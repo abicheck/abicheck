@@ -494,9 +494,9 @@ def abi_dump(
 
     Args:
         library_path: Path to .so, .dll, or .dylib file.
-        headers: Public header file paths. Required for ELF (.so) — omitting them
-            produces a symbol-only snapshot with no type information. Not used for
-            PE (.dll) or Mach-O (.dylib) inputs.
+        headers: Public header file paths. For ELF (.so), omitting them produces
+            a symbol-only snapshot with no type information (strongly recommended
+            to supply headers). Not used for PE (.dll) or Mach-O (.dylib) inputs.
         include_dirs: Extra include directories for the C/C++ parser.
         version: Version label to embed in the snapshot (e.g. "1.2.3").
         language: Language mode — "c++" (default) or "c".
