@@ -64,8 +64,19 @@ Add to `.cursor/mcp.json` or VS Code MCP settings:
 
 The MCP server exposes four tools. All return JSON-encoded strings.
 
-Each tool returns either a success envelope (`{"status": "ok", ...}`) or an
-error envelope (`{"status": "error", "error": "<message>"}`). See
+**Response envelopes.** On failure, every tool returns the same error
+envelope: `{"status": "error", "error": "<message>"}`. On success the
+shape differs by tool:
+
+| Tool | Success envelope |
+|---|---|
+| `abi_compare` | `{"status": "ok", "verdict": ..., ...}` |
+| `abi_dump` | `{"status": "ok", "summary": ..., ...}` |
+| `abi_list_changes` | `{"count": ..., "change_kinds": [...]}` — no `status` field |
+| `abi_explain_change` | `{"kind": ..., "impact": ..., ...}` — no `status` field |
+
+The simplest client check is: `status == "error"` ⇒ failure; otherwise
+treat as success and parse the tool-specific payload. See
 [Error responses](#error-responses) for the error shape and common causes.
 
 ### `abi_compare` — Compare two ABI surfaces
