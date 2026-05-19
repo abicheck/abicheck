@@ -5,7 +5,9 @@ on:
     branches: [main]
     paths:
       - 'docs/**'
+      - 'examples/**'
       - 'mkdocs.yml'
+      - 'scripts/gen_examples_docs.py'
       - '.github/workflows/pages.yml'
       - '.github/workflows/docs-pr.yml'
 
@@ -23,6 +25,9 @@ jobs:
 
       - name: Install MkDocs + Material theme
         run: pip install mkdocs mkdocs-material
+
+      - name: Check generated examples docs are up to date
+        run: python scripts/gen_examples_docs.py --check
 
       - name: Build docs (strict)
         run: mkdocs build --strict

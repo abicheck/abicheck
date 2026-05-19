@@ -53,6 +53,21 @@ nav:
     - Breaking Cases Catalog: concepts/breaking-cases-catalog.md
     - ABI Stability Guide: concepts/abi-stability-guide.md
     - Limitations: concepts/limitations.md
+  - Examples:
+    - Overview: examples/index.md
+    - By Verdict:
+      - "BREAKING": examples/by-verdict/breaking.md
+      - "API_BREAK": examples/by-verdict/api-break.md
+      - "COMPATIBLE_WITH_RISK": examples/by-verdict/compatible-risk.md
+      - "COMPATIBLE": examples/by-verdict/compatible.md
+      - "NO_CHANGE": examples/by-verdict/no-change.md
+    - By Category:
+      - Breaking: examples/by-category/breaking.md
+      - API Break: examples/by-category/api_break.md
+      - Risk: examples/by-category/risk.md
+      - Addition: examples/by-category/addition.md
+      - Quality: examples/by-category/quality.md
+      - No Change: examples/by-category/no_change.md
   - Reference:
     - Change Kinds: reference/change-kinds.md
     - Exit Codes: reference/exit-codes.md

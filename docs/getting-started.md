@@ -77,7 +77,9 @@ pip install -e .
 
 ## 2) First check (using repo examples)
 
-The repo includes 74 ABI scenario examples with paired `v1`/`v2` sources and headers:
+The repo includes 74 ABI scenario examples with paired `v1`/`v2` sources and headers.
+Browse them in the [Examples & Case Encyclopedia](examples/index.md),
+or pick one and run it locally:
 
 ```bash
 cd examples/case01_symbol_removal

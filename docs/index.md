@@ -25,6 +25,7 @@ It supports ELF (Linux), PE/COFF (Windows), and Mach-O (macOS) binaries, and it'
 **Evaluating or comparing tools?**
 
 - [Tool Comparison & Benchmarks](reference/tool-comparison.md) — abicheck vs `abidiff` vs ABICC on a 74-case catalog.
+- [Examples & Case Encyclopedia](examples/index.md) — all 74 cases with code, runtime demo, and fixes.
 - [ABI Breaks Explained](concepts/abi-breaks-explained.md) — real-world scenarios with code.
 - [Limitations](concepts/limitations.md) — what abicheck does *not* catch.
 
