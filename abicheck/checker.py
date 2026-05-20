@@ -198,8 +198,13 @@ def compare(
     changes.extend(soname_changes)
 
     # Run the post-processing pipeline (filtering, dedup, enrichment, suppression).
+    # PolicyFile.frozen_namespaces is threaded in so the late-stage
+    # EscalateFrozenNamespaceViolations step can tag matching findings.
     from .post_processing import DEFAULT_PIPELINE
-    pp_ctx = DEFAULT_PIPELINE.run(changes, old, new, suppression=suppression)
+    frozen_ns = list(policy_file.frozen_namespaces) if policy_file is not None else []
+    pp_ctx = DEFAULT_PIPELINE.run(
+        changes, old, new, suppression=suppression, frozen_namespaces=frozen_ns,
+    )
     kept = pp_ctx.kept
     redundant = pp_ctx.redundant
     opaque_filtered = pp_ctx.opaque_filtered

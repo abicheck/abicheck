@@ -275,6 +275,7 @@ class TestPostProcessingPipeline:
             "detect_onedal_patterns",
             "detect_namespace_patterns",
             "detect_template_patterns",
+            "escalate_frozen_namespace_violations",
         ]
         assert DEFAULT_PIPELINE.step_names == expected_names
 

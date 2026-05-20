@@ -46,6 +46,12 @@ class Change:
     affected_symbols: list[str] | None = None  # exported functions using this type
     caused_by_type: str | None = None    # root type that makes this change redundant
     caused_count: int = 0                # number of derived changes collapsed into this root
+    # Set by EscalateFrozenNamespaceViolations when the change's symbol /
+    # caused_by_type matches a namespace declared as "frozen" in the policy
+    # file (`frozen_namespaces:`). Carries the matching glob pattern so the
+    # reporter can name the policy. Verdict computation blocks any
+    # policy_override that would downgrade a change with this field set.
+    frozen_namespace_violation: str | None = None
 
 
 @dataclass

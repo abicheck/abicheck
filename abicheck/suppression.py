@@ -32,6 +32,7 @@ _VALID_CHANGE_KINDS: frozenset[str] = frozenset(ck.value for ck in ChangeKind)
 _KNOWN_ENTRY_KEYS: frozenset[str] = frozenset({
     "symbol", "symbol_pattern", "type_pattern", "member_name",
     "change_kind", "reason", "label", "source_location", "expires",
+    "namespace",
 })
 
 # ChangeKind values that represent type-level changes (matched by type_pattern)
@@ -70,6 +71,13 @@ class Suppression:
     source_location: str | None = None
     """Suppress all changes whose source file path matches this pattern (fnmatch-style).
     Example: ``source_location: "*/internal/*"`` suppresses changes from internal headers."""
+    namespace: str | None = None
+    """Suppress all changes whose symbol *or* ``caused_by_type`` lies in this
+    namespace (fnmatch-style glob; ``**`` matches any number of leading
+    ``::``-separated segments).  Template arguments are stripped before
+    matching, so ``foo<int>::bar`` matches ``foo::bar``.  Example:
+    ``namespace: "**::detail::r1::*"`` suppresses every finding inside
+    oneTBB's frozen runtime namespace."""
     expires: date | None = None
     """Optional expiry date (ISO 8601). After this date, the suppression is inactive
     and a warning is emitted. Format: ``expires: 2026-06-01``."""
@@ -77,6 +85,7 @@ class Suppression:
     _compiled_type_pattern: re.Pattern[str] | None = field(default=None, init=False, repr=False)
     _compiled_member_pattern: re.Pattern[str] | None = field(default=None, init=False, repr=False)
     _compiled_source_pattern: re.Pattern[str] | None = field(default=None, init=False, repr=False)
+    _compiled_namespace_pattern: re.Pattern[str] | None = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
         has_symbol = self.symbol is not None
@@ -84,13 +93,19 @@ class Suppression:
         has_type_pattern = self.type_pattern is not None
         has_member_name = self.member_name is not None
         has_source_location = self.source_location is not None
+        has_namespace = self.namespace is not None
 
         selector_count = sum([has_symbol, has_sym_pattern, has_type_pattern])
-        if selector_count == 0 and not has_source_location and not has_member_name:
+        if (
+            selector_count == 0
+            and not has_source_location
+            and not has_member_name
+            and not has_namespace
+        ):
             raise ValueError(
                 "Suppression must have at least one of: "
                 "'symbol', 'symbol_pattern', 'type_pattern', "
-                "'member_name', or 'source_location'"
+                "'member_name', 'source_location', or 'namespace'"
             )
         if selector_count > 1:
             raise ValueError(
@@ -137,6 +152,16 @@ class Suppression:
             except re.error as e:
                 raise ValueError(
                     f"Invalid source_location {self.source_location!r}: {e}"
+                ) from e
+        if self.namespace is not None:
+            import fnmatch as _fn
+            try:
+                self._compiled_namespace_pattern = re.compile(
+                    _fn.translate(self.namespace)
+                )
+            except re.error as e:
+                raise ValueError(
+                    f"Invalid namespace {self.namespace!r}: {e}"
                 ) from e
         # Validate change_kind against known enum values
         if self.change_kind is not None:
@@ -188,6 +213,44 @@ class Suppression:
             member = change.symbol.rsplit("::", 1)[-1] if change.symbol else ""
             if not self._compiled_member_pattern.fullmatch(member):
                 return False
+
+        # namespace: match the ``::``-joined namespace prefix of either the
+        # change's symbol or its caused_by_type. This is the selector users
+        # need for frozen-namespace-style suppressions (e.g. "ignore
+        # everything inside detail::r1") without listing each symbol
+        # individually. We also try the demangled form when the input
+        # appears to be an Itanium-mangled symbol, so users don't have to
+        # write mangled-name globs.
+        if self._compiled_namespace_pattern is not None:
+            from .demangle import demangle as _dm
+            from .internal_leak import _strip_template_args
+
+            pat = self._compiled_namespace_pattern
+
+            def _ns_match(name: str | None) -> bool:
+                if not name:
+                    return False
+                forms = [name]
+                if name.startswith("_Z"):
+                    dm = _dm(name)
+                    if dm:
+                        forms.append(dm)
+                for form in forms:
+                    stripped = _strip_template_args(form)
+                    if pat.match(stripped):
+                        return True
+                    if "::" in stripped:
+                        prefix = stripped.rsplit("::", 1)[0]
+                        if pat.match(prefix):
+                            return True
+                return False
+
+            if not (_ns_match(change.symbol) or _ns_match(change.caused_by_type)):
+                return False
+            # Fall through (AND logic with other selectors), but if no other
+            # selectors are present the change-kind filter (if any) still
+            # applies below.
+
 
         # type_pattern: only matches type-level changes
         if self._compiled_type_pattern is not None:
@@ -313,6 +376,7 @@ class SuppressionList:
                     reason=item.get("reason"),
                     label=item.get("label"),
                     source_location=item.get("source_location"),
+                    namespace=item.get("namespace"),
                     expires=expires,
                 )
             except ValueError as e:

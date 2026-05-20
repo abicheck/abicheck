@@ -102,6 +102,14 @@ class PolicyFile:
     base_policy: str = "strict_abi"
     overrides: dict[ChangeKind, Verdict] = field(default_factory=dict)
     source_path: Path | None = None
+    # Glob patterns identifying namespaces whose symbols / types are
+    # contractually frozen (e.g. oneTBB's `**::detail::r1`, oneDAL's
+    # `**::detail::v1`). Any finding whose symbol or caused_by_type lies in
+    # one of these namespaces is tagged via Change.frozen_namespace_violation
+    # and is exempt from policy_override downgrades. Patterns use fnmatch
+    # globbing against ``::``-joined namespace segments; ``**`` matches any
+    # number of leading segments. Empty list = no extra namespaces.
+    frozen_namespaces: list[str] = field(default_factory=list)
 
     @classmethod
     def load(cls, path: Path) -> PolicyFile:
@@ -178,7 +186,28 @@ class PolicyFile:
                 "Valid values: break, warn, risk, ignore"
             )
 
-        return cls(base_policy=base_policy, overrides=overrides, source_path=path)
+        # frozen_namespaces: optional list of glob patterns identifying
+        # contractually-frozen namespaces (e.g. oneTBB detail::r1).
+        frozen_raw = raw.get("frozen_namespaces", [])
+        if not isinstance(frozen_raw, list):
+            raise PolicyError(
+                "'frozen_namespaces' must be a YAML list of glob patterns, got "
+                + type(frozen_raw).__name__
+            )
+        frozen_namespaces: list[str] = []
+        for i, pat in enumerate(frozen_raw):
+            if not isinstance(pat, str):
+                raise PolicyError(
+                    f"frozen_namespaces[{i}]: expected string, got {type(pat).__name__}"
+                )
+            frozen_namespaces.append(pat)
+
+        return cls(
+            base_policy=base_policy,
+            overrides=overrides,
+            source_path=path,
+            frozen_namespaces=frozen_namespaces,
+        )
 
     def compute_verdict(self, changes: list[Any]) -> Verdict:
         """Compute verdict for *changes* applying base_policy then overrides.
@@ -194,16 +223,6 @@ class PolicyFile:
 
         # Start from base policy verdict
         verdicts: list[Verdict] = []
-        for change in changes:
-            kind = change.kind
-            if kind in self.overrides:
-                verdicts.append(self.overrides[kind])
-            else:
-                # Delegate to base policy for this single change
-                single_verdict = compute_verdict([change], policy=self.base_policy)
-                verdicts.append(single_verdict)
-
-        # Worst verdict wins
         order = [
             Verdict.NO_CHANGE,
             Verdict.COMPATIBLE,
@@ -211,6 +230,31 @@ class PolicyFile:
             Verdict.API_BREAK,
             Verdict.BREAKING,
         ]
+        for change in changes:
+            kind = change.kind
+            base_v = compute_verdict([change], policy=self.base_policy)
+            if kind in self.overrides:
+                override_v = self.overrides[kind]
+                # A change that violates a frozen-namespace contract MUST
+                # NOT be downgraded by a policy override. The user's
+                # `overrides` block can still upgrade severity (e.g. mark
+                # something more severe than the base classification), but
+                # downgrades on tagged changes are silently rejected so
+                # users cannot accidentally mask a documented invariant.
+                # ``isinstance(..., str)`` guards against MagicMock-style
+                # test doubles where any attribute access returns a truthy
+                # mock; only a real glob-pattern string counts as a tag.
+                fnv = getattr(change, "frozen_namespace_violation", None)
+                if isinstance(fnv, str) and fnv and (
+                    order.index(override_v) < order.index(base_v)
+                ):
+                    verdicts.append(base_v)
+                else:
+                    verdicts.append(override_v)
+            else:
+                verdicts.append(base_v)
+
+        # Worst verdict wins (reuse the `order` list from above).
         return max(verdicts, key=lambda v: order.index(v) if v in order else 0)
 
     def describe(self) -> str:

@@ -3,7 +3,7 @@
 
 ABI breaks: existing consumers will fail at runtime.
 
-_76 case(s)._ [← back to all examples](../index.md)
+_77 case(s)._ [← back to all examples](../index.md)
 
 | Case | Title | Verdict | Category |
 |------|-------|---------|----------|
@@ -24,6 +24,7 @@ _76 case(s)._ [← back to all examples](../index.md)
 | [case118_experimental_removed_without_replacement](../case118_experimental_removed_without_replacement.md) | : removed without replacement (API break) | 🔴 BREAKING | Breaking |
 | [case119_inline_namespace_version_bumped](../case119_inline_namespace_version_bumped.md) | case112 — inline namespace version bumped (BREAKING) | 🔴 BREAKING | Breaking |
 | [case11_global_var_type](../case11_global_var_type.md) | Global Variable Type Change | 🔴 BREAKING | Breaking |
+| [case120_frozen_runtime_signature_changed](../case120_frozen_runtime_signature_changed.md) | Frozen Runtime Signature Changed (oneTBB `detail::r1` shape) | 🔴 BREAKING | Breaking |
 | [case12_function_removed](../case12_function_removed.md) | Function Removed from Shared Library | 🔴 BREAKING | Breaking |
 | [case14_cpp_class_size](../case14_cpp_class_size.md) | C++ Class Size Change | 🔴 BREAKING | Breaking |
 | [case17_template_abi](../case17_template_abi.md) | Case 17 — Template Instantiation ABI Change | 🔴 BREAKING | Breaking |

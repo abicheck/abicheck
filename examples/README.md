@@ -139,6 +139,7 @@ Some policy-escalated source/contract breaks (notably case30, case35) may keep i
 | [110](case110_concurrent_unordered_map_api_drift/README.md) | concurrent_unordered_map API Drift (oneTBB regression suite) | Breaking | BREAKING 🔴 |
 | [111](case111_enumerable_thread_specific_lambda_ambiguity/README.md) | enumerable_thread_specific Lambda-Init Ambiguity (oneTBB regression suite) | Addition | COMPATIBLE 🟢 (known gap) |
 | [112](case112_task_arena_attach_tag/README.md) | task_arena::attach Tag Replaces Enum (oneTBB regression suite) | Breaking | BREAKING 🔴 |
+| [120](case120_frozen_runtime_signature_changed/README.md) | Frozen Runtime Signature Changed (oneTBB `detail::r1` shape) | Breaking | BREAKING 🔴 |
 
 ---
 
