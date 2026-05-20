@@ -336,6 +336,14 @@ def _load_cases() -> list[Case]:
     data = json.loads(GROUND_TRUTH.read_text(encoding="utf-8"))
     cases = []
     for name, meta in data["verdicts"].items():
+        # Bundle cases (ADR-023) are multi-library and use a different
+        # ground-truth shape (expected=null, per-library verdicts under
+        # expected_libraries, bundle-level verdict under
+        # expected_combined_verdict). They have their own README files
+        # but don't map onto the per-case verdict-page generator; skip
+        # them here. The bundle index belongs in a follow-up doc page.
+        if meta.get("category") == "bundle" or meta.get("bundle") is True:
+            continue
         if meta["expected"] not in VERDICT_META:
             raise ValueError(f"{name}: unknown verdict {meta['expected']!r}")
         if meta["category"] not in CATEGORY_META:

@@ -378,6 +378,14 @@ def _check_case_preconditions(
     if entry.get("skip", False):
         return CaseResult(name, "SKIP", expected_raw, None, entry.get("reason", "skip=true"))
 
+    # Bundle cases (ADR-023) are multi-library and use a different layout
+    # (per-side dirs under examples/<case>/{old,new}/<libname>.cpp).
+    # The v1/v2-pair compile path in this script can't build them; they
+    # have their own integration tests in tests/test_bundle.py.
+    if entry.get("category") == "bundle" or entry.get("bundle") is True:
+        return CaseResult(name, "SKIP", expected_raw, None,
+                          "bundle case — exercised by tests/test_bundle.py (ADR-023)")
+
     platforms = entry.get("platforms", ["linux", "macos", "windows"])
     if CURRENT_PLATFORM not in platforms:
         return CaseResult(name, "SKIP", expected_raw, None,
