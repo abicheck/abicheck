@@ -76,6 +76,28 @@ def test_parse_args_skip_compat_default_false():
     assert args.skip_compat is False
 
 
+# ── case64 compiler selection ────────────────────────────────────────────────
+
+def test_case64_auto_prefers_versioned_clang():
+    mod = _load_benchmark()
+
+    def fake_which(name):
+        return {
+            "clang-18": "/usr/bin/clang-18",
+            "clang++-18": "/usr/bin/clang++-18",
+        }.get(name)
+
+    with patch("shutil.which", side_effect=fake_which):
+        assert mod._first_available_tool("clang-18", "clang") == "/usr/bin/clang-18"
+        assert mod._case64_toolchain_policy("case64_calling_convention_changed", "auto") == ("clang", True)
+
+
+def test_case64_auto_no_clang_uses_default_toolchain():
+    mod = _load_benchmark()
+    with patch("shutil.which", return_value=None):
+        assert mod._case64_toolchain_policy("case64_calling_convention_changed", "auto") == (None, False)
+
+
 # ── Graceful SKIP when tool not present ──────────────────────────────────────
 
 def test_run_abicc_dumper_skip_when_missing(tmp_path):
