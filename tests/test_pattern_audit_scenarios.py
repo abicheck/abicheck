@@ -6,22 +6,28 @@
 #
 #     http://www.apache.org/licenses/LICENSE-2.0
 
-"""ABI/API compatibility scenarios derived from analysing oneDNN's public
-headers (oneapi/dnnl/dnnl.h, dnnl_types.h, dnnl_common_types.h, dnnl.hpp,
-dnnl_config.h.in).
+"""Audit-driven scenarios for ABI/API compatibility patterns.
 
-This file is the executable counterpart to the analysis attached to PR #238.
-It does two things:
+This file is the executable artefact of an audit that reviewed candidate
+new example cases against the existing catalogue (``examples/case*`` and
+the ChangeKind enum in ``checker_policy.py``). Its purpose is twofold:
 
-1. Documents — case by case — which oneDNN-shaped compatibility hazards are
-   already covered by existing examples / ChangeKinds, so we don't pad the
-   example catalogue with duplicates.
+1. Records — case by case — which proposed scenarios are **duplicates**
+   of existing examples (so we don't pad the catalogue) and which are
+   **genuinely novel** failure modes.
 
-2. For the scenarios that are *genuinely* new, builds synthetic
-   ``AbiSnapshot`` pairs (no compiler / castxml / libabigail required) and
-   asserts that ``abicheck.checker.compare`` actually emits the expected
-   finding — or, where it does not, marks the test ``xfail`` so the gap is
-   visible and tracked.
+2. For each genuinely-novel scenario, builds synthetic ``AbiSnapshot``
+   pairs (no compiler / castxml / libabigail required) and asserts that
+   ``abicheck.checker.compare`` emits the expected finding — or, where
+   it does not, marks the test ``xfail`` so the policy gap is visible
+   and tracked.
+
+The scenarios in this file were collected while reviewing public C/C++
+headers from several real-world libraries (BLAS-family, deep-learning
+runtimes, kernel ABI interfaces). The patterns themselves are generic;
+the synthetic snapshots use neutral identifiers (``libfoo``,
+``library_version_t``, ``post_op_kind``) so the audit reads as
+library-agnostic.
 
 Cross-references:
     * ``abicheck/checker_policy.py``       — ``ChangeKind`` enum
@@ -37,27 +43,26 @@ Coverage matrix — proposed-vs-existing comparison
 
 Each row was evaluated against the 91 example cases in ``examples/`` and
 the ~145 ChangeKinds in ``checker_policy.py``. "Duplicate" means the same
-detection path is already exercised end-to-end by an existing case; "new"
-means the failure mode is qualitatively distinct.
+detection path is already exercised end-to-end by an existing case;
+"novel" means the failure mode is qualitatively distinct.
 
-oneDNN pattern                                         | Existing coverage                                 | Verdict
+Pattern                                                | Existing coverage                                 | Verdict
 ------------------------------------------------------ | ------------------------------------------------- | -------
-``foo_v1`` removed when ``foo_v2`` shipped              | ``func_removed`` (case01, case12)                 | DUPLICATE
-``DNNL_ARG_SRC_0`` macro renumbered                     | ``CONSTANT_CHANGED`` ChangeKind — no example      | NEW
-``DNNL_RUNTIME_DIM_VAL`` sentinel macro changed         | Same ``CONSTANT_CHANGED`` — no example            | NEW (variant of above)
-``DNNL_MAX_NDIMS`` bumped (12 → 16)                     | ``CONSTANT_CHANGED`` + ``type_size_changed``      | DUPLICATE-by-composition
-``dnnl_version_t`` field appended (returned by pointer) | case62 covers opaque; case07/14 cover by-value    | NEW (asymmetric case)
-``dnnl_format_kind_max = 0x7fff`` widened to 0x7fff'ffff | case57 ``enum_underlying_size_changed``           | DUPLICATE
-Conditional enum member under ``#if EXPERIMENTAL_X``    | environment_matrix exists, no example             | NEW
-Internal value range (``1 << 12``) shifts & leaks       | ``INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API`` is *types* | NEW (value-range companion)
-``handle_traits<T>::destructor`` typedef signature drift | function-pointer typedef changes are covered      | DUPLICATE
-``handle<T>::dummy_destructor`` static→extern           | case59 ``func_became_inline``                     | DUPLICATE
-Post-op kind appended (forward-incompat for old reader) | case81 (reassignment), case25 (member added)      | NEW (forward-asym)
-Build-config flag toggles inline struct field           | Same as "conditional enum"                        | DUPLICATE-of-NEW
-Defaulted template parameter *added*                    | case87 (``default_template_arg_changed`` is for
-                                                          a *value* change, not adding a defaulted slot)    | NEW (marginal)
+``foo_v1`` removed when ``foo_v2`` ships                | ``func_removed`` (case01, case12)                 | DUPLICATE
+Public arg-slot ``#define`` renumbered                  | ``CONSTANT_CHANGED`` ChangeKind — no example      | novel (no example)
+Runtime sentinel ``#define`` value changed              | Same ``CONSTANT_CHANGED`` — no example            | novel (variant)
+Fixed-array-size macro bumped (e.g. ``MAX_NDIMS``)      | ``CONSTANT_CHANGED`` + ``type_size_changed``      | DUPLICATE (composition)
+Info struct field appended (returned by ``const T*``)   | case62 covers opaque; case07/14 cover by-value    | novel (asymmetric)
+Enum ``_max`` sentinel widened (forces wider storage)   | case57 ``enum_underlying_size_changed``           | DUPLICATE
+Conditional enum member under ``#if EXPERIMENTAL_X``    | environment_matrix exists, no example             | novel (build skew)
+Internal value range (``1 << 12``) shifts & leaks       | ``INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API`` is *types* | novel (value-range companion)
+Function-pointer typedef signature drifts               | function-pointer typedef changes are covered      | DUPLICATE
+Static class-member destructor turned extern            | case59 ``func_became_inline``                     | DUPLICATE
+Post-op kind appended (forward-incompat for old reader) | case81 (reassignment), case25 (member added)      | novel (forward-asym)
+Build-config flag toggles inline struct field           | Same as "conditional enum"                        | DUPLICATE-of-novel
+Defaulted template parameter *added*                    | case87 covers default arg *value* change          | novel (marginal)
 
-→ Five genuinely-new scenarios to test, with classifications:
+→ Five genuinely-novel scenarios are exercised below:
 
    S1. PUBLIC_MACRO_RUNTIME_SLOT_RENUMBERED     (uses CONSTANT_CHANGED; gap = no example)
    S2. POINTER_RETURNED_INFO_STRUCT_APPENDED    (uses TYPE_FIELD_ADDED + needs overlay)
@@ -66,9 +71,18 @@ Defaulted template parameter *added*                    | case87 (``default_temp
    S5. FORWARD_COMPAT_TAG_APPENDED              (uses ENUM_MEMBER_ADDED; severity asym)
 
 The tests below construct synthetic snapshots for each, run
-``compare(...)``, and assert what the current tool catches.  Gaps are
+``compare(...)``, and assert what the current tool catches. Gaps are
 ``xfail``-marked with a clear reason so they show up in the failure
 report without breaking the suite.
+
+Honest assessment (recorded here for future contributors): of the five
+"novel" scenarios above, only **S2** is a strong candidate for a new
+example case (e.g. ``case90_info_struct_returned_by_pointer_appended``)
+because it exercises a layout-change-via-pointer-return path that no
+existing case demonstrates. **S4** would also need a new example, but
+only after the corresponding ChangeKind and detector land. The other
+three are best served by this regression net plus follow-up policy
+work, not by new example directories.
 """
 from __future__ import annotations
 
@@ -95,7 +109,7 @@ from abicheck.model import (
 
 def _snap(
     *,
-    library: str = "libdnnl.so.3",
+    library: str = "libfoo.so.1",
     version: str = "1.0",
     functions: list[Function] | None = None,
     variables: list[Variable] | None = None,
@@ -154,19 +168,19 @@ class TestDuplicateScenarios:
     """
 
     def test_versioned_function_v1_removed_is_just_func_removed(self) -> None:
-        """``dnnl_memory_create`` deprecated when ``dnnl_memory_create_v2``
-        ships: the suffix is naming convention; detection is plain
-        ``func_removed`` and is exercised by case01.
+        """``foo_create`` deprecated when ``foo_create_v2`` ships: the
+        suffix is naming convention; detection is plain ``func_removed``
+        and is exercised by case01.
         """
         old = _snap(
             functions=[
-                _public_fn("dnnl_memory_create",    is_extern_c=True),
-                _public_fn("dnnl_memory_create_v2", is_extern_c=True),
+                _public_fn("foo_create",    is_extern_c=True),
+                _public_fn("foo_create_v2", is_extern_c=True),
             ],
         )
         new = _snap(
             functions=[
-                _public_fn("dnnl_memory_create_v2", is_extern_c=True),
+                _public_fn("foo_create_v2", is_extern_c=True),
             ],
         )
         kinds = _kinds(compare(old, new))
@@ -176,13 +190,13 @@ class TestDuplicateScenarios:
         )
 
     def test_max_ndims_bump_is_constant_change_plus_struct_grow(self) -> None:
-        """``#define DNNL_MAX_NDIMS 12`` → ``16`` plus the embedding struct
+        """``#define MAX_NDIMS 12`` → ``16`` plus the embedding struct
         growing — both fire via existing kinds, no new case needed."""
         old = _snap(
-            constants={"DNNL_MAX_NDIMS": "12"},
+            constants={"MAX_NDIMS": "12"},
             types=[
                 RecordType(
-                    name="dnnl_memory_desc_t",
+                    name="memory_desc_t",
                     kind="struct",
                     size_bits=12 * 64,
                     fields=[TypeField(name="dims", type="int64_t[12]", offset_bits=0)],
@@ -190,10 +204,10 @@ class TestDuplicateScenarios:
             ],
         )
         new = _snap(
-            constants={"DNNL_MAX_NDIMS": "16"},
+            constants={"MAX_NDIMS": "16"},
             types=[
                 RecordType(
-                    name="dnnl_memory_desc_t",
+                    name="memory_desc_t",
                     kind="struct",
                     size_bits=16 * 64,
                     fields=[TypeField(name="dims", type="int64_t[16]", offset_bits=0)],
@@ -208,29 +222,29 @@ class TestDuplicateScenarios:
         )
 
     def test_enum_max_sentinel_widened_is_underlying_size_changed(self) -> None:
-        """``dnnl_format_kind_max = 0x7fff`` lifted to a value that no
-        longer fits in 16 bits. case57 already covers this exact
-        progression — the enum underlying type widens and every embedding
-        struct re-lays out."""
+        """``format_kind_max = 0x7fff`` lifted to a value that no longer
+        fits in 16 bits. case57 already covers this exact progression —
+        the enum underlying type widens and every embedding struct
+        re-lays out."""
         old = _snap(
             enums=[EnumType(
-                name="dnnl_format_kind_t",
+                name="format_kind_t",
                 underlying_type="int",
                 members=[
-                    EnumMember("dnnl_format_kind_undef", 0),
-                    EnumMember("dnnl_blocked",          2),
-                    EnumMember("dnnl_format_kind_max",  0x7fff),
+                    EnumMember("format_kind_undef", 0),
+                    EnumMember("format_blocked",    2),
+                    EnumMember("format_kind_max",   0x7fff),
                 ],
             )],
         )
         new = _snap(
             enums=[EnumType(
-                name="dnnl_format_kind_t",
+                name="format_kind_t",
                 underlying_type="long",   # widened
                 members=[
-                    EnumMember("dnnl_format_kind_undef", 0),
-                    EnumMember("dnnl_blocked",          2),
-                    EnumMember("dnnl_format_kind_max",  0x7fff_ffff_ffff_ffff),
+                    EnumMember("format_kind_undef", 0),
+                    EnumMember("format_blocked",    2),
+                    EnumMember("format_kind_max",   0x7fff_ffff_ffff_ffff),
                 ],
             )],
         )
@@ -244,72 +258,74 @@ class TestDuplicateScenarios:
 
 
 # ===========================================================================
-# S1 — Macro renumbered (DNNL_ARG_SRC_0 etc.)
+# S1 — Macro renumbered (public arg-slot identifiers)
 # ===========================================================================
 #
-# oneDNN exposes 79 ``#define DNNL_ARG_*`` numeric "slot" identifiers
-# (dnnl_types.h:2542+). They are part of the runtime contract — the
-# in-memory ``dnnl_exec_arg_t {int arg; dnnl_memory_t memory}`` map keys
-# every primitive execution. Renumbering them is silently catastrophic.
+# Many runtime APIs expose a family of ``#define LIB_ARG_*`` numeric
+# "slot" identifiers (think of any execution model where the caller
+# passes a list of ``{int slot, void *value}`` to a "primitive execute"
+# function). They are part of the runtime contract — the in-memory
+# arg-list keys every operation. Renumbering them is silently
+# catastrophic.
 #
 # Detection exists (CONSTANT_CHANGED), but the catalogue has no example
 # making the "macro-used-as-runtime-slot-ID" failure mode concrete.
 
 
 class TestS1MacroRuntimeSlotRenumbered:
-    def test_dnnl_arg_src_renumbered_is_caught(self) -> None:
+    def test_arg_slot_macro_renumbered_is_caught(self) -> None:
         """The minimum signal: same name, different integer value."""
         old = _snap(constants={
-            "DNNL_ARG_SRC_0":     "1",
-            "DNNL_ARG_DST_0":     "17",
-            "DNNL_ARG_WEIGHTS_0": "33",
+            "LIB_ARG_SRC_0":     "1",
+            "LIB_ARG_DST_0":     "17",
+            "LIB_ARG_WEIGHTS_0": "33",
         })
         new = _snap(constants={
-            "DNNL_ARG_SRC_0":     "2",   # <-- silently renumbered
-            "DNNL_ARG_DST_0":     "17",
-            "DNNL_ARG_WEIGHTS_0": "33",
+            "LIB_ARG_SRC_0":     "2",   # <-- silently renumbered
+            "LIB_ARG_DST_0":     "17",
+            "LIB_ARG_WEIGHTS_0": "33",
         })
         kinds = _kinds(compare(old, new))
         assert ChangeKind.CONSTANT_CHANGED in kinds, (
             "tool must flag a #define numeric value drift on a public "
-            "DNNL_ARG_* slot identifier"
+            "LIB_ARG_* slot identifier"
         )
 
     def test_argument_slot_removed(self) -> None:
-        """``DNNL_ARG_WEIGHTS_0`` removed in a hypothetical cleanup. Old
-        consumers passed integer 33 to ``dnnl_primitive_execute``; new
-        library may now interpret 33 as something else."""
+        """``LIB_ARG_WEIGHTS_0`` removed in a hypothetical cleanup. Old
+        consumers passed integer 33 to the execute call; new library
+        may now interpret 33 as something else."""
         old = _snap(constants={
-            "DNNL_ARG_SRC_0":     "1",
-            "DNNL_ARG_WEIGHTS_0": "33",
+            "LIB_ARG_SRC_0":     "1",
+            "LIB_ARG_WEIGHTS_0": "33",
         })
-        new = _snap(constants={"DNNL_ARG_SRC_0": "1"})
+        new = _snap(constants={"LIB_ARG_SRC_0": "1"})
         kinds = _kinds(compare(old, new))
         assert ChangeKind.CONSTANT_REMOVED in kinds
 
     def test_runtime_sentinel_macro_changed(self) -> None:
-        """``DNNL_RUNTIME_DIM_VAL = INT64_MIN`` is the sentinel meaning
-        "this dim is filled in at execution time". Changing the value
-        breaks every consumer that hard-coded the magic number into a
-        struct field or compared against it."""
+        """``LIB_RUNTIME_DIM_VAL = INT64_MIN`` is a typical sentinel
+        meaning "this dim is filled in at execution time". Changing the
+        value breaks every consumer that hard-coded the magic number
+        into a struct field or compared against it."""
         old = _snap(constants={
-            "DNNL_RUNTIME_DIM_VAL":  "(-9223372036854775807LL - 1)",
-            "DNNL_RUNTIME_SIZE_VAL": "((size_t)(-9223372036854775807LL - 1))",
+            "LIB_RUNTIME_DIM_VAL":  "(-9223372036854775807LL - 1)",
+            "LIB_RUNTIME_SIZE_VAL": "((size_t)(-9223372036854775807LL - 1))",
         })
         new = _snap(constants={
-            "DNNL_RUNTIME_DIM_VAL":  "(-2147483648)",  # narrowed to int32
-            "DNNL_RUNTIME_SIZE_VAL": "((size_t)(-9223372036854775807LL - 1))",
+            "LIB_RUNTIME_DIM_VAL":  "(-2147483648)",  # narrowed to int32
+            "LIB_RUNTIME_SIZE_VAL": "((size_t)(-9223372036854775807LL - 1))",
         })
         kinds = _kinds(compare(old, new))
         assert ChangeKind.CONSTANT_CHANGED in kinds
 
 
 # ===========================================================================
-# S2 — Pointer-returned info struct grew (dnnl_version_t)
+# S2 — Pointer-returned info struct grew
 # ===========================================================================
 #
-# ``const dnnl_version_t* dnnl_version(void)`` — the library owns the
-# struct (static const), so adding a field is:
+# ``const library_version_t* library_version(void)`` — the library owns
+# the struct (static const), so appending a field is:
 #   * BACKWARD-compat for old consumers vs new lib (reads first N bytes)
 #   * FORWARD-incompat for new consumers vs old lib (reads past end)
 #
@@ -322,6 +338,11 @@ class TestS1MacroRuntimeSlotRenumbered:
 # ``TYPE_FIELD_ADDED`` / ``TYPE_SIZE_CHANGED`` /
 # ``STRUCT_SIZE_CHANGED`` fires. Whether it is severity-asymmetric
 # (forward-incompat) is an open question for follow-up policy work.
+#
+# Of all five scenarios in this file, S2 is the strongest candidate
+# for a dedicated example case (``case90_*``) — it's the only one
+# whose failure shape is not already exemplified somewhere in
+# examples/.
 
 
 def _version_struct(fields: list[tuple[str, str]], size_bits: int) -> RecordType:
@@ -333,7 +354,7 @@ def _version_struct(fields: list[tuple[str, str]], size_bits: int) -> RecordType
         members.append(TypeField(name=name, type=ty, offset_bits=offset))
         offset += bits
     return RecordType(
-        name="dnnl_version_t",
+        name="library_version_t",
         kind="struct",
         size_bits=size_bits,
         fields=members,
@@ -355,12 +376,12 @@ class TestS2PointerReturnedInfoStructAppended:
         )
         new_struct = _version_struct(
             [
-                ("major",            "int"),
-                ("minor",            "int"),
-                ("patch",            "int"),
-                ("hash",             "const char *"),
-                ("cpu_runtime",      "unsigned"),
-                ("gpu_runtime",      "unsigned"),
+                ("major",              "int"),
+                ("minor",              "int"),
+                ("patch",              "int"),
+                ("hash",               "const char *"),
+                ("cpu_runtime",        "unsigned"),
+                ("gpu_runtime",        "unsigned"),
                 ("threadpool_runtime", "unsigned"),  # <-- appended
             ],
             size_bits=32 + 32 + 32 + 64 + 32 + 32 + 32,
@@ -368,16 +389,16 @@ class TestS2PointerReturnedInfoStructAppended:
         old = _snap(
             types=[old_struct],
             functions=[_public_fn(
-                "dnnl_version",
-                ret="const dnnl_version_t *",
+                "library_version",
+                ret="const library_version_t *",
                 is_extern_c=True,
             )],
         )
         new = _snap(
             types=[new_struct],
             functions=[_public_fn(
-                "dnnl_version",
-                ret="const dnnl_version_t *",
+                "library_version",
+                ret="const library_version_t *",
                 is_extern_c=True,
             )],
         )
@@ -425,9 +446,10 @@ class TestS2PointerReturnedInfoStructAppended:
 # S3 — Feature-macro-gated enum member skew
 # ===========================================================================
 #
-# oneDNN gates members like:
-#   #if defined(DNNL_EXPERIMENTAL_GROUPED_MEMORY)
-#       dnnl_grouped,
+# A common pattern in libraries with experimental features:
+#
+#   #if defined(LIB_EXPERIMENTAL_GROUPED)
+#       sparse_grouped,
 #   #endif
 #
 # Two builds of the same source produce different ABIs. The library is
@@ -437,29 +459,29 @@ class TestS2PointerReturnedInfoStructAppended:
 
 class TestS3FeatureMacroGatedEnumSkew:
     def test_member_present_only_in_one_snapshot(self) -> None:
-        """Old snapshot was dumped with -DDNNL_EXPERIMENTAL_GROUPED_MEMORY,
-        new snapshot without — ``dnnl_grouped`` enumerator disappears."""
+        """Old snapshot was dumped with -DLIB_EXPERIMENTAL_GROUPED, new
+        snapshot without — ``sparse_grouped`` enumerator disappears."""
         old = _snap(
             enums=[EnumType(
-                name="dnnl_sparse_encoding_t",
+                name="sparse_encoding_t",
                 members=[
-                    EnumMember("dnnl_sparse_encoding_undef", 0),
-                    EnumMember("dnnl_csr",                   1),
-                    EnumMember("dnnl_packed",                2),
-                    EnumMember("dnnl_coo",                   3),
-                    EnumMember("dnnl_grouped",               4),  # gated
+                    EnumMember("sparse_encoding_undef", 0),
+                    EnumMember("sparse_csr",            1),
+                    EnumMember("sparse_packed",         2),
+                    EnumMember("sparse_coo",            3),
+                    EnumMember("sparse_grouped",        4),  # gated
                 ],
             )],
-            constants={"DNNL_EXPERIMENTAL_GROUPED_MEMORY": "1"},
+            constants={"LIB_EXPERIMENTAL_GROUPED": "1"},
         )
         new = _snap(
             enums=[EnumType(
-                name="dnnl_sparse_encoding_t",
+                name="sparse_encoding_t",
                 members=[
-                    EnumMember("dnnl_sparse_encoding_undef", 0),
-                    EnumMember("dnnl_csr",                   1),
-                    EnumMember("dnnl_packed",                2),
-                    EnumMember("dnnl_coo",                   3),
+                    EnumMember("sparse_encoding_undef", 0),
+                    EnumMember("sparse_csr",            1),
+                    EnumMember("sparse_packed",         2),
+                    EnumMember("sparse_coo",            3),
                 ],
             )],
             constants={},
@@ -514,17 +536,17 @@ class TestS3FeatureMacroGatedEnumSkew:
 # S4 — Internal value range leaks via public API
 # ===========================================================================
 #
-# PR #238 covers ``::detail::`` *types* leaking via inheritance / embedding.
-# Its companion is *values*: oneDNN's
+# PR #238 covers internal *types* leaking via inheritance / embedding.
+# Its companion is *values*: a library that defines internal-only
+# enum constants packed into the same numeric range as a public enum:
 #
 #     const alg_kind_t internal_only_start = (alg_kind_t)(1 << 12);
 #     const alg_kind_t eltwise_stochastic_round =
 #         (alg_kind_t)(internal_only_start + 1);
 #
-# (src/common/c_types_map.hpp:147) defines an internal-only numeric
-# range. If a public API returns or accepts ``alg_kind_t`` and the
-# internal range shifts (e.g. ``1 << 12 → 1 << 13``), a value that used
-# to mean "stochastic round" now means a different op silently.
+# If a public API returns or accepts ``alg_kind_t`` and the internal
+# range shifts (e.g. ``1 << 12 → 1 << 13``), a value that used to mean
+# "stochastic round" now means a different op silently.
 
 
 class TestS4InternalValueRangeLeak:
@@ -532,12 +554,12 @@ class TestS4InternalValueRangeLeak:
         """Minimal floor: even without a dedicated overlay, the constant
         diff must fire."""
         old = _snap(constants={
-            "internal_only_start":          "4096",  # 1 << 12
-            "eltwise_stochastic_round":     "4097",
+            "internal_only_start":      "4096",  # 1 << 12
+            "eltwise_stochastic_round": "4097",
         })
         new = _snap(constants={
-            "internal_only_start":          "8192",  # 1 << 13
-            "eltwise_stochastic_round":     "8193",
+            "internal_only_start":      "8192",  # 1 << 13
+            "eltwise_stochastic_round": "8193",
         })
         kinds = _kinds(compare(old, new))
         assert ChangeKind.CONSTANT_CHANGED in kinds
@@ -558,18 +580,18 @@ class TestS4InternalValueRangeLeak:
         # Public function accepts the value, internal constant changes.
         old = _snap(
             functions=[_public_fn(
-                "dnnl_primitive_attr_set_post_ops_eltwise",
-                ret="dnnl_status_t",
-                params=[("alg_kind", "dnnl_alg_kind_t")],
+                "lib_attr_set_post_ops_eltwise",
+                ret="lib_status_t",
+                params=[("alg_kind", "lib_alg_kind_t")],
                 is_extern_c=True,
             )],
             constants={"internal_only_start": "4096"},
         )
         new = _snap(
             functions=[_public_fn(
-                "dnnl_primitive_attr_set_post_ops_eltwise",
-                ret="dnnl_status_t",
-                params=[("alg_kind", "dnnl_alg_kind_t")],
+                "lib_attr_set_post_ops_eltwise",
+                ret="lib_status_t",
+                params=[("alg_kind", "lib_alg_kind_t")],
                 is_extern_c=True,
             )],
             constants={"internal_only_start": "8192"},
@@ -579,7 +601,7 @@ class TestS4InternalValueRangeLeak:
             "internal" in (c.description or "").lower()
             and ("value" in (c.description or "").lower()
                  or "range" in (c.description or "").lower())
-            and c.symbol == "dnnl_primitive_attr_set_post_ops_eltwise"
+            and c.symbol == "lib_attr_set_post_ops_eltwise"
             for c in result.changes
         ), "expected an overlay tying the internal-range shift to the public API"
 
@@ -591,7 +613,7 @@ class TestS4InternalValueRangeLeak:
 # Distinct from case81 (tag *reassignment* — silently misinterpreted) and
 # case25 (plain enum member added — flagged as compatible).
 #
-# In oneDNN's post-op kind list, appending a new ``BINARY_V2`` is
+# In a post-op kind list, appending a new ``BINARY_V2`` is
 # backward-compatible for the *library* (old data fed to new lib parses
 # fine) but forward-incompatible for the *application* (data produced
 # by new lib fed to old lib trips an unknown-kind path).
@@ -602,22 +624,22 @@ class TestS5ForwardCompatTagAppended:
         """Minimum floor: a new enumerator must surface as
         ``ENUM_MEMBER_ADDED`` (existing kind)."""
         old = _snap(enums=[EnumType(
-            name="dnnl_post_op_kind",
+            name="post_op_kind",
             members=[
-                EnumMember("dnnl_post_op_undef",  0),
-                EnumMember("dnnl_post_op_sum",    1),
-                EnumMember("dnnl_post_op_eltwise", 2),
-                EnumMember("dnnl_post_op_binary",  3),
+                EnumMember("post_op_undef",   0),
+                EnumMember("post_op_sum",     1),
+                EnumMember("post_op_eltwise", 2),
+                EnumMember("post_op_binary",  3),
             ],
         )])
         new = _snap(enums=[EnumType(
-            name="dnnl_post_op_kind",
+            name="post_op_kind",
             members=[
-                EnumMember("dnnl_post_op_undef",      0),
-                EnumMember("dnnl_post_op_sum",        1),
-                EnumMember("dnnl_post_op_eltwise",    2),
-                EnumMember("dnnl_post_op_binary",     3),
-                EnumMember("dnnl_post_op_binary_v2",  4),  # <-- new
+                EnumMember("post_op_undef",      0),
+                EnumMember("post_op_sum",        1),
+                EnumMember("post_op_eltwise",    2),
+                EnumMember("post_op_binary",     3),
+                EnumMember("post_op_binary_v2",  4),  # <-- new
             ],
         )])
         kinds = _kinds(compare(old, new))
@@ -629,18 +651,18 @@ class TestS5ForwardCompatTagAppended:
         ``ENUM_MEMBER_VALUE_CHANGED`` — the latter is what
         case81-style silent reassignment looks like."""
         old = _snap(enums=[EnumType(
-            name="dnnl_post_op_kind",
+            name="post_op_kind",
             members=[
-                EnumMember("dnnl_post_op_sum",     1),
-                EnumMember("dnnl_post_op_eltwise", 2),
+                EnumMember("post_op_sum",     1),
+                EnumMember("post_op_eltwise", 2),
             ],
         )])
         new = _snap(enums=[EnumType(
-            name="dnnl_post_op_kind",
+            name="post_op_kind",
             members=[
-                EnumMember("dnnl_post_op_sum",     1),
-                EnumMember("dnnl_post_op_eltwise", 2),
-                EnumMember("dnnl_post_op_binary",  3),  # appended only
+                EnumMember("post_op_sum",     1),
+                EnumMember("post_op_eltwise", 2),
+                EnumMember("post_op_binary",  3),  # appended only
             ],
         )])
         kinds = _kinds(compare(old, new))
@@ -656,18 +678,18 @@ class TestS5ForwardCompatTagAppended:
         ``ENUM_MEMBER_VALUE_CHANGED`` (or a value-changed equivalent),
         independently of the append being flagged as ``_ADDED``."""
         old = _snap(enums=[EnumType(
-            name="dnnl_post_op_kind",
+            name="post_op_kind",
             members=[
-                EnumMember("dnnl_post_op_sum",     1),
-                EnumMember("dnnl_post_op_eltwise", 2),
+                EnumMember("post_op_sum",     1),
+                EnumMember("post_op_eltwise", 2),
             ],
         )])
         new = _snap(enums=[EnumType(
-            name="dnnl_post_op_kind",
+            name="post_op_kind",
             members=[
-                EnumMember("dnnl_post_op_sum",     1),
-                EnumMember("dnnl_post_op_eltwise", 3),   # <-- silently renumbered
-                EnumMember("dnnl_post_op_binary",  2),   # took eltwise's slot
+                EnumMember("post_op_sum",     1),
+                EnumMember("post_op_eltwise", 3),   # <-- silently renumbered
+                EnumMember("post_op_binary",  2),   # took eltwise's slot
             ],
         )])
         kinds = _kinds(compare(old, new))
@@ -700,9 +722,7 @@ class TestS5ForwardCompatTagAppended:
 
 
 # ===========================================================================
-# Meta-test — make sure the new test file is discovered by autodiscovery
-# and that the proposed-vs-existing matrix in the module docstring stays
-# in sync with the actual ChangeKind enum.
+# Meta-test — keep the coverage matrix honest.
 # ===========================================================================
 
 
