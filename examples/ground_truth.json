@@ -1014,12 +1014,12 @@
       "category": "breaking",
       "platforms": [
         "linux",
-        "macos",
-        "windows"
+        "macos"
       ],
       "abi_break": true,
       "api_break": false,
       "bad_practice": false,
+      "known_gap": "Windows: the v1.h fixture includes ``<cstdint>`` for ``std::uint64_t``. On the GitHub Actions Windows runner, castxml's bundled Clang frontend can't parse mingw64 GCC 15.2.0's ``bits/c++config.h`` (it uses the C++23 ``bf16`` floating-point literal suffix: ``typedef __decltype(0.0bf16) __bfloat16_t;``). This is a toolchain incompatibility, not an issue with the detector or the example — castxml dump fails before the detector runs. Same root cause as case80 / case89.",
       "description": "DAAL-style serialization tag IDs swapped values between knn_model and linear_regression. Symbols, types, layout all unchanged — every conventional ABI check passes — but saved models silently deserialize as the wrong class. Emits SERIALIZATION_TAG_CHANGED.",
       "expected_kinds": ["serialization_tag_changed"]
     },
