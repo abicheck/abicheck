@@ -123,19 +123,21 @@ class TestEscalateFrozenNamespaceViolations:
     def test_tags_via_caused_by_type(self) -> None:
         """Synthetic overlay findings carry the root cause in
         caused_by_type rather than symbol; the step must match both."""
+        from abicheck.post_processing import PipelineContext
+
         c = Change(
             kind=ChangeKind.INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API,
             symbol="overlay_id_42",
             description="leak",
             caused_by_type="ns::detail::r1::registry",
         )
-        ctx_changes = EscalateFrozenNamespaceViolations().run(
-            [c],
-            type("Ctx", (), {
-                "frozen_namespaces": ["**::detail::r1::*"],
-            })(),
+        ctx = PipelineContext(
+            old=_snap("1.0", []),
+            new=_snap("2.0", []),
+            frozen_namespaces=["**::detail::r1::*"],
         )
-        assert ctx_changes[0].frozen_namespace_violation == "**::detail::r1::*"
+        EscalateFrozenNamespaceViolations().run([c], ctx)
+        assert c.frozen_namespace_violation == "**::detail::r1::*"
 
     def test_strips_template_args_before_matching(self) -> None:
         c = Change(
@@ -275,3 +277,104 @@ class TestSuppressionNamespaceSelector:
         r = compare(old, new, suppression=suppression)
         # The finding is suppressed → verdict is NO_CHANGE.
         assert r.verdict == Verdict.NO_CHANGE
+
+    def test_namespace_matches_deep_descendants(self) -> None:
+        """A glob like ``**::detail::r1`` must match arbitrarily nested
+        descendants — ``ns::detail::r1::sub::foo``, not only the
+        immediate child level. Regression for CodeRabbit's review.
+        """
+        c = Change(
+            kind=ChangeKind.FUNC_PARAMS_CHANGED,
+            symbol="ns::detail::r1::sub::deeper::dispatch",
+            description="x",
+        )
+        sup = Suppression(namespace="**::detail::r1", reason="legacy")
+        assert sup.matches(c)
+
+
+# ── Regression: deep ancestor matching + extern "C" + ctx.redundant ─────
+
+
+class TestEscalationRegressions:
+    def test_glob_matches_deep_descendants(self) -> None:
+        """The pipeline's matcher must also walk every ancestor prefix."""
+        c = Change(
+            kind=ChangeKind.FUNC_PARAMS_CHANGED,
+            symbol="ns::detail::r1::sub::deeper::dispatch",
+            description="param changed",
+        )
+        old = _snap("1.0", [])
+        new = _snap("2.0", [])
+        pp = DEFAULT_PIPELINE.run(
+            [c], old, new, frozen_namespaces=["**::detail::r1"],
+        )
+        assert pp.kept[0].frozen_namespace_violation == "**::detail::r1"
+
+    def test_extern_c_symbol_uses_qualified_name_from_function(self) -> None:
+        """When the Change.symbol is an unqualified extern "C" export
+        like ``dispatch``, the matcher must recover the C++ namespace
+        from the snapshot's ``Function.name`` index. This is the Codex
+        P1 regression — without this fix, ``**::detail::r1::*`` never
+        matches any extern "C" symbol declared in a C++ namespace."""
+        old_fn = Function(
+            name="mylib::detail::r1::dispatch",   # C++-qualified record
+            mangled="dispatch",                   # C export name
+            return_type="int",
+            params=[Param(name="n", type="int")],
+            visibility=Visibility.PUBLIC,
+            is_extern_c=True,
+        )
+        new_fn = Function(
+            name="mylib::detail::r1::dispatch",
+            mangled="dispatch",
+            return_type="long",                   # widened
+            params=[Param(name="n", type="long")],
+            visibility=Visibility.PUBLIC,
+            is_extern_c=True,
+        )
+        old = _snap("1.0", [old_fn])
+        new = _snap("2.0", [new_fn])
+        c = Change(
+            kind=ChangeKind.FUNC_PARAMS_CHANGED,
+            symbol="dispatch",  # unqualified, as it appears in ELF .dynsym
+            description="param changed",
+        )
+        pp = DEFAULT_PIPELINE.run(
+            [c], old, new, frozen_namespaces=["**::detail::r1::*"],
+        )
+        assert pp.kept[0].frozen_namespace_violation == "**::detail::r1::*"
+
+    def test_redundant_changes_are_also_tagged(self) -> None:
+        """ctx.redundant is fed into verdict computation alongside kept,
+        so frozen-namespace tagging must visit both buckets — otherwise
+        a downgrade override could silently apply to a redundant
+        finding inside the frozen namespace."""
+        # Synthesize a change directly into ctx.redundant by running the
+        # pipeline through compare() with a rename pair.  Simpler: call
+        # the step directly with a redundant entry preloaded.
+        from abicheck.post_processing import (
+            EscalateFrozenNamespaceViolations,
+            PipelineContext,
+        )
+
+        old = _snap("1.0", [])
+        new = _snap("2.0", [])
+        c_kept = Change(
+            kind=ChangeKind.FUNC_PARAMS_CHANGED,
+            symbol="ns::detail::r1::dispatch",
+            description="kept",
+        )
+        c_redundant = Change(
+            kind=ChangeKind.FUNC_PARAMS_CHANGED,
+            symbol="ns::detail::r1::other",
+            description="redundant",
+        )
+        ctx = PipelineContext(
+            old=old,
+            new=new,
+            frozen_namespaces=["**::detail::r1::*"],
+            redundant=[c_redundant],
+        )
+        EscalateFrozenNamespaceViolations().run([c_kept], ctx)
+        assert c_kept.frozen_namespace_violation == "**::detail::r1::*"
+        assert c_redundant.frozen_namespace_violation == "**::detail::r1::*"

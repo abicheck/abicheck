@@ -236,13 +236,17 @@ class Suppression:
                     if dm:
                         forms.append(dm)
                 for form in forms:
-                    stripped = _strip_template_args(form)
-                    if pat.match(stripped):
-                        return True
-                    if "::" in stripped:
-                        prefix = stripped.rsplit("::", 1)[0]
-                        if pat.match(prefix):
+                    # Walk every ancestor prefix so a glob like
+                    # ``**::detail::r1`` matches both immediate children
+                    # (``ns::detail::r1::foo``) and deeper descendants
+                    # (``ns::detail::r1::sub::foo``).
+                    candidate = _strip_template_args(form)
+                    while True:
+                        if pat.match(candidate):
                             return True
+                        if "::" not in candidate:
+                            break
+                        candidate = candidate.rsplit("::", 1)[0]
                 return False
 
             if not (_ns_match(change.symbol) or _ns_match(change.caused_by_type)):

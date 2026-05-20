@@ -562,44 +562,80 @@ class EscalateFrozenNamespaceViolations:
 
         patterns = list(ctx.frozen_namespaces)
 
+        # Pre-build mangled→qualified-name lookups so we can recover the
+        # C++ namespace of ``extern "C"`` symbols whose ``Change.symbol``
+        # is just the unqualified export name (e.g. ``dispatch`` for a
+        # function declared in ``mylib::detail::r1::``). Both snapshots
+        # are consulted because FUNC_REMOVED is only in old and
+        # FUNC_ADDED only in new.
+        qualified_lookup: dict[str, str] = {}
+        for snap in (ctx.old, ctx.new):
+            if snap is None:
+                continue
+            try:
+                snap.index()
+            except Exception:  # noqa: BLE001 — defensive; snapshots may be partial
+                continue
+            func_map = getattr(snap, "_func_by_mangled", None) or {}
+            for mangled, fn in func_map.items():
+                fname = getattr(fn, "name", None)
+                if fname and "::" in fname and mangled not in qualified_lookup:
+                    qualified_lookup[mangled] = fname
+
         def _match(name: str | None) -> str | None:
             if not name:
                 return None
-            # If the name looks like an Itanium-mangled symbol, also try the
-            # demangled form. Many Change.symbol values are mangled names
-            # (e.g. ``_ZN2ns6detail2r18dispatchEi``) which fnmatch globs
-            # like ``**::detail::r1::*`` would not otherwise hit.
+            # Collect every plausible C++-qualified form of *name*:
+            # 1. the raw value (mangled, demangled, or already qualified);
+            # 2. the demangled form when the raw value looks Itanium-mangled;
+            # 3. the snapshot-recorded qualified name (Function.name), which
+            #    is the only form that recovers the namespace of an
+            #    ``extern "C"`` symbol whose export name is unqualified.
             forms: list[str] = [name]
             if name.startswith("_Z"):
                 dm = demangle(name)
                 if dm:
                     forms.append(dm)
+            qual = qualified_lookup.get(name)
+            if qual:
+                forms.append(qual)
+
             for form in forms:
-                stripped = _strip_template_args(form)
-                # Try the full name, then the leading namespace prefix
-                # (everything up to the last "::").
-                candidates = [stripped]
-                if "::" in stripped:
-                    candidates.append(stripped.rsplit("::", 1)[0])
-                for cand in candidates:
+                # Walk every ancestor prefix so ``**::detail::r1`` matches
+                # both ``ns::detail::r1::foo`` and the deeper
+                # ``ns::detail::r1::sub::foo``.
+                candidate = _strip_template_args(form)
+                while True:
                     for pat in patterns:
-                        if fnmatch.fnmatchcase(cand, pat):
+                        if fnmatch.fnmatchcase(candidate, pat):
                             return pat
+                    if "::" not in candidate:
+                        break
+                    candidate = candidate.rsplit("::", 1)[0]
             return None
 
-        for c in changes:
+        def _tag(c: Change) -> None:
             if c.frozen_namespace_violation is not None:
                 # Already tagged by an earlier step (e.g. internal-leak
                 # overlay that synthesised a finding with the field set).
-                continue
+                return
             pat = _match(c.symbol) or _match(c.caused_by_type)
             if pat is None:
-                continue
+                return
             c.frozen_namespace_violation = pat
             if not c.description.startswith("[frozen-namespace violation"):
                 c.description = (
                     f"[frozen-namespace violation: {pat}] " + c.description
                 )
+
+        for c in changes:
+            _tag(c)
+        # ``compare()`` computes the verdict on kept + redundant, so
+        # findings moved into ctx.redundant by FilterRedundant must also
+        # be tagged — otherwise a downgrade override could silently
+        # apply to a redundant-but-frozen finding.
+        for c in ctx.redundant:
+            _tag(c)
         return changes
 
 
