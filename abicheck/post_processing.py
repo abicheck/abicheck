@@ -315,16 +315,30 @@ class DetectOneDALPatterns:
         #     list. If we rebind ``changes`` to a new filtered list,
         #     ``ctx.kept`` still points at the old one and our
         #     suppression is silently lost. Mutate in place instead.
-        suppressed_mangled = sycl_suppressed | isa_suppressed
-        if suppressed_mangled:
+        #
+        # We match the per-symbol ``Change.symbol`` against the
+        # suppression set using BOTH exact equality and substring
+        # containment. On Linux ``diff_symbols._diff_functions`` emits
+        # ``Change.symbol = fn.mangled`` (Itanium mangling); on Windows
+        # ``diff_platform._diff_pe`` emits ``Change.symbol = e.name``
+        # (PE export-table name = MSVC mangling), which is a sibling
+        # encoding of the same underlying function but a different
+        # string. The demangled function name (e.g.
+        # ``kmeans_compute_avx512``) appears as a substring of both
+        # mangled forms, so substring containment is the platform-
+        # portable signal.
+        suppressed_keys = sycl_suppressed | isa_suppressed
+        if suppressed_keys:
             to_keep: list[Change] = []
             for ch in changes:
-                if (
-                    ch.kind == ChangeKind.FUNC_REMOVED
-                    and ch.symbol in suppressed_mangled
-                ):
-                    ctx.suppressed.append(ch)
-                    continue
+                if ch.kind == ChangeKind.FUNC_REMOVED:
+                    sym = ch.symbol
+                    matched = sym in suppressed_keys or any(
+                        key and key in sym for key in suppressed_keys
+                    )
+                    if matched:
+                        ctx.suppressed.append(ch)
+                        continue
                 to_keep.append(ch)
             changes[:] = to_keep
 
