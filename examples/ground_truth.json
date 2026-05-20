@@ -1060,6 +1060,8 @@
       "abi_break": true,
       "api_break": false,
       "bad_practice": true,
+      "skip": true,
+      "reason": "Bundle case — no single-pair v1.cpp/v2.cpp layout; uses gen_bundle.sh to produce v1/ and v2/ directories. The detect_bundle_soname_skew() function is unit-tested directly in tests/test_onedal_detectors.py; compare-release CLI wiring is tracked for a follow-up PR.",
       "known_gap": "Requires multi-library bundle compare mode; cli wiring is partial — the detect_bundle_soname_skew() function is unit-tested directly, but compare-release integration is tracked for a follow-up PR. The example ships gen_bundle.sh to produce v1/ and v2/ directories on demand.",
       "description": "Multi-library bundle SONAME skew: libonedal_core and libonedal_dpc bump SONAME from .so.1 to .so.2 but libonedal_thread keeps .so.1 by accident. Per-library checks pass; cohort-level invariant fails. Emits BUNDLE_SONAME_SKEW.",
       "expected_kinds": ["bundle_soname_skew"]
