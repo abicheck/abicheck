@@ -623,24 +623,58 @@ class TestS5ForwardCompatTagAppended:
         kinds = _kinds(compare(old, new))
         assert ChangeKind.ENUM_MEMBER_ADDED in kinds
 
-    def test_appending_does_not_reassign_existing_ids(self) -> None:
-        """Guard against case81-style silent reassignment slipping in
-        through "I just appended". Old IDs must still resolve to the
-        same names."""
-        old_members = {
-            "dnnl_post_op_sum":    1,
-            "dnnl_post_op_eltwise": 2,
-        }
-        new_members = {
-            "dnnl_post_op_sum":      1,
-            "dnnl_post_op_eltwise":  2,
-            "dnnl_post_op_binary":   3,
-        }
-        # Same-name → same-value invariant
-        for name, val in old_members.items():
-            assert new_members[name] == val, (
-                f"appended tag must not renumber existing tag {name!r}"
-            )
+    def test_pure_append_does_not_trigger_reassignment_finding(self) -> None:
+        """Pure append (no existing value changed): the checker should
+        report ``ENUM_MEMBER_ADDED`` but NOT
+        ``ENUM_MEMBER_VALUE_CHANGED`` — the latter is what
+        case81-style silent reassignment looks like."""
+        old = _snap(enums=[EnumType(
+            name="dnnl_post_op_kind",
+            members=[
+                EnumMember("dnnl_post_op_sum",     1),
+                EnumMember("dnnl_post_op_eltwise", 2),
+            ],
+        )])
+        new = _snap(enums=[EnumType(
+            name="dnnl_post_op_kind",
+            members=[
+                EnumMember("dnnl_post_op_sum",     1),
+                EnumMember("dnnl_post_op_eltwise", 2),
+                EnumMember("dnnl_post_op_binary",  3),  # appended only
+            ],
+        )])
+        kinds = _kinds(compare(old, new))
+        assert ChangeKind.ENUM_MEMBER_ADDED in kinds
+        assert ChangeKind.ENUM_MEMBER_VALUE_CHANGED not in kinds, (
+            "pure append must not surface as a value-change finding"
+        )
+
+    def test_reassigning_existing_id_during_append_is_caught(self) -> None:
+        """The regression this case is really guarding against: someone
+        appends a new tag AND quietly renumbers an old one. The
+        renumbering must surface as case81-shaped
+        ``ENUM_MEMBER_VALUE_CHANGED`` (or a value-changed equivalent),
+        independently of the append being flagged as ``_ADDED``."""
+        old = _snap(enums=[EnumType(
+            name="dnnl_post_op_kind",
+            members=[
+                EnumMember("dnnl_post_op_sum",     1),
+                EnumMember("dnnl_post_op_eltwise", 2),
+            ],
+        )])
+        new = _snap(enums=[EnumType(
+            name="dnnl_post_op_kind",
+            members=[
+                EnumMember("dnnl_post_op_sum",     1),
+                EnumMember("dnnl_post_op_eltwise", 3),   # <-- silently renumbered
+                EnumMember("dnnl_post_op_binary",  2),   # took eltwise's slot
+            ],
+        )])
+        kinds = _kinds(compare(old, new))
+        assert ChangeKind.ENUM_MEMBER_VALUE_CHANGED in kinds, (
+            "renumbering an existing enum member during an 'append' must "
+            "still surface — this is the case81 failure mode"
+        )
 
     @pytest.mark.xfail(
         reason=(
