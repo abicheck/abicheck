@@ -166,7 +166,15 @@ class Function:
     return_pointer_depth: int = 0  # T=0, T*=1, T**=2
     elf_visibility: ElfVisibility | None = None  # ELF st_other (populated from .dynsym)
     ref_qualifier: str = ""       # "" (none), "&" (lvalue), "&&" (rvalue)
-    is_explicit: bool = False     # explicit specifier on constructors / conversion operators (DW_AT_explicit)
+    # explicit specifier on constructors / conversion operators (DW_AT_explicit /
+    # castxml @explicit). Tri-state to keep "unknown" distinct from "implicit":
+    # - True  → source has `explicit` (or `explicit(true)`)
+    # - False → source does not have `explicit`
+    # - None  → snapshot loader does not know (older snapshots, dumpers that
+    #           don't capture this attribute). The diff must skip the
+    #           detector when either side is None to avoid false API_BREAK
+    #           findings from schema evolution.
+    is_explicit: bool | None = None
 
 
 @dataclass

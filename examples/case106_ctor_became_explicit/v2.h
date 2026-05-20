@@ -1,16 +1,17 @@
-// case106 v2 — same ctor gains `explicit`.
+// case106 v2 — the conversion operator gains `explicit`.
 //
-// Source code that wrote `task_arena ta = 42;` or relied on implicit
-// conversion in argument passing no longer compiles. Mangled name unchanged,
-// so previously-compiled binaries still link.
+// Source code that wrote `int n = ta;` or relied on implicit conversion
+// at a function-call argument boundary no longer compiles. Mangled name
+// of `operator int() const` is unchanged, so previously-compiled binaries
+// still link.
 #pragma once
 
 namespace mylib {
 
 class task_arena {
 public:
-    explicit task_arena(int concurrency);  // NOW EXPLICIT — source break
-    int concurrency() const;
+    task_arena(int concurrency);
+    explicit operator int() const;  // NOW EXPLICIT — source break
 private:
     int concurrency_;
 };

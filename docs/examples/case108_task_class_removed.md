@@ -7,7 +7,7 @@
 | **Category** | Breaking |
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | ABI break, API break |
-| **Detected `ChangeKind`s** | `func_removed` |
+| **Detected `ChangeKind`s** | `func_removed`, `type_removed` |
 | **Source files** | [browse on GitHub](https://github.com/napetrov/abicheck/blob/main/examples/case108_task_class_removed/) |
 
 **Category:** Polymorphic Class Removal | **Verdict:** 🔴 BREAKING
@@ -38,7 +38,7 @@ fully removed in oneTBB 2021.1 along with `task_scheduler_init` (case107).
 |----|------|
 | `class task { virtual task* execute() = 0; ... };` | *(removed)* |
 | `task* mylib_spawn_dummy();` | *(removed)* |
-| — | `class task_group { void run(std::function<void()>); ... };` |
+| — | `class task_group { using task_fn = void (*)(); void run(task_fn); ... };` |
 
 ## How abicheck catches it
 

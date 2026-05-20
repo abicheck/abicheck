@@ -362,7 +362,10 @@ class _DwarfSnapshotBuilder:
         # DW_AT_explicit is emitted by g++/clang++ on ctors and conversion ops
         # whose source-level declaration carries the `explicit` specifier
         # (C++20 conditional `explicit(bool)` collapses to its resolved bool).
-        is_explicit = _attr_bool(die, "DW_AT_explicit")
+        # Tri-state: True/False are authoritative readings from DWARF; the
+        # snapshot loader defaults to None for older snapshots that predate
+        # this field, so the diff can distinguish "unknown" from "implicit".
+        is_explicit: bool | None = _attr_bool(die, "DW_AT_explicit")
 
         # Access level
         access_val = _attr_int(die, "DW_AT_accessibility")

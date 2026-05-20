@@ -19,7 +19,7 @@ def _snap(version: str, functions: list[Function]) -> AbiSnapshot:
     )
 
 
-def _ctor(mangled: str, is_explicit: bool) -> Function:
+def _ctor(mangled: str, is_explicit: bool | None) -> Function:
     return Function(
         name="Foo::Foo",
         mangled=mangled,
@@ -43,7 +43,7 @@ class TestExplicitCtor:
         old = _snap("1.0", [_ctor("_ZN3FooC1Ei", is_explicit=True)])
         new = _snap("2.0", [_ctor("_ZN3FooC1Ei", is_explicit=False)])
         r = compare(old, new)
-        # COMPATIBLE_WITH_RISK is reported via verdict; the change itself is in RISK_KINDS
+        assert r.verdict == Verdict.COMPATIBLE_WITH_RISK
         assert any(c.kind == ChangeKind.CTOR_EXPLICIT_REMOVED for c in r.changes)
         assert ChangeKind.CTOR_EXPLICIT_REMOVED in RISK_KINDS
 
@@ -62,3 +62,52 @@ class TestExplicitCtor:
         old = _ctor("_ZN3FooC1Ei", is_explicit=False)
         new = _ctor("_ZN3FooC1Ei", is_explicit=True)
         assert old.mangled == new.mangled
+
+    def test_none_on_either_side_suppresses_detector(self) -> None:
+        """Tri-state: a missing `is_explicit` field (older snapshot, or a
+        Function tag where the attribute is N/A) must NOT produce a finding
+        when compared against a fresh snapshot. This pins the Codex review
+        concern: defaulting unknown→implicit would cause spurious
+        CTOR_EXPLICIT_ADDED findings on every consumer upgrading abicheck.
+        """
+        # old has unknown explicitness; new is explicit
+        old = _snap("1.0", [_ctor("_ZN3FooC1Ei", is_explicit=None)])
+        new = _snap("2.0", [_ctor("_ZN3FooC1Ei", is_explicit=True)])
+        r = compare(old, new)
+        assert not any(
+            c.kind in (ChangeKind.CTOR_EXPLICIT_ADDED, ChangeKind.CTOR_EXPLICIT_REMOVED)
+            for c in r.changes
+        )
+        # Symmetric: old explicit, new unknown
+        old = _snap("1.0", [_ctor("_ZN3FooC1Ei", is_explicit=True)])
+        new = _snap("2.0", [_ctor("_ZN3FooC1Ei", is_explicit=None)])
+        r = compare(old, new)
+        assert not any(
+            c.kind in (ChangeKind.CTOR_EXPLICIT_ADDED, ChangeKind.CTOR_EXPLICIT_REMOVED)
+            for c in r.changes
+        )
+
+    def test_stale_snapshot_no_field_loads_as_none(self) -> None:
+        """Loader contract: an older snapshot JSON without the
+        `is_explicit` key must load as None, not False, so the diff
+        does not produce stale-baseline false positives."""
+        from abicheck.serialization import snapshot_from_dict
+
+        d = {
+            "library": "libtest.so.1",
+            "version": "1.0",
+            "functions": [
+                {
+                    "name": "Foo::Foo",
+                    "mangled": "_ZN3FooC1Ei",
+                    "return_type": "void",
+                    "params": [{"name": "x", "type": "int"}],
+                    "visibility": "public",
+                    # NB: no is_explicit key — simulates a pre-v5 snapshot.
+                },
+            ],
+            "variables": [],
+            "types": [],
+        }
+        snap = snapshot_from_dict(d)
+        assert snap.functions[0].is_explicit is None

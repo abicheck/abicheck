@@ -1,4 +1,4 @@
-// case93 v2 — the previously-empty tag gains a member.
+// case94 v2 — the previously-empty tag gains a member.
 //
 // The header author thinks of `auto_partitioner` as a private implementation
 // detail (it has no documented members), so adding a state field looks safe.

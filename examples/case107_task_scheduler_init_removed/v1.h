@@ -6,8 +6,10 @@
 // its public ctors/dtors and `terminate()`/`initialize()` members) is the
 // single biggest hard ABI break in TBB's history.
 //
-// This case captures the canonical "previously-exported class with virtual
-// methods disappears" shape so we have a named regression fixture.
+// This case captures the canonical "previously-exported non-polymorphic class
+// disappears" shape so we have a named regression fixture. (The vtable / RTTI
+// angle of removing a polymorphic base class is covered separately by
+// case108, which models the `tbb::task` removal.)
 #pragma once
 
 namespace mylib {

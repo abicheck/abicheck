@@ -7,7 +7,7 @@
 | **Category** | Breaking |
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | ABI break, API break |
-| **Detected `ChangeKind`s** | `func_removed` |
+| **Detected `ChangeKind`s** | `func_removed`, `type_removed` |
 | **Source files** | [browse on GitHub](https://github.com/napetrov/abicheck/blob/main/examples/case107_task_scheduler_init_removed/) |
 
 **Category:** Class Removal | **Verdict:** 🔴 BREAKING

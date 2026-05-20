@@ -7,6 +7,6 @@ _3 case(s)._ [← back to all examples](../index.md)
 
 | Case | Title | Verdict | Category |
 |------|-------|---------|----------|
-| [case106_ctor_became_explicit](../case106_ctor_became_explicit.md) | Constructor Became `explicit` | 🟠 API_BREAK | API Break |
+| [case106_ctor_became_explicit](../case106_ctor_became_explicit.md) | Conversion Operator Became `explicit` | 🟠 API_BREAK | API Break |
 | [case31_enum_rename](../case31_enum_rename.md) | Case 31 — Enum Member Rename | 🟠 API_BREAK | API Break |
 | [case34_access_level](../case34_access_level.md) | Case 34 — Access Level Changed | 🟠 API_BREAK | API Break |

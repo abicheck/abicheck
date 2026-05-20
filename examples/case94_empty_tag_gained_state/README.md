@@ -1,4 +1,4 @@
-# Case 93: Empty Tag Gained State
+# Case 94: Empty Tag Gained State
 
 **Category:** Type Layout | **Verdict:** 🔴 BREAKING
 

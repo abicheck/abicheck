@@ -170,24 +170,28 @@ def _check_function_signature(mangled: str, f_old: Function, f_new: Function) ->
         ))
 
     # explicit-specifier transitions on ctors / conversion operators.
-    # DW_AT_explicit is the gating signal — only emitted by g++/clang++ for
-    # constructors and conversion functions, so any flip here is meaningful.
-    if not f_old.is_explicit and f_new.is_explicit:
-        changes.append(Change(
-            kind=ChangeKind.CTOR_EXPLICIT_ADDED,
-            symbol=mangled,
-            description=f"Constructor/conversion gained `explicit` specifier: {f_old.name}",
-            old_value="implicit",
-            new_value="explicit",
-        ))
-    elif f_old.is_explicit and not f_new.is_explicit:
-        changes.append(Change(
-            kind=ChangeKind.CTOR_EXPLICIT_REMOVED,
-            symbol=mangled,
-            description=f"Constructor/conversion lost `explicit` specifier: {f_old.name}",
-            old_value="explicit",
-            new_value="implicit",
-        ))
+    # Tri-state: only fire when BOTH sides record explicit data. None means
+    # the dumper/loader couldn't determine it — typically an older snapshot
+    # that predates the field, or a Function/Destructor where `explicit` is
+    # N/A. Skipping in that case avoids false API_BREAK findings produced
+    # purely by snapshot schema evolution.
+    if f_old.is_explicit is not None and f_new.is_explicit is not None:
+        if not f_old.is_explicit and f_new.is_explicit:
+            changes.append(Change(
+                kind=ChangeKind.CTOR_EXPLICIT_ADDED,
+                symbol=mangled,
+                description=f"Constructor/conversion gained `explicit` specifier: {f_old.name}",
+                old_value="implicit",
+                new_value="explicit",
+            ))
+        elif f_old.is_explicit and not f_new.is_explicit:
+            changes.append(Change(
+                kind=ChangeKind.CTOR_EXPLICIT_REMOVED,
+                symbol=mangled,
+                description=f"Constructor/conversion lost `explicit` specifier: {f_old.name}",
+                old_value="explicit",
+                new_value="implicit",
+            ))
 
     return changes
 

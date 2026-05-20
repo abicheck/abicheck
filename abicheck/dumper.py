@@ -607,9 +607,18 @@ class _CastxmlParser:
     def parse_functions(self) -> list[Function]:
         funcs = []
         for el in self._root:
-            if el.tag not in ("Function", "Method", "Constructor", "Destructor"):
+            # castxml emits user-defined conversion operators as <Converter>
+            # rather than <Method>. They carry mangled names (unlike
+            # constructors), `const`/`virtual`/`explicit` qualifiers, and an
+            # implicit empty name (which we synthesize as `operator <T>`).
+            if el.tag not in ("Function", "Method", "Constructor", "Destructor", "Converter"):
                 continue
             name = el.get("name", "")
+            if not name and el.tag == "Converter":
+                # Synthesize a stable display name for conversion operators.
+                ret_id = el.get("returns", "")
+                ret_type_for_name = self._type_name(ret_id) if ret_id else "?"
+                name = f"operator {ret_type_for_name}"
             if not name:
                 continue
             # Skip compiler built-ins and command-line synthetic declarations
@@ -658,6 +667,16 @@ class _CastxmlParser:
             is_deleted = el.get("deleted") == "1"
             # castxml emits inline="1" for inline functions/methods
             is_inline = el.get("inline") == "1"
+            # castxml emits explicit="1" on Constructor / Method elements that
+            # carry the `explicit` specifier. Tri-state: only Constructor /
+            # Method tags can be explicit; for plain Function / Destructor the
+            # attribute is conceptually N/A and we leave is_explicit=None so
+            # the diff does not produce spurious findings.
+            is_explicit: bool | None
+            if el.tag in ("Constructor", "Method", "Converter"):
+                is_explicit = el.get("explicit") == "1"
+            else:
+                is_explicit = None
 
             # C++ ref-qualifier: castxml emits refqual="lvalue" or "rvalue"
             refqual_raw = el.get("refqual", "")
@@ -683,6 +702,7 @@ class _CastxmlParser:
                 access=self._access_level(el),
                 return_pointer_depth=ret_ptr_depth,
                 ref_qualifier=ref_qualifier,
+                is_explicit=is_explicit,
             ))
         return funcs
 

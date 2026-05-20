@@ -1,6 +1,6 @@
 # ABI Scenario Catalog
 
-This directory contains **95 published cases** (`01–76` + `26b` + `77, 79–84, 86–87, 89, 90–93, 94, 106–108`) demonstrating real-world ABI/API break scenarios. Each case is a minimal, compilable C/C++ example with:
+This directory contains **91 published cases** (`01–76` + `26b` + `77, 79–84, 86–87, 89, 94, 106–108`) plus **4 multi-library bundle cases** (`90–93`, tracked separately under [ADR-023](../docs/development/adr/023-bundle-aware-multi-binary-analysis.md)) demonstrating real-world ABI/API break scenarios. Each case is a minimal, compilable C/C++ example with:
 
 - Paired `v1/` and `v2/` source + headers.
 - A consumer `app.c` / `app.cpp` that demonstrates the actual failure at runtime.

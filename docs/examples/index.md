@@ -59,7 +59,7 @@ Source files (`v1.*`, `v2.*`, `app.*`, `CMakeLists.txt`) are linked at the botto
 | [case07_struct_layout](case07_struct_layout.md) | Struct Layout Change | 🔴 BREAKING | Breaking |
 | [case08_enum_value_change](case08_enum_value_change.md) | Enum Value Change | 🔴 BREAKING | Breaking |
 | [case09_cpp_vtable](case09_cpp_vtable.md) | C++ Vtable Change | 🔴 BREAKING | Breaking |
-| [case106_ctor_became_explicit](case106_ctor_became_explicit.md) | Constructor Became `explicit` | 🟠 API_BREAK | API Break |
+| [case106_ctor_became_explicit](case106_ctor_became_explicit.md) | Conversion Operator Became `explicit` | 🟠 API_BREAK | API Break |
 | [case107_task_scheduler_init_removed](case107_task_scheduler_init_removed.md) | `task_scheduler_init` Removed (oneTBB historical break) | 🔴 BREAKING | Breaking |
 | [case108_task_class_removed](case108_task_class_removed.md) | `task` Class Removed (oneTBB historical break — vtable angle) | 🔴 BREAKING | Breaking |
 | [case10_return_type](case10_return_type.md) | Return Type Change | 🔴 BREAKING | Breaking |
@@ -140,4 +140,4 @@ Source files (`v1.*`, `v2.*`, `app.*`, `CMakeLists.txt`) are linked at the botto
 | [case86_tag_struct_renamed](case86_tag_struct_renamed.md) | Tag struct renamed (empty class re-mangling) | 🔴 BREAKING | Breaking |
 | [case87_default_template_arg_changed](case87_default_template_arg_changed.md) | Default template argument changed | 🔴 BREAKING | Breaking |
 | [case89_inline_accessor_renamed_pimpl_member](case89_inline_accessor_renamed_pimpl_member.md) | Inline accessor references renamed pimpl member | 🔴 BREAKING | Breaking |
-| [case93_empty_tag_gained_state](case93_empty_tag_gained_state.md) | Empty Tag Gained State | 🔴 BREAKING | Breaking |
+| [case94_empty_tag_gained_state](case94_empty_tag_gained_state.md) | Empty Tag Gained State | 🔴 BREAKING | Breaking |

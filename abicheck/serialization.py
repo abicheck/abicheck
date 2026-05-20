@@ -337,7 +337,10 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
             return_pointer_depth=f.get("return_pointer_depth", 0),
             elf_visibility=ElfVisibility(f["elf_visibility"]) if f.get("elf_visibility") else None,
             ref_qualifier=f.get("ref_qualifier", ""),
-            is_explicit=f.get("is_explicit", False),
+            # Tri-state: a missing key (older snapshot) loads as None,
+            # which suppresses CTOR_EXPLICIT_ADDED/_REMOVED in the diff
+            # rather than producing spurious findings from schema evolution.
+            is_explicit=f.get("is_explicit"),
         )
         for f in d.get("functions", [])
     ]
