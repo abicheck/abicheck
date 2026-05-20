@@ -709,26 +709,33 @@ class TestS5ForwardCompatTagAppended:
 class TestCatalogueIntegrity:
     def test_referenced_change_kinds_all_exist(self) -> None:
         """Every ChangeKind referenced explicitly in the coverage matrix
-        must still exist in the enum — guards against rename drift."""
-        referenced = {
-            ChangeKind.FUNC_REMOVED,
-            ChangeKind.CONSTANT_CHANGED,
-            ChangeKind.CONSTANT_REMOVED,
-            ChangeKind.CONSTANT_ADDED,
-            ChangeKind.ENUM_MEMBER_ADDED,
-            ChangeKind.ENUM_MEMBER_REMOVED,
-            ChangeKind.ENUM_LAST_MEMBER_VALUE_CHANGED,
-            ChangeKind.ENUM_UNDERLYING_SIZE_CHANGED,
-            ChangeKind.TYPE_FIELD_ADDED,
-            ChangeKind.TYPE_FIELD_ADDED_COMPATIBLE,
-            ChangeKind.TYPE_SIZE_CHANGED,
-            ChangeKind.STRUCT_SIZE_CHANGED,
-            ChangeKind.INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API,
+        must still exist in the enum — guards against rename drift.
+
+        Compares by name (not by attribute) so a rename surfaces here as
+        a clear missing-member failure rather than as an import error
+        somewhere else.
+        """
+        referenced_names = {
+            "FUNC_REMOVED",
+            "CONSTANT_CHANGED",
+            "CONSTANT_REMOVED",
+            "CONSTANT_ADDED",
+            "ENUM_MEMBER_ADDED",
+            "ENUM_MEMBER_REMOVED",
+            "ENUM_LAST_MEMBER_VALUE_CHANGED",
+            "ENUM_UNDERLYING_SIZE_CHANGED",
+            "TYPE_FIELD_ADDED",
+            "TYPE_FIELD_ADDED_COMPATIBLE",
+            "TYPE_SIZE_CHANGED",
+            "STRUCT_SIZE_CHANGED",
+            "INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API",
         }
-        # If any of these stops existing, the import at the top of the
-        # file already fails. Sanity-assert anyway for explicit failure
-        # message.
-        assert len(referenced) == len(referenced), "trivially true"
+        existing_names = {k.name for k in ChangeKind}
+        missing = referenced_names - existing_names
+        assert not missing, (
+            f"coverage matrix references ChangeKind names that no "
+            f"longer exist in the enum: {sorted(missing)}"
+        )
 
     def test_no_proposed_new_kinds_silently_shipped(self) -> None:
         """The matrix claims S4 needs a NEW ChangeKind
