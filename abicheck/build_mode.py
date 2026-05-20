@@ -146,12 +146,16 @@ _GCC_PRODUCER = re.compile(
 _CLANG_PRODUCER = re.compile(
     r"clang\s+version\s+(?P<ver>\d+(?:\.\d+){0,2})", re.IGNORECASE,
 )
+# Word boundaries on ``icx``/``icc`` so we don't false-match arbitrary
+# substrings (e.g. an unrelated ``pacicx-tool`` or ``pickle``).
 _ICX_PRODUCER = re.compile(
-    r"(?:Intel\(R\)\s+oneAPI\s+DPC\+\+/C\+\+|icx)\s*[A-Za-z]*\s*(?P<ver>\d+(?:\.\d+){0,2})?",
+    r"(?:Intel\(R\)\s+oneAPI\s+DPC\+\+/C\+\+|\bicx\b)"
+    r"\s*[A-Za-z]*\s*(?P<ver>\d+(?:\.\d+){0,2})?",
     re.IGNORECASE,
 )
 _ICC_PRODUCER = re.compile(
-    r"(?:Intel\(R\)\s+C\+\+\s+Compiler|icc)\s*[A-Za-z]*\s*(?P<ver>\d+(?:\.\d+){0,2})?",
+    r"(?:Intel\(R\)\s+C\+\+\s+Compiler|\bicc\b)"
+    r"\s*[A-Za-z]*\s*(?P<ver>\d+(?:\.\d+){0,2})?",
     re.IGNORECASE,
 )
 # MSVC ships several producer-string variants:
@@ -179,10 +183,21 @@ def detect_compiler_family(
         if not text:
             continue
         m = _ICX_PRODUCER.search(text)
-        if m and "DPC++" in text or "oneAPI" in (text or ""):
-            return CompilerFamily.ICX, (m.group("ver") if m else None)
+        # Parentheses required: ``m and (... or ...)``; the un-parenthesized
+        # form ``m and X or Y`` parses as ``(m and X) or Y`` and incorrectly
+        # classifies any string containing "oneAPI" as ICX even when the
+        # ICX regex did not match (e.g. mixed .comment blobs from linked
+        # objects, or unrelated tooling that mentions oneAPI in passing).
+        if m and ("DPC++" in text or "oneAPI" in text):
+            return CompilerFamily.ICX, m.group("ver")
         m = _ICC_PRODUCER.search(text)
-        if m and "Intel" in text and "DPC++" not in text:
+        # Classic icc producer strings sometimes omit the literal
+        # "Intel" prefix (e.g. ``icc 19.1.3.304``); the regex already
+        # requires either the full "Intel(R) C++ Compiler" form or a
+        # word-boundary-bounded ``icc`` token, so we only need to guard
+        # against an oneAPI / DPC++ string accidentally hitting the
+        # generic icc match.
+        if m and "DPC++" not in text and "oneAPI" not in text:
             return CompilerFamily.ICC, m.group("ver")
         m = _MSVC_PRODUCER.search(text)
         if m and ("Microsoft" in text or "MSVC" in text):
@@ -204,7 +219,11 @@ _DWARF_LANG_TO_STD: dict[int, CxxStandard] = {
     0x01: CxxStandard.C,                # DW_LANG_C89
     0x02: CxxStandard.CXX98,            # DW_LANG_C_plus_plus (pre-C++03)
     0x0c: CxxStandard.C,                # DW_LANG_C99
-    0x19: CxxStandard.CXX11,            # DW_LANG_C_plus_plus_03
+    # 0x19 (DW_LANG_C_plus_plus_03) is mapped to CXX98 rather than CXX11
+    # because the enum has no CXX03 bucket and CXX98 is the closest
+    # pre-C++11 standard; upgrading C++03 binaries to CXX11 would
+    # misattribute ABI differences to the wrong build mode.
+    0x19: CxxStandard.CXX98,            # DW_LANG_C_plus_plus_03
     0x1a: CxxStandard.CXX11,            # DW_LANG_C_plus_plus_11
     0x21: CxxStandard.CXX14_OR_LATER,   # DW_LANG_C_plus_plus_14
     0x2a: CxxStandard.CXX17,            # DW_LANG_C_plus_plus_17

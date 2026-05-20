@@ -68,6 +68,18 @@ class TestCompilerFamily:
             fam, _ver = detect_compiler_family(producer=f, comment=None)
             assert fam == CompilerFamily.ICX, f"failed on {f!r}"
 
+    def test_icc_producer_strings(self) -> None:
+        """Classic Intel C++ Compiler (pre-oneAPI). Producer strings vary,
+        and may not always include the literal 'Intel' prefix."""
+        fixtures = [
+            "Intel(R) C++ Compiler 19.1.3.304",
+            "icc 19.1.3.304",
+            "icc (ICC) 2021.7.1 20221019",
+        ]
+        for f in fixtures:
+            fam, _ver = detect_compiler_family(producer=f, comment=None)
+            assert fam == CompilerFamily.ICC, f"failed on {f!r}"
+
     def test_unknown_producer_strings(self) -> None:
         fam, _ver = detect_compiler_family(producer=None, comment=None)
         assert fam == CompilerFamily.UNKNOWN
@@ -78,6 +90,29 @@ class TestCompilerFamily:
         fam, _ver = detect_compiler_family(
             producer=None,
             comment="GCC: (Ubuntu 13.2.0-23ubuntu4) 13.2.0",
+        )
+        assert fam == CompilerFamily.GCC
+
+    def test_oneapi_substring_does_not_trigger_icx_alone(self) -> None:
+        """Regression for the Codex P2 finding: the un-parenthesized
+        condition ``m and "DPC++" in text or "oneAPI" in text`` would
+        classify any string mentioning oneAPI as ICX even when the ICX
+        producer regex did not match. With the fix, an unrelated string
+        like a third-party tool that happens to print 'oneAPI' in its
+        version banner must NOT be misclassified.
+        """
+        # No 'Intel(R) oneAPI DPC++/C++' producer prefix, just a stray
+        # mention of "oneAPI" — must NOT classify as ICX.
+        fam, _ver = detect_compiler_family(
+            producer="some_tool 1.2.3 (built against oneAPI)",
+            comment=None,
+        )
+        assert fam == CompilerFamily.UNKNOWN
+        # Same for a GCC producer string with 'oneAPI' in it: should
+        # still resolve to GCC (later branch), not ICX.
+        fam, _ver = detect_compiler_family(
+            producer="GCC: (Ubuntu 11.4.0) 11.4.0 (oneAPI compat layer)",
+            comment=None,
         )
         assert fam == CompilerFamily.GCC
 
@@ -94,6 +129,14 @@ class TestCxxStandard:
         assert detect_cxx_standard(0x2a) == CxxStandard.CXX17
         assert detect_cxx_standard(0x2b) == CxxStandard.CXX20
         assert detect_cxx_standard(0x2e) == CxxStandard.CXX23
+
+    def test_cpp03_maps_to_pre_cxx11_bucket(self) -> None:
+        """Regression for the Codex P2 finding: DW_LANG_C_plus_plus_03
+        (0x19) must NOT be upgraded to CXX11. The enum has no CXX03
+        bucket, so the closest pre-C++11 value (CXX98) is used. This
+        avoids misattributing ABI differences between C++03 and C++11
+        binaries to the wrong build mode."""
+        assert detect_cxx_standard(0x19) == CxxStandard.CXX98
 
     def test_unknown_tag(self) -> None:
         assert detect_cxx_standard(None) == CxxStandard.UNKNOWN

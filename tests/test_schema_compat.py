@@ -196,6 +196,41 @@ class TestReserialization:
         snap = snapshot_from_dict(d)
         assert snap.build_mode is None
 
+    def test_malformed_build_mode_falls_back_to_none(self):
+        """A malformed ``build_mode`` payload (e.g. a string instead of
+        a dict, or a dict whose ``provenance`` is the wrong shape) must
+        load as None rather than raising. Regression for CodeRabbit's
+        review: previously ``prov_raw.get(...)`` would raise on a
+        non-dict provenance."""
+        d = _load_fixture("v5.json")
+
+        # Case 1: build_mode itself is a non-dict.
+        d_bad = dict(d)
+        d_bad["build_mode"] = "garbage"
+        snap = snapshot_from_dict(d_bad)
+        assert snap.build_mode is None
+
+        # Case 2: provenance is a non-dict.
+        d_bad = dict(d)
+        d_bad["build_mode"] = {
+            "compiler_family": "gcc",
+            "provenance": "not-a-dict",
+        }
+        snap = snapshot_from_dict(d_bad)
+        assert snap.build_mode is None
+
+        # Case 3: libcpp_abi_version is a non-int (must coerce to None,
+        # not raise downstream when other code does arithmetic on it).
+        d_bad = dict(d)
+        d_bad["build_mode"] = {
+            "compiler_family": "clang",
+            "libcpp_abi_version": "not-a-number",
+            "provenance": {},
+        }
+        snap = snapshot_from_dict(d_bad)
+        assert snap.build_mode is not None
+        assert snap.build_mode.libcpp_abi_version is None
+
     def test_future_version_warning(self):
         """Loading a snapshot with schema_version > current emits a warning."""
         d = _load_fixture("v4.json")

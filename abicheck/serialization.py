@@ -480,12 +480,35 @@ def _build_mode_from_dict(raw: Any) -> BuildMode | None:
         except (ValueError, KeyError):
             return default
 
-    prov_raw = raw.get("provenance") or {}
+    # Validate provenance shape: a malformed snapshot may carry a
+    # non-dict value (string/list from hand-edited JSON, or a partial
+    # corruption). Per the function contract, return None for
+    # malformed inputs rather than raising at .get().
+    prov_raw = raw.get("provenance")
+    if prov_raw is None:
+        prov_raw = {}
+    if not isinstance(prov_raw, dict):
+        return None
     provenance = BuildModeProvenance(
         raw_producer=prov_raw.get("raw_producer"),
         raw_comment=prov_raw.get("raw_comment"),
         compiler_version=prov_raw.get("compiler_version"),
     )
+
+    # Coerce libcpp_abi_version: int passes through; numeric string
+    # (some YAML/JSON producers emit "1" instead of 1) coerces; anything
+    # else (bool wraps as 0/1 which would be misleading; lists/dicts)
+    # falls back to None.
+    libcpp_raw = raw.get("libcpp_abi_version")
+    if isinstance(libcpp_raw, bool):
+        libcpp_abi_version: int | None = None
+    elif isinstance(libcpp_raw, int):
+        libcpp_abi_version = libcpp_raw
+    elif isinstance(libcpp_raw, str) and libcpp_raw.isdigit():
+        libcpp_abi_version = int(libcpp_raw)
+    else:
+        libcpp_abi_version = None
+
     return BuildMode(
         compiler_family=_enum_or(
             CompilerFamily, raw.get("compiler_family"), CompilerFamily.UNKNOWN,
@@ -499,7 +522,7 @@ def _build_mode_from_dict(raw: Any) -> BuildMode | None:
             raw.get("glibcxx_dual_abi"),
             GlibcxxDualAbi.NOT_APPLICABLE,
         ),
-        libcpp_abi_version=raw.get("libcpp_abi_version"),
+        libcpp_abi_version=libcpp_abi_version,
         provenance=provenance,
     )
 
