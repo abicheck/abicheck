@@ -641,3 +641,342 @@ class TestNonElfInputs:
         snap = build_bundle_snapshot({"libnotelf.so": json_file})
         assert snap.libraries == {}
         assert snap.metadata == {}
+
+    def test_path_looks_like_elf_handles_missing(self, tmp_path: Path) -> None:
+        from abicheck.bundle import _path_looks_like_elf
+        # Non-existent path — OSError → False, no raise.
+        assert _path_looks_like_elf(tmp_path / "does-not-exist.so") is False
+
+    def test_path_looks_like_elf_accepts_magic(self, tmp_path: Path) -> None:
+        from abicheck.bundle import _path_looks_like_elf
+        p = tmp_path / "fake.so"
+        p.write_bytes(b"\x7fELF" + b"\0" * 12)
+        assert _path_looks_like_elf(p) is True
+
+    def test_build_bundle_snapshot_with_real_elf(self) -> None:
+        # Construct a minimal ELF using elftools' write APIs is heavy;
+        # instead reuse a known-good system .so. This exercises the real
+        # parse_elf_metadata path in build_bundle_snapshot (otherwise
+        # bypassed by the in-memory _snapshot helper used elsewhere).
+        from abicheck.bundle import build_bundle_snapshot
+        candidate = None
+        for p in (
+            "/lib/x86_64-linux-gnu/libc.so.6",
+            "/lib64/libc.so.6",
+            "/usr/lib/libc.so.6",
+            "/usr/lib/x86_64-linux-gnu/libc.so.6",
+        ):
+            if Path(p).is_file():
+                candidate = Path(p)
+                break
+        if candidate is None:
+            pytest.skip("no system libc available for ELF round-trip")
+        snap = build_bundle_snapshot({"libc.so.6": candidate})
+        assert "libc.so.6" in snap.metadata
+        assert len(snap.resolution.provides) > 0
+
+
+# ---------------------------------------------------------------------------
+# BundleSnapshot.is_intra_bundle_provider
+# ---------------------------------------------------------------------------
+
+class TestIsIntraBundleProvider:
+    def test_matches_filename(self) -> None:
+        snap = _snapshot({"libcore.so": _meta(soname="libcore.so.1")})
+        assert snap.is_intra_bundle_provider("libcore.so") is True
+
+    def test_matches_soname(self) -> None:
+        snap = _snapshot({"libcore.so": _meta(soname="libcore.so.1")})
+        assert snap.is_intra_bundle_provider("libcore.so.1") is True
+
+    def test_matches_filename_stem_against_soname(self) -> None:
+        # Lookup "libcore.so.1" hits a key "libcore.so" via stem fallback.
+        snap = _snapshot({"libcore.so": _meta(soname="")})
+        assert snap.is_intra_bundle_provider("libcore.so.1") is True
+
+    def test_matches_soname_stem_against_filename(self) -> None:
+        snap = _snapshot({"libcore.so.1": _meta(soname="")})
+        assert snap.is_intra_bundle_provider("libcore.so") is True
+
+    def test_no_match_returns_false(self) -> None:
+        snap = _snapshot({"libcore.so": _meta(soname="libcore.so.1")})
+        assert snap.is_intra_bundle_provider("libother.so") is False
+
+    def test_library_names_property(self) -> None:
+        snap = _snapshot({
+            "libb.so": _meta(soname="libb.so.1"),
+            "liba.so": _meta(soname="liba.so.1"),
+        })
+        assert snap.library_names == ["liba.so", "libb.so"]
+
+
+# ---------------------------------------------------------------------------
+# BundleFinding.to_change lowering
+# ---------------------------------------------------------------------------
+
+class TestBundleFindingToChange:
+    def test_lowering_with_both_consumer_and_provider(self) -> None:
+        from abicheck.bundle import BundleFinding
+        f = BundleFinding(
+            kind=ChangeKind.BUNDLE_INTRA_DEP_SIGNATURE_CHANGED,
+            symbol="core_add",
+            description="signature changed",
+            consumer_library="libalgo.so",
+            provider_library="libcore.so",
+        )
+        ch = f.to_change()
+        assert ch.kind == ChangeKind.BUNDLE_INTRA_DEP_SIGNATURE_CHANGED
+        assert "libalgo.so" in ch.description
+        assert "libcore.so" in ch.description
+
+    def test_lowering_provider_only(self) -> None:
+        from abicheck.bundle import BundleFinding
+        f = BundleFinding(
+            kind=ChangeKind.BUNDLE_LIBRARY_REMOVED,
+            symbol="libcore.so",
+            description="lib removed",
+            provider_library="libcore.so",
+        )
+        ch = f.to_change()
+        assert "libcore.so" in ch.description
+
+    def test_lowering_consumer_only(self) -> None:
+        from abicheck.bundle import BundleFinding
+        f = BundleFinding(
+            kind=ChangeKind.BUNDLE_INTRA_DEP_REMOVED,
+            symbol="core_mul",
+            description="missing",
+            consumer_library="libalgo.so",
+        )
+        ch = f.to_change()
+        assert "libalgo.so" in ch.description
+
+    def test_lowering_neither(self) -> None:
+        from abicheck.bundle import BundleFinding
+        f = BundleFinding(
+            kind=ChangeKind.BUNDLE_LIBRARY_ADDED,
+            symbol="libnew.so",
+            description="added",
+        )
+        ch = f.to_change()
+        assert ch.description == "added"
+
+
+# ---------------------------------------------------------------------------
+# End-to-end compare-release with bundle analysis enabled
+# ---------------------------------------------------------------------------
+
+def _build_tiny_so(release_dir: Path, name: str, src: str) -> Path:
+    """Compile *src* into ``release_dir/name`` (a .so file).
+
+    Sources are kept in a *sibling* directory next to release_dir so the
+    discover_shared_libraries walk inside the release scan does not pick
+    them up as ELF candidates.  Skips the calling test if gcc is
+    unavailable on the runner.
+    """
+    import shutil
+    import subprocess
+    gcc = shutil.which("gcc")
+    if gcc is None:
+        pytest.skip("gcc unavailable; cannot build bundle E2E fixture")
+    src_dir = release_dir.parent / f"{release_dir.name}.sources"
+    src_dir.mkdir(exist_ok=True)
+    src_path = src_dir / f"{name}.c"
+    src_path.write_text(src)
+    out = release_dir / name
+    soname = name.split(".so")[0] + ".so.1"
+    res = subprocess.run(
+        [gcc, "-shared", "-fPIC", "-g", "-O0", str(src_path),
+         "-o", str(out), f"-Wl,-soname,{soname}"],
+        capture_output=True, text=True,
+    )
+    if res.returncode != 0:
+        pytest.fail(f"gcc failed for {name}: {res.stderr}")
+    return out
+
+
+class TestCompareReleaseBundleE2E:
+    """Exercise compare-release end-to-end with the bundle layer enabled.
+
+    These tests compile tiny C .so files at runtime so the CLI's bundle
+    wiring (in abicheck/cli.py) is actually covered by tests — the
+    in-memory unit tests above bypass the CLI surface and the ELF
+    parsing path.
+    """
+
+    def test_compare_release_emits_bundle_findings(self, tmp_path: Path) -> None:
+        # libcore drops core_mul between old and new; libalgo still
+        # imports it. Bundle layer must catch this; the CLI must surface
+        # the bundle_verdict and bundle_findings in JSON output.
+        import json as _json
+
+        from click.testing import CliRunner
+
+        from abicheck.cli import main
+
+        old = tmp_path / "old"
+        new = tmp_path / "new"
+        old.mkdir()
+        new.mkdir()
+        _build_tiny_so(
+            old, "libcore.so",
+            "int core_add(int a, int b){return a+b;}\n"
+            "int core_mul(int a, int b){return a*b;}\n",
+        )
+        _build_tiny_so(
+            new, "libcore.so",
+            "int core_add(int a, int b){return a+b;}\n",   # core_mul removed
+        )
+        # libalgo: byte-identical in old and new, still imports core_mul.
+        algo_src = (
+            "extern int core_add(int,int);\n"
+            "extern int core_mul(int,int);\n"
+            "int algo_sum(int lo, int hi){int s=0;for(int i=lo;i<=hi;++i)s=core_add(s,i);return s;}\n"
+            "int algo_square(int x){return core_mul(x,x);}\n"
+        )
+        for side in (old, new):
+            src_dir = side.parent / f"{side.name}.sources"
+            src_dir.mkdir(exist_ok=True)
+            src_file = src_dir / "libalgo.c"
+            src_file.write_text(algo_src)
+            import shutil as _shutil
+            import subprocess as _sub
+            gcc = _shutil.which("gcc")
+            assert gcc is not None
+            _sub.run(
+                [gcc, "-shared", "-fPIC", "-g", "-O0", str(src_file),
+                 "-o", str(side / "libalgo.so"),
+                 "-L", str(side), "-Wl,--no-as-needed", "-lcore",
+                 "-Wl,-soname,libalgo.so.1"],
+                check=True, capture_output=True,
+            )
+
+        result = CliRunner().invoke(
+            main,
+            ["compare-release", str(old), str(new), "--format", "json"],
+        )
+        # Bundle BREAKING → exit 4.
+        assert result.exit_code == 4, result.output
+        data = _json.loads(result.stdout)
+        assert data["bundle_verdict"] == "BREAKING"
+        kinds = {f["kind"] for f in data["bundle_findings"]}
+        assert "bundle_intra_dep_removed" in kinds
+        # The consumer attribution must point at libalgo.so.
+        intra = next(
+            f for f in data["bundle_findings"]
+            if f["kind"] == "bundle_intra_dep_removed"
+        )
+        assert intra["consumer_library"] == "libalgo.so"
+        assert intra["symbol"] == "core_mul"
+
+    def test_compare_release_no_bundle_analysis_opts_out(self, tmp_path: Path) -> None:
+        # Same broken bundle as above; --no-bundle-analysis must
+        # suppress bundle findings and report only per-library results.
+        import json as _json
+
+        from click.testing import CliRunner
+
+        from abicheck.cli import main
+
+        old = tmp_path / "old"
+        new = tmp_path / "new"
+        old.mkdir()
+        new.mkdir()
+        _build_tiny_so(old, "libfoo.so", "int foo(void){return 1;}\nint bar(void){return 2;}\n")
+        _build_tiny_so(new, "libfoo.so", "int foo(void){return 1;}\n")
+
+        result = CliRunner().invoke(
+            main,
+            ["compare-release", str(old), str(new),
+             "--no-bundle-analysis", "--format", "json"],
+        )
+        data = _json.loads(result.stdout)
+        # bundle_verdict / bundle_findings must NOT be present.
+        assert "bundle_verdict" not in data
+        assert "bundle_findings" not in data
+
+    def test_compare_release_with_manifest_emits_manifest_finding(
+        self, tmp_path: Path,
+    ) -> None:
+        # Manifest lists `bar` as a promise; new bundle drops it.
+        import json as _json
+
+        from click.testing import CliRunner
+
+        from abicheck.cli import main
+
+        old = tmp_path / "old"
+        new = tmp_path / "new"
+        old.mkdir()
+        new.mkdir()
+        _build_tiny_so(old, "libfoo.so", "int foo(void){return 1;}\nint bar(void){return 2;}\n")
+        _build_tiny_so(new, "libfoo.so", "int foo(void){return 1;}\n")
+
+        manifest = tmp_path / "manifest.yaml"
+        manifest.write_text(
+            "version: 1\n"
+            "provides:\n"
+            "  - symbol: foo\n"
+            "    library: libfoo.so.1\n"
+            "    optional_provider: false\n"
+            "  - symbol: bar\n"
+            "    library: libfoo.so.1\n"
+            "    optional_provider: false\n",
+        )
+
+        result = CliRunner().invoke(
+            main,
+            ["compare-release", str(old), str(new),
+             "--manifest", str(manifest), "--format", "json"],
+        )
+        data = _json.loads(result.stdout)
+        kinds = {f["kind"] for f in data["bundle_findings"]}
+        assert "bundle_manifest_instantiation_removed" in kinds
+
+    def test_compare_release_markdown_shows_bundle_section(
+        self, tmp_path: Path,
+    ) -> None:
+        # Bundle finding must show up in the markdown summary output.
+        from click.testing import CliRunner
+
+        from abicheck.cli import main
+
+        old = tmp_path / "old"
+        new = tmp_path / "new"
+        old.mkdir()
+        new.mkdir()
+        _build_tiny_so(
+            old, "libcore.so",
+            "int core_add(int a, int b){return a+b;}\n"
+            "int core_mul(int a, int b){return a*b;}\n",
+        )
+        _build_tiny_so(
+            new, "libcore.so",
+            "int core_add(int a, int b){return a+b;}\n",
+        )
+        algo_src = (
+            "extern int core_mul(int,int);\n"
+            "int algo_square(int x){return core_mul(x,x);}\n"
+        )
+        for side in (old, new):
+            src_dir = side.parent / f"{side.name}.sources"
+            src_dir.mkdir(exist_ok=True)
+            src_file = src_dir / "libalgo.c"
+            src_file.write_text(algo_src)
+            import shutil as _shutil
+            import subprocess as _sub
+            gcc = _shutil.which("gcc")
+            assert gcc is not None
+            _sub.run(
+                [gcc, "-shared", "-fPIC", "-g", "-O0", str(src_file),
+                 "-o", str(side / "libalgo.so"),
+                 "-L", str(side), "-Wl,--no-as-needed", "-lcore",
+                 "-Wl,-soname,libalgo.so.1"],
+                check=True, capture_output=True,
+            )
+
+        result = CliRunner().invoke(
+            main, ["compare-release", str(old), str(new)],
+        )
+        assert "Bundle (Cross-Library) Findings" in result.stdout
+        assert "bundle_intra_dep_removed" in result.stdout
