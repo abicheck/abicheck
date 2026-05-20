@@ -1,0 +1,822 @@
+# Copyright 2026 Nikolay Petrov
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+
+"""Unit tests for the oneDAL-shaped detectors (case77–case89).
+
+Each detector is exercised with synthetic ``AbiSnapshot`` objects, so the
+suite runs without a C/C++ compiler, libabigail, abi-compliance-checker,
+or castxml — these are part of the default fast test suite.
+
+Cases covered:
+
+* case79: ``detect_missing_instantiations``
+* case81: ``detect_serialization_tag_changes``
+* case82: ``detect_sycl_overload_set_removal``
+* case83: ``detect_cpu_dispatch_isa_dropped``
+* case84: ``detect_bundle_soname_skew``
+* case86: ``detect_tag_type_renamed``
+* case87: ``detect_default_template_arg_changed``
+* case89: ``detect_inline_body_renamed_member``
+
+case77 and case80 reuse the existing internal-leak detector and are
+covered by ``tests/test_internal_leak.py`` plus the autodiscovery
+integration test.
+"""
+
+from __future__ import annotations
+
+import pytest
+
+from abicheck.checker_policy import ChangeKind
+from abicheck.checker_types import Change
+from abicheck.diff_onedal import (
+    BundleMember,
+    _extract_soname_major,
+    _has_sycl_queue_first_param,
+    _is_empty_record,
+    _isa_token_in_symbol,
+    _looks_like_serialization_tag,
+    _looks_like_template_instantiation,
+    detect_bundle_soname_skew,
+    detect_cpu_dispatch_isa_dropped,
+    detect_default_template_arg_changed,
+    detect_inline_body_renamed_member,
+    detect_missing_instantiations,
+    detect_serialization_tag_changes,
+    detect_sycl_overload_set_removal,
+    detect_tag_type_renamed,
+)
+from abicheck.model import (
+    AbiSnapshot,
+    Function,
+    Param,
+    ParamKind,
+    RecordType,
+    TypeField,
+    Variable,
+)
+
+# ---------------------------------------------------------------------------
+# Helpers — synthetic snapshot construction
+# ---------------------------------------------------------------------------
+
+
+def _fn(
+    name: str,
+    mangled: str | None = None,
+    *,
+    params: list[Param] | None = None,
+    is_inline: bool = False,
+    return_type: str = "void",
+) -> Function:
+    return Function(
+        name=name,
+        mangled=mangled or f"_Z{len(name)}{name.replace('::', '')}v",
+        return_type=return_type,
+        params=params or [],
+        is_inline=is_inline,
+    )
+
+
+def _snap(
+    name: str,
+    functions: list[Function] | None = None,
+    types: list[RecordType] | None = None,
+    variables: list[Variable] | None = None,
+    constants: dict[str, str] | None = None,
+) -> AbiSnapshot:
+    return AbiSnapshot(
+        library=name,
+        version="1.0",
+        functions=functions or [],
+        types=types or [],
+        variables=variables or [],
+        constants=constants or {},
+    )
+
+
+# ===========================================================================
+# Shared helpers
+# ===========================================================================
+
+
+class TestIsEmptyRecord:
+    def test_empty_one_byte_class(self) -> None:
+        rt = RecordType(name="ns::tag", kind="struct", size_bits=8, fields=[])
+        assert _is_empty_record(rt) is True
+
+    def test_unknown_size_no_fields(self) -> None:
+        rt = RecordType(name="ns::tag", kind="struct", size_bits=None, fields=[])
+        assert _is_empty_record(rt) is True
+
+    def test_class_with_field_not_empty(self) -> None:
+        rt = RecordType(
+            name="ns::has_field",
+            kind="struct",
+            size_bits=32,
+            fields=[TypeField(name="x", type="int")],
+        )
+        assert _is_empty_record(rt) is False
+
+    def test_class_with_vtable_not_empty(self) -> None:
+        rt = RecordType(
+            name="ns::polymorphic",
+            kind="class",
+            size_bits=64,
+            vtable=["_ZN12polymorphic1fEv"],
+        )
+        assert _is_empty_record(rt) is False
+
+
+# ===========================================================================
+# case81 — serialization tag changes
+# ===========================================================================
+
+
+class TestSerializationTagNaming:
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "kmeans_model_tag",
+            "kmeans_serialization_tag",
+            "KMeansSerializationTag",
+            "mylib::knn_model_tag",
+            "ns::detail::tag_id",
+        ],
+    )
+    def test_recognised(self, name: str) -> None:
+        assert _looks_like_serialization_tag(name) is True
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "kmeans_model",
+            "compute",
+            "tag_input",  # leaf doesn't end in tag suffix
+        ],
+    )
+    def test_not_recognised(self, name: str) -> None:
+        assert _looks_like_serialization_tag(name) is False
+
+
+class TestSerializationTagDetector:
+    def test_swap_emits_finding_per_tag(self) -> None:
+        old = _snap(
+            "lib",
+            constants={
+                "kmeans_model_tag": "0x1001",
+                "knn_model_tag": "0x1002",
+                "linear_regression_tag": "0x1003",
+            },
+        )
+        new = _snap(
+            "lib",
+            constants={
+                "kmeans_model_tag": "0x1001",
+                "knn_model_tag": "0x1003",  # swapped
+                "linear_regression_tag": "0x1002",  # swapped
+            },
+        )
+        findings = detect_serialization_tag_changes(old, new)
+        assert len(findings) == 2
+        assert all(f.kind == ChangeKind.SERIALIZATION_TAG_CHANGED for f in findings)
+        # The swap-partner must be named in the description.
+        descs = " ".join(f.description for f in findings)
+        assert "linear_regression_tag" in descs
+        assert "knn_model_tag" in descs
+
+    def test_single_value_change_emits_one_finding(self) -> None:
+        old = _snap("lib", constants={"foo_tag": "0x10"})
+        new = _snap("lib", constants={"foo_tag": "0x99"})
+        findings = detect_serialization_tag_changes(old, new)
+        assert len(findings) == 1
+        assert findings[0].old_value == "0x10"
+        assert findings[0].new_value == "0x99"
+
+    def test_no_change_no_finding(self) -> None:
+        old = _snap("lib", constants={"foo_tag": "0x10"})
+        new = _snap("lib", constants={"foo_tag": "0x10"})
+        assert detect_serialization_tag_changes(old, new) == []
+
+    def test_non_tag_constants_ignored(self) -> None:
+        old = _snap("lib", constants={"max_threads": "16"})
+        new = _snap("lib", constants={"max_threads": "32"})
+        assert detect_serialization_tag_changes(old, new) == []
+
+    def test_picks_up_variable_initial_values(self) -> None:
+        v1 = Variable(name="model_tag", mangled="model_tag", type="int", value="100")
+        v2 = Variable(name="model_tag", mangled="model_tag", type="int", value="200")
+        old = _snap("lib", variables=[v1])
+        new = _snap("lib", variables=[v2])
+        findings = detect_serialization_tag_changes(old, new)
+        assert len(findings) == 1
+
+
+# ===========================================================================
+# case79 — missing template instantiation
+# ===========================================================================
+
+
+class TestTemplateInstantiationHeuristic:
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "descriptor<float>",
+            "ns::descriptor<float, int>",
+            "ns::descriptor<float>::method",
+        ],
+    )
+    def test_recognised(self, name: str) -> None:
+        assert _looks_like_template_instantiation(name) is True
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "compute",
+            "ns::compute",
+            "operator<",  # operator< has '<' but no closing '>'
+        ],
+    )
+    def test_not_recognised(self, name: str) -> None:
+        assert _looks_like_template_instantiation(name) is False
+
+
+class TestMissingInstantiationDetector:
+    def test_one_instantiation_dropped_emits_finding(self) -> None:
+        old = _snap(
+            "lib",
+            functions=[
+                _fn("descriptor<float>::descriptor", "_ZN10descriptorIfEC1Ev"),
+                _fn("descriptor<double>::descriptor", "_ZN10descriptorIdEC1Ev"),
+            ],
+        )
+        new = _snap(
+            "lib",
+            functions=[
+                _fn("descriptor<float>::descriptor", "_ZN10descriptorIfEC1Ev"),
+            ],
+        )
+        findings = detect_missing_instantiations(old, new)
+        assert len(findings) == 1
+        assert findings[0].kind == ChangeKind.INSTANTIATION_MISSING_FROM_BINARY
+        assert "descriptor<double>" in findings[0].description
+
+    def test_whole_template_removed_not_flagged_here(self) -> None:
+        # If no descriptor<*> survives, this is plain func_removed, not
+        # an "advertised but missing" situation.
+        old = _snap(
+            "lib",
+            functions=[
+                _fn("descriptor<float>::descriptor", "_ZN10descriptorIfEC1Ev"),
+            ],
+        )
+        new = _snap("lib", functions=[])
+        assert detect_missing_instantiations(old, new) == []
+
+    def test_non_template_removal_ignored(self) -> None:
+        old = _snap(
+            "lib",
+            functions=[
+                _fn("compute", "_Z7computev"),
+                _fn("descriptor<float>::descriptor", "_ZN10descriptorIfEC1Ev"),
+            ],
+        )
+        new = _snap(
+            "lib",
+            functions=[
+                _fn("descriptor<float>::descriptor", "_ZN10descriptorIfEC1Ev"),
+            ],
+        )
+        assert detect_missing_instantiations(old, new) == []
+
+
+# ===========================================================================
+# case82 — SYCL overload set removed
+# ===========================================================================
+
+
+class TestSyclFirstParam:
+    def test_recognises_sycl_queue_ref(self) -> None:
+        fn = _fn(
+            "compute",
+            params=[
+                Param(name="q", type="sycl::queue&", kind=ParamKind.REFERENCE),
+            ],
+        )
+        assert _has_sycl_queue_first_param(fn) is True
+
+    def test_recognises_sycl_queue_with_spaces(self) -> None:
+        fn = _fn(
+            "compute",
+            params=[
+                Param(name="q", type="sycl :: queue&", kind=ParamKind.REFERENCE),
+            ],
+        )
+        assert _has_sycl_queue_first_param(fn) is True
+
+    def test_non_sycl_first_param(self) -> None:
+        fn = _fn("compute", params=[Param(name="x", type="int")])
+        assert _has_sycl_queue_first_param(fn) is False
+
+    def test_no_params(self) -> None:
+        assert _has_sycl_queue_first_param(_fn("noargs")) is False
+
+
+class TestSyclOverloadSetDetector:
+    def _build_pair(self) -> tuple[AbiSnapshot, AbiSnapshot]:
+        sycl_param = Param(
+            name="q",
+            type="sycl::queue&",
+            kind=ParamKind.REFERENCE,
+        )
+        old = _snap(
+            "lib",
+            functions=[
+                _fn("compute", "_Z7computev"),
+                _fn("compute", "_Z7computeRN4sycl5queueE", params=[sycl_param]),
+                _fn("train", "_Z5trainv"),
+                _fn("train", "_Z5trainRN4sycl5queueE", params=[sycl_param]),
+                _fn("infer", "_Z5inferv"),
+                _fn("infer", "_Z5inferRN4sycl5queueE", params=[sycl_param]),
+            ],
+        )
+        new = _snap(
+            "lib",
+            functions=[
+                _fn("compute", "_Z7computev"),
+                _fn("train", "_Z5trainv"),
+                _fn("infer", "_Z5inferv"),
+            ],
+        )
+        return old, new
+
+    def test_grouped_finding_emitted(self) -> None:
+        old, new = self._build_pair()
+        findings, suppressed = detect_sycl_overload_set_removal(old, new)
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.kind == ChangeKind.SYCL_OVERLOAD_SET_REMOVED
+        assert "3 overloads" in f.description
+        for name in ("compute", "train", "infer"):
+            assert name in f.description
+        assert set(suppressed) == {
+            "_Z7computeRN4sycl5queueE",
+            "_Z5trainRN4sycl5queueE",
+            "_Z5inferRN4sycl5queueE",
+        }
+
+    def test_threshold_respected(self) -> None:
+        old, new = self._build_pair()
+        # Bump threshold above the available count → no grouping.
+        findings, suppressed = detect_sycl_overload_set_removal(
+            old,
+            new,
+            min_overloads=10,
+        )
+        assert findings == []
+        assert suppressed == set()
+
+    def test_no_surviving_sibling_no_finding(self) -> None:
+        # If the *non*-SYCL overload also disappeared, this is a pure
+        # API removal, not a build-mode change.
+        sycl_param = Param(
+            name="q",
+            type="sycl::queue&",
+            kind=ParamKind.REFERENCE,
+        )
+        old = _snap(
+            "lib",
+            functions=[
+                _fn("compute", "_Z7computev"),
+                _fn("compute", "_Z7computeQ", params=[sycl_param]),
+                _fn("train", "_Z5trainv"),
+                _fn("train", "_Z5trainQ", params=[sycl_param]),
+            ],
+        )
+        new = _snap("lib", functions=[])
+        findings, _ = detect_sycl_overload_set_removal(old, new)
+        assert findings == []
+
+
+# ===========================================================================
+# case83 — CPU dispatch ISA dropped
+# ===========================================================================
+
+
+class TestIsaTokenization:
+    @pytest.mark.parametrize(
+        "symbol,expected",
+        [
+            ("kmeans_compute_avx512", "avx512"),
+            ("kmeans_compute_avx2", "avx2"),
+            ("kmeans_compute_sse42", "sse42"),
+            ("kmeans_compute_sse2", "sse2"),
+            ("kmeans_compute_scalar", "scalar"),
+            ("kmeans_compute_AVX512_inner", "avx512"),
+            ("kmeans_compute", None),
+            ("", None),
+        ],
+    )
+    def test_token_extracted(self, symbol: str, expected: str | None) -> None:
+        assert _isa_token_in_symbol(symbol) == expected
+
+    def test_avx512_beats_avx(self) -> None:
+        # ``avx512`` must be matched in preference to ``avx``.
+        assert _isa_token_in_symbol("foo_avx512_bar") == "avx512"
+
+
+class TestCpuDispatchIsaDetector:
+    def _build_three_algorithms(self) -> tuple[AbiSnapshot, AbiSnapshot]:
+        algos = ("kmeans", "knn", "linreg")
+        old = _snap(
+            "lib",
+            functions=[
+                _fn(f"{a}_compute_{isa}", f"_Z{len(a)}{a}_compute_{isa}")
+                for a in algos
+                for isa in ("avx512", "avx2", "sse42", "scalar")
+            ],
+        )
+        new = _snap(
+            "lib",
+            functions=[
+                _fn(f"{a}_compute_{isa}", f"_Z{len(a)}{a}_compute_{isa}")
+                for a in algos
+                for isa in ("avx2", "sse42", "scalar")
+            ],
+        )
+        return old, new
+
+    def test_grouped_finding_for_isa_drop(self) -> None:
+        old, new = self._build_three_algorithms()
+        findings, suppressed = detect_cpu_dispatch_isa_dropped(old, new)
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.kind == ChangeKind.CPU_DISPATCH_ISA_DROPPED
+        assert "avx512" in f.description
+        # All three avx512 mangled names suppressed.
+        assert len(suppressed) == 3
+
+    def test_below_threshold_no_finding(self) -> None:
+        old, new = self._build_three_algorithms()
+        findings, _ = detect_cpu_dispatch_isa_dropped(
+            old,
+            new,
+            min_removed=10,
+        )
+        assert findings == []
+
+    def test_no_overlap_with_survivors_no_finding(self) -> None:
+        # If the algorithms went away entirely (no surviving stems),
+        # this is plain func_removed, not an ISA-tier drop.
+        old = _snap(
+            "lib",
+            functions=[
+                _fn("alg_avx512", "_Z10alg_avx512v"),
+                _fn("beta_avx512", "_Z11beta_avx512v"),
+                _fn("gamma_avx512", "_Z12gamma_avx512v"),
+            ],
+        )
+        new = _snap("lib", functions=[])
+        findings, _ = detect_cpu_dispatch_isa_dropped(old, new)
+        assert findings == []
+
+
+# ===========================================================================
+# case86 — tag struct renamed
+# ===========================================================================
+
+
+class TestTagTypeRenamedDetector:
+    def test_rename_with_symbol_evidence(self) -> None:
+        old_tag = RecordType(
+            name="mylib::method::brute_force",
+            kind="struct",
+            size_bits=8,
+            fields=[],
+        )
+        new_tag = RecordType(
+            name="mylib::method::search_brute",
+            kind="struct",
+            size_bits=8,
+            fields=[],
+        )
+        old = _snap(
+            "lib",
+            functions=[
+                _fn(
+                    "mylib::descriptor<mylib::method::brute_force>::descriptor",
+                    "_ZN5mylib10descriptorINS_6method11brute_forceEEC1Ev",
+                ),
+            ],
+            types=[old_tag],
+        )
+        new = _snap(
+            "lib",
+            functions=[
+                _fn(
+                    "mylib::descriptor<mylib::method::search_brute>::descriptor",
+                    "_ZN5mylib10descriptorINS_6method12search_bruteEEC1Ev",
+                ),
+            ],
+            types=[new_tag],
+        )
+        findings = detect_tag_type_renamed(old, new)
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.kind == ChangeKind.TAG_TYPE_RENAMED
+        assert f.old_value == "mylib::method::brute_force"
+        assert f.new_value == "mylib::method::search_brute"
+        assert f.affected_symbols and len(f.affected_symbols) == 1
+
+    def test_no_symbol_evidence_no_finding(self) -> None:
+        old_tag = RecordType(name="a::tagA", kind="struct", size_bits=8)
+        new_tag = RecordType(name="a::tagB", kind="struct", size_bits=8)
+        old = _snap("lib", functions=[_fn("unrelated")], types=[old_tag])
+        new = _snap("lib", functions=[_fn("unrelated")], types=[new_tag])
+        assert detect_tag_type_renamed(old, new) == []
+
+    def test_different_parent_namespace_no_match(self) -> None:
+        old_tag = RecordType(name="a::tagA", kind="struct", size_bits=8)
+        new_tag = RecordType(name="b::tagB", kind="struct", size_bits=8)
+        old = _snap(
+            "lib", functions=[_fn("a_tagA_inst", "_Za_tagA_inst")], types=[old_tag]
+        )
+        new = _snap(
+            "lib", functions=[_fn("b_tagB_inst", "_Zb_tagB_inst")], types=[new_tag]
+        )
+        assert detect_tag_type_renamed(old, new) == []
+
+
+# ===========================================================================
+# case87 — default template arg changed
+# ===========================================================================
+
+
+class TestDefaultTemplateArgDetector:
+    def test_pair_with_differing_template_args(self) -> None:
+        old = _snap(
+            "lib",
+            functions=[
+                _fn(
+                    "ns::descriptor<float, ns::minkowski_distance<float>>::compute",
+                    "_ZN2ns10descriptorIfNS_18minkowski_distanceIfEEE7computeEv",
+                ),
+            ],
+        )
+        new = _snap(
+            "lib",
+            functions=[
+                _fn(
+                    "ns::descriptor<float, ns::euclidean_distance<float>>::compute",
+                    "_ZN2ns10descriptorIfNS_18euclidean_distanceIfEEE7computeEv",
+                ),
+            ],
+        )
+        findings = detect_default_template_arg_changed(old, new)
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.kind == ChangeKind.DEFAULT_TEMPLATE_ARG_CHANGED
+
+    def test_no_change_no_finding(self) -> None:
+        old = _snap(
+            "lib",
+            functions=[
+                _fn("ns::descriptor<float, ns::A>::compute", "_Zold"),
+            ],
+        )
+        new = _snap(
+            "lib",
+            functions=[
+                _fn("ns::descriptor<float, ns::A>::compute", "_Zold"),
+            ],
+        )
+        assert detect_default_template_arg_changed(old, new) == []
+
+    def test_different_unqualified_names_not_paired(self) -> None:
+        old = _snap(
+            "lib",
+            functions=[
+                _fn("ns::descriptor<float, A>::train", "_Zoldtrain"),
+            ],
+        )
+        new = _snap(
+            "lib",
+            functions=[
+                _fn("ns::descriptor<float, B>::infer", "_Znewinfer"),
+            ],
+        )
+        assert detect_default_template_arg_changed(old, new) == []
+
+
+# ===========================================================================
+# case89 — inline accessor references renamed pimpl member
+# ===========================================================================
+
+
+class TestInlineAccessorRenamedMember:
+    def _build(self) -> tuple[AbiSnapshot, AbiSnapshot, list[Change]]:
+        old_impl = RecordType(
+            name="mylib::detail::descriptor_impl",
+            kind="class",
+            size_bits=64,
+            fields=[TypeField(name="class_count_", type="int")],
+        )
+        new_impl = RecordType(
+            name="mylib::detail::descriptor_impl",
+            kind="class",
+            size_bits=64,
+            fields=[TypeField(name="n_classes_", type="int")],
+        )
+        # Public class holds the pimpl.
+        public_rt = RecordType(
+            name="mylib::descriptor",
+            kind="class",
+            size_bits=128,
+            fields=[
+                TypeField(
+                    name="impl_",
+                    type="std::shared_ptr<mylib::detail::descriptor_impl>",
+                )
+            ],
+        )
+        inline_getter = _fn(
+            "mylib::descriptor::get_class_count",
+            "_ZNK5mylib10descriptor15get_class_countEv",
+            is_inline=True,
+        )
+        old = _snap("lib", functions=[inline_getter], types=[old_impl, public_rt])
+        new = _snap("lib", functions=[inline_getter], types=[new_impl, public_rt])
+        # The diff would normally produce removed + added field
+        # changes; synthesise them directly.
+        changes = [
+            Change(
+                kind=ChangeKind.TYPE_FIELD_REMOVED,
+                symbol="mylib::detail::descriptor_impl::class_count_",
+                description="",
+                old_value="class_count_",
+            ),
+            Change(
+                kind=ChangeKind.TYPE_FIELD_ADDED,
+                symbol="mylib::detail::descriptor_impl::n_classes_",
+                description="",
+                new_value="n_classes_",
+            ),
+        ]
+        return old, new, changes
+
+    def test_pimpl_rename_with_inline_accessor_detected(self) -> None:
+        old, new, changes = self._build()
+        findings = detect_inline_body_renamed_member(old, new, changes)
+        assert len(findings) >= 1
+        f = findings[0]
+        assert f.kind == ChangeKind.INLINE_BODY_REFERENCES_RENAMED_MEMBER
+        assert f.old_value == "class_count_"
+        assert f.new_value == "n_classes_"
+
+    def test_no_inline_accessor_no_finding(self) -> None:
+        old, new, changes = self._build()
+        # Strip inline flag from the function in both snapshots.
+        for snap in (old, new):
+            for fn in snap.functions:
+                fn.is_inline = False
+        assert detect_inline_body_renamed_member(old, new, changes) == []
+
+    def test_internal_namespace_required(self) -> None:
+        # Rename on a non-detail:: type — accessor is fine because the
+        # public layout is intentionally part of the contract.
+        public_impl_old = RecordType(
+            name="mylib::config",
+            kind="class",
+            size_bits=32,
+            fields=[TypeField(name="a", type="int")],
+        )
+        public_impl_new = RecordType(
+            name="mylib::config",
+            kind="class",
+            size_bits=32,
+            fields=[TypeField(name="b", type="int")],
+        )
+        old = _snap("lib", types=[public_impl_old])
+        new = _snap("lib", types=[public_impl_new])
+        changes = [
+            Change(
+                kind=ChangeKind.TYPE_FIELD_REMOVED,
+                symbol="mylib::config::a",
+                description="",
+            ),
+            Change(
+                kind=ChangeKind.TYPE_FIELD_ADDED,
+                symbol="mylib::config::b",
+                description="",
+            ),
+        ]
+        assert detect_inline_body_renamed_member(old, new, changes) == []
+
+
+# ===========================================================================
+# case84 — bundle SONAME skew
+# ===========================================================================
+
+
+class TestSonameExtraction:
+    @pytest.mark.parametrize(
+        "soname,expected",
+        [
+            ("libonedal_core.so.2", 2),
+            ("libfoo.so.10", 10),
+            ("libfoo.2.dylib", 2),
+            ("libfoo-3.dll", 3),
+            ("libfoo.so", None),
+            ("", None),
+        ],
+    )
+    def test_extract(self, soname: str, expected: int | None) -> None:
+        assert _extract_soname_major(soname) == expected
+
+
+class TestBundleSonameSkewDetector:
+    def test_skew_detected(self) -> None:
+        old = [
+            BundleMember("libonedal_core.so.1", "libonedal_core.so.1", 1),
+            BundleMember("libonedal_thread.so.1", "libonedal_thread.so.1", 1),
+            BundleMember("libonedal_dpc.so.1", "libonedal_dpc.so.1", 1),
+        ]
+        new = [
+            BundleMember("libonedal_core.so.2", "libonedal_core.so.2", 2),
+            BundleMember("libonedal_thread.so.1", "libonedal_thread.so.1", 1),  # lagged
+            BundleMember("libonedal_dpc.so.2", "libonedal_dpc.so.2", 2),
+        ]
+        findings = detect_bundle_soname_skew(old, new)
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.kind == ChangeKind.BUNDLE_SONAME_SKEW
+        assert "libonedal_thread.so.1" in (
+            (f.affected_symbols and " ".join(f.affected_symbols)) or ""
+        )
+
+    def test_lockstep_bump_no_finding(self) -> None:
+        old = [
+            BundleMember("libfoo.so.1", "libfoo.so.1", 1),
+            BundleMember("libbar.so.1", "libbar.so.1", 1),
+        ]
+        new = [
+            BundleMember("libfoo.so.2", "libfoo.so.2", 2),
+            BundleMember("libbar.so.2", "libbar.so.2", 2),
+        ]
+        assert detect_bundle_soname_skew(old, new) == []
+
+    def test_no_bump_no_finding(self) -> None:
+        old = [
+            BundleMember("libfoo.so.1", "libfoo.so.1", 1),
+            BundleMember("libbar.so.1", "libbar.so.1", 1),
+        ]
+        new = [
+            BundleMember("libfoo.so.1", "libfoo.so.1", 1),
+            BundleMember("libbar.so.1", "libbar.so.1", 1),
+        ]
+        assert detect_bundle_soname_skew(old, new) == []
+
+    def test_cohort_prefix_filter(self) -> None:
+        old = [
+            BundleMember("libonedal_core.so.1", "libonedal_core.so.1", 1),
+            BundleMember("libonedal_dpc.so.1", "libonedal_dpc.so.1", 1),
+            BundleMember("libstdc++.so.6", "libstdc++.so.6", 6),
+        ]
+        new = [
+            BundleMember("libonedal_core.so.2", "libonedal_core.so.2", 2),
+            BundleMember("libonedal_dpc.so.1", "libonedal_dpc.so.1", 1),
+            BundleMember("libstdc++.so.6", "libstdc++.so.6", 6),
+        ]
+        findings = detect_bundle_soname_skew(old, new, cohort_prefix="libonedal_")
+        assert len(findings) == 1
+        # libstdc++ excluded from the cohort.
+
+
+# ===========================================================================
+# End-to-end pipeline integration
+# ===========================================================================
+
+
+class TestPipelineIntegration:
+    """The DetectOneDALPatterns step must run as part of DEFAULT_PIPELINE
+    and append new findings into the change list.
+    """
+
+    def test_pipeline_includes_step(self) -> None:
+        from abicheck.post_processing import DEFAULT_PIPELINE
+
+        assert "detect_onedal_patterns" in DEFAULT_PIPELINE.step_names
+
+    def test_serialization_tag_finding_flows_through_pipeline(self) -> None:
+        from abicheck.post_processing import DEFAULT_PIPELINE
+
+        old = _snap("lib", constants={"foo_tag": "0x1"})
+        new = _snap("lib", constants={"foo_tag": "0x2"})
+        ctx = DEFAULT_PIPELINE.run([], old, new)
+        kinds = [c.kind for c in ctx.kept]
+        assert ChangeKind.SERIALIZATION_TAG_CHANGED in kinds

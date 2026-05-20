@@ -5,6 +5,7 @@ Covers:
 - B: DetectorRegistry — self-registering detectors
 - C: PostProcessingPipeline — explicit step pipeline
 """
+
 from __future__ import annotations
 
 from abicheck.change_registry import (
@@ -67,7 +68,8 @@ class TestChangeKindRegistry:
     def test_risk_kinds_derived_from_registry(self):
         """RISK_KINDS matches registry entries with COMPATIBLE_WITH_RISK verdict."""
         registry_risk = {
-            ChangeKind(v) for v in REGISTRY.kinds_for_verdict(Verdict.COMPATIBLE_WITH_RISK)
+            ChangeKind(v)
+            for v in REGISTRY.kinds_for_verdict(Verdict.COMPATIBLE_WITH_RISK)
         }
         assert RISK_KINDS == registry_risk
 
@@ -82,9 +84,7 @@ class TestChangeKindRegistry:
 
     def test_impact_text_derived_from_registry(self):
         """IMPACT_TEXT dict matches registry impact fields."""
-        registry_impact = {
-            ChangeKind(k): v for k, v in REGISTRY.impact_text().items()
-        }
+        registry_impact = {ChangeKind(k): v for k, v in REGISTRY.impact_text().items()}
         assert IMPACT_TEXT == registry_impact
 
     def test_sdk_vendor_overrides_from_registry(self):
@@ -134,6 +134,7 @@ def _get_populated_registry():
     """Import checker (which triggers all detector imports) and return registry."""
     import abicheck.checker  # noqa: F401 — triggers detector module imports
     from abicheck.detector_registry import registry
+
     return registry
 
 
@@ -156,16 +157,46 @@ class TestDetectorRegistry:
         registry = _get_populated_registry()
         names = set(registry.detector_names)
         expected = {
-            "functions", "variables", "types", "enums", "elf", "pe", "macho",
-            "dwarf", "advanced_dwarf", "enum_renames", "field_qualifiers",
-            "field_renames", "param_defaults", "param_renames", "pointer_levels",
-            "access_levels", "anon_fields", "var_values", "type_kind_changes",
-            "reserved_fields", "const_overloads", "param_restrict", "param_va_list",
-            "constants", "var_access", "elf_deleted_fallback", "template_inner_types",
-            "symbol_renames", "method_qualifiers", "unions", "typedefs",
-            "tls_checks", "protected_visibility", "symbol_version_alias",
-            "glibcxx_dual_abi", "inline_namespace", "vtable_identity",
-            "abi_surface", "sycl", "fingerprint_renames",
+            "functions",
+            "variables",
+            "types",
+            "enums",
+            "elf",
+            "pe",
+            "macho",
+            "dwarf",
+            "advanced_dwarf",
+            "enum_renames",
+            "field_qualifiers",
+            "field_renames",
+            "param_defaults",
+            "param_renames",
+            "pointer_levels",
+            "access_levels",
+            "anon_fields",
+            "var_values",
+            "type_kind_changes",
+            "reserved_fields",
+            "const_overloads",
+            "param_restrict",
+            "param_va_list",
+            "constants",
+            "var_access",
+            "elf_deleted_fallback",
+            "template_inner_types",
+            "symbol_renames",
+            "method_qualifiers",
+            "unions",
+            "typedefs",
+            "tls_checks",
+            "protected_visibility",
+            "symbol_version_alias",
+            "glibcxx_dual_abi",
+            "inline_namespace",
+            "vtable_identity",
+            "abi_surface",
+            "sycl",
+            "fingerprint_renames",
         }
         assert expected <= names
 
@@ -241,6 +272,7 @@ class TestPostProcessingPipeline:
             "filter_redundant",
             "enrich_affected_symbols",
             "detect_internal_leaks",
+            "detect_onedal_patterns",
         ]
         assert DEFAULT_PIPELINE.step_names == expected_names
 
@@ -264,8 +296,17 @@ class TestPostProcessingPipeline:
         from abicheck.post_processing import DEFAULT_PIPELINE
 
         old = AbiSnapshot(
-            library="test", version="1.0",
-            functions=[Function(name="foo", mangled="foo", return_type="int", params=[], visibility=Visibility.PUBLIC)],
+            library="test",
+            version="1.0",
+            functions=[
+                Function(
+                    name="foo",
+                    mangled="foo",
+                    return_type="int",
+                    params=[],
+                    visibility=Visibility.PUBLIC,
+                )
+            ],
         )
         new = AbiSnapshot(library="test", version="2.0", functions=[])
         changes = [
@@ -288,10 +329,12 @@ class TestPostProcessingPipeline:
             PostProcessingPipeline,
         )
 
-        pipeline = PostProcessingPipeline([
-            FilterReservedFieldRenames(),
-            DeduplicateAstDwarf(),
-        ])
+        pipeline = PostProcessingPipeline(
+            [
+                FilterReservedFieldRenames(),
+                DeduplicateAstDwarf(),
+            ]
+        )
         assert pipeline.step_names == [
             "filter_reserved_field_renames",
             "deduplicate_ast_dwarf",
@@ -327,8 +370,17 @@ class TestCompareUsesNewArchitecture:
         from abicheck.model import AbiSnapshot, Function, Visibility
 
         old = AbiSnapshot(
-            library="test", version="1.0",
-            functions=[Function(name="foo", mangled="foo", return_type="int", params=[], visibility=Visibility.PUBLIC)],
+            library="test",
+            version="1.0",
+            functions=[
+                Function(
+                    name="foo",
+                    mangled="foo",
+                    return_type="int",
+                    params=[],
+                    visibility=Visibility.PUBLIC,
+                )
+            ],
         )
         new = AbiSnapshot(library="test", version="2.0")
         result = compare(old, new)

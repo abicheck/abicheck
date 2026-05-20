@@ -1,6 +1,6 @@
 # ABI Scenario Catalog
 
-This directory contains **77 published cases** (`01–76` + `26b`) demonstrating real-world ABI/API break scenarios. Each case is a minimal, compilable C/C++ example with:
+This directory contains **87 published cases** (`01–76` + `26b` + `77, 79–84, 86–87, 89`) demonstrating real-world ABI/API break scenarios. Each case is a minimal, compilable C/C++ example with:
 
 - Paired `v1/` and `v2/` source + headers.
 - A consumer `app.c` / `app.cpp` that demonstrates the actual failure at runtime.
@@ -17,9 +17,9 @@ The catalog drives abicheck's benchmark and serves as an encyclopedia of ABI pit
 
 | Verdict | Count | `checker_policy.py` set | Icon |
 |---------|-------|-------------------------|------|
-| BREAKING | 56 | `BREAKING_KINDS` | 🔴 |
+| BREAKING | 65 | `BREAKING_KINDS` | 🔴 |
 | API_BREAK | 2 | `API_BREAK_KINDS` | 🟠 |
-| COMPATIBLE_WITH_RISK | 1 | `RISK_KINDS` | 🟡 |
+| COMPATIBLE_WITH_RISK | 2 | `RISK_KINDS` | 🟡 |
 | COMPATIBLE (addition) | 7 | `ADDITION_KINDS` | 🟢 |
 | COMPATIBLE (quality) | 9 | `QUALITY_KINDS` | 🟡 |
 | NO_CHANGE | 2 | — | ✅ |
@@ -118,6 +118,16 @@ Some policy-escalated source/contract breaks (notably case30, case35) may keep i
 | [74](case74_detail_base_class_changed/README.md) | Internal `detail::` Base Class Layout Change (oneDAL-style leak) | Breaking | BREAKING 🔴 |
 | [75](case75_detail_embedded_by_value/README.md) | Internal `detail::` Impl Embedded by Value | Breaking | BREAKING 🔴 |
 | [76](case76_detail_pimpl_vtable_changed/README.md) | Internal `detail::` Polymorphic Base Vtable Change | Breaking | BREAKING 🔴 |
+| [77](case77_detail_templated_base_changed/README.md) | Internal `detail::` Templated Base Class Layout Change | Breaking | BREAKING 🔴 |
+| [79](case79_missing_template_instantiation/README.md) | Missing Template Instantiation in Shipped Binary | Breaking | BREAKING 🔴 |
+| [80](case80_pimpl_shared_to_unique/README.md) | Pimpl Alias `shared_ptr` → `unique_ptr` | Breaking | BREAKING 🔴 |
+| [81](case81_serialization_tag_reassigned/README.md) | Serialization Tag ID Reassigned (silent data corruption) | Breaking | BREAKING 🔴 |
+| [82](case82_sycl_overload_set_removed/README.md) | SYCL Overload Set Removed (DPC++ build withdrawn) | Breaking | BREAKING 🔴 |
+| [83](case83_cpu_dispatch_isa_dropped/README.md) | CPU-Dispatch ISA Family Dropped | Risk | COMPATIBLE_WITH_RISK 🟡 |
+| [84](case84_bundle_soname_skew/README.md) | Multi-Library Bundle SONAME Skew | Breaking | BREAKING 🔴 (bad practice) |
+| [86](case86_tag_struct_renamed/README.md) | Tag Struct Renamed (empty type re-mangling) | Breaking | BREAKING 🔴 |
+| [87](case87_default_template_arg_changed/README.md) | Default Template Argument Changed | Breaking | BREAKING 🔴 |
+| [89](case89_inline_accessor_renamed_pimpl_member/README.md) | Inline Accessor References Renamed Pimpl Member | Breaking | BREAKING 🔴 |
 
 ---
 

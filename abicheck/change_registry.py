@@ -541,4 +541,75 @@ REGISTRY = ChangeKindRegistry([
               "vtable, or compiled code of every consumer of the public type. "
               "Common in libraries such as oneDAL that wrap implementation in a "
               "'detail' namespace."),
+
+    # ── oneDAL-shaped breaks (case77–case89, follow-up to PR #238) ──────
+    _E("instantiation_missing_from_binary", _B,
+       impact="Header declares an explicit template instantiation that the shipped "
+              "library no longer exports. Consumer source compiles cleanly but fails "
+              "to link at load time with an undefined-symbol error. Common when a "
+              "build trim drops a Float/Method/Task combination without updating "
+              "the public header's `extern template` declarations."),
+
+    _E("serialization_tag_changed", _B,
+       impact="A serialization tag ID (or equivalent constant identifying a class "
+              "for persistence) changed value or was swapped with another class's "
+              "tag. Symbol table, types, and layout are all unchanged — every "
+              "conventional ABI check passes. But saved models / persisted state "
+              "from the old library deserialize as the wrong class against the new "
+              "library, silently corrupting data. Common in DAAL-style "
+              "SerializationIface designs."),
+
+    _E("sycl_overload_set_removed", _B,
+       impact="A family of public overloads that take a SYCL queue as the first "
+              "parameter was removed in bulk (typical when DPC++ support is "
+              "disabled at build time). Reported as one grouped finding rather "
+              "than N independent func_removed entries to make the deployment-"
+              "level event ('the GPU/SYCL overload family was withdrawn') "
+              "visible at a glance."),
+
+    _E("cpu_dispatch_isa_dropped", _R,
+       impact="An entire CPU ISA tier (e.g. avx512) of dispatched specializations "
+              "was removed. The runtime dispatcher continues to work for callers "
+              "that did not pin a specific ISA, but consumers that linked directly "
+              "against a now-removed ISA-specific symbol get unresolved symbols. "
+              "Reported as one grouped finding listing the affected algorithm "
+              "stems."),
+
+    _E("bundle_soname_skew", _B,
+       impact="A co-versioned bundle of shared libraries (e.g. libonedal_core, "
+              "libonedal_thread, libonedal_dpc) did not move SONAME in lockstep. "
+              "Some siblings bumped the major SONAME, others did not. Distro "
+              "packages built on this bundle have inconsistent dependency "
+              "metadata; binaries dynamically loading the mixed cohort can fetch "
+              "incompatible internal contracts and corrupt at the first cross-"
+              "library call."),
+
+    _E("tag_type_renamed", _B,
+       impact="An empty tag struct (zero fields, no methods) used solely for "
+              "template specialization was renamed. Layout-based detectors see no "
+              "change because the type has no layout, but every explicit "
+              "instantiation that referenced the old tag is re-mangled and the "
+              "old symbol disappears. Consumers built against the old header get "
+              "unresolved-symbol errors at load time. Common with oneDAL "
+              "method::* / task::* tag families."),
+
+    _E("default_template_arg_changed", _B,
+       impact="A default template argument changed (e.g. `Distance = "
+              "minkowski_distance<Float>` → `Distance = euclidean_distance<Float>`). "
+              "Consumer source compiles unchanged but the substituted instantiation "
+              "type differs, producing a different mangled symbol. The library "
+              "ships only one instantiation; consumers built against the old "
+              "default reference a symbol that no longer exists. Unlike function "
+              "default parameter changes (NO_CHANGE), template default arguments "
+              "ARE part of the substituted type and affect mangling."),
+
+    _E("inline_body_references_renamed_member", _B,
+       impact="An inline public accessor (header-emitted into every consumer "
+              "binary) reaches into a pimpl/detail member by name. That member "
+              "was renamed in the implementation type, and although the inline "
+              "accessor's body was updated in lockstep in the new header, "
+              "consumers compiled against the OLD header have the old field "
+              "name baked into their binary. At runtime, the inline body "
+              "accesses a field at the wrong offset (or by a name that no "
+              "longer exists), producing silent wrong data or crashes."),
 ])

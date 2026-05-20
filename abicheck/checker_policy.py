@@ -96,9 +96,7 @@ class ChangeKind(str, Enum):
     FUNC_VISIBILITY_CHANGED = (
         "func_visibility_changed"  # default→hidden: symbol gone from ABI
     )
-    FUNC_VISIBILITY_PROTECTED_CHANGED = (
-        "func_visibility_protected_changed"  # default↔protected: interposition semantics changed, symbol still exported
-    )
+    FUNC_VISIBILITY_PROTECTED_CHANGED = "func_visibility_protected_changed"  # default↔protected: interposition semantics changed, symbol still exported
 
     # Virtual changes
     FUNC_PURE_VIRTUAL_ADDED = "func_pure_virtual_added"
@@ -126,13 +124,17 @@ class ChangeKind(str, Enum):
     RUNPATH_CHANGED = "runpath_changed"
 
     # ── Mach-O specific ──────────────────────────────────────────────────
-    COMPAT_VERSION_CHANGED = "compat_version_changed"  # LC_ID_DYLIB compat_version changed → BREAKING
+    COMPAT_VERSION_CHANGED = (
+        "compat_version_changed"  # LC_ID_DYLIB compat_version changed → BREAKING
+    )
 
     # ELF security / bad practice
     EXECUTABLE_STACK = "executable_stack"  # PT_GNU_STACK has PF_X — NX protection disabled (bad practice)
 
     # ELF symbol visibility drift (.dynsym STV_*)
-    ELF_VISIBILITY_CHANGED = "elf_visibility_changed"  # DEFAULT→PROTECTED (interposition semantics change)
+    ELF_VISIBILITY_CHANGED = (
+        "elf_visibility_changed"  # DEFAULT→PROTECTED (interposition semantics change)
+    )
 
     # Symbol metadata drift (ELF .dynsym)
     SYMBOL_BINDING_CHANGED = "symbol_binding_changed"  # GLOBAL→WEAK (breaking)
@@ -287,14 +289,18 @@ class ChangeKind(str, Enum):
     TYPEDEF_VERSION_SENTINEL = "typedef_version_sentinel"
 
     # ── ELF st_other visibility transitions ────────────────────────────────────
-    SYMBOL_ELF_VISIBILITY_CHANGED = "symbol_elf_visibility_changed"  # DEFAULT→PROTECTED etc.
+    SYMBOL_ELF_VISIBILITY_CHANGED = (
+        "symbol_elf_visibility_changed"  # DEFAULT→PROTECTED etc.
+    )
 
     # ── Symbol rename detection ────────────────────────────────────────────────
     # Emitted when multiple symbols are removed and corresponding prefixed/suffixed
     # versions are added, indicating a namespace refactoring. Old consumers linked
     # against the unprefixed symbols will get undefined symbol errors.
     SYMBOL_RENAMED_BATCH = "symbol_renamed_batch"
-    FUNC_LIKELY_RENAMED = "func_likely_renamed"  # binary fingerprint match: same code, different name
+    FUNC_LIKELY_RENAMED = (
+        "func_likely_renamed"  # binary fingerprint match: same code, different name
+    )
 
     # ── Symbol origin detection ────────────────────────────────────────────────
     # Emitted when a symbol that changed (removed, type-changed, etc.) is detected
@@ -308,13 +314,23 @@ class ChangeKind(str, Enum):
     # ── Gap analysis: proposed new checks ──────────────────────────────────
     FUNC_REF_QUAL_CHANGED = "func_ref_qual_changed"  # &/&& ref-qualifier changed
     FUNC_LANGUAGE_LINKAGE_CHANGED = "func_language_linkage_changed"  # extern "C" ↔ C++
-    SYMBOL_VERSION_ALIAS_CHANGED = "symbol_version_alias_changed"  # default version alias changed
+    SYMBOL_VERSION_ALIAS_CHANGED = (
+        "symbol_version_alias_changed"  # default version alias changed
+    )
     TLS_VAR_SIZE_CHANGED = "tls_var_size_changed"  # TLS variable size changed
-    PROTECTED_VISIBILITY_CHANGED = "protected_visibility_changed"  # STV_PROTECTED ↔ DEFAULT
-    GLIBCXX_DUAL_ABI_FLIP_DETECTED = "glibcxx_dual_abi_flip_detected"  # dual ABI toggle diagnostic
+    PROTECTED_VISIBILITY_CHANGED = (
+        "protected_visibility_changed"  # STV_PROTECTED ↔ DEFAULT
+    )
+    GLIBCXX_DUAL_ABI_FLIP_DETECTED = (
+        "glibcxx_dual_abi_flip_detected"  # dual ABI toggle diagnostic
+    )
     INLINE_NAMESPACE_MOVED = "inline_namespace_moved"  # inline namespace version change
-    VTABLE_SYMBOL_IDENTITY_CHANGED = "vtable_symbol_identity_changed"  # vtable/typeinfo symbol rename
-    ABI_SURFACE_EXPLOSION = "abi_surface_explosion"  # dramatic ABI surface growth/shrink
+    VTABLE_SYMBOL_IDENTITY_CHANGED = (
+        "vtable_symbol_identity_changed"  # vtable/typeinfo symbol rename
+    )
+    ABI_SURFACE_EXPLOSION = (
+        "abi_surface_explosion"  # dramatic ABI surface growth/shrink
+    )
 
     # ELF symbol-version policy checks
     SYMBOL_VERSION_NODE_REMOVED = "symbol_version_node_removed"
@@ -348,6 +364,24 @@ class ChangeKind(str, Enum):
     # from / embeds-by-value / uses-as-template-argument the internal type.
     INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API = "internal_type_leaks_via_public_api"
 
+    # ── oneDAL-shaped breaks added in case77–case89 ──────────────────────
+    # See examples/case79_missing_template_instantiation/README.md
+    INSTANTIATION_MISSING_FROM_BINARY = "instantiation_missing_from_binary"
+    # See examples/case81_serialization_tag_reassigned/README.md
+    SERIALIZATION_TAG_CHANGED = "serialization_tag_changed"
+    # See examples/case82_sycl_overload_set_removed/README.md
+    SYCL_OVERLOAD_SET_REMOVED = "sycl_overload_set_removed"
+    # See examples/case83_cpu_dispatch_isa_dropped/README.md
+    CPU_DISPATCH_ISA_DROPPED = "cpu_dispatch_isa_dropped"
+    # See examples/case84_bundle_soname_skew/README.md
+    BUNDLE_SONAME_SKEW = "bundle_soname_skew"
+    # See examples/case86_tag_struct_renamed/README.md
+    TAG_TYPE_RENAMED = "tag_type_renamed"
+    # See examples/case87_default_template_arg_changed/README.md
+    DEFAULT_TEMPLATE_ARG_CHANGED = "default_template_arg_changed"
+    # See examples/case89_inline_accessor_renamed_pimpl_member/README.md
+    INLINE_BODY_REFERENCES_RENAMED_MEMBER = "inline_body_references_renamed_member"
+
 
 class HasKind(Protocol):
     kind: ChangeKind
@@ -358,6 +392,7 @@ class HasKind(Protocol):
 
 class Confidence(str, Enum):
     """Evidence confidence level for a comparison result."""
+
     HIGH = "high"
     MEDIUM = "medium"
     LOW = "low"
@@ -368,6 +403,7 @@ class Confidence(str, Enum):
 # ---------------------------------------------------------------------------
 # These sets are computed from the registry entries. To add a new ChangeKind,
 # add ONE entry in change_registry.py — these sets update automatically.
+
 
 def _kinds_for(verdict_val: str) -> set[ChangeKind]:
     """Map registry verdict string values back to ChangeKind enum members."""
@@ -398,6 +434,7 @@ QUALITY_KINDS: frozenset[ChangeKind] = frozenset(COMPATIBLE_KINDS - ADDITION_KIN
 # Policy-specific downgrade sets — DERIVED from change_registry policy_overrides
 # ---------------------------------------------------------------------------
 
+
 def _policy_override_kinds(policy: str) -> frozenset[ChangeKind]:
     """Return kinds that have a policy override for the given policy name."""
     return frozenset(ChangeKind(v) for v in _REGISTRY.policy_overrides_for(policy))
@@ -410,7 +447,9 @@ SDK_VENDOR_COMPAT_KINDS: frozenset[ChangeKind] = _policy_override_kinds("sdk_ven
 SDK_VENDOR_DOWNGRADED_KINDS: frozenset[ChangeKind] = SDK_VENDOR_COMPAT_KINDS
 
 # plugin_abi: calling-convention kinds downgraded BREAKING → COMPATIBLE.
-PLUGIN_ABI_DOWNGRADED_KINDS: frozenset[ChangeKind] = _policy_override_kinds("plugin_abi")
+PLUGIN_ABI_DOWNGRADED_KINDS: frozenset[ChangeKind] = _policy_override_kinds(
+    "plugin_abi"
+)
 
 # Integrity assertions: catch miscategorisation at import time.
 # Use explicit raises (not assert) so these are never stripped by python -O.
@@ -460,8 +499,10 @@ if not RISK_KINDS.isdisjoint(API_BREAK_KINDS):
 # added but forgotten here.  Use explicit raise (not assert) so this is never
 # stripped by python -O.
 _ALL_CLASSIFIED: frozenset[ChangeKind] = (
-    frozenset(BREAKING_KINDS) | frozenset(COMPATIBLE_KINDS)
-    | frozenset(API_BREAK_KINDS) | RISK_KINDS
+    frozenset(BREAKING_KINDS)
+    | frozenset(COMPATIBLE_KINDS)
+    | frozenset(API_BREAK_KINDS)
+    | RISK_KINDS
 )
 _UNCLASSIFIED = set(ChangeKind) - _ALL_CLASSIFIED
 if _UNCLASSIFIED:
@@ -508,13 +549,24 @@ IMPACT_TEXT: dict[ChangeKind, str] = {
 
 
 POLICY_REGISTRY: dict[ChangeKind, PolicyEntry] = (
-    {k: PolicyEntry(Verdict.BREAKING, "error", k.value, IMPACT_TEXT.get(k, "")) for k in BREAKING_KINDS}
-    | {k: PolicyEntry(Verdict.API_BREAK, "warning", k.value, IMPACT_TEXT.get(k, "")) for k in API_BREAK_KINDS}
+    {
+        k: PolicyEntry(Verdict.BREAKING, "error", k.value, IMPACT_TEXT.get(k, ""))
+        for k in BREAKING_KINDS
+    }
     | {
-        k: PolicyEntry(Verdict.COMPATIBLE_WITH_RISK, "warning", k.value, IMPACT_TEXT.get(k, ""))
+        k: PolicyEntry(Verdict.API_BREAK, "warning", k.value, IMPACT_TEXT.get(k, ""))
+        for k in API_BREAK_KINDS
+    }
+    | {
+        k: PolicyEntry(
+            Verdict.COMPATIBLE_WITH_RISK, "warning", k.value, IMPACT_TEXT.get(k, "")
+        )
         for k in RISK_KINDS
     }
-    | {k: PolicyEntry(Verdict.COMPATIBLE, "warning", k.value, IMPACT_TEXT.get(k, "")) for k in COMPATIBLE_KINDS}
+    | {
+        k: PolicyEntry(Verdict.COMPATIBLE, "warning", k.value, IMPACT_TEXT.get(k, ""))
+        for k in COMPATIBLE_KINDS
+    }
 )
 
 

@@ -966,6 +966,145 @@
       "known_gap": "macOS / Windows: vtable break is currently only detectable via symbol_size_changed on the ELF vtable symbol; Mach-O / PE export tables carry no symbol size, and castxml emits vtable_index=None for all virtuals so the structural diff collapses to a single slot — neither signal fires on these platforms",
       "description": "Internal-namespace leak: mylib::detail::algorithm_iface gains a virtual method inserted mid-vtable; public mylib::svm_algorithm inherits from it, so vtable slot indices shift for all consumers. Detected by existing type_vtable_changed / func_virtual_added, escalated by internal_type_leaks_via_public_api.",
       "expected_kinds": ["internal_type_leaks_via_public_api"]
+    },
+    "case77_detail_templated_base_changed": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "abi_break": true,
+      "api_break": true,
+      "bad_practice": false,
+      "description": "Internal-namespace leak through a templated detail:: base: mylib::detail::descriptor_base<Task> gains a field, growing every knn_descriptor<Task> instantiation. Verifies the leak reachability walker follows template-instantiation edges into detail::.",
+      "expected_kinds": ["internal_type_leaks_via_public_api"]
+    },
+    "case79_missing_template_instantiation": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "abi_break": true,
+      "api_break": true,
+      "bad_practice": false,
+      "description": "Header advertises descriptor<float> and descriptor<double>; v2 library ships only the float instantiation. Header is unchanged so source compiles, link/load fails with undefined symbol. Emits INSTANTIATION_MISSING_FROM_BINARY.",
+      "expected_kinds": ["instantiation_missing_from_binary"]
+    },
+    "case80_pimpl_shared_to_unique": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "abi_break": true,
+      "api_break": true,
+      "bad_practice": false,
+      "description": "Pimpl alias switched from shared_ptr<T> to unique_ptr<T>. The type of descriptor::impl_ changed; inline accessors re-mangle, destruction model changes (no atomic refcount), copy semantics flip from refcounted-share to move-only. Detected by existing type_field_type_changed escalated via internal_type_leaks_via_public_api.",
+      "expected_kinds": ["internal_type_leaks_via_public_api"]
+    },
+    "case81_serialization_tag_reassigned": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "abi_break": true,
+      "api_break": false,
+      "bad_practice": false,
+      "description": "DAAL-style serialization tag IDs swapped values between knn_model and linear_regression. Symbols, types, layout all unchanged — every conventional ABI check passes — but saved models silently deserialize as the wrong class. Emits SERIALIZATION_TAG_CHANGED.",
+      "expected_kinds": ["serialization_tag_changed"]
+    },
+    "case82_sycl_overload_set_removed": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "abi_break": true,
+      "api_break": true,
+      "bad_practice": false,
+      "description": "DPC++ build withdrawn between releases — every sycl::queue&-taking overload disappears across multiple algorithms. Reported as one grouped SYCL_OVERLOAD_SET_REMOVED finding instead of N independent func_removed.",
+      "expected_kinds": ["sycl_overload_set_removed"]
+    },
+    "case83_cpu_dispatch_isa_dropped": {
+      "expected": "COMPATIBLE_WITH_RISK",
+      "category": "risk",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "abi_break": false,
+      "api_break": false,
+      "bad_practice": false,
+      "description": "AVX-512 ISA tier dropped: every *_avx512_* symbol removed across all algorithms. Dispatcher-using callers unaffected; ISA-pinned callers break. Reported as one grouped CPU_DISPATCH_ISA_DROPPED finding (RISK_KINDS).",
+      "expected_kinds": ["cpu_dispatch_isa_dropped"]
+    },
+    "case84_bundle_soname_skew": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux"
+      ],
+      "abi_break": true,
+      "api_break": false,
+      "bad_practice": true,
+      "known_gap": "Requires multi-library bundle compare mode; cli wiring is partial — the detect_bundle_soname_skew() function is unit-tested directly, but compare-release integration is tracked for a follow-up PR. The example ships gen_bundle.sh to produce v1/ and v2/ directories on demand.",
+      "description": "Multi-library bundle SONAME skew: libonedal_core and libonedal_dpc bump SONAME from .so.1 to .so.2 but libonedal_thread keeps .so.1 by accident. Per-library checks pass; cohort-level invariant fails. Emits BUNDLE_SONAME_SKEW.",
+      "expected_kinds": ["bundle_soname_skew"]
+    },
+    "case86_tag_struct_renamed": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "abi_break": true,
+      "api_break": true,
+      "bad_practice": false,
+      "description": "Empty tag struct method::brute_force renamed to method::search_brute. No layout signal (empty type), but every explicit descriptor<method::brute_force, ...> instantiation re-mangles. Emits TAG_TYPE_RENAMED correlating the empty type rename with the symbol-name shift.",
+      "expected_kinds": ["tag_type_renamed"]
+    },
+    "case87_default_template_arg_changed": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "abi_break": true,
+      "api_break": false,
+      "bad_practice": false,
+      "description": "Default template argument changed (Distance = minkowski_distance → euclidean_distance). Consumer source compiles unchanged but substituted instantiation type differs, producing a different mangled symbol. Emits DEFAULT_TEMPLATE_ARG_CHANGED. Unlike case32 (function default param, NO_CHANGE), template defaults are part of the substituted type.",
+      "expected_kinds": ["default_template_arg_changed"]
+    },
+    "case89_inline_accessor_renamed_pimpl_member": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "abi_break": true,
+      "api_break": false,
+      "bad_practice": false,
+      "description": "Public inline accessor reaches into detail::descriptor_impl::class_count_ by name. v2 renames the field to n_classes_ and updates the inline body in lockstep, but consumers compiled against v1.h have the OLD field name baked into their inline accessor bodies. Emits INLINE_BODY_REFERENCES_RENAMED_MEMBER.",
+      "expected_kinds": ["inline_body_references_renamed_member"]
     }
   }
 }

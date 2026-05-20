@@ -3,8 +3,9 @@
 
 Backward-compatible at the symbol level but with behavioral risk.
 
-_1 case(s)._ [← back to all examples](../index.md)
+_2 case(s)._ [← back to all examples](../index.md)
 
 | Case | Title | Verdict | Category |
 |------|-------|---------|----------|
 | [case15_noexcept_change](../case15_noexcept_change.md) | Case 15 — `noexcept` Changed | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case83_cpu_dispatch_isa_dropped](../case83_cpu_dispatch_isa_dropped.md) | CPU-dispatch ISA family dropped | 🟡 COMPATIBLE_WITH_RISK | Risk |

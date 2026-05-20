@@ -1,0 +1,63 @@
+# Case 87: Default template argument changed
+
+**Category:** Template ABI | **Verdict:** BREAKING
+
+## What breaks
+
+```cpp
+// v1
+template <typename Float, typename Distance = minkowski_distance<Float>>
+class descriptor;
+
+// v2
+template <typename Float, typename Distance = euclidean_distance<Float>>
+class descriptor;
+```
+
+Consumer source like `mylib::descriptor<float> d;` compiles against both
+headers — the change is invisible at the call site. But the *substituted*
+type differs:
+
+- v1: `descriptor<float, minkowski_distance<float>>` → mangled symbol
+  `_ZN5mylib10descriptorIfNS_18minkowski_distanceIfEEEC1Ev`
+- v2: `descriptor<float, euclidean_distance<float>>` → mangled symbol
+  `_ZN5mylib10descriptorIfNS_18euclidean_distanceIfEEEC1Ev`
+
+A consumer compiled against v1 emits calls to the first mangled name.
+A consumer compiled against v2 emits calls to the second. The shipped
+library can only contain one — whichever version was built. Cross-version
+linking yields unresolved symbols.
+
+## Why distinct from case32
+
+case32 covers *function* default parameter values, which are resolved at
+the call site and never affect mangling — verdict NO_CHANGE. case87
+covers *template* default arguments, which ARE part of the substituted
+type and DO affect mangling — verdict BREAKING. Opposite outcome,
+opposite mechanism, same English phrase ("default value changed"). Easy
+to confuse without a dedicated case.
+
+## How abicheck catches it
+
+The diff produces `func_removed` for the v1-mangled constructor symbol
+and `func_added` for the v2-mangled one. The new
+`default_template_arg_changed` detector correlates them when the
+unqualified function name is identical and the substituted template
+argument differs only in the inner-type chain. The grouped finding
+points to the header line where the default was changed so the report
+explains *why* the symbols differ.
+
+## Real-world reference
+
+`cpp/oneapi/dal/algo/knn/common.hpp`:
+
+```cpp
+template <typename Float = float,
+          typename Method = method::by_default,
+          typename Task = task::by_default,
+          typename Distance = oneapi::dal::minkowski_distance::descriptor<Float>>
+class descriptor;
+```
+
+Any change to the default for `Method`, `Task`, or `Distance` re-mangles
+every explicit instantiation that didn't override that argument.

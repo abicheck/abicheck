@@ -3,7 +3,7 @@
 
 Listed in `BREAKING_KINDS` — runtime ABI break.
 
-_56 case(s)._ [← back to all examples](../index.md)
+_65 case(s)._ [← back to all examples](../index.md)
 
 | Case | Title | Verdict | Category |
 |------|-------|---------|----------|
@@ -63,3 +63,12 @@ _56 case(s)._ [← back to all examples](../index.md)
 | [case74_detail_base_class_changed](../case74_detail_base_class_changed.md) | Internal `detail::` base class layout change leaks via public API | 🔴 BREAKING | Breaking |
 | [case75_detail_embedded_by_value](../case75_detail_embedded_by_value.md) | Internal `detail::` impl struct embedded by value | 🔴 BREAKING | Breaking |
 | [case76_detail_pimpl_vtable_changed](../case76_detail_pimpl_vtable_changed.md) | Internal `detail::` polymorphic base vtable change | 🔴 BREAKING | Breaking |
+| [case77_detail_templated_base_changed](../case77_detail_templated_base_changed.md) | Internal `detail::` *templated* base class layout change | 🔴 BREAKING | Breaking |
+| [case79_missing_template_instantiation](../case79_missing_template_instantiation.md) | Missing template instantiation in shipped binary | 🔴 BREAKING | Breaking |
+| [case80_pimpl_shared_to_unique](../case80_pimpl_shared_to_unique.md) | Pimpl alias changed from `shared_ptr` to `unique_ptr` | 🔴 BREAKING | Breaking |
+| [case81_serialization_tag_reassigned](../case81_serialization_tag_reassigned.md) | Serialization tag ID reassigned | 🔴 BREAKING | Breaking |
+| [case82_sycl_overload_set_removed](../case82_sycl_overload_set_removed.md) | SYCL overload set removed (DPC++ build withdrawn) | 🔴 BREAKING | Breaking |
+| [case84_bundle_soname_skew](../case84_bundle_soname_skew.md) | Multi-library bundle SONAME skew | 🔴 BREAKING | Breaking |
+| [case86_tag_struct_renamed](../case86_tag_struct_renamed.md) | Tag struct renamed (empty class re-mangling) | 🔴 BREAKING | Breaking |
+| [case87_default_template_arg_changed](../case87_default_template_arg_changed.md) | Default template argument changed | 🔴 BREAKING | Breaking |
+| [case89_inline_accessor_renamed_pimpl_member](../case89_inline_accessor_renamed_pimpl_member.md) | Inline accessor references renamed pimpl member | 🔴 BREAKING | Breaking |

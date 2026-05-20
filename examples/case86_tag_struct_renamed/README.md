@@ -1,0 +1,68 @@
+# Case 86: Tag struct renamed (empty class re-mangling)
+
+**Category:** Mangling ABI | **Verdict:** BREAKING
+
+## What breaks
+
+Empty tag structs are the workhorses of C++ template specialization:
+
+```cpp
+namespace mylib::method {
+struct brute_force {};
+struct kd_tree {};
+}
+```
+
+The library ships explicit instantiations that bake the tag's mangled name
+into symbol names:
+
+```
+_ZN5mylib10descriptorINS_6method11brute_forceENS_4task14classificationEEC1Ev
+```
+
+v2 renames `brute_force` → `search_brute`. Mechanically:
+
+- The struct has zero fields and zero methods. Layout-based detectors
+  (`type_size_changed`, `type_field_*`) see nothing.
+- The old type appears as `TYPE_REMOVED`, the new one as `TYPE_ADDED` —
+  an existing detector can produce both findings but does not link them.
+- Every explicit instantiation referencing the old tag gets a brand-new
+  mangled name. Consumer binaries linked against v1 request the old
+  symbol at load time and get an unresolved-symbol error.
+
+## Why this is its own ChangeKind
+
+Renaming a *non-empty* class is rare and would already trigger many
+layout-related findings. Renaming a tag struct — the *only* purpose of
+which is to participate in mangling — is uniquely a oneDAL/Boost/std-style
+risk, and no existing ChangeKind correlates the disappearance with the
+appearance. A new `TAG_TYPE_RENAMED` makes the correlation explicit.
+
+## How abicheck detects it
+
+The new detector (`abicheck/diff_tag_renames.py`) runs after the
+type-diff pass:
+
+1. Find every `TYPE_REMOVED` for a record type with zero fields and no
+   virtual methods (an "empty" type).
+2. Find every `TYPE_ADDED` for an empty record type in the same parent
+   namespace.
+3. Look for a symbol-rename pair in the symbol diff where the old mangled
+   substring contains the removed tag's name segment and the new mangled
+   substring contains the added tag's name segment.
+4. When both halves match, emit a single `TAG_TYPE_RENAMED` finding
+   pairing the two and suppress the redundant `TYPE_REMOVED` /
+   `TYPE_ADDED`.
+
+## Real-world reference
+
+oneDAL's `cpp/oneapi/dal/algo/*/common.hpp` defines:
+
+```cpp
+namespace method { struct by_default {}; struct brute_force {}; struct kd_tree {}; }
+namespace task   { struct by_default {}; struct classification {}; struct regression {}; }
+```
+
+…and every `descriptor<Float, Method, Task>` instantiation embeds these
+tags in its mangled name. Renaming any of them silently breaks every
+shipped instantiation symbol.

@@ -8,6 +8,7 @@ This file:
    - TYPE_VTABLE_CHANGED          (vtable layout change: breaking)
 3. TypedefToFunction gap test      (function-pointer typedef signature change)
 """
+
 from __future__ import annotations
 
 from abicheck.checker import ChangeKind, DiffResult, Verdict, compare
@@ -190,6 +191,15 @@ ASSERTED_CHANGE_KINDS: set[ChangeKind] = {
     # Internal-namespace leak via public API (oneDAL-style detail:: pattern)
     # Exercised in tests/test_internal_leak.py.
     ChangeKind.INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API,
+    # oneDAL-shaped detectors (case77–case89) — exercised in tests/test_onedal_detectors.py
+    ChangeKind.INSTANTIATION_MISSING_FROM_BINARY,
+    ChangeKind.SERIALIZATION_TAG_CHANGED,
+    ChangeKind.SYCL_OVERLOAD_SET_REMOVED,
+    ChangeKind.CPU_DISPATCH_ISA_DROPPED,
+    ChangeKind.BUNDLE_SONAME_SKEW,
+    ChangeKind.TAG_TYPE_RENAMED,
+    ChangeKind.DEFAULT_TEMPLATE_ARG_CHANGED,
+    ChangeKind.INLINE_BODY_REFERENCES_RENAMED_MEMBER,
 }
 
 
@@ -255,38 +265,61 @@ def _kinds(result: DiffResult) -> set[ChangeKind]:
 
 
 class TestSymbolBindingStrengthened:
-
     def test_weak_to_global_detected(self) -> None:
         """WEAK→GLOBAL binding change should emit SYMBOL_BINDING_STRENGTHENED."""
-        old_elf = _elf(symbols=[
-            ElfSymbol(name="foo", binding=SymbolBinding.WEAK, sym_type=SymbolType.FUNC),
-        ])
-        new_elf = _elf(symbols=[
-            ElfSymbol(name="foo", binding=SymbolBinding.GLOBAL, sym_type=SymbolType.FUNC),
-        ])
+        old_elf = _elf(
+            symbols=[
+                ElfSymbol(
+                    name="foo", binding=SymbolBinding.WEAK, sym_type=SymbolType.FUNC
+                ),
+            ]
+        )
+        new_elf = _elf(
+            symbols=[
+                ElfSymbol(
+                    name="foo", binding=SymbolBinding.GLOBAL, sym_type=SymbolType.FUNC
+                ),
+            ]
+        )
         result = compare(_elf_snap(old_elf), _elf_snap(new_elf))
         assert ChangeKind.SYMBOL_BINDING_STRENGTHENED in _kinds(result)
 
     def test_weak_to_global_is_compatible(self) -> None:
         """Strengthening should NOT be BREAKING — it's compatible."""
-        old_elf = _elf(symbols=[
-            ElfSymbol(name="bar", binding=SymbolBinding.WEAK, sym_type=SymbolType.FUNC),
-        ])
-        new_elf = _elf(symbols=[
-            ElfSymbol(name="bar", binding=SymbolBinding.GLOBAL, sym_type=SymbolType.FUNC),
-        ])
+        old_elf = _elf(
+            symbols=[
+                ElfSymbol(
+                    name="bar", binding=SymbolBinding.WEAK, sym_type=SymbolType.FUNC
+                ),
+            ]
+        )
+        new_elf = _elf(
+            symbols=[
+                ElfSymbol(
+                    name="bar", binding=SymbolBinding.GLOBAL, sym_type=SymbolType.FUNC
+                ),
+            ]
+        )
         result = compare(_elf_snap(old_elf), _elf_snap(new_elf))
         assert ChangeKind.SYMBOL_BINDING_STRENGTHENED in _kinds(result)
         assert result.verdict == Verdict.COMPATIBLE
 
     def test_global_to_weak_is_not_strengthened(self) -> None:
         """GLOBAL→WEAK should emit SYMBOL_BINDING_CHANGED, not STRENGTHENED."""
-        old_elf = _elf(symbols=[
-            ElfSymbol(name="baz", binding=SymbolBinding.GLOBAL, sym_type=SymbolType.FUNC),
-        ])
-        new_elf = _elf(symbols=[
-            ElfSymbol(name="baz", binding=SymbolBinding.WEAK, sym_type=SymbolType.FUNC),
-        ])
+        old_elf = _elf(
+            symbols=[
+                ElfSymbol(
+                    name="baz", binding=SymbolBinding.GLOBAL, sym_type=SymbolType.FUNC
+                ),
+            ]
+        )
+        new_elf = _elf(
+            symbols=[
+                ElfSymbol(
+                    name="baz", binding=SymbolBinding.WEAK, sym_type=SymbolType.FUNC
+                ),
+            ]
+        )
         result = compare(_elf_snap(old_elf), _elf_snap(new_elf))
         assert ChangeKind.SYMBOL_BINDING_STRENGTHENED not in _kinds(result)
         assert ChangeKind.SYMBOL_BINDING_CHANGED in _kinds(result)
@@ -301,33 +334,48 @@ class TestSymbolBindingStrengthened:
 
 
 class TestVarAccessWidened:
-
     def test_private_to_public_detected(self) -> None:
         """private→public variable access change should emit VAR_ACCESS_WIDENED."""
-        old = _snap(variables=[_var("g_val", "_g_val", "int", access=AccessLevel.PRIVATE)])
-        new = _snap(variables=[_var("g_val", "_g_val", "int", access=AccessLevel.PUBLIC)])
+        old = _snap(
+            variables=[_var("g_val", "_g_val", "int", access=AccessLevel.PRIVATE)]
+        )
+        new = _snap(
+            variables=[_var("g_val", "_g_val", "int", access=AccessLevel.PUBLIC)]
+        )
         result = compare(old, new)
         assert ChangeKind.VAR_ACCESS_WIDENED in _kinds(result)
 
     def test_protected_to_public_detected(self) -> None:
         """protected→public should also emit VAR_ACCESS_WIDENED."""
-        old = _snap(variables=[_var("g_val", "_g_val", "int", access=AccessLevel.PROTECTED)])
-        new = _snap(variables=[_var("g_val", "_g_val", "int", access=AccessLevel.PUBLIC)])
+        old = _snap(
+            variables=[_var("g_val", "_g_val", "int", access=AccessLevel.PROTECTED)]
+        )
+        new = _snap(
+            variables=[_var("g_val", "_g_val", "int", access=AccessLevel.PUBLIC)]
+        )
         result = compare(old, new)
         assert ChangeKind.VAR_ACCESS_WIDENED in _kinds(result)
 
     def test_widened_is_compatible(self) -> None:
         """Widening access should be COMPATIBLE, not BREAKING."""
-        old = _snap(variables=[_var("g_val", "_g_val", "int", access=AccessLevel.PRIVATE)])
-        new = _snap(variables=[_var("g_val", "_g_val", "int", access=AccessLevel.PUBLIC)])
+        old = _snap(
+            variables=[_var("g_val", "_g_val", "int", access=AccessLevel.PRIVATE)]
+        )
+        new = _snap(
+            variables=[_var("g_val", "_g_val", "int", access=AccessLevel.PUBLIC)]
+        )
         result = compare(old, new)
         assert ChangeKind.VAR_ACCESS_WIDENED in _kinds(result)
         assert result.verdict == Verdict.COMPATIBLE
 
     def test_narrowing_is_not_widened(self) -> None:
         """public→private should emit VAR_ACCESS_CHANGED, not VAR_ACCESS_WIDENED."""
-        old = _snap(variables=[_var("g_val", "_g_val", "int", access=AccessLevel.PUBLIC)])
-        new = _snap(variables=[_var("g_val", "_g_val", "int", access=AccessLevel.PRIVATE)])
+        old = _snap(
+            variables=[_var("g_val", "_g_val", "int", access=AccessLevel.PUBLIC)]
+        )
+        new = _snap(
+            variables=[_var("g_val", "_g_val", "int", access=AccessLevel.PRIVATE)]
+        )
         result = compare(old, new)
         assert ChangeKind.VAR_ACCESS_WIDENED not in _kinds(result)
         assert ChangeKind.VAR_ACCESS_CHANGED in _kinds(result)
@@ -343,70 +391,129 @@ class TestVarAccessWidened:
 
 
 class TestTypeVtableChanged:
-
     def test_vtable_reorder_detected(self) -> None:
         """Reordering vtable entries should emit TYPE_VTABLE_CHANGED."""
-        old = _snap(types=[RecordType(
-            name="Base", kind="class", size_bits=64,
-            vtable=["_ZN4Base3fooEv", "_ZN4Base3barEv"],
-        )])
-        new = _snap(types=[RecordType(
-            name="Base", kind="class", size_bits=64,
-            vtable=["_ZN4Base3barEv", "_ZN4Base3fooEv"],
-        )])
+        old = _snap(
+            types=[
+                RecordType(
+                    name="Base",
+                    kind="class",
+                    size_bits=64,
+                    vtable=["_ZN4Base3fooEv", "_ZN4Base3barEv"],
+                )
+            ]
+        )
+        new = _snap(
+            types=[
+                RecordType(
+                    name="Base",
+                    kind="class",
+                    size_bits=64,
+                    vtable=["_ZN4Base3barEv", "_ZN4Base3fooEv"],
+                )
+            ]
+        )
         result = compare(old, new)
         assert ChangeKind.TYPE_VTABLE_CHANGED in _kinds(result)
 
     def test_vtable_entry_added(self) -> None:
         """Adding a vtable entry should emit TYPE_VTABLE_CHANGED."""
-        old = _snap(types=[RecordType(
-            name="Base", kind="class", size_bits=64,
-            vtable=["_ZN4Base3fooEv"],
-        )])
-        new = _snap(types=[RecordType(
-            name="Base", kind="class", size_bits=64,
-            vtable=["_ZN4Base3fooEv", "_ZN4Base3barEv"],
-        )])
+        old = _snap(
+            types=[
+                RecordType(
+                    name="Base",
+                    kind="class",
+                    size_bits=64,
+                    vtable=["_ZN4Base3fooEv"],
+                )
+            ]
+        )
+        new = _snap(
+            types=[
+                RecordType(
+                    name="Base",
+                    kind="class",
+                    size_bits=64,
+                    vtable=["_ZN4Base3fooEv", "_ZN4Base3barEv"],
+                )
+            ]
+        )
         result = compare(old, new)
         assert ChangeKind.TYPE_VTABLE_CHANGED in _kinds(result)
 
     def test_vtable_entry_removed(self) -> None:
         """Removing a vtable entry should emit TYPE_VTABLE_CHANGED."""
-        old = _snap(types=[RecordType(
-            name="Base", kind="class", size_bits=64,
-            vtable=["_ZN4Base3fooEv", "_ZN4Base3barEv"],
-        )])
-        new = _snap(types=[RecordType(
-            name="Base", kind="class", size_bits=64,
-            vtable=["_ZN4Base3fooEv"],
-        )])
+        old = _snap(
+            types=[
+                RecordType(
+                    name="Base",
+                    kind="class",
+                    size_bits=64,
+                    vtable=["_ZN4Base3fooEv", "_ZN4Base3barEv"],
+                )
+            ]
+        )
+        new = _snap(
+            types=[
+                RecordType(
+                    name="Base",
+                    kind="class",
+                    size_bits=64,
+                    vtable=["_ZN4Base3fooEv"],
+                )
+            ]
+        )
         result = compare(old, new)
         assert ChangeKind.TYPE_VTABLE_CHANGED in _kinds(result)
 
     def test_vtable_change_is_breaking(self) -> None:
         """Vtable layout changes should be BREAKING."""
-        old = _snap(types=[RecordType(
-            name="Widget", kind="class", size_bits=64,
-            vtable=["_ZN6Widget4drawEv", "_ZN6Widget6resizeEv"],
-        )])
-        new = _snap(types=[RecordType(
-            name="Widget", kind="class", size_bits=64,
-            vtable=["_ZN6Widget6resizeEv", "_ZN6Widget4drawEv"],
-        )])
+        old = _snap(
+            types=[
+                RecordType(
+                    name="Widget",
+                    kind="class",
+                    size_bits=64,
+                    vtable=["_ZN6Widget4drawEv", "_ZN6Widget6resizeEv"],
+                )
+            ]
+        )
+        new = _snap(
+            types=[
+                RecordType(
+                    name="Widget",
+                    kind="class",
+                    size_bits=64,
+                    vtable=["_ZN6Widget6resizeEv", "_ZN6Widget4drawEv"],
+                )
+            ]
+        )
         result = compare(old, new)
         assert ChangeKind.TYPE_VTABLE_CHANGED in _kinds(result)
         assert result.verdict == Verdict.BREAKING
 
     def test_no_vtable_change_when_identical(self) -> None:
         """Identical vtable should NOT emit TYPE_VTABLE_CHANGED."""
-        old = _snap(types=[RecordType(
-            name="Base", kind="class", size_bits=64,
-            vtable=["_ZN4Base3fooEv"],
-        )])
-        new = _snap(types=[RecordType(
-            name="Base", kind="class", size_bits=64,
-            vtable=["_ZN4Base3fooEv"],
-        )])
+        old = _snap(
+            types=[
+                RecordType(
+                    name="Base",
+                    kind="class",
+                    size_bits=64,
+                    vtable=["_ZN4Base3fooEv"],
+                )
+            ]
+        )
+        new = _snap(
+            types=[
+                RecordType(
+                    name="Base",
+                    kind="class",
+                    size_bits=64,
+                    vtable=["_ZN4Base3fooEv"],
+                )
+            ]
+        )
         result = compare(old, new)
         assert ChangeKind.TYPE_VTABLE_CHANGED not in _kinds(result)
 
@@ -430,7 +537,9 @@ class TestTypedefToFunction:
         new = _snap(typedefs={"handler_t": "int(*)(int, int)"})
         result = compare(old, new)
         assert ChangeKind.TYPEDEF_BASE_CHANGED in _kinds(result)
-        change = next(c for c in result.changes if c.kind == ChangeKind.TYPEDEF_BASE_CHANGED)
+        change = next(
+            c for c in result.changes if c.kind == ChangeKind.TYPEDEF_BASE_CHANGED
+        )
         assert change.old_value == "int(*)(int)"
         assert change.new_value == "int(*)(int, int)"
 
@@ -470,7 +579,6 @@ class TestTypedefToFunction:
 
 
 class TestInlineTransitions:
-
     def test_func_became_inline_detected(self) -> None:
         """non-inline → inline transition should emit FUNC_BECAME_INLINE."""
         old = _snap(functions=[_func("compute", "_Z7computei", is_inline=False)])
@@ -538,7 +646,6 @@ class TestInlineTransitions:
 
 
 class TestCompatVersionChanged:
-
     def test_compat_version_changed_detected(self) -> None:
         """compat_version change in Mach-O metadata emits COMPAT_VERSION_CHANGED."""
         old = _snap()

@@ -20,6 +20,7 @@ through filtering, deduplication, enrichment, and suppression.
 
 Architecture review: Problem C — explicit pipeline replaces imperative chain.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -50,9 +51,7 @@ class PipelineStep(Protocol):
 
     name: str
 
-    def run(
-        self, changes: list[Change], ctx: PipelineContext
-    ) -> list[Change]:
+    def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:
         """Transform the change list, returning the updated list."""
         ...
 
@@ -237,6 +236,100 @@ class EnrichAffectedSymbols:
         return changes
 
 
+class DetectOneDALPatterns:
+    """Run the oneDAL-shaped detectors added in PR #239 (case77–case89).
+
+    Each individual detector lives in :mod:`abicheck.diff_onedal`; this
+    pipeline step wires them together, dedupes findings against the
+    existing change list, and respects user suppression.
+
+    Detectors run:
+
+    * ``detect_serialization_tag_changes``
+    * ``detect_missing_instantiations``
+    * ``detect_sycl_overload_set_removal`` (also suppresses redundant
+      per-symbol ``func_removed`` children)
+    * ``detect_cpu_dispatch_isa_dropped`` (likewise)
+    * ``detect_tag_type_renamed``
+    * ``detect_default_template_arg_changed``
+    * ``detect_inline_body_renamed_member``
+    """
+
+    name = "detect_onedal_patterns"
+
+    def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:
+        from .checker_policy import ChangeKind
+        from .diff_onedal import (
+            detect_cpu_dispatch_isa_dropped,
+            detect_default_template_arg_changed,
+            detect_inline_body_renamed_member,
+            detect_missing_instantiations,
+            detect_serialization_tag_changes,
+            detect_sycl_overload_set_removal,
+            detect_tag_type_renamed,
+        )
+
+        new_findings: list[Change] = []
+        new_findings.extend(detect_serialization_tag_changes(ctx.old, ctx.new))
+        new_findings.extend(detect_missing_instantiations(ctx.old, ctx.new))
+
+        sycl_findings, sycl_suppressed = detect_sycl_overload_set_removal(
+            ctx.old,
+            ctx.new,
+        )
+        new_findings.extend(sycl_findings)
+
+        isa_findings, isa_suppressed = detect_cpu_dispatch_isa_dropped(
+            ctx.old,
+            ctx.new,
+        )
+        new_findings.extend(isa_findings)
+
+        new_findings.extend(detect_tag_type_renamed(ctx.old, ctx.new))
+        new_findings.extend(
+            detect_default_template_arg_changed(
+                ctx.old,
+                ctx.new,
+            )
+        )
+        new_findings.extend(
+            detect_inline_body_renamed_member(
+                ctx.old,
+                ctx.new,
+                changes,
+            )
+        )
+
+        # Filter out per-symbol ``func_removed`` findings that are
+        # children of the grouped SYCL/ISA detectors.
+        suppressed_mangled = sycl_suppressed | isa_suppressed
+        if suppressed_mangled:
+            kept: list[Change] = []
+            for ch in changes:
+                if (
+                    ch.kind == ChangeKind.FUNC_REMOVED
+                    and ch.symbol in suppressed_mangled
+                ):
+                    ctx.redundant.append(ch)
+                    continue
+                kept.append(ch)
+            changes = kept
+
+        if not new_findings:
+            return changes
+        seen_keys = {(c.kind, c.symbol) for c in changes}
+        for c in new_findings:
+            if ctx.suppression is not None and ctx.suppression.is_suppressed(c):
+                ctx.suppressed.append(c)
+                continue
+            key = (c.kind, c.symbol)
+            if key in seen_keys:
+                continue
+            changes.append(c)
+            seen_keys.add(key)
+        return changes
+
+
 class DetectInternalLeaks:
     """Detect internal-namespace (``detail::``, ``impl::``, …) types whose
     changes leak through the public ABI surface.
@@ -262,9 +355,7 @@ class DetectInternalLeaks:
         if not extra:
             return changes
         # Avoid duplicates if the pipeline is re-run.
-        seen_symbols = {
-            (c.kind, c.symbol) for c in changes
-        }
+        seen_symbols = {(c.kind, c.symbol) for c in changes}
         # Synthetic leak findings must respect user suppression rules
         # too. ``ApplySuppression`` ran earlier in the pipeline, so we
         # apply the same predicate by hand here rather than re-running
@@ -316,17 +407,20 @@ class PostProcessingPipeline:
 
 
 # Default pipeline matching the current compare() post-processing order.
-DEFAULT_PIPELINE = PostProcessingPipeline([
-    FilterReservedFieldRenames(),
-    FilterOpaqueSizeChanges(),
-    DowngradeOpaqueStructChanges(),
-    DeduplicateAstDwarf(),
-    DeduplicateCrossDetector(),
-    DowngradeOpaqueTypeChanges(),
-    EnrichSourceLocations(),
-    ApplySuppression(),
-    SuppressRenamedPairs(),
-    FilterRedundant(),
-    EnrichAffectedSymbols(),
-    DetectInternalLeaks(),
-])
+DEFAULT_PIPELINE = PostProcessingPipeline(
+    [
+        FilterReservedFieldRenames(),
+        FilterOpaqueSizeChanges(),
+        DowngradeOpaqueStructChanges(),
+        DeduplicateAstDwarf(),
+        DeduplicateCrossDetector(),
+        DowngradeOpaqueTypeChanges(),
+        EnrichSourceLocations(),
+        ApplySuppression(),
+        SuppressRenamedPairs(),
+        FilterRedundant(),
+        EnrichAffectedSymbols(),
+        DetectInternalLeaks(),
+        DetectOneDALPatterns(),
+    ]
+)
