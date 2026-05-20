@@ -240,6 +240,42 @@ class TestSerializationTagDetector:
         kinds = [f.kind for f in findings]
         assert kinds.count(ChangeKind.SERIALIZATION_TAG_CHANGED) == 2
 
+    def test_source_precedence_constants_over_variables(self) -> None:
+        """CodeRabbit regression: ``constants`` is the highest-confidence
+        source. A ``variables`` entry with the same name must NOT
+        overwrite a ``constants`` value (otherwise a lower-confidence
+        sibling value can manufacture a spurious
+        ``SERIALIZATION_TAG_CHANGED``).
+        """
+        # Both snapshots agree on the constant; variables disagree.
+        # Because constants take precedence, the detector must see them
+        # as equal and emit nothing.
+        old = _snap(
+            "lib",
+            constants={"foo_tag": "0x42"},
+            variables=[
+                Variable(
+                    name="foo_tag",
+                    mangled="foo_tag",
+                    type="int",
+                    value="100",
+                ),
+            ],
+        )
+        new = _snap(
+            "lib",
+            constants={"foo_tag": "0x42"},
+            variables=[
+                Variable(
+                    name="foo_tag",
+                    mangled="foo_tag",
+                    type="int",
+                    value="999",
+                ),
+            ],
+        )
+        assert detect_serialization_tag_changes(old, new) == []
+
     def test_picks_up_variable_initial_values(self) -> None:
         v1 = Variable(name="model_tag", mangled="model_tag", type="int", value="100")
         v2 = Variable(name="model_tag", mangled="model_tag", type="int", value="200")
@@ -433,6 +469,51 @@ class TestSyclOverloadSetDetector:
         assert "_Z7computeRN4sycl5queueE" in suppressed
         assert "_Z5trainRN4sycl5queueE" in suppressed
         assert "_Z5inferRN4sycl5queueE" in suppressed
+
+    def test_cross_namespace_compute_not_cross_matched(self) -> None:
+        """CodeRabbit regression: SYCL family matching must use the
+        QUALIFIED callable stem, not just the leaf name. A SYCL overload
+        ``ns1::foo::compute(sycl::queue&)`` must not be paired against a
+        surviving non-SYCL ``ns2::bar::compute()`` from a different
+        namespace — they're unrelated callables that happen to share a
+        leaf method name.
+        """
+        sycl_param = Param(
+            name="q",
+            type="sycl::queue&",
+            kind=ParamKind.REFERENCE,
+        )
+        # v1: SYCL overload on ns1::foo + non-SYCL siblings on ns2::bar.
+        # v2: only the ns2::bar non-SYCL siblings remain. The ns1::foo
+        # SYCL overload is removed but its non-SYCL counterpart is also
+        # gone (no longer a "family withdrawn" case for ns1::foo).
+        old = _snap(
+            "lib",
+            functions=[
+                _fn(
+                    "ns1::foo::compute",
+                    "_Z3ns1foocomputeRN4sycl5queueE",
+                    params=[sycl_param],
+                ),
+                _fn("ns2::bar::compute", "_Z3ns2barcomputev"),
+                _fn("ns2::bar::train", "_Z3ns2bartrainv"),
+                _fn("ns2::bar::infer", "_Z3ns2barinferv"),
+            ],
+        )
+        new = _snap(
+            "lib",
+            functions=[
+                _fn("ns2::bar::compute", "_Z3ns2barcomputev"),
+                _fn("ns2::bar::train", "_Z3ns2bartrainv"),
+                _fn("ns2::bar::infer", "_Z3ns2barinferv"),
+            ],
+        )
+        findings, suppressed = detect_sycl_overload_set_removal(old, new)
+        # No grouped finding: the removed SYCL function's qualified
+        # entity is ``ns1::foo::compute``, which has no surviving
+        # non-SYCL sibling. ``ns2::bar::compute`` is unrelated.
+        assert findings == []
+        assert suppressed == set()
 
     def test_threshold_respected(self) -> None:
         old, new = self._build_pair()
@@ -736,6 +817,60 @@ class TestDefaultTemplateArgDetector:
             functions=[_fn("ns2::bar<float>::compute", "_Zns2bar")],
         )
         assert detect_default_template_arg_changed(old, new) == []
+
+    def test_leading_arg_change_not_flagged(self) -> None:
+        """CodeRabbit Major regression: when EVERY template-arg position
+        differs (i.e. there is no stable leading prefix), the change is
+        an explicit instantiation swap, not a default-template-arg
+        change. ``DEFAULT_TEMPLATE_ARG_CHANGED`` must not fire.
+        """
+        old = _snap(
+            "lib",
+            functions=[
+                _fn(
+                    "ns::descriptor<float, ns::A>::compute",
+                    "_ZN2ns10descriptorIfNS_1AEE7computeEv",
+                ),
+            ],
+        )
+        new = _snap(
+            "lib",
+            functions=[
+                _fn(
+                    "ns::descriptor<double, ns::B>::compute",
+                    "_ZN2ns10descriptorIdNS_1BEE7computeEv",
+                ),
+            ],
+        )
+        # Both args change (float→double AND A→B) → not a default change.
+        assert detect_default_template_arg_changed(old, new) == []
+
+    def test_trailing_arg_change_still_flagged(self) -> None:
+        """Positive check for the leading-prefix gate: when only the
+        TRAILING arg changes (leading prefix identical), the finding
+        still fires — this is the canonical case87 pattern.
+        """
+        old = _snap(
+            "lib",
+            functions=[
+                _fn(
+                    "ns::descriptor<float, ns::A>::compute",
+                    "_ZN2ns10descriptorIfNS_1AEE7computeEv",
+                ),
+            ],
+        )
+        new = _snap(
+            "lib",
+            functions=[
+                _fn(
+                    "ns::descriptor<float, ns::B>::compute",
+                    "_ZN2ns10descriptorIfNS_1BEE7computeEv",
+                ),
+            ],
+        )
+        findings = detect_default_template_arg_changed(old, new)
+        assert len(findings) == 1
+        assert findings[0].kind == ChangeKind.DEFAULT_TEMPLATE_ARG_CHANGED
 
 
 # ===========================================================================

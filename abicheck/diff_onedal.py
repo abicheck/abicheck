@@ -135,13 +135,17 @@ def _collect_tag_constants(snap: AbiSnapshot) -> dict[str, str]:
        This is the most portable source because DWARF always captures
        ``DW_AT_const_value`` for enumerators.
     """
+    # Source precedence is enforced via ``setdefault``: a name present in
+    # ``constants`` (the highest-confidence source) is never overwritten by
+    # a value from ``variables`` or ``enums``. Later sources only fill
+    # gaps. This matches the docstring's "in order of reliability".
     out: dict[str, str] = {}
     for name, value in (snap.constants or {}).items():
         if _looks_like_serialization_tag(name) and value is not None:
-            out[name] = str(value)
+            out.setdefault(name, str(value))
     for var in snap.variables:
         if _looks_like_serialization_tag(var.name) and var.value is not None:
-            out[var.name] = str(var.value)
+            out.setdefault(var.name, str(var.value))
     for enum_t in snap.enums or []:
         enum_leaf = _last_segment(enum_t.name).lower()
         # An enum is tag-shaped when its TYPE name matches the tag pattern
@@ -154,7 +158,7 @@ def _collect_tag_constants(snap: AbiSnapshot) -> dict[str, str]:
         for m in enum_t.members:
             full = f"{enum_t.name}::{m.name}"
             if type_is_tag or _looks_like_serialization_tag(m.name):
-                out[full] = str(m.value)
+                out.setdefault(full, str(m.value))
     return out
 
 
@@ -354,27 +358,33 @@ def detect_sycl_overload_set_removal(
     old.index()
     new.index()
     new_mangled = {f.mangled for f in new.functions}
-    # Group removed SYCL-overload candidates by unqualified function name.
-    by_unq: dict[str, list[Function]] = defaultdict(list)
+    # Group removed SYCL-overload candidates by the *qualified* callable
+    # stem (full namespace path with template args stripped). Keying by
+    # the unqualified leaf name alone would let unrelated symbols like
+    # ``ns1::foo::compute(sycl::queue&)`` and ``ns2::bar::compute()`` cross-
+    # match — a false ``SYCL_OVERLOAD_SET_REMOVED`` that hides the real
+    # per-symbol removals. Same fix that ``detect_default_template_arg_changed``
+    # already uses.
+    by_entity: dict[str, list[Function]] = defaultdict(list)
     for fn in old.functions:
         if fn.mangled in new_mangled:
             continue
         if not _has_sycl_queue_first_param(fn):
             continue
-        by_unq[_unqualified_function_name(fn.name)].append(fn)
+        by_entity[_callable_stem(fn.name)].append(fn)
     # Surviving non-SYCL siblings give us confidence that the family
     # was withdrawn deliberately (DPC++ build disabled), not that the
-    # whole algorithm was deleted.
+    # whole algorithm was deleted. Use the same qualified key.
     surviving_non_sycl: set[str] = set()
     for fn in new.functions:
         if not _has_sycl_queue_first_param(fn):
-            surviving_non_sycl.add(_unqualified_function_name(fn.name))
+            surviving_non_sycl.add(_callable_stem(fn.name))
     findings: list[Change] = []
     suppressed: set[str] = set()
     affected_unq: list[str] = []
     affected_mangled: list[str] = []
-    for unq, removed in by_unq.items():
-        if unq not in surviving_non_sycl:
+    for entity, removed in by_entity.items():
+        if entity not in surviving_non_sycl:
             continue
         for fn in removed:
             affected_mangled.append(fn.mangled)
@@ -384,7 +394,9 @@ def detect_sycl_overload_set_removal(
             # castxml-derived mangled name or a sibling export-name form.
             if fn.name:
                 suppressed.add(fn.name)
-        affected_unq.append(unq)
+        # The report shows the unqualified leaf so it reads as
+        # "compute, train, infer" rather than full namespaced paths.
+        affected_unq.append(_last_segment(entity) or entity)
     if len(affected_unq) >= min_overloads:
         affected_unq.sort()
         findings.append(
@@ -643,6 +655,70 @@ def detect_tag_type_renamed(
 # ---------------------------------------------------------------------------
 
 
+def _stable_leading_template_args(old_args: str, new_args: str) -> bool:
+    """Return ``True`` iff *old_args* and *new_args* differ ONLY in
+    trailing positions — i.e. some non-empty leading prefix is identical.
+
+    Used to gate ``DEFAULT_TEMPLATE_ARG_CHANGED`` so we don't flag a
+    pairing like ``Foo<float, A>::compute`` → ``Foo<double, B>::compute``
+    where every position changed (that's an explicit instantiation
+    change, not a default-arg change). For a default-arg change, C++
+    requires defaults to live in trailing positions, so the leading
+    args supplied by the user must remain identical between old and
+    new substituted forms.
+
+    Single-arg templates are accepted as a degenerate case (no leading
+    args to compare; the only arg IS the trailing position).
+
+    >>> _stable_leading_template_args("float, A", "float, B")
+    True
+    >>> _stable_leading_template_args("float, A", "double, B")
+    False
+    >>> _stable_leading_template_args("A", "B")  # 1-arg degenerate case
+    True
+    """
+    old_list = [p.strip() for p in _split_top_level_commas_local(old_args)]
+    new_list = [p.strip() for p in _split_top_level_commas_local(new_args)]
+    if not old_list or not new_list:
+        return False
+    # Degenerate single-arg template: nothing leading to compare.
+    if len(old_list) == 1 and len(new_list) == 1:
+        return True
+    # Same length, identical leading prefix of size >= 1.
+    if len(old_list) != len(new_list):
+        return False
+    diff_idx = next(
+        (i for i in range(len(old_list)) if old_list[i] != new_list[i]),
+        len(old_list),
+    )
+    return diff_idx >= 1 and diff_idx < len(old_list)
+
+
+def _split_top_level_commas_local(s: str) -> list[str]:
+    """Split *s* on commas not nested inside ``<...>``. Lightweight local
+    copy of the helper in ``internal_leak`` to avoid a cross-module
+    dependency for a small parser.
+    """
+    parts: list[str] = []
+    depth = 0
+    buf: list[str] = []
+    for ch in s:
+        if ch == "<":
+            depth += 1
+            buf.append(ch)
+        elif ch == ">":
+            depth -= 1
+            buf.append(ch)
+        elif ch == "," and depth == 0:
+            parts.append("".join(buf))
+            buf = []
+        else:
+            buf.append(ch)
+    if buf:
+        parts.append("".join(buf))
+    return parts
+
+
 def _extract_template_args(demangled: str) -> str | None:
     """Return the substring inside the outermost (balanced) ``<...>`` of
     *demangled*.
@@ -713,6 +789,15 @@ def detect_default_template_arg_changed(
         for cand in added_by_entity.get(entity, []):
             new_args = _extract_template_args(cand.name)
             if new_args is None or new_args == old_args:
+                continue
+            # Require that the two argument lists differ only in trailing
+            # positions — i.e. there is a non-empty leading prefix that
+            # matches. A "default template argument changed" can only
+            # affect positions the user didn't supply explicitly, which
+            # are by C++ rule the trailing ones; an explicit change to a
+            # LEADING arg is something else (and should not be flagged
+            # here, since it's not subsumed by a default change).
+            if not _stable_leading_template_args(old_args, new_args):
                 continue
             key = (fn.mangled, cand.mangled)
             if key in seen_pairs:
