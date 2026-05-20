@@ -52,6 +52,15 @@ class TestGroundTruthStructure:
     def test_every_case_has_expected_verdict(self, verdicts: dict) -> None:
         for case_name, meta in verdicts.items():
             assert "expected" in meta, f"{case_name} missing 'expected' field"
+            # Bundle cases (ADR-023) intentionally set expected=null because
+            # they are not single-library v1/v2 comparisons; their per-library
+            # verdicts live under expected_libraries and their aggregate
+            # verdict under expected_combined_verdict.
+            if meta.get("category") == "bundle":
+                assert meta["expected"] is None, (
+                    f"{case_name}: bundle case must have expected=null"
+                )
+                continue
             assert meta["expected"] in {
                 "NO_CHANGE",
                 "COMPATIBLE",
@@ -68,6 +77,7 @@ class TestGroundTruthStructure:
             "risk",
             "api_break",
             "breaking",
+            "bundle",
         }
         for case_name, meta in verdicts.items():
             assert "category" in meta, f"{case_name} missing 'category'"
@@ -179,6 +189,10 @@ class TestVerdictCategoryAlignment:
     def test_verdict_matches_category(self, verdicts: dict) -> None:
         mismatches = []
         for case_name, meta in verdicts.items():
+            # Bundle cases (ADR-023) carry expected=null and category=bundle
+            # by design — the aggregate verdict lives in expected_combined_verdict.
+            if meta.get("category") == "bundle":
+                continue
             verdict = meta["expected"]
             category = meta["category"]
             allowed = VERDICT_TO_CATEGORIES.get(verdict, set())

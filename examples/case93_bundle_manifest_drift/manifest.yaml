@@ -1,0 +1,17 @@
+# Public ABI contract for this release (case93).
+# Each entry declares a symbol the bundle publicly promises to ship.
+# See docs/development/adr/023-bundle-aware-multi-binary-analysis.md.
+version: 1
+provides:
+  - symbol: train_float_dense
+    library: libcore.so
+    optional_provider: false
+  - symbol: train_float_sparse
+    library: libcore.so
+    optional_provider: false
+  - symbol: train_double_dense
+    library: libcore.so
+    optional_provider: false
+  - symbol: train_double_sparse
+    library: libcore.so
+    optional_provider: false

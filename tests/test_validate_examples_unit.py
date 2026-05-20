@@ -25,12 +25,12 @@ from tests.validate_examples import (  # noqa: E402
 
 _GROUND_TRUTH = Path(__file__).parent.parent / "examples" / "ground_truth.json"
 _VALID_CATEGORIES = frozenset(
-    {"breaking", "addition", "quality", "no_change", "api_break", "risk"}
+    {"breaking", "addition", "quality", "no_change", "api_break", "risk", "bundle"}
 )
 _VALID_VERDICTS = frozenset(
     {"BREAKING", "COMPATIBLE", "COMPATIBLE_WITH_RISK", "NO_CHANGE", "API_BREAK"}
 )
-_EXPECTED_CASE_COUNT = 87
+_EXPECTED_CASE_COUNT = 91
 
 
 # ── _normalize_verdict ────────────────────────────────────────────────────

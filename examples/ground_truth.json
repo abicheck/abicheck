@@ -1107,6 +1107,74 @@
       "known_gap": "Windows: the public class holds std::shared_ptr<detail::descriptor_impl> which renders differently in MSVC PDB/STL field-type strings, so the internal-leak reachability heuristic that ties the inline accessor to the renamed detail:: member does not fire as-shipped.",
       "description": "Public inline accessor reaches into detail::descriptor_impl::class_count_ by name. v2 renames the field to n_classes_ and updates the inline body in lockstep, but consumers compiled against v1.h have the OLD field name baked into their inline accessor bodies. Emits INLINE_BODY_REFERENCES_RENAMED_MEMBER.",
       "expected_kinds": ["inline_body_references_renamed_member"]
+    },
+    "case90_bundle_intra_dep_removed": {
+      "bundle": true,
+      "expected": null,
+      "category": "bundle",
+      "platforms": ["linux"],
+      "abi_break": true,
+      "api_break": false,
+      "bad_practice": false,
+      "description": "Bundle (ADR-023): libcore removes core_mul; sibling libalgo still imports it (DT_NEEDED libcore.so.1 + U core_mul). Per-library compare reports libalgo NO_CHANGE; the bundle layer catches the dangling intra-bundle import.",
+      "expected_bundle_verdict": "BREAKING",
+      "expected_combined_verdict": "BREAKING",
+      "expected_bundle_kinds": ["bundle_intra_dep_removed"],
+      "expected_libraries": {
+        "libcore.so": {"verdict": "BREAKING", "expected_kinds": ["func_removed"]},
+        "libalgo.so": {"verdict": "NO_CHANGE", "expected_kinds": []}
+      }
+    },
+    "case91_bundle_intra_signature_drift": {
+      "bundle": true,
+      "expected": null,
+      "category": "bundle",
+      "platforms": ["linux"],
+      "abi_break": true,
+      "api_break": false,
+      "bad_practice": false,
+      "description": "Bundle (ADR-023): libcore changes core_add(int,int) -> core_add(long,long). extern C, mangled name unchanged. libalgo binary is byte-identical between versions but its call sites still use the int calling convention. Bundle layer flags libalgo as bundle_intra_dep_signature_changed.",
+      "expected_bundle_verdict": "BREAKING",
+      "expected_combined_verdict": "BREAKING",
+      "expected_bundle_kinds": ["bundle_intra_dep_signature_changed"],
+      "expected_libraries": {
+        "libcore.so": {"verdict": "BREAKING", "expected_kinds": ["func_params_changed", "func_return_changed"]},
+        "libalgo.so": {"verdict": "NO_CHANGE", "expected_kinds": []}
+      }
+    },
+    "case92_bundle_provider_changed": {
+      "bundle": true,
+      "expected": null,
+      "category": "bundle",
+      "platforms": ["linux"],
+      "abi_break": false,
+      "api_break": false,
+      "bad_practice": false,
+      "description": "Bundle (ADR-023): shared_util moves from libcore to libutil between releases. The bundle's union of exported symbols is unchanged but DT_NEEDED contracts shift; downstream binaries that only linked -lcore now miss the symbol. Per-library worst-of reports BREAKING; the bundle layer adds COMPATIBLE_WITH_RISK provider-change finding.",
+      "expected_bundle_verdict": "COMPATIBLE_WITH_RISK",
+      "expected_combined_verdict": "BREAKING",
+      "expected_bundle_kinds": ["bundle_provider_changed"],
+      "expected_libraries": {
+        "libcore.so": {"verdict": "BREAKING", "expected_kinds": ["func_removed"]},
+        "libutil.so": {"verdict": "COMPATIBLE", "expected_kinds": ["func_added"]}
+      }
+    },
+    "case93_bundle_manifest_drift": {
+      "bundle": true,
+      "expected": null,
+      "category": "bundle",
+      "platforms": ["linux"],
+      "abi_break": true,
+      "api_break": false,
+      "bad_practice": false,
+      "description": "Bundle (ADR-023): manifest.yaml promises four train_* instantiations; the new bundle silently drops train_double_sparse. With --manifest, the bundle layer emits bundle_manifest_instantiation_removed. Without --manifest, the per-library func_removed already covers it but cannot distinguish 'promised' from 'incidental'.",
+      "manifest_file": "manifest.yaml",
+      "expected_bundle_verdict": "BREAKING",
+      "expected_combined_verdict": "BREAKING",
+      "expected_bundle_kinds": ["bundle_manifest_instantiation_removed"],
+      "expected_libraries": {
+        "libcore.so": {"verdict": "BREAKING", "expected_kinds": ["func_removed"]}
+      }
     }
   }
 }

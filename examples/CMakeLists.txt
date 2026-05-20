@@ -214,6 +214,143 @@ function(abicheck_add_case CASE_NAME)
 endfunction()
 
 # ---------------------------------------------------------------------------
+# Helper function: add a multi-binary "bundle" case (ADR-023)
+#
+# Builds two directories — <case>_old/ and <case>_new/ — each containing
+# one shared library per LIBRARIES entry, sourced from <case>/old/<lib>.cpp
+# and <case>/new/<lib>.cpp respectively. Linkage between siblings is
+# declared via LINK_GRAPH (a flat list of "consumer:provider" pairs).
+#
+# Usage:
+#   abicheck_add_bundle_case(case77_bundle_xxx
+#       LIBRARIES   libcore libalgo libapi
+#       LINK_GRAPH  libalgo:libcore libapi:libalgo libapi:libcore
+#       HEADERS     core.h algo.h api.h      # under <case>/include/
+#      [LANG        CXX]
+#      [PLATFORMS   linux]
+#   )
+#
+# Each library's old source = <case>/old/<libname>.cpp.
+# Each library's new source = <case>/new/<libname>.cpp.
+# Headers in <case>/include/ are added to the include path for all libs
+# on both sides. SONAMEs are normalized so old/new pairs match on stem.
+#
+# Bundle cases default to Linux-only — the bundle layer parses ELF
+# DT_NEEDED, gnu.version_r and gnu.version_d sections (ADR-018 / ADR-023).
+# ---------------------------------------------------------------------------
+function(abicheck_add_bundle_case CASE_NAME)
+  cmake_parse_arguments(PARSE_ARGV 1 ARG
+    ""
+    "LANG"
+    "LIBRARIES;LINK_GRAPH;HEADERS;PLATFORMS"
+  )
+
+  # Bundle analysis is ELF-only — skip on non-Linux unless explicitly opted in.
+  if(NOT ARG_PLATFORMS)
+    set(ARG_PLATFORMS linux)
+  endif()
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    list(FIND ARG_PLATFORMS "linux" _idx)
+  elseif(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+    list(FIND ARG_PLATFORMS "macos" _idx)
+  elseif(CMAKE_SYSTEM_NAME STREQUAL "Windows")
+    list(FIND ARG_PLATFORMS "windows" _idx)
+  else()
+    set(_idx -1)
+  endif()
+  if(_idx EQUAL -1)
+    message(STATUS "Skipping ${CASE_NAME} (bundle case not supported on ${CMAKE_SYSTEM_NAME})")
+    return()
+  endif()
+
+  if(NOT ARG_LANG)
+    set(ARG_LANG CXX)
+  endif()
+
+  # CMAKE_CURRENT_SOURCE_DIR resolves to the case's own subdirectory
+  # because abicheck_add_bundle_case is invoked from
+  # examples/<case>/CMakeLists.txt via add_subdirectory().
+  set(_case_src ${CMAKE_CURRENT_SOURCE_DIR})
+  set(_old_out ${CMAKE_BINARY_DIR}/${CASE_NAME}/old)
+  set(_new_out ${CMAKE_BINARY_DIR}/${CASE_NAME}/new)
+  file(MAKE_DIRECTORY ${_old_out})
+  file(MAKE_DIRECTORY ${_new_out})
+
+  # Index linkage as a CMake-friendly map: "<lib>=<provider1>;<provider2>;..."
+  foreach(_lib IN LISTS ARG_LIBRARIES)
+    set(_deps_of_${_lib} "")
+  endforeach()
+  foreach(_edge IN LISTS ARG_LINK_GRAPH)
+    if(NOT _edge MATCHES "^[^:]+:[^:]+$")
+      message(FATAL_ERROR
+        "abicheck_add_bundle_case(${CASE_NAME}): malformed LINK_GRAPH edge '${_edge}'. "
+        "Expected 'consumer:provider'.")
+    endif()
+    string(REPLACE ":" ";" _pair ${_edge})
+    list(GET _pair 0 _consumer)
+    list(GET _pair 1 _provider)
+    list(FIND ARG_LIBRARIES "${_consumer}" _consumer_idx)
+    list(FIND ARG_LIBRARIES "${_provider}" _provider_idx)
+    if(_consumer_idx EQUAL -1 OR _provider_idx EQUAL -1)
+      message(FATAL_ERROR
+        "abicheck_add_bundle_case(${CASE_NAME}): LINK_GRAPH edge '${_edge}' "
+        "references a library not declared in LIBRARIES.")
+    endif()
+    list(APPEND _deps_of_${_consumer} ${_provider})
+  endforeach()
+
+  foreach(_side old new)
+    if(_side STREQUAL "old")
+      set(_out ${_old_out})
+    else()
+      set(_out ${_new_out})
+    endif()
+    foreach(_lib IN LISTS ARG_LIBRARIES)
+      set(_tgt "${CASE_NAME}_${_side}_${_lib}")
+      set(_src "${_case_src}/${_side}/${_lib}.cpp")
+      if(NOT EXISTS ${_src})
+        # Allow .c fallback for plain-C bundle cases.
+        set(_src "${_case_src}/${_side}/${_lib}.c")
+      endif()
+      add_library(${_tgt} SHARED ${_src})
+      set_target_properties(${_tgt} PROPERTIES
+        OUTPUT_NAME ${_lib}
+        PREFIX ""
+        LIBRARY_OUTPUT_DIRECTORY ${_out}
+        RUNTIME_OUTPUT_DIRECTORY ${_out}
+        ARCHIVE_OUTPUT_DIRECTORY ${_out}
+        LIBRARY_OUTPUT_DIRECTORY_DEBUG ${_out}
+        LIBRARY_OUTPUT_DIRECTORY_RELEASE ${_out}
+        LIBRARY_OUTPUT_DIRECTORY_RELWITHDEBINFO ${_out}
+        LIBRARY_OUTPUT_DIRECTORY_MINSIZEREL ${_out}
+        RUNTIME_OUTPUT_DIRECTORY_DEBUG ${_out}
+        RUNTIME_OUTPUT_DIRECTORY_RELEASE ${_out}
+        RUNTIME_OUTPUT_DIRECTORY_RELWITHDEBINFO ${_out}
+        RUNTIME_OUTPUT_DIRECTORY_MINSIZEREL ${_out}
+        ARCHIVE_OUTPUT_DIRECTORY_DEBUG ${_out}
+        ARCHIVE_OUTPUT_DIRECTORY_RELEASE ${_out}
+        ARCHIVE_OUTPUT_DIRECTORY_RELWITHDEBINFO ${_out}
+        ARCHIVE_OUTPUT_DIRECTORY_MINSIZEREL ${_out}
+      )
+      # SONAME identical on both sides so compare-release matches by stem.
+      if(NOT MSVC AND NOT APPLE)
+        set_target_properties(${_tgt} PROPERTIES
+          LINK_FLAGS "-Wl,-soname,${_lib}.so.1"
+        )
+      endif()
+      if(ARG_HEADERS)
+        target_include_directories(${_tgt} PRIVATE ${_case_src}/include)
+      endif()
+      # Wire intra-bundle linkage.
+      foreach(_dep IN LISTS _deps_of_${_lib})
+        target_link_libraries(${_tgt} PRIVATE "${CASE_NAME}_${_side}_${_dep}")
+      endforeach()
+    endforeach()
+  endforeach()
+endfunction()
+
+
+# ---------------------------------------------------------------------------
 # Include all case subdirectories
 # ---------------------------------------------------------------------------
 file(GLOB _case_dirs RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} case*)
