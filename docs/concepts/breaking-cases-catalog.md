@@ -1,8 +1,17 @@
 # ABI Breaking Cases Catalog
 
-This catalog summarizes breakage patterns covered by the `examples/` directory (74 cases).
-For full code walkthroughs, see [Examples & Breakage Guide](abi-breaks-explained.md).
-For the complete list of 100+ detected change types, see [Change Kind Reference](../reference/change-kinds.md).
+This catalog summarizes the **breakage patterns** behind the 74 cases under
+`examples/`. It groups cases into thematic clusters with a short description of
+the risk, type, and mitigation pattern — useful for skimming the design space.
+
+For full per-case walkthroughs (code, runtime demo, fix), see the auto-generated
+**[Examples & Case Encyclopedia](../examples/index.md)**. That tree is regenerated
+from `examples/ground_truth.json` and per-case `README.md` files on every doc
+build, so it always reflects all 74 cases. The conceptual narrative — *why* ABI
+breaks happen — lives in [ABI Breaks Explained](abi-breaks-explained.md).
+
+For the complete list of 145 detected change types, see the
+[Change Kind Reference](../reference/change-kinds.md).
 
 ## 1) Symbol/API surface breaks
 

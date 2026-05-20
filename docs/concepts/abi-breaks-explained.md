@@ -1,6 +1,9 @@
 # Examples & Breakage Guide
 
-The `examples/` directory contains real-world ABI/API break scenarios. Each case has paired `v1`/`v2` source files, expected verdicts, and build scripts. Run any case yourself:
+The `examples/` directory contains real-world ABI/API break scenarios — 74
+cases in total. Each case has paired `v1`/`v2` source files, a consumer
+(`app.c`/`app.cpp`), a CMake build, expected verdicts, and a `README.md`
+walkthrough. Run any case yourself:
 
 ```bash
 cd examples/case01_symbol_removal
@@ -9,7 +12,22 @@ gcc -shared -fPIC -g v2.c -o libv2.so
 abicheck compare libv1.so libv2.so --old-header v1.h --new-header v2.h
 ```
 
-Expected verdicts for all cases are in [`examples/ground_truth.json`](https://github.com/napetrov/abicheck/blob/main/examples/ground_truth.json). For the complete list of detected change types, see [Change Kind Reference](../reference/change-kinds.md).
+Expected verdicts for all cases are in
+[`examples/ground_truth.json`](https://github.com/napetrov/abicheck/blob/main/examples/ground_truth.json).
+For the complete list of detected change types, see the
+[Change Kind Reference](../reference/change-kinds.md).
+
+!!! tip "Looking for a specific case?"
+    Every case has its own rendered page under
+    [**Examples & Case Encyclopedia**](../examples/index.md), generated from the
+    per-case `README.md` plus `ground_truth.json`. Browse
+    [by verdict](../examples/index.md#verdict-distribution) (🔴 BREAKING,
+    🟠 API_BREAK, 🟡 COMPATIBLE_WITH_RISK, 🟢 COMPATIBLE, ✅ NO_CHANGE) or
+    [by category](../examples/index.md#browse-by-category).
+
+The sections below give a *conceptual* tour of the major break families with
+representative cases. For the full catalog (all 74 cases, kept in sync
+automatically), use the Encyclopedia.
 
 ## Categories
 

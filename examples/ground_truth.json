@@ -651,7 +651,8 @@
       "abi_break": true,
       "api_break": true,
       "bad_practice": true,
-      "description": "Library exports generic symbol names (init, process, cleanup) without prefix \u2014 collision risk (bad practice \u2014 API design)"
+      "description": "Library exports generic symbol names (init, process, cleanup) without prefix \u2014 collision risk (bad practice \u2014 API design)",
+      "expected_kinds": ["func_removed", "func_added"]
     },
     "case54_used_reserved_field": {
       "expected": "COMPATIBLE",
@@ -664,7 +665,8 @@
       "api_break": false,
       "bad_practice": false,
       "description": "Reserved placeholder fields (__reserved1, __reserved2) renamed to meaningful names at same offsets \u2014 layout unchanged (USED_RESERVED_FIELD)",
-      "known_gap": "macOS: Tool returns NO_CHANGE \u2014 without castxml, Mach-O mode captures only exported symbols; struct field renames are invisible"
+      "known_gap": "macOS: Tool returns NO_CHANGE \u2014 without castxml, Mach-O mode captures only exported symbols; struct field renames are invisible",
+      "expected_kinds": ["used_reserved_field"]
     },
     "case55_type_kind_changed": {
       "expected": "BREAKING",
@@ -677,7 +679,8 @@
       "api_break": true,
       "bad_practice": false,
       "description": "Type changed from struct to union \u2014 fields overlap instead of sequential layout (TYPE_KIND_CHANGED)",
-      "known_gap": "macOS: Tool returns NO_CHANGE \u2014 without castxml, Mach-O mode captures only exported symbols; struct-to-union type kind change is invisible"
+      "known_gap": "macOS: Tool returns NO_CHANGE \u2014 without castxml, Mach-O mode captures only exported symbols; struct-to-union type kind change is invisible",
+      "expected_kinds": ["type_kind_changed"]
     },
     "case56_struct_packing_changed": {
       "expected": "BREAKING",
@@ -690,7 +693,8 @@
       "api_break": true,
       "bad_practice": false,
       "description": "Struct packing changed via pragma pack(1) \u2014 field offsets and sizeof change (STRUCT_PACKING_CHANGED)",
-      "known_gap": "macOS: Tool returns NO_CHANGE \u2014 without castxml, Mach-O mode captures only exported symbols; packing/layout changes are invisible"
+      "known_gap": "macOS: Tool returns NO_CHANGE \u2014 without castxml, Mach-O mode captures only exported symbols; packing/layout changes are invisible",
+      "expected_kinds": ["struct_packing_changed"]
     },
     "case57_enum_underlying_size_changed": {
       "expected": "BREAKING",
@@ -703,7 +707,8 @@
       "api_break": true,
       "bad_practice": false,
       "description": "Enum underlying type grows from int to long due to large sentinel value \u2014 sizeof changes (ENUM_UNDERLYING_SIZE_CHANGED)",
-      "known_gap": "macOS: Tool returns NO_CHANGE \u2014 without castxml, Mach-O mode captures only exported symbols; enum underlying size changes are invisible"
+      "known_gap": "macOS: Tool returns NO_CHANGE \u2014 without castxml, Mach-O mode captures only exported symbols; enum underlying size changes are invisible",
+      "expected_kinds": ["enum_underlying_size_changed"]
     },
     "case58_var_removed": {
       "expected": "BREAKING",
@@ -716,7 +721,8 @@
       "api_break": true,
       "bad_practice": false,
       "description": "Global variable lib_debug_level removed from export table (VAR_REMOVED)",
-      "known_gap": "macOS: Tool returns COMPATIBLE \u2014 Mach-O export table does not distinguish functions from variables; lib_debug_level detected as func_removed_elf_only instead of var_removed"
+      "known_gap": "macOS: Tool returns COMPATIBLE \u2014 Mach-O export table does not distinguish functions from variables; lib_debug_level detected as func_removed_elf_only instead of var_removed",
+      "expected_kinds": ["var_removed"]
     },
     "case59_func_became_inline": {
       "expected": "BREAKING",
@@ -728,7 +734,8 @@
       "abi_break": true,
       "api_break": false,
       "bad_practice": false,
-      "description": "Functions moved from outlined to static inline in header \u2014 symbols disappear from .dynsym (FUNC_REMOVED, inverse of case47)"
+      "description": "Functions moved from outlined to static inline in header \u2014 symbols disappear from .dynsym (FUNC_REMOVED, inverse of case47)",
+      "expected_kinds": ["func_removed"]
     },
     "case60_base_class_position_changed": {
       "expected": "BREAKING",
@@ -753,7 +760,8 @@
       "abi_break": false,
       "api_break": false,
       "bad_practice": false,
-      "description": "New global variable lib_build_number added \u2014 purely additive (VAR_ADDED)"
+      "description": "New global variable lib_build_number added \u2014 purely additive (VAR_ADDED)",
+      "expected_kinds": ["var_added"]
     },
     "case62_type_field_added_compatible": {
       "expected": "COMPATIBLE",
@@ -765,7 +773,8 @@
       "abi_break": false,
       "api_break": false,
       "bad_practice": false,
-      "description": "Field added to opaque struct (callers use pointer only) \u2014 layout change invisible to consumers (TYPE_FIELD_ADDED compatible)"
+      "description": "Field added to opaque struct (callers use pointer only) \u2014 layout change invisible to consumers (TYPE_FIELD_ADDED compatible)",
+      "expected_kinds": ["func_added"]
     },
     "case63_bitfield_changed": {
       "expected": "BREAKING",
@@ -899,7 +908,7 @@
       "api_break": true,
       "bad_practice": false,
       "description": "Intermediate class inserted into hierarchy \u2014 vtable layout shifts, object size changes, covariant return type changes from Circle* to Drawable* (TYPE_BASE_CHANGED)",
-      "expected_kinds": ["type_base_changed"]
+      "expected_kinds": ["type_base_changed", "type_vtable_changed", "func_return_changed"]
     },
     "case73_typedef_underlying_changed": {
       "expected": "BREAKING",

@@ -1,7 +1,7 @@
 # Case 34 — Access Level Changed
 
 
-**Verdict:** 🟡 API_BREAK
+**Verdict:** 🟠 API_BREAK
 **abicheck verdict: API_BREAK** (with headers) / **NO_CHANGE** (ELF-only)
 
 ## What changes
