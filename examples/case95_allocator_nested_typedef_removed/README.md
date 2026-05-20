@@ -52,7 +52,7 @@ contributes the qualifier (e.g. when typedef symbols are emitted as
 | v1 | v2 |
 |----|------|
 | `typedef int value_type;` and four more nested aliases | (removed) |
-| `int* allocate(size_type n);` | `int* allocate(std::size_t n);` |
+| `int* allocate(size_type n);` | `int* allocate(unsigned long n);` |
 
 ## How to fix (as a library maintainer)
 

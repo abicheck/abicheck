@@ -4,15 +4,19 @@
 // so previously-linked binaries still load and run.  But every consumer
 // source TU that wrote `typename my_allocator::value_type` (or any other
 // removed alias) now fails to compile.
+//
+// NOTE: <cstddef> is intentionally avoided here (see v1.h for why).
+// The parameter underlying width matches v1's `size_type` so the
+// member-function mangled names stay identical and the only diff is
+// the nested typedef-set removal.
 #pragma once
-#include <cstddef>
 
 namespace mylib {
 
 class my_allocator {
 public:
-    int* allocate(std::size_t n);
-    void deallocate(int* p, std::size_t n);
+    int* allocate(unsigned long n);
+    void deallocate(int* p, unsigned long n);
 };
 
 } // namespace mylib

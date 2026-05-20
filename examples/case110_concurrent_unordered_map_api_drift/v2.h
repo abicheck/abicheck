@@ -5,7 +5,8 @@
 // every previously-compiled consumer that called the old form fails to
 // link.
 #pragma once
-#include <cstddef>  // matches v1.h so the cstddef typedef set lands in both snapshots
+// (see v1.h: <cstddef> intentionally avoided — castxml + mingw libstdc++ 15
+//  rejects bfloat16 literals in <bits/c++config.h>.)
 
 namespace mylib {
 
