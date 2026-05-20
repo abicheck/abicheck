@@ -594,6 +594,144 @@ class TestManifest:
         with pytest.raises(ValueError, match="optional_provider.*must be a boolean"):
             load_manifest(path)
 
+    def test_load_manifest_pattern_form(self, tmp_path: Path) -> None:
+        path = tmp_path / "patterns.yaml"
+        path.write_text(
+            "version: 1\n"
+            "provides:\n"
+            "  - pattern: \"oneapi::dal::train_ops<*>*\"\n"
+            "    library: libonedal_core.so.1\n"
+            "    optional_provider: false\n",
+        )
+        m = load_manifest(path)
+        assert len(m.entries) == 1
+        assert m.entries[0].pattern == "oneapi::dal::train_ops<*>*"
+        assert m.entries[0].kind() == "pattern"
+
+    def test_load_manifest_template_form(self, tmp_path: Path) -> None:
+        path = tmp_path / "templates.yaml"
+        path.write_text(
+            "version: 1\n"
+            "provides:\n"
+            "  - template: oneapi::dal::train_ops\n"
+            "    instantiations:\n"
+            "      - {Float: float,  Method: \"method::dense\", Task: \"task::train\"}\n"
+            "      - {Float: double, Method: \"method::dense\", Task: \"task::train\"}\n",
+        )
+        m = load_manifest(path)
+        assert m.entries[0].template == "oneapi::dal::train_ops"
+        assert len(m.entries[0].instantiations) == 2
+        assert m.entries[0].instantiations[0]["Float"] == "float"
+        assert m.entries[0].kind() == "template"
+
+    def test_load_manifest_rejects_multiple_shape_keys(self, tmp_path: Path) -> None:
+        path = tmp_path / "mixed.yaml"
+        path.write_text(
+            "version: 1\n"
+            "provides:\n"
+            "  - symbol: foo\n"
+            "    pattern: \"foo*\"\n",
+        )
+        with pytest.raises(ValueError, match="conflicting fields"):
+            load_manifest(path)
+
+    def test_load_manifest_rejects_missing_shape_key(self, tmp_path: Path) -> None:
+        path = tmp_path / "empty.yaml"
+        path.write_text(
+            "version: 1\n"
+            "provides:\n"
+            "  - library: libfoo.so.1\n",
+        )
+        with pytest.raises(ValueError, match="must have one of 'symbol'"):
+            load_manifest(path)
+
+    def test_load_manifest_template_needs_instantiations(self, tmp_path: Path) -> None:
+        path = tmp_path / "no-insts.yaml"
+        path.write_text(
+            "version: 1\n"
+            "provides:\n"
+            "  - template: oneapi::dal::train_ops\n",
+        )
+        with pytest.raises(ValueError, match="non-empty 'instantiations:'"):
+            load_manifest(path)
+
+
+# ---------------------------------------------------------------------------
+# Pattern and template matching against the bundle
+# ---------------------------------------------------------------------------
+
+class TestManifestPatternMatching:
+    def test_pattern_matches_mangled_extern_c_symbols(self) -> None:
+        # extern "C" symbols aren't demangled (demangle returns None for
+        # them); the matcher falls back to the mangled name. This means
+        # patterns work uniformly for C and C++ symbols.
+        new = _snapshot({
+            "libcore.so": _meta(
+                soname="libcore.so.1",
+                exports=["onedal_train_float_dense", "onedal_train_float_sparse",
+                         "onedal_predict_float_dense"],
+            ),
+        })
+        manifest = InstantiationManifest(entries=(
+            ManifestEntry(pattern="onedal_train_*", optional_provider=True),
+        ))
+        result = compare_bundle(new, new, [], manifest=manifest)
+        assert not any(
+            f.kind == ChangeKind.BUNDLE_MANIFEST_INSTANTIATION_REMOVED
+            for f in result.bundle_findings
+        )
+
+    def test_pattern_with_no_match_emits_removed(self) -> None:
+        new = _snapshot({"libcore.so": _meta(soname="libcore.so.1")})
+        manifest = InstantiationManifest(entries=(
+            ManifestEntry(pattern="onedal_train_*", optional_provider=True),
+        ))
+        result = compare_bundle(new, new, [], manifest=manifest)
+        removed = [
+            f for f in result.bundle_findings
+            if f.kind == ChangeKind.BUNDLE_MANIFEST_INSTANTIATION_REMOVED
+        ]
+        assert len(removed) == 1
+        assert removed[0].symbol == "onedal_train_*"
+
+    def test_template_form_matches_demangled_substring(self) -> None:
+        # The expanded form "ns::T<arg1, arg2>" is checked as substring
+        # against the demangled name. For extern "C" symbols (no
+        # demangling), the matcher falls back to the mangled name; we
+        # set up symbol names that contain the substring so the test
+        # doesn't depend on cxxfilt availability.
+        new = _snapshot({
+            "libcore.so": _meta(
+                soname="libcore.so.1",
+                exports=[
+                    "ns::T<float, dense>_ctor",   # carries the expanded form
+                    "ns::T<double, sparse>_ctor",
+                ],
+            ),
+        })
+        manifest = InstantiationManifest(entries=(
+            ManifestEntry(
+                template="ns::T",
+                instantiations=({"P1": "float", "P2": "dense"},),
+                optional_provider=True,
+            ),
+            ManifestEntry(
+                template="ns::T",
+                instantiations=({"P1": "int", "P2": "dense"},),  # not exported
+                optional_provider=True,
+            ),
+        ))
+        result = compare_bundle(new, new, [], manifest=manifest)
+        removed = [
+            f for f in result.bundle_findings
+            if f.kind == ChangeKind.BUNDLE_MANIFEST_INSTANTIATION_REMOVED
+        ]
+        # First entry must NOT fire (float,dense is present);
+        # second entry MUST fire (int,dense is not).
+        assert len(removed) == 1
+        assert "int" in removed[0].description
+        assert "dense" in removed[0].description
+
     def test_required_provider_matches_soname(self) -> None:
         # Manifest format documents both filename keys (libcore.so) and
         # SONAMEs (libcore.so.1) for the `library:` field. The bundle

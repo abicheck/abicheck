@@ -58,59 +58,168 @@ summary and new top-level keys in the JSON output:
 
 ## The three new flags
 
-### `--manifest PATH`
+### `--manifest PATH` *(Experimental)*
 
-A **manifest** is a YAML or JSON file that lists the symbols your
-release publicly promises to ship. With `--manifest`, the bundle layer
-enforces the contract: every promised symbol must be exported by some
-library in the new bundle.
+> **You probably don't need this flag.** For 95% of releases the
+> headers passed to `-H include/` already define the public ABI
+> contract, and the bundle layer derives the rest from ELF resolution.
+> `--manifest` covers a narrow set of cases where the contract lives
+> *outside* the headers. The manifest schema is still being shaped —
+> expect changes between minor versions.
 
-Without a manifest, per-library `func_removed` already flags the symbol
-disappearing — but the tool can't tell whether that symbol was a
-*promised* part of the public ABI or an internal helper that happened
-to be visible. The manifest externalises the contract.
+**What headers + bundle resolution already give you (no manifest needed):**
 
-**Format:**
+- Every public function, type, class declared in headers, with full
+  signature / layout diff.
+- Cross-DSO symbol resolution — sibling drops a symbol another sibling
+  still imports, `extern "C"` signature drift, provider migration.
+- Type drift propagated through template-instantiated symbols.
+
+**When `--manifest` actually adds something:**
+
+- **Template instantiation lists.** `extern template foo<int>;` in a
+  header is just a declaration; the contract is *which specific
+  instantiations get emitted as symbols in the .so*. That list lives
+  in build files / `*_ops.cpp` files, not in headers.
+- **dlopen/dlsym plugin contracts.** Symbols loaded at runtime by name
+  with no header declaration.
+- **Internal-but-stable APIs.** Symbols intentionally exported for
+  trusted consumers (e.g. test harnesses, sibling tooling) but kept
+  out of the public headers.
+- **Symbol-version promises.** Specific `foo@GLIBCXX_3.4.30`
+  guarantees that headers can't express.
+
+You do not need to hand-list every symbol. Listing tens of thousands
+of mangled names is impractical, fragile (mangling shifts with compiler
+ABI / inline-namespace bumps), and unmaintainable. The manifest schema
+provides three entry shapes for this reason:
+
+#### Entry shape 1 — `pattern:` (most useful)
+
+Glob (`fnmatch`) matched against the **demangled** form of every
+exported symbol. The entry passes iff at least one symbol in the new
+bundle matches the glob.
 
 ```yaml
-# release-2.0/manifest.yaml
 version: 1
 provides:
-  - symbol: _ZN6oneapi3dal9train_opsIfNS0_6methodE7defaultENS0_4taskE5trainEEvv
+  - pattern: "oneapi::dal::train_ops<*>*"   # any instantiation of train_ops
     library: libonedal_core.so.1
     optional_provider: false
+  - pattern: "oneapi::dal::detail::*"        # internal helpers — optional
+    library: libonedal_core.so.1
+    optional_provider: true
+  - pattern: "onedal_ext_*"                  # extern-C plugin entry points
+    library: libonedal_core.so.1
+    optional_provider: false
+```
+
+Patterns work for both C++ (matched against the demangled form) and
+`extern "C"` symbols (matched against the literal name, since they
+don't demangle).
+
+#### Entry shape 2 — `template:` + `instantiations:` (the right shape for template libs)
+
+The contract for template-heavy libraries (oneDAL, libtorch, MKL) is
+the **explicit instantiation matrix** the build system enumerates. The
+manifest expresses that directly:
+
+```yaml
+version: 1
+provides:
+  - template: oneapi::dal::train_ops
+    instantiations:
+      - {Float: float,  Method: "method::dense",  Task: "task::train"}
+      - {Float: float,  Method: "method::sparse", Task: "task::train"}
+      - {Float: double, Method: "method::dense",  Task: "task::train"}
+      - {Float: double, Method: "method::sparse", Task: "task::train"}
+    library: libonedal_core.so.1
+    optional_provider: false
+```
+
+abicheck expands each instantiation into the demangled form
+`Template<v1, v2, ...>` and checks that some exported symbol's
+demangled name contains it as a substring. Parameter values appear in
+the angle-bracket list in the order the manifest declares them — so
+**the parameter order in each `instantiations` entry must match the
+template's parameter order**.
+
+Dozens of entries describe thousands of mangled symbols. This is
+where the manifest is genuinely cheaper than checking via headers.
+
+#### Entry shape 3 — `symbol:` (rare; literal exact match)
+
+Reach for this when the promise really is one specific mangled symbol
+— a versioned entry point, a dlsym plugin name, a stable C ABI
+function. Equality match against `.dynsym`.
+
+```yaml
+version: 1
+provides:
   - symbol: oneapi_dal_version
     library: libonedal_core.so.1
     optional_provider: false
-  - symbol: any_train_op_helper
-    optional_provider: true   # any sibling may provide it
+  - symbol: _ZN6oneapi3dal9train_opsIfNS0_6methodE...
+    library: libonedal_core.so.1
+    optional_provider: false
 ```
 
-Each entry has:
+You generally don't want this for templates — instantiation form is
+shorter, demangler-version-independent, and easier to review.
 
-- `symbol` *(required)* — the exported symbol name (mangled for C++,
-  plain for `extern "C"`).
+#### Shared fields
+
+Every entry accepts:
+
 - `library` *(optional)* — required when `optional_provider: false`.
   Names a specific library (filename like `libcore.so` or SONAME like
   `libcore.so.1` both work).
 - `optional_provider` *(default `true`)* — when `true`, any sibling in
   the bundle can satisfy the promise; when `false`, the symbol must be
   provided by the named `library`. Must be a real boolean (`true` /
-  `false`); the manifest loader rejects string `"false"` or integer
-  `1` to prevent silent contract weakening.
+  `false`); strings like `"false"` and integers are rejected.
 
-**Verdicts:**
+Exactly one of `symbol` / `pattern` / `template` per entry; mixing
+raises a `ValueError`.
+
+#### Verdicts
 
 | Manifest entry status in new bundle | ChangeKind | Default verdict |
 |---|---|---|
-| Promised symbol missing | `bundle_manifest_instantiation_removed` | BREAKING |
-| Promised at wrong provider (when `optional_provider: false`) | `bundle_manifest_instantiation_removed` | BREAKING |
-| Manifest lists a symbol that the old bundle didn't export | `bundle_manifest_instantiation_added` | COMPATIBLE (addition) |
+| No matching symbol | `bundle_manifest_instantiation_removed` | BREAKING |
+| Matched but at wrong provider (when `optional_provider: false`) | `bundle_manifest_instantiation_removed` | BREAKING |
+| Matched in new bundle but not in old bundle | `bundle_manifest_instantiation_added` | COMPATIBLE (addition) |
 
 A malformed manifest aborts the run with a `ClickException`. A failing
 `--manifest` is treated as a user error, not an environmental quirk —
 unlike the bundle-engine-internal failures, which degrade to per-library
 results with a warning.
+
+#### Bootstrapping a manifest
+
+Hand-writing the first manifest is the hard part. abicheck ships a
+helper that produces a starting point:
+
+```bash
+python scripts/extract_bundle_manifest.py release-2.0/lib/ > manifest.yaml
+```
+
+The script walks the release's `.so` files, demangles every exported
+symbol, groups by top-level C++ namespace, and emits one `pattern:`
+entry per (namespace, library) pair. The result is intentionally
+over-broad — every symbol the bundle currently exports is promised.
+A curator then narrows it:
+
+- Drop entries for internal namespaces (`detail::`, `impl::`).
+- Replace generic `ns::*` patterns with specific `template:` entries
+  for explicitly-instantiated classes.
+- Mark experimental surface `optional_provider: true`.
+- Delete entries for libraries that aren't part of the public contract
+  (test fixtures, internal tooling shipped alongside the release).
+
+You don't have to do this all at once. The minimal useful manifest is
+one entry per library covering the namespaces you actually want to
+freeze.
 
 ### `--bundle-system-providers libfoo,libbar`
 

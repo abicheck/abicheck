@@ -226,23 +226,62 @@ their meaning; the bundle findings can promote 0 → 4. Bundle analysis is
 **enabled by default**; users do not need to do anything to opt in.
 `--no-bundle-analysis` is the documented opt-out.
 
-### `--manifest` format
+### `--manifest` format (**Experimental** — schema may change in minor releases)
+
+The manifest exists for promises that headers cannot express:
+explicit template instantiation lists, `dlopen`/`dlsym` plugin
+contracts, internal-but-stable APIs, and symbol-version guarantees.
+For the common case (headers + bundle resolution), no manifest is
+needed.
+
+Hand-listing every mangled symbol is infeasible for libraries with
+thousands of exports and unstable under compiler-ABI shifts. The
+schema therefore accepts three entry shapes; the matcher works
+against demangled symbol names where possible.
 
 ```yaml
 # manifest.yaml — versioned ABI promises for a bundle
 version: 1
 provides:
-  - symbol: _ZN6oneapi3dal9train_opsIfNS0_6methodE7defaultENS0_4taskE5trainEEvv
+  # 1. pattern: glob (fnmatch) against the demangled form. Most common.
+  - pattern: "oneapi::dal::train_ops<*>*"
     library: libonedal_core.so.1
-    optional_provider: true   # may be in any library in the bundle
+    optional_provider: false
+
+  # 2. template + instantiations: the right shape for template libs.
+  #    abicheck expands each entry into "Template<v1, v2, ...>" and
+  #    matches as substring against demangled exported symbols.
+  - template: oneapi::dal::train_ops
+    instantiations:
+      - {Float: float,  Method: "method::dense",  Task: "task::train"}
+      - {Float: double, Method: "method::sparse", Task: "task::train"}
+    library: libonedal_core.so.1
+    optional_provider: false
+
+  # 3. symbol: literal mangled-name equality. Rare; reserve for
+  #    versioned entry points / dlsym plugin contracts.
   - symbol: oneapi_dal_version
     library: libonedal_core.so.1
     optional_provider: false
 ```
 
-`library:` is enforcement of provider when `optional_provider: false`.
+Exactly one of `symbol` / `pattern` / `template` per entry. `library:`
+is enforcement of provider when `optional_provider: false`;
 `optional_provider: true` accepts any sibling provider (lets bundles
 reshuffle internal hosting without breaking the contract).
+`optional_provider` must be a real boolean — strings and integers are
+rejected to prevent silent contract weakening.
+
+The `scripts/extract_bundle_manifest.py` helper emits a baseline
+manifest from an existing release directory (one coarse `pattern:`
+entry per namespace+library); users then curate it.
+
+**Why "Experimental":** the schema mixes three matching modes and the
+template-form matcher uses substring matching against demangled names,
+which works in practice but isn't a complete equivalence to Itanium
+mangling. We expect to refine the entry shapes (especially how
+default template arguments and SFINAE-pruned overloads are expressed)
+based on usage feedback from oneDAL-shaped consumers.
 
 ### Library identity within a bundle
 

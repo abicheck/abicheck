@@ -244,11 +244,60 @@ class BundleDiffResult:
 
 @dataclass(frozen=True)
 class ManifestEntry:
-    """One promised symbol in an :class:`InstantiationManifest`."""
+    """One promised entry in an :class:`InstantiationManifest`.
 
-    symbol: str
-    library: str | None         # required provider, or None if any sibling is acceptable
-    optional_provider: bool     # True = any sibling may provide; False = library is required
+    Exactly one of ``symbol``, ``pattern``, or ``template`` is set.
+
+    - ``symbol`` — a literal mangled symbol name. Matched by equality
+      against the bundle's exported-symbol set. Useful when the contract
+      genuinely is one specific symbol (versioned entry points, dlsym
+      plugin contracts).
+    - ``pattern`` — a glob (``fnmatch`` semantics, with ``*`` and ``?``)
+      matched against the *demangled* form of every exported symbol.
+      Match is found-iff any exported symbol's demangled form matches
+      the glob. Best for "any train_ops<*> for these algorithm classes"
+      type promises that headers don't capture as a contract.
+    - ``template`` — a C++ qualified template name plus an
+      ``instantiations`` list of parameter assignments. abicheck
+      expands each assignment into a substring of the demangled form
+      ``Template<v1, v2, ...>`` and looks for at least one exported
+      symbol whose demangled name contains it. The natural shape for
+      libraries (oneDAL, libtorch, MKL) that maintain an explicit
+      instantiation matrix in their build system.
+    """
+
+    symbol: str | None = None                    # literal mangled symbol
+    pattern: str | None = None                   # fnmatch glob on demangled form
+    template: str | None = None                  # C++ qualified template name
+    instantiations: tuple[dict[str, str], ...] = ()  # for template form
+    library: str | None = None                   # provider when optional_provider=False
+    optional_provider: bool = True               # True = any sibling may provide
+
+    def kind(self) -> str:
+        """Return ``'symbol'``, ``'pattern'``, or ``'template'`` for diagnostics."""
+        if self.symbol is not None:
+            return "symbol"
+        if self.pattern is not None:
+            return "pattern"
+        return "template"
+
+    def display_name(self) -> str:
+        """Best human-readable identifier for the entry (used in findings).
+
+        For template entries, expands the instantiations into the same
+        ``Template<arg1, arg2>`` form the matcher uses so the finding
+        actually identifies *which* parameter set failed — otherwise
+        users would see ``Template`` and have no idea which instantiation
+        was missing.
+        """
+        if self.symbol is not None:
+            return self.symbol
+        if self.pattern is not None:
+            return self.pattern
+        if self.template is not None and self.instantiations:
+            expanded = _expand_instantiations(self.template, self.instantiations)
+            return ", ".join(expanded)
+        return self.template or "<empty>"
 
 
 @dataclass(frozen=True)
@@ -256,8 +305,8 @@ class InstantiationManifest:
     """A list of symbols a release publicly promises to ship.
 
     Loaded from a YAML/JSON file via :func:`load_manifest`. The bundle
-    layer enforces that every entry in the *old* manifest is exported by
-    *some* library in the new bundle (or the named one when
+    layer enforces that every entry has at least one matching exported
+    symbol in the new bundle (or at the named provider when
     ``optional_provider=False``).
     """
 
@@ -265,18 +314,52 @@ class InstantiationManifest:
 
     @property
     def symbols(self) -> frozenset[str]:
-        return frozenset(e.symbol for e in self.entries)
+        """Literal-symbol entries only (back-compat for existing callers)."""
+        return frozenset(e.symbol for e in self.entries if e.symbol is not None)
+
+
+def _expand_instantiations(template: str, instantiations: tuple[dict[str, str], ...]) -> list[str]:
+    """Build demangled-form substring patterns from a template + parameter list.
+
+    Returns a list of strings like ``"oneapi::dal::train_ops<float, method::dense, task::train>"``
+    that the matcher tests as substring against the demangled form of
+    each exported symbol. Parameter order in the produced angle-bracket
+    list is the iteration order of the dict (insertion order, preserved
+    in Python 3.7+). YAML/JSON manifests therefore declare parameters
+    in the same order the template's parameter list takes them.
+    """
+    expanded: list[str] = []
+    for inst in instantiations:
+        args = ", ".join(str(v) for v in inst.values())
+        expanded.append(f"{template}<{args}>")
+    return expanded
 
 
 def load_manifest(path: Path) -> InstantiationManifest:
     """Load a manifest from YAML (``.yaml``/``.yml``) or JSON.
 
-    Format::
+    Format (all three entry shapes are accepted; exactly one of
+    ``symbol`` / ``pattern`` / ``template`` per entry)::
 
         version: 1
         provides:
-          - symbol: foo_v2
-            library: libfoo.so.1
+          # 1. Literal symbol — exact match against .dynsym.
+          - symbol: oneapi_dal_version
+            library: libonedal_core.so.1
+            optional_provider: false
+
+          # 2. Glob pattern — fnmatch against demangled form.
+          - pattern: "oneapi::dal::detail::train_kernel<*>*"
+            library: libonedal_core.so.1
+            optional_provider: false
+
+          # 3. Template + instantiations — natural shape for template libs.
+          - template: oneapi::dal::train_ops
+            instantiations:
+              - {Float: float,  Method: "method::dense",  Task: "task::train"}
+              - {Float: float,  Method: "method::sparse", Task: "task::train"}
+              - {Float: double, Method: "method::dense",  Task: "task::train"}
+            library: libonedal_core.so.1
             optional_provider: false
     """
     import json
@@ -292,21 +375,69 @@ def load_manifest(path: Path) -> InstantiationManifest:
         raise ValueError(f"manifest {path}: missing top-level 'provides:' list")
     entries: list[ManifestEntry] = []
     for raw in data["provides"]:
-        if not isinstance(raw, dict) or "symbol" not in raw:
-            raise ValueError(f"manifest {path}: entry missing 'symbol' field: {raw!r}")
+        if not isinstance(raw, dict):
+            raise ValueError(f"manifest {path}: entry is not a mapping: {raw!r}")
+        # Exactly one of symbol / pattern / template must be set.
+        shape_keys = [k for k in ("symbol", "pattern", "template") if k in raw]
+        if len(shape_keys) == 0:
+            raise ValueError(
+                f"manifest {path}: entry must have one of 'symbol', "
+                f"'pattern', or 'template': {raw!r}",
+            )
+        if len(shape_keys) > 1:
+            raise ValueError(
+                f"manifest {path}: entry has conflicting fields "
+                f"{shape_keys!r}; pick exactly one: {raw!r}",
+            )
         optional_provider = raw.get("optional_provider", True)
         if not isinstance(optional_provider, bool):
             raise ValueError(
                 f"manifest {path}: 'optional_provider' must be a boolean "
                 f"(got {type(optional_provider).__name__} {optional_provider!r}): {raw!r}",
             )
-        entries.append(
-            ManifestEntry(
-                symbol=str(raw["symbol"]),
-                library=str(raw["library"]) if raw.get("library") else None,
-                optional_provider=optional_provider,
-            ),
-        )
+        library = str(raw["library"]) if raw.get("library") else None
+        if "template" in raw:
+            insts_raw = raw.get("instantiations", [])
+            if not isinstance(insts_raw, list) or not insts_raw:
+                raise ValueError(
+                    f"manifest {path}: template entry needs a non-empty "
+                    f"'instantiations:' list: {raw!r}",
+                )
+            insts: list[dict[str, str]] = []
+            for inst in insts_raw:
+                if not isinstance(inst, dict):
+                    raise ValueError(
+                        f"manifest {path}: each instantiation must be a "
+                        f"mapping of parameter name to value: {inst!r}",
+                    )
+                # Preserve dict insertion order from YAML/JSON; coerce
+                # values to str so YAML's `true`/`false`/numbers render
+                # correctly in the expanded template signature.
+                insts.append({str(k): str(v) for k, v in inst.items()})
+            entries.append(
+                ManifestEntry(
+                    template=str(raw["template"]),
+                    instantiations=tuple(insts),
+                    library=library,
+                    optional_provider=optional_provider,
+                ),
+            )
+        elif "pattern" in raw:
+            entries.append(
+                ManifestEntry(
+                    pattern=str(raw["pattern"]),
+                    library=library,
+                    optional_provider=optional_provider,
+                ),
+            )
+        else:
+            entries.append(
+                ManifestEntry(
+                    symbol=str(raw["symbol"]),
+                    library=library,
+                    optional_provider=optional_provider,
+                ),
+            )
     return InstantiationManifest(entries=tuple(entries))
 
 
@@ -851,6 +982,62 @@ def _detect_version_drift(
     return findings
 
 
+def _match_entry(
+    entry: ManifestEntry,
+    snapshot: BundleSnapshot,
+) -> tuple[list[str], list[ProviderEntry]]:
+    """Return ``(matched_demangled_substrings, providers)`` for *entry*.
+
+    For ``symbol`` entries: literal lookup against the resolution graph.
+    For ``pattern`` and ``template`` entries: scan every library's
+    exported symbols, demangle them, and collect any that match the
+    glob/substring. *providers* is the list of libraries that exported
+    any matching symbol (one entry per library, not per symbol).
+
+    Demangling is performed via :func:`abicheck.demangle.demangle`;
+    when the demangler is unavailable, pattern/template entries fall
+    back to matching the mangled name itself (better than nothing,
+    catches `extern "C"` symbols).
+    """
+    import fnmatch
+
+    from .demangle import demangle as _demangle
+
+    if entry.symbol is not None:
+        providers = snapshot.resolution.providers_for(entry.symbol)
+        return ([entry.symbol] if providers else []), providers
+
+    if entry.pattern is not None:
+        targets = [entry.pattern]
+    else:
+        targets = _expand_instantiations(entry.template or "", entry.instantiations)
+
+    matched: list[str] = []
+    provider_set: set[str] = set()
+    for lib_name, meta in snapshot.metadata.items():
+        for sym in meta.symbols:
+            if sym.visibility not in ("default", "protected"):
+                continue
+            demangled = _demangle(sym.name) or sym.name
+            for target in targets:
+                if entry.pattern is not None:
+                    if fnmatch.fnmatchcase(demangled, target):
+                        matched.append(demangled)
+                        provider_set.add(lib_name)
+                        break
+                else:
+                    # template form: substring match on the expanded signature
+                    if target in demangled:
+                        matched.append(demangled)
+                        provider_set.add(lib_name)
+                        break
+    providers = [
+        ProviderEntry(library=name, version="")
+        for name in sorted(provider_set)
+    ]
+    return matched, providers
+
+
 def _detect_manifest_drift(
     old: BundleSnapshot,
     new: BundleSnapshot,
@@ -858,25 +1045,25 @@ def _detect_manifest_drift(
 ) -> list[BundleFinding]:
     """Enforce a release manifest against the new bundle.
 
-    For each promised symbol:
-      - If absent from the new bundle entirely → ``BUNDLE_MANIFEST_INSTANTIATION_REMOVED``.
-      - If present but at the wrong provider (when ``optional_provider=False``)
+    For each promised entry (symbol / pattern / template):
+      - If no exported symbol matches → ``BUNDLE_MANIFEST_INSTANTIATION_REMOVED``.
+      - If matched but at the wrong provider (when ``optional_provider=False``)
         → ``BUNDLE_MANIFEST_INSTANTIATION_REMOVED`` (contract names the lib).
 
     Symbols in the new bundle but not in the manifest are not flagged
-    here (out-of-manifest additions are not necessarily promised).
+    here (out-of-manifest exports are not necessarily promised).
     """
     findings: list[BundleFinding] = []
     for entry in manifest.entries:
-        providers = new.resolution.providers_for(entry.symbol)
-        if not providers:
+        matched, providers = _match_entry(entry, new)
+        if not matched:
             findings.append(
                 BundleFinding(
                     kind=ChangeKind.BUNDLE_MANIFEST_INSTANTIATION_REMOVED,
-                    symbol=entry.symbol,
+                    symbol=entry.display_name(),
                     description=(
-                        f"Manifest promises {entry.symbol} but no library in the "
-                        f"new bundle exports it."
+                        f"Manifest promises {entry.kind()} {entry.display_name()!r} "
+                        f"but no exported symbol in the new bundle matches it."
                     ),
                     provider_library=entry.library,
                 ),
@@ -886,8 +1073,6 @@ def _detect_manifest_drift(
             # Match the manifest `library:` field against either the
             # bundle's canonical library key (e.g. "libcore.so") or the
             # ELF SONAME of any candidate provider (e.g. "libcore.so.1").
-            # The ADR documents both spellings; user-supplied manifests in
-            # practice use SONAMEs (e.g. libonedal_core.so.1).
             def _matches(prov: ProviderEntry) -> bool:
                 if prov.library == entry.library:
                     return True
@@ -898,30 +1083,32 @@ def _detect_manifest_drift(
                 findings.append(
                     BundleFinding(
                         kind=ChangeKind.BUNDLE_MANIFEST_INSTANTIATION_REMOVED,
-                        symbol=entry.symbol,
+                        symbol=entry.display_name(),
                         description=(
-                            f"Manifest requires {entry.symbol} to be provided by "
-                            f"{entry.library}, but it is provided by {got} instead."
+                            f"Manifest requires {entry.display_name()!r} to be "
+                            f"provided by {entry.library}, but it is provided by "
+                            f"{got} instead."
                         ),
                         provider_library=entry.library,
                         new_value=got,
                     ),
                 )
 
-    # Newly-promised symbols (present in new manifest but not old export set).
-    old_exports = set(old.resolution.provides.keys())
+    # Newly-promised entries (matched in new bundle but not in old).
     for entry in manifest.entries:
-        if entry.symbol in old_exports:
+        matched_new, _ = _match_entry(entry, new)
+        if not matched_new:
             continue
-        if not new.resolution.providers_for(entry.symbol):
+        matched_old, _ = _match_entry(entry, old)
+        if matched_old:
             continue
         findings.append(
             BundleFinding(
                 kind=ChangeKind.BUNDLE_MANIFEST_INSTANTIATION_ADDED,
-                symbol=entry.symbol,
+                symbol=entry.display_name(),
                 description=(
-                    f"Manifest now promises {entry.symbol}; not present in the "
-                    f"old bundle. New public instantiation."
+                    f"Manifest now promises {entry.kind()} {entry.display_name()!r}; "
+                    f"not exported by the old bundle. New public surface."
                 ),
                 provider_library=entry.library,
             ),
