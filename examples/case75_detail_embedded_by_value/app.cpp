@@ -6,7 +6,7 @@
 int main() {
     using namespace mylib;
     table t;
-    std::printf("rows=%zu cols=%zu (expect 3 4)\n",
+    std::printf("rows=%lu cols=%lu (expect 3 4)\n",
                 t.row_count(), t.column_count());
     return 0;
 }

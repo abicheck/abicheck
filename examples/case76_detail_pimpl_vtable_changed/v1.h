@@ -11,7 +11,13 @@ namespace detail {
 
 class algorithm_iface {
 public:
-    virtual ~algorithm_iface() = default;
+    // Out-of-line destructor — gives this abstract class a *key function*
+    // so the vtable / typeinfo symbols are emitted in v1's binary. Without
+    // a key function, MSVC / Mach-O linkers may omit the vtable symbol
+    // entirely (it would only appear in TUs that instantiate a derived
+    // class), in which case the v1→v2 diff would look like the vtable was
+    // *added* instead of *changed* — masking the real ABI break.
+    virtual ~algorithm_iface();
     virtual int run() = 0;
     virtual int status() const = 0;
 };

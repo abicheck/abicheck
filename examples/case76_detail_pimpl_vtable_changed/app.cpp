@@ -5,6 +5,7 @@
 #include <cstdio>
 
 int main() {
+    using namespace mylib;
     auto* a = mylib_make_svm();
     a->run();
     std::printf("status=%d (expect 1)\n", a->status());

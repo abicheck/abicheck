@@ -2,6 +2,10 @@
 
 namespace mylib {
 
+namespace detail {
+algorithm_iface::~algorithm_iface() = default;
+} // namespace detail
+
 svm_algorithm::svm_algorithm() : state_(0) {}
 int svm_algorithm::run() { state_ = 1; return 0; }
 int svm_algorithm::status() const { return state_; }

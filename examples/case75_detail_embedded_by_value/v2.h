@@ -5,15 +5,17 @@
 // public `table` type.
 #pragma once
 
-#include <cstddef>
+// See v1.h — no <cstddef> include to avoid GCC 15+ libstdc++ headers
+// that castxml's bundled clang can't parse (the ``bf16`` floating-point
+// literal in ``bits/c++config.h``).
 
 namespace mylib {
 namespace detail {
 
 struct table_impl {
-    std::size_t row_count;
-    std::size_t column_count;
-    std::size_t layout_kind;   // NEW FIELD — leaks via mylib::table
+    unsigned long row_count;
+    unsigned long column_count;
+    unsigned long layout_kind;   // NEW FIELD — leaks via mylib::table
 };
 
 } // namespace detail
@@ -21,9 +23,9 @@ struct table_impl {
 class table {
 public:
     table();
-    std::size_t row_count() const;
-    std::size_t column_count() const;
-    std::size_t layout_kind() const;
+    unsigned long row_count() const;
+    unsigned long column_count() const;
+    unsigned long layout_kind() const;
 private:
     detail::table_impl impl_;
 };

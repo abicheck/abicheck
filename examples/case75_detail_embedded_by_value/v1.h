@@ -10,15 +10,19 @@
 // example of layout-coupled detail types).
 #pragma once
 
-#include <cstddef>
+// NOTE: intentionally not including <cstddef> — castxml's bundled clang
+// chokes on GCC 15+ libstdc++ headers ("invalid suffix 'bf16'" in
+// bits/c++config.h). We use ``unsigned long`` directly instead, which
+// is wide enough for the dimensions stored here on every supported
+// platform and keeps this header free of system-include dependencies.
 
 namespace mylib {
 namespace detail {
 
 // "Internal" implementation type, embedded by value below.
 struct table_impl {
-    std::size_t row_count;
-    std::size_t column_count;
+    unsigned long row_count;
+    unsigned long column_count;
 };
 
 } // namespace detail
@@ -26,8 +30,8 @@ struct table_impl {
 class table {
 public:
     table();
-    std::size_t row_count() const;
-    std::size_t column_count() const;
+    unsigned long row_count() const;
+    unsigned long column_count() const;
 private:
     detail::table_impl impl_;
 };

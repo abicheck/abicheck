@@ -3,6 +3,7 @@
 namespace mylib {
 
 namespace detail {
+algorithm_iface::~algorithm_iface() = default;
 int algorithm_iface::progress() const { return 0; }
 } // namespace detail
 
