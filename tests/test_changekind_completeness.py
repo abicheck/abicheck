@@ -187,6 +187,9 @@ ASSERTED_CHANGE_KINDS: set[ChangeKind] = {
     ChangeKind.FLEXIBLE_ARRAY_MEMBER_CHANGED,
     # DWARF-based = delete detection (P3 gap)
     ChangeKind.FUNC_DELETED_DWARF,
+    # Internal-namespace leak via public API (oneDAL-style detail:: pattern)
+    # Exercised in tests/test_internal_leak.py.
+    ChangeKind.INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API,
 }
 
 

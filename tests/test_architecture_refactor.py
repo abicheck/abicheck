@@ -225,7 +225,7 @@ class TestPostProcessingPipeline:
     """Pipeline-based post-processing."""
 
     def test_default_pipeline_has_expected_steps(self):
-        """DEFAULT_PIPELINE has all 11 expected steps."""
+        """DEFAULT_PIPELINE has all expected steps in order."""
         from abicheck.post_processing import DEFAULT_PIPELINE
 
         expected_names = [
@@ -240,6 +240,7 @@ class TestPostProcessingPipeline:
             "suppress_renamed_pairs",
             "filter_redundant",
             "enrich_affected_symbols",
+            "detect_internal_leaks",
         ]
         assert DEFAULT_PIPELINE.step_names == expected_names
 

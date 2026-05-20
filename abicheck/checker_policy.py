@@ -340,6 +340,14 @@ class ChangeKind(str, Enum):
     SYCL_RUNTIME_VERSION_CHANGED = "sycl_runtime_version_changed"
     SYCL_BACKEND_DRIVER_REQ_CHANGED = "sycl_backend_driver_req_changed"
 
+    # ── Internal-namespace leak via public API ───────────────────────────
+    # A type that lives in an "internal" namespace (e.g. ::detail::, ::impl::,
+    # ::internal::) has changed and is reachable from a public exported type
+    # or symbol. This is the oneDAL-style break where users of the public
+    # API still observe ABI differences because the public type inherits
+    # from / embeds-by-value / uses-as-template-argument the internal type.
+    INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API = "internal_type_leaks_via_public_api"
+
 
 class HasKind(Protocol):
     kind: ChangeKind

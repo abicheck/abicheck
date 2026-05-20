@@ -530,4 +530,15 @@ REGISTRY = ChangeKindRegistry([
     _E("func_deleted_dwarf", _B,
        impact="Function marked as deleted (= delete) detected via DWARF debug info. "
               "The function was previously callable; callers will fail to link."),
+
+    # ── Internal-namespace leak via public API ──────────────────────────
+    _E("internal_type_leaks_via_public_api", _B,
+       impact="A type in an internal namespace (e.g. ::detail::, ::impl::, ::internal::) "
+              "changed and is reachable from a public exported type or symbol "
+              "(via inheritance, embedded-by-value field, or template argument). "
+              "Although the type is conceptually 'internal', it is part of the "
+              "effective public ABI: changes to it propagate into the layout, "
+              "vtable, or compiled code of every consumer of the public type. "
+              "Common in libraries such as oneDAL that wrap implementation in a "
+              "'detail' namespace."),
 ])

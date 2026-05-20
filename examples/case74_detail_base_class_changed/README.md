@@ -1,0 +1,88 @@
+# Case 74: Internal `detail::` base class layout change leaks via public API
+
+**Category:** Internal-leak | **Verdict:** BREAKING
+
+## What breaks
+
+The library declares its "internal" implementation helpers inside a
+`detail::` namespace — matching the convention used by oneDAL, oneTBB,
+many Boost libraries, and the standard library's `std::__detail`:
+
+```cpp
+namespace mylib::detail {
+    class descriptor_base { /* ... */ };
+}
+class knn_descriptor : public detail::descriptor_base { /* ... */ };
+```
+
+v2 adds an `int max_iter_` member to `detail::descriptor_base`. From
+the library author's perspective this is purely an internal change.
+From consumers' perspective it's a binary ABI break:
+
+- `sizeof(knn_descriptor)` increases by 4–8 bytes (alignment-dependent).
+- The offset of `neighbor_count_` (declared in the derived public class)
+  shifts because the base subobject grew.
+- Stack-allocated `knn_descriptor` instances in caller code overflow
+  their pre-v2 frame slots.
+- Heap-allocated objects from callers compiled against v1 headers
+  under-allocate when run against v2 binaries.
+
+## Why abicheck catches it
+
+Existing detectors already report `type_size_changed` on
+`detail::descriptor_base`. By itself that finding is easy for a
+reviewer to dismiss as "internal-only". The
+`internal_type_leaks_via_public_api` overlay added in this PR walks
+the reachability graph from every public exported symbol and surfaces
+a synthetic finding that names the *public-facing* class
+(`mylib::knn_descriptor`) together with the chain
+`knn_descriptor → base:detail::descriptor_base`, making the public
+impact impossible to miss.
+
+## Code diff
+
+```cpp
+// v1
+namespace mylib::detail {
+class descriptor_base {
+public:
+    int class_count_;
+};
+}
+
+// v2 — single new field in the "internal" base
+namespace mylib::detail {
+class descriptor_base {
+public:
+    int class_count_;
+    int max_iter_;        // NEW — shifts every derived layout
+};
+}
+```
+
+## How to fix
+
+Treat `detail::` as a private implementation surface that is *not*
+allowed to leak through the binary interface. The two main patterns
+are pimpl (hold a pointer to an opaque struct) and a true private
+interface (forward-declared header consumers cannot include):
+
+```cpp
+// Pimpl — internal layout changes never affect the public sizeof.
+class knn_descriptor {
+public:
+    knn_descriptor();
+    ~knn_descriptor();
+    int get_class_count() const;
+private:
+    struct impl;
+    impl* p_;             // size is fixed at sizeof(void*)
+};
+```
+
+## References
+
+- Itanium C++ ABI §2.5: object layout and base subobjects.
+- oneDAL coding guidelines: `detail::` symbols are explicitly
+  documented as unstable, but the *layout* still leaks through public
+  derived classes if pimpl is not used.

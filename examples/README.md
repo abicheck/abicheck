@@ -1,6 +1,6 @@
 # ABI Scenario Catalog
 
-This directory contains **74 published cases** (`01–73` + `26b`) demonstrating real-world ABI/API break scenarios. Each case is a minimal, compilable C/C++ example with:
+This directory contains **77 published cases** (`01–76` + `26b`) demonstrating real-world ABI/API break scenarios. Each case is a minimal, compilable C/C++ example with:
 
 - Paired `v1/` and `v2/` source + headers.
 - A consumer `app.c` / `app.cpp` that demonstrates the actual failure at runtime.
@@ -17,7 +17,7 @@ The catalog drives abicheck's benchmark and serves as an encyclopedia of ABI pit
 
 | Verdict | Count | `checker_policy.py` set | Icon |
 |---------|-------|-------------------------|------|
-| BREAKING | 53 | `BREAKING_KINDS` | 🔴 |
+| BREAKING | 56 | `BREAKING_KINDS` | 🔴 |
 | API_BREAK | 2 | `API_BREAK_KINDS` | 🟠 |
 | COMPATIBLE_WITH_RISK | 1 | `RISK_KINDS` | 🟡 |
 | COMPATIBLE (addition) | 7 | `ADDITION_KINDS` | 🟢 |
@@ -115,6 +115,9 @@ Some policy-escalated source/contract breaks (notably case30, case35) may keep i
 | [71](case71_inline_namespace_moved/README.md) | Inline Namespace Moved (v1→v2) | Breaking | BREAKING 🔴 |
 | [72](case72_covariant_return_changed/README.md) | Covariant Return Type Changed (hierarchy insert) | Breaking | BREAKING 🔴 |
 | [73](case73_typedef_underlying_changed/README.md) | Typedef Underlying Type Changed (int→void*) | Breaking | BREAKING 🔴 |
+| [74](case74_detail_base_class_changed/README.md) | Internal `detail::` Base Class Layout Change (oneDAL-style leak) | Breaking | BREAKING 🔴 |
+| [75](case75_detail_embedded_by_value/README.md) | Internal `detail::` Impl Embedded by Value | Breaking | BREAKING 🔴 |
+| [76](case76_detail_pimpl_vtable_changed/README.md) | Internal `detail::` Polymorphic Base Vtable Change | Breaking | BREAKING 🔴 |
 
 ---
 
@@ -152,7 +155,7 @@ cmake --build build
 
 ## Related documentation
 
-- **Unified 74-case accuracy table** (all configurations, FP/FN): [`../README.md#validation-snapshot`](../README.md#validation-snapshot)
+- **Unified 77-case accuracy table** (all configurations, FP/FN): [`../README.md#validation-snapshot`](../README.md#validation-snapshot)
 - **Per-case accuracy matrix and methodology:** [Tool Comparison & Benchmarks](../docs/reference/tool-comparison.md)
 - **What counts as an ABI break (with code):** [ABI Breaks Explained](../docs/concepts/abi-breaks-explained.md)
 - **Dependency ABI leaks** (case 18 background): [`case18_dependency_leak/README.md`](case18_dependency_leak/README.md)

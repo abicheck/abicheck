@@ -923,6 +923,49 @@
       "bad_practice": false,
       "description": "Typedef handle_t underlying type changed from int to void* \u2014 sizeof changes from 4 to 8 bytes, all functions using the typedef inherit the break (TYPEDEF_BASE_CHANGED)",
       "expected_kinds": ["typedef_base_changed"]
+    },
+    "case74_detail_base_class_changed": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "abi_break": true,
+      "api_break": true,
+      "bad_practice": false,
+      "description": "Internal-namespace leak: mylib::detail::descriptor_base gains a field; public mylib::knn_descriptor inherits from it, so sizeof/layout of the public class changes. Detected by existing type_size_changed/struct_field_added, escalated by internal_type_leaks_via_public_api.",
+      "expected_kinds": ["internal_type_leaks_via_public_api"]
+    },
+    "case75_detail_embedded_by_value": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "abi_break": true,
+      "api_break": true,
+      "bad_practice": false,
+      "description": "Internal-namespace leak: mylib::detail::table_impl gains a field; public mylib::table embeds it by value, so sizeof(table) grows. Detected by existing struct_field_added on detail::table_impl, escalated by internal_type_leaks_via_public_api.",
+      "expected_kinds": ["internal_type_leaks_via_public_api"]
+    },
+    "case76_detail_pimpl_vtable_changed": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "abi_break": true,
+      "api_break": true,
+      "bad_practice": false,
+      "known_gap": "macOS / Windows: vtable break is currently only detectable via symbol_size_changed on the ELF vtable symbol; Mach-O / PE export tables carry no symbol size, and castxml emits vtable_index=None for all virtuals so the structural diff collapses to a single slot — neither signal fires on these platforms",
+      "description": "Internal-namespace leak: mylib::detail::algorithm_iface gains a virtual method inserted mid-vtable; public mylib::svm_algorithm inherits from it, so vtable slot indices shift for all consumers. Detected by existing type_vtable_changed / func_virtual_added, escalated by internal_type_leaks_via_public_api.",
+      "expected_kinds": ["internal_type_leaks_via_public_api"]
     }
   }
 }

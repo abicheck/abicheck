@@ -1260,7 +1260,10 @@ def _dump_elf(
     #
     # Strategy: if DWARF is present, attempt the DWARF build. If it
     # produces at least one function, use it. Otherwise fall through
-    # to symbol-only mode (the DWARF may contain only CRT stubs).
+    # to symbol-only mode (the DWARF may contain only CRT stubs) — but
+    # still carry the type information across so downstream detectors
+    # (notably internal_leak) can use it.
+    dwarf_only_types: list[RecordType] = []
     if dwarf_only or (not headers and dwarf_meta.has_dwarf):
         if dwarf_only and headers:
             warnings.warn(
@@ -1290,15 +1293,33 @@ def _dump_elf(
                 )
             _populate_elf_visibility(snap)
             return snap
+        # DWARF snapshot had no symbols of its own (often the case when
+        # the binary exports only constructors / extern "C" wrappers that
+        # the DWARF subprogram filter rejected). Keep the *types* it
+        # extracted — they include bases / vtable info that pure-DWARF
+        # metadata (DwarfMetadata.structs) does not retain.
+        dwarf_only_types = list(snap.types)
 
     if not headers:
-        # No headers, no DWARF → symbol-only fallback (L0 only)
-        warnings.warn(
-            "No headers provided and no DWARF debug info — only ELF-exported "
-            "symbols will be captured; type information will be missing.",
-            UserWarning,
-            stacklevel=2,
-        )
+        # No headers → symbol-only fallback. When the DWARF snapshot
+        # builder produced types but no functions, we still preserve
+        # those types (see *dwarf_only_types*), so the warning is
+        # narrowed to reflect what's actually missing.
+        if dwarf_only_types:
+            warnings.warn(
+                "No headers provided — using ELF-exported symbols for "
+                "functions/variables; DWARF-derived type information "
+                "preserved.",
+                UserWarning,
+                stacklevel=2,
+            )
+        else:
+            warnings.warn(
+                "No headers provided and no DWARF debug info — only ELF-exported "
+                "symbols will be captured; type information will be missing.",
+                UserWarning,
+                stacklevel=2,
+            )
         snapshot = AbiSnapshot(
             library=so_path.name,
             version=version,
@@ -1323,6 +1344,12 @@ def _dump_elf(
                 )
                 for sym in sorted(exported_dynamic_objects | exported_dynamic_tls)
             ],
+            # Preserve DWARF-derived types (with bases / vtable) when the
+            # symbol-only fallback is taken. Pure DwarfMetadata loses
+            # inheritance info; retaining the partially-populated DWARF
+            # snapshot's types lets downstream detectors (e.g. internal
+            # leak detection) still see the relationships.
+            types=dwarf_only_types,
             elf=elf_meta,
             dwarf=dwarf_meta,
             dwarf_advanced=dwarf_adv,

@@ -237,6 +237,48 @@ class EnrichAffectedSymbols:
         return changes
 
 
+class DetectInternalLeaks:
+    """Detect internal-namespace (``detail::``, ``impl::``, …) types whose
+    changes leak through the public ABI surface.
+
+    Runs after dedup / redundancy filtering so the trigger set only
+    contains semantically distinct findings. Emitted leak entries are
+    added to the change list and become part of the verdict computation.
+    """
+
+    name = "detect_internal_leaks"
+
+    def __init__(self, namespaces: tuple[str, ...] | None = None) -> None:
+        self._namespaces = namespaces
+
+    def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:
+        from .internal_leak import (
+            DEFAULT_INTERNAL_NAMESPACES,
+            detect_internal_leaks,
+        )
+
+        namespaces = self._namespaces or DEFAULT_INTERNAL_NAMESPACES
+        extra = detect_internal_leaks(changes, ctx.old, ctx.new, namespaces)
+        if not extra:
+            return changes
+        # Avoid duplicates if the pipeline is re-run.
+        seen_symbols = {
+            (c.kind, c.symbol) for c in changes
+        }
+        # Synthetic leak findings must respect user suppression rules
+        # too. ``ApplySuppression`` ran earlier in the pipeline, so we
+        # apply the same predicate by hand here rather than re-running
+        # the whole step.
+        for c in extra:
+            if ctx.suppression is not None and ctx.suppression.is_suppressed(c):
+                ctx.suppressed.append(c)
+                continue
+            if (c.kind, c.symbol) not in seen_symbols:
+                changes.append(c)
+                seen_symbols.add((c.kind, c.symbol))
+        return changes
+
+
 # ---------------------------------------------------------------------------
 # Pipeline orchestrator
 # ---------------------------------------------------------------------------
@@ -286,4 +328,5 @@ DEFAULT_PIPELINE = PostProcessingPipeline([
     SuppressRenamedPairs(),
     FilterRedundant(),
     EnrichAffectedSymbols(),
+    DetectInternalLeaks(),
 ])

@@ -3,7 +3,7 @@
 
 Listed in `BREAKING_KINDS` — runtime ABI break.
 
-_53 case(s)._ [← back to all examples](../index.md)
+_56 case(s)._ [← back to all examples](../index.md)
 
 | Case | Title | Verdict | Category |
 |------|-------|---------|----------|
@@ -60,3 +60,6 @@ _53 case(s)._ [← back to all examples](../index.md)
 | [case71_inline_namespace_moved](../case71_inline_namespace_moved.md) | Inline Namespace Moved | 🔴 BREAKING | Breaking |
 | [case72_covariant_return_changed](../case72_covariant_return_changed.md) | Covariant Return Type Changed | 🔴 BREAKING | Breaking |
 | [case73_typedef_underlying_changed](../case73_typedef_underlying_changed.md) | Typedef Underlying Type Changed | 🔴 BREAKING | Breaking |
+| [case74_detail_base_class_changed](../case74_detail_base_class_changed.md) | Internal `detail::` base class layout change leaks via public API | 🔴 BREAKING | Breaking |
+| [case75_detail_embedded_by_value](../case75_detail_embedded_by_value.md) | Internal `detail::` impl struct embedded by value | 🔴 BREAKING | Breaking |
+| [case76_detail_pimpl_vtable_changed](../case76_detail_pimpl_vtable_changed.md) | Internal `detail::` polymorphic base vtable change | 🔴 BREAKING | Breaking |
