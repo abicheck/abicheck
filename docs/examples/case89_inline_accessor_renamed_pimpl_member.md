@@ -5,7 +5,7 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
-| **Platforms** | Linux, macOS, Windows |
+| **Platforms** | Linux, macOS |
 | **Flags** | ABI break |
 | **Detected `ChangeKind`s** | `inline_body_references_renamed_member` |
 | **Source files** | [browse on GitHub](https://github.com/napetrov/abicheck/blob/main/examples/case89_inline_accessor_renamed_pimpl_member/) |

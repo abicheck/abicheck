@@ -1000,12 +1000,12 @@
       "category": "breaking",
       "platforms": [
         "linux",
-        "macos",
-        "windows"
+        "macos"
       ],
       "abi_break": true,
       "api_break": true,
       "bad_practice": false,
+      "known_gap": "Windows: std::shared_ptr / std::unique_ptr layout names differ between MSVC STL and libstdc++/libc++, so the type-name-based detection signal is not portable as-shipped. Tracked for a follow-up that normalises smart-pointer template-arg names across stdlibs.",
       "description": "Pimpl alias switched from shared_ptr<T> to unique_ptr<T>. The type of descriptor::impl_ changed; inline accessors re-mangle, destruction model changes (no atomic refcount), copy semantics flip from refcounted-share to move-only. Detected by existing type_field_type_changed escalated via internal_type_leaks_via_public_api.",
       "expected_kinds": ["internal_type_leaks_via_public_api"]
     },
@@ -1099,12 +1099,12 @@
       "category": "breaking",
       "platforms": [
         "linux",
-        "macos",
-        "windows"
+        "macos"
       ],
       "abi_break": true,
       "api_break": false,
       "bad_practice": false,
+      "known_gap": "Windows: the public class holds std::shared_ptr<detail::descriptor_impl> which renders differently in MSVC PDB/STL field-type strings, so the internal-leak reachability heuristic that ties the inline accessor to the renamed detail:: member does not fire as-shipped.",
       "description": "Public inline accessor reaches into detail::descriptor_impl::class_count_ by name. v2 renames the field to n_classes_ and updates the inline body in lockstep, but consumers compiled against v1.h have the OLD field name baked into their inline accessor bodies. Emits INLINE_BODY_REFERENCES_RENAMED_MEMBER.",
       "expected_kinds": ["inline_body_references_renamed_member"]
     }

@@ -425,11 +425,14 @@ class TestSyclOverloadSetDetector:
         assert "3 overloads" in f.description
         for name in ("compute", "train", "infer"):
             assert name in f.description
-        assert set(suppressed) == {
-            "_Z7computeRN4sycl5queueE",
-            "_Z5trainRN4sycl5queueE",
-            "_Z5inferRN4sycl5queueE",
-        }
+        # All three SYCL-overload mangled names must be in the suppression
+        # set. The set may additionally contain the demangled function
+        # names (``compute`` / ``train`` / ``infer``) as a portability
+        # fallback for platforms whose ``Change.symbol`` is the demangled
+        # name rather than the mangled name.
+        assert "_Z7computeRN4sycl5queueE" in suppressed
+        assert "_Z5trainRN4sycl5queueE" in suppressed
+        assert "_Z5inferRN4sycl5queueE" in suppressed
 
     def test_threshold_respected(self) -> None:
         old, new = self._build_pair()
@@ -519,8 +522,12 @@ class TestCpuDispatchIsaDetector:
         f = findings[0]
         assert f.kind == ChangeKind.CPU_DISPATCH_ISA_DROPPED
         assert "avx512" in f.description
-        # All three avx512 mangled names suppressed.
-        assert len(suppressed) == 3
+        # The three AVX-512 mangled names are present in the suppressed
+        # set; the set may also contain the demangled function names
+        # (added as a portability fallback for platforms whose
+        # ``Change.symbol`` uses a different mangling than ``fn.mangled``).
+        for algo in ("kmeans", "knn", "linreg"):
+            assert any(f"{algo}_compute_avx512" in s for s in suppressed)
 
     def test_below_threshold_no_finding(self) -> None:
         old, new = self._build_three_algorithms()

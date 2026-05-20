@@ -5,7 +5,7 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
-| **Platforms** | Linux, macOS, Windows |
+| **Platforms** | Linux, macOS |
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | `internal_type_leaks_via_public_api` |
 | **Source files** | [browse on GitHub](https://github.com/napetrov/abicheck/blob/main/examples/case80_pimpl_shared_to_unique/) |
