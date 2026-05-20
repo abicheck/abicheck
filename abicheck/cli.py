@@ -35,6 +35,7 @@ from .serialization import load_snapshot, snapshot_to_json
 
 if TYPE_CHECKING:
     from .appcompat import AppRequirements
+    from .bundle import BundleDiffResult
     from .checker_types import DiffResult
     from .debug_resolver import DebugArtifact
     from .policy_file import PolicyFile
@@ -2003,6 +2004,59 @@ def _collect_release_extras(
     return diff_pairs, annotations
 
 
+def _run_bundle_analysis(
+    old_map: dict[str, Path],
+    new_map: dict[str, Path],
+    diff_pairs: list[tuple[DiffResult, AbiSnapshot]],
+    *,
+    manifest_path: Path | None,
+    bundle_system_providers: str,
+) -> BundleDiffResult | None:
+    """Run bundle-level (ADR-023) analysis on a compare-release run.
+
+    Returns None when there is nothing to analyze (e.g. all libraries
+    failed to dump). Errors during analysis are caught and reported as a
+    warning rather than aborting; bundle analysis is additive.
+    """
+    from .bundle import (
+        BundleDiffResult,
+        build_bundle_snapshot,
+        compare_bundle,
+        load_manifest,
+    )
+
+    if not old_map and not new_map:
+        return None
+    try:
+        old_snap = build_bundle_snapshot(dict(old_map))
+        new_snap = build_bundle_snapshot(dict(new_map))
+    except Exception as exc:
+        click.echo(f"Warning: bundle analysis skipped: {exc}", err=True)
+        return None
+
+    manifest = None
+    if manifest_path is not None:
+        try:
+            manifest = load_manifest(manifest_path)
+        except Exception as exc:
+            click.echo(f"Warning: failed to load manifest {manifest_path}: {exc}", err=True)
+            return None
+
+    system_extra: list[str] = [
+        s.strip() for s in bundle_system_providers.split(",") if s.strip()
+    ]
+    per_lib_results = [pair[0] for pair in diff_pairs]
+    try:
+        return compare_bundle(
+            old_snap, new_snap, per_lib_results,
+            manifest=manifest,
+            system_providers=system_extra or None,
+        )
+    except Exception as exc:
+        click.echo(f"Warning: bundle analysis raised: {exc}", err=True)
+        return BundleDiffResult(old_root=old_snap.root, new_root=new_snap.root)
+
+
 def _format_release_summary(
     fmt: str, worst_verdict: str,
     old_dir: Path, new_dir: Path,
@@ -2011,6 +2065,7 @@ def _format_release_summary(
     old_map: dict[str, Path], new_map: dict[str, Path],
     warning_msgs: list[str],
     diff_pairs: list[tuple[DiffResult, AbiSnapshot]] | None = None,
+    bundle_result: BundleDiffResult | None = None,
 ) -> str:
     """Format the release comparison summary as JSON, markdown, or JUnit XML."""
     if fmt == "junit":
@@ -2034,6 +2089,21 @@ def _format_release_summary(
             "unmatched_new": [new_map[k].name for k in added_keys],
             "warnings": warning_msgs,
         }
+        if bundle_result is not None:
+            summary["bundle_verdict"] = bundle_result.bundle_verdict.value
+            summary["bundle_findings"] = [
+                {
+                    "kind": f.kind.value,
+                    "symbol": f.symbol,
+                    "consumer_library": f.consumer_library,
+                    "provider_library": f.provider_library,
+                    "description": f.description,
+                    "old_value": f.old_value,
+                    "new_value": f.new_value,
+                    "affected_libraries": list(f.affected_libraries),
+                }
+                for f in bundle_result.bundle_findings
+            ]
         return json.dumps(summary, indent=2)
 
     _VERDICT_EMOJI = {
@@ -2046,6 +2116,15 @@ def _format_release_summary(
         f"| **Old** | `{old_dir}` |",
         f"| **New** | `{new_dir}` |",
         f"| **Verdict** | {_VERDICT_EMOJI.get(worst_verdict, '?')} `{worst_verdict}` |",
+    ]
+    bundle_count = len(bundle_result.bundle_findings) if bundle_result else 0
+    if bundle_result is not None:
+        bundle_em = _VERDICT_EMOJI.get(bundle_result.bundle_verdict.value, "?")
+        lines.append(
+            f"| **Bundle** | {bundle_em} `{bundle_result.bundle_verdict.value}` "
+            f"({bundle_count} cross-library finding{'s' if bundle_count != 1 else ''}) |",
+        )
+    lines += [
         "", "## Libraries", "",
         "| Library | Verdict | Breaking | Source | Risk | Additions |",
         "|---|---|---|---|---|---|",
@@ -2065,6 +2144,15 @@ def _format_release_summary(
         lines += ["", "## ℹ️ Added Libraries", ""]
         for k in added_keys:
             lines.append(f"- `{new_map[k].name}`")
+    if bundle_result is not None and bundle_result.bundle_findings:
+        lines += ["", "## 🔗 Bundle (Cross-Library) Findings", ""]
+        for f in bundle_result.bundle_findings:
+            lines.append(
+                f"- **{f.kind.value}** — `{f.symbol}`"
+                + (f" (consumer: `{f.consumer_library}`)" if f.consumer_library else "")
+                + (f" (provider: `{f.provider_library}`)" if f.provider_library else ""),
+            )
+            lines.append(f"  - {f.description}")
     return "\n".join(lines)
 
 
@@ -2152,6 +2240,18 @@ def _write_release_summary_file(
 @click.option("-j", "--jobs", "jobs", type=int, default=1, show_default=True,
               help="Number of parallel library comparisons. "
                    "Use 0 for auto-detect (CPU count).")
+@click.option("--manifest", "manifest_path", type=click.Path(exists=True, path_type=Path),
+              default=None,
+              help="ABI instantiation manifest (YAML/JSON) listing symbols the "
+                   "release publicly promises. See ADR-023.")
+@click.option("--bundle-system-providers", "bundle_system_providers", default="",
+              help="Comma-separated extra sonames to treat as system-provided "
+                   "(extends the built-in libc/libstdc++/libgcc/libtbb allow-list).")
+@click.option("--no-bundle-analysis", "no_bundle_analysis", is_flag=True, default=False,
+              help="Skip bundle-level cross-library analysis (debug/parity escape hatch). "
+                   "Bundle findings catch intra-bundle symbol removals, signature drift "
+                   "across DSO boundaries, type drift across siblings, provider "
+                   "migration, and manifest mismatches.")
 def compare_release_cmd(
     old_dir: Path,
     new_dir: Path,
@@ -2182,6 +2282,9 @@ def compare_release_cmd(
     annotate_additions: bool,
     verbose: bool,
     jobs: int,
+    manifest_path: Path | None,
+    bundle_system_providers: str,
+    no_bundle_analysis: bool,
 ) -> None:
     """Compare all libraries in two release directories or packages.
 
@@ -2302,6 +2405,7 @@ def compare_release_cmd(
         if output_dir:
             output_dir.mkdir(parents=True, exist_ok=True)
 
+        bundle_enabled = not no_bundle_analysis
         library_results, worst_verdict, diff_pairs = _compare_release_libraries(
             matched_keys, old_map, new_map,
             old_debug_dir, new_debug_dir, resolve_debug_info,
@@ -2309,11 +2413,23 @@ def compare_release_cmd(
             old_version, new_version,
             lang, suppress, policy, policy_file_path,
             output_dir,
-            collect_diff_results=(fmt == "junit"),
+            collect_diff_results=(fmt == "junit") or bundle_enabled,
             annotate=annotate,
             annotate_additions=annotate_additions,
             jobs=jobs,
         )
+
+        bundle_result = None
+        if bundle_enabled:
+            bundle_result = _run_bundle_analysis(
+                old_map, new_map, diff_pairs,
+                manifest_path=manifest_path,
+                bundle_system_providers=bundle_system_providers,
+            )
+            if bundle_result is not None:
+                bv = bundle_result.bundle_verdict.value
+                if _RELEASE_VERDICT_ORDER.get(bv, 0) > _RELEASE_VERDICT_ORDER.get(worst_verdict, 0):
+                    worst_verdict = bv
 
         if removed_keys and _RELEASE_VERDICT_ORDER.get(worst_verdict, 0) < _RELEASE_VERDICT_ORDER.get("COMPATIBLE_WITH_RISK", 0):
             worst_verdict = "COMPATIBLE_WITH_RISK"
@@ -2323,6 +2439,7 @@ def compare_release_cmd(
             library_results, removed_keys, added_keys,
             old_map, new_map, warning_msgs,
             diff_pairs=diff_pairs if fmt == "junit" else None,
+            bundle_result=bundle_result,
         )
         _write_or_echo(output, text)
 

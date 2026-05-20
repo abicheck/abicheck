@@ -531,6 +531,48 @@ REGISTRY = ChangeKindRegistry([
        impact="Function marked as deleted (= delete) detected via DWARF debug info. "
               "The function was previously callable; callers will fail to link."),
 
+    # ── Bundle / multi-library findings (ADR-023) ───────────────────────
+    _E("bundle_intra_dep_removed", _B,
+       impact="A sibling library in this bundle still imports a symbol that no "
+              "library in the new bundle exports. Loading the consumer will fail "
+              "with undefined symbol at runtime."),
+    _E("bundle_intra_dep_signature_changed", _B,
+       impact="A sibling library imports a symbol whose provider changed its "
+              "DWARF signature (parameters or return type) while keeping the same "
+              "mangled name (typical of extern \"C\" or weak boundaries). The "
+              "linker resolves the symbol but the calling convention is wrong; "
+              "callers pass arguments with the old layout, callee reads the new."),
+    _E("bundle_intra_type_changed", _B,
+       impact="A type defined in one library of this bundle is used in the public "
+              "ABI of a sibling library, and its layout changed. The sibling's "
+              "ABI looks unchanged on its own, but every cross-DSO call that "
+              "passes the type by value or reads its fields is now miscompiled."),
+    _E("bundle_provider_changed", _R,
+       impact="A symbol moved from one library in this bundle to another. "
+              "Downstream binaries that had DT_NEEDED on the old provider may "
+              "still resolve transitively through the bundle's link graph, or "
+              "may not — depends on whether the consumer's existing dependency "
+              "chain reaches the new provider."),
+    _E("bundle_manifest_instantiation_removed", _B,
+       impact="A symbol listed in the supplied --manifest as a public ABI "
+              "promise is not exported by any library in the new bundle. "
+              "Consumers of the previously-promised template instantiation will "
+              "fail to link or load."),
+    _E("bundle_manifest_instantiation_added", _C, is_addition=True,
+       impact="A symbol present in the new manifest is not in the old one; "
+              "new instantiation now publicly promised."),
+    _E("bundle_library_removed", _B,
+       impact="A library present in the old bundle is absent in the new bundle "
+              "and at least one of its exported symbols was consumed by a sibling. "
+              "Loading any consumer fails with NEEDED-library-not-found."),
+    _E("bundle_library_added", _C, is_addition=True,
+       impact="A new library appears in the bundle; existing consumers unaffected."),
+    _E("bundle_intra_dep_resolved_to_different_version", _R,
+       impact="A sibling import that previously resolved to one symbol version "
+              "now resolves to a different version in the new bundle (gnu.version_r "
+              "drift). Compatible at the linker level but the underlying ABI of "
+              "that version may differ."),
+
     # ── Internal-namespace leak via public API ──────────────────────────
     _E("internal_type_leaks_via_public_api", _B,
        impact="A type in an internal namespace (e.g. ::detail::, ::impl::, ::internal::) "

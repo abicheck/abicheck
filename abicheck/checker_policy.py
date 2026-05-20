@@ -382,6 +382,19 @@ class ChangeKind(str, Enum):
     # See examples/case89_inline_accessor_renamed_pimpl_member/README.md
     INLINE_BODY_REFERENCES_RENAMED_MEMBER = "inline_body_references_renamed_member"
 
+    # ── Bundle / multi-library findings (ADR-023) ────────────────────────
+    # Reported by the bundle layer in addition to per-library changes.
+    # See abicheck/bundle.py.
+    BUNDLE_INTRA_DEP_REMOVED = "bundle_intra_dep_removed"
+    BUNDLE_INTRA_DEP_SIGNATURE_CHANGED = "bundle_intra_dep_signature_changed"
+    BUNDLE_INTRA_TYPE_CHANGED = "bundle_intra_type_changed"
+    BUNDLE_PROVIDER_CHANGED = "bundle_provider_changed"
+    BUNDLE_MANIFEST_INSTANTIATION_REMOVED = "bundle_manifest_instantiation_removed"
+    BUNDLE_MANIFEST_INSTANTIATION_ADDED = "bundle_manifest_instantiation_added"
+    BUNDLE_LIBRARY_REMOVED = "bundle_library_removed"
+    BUNDLE_LIBRARY_ADDED = "bundle_library_added"
+    BUNDLE_INTRA_DEP_VERSION_DRIFT = "bundle_intra_dep_resolved_to_different_version"
+
 
 class HasKind(Protocol):
     kind: ChangeKind
