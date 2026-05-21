@@ -1,6 +1,6 @@
 # ABI Scenario Catalog
 
-This directory contains **96 published cases** (`01–76` + `26b` + `77, 79–84, 86–87, 89, 94, 95, 106–112`) plus **4 multi-library bundle cases** (`90–93`, tracked separately under [ADR-023](../docs/development/adr/023-bundle-aware-multi-binary-analysis.md)) demonstrating real-world ABI/API break scenarios. Each case is a minimal, compilable C/C++ example with:
+This directory contains **98 published cases** (`01–76` + `26b` + `77, 79–84, 86–87, 89, 94, 95, 96, 105–112`) plus **4 multi-library bundle cases** (`90–93`, tracked separately under [ADR-023](../docs/development/adr/023-bundle-aware-multi-binary-analysis.md)) demonstrating real-world ABI/API break scenarios. Each case is a minimal, compilable C/C++ example with:
 
 - Paired `v1/` and `v2/` source + headers.
 - A consumer `app.c` / `app.cpp` that demonstrates the actual failure at runtime.
@@ -18,9 +18,9 @@ The catalog drives abicheck's benchmark and serves as an encyclopedia of ABI pit
 | Verdict | Count | `checker_policy.py` set | Icon |
 |---------|-------|-------------------------|------|
 | BREAKING | 72 | `BREAKING_KINDS` | 🔴 |
-| API_BREAK | 3 | `API_BREAK_KINDS` | 🟠 |
+| API_BREAK | 4 | `API_BREAK_KINDS` | 🟠 |
 | COMPATIBLE_WITH_RISK | 2 | `RISK_KINDS` | 🟡 |
-| COMPATIBLE (addition) | 8 | `ADDITION_KINDS` | 🟢 |
+| COMPATIBLE (addition) | 9 | `ADDITION_KINDS` | 🟢 |
 | COMPATIBLE (quality) | 9 | `QUALITY_KINDS` | 🟡 |
 | NO_CHANGE | 2 | — | ✅ |
 
@@ -130,6 +130,8 @@ Some policy-escalated source/contract breaks (notably case30, case35) may keep i
 | [89](case89_inline_accessor_renamed_pimpl_member/README.md) | Inline Accessor References Renamed Pimpl Member | Breaking | BREAKING 🔴 |
 | [94](case94_empty_tag_gained_state/README.md) | Empty Tag Gained State (oneTBB partitioner shape) | Breaking | BREAKING 🔴 |
 | [95](case95_allocator_nested_typedef_removed/README.md) | Allocator Nested-Typedef Removed (member_name suppression demo) | Breaking | BREAKING 🔴 |
+| [96](case96_hidden_friend_removed/README.md) | Hidden Friend Operator Removed (castxml `befriending` detection) | API Break | API_BREAK 🟠 |
+| [105](case105_concept_tightening/README.md) | Concept Tightening (C++20, known gap) | Addition | COMPATIBLE 🟢 (known gap) |
 | [106](case106_ctor_became_explicit/README.md) | Conversion Operator Became `explicit` | API Break | API_BREAK 🟠 |
 | [107](case107_task_scheduler_init_removed/README.md) | `task_scheduler_init` Removed (oneTBB 2021.1) | Breaking | BREAKING 🔴 |
 | [108](case108_task_class_removed/README.md) | `task` Class Removed (oneTBB 2021.1) | Breaking | BREAKING 🔴 |

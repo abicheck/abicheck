@@ -176,6 +176,14 @@ class Function:
     #           detector when either side is None to avoid false API_BREAK
     #           findings from schema evolution.
     is_explicit: bool | None = None
+    # Hidden-friend marker (in-class `friend` declaration, often inline).
+    # Tri-state to keep "unknown" distinct from "not a friend":
+    # - True  → declared as a friend inside some class body (castxml
+    #           ``befriending`` attribute on the class points to this fn).
+    # - False → not a friend declaration.
+    # - None  → dumper/loader could not determine (older snapshots, DWARF-
+    #           only path). Diff detectors skip when either side is None.
+    is_hidden_friend: bool | None = None
 
 
 @dataclass

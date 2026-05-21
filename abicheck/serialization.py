@@ -355,6 +355,10 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
             # which suppresses CTOR_EXPLICIT_ADDED/_REMOVED in the diff
             # rather than producing spurious findings from schema evolution.
             is_explicit=f.get("is_explicit"),
+            # Tri-state, same rationale as is_explicit — a missing key on
+            # an older snapshot loads as None and suppresses the
+            # HIDDEN_FRIEND_ADDED/_REMOVED transition detector.
+            is_hidden_friend=f.get("is_hidden_friend"),
         )
         for f in d.get("functions", [])
     ]

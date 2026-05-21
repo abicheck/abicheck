@@ -1204,6 +1204,34 @@
       "description": "An allocator-style class drops the historical STL nested-typedef set (value_type, pointer, reference, size_type, difference_type). Exported member symbols are unchanged so binaries still link, but consumer source using `typename Alloc::value_type` etc. fails to compile. Detected via `typedef_removed` (BREAKING per change_registry). Demonstrates the new `member_name` suppression selector — combined with `change_kind: typedef_removed`, it scopes the inevitable noise from removing a uniform set of nested aliases.",
       "expected_kinds": ["typedef_removed"]
     },
+    "case96_hidden_friend_removed": {
+      "expected": "API_BREAK",
+      "category": "api_break",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "abi_break": false,
+      "api_break": true,
+      "bad_practice": false,
+      "description": "A non-member operator (`operator==`) declared as an in-class `friend` with an inline body (a 'hidden friend') is removed in v2. Consumers that wrote `a == b` resolved the call via ADL to the friend; with the declaration gone, ADL finds nothing and the source no longer compiles. The .so symbol set is unchanged because inline hidden friends typically have no external symbol. Detected via the new HIDDEN_FRIEND_REMOVED ChangeKind, derived from castxml's `befriending` attribute on the Class/Struct element.",
+      "expected_kinds": ["hidden_friend_removed"]
+    },
+    "case105_concept_tightening": {
+      "expected": "COMPATIBLE",
+      "category": "addition",
+      "platforms": [
+        "linux",
+        "macos"
+      ],
+      "abi_break": false,
+      "api_break": false,
+      "bad_practice": true,
+      "known_gap": "castxml emits C++20 `concept` declarations as <Unimplemented kind=\"Concept\"/> with no name and no body, and drops the templates that use them. There is no way to detect concept tightening from the castxml dump path; the case is preserved as a regression fixture until the header-AST capture path on the roadmap lands (a libclang-based extractor sitting alongside castxml that captures each concept's constrained parameters and `requires`-expression body). abicheck currently returns NO_CHANGE on this case.",
+      "description": "A C++20 `concept` (`Addable`) gains an additional requirement (default-constructibility). The already-shipped `sum<int>` instantiation keeps the same mangled symbol so previously-compiled binaries keep linking, but consumers instantiating `sum<T>` for types that fail the tightened constraint no longer compile. Concept tightening is detection-blocked by castxml at present; see `known_gap`.",
+      "expected_kinds": []
+    },
     "case106_ctor_became_explicit": {
       "expected": "API_BREAK",
       "category": "api_break",

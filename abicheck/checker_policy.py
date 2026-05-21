@@ -412,7 +412,7 @@ class ChangeKind(str, Enum):
     EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT = (
         "experimental_removed_without_replacement"
     )
-    # See examples/case111_std_reexport_removed/README.md
+    # Example case deferred — detector + unit tests live in PR #247.
     STD_REEXPORT_REMOVED = "std_reexport_removed"
     # Specialisation of INLINE_NAMESPACE_MOVED for header-declared
     # symbols whose qualified name path explicitly carries a versioned
@@ -437,6 +437,15 @@ class ChangeKind(str, Enum):
     API_DEPENDS_ON_CONSUMER_ENV = "api_depends_on_consumer_env"
     CXX_STANDARD_FLOOR_RAISED = "cxx_standard_floor_raised"
     BEHAVIOURAL_DEFAULT_CHANGED = "behavioural_default_changed"
+
+    # Hidden friends (in-class `friend` declarations, typically inline).
+    # Inline-defined hidden friends are findable only via ADL on one of
+    # their argument types; removing one is a source-level break for any
+    # consumer that wrote `a + b` (or similar operator/ADL usage). When
+    # the friend was also defined out-of-line, removal additionally fires
+    # FUNC_REMOVED at the binary level; the two findings are complementary.
+    HIDDEN_FRIEND_REMOVED = "hidden_friend_removed"
+    HIDDEN_FRIEND_ADDED = "hidden_friend_added"
 
 
 class HasKind(Protocol):

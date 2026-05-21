@@ -775,4 +775,21 @@ REGISTRY = ChangeKindRegistry([
               "execution backend, or the default policy. Source compiles "
               "and links unchanged; runtime behaviour silently differs. "
               "Read from the probe manifest's `defaults:` section."),
+
+    # ── Hidden-friend transitions (PR #248 follow-up) ───────────────────
+    _E("hidden_friend_removed", _A,
+       impact="An in-class `friend` declaration (a 'hidden friend' — "
+              "findable only via ADL on one of its argument types) was "
+              "removed. Inline hidden friends never receive an external "
+              "symbol, so the break is invisible at the binary layer, but "
+              "every consumer that wrote `a + b` (or any other ADL-driven "
+              "call site) fails to compile against the new headers. When "
+              "the friend was also defined out-of-line, removal "
+              "additionally surfaces as FUNC_REMOVED at link time."),
+    _E("hidden_friend_added", _C, is_addition=True,
+       impact="A new in-class `friend` declaration was added. Pure "
+              "addition: existing code keeps compiling, no symbol "
+              "disappears, and the new operator/function only "
+              "participates in overload resolution at call sites that "
+              "trigger ADL on one of its argument types."),
 ])

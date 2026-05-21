@@ -169,6 +169,33 @@ def _check_function_signature(mangled: str, f_old: Function, f_new: Function) ->
             description=f"Function is no longer virtual: {f_old.name}",
         ))
 
+    # Hidden-friend transitions: an in-class `friend` declaration was
+    # added or removed across versions. Tri-state — skip when either
+    # side's snapshot did not record the flag (e.g. DWARF-only path or
+    # an older snapshot). The matched-mangled iteration here handles
+    # the case where the friend has an out-of-line definition (i.e.
+    # a real symbol). Inline-only hidden friends never appear here
+    # because they have no symbol on either side; those transitions
+    # are picked up by ``_check_hidden_friend_additions_removals``
+    # below by matching on (name, params) rather than mangled name.
+    if f_old.is_hidden_friend is not None and f_new.is_hidden_friend is not None:
+        if not f_old.is_hidden_friend and f_new.is_hidden_friend:
+            changes.append(Change(
+                kind=ChangeKind.HIDDEN_FRIEND_ADDED,
+                symbol=mangled,
+                description=f"Function became an in-class friend declaration: {f_old.name}",
+                old_value="non-friend",
+                new_value="hidden friend",
+            ))
+        elif f_old.is_hidden_friend and not f_new.is_hidden_friend:
+            changes.append(Change(
+                kind=ChangeKind.HIDDEN_FRIEND_REMOVED,
+                symbol=mangled,
+                description=f"Function is no longer an in-class friend declaration: {f_old.name}",
+                old_value="hidden friend",
+                new_value="non-friend",
+            ))
+
     # explicit-specifier transitions on ctors / conversion operators.
     # Tri-state: only fire when BOTH sides record explicit data. None means
     # the dumper/loader couldn't determine it — typically an older snapshot
@@ -304,6 +331,50 @@ def _diff_functions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     # FUNC_BECAME_INLINE / FUNC_LOST_INLINE: detect inline↔non-inline transitions
     changes.extend(_check_inline_transitions(old_map, new_map, new))
 
+    # HIDDEN_FRIEND_ADDED / HIDDEN_FRIEND_REMOVED for the inline-only case.
+    # Inline hidden friends have no external symbol (visibility=HIDDEN) so
+    # the public-symbol diff above does not see them. Match across versions
+    # by mangled name across the FULL function map (not just public).
+    changes.extend(_diff_inline_hidden_friends(old_all, new_all_map))
+
+    return changes
+
+
+def _diff_inline_hidden_friends(
+    old_all: dict[str, Function], new_all: dict[str, Function],
+) -> list[Change]:
+    """Pick up hidden-friend additions/removals that have no public symbol.
+
+    Inline-defined hidden friends never appear in the .so dynsym (the
+    compiler emits them as `linkonce_odr`, often inlined into callers).
+    They show up in the castxml snapshot with ``visibility=HIDDEN`` and
+    ``is_hidden_friend=True``. The public-symbol diff above skips them.
+    This pass compares across the full function map and only fires for
+    functions that are flagged as hidden friends on one side.
+    """
+    changes: list[Change] = []
+    for mangled, f_old in old_all.items():
+        if not f_old.is_hidden_friend:
+            continue
+        if mangled in new_all:
+            continue
+        changes.append(Change(
+            kind=ChangeKind.HIDDEN_FRIEND_REMOVED,
+            symbol=mangled,
+            description=f"Hidden friend declaration removed: {f_old.name}",
+            old_value=f_old.name,
+        ))
+    for mangled, f_new in new_all.items():
+        if not f_new.is_hidden_friend:
+            continue
+        if mangled in old_all:
+            continue
+        changes.append(Change(
+            kind=ChangeKind.HIDDEN_FRIEND_ADDED,
+            symbol=mangled,
+            description=f"Hidden friend declaration added: {f_new.name}",
+            new_value=f_new.name,
+        ))
     return changes
 
 

@@ -258,6 +258,41 @@ _CPP_PATTERNS = [
 ]
 
 
+# Structural C++20 patterns — concepts and requires-expressions. When any
+# of these appears in a header, castxml must be invoked with a C++20-aware
+# `-std=` flag or it will fail to parse the file. The patterns target the
+# definition site (`concept X = ...`, `requires(...) {`, `template <Foo T>`-
+# style constrained template parameters) rather than uses, so we don't
+# over-trigger.
+_CPP20_PATTERNS = [
+    re.compile(rb"^\s*concept\s+\w+\s*="),          # concept Addable = ...
+    re.compile(rb"\brequires\s*\("),                # requires(T a, T b) { ... }
+    re.compile(rb"\brequires\s+\w"),                # template<T> requires Foo<T>
+]
+
+
+def _detect_cpp20_headers(header_paths: list[Path]) -> bool:
+    """Return True if any header contains C++20-only syntax (concept/requires).
+
+    Used to decide whether to pass ``-std=gnu++20`` to castxml. castxml's
+    default standard is whatever the underlying compiler defaults to
+    (usually C++17 on modern gcc), which does not accept ``concept``
+    declarations. This detection is conservative: only definition-site
+    syntax counts, not the keyword in arbitrary text.
+    """
+    for p in header_paths:
+        try:
+            content = p.read_bytes()
+        except OSError:
+            continue
+        content = re.sub(rb"/\*.*?\*/", b"", content, flags=re.DOTALL)
+        for line in content.split(b"\n"):
+            stripped = line.split(b"//")[0]
+            if any(pat.search(stripped) for pat in _CPP20_PATTERNS):
+                return True
+    return False
+
+
 def _detect_cpp_headers(header_paths: list[Path]) -> bool:
     """Auto-detect whether headers require C++ compilation mode (FIX-A).
 
@@ -319,6 +354,7 @@ def _build_castxml_command(
     nostdinc: bool = False,
     gcc_options: str | None = None,
     force_cpp: bool = False,
+    force_cpp20: bool = False,
 ) -> list[str]:
     """Build the castxml command line."""
     cmd = ["castxml", "--castxml-output=1",
@@ -337,6 +373,19 @@ def _build_castxml_command(
     # which is rejected when parsing a .h file in C mode.
     if not force_cpp and cc_id == "gnu":
         cmd += ["-x", "c", "-std=gnu11"]
+    elif force_cpp20 and not (
+        gcc_options
+        and ("-std=" in gcc_options or "/std:" in gcc_options)
+    ):
+        # Headers contain C++20-only syntax (concept / requires-expression).
+        # Castxml's default standard is whatever the host compiler picks
+        # (usually C++17 on modern gcc / MSVC), which rejects concepts.
+        # Force C++20 unless the caller already supplied an explicit -std=.
+        # MSVC uses /std:c++20; gcc/clang use -std=gnu++20.
+        if cc_id == "msvc":
+            cmd += ["/std:c++20"]
+        else:
+            cmd += ["-x", "c++", "-std=gnu++20"]
 
     cmd += ["-o", str(out_xml), str(agg_path)]
     return cmd
@@ -443,6 +492,11 @@ def _castxml_dump(
         force_cpp = _detect_cpp_headers(headers)
     agg_ext = ".hpp" if force_cpp else ".h"
 
+    # Detect C++20 concept / requires syntax separately — castxml's default
+    # standard (typically C++17) rejects these, so we need to override
+    # the standard explicitly. Only meaningful when we're already in C++ mode.
+    force_cpp20 = bool(force_cpp) and _detect_cpp20_headers(headers)
+
     with tempfile.NamedTemporaryFile(suffix=agg_ext, mode="w", delete=False) as agg:
         for h in headers:
             agg.write(f'#include "{h.resolve()}"\n')
@@ -452,6 +506,7 @@ def _castxml_dump(
         cc_bin, cc_id, extra_includes, out_xml, agg_path,
         sysroot=sysroot, nostdinc=nostdinc, gcc_options=gcc_options,
         force_cpp=bool(force_cpp),
+        force_cpp20=force_cpp20,
     )
 
     try:
@@ -604,14 +659,44 @@ class _CastxmlParser:
         fname = file_el.get("name", "")
         return fname in ("<builtin>", "<built-in>", "<command-line>")
 
+    def _build_hidden_friend_ids(self) -> set[str]:
+        """Collect function ids referenced by class `befriending` attributes.
+
+        castxml emits an in-class ``friend`` declaration as a separate
+        ``Function`` / ``Method`` / ``OperatorFunction`` element at namespace
+        scope, and records the link from the class via a ``befriending``
+        attribute on the ``Class`` / ``Struct`` element — a whitespace-
+        separated list of ids. We resolve those ids so we can mark the
+        corresponding ``Function`` objects as hidden friends downstream.
+        """
+        ids: set[str] = set()
+        for el in self._root:
+            if el.tag not in ("Class", "Struct"):
+                continue
+            befriending = el.get("befriending", "")
+            if not befriending:
+                continue
+            for fid in befriending.split():
+                if fid:
+                    ids.add(fid)
+        return ids
+
     def parse_functions(self) -> list[Function]:
         funcs = []
+        hidden_friend_ids = self._build_hidden_friend_ids()
+        # castxml emits non-member operator overloads as <OperatorFunction>
+        # (e.g. `bool operator==(const Foo&, const Foo&)` at namespace scope,
+        # including hidden friends declared inside a class body).
+        function_tags = (
+            "Function", "Method", "Constructor", "Destructor",
+            "Converter", "OperatorFunction", "OperatorMethod",
+        )
         for el in self._root:
             # castxml emits user-defined conversion operators as <Converter>
             # rather than <Method>. They carry mangled names (unlike
             # constructors), `const`/`virtual`/`explicit` qualifiers, and an
             # implicit empty name (which we synthesize as `operator <T>`).
-            if el.tag not in ("Function", "Method", "Constructor", "Destructor", "Converter"):
+            if el.tag not in function_tags:
                 continue
             name = el.get("name", "")
             if not name and el.tag == "Converter":
@@ -619,6 +704,12 @@ class _CastxmlParser:
                 ret_id = el.get("returns", "")
                 ret_type_for_name = self._type_name(ret_id) if ret_id else "?"
                 name = f"operator {ret_type_for_name}"
+            # castxml emits operator name as the bare symbol (e.g. "==", "+").
+            # Normalize to the canonical "operator==" form for readability and
+            # to match how the rest of the pipeline (and human reports)
+            # refer to operator overloads.
+            if name and el.tag in ("OperatorFunction", "OperatorMethod") and not name.startswith("operator"):
+                name = f"operator{name}"
             if not name:
                 continue
             # Skip compiler built-ins and command-line synthetic declarations
@@ -682,6 +773,11 @@ class _CastxmlParser:
             refqual_raw = el.get("refqual", "")
             ref_qualifier = {"lvalue": "&", "rvalue": "&&"}.get(refqual_raw, "")
 
+            # Hidden-friend marker: castxml records the link via the
+            # ``befriending`` attribute on the class element. We resolved
+            # the referenced ids upfront and check membership here.
+            is_hidden_friend = el.get("id", "") in hidden_friend_ids
+
             funcs.append(Function(
                 name=name,
                 mangled=mangled,
@@ -703,6 +799,7 @@ class _CastxmlParser:
                 return_pointer_depth=ret_ptr_depth,
                 ref_qualifier=ref_qualifier,
                 is_explicit=is_explicit,
+                is_hidden_friend=is_hidden_friend,
             ))
         return funcs
 

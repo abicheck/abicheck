@@ -229,6 +229,9 @@ ASSERTED_CHANGE_KINDS: set[ChangeKind] = {
     ChangeKind.API_DEPENDS_ON_CONSUMER_ENV,
     ChangeKind.CXX_STANDARD_FLOOR_RAISED,
     ChangeKind.BEHAVIOURAL_DEFAULT_CHANGED,
+    # Hidden friend transitions — exercised in tests/test_hidden_friends.py
+    ChangeKind.HIDDEN_FRIEND_ADDED,
+    ChangeKind.HIDDEN_FRIEND_REMOVED,
 }
 
 
