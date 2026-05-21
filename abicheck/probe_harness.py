@@ -213,13 +213,14 @@ def _parse_cxx_std(flags: list[str]) -> int | None:
 
 def load_probe_spec(path: str | Path) -> ProbeSpec:
     """Parse a YAML probe manifest. Accepts JSON too (a YAML subset)."""
+    text = Path(path).read_text(encoding="utf-8")
     try:
         import yaml
-        data = yaml.safe_load(Path(path).read_text())
+        data = yaml.safe_load(text)
     except ImportError:
         # Fallback: PyYAML isn't required as a runtime dep for abicheck,
         # so we accept JSON-shaped files unchanged.
-        data = json.loads(Path(path).read_text())
+        data = json.loads(text)
     return parse_probe_spec(data)
 
 
@@ -277,7 +278,7 @@ def _compile_probe(
     """Compile one probe under one configuration. Returns (object_path, error)."""
     src_path = work_dir / f"{cfg.id}__{probe.name}.cpp"
     obj_path = work_dir / f"{cfg.id}__{probe.name}.o"
-    src_path.write_text(probe.render())
+    src_path.write_text(probe.render(), encoding="utf-8")
 
     cmd = cfg.as_command_args() + [
         "-c",
@@ -290,7 +291,7 @@ def _compile_probe(
 
     try:
         proc = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=60,
+            cmd, capture_output=True, text=True, timeout=60, check=False,
         )
     except subprocess.TimeoutExpired:
         return None, "compilation timed out (60s)"
@@ -356,7 +357,9 @@ def run_probe_matrix(
                 if obj_path is not None and snapshot:
                     try:
                         snap = _snapshot_object_file(obj_path)
-                    except Exception as e:  # pragma: no cover — dumper raises
+                    except (OSError, ValueError, RuntimeError) as e:  # pragma: no cover
+                        # Dumper raises one of these on malformed objects;
+                        # everything else propagates.
                         err = f"dumper failed on {obj_path.name}: {e}"
                 results.append(ProbeResult(
                     configuration_id=cfg.id,
@@ -382,11 +385,11 @@ def run_probe_matrix(
 
 
 def write_matrix_snapshot(matrix: MatrixSnapshot, path: str | Path) -> None:
-    Path(path).write_text(matrix.to_json())
+    Path(path).write_text(matrix.to_json(), encoding="utf-8")
 
 
 def load_matrix_snapshot(path: str | Path) -> MatrixSnapshot:
-    data = json.loads(Path(path).read_text())
+    data = json.loads(Path(path).read_text(encoding="utf-8"))
     return MatrixSnapshot.from_dict(data)
 
 

@@ -509,42 +509,47 @@ def detect_inline_namespace_version_bump(
     stripped* qualified name. If both sides have versioned segments AND
     the integer suffix changed, emit one finding per moved declaration.
     """
-    changes: list[Change] = []
+    old_idx = _index_versioned(_collect_versioned_entries(old))
+    new_idx = _index_versioned(_collect_versioned_entries(new))
+    return _emit_version_bumps(old_idx, new_idx)
 
-    def _index(snap: AbiSnapshot, items: list[tuple[str, str]]) -> dict[
-            tuple[str, ...], list[tuple[str, int, str]]]:
-        """Map version-stripped segments → list of ``(qualified, version_int, kind)``."""
-        out: dict[tuple[str, ...], list[tuple[str, int, str]]] = {}
-        for qname, kind in items:
-            segs = _segments(qname)
-            stripped, ver = _version_strip_segments(segs)
-            if ver is None:
-                continue
-            out.setdefault(stripped, []).append((qname, ver, kind))
-        return out
 
-    from .model import Visibility
-
-    def _entries(snap: AbiSnapshot) -> list[tuple[str, str]]:
-        items: list[tuple[str, str]] = []
-        for f in snap.functions:
-            if f.visibility != Visibility.PUBLIC:
-                continue
-            qname = _qualified_function_name(f.name, f.mangled)
-            if qname:
-                items.append((qname, "function"))
-        for t in snap.types:
-            if t.name:
-                items.append((t.name, "type"))
-        return items
-
-    old_idx = _index(old, _entries(old))
-    new_idx = _index(new, _entries(new))
-
-    seen_keys: set[tuple[str, ...]] = set()
-    for stripped, old_list in old_idx.items():
-        if stripped in seen_keys:
+def _index_versioned(
+    items: list[tuple[str, str]],
+) -> dict[tuple[str, ...], list[tuple[str, int, str]]]:
+    """Map version-stripped segments → list of ``(qualified, version_int, kind)``."""
+    out: dict[tuple[str, ...], list[tuple[str, int, str]]] = {}
+    for qname, kind in items:
+        segs = _segments(qname)
+        stripped, ver = _version_strip_segments(segs)
+        if ver is None:
             continue
+        out.setdefault(stripped, []).append((qname, ver, kind))
+    return out
+
+
+def _collect_versioned_entries(snap: AbiSnapshot) -> list[tuple[str, str]]:
+    """Return ``[(qualified_name, "function"|"type"), …]`` for *snap*."""
+    from .model import Visibility
+    items: list[tuple[str, str]] = []
+    for f in snap.functions:
+        if f.visibility != Visibility.PUBLIC:
+            continue
+        qname = _qualified_function_name(f.name, f.mangled)
+        if qname:
+            items.append((qname, "function"))
+    for t in snap.types:
+        if t.name:
+            items.append((t.name, "type"))
+    return items
+
+
+def _emit_version_bumps(
+    old_idx: dict[tuple[str, ...], list[tuple[str, int, str]]],
+    new_idx: dict[tuple[str, ...], list[tuple[str, int, str]]],
+) -> list[Change]:
+    changes: list[Change] = []
+    for stripped, old_list in old_idx.items():
         new_list = new_idx.get(stripped, [])
         if not new_list:
             continue
@@ -552,10 +557,8 @@ def detect_inline_namespace_version_bump(
         new_versions = {v for _, v, _ in new_list}
         if old_versions == new_versions:
             continue
-        # Bump direction: any new max > any old max.
         if max(new_versions) <= max(old_versions):
             continue
-        seen_keys.add(stripped)
         old_q = old_list[0][0]
         new_q = new_list[0][0]
         changes.append(Change(
@@ -570,7 +573,6 @@ def detect_inline_namespace_version_bump(
             old_value=old_q,
             new_value=new_q,
         ))
-
     return changes
 
 

@@ -123,6 +123,75 @@ def _qualified_function_name(name: str, mangled: str) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _public_functions(snap: AbiSnapshot) -> list[Function]:
+    """Return the subset of public functions in *snap*."""
+    from .model import Visibility
+    return [f for f in snap.functions if f.visibility == Visibility.PUBLIC]
+
+
+def _internal_template_stems(
+    funcs: list[Function],
+    internal_namespaces: tuple[str, ...],
+) -> set[str]:
+    """Return template stems that live in one of *internal_namespaces*."""
+    out: set[str] = set()
+    for f in funcs:
+        qname = _qualified_function_name(f.name, f.mangled)
+        if not _looks_like_template_instantiation(qname):
+            continue
+        stem = _strip_template_args(qname)
+        if _is_internal_segment(stem, internal_namespaces):
+            out.add(stem)
+    return out
+
+
+def _functions_by_stem(funcs: list[Function]) -> dict[str, list[Function]]:
+    """Group *funcs* by template-args-stripped stem."""
+    out: dict[str, list[Function]] = defaultdict(list)
+    for f in funcs:
+        qname = _qualified_function_name(f.name, f.mangled)
+        out[_strip_template_args(qname)].append(f)
+    return out
+
+
+def _function_signature(f: Function) -> tuple[str, int, str]:
+    """Return a comparable signature tuple for *f*."""
+    return (
+        f.return_type,
+        len(f.params),
+        "|".join(p.type for p in f.params),
+    )
+
+
+def _instantiation_set(funcs: list[Function]) -> set[tuple[str, tuple[str, int, str]]]:
+    return {
+        (_qualified_function_name(f.name, f.mangled), _function_signature(f))
+        for f in funcs
+    }
+
+
+def _leak_change(
+    stem: str,
+    old_sigs: set[tuple[str, tuple[str, int, str]]],
+    new_sigs: set[tuple[str, tuple[str, int, str]]],
+) -> Change:
+    """Build an INTERNAL_TEMPLATE_LEAKS_VIA_PUBLIC_API finding for *stem*."""
+    removed_names = sorted({n for n, _ in old_sigs - new_sigs})[:3]
+    added_names = sorted({n for n, _ in new_sigs - old_sigs})[:3]
+    return Change(
+        kind=ChangeKind.INTERNAL_TEMPLATE_LEAKS_VIA_PUBLIC_API,
+        symbol=stem,
+        description=(
+            f"Internal-namespace function template '{stem}' has "
+            f"changed instantiations: removed={removed_names}, "
+            f"added={added_names}. These mangled names participate "
+            f"in consumer symbol tables; every consumer must rebuild."
+        ),
+        old_value=str(sorted({n for n, _ in old_sigs})[:3]),
+        new_value=str(sorted({n for n, _ in new_sigs})[:3]),
+    )
+
+
 def detect_internal_template_leaks(
     old: AbiSnapshot,
     new: AbiSnapshot,
@@ -143,78 +212,25 @@ def detect_internal_template_leaks(
     The detector is intentionally per-stem rather than per-instantiation
     so a reviewer sees one finding even when 30 instantiations shift.
     """
-    from .model import Visibility
-
-    def _pub_funcs(snap: AbiSnapshot) -> list[Function]:
-        return [f for f in snap.functions if f.visibility == Visibility.PUBLIC]
-
-    def _stems_with_internal_segment(funcs: list[Function]) -> set[str]:
-        out: set[str] = set()
-        for f in funcs:
-            qname = _qualified_function_name(f.name, f.mangled)
-            if not _looks_like_template_instantiation(qname):
-                continue
-            stem = _strip_template_args(qname)
-            if _is_internal_segment(stem, internal_namespaces):
-                out.add(stem)
-        return out
-
-    old_funcs = _pub_funcs(old)
-    new_funcs = _pub_funcs(new)
-
+    old_funcs = _public_functions(old)
+    new_funcs = _public_functions(new)
     internal_stems = (
-        _stems_with_internal_segment(old_funcs)
-        | _stems_with_internal_segment(new_funcs)
+        _internal_template_stems(old_funcs, internal_namespaces)
+        | _internal_template_stems(new_funcs, internal_namespaces)
     )
     if not internal_stems:
         return []
 
-    def _index_by_stem(funcs: list[Function]) -> dict[str, list[Function]]:
-        out: dict[str, list[Function]] = defaultdict(list)
-        for f in funcs:
-            qname = _qualified_function_name(f.name, f.mangled)
-            stem = _strip_template_args(qname)
-            out[stem].append(f)
-        return out
-
-    old_by_stem = _index_by_stem(old_funcs)
-    new_by_stem = _index_by_stem(new_funcs)
-
-    def _sig(f: Function) -> tuple[str, int, str]:
-        return (
-            f.return_type,
-            len(f.params),
-            "|".join(p.type for p in f.params),
-        )
+    old_by_stem = _functions_by_stem(old_funcs)
+    new_by_stem = _functions_by_stem(new_funcs)
 
     changes: list[Change] = []
     for stem in sorted(internal_stems):
-        old_sigs = {(_qualified_function_name(f.name, f.mangled), _sig(f))
-                    for f in old_by_stem.get(stem, [])}
-        new_sigs = {(_qualified_function_name(f.name, f.mangled), _sig(f))
-                    for f in new_by_stem.get(stem, [])}
+        old_sigs = _instantiation_set(old_by_stem.get(stem, []))
+        new_sigs = _instantiation_set(new_by_stem.get(stem, []))
         if old_sigs == new_sigs:
             continue
-        added = new_sigs - old_sigs
-        removed = old_sigs - new_sigs
-        if not added and not removed:
-            continue
-        # Build a concise description naming the first few changes.
-        removed_names = sorted({n for n, _ in removed})[:3]
-        added_names = sorted({n for n, _ in added})[:3]
-        changes.append(Change(
-            kind=ChangeKind.INTERNAL_TEMPLATE_LEAKS_VIA_PUBLIC_API,
-            symbol=stem,
-            description=(
-                f"Internal-namespace function template '{stem}' has "
-                f"changed instantiations: removed={removed_names}, "
-                f"added={added_names}. These mangled names participate "
-                f"in consumer symbol tables; every consumer must rebuild."
-            ),
-            old_value=str(sorted({n for n, _ in old_sigs})[:3]),
-            new_value=str(sorted({n for n, _ in new_sigs})[:3]),
-        ))
-
+        changes.append(_leak_change(stem, old_sigs, new_sigs))
     return changes
 
 

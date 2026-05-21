@@ -69,6 +69,49 @@ def _public_type_names(snap) -> set[str]:  # type: ignore[no-untyped-def]
 # ---------------------------------------------------------------------------
 
 
+def _aggregate_decls_by_cfg(
+    matrix: MatrixSnapshot,
+) -> tuple[dict[str, set[str]], dict[str, set[str]]]:
+    """Return (functions_by_cfg, types_by_cfg) aggregated across probes."""
+    cfg_funcs: dict[str, set[str]] = {}
+    cfg_types: dict[str, set[str]] = {}
+    for cfg_id, results in matrix.by_configuration().items():
+        fset: set[str] = set()
+        tset: set[str] = set()
+        for r in results:
+            if r.snapshot is None:
+                continue
+            fset |= _public_function_names(r.snapshot)
+            tset |= _public_type_names(r.snapshot)
+        cfg_funcs[cfg_id] = fset
+        cfg_types[cfg_id] = tset
+    return cfg_funcs, cfg_types
+
+
+def _env_dependence_change(
+    name: str,
+    presence: dict[str, bool],
+    kind_label: str,
+) -> Change | None:
+    """Return an API_DEPENDS_ON_CONSUMER_ENV finding for *name*, or None
+    if *name* is present in every configuration (or absent in every one)."""
+    present = sorted(c for c, p in presence.items() if p)
+    absent = sorted(c for c, p in presence.items() if not p)
+    if not present or not absent:
+        return None
+    return Change(
+        kind=ChangeKind.API_DEPENDS_ON_CONSUMER_ENV,
+        symbol=name,
+        description=(
+            f"{kind_label} '{name}' is present in configurations "
+            f"{present} but absent in {absent}. Consumers compiling "
+            f"under different toolchains see different public APIs."
+        ),
+        old_value=",".join(present),
+        new_value=",".join(absent),
+    )
+
+
 def detect_api_depends_on_consumer_env(
     matrix: MatrixSnapshot,
 ) -> list[Change]:
@@ -79,59 +122,24 @@ def detect_api_depends_on_consumer_env(
     each truly-divergent declaration once. Names present in every
     configuration (the common case) are silently ignored.
     """
-    by_cfg = matrix.by_configuration()
-    if len(by_cfg) < 2:
+    if len(matrix.by_configuration()) < 2:
         return []
-
-    # Aggregate per-configuration declared name sets across all probes
-    # in that configuration.
-    cfg_funcs: dict[str, set[str]] = {}
-    cfg_types: dict[str, set[str]] = {}
-    for cfg_id, results in by_cfg.items():
-        fset: set[str] = set()
-        tset: set[str] = set()
-        for r in results:
-            if r.snapshot is None:
-                continue
-            fset |= _public_function_names(r.snapshot)
-            tset |= _public_type_names(r.snapshot)
-        cfg_funcs[cfg_id] = fset
-        cfg_types[cfg_id] = tset
-
+    cfg_funcs, cfg_types = _aggregate_decls_by_cfg(matrix)
     all_cfgs = sorted(cfg_funcs)
     if len(all_cfgs) < 2:
         return []
 
-    union_funcs = set().union(*cfg_funcs.values())
-    union_types = set().union(*cfg_types.values())
-
     changes: list[Change] = []
-
-    def _emit(name: str, presence: dict[str, bool], kind_label: str) -> None:
-        present = sorted(c for c, p in presence.items() if p)
-        absent = sorted(c for c, p in presence.items() if not p)
-        if not present or not absent:
-            return
-        changes.append(Change(
-            kind=ChangeKind.API_DEPENDS_ON_CONSUMER_ENV,
-            symbol=name,
-            description=(
-                f"{kind_label} '{name}' is present in configurations "
-                f"{present} but absent in {absent}. Consumers compiling "
-                f"under different toolchains see different public APIs."
-            ),
-            old_value=",".join(present),
-            new_value=",".join(absent),
-        ))
-
-    for name in sorted(union_funcs):
+    for name in sorted(set().union(*cfg_funcs.values())):
         presence = {c: (name in cfg_funcs[c]) for c in all_cfgs}
-        _emit(name, presence, "Function")
-
-    for name in sorted(union_types):
+        change = _env_dependence_change(name, presence, "Function")
+        if change is not None:
+            changes.append(change)
+    for name in sorted(set().union(*cfg_types.values())):
         presence = {c: (name in cfg_types[c]) for c in all_cfgs}
-        _emit(name, presence, "Type")
-
+        change = _env_dependence_change(name, presence, "Type")
+        if change is not None:
+            changes.append(change)
     return changes
 
 
