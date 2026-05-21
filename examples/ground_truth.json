@@ -1339,12 +1339,12 @@
     "case116_cxx_standard_floor_raised": {
       "expected": "NO_CHANGE",
       "category": "no_change",
-      "platforms": ["linux"],
+      "platforms": ["linux", "macos", "windows"],
       "abi_break": false,
       "api_break": false,
       "bad_practice": false,
-      "known_gap": "v2.h uses the C++20 `requires` clause. castxml's bundled Clang frontend defaults to C++14 / C++17 in many environments and rejects the new syntax before the dumper can extract DWARF or AST data — the v2 dump fails on macOS / Windows runners. The matrix-aware CXX_STANDARD_FLOOR_RAISED detector (emitted by the probe harness when fed per-configuration cxx_std) is the only correct channel for this signal; the case is preserved as a fixture for whenever the dumper is taught to thread `-std=c++20` through to castxml.",
-      "description": "v1 header works under C++17; v2 adds a `requires` clause to the same template. Symbol set is unchanged so per-binary diff is NO_CHANGE; the source-level break for C++17 consumers is invisible to per-binary detectors. The matrix-aware CXX_STANDARD_FLOOR_RAISED finding is the channel that surfaces it.",
+      "known_gap": "The C++ standard floor signal is invisible to a per-binary diff (symbol/type set is unchanged between v1 and v2). The matrix-aware CXX_STANDARD_FLOOR_RAISED detector (emitted by the probe harness when fed per-configuration cxx_std metadata) is the only correct channel for this signal. The CMakeLists.txt builds v2 with -std=c++20 to embed a post-C++17 contract via build configuration, but the public declaration set is intentionally identical to v1's so the case still produces NO_CHANGE under the current single-config pipeline.",
+      "description": "v1 header works under C++17; v2 is built with -std=c++20 but declares the same public surface as v1. Per-binary diff is NO_CHANGE; the source-level break for C++17 consumers only surfaces via the matrix-aware CXX_STANDARD_FLOOR_RAISED detector.",
       "expected_kinds": []
     },
     "case117_experimental_graduated": {

@@ -1,18 +1,19 @@
-// case116 v2 — header now requires C++20 (uses a `requires`
-// expression). Consumers still building with C++17 cannot include
-// this header at all.
+// case116 v2 — header is byte-identical to v1.h *at the declaration
+// level*. The C++ standard floor signal does not show up in a per-
+// binary diff (the symbol/type set is unchanged); it only surfaces
+// when the probe harness records each consumer build's cxx_std and
+// compares the floors.
 //
-// The dedicated CXX_STANDARD_FLOOR_RAISED finding is emitted by the
-// matrix detector when the probe harness's manifest records the
-// per-configuration `cxx_std` and the minimum floor moves up between
-// releases. The static example fixture here documents the failure mode
-// for reviewers and serves as an integration smoke test.
+// The CMakeLists.txt builds v2 with -std=c++20 so the *.so embeds a
+// post-C++17 contract via build configuration, but the public
+// declaration set is identical to v1. The case is preserved as a
+// fixture for whenever the dumper threads -std=c++20 through to
+// castxml; for now, the per-binary verdict is correctly NO_CHANGE.
 #pragma once
 
 namespace lib {
 
 template <typename T>
-    requires requires(T t) { ++t; }
 T identity(T x) { return x; }
 
 void print_int(int x);

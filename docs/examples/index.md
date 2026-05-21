@@ -70,7 +70,7 @@ Source files (`v1.*`, `v2.*`, `app.*`, `CMakeLists.txt`) are linked at the botto
 | [case113_internal_template_signature_changed](case113_internal_template_signature_changed.md) | case113 — internal function-template signature leaks via public API (BREAKING) | 🔴 BREAKING | Breaking |
 | [case114_cpo_kind_changed](case114_cpo_kind_changed.md) | case114 — CPO kind changed (BREAKING) | 🔴 BREAKING | Breaking |
 | [case115_api_depends_on_consumer_env](case115_api_depends_on_consumer_env.md) | case115 — public API depends on consumer build environment (RISK) | 🟢 COMPATIBLE | Quality (Compatible) |
-| [case116_cxx_standard_floor_raised](case116_cxx_standard_floor_raised.md) | case116 — C++ standard floor raised (API_BREAK) | ✅ NO_CHANGE | No Change |
+| [case116_cxx_standard_floor_raised](case116_cxx_standard_floor_raised.md) | NO_CHANGE) | ✅ NO_CHANGE | No Change |
 | [case117_experimental_graduated](case117_experimental_graduated.md) | case109 — experimental → stable graduation (compatible) | 🟢 COMPATIBLE | Addition (Compatible) |
 | [case118_experimental_removed_without_replacement](case118_experimental_removed_without_replacement.md) | : removed without replacement (API break) | 🔴 BREAKING | Breaking |
 | [case119_inline_namespace_version_bumped](case119_inline_namespace_version_bumped.md) | case112 — inline namespace version bumped (BREAKING) | 🔴 BREAKING | Breaking |
