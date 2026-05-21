@@ -214,7 +214,7 @@ def _parse_cxx_std(flags: list[str]) -> int | None:
 def load_probe_spec(path: str | Path) -> ProbeSpec:
     """Parse a YAML probe manifest. Accepts JSON too (a YAML subset)."""
     try:
-        import yaml  # type: ignore[import-untyped]
+        import yaml
         data = yaml.safe_load(Path(path).read_text())
     except ImportError:
         # Fallback: PyYAML isn't required as a runtime dep for abicheck,
