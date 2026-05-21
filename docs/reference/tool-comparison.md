@@ -4,8 +4,9 @@ This document explains how each ABI checking tool works, what analysis method it
 benchmark results across real-world test cases, and why the numbers come out the way they do.
 
 > **Note:** abicheck detects 100+ change types (see [Change Kind Reference](change-kinds.md)).
-> The cross-tool benchmark table below uses 42 representative cases (case01-41 + case26b).
-> The full `examples/` directory has 74 cases — abicheck matches the expected verdict on 69 of them (93% exact-match accuracy, all 74 cases counted).
+> The current cross-tool benchmark covers the full 74-case `examples/` catalog
+> (`case01`-`case73` + `case26b`). A historical 42-case snapshot is kept below
+> only for comparison with older reports.
 
 ---
 
@@ -22,8 +23,8 @@ benchmark results across real-world test cases, and why the numbers come out the
 .so (v2) ──► (same) ──► snapshot (JSON) ┘
 ```
 
-**Analysis basis:** ELF symbol table + Clang AST via castxml + DWARF.  
-**Header requirement:** Yes — headers are passed to castxml for full type analysis.  
+**Analysis basis:** ELF symbol table + Clang AST via castxml + DWARF.
+**Header requirement:** Yes — headers are passed to castxml for full type analysis.
 **Compiler requirement:** None — castxml runs separately as a standalone tool.
 
 This gives abicheck three independent data sources per symbol: ELF (what is exported),
@@ -46,16 +47,15 @@ instead of snapshots:
 
 Used as a drop-in for ABICC-based CI pipelines (`abicheck compat check -lib foo -old v1.xml -new v2.xml`).
 
-**Why compat scores lower (40/42 vs 42/42):**  
+**Why compat scores lower than compare mode:**
 `compat` follows ABICC's verdict vocabulary: COMPATIBLE, BREAKING, NO_CHANGE.
-It cannot emit `API_BREAK` — the verdict for source-level-only breaks that are binary-safe
-(e.g. a parameter rename, or reduced access level in a class method).  
-Two benchmark cases (`case31_enum_rename`, `case34_access_level`) expect `API_BREAK`,
-so they score as misses in compat mode.  
+It cannot represent the full `compare` verdict vocabulary cleanly in ABICC-style
+pipelines, especially source-level-only breaks that are binary-safe (for example
+an enum/member rename or reduced access level in a class method).
 This is intentional and documented in `examples/ground_truth.json` as `expected_compat`.
 
 **When to use `compat`:** When you have an existing ABICC XML pipeline and want to
-migrate to abicheck without rewriting scripts.  
+migrate to abicheck without rewriting scripts.
 **When to use `compare`:** For all new integrations — full verdict set including `API_BREAK`.
 
 ---
@@ -69,17 +69,14 @@ Two sub-modes via `--strict-mode`:
 - `full` (default with `-s`): `COMPATIBLE` + `API_BREAK` → `BREAKING` (matches ABICC `-strict`)
 - `api`: only `API_BREAK` → `BREAKING`, additive `COMPATIBLE` changes stay `COMPATIBLE`
 
-**Why strict scores 31/42 (not 100%):**  
-Nine benchmark cases are legitimately `COMPATIBLE` (additive changes, SONAME addition,
-symbol versioning policy, etc.). `--strict-mode full` promotes these to `BREAKING` —
-intentionally, just like ABICC `-strict`. These are correct tool outputs for the
-strict policy, but score as misses against the ground truth which says `COMPATIBLE`.
+**Why strict scores lower than compat mode:**
+Several catalog cases are legitimately `COMPATIBLE` or `API_BREAK`. `--strict-mode full`
+promotes these to `BREAKING` intentionally, just like ABICC `-strict`. These are correct
+tool outputs for the strict policy, but score as misses against the ground truth.
 
-**Why strict (31/42) > ABICC dumper (20/30 = 66%):**  
-ABICC dumper fails to even produce a result on 12 cases (ERROR + TIMEOUT), so its
-denominator is only 30. abicheck strict runs on all 42 cases — even cases where the
-verdict is intentionally promoted. If you normalise ABICC dumper to 42 cases,
-its effective accuracy is 20/42 = 48%, well below strict's 31/42 = 73%.
+**Why strict still has a full denominator:**
+`abicheck strict` runs on all 74 cases. ABICC and abidiff runs can time out or error on
+specific cases, so their scored denominators are lower in the full matrix.
 
 **When to use strict:** CI gates where any COMPATIBLE addition (e.g. new symbol) should
 fail the build. Use `--strict-mode api` to avoid false positives on purely additive changes.
@@ -94,8 +91,8 @@ fail the build. Use `--strict-mode api` to avoid false positives on purely addit
 .so (v2) ──► abidw ──► ABI XML ──┘
 ```
 
-**Analysis basis:** DWARF (primary), CTF/BTF fallback; pure ELF symbol table if no debug info present.  
-**Header requirement:** None (in ELF mode).  
+**Analysis basis:** DWARF (primary), CTF/BTF fallback; pure ELF symbol table if no debug info present.
+**Header requirement:** None (in ELF mode).
 **Compiler requirement:** None.
 
 abidiff reads type information from DWARF sections of the `.so` when available. If DWARF
@@ -104,7 +101,7 @@ modules), and finally to ELF symbol names only when no debug info is present.
 
 For our benchmark, all `.so` files are built with `-g` so DWARF is used throughout.
 
-**Benchmark result: 11/42 (26%)**  
+**Current benchmark result:** see the 74-case matrix below.
 abidiff misses anything that is not directly a symbol removal or a change that DWARF
 fully describes. Specifically:
 - Struct layout, vtable, return type changes → DWARF often marks as COMPATIBLE because
@@ -132,10 +129,10 @@ fully describes. Specifically:
 **`--headers-dir` role:** Filters which symbols are considered public API.
 It does **not** provide additional type information — `abidw` still reads types from DWARF.
 
-**Why abidiff+headers = abidiff in our suite (both 11/42):**  
+**Why abidiff+headers tracks abidiff in our suite:**
 Our benchmark examples are compiled with `-fvisibility=default`, meaning all symbols
-are exported by default. None of the headers use `__attribute__((visibility("hidden")))`.  
-So the header filter changes nothing — all symbols are already public in both modes.  
+are exported by default. None of the headers use `__attribute__((visibility("hidden")))`.
+So the header filter changes nothing — all symbols are already public in both modes.
 The fundamental limitation is that abidiff relies on DWARF for types, not AST.
 Even with perfect headers, it cannot see noexcept, static-qualifier changes, or
 source-level-only changes that have no ELF/DWARF representation.
@@ -154,18 +151,13 @@ It does not improve detection of semantic changes.
 .so (v2, compiled with -g) ──► abi-dumper ──► v2.abi ──┘
 ```
 
-**Analysis basis:** DWARF — same as abidiff, but through Perl-based abi-dumper.  
-**Header requirement:** Optional (pass `-public-headers` to filter to public API).  
+**Analysis basis:** DWARF — same as abidiff, but through Perl-based abi-dumper.
+**Header requirement:** Optional (pass `-public-headers` to filter to public API).
 **Compiler requirement:** None. Debug build (`-g`) required.
 
-**Benchmark result: 20/30 scored (66%) — 12 cases ERROR/TIMEOUT:**
-- `case09_cpp_vtable`: 122s timeout (abi-compliance-checker with complex vtable)
-- `case28/30/31/32/33/34/35/36/40`: ERROR — abi-dumper fails on these C++ patterns
-  (typedef chains, access levels, field renames, anon structs, etc.)
-
-**Why ABICC(dump) accuracy is 66% but effective is only 48%:**  
-Scoring 20/30 looks reasonable, but 12 out of 42 cases don't even run. For a fair comparison:
-20/42 = **48%** effective accuracy. Meanwhile abicheck gets 42/42 = 100%.
+**Current benchmark result:** see the 74-case matrix below. The abi-dumper workflow
+still times out or errors on specific C++ cases and can leave runaway
+`abi-compliance-checker` child processes if the outer wrapper is interrupted.
 
 ---
 
@@ -176,8 +168,8 @@ v1.xml (headers dir + .so path) ──► abi-compliance-checker (invokes GCC in
 v2.xml (headers dir + .so path) ──┘
 ```
 
-**Analysis basis:** GCC-compiled AST from headers.  
-**Header requirement:** Yes — must point to headers directory.  
+**Analysis basis:** GCC-compiled AST from headers.
+**Header requirement:** Yes — must point to headers directory.
 **Compiler requirement:** Yes — **GCC only**. Clang and icpx are not supported.
 
 **Why ABICC(xml) is slow and unreliable:**
@@ -193,7 +185,7 @@ v2.xml (headers dir + .so path) ──┘
 **Our fix in PR #72:** Pass a specific header file path instead of a directory in
 `<headers>`. This drops runtime from 120s → ~1s and fixes wrong verdicts.
 
-**Benchmark result: 25/41 (60%) — 1 case TIMEOUT, rest scored.**
+**Current benchmark result:** see the 74-case matrix below.
 
 ---
 
@@ -212,7 +204,7 @@ Only `abicheck compare` can emit this verdict.
 
 ---
 
-## Why abicheck achieves 100%
+## Why abicheck leads the matrix
 
 abicheck uses three independent analysis passes per comparison:
 
@@ -231,7 +223,61 @@ const). ABICC has no ELF pass (misses SONAME, visibility). ABICC(dump) has no AS
 
 ---
 
-## Benchmark summary (2026-03-11, 42 cases)
+## Current benchmark summary (2026-05-19, 74 cases)
+
+Full-catalog scan status from `python3 scripts/benchmark_comparison.py` on the current
+`examples/` catalog. ABICC runs used `--abicc-timeout 20` to keep known hangs bounded.
+
+| Tool | Cases attempted | Scored | Correct | Accuracy | Not scored / notes |
+|------|:---------------:|:------:|:-------:|:--------:|--------------------|
+| abicheck compare | 74 | 74 | 74 | **100%** | Full exact match after forcing Clang for `case64` |
+| abicheck compat | 74 | 74 | 71 | 95% | ABICC-style compatibility mode |
+| abicheck strict | 74 | 74 | 62 | 83% | Intentional strict promotion of compatible/API breaks |
+| abidiff | 74 | 73 | 22 | 30% of scored | `case16_inline_to_non_inline` hangs/timeouts |
+| abidiff+headers | 74 | 73 | 22 | 30% of scored | `case16_inline_to_non_inline` hangs/timeouts |
+| ABICC(dump) | 74 | 71 | 51 | 71% of scored | `case09`, `case59` timeout; `case16` error |
+| ABICC(xml) | 74 | 72 | 50 | 69% of scored | `case16`, `case60` timeout |
+
+### Scan-status matrix
+
+| Check configuration | Full 74-case run | Status |
+|---------------------|:----------------:|--------|
+| `abicheck` | ✅ 74/74 completed | 74/74 exact |
+| `abicheck_compat` | ✅ 74/74 completed | 71/74 exact |
+| `abicheck_strict` | ✅ 74/74 completed | 62/74 exact |
+| `abidiff` | ⚠️ 73/74 completed | `case16_inline_to_non_inline` hangs |
+| `abidiff_headers` | ⚠️ 73/74 completed | `case16_inline_to_non_inline` hangs |
+| `abicc_dumper` | ⚠️ 71/74 scored | `case09`, `case59` timeout; `case16` error |
+| `abicc_xml` | ⚠️ 72/74 scored | `case16`, `case60` timeout |
+
+### Commands used
+
+```bash
+python3 scripts/benchmark_comparison.py \
+  --tools abicheck abicheck_compat abicheck_strict \
+  --skip-abicc
+
+# abidiff and abidiff+headers were run on all cases except case16,
+# which hangs in both modes in this environment.
+python3 scripts/benchmark_comparison.py \
+  --tools abidiff abidiff_headers \
+  --skip-abicc \
+  --cases case01_symbol_removal ... case73_typedef_underlying_changed
+
+timeout 600 python3 scripts/benchmark_comparison.py \
+  --tools abicc_xml \
+  --abicc-mode xml \
+  --abicc-timeout 20
+
+timeout 600 python3 scripts/benchmark_comparison.py \
+  --tools abicc_dumper \
+  --abicc-mode dumper \
+  --abicc-timeout 20
+```
+
+---
+
+## Legacy benchmark summary (2026-03-11, 42 cases)
 
 | Tool | Scored | Correct | Accuracy | Not scored | Time |
 |------|:------:|:-------:|:--------:|:----------:|------|
@@ -245,7 +291,7 @@ const). ABICC has no ELF pass (misses SONAME, visibility). ABICC(dump) has no AS
 
 ---
 
-## Full results (42 cases)
+## Legacy full results (42 cases)
 
 | Case | Expected | abicheck | compat | strict | abidiff | abidiff+hdr | ABICC(dump) | ABICC(xml) |
 |------|----------|----------|--------|--------|---------|-------------|-------------|------------|
@@ -297,7 +343,7 @@ Legend: ✅ correct · ⚠️ wrong/undercounted · ❌ wrong in opposite direct
 ¹ `strict` false positive: COMPATIBLE → BREAKING is expected with `--strict-mode full`; use `--strict-mode api` to avoid.
 ² `compat` known limitation: API_BREAK verdict not supported; maps to COMPATIBLE (scored as miss).
 
-## Timing
+## Legacy timing
 
 | Tool | Total (42 cases) | Notes |
 |------|-----------------|-------|
@@ -312,8 +358,8 @@ Legend: ✅ correct · ⚠️ wrong/undercounted · ❌ wrong in opposite direct
 ## Run the benchmark yourself
 
 ```bash
-# Full benchmark (all 42 cases, all tools)
-python3 scripts/benchmark_comparison.py
+# Full benchmark (all 74 cases, all tools)
+python3 scripts/benchmark_comparison.py --abicc-mode both
 ```
 
 ```bash
@@ -337,4 +383,4 @@ python3 scripts/benchmark_comparison.py --tools abicheck abidiff
 | Migrating from ABICC XML pipeline | `abicheck compat check` |
 | Strict gate (any addition = fail) | `abicheck compat check -s` |
 | Debug build available, DWARF check | `abicheck compare` (castxml already better) |
-| Quick ELF-only sanity check | `abidiff` (fast, 26% but catches symbol removals) |
+| Quick ELF-only sanity check | `abidiff` (fast, 30% (22/73) but catches symbol removals) |

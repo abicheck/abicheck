@@ -1,0 +1,60 @@
+# Case 110: concurrent_unordered_map API Drift
+
+**Category:** ABI + source break / oneTBB regression suite | **Verdict:** 🔴 BREAKING
+
+## What breaks
+
+A public member function (`insert`) loses one of its parameters between
+versions. The mangled symbol of the old overload disappears from the
+.so; the new overload has a different mangled name. Both the .so symbol
+table and any consumer source that called the old form change.
+
+## Why this is in the oneTBB regression suite
+
+Mirrors several documented historical signature tightenings on
+`tbb::concurrent_unordered_map` (and friends) where helper / hint
+parameters were dropped or reordered between releases. These changes
+are doubly bad: they break source AND they break linking of consumers
+that were built against the old headers.
+
+## How abicheck catches it
+
+The diff exposes:
+
+- `FUNC_REMOVED`: old mangled `insert(int, size_t)`
+- `FUNC_ADDED`: new mangled `insert(int)` (informational; helps the
+  reporter identify a candidate replacement)
+
+`FUNC_REMOVED` on a public symbol is unconditionally BREAKING — there
+is no new detector required to flag this case.
+
+## Code diff
+
+| v1 | v2 |
+|----|------|
+| `void insert(int key, std::size_t rehash_hint);` | `void insert(int key);` |
+
+## How to fix (as a library maintainer)
+
+- Keep both overloads through a deprecation window: in release N–1, mark
+  the hint-form overload `[[deprecated]]` and have it call into the
+  hint-free implementation. In release N, remove it.
+- If the hint argument is genuinely dead, prefer making it a default
+  argument first (`std::size_t rehash_hint = 0`) — that preserves the
+  symbol name on platforms where the mangled signature includes the
+  parameter, and only later remove it.
+
+## Real failure demo
+
+```bash
+# v1 header, v1 .so:
+g++ -std=c++17 -I. app.cpp -L. -lmylib -o app   # compiles, links, runs
+
+# v2 header, v2 .so: app.cpp's 2-arg insert is gone.
+g++ -std=c++17 -I. app.cpp -L. -lmylib -o app
+# → error: no matching function for call to 'insert(int, int)'
+```
+
+## References
+
+- oneTBB 2021 migration guide: `concurrent_unordered_map` API changes.

@@ -1,6 +1,6 @@
 # ABI Scenario Catalog
 
-This directory contains **91 published cases** (`01–76` + `26b` + `77, 79–84, 86–87, 89, 94, 106–108`) plus **4 multi-library bundle cases** (`90–93`, tracked separately under [ADR-023](../docs/development/adr/023-bundle-aware-multi-binary-analysis.md)) demonstrating real-world ABI/API break scenarios. Each case is a minimal, compilable C/C++ example with:
+This directory contains **96 published cases** (`01–76` + `26b` + `77, 79–84, 86–87, 89, 94, 95, 106–112`) plus **4 multi-library bundle cases** (`90–93`, tracked separately under [ADR-023](../docs/development/adr/023-bundle-aware-multi-binary-analysis.md)) demonstrating real-world ABI/API break scenarios. Each case is a minimal, compilable C/C++ example with:
 
 - Paired `v1/` and `v2/` source + headers.
 - A consumer `app.c` / `app.cpp` that demonstrates the actual failure at runtime.
@@ -17,10 +17,10 @@ The catalog drives abicheck's benchmark and serves as an encyclopedia of ABI pit
 
 | Verdict | Count | `checker_policy.py` set | Icon |
 |---------|-------|-------------------------|------|
-| BREAKING | 68 | `BREAKING_KINDS` | 🔴 |
+| BREAKING | 72 | `BREAKING_KINDS` | 🔴 |
 | API_BREAK | 3 | `API_BREAK_KINDS` | 🟠 |
 | COMPATIBLE_WITH_RISK | 2 | `RISK_KINDS` | 🟡 |
-| COMPATIBLE (addition) | 7 | `ADDITION_KINDS` | 🟢 |
+| COMPATIBLE (addition) | 8 | `ADDITION_KINDS` | 🟢 |
 | COMPATIBLE (quality) | 9 | `QUALITY_KINDS` | 🟡 |
 | NO_CHANGE | 2 | — | ✅ |
 
@@ -129,9 +129,14 @@ Some policy-escalated source/contract breaks (notably case30, case35) may keep i
 | [87](case87_default_template_arg_changed/README.md) | Default Template Argument Changed | Breaking | BREAKING 🔴 |
 | [89](case89_inline_accessor_renamed_pimpl_member/README.md) | Inline Accessor References Renamed Pimpl Member | Breaking | BREAKING 🔴 |
 | [94](case94_empty_tag_gained_state/README.md) | Empty Tag Gained State (oneTBB partitioner shape) | Breaking | BREAKING 🔴 |
+| [95](case95_allocator_nested_typedef_removed/README.md) | Allocator Nested-Typedef Removed (member_name suppression demo) | Breaking | BREAKING 🔴 |
 | [106](case106_ctor_became_explicit/README.md) | Conversion Operator Became `explicit` | API Break | API_BREAK 🟠 |
 | [107](case107_task_scheduler_init_removed/README.md) | `task_scheduler_init` Removed (oneTBB 2021.1) | Breaking | BREAKING 🔴 |
 | [108](case108_task_class_removed/README.md) | `task` Class Removed (oneTBB 2021.1) | Breaking | BREAKING 🔴 |
+| [109](case109_flow_graph_policy_renames/README.md) | flow::graph Policy Tag Renames (oneTBB regression suite) | Breaking | BREAKING 🔴 |
+| [110](case110_concurrent_unordered_map_api_drift/README.md) | concurrent_unordered_map API Drift (oneTBB regression suite) | Breaking | BREAKING 🔴 |
+| [111](case111_enumerable_thread_specific_lambda_ambiguity/README.md) | enumerable_thread_specific Lambda-Init Ambiguity (oneTBB regression suite) | Addition | COMPATIBLE 🟢 (known gap) |
+| [112](case112_task_arena_attach_tag/README.md) | task_arena::attach Tag Replaces Enum (oneTBB regression suite) | Breaking | BREAKING 🔴 |
 
 ---
 

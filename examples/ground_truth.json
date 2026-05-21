@@ -1190,6 +1190,20 @@
       "description": "An empty tag struct (mirrors tbb::auto_partitioner) gains a member; sizeof grows from 1 to 8. Any consumer that passed the tag by value into a header-inline algorithm interface now writes an undersized argument into a wider slot. Detected by the existing type_size_changed / type_field_added pair.",
       "expected_kinds": ["type_size_changed", "type_field_added"]
     },
+    "case95_allocator_nested_typedef_removed": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "abi_break": false,
+      "api_break": true,
+      "bad_practice": false,
+      "description": "An allocator-style class drops the historical STL nested-typedef set (value_type, pointer, reference, size_type, difference_type). Exported member symbols are unchanged so binaries still link, but consumer source using `typename Alloc::value_type` etc. fails to compile. Detected via `typedef_removed` (BREAKING per change_registry). Demonstrates the new `member_name` suppression selector — combined with `change_kind: typedef_removed`, it scopes the inevitable noise from removing a uniform set of nested aliases.",
+      "expected_kinds": ["typedef_removed"]
+    },
     "case106_ctor_became_explicit": {
       "expected": "API_BREAK",
       "category": "api_break",
@@ -1233,7 +1247,35 @@
       "description": "Named regression fixture for the oneTBB 2021.1 removal of the polymorphic `tbb::task` base class. Removing a publicly-derivable polymorphic base destroys every user subclass's vtable, breaks RTTI across DSOs, and undefines the typeinfo symbol. Detected by existing FUNC_REMOVED / TYPE_REMOVED detectors.",
       "expected_kinds": ["func_removed", "type_removed"]
     },
-    "case109_experimental_graduated": {
+    "case109_flow_graph_policy_renames": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "abi_break": false,
+      "api_break": true,
+      "bad_practice": false,
+      "description": "Header-only policy-tag types used as template parameters for `function_node` are renamed wholesale (queueing/rejecting → buffering_policy/backpressure_policy) and the instantiation-anchor typedef is dropped. The example deliberately keeps v1.cpp / v2.cpp byte-identical (no template instantiations) so the .so symbol table is unchanged across the version pair; any rebuild against v2 headers still fails. Detected via `typedef_removed` + `type_removed` (both BREAKING per change_registry). Member of the oneTBB regression suite; mirrors the 2021 flow::graph policy reshuffle.",
+      "expected_kinds": ["typedef_removed", "type_removed"]
+    },
+    "case110_concurrent_unordered_map_api_drift": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "abi_break": true,
+      "api_break": true,
+      "bad_practice": false,
+      "description": "Public member function `insert` loses one of its parameters between versions. The old mangled symbol disappears, the new overload has a different mangled name — both source and link break. Member of the oneTBB regression suite; mirrors historical signature tightenings on `tbb::concurrent_unordered_map`.",
+      "expected_kinds": ["func_removed"]
+    },
+    "case111_enumerable_thread_specific_lambda_ambiguity": {
       "expected": "COMPATIBLE",
       "category": "addition",
       "platforms": [
@@ -1243,11 +1285,12 @@
       ],
       "abi_break": false,
       "api_break": false,
-      "bad_practice": false,
-      "description": "A declaration lived only under lib::experimental:: in v1 and is published at the stable lib:: name in v2 while the experimental alias is retained. The dedicated EXPERIMENTAL_GRADUATED finding makes the migration event visible; the underlying signal is also a plain func_added for the stable name.",
-      "expected_kinds": ["experimental_graduated", "func_added"]
+      "bad_practice": true,
+      "known_gap": "Two gaps stack here. (1) castxml does not emit mangled names for user-declared constructors (same gap as case106 / case112), so the added second ctor cannot be observed as FUNC_ADDED end-to-end — abicheck currently returns NO_CHANGE on this case. (2) Even with the FUNC_ADDED in place, constructor overload ambiguity at consumer call sites cannot be detected from library snapshots alone; that needs the castxml header-AST capture path on the roadmap (concept tightening / hidden friends). The case is preserved as a regression fixture for whenever either gap is closed.",
+      "description": "A second constructor overload accepting `std::function<int()>` is added next to the existing `int`-form constructor. By itself this is a pure addition — existing call sites that pass an int still resolve to the original constructor. The risk: brace-initialization and generic callable arguments can become ambiguous at downstream call sites. Member of the oneTBB regression suite.",
+      "expected_kinds": ["func_added"]
     },
-    "case110_experimental_removed_without_replacement": {
+    "case112_task_arena_attach_tag": {
       "expected": "BREAKING",
       "category": "breaking",
       "platforms": [
@@ -1258,31 +1301,14 @@
       "abi_break": true,
       "api_break": true,
       "bad_practice": false,
-      "description": "A declaration only ever lived under lib::experimental:: in v1 and is removed from v2 with no stable-namespace replacement. The dedicated EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT finding tells reviewers there is no migration target; the underlying mangled symbol disappearance is also reported as a plain func_removed.",
-      "expected_kinds": ["experimental_removed_without_replacement", "func_removed"]
-    },
-    "case112_inline_namespace_version_bumped": {
-      "expected": "BREAKING",
-      "category": "breaking",
-      "platforms": [
-        "linux",
-        "macos",
-        "windows"
-      ],
-      "abi_break": true,
-      "api_break": false,
-      "bad_practice": false,
-      "description": "Library uses a versioned inline namespace `_V1` in v1 and bumps to `_V2` in v2. Declarations look identical to consumers so source keeps compiling, but every freshly built TU emits mangled symbols carrying the new version segment — old and new TUs of the same program ODR-violate. Specialisation of the existing inline_namespace_moved that fires from declared-name evidence so it works on header-only inputs and single-symbol bumps.",
-      "expected_kinds": ["inline_namespace_version_bumped"]
+      "known_gap": "Two detector gaps stack on this case in the castxml-driven pipeline: (1) castxml does not emit mangled names for user-declared constructors (same gap as case106), so the v1 ctor `task_arena(attach_mode_t)` collapses with all other ctors under mangled='task_arena' and FUNC_REMOVED never fires; (2) abicheck's enum diff defers wholly-removed enums to TYPE_REMOVED, but TYPE_REMOVED only iterates `snap.types`, never `snap.enums`, so `attach_mode_t` removal goes silently undetected. End-to-end the verdict comes out COMPATIBLE (only the new nested `attach` struct is observed as TYPE_ADDED). The case is preserved as a regression fixture for whenever either gap is closed.",
+      "description": "An `attach_mode_t` enum + matching constructor are replaced by an empty tag struct `task_arena::attach` + tag-dispatched constructor. The old enum, its members, and the old constructor's mangled symbol are all removed. Member of the oneTBB regression suite; mirrors the 2021 `task_arena::attach` tag introduction.",
+      "expected_kinds": ["func_removed", "type_removed", "enum_member_removed"]
     },
     "case113_internal_template_signature_changed": {
       "expected": "BREAKING",
       "category": "breaking",
-      "platforms": [
-        "linux",
-        "macos",
-        "windows"
-      ],
+      "platforms": ["linux", "macos", "windows"],
       "abi_break": true,
       "api_break": false,
       "bad_practice": false,
@@ -1292,11 +1318,7 @@
     "case114_cpo_kind_changed": {
       "expected": "BREAKING",
       "category": "breaking",
-      "platforms": [
-        "linux",
-        "macos",
-        "windows"
-      ],
+      "platforms": ["linux", "macos", "windows"],
       "abi_break": true,
       "api_break": false,
       "bad_practice": false,
@@ -1306,11 +1328,7 @@
     "case115_api_depends_on_consumer_env": {
       "expected": "BREAKING",
       "category": "breaking",
-      "platforms": [
-        "linux",
-        "macos",
-        "windows"
-      ],
+      "platforms": ["linux", "macos", "windows"],
       "abi_break": true,
       "api_break": true,
       "bad_practice": false,
@@ -1320,16 +1338,42 @@
     "case116_cxx_standard_floor_raised": {
       "expected": "NO_CHANGE",
       "category": "no_change",
-      "platforms": [
-        "linux",
-        "macos",
-        "windows"
-      ],
+      "platforms": ["linux", "macos", "windows"],
       "abi_break": false,
       "api_break": false,
       "bad_practice": false,
       "description": "v1 header works under C++17; v2 adds a `requires` clause to the same template. Symbol set is unchanged so per-binary diff is NO_CHANGE; the source-level break for C++17 consumers is invisible to per-binary detectors. The matrix-aware CXX_STANDARD_FLOOR_RAISED finding (emitted by the probe harness when fed per-configuration cxx_std) is the channel that surfaces it.",
       "expected_kinds": []
+    },
+    "case117_experimental_graduated": {
+      "expected": "COMPATIBLE",
+      "category": "addition",
+      "platforms": ["linux", "macos", "windows"],
+      "abi_break": false,
+      "api_break": false,
+      "bad_practice": false,
+      "description": "A declaration lived only under lib::experimental:: in v1 and is published at the stable lib:: name in v2 while the experimental alias is retained. The dedicated EXPERIMENTAL_GRADUATED finding makes the migration event visible; the underlying signal is also a plain func_added for the stable name.",
+      "expected_kinds": ["experimental_graduated", "func_added"]
+    },
+    "case118_experimental_removed_without_replacement": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": ["linux", "macos", "windows"],
+      "abi_break": true,
+      "api_break": true,
+      "bad_practice": false,
+      "description": "A declaration only ever lived under lib::experimental:: in v1 and is removed from v2 with no stable-namespace replacement. The dedicated EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT finding tells reviewers there is no migration target; the underlying mangled symbol disappearance is also reported as a plain func_removed.",
+      "expected_kinds": ["experimental_removed_without_replacement", "func_removed"]
+    },
+    "case119_inline_namespace_version_bumped": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": ["linux", "macos", "windows"],
+      "abi_break": true,
+      "api_break": false,
+      "bad_practice": false,
+      "description": "Library uses a versioned inline namespace `_V1` in v1 and bumps to `_V2` in v2. Declarations look identical to consumers so source keeps compiling, but every freshly built TU emits mangled symbols carrying the new version segment — old and new TUs of the same program ODR-violate. Specialisation of the existing inline_namespace_moved that fires from declared-name evidence so it works on header-only inputs and single-symbol bumps.",
+      "expected_kinds": ["inline_namespace_version_bumped"]
     }
   }
 }

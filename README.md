@@ -152,13 +152,14 @@ The [`examples/`](examples/README.md) directory contains **74 real-world ABI sce
 
 Accuracy on the full 74-case catalog (`01–73` + `26b`):
 
-| Configuration | Exact verdict accuracy | FP | FN |
-|---|---:|---:|---:|
-| `abicheck compare` | **69/74 (93%)** | 0 | 1 |
-| `abicheck compat` | **68/74 (92%)** | 0 | 1 |
-| `abidiff` | **23/74 (31%)** | 0 | 39 |
-
-\* FP/FN for breaking-signal detection (`BREAKING` + `API_BREAK` treated as positive).
+| Configuration | Exact verdict accuracy | Scan status |
+|---|---:|---|
+| `abicheck compare` | **74/74 (100%)** | 74/74 completed |
+| `abicheck compat` | **71/74 (95%)** | 74/74 completed |
+| `abicheck strict` | **62/74 (83%)** | 74/74 completed |
+| `abidiff` | **22/73 (30%)** | 73/74 completed; `case16` hangs |
+| `ABICC(xml)` | **50/72 (69%)** | 72/74 scored |
+| `ABICC(dump)` | **51/71 (71%)** | 71/74 scored |
 
 Per-case matrix, methodology, and the full comparison table: [Tool Comparison & Benchmarks](https://napetrov.github.io/abicheck/reference/tool-comparison/).
 

@@ -158,6 +158,14 @@ def _shared_lib_suffix() -> str:
 
 SHARED_LIB_SUFFIX = _shared_lib_suffix()
 
+def _first_available_tool(*names: str) -> str | None:
+    """Return the first available executable path from *names*."""
+    for name in names:
+        path = shutil.which(name)
+        if path:
+            return path
+    return None
+
 # Load platform info from ground_truth.json
 PLATFORMS: dict[str, list[str]] = {
     k: v.get("platforms", ["linux", "macos", "windows"])
@@ -857,7 +865,7 @@ def _error_entry(case_name: str, expected: str) -> dict[str, Any]:
 def _case64_toolchain_policy(case_name: str, configured: str) -> tuple[str | None, bool]:
     """Return (preferred_family, force_case64_compile) for benchmark compilation."""
     case64 = case_name == "case64_calling_convention_changed"
-    has_clang = bool(shutil.which("clang-18") or shutil.which("clang"))
+    has_clang = bool(_first_available_tool("clang-18", "clang"))
     if configured == "clang":
         preferred_family = "clang"
     elif configured == "gcc":
@@ -958,15 +966,19 @@ def _build_case_artifacts(
         cmake_build.mkdir(parents=True)
         cmake_env = os.environ.copy()
         if force_case64_compile and preferred_family == "clang":
-            if shutil.which("clang"):
-                cmake_env.setdefault("CC", "clang")
-            if shutil.which("clang++"):
-                cmake_env.setdefault("CXX", "clang++")
+            cc = _first_available_tool("clang-18", "clang")
+            cxx = _first_available_tool("clang++-18", "clang++")
+            if cc:
+                cmake_env["CC"] = cc
+            if cxx:
+                cmake_env["CXX"] = cxx
         elif force_case64_compile and preferred_family == "gcc":
-            if shutil.which("gcc"):
-                cmake_env.setdefault("CC", "gcc")
-            if shutil.which("g++"):
-                cmake_env.setdefault("CXX", "g++")
+            cc = _first_available_tool("gcc")
+            cxx = _first_available_tool("g++")
+            if cc:
+                cmake_env["CC"] = cc
+            if cxx:
+                cmake_env["CXX"] = cxx
 
         try:
             cr = subprocess.run(

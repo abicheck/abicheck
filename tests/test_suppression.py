@@ -255,6 +255,95 @@ def test_type_pattern_with_change_kind_mismatch_not_matched() -> None:
     assert not sup.matches(c)
 
 
+# ─── member_name selector ────────────────────────────────────────────────────
+
+def test_member_name_matches_bare_typedef_symbol() -> None:
+    """Typedef removals use the bare alias as the symbol — member_name should match it."""
+    sup = Suppression(member_name="value_type", change_kind="typedef_removed")
+    c = make_change(ChangeKind.TYPEDEF_REMOVED, "value_type")
+    assert sup.matches(c)
+
+
+def test_member_name_matches_last_qualified_segment() -> None:
+    sup = Suppression(member_name="value_type", change_kind="typedef_removed")
+    c = make_change(ChangeKind.TYPEDEF_REMOVED, "std::allocator::value_type")
+    assert sup.matches(c)
+
+
+def test_member_name_does_not_match_other_member() -> None:
+    sup = Suppression(member_name="value_type", change_kind="typedef_removed")
+    c = make_change(ChangeKind.TYPEDEF_REMOVED, "size_type")
+    assert not sup.matches(c)
+
+
+def test_member_name_uses_fullmatch_not_substring() -> None:
+    sup = Suppression(member_name="value", change_kind="typedef_removed")
+    c = make_change(ChangeKind.TYPEDEF_REMOVED, "value_type")
+    assert not sup.matches(c)
+
+
+def test_member_name_combines_with_type_pattern() -> None:
+    """member_name + type_pattern is the canonical noise-control combo."""
+    sup = Suppression(
+        type_pattern="Allocator",
+        member_name="value_type",
+        change_kind="typedef_removed",
+    )
+    # Symbol shape from diff_types when typedef is qualified by its container.
+    c = make_change(ChangeKind.TYPEDEF_REMOVED, "Allocator::value_type")
+    assert sup.matches(c)
+    # Different container — type_pattern blocks the match.
+    c2 = make_change(ChangeKind.TYPEDEF_REMOVED, "OtherType::value_type")
+    assert not sup.matches(c2)
+
+
+def test_member_name_change_kind_mismatch_not_matched() -> None:
+    sup = Suppression(member_name="value_type", change_kind="typedef_removed")
+    c = make_change(ChangeKind.TYPEDEF_BASE_CHANGED, "value_type")
+    assert not sup.matches(c)
+
+
+def test_member_name_regex_pattern() -> None:
+    sup = Suppression(member_name=r"(value|size)_type")
+    assert sup.matches(make_change(ChangeKind.TYPEDEF_REMOVED, "value_type"))
+    assert sup.matches(make_change(ChangeKind.TYPEDEF_REMOVED, "size_type"))
+    assert not sup.matches(make_change(ChangeKind.TYPEDEF_REMOVED, "pointer"))
+
+
+def test_member_name_invalid_regex_rejected() -> None:
+    with pytest.raises(ValueError, match="Invalid member_name"):
+        Suppression(member_name="(unclosed")
+
+
+def test_member_name_rejects_combination_with_symbol() -> None:
+    with pytest.raises(ValueError, match="cannot be combined"):
+        Suppression(symbol="foo", member_name="bar")
+
+
+def test_member_name_rejects_combination_with_symbol_pattern() -> None:
+    with pytest.raises(ValueError, match="cannot be combined"):
+        Suppression(symbol_pattern="foo.*", member_name="bar")
+
+
+def test_member_name_counts_as_selector() -> None:
+    """member_name alone satisfies the 'at least one selector' requirement."""
+    sup = Suppression(member_name="value_type")
+    assert sup.matches(make_change(ChangeKind.TYPEDEF_REMOVED, "value_type"))
+
+
+def test_member_name_loaded_from_yaml(tmp_path: Path) -> None:
+    yaml_path = write_yaml(tmp_path, """
+        version: 1
+        suppressions:
+          - member_name: "value_type"
+            change_kind: "typedef_removed"
+            reason: "stdlib boilerplate"
+    """)
+    sl = SuppressionList.load(yaml_path)
+    assert len(sl) == 1
+    assert sl.is_suppressed(make_change(ChangeKind.TYPEDEF_REMOVED, "value_type"))
+
+
 def test_rules_by_label_and_repr() -> None:
     sl = SuppressionList([
         Suppression(symbol="a", label="x"),
