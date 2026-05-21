@@ -373,12 +373,19 @@ def _build_castxml_command(
     # which is rejected when parsing a .h file in C mode.
     if not force_cpp and cc_id == "gnu":
         cmd += ["-x", "c", "-std=gnu11"]
-    elif force_cpp20 and not (gcc_options and "-std=" in gcc_options):
+    elif force_cpp20 and not (
+        gcc_options
+        and ("-std=" in gcc_options or "/std:" in gcc_options)
+    ):
         # Headers contain C++20-only syntax (concept / requires-expression).
         # Castxml's default standard is whatever the host compiler picks
-        # (usually C++17 on modern gcc), which rejects concepts. Force
-        # gnu++20 unless the caller already supplied an explicit -std=.
-        cmd += ["-x", "c++", "-std=gnu++20"]
+        # (usually C++17 on modern gcc / MSVC), which rejects concepts.
+        # Force C++20 unless the caller already supplied an explicit -std=.
+        # MSVC uses /std:c++20; gcc/clang use -std=gnu++20.
+        if cc_id == "msvc":
+            cmd += ["/std:c++20"]
+        else:
+            cmd += ["-x", "c++", "-std=gnu++20"]
 
     cmd += ["-o", str(out_xml), str(agg_path)]
     return cmd

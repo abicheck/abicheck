@@ -1223,8 +1223,7 @@
       "category": "addition",
       "platforms": [
         "linux",
-        "macos",
-        "windows"
+        "macos"
       ],
       "abi_break": false,
       "api_break": false,
