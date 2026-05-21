@@ -11,6 +11,22 @@ permissions:
   contents: read
 
 jobs:
+  ai-readiness:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: 'pip'
+      - name: Install mypy (for baseline-drift check)
+        run: |
+          python -m pip install --upgrade pip
+          pip install mypy
+      - name: AI-readiness checks (file size, CLAUDE.md coverage, ChangeKind invariants, mypy drift, import cycles)
+        run: python scripts/check_ai_readiness.py
+
   lint-and-types:
     runs-on: ubuntu-latest
     timeout-minutes: 10

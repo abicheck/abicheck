@@ -124,21 +124,56 @@ Core pipeline (in order of data flow):
 
 ## Known mypy issues
 
-CI runs `mypy abicheck/` as a required gate. It currently reports ~17 errors in:
-- `compat/cli.py` — Click's `Group` class typed as `Any` (4 errors)
-- `ctf_metadata.py`, `btf_metadata.py`, `dwarf_snapshot.py` — unused `type: ignore` comments (13 errors)
+CI runs `mypy abicheck/` as a required gate. The current baseline is **27 errors** (concentrated in `compat/cli.py`, `ctf_metadata.py`, `btf_metadata.py`, `dwarf_snapshot.py`). `scripts/check_ai_readiness.py` enforces the baseline — a higher count fails CI.
 
 These are upstream typing gaps or stale suppression comments, not bugs.
-**Your responsibility**: run `mypy abicheck/` after your changes and ensure you do not introduce *new* errors beyond the known baseline. Do not dismiss new mypy failures as "known issues".
+**Your responsibility**: run `mypy abicheck/` after your changes and ensure you do not introduce *new* errors beyond the documented baseline. Do not dismiss new mypy failures as "known issues". If you legitimately reduce the count, lower `MYPY_ERROR_BASELINE` in `scripts/check_ai_readiness.py` to lock in the win.
+
+## AI-readiness gate
+
+`scripts/check_ai_readiness.py` runs in CI as a fast structural gate. It checks:
+
+| Check | Severity | What it enforces |
+|-------|----------|------------------|
+| `file-size` | ERROR > 2000 lines, WARN > 1500 | Source files stay legible (no allowlist) |
+| `claude-md-coverage` | ERROR | `CLAUDE.md` exists in each major sub-tree |
+| `test-ratio` | WARN | At least 20% test-to-source file ratio |
+| `future-annotations` | WARN | `from __future__ import annotations` per CLAUDE.md convention |
+| `changekind-partition` | ERROR | Every `ChangeKind` is in exactly one of `BREAKING_KINDS` / `API_BREAK_KINDS` / `COMPATIBLE_KINDS` / `RISK_KINDS` |
+| `changekind-detector` | WARN | Every `ChangeKind` is produced somewhere (not orphaned) |
+| `changekind-docs` | WARN | Every `ChangeKind` is mentioned in `docs/` |
+| `import-cycles` | ERROR | No import cycles within `abicheck/` |
+| `mypy-baseline` | ERROR if drifted up | mypy error count ≤ documented baseline |
+| `examples-ground-truth` | ERROR | Every `examples/case*/` has a `README.md` and an entry in `ground_truth.json` |
+| `mkdocs-nav-coverage` | WARN | Every `docs/**/*.md` is in `mkdocs.yml` nav or linked from another doc |
+| `banned-imports` | ERROR | No `print(...)` outside CLI/reporter modules; no `subprocess(..., shell=True)` |
+| `license-header` | WARN | Every `abicheck/**/*.py` carries the Apache-2.0 header / SPDX identifier |
+
+Run locally: `python scripts/check_ai_readiness.py`. Errors fail; warnings print and pass.
 
 ## Files that are large — edit carefully
 
-- `cli.py` (2,616 lines) — main CLI, many Click commands
-- `diff_platform.py` (1,618 lines) — all platform-specific detection
-- `dumper.py` (1,553 lines) — binary metadata extraction
-- `compat/cli.py` (1,389 lines) — ABICC compat CLI
+- `cli.py` (~1,950 lines) — main CLI, Click commands; sub-command modules below register on it
+- `cli_compare_release.py` (~950 lines) — `compare-release` command and helpers (split from `cli.py`)
+- `cli_baseline.py` (~240 lines) — `baseline` command group (split from `cli.py`)
+- `cli_debian_symbols.py` (~130 lines) — `debian-symbols` command group (split from `cli.py`)
+- `diff_platform.py` (~1,600 lines) — all platform-specific detection
+- `dumper.py` (~1,600 lines) — binary metadata extraction
+- `compat/cli.py` (~1,500 lines) — ABICC compat CLI
 
-These files work correctly but are large. When editing, read the specific section you need rather than the whole file.
+The 2000-line hard cap is enforced for every source file (no allowlist). Files above 1500 lines emit a WARN as a refactor signal. When editing, read the specific section you need rather than the whole file.
+
+### Adding a new top-level command
+
+Pick the right home:
+
+- **Small command (one function, no significant helpers)** — add to `cli.py` directly with `@main.command(...)`.
+- **Larger command or command group** — add as a sibling `abicheck/cli_<name>.py` module:
+  1. Top of module: `from .cli import main` (and any shared `_helpers`).
+  2. Decorate with `@main.command("foo")` or `@main.group("foo")` as usual.
+  3. At the bottom of `cli.py`, add `cli_<name>` to the side-effect `from . import (...)` block — that runs after `main` and helpers are defined, registering the new command.
+  4. If the new module uses `@click` decorators, add `abicheck.cli_<name>` to the `disallow_untyped_decorators = false` override in `pyproject.toml` (alongside the existing entries).
+  5. If `scripts/check_ai_readiness.py` flags a cycle, add `frozenset({"cli", "cli_<name>"})` to `IMPORT_CYCLE_ALLOWLIST` — this registration pattern is by design.
 
 ## Exit codes
 
