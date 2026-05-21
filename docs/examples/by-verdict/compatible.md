@@ -3,7 +3,7 @@
 
 Backward-compatible changes (additions or quality-only).
 
-_18 case(s)._ [← back to all examples](../index.md)
+_20 case(s)._ [← back to all examples](../index.md)
 
 | Case | Title | Verdict | Category |
 |------|-------|---------|----------|
@@ -11,6 +11,8 @@ _18 case(s)._ [← back to all examples](../index.md)
 | [case05_soname](../case05_soname.md) | Missing SONAME | 🟢 COMPATIBLE | Quality (Compatible) |
 | [case105_concept_tightening](../case105_concept_tightening.md) | Concept Tightening (C++20) | 🟢 COMPATIBLE | Addition (Compatible) |
 | [case111_enumerable_thread_specific_lambda_ambiguity](../case111_enumerable_thread_specific_lambda_ambiguity.md) | enumerable_thread_specific Lambda-Init Ambiguity | 🟢 COMPATIBLE | Addition (Compatible) |
+| [case115_api_depends_on_consumer_env](../case115_api_depends_on_consumer_env.md) | case115 — public API depends on consumer build environment (RISK) | 🟢 COMPATIBLE | Quality (Compatible) |
+| [case117_experimental_graduated](../case117_experimental_graduated.md) | case109 — experimental → stable graduation (compatible) | 🟢 COMPATIBLE | Addition (Compatible) |
 | [case13_symbol_versioning](../case13_symbol_versioning.md) | Symbol Versioning Script | 🟢 COMPATIBLE | Quality (Compatible) |
 | [case16_inline_to_non_inline](../case16_inline_to_non_inline.md) | Case 16 — Inline → Non-inline (ODR / Symbol Appearance) | 🟢 COMPATIBLE | Addition (Compatible) |
 | [case25_enum_member_added](../case25_enum_member_added.md) | Case 25 — Enum Member Added | 🟢 COMPATIBLE | Addition (Compatible) |

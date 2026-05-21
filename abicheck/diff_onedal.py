@@ -45,6 +45,25 @@ from typing import TYPE_CHECKING
 from .checker_policy import ChangeKind
 from .checker_types import Change
 
+# Re-exports for backwards compatibility — the generic detectors were
+# extracted to dedicated modules in PR-D (post #238 / oneDPL analysis).
+# Existing tests / external callers that import from this module keep
+# working unchanged.
+from .diff_serialization import (  # noqa: F401
+    _TAG_EXACT_LEAVES,
+    _TAG_SUFFIX_PATTERNS,
+    _collect_tag_constants,
+    _looks_like_serialization_tag,
+    detect_serialization_tag_changes,
+)
+from .diff_templates import (  # noqa: F401
+    _looks_like_template_instantiation,
+    detect_missing_instantiations,
+)
+from .diff_templates import (
+    _strip_template_args as _callable_stem,
+)
+
 if TYPE_CHECKING:
     from .model import AbiSnapshot, Function, RecordType
 
@@ -80,224 +99,13 @@ def _parent_namespace(qualified_name: str) -> str:
 
 # ---------------------------------------------------------------------------
 # case81 — serialization tag ID reassigned
+# (detector moved to abicheck.diff_serialization in PR-D; re-exported at top)
 # ---------------------------------------------------------------------------
-
-# Variable / constant naming conventions that mark a value as a
-# serialization tag identifier. Matched case-insensitively as a full
-# token (suffix match), per oneDAL/DAAL conventions.
-_TAG_SUFFIX_PATTERNS: tuple[str, ...] = (
-    "_serialization_tag",
-    "_serializationtag",
-    "_tag",
-    "serializationtag",
-    "_tag_id",
-    "_tagid",
-)
-
-# Standalone leaf names that should also count as serialization tags
-# even without a prefix (e.g. ``ns::detail::tag_id``).
-#
-# NB: ``"tag"`` alone is *too* broad — many libraries have generic
-# enums called ``Tag`` that are not serialization tags. We require a
-# more specific pattern: ``tag_id`` / ``tagid`` / ``serializationtag``
-# (and the suffix patterns above cover ``*_serialization_tag``,
-# ``*_tag_id``, ``*_tag`` for *constant/variable* names whose suffix
-# carries the intent).
-_TAG_EXACT_LEAVES: frozenset[str] = frozenset(
-    {
-        "tag_id",
-        "tagid",
-        "serializationtag",
-    }
-)
-
-
-def _looks_like_serialization_tag(name: str) -> bool:
-    if not name:
-        return False
-    leaf = _last_segment(name).lower()
-    if leaf in _TAG_EXACT_LEAVES:
-        return True
-    return any(leaf.endswith(p) for p in _TAG_SUFFIX_PATTERNS)
-
-
-def _collect_tag_constants(snap: AbiSnapshot) -> dict[str, str]:
-    """Return ``{constant_name: stringified_value}`` for tag-shaped constants.
-
-    Three data sources, in order of reliability:
-
-    1. ``snap.constants`` — ``constexpr`` / ``#define`` values (when the
-       header-side dumper captures them).
-    2. ``snap.variables`` — global ``const`` variables (``Variable.value``
-       populated from DWARF where available).
-    3. ``snap.enums`` — ``enum class SerializationTag``-style enums whose
-       *type* name or *member* names match the tag-naming conventions.
-       This is the most portable source because DWARF always captures
-       ``DW_AT_const_value`` for enumerators.
-    """
-    # Source precedence is enforced via ``setdefault``: a name present in
-    # ``constants`` (the highest-confidence source) is never overwritten by
-    # a value from ``variables`` or ``enums``. Later sources only fill
-    # gaps. This matches the docstring's "in order of reliability".
-    out: dict[str, str] = {}
-    for name, value in (snap.constants or {}).items():
-        if _looks_like_serialization_tag(name) and value is not None:
-            out.setdefault(name, str(value))
-    for var in snap.variables:
-        if _looks_like_serialization_tag(var.name) and var.value is not None:
-            out.setdefault(var.name, str(var.value))
-    for enum_t in snap.enums or []:
-        enum_leaf = _last_segment(enum_t.name).lower()
-        # An enum is tag-shaped when its TYPE name matches the tag pattern
-        # OR when any of its MEMBER names match (covers both
-        # ``enum SerializationTag { kmeans, ... }`` and
-        # ``enum Foo { kmeans_tag = 1, ... }``).
-        type_is_tag = enum_leaf in _TAG_EXACT_LEAVES or any(
-            enum_leaf.endswith(p) for p in _TAG_SUFFIX_PATTERNS
-        )
-        for m in enum_t.members:
-            full = f"{enum_t.name}::{m.name}"
-            if type_is_tag or _looks_like_serialization_tag(m.name):
-                out.setdefault(full, str(m.value))
-    return out
-
-
-def detect_serialization_tag_changes(
-    old: AbiSnapshot,
-    new: AbiSnapshot,
-) -> list[Change]:
-    """Emit ``SERIALIZATION_TAG_CHANGED`` for tag constants whose values
-    changed between *old* and *new*, including swaps.
-    """
-    old_tags = _collect_tag_constants(old)
-    new_tags = _collect_tag_constants(new)
-    findings: list[Change] = []
-    for name, old_val in old_tags.items():
-        new_val = new_tags.get(name)
-        if new_val is None or new_val == old_val:
-            continue
-        # Identify the swap partner, if any, so the description points the
-        # reviewer at the cause and not just the symptom.
-        partner = next(
-            (n for n, v in new_tags.items() if v == old_val and n != name),
-            None,
-        )
-        if partner is not None:
-            desc = (
-                f"Serialization tag '{name}' value changed {old_val} → "
-                f"{new_val}; this is the same value previously assigned to "
-                f"'{partner}'. Saved data referencing the old value now "
-                f"deserialises as the wrong class."
-            )
-        else:
-            desc = (
-                f"Serialization tag '{name}' value changed {old_val} → "
-                f"{new_val}; persisted data using the old tag id is no "
-                f"longer recognised."
-            )
-        findings.append(
-            Change(
-                kind=ChangeKind.SERIALIZATION_TAG_CHANGED,
-                symbol=name,
-                description=desc,
-                old_value=old_val,
-                new_value=new_val,
-            )
-        )
-    return findings
-
 
 # ---------------------------------------------------------------------------
 # case79 — missing template instantiation
+# (detector moved to abicheck.diff_templates in PR-D; re-exported at top)
 # ---------------------------------------------------------------------------
-
-# A Function whose demangled name contains ``<...>`` is (in Itanium /
-# MSVC C++ ABI terms) an instantiated template specialisation. The
-# distinction matters because plain ``func_removed`` is normal API
-# evolution, whereas removal of an instantiation that the header still
-# advertises is silent: the header makes no diagnostic noise.
-_TEMPLATE_ARGS_RE = re.compile(r"<[^<>]")
-
-
-def _looks_like_template_instantiation(name: str) -> bool:
-    return bool(name) and bool(_TEMPLATE_ARGS_RE.search(name))
-
-
-def _callable_stem(name: str) -> str:
-    """Return *name* with all top-level template-argument groups stripped.
-
-    Examples
-    --------
-    >>> _callable_stem("ns::descriptor<float>::train")
-    'ns::descriptor::train'
-    >>> _callable_stem("ns::function<int, char>")
-    'ns::function'
-    >>> _callable_stem("Outer<X<int>>::Inner<Y>::run")
-    'Outer::Inner::run'
-    """
-    depth = 0
-    out: list[str] = []
-    for ch in name:
-        if ch == "<":
-            depth += 1
-            continue
-        if ch == ">":
-            depth -= 1
-            continue
-        if depth == 0:
-            out.append(ch)
-    return "".join(out)
-
-
-def detect_missing_instantiations(
-    old: AbiSnapshot,
-    new: AbiSnapshot,
-) -> list[Change]:
-    """Emit ``INSTANTIATION_MISSING_FROM_BINARY`` for template-instantiation
-    symbols present in *old* that vanished in *new* but whose enclosing
-    template still exists.
-    """
-    old.index()
-    new.index()
-    new_mangled = {f.mangled for f in new.functions}
-    findings: list[Change] = []
-    # Pre-compute the set of (callable_stem, args_excluding_ours) keys still
-    # present in the new snapshot. ``callable_stem`` is the full qualified
-    # identifier minus template args — comparing on this means we only flag
-    # a removal when a *sibling instantiation* of the SAME callable survives,
-    # not when an unrelated member of the same class survives.
-    surviving_stems: set[str] = set()
-    for fn in new.functions:
-        if _looks_like_template_instantiation(fn.name):
-            surviving_stems.add(_callable_stem(fn.name))
-    for fn in old.functions:
-        if fn.mangled in new_mangled:
-            continue
-        if not _looks_like_template_instantiation(fn.name):
-            continue
-        stem = _callable_stem(fn.name)
-        if stem not in surviving_stems:
-            # The whole template family went away — this is a plain
-            # API removal and is reported as ``func_removed`` already.
-            continue
-        findings.append(
-            Change(
-                kind=ChangeKind.INSTANTIATION_MISSING_FROM_BINARY,
-                symbol=fn.mangled,
-                description=(
-                    f"Template instantiation '{fn.name}' was exported by the "
-                    f"old library but is missing from the new binary. Other "
-                    f"instantiations of '{stem}' still exist, so the public "
-                    f"header very likely still advertises this one. Consumers "
-                    f"built against the old header link cleanly but fail at "
-                    f"load time with an undefined-symbol error."
-                ),
-                old_value=fn.mangled,
-                new_value=None,
-            )
-        )
-    return findings
-
 
 # ---------------------------------------------------------------------------
 # case82 — SYCL overload set removed

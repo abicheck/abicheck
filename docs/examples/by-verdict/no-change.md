@@ -3,9 +3,10 @@
 
 Identical ABI/API — baseline control cases.
 
-_2 case(s)._ [← back to all examples](../index.md)
+_3 case(s)._ [← back to all examples](../index.md)
 
 | Case | Title | Verdict | Category |
 |------|-------|---------|----------|
 | [case04_no_change](../case04_no_change.md) | No Change | ✅ NO_CHANGE | No Change |
+| [case116_cxx_standard_floor_raised](../case116_cxx_standard_floor_raised.md) | NO_CHANGE) | ✅ NO_CHANGE | No Change |
 | [case32_param_defaults](../case32_param_defaults.md) | Case 32 — Parameter Default Value Changes (C++) | ✅ NO_CHANGE | No Change |

@@ -214,6 +214,21 @@ ASSERTED_CHANGE_KINDS: set[ChangeKind] = {
     # Explicit specifier transitions — exercised in tests/test_explicit_ctor.py
     ChangeKind.CTOR_EXPLICIT_ADDED,
     ChangeKind.CTOR_EXPLICIT_REMOVED,
+    # Namespace-shape patterns — exercised in tests/test_diff_namespaces.py
+    ChangeKind.EXPERIMENTAL_GRADUATED,
+    ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT,
+    ChangeKind.STD_REEXPORT_REMOVED,
+    ChangeKind.INLINE_NAMESPACE_VERSION_BUMPED,
+    # Template / overload-set patterns — exercised in tests/test_diff_templates.py
+    ChangeKind.INTERNAL_TEMPLATE_LEAKS_VIA_PUBLIC_API,
+    ChangeKind.CPO_KIND_CHANGED,
+    ChangeKind.OVERLOAD_SET_REROUTED,
+    ChangeKind.MANDATORY_TEMPLATE_PARAM_ADDED,
+    ChangeKind.UNSPECIFIED_RETURN_NOW_NAMED,
+    # Build-config / probe-harness patterns — exercised in tests/test_diff_build_config.py
+    ChangeKind.API_DEPENDS_ON_CONSUMER_ENV,
+    ChangeKind.CXX_STANDARD_FLOOR_RAISED,
+    ChangeKind.BEHAVIOURAL_DEFAULT_CHANGED,
     # Hidden friend transitions — exercised in tests/test_hidden_friends.py
     ChangeKind.HIDDEN_FRIEND_ADDED,
     ChangeKind.HIDDEN_FRIEND_REMOVED,

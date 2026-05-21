@@ -670,7 +670,113 @@ REGISTRY = ChangeKindRegistry([
               "function now do, potentially selecting a different overload "
               "than before and causing silent behavioral drift."),
 
-    # ── Hidden-friend transitions ────────────────────────────────────────
+    # ── Namespace-shape patterns (PR follow-up to #238) ─────────────────
+    # Generic detectors for template / header-only libraries (oneDPL-shaped
+    # but not oneDPL-specific). Live in abicheck/diff_namespaces.py.
+    _E("experimental_graduated", _C, is_addition=True,
+       impact="A declaration that previously lived under an `experimental::` "
+              "(or similar) namespace is now also available at a stable name "
+              "in the same library, while the experimental alias is retained. "
+              "Compatible: existing consumers keep compiling; new consumers "
+              "are encouraged to migrate to the stable name."),
+
+    _E("experimental_removed_without_replacement", _A,
+       impact="A declaration that previously lived under an `experimental::` "
+              "(or similar) namespace was removed and no declaration with "
+              "the same leaf name appears under a stable namespace in the "
+              "new headers. Consumers that depended on the experimental name "
+              "no longer compile. The mangled name change is the same as a "
+              "func_removed/type_removed for an instantiated template, but "
+              "the experimental graduation pattern is named explicitly so "
+              "users see whether a replacement was published."),
+
+    _E("std_reexport_removed", _A,
+       impact="A public header used to re-export a name from `std::` "
+              "(e.g. `using std::execution::par;`) and the re-export was "
+              "deleted in the new headers. Consumer source that referenced "
+              "the library-qualified name (`lib::par`) no longer compiles "
+              "even though the underlying `std::par` is still available. "
+              "Source break only — no symbol disappears, but every TU that "
+              "named the library alias must be edited."),
+
+    _E("inline_namespace_version_bumped", _B,
+       impact="A header-declared symbol or type lives under a versioned "
+              "inline namespace (e.g. `inline namespace _V1`) and the "
+              "version segment shifted (`_V1` → `_V2`). Declarations look "
+              "identical to consumers but every newly compiled TU produces "
+              "a different mangled symbol; old TUs in the same program ODR-"
+              "violate against new TUs. Specialisation of inline_namespace_"
+              "moved that fires from declared-name evidence (works even "
+              "when the library ships no .so)."),
+
+    # ── Template / overload-set patterns (PR-B) ─────────────────────────
+    _E("internal_template_leaks_via_public_api", _B,
+       impact="An internal-namespace function template (e.g. "
+              "`oneapi::dpl::__internal::__pattern_walk2<...>`) changed "
+              "signature, and its instantiations appear in consumer "
+              "symbol tables because public algorithms inline-dispatch "
+              "through it. The internal helper is part of the effective "
+              "public ABI — every consumer must be rebuilt. Function-"
+              "template analogue of INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API."),
+
+    _E("cpo_kind_changed", _B,
+       impact="A public customization point object (CPO) changed kind: "
+              "what used to be a free function is now a function-object "
+              "(variable of an unspecified class type), or vice versa. "
+              "Call syntax (`lib::sort(args...)`) keeps working but "
+              "`decltype(lib::sort)` is now a different type, breaking "
+              "extern templates, trait specializations, and any code that "
+              "took the CPO's address."),
+
+    _E("overload_set_rerouted", _R,
+       impact="The overload set under a public name changed in a way "
+              "where some overloads were removed and others added. "
+              "Existing call sites that previously resolved to a removed "
+              "overload now resolve to a different overload (often via "
+              "implicit conversion or a templated catch-all), silently "
+              "changing the called function. Compiles, links, runs — but "
+              "runs different code."),
+
+    _E("mandatory_template_param_added", _A,
+       impact="A function or class template parameter that was defaulted "
+              "(or deduced) became mandatory. Consumer source that wrote "
+              "`Foo<int>` without supplying the new parameter no longer "
+              "compiles. Mangled symbols also change because the "
+              "instantiation tuple differs."),
+
+    _E("unspecified_return_now_named", _A,
+       impact="A factory function's return type changed between an "
+              "unspecified placeholder (`auto`, lambda type, anonymous "
+              "class) and a named type — or vice versa. Source that "
+              "stored the result with the deduced spelling (`auto x = "
+              "make_X();`) keeps compiling; source that wrote out the "
+              "type fails to compile."),
+
+    # ── Build-config / probe-harness patterns (PR-C) ────────────────────
+    _E("api_depends_on_consumer_env", _R,
+       impact="A public declaration is present under one consumer build "
+              "configuration (compiler, language standard, macro set) "
+              "and absent under another. Source that compiled on the "
+              "library author's machine may not compile on the consumer's. "
+              "Detected only when abicheck is given a probe matrix "
+              "(snapshots taken under multiple configurations)."),
+
+    _E("cxx_standard_floor_raised", _A,
+       impact="The library's minimum required C++ standard increased "
+              "between releases (e.g. C++17 → C++20). Consumers still "
+              "building with the old standard no longer get a working "
+              "header set; standard-library facilities removed in newer "
+              "standards (e.g. std::result_of) may also disappear from "
+              "the API surface."),
+
+    _E("behavioural_default_changed", _R,
+       impact="A documented default value changed without altering any "
+              "signature — e.g. the default device selector, the default "
+              "execution backend, or the default policy. Source compiles "
+              "and links unchanged; runtime behaviour silently differs. "
+              "Read from the probe manifest's `defaults:` section."),
+
+    # ── Hidden-friend transitions (PR #248 follow-up) ───────────────────
     _E("hidden_friend_removed", _A,
        impact="An in-class `friend` declaration (a 'hidden friend' — "
               "findable only via ADL on one of its argument types) was "

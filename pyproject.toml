@@ -103,7 +103,12 @@ disallow_untyped_decorators = false
 [[tool.mypy.overrides]]
 # types-PyYAML stubs may not be found in all environments;
 # the package is listed in [project.optional-dependencies.dev].
-module = ["abicheck.policy_file", "abicheck.suppression", "abicheck.environment_matrix"]
+module = [
+    "abicheck.policy_file",
+    "abicheck.suppression",
+    "abicheck.environment_matrix",
+    "abicheck.probe_harness",
+]
 disable_error_code = ["import-untyped"]
 
 [tool.pytest.ini_options]

@@ -1,0 +1,331 @@
+# Copyright 2026 Nikolay Petrov
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+
+"""Unit tests for the template / overload-set pattern detectors.
+
+Synthetic ``AbiSnapshot`` fixtures only — no compiler, no castxml.
+"""
+from __future__ import annotations
+
+import pytest
+
+from abicheck.checker_policy import ChangeKind
+from abicheck.diff_templates import (
+    _count_top_level_template_args,
+    _return_is_unspecified,
+    _strip_template_args,
+    detect_cpo_kind_changed,
+    detect_internal_template_leaks,
+    detect_mandatory_template_param_added,
+    detect_overload_set_rerouted,
+    detect_template_patterns,
+    detect_unspecified_return_now_named,
+)
+from abicheck.model import (
+    AbiSnapshot,
+    Function,
+    Param,
+    RecordType,
+    Variable,
+    Visibility,
+)
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+
+def _snap(funcs=None, vars_=None, types=None) -> AbiSnapshot:
+    return AbiSnapshot(
+        library="libt.so",
+        version="0",
+        functions=list(funcs or []),
+        variables=list(vars_ or []),
+        types=list(types or []),
+    )
+
+
+def _fn(name: str, mangled: str | None = None,
+        return_type: str = "void",
+        params: list[tuple[str, str]] | None = None,
+        visibility: Visibility = Visibility.PUBLIC) -> Function:
+    return Function(
+        name=name,
+        mangled=mangled if mangled is not None else f"_Z{name}",
+        return_type=return_type,
+        params=[Param(name=n, type=t) for n, t in (params or [])],
+        visibility=visibility,
+    )
+
+
+def _var(name: str, type_: str = "int",
+         visibility: Visibility = Visibility.PUBLIC) -> Variable:
+    return Variable(name=name, mangled=f"_Z{name}", type=type_,
+                    visibility=visibility)
+
+
+def _rec(name: str) -> RecordType:
+    return RecordType(name=name, kind="class")
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+class TestStripTemplateArgs:
+    @pytest.mark.parametrize("name, expected", [
+        ("Foo<int>", "Foo"),
+        ("ns::Foo<int, char>", "ns::Foo"),
+        ("ns::Foo<bar::baz<int>>", "ns::Foo"),
+        ("plain", "plain"),
+        ("", ""),
+    ])
+    def test_strips(self, name: str, expected: str) -> None:
+        assert _strip_template_args(name) == expected
+
+
+class TestCountTopLevelTemplateArgs:
+    @pytest.mark.parametrize("name, expected", [
+        ("Foo<int>", 1),
+        ("Foo<int, char>", 2),
+        ("Foo<int, std::pair<int, char>>", 2),
+        ("Foo", None),
+        ("", None),
+    ])
+    def test_count(self, name: str, expected: int | None) -> None:
+        assert _count_top_level_template_args(name) == expected
+
+
+class TestReturnIsUnspecified:
+    @pytest.mark.parametrize("rt, expected", [
+        ("auto", True),
+        ("decltype(auto)", True),
+        ("(anonymous namespace)::T", True),
+        ("ns::Named", False),
+        ("int", False),
+        ("", False),
+    ])
+    def test_classification(self, rt: str, expected: bool) -> None:
+        assert _return_is_unspecified(rt) is expected
+
+
+# ---------------------------------------------------------------------------
+# INTERNAL_TEMPLATE_LEAKS_VIA_PUBLIC_API
+# ---------------------------------------------------------------------------
+
+
+class TestInternalTemplateLeaks:
+    def test_changed_instantiation_set_fires(self) -> None:
+        old = _snap(funcs=[
+            _fn("lib::__detail::walk<int>"),
+            _fn("lib::__detail::walk<char>"),
+        ])
+        new = _snap(funcs=[
+            _fn("lib::__detail::walk<int>"),
+            _fn("lib::__detail::walk<double>"),
+        ])
+        changes = detect_internal_template_leaks(old, new)
+        assert len(changes) == 1
+        c = changes[0]
+        assert c.kind == ChangeKind.INTERNAL_TEMPLATE_LEAKS_VIA_PUBLIC_API
+        assert c.symbol == "lib::__detail::walk"
+
+    def test_internal_stem_unchanged_no_finding(self) -> None:
+        old = _snap(funcs=[_fn("lib::__detail::walk<int>")])
+        new = _snap(funcs=[_fn("lib::__detail::walk<int>")])
+        assert detect_internal_template_leaks(old, new) == []
+
+    def test_public_stem_not_internal(self) -> None:
+        old = _snap(funcs=[_fn("lib::walk<int>")])
+        new = _snap(funcs=[_fn("lib::walk<char>")])
+        assert detect_internal_template_leaks(old, new) == []
+
+    def test_custom_internal_namespaces(self) -> None:
+        old = _snap(funcs=[_fn("lib::priv::walk<int>")])
+        new = _snap(funcs=[_fn("lib::priv::walk<char>")])
+        changes = detect_internal_template_leaks(
+            old, new, internal_namespaces=("priv",),
+        )
+        assert len(changes) == 1
+
+    def test_non_template_internal_funcs_ignored(self) -> None:
+        # The detector targets *instantiations*; plain (non-template)
+        # internal helpers are out of scope.
+        old = _snap(funcs=[_fn("lib::__detail::plain_helper")])
+        new = _snap(funcs=[])
+        assert detect_internal_template_leaks(old, new) == []
+
+
+# ---------------------------------------------------------------------------
+# CPO_KIND_CHANGED
+# ---------------------------------------------------------------------------
+
+
+class TestCpoKindChanged:
+    def test_function_became_variable(self) -> None:
+        old = _snap(funcs=[_fn("lib::sort")])
+        new = _snap(vars_=[_var("lib::sort", type_="lib::__sort_fn")])
+        changes = detect_cpo_kind_changed(old, new)
+        assert len(changes) == 1
+        c = changes[0]
+        assert c.kind == ChangeKind.CPO_KIND_CHANGED
+        assert c.old_value == "function"
+        assert c.new_value == "variable"
+
+    def test_variable_became_function(self) -> None:
+        old = _snap(vars_=[_var("lib::sort", type_="lib::__sort_fn")])
+        new = _snap(funcs=[_fn("lib::sort")])
+        changes = detect_cpo_kind_changed(old, new)
+        assert len(changes) == 1
+        assert changes[0].new_value == "function"
+
+    def test_no_flip_no_finding(self) -> None:
+        old = _snap(funcs=[_fn("lib::sort")])
+        new = _snap(funcs=[_fn("lib::sort")])
+        assert detect_cpo_kind_changed(old, new) == []
+
+    def test_name_present_as_both_in_old_skipped(self) -> None:
+        # If the name was already ambiguous (both function and variable)
+        # in old, the new state is not a flip — silently skip to avoid
+        # false positives.
+        old = _snap(
+            funcs=[_fn("lib::sort")],
+            vars_=[_var("lib::sort")],
+        )
+        new = _snap(vars_=[_var("lib::sort")])
+        assert detect_cpo_kind_changed(old, new) == []
+
+
+# ---------------------------------------------------------------------------
+# OVERLOAD_SET_REROUTED
+# ---------------------------------------------------------------------------
+
+
+class TestOverloadSetRerouted:
+    def test_overload_swap_fires(self) -> None:
+        old = _snap(funcs=[
+            _fn("lib::sort", mangled="_Zold1", params=[("a", "int*")]),
+            _fn("lib::sort", mangled="_Zold2", params=[("a", "long*")]),
+        ])
+        new = _snap(funcs=[
+            _fn("lib::sort", mangled="_Znew1", params=[("a", "int*")]),
+            _fn("lib::sort", mangled="_Znew2", params=[("a", "double*")]),
+        ])
+        changes = detect_overload_set_rerouted(old, new)
+        assert len(changes) == 1
+        assert changes[0].kind == ChangeKind.OVERLOAD_SET_REROUTED
+        assert changes[0].symbol == "lib::sort"
+
+    def test_pure_addition_no_finding(self) -> None:
+        old = _snap(funcs=[
+            _fn("lib::sort", mangled="_Zo1", params=[("a", "int*")]),
+        ])
+        new = _snap(funcs=[
+            _fn("lib::sort", mangled="_Zn1", params=[("a", "int*")]),
+            _fn("lib::sort", mangled="_Zn2", params=[("a", "long*")]),
+        ])
+        assert detect_overload_set_rerouted(old, new) == []
+
+    def test_pure_removal_no_finding(self) -> None:
+        old = _snap(funcs=[
+            _fn("lib::sort", mangled="_Zo1", params=[("a", "int*")]),
+            _fn("lib::sort", mangled="_Zo2", params=[("a", "long*")]),
+        ])
+        new = _snap(funcs=[
+            _fn("lib::sort", mangled="_Zn1", params=[("a", "int*")]),
+        ])
+        assert detect_overload_set_rerouted(old, new) == []
+
+
+# ---------------------------------------------------------------------------
+# MANDATORY_TEMPLATE_PARAM_ADDED
+# ---------------------------------------------------------------------------
+
+
+class TestMandatoryTemplateParamAdded:
+    def test_arity_grew(self) -> None:
+        old = _snap(funcs=[_fn("Foo<int>")])
+        new = _snap(funcs=[_fn("Foo<int, char>")])
+        changes = detect_mandatory_template_param_added(old, new)
+        assert len(changes) == 1
+        assert changes[0].kind == ChangeKind.MANDATORY_TEMPLATE_PARAM_ADDED
+        assert changes[0].symbol == "Foo"
+
+    def test_arity_stable_no_finding(self) -> None:
+        # Library kept a Foo<int> instantiation alive, so the heuristic
+        # cannot tell a new defaulted param from a mandatory one.
+        old = _snap(funcs=[_fn("Foo<int>")])
+        new = _snap(funcs=[_fn("Foo<int>"), _fn("Foo<int, char>")])
+        assert detect_mandatory_template_param_added(old, new) == []
+
+    def test_works_for_types(self) -> None:
+        old = _snap(types=[_rec("Bar<int>")])
+        new = _snap(types=[_rec("Bar<int, float>")])
+        changes = detect_mandatory_template_param_added(old, new)
+        assert len(changes) == 1
+
+
+# ---------------------------------------------------------------------------
+# UNSPECIFIED_RETURN_NOW_NAMED
+# ---------------------------------------------------------------------------
+
+
+class TestUnspecifiedReturnNowNamed:
+    def test_auto_to_named(self) -> None:
+        old = _snap(funcs=[_fn("lib::make", return_type="auto")])
+        new = _snap(funcs=[_fn("lib::make", return_type="lib::Foo")])
+        changes = detect_unspecified_return_now_named(old, new)
+        assert len(changes) == 1
+        c = changes[0]
+        assert c.kind == ChangeKind.UNSPECIFIED_RETURN_NOW_NAMED
+        assert c.old_value == "auto"
+        assert c.new_value == "lib::Foo"
+
+    def test_named_to_lambda(self) -> None:
+        old = _snap(funcs=[_fn("lib::make", return_type="lib::Foo")])
+        new = _snap(funcs=[_fn("lib::make", return_type="<lambda(int)>")])
+        changes = detect_unspecified_return_now_named(old, new)
+        assert len(changes) == 1
+        assert "unspecified" in changes[0].description
+
+    def test_stable_no_finding(self) -> None:
+        old = _snap(funcs=[_fn("lib::make", return_type="lib::Foo")])
+        new = _snap(funcs=[_fn("lib::make", return_type="lib::Foo")])
+        assert detect_unspecified_return_now_named(old, new) == []
+
+
+# ---------------------------------------------------------------------------
+# Combined entry point & pipeline integration
+# ---------------------------------------------------------------------------
+
+
+class TestCombined:
+    def test_runs_all(self) -> None:
+        old = _snap(
+            funcs=[
+                _fn("lib::__detail::walk<int>"),
+                _fn("lib::sort"),
+                _fn("lib::make", return_type="auto"),
+            ],
+        )
+        new = _snap(
+            funcs=[
+                _fn("lib::__detail::walk<char>"),
+                _fn("lib::make", return_type="lib::Foo"),
+            ],
+            vars_=[_var("lib::sort", type_="lib::__sort_fn")],
+        )
+        changes = detect_template_patterns(old, new)
+        kinds = {c.kind for c in changes}
+        assert ChangeKind.INTERNAL_TEMPLATE_LEAKS_VIA_PUBLIC_API in kinds
+        assert ChangeKind.CPO_KIND_CHANGED in kinds
+        assert ChangeKind.UNSPECIFIED_RETURN_NOW_NAMED in kinds
+
+
+class TestPipelineIntegration:
+    def test_default_pipeline_includes_template_step(self) -> None:
+        from abicheck.post_processing import DEFAULT_PIPELINE
+        assert "detect_template_patterns" in DEFAULT_PIPELINE.step_names

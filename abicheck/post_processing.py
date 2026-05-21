@@ -296,15 +296,18 @@ class DetectOneDALPatterns:
 
     def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:
         from .checker_policy import ChangeKind
+
+        # Generic detectors live in dedicated modules after PR-D; the
+        # remaining oneDAL-shaped ones stay in diff_onedal.
         from .diff_onedal import (
             detect_cpu_dispatch_isa_dropped,
             detect_default_template_arg_changed,
             detect_inline_body_renamed_member,
-            detect_missing_instantiations,
-            detect_serialization_tag_changes,
             detect_sycl_overload_set_removal,
             detect_tag_type_renamed,
         )
+        from .diff_serialization import detect_serialization_tag_changes
+        from .diff_templates import detect_missing_instantiations
 
         new_findings: list[Change] = []
         new_findings.extend(detect_serialization_tag_changes(ctx.old, ctx.new))
@@ -383,6 +386,80 @@ class DetectOneDALPatterns:
                 to_keep.append(ch)
             changes[:] = to_keep
 
+        if not new_findings:
+            return changes
+        seen_keys = {(c.kind, c.symbol) for c in changes}
+        for c in new_findings:
+            if ctx.suppression is not None and ctx.suppression.is_suppressed(c):
+                ctx.suppressed.append(c)
+                continue
+            key = (c.kind, c.symbol)
+            if key in seen_keys:
+                continue
+            changes.append(c)
+            seen_keys.add(key)
+        return changes
+
+
+class DetectTemplatePatterns:
+    """Run the generic template / overload-set pattern detectors.
+
+    Lives in :mod:`abicheck.diff_templates`. Covers internal-template
+    leaks (function-template analogue of PR #238), CPO kind flips,
+    overload-set rerouting, mandatory-template-param additions, and
+    unspecified-return flips.
+    """
+
+    name = "detect_template_patterns"
+
+    def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:
+        from .diff_templates import detect_template_patterns
+
+        new_findings = detect_template_patterns(ctx.old, ctx.new)
+        if not new_findings:
+            return changes
+        seen_keys = {(c.kind, c.symbol) for c in changes}
+        for c in new_findings:
+            if ctx.suppression is not None and ctx.suppression.is_suppressed(c):
+                ctx.suppressed.append(c)
+                continue
+            key = (c.kind, c.symbol)
+            if key in seen_keys:
+                continue
+            changes.append(c)
+            seen_keys.add(key)
+        return changes
+
+
+class DetectNamespacePatterns:
+    """Run the generic namespace-shape detectors.
+
+    These cover header-only / template-library failure modes that aren't
+    bound to any one library: experimental graduations, silent removals
+    from experimental namespaces, and ``using std::X;`` re-export drops.
+    Lives in :mod:`abicheck.diff_namespaces`.
+    """
+
+    name = "detect_namespace_patterns"
+
+    def __init__(
+        self,
+        experimental_namespaces: tuple[str, ...] | None = None,
+    ) -> None:
+        self._experimental_namespaces = experimental_namespaces
+
+    def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:
+        from .diff_namespaces import (
+            DEFAULT_EXPERIMENTAL_NAMESPACES,
+            detect_namespace_patterns,
+        )
+
+        namespaces = (
+            self._experimental_namespaces or DEFAULT_EXPERIMENTAL_NAMESPACES
+        )
+        new_findings = detect_namespace_patterns(
+            ctx.old, ctx.new, experimental_namespaces=namespaces,
+        )
         if not new_findings:
             return changes
         seen_keys = {(c.kind, c.symbol) for c in changes}
@@ -490,5 +567,7 @@ DEFAULT_PIPELINE = PostProcessingPipeline(
         EnrichAffectedSymbols(),
         DetectInternalLeaks(),
         DetectOneDALPatterns(),
+        DetectNamespacePatterns(),
+        DetectTemplatePatterns(),
     ]
 )
