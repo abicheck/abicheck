@@ -92,7 +92,13 @@ disable_error_code = ["attr-defined", "unused-ignore"]
 
 [[tool.mypy.overrides]]
 # Click decorators (@click.command, @click.option, etc.) are untyped.
-module = ["abicheck.cli", "abicheck.compat.cli"]
+module = [
+    "abicheck.cli",
+    "abicheck.cli_compare_release",
+    "abicheck.cli_debian_symbols",
+    "abicheck.cli_baseline",
+    "abicheck.compat.cli",
+]
 disallow_untyped_decorators = false
 
 [[tool.mypy.overrides]]

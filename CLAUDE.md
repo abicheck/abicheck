@@ -135,7 +135,7 @@ These are upstream typing gaps or stale suppression comments, not bugs.
 
 | Check | Severity | What it enforces |
 |-------|----------|------------------|
-| `file-size` | ERROR > 2000 lines (allowlist), WARN > 1500 | Source files stay legible |
+| `file-size` | ERROR > 2000 lines, WARN > 1500 | Source files stay legible (no allowlist) |
 | `claude-md-coverage` | ERROR | `CLAUDE.md` exists in each major sub-tree |
 | `test-ratio` | WARN | At least 20% test-to-source file ratio |
 | `future-annotations` | WARN | `from __future__ import annotations` per CLAUDE.md convention |
@@ -149,12 +149,27 @@ Run locally: `python scripts/check_ai_readiness.py`. Errors fail; warnings print
 
 ## Files that are large — edit carefully
 
-- `cli.py` (~3,100 lines) — main CLI, many Click commands
+- `cli.py` (~1,950 lines) — main CLI, Click commands; sub-command modules below register on it
+- `cli_compare_release.py` (~950 lines) — `compare-release` command and helpers (split from `cli.py`)
+- `cli_baseline.py` (~240 lines) — `baseline` command group (split from `cli.py`)
+- `cli_debian_symbols.py` (~130 lines) — `debian-symbols` command group (split from `cli.py`)
 - `diff_platform.py` (~1,600 lines) — all platform-specific detection
 - `dumper.py` (~1,600 lines) — binary metadata extraction
 - `compat/cli.py` (~1,500 lines) — ABICC compat CLI
 
-These files work correctly but are large. When editing, read the specific section you need rather than the whole file. The AI-readiness check allow-lists them above the hard line-limit, but new files over 2000 lines will fail CI.
+The 2000-line hard cap is enforced for every source file (no allowlist). Files above 1500 lines emit a WARN as a refactor signal. When editing, read the specific section you need rather than the whole file.
+
+### Adding a new top-level command
+
+Pick the right home:
+
+- **Small command (one function, no significant helpers)** — add to `cli.py` directly with `@main.command(...)`.
+- **Larger command or command group** — add as a sibling `abicheck/cli_<name>.py` module:
+  1. Top of module: `from .cli import main` (and any shared `_helpers`).
+  2. Decorate with `@main.command("foo")` or `@main.group("foo")` as usual.
+  3. At the bottom of `cli.py`, add `cli_<name>` to the side-effect `from . import (...)` block — that runs after `main` and helpers are defined, registering the new command.
+  4. If the new module uses `@click` decorators, add `abicheck.cli_<name>` to the `disallow_untyped_decorators = false` override in `pyproject.toml` (alongside the existing entries).
+  5. If `scripts/check_ai_readiness.py` flags a cycle, add `frozenset({"cli", "cli_<name>"})` to `IMPORT_CYCLE_ALLOWLIST` — this registration pattern is by design.
 
 ## Exit codes
 
