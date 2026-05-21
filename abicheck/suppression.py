@@ -30,8 +30,8 @@ _VALID_CHANGE_KINDS: frozenset[str] = frozenset(ck.value for ck in ChangeKind)
 
 # Keys allowed in a suppression entry — unknown keys are rejected
 _KNOWN_ENTRY_KEYS: frozenset[str] = frozenset({
-    "symbol", "symbol_pattern", "type_pattern", "change_kind", "reason",
-    "label", "source_location", "expires",
+    "symbol", "symbol_pattern", "type_pattern", "member_name",
+    "change_kind", "reason", "label", "source_location", "expires",
 })
 
 # ChangeKind values that represent type-level changes (matched by type_pattern)
@@ -53,6 +53,15 @@ class Suppression:
     symbol: str | None = None
     symbol_pattern: str | None = None
     type_pattern: str | None = None
+    member_name: str | None = None
+    """Regex (fullmatch) against the last ``::``-segment of ``change.symbol``.
+
+    Useful for suppressing nested typedefs / fields by bare member name
+    independent of the containing type — e.g. ``member_name: "value_type"``
+    silences every ``typedef_removed`` whose alias is ``value_type``, no matter
+    which allocator/container it came from. May be combined with
+    ``type_pattern`` and/or ``change_kind`` for a conjunctive filter.
+    """
     change_kind: str | None = None
     reason: str | None = None
     # --- Extended fields ---
@@ -66,24 +75,33 @@ class Suppression:
     and a warning is emitted. Format: ``expires: 2026-06-01``."""
     _compiled_pattern: re.Pattern[str] | None = field(default=None, init=False, repr=False)
     _compiled_type_pattern: re.Pattern[str] | None = field(default=None, init=False, repr=False)
+    _compiled_member_pattern: re.Pattern[str] | None = field(default=None, init=False, repr=False)
     _compiled_source_pattern: re.Pattern[str] | None = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
         has_symbol = self.symbol is not None
         has_sym_pattern = self.symbol_pattern is not None
         has_type_pattern = self.type_pattern is not None
+        has_member_name = self.member_name is not None
         has_source_location = self.source_location is not None
 
         selector_count = sum([has_symbol, has_sym_pattern, has_type_pattern])
-        if selector_count == 0 and not has_source_location:
+        if selector_count == 0 and not has_source_location and not has_member_name:
             raise ValueError(
                 "Suppression must have at least one of: "
-                "'symbol', 'symbol_pattern', 'type_pattern', or 'source_location'"
+                "'symbol', 'symbol_pattern', 'type_pattern', "
+                "'member_name', or 'source_location'"
             )
         if selector_count > 1:
             raise ValueError(
                 "Suppression fields 'symbol', 'symbol_pattern', and 'type_pattern' "
                 "are mutually exclusive — specify exactly one"
+            )
+        if has_member_name and (has_symbol or has_sym_pattern):
+            raise ValueError(
+                "'member_name' cannot be combined with 'symbol' or 'symbol_pattern' "
+                "(those already match the full symbol). Combine with 'type_pattern' "
+                "and/or 'change_kind' instead."
             )
         # Compile regex eagerly — malformed patterns fail at load time, not match time.
         # Uses fullmatch semantics: the pattern must match the entire symbol name.
@@ -101,6 +119,13 @@ class Suppression:
             except re.error as e:
                 raise ValueError(
                     f"Invalid type_pattern {self.type_pattern!r}: {e}"
+                ) from e
+        if self.member_name is not None:
+            try:
+                self._compiled_member_pattern = re.compile(self.member_name)
+            except re.error as e:
+                raise ValueError(
+                    f"Invalid member_name {self.member_name!r}: {e}"
                 ) from e
         if self.source_location is not None:
             # Convert fnmatch-style glob to regex for flexibility
@@ -156,6 +181,13 @@ class Suppression:
             if not self._compiled_source_pattern.match(src_path):
                 return False
             # Fall through to check remaining selectors conjunctively (AND logic)
+
+        # member_name: fullmatch the last "::"-segment of change.symbol.
+        # Applied conjunctively so it can combine with type_pattern / change_kind.
+        if self._compiled_member_pattern is not None:
+            member = change.symbol.rsplit("::", 1)[-1] if change.symbol else ""
+            if not self._compiled_member_pattern.fullmatch(member):
+                return False
 
         # type_pattern: only matches type-level changes
         if self._compiled_type_pattern is not None:
@@ -276,6 +308,7 @@ class SuppressionList:
                     symbol=item.get("symbol"),
                     symbol_pattern=item.get("symbol_pattern"),
                     type_pattern=item.get("type_pattern"),
+                    member_name=item.get("member_name"),
                     change_kind=item.get("change_kind"),
                     reason=item.get("reason"),
                     label=item.get("label"),
@@ -413,7 +446,10 @@ class SuppressionAudit:
         if self.stale_rules:
             lines.append(f"  ⚠ {len(self.stale_rules)} stale rule(s) matched nothing")
             for s in self.stale_rules[:5]:
-                target = s.symbol or s.symbol_pattern or s.type_pattern or s.source_location or "?"
+                target = (
+                    s.symbol or s.symbol_pattern or s.type_pattern
+                    or s.member_name or s.source_location or "?"
+                )
                 lines.append(f"    - {target} ({s.reason or 'no reason'})")
         if self.high_risk_matches:
             lines.append(f"  ⚠ {len(self.high_risk_matches)} suppression(s) matched BREAKING changes")

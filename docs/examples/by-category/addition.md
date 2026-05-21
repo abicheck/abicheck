@@ -3,11 +3,12 @@
 
 Listed in `ADDITION_KINDS` — backward-compatible additions.
 
-_7 case(s)._ [← back to all examples](../index.md)
+_8 case(s)._ [← back to all examples](../index.md)
 
 | Case | Title | Verdict | Category |
 |------|-------|---------|----------|
 | [case03_compat_addition](../case03_compat_addition.md) | Compatible Addition (New Export) | 🟢 COMPATIBLE | Addition (Compatible) |
+| [case111_enumerable_thread_specific_lambda_ambiguity](../case111_enumerable_thread_specific_lambda_ambiguity.md) | enumerable_thread_specific Lambda-Init Ambiguity | 🟢 COMPATIBLE | Addition (Compatible) |
 | [case16_inline_to_non_inline](../case16_inline_to_non_inline.md) | Case 16 — Inline → Non-inline (ODR / Symbol Appearance) | 🟢 COMPATIBLE | Addition (Compatible) |
 | [case25_enum_member_added](../case25_enum_member_added.md) | Case 25 — Enum Member Added | 🟢 COMPATIBLE | Addition (Compatible) |
 | [case26b_union_field_added_compatible](../case26b_union_field_added_compatible.md) | Case 26b — Union Field Added (No Size Change) | 🟢 COMPATIBLE | Addition (Compatible) |
