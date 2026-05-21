@@ -1,4 +1,4 @@
-abicheck_add_case(case110_experimental_removed_without_replacement
+abicheck_add_case(case117_experimental_graduated
     V1_SOURCES v1.cpp
     V2_SOURCES v2.cpp
     V1_HEADERS v1.h

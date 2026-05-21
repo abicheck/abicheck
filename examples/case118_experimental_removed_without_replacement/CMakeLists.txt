@@ -1,4 +1,4 @@
-abicheck_add_case(case112_inline_namespace_version_bumped
+abicheck_add_case(case118_experimental_removed_without_replacement
     V1_SOURCES v1.cpp
     V2_SOURCES v2.cpp
     V1_HEADERS v1.h

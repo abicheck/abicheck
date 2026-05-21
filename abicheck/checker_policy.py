@@ -406,9 +406,9 @@ class ChangeKind(str, Enum):
     CTOR_EXPLICIT_REMOVED = "ctor_explicit_removed"
 
     # ── Namespace-shape patterns (oneDPL / header-only follow-up) ────────
-    # See examples/case109_experimental_graduated/README.md
+    # See examples/case117_experimental_graduated/README.md
     EXPERIMENTAL_GRADUATED = "experimental_graduated"
-    # See examples/case110_experimental_removed_without_replacement/README.md
+    # See examples/case118_experimental_removed_without_replacement/README.md
     EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT = (
         "experimental_removed_without_replacement"
     )
