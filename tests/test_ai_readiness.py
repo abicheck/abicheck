@@ -46,8 +46,24 @@ def test_script_imports(car):
         "changekind-docs",
         "import-cycles",
         "mypy-baseline",
+        "examples-ground-truth",
+        "mkdocs-nav-coverage",
+        "banned-imports",
+        "license-header",
     }
     assert expected <= set(car.CHECKS)
+
+
+def test_examples_ground_truth_in_sync(car):
+    f = car.Findings()
+    car.check_examples_ground_truth(f)
+    assert f.errors == [], f"examples/ground_truth.json out of sync: {f.errors}"
+
+
+def test_no_banned_imports(car):
+    f = car.Findings()
+    car.check_banned_imports(f)
+    assert f.errors == [], f"Banned-import violations: {f.errors}"
 
 
 def test_changekind_partition_holds(car):

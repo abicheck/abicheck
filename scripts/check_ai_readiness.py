@@ -532,6 +532,252 @@ def check_mypy_baseline(f: Findings) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Check: examples ground-truth integrity
+# ---------------------------------------------------------------------------
+
+
+def check_examples_ground_truth(f: Findings) -> None:
+    """Each examples/case*/ must have a README.md AND an entry in
+    examples/ground_truth.json["verdicts"]. Missing either side fails: the
+    catalog is calibration data and the two sides have to stay in sync.
+    """
+    if not EXAMPLES.exists():
+        return
+    gt_path = EXAMPLES / "ground_truth.json"
+    if not gt_path.is_file():
+        f.err("examples-ground-truth", f"{_rel(gt_path)}: file not found")
+        return
+    try:
+        gt = json.loads(_read(gt_path))
+    except json.JSONDecodeError as e:
+        f.err("examples-ground-truth", f"{_rel(gt_path)}: invalid JSON: {e}")
+        return
+    verdicts = gt.get("verdicts")
+    if not isinstance(verdicts, dict):
+        f.err("examples-ground-truth", f"{_rel(gt_path)}: missing 'verdicts' object")
+        return
+    case_dirs = {
+        p.name for p in EXAMPLES.iterdir() if p.is_dir() and p.name.startswith("case")
+    }
+
+    for case_name in sorted(case_dirs):
+        case_dir = EXAMPLES / case_name
+        if not (case_dir / "README.md").is_file():
+            f.err(
+                "examples-ground-truth",
+                f"examples/{case_name}/: missing README.md (per-case explainer required)",
+            )
+        if case_name not in verdicts:
+            f.err(
+                "examples-ground-truth",
+                f"examples/{case_name}/: no entry in ground_truth.json['verdicts']",
+            )
+
+    for entry_name in sorted(verdicts):
+        if entry_name not in case_dirs:
+            f.warn(
+                "examples-ground-truth",
+                f"ground_truth.json references '{entry_name}' but no examples/{entry_name}/ directory",
+            )
+
+
+# ---------------------------------------------------------------------------
+# Check: mkdocs nav coverage
+# ---------------------------------------------------------------------------
+
+
+_MKDOCS_MD_REF_RE = re.compile(r"[:\s]\s*([A-Za-z0-9._/-]+\.md)\b")
+
+
+def _collect_mkdocs_nav_refs() -> set[str]:
+    """Extract every .md path referenced in mkdocs.yml.
+
+    We deliberately don't depend on PyYAML — the script is stdlib-only and
+    runs before pip install in CI. A regex over the nav block is good
+    enough: mkdocs nav entries are always plain ``Title: path.md`` lines.
+    """
+    mkdocs = ROOT / "mkdocs.yml"
+    if not mkdocs.is_file():
+        return set()
+    text = _read(mkdocs)
+    return {m.group(1).strip() for m in _MKDOCS_MD_REF_RE.finditer(text)}
+
+
+_MD_LINK_RE = re.compile(r"\]\(([^)#?]+\.md)(?:[#?][^)]*)?\)")
+
+
+def _collect_doc_link_refs() -> set[str]:
+    """Collect every relative .md link target inside docs/**/*.md.
+
+    Pages reached transitively (e.g. examples/caseNN_*.md linked from a
+    catalog page, ADRs linked from an index) shouldn't be flagged as
+    orphans — they're reachable, just not enumerated in nav.
+    """
+    refs: set[str] = set()
+    for md in DOCS.rglob("*.md"):
+        try:
+            base = md.parent.relative_to(DOCS).as_posix()
+        except ValueError:
+            base = ""
+        for m in _MD_LINK_RE.finditer(_read(md)):
+            target = m.group(1).strip()
+            if target.startswith(("http://", "https://", "/")):
+                continue
+            # Resolve relative to the containing doc.
+            joined = (md.parent / target).resolve()
+            try:
+                rel = joined.relative_to(DOCS.resolve()).as_posix()
+            except ValueError:
+                continue
+            refs.add(rel)
+            if base:
+                refs.add(f"{base}/{target}" if not target.startswith("../") else rel)
+            else:
+                refs.add(target)
+    return refs
+
+
+def check_mkdocs_nav_coverage(f: Findings) -> None:
+    """Every docs/**/*.md file should be reachable from mkdocs.yml's nav
+    OR from another doc page.
+
+    Orphan docs make the site harder to navigate and often signal a
+    stale page — `mkdocs build --strict` catches dangling refs but not
+    orphans. WARN-only because some docs intentionally live outside nav
+    (e.g. ADR archives reached via README links).
+    """
+    if not DOCS.exists():
+        return
+    nav_refs = _collect_mkdocs_nav_refs()
+    if not nav_refs:
+        return  # mkdocs.yml missing or unparseable — silent skip
+    link_refs = _collect_doc_link_refs()
+    reachable = nav_refs | link_refs
+    for md in DOCS.rglob("*.md"):
+        rel = md.relative_to(DOCS).as_posix()
+        if rel in reachable:
+            continue
+        # CLAUDE.md is for AI agents, never published to the site.
+        if md.name == "CLAUDE.md":
+            continue
+        # index.md sits at a directory root and is implicitly served when
+        # the parent section is opened, even if nothing links to it.
+        if md.name == "index.md":
+            continue
+        f.warn(
+            "mkdocs-nav-coverage",
+            f"docs/{rel}: not referenced from mkdocs.yml nav or any other doc (orphan?)",
+        )
+
+
+# ---------------------------------------------------------------------------
+# Check: banned imports / API misuse
+# ---------------------------------------------------------------------------
+
+
+# Files allowed to call ``print()`` (structured CLI output). Everything else
+# should use the ``click.echo`` / ``_logger`` / ``reporter`` machinery so output
+# can be redirected, suppressed, or annotated by callers.
+_PRINT_ALLOWED: frozenset[str] = frozenset(
+    {
+        "abicheck/cli.py",
+        "abicheck/cli_baseline.py",
+        "abicheck/cli_compare_release.py",
+        "abicheck/cli_debian_symbols.py",
+        "abicheck/compat/cli.py",
+        "abicheck/reporter.py",
+    }
+)
+
+
+def _is_subprocess_call(node: ast.Call) -> bool:
+    func = node.func
+    if isinstance(func, ast.Attribute):
+        # subprocess.run(...), subprocess.Popen(...), etc.
+        if isinstance(func.value, ast.Name) and func.value.id == "subprocess":
+            return func.attr in {"run", "Popen", "call", "check_call", "check_output"}
+    return False
+
+
+def check_banned_imports(f: Findings) -> None:
+    """Catch a small set of real foot-guns:
+
+    - ``print(...)`` outside the CLI / reporter layer — every other module
+      should use structured output (click.echo, logger) so callers can
+      capture or silence it.
+    - ``subprocess.<call>(..., shell=True)`` — shell injection vector;
+      callers can always pass a list of args instead.
+    """
+    for path in PKG.rglob("*.py"):
+        rel = _rel(path)
+        try:
+            tree = ast.parse(_read(path), filename=rel)
+        except SyntaxError:
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            # print() outside the allowlist
+            if (
+                isinstance(node.func, ast.Name)
+                and node.func.id == "print"
+                and rel not in _PRINT_ALLOWED
+            ):
+                f.err(
+                    "banned-imports",
+                    f"{rel}:{node.lineno}: `print(...)` not allowed outside CLI/reporter modules; use click.echo or _logger",
+                )
+            # subprocess.<x>(..., shell=True)
+            if _is_subprocess_call(node):
+                for kw in node.keywords:
+                    if (
+                        kw.arg == "shell"
+                        and isinstance(kw.value, ast.Constant)
+                        and kw.value.value is True
+                    ):
+                        f.err(
+                            "banned-imports",
+                            f"{rel}:{node.lineno}: `subprocess` with `shell=True` is a shell-injection vector; pass an args list instead",
+                        )
+
+
+# ---------------------------------------------------------------------------
+# Check: Apache-2.0 license header
+# ---------------------------------------------------------------------------
+
+
+# Match either the SPDX identifier or the Apache-2.0 NOTICE prose used in
+# the existing files. We don't care about exact format, just presence.
+_LICENSE_RE = re.compile(
+    r"(SPDX-License-Identifier:\s*Apache-2\.0|Apache License,\s*Version\s*2\.0)",
+    re.IGNORECASE,
+)
+
+
+def check_license_header(f: Findings) -> None:
+    """Every abicheck/**/*.py should carry the Apache-2.0 header.
+
+    We look at the first 25 lines so the check tolerates an optional
+    shebang or encoding cookie on top.
+    """
+    for path in PKG.rglob("*.py"):
+        rel = _rel(path)
+        # Empty files and package markers (__init__.py / __main__.py without
+        # real code) are skipped — the project ships some intentionally
+        # trivial files that don't need their own header.
+        src = _read(path)
+        if not src.strip():
+            continue
+        head = "\n".join(src.splitlines()[:25])
+        if _LICENSE_RE.search(head):
+            continue
+        f.warn(
+            "license-header",
+            f"{rel}: missing Apache-2.0 license header (add `# SPDX-License-Identifier: Apache-2.0` or full notice)",
+        )
+
+
+# ---------------------------------------------------------------------------
 # Registry & CLI
 # ---------------------------------------------------------------------------
 
@@ -546,6 +792,10 @@ CHECKS: dict[str, Callable[[Findings], None]] = {
     "changekind-docs": check_changekind_docs,
     "import-cycles": check_import_cycles,
     "mypy-baseline": check_mypy_baseline,
+    "examples-ground-truth": check_examples_ground_truth,
+    "mkdocs-nav-coverage": check_mkdocs_nav_coverage,
+    "banned-imports": check_banned_imports,
+    "license-header": check_license_header,
 }
 
 

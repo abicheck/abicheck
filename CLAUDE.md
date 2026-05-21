@@ -144,6 +144,10 @@ These are upstream typing gaps or stale suppression comments, not bugs.
 | `changekind-docs` | WARN | Every `ChangeKind` is mentioned in `docs/` |
 | `import-cycles` | ERROR | No import cycles within `abicheck/` |
 | `mypy-baseline` | ERROR if drifted up | mypy error count ≤ documented baseline |
+| `examples-ground-truth` | ERROR | Every `examples/case*/` has a `README.md` and an entry in `ground_truth.json` |
+| `mkdocs-nav-coverage` | WARN | Every `docs/**/*.md` is in `mkdocs.yml` nav or linked from another doc |
+| `banned-imports` | ERROR | No `print(...)` outside CLI/reporter modules; no `subprocess(..., shell=True)` |
+| `license-header` | WARN | Every `abicheck/**/*.py` carries the Apache-2.0 header / SPDX identifier |
 
 Run locally: `python scripts/check_ai_readiness.py`. Errors fail; warnings print and pass.
 
