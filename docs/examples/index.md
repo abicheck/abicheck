@@ -16,10 +16,10 @@ Use this catalog to:
 
 | Verdict | Count | What it means |
 |---------|-------|---------------|
-| 🔴 [BREAKING](by-verdict/breaking.md) | 77 | ABI breaks: existing consumers will fail at runtime. |
+| 🔴 [BREAKING](by-verdict/breaking.md) | 76 | ABI breaks: existing consumers will fail at runtime. |
 | 🟠 [API_BREAK](by-verdict/api-break.md) | 3 | Source-level / API-only breaks; recompilation fails or behavior shifts. |
 | 🟡 [COMPATIBLE_WITH_RISK](by-verdict/compatible-risk.md) | 2 | Backward-compatible at the symbol level but with behavioral risk. |
-| 🟢 [COMPATIBLE](by-verdict/compatible.md) | 18 | Backward-compatible changes (additions or quality-only). |
+| 🟢 [COMPATIBLE](by-verdict/compatible.md) | 19 | Backward-compatible changes (additions or quality-only). |
 | ✅ [NO_CHANGE](by-verdict/no-change.md) | 3 | Identical ABI/API — baseline control cases. |
 
 ## How to read a case page
@@ -39,11 +39,11 @@ Source files (`v1.*`, `v2.*`, `app.*`, `CMakeLists.txt`) are linked at the botto
 
 | Category | Cases | What it covers |
 |----------|-------|----------------|
-| [Breaking](by-category/breaking.md) | 77 | Listed in `BREAKING_KINDS` — runtime ABI break. |
+| [Breaking](by-category/breaking.md) | 76 | Listed in `BREAKING_KINDS` — runtime ABI break. |
 | [API Break](by-category/api_break.md) | 3 | Listed in `API_BREAK_KINDS` — source/API-level break. |
 | [Risk](by-category/risk.md) | 2 | Listed in `RISK_KINDS` — symbol-compatible but behaviorally risky. |
 | [Addition (Compatible)](by-category/addition.md) | 9 | Listed in `ADDITION_KINDS` — backward-compatible additions. |
-| [Quality (Compatible)](by-category/quality.md) | 9 | Listed in `QUALITY_KINDS` — metadata/quality issues, not ABI breaks. |
+| [Quality (Compatible)](by-category/quality.md) | 10 | Listed in `QUALITY_KINDS` — metadata/quality issues, not ABI breaks. |
 | [No Change](by-category/no_change.md) | 3 | Identical ABI/API — sanity-check baselines. |
 
 ## All cases
@@ -69,7 +69,7 @@ Source files (`v1.*`, `v2.*`, `app.*`, `CMakeLists.txt`) are linked at the botto
 | [case112_task_arena_attach_tag](case112_task_arena_attach_tag.md) | task_arena::attach Tag Type Replaces Enum | 🔴 BREAKING | Breaking |
 | [case113_internal_template_signature_changed](case113_internal_template_signature_changed.md) | case113 — internal function-template signature leaks via public API (BREAKING) | 🔴 BREAKING | Breaking |
 | [case114_cpo_kind_changed](case114_cpo_kind_changed.md) | case114 — CPO kind changed (BREAKING) | 🔴 BREAKING | Breaking |
-| [case115_api_depends_on_consumer_env](case115_api_depends_on_consumer_env.md) | case115 — public API depends on consumer build environment (RISK) | 🔴 BREAKING | Breaking |
+| [case115_api_depends_on_consumer_env](case115_api_depends_on_consumer_env.md) | case115 — public API depends on consumer build environment (RISK) | 🟢 COMPATIBLE | Quality (Compatible) |
 | [case116_cxx_standard_floor_raised](case116_cxx_standard_floor_raised.md) | case116 — C++ standard floor raised (API_BREAK) | ✅ NO_CHANGE | No Change |
 | [case117_experimental_graduated](case117_experimental_graduated.md) | case109 — experimental → stable graduation (compatible) | 🟢 COMPATIBLE | Addition (Compatible) |
 | [case118_experimental_removed_without_replacement](case118_experimental_removed_without_replacement.md) | : removed without replacement (API break) | 🔴 BREAKING | Breaking |

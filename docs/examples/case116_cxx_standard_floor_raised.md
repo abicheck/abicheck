@@ -5,7 +5,7 @@
 |-------|-------|
 | **Verdict** | ✅ **NO_CHANGE** |
 | **Category** | No Change |
-| **Platforms** | Linux, macOS, Windows |
+| **Platforms** | Linux |
 | **Flags** | — |
 | **Detected `ChangeKind`s** | — |
 | **Source files** | [browse on GitHub](https://github.com/napetrov/abicheck/blob/main/examples/case116_cxx_standard_floor_raised/) |

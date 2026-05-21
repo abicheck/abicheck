@@ -3,11 +3,11 @@
 
 | Field | Value |
 |-------|-------|
-| **Verdict** | 🔴 **BREAKING** |
-| **Category** | Breaking |
+| **Verdict** | 🟢 **COMPATIBLE** |
+| **Category** | Quality (Compatible) |
 | **Platforms** | Linux, macOS, Windows |
-| **Flags** | ABI break, API break |
-| **Detected `ChangeKind`s** | `func_removed` |
+| **Flags** | — |
+| **Detected `ChangeKind`s** | `func_removed_elf_only` |
 | **Source files** | [browse on GitHub](https://github.com/napetrov/abicheck/blob/main/examples/case115_api_depends_on_consumer_env/) |
 
 ## What this case demonstrates
@@ -44,4 +44,4 @@ finding is layered on top by the probe-harness pipeline and reported as
 - [`v2.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case115_api_depends_on_consumer_env/v2.cpp)
 - [`v2.h`](https://github.com/napetrov/abicheck/blob/main/examples/case115_api_depends_on_consumer_env/v2.h)
 
-_See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
+_See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md)._

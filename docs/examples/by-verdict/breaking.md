@@ -3,7 +3,7 @@
 
 ABI breaks: existing consumers will fail at runtime.
 
-_77 case(s)._ [← back to all examples](../index.md)
+_76 case(s)._ [← back to all examples](../index.md)
 
 | Case | Title | Verdict | Category |
 |------|-------|---------|----------|
@@ -21,7 +21,6 @@ _77 case(s)._ [← back to all examples](../index.md)
 | [case112_task_arena_attach_tag](../case112_task_arena_attach_tag.md) | task_arena::attach Tag Type Replaces Enum | 🔴 BREAKING | Breaking |
 | [case113_internal_template_signature_changed](../case113_internal_template_signature_changed.md) | case113 — internal function-template signature leaks via public API (BREAKING) | 🔴 BREAKING | Breaking |
 | [case114_cpo_kind_changed](../case114_cpo_kind_changed.md) | case114 — CPO kind changed (BREAKING) | 🔴 BREAKING | Breaking |
-| [case115_api_depends_on_consumer_env](../case115_api_depends_on_consumer_env.md) | case115 — public API depends on consumer build environment (RISK) | 🔴 BREAKING | Breaking |
 | [case118_experimental_removed_without_replacement](../case118_experimental_removed_without_replacement.md) | : removed without replacement (API break) | 🔴 BREAKING | Breaking |
 | [case119_inline_namespace_version_bumped](../case119_inline_namespace_version_bumped.md) | case112 — inline namespace version bumped (BREAKING) | 🔴 BREAKING | Breaking |
 | [case11_global_var_type](../case11_global_var_type.md) | Global Variable Type Change | 🔴 BREAKING | Breaking |
