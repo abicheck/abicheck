@@ -34,6 +34,9 @@ These changes are immediately incompatible with existing compiled binaries.
 | `func_pure_virtual_added` | A virtual function became pure virtual. Any concrete class that does not implement it is now abstract — instantiation fails at link time. |
 | `func_virtual_became_pure` | A virtual method that had a default implementation is now pure. Derived classes that relied on the base implementation now fail to link. |
 | `func_deleted` | A function was marked `= delete`. Previously callable code now gets a link-time error (callers compiled against old header had no error). |
+| `func_deleted_dwarf` | A function was marked `= delete`, detected via DWARF debug info (`DW_AT_deleted` in DWARF 5+, or a function declared in headers but absent from the DWARF compilation units). The function was previously callable; callers fail to link. |
+| `func_ref_qual_changed` | A C++ member function's ref-qualifier (`&` / `&&`) changed. This alters the Itanium ABI mangled name and the overload resolution result; old binaries link to a symbol that no longer exists under the previous name. |
+| `func_removed_from_binary` | A function declared in the public headers disappeared from `.dynsym` (header-declared but no longer exported). Consumers' PLT entries fail to resolve at load time. *Reserved kind — currently caught by `func_removed`; planned to be emitted by a dedicated mixed-mode detector that triangulates headers against the binary symbol table.* |
 
 ### Variable Changes
 
@@ -122,6 +125,18 @@ These changes are immediately incompatible with existing compiled binaries.
 |------|-------------|
 | `anon_field_changed` | An anonymous struct or union member changed. Offset arithmetic for all sibling fields may be affected. |
 
+### Template Changes
+
+| Kind | Description |
+|------|-------------|
+| `template_return_type_changed` | A function's return type is a template specialization whose inner type argument changed (e.g. `vector<int>` → `vector<double>`). The mangled return type changes, so old binaries fail to resolve the symbol. |
+
+### Symbol Rename
+
+| Kind | Description |
+|------|-------------|
+| `symbol_renamed_batch` | Multiple symbols were renamed in a coordinated way (e.g. namespace prefix added or removed, mass refactor). Old binaries reference the old names and get undefined-symbol errors at load time. Emitted as a single roll-up finding so a namespace rename does not flood the report with one entry per symbol. |
+
 ### ELF Symbol Versioning
 
 | Kind | Description |
@@ -185,6 +200,19 @@ These changes break the source-level API contract but do not affect already-comp
 | `constant_changed` | A `#define` constant's value changed. Source code that used the constant in a way that depended on its exact value gets different behavior at compile time. |
 | `constant_removed` | A `#define` constant was removed entirely. Source code referencing it fails to compile. |
 
+### Template and Overload Set Changes
+
+| Kind | Description |
+|------|-------------|
+| `mandatory_template_param_added` | A template parameter that was previously defaulted (or deduced) became mandatory. Consumer source that wrote `Foo<int>` without supplying the new parameter no longer compiles; mangled instantiations also change because the template-argument tuple differs. |
+| `unspecified_return_now_named` | A factory function's return type changed between an unspecified placeholder (`auto`, lambda type, anonymous class) and a named type — or vice versa. Source that stored the result with `auto x = make_X();` keeps compiling; source that wrote the type out by hand fails. |
+
+### Header Re-exports
+
+| Kind | Description |
+|------|-------------|
+| `std_reexport_removed` | A public header used to re-export a name from `std::` (e.g. `using std::execution::par;`) and the re-export was deleted. Consumer source that referenced the library-qualified name (`lib::par`) no longer compiles, even though the underlying `std::par` is still available. Source-only break — no symbol disappears. |
+
 ---
 
 ## Deployment Risk (`COMPATIBLE_WITH_RISK`)
@@ -199,6 +227,11 @@ library from loading in some deployment environments. Manual review is required.
 | `symbol_leaked_from_dependency_changed` | A symbol exported by this library that appears to originate from a **dependency** (e.g., `libstdc++.so.6`, `libgcc_s.so.1`, `libc.so.6`) was removed, added, or changed. This is a real ABI fact — the library is leaking dependency symbols into its public ABI surface (a common side-effect of missing `-fvisibility=hidden`). Direct consumers of this library typically resolve those symbols through the dependency directly and are not immediately affected. However, the risk is that on other systems with a different version of the dependency, the leaked symbols may differ — causing failures. **Recommended action:** apply `-fvisibility=hidden` to prevent leaking dependency symbols. |
 | `func_likely_renamed` | A function likely was renamed (binary fingerprint match: identical code size and hash, different symbol name). Old binaries reference the old name and will fail to resolve at load time. **This is a heuristic signal** — the match is based on function size and code hash fingerprinting in stripped binaries (elf_only_mode). Verify the rename is intentional. Only fires in symbols-only analysis mode. |
 | `symbol_moved_version_node` | A symbol moved from one version node to another (e.g., `LIBFOO_1.0` → `LIBFOO_2.0`). Applications linked against the old version node will not find this symbol at the expected version. This is typically intentional during a major release, but should be verified. |
+| `symbol_version_alias_changed` | The default symbol version alias changed (e.g. `foo@@VER_1.0` → `foo@@VER_2.0`). Existing binaries that requested the previous default version may fail to link or load if the old alias is not retained. **Recommended action:** retain the old alias as a non-default version to preserve resolution for existing consumers. |
+| `protected_visibility_changed` | An ELF symbol's visibility changed between `STV_DEFAULT` and `STV_PROTECTED`. For data symbols this can break copy relocations; for functions it changes interposition semantics. The symbol remains exported, but consumers using `LD_PRELOAD`-based interposition may stop seeing the override. |
+| `vtable_symbol_identity_changed` | A vtable or `typeinfo` symbol's identity changed (e.g. via a visibility or version-script change) while the class layout is stable. Cross-DSO `dynamic_cast` and exception matching can silently fail because they compare RTTI pointers, not contents. |
+| `overload_set_rerouted` | The overload set under a public name changed in a way where some overloads were removed and others added. Existing call sites that previously resolved to a removed overload now resolve to a different one (often via implicit conversion or a templated catch-all) — compiles, links, runs, but runs **different** code. |
+| `behavioural_default_changed` | A documented default value changed without altering any signature — e.g. the default device selector, the default execution backend, or the default policy. Source compiles and links unchanged; runtime behaviour silently differs. Read from the probe manifest's `defaults:` section. |
 
 ---
 
@@ -235,6 +268,13 @@ These changes are safe: they add new capabilities or carry diagnostic informatio
 | `func_noexcept_added` | `noexcept` added to a function. The Itanium ABI mangling does not change in practice; existing compiled binaries resolve the same symbol. A source-level concern for function-pointer typing only. |
 | `func_noexcept_removed` | `noexcept` removed from a function. Existing binaries continue to resolve the symbol. A source-level exception-specification concern only. |
 
+### Function Visibility and Inline Attribute Changes
+
+| Kind | Description |
+|------|-------------|
+| `func_visibility_protected_changed` | A function's visibility changed between `STV_DEFAULT` and `STV_PROTECTED`. The symbol remains exported and is still resolvable by external consumers; intra-library calls bypass interposition (intentional). Existing compiled consumers are unaffected. |
+| `func_lost_inline` | A function lost its `inline` attribute. The compiler now emits the symbol with normal external linkage, which is strictly additive — old binaries that previously could not find an inline-only definition will now resolve it. |
+
 ### ELF Dynamic Section
 
 | Kind | Description |
@@ -252,6 +292,9 @@ These changes are safe: they add new capabilities or carry diagnostic informatio
 | `common_symbol_risk` | A `STT_COMMON` symbol is exported. Common symbols have merge semantics that can cause surprising behavior — a risk warning, not a proven break. |
 | `symbol_version_defined_added` | Symbol versioning was introduced to the library (a new version definition added). New binaries link against the versioned symbol; old binaries use the unversioned fallback. |
 | `symbol_version_required_removed` | A previously required symbol version dependency was dropped. Reduces the minimum libc/glibc requirement — compatible or an improvement. |
+| `symbol_version_required_added_compat` | A new required symbol version dependency was added, but it is older than the previous maximum (e.g. `GLIBC_2.14` added while already depending on `GLIBC_2.17`). Existing target systems already satisfy the new requirement — informational only. The breaking case (a *newer* requirement) is reported as `symbol_version_required_added` under `COMPATIBLE_WITH_RISK`. |
+| `elf_visibility_changed` | ELF symbol visibility changed (e.g. `STV_DEFAULT` → `STV_PROTECTED`). The symbol is still exported but interposition semantics differ. *Legacy alias kept for backwards compatibility — the active emitter is `symbol_elf_visibility_changed`.* |
+| `symbol_elf_visibility_changed` | ELF symbol visibility (`st_other`) changed (e.g. `STV_DEFAULT` → `STV_PROTECTED`). The symbol is still exported, but interposition via `LD_PRELOAD` may stop working for intra-library calls. |
 
 ### ELF Symbol-Version Policy
 
@@ -267,6 +310,13 @@ These changes are safe: they add new capabilities or carry diagnostic informatio
 |------|-------------|
 | `dwarf_info_missing` | The new binary was stripped of debug info (`-g`). abicheck cannot perform DWARF-based comparison — this is a coverage gap warning, not a proven ABI break. |
 | `toolchain_flag_drift` | Toolchain flags drifted between builds (e.g., `-fshort-enums`, `-fpack-struct`). Informational — may indicate a real break that other checks (size, alignment) would catch. |
+
+### ABI Surface Diagnostics
+
+| Kind | Description |
+|------|-------------|
+| `glibcxx_dual_abi_flip_detected` | Mass symbol churn matches a libstdc++ dual ABI toggle (`_GLIBCXX_USE_CXX11_ABI`). Individual removed/added symbols are likely caused by this single root cause rather than intentional API changes — the underlying per-symbol findings are reported separately. |
+| `abi_surface_explosion` | The public ABI surface grew or shrank dramatically (e.g. a lost `-fvisibility=hidden` flag). This is a configuration/packaging signal, not a per-symbol break, but may indicate an unintended visibility regression. |
 
 ### Field Qualifier Changes
 

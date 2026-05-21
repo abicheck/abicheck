@@ -41,6 +41,7 @@ nav:
     - Severity Configuration: user-guide/severity.md
     - Output Formats: user-guide/output-formats.md
     - Multi-Binary Releases: user-guide/multi-binary.md
+    - Baseline Management: user-guide/baseline-management.md
     - Local Compare: user-guide/local-compare.md
     - MCP Integration: user-guide/mcp-integration.md
     - GitHub Action: user-guide/github-action.md
@@ -104,6 +105,7 @@ nav:
       - "017: GitHub Action": development/adr/017-github-action.md
       - "018: Cross-Platform Support": development/adr/018-cross-platform-support.md
       - "019: Testing Strategy": development/adr/019-testing-strategy.md
+      - "020: SYCL & Heterogeneous Stack": development/adr/020-sycl-and-heterogeneous-stack-support.md
       - Gap Analysis: development/adr/adr-gap-analysis.md
 
 plugins:
