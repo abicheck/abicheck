@@ -150,6 +150,142 @@ def _qualified_function_name(name: str, mangled: str) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _split_experimental(
+    qnames: list[str],
+    experimental_namespaces: tuple[str, ...],
+) -> tuple[list[str], list[str]]:
+    """Split *qnames* into ``(experimental, stable)`` by namespace match."""
+    exp = [
+        q for q in qnames
+        if any(s in experimental_namespaces for s in _segments(q))
+    ]
+    stable = [q for q in qnames if q not in exp]
+    return exp, stable
+
+
+def _index_funcs_by_stable_key(
+    snap: AbiSnapshot,
+    experimental_namespaces: tuple[str, ...],
+) -> dict[tuple[str, str], list[str]]:
+    """Index public functions by ``(stripped_qualified_name, leaf)``.
+
+    Only public functions are indexed so internal helpers in
+    ``experimental::`` don't get reported.
+    """
+    from .model import Visibility
+    out: dict[tuple[str, str], list[str]] = {}
+    for f in snap.functions:
+        if f.visibility != Visibility.PUBLIC:
+            continue
+        qname = _qualified_function_name(f.name, f.mangled)
+        segs = _segments(qname)
+        if not segs:
+            continue
+        leaf = segs[-1]
+        stripped, _ = _strip_experimental(qname, experimental_namespaces)
+        out.setdefault((stripped, leaf), []).append(qname)
+    return out
+
+
+def _index_types_by_stable_key(
+    snap: AbiSnapshot,
+    experimental_namespaces: tuple[str, ...],
+) -> dict[tuple[str, str], list[str]]:
+    """Index types by ``(stripped_qualified_name, leaf)``."""
+    out: dict[tuple[str, str], list[str]] = {}
+    for t in snap.types:
+        qname = t.name
+        segs = _segments(qname)
+        if not segs:
+            continue
+        leaf = segs[-1]
+        stripped, _ = _strip_experimental(qname, experimental_namespaces)
+        out.setdefault((stripped, leaf), []).append(qname)
+    return out
+
+
+def _classify_experimental_event(
+    old_exp: list[str],
+    old_stable: list[str],
+    new_exp: list[str],
+    new_stable: list[str],
+) -> str | None:
+    """Return ``"graduated"``, ``"removed"``, or ``None`` for a key pair.
+
+    Graduation requires an experimental presence in old AND a new stable
+    twin that did not exist before. Removal requires no replacement on
+    either side. Everything else is silent.
+    """
+    if not old_exp:
+        return None
+    if new_exp and new_stable and not old_stable:
+        return "graduated"
+    if not new_exp and not new_stable and not old_stable:
+        return "removed"
+    return None
+
+
+def _emit_experimental_change(
+    event: str,
+    leaf: str,
+    old_exp: list[str],
+    new_stable: list[str],
+    kind_label: str,
+) -> Change:
+    """Build the ``Change`` record for one classified event."""
+    old_q = old_exp[0]
+    if event == "graduated":
+        new_q = new_stable[0]
+        return Change(
+            kind=ChangeKind.EXPERIMENTAL_GRADUATED,
+            symbol=new_q,
+            description=(
+                f"Experimental {kind_label} '{old_q}' graduated to stable "
+                f"name '{new_q}'; experimental alias retained."
+            ),
+            old_value=old_q,
+            new_value=new_q,
+        )
+    return Change(
+        kind=ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT,
+        symbol=old_q,
+        description=(
+            f"Experimental {kind_label} '{old_q}' was removed and no "
+            f"{kind_label} with leaf '{leaf}' was published at a stable "
+            f"namespace in the new headers."
+        ),
+        old_value=old_q,
+        new_value=None,
+    )
+
+
+def _findings_for(
+    old_index: dict[tuple[str, str], list[str]],
+    new_index: dict[tuple[str, str], list[str]],
+    experimental_namespaces: tuple[str, ...],
+    kind_label: str,
+) -> list[Change]:
+    """Walk old/new indices, emitting one finding per classified event."""
+    out: list[Change] = []
+    for (stable_key, leaf), qnames in old_index.items():
+        old_exp, old_stable = _split_experimental(qnames, experimental_namespaces)
+        if not old_exp:
+            continue
+        new_qnames = new_index.get((stable_key, leaf), [])
+        new_exp, new_stable = _split_experimental(
+            new_qnames, experimental_namespaces,
+        )
+        event = _classify_experimental_event(
+            old_exp, old_stable, new_exp, new_stable,
+        )
+        if event is None:
+            continue
+        out.append(_emit_experimental_change(
+            event, leaf, old_exp, new_stable, kind_label,
+        ))
+    return out
+
+
 def detect_experimental_namespace_changes(
     old: AbiSnapshot,
     new: AbiSnapshot,
@@ -175,163 +311,20 @@ def detect_experimental_namespace_changes(
     ``old`` — that's just deletion of a redundant alias, not a
     graduation event.
     """
-    changes: list[Change] = []
-
-    # ----- Functions ------------------------------------------------------
-
-    def _index_funcs(snap: AbiSnapshot) -> dict[tuple[str, str], list[str]]:
-        """Map (qualified_name_without_experimental, leaf) → [qualified_names].
-
-        Index ONLY public functions so internal helpers in experimental::
-        don't get reported.
-        """
-        # Local import to avoid widening the module import graph.
-        from .model import Visibility
-        out: dict[tuple[str, str], list[str]] = {}
-        for f in snap.functions:
-            if f.visibility != Visibility.PUBLIC:
-                continue
-            qname = _qualified_function_name(f.name, f.mangled)
-            segs = _segments(qname)
-            if not segs:
-                continue
-            leaf = segs[-1]
-            stripped, matched = _strip_experimental(qname, experimental_namespaces)
-            key = (stripped, leaf)
-            out.setdefault(key, []).append(qname)
-            if matched is None:
-                # Also index plain stable declarations so we can look them up by
-                # the same key shape when checking the experimental side.
-                continue
-        return out
-
-    old_funcs = _index_funcs(old)
-    new_funcs = _index_funcs(new)
-
-    # Look at OLD experimental names and decide their fate in NEW.
-    seen_func_keys: set[tuple[str, str]] = set()
-    for (stable_key, leaf), qnames in old_funcs.items():
-        old_experimental_qnames = [
-            q for q in qnames
-            if any(s in experimental_namespaces for s in _segments(q))
-        ]
-        if not old_experimental_qnames:
-            continue
-        old_stable_qnames = [q for q in qnames if q not in old_experimental_qnames]
-        new_qnames = new_funcs.get((stable_key, leaf), [])
-        new_experimental_qnames = [
-            q for q in new_qnames
-            if any(s in experimental_namespaces for s in _segments(q))
-        ]
-        new_stable_qnames = [
-            q for q in new_qnames if q not in new_experimental_qnames
-        ]
-
-        key = (stable_key, leaf)
-        if key in seen_func_keys:
-            continue
-        seen_func_keys.add(key)
-
-        # Graduation: experimental name still present AND a new stable
-        # twin appeared that did not exist in the old headers.
-        if new_experimental_qnames and new_stable_qnames and not old_stable_qnames:
-            old_q = old_experimental_qnames[0]
-            new_q = new_stable_qnames[0]
-            changes.append(Change(
-                kind=ChangeKind.EXPERIMENTAL_GRADUATED,
-                symbol=new_q,
-                description=(
-                    f"Experimental declaration '{old_q}' graduated to stable "
-                    f"name '{new_q}'; experimental alias retained."
-                ),
-                old_value=old_q,
-                new_value=new_q,
-            ))
-            continue
-
-        # Removed without replacement: no experimental, no stable, twin.
-        if (not new_experimental_qnames
-                and not new_stable_qnames
-                and not old_stable_qnames):
-            old_q = old_experimental_qnames[0]
-            changes.append(Change(
-                kind=ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT,
-                symbol=old_q,
-                description=(
-                    f"Experimental declaration '{old_q}' was removed and no "
-                    f"declaration with leaf '{leaf}' was published at a "
-                    f"stable namespace in the new headers."
-                ),
-                old_value=old_q,
-                new_value=None,
-            ))
-
-    # ----- Types ----------------------------------------------------------
-
-    def _index_types(snap: AbiSnapshot) -> dict[tuple[str, str], list[str]]:
-        out: dict[tuple[str, str], list[str]] = {}
-        for t in snap.types:
-            qname = t.name
-            segs = _segments(qname)
-            if not segs:
-                continue
-            leaf = segs[-1]
-            stripped, _ = _strip_experimental(qname, experimental_namespaces)
-            key = (stripped, leaf)
-            out.setdefault(key, []).append(qname)
-        return out
-
-    old_types = _index_types(old)
-    new_types = _index_types(new)
-
-    seen_type_keys: set[tuple[str, str]] = set()
-    for (stable_key, leaf), qnames in old_types.items():
-        old_exp = [
-            q for q in qnames
-            if any(s in experimental_namespaces for s in _segments(q))
-        ]
-        if not old_exp:
-            continue
-        old_stable = [q for q in qnames if q not in old_exp]
-        new_qnames = new_types.get((stable_key, leaf), [])
-        new_exp = [
-            q for q in new_qnames
-            if any(s in experimental_namespaces for s in _segments(q))
-        ]
-        new_stable = [q for q in new_qnames if q not in new_exp]
-
-        key = (stable_key, leaf)
-        if key in seen_type_keys:
-            continue
-        seen_type_keys.add(key)
-
-        if new_exp and new_stable and not old_stable:
-            changes.append(Change(
-                kind=ChangeKind.EXPERIMENTAL_GRADUATED,
-                symbol=new_stable[0],
-                description=(
-                    f"Experimental type '{old_exp[0]}' graduated to stable "
-                    f"name '{new_stable[0]}'; experimental alias retained."
-                ),
-                old_value=old_exp[0],
-                new_value=new_stable[0],
-            ))
-            continue
-
-        if not new_exp and not new_stable and not old_stable:
-            changes.append(Change(
-                kind=ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT,
-                symbol=old_exp[0],
-                description=(
-                    f"Experimental type '{old_exp[0]}' was removed and no "
-                    f"type with leaf '{leaf}' was published at a stable "
-                    f"namespace in the new headers."
-                ),
-                old_value=old_exp[0],
-                new_value=None,
-            ))
-
-    return changes
+    out: list[Change] = []
+    out.extend(_findings_for(
+        _index_funcs_by_stable_key(old, experimental_namespaces),
+        _index_funcs_by_stable_key(new, experimental_namespaces),
+        experimental_namespaces,
+        "declaration",
+    ))
+    out.extend(_findings_for(
+        _index_types_by_stable_key(old, experimental_namespaces),
+        _index_types_by_stable_key(new, experimental_namespaces),
+        experimental_namespaces,
+        "type",
+    ))
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -381,6 +374,46 @@ def _looks_like_std_reexport(
     return declared_segs[-1] == underlying_segs[-1]
 
 
+def _collect_public_declared_names(snap: AbiSnapshot) -> set[str]:
+    """Return the set of qualified declared names of public functions in *snap*."""
+    from .model import Visibility
+    out: set[str] = set()
+    for f in snap.functions:
+        if f.visibility != Visibility.PUBLIC:
+            continue
+        qname = _qualified_function_name(f.name, f.mangled)
+        if qname:
+            out.add(qname)
+    return out
+
+
+def _batch_demangle_public(snap: AbiSnapshot) -> dict[str, str]:
+    """Demangle every public mangled name in *snap* in one batch call."""
+    from .demangle import demangle_batch
+    from .model import Visibility
+    mangled = [
+        f.mangled for f in snap.functions
+        if f.mangled.startswith("_Z") and f.visibility == Visibility.PUBLIC
+    ]
+    return demangle_batch(mangled) if mangled else {}
+
+
+def _build_std_reexport_change(declared: str, underlying: str) -> Change:
+    """Build a single ``STD_REEXPORT_REMOVED`` finding."""
+    return Change(
+        kind=ChangeKind.STD_REEXPORT_REMOVED,
+        symbol=declared,
+        description=(
+            f"Public re-export '{declared}' of standard-library entity "
+            f"'{underlying}' was removed. Consumer code that named "
+            f"'{declared}' no longer compiles; '{underlying}' is "
+            f"still available under its std:: name."
+        ),
+        old_value=f"{declared} → {underlying}",
+        new_value=None,
+    )
+
+
 def detect_std_reexport_removed(
     old: AbiSnapshot,
     new: AbiSnapshot,
@@ -398,27 +431,10 @@ def detect_std_reexport_removed(
     declared name is in ``std::``, or when the mangled name does not
     demangle to ``std::``.
     """
-    from .demangle import demangle_batch
     from .model import Visibility
 
-    # Demangle all candidate mangled names in one batch to keep the
-    # subprocess invocation cost bounded.
-    mangled_to_demangle = [
-        f.mangled for f in old.functions
-        if f.mangled.startswith("_Z") and f.visibility == Visibility.PUBLIC
-    ]
-    demangled = demangle_batch(mangled_to_demangle) if mangled_to_demangle else {}
-
-    # Index NEW snapshot's declared qualified names — preserve duplicates
-    # (overload sets) by counting, so a re-export shadowing the same leaf
-    # is not mistaken for a separate declaration.
-    new_declared: set[str] = set()
-    for f in new.functions:
-        if f.visibility != Visibility.PUBLIC:
-            continue
-        qname = _qualified_function_name(f.name, f.mangled)
-        if qname:
-            new_declared.add(qname)
+    demangled = _batch_demangle_public(old)
+    new_declared = _collect_public_declared_names(new)
 
     changes: list[Change] = []
     seen: set[str] = set()
@@ -426,26 +442,13 @@ def detect_std_reexport_removed(
         if f.visibility != Visibility.PUBLIC:
             continue
         declared = _qualified_function_name(f.name, f.mangled)
-        if not declared or declared in seen:
+        if not declared or declared in seen or declared in new_declared:
             continue
         underlying = demangled.get(f.mangled, "")
         if not _looks_like_std_reexport(declared, underlying):
             continue
-        if declared in new_declared:
-            continue
         seen.add(declared)
-        changes.append(Change(
-            kind=ChangeKind.STD_REEXPORT_REMOVED,
-            symbol=declared,
-            description=(
-                f"Public re-export '{declared}' of standard-library entity "
-                f"'{underlying}' was removed. Consumer code that named "
-                f"'{declared}' no longer compiles; '{underlying}' is "
-                f"still available under its std:: name."
-            ),
-            old_value=f"{declared} → {underlying}",
-            new_value=None,
-        ))
+        changes.append(_build_std_reexport_change(declared, underlying))
 
     return changes
 
