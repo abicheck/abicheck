@@ -3,7 +3,7 @@
 
 Listed in `BREAKING_KINDS` — runtime ABI break.
 
-_70 case(s)._ [← back to all examples](../index.md)
+_72 case(s)._ [← back to all examples](../index.md)
 
 | Case | Title | Verdict | Category |
 |------|-------|---------|----------|
@@ -18,6 +18,8 @@ _70 case(s)._ [← back to all examples](../index.md)
 | [case10_return_type](../case10_return_type.md) | Return Type Change | 🔴 BREAKING | Breaking |
 | [case110_experimental_removed_without_replacement](../case110_experimental_removed_without_replacement.md) | : removed without replacement (API break) | 🔴 BREAKING | Breaking |
 | [case112_inline_namespace_version_bumped](../case112_inline_namespace_version_bumped.md) | case112 — inline namespace version bumped (BREAKING) | 🔴 BREAKING | Breaking |
+| [case113_internal_template_signature_changed](../case113_internal_template_signature_changed.md) | case113 — internal function-template signature leaks via public API (BREAKING) | 🔴 BREAKING | Breaking |
+| [case114_cpo_kind_changed](../case114_cpo_kind_changed.md) | case114 — CPO kind changed (BREAKING) | 🔴 BREAKING | Breaking |
 | [case11_global_var_type](../case11_global_var_type.md) | Global Variable Type Change | 🔴 BREAKING | Breaking |
 | [case12_function_removed](../case12_function_removed.md) | Function Removed from Shared Library | 🔴 BREAKING | Breaking |
 | [case14_cpp_class_size](../case14_cpp_class_size.md) | C++ Class Size Change | 🔴 BREAKING | Breaking |

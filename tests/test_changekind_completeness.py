@@ -219,6 +219,12 @@ ASSERTED_CHANGE_KINDS: set[ChangeKind] = {
     ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT,
     ChangeKind.STD_REEXPORT_REMOVED,
     ChangeKind.INLINE_NAMESPACE_VERSION_BUMPED,
+    # Template / overload-set patterns — exercised in tests/test_diff_templates.py
+    ChangeKind.INTERNAL_TEMPLATE_LEAKS_VIA_PUBLIC_API,
+    ChangeKind.CPO_KIND_CHANGED,
+    ChangeKind.OVERLOAD_SET_REROUTED,
+    ChangeKind.MANDATORY_TEMPLATE_PARAM_ADDED,
+    ChangeKind.UNSPECIFIED_RETURN_NOW_NAMED,
 }
 
 

@@ -398,6 +398,36 @@ class DetectOneDALPatterns:
         return changes
 
 
+class DetectTemplatePatterns:
+    """Run the generic template / overload-set pattern detectors.
+
+    Lives in :mod:`abicheck.diff_templates`. Covers internal-template
+    leaks (function-template analogue of PR #238), CPO kind flips,
+    overload-set rerouting, mandatory-template-param additions, and
+    unspecified-return flips.
+    """
+
+    name = "detect_template_patterns"
+
+    def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:
+        from .diff_templates import detect_template_patterns
+
+        new_findings = detect_template_patterns(ctx.old, ctx.new)
+        if not new_findings:
+            return changes
+        seen_keys = {(c.kind, c.symbol) for c in changes}
+        for c in new_findings:
+            if ctx.suppression is not None and ctx.suppression.is_suppressed(c):
+                ctx.suppressed.append(c)
+                continue
+            key = (c.kind, c.symbol)
+            if key in seen_keys:
+                continue
+            changes.append(c)
+            seen_keys.add(key)
+        return changes
+
+
 class DetectNamespacePatterns:
     """Run the generic namespace-shape detectors.
 
@@ -535,5 +565,6 @@ DEFAULT_PIPELINE = PostProcessingPipeline(
         DetectInternalLeaks(),
         DetectOneDALPatterns(),
         DetectNamespacePatterns(),
+        DetectTemplatePatterns(),
     ]
 )

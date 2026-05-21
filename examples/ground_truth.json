@@ -1274,6 +1274,34 @@
       "bad_practice": false,
       "description": "Library uses a versioned inline namespace `_V1` in v1 and bumps to `_V2` in v2. Declarations look identical to consumers so source keeps compiling, but every freshly built TU emits mangled symbols carrying the new version segment — old and new TUs of the same program ODR-violate. Specialisation of the existing inline_namespace_moved that fires from declared-name evidence so it works on header-only inputs and single-symbol bumps.",
       "expected_kinds": ["inline_namespace_version_bumped"]
+    },
+    "case113_internal_template_signature_changed": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "abi_break": true,
+      "api_break": false,
+      "bad_practice": false,
+      "description": "Internal helper template `lib::__detail::walk<T>` is dispatched through by a public inline algorithm `sum_range`. Between v1 and v2 the explicit instantiation set shifts (`walk<float>` removed, `walk<double>` added). Consumers compiled against v1 baked `walk<float>` into their symbol table; against v2 they fail to link. Function-template analogue of internal_type_leaks_via_public_api from PR #238.",
+      "expected_kinds": ["internal_template_leaks_via_public_api", "func_removed"]
+    },
+    "case114_cpo_kind_changed": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "abi_break": true,
+      "api_break": false,
+      "bad_practice": false,
+      "description": "Public name `lib::sort` is published in v1 as a free function and in v2 as a customisation point object (constexpr variable of an unspecified function-object class type). Call syntax keeps working but decltype, extern templates, and trait specialisations break.",
+      "expected_kinds": ["cpo_kind_changed"]
     }
   }
 }

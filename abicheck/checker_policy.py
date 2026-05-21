@@ -421,6 +421,17 @@ class ChangeKind(str, Enum):
     # no .so (header-only / template libraries).
     INLINE_NAMESPACE_VERSION_BUMPED = "inline_namespace_version_bumped"
 
+    # ── Template / overload-set patterns (PR-B follow-up) ────────────────
+    # See examples/case113_internal_template_signature_changed/README.md
+    INTERNAL_TEMPLATE_LEAKS_VIA_PUBLIC_API = (
+        "internal_template_leaks_via_public_api"
+    )
+    # See examples/case114_cpo_kind_changed/README.md
+    CPO_KIND_CHANGED = "cpo_kind_changed"
+    OVERLOAD_SET_REROUTED = "overload_set_rerouted"
+    MANDATORY_TEMPLATE_PARAM_ADDED = "mandatory_template_param_added"
+    UNSPECIFIED_RETURN_NOW_NAMED = "unspecified_return_now_named"
+
 
 class HasKind(Protocol):
     kind: ChangeKind
