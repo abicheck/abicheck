@@ -66,36 +66,79 @@ def demangle(symbol: str) -> str | None:
     return None
 
 
+# Process-wide cache for demangle_batch. Two dicts so a symbol that
+# was passed once and known *not* to be demangleable is not re-queried
+# on subsequent calls. Bounded to avoid unbounded growth on long-lived
+# servers; the bound is intentionally large because the typical
+# working-set is a few thousand symbols per ABI snapshot.
+_BATCH_CACHE_OK: dict[str, str] = {}
+_BATCH_CACHE_FAIL: set[str] = set()
+_BATCH_CACHE_MAX = 65536
+
+
+def _batch_cache_record_ok(mangled: str, demangled: str) -> None:
+    if len(_BATCH_CACHE_OK) >= _BATCH_CACHE_MAX:
+        _BATCH_CACHE_OK.clear()
+    _BATCH_CACHE_OK[mangled] = demangled
+
+
+def _batch_cache_record_fail(mangled: str) -> None:
+    if len(_BATCH_CACHE_FAIL) >= _BATCH_CACHE_MAX:
+        _BATCH_CACHE_FAIL.clear()
+    _BATCH_CACHE_FAIL.add(mangled)
+
+
 def demangle_batch(symbols: list[str]) -> dict[str, str]:
     """Demangle a batch of symbols efficiently using a single ``c++filt`` call.
 
     Returns a mapping from mangled → demangled for symbols that were
     successfully demangled. Non-C++ symbols are excluded from the result.
+
+    Memoised per-process via module-level caches so that callers which
+    repeatedly demangle the same (or overlapping) symbol sets — common
+    when several detectors each call ``demangle_batch`` with their own
+    slice of a snapshot — do not pay the subprocess cost more than once
+    per unique symbol.
     """
     cpp_syms = [s for s in symbols if s and s.startswith("_Z")]
     if not cpp_syms:
         return {}
 
     result: dict[str, str] = {}
+    # Phase 1 — serve from the process-wide cache (both hit and miss).
+    uncached: list[str] = []
+    for s in cpp_syms:
+        if s in _BATCH_CACHE_OK:
+            result[s] = _BATCH_CACHE_OK[s]
+        elif s in _BATCH_CACHE_FAIL:
+            continue  # known non-demangleable; do not re-query
+        else:
+            uncached.append(s)
+
+    if not uncached:
+        return result
+
     remaining_syms: list[str] = []
 
-    # Try cxxfilt first (in-process, fastest)
+    # Phase 2 — try cxxfilt (in-process, fastest) for the uncached set.
     try:
         import cxxfilt
-        for s in cpp_syms:
+        for s in uncached:
             try:
                 d = cxxfilt.demangle(s)
                 if d and d != s:
                     result[s] = d
+                    _batch_cache_record_ok(s, d)
                 else:
                     remaining_syms.append(s)
             except Exception:  # noqa: BLE001
                 remaining_syms.append(s)
     except ImportError:
-        remaining_syms = list(cpp_syms)
+        remaining_syms = list(uncached)
 
-    # Fallback: batch c++filt call for symbols cxxfilt couldn't handle
+    # Phase 3 — fall back to a single batched c++filt call.
     if remaining_syms:
+        success_set: set[str] = set()
         try:
             proc = subprocess.run(
                 ["c++filt"],
@@ -107,10 +150,23 @@ def demangle_batch(symbols: list[str]) -> dict[str, str]:
                 for mangled, demangled in zip(remaining_syms, lines):
                     if demangled and demangled != mangled:
                         result[mangled] = demangled
+                        _batch_cache_record_ok(mangled, demangled)
+                        success_set.add(mangled)
         except (FileNotFoundError, subprocess.TimeoutExpired):
             pass
+        # Record the genuinely-unresolvable symbols so we don't keep
+        # spawning c++filt for them.
+        for s in remaining_syms:
+            if s not in success_set:
+                _batch_cache_record_fail(s)
 
     return result
+
+
+def _reset_demangle_batch_cache() -> None:
+    """Test helper — clear the process-wide cache."""
+    _BATCH_CACHE_OK.clear()
+    _BATCH_CACHE_FAIL.clear()
 
 
 def base_name(symbol: str) -> str:

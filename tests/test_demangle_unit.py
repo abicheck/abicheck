@@ -13,9 +13,11 @@ import abicheck.demangle as _mod
 @pytest.fixture(autouse=True)
 def _clear_caches():
     _mod.demangle.cache_clear()
+    _mod._reset_demangle_batch_cache()
     _mod._warned_no_demangler = False
     yield
     _mod.demangle.cache_clear()
+    _mod._reset_demangle_batch_cache()
     _mod._warned_no_demangler = False
 
 
