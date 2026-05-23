@@ -8,7 +8,7 @@
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | `func_removed`, `type_removed`, `enum_member_removed` |
-| **Source files** | [browse on GitHub](https://github.com/napetrov/abicheck/blob/main/examples/case112_task_arena_attach_tag/) |
+| **Source files** | [browse source](../../examples/case112_task_arena_attach_tag/) |
 
 **Category:** ABI + source break / oneTBB regression suite | **Verdict:** 🔴 BREAKING
 
@@ -80,11 +80,11 @@ g++ -std=c++17 -I. app.cpp -L. -lmylib -o app
 
 ## Source files
 
-- [`CMakeLists.txt`](https://github.com/napetrov/abicheck/blob/main/examples/case112_task_arena_attach_tag/CMakeLists.txt)
-- [`app.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case112_task_arena_attach_tag/app.cpp)
-- [`v1.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case112_task_arena_attach_tag/v1.cpp)
-- [`v1.h`](https://github.com/napetrov/abicheck/blob/main/examples/case112_task_arena_attach_tag/v1.h)
-- [`v2.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case112_task_arena_attach_tag/v2.cpp)
-- [`v2.h`](https://github.com/napetrov/abicheck/blob/main/examples/case112_task_arena_attach_tag/v2.h)
+- [`CMakeLists.txt`](../../examples/case112_task_arena_attach_tag/CMakeLists.txt)
+- [`app.cpp`](../../examples/case112_task_arena_attach_tag/app.cpp)
+- [`v1.cpp`](../../examples/case112_task_arena_attach_tag/v1.cpp)
+- [`v1.h`](../../examples/case112_task_arena_attach_tag/v1.h)
+- [`v2.cpp`](../../examples/case112_task_arena_attach_tag/v2.cpp)
+- [`v2.h`](../../examples/case112_task_arena_attach_tag/v2.h)
 
 _See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._

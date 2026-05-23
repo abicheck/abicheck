@@ -51,17 +51,27 @@ older baseline snapshots that predate the field.
 **Severity: BAD PRACTICE / API BREAK**
 
 ```bash
-# v1 header, v1 .so: compiles and runs.
-# Note linker order: object/source inputs must precede -l flags on modern
-# Linux toolchains (-Wl,--as-needed is the default).
-g++ -std=c++17 -I. app.cpp -L. -lmylib -o app
-./app   # → concurrency = 4 (expect 4)
+cmake -S examples -B /tmp/abicheck-examples-build -DCMAKE_BUILD_TYPE=Debug
+cmake --build /tmp/abicheck-examples-build \
+  --target case93_ctor_became_explicit_app case93_ctor_became_explicit_v2
 
-# v2 header, v2 .so: app.cpp does `int n = ta;`, an implicit conversion
-# via `operator int() const`. v2 declares the operator `explicit`, so the
-# same app.cpp source no longer compiles:
-g++ -std=c++17 -I. app.cpp -L. -lmylib -o app
-# → error: cannot convert 'mylib::task_arena' to 'int' in initialization
+/tmp/abicheck-examples-build/case93_ctor_became_explicit/app_v1
+# concurrency = 4 (expect 4)
+
+# Runtime substitution is still OK: the mangled conversion-operator symbol
+# did not change.
+tmp=$(mktemp -d)
+cp /tmp/abicheck-examples-build/case93_ctor_became_explicit/app_v1 "$tmp/"
+cp /tmp/abicheck-examples-build/case93_ctor_became_explicit/libv2.so "$tmp/libv1.so"
+(cd "$tmp" && LD_LIBRARY_PATH=. ./app_v1)
+# concurrency = 4 (expect 4)
+
+# Source rebuild against the v2 header fails because app.cpp does `int n = ta;`.
+tmp=$(mktemp -d)
+cp examples/case93_ctor_became_explicit/app.cpp "$tmp/app.cpp"
+cp examples/case93_ctor_became_explicit/v2.h "$tmp/v1.h"
+g++ -std=c++17 -I"$tmp" -c "$tmp/app.cpp" -o "$tmp/app.o"
+# error: cannot convert 'mylib::task_arena' to 'int' in initialization
 ```
 
 ## How to fix

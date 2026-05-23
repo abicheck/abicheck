@@ -8,7 +8,7 @@
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | API break |
 | **Detected `ChangeKind`s** | `ctor_explicit_added` |
-| **Source files** | [browse on GitHub](https://github.com/napetrov/abicheck/blob/main/examples/case106_ctor_became_explicit/) |
+| **Source files** | [browse source](../../examples/case106_ctor_became_explicit/) |
 
 **Category:** Source API contract | **Verdict:** 🟠 API_BREAK
 
@@ -61,17 +61,27 @@ older baseline snapshots that predate the field.
 **Severity: BAD PRACTICE / API BREAK**
 
 ```bash
-# v1 header, v1 .so: compiles and runs.
-# Note linker order: object/source inputs must precede -l flags on modern
-# Linux toolchains (-Wl,--as-needed is the default).
-g++ -std=c++17 -I. app.cpp -L. -lmylib -o app
-./app   # → concurrency = 4 (expect 4)
+cmake -S examples -B /tmp/abicheck-examples-build -DCMAKE_BUILD_TYPE=Debug
+cmake --build /tmp/abicheck-examples-build \
+  --target case93_ctor_became_explicit_app case93_ctor_became_explicit_v2
 
-# v2 header, v2 .so: app.cpp does `int n = ta;`, an implicit conversion
-# via `operator int() const`. v2 declares the operator `explicit`, so the
-# same app.cpp source no longer compiles:
-g++ -std=c++17 -I. app.cpp -L. -lmylib -o app
-# → error: cannot convert 'mylib::task_arena' to 'int' in initialization
+/tmp/abicheck-examples-build/case93_ctor_became_explicit/app_v1
+# concurrency = 4 (expect 4)
+
+# Runtime substitution is still OK: the mangled conversion-operator symbol
+# did not change.
+tmp=$(mktemp -d)
+cp /tmp/abicheck-examples-build/case93_ctor_became_explicit/app_v1 "$tmp/"
+cp /tmp/abicheck-examples-build/case93_ctor_became_explicit/libv2.so "$tmp/libv1.so"
+(cd "$tmp" && LD_LIBRARY_PATH=. ./app_v1)
+# concurrency = 4 (expect 4)
+
+# Source rebuild against the v2 header fails because app.cpp does `int n = ta;`.
+tmp=$(mktemp -d)
+cp examples/case93_ctor_became_explicit/app.cpp "$tmp/app.cpp"
+cp examples/case93_ctor_became_explicit/v2.h "$tmp/v1.h"
+g++ -std=c++17 -I"$tmp" -c "$tmp/app.cpp" -o "$tmp/app.o"
+# error: cannot convert 'mylib::task_arena' to 'int' in initialization
 ```
 
 ## How to fix
@@ -90,11 +100,11 @@ g++ -std=c++17 -I. app.cpp -L. -lmylib -o app
 
 ## Source files
 
-- [`CMakeLists.txt`](https://github.com/napetrov/abicheck/blob/main/examples/case106_ctor_became_explicit/CMakeLists.txt)
-- [`app.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case106_ctor_became_explicit/app.cpp)
-- [`v1.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case106_ctor_became_explicit/v1.cpp)
-- [`v1.h`](https://github.com/napetrov/abicheck/blob/main/examples/case106_ctor_became_explicit/v1.h)
-- [`v2.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case106_ctor_became_explicit/v2.cpp)
-- [`v2.h`](https://github.com/napetrov/abicheck/blob/main/examples/case106_ctor_became_explicit/v2.h)
+- [`CMakeLists.txt`](../../examples/case106_ctor_became_explicit/CMakeLists.txt)
+- [`app.cpp`](../../examples/case106_ctor_became_explicit/app.cpp)
+- [`v1.cpp`](../../examples/case106_ctor_became_explicit/v1.cpp)
+- [`v1.h`](../../examples/case106_ctor_became_explicit/v1.h)
+- [`v2.cpp`](../../examples/case106_ctor_became_explicit/v2.cpp)
+- [`v2.h`](../../examples/case106_ctor_became_explicit/v2.h)
 
 _See also: [Examples overview](index.md) · [All API_BREAK cases](by-verdict/api-break.md) · [Category: API Break](by-category/api_break.md)._

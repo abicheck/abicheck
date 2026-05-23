@@ -8,7 +8,7 @@
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | ABI break |
 | **Detected `ChangeKind`s** | `cpo_kind_changed` |
-| **Source files** | [browse on GitHub](https://github.com/napetrov/abicheck/blob/main/examples/case114_cpo_kind_changed/) |
+| **Source files** | [browse source](../../examples/case114_cpo_kind_changed/) |
 
 ## What this case demonstrates
 
@@ -43,11 +43,11 @@ with `lib::sort` must be updated.
 
 ## Source files
 
-- [`CMakeLists.txt`](https://github.com/napetrov/abicheck/blob/main/examples/case114_cpo_kind_changed/CMakeLists.txt)
-- [`app.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case114_cpo_kind_changed/app.cpp)
-- [`v1.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case114_cpo_kind_changed/v1.cpp)
-- [`v1.h`](https://github.com/napetrov/abicheck/blob/main/examples/case114_cpo_kind_changed/v1.h)
-- [`v2.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case114_cpo_kind_changed/v2.cpp)
-- [`v2.h`](https://github.com/napetrov/abicheck/blob/main/examples/case114_cpo_kind_changed/v2.h)
+- [`CMakeLists.txt`](../../examples/case114_cpo_kind_changed/CMakeLists.txt)
+- [`app.cpp`](../../examples/case114_cpo_kind_changed/app.cpp)
+- [`v1.cpp`](../../examples/case114_cpo_kind_changed/v1.cpp)
+- [`v1.h`](../../examples/case114_cpo_kind_changed/v1.h)
+- [`v2.cpp`](../../examples/case114_cpo_kind_changed/v2.cpp)
+- [`v2.h`](../../examples/case114_cpo_kind_changed/v2.h)
 
 _See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._

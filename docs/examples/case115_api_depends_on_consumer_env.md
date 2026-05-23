@@ -8,7 +8,7 @@
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | — |
 | **Detected `ChangeKind`s** | `func_removed_elf_only` |
-| **Source files** | [browse on GitHub](https://github.com/napetrov/abicheck/blob/main/examples/case115_api_depends_on_consumer_env/) |
+| **Source files** | [browse source](../../examples/case115_api_depends_on_consumer_env/) |
 
 ## What this case demonstrates
 
@@ -37,11 +37,11 @@ finding is layered on top by the probe-harness pipeline and reported as
 
 ## Source files
 
-- [`CMakeLists.txt`](https://github.com/napetrov/abicheck/blob/main/examples/case115_api_depends_on_consumer_env/CMakeLists.txt)
-- [`app.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case115_api_depends_on_consumer_env/app.cpp)
-- [`v1.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case115_api_depends_on_consumer_env/v1.cpp)
-- [`v1.h`](https://github.com/napetrov/abicheck/blob/main/examples/case115_api_depends_on_consumer_env/v1.h)
-- [`v2.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case115_api_depends_on_consumer_env/v2.cpp)
-- [`v2.h`](https://github.com/napetrov/abicheck/blob/main/examples/case115_api_depends_on_consumer_env/v2.h)
+- [`CMakeLists.txt`](../../examples/case115_api_depends_on_consumer_env/CMakeLists.txt)
+- [`app.cpp`](../../examples/case115_api_depends_on_consumer_env/app.cpp)
+- [`v1.cpp`](../../examples/case115_api_depends_on_consumer_env/v1.cpp)
+- [`v1.h`](../../examples/case115_api_depends_on_consumer_env/v1.h)
+- [`v2.cpp`](../../examples/case115_api_depends_on_consumer_env/v2.cpp)
+- [`v2.h`](../../examples/case115_api_depends_on_consumer_env/v2.h)
 
 _See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md)._

@@ -8,7 +8,7 @@
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | `sycl_overload_set_removed` |
-| **Source files** | [browse on GitHub](https://github.com/napetrov/abicheck/blob/main/examples/case82_sycl_overload_set_removed/) |
+| **Source files** | [browse source](../../examples/case82_sycl_overload_set_removed/) |
 
 **Category:** Overload-family ABI | **Verdict:** BREAKING
 
@@ -30,6 +30,21 @@ Mechanically this is N×`func_removed`. Reporting it that way buries the
 signal under a wall of independent removals, making the suppression UX a
 mess (one rule per algorithm) and obscuring the deployment-level question
 ("did the SYCL surface go away?").
+
+## Real Failure Demo
+
+**Severity: BREAKING / LOAD-TIME FAILURE**
+
+```bash
+cmake -S examples -B /tmp/abicheck-examples-build -DCMAKE_BUILD_TYPE=Debug
+cmake --build /tmp/abicheck-examples-build --target case82_sycl_overload_set_removed_app case82_sycl_overload_set_removed_v2
+
+tmp=$(mktemp -d)
+cp /tmp/abicheck-examples-build/case82_sycl_overload_set_removed/app_v1 "$tmp/"
+cp /tmp/abicheck-examples-build/case82_sycl_overload_set_removed/libv2.so "$tmp/libv1.so"
+(cd "$tmp" && LD_LIBRARY_PATH=. ./app_v1)
+# ./app_v1: symbol lookup error: undefined symbol: _ZN5mylib7computeERN4sycl5queueERKNS_10descriptorERKNS_5tableE
+```
 
 ## Why this is its own ChangeKind
 
@@ -60,11 +75,11 @@ one go.
 
 ## Source files
 
-- [`CMakeLists.txt`](https://github.com/napetrov/abicheck/blob/main/examples/case82_sycl_overload_set_removed/CMakeLists.txt)
-- [`app.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case82_sycl_overload_set_removed/app.cpp)
-- [`v1.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case82_sycl_overload_set_removed/v1.cpp)
-- [`v1.h`](https://github.com/napetrov/abicheck/blob/main/examples/case82_sycl_overload_set_removed/v1.h)
-- [`v2.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case82_sycl_overload_set_removed/v2.cpp)
-- [`v2.h`](https://github.com/napetrov/abicheck/blob/main/examples/case82_sycl_overload_set_removed/v2.h)
+- [`CMakeLists.txt`](../../examples/case82_sycl_overload_set_removed/CMakeLists.txt)
+- [`app.cpp`](../../examples/case82_sycl_overload_set_removed/app.cpp)
+- [`v1.cpp`](../../examples/case82_sycl_overload_set_removed/v1.cpp)
+- [`v1.h`](../../examples/case82_sycl_overload_set_removed/v1.h)
+- [`v2.cpp`](../../examples/case82_sycl_overload_set_removed/v2.cpp)
+- [`v2.h`](../../examples/case82_sycl_overload_set_removed/v2.h)
 
 _See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._

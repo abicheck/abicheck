@@ -8,7 +8,7 @@
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | `tag_type_renamed` |
-| **Source files** | [browse on GitHub](https://github.com/napetrov/abicheck/blob/main/examples/case86_tag_struct_renamed/) |
+| **Source files** | [browse source](../../examples/case86_tag_struct_renamed/) |
 
 **Category:** Mangling ABI | **Verdict:** BREAKING
 
@@ -39,6 +39,21 @@ v2 renames `brute_force` → `search_brute`. Mechanically:
 - Every explicit instantiation referencing the old tag gets a brand-new
   mangled name. Consumer binaries linked against v1 request the old
   symbol at load time and get an unresolved-symbol error.
+
+## Real Failure Demo
+
+**Severity: BREAKING / LOAD-TIME FAILURE**
+
+```bash
+cmake -S examples -B /tmp/abicheck-examples-build -DCMAKE_BUILD_TYPE=Debug
+cmake --build /tmp/abicheck-examples-build --target case85_tag_struct_renamed_app case85_tag_struct_renamed_v2
+
+tmp=$(mktemp -d)
+cp /tmp/abicheck-examples-build/case85_tag_struct_renamed/app_v1 "$tmp/"
+cp /tmp/abicheck-examples-build/case85_tag_struct_renamed/libv2.so "$tmp/libv1.so"
+(cd "$tmp" && LD_LIBRARY_PATH=. ./app_v1)
+# ./app_v1: symbol lookup error: undefined symbol: descriptor<brute_force, classification>::descriptor()
+```
 
 ## Why this is its own ChangeKind
 
@@ -81,11 +96,11 @@ shipped instantiation symbol.
 
 ## Source files
 
-- [`CMakeLists.txt`](https://github.com/napetrov/abicheck/blob/main/examples/case86_tag_struct_renamed/CMakeLists.txt)
-- [`app.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case86_tag_struct_renamed/app.cpp)
-- [`v1.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case86_tag_struct_renamed/v1.cpp)
-- [`v1.h`](https://github.com/napetrov/abicheck/blob/main/examples/case86_tag_struct_renamed/v1.h)
-- [`v2.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case86_tag_struct_renamed/v2.cpp)
-- [`v2.h`](https://github.com/napetrov/abicheck/blob/main/examples/case86_tag_struct_renamed/v2.h)
+- [`CMakeLists.txt`](../../examples/case86_tag_struct_renamed/CMakeLists.txt)
+- [`app.cpp`](../../examples/case86_tag_struct_renamed/app.cpp)
+- [`v1.cpp`](../../examples/case86_tag_struct_renamed/v1.cpp)
+- [`v1.h`](../../examples/case86_tag_struct_renamed/v1.h)
+- [`v2.cpp`](../../examples/case86_tag_struct_renamed/v2.cpp)
+- [`v2.h`](../../examples/case86_tag_struct_renamed/v2.h)
 
 _See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._

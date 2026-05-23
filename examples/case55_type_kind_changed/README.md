@@ -44,3 +44,18 @@ python3 -m abicheck.cli compare /tmp/v1.json /tmp/v2.json
 ## References
 
 - [DWARF structure vs union tags](https://dwarfstd.org/doc/DWARF5.pdf)
+
+## Real Failure Demo
+
+**Severity: BREAKING / WRONG RESULT**
+
+```bash
+cmake -S examples -B /tmp/abicheck-examples-build -DCMAKE_BUILD_TYPE=Debug
+cmake --build /tmp/abicheck-examples-build --target case56_type_kind_changed_app case56_type_kind_changed_v2
+
+tmp=$(mktemp -d)
+cp /tmp/abicheck-examples-build/case56_type_kind_changed/app_v1 "$tmp/"
+cp /tmp/abicheck-examples-build/case56_type_kind_changed/libv2.so "$tmp/libv1.so"
+(cd "$tmp" && LD_LIBRARY_PATH=. ./app_v1)
+# sum = 10 / WRONG RESULT: type kind changed (struct -> union)
+```

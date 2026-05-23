@@ -8,7 +8,7 @@
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | API break |
 | **Detected `ChangeKind`s** | `typedef_removed`, `type_removed` |
-| **Source files** | [browse on GitHub](https://github.com/napetrov/abicheck/blob/main/examples/case109_flow_graph_policy_renames/) |
+| **Source files** | [browse source](../../examples/case109_flow_graph_policy_renames/) |
 
 **Category:** Source API / oneTBB regression suite | **Verdict:** 🔴 BREAKING
 
@@ -69,11 +69,11 @@ consumer wants to silence informational additions.
 
 ## Source files
 
-- [`CMakeLists.txt`](https://github.com/napetrov/abicheck/blob/main/examples/case109_flow_graph_policy_renames/CMakeLists.txt)
-- [`app.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case109_flow_graph_policy_renames/app.cpp)
-- [`v1.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case109_flow_graph_policy_renames/v1.cpp)
-- [`v1.h`](https://github.com/napetrov/abicheck/blob/main/examples/case109_flow_graph_policy_renames/v1.h)
-- [`v2.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case109_flow_graph_policy_renames/v2.cpp)
-- [`v2.h`](https://github.com/napetrov/abicheck/blob/main/examples/case109_flow_graph_policy_renames/v2.h)
+- [`CMakeLists.txt`](../../examples/case109_flow_graph_policy_renames/CMakeLists.txt)
+- [`app.cpp`](../../examples/case109_flow_graph_policy_renames/app.cpp)
+- [`v1.cpp`](../../examples/case109_flow_graph_policy_renames/v1.cpp)
+- [`v1.h`](../../examples/case109_flow_graph_policy_renames/v1.h)
+- [`v2.cpp`](../../examples/case109_flow_graph_policy_renames/v2.cpp)
+- [`v2.h`](../../examples/case109_flow_graph_policy_renames/v2.h)
 
 _See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._

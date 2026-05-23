@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import filecmp
 import json
+import posixpath
 import re
 import shutil
 import sys
@@ -23,7 +24,7 @@ ROOT = Path(__file__).resolve().parent.parent
 EXAMPLES_DIR = ROOT / "examples"
 DOCS_EXAMPLES_DIR = ROOT / "docs" / "examples"
 GROUND_TRUTH = EXAMPLES_DIR / "ground_truth.json"
-REPO_BLOB = "https://github.com/napetrov/abicheck/blob/main"
+REPO_ROOT_FROM_DOCS_EXAMPLES = "../.."
 
 VERDICT_META = {
     "BREAKING": {
@@ -149,16 +150,19 @@ def _read_case(name: str, meta: dict) -> Case:
 
 
 def _rewrite_links(body: str) -> str:
-    # Rewrite repo-relative links like ../abicheck/... → GitHub blob URLs.
+    # Rewrite source-tree links from examples/<case>/README.md so generated
+    # docs remain navigable in local/offline builds.
     def repl(m: re.Match) -> str:
         text, target = m.group(1), m.group(2)
         if target.startswith(("http://", "https://", "#", "mailto:")):
             return m.group(0)
-        # Bare filenames like v1.c, app.cpp → point to the case directory on GitHub.
+        # Bare filenames like v1.c, app.cpp point to the source case directory.
         if target.startswith("../"):
-            url = f"{REPO_BLOB}/{target.lstrip('./')}"
+            url = posixpath.normpath(
+                f"{REPO_ROOT_FROM_DOCS_EXAMPLES}/examples/__CASE__/{target}"
+            )
         elif "/" not in target and "." in target:
-            url = f"{REPO_BLOB}/examples/__CASE__/{target}"
+            url = f"{REPO_ROOT_FROM_DOCS_EXAMPLES}/examples/__CASE__/{target}"
         else:
             url = target
         return f"[{text}]({url})"
@@ -193,7 +197,7 @@ def _meta_table(case: Case) -> str:
         f"| **Platforms** | {platforms} |\n"
         f"| **Flags** | {flag_str} |\n"
         f"| **Detected `ChangeKind`s** | {kinds} |\n"
-        f"| **Source files** | [browse on GitHub]({REPO_BLOB}/examples/{case.name}/) |\n"
+        f"| **Source files** | [browse source]({REPO_ROOT_FROM_DOCS_EXAMPLES}/examples/{case.name}/) |\n"
     )
 
 
@@ -204,7 +208,10 @@ def _source_links(case: Case) -> str:
     )
     if not files:
         return ""
-    lines = [f"- [`{f}`]({REPO_BLOB}/examples/{case.name}/{f})" for f in files]
+    lines = [
+        f"- [`{f}`]({REPO_ROOT_FROM_DOCS_EXAMPLES}/examples/{case.name}/{f})"
+        for f in files
+    ]
     return "## Source files\n\n" + "\n".join(lines) + "\n"
 
 
@@ -258,9 +265,9 @@ def _render_index(cases: list[Case]) -> str:
         "- Look up the **mitigation pattern** for a specific change.\n"
         "- Cross-reference detected [`ChangeKind`s](../reference/change-kinds.md) with concrete reproductions.\n\n",
         "> **Ground truth.** Expected verdicts and detected change kinds live in "
-        f"[`examples/ground_truth.json`]({REPO_BLOB}/examples/ground_truth.json) and are the "
+        "[`examples/ground_truth.json`](../../examples/ground_truth.json) and are the "
         "single source of truth — these pages are generated from that file plus per-case "
-        f"`README.md` files under [`examples/`]({REPO_BLOB}/examples/).\n\n",
+        "`README.md` files under [`examples/`](../../examples/).\n\n",
         "## Verdict distribution\n\n",
         "| Verdict | Count | What it means |\n",
         "|---------|-------|---------------|\n",

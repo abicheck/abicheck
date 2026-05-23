@@ -120,3 +120,4 @@ echo "exit: $?"  # → 1
 ```
 
 **Why CRITICAL:** The consumer relies on the accidentally-exported `internal_helper` symbol. v2 hides it, so any binary that resolved the symbol at load time will now fail to link/symbolize and abort before it can handle the crash. This app shows the missing symbol and exits with failure to make the issue obvious.
+

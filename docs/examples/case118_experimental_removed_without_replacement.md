@@ -8,7 +8,7 @@
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | `experimental_removed_without_replacement`, `func_removed` |
-| **Source files** | [browse on GitHub](https://github.com/napetrov/abicheck/blob/main/examples/case118_experimental_removed_without_replacement/) |
+| **Source files** | [browse source](../../examples/case118_experimental_removed_without_replacement/) |
 
 ## What this case demonstrates
 
@@ -40,11 +40,11 @@ namespace-level finding is the human-readable framing.
 
 ## Source files
 
-- [`CMakeLists.txt`](https://github.com/napetrov/abicheck/blob/main/examples/case118_experimental_removed_without_replacement/CMakeLists.txt)
-- [`app.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case118_experimental_removed_without_replacement/app.cpp)
-- [`v1.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case118_experimental_removed_without_replacement/v1.cpp)
-- [`v1.h`](https://github.com/napetrov/abicheck/blob/main/examples/case118_experimental_removed_without_replacement/v1.h)
-- [`v2.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case118_experimental_removed_without_replacement/v2.cpp)
-- [`v2.h`](https://github.com/napetrov/abicheck/blob/main/examples/case118_experimental_removed_without_replacement/v2.h)
+- [`CMakeLists.txt`](../../examples/case118_experimental_removed_without_replacement/CMakeLists.txt)
+- [`app.cpp`](../../examples/case118_experimental_removed_without_replacement/app.cpp)
+- [`v1.cpp`](../../examples/case118_experimental_removed_without_replacement/v1.cpp)
+- [`v1.h`](../../examples/case118_experimental_removed_without_replacement/v1.h)
+- [`v2.cpp`](../../examples/case118_experimental_removed_without_replacement/v2.cpp)
+- [`v2.h`](../../examples/case118_experimental_removed_without_replacement/v2.h)
 
 _See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._

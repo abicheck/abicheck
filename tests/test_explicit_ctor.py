@@ -4,8 +4,11 @@ Synthetic snapshots — no compiler needed. Exercises the `is_explicit` flag
 captured from DW_AT_explicit and the diff logic in diff_symbols.py.
 """
 
+from xml.etree.ElementTree import Element
+
 from abicheck.checker import compare
 from abicheck.checker_policy import API_BREAK_KINDS, RISK_KINDS, ChangeKind, Verdict
+from abicheck.dumper import _CastxmlParser
 from abicheck.model import AbiSnapshot, Function, Param, Visibility
 
 
@@ -111,3 +114,20 @@ class TestExplicitCtor:
         }
         snap = snapshot_from_dict(d)
         assert snap.functions[0].is_explicit is None
+
+    def test_castxml_converter_fallback_reads_multiline_explicit_operator(self, tmp_path) -> None:
+        source = tmp_path / "v2.h"
+        source.write_text(
+            "struct Token {\n"
+            "    explicit\n"
+            "    operator int() const;\n"
+            "};\n",
+            encoding="utf-8",
+        )
+        root = Element("GCC_XML")
+        file_el = Element("File", id="_1", name=str(source))
+        root.append(file_el)
+        parser = _CastxmlParser(root, exported_dynamic=set(), exported_static=set())
+        loc_el = Element("Location", file="_1", line="2")
+
+        assert parser._source_line_has_explicit(loc_el) is True

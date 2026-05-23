@@ -11,6 +11,23 @@ v2 adds a `priority` field at the end. Because callers only use `Session*`
 This is the **correct design pattern** for extensible C APIs: opaque handles +
 accessor functions allow adding fields without breaking existing consumers.
 
+## Real Failure Demo
+
+**Severity: COMPATIBLE - NO FAILURE EXPECTED**
+
+The struct is opaque to callers, so v2 can grow the private allocation without changing caller layout.
+
+```bash
+cmake -S examples -B /tmp/abicheck-examples-build -DCMAKE_BUILD_TYPE=Debug
+cmake --build /tmp/abicheck-examples-build --target case63_type_field_added_compatible_app case63_type_field_added_compatible_v2
+
+tmp=$(mktemp -d)
+cp /tmp/abicheck-examples-build/case63_type_field_added_compatible/app_v1 "$tmp/"
+cp /tmp/abicheck-examples-build/case63_type_field_added_compatible/libv2.so "$tmp/libv1.so"
+(cd "$tmp" && LD_LIBRARY_PATH=. ./app_v1)
+# name = test / timeout = 30
+```
+
 ## Why this is compatible
 
 - **Callers never see the layout**: `Session` is forward-declared in the header.

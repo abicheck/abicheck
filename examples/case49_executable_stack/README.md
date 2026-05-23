@@ -84,3 +84,22 @@ executable stacks.
 
 - [Hardening ELF binaries — execstack](https://wiki.gentoo.org/wiki/Hardened/GNU_stack_quickstart)
 - [Red Hat: Controlling execstack](https://access.redhat.com/solutions/2936741)
+
+## Real Failure Demo
+
+**Severity: SECURITY / BAD PRACTICE**
+
+The program still runs, but the v1 artifact requests an executable process
+stack. Hardened loaders and distro policy can reject this even when symbol ABI
+looks otherwise compatible.
+
+```bash
+cmake -S examples -B /tmp/abicheck-examples-build -DCMAKE_BUILD_TYPE=Debug
+cmake --build /tmp/abicheck-examples-build --target case50_executable_stack_v1 case50_executable_stack_v2
+
+readelf -W -l /tmp/abicheck-examples-build/case50_executable_stack/libv1.so | grep GNU_STACK
+# GNU_STACK ... RWE
+
+readelf -W -l /tmp/abicheck-examples-build/case50_executable_stack/libv2.so | grep GNU_STACK
+# GNU_STACK ... RW
+```

@@ -27,6 +27,21 @@ From consumers' perspective it's a binary ABI break:
 - Heap-allocated objects from callers compiled against v1 headers
   under-allocate when run against v2 binaries.
 
+## Real Failure Demo
+
+**Severity: BREAKING / MEMORY CORRUPTION**
+
+```bash
+cmake -S examples -B /tmp/abicheck-examples-build -DCMAKE_BUILD_TYPE=Debug
+cmake --build /tmp/abicheck-examples-build --target case75_detail_base_class_changed_app case75_detail_base_class_changed_v2
+
+tmp=$(mktemp -d)
+cp /tmp/abicheck-examples-build/case75_detail_base_class_changed/app_v1 "$tmp/"
+cp /tmp/abicheck-examples-build/case75_detail_base_class_changed/libv2.so "$tmp/libv1.so"
+(cd "$tmp" && LD_LIBRARY_PATH=. ./app_v1)
+# *** stack smashing detected ***: terminated
+```
+
 ## Why abicheck catches it
 
 Existing detectors already report `type_size_changed` on

@@ -12,6 +12,21 @@ This is a **design-level bad practice**: unprefixed names in C shared libraries
 are a collision time-bomb in any non-trivial application that links multiple
 libraries.
 
+## Real Failure Demo
+
+**Severity: BREAKING / SYMBOL REMOVAL**
+
+```bash
+cmake -S examples -B /tmp/abicheck-examples-build -DCMAKE_BUILD_TYPE=Debug
+cmake --build /tmp/abicheck-examples-build --target case54_namespace_pollution_app case54_namespace_pollution_v2
+
+tmp=$(mktemp -d)
+cp /tmp/abicheck-examples-build/case54_namespace_pollution/app_v1 "$tmp/"
+cp /tmp/abicheck-examples-build/case54_namespace_pollution/libv2.so "$tmp/libv1.so"
+(cd "$tmp" && LD_LIBRARY_PATH=. ./app_v1)
+# ./app_v1: symbol lookup error: ./app_v1: undefined symbol: process
+```
+
 ## Why namespace pollution is bad practice
 
 C has no namespaces. All exported symbols from all shared libraries loaded in

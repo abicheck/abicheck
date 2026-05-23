@@ -23,6 +23,21 @@ unaffected. Consumers who linked directly against `kmeans_compute_avx512`
 that bypass the dispatcher for reproducibility) get unresolved symbols at
 load time.
 
+## Real Failure Demo
+
+**Severity: BREAKING / LOAD-TIME FAILURE**
+
+```bash
+cmake -S examples -B /tmp/abicheck-examples-build -DCMAKE_BUILD_TYPE=Debug
+cmake --build /tmp/abicheck-examples-build --target case83_cpu_dispatch_isa_dropped_app case83_cpu_dispatch_isa_dropped_v2
+
+tmp=$(mktemp -d)
+cp /tmp/abicheck-examples-build/case83_cpu_dispatch_isa_dropped/app_v1 "$tmp/"
+cp /tmp/abicheck-examples-build/case83_cpu_dispatch_isa_dropped/libv2.so "$tmp/libv1.so"
+(cd "$tmp" && LD_LIBRARY_PATH=. ./app_v1)
+# ./app_v1: symbol lookup error: undefined symbol: _ZN5mylib21kmeans_compute_avx512Ei
+```
+
 ## Why a separate ChangeKind (not just N×func_removed)
 
 If reported as 50 independent `func_removed` findings, the deployment-level

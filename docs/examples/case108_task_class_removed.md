@@ -8,7 +8,7 @@
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | `func_removed`, `type_removed` |
-| **Source files** | [browse on GitHub](https://github.com/napetrov/abicheck/blob/main/examples/case108_task_class_removed/) |
+| **Source files** | [browse source](../../examples/case108_task_class_removed/) |
 
 **Category:** Polymorphic Class Removal | **Verdict:** 🔴 BREAKING
 
@@ -25,6 +25,36 @@ This is more severe than case107 because:
 - RTTI strings (`typeinfo for mylib::task`) crossed DSO boundaries; removing
   the base silently breaks `dynamic_cast` and exception handling for any
   user exception derived from it.
+
+## Real Failure Demo
+
+**Severity: BREAKING**
+
+```bash
+cmake -S examples -B /tmp/abicheck-examples-build -DCMAKE_BUILD_TYPE=Debug
+cmake --build /tmp/abicheck-examples-build \
+  --target case95_task_class_removed_app case95_task_class_removed_v2
+
+/tmp/abicheck-examples-build/case95_task_class_removed/app_v1
+# ref_count after dec = 2 (expect 2)
+
+# Runtime replacement: the v1 binary asks for the removed v1 factory/type
+# surface and fails as soon as the missing symbol is resolved.
+tmp=$(mktemp -d)
+cp /tmp/abicheck-examples-build/case95_task_class_removed/app_v1 "$tmp/"
+cp /tmp/abicheck-examples-build/case95_task_class_removed/libv2.so "$tmp/libv1.so"
+(cd "$tmp" && LD_LIBRARY_PATH=. ./app_v1)
+# ./app_v1: symbol lookup error: ./app_v1: undefined symbol: _ZN5mylib17mylib_spawn_dummyEv
+
+# Source rebuild against the v2 header also fails because the base class and
+# factory are gone.
+tmp=$(mktemp -d)
+cp examples/case95_task_class_removed/app.cpp "$tmp/app.cpp"
+cp examples/case95_task_class_removed/v2.h "$tmp/v1.h"
+g++ -std=c++17 -I"$tmp" -c "$tmp/app.cpp" -o "$tmp/app.o"
+# error: 'task' is not a member of 'mylib'
+# error: 'mylib_spawn_dummy' is not a member of 'mylib'
+```
 
 ## Why this is a oneTBB-flavored break
 
@@ -66,11 +96,11 @@ migration is:
 
 ## Source files
 
-- [`CMakeLists.txt`](https://github.com/napetrov/abicheck/blob/main/examples/case108_task_class_removed/CMakeLists.txt)
-- [`app.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case108_task_class_removed/app.cpp)
-- [`v1.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case108_task_class_removed/v1.cpp)
-- [`v1.h`](https://github.com/napetrov/abicheck/blob/main/examples/case108_task_class_removed/v1.h)
-- [`v2.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case108_task_class_removed/v2.cpp)
-- [`v2.h`](https://github.com/napetrov/abicheck/blob/main/examples/case108_task_class_removed/v2.h)
+- [`CMakeLists.txt`](../../examples/case108_task_class_removed/CMakeLists.txt)
+- [`app.cpp`](../../examples/case108_task_class_removed/app.cpp)
+- [`v1.cpp`](../../examples/case108_task_class_removed/v1.cpp)
+- [`v1.h`](../../examples/case108_task_class_removed/v1.h)
+- [`v2.cpp`](../../examples/case108_task_class_removed/v2.cpp)
+- [`v2.h`](../../examples/case108_task_class_removed/v2.h)
 
 _See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._

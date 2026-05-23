@@ -9,6 +9,35 @@ Every consumer that referenced the class (constructed it, called its members,
 or held it by value) gets `undefined symbol` at load time, and source code
 fails to compile against the new headers.
 
+## Real Failure Demo
+
+**Severity: BREAKING**
+
+```bash
+cmake -S examples -B /tmp/abicheck-examples-build -DCMAKE_BUILD_TYPE=Debug
+cmake --build /tmp/abicheck-examples-build \
+  --target case94_task_scheduler_init_removed_app case94_task_scheduler_init_removed_v2
+
+/tmp/abicheck-examples-build/case94_task_scheduler_init_removed/app_v1
+# active = 1 (expect 1)
+# active = 0 (expect 0)
+
+# Runtime replacement: a binary linked against v1 fails when v2 is substituted
+# under the old library name.
+tmp=$(mktemp -d)
+cp /tmp/abicheck-examples-build/case94_task_scheduler_init_removed/app_v1 "$tmp/"
+cp /tmp/abicheck-examples-build/case94_task_scheduler_init_removed/libv2.so "$tmp/libv1.so"
+(cd "$tmp" && LD_LIBRARY_PATH=. ./app_v1)
+# ./app_v1: symbol lookup error: ./app_v1: undefined symbol: _ZN5mylib19task_scheduler_initD1Ev
+
+# Source rebuild against the v2 header also fails because the class is gone.
+tmp=$(mktemp -d)
+cp examples/case94_task_scheduler_init_removed/app.cpp "$tmp/app.cpp"
+cp examples/case94_task_scheduler_init_removed/v2.h "$tmp/v1.h"
+g++ -std=c++17 -I"$tmp" -c "$tmp/app.cpp" -o "$tmp/app.o"
+# error: 'task_scheduler_init' is not a member of 'mylib'
+```
+
 ## Why this is a oneTBB-flavored break
 
 This is the single largest hard ABI break in TBB's history: classic TBB

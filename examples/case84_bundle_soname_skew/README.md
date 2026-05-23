@@ -47,6 +47,25 @@ case84_bundle_soname_skew/
 The `compare-release` mode of abicheck ingests both directories and runs
 the cross-library aggregator.
 
+## Real Failure Demo
+
+**Severity: BREAKING / RELEASE BUNDLE SKEW**
+
+This fixture is a directory-level failure, not a single app swap. Rebuild the
+three shared libraries and run the cohort detector directly: two siblings bump
+to SONAME `.so.2`, while `libonedal_thread` stays on `.so.1`.
+
+```bash
+python3 - <<'PY'
+from abicheck.diff_onedal import bundle_members_from_directory, detect_bundle_soname_skew
+old = bundle_members_from_directory('examples/case84_bundle_soname_skew/v1')
+new = bundle_members_from_directory('examples/case84_bundle_soname_skew/v2')
+for finding in detect_bundle_soname_skew(old, new, cohort_prefix='libonedal_'):
+    print(finding.kind.value, finding.severity.value)
+PY
+# bundle_soname_skew BREAKING
+```
+
 ## Why this is its own ChangeKind
 
 Existing `soname_changed` and `soname_bump_recommended` are per-library

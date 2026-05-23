@@ -31,6 +31,21 @@ instance now dispatches through the slot occupied at runtime by
 reshuffle never touches any public *name*; only the slot indices
 move. That makes the break invisible to symbol-level tools.
 
+## Real Failure Demo
+
+**Severity: BREAKING / WRONG RESULT**
+
+```bash
+cmake -S examples -B /tmp/abicheck-examples-build -DCMAKE_BUILD_TYPE=Debug
+cmake --build /tmp/abicheck-examples-build --target case77_detail_pimpl_vtable_changed_app case77_detail_pimpl_vtable_changed_v2
+
+tmp=$(mktemp -d)
+cp /tmp/abicheck-examples-build/case77_detail_pimpl_vtable_changed/app_v1 "$tmp/"
+cp /tmp/abicheck-examples-build/case77_detail_pimpl_vtable_changed/libv2.so "$tmp/libv1.so"
+(cd "$tmp" && LD_LIBRARY_PATH=. ./app_v1)
+# status=50 (expect 1)
+```
+
 ## Why abicheck catches it
 
 On Linux the vtable symbol (`_ZTVN5mylib6detail15algorithm_ifaceE`)

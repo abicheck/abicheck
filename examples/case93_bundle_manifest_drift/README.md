@@ -24,6 +24,17 @@ In real oneDAL these are mangled C++ symbols for
 documentation is a silent contract violation: downstream code that
 instantiated the dropped triple will fail to link.
 
+## Real Failure Demo
+
+**Severity: BREAKING / MANIFEST PROMISE REMOVED**
+
+```bash
+cmake -S examples -B /tmp/abicheck-examples-build -DCMAKE_BUILD_TYPE=Debug
+cmake --build /tmp/abicheck-examples-build --target case91_bundle_manifest_drift_old_libcore case91_bundle_manifest_drift_new_libcore
+PYTHONPATH=. python3 -m abicheck.cli compare-release   /tmp/abicheck-examples-build/case91_bundle_manifest_drift/old   /tmp/abicheck-examples-build/case91_bundle_manifest_drift/new   --manifest examples/case91_bundle_manifest_drift/manifest.yaml   --format markdown
+# bundle_manifest_instantiation_removed: train_double_sparse is promised but no longer exported.
+```
+
 ## Why this needs a manifest
 Per-library `func_removed` detection already flags the missing symbol —
 but it can't tell whether the symbol was a *promised* part of the public

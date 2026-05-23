@@ -70,3 +70,18 @@ CacheBlock* block_alloc(void) {
 
 - [C11 alignas / _Alignas](https://en.cppreference.com/w/c/language/_Alignas)
 - [GCC __attribute__((aligned))](https://gcc.gnu.org/onlinedocs/gcc/Common-Type-Attributes.html)
+
+## Real Failure Demo
+
+**Severity: BAD PRACTICE / ABI BREAK**
+
+```bash
+cmake -S examples -B /tmp/abicheck-examples-build -DCMAKE_BUILD_TYPE=Debug
+cmake --build /tmp/abicheck-examples-build --target case43_type_alignment_changed_app case43_type_alignment_changed_v2
+
+tmp=$(mktemp -d)
+cp /tmp/abicheck-examples-build/case43_type_alignment_changed/app_v1 "$tmp/"
+cp /tmp/abicheck-examples-build/case43_type_alignment_changed/libv2.so "$tmp/libv1.so"
+(cd "$tmp" && LD_LIBRARY_PATH=. ./app_v1)
+# block_process = 0 (expected 4) / WRONG RESULT: alignment change caused array stride/layout mismatch
+```

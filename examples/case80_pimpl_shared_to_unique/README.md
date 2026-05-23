@@ -32,6 +32,23 @@ so the containing class even shrinks — the failure isn't "size grew", it is:
    move-only. Consumer code that copied a `descriptor` compiles under v1,
    refuses under v2.
 
+## Real Failure Demo
+
+**Severity: BREAKING / ABI SHAPE CHANGE**
+
+This smoke app still works because it does not copy or share ownership. The real break is that the public object field changes from shared ownership ABI to unique ownership ABI, changing size, copyability, and inline member code expectations.
+
+```bash
+cmake -S examples -B /tmp/abicheck-examples-build -DCMAKE_BUILD_TYPE=Debug
+cmake --build /tmp/abicheck-examples-build --target case80_pimpl_shared_to_unique_app case80_pimpl_shared_to_unique_v2
+
+tmp=$(mktemp -d)
+cp /tmp/abicheck-examples-build/case80_pimpl_shared_to_unique/app_v1 "$tmp/"
+cp /tmp/abicheck-examples-build/case80_pimpl_shared_to_unique/libv2.so "$tmp/libv1.so"
+(cd "$tmp" && LD_LIBRARY_PATH=. ./app_v1)
+# class_count = 7 (expect 7)
+```
+
 ## Why abicheck catches it
 
 The existing `type_field_type_changed` detector fires on `descriptor::impl_`

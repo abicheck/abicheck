@@ -10,7 +10,7 @@ Use this catalog to:
 - Look up the **mitigation pattern** for a specific change.
 - Cross-reference detected [`ChangeKind`s](../reference/change-kinds.md) with concrete reproductions.
 
-> **Ground truth.** Expected verdicts and detected change kinds live in [`examples/ground_truth.json`](https://github.com/napetrov/abicheck/blob/main/examples/ground_truth.json) and are the single source of truth — these pages are generated from that file plus per-case `README.md` files under [`examples/`](https://github.com/napetrov/abicheck/blob/main/examples/).
+> **Ground truth.** Expected verdicts and detected change kinds live in [`examples/ground_truth.json`](../../examples/ground_truth.json) and are the single source of truth — these pages are generated from that file plus per-case `README.md` files under [`examples/`](../../examples/).
 
 ## Verdict distribution
 

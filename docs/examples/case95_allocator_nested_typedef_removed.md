@@ -8,7 +8,7 @@
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | API break |
 | **Detected `ChangeKind`s** | `typedef_removed` |
-| **Source files** | [browse on GitHub](https://github.com/napetrov/abicheck/blob/main/examples/case95_allocator_nested_typedef_removed/) |
+| **Source files** | [browse source](../../examples/case95_allocator_nested_typedef_removed/) |
 
 **Category:** Source API contract | **Verdict:** 🔴 BREAKING
 
@@ -93,11 +93,11 @@ g++ -std=c++17 -I. app.cpp -L. -lmylib -o app
 
 ## Source files
 
-- [`CMakeLists.txt`](https://github.com/napetrov/abicheck/blob/main/examples/case95_allocator_nested_typedef_removed/CMakeLists.txt)
-- [`app.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case95_allocator_nested_typedef_removed/app.cpp)
-- [`v1.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case95_allocator_nested_typedef_removed/v1.cpp)
-- [`v1.h`](https://github.com/napetrov/abicheck/blob/main/examples/case95_allocator_nested_typedef_removed/v1.h)
-- [`v2.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case95_allocator_nested_typedef_removed/v2.cpp)
-- [`v2.h`](https://github.com/napetrov/abicheck/blob/main/examples/case95_allocator_nested_typedef_removed/v2.h)
+- [`CMakeLists.txt`](../../examples/case95_allocator_nested_typedef_removed/CMakeLists.txt)
+- [`app.cpp`](../../examples/case95_allocator_nested_typedef_removed/app.cpp)
+- [`v1.cpp`](../../examples/case95_allocator_nested_typedef_removed/v1.cpp)
+- [`v1.h`](../../examples/case95_allocator_nested_typedef_removed/v1.h)
+- [`v2.cpp`](../../examples/case95_allocator_nested_typedef_removed/v2.cpp)
+- [`v2.h`](../../examples/case95_allocator_nested_typedef_removed/v2.h)
 
 _See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._

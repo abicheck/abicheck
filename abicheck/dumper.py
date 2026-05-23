@@ -571,6 +571,40 @@ class _CastxmlParser:
     def _resolve(self, id_: str) -> Element | None:
         return self._id_map.get(id_)
 
+    def _source_line_has_explicit(
+        self,
+        loc_el: Element | None,
+        declaration_el: Element | None = None,
+    ) -> bool | None:
+        """Fallback for castxml Converter nodes that omit explicit="1"."""
+        if loc_el is not None:
+            file_id = loc_el.get("file", "")
+            line_raw = loc_el.get("line", "")
+        elif declaration_el is not None:
+            file_id = declaration_el.get("file", "")
+            line_raw = declaration_el.get("line", "")
+        else:
+            return None
+        file_el = self._id_map.get(file_id)
+        if file_el is None:
+            return None
+        fname = file_el.get("name", "")
+        if not fname or not line_raw:
+            return None
+        try:
+            line_no = int(line_raw)
+            lines = Path(fname).read_text(encoding="utf-8").splitlines()
+        except (OSError, UnicodeDecodeError, ValueError, IndexError):
+            return None
+        start = max(0, line_no - 1)
+        window_parts: list[str] = []
+        for line in lines[start : min(len(lines), start + 6)]:
+            window_parts.append(line.strip())
+            if ";" in line or "{" in line:
+                break
+        window = " ".join(window_parts)
+        return bool(re.search(r"\bexplicit\b.*\boperator\b", window))
+
     def _type_name(self, id_: str, depth: int = 0) -> str:
         if depth > 10:
             return "?"
@@ -764,8 +798,14 @@ class _CastxmlParser:
             # attribute is conceptually N/A and we leave is_explicit=None so
             # the diff does not produce spurious findings.
             is_explicit: bool | None
-            if el.tag in ("Constructor", "Method", "Converter"):
+            if el.tag in ("Constructor", "Method"):
                 is_explicit = el.get("explicit") == "1"
+            elif el.tag == "Converter":
+                is_explicit = (
+                    el.get("explicit") == "1"
+                    if el.get("explicit") is not None
+                    else self._source_line_has_explicit(loc_el, el)
+                )
             else:
                 is_explicit = None
 

@@ -8,7 +8,7 @@
 | **Platforms** | Linux |
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | `enum_member_value_changed` |
-| **Source files** | [browse on GitHub](https://github.com/napetrov/abicheck/blob/main/examples/case08_enum_value_change/) |
+| **Source files** | [browse source](../../examples/case08_enum_value_change/) |
 
 **Category:** Type Layout | **Verdict:** 🟡 ABI CHANGE (exit 4)
 
@@ -81,11 +81,11 @@ statements using the old numeric constants silently route to the wrong branch.
 
 ## Source files
 
-- [`CMakeLists.txt`](https://github.com/napetrov/abicheck/blob/main/examples/case08_enum_value_change/CMakeLists.txt)
-- [`app.c`](https://github.com/napetrov/abicheck/blob/main/examples/case08_enum_value_change/app.c)
-- [`v1.c`](https://github.com/napetrov/abicheck/blob/main/examples/case08_enum_value_change/v1.c)
-- [`v1.h`](https://github.com/napetrov/abicheck/blob/main/examples/case08_enum_value_change/v1.h)
-- [`v2.c`](https://github.com/napetrov/abicheck/blob/main/examples/case08_enum_value_change/v2.c)
-- [`v2.h`](https://github.com/napetrov/abicheck/blob/main/examples/case08_enum_value_change/v2.h)
+- [`CMakeLists.txt`](../../examples/case08_enum_value_change/CMakeLists.txt)
+- [`app.c`](../../examples/case08_enum_value_change/app.c)
+- [`v1.c`](../../examples/case08_enum_value_change/v1.c)
+- [`v1.h`](../../examples/case08_enum_value_change/v1.h)
+- [`v2.c`](../../examples/case08_enum_value_change/v2.c)
+- [`v2.h`](../../examples/case08_enum_value_change/v2.h)
 
 _See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._
