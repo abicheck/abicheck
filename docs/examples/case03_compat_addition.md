@@ -8,7 +8,7 @@
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | — |
 | **Detected `ChangeKind`s** | `func_added` |
-| **Source files** | [browse on GitHub](https://github.com/napetrov/abicheck/blob/main/examples/case03_compat_addition/) |
+| **Source files** | `examples/case03_compat_addition/` |
 
 **Category:** Symbol API | **Verdict:** 🟢 COMPATIBLE (exit 4)
 
@@ -77,11 +77,11 @@ releases without bumping the SONAME, relying on this compatible-addition guarant
 
 ## Source files
 
-- [`CMakeLists.txt`](https://github.com/napetrov/abicheck/blob/main/examples/case03_compat_addition/CMakeLists.txt)
-- [`app.c`](https://github.com/napetrov/abicheck/blob/main/examples/case03_compat_addition/app.c)
-- [`v1.c`](https://github.com/napetrov/abicheck/blob/main/examples/case03_compat_addition/v1.c)
-- [`v1.h`](https://github.com/napetrov/abicheck/blob/main/examples/case03_compat_addition/v1.h)
-- [`v2.c`](https://github.com/napetrov/abicheck/blob/main/examples/case03_compat_addition/v2.c)
-- [`v2.h`](https://github.com/napetrov/abicheck/blob/main/examples/case03_compat_addition/v2.h)
+- `CMakeLists.txt`
+- `app.c`
+- `v1.c`
+- `v1.h`
+- `v2.c`
+- `v2.h`
 
 _See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Addition (Compatible)](by-category/addition.md)._

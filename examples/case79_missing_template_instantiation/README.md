@@ -28,6 +28,21 @@ This is the failure mode for oneDAL's "ship `float` instantiation only" build
 trim: the public combinatorics promised by `cpp/oneapi/dal/algo/*/common.hpp`
 must match the explicit instantiations in `*_instantiation.cpp`.
 
+## Real Failure Demo
+
+**Severity: BREAKING / LOAD-TIME FAILURE**
+
+```bash
+cmake -S examples -B /tmp/abicheck-examples-build -DCMAKE_BUILD_TYPE=Debug
+cmake --build /tmp/abicheck-examples-build --target case79_missing_template_instantiation_app case79_missing_template_instantiation_v2
+
+tmp=$(mktemp -d)
+cp /tmp/abicheck-examples-build/case79_missing_template_instantiation/app_v1 "$tmp/"
+cp /tmp/abicheck-examples-build/case79_missing_template_instantiation/libv2.so "$tmp/libv1.so"
+(cd "$tmp" && LD_LIBRARY_PATH=. ./app_v1)
+# ./app_v1: symbol lookup error: undefined symbol: _ZN5mylib10descriptorIdE13set_thresholdEd
+```
+
 ## Why abicheck catches it
 
 A new `INSTANTIATION_MISSING_FROM_BINARY` ChangeKind is emitted when a

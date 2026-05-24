@@ -15,6 +15,17 @@ set is unchanged. The set of *providers* changed:
 | `shared_util` | libcore.so  | libutil.so  |
 | `util_double_add` | libutil.so | libutil.so |
 
+## Real Failure Demo
+
+**Severity: COMPATIBLE_WITH_RISK / PROVIDER MIGRATION**
+
+```bash
+cmake -S examples -B /tmp/abicheck-examples-build -DCMAKE_BUILD_TYPE=Debug
+cmake --build /tmp/abicheck-examples-build --target case92_bundle_provider_changed_old_libutil case92_bundle_provider_changed_new_libutil
+PYTHONPATH=. python3 -m abicheck.cli compare-release   /tmp/abicheck-examples-build/case92_bundle_provider_changed/old   /tmp/abicheck-examples-build/case92_bundle_provider_changed/new   --format markdown
+# bundle_provider_changed: shared_util moved from libcore.so to libutil.so.
+```
+
 ## Why this is risk, not a hard break
 - Downstream binaries linked with `-lcore -lutil` get both; the loader
   resolves `shared_util` from whichever DSO is searched first (the new

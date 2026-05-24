@@ -8,7 +8,7 @@
 | **Platforms** | Linux, macOS |
 | **Flags** | ABI break |
 | **Detected `ChangeKind`s** | `inline_body_references_renamed_member` |
-| **Source files** | [browse on GitHub](https://github.com/napetrov/abicheck/blob/main/examples/case89_inline_accessor_renamed_pimpl_member/) |
+| **Source files** | `examples/case89_inline_accessor_renamed_pimpl_member/` |
 
 **Category:** Pimpl ABI | **Verdict:** BREAKING
 
@@ -42,6 +42,23 @@ is inline and has no exported symbol. There is no public-type layout change:
 `descriptor` still holds one pimpl pointer. The break lives entirely in the
 gap between *what the consumer's inline body assumes* and *what the new
 detail layout actually is*.
+
+## Real Failure Demo
+
+**Severity: BREAKING / LATENT INLINE ABI DRIFT**
+
+The tiny app happens to read the same value, but its inline accessor is compiled against the old `impl_->class_count_` member. A real v2 layout that reuses that slot for another field turns the inline read into stale or wrong data.
+
+```bash
+cmake -S examples -B /tmp/abicheck-examples-build -DCMAKE_BUILD_TYPE=Debug
+cmake --build /tmp/abicheck-examples-build --target case87_inline_accessor_renamed_pimpl_member_app case87_inline_accessor_renamed_pimpl_member_v2
+
+tmp=$(mktemp -d)
+cp /tmp/abicheck-examples-build/case87_inline_accessor_renamed_pimpl_member/app_v1 "$tmp/"
+cp /tmp/abicheck-examples-build/case87_inline_accessor_renamed_pimpl_member/libv2.so "$tmp/libv1.so"
+(cd "$tmp" && LD_LIBRARY_PATH=. ./app_v1)
+# class_count = 2
+```
 
 ## Why distinct from case35 + case47
 
@@ -78,11 +95,11 @@ consumer binary already compiled against the previous header.
 
 ## Source files
 
-- [`CMakeLists.txt`](https://github.com/napetrov/abicheck/blob/main/examples/case89_inline_accessor_renamed_pimpl_member/CMakeLists.txt)
-- [`app.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case89_inline_accessor_renamed_pimpl_member/app.cpp)
-- [`v1.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case89_inline_accessor_renamed_pimpl_member/v1.cpp)
-- [`v1.h`](https://github.com/napetrov/abicheck/blob/main/examples/case89_inline_accessor_renamed_pimpl_member/v1.h)
-- [`v2.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case89_inline_accessor_renamed_pimpl_member/v2.cpp)
-- [`v2.h`](https://github.com/napetrov/abicheck/blob/main/examples/case89_inline_accessor_renamed_pimpl_member/v2.h)
+- `CMakeLists.txt`
+- `app.cpp`
+- `v1.cpp`
+- `v1.h`
+- `v2.cpp`
+- `v2.h`
 
 _See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._

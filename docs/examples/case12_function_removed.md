@@ -8,7 +8,7 @@
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | `func_removed` |
-| **Source files** | [browse on GitHub](https://github.com/napetrov/abicheck/blob/main/examples/case12_function_removed/) |
+| **Source files** | `examples/case12_function_removed/` |
 
 **Category:** Symbol API | **Abicheck verdict:** BREAKING | **Verdict:** 🔴 BREAKING
 
@@ -86,11 +86,11 @@ The function is removed from the .so — the dynamic linker emits an undefined s
 
 ## Source files
 
-- [`CMakeLists.txt`](https://github.com/napetrov/abicheck/blob/main/examples/case12_function_removed/CMakeLists.txt)
-- [`app.c`](https://github.com/napetrov/abicheck/blob/main/examples/case12_function_removed/app.c)
-- [`v1.c`](https://github.com/napetrov/abicheck/blob/main/examples/case12_function_removed/v1.c)
-- [`v1.h`](https://github.com/napetrov/abicheck/blob/main/examples/case12_function_removed/v1.h)
-- [`v2.c`](https://github.com/napetrov/abicheck/blob/main/examples/case12_function_removed/v2.c)
-- [`v2.h`](https://github.com/napetrov/abicheck/blob/main/examples/case12_function_removed/v2.h)
+- `CMakeLists.txt`
+- `app.c`
+- `v1.c`
+- `v1.h`
+- `v2.c`
+- `v2.h`
 
 _See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._

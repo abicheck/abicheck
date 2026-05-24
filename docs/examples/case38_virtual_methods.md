@@ -8,7 +8,7 @@
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | — |
-| **Source files** | [browse on GitHub](https://github.com/napetrov/abicheck/blob/main/examples/case38_virtual_methods/) |
+| **Source files** | `examples/case38_virtual_methods/` |
 
 **Category:** C++ Virtual / Deleted | **Verdict:** BREAKING
 
@@ -121,12 +121,12 @@ This app may still run after swap because it does not exercise all affected ABI 
 
 ## Source files
 
-- [`CMakeLists.txt`](https://github.com/napetrov/abicheck/blob/main/examples/case38_virtual_methods/CMakeLists.txt)
-- [`app.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case38_virtual_methods/app.cpp)
-- [`copy_ctor_demo.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case38_virtual_methods/copy_ctor_demo.cpp)
-- [`v1.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case38_virtual_methods/v1.cpp)
-- [`v1.hpp`](https://github.com/napetrov/abicheck/blob/main/examples/case38_virtual_methods/v1.hpp)
-- [`v2.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case38_virtual_methods/v2.cpp)
-- [`v2.hpp`](https://github.com/napetrov/abicheck/blob/main/examples/case38_virtual_methods/v2.hpp)
+- `CMakeLists.txt`
+- `app.cpp`
+- `copy_ctor_demo.cpp`
+- `v1.cpp`
+- `v1.hpp`
+- `v2.cpp`
+- `v2.hpp`
 
 _See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._

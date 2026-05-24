@@ -553,6 +553,7 @@ class _CastxmlParser:
         self._exported_static = exported_static
         self._id_map: dict[str, Element] = {}
         self._virtual_methods_by_class: dict[str, list[Element]] = {}
+        self._source_lines_cache: dict[str, list[str]] = {}
         self._build_id_map()
 
     def _build_id_map(self) -> None:
@@ -570,6 +571,50 @@ class _CastxmlParser:
 
     def _resolve(self, id_: str) -> Element | None:
         return self._id_map.get(id_)
+
+    def _source_line_has_explicit(
+        self,
+        loc_el: Element | None,
+        declaration_el: Element | None = None,
+    ) -> bool | None:
+        """Fallback for castxml Converter nodes that omit explicit="1"."""
+        if loc_el is not None:
+            file_id = loc_el.get("file", "")
+            line_raw = loc_el.get("line", "")
+        elif declaration_el is not None:
+            file_id = declaration_el.get("file", "")
+            line_raw = declaration_el.get("line", "")
+        else:
+            return None
+        file_el = self._id_map.get(file_id)
+        if file_el is None:
+            return None
+        fname = file_el.get("name", "")
+        if not fname or not line_raw:
+            return None
+        try:
+            line_no = int(line_raw)
+            lines = self._source_lines_cache.get(fname)
+            if lines is None:
+                lines = Path(fname).read_text(encoding="utf-8").splitlines()
+                self._source_lines_cache[fname] = lines
+        except (OSError, UnicodeDecodeError, ValueError, IndexError):
+            return None
+        # CastXML can point a split conversion operator at the ``operator``
+        # line, while the ``explicit`` keyword is on the preceding line.
+        start = max(0, line_no - 4)
+        window_parts: list[str] = []
+        for line in lines[start : min(len(lines), line_no + 5)]:
+            window_parts.append(line.strip())
+            if line_no - 1 <= start + len(window_parts) - 1 and (";" in line or "{" in line):
+                break
+        window = " ".join(window_parts)
+        operator_match = re.search(r"\boperator\b", window)
+        if operator_match is None:
+            return False
+        prefix = window[:operator_match.start()]
+        declaration_start = max(prefix.rfind(";"), prefix.rfind("{"), prefix.rfind("}"))
+        return bool(re.search(r"\bexplicit\b", prefix[declaration_start + 1 :]))
 
     def _type_name(self, id_: str, depth: int = 0) -> str:
         if depth > 10:
@@ -764,8 +809,14 @@ class _CastxmlParser:
             # attribute is conceptually N/A and we leave is_explicit=None so
             # the diff does not produce spurious findings.
             is_explicit: bool | None
-            if el.tag in ("Constructor", "Method", "Converter"):
+            if el.tag in ("Constructor", "Method"):
                 is_explicit = el.get("explicit") == "1"
+            elif el.tag == "Converter":
+                is_explicit = (
+                    el.get("explicit") == "1"
+                    if el.get("explicit") is not None
+                    else self._source_line_has_explicit(loc_el, el)
+                )
             else:
                 is_explicit = None
 

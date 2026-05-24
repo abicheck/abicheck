@@ -8,7 +8,7 @@
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | — |
 | **Detected `ChangeKind`s** | — |
-| **Source files** | [browse on GitHub](https://github.com/napetrov/abicheck/blob/main/examples/case04_no_change/) |
+| **Source files** | `examples/case04_no_change/` |
 
 **Category:** Symbol API | **Verdict:** ✅ NO_CHANGE (exit 0)
 
@@ -73,11 +73,11 @@ regressions: any non-zero exit from abidiff triggers a review gate.
 
 ## Source files
 
-- [`CMakeLists.txt`](https://github.com/napetrov/abicheck/blob/main/examples/case04_no_change/CMakeLists.txt)
-- [`app.c`](https://github.com/napetrov/abicheck/blob/main/examples/case04_no_change/app.c)
-- [`v1.c`](https://github.com/napetrov/abicheck/blob/main/examples/case04_no_change/v1.c)
-- [`v1.h`](https://github.com/napetrov/abicheck/blob/main/examples/case04_no_change/v1.h)
-- [`v2.c`](https://github.com/napetrov/abicheck/blob/main/examples/case04_no_change/v2.c)
-- [`v2.h`](https://github.com/napetrov/abicheck/blob/main/examples/case04_no_change/v2.h)
+- `CMakeLists.txt`
+- `app.c`
+- `v1.c`
+- `v1.h`
+- `v2.c`
+- `v2.h`
 
 _See also: [Examples overview](index.md) · [All NO_CHANGE cases](by-verdict/no-change.md) · [Category: No Change](by-category/no_change.md)._

@@ -8,7 +8,7 @@
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | — |
 | **Detected `ChangeKind`s** | `cpu_dispatch_isa_dropped` |
-| **Source files** | [browse on GitHub](https://github.com/napetrov/abicheck/blob/main/examples/case83_cpu_dispatch_isa_dropped/) |
+| **Source files** | `examples/case83_cpu_dispatch_isa_dropped/` |
 
 **Category:** Dispatch ABI | **Verdict:** COMPATIBLE_WITH_RISK
 
@@ -32,6 +32,21 @@ unaffected. Consumers who linked directly against `kmeans_compute_avx512`
 (common in test scaffolding, micro-benchmarks, or external integrations
 that bypass the dispatcher for reproducibility) get unresolved symbols at
 load time.
+
+## Real Failure Demo
+
+**Severity: BREAKING / LOAD-TIME FAILURE**
+
+```bash
+cmake -S examples -B /tmp/abicheck-examples-build -DCMAKE_BUILD_TYPE=Debug
+cmake --build /tmp/abicheck-examples-build --target case83_cpu_dispatch_isa_dropped_app case83_cpu_dispatch_isa_dropped_v2
+
+tmp=$(mktemp -d)
+cp /tmp/abicheck-examples-build/case83_cpu_dispatch_isa_dropped/app_v1 "$tmp/"
+cp /tmp/abicheck-examples-build/case83_cpu_dispatch_isa_dropped/libv2.so "$tmp/libv1.so"
+(cd "$tmp" && LD_LIBRARY_PATH=. ./app_v1)
+# ./app_v1: symbol lookup error: undefined symbol: _ZN5mylib21kmeans_compute_avx512Ei
+```
 
 ## Why a separate ChangeKind (not just N×func_removed)
 
@@ -66,11 +81,11 @@ dispatch tables. ISA-specialized symbols have suffixes like
 
 ## Source files
 
-- [`CMakeLists.txt`](https://github.com/napetrov/abicheck/blob/main/examples/case83_cpu_dispatch_isa_dropped/CMakeLists.txt)
-- [`app.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case83_cpu_dispatch_isa_dropped/app.cpp)
-- [`v1.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case83_cpu_dispatch_isa_dropped/v1.cpp)
-- [`v1.h`](https://github.com/napetrov/abicheck/blob/main/examples/case83_cpu_dispatch_isa_dropped/v1.h)
-- [`v2.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case83_cpu_dispatch_isa_dropped/v2.cpp)
-- [`v2.h`](https://github.com/napetrov/abicheck/blob/main/examples/case83_cpu_dispatch_isa_dropped/v2.h)
+- `CMakeLists.txt`
+- `app.cpp`
+- `v1.cpp`
+- `v1.h`
+- `v2.cpp`
+- `v2.h`
 
 _See also: [Examples overview](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md)._

@@ -8,7 +8,7 @@
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | Bad practice |
 | **Detected `ChangeKind`s** | `func_added` |
-| **Source files** | [browse on GitHub](https://github.com/napetrov/abicheck/blob/main/examples/case111_enumerable_thread_specific_lambda_ambiguity/) |
+| **Source files** | `examples/case111_enumerable_thread_specific_lambda_ambiguity/` |
 
 **Category:** Subtle source break / oneTBB regression suite | **Verdict:** 🟢 COMPATIBLE (known gap — see below)
 
@@ -84,11 +84,11 @@ resolvability.
 
 ## Source files
 
-- [`CMakeLists.txt`](https://github.com/napetrov/abicheck/blob/main/examples/case111_enumerable_thread_specific_lambda_ambiguity/CMakeLists.txt)
-- [`app.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case111_enumerable_thread_specific_lambda_ambiguity/app.cpp)
-- [`v1.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case111_enumerable_thread_specific_lambda_ambiguity/v1.cpp)
-- [`v1.h`](https://github.com/napetrov/abicheck/blob/main/examples/case111_enumerable_thread_specific_lambda_ambiguity/v1.h)
-- [`v2.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case111_enumerable_thread_specific_lambda_ambiguity/v2.cpp)
-- [`v2.h`](https://github.com/napetrov/abicheck/blob/main/examples/case111_enumerable_thread_specific_lambda_ambiguity/v2.h)
+- `CMakeLists.txt`
+- `app.cpp`
+- `v1.cpp`
+- `v1.h`
+- `v2.cpp`
+- `v2.h`
 
 _See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Addition (Compatible)](by-category/addition.md)._

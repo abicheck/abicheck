@@ -8,7 +8,7 @@
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | `func_cv_changed` |
-| **Source files** | [browse on GitHub](https://github.com/napetrov/abicheck/blob/main/examples/case22_method_const_changed/) |
+| **Source files** | `examples/case22_method_const_changed/` |
 
 **Verdict:** 🔴 BREAKING
 **abicheck verdict: BREAKING**
@@ -93,7 +93,7 @@ const qualifier on method changes mangled name — symbol lookup error
 
 ## Source files
 
-- [`CMakeLists.txt`](https://github.com/napetrov/abicheck/blob/main/examples/case22_method_const_changed/CMakeLists.txt)
-- [`app.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case22_method_const_changed/app.cpp)
+- `CMakeLists.txt`
+- `app.cpp`
 
 _See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._

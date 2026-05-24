@@ -8,7 +8,7 @@
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | ABI break |
 | **Detected `ChangeKind`s** | — |
-| **Source files** | [browse on GitHub](https://github.com/napetrov/abicheck/blob/main/examples/case26_union_field_added/) |
+| **Source files** | `examples/case26_union_field_added/` |
 
 **Verdict:** 🔴 BREAKING
 **abicheck verdict: BREAKING** (TYPE_SIZE_CHANGED: union grows 4→8 bytes)
@@ -100,7 +100,7 @@ v2 now writes the newly added double field so old-layout callers observe incompa
 
 ## Source files
 
-- [`CMakeLists.txt`](https://github.com/napetrov/abicheck/blob/main/examples/case26_union_field_added/CMakeLists.txt)
-- [`app.c`](https://github.com/napetrov/abicheck/blob/main/examples/case26_union_field_added/app.c)
+- `CMakeLists.txt`
+- `app.c`
 
 _See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._

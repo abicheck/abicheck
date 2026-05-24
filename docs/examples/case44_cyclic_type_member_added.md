@@ -8,7 +8,7 @@
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | — |
-| **Source files** | [browse on GitHub](https://github.com/napetrov/abicheck/blob/main/examples/case44_cyclic_type_member_added/) |
+| **Source files** | `examples/case44_cyclic_type_member_added/` |
 
 **Category:** Struct Layout | **Verdict:** 🔴 BREAKING
 
@@ -69,11 +69,11 @@ Avoid by-value passing of structs in public API:
 
 ## Source files
 
-- [`CMakeLists.txt`](https://github.com/napetrov/abicheck/blob/main/examples/case44_cyclic_type_member_added/CMakeLists.txt)
-- [`app.c`](https://github.com/napetrov/abicheck/blob/main/examples/case44_cyclic_type_member_added/app.c)
-- [`v1.c`](https://github.com/napetrov/abicheck/blob/main/examples/case44_cyclic_type_member_added/v1.c)
-- [`v1.h`](https://github.com/napetrov/abicheck/blob/main/examples/case44_cyclic_type_member_added/v1.h)
-- [`v2.c`](https://github.com/napetrov/abicheck/blob/main/examples/case44_cyclic_type_member_added/v2.c)
-- [`v2.h`](https://github.com/napetrov/abicheck/blob/main/examples/case44_cyclic_type_member_added/v2.h)
+- `CMakeLists.txt`
+- `app.c`
+- `v1.c`
+- `v1.h`
+- `v2.c`
+- `v2.h`
 
 _See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._

@@ -8,7 +8,7 @@
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | `type_base_changed`, `type_vtable_changed`, `func_return_changed` |
-| **Source files** | [browse on GitHub](https://github.com/napetrov/abicheck/blob/main/examples/case72_covariant_return_changed/) |
+| **Source files** | `examples/case72_covariant_return_changed/` |
 
 **Category:** VTable / Inheritance | **Verdict:** BREAKING
 
@@ -130,11 +130,11 @@ hierarchies changed because the classof() chain encodes the exact hierarchy.
 
 ## Source files
 
-- [`CMakeLists.txt`](https://github.com/napetrov/abicheck/blob/main/examples/case72_covariant_return_changed/CMakeLists.txt)
-- [`app.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case72_covariant_return_changed/app.cpp)
-- [`v1.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case72_covariant_return_changed/v1.cpp)
-- [`v1.h`](https://github.com/napetrov/abicheck/blob/main/examples/case72_covariant_return_changed/v1.h)
-- [`v2.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case72_covariant_return_changed/v2.cpp)
-- [`v2.h`](https://github.com/napetrov/abicheck/blob/main/examples/case72_covariant_return_changed/v2.h)
+- `CMakeLists.txt`
+- `app.cpp`
+- `v1.cpp`
+- `v1.h`
+- `v2.cpp`
+- `v2.h`
 
 _See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._

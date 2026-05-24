@@ -12,14 +12,14 @@ These changes preserve binary compatibility. Existing consumers continue to work
 
 | Change | Why Safe | Example |
 |--------|----------|---------|
-| Add new exported function | Existing binaries never reference it; linker ignores unknown symbols | [case03](https://github.com/napetrov/abicheck/tree/main/examples/case03_compat_addition) |
-| Append enum member (end, no value shift) | Compiled binaries use integer values; existing values unchanged | [case25](https://github.com/napetrov/abicheck/tree/main/examples/case25_enum_member_added) |
-| Add union field without growing size | Union size = max(fields); fits within existing allocation | [case26b](https://github.com/napetrov/abicheck/tree/main/examples/case26b_union_field_added_compatible) |
-| Weaken symbol binding (GLOBAL to WEAK) | Symbol still resolves; interposition semantics relax | [case27](https://github.com/napetrov/abicheck/tree/main/examples/case27_symbol_binding_weakened) |
-| Add IFUNC dispatch | Transparent to callers; resolver picks implementation at load time | [case29](https://github.com/napetrov/abicheck/tree/main/examples/case29_ifunc_transition) |
-| Outline an inline function (add export) | New symbol appears; callers with inlined copy still work | [case47](https://github.com/napetrov/abicheck/tree/main/examples/case47_inline_to_outlined) |
-| Add new global variable | No existing code references it | [case61](https://github.com/napetrov/abicheck/tree/main/examples/case61_var_added) |
-| Add field to opaque struct | Callers access through pointers only; layout is hidden | [case62](https://github.com/napetrov/abicheck/tree/main/examples/case62_type_field_added_compatible) |
+| Add new exported function | Existing binaries never reference it; linker ignores unknown symbols | [case03](../examples/case03_compat_addition.md) |
+| Append enum member (end, no value shift) | Compiled binaries use integer values; existing values unchanged | [case25](../examples/case25_enum_member_added.md) |
+| Add union field without growing size | Union size = max(fields); fits within existing allocation | [case26b](../examples/case26b_union_field_added_compatible.md) |
+| Weaken symbol binding (GLOBAL to WEAK) | Symbol still resolves; interposition semantics relax | [case27](../examples/case27_symbol_binding_weakened.md) |
+| Add IFUNC dispatch | Transparent to callers; resolver picks implementation at load time | [case29](../examples/case29_ifunc_transition.md) |
+| Outline an inline function (add export) | New symbol appears; callers with inlined copy still work | [case47](../examples/case47_inline_to_outlined.md) |
+| Add new global variable | No existing code references it | [case61](../examples/case61_var_added.md) |
+| Add field to opaque struct | Callers access through pointers only; layout is hidden | [case62](../examples/case62_type_field_added_compatible.md) |
 
 ---
 
@@ -29,18 +29,18 @@ These cause crashes, wrong results, or link failures in pre-compiled consumers.
 
 | Change | What Happens at Runtime | Example |
 |--------|------------------------|---------|
-| Remove exported symbol | `undefined symbol` on dlopen/startup | [case01](https://github.com/napetrov/abicheck/tree/main/examples/case01_symbol_removal) |
-| Change parameter types | Caller passes args in wrong registers/format; garbage or crash | [case02](https://github.com/napetrov/abicheck/tree/main/examples/case02_param_type_change) |
-| Change struct layout/size | Stack corruption; reads/writes past allocation boundary | [case07](https://github.com/napetrov/abicheck/tree/main/examples/case07_struct_layout) |
-| Change enum member values | Switch/lookup tables use stale integer values; wrong branch taken | [case08](https://github.com/napetrov/abicheck/tree/main/examples/case08_enum_value_change) |
-| Reorder virtual methods | Vtable slot mismatch; call dispatches to wrong method silently | [case09](https://github.com/napetrov/abicheck/tree/main/examples/case09_cpp_vtable) |
-| Change return type | Caller interprets return register/memory as wrong type | [case10](https://github.com/napetrov/abicheck/tree/main/examples/case10_return_type) |
-| Change class size (add members) | `new`/stack allocation undersized; heap corruption, SIGSEGV | [case14](https://github.com/napetrov/abicheck/tree/main/examples/case14_cpp_class_size) |
-| Remove enum member | Code referencing removed constant fails at compile time or uses stale value | [case19](https://github.com/napetrov/abicheck/tree/main/examples/case19_enum_member_removed) |
-| Change type alignment (`alignas`) | Misaligned access; SIGBUS on strict-alignment architectures | [case42](https://github.com/napetrov/abicheck/tree/main/examples/case42_type_alignment_changed) |
-| Change struct packing (`pragma pack`) | Field offsets shift; every member read is wrong | [case56](https://github.com/napetrov/abicheck/tree/main/examples/case56_struct_packing_changed) |
-| Change calling convention | Parameters read from wrong registers; total data corruption | [case64](https://github.com/napetrov/abicheck/tree/main/examples/case64_calling_convention_changed) |
-| Remove symbol version node | Dynamic linker refuses to load; `version 'FOO_1.0' not found` | [case65](https://github.com/napetrov/abicheck/tree/main/examples/case65_symbol_version_removed) |
+| Remove exported symbol | `undefined symbol` on dlopen/startup | [case01](../examples/case01_symbol_removal.md) |
+| Change parameter types | Caller passes args in wrong registers/format; garbage or crash | [case02](../examples/case02_param_type_change.md) |
+| Change struct layout/size | Stack corruption; reads/writes past allocation boundary | [case07](../examples/case07_struct_layout.md) |
+| Change enum member values | Switch/lookup tables use stale integer values; wrong branch taken | [case08](../examples/case08_enum_value_change.md) |
+| Reorder virtual methods | Vtable slot mismatch; call dispatches to wrong method silently | [case09](../examples/case09_cpp_vtable.md) |
+| Change return type | Caller interprets return register/memory as wrong type | [case10](../examples/case10_return_type.md) |
+| Change class size (add members) | `new`/stack allocation undersized; heap corruption, SIGSEGV | [case14](../examples/case14_cpp_class_size.md) |
+| Remove enum member | Code referencing removed constant fails at compile time or uses stale value | [case19](../examples/case19_enum_member_removed.md) |
+| Change type alignment (`alignas`) | Misaligned access; SIGBUS on strict-alignment architectures | [case42](../examples/case42_type_alignment_changed.md) |
+| Change struct packing (`pragma pack`) | Field offsets shift; every member read is wrong | [case56](../examples/case56_struct_packing_changed.md) |
+| Change calling convention | Parameters read from wrong registers; total data corruption | [case64](../examples/case64_calling_convention_changed.md) |
+| Remove symbol version node | Dynamic linker refuses to load; `version 'FOO_1.0' not found` | [case65](../examples/case65_symbol_version_removed.md) |
 
 See the full breaking catalog in [Breaking Cases Catalog](breaking-cases-catalog.md).
 
@@ -52,8 +52,8 @@ Binary-compatible, but recompilation against new headers fails. Verdict: 🟠 AP
 
 | Change | Impact | Example |
 |--------|--------|---------|
-| Rename enum member (same value) | `LOG_ERR` no longer compiles; binary still uses integer `1` | [case31](https://github.com/napetrov/abicheck/tree/main/examples/case31_enum_rename) |
-| Narrow access level (public to private) | Downstream code calling `helper()` gets compile error | [case34](https://github.com/napetrov/abicheck/tree/main/examples/case34_access_level) |
+| Rename enum member (same value) | `LOG_ERR` no longer compiles; binary still uses integer `1` | [case31](../examples/case31_enum_rename.md) |
+| Narrow access level (public to private) | Downstream code calling `helper()` gets compile error | [case34](../examples/case34_access_level.md) |
 | Remove default parameter | Call sites relying on default fail to compile; ABI unchanged | -- |
 
 ---
@@ -66,7 +66,7 @@ Binary-compatible, but may break at deployment time. Verdict: 🟡 COMPATIBLE_WI
 |--------|------|---------|
 | New GLIBC/GLIBCXX version requirement | Binaries won't load on older distros missing the required symbol version | -- (detected via `SYMBOL_VERSION_REQUIRED_ADDED`) |
 | Leaked dependency symbol changed | Transitive dependency update shifts symbols your consumers never directly linked | -- |
-| `noexcept` removed | C++17 callers compiled with `noexcept` in function type get UB on throw | [case15](https://github.com/napetrov/abicheck/tree/main/examples/case15_noexcept_change) |
+| `noexcept` removed | C++17 callers compiled with `noexcept` in function type get UB on throw | [case15](../examples/case15_noexcept_change.md) |
 
 ---
 
@@ -76,11 +76,11 @@ No immediate breakage, but these compromise the ABI contract or security posture
 
 | Warning | Why It Matters | Example |
 |---------|---------------|---------|
-| Missing SONAME | Consumers record bare filename; library versioning breaks | [case05](https://github.com/napetrov/abicheck/tree/main/examples/case05_soname) |
-| Visibility leak (no `-fvisibility=hidden`) | Internal symbols become public ABI surface you must maintain forever | [case06](https://github.com/napetrov/abicheck/tree/main/examples/case06_visibility) (fixing later = BREAKING) |
-| Executable stack (`GNU_STACK RWX`) | Disables NX protection process-wide; trivial exploit target | [case49](https://github.com/napetrov/abicheck/tree/main/examples/case49_executable_stack) |
-| RPATH leak (hardcoded build path) | Library only works on the build machine; deployment fails everywhere else | [case52](https://github.com/napetrov/abicheck/tree/main/examples/case52_rpath_leak) |
-| Namespace pollution (generic names) | Unprefixed symbols like `init()` collide across libraries | [case53](https://github.com/napetrov/abicheck/tree/main/examples/case53_namespace_pollution) (fixing later = BREAKING) |
+| Missing SONAME | Consumers record bare filename; library versioning breaks | [case05](../examples/case05_soname.md) |
+| Visibility leak (no `-fvisibility=hidden`) | Internal symbols become public ABI surface you must maintain forever | [case06](../examples/case06_visibility.md) (fixing later = BREAKING) |
+| Executable stack (`GNU_STACK RWX`) | Disables NX protection process-wide; trivial exploit target | [case49](../examples/case49_executable_stack.md) |
+| RPATH leak (hardcoded build path) | Library only works on the build machine; deployment fails everywhere else | [case52](../examples/case52_rpath_leak.md) |
+| Namespace pollution (generic names) | Unprefixed symbols like `init()` collide across libraries | [case53](../examples/case53_namespace_pollution.md) (fixing later = BREAKING) |
 
 ---
 

@@ -8,7 +8,7 @@
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | — |
 | **Detected `ChangeKind`s** | — |
-| **Source files** | [browse on GitHub](https://github.com/napetrov/abicheck/blob/main/examples/case26b_union_field_added_compatible/) |
+| **Source files** | `examples/case26b_union_field_added_compatible/` |
 
 **Verdict:** 🟢 COMPATIBLE
 
@@ -18,6 +18,26 @@
 |---------|-----------|
 | v1 | `union Value { long l; double d; };` |
 | v2 | `union Value { long l; double d; int i; };` |
+
+## Real Failure Demo
+
+**Severity: COMPATIBLE - NO FAILURE EXPECTED**
+
+This is intentionally a non-failure demo. The app is compiled against v1, then
+run with v2 under the old SONAME. Because the added union field does not change
+`sizeof(union Value)`, the result is identical.
+
+```bash
+cmake -S examples -B /tmp/abicheck-examples-build -DCMAKE_BUILD_TYPE=Debug
+cmake --build /tmp/abicheck-examples-build --target case27_union_field_added_compatible_app case27_union_field_added_compatible_v2
+
+tmp=$(mktemp -d)
+cp /tmp/abicheck-examples-build/case27_union_field_added_compatible/app_v1 "$tmp/"
+cp /tmp/abicheck-examples-build/case27_union_field_added_compatible/libv2.so "$tmp/libv1.so"
+(cd "$tmp" && LD_LIBRARY_PATH=. ./app_v1)
+# after fill: v.l = 42
+# OK: union field added (no size change) is ABI-compatible
+```
 
 ## Why this is NOT a binary ABI break
 
@@ -78,7 +98,7 @@ Verdict: **COMPATIBLE**.
 
 ## Source files
 
-- [`CMakeLists.txt`](https://github.com/napetrov/abicheck/blob/main/examples/case26b_union_field_added_compatible/CMakeLists.txt)
-- [`app.c`](https://github.com/napetrov/abicheck/blob/main/examples/case26b_union_field_added_compatible/app.c)
+- `CMakeLists.txt`
+- `app.c`
 
 _See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Addition (Compatible)](by-category/addition.md)._

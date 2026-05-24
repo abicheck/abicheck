@@ -8,7 +8,7 @@
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | ABI break |
 | **Detected `ChangeKind`s** | `default_template_arg_changed` |
-| **Source files** | [browse on GitHub](https://github.com/napetrov/abicheck/blob/main/examples/case87_default_template_arg_changed/) |
+| **Source files** | `examples/case87_default_template_arg_changed/` |
 
 **Category:** Template ABI | **Verdict:** BREAKING
 
@@ -37,6 +37,21 @@ A consumer compiled against v1 emits calls to the first mangled name.
 A consumer compiled against v2 emits calls to the second. The shipped
 library can only contain one — whichever version was built. Cross-version
 linking yields unresolved symbols.
+
+## Real Failure Demo
+
+**Severity: API BREAK / LOAD-TIME FAILURE**
+
+```bash
+cmake -S examples -B /tmp/abicheck-examples-build -DCMAKE_BUILD_TYPE=Debug
+cmake --build /tmp/abicheck-examples-build --target case86_default_template_arg_changed_app case86_default_template_arg_changed_v2
+
+tmp=$(mktemp -d)
+cp /tmp/abicheck-examples-build/case86_default_template_arg_changed/app_v1 "$tmp/"
+cp /tmp/abicheck-examples-build/case86_default_template_arg_changed/libv2.so "$tmp/libv1.so"
+(cd "$tmp" && LD_LIBRARY_PATH=. ./app_v1)
+# ./app_v1: symbol lookup error: undefined symbol: descriptor<float, minkowski_distance<float>>::dimension()
+```
 
 ## Why distinct from case32
 
@@ -76,11 +91,11 @@ every explicit instantiation that didn't override that argument.
 
 ## Source files
 
-- [`CMakeLists.txt`](https://github.com/napetrov/abicheck/blob/main/examples/case87_default_template_arg_changed/CMakeLists.txt)
-- [`app.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case87_default_template_arg_changed/app.cpp)
-- [`v1.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case87_default_template_arg_changed/v1.cpp)
-- [`v1.h`](https://github.com/napetrov/abicheck/blob/main/examples/case87_default_template_arg_changed/v1.h)
-- [`v2.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case87_default_template_arg_changed/v2.cpp)
-- [`v2.h`](https://github.com/napetrov/abicheck/blob/main/examples/case87_default_template_arg_changed/v2.h)
+- `CMakeLists.txt`
+- `app.cpp`
+- `v1.cpp`
+- `v1.h`
+- `v2.cpp`
+- `v2.h`
 
 _See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._

@@ -8,7 +8,7 @@
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | `type_became_opaque` |
-| **Source files** | [browse on GitHub](https://github.com/napetrov/abicheck/blob/main/examples/case28_typedef_opaque/) |
+| **Source files** | `examples/case28_typedef_opaque/` |
 
 **Category:** Type System | **Verdict:** 🔴 BREAKING (Scenario 1: typedef_base_changed) / 🟡 API_BREAK (Scenarios 2-3)
 
@@ -124,11 +124,11 @@ echo "exit: $?"
 
 ## Source files
 
-- [`CMakeLists.txt`](https://github.com/napetrov/abicheck/blob/main/examples/case28_typedef_opaque/CMakeLists.txt)
-- [`app.c`](https://github.com/napetrov/abicheck/blob/main/examples/case28_typedef_opaque/app.c)
-- [`v1.c`](https://github.com/napetrov/abicheck/blob/main/examples/case28_typedef_opaque/v1.c)
-- [`v1.h`](https://github.com/napetrov/abicheck/blob/main/examples/case28_typedef_opaque/v1.h)
-- [`v2.c`](https://github.com/napetrov/abicheck/blob/main/examples/case28_typedef_opaque/v2.c)
-- [`v2.h`](https://github.com/napetrov/abicheck/blob/main/examples/case28_typedef_opaque/v2.h)
+- `CMakeLists.txt`
+- `app.c`
+- `v1.c`
+- `v1.h`
+- `v2.c`
+- `v2.h`
 
 _See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._

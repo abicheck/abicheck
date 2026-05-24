@@ -8,7 +8,7 @@
 | **Platforms** | Linux, macOS |
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | `tls_var_size_changed` |
-| **Source files** | [browse on GitHub](https://github.com/napetrov/abicheck/blob/main/examples/case67_tls_var_size_changed/) |
+| **Source files** | `examples/case67_tls_var_size_changed/` |
 
 **Category:** Variable ABI | **Verdict:** BREAKING
 
@@ -125,11 +125,11 @@ type) between the two library versions.
 
 ## Source files
 
-- [`CMakeLists.txt`](https://github.com/napetrov/abicheck/blob/main/examples/case67_tls_var_size_changed/CMakeLists.txt)
-- [`app.c`](https://github.com/napetrov/abicheck/blob/main/examples/case67_tls_var_size_changed/app.c)
-- [`v1.c`](https://github.com/napetrov/abicheck/blob/main/examples/case67_tls_var_size_changed/v1.c)
-- [`v1.h`](https://github.com/napetrov/abicheck/blob/main/examples/case67_tls_var_size_changed/v1.h)
-- [`v2.c`](https://github.com/napetrov/abicheck/blob/main/examples/case67_tls_var_size_changed/v2.c)
-- [`v2.h`](https://github.com/napetrov/abicheck/blob/main/examples/case67_tls_var_size_changed/v2.h)
+- `CMakeLists.txt`
+- `app.c`
+- `v1.c`
+- `v1.h`
+- `v2.c`
+- `v2.h`
 
 _See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._

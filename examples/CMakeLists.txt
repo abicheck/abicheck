@@ -47,6 +47,7 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
 #      [APP_SOURCES app.c]
 #      [APP_INCLUDE_DIRS dir]
 #      [APP_LINK_LIBRARIES lib]
+#      [APP_COMPILE_OPTIONS ..]
 #      [PLATFORMS linux macos windows]
 #   )
 # ---------------------------------------------------------------------------
@@ -54,7 +55,7 @@ function(abicheck_add_case CASE_NAME)
   cmake_parse_arguments(PARSE_ARGV 1 ARG
     ""
     "LANG"
-    "V1_SOURCES;V2_SOURCES;V1_HEADERS;V2_HEADERS;V1_INCLUDE_DIRS;V2_INCLUDE_DIRS;V1_FORCE_INCLUDE;V2_FORCE_INCLUDE;V1_COMPILE_OPTIONS;V2_COMPILE_OPTIONS;V1_LINK_OPTIONS;V2_LINK_OPTIONS;APP_SOURCES;APP_INCLUDE_DIRS;APP_LINK_LIBRARIES;PLATFORMS"
+    "V1_SOURCES;V2_SOURCES;V1_HEADERS;V2_HEADERS;V1_INCLUDE_DIRS;V2_INCLUDE_DIRS;V1_FORCE_INCLUDE;V2_FORCE_INCLUDE;V1_COMPILE_OPTIONS;V2_COMPILE_OPTIONS;V1_LINK_OPTIONS;V2_LINK_OPTIONS;APP_SOURCES;APP_INCLUDE_DIRS;APP_LINK_LIBRARIES;APP_COMPILE_OPTIONS;PLATFORMS"
   )
 
   # --- Platform filter ---
@@ -198,6 +199,9 @@ function(abicheck_add_case CASE_NAME)
     endif()
     if(ARG_APP_LINK_LIBRARIES)
       target_link_libraries(${_app} PRIVATE ${ARG_APP_LINK_LIBRARIES})
+    endif()
+    if(ARG_APP_COMPILE_OPTIONS)
+      target_compile_options(${_app} PRIVATE ${ARG_APP_COMPILE_OPTIONS})
     endif()
     if(APPLE)
       set_target_properties(${_app} PROPERTIES

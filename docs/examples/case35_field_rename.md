@@ -8,7 +8,7 @@
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | API break |
 | **Detected `ChangeKind`s** | `field_renamed` |
-| **Source files** | [browse on GitHub](https://github.com/napetrov/abicheck/blob/main/examples/case35_field_rename/) |
+| **Source files** | `examples/case35_field_rename/` |
 
 **Verdict:** 🔴 BREAKING (policy escalated source break)
 **abicheck verdict: BREAKING**
@@ -92,11 +92,11 @@ Field rename: binary compat (field exists), source break (name changed)
 
 ## Source files
 
-- [`CMakeLists.txt`](https://github.com/napetrov/abicheck/blob/main/examples/case35_field_rename/CMakeLists.txt)
-- [`app.c`](https://github.com/napetrov/abicheck/blob/main/examples/case35_field_rename/app.c)
-- [`v1.c`](https://github.com/napetrov/abicheck/blob/main/examples/case35_field_rename/v1.c)
-- [`v1.h`](https://github.com/napetrov/abicheck/blob/main/examples/case35_field_rename/v1.h)
-- [`v2.c`](https://github.com/napetrov/abicheck/blob/main/examples/case35_field_rename/v2.c)
-- [`v2.h`](https://github.com/napetrov/abicheck/blob/main/examples/case35_field_rename/v2.h)
+- `CMakeLists.txt`
+- `app.c`
+- `v1.c`
+- `v1.h`
+- `v2.c`
+- `v2.h`
 
 _See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._

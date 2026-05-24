@@ -8,7 +8,7 @@
 | **Platforms** | Linux |
 | **Flags** | ABI break |
 | **Detected `ChangeKind`s** | `symbol_version_defined_removed` |
-| **Source files** | [browse on GitHub](https://github.com/napetrov/abicheck/blob/main/examples/case65_symbol_version_removed/) |
+| **Source files** | `examples/case65_symbol_version_removed/` |
 
 **Category:** Symbol Versioning | **Verdict:** BREAKING
 
@@ -115,13 +115,13 @@ comparing the `.gnu.version_d` sections of the two library versions.
 
 ## Source files
 
-- [`CMakeLists.txt`](https://github.com/napetrov/abicheck/blob/main/examples/case65_symbol_version_removed/CMakeLists.txt)
-- [`app.c`](https://github.com/napetrov/abicheck/blob/main/examples/case65_symbol_version_removed/app.c)
-- [`v1.c`](https://github.com/napetrov/abicheck/blob/main/examples/case65_symbol_version_removed/v1.c)
-- [`v1.h`](https://github.com/napetrov/abicheck/blob/main/examples/case65_symbol_version_removed/v1.h)
-- [`v1.map`](https://github.com/napetrov/abicheck/blob/main/examples/case65_symbol_version_removed/v1.map)
-- [`v2.c`](https://github.com/napetrov/abicheck/blob/main/examples/case65_symbol_version_removed/v2.c)
-- [`v2.h`](https://github.com/napetrov/abicheck/blob/main/examples/case65_symbol_version_removed/v2.h)
-- [`v2.map`](https://github.com/napetrov/abicheck/blob/main/examples/case65_symbol_version_removed/v2.map)
+- `CMakeLists.txt`
+- `app.c`
+- `v1.c`
+- `v1.h`
+- `v1.map`
+- `v2.c`
+- `v2.h`
+- `v2.map`
 
 _See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._

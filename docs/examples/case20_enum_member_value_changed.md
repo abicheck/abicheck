@@ -8,7 +8,7 @@
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | `enum_member_value_changed` |
-| **Source files** | [browse on GitHub](https://github.com/napetrov/abicheck/blob/main/examples/case20_enum_member_value_changed/) |
+| **Source files** | `examples/case20_enum_member_value_changed/` |
 
 **Verdict:** 🔴 BREAKING
 **Verdict detail:** ABI break (runtime value mismatch) + API break (enum value changed in header)
@@ -91,7 +91,7 @@ Enum value changed: integer value differs, silent wrong behavior
 
 ## Source files
 
-- [`CMakeLists.txt`](https://github.com/napetrov/abicheck/blob/main/examples/case20_enum_member_value_changed/CMakeLists.txt)
-- [`app.c`](https://github.com/napetrov/abicheck/blob/main/examples/case20_enum_member_value_changed/app.c)
+- `CMakeLists.txt`
+- `app.c`
 
 _See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._

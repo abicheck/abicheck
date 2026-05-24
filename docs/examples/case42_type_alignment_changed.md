@@ -8,7 +8,7 @@
 | **Platforms** | Linux, macOS |
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | — |
-| **Source files** | [browse on GitHub](https://github.com/napetrov/abicheck/blob/main/examples/case42_type_alignment_changed/) |
+| **Source files** | `examples/case42_type_alignment_changed/` |
 
 **Category:** Type Layout / DWARF | **Verdict:** BREAKING
 
@@ -81,15 +81,30 @@ CacheBlock* block_alloc(void) {
 - [C11 alignas / _Alignas](https://en.cppreference.com/w/c/language/_Alignas)
 - [GCC __attribute__((aligned))](https://gcc.gnu.org/onlinedocs/gcc/Common-Type-Attributes.html)
 
+## Real Failure Demo
+
+**Severity: BAD PRACTICE / ABI BREAK**
+
+```bash
+cmake -S examples -B /tmp/abicheck-examples-build -DCMAKE_BUILD_TYPE=Debug
+cmake --build /tmp/abicheck-examples-build --target case43_type_alignment_changed_app case43_type_alignment_changed_v2
+
+tmp=$(mktemp -d)
+cp /tmp/abicheck-examples-build/case43_type_alignment_changed/app_v1 "$tmp/"
+cp /tmp/abicheck-examples-build/case43_type_alignment_changed/libv2.so "$tmp/libv1.so"
+(cd "$tmp" && LD_LIBRARY_PATH=. ./app_v1)
+# block_process = 0 (expected 4) / WRONG RESULT: alignment change caused array stride/layout mismatch
+```
+
 ---
 
 ## Source files
 
-- [`CMakeLists.txt`](https://github.com/napetrov/abicheck/blob/main/examples/case42_type_alignment_changed/CMakeLists.txt)
-- [`app.c`](https://github.com/napetrov/abicheck/blob/main/examples/case42_type_alignment_changed/app.c)
-- [`bad.c`](https://github.com/napetrov/abicheck/blob/main/examples/case42_type_alignment_changed/bad.c)
-- [`bad.h`](https://github.com/napetrov/abicheck/blob/main/examples/case42_type_alignment_changed/bad.h)
-- [`good.c`](https://github.com/napetrov/abicheck/blob/main/examples/case42_type_alignment_changed/good.c)
-- [`good.h`](https://github.com/napetrov/abicheck/blob/main/examples/case42_type_alignment_changed/good.h)
+- `CMakeLists.txt`
+- `app.c`
+- `bad.c`
+- `bad.h`
+- `good.c`
+- `good.h`
 
 _See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._

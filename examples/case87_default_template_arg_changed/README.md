@@ -28,6 +28,21 @@ A consumer compiled against v2 emits calls to the second. The shipped
 library can only contain one — whichever version was built. Cross-version
 linking yields unresolved symbols.
 
+## Real Failure Demo
+
+**Severity: API BREAK / LOAD-TIME FAILURE**
+
+```bash
+cmake -S examples -B /tmp/abicheck-examples-build -DCMAKE_BUILD_TYPE=Debug
+cmake --build /tmp/abicheck-examples-build --target case86_default_template_arg_changed_app case86_default_template_arg_changed_v2
+
+tmp=$(mktemp -d)
+cp /tmp/abicheck-examples-build/case86_default_template_arg_changed/app_v1 "$tmp/"
+cp /tmp/abicheck-examples-build/case86_default_template_arg_changed/libv2.so "$tmp/libv1.so"
+(cd "$tmp" && LD_LIBRARY_PATH=. ./app_v1)
+# ./app_v1: symbol lookup error: undefined symbol: descriptor<float, minkowski_distance<float>>::dimension()
+```
+
 ## Why distinct from case32
 
 case32 covers *function* default parameter values, which are resolved at

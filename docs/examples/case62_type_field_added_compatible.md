@@ -8,7 +8,7 @@
 | **Platforms** | Linux, macOS |
 | **Flags** | — |
 | **Detected `ChangeKind`s** | `func_added` |
-| **Source files** | [browse on GitHub](https://github.com/napetrov/abicheck/blob/main/examples/case62_type_field_added_compatible/) |
+| **Source files** | `examples/case62_type_field_added_compatible/` |
 
 **Category:** Type Layout | **Verdict:** COMPATIBLE
 
@@ -20,6 +20,23 @@ v2 adds a `priority` field at the end. Because callers only use `Session*`
 
 This is the **correct design pattern** for extensible C APIs: opaque handles +
 accessor functions allow adding fields without breaking existing consumers.
+
+## Real Failure Demo
+
+**Severity: COMPATIBLE - NO FAILURE EXPECTED**
+
+The struct is opaque to callers, so v2 can grow the private allocation without changing caller layout.
+
+```bash
+cmake -S examples -B /tmp/abicheck-examples-build -DCMAKE_BUILD_TYPE=Debug
+cmake --build /tmp/abicheck-examples-build --target case63_type_field_added_compatible_app case63_type_field_added_compatible_v2
+
+tmp=$(mktemp -d)
+cp /tmp/abicheck-examples-build/case63_type_field_added_compatible/app_v1 "$tmp/"
+cp /tmp/abicheck-examples-build/case63_type_field_added_compatible/libv2.so "$tmp/libv1.so"
+(cd "$tmp" && LD_LIBRARY_PATH=. ./app_v1)
+# name = test / timeout = 30
+```
 
 ## Why this is compatible
 
@@ -83,11 +100,11 @@ struct Widget {
 
 ## Source files
 
-- [`CMakeLists.txt`](https://github.com/napetrov/abicheck/blob/main/examples/case62_type_field_added_compatible/CMakeLists.txt)
-- [`app.c`](https://github.com/napetrov/abicheck/blob/main/examples/case62_type_field_added_compatible/app.c)
-- [`bad.c`](https://github.com/napetrov/abicheck/blob/main/examples/case62_type_field_added_compatible/bad.c)
-- [`bad.h`](https://github.com/napetrov/abicheck/blob/main/examples/case62_type_field_added_compatible/bad.h)
-- [`good.c`](https://github.com/napetrov/abicheck/blob/main/examples/case62_type_field_added_compatible/good.c)
-- [`good.h`](https://github.com/napetrov/abicheck/blob/main/examples/case62_type_field_added_compatible/good.h)
+- `CMakeLists.txt`
+- `app.c`
+- `bad.c`
+- `bad.h`
+- `good.c`
+- `good.h`
 
 _See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Addition (Compatible)](by-category/addition.md)._

@@ -8,7 +8,7 @@
 | **Platforms** | Linux |
 | **Flags** | — |
 | **Detected `ChangeKind`s** | — |
-| **Source files** | [browse on GitHub](https://github.com/napetrov/abicheck/blob/main/examples/case16_inline_to_non_inline/) |
+| **Source files** | `examples/case16_inline_to_non_inline/` |
 
 **Verdict:** 🟢 COMPATIBLE
 ## What changes
@@ -131,11 +131,11 @@ Inline→non-inline: old binary uses inlined copy, runtime unaffected
 
 ## Source files
 
-- [`CMakeLists.txt`](https://github.com/napetrov/abicheck/blob/main/examples/case16_inline_to_non_inline/CMakeLists.txt)
-- [`app.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case16_inline_to_non_inline/app.cpp)
-- [`v1.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case16_inline_to_non_inline/v1.cpp)
-- [`v1.hpp`](https://github.com/napetrov/abicheck/blob/main/examples/case16_inline_to_non_inline/v1.hpp)
-- [`v2.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case16_inline_to_non_inline/v2.cpp)
-- [`v2.hpp`](https://github.com/napetrov/abicheck/blob/main/examples/case16_inline_to_non_inline/v2.hpp)
+- `CMakeLists.txt`
+- `app.cpp`
+- `v1.cpp`
+- `v1.hpp`
+- `v2.cpp`
+- `v2.hpp`
 
 _See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Addition (Compatible)](by-category/addition.md)._

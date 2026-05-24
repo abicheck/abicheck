@@ -8,7 +8,7 @@
 | **Platforms** | Linux |
 | **Flags** | API break |
 | **Detected `ChangeKind`s** | — |
-| **Source files** | [browse on GitHub](https://github.com/napetrov/abicheck/blob/main/examples/case15_noexcept_change/) |
+| **Source files** | `examples/case15_noexcept_change/` |
 
 **Category:** Risk | **Verdict:** 🟡 COMPATIBLE_WITH_RISK
 
@@ -172,17 +172,17 @@ new `.so`.
 
 - [C++ noexcept specifier](https://en.cppreference.com/w/cpp/language/noexcept_spec)
 - [P0012R1: noexcept as part of function type](https://wg21.link/P0012R1)
-- [`checker_policy.py` — FUNC_NOEXCEPT_REMOVED](https://github.com/napetrov/abicheck/blob/main/abicheck/checker_policy.py)
+- `checker_policy.py` — FUNC_NOEXCEPT_REMOVED`
 
 ---
 
 ## Source files
 
-- [`CMakeLists.txt`](https://github.com/napetrov/abicheck/blob/main/examples/case15_noexcept_change/CMakeLists.txt)
-- [`app.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case15_noexcept_change/app.cpp)
-- [`v1.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case15_noexcept_change/v1.cpp)
-- [`v1.h`](https://github.com/napetrov/abicheck/blob/main/examples/case15_noexcept_change/v1.h)
-- [`v2.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case15_noexcept_change/v2.cpp)
-- [`v2.h`](https://github.com/napetrov/abicheck/blob/main/examples/case15_noexcept_change/v2.h)
+- `CMakeLists.txt`
+- `app.cpp`
+- `v1.cpp`
+- `v1.h`
+- `v2.cpp`
+- `v2.h`
 
 _See also: [Examples overview](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md)._

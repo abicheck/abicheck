@@ -8,7 +8,7 @@
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | — |
-| **Source files** | [browse on GitHub](https://github.com/napetrov/abicheck/blob/main/examples/case45_multi_dim_array_change/) |
+| **Source files** | `examples/case45_multi_dim_array_change/` |
 
 **Category:** Struct Layout | **Verdict:** 🔴 BREAKING
 
@@ -66,11 +66,11 @@ abidiff v1.abi v2.abi
 
 ## Source files
 
-- [`CMakeLists.txt`](https://github.com/napetrov/abicheck/blob/main/examples/case45_multi_dim_array_change/CMakeLists.txt)
-- [`app.c`](https://github.com/napetrov/abicheck/blob/main/examples/case45_multi_dim_array_change/app.c)
-- [`v1.c`](https://github.com/napetrov/abicheck/blob/main/examples/case45_multi_dim_array_change/v1.c)
-- [`v1.h`](https://github.com/napetrov/abicheck/blob/main/examples/case45_multi_dim_array_change/v1.h)
-- [`v2.c`](https://github.com/napetrov/abicheck/blob/main/examples/case45_multi_dim_array_change/v2.c)
-- [`v2.h`](https://github.com/napetrov/abicheck/blob/main/examples/case45_multi_dim_array_change/v2.h)
+- `CMakeLists.txt`
+- `app.c`
+- `v1.c`
+- `v1.h`
+- `v2.c`
+- `v2.h`
 
 _See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._

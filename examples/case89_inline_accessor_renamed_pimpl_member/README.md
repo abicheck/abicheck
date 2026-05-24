@@ -33,6 +33,23 @@ is inline and has no exported symbol. There is no public-type layout change:
 gap between *what the consumer's inline body assumes* and *what the new
 detail layout actually is*.
 
+## Real Failure Demo
+
+**Severity: BREAKING / LATENT INLINE ABI DRIFT**
+
+The tiny app happens to read the same value, but its inline accessor is compiled against the old `impl_->class_count_` member. A real v2 layout that reuses that slot for another field turns the inline read into stale or wrong data.
+
+```bash
+cmake -S examples -B /tmp/abicheck-examples-build -DCMAKE_BUILD_TYPE=Debug
+cmake --build /tmp/abicheck-examples-build --target case87_inline_accessor_renamed_pimpl_member_app case87_inline_accessor_renamed_pimpl_member_v2
+
+tmp=$(mktemp -d)
+cp /tmp/abicheck-examples-build/case87_inline_accessor_renamed_pimpl_member/app_v1 "$tmp/"
+cp /tmp/abicheck-examples-build/case87_inline_accessor_renamed_pimpl_member/libv2.so "$tmp/libv1.so"
+(cd "$tmp" && LD_LIBRARY_PATH=. ./app_v1)
+# class_count = 2
+```
+
 ## Why distinct from case35 + case47
 
 - case35 (`field_rename`) covers field renames in isolation. It does not

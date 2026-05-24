@@ -8,7 +8,7 @@
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | `var_became_const` |
-| **Source files** | [browse on GitHub](https://github.com/napetrov/abicheck/blob/main/examples/case39_var_const/) |
+| **Source files** | `examples/case39_var_const/` |
 
 **Category:** Global Variable Qualifiers | **Verdict:** 🔴 BREAKING (runtime) / NO_CHANGE in headers-only abicheck
 
@@ -125,11 +125,11 @@ Without `-H`, ELF-only mode may miss source-level type qualifiers on globals.
 
 ## Source files
 
-- [`CMakeLists.txt`](https://github.com/napetrov/abicheck/blob/main/examples/case39_var_const/CMakeLists.txt)
-- [`app.c`](https://github.com/napetrov/abicheck/blob/main/examples/case39_var_const/app.c)
-- [`v1.c`](https://github.com/napetrov/abicheck/blob/main/examples/case39_var_const/v1.c)
-- [`v1.h`](https://github.com/napetrov/abicheck/blob/main/examples/case39_var_const/v1.h)
-- [`v2.c`](https://github.com/napetrov/abicheck/blob/main/examples/case39_var_const/v2.c)
-- [`v2.h`](https://github.com/napetrov/abicheck/blob/main/examples/case39_var_const/v2.h)
+- `CMakeLists.txt`
+- `app.c`
+- `v1.c`
+- `v1.h`
+- `v2.c`
+- `v2.h`
 
 _See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._

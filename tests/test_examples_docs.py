@@ -13,6 +13,7 @@ Three guarantees enforced here:
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import re
 import subprocess
@@ -25,6 +26,15 @@ ROOT = Path(__file__).resolve().parent.parent
 EXAMPLES_DIR = ROOT / "examples"
 GROUND_TRUTH = EXAMPLES_DIR / "ground_truth.json"
 GEN_SCRIPT = ROOT / "scripts" / "gen_examples_docs.py"
+
+
+def _load_generator_module():
+    spec = importlib.util.spec_from_file_location("gen_examples_docs", GEN_SCRIPT)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules.pop("gen_examples_docs", None)
+    sys.modules["gen_examples_docs"] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 def _ground_truth_cases() -> list[str]:
@@ -77,3 +87,36 @@ def test_generator_check_passes() -> None:
         "docs/examples/ is out of date — run `python scripts/gen_examples_docs.py`.\n"
         f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
     )
+
+
+def test_generator_rewrites_source_links_without_mkdocs_broken_links() -> None:
+    mod = _load_generator_module()
+
+    rewritten = mod._rewrite_links(
+        "[v1 header](v1.h) [guide](../docs/concepts/abi-stability-guide.md)"
+    )
+
+    assert "`v1 header`" in rewritten
+    assert "[guide](../concepts/abi-stability-guide.md)" in rewritten
+    assert "../../examples/" not in rewritten
+
+
+def test_generator_source_section_uses_code_literals() -> None:
+    mod = _load_generator_module()
+    case = mod.Case(
+        name="case01_symbol_removal",
+        title="Case 01: Symbol Removal",
+        verdict="BREAKING",
+        category="breaking",
+        platforms=["linux"],
+        abi_break=True,
+        api_break=False,
+        bad_practice=False,
+        expected_kinds=[],
+        body="",
+    )
+
+    source_section = mod._source_links(case)
+
+    assert "- `v1.c`" in source_section
+    assert "](" not in source_section

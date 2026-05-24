@@ -8,7 +8,7 @@
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | API break |
 | **Detected `ChangeKind`s** | `enum_member_renamed` |
-| **Source files** | [browse on GitHub](https://github.com/napetrov/abicheck/blob/main/examples/case31_enum_rename/) |
+| **Source files** | `examples/case31_enum_rename/` |
 
 **Category:** Enum API | **Verdict:** 🟠 API_BREAK (binary compatible)
 
@@ -120,11 +120,11 @@ echo "exit: $?"
 
 ## Source files
 
-- [`CMakeLists.txt`](https://github.com/napetrov/abicheck/blob/main/examples/case31_enum_rename/CMakeLists.txt)
-- [`app.c`](https://github.com/napetrov/abicheck/blob/main/examples/case31_enum_rename/app.c)
-- [`v1.c`](https://github.com/napetrov/abicheck/blob/main/examples/case31_enum_rename/v1.c)
-- [`v1.h`](https://github.com/napetrov/abicheck/blob/main/examples/case31_enum_rename/v1.h)
-- [`v2.c`](https://github.com/napetrov/abicheck/blob/main/examples/case31_enum_rename/v2.c)
-- [`v2.h`](https://github.com/napetrov/abicheck/blob/main/examples/case31_enum_rename/v2.h)
+- `CMakeLists.txt`
+- `app.c`
+- `v1.c`
+- `v1.h`
+- `v2.c`
+- `v2.h`
 
 _See also: [Examples overview](index.md) · [All API_BREAK cases](by-verdict/api-break.md) · [Category: API Break](by-category/api_break.md)._

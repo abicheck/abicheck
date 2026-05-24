@@ -8,7 +8,7 @@
 | **Platforms** | Linux |
 | **Flags** | Bad practice |
 | **Detected `ChangeKind`s** | — |
-| **Source files** | [browse on GitHub](https://github.com/napetrov/abicheck/blob/main/examples/case52_rpath_leak/) |
+| **Source files** | `examples/case52_rpath_leak/` |
 
 **Category:** ELF / Deployment | **Verdict:** BAD PRACTICE
 
@@ -21,6 +21,25 @@ uses `$ORIGIN`-relative paths.
 
 This is a **deployment-level bad practice**: build-directory paths in shared
 libraries break on every machine except the one where the library was built.
+
+## Real Failure Demo
+
+**Severity: SECURITY / PACKAGING RISK**
+
+The code path still runs, but v1 bakes a build-machine path into `RUNPATH`.
+That can load unintended libraries on a matching host path or fail package
+policy checks.
+
+```bash
+cmake -S examples -B /tmp/abicheck-examples-build -DCMAKE_BUILD_TYPE=Debug
+cmake --build /tmp/abicheck-examples-build --target case53_rpath_leak_v1 case53_rpath_leak_v2
+
+readelf -d /tmp/abicheck-examples-build/case53_rpath_leak/libv1.so | grep RUNPATH
+# Library runpath: [/home/build/myproject/lib]
+
+readelf -d /tmp/abicheck-examples-build/case53_rpath_leak/libv2.so | grep RUNPATH
+# Library runpath: [$ORIGIN]
+```
 
 ## Why hardcoded RPATH is bad practice
 
@@ -104,9 +123,9 @@ as a warning for the same reason.
 
 ## Source files
 
-- [`CMakeLists.txt`](https://github.com/napetrov/abicheck/blob/main/examples/case52_rpath_leak/CMakeLists.txt)
-- [`app.c`](https://github.com/napetrov/abicheck/blob/main/examples/case52_rpath_leak/app.c)
-- [`bad.c`](https://github.com/napetrov/abicheck/blob/main/examples/case52_rpath_leak/bad.c)
-- [`good.c`](https://github.com/napetrov/abicheck/blob/main/examples/case52_rpath_leak/good.c)
+- `CMakeLists.txt`
+- `app.c`
+- `bad.c`
+- `good.c`
 
 _See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md)._

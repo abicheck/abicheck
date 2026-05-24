@@ -8,7 +8,7 @@
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | `func_removed` |
-| **Source files** | [browse on GitHub](https://github.com/napetrov/abicheck/blob/main/examples/case110_concurrent_unordered_map_api_drift/) |
+| **Source files** | `examples/case110_concurrent_unordered_map_api_drift/` |
 
 **Category:** ABI + source break / oneTBB regression suite | **Verdict:** 🔴 BREAKING
 
@@ -73,11 +73,11 @@ g++ -std=c++17 -I. app.cpp -L. -lmylib -o app
 
 ## Source files
 
-- [`CMakeLists.txt`](https://github.com/napetrov/abicheck/blob/main/examples/case110_concurrent_unordered_map_api_drift/CMakeLists.txt)
-- [`app.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case110_concurrent_unordered_map_api_drift/app.cpp)
-- [`v1.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case110_concurrent_unordered_map_api_drift/v1.cpp)
-- [`v1.h`](https://github.com/napetrov/abicheck/blob/main/examples/case110_concurrent_unordered_map_api_drift/v1.h)
-- [`v2.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case110_concurrent_unordered_map_api_drift/v2.cpp)
-- [`v2.h`](https://github.com/napetrov/abicheck/blob/main/examples/case110_concurrent_unordered_map_api_drift/v2.h)
+- `CMakeLists.txt`
+- `app.cpp`
+- `v1.cpp`
+- `v1.h`
+- `v2.cpp`
+- `v2.h`
 
 _See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._

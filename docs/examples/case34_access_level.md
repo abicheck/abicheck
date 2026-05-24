@@ -8,7 +8,7 @@
 | **Platforms** | Linux, macOS |
 | **Flags** | API break |
 | **Detected `ChangeKind`s** | — |
-| **Source files** | [browse on GitHub](https://github.com/napetrov/abicheck/blob/main/examples/case34_access_level/) |
+| **Source files** | `examples/case34_access_level/` |
 
 **Verdict:** 🟠 API_BREAK
 **abicheck verdict: API_BREAK** (with headers) / **NO_CHANGE** (ELF-only)
@@ -41,6 +41,24 @@ private:
     void helper();         // narrowed: public → private
     int cache;             // narrowed: public → private
 };
+```
+
+## Real Failure Demo
+
+**Severity: API BREAK / COMPILE-TIME FAILURE**
+
+Old binaries still run with v2 because C++ access control is not encoded in the
+mangled symbol. The real failure appears when source using the formerly-public
+members is rebuilt against the v2 header.
+
+```bash
+tmp=$(mktemp -d)
+cp examples/case35_access_level/app.cpp "$tmp/app.cpp"
+cp examples/case35_access_level/v1.hpp "$tmp/v1.hpp"
+cp examples/case35_access_level/v2.hpp "$tmp/v2.hpp"
+g++ -std=c++17 -DUSE_V2 -I"$tmp" -c "$tmp/app.cpp" -o "$tmp/app.o"
+# error: 'void Widget::helper()' is private within this context
+# error: 'int Widget::cache' is private within this context
 ```
 
 ## Why this is NOT a binary ABI break
@@ -111,11 +129,11 @@ Access level narrowing: binary layout unchanged, compile fails
 
 ## Source files
 
-- [`CMakeLists.txt`](https://github.com/napetrov/abicheck/blob/main/examples/case34_access_level/CMakeLists.txt)
-- [`app.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case34_access_level/app.cpp)
-- [`v1.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case34_access_level/v1.cpp)
-- [`v1.hpp`](https://github.com/napetrov/abicheck/blob/main/examples/case34_access_level/v1.hpp)
-- [`v2.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case34_access_level/v2.cpp)
-- [`v2.hpp`](https://github.com/napetrov/abicheck/blob/main/examples/case34_access_level/v2.hpp)
+- `CMakeLists.txt`
+- `app.cpp`
+- `v1.cpp`
+- `v1.hpp`
+- `v2.cpp`
+- `v2.hpp`
 
 _See also: [Examples overview](index.md) · [All API_BREAK cases](by-verdict/api-break.md) · [Category: API Break](by-category/api_break.md)._

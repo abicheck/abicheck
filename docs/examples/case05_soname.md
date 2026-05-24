@@ -8,7 +8,7 @@
 | **Platforms** | Linux |
 | **Flags** | Bad practice |
 | **Detected `ChangeKind`s** | `soname_missing` |
-| **Source files** | [browse on GitHub](https://github.com/napetrov/abicheck/blob/main/examples/case05_soname/) |
+| **Source files** | `examples/case05_soname/` |
 
 **Category:** ELF/Linker | **Verdict:** 🟡 BAD PRACTICE
 
@@ -90,9 +90,9 @@ binaries won't find it and packaging tools (ldconfig, dpkg) can't manage the sym
 
 ## Source files
 
-- [`CMakeLists.txt`](https://github.com/napetrov/abicheck/blob/main/examples/case05_soname/CMakeLists.txt)
-- [`app.c`](https://github.com/napetrov/abicheck/blob/main/examples/case05_soname/app.c)
-- [`bad.c`](https://github.com/napetrov/abicheck/blob/main/examples/case05_soname/bad.c)
-- [`good.c`](https://github.com/napetrov/abicheck/blob/main/examples/case05_soname/good.c)
+- `CMakeLists.txt`
+- `app.c`
+- `bad.c`
+- `good.c`
 
 _See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md)._

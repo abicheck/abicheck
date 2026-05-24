@@ -8,7 +8,7 @@
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | `internal_type_leaks_via_public_api` |
-| **Source files** | [browse on GitHub](https://github.com/napetrov/abicheck/blob/main/examples/case76_detail_pimpl_vtable_changed/) |
+| **Source files** | `examples/case76_detail_pimpl_vtable_changed/` |
 
 **Category:** Internal-leak | **Verdict:** BREAKING
 
@@ -40,6 +40,21 @@ instance now dispatches through the slot occupied at runtime by
 `progress()` — wrong return value at best, crash at worst. The
 reshuffle never touches any public *name*; only the slot indices
 move. That makes the break invisible to symbol-level tools.
+
+## Real Failure Demo
+
+**Severity: BREAKING / WRONG RESULT**
+
+```bash
+cmake -S examples -B /tmp/abicheck-examples-build -DCMAKE_BUILD_TYPE=Debug
+cmake --build /tmp/abicheck-examples-build --target case77_detail_pimpl_vtable_changed_app case77_detail_pimpl_vtable_changed_v2
+
+tmp=$(mktemp -d)
+cp /tmp/abicheck-examples-build/case77_detail_pimpl_vtable_changed/app_v1 "$tmp/"
+cp /tmp/abicheck-examples-build/case77_detail_pimpl_vtable_changed/libv2.so "$tmp/libv1.so"
+(cd "$tmp" && LD_LIBRARY_PATH=. ./app_v1)
+# status=50 (expect 1)
+```
 
 ## Why abicheck catches it
 
@@ -124,11 +139,11 @@ If polymorphism must remain part of the public surface, only ever
 
 ## Source files
 
-- [`CMakeLists.txt`](https://github.com/napetrov/abicheck/blob/main/examples/case76_detail_pimpl_vtable_changed/CMakeLists.txt)
-- [`app.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case76_detail_pimpl_vtable_changed/app.cpp)
-- [`v1.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case76_detail_pimpl_vtable_changed/v1.cpp)
-- [`v1.h`](https://github.com/napetrov/abicheck/blob/main/examples/case76_detail_pimpl_vtable_changed/v1.h)
-- [`v2.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case76_detail_pimpl_vtable_changed/v2.cpp)
-- [`v2.h`](https://github.com/napetrov/abicheck/blob/main/examples/case76_detail_pimpl_vtable_changed/v2.h)
+- `CMakeLists.txt`
+- `app.cpp`
+- `v1.cpp`
+- `v1.h`
+- `v2.cpp`
+- `v2.h`
 
 _See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._

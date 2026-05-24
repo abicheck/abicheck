@@ -8,7 +8,7 @@
 | **Platforms** | Linux |
 | **Flags** | ABI break, Bad practice |
 | **Detected `ChangeKind`s** | — |
-| **Source files** | [browse on GitHub](https://github.com/napetrov/abicheck/blob/main/examples/case18_dependency_leak/) |
+| **Source files** | `examples/case18_dependency_leak/` |
 
 **Verdict:** 🔴 BREAKING (project policy + binary layout risk)
 
@@ -174,13 +174,13 @@ Header dependency leak: binary compat, recompile fails
 
 ## Source files
 
-- [`CMakeLists.txt`](https://github.com/napetrov/abicheck/blob/main/examples/case18_dependency_leak/CMakeLists.txt)
-- [`app.c`](https://github.com/napetrov/abicheck/blob/main/examples/case18_dependency_leak/app.c)
-- [`foo_v1.h`](https://github.com/napetrov/abicheck/blob/main/examples/case18_dependency_leak/foo_v1.h)
-- [`foo_v2.h`](https://github.com/napetrov/abicheck/blob/main/examples/case18_dependency_leak/foo_v2.h)
-- [`libfoo_v1.c`](https://github.com/napetrov/abicheck/blob/main/examples/case18_dependency_leak/libfoo_v1.c)
-- [`libfoo_v2.c`](https://github.com/napetrov/abicheck/blob/main/examples/case18_dependency_leak/libfoo_v2.c)
-- [`thirdparty_v1.h`](https://github.com/napetrov/abicheck/blob/main/examples/case18_dependency_leak/thirdparty_v1.h)
-- [`thirdparty_v2.h`](https://github.com/napetrov/abicheck/blob/main/examples/case18_dependency_leak/thirdparty_v2.h)
+- `CMakeLists.txt`
+- `app.c`
+- `foo_v1.h`
+- `foo_v2.h`
+- `libfoo_v1.c`
+- `libfoo_v2.c`
+- `thirdparty_v1.h`
+- `thirdparty_v2.h`
 
 _See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._

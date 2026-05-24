@@ -8,7 +8,7 @@
 | **Platforms** | Linux, macOS |
 | **Flags** | Bad practice |
 | **Detected `ChangeKind`s** | — |
-| **Source files** | [browse on GitHub](https://github.com/napetrov/abicheck/blob/main/examples/case105_concept_tightening/) |
+| **Source files** | `examples/case105_concept_tightening/` |
 
 **Category:** Subtle source break / regression suite | **Verdict:** 🟢 COMPATIBLE (known gap — see below)
 
@@ -110,11 +110,11 @@ g++ -std=c++20 -I. app.cpp -L. -lv2 -o app
 
 ## Source files
 
-- [`CMakeLists.txt`](https://github.com/napetrov/abicheck/blob/main/examples/case105_concept_tightening/CMakeLists.txt)
-- [`app.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case105_concept_tightening/app.cpp)
-- [`v1.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case105_concept_tightening/v1.cpp)
-- [`v1.h`](https://github.com/napetrov/abicheck/blob/main/examples/case105_concept_tightening/v1.h)
-- [`v2.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case105_concept_tightening/v2.cpp)
-- [`v2.h`](https://github.com/napetrov/abicheck/blob/main/examples/case105_concept_tightening/v2.h)
+- `CMakeLists.txt`
+- `app.cpp`
+- `v1.cpp`
+- `v1.h`
+- `v2.cpp`
+- `v2.h`
 
 _See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Addition (Compatible)](by-category/addition.md)._

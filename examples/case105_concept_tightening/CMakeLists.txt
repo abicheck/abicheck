@@ -9,5 +9,6 @@ abicheck_add_case(case105_concept_tightening
     # /std:c++20, gcc/clang use -std=c++20.
     V1_COMPILE_OPTIONS "$<IF:$<CXX_COMPILER_ID:MSVC>,/std:c++20,-std=c++20>"
     V2_COMPILE_OPTIONS "$<IF:$<CXX_COMPILER_ID:MSVC>,/std:c++20,-std=c++20>"
+    APP_COMPILE_OPTIONS "$<IF:$<CXX_COMPILER_ID:MSVC>,/std:c++20,-std=c++20>"
     PLATFORMS linux macos
 )

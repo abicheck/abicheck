@@ -82,3 +82,18 @@ Or use a `__attribute__((weak))` symbol.
 ## References
 
 - [C99 inline semantics](https://www.open-std.org/jtc1/sc22/wg14/www/docs/n1570.pdf)
+
+## Real Failure Demo
+
+**Severity: BREAKING / LOAD-TIME FAILURE**
+
+```bash
+cmake -S examples -B /tmp/abicheck-examples-build -DCMAKE_BUILD_TYPE=Debug
+cmake --build /tmp/abicheck-examples-build --target case60_func_became_inline_app case60_func_became_inline_v2
+
+tmp=$(mktemp -d)
+cp /tmp/abicheck-examples-build/case60_func_became_inline/app_v1 "$tmp/"
+cp /tmp/abicheck-examples-build/case60_func_became_inline/libv2.so "$tmp/libv1.so"
+(cd "$tmp" && LD_LIBRARY_PATH=. ./app_v1)
+# ./app_v1: symbol lookup error: ./app_v1: undefined symbol: fast_abs
+```

@@ -8,7 +8,7 @@
 | **Platforms** | Linux, macOS |
 | **Flags** | ABI break |
 | **Detected `ChangeKind`s** | `value_abi_trait_changed` |
-| **Source files** | [browse on GitHub](https://github.com/napetrov/abicheck/blob/main/examples/case69_trivial_to_nontrivial/) |
+| **Source files** | `examples/case69_trivial_to_nontrivial/` |
 
 **Category:** Calling Convention | **Verdict:** BREAKING
 
@@ -123,11 +123,11 @@ they are invisible to most diff tools but cause silent corruption at runtime.
 
 ## Source files
 
-- [`CMakeLists.txt`](https://github.com/napetrov/abicheck/blob/main/examples/case69_trivial_to_nontrivial/CMakeLists.txt)
-- [`app.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case69_trivial_to_nontrivial/app.cpp)
-- [`v1.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case69_trivial_to_nontrivial/v1.cpp)
-- [`v1.h`](https://github.com/napetrov/abicheck/blob/main/examples/case69_trivial_to_nontrivial/v1.h)
-- [`v2.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case69_trivial_to_nontrivial/v2.cpp)
-- [`v2.h`](https://github.com/napetrov/abicheck/blob/main/examples/case69_trivial_to_nontrivial/v2.h)
+- `CMakeLists.txt`
+- `app.cpp`
+- `v1.cpp`
+- `v1.h`
+- `v2.cpp`
+- `v2.h`
 
 _See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._

@@ -8,7 +8,7 @@
 | **Platforms** | Linux |
 | **Flags** | — |
 | **Detected `ChangeKind`s** | — |
-| **Source files** | [browse on GitHub](https://github.com/napetrov/abicheck/blob/main/examples/case27_symbol_binding_weakened/) |
+| **Source files** | `examples/case27_symbol_binding_weakened/` |
 
 **Verdict:** 🟢 COMPATIBLE
 **abicheck verdict: COMPATIBLE (informational/warning)**
@@ -98,7 +98,7 @@ WEAK symbols are still exported and resolved normally when no override exists. T
 
 ## Source files
 
-- [`CMakeLists.txt`](https://github.com/napetrov/abicheck/blob/main/examples/case27_symbol_binding_weakened/CMakeLists.txt)
-- [`app.c`](https://github.com/napetrov/abicheck/blob/main/examples/case27_symbol_binding_weakened/app.c)
+- `CMakeLists.txt`
+- `app.c`
 
 _See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md)._

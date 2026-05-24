@@ -8,7 +8,7 @@
 | **Platforms** | Linux |
 | **Flags** | ABI break |
 | **Detected `ChangeKind`s** | `calling_convention_changed` |
-| **Source files** | [browse on GitHub](https://github.com/napetrov/abicheck/blob/main/examples/case64_calling_convention_changed/) |
+| **Source files** | `examples/case64_calling_convention_changed/` |
 
 **Category:** Function ABI | **Verdict:** BREAKING
 
@@ -125,11 +125,11 @@ DWARF `DW_AT_calling_convention` attributes between the two binary versions.
 
 ## Source files
 
-- [`CMakeLists.txt`](https://github.com/napetrov/abicheck/blob/main/examples/case64_calling_convention_changed/CMakeLists.txt)
-- [`app.c`](https://github.com/napetrov/abicheck/blob/main/examples/case64_calling_convention_changed/app.c)
-- [`v1.c`](https://github.com/napetrov/abicheck/blob/main/examples/case64_calling_convention_changed/v1.c)
-- [`v1.h`](https://github.com/napetrov/abicheck/blob/main/examples/case64_calling_convention_changed/v1.h)
-- [`v2.c`](https://github.com/napetrov/abicheck/blob/main/examples/case64_calling_convention_changed/v2.c)
-- [`v2.h`](https://github.com/napetrov/abicheck/blob/main/examples/case64_calling_convention_changed/v2.h)
+- `CMakeLists.txt`
+- `app.c`
+- `v1.c`
+- `v1.h`
+- `v2.c`
+- `v2.h`
 
 _See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._

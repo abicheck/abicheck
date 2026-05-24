@@ -8,7 +8,7 @@
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | `internal_type_leaks_via_public_api` |
-| **Source files** | [browse on GitHub](https://github.com/napetrov/abicheck/blob/main/examples/case74_detail_base_class_changed/) |
+| **Source files** | `examples/case74_detail_base_class_changed/` |
 
 **Category:** Internal-leak | **Verdict:** BREAKING
 
@@ -36,6 +36,21 @@ From consumers' perspective it's a binary ABI break:
   their pre-v2 frame slots.
 - Heap-allocated objects from callers compiled against v1 headers
   under-allocate when run against v2 binaries.
+
+## Real Failure Demo
+
+**Severity: BREAKING / MEMORY CORRUPTION**
+
+```bash
+cmake -S examples -B /tmp/abicheck-examples-build -DCMAKE_BUILD_TYPE=Debug
+cmake --build /tmp/abicheck-examples-build --target case75_detail_base_class_changed_app case75_detail_base_class_changed_v2
+
+tmp=$(mktemp -d)
+cp /tmp/abicheck-examples-build/case75_detail_base_class_changed/app_v1 "$tmp/"
+cp /tmp/abicheck-examples-build/case75_detail_base_class_changed/libv2.so "$tmp/libv1.so"
+(cd "$tmp" && LD_LIBRARY_PATH=. ./app_v1)
+# *** stack smashing detected ***: terminated
+```
 
 ## Why abicheck catches it
 
@@ -101,11 +116,11 @@ private:
 
 ## Source files
 
-- [`CMakeLists.txt`](https://github.com/napetrov/abicheck/blob/main/examples/case74_detail_base_class_changed/CMakeLists.txt)
-- [`app.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case74_detail_base_class_changed/app.cpp)
-- [`v1.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case74_detail_base_class_changed/v1.cpp)
-- [`v1.h`](https://github.com/napetrov/abicheck/blob/main/examples/case74_detail_base_class_changed/v1.h)
-- [`v2.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case74_detail_base_class_changed/v2.cpp)
-- [`v2.h`](https://github.com/napetrov/abicheck/blob/main/examples/case74_detail_base_class_changed/v2.h)
+- `CMakeLists.txt`
+- `app.cpp`
+- `v1.cpp`
+- `v1.h`
+- `v2.cpp`
+- `v2.h`
 
 _See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._

@@ -8,7 +8,7 @@
 | **Platforms** | Linux |
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | `func_params_changed` |
-| **Source files** | [browse on GitHub](https://github.com/napetrov/abicheck/blob/main/examples/case02_param_type_change/) |
+| **Source files** | `examples/case02_param_type_change/` |
 
 **Category:** Symbol API | **Verdict:** 🟡 ABI CHANGE (exit 4)
 
@@ -83,11 +83,11 @@ Common in numerical libraries (BLAS, LAPACK) when precision is upgraded — `flo
 
 ## Source files
 
-- [`CMakeLists.txt`](https://github.com/napetrov/abicheck/blob/main/examples/case02_param_type_change/CMakeLists.txt)
-- [`app.c`](https://github.com/napetrov/abicheck/blob/main/examples/case02_param_type_change/app.c)
-- [`v1.c`](https://github.com/napetrov/abicheck/blob/main/examples/case02_param_type_change/v1.c)
-- [`v1.h`](https://github.com/napetrov/abicheck/blob/main/examples/case02_param_type_change/v1.h)
-- [`v2.c`](https://github.com/napetrov/abicheck/blob/main/examples/case02_param_type_change/v2.c)
-- [`v2.h`](https://github.com/napetrov/abicheck/blob/main/examples/case02_param_type_change/v2.h)
+- `CMakeLists.txt`
+- `app.c`
+- `v1.c`
+- `v1.h`
+- `v2.c`
+- `v2.h`
 
 _See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._

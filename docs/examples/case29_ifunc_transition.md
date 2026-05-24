@@ -8,7 +8,7 @@
 | **Platforms** | Linux |
 | **Flags** | — |
 | **Detected `ChangeKind`s** | — |
-| **Source files** | [browse on GitHub](https://github.com/napetrov/abicheck/blob/main/examples/case29_ifunc_transition/) |
+| **Source files** | `examples/case29_ifunc_transition/` |
 
 **Verdict:** 🟢 COMPATIBLE
 **abicheck verdict: COMPATIBLE (informational/warning)**
@@ -106,7 +106,7 @@ IFUNC: PLT/GOT transparent to caller, runtime compat
 
 ## Source files
 
-- [`CMakeLists.txt`](https://github.com/napetrov/abicheck/blob/main/examples/case29_ifunc_transition/CMakeLists.txt)
-- [`app.c`](https://github.com/napetrov/abicheck/blob/main/examples/case29_ifunc_transition/app.c)
+- `CMakeLists.txt`
+- `app.c`
 
 _See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md)._

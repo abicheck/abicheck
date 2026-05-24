@@ -8,7 +8,7 @@
 | **Platforms** | Linux, macOS |
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | `type_kind_changed` |
-| **Source files** | [browse on GitHub](https://github.com/napetrov/abicheck/blob/main/examples/case55_type_kind_changed/) |
+| **Source files** | `examples/case55_type_kind_changed/` |
 
 **Category:** Type Layout | **Verdict:** BREAKING
 
@@ -55,15 +55,30 @@ python3 -m abicheck.cli compare /tmp/v1.json /tmp/v2.json
 
 - [DWARF structure vs union tags](https://dwarfstd.org/doc/DWARF5.pdf)
 
+## Real Failure Demo
+
+**Severity: BREAKING / WRONG RESULT**
+
+```bash
+cmake -S examples -B /tmp/abicheck-examples-build -DCMAKE_BUILD_TYPE=Debug
+cmake --build /tmp/abicheck-examples-build --target case56_type_kind_changed_app case56_type_kind_changed_v2
+
+tmp=$(mktemp -d)
+cp /tmp/abicheck-examples-build/case56_type_kind_changed/app_v1 "$tmp/"
+cp /tmp/abicheck-examples-build/case56_type_kind_changed/libv2.so "$tmp/libv1.so"
+(cd "$tmp" && LD_LIBRARY_PATH=. ./app_v1)
+# sum = 10 / WRONG RESULT: type kind changed (struct -> union)
+```
+
 ---
 
 ## Source files
 
-- [`CMakeLists.txt`](https://github.com/napetrov/abicheck/blob/main/examples/case55_type_kind_changed/CMakeLists.txt)
-- [`app.c`](https://github.com/napetrov/abicheck/blob/main/examples/case55_type_kind_changed/app.c)
-- [`bad.c`](https://github.com/napetrov/abicheck/blob/main/examples/case55_type_kind_changed/bad.c)
-- [`bad.h`](https://github.com/napetrov/abicheck/blob/main/examples/case55_type_kind_changed/bad.h)
-- [`good.c`](https://github.com/napetrov/abicheck/blob/main/examples/case55_type_kind_changed/good.c)
-- [`good.h`](https://github.com/napetrov/abicheck/blob/main/examples/case55_type_kind_changed/good.h)
+- `CMakeLists.txt`
+- `app.c`
+- `bad.c`
+- `bad.h`
+- `good.c`
+- `good.h`
 
 _See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._

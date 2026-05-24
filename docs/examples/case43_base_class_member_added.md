@@ -8,7 +8,7 @@
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | — |
-| **Source files** | [browse on GitHub](https://github.com/napetrov/abicheck/blob/main/examples/case43_base_class_member_added/) |
+| **Source files** | `examples/case43_base_class_member_added/` |
 
 **Category:** C++ Layout | **Verdict:** 🔴 BREAKING
 
@@ -74,11 +74,11 @@ Options:
 
 ## Source files
 
-- [`CMakeLists.txt`](https://github.com/napetrov/abicheck/blob/main/examples/case43_base_class_member_added/CMakeLists.txt)
-- [`app.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case43_base_class_member_added/app.cpp)
-- [`v1.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case43_base_class_member_added/v1.cpp)
-- [`v1.hpp`](https://github.com/napetrov/abicheck/blob/main/examples/case43_base_class_member_added/v1.hpp)
-- [`v2.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case43_base_class_member_added/v2.cpp)
-- [`v2.hpp`](https://github.com/napetrov/abicheck/blob/main/examples/case43_base_class_member_added/v2.hpp)
+- `CMakeLists.txt`
+- `app.cpp`
+- `v1.cpp`
+- `v1.hpp`
+- `v2.cpp`
+- `v2.hpp`
 
 _See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._

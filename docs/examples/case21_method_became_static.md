@@ -8,7 +8,7 @@
 | **Platforms** | Linux |
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | `func_static_changed` |
-| **Source files** | [browse on GitHub](https://github.com/napetrov/abicheck/blob/main/examples/case21_method_became_static/) |
+| **Source files** | `examples/case21_method_became_static/` |
 
 **Verdict:** 🔴 BREAKING (calling convention contract)
 
@@ -66,7 +66,7 @@ No crash is required to prove ABI break — wrong results are enough.
 
 ## Source files
 
-- [`CMakeLists.txt`](https://github.com/napetrov/abicheck/blob/main/examples/case21_method_became_static/CMakeLists.txt)
-- [`app.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case21_method_became_static/app.cpp)
+- `CMakeLists.txt`
+- `app.cpp`
 
 _See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._

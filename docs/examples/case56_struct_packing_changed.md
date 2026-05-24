@@ -8,7 +8,7 @@
 | **Platforms** | Linux, macOS |
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | `struct_packing_changed` |
-| **Source files** | [browse on GitHub](https://github.com/napetrov/abicheck/blob/main/examples/case56_struct_packing_changed/) |
+| **Source files** | `examples/case56_struct_packing_changed/` |
 
 **Category:** Type Layout / DWARF | **Verdict:** BREAKING
 
@@ -62,15 +62,30 @@ python3 -m abicheck.cli compare /tmp/v1.json /tmp/v2.json
 
 - [GCC: Structure Packing Pragmas](https://gcc.gnu.org/onlinedocs/gcc/Structure-Layout-Pragmas.html)
 
+## Real Failure Demo
+
+**Severity: BREAKING / WRONG RESULT**
+
+```bash
+cmake -S examples -B /tmp/abicheck-examples-build -DCMAKE_BUILD_TYPE=Debug
+cmake --build /tmp/abicheck-examples-build --target case57_struct_packing_changed_app case57_struct_packing_changed_v2
+
+tmp=$(mktemp -d)
+cp /tmp/abicheck-examples-build/case57_struct_packing_changed/app_v1 "$tmp/"
+cp /tmp/abicheck-examples-build/case57_struct_packing_changed/libv2.so "$tmp/libv1.so"
+(cd "$tmp" && LD_LIBRARY_PATH=. ./app_v1)
+# value = 22528 / WRONG RESULT: struct packing/layout changed
+```
+
 ---
 
 ## Source files
 
-- [`CMakeLists.txt`](https://github.com/napetrov/abicheck/blob/main/examples/case56_struct_packing_changed/CMakeLists.txt)
-- [`app.c`](https://github.com/napetrov/abicheck/blob/main/examples/case56_struct_packing_changed/app.c)
-- [`bad.c`](https://github.com/napetrov/abicheck/blob/main/examples/case56_struct_packing_changed/bad.c)
-- [`bad.h`](https://github.com/napetrov/abicheck/blob/main/examples/case56_struct_packing_changed/bad.h)
-- [`good.c`](https://github.com/napetrov/abicheck/blob/main/examples/case56_struct_packing_changed/good.c)
-- [`good.h`](https://github.com/napetrov/abicheck/blob/main/examples/case56_struct_packing_changed/good.h)
+- `CMakeLists.txt`
+- `app.c`
+- `bad.c`
+- `bad.h`
+- `good.c`
+- `good.h`
 
 _See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._

@@ -8,7 +8,7 @@
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | — |
 | **Detected `ChangeKind`s** | — |
-| **Source files** | [browse on GitHub](https://github.com/napetrov/abicheck/blob/main/examples/case47_inline_to_outlined/) |
+| **Source files** | `examples/case47_inline_to_outlined/` |
 
 **Category:** Compatible | **Verdict:** 🟢 COMPATIBLE
 
@@ -68,11 +68,11 @@ contexts or LTO-heavy builds) may see different behavior. Document the change.
 
 ## Source files
 
-- [`CMakeLists.txt`](https://github.com/napetrov/abicheck/blob/main/examples/case47_inline_to_outlined/CMakeLists.txt)
-- [`app.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case47_inline_to_outlined/app.cpp)
-- [`v1.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case47_inline_to_outlined/v1.cpp)
-- [`v1.hpp`](https://github.com/napetrov/abicheck/blob/main/examples/case47_inline_to_outlined/v1.hpp)
-- [`v2.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case47_inline_to_outlined/v2.cpp)
-- [`v2.hpp`](https://github.com/napetrov/abicheck/blob/main/examples/case47_inline_to_outlined/v2.hpp)
+- `CMakeLists.txt`
+- `app.cpp`
+- `v1.cpp`
+- `v1.hpp`
+- `v2.cpp`
+- `v2.hpp`
 
 _See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Addition (Compatible)](by-category/addition.md)._

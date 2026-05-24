@@ -8,7 +8,7 @@
 | **Platforms** | Linux, macOS |
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | — |
-| **Source files** | [browse on GitHub](https://github.com/napetrov/abicheck/blob/main/examples/case41_type_changes/) |
+| **Source files** | `examples/case41_type_changes/` |
 
 **Category:** Type / Enum Changes | **Verdict:** BREAKING
 
@@ -120,11 +120,11 @@ bounds in public APIs — use a separate `#define` or function instead.
 
 ## Source files
 
-- [`CMakeLists.txt`](https://github.com/napetrov/abicheck/blob/main/examples/case41_type_changes/CMakeLists.txt)
-- [`app.c`](https://github.com/napetrov/abicheck/blob/main/examples/case41_type_changes/app.c)
-- [`v1.c`](https://github.com/napetrov/abicheck/blob/main/examples/case41_type_changes/v1.c)
-- [`v1.h`](https://github.com/napetrov/abicheck/blob/main/examples/case41_type_changes/v1.h)
-- [`v2.c`](https://github.com/napetrov/abicheck/blob/main/examples/case41_type_changes/v2.c)
-- [`v2.h`](https://github.com/napetrov/abicheck/blob/main/examples/case41_type_changes/v2.h)
+- `CMakeLists.txt`
+- `app.c`
+- `v1.c`
+- `v1.h`
+- `v2.c`
+- `v2.h`
 
 _See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._

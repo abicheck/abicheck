@@ -21,6 +21,23 @@ existing saved model becomes silently corrupt:
 There is **no symbol change**, **no layout change**, **no link error**, **no
 load error**. Every conventional ABI checker reports COMPATIBLE.
 
+## Real Failure Demo
+
+**Severity: BREAKING / PERSISTENCE FORMAT DRIFT**
+
+Old serialized model tags now deserialize as a different model family.
+
+```bash
+cmake -S examples -B /tmp/abicheck-examples-build -DCMAKE_BUILD_TYPE=Debug
+cmake --build /tmp/abicheck-examples-build --target case81_serialization_tag_reassigned_app case81_serialization_tag_reassigned_v2
+
+tmp=$(mktemp -d)
+cp /tmp/abicheck-examples-build/case81_serialization_tag_reassigned/app_v1 "$tmp/"
+cp /tmp/abicheck-examples-build/case81_serialization_tag_reassigned/libv2.so "$tmp/libv1.so"
+(cd "$tmp" && LD_LIBRARY_PATH=. ./app_v1)
+# knn_model_tag = 0x1003; linear_regression = 0x1002
+```
+
 ## Why this is its own ChangeKind
 
 This is a *payload-level* invariant — the binary contract between two

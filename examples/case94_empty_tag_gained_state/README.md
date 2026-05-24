@@ -10,6 +10,23 @@ template, an algorithm overload selector, or any function taking it by value —
 1-byte argument into what is now an 8-byte parameter slot. The callee reads partially
 uninitialized memory, then steps on subsequent stack/register state.
 
+## Real Failure Demo
+
+**Severity: BREAKING / LATENT CALL ABI DRIFT**
+
+The smoke app does not crash, but the public by-value tag changed from empty to stateful. Header-inlined algorithms compiled against v1 pass the old object shape into a v2 function expecting the wider tag.
+
+```bash
+cmake -S examples -B /tmp/abicheck-examples-build -DCMAKE_BUILD_TYPE=Debug
+cmake --build /tmp/abicheck-examples-build --target case94_empty_tag_gained_state_app case94_empty_tag_gained_state_v2
+
+tmp=$(mktemp -d)
+cp /tmp/abicheck-examples-build/case94_empty_tag_gained_state/app_v1 "$tmp/"
+cp /tmp/abicheck-examples-build/case94_empty_tag_gained_state/libv2.so "$tmp/libv1.so"
+(cd "$tmp" && LD_LIBRARY_PATH=. ./app_v1)
+# run(7) = 14 (expect 14)
+```
+
 ## Why this is a oneTBB-flavored break
 
 The pattern is exactly the `tbb::auto_partitioner` / `tbb::simple_partitioner` /

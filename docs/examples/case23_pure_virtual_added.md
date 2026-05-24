@@ -8,7 +8,7 @@
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | `func_pure_virtual_added` |
-| **Source files** | [browse on GitHub](https://github.com/napetrov/abicheck/blob/main/examples/case23_pure_virtual_added/) |
+| **Source files** | `examples/case23_pure_virtual_added/` |
 
 **Verdict:** 🔴 BREAKING
 **abicheck verdict: BREAKING**
@@ -114,7 +114,7 @@ Became pure virtual: direct instantiation causes SIGABRT
 
 ## Source files
 
-- [`CMakeLists.txt`](https://github.com/napetrov/abicheck/blob/main/examples/case23_pure_virtual_added/CMakeLists.txt)
-- [`app.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case23_pure_virtual_added/app.cpp)
+- `CMakeLists.txt`
+- `app.cpp`
 
 _See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._

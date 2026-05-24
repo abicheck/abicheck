@@ -8,7 +8,7 @@
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | — |
-| **Source files** | [browse on GitHub](https://github.com/napetrov/abicheck/blob/main/examples/case48_leaf_struct_through_pointer/) |
+| **Source files** | `examples/case48_leaf_struct_through_pointer/` |
 
 **Category:** Breaking | **Verdict:** 🔴 BREAKING
 
@@ -74,11 +74,11 @@ propagation mechanism as this case. See `case18_dependency_leak` for the externa
 
 ## Source files
 
-- [`CMakeLists.txt`](https://github.com/napetrov/abicheck/blob/main/examples/case48_leaf_struct_through_pointer/CMakeLists.txt)
-- [`app.c`](https://github.com/napetrov/abicheck/blob/main/examples/case48_leaf_struct_through_pointer/app.c)
-- [`v1.c`](https://github.com/napetrov/abicheck/blob/main/examples/case48_leaf_struct_through_pointer/v1.c)
-- [`v1.h`](https://github.com/napetrov/abicheck/blob/main/examples/case48_leaf_struct_through_pointer/v1.h)
-- [`v2.c`](https://github.com/napetrov/abicheck/blob/main/examples/case48_leaf_struct_through_pointer/v2.c)
-- [`v2.h`](https://github.com/napetrov/abicheck/blob/main/examples/case48_leaf_struct_through_pointer/v2.h)
+- `CMakeLists.txt`
+- `app.c`
+- `v1.c`
+- `v1.h`
+- `v2.c`
+- `v2.h`
 
 _See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._

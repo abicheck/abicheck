@@ -8,7 +8,7 @@
 | **Platforms** | Linux |
 | **Flags** | — |
 | **Detected `ChangeKind`s** | — |
-| **Source files** | [browse on GitHub](https://github.com/napetrov/abicheck/blob/main/examples/case51_protected_visibility/) |
+| **Source files** | `examples/case51_protected_visibility/` |
 
 **Category:** ELF / Policy | **Verdict:** 🟢 COMPATIBLE
 
@@ -124,7 +124,7 @@ as an interposition policy change.
 
 ## Source files
 
-- [`CMakeLists.txt`](https://github.com/napetrov/abicheck/blob/main/examples/case51_protected_visibility/CMakeLists.txt)
-- [`app.c`](https://github.com/napetrov/abicheck/blob/main/examples/case51_protected_visibility/app.c)
+- `CMakeLists.txt`
+- `app.c`
 
 _See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md)._

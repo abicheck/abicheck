@@ -8,7 +8,7 @@
 | **Platforms** | Linux, macOS |
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | — |
-| **Source files** | [browse on GitHub](https://github.com/napetrov/abicheck/blob/main/examples/case60_base_class_position_changed/) |
+| **Source files** | `examples/case60_base_class_position_changed/` |
 
 **Category:** C++ Layout | **Verdict:** BREAKING
 
@@ -59,13 +59,28 @@ python3 -m abicheck.cli compare /tmp/v1.json /tmp/v2.json
 
 - [Itanium C++ ABI: class layout](https://itanium-cxx-abi.github.io/cxx-abi/abi.html#class-types)
 
+## Real Failure Demo
+
+**Severity: BREAKING / OBJECT CORRUPTION**
+
+```bash
+cmake -S examples -B /tmp/abicheck-examples-build -DCMAKE_BUILD_TYPE=Debug
+cmake --build /tmp/abicheck-examples-build --target case61_base_class_position_changed_app case61_base_class_position_changed_v2
+
+tmp=$(mktemp -d)
+cp /tmp/abicheck-examples-build/case61_base_class_position_changed/app_v1 "$tmp/"
+cp /tmp/abicheck-examples-build/case61_base_class_position_changed/libv2.so "$tmp/libv1.so"
+(cd "$tmp" && LD_LIBRARY_PATH=. ./app_v1)
+# id = <garbage>; CORRUPTION: base-class order changed, subobject offsets mismatch
+```
+
 ---
 
 ## Source files
 
-- [`CMakeLists.txt`](https://github.com/napetrov/abicheck/blob/main/examples/case60_base_class_position_changed/CMakeLists.txt)
-- [`app.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case60_base_class_position_changed/app.cpp)
-- [`v1.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case60_base_class_position_changed/v1.cpp)
-- [`v2.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case60_base_class_position_changed/v2.cpp)
+- `CMakeLists.txt`
+- `app.cpp`
+- `v1.cpp`
+- `v2.cpp`
 
 _See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._

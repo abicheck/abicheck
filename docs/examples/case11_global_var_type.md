@@ -8,7 +8,7 @@
 | **Platforms** | Linux |
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | `var_type_changed` |
-| **Source files** | [browse on GitHub](https://github.com/napetrov/abicheck/blob/main/examples/case11_global_var_type/) |
+| **Source files** | `examples/case11_global_var_type/` |
 
 **Category:** Type Layout | **Verdict:** 🟡 ABI CHANGE (exit 4)
 
@@ -81,11 +81,11 @@ On little-endian x86 this reads the low 32 bits — garbage for values above `IN
 
 ## Source files
 
-- [`CMakeLists.txt`](https://github.com/napetrov/abicheck/blob/main/examples/case11_global_var_type/CMakeLists.txt)
-- [`app.c`](https://github.com/napetrov/abicheck/blob/main/examples/case11_global_var_type/app.c)
-- [`v1.c`](https://github.com/napetrov/abicheck/blob/main/examples/case11_global_var_type/v1.c)
-- [`v1.h`](https://github.com/napetrov/abicheck/blob/main/examples/case11_global_var_type/v1.h)
-- [`v2.c`](https://github.com/napetrov/abicheck/blob/main/examples/case11_global_var_type/v2.c)
-- [`v2.h`](https://github.com/napetrov/abicheck/blob/main/examples/case11_global_var_type/v2.h)
+- `CMakeLists.txt`
+- `app.c`
+- `v1.c`
+- `v1.h`
+- `v2.c`
+- `v2.h`
 
 _See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._

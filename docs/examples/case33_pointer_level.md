@@ -8,7 +8,7 @@
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | `param_pointer_level_changed` |
-| **Source files** | [browse on GitHub](https://github.com/napetrov/abicheck/blob/main/examples/case33_pointer_level/) |
+| **Source files** | `examples/case33_pointer_level/` |
 
 **Verdict:** 🔴 BREAKING
 **abicheck verdict: BREAKING**
@@ -72,11 +72,11 @@ Pointer level change: wrong dereference depth — SIGSEGV
 
 ## Source files
 
-- [`CMakeLists.txt`](https://github.com/napetrov/abicheck/blob/main/examples/case33_pointer_level/CMakeLists.txt)
-- [`app.c`](https://github.com/napetrov/abicheck/blob/main/examples/case33_pointer_level/app.c)
-- [`v1.c`](https://github.com/napetrov/abicheck/blob/main/examples/case33_pointer_level/v1.c)
-- [`v1.h`](https://github.com/napetrov/abicheck/blob/main/examples/case33_pointer_level/v1.h)
-- [`v2.c`](https://github.com/napetrov/abicheck/blob/main/examples/case33_pointer_level/v2.c)
-- [`v2.h`](https://github.com/napetrov/abicheck/blob/main/examples/case33_pointer_level/v2.h)
+- `CMakeLists.txt`
+- `app.c`
+- `v1.c`
+- `v1.h`
+- `v2.c`
+- `v2.h`
 
 _See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._

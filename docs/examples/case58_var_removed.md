@@ -8,7 +8,7 @@
 | **Platforms** | Linux, macOS |
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | `var_removed` |
-| **Source files** | [browse on GitHub](https://github.com/napetrov/abicheck/blob/main/examples/case58_var_removed/) |
+| **Source files** | `examples/case58_var_removed/` |
 
 **Category:** Symbol API | **Verdict:** BREAKING
 
@@ -64,13 +64,28 @@ Or use a version script to control when symbols are removed.
 
 - [ELF Symbol Versioning](https://www.akkadia.org/drepper/symbol-versioning)
 
+## Real Failure Demo
+
+**Severity: BREAKING / LOAD-TIME FAILURE**
+
+```bash
+cmake -S examples -B /tmp/abicheck-examples-build -DCMAKE_BUILD_TYPE=Debug
+cmake --build /tmp/abicheck-examples-build --target case59_var_removed_app case59_var_removed_v2
+
+tmp=$(mktemp -d)
+cp /tmp/abicheck-examples-build/case59_var_removed/app_v1 "$tmp/"
+cp /tmp/abicheck-examples-build/case59_var_removed/libv2.so "$tmp/libv1.so"
+(cd "$tmp" && LD_LIBRARY_PATH=. ./app_v1)
+# ./app_v1: symbol lookup error: ./app_v1: undefined symbol: lib_debug_level
+```
+
 ---
 
 ## Source files
 
-- [`CMakeLists.txt`](https://github.com/napetrov/abicheck/blob/main/examples/case58_var_removed/CMakeLists.txt)
-- [`app.c`](https://github.com/napetrov/abicheck/blob/main/examples/case58_var_removed/app.c)
-- [`bad.c`](https://github.com/napetrov/abicheck/blob/main/examples/case58_var_removed/bad.c)
-- [`good.c`](https://github.com/napetrov/abicheck/blob/main/examples/case58_var_removed/good.c)
+- `CMakeLists.txt`
+- `app.c`
+- `bad.c`
+- `good.c`
 
 _See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._

@@ -30,6 +30,21 @@ v2 renames `brute_force` → `search_brute`. Mechanically:
   mangled name. Consumer binaries linked against v1 request the old
   symbol at load time and get an unresolved-symbol error.
 
+## Real Failure Demo
+
+**Severity: BREAKING / LOAD-TIME FAILURE**
+
+```bash
+cmake -S examples -B /tmp/abicheck-examples-build -DCMAKE_BUILD_TYPE=Debug
+cmake --build /tmp/abicheck-examples-build --target case86_tag_struct_renamed_app case86_tag_struct_renamed_v2
+
+tmp=$(mktemp -d)
+cp /tmp/abicheck-examples-build/case86_tag_struct_renamed/app_v1 "$tmp/"
+cp /tmp/abicheck-examples-build/case86_tag_struct_renamed/libv2.so "$tmp/libv1.so"
+(cd "$tmp" && LD_LIBRARY_PATH=. ./app_v1)
+# ./app_v1: symbol lookup error: undefined symbol: descriptor<brute_force, classification>::descriptor()
+```
+
 ## Why this is its own ChangeKind
 
 Renaming a *non-empty* class is rare and would already trigger many

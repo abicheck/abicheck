@@ -8,7 +8,7 @@
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | `instantiation_missing_from_binary` |
-| **Source files** | [browse on GitHub](https://github.com/napetrov/abicheck/blob/main/examples/case79_missing_template_instantiation/) |
+| **Source files** | `examples/case79_missing_template_instantiation/` |
 
 **Category:** Header-vs-binary parity | **Verdict:** BREAKING
 
@@ -37,6 +37,21 @@ In v2, the `template class descriptor<double>;` line is dropped from the
 This is the failure mode for oneDAL's "ship `float` instantiation only" build
 trim: the public combinatorics promised by `cpp/oneapi/dal/algo/*/common.hpp`
 must match the explicit instantiations in `*_instantiation.cpp`.
+
+## Real Failure Demo
+
+**Severity: BREAKING / LOAD-TIME FAILURE**
+
+```bash
+cmake -S examples -B /tmp/abicheck-examples-build -DCMAKE_BUILD_TYPE=Debug
+cmake --build /tmp/abicheck-examples-build --target case79_missing_template_instantiation_app case79_missing_template_instantiation_v2
+
+tmp=$(mktemp -d)
+cp /tmp/abicheck-examples-build/case79_missing_template_instantiation/app_v1 "$tmp/"
+cp /tmp/abicheck-examples-build/case79_missing_template_instantiation/libv2.so "$tmp/libv1.so"
+(cd "$tmp" && LD_LIBRARY_PATH=. ./app_v1)
+# ./app_v1: symbol lookup error: undefined symbol: _ZN5mylib10descriptorIdE13set_thresholdEd
+```
 
 ## Why abicheck catches it
 
@@ -73,11 +88,11 @@ example.
 
 ## Source files
 
-- [`CMakeLists.txt`](https://github.com/napetrov/abicheck/blob/main/examples/case79_missing_template_instantiation/CMakeLists.txt)
-- [`app.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case79_missing_template_instantiation/app.cpp)
-- [`v1.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case79_missing_template_instantiation/v1.cpp)
-- [`v1.h`](https://github.com/napetrov/abicheck/blob/main/examples/case79_missing_template_instantiation/v1.h)
-- [`v2.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case79_missing_template_instantiation/v2.cpp)
-- [`v2.h`](https://github.com/napetrov/abicheck/blob/main/examples/case79_missing_template_instantiation/v2.h)
+- `CMakeLists.txt`
+- `app.cpp`
+- `v1.cpp`
+- `v1.h`
+- `v2.cpp`
+- `v2.h`
 
 _See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._

@@ -8,7 +8,7 @@
 | **Platforms** | Linux |
 | **Flags** | — |
 | **Detected `ChangeKind`s** | — |
-| **Source files** | [browse on GitHub](https://github.com/napetrov/abicheck/blob/main/examples/case13_symbol_versioning/) |
+| **Source files** | `examples/case13_symbol_versioning/` |
 
 **Category:** ELF/Linker  
 **Verdict:** 🟢 COMPATIBLE — `symbol_version_defined_added: LIBFOO_1.0`  
@@ -48,6 +48,25 @@ changes:
 The ELF detector sees `LIBFOO_1.0` in v2's `.gnu.version_d` section but not in v1 → version definition *added*. This is a `compatible_addition`, not a break.
 
 ---
+
+## Real Failure Demo
+
+**Severity: COMPATIBLE / VERSIONING QUALITY**
+
+The old binary keeps running when the v2 library adds GNU symbol versions, but
+the real observable difference is in ELF metadata: v1 has no version section;
+v2 exports the public ABI under `LIBFOO_1.0`.
+
+```bash
+cmake -S examples -B /tmp/abicheck-examples-build -DCMAKE_BUILD_TYPE=Debug
+cmake --build /tmp/abicheck-examples-build --target case13_symbol_versioning_app case13_symbol_versioning_v2
+
+readelf --version-info /tmp/abicheck-examples-build/case13_symbol_versioning/libv1.so
+# No version information found in this file.
+
+readelf --version-info /tmp/abicheck-examples-build/case13_symbol_versioning/libv2.so | grep LIBFOO_1.0
+# 2 (LIBFOO_1.0) ... Name: LIBFOO_1.0
+```
 
 ## Why it is COMPATIBLE (unversioned → versioned)
 
@@ -142,10 +161,10 @@ entry with size=0), but correctly captures `LIBFOO_1.0` as a **version definitio
 
 ## Source files
 
-- [`CMakeLists.txt`](https://github.com/napetrov/abicheck/blob/main/examples/case13_symbol_versioning/CMakeLists.txt)
-- [`app.c`](https://github.com/napetrov/abicheck/blob/main/examples/case13_symbol_versioning/app.c)
-- [`bad.c`](https://github.com/napetrov/abicheck/blob/main/examples/case13_symbol_versioning/bad.c)
-- [`good.c`](https://github.com/napetrov/abicheck/blob/main/examples/case13_symbol_versioning/good.c)
-- [`libfoo.map`](https://github.com/napetrov/abicheck/blob/main/examples/case13_symbol_versioning/libfoo.map)
+- `CMakeLists.txt`
+- `app.c`
+- `bad.c`
+- `good.c`
+- `libfoo.map`
 
 _See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md)._

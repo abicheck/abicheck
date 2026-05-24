@@ -25,9 +25,6 @@ struct wrapped {
 // (`std::same_as` is in <concepts>, but the same_as constraint is
 // satisfied by the operator's return type.)
 
-template <mylib::Addable T>
-T cs_check_addable_only();  // declaration only — proves the concept is satisfiable.
-
 int main() {
     // *** Source-break demonstration ***
     // Under v1.h, `wrapped` satisfies `Addable` and the next line
@@ -35,10 +32,9 @@ int main() {
     // and `wrapped` is not default-constructible, so the same line
     // fails to compile:
     //
-    //   error: template constraint failure for ‘template<Addable T>’
+    //   error: static assertion failed
     //   note: the expression ‘T()’ would be ill-formed
-    auto check = &cs_check_addable_only<wrapped>;
-    (void)check;
+    static_assert(mylib::Addable<wrapped>);
 
     // Runtime: call the int instantiation that the library exports.
     int r = mylib::sum(2, 3);

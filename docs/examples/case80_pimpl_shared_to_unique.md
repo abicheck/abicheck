@@ -8,7 +8,7 @@
 | **Platforms** | Linux, macOS |
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | `internal_type_leaks_via_public_api` |
-| **Source files** | [browse on GitHub](https://github.com/napetrov/abicheck/blob/main/examples/case80_pimpl_shared_to_unique/) |
+| **Source files** | `examples/case80_pimpl_shared_to_unique/` |
 
 **Category:** Pimpl ABI | **Verdict:** BREAKING
 
@@ -42,6 +42,23 @@ so the containing class even shrinks — the failure isn't "size grew", it is:
    move-only. Consumer code that copied a `descriptor` compiles under v1,
    refuses under v2.
 
+## Real Failure Demo
+
+**Severity: BREAKING / ABI SHAPE CHANGE**
+
+This smoke app still works because it does not copy or share ownership. The real break is that the public object field changes from shared ownership ABI to unique ownership ABI, changing size, copyability, and inline member code expectations.
+
+```bash
+cmake -S examples -B /tmp/abicheck-examples-build -DCMAKE_BUILD_TYPE=Debug
+cmake --build /tmp/abicheck-examples-build --target case80_pimpl_shared_to_unique_app case80_pimpl_shared_to_unique_v2
+
+tmp=$(mktemp -d)
+cp /tmp/abicheck-examples-build/case80_pimpl_shared_to_unique/app_v1 "$tmp/"
+cp /tmp/abicheck-examples-build/case80_pimpl_shared_to_unique/libv2.so "$tmp/libv1.so"
+(cd "$tmp" && LD_LIBRARY_PATH=. ./app_v1)
+# class_count = 7 (expect 7)
+```
+
 ## Why abicheck catches it
 
 The existing `type_field_type_changed` detector fires on `descriptor::impl_`
@@ -73,11 +90,11 @@ the API" cleanup without realizing it is binary-incompatible.
 
 ## Source files
 
-- [`CMakeLists.txt`](https://github.com/napetrov/abicheck/blob/main/examples/case80_pimpl_shared_to_unique/CMakeLists.txt)
-- [`app.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case80_pimpl_shared_to_unique/app.cpp)
-- [`v1.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case80_pimpl_shared_to_unique/v1.cpp)
-- [`v1.h`](https://github.com/napetrov/abicheck/blob/main/examples/case80_pimpl_shared_to_unique/v1.h)
-- [`v2.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case80_pimpl_shared_to_unique/v2.cpp)
-- [`v2.h`](https://github.com/napetrov/abicheck/blob/main/examples/case80_pimpl_shared_to_unique/v2.h)
+- `CMakeLists.txt`
+- `app.cpp`
+- `v1.cpp`
+- `v1.h`
+- `v2.cpp`
+- `v2.h`
 
 _See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._

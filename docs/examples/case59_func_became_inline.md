@@ -8,7 +8,7 @@
 | **Platforms** | Linux, macOS |
 | **Flags** | ABI break |
 | **Detected `ChangeKind`s** | `func_removed` |
-| **Source files** | [browse on GitHub](https://github.com/napetrov/abicheck/blob/main/examples/case59_func_became_inline/) |
+| **Source files** | `examples/case59_func_became_inline/` |
 
 **Category:** Symbol API | **Verdict:** BREAKING (API_BREAK)
 
@@ -93,15 +93,30 @@ Or use a `__attribute__((weak))` symbol.
 
 - [C99 inline semantics](https://www.open-std.org/jtc1/sc22/wg14/www/docs/n1570.pdf)
 
+## Real Failure Demo
+
+**Severity: BREAKING / LOAD-TIME FAILURE**
+
+```bash
+cmake -S examples -B /tmp/abicheck-examples-build -DCMAKE_BUILD_TYPE=Debug
+cmake --build /tmp/abicheck-examples-build --target case60_func_became_inline_app case60_func_became_inline_v2
+
+tmp=$(mktemp -d)
+cp /tmp/abicheck-examples-build/case60_func_became_inline/app_v1 "$tmp/"
+cp /tmp/abicheck-examples-build/case60_func_became_inline/libv2.so "$tmp/libv1.so"
+(cd "$tmp" && LD_LIBRARY_PATH=. ./app_v1)
+# ./app_v1: symbol lookup error: ./app_v1: undefined symbol: fast_abs
+```
+
 ---
 
 ## Source files
 
-- [`CMakeLists.txt`](https://github.com/napetrov/abicheck/blob/main/examples/case59_func_became_inline/CMakeLists.txt)
-- [`app.c`](https://github.com/napetrov/abicheck/blob/main/examples/case59_func_became_inline/app.c)
-- [`bad.c`](https://github.com/napetrov/abicheck/blob/main/examples/case59_func_became_inline/bad.c)
-- [`bad.h`](https://github.com/napetrov/abicheck/blob/main/examples/case59_func_became_inline/bad.h)
-- [`good.c`](https://github.com/napetrov/abicheck/blob/main/examples/case59_func_became_inline/good.c)
-- [`good.h`](https://github.com/napetrov/abicheck/blob/main/examples/case59_func_became_inline/good.h)
+- `CMakeLists.txt`
+- `app.c`
+- `bad.c`
+- `bad.h`
+- `good.c`
+- `good.h`
 
 _See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._

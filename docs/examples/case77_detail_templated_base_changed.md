@@ -8,7 +8,7 @@
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | `internal_type_leaks_via_public_api` |
-| **Source files** | [browse on GitHub](https://github.com/napetrov/abicheck/blob/main/examples/case77_detail_templated_base_changed/) |
+| **Source files** | `examples/case77_detail_templated_base_changed/` |
 
 **Category:** Internal-leak | **Verdict:** BREAKING
 
@@ -42,6 +42,21 @@ field, which grows *every instantiation* simultaneously:
 
 case74 verifies the simple inheritance edge. case77 verifies that the leak
 reachability walker follows template-instantiation edges into `detail::`.
+
+## Real Failure Demo
+
+**Severity: BREAKING / MEMORY CORRUPTION**
+
+```bash
+cmake -S examples -B /tmp/abicheck-examples-build -DCMAKE_BUILD_TYPE=Debug
+cmake --build /tmp/abicheck-examples-build --target case77_detail_templated_base_changed_app case77_detail_templated_base_changed_v2
+
+tmp=$(mktemp -d)
+cp /tmp/abicheck-examples-build/case77_detail_templated_base_changed/app_v1 "$tmp/"
+cp /tmp/abicheck-examples-build/case77_detail_templated_base_changed/libv2.so "$tmp/libv1.so"
+(cd "$tmp" && LD_LIBRARY_PATH=. ./app_v1)
+# *** stack smashing detected ***: terminated
+```
 
 ## Why abicheck catches it
 
@@ -94,11 +109,11 @@ the binary layout of every shipped algorithm descriptor.
 
 ## Source files
 
-- [`CMakeLists.txt`](https://github.com/napetrov/abicheck/blob/main/examples/case77_detail_templated_base_changed/CMakeLists.txt)
-- [`app.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case77_detail_templated_base_changed/app.cpp)
-- [`v1.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case77_detail_templated_base_changed/v1.cpp)
-- [`v1.h`](https://github.com/napetrov/abicheck/blob/main/examples/case77_detail_templated_base_changed/v1.h)
-- [`v2.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case77_detail_templated_base_changed/v2.cpp)
-- [`v2.h`](https://github.com/napetrov/abicheck/blob/main/examples/case77_detail_templated_base_changed/v2.h)
+- `CMakeLists.txt`
+- `app.cpp`
+- `v1.cpp`
+- `v1.h`
+- `v2.cpp`
+- `v2.h`
 
 _See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._

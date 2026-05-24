@@ -8,7 +8,7 @@
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | — |
 | **Detected `ChangeKind`s** | — |
-| **Source files** | [browse on GitHub](https://github.com/napetrov/abicheck/blob/main/examples/case116_cxx_standard_floor_raised/) |
+| **Source files** | `examples/case116_cxx_standard_floor_raised/` |
 
 ## What this case demonstrates
 
@@ -42,11 +42,11 @@ fixture for the matrix-detector channel.
 
 ## Source files
 
-- [`CMakeLists.txt`](https://github.com/napetrov/abicheck/blob/main/examples/case116_cxx_standard_floor_raised/CMakeLists.txt)
-- [`app.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case116_cxx_standard_floor_raised/app.cpp)
-- [`v1.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case116_cxx_standard_floor_raised/v1.cpp)
-- [`v1.h`](https://github.com/napetrov/abicheck/blob/main/examples/case116_cxx_standard_floor_raised/v1.h)
-- [`v2.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case116_cxx_standard_floor_raised/v2.cpp)
-- [`v2.h`](https://github.com/napetrov/abicheck/blob/main/examples/case116_cxx_standard_floor_raised/v2.h)
+- `CMakeLists.txt`
+- `app.cpp`
+- `v1.cpp`
+- `v1.h`
+- `v2.cpp`
+- `v2.h`
 
 _See also: [Examples overview](index.md) · [All NO_CHANGE cases](by-verdict/no-change.md) · [Category: No Change](by-category/no_change.md)._

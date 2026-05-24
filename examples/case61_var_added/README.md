@@ -7,6 +7,23 @@
 v1 exports `lib_version`. v2 adds a new global variable `lib_build_number`.
 All existing symbols are unchanged — this is a purely additive change.
 
+## Real Failure Demo
+
+**Severity: COMPATIBLE - NO FAILURE EXPECTED**
+
+This is an additive ABI change. The old app does not reference the new global, so runtime substitution is safe.
+
+```bash
+cmake -S examples -B /tmp/abicheck-examples-build -DCMAKE_BUILD_TYPE=Debug
+cmake --build /tmp/abicheck-examples-build --target case62_var_added_app case62_var_added_v2
+
+tmp=$(mktemp -d)
+cp /tmp/abicheck-examples-build/case62_var_added/app_v1 "$tmp/"
+cp /tmp/abicheck-examples-build/case62_var_added/libv2.so "$tmp/libv1.so"
+(cd "$tmp" && LD_LIBRARY_PATH=. ./app_v1)
+# version = 2 / get_version() = 2
+```
+
 ## Why this is compatible
 
 - Existing binaries never reference `lib_build_number`, so it doesn't affect them.

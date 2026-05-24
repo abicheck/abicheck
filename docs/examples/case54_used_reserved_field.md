@@ -8,7 +8,7 @@
 | **Platforms** | Linux, macOS |
 | **Flags** | — |
 | **Detected `ChangeKind`s** | `used_reserved_field` |
-| **Source files** | [browse on GitHub](https://github.com/napetrov/abicheck/blob/main/examples/case54_used_reserved_field/) |
+| **Source files** | `examples/case54_used_reserved_field/` |
 
 **Category:** Type Layout | **Verdict:** COMPATIBLE
 
@@ -71,15 +71,32 @@ typedef struct {
 
 - [Preserving ABI with reserved fields](https://www.akkadia.org/drepper/dsohowto.pdf)
 
+## Real Failure Demo
+
+**Severity: BAD PRACTICE / ABI RISK**
+
+The small app still prints the old value, but v1 consumes a reserved field that v2 expects to own. The failure is latent: future library code may reinterpret that field and corrupt caller state.
+
+```bash
+cmake -S examples -B /tmp/abicheck-examples-build -DCMAKE_BUILD_TYPE=Debug
+cmake --build /tmp/abicheck-examples-build --target case55_used_reserved_field_app case55_used_reserved_field_v2
+
+tmp=$(mktemp -d)
+cp /tmp/abicheck-examples-build/case55_used_reserved_field/app_v1 "$tmp/"
+cp /tmp/abicheck-examples-build/case55_used_reserved_field/libv2.so "$tmp/libv1.so"
+(cd "$tmp" && LD_LIBRARY_PATH=. ./app_v1)
+# flags = 0
+```
+
 ---
 
 ## Source files
 
-- [`CMakeLists.txt`](https://github.com/napetrov/abicheck/blob/main/examples/case54_used_reserved_field/CMakeLists.txt)
-- [`app.c`](https://github.com/napetrov/abicheck/blob/main/examples/case54_used_reserved_field/app.c)
-- [`bad.c`](https://github.com/napetrov/abicheck/blob/main/examples/case54_used_reserved_field/bad.c)
-- [`bad.h`](https://github.com/napetrov/abicheck/blob/main/examples/case54_used_reserved_field/bad.h)
-- [`good.c`](https://github.com/napetrov/abicheck/blob/main/examples/case54_used_reserved_field/good.c)
-- [`good.h`](https://github.com/napetrov/abicheck/blob/main/examples/case54_used_reserved_field/good.h)
+- `CMakeLists.txt`
+- `app.c`
+- `bad.c`
+- `bad.h`
+- `good.c`
+- `good.h`
 
 _See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md)._

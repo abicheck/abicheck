@@ -8,7 +8,7 @@
 | **Platforms** | Linux, macOS, Windows |
 | **Flags** | — |
 | **Detected `ChangeKind`s** | `experimental_graduated`, `func_added` |
-| **Source files** | [browse on GitHub](https://github.com/napetrov/abicheck/blob/main/examples/case117_experimental_graduated/) |
+| **Source files** | `examples/case117_experimental_graduated/` |
 
 ## What this case demonstrates
 
@@ -41,11 +41,11 @@ additive.
 
 ## Source files
 
-- [`CMakeLists.txt`](https://github.com/napetrov/abicheck/blob/main/examples/case117_experimental_graduated/CMakeLists.txt)
-- [`app.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case117_experimental_graduated/app.cpp)
-- [`v1.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case117_experimental_graduated/v1.cpp)
-- [`v1.h`](https://github.com/napetrov/abicheck/blob/main/examples/case117_experimental_graduated/v1.h)
-- [`v2.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case117_experimental_graduated/v2.cpp)
-- [`v2.h`](https://github.com/napetrov/abicheck/blob/main/examples/case117_experimental_graduated/v2.h)
+- `CMakeLists.txt`
+- `app.cpp`
+- `v1.cpp`
+- `v1.h`
+- `v2.cpp`
+- `v2.h`
 
 _See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Addition (Compatible)](by-category/addition.md)._

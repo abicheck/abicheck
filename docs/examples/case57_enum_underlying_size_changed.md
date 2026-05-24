@@ -8,7 +8,7 @@
 | **Platforms** | Linux, macOS |
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | `enum_underlying_size_changed` |
-| **Source files** | [browse on GitHub](https://github.com/napetrov/abicheck/blob/main/examples/case57_enum_underlying_size_changed/) |
+| **Source files** | `examples/case57_enum_underlying_size_changed/` |
 
 **Category:** Type Layout | **Verdict:** BREAKING
 
@@ -58,15 +58,30 @@ python3 -m abicheck.cli compare /tmp/v1.json /tmp/v2.json
 
 - [C11 6.7.2.2: Enumeration specifiers](https://www.open-std.org/jtc1/sc22/wg14/www/docs/n1570.pdf)
 
+## Real Failure Demo
+
+**Severity: BREAKING / WRONG RESULT**
+
+```bash
+cmake -S examples -B /tmp/abicheck-examples-build -DCMAKE_BUILD_TYPE=Debug
+cmake --build /tmp/abicheck-examples-build --target case58_enum_underlying_size_changed_app case58_enum_underlying_size_changed_v2
+
+tmp=$(mktemp -d)
+cp /tmp/abicheck-examples-build/case58_enum_underlying_size_changed/app_v1 "$tmp/"
+cp /tmp/abicheck-examples-build/case58_enum_underlying_size_changed/libv2.so "$tmp/libv1.so"
+(cd "$tmp" && LD_LIBRARY_PATH=. ./app_v1)
+# color = 2; alpha = 0 / WRONG RESULT: enum underlying size/layout changed
+```
+
 ---
 
 ## Source files
 
-- [`CMakeLists.txt`](https://github.com/napetrov/abicheck/blob/main/examples/case57_enum_underlying_size_changed/CMakeLists.txt)
-- [`app.c`](https://github.com/napetrov/abicheck/blob/main/examples/case57_enum_underlying_size_changed/app.c)
-- [`bad.c`](https://github.com/napetrov/abicheck/blob/main/examples/case57_enum_underlying_size_changed/bad.c)
-- [`bad.h`](https://github.com/napetrov/abicheck/blob/main/examples/case57_enum_underlying_size_changed/bad.h)
-- [`good.c`](https://github.com/napetrov/abicheck/blob/main/examples/case57_enum_underlying_size_changed/good.c)
-- [`good.h`](https://github.com/napetrov/abicheck/blob/main/examples/case57_enum_underlying_size_changed/good.h)
+- `CMakeLists.txt`
+- `app.c`
+- `bad.c`
+- `bad.h`
+- `good.c`
+- `good.h`
 
 _See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._

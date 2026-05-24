@@ -8,7 +8,7 @@
 | **Platforms** | Linux, macOS |
 | **Flags** | ABI break |
 | **Detected `ChangeKind`s** | `serialization_tag_changed` |
-| **Source files** | [browse on GitHub](https://github.com/napetrov/abicheck/blob/main/examples/case81_serialization_tag_reassigned/) |
+| **Source files** | `examples/case81_serialization_tag_reassigned/` |
 
 **Category:** Payload ABI | **Verdict:** BREAKING
 
@@ -30,6 +30,23 @@ existing saved model becomes silently corrupt:
 
 There is **no symbol change**, **no layout change**, **no link error**, **no
 load error**. Every conventional ABI checker reports COMPATIBLE.
+
+## Real Failure Demo
+
+**Severity: BREAKING / PERSISTENCE FORMAT DRIFT**
+
+Old serialized model tags now deserialize as a different model family.
+
+```bash
+cmake -S examples -B /tmp/abicheck-examples-build -DCMAKE_BUILD_TYPE=Debug
+cmake --build /tmp/abicheck-examples-build --target case81_serialization_tag_reassigned_app case81_serialization_tag_reassigned_v2
+
+tmp=$(mktemp -d)
+cp /tmp/abicheck-examples-build/case81_serialization_tag_reassigned/app_v1 "$tmp/"
+cp /tmp/abicheck-examples-build/case81_serialization_tag_reassigned/libv2.so "$tmp/libv1.so"
+(cd "$tmp" && LD_LIBRARY_PATH=. ./app_v1)
+# knn_model_tag = 0x1003; linear_regression = 0x1002
+```
 
 ## Why this is its own ChangeKind
 
@@ -72,11 +89,11 @@ file format — changing them is on par with changing a wire protocol field.
 
 ## Source files
 
-- [`CMakeLists.txt`](https://github.com/napetrov/abicheck/blob/main/examples/case81_serialization_tag_reassigned/CMakeLists.txt)
-- [`app.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case81_serialization_tag_reassigned/app.cpp)
-- [`v1.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case81_serialization_tag_reassigned/v1.cpp)
-- [`v1.h`](https://github.com/napetrov/abicheck/blob/main/examples/case81_serialization_tag_reassigned/v1.h)
-- [`v2.cpp`](https://github.com/napetrov/abicheck/blob/main/examples/case81_serialization_tag_reassigned/v2.cpp)
-- [`v2.h`](https://github.com/napetrov/abicheck/blob/main/examples/case81_serialization_tag_reassigned/v2.h)
+- `CMakeLists.txt`
+- `app.cpp`
+- `v1.cpp`
+- `v1.h`
+- `v2.cpp`
+- `v2.h`
 
 _See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._

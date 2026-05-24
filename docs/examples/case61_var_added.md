@@ -8,7 +8,7 @@
 | **Platforms** | Linux, macOS |
 | **Flags** | — |
 | **Detected `ChangeKind`s** | `var_added` |
-| **Source files** | [browse on GitHub](https://github.com/napetrov/abicheck/blob/main/examples/case61_var_added/) |
+| **Source files** | `examples/case61_var_added/` |
 
 **Category:** Symbol API | **Verdict:** COMPATIBLE
 
@@ -16,6 +16,23 @@
 
 v1 exports `lib_version`. v2 adds a new global variable `lib_build_number`.
 All existing symbols are unchanged — this is a purely additive change.
+
+## Real Failure Demo
+
+**Severity: COMPATIBLE - NO FAILURE EXPECTED**
+
+This is an additive ABI change. The old app does not reference the new global, so runtime substitution is safe.
+
+```bash
+cmake -S examples -B /tmp/abicheck-examples-build -DCMAKE_BUILD_TYPE=Debug
+cmake --build /tmp/abicheck-examples-build --target case62_var_added_app case62_var_added_v2
+
+tmp=$(mktemp -d)
+cp /tmp/abicheck-examples-build/case62_var_added/app_v1 "$tmp/"
+cp /tmp/abicheck-examples-build/case62_var_added/libv2.so "$tmp/libv1.so"
+(cd "$tmp" && LD_LIBRARY_PATH=. ./app_v1)
+# version = 2 / get_version() = 2
+```
 
 ## Why this is compatible
 
@@ -51,9 +68,9 @@ python3 -m abicheck.cli compare /tmp/v1.json /tmp/v2.json
 
 ## Source files
 
-- [`CMakeLists.txt`](https://github.com/napetrov/abicheck/blob/main/examples/case61_var_added/CMakeLists.txt)
-- [`app.c`](https://github.com/napetrov/abicheck/blob/main/examples/case61_var_added/app.c)
-- [`bad.c`](https://github.com/napetrov/abicheck/blob/main/examples/case61_var_added/bad.c)
-- [`good.c`](https://github.com/napetrov/abicheck/blob/main/examples/case61_var_added/good.c)
+- `CMakeLists.txt`
+- `app.c`
+- `bad.c`
+- `good.c`
 
 _See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Addition (Compatible)](by-category/addition.md)._
