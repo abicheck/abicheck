@@ -219,7 +219,13 @@ class TestFrozenNamespaceBlocksDowngrade:
         ])
         pf = PolicyFile(
             base_policy="strict_abi",
-            overrides={ChangeKind.FUNC_PARAMS_CHANGED: Verdict.COMPATIBLE},
+            overrides={
+                ChangeKind.FUNC_PARAMS_CHANGED: Verdict.COMPATIBLE,
+                # Param-widening also trips the OVERLOAD_SET_REROUTED RISK
+                # detector; downgrade it too so the only thing left
+                # deciding the verdict is the override under test.
+                ChangeKind.OVERLOAD_SET_REROUTED: Verdict.COMPATIBLE,
+            },
             frozen_namespaces=["**::detail::r1::*"],
         )
         r = compare(old, new, policy_file=pf)
