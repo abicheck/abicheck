@@ -3,12 +3,13 @@
 
 Listed in `QUALITY_KINDS` — metadata/quality issues, not ABI breaks.
 
-_10 case(s)._ [← back to all examples](../index.md)
+_11 case(s)._ [← back to all examples](../index.md)
 
 | Case | Title | Verdict | Category |
 |------|-------|---------|----------|
 | [case05_soname](../case05_soname.md) | Missing SONAME | 🟢 COMPATIBLE | Quality (Compatible) |
 | [case115_api_depends_on_consumer_env](../case115_api_depends_on_consumer_env.md) | case115 — public API depends on consumer build environment (RISK) | 🟢 COMPATIBLE | Quality (Compatible) |
+| [case121_toolchain_flag_drift](../case121_toolchain_flag_drift.md) | Toolchain flag drift (`toolchain_flag_drift`) | 🟢 COMPATIBLE | Quality (Compatible) |
 | [case13_symbol_versioning](../case13_symbol_versioning.md) | Symbol Versioning Script | 🟢 COMPATIBLE | Quality (Compatible) |
 | [case27_symbol_binding_weakened](../case27_symbol_binding_weakened.md) | Case 27 — Symbol Binding Weakened (GLOBAL → WEAK) | 🟢 COMPATIBLE | Quality (Compatible) |
 | [case29_ifunc_transition](../case29_ifunc_transition.md) | Case 29 — GNU IFUNC Transition | 🟢 COMPATIBLE | Quality (Compatible) |

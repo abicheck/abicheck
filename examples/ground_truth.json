@@ -1418,6 +1418,30 @@
       "bad_practice": false,
       "description": "An extern \"C\" runtime entry inside a contractually-frozen namespace (mirrors oneTBB's `detail::r1`) has its parameter and return types widened in place. The exported symbol name is unchanged but callers built against v1 pass int into what is now a long slot. Detected by the existing FUNC_PARAMS_CHANGED / FUNC_RETURN_CHANGED detectors; the new `frozen_namespaces:` policy field additionally tags the finding via Change.frozen_namespace_violation and refuses any `overrides:` entry that would downgrade it. See policy.yaml in the case directory.",
       "expected_kinds": ["func_params_changed", "func_return_changed"]
+    },
+    "case121_toolchain_flag_drift": {
+      "expected": "COMPATIBLE",
+      "category": "quality",
+      "platforms": [
+        "linux"
+      ],
+      "abi_break": false,
+      "api_break": false,
+      "bad_practice": true,
+      "description": "Public surface and every exported symbol are identical between v1 and v2; only the ABI-affecting compiler flag set differs (v2 adds -fshort-enums). The toolchain-flag drift detector parses DW_AT_producer and reports the mismatch as a compatible, informational quality signal — a leading indicator that the two builds were made under different ABI assumptions, before that drift turns into a real layout break on a library that exposes enums/packed structs/a different data model.",
+      "expected_kinds": ["toolchain_flag_drift"]
+    },
+    "case122_glibcxx_dual_abi_flip": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux"
+      ],
+      "abi_break": true,
+      "api_break": false,
+      "bad_practice": true,
+      "description": "Identical C++ source built once with _GLIBCXX_USE_CXX11_ABI=0 (v1) and once with =1 (v2). GNU libstdc++ ships two incompatible std::string/std::list ABIs selected by this macro, so every std::string-bearing exported symbol gets a different mangled name (std::__cxx11::basic_string vs the legacy std::basic_string). abicheck recognises the mass-churn signature and collapses it into a single glibcxx_dual_abi_flip_detected diagnostic alongside the underlying func_removed/func_added evidence; verdict is BREAKING. GNU libstdc++ only.",
+      "expected_kinds": ["glibcxx_dual_abi_flip_detected", "func_removed"]
     }
   }
 }

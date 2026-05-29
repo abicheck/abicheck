@@ -145,6 +145,7 @@ def _diff_advanced_dwarf(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         "value_abi_trait_changed": ChangeKind.VALUE_ABI_TRAIT_CHANGED,
         "struct_packing_changed": ChangeKind.STRUCT_PACKING_CHANGED,
         "toolchain_flag_drift": ChangeKind.TOOLCHAIN_FLAG_DRIFT,
+        "vector_abi_changed": ChangeKind.VECTOR_ABI_CHANGED,
         "type_visibility_changed": ChangeKind.TYPE_VISIBILITY_CHANGED,
         "frame_register_changed": ChangeKind.FRAME_REGISTER_CHANGED,
     }

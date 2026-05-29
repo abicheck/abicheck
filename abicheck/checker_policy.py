@@ -178,6 +178,13 @@ class ChangeKind(str, Enum):
     FRAME_REGISTER_CHANGED = (
         "frame_register_changed"  # CFA/frame-pointer convention changed (#117)
     )
+    VECTOR_ABI_CHANGED = (
+        # Vector-function (SIMD clone) ABI selection drifted between versions:
+        # the vectorized call variants of a function resolve to a different
+        # ABI. Detected from vector-ABI compiler flags in DW_AT_producer
+        # (-mveclibabi= GCC, -fveclib= clang, -vecabi= Intel-style).
+        "vector_abi_changed"
+    )
 
     # Sprint 2 — gap detectors
     FUNC_DELETED = "func_deleted"  # = delete added → BREAKING (was callable)

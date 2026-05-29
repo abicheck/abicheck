@@ -109,6 +109,7 @@ These changes are immediately incompatible with existing compiled binaries.
 | `struct_field_type_changed` | A struct field changed its type according to DWARF. Layout and semantics change for that field. |
 | `struct_alignment_changed` | `alignof(T)` changed according to DWARF. Critical for SIMD types and cross-platform code. |
 | `calling_convention_changed` | The calling convention for a function changed (from DWARF `DW_AT_calling_convention`). Arguments are passed via different registers or stack layout. |
+| `vector_abi_changed` | The vector-function (SIMD clone) ABI selection drifted between builds (from vector-ABI flags in DWARF `DW_AT_producer`: `-mveclibabi=` GCC, `-fveclib=` clang, `-vecabi=` Intel-style). Vectorized call variants resolve to a different ABI, breaking callers of the vector entry points. Downgraded to compatible under the `plugin_abi` policy. |
 | `struct_packing_changed` | `__attribute__((packed))` was added or removed. Changes every field offset and the total size — complete struct layout break. |
 | `type_visibility_changed` | RTTI typeinfo or vtable visibility changed. Cross-DSO `dynamic_cast` and exception matching can silently fail. |
 

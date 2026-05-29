@@ -140,6 +140,8 @@ Some policy-escalated source/contract breaks (notably case30, case35) may keep i
 | [111](case111_enumerable_thread_specific_lambda_ambiguity/README.md) | enumerable_thread_specific Lambda-Init Ambiguity (oneTBB regression suite) | Addition | COMPATIBLE 🟢 (known gap) |
 | [112](case112_task_arena_attach_tag/README.md) | task_arena::attach Tag Replaces Enum (oneTBB regression suite) | Breaking | BREAKING 🔴 |
 | [120](case120_frozen_runtime_signature_changed/README.md) | Frozen Runtime Signature Changed (oneTBB `detail::r1` shape) | Breaking | BREAKING 🔴 |
+| [121](case121_toolchain_flag_drift/README.md) | Toolchain Flag Drift (ABI-affecting compiler flags differ via `DW_AT_producer`) | Quality | COMPATIBLE 🟢 |
+| [122](case122_glibcxx_dual_abi_flip/README.md) | libstdc++ Dual-ABI Flip (`_GLIBCXX_USE_CXX11_ABI` toggle) | Breaking | BREAKING 🔴 |
 
 ---
 

@@ -297,6 +297,9 @@ REGISTRY = ChangeKindRegistry([
        impact="Compiler flags differ between versions; may cause subtle ABI mismatches."),
     _E("frame_register_changed", _B,
        policy_overrides={"plugin_abi": _C}),
+    _E("vector_abi_changed", _B,
+       impact="Vector-function (SIMD clone) ABI selection changed (-mveclibabi/-fveclib/-vecabi); vectorized call variants resolve to a different ABI, so callers of the vector entry points pass/return data in the wrong registers.",
+       policy_overrides={"plugin_abi": _C}),
 
     # ── Sprint 2 — gap detectors ──────────────────────────────────────────
     _E("func_deleted", _B,
