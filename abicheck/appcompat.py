@@ -136,6 +136,8 @@ def _build_version_index(
         if isinstance(section, GNUVerNeedSection):
             for verneed, vernaux_iter in section.iter_versions():
                 lib = verneed.name
+                if not lib:
+                    continue
                 for vernaux in vernaux_iter:
                     ver_idx = vernaux.entry.vna_other
                     ver_idx_to_lib[ver_idx] = lib

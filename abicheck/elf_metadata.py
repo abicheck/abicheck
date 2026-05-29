@@ -302,6 +302,10 @@ def _parse_version_def(section: GNUVerDefSection, meta: ElfMetadata) -> None:
 def _parse_version_need(section: GNUVerNeedSection, meta: ElfMetadata) -> None:
     for verneed, vernaux_iter in section.iter_versions():
         lib = verneed.name
+        # pyelftools' .name fields are str | None; skip entries with no
+        # library name rather than indexing the dict with None.
+        if not lib:
+            continue
         if lib not in meta.versions_required:
             meta.versions_required[lib] = []
         for vernaux in vernaux_iter:
@@ -454,6 +458,8 @@ def _build_verneed_index(
     """Build version-index → (library, version_name, is_defined=False) from .gnu.version_r."""
     for verneed, vernaux_iter in section.iter_versions():
         lib = verneed.name
+        if not lib:
+            continue
         for vernaux in vernaux_iter:
             idx = vernaux.entry.vna_other
             name = vernaux.name
