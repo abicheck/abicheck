@@ -249,7 +249,11 @@ class Suppression:
                         candidate = candidate.rsplit("::", 1)[0]
                 return False
 
-            if not (_ns_match(change.symbol) or _ns_match(change.caused_by_type)):
+            if not (
+                _ns_match(change.symbol)
+                or _ns_match(change.caused_by_type)
+                or _ns_match(change.qualified_name)
+            ):
                 return False
             # Fall through (AND logic with other selectors), but if no other
             # selectors are present the change-kind filter (if any) still

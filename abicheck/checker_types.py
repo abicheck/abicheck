@@ -52,6 +52,13 @@ class Change:
     # reporter can name the policy. Verdict computation blocks any
     # policy_override that would downgrade a change with this field set.
     frozen_namespace_violation: str | None = None
+    # Filled in by the source-location enrichment step from the snapshot's
+    # function index — the C++-qualified declared name (e.g.
+    # ``mylib::detail::r1::dispatch``) for symbols whose ``symbol`` field
+    # carries only the mangled/exported form. ``None`` when no matching
+    # Function record was found (e.g. type-level changes). Lets namespace
+    # selectors match ``extern "C"`` entries whose export name is unqualified.
+    qualified_name: str | None = None
 
 
 @dataclass

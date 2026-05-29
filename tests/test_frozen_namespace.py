@@ -297,6 +297,49 @@ class TestSuppressionNamespaceSelector:
         sup = Suppression(namespace="**::detail::r1", reason="legacy")
         assert sup.matches(c)
 
+    def test_namespace_matches_via_qualified_name(self) -> None:
+        """For extern "C" symbols, ``Change.symbol`` is the unqualified
+        export name (``dispatch``) and the namespace lives only on the
+        snapshot ``Function.name`` — which the source-location enrichment
+        step copies onto ``Change.qualified_name``. The matcher must
+        consult that field too. Codex P1 regression."""
+        c = Change(
+            kind=ChangeKind.FUNC_PARAMS_CHANGED,
+            symbol="dispatch",
+            qualified_name="mylib::detail::r1::dispatch",
+            description="param widened",
+        )
+        sup = Suppression(namespace="**::detail::r1::*", reason="legacy churn")
+        assert sup.matches(c)
+
+    def test_extern_c_namespace_suppression_end_to_end(self) -> None:
+        """Compare() with an extern "C" symbol in a frozen namespace and a
+        ``namespace:`` suppression matching it ⇒ verdict NO_CHANGE. This
+        exercises the full enrichment → suppression pipeline."""
+        old_fn = Function(
+            name="mylib::detail::r1::dispatch",
+            mangled="dispatch",
+            return_type="int",
+            params=[Param(name="n", type="int")],
+            visibility=Visibility.PUBLIC,
+            is_extern_c=True,
+        )
+        new_fn = Function(
+            name="mylib::detail::r1::dispatch",
+            mangled="dispatch",
+            return_type="long",
+            params=[Param(name="n", type="long")],
+            visibility=Visibility.PUBLIC,
+            is_extern_c=True,
+        )
+        old = _snap("1.0", [old_fn])
+        new = _snap("2.0", [new_fn])
+        suppression = SuppressionList(
+            [Suppression(namespace="**::detail::r1::*", reason="legacy churn")],
+        )
+        r = compare(old, new, suppression=suppression)
+        assert r.verdict == Verdict.NO_CHANGE
+
 
 # ── Regression: deep ancestor matching + extern "C" + ctx.redundant ─────
 

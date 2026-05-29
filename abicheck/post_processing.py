@@ -619,7 +619,11 @@ class EscalateFrozenNamespaceViolations:
                 # Already tagged by an earlier step (e.g. internal-leak
                 # overlay that synthesised a finding with the field set).
                 return
-            pat = _match(c.symbol) or _match(c.caused_by_type)
+            pat = (
+                _match(c.symbol)
+                or _match(c.caused_by_type)
+                or _match(c.qualified_name)
+            )
             if pat is None:
                 return
             c.frozen_namespace_violation = pat

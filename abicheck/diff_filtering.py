@@ -88,19 +88,40 @@ def _build_location_index(
 def _enrich_source_locations(
     changes: list[Change], old: AbiSnapshot, new: AbiSnapshot,
 ) -> None:
-    """Fill in source_location on Changes from the model data."""
+    """Fill in source_location and qualified_name on Changes from the model data."""
     type_loc, func_loc, var_loc = _build_location_index(old, new)
 
-    for c in changes:
-        if c.source_location:
+    # Build mangled→qualified-name lookup so namespace-based selectors
+    # (Suppression.namespace, frozen_namespaces policy) can recover the
+    # C++ namespace of ``extern "C"`` symbols whose ``Change.symbol`` is
+    # the unqualified export name. Both snapshots are consulted because
+    # FUNC_REMOVED is only in old, FUNC_ADDED only in new.
+    qualified_lookup: dict[str, str] = {}
+    for snap in (old, new):
+        if snap is None:
             continue
-        # Try function/variable first (symbol is mangled name), then type name
-        loc = func_loc.get(c.symbol) or var_loc.get(c.symbol) or type_loc.get(c.symbol)
-        # For qualified symbols like "ns::MyStruct::field", fall back to root type name
-        if not loc and "::" in c.symbol:
-            loc = type_loc.get(_root_type_name(c))
-        if loc:
-            c.source_location = loc
+        try:
+            snap.index()
+        except Exception:  # noqa: BLE001 — partial snapshots in some tests
+            continue
+        for mangled, fn in (getattr(snap, "_func_by_mangled", None) or {}).items():
+            fname = getattr(fn, "name", None)
+            if fname and "::" in fname and mangled not in qualified_lookup:
+                qualified_lookup[mangled] = fname
+
+    for c in changes:
+        if not c.source_location:
+            # Try function/variable first (symbol is mangled name), then type name
+            loc = func_loc.get(c.symbol) or var_loc.get(c.symbol) or type_loc.get(c.symbol)
+            # For qualified symbols like "ns::MyStruct::field", fall back to root type name
+            if not loc and "::" in c.symbol:
+                loc = type_loc.get(_root_type_name(c))
+            if loc:
+                c.source_location = loc
+        if not c.qualified_name:
+            qual = qualified_lookup.get(c.symbol)
+            if qual:
+                c.qualified_name = qual
 
 
 def _all_ancestors(
