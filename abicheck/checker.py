@@ -17,6 +17,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from . import (
+    diff_abi_tags,  # noqa: F401 — triggers detector registration
+    diff_atomic,  # noqa: F401 — triggers detector registration
+    diff_bit_int,  # noqa: F401 — triggers detector registration
+    diff_char8t,  # noqa: F401 — triggers detector registration
+    diff_integer_model,  # noqa: F401 — triggers detector registration
+)
 from .checker_policy import (
     API_BREAK_KINDS as _API_BREAK_KINDS,
 )

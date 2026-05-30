@@ -448,6 +448,13 @@ class ChangeKind(str, Enum):
     HIDDEN_FRIEND_REMOVED = "hidden_friend_removed"
     HIDDEN_FRIEND_ADDED = "hidden_friend_added"
 
+    # ── oneAPI / modern-C++ ABI hazards (gap analysis) ──────────────────────
+    INTEGER_MODEL_CHANGED = "integer_model_changed"
+    ABI_TAG_CHANGED = "abi_tag_changed"
+    CHAR8T_MIGRATION = "char8t_migration"
+    BIT_INT_WIDTH_CHANGED = "bit_int_width_changed"
+    ATOMIC_QUALIFIER_CHANGED = "atomic_qualifier_changed"
+
 
 class HasKind(Protocol):
     kind: ChangeKind

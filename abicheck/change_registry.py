@@ -789,4 +789,38 @@ REGISTRY = ChangeKindRegistry([
               "disappears, and the new operator/function only "
               "participates in overload resolution at call sites that "
               "trigger ADL on one of its argument types."),
+
+    # ── oneAPI / modern-C++ ABI hazards (gap analysis) ──────────────────────
+    _E("integer_model_changed", _B,
+       impact="A large fraction of public integer parameters/returns flipped "
+              "width together (e.g. int→long, int32_t→int64_t), or a public "
+              "integer typedef changed its underlying size. This is the "
+              "signature of an LP64↔ILP64 model switch (e.g. oneMKL's MKL_INT "
+              "built for the 32-bit vs 64-bit integer interface). Every caller "
+              "passes/reads integers with the wrong width; arguments and array "
+              "indices are silently truncated or sign-extended."),
+    _E("abi_tag_changed", _B,
+       impact="The Itanium ABI-tag set on a symbol changed (e.g. it gained or "
+              "lost `[abi:cxx11]` / a `[[gnu::abi_tag]]`). The mangled name "
+              "encodes the tag, so old binaries reference a symbol that no "
+              "longer exists under that name. Distinct from a mass dual-ABI "
+              "flip: this is a per-symbol tag change."),
+    _E("char8t_migration", _B,
+       impact="A public parameter, return, or field type changed between a "
+              "char-family spelling (char / unsigned char) and C++20 `char8_t`. "
+              "`char8_t` is a distinct type that participates in overload "
+              "resolution and name mangling, so the mangled symbol changes and "
+              "old binaries fail to resolve it."),
+    _E("bit_int_width_changed", _B,
+       impact="A public use of C23 `_BitInt(N)` changed its width N between "
+              "versions, or a field/param type changed to/from `_BitInt(N)`. "
+              "The bit width determines the storage size and calling-convention "
+              "treatment, so old code reads/writes the value with the wrong "
+              "width."),
+    _E("atomic_qualifier_changed", _B,
+       impact="The `_Atomic` qualifier was added to or removed from a public "
+              "field/param/return type. Per WG14 the size and alignment of an "
+              "_Atomic-qualified type may differ from the unqualified type and "
+              "varies across compilers, so layout and calling convention "
+              "diverge and old code is miscompiled."),
 ])
