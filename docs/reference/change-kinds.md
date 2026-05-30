@@ -156,6 +156,19 @@ These changes are immediately incompatible with existing compiled binaries.
 
 ---
 
+
+### Modern C/C++ standard & toolchain ABI hazards
+
+These breaks come from language-standard features or build-model choices (oneAPI-relevant) escaping into the public binary contract.
+
+| Kind | Description |
+|------|-------------|
+| `integer_model_changed` | The library's integer model flipped (LP64 ↔ ILP64). A public integer typedef (e.g. an `MKL_INT`-style alias) changed its underlying width, or a large fraction of public function parameters/returns flipped integer width together (`int`↔`long`, `int32_t`↔`int64_t`). Callers compiled against the old width pass/return data in the wrong-sized registers/slots — silent corruption. Classic oneMKL LP64-vs-ILP64 mismatch. |
+| `abi_tag_changed` | A single exported symbol's Itanium ABI-tag set changed (e.g. gained or lost `[abi:cxx11]` or a `[[gnu::abi_tag]]`). The mangled name changes, so a consumer compiled against the old header links against a symbol that no longer exists. The per-symbol analogue of `glibcxx_dual_abi_flip_detected` (which reports the library-wide flip). |
+| `char8t_migration` | A public function parameter/return type or a struct field changed between a `char`-family spelling and C++20 `char8_t` (in either direction). `char8_t` is a distinct fundamental type: the mangled name and overload identity change, so old binaries reference a symbol that no longer exists. |
+| `bit_int_width_changed` | A public type used C23 `_BitInt(N)` and the width `N` changed, or a parameter/field/return type changed to or from `_BitInt(N)`. The width is part of the type identity and layout, so old code reads/writes the wrong number of bits and the mangled name changes. |
+| `atomic_qualifier_changed` | The `_Atomic` qualifier was added to or removed from a public field, parameter, or return type. The size, alignment, and (for some struct types) representation of atomic-qualified types can diverge from their non-atomic counterparts and across compilers (WG14), so old code misinterprets the data. |
+
 ## Source API Breaks (`API_BREAK`)
 
 These changes break the source-level API contract but do not affect already-compiled binaries.
