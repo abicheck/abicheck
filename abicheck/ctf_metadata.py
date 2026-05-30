@@ -435,6 +435,53 @@ class _TypeResolver:
     def _str_at(self, offset: int) -> str:
         return _read_string(self._str, offset)
 
+    def _resolve_name_array(self, t: CtfType) -> str:
+        """Return the name string for a CTF array type."""
+        if self._version >= CTF_VERSION_3 and len(t.extra) >= 12:
+            elem_type = struct.unpack_from("<I", t.extra, 0)[0]
+            nelems = struct.unpack_from("<I", t.extra, 8)[0]
+            return f"{self.name(elem_type)}[{nelems}]"
+        if self._version < CTF_VERSION_3 and len(t.extra) >= 6:
+            elem_type = struct.unpack_from("<H", t.extra, 0)[0]
+            nelems = struct.unpack_from("<H", t.extra, 4)[0]
+            return f"{self.name(elem_type)}[{nelems}]"
+        return "[]"
+
+    def _resolve_name_tagged(self, kind: int, tname: str) -> str | None:
+        """Handle tagged aggregate/forward kinds; return None if not applicable."""
+        if kind in (CTF_K_STRUCT, CTF_K_UNION):
+            tag = "union" if kind == CTF_K_UNION else "struct"
+            return tname if tname else f"<anon {tag}>"
+        if kind == CTF_K_ENUM:
+            return tname if tname else "<anon enum>"
+        if kind == CTF_K_FORWARD:
+            return tname if tname else "<fwd>"
+        return None
+
+    # Module-level qualifier map shared across all resolver instances.
+    _CV_QUALIFIERS: dict[int, str] = {
+        CTF_K_VOLATILE: "volatile",
+        CTF_K_CONST: "const",
+        CTF_K_RESTRICT: "restrict",
+    }
+
+    def _resolve_name_simple(self, kind: int, tname: str, size_or_type: int) -> str | None:
+        """Handle simple/named kinds; return None if kind is not handled here."""
+        if kind == CTF_K_INTEGER:
+            return tname if tname else "int"
+        if kind == CTF_K_FLOAT:
+            return tname if tname else "float"
+        if kind == CTF_K_POINTER:
+            return f"{self.name(size_or_type)} *"
+        tagged = self._resolve_name_tagged(kind, tname)
+        if tagged is not None:
+            return tagged
+        if kind == CTF_K_TYPEDEF:
+            return tname if tname else self.name(size_or_type)
+        if kind in self._CV_QUALIFIERS:
+            return f"{self._CV_QUALIFIERS[kind]} {self.name(size_or_type)}"
+        return None
+
     def _resolve_name(self, type_id: int) -> str:
         if type_id == 0:
             return "void"
@@ -445,40 +492,13 @@ class _TypeResolver:
         kind = t.kind
         tname = self._str_at(t.name_off)
 
-        if kind == CTF_K_INTEGER:
-            return tname if tname else "int"
-        if kind == CTF_K_FLOAT:
-            return tname if tname else "float"
-        if kind == CTF_K_POINTER:
-            return f"{self.name(t.size_or_type)} *"
-        if kind in (CTF_K_STRUCT, CTF_K_UNION):
-            tag = "union" if kind == CTF_K_UNION else "struct"
-            return tname if tname else f"<anon {tag}>"
-        if kind == CTF_K_ENUM:
-            return tname if tname else "<anon enum>"
-        if kind == CTF_K_TYPEDEF:
-            return tname if tname else self.name(t.size_or_type)
-        if kind == CTF_K_VOLATILE:
-            return f"volatile {self.name(t.size_or_type)}"
-        if kind == CTF_K_CONST:
-            return f"const {self.name(t.size_or_type)}"
-        if kind == CTF_K_RESTRICT:
-            return f"restrict {self.name(t.size_or_type)}"
-        if kind == CTF_K_FORWARD:
-            return tname if tname else "<fwd>"
+        simple = self._resolve_name_simple(kind, tname, t.size_or_type)
+        if simple is not None:
+            return simple
         if kind == CTF_K_ARRAY:
-            if self._version >= CTF_VERSION_3 and len(t.extra) >= 12:
-                elem_type = struct.unpack_from("<I", t.extra, 0)[0]
-                nelems = struct.unpack_from("<I", t.extra, 8)[0]
-                return f"{self.name(elem_type)}[{nelems}]"
-            if self._version < CTF_VERSION_3 and len(t.extra) >= 6:
-                elem_type = struct.unpack_from("<H", t.extra, 0)[0]
-                nelems = struct.unpack_from("<H", t.extra, 4)[0]
-                return f"{self.name(elem_type)}[{nelems}]"
-            return "[]"
+            return self._resolve_name_array(t)
         if kind == CTF_K_FUNCTION:
-            ret = self.name(t.size_or_type)
-            return f"{ret}(...)"
+            return f"{self.name(t.size_or_type)}(...)"
 
         return f"<ctf_kind_{kind}:{type_id}>"
 

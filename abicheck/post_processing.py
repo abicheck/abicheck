@@ -565,6 +565,26 @@ class EscalateFrozenNamespaceViolations:
 
     name = "escalate_frozen_namespace_violations"
 
+    @staticmethod
+    def _build_qualified_lookup(old: AbiSnapshot, new: AbiSnapshot) -> dict[str, str]:
+        """Build a mangled→qualified-name map from both snapshots.
+
+        Pre-building this lookup lets :meth:`run` recover the C++ namespace
+        of ``extern "C"`` symbols whose ``Change.symbol`` is just the
+        unqualified export name.  Both snapshots are consulted because
+        FUNC_REMOVED is only in old and FUNC_ADDED only in new.
+        """
+        qualified_lookup: dict[str, str] = {}
+        for snap in (old, new):
+            if snap is None or not _safe_index(snap):
+                continue
+            func_map = getattr(snap, "_func_by_mangled", None) or {}
+            for mangled, fn in func_map.items():
+                fname = getattr(fn, "name", None)
+                if fname and "::" in fname and mangled not in qualified_lookup:
+                    qualified_lookup[mangled] = fname
+        return qualified_lookup
+
     def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:
         if not ctx.frozen_namespaces:
             return changes
@@ -575,22 +595,7 @@ class EscalateFrozenNamespaceViolations:
         from .internal_leak import _strip_template_args
 
         patterns = list(ctx.frozen_namespaces)
-
-        # Pre-build mangled→qualified-name lookups so we can recover the
-        # C++ namespace of ``extern "C"`` symbols whose ``Change.symbol``
-        # is just the unqualified export name (e.g. ``dispatch`` for a
-        # function declared in ``mylib::detail::r1::``). Both snapshots
-        # are consulted because FUNC_REMOVED is only in old and
-        # FUNC_ADDED only in new.
-        qualified_lookup: dict[str, str] = {}
-        for snap in (ctx.old, ctx.new):
-            if snap is None or not _safe_index(snap):
-                continue
-            func_map = getattr(snap, "_func_by_mangled", None) or {}
-            for mangled, fn in func_map.items():
-                fname = getattr(fn, "name", None)
-                if fname and "::" in fname and mangled not in qualified_lookup:
-                    qualified_lookup[mangled] = fname
+        qualified_lookup = self._build_qualified_lookup(ctx.old, ctx.new)
 
         def _match(name: str | None) -> str | None:
             if not name:

@@ -749,6 +749,180 @@ def _populate_elf_visibility(snap: AbiSnapshot) -> None:
             var.elf_visibility = _ELF_VIS_MAP.get(elf_sym.visibility)
 
 
+def _elf_classify_symbols(
+    elf_meta: object,
+    exported_dynamic: set[str],
+) -> tuple[set[str], set[str], set[str], set[str]]:
+    """Split ELF metadata symbols into typed subsets for the no-header path.
+
+    Returns ``(exported_dynamic, funcs, objects, tls)`` where *exported_dynamic*
+    may be the original fallback set when *elf_meta* has no symbols.
+    """
+    from .elf_metadata import SymbolType
+
+    exported_dynamic_funcs: set[str] = exported_dynamic  # fallback
+    exported_dynamic_objects: set[str] = set()
+    exported_dynamic_tls: set[str] = set()
+    if elf_meta is not None and elf_meta.symbols:  # type: ignore[union-attr]
+        exported_dynamic_funcs = {
+            sym.name for sym in elf_meta.symbols  # type: ignore[union-attr]
+            if sym.sym_type in (SymbolType.FUNC, SymbolType.IFUNC, SymbolType.NOTYPE)
+        }
+        exported_dynamic_objects = {
+            sym.name for sym in elf_meta.symbols  # type: ignore[union-attr]
+            if sym.sym_type == SymbolType.OBJECT
+        }
+        exported_dynamic_tls = {
+            sym.name for sym in elf_meta.symbols  # type: ignore[union-attr]
+            if sym.sym_type == SymbolType.TLS
+        }
+        # Full set for CastxmlParser: determines PUBLIC vs ELF_ONLY visibility
+        exported_dynamic = exported_dynamic_funcs | exported_dynamic_objects | exported_dynamic_tls
+    return exported_dynamic, exported_dynamic_funcs, exported_dynamic_objects, exported_dynamic_tls
+
+
+def _elf_lang_to_profile(lang: str | None) -> str | None:
+    """Convert a ``--lang`` flag value to an internal language-profile string."""
+    if lang is None:
+        return None
+    lu = lang.upper()
+    if lu == "C":
+        return "c"
+    if lu in ("C++", "CPP"):
+        return "cpp"
+    return None
+
+
+def _try_dwarf_snapshot(
+    so_path: Path,
+    elf_meta: object,
+    dwarf_meta: object,
+    dwarf_adv: object,
+    version: str,
+    profile_hint: str | None,
+    headers: list[Path],
+    dwarf_only: bool,
+) -> tuple[AbiSnapshot | None, list[RecordType]]:
+    """Attempt to build a snapshot from DWARF debug info.
+
+    Returns ``(snapshot, dwarf_only_types)``.  When the snapshot should be
+    used directly, *snapshot* is non-None.  When DWARF produced no symbols
+    (and *dwarf_only* is False), *snapshot* is None and *dwarf_only_types*
+    carries the partial type list for the symbol-only fallback path.
+    """
+    from .dwarf_snapshot import build_snapshot_from_dwarf
+
+    if dwarf_only and headers:
+        warnings.warn(
+            "--dwarf-only: ignoring provided headers; using DWARF as primary data source.",
+            UserWarning,
+            stacklevel=3,
+        )
+
+    snap = build_snapshot_from_dwarf(
+        so_path,
+        elf_meta,  # type: ignore[arg-type]
+        dwarf_meta,  # type: ignore[arg-type]
+        dwarf_adv,  # type: ignore[arg-type]
+        version=version,
+        language_profile=profile_hint,
+    )
+    # If DWARF produced functions (or was explicitly forced), use it.
+    if snap.functions or snap.variables or dwarf_only:
+        if not headers and not dwarf_only:
+            warnings.warn(
+                "No headers provided — using DWARF debug info as primary data source. "
+                "#define constants and default parameter values will be unavailable.",
+                UserWarning,
+                stacklevel=3,
+            )
+        _populate_elf_visibility(snap)
+        return snap, []
+    # DWARF snapshot had no symbols of its own (often the case when
+    # the binary exports only constructors / extern "C" wrappers that
+    # the DWARF subprogram filter rejected). Keep the *types* it
+    # extracted — they include bases / vtable info that pure-DWARF
+    # metadata (DwarfMetadata.structs) does not retain.
+    return None, list(snap.types)
+
+
+def _build_symbol_only_snapshot(
+    so_path: Path,
+    version: str,
+    elf_meta: object,
+    dwarf_meta: object,
+    dwarf_adv: object,
+    exported_dynamic_funcs: set[str],
+    exported_dynamic_objects: set[str],
+    exported_dynamic_tls: set[str],
+    dwarf_only_types: list[RecordType],
+    profile_hint: str | None,
+) -> AbiSnapshot:
+    """Build a symbol-only :class:`AbiSnapshot` when no headers are available.
+
+    Issues the appropriate ``UserWarning`` based on whether DWARF-derived
+    types are present, then assembles the snapshot from ELF-exported symbols.
+    """
+    # No headers → symbol-only fallback. When the DWARF snapshot
+    # builder produced types but no functions, we still preserve
+    # those types (see *dwarf_only_types*), so the warning is
+    # narrowed to reflect what's actually missing.
+    if dwarf_only_types:
+        warnings.warn(
+            "No headers provided — using ELF-exported symbols for "
+            "functions/variables; DWARF-derived type information "
+            "preserved.",
+            UserWarning,
+            stacklevel=3,
+        )
+    else:
+        warnings.warn(
+            "No headers provided and no DWARF debug info — only ELF-exported "
+            "symbols will be captured; type information will be missing.",
+            UserWarning,
+            stacklevel=3,
+        )
+    snapshot = AbiSnapshot(
+        library=so_path.name,
+        version=version,
+        source_path=str(so_path),
+        functions=[
+            Function(
+                name=sym,
+                mangled=sym,
+                return_type="?",
+                visibility=Visibility.ELF_ONLY,
+                # Absence of Itanium _Z prefix is strong evidence of C linkage
+                is_extern_c=not sym.startswith("_Z"),
+            )
+            for sym in sorted(exported_dynamic_funcs)
+        ],
+        variables=[
+            Variable(
+                name=sym,
+                mangled=sym,
+                type="?",
+                visibility=Visibility.ELF_ONLY,
+            )
+            for sym in sorted(exported_dynamic_objects | exported_dynamic_tls)
+        ],
+        # Preserve DWARF-derived types (with bases / vtable) when the
+        # symbol-only fallback is taken. Pure DwarfMetadata loses
+        # inheritance info; retaining the partially-populated DWARF
+        # snapshot's types lets downstream detectors (e.g. internal
+        # leak detection) still see the relationships.
+        types=dwarf_only_types,
+        elf=elf_meta,  # type: ignore[arg-type]
+        dwarf=dwarf_meta,  # type: ignore[arg-type]
+        dwarf_advanced=dwarf_adv,  # type: ignore[arg-type]
+        elf_only_mode=True,
+        platform="elf",
+        language_profile=profile_hint,
+    )
+    _populate_elf_visibility(snapshot)
+    return snapshot
+
+
 def _dump_elf(
     so_path: Path,
     headers: list[Path],
@@ -768,149 +942,34 @@ def _dump_elf(
     """ELF-specific dump: pyelftools + debug info (DWARF/BTF/CTF) + castxml."""
     exported_dynamic, exported_static = _pyelftools_exported_symbols(so_path)
 
-    from .elf_metadata import SymbolType, parse_elf_metadata
+    from .elf_metadata import parse_elf_metadata
 
     elf_meta = parse_elf_metadata(so_path)
-    # Use filtered ELF metadata symbols as authoritative surface for no-header mode.
-    # This excludes version-definition aux symbols like LIBFOO_1.0.
-    # Split into two sets: function-like symbols (for Function builder) and
-    # object symbols (globals) — merged for CastxmlParser visibility check.
-    # Split into func-like (for Function builder) and object (globals) sets.
-    # Fall back to pyelftools set when elf_meta is unavailable.
-    exported_dynamic_funcs: set[str] = exported_dynamic  # fallback
-    exported_dynamic_objects: set[str] = set()
-    exported_dynamic_tls: set[str] = set()
-    if elf_meta is not None and elf_meta.symbols:
-        exported_dynamic_funcs = {
-            sym.name for sym in elf_meta.symbols
-            if sym.sym_type in (SymbolType.FUNC, SymbolType.IFUNC, SymbolType.NOTYPE)
-        }
-        exported_dynamic_objects = {
-            sym.name for sym in elf_meta.symbols
-            if sym.sym_type == SymbolType.OBJECT
-        }
-        exported_dynamic_tls = {
-            sym.name for sym in elf_meta.symbols
-            if sym.sym_type == SymbolType.TLS
-        }
-        # Full set for CastxmlParser: determines PUBLIC vs ELF_ONLY visibility
-        exported_dynamic = exported_dynamic_funcs | exported_dynamic_objects | exported_dynamic_tls
+    exported_dynamic, exported_dynamic_funcs, exported_dynamic_objects, exported_dynamic_tls = (
+        _elf_classify_symbols(elf_meta, exported_dynamic)
+    )
     dwarf_meta, dwarf_adv = _resolve_debug_metadata(so_path, debug_format)
-
-    profile_hint: str | None = None
-    if lang is not None:
-        lu = lang.upper()
-        if lu == "C":
-            profile_hint = "c"
-        elif lu in ("C++", "CPP"):
-            profile_hint = "cpp"
+    profile_hint = _elf_lang_to_profile(lang)
 
     # ADR-003: Updated fallback chain
     # --dwarf-only → force DWARF mode regardless of headers
     # no headers + DWARF available → DWARF-only mode (24/30 detectors)
     # no headers + no DWARF → symbols-only mode (6/30 detectors)
-    #
-    # Strategy: if DWARF is present, attempt the DWARF build. If it
-    # produces at least one function, use it. Otherwise fall through
-    # to symbol-only mode (the DWARF may contain only CRT stubs) — but
-    # still carry the type information across so downstream detectors
-    # (notably internal_leak) can use it.
     dwarf_only_types: list[RecordType] = []
-    if dwarf_only or (not headers and dwarf_meta.has_dwarf):
-        if dwarf_only and headers:
-            warnings.warn(
-                "--dwarf-only: ignoring provided headers; using DWARF as primary data source.",
-                UserWarning,
-                stacklevel=2,
-            )
-
-        from .dwarf_snapshot import build_snapshot_from_dwarf
-        snap = build_snapshot_from_dwarf(
-            so_path,
-            elf_meta,
-            dwarf_meta,
-            dwarf_adv,
-            version=version,
-            language_profile=profile_hint,
+    if dwarf_only or (not headers and dwarf_meta.has_dwarf):  # type: ignore[union-attr]
+        snap, dwarf_only_types = _try_dwarf_snapshot(
+            so_path, elf_meta, dwarf_meta, dwarf_adv,
+            version, profile_hint, headers, dwarf_only,
         )
-        # If DWARF produced functions (or was explicitly forced), use it.
-        # Otherwise fall through to symbol-only mode.
-        if snap.functions or snap.variables or dwarf_only:
-            if not headers and not dwarf_only:
-                warnings.warn(
-                    "No headers provided — using DWARF debug info as primary data source. "
-                    "#define constants and default parameter values will be unavailable.",
-                    UserWarning,
-                    stacklevel=2,
-                )
-            _populate_elf_visibility(snap)
+        if snap is not None:
             return snap
-        # DWARF snapshot had no symbols of its own (often the case when
-        # the binary exports only constructors / extern "C" wrappers that
-        # the DWARF subprogram filter rejected). Keep the *types* it
-        # extracted — they include bases / vtable info that pure-DWARF
-        # metadata (DwarfMetadata.structs) does not retain.
-        dwarf_only_types = list(snap.types)
 
     if not headers:
-        # No headers → symbol-only fallback. When the DWARF snapshot
-        # builder produced types but no functions, we still preserve
-        # those types (see *dwarf_only_types*), so the warning is
-        # narrowed to reflect what's actually missing.
-        if dwarf_only_types:
-            warnings.warn(
-                "No headers provided — using ELF-exported symbols for "
-                "functions/variables; DWARF-derived type information "
-                "preserved.",
-                UserWarning,
-                stacklevel=2,
-            )
-        else:
-            warnings.warn(
-                "No headers provided and no DWARF debug info — only ELF-exported "
-                "symbols will be captured; type information will be missing.",
-                UserWarning,
-                stacklevel=2,
-            )
-        snapshot = AbiSnapshot(
-            library=so_path.name,
-            version=version,
-            source_path=str(so_path),
-            functions=[
-                Function(
-                    name=sym,
-                    mangled=sym,
-                    return_type="?",
-                    visibility=Visibility.ELF_ONLY,
-                    # Absence of Itanium _Z prefix is strong evidence of C linkage
-                    is_extern_c=not sym.startswith("_Z"),
-                )
-                for sym in sorted(exported_dynamic_funcs)
-            ],
-            variables=[
-                Variable(
-                    name=sym,
-                    mangled=sym,
-                    type="?",
-                    visibility=Visibility.ELF_ONLY,
-                )
-                for sym in sorted(exported_dynamic_objects | exported_dynamic_tls)
-            ],
-            # Preserve DWARF-derived types (with bases / vtable) when the
-            # symbol-only fallback is taken. Pure DwarfMetadata loses
-            # inheritance info; retaining the partially-populated DWARF
-            # snapshot's types lets downstream detectors (e.g. internal
-            # leak detection) still see the relationships.
-            types=dwarf_only_types,
-            elf=elf_meta,
-            dwarf=dwarf_meta,
-            dwarf_advanced=dwarf_adv,
-            elf_only_mode=True,
-            platform="elf",
-            language_profile=profile_hint,
+        return _build_symbol_only_snapshot(
+            so_path, version, elf_meta, dwarf_meta, dwarf_adv,
+            exported_dynamic_funcs, exported_dynamic_objects, exported_dynamic_tls,
+            dwarf_only_types, profile_hint,
         )
-        _populate_elf_visibility(snapshot)
-        return snapshot
 
     xml_root = _castxml_dump(
         headers, extra_includes, compiler=compiler,

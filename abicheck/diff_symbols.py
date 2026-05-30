@@ -95,131 +95,173 @@ def _check_removed_function(
     )
 
 
-def _check_function_signature(mangled: str, f_old: Function, f_new: Function) -> list[Change]:
-    """Compare signatures and qualifiers of two matched functions."""
-    changes: list[Change] = []
+def _check_return_type_change(mangled: str, f_old: Function, f_new: Function) -> list[Change]:
+    """Emit a change if the return type was modified."""
+    if canonicalize_type_name(f_old.return_type) == canonicalize_type_name(f_new.return_type):
+        return []
+    return [Change(
+        kind=ChangeKind.FUNC_RETURN_CHANGED,
+        symbol=mangled,
+        description=f"Return type changed: {f_old.name}",
+        old_value=f_old.return_type,
+        new_value=f_new.return_type,
+    )]
 
-    if canonicalize_type_name(f_old.return_type) != canonicalize_type_name(f_new.return_type):
-        changes.append(Change(
-            kind=ChangeKind.FUNC_RETURN_CHANGED,
-            symbol=mangled,
-            description=f"Return type changed: {f_old.name}",
-            old_value=f_old.return_type,
-            new_value=f_new.return_type,
-        ))
 
+def _check_params_change(mangled: str, f_old: Function, f_new: Function) -> list[Change]:
+    """Emit a change if the parameter list was modified."""
     old_params = [(canonicalize_type_name(p.type), p.kind) for p in f_old.params]
     new_params = [(canonicalize_type_name(p.type), p.kind) for p in f_new.params]
-    if old_params != new_params:
-        changes.append(Change(
-            kind=ChangeKind.FUNC_PARAMS_CHANGED,
-            symbol=mangled,
-            description=f"Parameters changed: {f_old.name}",
-            old_value=_format_params(f_old.params),
-            new_value=_format_params(f_new.params),
-        ))
+    if old_params == new_params:
+        return []
+    return [Change(
+        kind=ChangeKind.FUNC_PARAMS_CHANGED,
+        symbol=mangled,
+        description=f"Parameters changed: {f_old.name}",
+        old_value=_format_params(f_old.params),
+        new_value=_format_params(f_new.params),
+    )]
 
-    # Ref-qualifier changes (&/&&)
+
+def _check_ref_qualifier_change(mangled: str, f_old: Function, f_new: Function) -> list[Change]:
+    """Emit a change if the ref-qualifier (&/&&) was modified."""
     old_rq = f_old.ref_qualifier or ""
     new_rq = f_new.ref_qualifier or ""
-    if old_rq != new_rq:
-        changes.append(Change(
-            kind=ChangeKind.FUNC_REF_QUAL_CHANGED,
-            symbol=mangled,
-            description=f"Ref-qualifier changed: {f_old.name} ({old_rq!r} → {new_rq!r})",
-            old_value=old_rq or "(none)",
-            new_value=new_rq or "(none)",
-        ))
+    if old_rq == new_rq:
+        return []
+    return [Change(
+        kind=ChangeKind.FUNC_REF_QUAL_CHANGED,
+        symbol=mangled,
+        description=f"Ref-qualifier changed: {f_old.name} ({old_rq!r} → {new_rq!r})",
+        old_value=old_rq or "(none)",
+        new_value=new_rq or "(none)",
+    )]
 
-    # Language linkage change (extern "C" ↔ C++)
-    if f_old.is_extern_c != f_new.is_extern_c:
-        old_linkage = 'extern "C"' if f_old.is_extern_c else "C++"
-        new_linkage = 'extern "C"' if f_new.is_extern_c else "C++"
-        changes.append(Change(
-            kind=ChangeKind.FUNC_LANGUAGE_LINKAGE_CHANGED,
-            symbol=mangled,
-            description=f"Language linkage changed: {f_old.name} ({old_linkage} → {new_linkage})",
-            old_value=old_linkage,
-            new_value=new_linkage,
-        ))
 
+def _check_linkage_change(mangled: str, f_old: Function, f_new: Function) -> list[Change]:
+    """Emit a change if the language linkage (extern \"C\" ↔ C++) was modified."""
+    if f_old.is_extern_c == f_new.is_extern_c:
+        return []
+    old_linkage = 'extern "C"' if f_old.is_extern_c else "C++"
+    new_linkage = 'extern "C"' if f_new.is_extern_c else "C++"
+    return [Change(
+        kind=ChangeKind.FUNC_LANGUAGE_LINKAGE_CHANGED,
+        symbol=mangled,
+        description=f"Language linkage changed: {f_old.name} ({old_linkage} → {new_linkage})",
+        old_value=old_linkage,
+        new_value=new_linkage,
+    )]
+
+
+def _check_noexcept_change(mangled: str, f_old: Function, f_new: Function) -> list[Change]:
+    """Emit a change if the noexcept specifier was added or removed."""
     if f_old.is_noexcept and not f_new.is_noexcept:
-        changes.append(Change(
+        return [Change(
             kind=ChangeKind.FUNC_NOEXCEPT_REMOVED,
             symbol=mangled,
             description=f"noexcept specifier removed: {f_old.name}",
-        ))
-    elif not f_old.is_noexcept and f_new.is_noexcept:
-        changes.append(Change(
+        )]
+    if not f_old.is_noexcept and f_new.is_noexcept:
+        return [Change(
             kind=ChangeKind.FUNC_NOEXCEPT_ADDED,
             symbol=mangled,
             description=f"noexcept specifier added: {f_old.name}",
-        ))
+        )]
+    return []
 
+
+def _check_virtual_change(mangled: str, f_old: Function, f_new: Function) -> list[Change]:
+    """Emit a change if the virtual specifier was added or removed."""
     if not f_old.is_virtual and f_new.is_virtual:
-        changes.append(Change(
+        return [Change(
             kind=ChangeKind.FUNC_VIRTUAL_ADDED,
             symbol=mangled,
             description=f"Function became virtual: {f_old.name}",
-        ))
-    elif f_old.is_virtual and not f_new.is_virtual:
-        changes.append(Change(
+        )]
+    if f_old.is_virtual and not f_new.is_virtual:
+        return [Change(
             kind=ChangeKind.FUNC_VIRTUAL_REMOVED,
             symbol=mangled,
             description=f"Function is no longer virtual: {f_old.name}",
-        ))
+        )]
+    return []
 
-    # Hidden-friend transitions: an in-class `friend` declaration was
-    # added or removed across versions. Tri-state — skip when either
-    # side's snapshot did not record the flag (e.g. DWARF-only path or
-    # an older snapshot). The matched-mangled iteration here handles
-    # the case where the friend has an out-of-line definition (i.e.
-    # a real symbol). Inline-only hidden friends never appear here
-    # because they have no symbol on either side; those transitions
-    # are picked up by ``_check_hidden_friend_additions_removals``
-    # below by matching on (name, params) rather than mangled name.
-    if f_old.is_hidden_friend is not None and f_new.is_hidden_friend is not None:
-        if not f_old.is_hidden_friend and f_new.is_hidden_friend:
-            changes.append(Change(
-                kind=ChangeKind.HIDDEN_FRIEND_ADDED,
-                symbol=mangled,
-                description=f"Function became an in-class friend declaration: {f_old.name}",
-                old_value="non-friend",
-                new_value="hidden friend",
-            ))
-        elif f_old.is_hidden_friend and not f_new.is_hidden_friend:
-            changes.append(Change(
-                kind=ChangeKind.HIDDEN_FRIEND_REMOVED,
-                symbol=mangled,
-                description=f"Function is no longer an in-class friend declaration: {f_old.name}",
-                old_value="hidden friend",
-                new_value="non-friend",
-            ))
 
-    # explicit-specifier transitions on ctors / conversion operators.
-    # Tri-state: only fire when BOTH sides record explicit data. None means
-    # the dumper/loader couldn't determine it — typically an older snapshot
-    # that predates the field, or a Function/Destructor where `explicit` is
-    # N/A. Skipping in that case avoids false API_BREAK findings produced
-    # purely by snapshot schema evolution.
-    if f_old.is_explicit is not None and f_new.is_explicit is not None:
-        if not f_old.is_explicit and f_new.is_explicit:
-            changes.append(Change(
-                kind=ChangeKind.CTOR_EXPLICIT_ADDED,
-                symbol=mangled,
-                description=f"Constructor/conversion gained `explicit` specifier: {f_old.name}",
-                old_value="implicit",
-                new_value="explicit",
-            ))
-        elif f_old.is_explicit and not f_new.is_explicit:
-            changes.append(Change(
-                kind=ChangeKind.CTOR_EXPLICIT_REMOVED,
-                symbol=mangled,
-                description=f"Constructor/conversion lost `explicit` specifier: {f_old.name}",
-                old_value="explicit",
-                new_value="implicit",
-            ))
+def _check_hidden_friend_change(mangled: str, f_old: Function, f_new: Function) -> list[Change]:
+    """Emit a change if the hidden-friend status transitioned.
 
+    Hidden-friend transitions: an in-class ``friend`` declaration was
+    added or removed across versions. Tri-state — skip when either
+    side's snapshot did not record the flag (e.g. DWARF-only path or
+    an older snapshot). The matched-mangled iteration here handles
+    the case where the friend has an out-of-line definition (i.e.
+    a real symbol). Inline-only hidden friends never appear here
+    because they have no symbol on either side; those transitions
+    are picked up by ``_check_hidden_friend_additions_removals``
+    below by matching on (name, params) rather than mangled name.
+    """
+    if f_old.is_hidden_friend is None or f_new.is_hidden_friend is None:
+        return []
+    if not f_old.is_hidden_friend and f_new.is_hidden_friend:
+        return [Change(
+            kind=ChangeKind.HIDDEN_FRIEND_ADDED,
+            symbol=mangled,
+            description=f"Function became an in-class friend declaration: {f_old.name}",
+            old_value="non-friend",
+            new_value="hidden friend",
+        )]
+    if f_old.is_hidden_friend and not f_new.is_hidden_friend:
+        return [Change(
+            kind=ChangeKind.HIDDEN_FRIEND_REMOVED,
+            symbol=mangled,
+            description=f"Function is no longer an in-class friend declaration: {f_old.name}",
+            old_value="hidden friend",
+            new_value="non-friend",
+        )]
+    return []
+
+
+def _check_explicit_change(mangled: str, f_old: Function, f_new: Function) -> list[Change]:
+    """Emit a change if the explicit specifier was added or removed.
+
+    Tri-state: only fire when BOTH sides record explicit data. None means
+    the dumper/loader couldn't determine it — typically an older snapshot
+    that predates the field, or a Function/Destructor where ``explicit`` is
+    N/A. Skipping in that case avoids false API_BREAK findings produced
+    purely by snapshot schema evolution.
+    """
+    if f_old.is_explicit is None or f_new.is_explicit is None:
+        return []
+    if not f_old.is_explicit and f_new.is_explicit:
+        return [Change(
+            kind=ChangeKind.CTOR_EXPLICIT_ADDED,
+            symbol=mangled,
+            description=f"Constructor/conversion gained `explicit` specifier: {f_old.name}",
+            old_value="implicit",
+            new_value="explicit",
+        )]
+    if f_old.is_explicit and not f_new.is_explicit:
+        return [Change(
+            kind=ChangeKind.CTOR_EXPLICIT_REMOVED,
+            symbol=mangled,
+            description=f"Constructor/conversion lost `explicit` specifier: {f_old.name}",
+            old_value="explicit",
+            new_value="implicit",
+        )]
+    return []
+
+
+def _check_function_signature(mangled: str, f_old: Function, f_new: Function) -> list[Change]:
+    """Compare signatures and qualifiers of two matched functions."""
+    changes: list[Change] = []
+    changes.extend(_check_return_type_change(mangled, f_old, f_new))
+    changes.extend(_check_params_change(mangled, f_old, f_new))
+    changes.extend(_check_ref_qualifier_change(mangled, f_old, f_new))
+    changes.extend(_check_linkage_change(mangled, f_old, f_new))
+    changes.extend(_check_noexcept_change(mangled, f_old, f_new))
+    changes.extend(_check_virtual_change(mangled, f_old, f_new))
+    changes.extend(_check_hidden_friend_change(mangled, f_old, f_new))
+    changes.extend(_check_explicit_change(mangled, f_old, f_new))
     return changes
 
 
@@ -260,61 +302,47 @@ def _check_inline_transitions(
     return changes
 
 
-@registry.detector("functions")
-def _diff_functions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
-    elf_only_mode = getattr(old, "elf_only_mode", False)
+def _match_old_function(
+    mangled: str,
+    f_old: Function,
+    new_map: dict[str, Function],
+    new_by_name: dict[str, Function],
+    new_all: dict[str, Function],
+    matched_by_name: set[str],
+    elf_only_mode: bool,
+) -> list[Change]:
+    """Classify a single old function: matched by mangled, extern-C fallback, or removed."""
+    if mangled in new_map:
+        return list(_check_function_signature(mangled, f_old, new_map[mangled]))
+
+    # FIX-A Part 2: fallback by plain name when either side uses extern "C".
+    if (
+        f_old.is_extern_c
+        or (f_old.name in new_by_name and new_by_name[f_old.name].is_extern_c)
+    ) and f_old.name in new_by_name:
+        f_new = new_by_name[f_old.name]
+        result = list(_check_function_signature(f_old.name, f_old, f_new))
+        matched_by_name.add(f_old.name)
+        return result
+
+    return [_check_removed_function(mangled, f_old, new_all, elf_only_mode)]
+
+
+def _detect_newly_deleted_functions(
+    old_all: dict[str, Function],
+    new_all: dict[str, Function],
+) -> list[Change]:
+    """Detect functions that gained ``= delete`` between snapshots.
+
+    FUNC_DELETED: detected via castxml is_deleted attribute (header analysis).
+    FUNC_DELETED_DWARF: detected via DWARF DW_AT_deleted attribute (binary analysis).
+    """
     changes: list[Change] = []
-    old_map = {k: v for k, v in old.function_map.items() if v.visibility in (Visibility.PUBLIC, Visibility.ELF_ONLY)}
-    new_map = {k: v for k, v in new.function_map.items() if v.visibility in (Visibility.PUBLIC, Visibility.ELF_ONLY)}
-
-    # Build a lookup of ALL functions in new snapshot (including hidden).
-    new_all = new.function_map
-
-    # FIX-A Part 2: Build secondary indices by plain name for fallback matching
-    # when mangled names differ due to C/C++ compilation mode mismatch.
-    # Match by name when *either* side uses extern "C" (covers both C→C++ and
-    # C++→C linkage flips).
-    new_by_name: dict[str, Function] = {
-        f.name: f for f in new_map.values()
-    }
-    matched_by_name: set[str] = set()
-
-    for mangled, f_old in old_map.items():
-        if mangled in new_map:
-            changes.extend(_check_function_signature(mangled, f_old, new_map[mangled]))
-            continue
-
-        # Fallback: match by plain name when either side uses extern "C"
-        if (f_old.is_extern_c or (f_old.name in new_by_name and new_by_name[f_old.name].is_extern_c)) \
-                and f_old.name in new_by_name:
-            f_new = new_by_name[f_old.name]
-            changes.extend(_check_function_signature(f_old.name, f_old, f_new))
-            matched_by_name.add(f_old.name)
-            continue
-
-        changes.append(_check_removed_function(mangled, f_old, new_all, elf_only_mode))
-
-    for mangled, f_new in new_map.items():
-        if mangled not in old_map and f_new.name not in matched_by_name:
-            changes.append(Change(
-                kind=ChangeKind.FUNC_ADDED,
-                symbol=mangled,
-                description=f"New public function: {f_new.name}",
-                new_value=f_new.name,
-            ))
-
-    # FUNC_DELETED / FUNC_DELETED_DWARF: function was not deleted before, now marked = delete.
-    # FUNC_DELETED: detected via castxml is_deleted attribute (header analysis).
-    # FUNC_DELETED_DWARF: detected via DWARF DW_AT_deleted attribute (binary analysis).
-    old_all = old.function_map
-    new_all_map = new.function_map
-    for mangled, f_new in new_all_map.items():
+    for mangled, f_new in new_all.items():
         if not f_new.is_deleted:
             continue
         f_old_any = old_all.get(mangled)
         if f_old_any is not None and not f_old_any.is_deleted:
-            # Determine source: if the Function itself was marked deleted from DWARF
-            # (DW_AT_deleted), emit the DWARF-specific kind.
             kind = (
                 ChangeKind.FUNC_DELETED_DWARF
                 if f_new.deleted_from_dwarf
@@ -327,6 +355,41 @@ def _diff_functions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                 old_value="callable",
                 new_value="deleted",
             ))
+    return changes
+
+
+@registry.detector("functions")
+def _diff_functions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
+    elf_only_mode = getattr(old, "elf_only_mode", False)
+    changes: list[Change] = []
+    old_map = {k: v for k, v in old.function_map.items() if v.visibility in (Visibility.PUBLIC, Visibility.ELF_ONLY)}
+    new_map = {k: v for k, v in new.function_map.items() if v.visibility in (Visibility.PUBLIC, Visibility.ELF_ONLY)}
+
+    # Build a lookup of ALL functions in new snapshot (including hidden).
+    new_all = new.function_map
+
+    # FIX-A Part 2: Build secondary indices by plain name for fallback matching
+    # when mangled names differ due to C/C++ compilation mode mismatch.
+    new_by_name: dict[str, Function] = {f.name: f for f in new_map.values()}
+    matched_by_name: set[str] = set()
+
+    for mangled, f_old in old_map.items():
+        changes.extend(
+            _match_old_function(mangled, f_old, new_map, new_by_name, new_all, matched_by_name, elf_only_mode)
+        )
+
+    for mangled, f_new in new_map.items():
+        if mangled not in old_map and f_new.name not in matched_by_name:
+            changes.append(Change(
+                kind=ChangeKind.FUNC_ADDED,
+                symbol=mangled,
+                description=f"New public function: {f_new.name}",
+                new_value=f_new.name,
+            ))
+
+    old_all = old.function_map
+    new_all_map = new.function_map
+    changes.extend(_detect_newly_deleted_functions(old_all, new_all_map))
 
     # FUNC_BECAME_INLINE / FUNC_LOST_INLINE: detect inline↔non-inline transitions
     changes.extend(_check_inline_transitions(old_map, new_map, new))
@@ -535,19 +598,12 @@ def _is_access_narrowing(old_access: Any, new_access: Any) -> bool:
     return _RANK.get(new_access, 0) > _RANK.get(old_access, 0)
 
 
-@registry.detector("access_levels")
-def _diff_access_levels(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
-    """Detect narrowing access level changes on methods and fields.
-
-    Only flags narrowing transitions (public→protected/private, protected→private).
-    Widening (e.g., private→public) is backward-compatible and not reported.
-    """
+def _check_method_access_changes(
+    old_map: dict[str, Function],
+    new_map: dict[str, Function],
+) -> list[Change]:
+    """Emit METHOD_ACCESS_CHANGED for narrowing method access transitions."""
     changes: list[Change] = []
-
-    # Method access changes (narrowing only)
-    old_map = _public_functions(old)
-    new_map = _public_functions(new)
-
     for mangled, f_old in old_map.items():
         f_new = new_map.get(mangled)
         if f_new is None:
@@ -560,18 +616,21 @@ def _diff_access_levels(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                 old_value=f_old.access.value,
                 new_value=f_new.access.value,
             ))
+    return changes
 
-    # Field access changes (narrowing only)
-    old_types = {t.name: t for t in old.types if not t.is_union}
-    new_types = {t.name: t for t in new.types if not t.is_union}
 
+def _check_field_access_changes(
+    old_types: dict[str, Any],
+    new_types: dict[str, Any],
+) -> list[Change]:
+    """Emit FIELD_ACCESS_CHANGED for narrowing field access transitions."""
+    changes: list[Change] = []
     for name, t_old in old_types.items():
         t_new = new_types.get(name)
         if t_new is None:
             continue
         old_fields = {f.name: f for f in t_old.fields}
         new_fields = {f.name: f for f in t_new.fields}
-
         for fname, f_old_f in old_fields.items():
             f_new_f = new_fields.get(fname)
             if f_new_f is None:
@@ -584,7 +643,73 @@ def _diff_access_levels(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                     old_value=f_old_f.access.value,
                     new_value=f_new_f.access.value,
                 ))
+    return changes
 
+
+@registry.detector("access_levels")
+def _diff_access_levels(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
+    """Detect narrowing access level changes on methods and fields.
+
+    Only flags narrowing transitions (public→protected/private, protected→private).
+    Widening (e.g., private→public) is backward-compatible and not reported.
+    """
+    changes: list[Change] = []
+    changes.extend(_check_method_access_changes(_public_functions(old), _public_functions(new)))
+    old_types = {t.name: t for t in old.types if not t.is_union}
+    new_types = {t.name: t for t in new.types if not t.is_union}
+    changes.extend(_check_field_access_changes(old_types, new_types))
+    return changes
+
+
+def _is_anon_field(f: Any) -> bool:
+    """Return True for compiler-generated anonymous/unnamed fields."""
+    return not f.name or f.name.startswith("__anon")
+
+
+def _check_anon_field_at_offset(
+    name: str,
+    offset: int,
+    f_old: Any,
+    new_by_offset: dict[int, Any],
+) -> Change | None:
+    """Compare a single anonymous field (by offset) to what the new type has."""
+    f_new = new_by_offset.get(offset)
+    if f_new is None:
+        return Change(
+            kind=ChangeKind.ANON_FIELD_CHANGED,
+            symbol=name,
+            description=f"Anonymous field removed at offset {offset} in {name}",
+            old_value=f_old.type,
+        )
+    if f_old.type != f_new.type:
+        return Change(
+            kind=ChangeKind.ANON_FIELD_CHANGED,
+            symbol=name,
+            description=f"Anonymous field type changed at offset {offset} in {name}",
+            old_value=f_old.type,
+            new_value=f_new.type,
+        )
+    return None
+
+
+def _anon_fields_by_offset(fields: list[Any]) -> dict[int, Any]:
+    """Index anonymous fields (no name or __anon prefix) by their bit offset."""
+    return {f.offset_bits: f for f in fields if _is_anon_field(f) and f.offset_bits is not None}
+
+
+def _check_anon_fields_for_type(name: str, t_old: Any, t_new: Any) -> list[Change]:
+    """Compare anonymous fields by offset for a single matched type pair."""
+    old_by_offset = _anon_fields_by_offset(t_old.fields)
+    new_by_offset = _anon_fields_by_offset(t_new.fields)
+
+    if not old_by_offset and not new_by_offset:
+        return []
+
+    changes: list[Change] = []
+    for offset, f_old in old_by_offset.items():
+        ch = _check_anon_field_at_offset(name, offset, f_old, new_by_offset)
+        if ch is not None:
+            changes.append(ch)
     return changes
 
 
@@ -599,36 +724,53 @@ def _diff_anon_fields(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         t_new = new_map.get(name)
         if t_new is None:
             continue
-        # Look for fields with empty/anonymous names (compiler-generated)
-        old_anon = [f for f in t_old.fields if not f.name or f.name.startswith("__anon")]
-        new_anon = [f for f in t_new.fields if not f.name or f.name.startswith("__anon")]
-
-        if not old_anon and not new_anon:
-            continue
-
-        # Compare anonymous fields by offset
-        old_by_offset = {f.offset_bits: f for f in old_anon if f.offset_bits is not None}
-        new_by_offset = {f.offset_bits: f for f in new_anon if f.offset_bits is not None}
-
-        for offset, f_old in old_by_offset.items():
-            f_new = new_by_offset.get(offset)
-            if f_new is None:
-                changes.append(Change(
-                    kind=ChangeKind.ANON_FIELD_CHANGED,
-                    symbol=name,
-                    description=f"Anonymous field removed at offset {offset} in {name}",
-                    old_value=f_old.type,
-                ))
-            elif f_old.type != f_new.type:
-                changes.append(Change(
-                    kind=ChangeKind.ANON_FIELD_CHANGED,
-                    symbol=name,
-                    description=f"Anonymous field type changed at offset {offset} in {name}",
-                    old_value=f_old.type,
-                    new_value=f_new.type,
-                ))
+        changes.extend(_check_anon_fields_for_type(name, t_old, t_new))
 
     return changes
+
+
+def _find_rename_pairs(
+    removed: set[str],
+    added: set[str],
+    old_map: dict[str, Function],
+    new_map: dict[str, Function],
+) -> list[tuple[str, str]]:
+    """Return (old_name, new_name) pairs where new_name has a common prefix added to old_name."""
+    pairs: list[tuple[str, str]] = []
+    for r_sym in removed:
+        r_name = old_map[r_sym].name
+        for a_sym in added:
+            a_name = new_map[a_sym].name
+            if a_name.endswith(r_name) and len(a_name) > len(r_name):
+                pairs.append((r_name, a_name))
+                break
+            if a_name.endswith("_" + r_name) and len(a_name) > len(r_name) + 1:
+                pairs.append((r_name, a_name))
+                break
+    return pairs
+
+
+def _emit_batch_rename(rename_pairs: list[tuple[str, str]]) -> list[Change]:
+    """Emit a SYMBOL_RENAMED_BATCH change if all pairs share a single common prefix."""
+    if len(rename_pairs) < 2:
+        return []
+    prefixes = {new_name[: new_name.rfind(old_name)] for old_name, new_name in rename_pairs}
+    if len(prefixes) != 1:
+        return []
+    prefix = prefixes.pop()
+    pair_desc = ", ".join(f"{o} → {n}" for o, n in rename_pairs[:5])
+    if len(rename_pairs) > 5:
+        pair_desc += f", ... ({len(rename_pairs)} total)"
+    return [Change(
+        kind=ChangeKind.SYMBOL_RENAMED_BATCH,
+        symbol=f"batch_rename:{prefix}*",
+        description=(
+            f"Batch symbol rename detected (namespace refactoring): "
+            f"prefix '{prefix}' added to {len(rename_pairs)} symbols ({pair_desc})"
+        ),
+        old_value=", ".join(o for o, _ in rename_pairs),
+        new_value=", ".join(n for _, n in rename_pairs),
+    )]
 
 
 @registry.detector("symbol_renames")
@@ -643,8 +785,6 @@ def _diff_symbol_renames(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     the added name ends with the removed name (common prefix pattern), emit
     a SYMBOL_RENAMED_BATCH change.
     """
-    changes: list[Change] = []
-
     old_map = _public_functions(old)
     new_map = _public_functions(new)
 
@@ -652,50 +792,10 @@ def _diff_symbol_renames(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     added = set(new_map.keys()) - set(old_map.keys())
 
     if len(removed) < 2 or not added:
-        return changes
+        return []
 
-    # Find rename pairs: removed symbol "X" matches added symbol "prefix_X"
-    # or "prefixX" (where prefix is a common prefix among all added symbols).
-    rename_pairs: list[tuple[str, str]] = []
-    for r_sym in removed:
-        r_name = old_map[r_sym].name
-        for a_sym in added:
-            a_name = new_map[a_sym].name
-            # Check if added name ends with removed name (prefix pattern)
-            if a_name.endswith(r_name) and len(a_name) > len(r_name):
-                rename_pairs.append((r_name, a_name))
-                break
-            # Also check underscore-separated: "init" → "mylib_init"
-            if a_name.endswith("_" + r_name) and len(a_name) > len(r_name) + 1:
-                rename_pairs.append((r_name, a_name))
-                break
-
-    # Require at least 2 rename pairs to be considered a batch rename
-    if len(rename_pairs) >= 2:
-        # Verify common prefix among the renamed symbols
-        prefixes = set()
-        for old_name, new_name in rename_pairs:
-            prefix = new_name[: new_name.rfind(old_name)]
-            prefixes.add(prefix)
-
-        # If there's a single common prefix, this is a deliberate namespace refactoring
-        if len(prefixes) == 1:
-            prefix = prefixes.pop()
-            pair_desc = ", ".join(f"{o} → {n}" for o, n in rename_pairs[:5])
-            if len(rename_pairs) > 5:
-                pair_desc += f", ... ({len(rename_pairs)} total)"
-            changes.append(Change(
-                kind=ChangeKind.SYMBOL_RENAMED_BATCH,
-                symbol=f"batch_rename:{prefix}*",
-                description=(
-                    f"Batch symbol rename detected (namespace refactoring): "
-                    f"prefix '{prefix}' added to {len(rename_pairs)} symbols ({pair_desc})"
-                ),
-                old_value=", ".join(o for o, _ in rename_pairs),
-                new_value=", ".join(n for _, n in rename_pairs),
-            ))
-
-    return changes
+    rename_pairs = _find_rename_pairs(removed, added, old_map, new_map)
+    return _emit_batch_rename(rename_pairs)
 
 
 @registry.detector("param_restrict")

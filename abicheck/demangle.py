@@ -88,6 +88,65 @@ def _batch_cache_record_fail(mangled: str) -> None:
     _BATCH_CACHE_FAIL.add(mangled)
 
 
+def _batch_phase1_cache(cpp_syms: list[str]) -> tuple[dict[str, str], list[str]]:
+    """Return (already-resolved, uncached) from the process-wide cache."""
+    result: dict[str, str] = {}
+    uncached: list[str] = []
+    for s in cpp_syms:
+        if s in _BATCH_CACHE_OK:
+            result[s] = _BATCH_CACHE_OK[s]
+        elif s in _BATCH_CACHE_FAIL:
+            pass  # known non-demangleable; skip silently
+        else:
+            uncached.append(s)
+    return result, uncached
+
+
+def _batch_phase2_cxxfilt(uncached: list[str], result: dict[str, str]) -> list[str]:
+    """Try in-process cxxfilt for *uncached* symbols; return still-remaining list."""
+    remaining: list[str] = []
+    try:
+        import cxxfilt
+        for s in uncached:
+            try:
+                d = cxxfilt.demangle(s)
+                if d and d != s:
+                    result[s] = d
+                    _batch_cache_record_ok(s, d)
+                else:
+                    remaining.append(s)
+            except Exception:  # noqa: BLE001
+                remaining.append(s)
+    except ImportError:
+        remaining = list(uncached)
+    return remaining
+
+
+def _batch_phase3_cppfilt(remaining: list[str], result: dict[str, str]) -> None:
+    """Fall back to a single batched ``c++filt`` subprocess call."""
+    success_set: set[str] = set()
+    try:
+        proc = subprocess.run(
+            ["c++filt"],
+            input="\n".join(remaining),
+            capture_output=True, text=True, timeout=30,
+        )
+        if proc.returncode == 0:
+            lines = proc.stdout.strip().split("\n")
+            for mangled, demangled in zip(remaining, lines):
+                if demangled and demangled != mangled:
+                    result[mangled] = demangled
+                    _batch_cache_record_ok(mangled, demangled)
+                    success_set.add(mangled)
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        pass
+    # Record the genuinely-unresolvable symbols so we don't keep
+    # spawning c++filt for them.
+    for s in remaining:
+        if s not in success_set:
+            _batch_cache_record_fail(s)
+
+
 def demangle_batch(symbols: list[str]) -> dict[str, str]:
     """Demangle a batch of symbols efficiently using a single ``c++filt`` call.
 
@@ -104,61 +163,17 @@ def demangle_batch(symbols: list[str]) -> dict[str, str]:
     if not cpp_syms:
         return {}
 
-    result: dict[str, str] = {}
     # Phase 1 — serve from the process-wide cache (both hit and miss).
-    uncached: list[str] = []
-    for s in cpp_syms:
-        if s in _BATCH_CACHE_OK:
-            result[s] = _BATCH_CACHE_OK[s]
-        elif s in _BATCH_CACHE_FAIL:
-            continue  # known non-demangleable; do not re-query
-        else:
-            uncached.append(s)
-
+    result, uncached = _batch_phase1_cache(cpp_syms)
     if not uncached:
         return result
 
-    remaining_syms: list[str] = []
-
     # Phase 2 — try cxxfilt (in-process, fastest) for the uncached set.
-    try:
-        import cxxfilt
-        for s in uncached:
-            try:
-                d = cxxfilt.demangle(s)
-                if d and d != s:
-                    result[s] = d
-                    _batch_cache_record_ok(s, d)
-                else:
-                    remaining_syms.append(s)
-            except Exception:  # noqa: BLE001
-                remaining_syms.append(s)
-    except ImportError:
-        remaining_syms = list(uncached)
+    remaining = _batch_phase2_cxxfilt(uncached, result)
 
     # Phase 3 — fall back to a single batched c++filt call.
-    if remaining_syms:
-        success_set: set[str] = set()
-        try:
-            proc = subprocess.run(
-                ["c++filt"],
-                input="\n".join(remaining_syms),
-                capture_output=True, text=True, timeout=30,
-            )
-            if proc.returncode == 0:
-                lines = proc.stdout.strip().split("\n")
-                for mangled, demangled in zip(remaining_syms, lines):
-                    if demangled and demangled != mangled:
-                        result[mangled] = demangled
-                        _batch_cache_record_ok(mangled, demangled)
-                        success_set.add(mangled)
-        except (FileNotFoundError, subprocess.TimeoutExpired):
-            pass
-        # Record the genuinely-unresolvable symbols so we don't keep
-        # spawning c++filt for them.
-        for s in remaining_syms:
-            if s not in success_set:
-                _batch_cache_record_fail(s)
+    if remaining:
+        _batch_phase3_cppfilt(remaining, result)
 
     return result
 

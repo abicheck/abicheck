@@ -132,6 +132,126 @@ def _failure_type(
 # Single DiffResult → <testsuite>
 # ---------------------------------------------------------------------------
 
+def _partition_changes(
+    changes: list[Change],
+) -> tuple[dict[str, Change], list[Change]]:
+    """Split *changes* into (first-change-per-symbol map, extra changes).
+
+    The first change seen for each symbol becomes the primary testcase entry;
+    subsequent changes on the same symbol are collected in *extra_changes* so
+    they can be appended as additional ``<failure>`` children later.
+    """
+    change_by_symbol: dict[str, Change] = {}
+    extra_changes: list[Change] = []
+    for c in changes:
+        if c.symbol not in change_by_symbol:
+            change_by_symbol[c.symbol] = c
+        else:
+            extra_changes.append(c)
+    return change_by_symbol, extra_changes
+
+
+def _collect_all_symbols(
+    old_snapshot: AbiSnapshot | None,
+    show_only: str | None,
+    change_by_symbol: dict[str, Change],
+) -> dict[str, str]:
+    """Build a symbol_name → classname map covering changed and unchanged symbols.
+
+    When *old_snapshot* is provided and *show_only* is **not** active,
+    unchanged symbols are included so the pass-rate is meaningful.  When
+    *show_only* is active, only filtered changes should appear.
+    """
+    all_symbols: dict[str, str] = {}
+    if old_snapshot is not None and not show_only:
+        for f in old_snapshot.functions:
+            all_symbols[f.mangled] = "functions"
+        for v in old_snapshot.variables:
+            all_symbols[v.mangled] = "variables"
+        for t in old_snapshot.types:
+            all_symbols[t.name] = "types"
+        for e in old_snapshot.enums:
+            all_symbols[e.name] = "enums"
+    # Add changed symbols that might not be in old_snapshot (e.g. additions)
+    for sym, c in change_by_symbol.items():
+        if sym not in all_symbols:
+            all_symbols[sym] = _classname_for(c)
+    return all_symbols
+
+
+def _count_failures(
+    changes: list[Change],
+    breaking_set: frozenset[ChangeKind],
+    api_break_set: frozenset[ChangeKind],
+    risk_set: frozenset[ChangeKind],
+    severity_config: SeverityConfig | None,
+) -> int:
+    """Count distinct symbols that have at least one failing change."""
+    symbols_with_failure: set[str] = set()
+    for c in changes:
+        if _is_failure(c, breaking_set, api_break_set, risk_set, severity_config):
+            symbols_with_failure.add(c.symbol)
+    return len(symbols_with_failure)
+
+
+def _emit_testcases(
+    ts: ET.Element,
+    all_symbols: dict[str, str],
+    change_by_symbol: dict[str, Change],
+    breaking_set: frozenset[ChangeKind],
+    api_break_set: frozenset[ChangeKind],
+    risk_set: frozenset[ChangeKind],
+    severity_config: SeverityConfig | None,
+) -> None:
+    """Append ``<testcase>`` elements to *ts* for every symbol in *all_symbols*.
+
+    When *all_symbols* is empty (no snapshot, no filter), fall back to
+    emitting one testcase per changed symbol only.
+    """
+    if all_symbols:
+        for sym, classname in sorted(all_symbols.items()):
+            tc = ET.SubElement(ts, "testcase")
+            tc.set("name", sym)
+            tc.set("classname", classname)
+            if sym in change_by_symbol:
+                _maybe_add_failure(
+                    tc, change_by_symbol[sym],
+                    breaking_set, api_break_set, risk_set,
+                    severity_config,
+                )
+    else:
+        # No snapshot — only emit changed symbols
+        for sym, c in sorted(change_by_symbol.items()):
+            tc = ET.SubElement(ts, "testcase")
+            tc.set("name", sym)
+            tc.set("classname", _classname_for(c))
+            _maybe_add_failure(
+                tc, c, breaking_set, api_break_set, risk_set, severity_config,
+            )
+
+
+def _append_extra_failures(
+    ts: ET.Element,
+    extra_changes: list[Change],
+    breaking_set: frozenset[ChangeKind],
+    api_break_set: frozenset[ChangeKind],
+    risk_set: frozenset[ChangeKind],
+    severity_config: SeverityConfig | None,
+) -> None:
+    """Append extra ``<failure>`` children to already-existing testcases.
+
+    Handles symbols that have more than one change (e.g. multiple changes
+    to the same symbol).  For each extra failing change, find the existing
+    ``<testcase>`` with the matching name and attach a new ``<failure>``.
+    """
+    for c in extra_changes:
+        if _is_failure(c, breaking_set, api_break_set, risk_set, severity_config):
+            for tc in ts:
+                if tc.get("name") == c.symbol:
+                    _add_failure(tc, c, breaking_set, api_break_set, risk_set)
+                    break
+
+
 def _build_testsuite(
     result: DiffResult,
     old_snapshot: AbiSnapshot | None = None,
@@ -154,42 +274,9 @@ def _build_testsuite(
     if show_only:
         changes = apply_show_only(changes, show_only, policy=result.policy)
 
-    # Build map: symbol → change (use first change per symbol for the testcase)
-    change_by_symbol: dict[str, Change] = {}
-    extra_changes: list[Change] = []
-    for c in changes:
-        if c.symbol not in change_by_symbol:
-            change_by_symbol[c.symbol] = c
-        else:
-            extra_changes.append(c)
-
-    # Collect all symbols (changed + unchanged) when snapshot is available
-    # and no show_only filter is active.  When show_only is active, only
-    # filtered changes should appear to match the documented behaviour
-    # ("filtered-out changes are omitted entirely").
-    all_symbols: dict[str, str] = {}  # symbol_name → classname
-    if old_snapshot is not None and not show_only:
-        for f in old_snapshot.functions:
-            all_symbols[f.mangled] = "functions"
-        for v in old_snapshot.variables:
-            all_symbols[v.mangled] = "variables"
-        for t in old_snapshot.types:
-            all_symbols[t.name] = "types"
-        for e in old_snapshot.enums:
-            all_symbols[e.name] = "enums"
-
-    # Add changed symbols that might not be in old_snapshot (e.g. additions)
-    for sym, c in change_by_symbol.items():
-        if sym not in all_symbols:
-            all_symbols[sym] = _classname_for(c)
-
-    # Count failures — a symbol counts as failing if ANY of its changes fail
-    # (not just the first one stored in change_by_symbol).
-    symbols_with_failure: set[str] = set()
-    for c in changes:
-        if _is_failure(c, breaking_set, api_break_set, risk_set, severity_config):
-            symbols_with_failure.add(c.symbol)
-    failure_count = len(symbols_with_failure)
+    change_by_symbol, extra_changes = _partition_changes(changes)
+    all_symbols = _collect_all_symbols(old_snapshot, show_only, change_by_symbol)
+    failure_count = _count_failures(changes, breaking_set, api_break_set, risk_set, severity_config)
 
     total = len(all_symbols) if all_symbols else len(change_by_symbol)
 
@@ -199,37 +286,8 @@ def _build_testsuite(
     ts.set("failures", str(failure_count))
     ts.set("errors", "0")
 
-    # Emit test cases for every symbol
-    if all_symbols:
-        for sym, classname in sorted(all_symbols.items()):
-            tc = ET.SubElement(ts, "testcase")
-            tc.set("name", sym)
-            tc.set("classname", classname)
-            if sym in change_by_symbol:
-                _maybe_add_failure(
-                    tc, change_by_symbol[sym],
-                    breaking_set, api_break_set, risk_set,
-                    severity_config,
-                )
-    else:
-        # No snapshot — only emit changed symbols
-        for sym, c in sorted(change_by_symbol.items()):
-            tc = ET.SubElement(ts, "testcase")
-            tc.set("name", sym)
-            tc.set("classname", _classname_for(c))
-            _maybe_add_failure(
-                tc, c, breaking_set, api_break_set, risk_set, severity_config,
-            )
-
-    # Additional changes for symbols that already have a testcase
-    # (e.g. multiple changes to the same symbol) — append as extra failures
-    for c in extra_changes:
-        if _is_failure(c, breaking_set, api_break_set, risk_set, severity_config):
-            # Find the existing testcase for this symbol
-            for tc in ts:
-                if tc.get("name") == c.symbol:
-                    _add_failure(tc, c, breaking_set, api_break_set, risk_set)
-                    break
+    _emit_testcases(ts, all_symbols, change_by_symbol, breaking_set, api_break_set, risk_set, severity_config)
+    _append_extra_failures(ts, extra_changes, breaking_set, api_break_set, risk_set, severity_config)
 
     return ts
 

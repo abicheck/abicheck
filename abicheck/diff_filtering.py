@@ -178,6 +178,62 @@ def _resolve_ancestor_functions(
                 type_to_mangled[tname].append(mname)
 
 
+def _collect_function_type_refs(func: Function) -> set[str]:
+    """Return the set of type strings referenced in *func*'s signature."""
+    out: set[str] = set()
+    if func.return_type:
+        out.add(func.return_type)
+    for p in func.params:
+        if p.type:
+            out.add(p.type)
+    return out
+
+
+def _build_type_to_funcs(
+    affected_types: set[str],
+    old_pub: dict[str, Function],
+) -> tuple[dict[str, list[str]], dict[str, list[str]]]:
+    """Build type→(demangled, mangled) function name lists from public functions."""
+    type_to_funcs: dict[str, list[str]] = {t: [] for t in affected_types}
+    type_to_mangled: dict[str, list[str]] = {t: [] for t in affected_types}
+    for _mangled, func in old_pub.items():
+        func_types_used = _collect_function_type_refs(func)
+        for tname in affected_types:
+            if any(tname in ft for ft in func_types_used):
+                type_to_funcs[tname].append(func.name)
+                type_to_mangled[tname].append(func.mangled)
+    return type_to_funcs, type_to_mangled
+
+
+def _build_type_embed_index(
+    affected_types: set[str],
+    old: AbiSnapshot,
+) -> dict[str, set[str]]:
+    """Build a child_type→{parent_type} embedding index from old snapshot fields."""
+    type_embeds: dict[str, set[str]] = {}
+    for t in old.types:
+        for fld in t.fields:
+            for tname in affected_types:
+                if tname in fld.type:
+                    type_embeds.setdefault(tname, set()).add(t.name)
+    return type_embeds
+
+
+def _assign_affected_symbols_to_changes(
+    type_changes: list[Change],
+    type_to_funcs: dict[str, list[str]],
+    type_to_mangled: dict[str, list[str]],
+) -> None:
+    """Populate Change.affected_symbols from the type-to-function mappings."""
+    for c in type_changes:
+        type_name = _root_type_name(c)
+        funcs = type_to_funcs.get(type_name, [])
+        mangled_funcs = type_to_mangled.get(type_name, [])
+        if funcs:
+            # Store both demangled and mangled names for cross-format matching
+            c.affected_symbols = sorted(set(funcs) | set(mangled_funcs))
+
+
 def _enrich_affected_symbols(
     changes: list[Change], old: AbiSnapshot,
 ) -> None:
@@ -187,54 +243,27 @@ def _enrich_affected_symbols(
     if not type_changes:
         return
 
-    # Collect affected type names
-    affected_types: set[str] = set()
-    for c in type_changes:
-        # symbol is the type name (e.g. "Point", "ns::Container", "Status")
-        # Strip field qualifiers like "ns::Container::flags" → "ns::Container"
-        type_name = _root_type_name(c)
-        affected_types.add(type_name)
-
+    # Collect affected type names; strip field qualifiers like
+    # "ns::Container::flags" → "ns::Container"
+    affected_types: set[str] = {_root_type_name(c) for c in type_changes}
     if not affected_types:
         return
 
-    # Build type→functions mapping from old snapshot (FIX-A Part 3).
-    # Store both demangled names (for display) and mangled names (for appcompat matching).
-    type_to_funcs: dict[str, list[str]] = {t: [] for t in affected_types}
-    type_to_mangled: dict[str, list[str]] = {t: [] for t in affected_types}
     old_pub = _public_functions(old)
 
-    def _function_types(func: Function) -> set[str]:
-        out: set[str] = set()
-        if func.return_type:
-            out.add(func.return_type)
-        for p in func.params:
-            if p.type:
-                out.add(p.type)
-        return out
-
-    for _mangled, func in old_pub.items():
-        func_types_used = _function_types(func)
-        for tname in affected_types:
-            if any(tname in ft for ft in func_types_used):
-                type_to_funcs[tname].append(func.name)
-                type_to_mangled[tname].append(func.mangled)
+    # Build type→functions mapping from old snapshot (FIX-A Part 3).
+    # Store both demangled names (for display) and mangled names (for appcompat matching).
+    type_to_funcs, type_to_mangled = _build_type_to_funcs(affected_types, old_pub)
 
     # Also check if types are embedded in struct fields used by functions
     # (e.g., Container has a Leaf field → functions taking Container* are affected by Leaf changes)
-    type_embeds: dict[str, set[str]] = {}  # child_type → {parent_type, ...}
-    for t in old.types:
-        for fld in t.fields:
-            for tname in affected_types:
-                if tname in fld.type:
-                    type_embeds.setdefault(tname, set()).add(t.name)
+    type_embeds = _build_type_embed_index(affected_types, old)
 
     # Compute transitive closure: if Leaf is in Container is in Wrapper,
     # functions using Wrapper are also affected by Leaf changes.
     # Cache: ancestor type → list of (func_name, mangled) so each ancestor
     # is scanned at most once across all affected types.
     ancestor_func_cache: dict[str, list[tuple[str, str]]] = {}
-
     for tname in affected_types:
         ancestors = _all_ancestors(tname, type_embeds)
         _resolve_ancestor_functions(
@@ -244,14 +273,7 @@ def _enrich_affected_symbols(
 
     # Assign to changes — include both demangled names (display) and
     # mangled names (appcompat matching, FIX-A Part 3).
-    for c in type_changes:
-        type_name = _root_type_name(c)
-        funcs = type_to_funcs.get(type_name, [])
-        mangled_funcs = type_to_mangled.get(type_name, [])
-        if funcs:
-            # Store both demangled and mangled names for cross-format matching
-            all_symbols = sorted(set(funcs) | set(mangled_funcs))
-            c.affected_symbols = all_symbols
+    _assign_affected_symbols_to_changes(type_changes, type_to_funcs, type_to_mangled)
 
 
 
@@ -353,40 +375,37 @@ def _mark_as_redundant(
     redundant.append(c)
 
 
-def _filter_redundant(changes: list[Change]) -> tuple[list[Change], list[Change]]:
-    """Identify changes that are consequences of a root type change.
-
-    Returns (kept, redundant) — redundant changes are still available for audit.
-    Root changes are annotated with ``caused_count`` and ``derived_symbols``.
-    """
-    # Step 1: Collect root type changes
+def _collect_root_types(changes: list[Change]) -> dict[str, Change]:
+    """Return a mapping of type_name → first root-type Change found in *changes*."""
     root_types: dict[str, Change] = {}
     for c in changes:
         if c.kind in _ROOT_TYPE_CHANGE_KINDS:
             type_name = _root_type_name(c)
             if type_name not in root_types:
                 root_types[type_name] = c
+    return root_types
 
-    if not root_types:
-        return changes, []
 
-    # Pre-compile word-boundary regex patterns for all root type names once,
-    # instead of recompiling per (_match_root_type call * root type) pair.
-    compiled_patterns: dict[str, re.Pattern[str]] = {
+def _compile_root_patterns(root_types: dict[str, Change]) -> dict[str, re.Pattern[str]]:
+    """Pre-compile word-boundary regex patterns for each root type name."""
+    return {
         name: re.compile(r'(?<![A-Za-z0-9_])' + re.escape(name) + r'(?![A-Za-z0-9_])')
         for name in root_types
     }
 
-    # Step 2: Check each non-root change for redundancy
-    kept: list[Change] = []
-    redundant: list[Change] = []
 
-    # Track root types that have been classified as redundant themselves,
-    # so we don't let downstream changes point at removed roots.
+def _classify_root_pass(
+    changes: list[Change],
+    root_types: dict[str, Change],
+    compiled_patterns: dict[str, re.Pattern[str]],
+    kept: list[Change],
+    redundant: list[Change],
+) -> None:
+    """First pass: classify root-type changes, marking cross-referencing ones redundant.
+
+    Mutates *root_types* (removes redundant roots), *kept*, and *redundant* in place.
+    """
     removed_roots: set[str] = set()
-
-    # First pass: classify root type changes (some may be redundant
-    # if they reference another root type — nested type propagation).
     for c in changes:
         if c.kind not in _ROOT_TYPE_CHANGE_KINDS:
             continue
@@ -396,35 +415,60 @@ def _filter_redundant(changes: list[Change]) -> tuple[list[Change], list[Change]
             matched_root = _match_root_type(c, other_roots, compiled_patterns)
             if matched_root is not None:
                 _mark_as_redundant(c, matched_root, root_types, redundant)
-                # Remove this root from root_types so derived changes
-                # won't point at a root that is itself redundant.
+                # Remove this root so derived changes won't point at a
+                # root that is itself redundant.
                 removed_roots.add(type_name)
                 continue
         kept.append(c)
-
-    # Remove redundant roots from the lookup dict
     for name in removed_roots:
         root_types.pop(name, None)
 
-    # Second pass: classify non-root changes
+
+def _classify_derived_pass(
+    changes: list[Change],
+    root_types: dict[str, Change],
+    compiled_patterns: dict[str, re.Pattern[str]],
+    kept: list[Change],
+    redundant: list[Change],
+) -> None:
+    """Second pass: classify non-root changes, marking derived ones redundant."""
     for c in changes:
         if c.kind in _ROOT_TYPE_CHANGE_KINDS:
-            continue  # already handled above
-
-        if c.kind in _ALWAYS_INDEPENDENT_KINDS:
+            continue  # already handled in first pass
+        if c.kind in _ALWAYS_INDEPENDENT_KINDS or c.kind not in _DERIVED_CHANGE_KINDS:
             kept.append(c)
             continue
-
-        if c.kind not in _DERIVED_CHANGE_KINDS:
-            kept.append(c)
-            continue
-
         # Check if this change references a (kept) root type
         matched_root = _match_root_type(c, root_types, compiled_patterns)
         if matched_root is not None:
             _mark_as_redundant(c, matched_root, root_types, redundant)
         else:
             kept.append(c)
+
+
+def _filter_redundant(changes: list[Change]) -> tuple[list[Change], list[Change]]:
+    """Identify changes that are consequences of a root type change.
+
+    Returns (kept, redundant) — redundant changes are still available for audit.
+    Root changes are annotated with ``caused_count`` and ``derived_symbols``.
+    """
+    root_types = _collect_root_types(changes)
+    if not root_types:
+        return changes, []
+
+    # Pre-compile word-boundary regex patterns for all root type names once,
+    # instead of recompiling per (_match_root_type call * root type) pair.
+    compiled_patterns = _compile_root_patterns(root_types)
+
+    kept: list[Change] = []
+    redundant: list[Change] = []
+
+    # First pass: classify root type changes (some may be redundant
+    # if they reference another root type — nested type propagation).
+    _classify_root_pass(changes, root_types, compiled_patterns, kept, redundant)
+
+    # Second pass: classify non-root changes
+    _classify_derived_pass(changes, root_types, compiled_patterns, kept, redundant)
 
     return kept, redundant
 
