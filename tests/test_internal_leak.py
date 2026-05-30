@@ -28,7 +28,6 @@ from abicheck.internal_leak import (
     detect_internal_leaks,
     is_internal_type,
 )
-from abicheck.dwarf_metadata import DwarfMetadata, FieldInfo, StructLayout
 from abicheck.model import (
     AbiSnapshot,
     Function,
