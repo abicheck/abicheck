@@ -26,6 +26,7 @@ from .binary_fingerprint import (
 from .checker_policy import ChangeKind
 from .checker_types import Change
 from .detector_registry import registry
+from .diff_helpers import bool_transition, diff_by_key
 from .elf_metadata import SymbolType
 from .model import (
     AbiSnapshot,
@@ -155,36 +156,20 @@ def _check_linkage_change(mangled: str, f_old: Function, f_new: Function) -> lis
 
 def _check_noexcept_change(mangled: str, f_old: Function, f_new: Function) -> list[Change]:
     """Emit a change if the noexcept specifier was added or removed."""
-    if f_old.is_noexcept and not f_new.is_noexcept:
-        return [Change(
-            kind=ChangeKind.FUNC_NOEXCEPT_REMOVED,
-            symbol=mangled,
-            description=f"noexcept specifier removed: {f_old.name}",
-        )]
-    if not f_old.is_noexcept and f_new.is_noexcept:
-        return [Change(
-            kind=ChangeKind.FUNC_NOEXCEPT_ADDED,
-            symbol=mangled,
-            description=f"noexcept specifier added: {f_old.name}",
-        )]
-    return []
+    return bool_transition(
+        f_old.is_noexcept, f_new.is_noexcept, mangled,
+        added=(ChangeKind.FUNC_NOEXCEPT_ADDED, f"noexcept specifier added: {f_old.name}"),
+        removed=(ChangeKind.FUNC_NOEXCEPT_REMOVED, f"noexcept specifier removed: {f_old.name}"),
+    )
 
 
 def _check_virtual_change(mangled: str, f_old: Function, f_new: Function) -> list[Change]:
     """Emit a change if the virtual specifier was added or removed."""
-    if not f_old.is_virtual and f_new.is_virtual:
-        return [Change(
-            kind=ChangeKind.FUNC_VIRTUAL_ADDED,
-            symbol=mangled,
-            description=f"Function became virtual: {f_old.name}",
-        )]
-    if f_old.is_virtual and not f_new.is_virtual:
-        return [Change(
-            kind=ChangeKind.FUNC_VIRTUAL_REMOVED,
-            symbol=mangled,
-            description=f"Function is no longer virtual: {f_old.name}",
-        )]
-    return []
+    return bool_transition(
+        f_old.is_virtual, f_new.is_virtual, mangled,
+        added=(ChangeKind.FUNC_VIRTUAL_ADDED, f"Function became virtual: {f_old.name}"),
+        removed=(ChangeKind.FUNC_VIRTUAL_REMOVED, f"Function is no longer virtual: {f_old.name}"),
+    )
 
 
 def _check_hidden_friend_change(mangled: str, f_old: Function, f_new: Function) -> list[Change]:
@@ -200,25 +185,14 @@ def _check_hidden_friend_change(mangled: str, f_old: Function, f_new: Function) 
     are picked up by ``_check_hidden_friend_additions_removals``
     below by matching on (name, params) rather than mangled name.
     """
-    if f_old.is_hidden_friend is None or f_new.is_hidden_friend is None:
-        return []
-    if not f_old.is_hidden_friend and f_new.is_hidden_friend:
-        return [Change(
-            kind=ChangeKind.HIDDEN_FRIEND_ADDED,
-            symbol=mangled,
-            description=f"Function became an in-class friend declaration: {f_old.name}",
-            old_value="non-friend",
-            new_value="hidden friend",
-        )]
-    if f_old.is_hidden_friend and not f_new.is_hidden_friend:
-        return [Change(
-            kind=ChangeKind.HIDDEN_FRIEND_REMOVED,
-            symbol=mangled,
-            description=f"Function is no longer an in-class friend declaration: {f_old.name}",
-            old_value="hidden friend",
-            new_value="non-friend",
-        )]
-    return []
+    return bool_transition(
+        f_old.is_hidden_friend, f_new.is_hidden_friend, mangled,
+        skip_none=True,
+        added=(ChangeKind.HIDDEN_FRIEND_ADDED, f"Function became an in-class friend declaration: {f_old.name}"),
+        added_values=("non-friend", "hidden friend"),
+        removed=(ChangeKind.HIDDEN_FRIEND_REMOVED, f"Function is no longer an in-class friend declaration: {f_old.name}"),
+        removed_values=("hidden friend", "non-friend"),
+    )
 
 
 def _check_explicit_change(mangled: str, f_old: Function, f_new: Function) -> list[Change]:
@@ -230,25 +204,14 @@ def _check_explicit_change(mangled: str, f_old: Function, f_new: Function) -> li
     N/A. Skipping in that case avoids false API_BREAK findings produced
     purely by snapshot schema evolution.
     """
-    if f_old.is_explicit is None or f_new.is_explicit is None:
-        return []
-    if not f_old.is_explicit and f_new.is_explicit:
-        return [Change(
-            kind=ChangeKind.CTOR_EXPLICIT_ADDED,
-            symbol=mangled,
-            description=f"Constructor/conversion gained `explicit` specifier: {f_old.name}",
-            old_value="implicit",
-            new_value="explicit",
-        )]
-    if f_old.is_explicit and not f_new.is_explicit:
-        return [Change(
-            kind=ChangeKind.CTOR_EXPLICIT_REMOVED,
-            symbol=mangled,
-            description=f"Constructor/conversion lost `explicit` specifier: {f_old.name}",
-            old_value="explicit",
-            new_value="implicit",
-        )]
-    return []
+    return bool_transition(
+        f_old.is_explicit, f_new.is_explicit, mangled,
+        skip_none=True,
+        added=(ChangeKind.CTOR_EXPLICIT_ADDED, f"Constructor/conversion gained `explicit` specifier: {f_old.name}"),
+        added_values=("implicit", "explicit"),
+        removed=(ChangeKind.CTOR_EXPLICIT_REMOVED, f"Constructor/conversion lost `explicit` specifier: {f_old.name}"),
+        removed_values=("explicit", "implicit"),
+    )
 
 
 def _check_function_signature(mangled: str, f_old: Function, f_new: Function) -> list[Change]:
@@ -457,53 +420,50 @@ def _diff_inline_hidden_friends(
     return changes
 
 
+def _check_variable(mangled: str, v_old: Variable, v_new: Variable) -> list[Change]:
+    """Compare a matched pair of public variables."""
+    if canonicalize_type_name(v_old.type) != canonicalize_type_name(v_new.type):
+        return [Change(
+            kind=ChangeKind.VAR_TYPE_CHANGED,
+            symbol=mangled,
+            description=f"Variable type changed: {v_old.name}",
+            old_value=v_old.type, new_value=v_new.type,
+        )]
+    # const-qualification transitions only matter when the type is unchanged.
+    return bool_transition(
+        v_old.is_const, v_new.is_const, mangled,
+        added=(ChangeKind.VAR_BECAME_CONST, f"Variable became const-qualified: {v_old.name} (writes now → SIGSEGV)"),
+        added_values=("non-const", "const"),
+        removed=(ChangeKind.VAR_LOST_CONST, f"Variable lost const qualifier: {v_old.name} (ODR / inlining break)"),
+        removed_values=("const", "non-const"),
+    )
+
+
+def _var_removed(mangled: str, v_old: Variable) -> list[Change]:
+    return [Change(
+        kind=ChangeKind.VAR_REMOVED,
+        symbol=mangled,
+        description=f"Public variable removed: {v_old.name}",
+    )]
+
+
+def _var_added(mangled: str, v_new: Variable) -> list[Change]:
+    return [Change(
+        kind=ChangeKind.VAR_ADDED,
+        symbol=mangled,
+        description=f"New public variable: {v_new.name}",
+    )]
+
+
 @registry.detector("variables")
 def _diff_variables(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
-    changes: list[Change] = []
-    old_map = _public_variables(old)
-    new_map = _public_variables(new)
-
-    for mangled, v_old in old_map.items():
-        if mangled not in new_map:
-            changes.append(Change(
-                kind=ChangeKind.VAR_REMOVED,
-                symbol=mangled,
-                description=f"Public variable removed: {v_old.name}",
-            ))
-        elif canonicalize_type_name(old_map[mangled].type) != canonicalize_type_name(new_map[mangled].type):
-            changes.append(Change(
-                kind=ChangeKind.VAR_TYPE_CHANGED,
-                symbol=mangled,
-                description=f"Variable type changed: {v_old.name}",
-                old_value=v_old.type, new_value=new_map[mangled].type,
-            ))
-        else:
-            v_new = new_map[mangled]
-            if not v_old.is_const and v_new.is_const:
-                changes.append(Change(
-                    kind=ChangeKind.VAR_BECAME_CONST,
-                    symbol=mangled,
-                    description=f"Variable became const-qualified: {v_old.name} (writes now → SIGSEGV)",
-                    old_value="non-const",
-                    new_value="const",
-                ))
-            elif v_old.is_const and not v_new.is_const:
-                changes.append(Change(
-                    kind=ChangeKind.VAR_LOST_CONST,
-                    symbol=mangled,
-                    description=f"Variable lost const qualifier: {v_old.name} (ODR / inlining break)",
-                    old_value="const",
-                    new_value="non-const",
-                ))
-
-    for mangled, v_new in new_map.items():
-        if mangled not in old_map:
-            changes.append(Change(
-                kind=ChangeKind.VAR_ADDED,
-                symbol=mangled,
-                description=f"New public variable: {v_new.name}",
-            ))
-    return changes
+    return diff_by_key(
+        _public_variables(old),
+        _public_variables(new),
+        on_removed=_var_removed,
+        on_added=_var_added,
+        on_common=_check_variable,
+    )
 
 
 @registry.detector("param_defaults")
