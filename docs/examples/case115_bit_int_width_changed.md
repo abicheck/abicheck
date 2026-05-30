@@ -5,7 +5,7 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
-| **Platforms** | Linux, macOS, Windows |
+| **Platforms** | Linux |
 | **Flags** | ABI break |
 | **Detected `ChangeKind`s** | `bit_int_width_changed` |
 | **Source files** | `examples/case115_bit_int_width_changed/` |
@@ -32,7 +32,7 @@ buildable on every supported toolchain.)
 field) whose `_BitInt(N)` width changes — or that migrates to/from `_BitInt`.
 
 ## Files
-- `v1.h` / `v2.h` — _BitInt(64) vs _BitInt(128) declarations
+- `v1.h` / `v2.h` — `_BitInt(64)` vs `_BitInt(128)` declarations
 - `v1.c` / `v2.c` — the two library builds
 - `app.c` — consumer built against the 64-bit interface
 

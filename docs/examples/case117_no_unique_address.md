@@ -34,9 +34,11 @@ against v2. See `docs/development/adr/0001-deferred-modern-cpp-abi.md` for why
 this (and not, say, C++20 modules) is in scope for the snapshot pipeline.
 
 ## Files
-- `v1.h` / `v2.h` — ordinary vs `[[no_unique_address]]` member
-- `v1.cpp` / `v2.cpp` — the two library builds
-- `app.cpp` — consumer built against the v1 layout
+- `v1.cpp` / `v2.cpp` — the two library builds, with the ordinary vs
+  `[[no_unique_address]]` member inlined (no header: the snapshot is taken from
+  the compiled library's DWARF). This case is Linux-only — the layout change is
+  only visible via the ELF/DWARF path.
+- `app.cpp` — minimal consumer stub
 
 ---
 

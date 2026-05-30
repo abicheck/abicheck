@@ -21,6 +21,8 @@ direction. The per-symbol `func_params_changed` / field findings are still
 present; the specialised kind names the C++20 root cause.
 
 ## Files
-- `v1.h` / `v2.h` — char* vs char8_t* declarations
-- `v1.cpp` / `v2.cpp` — the two library builds
-- `app.cpp` — consumer built against the char* interface
+- `v1.cpp` / `v2.cpp` — the two library builds, with the `const char*` vs
+  `const char8_t*` declarations inlined (no header: the snapshot is taken from
+  the compiled library's DWARF). This case is Linux-only — the migration is
+  only visible via the ELF/DWARF path.
+- `app.cpp` — minimal consumer stub

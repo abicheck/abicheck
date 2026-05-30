@@ -4,15 +4,14 @@
 
 ## What changed
 
-`v1` exposes a `Buffer` struct with a plain `int refcount` and a
-`buffer_count()` returning `int`. `v2` adds the C11 `_Atomic` qualifier to both
-the field and the return type.
+`v1` exposes a `struct counter` whose `value` field is a plain (unqualified)
+`int`. `v2` adds the C11 `_Atomic` qualifier to that field. The accessor
+`get_count()` returns a plain `long` in both versions — only the field changed.
 
 Per WG14, the size and alignment of an `_Atomic`-qualified type may differ from
 the unqualified type and varies across implementations (some lock-free types
-carry extra padding/alignment). So the `Buffer` layout and the return-value ABI
-can diverge: a consumer built against v1 reads the field at the wrong
-offset/width and interprets the return with the wrong representation.
+carry extra padding/alignment). So the `struct counter` layout can diverge: a
+consumer built against v1 reads the field at the wrong offset/width against v2.
 
 ## How abicheck catches it
 

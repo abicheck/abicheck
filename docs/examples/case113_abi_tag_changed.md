@@ -33,9 +33,11 @@ detector stays silent when a mass dual-ABI flip is detected, to avoid
 duplicate noise.
 
 ## Files
-- `v1.h` / `v2.h` — tagged vs untagged declarations
-- `v1.cpp` / `v2.cpp` — the two library builds
-- `app.cpp` — consumer referencing the tagged symbol
+- `v1.cpp` / `v2.cpp` — the two library builds, with the tagged vs untagged
+  `get_id()` declaration inlined (no header: the snapshot is taken from the
+  compiled library's DWARF). This case is Linux-only — the ABI-tag rename is
+  only visible via the ELF/DWARF path.
+- `app.cpp` — minimal consumer stub
 
 ---
 
