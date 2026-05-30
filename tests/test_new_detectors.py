@@ -18,6 +18,7 @@ from abicheck.elf_metadata import ElfMetadata, ElfSymbol, SymbolBinding, SymbolT
 from abicheck.model import (
     AbiSnapshot,
     Function,
+    Param,
     Visibility,
 )
 
@@ -556,3 +557,175 @@ class TestFuncLanguageLinkageChanged:
         f_new = _pub_func("c_func", "c_func", is_extern_c=True)
         r = compare(_snap(functions=[f_old]), _snap(functions=[f_new]))
         assert not _has_kind(r, ChangeKind.FUNC_LANGUAGE_LINKAGE_CHANGED)
+
+
+# ── INTEGER_MODEL_CHANGED (LP64 ↔ ILP64) ─────────────────────────────────────
+
+class TestIntegerModelChanged:
+    def _int_func(self, name, ret, ptypes):
+        return Function(
+            name=name, mangled="_Z" + name, return_type=ret,
+            params=[Param(name=f"a{i}", type=t) for i, t in enumerate(ptypes)],
+            visibility=Visibility.PUBLIC,
+        )
+
+    def test_lp64_to_ilp64_mass_flip(self):
+        old = [self._int_func(f"fn{i}", "int", ["int", "int"]) for i in range(5)]
+        new = [self._int_func(f"fn{i}", "long", ["long", "long"]) for i in range(5)]
+        r = compare(_snap(functions=old), _snap(functions=new))
+        assert _has_kind(r, ChangeKind.INTEGER_MODEL_CHANGED)
+        c = _changes_of_kind(r, ChangeKind.INTEGER_MODEL_CHANGED)[0]
+        assert "LP64 → ILP64" in c.description
+
+    def test_int32_to_int64_flip(self):
+        old = [self._int_func(f"fn{i}", "int32_t", ["int32_t"]) for i in range(6)]
+        new = [self._int_func(f"fn{i}", "int64_t", ["int64_t"]) for i in range(6)]
+        r = compare(_snap(functions=old), _snap(functions=new))
+        assert _has_kind(r, ChangeKind.INTEGER_MODEL_CHANGED)
+
+    def test_ilp64_to_lp64_direction(self):
+        old = [self._int_func(f"fn{i}", "long", ["long", "long"]) for i in range(5)]
+        new = [self._int_func(f"fn{i}", "int", ["int", "int"]) for i in range(5)]
+        r = compare(_snap(functions=old), _snap(functions=new))
+        c = _changes_of_kind(r, ChangeKind.INTEGER_MODEL_CHANGED)
+        assert c and "ILP64 → LP64" in c[0].description
+
+    def test_few_flips_not_detected(self):
+        old = [self._int_func("fn0", "int", ["int"])]
+        new = [self._int_func("fn0", "long", ["long"])]
+        r = compare(_snap(functions=old), _snap(functions=new))
+        assert not _has_kind(r, ChangeKind.INTEGER_MODEL_CHANGED)
+
+    def test_non_integer_changes_not_detected(self):
+        old = [self._int_func(f"fn{i}", "void", ["double"]) for i in range(6)]
+        new = [self._int_func(f"fn{i}", "void", ["float"]) for i in range(6)]
+        r = compare(_snap(functions=old), _snap(functions=new))
+        assert not _has_kind(r, ChangeKind.INTEGER_MODEL_CHANGED)
+
+    def test_signedness_only_not_detected(self):
+        old = [self._int_func(f"fn{i}", "int", ["int"]) for i in range(6)]
+        new = [self._int_func(f"fn{i}", "unsigned int", ["unsigned int"]) for i in range(6)]
+        r = compare(_snap(functions=old), _snap(functions=new))
+        assert not _has_kind(r, ChangeKind.INTEGER_MODEL_CHANGED)
+
+    def test_integer_typedef_resize_detected(self):
+        old = _snap(typedefs={"MKL_INT": "int"})
+        new = _snap(typedefs={"MKL_INT": "long"})
+        r = compare(old, new)
+        assert _has_kind(r, ChangeKind.INTEGER_MODEL_CHANGED)
+
+    def test_unrelated_typedef_resize_not_detected(self):
+        old = _snap(typedefs={"my_handle": "int"})
+        new = _snap(typedefs={"my_handle": "long"})
+        r = compare(old, new)
+        assert not _has_kind(r, ChangeKind.INTEGER_MODEL_CHANGED)
+
+
+# ── char8t / _BitInt / _Atomic / abi_tag spelling detectors ──────────────────
+
+def _spell_func(name, ret="void", ptypes=None):
+    return Function(
+        name=name, mangled="_Z" + name, return_type=ret,
+        params=[Param(name=f"a{i}", type=t) for i, t in enumerate(ptypes or [])],
+        visibility=Visibility.PUBLIC,
+    )
+
+
+class TestChar8tMigration:
+    def test_param_char_to_char8t(self):
+        old = [_spell_func("g", "void", ["char *"])]
+        new = [_spell_func("g", "void", ["char8_t *"])]
+        r = compare(_snap(functions=old), _snap(functions=new))
+        assert _has_kind(r, ChangeKind.CHAR8T_MIGRATION)
+
+    def test_return_char8t_to_char(self):
+        old = [_spell_func("g", "char8_t", [])]
+        new = [_spell_func("g", "unsigned char", [])]
+        r = compare(_snap(functions=old), _snap(functions=new))
+        c = _changes_of_kind(r, ChangeKind.CHAR8T_MIGRATION)
+        assert c and "char8_t → char-family" in c[0].description
+
+    def test_non_char8t_change_not_detected(self):
+        old = [_spell_func("g", "void", ["int"])]
+        new = [_spell_func("g", "void", ["long"])]
+        r = compare(_snap(functions=old), _snap(functions=new))
+        assert not _has_kind(r, ChangeKind.CHAR8T_MIGRATION)
+
+
+class TestBitIntWidthChanged:
+    def test_param_width_change(self):
+        old = [_spell_func("g", "void", ["_BitInt(32)"])]
+        new = [_spell_func("g", "void", ["_BitInt(64)"])]
+        r = compare(_snap(functions=old), _snap(functions=new))
+        assert _has_kind(r, ChangeKind.BIT_INT_WIDTH_CHANGED)
+
+    def test_migration_to_bit_int(self):
+        old = [_spell_func("g", "void", ["int"])]
+        new = [_spell_func("g", "void", ["_BitInt(24)"])]
+        r = compare(_snap(functions=old), _snap(functions=new))
+        c = _changes_of_kind(r, ChangeKind.BIT_INT_WIDTH_CHANGED)
+        assert c and "became _BitInt(24)" in c[0].description
+
+    def test_no_bit_int_not_detected(self):
+        old = [_spell_func("g", "void", ["int"])]
+        new = [_spell_func("g", "void", ["long"])]
+        r = compare(_snap(functions=old), _snap(functions=new))
+        assert not _has_kind(r, ChangeKind.BIT_INT_WIDTH_CHANGED)
+
+
+class TestAtomicQualifierChanged:
+    def test_atomic_added(self):
+        old = [_spell_func("g", "void", ["int"])]
+        new = [_spell_func("g", "void", ["_Atomic(int)"])]
+        r = compare(_snap(functions=old), _snap(functions=new))
+        c = _changes_of_kind(r, ChangeKind.ATOMIC_QUALIFIER_CHANGED)
+        assert c and "qualifier added" in c[0].description
+
+    def test_atomic_removed(self):
+        old = [_spell_func("g", "void", ["_Atomic(long)"])]
+        new = [_spell_func("g", "void", ["long"])]
+        r = compare(_snap(functions=old), _snap(functions=new))
+        assert _has_kind(r, ChangeKind.ATOMIC_QUALIFIER_CHANGED)
+
+    def test_non_atomic_change_not_detected(self):
+        old = [_spell_func("g", "void", ["int"])]
+        new = [_spell_func("g", "void", ["long"])]
+        r = compare(_snap(functions=old), _snap(functions=new))
+        assert not _has_kind(r, ChangeKind.ATOMIC_QUALIFIER_CHANGED)
+
+
+class TestAbiTagChanged:
+    def test_tag_gained(self):
+        # Untagged _Z3foov gains the cxx11 ABI tag -> _Z3fooB5cxx11v.
+        old = [_pub_func("foo", "_Z3foov")]
+        new = [_pub_func("foo", "_Z3fooB5cxx11v")]
+        r = compare(_snap(functions=old), _snap(functions=new))
+        assert _has_kind(r, ChangeKind.ABI_TAG_CHANGED)
+
+    def test_tag_lost(self):
+        old = [_pub_func("foo", "_Z3fooB5cxx11v")]
+        new = [_pub_func("foo", "_Z3foov")]
+        r = compare(_snap(functions=old), _snap(functions=new))
+        c = _changes_of_kind(r, ChangeKind.ABI_TAG_CHANGED)
+        assert c and "lost" in c[0].description
+
+    def test_real_rename_not_tag_change(self):
+        old = [_pub_func("foo", "_Z3foov")]
+        new = [_pub_func("bar", "_Z3barv")]
+        r = compare(_snap(functions=old), _snap(functions=new))
+        assert not _has_kind(r, ChangeKind.ABI_TAG_CHANGED)
+
+    def test_identical_not_reported(self):
+        old = [_pub_func("foo", "_Z3fooB5cxx11v")]
+        new = [_pub_func("foo", "_Z3fooB5cxx11v")]
+        r = compare(_snap(functions=old), _snap(functions=new))
+        assert not _has_kind(r, ChangeKind.ABI_TAG_CHANGED)
+
+    def test_suppressed_under_mass_dual_abi_flip(self):
+        old = [
+            _pub_func(f"f{i}", f"_ZN3foo{i}B5cxx11Ev") for i in range(8)
+        ]
+        new = [_pub_func(f"f{i}", f"_ZN3foo{i}Ev") for i in range(8)]
+        r = compare(_snap(functions=old), _snap(functions=new))
+        assert _has_kind(r, ChangeKind.GLIBCXX_DUAL_ABI_FLIP_DETECTED)
+        assert not _has_kind(r, ChangeKind.ABI_TAG_CHANGED)
