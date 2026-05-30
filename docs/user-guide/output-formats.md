@@ -133,11 +133,60 @@ The `evidence_tier` scalar collapses the raw sources into a single ordered label
 
 ```json
 {
-  "verdict": "breaking",
+  "verdict": "BREAKING",
   "confidence": "high",
   "evidence_tier": "header_aware",
   "evidence_tiers": ["elf", "dwarf", "header"]
 }
+```
+
+---
+
+## JSON schema and stability guarantees
+
+The `compare --format json` document is a **stable, machine-readable contract**.
+It is described by a versioned [JSON Schema](https://json-schema.org/) (draft
+2020-12) that ships inside the package at
+`abicheck/schemas/compare_report.schema.json` and is importable:
+
+```python
+from abicheck.schemas import (
+    REPORT_SCHEMA_VERSION,        # e.g. "1.0"
+    COMPARE_REPORT_SCHEMA_PATH,   # pathlib.Path to the .schema.json
+    load_compare_report_schema,   # -> dict
+)
+```
+
+Every JSON report carries a top-level `report_schema_version` field
+(`MAJOR.MINOR`) so consumers can detect the contract version they are reading:
+
+```json
+{
+  "report_schema_version": "1.0",
+  "library": "libfoo.so.1",
+  "verdict": "BREAKING"
+}
+```
+
+**Stability policy:**
+
+- **Additive** changes — new optional keys, new enum members, relaxing a
+  constraint — bump the **MINOR** component. Existing consumers keep working.
+- **Breaking** changes — removing or renaming a key, tightening a type, or
+  removing an enum member — bump the **MAJOR** component.
+
+Consumers should accept any report whose `report_schema_version` shares their
+expected MAJOR component and **ignore unknown keys** (the schema sets
+`additionalProperties: true` precisely so that MINOR additions never break
+validation). Validating with the bundled schema requires the optional
+`jsonschema` package:
+
+```python
+import json, jsonschema
+from abicheck.schemas import load_compare_report_schema
+
+report = json.loads(open("report.json").read())
+jsonschema.validate(report, load_compare_report_schema())
 ```
 
 ---

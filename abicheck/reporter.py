@@ -39,6 +39,7 @@ from .checker_policy import (
     policy_kind_sets as _policy_kind_sets,
 )
 from .report_summary import build_summary
+from .schemas import REPORT_SCHEMA_VERSION
 
 
 def _kind_to_severity(kind: ChangeKind, policy: str) -> str:
@@ -523,6 +524,7 @@ def to_json(
 
     summary = build_summary(result)
     d: dict[str, object] = {
+        "report_schema_version": REPORT_SCHEMA_VERSION,
         "library": result.library,
         "old_version": result.old_version,
         "new_version": result.new_version,
