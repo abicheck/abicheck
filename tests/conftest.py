@@ -40,6 +40,10 @@ def pytest_configure(config: pytest.Config) -> None:
         "markers",
         "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     )
+    config.addinivalue_line(
+        "markers",
+        "msvc: requires the MSVC toolchain (cl.exe) — Windows PDB end-to-end tests",
+    )
 
 
 def _integration_skip_reason() -> str | None:
@@ -80,6 +84,13 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list) -> None:
         for item in items:
             if "abicc" in item.keywords:
                 item.add_marker(skip_abicc)
+
+    # MSVC tests need cl.exe on PATH (set up by the MSVC dev environment).
+    if shutil.which("cl") is None:
+        skip_msvc = pytest.mark.skip(reason="cl.exe (MSVC) not found in PATH")
+        for item in items:
+            if "msvc" in item.keywords:
+                item.add_marker(skip_msvc)
 
 
 @pytest.fixture

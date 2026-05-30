@@ -6,37 +6,38 @@ is deliberately small and concrete — strategic / architectural ideas live in
 
 ## MSVC + PDB end-to-end CI
 
-**Status:** TODO (near-term, high priority)
+**Status:** Done (initial lane landed).
 
-**Problem.** abicheck implements PDB parsing (`pdb_parser.py`, `pdb_metadata.py`,
-`pdb_utils.py`) and PE/COFF metadata extraction (`pe_metadata.py`), but the
-Windows CI lane currently builds and compares with the **MinGW/GCC** toolchain
-only. There is no end-to-end job that:
+abicheck implements PDB parsing (`pdb_parser.py`, `pdb_metadata.py`,
+`pdb_utils.py`) and PE/COFF metadata extraction (`pe_metadata.py`), and
+`service.resolve_input(..., pdb_path=...)` feeds PDB struct/enum layout into the
+same `DwarfMetadata` pipeline the ELF/DWARF path uses. The Windows *unit-test*
+lane still uses MinGW/GCC, but there is now a dedicated end-to-end lane against
+a real Microsoft toolchain:
 
-1. builds a fixture DLL **with MSVC** (`cl.exe` / `link.exe`),
-2. emits a matching **PDB**,
-3. runs `abicheck dump` + `abicheck compare` over the MSVC-produced artifacts,
-4. asserts the verdict against a known-good ground truth.
+- **`windows-msvc` CI lane** (`.github/workflows/ci.yml`) on the GitHub-hosted
+  `windows-latest` runner. `ilammy/msvc-dev-cmd` puts `cl.exe` on PATH; the lane
+  runs `pytest -m msvc`.
+- **`tests/test_msvc_pdb_e2e.py`** compiles a DLL with `cl.exe /Zi` (emitting a
+  matching `.pdb`), then dumps + compares two versions via abicheck and asserts
+  the verdict. Cases: identical DLLs → compatible; a by-value struct that gains
+  a field → BREAKING (real layout change exposed by the PDB).
+- Gated behind the `msvc` marker (registered in `conftest.py`); skips cleanly
+  when `cl.exe` is absent, so it is a no-op on Linux/macOS and on Windows
+  runners without the MSVC environment — mirroring the
+  `integration` / `libabigail` / `abicc` marker discipline.
 
-This is the largest gap in the current platform-coverage story: the MSVC + PDB
-path is exercised only by unit tests over synthetic/recorded inputs, never by a
-real Microsoft toolchain in CI.
+**Remaining follow-ups (not blocking):**
 
-**Proposed work.**
+- Broaden the MSVC fixture matrix to mirror more ELF example cases
+  (function removal, enum value shift, calling-convention change).
+- Full function-signature checking from MSVC builds needs header parsing on
+  Windows (castxml is not currently exercised on PE in CI); the current lane
+  asserts on PDB-derived struct/enum layout verdicts.
+- If GitHub-hosted MSVC proves too constrained for some PDB scenarios, add a
+  scheduled self-hosted validation job.
 
-- Add a `windows-msvc` CI lane (GitHub-hosted `windows-latest` runner, which
-  ships MSVC build tools) that compiles a small C/C++ fixture with `cl.exe`,
-  produces a `.dll` + `.pdb`, and runs an end-to-end compare.
-- Seed 2–3 MSVC/PDB fixtures mirroring existing ELF example cases (e.g. a
-  struct-size change and a function-removal) so the lane has ground truth.
-- Gate the lane behind a marker (e.g. `@pytest.mark.msvc`) so default fast runs
-  stay toolchain-free, mirroring the existing `integration` / `libabigail` /
-  `abicc` marker discipline.
-- If GitHub-hosted MSVC proves too constrained for the PDB scenarios we need,
-  fall back to a scheduled self-hosted validation job.
-
-**Risks.** Windows toolchain setup complexity; CI runtime/cost; PDB layout
-differences across MSVC versions. Scope a spike before committing the lane.
+**Risks.** PDB layout differences across MSVC versions; CI runtime/cost.
 
 ## Other deferred roadmap items
 

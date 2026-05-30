@@ -166,6 +166,23 @@ jobs:
       - name: End-to-end demo (libz)
         run: python scripts/demo_libz.py
 
+  windows-msvc:
+    name: MSVC + PDB end-to-end
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up MSVC developer environment (cl.exe on PATH)
+        uses: ilammy/msvc-dev-cmd@v1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: 'pip'
+      - name: Install package
+        run: pip install -e ".[dev]"
+      - name: Run MSVC + PDB end-to-end tests
+        run: pytest tests/test_msvc_pdb_e2e.py -v -m msvc --tb=short
+
   heavy-parity-gate:
     runs-on: ubuntu-latest
     outputs:
