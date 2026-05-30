@@ -338,13 +338,20 @@ def _try_header_scoped_dump(
     from .dumper import _dump_macho as _dumper_macho
     from .dumper import _dump_pe as _dumper_pe
 
+    # Expand header directories into individual files (same as the ELF path),
+    # so `--header <dir>` scopes correctly instead of feeding a directory to
+    # castxml's `#include`. Done *outside* the broad except below so a genuinely
+    # bad/empty header path raises a clear ValidationError rather than silently
+    # falling back to the full export table.
+    resolved_headers = expand_header_inputs(headers)
+
     compiler = "cc" if lang.lower() == "c" else "c++"
     lang_arg = lang if lang.lower() == "c" else None
     try:
         if fmt == "pe":
-            snap = _dumper_pe(path, headers, includes, version, compiler, lang=lang_arg)
+            snap = _dumper_pe(path, resolved_headers, includes, version, compiler, lang=lang_arg)
         else:
-            snap = _dumper_macho(path, headers, includes, version, compiler, lang=lang_arg)
+            snap = _dumper_macho(path, resolved_headers, includes, version, compiler, lang=lang_arg)
     except Exception as exc:  # noqa: BLE001 — castxml missing / parse failure → fall back
         warnings.warn(
             f"Header-based ABI scoping unavailable for '{path.name}' "
