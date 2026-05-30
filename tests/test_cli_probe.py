@@ -23,10 +23,10 @@ with ``run_probe_matrix`` monkeypatched for the same reason.
 from __future__ import annotations
 
 import json
-import xml.dom.minidom as minidom
 from pathlib import Path
 
 from click.testing import CliRunner
+from defusedxml.ElementTree import fromstring as xml_fromstring
 
 from abicheck.cli import main
 
@@ -132,7 +132,7 @@ class TestProbeCompare:
             main, ["probe", "compare", str(old), str(new), "-f", "junit"]
         )
         assert result.exit_code == 2
-        minidom.parseString(result.output)  # raises on malformed XML
+        xml_fromstring(result.output)  # raises on malformed XML
 
     def test_output_to_file(self, tmp_path: Path) -> None:
         old, new = self._matrices(tmp_path)
