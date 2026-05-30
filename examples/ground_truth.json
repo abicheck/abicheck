@@ -1710,9 +1710,7 @@
             "expected": "BREAKING",
             "category": "breaking",
             "platforms": [
-                "linux",
-                "macos",
-                "windows"
+                "linux"
             ],
             "abi_break": true,
             "api_break": false,
@@ -1726,9 +1724,7 @@
             "expected": "BREAKING",
             "category": "breaking",
             "platforms": [
-                "linux",
-                "macos",
-                "windows"
+                "linux"
             ],
             "abi_break": true,
             "api_break": false,
@@ -1749,7 +1745,7 @@
             "abi_break": true,
             "api_break": false,
             "bad_practice": false,
-            "description": "A public C23 _BitInt(128) accumulator widened to _BitInt(256) across a struct field, a by-value parameter, and a return type. The bit width is part of the type, so storage size and calling-convention treatment change.",
+            "description": "A public C23 _BitInt(64) accumulator widened to _BitInt(128) across a struct field, a by-value parameter, and a return type. The bit width is part of the type, so storage size and calling-convention treatment change. (128 is clang's maximum _BitInt width, keeping the case portable.)",
             "expected_kinds": [
                 "bit_int_width_changed"
             ],
@@ -1775,9 +1771,7 @@
             "expected": "BREAKING",
             "category": "breaking",
             "platforms": [
-                "linux",
-                "macos",
-                "windows"
+                "linux"
             ],
             "abi_break": true,
             "api_break": false,

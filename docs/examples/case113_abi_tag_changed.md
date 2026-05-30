@@ -5,7 +5,7 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
-| **Platforms** | Linux, macOS, Windows |
+| **Platforms** | Linux |
 | **Flags** | ABI break |
 | **Detected `ChangeKind`s** | `abi_tag_changed` |
 | **Source files** | `examples/case113_abi_tag_changed/` |

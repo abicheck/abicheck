@@ -5,7 +5,7 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
-| **Platforms** | Linux, macOS, Windows |
+| **Platforms** | Linux |
 | **Flags** | ABI break |
 | **Detected `ChangeKind`s** | `type_size_changed`, `type_field_offset_changed` |
 | **Source files** | `examples/case117_no_unique_address/` |

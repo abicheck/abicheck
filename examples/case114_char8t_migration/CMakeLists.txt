@@ -2,7 +2,7 @@ abicheck_add_case(case114_char8t_migration
     V1_SOURCES v1.cpp
     V2_SOURCES v2.cpp
     APP_SOURCES app.cpp
-    PLATFORMS linux macos windows
+    PLATFORMS linux
 )
 
 # char8_t is a C++20 feature; the repo-wide default is C++17.

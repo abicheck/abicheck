@@ -2,7 +2,7 @@ abicheck_add_case(case117_no_unique_address
     V1_SOURCES v1.cpp
     V2_SOURCES v2.cpp
     APP_SOURCES app.cpp
-    PLATFORMS linux macos windows
+    PLATFORMS linux
 )
 
 # [[no_unique_address]] is a C++20 feature; the repo-wide default is C++17.

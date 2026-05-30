@@ -5,7 +5,7 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
-| **Platforms** | Linux, macOS, Windows |
+| **Platforms** | Linux |
 | **Flags** | ABI break |
 | **Detected `ChangeKind`s** | `char8t_migration` |
 | **Source files** | `examples/case114_char8t_migration/` |

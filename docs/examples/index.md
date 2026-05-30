@@ -75,7 +75,7 @@ Source files (`v1.*`, `v2.*`, `app.*`, `CMakeLists.txt`) are listed at the botto
 | [case112_lp64_ilp64](case112_lp64_ilp64.md) | LP64 → ILP64 integer-model switch (oneMKL MKL_INT 32→64) | 🔴 BREAKING | Breaking |
 | [case113_abi_tag_changed](case113_abi_tag_changed.md) | ABI-tag set change ([abi:cxx11] lost on a single symbol) | 🔴 BREAKING | Breaking |
 | [case114_char8t_migration](case114_char8t_migration.md) | char8_t migration (C++20 char-family → char8_t) | 🔴 BREAKING | Breaking |
-| [case115_bit_int_width_changed](case115_bit_int_width_changed.md) | _BitInt(N) width change (C23 128 → 256) | 🔴 BREAKING | Breaking |
+| [case115_bit_int_width_changed](case115_bit_int_width_changed.md) | _BitInt(N) width change (C23 64 → 128) | 🔴 BREAKING | Breaking |
 | [case116_atomic_qualifier_changed](case116_atomic_qualifier_changed.md) | _Atomic qualifier added (C11) | 🔴 BREAKING | Breaking |
 | [case117_no_unique_address](case117_no_unique_address.md) | [[no_unique_address]] layout overlay (no new ChangeKind) | 🔴 BREAKING | Breaking |
 | [case11_global_var_type](case11_global_var_type.md) | Global Variable Type Change | 🔴 BREAKING | Breaking |
