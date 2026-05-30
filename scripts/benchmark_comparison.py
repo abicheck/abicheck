@@ -925,6 +925,79 @@ class _BuildResult:
     ok: bool
 
 
+def _configure_cmake_env(force_case64_compile: bool, preferred_family: str | None) -> dict[str, str]:
+    """Return a copy of os.environ with CC/CXX overridden for the requested toolchain."""
+    cmake_env = os.environ.copy()
+    if not force_case64_compile:
+        return cmake_env
+    if preferred_family == "clang":
+        cc = _first_available_tool("clang-18", "clang")
+        cxx = _first_available_tool("clang++-18", "clang++")
+    elif preferred_family == "gcc":
+        cc = _first_available_tool("gcc")
+        cxx = _first_available_tool("g++")
+    else:
+        return cmake_env
+    if cc:
+        cmake_env["CC"] = cc
+    if cxx:
+        cmake_env["CXX"] = cxx
+    return cmake_env
+
+
+def _run_cmake_configure_and_build(
+    case_dir: Path,
+    cmake_build: Path,
+    name: str,
+    cmake_env: dict[str, str],
+) -> Any:
+    """Run cmake configure + build. Returns a result object with .returncode."""
+    try:
+        cr = subprocess.run(
+            ["cmake", "-S", str(case_dir.parent), "-B", str(cmake_build),
+             "-DCMAKE_BUILD_TYPE=Debug"],
+            capture_output=True, text=True, timeout=60, env=cmake_env,
+        )
+        if cr.returncode == 0:
+            cr = subprocess.run(
+                ["cmake", "--build", str(cmake_build),
+                 "--target", f"{name}_v1", f"{name}_v2",
+                 "--config", "Debug"],
+                capture_output=True, text=True, timeout=120, env=cmake_env,
+            )
+    except subprocess.TimeoutExpired:
+        cr = type("R", (), {"returncode": -1})()
+    return cr
+
+
+def _resolve_cmake_libs(
+    name: str,
+    expected: str,
+    cmake_build: Path,
+    cr: Any,
+    v1_so: Path,
+    v2_so: Path,
+    used_cmake_artifacts: bool,
+    v1_h_hint: Path | None,
+    v2_h_hint: Path | None,
+    results: list[dict],
+    used_make_artifacts: bool,
+) -> _BuildResult:
+    """Resolve built libraries from cmake output; append error entry and return ok=False on failure."""
+    cmake_out = cmake_build / name
+    if cr.returncode == 0 and cmake_out.exists():
+        built_v1 = _find_cmake_lib(cmake_out, "v1")
+        built_v2 = _find_cmake_lib(cmake_out, "v2")
+        if built_v1 and built_v2:
+            return _BuildResult(built_v1, built_v2, used_make_artifacts, True, v1_h_hint, v2_h_hint, ok=True)
+        print(f"  {name:<35} CMAKE_NO_LIB")
+        results.append(_error_entry(name, expected))
+        return _BuildResult(v1_so, v2_so, used_make_artifacts, used_cmake_artifacts, v1_h_hint, v2_h_hint, ok=False)
+    print(f"  {name:<35} CMAKE_BUILD_ERR")
+    results.append(_error_entry(name, expected))
+    return _BuildResult(v1_so, v2_so, used_make_artifacts, used_cmake_artifacts, v1_h_hint, v2_h_hint, ok=False)
+
+
 def _build_case_artifacts(
     name: str,
     expected: str,
@@ -944,7 +1017,6 @@ def _build_case_artifacts(
     used_cmake_artifacts = False
 
     cmake_file = case_dir / "CMakeLists.txt"
-    makefile = case_dir / "Makefile"
 
     preferred_family, force_case64_compile = _case64_toolchain_policy(name, args.case64_toolchain)
     pb_v1, pb_v2, used_prebuilt_artifacts, pb_cmake = _try_reuse_prebuilt(
@@ -964,59 +1036,18 @@ def _build_case_artifacts(
         if cmake_build.exists():
             shutil.rmtree(str(cmake_build))
         cmake_build.mkdir(parents=True)
-        cmake_env = os.environ.copy()
-        if force_case64_compile and preferred_family == "clang":
-            cc = _first_available_tool("clang-18", "clang")
-            cxx = _first_available_tool("clang++-18", "clang++")
-            if cc:
-                cmake_env["CC"] = cc
-            if cxx:
-                cmake_env["CXX"] = cxx
-        elif force_case64_compile and preferred_family == "gcc":
-            cc = _first_available_tool("gcc")
-            cxx = _first_available_tool("g++")
-            if cc:
-                cmake_env["CC"] = cc
-            if cxx:
-                cmake_env["CXX"] = cxx
-
-        try:
-            cr = subprocess.run(
-                ["cmake", "-S", str(case_dir.parent), "-B", str(cmake_build),
-                 "-DCMAKE_BUILD_TYPE=Debug"],
-                capture_output=True, text=True, timeout=60, env=cmake_env,
-            )
-            if cr.returncode == 0:
-                cr = subprocess.run(
-                    ["cmake", "--build", str(cmake_build),
-                     "--target", f"{name}_v1", f"{name}_v2",
-                     "--config", "Debug"],
-                    capture_output=True, text=True, timeout=120, env=cmake_env,
-                )
-        except subprocess.TimeoutExpired:
-            cr = type("R", (), {"returncode": -1})()
-        cmake_out = cmake_build / name
-        if cr.returncode == 0 and cmake_out.exists():
-            built_v1 = _find_cmake_lib(cmake_out, "v1")
-            built_v2 = _find_cmake_lib(cmake_out, "v2")
-            if built_v1 and built_v2:
-                v1_so = built_v1
-                v2_so = built_v2
-                used_cmake_artifacts = True
-            else:
-                print(f"  {name:<35} CMAKE_NO_LIB")
-                results.append(_error_entry(name, expected))
-                return _BuildResult(v1_so, v2_so, used_make_artifacts, used_cmake_artifacts, v1_h_hint, v2_h_hint, ok=False)
-        else:
-            print(f"  {name:<35} CMAKE_BUILD_ERR")
-            results.append(_error_entry(name, expected))
-            return _BuildResult(v1_so, v2_so, used_make_artifacts, used_cmake_artifacts, v1_h_hint, v2_h_hint, ok=False)
+        cmake_env = _configure_cmake_env(force_case64_compile, preferred_family)
+        cr = _run_cmake_configure_and_build(case_dir, cmake_build, name, cmake_env)
+        return _resolve_cmake_libs(
+            name, expected, cmake_build, cr, v1_so, v2_so,
+            used_cmake_artifacts, v1_h_hint, v2_h_hint, results, used_make_artifacts,
+        )
 
     return _BuildResult(v1_so, v2_so, used_make_artifacts, used_cmake_artifacts, v1_h_hint, v2_h_hint, ok=True)
 
 
-def _print_accuracy_summary(results: list[dict], active_tools: list[Any], selected_tools: set[str]) -> None:
-    print("\n" + "─" * 80)
+def _print_tool_accuracy_bars(results: list[dict], active_tools: list[Any]) -> None:
+    """Print per-tool accuracy bars with timing totals."""
     print("  Accuracy vs expected verdicts:")
     for t in active_tools:
         c, total = _accuracy(results, t.name, t.expected_key)
@@ -1026,28 +1057,32 @@ def _print_accuracy_summary(results: list[dict], active_tools: list[Any], select
             tot_s = _total_ms(results, t.ms_key) / 1000
             print(f"    {t.label}: {c:>2}/{total} ({pct:3}%) {bar}  [{tot_s:6.1f}s total]")
 
-    # Divergences from expected
-    if "abicheck" in selected_tools:
-        print("\n  Cases where abicheck differs from expected:")
-        for r in results:
-            if r.get("expected", "?") == "?":
-                continue
-            if r["abicheck"] not in ("SKIP", "ERROR", "TIMEOUT") and r["abicheck"] != r["expected"]:
-                print(f"    {r['case']:<40} got={r['abicheck']} expected={r['expected']}")
 
-    # Strict vs compat divergences
-    if "abicheck_strict" in selected_tools and "abicheck_compat" in selected_tools:
-        print("\n  Cases where abicheck_strict differs from abicheck_compat:")
-        for r in results:
-            ac_s = r.get("abicheck_strict", "SKIP")
-            ac_c = r.get("abicheck_compat", "SKIP")
-            if ac_s in ("SKIP", "ERROR", "TIMEOUT") or ac_c in ("SKIP", "ERROR", "TIMEOUT"):
-                continue
-            if ac_s != ac_c:
-                exp = r.get("expected", "?")
-                print(f"    {r['case']:<40} compat={ac_c} strict={ac_s} expected={exp}")
+def _print_abicheck_divergences(results: list[dict]) -> None:
+    """Print cases where abicheck verdict differs from expected."""
+    print("\n  Cases where abicheck differs from expected:")
+    for r in results:
+        if r.get("expected", "?") == "?":
+            continue
+        if r["abicheck"] not in ("SKIP", "ERROR", "TIMEOUT") and r["abicheck"] != r["expected"]:
+            print(f"    {r['case']:<40} got={r['abicheck']} expected={r['expected']}")
 
-    # Per-case timing for slow tools (registry-driven via show_slowest flag)
+
+def _print_strict_compat_divergences(results: list[dict]) -> None:
+    """Print cases where abicheck_strict differs from abicheck_compat."""
+    print("\n  Cases where abicheck_strict differs from abicheck_compat:")
+    for r in results:
+        ac_s = r.get("abicheck_strict", "SKIP")
+        ac_c = r.get("abicheck_compat", "SKIP")
+        if ac_s in ("SKIP", "ERROR", "TIMEOUT") or ac_c in ("SKIP", "ERROR", "TIMEOUT"):
+            continue
+        if ac_s != ac_c:
+            exp = r.get("expected", "?")
+            print(f"    {r['case']:<40} compat={ac_c} strict={ac_s} expected={exp}")
+
+
+def _print_slowest_cases(results: list[dict], active_tools: list[Any]) -> None:
+    """Print top-10 slowest cases for each tool flagged with show_slowest."""
     for tool_obj in active_tools:
         if not tool_obj.show_slowest:
             continue
@@ -1060,6 +1095,203 @@ def _print_accuracy_summary(results: list[dict], active_tools: list[Any], select
                 print(f"    {r['case']:<40} {ms:>7}ms  [{verdict}]")
 
 
+def _print_accuracy_summary(results: list[dict], active_tools: list[Any], selected_tools: set[str]) -> None:
+    print("\n" + "─" * 80)
+    _print_tool_accuracy_bars(results, active_tools)
+
+    if "abicheck" in selected_tools:
+        _print_abicheck_divergences(results)
+
+    if "abicheck_strict" in selected_tools and "abicheck_compat" in selected_tools:
+        _print_strict_compat_divergences(results)
+
+    _print_slowest_cases(results, active_tools)
+
+
+# ── Main helpers ──────────────────────────────────────────────────────────────
+
+def _resolve_selected_tools(args: Any) -> set[str]:
+    """Return the set of tool names to run, honoring high-level on/off switches."""
+    use_dumper = not args.skip_abicc and args.abicc_mode in ("dumper", "both")
+    use_xml = not args.skip_abicc and args.abicc_mode in ("xml", "both")
+    use_compat = not args.skip_compat
+
+    selected: set[str] = set(args.tools or [
+        "abicheck", "abicheck_compat", "abicheck_strict",
+        "abidiff", "abidiff_headers", "abicc_dumper", "abicc_xml",
+    ])
+
+    # honor high-level switches even if tool is listed explicitly
+    if not use_compat:
+        selected.discard("abicheck_compat")
+        selected.discard("abicheck_strict")
+    if not use_dumper:
+        selected.discard("abicc_dumper")
+    if not use_xml:
+        selected.discard("abicc_xml")
+
+    return selected
+
+
+def _print_table_header(active_tools: list[Any]) -> None:
+    """Print the column header row and separator."""
+    cols = [("Case", 35), ("Expected", 12)] + [(t.col_name, t.col_width) for t in active_tools]
+    hdr = " ".join(f"{name:<{w}}" for name, w in cols)
+    print(f"\n{hdr}")
+    print("─" * len(hdr))
+
+
+def _skip_row_entry(name: str, expected: str) -> dict[str, Any]:
+    """Return a result-row dict with all tool verdicts set to SKIP."""
+    return {
+        "case": name,
+        "expected": expected,
+        "abicheck": "SKIP",
+        "abicheck_compat": "SKIP",
+        "abicheck_strict": "SKIP",
+        "abidiff": "SKIP",
+        "abidiff_headers": "SKIP",
+        "abicc_dumper": "SKIP",
+        "abicc_xml": "SKIP",
+    }
+
+
+def _resolve_case_headers(
+    v1_src: Path,
+    v2_src: Path,
+    bdir: Path,
+    v1_h_hint: Path | None,
+    v2_h_hint: Path | None,
+    used_make_artifacts: bool,
+    used_cmake_artifacts: bool,
+) -> tuple[Path | None, Path | None, Path | None, Path | None]:
+    """Resolve v1_h, v2_h, v1_h_abicheck, v2_h_abicheck for a case.
+
+    Header selection policy:
+    - abicheck family: ELF-only (None) when Makefile/CMake artifacts are used
+      and the case has no explicit headers, to avoid false BREAKING.
+    - Header-aware tools: always synthesize/resolve headers for full context.
+    """
+    v1_h_gen = bdir / "v1.h"
+    v2_h_gen = bdir / "v2.h"
+    make_header(v1_src, v1_h_gen)
+    make_header(v2_src, v2_h_gen)
+
+    v1_h = v1_h_hint if v1_h_hint else (v1_h_gen if v1_h_gen.exists() else None)
+    v2_h = v2_h_hint if v2_h_hint else (v2_h_gen if v2_h_gen.exists() else None)
+
+    if (used_make_artifacts or used_cmake_artifacts) and not (v1_h_hint or v2_h_hint):
+        v1_h_abicheck: Path | None = None
+        v2_h_abicheck: Path | None = None
+    else:
+        v1_h_abicheck = v1_h
+        v2_h_abicheck = v2_h
+
+    return v1_h, v2_h, v1_h_abicheck, v2_h_abicheck
+
+
+def _run_tools_for_case(
+    active_tools: list[Any],
+    v1_so: Path,
+    v2_so: Path,
+    v1_h: Path | None,
+    v2_h: Path | None,
+    v1_h_abicheck: Path | None,
+    v2_h_abicheck: Path | None,
+    name: str,
+    rdir: Path,
+    abicc_timeout: int,
+) -> dict[str, ToolResult]:
+    """Run all active tools for a case and return their results keyed by tool name."""
+    tool_results: dict[str, ToolResult] = {}
+    for t in active_tools:
+        if t.name in ("abicheck", "abicheck_compat", "abicheck_strict"):
+            tool_results[t.name] = t.run_fn(v1_so, v2_so, v1_h_abicheck, v2_h_abicheck, name, rdir)
+        elif t.name in ("abicc_dumper", "abicc_xml"):
+            tool_results[t.name] = t.run_fn(v1_so, v2_so, v1_h, v2_h, name, rdir, timeout=abicc_timeout)
+        else:
+            # abidiff and abidiff_headers share the common signature
+            tool_results[t.name] = t.run_fn(v1_so, v2_so, v1_h, v2_h, name, rdir)
+    return tool_results
+
+
+def _build_result_entry(
+    name: str,
+    expected: str,
+    tool_results: dict[str, ToolResult],
+) -> dict[str, Any]:
+    """Build the full result dict for a case, merging per-tool verdicts and timing."""
+    entry: dict[str, Any] = {
+        "case": name,
+        "expected": expected,
+        "expected_compat": EXPECTED_COMPAT.get(name, expected),
+        "expected_abicc": EXPECTED_ABICC.get(name, expected),
+    }
+    for t in TOOL_REGISTRY:
+        tr = tool_results.get(t.name, ToolResult(verdict="SKIP"))
+        entry[t.name] = tr.verdict
+        entry[t.ms_key] = round(tr.elapsed_ms)
+    return entry
+
+
+def _process_case(
+    case_dir: Path,
+    active_tools: list[Any],
+    case_prefixes: list[str],
+    results: list[dict],
+    args: Any,
+) -> None:
+    """Process a single example case: build, run tools, print row, append result."""
+    name = case_dir.name
+    if case_prefixes and not any(name.startswith(pref) for pref in case_prefixes):
+        return
+    expected = EXPECTED.get(name, "?")
+
+    # Platform filter
+    case_platforms = PLATFORMS.get(name, ["linux", "macos", "windows"])
+    if CURRENT_PLATFORM not in case_platforms:
+        print(f"  {name:<33} {expected:<12} {'SKIP(platform)':<12}")
+        results.append(_skip_row_entry(name, expected))
+        return
+
+    v1_src, v2_src, v1_h_hint, v2_h_hint = find_sources(case_dir)
+    if v1_src is None:
+        print(f"  {name:<33} {expected:<12} {'NO_SOURCE':<12}")
+        results.append(_skip_row_entry(name, expected))
+        return
+
+    rdir = REPORT_DIR / name
+    rdir.mkdir(exist_ok=True)
+    bdir = BUILD_DIR / name
+    bdir.mkdir(exist_ok=True)
+
+    # Build strategy: CMake > Makefile > direct compilation
+    br = _build_case_artifacts(name, expected, case_dir, bdir, v1_src, v2_src,
+                               v1_h_hint, v2_h_hint, args, results)
+    if not br.ok:
+        return
+    v1_so = br.v1_so
+    v2_so = br.v2_so
+    v1_h_hint = br.v1_h_hint
+    v2_h_hint = br.v2_h_hint
+
+    v1_h, v2_h, v1_h_abicheck, v2_h_abicheck = _resolve_case_headers(
+        v1_src, v2_src, bdir, v1_h_hint, v2_h_hint,
+        br.used_make_artifacts, br.used_cmake_artifacts,
+    )
+
+    tool_results = _run_tools_for_case(
+        active_tools, v1_so, v2_so, v1_h, v2_h, v1_h_abicheck, v2_h_abicheck,
+        name, rdir, args.abicc_timeout,
+    )
+
+    row_parts = [f"  {name:<33}", f"{expected:<12}"]
+    row_parts += [_col(tool_results[t.name].verdict, t.col_width) for t in active_tools]
+    print(" ".join(row_parts))
+
+    results.append(_build_result_entry(name, expected, tool_results))
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 def main() -> None:
     args = parse_args()
@@ -1068,135 +1300,16 @@ def main() -> None:
     BUILD_DIR.mkdir(exist_ok=True)
 
     all_cases = sorted(d for d in EXAMPLES_DIR.iterdir() if d.is_dir() and d.name.startswith("case"))
-
-    use_dumper = not args.skip_abicc and args.abicc_mode in ("dumper", "both")
-    use_xml = not args.skip_abicc and args.abicc_mode in ("xml", "both")
-    use_compat = not args.skip_compat
-
-    selected_tools = set(args.tools or [
-        "abicheck", "abicheck_compat", "abicheck_strict",
-        "abidiff", "abidiff_headers", "abicc_dumper", "abicc_xml",
-    ])
-
-    # honor high-level switches even if tool is listed explicitly
-    if not use_compat:
-        selected_tools.discard("abicheck_compat")
-        selected_tools.discard("abicheck_strict")
-    if not use_dumper:
-        selected_tools.discard("abicc_dumper")
-    if not use_xml:
-        selected_tools.discard("abicc_xml")
-
+    selected_tools = _resolve_selected_tools(args)
     active_tools = [t for t in TOOL_REGISTRY if t.name in selected_tools]
 
-    # Header — build columns directly from active tool registry
-    cols = [("Case", 35), ("Expected", 12)] + [(t.col_name, t.col_width) for t in active_tools]
-
-    hdr = " ".join(f"{name:<{w}}" for name, w in cols)
-    print(f"\n{hdr}")
-    print("─" * len(hdr))
+    _print_table_header(active_tools)
 
     results: list[dict] = []
-
     case_prefixes = args.cases or []
 
     for case_dir in all_cases:
-        name = case_dir.name
-        if case_prefixes and not any(name.startswith(pref) for pref in case_prefixes):
-            continue
-        expected = EXPECTED.get(name, "?")
-
-        # Platform filter
-        case_platforms = PLATFORMS.get(name, ["linux", "macos", "windows"])
-        if CURRENT_PLATFORM not in case_platforms:
-            row = f"  {name:<33} {expected:<12} {'SKIP(platform)':<12}"
-            print(row)
-            results.append({"case": name, "expected": expected, "abicheck": "SKIP",
-                             "abicheck_compat": "SKIP", "abicheck_strict": "SKIP",
-                             "abidiff": "SKIP",
-                             "abidiff_headers": "SKIP", "abicc_dumper": "SKIP",
-                             "abicc_xml": "SKIP"})
-            continue
-
-        v1_src, v2_src, v1_h_hint, v2_h_hint = find_sources(case_dir)
-        if v1_src is None:
-            row = f"  {name:<33} {expected:<12} {'NO_SOURCE':<12}"
-            print(row)
-            results.append({"case": name, "expected": expected, "abicheck": "SKIP",
-                             "abicheck_compat": "SKIP", "abicheck_strict": "SKIP",
-                             "abidiff": "SKIP",
-                             "abidiff_headers": "SKIP", "abicc_dumper": "SKIP",
-                             "abicc_xml": "SKIP"})
-            continue
-
-        rdir = REPORT_DIR / name
-        rdir.mkdir(exist_ok=True)
-        bdir = BUILD_DIR / name
-        bdir.mkdir(exist_ok=True)
-
-        v1_h_gen = bdir / "v1.h"
-        v2_h_gen = bdir / "v2.h"
-
-        # Build strategy: CMake > Makefile > direct compilation
-        br = _build_case_artifacts(name, expected, case_dir, bdir, v1_src, v2_src,
-                                   v1_h_hint, v2_h_hint, args, results)
-        if not br.ok:
-            continue
-        v1_so = br.v1_so
-        v2_so = br.v2_so
-        used_make_artifacts = br.used_make_artifacts
-        used_cmake_artifacts = br.used_cmake_artifacts
-        v1_h_hint = br.v1_h_hint
-        v2_h_hint = br.v2_h_hint
-
-        # Header selection policy:
-        # abicheck family (abicheck / abicheck_compat / abicheck_strict):
-        #   When Makefile artifacts are used and the case has no explicit
-        #   headers, run in ELF-only mode (no synthesized headers). This
-        #   avoids false BREAKING in case06_visibility where generated
-        #   headers from impl sources mark internal symbols as public API.
-        # Header-aware tools (abidiff_headers, abicc_dumper, abicc_xml):
-        #   Always synthesize/resolve headers so these tools have full
-        #   source-level context regardless of the ELF-only policy above.
-        make_header(v1_src, v1_h_gen)
-        make_header(v2_src, v2_h_gen)
-        v1_h = v1_h_hint if v1_h_hint else (v1_h_gen if v1_h_gen.exists() else None)
-        v2_h = v2_h_hint if v2_h_hint else (v2_h_gen if v2_h_gen.exists() else None)
-
-        # abicheck-family headers: ELF-only for Makefile cases without hints
-        if (used_make_artifacts or used_cmake_artifacts) and not (v1_h_hint or v2_h_hint):
-            v1_h_abicheck = None
-            v2_h_abicheck = None
-        else:
-            v1_h_abicheck = v1_h
-            v2_h_abicheck = v2_h
-
-        tool_results: dict[str, ToolResult] = {}
-        for t in active_tools:
-            if t.name in ("abicheck", "abicheck_compat", "abicheck_strict"):
-                tool_results[t.name] = t.run_fn(v1_so, v2_so, v1_h_abicheck, v2_h_abicheck, name, rdir)
-            elif t.name in ("abicc_dumper", "abicc_xml"):
-                tool_results[t.name] = t.run_fn(v1_so, v2_so, v1_h, v2_h, name, rdir, timeout=args.abicc_timeout)
-            else:
-                # abidiff and abidiff_headers share the common signature
-                tool_results[t.name] = t.run_fn(v1_so, v2_so, v1_h, v2_h, name, rdir)
-
-        row_parts = [f"  {name:<33}", f"{expected:<12}"]
-        row_parts += [_col(tool_results[t.name].verdict, t.col_width) for t in active_tools]
-
-        print(" ".join(row_parts))
-
-        entry: dict[str, Any] = {
-            "case": name,
-            "expected": expected,
-            "expected_compat": EXPECTED_COMPAT.get(name, expected),
-            "expected_abicc": EXPECTED_ABICC.get(name, expected),
-        }
-        for t in TOOL_REGISTRY:
-            tr = tool_results.get(t.name, ToolResult(verdict="SKIP"))
-            entry[t.name] = tr.verdict
-            entry[t.ms_key] = round(tr.elapsed_ms)
-        results.append(entry)
+        _process_case(case_dir, active_tools, case_prefixes, results, args)
 
     # ── Accuracy summary ──────────────────────────────────────────────────────
     _print_accuracy_summary(results, active_tools, selected_tools)

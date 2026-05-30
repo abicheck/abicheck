@@ -364,60 +364,64 @@ class _TypeResolver:
         kind = t.kind
         tname = self._str_at(t.name_off)
 
-        if kind in (BTF_KIND_STRUCT, BTF_KIND_UNION):
-            tag = "union" if kind == BTF_KIND_UNION else "struct"
-            return tname if tname else f"<anon {tag}>"
+        named = self._resolve_named_kind(kind, t, tname)
+        if named is not None:
+            return named
+        compound = self._resolve_compound_kind(kind, t, tname)
+        if compound is not None:
+            return compound
+        return f"<btf_kind_{kind}:{type_id}>"
 
+    def _resolve_named_kind(self, kind: int, t: BtfType, tname: str) -> str | None:
+        """Names for kinds that resolve to a declared name or a kind-specific default."""
+        default = self._named_kind_default(kind, t)
+        if default is None:
+            return None
+        return tname if tname else default
+
+    @staticmethod
+    def _named_kind_default(kind: int, t: BtfType) -> str | None:
+        """Fallback display name for a named kind when it has no declared name."""
+        if kind == BTF_KIND_STRUCT:
+            return "<anon struct>"
+        if kind == BTF_KIND_UNION:
+            return "<anon union>"
         if kind in (BTF_KIND_ENUM, BTF_KIND_ENUM64):
-            return tname if tname else "<anon enum>"
-
+            return "<anon enum>"
         if kind == BTF_KIND_INT:
-            return tname if tname else "int"
-
+            return "int"
         if kind == BTF_KIND_FLOAT:
-            return tname if tname else "float"
+            return "float"
+        if kind == BTF_KIND_FWD:
+            return "<fwd union>" if t.kflag else "<fwd struct>"
+        if kind == BTF_KIND_FUNC:
+            return "<func>"
+        if kind == BTF_KIND_VAR:
+            return "<var>"
+        return None
 
+    def _resolve_compound_kind(self, kind: int, t: BtfType, tname: str) -> str | None:
+        """Names for kinds built from a referenced type (pointers, qualifiers, …)."""
         if kind == BTF_KIND_PTR:
-            ref = self.name(t.size_or_type)
-            return f"{ref} *"
-
+            return f"{self.name(t.size_or_type)} *"
         if kind == BTF_KIND_ARRAY:
             if len(t.extra) >= 12:
                 elem_type, _, nelems = struct.unpack_from("<III", t.extra, 0)
-                ref = self.name(elem_type)
-                return f"{ref}[{nelems}]"
+                return f"{self.name(elem_type)}[{nelems}]"
             return "[]"
-
         if kind == BTF_KIND_TYPEDEF:
             return tname if tname else self.name(t.size_or_type)
-
         if kind == BTF_KIND_VOLATILE:
             return f"volatile {self.name(t.size_or_type)}"
-
         if kind == BTF_KIND_CONST:
             return f"const {self.name(t.size_or_type)}"
-
         if kind == BTF_KIND_RESTRICT:
             return f"restrict {self.name(t.size_or_type)}"
-
-        if kind == BTF_KIND_FWD:
-            tag = "union" if t.kflag else "struct"
-            return tname if tname else f"<fwd {tag}>"
-
         if kind == BTF_KIND_FUNC_PROTO:
-            ret = self.name(t.size_or_type)
-            return f"{ret}(...)"
-
-        if kind == BTF_KIND_FUNC:
-            return tname if tname else "<func>"
-
-        if kind == BTF_KIND_VAR:
-            return tname if tname else "<var>"
-
+            return f"{self.name(t.size_or_type)}(...)"
         if kind == BTF_KIND_TYPE_TAG:
             return self.name(t.size_or_type)
-
-        return f"<btf_kind_{kind}:{type_id}>"
+        return None
 
     def _resolve_size(self, type_id: int) -> int:
         if type_id == 0:
@@ -526,6 +530,40 @@ def _extract_structs(
     return structs
 
 
+def _parse_enum32_members(t: BtfType, str_data: bytes) -> dict[str, int]:
+    """Parse 32-bit BTF enum enumerators (8 bytes each)."""
+    members: dict[str, int] = {}
+    # kflag=1 → signed enumerators, kflag=0 → unsigned
+    fmt = "<Ii" if t.kflag else "<II"
+    for i in range(t.vlen):
+        off = i * 8
+        if off + 8 > len(t.extra):
+            break
+        e_name_off, e_val = struct.unpack_from(fmt, t.extra, off)
+        e_name = _read_string(str_data, e_name_off)
+        if e_name:
+            members[e_name] = e_val
+    return members
+
+
+def _parse_enum64_members(t: BtfType, str_data: bytes) -> dict[str, int]:
+    """Parse 64-bit BTF enum enumerators (12 bytes each)."""
+    members: dict[str, int] = {}
+    for i in range(t.vlen):
+        off = i * 12
+        if off + 12 > len(t.extra):
+            break
+        e_name_off, e_val_lo, e_val_hi = struct.unpack_from("<III", t.extra, off)
+        e_name = _read_string(str_data, e_name_off)
+        e_val = e_val_lo | (e_val_hi << 32)
+        # kflag=1 → signed: sign-extend 64-bit value
+        if t.kflag and e_val >= (1 << 63):
+            e_val -= 1 << 64
+        if e_name:
+            members[e_name] = e_val
+    return members
+
+
 def _extract_enums(
     types: list[BtfType], str_data: bytes,
 ) -> dict[str, EnumInfo]:
@@ -534,53 +572,19 @@ def _extract_enums(
 
     for t in types:
         if t.kind == BTF_KIND_ENUM:
-            name = _read_string(str_data, t.name_off)
-            if not name:
-                continue
-            members: dict[str, int] = {}
-            # kflag=1 → signed enumerators, kflag=0 → unsigned
-            fmt = "<Ii" if t.kflag else "<II"
-            for i in range(t.vlen):
-                off = i * 8
-                if off + 8 > len(t.extra):
-                    break
-                e_name_off, e_val = struct.unpack_from(fmt, t.extra, off)
-                e_name = _read_string(str_data, e_name_off)
-                if e_name:
-                    members[e_name] = e_val
-
-            if name not in enums:
-                enums[name] = EnumInfo(
-                    name=name,
-                    underlying_byte_size=t.size_or_type,
-                    members=members,
-                )
-
+            members = _parse_enum32_members(t, str_data)
         elif t.kind == BTF_KIND_ENUM64:
-            name = _read_string(str_data, t.name_off)
-            if not name:
-                continue
-            members = {}
-            for i in range(t.vlen):
-                off = i * 12
-                if off + 12 > len(t.extra):
-                    break
-                e_name_off, e_val_lo, e_val_hi = struct.unpack_from(
-                    "<III", t.extra, off)
-                e_name = _read_string(str_data, e_name_off)
-                e_val = e_val_lo | (e_val_hi << 32)
-                # kflag=1 → signed: sign-extend 64-bit value
-                if t.kflag and e_val >= (1 << 63):
-                    e_val -= 1 << 64
-                if e_name:
-                    members[e_name] = e_val
+            members = _parse_enum64_members(t, str_data)
+        else:
+            continue
 
-            if name not in enums:
-                enums[name] = EnumInfo(
-                    name=name,
-                    underlying_byte_size=t.size_or_type,
-                    members=members,
-                )
+        name = _read_string(str_data, t.name_off)
+        if name and name not in enums:
+            enums[name] = EnumInfo(
+                name=name,
+                underlying_byte_size=t.size_or_type,
+                members=members,
+            )
 
     return enums
 

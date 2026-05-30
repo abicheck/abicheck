@@ -232,6 +232,119 @@ def load_compile_db(path: Path) -> list[CompileEntry]:
     return entries
 
 
+_ABI_EXTRA_PREFIXES = (
+    "-fabi-version=", "-fpack-struct=",
+    "-fms-extensions", "-fno-exceptions",
+    "-fno-rtti", "-fexceptions", "-frtti",
+)
+
+
+def _resolve_path(raw: str, directory: Path) -> Path:
+    """Resolve a path string relative to *directory* if not absolute."""
+    p = Path(raw)
+    if not p.is_absolute():
+        p = directory / p
+    return p
+
+
+def _try_consume_include(arg: str, arguments: list[str], i: int, directory: Path, ctx: BuildContext) -> int:
+    """Handle -I (combined and separate forms). Returns new index."""
+    m = _INCLUDE_RE.match(arg)
+    if m:
+        ctx.include_paths.append(_resolve_path(m.group(1), directory))
+        return i + 1
+    if arg == "-I" and i + 1 < len(arguments):
+        ctx.include_paths.append(_resolve_path(arguments[i + 1], directory))
+        return i + 2
+    return i  # no match — caller must advance
+
+
+def _try_consume_isystem(arg: str, arguments: list[str], i: int, directory: Path, ctx: BuildContext) -> int:
+    """Handle -isystem (combined and separate forms). Returns new index."""
+    m = _ISYSTEM_RE.match(arg)
+    if m:
+        ctx.system_includes.append(_resolve_path(m.group(1), directory))
+        return i + 1
+    if arg == "-isystem" and i + 1 < len(arguments):
+        ctx.system_includes.append(_resolve_path(arguments[i + 1], directory))
+        return i + 2
+    return i  # no match — caller must advance
+
+
+def _try_consume_target(arg: str, arguments: list[str], i: int, ctx: BuildContext) -> int:
+    """Handle --target= and -target (combined and separate forms). Returns new index."""
+    m = _TARGET_RE.match(arg)
+    if m:
+        ctx.target_triple = m.group(1)
+        return i + 1
+    if arg in ("-target", "--target") and i + 1 < len(arguments):
+        ctx.target_triple = arguments[i + 1]
+        return i + 2
+    return i  # no match — caller must advance
+
+
+def _try_consume_sysroot(arg: str, arguments: list[str], i: int, directory: Path, ctx: BuildContext) -> int:
+    """Handle --sysroot=, --sysroot, and -isysroot forms. Returns new index.
+
+    Relative sysroot paths are resolved against *directory* (the compile
+    entry's working directory), matching the behaviour of -I and -isystem.
+    Absolute paths are stored as-is.
+    """
+    m = _SYSROOT_RE.match(arg)
+    if m:
+        ctx.sysroot = _resolve_path(m.group(1), directory)
+        return i + 1
+    if arg in ("--sysroot", "-isysroot") and i + 1 < len(arguments):
+        ctx.sysroot = _resolve_path(arguments[i + 1], directory)
+        return i + 2
+    return i  # no match — caller must advance
+
+
+def _is_abi_extra_flag(arg: str) -> bool:
+    """Return True for ABI-relevant flags that should be forwarded as extra_flags."""
+    return bool(_VISIBILITY_RE.match(arg)) or arg.startswith(_ABI_EXTRA_PREFIXES)
+
+
+def _try_consume_define_undef(arg: str, arguments: list[str], i: int, ctx: BuildContext) -> int:
+    """Handle -Dmacro[=value], -D macro[=value], -Umacro, -U macro.
+
+    Handles both combined forms (``-DNAME=V``, ``-UNAME``) and split forms
+    (``-D NAME=V``, ``-U NAME``).  Returns the new argument index after
+    consuming this flag (and its value token if applicable), or *i* unchanged
+    if the argument was not a define/undef flag.
+    """
+    m = _DEFINE_RE.match(arg)
+    if m:
+        ctx.defines[m.group(1)] = m.group(2)  # None if no =value
+        return i + 1
+    if arg == "-D" and i + 1 < len(arguments):
+        # Split form: -D NAME[=VALUE]
+        name, _, value = arguments[i + 1].partition("=")
+        ctx.defines[name] = value if value else None
+        return i + 2
+    m = _UNDEF_RE.match(arg)
+    if m:
+        ctx.undefines.add(m.group(1))
+        return i + 1
+    if arg == "-U" and i + 1 < len(arguments):
+        # Split form: -U NAME
+        ctx.undefines.add(arguments[i + 1])
+        return i + 2
+    return i  # no match — caller must advance
+
+
+def _consume_std_extra(arg: str, ctx: BuildContext) -> bool:
+    """Handle -std=xxx and ABI-relevant extra flags. Returns True if consumed."""
+    m = _STD_RE.match(arg)
+    if m:
+        ctx.language_standard = m.group(1)
+        return True
+    if _is_abi_extra_flag(arg):
+        ctx.extra_flags.append(arg)
+        return True
+    return False
+
+
 def _extract_flags(arguments: list[str], directory: Path) -> BuildContext:
     """Extract ABI-relevant flags from a compiler argument list.
 
@@ -244,112 +357,40 @@ def _extract_flags(arguments: list[str], directory: Path) -> BuildContext:
     while i < len(arguments):
         arg = arguments[i]
 
-        # -Dmacro or -Dmacro=value (combined form)
-        m = _DEFINE_RE.match(arg)
-        if m:
-            ctx.defines[m.group(1)] = m.group(2)  # None if no =value
+        new_i = _try_consume_define_undef(arg, arguments, i, ctx)
+        if new_i != i:
+            i = new_i
+            continue
+
+        # -I and -isystem (combined and separate)
+        new_i = _try_consume_include(arg, arguments, i, directory, ctx)
+        if new_i != i:
+            i = new_i
+            continue
+
+        new_i = _try_consume_isystem(arg, arguments, i, directory, ctx)
+        if new_i != i:
+            i = new_i
+            continue
+
+        if _consume_std_extra(arg, ctx):
             i += 1
             continue
 
-        # -Umacro
-        m = _UNDEF_RE.match(arg)
-        if m:
-            ctx.undefines.add(m.group(1))
-            i += 1
+        # --target=xxx or -target xxx (combined and separate)
+        new_i = _try_consume_target(arg, arguments, i, ctx)
+        if new_i != i:
+            i = new_i
             continue
 
-        # -Ipath (combined form)
-        m = _INCLUDE_RE.match(arg)
-        if m:
-            p = Path(m.group(1))
-            if not p.is_absolute():
-                p = directory / p
-            ctx.include_paths.append(p)
-            i += 1
+        # --sysroot=, --sysroot, -isysroot (combined and separate)
+        new_i = _try_consume_sysroot(arg, arguments, i, directory, ctx)
+        if new_i != i:
+            i = new_i
             continue
 
-        # -I path (separate form)
-        if arg == "-I" and i + 1 < len(arguments):
-            p = Path(arguments[i + 1])
-            if not p.is_absolute():
-                p = directory / p
-            ctx.include_paths.append(p)
-            i += 2
-            continue
-
-        # -isystempath (combined form)
-        m = _ISYSTEM_RE.match(arg)
-        if m:
-            p = Path(m.group(1))
-            if not p.is_absolute():
-                p = directory / p
-            ctx.system_includes.append(p)
-            i += 1
-            continue
-
-        # -isystem path (separate form)
-        if arg == "-isystem" and i + 1 < len(arguments):
-            p = Path(arguments[i + 1])
-            if not p.is_absolute():
-                p = directory / p
-            ctx.system_includes.append(p)
-            i += 2
-            continue
-
-        # -std=xxx (combined)
-        m = _STD_RE.match(arg)
-        if m:
-            ctx.language_standard = m.group(1)
-            i += 1
-            continue
-
-        # --target=xxx or -target xxx
-        m = _TARGET_RE.match(arg)
-        if m:
-            ctx.target_triple = m.group(1)
-            i += 1
-            continue
-        if arg in ("-target", "--target") and i + 1 < len(arguments):
-            ctx.target_triple = arguments[i + 1]
-            i += 2
-            continue
-
-        # --sysroot=xxx
-        m = _SYSROOT_RE.match(arg)
-        if m:
-            ctx.sysroot = Path(m.group(1))
-            i += 1
-            continue
-        if arg == "--sysroot" and i + 1 < len(arguments):
-            ctx.sysroot = Path(arguments[i + 1])
-            i += 2
-            continue
-        if arg == "-isysroot" and i + 1 < len(arguments):
-            ctx.sysroot = Path(arguments[i + 1])
-            i += 2
-            continue
-
-        # -fvisibility=xxx (ABI-relevant but passed as extra flag)
-        m = _VISIBILITY_RE.match(arg)
-        if m:
-            ctx.extra_flags.append(arg)
-            i += 1
-            continue
-
-        # ABI-relevant flags passed through
-        if arg.startswith(("-fabi-version=", "-fpack-struct=",
-                           "-fms-extensions", "-fno-exceptions",
-                           "-fno-rtti", "-fexceptions", "-frtti")):
-            ctx.extra_flags.append(arg)
-            i += 1
-            continue
-
-        # Skip flags we don't care about
-        if arg in _FLAGS_WITH_ARG and i + 1 < len(arguments):
-            i += 2
-            continue
-
-        i += 1
+        # Skip flags we don't care about (those that take a value token)
+        i += 2 if (arg in _FLAGS_WITH_ARG and i + 1 < len(arguments)) else 1
 
     return ctx
 
@@ -479,104 +520,82 @@ def _std_sort_key(std: str) -> tuple[int, int]:
     return (1 if is_cpp else 0, version)
 
 
-def build_context_union_fallback(
-    entries: list[CompileEntry],
-    source_filter: str | None = None,
-) -> BuildContext:
-    """Union strategy: merge flags from all TUs (ADR-020 fallback).
+def _filter_entries_by_glob(entries: list[CompileEntry], source_filter: str | None) -> list[CompileEntry]:
+    """Return entries matching *source_filter* glob, or all entries if no match."""
+    if not source_filter:
+        return entries
+    filtered = [e for e in entries if _entry_matches_filter(e, source_filter)]
+    return filtered if filtered else entries
 
-    Used when a header cannot be matched to a specific TU.  Unions
-    defines and include paths, warns on conflicts.
 
-    Args:
-        entries: Parsed compile database entries.
-        source_filter: Optional glob pattern to filter source files.
+def _merge_defines_from_contexts(
+    contexts: list[BuildContext],
+) -> tuple[dict[str, str | None], dict[str, list[str]]]:
+    """Merge define maps from multiple contexts; track per-macro conflicts.
 
     Returns:
-        BuildContext with merged flags.
+        (merged_defines, define_conflicts) — conflicts maps macro name to list of
+        distinct seen values (including the first).
     """
-    filtered = entries
-    if source_filter:
-        filtered = [
-            e for e in entries
-            if _entry_matches_filter(e, source_filter)
-        ]
-        if not filtered:
-            filtered = entries
-
-    if not filtered:
-        return BuildContext()
-
-    # Extract flags from all entries
-    contexts = [_extract_flags(e.arguments, e.directory) for e in filtered]
-
-    # Merge defines (track conflicts)
-    merged_defines: dict[str, str | None] = {}
-    define_conflicts: dict[str, list[str]] = {}
+    merged: dict[str, str | None] = {}
+    conflicts: dict[str, list[str]] = {}
     for ctx in contexts:
         for macro, value in ctx.defines.items():
             val_str = value if value is not None else "(defined)"
-            if macro in merged_defines:
-                existing = merged_defines[macro]
+            if macro in merged:
+                existing = merged[macro]
                 existing_str = existing if existing is not None else "(defined)"
                 if existing_str != val_str:
-                    if macro not in define_conflicts:
-                        define_conflicts[macro] = [existing_str]
-                    define_conflicts[macro].append(val_str)
+                    if macro not in conflicts:
+                        conflicts[macro] = [existing_str]
+                    conflicts[macro].append(val_str)
             else:
-                merged_defines[macro] = value
-
-    if define_conflicts:
-        for macro, values in define_conflicts.items():
-            unique = sorted(set(values))
+                merged[macro] = value
+    if conflicts:
+        for macro, values in conflicts.items():
             _logger.warning(
                 "Macro %s has conflicting values across TUs: %s; "
                 "using first value",
                 macro,
-                ", ".join(unique),
+                ", ".join(sorted(set(values))),
             )
+    return merged, conflicts
 
-    # Merge undefines
-    merged_undefines: set[str] = set()
-    for ctx in contexts:
-        merged_undefines |= ctx.undefines
 
-    # Merge include paths (deduplicate, preserve order)
-    seen_includes: set[str] = set()
-    merged_includes: list[Path] = []
+def _merge_path_list(contexts: list[BuildContext], attr: str) -> list[Path]:
+    """Merge a list[Path] attribute from multiple contexts, deduplicating by resolved path."""
+    seen: set[str] = set()
+    merged: list[Path] = []
     for ctx in contexts:
-        for p in ctx.include_paths:
+        for p in getattr(ctx, attr):
             key = str(p.resolve())
-            if key not in seen_includes:
-                seen_includes.add(key)
-                merged_includes.append(p)
+            if key not in seen:
+                seen.add(key)
+                merged.append(p)
+    return merged
 
-    seen_sys: set[str] = set()
-    merged_sys_includes: list[Path] = []
-    for ctx in contexts:
-        for p in ctx.system_includes:
-            key = str(p.resolve())
-            if key not in seen_sys:
-                seen_sys.add(key)
-                merged_sys_includes.append(p)
 
-    # Language standard: prefer highest C++ standard
-    standards: list[str] = []
-    for ctx in contexts:
-        if ctx.language_standard:
-            standards.append(ctx.language_standard)
-    standards = sorted(set(standards))
+def _pick_best_standard(contexts: list[BuildContext]) -> tuple[str | None, list[str]]:
+    """Choose the highest language standard from all contexts.
 
-    lang_std: str | None = None
-    if standards:
-        cpp_stds = [s for s in standards if "c++" in s or "gnu++" in s]
-        c_stds = [s for s in standards if s not in cpp_stds]
-        if cpp_stds:
-            lang_std = max(cpp_stds, key=_std_sort_key)
-        elif c_stds:
-            lang_std = max(c_stds, key=_std_sort_key)
+    Returns:
+        (lang_std, sorted_unique_standards) — lang_std may be None if none found.
+    """
+    raw = [ctx.language_standard for ctx in contexts if ctx.language_standard]
+    standards = sorted(set(raw))
+    if not standards:
+        return None, standards
+    cpp_stds = [s for s in standards if "c++" in s or "gnu++" in s]
+    c_stds = [s for s in standards if s not in cpp_stds]
+    if cpp_stds:
+        return max(cpp_stds, key=_std_sort_key), standards
+    return max(c_stds, key=_std_sort_key), standards
 
-    # Target and sysroot: must be consistent
+
+def _pick_target_sysroot(
+    contexts: list[BuildContext],
+) -> tuple[str | None, Path | None]:
+    """Return the single consistent target triple and sysroot, warning on conflicts."""
     targets = {ctx.target_triple for ctx in contexts if ctx.target_triple}
     sysroots = {str(ctx.sysroot) for ctx in contexts if ctx.sysroot}
 
@@ -598,14 +617,53 @@ def build_context_union_fallback(
     elif sysroots:
         sysroot = Path(next(iter(sysroots)))
 
-    # Merge extra flags (deduplicate)
-    seen_extra: set[str] = set()
-    merged_extra: list[str] = []
+    return target, sysroot
+
+
+def _merge_extra_flags(contexts: list[BuildContext]) -> list[str]:
+    """Merge extra_flags from all contexts, preserving order and deduplicating."""
+    seen: set[str] = set()
+    merged: list[str] = []
     for ctx in contexts:
         for f in ctx.extra_flags:
-            if f not in seen_extra:
-                seen_extra.add(f)
-                merged_extra.append(f)
+            if f not in seen:
+                seen.add(f)
+                merged.append(f)
+    return merged
+
+
+def build_context_union_fallback(
+    entries: list[CompileEntry],
+    source_filter: str | None = None,
+) -> BuildContext:
+    """Union strategy: merge flags from all TUs (ADR-020 fallback).
+
+    Used when a header cannot be matched to a specific TU.  Unions
+    defines and include paths, warns on conflicts.
+
+    Args:
+        entries: Parsed compile database entries.
+        source_filter: Optional glob pattern to filter source files.
+
+    Returns:
+        BuildContext with merged flags.
+    """
+    filtered = _filter_entries_by_glob(entries, source_filter)
+    if not filtered:
+        return BuildContext()
+
+    contexts = [_extract_flags(e.arguments, e.directory) for e in filtered]
+
+    merged_defines, define_conflicts = _merge_defines_from_contexts(contexts)
+    merged_undefines: set[str] = set()
+    for ctx in contexts:
+        merged_undefines |= ctx.undefines
+
+    merged_includes = _merge_path_list(contexts, "include_paths")
+    merged_sys_includes = _merge_path_list(contexts, "system_includes")
+    lang_std, standards = _pick_best_standard(contexts)
+    target, sysroot = _pick_target_sysroot(contexts)
+    merged_extra = _merge_extra_flags(contexts)
 
     return BuildContext(
         defines=merged_defines,
@@ -616,7 +674,7 @@ def build_context_union_fallback(
         target_triple=target,
         sysroot=sysroot,
         extra_flags=merged_extra,
-        compile_db_path=filtered[0].directory / "compile_commands.json" if filtered else None,
+        compile_db_path=filtered[0].directory / "compile_commands.json",
         define_conflicts=define_conflicts,
         standard_variants=standards,
     )

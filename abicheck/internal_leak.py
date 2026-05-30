@@ -221,8 +221,10 @@ def _split_top_level_commas(s: str) -> list[str]:
     return parts
 
 
-def _build_type_map(snap: AbiSnapshot) -> dict[str, RecordType]:
+def _build_type_map(snap: AbiSnapshot) -> tuple[dict[str, RecordType], bool]:
     """Build a type-name → RecordType map for *snap*.
+
+    Returns a ``(type_map, is_dwarf_fallback)`` tuple.
 
     Primary source is ``snap.types`` (populated by header parsing or
     the DWARF snapshot builder). When that's empty but ``snap.dwarf``
@@ -233,13 +235,20 @@ def _build_type_map(snap: AbiSnapshot) -> dict[str, RecordType]:
     ``DwarfMetadata`` (it lacks base-class info), but
     ``DwarfMetadata.structs`` still gives us field types — enough to
     flag the *embedded-by-value* leak pattern.
+
+    ``is_dwarf_fallback`` is ``True`` when the returned map was built
+    from ``snap.dwarf.structs`` rather than ``snap.types``.  Callers
+    use this flag to skip public-type BFS seeding: the DWARF-only
+    record set is not filtered to the public ABI surface, so seeding
+    from it would produce spurious ``INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API``
+    findings with no real public entry point.
     """
     out: dict[str, RecordType] = {t.name: t for t in snap.types}
     if out:
-        return out
+        return out, False
     dwarf = getattr(snap, "dwarf", None)
     if dwarf is None or not getattr(dwarf, "structs", None):
-        return out
+        return out, False
     from .model import RecordType as _RecordType
     from .model import TypeField as _TypeField
 
@@ -259,7 +268,7 @@ def _build_type_map(snap: AbiSnapshot) -> dict[str, RecordType]:
             fields=fields,
             is_union=layout.is_union,
         )
-    return out
+    return out, True
 
 
 def _resolve_type_name(
@@ -289,6 +298,147 @@ def _resolve_type_name(
     return typename
 
 
+def _seed_queue_from_functions(
+    snap: AbiSnapshot,
+    queue: collections.deque[tuple[str, list[str]]],
+) -> None:
+    """Enqueue type candidates derived from all public function signatures."""
+    from .diff_symbols import _public_functions
+
+    for func in _public_functions(snap).values():
+        seed_types = [func.return_type] + [p.type for p in func.params]
+        for t in seed_types:
+            if not t:
+                continue
+            for cand in _candidate_type_names(t):
+                queue.append((cand, [f"fn:{func.name}"]))
+
+
+def _seed_queue_from_variables(
+    snap: AbiSnapshot,
+    queue: collections.deque[tuple[str, list[str]]],
+) -> None:
+    """Enqueue type candidates derived from all public variable types."""
+    from .diff_symbols import _public_variables
+
+    for var in _public_variables(snap).values():
+        if var.type:
+            for cand in _candidate_type_names(var.type):
+                queue.append((cand, [f"var:{var.name}"]))
+
+
+def _seed_queue_from_public_types(
+    type_map: dict[str, RecordType],
+    internal_set: set[str],
+    queue: collections.deque[tuple[str, list[str]]],
+    *,
+    is_dwarf_fallback: bool = False,
+) -> None:
+    """Enqueue all public (non-internal-namespace) types from *type_map*.
+
+    This catches classes declared in public headers but never referenced by
+    an exported function symbol (e.g. inline-only templates).  The walk
+    uses the header-derived type map (``snap.types``) so it only seeds
+    from types on the genuine public ABI surface.
+
+    When *is_dwarf_fallback* is ``True`` the map was synthesised from
+    ``snap.dwarf.structs``, which is NOT filtered to the public ABI
+    surface.  In that case seeding is skipped entirely to avoid spurious
+    ``INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API`` findings that have no real
+    public entry point.  Function- and variable-based seeding
+    (``_seed_queue_from_functions`` / ``_seed_queue_from_variables``)
+    still runs on the DWARF-only path and provides the real public
+    surface anchors.
+    """
+    if is_dwarf_fallback:
+        return
+    for seed_name in type_map:
+        if seed_name and not is_internal_type(seed_name, internal_set):
+            queue.append((seed_name, [f"type:{seed_name}"]))
+
+
+def _enqueue_record_children(
+    rec: RecordType,
+    new_path: list[str],
+    queue: collections.deque[tuple[str, list[str]]],
+) -> None:
+    """Enqueue bases (and virtual bases) and field types of *rec*.
+
+    Inheritance always carries ABI through.  Fields are included
+    regardless of whether they are pointers/references — identity/vtable
+    changes propagate via those too; the reporter can downgrade if needed.
+    """
+    for base in rec.bases:
+        for cand in _candidate_type_names(base):
+            queue.append((cand, new_path + [f"base:{base}"]))
+    for vb in rec.virtual_bases:
+        for cand in _candidate_type_names(vb):
+            queue.append((cand, new_path + [f"vbase:{vb}"]))
+    for fld in rec.fields:
+        for cand in _candidate_type_names(fld.type):
+            queue.append((cand, new_path + [f"field:{fld.name}"]))
+
+
+def _bfs_collect_paths(
+    queue: collections.deque[tuple[str, list[str]]],
+    type_map: dict[str, RecordType],
+    internal_set: set[str],
+) -> dict[str, list[list[str]]]:
+    """Drive the BFS walk; return raw (un-deduped) internal-type paths."""
+    paths: dict[str, list[list[str]]] = collections.defaultdict(list)
+    visited: set[tuple[str, str]] = set()
+
+    while queue:
+        typename, path = queue.popleft()
+        if not typename:
+            continue
+        # DWARF can record base-class names un-qualified; resolve against
+        # the type map before we record / enqueue children.
+        typename = _resolve_type_name(typename, type_map)
+        # Cycle protection: visit each (entry_point, typename) pair at
+        # most once. We deliberately scope by entry point so that two
+        # public roots reaching the same intermediate type each get
+        # their children walked — otherwise the second root's path is
+        # never extended past the shared intermediate, which would lose
+        # by-value severity information for nested internal types.
+        key: tuple[str, str] = (path[0] if path else "", typename)
+        if key in visited:
+            # Still record the leak if this typename is internal — paths
+            # vary by entry point, but the *first* recorded one is enough
+            # for user-facing reporting.
+            if is_internal_type(typename, internal_set):
+                paths[typename].append(list(path + [typename]))
+            continue
+        visited.add(key)
+
+        if is_internal_type(typename, internal_set):
+            paths[typename].append(list(path + [typename]))
+
+        rec = type_map.get(typename)
+        if rec is None:
+            continue
+        _enqueue_record_children(rec, path + [typename], queue)
+
+    return paths
+
+
+def _dedup_paths(
+    paths: dict[str, list[list[str]]],
+) -> dict[str, list[list[str]]]:
+    """Drop duplicate paths per internal type, keeping the shortest."""
+    deduped: dict[str, list[list[str]]] = {}
+    for tname, plist in paths.items():
+        unique: list[list[str]] = []
+        seen: set[tuple[str, ...]] = set()
+        for p in sorted(plist, key=len):
+            key_t = tuple(p)
+            if key_t not in seen:
+                seen.add(key_t)
+                unique.append(p)
+        deduped[tname] = unique
+    return deduped
+
+
 def compute_leak_paths(
     snap: AbiSnapshot,
     internal_namespaces: Iterable[str] = DEFAULT_INTERNAL_NAMESPACES,
@@ -312,103 +462,16 @@ def compute_leak_paths(
     layout change, while pointer-to-internal still breaks on type-identity
     or vtable changes.
     """
-    from .diff_symbols import _public_functions, _public_variables
-
     internal_set = set(internal_namespaces)
-    type_map = _build_type_map(snap)
-
-    paths: dict[str, list[list[str]]] = collections.defaultdict(list)
-    visited: set[tuple[str, str]] = set()
-
-    def _record(typename: str, path: list[str]) -> None:
-        if is_internal_type(typename, internal_set):
-            paths[typename].append(list(path))
+    type_map, is_dwarf_fallback = _build_type_map(snap)
 
     queue: collections.deque[tuple[str, list[str]]] = collections.deque()
+    _seed_queue_from_functions(snap, queue)
+    _seed_queue_from_variables(snap, queue)
+    _seed_queue_from_public_types(type_map, internal_set, queue, is_dwarf_fallback=is_dwarf_fallback)
 
-    # Seed: public functions and variables.
-    for func in _public_functions(snap).values():
-        seed_types = [func.return_type] + [p.type for p in func.params]
-        for t in seed_types:
-            if not t:
-                continue
-            for cand in _candidate_type_names(t):
-                queue.append((cand, [f"fn:{func.name}"]))
-
-    for var in _public_variables(snap).values():
-        if var.type:
-            for cand in _candidate_type_names(var.type):
-                queue.append((cand, [f"var:{var.name}"]))
-
-    # Also seed from any *public* (i.e. non-internal-namespace) type known
-    # to the snapshot — so that a class declared in a public header but
-    # never referenced by an exported function symbol (e.g. an inline-only
-    # template) is still treated as a public starting point. We iterate
-    # the *unified* type map (snap.types ∪ snap.dwarf.structs) so the
-    # walk still works in the dumper's symbol-only fallback path, where
-    # snap.types is empty but snap.dwarf carries the layout info.
-    for seed_name in type_map:
-        if seed_name and not is_internal_type(seed_name, internal_set):
-            queue.append((seed_name, [f"type:{seed_name}"]))
-
-    while queue:
-        typename, path = queue.popleft()
-        if not typename:
-            continue
-        # DWARF can record base-class names un-qualified; resolve against
-        # the type map before we record / enqueue children.
-        typename = _resolve_type_name(typename, type_map)
-        # Cycle protection: visit each (entry_point, typename) pair at
-        # most once. We deliberately scope by entry point so that two
-        # public roots reaching the same intermediate type each get
-        # their children walked — otherwise the second root's path is
-        # never extended past the shared intermediate, which would lose
-        # by-value severity information for nested internal types.
-        key: tuple[str, str] = (path[0] if path else "", typename)
-        if key in visited:
-            # Still record the leak if this typename is internal — paths
-            # vary by entry point, but the *first* recorded one is enough
-            # for user-facing reporting.
-            _record(typename, path + [typename])
-            continue
-        visited.add(key)
-
-        _record(typename, path + [typename])
-
-        rec = type_map.get(typename)
-        if rec is None:
-            continue
-        new_path = path + [typename]
-
-        # Bases (inheritance always carries ABI through).
-        for base in rec.bases:
-            for cand in _candidate_type_names(base):
-                queue.append((cand, new_path + [f"base:{base}"]))
-        for vb in rec.virtual_bases:
-            for cand in _candidate_type_names(vb):
-                queue.append((cand, new_path + [f"vbase:{vb}"]))
-
-        # Fields. We do NOT exclude pointer/reference fields here — even
-        # though a layout change to *Impl* does not affect a class that
-        # only holds an Impl*, identity / vtable changes to Impl still
-        # propagate via inline destructors and through-pointer dispatch.
-        # The reporter can downgrade if needed; detection is generous.
-        for fld in rec.fields:
-            for cand in _candidate_type_names(fld.type):
-                queue.append((cand, new_path + [f"field:{fld.name}"]))
-
-    # Drop duplicate paths per internal type (keep the shortest).
-    deduped: dict[str, list[list[str]]] = {}
-    for tname, plist in paths.items():
-        unique: list[list[str]] = []
-        seen: set[tuple[str, ...]] = set()
-        for p in sorted(plist, key=len):
-            key_t = tuple(p)
-            if key_t not in seen:
-                seen.add(key_t)
-                unique.append(p)
-        deduped[tname] = unique
-    return deduped
+    paths = _bfs_collect_paths(queue, type_map, internal_set)
+    return _dedup_paths(paths)
 
 
 # ---------------------------------------------------------------------------
@@ -421,6 +484,35 @@ def _format_path(path: list[str]) -> str:
     return " → ".join(path)
 
 
+def _field_is_indirect(fld_type: str) -> bool:
+    """Return True if *fld_type* is a pointer, reference, or smart-pointer wrapper.
+
+    Indirect fields don't embed by value, so layout changes don't
+    directly propagate through them.
+    """
+    if "*" in fld_type or "&" in fld_type:
+        return True
+    stripped = _strip_decorators(fld_type)
+    return (
+        "unique_ptr" in stripped
+        or "shared_ptr" in stripped
+        or "weak_ptr" in stripped
+        or "pimpl" in stripped.lower()
+    )
+
+
+def _record_field_is_value_embedded(rec: RecordType, field_name: str) -> bool | None:
+    """Check whether *field_name* in *rec* is embedded by value.
+
+    Returns True if embedded-by-value, False if indirect, None if the field
+    is not found in *rec*.
+    """
+    for fld in rec.fields:
+        if fld.name == field_name:
+            return not _field_is_indirect(fld.type)
+    return None
+
+
 def _path_describes_value_embedding(
     path: list[str], snap: AbiSnapshot,
 ) -> bool:
@@ -429,37 +521,88 @@ def _path_describes_value_embedding(
 
     Used to decide the severity hint in the leak's description.
     """
-    type_map = _build_type_map(snap)
+    type_map, _ = _build_type_map(snap)
     # Walk in pairs: when we see "field:<name>", the *previous* element is
     # the type containing the field; the field type is the *next* element
     # (or rather the next typename in the chain — fields don't show their
     # type literally, but the chain alternates "type → field:X → next-type").
     for i, step in enumerate(path):
-        if not step.startswith("field:"):
-            continue
-        if i == 0:
+        if not step.startswith("field:") or i == 0:
             continue
         containing_type = path[i - 1]
         field_name = step[len("field:"):]
         rec = type_map.get(containing_type)
         if rec is None:
             continue
-        for fld in rec.fields:
-            if fld.name != field_name:
-                continue
-            stripped = _strip_decorators(fld.type)
-            # Pointer / reference / smart-pointer wrappers don't embed by value.
-            if "*" in fld.type or "&" in fld.type:
-                return False
-            if (
-                "unique_ptr" in stripped
-                or "shared_ptr" in stripped
-                or "weak_ptr" in stripped
-                or "pimpl" in stripped.lower()
-            ):
-                return False
-            return True
+        result = _record_field_is_value_embedded(rec, field_name)
+        if result is not None:
+            return result
     return False
+
+
+def _collect_internal_changes(
+    changes: list[Change],
+    internal_set: tuple[str, ...],
+) -> dict[str, list[Change]]:
+    """Phase 1: bucket changes by internal type name.
+
+    Only considers changes of a layout-affecting kind whose symbol resolves
+    to an internal type.  Returns an empty dict when nothing qualifies.
+    """
+    internal_changes: dict[str, list[Change]] = collections.defaultdict(list)
+    for c in changes:
+        if c.kind not in _LEAK_TRIGGERING_KINDS:
+            continue
+        # ``symbol`` may be e.g. "ns::detail::Impl::field" — peel the field
+        # qualifier so we look up the type itself.
+        type_name = _root_type_name_for_change(c)
+        if is_internal_type(type_name, internal_set):
+            internal_changes[type_name].append(c)
+    return internal_changes
+
+
+def _merge_leak_paths(
+    tname: str,
+    old_paths: dict[str, list[list[str]]],
+    new_paths: dict[str, list[list[str]]],
+) -> list[list[str]]:
+    """Merge reachability paths from both snapshots, deduplicating."""
+    old_list = old_paths.get(tname, [])
+    new_unique = [p for p in new_paths.get(tname, []) if p not in old_list]
+    return old_list + new_unique
+
+
+def _build_leak_change(
+    tname: str,
+    triggers: list[Change],
+    paths: list[list[str]],
+    sample_snap: AbiSnapshot,
+) -> Change:
+    """Build a single ``INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API`` Change entry."""
+    embedded_by_value = any(
+        _path_describes_value_embedding(p, sample_snap) for p in paths
+    )
+    kinds_seen = sorted({c.kind.value for c in triggers})
+    path_strs = [_format_path(p) for p in paths[:3]]
+    more = "" if len(paths) <= 3 else f" (+{len(paths) - 3} more paths)"
+    sev_hint = (
+        "embedded-by-value or via inheritance — layout change propagates "
+        "to public type size/offset"
+        if embedded_by_value
+        else "reachable via pointer / template — identity/vtable changes "
+             "propagate to consumers"
+    )
+    return Change(
+        kind=ChangeKind.INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API,
+        symbol=tname,
+        description=(
+            f"Internal type '{tname}' changed "
+            f"({', '.join(kinds_seen)}) and is reachable from the public "
+            f"ABI surface — {sev_hint}. Public-surface paths: "
+            f"{'; '.join(path_strs)}{more}."
+        ),
+        caused_by_type=tname,
+    )
 
 
 def detect_internal_leaks(
@@ -481,21 +624,11 @@ def detect_internal_leaks(
     entry points, the description lists up to three of them.
     """
     internal_set = tuple(internal_namespaces)
-    # 1. Find changes whose symbol is an internal type.
-    internal_changes: dict[str, list[Change]] = collections.defaultdict(list)
-    for c in changes:
-        if c.kind not in _LEAK_TRIGGERING_KINDS:
-            continue
-        # ``symbol`` may be e.g. "ns::detail::Impl::field" — peel the field
-        # qualifier so we look up the type itself.
-        type_name = _root_type_name_for_change(c)
-        if is_internal_type(type_name, internal_set):
-            internal_changes[type_name].append(c)
-
+    internal_changes = _collect_internal_changes(changes, internal_set)
     if not internal_changes:
         return []
 
-    # 2. Compute reachability on *both* snapshots (a type may be reachable
+    # Compute reachability on *both* snapshots (a type may be reachable
     # only in one direction, e.g. just-added internal type leaked by a
     # new public template).
     old_paths = compute_leak_paths(old, internal_set)
@@ -503,45 +636,15 @@ def detect_internal_leaks(
 
     out: list[Change] = []
     for tname, triggers in internal_changes.items():
-        paths = old_paths.get(tname, []) + [
-            p for p in new_paths.get(tname, [])
-            if p not in old_paths.get(tname, [])
-        ]
+        paths = _merge_leak_paths(tname, old_paths, new_paths)
         if not paths:
             # Internal type changed but not reachable from public API in
             # either snapshot — this is the "truly private" case; skip.
             continue
-
         # Pick the snapshot whose path list to use for the value-embedding
         # heuristic. Prefer old (where the public API was already shipped).
         sample_snap = old if old_paths.get(tname) else new
-        embedded_by_value = any(
-            _path_describes_value_embedding(p, sample_snap) for p in paths
-        )
-
-        kinds_seen = sorted({c.kind.value for c in triggers})
-        path_strs = [_format_path(p) for p in paths[:3]]
-        more = "" if len(paths) <= 3 else f" (+{len(paths) - 3} more paths)"
-
-        sev_hint = (
-            "embedded-by-value or via inheritance — layout change propagates "
-            "to public type size/offset"
-            if embedded_by_value
-            else "reachable via pointer / template — identity/vtable changes "
-                 "propagate to consumers"
-        )
-
-        out.append(Change(
-            kind=ChangeKind.INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API,
-            symbol=tname,
-            description=(
-                f"Internal type '{tname}' changed "
-                f"({', '.join(kinds_seen)}) and is reachable from the public "
-                f"ABI surface — {sev_hint}. Public-surface paths: "
-                f"{'; '.join(path_strs)}{more}."
-            ),
-            caused_by_type=tname,
-        ))
+        out.append(_build_leak_change(tname, triggers, paths, sample_snap))
 
     return out
 

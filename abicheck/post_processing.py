@@ -66,6 +66,20 @@ class PipelineStep(Protocol):
 # ---------------------------------------------------------------------------
 
 
+def _safe_index(snap: AbiSnapshot) -> bool:
+    """Index ``snap`` for lookups, tolerating partial snapshots.
+
+    Returns ``True`` when the snapshot indexed cleanly and is safe to read
+    from, ``False`` otherwise. Keeping the swallowed exception out of a
+    ``try/except/continue`` loop body avoids a silently-ignored-error pattern.
+    """
+    try:
+        snap.index()
+    except Exception:  # noqa: BLE001 — defensive; snapshots may be partial
+        return False
+    return True
+
+
 def _matches_suppression_key(symbol: str, key: str) -> bool:
     """Return ``True`` iff *symbol* is suppressed by *key*.
 
@@ -551,6 +565,26 @@ class EscalateFrozenNamespaceViolations:
 
     name = "escalate_frozen_namespace_violations"
 
+    @staticmethod
+    def _build_qualified_lookup(old: AbiSnapshot, new: AbiSnapshot) -> dict[str, str]:
+        """Build a mangled→qualified-name map from both snapshots.
+
+        Pre-building this lookup lets :meth:`run` recover the C++ namespace
+        of ``extern "C"`` symbols whose ``Change.symbol`` is just the
+        unqualified export name.  Both snapshots are consulted because
+        FUNC_REMOVED is only in old and FUNC_ADDED only in new.
+        """
+        qualified_lookup: dict[str, str] = {}
+        for snap in (old, new):
+            if snap is None or not _safe_index(snap):
+                continue
+            func_map = getattr(snap, "_func_by_mangled", None) or {}
+            for mangled, fn in func_map.items():
+                fname = getattr(fn, "name", None)
+                if fname and "::" in fname and mangled not in qualified_lookup:
+                    qualified_lookup[mangled] = fname
+        return qualified_lookup
+
     def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:
         if not ctx.frozen_namespaces:
             return changes
@@ -561,26 +595,7 @@ class EscalateFrozenNamespaceViolations:
         from .internal_leak import _strip_template_args
 
         patterns = list(ctx.frozen_namespaces)
-
-        # Pre-build mangled→qualified-name lookups so we can recover the
-        # C++ namespace of ``extern "C"`` symbols whose ``Change.symbol``
-        # is just the unqualified export name (e.g. ``dispatch`` for a
-        # function declared in ``mylib::detail::r1::``). Both snapshots
-        # are consulted because FUNC_REMOVED is only in old and
-        # FUNC_ADDED only in new.
-        qualified_lookup: dict[str, str] = {}
-        for snap in (ctx.old, ctx.new):
-            if snap is None:
-                continue
-            try:
-                snap.index()
-            except Exception:  # noqa: BLE001 — defensive; snapshots may be partial
-                continue
-            func_map = getattr(snap, "_func_by_mangled", None) or {}
-            for mangled, fn in func_map.items():
-                fname = getattr(fn, "name", None)
-                if fname and "::" in fname and mangled not in qualified_lookup:
-                    qualified_lookup[mangled] = fname
+        qualified_lookup = self._build_qualified_lookup(ctx.old, ctx.new)
 
         def _match(name: str | None) -> str | None:
             if not name:

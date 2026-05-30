@@ -38,7 +38,7 @@ from __future__ import annotations
 import os
 import re
 from collections import defaultdict
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -279,6 +279,78 @@ def _isa_strip_token(symbol_name: str, token: str) -> str:
     return lowered
 
 
+def _build_removed_by_isa(old_functions: Iterable[Function], new_mangled: set[str]) -> dict[str, list[tuple[str, str]]]:
+    """Build a mapping from ISA token → list of (stem, mangled) for functions removed in new."""
+    removed_by_isa: dict[str, list[tuple[str, str]]] = defaultdict(list)
+    for fn in old_functions:
+        if fn.mangled in new_mangled:
+            continue
+        token = _isa_token_in_symbol(fn.name) or _isa_token_in_symbol(fn.mangled)
+        if token is None:
+            continue
+        stem = _isa_strip_token(fn.name, token)
+        removed_by_isa[token].append((stem, fn.mangled))
+    return removed_by_isa
+
+
+def _build_all_surviving_stems(new_functions: Iterable[Function]) -> set[str]:
+    """Return the union of algorithm stems that still exist under any ISA in the new snapshot."""
+    surviving_stems_by_isa: dict[str, set[str]] = defaultdict(set)
+    for fn in new_functions:
+        token = _isa_token_in_symbol(fn.name) or _isa_token_in_symbol(fn.mangled)
+        if token is None:
+            continue
+        surviving_stems_by_isa[token].add(_isa_strip_token(fn.name, token))
+    return set().union(*surviving_stems_by_isa.values()) if surviving_stems_by_isa else set()
+
+
+def _suppress_demangled_names(
+    overlapping: list[tuple[str, str]],
+    old_index: dict[str, Function],
+    suppressed: set[str],
+) -> None:
+    """Add demangled function names to *suppressed* for cross-platform robustness.
+
+    Belt-and-suspenders: Different platforms emit ``func_removed`` ``Change.symbol``
+    with different conventions. Adding the demangled name catches the case where
+    castxml-derived ``fn.mangled`` and PE-export-derived ``Change.symbol`` are
+    sibling forms of the same underlying name.
+    """
+    for _, mangled in overlapping:
+        removed_fn = old_index.get(mangled)
+        if removed_fn is not None and removed_fn.name:
+            suppressed.add(removed_fn.name)
+
+
+def _emit_isa_dropped_finding(
+    token: str,
+    overlapping: list[tuple[str, str]],
+    old_index: dict[str, Function],
+    suppressed: set[str],
+) -> Change:
+    """Build the CPU_DISPATCH_ISA_DROPPED Change and update *suppressed* in place."""
+    affected_stems = {stem for stem, _ in overlapping}
+    affected_mangled = [m for _, m in overlapping]
+    suppressed.update(affected_mangled)
+    _suppress_demangled_names(overlapping, old_index, suppressed)
+    stems_sorted = sorted(affected_stems)
+    return Change(
+        kind=ChangeKind.CPU_DISPATCH_ISA_DROPPED,
+        symbol=f"<isa:{token}>",
+        description=(
+            f"CPU dispatch ISA '{token}' tier removed: "
+            f"{len(affected_mangled)} specialisations across "
+            f"{len(affected_stems)} algorithms "
+            f"({', '.join(stems_sorted[:8])}"
+            f"{'…' if len(stems_sorted) > 8 else ''}). "
+            f"Runtime dispatcher continues to work; consumers that "
+            f"pinned directly to '{token}' symbols get unresolved "
+            f"references at load time."
+        ),
+        affected_symbols=affected_mangled,
+    )
+
+
 def detect_cpu_dispatch_isa_dropped(
     old: AbiSnapshot,
     new: AbiSnapshot,
@@ -294,30 +366,9 @@ def detect_cpu_dispatch_isa_dropped(
     old.index()
     new.index()
     new_mangled = {f.mangled for f in new.functions}
-    # Map: isa_token -> list of (stem, mangled) for removed symbols.
-    removed_by_isa: dict[str, list[tuple[str, str]]] = defaultdict(list)
-    for fn in old.functions:
-        if fn.mangled in new_mangled:
-            continue
-        token = _isa_token_in_symbol(fn.name) or _isa_token_in_symbol(fn.mangled)
-        if token is None:
-            continue
-        stem = _isa_strip_token(fn.name, token)
-        removed_by_isa[token].append((stem, fn.mangled))
-    # For confidence, require that at least one sibling ISA still
-    # exists in the new snapshot for some of the affected stems —
-    # otherwise the whole algorithm was deleted, not just the ISA tier.
-    surviving_stems_by_isa: dict[str, set[str]] = defaultdict(set)
-    for fn in new.functions:
-        token = _isa_token_in_symbol(fn.name) or _isa_token_in_symbol(fn.mangled)
-        if token is None:
-            continue
-        surviving_stems_by_isa[token].add(_isa_strip_token(fn.name, token))
-    all_surviving_stems = (
-        set().union(*surviving_stems_by_isa.values())
-        if surviving_stems_by_isa
-        else set()
-    )
+    removed_by_isa = _build_removed_by_isa(old.functions, new_mangled)
+    all_surviving_stems = _build_all_surviving_stems(new.functions)
+    old_index: dict[str, Function] = {f.mangled: f for f in old.functions}
     findings: list[Change] = []
     suppressed: set[str] = set()
     for token, removed in removed_by_isa.items():
@@ -326,52 +377,74 @@ def detect_cpu_dispatch_isa_dropped(
         # Only group symbols whose algorithm stem still survives under some
         # other ISA. Fully-removed algorithms keep their per-symbol
         # ``func_removed`` finding so the user sees the real deletion.
-        overlapping = [
-            (stem, mangled) for stem, mangled in removed if stem in all_surviving_stems
-        ]
+        overlapping = [(stem, mangled) for stem, mangled in removed if stem in all_surviving_stems]
         if len(overlapping) < min_removed:
             continue
-        affected_stems = {stem for stem, _ in overlapping}
-        affected_mangled = [m for _, m in overlapping]
-        suppressed.update(affected_mangled)
-        # Belt-and-suspenders: also include the demangled function name in
-        # the suppression set. Different platforms emit ``func_removed``
-        # ``Change.symbol`` with different conventions — on Linux it's the
-        # Itanium mangled name (matches ``fn.mangled``); on Windows the PE
-        # diff (``diff_platform._diff_pe``) uses the MSVC export name,
-        # which is a mangled form that may not equal castxml's
-        # ``fn.mangled`` verbatim. Adding the demangled name catches the
-        # case where castxml-derived ``fn.mangled`` and PE-export-derived
-        # ``Change.symbol`` are sibling forms of the same underlying name.
-        old_index = {f.mangled: f for f in old.functions}
-        for _, mangled in overlapping:
-            removed_fn = old_index.get(mangled)
-            if removed_fn is not None and removed_fn.name:
-                suppressed.add(removed_fn.name)
-        stems_sorted = sorted(affected_stems)
-        findings.append(
-            Change(
-                kind=ChangeKind.CPU_DISPATCH_ISA_DROPPED,
-                symbol=f"<isa:{token}>",
-                description=(
-                    f"CPU dispatch ISA '{token}' tier removed: "
-                    f"{len(affected_mangled)} specialisations across "
-                    f"{len(affected_stems)} algorithms "
-                    f"({', '.join(stems_sorted[:8])}"
-                    f"{'…' if len(stems_sorted) > 8 else ''}). "
-                    f"Runtime dispatcher continues to work; consumers that "
-                    f"pinned directly to '{token}' symbols get unresolved "
-                    f"references at load time."
-                ),
-                affected_symbols=affected_mangled,
-            )
-        )
+        findings.append(_emit_isa_dropped_finding(token, overlapping, old_index, suppressed))
     return findings, suppressed
 
 
 # ---------------------------------------------------------------------------
 # case86 — tag type renamed (empty struct rename)
 # ---------------------------------------------------------------------------
+
+
+def _symbols_embedding_leaf(mangled_set: set[str], leaf: str) -> list[str]:
+    """Return mangled names from *mangled_set* that embed *leaf* (with or without underscores)."""
+    token = leaf.replace("_", "")
+    return [m for m in mangled_set if leaf in m or token in m]
+
+
+def _find_tag_rename_for_removed(
+    removed: RecordType,
+    candidates: list[RecordType],
+    only_removed: set[str],
+    only_added: set[str],
+) -> Change | None:
+    """Try to match *removed* to one of the *candidates* added types via symbol evidence.
+
+    Returns a TAG_TYPE_RENAMED Change on the first matching candidate, or None.
+    """
+    old_leaf = _last_segment(removed.name)
+    removed_with_token = _symbols_embedding_leaf(only_removed, old_leaf)
+    if not removed_with_token:
+        return None
+    for added in candidates:
+        new_leaf = _last_segment(added.name)
+        added_with_token = _symbols_embedding_leaf(only_added, new_leaf)
+        if not added_with_token:
+            continue
+        return Change(
+            kind=ChangeKind.TAG_TYPE_RENAMED,
+            symbol=removed.name,
+            description=(
+                f"Empty tag struct '{removed.name}' renamed to "
+                f"'{added.name}'. The type has no fields or vtable, so "
+                f"layout-based detectors see no change, but "
+                f"{len(removed_with_token)} explicit instantiation "
+                f"symbol(s) referencing the old name were re-mangled "
+                f"(now {len(added_with_token)} symbol(s) reference the "
+                f"new name). Consumers built against the old header "
+                f"fail to resolve the instantiation at load time."
+            ),
+            old_value=removed.name,
+            new_value=added.name,
+            affected_symbols=removed_with_token,
+        )
+    return None
+
+
+def _empty_records_only_in(types_a: dict[str, RecordType], types_b: dict[str, RecordType]) -> list[RecordType]:
+    """Return records that are empty and present in *types_a* but not *types_b*."""
+    return [t for name, t in types_a.items() if name not in types_b and _is_empty_record(t)]
+
+
+def _group_by_namespace(types: list[RecordType]) -> dict[str, list[RecordType]]:
+    """Index a list of type objects by their parent namespace."""
+    by_ns: dict[str, list[RecordType]] = defaultdict(list)
+    for t in types:
+        by_ns[_parent_namespace(t.name)].append(t)
+    return by_ns
 
 
 def detect_tag_type_renamed(
@@ -389,72 +462,22 @@ def detect_tag_type_renamed(
     new.index()
     old_types = {t.name: t for t in old.types}
     new_types = {t.name: t for t in new.types}
-    # Find empty record removals and additions.
-    removed_empties = [
-        t
-        for name, t in old_types.items()
-        if name not in new_types and _is_empty_record(t)
-    ]
-    added_empties = [
-        t
-        for name, t in new_types.items()
-        if name not in old_types and _is_empty_record(t)
-    ]
+    removed_empties = _empty_records_only_in(old_types, new_types)
+    added_empties = _empty_records_only_in(new_types, old_types)
     if not removed_empties or not added_empties:
         return []
-    # Group by parent namespace.
-    added_by_ns: dict[str, list[RecordType]] = defaultdict(list)
-    for t in added_empties:
-        added_by_ns[_parent_namespace(t.name)].append(t)
-    old_mangled = {f.mangled for f in old.functions}
-    new_mangled = {f.mangled for f in new.functions}
-    only_removed = old_mangled - new_mangled
-    only_added = new_mangled - old_mangled
+    added_by_ns = _group_by_namespace(added_empties)
+    only_removed = {f.mangled for f in old.functions} - {f.mangled for f in new.functions}
+    only_added = {f.mangled for f in new.functions} - {f.mangled for f in old.functions}
     findings: list[Change] = []
     for removed in removed_empties:
         ns = _parent_namespace(removed.name)
         candidates = added_by_ns.get(ns, [])
         if not candidates:
             continue
-        old_leaf = _last_segment(removed.name)
-        # Symbol-level evidence: find removed mangled names embedding
-        # the old leaf; for the *first* candidate added type whose leaf
-        # also appears in at least one ADDED mangled name, declare a
-        # rename.
-        old_leaf_token = old_leaf.replace("_", "")
-        removed_with_token = [
-            m for m in only_removed if old_leaf in m or old_leaf_token in m
-        ]
-        if not removed_with_token:
-            continue
-        for added in candidates:
-            new_leaf = _last_segment(added.name)
-            new_leaf_token = new_leaf.replace("_", "")
-            added_with_token = [
-                m for m in only_added if new_leaf in m or new_leaf_token in m
-            ]
-            if not added_with_token:
-                continue
-            findings.append(
-                Change(
-                    kind=ChangeKind.TAG_TYPE_RENAMED,
-                    symbol=removed.name,
-                    description=(
-                        f"Empty tag struct '{removed.name}' renamed to "
-                        f"'{added.name}'. The type has no fields or vtable, so "
-                        f"layout-based detectors see no change, but "
-                        f"{len(removed_with_token)} explicit instantiation "
-                        f"symbol(s) referencing the old name were re-mangled "
-                        f"(now {len(added_with_token)} symbol(s) reference the "
-                        f"new name). Consumers built against the old header "
-                        f"fail to resolve the instantiation at load time."
-                    ),
-                    old_value=removed.name,
-                    new_value=added.name,
-                    affected_symbols=removed_with_token,
-                )
-            )
-            break  # one rename per removed type
+        ch = _find_tag_rename_for_removed(removed, candidates, only_removed, only_added)
+        if ch is not None:
+            findings.append(ch)
     return findings
 
 
@@ -637,6 +660,110 @@ def detect_default_template_arg_changed(
 # ---------------------------------------------------------------------------
 
 
+def _collect_field_rename_candidates(
+    changes: Iterable[Change],
+    namespaces: tuple[str, ...],
+) -> list[tuple[str, str, str]]:
+    """Return ``(record_name, old_field, new_field)`` triples from FIELD_RENAMED changes
+    whose record belongs to an internal namespace."""
+    from .internal_leak import is_internal_type  # local import: cycle-free
+
+    candidates: list[tuple[str, str, str]] = []
+    for ch in changes:
+        if ch.kind != ChangeKind.FIELD_RENAMED:
+            continue
+        record_name = ch.symbol.rsplit("::", 1)[0] if "::" in ch.symbol else ""
+        if not is_internal_type(record_name, namespaces):
+            continue
+        if ch.old_value and ch.new_value:
+            candidates.append((record_name, str(ch.old_value), str(ch.new_value)))
+    return candidates
+
+
+def _collect_paired_field_candidates(
+    changes: Iterable[Change],
+    namespaces: tuple[str, ...],
+) -> list[tuple[str, str, str]]:
+    """Synthesise ``(record_name, old_field, new_field)`` triples from paired
+    TYPE_FIELD_REMOVED / TYPE_FIELD_ADDED changes on the same internal type.
+
+    Covers the case where the AST emitter doesn't produce a FIELD_RENAMED
+    but does produce paired field deltas (oneDAL's "modernize naming" pattern).
+    """
+    from .internal_leak import is_internal_type  # local import: cycle-free
+
+    by_internal: dict[str, tuple[list[str], list[str]]] = defaultdict(lambda: ([], []))
+    for ch in changes:
+        if ch.kind not in (ChangeKind.TYPE_FIELD_REMOVED, ChangeKind.TYPE_FIELD_ADDED):
+            continue
+        # `symbol` for these is typically "Type::field_name"
+        if "::" not in ch.symbol:
+            continue
+        rec, fld = ch.symbol.rsplit("::", 1)
+        if not is_internal_type(rec, namespaces):
+            continue
+        removed_list, added_list = by_internal[rec]
+        if ch.kind == ChangeKind.TYPE_FIELD_REMOVED:
+            removed_list.append(fld)
+        else:
+            added_list.append(fld)
+
+    candidates: list[tuple[str, str, str]] = []
+    for rec, (removed, added) in by_internal.items():
+        # Pair positionally — equal count is the strongest hint of a rename batch.
+        if removed and added and len(removed) == len(added):
+            for old_field, new_field in zip(removed, added, strict=False):
+                candidates.append((rec, old_field, new_field))
+    return candidates
+
+
+def _emit_inline_body_findings(
+    rename_candidates: list[tuple[str, str, str]],
+    old_types: Mapping[str, object],
+    new_types: Mapping[str, object],
+    old_functions: Iterable[Function],
+    namespaces: tuple[str, ...],
+) -> list[Change]:
+    """For each rename candidate emit INLINE_BODY_REFERENCES_RENAMED_MEMBER findings.
+
+    Looks for a public class whose fields include a pimpl pointing at the
+    internal type AND at least one inline public function declared on that class.
+    """
+    findings: list[Change] = []
+    seen: set[tuple[str, str, str]] = set()
+    for internal_type, old_field, new_field in rename_candidates:
+        public_holders = _find_public_pimpl_holders(new_types.values(), internal_type, namespaces)
+        if not public_holders:
+            public_holders = _find_public_pimpl_holders(old_types.values(), internal_type, namespaces)
+        if not public_holders:
+            continue
+        inline_funcs = _inline_accessors_for(old_functions, public_holders)
+        if not inline_funcs:
+            continue
+        for holder in sorted(public_holders):
+            key = (holder, internal_type, old_field)
+            if key in seen:
+                continue
+            seen.add(key)
+            findings.append(Change(
+                kind=ChangeKind.INLINE_BODY_REFERENCES_RENAMED_MEMBER,
+                symbol=holder,
+                description=(
+                    f"Public class '{holder}' has inline accessors "
+                    f"({len(inline_funcs)} found) reaching into "
+                    f"'{internal_type}' by name. Field '{old_field}' was "
+                    f"renamed to '{new_field}' in the new internal layout. "
+                    f"Consumers compiled against the old header have the "
+                    f"old member name baked into their inline accessor "
+                    f"bodies; running against the new library reads the "
+                    f"wrong offset or fails to resolve the member."
+                ),
+                old_value=old_field,
+                new_value=new_field,
+            ))
+    return findings
+
+
 def detect_inline_body_renamed_member(
     old: AbiSnapshot,
     new: AbiSnapshot,
@@ -657,107 +784,21 @@ def detect_inline_body_renamed_member(
     member belongs to a detail:: type and there exist public inline
     accessors on the containing class.
     """
-    from .internal_leak import is_internal_type  # local import: cycle-free
+    # Materialise the iterable once so both collection passes can use it.
+    changes_list = list(changes)
 
     # Index types by name.
     old_types = {t.name: t for t in old.types}
     new_types = {t.name: t for t in new.types}
 
-    # Identify (record_name, old_field, new_field) rename candidates.
-    rename_candidates: list[tuple[str, str, str]] = []
-    for ch in changes:
-        if ch.kind != ChangeKind.FIELD_RENAMED:
-            continue
-        record_name = ch.symbol.rsplit("::", 1)[0] if "::" in ch.symbol else ""
-        if not is_internal_type(record_name, namespaces):
-            continue
-        if ch.old_value and ch.new_value:
-            rename_candidates.append(
-                (record_name, str(ch.old_value), str(ch.new_value)),
-            )
-
-    # Also synthesise candidates from removed+added field pairs on the
-    # same internal type — covers the case where the AST emitter doesn't
-    # produce a FIELD_RENAMED but does produce paired field deltas.
-    by_internal: dict[str, tuple[list[str], list[str]]] = defaultdict(
-        lambda: ([], []),
-    )
-    for ch in changes:
-        if ch.kind not in (
-            ChangeKind.TYPE_FIELD_REMOVED,
-            ChangeKind.TYPE_FIELD_ADDED,
-        ):
-            continue
-        # `symbol` for these is typically "Type::field_name"
-        if "::" not in ch.symbol:
-            continue
-        rec, fld = ch.symbol.rsplit("::", 1)
-        if not is_internal_type(rec, namespaces):
-            continue
-        removed_list, added_list = by_internal[rec]
-        if ch.kind == ChangeKind.TYPE_FIELD_REMOVED:
-            removed_list.append(fld)
-        else:
-            added_list.append(fld)
-    for rec, (removed, added) in by_internal.items():
-        # Pair them positionally — same count is the strongest hint
-        # of a rename batch (oneDAL's "modernize naming" pattern).
-        if removed and added and len(removed) == len(added):
-            for old_field, new_field in zip(removed, added, strict=False):
-                rename_candidates.append((rec, old_field, new_field))
+    # Gather rename candidates from two complementary signals.
+    rename_candidates = _collect_field_rename_candidates(changes_list, namespaces)
+    rename_candidates.extend(_collect_paired_field_candidates(changes_list, namespaces))
 
     if not rename_candidates:
         return []
 
-    # For each candidate, look for a public class whose fields include
-    # a pimpl pointing at the internal type, AND at least one inline
-    # public function declared on that class in BOTH snapshots.
-    findings: list[Change] = []
-    seen: set[tuple[str, str, str]] = set()
-    for internal_type, old_field, new_field in rename_candidates:
-        public_holders = _find_public_pimpl_holders(
-            new_types.values(),
-            internal_type,
-            namespaces,
-        )
-        if not public_holders:
-            public_holders = _find_public_pimpl_holders(
-                old_types.values(),
-                internal_type,
-                namespaces,
-            )
-        if not public_holders:
-            continue
-        inline_funcs = _inline_accessors_for(
-            old.functions,
-            public_holders,
-        )
-        if not inline_funcs:
-            continue
-        for holder in sorted(public_holders):
-            key = (holder, internal_type, old_field)
-            if key in seen:
-                continue
-            seen.add(key)
-            findings.append(
-                Change(
-                    kind=ChangeKind.INLINE_BODY_REFERENCES_RENAMED_MEMBER,
-                    symbol=holder,
-                    description=(
-                        f"Public class '{holder}' has inline accessors "
-                        f"({len(inline_funcs)} found) reaching into "
-                        f"'{internal_type}' by name. Field '{old_field}' was "
-                        f"renamed to '{new_field}' in the new internal layout. "
-                        f"Consumers compiled against the old header have the "
-                        f"old member name baked into their inline accessor "
-                        f"bodies; running against the new library reads the "
-                        f"wrong offset or fails to resolve the member."
-                    ),
-                    old_value=old_field,
-                    new_value=new_field,
-                )
-            )
-    return findings
+    return _emit_inline_body_findings(rename_candidates, old_types, new_types, old.functions, namespaces)
 
 
 def _find_public_pimpl_holders(

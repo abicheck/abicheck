@@ -27,7 +27,7 @@ import logging
 import re as _re
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import click
 
@@ -751,6 +751,283 @@ def compat_dump_cmd(
     _do_echo(f"ABI dump written to {dump_path}", quiet)
 
 
+# ── compat_check_cmd helpers ─────────────────────────────────────────────────
+
+
+def _load_compat_inputs(
+    old_desc: Path,
+    new_desc: Path,
+    relpath: str | None,
+    relpath1: str | None,
+    relpath2: str | None,
+    skip_headers: Path | None,
+    quiet: bool,
+) -> tuple[CompatDescriptor | AbiSnapshot, CompatDescriptor | AbiSnapshot, set[str]]:
+    """Resolve relpath overrides, notify about Perl dumps, parse descriptors, load skip-headers set.
+
+    Returns (old_d, new_d, skip_headers_set).
+    """
+    old_relpath = relpath1 or relpath
+    new_relpath = relpath2 or relpath
+
+    old_is_abicc_perl = is_abicc_perl_dump_file(old_desc)
+    new_is_abicc_perl = is_abicc_perl_dump_file(new_desc)
+    if old_is_abicc_perl or new_is_abicc_perl:
+        _do_echo(
+            "Info: ABICC Perl ABI.dump input detected. "
+            "Using migration-focused importer (full ABICC dump parity is not guaranteed). "
+            "Prefer abicheck JSON dumps for best fidelity.",
+            quiet,
+        )
+
+    old_d, new_d = _parse_compat_descriptors(old_desc, new_desc, old_relpath, new_relpath)
+    skip_headers_set = _load_skip_headers(skip_headers)
+    if skip_headers_set:
+        _do_echo(f"Applying -skip-headers: excluding {len(skip_headers_set)} header(s).", quiet)
+
+    return old_d, new_d, skip_headers_set
+
+
+def _take_snapshots_with_logging(
+    old_d: CompatDescriptor | AbiSnapshot,
+    new_d: CompatDescriptor | AbiSnapshot,
+    old_desc: Path,
+    new_desc: Path,
+    vnum1: str | None,
+    vnum2: str | None,
+    log1_handler: logging.Handler | None,
+    log2_handler: logging.Handler | None,
+    *,
+    headers_list_path: Path | None,
+    single_header: str | None,
+    skip_headers_set: set[str],
+    quiet: bool,
+    gcc_path: str | None,
+    gcc_prefix: str | None,
+    gcc_options: str | None,
+    sysroot: Path | None,
+    nostdinc: bool,
+    lang: str | None,
+) -> tuple[AbiSnapshot, str, AbiSnapshot, str]:
+    """Build old and new snapshots, activating per-phase log handlers around each dump call.
+
+    Returns (old_snap, old_version, new_snap, new_version).
+    Cleans up handlers on error before re-raising via _compat_fail.
+    """
+    _logger = logging.getLogger("abicheck")
+    try:
+        if log1_handler is not None:
+            _logger.addHandler(log1_handler)
+        old_snap, old_version = _snapshot_from_compat_input(
+            old_d, vnum1, old_desc,
+            headers_list_path=headers_list_path,
+            single_header=single_header,
+            skip_headers_set=skip_headers_set,
+            quiet=quiet,
+            gcc_path=gcc_path,
+            gcc_prefix=gcc_prefix,
+            gcc_options=gcc_options,
+            sysroot=sysroot,
+            nostdinc=nostdinc,
+            lang=lang,
+        )
+        if log1_handler is not None:
+            _logger.removeHandler(log1_handler)
+            log1_handler.close()
+
+        if log2_handler is not None:
+            _logger.addHandler(log2_handler)
+        new_snap, new_version = _snapshot_from_compat_input(
+            new_d, vnum2, new_desc,
+            headers_list_path=headers_list_path,
+            single_header=single_header,
+            skip_headers_set=skip_headers_set,
+            quiet=quiet,
+            gcc_path=gcc_path,
+            gcc_prefix=gcc_prefix,
+            gcc_options=gcc_options,
+            sysroot=sysroot,
+            nostdinc=nostdinc,
+            lang=lang,
+        )
+        if log2_handler is not None:
+            _logger.removeHandler(log2_handler)
+            log2_handler.close()
+    except Exception as exc:  # noqa: BLE001
+        if log1_handler is not None:
+            log1_handler.close()
+        if log2_handler is not None:
+            log2_handler.close()
+        _compat_fail("during dump", exc)
+
+    return old_snap, old_version, new_snap, new_version
+
+
+def _apply_result_transforms(
+    result: DiffResult,
+    *,
+    warn_newsym: bool,
+    limit_affected: int,
+    source_only: bool,
+    binary_only: bool,
+    strict: bool,
+    strict_mode: str,
+) -> tuple[DiffResult, DiffResult]:
+    """Apply post-compare transforms and return (transformed_result, full_result).
+
+    full_result is the result before source-only filtering (used for split reports).
+    The transforms are applied in order: warn-newsym, limit-affected, source-only filter, strict.
+    """
+    if warn_newsym:
+        result = _apply_warn_newsym(result)
+    if limit_affected > 0:
+        result = _limit_affected_changes(result, limit_affected)
+
+    # full_result is saved before source filtering for -bin-report-path / -src-report-path.
+    full_result = result
+
+    if source_only and not binary_only:
+        result = _filter_source_only(result)
+    if strict:
+        result = _apply_strict(result, mode=strict_mode)
+
+    return result, full_result
+
+
+def _resolve_report_path_and_mkdir(
+    report_path: Path | None,
+    lib_name: str,
+    old_version: str,
+    new_version: str,
+    fmt: str,
+    quiet: bool,
+) -> Path:
+    """Derive a default report path when none is given, then create parent directories.
+
+    Returns the resolved Path.
+    """
+    if report_path is None:
+        ext = fmt.lower()
+        report_path = (
+            Path("compat_reports")
+            / _safe_path(lib_name)
+            / f"{_safe_path(old_version)}_to_{_safe_path(new_version)}"
+            / f"compat_report.{ext}"
+        )
+    try:
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        _compat_fail("writing report output", exc)
+    return report_path
+
+
+def _generate_compat_report(
+    r: DiffResult,
+    path: Path,
+    *,
+    fmt: str,
+    lib_name: str,
+    old_version: str,
+    new_version: str,
+    effective_title: str | None,
+    compat_html: bool,
+    arch: str | None,
+    gcc_path: str | None,
+) -> None:
+    """Write a single report file in the requested format."""
+    if fmt == "html":
+        write_html_report(
+            r, output_path=path,
+            lib_name=lib_name,
+            old_version=old_version, new_version=new_version,
+            old_symbol_count=r.old_symbol_count,
+            title=effective_title,
+            compat_html=compat_html,
+        )
+    elif fmt == "xml":
+        write_xml_report(
+            r, output_path=path,
+            lib_name=lib_name,
+            old_version=old_version, new_version=new_version,
+            old_symbol_count=r.old_symbol_count,
+            arch=arch or "",
+            compiler=_detect_compiler_version(gcc_path),
+        )
+    elif fmt == "json":
+        path.write_text(to_json(r), encoding="utf-8")
+    else:
+        path.write_text(to_markdown(r), encoding="utf-8")
+
+
+def _write_all_reports(
+    result: DiffResult,
+    full_result: DiffResult,
+    report_path: Path,
+    bin_report_path: Path | None,
+    src_report_path: Path | None,
+    *,
+    list_affected: bool,
+    to_stdout: bool,
+    quiet: bool,
+    fmt: str,
+    lib_name: str,
+    old_version: str,
+    new_version: str,
+    effective_title: str | None,
+    compat_html: bool,
+    arch: str | None,
+    gcc_path: str | None,
+) -> None:
+    """Write primary report, optional split reports, affected-symbols list, and stdout echo."""
+    _report_kwargs: dict[str, Any] = dict(
+        fmt=fmt, lib_name=lib_name, old_version=old_version, new_version=new_version,
+        effective_title=effective_title, compat_html=compat_html, arch=arch, gcc_path=gcc_path,
+    )
+    try:
+        _generate_compat_report(result, report_path, **_report_kwargs)
+
+        if bin_report_path:
+            bin_report_path.parent.mkdir(parents=True, exist_ok=True)
+            _generate_compat_report(_filter_binary_only(full_result), bin_report_path, **_report_kwargs)
+            _do_echo(f"Binary report: {bin_report_path}", quiet)
+
+        if src_report_path:
+            src_report_path.parent.mkdir(parents=True, exist_ok=True)
+            _generate_compat_report(_filter_source_only(full_result), src_report_path, **_report_kwargs)
+            _do_echo(f"Source report: {src_report_path}", quiet)
+
+        if list_affected:
+            affected_path = report_path.with_suffix(".affected.txt")
+            _write_affected_list(result, affected_path)
+            _do_echo(f"Affected symbols: {affected_path}", quiet)
+
+        if to_stdout:
+            click.echo(report_path.read_text(encoding="utf-8"))
+    except OSError as exc:
+        _compat_fail("writing report output", exc)
+
+
+def _print_summary_and_exit(
+    result: DiffResult,
+    verdict: str,
+    quiet: bool,
+    report_path: Path,
+) -> None:
+    """Print ABICC-style console summary and exit with the appropriate code."""
+    from ..report_summary import compatibility_metrics  # noqa: PLC0415
+
+    metrics = compatibility_metrics(result.changes, result.old_symbol_count)
+    _do_echo(f"Binary compatibility: {metrics.binary_compatibility_pct:.1f}%", quiet)
+    _do_echo(f"Total binary compatibility problems: {metrics.breaking_count}, warnings: 0", quiet)
+    _do_echo(f"Verdict: {verdict}", quiet)
+    _do_echo(f"Report:  {report_path}", quiet)
+
+    if verdict == "BREAKING":
+        sys.exit(1)
+    if verdict == "API_BREAK":
+        sys.exit(2)
+
+
 # ── compat compare subcommand ─────────────────────────────────────────────────
 
 @compat_group.command("check")
@@ -1031,73 +1308,24 @@ def compat_check_cmd(  # noqa: PLR0913
         count_all_symbols=count_all_symbols,
     )
 
-    # ── Resolve relpath overrides ────────────────────────────────────────
-    old_relpath = relpath1 or relpath
-    new_relpath = relpath2 or relpath
+    # ── Resolve relpath overrides, detect Perl dumps, parse descriptors ──
+    old_d, new_d, _skip_headers_set = _load_compat_inputs(
+        old_desc, new_desc, relpath, relpath1, relpath2, skip_headers, quiet,
+    )
 
-    old_is_abicc_perl = is_abicc_perl_dump_file(old_desc)
-    new_is_abicc_perl = is_abicc_perl_dump_file(new_desc)
-    if old_is_abicc_perl or new_is_abicc_perl:
-        _do_echo(
-            "Info: ABICC Perl ABI.dump input detected. "
-            "Using migration-focused importer (full ABICC dump parity is not guaranteed). "
-            "Prefer abicheck JSON dumps for best fidelity.",
-            quiet,
-        )
-
-    old_d, new_d = _parse_compat_descriptors(old_desc, new_desc, old_relpath, new_relpath)
-    _skip_headers_set = _load_skip_headers(skip_headers)
-    if _skip_headers_set:
-        _do_echo(f"Applying -skip-headers: excluding {len(_skip_headers_set)} header(s).", quiet)
-
-    _logger = logging.getLogger("abicheck")
-    try:
-        # Activate log1 handler for old library analysis phase
-        if _log1_handler is not None:
-            _logger.addHandler(_log1_handler)
-        old_snap, old_version = _snapshot_from_compat_input(
-            old_d, vnum1, old_desc,
-            headers_list_path=headers_list_path,
-            single_header=single_header,
-            skip_headers_set=_skip_headers_set,
-            quiet=quiet,
-            gcc_path=gcc_path,
-            gcc_prefix=gcc_prefix,
-            gcc_options=gcc_options,
-            sysroot=sysroot,
-            nostdinc=nostdinc,
-            lang=lang,
-        )
-        if _log1_handler is not None:
-            _logger.removeHandler(_log1_handler)
-            _log1_handler.close()
-
-        # Activate log2 handler for new library analysis phase
-        if _log2_handler is not None:
-            _logger.addHandler(_log2_handler)
-        new_snap, new_version = _snapshot_from_compat_input(
-            new_d, vnum2, new_desc,
-            headers_list_path=headers_list_path,
-            single_header=single_header,
-            skip_headers_set=_skip_headers_set,
-            quiet=quiet,
-            gcc_path=gcc_path,
-            gcc_prefix=gcc_prefix,
-            gcc_options=gcc_options,
-            sysroot=sysroot,
-            nostdinc=nostdinc,
-            lang=lang,
-        )
-        if _log2_handler is not None:
-            _logger.removeHandler(_log2_handler)
-            _log2_handler.close()
-    except Exception as exc:  # noqa: BLE001
-        # Clean up phase handlers on error
-        if _log1_handler is not None:
-            _log1_handler.close()
-        if _log2_handler is not None:
-            _log2_handler.close()
-        _compat_fail("during dump", exc)
+    old_snap, old_version, new_snap, new_version = _take_snapshots_with_logging(
+        old_d, new_d, old_desc, new_desc, vnum1, vnum2, _log1_handler, _log2_handler,
+        headers_list_path=headers_list_path,
+        single_header=single_header,
+        skip_headers_set=_skip_headers_set,
+        quiet=quiet,
+        gcc_path=gcc_path,
+        gcc_prefix=gcc_prefix,
+        gcc_options=gcc_options,
+        sysroot=sysroot,
+        nostdinc=nostdinc,
+        lang=lang,
+    )
 
     if headers_only:
         _do_echo("Note: -headers-only is accepted — ELF/DWARF checks still run.", quiet)
@@ -1112,32 +1340,15 @@ def compat_check_cmd(  # noqa: PLR0913
     result = compare(old_snap, new_snap, suppression=suppression, policy="strict_abi")
 
     # ── Post-compare transforms ───────────────────────────────────────────
-
-    # -warn-newsym: treat new symbols as breaks
-    if warn_newsym:
-        result = _apply_warn_newsym(result)
-
-    # -limit-affected: cap reported changes per kind
-    if limit_affected > 0:
-        result = _limit_affected_changes(result, limit_affected)
-
-    # Save post-processed result before source filtering for split reports.
-    # -bin-report-path needs the full (non-source-filtered) result;
-    # -src-report-path derives from this via _filter_source_only.
-    full_result = result
-
-    # -source: filter to source/API breaks only (for primary report).
-    # -binary is the default mode and does NOT filter source-level changes
-    # from the primary report (matching ABICC semantics). _filter_binary_only
-    # is only used for -bin-report-path split reports.
-    if source_only and not binary_only:
-        result = _filter_source_only(result)
-
-    # -strict: treat COMPATIBLE and API_BREAK as BREAKING.
-    # Applied AFTER source filtering so that -source -strict --strict-mode api
-    # promotes the already-filtered verdict, not the pre-filter one.
-    if strict:
-        result = _apply_strict(result, mode=strict_mode)
+    result, full_result = _apply_result_transforms(
+        result,
+        warn_newsym=warn_newsym,
+        limit_affected=limit_affected,
+        source_only=source_only,
+        binary_only=binary_only,
+        strict=strict,
+        strict_mode=strict_mode,
+    )
 
     verdict = result.verdict.value if hasattr(result.verdict, "value") else str(result.verdict)
 
@@ -1145,99 +1356,30 @@ def compat_check_cmd(  # noqa: PLR0913
     if fmt.lower() == "htm":
         fmt = "html"
 
-    # ── Determine report output path ──────────────────────────────────────
-    if report_path is None:
-        ext = fmt.lower()
-        report_path = (
-            Path("compat_reports")
-            / _safe_path(lib_name)
-            / f"{_safe_path(old_version)}_to_{_safe_path(new_version)}"
-            / f"compat_report.{ext}"
-        )
-
-    try:
-        report_path.parent.mkdir(parents=True, exist_ok=True)
-    except OSError as exc:
-        _compat_fail("writing report output", exc)
-
     # Build effective title
     effective_title = title
     if component and not effective_title:
         effective_title = f"ABI Compatibility Report — {lib_name} ({component})"
 
-    # ── Generate report ──────────────────────────────────────────────────
-    def _generate_report(r: DiffResult, path: Path) -> None:
-        if fmt == "html":
-            write_html_report(
-                r, output_path=path,
-                lib_name=lib_name,
-                old_version=old_version, new_version=new_version,
-                old_symbol_count=r.old_symbol_count,
-                title=effective_title,
-                compat_html=compat_html,
-            )
-        elif fmt == "xml":
-            write_xml_report(
-                r, output_path=path,
-                lib_name=lib_name,
-                old_version=old_version, new_version=new_version,
-                old_symbol_count=r.old_symbol_count,
-                arch=arch or "",
-                compiler=_detect_compiler_version(gcc_path),
-            )
-        elif fmt == "json":
-            path.write_text(to_json(r), encoding="utf-8")
-        else:
-            path.write_text(to_markdown(r), encoding="utf-8")
+    # ── Determine report output path and write all reports ────────────────
+    report_path = _resolve_report_path_and_mkdir(report_path, lib_name, old_version, new_version, fmt, quiet)
 
-    # Write primary report
-    try:
-        _generate_report(result, report_path)
+    _write_all_reports(
+        result, full_result, report_path, bin_report_path, src_report_path,
+        list_affected=list_affected,
+        to_stdout=to_stdout,
+        quiet=quiet,
+        fmt=fmt,
+        lib_name=lib_name,
+        old_version=old_version,
+        new_version=new_version,
+        effective_title=effective_title,
+        compat_html=compat_html,
+        arch=arch,
+        gcc_path=gcc_path,
+    )
 
-        # -bin-report-path / -src-report-path: generate split reports
-        if bin_report_path:
-            bin_report_path.parent.mkdir(parents=True, exist_ok=True)
-            bin_result = _filter_binary_only(full_result)
-            _generate_report(bin_result, bin_report_path)
-            _do_echo(f"Binary report: {bin_report_path}", quiet)
-
-        if src_report_path:
-            src_report_path.parent.mkdir(parents=True, exist_ok=True)
-            src_result = _filter_source_only(full_result)
-            _generate_report(src_result, src_report_path)
-            _do_echo(f"Source report: {src_report_path}", quiet)
-
-        # -list-affected: write affected symbols to separate file
-        if list_affected:
-            affected_path = report_path.with_suffix(".affected.txt")
-            _write_affected_list(result, affected_path)
-            _do_echo(f"Affected symbols: {affected_path}", quiet)
-
-        if to_stdout:
-            click.echo(report_path.read_text(encoding="utf-8"))
-    except OSError as exc:
-        _compat_fail("writing report output", exc)
-
-    # Compute BC% for console output (matches ABICC console format)
-    from ..report_summary import compatibility_metrics  # noqa: PLC0415
-    metrics = compatibility_metrics(result.changes, result.old_symbol_count)
-    breaking_count = metrics.breaking_count
-    _bc_pct = metrics.binary_compatibility_pct
-
-    _do_echo(f"Binary compatibility: {_bc_pct:.1f}%", quiet)
-    _do_echo(f"Total binary compatibility problems: {breaking_count}, warnings: 0", quiet)
-    _do_echo(f"Verdict: {verdict}", quiet)
-    _do_echo(f"Report:  {report_path}", quiet)
-
-    # Exit codes mirror ABICC:
-    #   0 = NO_CHANGE, COMPATIBLE, or COMPATIBLE_WITH_RISK
-    #       (COMPATIBLE_WITH_RISK is binary-compatible; deployment risk surfaced in report only)
-    #   1 = BREAKING
-    #   2 = API_BREAK (source-level API break — recompilation required)
-    if verdict == "BREAKING":
-        sys.exit(1)
-    if verdict == "API_BREAK":
-        sys.exit(2)
+    _print_summary_and_exit(result, verdict, quiet, report_path)
 
 
 def _emit_compat_info_notes(

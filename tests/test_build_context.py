@@ -27,6 +27,8 @@ from abicheck.build_context import (
     _entry_matches_filter,
     _extract_flags,
     _std_sort_key,
+    _try_consume_define_undef,
+    _try_consume_sysroot,
     build_context_for_header,
     build_context_union_fallback,
     load_compile_db,
@@ -506,3 +508,141 @@ class TestPerHeaderMatching:
         ctx = build_context_for_header(entries, header)
         assert ctx.compile_db_path is not None
         assert ctx.compile_db_path.name == "compile_commands.json"
+
+
+# ---------------------------------------------------------------------------
+# Tests: Finding 1 — relative sysroot resolution (CodeRabbit PR #256)
+# ---------------------------------------------------------------------------
+
+
+class TestSysrootRelativeResolution:
+    """Relative --sysroot / -isysroot paths must resolve against the compile
+    entry's working directory, not the process CWD."""
+
+    def test_sysroot_combined_relative_resolves_against_directory(self) -> None:
+        """--sysroot=relative/path is resolved against the compile directory."""
+        directory = Path("/project/build")
+        ctx = _extract_flags(["--sysroot=relative/sysroot"], directory)
+        assert ctx.sysroot == Path("/project/build/relative/sysroot")
+
+    def test_sysroot_separate_relative_resolves_against_directory(self) -> None:
+        """--sysroot relative/path (split form) resolves against compile directory."""
+        directory = Path("/project/build")
+        ctx = _extract_flags(["--sysroot", "relative/sysroot"], directory)
+        assert ctx.sysroot == Path("/project/build/relative/sysroot")
+
+    def test_isysroot_relative_resolves_against_directory(self) -> None:
+        """-isysroot relative/path resolves against compile directory."""
+        directory = Path("/project/build")
+        ctx = _extract_flags(["-isysroot", "relative/sysroot"], directory)
+        assert ctx.sysroot == Path("/project/build/relative/sysroot")
+
+    def test_sysroot_absolute_kept_as_is(self) -> None:
+        """Absolute --sysroot paths are not modified."""
+        directory = Path("/project/build")
+        ctx = _extract_flags(["--sysroot=/opt/sysroot"], directory)
+        assert ctx.sysroot == Path("/opt/sysroot")
+
+    def test_sysroot_separate_absolute_kept_as_is(self) -> None:
+        """Absolute --sysroot path in split form is not modified."""
+        directory = Path("/project/build")
+        ctx = _extract_flags(["--sysroot", "/opt/sysroot"], directory)
+        assert ctx.sysroot == Path("/opt/sysroot")
+
+    def test_try_consume_sysroot_relative(self) -> None:
+        """_try_consume_sysroot helper resolves relative paths against directory."""
+        directory = Path("/build")
+        ctx = BuildContext()
+        new_i = _try_consume_sysroot("--sysroot=sdk", ["--sysroot=sdk"], 0, directory, ctx)
+        assert new_i == 1
+        assert ctx.sysroot == Path("/build/sdk")
+
+    def test_try_consume_sysroot_separate_relative(self) -> None:
+        """_try_consume_sysroot split form resolves relative paths against directory."""
+        directory = Path("/build")
+        ctx = BuildContext()
+        new_i = _try_consume_sysroot("--sysroot", ["--sysroot", "sdk"], 0, directory, ctx)
+        assert new_i == 2
+        assert ctx.sysroot == Path("/build/sdk")
+
+    def test_try_consume_sysroot_no_match(self) -> None:
+        """_try_consume_sysroot returns i unchanged when flag doesn't match."""
+        ctx = BuildContext()
+        new_i = _try_consume_sysroot("-I/inc", ["-I/inc"], 0, Path("/"), ctx)
+        assert new_i == 0
+        assert ctx.sysroot is None
+
+
+# ---------------------------------------------------------------------------
+# Tests: Finding 2 — split -D/-U forms (CodeRabbit PR #256)
+# ---------------------------------------------------------------------------
+
+
+class TestSplitDefineUndef:
+    """Split -D NAME and -U NAME forms must be captured, not silently dropped."""
+
+    def test_split_define_no_value(self) -> None:
+        """'-D NAME' (space-separated) captures the macro with no value."""
+        ctx = _extract_flags(["-D", "MY_MACRO"], Path("/"))
+        assert "MY_MACRO" in ctx.defines
+        assert ctx.defines["MY_MACRO"] is None
+
+    def test_split_define_with_value(self) -> None:
+        """'-D NAME=VALUE' (space-separated) captures macro and value."""
+        ctx = _extract_flags(["-D", "MY_MACRO=42"], Path("/"))
+        assert ctx.defines["MY_MACRO"] == "42"
+
+    def test_split_undef(self) -> None:
+        """'-U NAME' (space-separated) captures the macro in undefines."""
+        ctx = _extract_flags(["-U", "MY_MACRO"], Path("/"))
+        assert "MY_MACRO" in ctx.undefines
+
+    def test_split_define_mixed_with_combined(self) -> None:
+        """Split and combined define forms may appear in the same argument list."""
+        ctx = _extract_flags(["-DCOMBINED=1", "-D", "SPLIT=2"], Path("/"))
+        assert ctx.defines["COMBINED"] == "1"
+        assert ctx.defines["SPLIT"] == "2"
+
+    def test_split_undef_mixed_with_combined(self) -> None:
+        """Split and combined undef forms may appear in the same argument list."""
+        ctx = _extract_flags(["-UCOMBINED", "-U", "SPLIT"], Path("/"))
+        assert "COMBINED" in ctx.undefines
+        assert "SPLIT" in ctx.undefines
+
+    def test_split_define_at_end_of_args_ignored(self) -> None:
+        """'-D' at end of argument list (no following token) is silently skipped."""
+        ctx = _extract_flags(["-D"], Path("/"))
+        assert not ctx.defines
+
+    def test_split_undef_at_end_of_args_ignored(self) -> None:
+        """'-U' at end of argument list (no following token) is silently skipped."""
+        ctx = _extract_flags(["-U"], Path("/"))
+        assert not ctx.undefines
+
+    def test_try_consume_define_undef_combined_define(self) -> None:
+        """_try_consume_define_undef returns i+1 for combined -DNAME."""
+        ctx = BuildContext()
+        new_i = _try_consume_define_undef("-DFOO=1", ["-DFOO=1"], 0, ctx)
+        assert new_i == 1
+        assert ctx.defines["FOO"] == "1"
+
+    def test_try_consume_define_undef_split_define(self) -> None:
+        """_try_consume_define_undef returns i+2 for split -D NAME."""
+        ctx = BuildContext()
+        new_i = _try_consume_define_undef("-D", ["-D", "FOO=1"], 0, ctx)
+        assert new_i == 2
+        assert ctx.defines["FOO"] == "1"
+
+    def test_try_consume_define_undef_split_undef(self) -> None:
+        """_try_consume_define_undef returns i+2 for split -U NAME."""
+        ctx = BuildContext()
+        new_i = _try_consume_define_undef("-U", ["-U", "FOO"], 0, ctx)
+        assert new_i == 2
+        assert "FOO" in ctx.undefines
+
+    def test_try_consume_define_undef_no_match(self) -> None:
+        """_try_consume_define_undef returns i unchanged for non-define flags."""
+        ctx = BuildContext()
+        new_i = _try_consume_define_undef("-std=c++17", ["-std=c++17"], 0, ctx)
+        assert new_i == 0
+        assert not ctx.defines

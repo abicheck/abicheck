@@ -15,6 +15,7 @@
 """Suppression — load and apply suppression rules to ABI changes."""
 from __future__ import annotations
 
+import fnmatch
 import re
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
@@ -47,6 +48,133 @@ _TYPE_CHANGE_KINDS: frozenset[str] = frozenset({
     "typedef_removed", "typedef_base_changed",
     "struct_field_type_changed", "union_field_type_changed",
 })
+
+
+def _compile_pattern(pattern: str | None, field_name: str) -> re.Pattern[str] | None:
+    """Compile *pattern* as a regex, raising :class:`ValueError` on failure."""
+    if pattern is None:
+        return None
+    try:
+        return re.compile(pattern)
+    except re.error as e:
+        raise ValueError(f"Invalid {field_name} {pattern!r}: {e}") from e
+
+
+def _compile_glob(glob: str | None, field_name: str) -> re.Pattern[str] | None:
+    """Compile an fnmatch-style *glob* to a regex, raising :class:`ValueError` on failure."""
+    if glob is None:
+        return None
+    try:
+        return re.compile(fnmatch.translate(glob))
+    except re.error as e:
+        raise ValueError(f"Invalid {field_name} {glob!r}: {e}") from e
+
+
+def _validate_selectors(
+    has_symbol: bool,
+    has_sym_pattern: bool,
+    has_type_pattern: bool,
+    has_member_name: bool,
+    has_source_location: bool,
+    has_namespace: bool,
+) -> None:
+    """Raise :class:`ValueError` if the selector combination is invalid."""
+    selector_count = sum([has_symbol, has_sym_pattern, has_type_pattern])
+    if selector_count == 0 and not has_source_location and not has_member_name and not has_namespace:
+        raise ValueError(
+            "Suppression must have at least one of: "
+            "'symbol', 'symbol_pattern', 'type_pattern', "
+            "'member_name', 'source_location', or 'namespace'"
+        )
+    if selector_count > 1:
+        raise ValueError(
+            "Suppression fields 'symbol', 'symbol_pattern', and 'type_pattern' "
+            "are mutually exclusive — specify exactly one"
+        )
+    if has_member_name and (has_symbol or has_sym_pattern):
+        raise ValueError(
+            "'member_name' cannot be combined with 'symbol' or 'symbol_pattern' "
+            "(those already match the full symbol). Combine with 'type_pattern' "
+            "and/or 'change_kind' instead."
+        )
+
+
+def _ns_match(pat: re.Pattern[str], name: str | None) -> bool:
+    """Return True if *name* (or any of its namespace ancestors) matches *pat*.
+
+    Handles Itanium-mangled symbols by also trying the demangled form.
+    Template arguments are stripped before walking the ancestor chain.
+    """
+    if not name:
+        return False
+    from .demangle import demangle as _dm
+    from .internal_leak import _strip_template_args
+
+    forms: list[str] = [name]
+    if name.startswith("_Z"):
+        dm = _dm(name)
+        if dm:
+            forms.append(dm)
+    for form in forms:
+        candidate = _strip_template_args(form)
+        while True:
+            if pat.match(candidate):
+                return True
+            if "::" not in candidate:
+                break
+            candidate = candidate.rsplit("::", 1)[0]
+    return False
+
+
+def _matches_source_location(compiled: re.Pattern[str], change: Change) -> bool:
+    """Return False if *change*'s source path does not match *compiled*."""
+    src = change.source_location or ""
+    src_path = re.sub(r":\d+(?::\d+)?$", "", src)
+    return bool(compiled.match(src_path))
+
+
+def _matches_member_name(compiled: re.Pattern[str], change: Change) -> bool:
+    """Return True if the last ``::``-segment of ``change.symbol`` matches *compiled*."""
+    member = change.symbol.rsplit("::", 1)[-1] if change.symbol else ""
+    return bool(compiled.fullmatch(member))
+
+
+def _matches_namespace(compiled: re.Pattern[str], change: Change) -> bool:
+    """Return True if any of symbol/caused_by_type/qualified_name lies in the namespace."""
+    return (
+        _ns_match(compiled, change.symbol)
+        or _ns_match(compiled, change.caused_by_type)
+        or _ns_match(compiled, change.qualified_name)
+    )
+
+
+def _matches_type_pattern(
+    compiled: re.Pattern[str],
+    change_kind_filter: str | None,
+    change: Change,
+) -> bool:
+    """Return True if *change* is a type-level change matching *compiled*."""
+    if change.kind.value not in _TYPE_CHANGE_KINDS:
+        return False
+    match_symbol = change.symbol.rsplit("::", 1)[0] if "::" in change.symbol else change.symbol
+    if not compiled.fullmatch(match_symbol):
+        return False
+    if change_kind_filter is not None and change.kind.value != change_kind_filter:
+        return False
+    return True
+
+
+def _matches_symbol(
+    symbol: str | None,
+    compiled_pattern: re.Pattern[str] | None,
+    change: Change,
+) -> bool:
+    """Return True if *change.symbol* satisfies the symbol/symbol_pattern selector."""
+    if symbol is not None:
+        return change.symbol == symbol
+    if compiled_pattern is not None:
+        return bool(compiled_pattern.fullmatch(change.symbol))
+    return True
 
 
 @dataclass
@@ -88,89 +216,29 @@ class Suppression:
     _compiled_namespace_pattern: re.Pattern[str] | None = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
-        has_symbol = self.symbol is not None
-        has_sym_pattern = self.symbol_pattern is not None
-        has_type_pattern = self.type_pattern is not None
-        has_member_name = self.member_name is not None
-        has_source_location = self.source_location is not None
-        has_namespace = self.namespace is not None
-
-        selector_count = sum([has_symbol, has_sym_pattern, has_type_pattern])
-        if (
-            selector_count == 0
-            and not has_source_location
-            and not has_member_name
-            and not has_namespace
-        ):
-            raise ValueError(
-                "Suppression must have at least one of: "
-                "'symbol', 'symbol_pattern', 'type_pattern', "
-                "'member_name', 'source_location', or 'namespace'"
-            )
-        if selector_count > 1:
-            raise ValueError(
-                "Suppression fields 'symbol', 'symbol_pattern', and 'type_pattern' "
-                "are mutually exclusive — specify exactly one"
-            )
-        if has_member_name and (has_symbol or has_sym_pattern):
-            raise ValueError(
-                "'member_name' cannot be combined with 'symbol' or 'symbol_pattern' "
-                "(those already match the full symbol). Combine with 'type_pattern' "
-                "and/or 'change_kind' instead."
-            )
+        _validate_selectors(
+            has_symbol=self.symbol is not None,
+            has_sym_pattern=self.symbol_pattern is not None,
+            has_type_pattern=self.type_pattern is not None,
+            has_member_name=self.member_name is not None,
+            has_source_location=self.source_location is not None,
+            has_namespace=self.namespace is not None,
+        )
         # Compile regex eagerly — malformed patterns fail at load time, not match time.
         # Uses fullmatch semantics: the pattern must match the entire symbol name.
         # Use explicit '.*' anchors in the pattern if partial matching is intended.
-        if self.symbol_pattern is not None:
-            try:
-                self._compiled_pattern = re.compile(self.symbol_pattern)
-            except re.error as e:
-                raise ValueError(
-                    f"Invalid symbol_pattern {self.symbol_pattern!r}: {e}"
-                ) from e
-        if self.type_pattern is not None:
-            try:
-                self._compiled_type_pattern = re.compile(self.type_pattern)
-            except re.error as e:
-                raise ValueError(
-                    f"Invalid type_pattern {self.type_pattern!r}: {e}"
-                ) from e
-        if self.member_name is not None:
-            try:
-                self._compiled_member_pattern = re.compile(self.member_name)
-            except re.error as e:
-                raise ValueError(
-                    f"Invalid member_name {self.member_name!r}: {e}"
-                ) from e
-        if self.source_location is not None:
-            # Convert fnmatch-style glob to regex for flexibility
-            import fnmatch
-            try:
-                self._compiled_source_pattern = re.compile(
-                    fnmatch.translate(self.source_location)
-                )
-            except re.error as e:
-                raise ValueError(
-                    f"Invalid source_location {self.source_location!r}: {e}"
-                ) from e
-        if self.namespace is not None:
-            import fnmatch as _fn
-            try:
-                self._compiled_namespace_pattern = re.compile(
-                    _fn.translate(self.namespace)
-                )
-            except re.error as e:
-                raise ValueError(
-                    f"Invalid namespace {self.namespace!r}: {e}"
-                ) from e
+        self._compiled_pattern = _compile_pattern(self.symbol_pattern, "symbol_pattern")
+        self._compiled_type_pattern = _compile_pattern(self.type_pattern, "type_pattern")
+        self._compiled_member_pattern = _compile_pattern(self.member_name, "member_name")
+        self._compiled_source_pattern = _compile_glob(self.source_location, "source_location")
+        self._compiled_namespace_pattern = _compile_glob(self.namespace, "namespace")
         # Validate change_kind against known enum values
-        if self.change_kind is not None:
-            if self.change_kind not in _VALID_CHANGE_KINDS:
-                valid = ", ".join(sorted(_VALID_CHANGE_KINDS))
-                raise ValueError(
-                    f"Unknown change_kind {self.change_kind!r}. "
-                    f"Valid values: {valid}"
-                )
+        if self.change_kind is not None and self.change_kind not in _VALID_CHANGE_KINDS:
+            valid = ", ".join(sorted(_VALID_CHANGE_KINDS))
+            raise ValueError(
+                f"Unknown change_kind {self.change_kind!r}. "
+                f"Valid values: {valid}"
+            )
 
     def is_expired(self, today: date | None = None) -> bool:
         """Return True if this suppression has passed its expiry date."""
@@ -198,99 +266,37 @@ class Suppression:
         if self.is_expired(today):
             return False
 
-        # source_location: match against change.source_location if present
+        # source_location: match against change.source_location if present.
+        # Fall through to check remaining selectors conjunctively (AND logic).
         if self._compiled_source_pattern is not None:
-            src = change.source_location or ""
-            # source_location is usually "path:line[:col]"; match glob against path only.
-            src_path = re.sub(r":\d+(?::\d+)?$", "", src)
-            if not self._compiled_source_pattern.match(src_path):
+            if not _matches_source_location(self._compiled_source_pattern, change):
                 return False
-            # Fall through to check remaining selectors conjunctively (AND logic)
 
         # member_name: fullmatch the last "::"-segment of change.symbol.
         # Applied conjunctively so it can combine with type_pattern / change_kind.
         if self._compiled_member_pattern is not None:
-            member = change.symbol.rsplit("::", 1)[-1] if change.symbol else ""
-            if not self._compiled_member_pattern.fullmatch(member):
+            if not _matches_member_name(self._compiled_member_pattern, change):
                 return False
 
         # namespace: match the ``::``-joined namespace prefix of either the
-        # change's symbol or its caused_by_type. This is the selector users
-        # need for frozen-namespace-style suppressions (e.g. "ignore
-        # everything inside detail::r1") without listing each symbol
-        # individually. We also try the demangled form when the input
-        # appears to be an Itanium-mangled symbol, so users don't have to
-        # write mangled-name globs.
+        # change's symbol or its caused_by_type. Fall through (AND logic with
+        # other selectors); the change-kind filter (if any) still applies below.
         if self._compiled_namespace_pattern is not None:
-            from .demangle import demangle as _dm
-            from .internal_leak import _strip_template_args
-
-            pat = self._compiled_namespace_pattern
-
-            def _ns_match(name: str | None) -> bool:
-                if not name:
-                    return False
-                forms = [name]
-                if name.startswith("_Z"):
-                    dm = _dm(name)
-                    if dm:
-                        forms.append(dm)
-                for form in forms:
-                    # Walk every ancestor prefix so a glob like
-                    # ``**::detail::r1`` matches both immediate children
-                    # (``ns::detail::r1::foo``) and deeper descendants
-                    # (``ns::detail::r1::sub::foo``).
-                    candidate = _strip_template_args(form)
-                    while True:
-                        if pat.match(candidate):
-                            return True
-                        if "::" not in candidate:
-                            break
-                        candidate = candidate.rsplit("::", 1)[0]
+            if not _matches_namespace(self._compiled_namespace_pattern, change):
                 return False
 
-            if not (
-                _ns_match(change.symbol)
-                or _ns_match(change.caused_by_type)
-                or _ns_match(change.qualified_name)
-            ):
-                return False
-            # Fall through (AND logic with other selectors), but if no other
-            # selectors are present the change-kind filter (if any) still
-            # applies below.
-
-
-        # type_pattern: only matches type-level changes
+        # type_pattern: only matches type-level changes (TYPE_*, ENUM_*, TYPEDEF_*, …).
+        # Returns early (True/False) because type_pattern is a primary selector.
         if self._compiled_type_pattern is not None:
-            if change.kind.value not in _TYPE_CHANGE_KINDS:
-                return False
-            # For member-qualified symbols (e.g. "Color::GREEN"), match the
-            # type name prefix so type_pattern: "Color" still works.
-            # For member-qualified symbols like "Color::GREEN", strip the
-            # member suffix.  Use rsplit so namespaced types ("ns::Color::GREEN")
-            # keep everything except the last component → "ns::Color".
-            match_symbol = change.symbol.rsplit("::", 1)[0] if "::" in change.symbol else change.symbol
-            if not self._compiled_type_pattern.fullmatch(match_symbol):
-                return False
-            # Check change_kind filter if specified
-            if self.change_kind is not None and change.kind.value != self.change_kind:
-                return False
-            return True
+            return _matches_type_pattern(self._compiled_type_pattern, self.change_kind, change)
 
         # Check symbol match
-        if self.symbol is not None:
-            if change.symbol != self.symbol:
-                return False
-        elif self._compiled_pattern is not None:
-            # fullmatch: pattern must cover the complete symbol, preventing
-            # accidental over-suppression from short patterns.
-            if not self._compiled_pattern.fullmatch(change.symbol):
-                return False
+        if not _matches_symbol(self.symbol, self._compiled_pattern, change):
+            return False
 
         # Check change_kind match (if specified)
-        if self.change_kind is not None:
-            if change.kind.value != self.change_kind:
-                return False
+        if self.change_kind is not None and change.kind.value != self.change_kind:
+            return False
 
         return True
 

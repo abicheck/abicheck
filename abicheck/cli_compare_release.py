@@ -26,6 +26,7 @@ import sys
 import tempfile
 from collections.abc import Callable
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import click
 
@@ -44,6 +45,9 @@ from .cli import (
 )
 from .model import AbiSnapshot
 from .reporter import to_json
+
+if TYPE_CHECKING:
+    from .package import PackageExtractor
 
 # ---------------------------------------------------------------------------
 # compare-release helpers
@@ -564,6 +568,177 @@ def _write_release_summary_file(
     click.echo(f"Per-library reports written to {output_dir}/", err=True)
 
 
+def _extract_if_package(
+    input_path: Path,
+    debug_pkg: Path | None,
+    devel_pkg: Path | None,
+    make_temp_dir: Callable[[str], Path],
+    is_package: Callable[[Path], bool],
+    detect_extractor: Callable[[Path], PackageExtractor | None],
+) -> tuple[Path, Path | None, Path | None]:
+    """Extract package to tempdir if needed, return (lib_dir, debug_dir, header_dir).
+
+    When *input_path* is a plain directory (not a package archive), it is used
+    as-is for lib_dir.  Side packages (*debug_pkg*, *devel_pkg*) are still
+    extracted in that case so that standalone debug/devel packages paired with
+    an already-extracted directory are not silently ignored.
+    """
+    # Default: treat input_path as an already-extracted library directory.
+    lib_dir: Path = input_path
+    debug_dir: Path | None = None
+    header_dir: Path | None = None
+
+    if is_package(input_path):
+        extractor = detect_extractor(input_path)
+        if extractor is None:
+            raise click.ClickException(f"Unrecognized package format: {input_path}")
+        target = make_temp_dir("abicheck_pkg_")
+        result = extractor.extract(input_path, target)
+        lib_dir = result.lib_dir
+        debug_dir = result.debug_dir
+        header_dir = result.header_dir
+
+    if debug_pkg is not None:
+        dbg_ext = detect_extractor(debug_pkg)
+        if dbg_ext is None:
+            raise click.ClickException(f"Unrecognized debug package format: {debug_pkg}")
+        dbg_target = make_temp_dir("abicheck_dbg_")
+        dbg_result = dbg_ext.extract(debug_pkg, dbg_target)
+        debug_dir = dbg_result.debug_dir or dbg_result.lib_dir
+
+    if devel_pkg is not None:
+        dev_ext = detect_extractor(devel_pkg)
+        if dev_ext is None:
+            raise click.ClickException(f"Unrecognized devel package format: {devel_pkg}")
+        dev_target = make_temp_dir("abicheck_dev_")
+        dev_result = dev_ext.extract(devel_pkg, dev_target)
+        header_dir = dev_result.header_dir or dev_result.lib_dir
+
+    return lib_dir, debug_dir, header_dir
+
+
+def _collect_bundle_result(
+    library_results: list[dict[str, object]],
+    old_map: dict[str, Path],
+    new_map: dict[str, Path],
+    worst_verdict: str,
+    manifest_path: Path | None,
+    bundle_system_providers: str,
+) -> tuple[BundleDiffResult | None, str]:
+    """Extract stashed DiffResults, run bundle analysis, update worst verdict."""
+    stashed_diffs: list[DiffResult] = []
+    for entry in library_results:
+        diff = entry.get("_diff_result") if isinstance(entry, dict) else None
+        if isinstance(diff, DiffResult):
+            stashed_diffs.append(diff)
+    bundle_result = _run_bundle_analysis(
+        old_map, new_map, stashed_diffs,
+        manifest_path=manifest_path,
+        bundle_system_providers=bundle_system_providers,
+    )
+    if bundle_result is not None:
+        bv = bundle_result.bundle_verdict.value
+        if _RELEASE_VERDICT_ORDER.get(bv, 0) > _RELEASE_VERDICT_ORDER.get(worst_verdict, 0):
+            worst_verdict = bv
+    return bundle_result, worst_verdict
+
+
+def _cleanup_temp_dirs(temp_dir_paths: list[str], keep_extracted: bool) -> None:
+    """Remove or report temporary directories created during package extraction."""
+    import shutil as _shutil
+
+    if not keep_extracted:
+        for td_path in temp_dir_paths:
+            _shutil.rmtree(td_path, ignore_errors=True)
+    elif temp_dir_paths:
+        kept_paths = ", ".join(temp_dir_paths)
+        click.echo(f"Extracted files kept in: {kept_paths}", err=True)
+
+
+def _finalize_release_output(
+    fmt: str,
+    worst_verdict: str,
+    old_dir: Path,
+    new_dir: Path,
+    library_results: list[dict[str, object]],
+    removed_keys: list[str],
+    added_keys: list[str],
+    old_map: dict[str, Path],
+    new_map: dict[str, Path],
+    warning_msgs: list[str],
+    diff_pairs: list[tuple[DiffResult, AbiSnapshot]],
+    bundle_result: BundleDiffResult | None,
+    output: Path | None,
+    output_dir: Path | None,
+    annotate: bool,
+    fail_on_removed: bool,
+) -> None:
+    """Write summary output, step summary, per-library dir report, then exit."""
+    text = _format_release_summary(
+        fmt, worst_verdict, old_dir, new_dir,
+        library_results, removed_keys, added_keys,
+        old_map, new_map, warning_msgs,
+        diff_pairs=diff_pairs if fmt == "junit" else None,
+        bundle_result=bundle_result,
+    )
+    _write_or_echo(output, text)
+
+    if annotate:
+        _write_release_step_summary(text, fmt)
+
+    if output_dir:
+        _write_release_summary_file(
+            output_dir, worst_verdict, library_results,
+            removed_keys, added_keys, old_map, new_map,
+        )
+
+    _exit_compare_release(worst_verdict, fail_on_removed, removed_keys)
+
+
+def _validate_suppression_early(
+    suppress: Path | None,
+    policy: str,
+    policy_file_path: Path | None,
+    strict_suppressions: bool,
+    require_justification: bool,
+) -> None:
+    """Load and validate the suppression file before entering the per-library loop.
+
+    Only invoked when the user passes a suppression file together with
+    *strict_suppressions* or *require_justification*, so that stale or
+    undocumented rules are rejected before any expensive per-library work.
+    """
+    if suppress is not None and (strict_suppressions or require_justification):
+        _load_suppression_and_policy(
+            suppress, policy, policy_file_path,
+            strict_suppressions=strict_suppressions,
+            require_justification=require_justification,
+        )
+
+
+def _strip_diff_results_and_adjust_verdict(
+    library_results: list[dict[str, object]],
+    removed_keys: list[str],
+    worst_verdict: str,
+) -> str:
+    """Remove un-serialisable ``_diff_result`` entries and adjust the worst verdict.
+
+    After bundle analysis the stashed :class:`DiffResult` objects are no
+    longer needed.  Stripping them here keeps the summary formatter free of
+    any Python-only objects.  Additionally, if any library was *removed*
+    from the release and the verdict has not already been escalated, the
+    verdict is bumped to at least ``COMPATIBLE_WITH_RISK``.
+
+    Returns the (possibly updated) *worst_verdict* string.
+    """
+    for entry in library_results:
+        if isinstance(entry, dict):
+            entry.pop("_diff_result", None)
+    if removed_keys and _RELEASE_VERDICT_ORDER.get(worst_verdict, 0) < _RELEASE_VERDICT_ORDER.get("COMPATIBLE_WITH_RISK", 0):
+        worst_verdict = "COMPATIBLE_WITH_RISK"
+    return worst_verdict
+
+
 @main.command("compare-release")
 @click.argument("old_dir", type=click.Path(exists=True, path_type=Path))
 @click.argument("new_dir", type=click.Path(exists=True, path_type=Path))
@@ -719,73 +894,29 @@ def compare_release_cmd(
     _temp_dir_paths: list[str] = []
 
     def _make_temp_dir(prefix: str) -> Path:
-        """Create a temporary directory, tracking it for later cleanup."""
         path = tempfile.mkdtemp(prefix=prefix)
         _temp_dir_paths.append(path)
         return Path(path)
 
-    def _extract_if_package(
-        input_path: Path,
-        debug_pkg: Path | None,
-        devel_pkg: Path | None,
-    ) -> tuple[Path, Path | None, Path | None]:
-        """Extract package to tempdir if needed, return (lib_dir, debug_dir, header_dir)."""
-        if not is_package(input_path):
-            return input_path, None, None
-
-        extractor = detect_extractor(input_path)
-        if extractor is None:
-            raise click.ClickException(f"Unrecognized package format: {input_path}")
-
-        target = _make_temp_dir("abicheck_pkg_")
-
-        result = extractor.extract(input_path, target)
-        lib_dir = result.lib_dir
-        debug_dir = result.debug_dir
-        header_dir = result.header_dir
-
-        # Extract debug info package if provided
-        if debug_pkg is not None:
-            dbg_ext = detect_extractor(debug_pkg)
-            if dbg_ext is None:
-                raise click.ClickException(f"Unrecognized debug package format: {debug_pkg}")
-            dbg_target = _make_temp_dir("abicheck_dbg_")
-            dbg_result = dbg_ext.extract(debug_pkg, dbg_target)
-            debug_dir = dbg_result.lib_dir
-
-        # Extract devel package if provided
-        if devel_pkg is not None:
-            dev_ext = detect_extractor(devel_pkg)
-            if dev_ext is None:
-                raise click.ClickException(f"Unrecognized devel package format: {devel_pkg}")
-            dev_target = _make_temp_dir("abicheck_dev_")
-            dev_result = dev_ext.extract(devel_pkg, dev_target)
-            header_dir = dev_result.lib_dir
-
-        return lib_dir, debug_dir, header_dir
+    def _do_extract(input_path: Path, debug_pkg: Path | None, devel_pkg: Path | None) -> tuple[Path, Path | None, Path | None]:
+        return _extract_if_package(input_path, debug_pkg, devel_pkg, _make_temp_dir, is_package, detect_extractor)
 
     # Validate suppression file early (before per-library loop)
-    if suppress is not None and (strict_suppressions or require_justification):
-        _load_suppression_and_policy(
-            suppress, policy, policy_file_path,
-            strict_suppressions=strict_suppressions,
-            require_justification=require_justification,
-        )
+    _validate_suppression_early(suppress, policy, policy_file_path, strict_suppressions, require_justification)
 
     try:
-        prep = _prepare_compare_release_inputs(
-            old_dir, new_dir,
-            debug_info1, debug_info2, devel_pkg1, devel_pkg2,
-            include_private_dso, dso_only,
-            headers, old_headers_only, new_headers_only, includes,
-            _extract_if_package, discover_shared_libraries, is_package, _is_elf_shared_object,
-        )
         (
             old_debug_dir, new_debug_dir,
             old_h, new_h, old_inc, new_inc,
             old_map, new_map, warning_msgs,
             matched_keys, removed_keys, added_keys,
-        ) = prep
+        ) = _prepare_compare_release_inputs(
+            old_dir, new_dir,
+            debug_info1, debug_info2, devel_pkg1, devel_pkg2,
+            include_private_dso, dso_only,
+            headers, old_headers_only, new_headers_only, includes,
+            _do_extract, discover_shared_libraries, is_package, _is_elf_shared_object,
+        )
 
         if fmt != "json":
             for msg in warning_msgs:
@@ -794,7 +925,6 @@ def compare_release_cmd(
         if output_dir:
             output_dir.mkdir(parents=True, exist_ok=True)
 
-        bundle_enabled = not no_bundle_analysis
         # JUnit still re-runs pairs in _collect_release_extras because it
         # needs old AbiSnapshot too. Bundle analysis reuses the
         # _diff_result stashed in each library entry from the first pass.
@@ -811,67 +941,26 @@ def compare_release_cmd(
             jobs=jobs,
         )
 
-        bundle_result = None
-        if bundle_enabled:
-            # Pull the per-library DiffResults out of the entries (stashed
-            # by _compare_one_library) and feed them into the bundle layer
-            # without re-running the per-library compare.
-            stashed_diffs: list[DiffResult] = []
-            for entry in library_results:
-                diff = entry.get("_diff_result") if isinstance(entry, dict) else None
-                if isinstance(diff, DiffResult):
-                    stashed_diffs.append(diff)
-            bundle_result = _run_bundle_analysis(
-                old_map, new_map, stashed_diffs,
+        bundle_result: BundleDiffResult | None = None
+        if not no_bundle_analysis:
+            bundle_result, worst_verdict = _collect_bundle_result(
+                library_results, old_map, new_map, worst_verdict,
                 manifest_path=manifest_path,
                 bundle_system_providers=bundle_system_providers,
             )
-            if bundle_result is not None:
-                bv = bundle_result.bundle_verdict.value
-                if _RELEASE_VERDICT_ORDER.get(bv, 0) > _RELEASE_VERDICT_ORDER.get(worst_verdict, 0):
-                    worst_verdict = bv
 
-        # Strip _diff_result from entries before they leave this scope —
-        # it's a Python object that can't be JSON-serialised and the
-        # summary formatter doesn't need it.
-        for entry in library_results:
-            if isinstance(entry, dict):
-                entry.pop("_diff_result", None)
+        # Strip _diff_result from entries and bump verdict for removed libraries.
+        worst_verdict = _strip_diff_results_and_adjust_verdict(library_results, removed_keys, worst_verdict)
 
-        if removed_keys and _RELEASE_VERDICT_ORDER.get(worst_verdict, 0) < _RELEASE_VERDICT_ORDER.get("COMPATIBLE_WITH_RISK", 0):
-            worst_verdict = "COMPATIBLE_WITH_RISK"
-
-        text = _format_release_summary(
+        _finalize_release_output(
             fmt, worst_verdict, old_dir, new_dir,
             library_results, removed_keys, added_keys,
             old_map, new_map, warning_msgs,
-            diff_pairs=diff_pairs if fmt == "junit" else None,
-            bundle_result=bundle_result,
+            diff_pairs, bundle_result,
+            output, output_dir, annotate, fail_on_removed,
         )
-        _write_or_echo(output, text)
-
-        # Write a single step summary for the entire release comparison.
-        if annotate:
-            _write_release_step_summary(text, fmt)
-
-        if output_dir:
-            _write_release_summary_file(
-                output_dir, worst_verdict, library_results,
-                removed_keys, added_keys, old_map, new_map,
-            )
-
-        _exit_compare_release(worst_verdict, fail_on_removed, removed_keys)
     finally:
-        import shutil as _shutil
-        if not keep_extracted:
-            for td_path in _temp_dir_paths:
-                _shutil.rmtree(td_path, ignore_errors=True)
-        elif _temp_dir_paths:
-            kept_paths = ", ".join(_temp_dir_paths)
-            click.echo(
-                f"Extracted files kept in: {kept_paths}",
-                err=True,
-            )
+        _cleanup_temp_dirs(_temp_dir_paths, keep_extracted)
 
 
 def _prepare_compare_release_inputs(

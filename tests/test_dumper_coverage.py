@@ -23,6 +23,7 @@ from abicheck.dumper import (
     _CastxmlParser,
     dump,
 )
+from abicheck.elf_metadata import ElfMetadata
 
 # ── _castxml_dump internal branches ────────────────────────────────────
 
@@ -189,7 +190,7 @@ class TestDumpSymbolFiltering:
             "abicheck.dumper._pyelftools_exported_symbols",
             lambda _p: (set(), set()),
         )
-        monkeypatch.setattr("abicheck.elf_metadata.parse_elf_metadata", lambda _p: None)
+        monkeypatch.setattr("abicheck.elf_metadata.parse_elf_metadata", lambda _p: ElfMetadata())
         monkeypatch.setattr("abicheck.dwarf_metadata.parse_dwarf_metadata", lambda _p: None)
         monkeypatch.setattr("abicheck.dwarf_advanced.parse_advanced_dwarf", lambda _p: None)
 
@@ -208,7 +209,7 @@ class TestDumpSymbolFiltering:
             "abicheck.dumper._pyelftools_exported_symbols",
             lambda _p: (set(), set()),
         )
-        monkeypatch.setattr("abicheck.elf_metadata.parse_elf_metadata", lambda _p: None)
+        monkeypatch.setattr("abicheck.elf_metadata.parse_elf_metadata", lambda _p: ElfMetadata())
         monkeypatch.setattr("abicheck.dwarf_metadata.parse_dwarf_metadata", lambda _p: None)
         monkeypatch.setattr("abicheck.dwarf_advanced.parse_advanced_dwarf", lambda _p: None)
 

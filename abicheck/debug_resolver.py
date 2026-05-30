@@ -532,6 +532,74 @@ class DebuginfodResolver:
             return Path(xdg) / "abicheck" / "debuginfod"
         return Path.home() / ".cache" / "abicheck" / "debuginfod"
 
+    def _url_allowed(self, url: str) -> bool:
+        """Return True if *url* is permitted under the current security policy."""
+        scheme = urlparse(url).scheme.lower()
+        if scheme == "https":
+            return True
+        if scheme == "http" and self._allow_insecure:
+            return True
+        _logger.warning(
+            "Skipping debuginfod URL %s (scheme %r not allowed; "
+            "only https is accepted by default, use "
+            "--debuginfod-allow-insecure to also allow http)",
+            url, scheme,
+        )
+        return False
+
+    def _fetch_data(self, fetch_url: str) -> bytes | None:
+        """Download *fetch_url* and return raw bytes, or None on failure/oversize."""
+        resp = self._safe_urlopen(fetch_url)
+        with resp:
+            if resp.status != 200:
+                return None
+            data = resp.read(_MAX_DEBUGINFOD_SIZE + 1)
+        if len(data) > _MAX_DEBUGINFOD_SIZE:
+            _logger.warning(
+                "Debuginfod response exceeds %d MiB limit, skipping",
+                _MAX_DEBUGINFOD_SIZE // (1024 * 1024),
+            )
+            return None
+        return data
+
+    def _atomic_cache_write(self, dest: Path, data: bytes) -> None:
+        """Write *data* to *dest* atomically via a temp file."""
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp_path = tempfile.mkstemp(dir=dest.parent)
+        try:
+            os.write(fd, data)
+            os.close(fd)
+            fd = -1  # mark as closed
+            os.replace(tmp_path, str(dest))
+        except BaseException:
+            if fd >= 0:
+                os.close(fd)
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
+
+    def _fetch_one_url(self, url: str, build_id: str, cached: Path) -> DebugArtifact | None:
+        """Try to fetch debug info for *build_id* from *url*; return artifact or None."""
+        if not self._url_allowed(url):
+            return None
+        fetch_url = f"{url}/buildid/{build_id}/debuginfo"
+        _logger.info("Fetching debug info from %s", fetch_url)
+        try:
+            data = self._fetch_data(fetch_url)
+            if data is None:
+                return None
+            if len(data) < 16 or data[:4] != b"\x7fELF":
+                _logger.warning("Downloaded file is not valid ELF: %s", fetch_url)
+                return None
+            self._atomic_cache_write(cached, data)
+            _logger.info("Downloaded and cached debug info: %s", cached)
+            return DebugArtifact(dwarf_path=cached, source=f"debuginfod ({url})")
+        except (OSError, ValueError) as exc:
+            _logger.debug("debuginfod fetch failed from %s: %s", url, exc)
+            return None
+
     def resolve(
         self,
         binary_path: Path,
@@ -554,70 +622,11 @@ class DebuginfodResolver:
             _logger.debug("debuginfod cache hit: %s", cached)
             return DebugArtifact(dwarf_path=cached, source="debuginfod (cached)")
 
-        # Fetch from server
+        # Fetch from each configured server in order
         for url in self._urls:
-            url = url.rstrip("/")
-            scheme = urlparse(url).scheme.lower()
-            if scheme == "https":
-                pass  # always allowed
-            elif scheme == "http" and self._allow_insecure:
-                pass  # allowed with explicit opt-in
-            else:
-                _logger.warning(
-                    "Skipping debuginfod URL %s (scheme %r not allowed; "
-                    "only https is accepted by default, use "
-                    "--debuginfod-allow-insecure to also allow http)",
-                    url, scheme,
-                )
-                continue
-
-            fetch_url = f"{url}/buildid/{build_id}/debuginfo"
-            _logger.info("Fetching debug info from %s", fetch_url)
-
-            try:
-                resp = self._safe_urlopen(fetch_url)
-                with resp:
-                    if resp.status != 200:
-                        continue
-                    # Read with size limit to prevent memory exhaustion
-                    data = resp.read(_MAX_DEBUGINFOD_SIZE + 1)
-                    if len(data) > _MAX_DEBUGINFOD_SIZE:
-                        _logger.warning(
-                            "Debuginfod response exceeds %d MiB limit, skipping",
-                            _MAX_DEBUGINFOD_SIZE // (1024 * 1024),
-                        )
-                        continue
-
-                # Validate ELF magic
-                if len(data) < 16 or data[:4] != b"\x7fELF":
-                    _logger.warning("Downloaded file is not valid ELF: %s", fetch_url)
-                    continue
-
-                # Atomic cache write: write to temp file then replace
-                cached.parent.mkdir(parents=True, exist_ok=True)
-                fd, tmp_path = tempfile.mkstemp(dir=cached.parent)
-                try:
-                    os.write(fd, data)
-                    os.close(fd)
-                    fd = -1  # mark as closed
-                    os.replace(tmp_path, str(cached))
-                except BaseException:
-                    if fd >= 0:
-                        os.close(fd)
-                    try:
-                        os.unlink(tmp_path)
-                    except OSError:
-                        pass
-                    raise
-
-                _logger.info("Downloaded and cached debug info: %s", cached)
-                return DebugArtifact(
-                    dwarf_path=cached,
-                    source=f"debuginfod ({url})",
-                )
-            except (OSError, ValueError) as exc:
-                _logger.debug("debuginfod fetch failed from %s: %s", url, exc)
-                continue
+            artifact = self._fetch_one_url(url.rstrip("/"), build_id, cached)
+            if artifact is not None:
+                return artifact
 
         return None
 

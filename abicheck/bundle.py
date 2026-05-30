@@ -44,6 +44,7 @@ import logging
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import cast
 
 from .checker_policy import ChangeKind, Verdict, compute_verdict
 from .checker_types import Change, DiffResult
@@ -335,6 +336,92 @@ def _expand_instantiations(template: str, instantiations: tuple[dict[str, str], 
     return expanded
 
 
+def _load_manifest_data(path: Path) -> dict[str, object]:
+    """Read and parse YAML or JSON manifest file; validate top-level shape."""
+    import json
+
+    text = path.read_text(encoding="utf-8")
+    if path.suffix.lower() in (".yaml", ".yml"):
+        import yaml
+        data = yaml.safe_load(text)
+    else:
+        data = json.loads(text)
+    if not isinstance(data, dict) or not isinstance(data.get("provides"), list):
+        raise ValueError(f"manifest {path}: missing top-level 'provides:' list")
+    return cast("dict[str, object]", data)
+
+
+def _validate_manifest_entry_shape(path: Path, raw: dict[str, object]) -> str:
+    """Validate that *raw* has exactly one of symbol/pattern/template; return it."""
+    shape_keys = [k for k in ("symbol", "pattern", "template") if k in raw]
+    if len(shape_keys) == 0:
+        raise ValueError(
+            f"manifest {path}: entry must have one of 'symbol', "
+            f"'pattern', or 'template': {raw!r}",
+        )
+    if len(shape_keys) > 1:
+        raise ValueError(
+            f"manifest {path}: entry has conflicting fields "
+            f"{shape_keys!r}; pick exactly one: {raw!r}",
+        )
+    return shape_keys[0]
+
+
+def _parse_template_instantiations(path: Path, raw: dict[str, object]) -> tuple[dict[str, str], ...]:
+    """Parse and coerce the 'instantiations' list from a template entry."""
+    insts_raw = raw.get("instantiations", [])
+    if not isinstance(insts_raw, list) or not insts_raw:
+        raise ValueError(
+            f"manifest {path}: template entry needs a non-empty "
+            f"'instantiations:' list: {raw!r}",
+        )
+    insts: list[dict[str, str]] = []
+    for inst in insts_raw:
+        if not isinstance(inst, dict):
+            raise ValueError(
+                f"manifest {path}: each instantiation must be a "
+                f"mapping of parameter name to value: {inst!r}",
+            )
+        # Preserve dict insertion order from YAML/JSON; coerce
+        # values to str so YAML's `true`/`false`/numbers render
+        # correctly in the expanded template signature.
+        insts.append({str(k): str(v) for k, v in inst.items()})
+    return tuple(insts)
+
+
+def _parse_manifest_entry(path: Path, raw: dict[str, object]) -> ManifestEntry:
+    """Convert one raw mapping from a manifest 'provides' list into a :class:`ManifestEntry`."""
+    if not isinstance(raw, dict):
+        raise ValueError(f"manifest {path}: entry is not a mapping: {raw!r}")
+    shape = _validate_manifest_entry_shape(path, raw)
+    optional_provider = raw.get("optional_provider", True)
+    if not isinstance(optional_provider, bool):
+        raise ValueError(
+            f"manifest {path}: 'optional_provider' must be a boolean "
+            f"(got {type(optional_provider).__name__} {optional_provider!r}): {raw!r}",
+        )
+    library = str(raw["library"]) if raw.get("library") else None
+    if shape == "template":
+        insts = _parse_template_instantiations(path, raw)
+        return ManifestEntry(
+            template=str(raw["template"]),
+            instantiations=insts,
+            library=library,
+            optional_provider=optional_provider,
+        )
+    if shape == "pattern":
+        return ManifestEntry(
+            pattern=str(raw["pattern"]),
+            library=library,
+            optional_provider=optional_provider,
+        )
+    return ManifestEntry(
+        symbol=str(raw["symbol"]),
+        library=library,
+        optional_provider=optional_provider,
+    )
+
+
 def load_manifest(path: Path) -> InstantiationManifest:
     """Load a manifest from YAML (``.yaml``/``.yml``) or JSON.
 
@@ -362,82 +449,9 @@ def load_manifest(path: Path) -> InstantiationManifest:
             library: libonedal_core.so.1
             optional_provider: false
     """
-    import json
-
-    text = path.read_text(encoding="utf-8")
-    if path.suffix.lower() in (".yaml", ".yml"):
-        import yaml
-        data = yaml.safe_load(text)
-    else:
-        data = json.loads(text)
-
-    if not isinstance(data, dict) or "provides" not in data:
-        raise ValueError(f"manifest {path}: missing top-level 'provides:' list")
-    entries: list[ManifestEntry] = []
-    for raw in data["provides"]:
-        if not isinstance(raw, dict):
-            raise ValueError(f"manifest {path}: entry is not a mapping: {raw!r}")
-        # Exactly one of symbol / pattern / template must be set.
-        shape_keys = [k for k in ("symbol", "pattern", "template") if k in raw]
-        if len(shape_keys) == 0:
-            raise ValueError(
-                f"manifest {path}: entry must have one of 'symbol', "
-                f"'pattern', or 'template': {raw!r}",
-            )
-        if len(shape_keys) > 1:
-            raise ValueError(
-                f"manifest {path}: entry has conflicting fields "
-                f"{shape_keys!r}; pick exactly one: {raw!r}",
-            )
-        optional_provider = raw.get("optional_provider", True)
-        if not isinstance(optional_provider, bool):
-            raise ValueError(
-                f"manifest {path}: 'optional_provider' must be a boolean "
-                f"(got {type(optional_provider).__name__} {optional_provider!r}): {raw!r}",
-            )
-        library = str(raw["library"]) if raw.get("library") else None
-        if "template" in raw:
-            insts_raw = raw.get("instantiations", [])
-            if not isinstance(insts_raw, list) or not insts_raw:
-                raise ValueError(
-                    f"manifest {path}: template entry needs a non-empty "
-                    f"'instantiations:' list: {raw!r}",
-                )
-            insts: list[dict[str, str]] = []
-            for inst in insts_raw:
-                if not isinstance(inst, dict):
-                    raise ValueError(
-                        f"manifest {path}: each instantiation must be a "
-                        f"mapping of parameter name to value: {inst!r}",
-                    )
-                # Preserve dict insertion order from YAML/JSON; coerce
-                # values to str so YAML's `true`/`false`/numbers render
-                # correctly in the expanded template signature.
-                insts.append({str(k): str(v) for k, v in inst.items()})
-            entries.append(
-                ManifestEntry(
-                    template=str(raw["template"]),
-                    instantiations=tuple(insts),
-                    library=library,
-                    optional_provider=optional_provider,
-                ),
-            )
-        elif "pattern" in raw:
-            entries.append(
-                ManifestEntry(
-                    pattern=str(raw["pattern"]),
-                    library=library,
-                    optional_provider=optional_provider,
-                ),
-            )
-        else:
-            entries.append(
-                ManifestEntry(
-                    symbol=str(raw["symbol"]),
-                    library=library,
-                    optional_provider=optional_provider,
-                ),
-            )
+    data = _load_manifest_data(path)
+    provides = cast("list[dict[str, object]]", data["provides"])
+    entries = [_parse_manifest_entry(path, raw) for raw in provides]
     return InstantiationManifest(entries=tuple(entries))
 
 

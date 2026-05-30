@@ -571,6 +571,34 @@ class TestManifest:
         with pytest.raises(ValueError, match="missing top-level 'provides:'"):
             load_manifest(path)
 
+    def test_load_manifest_rejects_provides_as_dict(self, tmp_path: Path) -> None:
+        # `provides: {}` passes the existence check but is not a list —
+        # must raise a clear error rather than a confusing per-entry error.
+        path = tmp_path / "bad_dict.yaml"
+        path.write_text("version: 1\nprovides: {}\n")
+        with pytest.raises(ValueError, match="missing top-level 'provides:'"):
+            load_manifest(path)
+
+    def test_load_manifest_rejects_provides_as_string(self, tmp_path: Path) -> None:
+        # `provides: "foo"` is likewise not a list.
+        path = tmp_path / "bad_str.json"
+        path.write_text('{"version": 1, "provides": "foo"}')
+        with pytest.raises(ValueError, match="missing top-level 'provides:'"):
+            load_manifest(path)
+
+    def test_load_manifest_valid_list_still_loads(self, tmp_path: Path) -> None:
+        # Regression guard: a well-formed manifest with a list value for
+        # `provides` must continue to load without error.
+        path = tmp_path / "ok.json"
+        path.write_text(
+            '{"version": 1, "provides": ['
+            '{"symbol": "ok_func", "library": "libfoo.so.1"}'
+            ']}',
+        )
+        m = load_manifest(path)
+        assert len(m.entries) == 1
+        assert m.entries[0].symbol == "ok_func"
+
     def test_load_manifest_rejects_string_optional_provider(self, tmp_path: Path) -> None:
         # YAML quote-ifies bool-looking strings; users hand-editing
         # `optional_provider: "false"` (string) would silently get

@@ -595,6 +595,43 @@ def _compute_appcompat_verdict(
     return Verdict.COMPATIBLE if required_count > 0 else Verdict.NO_CHANGE
 
 
+def _missing_app_versions(new_lib_path: Path, app_reqs: AppRequirements) -> list[str]:
+    """Return ELF version tags required by the app but absent from the new library."""
+    if _detect_app_format(new_lib_path) != "elf":
+        return []
+    from .elf_metadata import parse_elf_metadata
+
+    new_defined_versions = set(parse_elf_metadata(new_lib_path).versions_defined)
+    return [
+        ver_tag
+        for ver_tag in app_reqs.required_versions
+        if ver_tag not in new_defined_versions
+    ]
+
+
+def _partition_app_changes(
+    diff: DiffResult, app_reqs: AppRequirements,
+) -> tuple[list[Change], list[Change]]:
+    """Split diff changes into (relevant-to-app, irrelevant-to-app)."""
+    breaking_for_app: list[Change] = []
+    irrelevant_for_app: list[Change] = []
+    for change in diff.changes:
+        target = breaking_for_app if _is_relevant_to_app(change, app_reqs) else irrelevant_for_app
+        target.append(change)
+    return breaking_for_app, irrelevant_for_app
+
+
+def _compute_symbol_coverage(
+    new_exports: set[str], required_count: int, missing_count: int,
+) -> float:
+    """Percentage of required app symbols still available in the new library."""
+    if not new_exports:
+        return 0.0 if required_count > 0 else 100.0
+    if required_count == 0:
+        return 100.0
+    return (required_count - missing_count) / required_count * 100.0
+
+
 def check_appcompat(
     app_path: Path,
     old_lib_path: Path,
@@ -667,33 +704,14 @@ def check_appcompat(
     )
 
     # Check version availability
-    missing_versions: list[str] = []
-    if _detect_app_format(new_lib_path) == "elf":
-        from .elf_metadata import parse_elf_metadata
-        new_elf_meta = parse_elf_metadata(new_lib_path)
-        new_defined_versions = set(new_elf_meta.versions_defined)
-        for ver_tag, _lib in app_reqs.required_versions.items():
-            if ver_tag not in new_defined_versions:
-                missing_versions.append(ver_tag)
+    missing_versions = _missing_app_versions(new_lib_path, app_reqs)
 
     # 4. Filter diff by app usage
-    breaking_for_app: list[Change] = []
-    irrelevant_for_app: list[Change] = []
-    for change in diff.changes:
-        if _is_relevant_to_app(change, app_reqs):
-            breaking_for_app.append(change)
-        else:
-            irrelevant_for_app.append(change)
+    breaking_for_app, irrelevant_for_app = _partition_app_changes(diff, app_reqs)
 
     # 5. Compute app-specific verdict
     required_count = len(app_reqs.undefined_symbols)
-    if new_exports:
-        coverage = (
-            (required_count - len(missing_symbols)) / required_count * 100.0
-            if required_count > 0 else 100.0
-        )
-    else:
-        coverage = 0.0 if required_count > 0 else 100.0
+    coverage = _compute_symbol_coverage(new_exports, required_count, len(missing_symbols))
 
     verdict = _compute_appcompat_verdict(
         missing_symbols, missing_versions, breaking_for_app,
@@ -738,23 +756,10 @@ def check_against(
     )
 
     # Check version availability for ELF
-    missing_versions: list[str] = []
-    if _detect_app_format(new_lib_path) == "elf":
-        from .elf_metadata import parse_elf_metadata
-        new_elf_meta = parse_elf_metadata(new_lib_path)
-        new_defined_versions = set(new_elf_meta.versions_defined)
-        for ver_tag, _lib in app_reqs.required_versions.items():
-            if ver_tag not in new_defined_versions:
-                missing_versions.append(ver_tag)
+    missing_versions = _missing_app_versions(new_lib_path, app_reqs)
 
     required_count = len(app_reqs.undefined_symbols)
-    if new_exports:
-        coverage = (
-            (required_count - len(missing_symbols)) / required_count * 100.0
-            if required_count > 0 else 100.0
-        )
-    else:
-        coverage = 0.0 if required_count > 0 else 100.0
+    coverage = _compute_symbol_coverage(new_exports, required_count, len(missing_symbols))
 
     verdict = Verdict.BREAKING if (missing_symbols or missing_versions) else Verdict.COMPATIBLE
 

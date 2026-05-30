@@ -134,7 +134,7 @@ class TestMatrixSnapshot:
             results=[
                 ProbeResult(
                     configuration_id="a", probe_id="p1",
-                    object_path="/tmp/a__p1.o", error=None,
+                    object_path="build/a__p1.o", error=None,
                 ),
                 ProbeResult(
                     configuration_id="b", probe_id="p1",
