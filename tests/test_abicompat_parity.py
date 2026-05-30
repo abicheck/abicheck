@@ -80,12 +80,13 @@ def _require_tool(name: str) -> None:
         pytest.skip(f"{name} not found in PATH")
 
 
-def _compile_so(src: str, out: Path, soname: str) -> None:
+def _compile_so(src: str, out: Path) -> None:
+    """Compile a plain ``libfoo.so`` (no version suffix) so ``-lfoo`` links."""
     src_file = out.with_suffix(".c")
     src_file.write_text(src.strip() + "\n", encoding="utf-8")
     cmd = [
         "gcc", "-shared", "-fPIC", "-g", "-fvisibility=default",
-        f"-Wl,-soname,{soname}", "-o", str(out), str(src_file),
+        "-Wl,-soname,libfoo.so", "-o", str(out), str(src_file),
     ]
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
     if r.returncode != 0:
@@ -95,9 +96,10 @@ def _compile_so(src: str, out: Path, soname: str) -> None:
 def _compile_app(src: str, lib: Path, out: Path, tmp_path: Path) -> None:
     src_file = tmp_path / "app.c"
     src_file.write_text(src.strip() + "\n", encoding="utf-8")
+    # lib is named libfoo.so → link with -lfoo.
     cmd = [
         "gcc", "-g", "-o", str(out), str(src_file),
-        "-L", str(lib.parent), f"-l{lib.stem[3:]}",
+        "-L", str(lib.parent), "-lfoo",
         f"-Wl,-rpath,{lib.parent}",
     ]
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
@@ -145,13 +147,12 @@ def test_abicompat_parity(
     _require_tool("abicompat")
     _require_tool("gcc")
 
-    soname = "libfoo.so.1"
-    v1 = tmp_path / "v1" / "libfoo.so.1"
-    v2 = tmp_path / "v2" / "libfoo.so.1"
+    v1 = tmp_path / "v1" / "libfoo.so"
+    v2 = tmp_path / "v2" / "libfoo.so"
     v1.parent.mkdir()
     v2.parent.mkdir()
-    _compile_so(_LIB_V1, v1, soname)
-    _compile_so(lib_v2_src, v2, soname)
+    _compile_so(_LIB_V1, v1)
+    _compile_so(lib_v2_src, v2)
 
     app = tmp_path / "app"
     _compile_app(_APP_SRC, v1, app, tmp_path)

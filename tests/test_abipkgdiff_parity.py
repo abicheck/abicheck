@@ -48,20 +48,25 @@ from click.testing import CliRunner
 
 _LIB_V1 = """
 int api(int x) { return x + 1; }
+int helper(int x) { return x * 2; }
 """
 
 # Identical → compatible.
 _LIB_SAME = _LIB_V1
 
-# Return type widened int -> long long → ABI breaking.
-_LIB_BREAK = """
-long long api(int x) { return (long long)x + 1; }
+# An exported symbol is removed → unambiguous incompatible ABI change for
+# *both* tools. (Return/parameter type changes are deliberately avoided here:
+# libabigail is conservative about sub-type drift without --headers-dir and
+# reports them as compatible — that divergence is already documented and
+# tested in test_abidiff_parity.py, and is not what this lane checks.)
+_LIB_REMOVE_SYMBOL = """
+int api(int x) { return x + 1; }
 """
 
 # (name, lib_v2_src, abicheck_breaking_expected, abipkgdiff_breaking_expected)
 PARITY_CASES = [
     ("identical", _LIB_SAME, False, False),
-    ("return_type_widened", _LIB_BREAK, True, True),
+    ("symbol_removed", _LIB_REMOVE_SYMBOL, True, True),
 ]
 
 
