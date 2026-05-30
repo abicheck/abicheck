@@ -35,7 +35,7 @@ new policy.
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping
-from typing import TypeVar
+from typing import Any, TypeVar, cast
 
 from .checker_policy import ChangeKind
 from .checker_types import Change
@@ -43,6 +43,11 @@ from .checker_types import Change
 K = TypeVar("K")
 V = TypeVar("V")
 W = TypeVar("W")
+
+# Sentinel distinguishing "key absent" from "key present with value None".
+# Typed as Any so it can stand in for a ``W`` in the get() default without
+# upsetting the type checker.
+_MISSING: Any = object()
 
 # A (ChangeKind, description) pair describing one direction of a transition.
 TransitionSpec = tuple[ChangeKind, str]
@@ -110,14 +115,12 @@ def diff_by_key(
     """
     changes: list[Change] = []
     for key, old_val in old_map.items():
-        new_val = new_map.get(key)
-        if new_val is None and key not in new_map:
+        new_val = new_map.get(key, _MISSING)
+        if new_val is _MISSING:
             if on_removed is not None:
                 changes.extend(on_removed(key, old_val))
         elif on_common is not None:
-            # ``new_val`` is the value for ``key``; the ``is None`` branch
-            # above only triggers when the key is genuinely absent.
-            changes.extend(on_common(key, old_val, new_map[key]))
+            changes.extend(on_common(key, old_val, cast(W, new_val)))
     for key, new_val in new_map.items():
         if key not in old_map and on_added is not None:
             changes.extend(on_added(key, new_val))

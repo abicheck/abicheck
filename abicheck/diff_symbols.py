@@ -439,21 +439,29 @@ def _check_variable(mangled: str, v_old: Variable, v_new: Variable) -> list[Chan
     )
 
 
+def _var_removed(mangled: str, v_old: Variable) -> list[Change]:
+    return [Change(
+        kind=ChangeKind.VAR_REMOVED,
+        symbol=mangled,
+        description=f"Public variable removed: {v_old.name}",
+    )]
+
+
+def _var_added(mangled: str, v_new: Variable) -> list[Change]:
+    return [Change(
+        kind=ChangeKind.VAR_ADDED,
+        symbol=mangled,
+        description=f"New public variable: {v_new.name}",
+    )]
+
+
 @registry.detector("variables")
 def _diff_variables(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     return diff_by_key(
         _public_variables(old),
         _public_variables(new),
-        on_removed=lambda mangled, v_old: [Change(
-            kind=ChangeKind.VAR_REMOVED,
-            symbol=mangled,
-            description=f"Public variable removed: {v_old.name}",
-        )],
-        on_added=lambda mangled, v_new: [Change(
-            kind=ChangeKind.VAR_ADDED,
-            symbol=mangled,
-            description=f"New public variable: {v_new.name}",
-        )],
+        on_removed=_var_removed,
+        on_added=_var_added,
         on_common=_check_variable,
     )
 

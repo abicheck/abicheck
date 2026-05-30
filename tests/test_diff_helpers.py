@@ -52,6 +52,15 @@ class TestBoolTransition:
         assert out[0].old_value == "non-virtual"
         assert out[0].new_value == "virtual"
 
+    def test_removed_values_are_carried_through(self) -> None:
+        out = bool_transition(
+            True, False, "sym",
+            removed=REMOVED,
+            removed_values=("virtual", "non-virtual"),
+        )
+        assert out[0].old_value == "virtual"
+        assert out[0].new_value == "non-virtual"
+
     def test_default_values_are_none(self) -> None:
         out = bool_transition(False, True, "sym", added=ADDED)
         assert out[0].old_value is None
