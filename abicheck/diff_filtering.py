@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import re
 
-from .checker_policy import ChangeKind, Confidence
+from .checker_policy import ChangeKind, Confidence, EvidenceTier
 from .checker_types import Change
 from .detectors import DetectorResult
 from .diff_symbols import _PUBLIC_VIS, _public_functions
@@ -1052,6 +1052,23 @@ def _detect_evidence_tiers(
     return tiers, has_elf, has_dwarf, has_dwarf_advanced, has_pe, has_macho, has_headers
 
 
+def _determine_evidence_tier(
+    has_dwarf: bool, has_dwarf_advanced: bool, has_headers: bool,
+) -> EvidenceTier:
+    """Collapse the raw evidence booleans into the canonical analysis tier.
+
+    See :class:`EvidenceTier` for the semantics of each level. Header/AST
+    surface always wins (it is the richest signal); DWARF debug info is the
+    middle tier; everything else (symbol-table-only ELF/PE/Mach-O) is the
+    floor.
+    """
+    if has_headers:
+        return EvidenceTier.HEADER_AWARE
+    if has_dwarf or has_dwarf_advanced:
+        return EvidenceTier.DWARF_AWARE
+    return EvidenceTier.ELF_ONLY
+
+
 def _determine_confidence_level(
     has_elf: bool, has_dwarf: bool, has_pe: bool, has_macho: bool,
     has_headers: bool,
@@ -1101,10 +1118,14 @@ def _compute_confidence(
     detector_results: list[DetectorResult],
     old: AbiSnapshot,
     new: AbiSnapshot,
-) -> tuple[list[str], Confidence, list[str]]:
+) -> tuple[list[str], Confidence, list[str], EvidenceTier]:
     """Compute evidence tiers, confidence level, and coverage warnings.
 
-    Returns (evidence_tiers, confidence, coverage_warnings).
+    Returns (evidence_tiers, confidence, coverage_warnings, evidence_tier).
+
+    ``evidence_tier`` is the canonical, ordered analysis depth (see
+    :class:`EvidenceTier`); ``evidence_tiers`` remains the raw list of
+    available data sources for backward compatibility.
 
     Evidence tiers:
     - "elf": ELF metadata present and analyzed
@@ -1118,9 +1139,11 @@ def _compute_confidence(
     - "medium": headers only, or binary-only with ELF+DWARF
     - "low": binary-only without DWARF, or very limited data
     """
-    tiers, has_elf, has_dwarf, _has_dwarf_adv, has_pe, has_macho, has_headers = (
+    tiers, has_elf, has_dwarf, has_dwarf_adv, has_pe, has_macho, has_headers = (
         _detect_evidence_tiers(old, new)
     )
+
+    evidence_tier = _determine_evidence_tier(has_dwarf, has_dwarf_adv, has_headers)
 
     warnings: list[str] = []
 
@@ -1134,7 +1157,7 @@ def _compute_confidence(
         detector_results, warnings,
     )
 
-    return tiers, confidence, warnings
+    return tiers, confidence, warnings, evidence_tier
 
 
 # ChangeKinds that should be downgraded when the type is opaque in both snapshots.

@@ -39,6 +39,7 @@ from .checker_policy import (
     policy_kind_sets as _policy_kind_sets,
 )
 from .report_summary import build_summary
+from .schemas import REPORT_SCHEMA_VERSION
 
 
 def _kind_to_severity(kind: ChangeKind, policy: str) -> str:
@@ -235,6 +236,7 @@ def to_stat_json(result: DiffResult, indent: int = 2) -> str:
     summary = build_summary(result)
     effective_policy = result.policy or "strict_abi"
     d: dict[str, object] = {
+        "report_schema_version": REPORT_SCHEMA_VERSION,
         "library": result.library,
         "old_version": result.old_version,
         "new_version": result.new_version,
@@ -254,6 +256,7 @@ def to_stat_json(result: DiffResult, indent: int = 2) -> str:
         d["redundant_count"] = result.redundant_count
     # Confidence & evidence metadata
     d["confidence"] = result.confidence.value
+    d["evidence_tier"] = result.evidence_tier.value
     d["evidence_tiers"] = list(result.evidence_tiers)
     if result.coverage_warnings:
         d["coverage_warnings"] = list(result.coverage_warnings)
@@ -458,6 +461,7 @@ def _to_json_leaf(
     non_type_list = [_change_to_dict(c, policy=effective_policy, kind_sets=eff_sets) for c in non_type_changes]
 
     d: dict[str, object] = {
+        "report_schema_version": REPORT_SCHEMA_VERSION,
         "library": result.library,
         "old_version": result.old_version,
         "new_version": result.new_version,
@@ -479,6 +483,7 @@ def _to_json_leaf(
         d["redundant_count"] = result.redundant_count
     # Confidence & evidence metadata
     d["confidence"] = result.confidence.value
+    d["evidence_tier"] = result.evidence_tier.value
     d["evidence_tiers"] = list(result.evidence_tiers)
     if result.coverage_warnings:
         d["coverage_warnings"] = list(result.coverage_warnings)
@@ -521,6 +526,7 @@ def to_json(
 
     summary = build_summary(result)
     d: dict[str, object] = {
+        "report_schema_version": REPORT_SCHEMA_VERSION,
         "library": result.library,
         "old_version": result.old_version,
         "new_version": result.new_version,
@@ -587,6 +593,7 @@ def to_json(
     ]
     # Confidence & evidence metadata — helps users assess verdict trust level
     d["confidence"] = result.confidence.value
+    d["evidence_tier"] = result.evidence_tier.value
     d["evidence_tiers"] = list(result.evidence_tiers)
     if result.coverage_warnings:
         d["coverage_warnings"] = list(result.coverage_warnings)
@@ -1007,12 +1014,15 @@ def _append_confidence_section(lines: list[str], result: DiffResult) -> None:
     cov_warns = getattr(result, "coverage_warnings", None)
     conf_val = conf.value if hasattr(conf, "value") else str(conf)
     tier_str = ", ".join(f"`{t}`" for t in tiers) if tiers else "_none_"
+    etier = getattr(result, "evidence_tier", None)
+    etier_val = etier.value if (etier is not None and hasattr(etier, "value")) else str(etier)
     lines += [
         "## Analysis Confidence",
         "",
         "| Field | Value |",
         "|---|---|",
         f"| Confidence | {conf_val.upper()} |",
+        f"| Evidence tier | `{etier_val}` |",
         f"| Evidence tiers | {tier_str} |",
     ]
     if cov_warns:
@@ -1123,6 +1133,9 @@ def appcompat_to_json(result: object, indent: int = 2) -> str:
         conf = getattr(full_diff, "confidence", None)
         if conf is not None:
             d["confidence"] = conf.value if hasattr(conf, "value") else str(conf)
+            etier = getattr(full_diff, "evidence_tier", None)
+            if etier is not None:
+                d["evidence_tier"] = etier.value if hasattr(etier, "value") else str(etier)
             d["evidence_tiers"] = list(getattr(full_diff, "evidence_tiers", []) or [])
             cov_warns = getattr(full_diff, "coverage_warnings", []) or []
             if cov_warns:

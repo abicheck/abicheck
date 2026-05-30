@@ -30,7 +30,9 @@ Fix known ABICC / libabigail limitations and add new detection capability:
 
 **Done:** DWARF-aware struct/enum layout; calling convention, packing, toolchain flags detection; AST-DWARF deduplication; field qualifiers (const/volatile/mutable); enum/parameter rename heuristics; ELF_ONLY visibility tier used throughout detection; `Confidence` enum (high/medium/low) on `DiffResult` with `coverage_warnings` for disabled detectors (v0.2.0).
 
-**TODO:** Formalize HEADER_AWARE tier as distinct from DWARF_AWARE in JSON output schema.
+**Done:** Formalized the canonical `evidence_tier` scalar (`ELF_ONLY` / `DWARF_AWARE` / `HEADER_AWARE`, ordered by analysis depth) in the JSON output schema, alongside the existing raw `evidence_tiers` list. HEADER_AWARE is now distinct from DWARF_AWARE: the presence of a header/AST surface promotes the tier above DWARF-only debug info. See `EvidenceTier` in `checker_policy.py`.
+
+**Backlog (MSVC end-to-end):** Windows CI currently exercises the MinGW/GCC toolchain only; there is no MSVC + PDB end-to-end lane. Closing the MSVC story (PDB fixtures, a self-hosted or GitHub-hosted MSVC build/compare job) is tracked as a near-term hardening item. See `docs/development/backlog.md`.
 
 ---
 
@@ -104,7 +106,7 @@ Public documentation at <https://napetrov.github.io/abicheck/>:
 | Goal | Status |
 |------|--------|
 | G1: ABICC drop-in | Done — 145 ChangeKinds, compat CLI, suppression files, XML reports |
-| G2: Known gaps | DWARF layout, toolchain flags, AST-DWARF dedup, confidence tracking done; HEADER_AWARE tier TODO |
+| G2: Known gaps | DWARF layout, toolchain flags, AST-DWARF dedup, confidence tracking, canonical evidence tier (ELF_ONLY/DWARF_AWARE/HEADER_AWARE) done |
 | G3: libabigail tests | Done — ~54 parity test functions + 74 example cases |
 | G4: Agent-friendly | Done — JSON, SARIF, exit codes, snapshots, MCP server, GitHub Action |
 | G5: Break encyclopedia | Done — 74 example cases with docs + coverage matrix |

@@ -61,6 +61,7 @@ dev = [
     "ruff>=0.3",
     "mypy>=1.0",
     "types-PyYAML",
+    "jsonschema>=4.0",
 ]
 
 [tool.mypy]
@@ -146,6 +147,9 @@ markers = [
 
 [tool.setuptools.packages.find]
 include = ["abicheck*"]
+
+[tool.setuptools.package-data]
+"abicheck.schemas" = ["*.json"]
 
 [tool.coverage.run]
 branch = true

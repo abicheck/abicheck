@@ -25,6 +25,7 @@ from dataclasses import dataclass, field
 from .checker_policy import (
     ChangeKind,
     Confidence,
+    EvidenceTier,
     Verdict,
 )
 from .checker_policy import (
@@ -111,6 +112,10 @@ class DiffResult:
     out_of_surface_changes: list[Change] = field(default_factory=list)
     out_of_surface_count: int = 0
     scope_to_public_surface: bool = False
+    # Canonical analysis depth (ordered): ELF_ONLY < DWARF_AWARE < HEADER_AWARE.
+    # Distinct from the raw ``evidence_tiers`` list above — this is the single
+    # scalar consumers should key trust decisions off of. See EvidenceTier.
+    evidence_tier: EvidenceTier = EvidenceTier.ELF_ONLY
 
     def _effective_kind_sets(
         self,

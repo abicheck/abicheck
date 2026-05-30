@@ -1431,7 +1431,7 @@ class TestComputeConfidenceDwarfFlag:
             Function(name="f", mangled="_f", return_type="void", visibility=Visibility.PUBLIC),
         ])
         new.dwarf = DwarfMetadata(has_dwarf=False)
-        tiers, _conf, _warns = _compute_confidence([], old, new)
+        tiers, _conf, _warns, _etier = _compute_confidence([], old, new)
         assert "dwarf" not in tiers
 
     def test_real_dwarf_counted(self):
@@ -1439,7 +1439,7 @@ class TestComputeConfidenceDwarfFlag:
         old.dwarf = DwarfMetadata(has_dwarf=True)
         new = _make_snap()
         new.dwarf = DwarfMetadata(has_dwarf=True)
-        tiers, _conf, _warns = _compute_confidence([], old, new)
+        tiers, _conf, _warns, _etier = _compute_confidence([], old, new)
         assert "dwarf" in tiers
 
     def test_placeholder_dwarf_advanced_not_counted(self):
@@ -1447,7 +1447,7 @@ class TestComputeConfidenceDwarfFlag:
         old.dwarf_advanced = AdvancedDwarfMetadata(has_dwarf=False)
         new = _make_snap()
         new.dwarf_advanced = AdvancedDwarfMetadata(has_dwarf=False)
-        tiers, _conf, _warns = _compute_confidence([], old, new)
+        tiers, _conf, _warns, _etier = _compute_confidence([], old, new)
         assert "dwarf_advanced" not in tiers
 
     def test_real_dwarf_advanced_counted(self):
@@ -1455,7 +1455,7 @@ class TestComputeConfidenceDwarfFlag:
         old.dwarf_advanced = AdvancedDwarfMetadata(has_dwarf=True)
         new = _make_snap()
         new.dwarf_advanced = AdvancedDwarfMetadata(has_dwarf=True)
-        tiers, _conf, _warns = _compute_confidence([], old, new)
+        tiers, _conf, _warns, _etier = _compute_confidence([], old, new)
         assert "dwarf_advanced" in tiers
 
     def test_one_side_real_dwarf_counted(self):
@@ -1463,5 +1463,5 @@ class TestComputeConfidenceDwarfFlag:
         old.dwarf = DwarfMetadata(has_dwarf=True)
         new = _make_snap()
         new.dwarf = DwarfMetadata(has_dwarf=False)
-        tiers, _conf, _warns = _compute_confidence([], old, new)
+        tiers, _conf, _warns, _etier = _compute_confidence([], old, new)
         assert "dwarf" in tiers

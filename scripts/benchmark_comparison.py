@@ -914,6 +914,81 @@ def _total_ms(results: list[dict], ms_key: str) -> float:
     return sum(r.get(ms_key, 0) for r in results)
 
 
+def _tool_version(cmd: list[str]) -> str | None:
+    """Best-effort one-line version string for an external tool, or None."""
+    if shutil.which(cmd[0]) is None:
+        return None
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    out = (r.stdout or r.stderr or "").strip().splitlines()
+    return out[0].strip() if out else None
+
+
+def _git_commit() -> str | None:
+    try:
+        r = subprocess.run(
+            ["git", "-C", str(REPO_DIR), "rev-parse", "HEAD"],
+            capture_output=True, text=True, timeout=15,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return r.stdout.strip() if r.returncode == 0 else None
+
+
+def _ground_truth_digest() -> str | None:
+    """SHA-256 of examples/ground_truth.json so a benchmark run is pinned to it."""
+    gt = EXAMPLES_DIR / "ground_truth.json"
+    if not gt.is_file():
+        return None
+    import hashlib
+
+    return hashlib.sha256(gt.read_bytes()).hexdigest()
+
+
+def _collect_metadata(results: list[dict], active_tools: list[Any]) -> dict[str, Any]:
+    """Assemble reproducibility metadata + machine-readable accuracy.
+
+    This is the release-pinnable artifact: it records the exact inputs
+    (abicheck version, git commit, tool versions, ground-truth digest, case
+    count) alongside per-tool accuracy, so a published number can be
+    reproduced and audited against the tag it was generated from.
+    """
+    try:
+        from abicheck import __version__ as abicheck_version
+    except Exception:  # noqa: BLE001
+        abicheck_version = "unknown"
+
+    accuracy: dict[str, dict[str, Any]] = {}
+    for t in active_tools:
+        correct, total = _accuracy(results, t.name, t.expected_key)
+        accuracy[t.name] = {
+            "label": t.label,
+            "correct": correct,
+            "scored": total,
+            "pct": round(100 * correct / total, 1) if total else None,
+            "total_ms": round(_total_ms(results, t.ms_key)),
+        }
+
+    return {
+        "schema": "abicheck-benchmark/1.0",
+        "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "abicheck_version": abicheck_version,
+        "git_commit": _git_commit(),
+        "case_count": len(results),
+        "ground_truth_sha256": _ground_truth_digest(),
+        "tool_versions": {
+            "abidiff": _tool_version(["abidiff", "--version"]),
+            "abi-compliance-checker": _tool_version(["abi-compliance-checker", "-dumpversion"]),
+            "gcc": _tool_version(["gcc", "--version"]),
+            "castxml": _tool_version(["castxml", "--version"]),
+        },
+        "accuracy": accuracy,
+        "results": results,
+    }
+
+
 @dataclass
 class _BuildResult:
     v1_so: Path
@@ -1316,8 +1391,16 @@ def main() -> None:
 
     summary = REPORT_DIR / "comparison_summary.json"
     summary.write_text(json.dumps(results, indent=2))
+
+    # Release-pinnable artifact: metadata + accuracy + results in one file.
+    report = _collect_metadata(results, active_tools)
+    report_path = REPORT_DIR / "benchmark_report.json"
+    report_path.write_text(json.dumps(report, indent=2))
+
     print(f"\n  Reports: {REPORT_DIR}/")
-    print(f"  Summary: {summary}\n")
+    print(f"  Summary: {summary}")
+    print(f"  Report:  {report_path}  (pinned: commit={report['git_commit'] or 'unknown'}, "
+          f"gt={(report['ground_truth_sha256'] or '')[:12]})\n")
 
 
 if __name__ == "__main__":

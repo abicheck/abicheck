@@ -34,6 +34,7 @@ ruff format --check abicheck/ tests/
 | `integration` | castxml + gcc/g++ | Only if modifying DWARF/ELF parsing |
 | `libabigail` | abidiff + gcc/g++ | Only for parity testing |
 | `abicc` | abi-compliance-checker + gcc/g++ | Only for parity testing |
+| `msvc` | MSVC `cl.exe` (Windows) | Only for the MSVC+PDB end-to-end lane |
 | `slow` | varies | Hypothesis/perf benchmarks, skip in normal dev |
 | `golden` | golden files | Snapshot tests, skip unless changing output format |
 

@@ -105,6 +105,92 @@ abicheck compare old.json new.json --show-impact
 
 ---
 
+## Analysis confidence and evidence tier
+
+Every comparison reports how much evidence backed the verdict, so consumers can
+calibrate trust. Three related fields appear in the Markdown "Analysis
+Confidence" section and the JSON report:
+
+| Field | Type | Meaning |
+|-------|------|---------|
+| `confidence` | `high` / `medium` / `low` | Overall trust level (does the available evidence corroborate the verdict, and were any detectors disabled). |
+| `evidence_tier` | `elf_only` / `dwarf_aware` / `header_aware` | **Canonical, ordered analysis depth.** Key trust decisions off this scalar. |
+| `evidence_tiers` | list of strings | Raw data sources that were available (`elf`, `dwarf`, `dwarf_advanced`, `header`, `pe`, `macho`). Retained for backward compatibility. |
+
+The `evidence_tier` scalar collapses the raw sources into a single ordered label
+(shallow → deep):
+
+- **`elf_only`** — symbol-table-only. Binary export tables (ELF/PE/Mach-O) are
+  present, but there is no DWARF debug info and no header/AST surface. Only
+  symbol add/remove and version changes are observable; struct layout, enum
+  values, and type changes are **not**.
+- **`dwarf_aware`** — DWARF (or equivalent debug info) is present, enabling
+  struct layout, enum, and calling-convention analysis, but no header/AST
+  surface is available to cross-check declared API intent.
+- **`header_aware`** — a parsed header/AST surface (functions/types/enums) is
+  present. The richest tier, and the only one that can reason about
+  declared-but-not-emitted API, inline/template changes, and macro contracts.
+
+```json
+{
+  "verdict": "BREAKING",
+  "confidence": "high",
+  "evidence_tier": "header_aware",
+  "evidence_tiers": ["elf", "dwarf", "header"]
+}
+```
+
+---
+
+## JSON schema and stability guarantees
+
+The `compare --format json` document is a **stable, machine-readable contract**.
+It is described by a versioned [JSON Schema](https://json-schema.org/) (draft
+2020-12) that ships inside the package at
+`abicheck/schemas/compare_report.schema.json` and is importable:
+
+```python
+from abicheck.schemas import (
+    REPORT_SCHEMA_VERSION,        # e.g. "1.0"
+    COMPARE_REPORT_SCHEMA_PATH,   # pathlib.Path to the .schema.json
+    load_compare_report_schema,   # -> dict
+)
+```
+
+Every JSON report carries a top-level `report_schema_version` field
+(`MAJOR.MINOR`) so consumers can detect the contract version they are reading:
+
+```json
+{
+  "report_schema_version": "1.0",
+  "library": "libfoo.so.1",
+  "verdict": "BREAKING"
+}
+```
+
+**Stability policy:**
+
+- **Additive** changes — new optional keys, new enum members, relaxing a
+  constraint — bump the **MINOR** component. Existing consumers keep working.
+- **Breaking** changes — removing or renaming a key, tightening a type, or
+  removing an enum member — bump the **MAJOR** component.
+
+Consumers should accept any report whose `report_schema_version` shares their
+expected MAJOR component and **ignore unknown keys** (the schema sets
+`additionalProperties: true` precisely so that MINOR additions never break
+validation). Validating with the bundled schema requires the optional
+`jsonschema` package:
+
+```python
+import json, jsonschema
+from abicheck.schemas import load_compare_report_schema
+
+report = json.loads(open("report.json").read())
+jsonschema.validate(report, load_compare_report_schema())
+```
+
+---
+
 ## SARIF Output
 
 abicheck supports [SARIF 2.1.0](https://docs.oasis-open.org/sarif/sarif/v2.1.0/) output for integration with GitHub Code Scanning and other SAST platforms.

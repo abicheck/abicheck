@@ -15,6 +15,7 @@
 | Field | Value |
 |---|---|
 | Confidence | HIGH |
+| Evidence tier | `header_aware` |
 | Evidence tiers | `elf`, `header` |
 | Coverage gap | Detector 'fingerprint_renames' disabled: requires ELF metadata in elf_only_mode |
 | Coverage gap | Detector 'pe' disabled: missing PE metadata |

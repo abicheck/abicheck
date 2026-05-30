@@ -159,3 +159,52 @@ def test_tool_result_defaults():
     assert r.changes == []
     assert r.raw_output == ""
     assert r.report_path == ""
+
+
+# ── Release-pinned report metadata ────────────────────────────────────────────
+
+
+class _FakeTool:
+    name = "abicheck"
+    expected_key = "expected"
+    ms_key = "abicheck_ms"
+    label = "abicheck compare"
+
+
+def test_collect_metadata_shape_and_accuracy():
+    mod = _load_benchmark()
+    results = [
+        {"case": "case01", "expected": "BREAKING", "abicheck": "BREAKING", "abicheck_ms": 5},
+        {"case": "case02", "expected": "COMPATIBLE", "abicheck": "COMPATIBLE", "abicheck_ms": 4},
+        {"case": "case03", "expected": "BREAKING", "abicheck": "COMPATIBLE", "abicheck_ms": 6},
+        # SKIP rows must not be scored.
+        {"case": "case04", "expected": "BREAKING", "abicheck": "SKIP", "abicheck_ms": 0},
+    ]
+    meta = mod._collect_metadata(results, [_FakeTool()])
+
+    assert meta["schema"] == "abicheck-benchmark/1.0"
+    assert meta["case_count"] == 4
+    assert "abicheck_version" in meta
+    assert set(meta["tool_versions"]) >= {"abidiff", "gcc", "castxml"}
+    assert meta["results"] is results
+
+    acc = meta["accuracy"]["abicheck"]
+    assert acc["scored"] == 3          # SKIP excluded
+    assert acc["correct"] == 2          # case03 wrong
+    assert acc["pct"] == round(100 * 2 / 3, 1)
+
+
+def test_ground_truth_digest_is_stable():
+    mod = _load_benchmark()
+    first = mod._ground_truth_digest()
+    second = mod._ground_truth_digest()
+    # Either None (file absent) or a stable 64-char hex digest.
+    assert first == second
+    if first is not None:
+        assert len(first) == 64
+        int(first, 16)  # valid hex
+
+
+def test_tool_version_returns_none_for_missing_tool():
+    mod = _load_benchmark()
+    assert mod._tool_version(["definitely-not-a-real-tool-xyz", "--version"]) is None

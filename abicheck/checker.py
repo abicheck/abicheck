@@ -242,7 +242,7 @@ def compare(
     )
 
     # Compute evidence tiers and confidence from detector results.
-    evidence_tiers, confidence, coverage_warnings = _compute_confidence(
+    evidence_tiers, confidence, coverage_warnings, evidence_tier = _compute_confidence(
         detector_results, old, new,
     )
 
@@ -267,4 +267,5 @@ def compare(
         out_of_surface_changes=out_of_surface,
         out_of_surface_count=len(out_of_surface),
         scope_to_public_surface=scope_to_public_surface,
+        evidence_tier=evidence_tier,
     )

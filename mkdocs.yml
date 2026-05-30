@@ -80,6 +80,7 @@ nav:
   - Troubleshooting: troubleshooting.md
   - Development:
     - Goals: development/goals.md
+    - Backlog: development/backlog.md
     - Codebase Overview: development/codebase-overview.md
     - Testing: development/testing.md
     - Report Comparison: development/report-comparison.md

@@ -21,13 +21,15 @@ Requires: abidiff (libabigail-tools), gcc/g++, castxml.
 """
 from __future__ import annotations
 
-import shutil
 import subprocess
 import textwrap
 import warnings
 from pathlib import Path
 
 import pytest
+
+from tests._libabigail import decode_exit_code
+from tests._libabigail import require_tool as _require_tool
 
 # ---------------------------------------------------------------------------
 # Cases:
@@ -154,11 +156,6 @@ _DIVERGE = [c for c in PARITY_CASES if c[8] == "divergence"]
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _require_tool(name: str) -> None:
-    if shutil.which(name) is None:
-        pytest.skip(f"{name} not found in PATH")
-
-
 def _compile_so(src: str, out: Path, lang: str) -> None:
     ext = ".c" if lang == "c" else ".cpp"
     src_file = out.with_suffix(ext)
@@ -223,16 +220,7 @@ def _run_abidiff(old: Path, new: Path) -> str:
         ["abidiff", "--no-show-locs", str(old), str(new)],
         capture_output=True, text=True, timeout=30,
     )
-    code = r.returncode
-    if code == 0:
-        return "NO_CHANGE"
-    if code & 1:
-        return "ERROR"
-    if code & 8:
-        return "BREAKING"
-    if code & 4:
-        return "COMPATIBLE"
-    return "NO_CHANGE"
+    return decode_exit_code(r.returncode, zero_verdict="NO_CHANGE")
 
 
 def _setup(

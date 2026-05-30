@@ -471,6 +471,47 @@ class Confidence(str, Enum):
     LOW = "low"
 
 
+class EvidenceTier(str, Enum):
+    """Canonical analysis tier achieved for a comparison.
+
+    Unlike :data:`DiffResult.evidence_tiers` — a list of the *raw* data
+    sources that were available (``"elf"``, ``"dwarf"``, ``"header"``,
+    ``"pe"``, ``"macho"``) — this is a single, ordered label summarizing
+    *how deep* the analysis could go. Consumers should key trust decisions
+    off this scalar rather than re-deriving depth from the raw list.
+
+    Ordering (shallow → deep):
+
+    - ``ELF_ONLY`` — symbol-table-only. Binary metadata is present
+      (ELF/PE/Mach-O export tables) but there is no DWARF debug info and no
+      header/AST surface. Only symbol add/remove and version changes are
+      observable; struct layout, enum values, and type changes are not.
+    - ``DWARF_AWARE`` — DWARF (or equivalent debug info) is present, enabling
+      struct layout, enum, and calling-convention analysis, but no
+      header/AST surface is available to cross-check declared API intent.
+    - ``HEADER_AWARE`` — header/AST information (functions/types/enums from a
+      parsed source surface) is present. This is the richest tier and the
+      only one that can reason about declared-but-not-emitted API,
+      inline/template changes, and macro contracts.
+    """
+
+    ELF_ONLY = "elf_only"
+    DWARF_AWARE = "dwarf_aware"
+    HEADER_AWARE = "header_aware"
+
+    @property
+    def rank(self) -> int:
+        """Numeric depth (higher = deeper analysis). Useful for comparisons."""
+        return _EVIDENCE_TIER_RANK[self]
+
+
+_EVIDENCE_TIER_RANK: dict[EvidenceTier, int] = {
+    EvidenceTier.ELF_ONLY: 0,
+    EvidenceTier.DWARF_AWARE: 1,
+    EvidenceTier.HEADER_AWARE: 2,
+}
+
+
 # ---------------------------------------------------------------------------
 # Classification sets — DERIVED from change_registry.py (single source of truth)
 # ---------------------------------------------------------------------------
