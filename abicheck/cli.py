@@ -209,36 +209,6 @@ def _dump_elf(
         raise click.ClickException(f"Failed to dump '{path}': {exc}") from exc
 
 
-def _dump_macho(path: Path, version: str) -> AbiSnapshot:
-    """Dump ABI snapshot from a Mach-O binary."""
-    from .macho_metadata import parse_macho_metadata
-    try:
-        macho_meta = parse_macho_metadata(path)
-    except (RuntimeError, OSError, ValueError) as exc:
-        raise click.ClickException(
-            f"Failed to parse Mach-O '{path}': {exc}"
-        ) from exc
-    if not macho_meta.exports and not macho_meta.install_name and not macho_meta.dependent_libs:
-        raise click.ClickException(
-            f"Mach-O file '{path}' has no exports or load-command metadata. "
-            "Verify the file is a valid dynamic library."
-        )
-    from .model import Function, Visibility
-    funcs = [
-        Function(
-            name=exp.name, mangled=exp.name, return_type="?",
-            visibility=Visibility.PUBLIC,
-            is_extern_c=not exp.name.startswith("_Z"),
-        )
-        for exp in macho_meta.exports if exp.name
-    ]
-    return AbiSnapshot(
-        library=path.name, version=version,
-        functions=funcs, macho=macho_meta,
-        platform="macho",
-    )
-
-
 def _dump_native_binary(
     path: Path, binary_fmt: str,
     headers: list[Path], includes: list[Path],
@@ -252,7 +222,9 @@ def _dump_native_binary(
 
     For ELF, headers are required for full AST analysis unless dwarf_only
     is set or DWARF debug info is available (ADR-003 fallback chain).
-    For PE/Mach-O, headers are optional — export tables provide the symbol surface.
+    For PE/Mach-O, headers are optional: when supplied they scope the ABI
+    surface to declarations in those public headers (best-effort, via castxml),
+    otherwise the export table provides the symbol surface.
     """
     if binary_fmt == "elf":
         return _dump_elf(path, headers, includes, version, lang,
@@ -261,12 +233,23 @@ def _dump_native_binary(
     if binary_fmt == "pe":
         from .service import _dump_pe
         try:
-            return _dump_pe(path, version, pdb_path=pdb_path)
+            return _dump_pe(
+                path, version,
+                headers=headers, includes=includes, lang=lang,
+                pdb_path=pdb_path,
+            )
         except AbicheckError as exc:
             raise click.ClickException(str(exc)) from exc
 
     if binary_fmt == "macho":
-        return _dump_macho(path, version)
+        from .service import _dump_macho
+        try:
+            return _dump_macho(
+                path, version,
+                headers=headers, includes=includes, lang=lang,
+            )
+        except AbicheckError as exc:
+            raise click.ClickException(str(exc)) from exc
 
     fmt_labels = {"elf": "ELF", "pe": "PE (Windows DLL)", "macho": "Mach-O (macOS dylib)"}
     raise click.ClickException(f"Unsupported binary format: {fmt_labels.get(binary_fmt, binary_fmt)}")
@@ -1128,8 +1111,10 @@ def _exit_with_severity_or_verdict(
 @click.option("-H", "--header", "headers", multiple=True,
               type=click.Path(path_type=Path),
               help="Public header file or directory applied to both sides (repeat for multiple). "
-                   "Recommended for full ELF ABI analysis; without headers, ELF falls back to symbols-only mode. "
-                   "Validated when input is ELF; ignored for snapshots.")
+                   "Recommended for full ABI analysis; without headers, native binaries fall back to symbols-only mode. "
+                   "Scopes the ABI surface to declarations in these headers for ELF; on PE/Mach-O scoping is "
+                   "best-effort and falls back to the export table when castxml is unavailable or names don't match "
+                   "(e.g. MSVC C++ mangling). Validated for native binaries; ignored for snapshots.")
 @click.option("-I", "--include", "includes", multiple=True,
               type=click.Path(path_type=Path),
               help="Extra include directory for castxml (applied to both sides).")
@@ -1139,11 +1124,11 @@ def _exit_with_severity_or_verdict(
 @click.option("--old-header", "old_headers_only", multiple=True,
               type=click.Path(path_type=Path),
               help="Public header for old side only (overrides -H for old). "
-                   "Validated when input is ELF; ignored for snapshots.")
+                   "Validated for native binaries; ignored for snapshots.")
 @click.option("--new-header", "new_headers_only", multiple=True,
               type=click.Path(path_type=Path),
               help="Public header for new side only (overrides -H for new). "
-                   "Validated when input is ELF; ignored for snapshots.")
+                   "Validated for native binaries; ignored for snapshots.")
 @click.option("--old-include", "old_includes_only", multiple=True,
               type=click.Path(path_type=Path),
               help="Include dir for old side only (overrides -I for old).")

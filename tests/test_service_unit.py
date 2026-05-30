@@ -728,3 +728,249 @@ class TestRenderDepsSection:
         result = _render_deps_section_md(old, new)
         assert "old.so" in result
         assert "new.so" in result
+
+
+# ── Header-scoped PE/Mach-O dumps (issue #235) ───────────────────────────────
+
+
+def _scoped_snapshot(platform: str, *funcs: tuple[str, Visibility]) -> AbiSnapshot:
+    """Build a fake header-scoped snapshot as ``dumper._dump_*`` would return."""
+    from abicheck.model import RecordType
+
+    snap = AbiSnapshot(library="lib", version="1.0", platform=platform)
+    snap.functions = [
+        Function(name=n, mangled=n, return_type="int", visibility=v) for n, v in funcs
+    ]
+    # A header-scoped dump carries real type info (so layout diffs still fire).
+    snap.types = [RecordType(name="PublicStruct", kind="struct")]
+    return snap
+
+
+def _pe_meta(*export_names: str) -> MagicMock:
+    meta = MagicMock()
+    meta.machine = "AMD64"
+    exports = []
+    for i, name in enumerate(export_names, start=1):
+        exp = MagicMock()
+        exp.name = name
+        exp.ordinal = i
+        exports.append(exp)
+    meta.exports = exports
+    return meta
+
+
+class TestPeHeaderScoping:
+    """Issue #235: --header/--include must scope the PE ABI surface."""
+
+    def test_headers_route_to_castxml_scoped_dump(self, tmp_path):
+        from abicheck.service import _dump_pe
+
+        p = tmp_path / "lib.dll"
+        p.write_bytes(b"MZ" + b"\x00" * 100)
+        # Export table has a public API symbol AND a private/internal export.
+        pe_meta = _pe_meta("PublicApiFunc", "InternalPrivateFunc")
+        # Header-scoped dump only sees the symbol declared in the public header.
+        scoped = _scoped_snapshot("pe", ("PublicApiFunc", Visibility.PUBLIC))
+
+        with patch("abicheck.pe_metadata.parse_pe_metadata", return_value=pe_meta), \
+             patch("abicheck.pdb_utils.locate_pdb", return_value=None), \
+             patch("abicheck.dumper._dump_pe", return_value=scoped) as mock_dump:
+            result = _dump_pe(p, "1.0", headers=[Path("api.h")], includes=[Path("inc")])
+
+        # The header-aware dumper was actually invoked with the headers.
+        assert mock_dump.called
+        called_headers = mock_dump.call_args.args[1]
+        assert called_headers == [Path("api.h")]
+        # Surface is scoped: private export absent, public symbol present.
+        names = [f.name for f in result.functions]
+        assert "PublicApiFunc" in names
+        assert "InternalPrivateFunc" not in names
+        # Type info preserved so reachable layout changes still diff.
+        assert any(t.name == "PublicStruct" for t in result.types)
+
+    def test_private_export_absent_from_headers_not_compared(self, tmp_path):
+        """An exported-but-private symbol removed in 'new' must not surface."""
+        from abicheck.checker import compare
+        from abicheck.service import _dump_pe
+
+        old_p = tmp_path / "old.dll"
+        new_p = tmp_path / "new.dll"
+        old_p.write_bytes(b"MZ" + b"\x00" * 100)
+        new_p.write_bytes(b"MZ" + b"\x00" * 100)
+
+        old_pe = _pe_meta("PublicApiFunc", "InternalPrivateFunc")
+        new_pe = _pe_meta("PublicApiFunc")  # private export dropped in new
+        old_scoped = _scoped_snapshot("pe", ("PublicApiFunc", Visibility.PUBLIC))
+        new_scoped = _scoped_snapshot("pe", ("PublicApiFunc", Visibility.PUBLIC))
+
+        with patch("abicheck.pdb_utils.locate_pdb", return_value=None):
+            with patch("abicheck.pe_metadata.parse_pe_metadata", return_value=old_pe), \
+                 patch("abicheck.dumper._dump_pe", return_value=old_scoped):
+                old_snap = _dump_pe(old_p, "1.0", headers=[Path("api.h")])
+            with patch("abicheck.pe_metadata.parse_pe_metadata", return_value=new_pe), \
+                 patch("abicheck.dumper._dump_pe", return_value=new_scoped):
+                new_snap = _dump_pe(new_p, "2.0", headers=[Path("api.h")])
+
+        result = compare(old_snap, new_snap)
+        removed = [c for c in result.changes if "InternalPrivateFunc" in (c.symbol or "")]
+        assert removed == [], f"private export must not be reported: {removed}"
+
+    def test_fallback_when_no_header_match(self, tmp_path):
+        """MSVC-mangled C++ exports won't match Itanium names → warn + fallback."""
+        from abicheck.service import _dump_pe
+
+        p = tmp_path / "lib.dll"
+        p.write_bytes(b"MZ" + b"\x00" * 100)
+        pe_meta = _pe_meta("?realFunc@@YAHXZ")
+        # castxml parsed headers but nothing matched the export table.
+        scoped = _scoped_snapshot("pe", ("someDecl", Visibility.HIDDEN))
+
+        with patch("abicheck.pe_metadata.parse_pe_metadata", return_value=pe_meta), \
+             patch("abicheck.pdb_utils.locate_pdb", return_value=None), \
+             patch("abicheck.dumper._dump_pe", return_value=scoped):
+            with pytest.warns(UserWarning, match="None of the provided headers matched"):
+                result = _dump_pe(p, "1.0", headers=[Path("api.h")])
+
+        # Fell back to the full export table.
+        names = [f.name for f in result.functions]
+        assert "?realFunc@@YAHXZ" in names
+
+    def test_fallback_when_castxml_unavailable(self, tmp_path):
+        from abicheck.service import _dump_pe
+
+        p = tmp_path / "lib.dll"
+        p.write_bytes(b"MZ" + b"\x00" * 100)
+        pe_meta = _pe_meta("PublicApiFunc")
+
+        with patch("abicheck.pe_metadata.parse_pe_metadata", return_value=pe_meta), \
+             patch("abicheck.pdb_utils.locate_pdb", return_value=None), \
+             patch("abicheck.dumper._dump_pe", side_effect=RuntimeError("castxml not found")):
+            with pytest.warns(UserWarning, match="Header-based ABI scoping unavailable"):
+                result = _dump_pe(p, "1.0", headers=[Path("api.h")])
+
+        names = [f.name for f in result.functions]
+        assert "PublicApiFunc" in names
+
+    def test_no_headers_uses_export_table(self, tmp_path):
+        """Without headers, behaviour is unchanged: full export table, PUBLIC."""
+        from abicheck.service import _dump_pe
+
+        p = tmp_path / "lib.dll"
+        p.write_bytes(b"MZ" + b"\x00" * 100)
+        pe_meta = _pe_meta("PublicApiFunc", "InternalPrivateFunc")
+
+        with patch("abicheck.pe_metadata.parse_pe_metadata", return_value=pe_meta), \
+             patch("abicheck.pdb_utils.locate_pdb", return_value=None), \
+             patch("abicheck.dumper._dump_pe") as mock_dump:
+            result = _dump_pe(p, "1.0")
+
+        assert not mock_dump.called  # castxml path never taken
+        names = {f.name for f in result.functions}
+        assert names == {"PublicApiFunc", "InternalPrivateFunc"}
+        assert all(f.visibility == Visibility.PUBLIC for f in result.functions)
+
+    def test_pdb_debug_preserved_on_scoped_snapshot(self, tmp_path):
+        from abicheck.service import _dump_pe
+
+        p = tmp_path / "lib.dll"
+        p.write_bytes(b"MZ" + b"\x00" * 100)
+        pe_meta = _pe_meta("PublicApiFunc")
+        scoped = _scoped_snapshot("pe", ("PublicApiFunc", Visibility.PUBLIC))
+        dwarf_meta = MagicMock()
+        dwarf_adv = MagicMock()
+
+        with patch("abicheck.pe_metadata.parse_pe_metadata", return_value=pe_meta), \
+             patch("abicheck.dumper._dump_pe", return_value=scoped), \
+             patch("abicheck.service._extract_pdb_debug", return_value=(dwarf_meta, dwarf_adv)):
+            result = _dump_pe(p, "1.0", headers=[Path("api.h")])
+
+        assert result.dwarf is dwarf_meta
+        assert result.dwarf_advanced is dwarf_adv
+
+
+class TestMachoHeaderScoping:
+    def test_headers_route_to_castxml_scoped_dump(self, tmp_path):
+        from abicheck.service import _dump_macho
+
+        p = tmp_path / "lib.dylib"
+        p.write_bytes(b"\xfe\xed\xfa\xce" + b"\x00" * 100)
+        export = MagicMock()
+        export.name = "_publicFn"
+        macho_meta = MagicMock()
+        macho_meta.exports = [export]
+        macho_meta.install_name = "libtest.dylib"
+        macho_meta.dependent_libs = []
+        scoped = _scoped_snapshot("macho", ("publicFn", Visibility.PUBLIC))
+
+        with patch("abicheck.macho_metadata.parse_macho_metadata", return_value=macho_meta), \
+             patch("abicheck.dumper._dump_macho", return_value=scoped) as mock_dump:
+            result = _dump_macho(p, "1.0", headers=[Path("api.h")])
+
+        assert mock_dump.called
+        assert [f.name for f in result.functions] == ["publicFn"]
+
+    def test_fallback_when_no_header_match(self, tmp_path):
+        from abicheck.service import _dump_macho
+
+        p = tmp_path / "lib.dylib"
+        p.write_bytes(b"\xfe\xed\xfa\xce" + b"\x00" * 100)
+        export = MagicMock()
+        export.name = "_publicFn"
+        macho_meta = MagicMock()
+        macho_meta.exports = [export]
+        macho_meta.install_name = "libtest.dylib"
+        macho_meta.dependent_libs = []
+        scoped = _scoped_snapshot("macho", ("other", Visibility.HIDDEN))
+
+        with patch("abicheck.macho_metadata.parse_macho_metadata", return_value=macho_meta), \
+             patch("abicheck.dumper._dump_macho", return_value=scoped):
+            with pytest.warns(UserWarning, match="None of the provided headers matched"):
+                result = _dump_macho(p, "1.0", headers=[Path("api.h")])
+
+        assert [f.name for f in result.functions] == ["_publicFn"]
+
+
+class TestRunDumpHeaderWiring:
+    """run_dump must forward headers/includes to the PE/Mach-O dumpers."""
+
+    def test_run_dump_pe_forwards_headers(self, tmp_path):
+        p = tmp_path / "lib.dll"
+        p.write_bytes(b"MZ" + b"\x00" * 100)
+        snap = AbiSnapshot(library="lib", version="1.0", platform="pe")
+        with patch("abicheck.service._dump_pe", return_value=snap) as mock_pe:
+            run_dump(p, "pe", [Path("api.h")], [Path("inc")], "1.0", "c++")
+        assert mock_pe.call_args.kwargs["headers"] == [Path("api.h")]
+        assert mock_pe.call_args.kwargs["includes"] == [Path("inc")]
+
+    def test_run_dump_macho_forwards_headers(self, tmp_path):
+        p = tmp_path / "lib.dylib"
+        p.write_bytes(b"\xfe\xed\xfa\xce" + b"\x00" * 100)
+        snap = AbiSnapshot(library="lib", version="1.0", platform="macho")
+        with patch("abicheck.service._dump_macho", return_value=snap) as mock_macho:
+            run_dump(p, "macho", [Path("api.h")], [], "1.0", "c++")
+        assert mock_macho.call_args.kwargs["headers"] == [Path("api.h")]
+
+
+class TestCliNativeBinaryHeaderWiring:
+    """CLI _dump_native_binary must forward headers to service._dump_pe/_dump_macho."""
+
+    def test_cli_pe_forwards_headers(self, tmp_path):
+        from abicheck.cli import _dump_native_binary
+
+        p = tmp_path / "lib.dll"
+        p.write_bytes(b"MZ" + b"\x00" * 100)
+        snap = AbiSnapshot(library="lib", version="1.0", platform="pe")
+        with patch("abicheck.service._dump_pe", return_value=snap) as mock_pe:
+            _dump_native_binary(p, "pe", [Path("api.h")], [Path("inc")], "1.0", "c++")
+        assert mock_pe.call_args.kwargs["headers"] == [Path("api.h")]
+        assert mock_pe.call_args.kwargs["includes"] == [Path("inc")]
+
+    def test_cli_macho_forwards_headers(self, tmp_path):
+        from abicheck.cli import _dump_native_binary
+
+        p = tmp_path / "lib.dylib"
+        p.write_bytes(b"\xfe\xed\xfa\xce" + b"\x00" * 100)
+        snap = AbiSnapshot(library="lib", version="1.0", platform="macho")
+        with patch("abicheck.service._dump_macho", return_value=snap) as mock_macho:
+            _dump_native_binary(p, "macho", [Path("api.h")], [], "1.0", "c++")
+        assert mock_macho.call_args.kwargs["headers"] == [Path("api.h")]
