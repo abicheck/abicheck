@@ -87,8 +87,6 @@ must survive a toolchain change.
 - `CMakeLists.txt`
 - `app.cpp`
 - `v1.cpp`
-- `v1.hpp`
 - `v2.cpp`
-- `v2.hpp`
 
 _See also: [Examples overview](index.md) · [All BREAKING cases](by-verdict/breaking.md) · [Category: Breaking](by-category/breaking.md)._

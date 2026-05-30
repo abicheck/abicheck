@@ -132,3 +132,34 @@ class TestVectorAbiPartition:
         meta = REGISTRY.get("vector_abi_changed")
         assert meta is not None
         assert meta.policy_overrides.get("plugin_abi") is Verdict.COMPATIBLE
+
+
+class TestVectorAbiBinaryOnly:
+    """The kind is producer-derived, so it must be treated as binary-only in
+    source-level reports (like toolchain_flag_drift)."""
+
+    def test_in_compat_binary_only_kinds(self) -> None:
+        from abicheck.compat.cli import _BINARY_ONLY_KINDS
+        assert ChangeKind.VECTOR_ABI_CHANGED in _BINARY_ONLY_KINDS
+
+    def test_in_report_binary_only_kinds(self) -> None:
+        from abicheck.report_classifications import BINARY_ONLY_KINDS
+        assert "vector_abi_changed" in BINARY_ONLY_KINDS
+
+
+class TestVectorAbiSerializationRoundTrip:
+    """vector_abi_flags must survive a snapshot JSON round-trip so that
+    comparisons run from saved snapshots still report the change."""
+
+    def test_round_trip_preserves_vector_abi_flags(self) -> None:
+        from abicheck.serialization import snapshot_from_dict, snapshot_to_dict
+        snap = _snap({"-mveclibabi=svml"})
+        restored = snapshot_from_dict(snapshot_to_dict(snap))
+        assert restored.dwarf_advanced.toolchain.vector_abi_flags == {"-mveclibabi=svml"}
+
+    def test_round_trip_still_detects_change(self) -> None:
+        from abicheck.serialization import snapshot_from_dict, snapshot_to_dict
+        old = snapshot_from_dict(snapshot_to_dict(_snap(set())))
+        new = snapshot_from_dict(snapshot_to_dict(_snap({"-vecabi=cmdtarget"})))
+        kinds = {c.kind for c in compare(old, new).changes}
+        assert ChangeKind.VECTOR_ABI_CHANGED in kinds

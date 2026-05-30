@@ -200,6 +200,7 @@ _BINARY_ONLY_KINDS: frozenset[ChangeKind] = frozenset({
     ChangeKind.SYMBOL_VERSION_REQUIRED_REMOVED,
     ChangeKind.DWARF_INFO_MISSING,
     ChangeKind.TOOLCHAIN_FLAG_DRIFT,
+    ChangeKind.VECTOR_ABI_CHANGED,
 })
 
 # ChangeKinds that represent new symbols being added (for -warn-newsym)

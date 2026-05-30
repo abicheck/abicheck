@@ -268,6 +268,7 @@ def _dwarf_advanced_from_dict(d: dict[str, Any]) -> Any:
         compiler=tc.get("compiler", ""),
         version=tc.get("version", ""),
         abi_flags=set(tc.get("abi_flags", [])),
+        vector_abi_flags=set(tc.get("vector_abi_flags", [])),
     )
     return AdvancedDwarfMetadata(
         has_dwarf=d.get("has_dwarf", False),

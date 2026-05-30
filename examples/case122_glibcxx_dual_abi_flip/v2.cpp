@@ -1,4 +1,9 @@
-#include "v2.hpp"
+// Self-contained on purpose: the libstdc++ dual-ABI flip is a binary/symbol
+// phenomenon, so this case is validated from the built shared objects (no
+// public header is handed to the snapshotter). v1 and v2 are identical source;
+// only the _GLIBCXX_USE_CXX11_ABI compile flag differs (see CMakeLists.txt).
+#include <string>
+#include <vector>
 
 std::string join(const std::string& a, const std::string& b) { return a + b; }
 std::string upper(const std::string& s) { return s; }
