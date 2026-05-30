@@ -386,3 +386,66 @@ class TestScopeCli:
         result = runner.invoke(main, ["compare", str(op), str(np_)])
         # Without scoping, the internal change is a reported finding.
         assert "InternalCache" in result.stdout
+
+
+# ── machine-readable surface ledger (ADR-024 §D4/D5 disclosure) ──────────────
+
+
+class TestSurfaceLedgerOutput:
+    """The out-of-surface audit ledger is disclosed in JSON and SARIF.
+
+    ADR-024 rejects libabigail's hard ``--headers-dir`` drop precisely so the
+    "why was this excluded" trail stays auditable — that trail must reach the
+    machine-readable formats, not just stderr text.
+    """
+
+    def _scoped_result(self):
+        old = AbiSnapshot(
+            library="lib",
+            version="1",
+            functions=[_fn("public_api", ret="Result *")],
+            types=[_rec("Result", size=64), _rec("InternalCache", size=64)],
+        )
+        new = AbiSnapshot(
+            library="lib",
+            version="2",
+            functions=[_fn("public_api", ret="Result *")],
+            types=[_rec("Result", size=64), _rec("InternalCache", size=128)],
+        )
+        return compare(old, new, scope_to_public_surface=True)
+
+    def test_json_includes_surface_scope_ledger(self):
+        import json
+
+        from abicheck.reporter import to_json
+
+        d = json.loads(to_json(self._scoped_result()))
+        assert "surface_scope" in d
+        ledger = d["surface_scope"]
+        assert ledger["enabled"] is True
+        assert ledger["out_of_surface_count"] >= 1
+        symbols = {c["symbol"] for c in ledger["out_of_surface_changes"]}
+        assert any("InternalCache" in s for s in symbols)
+
+    def test_sarif_includes_surface_scope_ledger(self):
+        from abicheck.sarif import to_sarif
+
+        props = to_sarif(self._scoped_result())["runs"][0]["properties"]
+        assert "surfaceScope" in props
+        ledger = props["surfaceScope"]
+        assert ledger["enabled"] is True
+        assert ledger["outOfSurfaceCount"] >= 1
+        symbols = {c["symbol"] for c in ledger["outOfSurfaceChanges"]}
+        assert any("InternalCache" in s for s in symbols)
+
+    def test_ledger_absent_when_scoping_off(self):
+        import json
+
+        from abicheck.reporter import to_json
+        from abicheck.sarif import to_sarif
+
+        old = AbiSnapshot(library="lib", version="1", functions=[_fn("public_api")])
+        new = AbiSnapshot(library="lib", version="2", functions=[_fn("public_api")])
+        res = compare(old, new)
+        assert "surface_scope" not in json.loads(to_json(res))
+        assert "surfaceScope" not in to_sarif(res)["runs"][0]["properties"]

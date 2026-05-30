@@ -55,6 +55,43 @@ and source sections include their own redundant counts.
 receives them, so derived changes do not appear as test cases. No
 JUnit-specific redundancy metadata is emitted.
 
+## Public-header surface scoping
+
+`--scope-public-headers` (ADR-024) restricts findings to the *public* ABI
+surface — the symbols exported **and** declared in the public headers you
+supplied, plus the types reachable from them. Changes that fall outside that
+surface (e.g. a layout change to an internal struct no public API references)
+are **not dropped**: they are moved to an audit ledger so the "why was this
+excluded" trail stays inspectable. Internal-type leaks are never filtered.
+
+Use `--show-filtered` to print the ledger on the terminal.
+
+### How it appears in each format
+
+**Text**: With `--show-filtered`, an audit block on stderr:
+```
+Filtered as non-public ABI surface (1 finding, --scope-public-headers):
+  - type_size_changed: InternalCache
+```
+
+**JSON**: A top-level `surface_scope` object (present only when scoping is
+active):
+```json
+"surface_scope": {
+  "enabled": true,
+  "out_of_surface_count": 1,
+  "out_of_surface_changes": [
+    {"kind": "type_size_changed", "symbol": "InternalCache",
+     "description": "Size changed: InternalCache (64 → 128 bits)",
+     "source_location": null}
+  ]
+}
+```
+
+**SARIF**: A `surfaceScope` object in run-level `properties` with
+`outOfSurfaceCount` and `outOfSurfaceChanges` (same per-finding fields,
+camelCased), present only when scoping is active.
+
 ## `--show-only` filter
 
 Limit displayed changes by severity, element, or action (AND across dimensions,

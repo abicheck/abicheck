@@ -581,6 +581,24 @@ def to_json(
             for c in result.suppressed_changes
         ],
     }
+    # ADR-024 §D4/D5: public-surface scope ledger. When header scoping is
+    # active, findings that fall outside the public ABI surface are demoted to
+    # this audit ledger rather than dropped — disclosed here (not just on
+    # stderr) so the "why was this excluded" trail is machine-readable.
+    if result.scope_to_public_surface:
+        d["surface_scope"] = {
+            "enabled": True,
+            "out_of_surface_count": result.out_of_surface_count,
+            "out_of_surface_changes": [
+                {
+                    "kind": c.kind.value,
+                    "symbol": c.symbol,
+                    "description": c.description,
+                    "source_location": c.source_location,
+                }
+                for c in result.out_of_surface_changes
+            ],
+        }
     d["detectors"] = [
         {
             "name": det.name,
