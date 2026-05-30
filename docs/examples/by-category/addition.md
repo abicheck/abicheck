@@ -10,10 +10,10 @@ _10 case(s)._ [← back to all examples](../index.md)
 | [case03_compat_addition](../case03_compat_addition.md) | Compatible Addition (New Export) | 🟢 COMPATIBLE | Addition (Compatible) |
 | [case105_concept_tightening](../case105_concept_tightening.md) | Concept Tightening (C++20) | 🟢 COMPATIBLE | Addition (Compatible) |
 | [case111_enumerable_thread_specific_lambda_ambiguity](../case111_enumerable_thread_specific_lambda_ambiguity.md) | enumerable_thread_specific Lambda-Init Ambiguity | 🟢 COMPATIBLE | Addition (Compatible) |
-| [case117_experimental_graduated](../case117_experimental_graduated.md) | case109 — experimental → stable graduation (compatible) | 🟢 COMPATIBLE | Addition (Compatible) |
 | [case16_inline_to_non_inline](../case16_inline_to_non_inline.md) | Case 16 — Inline → Non-inline (ODR / Symbol Appearance) | 🟢 COMPATIBLE | Addition (Compatible) |
 | [case25_enum_member_added](../case25_enum_member_added.md) | Case 25 — Enum Member Added | 🟢 COMPATIBLE | Addition (Compatible) |
 | [case26b_union_field_added_compatible](../case26b_union_field_added_compatible.md) | Case 26b — Union Field Added (No Size Change) | 🟢 COMPATIBLE | Addition (Compatible) |
 | [case47_inline_to_outlined](../case47_inline_to_outlined.md) | Inline Function Moved to Outlined | 🟢 COMPATIBLE | Addition (Compatible) |
 | [case61_var_added](../case61_var_added.md) | Global Variable Added | 🟢 COMPATIBLE | Addition (Compatible) |
 | [case62_type_field_added_compatible](../case62_type_field_added_compatible.md) | Type Field Added (Compatible — Opaque Struct) | 🟢 COMPATIBLE | Addition (Compatible) |
+| [case99_experimental_graduated](../case99_experimental_graduated.md) | case99 — experimental → stable graduation (compatible) | 🟢 COMPATIBLE | Addition (Compatible) |

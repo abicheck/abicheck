@@ -1,0 +1,13 @@
+# Example policy file for case102: declare the oneTBB-style runtime
+# namespace `**::detail::r1::*` as contractually frozen.
+#
+# Run abicheck with:
+#   abicheck compare libv1.so libv2.so --policy-file policy.yaml
+#
+# Any finding whose symbol (or caused_by_type) lies in a matching
+# namespace is tagged frozen_namespace_violation, and `overrides:`
+# entries cannot downgrade its severity.
+base_policy: strict_abi
+frozen_namespaces:
+  - "**::detail::r1::*"
+  - "**::detail::r2::*"

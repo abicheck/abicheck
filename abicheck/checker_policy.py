@@ -407,9 +407,9 @@ class ChangeKind(str, Enum):
     CTOR_EXPLICIT_REMOVED = "ctor_explicit_removed"
 
     # ── Namespace-shape patterns (oneDPL / header-only follow-up) ────────
-    # See examples/case117_experimental_graduated/README.md
+    # See examples/case99_experimental_graduated/README.md
     EXPERIMENTAL_GRADUATED = "experimental_graduated"
-    # See examples/case118_experimental_removed_without_replacement/README.md
+    # See examples/case100_experimental_removed_without_replacement/README.md
     EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT = (
         "experimental_removed_without_replacement"
     )
@@ -423,18 +423,18 @@ class ChangeKind(str, Enum):
     INLINE_NAMESPACE_VERSION_BUMPED = "inline_namespace_version_bumped"
 
     # ── Template / overload-set patterns (PR-B follow-up) ────────────────
-    # See examples/case113_internal_template_signature_changed/README.md
+    # See examples/case85_internal_template_signature_changed/README.md
     INTERNAL_TEMPLATE_LEAKS_VIA_PUBLIC_API = (
         "internal_template_leaks_via_public_api"
     )
-    # See examples/case114_cpo_kind_changed/README.md
+    # See examples/case88_cpo_kind_changed/README.md
     CPO_KIND_CHANGED = "cpo_kind_changed"
     OVERLOAD_SET_REROUTED = "overload_set_rerouted"
     MANDATORY_TEMPLATE_PARAM_ADDED = "mandatory_template_param_added"
     UNSPECIFIED_RETURN_NOW_NAMED = "unspecified_return_now_named"
 
     # ── Build-configuration / probe-harness patterns (PR-C) ──────────────
-    # See examples/case115_api_depends_on_consumer_env/README.md
+    # See examples/case97_api_depends_on_consumer_env/README.md
     API_DEPENDS_ON_CONSUMER_ENV = "api_depends_on_consumer_env"
     CXX_STANDARD_FLOOR_RAISED = "cxx_standard_floor_raised"
     BEHAVIOURAL_DEFAULT_CHANGED = "behavioural_default_changed"

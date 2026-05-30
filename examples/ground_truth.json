@@ -1314,11 +1314,11 @@
       "abi_break": false,
       "api_break": false,
       "bad_practice": true,
-      "known_gap": "Two gaps stack here. (1) castxml does not emit mangled names for user-declared constructors (same gap as case106 / case112), so the added second ctor cannot be observed as FUNC_ADDED end-to-end — abicheck currently returns NO_CHANGE on this case. (2) Even with the FUNC_ADDED in place, constructor overload ambiguity at consumer call sites cannot be detected from library snapshots alone; that needs the castxml header-AST capture path on the roadmap (concept tightening / hidden friends). The case is preserved as a regression fixture for whenever either gap is closed.",
+      "known_gap": "Two gaps stack here. (1) castxml does not emit mangled names for user-declared constructors (same gap as case106 / case78), so the added second ctor cannot be observed as FUNC_ADDED end-to-end — abicheck currently returns NO_CHANGE on this case. (2) Even with the FUNC_ADDED in place, constructor overload ambiguity at consumer call sites cannot be detected from library snapshots alone; that needs the castxml header-AST capture path on the roadmap (concept tightening / hidden friends). The case is preserved as a regression fixture for whenever either gap is closed.",
       "description": "A second constructor overload accepting `std::function<int()>` is added next to the existing `int`-form constructor. By itself this is a pure addition — existing call sites that pass an int still resolve to the original constructor. The risk: brace-initialization and generic callable arguments can become ambiguous at downstream call sites. Member of the oneTBB regression suite.",
       "expected_kinds": ["func_added"]
     },
-    "case112_task_arena_attach_tag": {
+    "case78_task_arena_attach_tag": {
       "expected": "BREAKING",
       "category": "breaking",
       "platforms": [
@@ -1333,7 +1333,7 @@
       "description": "An `attach_mode_t` enum + matching constructor are replaced by an empty tag struct `task_arena::attach` + tag-dispatched constructor. The old enum, its members, and the old constructor's mangled symbol are all removed. Member of the oneTBB regression suite; mirrors the 2021 `task_arena::attach` tag introduction.",
       "expected_kinds": ["func_removed", "type_removed", "enum_member_removed"]
     },
-    "case113_internal_template_signature_changed": {
+    "case85_internal_template_signature_changed": {
       "expected": "BREAKING",
       "category": "breaking",
       "platforms": ["linux", "macos", "windows"],
@@ -1343,7 +1343,7 @@
       "description": "Internal helper template `lib::__detail::walk<T>` is dispatched through by a public inline algorithm `sum_range`. Between v1 and v2 the explicit instantiation set shifts (`walk<float>` removed, `walk<double>` added). Consumers compiled against v1 baked `walk<float>` into their symbol table; against v2 they fail to link. Function-template analogue of internal_type_leaks_via_public_api from PR #238.",
       "expected_kinds": ["internal_template_leaks_via_public_api", "func_removed"]
     },
-    "case114_cpo_kind_changed": {
+    "case88_cpo_kind_changed": {
       "expected": "BREAKING",
       "category": "breaking",
       "platforms": ["linux", "macos", "windows"],
@@ -1353,7 +1353,7 @@
       "description": "Public name `lib::sort` is published in v1 as a free function and in v2 as a customisation point object (constexpr variable of an unspecified function-object class type). Call syntax keeps working but decltype, extern templates, and trait specialisations break.",
       "expected_kinds": ["cpo_kind_changed"]
     },
-    "case115_api_depends_on_consumer_env": {
+    "case97_api_depends_on_consumer_env": {
       "expected": "COMPATIBLE",
       "category": "quality",
       "platforms": ["linux", "macos", "windows"],
@@ -1364,7 +1364,7 @@
       "description": "Header declares `lib::extended()` only when the consumer defines `USE_FEATURE`. The v1 build defines the macro and exports extended(); v2 builds without it. The matrix-aware API_DEPENDS_ON_CONSUMER_ENV finding is the channel that exposes this when both macro states are probed.",
       "expected_kinds": ["func_removed_elf_only"]
     },
-    "case116_cxx_standard_floor_raised": {
+    "case98_cxx_standard_floor_raised": {
       "expected": "NO_CHANGE",
       "category": "no_change",
       "platforms": ["linux", "macos", "windows"],
@@ -1375,7 +1375,7 @@
       "description": "v1 header works under C++17; v2 is built with -std=c++20 but declares the same public surface as v1. Per-binary diff is NO_CHANGE; the source-level break for C++17 consumers only surfaces via the matrix-aware CXX_STANDARD_FLOOR_RAISED detector.",
       "expected_kinds": []
     },
-    "case117_experimental_graduated": {
+    "case99_experimental_graduated": {
       "expected": "COMPATIBLE",
       "category": "addition",
       "platforms": ["linux", "macos", "windows"],
@@ -1385,7 +1385,7 @@
       "description": "A declaration lived only under lib::experimental:: in v1 and is published at the stable lib:: name in v2 while the experimental alias is retained. The dedicated EXPERIMENTAL_GRADUATED finding makes the migration event visible; the underlying signal is also a plain func_added for the stable name.",
       "expected_kinds": ["experimental_graduated", "func_added"]
     },
-    "case118_experimental_removed_without_replacement": {
+    "case100_experimental_removed_without_replacement": {
       "expected": "BREAKING",
       "category": "breaking",
       "platforms": ["linux", "macos", "windows"],
@@ -1395,7 +1395,7 @@
       "description": "A declaration only ever lived under lib::experimental:: in v1 and is removed from v2 with no stable-namespace replacement. The dedicated EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT finding tells reviewers there is no migration target; the underlying mangled symbol disappearance is also reported as a plain func_removed.",
       "expected_kinds": ["experimental_removed_without_replacement", "func_removed"]
     },
-    "case119_inline_namespace_version_bumped": {
+    "case101_inline_namespace_version_bumped": {
       "expected": "BREAKING",
       "category": "breaking",
       "platforms": ["linux", "macos", "windows"],
@@ -1405,7 +1405,7 @@
       "description": "Library uses a versioned inline namespace `_V1` in v1 and bumps to `_V2` in v2. Declarations look identical to consumers so source keeps compiling, but every freshly built TU emits mangled symbols carrying the new version segment — old and new TUs of the same program ODR-violate. Specialisation of the existing inline_namespace_moved that fires from declared-name evidence so it works on header-only inputs and single-symbol bumps.",
       "expected_kinds": ["inline_namespace_version_bumped"]
     },
-    "case120_frozen_runtime_signature_changed": {
+    "case102_frozen_runtime_signature_changed": {
       "expected": "BREAKING",
       "category": "breaking",
       "platforms": [
@@ -1419,7 +1419,7 @@
       "description": "An extern \"C\" runtime entry inside a contractually-frozen namespace (mirrors oneTBB's `detail::r1`) has its parameter and return types widened in place. The exported symbol name is unchanged but callers built against v1 pass int into what is now a long slot. Detected by the existing FUNC_PARAMS_CHANGED / FUNC_RETURN_CHANGED detectors; the new `frozen_namespaces:` policy field additionally tags the finding via Change.frozen_namespace_violation and refuses any `overrides:` entry that would downgrade it. See policy.yaml in the case directory.",
       "expected_kinds": ["func_params_changed", "func_return_changed"]
     },
-    "case121_toolchain_flag_drift": {
+    "case103_toolchain_flag_drift": {
       "expected": "COMPATIBLE",
       "category": "quality",
       "platforms": [
@@ -1431,7 +1431,7 @@
       "description": "Public surface and every exported symbol are identical between v1 and v2; only the ABI-affecting compiler flag set differs (v2 adds -fshort-enums). The toolchain-flag drift detector parses DW_AT_producer and reports the mismatch as a compatible, informational quality signal — a leading indicator that the two builds were made under different ABI assumptions, before that drift turns into a real layout break on a library that exposes enums/packed structs/a different data model.",
       "expected_kinds": ["toolchain_flag_drift"]
     },
-    "case122_glibcxx_dual_abi_flip": {
+    "case104_glibcxx_dual_abi_flip": {
       "expected": "BREAKING",
       "category": "breaking",
       "platforms": [

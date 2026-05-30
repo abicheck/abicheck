@@ -1,8 +1,8 @@
 # CLAUDE.md — `examples/`
 
-The ABI-scenario catalog: ~96 published cases + 4 multi-library bundle
-cases. Each case is a minimal, compilable C/C++ example demonstrating a
-specific ABI/API pitfall.
+The ABI-scenario catalog: 112 cases numbered contiguously (`01–111` +
+`26b`), including 4 multi-library bundle cases. Each case is a minimal,
+compilable C/C++ example demonstrating a specific ABI/API pitfall.
 
 Read `README.md` in this directory first — it indexes every case and
 explains the verdict taxonomy.

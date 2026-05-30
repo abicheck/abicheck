@@ -1,6 +1,6 @@
 # ABI Scenario Catalog
 
-This directory contains **98 published cases** (`01–76` + `26b` + `77, 79–84, 86–87, 89, 94, 95, 96, 105–112`) plus **4 multi-library bundle cases** (`90–93`, tracked separately under [ADR-023](../docs/development/adr/023-bundle-aware-multi-binary-analysis.md)) demonstrating real-world ABI/API break scenarios. Each case is a minimal, compilable C/C++ example with:
+This directory contains **112 cases** numbered contiguously (`01–111` + `26b`), including **4 multi-library bundle cases** (`90–93`, tracked separately under [ADR-023](../docs/development/adr/023-bundle-aware-multi-binary-analysis.md)) demonstrating real-world ABI/API break scenarios. Each case is a minimal, compilable C/C++ example with:
 
 - Paired `v1/` and `v2/` source + headers.
 - A consumer `app.c` / `app.cpp` that demonstrates the actual failure at runtime.
@@ -17,12 +17,13 @@ The catalog drives abicheck's benchmark and serves as an encyclopedia of ABI pit
 
 | Verdict | Count | `checker_policy.py` set | Icon |
 |---------|-------|-------------------------|------|
-| BREAKING | 72 | `BREAKING_KINDS` | 🔴 |
+| BREAKING | 78 | `BREAKING_KINDS` | 🔴 |
 | API_BREAK | 4 | `API_BREAK_KINDS` | 🟠 |
 | COMPATIBLE_WITH_RISK | 2 | `RISK_KINDS` | 🟡 |
-| COMPATIBLE (addition) | 9 | `ADDITION_KINDS` | 🟢 |
-| COMPATIBLE (quality) | 9 | `QUALITY_KINDS` | 🟡 |
-| NO_CHANGE | 2 | — | ✅ |
+| COMPATIBLE (addition) | 10 | `ADDITION_KINDS` | 🟢 |
+| COMPATIBLE (quality) | 11 | `QUALITY_KINDS` | 🟡 |
+| NO_CHANGE | 3 | — | ✅ |
+| Bundle (multi-binary) | 4 | see [ADR-023](../docs/development/adr/023-bundle-aware-multi-binary-analysis.md) | 🔴 |
 
 > **Verdict source of truth:** [`ground_truth.json`](ground_truth.json), which aligns with the 5-tier classification in [`abicheck/checker_policy.py`](../abicheck/checker_policy.py): `BREAKING_KINDS` → `API_BREAK_KINDS` → `RISK_KINDS` → `QUALITY_KINDS` → `ADDITION_KINDS`.
 
@@ -119,18 +120,29 @@ Some policy-escalated source/contract breaks (notably case30, case35) may keep i
 | [75](case75_detail_embedded_by_value/README.md) | Internal `detail::` Impl Embedded by Value | Breaking | BREAKING 🔴 |
 | [76](case76_detail_pimpl_vtable_changed/README.md) | Internal `detail::` Polymorphic Base Vtable Change | Breaking | BREAKING 🔴 |
 | [77](case77_detail_templated_base_changed/README.md) | Internal `detail::` Templated Base Class Layout Change | Breaking | BREAKING 🔴 |
+| [78](case78_task_arena_attach_tag/README.md) | task_arena::attach Tag Replaces Enum (oneTBB regression suite) | Breaking | BREAKING 🔴 |
 | [79](case79_missing_template_instantiation/README.md) | Missing Template Instantiation in Shipped Binary | Breaking | BREAKING 🔴 |
 | [80](case80_pimpl_shared_to_unique/README.md) | Pimpl Alias `shared_ptr` → `unique_ptr` | Breaking | BREAKING 🔴 |
 | [81](case81_serialization_tag_reassigned/README.md) | Serialization Tag ID Reassigned (silent data corruption) | Breaking | BREAKING 🔴 |
 | [82](case82_sycl_overload_set_removed/README.md) | SYCL Overload Set Removed (DPC++ build withdrawn) | Breaking | BREAKING 🔴 |
 | [83](case83_cpu_dispatch_isa_dropped/README.md) | CPU-Dispatch ISA Family Dropped | Risk | COMPATIBLE_WITH_RISK 🟡 |
 | [84](case84_bundle_soname_skew/README.md) | Multi-Library Bundle SONAME Skew | Breaking | BREAKING 🔴 (bad practice) |
+| [85](case85_internal_template_signature_changed/README.md) | Internal Function-Template Signature Leaks via Public API | Breaking | BREAKING 🔴 |
 | [86](case86_tag_struct_renamed/README.md) | Tag Struct Renamed (empty type re-mangling) | Breaking | BREAKING 🔴 |
 | [87](case87_default_template_arg_changed/README.md) | Default Template Argument Changed | Breaking | BREAKING 🔴 |
+| [88](case88_cpo_kind_changed/README.md) | CPO Kind Changed | Breaking | BREAKING 🔴 |
 | [89](case89_inline_accessor_renamed_pimpl_member/README.md) | Inline Accessor References Renamed Pimpl Member | Breaking | BREAKING 🔴 |
 | [94](case94_empty_tag_gained_state/README.md) | Empty Tag Gained State (oneTBB partitioner shape) | Breaking | BREAKING 🔴 |
 | [95](case95_allocator_nested_typedef_removed/README.md) | Allocator Nested-Typedef Removed (member_name suppression demo) | Breaking | BREAKING 🔴 |
 | [96](case96_hidden_friend_removed/README.md) | Hidden Friend Operator Removed (castxml `befriending` detection) | API Break | API_BREAK 🟠 |
+| [97](case97_api_depends_on_consumer_env/README.md) | Public API Depends on Consumer Build Environment | Quality | COMPATIBLE 🟡 (known gap) |
+| [98](case98_cxx_standard_floor_raised/README.md) | C++ Standard Floor Raised (per-binary: NO_CHANGE) | No Change | NO_CHANGE ✅ (known gap) |
+| [99](case99_experimental_graduated/README.md) | experimental → stable Graduation | Addition | COMPATIBLE 🟢 |
+| [100](case100_experimental_removed_without_replacement/README.md) | experimental:: Removed Without Replacement | Breaking | BREAKING 🔴 |
+| [101](case101_inline_namespace_version_bumped/README.md) | Inline Namespace Version Bumped | Breaking | BREAKING 🔴 |
+| [102](case102_frozen_runtime_signature_changed/README.md) | Frozen Runtime Signature Changed (oneTBB `detail::r1` shape) | Breaking | BREAKING 🔴 |
+| [103](case103_toolchain_flag_drift/README.md) | Toolchain Flag Drift (ABI-affecting compiler flags differ via `DW_AT_producer`) | Quality | COMPATIBLE 🟢 |
+| [104](case104_glibcxx_dual_abi_flip/README.md) | libstdc++ Dual-ABI Flip (`_GLIBCXX_USE_CXX11_ABI` toggle) | Breaking | BREAKING 🔴 |
 | [105](case105_concept_tightening/README.md) | Concept Tightening (C++20, known gap) | Addition | COMPATIBLE 🟢 (known gap) |
 | [106](case106_ctor_became_explicit/README.md) | Conversion Operator Became `explicit` | API Break | API_BREAK 🟠 |
 | [107](case107_task_scheduler_init_removed/README.md) | `task_scheduler_init` Removed (oneTBB 2021.1) | Breaking | BREAKING 🔴 |
@@ -138,10 +150,6 @@ Some policy-escalated source/contract breaks (notably case30, case35) may keep i
 | [109](case109_flow_graph_policy_renames/README.md) | flow::graph Policy Tag Renames (oneTBB regression suite) | Breaking | BREAKING 🔴 |
 | [110](case110_concurrent_unordered_map_api_drift/README.md) | concurrent_unordered_map API Drift (oneTBB regression suite) | Breaking | BREAKING 🔴 |
 | [111](case111_enumerable_thread_specific_lambda_ambiguity/README.md) | enumerable_thread_specific Lambda-Init Ambiguity (oneTBB regression suite) | Addition | COMPATIBLE 🟢 (known gap) |
-| [112](case112_task_arena_attach_tag/README.md) | task_arena::attach Tag Replaces Enum (oneTBB regression suite) | Breaking | BREAKING 🔴 |
-| [120](case120_frozen_runtime_signature_changed/README.md) | Frozen Runtime Signature Changed (oneTBB `detail::r1` shape) | Breaking | BREAKING 🔴 |
-| [121](case121_toolchain_flag_drift/README.md) | Toolchain Flag Drift (ABI-affecting compiler flags differ via `DW_AT_producer`) | Quality | COMPATIBLE 🟢 |
-| [122](case122_glibcxx_dual_abi_flip/README.md) | libstdc++ Dual-ABI Flip (`_GLIBCXX_USE_CXX11_ABI` toggle) | Breaking | BREAKING 🔴 |
 
 ---
 

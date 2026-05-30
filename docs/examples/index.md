@@ -59,6 +59,11 @@ Source files (`v1.*`, `v2.*`, `app.*`, `CMakeLists.txt`) are listed at the botto
 | [case07_struct_layout](case07_struct_layout.md) | Struct Layout Change | 🔴 BREAKING | Breaking |
 | [case08_enum_value_change](case08_enum_value_change.md) | Enum Value Change | 🔴 BREAKING | Breaking |
 | [case09_cpp_vtable](case09_cpp_vtable.md) | C++ Vtable Change | 🔴 BREAKING | Breaking |
+| [case100_experimental_removed_without_replacement](case100_experimental_removed_without_replacement.md) | : removed without replacement (API break) | 🔴 BREAKING | Breaking |
+| [case101_inline_namespace_version_bumped](case101_inline_namespace_version_bumped.md) | case101 — inline namespace version bumped (BREAKING) | 🔴 BREAKING | Breaking |
+| [case102_frozen_runtime_signature_changed](case102_frozen_runtime_signature_changed.md) | Frozen Runtime Signature Changed (oneTBB `detail::r1` shape) | 🔴 BREAKING | Breaking |
+| [case103_toolchain_flag_drift](case103_toolchain_flag_drift.md) | Toolchain flag drift (`toolchain_flag_drift`) | 🟢 COMPATIBLE | Quality (Compatible) |
+| [case104_glibcxx_dual_abi_flip](case104_glibcxx_dual_abi_flip.md) | libstdc++ dual-ABI flip (`glibcxx_dual_abi_flip_detected`) | 🔴 BREAKING | Breaking |
 | [case105_concept_tightening](case105_concept_tightening.md) | Concept Tightening (C++20) | 🟢 COMPATIBLE | Addition (Compatible) |
 | [case106_ctor_became_explicit](case106_ctor_became_explicit.md) | Conversion Operator Became `explicit` | 🟠 API_BREAK | API Break |
 | [case107_task_scheduler_init_removed](case107_task_scheduler_init_removed.md) | `task_scheduler_init` Removed (oneTBB historical break) | 🔴 BREAKING | Breaking |
@@ -67,18 +72,7 @@ Source files (`v1.*`, `v2.*`, `app.*`, `CMakeLists.txt`) are listed at the botto
 | [case10_return_type](case10_return_type.md) | Return Type Change | 🔴 BREAKING | Breaking |
 | [case110_concurrent_unordered_map_api_drift](case110_concurrent_unordered_map_api_drift.md) | concurrent_unordered_map API Drift | 🔴 BREAKING | Breaking |
 | [case111_enumerable_thread_specific_lambda_ambiguity](case111_enumerable_thread_specific_lambda_ambiguity.md) | enumerable_thread_specific Lambda-Init Ambiguity | 🟢 COMPATIBLE | Addition (Compatible) |
-| [case112_task_arena_attach_tag](case112_task_arena_attach_tag.md) | task_arena::attach Tag Type Replaces Enum | 🔴 BREAKING | Breaking |
-| [case113_internal_template_signature_changed](case113_internal_template_signature_changed.md) | case113 — internal function-template signature leaks via public API (BREAKING) | 🔴 BREAKING | Breaking |
-| [case114_cpo_kind_changed](case114_cpo_kind_changed.md) | case114 — CPO kind changed (BREAKING) | 🔴 BREAKING | Breaking |
-| [case115_api_depends_on_consumer_env](case115_api_depends_on_consumer_env.md) | case115 — public API depends on consumer build environment (RISK) | 🟢 COMPATIBLE | Quality (Compatible) |
-| [case116_cxx_standard_floor_raised](case116_cxx_standard_floor_raised.md) | NO_CHANGE) | ✅ NO_CHANGE | No Change |
-| [case117_experimental_graduated](case117_experimental_graduated.md) | case109 — experimental → stable graduation (compatible) | 🟢 COMPATIBLE | Addition (Compatible) |
-| [case118_experimental_removed_without_replacement](case118_experimental_removed_without_replacement.md) | : removed without replacement (API break) | 🔴 BREAKING | Breaking |
-| [case119_inline_namespace_version_bumped](case119_inline_namespace_version_bumped.md) | case112 — inline namespace version bumped (BREAKING) | 🔴 BREAKING | Breaking |
 | [case11_global_var_type](case11_global_var_type.md) | Global Variable Type Change | 🔴 BREAKING | Breaking |
-| [case120_frozen_runtime_signature_changed](case120_frozen_runtime_signature_changed.md) | Frozen Runtime Signature Changed (oneTBB `detail::r1` shape) | 🔴 BREAKING | Breaking |
-| [case121_toolchain_flag_drift](case121_toolchain_flag_drift.md) | Toolchain flag drift (`toolchain_flag_drift`) | 🟢 COMPATIBLE | Quality (Compatible) |
-| [case122_glibcxx_dual_abi_flip](case122_glibcxx_dual_abi_flip.md) | libstdc++ dual-ABI flip (`glibcxx_dual_abi_flip_detected`) | 🔴 BREAKING | Breaking |
 | [case12_function_removed](case12_function_removed.md) | Function Removed from Shared Library | 🔴 BREAKING | Breaking |
 | [case13_symbol_versioning](case13_symbol_versioning.md) | Symbol Versioning Script | 🟢 COMPATIBLE | Quality (Compatible) |
 | [case14_cpp_class_size](case14_cpp_class_size.md) | C++ Class Size Change | 🔴 BREAKING | Breaking |
@@ -146,15 +140,21 @@ Source files (`v1.*`, `v2.*`, `app.*`, `CMakeLists.txt`) are listed at the botto
 | [case75_detail_embedded_by_value](case75_detail_embedded_by_value.md) | Internal `detail::` impl struct embedded by value | 🔴 BREAKING | Breaking |
 | [case76_detail_pimpl_vtable_changed](case76_detail_pimpl_vtable_changed.md) | Internal `detail::` polymorphic base vtable change | 🔴 BREAKING | Breaking |
 | [case77_detail_templated_base_changed](case77_detail_templated_base_changed.md) | Internal `detail::` *templated* base class layout change | 🔴 BREAKING | Breaking |
+| [case78_task_arena_attach_tag](case78_task_arena_attach_tag.md) | task_arena::attach Tag Type Replaces Enum | 🔴 BREAKING | Breaking |
 | [case79_missing_template_instantiation](case79_missing_template_instantiation.md) | Missing template instantiation in shipped binary | 🔴 BREAKING | Breaking |
 | [case80_pimpl_shared_to_unique](case80_pimpl_shared_to_unique.md) | Pimpl alias changed from `shared_ptr` to `unique_ptr` | 🔴 BREAKING | Breaking |
 | [case81_serialization_tag_reassigned](case81_serialization_tag_reassigned.md) | Serialization tag ID reassigned | 🔴 BREAKING | Breaking |
 | [case82_sycl_overload_set_removed](case82_sycl_overload_set_removed.md) | SYCL overload set removed (DPC++ build withdrawn) | 🔴 BREAKING | Breaking |
 | [case83_cpu_dispatch_isa_dropped](case83_cpu_dispatch_isa_dropped.md) | CPU-dispatch ISA family dropped | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case84_bundle_soname_skew](case84_bundle_soname_skew.md) | Multi-library bundle SONAME skew | 🔴 BREAKING | Breaking |
+| [case85_internal_template_signature_changed](case85_internal_template_signature_changed.md) | case85 — internal function-template signature leaks via public API (BREAKING) | 🔴 BREAKING | Breaking |
 | [case86_tag_struct_renamed](case86_tag_struct_renamed.md) | Tag struct renamed (empty class re-mangling) | 🔴 BREAKING | Breaking |
 | [case87_default_template_arg_changed](case87_default_template_arg_changed.md) | Default template argument changed | 🔴 BREAKING | Breaking |
+| [case88_cpo_kind_changed](case88_cpo_kind_changed.md) | case88 — CPO kind changed (BREAKING) | 🔴 BREAKING | Breaking |
 | [case89_inline_accessor_renamed_pimpl_member](case89_inline_accessor_renamed_pimpl_member.md) | Inline accessor references renamed pimpl member | 🔴 BREAKING | Breaking |
 | [case94_empty_tag_gained_state](case94_empty_tag_gained_state.md) | Empty Tag Gained State | 🔴 BREAKING | Breaking |
 | [case95_allocator_nested_typedef_removed](case95_allocator_nested_typedef_removed.md) | Allocator Nested-Typedef Removed | 🔴 BREAKING | Breaking |
 | [case96_hidden_friend_removed](case96_hidden_friend_removed.md) | Hidden Friend Operator Removed | 🟠 API_BREAK | API Break |
+| [case97_api_depends_on_consumer_env](case97_api_depends_on_consumer_env.md) | case97 — public API depends on consumer build environment (RISK) | 🟢 COMPATIBLE | Quality (Compatible) |
+| [case98_cxx_standard_floor_raised](case98_cxx_standard_floor_raised.md) | NO_CHANGE) | ✅ NO_CHANGE | No Change |
+| [case99_experimental_graduated](case99_experimental_graduated.md) | case99 — experimental → stable graduation (compatible) | 🟢 COMPATIBLE | Addition (Compatible) |
