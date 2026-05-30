@@ -230,6 +230,12 @@ ASSERTED_CHANGE_KINDS: set[ChangeKind] = {
     # Hidden friend transitions — exercised in tests/test_hidden_friends.py
     ChangeKind.HIDDEN_FRIEND_ADDED,
     ChangeKind.HIDDEN_FRIEND_REMOVED,
+    # Modern-C++/oneAPI ABI hazards — exercised in tests/test_new_detectors.py
+    ChangeKind.INTEGER_MODEL_CHANGED,
+    ChangeKind.ABI_TAG_CHANGED,
+    ChangeKind.CHAR8T_MIGRATION,
+    ChangeKind.BIT_INT_WIDTH_CHANGED,
+    ChangeKind.ATOMIC_QUALIFIER_CHANGED,
 }
 
 

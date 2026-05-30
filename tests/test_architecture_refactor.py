@@ -142,9 +142,9 @@ class TestDetectorRegistry:
     """Self-registering detector registry."""
 
     def test_all_detectors_registered(self):
-        """All 40 detectors are registered via decorators."""
+        """All 45 detectors are registered via decorators."""
         registry = _get_populated_registry()
-        assert len(registry) == 40
+        assert len(registry) == 45
 
     def test_detector_names_unique(self):
         """No duplicate detector names."""
