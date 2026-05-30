@@ -85,6 +85,20 @@ def _build_location_index(
     return type_loc, func_loc, var_loc
 
 
+def _safe_index(snap: AbiSnapshot) -> bool:
+    """Index ``snap`` for lookups, tolerating partial snapshots seen in tests.
+
+    Returns ``True`` if the snapshot was indexed successfully and is safe to
+    read from, ``False`` otherwise. Keeping the swallowed exception out of a
+    ``try/except/continue`` loop body avoids a silently-ignored-error pattern.
+    """
+    try:
+        snap.index()
+    except Exception:  # noqa: BLE001 — partial snapshots in some tests
+        return False
+    return True
+
+
 def _enrich_source_locations(
     changes: list[Change], old: AbiSnapshot, new: AbiSnapshot,
 ) -> None:
@@ -98,11 +112,7 @@ def _enrich_source_locations(
     # FUNC_REMOVED is only in old, FUNC_ADDED only in new.
     qualified_lookup: dict[str, str] = {}
     for snap in (old, new):
-        if snap is None:
-            continue
-        try:
-            snap.index()
-        except Exception:  # noqa: BLE001 — partial snapshots in some tests
+        if snap is None or not _safe_index(snap):
             continue
         for mangled, fn in (getattr(snap, "_func_by_mangled", None) or {}).items():
             fname = getattr(fn, "name", None)

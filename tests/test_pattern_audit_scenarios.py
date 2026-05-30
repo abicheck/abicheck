@@ -174,7 +174,7 @@ class TestDuplicateScenarios:
         """
         old = _snap(
             functions=[
-                _public_fn("foo_create",    is_extern_c=True),
+                _public_fn("foo_create", is_extern_c=True),
                 _public_fn("foo_create_v2", is_extern_c=True),
             ],
         )
@@ -232,8 +232,8 @@ class TestDuplicateScenarios:
                 underlying_type="int",
                 members=[
                     EnumMember("format_kind_undef", 0),
-                    EnumMember("format_blocked",    2),
-                    EnumMember("format_kind_max",   0x7fff),
+                    EnumMember("format_blocked", 2),
+                    EnumMember("format_kind_max", 0x7fff),
                 ],
             )],
         )
@@ -243,8 +243,8 @@ class TestDuplicateScenarios:
                 underlying_type="long",   # widened
                 members=[
                     EnumMember("format_kind_undef", 0),
-                    EnumMember("format_blocked",    2),
-                    EnumMember("format_kind_max",   0x7fff_ffff_ffff_ffff),
+                    EnumMember("format_blocked", 2),
+                    EnumMember("format_kind_max", 0x7fff_ffff_ffff_ffff),
                 ],
             )],
         )
@@ -276,13 +276,13 @@ class TestS1MacroRuntimeSlotRenumbered:
     def test_arg_slot_macro_renumbered_is_caught(self) -> None:
         """The minimum signal: same name, different integer value."""
         old = _snap(constants={
-            "LIB_ARG_SRC_0":     "1",
-            "LIB_ARG_DST_0":     "17",
+            "LIB_ARG_SRC_0": "1",
+            "LIB_ARG_DST_0": "17",
             "LIB_ARG_WEIGHTS_0": "33",
         })
         new = _snap(constants={
-            "LIB_ARG_SRC_0":     "2",   # <-- silently renumbered
-            "LIB_ARG_DST_0":     "17",
+            "LIB_ARG_SRC_0": "2",  # <-- silently renumbered
+            "LIB_ARG_DST_0": "17",
             "LIB_ARG_WEIGHTS_0": "33",
         })
         kinds = _kinds(compare(old, new))
@@ -296,7 +296,7 @@ class TestS1MacroRuntimeSlotRenumbered:
         consumers passed integer 33 to the execute call; new library
         may now interpret 33 as something else."""
         old = _snap(constants={
-            "LIB_ARG_SRC_0":     "1",
+            "LIB_ARG_SRC_0": "1",
             "LIB_ARG_WEIGHTS_0": "33",
         })
         new = _snap(constants={"LIB_ARG_SRC_0": "1"})
@@ -309,11 +309,11 @@ class TestS1MacroRuntimeSlotRenumbered:
         value breaks every consumer that hard-coded the magic number
         into a struct field or compared against it."""
         old = _snap(constants={
-            "LIB_RUNTIME_DIM_VAL":  "(-9223372036854775807LL - 1)",
+            "LIB_RUNTIME_DIM_VAL": "(-9223372036854775807LL - 1)",
             "LIB_RUNTIME_SIZE_VAL": "((size_t)(-9223372036854775807LL - 1))",
         })
         new = _snap(constants={
-            "LIB_RUNTIME_DIM_VAL":  "(-2147483648)",  # narrowed to int32
+            "LIB_RUNTIME_DIM_VAL": "(-2147483648)",  # narrowed to int32
             "LIB_RUNTIME_SIZE_VAL": "((size_t)(-9223372036854775807LL - 1))",
         })
         kinds = _kinds(compare(old, new))
@@ -365,10 +365,10 @@ class TestS2PointerReturnedInfoStructAppended:
     def test_field_appended_is_flagged(self) -> None:
         old_struct = _version_struct(
             [
-                ("major",       "int"),
-                ("minor",       "int"),
-                ("patch",       "int"),
-                ("hash",        "const char *"),
+                ("major", "int"),
+                ("minor", "int"),
+                ("patch", "int"),
+                ("hash", "const char *"),
                 ("cpu_runtime", "unsigned"),
                 ("gpu_runtime", "unsigned"),
             ],
@@ -376,12 +376,12 @@ class TestS2PointerReturnedInfoStructAppended:
         )
         new_struct = _version_struct(
             [
-                ("major",              "int"),
-                ("minor",              "int"),
-                ("patch",              "int"),
-                ("hash",               "const char *"),
-                ("cpu_runtime",        "unsigned"),
-                ("gpu_runtime",        "unsigned"),
+                ("major", "int"),
+                ("minor", "int"),
+                ("patch", "int"),
+                ("hash", "const char *"),
+                ("cpu_runtime", "unsigned"),
+                ("gpu_runtime", "unsigned"),
                 ("threadpool_runtime", "unsigned"),  # <-- appended
             ],
             size_bits=32 + 32 + 32 + 64 + 32 + 32 + 32,
@@ -466,10 +466,10 @@ class TestS3FeatureMacroGatedEnumSkew:
                 name="sparse_encoding_t",
                 members=[
                     EnumMember("sparse_encoding_undef", 0),
-                    EnumMember("sparse_csr",            1),
-                    EnumMember("sparse_packed",         2),
-                    EnumMember("sparse_coo",            3),
-                    EnumMember("sparse_grouped",        4),  # gated
+                    EnumMember("sparse_csr", 1),
+                    EnumMember("sparse_packed", 2),
+                    EnumMember("sparse_coo", 3),
+                    EnumMember("sparse_grouped", 4),  # gated
                 ],
             )],
             constants={"LIB_EXPERIMENTAL_GROUPED": "1"},
@@ -479,9 +479,9 @@ class TestS3FeatureMacroGatedEnumSkew:
                 name="sparse_encoding_t",
                 members=[
                     EnumMember("sparse_encoding_undef", 0),
-                    EnumMember("sparse_csr",            1),
-                    EnumMember("sparse_packed",         2),
-                    EnumMember("sparse_coo",            3),
+                    EnumMember("sparse_csr", 1),
+                    EnumMember("sparse_packed", 2),
+                    EnumMember("sparse_coo", 3),
                 ],
             )],
             constants={},
@@ -554,11 +554,11 @@ class TestS4InternalValueRangeLeak:
         """Minimal floor: even without a dedicated overlay, the constant
         diff must fire."""
         old = _snap(constants={
-            "internal_only_start":      "4096",  # 1 << 12
+            "internal_only_start": "4096",  # 1 << 12
             "eltwise_stochastic_round": "4097",
         })
         new = _snap(constants={
-            "internal_only_start":      "8192",  # 1 << 13
+            "internal_only_start": "8192",  # 1 << 13
             "eltwise_stochastic_round": "8193",
         })
         kinds = _kinds(compare(old, new))
@@ -626,20 +626,20 @@ class TestS5ForwardCompatTagAppended:
         old = _snap(enums=[EnumType(
             name="post_op_kind",
             members=[
-                EnumMember("post_op_undef",   0),
-                EnumMember("post_op_sum",     1),
+                EnumMember("post_op_undef", 0),
+                EnumMember("post_op_sum", 1),
                 EnumMember("post_op_eltwise", 2),
-                EnumMember("post_op_binary",  3),
+                EnumMember("post_op_binary", 3),
             ],
         )])
         new = _snap(enums=[EnumType(
             name="post_op_kind",
             members=[
-                EnumMember("post_op_undef",      0),
-                EnumMember("post_op_sum",        1),
-                EnumMember("post_op_eltwise",    2),
-                EnumMember("post_op_binary",     3),
-                EnumMember("post_op_binary_v2",  4),  # <-- new
+                EnumMember("post_op_undef", 0),
+                EnumMember("post_op_sum", 1),
+                EnumMember("post_op_eltwise", 2),
+                EnumMember("post_op_binary", 3),
+                EnumMember("post_op_binary_v2", 4),  # <-- new
             ],
         )])
         kinds = _kinds(compare(old, new))
@@ -653,16 +653,16 @@ class TestS5ForwardCompatTagAppended:
         old = _snap(enums=[EnumType(
             name="post_op_kind",
             members=[
-                EnumMember("post_op_sum",     1),
+                EnumMember("post_op_sum", 1),
                 EnumMember("post_op_eltwise", 2),
             ],
         )])
         new = _snap(enums=[EnumType(
             name="post_op_kind",
             members=[
-                EnumMember("post_op_sum",     1),
+                EnumMember("post_op_sum", 1),
                 EnumMember("post_op_eltwise", 2),
-                EnumMember("post_op_binary",  3),  # appended only
+                EnumMember("post_op_binary", 3),  # appended only
             ],
         )])
         kinds = _kinds(compare(old, new))
@@ -680,16 +680,16 @@ class TestS5ForwardCompatTagAppended:
         old = _snap(enums=[EnumType(
             name="post_op_kind",
             members=[
-                EnumMember("post_op_sum",     1),
+                EnumMember("post_op_sum", 1),
                 EnumMember("post_op_eltwise", 2),
             ],
         )])
         new = _snap(enums=[EnumType(
             name="post_op_kind",
             members=[
-                EnumMember("post_op_sum",     1),
+                EnumMember("post_op_sum", 1),
                 EnumMember("post_op_eltwise", 3),   # <-- silently renumbered
-                EnumMember("post_op_binary",  2),   # took eltwise's slot
+                EnumMember("post_op_binary", 2),  # took eltwise's slot
             ],
         )])
         kinds = _kinds(compare(old, new))
