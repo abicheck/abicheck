@@ -52,6 +52,49 @@ jobs:
           path: dist/
           retention-days: 7
 
+  benchmark:
+    name: Release-pinned benchmark
+    # Run only for real releases; attaches a reproducible benchmark report
+    # (versions, git commit, ground-truth digest, per-tool accuracy) to the
+    # GitHub Release so the README accuracy numbers are auditable evidence.
+    if: github.event_name == 'release'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # upload release asset
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system deps (oracles + toolchain)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y gcc g++ castxml cmake
+          sudo apt-get install -y abigail-tools || sudo apt-get install -y libabigail-tools
+          sudo apt-get install -y abi-compliance-checker || true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: 'pip'
+
+      - name: Install package
+        run: pip install -e ".[dev]"
+
+      - name: Run benchmark
+        run: python scripts/benchmark_comparison.py --abicc-timeout 60
+
+      - name: Upload benchmark report (workflow artifact)
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-report
+          path: benchmark_reports/benchmark_report.json
+          retention-days: 90
+
+      - name: Attach benchmark report to the release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: benchmark_reports/benchmark_report.json
+
   publish:
     name: Publish to PyPI
     needs: build
