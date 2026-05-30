@@ -106,10 +106,11 @@ def _build_dll(work: Path, name: str, *, v2: bool) -> tuple[Path, Path]:
     return dll, pdb
 
 
-def _snapshot(dll: Path, pdb: Path, header: Path, version: str):
-    return resolve_input(
-        dll, headers=[header], version=version, lang="c++", pdb_path=pdb,
-    )
+def _snapshot(dll: Path, pdb: Path, version: str):
+    # NB: the PE dump path (service._dump_pe) does not run castxml header
+    # analysis — type information comes from the PDB, not headers. So we pass
+    # only the DLL + its PDB; struct/enum layout flows through the PDB parser.
+    return resolve_input(dll, version=version, lang="c++", pdb_path=pdb)
 
 
 def _has_struct(snap, name: str) -> bool:
@@ -125,7 +126,7 @@ class TestMsvcPdbEndToEnd:
         """The MSVC DLL's export table is captured (always, even without PDB layout)."""
         _require_msvc()
         dll, pdb = _build_dll(tmp_path / "v1", "foo", v2=False)
-        snap = _snapshot(dll, pdb, tmp_path / "v1" / "foo.h", "1.0")
+        snap = _snapshot(dll, pdb, "1.0")
         assert snap.platform == "pe"
         assert snap.pe is not None
         exported = {f.name for f in snap.functions}
@@ -141,7 +142,7 @@ class TestMsvcPdbEndToEnd:
         """
         _require_msvc()
         dll, pdb = _build_dll(tmp_path / "v1", "foo", v2=False)
-        snap = _snapshot(dll, pdb, tmp_path / "v1" / "foo.h", "1.0")
+        snap = _snapshot(dll, pdb, "1.0")
         if not _has_struct(snap, "Widget"):
             pytest.skip("PDB parser did not extract Widget layout from this MSVC PDB")
         widget = snap.dwarf.structs["Widget"]
@@ -151,8 +152,8 @@ class TestMsvcPdbEndToEnd:
         _require_msvc()
         dll1, pdb1 = _build_dll(tmp_path / "a", "foo", v2=False)
         dll2, pdb2 = _build_dll(tmp_path / "b", "foo", v2=False)
-        old = _snapshot(dll1, pdb1, tmp_path / "a" / "foo.h", "1.0")
-        new = _snapshot(dll2, pdb2, tmp_path / "b" / "foo.h", "1.1")
+        old = _snapshot(dll1, pdb1, "1.0")
+        new = _snapshot(dll2, pdb2, "1.1")
         result = compare(old, new)
         assert result.verdict in (Verdict.NO_CHANGE, Verdict.COMPATIBLE)
 
@@ -166,8 +167,8 @@ class TestMsvcPdbEndToEnd:
         _require_msvc()
         dll1, pdb1 = _build_dll(tmp_path / "v1", "foo", v2=False)
         dll2, pdb2 = _build_dll(tmp_path / "v2", "foo", v2=True)
-        old = _snapshot(dll1, pdb1, tmp_path / "v1" / "foo.h", "1.0")
-        new = _snapshot(dll2, pdb2, tmp_path / "v2" / "foo.h", "2.0")
+        old = _snapshot(dll1, pdb1, "1.0")
+        new = _snapshot(dll2, pdb2, "2.0")
         if not (_has_struct(old, "Widget") and _has_struct(new, "Widget")):
             pytest.skip("PDB parser did not extract Widget layout from these MSVC PDBs")
         result = compare(old, new)

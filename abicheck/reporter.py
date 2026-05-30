@@ -236,6 +236,7 @@ def to_stat_json(result: DiffResult, indent: int = 2) -> str:
     summary = build_summary(result)
     effective_policy = result.policy or "strict_abi"
     d: dict[str, object] = {
+        "report_schema_version": REPORT_SCHEMA_VERSION,
         "library": result.library,
         "old_version": result.old_version,
         "new_version": result.new_version,
@@ -460,6 +461,7 @@ def _to_json_leaf(
     non_type_list = [_change_to_dict(c, policy=effective_policy, kind_sets=eff_sets) for c in non_type_changes]
 
     d: dict[str, object] = {
+        "report_schema_version": REPORT_SCHEMA_VERSION,
         "library": result.library,
         "old_version": result.old_version,
         "new_version": result.new_version,

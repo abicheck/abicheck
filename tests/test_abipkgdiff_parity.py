@@ -34,13 +34,18 @@ Requires: abipkgdiff (libabigail-tools), gcc.
 
 from __future__ import annotations
 
-import shutil
 import subprocess
 import tarfile
 from pathlib import Path
 
 import pytest
 from click.testing import CliRunner
+
+from tests._libabigail import (
+    compile_shared_lib,
+    decode_exit_code,
+    require_tool,
+)
 
 # ---------------------------------------------------------------------------
 # Library source pairs
@@ -70,23 +75,6 @@ PARITY_CASES = [
 ]
 
 
-def _require_tool(name: str) -> None:
-    if shutil.which(name) is None:
-        pytest.skip(f"{name} not found in PATH")
-
-
-def _compile_so(src: str, out: Path) -> None:
-    src_file = out.with_suffix(".c")
-    src_file.write_text(src.strip() + "\n", encoding="utf-8")
-    cmd = [
-        "gcc", "-shared", "-fPIC", "-g", "-fvisibility=default",
-        "-Wl,-soname,libfoo.so.1", "-o", str(out), str(src_file),
-    ]
-    r = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-    if r.returncode != 0:
-        pytest.skip(f"library compile failed: {r.stderr[:200]}")
-
-
 def _make_tar_package(lib: Path, pkg: Path) -> None:
     """Wrap a shared library into a tar package under usr/lib/."""
     with tarfile.open(pkg, "w:gz") as tf:
@@ -98,16 +86,7 @@ def _run_abipkgdiff(old_pkg: Path, new_pkg: Path) -> str:
         ["abipkgdiff", str(old_pkg), str(new_pkg)],
         capture_output=True, text=True, timeout=60,
     )
-    code = r.returncode
-    if code == 0:
-        return "COMPATIBLE"
-    if code & 1:
-        return "ERROR"
-    if code & 8:
-        return "BREAKING"
-    if code & 4:
-        return "COMPATIBLE"
-    return "COMPATIBLE"
+    return decode_exit_code(r.returncode, zero_verdict="COMPATIBLE")
 
 
 def _run_abicheck_compare_release(old_pkg: Path, new_pkg: Path) -> str:
@@ -139,15 +118,15 @@ def test_abipkgdiff_parity(
     abipkgdiff_breaking: bool,
     tmp_path: Path,
 ) -> None:
-    _require_tool("abipkgdiff")
-    _require_tool("gcc")
+    require_tool("abipkgdiff")
+    require_tool("gcc")
 
     v1 = tmp_path / "build_v1" / "libfoo.so.1"
     v2 = tmp_path / "build_v2" / "libfoo.so.1"
     v1.parent.mkdir()
     v2.parent.mkdir()
-    _compile_so(_LIB_V1, v1)
-    _compile_so(lib_v2_src, v2)
+    compile_shared_lib(_LIB_V1, v1, lang="c", soname="libfoo.so.1")
+    compile_shared_lib(lib_v2_src, v2, lang="c", soname="libfoo.so.1")
 
     old_pkg = tmp_path / "foo-1.0.tar.gz"
     new_pkg = tmp_path / "foo-2.0.tar.gz"

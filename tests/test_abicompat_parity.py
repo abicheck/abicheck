@@ -31,11 +31,16 @@ Requires: abicompat (libabigail-tools), gcc/g++.
 
 from __future__ import annotations
 
-import shutil
 import subprocess
 from pathlib import Path
 
 import pytest
+
+from tests._libabigail import (
+    compile_shared_lib,
+    decode_exit_code,
+    require_tool,
+)
 
 # ---------------------------------------------------------------------------
 # Cases: (name, lib_v1, lib_v2, app_src, abicheck_expected, abicompat_expected)
@@ -75,24 +80,6 @@ PARITY_CASES = [
 ]
 
 
-def _require_tool(name: str) -> None:
-    if shutil.which(name) is None:
-        pytest.skip(f"{name} not found in PATH")
-
-
-def _compile_so(src: str, out: Path) -> None:
-    """Compile a plain ``libfoo.so`` (no version suffix) so ``-lfoo`` links."""
-    src_file = out.with_suffix(".c")
-    src_file.write_text(src.strip() + "\n", encoding="utf-8")
-    cmd = [
-        "gcc", "-shared", "-fPIC", "-g", "-fvisibility=default",
-        "-Wl,-soname,libfoo.so", "-o", str(out), str(src_file),
-    ]
-    r = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-    if r.returncode != 0:
-        pytest.skip(f"library compile failed: {r.stderr[:200]}")
-
-
 def _compile_app(src: str, lib: Path, out: Path, tmp_path: Path) -> None:
     src_file = tmp_path / "app.c"
     src_file.write_text(src.strip() + "\n", encoding="utf-8")
@@ -108,20 +95,12 @@ def _compile_app(src: str, lib: Path, out: Path, tmp_path: Path) -> None:
 
 
 def _run_abicompat(app: Path, old_lib: Path, new_lib: Path) -> str:
+    # abicompat argument order: <application> <old-library> <new-library>.
     r = subprocess.run(
         ["abicompat", str(app), str(old_lib), str(new_lib)],
         capture_output=True, text=True, timeout=30,
     )
-    code = r.returncode
-    if code == 0:
-        return "COMPATIBLE"
-    if code & 1:
-        return "ERROR"
-    if code & 8:
-        return "BREAKING"
-    if code & 4:
-        return "COMPATIBLE"
-    return "COMPATIBLE"
+    return decode_exit_code(r.returncode, zero_verdict="COMPATIBLE")
 
 
 def _run_abicheck_appcompat(app: Path, old_lib: Path, new_lib: Path) -> str:
@@ -144,15 +123,16 @@ def test_abicompat_parity(
     abicompat_exp: set[str],
     tmp_path: Path,
 ) -> None:
-    _require_tool("abicompat")
-    _require_tool("gcc")
+    require_tool("abicompat")
+    require_tool("gcc")
 
     v1 = tmp_path / "v1" / "libfoo.so"
     v2 = tmp_path / "v2" / "libfoo.so"
     v1.parent.mkdir()
     v2.parent.mkdir()
-    _compile_so(_LIB_V1, v1)
-    _compile_so(lib_v2_src, v2)
+    # Plain libfoo.so (soname libfoo.so) so the app links with -lfoo.
+    compile_shared_lib(_LIB_V1, v1, lang="c", soname="libfoo.so")
+    compile_shared_lib(lib_v2_src, v2, lang="c", soname="libfoo.so")
 
     app = tmp_path / "app"
     _compile_app(_APP_SRC, v1, app, tmp_path)

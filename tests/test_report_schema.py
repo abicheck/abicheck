@@ -20,7 +20,8 @@ These tests pin three things:
 
 1. The schema file itself is well-formed JSON Schema and ships in the package.
 2. Real `to_json` output validates against it (full / show-only / severity).
-3. The emitted ``report_schema_version`` matches the package constant.
+3. The emitted ``report_schema_version`` matches the package constant and is
+   present in every projection (full / ``--stat`` / ``--report-mode leaf``).
 
 `jsonschema` is an optional dependency; structural validation tests skip
 cleanly when it is absent, while the non-jsonschema invariants always run.
@@ -160,3 +161,15 @@ class TestSchemaVersion:
         parts = REPORT_SCHEMA_VERSION.split(".")
         assert len(parts) == 2
         assert all(p.isdigit() for p in parts)
+
+    def test_stat_mode_carries_version(self):
+        """--stat JSON is a different shape but must still carry the version marker."""
+        old, new = _breaking_pair()
+        payload = json.loads(reporter.to_json(compare(old, new), stat=True))
+        assert payload["report_schema_version"] == REPORT_SCHEMA_VERSION
+
+    def test_leaf_mode_carries_version(self):
+        """--report-mode leaf JSON must still carry the version marker."""
+        old, new = _breaking_pair()
+        payload = json.loads(reporter.to_json(compare(old, new), report_mode="leaf"))
+        assert payload["report_schema_version"] == REPORT_SCHEMA_VERSION

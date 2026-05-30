@@ -1399,7 +1399,7 @@ def main() -> None:
 
     print(f"\n  Reports: {REPORT_DIR}/")
     print(f"  Summary: {summary}")
-    print(f"  Report:  {report_path}  (pinned: commit={report['git_commit']}, "
+    print(f"  Report:  {report_path}  (pinned: commit={report['git_commit'] or 'unknown'}, "
           f"gt={(report['ground_truth_sha256'] or '')[:12]})\n")
 
 

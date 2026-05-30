@@ -71,6 +71,14 @@ def _integration_skip_reason() -> str | None:
     return None
 
 
+# Marker → external tool that must be on PATH for that marker's tests to run.
+# Add a row here to gate a new marker on tool availability — no copy-paste loop.
+_MARKER_REQUIRED_TOOL: dict[str, str] = {
+    "abicc": "abi-compliance-checker",
+    "msvc": "cl",  # MSVC compiler driver (set up by the MSVC dev environment)
+}
+
+
 def pytest_collection_modifyitems(config: pytest.Config, items: list) -> None:
     reason = _integration_skip_reason()
     if reason:
@@ -79,18 +87,13 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list) -> None:
             if "integration" in item.keywords:
                 item.add_marker(skip)
 
-    if shutil.which("abi-compliance-checker") is None:
-        skip_abicc = pytest.mark.skip(reason="abi-compliance-checker not found in PATH")
+    for marker, tool in _MARKER_REQUIRED_TOOL.items():
+        if shutil.which(tool) is not None:
+            continue
+        skip = pytest.mark.skip(reason=f"{tool} not found in PATH")
         for item in items:
-            if "abicc" in item.keywords:
-                item.add_marker(skip_abicc)
-
-    # MSVC tests need cl.exe on PATH (set up by the MSVC dev environment).
-    if shutil.which("cl") is None:
-        skip_msvc = pytest.mark.skip(reason="cl.exe (MSVC) not found in PATH")
-        for item in items:
-            if "msvc" in item.keywords:
-                item.add_marker(skip_msvc)
+            if marker in item.keywords:
+                item.add_marker(skip)
 
 
 @pytest.fixture
