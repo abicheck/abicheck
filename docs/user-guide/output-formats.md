@@ -78,7 +78,7 @@ planned once per-declaration header tracking lands — see ADR-024 Phase 1.)
 
 **Text**: With `--show-filtered`, an audit block on stderr (the reason is shown
 in parentheses):
-```
+```text
 Filtered as non-public ABI surface (1 finding, --scope-public-headers):
   - type_size_changed: InternalCache (non-public-type)
 ```
