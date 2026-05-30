@@ -30,6 +30,9 @@ from .model import AbiSnapshot, Visibility
 
 # Canonical integer-width buckets. A change that moves a spelling from one
 # bucket to a *different* bucket (and is not a sign-only change) is a width flip.
+# NOTE: the ``long`` family is intentionally NOT here — its width is data-model
+# dependent (64-bit under LP64 on Linux/macOS, 32-bit under LLP64 on Windows)
+# and is resolved per-target in ``_int_width_bucket``.
 _INT_WIDTH_BUCKETS: dict[str, str] = {
     "int": "32",
     "signed int": "32",
@@ -37,22 +40,29 @@ _INT_WIDTH_BUCKETS: dict[str, str] = {
     "unsigned int": "32",
     "int32_t": "32",
     "uint32_t": "32",
-    "long": "64",
-    "long int": "64",
-    "signed long": "64",
-    "unsigned long": "64",
     "long long": "64",
+    "long long int": "64",
+    "signed long long": "64",
     "unsigned long long": "64",
     "int64_t": "64",
     "uint64_t": "64",
 }
 
+# The ``long`` family: 64-bit under LP64 (Linux/macOS), 32-bit under LLP64
+# (Windows). Resolved against the snapshot platform in ``_int_width_bucket``.
+_LONG_FAMILY = frozenset({"long", "long int", "signed long", "unsigned long"})
+
 # Integer-typedef name hints used to corroborate an LP64<->ILP64 switch.
 _INT_TYPEDEF_HINTS = ("_INT", "_int", "INT_T", "_INTEGER")
 
 
-def _int_width_bucket(type_str: object) -> str | None:
+def _int_width_bucket(type_str: object, is_llp64: bool = False) -> str | None:
     """Map a type spelling to its integer-width bucket, or None.
+
+    ``is_llp64`` must be set for Windows/LLP64 targets, where ``long`` is
+    32-bit; otherwise the LP64 model is assumed (``long`` is 64-bit). Without
+    this, a benign ``int``→``long`` change on Windows would be misread as an
+    LP64↔ILP64 model flip (Codex review P2).
 
     Defensive against non-string inputs: some snapshots/tests carry type fields
     that are not plain strings, and an uncaught exception here would disable the
@@ -61,7 +71,10 @@ def _int_width_bucket(type_str: object) -> str | None:
     """
     if not isinstance(type_str, str):
         return None
-    return _INT_WIDTH_BUCKETS.get(type_str.strip())
+    t = type_str.strip()
+    if t in _LONG_FAMILY:
+        return "32" if is_llp64 else "64"
+    return _INT_WIDTH_BUCKETS.get(t)
 
 
 @registry.detector("integer_model")
@@ -75,6 +88,9 @@ def _diff_integer_model(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     symbol diff.
     """
     changes: list[Change] = []
+
+    # Windows/LLP64: ``long`` is 32-bit, so int<->long is NOT a model flip there.
+    is_llp64 = "pe" in (old.platform, new.platform)
 
     old_map = {f.mangled: f for f in old.functions if f.visibility == Visibility.PUBLIC}
     new_map = {f.mangled: f for f in new.functions if f.visibility == Visibility.PUBLIC}
@@ -91,8 +107,8 @@ def _diff_integer_model(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         for op, npm in zip(of.params, nf.params):
             slots.append((op.type, npm.type))
         for old_t, new_t in slots:
-            ob = _int_width_bucket(old_t)
-            nb = _int_width_bucket(new_t)
+            ob = _int_width_bucket(old_t, is_llp64)
+            nb = _int_width_bucket(new_t, is_llp64)
             if ob is None or nb is None:
                 continue
             total += 1
@@ -112,8 +128,8 @@ def _diff_integer_model(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
             continue
         if not any(h in name for h in _INT_TYPEDEF_HINTS):
             continue
-        ob = _int_width_bucket(old_under)
-        nb = _int_width_bucket(new_under)
+        ob = _int_width_bucket(old_under, is_llp64)
+        nb = _int_width_bucket(new_under, is_llp64)
         if ob is not None and nb is not None and ob != nb:
             typedef_flips.append(f"{name} ({old_under} -> {new_under})")
             if nb == "64":

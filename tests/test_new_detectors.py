@@ -620,6 +620,15 @@ class TestIntegerModelChanged:
         r = compare(old, new)
         assert not _has_kind(r, ChangeKind.INTEGER_MODEL_CHANGED)
 
+    def test_llp64_int_to_long_typedef_not_flagged(self):
+        # Windows/LLP64: `long` is 32-bit, so int->long is NOT a model flip.
+        old = _snap(typedefs={"MKL_INT": "int"})
+        new = _snap(typedefs={"MKL_INT": "long"})
+        old.platform = "pe"
+        new.platform = "pe"
+        r = compare(old, new)
+        assert not _has_kind(r, ChangeKind.INTEGER_MODEL_CHANGED)
+
 
 # ── char8t / _BitInt / _Atomic / abi_tag spelling detectors ──────────────────
 
@@ -650,6 +659,19 @@ class TestChar8tMigration:
         new = [_spell_func("g", "void", ["long"])]
         r = compare(_snap(functions=old), _snap(functions=new))
         assert not _has_kind(r, ChangeKind.CHAR8T_MIGRATION)
+
+    def test_char8t_migration_with_mangling_change(self):
+        # Realistic: char->char8_t changes the mangled name (PKc->PKDu) so the
+        # symbols don't share a key. The demangled-name fallback must still pair
+        # them and surface the migration (Codex review P2).
+        old = [Function(name="f", mangled="_Z1fPKc", return_type="void",
+                        params=[Param(name="s", type="char *")],
+                        visibility=Visibility.PUBLIC)]
+        new = [Function(name="f", mangled="_Z1fPKDu", return_type="void",
+                        params=[Param(name="s", type="char8_t *")],
+                        visibility=Visibility.PUBLIC)]
+        r = compare(_snap(functions=old), _snap(functions=new))
+        assert _has_kind(r, ChangeKind.CHAR8T_MIGRATION)
 
 
 class TestBitIntWidthChanged:

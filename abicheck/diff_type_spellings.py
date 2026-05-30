@@ -29,7 +29,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from dataclasses import dataclass
 
-from .model import AbiSnapshot, Visibility
+from .model import AbiSnapshot, Function, Visibility
 
 
 @dataclass(frozen=True)
@@ -53,17 +53,45 @@ def iter_type_slot_changes(old: AbiSnapshot, new: AbiSnapshot) -> Iterator[TypeS
         # so a malformed snapshot cannot crash (and thus disable) the caller.
         return isinstance(a, str) and isinstance(b, str) and a != b
 
-    # ── Functions: return type + positional parameters ──────────────────────
-    old_fns = {f.mangled: f for f in old.functions if f.visibility == Visibility.PUBLIC}
-    new_fns = {f.mangled: f for f in new.functions if f.visibility == Visibility.PUBLIC}
-    for key in set(old_fns) & set(new_fns):
-        of, nf = old_fns[key], new_fns[key]
+    def _emit(of: Function, nf: Function) -> Iterator[TypeSlotChange]:
         if _differ(of.return_type, nf.return_type):
             yield TypeSlotChange(of.name, "return type", of.return_type, nf.return_type)
         for op, npm in zip(of.params, nf.params):
             if _differ(op.type, npm.type):
                 pname = op.name or npm.name or "?"
                 yield TypeSlotChange(of.name, f"parameter '{pname}'", op.type, npm.type)
+
+    # ── Functions: return type + positional parameters ──────────────────────
+    old_fns = {f.mangled: f for f in old.functions if f.visibility == Visibility.PUBLIC}
+    new_fns = {f.mangled: f for f in new.functions if f.visibility == Visibility.PUBLIC}
+    matched_new: set[str] = set()
+    for key in set(old_fns) & set(new_fns):
+        matched_new.add(key)
+        yield from _emit(old_fns[key], new_fns[key])
+
+    # Fallback: a type migration such as char->char8_t, ->_BitInt(N), or an
+    # _Atomic qualifier change *alters the mangled name itself* (e.g. PKc->PKDu),
+    # so the two symbols never share a mangled key and the pass above misses
+    # them (Codex review P2). Pair any leftover functions by their demangled
+    # name, but only when that name is unambiguous on both sides (exactly one
+    # unmatched old and one unmatched new) so overload sets are never mispaired.
+    leftover_old = [f for k, f in old_fns.items() if k not in set(new_fns)]
+    leftover_new = [f for k, f in new_fns.items() if k not in matched_new]
+    if leftover_old and leftover_new:
+        from collections import defaultdict
+
+        old_by_name: dict[str, list[Function]] = defaultdict(list)
+        for f in leftover_old:
+            if f.name:
+                old_by_name[f.name].append(f)
+        new_by_name: dict[str, list[Function]] = defaultdict(list)
+        for f in leftover_new:
+            if f.name:
+                new_by_name[f.name].append(f)
+        for nm, olist in old_by_name.items():
+            nlist = new_by_name.get(nm)
+            if len(olist) == 1 and nlist and len(nlist) == 1:
+                yield from _emit(olist[0], nlist[0])
 
     # ── Record types: field spellings ───────────────────────────────────────
     old_types = {t.name: t for t in old.types}
