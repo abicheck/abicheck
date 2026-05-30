@@ -87,9 +87,25 @@ abicheck probe compare onedpl-2022.json onedpl-2023.json -f markdown
 | `-f, --format` | `json` (default), `markdown`, `sarif`, or `junit`. |
 | `-o, --output` | Write the report here (default: stdout). |
 | `--policy` | Built-in policy profile for verdict classification. |
+| `--allow-failures` | Diff even when an input matrix has failed probe results. |
 
 The exit code follows the legacy `compare` mapping: `0` = compatible,
 `2` = source break, `4` = ABI break.
+
+### Incomplete matrices
+
+The `API_DEPENDS_ON_CONSUMER_ENV` detector only inspects probes that
+compiled successfully. If a `probe run` produced failures — most commonly
+a compiler missing from `PATH` — every result for that configuration
+carries an error and no snapshot. Diffing two such matrices would skip
+the failed results and could report `NO_CHANGE` / exit `0`, silently
+marking an *untested* matrix as compatible.
+
+To avoid that false-negative, `probe compare` **rejects** an input matrix
+that contains failed results, printing the failures and exiting with code
+`3`. Pass `--allow-failures` to diff the successful subset anyway; the
+report is then marked low-confidence with a coverage warning naming how
+many results were skipped.
 
 ## Python API
 

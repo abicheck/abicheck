@@ -62,6 +62,12 @@ _VERDICT_EXIT = {
     "API_BREAK": 2,
 }
 
+# Exit code for a comparison that could not be trusted because one of the
+# input matrices contained failed probe results (e.g. a missing compiler).
+# Distinct from the verdict codes so callers can tell "incomplete input"
+# apart from "compatible".
+_EXIT_INCOMPLETE_MATRIX = 3
+
 
 @main.group("probe")
 def probe_group() -> None:
@@ -162,20 +168,56 @@ def probe_run(
     show_default=True,
     help="Built-in policy profile for verdict classification.",
 )
+@click.option(
+    "--allow-failures",
+    is_flag=True,
+    default=False,
+    help="Diff even when an input matrix contains failed probe results "
+    "(by default the comparison is rejected as untrustworthy).",
+)
 def probe_compare(
     old_matrix: Path,
     new_matrix: Path,
     fmt: str,
     output: Path | None,
     policy: str,
+    allow_failures: bool,
 ) -> None:
     """Diff two MatrixSnapshots and report build-configuration findings.
 
     Exit code follows the legacy ``compare`` mapping: 0 = compatible,
-    2 = source break, 4 = ABI break.
+    2 = source break, 4 = ABI break. A third code (3) is returned when an
+    input matrix contains failed probe results and ``--allow-failures``
+    was not given — the env-dependence detector only sees successful
+    snapshots, so diffing an incomplete matrix could silently report
+    "compatible".
     """
     old = load_matrix_snapshot(old_matrix)
     new = load_matrix_snapshot(new_matrix)
+
+    # Guard against a false "compatible" verdict over an incomplete
+    # matrix. ``diff_matrix`` skips results with no snapshot, so a matrix
+    # whose probes all failed to compile (e.g. a missing compiler) would
+    # diff clean and exit 0 with high confidence. Refuse by default.
+    old_failed = [r for r in old.results if r.error]
+    new_failed = [r for r in new.results if r.error]
+    if (old_failed or new_failed) and not allow_failures:
+        for label, failed in (("old", old_failed), ("new", new_failed)):
+            for r in failed:
+                click.echo(
+                    f"  ! {label} {r.configuration_id} / {r.probe_id}: {r.error}",
+                    err=True,
+                )
+        click.echo(
+            f"probe compare: {len(old_failed)} failed result(s) in old matrix, "
+            f"{len(new_failed)} in new matrix. Refusing to diff an incomplete "
+            f"matrix — a clean result would be misleading. Re-run `probe run` "
+            f"with a working toolchain, or pass --allow-failures to diff the "
+            f"successful subset.",
+            err=True,
+        )
+        raise SystemExit(_EXIT_INCOMPLETE_MATRIX)
+
     findings = diff_matrix(old, new)
 
     result = DiffResult(
@@ -186,6 +228,19 @@ def probe_compare(
         verdict=compute_verdict(findings, policy=policy),
         policy=policy,
     )
+
+    # When proceeding over a partial matrix (--allow-failures), the
+    # env-dependence findings cover only the successful subset, so flag
+    # the reduced trust rather than letting the report claim high
+    # confidence.
+    if old_failed or new_failed:
+        from .checker_policy import Confidence
+
+        result.confidence = Confidence.LOW
+        result.coverage_warnings = [
+            f"{len(old_failed) + len(new_failed)} probe result(s) failed; "
+            f"env-dependence findings cover only the successful subset."
+        ]
 
     if fmt == "json":
         from .reporter import to_json

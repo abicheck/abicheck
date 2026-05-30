@@ -52,6 +52,30 @@ def _write_matrix(
     )
 
 
+def _write_failed_matrix(path: Path, *, version: str) -> None:
+    """A matrix whose only probe result failed to compile (no snapshot)."""
+    path.write_text(
+        json.dumps(
+            {
+                "library": "onedpl",
+                "version": version,
+                "spec_name": "onedpl",
+                "cxx_stds": {"gcc_cxx20": 20},
+                "defaults": {"backend": "tbb"},
+                "results": [
+                    {
+                        "configuration_id": "gcc_cxx20",
+                        "probe_id": "sort",
+                        "object_path": None,
+                        "snapshot": None,
+                        "error": "compiler 'g++' not found on PATH",
+                    }
+                ],
+            }
+        )
+    )
+
+
 # ---------------------------------------------------------------------------
 # probe compare
 # ---------------------------------------------------------------------------
@@ -128,6 +152,82 @@ class TestProbeCompare:
         result = CliRunner().invoke(main, ["probe", "compare", str(old), str(new)])
         assert result.exit_code == 0, result.output
         assert json.loads(result.output)["verdict"] in ("NO_CHANGE", "COMPATIBLE")
+
+
+class TestProbeCompareIncompleteMatrix:
+    """An all-failed matrix (e.g. missing compiler) must not diff clean."""
+
+    def test_failed_results_rejected_with_exit_3(self, tmp_path: Path) -> None:
+        old = tmp_path / "old.json"
+        new = tmp_path / "new.json"
+        _write_failed_matrix(old, version="1.0")
+        _write_failed_matrix(new, version="2.0")
+        result = CliRunner().invoke(main, ["probe", "compare", str(old), str(new)])
+        assert result.exit_code == 3, result.output
+        assert "Refusing to diff an incomplete matrix" in result.output
+        assert "not found on PATH" in result.output
+
+    def test_failure_in_only_one_matrix_still_rejected(self, tmp_path: Path) -> None:
+        old = tmp_path / "old.json"
+        new = tmp_path / "new.json"
+        _write_matrix(
+            old, version="1.0", cxx_stds={"a": 20}, defaults={"backend": "tbb"}
+        )
+        _write_failed_matrix(new, version="2.0")
+        result = CliRunner().invoke(main, ["probe", "compare", str(old), str(new)])
+        assert result.exit_code == 3, result.output
+
+    def test_allow_failures_diffs_and_marks_low_confidence(
+        self, tmp_path: Path
+    ) -> None:
+        old = tmp_path / "old.json"
+        new = tmp_path / "new.json"
+        # Defaults differ → a real finding survives, but the matrix is partial.
+        _write_failed_matrix(old, version="1.0")
+        new.write_text(
+            json.dumps(
+                {
+                    "library": "onedpl",
+                    "version": "2.0",
+                    "spec_name": "onedpl",
+                    "cxx_stds": {"gcc_cxx20": 20},
+                    "defaults": {"backend": "openmp"},
+                    "results": [
+                        {
+                            "configuration_id": "gcc_cxx20",
+                            "probe_id": "sort",
+                            "object_path": None,
+                            "snapshot": None,
+                            "error": "compiler 'g++' not found on PATH",
+                        }
+                    ],
+                }
+            )
+        )
+        result = CliRunner().invoke(
+            main, ["probe", "compare", str(old), str(new), "--allow-failures"]
+        )
+        # behavioural_default_changed is risk → verdict not API_BREAK → exit 0.
+        assert result.exit_code == 0, result.output
+        payload = json.loads(result.output)
+        assert payload["confidence"] == "low"
+        assert any(
+            c["kind"] == "behavioural_default_changed" for c in payload["changes"]
+        )
+
+    def test_clean_matrix_unaffected(self, tmp_path: Path) -> None:
+        # A matrix with no failed results is diffed normally (high confidence).
+        old = tmp_path / "old.json"
+        new = tmp_path / "new.json"
+        _write_matrix(
+            old, version="1.0", cxx_stds={"a": 20}, defaults={"backend": "tbb"}
+        )
+        _write_matrix(
+            new, version="2.0", cxx_stds={"a": 20}, defaults={"backend": "tbb"}
+        )
+        result = CliRunner().invoke(main, ["probe", "compare", str(old), str(new)])
+        assert result.exit_code == 0, result.output
+        assert json.loads(result.output)["confidence"] == "high"
 
 
 # ---------------------------------------------------------------------------
