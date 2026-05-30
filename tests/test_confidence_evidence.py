@@ -175,6 +175,24 @@ class TestCanonicalEvidenceTier:
         assert "Evidence tier" in md
         assert "header_aware" in md
 
+    def test_evidence_tier_in_appcompat_json(self):
+        """appcompat JSON surfaces the canonical tier from the underlying full diff."""
+        import types
+
+        f = _pub_func("api", "_Z3apiv")
+        full = compare(_snap(functions=[f]), _snap(functions=[f]))
+        fake = types.SimpleNamespace(
+            full_diff=full,
+            app_path="app",
+            library_path="lib.so",
+            verdict=full.verdict,
+            used_symbols=[],
+            affected_symbols=[],
+            affected_changes=[],
+        )
+        payload = json.loads(reporter.appcompat_to_json(fake))
+        assert payload["evidence_tier"] == "header_aware"
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Confidence Levels
