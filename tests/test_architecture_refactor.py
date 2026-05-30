@@ -267,6 +267,7 @@ class TestPostProcessingPipeline:
             "deduplicate_cross_detector",
             "downgrade_opaque_type_changes",
             "enrich_source_locations",
+            "filter_non_public_surface",
             "apply_suppression",
             "suppress_renamed_pairs",
             "filter_redundant",

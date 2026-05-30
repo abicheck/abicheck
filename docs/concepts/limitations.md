@@ -242,6 +242,10 @@ in those public headers via castxml. This is **best-effort**:
   and MinGW-built exports match by plain name and scope correctly.
 
 Reachability-based public-surface filtering (keeping only the symbols and types reachable
-from public headers, with an auditable trail of what was filtered and why) remains a
-separate, larger effort designed in
-[ADR-024](../development/adr/024-public-abi-surface-resolution.md).
+from the public API, with an auditable trail of what was filtered and why) is available as
+an **opt-in** mode: pass `--scope-public-headers` (add `--show-filtered` to print the audit
+ledger) to `abicheck compare`. Findings about symbols/types not reachable from the
+public-header-declared exported API are recorded as *filtered* rather than reported, while
+internal-type *leaks* are never hidden. Full source-header provenance (distinguishing a
+privately-included header from a public one independently of reachability) remains future
+work. See [ADR-024](../development/adr/024-public-abi-surface-resolution.md).

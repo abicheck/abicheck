@@ -1012,6 +1012,19 @@ def _merge_redundant_changes(result: DiffResult) -> None:
     result.redundant_count = 0
 
 
+def _echo_filtered_surface(result: DiffResult) -> None:
+    """Print the public-surface audit ledger (ADR-024 §D5 traceability)."""
+    n = result.out_of_surface_count
+    click.echo(
+        f"\nFiltered as non-public ABI surface ({n} "
+        f"{'finding' if n == 1 else 'findings'}, --scope-public-headers):",
+        err=True,
+    )
+    for c in result.out_of_surface_changes:
+        loc = f" [{c.source_location}]" if c.source_location else ""
+        click.echo(f"  - {c.kind.value}: {c.symbol}{loc}", err=True)
+
+
 def _warn_all_suppressed(result: DiffResult) -> None:
     """Warn if a suppression file swallowed all changes."""
     total_changes = len(result.changes) + result.suppressed_count
@@ -1199,6 +1212,13 @@ def _exit_with_severity_or_verdict(
 @click.option("--show-redundant", is_flag=True, default=False,
               help="Disable redundancy filtering and show all changes including those "
                    "derived from root type changes.")
+@click.option("--scope-public-headers", "scope_public_headers", is_flag=True, default=False,
+              help="Restrict findings to the public-header ABI surface (ADR-024): "
+                   "changes to symbols/types not reachable from public-header-declared "
+                   "exported API are recorded as filtered, not reported. Internal-type "
+                   "leaks are never hidden.")
+@click.option("--show-filtered", "show_filtered", is_flag=True, default=False,
+              help="List findings excluded by --scope-public-headers (audit trail).")
 @click.option("--show-only", "show_only", default=None,
               callback=_validate_show_only, expose_value=True, is_eager=False,
               help="Comma-separated filter tokens to limit displayed changes. "
@@ -1261,6 +1281,7 @@ def compare_cmd(
     severity_addition: str | None,
     follow_deps: bool, search_paths: tuple[Path, ...], ld_library_path: str,
     show_redundant: bool, show_only: str | None, stat: bool,
+    scope_public_headers: bool, show_filtered: bool,
     report_mode: str, show_impact: bool,
     debug_format: str | None,
     annotate: bool,
@@ -1397,13 +1418,19 @@ def compare_cmd(
         if new_fmt == "elf":
             _populate_dependency_info(new, new_input, list(search_paths), None, ld_library_path)
 
-    result = compare(old, new, suppression=suppression, policy=policy, policy_file=pf)
+    result = compare(
+        old, new, suppression=suppression, policy=policy, policy_file=pf,
+        scope_to_public_surface=scope_public_headers,
+    )
 
     result.old_metadata = _collect_metadata(old_input)
     result.new_metadata = _collect_metadata(new_input)
 
     if show_redundant and result.redundant_changes:
         _merge_redundant_changes(result)
+
+    if show_filtered and result.out_of_surface_changes:
+        _echo_filtered_surface(result)
 
     _warn_all_suppressed(result)
 

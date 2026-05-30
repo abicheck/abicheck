@@ -177,6 +177,7 @@ def compare(
     *,
     policy: str = "strict_abi",
     policy_file: PolicyFile | None = None,
+    scope_to_public_surface: bool = False,
 ) -> DiffResult:
     """Diff two AbiSnapshots and return a DiffResult with verdict.
 
@@ -212,11 +213,13 @@ def compare(
     frozen_ns = list(policy_file.frozen_namespaces) if policy_file is not None else []
     pp_ctx = DEFAULT_PIPELINE.run(
         changes, old, new, suppression=suppression, frozen_namespaces=frozen_ns,
+        scope_to_public_surface=scope_to_public_surface,
     )
     kept = pp_ctx.kept
     redundant = pp_ctx.redundant
     opaque_filtered = pp_ctx.opaque_filtered
     suppressed = pp_ctx.suppressed
+    out_of_surface = pp_ctx.out_of_surface
 
     # Verdict computed on unsuppressed semantic changes.
     # NOTE: opaque_filtered changes are intentionally excluded from verdict
@@ -261,4 +264,7 @@ def compare(
         confidence=confidence,
         evidence_tiers=evidence_tiers,
         coverage_warnings=coverage_warnings,
+        out_of_surface_changes=out_of_surface,
+        out_of_surface_count=len(out_of_surface),
+        scope_to_public_surface=scope_to_public_surface,
     )

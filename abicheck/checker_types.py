@@ -105,6 +105,12 @@ class DiffResult:
     confidence: Confidence = Confidence.HIGH
     evidence_tiers: list[str] = field(default_factory=list)  # e.g. ["elf", "dwarf", "header"]
     coverage_warnings: list[str] = field(default_factory=list)  # human-readable coverage gaps
+    # ADR-024: findings excluded because they are not on the public-header
+    # ABI surface (only populated when scope_to_public_surface is enabled).
+    # Recorded for audit — surfaced under --show-filtered — never dropped.
+    out_of_surface_changes: list[Change] = field(default_factory=list)
+    out_of_surface_count: int = 0
+    scope_to_public_surface: bool = False
 
     def _effective_kind_sets(
         self,

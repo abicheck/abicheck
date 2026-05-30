@@ -590,6 +590,7 @@ def run_compare(
     old_debug_roots: list[Path] | None = None,
     new_debug_roots: list[Path] | None = None,
     enable_debuginfod: bool = False,
+    scope_to_public_surface: bool = False,
 ) -> tuple[DiffResult, AbiSnapshot, AbiSnapshot]:
     """Compare two ABI inputs and return the classified diff result.
 
@@ -630,7 +631,10 @@ def run_compare(
     )
 
     suppression, pf = load_suppression_and_policy(suppress, policy, policy_file_path)
-    result = compare(old, new, suppression=suppression, policy=policy, policy_file=pf)
+    result = compare(
+        old, new, suppression=suppression, policy=policy, policy_file=pf,
+        scope_to_public_surface=scope_to_public_surface,
+    )
     result.old_metadata = collect_metadata(old_input)
     result.new_metadata = collect_metadata(new_input)
     return result, old, new

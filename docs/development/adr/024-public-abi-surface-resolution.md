@@ -215,11 +215,38 @@ The feature is only credible if we can prove it neither over- nor under-filters.
 | Phase | Scope |
 |-------|-------|
 | **0** | PE/Mach-O header plumbing + directory expansion + fallback warnings — **done (PR #259)** |
-| **1** | Provenance capture: source-header tagging in castxml/DWARF/PDB parsers; model + serialization fields (schema bump) |
-| **2** | Header-scope resolution + surface ledger + `--show-filtered`/`--explain-scope` (opt-in mode, default `export`) |
-| **3** | Reachability closure + leak-guard integration (extend `internal_leak.py`) |
+| **1** | Provenance capture: source-header tagging in castxml/DWARF/PDB parsers; model + serialization fields (schema bump) — *future (see note)* |
+| **2** | Header-scope resolution + surface ledger + `--scope-public-headers`/`--show-filtered` (opt-in, default off) — **done** |
+| **3** | Reachability closure + leak-guard integration (extend `internal_leak.py`) — **done (closure shipped; leak exemption wired)** |
 | **4** | User-control overlay: widening public allowlist; integrate suppression as the narrowing layer; precedence + anti-hiding guard |
 | **5** | Parity + FP-rate gates; flip default to `header-scoped` once validated |
+
+### Implementation note (Phase 2/3 as shipped)
+
+The first cut derives the public surface from data the dumper *already*
+captures, avoiding the schema churn of full Phase 1 provenance:
+
+* **Public roots** = functions/variables with :data:`Visibility.PUBLIC`
+  (ADR-016 already means "exported **and** declared in a provided public
+  header"). When no headers were supplied (`elf_only_mode`), the surface is
+  declared *unresolvable* and scoping is a no-op.
+* **Public types** = the transitive reachability closure over those roots'
+  return/parameter/field/base/typedef types (`abicheck/surface.py`).
+* Findings outside the surface are moved to an audit ledger
+  (`DiffResult.out_of_surface_changes`, surfaced by `--show-filtered`),
+  never dropped; internal-leak kinds are exempt.
+
+This is wired as the opt-in `FilterNonPublicSurface` post-processing step
+(`compare(..., scope_to_public_surface=True)` /
+`abicheck compare --scope-public-headers`). Example cases
+`case118`–`case120` exercise it end-to-end; `tests/test_surface.py` covers
+the resolver, classifier, and anti-hiding guarantees.
+
+The remaining Phase 1 work — recording *which* header each declaration came
+from, so the surface can distinguish "private header transitively included"
+from "public header" independently of reachability — is still future work
+and is what unlocks the per-finding `private-header` ledger reason and the
+widening/narrowing user overlay (Phase 4).
 
 ---
 

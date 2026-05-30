@@ -1,1780 +1,1834 @@
 {
-    "version": "3",
-    "description": "Ground-truth expected verdicts and change kinds for all abicheck example cases. Single source of truth \u2014 kept in sync with tests/test_example_autodiscovery.py::EXPECTED. expected_kinds lists the ChangeKind values that MUST appear in the diff result (subset check). expected_absent_kinds lists kinds that MUST NOT appear (false positive guard).",
-    "cross_references": {
-        "verdict_classification": "abicheck/checker_policy.py \u2014 BREAKING_KINDS, API_BREAK_KINDS, RISK_KINDS, COMPATIBLE_KINDS (= ADDITION_KINDS \u222a QUALITY_KINDS)",
-        "category_mapping": "breaking \u2192 BREAKING_KINDS | api_break \u2192 API_BREAK_KINDS | risk \u2192 RISK_KINDS | addition \u2192 ADDITION_KINDS | quality \u2192 QUALITY_KINDS | no_change \u2192 (empty)",
-        "test_autodiscovery": "tests/test_example_autodiscovery.py \u2014 reads EXPECTED from this file",
-        "test_manual": "tests/test_abi_examples.py \u2014 hardcoded expectations for cases 01-18 (must stay in sync)",
-        "examples_readme": "examples/README.md \u2014 case index table (must stay in sync)"
+  "version": "3",
+  "description": "Ground-truth expected verdicts and change kinds for all abicheck example cases. Single source of truth \u2014 kept in sync with tests/test_example_autodiscovery.py::EXPECTED. expected_kinds lists the ChangeKind values that MUST appear in the diff result (subset check). expected_absent_kinds lists kinds that MUST NOT appear (false positive guard).",
+  "cross_references": {
+    "verdict_classification": "abicheck/checker_policy.py \u2014 BREAKING_KINDS, API_BREAK_KINDS, RISK_KINDS, COMPATIBLE_KINDS (= ADDITION_KINDS \u222a QUALITY_KINDS)",
+    "category_mapping": "breaking \u2192 BREAKING_KINDS | api_break \u2192 API_BREAK_KINDS | risk \u2192 RISK_KINDS | addition \u2192 ADDITION_KINDS | quality \u2192 QUALITY_KINDS | no_change \u2192 (empty)",
+    "test_autodiscovery": "tests/test_example_autodiscovery.py \u2014 reads EXPECTED from this file",
+    "test_manual": "tests/test_abi_examples.py \u2014 hardcoded expectations for cases 01-18 (must stay in sync)",
+    "examples_readme": "examples/README.md \u2014 case index table (must stay in sync)"
+  },
+  "verdicts": {
+    "case01_symbol_removal": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "abi_break": true,
+      "api_break": true,
+      "bad_practice": false,
+      "expected_kinds": [
+        "func_removed"
+      ]
     },
-    "verdicts": {
-        "case01_symbol_removal": {
-            "expected": "BREAKING",
-            "category": "breaking",
-            "platforms": [
-                "linux",
-                "macos",
-                "windows"
-            ],
-            "abi_break": true,
-            "api_break": true,
-            "bad_practice": false,
-            "expected_kinds": [
-                "func_removed"
-            ]
-        },
-        "case02_param_type_change": {
-            "expected": "BREAKING",
-            "category": "breaking",
-            "platforms": [
-                "linux"
-            ],
-            "abi_break": true,
-            "api_break": true,
-            "bad_practice": false,
-            "expected_kinds": [
-                "func_params_changed"
-            ]
-        },
-        "case03_compat_addition": {
-            "expected": "COMPATIBLE",
-            "category": "addition",
-            "platforms": [
-                "linux",
-                "macos",
-                "windows"
-            ],
-            "abi_break": false,
-            "api_break": false,
-            "bad_practice": false,
-            "expected_kinds": [
-                "func_added"
-            ]
-        },
-        "case04_no_change": {
-            "expected": "NO_CHANGE",
-            "category": "no_change",
-            "platforms": [
-                "linux",
-                "macos",
-                "windows"
-            ],
-            "abi_break": false,
-            "api_break": false,
-            "bad_practice": false,
-            "expected_kinds": [],
-            "expected_absent_kinds": [
-                "func_removed",
-                "func_params_changed",
-                "type_size_changed"
-            ]
-        },
-        "case05_soname": {
-            "expected": "COMPATIBLE",
-            "category": "quality",
-            "platforms": [
-                "linux"
-            ],
-            "abi_break": false,
-            "api_break": false,
-            "bad_practice": true,
-            "expected_kinds": [
-                "soname_missing"
-            ]
-        },
-        "case06_visibility": {
-            "expected": "BREAKING",
-            "category": "breaking",
-            "platforms": [
-                "linux"
-            ],
-            "abi_break": true,
-            "api_break": false,
-            "bad_practice": true,
-            "expected_kinds": [
-                "func_visibility_changed"
-            ]
-        },
-        "case07_struct_layout": {
-            "expected": "BREAKING",
-            "category": "breaking",
-            "platforms": [
-                "linux"
-            ],
-            "abi_break": true,
-            "api_break": true,
-            "bad_practice": false,
-            "expected_kinds": [
-                "type_size_changed"
-            ]
-        },
-        "case08_enum_value_change": {
-            "expected": "BREAKING",
-            "category": "breaking",
-            "platforms": [
-                "linux"
-            ],
-            "abi_break": true,
-            "api_break": true,
-            "bad_practice": false,
-            "expected_kinds": [
-                "enum_member_value_changed"
-            ]
-        },
-        "case09_cpp_vtable": {
-            "expected": "BREAKING",
-            "category": "breaking",
-            "platforms": [
-                "linux"
-            ],
-            "abi_break": true,
-            "api_break": true,
-            "bad_practice": false,
-            "expected_kinds": [
-                "type_vtable_changed"
-            ]
-        },
-        "case10_return_type": {
-            "expected": "BREAKING",
-            "category": "breaking",
-            "platforms": [
-                "linux"
-            ],
-            "abi_break": true,
-            "api_break": true,
-            "bad_practice": false,
-            "expected_kinds": [
-                "func_return_changed"
-            ]
-        },
-        "case11_global_var_type": {
-            "expected": "BREAKING",
-            "category": "breaking",
-            "platforms": [
-                "linux"
-            ],
-            "abi_break": true,
-            "api_break": true,
-            "bad_practice": false,
-            "expected_kinds": [
-                "var_type_changed"
-            ]
-        },
-        "case12_function_removed": {
-            "expected": "BREAKING",
-            "category": "breaking",
-            "platforms": [
-                "linux",
-                "macos",
-                "windows"
-            ],
-            "abi_break": true,
-            "api_break": true,
-            "bad_practice": false,
-            "expected_kinds": [
-                "func_removed"
-            ]
-        },
-        "case13_symbol_versioning": {
-            "expected": "COMPATIBLE",
-            "category": "quality",
-            "platforms": [
-                "linux"
-            ],
-            "abi_break": false,
-            "api_break": false,
-            "bad_practice": false
-        },
-        "case14_cpp_class_size": {
-            "expected": "BREAKING",
-            "category": "breaking",
-            "platforms": [
-                "linux"
-            ],
-            "abi_break": true,
-            "api_break": true,
-            "bad_practice": false
-        },
-        "case15_noexcept_change": {
-            "expected": "COMPATIBLE_WITH_RISK",
-            "category": "risk",
-            "platforms": [
-                "linux"
-            ],
-            "abi_break": false,
-            "api_break": true,
-            "bad_practice": false,
-            "note": "noexcept change itself is COMPATIBLE; GLIBCXX version requirement is deployment risk"
-        },
-        "case16_inline_to_non_inline": {
-            "expected": "COMPATIBLE",
-            "category": "addition",
-            "platforms": [
-                "linux"
-            ],
-            "abi_break": false,
-            "api_break": false,
-            "bad_practice": false
-        },
-        "case17_template_abi": {
-            "expected": "BREAKING",
-            "category": "breaking",
-            "platforms": [
-                "linux"
-            ],
-            "abi_break": true,
-            "api_break": true,
-            "bad_practice": false
-        },
-        "case18_dependency_leak": {
-            "expected": "BREAKING",
-            "category": "breaking",
-            "platforms": [
-                "linux"
-            ],
-            "abi_break": true,
-            "api_break": false,
-            "bad_practice": true
-        },
-        "case19_enum_member_removed": {
-            "expected": "BREAKING",
-            "category": "breaking",
-            "platforms": [
-                "linux",
-                "macos",
-                "windows"
-            ],
-            "abi_break": true,
-            "api_break": true,
-            "bad_practice": false,
-            "expected_kinds": [
-                "enum_member_removed"
-            ]
-        },
-        "case20_enum_member_value_changed": {
-            "expected": "BREAKING",
-            "category": "breaking",
-            "platforms": [
-                "linux",
-                "macos",
-                "windows"
-            ],
-            "abi_break": true,
-            "api_break": true,
-            "bad_practice": false,
-            "reason": "regular enum member value changes remain breaking; only named sentinel patterns are downgraded",
-            "expected_kinds": [
-                "enum_member_value_changed"
-            ]
-        },
-        "case21_method_became_static": {
-            "expected": "BREAKING",
-            "category": "breaking",
-            "platforms": [
-                "linux"
-            ],
-            "abi_break": true,
-            "api_break": true,
-            "bad_practice": false,
-            "expected_kinds": [
-                "func_static_changed"
-            ]
-        },
-        "case22_method_const_changed": {
-            "expected": "BREAKING",
-            "category": "breaking",
-            "platforms": [
-                "linux",
-                "macos",
-                "windows"
-            ],
-            "abi_break": true,
-            "api_break": true,
-            "bad_practice": false,
-            "expected_kinds": [
-                "func_cv_changed"
-            ]
-        },
-        "case23_pure_virtual_added": {
-            "expected": "BREAKING",
-            "category": "breaking",
-            "platforms": [
-                "linux",
-                "macos",
-                "windows"
-            ],
-            "abi_break": true,
-            "api_break": true,
-            "bad_practice": false,
-            "expected_kinds": [
-                "func_pure_virtual_added"
-            ]
-        },
-        "case24_union_field_removed": {
-            "expected": "BREAKING",
-            "category": "breaking",
-            "platforms": [
-                "linux",
-                "macos",
-                "windows"
-            ],
-            "abi_break": true,
-            "api_break": true,
-            "bad_practice": false,
-            "expected_kinds": [
-                "union_field_removed"
-            ]
-        },
-        "case25_enum_member_added": {
-            "expected": "COMPATIBLE",
-            "category": "addition",
-            "platforms": [
-                "linux",
-                "macos",
-                "windows"
-            ],
-            "abi_break": false,
-            "api_break": false,
-            "bad_practice": false,
-            "expected_kinds": [
-                "enum_member_added"
-            ]
-        },
-        "case26_union_field_added": {
-            "expected": "BREAKING",
-            "category": "breaking",
-            "platforms": [
-                "linux",
-                "macos",
-                "windows"
-            ],
-            "abi_break": true,
-            "api_break": false,
-            "bad_practice": false
-        },
-        "case27_symbol_binding_weakened": {
-            "expected": "COMPATIBLE",
-            "category": "quality",
-            "platforms": [
-                "linux"
-            ],
-            "abi_break": false,
-            "api_break": false,
-            "bad_practice": false
-        },
-        "case28_typedef_opaque": {
-            "expected": "BREAKING",
-            "category": "breaking",
-            "platforms": [
-                "linux",
-                "macos",
-                "windows"
-            ],
-            "abi_break": true,
-            "api_break": true,
-            "bad_practice": false,
-            "expected_kinds": [
-                "type_became_opaque"
-            ]
-        },
-        "case29_ifunc_transition": {
-            "expected": "COMPATIBLE",
-            "category": "quality",
-            "platforms": [
-                "linux"
-            ],
-            "abi_break": false,
-            "api_break": false,
-            "bad_practice": false
-        },
-        "case30_field_qualifiers": {
-            "expected": "BREAKING",
-            "category": "breaking",
-            "platforms": [
-                "linux",
-                "macos",
-                "windows"
-            ],
-            "abi_break": true,
-            "api_break": true,
-            "bad_practice": false
-        },
-        "case31_enum_rename": {
-            "expected": "API_BREAK",
-            "category": "api_break",
-            "expected_compat": "NO_CHANGE",
-            "platforms": [
-                "linux",
-                "macos",
-                "windows"
-            ],
-            "abi_break": false,
-            "api_break": true,
-            "bad_practice": false,
-            "expected_kinds": [
-                "enum_member_renamed"
-            ]
-        },
-        "case32_param_defaults": {
-            "expected": "NO_CHANGE",
-            "category": "no_change",
-            "platforms": [
-                "linux",
-                "macos",
-                "windows"
-            ],
-            "abi_break": false,
-            "api_break": false,
-            "bad_practice": false
-        },
-        "case33_pointer_level": {
-            "expected": "BREAKING",
-            "category": "breaking",
-            "platforms": [
-                "linux",
-                "macos",
-                "windows"
-            ],
-            "abi_break": true,
-            "api_break": true,
-            "bad_practice": false,
-            "expected_kinds": [
-                "param_pointer_level_changed"
-            ]
-        },
-        "case34_access_level": {
-            "expected": "API_BREAK",
-            "category": "api_break",
-            "expected_compat": "NO_CHANGE",
-            "platforms": [
-                "linux",
-                "macos"
-            ],
-            "abi_break": false,
-            "api_break": true,
-            "bad_practice": false
-        },
-        "case35_field_rename": {
-            "expected": "BREAKING",
-            "category": "breaking",
-            "platforms": [
-                "linux",
-                "macos",
-                "windows"
-            ],
-            "abi_break": false,
-            "api_break": true,
-            "bad_practice": false,
-            "expected_kinds": [
-                "field_renamed"
-            ]
-        },
-        "case36_anon_struct": {
-            "expected": "BREAKING",
-            "category": "breaking",
-            "platforms": [
-                "linux",
-                "macos",
-                "windows"
-            ],
-            "abi_break": true,
-            "api_break": true,
-            "bad_practice": false
-        },
-        "case37_base_class": {
-            "expected": "BREAKING",
-            "category": "breaking",
-            "platforms": [
-                "linux",
-                "macos",
-                "windows"
-            ],
-            "abi_break": true,
-            "api_break": true,
-            "bad_practice": false,
-            "expected_kinds": [
-                "type_base_changed"
-            ]
-        },
-        "case38_virtual_methods": {
-            "expected": "BREAKING",
-            "category": "breaking",
-            "platforms": [
-                "linux",
-                "macos",
-                "windows"
-            ],
-            "abi_break": true,
-            "api_break": true,
-            "bad_practice": false
-        },
-        "case39_var_const": {
-            "expected": "BREAKING",
-            "category": "breaking",
-            "platforms": [
-                "linux",
-                "macos",
-                "windows"
-            ],
-            "abi_break": true,
-            "api_break": true,
-            "bad_practice": false,
-            "expected_kinds": [
-                "var_became_const"
-            ]
-        },
-        "case40_field_layout": {
-            "expected": "BREAKING",
-            "category": "breaking",
-            "platforms": [
-                "linux",
-                "macos",
-                "windows"
-            ],
-            "abi_break": true,
-            "api_break": true,
-            "bad_practice": false
-        },
-        "case41_type_changes": {
-            "expected": "BREAKING",
-            "category": "breaking",
-            "platforms": [
-                "linux",
-                "macos"
-            ],
-            "abi_break": true,
-            "api_break": true,
-            "bad_practice": false
-        },
-        "case42_type_alignment_changed": {
-            "expected": "BREAKING",
-            "category": "breaking",
-            "platforms": [
-                "linux",
-                "macos"
-            ],
-            "abi_break": true,
-            "api_break": true,
-            "bad_practice": false,
-            "description": "Struct alignment changed via __attribute__((aligned(8))) to aligned(64) \u2014 stack allocation and array stride break (TYPE_ALIGNMENT_CHANGED)",
-            "known_gap": "macOS: Tool returns NO_CHANGE \u2014 without castxml, Mach-O mode captures only exported symbols; type-level alignment changes are invisible"
-        },
-        "case26b_union_field_added_compatible": {
-            "expected": "COMPATIBLE",
-            "category": "addition",
-            "platforms": [
-                "linux",
-                "macos",
-                "windows"
-            ],
-            "abi_break": false,
-            "api_break": false,
-            "bad_practice": false
-        },
-        "case43_base_class_member_added": {
-            "expected": "BREAKING",
-            "category": "breaking",
-            "platforms": [
-                "linux",
-                "macos",
-                "windows"
-            ],
-            "abi_break": true,
-            "api_break": true,
-            "bad_practice": false,
-            "description": "Data member added to base class shifts derived class layout (libabigail: Added_Base_Class_Data_Member)"
-        },
-        "case44_cyclic_type_member_added": {
-            "expected": "BREAKING",
-            "category": "breaking",
-            "platforms": [
-                "linux",
-                "macos",
-                "windows"
-            ],
-            "abi_break": true,
-            "api_break": true,
-            "bad_practice": false,
-            "description": "Member added to a self-referential (cyclic) struct \u2014 sizeof changes (libabigail: Added_Non_Virtual_Member_Variable in cyclic type)"
-        },
-        "case45_multi_dim_array_change": {
-            "expected": "BREAKING",
-            "category": "breaking",
-            "platforms": [
-                "linux",
-                "macos",
-                "windows"
-            ],
-            "abi_break": true,
-            "api_break": true,
-            "bad_practice": false,
-            "description": "Multi-dimensional array element type changed float->double \u2014 size doubles (libabigail: Subrange_Change)"
-        },
-        "case46_pointer_chain_type_change": {
-            "expected": "BREAKING",
-            "category": "breaking",
-            "platforms": [
-                "linux",
-                "macos",
-                "windows"
-            ],
-            "abi_break": true,
-            "api_break": true,
-            "bad_practice": false,
-            "description": "Pointer chain ultimate type changes int->long through two indirection levels (libabigail: Function_Return_Type_Change indirect)"
-        },
-        "case47_inline_to_outlined": {
-            "expected": "COMPATIBLE",
-            "category": "addition",
-            "platforms": [
-                "linux",
-                "macos",
-                "windows"
-            ],
-            "abi_break": false,
-            "api_break": false,
-            "bad_practice": false,
-            "description": "Inline method moved out-of-line: new exported symbol appears (FUNC_ADDED, libabigail: inline->outlined)"
-        },
-        "case48_leaf_struct_through_pointer": {
-            "expected": "BREAKING",
-            "category": "breaking",
-            "platforms": [
-                "linux",
-                "macos",
-                "windows"
-            ],
-            "abi_break": true,
-            "api_break": true,
-            "bad_practice": false,
-            "description": "Leaf struct gains field; propagates through embedding in Container \u2014 layout breaks (libabigail: Leaf_Type_Change)"
-        },
-        "case49_executable_stack": {
-            "expected": "COMPATIBLE",
-            "category": "quality",
-            "platforms": [
-                "linux"
-            ],
-            "abi_break": false,
-            "api_break": false,
-            "bad_practice": true,
-            "description": "Library linked with -Wl,-z,execstack has GNU_STACK RWE \u2014 disables NX protection (bad practice \u2014 security)"
-        },
-        "case50_soname_inconsistent": {
-            "expected": "COMPATIBLE",
-            "category": "quality",
-            "platforms": [
-                "linux"
-            ],
-            "abi_break": false,
-            "api_break": false,
-            "bad_practice": true,
-            "description": "SONAME present but set to wrong major version \u2014 bakes wrong DT_NEEDED into consumers (bad practice \u2014 packaging/upgrade hazard)"
-        },
-        "case51_protected_visibility": {
-            "expected": "COMPATIBLE",
-            "category": "quality",
-            "platforms": [
-                "linux"
-            ],
-            "abi_break": false,
-            "api_break": false,
-            "bad_practice": false,
-            "description": "Symbol visibility changed DEFAULT\u2192PROTECTED \u2014 exported but no longer interposable (compatible, interposition policy concern)"
-        },
-        "case52_rpath_leak": {
-            "expected": "COMPATIBLE",
-            "category": "quality",
-            "platforms": [
-                "linux"
-            ],
-            "abi_break": false,
-            "api_break": false,
-            "bad_practice": true,
-            "description": "Library has hardcoded build-directory path in DT_RUNPATH \u2014 non-portable deployment (bad practice \u2014 packaging)"
-        },
-        "case53_namespace_pollution": {
-            "expected": "BREAKING",
-            "category": "breaking",
-            "platforms": [
-                "linux"
-            ],
-            "abi_break": true,
-            "api_break": true,
-            "bad_practice": true,
-            "description": "Library exports generic symbol names (init, process, cleanup) without prefix \u2014 collision risk (bad practice \u2014 API design)",
-            "expected_kinds": [
-                "func_removed",
-                "func_added"
-            ]
-        },
-        "case54_used_reserved_field": {
-            "expected": "COMPATIBLE",
-            "category": "quality",
-            "platforms": [
-                "linux",
-                "macos"
-            ],
-            "abi_break": false,
-            "api_break": false,
-            "bad_practice": false,
-            "description": "Reserved placeholder fields (__reserved1, __reserved2) renamed to meaningful names at same offsets \u2014 layout unchanged (USED_RESERVED_FIELD)",
-            "known_gap": "macOS: Tool returns NO_CHANGE \u2014 without castxml, Mach-O mode captures only exported symbols; struct field renames are invisible",
-            "expected_kinds": [
-                "used_reserved_field"
-            ]
-        },
-        "case55_type_kind_changed": {
-            "expected": "BREAKING",
-            "category": "breaking",
-            "platforms": [
-                "linux",
-                "macos"
-            ],
-            "abi_break": true,
-            "api_break": true,
-            "bad_practice": false,
-            "description": "Type changed from struct to union \u2014 fields overlap instead of sequential layout (TYPE_KIND_CHANGED)",
-            "known_gap": "macOS: Tool returns NO_CHANGE \u2014 without castxml, Mach-O mode captures only exported symbols; struct-to-union type kind change is invisible",
-            "expected_kinds": [
-                "type_kind_changed"
-            ]
-        },
-        "case56_struct_packing_changed": {
-            "expected": "BREAKING",
-            "category": "breaking",
-            "platforms": [
-                "linux",
-                "macos"
-            ],
-            "abi_break": true,
-            "api_break": true,
-            "bad_practice": false,
-            "description": "Struct packing changed via pragma pack(1) \u2014 field offsets and sizeof change (STRUCT_PACKING_CHANGED)",
-            "known_gap": "macOS: Tool returns NO_CHANGE \u2014 without castxml, Mach-O mode captures only exported symbols; packing/layout changes are invisible",
-            "expected_kinds": [
-                "struct_packing_changed"
-            ]
-        },
-        "case57_enum_underlying_size_changed": {
-            "expected": "BREAKING",
-            "category": "breaking",
-            "platforms": [
-                "linux",
-                "macos"
-            ],
-            "abi_break": true,
-            "api_break": true,
-            "bad_practice": false,
-            "description": "Enum underlying type grows from int to long due to large sentinel value \u2014 sizeof changes (ENUM_UNDERLYING_SIZE_CHANGED)",
-            "known_gap": "macOS: Tool returns NO_CHANGE \u2014 without castxml, Mach-O mode captures only exported symbols; enum underlying size changes are invisible",
-            "expected_kinds": [
-                "enum_underlying_size_changed"
-            ]
-        },
-        "case58_var_removed": {
-            "expected": "BREAKING",
-            "category": "breaking",
-            "platforms": [
-                "linux",
-                "macos"
-            ],
-            "abi_break": true,
-            "api_break": true,
-            "bad_practice": false,
-            "description": "Global variable lib_debug_level removed from export table (VAR_REMOVED)",
-            "known_gap": "macOS: Tool returns COMPATIBLE \u2014 Mach-O export table does not distinguish functions from variables; lib_debug_level detected as func_removed_elf_only instead of var_removed",
-            "expected_kinds": [
-                "var_removed"
-            ]
-        },
-        "case59_func_became_inline": {
-            "expected": "BREAKING",
-            "category": "breaking",
-            "platforms": [
-                "linux",
-                "macos"
-            ],
-            "abi_break": true,
-            "api_break": false,
-            "bad_practice": false,
-            "description": "Functions moved from outlined to static inline in header \u2014 symbols disappear from .dynsym (FUNC_REMOVED, inverse of case47)",
-            "expected_kinds": [
-                "func_removed"
-            ]
-        },
-        "case60_base_class_position_changed": {
-            "expected": "BREAKING",
-            "category": "breaking",
-            "platforms": [
-                "linux",
-                "macos"
-            ],
-            "abi_break": true,
-            "api_break": true,
-            "bad_practice": false,
-            "description": "Multiple inheritance base class order swapped \u2014 subobject offsets and vtable pointers change (BASE_CLASS_POSITION_CHANGED)",
-            "known_gap": "macOS: Tool returns NO_CHANGE \u2014 no headers provided; Mach-O mode captures only exported symbols; base class layout changes are invisible"
-        },
-        "case61_var_added": {
-            "expected": "COMPATIBLE",
-            "category": "addition",
-            "platforms": [
-                "linux",
-                "macos"
-            ],
-            "abi_break": false,
-            "api_break": false,
-            "bad_practice": false,
-            "description": "New global variable lib_build_number added \u2014 purely additive (VAR_ADDED)",
-            "expected_kinds": [
-                "var_added"
-            ]
-        },
-        "case62_type_field_added_compatible": {
-            "expected": "COMPATIBLE",
-            "category": "addition",
-            "platforms": [
-                "linux",
-                "macos"
-            ],
-            "abi_break": false,
-            "api_break": false,
-            "bad_practice": false,
-            "description": "Field added to opaque struct (callers use pointer only) \u2014 layout change invisible to consumers (TYPE_FIELD_ADDED compatible)",
-            "expected_kinds": [
-                "func_added"
-            ]
-        },
-        "case63_bitfield_changed": {
-            "expected": "BREAKING",
-            "category": "breaking",
-            "platforms": [
-                "linux"
-            ],
-            "abi_break": true,
-            "api_break": true,
-            "bad_practice": false,
-            "description": "Bitfield width changed in struct \u2014 all subsequent bitfields shift to different bit positions (FIELD_BITFIELD_CHANGED)",
-            "expected_kinds": [
-                "field_bitfield_changed"
-            ]
-        },
-        "case64_calling_convention_changed": {
-            "expected": "BREAKING",
-            "category": "breaking",
-            "platforms": [
-                "linux"
-            ],
-            "abi_break": true,
-            "api_break": false,
-            "bad_practice": false,
-            "description": "Function calling convention changed from default System V to ms_abi \u2014 parameters passed in wrong registers (CALLING_CONVENTION_CHANGED)",
-            "expected_kinds": [
-                "calling_convention_changed"
-            ],
-            "known_gap": "GCC does not emit DW_AT_calling_convention for __attribute__((ms_abi)); detection requires Clang"
-        },
-        "case65_symbol_version_removed": {
-            "expected": "BREAKING",
-            "category": "breaking",
-            "platforms": [
-                "linux"
-            ],
-            "abi_break": true,
-            "api_break": false,
-            "bad_practice": false,
-            "description": "ELF symbol version node CRYPTO_1.0 removed \u2014 old binaries linked against that version fail at load time (SYMBOL_VERSION_DEFINED_REMOVED)",
-            "expected_kinds": [
-                "symbol_version_defined_removed"
-            ]
-        },
-        "case66_language_linkage_changed": {
-            "expected": "BREAKING",
-            "category": "breaking",
-            "platforms": [
-                "linux",
-                "macos",
-                "windows"
-            ],
-            "abi_break": true,
-            "api_break": true,
-            "bad_practice": false,
-            "description": "extern \"C\" removed from C++ functions \u2014 symbol names change from unmangled to C++ mangled (FUNC_LANGUAGE_LINKAGE_CHANGED)",
-            "expected_kinds": [
-                "func_language_linkage_changed"
-            ]
-        },
-        "case67_tls_var_size_changed": {
-            "expected": "BREAKING",
-            "category": "breaking",
-            "platforms": [
-                "linux",
-                "macos"
-            ],
-            "abi_break": true,
-            "api_break": true,
-            "bad_practice": false,
-            "description": "Thread-local variable ErrorCtx grows from 68 to 72 bytes due to inserted field \u2014 struct field offsets shift, causing consumers to read wrong data (TLS_VAR_SIZE_CHANGED)",
-            "expected_kinds": [
-                "tls_var_size_changed"
-            ]
-        },
-        "case68_virtual_method_added": {
-            "expected": "BREAKING",
-            "category": "breaking",
-            "platforms": [
-                "linux",
-                "macos",
-                "windows"
-            ],
-            "abi_break": true,
-            "api_break": true,
-            "bad_practice": false,
-            "description": "Virtual method added to previously non-virtual class \u2014 vtable pointer inserted, sizeof grows, all field offsets shift (FUNC_VIRTUAL_ADDED)",
-            "expected_kinds": [
-                "func_virtual_added"
-            ]
-        },
-        "case69_trivial_to_nontrivial": {
-            "expected": "BREAKING",
-            "category": "breaking",
-            "platforms": [
-                "linux",
-                "macos"
-            ],
-            "known_gap": "Windows MSVC x64: structs >8 bytes are always passed by pointer regardless of triviality, so the calling convention does not change",
-            "abi_break": true,
-            "api_break": false,
-            "bad_practice": false,
-            "description": "Trivially-copyable struct gains user-defined destructor \u2014 calling convention changes from register passing to hidden pointer (VALUE_ABI_TRAIT_CHANGED)",
-            "expected_kinds": [
-                "value_abi_trait_changed"
-            ]
-        },
-        "case70_flexible_array_member_changed": {
-            "expected": "BREAKING",
-            "category": "breaking",
-            "platforms": [
-                "linux",
-                "macos",
-                "windows"
-            ],
-            "abi_break": true,
-            "api_break": true,
-            "bad_practice": false,
-            "description": "Flexible array member element type changed float \u2192 double \u2014 dynamic allocation size and element access offsets break while sizeof(Packet) stays the same (FLEXIBLE_ARRAY_MEMBER_CHANGED)",
-            "expected_kinds": [
-                "flexible_array_member_changed",
-                "func_return_changed"
-            ]
-        },
-        "case71_inline_namespace_moved": {
-            "expected": "BREAKING",
-            "category": "breaking",
-            "platforms": [
-                "linux",
-                "macos",
-                "windows"
-            ],
-            "abi_break": true,
-            "api_break": false,
-            "bad_practice": false,
-            "description": "Symbols moved from inline namespace v1 to v2 \u2014 mangled names change so old binaries fail to resolve symbols (INLINE_NAMESPACE_MOVED)",
-            "expected_kinds": [
-                "inline_namespace_moved"
-            ]
-        },
-        "case72_covariant_return_changed": {
-            "expected": "BREAKING",
-            "category": "breaking",
-            "platforms": [
-                "linux",
-                "macos",
-                "windows"
-            ],
-            "abi_break": true,
-            "api_break": true,
-            "bad_practice": false,
-            "description": "Intermediate class inserted into hierarchy \u2014 vtable layout shifts, object size changes, covariant return type changes from Circle* to Drawable* (TYPE_BASE_CHANGED)",
-            "expected_kinds": [
-                "type_base_changed",
-                "type_vtable_changed",
-                "func_return_changed"
-            ]
-        },
-        "case73_typedef_underlying_changed": {
-            "expected": "BREAKING",
-            "category": "breaking",
-            "platforms": [
-                "linux",
-                "macos",
-                "windows"
-            ],
-            "abi_break": true,
-            "api_break": true,
-            "bad_practice": false,
-            "description": "Typedef handle_t underlying type changed from int to void* \u2014 sizeof changes from 4 to 8 bytes, all functions using the typedef inherit the break (TYPEDEF_BASE_CHANGED)",
-            "expected_kinds": [
-                "typedef_base_changed"
-            ]
-        },
-        "case74_detail_base_class_changed": {
-            "expected": "BREAKING",
-            "category": "breaking",
-            "platforms": [
-                "linux",
-                "macos",
-                "windows"
-            ],
-            "abi_break": true,
-            "api_break": true,
-            "bad_practice": false,
-            "description": "Internal-namespace leak: mylib::detail::descriptor_base gains a field; public mylib::knn_descriptor inherits from it, so sizeof/layout of the public class changes. Detected by existing type_size_changed/struct_field_added, escalated by internal_type_leaks_via_public_api.",
-            "expected_kinds": [
-                "internal_type_leaks_via_public_api"
-            ]
-        },
-        "case75_detail_embedded_by_value": {
-            "expected": "BREAKING",
-            "category": "breaking",
-            "platforms": [
-                "linux",
-                "macos",
-                "windows"
-            ],
-            "abi_break": true,
-            "api_break": true,
-            "bad_practice": false,
-            "description": "Internal-namespace leak: mylib::detail::table_impl gains a field; public mylib::table embeds it by value, so sizeof(table) grows. Detected by existing struct_field_added on detail::table_impl, escalated by internal_type_leaks_via_public_api.",
-            "expected_kinds": [
-                "internal_type_leaks_via_public_api"
-            ]
-        },
-        "case76_detail_pimpl_vtable_changed": {
-            "expected": "BREAKING",
-            "category": "breaking",
-            "platforms": [
-                "linux",
-                "macos",
-                "windows"
-            ],
-            "abi_break": true,
-            "api_break": true,
-            "bad_practice": false,
-            "known_gap": "macOS / Windows: vtable break is currently only detectable via symbol_size_changed on the ELF vtable symbol; Mach-O / PE export tables carry no symbol size, and castxml emits vtable_index=None for all virtuals so the structural diff collapses to a single slot \u2014 neither signal fires on these platforms",
-            "description": "Internal-namespace leak: mylib::detail::algorithm_iface gains a virtual method inserted mid-vtable; public mylib::svm_algorithm inherits from it, so vtable slot indices shift for all consumers. Detected by existing type_vtable_changed / func_virtual_added, escalated by internal_type_leaks_via_public_api.",
-            "expected_kinds": [
-                "internal_type_leaks_via_public_api"
-            ]
-        },
-        "case77_detail_templated_base_changed": {
-            "expected": "BREAKING",
-            "category": "breaking",
-            "platforms": [
-                "linux",
-                "macos",
-                "windows"
-            ],
-            "abi_break": true,
-            "api_break": true,
-            "bad_practice": false,
-            "description": "Internal-namespace leak through a templated detail:: base: mylib::detail::descriptor_base<Task> gains a field, growing every knn_descriptor<Task> instantiation. Verifies the leak reachability walker follows template-instantiation edges into detail::.",
-            "expected_kinds": [
-                "internal_type_leaks_via_public_api"
-            ]
-        },
-        "case79_missing_template_instantiation": {
-            "expected": "BREAKING",
-            "category": "breaking",
-            "platforms": [
-                "linux",
-                "macos",
-                "windows"
-            ],
-            "abi_break": true,
-            "api_break": true,
-            "bad_practice": false,
-            "description": "Header advertises descriptor<float> and descriptor<double>; v2 library ships only the float instantiation. Header is unchanged so source compiles, link/load fails with undefined symbol. Emits INSTANTIATION_MISSING_FROM_BINARY.",
-            "expected_kinds": [
-                "instantiation_missing_from_binary"
-            ]
-        },
-        "case80_pimpl_shared_to_unique": {
-            "expected": "BREAKING",
-            "category": "breaking",
-            "platforms": [
-                "linux",
-                "macos"
-            ],
-            "abi_break": true,
-            "api_break": true,
-            "bad_practice": false,
-            "known_gap": "Windows: std::shared_ptr / std::unique_ptr layout names differ between MSVC STL and libstdc++/libc++, so the type-name-based detection signal is not portable as-shipped. Tracked for a follow-up that normalises smart-pointer template-arg names across stdlibs.",
-            "description": "Pimpl alias switched from shared_ptr<T> to unique_ptr<T>. The type of descriptor::impl_ changed; inline accessors re-mangle, destruction model changes (no atomic refcount), copy semantics flip from refcounted-share to move-only. Detected by existing type_field_type_changed escalated via internal_type_leaks_via_public_api.",
-            "expected_kinds": [
-                "internal_type_leaks_via_public_api"
-            ]
-        },
-        "case81_serialization_tag_reassigned": {
-            "expected": "BREAKING",
-            "category": "breaking",
-            "platforms": [
-                "linux",
-                "macos"
-            ],
-            "abi_break": true,
-            "api_break": false,
-            "bad_practice": false,
-            "known_gap": "Windows: the v1.h fixture includes ``<cstdint>`` for ``std::uint64_t``. On the GitHub Actions Windows runner, castxml's bundled Clang frontend can't parse mingw64 GCC 15.2.0's ``bits/c++config.h`` (it uses the C++23 ``bf16`` floating-point literal suffix: ``typedef __decltype(0.0bf16) __bfloat16_t;``). This is a toolchain incompatibility, not an issue with the detector or the example \u2014 castxml dump fails before the detector runs. Same root cause as case80 / case89.",
-            "description": "DAAL-style serialization tag IDs swapped values between knn_model and linear_regression. Symbols, types, layout all unchanged \u2014 every conventional ABI check passes \u2014 but saved models silently deserialize as the wrong class. Emits SERIALIZATION_TAG_CHANGED.",
-            "expected_kinds": [
-                "serialization_tag_changed"
-            ]
-        },
-        "case82_sycl_overload_set_removed": {
-            "expected": "BREAKING",
-            "category": "breaking",
-            "platforms": [
-                "linux",
-                "macos",
-                "windows"
-            ],
-            "abi_break": true,
-            "api_break": true,
-            "bad_practice": false,
-            "description": "DPC++ build withdrawn between releases \u2014 every sycl::queue&-taking overload disappears across multiple algorithms. Reported as one grouped SYCL_OVERLOAD_SET_REMOVED finding instead of N independent func_removed.",
-            "expected_kinds": [
-                "sycl_overload_set_removed"
-            ]
-        },
-        "case83_cpu_dispatch_isa_dropped": {
-            "expected": "COMPATIBLE_WITH_RISK",
-            "category": "risk",
-            "platforms": [
-                "linux",
-                "macos",
-                "windows"
-            ],
-            "abi_break": false,
-            "api_break": false,
-            "bad_practice": false,
-            "description": "AVX-512 ISA tier dropped: every *_avx512_* symbol removed across all algorithms. Dispatcher-using callers unaffected; ISA-pinned callers break. Reported as one grouped CPU_DISPATCH_ISA_DROPPED finding (RISK_KINDS).",
-            "expected_kinds": [
-                "cpu_dispatch_isa_dropped"
-            ]
-        },
-        "case84_bundle_soname_skew": {
-            "expected": "BREAKING",
-            "category": "breaking",
-            "platforms": [
-                "linux"
-            ],
-            "abi_break": true,
-            "api_break": false,
-            "bad_practice": true,
-            "skip": true,
-            "reason": "Bundle case \u2014 no single-pair v1.cpp/v2.cpp layout; uses gen_bundle.sh to produce v1/ and v2/ directories. The detect_bundle_soname_skew() function is unit-tested directly in tests/test_onedal_detectors.py; compare-release CLI wiring is tracked for a follow-up PR.",
-            "known_gap": "Requires multi-library bundle compare mode; cli wiring is partial \u2014 the detect_bundle_soname_skew() function is unit-tested directly, but compare-release integration is tracked for a follow-up PR. The example ships gen_bundle.sh to produce v1/ and v2/ directories on demand.",
-            "description": "Multi-library bundle SONAME skew: libonedal_core and libonedal_dpc bump SONAME from .so.1 to .so.2 but libonedal_thread keeps .so.1 by accident. Per-library checks pass; cohort-level invariant fails. Emits BUNDLE_SONAME_SKEW.",
-            "expected_kinds": [
-                "bundle_soname_skew"
-            ]
-        },
-        "case86_tag_struct_renamed": {
-            "expected": "BREAKING",
-            "category": "breaking",
-            "platforms": [
-                "linux",
-                "macos",
-                "windows"
-            ],
-            "abi_break": true,
-            "api_break": true,
-            "bad_practice": false,
-            "description": "Empty tag struct method::brute_force renamed to method::search_brute. No layout signal (empty type), but every explicit descriptor<method::brute_force, ...> instantiation re-mangles. Emits TAG_TYPE_RENAMED correlating the empty type rename with the symbol-name shift.",
-            "expected_kinds": [
-                "tag_type_renamed"
-            ]
-        },
-        "case87_default_template_arg_changed": {
-            "expected": "BREAKING",
-            "category": "breaking",
-            "platforms": [
-                "linux",
-                "macos",
-                "windows"
-            ],
-            "abi_break": true,
-            "api_break": false,
-            "bad_practice": false,
-            "description": "Default template argument changed (Distance = minkowski_distance \u2192 euclidean_distance). Consumer source compiles unchanged but substituted instantiation type differs, producing a different mangled symbol. Emits DEFAULT_TEMPLATE_ARG_CHANGED. Unlike case32 (function default param, NO_CHANGE), template defaults are part of the substituted type.",
-            "expected_kinds": [
-                "default_template_arg_changed"
-            ]
-        },
-        "case89_inline_accessor_renamed_pimpl_member": {
-            "expected": "BREAKING",
-            "category": "breaking",
-            "platforms": [
-                "linux",
-                "macos"
-            ],
-            "abi_break": true,
-            "api_break": false,
-            "bad_practice": false,
-            "known_gap": "Windows: the public class holds std::shared_ptr<detail::descriptor_impl> which renders differently in MSVC PDB/STL field-type strings, so the internal-leak reachability heuristic that ties the inline accessor to the renamed detail:: member does not fire as-shipped.",
-            "description": "Public inline accessor reaches into detail::descriptor_impl::class_count_ by name. v2 renames the field to n_classes_ and updates the inline body in lockstep, but consumers compiled against v1.h have the OLD field name baked into their inline accessor bodies. Emits INLINE_BODY_REFERENCES_RENAMED_MEMBER.",
-            "expected_kinds": [
-                "inline_body_references_renamed_member"
-            ]
-        },
-        "case90_bundle_intra_dep_removed": {
-            "bundle": true,
-            "expected": null,
-            "category": "bundle",
-            "platforms": [
-                "linux"
-            ],
-            "abi_break": true,
-            "api_break": false,
-            "bad_practice": false,
-            "description": "Bundle (ADR-023): libcore removes core_mul; sibling libalgo still imports it (DT_NEEDED libcore.so.1 + U core_mul). Per-library compare reports libalgo NO_CHANGE; the bundle layer catches the dangling intra-bundle import.",
-            "expected_bundle_verdict": "BREAKING",
-            "expected_combined_verdict": "BREAKING",
-            "expected_bundle_kinds": [
-                "bundle_intra_dep_removed"
-            ],
-            "expected_libraries": {
-                "libcore.so": {
-                    "verdict": "BREAKING",
-                    "expected_kinds": [
-                        "func_removed"
-                    ]
-                },
-                "libalgo.so": {
-                    "verdict": "NO_CHANGE",
-                    "expected_kinds": []
-                }
-            }
-        },
-        "case91_bundle_intra_signature_drift": {
-            "bundle": true,
-            "expected": null,
-            "category": "bundle",
-            "platforms": [
-                "linux"
-            ],
-            "abi_break": true,
-            "api_break": false,
-            "bad_practice": false,
-            "description": "Bundle (ADR-023): libcore changes core_add(int,int) -> core_add(long,long). extern C, mangled name unchanged. libalgo binary is byte-identical between versions but its call sites still use the int calling convention. Bundle layer flags libalgo as bundle_intra_dep_signature_changed.",
-            "expected_bundle_verdict": "BREAKING",
-            "expected_combined_verdict": "BREAKING",
-            "expected_bundle_kinds": [
-                "bundle_intra_dep_signature_changed"
-            ],
-            "expected_libraries": {
-                "libcore.so": {
-                    "verdict": "BREAKING",
-                    "expected_kinds": [
-                        "func_params_changed",
-                        "func_return_changed"
-                    ]
-                },
-                "libalgo.so": {
-                    "verdict": "NO_CHANGE",
-                    "expected_kinds": []
-                }
-            }
-        },
-        "case92_bundle_provider_changed": {
-            "bundle": true,
-            "expected": null,
-            "category": "bundle",
-            "platforms": [
-                "linux"
-            ],
-            "abi_break": false,
-            "api_break": false,
-            "bad_practice": false,
-            "description": "Bundle (ADR-023): shared_util moves from libcore to libutil between releases. The bundle's union of exported symbols is unchanged but DT_NEEDED contracts shift; downstream binaries that only linked -lcore now miss the symbol. Per-library worst-of reports BREAKING; the bundle layer adds COMPATIBLE_WITH_RISK provider-change finding.",
-            "expected_bundle_verdict": "COMPATIBLE_WITH_RISK",
-            "expected_combined_verdict": "BREAKING",
-            "expected_bundle_kinds": [
-                "bundle_provider_changed"
-            ],
-            "expected_libraries": {
-                "libcore.so": {
-                    "verdict": "BREAKING",
-                    "expected_kinds": [
-                        "func_removed"
-                    ]
-                },
-                "libutil.so": {
-                    "verdict": "COMPATIBLE",
-                    "expected_kinds": [
-                        "func_added"
-                    ]
-                }
-            }
-        },
-        "case93_bundle_manifest_drift": {
-            "bundle": true,
-            "expected": null,
-            "category": "bundle",
-            "platforms": [
-                "linux"
-            ],
-            "abi_break": true,
-            "api_break": false,
-            "bad_practice": false,
-            "description": "Bundle (ADR-023): manifest.yaml promises four train_* instantiations; the new bundle silently drops train_double_sparse. With --manifest, the bundle layer emits bundle_manifest_instantiation_removed. Without --manifest, the per-library func_removed already covers it but cannot distinguish 'promised' from 'incidental'.",
-            "manifest_file": "manifest.yaml",
-            "expected_bundle_verdict": "BREAKING",
-            "expected_combined_verdict": "BREAKING",
-            "expected_bundle_kinds": [
-                "bundle_manifest_instantiation_removed"
-            ],
-            "expected_libraries": {
-                "libcore.so": {
-                    "verdict": "BREAKING",
-                    "expected_kinds": [
-                        "func_removed"
-                    ]
-                }
-            }
-        },
-        "case94_empty_tag_gained_state": {
-            "expected": "BREAKING",
-            "category": "breaking",
-            "platforms": [
-                "linux",
-                "macos",
-                "windows"
-            ],
-            "abi_break": true,
-            "api_break": true,
-            "bad_practice": false,
-            "description": "An empty tag struct (mirrors tbb::auto_partitioner) gains a member; sizeof grows from 1 to 8. Any consumer that passed the tag by value into a header-inline algorithm interface now writes an undersized argument into a wider slot. Detected by the existing type_size_changed / type_field_added pair.",
-            "expected_kinds": [
-                "type_size_changed",
-                "type_field_added"
-            ]
-        },
-        "case95_allocator_nested_typedef_removed": {
-            "expected": "BREAKING",
-            "category": "breaking",
-            "platforms": [
-                "linux",
-                "macos",
-                "windows"
-            ],
-            "abi_break": false,
-            "api_break": true,
-            "bad_practice": false,
-            "description": "An allocator-style class drops the historical STL nested-typedef set (value_type, pointer, reference, size_type, difference_type). Exported member symbols are unchanged so binaries still link, but consumer source using `typename Alloc::value_type` etc. fails to compile. Detected via `typedef_removed` (BREAKING per change_registry). Demonstrates the new `member_name` suppression selector \u2014 combined with `change_kind: typedef_removed`, it scopes the inevitable noise from removing a uniform set of nested aliases.",
-            "expected_kinds": [
-                "typedef_removed"
-            ]
-        },
-        "case96_hidden_friend_removed": {
-            "expected": "API_BREAK",
-            "category": "api_break",
-            "platforms": [
-                "linux",
-                "macos",
-                "windows"
-            ],
-            "abi_break": false,
-            "api_break": true,
-            "bad_practice": false,
-            "description": "A non-member operator (`operator==`) declared as an in-class `friend` with an inline body (a 'hidden friend') is removed in v2. Consumers that wrote `a == b` resolved the call via ADL to the friend; with the declaration gone, ADL finds nothing and the source no longer compiles. The .so symbol set is unchanged because inline hidden friends typically have no external symbol. Detected via the new HIDDEN_FRIEND_REMOVED ChangeKind, derived from castxml's `befriending` attribute on the Class/Struct element.",
-            "expected_kinds": [
-                "hidden_friend_removed"
-            ]
-        },
-        "case105_concept_tightening": {
-            "expected": "COMPATIBLE",
-            "category": "addition",
-            "platforms": [
-                "linux",
-                "macos"
-            ],
-            "abi_break": false,
-            "api_break": false,
-            "bad_practice": true,
-            "known_gap": "castxml emits C++20 `concept` declarations as <Unimplemented kind=\"Concept\"/> with no name and no body, and drops the templates that use them. There is no way to detect concept tightening from the castxml dump path; the case is preserved as a regression fixture until the header-AST capture path on the roadmap lands (a libclang-based extractor sitting alongside castxml that captures each concept's constrained parameters and `requires`-expression body). abicheck currently returns NO_CHANGE on this case.",
-            "description": "A C++20 `concept` (`Addable`) gains an additional requirement (default-constructibility). The already-shipped `sum<int>` instantiation keeps the same mangled symbol so previously-compiled binaries keep linking, but consumers instantiating `sum<T>` for types that fail the tightened constraint no longer compile. Concept tightening is detection-blocked by castxml at present; see `known_gap`.",
-            "expected_kinds": []
-        },
-        "case106_ctor_became_explicit": {
-            "expected": "API_BREAK",
-            "category": "api_break",
-            "platforms": [
-                "linux",
-                "macos",
-                "windows"
-            ],
-            "abi_break": false,
-            "api_break": true,
-            "bad_practice": false,
-            "known_gap": "castxml does not emit the `explicit` attribute on <Converter> elements (user-defined conversion operators), and does not emit a mangled name for user-declared constructors. The CTOR_EXPLICIT_ADDED detector is therefore not exercised end-to-end by the default castxml-based dump path on Linux/macOS \u2014 only via DWARF-only mode. The detector itself is validated by tests/test_explicit_ctor.py with synthetic snapshots.",
-            "description": "A converting conversion operator on a public handle type (mirrors `operator int()` on a oneTBB handle) gains the `explicit` specifier. The mangled name is unchanged so previously-compiled binaries still link, but any source code that wrote `int n = ta;` or relied on implicit conversion at a call site fails to compile against v2. Detected by the new CTOR_EXPLICIT_ADDED ChangeKind, derived from DW_AT_explicit on DW_TAG_subprogram (and `explicit=\"1\"` on castxml Method/Constructor \u2014 but not Converter, see known_gap).",
-            "expected_kinds": [
-                "ctor_explicit_added"
-            ]
-        },
-        "case107_task_scheduler_init_removed": {
-            "expected": "BREAKING",
-            "category": "breaking",
-            "platforms": [
-                "linux",
-                "macos",
-                "windows"
-            ],
-            "abi_break": true,
-            "api_break": true,
-            "bad_practice": false,
-            "description": "Named regression fixture for oneTBB's largest historical ABI break: tbb::task_scheduler_init was removed in oneTBB 2021.1. The entire publicly-exported class and all of its members disappear. Detected by the existing FUNC_REMOVED / TYPE_REMOVED detectors.",
-            "expected_kinds": [
-                "func_removed",
-                "type_removed"
-            ]
-        },
-        "case108_task_class_removed": {
-            "expected": "BREAKING",
-            "category": "breaking",
-            "platforms": [
-                "linux",
-                "macos",
-                "windows"
-            ],
-            "abi_break": true,
-            "api_break": true,
-            "bad_practice": false,
-            "description": "Named regression fixture for the oneTBB 2021.1 removal of the polymorphic `tbb::task` base class. Removing a publicly-derivable polymorphic base destroys every user subclass's vtable, breaks RTTI across DSOs, and undefines the typeinfo symbol. Detected by existing FUNC_REMOVED / TYPE_REMOVED detectors.",
-            "expected_kinds": [
-                "func_removed",
-                "type_removed"
-            ]
-        },
-        "case109_flow_graph_policy_renames": {
-            "expected": "BREAKING",
-            "category": "breaking",
-            "platforms": [
-                "linux",
-                "macos",
-                "windows"
-            ],
-            "abi_break": false,
-            "api_break": true,
-            "bad_practice": false,
-            "description": "Header-only policy-tag types used as template parameters for `function_node` are renamed wholesale (queueing/rejecting \u2192 buffering_policy/backpressure_policy) and the instantiation-anchor typedef is dropped. The example deliberately keeps v1.cpp / v2.cpp byte-identical (no template instantiations) so the .so symbol table is unchanged across the version pair; any rebuild against v2 headers still fails. Detected via `typedef_removed` + `type_removed` (both BREAKING per change_registry). Member of the oneTBB regression suite; mirrors the 2021 flow::graph policy reshuffle.",
-            "expected_kinds": [
-                "typedef_removed",
-                "type_removed"
-            ]
-        },
-        "case110_concurrent_unordered_map_api_drift": {
-            "expected": "BREAKING",
-            "category": "breaking",
-            "platforms": [
-                "linux",
-                "macos",
-                "windows"
-            ],
-            "abi_break": true,
-            "api_break": true,
-            "bad_practice": false,
-            "description": "Public member function `insert` loses one of its parameters between versions. The old mangled symbol disappears, the new overload has a different mangled name \u2014 both source and link break. Member of the oneTBB regression suite; mirrors historical signature tightenings on `tbb::concurrent_unordered_map`.",
-            "expected_kinds": [
-                "func_removed"
-            ]
-        },
-        "case111_enumerable_thread_specific_lambda_ambiguity": {
-            "expected": "COMPATIBLE",
-            "category": "addition",
-            "platforms": [
-                "linux",
-                "macos",
-                "windows"
-            ],
-            "abi_break": false,
-            "api_break": false,
-            "bad_practice": true,
-            "known_gap": "Two gaps stack here. (1) castxml does not emit mangled names for user-declared constructors (same gap as case106 / case78), so the added second ctor cannot be observed as FUNC_ADDED end-to-end \u2014 abicheck currently returns NO_CHANGE on this case. (2) Even with the FUNC_ADDED in place, constructor overload ambiguity at consumer call sites cannot be detected from library snapshots alone; that needs the castxml header-AST capture path on the roadmap (concept tightening / hidden friends). The case is preserved as a regression fixture for whenever either gap is closed.",
-            "description": "A second constructor overload accepting `std::function<int()>` is added next to the existing `int`-form constructor. By itself this is a pure addition \u2014 existing call sites that pass an int still resolve to the original constructor. The risk: brace-initialization and generic callable arguments can become ambiguous at downstream call sites. Member of the oneTBB regression suite.",
-            "expected_kinds": [
-                "func_added"
-            ]
-        },
-        "case78_task_arena_attach_tag": {
-            "expected": "BREAKING",
-            "category": "breaking",
-            "platforms": [
-                "linux",
-                "macos",
-                "windows"
-            ],
-            "abi_break": true,
-            "api_break": true,
-            "bad_practice": false,
-            "known_gap": "Two detector gaps stack on this case in the castxml-driven pipeline: (1) castxml does not emit mangled names for user-declared constructors (same gap as case106), so the v1 ctor `task_arena(attach_mode_t)` collapses with all other ctors under mangled='task_arena' and FUNC_REMOVED never fires; (2) abicheck's enum diff defers wholly-removed enums to TYPE_REMOVED, but TYPE_REMOVED only iterates `snap.types`, never `snap.enums`, so `attach_mode_t` removal goes silently undetected. End-to-end the verdict comes out COMPATIBLE (only the new nested `attach` struct is observed as TYPE_ADDED). The case is preserved as a regression fixture for whenever either gap is closed.",
-            "description": "An `attach_mode_t` enum + matching constructor are replaced by an empty tag struct `task_arena::attach` + tag-dispatched constructor. The old enum, its members, and the old constructor's mangled symbol are all removed. Member of the oneTBB regression suite; mirrors the 2021 `task_arena::attach` tag introduction.",
-            "expected_kinds": [
-                "func_removed",
-                "type_removed",
-                "enum_member_removed"
-            ]
-        },
-        "case85_internal_template_signature_changed": {
-            "expected": "BREAKING",
-            "category": "breaking",
-            "platforms": [
-                "linux",
-                "macos",
-                "windows"
-            ],
-            "abi_break": true,
-            "api_break": false,
-            "bad_practice": false,
-            "description": "Internal helper template `lib::__detail::walk<T>` is dispatched through by a public inline algorithm `sum_range`. Between v1 and v2 the explicit instantiation set shifts (`walk<float>` removed, `walk<double>` added). Consumers compiled against v1 baked `walk<float>` into their symbol table; against v2 they fail to link. Function-template analogue of internal_type_leaks_via_public_api from PR #238.",
-            "expected_kinds": [
-                "internal_template_leaks_via_public_api",
-                "func_removed"
-            ]
-        },
-        "case88_cpo_kind_changed": {
-            "expected": "BREAKING",
-            "category": "breaking",
-            "platforms": [
-                "linux",
-                "macos",
-                "windows"
-            ],
-            "abi_break": true,
-            "api_break": false,
-            "bad_practice": false,
-            "description": "Public name `lib::sort` is published in v1 as a free function and in v2 as a customisation point object (constexpr variable of an unspecified function-object class type). Call syntax keeps working but decltype, extern templates, and trait specialisations break.",
-            "expected_kinds": [
-                "cpo_kind_changed"
-            ]
-        },
-        "case97_api_depends_on_consumer_env": {
-            "expected": "COMPATIBLE",
-            "category": "quality",
-            "platforms": [
-                "linux",
-                "macos",
-                "windows"
-            ],
-            "abi_break": false,
-            "api_break": false,
-            "bad_practice": false,
-            "known_gap": "The single-config build harness does not exercise the matrix-aware API_DEPENDS_ON_CONSUMER_ENV detector \u2014 that detector consumes a MatrixSnapshot (multiple per-configuration snapshots) which is only produced by the `abicheck probe` subcommand (not wired into the default `compare` CLI yet). In the current single-config build, castxml dumps v1.h and v2.h WITHOUT USE_FEATURE defined, so the declared-function set is identical between v1 and v2; the underlying lib v1 still exports `extended` because v1.cpp `#define USE_FEATURE 1` before include \u2014 that surfaces as FUNC_REMOVED_ELF_ONLY (a quality-level finding) when CI builds the case, so the per-binary verdict is COMPATIBLE. The case is preserved as documentation of the macro-conditioned shape; the real BREAKING-grade finding only appears via the matrix detector.",
-            "description": "Header declares `lib::extended()` only when the consumer defines `USE_FEATURE`. The v1 build defines the macro and exports extended(); v2 builds without it. The matrix-aware API_DEPENDS_ON_CONSUMER_ENV finding is the channel that exposes this when both macro states are probed.",
-            "expected_kinds": [
-                "func_removed_elf_only"
-            ]
-        },
-        "case98_cxx_standard_floor_raised": {
-            "expected": "NO_CHANGE",
-            "category": "no_change",
-            "platforms": [
-                "linux",
-                "macos",
-                "windows"
-            ],
-            "abi_break": false,
-            "api_break": false,
-            "bad_practice": false,
-            "known_gap": "The C++ standard floor signal is invisible to a per-binary diff (symbol/type set is unchanged between v1 and v2). The matrix-aware CXX_STANDARD_FLOOR_RAISED detector (emitted by the probe harness when fed per-configuration cxx_std metadata) is the only correct channel for this signal. The CMakeLists.txt builds v2 with -std=c++20 to embed a post-C++17 contract via build configuration, but the public declaration set is intentionally identical to v1's so the case still produces NO_CHANGE under the current single-config pipeline.",
-            "description": "v1 header works under C++17; v2 is built with -std=c++20 but declares the same public surface as v1. Per-binary diff is NO_CHANGE; the source-level break for C++17 consumers only surfaces via the matrix-aware CXX_STANDARD_FLOOR_RAISED detector.",
-            "expected_kinds": []
-        },
-        "case99_experimental_graduated": {
-            "expected": "COMPATIBLE",
-            "category": "addition",
-            "platforms": [
-                "linux",
-                "macos",
-                "windows"
-            ],
-            "abi_break": false,
-            "api_break": false,
-            "bad_practice": false,
-            "description": "A declaration lived only under lib::experimental:: in v1 and is published at the stable lib:: name in v2 while the experimental alias is retained. The dedicated EXPERIMENTAL_GRADUATED finding makes the migration event visible; the underlying signal is also a plain func_added for the stable name.",
-            "expected_kinds": [
-                "experimental_graduated",
-                "func_added"
-            ]
-        },
-        "case100_experimental_removed_without_replacement": {
-            "expected": "BREAKING",
-            "category": "breaking",
-            "platforms": [
-                "linux",
-                "macos",
-                "windows"
-            ],
-            "abi_break": true,
-            "api_break": true,
-            "bad_practice": false,
-            "description": "A declaration only ever lived under lib::experimental:: in v1 and is removed from v2 with no stable-namespace replacement. The dedicated EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT finding tells reviewers there is no migration target; the underlying mangled symbol disappearance is also reported as a plain func_removed.",
-            "expected_kinds": [
-                "experimental_removed_without_replacement",
-                "func_removed"
-            ]
-        },
-        "case101_inline_namespace_version_bumped": {
-            "expected": "BREAKING",
-            "category": "breaking",
-            "platforms": [
-                "linux",
-                "macos",
-                "windows"
-            ],
-            "abi_break": true,
-            "api_break": false,
-            "bad_practice": false,
-            "description": "Library uses a versioned inline namespace `_V1` in v1 and bumps to `_V2` in v2. Declarations look identical to consumers so source keeps compiling, but every freshly built TU emits mangled symbols carrying the new version segment \u2014 old and new TUs of the same program ODR-violate. Specialisation of the existing inline_namespace_moved that fires from declared-name evidence so it works on header-only inputs and single-symbol bumps.",
-            "expected_kinds": [
-                "inline_namespace_version_bumped"
-            ]
-        },
-        "case102_frozen_runtime_signature_changed": {
-            "expected": "BREAKING",
-            "category": "breaking",
-            "platforms": [
-                "linux",
-                "macos",
-                "windows"
-            ],
-            "abi_break": true,
-            "api_break": true,
-            "bad_practice": false,
-            "description": "An extern \"C\" runtime entry inside a contractually-frozen namespace (mirrors oneTBB's `detail::r1`) has its parameter and return types widened in place. The exported symbol name is unchanged but callers built against v1 pass int into what is now a long slot. Detected by the existing FUNC_PARAMS_CHANGED / FUNC_RETURN_CHANGED detectors; the new `frozen_namespaces:` policy field additionally tags the finding via Change.frozen_namespace_violation and refuses any `overrides:` entry that would downgrade it. See policy.yaml in the case directory.",
-            "expected_kinds": [
-                "func_params_changed",
-                "func_return_changed"
-            ]
-        },
-        "case103_toolchain_flag_drift": {
-            "expected": "COMPATIBLE",
-            "category": "quality",
-            "platforms": [
-                "linux"
-            ],
-            "abi_break": false,
-            "api_break": false,
-            "bad_practice": true,
-            "description": "Public surface and every exported symbol are identical between v1 and v2; only the ABI-affecting compiler flag set differs (v2 adds -fshort-enums). The toolchain-flag drift detector parses DW_AT_producer and reports the mismatch as a compatible, informational quality signal \u2014 a leading indicator that the two builds were made under different ABI assumptions, before that drift turns into a real layout break on a library that exposes enums/packed structs/a different data model.",
-            "expected_kinds": [
-                "toolchain_flag_drift"
-            ]
-        },
-        "case104_glibcxx_dual_abi_flip": {
-            "expected": "BREAKING",
-            "category": "breaking",
-            "platforms": [
-                "linux"
-            ],
-            "abi_break": true,
-            "api_break": false,
-            "bad_practice": true,
-            "description": "Identical C++ source built once with _GLIBCXX_USE_CXX11_ABI=0 (v1) and once with =1 (v2). GNU libstdc++ ships two incompatible std::string/std::list ABIs selected by this macro, so every std::string-bearing exported symbol gets a different mangled name (std::__cxx11::basic_string vs the legacy std::basic_string). abicheck recognises the mass-churn signature and collapses it into a single glibcxx_dual_abi_flip_detected diagnostic alongside the underlying func_removed/func_added evidence; verdict is BREAKING. GNU libstdc++ only.",
-            "expected_kinds": [
-                "glibcxx_dual_abi_flip_detected",
-                "func_removed"
-            ]
-        },
-        "case112_lp64_ilp64": {
-            "expected": "BREAKING",
-            "category": "breaking",
-            "platforms": [
-                "linux"
-            ],
-            "abi_break": true,
-            "api_break": false,
-            "bad_practice": false,
-            "description": "oneMKL-style LP64 (MKL_INT=int, 32-bit) switched to ILP64 (MKL_INT=long, 64-bit). A large fraction of public integer parameters/returns flip width together and the MKL_INT typedef resizes, the signature of an LP64/ILP64 model switch.",
-            "expected_kinds": [
-                "integer_model_changed"
-            ]
-        },
-        "case113_abi_tag_changed": {
-            "expected": "BREAKING",
-            "category": "breaking",
-            "platforms": [
-                "linux"
-            ],
-            "abi_break": true,
-            "api_break": false,
-            "bad_practice": false,
-            "description": "A single C++ symbol loses its Itanium [abi:cxx11] ABI tag ([[gnu::abi_tag]]). The demangled name is unchanged but the mangled symbol (B5cxx11 component) differs, so consumers linked against the tagged symbol fail to resolve it.",
-            "expected_kinds": [
-                "abi_tag_changed"
-            ]
-        },
-        "case114_char8t_migration": {
-            "expected": "BREAKING",
-            "category": "breaking",
-            "platforms": [
-                "linux"
-            ],
-            "abi_break": true,
-            "api_break": false,
-            "bad_practice": false,
-            "description": "A public UTF-8 API migrated from char-family spellings to C++20 char8_t on parameters and a struct field. char8_t is a distinct type (mangling Du), so the mangled symbols change and old binaries fail to resolve them.",
-            "expected_kinds": [
-                "char8t_migration"
-            ]
-        },
-        "case115_bit_int_width_changed": {
-            "expected": "BREAKING",
-            "category": "breaking",
-            "platforms": [
-                "linux"
-            ],
-            "abi_break": true,
-            "api_break": false,
-            "bad_practice": false,
-            "description": "A public C23 _BitInt(64) accumulator widened to _BitInt(128) across a struct field, a by-value parameter, and a return type. The bit width is part of the type, so storage size and calling-convention treatment change. (128 is clang's maximum _BitInt width, keeping the case portable.)",
-            "expected_kinds": [
-                "bit_int_width_changed"
-            ],
-            "requires_feature": "_BitInt"
-        },
-        "case116_atomic_qualifier_changed": {
-            "expected": "BREAKING",
-            "category": "breaking",
-            "platforms": [
-                "linux"
-            ],
-            "abi_break": true,
-            "api_break": false,
-            "bad_practice": false,
-            "description": "A public struct field and a return type gained the C11 _Atomic qualifier. Per WG14 the size/alignment of an _Atomic-qualified type may differ from the unqualified type and varies across compilers, so layout and the return ABI diverge.",
-            "expected_kinds": [
-                "atomic_qualifier_changed"
-            ]
-        },
-        "case117_no_unique_address": {
-            "expected": "BREAKING",
-            "category": "breaking",
-            "platforms": [
-                "linux"
-            ],
-            "abi_break": true,
-            "api_break": false,
-            "bad_practice": false,
-            "description": "An empty member gained [[no_unique_address]] in C++20, letting the compiler overlay it with the next member. No dedicated ChangeKind is needed: the overlay shows up as the existing type_size_changed / type_field_offset_changed layout kinds.",
-            "expected_kinds": [
-                "type_size_changed",
-                "type_field_offset_changed"
-            ]
+    "case02_param_type_change": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux"
+      ],
+      "abi_break": true,
+      "api_break": true,
+      "bad_practice": false,
+      "expected_kinds": [
+        "func_params_changed"
+      ]
+    },
+    "case03_compat_addition": {
+      "expected": "COMPATIBLE",
+      "category": "addition",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "abi_break": false,
+      "api_break": false,
+      "bad_practice": false,
+      "expected_kinds": [
+        "func_added"
+      ]
+    },
+    "case04_no_change": {
+      "expected": "NO_CHANGE",
+      "category": "no_change",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "abi_break": false,
+      "api_break": false,
+      "bad_practice": false,
+      "expected_kinds": [],
+      "expected_absent_kinds": [
+        "func_removed",
+        "func_params_changed",
+        "type_size_changed"
+      ]
+    },
+    "case05_soname": {
+      "expected": "COMPATIBLE",
+      "category": "quality",
+      "platforms": [
+        "linux"
+      ],
+      "abi_break": false,
+      "api_break": false,
+      "bad_practice": true,
+      "expected_kinds": [
+        "soname_missing"
+      ]
+    },
+    "case06_visibility": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux"
+      ],
+      "abi_break": true,
+      "api_break": false,
+      "bad_practice": true,
+      "expected_kinds": [
+        "func_visibility_changed"
+      ]
+    },
+    "case07_struct_layout": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux"
+      ],
+      "abi_break": true,
+      "api_break": true,
+      "bad_practice": false,
+      "expected_kinds": [
+        "type_size_changed"
+      ]
+    },
+    "case08_enum_value_change": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux"
+      ],
+      "abi_break": true,
+      "api_break": true,
+      "bad_practice": false,
+      "expected_kinds": [
+        "enum_member_value_changed"
+      ]
+    },
+    "case09_cpp_vtable": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux"
+      ],
+      "abi_break": true,
+      "api_break": true,
+      "bad_practice": false,
+      "expected_kinds": [
+        "type_vtable_changed"
+      ]
+    },
+    "case10_return_type": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux"
+      ],
+      "abi_break": true,
+      "api_break": true,
+      "bad_practice": false,
+      "expected_kinds": [
+        "func_return_changed"
+      ]
+    },
+    "case11_global_var_type": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux"
+      ],
+      "abi_break": true,
+      "api_break": true,
+      "bad_practice": false,
+      "expected_kinds": [
+        "var_type_changed"
+      ]
+    },
+    "case12_function_removed": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "abi_break": true,
+      "api_break": true,
+      "bad_practice": false,
+      "expected_kinds": [
+        "func_removed"
+      ]
+    },
+    "case13_symbol_versioning": {
+      "expected": "COMPATIBLE",
+      "category": "quality",
+      "platforms": [
+        "linux"
+      ],
+      "abi_break": false,
+      "api_break": false,
+      "bad_practice": false
+    },
+    "case14_cpp_class_size": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux"
+      ],
+      "abi_break": true,
+      "api_break": true,
+      "bad_practice": false
+    },
+    "case15_noexcept_change": {
+      "expected": "COMPATIBLE_WITH_RISK",
+      "category": "risk",
+      "platforms": [
+        "linux"
+      ],
+      "abi_break": false,
+      "api_break": true,
+      "bad_practice": false,
+      "note": "noexcept change itself is COMPATIBLE; GLIBCXX version requirement is deployment risk"
+    },
+    "case16_inline_to_non_inline": {
+      "expected": "COMPATIBLE",
+      "category": "addition",
+      "platforms": [
+        "linux"
+      ],
+      "abi_break": false,
+      "api_break": false,
+      "bad_practice": false
+    },
+    "case17_template_abi": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux"
+      ],
+      "abi_break": true,
+      "api_break": true,
+      "bad_practice": false
+    },
+    "case18_dependency_leak": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux"
+      ],
+      "abi_break": true,
+      "api_break": false,
+      "bad_practice": true
+    },
+    "case19_enum_member_removed": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "abi_break": true,
+      "api_break": true,
+      "bad_practice": false,
+      "expected_kinds": [
+        "enum_member_removed"
+      ]
+    },
+    "case20_enum_member_value_changed": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "abi_break": true,
+      "api_break": true,
+      "bad_practice": false,
+      "reason": "regular enum member value changes remain breaking; only named sentinel patterns are downgraded",
+      "expected_kinds": [
+        "enum_member_value_changed"
+      ]
+    },
+    "case21_method_became_static": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux"
+      ],
+      "abi_break": true,
+      "api_break": true,
+      "bad_practice": false,
+      "expected_kinds": [
+        "func_static_changed"
+      ]
+    },
+    "case22_method_const_changed": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "abi_break": true,
+      "api_break": true,
+      "bad_practice": false,
+      "expected_kinds": [
+        "func_cv_changed"
+      ]
+    },
+    "case23_pure_virtual_added": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "abi_break": true,
+      "api_break": true,
+      "bad_practice": false,
+      "expected_kinds": [
+        "func_pure_virtual_added"
+      ]
+    },
+    "case24_union_field_removed": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "abi_break": true,
+      "api_break": true,
+      "bad_practice": false,
+      "expected_kinds": [
+        "union_field_removed"
+      ]
+    },
+    "case25_enum_member_added": {
+      "expected": "COMPATIBLE",
+      "category": "addition",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "abi_break": false,
+      "api_break": false,
+      "bad_practice": false,
+      "expected_kinds": [
+        "enum_member_added"
+      ]
+    },
+    "case26_union_field_added": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "abi_break": true,
+      "api_break": false,
+      "bad_practice": false
+    },
+    "case27_symbol_binding_weakened": {
+      "expected": "COMPATIBLE",
+      "category": "quality",
+      "platforms": [
+        "linux"
+      ],
+      "abi_break": false,
+      "api_break": false,
+      "bad_practice": false
+    },
+    "case28_typedef_opaque": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "abi_break": true,
+      "api_break": true,
+      "bad_practice": false,
+      "expected_kinds": [
+        "type_became_opaque"
+      ]
+    },
+    "case29_ifunc_transition": {
+      "expected": "COMPATIBLE",
+      "category": "quality",
+      "platforms": [
+        "linux"
+      ],
+      "abi_break": false,
+      "api_break": false,
+      "bad_practice": false
+    },
+    "case30_field_qualifiers": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "abi_break": true,
+      "api_break": true,
+      "bad_practice": false
+    },
+    "case31_enum_rename": {
+      "expected": "API_BREAK",
+      "category": "api_break",
+      "expected_compat": "NO_CHANGE",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "abi_break": false,
+      "api_break": true,
+      "bad_practice": false,
+      "expected_kinds": [
+        "enum_member_renamed"
+      ]
+    },
+    "case32_param_defaults": {
+      "expected": "NO_CHANGE",
+      "category": "no_change",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "abi_break": false,
+      "api_break": false,
+      "bad_practice": false
+    },
+    "case33_pointer_level": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "abi_break": true,
+      "api_break": true,
+      "bad_practice": false,
+      "expected_kinds": [
+        "param_pointer_level_changed"
+      ]
+    },
+    "case34_access_level": {
+      "expected": "API_BREAK",
+      "category": "api_break",
+      "expected_compat": "NO_CHANGE",
+      "platforms": [
+        "linux",
+        "macos"
+      ],
+      "abi_break": false,
+      "api_break": true,
+      "bad_practice": false
+    },
+    "case35_field_rename": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "abi_break": false,
+      "api_break": true,
+      "bad_practice": false,
+      "expected_kinds": [
+        "field_renamed"
+      ]
+    },
+    "case36_anon_struct": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "abi_break": true,
+      "api_break": true,
+      "bad_practice": false
+    },
+    "case37_base_class": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "abi_break": true,
+      "api_break": true,
+      "bad_practice": false,
+      "expected_kinds": [
+        "type_base_changed"
+      ]
+    },
+    "case38_virtual_methods": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "abi_break": true,
+      "api_break": true,
+      "bad_practice": false
+    },
+    "case39_var_const": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "abi_break": true,
+      "api_break": true,
+      "bad_practice": false,
+      "expected_kinds": [
+        "var_became_const"
+      ]
+    },
+    "case40_field_layout": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "abi_break": true,
+      "api_break": true,
+      "bad_practice": false
+    },
+    "case41_type_changes": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux",
+        "macos"
+      ],
+      "abi_break": true,
+      "api_break": true,
+      "bad_practice": false
+    },
+    "case42_type_alignment_changed": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux",
+        "macos"
+      ],
+      "abi_break": true,
+      "api_break": true,
+      "bad_practice": false,
+      "description": "Struct alignment changed via __attribute__((aligned(8))) to aligned(64) \u2014 stack allocation and array stride break (TYPE_ALIGNMENT_CHANGED)",
+      "known_gap": "macOS: Tool returns NO_CHANGE \u2014 without castxml, Mach-O mode captures only exported symbols; type-level alignment changes are invisible"
+    },
+    "case26b_union_field_added_compatible": {
+      "expected": "COMPATIBLE",
+      "category": "addition",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "abi_break": false,
+      "api_break": false,
+      "bad_practice": false
+    },
+    "case43_base_class_member_added": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "abi_break": true,
+      "api_break": true,
+      "bad_practice": false,
+      "description": "Data member added to base class shifts derived class layout (libabigail: Added_Base_Class_Data_Member)"
+    },
+    "case44_cyclic_type_member_added": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "abi_break": true,
+      "api_break": true,
+      "bad_practice": false,
+      "description": "Member added to a self-referential (cyclic) struct \u2014 sizeof changes (libabigail: Added_Non_Virtual_Member_Variable in cyclic type)"
+    },
+    "case45_multi_dim_array_change": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "abi_break": true,
+      "api_break": true,
+      "bad_practice": false,
+      "description": "Multi-dimensional array element type changed float->double \u2014 size doubles (libabigail: Subrange_Change)"
+    },
+    "case46_pointer_chain_type_change": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "abi_break": true,
+      "api_break": true,
+      "bad_practice": false,
+      "description": "Pointer chain ultimate type changes int->long through two indirection levels (libabigail: Function_Return_Type_Change indirect)"
+    },
+    "case47_inline_to_outlined": {
+      "expected": "COMPATIBLE",
+      "category": "addition",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "abi_break": false,
+      "api_break": false,
+      "bad_practice": false,
+      "description": "Inline method moved out-of-line: new exported symbol appears (FUNC_ADDED, libabigail: inline->outlined)"
+    },
+    "case48_leaf_struct_through_pointer": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "abi_break": true,
+      "api_break": true,
+      "bad_practice": false,
+      "description": "Leaf struct gains field; propagates through embedding in Container \u2014 layout breaks (libabigail: Leaf_Type_Change)"
+    },
+    "case49_executable_stack": {
+      "expected": "COMPATIBLE",
+      "category": "quality",
+      "platforms": [
+        "linux"
+      ],
+      "abi_break": false,
+      "api_break": false,
+      "bad_practice": true,
+      "description": "Library linked with -Wl,-z,execstack has GNU_STACK RWE \u2014 disables NX protection (bad practice \u2014 security)"
+    },
+    "case50_soname_inconsistent": {
+      "expected": "COMPATIBLE",
+      "category": "quality",
+      "platforms": [
+        "linux"
+      ],
+      "abi_break": false,
+      "api_break": false,
+      "bad_practice": true,
+      "description": "SONAME present but set to wrong major version \u2014 bakes wrong DT_NEEDED into consumers (bad practice \u2014 packaging/upgrade hazard)"
+    },
+    "case51_protected_visibility": {
+      "expected": "COMPATIBLE",
+      "category": "quality",
+      "platforms": [
+        "linux"
+      ],
+      "abi_break": false,
+      "api_break": false,
+      "bad_practice": false,
+      "description": "Symbol visibility changed DEFAULT\u2192PROTECTED \u2014 exported but no longer interposable (compatible, interposition policy concern)"
+    },
+    "case52_rpath_leak": {
+      "expected": "COMPATIBLE",
+      "category": "quality",
+      "platforms": [
+        "linux"
+      ],
+      "abi_break": false,
+      "api_break": false,
+      "bad_practice": true,
+      "description": "Library has hardcoded build-directory path in DT_RUNPATH \u2014 non-portable deployment (bad practice \u2014 packaging)"
+    },
+    "case53_namespace_pollution": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux"
+      ],
+      "abi_break": true,
+      "api_break": true,
+      "bad_practice": true,
+      "description": "Library exports generic symbol names (init, process, cleanup) without prefix \u2014 collision risk (bad practice \u2014 API design)",
+      "expected_kinds": [
+        "func_removed",
+        "func_added"
+      ]
+    },
+    "case54_used_reserved_field": {
+      "expected": "COMPATIBLE",
+      "category": "quality",
+      "platforms": [
+        "linux",
+        "macos"
+      ],
+      "abi_break": false,
+      "api_break": false,
+      "bad_practice": false,
+      "description": "Reserved placeholder fields (__reserved1, __reserved2) renamed to meaningful names at same offsets \u2014 layout unchanged (USED_RESERVED_FIELD)",
+      "known_gap": "macOS: Tool returns NO_CHANGE \u2014 without castxml, Mach-O mode captures only exported symbols; struct field renames are invisible",
+      "expected_kinds": [
+        "used_reserved_field"
+      ]
+    },
+    "case55_type_kind_changed": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux",
+        "macos"
+      ],
+      "abi_break": true,
+      "api_break": true,
+      "bad_practice": false,
+      "description": "Type changed from struct to union \u2014 fields overlap instead of sequential layout (TYPE_KIND_CHANGED)",
+      "known_gap": "macOS: Tool returns NO_CHANGE \u2014 without castxml, Mach-O mode captures only exported symbols; struct-to-union type kind change is invisible",
+      "expected_kinds": [
+        "type_kind_changed"
+      ]
+    },
+    "case56_struct_packing_changed": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux",
+        "macos"
+      ],
+      "abi_break": true,
+      "api_break": true,
+      "bad_practice": false,
+      "description": "Struct packing changed via pragma pack(1) \u2014 field offsets and sizeof change (STRUCT_PACKING_CHANGED)",
+      "known_gap": "macOS: Tool returns NO_CHANGE \u2014 without castxml, Mach-O mode captures only exported symbols; packing/layout changes are invisible",
+      "expected_kinds": [
+        "struct_packing_changed"
+      ]
+    },
+    "case57_enum_underlying_size_changed": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux",
+        "macos"
+      ],
+      "abi_break": true,
+      "api_break": true,
+      "bad_practice": false,
+      "description": "Enum underlying type grows from int to long due to large sentinel value \u2014 sizeof changes (ENUM_UNDERLYING_SIZE_CHANGED)",
+      "known_gap": "macOS: Tool returns NO_CHANGE \u2014 without castxml, Mach-O mode captures only exported symbols; enum underlying size changes are invisible",
+      "expected_kinds": [
+        "enum_underlying_size_changed"
+      ]
+    },
+    "case58_var_removed": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux",
+        "macos"
+      ],
+      "abi_break": true,
+      "api_break": true,
+      "bad_practice": false,
+      "description": "Global variable lib_debug_level removed from export table (VAR_REMOVED)",
+      "known_gap": "macOS: Tool returns COMPATIBLE \u2014 Mach-O export table does not distinguish functions from variables; lib_debug_level detected as func_removed_elf_only instead of var_removed",
+      "expected_kinds": [
+        "var_removed"
+      ]
+    },
+    "case59_func_became_inline": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux",
+        "macos"
+      ],
+      "abi_break": true,
+      "api_break": false,
+      "bad_practice": false,
+      "description": "Functions moved from outlined to static inline in header \u2014 symbols disappear from .dynsym (FUNC_REMOVED, inverse of case47)",
+      "expected_kinds": [
+        "func_removed"
+      ]
+    },
+    "case60_base_class_position_changed": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux",
+        "macos"
+      ],
+      "abi_break": true,
+      "api_break": true,
+      "bad_practice": false,
+      "description": "Multiple inheritance base class order swapped \u2014 subobject offsets and vtable pointers change (BASE_CLASS_POSITION_CHANGED)",
+      "known_gap": "macOS: Tool returns NO_CHANGE \u2014 no headers provided; Mach-O mode captures only exported symbols; base class layout changes are invisible"
+    },
+    "case61_var_added": {
+      "expected": "COMPATIBLE",
+      "category": "addition",
+      "platforms": [
+        "linux",
+        "macos"
+      ],
+      "abi_break": false,
+      "api_break": false,
+      "bad_practice": false,
+      "description": "New global variable lib_build_number added \u2014 purely additive (VAR_ADDED)",
+      "expected_kinds": [
+        "var_added"
+      ]
+    },
+    "case62_type_field_added_compatible": {
+      "expected": "COMPATIBLE",
+      "category": "addition",
+      "platforms": [
+        "linux",
+        "macos"
+      ],
+      "abi_break": false,
+      "api_break": false,
+      "bad_practice": false,
+      "description": "Field added to opaque struct (callers use pointer only) \u2014 layout change invisible to consumers (TYPE_FIELD_ADDED compatible)",
+      "expected_kinds": [
+        "func_added"
+      ]
+    },
+    "case63_bitfield_changed": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux"
+      ],
+      "abi_break": true,
+      "api_break": true,
+      "bad_practice": false,
+      "description": "Bitfield width changed in struct \u2014 all subsequent bitfields shift to different bit positions (FIELD_BITFIELD_CHANGED)",
+      "expected_kinds": [
+        "field_bitfield_changed"
+      ]
+    },
+    "case64_calling_convention_changed": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux"
+      ],
+      "abi_break": true,
+      "api_break": false,
+      "bad_practice": false,
+      "description": "Function calling convention changed from default System V to ms_abi \u2014 parameters passed in wrong registers (CALLING_CONVENTION_CHANGED)",
+      "expected_kinds": [
+        "calling_convention_changed"
+      ],
+      "known_gap": "GCC does not emit DW_AT_calling_convention for __attribute__((ms_abi)); detection requires Clang"
+    },
+    "case65_symbol_version_removed": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux"
+      ],
+      "abi_break": true,
+      "api_break": false,
+      "bad_practice": false,
+      "description": "ELF symbol version node CRYPTO_1.0 removed \u2014 old binaries linked against that version fail at load time (SYMBOL_VERSION_DEFINED_REMOVED)",
+      "expected_kinds": [
+        "symbol_version_defined_removed"
+      ]
+    },
+    "case66_language_linkage_changed": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "abi_break": true,
+      "api_break": true,
+      "bad_practice": false,
+      "description": "extern \"C\" removed from C++ functions \u2014 symbol names change from unmangled to C++ mangled (FUNC_LANGUAGE_LINKAGE_CHANGED)",
+      "expected_kinds": [
+        "func_language_linkage_changed"
+      ]
+    },
+    "case67_tls_var_size_changed": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux",
+        "macos"
+      ],
+      "abi_break": true,
+      "api_break": true,
+      "bad_practice": false,
+      "description": "Thread-local variable ErrorCtx grows from 68 to 72 bytes due to inserted field \u2014 struct field offsets shift, causing consumers to read wrong data (TLS_VAR_SIZE_CHANGED)",
+      "expected_kinds": [
+        "tls_var_size_changed"
+      ]
+    },
+    "case68_virtual_method_added": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "abi_break": true,
+      "api_break": true,
+      "bad_practice": false,
+      "description": "Virtual method added to previously non-virtual class \u2014 vtable pointer inserted, sizeof grows, all field offsets shift (FUNC_VIRTUAL_ADDED)",
+      "expected_kinds": [
+        "func_virtual_added"
+      ]
+    },
+    "case69_trivial_to_nontrivial": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux",
+        "macos"
+      ],
+      "known_gap": "Windows MSVC x64: structs >8 bytes are always passed by pointer regardless of triviality, so the calling convention does not change",
+      "abi_break": true,
+      "api_break": false,
+      "bad_practice": false,
+      "description": "Trivially-copyable struct gains user-defined destructor \u2014 calling convention changes from register passing to hidden pointer (VALUE_ABI_TRAIT_CHANGED)",
+      "expected_kinds": [
+        "value_abi_trait_changed"
+      ]
+    },
+    "case70_flexible_array_member_changed": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "abi_break": true,
+      "api_break": true,
+      "bad_practice": false,
+      "description": "Flexible array member element type changed float \u2192 double \u2014 dynamic allocation size and element access offsets break while sizeof(Packet) stays the same (FLEXIBLE_ARRAY_MEMBER_CHANGED)",
+      "expected_kinds": [
+        "flexible_array_member_changed",
+        "func_return_changed"
+      ]
+    },
+    "case71_inline_namespace_moved": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "abi_break": true,
+      "api_break": false,
+      "bad_practice": false,
+      "description": "Symbols moved from inline namespace v1 to v2 \u2014 mangled names change so old binaries fail to resolve symbols (INLINE_NAMESPACE_MOVED)",
+      "expected_kinds": [
+        "inline_namespace_moved"
+      ]
+    },
+    "case72_covariant_return_changed": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "abi_break": true,
+      "api_break": true,
+      "bad_practice": false,
+      "description": "Intermediate class inserted into hierarchy \u2014 vtable layout shifts, object size changes, covariant return type changes from Circle* to Drawable* (TYPE_BASE_CHANGED)",
+      "expected_kinds": [
+        "type_base_changed",
+        "type_vtable_changed",
+        "func_return_changed"
+      ]
+    },
+    "case73_typedef_underlying_changed": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "abi_break": true,
+      "api_break": true,
+      "bad_practice": false,
+      "description": "Typedef handle_t underlying type changed from int to void* \u2014 sizeof changes from 4 to 8 bytes, all functions using the typedef inherit the break (TYPEDEF_BASE_CHANGED)",
+      "expected_kinds": [
+        "typedef_base_changed"
+      ]
+    },
+    "case74_detail_base_class_changed": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "abi_break": true,
+      "api_break": true,
+      "bad_practice": false,
+      "description": "Internal-namespace leak: mylib::detail::descriptor_base gains a field; public mylib::knn_descriptor inherits from it, so sizeof/layout of the public class changes. Detected by existing type_size_changed/struct_field_added, escalated by internal_type_leaks_via_public_api.",
+      "expected_kinds": [
+        "internal_type_leaks_via_public_api"
+      ]
+    },
+    "case75_detail_embedded_by_value": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "abi_break": true,
+      "api_break": true,
+      "bad_practice": false,
+      "description": "Internal-namespace leak: mylib::detail::table_impl gains a field; public mylib::table embeds it by value, so sizeof(table) grows. Detected by existing struct_field_added on detail::table_impl, escalated by internal_type_leaks_via_public_api.",
+      "expected_kinds": [
+        "internal_type_leaks_via_public_api"
+      ]
+    },
+    "case76_detail_pimpl_vtable_changed": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "abi_break": true,
+      "api_break": true,
+      "bad_practice": false,
+      "known_gap": "macOS / Windows: vtable break is currently only detectable via symbol_size_changed on the ELF vtable symbol; Mach-O / PE export tables carry no symbol size, and castxml emits vtable_index=None for all virtuals so the structural diff collapses to a single slot \u2014 neither signal fires on these platforms",
+      "description": "Internal-namespace leak: mylib::detail::algorithm_iface gains a virtual method inserted mid-vtable; public mylib::svm_algorithm inherits from it, so vtable slot indices shift for all consumers. Detected by existing type_vtable_changed / func_virtual_added, escalated by internal_type_leaks_via_public_api.",
+      "expected_kinds": [
+        "internal_type_leaks_via_public_api"
+      ]
+    },
+    "case77_detail_templated_base_changed": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "abi_break": true,
+      "api_break": true,
+      "bad_practice": false,
+      "description": "Internal-namespace leak through a templated detail:: base: mylib::detail::descriptor_base<Task> gains a field, growing every knn_descriptor<Task> instantiation. Verifies the leak reachability walker follows template-instantiation edges into detail::.",
+      "expected_kinds": [
+        "internal_type_leaks_via_public_api"
+      ]
+    },
+    "case79_missing_template_instantiation": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "abi_break": true,
+      "api_break": true,
+      "bad_practice": false,
+      "description": "Header advertises descriptor<float> and descriptor<double>; v2 library ships only the float instantiation. Header is unchanged so source compiles, link/load fails with undefined symbol. Emits INSTANTIATION_MISSING_FROM_BINARY.",
+      "expected_kinds": [
+        "instantiation_missing_from_binary"
+      ]
+    },
+    "case80_pimpl_shared_to_unique": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux",
+        "macos"
+      ],
+      "abi_break": true,
+      "api_break": true,
+      "bad_practice": false,
+      "known_gap": "Windows: std::shared_ptr / std::unique_ptr layout names differ between MSVC STL and libstdc++/libc++, so the type-name-based detection signal is not portable as-shipped. Tracked for a follow-up that normalises smart-pointer template-arg names across stdlibs.",
+      "description": "Pimpl alias switched from shared_ptr<T> to unique_ptr<T>. The type of descriptor::impl_ changed; inline accessors re-mangle, destruction model changes (no atomic refcount), copy semantics flip from refcounted-share to move-only. Detected by existing type_field_type_changed escalated via internal_type_leaks_via_public_api.",
+      "expected_kinds": [
+        "internal_type_leaks_via_public_api"
+      ]
+    },
+    "case81_serialization_tag_reassigned": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux",
+        "macos"
+      ],
+      "abi_break": true,
+      "api_break": false,
+      "bad_practice": false,
+      "known_gap": "Windows: the v1.h fixture includes ``<cstdint>`` for ``std::uint64_t``. On the GitHub Actions Windows runner, castxml's bundled Clang frontend can't parse mingw64 GCC 15.2.0's ``bits/c++config.h`` (it uses the C++23 ``bf16`` floating-point literal suffix: ``typedef __decltype(0.0bf16) __bfloat16_t;``). This is a toolchain incompatibility, not an issue with the detector or the example \u2014 castxml dump fails before the detector runs. Same root cause as case80 / case89.",
+      "description": "DAAL-style serialization tag IDs swapped values between knn_model and linear_regression. Symbols, types, layout all unchanged \u2014 every conventional ABI check passes \u2014 but saved models silently deserialize as the wrong class. Emits SERIALIZATION_TAG_CHANGED.",
+      "expected_kinds": [
+        "serialization_tag_changed"
+      ]
+    },
+    "case82_sycl_overload_set_removed": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "abi_break": true,
+      "api_break": true,
+      "bad_practice": false,
+      "description": "DPC++ build withdrawn between releases \u2014 every sycl::queue&-taking overload disappears across multiple algorithms. Reported as one grouped SYCL_OVERLOAD_SET_REMOVED finding instead of N independent func_removed.",
+      "expected_kinds": [
+        "sycl_overload_set_removed"
+      ]
+    },
+    "case83_cpu_dispatch_isa_dropped": {
+      "expected": "COMPATIBLE_WITH_RISK",
+      "category": "risk",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "abi_break": false,
+      "api_break": false,
+      "bad_practice": false,
+      "description": "AVX-512 ISA tier dropped: every *_avx512_* symbol removed across all algorithms. Dispatcher-using callers unaffected; ISA-pinned callers break. Reported as one grouped CPU_DISPATCH_ISA_DROPPED finding (RISK_KINDS).",
+      "expected_kinds": [
+        "cpu_dispatch_isa_dropped"
+      ]
+    },
+    "case84_bundle_soname_skew": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux"
+      ],
+      "abi_break": true,
+      "api_break": false,
+      "bad_practice": true,
+      "skip": true,
+      "reason": "Bundle case \u2014 no single-pair v1.cpp/v2.cpp layout; uses gen_bundle.sh to produce v1/ and v2/ directories. The detect_bundle_soname_skew() function is unit-tested directly in tests/test_onedal_detectors.py; compare-release CLI wiring is tracked for a follow-up PR.",
+      "known_gap": "Requires multi-library bundle compare mode; cli wiring is partial \u2014 the detect_bundle_soname_skew() function is unit-tested directly, but compare-release integration is tracked for a follow-up PR. The example ships gen_bundle.sh to produce v1/ and v2/ directories on demand.",
+      "description": "Multi-library bundle SONAME skew: libonedal_core and libonedal_dpc bump SONAME from .so.1 to .so.2 but libonedal_thread keeps .so.1 by accident. Per-library checks pass; cohort-level invariant fails. Emits BUNDLE_SONAME_SKEW.",
+      "expected_kinds": [
+        "bundle_soname_skew"
+      ]
+    },
+    "case86_tag_struct_renamed": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "abi_break": true,
+      "api_break": true,
+      "bad_practice": false,
+      "description": "Empty tag struct method::brute_force renamed to method::search_brute. No layout signal (empty type), but every explicit descriptor<method::brute_force, ...> instantiation re-mangles. Emits TAG_TYPE_RENAMED correlating the empty type rename with the symbol-name shift.",
+      "expected_kinds": [
+        "tag_type_renamed"
+      ]
+    },
+    "case87_default_template_arg_changed": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "abi_break": true,
+      "api_break": false,
+      "bad_practice": false,
+      "description": "Default template argument changed (Distance = minkowski_distance \u2192 euclidean_distance). Consumer source compiles unchanged but substituted instantiation type differs, producing a different mangled symbol. Emits DEFAULT_TEMPLATE_ARG_CHANGED. Unlike case32 (function default param, NO_CHANGE), template defaults are part of the substituted type.",
+      "expected_kinds": [
+        "default_template_arg_changed"
+      ]
+    },
+    "case89_inline_accessor_renamed_pimpl_member": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux",
+        "macos"
+      ],
+      "abi_break": true,
+      "api_break": false,
+      "bad_practice": false,
+      "known_gap": "Windows: the public class holds std::shared_ptr<detail::descriptor_impl> which renders differently in MSVC PDB/STL field-type strings, so the internal-leak reachability heuristic that ties the inline accessor to the renamed detail:: member does not fire as-shipped.",
+      "description": "Public inline accessor reaches into detail::descriptor_impl::class_count_ by name. v2 renames the field to n_classes_ and updates the inline body in lockstep, but consumers compiled against v1.h have the OLD field name baked into their inline accessor bodies. Emits INLINE_BODY_REFERENCES_RENAMED_MEMBER.",
+      "expected_kinds": [
+        "inline_body_references_renamed_member"
+      ]
+    },
+    "case90_bundle_intra_dep_removed": {
+      "bundle": true,
+      "expected": null,
+      "category": "bundle",
+      "platforms": [
+        "linux"
+      ],
+      "abi_break": true,
+      "api_break": false,
+      "bad_practice": false,
+      "description": "Bundle (ADR-023): libcore removes core_mul; sibling libalgo still imports it (DT_NEEDED libcore.so.1 + U core_mul). Per-library compare reports libalgo NO_CHANGE; the bundle layer catches the dangling intra-bundle import.",
+      "expected_bundle_verdict": "BREAKING",
+      "expected_combined_verdict": "BREAKING",
+      "expected_bundle_kinds": [
+        "bundle_intra_dep_removed"
+      ],
+      "expected_libraries": {
+        "libcore.so": {
+          "verdict": "BREAKING",
+          "expected_kinds": [
+            "func_removed"
+          ]
+        },
+        "libalgo.so": {
+          "verdict": "NO_CHANGE",
+          "expected_kinds": []
         }
+      }
+    },
+    "case91_bundle_intra_signature_drift": {
+      "bundle": true,
+      "expected": null,
+      "category": "bundle",
+      "platforms": [
+        "linux"
+      ],
+      "abi_break": true,
+      "api_break": false,
+      "bad_practice": false,
+      "description": "Bundle (ADR-023): libcore changes core_add(int,int) -> core_add(long,long). extern C, mangled name unchanged. libalgo binary is byte-identical between versions but its call sites still use the int calling convention. Bundle layer flags libalgo as bundle_intra_dep_signature_changed.",
+      "expected_bundle_verdict": "BREAKING",
+      "expected_combined_verdict": "BREAKING",
+      "expected_bundle_kinds": [
+        "bundle_intra_dep_signature_changed"
+      ],
+      "expected_libraries": {
+        "libcore.so": {
+          "verdict": "BREAKING",
+          "expected_kinds": [
+            "func_params_changed",
+            "func_return_changed"
+          ]
+        },
+        "libalgo.so": {
+          "verdict": "NO_CHANGE",
+          "expected_kinds": []
+        }
+      }
+    },
+    "case92_bundle_provider_changed": {
+      "bundle": true,
+      "expected": null,
+      "category": "bundle",
+      "platforms": [
+        "linux"
+      ],
+      "abi_break": false,
+      "api_break": false,
+      "bad_practice": false,
+      "description": "Bundle (ADR-023): shared_util moves from libcore to libutil between releases. The bundle's union of exported symbols is unchanged but DT_NEEDED contracts shift; downstream binaries that only linked -lcore now miss the symbol. Per-library worst-of reports BREAKING; the bundle layer adds COMPATIBLE_WITH_RISK provider-change finding.",
+      "expected_bundle_verdict": "COMPATIBLE_WITH_RISK",
+      "expected_combined_verdict": "BREAKING",
+      "expected_bundle_kinds": [
+        "bundle_provider_changed"
+      ],
+      "expected_libraries": {
+        "libcore.so": {
+          "verdict": "BREAKING",
+          "expected_kinds": [
+            "func_removed"
+          ]
+        },
+        "libutil.so": {
+          "verdict": "COMPATIBLE",
+          "expected_kinds": [
+            "func_added"
+          ]
+        }
+      }
+    },
+    "case93_bundle_manifest_drift": {
+      "bundle": true,
+      "expected": null,
+      "category": "bundle",
+      "platforms": [
+        "linux"
+      ],
+      "abi_break": true,
+      "api_break": false,
+      "bad_practice": false,
+      "description": "Bundle (ADR-023): manifest.yaml promises four train_* instantiations; the new bundle silently drops train_double_sparse. With --manifest, the bundle layer emits bundle_manifest_instantiation_removed. Without --manifest, the per-library func_removed already covers it but cannot distinguish 'promised' from 'incidental'.",
+      "manifest_file": "manifest.yaml",
+      "expected_bundle_verdict": "BREAKING",
+      "expected_combined_verdict": "BREAKING",
+      "expected_bundle_kinds": [
+        "bundle_manifest_instantiation_removed"
+      ],
+      "expected_libraries": {
+        "libcore.so": {
+          "verdict": "BREAKING",
+          "expected_kinds": [
+            "func_removed"
+          ]
+        }
+      }
+    },
+    "case94_empty_tag_gained_state": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "abi_break": true,
+      "api_break": true,
+      "bad_practice": false,
+      "description": "An empty tag struct (mirrors tbb::auto_partitioner) gains a member; sizeof grows from 1 to 8. Any consumer that passed the tag by value into a header-inline algorithm interface now writes an undersized argument into a wider slot. Detected by the existing type_size_changed / type_field_added pair.",
+      "expected_kinds": [
+        "type_size_changed",
+        "type_field_added"
+      ]
+    },
+    "case95_allocator_nested_typedef_removed": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "abi_break": false,
+      "api_break": true,
+      "bad_practice": false,
+      "description": "An allocator-style class drops the historical STL nested-typedef set (value_type, pointer, reference, size_type, difference_type). Exported member symbols are unchanged so binaries still link, but consumer source using `typename Alloc::value_type` etc. fails to compile. Detected via `typedef_removed` (BREAKING per change_registry). Demonstrates the new `member_name` suppression selector \u2014 combined with `change_kind: typedef_removed`, it scopes the inevitable noise from removing a uniform set of nested aliases.",
+      "expected_kinds": [
+        "typedef_removed"
+      ]
+    },
+    "case96_hidden_friend_removed": {
+      "expected": "API_BREAK",
+      "category": "api_break",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "abi_break": false,
+      "api_break": true,
+      "bad_practice": false,
+      "description": "A non-member operator (`operator==`) declared as an in-class `friend` with an inline body (a 'hidden friend') is removed in v2. Consumers that wrote `a == b` resolved the call via ADL to the friend; with the declaration gone, ADL finds nothing and the source no longer compiles. The .so symbol set is unchanged because inline hidden friends typically have no external symbol. Detected via the new HIDDEN_FRIEND_REMOVED ChangeKind, derived from castxml's `befriending` attribute on the Class/Struct element.",
+      "expected_kinds": [
+        "hidden_friend_removed"
+      ]
+    },
+    "case105_concept_tightening": {
+      "expected": "COMPATIBLE",
+      "category": "addition",
+      "platforms": [
+        "linux",
+        "macos"
+      ],
+      "abi_break": false,
+      "api_break": false,
+      "bad_practice": true,
+      "known_gap": "castxml emits C++20 `concept` declarations as <Unimplemented kind=\"Concept\"/> with no name and no body, and drops the templates that use them. There is no way to detect concept tightening from the castxml dump path; the case is preserved as a regression fixture until the header-AST capture path on the roadmap lands (a libclang-based extractor sitting alongside castxml that captures each concept's constrained parameters and `requires`-expression body). abicheck currently returns NO_CHANGE on this case.",
+      "description": "A C++20 `concept` (`Addable`) gains an additional requirement (default-constructibility). The already-shipped `sum<int>` instantiation keeps the same mangled symbol so previously-compiled binaries keep linking, but consumers instantiating `sum<T>` for types that fail the tightened constraint no longer compile. Concept tightening is detection-blocked by castxml at present; see `known_gap`.",
+      "expected_kinds": []
+    },
+    "case106_ctor_became_explicit": {
+      "expected": "API_BREAK",
+      "category": "api_break",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "abi_break": false,
+      "api_break": true,
+      "bad_practice": false,
+      "known_gap": "castxml does not emit the `explicit` attribute on <Converter> elements (user-defined conversion operators), and does not emit a mangled name for user-declared constructors. The CTOR_EXPLICIT_ADDED detector is therefore not exercised end-to-end by the default castxml-based dump path on Linux/macOS \u2014 only via DWARF-only mode. The detector itself is validated by tests/test_explicit_ctor.py with synthetic snapshots.",
+      "description": "A converting conversion operator on a public handle type (mirrors `operator int()` on a oneTBB handle) gains the `explicit` specifier. The mangled name is unchanged so previously-compiled binaries still link, but any source code that wrote `int n = ta;` or relied on implicit conversion at a call site fails to compile against v2. Detected by the new CTOR_EXPLICIT_ADDED ChangeKind, derived from DW_AT_explicit on DW_TAG_subprogram (and `explicit=\"1\"` on castxml Method/Constructor \u2014 but not Converter, see known_gap).",
+      "expected_kinds": [
+        "ctor_explicit_added"
+      ]
+    },
+    "case107_task_scheduler_init_removed": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "abi_break": true,
+      "api_break": true,
+      "bad_practice": false,
+      "description": "Named regression fixture for oneTBB's largest historical ABI break: tbb::task_scheduler_init was removed in oneTBB 2021.1. The entire publicly-exported class and all of its members disappear. Detected by the existing FUNC_REMOVED / TYPE_REMOVED detectors.",
+      "expected_kinds": [
+        "func_removed",
+        "type_removed"
+      ]
+    },
+    "case108_task_class_removed": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "abi_break": true,
+      "api_break": true,
+      "bad_practice": false,
+      "description": "Named regression fixture for the oneTBB 2021.1 removal of the polymorphic `tbb::task` base class. Removing a publicly-derivable polymorphic base destroys every user subclass's vtable, breaks RTTI across DSOs, and undefines the typeinfo symbol. Detected by existing FUNC_REMOVED / TYPE_REMOVED detectors.",
+      "expected_kinds": [
+        "func_removed",
+        "type_removed"
+      ]
+    },
+    "case109_flow_graph_policy_renames": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "abi_break": false,
+      "api_break": true,
+      "bad_practice": false,
+      "description": "Header-only policy-tag types used as template parameters for `function_node` are renamed wholesale (queueing/rejecting \u2192 buffering_policy/backpressure_policy) and the instantiation-anchor typedef is dropped. The example deliberately keeps v1.cpp / v2.cpp byte-identical (no template instantiations) so the .so symbol table is unchanged across the version pair; any rebuild against v2 headers still fails. Detected via `typedef_removed` + `type_removed` (both BREAKING per change_registry). Member of the oneTBB regression suite; mirrors the 2021 flow::graph policy reshuffle.",
+      "expected_kinds": [
+        "typedef_removed",
+        "type_removed"
+      ]
+    },
+    "case110_concurrent_unordered_map_api_drift": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "abi_break": true,
+      "api_break": true,
+      "bad_practice": false,
+      "description": "Public member function `insert` loses one of its parameters between versions. The old mangled symbol disappears, the new overload has a different mangled name \u2014 both source and link break. Member of the oneTBB regression suite; mirrors historical signature tightenings on `tbb::concurrent_unordered_map`.",
+      "expected_kinds": [
+        "func_removed"
+      ]
+    },
+    "case111_enumerable_thread_specific_lambda_ambiguity": {
+      "expected": "COMPATIBLE",
+      "category": "addition",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "abi_break": false,
+      "api_break": false,
+      "bad_practice": true,
+      "known_gap": "Two gaps stack here. (1) castxml does not emit mangled names for user-declared constructors (same gap as case106 / case78), so the added second ctor cannot be observed as FUNC_ADDED end-to-end \u2014 abicheck currently returns NO_CHANGE on this case. (2) Even with the FUNC_ADDED in place, constructor overload ambiguity at consumer call sites cannot be detected from library snapshots alone; that needs the castxml header-AST capture path on the roadmap (concept tightening / hidden friends). The case is preserved as a regression fixture for whenever either gap is closed.",
+      "description": "A second constructor overload accepting `std::function<int()>` is added next to the existing `int`-form constructor. By itself this is a pure addition \u2014 existing call sites that pass an int still resolve to the original constructor. The risk: brace-initialization and generic callable arguments can become ambiguous at downstream call sites. Member of the oneTBB regression suite.",
+      "expected_kinds": [
+        "func_added"
+      ]
+    },
+    "case78_task_arena_attach_tag": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "abi_break": true,
+      "api_break": true,
+      "bad_practice": false,
+      "known_gap": "Two detector gaps stack on this case in the castxml-driven pipeline: (1) castxml does not emit mangled names for user-declared constructors (same gap as case106), so the v1 ctor `task_arena(attach_mode_t)` collapses with all other ctors under mangled='task_arena' and FUNC_REMOVED never fires; (2) abicheck's enum diff defers wholly-removed enums to TYPE_REMOVED, but TYPE_REMOVED only iterates `snap.types`, never `snap.enums`, so `attach_mode_t` removal goes silently undetected. End-to-end the verdict comes out COMPATIBLE (only the new nested `attach` struct is observed as TYPE_ADDED). The case is preserved as a regression fixture for whenever either gap is closed.",
+      "description": "An `attach_mode_t` enum + matching constructor are replaced by an empty tag struct `task_arena::attach` + tag-dispatched constructor. The old enum, its members, and the old constructor's mangled symbol are all removed. Member of the oneTBB regression suite; mirrors the 2021 `task_arena::attach` tag introduction.",
+      "expected_kinds": [
+        "func_removed",
+        "type_removed",
+        "enum_member_removed"
+      ]
+    },
+    "case85_internal_template_signature_changed": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "abi_break": true,
+      "api_break": false,
+      "bad_practice": false,
+      "description": "Internal helper template `lib::__detail::walk<T>` is dispatched through by a public inline algorithm `sum_range`. Between v1 and v2 the explicit instantiation set shifts (`walk<float>` removed, `walk<double>` added). Consumers compiled against v1 baked `walk<float>` into their symbol table; against v2 they fail to link. Function-template analogue of internal_type_leaks_via_public_api from PR #238.",
+      "expected_kinds": [
+        "internal_template_leaks_via_public_api",
+        "func_removed"
+      ]
+    },
+    "case88_cpo_kind_changed": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "abi_break": true,
+      "api_break": false,
+      "bad_practice": false,
+      "description": "Public name `lib::sort` is published in v1 as a free function and in v2 as a customisation point object (constexpr variable of an unspecified function-object class type). Call syntax keeps working but decltype, extern templates, and trait specialisations break.",
+      "expected_kinds": [
+        "cpo_kind_changed"
+      ]
+    },
+    "case97_api_depends_on_consumer_env": {
+      "expected": "COMPATIBLE",
+      "category": "quality",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "abi_break": false,
+      "api_break": false,
+      "bad_practice": false,
+      "known_gap": "The single-config build harness does not exercise the matrix-aware API_DEPENDS_ON_CONSUMER_ENV detector \u2014 that detector consumes a MatrixSnapshot (multiple per-configuration snapshots) which is only produced by the `abicheck probe` subcommand (not wired into the default `compare` CLI yet). In the current single-config build, castxml dumps v1.h and v2.h WITHOUT USE_FEATURE defined, so the declared-function set is identical between v1 and v2; the underlying lib v1 still exports `extended` because v1.cpp `#define USE_FEATURE 1` before include \u2014 that surfaces as FUNC_REMOVED_ELF_ONLY (a quality-level finding) when CI builds the case, so the per-binary verdict is COMPATIBLE. The case is preserved as documentation of the macro-conditioned shape; the real BREAKING-grade finding only appears via the matrix detector.",
+      "description": "Header declares `lib::extended()` only when the consumer defines `USE_FEATURE`. The v1 build defines the macro and exports extended(); v2 builds without it. The matrix-aware API_DEPENDS_ON_CONSUMER_ENV finding is the channel that exposes this when both macro states are probed.",
+      "expected_kinds": [
+        "func_removed_elf_only"
+      ]
+    },
+    "case98_cxx_standard_floor_raised": {
+      "expected": "NO_CHANGE",
+      "category": "no_change",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "abi_break": false,
+      "api_break": false,
+      "bad_practice": false,
+      "known_gap": "The C++ standard floor signal is invisible to a per-binary diff (symbol/type set is unchanged between v1 and v2). The matrix-aware CXX_STANDARD_FLOOR_RAISED detector (emitted by the probe harness when fed per-configuration cxx_std metadata) is the only correct channel for this signal. The CMakeLists.txt builds v2 with -std=c++20 to embed a post-C++17 contract via build configuration, but the public declaration set is intentionally identical to v1's so the case still produces NO_CHANGE under the current single-config pipeline.",
+      "description": "v1 header works under C++17; v2 is built with -std=c++20 but declares the same public surface as v1. Per-binary diff is NO_CHANGE; the source-level break for C++17 consumers only surfaces via the matrix-aware CXX_STANDARD_FLOOR_RAISED detector.",
+      "expected_kinds": []
+    },
+    "case99_experimental_graduated": {
+      "expected": "COMPATIBLE",
+      "category": "addition",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "abi_break": false,
+      "api_break": false,
+      "bad_practice": false,
+      "description": "A declaration lived only under lib::experimental:: in v1 and is published at the stable lib:: name in v2 while the experimental alias is retained. The dedicated EXPERIMENTAL_GRADUATED finding makes the migration event visible; the underlying signal is also a plain func_added for the stable name.",
+      "expected_kinds": [
+        "experimental_graduated",
+        "func_added"
+      ]
+    },
+    "case100_experimental_removed_without_replacement": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "abi_break": true,
+      "api_break": true,
+      "bad_practice": false,
+      "description": "A declaration only ever lived under lib::experimental:: in v1 and is removed from v2 with no stable-namespace replacement. The dedicated EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT finding tells reviewers there is no migration target; the underlying mangled symbol disappearance is also reported as a plain func_removed.",
+      "expected_kinds": [
+        "experimental_removed_without_replacement",
+        "func_removed"
+      ]
+    },
+    "case101_inline_namespace_version_bumped": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "abi_break": true,
+      "api_break": false,
+      "bad_practice": false,
+      "description": "Library uses a versioned inline namespace `_V1` in v1 and bumps to `_V2` in v2. Declarations look identical to consumers so source keeps compiling, but every freshly built TU emits mangled symbols carrying the new version segment \u2014 old and new TUs of the same program ODR-violate. Specialisation of the existing inline_namespace_moved that fires from declared-name evidence so it works on header-only inputs and single-symbol bumps.",
+      "expected_kinds": [
+        "inline_namespace_version_bumped"
+      ]
+    },
+    "case102_frozen_runtime_signature_changed": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "abi_break": true,
+      "api_break": true,
+      "bad_practice": false,
+      "description": "An extern \"C\" runtime entry inside a contractually-frozen namespace (mirrors oneTBB's `detail::r1`) has its parameter and return types widened in place. The exported symbol name is unchanged but callers built against v1 pass int into what is now a long slot. Detected by the existing FUNC_PARAMS_CHANGED / FUNC_RETURN_CHANGED detectors; the new `frozen_namespaces:` policy field additionally tags the finding via Change.frozen_namespace_violation and refuses any `overrides:` entry that would downgrade it. See policy.yaml in the case directory.",
+      "expected_kinds": [
+        "func_params_changed",
+        "func_return_changed"
+      ]
+    },
+    "case103_toolchain_flag_drift": {
+      "expected": "COMPATIBLE",
+      "category": "quality",
+      "platforms": [
+        "linux"
+      ],
+      "abi_break": false,
+      "api_break": false,
+      "bad_practice": true,
+      "description": "Public surface and every exported symbol are identical between v1 and v2; only the ABI-affecting compiler flag set differs (v2 adds -fshort-enums). The toolchain-flag drift detector parses DW_AT_producer and reports the mismatch as a compatible, informational quality signal \u2014 a leading indicator that the two builds were made under different ABI assumptions, before that drift turns into a real layout break on a library that exposes enums/packed structs/a different data model.",
+      "expected_kinds": [
+        "toolchain_flag_drift"
+      ]
+    },
+    "case104_glibcxx_dual_abi_flip": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux"
+      ],
+      "abi_break": true,
+      "api_break": false,
+      "bad_practice": true,
+      "description": "Identical C++ source built once with _GLIBCXX_USE_CXX11_ABI=0 (v1) and once with =1 (v2). GNU libstdc++ ships two incompatible std::string/std::list ABIs selected by this macro, so every std::string-bearing exported symbol gets a different mangled name (std::__cxx11::basic_string vs the legacy std::basic_string). abicheck recognises the mass-churn signature and collapses it into a single glibcxx_dual_abi_flip_detected diagnostic alongside the underlying func_removed/func_added evidence; verdict is BREAKING. GNU libstdc++ only.",
+      "expected_kinds": [
+        "glibcxx_dual_abi_flip_detected",
+        "func_removed"
+      ]
+    },
+    "case112_lp64_ilp64": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux"
+      ],
+      "abi_break": true,
+      "api_break": false,
+      "bad_practice": false,
+      "description": "oneMKL-style LP64 (MKL_INT=int, 32-bit) switched to ILP64 (MKL_INT=long, 64-bit). A large fraction of public integer parameters/returns flip width together and the MKL_INT typedef resizes, the signature of an LP64/ILP64 model switch.",
+      "expected_kinds": [
+        "integer_model_changed"
+      ]
+    },
+    "case113_abi_tag_changed": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux"
+      ],
+      "abi_break": true,
+      "api_break": false,
+      "bad_practice": false,
+      "description": "A single C++ symbol loses its Itanium [abi:cxx11] ABI tag ([[gnu::abi_tag]]). The demangled name is unchanged but the mangled symbol (B5cxx11 component) differs, so consumers linked against the tagged symbol fail to resolve it.",
+      "expected_kinds": [
+        "abi_tag_changed"
+      ]
+    },
+    "case114_char8t_migration": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux"
+      ],
+      "abi_break": true,
+      "api_break": false,
+      "bad_practice": false,
+      "description": "A public UTF-8 API migrated from char-family spellings to C++20 char8_t on parameters and a struct field. char8_t is a distinct type (mangling Du), so the mangled symbols change and old binaries fail to resolve them.",
+      "expected_kinds": [
+        "char8t_migration"
+      ]
+    },
+    "case115_bit_int_width_changed": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux"
+      ],
+      "abi_break": true,
+      "api_break": false,
+      "bad_practice": false,
+      "description": "A public C23 _BitInt(64) accumulator widened to _BitInt(128) across a struct field, a by-value parameter, and a return type. The bit width is part of the type, so storage size and calling-convention treatment change. (128 is clang's maximum _BitInt width, keeping the case portable.)",
+      "expected_kinds": [
+        "bit_int_width_changed"
+      ],
+      "requires_feature": "_BitInt"
+    },
+    "case116_atomic_qualifier_changed": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux"
+      ],
+      "abi_break": true,
+      "api_break": false,
+      "bad_practice": false,
+      "description": "A public struct field and a return type gained the C11 _Atomic qualifier. Per WG14 the size/alignment of an _Atomic-qualified type may differ from the unqualified type and varies across compilers, so layout and the return ABI diverge.",
+      "expected_kinds": [
+        "atomic_qualifier_changed"
+      ]
+    },
+    "case117_no_unique_address": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "platforms": [
+        "linux"
+      ],
+      "abi_break": true,
+      "api_break": false,
+      "bad_practice": false,
+      "description": "An empty member gained [[no_unique_address]] in C++20, letting the compiler overlay it with the next member. No dedicated ChangeKind is needed: the overlay shows up as the existing type_size_changed / type_field_offset_changed layout kinds.",
+      "expected_kinds": [
+        "type_size_changed",
+        "type_field_offset_changed"
+      ]
+    },
+    "case118_internal_struct_field_added_scoped": {
+      "expected": "NO_CHANGE",
+      "category": "no_change",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "abi_break": false,
+      "api_break": false,
+      "bad_practice": false,
+      "scope_public_headers": true,
+      "expected_kinds": [],
+      "expected_absent_kinds": [
+        "type_size_changed",
+        "type_field_added"
+      ]
+    },
+    "case119_internal_struct_field_removed_scoped": {
+      "expected": "NO_CHANGE",
+      "category": "no_change",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "abi_break": false,
+      "api_break": false,
+      "bad_practice": false,
+      "scope_public_headers": true,
+      "expected_kinds": [],
+      "expected_absent_kinds": [
+        "type_field_removed",
+        "type_size_changed"
+      ]
+    },
+    "case120_internal_struct_reordered_scoped": {
+      "expected": "NO_CHANGE",
+      "category": "no_change",
+      "platforms": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "abi_break": false,
+      "api_break": false,
+      "bad_practice": false,
+      "scope_public_headers": true,
+      "expected_kinds": [],
+      "expected_absent_kinds": [
+        "type_field_removed",
+        "type_size_changed"
+      ]
     }
+  }
 }

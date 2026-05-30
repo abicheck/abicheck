@@ -44,11 +44,16 @@ class PipelineContext:
     # Consumed by EscalateFrozenNamespaceViolations to tag matching
     # findings with Change.frozen_namespace_violation.
     frozen_namespaces: list[str] = field(default_factory=list)
+    # ADR-024 §D4: when True, FilterNonPublicSurface moves findings that are
+    # not on the public-header-scoped ABI surface to ``out_of_surface``.
+    scope_to_public_surface: bool = False
     # Accumulated side-outputs
     opaque_filtered: list[Change] = field(default_factory=list)
     suppressed: list[Change] = field(default_factory=list)
     redundant: list[Change] = field(default_factory=list)
     kept: list[Change] = field(default_factory=list)
+    # ADR-024: findings filtered out as not-public (full audit trail).
+    out_of_surface: list[Change] = field(default_factory=list)
 
 
 class PipelineStep(Protocol):
@@ -181,6 +186,38 @@ class EnrichSourceLocations:
 
         _enrich_source_locations(changes, ctx.old, ctx.new)
         return changes
+
+
+class FilterNonPublicSurface:
+    """Move findings outside the public-header surface to an audit ledger.
+
+    Opt-in (``ctx.scope_to_public_surface``). Mirrors what libabigail
+    ``--headers-dir`` / abi-compliance-checker do: a change to a symbol or
+    type that is not part of the public-header-scoped ABI surface is not a
+    public-compatibility break. Per ADR-024 §D4/D5 these findings are
+    *recorded* (``ctx.out_of_surface``), never silently dropped, and
+    internal-leak findings are exempt.
+    """
+
+    name = "filter_non_public_surface"
+
+    def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:
+        if not ctx.scope_to_public_surface:
+            return changes
+        from .surface import change_in_public_surface, compute_public_surface
+
+        surf_old = compute_public_surface(ctx.old)
+        surf_new = compute_public_surface(ctx.new)
+        if not (surf_old.resolvable or surf_new.resolvable):
+            # No header-derived surface to scope against — keep everything.
+            return changes
+        kept: list[Change] = []
+        for c in changes:
+            if change_in_public_surface(c, surf_old, surf_new):
+                kept.append(c)
+            else:
+                ctx.out_of_surface.append(c)
+        return kept
 
 
 class ApplySuppression:
@@ -665,6 +702,7 @@ class PostProcessingPipeline:
         new: AbiSnapshot,
         suppression: SuppressionList | None = None,
         frozen_namespaces: list[str] | None = None,
+        scope_to_public_surface: bool = False,
     ) -> PipelineContext:
         """Run all steps, returning the final PipelineContext."""
         ctx = PipelineContext(
@@ -672,6 +710,7 @@ class PostProcessingPipeline:
             new=new,
             suppression=suppression,
             frozen_namespaces=list(frozen_namespaces or []),
+            scope_to_public_surface=scope_to_public_surface,
         )
         for step in self.steps:
             changes = step.run(changes, ctx)
@@ -695,6 +734,7 @@ DEFAULT_PIPELINE = PostProcessingPipeline(
         DeduplicateCrossDetector(),
         DowngradeOpaqueTypeChanges(),
         EnrichSourceLocations(),
+        FilterNonPublicSurface(),
         ApplySuppression(),
         SuppressRenamedPairs(),
         FilterRedundant(),

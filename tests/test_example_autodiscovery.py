@@ -96,6 +96,13 @@ REQUIRES_FEATURE: dict[str, str] = {
     for k, v in _gt_data["verdicts"].items()
     if "requires_feature" in v
 }
+# scope_public_headers: case_name → bool. When true the case is compared with
+# ADR-024 public-surface scoping enabled (demonstrates that backward-compatible
+# changes to non-public API/ABI produce no findings).
+SCOPE_PUBLIC_HEADERS: dict[str, bool] = {
+    k: bool(v.get("scope_public_headers", False))
+    for k, v in _gt_data["verdicts"].items()
+}
 
 
 # ---------------------------------------------------------------------------
@@ -450,6 +457,7 @@ def _dump_and_compare(
     v2_lib: Path,
     headers_v1: list[Path],
     headers_v2: list[Path],
+    scope_to_public_surface: bool = False,
 ) -> tuple[str, list]:
     """Run abicheck dump+compare and return (verdict, changes)."""
     from abicheck.checker import compare
@@ -461,7 +469,7 @@ def _dump_and_compare(
     except Exception as exc:
         pytest.fail(f"{case_name}: dump failed: {exc}")
 
-    result = compare(snap1, snap2)
+    result = compare(snap1, snap2, scope_to_public_surface=scope_to_public_surface)
     return result.verdict.value.upper(), result.changes
 
 
@@ -534,6 +542,7 @@ def test_example_pipeline(
 
     got, changes = _dump_and_compare(
         case_name, v1_lib, v2_lib, headers_v1, headers_v2,
+        scope_to_public_surface=SCOPE_PUBLIC_HEADERS.get(case_name, False),
     )
 
     _assert_verdict(case_name, expected_verdict, got, changes)
