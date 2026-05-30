@@ -1488,6 +1488,7 @@ from . import (  # noqa: E402  — must run after `main` and helpers are defined
     cli_baseline,  # noqa: F401  — registers baseline
     cli_compare_release,  # noqa: F401  — registers compare-release
     cli_debian_symbols,  # noqa: F401  — registers debian-symbols
+    cli_probe,  # noqa: F401  — registers probe (run, compare)
     cli_stack,  # noqa: F401  — registers deps, stack-check
     cli_suggest,  # noqa: F401  — registers suggest-suppressions
 )

@@ -1,0 +1,61 @@
+# oneDPL probe-harness manifest.
+#
+# A real-world build-configuration matrix for Intel oneDPL. Each
+# configuration compiles the same probe TUs under a different
+# (compiler, language standard, backend) combination so abicheck can
+# detect public-surface divergence that depends on the *consumer's*
+# environment rather than on a source change.
+#
+# Usage:
+#   abicheck probe run examples/probes/onedpl.yaml \
+#       --library onedpl --version 2022.0 --out onedpl-2022.json
+#   abicheck probe run examples/probes/onedpl.yaml \
+#       --library onedpl --version 2023.0 --out onedpl-2023.json
+#   abicheck probe compare onedpl-2022.json onedpl-2023.json
+#
+# The include_dirs below point at a typical oneAPI install; adjust them
+# to your toolchain. Configurations whose compiler is absent from PATH
+# are reported as per-result errors rather than aborting the run.
+name: onedpl
+
+configurations:
+  - id: gcc13_cxx17_tbb
+    compiler: g++-13
+    flags: [-std=c++17, -O0, -fopenmp]
+    defines:
+      ONEDPL_USE_TBB_BACKEND: "1"
+    include_dirs: [/opt/oneapi/dpl/2023/include]
+
+  - id: gcc13_cxx20_omp
+    compiler: g++-13
+    flags: [-std=c++20, -O0, -fopenmp]
+    defines:
+      ONEDPL_USE_OPENMP_BACKEND: "1"
+    include_dirs: [/opt/oneapi/dpl/2023/include]
+
+  - id: clang17_cxx20_dpc
+    compiler: clang++-17
+    flags: [-std=c++20, -fsycl]
+    defines:
+      ONEDPL_USE_DPCPP_BACKEND: "1"
+    include_dirs: [/opt/oneapi/dpl/2023/include]
+
+probes:
+  - name: sort
+    headers: [oneapi/dpl/execution, oneapi/dpl/algorithm]
+    body: |
+      void probe_sort(int* a, int* b) {
+          oneapi::dpl::sort(oneapi::dpl::execution::par, a, b);
+      }
+
+  - name: experimental_ranges
+    headers: [oneapi/dpl/ranges]
+    body: |
+      void probe_ranges(int* a, int* b) {
+          oneapi::dpl::experimental::ranges::sort(
+              oneapi::dpl::experimental::ranges::views::all(a));
+      }
+
+defaults:
+  backend: tbb
+  execution_policy: par

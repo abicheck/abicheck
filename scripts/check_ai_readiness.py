@@ -448,6 +448,7 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
         frozenset({"cli", "cli_baseline"}),
         frozenset({"cli", "cli_debian_symbols"}),
         frozenset({"cli", "cli_appcompat"}),
+        frozenset({"cli", "cli_probe"}),
         frozenset({"cli", "cli_stack"}),
         frozenset({"cli", "cli_suggest"}),
     }

@@ -41,6 +41,7 @@ nav:
     - Severity Configuration: user-guide/severity.md
     - Output Formats: user-guide/output-formats.md
     - Multi-Binary Releases: user-guide/multi-binary.md
+    - Probe Harness: user-guide/probe-harness.md
     - Baseline Management: user-guide/baseline-management.md
     - Local Compare: user-guide/local-compare.md
     - MCP Integration: user-guide/mcp-integration.md
