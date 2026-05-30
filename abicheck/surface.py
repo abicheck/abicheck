@@ -249,6 +249,20 @@ def change_in_public_surface(
     # Type-level finding: check the implicated type name(s). A finding is
     # in-surface if *any* implicated type is reachable from the public API.
     candidates = _type_identifiers(sym) | _type_identifiers(change.caused_by_type)
+
+    # Anti-hiding (ADR-024 §D5.2): never filter a change to an
+    # internal-namespace type (``detail::``, ``impl::``, …). The internal-leak
+    # detector (post_processing.DetectInternalLeaks) runs *after* this step and
+    # decides whether such a type leaks through the public API — and it uses a
+    # broader set of public roots than this reachability closure (it also seeds
+    # from unreferenced public-header types). Deferring to it guarantees a real
+    # leak is never silently dropped here; a genuinely-unreachable internal type
+    # is simply left for normal handling.
+    from .internal_leak import DEFAULT_INTERNAL_NAMESPACES, is_internal_type
+
+    if any(is_internal_type(c, DEFAULT_INTERNAL_NAMESPACES) for c in candidates):
+        return True
+
     known = {c for c in candidates if c in all_types}
     if not known:
         # We cannot place this finding — keep it (never hide an unknown).

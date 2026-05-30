@@ -193,6 +193,19 @@ class TestChangeClassification:
         )
         assert change_in_public_surface(c, s, s) is True
 
+    def test_internal_namespace_type_never_filtered(self):
+        # detail::/impl:: types are deferred to the internal-leak detector,
+        # which uses broader reachability than this closure — so scoping must
+        # never drop them, even when not reachable here (anti-hiding, D5.2).
+        snap = AbiSnapshot(library="l", version="1", functions=[_fn("api")])
+        s = self._surf(snap)
+        c = Change(
+            kind=ChangeKind.TYPE_SIZE_CHANGED,
+            symbol="oneapi::dal::detail::pimpl",
+            description="",
+        )
+        assert change_in_public_surface(c, s, s) is True
+
     def test_unknown_type_kept_conservatively(self):
         snap = AbiSnapshot(library="l", version="1", functions=[_fn("api")])
         s = self._surf(snap)
