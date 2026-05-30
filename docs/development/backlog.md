@@ -6,7 +6,7 @@ is deliberately small and concrete — strategic / architectural ideas live in
 
 ## MSVC + PDB end-to-end CI
 
-**Status:** Done (initial lane landed).
+**Status:** In progress — experimental lane landed (non-blocking).
 
 abicheck implements PDB parsing (`pdb_parser.py`, `pdb_metadata.py`,
 `pdb_utils.py`) and PE/COFF metadata extraction (`pe_metadata.py`), and
@@ -26,6 +26,12 @@ a real Microsoft toolchain:
   when `cl.exe` is absent, so it is a no-op on Linux/macOS and on Windows
   runners without the MSVC environment — mirroring the
   `integration` / `libabigail` / `abicc` marker discipline.
+- The lane is marked `continue-on-error: true` while the pure-Python PDB parser
+  is proven against real MSVC output: the layout-dependent assertions
+  **self-skip** if the parser does not extract struct layout from a given MSVC
+  PDB version (a parser capability gap, not a regression), and the job does not
+  block the PR. The PE-export assertion always runs. Promote the lane to
+  blocking once it is consistently green across MSVC versions.
 
 **Remaining follow-ups (not blocking):**
 

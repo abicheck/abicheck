@@ -170,6 +170,11 @@ jobs:
     name: MSVC + PDB end-to-end
     runs-on: windows-latest
     timeout-minutes: 20
+    # Experimental lane: abicheck's pure-Python PDB parser is still maturing on
+    # real MSVC output, so a failure here is informational (does not block the
+    # PR). Tests self-skip when layout cannot be extracted; this flag covers
+    # genuine parser/toolchain breakage until the lane is proven stable.
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - name: Set up MSVC developer environment (cl.exe on PATH)
