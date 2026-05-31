@@ -391,6 +391,26 @@ def test_sc_policy_profile(tmp_path: Path) -> None:
     assert _compare(tmp_path, old, new, "--no-scope-public-headers", "--policy", "sdk_vendor").exit_code == 0
 
 
+def test_sc_review_digest(tmp_path: Path) -> None:
+    # The review digest is the GitHub-facing presentation layer: verdict +
+    # merge effect, a counts table, and the release recommendation.
+    res = _compare(
+        tmp_path,
+        _lib("1", [_fn("a"), _fn("b")]),
+        _lib("2", [_fn("a")]),
+        "--format",
+        "review",
+    )
+    assert res.exit_code == 4
+    out = res.output
+    assert "ABI review" in out
+    assert "`BREAKING`" in out
+    assert "Release recommendation:" in out
+    assert "| Category | Count |" in out
+    # The removed symbol is surfaced as a top impacted symbol.
+    assert "func_removed" in out
+
+
 def test_sc_scan_junit(tmp_path: Path) -> None:
     res = _compare(
         tmp_path,

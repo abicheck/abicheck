@@ -1298,8 +1298,11 @@ def _finalize_compare_result(
 @click.option("--new-version", "new_version", default="new", show_default=True,
               help="Version label for new side (used when input is a .so file).")
 # ── Compare options (unchanged) ──────────────────────────────────────────────
-@click.option("--format", "fmt", type=click.Choice(["json", "markdown", "sarif", "html", "junit"]),
-              default="markdown", show_default=True)
+@click.option("--format", "fmt", type=click.Choice(["json", "markdown", "sarif", "html", "junit", "review"]),
+              default="markdown", show_default=True,
+              help="Output format. 'review' emits a compact GitHub-facing digest "
+                   "(verdict + counts + release recommendation + manual-review banner) "
+                   "suitable for a job summary or PR comment.")
 @click.option("-o", "--output", type=click.Path(path_type=Path), default=None)
 @click.option("--suppress", type=click.Path(exists=True, path_type=Path), default=None,
               help="Suppression file (YAML) to filter known/intentional changes.")

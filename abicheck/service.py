@@ -706,7 +706,11 @@ def render_output(
             show_only=show_only, severity_config=severity_config,
         )
 
-    _SUPPORTED_FORMATS = {"json", "sarif", "html", "junit", "markdown", "md"}
+    if fmt == "review":
+        from .reporter import to_review_digest
+        return to_review_digest(result)
+
+    _SUPPORTED_FORMATS = {"json", "sarif", "html", "junit", "markdown", "md", "review"}
     if fmt not in _SUPPORTED_FORMATS:
         raise ValidationError(f"Unsupported output format: {fmt!r} (expected one of {sorted(_SUPPORTED_FORMATS)})")
 

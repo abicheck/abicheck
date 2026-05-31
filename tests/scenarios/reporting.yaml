@@ -51,3 +51,23 @@ scenarios:
     validates: UC-REP-markdown-html
     automated: true
     test: test_sc_scan_html
+
+  - id: SC-REVIEW-DIGEST
+    title: Emit a GitHub review digest for a job summary / PR comment
+    persona: Reviewer / CI engineer
+    narrative: >
+      Instead of making reviewers open raw JSON, CI pipes a compact Markdown
+      digest into the GitHub job summary or a PR comment. The digest leads with
+      the verdict and merge effect, separates breaking / API / risk / additions
+      (and, when scoping is active, filtered internal changes), states the
+      release recommendation, and shows a manual-review banner when public-header
+      scoping could not be confirmed. This is the "presentation" layer over the
+      machine-readable JSON decision contract.
+    flow:
+      - "abicheck compare old.json new.json --format review >> $GITHUB_STEP_SUMMARY"
+    expected:
+      exit_code: 4
+      output_contains: "ABI review"
+    validates: UC-REP-markdown-html
+    automated: true
+    test: test_sc_review_digest
