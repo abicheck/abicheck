@@ -129,6 +129,42 @@ def test_public_takes_precedence_over_system_path():
     assert origin is ScopeOrigin.PUBLIC_HEADER
 
 
+@pytest.mark.parametrize(
+    "header",
+    [
+        "/build/proj/generated/messages.h",
+        "/build/proj/src/moc_widget.cpp",
+        "/build/proj/proto/service.pb.h",
+        "/build/proj/schema_generated.h",
+        "/build/proj/api.grpc.pb.h",
+    ],
+)
+def test_generated_headers_classified(header):
+    # A public set must be present (opt-in), but the generated path is neither
+    # public nor system → GENERATED.
+    origin = _classify(header, public_headers=["include/api.h"])
+    assert origin is ScopeOrigin.GENERATED
+
+
+def test_export_only_when_no_header_but_symbol_exported():
+    hs, ds, have = build_public_set(["include/api.h"], None)
+    origin = classify_origin(None, hs, ds, have_public_set=have, export_only=True)
+    assert origin is ScopeOrigin.EXPORT_ONLY
+
+
+def test_export_only_ignored_without_public_set():
+    # D4: no public set → UNKNOWN regardless of export-only linkage.
+    hs, ds, have = build_public_set(None, None)
+    origin = classify_origin(None, hs, ds, have_public_set=have, export_only=True)
+    assert origin is ScopeOrigin.UNKNOWN
+
+
+def test_no_header_not_exported_is_unknown():
+    hs, ds, have = build_public_set(["include/api.h"], None)
+    origin = classify_origin(None, hs, ds, have_public_set=have, export_only=False)
+    assert origin is ScopeOrigin.UNKNOWN
+
+
 # ── apply_provenance ──────────────────────────────────────────────────────────
 
 

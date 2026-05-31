@@ -99,13 +99,16 @@ provenance fields:
   `source_location` with any trailing `:line` / `:line:col` stripped. Always
   populated when a source location is available; it is descriptive metadata.
 - `origin` — a `ScopeOrigin` classification of `source_header` against the
-  user-provided public-header set:
+  user-provided public-header set. This is the *Origin* axis of ADR-024's
+  two-axis Linkage × Origin surface model:
 
   | Value | Meaning |
   |-------|---------|
   | `public_header` | Header matches a `--public-header` / `--public-header-dir` input |
   | `private_header` | A project header outside the public set |
   | `system_header` | A toolchain/system header (`/usr/include`, MSVC, Xcode SDK, …) |
+  | `generated` | A machine-generated header (`moc_*`, `*.pb.h`, `generated/`, …) |
+  | `export_only` | Exported by the binary but absent from any header (no provenance) |
   | `unknown` | No public set was provided, or no source location was available |
 
 Classification is **opt-in** (decision D4): without `--public-header` /

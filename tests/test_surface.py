@@ -17,12 +17,15 @@ from abicheck.model import (
     Function,
     Param,
     RecordType,
+    ScopeOrigin,
     TypeField,
     Visibility,
 )
 from abicheck.surface import (
     REASON_NON_PUBLIC_TYPE,
     REASON_NOT_EXPORTED,
+    REASON_PRIVATE_HEADER,
+    REASON_SYSTEM_HEADER,
     PublicSurface,
     _type_identifiers,
     change_in_public_surface,
@@ -31,23 +34,26 @@ from abicheck.surface import (
 )
 
 
-def _fn(name, ret="void", params=(), vis=Visibility.PUBLIC, mangled=None):
+def _fn(name, ret="void", params=(), vis=Visibility.PUBLIC, mangled=None,
+        origin=ScopeOrigin.UNKNOWN):
     return Function(
         name=name,
         mangled=mangled if mangled is not None else f"_Z{len(name)}{name}",
         return_type=ret,
         params=[Param(name=f"a{i}", type=t) for i, t in enumerate(params)],
         visibility=vis,
+        origin=origin,
     )
 
 
-def _rec(name, fields=(), bases=(), size=64):
+def _rec(name, fields=(), bases=(), size=64, origin=ScopeOrigin.UNKNOWN):
     return RecordType(
         name=name,
         kind="struct",
         size_bits=size,
         fields=[TypeField(name=n, type=t) for n, t in fields],
         bases=list(bases),
+        origin=origin,
     )
 
 
@@ -522,3 +528,98 @@ class TestSurfaceLedgerOutput:
         res = compare(old, new)
         assert "surface_scope" not in json.loads(to_json(res))
         assert "surfaceScope" not in to_sarif(res)["runs"][0]["properties"]
+
+
+# ── classify_change_surface: provenance reason codes (ADR-015 v6 / ADR-024 D1) ─
+
+
+class TestProvenanceReasons:
+    def _surf(self, snap):
+        return compute_public_surface(snap)
+
+    def test_private_header_symbol_demoted_even_when_exported(self):
+        # A symbol the binary exports (PUBLIC linkage) but that originates in a
+        # private header is demoted with the provenance reason — the leaked
+        # private-header case scoping targets.
+        snap = AbiSnapshot(
+            library="l", version="1",
+            functions=[
+                _fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER),
+                _fn("leaked", origin=ScopeOrigin.PRIVATE_HEADER),
+            ],
+        )
+        s = self._surf(snap)
+        c = Change(kind=ChangeKind.FUNC_RETURN_CHANGED, symbol="leaked", description="")
+        in_surf, reason = classify_change_surface(c, s, s)
+        assert in_surf is False
+        assert reason == REASON_PRIVATE_HEADER
+
+    def test_system_header_symbol_demoted(self):
+        snap = AbiSnapshot(
+            library="l", version="1",
+            functions=[
+                _fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER),
+                _fn("from_libc", origin=ScopeOrigin.SYSTEM_HEADER),
+            ],
+        )
+        s = self._surf(snap)
+        c = Change(kind=ChangeKind.FUNC_RETURN_CHANGED, symbol="from_libc", description="")
+        assert classify_change_surface(c, s, s) == (False, REASON_SYSTEM_HEADER)
+
+    def test_public_header_origin_kept_in_surface(self):
+        snap = AbiSnapshot(
+            library="l", version="1",
+            functions=[_fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER)],
+        )
+        s = self._surf(snap)
+        c = Change(kind=ChangeKind.FUNC_RETURN_CHANGED, symbol="public_api", description="")
+        assert classify_change_surface(c, s, s) == (True, None)
+
+    def test_unknown_origin_falls_back_to_linkage_reason(self):
+        # No public set was used → origin UNKNOWN → provenance never fires;
+        # the linkage reason (not-exported) is emitted as before.
+        snap = AbiSnapshot(
+            library="l", version="1",
+            functions=[
+                _fn("public_api"),
+                _fn("hidden", vis=Visibility.ELF_ONLY),
+            ],
+        )
+        s = self._surf(snap)
+        c = Change(kind=ChangeKind.FUNC_RETURN_CHANGED, symbol="hidden", description="")
+        assert classify_change_surface(c, s, s) == (False, REASON_NOT_EXPORTED)
+
+    def test_private_header_type_finding_demoted(self):
+        snap = AbiSnapshot(
+            library="l", version="1",
+            functions=[_fn("api", ret="Result *")],
+            types=[
+                _rec("Result", origin=ScopeOrigin.PUBLIC_HEADER),
+                _rec("InternalCache", origin=ScopeOrigin.PRIVATE_HEADER),
+            ],
+        )
+        s = self._surf(snap)
+        c = Change(kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="InternalCache", description="")
+        assert classify_change_surface(c, s, s) == (False, REASON_PRIVATE_HEADER)
+
+    def test_disagreeing_sides_block_demotion(self):
+        # Public-header origin on one side blocks demotion (conservative).
+        old = AbiSnapshot(
+            library="l", version="1",
+            functions=[
+                _fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER),
+                _fn("sym", origin=ScopeOrigin.PRIVATE_HEADER),
+            ],
+        )
+        new = AbiSnapshot(
+            library="l", version="2",
+            functions=[
+                _fn("public_api", origin=ScopeOrigin.PUBLIC_HEADER),
+                _fn("sym", origin=ScopeOrigin.PUBLIC_HEADER),
+            ],
+        )
+        s_old, s_new = compute_public_surface(old), compute_public_surface(new)
+        c = Change(kind=ChangeKind.FUNC_RETURN_CHANGED, symbol="sym", description="")
+        # sym is in public_symbols on both sides; the public-header side blocks
+        # the private-header demotion, so it stays in surface.
+        assert classify_change_surface(c, s_old, s_new) == (True, None)

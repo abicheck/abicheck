@@ -33,7 +33,7 @@ from __future__ import annotations
 import re
 from pathlib import Path, PurePosixPath
 
-from .model import AbiSnapshot, ScopeOrigin
+from .model import AbiSnapshot, ScopeOrigin, Visibility
 
 # Directory prefixes that mark a header as belonging to the toolchain or the
 # operating system rather than the project under test.  Matched as path-segment
@@ -48,6 +48,25 @@ _SYSTEM_HEADER_DIRS: tuple[tuple[str, ...], ...] = (
     ("Program Files",),  # Windows SDK / MSVC
     ("VC", "Tools"),  # MSVC toolchain layout
     ("Windows Kits",),  # Windows SDK
+)
+
+# Path segments that mark a header as living in a machine-generated tree.
+_GENERATED_DIR_SEGMENTS: frozenset[str] = frozenset(
+    {"generated", "_generated", ".generated", "gen", "autogen"}
+)
+
+# Basename patterns produced by common code generators (Qt moc/uic/rcc,
+# protobuf, flatbuffers, gRPC). Matched case-sensitively on the file name.
+_GENERATED_BASENAME = re.compile(
+    r"""(?x)
+    ^moc_.*\.(?:h|hpp|cpp|cc)$       # Qt meta-object compiler
+    | ^ui_.*\.h$                     # Qt uic
+    | ^qrc_.*\.(?:cpp|cc)$           # Qt rcc
+    | .*\.pb\.(?:h|cc)$              # protobuf
+    | .*\.pb\.h$                     # protobuf (header)
+    | .*_generated\.h$               # flatbuffers
+    | .*\.grpc\.pb\.(?:h|cc)$        # gRPC
+    """
 )
 
 # A trailing ``:line`` or ``:line:col`` appended to a header path by the
@@ -113,26 +132,41 @@ def _is_system_header(header_segs: tuple[str, ...]) -> bool:
     return any(_contiguous_subsequence(d, header_segs) for d in _SYSTEM_HEADER_DIRS)
 
 
+def _is_generated_header(header_segs: tuple[str, ...]) -> bool:
+    if not header_segs:
+        return False
+    if any(seg in _GENERATED_DIR_SEGMENTS for seg in header_segs[:-1]):
+        return True
+    return bool(_GENERATED_BASENAME.match(header_segs[-1]))
+
+
 def classify_origin(
     source_header: str | None,
     public_header_segs: list[tuple[str, ...]],
     public_dir_segs: list[tuple[str, ...]],
     *,
     have_public_set: bool,
+    export_only: bool = False,
 ) -> ScopeOrigin:
-    """Classify a single header path into a :class:`ScopeOrigin`.
+    """Classify a single declaration into a :class:`ScopeOrigin`.
 
     The ``*_segs`` arguments are pre-segmented public-header inputs (see
     :func:`build_public_set`).  When ``have_public_set`` is False the result
     is always ``UNKNOWN`` — provenance is opt-in.
+
+    ``export_only`` marks a declaration that the binary exports but that has
+    no header provenance (``Visibility.ELF_ONLY``); with a public set in play
+    it classifies as ``EXPORT_ONLY`` rather than ``UNKNOWN``.
     """
-    if not have_public_set or source_header is None:
+    if not have_public_set:
         return ScopeOrigin.UNKNOWN
-    header_segs = _segments(source_header)
+    header_segs = _segments(source_header) if source_header else ()
     if not header_segs:
-        return ScopeOrigin.UNKNOWN
+        return ScopeOrigin.EXPORT_ONLY if export_only else ScopeOrigin.UNKNOWN
     if _matches_public(header_segs, public_header_segs, public_dir_segs):
         return ScopeOrigin.PUBLIC_HEADER
+    if _is_generated_header(header_segs):
+        return ScopeOrigin.GENERATED
     if _is_system_header(header_segs):
         return ScopeOrigin.SYSTEM_HEADER
     return ScopeOrigin.PRIVATE_HEADER
@@ -173,12 +207,14 @@ def apply_provenance(
     def _tag(decl: object) -> None:
         loc = getattr(decl, "source_location", None)
         sh = header_from_location(loc)
+        export_only = getattr(decl, "visibility", None) == Visibility.ELF_ONLY
         decl.source_header = sh  # type: ignore[attr-defined]
         decl.origin = classify_origin(  # type: ignore[attr-defined]
             sh,
             header_segs,
             dir_segs,
             have_public_set=have_set,
+            export_only=export_only,
         )
 
     for fn in snapshot.functions:

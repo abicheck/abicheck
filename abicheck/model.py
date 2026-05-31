@@ -135,7 +135,8 @@ class ParamKind(str, Enum):
 
 class ScopeOrigin(str, Enum):
     """Where a declaration's defining header sits relative to the
-    user-provided public-header set (ADR-015, schema v6).
+    user-provided public-header set — the *Origin* axis of the two-axis
+    Linkage × Origin surface model (ADR-024 D1, ADR-015 schema v6).
 
     Classification is opt-in: it is only meaningful when the caller
     supplies a public-header set (``--public-header`` / ``--public-header-dir``).
@@ -146,6 +147,8 @@ class ScopeOrigin(str, Enum):
     PUBLIC_HEADER = "public_header"    # defined in a provided public header
     PRIVATE_HEADER = "private_header"  # project header outside the public set
     SYSTEM_HEADER = "system_header"    # toolchain/system header (/usr/include, ...)
+    GENERATED = "generated"            # machine-generated header (moc_*, *.pb.h, generated/ ...)
+    EXPORT_ONLY = "export_only"        # exported by the binary but absent from any header
     UNKNOWN = "unknown"                # no public set, or no source location
 
 

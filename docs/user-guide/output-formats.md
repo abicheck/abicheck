@@ -72,9 +72,16 @@ Each demoted finding carries a `reason` code explaining why it was excluded:
 
 - `not-exported` — the symbol is known but not in the public export set.
 - `non-public-type` — the type is reachable from no public API root.
+- `private-header` — the declaration originates in a project header outside
+  the public-header set.
+- `system-header` — the declaration originates in a toolchain/system header
+  (`/usr/include`, MSVC, Xcode SDK, …).
 
-(Provenance-derived reasons such as `private-header` / `system-header` are
-planned once per-declaration header tracking lands — see ADR-024 Phase 1.)
+The `private-header` / `system-header` reasons are provenance-derived: they
+only appear when the snapshots were produced with `--public-header` /
+`--public-header-dir` (ADR-015 schema v6). Without a public-header set, every
+declaration's origin is `unknown` and only the linkage/reachability reasons
+above are emitted.
 
 **Text**: With `--show-filtered`, an audit block on stderr (the reason is shown
 in parentheses):
