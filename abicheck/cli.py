@@ -1270,6 +1270,9 @@ def _finalize_compare_result(
     if show_filtered and result.out_of_surface_changes:
         _echo_filtered_surface(result)
 
+    # The scoping fallback warning goes to stderr so it never corrupts the
+    # machine-readable payload on stdout (which carries scope_resolved /
+    # manual_review_required for programmatic consumers).
     if result.scope_to_public_surface and not result.scope_resolved:
         click.echo(
             "Warning: --scope-public-headers could not resolve the public "

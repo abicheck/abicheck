@@ -159,7 +159,9 @@ class TestStatOutput:
             "compare", str(old), str(new), "--stat", "--format", "json",
         ])
         assert result.exit_code == 0
-        data = json.loads(result.output)
+        # Read stdout (not .output) so any stderr warning — e.g. the
+        # public-surface scoping fallback — does not corrupt the JSON payload.
+        data = json.loads(result.stdout)
         assert "verdict" in data
 
     def test_stat_text_output(self, tmp_path: Path) -> None:
@@ -198,7 +200,9 @@ class TestRenderOutputFormats:
             "compare", str(old), str(new), "--format", "sarif",
         ])
         assert result.exit_code == 0
-        data = json.loads(result.output)
+        # Read stdout (not .output) so any stderr warning — e.g. the
+        # public-surface scoping fallback — does not corrupt the SARIF payload.
+        data = json.loads(result.stdout)
         assert "$schema" in data
 
     # test_html_output: covered by test_cli_unit.py::TestCompareHtml
