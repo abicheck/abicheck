@@ -3,7 +3,7 @@
 
 Listed in `BREAKING_KINDS` — runtime ABI break.
 
-_84 case(s)._ [← back to all examples](../index.md)
+_83 case(s)._ [← back to all examples](../index.md)
 
 | Case | Title | Verdict | Category |
 |------|-------|---------|----------|
@@ -83,7 +83,6 @@ _84 case(s)._ [← back to all examples](../index.md)
 | [case80_pimpl_shared_to_unique](../case80_pimpl_shared_to_unique.md) | Pimpl alias changed from `shared_ptr` to `unique_ptr` | 🔴 BREAKING | Breaking |
 | [case81_serialization_tag_reassigned](../case81_serialization_tag_reassigned.md) | Serialization tag ID reassigned | 🔴 BREAKING | Breaking |
 | [case82_sycl_overload_set_removed](../case82_sycl_overload_set_removed.md) | SYCL overload set removed (DPC++ build withdrawn) | 🔴 BREAKING | Breaking |
-| [case84_bundle_soname_skew](../case84_bundle_soname_skew.md) | Multi-library bundle SONAME skew | 🔴 BREAKING | Breaking |
 | [case85_internal_template_signature_changed](../case85_internal_template_signature_changed.md) | case85 — internal function-template signature leaks via public API (BREAKING) | 🔴 BREAKING | Breaking |
 | [case86_tag_struct_renamed](../case86_tag_struct_renamed.md) | Tag struct renamed (empty class re-mangling) | 🔴 BREAKING | Breaking |
 | [case87_default_template_arg_changed](../case87_default_template_arg_changed.md) | Default template argument changed | 🔴 BREAKING | Breaking |

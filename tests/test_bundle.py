@@ -1431,3 +1431,73 @@ class TestCompareReleaseBundleE2E:
         data = _json.loads(result.stdout)
         kinds = {f["kind"] for f in data.get("bundle_findings", [])}
         assert "bundle_soname_skew" not in kinds
+
+
+# ---------------------------------------------------------------------------
+# Cohort-scoped SONAME skew logic (pure, no compiler / no disk)
+# ---------------------------------------------------------------------------
+
+class TestSonameSkewCohortScoping:
+    """Unit tests for `_soname_skew_findings` / `_soname_cohort_family`.
+
+    These exercise the cohort-grouping correctness boundary directly (no
+    ELF I/O): skew is only flagged *within* a co-versioned family, so a
+    normal release of an independent library alongside an unrelated,
+    unchanged one is never reported.
+    """
+
+    @staticmethod
+    def _member(library: str, major: int):
+        from abicheck.diff_onedal import BundleMember
+        return BundleMember(library=library, soname=library, soname_major=major)
+
+    def test_cohort_family_grouping(self) -> None:
+        from abicheck.bundle import _soname_cohort_family
+        assert _soname_cohort_family("libonedal_core.so.2") == "libonedal"
+        assert _soname_cohort_family("libonedal_thread.so.1") == "libonedal"
+        assert _soname_cohort_family("libfoo.so.1") == "libfoo"
+        assert _soname_cohort_family("libbar.so.2") == "libbar"
+
+    def test_skew_within_cohort_is_flagged(self) -> None:
+        from abicheck.bundle import _soname_skew_findings
+        old = [
+            self._member("libonedal_core.so.1", 1),
+            self._member("libonedal_thread.so.1", 1),
+            self._member("libonedal_dpc.so.1", 1),
+        ]
+        new = [
+            self._member("libonedal_core.so.2", 2),
+            self._member("libonedal_thread.so.1", 1),  # laggard
+            self._member("libonedal_dpc.so.2", 2),
+        ]
+        findings = _soname_skew_findings(old, new)
+        assert len(findings) == 1
+        assert findings[0].kind == ChangeKind.BUNDLE_SONAME_SKEW
+        assert any("libonedal_thread" in lib for lib in findings[0].affected_libraries)
+
+    def test_independent_libraries_are_not_flagged(self) -> None:
+        # Regression for the P1 false positive: a normal libfoo bump next to
+        # an unrelated, unchanged libbar must NOT be a bundle skew — they are
+        # different families and are never compared against each other.
+        from abicheck.bundle import _soname_skew_findings
+        old = [self._member("libfoo.so.1", 1), self._member("libbar.so.1", 1)]
+        new = [self._member("libfoo.so.2", 2), self._member("libbar.so.1", 1)]
+        assert _soname_skew_findings(old, new) == []
+
+    def test_lockstep_bump_within_cohort_is_clean(self) -> None:
+        from abicheck.bundle import _soname_skew_findings
+        old = [
+            self._member("libonedal_core.so.1", 1),
+            self._member("libonedal_thread.so.1", 1),
+        ]
+        new = [
+            self._member("libonedal_core.so.2", 2),
+            self._member("libonedal_thread.so.2", 2),
+        ]
+        assert _soname_skew_findings(old, new) == []
+
+    def test_single_member_family_never_flags(self) -> None:
+        from abicheck.bundle import _soname_skew_findings
+        old = [self._member("libsolo.so.1", 1)]
+        new = [self._member("libsolo.so.2", 2)]
+        assert _soname_skew_findings(old, new) == []

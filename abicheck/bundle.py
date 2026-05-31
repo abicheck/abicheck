@@ -44,11 +44,14 @@ import logging
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 from .checker_policy import ChangeKind, Verdict, compute_verdict
 from .checker_types import Change, DiffResult
 from .elf_metadata import ElfMetadata, parse_elf_metadata
+
+if TYPE_CHECKING:
+    from .diff_onedal import BundleMember
 
 log = logging.getLogger(__name__)
 
@@ -1002,42 +1005,84 @@ def _detect_version_drift(
     return findings
 
 
+def _soname_cohort_family(library: str) -> str:
+    """Derive a co-versioned *family* key from a library filename.
+
+    The family is the cohort stem (everything before the first dot) with
+    the trailing ``_<component>`` segment stripped, so the oneDAL siblings
+    ``libonedal_core``/``libonedal_thread``/``libonedal_dpc`` collapse to a
+    single ``libonedal`` family while unrelated libraries (``libfoo`` vs
+    ``libbar``) stay in their own families. A name without an underscore is
+    its own family.
+    """
+    stem = library.split(".", 1)[0]
+    return stem.rsplit("_", 1)[0] if "_" in stem else stem
+
+
+def _soname_skew_findings(
+    old_members: list[BundleMember],
+    new_members: list[BundleMember],
+) -> list[BundleFinding]:
+    """Pure cohort-skew logic over already-read bundle members.
+
+    Libraries are first grouped into co-versioned families
+    (:func:`_soname_cohort_family`); skew is only evaluated **within** a
+    family that has at least two co-versioned members. This is the
+    correctness boundary: a normal release that bumps an independent
+    ``libfoo.so.1 → libfoo.so.2`` while an unrelated ``libbar.so.1`` stays
+    put must NOT be reported as a bundle invariant violation — the two are
+    different families, so they are never compared against each other.
+    """
+    from .diff_onedal import detect_bundle_soname_skew
+
+    by_family_old: dict[str, list[BundleMember]] = {}
+    by_family_new: dict[str, list[BundleMember]] = {}
+    for member in old_members:
+        by_family_old.setdefault(_soname_cohort_family(member.library), []).append(member)
+    for member in new_members:
+        by_family_new.setdefault(_soname_cohort_family(member.library), []).append(member)
+
+    findings: list[BundleFinding] = []
+    for family in sorted(set(by_family_old) & set(by_family_new)):
+        cohort_old = by_family_old[family]
+        cohort_new = by_family_new[family]
+        # A lone library bumping its own SONAME is an ordinary major bump,
+        # not a cohort skew. Require a genuine co-versioned set.
+        if len(cohort_old) < 2 and len(cohort_new) < 2:
+            continue
+        for change in detect_bundle_soname_skew(cohort_old, cohort_new):
+            findings.append(
+                BundleFinding(
+                    kind=change.kind,
+                    symbol=change.symbol,
+                    description=change.description,
+                    old_value=change.old_value,
+                    new_value=change.new_value,
+                    affected_libraries=list(change.affected_symbols or []),
+                )
+            )
+    return findings
+
+
 def _detect_soname_skew(
     old: BundleSnapshot,
     new: BundleSnapshot,
 ) -> list[BundleFinding]:
-    """Detect inconsistent SONAME major bumps across a co-versioned cohort.
+    """Detect inconsistent SONAME major bumps within a co-versioned cohort.
 
-    Delegates to :func:`abicheck.diff_onedal.detect_bundle_soname_skew`,
-    which clusters the bundle's libraries by cohort key and emits a single
-    :class:`ChangeKind.BUNDLE_SONAME_SKEW` finding when some siblings bumped
-    their major SONAME while others lagged. The members are read from the
-    release directories (``BundleSnapshot.root``) so the on-disk SONAME of
-    each ``.so`` is what drives the decision.
-
-    Returns an empty list when either side has no recognisable versioned
-    members (e.g. unversioned ``libfoo.so`` files), so the common case adds
-    no findings and cannot raise a false positive.
+    Reads the on-disk SONAME of each ``.so`` from the release directories
+    (``BundleSnapshot.root``), groups them into co-versioned families, and
+    delegates to :func:`_soname_skew_findings`. Returns an empty list when
+    either side has no recognisable versioned members (e.g. unversioned
+    ``libfoo.so`` files), so the common case adds no findings.
     """
-    from .diff_onedal import bundle_members_from_directory, detect_bundle_soname_skew
+    from .diff_onedal import bundle_members_from_directory
 
     old_members = bundle_members_from_directory(str(old.root))
     new_members = bundle_members_from_directory(str(new.root))
     if not old_members or not new_members:
         return []
-    findings: list[BundleFinding] = []
-    for change in detect_bundle_soname_skew(old_members, new_members):
-        findings.append(
-            BundleFinding(
-                kind=change.kind,
-                symbol=change.symbol,
-                description=change.description,
-                old_value=change.old_value,
-                new_value=change.new_value,
-                affected_libraries=list(change.affected_symbols or []),
-            )
-        )
-    return findings
+    return _soname_skew_findings(old_members, new_members)
 
 
 def _entry_targets(entry: ManifestEntry) -> list[tuple[str, str]]:
