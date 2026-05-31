@@ -98,19 +98,28 @@ scenarios:
       bundle are analysed.
     flow:
       - abicheck compare-release baseline/ pr-build/ -H include/ --scope-public-headers --format json -o abi.json
-      - abicheck compare-release baseline/ pr-build/ -H include/ --scope-public-headers --format sarif -o abi.sarif
+      - abicheck compare-release baseline/ pr-build/ -H include/ --scope-public-headers --format junit -o abi.xml
     expected:
-      fail_on_verdicts: [BREAKING, API_BREAK]
-      manual_review_required_on:
+      # Block only on CONFIRMED public breaks; when scoping fell back the result
+      # is unconfirmed and must be manual-review-only, never an auto-fail.
+      fail_when:
+        - verdict in [BREAKING, API_BREAK] and scope.manual_review_required == false
+      manual_review_when:
+        - scope.manual_review_required == true   # public surface could not be confirmed
         - verdict == COMPATIBLE_WITH_RISK
-        - warnings not empty
-        - public-surface scope fallback occurred
-      require_bundle_analysis: true
-      require_public_surface_scope: true
+      require_public_surface_scope: true   # scope block present in JSON
+      require_bundle_analysis: true        # bundle_verdict/bundle_findings present
     validates: UC-WF-bundle
     automated: false
     status: planned
     plan: docs/development/plans/g2-build-config-and-bundle.md
+    note: >
+      The scoping rollup (scope.manual_review_required / public_additions /
+      filtered_internal_changes) and changed_libraries that this gate keys off
+      are unit-tested in tests/test_compare_release.py
+      (TestCompareReleaseScopeAndChangedLibraries). Full automation needs a real
+      oneDAL bundle (multiple .so + public headers) so -H scoping is exercised
+      end-to-end rather than via JSON snapshots.
 
   # oneDAL-style additive surface tracking: report growth, never gate on it.
   - id: SC-ONEDAL-PR-ADDITION-TRACKING
@@ -123,18 +132,26 @@ scenarios:
       --show-filtered ledger) and communicate the release impact to reviewers via
       a job summary / PR comment rather than raw JSON.
     flow:
-      - abicheck compare-release baseline/ pr-build/ -H include/ --scope-public-headers --show-filtered --format json -o abi.json
-      - abicheck compare-release baseline/ pr-build/ -H include/ --scope-public-headers --format html -o abi.html
+      - abicheck compare-release baseline/ pr-build/ -H include/ --scope-public-headers --format json -o abi.json
+      - abicheck compare-release baseline/ pr-build/ -H include/ --scope-public-headers --output-dir reports/ --format markdown
     expected:
-      fail_on_verdicts: [BREAKING, API_BREAK]
+      fail_when:
+        - verdict in [BREAKING, API_BREAK]
       do_not_fail_on: [COMPATIBLE]
+      # Real compare-release JSON keys (see _format_release_summary): the scope
+      # rollup separates public growth from internal-only growth.
       require_summary_fields:
-        - public_additions
-        - filtered_internal_changes
         - changed_libraries
-        - release_recommendation
+        - scope.public_additions
+        - scope.filtered_internal_changes
       github_presentation: [job_summary, pr_comment]
     validates: UC-WF-bundle
     automated: false
     status: planned
     plan: docs/development/plans/g3-workflow-examples-and-reporting.md
+    note: >
+      changed_libraries and the scope.public_additions / filtered_internal_changes
+      rollup are emitted today and unit-tested in tests/test_compare_release.py.
+      Per-library release_recommendation is available in the --output-dir reports
+      (single-library JSON). The job_summary / pr_comment digest is the G3
+      review-UX deliverable; full automation needs a real oneDAL bundle.

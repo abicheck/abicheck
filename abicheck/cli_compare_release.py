@@ -69,6 +69,7 @@ _CompareReleaseCommonArgs = tuple[
     str, Path | None,
     str, Path | None,
     Path | None,
+    bool,
 ]
 
 
@@ -154,6 +155,7 @@ def _compare_one_library(
     lang: str, suppress: Path | None,
     policy: str, policy_file_path: Path | None,
     output_dir: Path | None,
+    scope_to_public_surface: bool = False,
 ) -> dict[str, object]:
     """Compare one library pair — suitable for parallel dispatch.
 
@@ -177,6 +179,7 @@ def _compare_one_library(
             old_version, new_version,
             lang, suppress, policy, policy_file_path,
             old_pdb_path=old_dbg, new_pdb_path=new_dbg,
+            scope_to_public_surface=scope_to_public_surface,
         )
         v = result.verdict.value
         entry: dict[str, object] = {
@@ -187,6 +190,11 @@ def _compare_one_library(
             "compatible_additions": len(result.compatible),
             "_diff_result": result,
         }
+        if scope_to_public_surface:
+            # Per-library public-surface scoping outcome (ADR-024, issue #235),
+            # aggregated into the release-level scope block by the formatter.
+            entry["scope_resolved"] = result.scope_resolved
+            entry["filtered_internal_count"] = result.out_of_surface_count
         if output_dir:
             lib_report_path = output_dir / f"{old_path.stem}.json"
             _safe_write_output(lib_report_path, to_json(result))
@@ -213,6 +221,7 @@ def _compare_release_libraries(
     annotate: bool = False,
     annotate_additions: bool = False,
     jobs: int = 1,
+    scope_to_public_surface: bool = False,
 ) -> tuple[list[dict[str, object]], str, list[tuple[DiffResult, AbiSnapshot]]]:
     """Compare each matched library pair and collect results.
 
@@ -236,6 +245,7 @@ def _compare_release_libraries(
         old_h, new_h, old_inc, new_inc,
         old_version, new_version,
         lang, suppress, policy, policy_file_path, output_dir,
+        scope_to_public_surface,
     )
 
     if effective_jobs > 1 and len(matched_keys) > 1:
@@ -270,6 +280,7 @@ def _compare_release_libraries(
             annotate_additions=annotate_additions,
             collect_diff_results=collect_diff_results,
             annotate=annotate,
+            scope_to_public_surface=scope_to_public_surface,
         )
         diff_pairs.extend(extra_pairs)
         all_annotations.extend(extra_annotations)
@@ -343,6 +354,7 @@ def _collect_release_extras(
     annotate_additions: bool,
     collect_diff_results: bool,
     annotate: bool,
+    scope_to_public_surface: bool = False,
 ) -> tuple[list[tuple[DiffResult, AbiSnapshot]], list[tuple[int, str]]]:
     """Collect optional re-run artifacts for JUnit and annotations."""
     diff_pairs: list[tuple[DiffResult, AbiSnapshot]] = []
@@ -359,6 +371,7 @@ def _collect_release_extras(
                 old_version, new_version,
                 lang, suppress, policy, policy_file_path,
                 old_pdb_path=old_dbg, new_pdb_path=new_dbg,
+                scope_to_public_surface=scope_to_public_surface,
             )
         except Exception as exc:
             click.echo(
@@ -468,15 +481,39 @@ def _format_release_summary(
         )
 
     if fmt == "json":
+        changed_libraries = [
+            str(lib["library"]) for lib in library_results
+            if str(lib.get("verdict")) not in ("NO_CHANGE", "ERROR")
+        ]
         summary: dict[str, object] = {
             "verdict": worst_verdict,
             "old_dir": str(old_dir),
             "new_dir": str(new_dir),
             "libraries": library_results,
+            "changed_libraries": changed_libraries,
             "unmatched_old": [old_map[k].name for k in removed_keys],
             "unmatched_new": [new_map[k].name for k in added_keys],
             "warnings": warning_msgs,
         }
+        # Release-level public-surface scoping rollup (ADR-024, issue #235).
+        # Present only when --scope-public-headers was active (per-library
+        # entries then carry a "scope_resolved" key).
+        scoped_libs = [lib for lib in library_results if "scope_resolved" in lib]
+        if scoped_libs:
+            def _as_int(v: object) -> int:
+                return v if isinstance(v, int) else 0
+            summary["scope"] = {
+                "public_headers_applied": True,
+                "manual_review_required": any(
+                    not bool(lib.get("scope_resolved", True)) for lib in scoped_libs
+                ),
+                "public_additions": sum(
+                    _as_int(lib.get("compatible_additions", 0)) for lib in scoped_libs
+                ),
+                "filtered_internal_changes": sum(
+                    _as_int(lib.get("filtered_internal_count", 0)) for lib in scoped_libs
+                ),
+            }
         if bundle_result is not None:
             summary["bundle_verdict"] = bundle_result.bundle_verdict.value
             summary["bundle_findings"] = [
@@ -817,6 +854,12 @@ def _strip_diff_results_and_adjust_verdict(
                    "Bundle findings catch intra-bundle symbol removals, signature drift "
                    "across DSO boundaries, type drift across siblings, provider "
                    "migration, and manifest mismatches.")
+@click.option("--scope-public-headers", "scope_public_headers", is_flag=True, default=False,
+              help="Restrict each library's findings to its public-header ABI surface "
+                   "(ADR-024): private/internal changes are recorded as filtered, not "
+                   "reported. When a library's public surface cannot be resolved, scoping "
+                   "falls back to the full export table and the release-level scope block "
+                   "flags manual_review_required (issue #235). Requires -H/--header.")
 def compare_release_cmd(
     old_dir: Path,
     new_dir: Path,
@@ -850,6 +893,7 @@ def compare_release_cmd(
     manifest_path: Path | None,
     bundle_system_providers: str,
     no_bundle_analysis: bool,
+    scope_public_headers: bool,
 ) -> None:
     """Compare all libraries in two release directories or packages.
 
@@ -939,6 +983,7 @@ def compare_release_cmd(
             annotate=annotate,
             annotate_additions=annotate_additions,
             jobs=jobs,
+            scope_to_public_surface=scope_public_headers,
         )
 
         bundle_result: BundleDiffResult | None = None

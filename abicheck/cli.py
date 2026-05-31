@@ -901,6 +901,7 @@ def _run_compare_pair(
     policy_file_path: Path | None,
     old_pdb_path: Path | None,
     new_pdb_path: Path | None,
+    scope_to_public_surface: bool = False,
 ) -> tuple[DiffResult, AbiSnapshot, AbiSnapshot]:
     """Run compare for one old/new pair and return result + resolved snapshots."""
     old_fmt = _detect_binary_format(old_input)
@@ -926,7 +927,10 @@ def _run_compare_pair(
     )
 
     suppression, pf = _load_suppression_and_policy(suppress, policy, policy_file_path)
-    result = compare(old, new, suppression=suppression, policy=policy, policy_file=pf)
+    result = compare(
+        old, new, suppression=suppression, policy=policy, policy_file=pf,
+        scope_to_public_surface=scope_to_public_surface,
+    )
     result.old_metadata = _collect_metadata(old_input)
     result.new_metadata = _collect_metadata(new_input)
     return result, old, new

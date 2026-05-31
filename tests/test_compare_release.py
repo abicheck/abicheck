@@ -14,7 +14,14 @@ from abicheck.cli import (
     main,
 )
 from abicheck.cli_compare_release import _extract_if_package
-from abicheck.model import AbiSnapshot, Function, Param, Visibility
+from abicheck.model import (
+    AbiSnapshot,
+    Function,
+    Param,
+    RecordType,
+    TypeField,
+    Visibility,
+)
 from abicheck.package import ExtractResult
 from abicheck.serialization import snapshot_to_json
 
@@ -357,6 +364,77 @@ class TestOutputDir:
         summary = json.loads((out_dir / "summary.json").read_text())
         assert summary["verdict"] == "NO_CHANGE"
         assert len(summary["libraries"]) == 1
+
+
+def _rec(name: str, size: int) -> RecordType:
+    return RecordType(name=name, kind="struct", size_bits=size,
+                      fields=[TypeField(name="x", type="int")])
+
+
+class TestCompareReleaseScopeAndChangedLibraries:
+    """compare-release: changed_libraries + public-header scoping rollup (#235)."""
+
+    def test_changed_libraries_lists_only_changed(self, tmp_path: Path) -> None:
+        old_dir = tmp_path / "old"
+        old_dir.mkdir()
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+        # libfoo breaks; libbar is identical (NO_CHANGE).
+        old_foo, new_foo = _breaking_pair("libfoo.so")
+        _write_snap(old_dir / "libfoo.json", old_foo)
+        _write_snap(new_dir / "libfoo.json", new_foo)
+        _write_snap(old_dir / "libbar.json", _snap(library="libbar.so"))
+        _write_snap(new_dir / "libbar.json", _snap(library="libbar.so"))
+        code, out = _invoke("compare-release", str(old_dir), str(new_dir), "--format", "json")
+        assert code == 4
+        data = json.loads(out)
+        assert data["changed_libraries"] == ["libfoo.json"]
+
+    def test_scope_block_resolved_filters_internal(self, tmp_path: Path) -> None:
+        old_dir = tmp_path / "old"
+        old_dir.mkdir()
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+        # Public api_call(Config*) -> int; InternalCache is private (unreachable).
+        # New side adds a public function and shrinks InternalCache: the private
+        # break is filtered, the public addition is reported.
+        pub_old = Function(name="api_call", mangled="api_call", return_type="int",
+                           params=[Param(name="c", type="Config *")], visibility=Visibility.PUBLIC)
+        pub_new = Function(name="new_api", mangled="new_api", return_type="int",
+                           visibility=Visibility.PUBLIC)
+        old = AbiSnapshot(library="libfoo.so", version="1", functions=[pub_old],
+                          types=[_rec("Config", 32), _rec("InternalCache", 64)])
+        new = AbiSnapshot(library="libfoo.so", version="2", functions=[pub_old, pub_new],
+                          types=[_rec("Config", 32), _rec("InternalCache", 128)])
+        _write_snap(old_dir / "libfoo.json", old)
+        _write_snap(new_dir / "libfoo.json", new)
+        code, out = _invoke("compare-release", str(old_dir), str(new_dir),
+                            "--scope-public-headers", "--format", "json")
+        data = json.loads(out)
+        assert data["scope"]["public_headers_applied"] is True
+        assert data["scope"]["manual_review_required"] is False
+        assert data["scope"]["filtered_internal_changes"] >= 1
+        assert data["scope"]["public_additions"] >= 1
+
+    def test_scope_fallback_flags_manual_review(self, tmp_path: Path) -> None:
+        old_dir = tmp_path / "old"
+        old_dir.mkdir()
+        new_dir = tmp_path / "new"
+        new_dir.mkdir()
+        # No public symbols -> surface unresolvable -> fall back to full export
+        # table and flag manual review (issue #235's "don't overclaim" half).
+        old = AbiSnapshot(library="libfoo.so", version="1", functions=[],
+                          types=[_rec("InternalCache", 64)])
+        new = AbiSnapshot(library="libfoo.so", version="2", functions=[],
+                          types=[_rec("InternalCache", 128)])
+        _write_snap(old_dir / "libfoo.json", old)
+        _write_snap(new_dir / "libfoo.json", new)
+        code, out = _invoke("compare-release", str(old_dir), str(new_dir),
+                            "--scope-public-headers", "--format", "json")
+        data = json.loads(out)
+        assert data["scope"]["manual_review_required"] is True
+        # The break is kept (fallback), so the library still shows as changed.
+        assert "libfoo.json" in data["changed_libraries"]
 
 
 # ── version-aware name matching ───────────────────────────────────────────────
