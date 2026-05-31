@@ -1070,16 +1070,33 @@ def _detect_soname_skew(
 ) -> list[BundleFinding]:
     """Detect inconsistent SONAME major bumps within a co-versioned cohort.
 
-    Reads the on-disk SONAME of each ``.so`` from the release directories
-    (``BundleSnapshot.root``), groups them into co-versioned families, and
-    delegates to :func:`_soname_skew_findings`. Returns an empty list when
-    either side has no recognisable versioned members (e.g. unversioned
-    ``libfoo.so`` files), so the common case adds no findings.
+    Members are derived from the *matched* release libraries
+    (``BundleSnapshot.libraries`` / ``.metadata``) rather than by rescanning
+    a single directory — release discovery is recursive, so a cohort member
+    living in another subdirectory must still participate. The authoritative
+    major comes from each library's DT_SONAME, falling back to the on-disk
+    filename. Libraries with no derivable major (unversioned ``libfoo.so``)
+    are dropped, so the common case adds no findings.
     """
-    from .diff_onedal import bundle_members_from_directory
+    from .diff_onedal import BundleMember, _extract_soname_major
 
-    old_members = bundle_members_from_directory(str(old.root))
-    new_members = bundle_members_from_directory(str(new.root))
+    def _members(snap: BundleSnapshot) -> list[BundleMember]:
+        members: list[BundleMember] = []
+        for name, path in snap.libraries.items():
+            meta = snap.metadata.get(name)
+            soname = (meta.soname if meta and meta.soname else "") or path.name
+            major = _extract_soname_major(soname)
+            if major is None:
+                major = _extract_soname_major(path.name)
+            if major is None:
+                continue
+            members.append(
+                BundleMember(library=path.name, soname=soname, soname_major=major)
+            )
+        return members
+
+    old_members = _members(old)
+    new_members = _members(new)
     if not old_members or not new_members:
         return []
     return _soname_skew_findings(old_members, new_members)

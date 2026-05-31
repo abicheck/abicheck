@@ -1501,3 +1501,31 @@ class TestSonameSkewCohortScoping:
         old = [self._member("libsolo.so.1", 1)]
         new = [self._member("libsolo.so.2", 2)]
         assert _soname_skew_findings(old, new) == []
+
+    def test_skew_uses_snapshot_libraries_across_directories(self) -> None:
+        # Regression for the P2 review: cohort members may live in different
+        # subdirectories (recursive release discovery). _detect_soname_skew
+        # must derive members from snapshot.libraries/.metadata — not rescan
+        # a single root — so a skew split across directories is still caught.
+        from abicheck.bundle import _detect_soname_skew
+
+        def _snap(core_soname: str, thread_soname: str) -> BundleSnapshot:
+            libs = {
+                "libonedal_core.so": Path("/rel/lib64") / core_soname,
+                "libonedal_thread.so": Path("/rel/lib32") / thread_soname,
+            }
+            meta = {
+                "libonedal_core.so": _meta(soname=core_soname, exports=["c"]),
+                "libonedal_thread.so": _meta(soname=thread_soname, exports=["t"]),
+            }
+            return BundleSnapshot(
+                root=Path("/rel/lib64"),  # only one dir; the other must still count
+                libraries=libs,
+                metadata=meta,
+                resolution=_compute_resolution_graph(libs, meta),
+            )
+
+        old = _snap("libonedal_core.so.1", "libonedal_thread.so.1")
+        new = _snap("libonedal_core.so.2", "libonedal_thread.so.1")  # thread lags
+        findings = _detect_soname_skew(old, new)
+        assert [f.kind for f in findings] == [ChangeKind.BUNDLE_SONAME_SKEW]
