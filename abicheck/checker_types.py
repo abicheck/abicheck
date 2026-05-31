@@ -60,6 +60,11 @@ class Change:
     # Function record was found (e.g. type-level changes). Lets namespace
     # selectors match ``extern "C"`` entries whose export name is unqualified.
     qualified_name: str | None = None
+    # Set by FilterNonPublicSurface (ADR-024 §D5.1) when --scope-public-headers
+    # demotes this finding off the public surface. Carries a stable reason code
+    # (e.g. "not-exported", "non-public-type") for the audit ledger. None for
+    # in-surface findings and when scoping is off.
+    surface_exclusion_reason: str | None = None
 
 
 @dataclass

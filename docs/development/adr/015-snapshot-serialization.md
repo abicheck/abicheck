@@ -55,7 +55,7 @@ class AbiSnapshot:
 ### 2. Integer schema versioning
 
 ```python
-SCHEMA_VERSION: int = 3
+SCHEMA_VERSION: int = 6
 ```
 
 Version history:
@@ -65,6 +65,9 @@ Version history:
 | 1 | Initial format (no `schema_version` field) | — |
 | 2 | `schema_version` field added | PR #89 |
 | 3 | `pe` and `macho` metadata fields added (multi-format support) | — |
+| 4 | Provenance metadata (`git_commit`, `git_tag`, `created_at`, `build_id`) | — |
+| 5 | `build_mode` capture (compiler/stdlib/std normalization) | — |
+| 6 | Declaration provenance: `source_header` + `origin` on functions/variables/types/enums | — |
 
 **Integer versioning** was chosen over semver because:
 
@@ -86,6 +89,34 @@ read the snapshot anyway — forward compatibility is best-effort.
 
 **Writing**: Always writes the current `SCHEMA_VERSION`. There is no option
 to write in an older format.
+
+### 3a. Declaration provenance fields (v6)
+
+`Function`, `Variable`, `RecordType`, and `EnumType` each carry two
+provenance fields:
+
+- `source_header` — the defining header path, derived from the existing
+  `source_location` with any trailing `:line` / `:line:col` stripped. Always
+  populated when a source location is available; it is descriptive metadata.
+- `origin` — a `ScopeOrigin` classification of `source_header` against the
+  user-provided public-header set. This is the *Origin* axis of ADR-024's
+  two-axis Linkage × Origin surface model:
+
+  | Value | Meaning |
+  |-------|---------|
+  | `public_header` | Header matches a `--public-header` / `--public-header-dir` input |
+  | `private_header` | A project header outside the public set |
+  | `system_header` | A toolchain/system header (`/usr/include`, MSVC, Xcode SDK, …) |
+  | `generated` | A machine-generated header (`moc_*`, `*.pb.h`, `generated/`, …) |
+  | `export_only` | Exported by the binary but absent from any header (no provenance) |
+  | `unknown` | No public set was provided, or no source location was available |
+
+Classification is **opt-in** (decision D4): without `--public-header` /
+`--public-header-dir`, every `origin` is `unknown` and downstream behaviour
+is unchanged. Matching is done on path *segments* (suffix / basename /
+directory containment) so absolute build-tree prefixes that never appear on
+the command line (e.g. `/build/abc/src/include/api.h`) still resolve against
+`include/api.h` (decision D3).
 
 ### 4. Serialization mechanics
 

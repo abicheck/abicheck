@@ -696,6 +696,7 @@ class _DwarfSnapshotBuilder:
             name=qualified,
             members=members,
             underlying_type=underlying,
+            source_location=self._resolve_decl_file(die, CU),
         ))
 
     # -------------------------------------------------------------------

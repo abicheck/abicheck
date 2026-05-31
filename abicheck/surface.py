@@ -49,7 +49,7 @@ import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from .model import Visibility
+from .model import ScopeOrigin, Visibility
 
 if TYPE_CHECKING:
     from .checker_types import Change
@@ -133,6 +133,10 @@ class PublicSurface:
     public_types: set[str] = field(default_factory=set)
     all_types: set[str] = field(default_factory=set)
     resolvable: bool = False
+    # Origin (ADR-024 D1 / ADR-015 v6) keyed by every symbol key and type
+    # name. Only populated when the snapshot was dumped with a public-header
+    # set; otherwise every value is UNKNOWN and provenance reasons never fire.
+    origin_by_key: dict[str, ScopeOrigin] = field(default_factory=dict)
 
 
 def _symbol_keys(name: str, mangled: str) -> set[str]:
@@ -141,6 +145,26 @@ def _symbol_keys(name: str, mangled: str) -> set[str]:
     if name and "::" in name:
         keys.add(name.rsplit("::", 1)[1])
     return keys
+
+
+# Origins that justify demoting a finding out of the public surface.
+_DEMOTE_ORIGINS: frozenset[ScopeOrigin] = frozenset(
+    {ScopeOrigin.PRIVATE_HEADER, ScopeOrigin.SYSTEM_HEADER}
+)
+
+
+def _merge_origin(existing: ScopeOrigin | None, new: ScopeOrigin) -> ScopeOrigin:
+    """Combine origins sharing a key. A non-demote origin (public/unknown/…)
+    always wins so we never demote a key that *any* public-header declaration
+    contributes to (conservative, ADR-024 §D5)."""
+    if existing is None or existing in _DEMOTE_ORIGINS:
+        return new if existing is None or new not in _DEMOTE_ORIGINS else existing
+    return existing
+
+
+def _record_origin(surface: PublicSurface, keys: set[str], origin: ScopeOrigin) -> None:
+    for k in keys:
+        surface.origin_by_key[k] = _merge_origin(surface.origin_by_key.get(k), origin)
 
 
 def _index_surface_types(snap: AbiSnapshot, surface: PublicSurface) -> dict[str, RecordType]:
@@ -153,10 +177,15 @@ def _index_surface_types(snap: AbiSnapshot, surface: PublicSurface) -> dict[str,
     for rec in snap.types:
         surface.all_types.add(rec.name)
         record_by_name[rec.name] = rec
+        keys = {rec.name}
         if "::" in rec.name:
-            record_by_name.setdefault(rec.name.rsplit("::", 1)[1], rec)
+            tail = rec.name.rsplit("::", 1)[1]
+            record_by_name.setdefault(tail, rec)
+            keys.add(tail)
+        _record_origin(surface, keys, getattr(rec, "origin", ScopeOrigin.UNKNOWN))
     for en in snap.enums:
         surface.all_types.add(en.name)
+        _record_origin(surface, {en.name}, getattr(en, "origin", ScopeOrigin.UNKNOWN))
     for alias in snap.typedefs:
         surface.all_types.add(alias)
     return record_by_name
@@ -173,6 +202,7 @@ def _seed_public_roots(snap: AbiSnapshot, surface: PublicSurface) -> tuple[set[s
     for fn in snap.functions:
         keys = _symbol_keys(fn.name, fn.mangled)
         surface.all_symbols |= keys
+        _record_origin(surface, keys, getattr(fn, "origin", ScopeOrigin.UNKNOWN))
         if fn.visibility == Visibility.PUBLIC:
             has_public = True
             surface.public_symbols |= keys
@@ -182,6 +212,7 @@ def _seed_public_roots(snap: AbiSnapshot, surface: PublicSurface) -> tuple[set[s
     for var in snap.variables:
         keys = _symbol_keys(var.name, var.mangled)
         surface.all_symbols |= keys
+        _record_origin(surface, keys, getattr(var, "origin", ScopeOrigin.UNKNOWN))
         if var.visibility == Visibility.PUBLIC:
             has_public = True
             surface.public_symbols |= keys
@@ -262,14 +293,72 @@ def change_in_public_surface(
 ) -> bool:
     """Return ``True`` if *change* concerns the public ABI surface.
 
+    Thin boolean wrapper over :func:`classify_change_surface` for callers
+    that only need the in/out decision.
+    """
+    return classify_change_surface(change, surf_old, surf_new)[0]
+
+
+# Exclusion reasons recorded on the surface ledger (ADR-024 §D5.1).
+# ``private-header`` / ``system-header`` are provenance-driven and only fire
+# when the snapshot was dumped with a public-header set (Phase 1, ADR-015 v6);
+# ``not-exported`` / ``non-public-type`` are the linkage/reachability reasons
+# the resolver can always determine. ``suppressed-by-user`` belongs to the
+# separate suppression ledger.
+REASON_NOT_EXPORTED = "not-exported"  # symbol known but not in the public export set
+REASON_NON_PUBLIC_TYPE = "non-public-type"  # type reachable by no public API root
+REASON_PRIVATE_HEADER = (
+    "private-header"  # decl originates in a non-public project header
+)
+REASON_SYSTEM_HEADER = "system-header"  # decl originates in a toolchain/system header
+
+# Map a demotable origin to its ledger reason code.
+_ORIGIN_REASON: dict[ScopeOrigin, str] = {
+    ScopeOrigin.PRIVATE_HEADER: REASON_PRIVATE_HEADER,
+    ScopeOrigin.SYSTEM_HEADER: REASON_SYSTEM_HEADER,
+}
+
+
+def _origin_reason(
+    surf_old: PublicSurface, surf_new: PublicSurface, key: str
+) -> str | None:
+    """Return the provenance demotion reason for *key*, or None to defer to
+    linkage/reachability. A public-header (or unknown) origin on *either* side
+    blocks demotion (conservative)."""
+    o_old = surf_old.origin_by_key.get(key, ScopeOrigin.UNKNOWN)
+    o_new = surf_new.origin_by_key.get(key, ScopeOrigin.UNKNOWN)
+    # Only demote when both sides agree the key is private/system. If either
+    # side is public/unknown/generated/export-only, keep deferring.
+    if o_old in _ORIGIN_REASON and o_new in _ORIGIN_REASON:
+        # Prefer private-header when the two disagree (the stronger signal).
+        if ScopeOrigin.PRIVATE_HEADER in (o_old, o_new):
+            return REASON_PRIVATE_HEADER
+        return REASON_SYSTEM_HEADER
+    return None
+
+
+def classify_change_surface(
+    change: Change,
+    surf_old: PublicSurface,
+    surf_new: PublicSurface,
+) -> tuple[bool, str | None]:
+    """Classify *change* against the public surface.
+
+    Returns ``(in_surface, reason)``. ``reason`` is ``None`` when the change
+    is in-surface (kept); otherwise it is a stable ledger reason code
+    explaining *why* the finding was demoted (ADR-024 §D5.1).
+
     Conservative by construction (ADR-024 §D5): leak findings, unknown
-    symbols, and unknown types all return ``True`` so scoping can only
-    ever remove findings it is *confident* are private.
+    symbols, and unknown types all stay in-surface so scoping can only ever
+    remove findings it is *confident* are private.
     """
     if change.kind.value in _NEVER_FILTER_KIND_NAMES:
-        return True
-    if not (surf_old.resolvable or surf_new.resolvable):
-        return True
+        return True, None
+    if not (surf_old.resolvable and surf_new.resolvable):
+        # If either side lacks a resolvable surface we cannot confidently
+        # place a finding as private on *both* versions — keep everything
+        # rather than risk hiding a real change from the unresolved side.
+        return True, None
 
     public_symbols = surf_old.public_symbols | surf_new.public_symbols
     all_symbols = surf_old.all_symbols | surf_new.all_symbols
@@ -278,10 +367,19 @@ def change_in_public_surface(
 
     sym = change.symbol or ""
     # Symbol-level finding (function/variable): public iff a public symbol.
+    # A confident private/system-header origin demotes even an exported
+    # symbol — that is exactly the leaked-private-header case scoping targets.
     if sym in all_symbols:
-        return sym in public_symbols
+        reason = _origin_reason(surf_old, surf_new, sym)
+        if reason is not None:
+            return False, reason
+        return (True, None) if sym in public_symbols else (False, REASON_NOT_EXPORTED)
     if sym and "::" in sym and sym.rsplit("::", 1)[1] in all_symbols:
-        return sym.rsplit("::", 1)[1] in public_symbols
+        tail = sym.rsplit("::", 1)[1]
+        reason = _origin_reason(surf_old, surf_new, tail)
+        if reason is not None:
+            return False, reason
+        return (True, None) if tail in public_symbols else (False, REASON_NOT_EXPORTED)
 
     # Type-level finding: check the implicated type name(s). A finding is
     # in-surface if *any* implicated type is reachable from the public API.
@@ -298,10 +396,21 @@ def change_in_public_surface(
     from .internal_leak import DEFAULT_INTERNAL_NAMESPACES, is_internal_type
 
     if any(is_internal_type(c, DEFAULT_INTERNAL_NAMESPACES) for c in candidates):
-        return True
+        return True, None
 
     known = {c for c in candidates if c in all_types}
     if not known:
         # We cannot place this finding — keep it (never hide an unknown).
-        return True
-    return bool(known & public_types)
+        return True, None
+    if known & public_types:
+        return True, None
+    # Prefer a provenance reason when every implicated type confidently
+    # originates from a private/system header; fall back to reachability.
+    type_reasons = {_origin_reason(surf_old, surf_new, c) for c in known}
+    if None not in type_reasons and type_reasons:
+        return False, (
+            REASON_PRIVATE_HEADER
+            if REASON_PRIVATE_HEADER in type_reasons
+            else REASON_SYSTEM_HEADER
+        )
+    return False, REASON_NON_PUBLIC_TYPE

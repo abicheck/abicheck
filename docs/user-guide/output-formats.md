@@ -55,6 +55,90 @@ and source sections include their own redundant counts.
 receives them, so derived changes do not appear as test cases. No
 JUnit-specific redundancy metadata is emitted.
 
+## Public-header surface scoping
+
+Public-header surface scoping (ADR-024) restricts findings to the *public* ABI
+surface — the symbols exported **and** declared in the public headers you
+supplied, plus the types reachable from them. Changes that fall outside that
+surface (e.g. a layout change to an internal struct no public API references)
+are **not dropped**: they are moved to an audit ledger so the "why was this
+excluded" trail stays inspectable. Internal-type leaks are never filtered.
+
+Scoping is **on by default** (ADR-024 Phase 5). When no public-header surface
+can be resolved — e.g. comparing two stripped `.so` files with no header or
+DWARF provenance — scoping is automatically a no-op and every finding is
+reported, so the default never hides anything it cannot place. Pass
+`--no-scope-public-headers` to force the unscoped report (every finding,
+regardless of surface).
+
+Use `--show-filtered` to print the ledger on the terminal.
+
+### Widening the surface (`--public-symbol`)
+
+Some symbols you *do* guarantee as public can't be seen by header provenance —
+hand-written asm stubs, `.def` exports, `extern "C"` shims, or symbols whose
+MSVC mangling castxml can't match. The **widening overlay** (ADR-024 §D6) forces
+such symbols back into the public surface so their changes are reported rather
+than demoted:
+
+```bash
+# Force individual symbols (repeatable), à la abi-compliance-checker -symbols-list
+abicheck compare old.so new.so --scope-public-headers \
+    --public-symbol my_asm_stub --public-symbol _ZN3foo3barEv
+
+# Or from a file (one symbol per line; '#' comments and blank lines ignored)
+abicheck compare old.so new.so --scope-public-headers \
+    --public-symbols-list public.syms
+```
+
+Matching is on the symbol as recorded on the finding (mangled or demangled),
+plus the trailing `::` segment of a qualified name. Widening only ever *keeps* a
+finding — it can never hide a break — and only takes effect together with
+`--scope-public-headers`. It is the counterpart to suppression, which *narrows*
+the surface; the two remain separate, auditable inputs.
+
+### How it appears in each format
+
+Each demoted finding carries a `reason` code explaining why it was excluded:
+
+- `not-exported` — the symbol is known but not in the public export set.
+- `non-public-type` — the type is reachable from no public API root.
+- `private-header` — the declaration originates in a project header outside
+  the public-header set.
+- `system-header` — the declaration originates in a toolchain/system header
+  (`/usr/include`, MSVC, Xcode SDK, …).
+
+The `private-header` / `system-header` reasons are provenance-derived: they
+only appear when the snapshots were produced with `--public-header` /
+`--public-header-dir` (ADR-015 schema v6). Without a public-header set, every
+declaration's origin is `unknown` and only the linkage/reachability reasons
+above are emitted.
+
+**Text**: With `--show-filtered`, an audit block on stderr (the reason is shown
+in parentheses):
+```text
+Filtered as non-public ABI surface (1 finding, --scope-public-headers):
+  - type_size_changed: InternalCache (non-public-type)
+```
+
+**JSON**: A top-level `surface_scope` object (present only when scoping is
+active):
+```json
+"surface_scope": {
+  "enabled": true,
+  "out_of_surface_count": 1,
+  "out_of_surface_changes": [
+    {"kind": "type_size_changed", "symbol": "InternalCache",
+     "description": "Size changed: InternalCache (64 → 128 bits)",
+     "source_location": null, "reason": "non-public-type"}
+  ]
+}
+```
+
+**SARIF**: A `surfaceScope` object in run-level `properties` with
+`outOfSurfaceCount` and `outOfSurfaceChanges` (same per-finding fields,
+camelCased; `reason` included when known), present only when scoping is active.
+
 ## `--show-only` filter
 
 Limit displayed changes by severity, element, or action (AND across dimensions,

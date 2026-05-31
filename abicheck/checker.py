@@ -177,7 +177,8 @@ def compare(
     *,
     policy: str = "strict_abi",
     policy_file: PolicyFile | None = None,
-    scope_to_public_surface: bool = False,
+    scope_to_public_surface: bool = True,
+    force_public_symbols: set[str] | None = None,
 ) -> DiffResult:
     """Diff two AbiSnapshots and return a DiffResult with verdict.
 
@@ -214,6 +215,7 @@ def compare(
     pp_ctx = DEFAULT_PIPELINE.run(
         changes, old, new, suppression=suppression, frozen_namespaces=frozen_ns,
         scope_to_public_surface=scope_to_public_surface,
+        force_public_symbols=force_public_symbols,
     )
     kept = pp_ctx.kept
     redundant = pp_ctx.redundant

@@ -402,6 +402,7 @@ class _CastxmlParser:
             variables.append(Variable(
                 name=name, mangled=mangled, type=type_name, visibility=vis,
                 is_const=is_const,
+                source_location=self._source_location(el),
             ))
         return variables
 
@@ -480,7 +481,29 @@ class _CastxmlParser:
             vtable=[] if is_opaque else self._build_vtable(el.get("id", "")),
             is_union=el.tag == "Union",
             is_opaque=is_opaque,
+            source_location=self._source_location(el),
         )
+
+    def _source_location(self, el: Any) -> str | None:
+        """Resolve a declaration's ``file:line`` source location.
+
+        Mirrors the function-parsing path: castxml emits the location either
+        directly as ``file``/``line`` attributes or as a ``location`` id
+        referencing a ``Location`` element. Returns ``None`` when neither is
+        present. Used to populate provenance (``source_header``/``origin``)
+        on records, variables, and enums (ADR-015 v6).
+        """
+        file_id = el.get("file", "")
+        line = el.get("line", "")
+        if not (file_id and line):
+            loc_id = el.get("location", "")
+            loc_el = self._id_map.get(loc_id) if loc_id else None
+            if loc_el is not None:
+                file_id = loc_el.get("file", "")
+                line = loc_el.get("line", "")
+        file_el = self._id_map.get(file_id) if file_id else None
+        fname = file_el.get("name", "") if file_el is not None else ""
+        return f"{fname}:{line}" if fname and line else None
 
     def _optional_int_attr(self, el: Any, attr: str) -> int | None:
         raw = el.get(attr)
@@ -657,7 +680,10 @@ class _CastxmlParser:
                     except ValueError:
                         m_val = 0
                     members.append(EnumMember(name=m_name, value=m_val))
-            enums.append(EnumType(name=name, members=members))
+            enums.append(EnumType(
+                name=name, members=members,
+                source_location=self._source_location(el),
+            ))
         return enums
 
     def _underlying_type_name(self, id_: str, depth: int = 0) -> str:

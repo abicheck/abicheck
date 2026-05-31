@@ -26,6 +26,10 @@ jobs:
           pip install mypy
       - name: AI-readiness checks (file size, CLAUDE.md coverage, ChangeKind invariants, mypy drift, import cycles)
         run: python scripts/check_ai_readiness.py
+      - name: Install package (for FP-rate gate)
+        run: pip install -e .
+      - name: Scoping FP-rate gate (ADR-024 §7 — false positives/negatives vs baseline)
+        run: python scripts/check_fp_rate.py
 
   lint-and-types:
     runs-on: ubuntu-latest

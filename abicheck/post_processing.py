@@ -47,6 +47,12 @@ class PipelineContext:
     # ADR-024 §D4: when True, FilterNonPublicSurface moves findings that are
     # not on the public-header-scoped ABI surface to ``out_of_surface``.
     scope_to_public_surface: bool = False
+    # ADR-024 §D6 widening overlay: symbol names (mangled or demangled) the
+    # user *guarantees* are public even when header provenance can't see them
+    # (asm stubs, .def exports, extern "C" shims, MSVC-mangling gaps). Matching
+    # findings are forced to stay in-surface under scoping. Widening only ever
+    # *keeps* a finding, so it cannot hide a break.
+    force_public_symbols: set[str] = field(default_factory=set)
     # Accumulated side-outputs
     opaque_filtered: list[Change] = field(default_factory=list)
     suppressed: list[Change] = field(default_factory=list)
@@ -202,6 +208,21 @@ class EnrichSourceLocations:
         return changes
 
 
+def _change_matches_symbols(change: Change, symbols: set[str]) -> bool:
+    """True if *change*'s symbol matches the widening allowlist.
+
+    Matches the raw symbol (mangled or demangled, as recorded on the change)
+    and — for qualified names — the trailing ``::`` segment, so an entry like
+    ``foo`` matches ``ns::foo`` as well as the exact spelling.
+    """
+    sym = change.symbol or ""
+    if not sym:
+        return False
+    if sym in symbols:
+        return True
+    return "::" in sym and sym.rsplit("::", 1)[1] in symbols
+
+
 class FilterNonPublicSurface:
     """Move findings outside the public-header surface to an audit ledger.
 
@@ -218,18 +239,27 @@ class FilterNonPublicSurface:
     def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:
         if not ctx.scope_to_public_surface:
             return changes
-        from .surface import change_in_public_surface, compute_public_surface
+        from .surface import classify_change_surface, compute_public_surface
 
         surf_old = compute_public_surface(ctx.old)
         surf_new = compute_public_surface(ctx.new)
         if not (surf_old.resolvable or surf_new.resolvable):
             # No header-derived surface to scope against — keep everything.
             return changes
+        force_public = ctx.force_public_symbols
         kept: list[Change] = []
         for c in changes:
-            if change_in_public_surface(c, surf_old, surf_new):
+            # Widening overlay (ADR-024 §D6): a user-guaranteed public symbol
+            # stays in-surface regardless of provenance/export classification.
+            if force_public and _change_matches_symbols(c, force_public):
+                kept.append(c)
+                continue
+            in_surface, reason = classify_change_surface(c, surf_old, surf_new)
+            if in_surface:
                 kept.append(c)
             else:
+                # Tag with the ledger reason (ADR-024 §D5.1) before demoting.
+                c.surface_exclusion_reason = reason
                 ctx.out_of_surface.append(c)
         return kept
 
@@ -718,6 +748,7 @@ class PostProcessingPipeline:
         suppression: SuppressionList | None = None,
         frozen_namespaces: list[str] | None = None,
         scope_to_public_surface: bool = False,
+        force_public_symbols: set[str] | None = None,
     ) -> PipelineContext:
         """Run all steps, returning the final PipelineContext."""
         ctx = PipelineContext(
@@ -726,6 +757,7 @@ class PostProcessingPipeline:
             suppression=suppression,
             frozen_namespaces=list(frozen_namespaces or []),
             scope_to_public_surface=scope_to_public_surface,
+            force_public_symbols=set(force_public_symbols or set()),
         )
         for step in self.steps:
             changes = step.run(changes, ctx)

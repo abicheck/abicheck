@@ -126,6 +126,13 @@ hard `--headers-dir` drop: we keep auditability.
    the full list) of entities **included** vs **excluded/demoted**, each with a reason:
    `private-header`, `system-header`, `not-exported`, `suppressed-by-user`,
    `mangling-fallback`, `no-provenance`. Available in text, JSON, and SARIF.
+   *Shipped (partial):* the ledger is disclosed in text/JSON/SARIF, and the
+   reasons the pre-provenance resolver can determine with confidence —
+   `not-exported` (symbol not in the export set) and `non-public-type` (type
+   reachable by no public root) — are tagged per finding. The
+   provenance-dependent reasons (`private-header`, `system-header`,
+   `mangling-fallback`, `no-provenance`) await Phase 1; `suppressed-by-user`
+   lives in the separate suppression ledger.
 2. **Leak guard always wins.** If a `PRIVATE_HEADER`-origin type is reachable from a
    `PUBLIC_HEADER`+exported root, emit `INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API` (extend
    `internal_leak.py`) **regardless of scoping mode**. Scoping must never suppress a leak.
@@ -215,11 +222,11 @@ The feature is only credible if we can prove it neither over- nor under-filters.
 | Phase | Scope |
 |-------|-------|
 | **0** | PE/Mach-O header plumbing + directory expansion + fallback warnings — **done (PR #259)** |
-| **1** | Provenance capture: source-header tagging in castxml/DWARF/PDB parsers; model + serialization fields (schema bump) — *future (see note)* |
-| **2** | Header-scope resolution + surface ledger + `--scope-public-headers`/`--show-filtered` (opt-in, default off) — **done** |
+| **1** | Provenance capture: source-header tagging in castxml/DWARF/PDB parsers; model + serialization fields (schema bump) — **done** (`source_header` + 6-way `ScopeOrigin` on functions/variables/types/enums; schema v6; castxml + DWARF populate locations; PDB pending) |
+| **2** | Header-scope resolution + surface ledger + `--scope-public-headers`/`--show-filtered` (opt-in, default off) — **done** (ledger now also disclosed in JSON `surface_scope` / SARIF `surfaceScope`, not just stderr text; provenance-driven `private-header`/`system-header` reasons now wired) |
 | **3** | Reachability closure + leak-guard integration (extend `internal_leak.py`) — **done (closure shipped; leak exemption wired)** |
-| **4** | User-control overlay: widening public allowlist; integrate suppression as the narrowing layer; precedence + anti-hiding guard |
-| **5** | Parity + FP-rate gates; flip default to `header-scoped` once validated |
+| **4** | User-control overlay: widening public allowlist; integrate suppression as the narrowing layer; precedence + anti-hiding guard — **done** (widening via `--public-symbol`/`--public-symbols-list`; suppression remains the narrowing layer; widening only ever *keeps*, never hides) |
+| **5** | Parity + FP-rate gates; flip default to `header-scoped` once validated — **done**: property-based monotonicity/subset/idempotence/anti-hiding/widening tests (`tests/test_surface_property.py`), libabigail scoping-parity lane (`tests/test_surface_scope_parity.py`), FP-rate gate (`scripts/check_fp_rate.py`, wired into CI + fast pytest), and the default flipped to header-scoped (`--no-scope-public-headers` opts out; a no-op when no public surface resolves) |
 
 ### Implementation note (Phase 2/3 as shipped)
 
@@ -233,14 +240,23 @@ captures, avoiding the schema churn of full Phase 1 provenance:
 * **Public types** = the transitive reachability closure over those roots'
   return/parameter/field/base/typedef types (`abicheck/surface.py`).
 * Findings outside the surface are moved to an audit ledger
-  (`DiffResult.out_of_surface_changes`, surfaced by `--show-filtered`),
-  never dropped; internal-leak kinds are exempt.
+  (`DiffResult.out_of_surface_changes`, surfaced by `--show-filtered` on the
+  terminal and by the `surface_scope` (JSON) / `surfaceScope` (SARIF)
+  objects in machine-readable output), never dropped; internal-leak kinds
+  are exempt. Disclosing the ledger in the machine-readable formats — not
+  just stderr — is what makes the "demote + disclose" promise (D4/D5)
+  auditable in CI, the key difference from libabigail's hard `--headers-dir`
+  drop. Each demoted finding is tagged with a `reason` code — `not-exported`
+  or `non-public-type`, the two the pre-provenance resolver can determine
+  confidently (`classify_change_surface` in `abicheck/surface.py`).
 
 This is wired as the opt-in `FilterNonPublicSurface` post-processing step
 (`compare(..., scope_to_public_surface=True)` /
 `abicheck compare --scope-public-headers`). Example cases
 `case118`–`case120` exercise it end-to-end; `tests/test_surface.py` covers
-the resolver, classifier, and anti-hiding guarantees.
+the resolver, classifier, anti-hiding guarantees, and the JSON/SARIF ledger,
+and `tests/test_surface_property.py` adds the property-based monotonicity /
+subset / order-independence guarantees from the validation strategy (§3).
 
 The remaining Phase 1 work — recording *which* header each declaration came
 from, so the surface can distinguish "private header transitively included"

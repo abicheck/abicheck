@@ -343,8 +343,11 @@ def _dump_and_compare(
     compare_cmd = [
         sys.executable, "-m", "abicheck.cli", "compare", str(snap1), str(snap2), "--format", "json",
     ]
-    if scope_public_headers:
-        compare_cmd.append("--scope-public-headers")
+    # Scoping is on by default since ADR-024 Phase 5; ground_truth.json verdicts
+    # are authored unscoped unless the case opts in, so be explicit either way.
+    compare_cmd.append(
+        "--scope-public-headers" if scope_public_headers else "--no-scope-public-headers"
+    )
     rc = subprocess.run(
         compare_cmd,
         capture_output=True, text=True, timeout=60,

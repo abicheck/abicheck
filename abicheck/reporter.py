@@ -420,6 +420,33 @@ def _to_markdown_leaf(
     return "\n".join(lines)
 
 
+def _add_surface_scope(d: dict[str, object], result: DiffResult) -> None:
+    """Attach the ADR-024 §D4/D5 public-surface scope ledger to a JSON dict.
+
+    When header scoping is active, findings that fall outside the public ABI
+    surface are demoted to this audit ledger rather than dropped — disclosed
+    here (not just on stderr) so the "why was this excluded" trail is
+    machine-readable. Shared by the full and leaf JSON paths so both formats
+    carry the ledger consistently.
+    """
+    if not result.scope_to_public_surface:
+        return
+    d["surface_scope"] = {
+        "enabled": True,
+        "out_of_surface_count": result.out_of_surface_count,
+        "out_of_surface_changes": [
+            {
+                "kind": c.kind.value,
+                "symbol": c.symbol,
+                "description": c.description,
+                "source_location": c.source_location,
+                "reason": getattr(c, "surface_exclusion_reason", None),
+            }
+            for c in result.out_of_surface_changes
+        ],
+    }
+
+
 def _to_json_leaf(
     result: DiffResult,
     indent: int = 2,
@@ -495,6 +522,7 @@ def _to_json_leaf(
     d["evidence_tiers"] = list(result.evidence_tiers)
     if result.coverage_warnings:
         d["coverage_warnings"] = list(result.coverage_warnings)
+    _add_surface_scope(d, result)
     return json.dumps(d, indent=indent)
 
 
@@ -591,6 +619,7 @@ def to_json(
             for c in result.suppressed_changes
         ],
     }
+    _add_surface_scope(d, result)
     d["detectors"] = [
         {
             "name": det.name,

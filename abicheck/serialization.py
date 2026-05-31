@@ -34,6 +34,7 @@ from .model import (
     Param,
     ParamKind,
     RecordType,
+    ScopeOrigin,
     TypeField,
     Variable,
     Visibility,
@@ -46,7 +47,8 @@ from .model import (
 # v3: pe/macho metadata fields added (multi-format support)
 # v4: provenance metadata (git_commit, git_tag, created_at, build_id)
 # v5: build_mode capture (compiler/stdlib/std normalization)
-SCHEMA_VERSION: int = 5
+# v6: declaration provenance (source_header + origin on functions/variables/types/enums; ADR-015)
+SCHEMA_VERSION: int = 6
 
 
 def _sets_to_lists(obj: Any) -> Any:
@@ -117,11 +119,25 @@ def snapshot_to_dict(snap: AbiSnapshot) -> dict[str, Any]:
     return converted
 
 
+def _scope_origin_or_unknown(raw: Any) -> ScopeOrigin:
+    """Deserialize a ScopeOrigin, defaulting unknown/invalid values to UNKNOWN.
+
+    A hand-edited or newer-schema snapshot may carry an origin string this
+    build does not recognize; that must not abort the whole load."""
+    try:
+        return ScopeOrigin(raw if raw is not None else "unknown")
+    except ValueError:
+        return ScopeOrigin.UNKNOWN
+
+
 def _enum_type_from_dict(e: dict[str, Any]) -> EnumType:
     return EnumType(
         name=e["name"],
         members=[EnumMember(name=m["name"], value=m["value"]) for m in e.get("members", [])],
         underlying_type=e.get("underlying_type", "int"),
+        source_location=e.get("source_location"),
+        source_header=e.get("source_header"),
+        origin=_scope_origin_or_unknown(e.get("origin")),
     )
 
 
@@ -360,6 +376,9 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
             # an older snapshot loads as None and suppresses the
             # HIDDEN_FRIEND_ADDED/_REMOVED transition detector.
             is_hidden_friend=f.get("is_hidden_friend"),
+            # Provenance (v6) — missing on older snapshots → None / UNKNOWN.
+            source_header=f.get("source_header"),
+            origin=_scope_origin_or_unknown(f.get("origin")),
         )
         for f in d.get("functions", [])
     ]
@@ -372,6 +391,8 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
             value=v.get("value"),
             access=AccessLevel(v.get("access", "public")),
             elf_visibility=ElfVisibility(v["elf_visibility"]) if v.get("elf_visibility") else None,
+            source_header=v.get("source_header"),
+            origin=_scope_origin_or_unknown(v.get("origin")),
         )
         for v in d.get("variables", [])
     ]
@@ -399,6 +420,8 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
             source_location=t.get("source_location"),
             is_union=t.get("is_union", t.get("kind") == "union"),
             is_opaque=t.get("is_opaque", False),
+            source_header=t.get("source_header"),
+            origin=_scope_origin_or_unknown(t.get("origin")),
         )
         for t in d.get("types", [])
     ]

@@ -415,6 +415,16 @@ def _populate_dependency_info(
               help="Public header file or directory (repeat for multiple).")
 @click.option("-I", "--include", "includes", multiple=True, type=click.Path(path_type=Path),
               help="Extra include directory for castxml.")
+# ── Declaration provenance (ADR-015) ─────────────────────────────────────────
+@click.option("--public-header", "public_headers", multiple=True,
+              type=click.Path(exists=True, dir_okay=False, path_type=Path),
+              help="Header treated as public for provenance classification (repeat for "
+                   "multiple). Declarations are tagged public/private/system in the snapshot. "
+                   "Opt-in: omitting this leaves every origin UNKNOWN.")
+@click.option("--public-header-dir", "public_header_dirs", multiple=True,
+              type=click.Path(exists=True, file_okay=False, path_type=Path),
+              help="Directory whose headers are treated as public for provenance "
+                   "classification (repeat for multiple).")
 @click.option("--version", "version", default="unknown", show_default=True,
               help="Library version string to embed in snapshot.")
 @click.option("--lang", default="c++", show_default=True,
@@ -487,6 +497,7 @@ def _populate_dependency_info(
 @click.option("--no-git", "no_git", is_flag=True, default=False,
               help="Do not auto-detect git commit SHA.")
 def dump_cmd(so_path: Path, headers: tuple[Path, ...], includes: tuple[Path, ...],
+             public_headers: tuple[Path, ...], public_header_dirs: tuple[Path, ...],
              version: str, lang: str, output: Path | None,
              gcc_path: str | None, gcc_prefix: str | None, gcc_options: str | None,
              sysroot: Path | None, nostdinc: bool, pdb_path: Path | None,
@@ -534,6 +545,11 @@ def dump_cmd(so_path: Path, headers: tuple[Path, ...], includes: tuple[Path, ...
             f"--{debug_format} is only supported for ELF binaries, not {binary_fmt.upper()}."
         )
     if binary_fmt in ("pe", "macho"):
+        if public_headers or public_header_dirs:
+            raise click.BadParameter(
+                "--public-header / --public-header-dir provenance classification is "
+                f"currently only supported for ELF inputs, not {binary_fmt.upper()}."
+            )
         _handle_non_elf_dump(
             so_path,
             binary_fmt,
@@ -580,6 +596,8 @@ def dump_cmd(so_path: Path, headers: tuple[Path, ...], includes: tuple[Path, ...
             lang=lang if lang == "c" else None,
             dwarf_only=dwarf_only,
             debug_format=debug_format,
+            public_headers=list(public_headers),
+            public_header_dirs=list(public_header_dirs),
         )
     except (AbicheckError, RuntimeError, OSError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
@@ -804,6 +822,24 @@ def _load_suppression_and_policy(
     return suppression, pf
 
 
+def _collect_force_public_symbols(
+    public_symbols: tuple[str, ...], symbols_list: Path | None,
+) -> set[str]:
+    """Merge --public-symbol values with a --public-symbols-list file.
+
+    The list file is one symbol per line; blank lines and ``#`` comments are
+    ignored (à la abi-compliance-checker -symbols-list). Inline trailing
+    comments are not stripped — a ``#`` must start the line to be a comment.
+    """
+    out: set[str] = {s.strip() for s in public_symbols if s.strip()}
+    if symbols_list is not None:
+        for raw in symbols_list.read_text(encoding="utf-8").splitlines():
+            line = raw.strip()
+            if line and not line.startswith("#"):
+                out.add(line)
+    return out
+
+
 def _validate_show_only(
     ctx: click.Context, param: click.Parameter, value: str | None,
 ) -> str | None:
@@ -1024,7 +1060,8 @@ def _echo_filtered_surface(result: DiffResult) -> None:
     )
     for c in result.out_of_surface_changes:
         loc = f" [{c.source_location}]" if c.source_location else ""
-        click.echo(f"  - {c.kind.value}: {c.symbol}{loc}", err=True)
+        reason = f" ({c.surface_exclusion_reason})" if c.surface_exclusion_reason else ""
+        click.echo(f"  - {c.kind.value}: {c.symbol}{loc}{reason}", err=True)
 
 
 def _warn_all_suppressed(result: DiffResult) -> None:
@@ -1307,13 +1344,25 @@ def _finalize_compare_result(
 @click.option("--show-redundant", is_flag=True, default=False,
               help="Disable redundancy filtering and show all changes including those "
                    "derived from root type changes.")
-@click.option("--scope-public-headers", "scope_public_headers", is_flag=True, default=False,
+@click.option("--scope-public-headers/--no-scope-public-headers", "scope_public_headers",
+              default=True, show_default=True,
               help="Restrict findings to the public-header ABI surface (ADR-024): "
                    "changes to symbols/types not reachable from public-header-declared "
                    "exported API are recorded as filtered, not reported. Internal-type "
-                   "leaks are never hidden.")
+                   "leaks are never hidden. On by default; use --no-scope-public-headers "
+                   "to report every finding regardless of surface.")
 @click.option("--show-filtered", "show_filtered", is_flag=True, default=False,
               help="List findings excluded by --scope-public-headers (audit trail).")
+@click.option("--public-symbol", "public_symbols", multiple=True,
+              help="Widening overlay (ADR-024 §D6): force a symbol (mangled or demangled "
+                   "name) into the public surface even when header provenance can't see it "
+                   "(asm stubs, .def exports, extern \"C\" shims, MSVC-mangling gaps). "
+                   "Repeatable. Only meaningful with --scope-public-headers.")
+@click.option("--public-symbols-list", "public_symbols_list",
+              type=click.Path(exists=True, dir_okay=False, path_type=Path), default=None,
+              help="File of symbols to force public (one per line; '#' comments and blank "
+                   "lines ignored), à la abi-compliance-checker -symbols-list. "
+                   "Merged with --public-symbol.")
 @click.option("--show-only", "show_only", default=None,
               callback=_validate_show_only, expose_value=True, is_eager=False,
               help="Comma-separated filter tokens to limit displayed changes. "
@@ -1380,6 +1429,7 @@ def compare_cmd(
     follow_deps: bool, search_paths: tuple[Path, ...], ld_library_path: str,
     show_redundant: bool, show_only: str | None, stat: bool,
     scope_public_headers: bool, show_filtered: bool,
+    public_symbols: tuple[str, ...], public_symbols_list: Path | None,
     report_mode: str, show_impact: bool,
     recommend: bool,
     debug_format: str | None,
@@ -1487,9 +1537,18 @@ def compare_cmd(
         require_justification=require_justification,
     )
 
+    force_public = _collect_force_public_symbols(public_symbols, public_symbols_list)
+    if force_public and not scope_public_headers:
+        click.echo(
+            "Warning: --public-symbol/--public-symbols-list only take effect with "
+            "--scope-public-headers; ignoring the widening overlay.",
+            err=True,
+        )
+
     result = compare(
         old, new, suppression=suppression, policy=policy, policy_file=pf,
         scope_to_public_surface=scope_public_headers,
+        force_public_symbols=force_public,
     )
 
     _finalize_compare_result(

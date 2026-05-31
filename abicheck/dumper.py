@@ -580,6 +580,8 @@ def dump(
     lang: str | None = None,
     dwarf_only: bool = False,
     debug_format: str | None = None,
+    public_headers: list[Path] | None = None,
+    public_header_dirs: list[Path] | None = None,
 ) -> AbiSnapshot:
     """Create an AbiSnapshot from a shared library + headers.
 
@@ -604,6 +606,11 @@ def dump(
         debug_format: Force debug format for ELF inputs: "dwarf", "btf", or "ctf".
             None = auto-detect (DWARF preferred for userspace, BTF for kernel).
             Ignored for Mach-O and PE binaries.
+        public_headers: Explicit public-header files used only to classify
+            declaration provenance (ADR-015). When empty, every declaration's
+            origin stays UNKNOWN and behaviour is unchanged.
+        public_header_dirs: Directories whose headers are treated as public
+            for provenance classification.
 
     Returns:
         AbiSnapshot with functions, variables, and types populated.
@@ -611,33 +618,38 @@ def dump(
     fmt = _detect_format(so_path)
 
     if fmt == "macho":
-        return _dump_macho(
+        snapshot = _dump_macho(
             so_path, headers, extra_includes or [], version, compiler,
             gcc_path=gcc_path, gcc_prefix=gcc_prefix, gcc_options=gcc_options,
             sysroot=sysroot, nostdinc=nostdinc, lang=lang,
             dwarf_only=dwarf_only,
         )
-    if fmt == "pe":
-        return _dump_pe(
+    elif fmt == "pe":
+        snapshot = _dump_pe(
             so_path, headers, extra_includes or [], version, compiler,
             gcc_path=gcc_path, gcc_prefix=gcc_prefix, gcc_options=gcc_options,
             sysroot=sysroot, nostdinc=nostdinc, lang=lang,
         )
-
-    if fmt != "elf":
+    elif fmt == "elf":
+        snapshot = _dump_elf(
+            so_path, headers, extra_includes or [], version, compiler,
+            gcc_path=gcc_path, gcc_prefix=gcc_prefix, gcc_options=gcc_options,
+            sysroot=sysroot, nostdinc=nostdinc, lang=lang,
+            dwarf_only=dwarf_only,
+            debug_format=debug_format,
+        )
+    else:
         raise ValidationError(
             f"Unrecognised binary format for {so_path}: "
             f"expected ELF, Mach-O, or PE but detected {fmt!r}. "
             f"Ensure the file is a valid shared library."
         )
 
-    return _dump_elf(
-        so_path, headers, extra_includes or [], version, compiler,
-        gcc_path=gcc_path, gcc_prefix=gcc_prefix, gcc_options=gcc_options,
-        sysroot=sysroot, nostdinc=nostdinc, lang=lang,
-        dwarf_only=dwarf_only,
-        debug_format=debug_format,
-    )
+    # Tag declaration provenance (source_header + origin). Always derives
+    # source_header from the parsed source location; origin is only
+    # classified when a public-header set is supplied (ADR-015, D4).
+    from .provenance import apply_provenance
+    return apply_provenance(snapshot, public_headers, public_header_dirs)
 
 
 def _is_kernel_binary(path: Path) -> bool:

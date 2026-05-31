@@ -207,7 +207,9 @@ class TestXmlCrossToolParity:
             warnings.simplefilter("ignore")
             old_snap = dump(v1_so, headers=[h1], version="1.0", compiler="cc")
             new_snap = dump(v2_so, headers=[h2], version="2.0", compiler="cc")
-        result = compare(old_snap, new_snap)
+        # Parity expectations predate default scoping (ADR-024 Phase 5); compare
+        # unscoped to keep the established XML/abicc verdicts apples-to-apples.
+        result = compare(old_snap, new_snap, scope_to_public_surface=False)
         abicheck_xml_str = generate_xml_report(
             result, lib_name="libtest",
             old_version="1.0", new_version="2.0",
@@ -275,7 +277,7 @@ class TestXmlCrossToolParity:
             warnings.simplefilter("ignore")
             old_snap = dump(v1_so, headers=[h], version="1.0", compiler="cc")
             new_snap = dump(v2_so, headers=[h], version="1.0", compiler="cc")
-        result = compare(old_snap, new_snap)
+        result = compare(old_snap, new_snap, scope_to_public_surface=False)
         xml_str = generate_xml_report(
             result, lib_name="libtest",
             old_version="1.0", new_version="1.0",

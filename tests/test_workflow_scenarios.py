@@ -153,11 +153,14 @@ def test_enum_rename_recommendation_follows_policy() -> None:
     old = _lib("1.0", ["use_mode"], enums=[_enum("MODE_B")])
     new = _lib("2.0", ["use_mode"], enums=[_enum("MODE_RENAMED")])
 
-    strict = compare(old, new, policy="strict_abi")
+    # Mode isn't referenced by a public function in this synthetic fixture, so
+    # opt out of default public-header scoping (ADR-024 Phase 5) to exercise the
+    # policy-aware recommender on the enum rename itself.
+    strict = compare(old, new, policy="strict_abi", scope_to_public_surface=False)
     assert strict.verdict is Verdict.API_BREAK
     assert recommend_release(strict).bump is SemverBump.MAJOR
 
-    vendor = compare(old, new, policy="sdk_vendor")
+    vendor = compare(old, new, policy="sdk_vendor", scope_to_public_surface=False)
     assert vendor.verdict is Verdict.COMPATIBLE
     rec = recommend_release(vendor)
     assert rec.bump is not SemverBump.MAJOR

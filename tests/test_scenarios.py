@@ -206,10 +206,13 @@ def test_sc_exit_contract(tmp_path: Path) -> None:
         members=[EnumMember("A", 0), EnumMember("RENAMED", 1)],
         underlying_type="int",
     )
+    # Mode isn't referenced by any public function here, so opt out of the
+    # default public-header scoping (ADR-024 Phase 5) to exercise the contract.
     api = _compare(
         tmp_path,
         _lib("1", [_fn("use")], enums=[e1]),
         _lib("2", [_fn("use")], enums=[e2]),
+        "--no-scope-public-headers",
     )
     assert api.exit_code == 2
     # BREAKING -> 4 (removed symbol)
@@ -237,7 +240,8 @@ def test_sc_public_surface_scope(tmp_path: Path) -> None:
     )
 
     # Without scoping the private break is a compliance error (issue #235).
-    assert _compare(tmp_path, old, new).exit_code == 4
+    # Scoping is on by default since ADR-024 Phase 5, so opt out explicitly here.
+    assert _compare(tmp_path, old, new, "--no-scope-public-headers").exit_code == 4
     # With public-header scoping it must NOT raise compliance errors: the only
     # change was to a private type, so the verdict is NO_CHANGE (exit 0). Assert
     # the verdict cell, not the word "BREAKING" (which also appears in the
@@ -360,8 +364,10 @@ def test_sc_policy_profile(tmp_path: Path) -> None:
     )
     old = _lib("1", [_fn("use")], enums=[e1])
     new = _lib("2", [_fn("use")], enums=[e2])
-    assert _compare(tmp_path, old, new).exit_code == 2  # strict_abi: API break
-    assert _compare(tmp_path, old, new, "--policy", "sdk_vendor").exit_code == 0
+    # Mode isn't referenced by a public function, so opt out of default
+    # public-header scoping (ADR-024 Phase 5) to exercise the policy contrast.
+    assert _compare(tmp_path, old, new, "--no-scope-public-headers").exit_code == 2  # strict_abi: API break
+    assert _compare(tmp_path, old, new, "--no-scope-public-headers", "--policy", "sdk_vendor").exit_code == 0
 
 
 def test_sc_scan_junit(tmp_path: Path) -> None:

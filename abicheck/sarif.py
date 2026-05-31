@@ -221,6 +221,29 @@ def to_sarif(
                     **({"coverageWarnings": list(result.coverage_warnings)} if result.coverage_warnings else {}),
                     "policy": result.policy or "strict_abi",
                     **({"policyOverrides": {k.value: v.value for k, v in result.policy_file.overrides.items()}} if result.policy_file and result.policy_file.overrides else {}),
+                    # ADR-024 §D4/D5: header-scope ledger. Out-of-surface
+                    # findings are disclosed here for auditability (never
+                    # silently dropped) when --scope-public-headers is active.
+                    **(
+                        {
+                            "surfaceScope": {
+                                "enabled": True,
+                                "outOfSurfaceCount": result.out_of_surface_count,
+                                "outOfSurfaceChanges": [
+                                    {
+                                        "kind": c.kind.value,
+                                        "symbol": c.symbol,
+                                        "description": c.description,
+                                        **({"sourceLocation": c.source_location} if c.source_location else {}),
+                                        **({"reason": c.surface_exclusion_reason} if c.surface_exclusion_reason else {}),
+                                    }
+                                    for c in result.out_of_surface_changes
+                                ],
+                            }
+                        }
+                        if result.scope_to_public_surface
+                        else {}
+                    ),
                 },
             }
         ],
