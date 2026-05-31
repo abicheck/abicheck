@@ -1061,8 +1061,8 @@ def _print_summary_and_exit(
 @click.option("--strict-mode", "strict_mode",
               type=click.Choice(["full", "api"], case_sensitive=False),
               default="full",
-              help="Strict promotion mode: 'full' (COMPATIBLE+API_BREAK→BREAKING, ABICC parity) "
-                   "or 'api' (only API_BREAK→BREAKING, COMPATIBLE stays COMPATIBLE). "
+              help="Strict promotion mode: 'full' (COMPATIBLE+API_BREAK->BREAKING, ABICC parity) "
+                   "or 'api' (only API_BREAK->BREAKING, COMPATIBLE stays COMPATIBLE). "
                    "Only applies when -strict is also set.")
 @click.option("-show-retval", "show_retval", is_flag=True, default=False,
               help="Show return-value changes in report.")
@@ -1255,12 +1255,12 @@ def compat_check_cmd(  # noqa: PLR0913
 
     \b
     Exit codes mirror ABICC:
-      0 — compatible or no change (NO_CHANGE, COMPATIBLE, COMPATIBLE_WITH_RISK)
-          COMPATIBLE_WITH_RISK exits 0 — binary-compatible; risk is surfaced in report only.
+      0 - compatible or no change (NO_CHANGE, COMPATIBLE, COMPATIBLE_WITH_RISK)
+          COMPATIBLE_WITH_RISK exits 0 - binary-compatible; risk is surfaced in report only.
           With -strict, it is promoted to exit 1.
-      1 — breaking ABI change detected (BREAKING)
-      2 — source-level break (API_BREAK)
-      3-11 — classified compat-mode errors (best-effort mapping)
+      1 - breaking ABI change detected (BREAKING)
+      2 - source-level break (API_BREAK)
+      3-11 - classified compat-mode errors (best-effort mapping)
 
     Note: with -strict, API_BREAK is also promoted to exit 1.
 
