@@ -57,12 +57,19 @@ JUnit-specific redundancy metadata is emitted.
 
 ## Public-header surface scoping
 
-`--scope-public-headers` (ADR-024) restricts findings to the *public* ABI
+Public-header surface scoping (ADR-024) restricts findings to the *public* ABI
 surface — the symbols exported **and** declared in the public headers you
 supplied, plus the types reachable from them. Changes that fall outside that
 surface (e.g. a layout change to an internal struct no public API references)
 are **not dropped**: they are moved to an audit ledger so the "why was this
 excluded" trail stays inspectable. Internal-type leaks are never filtered.
+
+Scoping is **on by default** (ADR-024 Phase 5). When no public-header surface
+can be resolved — e.g. comparing two stripped `.so` files with no header or
+DWARF provenance — scoping is automatically a no-op and every finding is
+reported, so the default never hides anything it cannot place. Pass
+`--no-scope-public-headers` to force the unscoped report (every finding,
+regardless of surface).
 
 Use `--show-filtered` to print the ledger on the terminal.
 

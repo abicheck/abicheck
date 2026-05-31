@@ -594,7 +594,7 @@ def run_compare(
     old_debug_roots: list[Path] | None = None,
     new_debug_roots: list[Path] | None = None,
     enable_debuginfod: bool = False,
-    scope_to_public_surface: bool = False,
+    scope_to_public_surface: bool = True,
     force_public_symbols: set[str] | None = None,
 ) -> tuple[DiffResult, AbiSnapshot, AbiSnapshot]:
     """Compare two ABI inputs and return the classified diff result.

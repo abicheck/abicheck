@@ -226,7 +226,7 @@ The feature is only credible if we can prove it neither over- nor under-filters.
 | **2** | Header-scope resolution + surface ledger + `--scope-public-headers`/`--show-filtered` (opt-in, default off) — **done** (ledger now also disclosed in JSON `surface_scope` / SARIF `surfaceScope`, not just stderr text; provenance-driven `private-header`/`system-header` reasons now wired) |
 | **3** | Reachability closure + leak-guard integration (extend `internal_leak.py`) — **done (closure shipped; leak exemption wired)** |
 | **4** | User-control overlay: widening public allowlist; integrate suppression as the narrowing layer; precedence + anti-hiding guard — **done** (widening via `--public-symbol`/`--public-symbols-list`; suppression remains the narrowing layer; widening only ever *keeps*, never hides) |
-| **5** | Parity + FP-rate gates; flip default to `header-scoped` once validated — *partial:* property-based monotonicity/subset/idempotence tests shipped (`tests/test_surface_property.py`); libabigail/abicc parity and the FP-rate CI gate remain |
+| **5** | Parity + FP-rate gates; flip default to `header-scoped` once validated — **done**: property-based monotonicity/subset/idempotence/anti-hiding/widening tests (`tests/test_surface_property.py`), libabigail scoping-parity lane (`tests/test_surface_scope_parity.py`), FP-rate gate (`scripts/check_fp_rate.py`, wired into CI + fast pytest), and the default flipped to header-scoped (`--no-scope-public-headers` opts out; a no-op when no public surface resolves) |
 
 ### Implementation note (Phase 2/3 as shipped)
 

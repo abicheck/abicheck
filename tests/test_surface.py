@@ -319,7 +319,7 @@ class TestScopedCompareNoFalsePositives:
             types=[_rec("Result", size=64), _rec("InternalCache", size=128)],
         )
 
-        unscoped = compare(old, new)
+        unscoped = compare(old, new, scope_to_public_surface=False)
         scoped = compare(old, new, scope_to_public_surface=True)
 
         # Without scoping the internal layout change shows up...
@@ -349,7 +349,10 @@ class TestScopedCompareNoFalsePositives:
         assert any("Result" in c.symbol for c in scoped.changes)
         assert scoped.verdict in (Verdict.BREAKING, Verdict.API_BREAK)
 
-    def test_scoping_off_by_default(self):
+    def test_scoping_on_by_default(self):
+        # ADR-024 Phase 5: header-scoping is the default. An internal-only
+        # layout change is demoted to the ledger out of the box; passing
+        # scope_to_public_surface=False restores the unscoped report.
         old = AbiSnapshot(
             library="lib",
             version="1",
@@ -363,8 +366,13 @@ class TestScopedCompareNoFalsePositives:
             types=[_rec("Result", size=64), _rec("InternalCache", size=128)],
         )
         default = compare(old, new)
-        assert default.out_of_surface_count == 0
-        assert default.scope_to_public_surface is False
+        assert default.scope_to_public_surface is True
+        assert default.out_of_surface_count >= 1
+        assert not any("InternalCache" in c.symbol for c in default.changes)
+
+        unscoped = compare(old, new, scope_to_public_surface=False)
+        assert unscoped.out_of_surface_count == 0
+        assert any("InternalCache" in c.symbol for c in unscoped.changes)
 
     def test_internal_leak_still_detected_under_scoping(self):
         # End-to-end anti-hiding guarantee: a detail:: type that leaks via a
@@ -457,7 +465,11 @@ class TestScopeCli:
 
         op, np_ = self._make_pair(tmp_path)
         runner = CliRunner()
-        result = runner.invoke(main, ["compare", str(op), str(np_)])
+        # Scoping is on by default now, so --no-scope-public-headers is needed
+        # to surface the internal-struct change.
+        result = runner.invoke(
+            main, ["compare", str(op), str(np_), "--no-scope-public-headers"]
+        )
         # The internal struct's size change is breaking, so compare exits
         # non-zero (2/4) — assert that so a crash (exit 1, no real output)
         # can't masquerade as a pass.
@@ -543,7 +555,7 @@ class TestSurfaceLedgerOutput:
 
         old = AbiSnapshot(library="lib", version="1", functions=[_fn("public_api")])
         new = AbiSnapshot(library="lib", version="2", functions=[_fn("public_api")])
-        res = compare(old, new)
+        res = compare(old, new, scope_to_public_surface=False)
         assert "surface_scope" not in json.loads(to_json(res))
         assert "surfaceScope" not in to_sarif(res)["runs"][0]["properties"]
 

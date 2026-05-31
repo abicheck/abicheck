@@ -255,7 +255,10 @@ class TestLeafClassVirtualMethodAdditions:
                 TypeField(name="x", type="int", offset_bits=64),
             ], vtable=["_ZN4Leaf7processEv"])],
         )
-        result = compare(old, new)
+        # Verdict-parity check: the Leaf class is reachable only through its own
+        # methods (not a free function), so disable surface scoping (default-on
+        # since ADR-024) to exercise raw vtable-change detection.
+        result = compare(old, new, scope_to_public_surface=False)
         kinds = _kinds(result)
         assert ChangeKind.FUNC_VIRTUAL_ADDED in kinds or ChangeKind.TYPE_VTABLE_CHANGED in kinds
         assert result.verdict == Verdict.BREAKING
@@ -275,7 +278,7 @@ class TestLeafClassVirtualMethodAdditions:
             types=[RecordType(name="Base", kind="class",
                               vtable=["_ZN4Base3fooEv", "_ZN4Base3barEv"])],
         )
-        result = compare(old, new)
+        result = compare(old, new, scope_to_public_surface=False)
         kinds = _kinds(result)
         assert ChangeKind.TYPE_VTABLE_CHANGED in kinds or ChangeKind.FUNC_VIRTUAL_ADDED in kinds
 

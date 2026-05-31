@@ -1342,11 +1342,13 @@ def _finalize_compare_result(
 @click.option("--show-redundant", is_flag=True, default=False,
               help="Disable redundancy filtering and show all changes including those "
                    "derived from root type changes.")
-@click.option("--scope-public-headers", "scope_public_headers", is_flag=True, default=False,
+@click.option("--scope-public-headers/--no-scope-public-headers", "scope_public_headers",
+              default=True, show_default=True,
               help="Restrict findings to the public-header ABI surface (ADR-024): "
                    "changes to symbols/types not reachable from public-header-declared "
                    "exported API are recorded as filtered, not reported. Internal-type "
-                   "leaks are never hidden.")
+                   "leaks are never hidden. On by default; use --no-scope-public-headers "
+                   "to report every finding regardless of surface.")
 @click.option("--show-filtered", "show_filtered", is_flag=True, default=False,
               help="List findings excluded by --scope-public-headers (audit trail).")
 @click.option("--public-symbol", "public_symbols", multiple=True,

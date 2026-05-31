@@ -177,7 +177,7 @@ def compare(
     *,
     policy: str = "strict_abi",
     policy_file: PolicyFile | None = None,
-    scope_to_public_surface: bool = False,
+    scope_to_public_surface: bool = True,
     force_public_symbols: set[str] | None = None,
 ) -> DiffResult:
     """Diff two AbiSnapshots and return a DiffResult with verdict.

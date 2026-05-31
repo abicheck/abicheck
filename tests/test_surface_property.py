@@ -203,7 +203,7 @@ def test_scoped_findings_subset_of_unscoped_universe(old: AbiSnapshot, new: AbiS
     ADR-024 §D4: header scoping only removes/demotes findings; it must never
     surface a (kind, symbol) the unscoped comparison did not produce.
     """
-    unscoped = compare(copy.deepcopy(old), copy.deepcopy(new))
+    unscoped = compare(copy.deepcopy(old), copy.deepcopy(new), scope_to_public_surface=False)
     scoped = compare(copy.deepcopy(old), copy.deepcopy(new), scope_to_public_surface=True)
 
     universe = _all_finding_keys(unscoped)
