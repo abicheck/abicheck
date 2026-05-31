@@ -523,6 +523,9 @@ def _to_json_leaf(
     if result.coverage_warnings:
         d["coverage_warnings"] = list(result.coverage_warnings)
     _add_surface_scope(d, result)
+    scope = _scope_dict(result)
+    if scope is not None:
+        d["scope"] = scope
     return json.dumps(d, indent=indent)
 
 
@@ -537,6 +540,35 @@ def _metadata_dict(meta: object | None) -> dict[str, object] | None:
         "path": getattr(meta, "path", ""),
         "sha256": getattr(meta, "sha256", ""),
         "size_bytes": getattr(meta, "size_bytes", 0),
+    }
+
+
+def _scope_dict(result: DiffResult) -> dict[str, object] | None:
+    """Machine-readable public-surface scoping block (ADR-024, issue #235).
+
+    Only emitted when ``--scope-public-headers`` was requested, so default
+    reports are unchanged. Records whether scoping resolved or fell back to the
+    full export table (``manual_review_required``), the public additions count,
+    and the audit ledger of findings filtered as internal/private.
+    """
+    if not result.scope_to_public_surface:
+        return None
+    summary = build_summary(result)
+    return {
+        "public_headers_applied": True,
+        "resolved": result.scope_resolved,
+        "fell_back": not result.scope_resolved,
+        "manual_review_required": not result.scope_resolved,
+        "public_additions": summary.compatible_additions,
+        "filtered_internal_count": result.out_of_surface_count,
+        "filtered_internal_changes": [
+            {
+                "kind": c.kind.value,
+                "symbol": c.symbol,
+                "description": c.description,
+            }
+            for c in result.out_of_surface_changes
+        ],
     }
 
 
@@ -646,6 +678,9 @@ def to_json(
             d["policy_file"] = str(result.policy_file.source_path)
     if show_impact:
         d["show_only_applied"] = show_only is not None
+    scope = _scope_dict(result)
+    if scope is not None:
+        d["scope"] = scope
     return json.dumps(d, indent=indent)
 
 

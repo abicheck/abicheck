@@ -254,6 +254,27 @@ def test_sc_public_surface_scope(tmp_path: Path) -> None:
     assert "InternalCache" in filtered.output
 
 
+def test_sc_public_surface_scope_fallback(tmp_path: Path) -> None:
+    # The "don't overclaim" half of issue #235. With no Visibility.PUBLIC
+    # symbols the public surface is unresolvable, so --scope-public-headers must
+    # fall back to the full export table rather than silently report a clean
+    # public surface: the private break is KEPT, the JSON records the fallback
+    # as manual-review-required, and a warning is emitted to stderr.
+    old = _lib("1", [], types=[_rec("InternalCache", 64)])
+    new = _lib("2", [], types=[_rec("InternalCache", 128)])
+    res = _compare(tmp_path, old, new, "--scope-public-headers", "--format", "json")
+    assert res.exit_code == 4  # fallback kept the break → still gated
+    doc = json.loads(res.stdout)
+    assert doc["scope"]["resolved"] is False
+    assert doc["scope"]["fell_back"] is True
+    assert doc["scope"]["manual_review_required"] is True
+    # The private change is kept (fallback), never silently dropped.
+    blob = json.dumps(doc["changes"])
+    assert "InternalCache" in blob
+    # Human-facing warning on stderr (machine contract is the scope block above).
+    assert "could not resolve the public surface" in res.stderr
+
+
 def test_sc_scan_sarif(tmp_path: Path) -> None:
     res = _compare(
         tmp_path,

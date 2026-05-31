@@ -149,7 +149,34 @@
       "type": "object",
       "additionalProperties": { "type": "string" }
     },
-    "policy_file": { "type": "string" }
+    "policy_file": { "type": "string" },
+    "scope": {
+      "type": "object",
+      "description": "Public-header scoping outcome (ADR-024, issue #235). Only present when --scope-public-headers was requested. When 'resolved' is false the public surface could not be determined and analysis fell back to the full export table, so 'manual_review_required' is true and compatibility is UNCONFIRMED.",
+      "required": ["public_headers_applied", "resolved", "fell_back", "manual_review_required"],
+      "additionalProperties": true,
+      "properties": {
+        "public_headers_applied": { "type": "boolean" },
+        "resolved": { "type": "boolean" },
+        "fell_back": { "type": "boolean" },
+        "manual_review_required": { "type": "boolean" },
+        "public_additions": { "type": "integer", "minimum": 0 },
+        "filtered_internal_count": { "type": "integer", "minimum": 0 },
+        "filtered_internal_changes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["kind", "symbol", "description"],
+            "additionalProperties": true,
+            "properties": {
+              "kind": { "type": "string" },
+              "symbol": { "type": "string" },
+              "description": { "type": "string" }
+            }
+          }
+        }
+      }
+    }
   },
   "$defs": {
     "fileMetadata": {

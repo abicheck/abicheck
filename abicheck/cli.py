@@ -1243,6 +1243,15 @@ def _finalize_compare_result(
     if show_filtered and result.out_of_surface_changes:
         _echo_filtered_surface(result)
 
+    if result.scope_to_public_surface and not result.scope_resolved:
+        click.echo(
+            "Warning: --scope-public-headers could not resolve the public "
+            "surface (no header-derived public symbols); fell back to the full "
+            "export table. Compatibility is UNCONFIRMED — treat this result as "
+            "manual-review-required, not a clean public surface.",
+            err=True,
+        )
+
     _warn_all_suppressed(result)
     _maybe_emit_annotations(
         result, annotate=annotate, annotate_additions=annotate_additions

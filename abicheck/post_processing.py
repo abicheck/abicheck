@@ -53,6 +53,11 @@ class PipelineContext:
     # findings are forced to stay in-surface under scoping. Widening only ever
     # *keeps* a finding, so it cannot hide a break.
     force_public_symbols: set[str] = field(default_factory=set)
+    # Set True when scoping was requested but the public surface could not be
+    # resolved, so the step fell back to the full export table (keeps every
+    # finding). Consumers surface this as "manual review required" — scoping
+    # must never silently read as confident compatibility (issue #235).
+    scope_fell_back: bool = False
     # Accumulated side-outputs
     opaque_filtered: list[Change] = field(default_factory=list)
     suppressed: list[Change] = field(default_factory=list)
@@ -244,7 +249,10 @@ class FilterNonPublicSurface:
         surf_old = compute_public_surface(ctx.old)
         surf_new = compute_public_surface(ctx.new)
         if not (surf_old.resolvable or surf_new.resolvable):
-            # No header-derived surface to scope against — keep everything.
+            # No header-derived surface to scope against — keep everything and
+            # record the fallback so the verdict is not mistaken for a
+            # confidently-clean public surface (issue #235).
+            ctx.scope_fell_back = True
             return changes
         force_public = ctx.force_public_symbols
         kept: list[Change] = []
