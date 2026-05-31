@@ -54,15 +54,17 @@ jobs:
 
   benchmark:
     name: Release-pinned benchmark
-    # Run only for real releases; attaches a reproducible benchmark report
-    # (versions, git commit, ground-truth digest, per-tool accuracy) to the
-    # GitHub Release so the README accuracy numbers are auditable evidence.
+    # Run only for real releases; generates a reproducible benchmark report
+    # (versions, git commit, ground-truth digest, per-tool accuracy) as a
+    # read-only artifact so the README accuracy numbers are auditable evidence.
     if: github.event_name == 'release'
     runs-on: ubuntu-latest
     permissions:
-      contents: write  # upload release asset
+      contents: read
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Install system deps (oracles + toolchain)
         run: |
@@ -90,8 +92,23 @@ jobs:
           path: benchmark_reports/benchmark_report.json
           retention-days: 90
 
+
+  upload-benchmark-report:
+    name: Attach benchmark report to release
+    needs: benchmark
+    if: github.event_name == 'release'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download benchmark report
+        uses: actions/download-artifact@v4
+        with:
+          name: benchmark-report
+          path: benchmark_reports/
+
       - name: Attach benchmark report to the release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65
         with:
           files: benchmark_reports/benchmark_report.json
 
