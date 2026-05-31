@@ -81,3 +81,60 @@ scenarios:
     validates: UC-WF-compare
     automated: true
     test: test_sc_ci_stat
+
+  # oneDAL-style bundle PR gate: block confirmed public breaks, warn (don't
+  # block) when analysis could not confidently confirm the public surface.
+  - id: SC-ONEDAL-PR-GATE-STRICT
+    title: Block oneDAL PRs on public ABI/API break, warn on unconfirmed analysis
+    persona: oneDAL maintainer
+    narrative: >
+      A pull request changes oneDAL shared libraries or public headers. CI must
+      stop merges for confirmed public BREAKING or API_BREAK findings, but must
+      only warn (not block) when compatibility cannot be confidently confirmed —
+      the public-surface scope fell back, or the verdict is COMPATIBLE_WITH_RISK.
+      Because exit 0 covers NO_CHANGE / COMPATIBLE / COMPATIBLE_WITH_RISK, the
+      gate inspects the JSON `verdict` field rather than relying on exit codes
+      alone, and uses compare-release so sibling-library relationships in the
+      bundle are analysed.
+    flow:
+      - abicheck compare-release baseline/ pr-build/ -H include/ --scope-public-headers --format json -o abi.json
+      - abicheck compare-release baseline/ pr-build/ -H include/ --scope-public-headers --format sarif -o abi.sarif
+    expected:
+      fail_on_verdicts: [BREAKING, API_BREAK]
+      manual_review_required_on:
+        - verdict == COMPATIBLE_WITH_RISK
+        - warnings not empty
+        - public-surface scope fallback occurred
+      require_bundle_analysis: true
+      require_public_surface_scope: true
+    validates: UC-WF-bundle
+    automated: false
+    status: planned
+    plan: docs/development/plans/g2-build-config-and-bundle.md
+
+  # oneDAL-style additive surface tracking: report growth, never gate on it.
+  - id: SC-ONEDAL-PR-ADDITION-TRACKING
+    title: Report oneDAL API/ABI additions without gating the PR
+    persona: oneDAL maintainer
+    narrative: >
+      A pull request legitimately expands oneDAL's surface. CI must not block the
+      merge on additions alone, but it must clearly separate public additions
+      from internal-only growth (using public-header scoping plus the
+      --show-filtered ledger) and communicate the release impact to reviewers via
+      a job summary / PR comment rather than raw JSON.
+    flow:
+      - abicheck compare-release baseline/ pr-build/ -H include/ --scope-public-headers --show-filtered --format json -o abi.json
+      - abicheck compare-release baseline/ pr-build/ -H include/ --scope-public-headers --format html -o abi.html
+    expected:
+      fail_on_verdicts: [BREAKING, API_BREAK]
+      do_not_fail_on: [COMPATIBLE]
+      require_summary_fields:
+        - public_additions
+        - filtered_internal_changes
+        - changed_libraries
+        - release_recommendation
+      github_presentation: [job_summary, pr_comment]
+    validates: UC-WF-bundle
+    automated: false
+    status: planned
+    plan: docs/development/plans/g3-workflow-examples-and-reporting.md

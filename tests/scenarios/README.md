@@ -20,7 +20,7 @@ file. `tests/test_scenarios.py` merges every `tests/scenarios/*.yaml`:
 | `release_management.yaml` | release recommendation, offline snapshots, baseline registry |
 | `consumer_deployment.yaml` | compare-release, appcompat, stack-check/deps, ABICC, Debian, MCP (planned) |
 
-There are currently **22 scenarios** (15 automated end-to-end + 7 planned).
+There are currently **25 scenarios** (15 automated end-to-end + 10 planned).
 
 Add a new group by dropping in a new `*.yaml`; add a scenario by appending to an
 existing group. Scenario ids must be unique across all files.

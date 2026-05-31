@@ -28,6 +28,40 @@ scenarios:
     automated: true
     test: test_sc_public_surface_scope
 
+  # The other half of issue #235: scoping is best-effort and can fall back.
+  - id: SC-PUBLIC-SURFACE-SCOPE-FALLBACK
+    title: Public-header scoping falls back and requires manual review
+    persona: Library maintainer
+    issue: 235
+    narrative: >
+      The maintainer asks for public-surface scoping, but the scope cannot be
+      resolved — castxml is unavailable, the public headers do not parse, or
+      PE/MSVC name matching fails. abicheck must NOT silently claim a clean
+      public surface. It warns, falls back to the full export table, and flags
+      that the result needs manual review (so an unconfirmed scope never reads
+      as confident compatibility). This is the "don't overclaim" companion to
+      SC-PUBLIC-SURFACE-SCOPE.
+    flow:
+      - abicheck compare old.json new.json --scope-public-headers
+      - abicheck compare old.json new.json --scope-public-headers --show-filtered
+    expected:
+      scope_resolved: false
+      warnings_not_empty: true
+      manual_review_required: true
+      fell_back_to_full_export_table: true
+    validates: UC-WF-compare
+    automated: false
+    status: planned
+    note: >
+      Not automatable through the JSON-snapshot harness: scoping at the
+      `compare` stage resolves the public surface from snapshot reachability
+      alone (which is why SC-PUBLIC-SURFACE-SCOPE runs on JSON), so it never
+      falls back. The fallback path is triggered upstream at dump/parse time
+      with real binaries — castxml unavailable, public headers that do not
+      parse, or PE/MSVC name matching failing (see ADR-024 and the limitations
+      doc). Automating it needs a real fixture exercising one of those failure
+      modes and asserting the emitted warning + full-export-table fallback.
+
   - id: SC-ACCEPT-KNOWN-BREAK
     title: Accept a known, intentional break via a suppression file
     persona: Library maintainer
