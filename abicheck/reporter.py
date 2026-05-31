@@ -40,6 +40,7 @@ from .checker_policy import (
 )
 from .report_summary import build_summary
 from .schemas import REPORT_SCHEMA_VERSION
+from .semver import recommend_release
 
 
 def _kind_to_severity(kind: ChangeKind, policy: str) -> str:
@@ -252,6 +253,7 @@ def to_stat_json(result: DiffResult, indent: int = 2) -> str:
             "affected_pct": round(summary.affected_pct, 1),
         },
     }
+    d["release_recommendation"] = recommend_release(result).to_dict()
     if result.redundant_count > 0:
         d["redundant_count"] = result.redundant_count
     # Confidence & evidence metadata
@@ -360,6 +362,7 @@ def _to_markdown_leaf(
     result: DiffResult,
     show_impact: bool = False,
     show_only: str | None = None,
+    show_recommendation: bool = False,
 ) -> str:
     """Leaf-change mode: root type changes with affected interface lists."""
     from .checker import _ROOT_TYPE_CHANGE_KINDS
@@ -378,6 +381,9 @@ def _to_markdown_leaf(
         f"| **Verdict** | {emoji} `{label}` |",
         "",
     ]
+
+    if show_recommendation:
+        _append_recommendation_section(lines, result)
 
     changes = list(result.changes)
     if show_only:
@@ -479,6 +485,8 @@ def _to_json_leaf(
         # FIX-H: populate changes with union for backward-compat consumers
         "changes": leaf_changes_list + non_type_list,
     }
+    # Release recommendation — always present in JSON, including leaf mode.
+    d["release_recommendation"] = recommend_release(result).to_dict()
     if result.redundant_count > 0:
         d["redundant_count"] = result.redundant_count
     # Confidence & evidence metadata
@@ -544,6 +552,8 @@ def to_json(
         "binary_compatibility_pct": round(summary.binary_compatibility_pct, 1),
         "affected_pct": round(summary.affected_pct, 1),
     }
+    # Release recommendation (semver bump + soname action) — additive, machine-facing.
+    d["release_recommendation"] = recommend_release(result).to_dict()
     effective_policy = result.policy or "strict_abi"
     d["policy"] = effective_policy
     eff_sets = result._effective_kind_sets()
@@ -925,12 +935,16 @@ def to_markdown(
     show_impact: bool = False,
     stat: bool = False,
     severity_config: SeverityConfig | None = None,
+    show_recommendation: bool = False,
 ) -> str:
     if stat:
         return to_stat(result)
 
     if report_mode == "leaf":
-        return _to_markdown_leaf(result, show_impact=show_impact, show_only=show_only)
+        return _to_markdown_leaf(
+            result, show_impact=show_impact, show_only=show_only,
+            show_recommendation=show_recommendation,
+        )
 
     v = result.verdict
     emoji = _VERDICT_EMOJI[v]
@@ -969,6 +983,9 @@ def to_markdown(
     _append_confidence_section(lines, result)
 
     _append_policy_section(lines, result)
+
+    if show_recommendation:
+        _append_recommendation_section(lines, result)
 
     # Severity configuration summary when provided
     if severity_config is not None:
@@ -1041,6 +1058,26 @@ def _append_policy_section(lines: list[str], result: DiffResult) -> None:
         )
         lines.append(f"> **Policy overrides**: {overrides}")
     lines.append("")
+
+
+_BUMP_EMOJI = {"major": "🔴", "minor": "🟢", "patch": "🟢", "none": "✅"}
+
+
+def _append_recommendation_section(lines: list[str], result: DiffResult) -> None:
+    """Append the release-recommendation section (semver bump + soname action)."""
+    rec = recommend_release(result)
+    emoji = _BUMP_EMOJI.get(rec.bump.value, "")
+    lines += [
+        "## Release Recommendation",
+        "",
+        "| Field | Value |",
+        "|---|---|",
+        f"| Version bump | {emoji} **{rec.bump.value.upper()}** |",
+        f"| SONAME action | `{rec.soname.value}` |",
+        "",
+        f"{rec.rationale}",
+        "",
+    ]
 
 
 def _format_change_md(c: object) -> str:

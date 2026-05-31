@@ -1,0 +1,83 @@
+# Scenario group: CI ABI gating (persona: CI engineer)
+#
+# See tests/scenarios/README.md for the catalog format and how it is validated.
+schema_version: 1
+
+scenarios:
+  - id: SC-CI-GATE-BREAKING
+    title: CI ABI gate fails the build on a removed public symbol
+    persona: CI engineer
+    narrative: >
+      A pull request drops a public function from a shared library. The ABI gate
+      in CI must fail (non-zero exit) so the breaking change cannot merge
+      silently.
+    flow:
+      - abicheck compare old.json new.json
+    expected:
+      exit_code: 4
+      verdict: BREAKING
+    validates: UC-WF-compare
+    automated: true
+    test: test_sc_ci_gate_breaking
+
+  - id: SC-CI-GATE-ADDITIVE
+    title: CI ABI gate passes a backward-compatible addition
+    persona: CI engineer
+    narrative: >
+      A release adds a new exported function and changes nothing else. The gate
+      must pass (exit 0) so additive work is not blocked.
+    flow:
+      - abicheck compare old.json new.json
+    expected:
+      exit_code: 0
+      verdict: COMPATIBLE
+    validates: UC-WF-compare
+    automated: true
+    test: test_sc_ci_gate_additive
+
+  - id: SC-EXIT-CONTRACT
+    title: Exit-code contract (0 / 2 / 4) is stable for tooling
+    persona: CI engineer
+    narrative: >
+      Build scripts gate on exit codes: 0 = compatible, 2 = source-level
+      (API) break, 4 = binary (ABI) break. This contract must hold so a
+      Makefile/pipeline can branch on it.
+    flow:
+      - abicheck compare old.json new.json   # exit code is the gate
+    expected:
+      exit_codes: {NO_CHANGE: 0, API_BREAK: 2, BREAKING: 4}
+    validates: UC-WF-compare
+    automated: true
+    test: test_sc_exit_contract
+
+  - id: SC-CI-SEVERITY-GATE
+    title: Severity policy turns an ABI break into a warning (custom gate)
+    persona: CI engineer
+    narrative: >
+      A team is mid-migration and wants ABI breaks reported but NOT
+      build-failing for one release. Passing a --severity-* flag switches to the
+      severity-aware exit scheme; downgrading abi_breaking to "warning" yields
+      exit 0 while the default gate still fails with exit 4.
+    flow:
+      - abicheck compare old.json new.json --severity-abi-breaking warning
+    expected:
+      exit_code: 0
+      default_exit_code: 4
+    validates: UC-WF-compare
+    automated: true
+    test: test_sc_ci_severity_gate
+
+  - id: SC-CI-STAT
+    title: One-line --stat summary for CI logs
+    persona: CI engineer
+    narrative: >
+      A pipeline wants a compact, greppable one-line result in the job log
+      instead of a full report.
+    flow:
+      - abicheck compare old.json new.json --stat
+    expected:
+      exit_code: 4
+      output_contains: total
+    validates: UC-WF-compare
+    automated: true
+    test: test_sc_ci_stat

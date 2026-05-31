@@ -191,6 +191,39 @@ jsonschema.validate(report, load_compare_report_schema())
 
 ---
 
+## Release recommendation (`--recommend`)
+
+Translates the verdict into the maintainer's actual question — *what version do
+I release, and do I need to bump the SONAME?* — as a recommended semantic-version
+bump (`major`/`minor`/`patch`/`none`) plus a SONAME action.
+
+```bash
+abicheck compare old.so new.so -H include/ --recommend
+```
+
+The recommendation is **policy-aware** (it honours `--policy` and
+`--policy-file`):
+
+| Verdict | Bump | SONAME |
+|---------|------|--------|
+| `NO_CHANGE` | none | no bump needed |
+| `BREAKING` | major | bump required (or `bump_missing`/`bump_performed` if abicheck observed the soname) |
+| `API_BREAK` | major | no bump needed (binary stays loadable) |
+| `COMPATIBLE_WITH_RISK` | minor/patch | no bump needed |
+| `COMPATIBLE` (additions) | minor | no bump needed |
+| `COMPATIBLE` (quality only) | patch | no bump needed |
+
+In **JSON** output the recommendation is always present (no flag needed) under
+the `release_recommendation` key, so CI and agents can gate on it directly:
+
+```bash
+abicheck compare old.so new.so -H include/ --format json \
+  | jq -r '.release_recommendation | "\(.version_bump) (\(.soname_action))"'
+# major (bump_required)
+```
+
+---
+
 ## SARIF Output
 
 abicheck supports [SARIF 2.1.0](https://docs.oasis-open.org/sarif/sarif/v2.1.0/) output for integration with GitHub Code Scanning and other SAST platforms.

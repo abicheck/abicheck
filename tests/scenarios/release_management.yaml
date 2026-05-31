@@ -1,0 +1,55 @@
+# Scenario group: release management (persona: library / release engineer)
+#
+# See tests/scenarios/README.md for the catalog format and how it is validated.
+schema_version: 1
+
+scenarios:
+  - id: SC-RELEASE-RECOMMENDATION
+    title: "Answer: what version do I release, and do I bump the SONAME?"
+    persona: Library maintainer
+    narrative: >
+      Before tagging a release, the maintainer asks abicheck what semantic
+      version to publish. The JSON report must carry a release_recommendation
+      (version bump + SONAME action) so release automation can act on it.
+    flow:
+      - abicheck compare old.json new.json --format json
+    expected:
+      version_bump: major
+    validates: UC-CHANGE-semver-recommendation
+    automated: true
+    test: test_sc_release_recommendation
+
+  - id: SC-OFFLINE-SNAPSHOT
+    title: Offline ABI baseline as a portable JSON snapshot
+    persona: Release engineer
+    narrative: >
+      A team dumps the ABI of each release to a JSON snapshot and compares future
+      builds against the stored snapshot without re-dumping — an offline, async
+      workflow where snapshots are the portable interchange format.
+    flow:
+      - abicheck dump libfoo.so -H include/ -o v1.json   # at release time
+      - abicheck compare v1.json v2.json                 # later, offline
+    expected:
+      exit_code: 4
+      verdict: BREAKING
+    validates: UC-WF-compare
+    automated: true
+    test: test_sc_offline_snapshot
+
+  - id: SC-BASELINE-REGISTRY
+    title: Pin a release ABI in the baseline registry, then gate future builds
+    persona: Release engineer
+    narrative: >
+      A team pushes each release's ABI snapshot to a versioned baseline registry
+      (`baseline push`), then later pulls it (`baseline pull`) and compares a new
+      build against it — pinning the approved ABI without re-dumping the old one.
+    flow:
+      - abicheck baseline push libfoo --version 1 --platform linux-x86_64 --snapshot v1.json --registry .abicheck/baselines
+      - abicheck baseline pull libfoo:1:linux-x86_64 -o pinned.json --registry .abicheck/baselines
+      - abicheck compare pinned.json v2.json
+    expected:
+      exit_code: 4
+      verdict: BREAKING
+    validates: UC-WF-baseline
+    automated: true
+    test: test_sc_baseline_registry

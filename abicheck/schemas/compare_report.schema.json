@@ -99,6 +99,17 @@
         }
       }
     },
+    "release_recommendation": {
+      "type": "object",
+      "description": "Recommended next release: a semantic-version bump and a SONAME action derived from the policy-aware verdict and change set. See docs/user-guide/output-formats.md.",
+      "required": ["version_bump", "soname_action", "rationale"],
+      "additionalProperties": true,
+      "properties": {
+        "version_bump": { "type": "string", "enum": ["major", "minor", "patch", "none"] },
+        "soname_action": { "type": "string", "enum": ["bump_required", "bump_performed", "bump_missing", "no_bump_needed"] },
+        "rationale": { "type": "string" }
+      }
+    },
     "detectors": {
       "type": "array",
       "items": {

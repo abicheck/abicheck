@@ -35,6 +35,29 @@ However, the depth of analysis depends on the **host platform** and whether head
 
 ---
 
+## Validation status (what is actually exercised in CI)
+
+The matrices above describe *intended* capability. The depth of **automated
+validation** differs sharply by platform, and you should calibrate trust
+accordingly:
+
+| Platform | Binary/metadata parsing | Workflow end-to-end (compare / appcompat / …) |
+|----------|:-----------------------:|:---------------------------------------------:|
+| **Linux / ELF** | Unit **and** integration tests | **Validated in CI** (the baseline) |
+| **Windows / PE+PDB** | Unit tests for the PE/PDB parsers | **Not validated end-to-end in CI** (MinGW experimental; MSVC untested) |
+| **macOS / Mach-O** | Unit tests for the Mach-O/ARM64 layer | **Not validated end-to-end in CI** (ARM64 HFA/HVA not yet tracked) |
+
+Concretely: every entry in [`examples/ground_truth.json`](https://github.com/napetrov/abicheck/blob/main/examples/ground_truth.json)
+is validated on Linux, and a `platforms` tag of `macos`/`windows` expresses
+*intended* portability rather than a CI-validated result — 20 cases carry an
+explicit `known_gap` describing where the non-Linux path diverges. This
+invariant (Linux = universal baseline; macOS/Windows = strict subset) is guarded
+by `tests/test_platform_coverage_honesty.py`. See
+[Use-Case Coverage Evaluation](../development/usecase-coverage-evaluation.md)
+(gap **G1**) for the roadmap to closing this.
+
+---
+
 ## What "Symbols Only" Mode Means
 
 When scanning a binary **without headers**, or scanning a non-native binary cross-platform,

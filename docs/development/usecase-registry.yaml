@@ -1,0 +1,325 @@
+# Use-case registry — the machine-checkable definition of abicheck's
+# application/library ABI-API change use cases.
+#
+# This is the SOURCE OF TRUTH behind the human-readable scorecard in
+# docs/development/usecase-coverage-evaluation.md. Each entry is validated by
+# tests/test_usecase_registry.py, which enforces that:
+#   - every entry has a known `axis` and `status`;
+#   - `complete` / `partial` / `modeled` entries cite evidence whose paths
+#     actually exist in the repo (so coverage claims cannot silently rot);
+#   - `partial` / `modeled` / `planned` entries carry a `gap` id, `next_steps`,
+#     and a `plan:` pointing at a real plan file under docs/development/plans/;
+#   - `by_design_excluded` entries explain themselves in `note`.
+#
+# To extend coverage: add or update an entry here, point `evidence` at the
+# real test/module/example that backs it, and the test keeps everyone honest.
+#
+# status legend:
+#   complete            fully supported and validated
+#   partial             works, but with documented caveats/gaps
+#   modeled             code/parsers exist but NOT validated end-to-end in CI
+#   planned             not implemented; has a tracked plan (gap + next_steps)
+#   by_design_excluded  deliberate non-goal (see docs/development/goals.md)
+#
+# axis legend: change_class | archetype | platform | workflow | reporting | toolchain
+
+schema_version: 1
+
+use_cases:
+  # ── change_class ──────────────────────────────────────────────────────────
+  - id: UC-CHANGE-taxonomy
+    axis: change_class
+    name: ABI/API change taxonomy (145 ChangeKinds, 5-tier policy)
+    status: complete
+    evidence:
+      modules: [abicheck/change_registry.py, abicheck/checker_policy.py]
+      tests: [tests/test_changekind_completeness.py]
+      examples: [examples/ground_truth.json]
+
+  - id: UC-CHANGE-semver-recommendation
+    axis: change_class
+    name: Release recommendation (semver bump + SONAME action)
+    status: complete
+    evidence:
+      modules: [abicheck/semver.py]
+      tests: [tests/test_semver_recommendation.py]
+
+  # ── archetype ─────────────────────────────────────────────────────────────
+  - id: UC-ARCH-c-library
+    axis: archetype
+    name: Pure-C shared library (extern "C", SONAME-versioned)
+    status: complete
+    evidence:
+      examples: [examples/ground_truth.json]
+    note: 35 pure-C example pairs (examples/case*/v1.c).
+
+  - id: UC-ARCH-cpp-library
+    axis: archetype
+    name: C++ library (templates, vtables, inline namespaces)
+    status: complete
+    evidence:
+      examples: [examples/ground_truth.json]
+    note: 52 C++ example pairs (examples/case*/v1.cpp).
+
+  - id: UC-ARCH-plugin
+    axis: archetype
+    name: Plugin host↔plugin load contract (dlopen)
+    status: partial
+    gap: G5
+    plan: docs/development/plans/g5-plugin-bidirectional-contract.md
+    evidence:
+      modules: [abicheck/appcompat.py]
+      tests: [tests/test_workflow_scenarios.py]
+    next_steps: >
+      Add a bidirectional host/plugin example fixture and an optional
+      host-contract check (host's required entrypoints vs plugin exports);
+      today only the plugin_abi policy + consumer-scoped scenario tests exist.
+
+  - id: UC-ARCH-header-only
+    axis: archetype
+    name: Header-only / inline-only libraries
+    status: planned
+    gap: G4
+    plan: docs/development/plans/g4-header-ast-extractor.md
+    evidence:
+      modules: [abicheck/dumper_castxml.py]
+    next_steps: >
+      Add a libclang-based header-AST extractor alongside castxml to unblock
+      concept tightening, hidden friends, and user-ctor mangled names
+      (dormant fixtures: cases 78/105/106/111).
+
+  - id: UC-ARCH-kernel-btf
+    axis: archetype
+    name: Kernel / eBPF modules (BTF/CTF)
+    status: modeled
+    gap: G6
+    plan: docs/development/plans/g6-kernel-btf-and-accelerator.md
+    evidence:
+      modules: [abicheck/btf_metadata.py, abicheck/ctf_metadata.py]
+      tests: [tests/test_btf_metadata.py]
+    next_steps: >
+      Add a BTF compare scenario (kernel struct gains a field) and a documented
+      "module vs vmlinux BTF" workflow; parsers exist but no end-to-end flow.
+
+  - id: UC-ARCH-sycl
+    axis: archetype
+    name: SYCL / heterogeneous accelerator stacks (PI/UR)
+    status: partial
+    gap: G6
+    plan: docs/development/plans/g6-kernel-btf-and-accelerator.md
+    evidence:
+      modules: [abicheck/sycl_metadata.py, abicheck/diff_sycl.py]
+      tests: [tests/test_diff_sycl.py]
+      examples: [examples/case82_sycl_overload_set_removed]
+    next_steps: Wire SYCL plugin detection into a workflow-level scenario; CUDA deferred.
+
+  - id: UC-ARCH-static-lib
+    axis: archetype
+    name: Static libraries (.a / .lib)
+    status: planned
+    gap: G8
+    plan: docs/development/plans/g8-static-libraries.md
+    next_steps: >
+      Decide scope: either iterate `ar` archive members for link-time API
+      checking, or document static libraries as an explicit non-goal.
+
+  - id: UC-ARCH-ffi-consumers
+    axis: archetype
+    name: FFI consumers in other languages (Rust/Go/Python)
+    status: by_design_excluded
+    note: >
+      The C ABI such consumers bind to is covered; first-class support for
+      non-C/C++ languages is a stated non-goal (docs/development/goals.md).
+
+  # ── platform ──────────────────────────────────────────────────────────────
+  - id: UC-PLAT-linux-elf
+    axis: platform
+    name: Linux ELF (the CI-validated baseline)
+    status: complete
+    evidence:
+      modules: [abicheck/elf_metadata.py]
+      examples: [examples/ground_truth.json]
+
+  - id: UC-PLAT-windows-pe
+    axis: platform
+    name: Windows PE/COFF + PDB (MSVC / MinGW)
+    status: partial
+    gap: G1
+    plan: docs/development/plans/g1-cross-platform-e2e.md
+    evidence:
+      modules: [abicheck/pe_metadata.py, abicheck/pdb_metadata.py]
+      tests: [tests/test_pe_metadata_unit.py, tests/test_pdb_metadata.py, tests/test_msvc_pdb_e2e.py]
+    next_steps: >
+      Broaden the MSVC+PDB e2e lane beyond smoke coverage and run a subset of
+      the example catalog on native PE binaries; MinGW remains experimental.
+
+  - id: UC-PLAT-macos-macho
+    axis: platform
+    name: macOS Mach-O (x86-64 / ARM64)
+    status: modeled
+    gap: G1
+    plan: docs/development/plans/g1-cross-platform-e2e.md
+    evidence:
+      modules: [abicheck/macho_metadata.py]
+      tests: [tests/test_macho_metadata_unit.py, tests/test_macos_arm64_abi.py]
+    next_steps: >
+      Add a macOS e2e CI lane running compare/appcompat on native dylibs and
+      track ARM64 AAPCS HFA/HVA / small-struct calling convention.
+
+  # ── workflow ──────────────────────────────────────────────────────────────
+  - id: UC-WF-compare
+    axis: workflow
+    name: Pairwise compare (CI PR gate)
+    status: complete
+    evidence:
+      tests: [tests/test_reporter.py]
+      examples: [examples/ground_truth.json]
+
+  - id: UC-WF-appcompat
+    axis: workflow
+    name: Application compatibility (consumer-scoped)
+    status: complete
+    evidence:
+      modules: [abicheck/appcompat.py]
+      tests: [tests/test_appcompat.py, tests/test_workflow_scenarios.py]
+
+  - id: UC-WF-baseline
+    axis: workflow
+    name: Baseline pinning / registry
+    status: complete
+    evidence:
+      modules: [abicheck/baseline.py]
+      tests: [tests/test_baseline.py]
+
+  - id: UC-WF-debian-symbols
+    axis: workflow
+    name: Debian symbols file generate/validate/diff
+    status: complete
+    evidence:
+      modules: [abicheck/debian_symbols.py]
+      tests: [tests/test_debian_symbols.py]
+
+  - id: UC-WF-abicc-compat
+    axis: workflow
+    name: ABICC drop-in replacement
+    status: complete
+    evidence:
+      modules: [abicheck/compat/cli.py]
+      tests: [tests/test_abicc_parity.py]
+
+  - id: UC-WF-stack-deps
+    axis: workflow
+    name: Full-stack dependency / sysroot validation
+    status: complete
+    evidence:
+      modules: [abicheck/cli_stack.py, abicheck/resolver.py]
+      tests: [tests/test_stack_checker.py]
+
+  - id: UC-WF-mcp
+    axis: workflow
+    name: MCP server (AI-agent integration)
+    status: complete
+    evidence:
+      modules: [abicheck/mcp_server.py]
+      tests: [tests/test_mcp_server_unit.py]
+    note: Unit-tested with mocks; no live client/server integration test.
+
+  - id: UC-WF-bundle
+    axis: workflow
+    name: Multi-library bundle / cohort analysis
+    status: partial
+    gap: G2
+    plan: docs/development/plans/g2-build-config-and-bundle.md
+    evidence:
+      modules: [abicheck/bundle.py]
+      tests: [tests/test_bundle.py]
+    next_steps: >
+      Complete compare-release CLI wiring (case84 is skip:true today) and extend
+      bundle analysis beyond Linux.
+
+  - id: UC-WF-probe-matrix
+    axis: workflow
+    name: Build-configuration matrix (probe harness)
+    status: partial
+    gap: G2
+    plan: docs/development/plans/g2-build-config-and-bundle.md
+    evidence:
+      modules: [abicheck/probe_harness.py, abicheck/diff_build_config.py]
+      tests: [tests/test_probe_harness.py]
+      examples: [examples/probes/onedpl.yaml]
+    next_steps: >
+      Fold matrix findings (API_DEPENDS_ON_CONSUMER_ENV, CXX_STANDARD_FLOOR_RAISED,
+      BEHAVIOURAL_DEFAULT_CHANGED) into `compare`/`compare-release`; it is a
+      separate command today, so cases 97/98 are invisible to a per-binary diff.
+
+  # ── reporting ─────────────────────────────────────────────────────────────
+  - id: UC-REP-json
+    axis: reporting
+    name: JSON report (versioned schema)
+    status: complete
+    evidence:
+      modules: [abicheck/reporter.py, abicheck/schemas/__init__.py]
+      tests: [tests/test_reporter.py, tests/test_report_schema.py]
+
+  - id: UC-REP-sarif
+    axis: reporting
+    name: SARIF 2.1.0 (GitHub Code Scanning)
+    status: complete
+    evidence:
+      modules: [abicheck/sarif.py]
+      tests: [tests/test_sarif.py]
+
+  - id: UC-REP-junit
+    axis: reporting
+    name: JUnit XML (CI dashboards)
+    status: complete
+    evidence:
+      modules: [abicheck/junit_report.py]
+      tests: [tests/test_junit_report.py]
+
+  - id: UC-REP-markdown-html
+    axis: reporting
+    name: Markdown / HTML reports
+    status: partial
+    gap: G3
+    plan: docs/development/plans/g3-workflow-examples-and-reporting.md
+    evidence:
+      modules: [abicheck/reporter.py, abicheck/html_report.py]
+      tests: [tests/test_format_compliance.py, tests/test_sprint9_html.py]
+    next_steps: Broaden Markdown/HTML test coverage across commands (currently thin).
+
+  # ── toolchain / language standard ───────────────────────────────────────────
+  - id: UC-TC-dual-abi
+    axis: toolchain
+    name: libstdc++ dual ABI flip (_GLIBCXX_USE_CXX11_ABI)
+    status: complete
+    evidence:
+      examples: [examples/case104_glibcxx_dual_abi_flip]
+
+  - id: UC-TC-flag-drift
+    axis: toolchain
+    name: Toolchain flag drift (DW_AT_producer)
+    status: complete
+    evidence:
+      modules: [abicheck/diff_build_config.py]
+      examples: [examples/case103_toolchain_flag_drift]
+
+  - id: UC-TC-modern-cxx-types
+    axis: toolchain
+    name: Integer model / char8_t / _BitInt / atomic / ABI tags
+    status: complete
+    evidence:
+      modules: [abicheck/diff_integer_model.py, abicheck/diff_char8t.py, abicheck/diff_bit_int.py, abicheck/diff_atomic.py]
+      examples: [examples/case112_lp64_ilp64]
+
+  - id: UC-TC-cxx-standard-floor
+    axis: toolchain
+    name: C++ standard floor raised (per-consumer source break)
+    status: partial
+    gap: G2
+    plan: docs/development/plans/g2-build-config-and-bundle.md
+    evidence:
+      examples: [examples/case98_cxx_standard_floor_raised]
+    next_steps: >
+      Only detectable via the probe matrix today; wire it into the mainline
+      compare so a per-binary run surfaces CXX_STANDARD_FLOOR_RAISED.

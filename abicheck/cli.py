@@ -830,6 +830,7 @@ def _render_output(
     show_impact: bool = False,
     stat: bool = False,
     severity_config: SeverityConfig | None = None,
+    show_recommendation: bool = False,
 ) -> str:
     """Render comparison result in the requested output format."""
     from .service import render_output
@@ -838,6 +839,7 @@ def _render_output(
         follow_deps=follow_deps, show_only=show_only,
         report_mode=report_mode, show_impact=show_impact,
         stat=stat, severity_config=severity_config,
+        show_recommendation=show_recommendation,
     )
 
 
@@ -1329,6 +1331,9 @@ def _finalize_compare_result(
                    "'leaf' groups by root type changes with impact lists.")
 @click.option("--show-impact", is_flag=True, default=False,
               help="Append an impact summary table showing root changes and affected interfaces.")
+@click.option("--recommend", is_flag=True, default=False,
+              help="Append a release recommendation (semver bump + SONAME action) to the "
+                   "report. Always present in --format json under 'release_recommendation'.")
 @click.option("--btf", "debug_format", flag_value="btf", default=None,
               help="Force BTF debug format for both sides (ELF only).")
 @click.option("--ctf", "debug_format", flag_value="ctf",
@@ -1376,6 +1381,7 @@ def compare_cmd(
     show_redundant: bool, show_only: str | None, stat: bool,
     scope_public_headers: bool, show_filtered: bool,
     report_mode: str, show_impact: bool,
+    recommend: bool,
     debug_format: str | None,
     annotate: bool,
     annotate_additions: bool,
@@ -1498,6 +1504,7 @@ def compare_cmd(
         show_only=show_only, report_mode=report_mode,
         show_impact=show_impact, stat=stat,
         severity_config=sev_config if severity_explicitly_set else None,
+        show_recommendation=recommend,
     )
 
     _write_or_echo(output, text)

@@ -1,0 +1,77 @@
+# Scenario group: compliance scanning (persona: library maintainer / AppSec)
+#
+# See tests/scenarios/README.md for the catalog format and how it is validated.
+schema_version: 1
+
+scenarios:
+  # The missed scenario from issue #235.
+  - id: SC-PUBLIC-SURFACE-SCOPE
+    title: Public-header scoping suppresses private/internal ABI breaks
+    persona: Library maintainer
+    issue: 235
+    narrative: >
+      A maintainer ships a stable public API and changes only a private/internal
+      type that is not reachable from any public declaration. Run as a
+      compliance scanner with public headers and --scope-public-headers, abicheck
+      must NOT raise compliance errors for the private break (matching the
+      default behaviour of libabigail and abicc). The private change is recorded
+      as filtered (visible under --show-filtered), never as a verdict-affecting
+      finding.
+    flow:
+      - abicheck compare old.json new.json --scope-public-headers
+      - abicheck compare old.json new.json --scope-public-headers --show-filtered
+    expected:
+      exit_code: 0
+      verdict: NO_CHANGE   # the only change was to a private type → filtered
+      without_scope_exit_code: 4
+    validates: UC-WF-compare
+    automated: true
+    test: test_sc_public_surface_scope
+
+  - id: SC-ACCEPT-KNOWN-BREAK
+    title: Accept a known, intentional break via a suppression file
+    persona: Library maintainer
+    narrative: >
+      A maintainer intentionally removed a deprecated symbol and recorded a
+      justified, time-boxed suppression. The gate must pass (exit 0) while the
+      suppression is live, and the change is tracked as suppressed (audit trail).
+    flow:
+      - abicheck compare old.json new.json --suppress suppressions.yaml
+    expected:
+      exit_code: 0
+    validates: UC-WF-compare
+    automated: true
+    test: test_sc_accept_known_break
+
+  - id: SC-SUPPRESSION-EXPIRY
+    title: Strict suppressions fail when a waiver has expired
+    persona: Library maintainer
+    narrative: >
+      Suppressions are time-boxed waivers. With --strict-suppressions, a rule
+      past its `expires` date fails the run (exit 1) so stale waivers can't hide
+      breaks indefinitely. (Note: an expired rule no longer suppresses, so the
+      underlying break also resurfaces.)
+    flow:
+      - abicheck compare old.json new.json --suppress expired.yaml --strict-suppressions
+    expected:
+      exit_code: 1
+    validates: UC-WF-compare
+    automated: true
+    test: test_sc_suppression_expiry
+
+  - id: SC-POLICY-PROFILE
+    title: A policy profile reclassifies a source-only break
+    persona: SDK vendor
+    narrative: >
+      An SDK vendor ships source alongside binaries, so source-only API breaks
+      (e.g. an enum-member rename) are acceptable. The sdk_vendor policy
+      downgrades them to COMPATIBLE (exit 0) where strict_abi reports an API
+      break (exit 2).
+    flow:
+      - abicheck compare old.json new.json --policy sdk_vendor
+    expected:
+      exit_code: 0
+      strict_exit_code: 2
+    validates: UC-WF-compare
+    automated: true
+    test: test_sc_policy_profile

@@ -659,6 +659,7 @@ def render_output(
     show_impact: bool = False,
     stat: bool = False,
     severity_config: SeverityConfig | None = None,
+    show_recommendation: bool = False,
 ) -> str:
     """Render comparison result in the requested output format.
 
@@ -711,6 +712,7 @@ def render_output(
     md = to_markdown(
         result, show_only=show_only, report_mode=report_mode,
         show_impact=show_impact, severity_config=severity_config,
+        show_recommendation=show_recommendation,
     )
     if follow_deps and (old.dependency_info or (new and new.dependency_info)):
         md += _render_deps_section_md(old, new)

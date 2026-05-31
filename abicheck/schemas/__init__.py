@@ -40,7 +40,8 @@ from pathlib import Path
 from typing import Any
 
 #: SemVer-style (MAJOR.MINOR) version of the compare-report JSON schema.
-REPORT_SCHEMA_VERSION = "1.0"
+#: 1.1 — added the optional ``release_recommendation`` object (additive).
+REPORT_SCHEMA_VERSION = "1.1"
 
 _SCHEMA_DIR = Path(__file__).resolve().parent
 COMPARE_REPORT_SCHEMA_PATH = _SCHEMA_DIR / "compare_report.schema.json"

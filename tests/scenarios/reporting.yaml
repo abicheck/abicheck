@@ -1,0 +1,53 @@
+# Scenario group: report formats for downstream consumers (CI dashboards,
+# code scanning, humans). Persona: AppSec / CI engineer / reviewer.
+#
+# See tests/scenarios/README.md for the catalog format and how it is validated.
+schema_version: 1
+
+scenarios:
+  - id: SC-SCAN-SARIF
+    title: Produce SARIF for GitHub Code Scanning
+    persona: AppSec / security engineer
+    narrative: >
+      A security team runs abicheck as a scanner in CI and uploads SARIF to
+      GitHub Code Scanning. The tool must emit valid SARIF 2.1.0 with one result
+      per finding, so breaks surface as code-scanning alerts.
+    flow:
+      - abicheck compare old.json new.json --format sarif -o abi.sarif
+    expected:
+      exit_code: 4
+      sarif: true
+    validates: UC-REP-sarif
+    automated: true
+    test: test_sc_scan_sarif
+
+  - id: SC-SCAN-JUNIT
+    title: Produce JUnit XML for CI test dashboards
+    persona: CI engineer
+    narrative: >
+      A pipeline renders ABI results alongside unit tests in its JUnit
+      dashboard (GitLab CI, Jenkins, Azure DevOps); each finding is a testcase
+      and breaks are failures.
+    flow:
+      - abicheck compare old.json new.json --format junit -o abi-junit.xml
+    expected:
+      exit_code: 4
+      output_contains: "<testsuites"
+    validates: UC-REP-junit
+    automated: true
+    test: test_sc_scan_junit
+
+  - id: SC-SCAN-HTML
+    title: Produce a self-contained HTML report for human review
+    persona: Reviewer / maintainer
+    narrative: >
+      A reviewer wants a readable, shareable report (embedded CSS, no external
+      assets) attached to a release or PR.
+    flow:
+      - abicheck compare old.json new.json --format html -o abi.html
+    expected:
+      exit_code: 4
+      output_contains: "<!DOCTYPE html>"
+    validates: UC-REP-markdown-html
+    automated: true
+    test: test_sc_scan_html

@@ -81,6 +81,17 @@ nav:
   - Development:
     - Goals: development/goals.md
     - Backlog: development/backlog.md
+    - User Scenarios & Flows: development/user-scenarios.md
+    - Use-Case Coverage Evaluation: development/usecase-coverage-evaluation.md
+    - Implementation Plans:
+      - Overview: development/plans/index.md
+      - "G1: Cross-platform e2e": development/plans/g1-cross-platform-e2e.md
+      - "G2: Build-config & bundle": development/plans/g2-build-config-and-bundle.md
+      - "G3: Workflow examples & reporting": development/plans/g3-workflow-examples-and-reporting.md
+      - "G4: Header-AST extractor": development/plans/g4-header-ast-extractor.md
+      - "G5: Plugin contract": development/plans/g5-plugin-bidirectional-contract.md
+      - "G6: Kernel BTF & accelerator": development/plans/g6-kernel-btf-and-accelerator.md
+      - "G8: Static libraries": development/plans/g8-static-libraries.md
     - Codebase Overview: development/codebase-overview.md
     - Testing: development/testing.md
     - Report Comparison: development/report-comparison.md
