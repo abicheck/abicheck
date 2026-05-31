@@ -428,7 +428,9 @@ def _run_abicheck(
             old_snap = dump(old, headers=headers_v1, version="v1", compiler=compiler, lang=lang)
             new_snap = dump(new, headers=headers_v2, version="v2", compiler=compiler, lang=lang)
 
-        result = compare(old_snap, new_snap)
+        # Parity baseline predates default scoping (ADR-024 Phase 5); compare
+        # unscoped for an apples-to-apples verdict against abi-compliance-checker.
+        result = compare(old_snap, new_snap, scope_to_public_surface=False)
         return result.verdict.value
     except Exception as exc:  # noqa: BLE001
         return f"ERROR: {exc}"

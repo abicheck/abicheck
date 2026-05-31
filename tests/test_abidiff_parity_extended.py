@@ -154,7 +154,9 @@ def _run_abicheck(old, new, hdr_v1, hdr_v2, lang, tmp_path):
         old_snap = dump(old, headers=headers_v1, version="v1", compiler=compiler)
         new_snap = dump(new, headers=headers_v2, version="v2", compiler=compiler)
 
-    result = compare(old_snap, new_snap)
+    # Parity baseline is abidiff without --headers-dir (unscoped); run abicheck
+    # unscoped too (surface scoping is default-on since ADR-024 Phase 5).
+    result = compare(old_snap, new_snap, scope_to_public_surface=False)
     return result.verdict.value
 
 
