@@ -17,6 +17,7 @@ from abicheck.model import ScopeOrigin
 from abicheck.pdb_metadata import parse_pdb_debug_info
 from abicheck.pdb_model import model_types_from_dwarf_metadata
 from abicheck.pdb_parser import (
+    LF_ENUM,
     LF_FIELDLIST,
     LF_STRING_ID,
     LF_STRUCTURE,
@@ -31,6 +32,8 @@ from abicheck.provenance import apply_provenance
 from tests.test_pdb_parser import (
     _build_minimal_pdb,
     _build_tpi_stream,
+    _make_lf_enum,
+    _make_lf_enumerate,
     _make_lf_fieldlist,
     _make_lf_member,
     _make_lf_structure,
@@ -123,6 +126,36 @@ class TestExtractUdtSourceFiles:
             )
         )
         assert _resolve_udt_source_files(ipi, types) == {"Vec3": "include/vec.h"}
+
+    def test_resolve_enum_udt_name(self) -> None:
+        # The enum branch of _resolve_udt_source_files: an LF_ENUM at ti 0x1001.
+        tpi = parse_tpi_stream(
+            _build_tpi_stream(
+                [
+                    (LF_FIELDLIST, _make_lf_fieldlist([_make_lf_enumerate(0, 0, "A")])),
+                    (LF_ENUM, _make_lf_enum(1, 0, 0x74, 0x1000, "Color")),
+                ]
+            )
+        )
+        types = TypeDatabase(tpi)
+        types.parse_all()
+        ipi = parse_tpi_stream(
+            _build_ipi_stream(
+                [
+                    (LF_STRING_ID, _string_id("include/color.h")),
+                    (LF_UDT_SRC_LINE, _udt_src_line(0x1001, 0x1000, 3)),
+                ]
+            )
+        )
+        assert _resolve_udt_source_files(ipi, types) == {"Color": "include/color.h"}
+
+    def test_resolve_empty_when_no_src_lines(self) -> None:
+        # No UDT_SRC_LINE records → empty map (early-return branch).
+        tpi = parse_tpi_stream(_build_tpi_stream([]))
+        types = TypeDatabase(tpi)
+        types.parse_all()
+        ipi = parse_tpi_stream(_build_ipi_stream([(LF_STRING_ID, _string_id("x.h"))]))
+        assert _resolve_udt_source_files(ipi, types) == {}
 
     def test_first_definition_wins(self) -> None:
         ipi = parse_tpi_stream(
@@ -343,3 +376,53 @@ class TestParsePdbEndToEnd:
         by_name = {t.name: t for t in snap.types}
         assert by_name["PublicType"].origin == ScopeOrigin.PUBLIC_HEADER
         assert by_name["PrivateType"].origin == ScopeOrigin.PRIVATE_HEADER
+
+
+class TestDumpPeFallbackBuildsPdbTypes:
+    """service._dump_pe recovers PDB-derived model types (with provenance) on
+    the header-scoping fallback branch (ADR-024 Phase 1, PE path)."""
+
+    def test_pdb_types_built_on_mangling_fallback(self, tmp_path, monkeypatch):
+        import types as _t
+        import warnings as _w
+
+        from abicheck import service
+        from abicheck.model import ScopeOrigin as _SO
+
+        hdr = tmp_path / "api.h"
+        hdr.write_text("struct Widget { int x; };\n")
+
+        # Fake PE metadata: one named export, valid machine.
+        fake_pe = _t.SimpleNamespace(
+            machine="AMD64",
+            exports=[_t.SimpleNamespace(name="Api", ordinal=1)],
+        )
+        monkeypatch.setattr(
+            "abicheck.pe_metadata.parse_pe_metadata", lambda p: fake_pe
+        )
+        # PDB debug info with a public-header type.
+        meta = DwarfMetadata(has_dwarf=True)
+        meta.structs["Widget"] = StructLayout(
+            name="Widget", byte_size=4, decl_file="api.h"
+        )
+        monkeypatch.setattr(service, "_extract_pdb_debug", lambda p, pp: (meta, None))
+        # Header scoping falls back (castxml/mangling gap).
+        monkeypatch.setattr(
+            service, "_try_header_scoped_dump", lambda *a, **k: (None, "mangling-fallback")
+        )
+
+        with _w.catch_warnings():
+            _w.simplefilter("ignore")
+            snap = service._dump_pe(
+                tmp_path / "lib.dll", "1", headers=[hdr], includes=[], lang="c++"
+            )
+        # PDB type recovered into the model with its source header, and the
+        # structured fallback signal recorded.
+        assert snap.scope_fallback == "mangling-fallback"
+        names = {t.name: t for t in snap.types}
+        assert "Widget" in names
+        assert names["Widget"].source_location == "api.h"
+        # apply_provenance (run by the CLI wrapper) would then classify it; here
+        # we confirm the type reached the model so provenance is possible.
+        apply_provenance(snap, public_headers=[hdr], public_header_dirs=None)
+        assert names["Widget"].origin == _SO.PUBLIC_HEADER

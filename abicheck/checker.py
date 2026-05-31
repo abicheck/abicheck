@@ -261,9 +261,12 @@ def compare(
     )
 
     # ADR-024 §D5.3: structured confidence in the surface resolution itself.
+    # Reuse the surfaces FilterNonPublicSurface already computed (when scoping
+    # ran) to avoid repeating the type-closure walk.
     from .surface import surface_scope_confidence
     scope_confidence, scope_notes = surface_scope_confidence(
         old, new, scope_enabled=scope_to_public_surface,
+        surf_old=pp_ctx.surf_old, surf_new=pp_ctx.surf_new,
     )
 
     return DiffResult(

@@ -334,6 +334,8 @@ def surface_scope_confidence(
     new: AbiSnapshot,
     *,
     scope_enabled: bool,
+    surf_old: PublicSurface | None = None,
+    surf_new: PublicSurface | None = None,
 ) -> tuple[str, list[str]]:
     """Summarise confidence in the header-scope resolution (ADR-024 §D5.3).
 
@@ -342,6 +344,11 @@ def surface_scope_confidence(
     note codes. ``"high"`` with no notes is the clean case. The dumper records
     the per-snapshot ``scope_fallback`` signal (castxml/mangling); a resolvable
     surface that nonetheless lacks provenance adds ``no-provenance``.
+
+    ``surf_old`` / ``surf_new`` may be passed when the caller has already run
+    :func:`compute_public_surface` (e.g. the ``FilterNonPublicSurface`` pipeline
+    step) to avoid repeating the type-closure walk; otherwise they are computed
+    on demand.
     """
     notes: list[str] = []
 
@@ -353,8 +360,8 @@ def surface_scope_confidence(
         _add(getattr(snap, "scope_fallback", None))
 
     if scope_enabled:
-        s_old = compute_public_surface(old)
-        s_new = compute_public_surface(new)
+        s_old = surf_old if surf_old is not None else compute_public_surface(old)
+        s_new = surf_new if surf_new is not None else compute_public_surface(new)
         # Flag reduced confidence when *any* resolvable side was scoped without
         # provenance — a mixed comparison (one side has provenance, the other
         # resolvable side does not) is still only half-trustworthy, so the note
