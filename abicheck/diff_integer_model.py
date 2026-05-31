@@ -26,7 +26,7 @@ from __future__ import annotations
 from .checker_policy import ChangeKind
 from .checker_types import Change
 from .detector_registry import registry
-from .model import AbiSnapshot, Visibility
+from .model import AbiSnapshot, Function, Visibility
 
 # Canonical integer-width buckets. A change that moves a spelling from one
 # bucket to a *different* bucket (and is not a sign-only change) is a width flip.
@@ -77,31 +77,14 @@ def _int_width_bucket(type_str: object, is_llp64: bool = False) -> str | None:
     return _INT_WIDTH_BUCKETS.get(t)
 
 
-@registry.detector("integer_model")
-def _diff_integer_model(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
-    """Detect an LP64<->ILP64 integer-model switch (e.g. oneMKL MKL_INT 32<->64).
-
-    Conservative, mirrors the glibcxx dual-ABI detector: only fires when a
-    meaningful number of public integer parameters/returns flip width together,
-    OR a public integer-named typedef changes its underlying width. Reports ONE
-    grouped diagnostic; per-symbol findings are still emitted separately by the
-    symbol diff.
-    """
-    changes: list[Change] = []
-
-    # Windows/LLP64: ``long`` is 32-bit, so int<->long is NOT a model flip there.
-    is_llp64 = "pe" in (old.platform, new.platform)
-
-    old_map = {f.mangled: f for f in old.functions if f.visibility == Visibility.PUBLIC}
-    new_map = {f.mangled: f for f in new.functions if f.visibility == Visibility.PUBLIC}
-    common = set(old_map) & set(new_map)
-
-    flips = 0  # integer slots that moved to a different width bucket
-    total = 0  # integer slots present (same kind) in both versions
-    up = 0     # 32 -> 64 transitions
-    down = 0   # 64 -> 32 transitions
-
-    for key in common:
+def _scan_function_integer_flips(
+    old_map: dict[str, Function],
+    new_map: dict[str, Function],
+    is_llp64: bool,
+) -> tuple[int, int, int, int]:
+    """Return (flips, total, up, down) over matched public functions' int slots."""
+    flips = total = up = down = 0
+    for key in set(old_map) & set(new_map):
         of, nf = old_map[key], new_map[key]
         slots: list[tuple[object, object]] = [(of.return_type, nf.return_type)]
         for op, npm in zip(of.params, nf.params):
@@ -118,10 +101,15 @@ def _diff_integer_model(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                     up += 1
                 elif ob == "64" and nb == "32":
                     down += 1
+    return flips, total, up, down
 
-    # Typedef corroboration: an integer-named typedef whose underlying width
-    # changed bucket (typedefs are name -> underlying-type-string in the model).
+
+def _scan_typedef_integer_flips(
+    old: AbiSnapshot, new: AbiSnapshot, is_llp64: bool
+) -> tuple[list[str], int, int]:
+    """Return (descriptions, up, down) for integer-named typedefs that changed width."""
     typedef_flips: list[str] = []
+    up = down = 0
     for name, old_under in old.typedefs.items():
         new_under = new.typedefs.get(name)
         if new_under is None:
@@ -136,19 +124,18 @@ def _diff_integer_model(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                 up += 1
             else:
                 down += 1
+    return typedef_flips, up, down
 
-    # Conservative thresholds (like the dual-ABI detector): require either a
-    # meaningful count + ratio of flips, or a corroborating integer typedef.
-    enough_func_flips = flips >= 4 and total > 0 and flips >= total * 0.5
-    if not enough_func_flips and not typedef_flips:
-        return changes
 
-    direction = (
-        "LP64 → ILP64 (32-bit → 64-bit)"
-        if up >= down
-        else "ILP64 → LP64 (64-bit → 32-bit)"
-    )
+def _integer_model_direction(up: int, down: int) -> str:
+    """Return the human-readable transition direction string."""
+    if up >= down:
+        return "LP64 → ILP64 (32-bit → 64-bit)"
+    return "ILP64 → LP64 (64-bit → 32-bit)"
 
+
+def _integer_model_detail(flips: int, total: int, typedef_flips: list[str]) -> str:
+    """Build the detail sentence describing what flipped width."""
     detail_bits = []
     if flips:
         detail_bits.append(
@@ -158,9 +145,40 @@ def _diff_integer_model(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         detail_bits.append(
             "integer typedef(s) resized: " + ", ".join(sorted(typedef_flips))
         )
-    detail = "; ".join(detail_bits)
+    return "; ".join(detail_bits)
 
-    changes.append(Change(
+
+@registry.detector("integer_model")
+def _diff_integer_model(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
+    """Detect an LP64<->ILP64 integer-model switch (e.g. oneMKL MKL_INT 32<->64).
+
+    Conservative, mirrors the glibcxx dual-ABI detector: only fires when a
+    meaningful number of public integer parameters/returns flip width together,
+    OR a public integer-named typedef changes its underlying width. Reports ONE
+    grouped diagnostic; per-symbol findings are still emitted separately by the
+    symbol diff.
+    """
+    # Windows/LLP64: ``long`` is 32-bit, so int<->long is NOT a model flip there.
+    is_llp64 = "pe" in (old.platform, new.platform)
+
+    old_map = {f.mangled: f for f in old.functions if f.visibility == Visibility.PUBLIC}
+    new_map = {f.mangled: f for f in new.functions if f.visibility == Visibility.PUBLIC}
+
+    flips, total, up, down = _scan_function_integer_flips(old_map, new_map, is_llp64)
+    typedef_flips, typedef_up, typedef_down = _scan_typedef_integer_flips(old, new, is_llp64)
+    up += typedef_up
+    down += typedef_down
+
+    # Conservative thresholds (like the dual-ABI detector): require either a
+    # meaningful count + ratio of flips, or a corroborating integer typedef.
+    enough_func_flips = flips >= 4 and total > 0 and flips >= total * 0.5
+    if not enough_func_flips and not typedef_flips:
+        return []
+
+    direction = _integer_model_direction(up, down)
+    detail = _integer_model_detail(flips, total, typedef_flips)
+
+    return [Change(
         kind=ChangeKind.INTEGER_MODEL_CHANGED,
         symbol="__integer_model",
         description=(
@@ -171,6 +189,4 @@ def _diff_integer_model(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         ),
         old_value=f"{down} narrowing / {up} widening transitions",
         new_value=direction,
-    ))
-
-    return changes
+    )]

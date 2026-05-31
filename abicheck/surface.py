@@ -143,16 +143,12 @@ def _symbol_keys(name: str, mangled: str) -> set[str]:
     return keys
 
 
-def compute_public_surface(snap: AbiSnapshot) -> PublicSurface:
-    """Compute the public-ABI surface of *snap*.
+def _index_surface_types(snap: AbiSnapshot, surface: PublicSurface) -> dict[str, RecordType]:
+    """Populate ``surface.all_types`` and return a name -> record index.
 
-    Public roots are :data:`Visibility.PUBLIC` functions/variables. The
-    public type set is the transitive closure over the types they
-    reference (returns, params, fields, bases, typedef targets).
+    Records are indexed by both their full name and (for namespaced types) the
+    trailing ``::`` segment, so the closure walk can match either encoding.
     """
-    surface = PublicSurface()
-
-    # Build the type universe and a name -> record index for closure walks.
     record_by_name: dict[str, RecordType] = {}
     for rec in snap.types:
         surface.all_types.add(rec.name)
@@ -163,8 +159,15 @@ def compute_public_surface(snap: AbiSnapshot) -> PublicSurface:
         surface.all_types.add(en.name)
     for alias in snap.typedefs:
         surface.all_types.add(alias)
+    return record_by_name
 
-    # Seed roots from public symbols; collect the type names they touch.
+
+def _seed_public_roots(snap: AbiSnapshot, surface: PublicSurface) -> tuple[set[str], bool]:
+    """Record public symbols on *surface*; return (seed type names, has_public).
+
+    Seeds the type-closure work-list from the return/parameter/variable types of
+    every :data:`Visibility.PUBLIC` function and variable.
+    """
     seed_types: set[str] = set()
     has_public = False
     for fn in snap.functions:
@@ -183,15 +186,20 @@ def compute_public_surface(snap: AbiSnapshot) -> PublicSurface:
             has_public = True
             surface.public_symbols |= keys
             seed_types |= _type_identifiers(var.type)
+    return seed_types, has_public
 
-    # Scoping only makes sense when we actually have header-derived public
-    # visibility. Without headers every symbol is ELF_ONLY (ADR-016) and a
-    # surface filter would hide everything — so declare it unresolvable.
-    surface.resolvable = has_public and not getattr(snap, "elf_only_mode", False)
-    if not surface.resolvable:
-        return surface
 
-    # Transitive closure over the record/typedef graph.
+def _walk_type_closure(
+    snap: AbiSnapshot,
+    surface: PublicSurface,
+    record_by_name: dict[str, RecordType],
+    seed_types: set[str],
+) -> None:
+    """Transitive closure over the record/typedef graph; fills public_types.
+
+    Follows typedef targets, record fields, and base classes from each seed
+    type, marking every reachable known type as part of the public surface.
+    """
     queue = list(seed_types)
     seen: set[str] = set()
     while queue:
@@ -218,6 +226,32 @@ def compute_public_surface(snap: AbiSnapshot) -> PublicSurface:
             for ident in _type_identifiers(base):
                 if ident not in seen:
                     queue.append(ident)
+
+
+def compute_public_surface(snap: AbiSnapshot) -> PublicSurface:
+    """Compute the public-ABI surface of *snap*.
+
+    Public roots are :data:`Visibility.PUBLIC` functions/variables. The
+    public type set is the transitive closure over the types they
+    reference (returns, params, fields, bases, typedef targets).
+    """
+    surface = PublicSurface()
+
+    # Build the type universe and a name -> record index for closure walks.
+    record_by_name = _index_surface_types(snap, surface)
+
+    # Seed roots from public symbols; collect the type names they touch.
+    seed_types, has_public = _seed_public_roots(snap, surface)
+
+    # Scoping only makes sense when we actually have header-derived public
+    # visibility. Without headers every symbol is ELF_ONLY (ADR-016) and a
+    # surface filter would hide everything — so declare it unresolvable.
+    surface.resolvable = has_public and not getattr(snap, "elf_only_mode", False)
+    if not surface.resolvable:
+        return surface
+
+    # Transitive closure over the record/typedef graph.
+    _walk_type_closure(snap, surface, record_by_name, seed_types)
     return surface
 
 

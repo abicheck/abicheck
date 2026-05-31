@@ -148,6 +148,44 @@ def _build_version_index(
     return ver_idx_to_lib
 
 
+def _symbol_version_index(versym_section: object | None, idx: int) -> int:
+    """Return the .gnu.version index for symbol *idx* (1 = unversioned/global)."""
+    if versym_section is None:
+        return 1
+    try:
+        ver_entry = versym_section.get_symbol(idx)
+        ver_ndx = ver_entry.entry["ndx"]
+        if isinstance(ver_ndx, str):
+            return 0 if ver_ndx == "VER_NDX_LOCAL" else 1
+        return int(ver_ndx) & 0x7FFF  # Mask off hidden bit.
+    except (IndexError, KeyError):
+        return 1
+
+
+def _symbol_from_target_library(
+    sym_name: str,
+    binding: str,
+    ver_ndx: int,
+    reqs: AppRequirements,
+    library_soname: str,
+    ver_idx_to_lib: dict[int, str],
+    versym_section: object | None,
+) -> bool:
+    """Return whether an undefined symbol is imported from the target library."""
+    if not library_soname:
+        return True
+    from .elf_metadata import _guess_symbol_origin
+
+    # With versioning, a concrete version index (>= 2) maps directly to a lib.
+    if versym_section is not None and ver_ndx >= 2:
+        return ver_idx_to_lib.get(ver_ndx, "") == library_soname
+    # Otherwise fall back to a heuristic on the symbol name / weak binding.
+    origin = _guess_symbol_origin(sym_name, reqs.needed_libs)
+    if origin is not None:
+        return origin == library_soname
+    return binding != "STB_WEAK"
+
+
 def _collect_undefined_symbols(
     elf: object,
     reqs: AppRequirements,
@@ -158,52 +196,27 @@ def _collect_undefined_symbols(
     """Read undefined symbols from .dynsym, filtered by target library."""
     from elftools.elf.sections import SymbolTableSection
 
-    def _version_index_for_symbol(idx: int) -> int:
-        if versym_section is None:
-            return 1
-        try:
-            ver_entry = versym_section.get_symbol(idx)
-            ver_ndx = ver_entry.entry["ndx"]
-            if isinstance(ver_ndx, str):
-                return 0 if ver_ndx == "VER_NDX_LOCAL" else 1
-            return int(ver_ndx) & 0x7FFF  # Mask off hidden bit.
-        except (IndexError, KeyError):
-            return 1
-
-    def _is_symbol_from_target_library(sym_name: str, binding: str, ver_ndx: int) -> bool:
-        if not library_soname:
-            return True
-        from .elf_metadata import _guess_symbol_origin
-        if versym_section is None:
-            origin = _guess_symbol_origin(sym_name, reqs.needed_libs)
-            if origin is not None:
-                return origin == library_soname
-            return binding != "STB_WEAK"
-        if ver_ndx >= 2:
-            source_lib = ver_idx_to_lib.get(ver_ndx, "")
-            return source_lib == library_soname
-
-        origin = _guess_symbol_origin(sym_name, reqs.needed_libs)
-        if origin is not None:
-            return origin == library_soname
-        return binding != "STB_WEAK"
-
     for section in elf.iter_sections():
-        if isinstance(section, SymbolTableSection) and section.name == ".dynsym":
-            for idx, sym in enumerate(section.iter_symbols()):
-                if sym.entry.st_shndx != "SHN_UNDEF":
-                    continue
-                if not sym.name:
-                    continue
-                binding = sym.entry.st_info.bind
-                if binding not in ("STB_GLOBAL", "STB_WEAK"):
-                    continue
-
-                ver_ndx = _version_index_for_symbol(idx)
-                if not _is_symbol_from_target_library(sym.name, binding, ver_ndx):
-                    continue
-
-                reqs.undefined_symbols.add(sym.name)
+        if not (isinstance(section, SymbolTableSection) and section.name == ".dynsym"):
+            continue
+        for idx, sym in enumerate(section.iter_symbols()):
+            if sym.entry.st_shndx != "SHN_UNDEF" or not sym.name:
+                continue
+            binding = sym.entry.st_info.bind
+            if binding not in ("STB_GLOBAL", "STB_WEAK"):
+                continue
+            ver_ndx = _symbol_version_index(versym_section, idx)
+            if not _symbol_from_target_library(
+                sym.name,
+                binding,
+                ver_ndx,
+                reqs,
+                library_soname,
+                ver_idx_to_lib,
+                versym_section,
+            ):
+                continue
+            reqs.undefined_symbols.add(sym.name)
 
 
 def _parse_elf_app_requirements(

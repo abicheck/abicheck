@@ -1117,6 +1117,99 @@ def _exit_with_severity_or_verdict(
             sys.exit(2)
 
 
+def _log_one_side_debug(
+    label: str, binary: Path, droots: list[Path],
+    *,
+    debuginfod: bool, debuginfod_url: str | None,
+) -> None:
+    """Resolve and log debug info for a single binary side, if applicable."""
+    if _detect_binary_format(binary) is None or not (droots or debuginfod):
+        return
+    from .debug_resolver import resolve_debug_info
+
+    artifact = resolve_debug_info(
+        binary,
+        debug_roots=droots or None,
+        enable_debuginfod=debuginfod,
+        debuginfod_urls=[debuginfod_url] if debuginfod_url else None,
+    )
+    if artifact:
+        click.echo(f"Debug info ({label}): {artifact.source}", err=True)
+
+
+def _log_debug_resolution(
+    old_input: Path, new_input: Path,
+    resolved_old_debug: list[Path], resolved_new_debug: list[Path],
+    *,
+    debuginfod: bool, debuginfod_url: str | None,
+) -> None:
+    """Resolve and log per-side debug info (debug roots / debuginfod), if any."""
+    if not (resolved_old_debug or resolved_new_debug or debuginfod):
+        return
+    _log_one_side_debug(
+        "old", old_input, resolved_old_debug,
+        debuginfod=debuginfod, debuginfod_url=debuginfod_url,
+    )
+    _log_one_side_debug(
+        "new", new_input, resolved_new_debug,
+        debuginfod=debuginfod, debuginfod_url=debuginfod_url,
+    )
+
+
+def _resolve_compare_snapshots(
+    old_input: Path, new_input: Path,
+    old_fmt: str | None, new_fmt: str | None,
+    old_h: list[Path], new_h: list[Path],
+    old_inc: list[Path], new_inc: list[Path],
+    old_version: str, new_version: str, lang: str,
+    pdb_path: Path | None, old_pdb_path: Path | None, new_pdb_path: Path | None,
+    dwarf_only: bool, debug_format: str | None,
+    follow_deps: bool, search_paths: tuple[Path, ...], ld_library_path: str,
+) -> tuple[AbiSnapshot, AbiSnapshot]:
+    """Load both ABI snapshots and (optionally) populate ELF dependency info."""
+    old = _resolve_input(
+        old_input, old_h, old_inc, old_version, lang,
+        is_elf=True if old_fmt == "elf" else None,
+        pdb_path=old_pdb_path if old_pdb_path else pdb_path,
+        dwarf_only=dwarf_only,
+        debug_format=debug_format,
+    )
+    new = _resolve_input(
+        new_input, new_h, new_inc, new_version, lang,
+        is_elf=True if new_fmt == "elf" else None,
+        pdb_path=new_pdb_path if new_pdb_path else pdb_path,
+        dwarf_only=dwarf_only,
+        debug_format=debug_format,
+    )
+    if follow_deps:
+        if old_fmt == "elf":
+            _populate_dependency_info(old, old_input, list(search_paths), None, ld_library_path)
+        if new_fmt == "elf":
+            _populate_dependency_info(new, new_input, list(search_paths), None, ld_library_path)
+    return old, new
+
+
+def _finalize_compare_result(
+    result: DiffResult, old_input: Path, new_input: Path,
+    *,
+    show_redundant: bool, show_filtered: bool,
+    annotate: bool, annotate_additions: bool,
+) -> None:
+    """Attach metadata and emit redundancy/filter/suppression/annotation output."""
+    result.old_metadata = _collect_metadata(old_input)
+    result.new_metadata = _collect_metadata(new_input)
+
+    if show_redundant and result.redundant_changes:
+        _merge_redundant_changes(result)
+    if show_filtered and result.out_of_surface_changes:
+        _echo_filtered_surface(result)
+
+    _warn_all_suppressed(result)
+    _maybe_emit_annotations(
+        result, annotate=annotate, annotate_additions=annotate_additions
+    )
+
+
 @main.command("compare")
 @click.argument("old_input", type=click.Path(exists=True, path_type=Path))
 @click.argument("new_input", type=click.Path(exists=True, path_type=Path))
@@ -1364,46 +1457,22 @@ def compare_cmd(
         old_includes_only, new_includes_only,
     )
 
-    resolved_old_pdb = old_pdb_path if old_pdb_path else pdb_path
-    resolved_new_pdb = new_pdb_path if new_pdb_path else pdb_path
-
     # Resolve per-side debug roots: --debug-root1 overrides --debug-root for old, etc.
     resolved_old_debug = list(debug_roots_old) if debug_roots_old else list(debug_roots)
     resolved_new_debug = list(debug_roots_new) if debug_roots_new else list(debug_roots)
-
-    # Log debug resolution if roots are specified
-    if resolved_old_debug or resolved_new_debug or debuginfod:
-        from .debug_resolver import resolve_debug_info
-        for label, binary, droots in [
-            ("old", old_input, resolved_old_debug),
-            ("new", new_input, resolved_new_debug),
-        ]:
-            if _detect_binary_format(binary) is not None and (droots or debuginfod):
-                artifact = resolve_debug_info(
-                    binary,
-                    debug_roots=droots or None,
-                    enable_debuginfod=debuginfod,
-                    debuginfod_urls=[debuginfod_url] if debuginfod_url else None,
-                )
-                if artifact:
-                    click.echo(
-                        f"Debug info ({label}): {artifact.source}",
-                        err=True,
-                    )
-
-    old = _resolve_input(
-        old_input, old_h, old_inc, old_version, lang,
-        is_elf=True if old_fmt == "elf" else None,
-        pdb_path=resolved_old_pdb,
-        dwarf_only=dwarf_only,
-        debug_format=debug_format,
+    _log_debug_resolution(
+        old_input, new_input,
+        resolved_old_debug, resolved_new_debug,
+        debuginfod=debuginfod, debuginfod_url=debuginfod_url,
     )
-    new = _resolve_input(
-        new_input, new_h, new_inc, new_version, lang,
-        is_elf=True if new_fmt == "elf" else None,
-        pdb_path=resolved_new_pdb,
-        dwarf_only=dwarf_only,
-        debug_format=debug_format,
+
+    old, new = _resolve_compare_snapshots(
+        old_input, new_input, old_fmt, new_fmt,
+        old_h, new_h, old_inc, new_inc,
+        old_version, new_version, lang,
+        pdb_path, old_pdb_path, new_pdb_path,
+        dwarf_only, debug_format,
+        follow_deps, search_paths, ld_library_path,
     )
 
     suppression, pf = _load_suppression_and_policy(
@@ -1412,29 +1481,16 @@ def compare_cmd(
         require_justification=require_justification,
     )
 
-    if follow_deps:
-        if old_fmt == "elf":
-            _populate_dependency_info(old, old_input, list(search_paths), None, ld_library_path)
-        if new_fmt == "elf":
-            _populate_dependency_info(new, new_input, list(search_paths), None, ld_library_path)
-
     result = compare(
         old, new, suppression=suppression, policy=policy, policy_file=pf,
         scope_to_public_surface=scope_public_headers,
     )
 
-    result.old_metadata = _collect_metadata(old_input)
-    result.new_metadata = _collect_metadata(new_input)
-
-    if show_redundant and result.redundant_changes:
-        _merge_redundant_changes(result)
-
-    if show_filtered and result.out_of_surface_changes:
-        _echo_filtered_surface(result)
-
-    _warn_all_suppressed(result)
-
-    _maybe_emit_annotations(result, annotate=annotate, annotate_additions=annotate_additions)
+    _finalize_compare_result(
+        result, old_input, new_input,
+        show_redundant=show_redundant, show_filtered=show_filtered,
+        annotate=annotate, annotate_additions=annotate_additions,
+    )
 
     text = _render_output(
         fmt, result, old, new,

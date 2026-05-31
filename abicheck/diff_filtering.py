@@ -517,6 +517,44 @@ _ENUM_DEDUP_KINDS = frozenset({
 })
 
 
+def _type_used_by_value(type_str: str, bare_re: re.Pattern[str]) -> bool:
+    """True if ``type_str`` names the type without a trailing ``*``."""
+    if not bare_re.search(type_str):
+        return False
+    stripped = type_str.replace("const", "").replace("volatile", "").strip()
+    for token in stripped.split(","):
+        token = token.strip()
+        if bare_re.search(token) and "*" not in token:
+            # Token contains the bare type name without a pointer dereference.
+            # This covers both by-value (T) and reference (T&) semantics —
+            # both allow the caller to hold/inspect the type's size.
+            return True
+    return False
+
+
+def _public_function_uses_type_by_value(snap: AbiSnapshot, bare_re: re.Pattern[str]) -> bool:
+    """True if any PUBLIC function uses the type (matched by *bare_re*) by value."""
+    for f in snap.functions:
+        if f.visibility not in _PUBLIC_VIS:
+            continue
+        if _type_used_by_value(f.return_type, bare_re):
+            return True
+        for p in f.params:
+            if _type_used_by_value(p.type, bare_re):
+                return True
+    return False
+
+
+def _public_variable_uses_type_by_value(snap: AbiSnapshot, bare_re: re.Pattern[str]) -> bool:
+    """True if any PUBLIC variable uses the type (matched by *bare_re*) by value."""
+    for v in snap.variables:
+        if v.visibility not in _PUBLIC_VIS:
+            continue
+        if _type_used_by_value(v.type, bare_re):
+            return True
+    return False
+
+
 def _is_pointer_only_type(
     type_name: str, snap: AbiSnapshot,
     _re_cache: dict[str, re.Pattern[str]] | None = None,
@@ -538,42 +576,8 @@ def _is_pointer_only_type(
         if _re_cache is not None:
             _re_cache[type_name] = bare_re
 
-    def _is_by_value(type_str: str) -> bool:
-        """True if ``type_str`` names the type without a trailing ``*``."""
-        if not bare_re.search(type_str):
-            return False
-        stripped = type_str.replace("const", "").replace("volatile", "").strip()
-        for token in stripped.split(","):
-            token = token.strip()
-            if bare_re.search(token) and "*" not in token:
-                # Token contains the bare type name without a pointer dereference.
-                # This covers both by-value (T) and reference (T&) semantics —
-                # both allow the caller to hold/inspect the type's size.
-                return True
+    if _public_function_uses_type_by_value(snap, bare_re) or _public_variable_uses_type_by_value(snap, bare_re):
         return False
-
-    def _public_function_uses_by_value() -> bool:
-        for f in snap.functions:
-            if f.visibility not in _PUBLIC_VIS:
-                continue
-            if _is_by_value(f.return_type):
-                return True
-            for p in f.params:
-                if _is_by_value(p.type):
-                    return True
-        return False
-
-    def _public_variable_uses_by_value() -> bool:
-        for v in snap.variables:
-            if v.visibility not in _PUBLIC_VIS:
-                continue
-            if _is_by_value(v.type):
-                return True
-        return False
-
-    if _public_function_uses_by_value() or _public_variable_uses_by_value():
-        return False
-
     return True
 
 
