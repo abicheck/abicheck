@@ -65,6 +65,46 @@ _NEVER_FILTER_KIND_NAMES: frozenset[str] = frozenset(
     }
 )
 
+# Findings whose ``symbol`` field identifies a type (or a member under a type)
+# rather than a function/variable symbol. These must be classified through
+# type reachability before consulting the symbol universe: in C++ especially,
+# a public type name can collide with a hidden constructor/destructor or helper
+# symbol of the same spelling.
+_TYPE_LEVEL_KIND_NAMES: frozenset[str] = frozenset(
+    {
+        "type_size_changed",
+        "type_alignment_changed",
+        "type_field_removed",
+        "type_field_added",
+        "type_field_offset_changed",
+        "type_field_type_changed",
+        "type_base_changed",
+        "type_vtable_changed",
+        "type_added",
+        "type_removed",
+        "type_field_added_compatible",
+        "enum_member_removed",
+        "enum_member_added",
+        "enum_member_value_changed",
+        "enum_last_member_value_changed",
+        "typedef_removed",
+        "typedef_base_changed",
+        "field_bitfield_changed",
+        "union_field_added",
+        "union_field_removed",
+        "union_field_type_changed",
+        "struct_size_changed",
+        "struct_field_offset_changed",
+        "struct_field_removed",
+        "struct_field_type_changed",
+        "struct_alignment_changed",
+        "enum_underlying_size_changed",
+        "struct_packing_changed",
+        "type_visibility_changed",
+        "value_abi_trait_changed",
+    }
+)
+
 # Tokens that are type qualifiers / keywords, not type names.
 _TYPE_NOISE: frozenset[str] = frozenset(
     {
@@ -456,24 +496,32 @@ def classify_change_surface(
     all_types = surf_old.all_types | surf_new.all_types
 
     sym = change.symbol or ""
+    candidates = _type_identifiers(sym) | _type_identifiers(change.caused_by_type)
+
+    # Type-level findings must not be classified via the symbol universe first:
+    # a public type such as ``Foo`` can legitimately collide with a hidden
+    # constructor/destructor/helper symbol named ``Foo``. In that case the
+    # layout change's ``symbol`` still denotes the type, so reachability decides.
+    type_level_finding = change.kind.value in _TYPE_LEVEL_KIND_NAMES
+
     # Symbol-level finding (function/variable): public iff a public symbol.
     # A confident private/system-header origin demotes even an exported
     # symbol — that is exactly the leaked-private-header case scoping targets.
-    if sym in all_symbols:
-        reason = _origin_reason(surf_old, surf_new, sym)
-        if reason is not None:
-            return False, reason
-        return (True, None) if sym in public_symbols else (False, REASON_NOT_EXPORTED)
-    if sym and "::" in sym and sym.rsplit("::", 1)[1] in all_symbols:
-        tail = sym.rsplit("::", 1)[1]
-        reason = _origin_reason(surf_old, surf_new, tail)
-        if reason is not None:
-            return False, reason
-        return (True, None) if tail in public_symbols else (False, REASON_NOT_EXPORTED)
+    if not type_level_finding:
+        if sym in all_symbols:
+            reason = _origin_reason(surf_old, surf_new, sym)
+            if reason is not None:
+                return False, reason
+            return (True, None) if sym in public_symbols else (False, REASON_NOT_EXPORTED)
+        if sym and "::" in sym and sym.rsplit("::", 1)[1] in all_symbols:
+            tail = sym.rsplit("::", 1)[1]
+            reason = _origin_reason(surf_old, surf_new, tail)
+            if reason is not None:
+                return False, reason
+            return (True, None) if tail in public_symbols else (False, REASON_NOT_EXPORTED)
 
     # Type-level finding: check the implicated type name(s). A finding is
     # in-surface if *any* implicated type is reachable from the public API.
-    candidates = _type_identifiers(sym) | _type_identifiers(change.caused_by_type)
 
     # Anti-hiding (ADR-024 §D5.2): never filter a change to an
     # internal-namespace type (``detail::``, ``impl::``, …). The internal-leak
