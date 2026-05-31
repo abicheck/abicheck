@@ -228,6 +228,8 @@ def to_sarif(
                         {
                             "surfaceScope": {
                                 "enabled": True,
+                                "confidence": result.surface_scope_confidence,
+                                "notes": list(result.surface_scope_notes),
                                 "outOfSurfaceCount": result.out_of_surface_count,
                                 "outOfSurfaceChanges": [
                                     {

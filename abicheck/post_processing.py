@@ -30,6 +30,7 @@ if TYPE_CHECKING:
     from .checker_types import Change
     from .model import AbiSnapshot
     from .suppression import SuppressionList
+    from .surface import PublicSurface
 
 
 @dataclass
@@ -58,6 +59,11 @@ class PipelineContext:
     # finding). Consumers surface this as "manual review required" — scoping
     # must never silently read as confident compatibility (issue #235).
     scope_fell_back: bool = False
+    # Public surfaces computed by FilterNonPublicSurface, cached here so the
+    # caller can reuse them (e.g. surface_scope_confidence) instead of repeating
+    # the type-closure walk. None when scoping was not run.
+    surf_old: PublicSurface | None = None
+    surf_new: PublicSurface | None = None
     # Accumulated side-outputs
     opaque_filtered: list[Change] = field(default_factory=list)
     suppressed: list[Change] = field(default_factory=list)
@@ -248,6 +254,9 @@ class FilterNonPublicSurface:
 
         surf_old = compute_public_surface(ctx.old)
         surf_new = compute_public_surface(ctx.new)
+        # Cache for reuse (surface_scope_confidence) — avoids a second walk.
+        ctx.surf_old = surf_old
+        ctx.surf_new = surf_new
         if not (surf_old.resolvable or surf_new.resolvable):
             # No header-derived surface to scope against — keep everything and
             # record the fallback so the verdict is not mistaken for a

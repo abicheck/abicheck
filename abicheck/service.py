@@ -32,7 +32,7 @@ from typing import TYPE_CHECKING
 from .checker import compare
 from .checker_types import DiffResult, LibraryMetadata
 from .errors import AbicheckError, SnapshotError, ValidationError
-from .model import AbiSnapshot, Function, Visibility
+from .model import AbiSnapshot, EnumType, Function, RecordType, Visibility
 from .reporter import to_json, to_markdown, to_stat, to_stat_json
 from .serialization import load_snapshot
 
@@ -328,14 +328,16 @@ def _try_header_scoped_dump(
     includes: list[Path],
     version: str,
     lang: str,
-) -> AbiSnapshot | None:
+) -> tuple[AbiSnapshot | None, str | None]:
     """Attempt a castxml header-scoped dump for a PE/Mach-O binary.
 
-    Returns the header-scoped snapshot when castxml is available *and* at least
-    one declared symbol matched the export table.  Returns ``None`` (after
+    Returns ``(snapshot, None)`` when castxml is available *and* at least one
+    declared symbol matched the export table.  Returns ``(None, reason)`` (after
     emitting a ``UserWarning``) when scoping is unavailable or had no effect, so
-    the caller can fall back to export-table mode.  This mirrors the public-API
-    scoping that ``abidw --headers-dir`` / abi-dumper apply for ELF.
+    the caller can fall back to export-table mode and record the structured
+    confidence signal (ADR-024 §D5.3).  ``reason`` is one of
+    ``"castxml-unavailable"`` / ``"mangling-fallback"``.  This mirrors the
+    public-API scoping that ``abidw --headers-dir`` / abi-dumper apply for ELF.
     """
     from .dumper import _dump_macho as _dumper_macho
     from .dumper import _dump_pe as _dumper_pe
@@ -362,7 +364,7 @@ def _try_header_scoped_dump(
             UserWarning,
             stacklevel=2,
         )
-        return None
+        return None, "castxml-unavailable"
 
     if not _has_matched_public_surface(snap):
         warnings.warn(
@@ -374,8 +376,8 @@ def _try_header_scoped_dump(
             UserWarning,
             stacklevel=2,
         )
-        return None
-    return snap
+        return None, "mangling-fallback"
+    return snap, None
 
 
 def _extract_pdb_debug(
@@ -439,8 +441,9 @@ def _dump_pe(
 
     dwarf_meta, dwarf_adv = _extract_pdb_debug(path, pdb_path)
 
+    scope_fallback: str | None = None
     if headers:
-        scoped = _try_header_scoped_dump(
+        scoped, scope_fallback = _try_header_scoped_dump(
             "pe", path, headers, includes or [], version, lang,
         )
         if scoped is not None:
@@ -461,12 +464,25 @@ def _dump_pe(
         for exp in pe_meta.exports
     ]
 
+    # ADR-024 Phase 1 (PDB provenance): when header scoping was requested but
+    # castxml could not resolve a surface (commonly the MSVC C++-mangling gap),
+    # recover declared types — *with their defining source header* — from the
+    # PDB debug info so that --public-header scoping still has a provenance
+    # signal to classify against. Bounded to this fallback branch so default
+    # PE diffs (no --header) are unaffected.
+    pdb_types: list[RecordType] = []
+    pdb_enums: list[EnumType] = []
+    if headers and dwarf_meta is not None:
+        from .pdb_model import model_types_from_dwarf_metadata
+        pdb_types, pdb_enums = model_types_from_dwarf_metadata(dwarf_meta)
+
     return AbiSnapshot(
         library=path.name, version=version,
-        functions=funcs, pe=pe_meta,
+        functions=funcs, types=pdb_types, enums=pdb_enums, pe=pe_meta,
         dwarf=dwarf_meta,
         dwarf_advanced=dwarf_adv,
         platform="pe",
+        scope_fallback=scope_fallback,
     )
 
 
@@ -496,8 +512,9 @@ def _dump_macho(
             "Verify the file is a valid dynamic library."
         )
 
+    scope_fallback: str | None = None
     if headers:
-        scoped = _try_header_scoped_dump(
+        scoped, scope_fallback = _try_header_scoped_dump(
             "macho", path, headers, includes or [], version, lang,
         )
         if scoped is not None:
@@ -515,6 +532,7 @@ def _dump_macho(
         library=path.name, version=version,
         functions=funcs, macho=macho_meta,
         platform="macho",
+        scope_fallback=scope_fallback,
     )
 
 

@@ -107,12 +107,28 @@ Each demoted finding carries a `reason` code explaining why it was excluded:
   the public-header set.
 - `system-header` — the declaration originates in a toolchain/system header
   (`/usr/include`, MSVC, Xcode SDK, …).
+- `no-provenance` — a type demoted by reachability while provenance *was*
+  available for the snapshot but not for this type, so the demotion is
+  reachability-based rather than provenance-confirmed (reduced confidence).
 
 The `private-header` / `system-header` reasons are provenance-derived: they
 only appear when the snapshots were produced with `--public-header` /
-`--public-header-dir` (ADR-015 schema v6). Without a public-header set, every
-declaration's origin is `unknown` and only the linkage/reachability reasons
-above are emitted.
+`--public-header-dir` (ADR-015 schema v6). `--public-header` is supported for
+ELF, PE (provenance from PDB `LF_UDT_SRC_LINE`), and Mach-O inputs. Without a
+public-header set, every declaration's origin is `unknown` and only the
+linkage/reachability reasons above are emitted.
+
+### Scope-resolution confidence
+
+The ledger also carries a structured **confidence** in the surface resolution
+itself (ADR-024 §D5.3), distinct from the overall verdict confidence:
+
+- `confidence`: `"high"` (a clean header-scoped run) or `"reduced"`.
+- `notes`: structured codes explaining any reduction —
+  `mangling-fallback` / `castxml-unavailable` (header scoping was requested on a
+  PE/Mach-O binary but fell back to the export table; recorded on the snapshot
+  as `scope_fallback`), or `no-provenance` (the surface resolved without any
+  declaration provenance).
 
 **Text**: With `--show-filtered`, an audit block on stderr (the reason is shown
 in parentheses):
@@ -126,6 +142,8 @@ active):
 ```json
 "surface_scope": {
   "enabled": true,
+  "confidence": "high",
+  "notes": [],
   "out_of_surface_count": 1,
   "out_of_surface_changes": [
     {"kind": "type_size_changed", "symbol": "InternalCache",
@@ -136,8 +154,9 @@ active):
 ```
 
 **SARIF**: A `surfaceScope` object in run-level `properties` with
-`outOfSurfaceCount` and `outOfSurfaceChanges` (same per-finding fields,
-camelCased; `reason` included when known), present only when scoping is active.
+`confidence`, `notes`, `outOfSurfaceCount`, and `outOfSurfaceChanges` (same
+per-finding fields, camelCased; `reason` included when known), present only
+when scoping is active.
 
 ## `--show-only` filter
 

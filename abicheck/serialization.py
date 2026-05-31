@@ -474,6 +474,7 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
         constants=d.get("constants", {}),
         platform=d.get("platform"),
         language_profile=d.get("language_profile"),
+        scope_fallback=d.get("scope_fallback"),
         dependency_info=dep_info,
         # Provenance metadata (v4)
         git_commit=d.get("git_commit"),

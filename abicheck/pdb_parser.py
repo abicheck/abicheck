@@ -85,6 +85,11 @@ LF_VBCLASS = 0x1401
 LF_IVBCLASS = 0x1402
 LF_METHOD = 0x150F
 
+# IPI (stream 4) "id" leaf records — carry source-file provenance for UDTs.
+LF_STRING_ID = 0x1605        # { substr_list_id: u32, name: char[] }
+LF_UDT_SRC_LINE = 0x1606     # { udt_ti: u32, src_string_id: u32, line: u32 }
+LF_UDT_MOD_SRC_LINE = 0x1607  # { udt_ti: u32, src_string_id: u32, line: u32, mod: u16 }
+
 # Numeric leaf constants
 LF_NUMERIC = 0x8000
 LF_CHAR = 0x8000
@@ -405,6 +410,56 @@ def parse_tpi_stream(data: bytes) -> TpiStream:
         type_index_end=ti_end,
         records=records,
     )
+
+
+def _read_id_string(data: bytes, off: int) -> str:
+    """Read a NUL-terminated UTF-8 string from *data* at *off* (best effort).
+
+    Unlike :func:`_read_cstring` this returns only the decoded string (the IPI
+    ``LF_STRING_ID`` payload ends with the name, so no trailing offset needed).
+    """
+    end = data.find(b"\x00", off)
+    raw = data[off:] if end < 0 else data[off:end]
+    return raw.decode("utf-8", errors="replace")
+
+
+def extract_udt_source_files(ipi: TpiStream) -> dict[int, str]:
+    """Map each UDT's TPI type index to its defining source file.
+
+    Walks the IPI stream (same record layout as TPI, stream 4): collects
+    ``LF_STRING_ID`` records (id → string) then resolves ``LF_UDT_SRC_LINE`` /
+    ``LF_UDT_MOD_SRC_LINE`` records, each of which ties a TPI UDT type index to
+    a source-file string id.  Returns ``{udt_tpi_ti: source_file}``.
+
+    This is the provenance signal MSVC records for user-defined types — the
+    PDB equivalent of DWARF ``DW_AT_decl_file`` (ADR-024 Phase 1).  Malformed
+    records are skipped rather than fatal.
+    """
+    string_by_id: dict[int, str] = {}
+    src_line_recs: list[tuple[int, int]] = []  # (udt_ti, src_string_id)
+
+    for rec in ipi.records:
+        data = rec.data
+        try:
+            if rec.leaf == LF_STRING_ID:
+                # { substr_list_id: u32, name: char[] }
+                if len(data) >= 4:
+                    string_by_id[rec.type_index] = _read_id_string(data, 4)
+            elif rec.leaf in (LF_UDT_SRC_LINE, LF_UDT_MOD_SRC_LINE):
+                # Both start with { udt_ti: u32, src_string_id: u32, ... }
+                if len(data) >= 8:
+                    udt_ti, src_id = struct.unpack_from("<II", data, 0)
+                    src_line_recs.append((udt_ti, src_id))
+        except struct.error:  # pragma: no cover - defensive
+            continue
+
+    out: dict[int, str] = {}
+    for udt_ti, src_id in src_line_recs:
+        src = string_by_id.get(src_id)
+        if src:
+            # First definition wins (matches the ODR convention used elsewhere).
+            out.setdefault(udt_ti, src)
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -1160,6 +1215,10 @@ class PdbFile:
     tpi: TpiStream | None = None
     dbi: DbiStream | None = None
     types: TypeDatabase | None = None
+    ipi: TpiStream | None = None
+    # UDT name → defining source file, from the IPI UDT_SRC_LINE records
+    # (ADR-024 Phase 1 provenance). Empty when the PDB has no IPI stream.
+    udt_source_files: dict[str, str] = field(default_factory=dict)
 
 
 def parse_pdb(path: Path) -> PdbFile:
@@ -1193,4 +1252,36 @@ def parse_pdb(path: Path) -> PdbFile:
             except (ValueError, struct.error) as exc:
                 log.debug("Failed to parse DBI stream from %s: %s", path, exc)
 
+    # Parse IPI stream (stream 4) for UDT source-file provenance — non-fatal.
+    if pdb.types is not None and msf.stream_count() > _IPI_STREAM:
+        ipi_data = msf.stream_data(_IPI_STREAM)
+        if ipi_data:
+            try:
+                pdb.ipi = parse_tpi_stream(ipi_data)
+                pdb.udt_source_files = _resolve_udt_source_files(pdb.ipi, pdb.types)
+            except (ValueError, struct.error) as exc:
+                log.debug("Failed to parse IPI stream from %s: %s", path, exc)
+
     return pdb
+
+
+def _resolve_udt_source_files(
+    ipi: TpiStream, types: TypeDatabase
+) -> dict[str, str]:
+    """Resolve the IPI UDT-source map (ti → file) to a UDT *name* → file map."""
+    by_ti = extract_udt_source_files(ipi)
+    if not by_ti:
+        return {}
+    name_by_ti: dict[int, str] = {}
+    for ti, cv in types.all_structs().items():
+        if cv.name:
+            name_by_ti[ti] = cv.name
+    for ti, cv_enum in types.all_enums().items():
+        if cv_enum.name:
+            name_by_ti[ti] = cv_enum.name
+    out: dict[str, str] = {}
+    for ti, src in by_ti.items():
+        name = name_by_ti.get(ti)
+        if name:
+            out.setdefault(name, src)
+    return out

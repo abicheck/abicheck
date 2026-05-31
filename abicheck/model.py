@@ -318,6 +318,18 @@ class AbiSnapshot:
     # Populated by detect_profile() in pipeline or by the dumper.
     language_profile: str | None = None  # "c" | "cpp" | "sycl" | None
 
+    # ADR-024 §D5.3 — structured confidence signal for header-scope resolution.
+    # Set by the dumper when public-header scoping was *requested* but could not
+    # be applied as intended, so the surface had to fall back to the export
+    # table. The previously bare ``UserWarning`` (PR #259) is retained for human
+    # output; this field makes the same fact machine-readable so the surface
+    # ledger can disclose reduced confidence. None = scoping succeeded or was
+    # never requested. Recognised values:
+    #   "castxml-unavailable" — castxml missing / header parse failed
+    #   "mangling-fallback"   — headers parsed but no declared symbol matched the
+    #                            export table (typically MSVC C++ name mangling)
+    scope_fallback: str | None = None
+
     # Full-stack dependency info (populated by --follow-deps)
     dependency_info: DependencyInfo | None = field(default=None)
 

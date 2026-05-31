@@ -115,13 +115,17 @@ def parse_pdb_debug_info(
     meta = DwarfMetadata(has_dwarf=True)
     adv = AdvancedDwarfMetadata(has_dwarf=True)
 
+    # UDT name → defining source file (ADR-024 Phase 1 provenance), parsed from
+    # the IPI stream. Empty when the PDB carries no IPI / source-line records.
+    src_files = pdb.udt_source_files
+
     try:
-        _extract_struct_layouts(pdb.types, meta, adv)
+        _extract_struct_layouts(pdb.types, meta, adv, src_files)
     except Exception as exc:  # noqa: BLE001
         log.warning("parse_pdb_debug_info: struct extraction failed: %s", exc)
 
     try:
-        _extract_enums(pdb.types, meta)
+        _extract_enums(pdb.types, meta, src_files)
     except Exception as exc:  # noqa: BLE001
         log.warning("parse_pdb_debug_info: enum extraction failed: %s", exc)
 
@@ -141,6 +145,7 @@ def _extract_struct_layouts(
     types: TypeDatabase,
     meta: DwarfMetadata,
     adv: AdvancedDwarfMetadata | None = None,
+    src_files: dict[str, str] | None = None,
 ) -> None:
     """Extract struct/class/union layouts from TPI into DwarfMetadata.structs.
 
@@ -178,6 +183,7 @@ def _extract_struct_layouts(
             alignment=0,  # PDB doesn't store explicit alignment
             fields=fields,
             is_union=cv_struct.is_union,
+            decl_file=(src_files or {}).get(cv_struct.name),
         )
 
         meta.structs[cv_struct.name] = layout
@@ -227,7 +233,11 @@ def _extract_fields(types: TypeDatabase, cv_struct: CvStruct) -> list[FieldInfo]
 # Phase 2: Enum types
 # ---------------------------------------------------------------------------
 
-def _extract_enums(types: TypeDatabase, meta: DwarfMetadata) -> None:
+def _extract_enums(
+    types: TypeDatabase,
+    meta: DwarfMetadata,
+    src_files: dict[str, str] | None = None,
+) -> None:
     """Extract enum types from TPI into DwarfMetadata.enums."""
     for ti, cv_enum in types.all_enums().items():
         if not _is_user_visible(cv_enum.name, cv_enum.is_forward_ref):
@@ -245,6 +255,7 @@ def _extract_enums(types: TypeDatabase, meta: DwarfMetadata) -> None:
             name=cv_enum.name,
             underlying_byte_size=underlying_size,
             members=members,
+            decl_file=(src_files or {}).get(cv_enum.name),
         )
 
         if cv_enum.name not in meta.enums:

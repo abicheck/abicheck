@@ -209,6 +209,21 @@ def _dump_elf(
         raise click.ClickException(f"Failed to dump '{path}': {exc}") from exc
 
 
+def _apply_native_provenance(
+    snap: AbiSnapshot,
+    public_headers: list[Path] | None,
+    public_header_dirs: list[Path] | None,
+) -> AbiSnapshot:
+    """Tag declaration provenance on a PE/Mach-O snapshot (ADR-024 Phase 1).
+
+    Mirrors the ELF path (``dumper.create_snapshot``), which always runs
+    ``apply_provenance``. A no-op when no public-header set is supplied —
+    every origin stays ``UNKNOWN`` and behaviour is unchanged.
+    """
+    from .provenance import apply_provenance
+    return apply_provenance(snap, public_headers, public_header_dirs)
+
+
 def _dump_native_binary(
     path: Path, binary_fmt: str,
     headers: list[Path], includes: list[Path],
@@ -217,6 +232,8 @@ def _dump_native_binary(
     pdb_path: Path | None = None,
     dwarf_only: bool = False,
     debug_format: str | None = None,
+    public_headers: list[Path] | None = None,
+    public_header_dirs: list[Path] | None = None,
 ) -> AbiSnapshot:
     """Dump ABI snapshot from a native binary (ELF, PE, or Mach-O).
 
@@ -225,6 +242,10 @@ def _dump_native_binary(
     For PE/Mach-O, headers are optional: when supplied they scope the ABI
     surface to declarations in those public headers (best-effort, via castxml),
     otherwise the export table provides the symbol surface.
+
+    ``public_headers`` / ``public_header_dirs`` classify declaration provenance
+    (ADR-024 Phase 1). For PE they also let the PDB-derived types carry a
+    ``ScopeOrigin``; an empty set keeps every origin ``UNKNOWN`` (no-op).
     """
     if binary_fmt == "elf":
         return _dump_elf(path, headers, includes, version, lang,
@@ -233,23 +254,25 @@ def _dump_native_binary(
     if binary_fmt == "pe":
         from .service import _dump_pe
         try:
-            return _dump_pe(
+            snap = _dump_pe(
                 path, version,
                 headers=headers, includes=includes, lang=lang,
                 pdb_path=pdb_path,
             )
         except AbicheckError as exc:
             raise click.ClickException(str(exc)) from exc
+        return _apply_native_provenance(snap, public_headers, public_header_dirs)
 
     if binary_fmt == "macho":
         from .service import _dump_macho
         try:
-            return _dump_macho(
+            snap = _dump_macho(
                 path, version,
                 headers=headers, includes=includes, lang=lang,
             )
         except AbicheckError as exc:
             raise click.ClickException(str(exc)) from exc
+        return _apply_native_provenance(snap, public_headers, public_header_dirs)
 
     fmt_labels = {"elf": "ELF", "pe": "PE (Windows DLL)", "macho": "Mach-O (macOS dylib)"}
     raise click.ClickException(f"Unsupported binary format: {fmt_labels.get(binary_fmt, binary_fmt)}")
@@ -545,11 +568,6 @@ def dump_cmd(so_path: Path, headers: tuple[Path, ...], includes: tuple[Path, ...
             f"--{debug_format} is only supported for ELF binaries, not {binary_fmt.upper()}."
         )
     if binary_fmt in ("pe", "macho"):
-        if public_headers or public_header_dirs:
-            raise click.BadParameter(
-                "--public-header / --public-header-dir provenance classification is "
-                f"currently only supported for ELF inputs, not {binary_fmt.upper()}."
-            )
         _handle_non_elf_dump(
             so_path,
             binary_fmt,
@@ -563,6 +581,8 @@ def dump_cmd(so_path: Path, headers: tuple[Path, ...], includes: tuple[Path, ...
             build_id,
             no_git,
             output,
+            public_headers,
+            public_header_dirs,
         )
         return
 
@@ -622,6 +642,8 @@ def _handle_non_elf_dump(
     build_id: str | None,
     no_git: bool,
     output: Path | None,
+    public_headers: tuple[Path, ...] = (),
+    public_header_dirs: tuple[Path, ...] = (),
 ) -> None:
     """Handle PE/Mach-O native dump path and output writing."""
     if follow_deps:
@@ -630,6 +652,8 @@ def _handle_non_elf_dump(
         snap = _dump_native_binary(
             so_path, binary_fmt, list(headers), list(includes), version, lang,
             pdb_path=pdb_path,
+            public_headers=list(public_headers),
+            public_header_dirs=list(public_header_dirs),
         )
     except click.ClickException:
         raise

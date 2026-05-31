@@ -1,7 +1,7 @@
 # ADR-024: Public ABI Surface Resolution and False-Positive Traceability
 
-**Date:** 2026-05-30
-**Status:** Proposed
+**Date:** 2026-05-30 (accepted 2026-05-31)
+**Status:** Accepted
 **Decision maker:** Nikolay Petrov
 
 ---
@@ -126,19 +126,27 @@ hard `--headers-dir` drop: we keep auditability.
    the full list) of entities **included** vs **excluded/demoted**, each with a reason:
    `private-header`, `system-header`, `not-exported`, `suppressed-by-user`,
    `mangling-fallback`, `no-provenance`. Available in text, JSON, and SARIF.
-   *Shipped (partial):* the ledger is disclosed in text/JSON/SARIF, and the
-   reasons the pre-provenance resolver can determine with confidence —
+   *Shipped:* the ledger is disclosed in text/JSON/SARIF. Per-finding reasons:
    `not-exported` (symbol not in the export set) and `non-public-type` (type
-   reachable by no public root) — are tagged per finding. The
-   provenance-dependent reasons (`private-header`, `system-header`,
-   `mangling-fallback`, `no-provenance`) await Phase 1; `suppressed-by-user`
-   lives in the separate suppression ledger.
+   reachable by no public root) are the linkage/reachability reasons;
+   `private-header` / `system-header` are tagged once provenance is available
+   (Phase 1). `no-provenance` marks a reachability demotion made while
+   provenance existed for the snapshot but not for the demoted type. The
+   scope-level confidence signal (`surface_scope.confidence` /
+   `surfaceScope.confidence`, with structured `notes`) discloses
+   `mangling-fallback` / `castxml-unavailable` (recorded by the dumper as the
+   snapshot's `scope_fallback`) and `no-provenance` — see §D5.3.
+   `suppressed-by-user` lives in the separate suppression ledger.
 2. **Leak guard always wins.** If a `PRIVATE_HEADER`-origin type is reachable from a
    `PUBLIC_HEADER`+exported root, emit `INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API` (extend
    `internal_leak.py`) **regardless of scoping mode**. Scoping must never suppress a leak.
 3. **Confidence is explicit.** Distinguish full-confidence (provenance + types known) from
    reduced-confidence (export-only, mangling fallback, missing provenance). The PE/Mach-O
    `UserWarning` fallbacks from PR #259 become structured confidence signals.
+   *Shipped:* the dumper records a machine-readable `scope_fallback`
+   (`"castxml-unavailable"` / `"mangling-fallback"`) on the snapshot alongside
+   the human `UserWarning`; the comparison surfaces a `surface_scope.confidence`
+   of `"high"` / `"reduced"` plus structured `notes` in the JSON/SARIF ledger.
 4. **No silent suppression of breaks.** When a *user* control (suppression/allowlist) would
    hide a finding that is `abi_breaking`, require an explicit acknowledgment (e.g. a
    `reason:` field) and emit a warning in the ledger. Suppressing breakage should be a
@@ -222,7 +230,7 @@ The feature is only credible if we can prove it neither over- nor under-filters.
 | Phase | Scope |
 |-------|-------|
 | **0** | PE/Mach-O header plumbing + directory expansion + fallback warnings — **done (PR #259)** |
-| **1** | Provenance capture: source-header tagging in castxml/DWARF/PDB parsers; model + serialization fields (schema bump) — **done** (`source_header` + 6-way `ScopeOrigin` on functions/variables/types/enums; schema v6; castxml + DWARF populate locations; PDB pending) |
+| **1** | Provenance capture: source-header tagging in castxml/DWARF/PDB parsers; model + serialization fields (schema bump) — **done** (`source_header` + 6-way `ScopeOrigin` on functions/variables/types/enums; schema v6; castxml + DWARF + **PDB** populate locations — PDB via `LF_UDT_SRC_LINE`/`LF_UDT_MOD_SRC_LINE` in the IPI stream, bridged to model types by `pdb_model.py`; `--public-header` now accepted for PE/Mach-O. Windows end-to-end is validated by the `msvc` CI lane; the parser/metadata/bridge layers carry synthetic-buffer unit tests on every platform) |
 | **2** | Header-scope resolution + surface ledger + `--scope-public-headers`/`--show-filtered` (opt-in, default off) — **done** (ledger now also disclosed in JSON `surface_scope` / SARIF `surfaceScope`, not just stderr text; provenance-driven `private-header`/`system-header` reasons now wired) |
 | **3** | Reachability closure + leak-guard integration (extend `internal_leak.py`) — **done (closure shipped; leak exemption wired)** |
 | **4** | User-control overlay: widening public allowlist; integrate suppression as the narrowing layer; precedence + anti-hiding guard — **done** (widening via `--public-symbol`/`--public-symbols-list`; suppression remains the narrowing layer; widening only ever *keeps*, never hides) |
@@ -258,11 +266,25 @@ the resolver, classifier, anti-hiding guarantees, and the JSON/SARIF ledger,
 and `tests/test_surface_property.py` adds the property-based monotonicity /
 subset / order-independence guarantees from the validation strategy (§3).
 
-The remaining Phase 1 work — recording *which* header each declaration came
-from, so the surface can distinguish "private header transitively included"
-from "public header" independently of reachability — is still future work
-and is what unlocks the per-finding `private-header` ledger reason and the
-widening/narrowing user overlay (Phase 4).
+Phase 1 (recording *which* header each declaration came from, so the surface
+can distinguish "private header transitively included" from "public header"
+independently of reachability) has since shipped across castxml, DWARF, and
+PDB. On the PE path PDB carries this via the IPI `LF_UDT_SRC_LINE` /
+`LF_UDT_MOD_SRC_LINE` records, parsed in `pdb_parser.py`, threaded onto
+`DwarfMetadata` as `decl_file`, and bridged into model `RecordType`/`EnumType`
+by `pdb_model.py` so `apply_provenance` can classify a `ScopeOrigin`. The
+bridge is invoked only on the PE header-scoping *fallback* branch (headers
+requested but castxml could not resolve a surface — the MSVC C++-mangling
+gap), keeping default PE diffs unchanged. This unlocks the per-finding
+`private-header` ledger reason and the widening/narrowing user overlay
+(Phase 4) on Windows binaries too.
+
+The one acknowledged residual is the MSVC C++-name-mangling gap itself
+(§D5.3 / Consequences): when castxml cannot match a mangled C++ export, the PE
+surface still falls back to the export table — now disclosed as a
+`mangling-fallback` confidence note rather than silently. PDB provenance
+narrows the impact (declared types still carry their header) but does not, on
+its own, close the mangling gap.
 
 ---
 

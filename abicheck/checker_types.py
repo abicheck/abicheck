@@ -123,6 +123,14 @@ class DiffResult:
     # needs manual review — it must never read as a confidently-clean public
     # surface (issue #235).
     scope_resolved: bool = True
+    # ADR-024 §D5.3 — structured confidence in the surface resolution itself
+    # (distinct from ``confidence`` above, which is the overall verdict trust).
+    # "high" with no notes = clean header-scoped run; "reduced" with one or more
+    # structured note codes (e.g. "mangling-fallback", "no-provenance") when the
+    # surface had to be resolved less reliably. Disclosed in the JSON/SARIF
+    # surface ledger so the "demote + disclose" promise stays auditable.
+    surface_scope_confidence: str = "high"
+    surface_scope_notes: list[str] = field(default_factory=list)
     # Canonical analysis depth (ordered): ELF_ONLY < DWARF_AWARE < HEADER_AWARE.
     # Distinct from the raw ``evidence_tiers`` list above — this is the single
     # scalar consumers should key trust decisions off of. See EvidenceTier.

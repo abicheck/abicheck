@@ -93,6 +93,11 @@ class StructLayout:
     alignment: int = 0                      # DW_AT_alignment (DWARF 5; 0 = unknown)
     fields: list[FieldInfo] = field(default_factory=list)
     is_union: bool = False
+    # Defining source header, when the debug info records it. DWARF leaves this
+    # None (decl-file is resolved on the DIE path); the PDB pipeline fills it
+    # from LF_UDT_SRC_LINE / LF_UDT_MOD_SRC_LINE so provenance (ADR-024 Phase 1)
+    # works for Windows binaries.
+    decl_file: str | None = None
 
 
 @dataclass
@@ -101,6 +106,8 @@ class EnumInfo:
     name: str
     underlying_byte_size: int               # sizeof underlying integer type
     members: dict[str, int] = field(default_factory=dict)  # name → value
+    # Defining source header — see StructLayout.decl_file (ADR-024 Phase 1).
+    decl_file: str | None = None
 
 
 @dataclass

@@ -433,6 +433,9 @@ def _add_surface_scope(d: dict[str, object], result: DiffResult) -> None:
         return
     d["surface_scope"] = {
         "enabled": True,
+        # ADR-024 §D5.3 — structured confidence in the resolution itself.
+        "confidence": result.surface_scope_confidence,
+        "notes": list(result.surface_scope_notes),
         "out_of_surface_count": result.out_of_surface_count,
         "out_of_surface_changes": [
             {

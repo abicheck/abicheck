@@ -276,8 +276,15 @@ def test_widening_only_repromotes_never_hides_or_invents(
         scope_to_public_surface=True, force_public_symbols=forced,
     )
 
-    # Re-promotion only adds to the reported set …
-    assert _change_keys(scoped.changes) <= _change_keys(widened.changes)
+    # Re-promotion keeps every scoped change *reported* — as a normal or a
+    # redundant change. Widening can relabel a change between the two buckets
+    # (re-promoting a root finding absorbs its now-redundant dependents, e.g. a
+    # type removal absorbing a function whose return type was that type), but it
+    # never pushes a kept finding back into the ledger. The total universe is
+    # asserted unchanged below; here we only forbid a kept→hidden transition.
+    assert _change_keys(scoped.changes) <= (
+        _change_keys(widened.changes) | _change_keys(widened.redundant_changes)
+    )
     # … only removes from the ledger …
     assert _change_keys(widened.out_of_surface_changes) <= _change_keys(
         scoped.out_of_surface_changes

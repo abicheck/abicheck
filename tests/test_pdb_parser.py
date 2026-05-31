@@ -186,6 +186,7 @@ def _build_dbi_stream(
 def _build_minimal_pdb(
     tpi_records: list[tuple[int, bytes]] | None = None,
     dbi_data: bytes | None = None,
+    ipi_records: list[tuple[int, bytes]] | None = None,
 ) -> bytes:
     """Construct a minimal valid PDB 7.0 file in memory.
 
@@ -194,6 +195,10 @@ def _build_minimal_pdb(
     - Block 1: FPM1
     - Block 2: FPM2
     - Blocks 3+: stream directory and stream data
+
+    When *ipi_records* is provided, a stream 4 (IPI) is appended carrying those
+    records (same on-disk layout as TPI), enabling UDT source-file provenance
+    tests (ADR-024 Phase 1).
     """
     tpi_data = _build_tpi_stream(tpi_records or [])
     dbi_data = dbi_data or _build_dbi_stream()
@@ -211,6 +216,8 @@ def _build_minimal_pdb(
         tpi_data,   # Stream 2 (TPI)
         dbi_data,   # Stream 3 (DBI)
     ]
+    if ipi_records is not None:
+        streams.append(_build_tpi_stream(ipi_records))  # Stream 4 (IPI)
 
     # Allocate blocks for each stream
     # First 3 blocks: superblock, FPM1, FPM2
