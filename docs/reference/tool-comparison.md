@@ -77,8 +77,8 @@ promotes these to `BREAKING` intentionally, just like ABICC `-strict`. These are
 tool outputs for the strict policy, but score as misses against the ground truth.
 
 **Why strict still has a full denominator:**
-`abicheck strict` runs on all 74 cases. ABICC and abidiff runs can time out or error on
-specific cases, so their scored denominators are lower in the full matrix.
+`abicheck strict` runs on all 74 cases in the benchmark subset. ABICC and abidiff runs can time out or error on
+specific cases, so their scored denominators are lower in the benchmark matrix.
 
 **When to use strict:** CI gates where any COMPATIBLE addition (e.g. new symbol) should
 fail the build. Use `--strict-mode api` to avoid false positives on purely additive changes.
@@ -103,7 +103,7 @@ modules), and finally to ELF symbol names only when no debug info is present.
 
 For our benchmark, all `.so` files are built with `-g` so DWARF is used throughout.
 
-**Current benchmark result:** see the 74-case matrix below.
+**Current benchmark result:** see the 74-case benchmark-subset matrix below.
 abidiff misses anything that is not directly a symbol removal or a change that DWARF
 fully describes. Specifically:
 - Struct layout, vtable, return type changes → DWARF often marks as COMPATIBLE because
@@ -157,7 +157,7 @@ It does not improve detection of semantic changes.
 **Header requirement:** Optional (pass `-public-headers` to filter to public API).
 **Compiler requirement:** None. Debug build (`-g`) required.
 
-**Current benchmark result:** see the 74-case matrix below. The abi-dumper workflow
+**Current benchmark result:** see the 74-case benchmark-subset matrix below. The abi-dumper workflow
 still times out or errors on specific C++ cases and can leave runaway
 `abi-compliance-checker` child processes if the outer wrapper is interrupted.
 
@@ -187,7 +187,7 @@ v2.xml (headers dir + .so path) ──┘
 **Our fix in PR #72:** Pass a specific header file path instead of a directory in
 `<headers>`. This drops runtime from 120s → ~1s and fixes wrong verdicts.
 
-**Current benchmark result:** see the 74-case matrix below.
+**Current benchmark result:** see the 74-case benchmark-subset matrix below.
 
 ---
 
@@ -225,10 +225,10 @@ const). ABICC has no ELF pass (misses SONAME, visibility). ABICC(dump) has no AS
 
 ---
 
-## Current benchmark summary (2026-05-19, 74 cases)
+## Current benchmark summary (2026-05-19, 74-case subset)
 
-Full-catalog scan status from `python3 scripts/benchmark_comparison.py` on the current
-`examples/` catalog. ABICC runs used `--abicc-timeout 20` to keep known hangs bounded.
+Release-pinned scan status from `python3 scripts/benchmark_comparison.py` on the original
+74-case benchmark subset. ABICC runs used `--abicc-timeout 20` to keep known hangs bounded.
 
 | Tool | Cases attempted | Scored | Correct | Accuracy | Not scored / notes |
 |------|:---------------:|:------:|:-------:|:--------:|--------------------|
@@ -242,7 +242,7 @@ Full-catalog scan status from `python3 scripts/benchmark_comparison.py` on the c
 
 ### Scan-status matrix
 
-| Check configuration | Full 74-case run | Status |
+| Check configuration | 74-case benchmark subset | Status |
 |---------------------|:----------------:|--------|
 | `abicheck` | ✅ 74/74 completed | 74/74 exact |
 | `abicheck_compat` | ✅ 74/74 completed | 71/74 exact |
@@ -360,7 +360,7 @@ Legend: ✅ correct · ⚠️ wrong/undercounted · ❌ wrong in opposite direct
 ## Run the benchmark yourself
 
 ```bash
-# Full benchmark (all 74 cases, all tools)
+# Fresh benchmark for the current checkout
 python3 scripts/benchmark_comparison.py --abicc-mode both
 ```
 

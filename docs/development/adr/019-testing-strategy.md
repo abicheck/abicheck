@@ -106,9 +106,9 @@ This means:
 
 1. **Documentation**: Each case has `README.md` with scenario description,
    expected break type, and detection evidence
-2. **Regression tests**: `tests/test_abi_examples.py` and
-   `tests/validate_examples.py` compile examples and verify abicheck detects
-   the correct changes
+2. **Regression tests**: `tests/validate_examples.py` compiles single-library
+   examples and verifies abicheck detects the correct changes; bundle cases are
+   exercised by `tests/test_bundle.py`
 
 Example case structure:
 ```text

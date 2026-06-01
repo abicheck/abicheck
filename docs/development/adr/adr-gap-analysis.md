@@ -260,7 +260,7 @@ Each candidate is rated by **urgency**:
 
 **Urgency: LOW**
 
-**What exists:** 120+ test files, 4 test tiers (unit, integration, parity-abicc, parity-libabigail), 74 example cases, conditional CI gates.
+**What exists:** 120+ test files, 4 test tiers (unit, integration, parity-abicc, parity-libabigail), 121 example cases, conditional CI gates.
 
 **Key decisions embedded in code:**
 - 80% coverage threshold enforced in CI

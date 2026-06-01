@@ -8,7 +8,7 @@ Focused comparison of **what information** each tool puts in its reports,
 how useful that information is, and what gaps exist — across all output formats.
 
 **Date:** 2026-03-14
-**Test suite:** 74 ABI scenario cases (examples/case01..case73 + case26b)
+**Test suite:** historical 74-case benchmark subset (examples/case01..case73 + case26b)
 
 ---
 

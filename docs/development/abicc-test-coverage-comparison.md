@@ -2,7 +2,7 @@
 
 > Updated: 2026-03-09 (independently verified against raw GitHub sources; ChangeKind count was 118 at time of writing, now 114 after taxonomy refactoring)
 > Source: ABICC `RulesBin.xml` (196 rules), `RulesSrc.xml` (100 rules + `Removed_Const_Overload`), `RegTests.pm` (~153 C++ + ~102 C named scenarios)
-> Target: abicheck `examples/` (74 cases), `tests/` (690+ tests), `ChangeKind` enum (118 kinds at time of writing; now 114 after taxonomy refactoring)
+> Target: abicheck `examples/` (121 cases; the original 74-case subset is the release-pinned cross-tool benchmark), `tests/` (690+ tests), `ChangeKind` enum (118 kinds at time of writing; now 114 after taxonomy refactoring)
 >
 > **Analysis modes:** Abicheck uses **both** header comparison (via castxml) **and** binary analysis (ELF/DWARF).
 > The `dump()` function combines castxml header parsing (types, functions, enums, typedefs, constants) with
@@ -24,7 +24,7 @@
 | **Abicheck covers (has ChangeKind + tests)** | **66/66 (100%)** |
 | Abicheck ChangeKind enum members | 118 (historical; now 114) |
 | All 118 ChangeKinds have assertion tests | **Yes** (historical snapshot; current count is 114) |
-| Abicheck example cases | 74 |
+| Abicheck example cases | 121 |
 | ABICC scenarios NOT in abicheck | **0** |
 
 ---

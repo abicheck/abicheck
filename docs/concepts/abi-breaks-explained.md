@@ -1,9 +1,10 @@
 # Examples & Breakage Guide
 
 The `examples/` directory contains real-world ABI/API break scenarios — 121
-cases in total. Each case has paired `v1`/`v2` source files, a consumer
-(`app.c`/`app.cpp`), a CMake build, expected verdicts, and a `README.md`
-walkthrough. Run any case yourself:
+cases in total. Single-library cases have paired `v1`/`v2` source files, a
+consumer (`app.c`/`app.cpp`), a CMake build, expected verdicts, and a `README.md`
+walkthrough; bundle/release-level cases use release-style layouts. Run a
+single-library case yourself:
 
 ```bash
 cd examples/case01_symbol_removal
@@ -18,7 +19,7 @@ For the complete list of detected change types, see the
 [Change Kind Reference](../reference/change-kinds.md).
 
 !!! tip "Looking for a specific case?"
-    Every case has its own rendered page under
+    Single-library cases have rendered pages under
     [**Examples & Case Encyclopedia**](../examples/index.md), generated from the
     per-case `README.md` plus `ground_truth.json`. Browse
     [by verdict](../examples/index.md#verdict-distribution) (🔴 BREAKING,
@@ -26,8 +27,8 @@ For the complete list of detected change types, see the
     [by category](../examples/index.md#browse-by-category).
 
 The sections below give a *conceptual* tour of the major break families with
-representative cases. For the full catalog (all 116 documented cases, kept in sync
-automatically), use the Encyclopedia.
+representative cases. For the generated single-library catalog, use the
+Encyclopedia; bundle/release-level cases live directly under `examples/`.
 
 ## Categories
 
