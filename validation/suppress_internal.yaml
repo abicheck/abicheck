@@ -1,0 +1,14 @@
+version: 1
+suppressions:
+  - namespace: "std::**"
+    reason: "libstdc++ implementation detail leaked via DWARF; not part of the library ABI"
+  - namespace: "std"
+    reason: "libstdc++ types (std::basic_string, integral_constant) are toolchain DWARF artifacts"
+  - namespace: "__gnu_cxx::**"
+    reason: "libstdc++ internal namespace"
+  - namespace: "__gnu_cxx"
+    reason: "libstdc++ internal namespace"
+  - namespace: "tbb::detail::**"
+    reason: "oneTBB documents tbb::detail as internal/unstable; excluded from ABI contract"
+  - namespace: "tbb::detail"
+    reason: "oneTBB internal namespace"

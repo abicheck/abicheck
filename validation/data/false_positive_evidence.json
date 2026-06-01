@@ -1,0 +1,134 @@
+{
+  "stdlib_dwarf_artifact": [
+    {
+      "kind": "type_field_removed",
+      "symbol": "std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >",
+      "desc": "Field removed: std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >::npos",
+      "old": null,
+      "new": null
+    },
+    {
+      "kind": "type_field_removed",
+      "symbol": "std::integral_constant<bool, false>",
+      "desc": "Field removed: std::integral_constant<bool, false>::value",
+      "old": null,
+      "new": null
+    },
+    {
+      "kind": "type_field_removed",
+      "symbol": "std::integral_constant<bool, true>",
+      "desc": "Field removed: std::integral_constant<bool, true>::value",
+      "old": null,
+      "new": null
+    },
+    {
+      "kind": "type_removed",
+      "symbol": "std::integral_constant<long unsigned int, 0>",
+      "desc": "Type removed: std::integral_constant<long unsigned int, 0>",
+      "old": null,
+      "new": null
+    },
+    {
+      "kind": "type_field_removed",
+      "symbol": "std::__atomic_base<bool>",
+      "desc": "Field removed: std::__atomic_base<bool>::_S_alignment",
+      "old": null,
+      "new": null
+    },
+    {
+      "kind": "type_field_removed",
+      "symbol": "std::__atomic_base<int>",
+      "desc": "Field removed: std::__atomic_base<int>::_S_alignment",
+      "old": null,
+      "new": null
+    }
+  ],
+  "rtti_lambda_churn": [
+    {
+      "kind": "var_removed",
+      "symbol": "_ZTIZN6google8protobuf2io7Printer8WithDefsEN4absl12lts_202508144SpanIKNS2_3SubEEEbEUlSt17basic_string_viewIcSt11char_tra",
+      "desc": "Public variable removed: _ZTIZN6google8protobuf2io7Printer8WithDefsEN4absl12lts_202508144SpanIKNS2_3SubEEEbEUlSt17basic_",
+      "old": null,
+      "new": null
+    },
+    {
+      "kind": "var_removed",
+      "symbol": "_ZTIZN6google8protobuf2io7Printer8WithDefsEN4absl12lts_202508144SpanIKNS2_3SubEEEbEUlSt17basic_string_viewIcSt11char_tra",
+      "desc": "Public variable removed: _ZTIZN6google8protobuf2io7Printer8WithDefsEN4absl12lts_202508144SpanIKNS2_3SubEEEbEUlSt17basic_",
+      "old": null,
+      "new": null
+    },
+    {
+      "kind": "var_removed",
+      "symbol": "_ZTIZN6google8protobuf2io7Printer8WithVarsIN4absl12lts_2025081413flat_hash_mapISt17basic_string_viewIcSt11char_traitsIcE",
+      "desc": "Public variable removed: _ZTIZN6google8protobuf2io7Printer8WithVarsIN4absl12lts_2025081413flat_hash_mapISt17basic_string",
+      "old": null,
+      "new": null
+    },
+    {
+      "kind": "var_removed",
+      "symbol": "_ZTSZN6google8protobuf2io7Printer8WithDefsEN4absl12lts_202508144SpanIKNS2_3SubEEEbEUlSt17basic_string_viewIcSt11char_tra",
+      "desc": "Public variable removed: _ZTSZN6google8protobuf2io7Printer8WithDefsEN4absl12lts_202508144SpanIKNS2_3SubEEEbEUlSt17basic_",
+      "old": null,
+      "new": null
+    },
+    {
+      "kind": "var_removed",
+      "symbol": "_ZTSZN6google8protobuf2io7Printer8WithDefsEN4absl12lts_202508144SpanIKNS2_3SubEEEbEUlSt17basic_string_viewIcSt11char_tra",
+      "desc": "Public variable removed: _ZTSZN6google8protobuf2io7Printer8WithDefsEN4absl12lts_202508144SpanIKNS2_3SubEEEbEUlSt17basic_",
+      "old": null,
+      "new": null
+    },
+    {
+      "kind": "var_removed",
+      "symbol": "_ZTSZN6google8protobuf2io7Printer8WithVarsIN4absl12lts_2025081413flat_hash_mapISt17basic_string_viewIcSt11char_traitsIcE",
+      "desc": "Public variable removed: _ZTSZN6google8protobuf2io7Printer8WithVarsIN4absl12lts_2025081413flat_hash_mapISt17basic_string",
+      "old": null,
+      "new": null
+    }
+  ],
+  "mixed_mode_libxml2": [
+    {
+      "kind": "type_removed",
+      "symbol": "_IO_FILE",
+      "desc": "Type removed: _IO_FILE",
+      "old": null,
+      "new": null
+    },
+    {
+      "kind": "type_removed",
+      "symbol": "_IO_marker",
+      "desc": "Type removed: _IO_marker",
+      "old": null,
+      "new": null
+    },
+    {
+      "kind": "type_removed",
+      "symbol": "_xmlParserInputBuffer",
+      "desc": "Type removed: _xmlParserInputBuffer",
+      "old": null,
+      "new": null
+    },
+    {
+      "kind": "type_removed",
+      "symbol": "_xmlParserInput",
+      "desc": "Type removed: _xmlParserInput",
+      "old": null,
+      "new": null
+    },
+    {
+      "kind": "type_removed",
+      "symbol": "_xmlSAXLocator",
+      "desc": "Type removed: _xmlSAXLocator",
+      "old": null,
+      "new": null
+    },
+    {
+      "kind": "type_removed",
+      "symbol": "_xmlEntity",
+      "desc": "Type removed: _xmlEntity",
+      "old": null,
+      "new": null
+    }
+  ]
+}

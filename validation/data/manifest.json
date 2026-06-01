@@ -1,0 +1,123 @@
+[
+  {
+    "pair": "T1_tbb_minor",
+    "library": "oneTBB",
+    "pkg": "tbb",
+    "old_ver": "2021.5.0",
+    "new_ver": "2021.9.0",
+    "expectation": "COMPATIBLE",
+    "note": "minor within oneTBB 2021 series (libtbb.so.12)",
+    "old_file": "tbb-2021.5.0-h4bd325d_0.tar.bz2",
+    "new_file": "tbb-2021.9.0-hf52228f_0.conda"
+  },
+  {
+    "pair": "T2_tbb_series",
+    "library": "oneTBB",
+    "pkg": "tbb",
+    "old_ver": "2021.9.0",
+    "new_ver": "2022.0.0",
+    "expectation": "COMPATIBLE",
+    "note": "2021->2022 series bump, ABI retained",
+    "old_file": "tbb-2021.9.0-hf52228f_0.conda",
+    "new_file": "tbb-2022.0.0-hceb3a55_0.conda"
+  },
+  {
+    "pair": "T3_tbb_patch",
+    "library": "oneTBB",
+    "pkg": "tbb",
+    "old_ver": "2022.0.0",
+    "new_ver": "2022.3.0",
+    "expectation": "COMPATIBLE",
+    "note": "patch within 2022 series",
+    "old_file": "tbb-2022.0.0-hceb3a55_0.conda",
+    "new_file": "tbb-2022.3.0-h8d10470_0.conda"
+  },
+  {
+    "pair": "P1_protobuf_patch",
+    "library": "protobuf",
+    "pkg": "libprotobuf",
+    "old_ver": "6.33.2",
+    "new_ver": "6.33.5",
+    "expectation": "COMPATIBLE",
+    "note": "patch, same SONAME",
+    "old_file": "libprotobuf-6.33.2-he382b67_0.conda",
+    "new_file": "libprotobuf-6.33.5-h2b00c02_0.conda"
+  },
+  {
+    "pair": "P2_protobuf_major",
+    "library": "protobuf",
+    "pkg": "libprotobuf",
+    "old_ver": "6.33.5",
+    "new_ver": "7.34.1",
+    "expectation": "BREAKING",
+    "note": "major SONAME bump 6->7",
+    "old_file": "libprotobuf-6.33.5-h2b00c02_0.conda",
+    "new_file": "libprotobuf-7.34.1-h612f066_0.conda"
+  },
+  {
+    "pair": "O1_openssl_patch",
+    "library": "openssl",
+    "pkg": "openssl",
+    "old_ver": "3.5.4",
+    "new_ver": "3.5.6",
+    "expectation": "COMPATIBLE",
+    "note": "patch within 3.5",
+    "old_file": "openssl-3.5.4-h26f9b46_0.conda",
+    "new_file": "openssl-3.5.6-h35e630c_0.conda"
+  },
+  {
+    "pair": "O2_openssl_minor",
+    "library": "openssl",
+    "pkg": "openssl",
+    "old_ver": "3.5.6",
+    "new_ver": "3.6.0",
+    "expectation": "COMPATIBLE",
+    "note": "minor, OpenSSL3 ABI-stable",
+    "old_file": "openssl-3.5.6-h35e630c_0.conda",
+    "new_file": "openssl-3.6.0-h26f9b46_0.conda"
+  },
+  {
+    "pair": "I1_icu_major",
+    "library": "icu",
+    "pkg": "icu",
+    "old_ver": "73.2",
+    "new_ver": "75.1",
+    "expectation": "BREAKING",
+    "note": "major ICU bump, versioned-symbol suffix change",
+    "old_file": "icu-73.2-h59595ed_0.conda",
+    "new_file": "icu-75.1-he02047a_0.conda"
+  },
+  {
+    "pair": "N1_libpng_patch",
+    "library": "libpng",
+    "pkg": "libpng",
+    "old_ver": "1.6.53",
+    "new_ver": "1.6.58",
+    "expectation": "COMPATIBLE",
+    "note": "patch within libpng16",
+    "old_file": "libpng-1.6.53-h421ea60_0.conda",
+    "new_file": "libpng-1.6.58-h421ea60_0.conda"
+  },
+  {
+    "pair": "Z1_zstd_minor",
+    "library": "zstd",
+    "pkg": "zstd",
+    "old_ver": "1.5.5",
+    "new_ver": "1.5.7",
+    "expectation": "COMPATIBLE",
+    "note": "minor within libzstd.so.1",
+    "old_file": "zstd-1.5.5-hfc55251_0.conda",
+    "new_file": "zstd-1.5.7-h3691f8a_4.conda"
+  },
+  {
+    "pair": "X1_libxml2_patch",
+    "library": "libxml2",
+    "pkg": "libxml2",
+    "old_ver": "2.9.7",
+    "new_ver": "2.9.9",
+    "expectation": "COMPATIBLE",
+    "note": "patch within libxml2.so.2",
+    "old_file": "libxml2-2.9.7-0.tar.bz2",
+    "new_file": "libxml2-2.9.9-h13577e0_0.tar.bz2"
+  }
+]

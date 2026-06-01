@@ -1,0 +1,827 @@
+[
+  {
+    "tag": "T1_tbb_minor__libtbb",
+    "pair": "T1_tbb_minor",
+    "library": "oneTBB",
+    "logical": "libtbb",
+    "old_ver": "2021.5.0",
+    "new_ver": "2021.9.0",
+    "expectation": "COMPATIBLE",
+    "note": "minor within oneTBB 2021 series (libtbb.so.12)",
+    "mode": "dwarf->dwarf",
+    "old_path": "/home/user/validation/libs/ex/tbb-2021.5.0-h4bd325d_0/lib/libtbb.so.12.5",
+    "new_path": "/home/user/validation/libs/ex/tbb-2021.9.0-hf52228f_0/lib/libtbb.so.12.9",
+    "exit_code": 4,
+    "seconds": 16.25,
+    "stderr": "Warning: '/home/user/validation/libs/ex/tbb-2021.5.0-h4bd325d_0/lib/libtbb.so.12.5' \u2014 no headers provided. Will use DWARF debug info if available, else symbols-only mode.\n/home/user/abicheck/abicheck/dumper.py:634: UserWarning: No headers provided \u2014 using DWARF debug info as primary data source. #define constants and default parameter values will be unavailable.\n  snapshot = _dump_elf(\nWarning: '/home/user/validation/libs/ex/tbb-2021.9.0-hf52228f_0/lib/libtbb.so.12.9' \u2014 no headers provided. Will use DWARF debug info if available, else symbols-only mode.\n/home/user/abicheck/abicheck/dumper.py:634: UserWarning: No headers provided \u2014 using DWARF debug info as primary data source. #define constants and default parameter values will be unavailable.\n  snapshot = _dump_elf(\nReport written to /home/user/validation/reports/T1_tbb_minor__libtbb.json",
+    "verdict": "BREAKING",
+    "counts": {
+      "breaking": 216
+    },
+    "release_recommendation": {
+      "version_bump": "major",
+      "soname_action": "bump_missing",
+      "rationale": "Binary ABI break detected \u2014 release a new MAJOR version. The SONAME was not bumped despite the binary break \u2014 bump it (e.g. libfoo.so.1 \u2192 libfoo.so.2) so old binaries fail loudly instead of silently loading an incompatible library."
+    }
+  },
+  {
+    "tag": "T1_tbb_minor__libtbbmalloc",
+    "pair": "T1_tbb_minor",
+    "library": "oneTBB",
+    "logical": "libtbbmalloc",
+    "old_ver": "2021.5.0",
+    "new_ver": "2021.9.0",
+    "expectation": "COMPATIBLE",
+    "note": "minor within oneTBB 2021 series (libtbb.so.12)",
+    "mode": "dwarf->dwarf",
+    "old_path": "/home/user/validation/libs/ex/tbb-2021.5.0-h4bd325d_0/lib/libtbbmalloc.so.2.5",
+    "new_path": "/home/user/validation/libs/ex/tbb-2021.9.0-hf52228f_0/lib/libtbbmalloc.so.2.9",
+    "exit_code": 4,
+    "seconds": 2.93,
+    "stderr": "Warning: '/home/user/validation/libs/ex/tbb-2021.5.0-h4bd325d_0/lib/libtbbmalloc.so.2.5' \u2014 no headers provided. Will use DWARF debug info if available, else symbols-only mode.\n/home/user/abicheck/abicheck/dumper.py:634: UserWarning: No headers provided \u2014 using DWARF debug info as primary data source. #define constants and default parameter values will be unavailable.\n  snapshot = _dump_elf(\nWarning: '/home/user/validation/libs/ex/tbb-2021.9.0-hf52228f_0/lib/libtbbmalloc.so.2.9' \u2014 no headers provided. Will use DWARF debug info if available, else symbols-only mode.\n/home/user/abicheck/abicheck/dumper.py:634: UserWarning: No headers provided \u2014 using DWARF debug info as primary data source. #define constants and default parameter values will be unavailable.\n  snapshot = _dump_elf(\nReport written to /home/user/validation/reports/T1_tbb_minor__libtbbmalloc.json",
+    "verdict": "BREAKING",
+    "counts": {
+      "breaking": 116
+    },
+    "release_recommendation": {
+      "version_bump": "major",
+      "soname_action": "bump_missing",
+      "rationale": "Binary ABI break detected \u2014 release a new MAJOR version. The SONAME was not bumped despite the binary break \u2014 bump it (e.g. libfoo.so.1 \u2192 libfoo.so.2) so old binaries fail loudly instead of silently loading an incompatible library."
+    }
+  },
+  {
+    "tag": "T1_tbb_minor__libtbbmalloc_proxy",
+    "pair": "T1_tbb_minor",
+    "library": "oneTBB",
+    "logical": "libtbbmalloc_proxy",
+    "old_ver": "2021.5.0",
+    "new_ver": "2021.9.0",
+    "expectation": "COMPATIBLE",
+    "note": "minor within oneTBB 2021 series (libtbb.so.12)",
+    "mode": "dwarf->dwarf",
+    "old_path": "/home/user/validation/libs/ex/tbb-2021.5.0-h4bd325d_0/lib/libtbbmalloc_proxy.so.2.5",
+    "new_path": "/home/user/validation/libs/ex/tbb-2021.9.0-hf52228f_0/lib/libtbbmalloc_proxy.so.2.9",
+    "exit_code": 4,
+    "seconds": 0.55,
+    "stderr": "Warning: '/home/user/validation/libs/ex/tbb-2021.5.0-h4bd325d_0/lib/libtbbmalloc_proxy.so.2.5' \u2014 no headers provided. Will use DWARF debug info if available, else symbols-only mode.\n/home/user/abicheck/abicheck/dumper.py:634: UserWarning: No headers provided \u2014 using DWARF debug info as primary data source. #define constants and default parameter values will be unavailable.\n  snapshot = _dump_elf(\nWarning: '/home/user/validation/libs/ex/tbb-2021.9.0-hf52228f_0/lib/libtbbmalloc_proxy.so.2.9' \u2014 no headers provided. Will use DWARF debug info if available, else symbols-only mode.\n/home/user/abicheck/abicheck/dumper.py:634: UserWarning: No headers provided \u2014 using DWARF debug info as primary data source. #define constants and default parameter values will be unavailable.\n  snapshot = _dump_elf(\nReport written to /home/user/validation/reports/T1_tbb_minor__libtbbmalloc_proxy.json",
+    "verdict": "BREAKING",
+    "counts": {
+      "breaking": 19
+    },
+    "release_recommendation": {
+      "version_bump": "major",
+      "soname_action": "bump_missing",
+      "rationale": "Binary ABI break detected \u2014 release a new MAJOR version. The SONAME was not bumped despite the binary break \u2014 bump it (e.g. libfoo.so.1 \u2192 libfoo.so.2) so old binaries fail loudly instead of silently loading an incompatible library."
+    }
+  },
+  {
+    "tag": "T2_tbb_series__libtbb",
+    "pair": "T2_tbb_series",
+    "library": "oneTBB",
+    "logical": "libtbb",
+    "old_ver": "2021.9.0",
+    "new_ver": "2022.0.0",
+    "expectation": "COMPATIBLE",
+    "note": "2021->2022 series bump, ABI retained",
+    "mode": "dwarf->sym",
+    "old_path": "/home/user/validation/libs/ex/tbb-2021.9.0-hf52228f_0/lib/libtbb.so.12.9",
+    "new_path": "/home/user/validation/libs/ex/tbb-2022.0.0-hceb3a55_0/lib/libtbb.so.12.14",
+    "exit_code": 4,
+    "seconds": 8.0,
+    "stderr": "Warning: '/home/user/validation/libs/ex/tbb-2021.9.0-hf52228f_0/lib/libtbb.so.12.9' \u2014 no headers provided. Will use DWARF debug info if available, else symbols-only mode.\n/home/user/abicheck/abicheck/dumper.py:634: UserWarning: No headers provided \u2014 using DWARF debug info as primary data source. #define constants and default parameter values will be unavailable.\n  snapshot = _dump_elf(\nWarning: '/home/user/validation/libs/ex/tbb-2022.0.0-hceb3a55_0/lib/libtbb.so.12.14' \u2014 no headers provided. Will use DWARF debug info if available, else symbols-only mode.\n/home/user/abicheck/abicheck/dumper.py:634: UserWarning: No headers provided and no DWARF debug info \u2014 only ELF-exported symbols will be captured; type information will be missing.\n  snapshot = _dump_elf(\nReport written to /home/user/validation/reports/T2_tbb_series__libtbb.json",
+    "verdict": "BREAKING",
+    "counts": {
+      "breaking": 1137
+    },
+    "release_recommendation": {
+      "version_bump": "major",
+      "soname_action": "bump_missing",
+      "rationale": "Binary ABI break detected \u2014 release a new MAJOR version. The SONAME was not bumped despite the binary break \u2014 bump it (e.g. libfoo.so.1 \u2192 libfoo.so.2) so old binaries fail loudly instead of silently loading an incompatible library."
+    }
+  },
+  {
+    "tag": "T2_tbb_series__libtbbbind_2_5",
+    "pair": "T2_tbb_series",
+    "library": "oneTBB",
+    "logical": "libtbbbind_2_5",
+    "old_ver": "2021.9.0",
+    "new_ver": "2022.0.0",
+    "expectation": "COMPATIBLE",
+    "note": "2021->2022 series bump, ABI retained",
+    "mode": "dwarf->sym",
+    "old_path": "/home/user/validation/libs/ex/tbb-2021.9.0-hf52228f_0/lib/libtbbbind_2_5.so.3.9",
+    "new_path": "/home/user/validation/libs/ex/tbb-2022.0.0-hceb3a55_0/lib/libtbbbind_2_5.so.3.14",
+    "exit_code": 4,
+    "seconds": 0.41,
+    "stderr": "Warning: '/home/user/validation/libs/ex/tbb-2021.9.0-hf52228f_0/lib/libtbbbind_2_5.so.3.9' \u2014 no headers provided. Will use DWARF debug info if available, else symbols-only mode.\n/home/user/abicheck/abicheck/dumper.py:634: UserWarning: No headers provided \u2014 using DWARF debug info as primary data source. #define constants and default parameter values will be unavailable.\n  snapshot = _dump_elf(\nWarning: '/home/user/validation/libs/ex/tbb-2022.0.0-hceb3a55_0/lib/libtbbbind_2_5.so.3.14' \u2014 no headers provided. Will use DWARF debug info if available, else symbols-only mode.\n/home/user/abicheck/abicheck/dumper.py:634: UserWarning: No headers provided and no DWARF debug info \u2014 only ELF-exported symbols will be captured; type information will be missing.\n  snapshot = _dump_elf(\nReport written to /home/user/validation/reports/T2_tbb_series__libtbbbind_2_5.json",
+    "verdict": "BREAKING",
+    "counts": {
+      "breaking": 166
+    },
+    "release_recommendation": {
+      "version_bump": "major",
+      "soname_action": "bump_missing",
+      "rationale": "Binary ABI break detected \u2014 release a new MAJOR version. The SONAME was not bumped despite the binary break \u2014 bump it (e.g. libfoo.so.1 \u2192 libfoo.so.2) so old binaries fail loudly instead of silently loading an incompatible library."
+    }
+  },
+  {
+    "tag": "T2_tbb_series__libtbbmalloc",
+    "pair": "T2_tbb_series",
+    "library": "oneTBB",
+    "logical": "libtbbmalloc",
+    "old_ver": "2021.9.0",
+    "new_ver": "2022.0.0",
+    "expectation": "COMPATIBLE",
+    "note": "2021->2022 series bump, ABI retained",
+    "mode": "dwarf->sym",
+    "old_path": "/home/user/validation/libs/ex/tbb-2021.9.0-hf52228f_0/lib/libtbbmalloc.so.2.9",
+    "new_path": "/home/user/validation/libs/ex/tbb-2022.0.0-hceb3a55_0/lib/libtbbmalloc.so.2.14",
+    "exit_code": 4,
+    "seconds": 1.55,
+    "stderr": "Warning: '/home/user/validation/libs/ex/tbb-2021.9.0-hf52228f_0/lib/libtbbmalloc.so.2.9' \u2014 no headers provided. Will use DWARF debug info if available, else symbols-only mode.\n/home/user/abicheck/abicheck/dumper.py:634: UserWarning: No headers provided \u2014 using DWARF debug info as primary data source. #define constants and default parameter values will be unavailable.\n  snapshot = _dump_elf(\nWarning: '/home/user/validation/libs/ex/tbb-2022.0.0-hceb3a55_0/lib/libtbbmalloc.so.2.14' \u2014 no headers provided. Will use DWARF debug info if available, else symbols-only mode.\n/home/user/abicheck/abicheck/dumper.py:634: UserWarning: No headers provided and no DWARF debug info \u2014 only ELF-exported symbols will be captured; type information will be missing.\n  snapshot = _dump_elf(\nReport written to /home/user/validation/reports/T2_tbb_series__libtbbmalloc.json",
+    "verdict": "BREAKING",
+    "counts": {
+      "breaking": 596
+    },
+    "release_recommendation": {
+      "version_bump": "major",
+      "soname_action": "bump_missing",
+      "rationale": "Binary ABI break detected \u2014 release a new MAJOR version. The SONAME was not bumped despite the binary break \u2014 bump it (e.g. libfoo.so.1 \u2192 libfoo.so.2) so old binaries fail loudly instead of silently loading an incompatible library."
+    }
+  },
+  {
+    "tag": "T2_tbb_series__libtbbmalloc_proxy",
+    "pair": "T2_tbb_series",
+    "library": "oneTBB",
+    "logical": "libtbbmalloc_proxy",
+    "old_ver": "2021.9.0",
+    "new_ver": "2022.0.0",
+    "expectation": "COMPATIBLE",
+    "note": "2021->2022 series bump, ABI retained",
+    "mode": "dwarf->sym",
+    "old_path": "/home/user/validation/libs/ex/tbb-2021.9.0-hf52228f_0/lib/libtbbmalloc_proxy.so.2.9",
+    "new_path": "/home/user/validation/libs/ex/tbb-2022.0.0-hceb3a55_0/lib/libtbbmalloc_proxy.so.2.14",
+    "exit_code": 4,
+    "seconds": 0.43,
+    "stderr": "Warning: '/home/user/validation/libs/ex/tbb-2021.9.0-hf52228f_0/lib/libtbbmalloc_proxy.so.2.9' \u2014 no headers provided. Will use DWARF debug info if available, else symbols-only mode.\n/home/user/abicheck/abicheck/dumper.py:634: UserWarning: No headers provided \u2014 using DWARF debug info as primary data source. #define constants and default parameter values will be unavailable.\n  snapshot = _dump_elf(\nWarning: '/home/user/validation/libs/ex/tbb-2022.0.0-hceb3a55_0/lib/libtbbmalloc_proxy.so.2.14' \u2014 no headers provided. Will use DWARF debug info if available, else symbols-only mode.\n/home/user/abicheck/abicheck/dumper.py:634: UserWarning: No headers provided and no DWARF debug info \u2014 only ELF-exported symbols will be captured; type information will be missing.\n  snapshot = _dump_elf(\nReport written to /home/user/validation/reports/T2_tbb_series__libtbbmalloc_proxy.json",
+    "verdict": "BREAKING",
+    "counts": {
+      "breaking": 130
+    },
+    "release_recommendation": {
+      "version_bump": "major",
+      "soname_action": "bump_missing",
+      "rationale": "Binary ABI break detected \u2014 release a new MAJOR version. The SONAME was not bumped despite the binary break \u2014 bump it (e.g. libfoo.so.1 \u2192 libfoo.so.2) so old binaries fail loudly instead of silently loading an incompatible library."
+    }
+  },
+  {
+    "tag": "T3_tbb_patch__libtbb",
+    "pair": "T3_tbb_patch",
+    "library": "oneTBB",
+    "logical": "libtbb",
+    "old_ver": "2022.0.0",
+    "new_ver": "2022.3.0",
+    "expectation": "COMPATIBLE",
+    "note": "patch within 2022 series",
+    "mode": "sym->sym",
+    "old_path": "/home/user/validation/libs/ex/tbb-2022.0.0-hceb3a55_0/lib/libtbb.so.12.14",
+    "new_path": "/home/user/validation/libs/ex/tbb-2022.3.0-h8d10470_0/lib/libtbb.so.12.17",
+    "exit_code": 0,
+    "seconds": 0.37,
+    "stderr": "Warning: '/home/user/validation/libs/ex/tbb-2022.0.0-hceb3a55_0/lib/libtbb.so.12.14' \u2014 no headers provided. Will use DWARF debug info if available, else symbols-only mode.\n/home/user/abicheck/abicheck/dumper.py:634: UserWarning: No headers provided and no DWARF debug info \u2014 only ELF-exported symbols will be captured; type information will be missing.\n  snapshot = _dump_elf(\nWarning: '/home/user/validation/libs/ex/tbb-2022.3.0-h8d10470_0/lib/libtbb.so.12.17' \u2014 no headers provided. Will use DWARF debug info if available, else symbols-only mode.\n/home/user/abicheck/abicheck/dumper.py:634: UserWarning: No headers provided and no DWARF debug info \u2014 only ELF-exported symbols will be captured; type information will be missing.\n  snapshot = _dump_elf(\nWarning: --scope-public-headers could not resolve the public surface (no header-derived public symbols); fell back to the full export table. Compatibility is UNCONFIRMED \u2014 treat this result as manual-review-required, not a clean public surface.\nReport written to /home/user/validation/reports/T3_tbb_patch__libtbb.json",
+    "verdict": "COMPATIBLE_WITH_RISK",
+    "counts": {
+      "breaking": 0
+    },
+    "release_recommendation": {
+      "version_bump": "minor",
+      "soname_action": "no_bump_needed",
+      "rationale": "Binary-compatible, but a deployment risk was detected \u2014 a MINOR release is appropriate; review the risk findings (e.g. a raised runtime/toolchain floor) before shipping."
+    }
+  },
+  {
+    "tag": "T3_tbb_patch__libtbbmalloc",
+    "pair": "T3_tbb_patch",
+    "library": "oneTBB",
+    "logical": "libtbbmalloc",
+    "old_ver": "2022.0.0",
+    "new_ver": "2022.3.0",
+    "expectation": "COMPATIBLE",
+    "note": "patch within 2022 series",
+    "mode": "sym->sym",
+    "old_path": "/home/user/validation/libs/ex/tbb-2022.0.0-hceb3a55_0/lib/libtbbmalloc.so.2.14",
+    "new_path": "/home/user/validation/libs/ex/tbb-2022.3.0-h8d10470_0/lib/libtbbmalloc.so.2.17",
+    "exit_code": 0,
+    "seconds": 0.28,
+    "stderr": "Warning: '/home/user/validation/libs/ex/tbb-2022.0.0-hceb3a55_0/lib/libtbbmalloc.so.2.14' \u2014 no headers provided. Will use DWARF debug info if available, else symbols-only mode.\n/home/user/abicheck/abicheck/dumper.py:634: UserWarning: No headers provided and no DWARF debug info \u2014 only ELF-exported symbols will be captured; type information will be missing.\n  snapshot = _dump_elf(\nWarning: '/home/user/validation/libs/ex/tbb-2022.3.0-h8d10470_0/lib/libtbbmalloc.so.2.17' \u2014 no headers provided. Will use DWARF debug info if available, else symbols-only mode.\nWarning: --scope-public-headers could not resolve the public surface (no header-derived public symbols); fell back to the full export table. Compatibility is UNCONFIRMED \u2014 treat this result as manual-review-required, not a clean public surface.\nReport written to /home/user/validation/reports/T3_tbb_patch__libtbbmalloc.json",
+    "verdict": "COMPATIBLE",
+    "counts": {
+      "breaking": 0
+    },
+    "release_recommendation": {
+      "version_bump": "patch",
+      "soname_action": "no_bump_needed",
+      "rationale": "Only quality / bad-practice findings with no API or ABI surface change \u2014 a PATCH release is sufficient."
+    }
+  },
+  {
+    "tag": "T3_tbb_patch__libtbbmalloc_proxy",
+    "pair": "T3_tbb_patch",
+    "library": "oneTBB",
+    "logical": "libtbbmalloc_proxy",
+    "old_ver": "2022.0.0",
+    "new_ver": "2022.3.0",
+    "expectation": "COMPATIBLE",
+    "note": "patch within 2022 series",
+    "mode": "sym->sym",
+    "old_path": "/home/user/validation/libs/ex/tbb-2022.0.0-hceb3a55_0/lib/libtbbmalloc_proxy.so.2.14",
+    "new_path": "/home/user/validation/libs/ex/tbb-2022.3.0-h8d10470_0/lib/libtbbmalloc_proxy.so.2.17",
+    "exit_code": 0,
+    "seconds": 0.26,
+    "stderr": "Warning: '/home/user/validation/libs/ex/tbb-2022.0.0-hceb3a55_0/lib/libtbbmalloc_proxy.so.2.14' \u2014 no headers provided. Will use DWARF debug info if available, else symbols-only mode.\n/home/user/abicheck/abicheck/dumper.py:634: UserWarning: No headers provided and no DWARF debug info \u2014 only ELF-exported symbols will be captured; type information will be missing.\n  snapshot = _dump_elf(\nWarning: '/home/user/validation/libs/ex/tbb-2022.3.0-h8d10470_0/lib/libtbbmalloc_proxy.so.2.17' \u2014 no headers provided. Will use DWARF debug info if available, else symbols-only mode.\nWarning: --scope-public-headers could not resolve the public surface (no header-derived public symbols); fell back to the full export table. Compatibility is UNCONFIRMED \u2014 treat this result as manual-review-required, not a clean public surface.\nReport written to /home/user/validation/reports/T3_tbb_patch__libtbbmalloc_proxy.json",
+    "verdict": "COMPATIBLE",
+    "counts": {
+      "breaking": 0
+    },
+    "release_recommendation": {
+      "version_bump": "patch",
+      "soname_action": "no_bump_needed",
+      "rationale": "Only quality / bad-practice findings with no API or ABI surface change \u2014 a PATCH release is sufficient."
+    }
+  },
+  {
+    "tag": "P1_protobuf_patch__libprotobuf",
+    "pair": "P1_protobuf_patch",
+    "library": "protobuf",
+    "logical": "libprotobuf",
+    "old_ver": "6.33.2",
+    "new_ver": "6.33.5",
+    "expectation": "COMPATIBLE",
+    "note": "patch, same SONAME",
+    "mode": "sym->sym",
+    "old_path": "/home/user/validation/libs/ex/libprotobuf-6.33.2-he382b67_0/lib/libprotobuf.so.33.2.0",
+    "new_path": "/home/user/validation/libs/ex/libprotobuf-6.33.5-h2b00c02_0/lib/libprotobuf.so.33.5.0",
+    "exit_code": 4,
+    "seconds": 1.77,
+    "stderr": "Warning: '/home/user/validation/libs/ex/libprotobuf-6.33.2-he382b67_0/lib/libprotobuf.so.33.2.0' \u2014 no headers provided. Will use DWARF debug info if available, else symbols-only mode.\n/home/user/abicheck/abicheck/dumper.py:634: UserWarning: No headers provided and no DWARF debug info \u2014 only ELF-exported symbols will be captured; type information will be missing.\n  snapshot = _dump_elf(\nWarning: '/home/user/validation/libs/ex/libprotobuf-6.33.5-h2b00c02_0/lib/libprotobuf.so.33.5.0' \u2014 no headers provided. Will use DWARF debug info if available, else symbols-only mode.\n/home/user/abicheck/abicheck/dumper.py:634: UserWarning: No headers provided and no DWARF debug info \u2014 only ELF-exported symbols will be captured; type information will be missing.\n  snapshot = _dump_elf(\nWarning: --scope-public-headers could not resolve the public surface (no header-derived public symbols); fell back to the full export table. Compatibility is UNCONFIRMED \u2014 treat this result as manual-review-required, not a clean public surface.\nReport written to /home/user/validation/reports/P1_protobuf_patch__libprotobuf.json",
+    "verdict": "BREAKING",
+    "counts": {
+      "breaking": 6
+    },
+    "release_recommendation": {
+      "version_bump": "major",
+      "soname_action": "bump_performed",
+      "rationale": "Binary ABI break detected \u2014 release a new MAJOR version. The SONAME was already bumped in this revision \u2014 good."
+    }
+  },
+  {
+    "tag": "P1_protobuf_patch__libprotobuf-lite",
+    "pair": "P1_protobuf_patch",
+    "library": "protobuf",
+    "logical": "libprotobuf-lite",
+    "old_ver": "6.33.2",
+    "new_ver": "6.33.5",
+    "expectation": "COMPATIBLE",
+    "note": "patch, same SONAME",
+    "mode": "sym->sym",
+    "old_path": "/home/user/validation/libs/ex/libprotobuf-6.33.2-he382b67_0/lib/libprotobuf-lite.so.33.2.0",
+    "new_path": "/home/user/validation/libs/ex/libprotobuf-6.33.5-h2b00c02_0/lib/libprotobuf-lite.so.33.5.0",
+    "exit_code": 0,
+    "seconds": 0.6,
+    "stderr": "Warning: '/home/user/validation/libs/ex/libprotobuf-6.33.2-he382b67_0/lib/libprotobuf-lite.so.33.2.0' \u2014 no headers provided. Will use DWARF debug info if available, else symbols-only mode.\n/home/user/abicheck/abicheck/dumper.py:634: UserWarning: No headers provided and no DWARF debug info \u2014 only ELF-exported symbols will be captured; type information will be missing.\n  snapshot = _dump_elf(\nWarning: '/home/user/validation/libs/ex/libprotobuf-6.33.5-h2b00c02_0/lib/libprotobuf-lite.so.33.5.0' \u2014 no headers provided. Will use DWARF debug info if available, else symbols-only mode.\n/home/user/abicheck/abicheck/dumper.py:634: UserWarning: No headers provided and no DWARF debug info \u2014 only ELF-exported symbols will be captured; type information will be missing.\n  snapshot = _dump_elf(\nWarning: --scope-public-headers could not resolve the public surface (no header-derived public symbols); fell back to the full export table. Compatibility is UNCONFIRMED \u2014 treat this result as manual-review-required, not a clean public surface.\nReport written to /home/user/validation/reports/P1_protobuf_patch__libprotobuf-lite.json",
+    "verdict": "COMPATIBLE_WITH_RISK",
+    "counts": {
+      "breaking": 0
+    },
+    "release_recommendation": {
+      "version_bump": "minor",
+      "soname_action": "no_bump_needed",
+      "rationale": "Binary-compatible, but a deployment risk was detected \u2014 a MINOR release is appropriate; review the risk findings (e.g. a raised runtime/toolchain floor) before shipping."
+    }
+  },
+  {
+    "tag": "P1_protobuf_patch__libprotoc",
+    "pair": "P1_protobuf_patch",
+    "library": "protobuf",
+    "logical": "libprotoc",
+    "old_ver": "6.33.2",
+    "new_ver": "6.33.5",
+    "expectation": "COMPATIBLE",
+    "note": "patch, same SONAME",
+    "mode": "sym->sym",
+    "old_path": "/home/user/validation/libs/ex/libprotobuf-6.33.2-he382b67_0/lib/libprotoc.so.33.2.0",
+    "new_path": "/home/user/validation/libs/ex/libprotobuf-6.33.5-h2b00c02_0/lib/libprotoc.so.33.5.0",
+    "exit_code": 0,
+    "seconds": 0.97,
+    "stderr": "Warning: '/home/user/validation/libs/ex/libprotobuf-6.33.2-he382b67_0/lib/libprotoc.so.33.2.0' \u2014 no headers provided. Will use DWARF debug info if available, else symbols-only mode.\n/home/user/abicheck/abicheck/dumper.py:634: UserWarning: No headers provided and no DWARF debug info \u2014 only ELF-exported symbols will be captured; type information will be missing.\n  snapshot = _dump_elf(\nWarning: '/home/user/validation/libs/ex/libprotobuf-6.33.5-h2b00c02_0/lib/libprotoc.so.33.5.0' \u2014 no headers provided. Will use DWARF debug info if available, else symbols-only mode.\n/home/user/abicheck/abicheck/dumper.py:634: UserWarning: No headers provided and no DWARF debug info \u2014 only ELF-exported symbols will be captured; type information will be missing.\n  snapshot = _dump_elf(\nWarning: --scope-public-headers could not resolve the public surface (no header-derived public symbols); fell back to the full export table. Compatibility is UNCONFIRMED \u2014 treat this result as manual-review-required, not a clean public surface.\nReport written to /home/user/validation/reports/P1_protobuf_patch__libprotoc.json",
+    "verdict": "COMPATIBLE_WITH_RISK",
+    "counts": {
+      "breaking": 0
+    },
+    "release_recommendation": {
+      "version_bump": "minor",
+      "soname_action": "no_bump_needed",
+      "rationale": "Binary-compatible, but a deployment risk was detected \u2014 a MINOR release is appropriate; review the risk findings (e.g. a raised runtime/toolchain floor) before shipping."
+    }
+  },
+  {
+    "tag": "P1_protobuf_patch__libutf8_range",
+    "pair": "P1_protobuf_patch",
+    "library": "protobuf",
+    "logical": "libutf8_range",
+    "old_ver": "6.33.2",
+    "new_ver": "6.33.5",
+    "expectation": "COMPATIBLE",
+    "note": "patch, same SONAME",
+    "mode": "sym->sym",
+    "old_path": "/home/user/validation/libs/ex/libprotobuf-6.33.2-he382b67_0/lib/libutf8_range.so.33.2.0",
+    "new_path": "/home/user/validation/libs/ex/libprotobuf-6.33.5-h2b00c02_0/lib/libutf8_range.so.33.5.0",
+    "exit_code": 0,
+    "seconds": 0.23,
+    "stderr": "Warning: '/home/user/validation/libs/ex/libprotobuf-6.33.2-he382b67_0/lib/libutf8_range.so.33.2.0' \u2014 no headers provided. Will use DWARF debug info if available, else symbols-only mode.\n/home/user/abicheck/abicheck/dumper.py:634: UserWarning: No headers provided and no DWARF debug info \u2014 only ELF-exported symbols will be captured; type information will be missing.\n  snapshot = _dump_elf(\nWarning: '/home/user/validation/libs/ex/libprotobuf-6.33.5-h2b00c02_0/lib/libutf8_range.so.33.5.0' \u2014 no headers provided. Will use DWARF debug info if available, else symbols-only mode.\nWarning: --scope-public-headers could not resolve the public surface (no header-derived public symbols); fell back to the full export table. Compatibility is UNCONFIRMED \u2014 treat this result as manual-review-required, not a clean public surface.\nReport written to /home/user/validation/reports/P1_protobuf_patch__libutf8_range.json",
+    "verdict": "COMPATIBLE",
+    "counts": {
+      "breaking": 0
+    },
+    "release_recommendation": {
+      "version_bump": "patch",
+      "soname_action": "no_bump_needed",
+      "rationale": "Only quality / bad-practice findings with no API or ABI surface change \u2014 a PATCH release is sufficient."
+    }
+  },
+  {
+    "tag": "P1_protobuf_patch__libutf8_validity",
+    "pair": "P1_protobuf_patch",
+    "library": "protobuf",
+    "logical": "libutf8_validity",
+    "old_ver": "6.33.2",
+    "new_ver": "6.33.5",
+    "expectation": "COMPATIBLE",
+    "note": "patch, same SONAME",
+    "mode": "sym->sym",
+    "old_path": "/home/user/validation/libs/ex/libprotobuf-6.33.2-he382b67_0/lib/libutf8_validity.so.33.2.0",
+    "new_path": "/home/user/validation/libs/ex/libprotobuf-6.33.5-h2b00c02_0/lib/libutf8_validity.so.33.5.0",
+    "exit_code": 0,
+    "seconds": 0.25,
+    "stderr": "Warning: '/home/user/validation/libs/ex/libprotobuf-6.33.2-he382b67_0/lib/libutf8_validity.so.33.2.0' \u2014 no headers provided. Will use DWARF debug info if available, else symbols-only mode.\n/home/user/abicheck/abicheck/dumper.py:634: UserWarning: No headers provided and no DWARF debug info \u2014 only ELF-exported symbols will be captured; type information will be missing.\n  snapshot = _dump_elf(\nWarning: '/home/user/validation/libs/ex/libprotobuf-6.33.5-h2b00c02_0/lib/libutf8_validity.so.33.5.0' \u2014 no headers provided. Will use DWARF debug info if available, else symbols-only mode.\nWarning: --scope-public-headers could not resolve the public surface (no header-derived public symbols); fell back to the full export table. Compatibility is UNCONFIRMED \u2014 treat this result as manual-review-required, not a clean public surface.\nReport written to /home/user/validation/reports/P1_protobuf_patch__libutf8_validity.json",
+    "verdict": "COMPATIBLE",
+    "counts": {
+      "breaking": 0
+    },
+    "release_recommendation": {
+      "version_bump": "patch",
+      "soname_action": "no_bump_needed",
+      "rationale": "Only quality / bad-practice findings with no API or ABI surface change \u2014 a PATCH release is sufficient."
+    }
+  },
+  {
+    "tag": "P2_protobuf_major__libprotobuf",
+    "pair": "P2_protobuf_major",
+    "library": "protobuf",
+    "logical": "libprotobuf",
+    "old_ver": "6.33.5",
+    "new_ver": "7.34.1",
+    "expectation": "BREAKING",
+    "note": "major SONAME bump 6->7",
+    "mode": "sym->sym",
+    "old_path": "/home/user/validation/libs/ex/libprotobuf-6.33.5-h2b00c02_0/lib/libprotobuf.so.33.5.0",
+    "new_path": "/home/user/validation/libs/ex/libprotobuf-7.34.1-h612f066_0/lib/libprotobuf.so.34.1.0",
+    "exit_code": 4,
+    "seconds": 1.83,
+    "stderr": "Warning: '/home/user/validation/libs/ex/libprotobuf-6.33.5-h2b00c02_0/lib/libprotobuf.so.33.5.0' \u2014 no headers provided. Will use DWARF debug info if available, else symbols-only mode.\n/home/user/abicheck/abicheck/dumper.py:634: UserWarning: No headers provided and no DWARF debug info \u2014 only ELF-exported symbols will be captured; type information will be missing.\n  snapshot = _dump_elf(\nWarning: '/home/user/validation/libs/ex/libprotobuf-7.34.1-h612f066_0/lib/libprotobuf.so.34.1.0' \u2014 no headers provided. Will use DWARF debug info if available, else symbols-only mode.\n/home/user/abicheck/abicheck/dumper.py:634: UserWarning: No headers provided and no DWARF debug info \u2014 only ELF-exported symbols will be captured; type information will be missing.\n  snapshot = _dump_elf(\nWarning: --scope-public-headers could not resolve the public surface (no header-derived public symbols); fell back to the full export table. Compatibility is UNCONFIRMED \u2014 treat this result as manual-review-required, not a clean public surface.\nReport written to /home/user/validation/reports/P2_protobuf_major__libprotobuf.json",
+    "verdict": "BREAKING",
+    "counts": {
+      "breaking": 98
+    },
+    "release_recommendation": {
+      "version_bump": "major",
+      "soname_action": "bump_performed",
+      "rationale": "Binary ABI break detected \u2014 release a new MAJOR version. The SONAME was already bumped in this revision \u2014 good."
+    }
+  },
+  {
+    "tag": "P2_protobuf_major__libprotobuf-lite",
+    "pair": "P2_protobuf_major",
+    "library": "protobuf",
+    "logical": "libprotobuf-lite",
+    "old_ver": "6.33.5",
+    "new_ver": "7.34.1",
+    "expectation": "BREAKING",
+    "note": "major SONAME bump 6->7",
+    "mode": "sym->sym",
+    "old_path": "/home/user/validation/libs/ex/libprotobuf-6.33.5-h2b00c02_0/lib/libprotobuf-lite.so.33.5.0",
+    "new_path": "/home/user/validation/libs/ex/libprotobuf-7.34.1-h612f066_0/lib/libprotobuf-lite.so.34.1.0",
+    "exit_code": 4,
+    "seconds": 0.63,
+    "stderr": "Warning: '/home/user/validation/libs/ex/libprotobuf-6.33.5-h2b00c02_0/lib/libprotobuf-lite.so.33.5.0' \u2014 no headers provided. Will use DWARF debug info if available, else symbols-only mode.\n/home/user/abicheck/abicheck/dumper.py:634: UserWarning: No headers provided and no DWARF debug info \u2014 only ELF-exported symbols will be captured; type information will be missing.\n  snapshot = _dump_elf(\nWarning: '/home/user/validation/libs/ex/libprotobuf-7.34.1-h612f066_0/lib/libprotobuf-lite.so.34.1.0' \u2014 no headers provided. Will use DWARF debug info if available, else symbols-only mode.\n/home/user/abicheck/abicheck/dumper.py:634: UserWarning: No headers provided and no DWARF debug info \u2014 only ELF-exported symbols will be captured; type information will be missing.\n  snapshot = _dump_elf(\nWarning: --scope-public-headers could not resolve the public surface (no header-derived public symbols); fell back to the full export table. Compatibility is UNCONFIRMED \u2014 treat this result as manual-review-required, not a clean public surface.\nReport written to /home/user/validation/reports/P2_protobuf_major__libprotobuf-lite.json",
+    "verdict": "BREAKING",
+    "counts": {
+      "breaking": 2
+    },
+    "release_recommendation": {
+      "version_bump": "major",
+      "soname_action": "bump_performed",
+      "rationale": "Binary ABI break detected \u2014 release a new MAJOR version. The SONAME was already bumped in this revision \u2014 good."
+    }
+  },
+  {
+    "tag": "P2_protobuf_major__libprotoc",
+    "pair": "P2_protobuf_major",
+    "library": "protobuf",
+    "logical": "libprotoc",
+    "old_ver": "6.33.5",
+    "new_ver": "7.34.1",
+    "expectation": "BREAKING",
+    "note": "major SONAME bump 6->7",
+    "mode": "sym->sym",
+    "old_path": "/home/user/validation/libs/ex/libprotobuf-6.33.5-h2b00c02_0/lib/libprotoc.so.33.5.0",
+    "new_path": "/home/user/validation/libs/ex/libprotobuf-7.34.1-h612f066_0/lib/libprotoc.so.34.1.0",
+    "exit_code": 4,
+    "seconds": 0.99,
+    "stderr": "Warning: '/home/user/validation/libs/ex/libprotobuf-6.33.5-h2b00c02_0/lib/libprotoc.so.33.5.0' \u2014 no headers provided. Will use DWARF debug info if available, else symbols-only mode.\n/home/user/abicheck/abicheck/dumper.py:634: UserWarning: No headers provided and no DWARF debug info \u2014 only ELF-exported symbols will be captured; type information will be missing.\n  snapshot = _dump_elf(\nWarning: '/home/user/validation/libs/ex/libprotobuf-7.34.1-h612f066_0/lib/libprotoc.so.34.1.0' \u2014 no headers provided. Will use DWARF debug info if available, else symbols-only mode.\n/home/user/abicheck/abicheck/dumper.py:634: UserWarning: No headers provided and no DWARF debug info \u2014 only ELF-exported symbols will be captured; type information will be missing.\n  snapshot = _dump_elf(\nWarning: --scope-public-headers could not resolve the public surface (no header-derived public symbols); fell back to the full export table. Compatibility is UNCONFIRMED \u2014 treat this result as manual-review-required, not a clean public surface.\nReport written to /home/user/validation/reports/P2_protobuf_major__libprotoc.json",
+    "verdict": "BREAKING",
+    "counts": {
+      "breaking": 8
+    },
+    "release_recommendation": {
+      "version_bump": "major",
+      "soname_action": "bump_performed",
+      "rationale": "Binary ABI break detected \u2014 release a new MAJOR version. The SONAME was already bumped in this revision \u2014 good."
+    }
+  },
+  {
+    "tag": "P2_protobuf_major__libutf8_range",
+    "pair": "P2_protobuf_major",
+    "library": "protobuf",
+    "logical": "libutf8_range",
+    "old_ver": "6.33.5",
+    "new_ver": "7.34.1",
+    "expectation": "BREAKING",
+    "note": "major SONAME bump 6->7",
+    "mode": "sym->sym",
+    "old_path": "/home/user/validation/libs/ex/libprotobuf-6.33.5-h2b00c02_0/lib/libutf8_range.so.33.5.0",
+    "new_path": "/home/user/validation/libs/ex/libprotobuf-7.34.1-h612f066_0/lib/libutf8_range.so.34.1.0",
+    "exit_code": 0,
+    "seconds": 0.23,
+    "stderr": "Warning: '/home/user/validation/libs/ex/libprotobuf-6.33.5-h2b00c02_0/lib/libutf8_range.so.33.5.0' \u2014 no headers provided. Will use DWARF debug info if available, else symbols-only mode.\n/home/user/abicheck/abicheck/dumper.py:634: UserWarning: No headers provided and no DWARF debug info \u2014 only ELF-exported symbols will be captured; type information will be missing.\n  snapshot = _dump_elf(\nWarning: '/home/user/validation/libs/ex/libprotobuf-7.34.1-h612f066_0/lib/libutf8_range.so.34.1.0' \u2014 no headers provided. Will use DWARF debug info if available, else symbols-only mode.\nWarning: --scope-public-headers could not resolve the public surface (no header-derived public symbols); fell back to the full export table. Compatibility is UNCONFIRMED \u2014 treat this result as manual-review-required, not a clean public surface.\nReport written to /home/user/validation/reports/P2_protobuf_major__libutf8_range.json",
+    "verdict": "COMPATIBLE",
+    "counts": {
+      "breaking": 0
+    },
+    "release_recommendation": {
+      "version_bump": "patch",
+      "soname_action": "no_bump_needed",
+      "rationale": "Only quality / bad-practice findings with no API or ABI surface change \u2014 a PATCH release is sufficient."
+    }
+  },
+  {
+    "tag": "P2_protobuf_major__libutf8_validity",
+    "pair": "P2_protobuf_major",
+    "library": "protobuf",
+    "logical": "libutf8_validity",
+    "old_ver": "6.33.5",
+    "new_ver": "7.34.1",
+    "expectation": "BREAKING",
+    "note": "major SONAME bump 6->7",
+    "mode": "sym->sym",
+    "old_path": "/home/user/validation/libs/ex/libprotobuf-6.33.5-h2b00c02_0/lib/libutf8_validity.so.33.5.0",
+    "new_path": "/home/user/validation/libs/ex/libprotobuf-7.34.1-h612f066_0/lib/libutf8_validity.so.34.1.0",
+    "exit_code": 0,
+    "seconds": 0.25,
+    "stderr": "Warning: '/home/user/validation/libs/ex/libprotobuf-6.33.5-h2b00c02_0/lib/libutf8_validity.so.33.5.0' \u2014 no headers provided. Will use DWARF debug info if available, else symbols-only mode.\n/home/user/abicheck/abicheck/dumper.py:634: UserWarning: No headers provided and no DWARF debug info \u2014 only ELF-exported symbols will be captured; type information will be missing.\n  snapshot = _dump_elf(\nWarning: '/home/user/validation/libs/ex/libprotobuf-7.34.1-h612f066_0/lib/libutf8_validity.so.34.1.0' \u2014 no headers provided. Will use DWARF debug info if available, else symbols-only mode.\nWarning: --scope-public-headers could not resolve the public surface (no header-derived public symbols); fell back to the full export table. Compatibility is UNCONFIRMED \u2014 treat this result as manual-review-required, not a clean public surface.\nReport written to /home/user/validation/reports/P2_protobuf_major__libutf8_validity.json",
+    "verdict": "COMPATIBLE",
+    "counts": {
+      "breaking": 0
+    },
+    "release_recommendation": {
+      "version_bump": "patch",
+      "soname_action": "no_bump_needed",
+      "rationale": "Only quality / bad-practice findings with no API or ABI surface change \u2014 a PATCH release is sufficient."
+    }
+  },
+  {
+    "tag": "O1_openssl_patch__libcrypto",
+    "pair": "O1_openssl_patch",
+    "library": "openssl",
+    "logical": "libcrypto",
+    "old_ver": "3.5.4",
+    "new_ver": "3.5.6",
+    "expectation": "COMPATIBLE",
+    "note": "patch within 3.5",
+    "mode": "sym->sym",
+    "old_path": "/home/user/validation/libs/ex/openssl-3.5.4-h26f9b46_0/lib/libcrypto.so.3",
+    "new_path": "/home/user/validation/libs/ex/openssl-3.5.6-h35e630c_0/lib/libcrypto.so.3",
+    "exit_code": 0,
+    "seconds": 2.84,
+    "stderr": "Warning: '/home/user/validation/libs/ex/openssl-3.5.4-h26f9b46_0/lib/libcrypto.so.3' \u2014 no headers provided. Will use DWARF debug info if available, else symbols-only mode.\n/home/user/abicheck/abicheck/dumper.py:634: UserWarning: No headers provided and no DWARF debug info \u2014 only ELF-exported symbols will be captured; type information will be missing.\n  snapshot = _dump_elf(\nWarning: '/home/user/validation/libs/ex/openssl-3.5.6-h35e630c_0/lib/libcrypto.so.3' \u2014 no headers provided. Will use DWARF debug info if available, else symbols-only mode.\nWarning: --scope-public-headers could not resolve the public surface (no header-derived public symbols); fell back to the full export table. Compatibility is UNCONFIRMED \u2014 treat this result as manual-review-required, not a clean public surface.\nReport written to /home/user/validation/reports/O1_openssl_patch__libcrypto.json",
+    "verdict": "COMPATIBLE",
+    "counts": {
+      "breaking": 0
+    },
+    "release_recommendation": {
+      "version_bump": "patch",
+      "soname_action": "no_bump_needed",
+      "rationale": "Only quality / bad-practice findings with no API or ABI surface change \u2014 a PATCH release is sufficient."
+    }
+  },
+  {
+    "tag": "O1_openssl_patch__libssl",
+    "pair": "O1_openssl_patch",
+    "library": "openssl",
+    "logical": "libssl",
+    "old_ver": "3.5.4",
+    "new_ver": "3.5.6",
+    "expectation": "COMPATIBLE",
+    "note": "patch within 3.5",
+    "mode": "sym->sym",
+    "old_path": "/home/user/validation/libs/ex/openssl-3.5.4-h26f9b46_0/lib/libssl.so.3",
+    "new_path": "/home/user/validation/libs/ex/openssl-3.5.6-h35e630c_0/lib/libssl.so.3",
+    "exit_code": 0,
+    "seconds": 0.75,
+    "stderr": "Warning: '/home/user/validation/libs/ex/openssl-3.5.4-h26f9b46_0/lib/libssl.so.3' \u2014 no headers provided. Will use DWARF debug info if available, else symbols-only mode.\n/home/user/abicheck/abicheck/dumper.py:634: UserWarning: No headers provided and no DWARF debug info \u2014 only ELF-exported symbols will be captured; type information will be missing.\n  snapshot = _dump_elf(\nWarning: '/home/user/validation/libs/ex/openssl-3.5.6-h35e630c_0/lib/libssl.so.3' \u2014 no headers provided. Will use DWARF debug info if available, else symbols-only mode.\nWarning: --scope-public-headers could not resolve the public surface (no header-derived public symbols); fell back to the full export table. Compatibility is UNCONFIRMED \u2014 treat this result as manual-review-required, not a clean public surface.\nReport written to /home/user/validation/reports/O1_openssl_patch__libssl.json",
+    "verdict": "COMPATIBLE",
+    "counts": {
+      "breaking": 0
+    },
+    "release_recommendation": {
+      "version_bump": "patch",
+      "soname_action": "no_bump_needed",
+      "rationale": "Only quality / bad-practice findings with no API or ABI surface change \u2014 a PATCH release is sufficient."
+    }
+  },
+  {
+    "tag": "O2_openssl_minor__libcrypto",
+    "pair": "O2_openssl_minor",
+    "library": "openssl",
+    "logical": "libcrypto",
+    "old_ver": "3.5.6",
+    "new_ver": "3.6.0",
+    "expectation": "COMPATIBLE",
+    "note": "minor, OpenSSL3 ABI-stable",
+    "mode": "sym->sym",
+    "old_path": "/home/user/validation/libs/ex/openssl-3.5.6-h35e630c_0/lib/libcrypto.so.3",
+    "new_path": "/home/user/validation/libs/ex/openssl-3.6.0-h26f9b46_0/lib/libcrypto.so.3",
+    "exit_code": 0,
+    "seconds": 2.95,
+    "stderr": "Warning: '/home/user/validation/libs/ex/openssl-3.5.6-h35e630c_0/lib/libcrypto.so.3' \u2014 no headers provided. Will use DWARF debug info if available, else symbols-only mode.\n/home/user/abicheck/abicheck/dumper.py:634: UserWarning: No headers provided and no DWARF debug info \u2014 only ELF-exported symbols will be captured; type information will be missing.\n  snapshot = _dump_elf(\nWarning: '/home/user/validation/libs/ex/openssl-3.6.0-h26f9b46_0/lib/libcrypto.so.3' \u2014 no headers provided. Will use DWARF debug info if available, else symbols-only mode.\nWarning: --scope-public-headers could not resolve the public surface (no header-derived public symbols); fell back to the full export table. Compatibility is UNCONFIRMED \u2014 treat this result as manual-review-required, not a clean public surface.\nReport written to /home/user/validation/reports/O2_openssl_minor__libcrypto.json",
+    "verdict": "COMPATIBLE",
+    "counts": {
+      "breaking": 0
+    },
+    "release_recommendation": {
+      "version_bump": "minor",
+      "soname_action": "no_bump_needed",
+      "rationale": "Backward-compatible additions to the public API \u2014 release a new MINOR version."
+    }
+  },
+  {
+    "tag": "O2_openssl_minor__libssl",
+    "pair": "O2_openssl_minor",
+    "library": "openssl",
+    "logical": "libssl",
+    "old_ver": "3.5.6",
+    "new_ver": "3.6.0",
+    "expectation": "COMPATIBLE",
+    "note": "minor, OpenSSL3 ABI-stable",
+    "mode": "sym->sym",
+    "old_path": "/home/user/validation/libs/ex/openssl-3.5.6-h35e630c_0/lib/libssl.so.3",
+    "new_path": "/home/user/validation/libs/ex/openssl-3.6.0-h26f9b46_0/lib/libssl.so.3",
+    "exit_code": 0,
+    "seconds": 0.71,
+    "stderr": "Warning: '/home/user/validation/libs/ex/openssl-3.5.6-h35e630c_0/lib/libssl.so.3' \u2014 no headers provided. Will use DWARF debug info if available, else symbols-only mode.\n/home/user/abicheck/abicheck/dumper.py:634: UserWarning: No headers provided and no DWARF debug info \u2014 only ELF-exported symbols will be captured; type information will be missing.\n  snapshot = _dump_elf(\nWarning: '/home/user/validation/libs/ex/openssl-3.6.0-h26f9b46_0/lib/libssl.so.3' \u2014 no headers provided. Will use DWARF debug info if available, else symbols-only mode.\nWarning: --scope-public-headers could not resolve the public surface (no header-derived public symbols); fell back to the full export table. Compatibility is UNCONFIRMED \u2014 treat this result as manual-review-required, not a clean public surface.\nReport written to /home/user/validation/reports/O2_openssl_minor__libssl.json",
+    "verdict": "COMPATIBLE_WITH_RISK",
+    "counts": {
+      "breaking": 0
+    },
+    "release_recommendation": {
+      "version_bump": "patch",
+      "soname_action": "no_bump_needed",
+      "rationale": "Binary-compatible, but a deployment risk was detected \u2014 a PATCH release is appropriate; review the risk findings (e.g. a raised runtime/toolchain floor) before shipping."
+    }
+  },
+  {
+    "tag": "I1_icu_major__libicudata",
+    "pair": "I1_icu_major",
+    "library": "icu",
+    "logical": "libicudata",
+    "old_ver": "73.2",
+    "new_ver": "75.1",
+    "expectation": "BREAKING",
+    "note": "major ICU bump, versioned-symbol suffix change",
+    "mode": "sym->sym",
+    "old_path": "/home/user/validation/libs/ex/icu-73.2-h59595ed_0/lib/libicudata.so.73.2",
+    "new_path": "/home/user/validation/libs/ex/icu-75.1-he02047a_0/lib/libicudata.so.75.1",
+    "exit_code": 4,
+    "seconds": 0.44,
+    "stderr": "Warning: '/home/user/validation/libs/ex/icu-73.2-h59595ed_0/lib/libicudata.so.73.2' \u2014 no headers provided. Will use DWARF debug info if available, else symbols-only mode.\n/home/user/abicheck/abicheck/dumper.py:634: UserWarning: No headers provided and no DWARF debug info \u2014 only ELF-exported symbols will be captured; type information will be missing.\n  snapshot = _dump_elf(\nWarning: '/home/user/validation/libs/ex/icu-75.1-he02047a_0/lib/libicudata.so.75.1' \u2014 no headers provided. Will use DWARF debug info if available, else symbols-only mode.\nWarning: --scope-public-headers could not resolve the public surface (no header-derived public symbols); fell back to the full export table. Compatibility is UNCONFIRMED \u2014 treat this result as manual-review-required, not a clean public surface.\nReport written to /home/user/validation/reports/I1_icu_major__libicudata.json",
+    "verdict": "BREAKING",
+    "counts": {
+      "breaking": 1
+    },
+    "release_recommendation": {
+      "version_bump": "major",
+      "soname_action": "bump_performed",
+      "rationale": "Binary ABI break detected \u2014 release a new MAJOR version. The SONAME was already bumped in this revision \u2014 good."
+    }
+  },
+  {
+    "tag": "I1_icu_major__libicui18n",
+    "pair": "I1_icu_major",
+    "library": "icu",
+    "logical": "libicui18n",
+    "old_ver": "73.2",
+    "new_ver": "75.1",
+    "expectation": "BREAKING",
+    "note": "major ICU bump, versioned-symbol suffix change",
+    "mode": "sym->sym",
+    "old_path": "/home/user/validation/libs/ex/icu-73.2-h59595ed_0/lib/libicui18n.so.73.2",
+    "new_path": "/home/user/validation/libs/ex/icu-75.1-he02047a_0/lib/libicui18n.so.75.1",
+    "exit_code": 4,
+    "seconds": 30.28,
+    "stderr": "Warning: '/home/user/validation/libs/ex/icu-73.2-h59595ed_0/lib/libicui18n.so.73.2' \u2014 no headers provided. Will use DWARF debug info if available, else symbols-only mode.\n/home/user/abicheck/abicheck/dumper.py:634: UserWarning: No headers provided and no DWARF debug info \u2014 only ELF-exported symbols will be captured; type information will be missing.\n  snapshot = _dump_elf(\nWarning: '/home/user/validation/libs/ex/icu-75.1-he02047a_0/lib/libicui18n.so.75.1' \u2014 no headers provided. Will use DWARF debug info if available, else symbols-only mode.\n/home/user/abicheck/abicheck/dumper.py:634: UserWarning: No headers provided and no DWARF debug info \u2014 only ELF-exported symbols will be captured; type information will be missing.\n  snapshot = _dump_elf(\nWarning: --scope-public-headers could not resolve the public surface (no header-derived public symbols); fell back to the full export table. Compatibility is UNCONFIRMED \u2014 treat this result as manual-review-required, not a clean public surface.\nReport written to /home/user/validation/reports/I1_icu_major__libicui18n.json",
+    "verdict": "BREAKING",
+    "counts": {
+      "breaking": 1105
+    },
+    "release_recommendation": {
+      "version_bump": "major",
+      "soname_action": "bump_performed",
+      "rationale": "Binary ABI break detected \u2014 release a new MAJOR version. The SONAME was already bumped in this revision \u2014 good."
+    }
+  },
+  {
+    "tag": "I1_icu_major__libicuio",
+    "pair": "I1_icu_major",
+    "library": "icu",
+    "logical": "libicuio",
+    "old_ver": "73.2",
+    "new_ver": "75.1",
+    "expectation": "BREAKING",
+    "note": "major ICU bump, versioned-symbol suffix change",
+    "mode": "sym->sym",
+    "old_path": "/home/user/validation/libs/ex/icu-73.2-h59595ed_0/lib/libicuio.so.73.2",
+    "new_path": "/home/user/validation/libs/ex/icu-75.1-he02047a_0/lib/libicuio.so.75.1",
+    "exit_code": 0,
+    "seconds": 0.29,
+    "stderr": "Warning: '/home/user/validation/libs/ex/icu-73.2-h59595ed_0/lib/libicuio.so.73.2' \u2014 no headers provided. Will use DWARF debug info if available, else symbols-only mode.\n/home/user/abicheck/abicheck/dumper.py:634: UserWarning: No headers provided and no DWARF debug info \u2014 only ELF-exported symbols will be captured; type information will be missing.\n  snapshot = _dump_elf(\nWarning: '/home/user/validation/libs/ex/icu-75.1-he02047a_0/lib/libicuio.so.75.1' \u2014 no headers provided. Will use DWARF debug info if available, else symbols-only mode.\n/home/user/abicheck/abicheck/dumper.py:634: UserWarning: No headers provided and no DWARF debug info \u2014 only ELF-exported symbols will be captured; type information will be missing.\n  snapshot = _dump_elf(\nWarning: --scope-public-headers could not resolve the public surface (no header-derived public symbols); fell back to the full export table. Compatibility is UNCONFIRMED \u2014 treat this result as manual-review-required, not a clean public surface.\nReport written to /home/user/validation/reports/I1_icu_major__libicuio.json",
+    "verdict": "COMPATIBLE_WITH_RISK",
+    "counts": {
+      "breaking": 0
+    },
+    "release_recommendation": {
+      "version_bump": "minor",
+      "soname_action": "no_bump_needed",
+      "rationale": "Binary-compatible, but a deployment risk was detected \u2014 a MINOR release is appropriate; review the risk findings (e.g. a raised runtime/toolchain floor) before shipping."
+    }
+  },
+  {
+    "tag": "I1_icu_major__libicutest",
+    "pair": "I1_icu_major",
+    "library": "icu",
+    "logical": "libicutest",
+    "old_ver": "73.2",
+    "new_ver": "75.1",
+    "expectation": "BREAKING",
+    "note": "major ICU bump, versioned-symbol suffix change",
+    "mode": "sym->sym",
+    "old_path": "/home/user/validation/libs/ex/icu-73.2-h59595ed_0/lib/libicutest.so.73.2",
+    "new_path": "/home/user/validation/libs/ex/icu-75.1-he02047a_0/lib/libicutest.so.75.1",
+    "exit_code": 0,
+    "seconds": 0.34,
+    "stderr": "Warning: '/home/user/validation/libs/ex/icu-73.2-h59595ed_0/lib/libicutest.so.73.2' \u2014 no headers provided. Will use DWARF debug info if available, else symbols-only mode.\n/home/user/abicheck/abicheck/dumper.py:634: UserWarning: No headers provided and no DWARF debug info \u2014 only ELF-exported symbols will be captured; type information will be missing.\n  snapshot = _dump_elf(\nWarning: '/home/user/validation/libs/ex/icu-75.1-he02047a_0/lib/libicutest.so.75.1' \u2014 no headers provided. Will use DWARF debug info if available, else symbols-only mode.\n/home/user/abicheck/abicheck/dumper.py:634: UserWarning: No headers provided and no DWARF debug info \u2014 only ELF-exported symbols will be captured; type information will be missing.\n  snapshot = _dump_elf(\nWarning: --scope-public-headers could not resolve the public surface (no header-derived public symbols); fell back to the full export table. Compatibility is UNCONFIRMED \u2014 treat this result as manual-review-required, not a clean public surface.\nReport written to /home/user/validation/reports/I1_icu_major__libicutest.json",
+    "verdict": "COMPATIBLE_WITH_RISK",
+    "counts": {
+      "breaking": 0
+    },
+    "release_recommendation": {
+      "version_bump": "minor",
+      "soname_action": "no_bump_needed",
+      "rationale": "Binary-compatible, but a deployment risk was detected \u2014 a MINOR release is appropriate; review the risk findings (e.g. a raised runtime/toolchain floor) before shipping."
+    }
+  },
+  {
+    "tag": "I1_icu_major__libicutu",
+    "pair": "I1_icu_major",
+    "library": "icu",
+    "logical": "libicutu",
+    "old_ver": "73.2",
+    "new_ver": "75.1",
+    "expectation": "BREAKING",
+    "note": "major ICU bump, versioned-symbol suffix change",
+    "mode": "sym->sym",
+    "old_path": "/home/user/validation/libs/ex/icu-73.2-h59595ed_0/lib/libicutu.so.73.2",
+    "new_path": "/home/user/validation/libs/ex/icu-75.1-he02047a_0/lib/libicutu.so.75.1",
+    "exit_code": 4,
+    "seconds": 0.45,
+    "stderr": "Warning: '/home/user/validation/libs/ex/icu-73.2-h59595ed_0/lib/libicutu.so.73.2' \u2014 no headers provided. Will use DWARF debug info if available, else symbols-only mode.\n/home/user/abicheck/abicheck/dumper.py:634: UserWarning: No headers provided and no DWARF debug info \u2014 only ELF-exported symbols will be captured; type information will be missing.\n  snapshot = _dump_elf(\nWarning: '/home/user/validation/libs/ex/icu-75.1-he02047a_0/lib/libicutu.so.75.1' \u2014 no headers provided. Will use DWARF debug info if available, else symbols-only mode.\n/home/user/abicheck/abicheck/dumper.py:634: UserWarning: No headers provided and no DWARF debug info \u2014 only ELF-exported symbols will be captured; type information will be missing.\n  snapshot = _dump_elf(\nWarning: --scope-public-headers could not resolve the public surface (no header-derived public symbols); fell back to the full export table. Compatibility is UNCONFIRMED \u2014 treat this result as manual-review-required, not a clean public surface.\nReport written to /home/user/validation/reports/I1_icu_major__libicutu.json",
+    "verdict": "BREAKING",
+    "counts": {
+      "breaking": 19
+    },
+    "release_recommendation": {
+      "version_bump": "major",
+      "soname_action": "bump_performed",
+      "rationale": "Binary ABI break detected \u2014 release a new MAJOR version. The SONAME was already bumped in this revision \u2014 good."
+    }
+  },
+  {
+    "tag": "I1_icu_major__libicuuc",
+    "pair": "I1_icu_major",
+    "library": "icu",
+    "logical": "libicuuc",
+    "old_ver": "73.2",
+    "new_ver": "75.1",
+    "expectation": "BREAKING",
+    "note": "major ICU bump, versioned-symbol suffix change",
+    "mode": "sym->sym",
+    "old_path": "/home/user/validation/libs/ex/icu-73.2-h59595ed_0/lib/libicuuc.so.73.2",
+    "new_path": "/home/user/validation/libs/ex/icu-75.1-he02047a_0/lib/libicuuc.so.75.1",
+    "exit_code": 4,
+    "seconds": 6.12,
+    "stderr": "Warning: '/home/user/validation/libs/ex/icu-73.2-h59595ed_0/lib/libicuuc.so.73.2' \u2014 no headers provided. Will use DWARF debug info if available, else symbols-only mode.\n/home/user/abicheck/abicheck/dumper.py:634: UserWarning: No headers provided and no DWARF debug info \u2014 only ELF-exported symbols will be captured; type information will be missing.\n  snapshot = _dump_elf(\nWarning: '/home/user/validation/libs/ex/icu-75.1-he02047a_0/lib/libicuuc.so.75.1' \u2014 no headers provided. Will use DWARF debug info if available, else symbols-only mode.\n/home/user/abicheck/abicheck/dumper.py:634: UserWarning: No headers provided and no DWARF debug info \u2014 only ELF-exported symbols will be captured; type information will be missing.\n  snapshot = _dump_elf(\nWarning: --scope-public-headers could not resolve the public surface (no header-derived public symbols); fell back to the full export table. Compatibility is UNCONFIRMED \u2014 treat this result as manual-review-required, not a clean public surface.\nReport written to /home/user/validation/reports/I1_icu_major__libicuuc.json",
+    "verdict": "BREAKING",
+    "counts": {
+      "breaking": 427
+    },
+    "release_recommendation": {
+      "version_bump": "major",
+      "soname_action": "bump_performed",
+      "rationale": "Binary ABI break detected \u2014 release a new MAJOR version. The SONAME was already bumped in this revision \u2014 good."
+    }
+  },
+  {
+    "tag": "N1_libpng_patch__libpng16",
+    "pair": "N1_libpng_patch",
+    "library": "libpng",
+    "logical": "libpng16",
+    "old_ver": "1.6.53",
+    "new_ver": "1.6.58",
+    "expectation": "COMPATIBLE",
+    "note": "patch within libpng16",
+    "mode": "sym->sym",
+    "old_path": "/home/user/validation/libs/ex/libpng-1.6.53-h421ea60_0/lib/libpng16.so.16.53.0",
+    "new_path": "/home/user/validation/libs/ex/libpng-1.6.58-h421ea60_0/lib/libpng16.so.16.58.0",
+    "exit_code": 0,
+    "seconds": 0.34,
+    "stderr": "Warning: '/home/user/validation/libs/ex/libpng-1.6.53-h421ea60_0/lib/libpng16.so.16.53.0' \u2014 no headers provided. Will use DWARF debug info if available, else symbols-only mode.\n/home/user/abicheck/abicheck/dumper.py:634: UserWarning: No headers provided and no DWARF debug info \u2014 only ELF-exported symbols will be captured; type information will be missing.\n  snapshot = _dump_elf(\nWarning: '/home/user/validation/libs/ex/libpng-1.6.58-h421ea60_0/lib/libpng16.so.16.58.0' \u2014 no headers provided. Will use DWARF debug info if available, else symbols-only mode.\nWarning: --scope-public-headers could not resolve the public surface (no header-derived public symbols); fell back to the full export table. Compatibility is UNCONFIRMED \u2014 treat this result as manual-review-required, not a clean public surface.\nReport written to /home/user/validation/reports/N1_libpng_patch__libpng16.json",
+    "verdict": "COMPATIBLE",
+    "counts": {
+      "breaking": 0
+    },
+    "release_recommendation": {
+      "version_bump": "patch",
+      "soname_action": "no_bump_needed",
+      "rationale": "Only quality / bad-practice findings with no API or ABI surface change \u2014 a PATCH release is sufficient."
+    }
+  },
+  {
+    "tag": "Z1_zstd_minor__libzstd",
+    "pair": "Z1_zstd_minor",
+    "library": "zstd",
+    "logical": "libzstd",
+    "old_ver": "1.5.5",
+    "new_ver": "1.5.7",
+    "expectation": "COMPATIBLE",
+    "note": "minor within libzstd.so.1",
+    "mode": "sym->sym",
+    "old_path": "/home/user/validation/libs/ex/zstd-1.5.5-hfc55251_0/lib/libzstd.so.1.5.5",
+    "new_path": "/home/user/validation/libs/ex/zstd-1.5.7-h3691f8a_4/lib/libzstd.so.1.5.7",
+    "exit_code": 0,
+    "seconds": 0.48,
+    "stderr": "Warning: '/home/user/validation/libs/ex/zstd-1.5.5-hfc55251_0/lib/libzstd.so.1.5.5' \u2014 no headers provided. Will use DWARF debug info if available, else symbols-only mode.\n/home/user/abicheck/abicheck/dumper.py:634: UserWarning: No headers provided and no DWARF debug info \u2014 only ELF-exported symbols will be captured; type information will be missing.\n  snapshot = _dump_elf(\nWarning: '/home/user/validation/libs/ex/zstd-1.5.7-h3691f8a_4/lib/libzstd.so.1.5.7' \u2014 no headers provided. Will use DWARF debug info if available, else symbols-only mode.\nWarning: --scope-public-headers could not resolve the public surface (no header-derived public symbols); fell back to the full export table. Compatibility is UNCONFIRMED \u2014 treat this result as manual-review-required, not a clean public surface.\nReport written to /home/user/validation/reports/Z1_zstd_minor__libzstd.json",
+    "verdict": "COMPATIBLE_WITH_RISK",
+    "counts": {
+      "breaking": 0
+    },
+    "release_recommendation": {
+      "version_bump": "minor",
+      "soname_action": "no_bump_needed",
+      "rationale": "Binary-compatible, but a deployment risk was detected \u2014 a MINOR release is appropriate; review the risk findings (e.g. a raised runtime/toolchain floor) before shipping."
+    }
+  },
+  {
+    "tag": "X1_libxml2_patch__libxml2",
+    "pair": "X1_libxml2_patch",
+    "library": "libxml2",
+    "logical": "libxml2",
+    "old_ver": "2.9.7",
+    "new_ver": "2.9.9",
+    "expectation": "COMPATIBLE",
+    "note": "patch within libxml2.so.2",
+    "mode": "dwarf->sym",
+    "old_path": "/home/user/validation/libs/ex/libxml2-2.9.7-0/lib/libxml2.so.2.9.7",
+    "new_path": "/home/user/validation/libs/ex/libxml2-2.9.9-h13577e0_0/lib/libxml2.so.2.9.9",
+    "exit_code": 4,
+    "seconds": 3.85,
+    "stderr": "Warning: '/home/user/validation/libs/ex/libxml2-2.9.7-0/lib/libxml2.so.2.9.7' \u2014 no headers provided. Will use DWARF debug info if available, else symbols-only mode.\n/home/user/abicheck/abicheck/dumper.py:634: UserWarning: No headers provided \u2014 using DWARF debug info as primary data source. #define constants and default parameter values will be unavailable.\n  snapshot = _dump_elf(\nWarning: '/home/user/validation/libs/ex/libxml2-2.9.9-h13577e0_0/lib/libxml2.so.2.9.9' \u2014 no headers provided. Will use DWARF debug info if available, else symbols-only mode.\n/home/user/abicheck/abicheck/dumper.py:634: UserWarning: No headers provided and no DWARF debug info \u2014 only ELF-exported symbols will be captured; type information will be missing.\n  snapshot = _dump_elf(\nReport written to /home/user/validation/reports/X1_libxml2_patch__libxml2.json",
+    "verdict": "BREAKING",
+    "counts": {
+      "breaking": 1149
+    },
+    "release_recommendation": {
+      "version_bump": "major",
+      "soname_action": "bump_missing",
+      "rationale": "Binary ABI break detected \u2014 release a new MAJOR version. The SONAME was not bumped despite the binary break \u2014 bump it (e.g. libfoo.so.1 \u2192 libfoo.so.2) so old binaries fail loudly instead of silently loading an incompatible library."
+    }
+  }
+]
