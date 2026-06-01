@@ -1,0 +1,98 @@
+# Scenario group: platform coverage. The Linux ELF baseline is automated (it is
+# the CI-validated reference platform); the native PE/Mach-O and host/plugin
+# lanes are planned — they need native binaries, so they are defined now and
+# automated once the cross-platform e2e lanes land. These close the documented
+# G1 (Windows/macOS e2e) and G5 (plugin contract) gaps.
+#
+# See tests/scenarios/README.md for the catalog format and how it is validated.
+schema_version: 1
+
+scenarios:
+  - id: SC-LINUX-ELF-BASELINE
+    title: Linux ELF compare — the CI-validated reference platform
+    persona: Library maintainer (Linux)
+    narrative: >
+      Linux ELF is abicheck's validated baseline platform. A SONAME-versioned
+      shared object drops a public symbol; comparing the two ELF snapshots must
+      report a binary break (exit 4) and recommend a major bump / SONAME action,
+      exactly as every consumer would experience at load time. This anchors the
+      platform axis with an automated end-to-end ELF flow.
+    flow:
+      - abicheck compare old.json new.json
+    expected:
+      exit_code: 4
+      verdict: BREAKING
+    validates: UC-PLAT-linux-elf
+    automated: true
+    test: test_sc_linux_elf_baseline
+
+  - id: SC-WINDOWS-PE-COMPARE
+    title: Compare two native Windows PE/COFF DLLs (MSVC + PDB)
+    persona: Windows library maintainer
+    narrative: >
+      A maintainer builds a DLL with MSVC and ships a PDB alongside it. Comparing
+      two versions must surface the same ABI breaks abicheck finds on ELF — a
+      removed exported symbol, a changed struct layout — using the PE export table
+      and PDB type info, so Windows is a first-class lane and not ELF-only.
+    flow:
+      - abicheck compare old.dll new.dll --old-pdb-path old.pdb --new-pdb-path new.pdb -H include/
+    expected:
+      exit_code: 4
+      verdict: BREAKING
+    validates: UC-PLAT-windows-pe
+    automated: false
+    status: planned
+    plan: docs/development/plans/g1-cross-platform-e2e.md
+    note: >
+      PE/COFF + PDB parsing is unit-tested (tests/test_pe_metadata_unit.py,
+      tests/test_pdb_metadata.py) and a smoke e2e lane exists
+      (tests/test_msvc_pdb_e2e.py, marked `msvc`). Full automation needs native
+      MSVC-built DLL/PDB fixtures so -H scoping and the export+PDB merge are
+      exercised end-to-end rather than via JSON snapshots.
+
+  - id: SC-MACOS-DYLIB-COMPARE
+    title: Compare two native macOS Mach-O dylibs (x86-64 / ARM64)
+    persona: macOS library maintainer
+    narrative: >
+      A maintainer compares two versions of a .dylib on macOS. The scanner must
+      read the Mach-O export trie and report breaks consistently with the ELF
+      lane, including ARM64 calling-convention-sensitive struct changes (HFA/HVA
+      and small-struct passing).
+    flow:
+      - abicheck compare old.dylib new.dylib -H include/
+    expected:
+      exit_code: 4
+      verdict: BREAKING
+    validates: UC-PLAT-macos-macho
+    automated: false
+    status: planned
+    plan: docs/development/plans/g1-cross-platform-e2e.md
+    note: >
+      Mach-O parsing is unit-tested (tests/test_macho_metadata_unit.py,
+      tests/test_macos_arm64_abi.py). Full automation needs a macOS CI lane with
+      native dylib fixtures so the export trie and ARM64 ABI paths run end-to-end.
+
+  - id: SC-PLUGIN-HOST-CONTRACT
+    title: Validate a host↔plugin dlopen contract in both directions
+    persona: Plugin platform engineer
+    narrative: >
+      A plugin host loads plugins via dlopen against a published contract. Unlike
+      a linked consumer, the contract is bidirectional: the host must keep
+      exporting the entrypoints plugins import, AND plugins must keep exporting
+      the entrypoints the host resolves. The scanner must check both directions
+      so neither side silently breaks the load contract.
+    flow:
+      - abicheck appcompat ./host plugin-v1.so plugin-v2.so --policy plugin_abi -H contract/
+    expected:
+      exit_code: 4
+      verdict: BREAKING
+    validates: UC-ARCH-plugin
+    automated: false
+    status: planned
+    plan: docs/development/plans/g5-plugin-bidirectional-contract.md
+    note: >
+      The plugin_abi policy and consumer-scoped appcompat are unit-tested
+      (tests/test_appcompat.py, tests/test_workflow_scenarios.py). Full automation
+      needs a host/plugin example pair plus an optional host-contract check
+      (host's required entrypoints vs plugin exports) to cover the reverse
+      direction; today only the forward (plugin-exports) direction is validated.

@@ -40,6 +40,7 @@ import yaml
 from click.testing import CliRunner
 
 from abicheck.cli import main
+from abicheck.dwarf_advanced import AdvancedDwarfMetadata
 from abicheck.model import (
     AbiSnapshot,
     EnumMember,
@@ -48,6 +49,7 @@ from abicheck.model import (
     Param,
     RecordType,
     TypeField,
+    Variable,
     Visibility,
 )
 from abicheck.serialization import save_snapshot
@@ -97,6 +99,22 @@ def _fn(name: str, ret: str = "int", params: tuple[str, ...] = ()) -> Function:
         params=[Param(name=f"a{i}", type=t) for i, t in enumerate(params)],
         visibility=Visibility.PUBLIC,
     )
+
+
+def _vfn(mangled: str, vtable_index: int) -> Function:
+    return Function(
+        name=mangled,
+        mangled=mangled,
+        return_type="void",
+        params=[],
+        visibility=Visibility.PUBLIC,
+        is_virtual=True,
+        vtable_index=vtable_index,
+    )
+
+
+def _var(name: str, type: str = "int") -> Variable:
+    return Variable(name=name, mangled=name, type=type, visibility=Visibility.PUBLIC)
 
 
 def _rec(name: str, size: int = 64) -> RecordType:
@@ -387,8 +405,15 @@ def test_sc_policy_profile(tmp_path: Path) -> None:
     new = _lib("2", [_fn("use")], enums=[e2])
     # Mode isn't referenced by a public function, so opt out of default
     # public-header scoping (ADR-024 Phase 5) to exercise the policy contrast.
-    assert _compare(tmp_path, old, new, "--no-scope-public-headers").exit_code == 2  # strict_abi: API break
-    assert _compare(tmp_path, old, new, "--no-scope-public-headers", "--policy", "sdk_vendor").exit_code == 0
+    assert (
+        _compare(tmp_path, old, new, "--no-scope-public-headers").exit_code == 2
+    )  # strict_abi: API break
+    assert (
+        _compare(
+            tmp_path, old, new, "--no-scope-public-headers", "--policy", "sdk_vendor"
+        ).exit_code
+        == 0
+    )
 
 
 def test_sc_probe_matrix_into_compare(tmp_path: Path) -> None:
@@ -411,12 +436,17 @@ def test_sc_probe_matrix_into_compare(tmp_path: Path) -> None:
 
     def _matrix(version: str, std: int) -> MatrixSnapshot:
         return MatrixSnapshot(
-            library="libfoo", version=version, spec_name="t",
+            library="libfoo",
+            version=version,
+            spec_name="t",
             cxx_stds={"a": std},
-            results=[ProbeResult(
-                configuration_id="a", probe_id="p0",
-                snapshot=_lib(version, list(same)),
-            )],
+            results=[
+                ProbeResult(
+                    configuration_id="a",
+                    probe_id="p0",
+                    snapshot=_lib(version, list(same)),
+                )
+            ],
         )
 
     om = str(tmp_path / "om.json")
@@ -425,8 +455,15 @@ def test_sc_probe_matrix_into_compare(tmp_path: Path) -> None:
     write_matrix_snapshot(_matrix("2", 20), nm)
 
     res = _cli(
-        "compare", o, n, "--format", "json",
-        "--probe-matrix-old", om, "--probe-matrix-new", nm,
+        "compare",
+        o,
+        n,
+        "--format",
+        "json",
+        "--probe-matrix-old",
+        om,
+        "--probe-matrix-new",
+        nm,
     )
     assert res.exit_code == 2  # API_BREAK from the build-config finding
     doc = json.loads(res.stdout)
@@ -508,3 +545,229 @@ def test_sc_baseline_registry(tmp_path: Path) -> None:
     )
     # Gate a new build against the pinned baseline pulled from the registry.
     assert _cli("compare", pinned, v2).exit_code == 4
+
+
+def test_sc_consume_json(tmp_path: Path) -> None:
+    # The JSON report is the machine decision contract any non-trivial gate keys
+    # off (exit 0 alone is lossy). It must be a stable, versioned document with a
+    # top-level verdict and a per-finding changes list.
+    res = _compare(
+        tmp_path,
+        _lib("1", [_fn("a"), _fn("b")]),
+        _lib("2", [_fn("a")]),
+        "--format",
+        "json",
+    )
+    assert res.exit_code == 4
+    doc = json.loads(res.output)
+    assert doc["report_schema_version"]  # versioned contract
+    assert doc["verdict"] == "BREAKING"
+    assert isinstance(doc["changes"], list) and doc["changes"]
+
+
+def test_sc_malformed_input(tmp_path: Path) -> None:
+    # Degraded-mode contract: a corrupt snapshot must fail cleanly (exit 1 with a
+    # diagnostic), never crash or silently read as compatible (exit 0).
+    good = _save(_lib("1", [_fn("a")]), tmp_path / "good.json")
+    corrupt = tmp_path / "corrupt.json"
+    corrupt.write_text("{ not valid json ]", encoding="utf-8")
+    res = _cli("compare", good, str(corrupt))
+    assert res.exit_code == 1
+    assert "Failed to load" in res.output
+
+
+def test_sc_c_struct_layout(tmp_path: Path) -> None:
+    # Pure-C archetype: a public function takes Point by value; growing Point
+    # changes its size, so every caller is ABI-incompatible — no symbol added or
+    # removed, yet a binary break (type_size_changed → BREAKING).
+    def _point(size: int, fields: list[TypeField]) -> RecordType:
+        return RecordType(name="Point", kind="struct", size_bits=size, fields=fields)
+
+    pub = [_fn("use_point", ret="int", params=("Point",))]
+    old = _lib(
+        "1",
+        list(pub),
+        types=[_point(64, [TypeField("x", "int"), TypeField("y", "int")])],
+    )
+    new = _lib(
+        "2",
+        list(pub),
+        types=[
+            _point(
+                96,
+                [TypeField("x", "int"), TypeField("y", "int"), TypeField("z", "int")],
+            )
+        ],
+    )
+    res = _compare(tmp_path, old, new)
+    assert res.exit_code == 4
+    doc = json.loads(_compare(tmp_path, old, new, "--format", "json").output)
+    assert doc["verdict"] == "BREAKING"
+    assert any(c["kind"] == "type_size_changed" for c in doc["changes"])
+
+
+def test_sc_cpp_vtable_break(tmp_path: Path) -> None:
+    # C++ archetype: inserting a virtual into a polymorphic base shifts every
+    # later vtable slot — a silent dispatch break the export table cannot see.
+    def _shape(vtable: list[str]) -> RecordType:
+        return RecordType(
+            name="Shape",
+            kind="class",
+            size_bits=64,
+            fields=[TypeField("_vptr", "void*")],
+            vtable=vtable,
+        )
+
+    old = _lib(
+        "1",
+        [_vfn("_ZN5Shape4areaEv", 0), _vfn("_ZN5Shape9perimeterEv", 1)],
+        types=[_shape(["_ZN5Shape4areaEv", "_ZN5Shape9perimeterEv"])],
+    )
+    new = _lib(
+        "2",
+        [
+            _vfn("_ZN5Shape4areaEv", 0),
+            _vfn("_ZN5Shape4drawEv", 1),
+            _vfn("_ZN5Shape9perimeterEv", 2),
+        ],
+        types=[
+            _shape(["_ZN5Shape4areaEv", "_ZN5Shape4drawEv", "_ZN5Shape9perimeterEv"])
+        ],
+    )
+    res = _compare(tmp_path, old, new, "--no-scope-public-headers", "--format", "json")
+    assert res.exit_code == 4
+    doc = json.loads(res.output)
+    assert doc["verdict"] == "BREAKING"
+    assert any(c["kind"] == "type_vtable_changed" for c in doc["changes"])
+
+
+def test_sc_exported_var_removed(tmp_path: Path) -> None:
+    # Data surface: dropping a public exported global variable breaks every
+    # consumer that referenced it (var_removed → BREAKING), like a removed symbol.
+    old = _lib("1", [_fn("a")], variables=[_var("g_count")])
+    new = _lib("2", [_fn("a")], variables=[])
+    res = _compare(tmp_path, old, new, "--no-scope-public-headers", "--format", "json")
+    assert res.exit_code == 4
+    doc = json.loads(res.output)
+    assert doc["verdict"] == "BREAKING"
+    assert any(c["kind"] == "var_removed" for c in doc["changes"])
+
+
+def test_sc_dual_abi_flip(tmp_path: Path) -> None:
+    # libstdc++ dual-ABI flip: the std::string family re-mangles when
+    # _GLIBCXX_USE_CXX11_ABI toggles. A naive diff sees mass add/remove churn;
+    # the scanner must recognise the __cxx11 marker pattern and emit one grouped
+    # glibcxx_dual_abi_flip_detected (still a real break: exit 4).
+    legacy = [_fn(f"_ZN3foo3barESs{i}") for i in range(6)]  # no __cxx11 marker
+    cxx11 = [_fn(f"_ZN3foo3barENSt7__cxx1112basic_stringE{i}") for i in range(6)]
+    res = _compare(
+        tmp_path,
+        _lib("1", legacy),
+        _lib("2", cxx11),
+        "--no-scope-public-headers",
+        "--format",
+        "json",
+    )
+    assert res.exit_code == 4
+    doc = json.loads(res.output)
+    assert doc["verdict"] == "BREAKING"
+    assert any(c["kind"] == "glibcxx_dual_abi_flip_detected" for c in doc["changes"])
+
+
+def test_sc_integer_model_flip(tmp_path: Path) -> None:
+    # LP64↔ILP64 switch: an integer-named typedef (MKL_INT) flips width 32→64.
+    # No symbol added/removed, yet every caller now passes/reads the wrong width
+    # (integer_model_changed → BREAKING).
+    old = _lib("1", [_fn("solve")], typedefs={"MKL_INT": "int"})
+    new = _lib("2", [_fn("solve")], typedefs={"MKL_INT": "int64_t"})
+    res = _compare(tmp_path, old, new, "--no-scope-public-headers", "--format", "json")
+    assert res.exit_code == 4
+    doc = json.loads(res.output)
+    assert doc["verdict"] == "BREAKING"
+    assert any(c["kind"] == "integer_model_changed" for c in doc["changes"])
+
+
+def test_sc_toolchain_flag_drift(tmp_path: Path) -> None:
+    # ABI-affecting compiler flags (recorded in DWARF toolchain metadata) drift
+    # between two builds of the same sources. The scanner surfaces
+    # toolchain_flag_drift as a *risk* signal — visible, but not a confirmed
+    # break, so the default gate stays green (exit 0).
+    def _adv(flags: set[str]) -> AdvancedDwarfMetadata:
+        meta = AdvancedDwarfMetadata(has_dwarf=True)
+        meta.toolchain.abi_flags = flags
+        return meta
+
+    old = _lib("1", [_fn("a")], dwarf_advanced=_adv({"-fno-exceptions"}))
+    new = _lib("2", [_fn("a")], dwarf_advanced=_adv({"-fno-exceptions", "-ffast-math"}))
+    res = _compare(tmp_path, old, new, "--no-scope-public-headers", "--format", "json")
+    assert res.exit_code == 0
+    doc = json.loads(res.output)
+    assert doc["verdict"] == "COMPATIBLE"
+    assert any(c["kind"] == "toolchain_flag_drift" for c in doc["changes"])
+
+
+def test_sc_cxx_std_floor(tmp_path: Path) -> None:
+    # The toolchain use case behind the probe matrix: identical binary surfaces,
+    # but the build raises the C++ standard floor 17 → 20. A per-binary diff is
+    # NO_CHANGE; passing the probe matrices folds CXX_STANDARD_FLOOR_RAISED into
+    # the verdict, surfacing the per-consumer source break (API_BREAK, exit 2).
+    from abicheck.probe_harness import (
+        MatrixSnapshot,
+        ProbeResult,
+        write_matrix_snapshot,
+    )
+
+    same = [_fn("a")]
+    o = _save(_lib("1", list(same)), tmp_path / "o.json")
+    n = _save(_lib("2", list(same)), tmp_path / "n.json")
+    assert _cli("compare", o, n).exit_code == 0  # binary surface unchanged
+
+    def _matrix(version: str, std: int) -> MatrixSnapshot:
+        return MatrixSnapshot(
+            library="libfoo",
+            version=version,
+            spec_name="t",
+            cxx_stds={"a": std},
+            results=[
+                ProbeResult(
+                    configuration_id="a",
+                    probe_id="p0",
+                    snapshot=_lib(version, list(same)),
+                )
+            ],
+        )
+
+    om, nm = str(tmp_path / "om.json"), str(tmp_path / "nm.json")
+    write_matrix_snapshot(_matrix("1", 17), om)
+    write_matrix_snapshot(_matrix("2", 20), nm)
+    res = _cli(
+        "compare",
+        o,
+        n,
+        "--format",
+        "json",
+        "--probe-matrix-old",
+        om,
+        "--probe-matrix-new",
+        nm,
+    )
+    assert res.exit_code == 2
+    doc = json.loads(res.stdout)
+    assert doc["verdict"] == "API_BREAK"
+    assert any(c["kind"] == "cxx_standard_floor_raised" for c in doc["changes"])
+
+
+def test_sc_linux_elf_baseline(tmp_path: Path) -> None:
+    # The validated baseline platform: an explicit ELF compare (platform="elf",
+    # SONAME-versioned) where a public symbol is removed → binary break (exit 4)
+    # with a major-bump recommendation, as a consumer would hit at load time.
+    from abicheck.elf_metadata import ElfMetadata
+
+    elf = ElfMetadata(soname="libfoo.so.1")
+    old = _lib("1", [_fn("a"), _fn("b")], platform="elf", elf=elf)
+    new = _lib("2", [_fn("a")], platform="elf", elf=ElfMetadata(soname="libfoo.so.1"))
+    res = _compare(tmp_path, old, new, "--format", "json")
+    assert res.exit_code == 4
+    doc = json.loads(res.output)
+    assert doc["verdict"] == "BREAKING"
+    assert doc["release_recommendation"]["version_bump"] == "major"

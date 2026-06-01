@@ -14,13 +14,17 @@ file. `tests/test_scenarios.py` merges every `tests/scenarios/*.yaml`:
 
 | File | Group |
 |---|---|
-| `ci_gating.yaml` | CI ABI gating — exit-code contract, severity gate, `--stat` |
+| `ci_gating.yaml` | CI ABI gating — exit-code contract, severity gate, `--stat`, malformed-input degraded mode |
 | `compliance_scanning.yaml` | public-surface scoping (issue #235), suppression (+ expiry), policy profiles |
-| `reporting.yaml` | report formats — SARIF, JUnit, HTML |
+| `change_archetypes.yaml` | per-archetype canonical breaks — C struct layout, C++ vtable, exported data |
+| `toolchain_coverage.yaml` | build/toolchain-driven shifts — dual-ABI flip, LP64↔ILP64, flag drift |
+| `reporting.yaml` | report formats — JSON contract, SARIF, JUnit, HTML, review digest |
 | `release_management.yaml` | release recommendation, offline snapshots, baseline registry |
 | `consumer_deployment.yaml` | compare-release, appcompat, stack-check/deps, ABICC, Debian, MCP (planned) |
+| `platform_coverage.yaml` | Linux ELF baseline (automated); native Windows PE/macOS Mach-O, plugin host↔plugin contract (planned) |
+| `archetype_coverage.yaml` | kernel-BTF, SYCL plugin, static library, header-only (planned) |
 
-There are currently **27 scenarios** (18 automated end-to-end + 9 planned).
+There are currently **44 scenarios** (28 automated end-to-end + 16 planned).
 
 Add a new group by dropping in a new `*.yaml`; add a scenario by appending to an
 existing group. Scenario ids must be unique across all files.

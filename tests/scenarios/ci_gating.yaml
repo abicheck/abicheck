@@ -82,6 +82,24 @@ scenarios:
     automated: true
     test: test_sc_ci_stat
 
+  - id: SC-MALFORMED-INPUT
+    title: Corrupt snapshot fails the run cleanly (degraded-mode contract)
+    persona: CI engineer
+    narrative: >
+      A gate is only trustworthy if its failure modes are predictable. When a
+      snapshot is corrupt or unreadable (truncated artifact, bad upload), the
+      scanner must not crash with a traceback or — worse — exit 0 and look clean.
+      It exits non-zero (1) with a clear "failed to load" diagnostic so the
+      pipeline distinguishes a tooling error from a compatibility verdict.
+    flow:
+      - abicheck compare good.json corrupt.json
+    expected:
+      exit_code: 1
+      output_contains: "Failed to load"
+    validates: UC-WF-compare
+    automated: true
+    test: test_sc_malformed_input
+
   # G2: fold build-config (probe-matrix) findings into the mainline gate.
   - id: SC-PROBE-MATRIX-GATE
     title: Build-config findings (C++ floor) gate via probe matrices in compare

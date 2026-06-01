@@ -1,0 +1,62 @@
+# Scenario group: change-archetype coverage — prove the scanner catches the
+# canonical ABI break in each library archetype (pure-C layout, C++ vtable,
+# exported data), not just the function-removal case the other groups lean on.
+#
+# See tests/scenarios/README.md for the catalog format and how it is validated.
+schema_version: 1
+
+scenarios:
+  - id: SC-C-STRUCT-LAYOUT
+    title: Pure-C struct grows a field — by-value layout break is caught
+    persona: Library maintainer (pure-C library)
+    narrative: >
+      A pure-C library adds a member to a struct that a public function takes by
+      value. The struct's size changes, so every caller compiled against the old
+      layout is now ABI-incompatible. The scanner must report a binary break
+      (exit 4, type_size_changed) even though no symbol was added or removed.
+    flow:
+      - abicheck compare old.json new.json
+    expected:
+      exit_code: 4
+      verdict: BREAKING
+      contains_kind: type_size_changed
+    validates: UC-ARCH-c-library
+    automated: true
+    test: test_sc_c_struct_layout
+
+  - id: SC-CPP-VTABLE-BREAK
+    title: C++ polymorphic class reorders its vtable — subclass break is caught
+    persona: Library maintainer (C++ library)
+    narrative: >
+      A new virtual function is inserted into a polymorphic base class, shifting
+      every later vtable slot. Subclasses and call sites compiled against the old
+      vtable now dispatch to the wrong slot — a classic silent C++ ABI break the
+      export table alone cannot see. The scanner must flag it (exit 4,
+      type_vtable_changed).
+    flow:
+      - abicheck compare old.json new.json --no-scope-public-headers
+    expected:
+      exit_code: 4
+      verdict: BREAKING
+      contains_kind: type_vtable_changed
+    validates: UC-ARCH-cpp-library
+    automated: true
+    test: test_sc_cpp_vtable_break
+
+  - id: SC-EXPORTED-VAR-REMOVED
+    title: Exported global variable removed — data surface break is caught
+    persona: Library maintainer
+    narrative: >
+      Compatibility is not only about functions. A library drops a public
+      exported global variable; any consumer that referenced it fails to link or
+      load. The scanner must treat the data surface like the function surface and
+      report a binary break (exit 4, var_removed).
+    flow:
+      - abicheck compare old.json new.json --no-scope-public-headers
+    expected:
+      exit_code: 4
+      verdict: BREAKING
+      contains_kind: var_removed
+    validates: UC-CHANGE-taxonomy
+    automated: true
+    test: test_sc_exported_var_removed
