@@ -236,8 +236,8 @@ use_cases:
       --bundle-cohort PREFIX so independent libraries are never inferred to be
       co-versioned from their filenames.
     evidence:
-      modules: [abicheck/bundle.py, abicheck/diff_onedal.py]
-      tests: [tests/test_bundle.py, tests/test_onedal_detectors.py]
+      modules: [abicheck/bundle.py, abicheck/diff_cpp_patterns.py]
+      tests: [tests/test_bundle.py, tests/test_cpp_pattern_detectors.py]
       examples: [examples/case84_bundle_soname_skew]
 
   - id: UC-WF-probe-matrix

@@ -1035,7 +1035,7 @@ def _strip_diff_results_and_adjust_verdict(
                    "(extends the built-in libc/libstdc++/libgcc/libtbb allow-list).")
 @click.option("--bundle-cohort", "bundle_cohorts", multiple=True, metavar="PREFIX",
               help="Declare a co-versioned library cohort by name prefix (e.g. "
-                   "'libonedal_'). Repeatable. Enables the BUNDLE_SONAME_SKEW check, "
+                   "'libfoo_'). Repeatable. Enables the BUNDLE_SONAME_SKEW check, "
                    "which flags when some members of the cohort bump their major SONAME "
                    "while siblings lag, and enables bundle-level cross-library analysis.")
 @click.option("--no-bundle-analysis", "no_bundle_analysis", is_flag=True, default=False,

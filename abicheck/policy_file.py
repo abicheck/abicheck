@@ -103,8 +103,8 @@ class PolicyFile:
     overrides: dict[ChangeKind, Verdict] = field(default_factory=dict)
     source_path: Path | None = None
     # Glob patterns identifying namespaces whose symbols / types are
-    # contractually frozen (e.g. oneTBB's `**::detail::r1`, oneDAL's
-    # `**::detail::v1`). Any finding whose symbol or caused_by_type lies in
+    # contractually frozen (e.g. a versioned internal namespace such as
+    # `**::detail::r1` or `**::detail::v1`). Any finding whose symbol or caused_by_type lies in
     # one of these namespaces is tagged via Change.frozen_namespace_violation
     # and is exempt from policy_override downgrades. Patterns use fnmatch
     # globbing against ``::``-joined namespace segments; ``**`` matches any
@@ -187,7 +187,7 @@ class PolicyFile:
             )
 
         # frozen_namespaces: optional list of glob patterns identifying
-        # contractually-frozen namespaces (e.g. oneTBB detail::r1).
+        # contractually-frozen namespaces (e.g. a versioned detail::r1).
         frozen_raw = raw.get("frozen_namespaces", [])
         if not isinstance(frozen_raw, list):
             raise PolicyError(

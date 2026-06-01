@@ -1,5 +1,5 @@
 #pragma once
-/* oneMKL-style LP64 integer interface: MKL_INT is 32-bit (int). */
+/* BLAS/LAPACK-style LP64 integer interface (e.g. oneMKL): MKL_INT is 32-bit (int). */
 
 typedef int MKL_INT;
 

@@ -578,10 +578,10 @@ REGISTRY = ChangeKindRegistry([
               "Although the type is conceptually 'internal', it is part of the "
               "effective public ABI: changes to it propagate into the layout, "
               "vtable, or compiled code of every consumer of the public type. "
-              "Common in libraries such as oneDAL that wrap implementation in a "
-              "'detail' namespace."),
+              "Common in libraries that wrap implementation in a "
+              "'detail' namespace (for example oneDAL)."),
 
-    # ── oneDAL-shaped breaks (case77–case89, follow-up to PR #238) ──────
+    # ── library-family-shaped breaks (case77–case89, follow-up to PR #238) ──────
     _E("instantiation_missing_from_binary", _B,
        impact="Header declares an explicit template instantiation that the shipped "
               "library no longer exports. Consumer source compiles cleanly but fails "
@@ -595,8 +595,8 @@ REGISTRY = ChangeKindRegistry([
               "tag. Symbol table, types, and layout are all unchanged — every "
               "conventional ABI check passes. But saved models / persisted state "
               "from the old library deserialize as the wrong class against the new "
-              "library, silently corrupting data. Common in DAAL-style "
-              "SerializationIface designs."),
+              "library, silently corrupting data. Common in "
+              "SerializationIface-style designs."),
 
     _E("sycl_overload_set_removed", _B,
        impact="A family of public overloads that take a SYCL queue as the first "
@@ -615,8 +615,8 @@ REGISTRY = ChangeKindRegistry([
               "stems."),
 
     _E("bundle_soname_skew", _B,
-       impact="A co-versioned bundle of shared libraries (e.g. libonedal_core, "
-              "libonedal_thread, libonedal_dpc) did not move SONAME in lockstep. "
+       impact="A co-versioned bundle of shared libraries (e.g. libfoo_core, "
+              "libfoo_thread, libfoo_dpc) did not move SONAME in lockstep. "
               "Some siblings bumped the major SONAME, others did not. Distro "
               "packages built on this bundle have inconsistent dependency "
               "metadata; binaries dynamically loading the mixed cohort can fetch "
@@ -629,7 +629,7 @@ REGISTRY = ChangeKindRegistry([
               "change because the type has no layout, but every explicit "
               "instantiation that referenced the old tag is re-mangled and the "
               "old symbol disappears. Consumers built against the old header get "
-              "unresolved-symbol errors at load time. Common with oneDAL "
+              "unresolved-symbol errors at load time. Common with "
               "method::* / task::* tag families."),
 
     _E("default_template_arg_changed", _B,
@@ -668,8 +668,9 @@ REGISTRY = ChangeKindRegistry([
               "than before and causing silent behavioral drift."),
 
     # ── Namespace-shape patterns (PR follow-up to #238) ─────────────────
-    # Generic detectors for template / header-only libraries (oneDPL-shaped
-    # but not oneDPL-specific). Live in abicheck/diff_namespaces.py.
+    # Generic detectors for template / header-only libraries (the patterns
+    # show up in libraries such as oneDPL, but are not library-specific).
+    # Live in abicheck/diff_namespaces.py.
     _E("experimental_graduated", _C, is_addition=True,
        impact="A declaration that previously lived under an `experimental::` "
               "(or similar) namespace is now also available at a stable name "
@@ -709,7 +710,7 @@ REGISTRY = ChangeKindRegistry([
     # ── Template / overload-set patterns (PR-B) ─────────────────────────
     _E("internal_template_leaks_via_public_api", _B,
        impact="An internal-namespace function template (e.g. "
-              "`oneapi::dpl::__internal::__pattern_walk2<...>`) changed "
+              "`acme::detail::__pattern_walk2<...>`) changed "
               "signature, and its instantiations appear in consumer "
               "symbol tables because public algorithms inline-dispatch "
               "through it. The internal helper is part of the effective "
@@ -790,13 +791,14 @@ REGISTRY = ChangeKindRegistry([
               "participates in overload resolution at call sites that "
               "trigger ADL on one of its argument types."),
 
-    # ── oneAPI / modern-C++ ABI hazards (gap analysis) ──────────────────────
+    # ── modern-C++ / numerical-library ABI hazards (gap analysis) ───────────
     _E("integer_model_changed", _B,
        impact="A large fraction of public integer parameters/returns flipped "
               "width together (e.g. int→long, int32_t→int64_t), or a public "
               "integer typedef changed its underlying size. This is the "
-              "signature of an LP64↔ILP64 model switch (e.g. oneMKL's MKL_INT "
-              "built for the 32-bit vs 64-bit integer interface). Every caller "
+              "signature of an LP64↔ILP64 model switch (e.g. a BLAS-style "
+              "`INT` typedef built for the 32-bit vs 64-bit integer interface). "
+              "Every caller "
               "passes/reads integers with the wrong width; arguments and array "
               "indices are silently truncated or sign-extended."),
     _E("abi_tag_changed", _B,

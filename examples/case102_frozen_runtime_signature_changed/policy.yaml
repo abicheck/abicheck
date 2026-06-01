@@ -1,5 +1,5 @@
-# Example policy file for case102: declare the oneTBB-style runtime
-# namespace `**::detail::r1::*` as contractually frozen.
+# Example policy file for case102: declare a versioned runtime
+# namespace `**::detail::r1::*` (as used by e.g. oneTBB) as contractually frozen.
 #
 # Run abicheck with:
 #   abicheck compare libv1.so libv2.so --policy-file policy.yaml

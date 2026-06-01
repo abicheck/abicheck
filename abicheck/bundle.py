@@ -15,8 +15,9 @@
 """Bundle-aware multi-library ABI analysis (ADR-023).
 
 The per-library compare implemented in ``checker.compare`` treats each
-library as an isolated unit. Real releases (oneDAL, libtorch, etc.) ship
-multiple libraries that reference each other's symbols; intra-bundle
+library as an isolated unit. Real releases (for example oneDAL or
+libtorch) ship multiple libraries that reference each other's symbols;
+intra-bundle
 breakage (sibling removes a symbol another sibling imports, extern-C
 signature drift across the DSO boundary, cross-DSO type drift, provider
 migration, instantiation-manifest drift) is invisible to per-library diff.
@@ -51,7 +52,7 @@ from .checker_types import Change, DiffResult
 from .elf_metadata import ElfMetadata, parse_elf_metadata
 
 if TYPE_CHECKING:
-    from .diff_onedal import BundleMember
+    from .diff_cpp_patterns import BundleMember
 
 log = logging.getLogger(__name__)
 
@@ -266,8 +267,8 @@ class ManifestEntry:
       expands each assignment into a substring of the demangled form
       ``Template<v1, v2, ...>`` and looks for at least one exported
       symbol whose demangled name contains it. The natural shape for
-      libraries (oneDAL, libtorch, MKL) that maintain an explicit
-      instantiation matrix in their build system.
+      libraries (for example oneDAL, libtorch, or MKL) that maintain an
+      explicit instantiation matrix in their build system.
     """
 
     symbol: str | None = None                    # literal mangled symbol
@@ -325,7 +326,7 @@ class InstantiationManifest:
 def _expand_instantiations(template: str, instantiations: tuple[dict[str, str], ...]) -> list[str]:
     """Build demangled-form substring patterns from a template + parameter list.
 
-    Returns a list of strings like ``"oneapi::dal::train_ops<float, method::dense, task::train>"``
+    Returns a list of strings like ``"acme::lib::train_ops<float, method::dense, task::train>"``
     that the matcher tests as substring against the demangled form of
     each exported symbol. Parameter order in the produced angle-bracket
     list is the iteration order of the dict (insertion order, preserved
@@ -434,22 +435,22 @@ def load_manifest(path: Path) -> InstantiationManifest:
         version: 1
         provides:
           # 1. Literal symbol — exact match against .dynsym.
-          - symbol: oneapi_dal_version
-            library: libonedal_core.so.1
+          - symbol: acme_lib_version
+            library: libfoo_core.so.1
             optional_provider: false
 
           # 2. Glob pattern — fnmatch against demangled form.
-          - pattern: "oneapi::dal::detail::train_kernel<*>*"
-            library: libonedal_core.so.1
+          - pattern: "acme::lib::detail::train_kernel<*>*"
+            library: libfoo_core.so.1
             optional_provider: false
 
           # 3. Template + instantiations — natural shape for template libs.
-          - template: oneapi::dal::train_ops
+          - template: acme::lib::train_ops
             instantiations:
               - {Float: float,  Method: "method::dense",  Task: "task::train"}
               - {Float: float,  Method: "method::sparse", Task: "task::train"}
               - {Float: double, Method: "method::dense",  Task: "task::train"}
-            library: libonedal_core.so.1
+            library: libfoo_core.so.1
             optional_provider: false
     """
     data = _load_manifest_data(path)
@@ -589,7 +590,7 @@ def compare_bundle(
             ``BUNDLE_MANIFEST_INSTANTIATION_REMOVED`` findings.
         system_providers: Sonames to treat as system-provided (extends
             :data:`DEFAULT_SYSTEM_PROVIDERS`).
-        cohorts: Explicit co-versioned cohort prefixes (e.g. ``"libonedal_"``)
+        cohorts: Explicit co-versioned cohort prefixes (e.g. ``"libfoo_"``)
             for the opt-in ``BUNDLE_SONAME_SKEW`` check. When empty/None the
             skew check is disabled — cohorts are never inferred from filenames.
     """
@@ -839,7 +840,7 @@ def _detect_intra_type_changed(
     Conservative heuristic: a ``type_*_changed`` against type ``T`` in
     library A counts as cross-DSO iff *some other library B* in the bundle
     exports a symbol whose name contains ``T`` (template instantiation,
-    mangled signature reference). Catches the oneDAL ``detail::``-style
+    mangled signature reference). Catches the ``detail::``-style
     pattern where a type defined in core leaks into algo's mangled
     symbols. Misses extern-C function pointers that pass struct
     references (would require type-graph propagation from DWARF, future
@@ -1018,7 +1019,7 @@ def _soname_skew_findings(
     """Pure cohort-skew logic over already-read bundle members.
 
     SONAME skew is **only** evaluated within explicitly declared cohorts —
-    each entry of *cohorts* is a cohort-key prefix (e.g. ``"libonedal_"``)
+    each entry of *cohorts* is a cohort-key prefix (e.g. ``"libfoo_"``)
     naming a set of libraries the release engineer asserts are co-versioned.
     Libraries that match no declared cohort are never compared, so a normal
     release that bumps an independent ``libfoo.so.1 → libfoo.so.2`` while an
@@ -1033,7 +1034,7 @@ def _soname_skew_findings(
     prefixes = [p.strip() for p in cohorts if p and p.strip()]
     if not prefixes:
         return []
-    from .diff_onedal import detect_bundle_soname_skew
+    from .diff_cpp_patterns import detect_bundle_soname_skew
 
     findings: list[BundleFinding] = []
     for prefix in prefixes:
@@ -1077,7 +1078,7 @@ def _detect_soname_skew(
     cohorts = [c.strip() for c in (cohorts or []) if c and c.strip()]
     if not cohorts:
         return []
-    from .diff_onedal import BundleMember, _extract_soname_major
+    from .diff_cpp_patterns import BundleMember, _extract_soname_major
 
     def _members(snap: BundleSnapshot) -> list[BundleMember]:
         members: list[BundleMember] = []
@@ -1131,7 +1132,7 @@ def _build_demangled_index(snapshot: BundleSnapshot) -> list[tuple[str, str]]:
 
     Performed once per :func:`_match_entry` call so manifest checking is
     O(symbols + targets × index) rather than O(symbols × targets) — for
-    a oneDAL-sized bundle (~50k exported symbols) with a manifest
+    a large bundle (~50k exported symbols) with a manifest
     containing hundreds of template instantiations, the naïve
     re-scan-per-target path would dominate ``compare-release`` runtime
     now that bundle analysis is default-on.

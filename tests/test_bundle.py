@@ -1507,7 +1507,7 @@ class TestSonameSkewCohortScoping:
 
     @staticmethod
     def _member(library: str, major: int):
-        from abicheck.diff_onedal import BundleMember
+        from abicheck.diff_cpp_patterns import BundleMember
         return BundleMember(library=library, soname=library, soname_major=major)
 
     def test_no_cohort_declared_emits_nothing(self) -> None:

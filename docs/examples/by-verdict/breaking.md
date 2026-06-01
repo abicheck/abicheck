@@ -17,8 +17,8 @@ _83 case(s)._ [← back to all examples](../index.md)
 | [case101_inline_namespace_version_bumped](../case101_inline_namespace_version_bumped.md) | case101 — inline namespace version bumped (BREAKING) | 🔴 BREAKING | Breaking |
 | [case102_frozen_runtime_signature_changed](../case102_frozen_runtime_signature_changed.md) | Frozen Runtime Signature Changed (oneTBB `detail::r1` shape) | 🔴 BREAKING | Breaking |
 | [case104_glibcxx_dual_abi_flip](../case104_glibcxx_dual_abi_flip.md) | libstdc++ dual-ABI flip (`glibcxx_dual_abi_flip_detected`) | 🔴 BREAKING | Breaking |
-| [case107_task_scheduler_init_removed](../case107_task_scheduler_init_removed.md) | `task_scheduler_init` Removed (oneTBB historical break) | 🔴 BREAKING | Breaking |
-| [case108_task_class_removed](../case108_task_class_removed.md) | `task` Class Removed (oneTBB historical break — vtable angle) | 🔴 BREAKING | Breaking |
+| [case107_task_scheduler_init_removed](../case107_task_scheduler_init_removed.md) | `task_scheduler_init` Removed (historical ABI break) | 🔴 BREAKING | Breaking |
+| [case108_task_class_removed](../case108_task_class_removed.md) | `task` Class Removed (historical ABI break — vtable angle) | 🔴 BREAKING | Breaking |
 | [case109_flow_graph_policy_renames](../case109_flow_graph_policy_renames.md) | flow::graph Policy Tag Renames | 🔴 BREAKING | Breaking |
 | [case10_return_type](../case10_return_type.md) | Return Type Change | 🔴 BREAKING | Breaking |
 | [case110_concurrent_unordered_map_api_drift](../case110_concurrent_unordered_map_api_drift.md) | concurrent_unordered_map API Drift | 🔴 BREAKING | Breaking |

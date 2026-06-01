@@ -21,8 +21,9 @@ links — but every consumer compiled against v1 pushes an `int` argument
 into what is now a `long` parameter slot. On most calling conventions this
 is silent corruption (high half-word garbage).
 
-## Why this is a oneTBB-flavored break
+## Why this is a breaking change
 
+This fixture mirrors a real frozen-namespace contract.
 [oneTBB's `VERSIONING.md`](https://github.com/uxlfoundation/oneTBB/blob/master/VERSIONING.md)
 specifies that the runtime-symbol namespace `tbb::detail::r1` is
 **append-only**: existing entry points are frozen at their shipped

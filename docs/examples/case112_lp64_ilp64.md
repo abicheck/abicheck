@@ -10,7 +10,7 @@
 | **Detected `ChangeKind`s** | `integer_model_changed` |
 | **Source files** | `examples/case112_lp64_ilp64/` |
 
-**Category:** Binary ABI break / oneAPI hazard | **Verdict:** 🔴 BREAKING
+**Category:** Binary ABI break / numerical-library ABI hazard | **Verdict:** 🔴 BREAKING
 
 ## What changed
 
@@ -22,8 +22,8 @@ flips its integer width at the same time. The function *names* are unchanged
 the ILP64 symbols at load time but passes/reads integers with the wrong width:
 array indices and lengths are silently truncated or sign-extended.
 
-This is the highest-value oneAPI ABI hazard: oneMKL ships both interfaces and
-they are not interchangeable.
+This is the highest-value numerical-library ABI hazard: for example oneMKL
+ships both interfaces and they are not interchangeable.
 
 ## How abicheck catches it
 

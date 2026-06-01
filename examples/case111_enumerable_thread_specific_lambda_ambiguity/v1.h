@@ -7,7 +7,7 @@
 //
 // unambiguously.
 //
-// NOTE: a real oneTBB-flavoured version would accept `std::function<int()>`
+// NOTE: a real-world version (e.g. in oneTBB) would accept `std::function<int()>`
 // as the lambda-init parameter, but we use a plain function-pointer typedef
 // here. Pulling in `<functional>` from libstdc++ 13 breaks castxml dumping
 // (clang rejects `__attribute__((__assume__(...)))` inside `stl_bvector.h`),

@@ -186,10 +186,10 @@ ASSERTED_CHANGE_KINDS: set[ChangeKind] = {
     ChangeKind.FLEXIBLE_ARRAY_MEMBER_CHANGED,
     # DWARF-based = delete detection (P3 gap)
     ChangeKind.FUNC_DELETED_DWARF,
-    # Internal-namespace leak via public API (oneDAL-style detail:: pattern)
+    # Internal-namespace leak via public API (detail:: leak pattern)
     # Exercised in tests/test_internal_leak.py.
     ChangeKind.INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API,
-    # oneDAL-shaped detectors (case77–case89) — exercised in tests/test_onedal_detectors.py
+    # library-family pattern detectors (case77–case89) — exercised in tests/test_cpp_pattern_detectors.py
     ChangeKind.INSTANTIATION_MISSING_FROM_BINARY,
     ChangeKind.SERIALIZATION_TAG_CHANGED,
     ChangeKind.SYCL_OVERLOAD_SET_REMOVED,

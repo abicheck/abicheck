@@ -34,7 +34,7 @@ Cross-references:
     * ``examples/ground_truth.json``       — existing example catalogue
     * ``abicheck/internal_leak.py``        — PR #238 (``detail::`` leak)
     * ``tests/test_internal_leak.py``      — companion test style
-    * ``tests/test_onedal_detectors.py``   — companion test style
+    * ``tests/test_cpp_pattern_detectors.py``   — companion test style
 
 ---------------------------------------------------------------------------
 

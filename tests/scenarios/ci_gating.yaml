@@ -121,13 +121,14 @@ scenarios:
     automated: true
     test: test_sc_probe_matrix_into_compare
 
-  # oneDAL-style bundle PR gate: block confirmed public breaks, warn (don't
+  # Multi-library bundle PR gate: block confirmed public breaks, warn (don't
   # block) when analysis could not confidently confirm the public surface.
-  - id: SC-ONEDAL-PR-GATE-STRICT
-    title: Block oneDAL PRs on public ABI/API break, warn on unconfirmed analysis
-    persona: oneDAL maintainer
+  - id: SC-BUNDLE-PR-GATE-STRICT
+    title: Block multi-library bundle PRs on public ABI/API break, warn on unconfirmed analysis
+    persona: numerical-library maintainer (e.g. oneDAL)
     narrative: >
-      A pull request changes oneDAL shared libraries or public headers. CI must
+      A pull request changes a co-versioned bundle's shared libraries or public
+      headers. CI must
       stop merges for confirmed public BREAKING or API_BREAK findings, but must
       only warn (not block) when compatibility cannot be confidently confirmed —
       the public-surface scope fell back, or the verdict is COMPATIBLE_WITH_RISK.
@@ -157,15 +158,15 @@ scenarios:
       filtered_internal_changes) and changed_libraries that this gate keys off
       are unit-tested in tests/test_compare_release.py
       (TestCompareReleaseScopeAndChangedLibraries). Full automation needs a real
-      oneDAL bundle (multiple .so + public headers) so -H scoping is exercised
+      multi-library bundle (multiple .so + public headers) so -H scoping is exercised
       end-to-end rather than via JSON snapshots.
 
-  # oneDAL-style additive surface tracking: report growth, never gate on it.
-  - id: SC-ONEDAL-PR-ADDITION-TRACKING
-    title: Report oneDAL API/ABI additions without gating the PR
-    persona: oneDAL maintainer
+  # Multi-library additive surface tracking: report growth, never gate on it.
+  - id: SC-BUNDLE-PR-ADDITION-TRACKING
+    title: Report bundle API/ABI additions without gating the PR
+    persona: numerical-library maintainer (e.g. oneDAL)
     narrative: >
-      A pull request legitimately expands oneDAL's surface. CI must not block the
+      A pull request legitimately expands the bundle's surface. CI must not block the
       merge on additions alone, but it must clearly separate public additions
       from internal-only growth (using public-header scoping plus the
       --show-filtered ledger) and communicate the release impact to reviewers via
@@ -193,4 +194,4 @@ scenarios:
       rollup are emitted today and unit-tested in tests/test_compare_release.py.
       Per-library release_recommendation is available in the --output-dir reports
       (single-library JSON). The job_summary / pr_comment digest is the G3
-      review-UX deliverable; full automation needs a real oneDAL bundle.
+      review-UX deliverable; full automation needs a real multi-library bundle.

@@ -20,12 +20,12 @@ value between releases. Symbol table, types, and layout are all
 unchanged — every conventional ABI check passes — but saved state
 from the old library deserialises as the wrong class against the new.
 
-Originally lived in :mod:`abicheck.diff_onedal` because the pattern
-was first identified in oneDAL/DAAL. The detection is naming-
-convention based (``*_tag_id``, ``*_serialization_tag``, …) and
+Originally lived in :mod:`abicheck.diff_cpp_patterns` because the pattern
+was first identified in a numerical library family. The detection is
+naming-convention based (``*_tag_id``, ``*_serialization_tag``, …) and
 applies to any library that uses the same persistence convention.
 
-Re-exported from :mod:`abicheck.diff_onedal` for backwards
+Re-exported from :mod:`abicheck.diff_cpp_patterns` for backwards
 compatibility with existing tests; new code should import from here.
 """
 

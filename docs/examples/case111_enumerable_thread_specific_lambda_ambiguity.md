@@ -10,7 +10,7 @@
 | **Detected `ChangeKind`s** | `func_added` |
 | **Source files** | `examples/case111_enumerable_thread_specific_lambda_ambiguity/` |
 
-**Category:** Subtle source break / oneTBB regression suite | **Verdict:** 🟢 COMPATIBLE (known gap — see below)
+**Category:** Subtle source break / regression suite | **Verdict:** 🟢 COMPATIBLE (known gap — see below)
 
 ## What breaks
 
@@ -24,14 +24,14 @@ code that compiled before may compile to a different constructor against
 the new headers, or stop compiling at unrelated call sites that infer
 the wrong overload.
 
-**Why function-pointer instead of `std::function`?** A real oneTBB-flavoured
-example would accept `std::function<int()>`, but pulling in
+**Why function-pointer instead of `std::function`?** A realistic
+example (such as oneTBB) would accept `std::function<int()>`, but pulling in
 `<functional>` from libstdc++ 13 trips castxml/clang (`__assume__`
 attribute in `<bits/stl_bvector.h>`), which would prevent the integration
 test from ever running. A function-pointer typedef exhibits the same
 overload-ambiguity risk for the purposes of this regression fixture.
 
-## Why this is in the oneTBB regression suite
+## Why this matters
 
 Mirrors a documented oneTBB pain point: adding lambda-/functor-accepting
 constructor overloads to existing handle types introduced overload

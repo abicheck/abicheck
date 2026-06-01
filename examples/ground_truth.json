@@ -1175,7 +1175,7 @@
       "abi_break": true,
       "api_break": false,
       "bad_practice": true,
-      "reason": "Bundle case \u2014 no single-pair v1.cpp/v2.cpp layout; uses gen_bundle.sh to produce v1/ and v2/ directories. Validated end-to-end through `compare-release` in tests/test_bundle.py::TestCompareReleaseBundleE2E::test_compare_release_emits_soname_skew_for_case84; detect_bundle_soname_skew() also unit-tested in tests/test_onedal_detectors.py.",
+      "reason": "Bundle case \u2014 no single-pair v1.cpp/v2.cpp layout; uses gen_bundle.sh to produce v1/ and v2/ directories. Validated end-to-end through `compare-release` in tests/test_bundle.py::TestCompareReleaseBundleE2E::test_compare_release_emits_soname_skew_for_case84; detect_bundle_soname_skew() also unit-tested in tests/test_cpp_pattern_detectors.py.",
       "description": "Multi-library bundle SONAME skew: libonedal_core and libonedal_dpc bump SONAME from .so.1 to .so.2 but libonedal_thread keeps .so.1 by accident. Per-library checks pass; cohort-level invariant fails. Emits BUNDLE_SONAME_SKEW.",
       "expected_bundle_verdict": "BREAKING",
       "expected_combined_verdict": "BREAKING",
@@ -1700,7 +1700,7 @@
       "abi_break": true,
       "api_break": false,
       "bad_practice": false,
-      "description": "oneMKL-style LP64 (MKL_INT=int, 32-bit) switched to ILP64 (MKL_INT=long, 64-bit). A large fraction of public integer parameters/returns flip width together and the MKL_INT typedef resizes, the signature of an LP64/ILP64 model switch.",
+      "description": "A BLAS/LAPACK-style integer interface (as shipped by e.g. oneMKL) switched LP64 (INT=int, 32-bit) to ILP64 (INT=long, 64-bit). A large fraction of public integer parameters/returns flip width together and the integer typedef resizes, the signature of an LP64/ILP64 model switch.",
       "expected_kinds": [
         "integer_model_changed"
       ]

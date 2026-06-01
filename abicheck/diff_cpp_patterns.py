@@ -6,7 +6,13 @@
 #
 #     http://www.apache.org/licenses/LICENSE-2.0
 
-"""Detectors for oneDAL-shaped ABI breaks (case77–case89).
+"""Detectors for library-family-shaped ABI breaks (case77–case89).
+
+These patterns are common in large C++ numerical/runtime libraries that
+ship a co-versioned bundle of shared objects behind a single public
+header tree (for example oneDAL, oneTBB, or libtorch). The detectors are
+not specific to any one library — the named projects are only used as
+illustrative examples.
 
 Each detector consumes the existing change list plus the old/new
 ``AbiSnapshot`` and emits *new* synthetic ``Change`` entries that name a
@@ -15,7 +21,7 @@ that triggered it.
 
 Implemented detectors:
 
-* :func:`detect_serialization_tag_changes` (case81) — DAAL-style tag
+* :func:`detect_serialization_tag_changes` (case81) — serialization tag
   IDs reassigned between releases.
 * :func:`detect_missing_instantiations` (case79) — header advertises a
   template instantiation the shipped library no longer exports.
@@ -45,10 +51,11 @@ from typing import TYPE_CHECKING
 from .checker_policy import ChangeKind
 from .checker_types import Change
 
-# Re-exports for backwards compatibility — the generic detectors were
-# extracted to dedicated modules in PR-D (post #238 / oneDPL analysis).
-# Existing tests / external callers that import from this module keep
-# working unchanged.
+# Re-exports — the generic detectors were extracted to dedicated modules
+# in PR-D, but are re-exported here so callers that import them from this
+# module keep working unchanged. (This module is internal: it is not
+# exported from ``abicheck/__init__`` and has no documented public-API
+# import path.)
 from .diff_serialization import (  # noqa: F401
     _TAG_EXACT_LEAVES,
     _TAG_SUFFIX_PATTERNS,
@@ -688,7 +695,7 @@ def _collect_paired_field_candidates(
     TYPE_FIELD_REMOVED / TYPE_FIELD_ADDED changes on the same internal type.
 
     Covers the case where the AST emitter doesn't produce a FIELD_RENAMED
-    but does produce paired field deltas (oneDAL's "modernize naming" pattern).
+    but does produce paired field deltas (a "modernize naming" refactor).
     """
     from .internal_leak import is_internal_type  # local import: cycle-free
 
@@ -853,14 +860,14 @@ def _inline_accessors_for(
 class BundleMember:
     """A single library participating in a bundle SONAME-skew check."""
 
-    library: str  # filename, e.g. "libonedal_core.so.2"
-    soname: str  # DT_SONAME, e.g. "libonedal_core.so.2"
+    library: str  # filename, e.g. "libfoo_core.so.2"
+    soname: str  # DT_SONAME, e.g. "libfoo_core.so.2"
     soname_major: int  # extracted major, e.g. 2
 
 
 def _extract_soname_major(soname: str) -> int | None:
     """Extract the trailing major from a SONAME like
-    ``libonedal_core.so.2`` or ``libfoo.2.dylib``. Returns ``None`` if
+    ``libfoo_core.so.2`` or ``libfoo.2.dylib``. Returns ``None`` if
     no integer suffix can be found."""
     if not soname:
         return None
@@ -879,8 +886,8 @@ def _extract_soname_major(soname: str) -> int | None:
 def _cohort_key(library: str) -> str:
     """Strip version-y suffixes to derive a cohort key for clustering."""
     name = library
-    # Drop everything from the first dot onwards: libonedal_core.so.2
-    # -> libonedal_core.
+    # Drop everything from the first dot onwards: libfoo_core.so.2
+    # -> libfoo_core.
     return name.split(".", 1)[0]
 
 
@@ -895,7 +902,7 @@ def detect_bundle_soname_skew(
     others did not.
 
     *cohort_prefix*, if provided, restricts the analysis to libraries
-    whose cohort key starts with this prefix (e.g. ``"libonedal_"``).
+    whose cohort key starts with this prefix (e.g. ``"libfoo_"``).
     """
     # Map new libraries by their cohort key to allow the old library
     # filename (which carries the old major) to look up the new entry.

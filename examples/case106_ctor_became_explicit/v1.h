@@ -1,6 +1,6 @@
 // case106 v1 — implicit converting *conversion operator*.
 //
-// Mirrors the oneTBB-style pattern where a handle type allows implicit
+// Mirrors a common pattern (e.g. in oneTBB) where a handle type allows implicit
 // conversion to a primitive at the call site:
 //
 //     mylib::task_arena ta(4);

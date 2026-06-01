@@ -14,8 +14,8 @@
 
 """Internal-namespace leak detection.
 
-Detects the oneDAL-style pattern where a type living in an "internal"
-namespace (``detail``, ``impl``, ``internal``) has changed and is
+Detects the detail-namespace leak pattern where a type living in an
+"internal" namespace (``detail``, ``impl``, ``internal``) has changed and is
 *reachable from the public ABI surface* via:
 
   - inheritance: ``class Public : public detail::Base``
@@ -87,8 +87,8 @@ _LEAK_TRIGGERING_KINDS: frozenset[ChangeKind] = frozenset({
 
 
 # Splits a qualified C++ name into namespace segments, ignoring template
-# argument lists. ``oneapi::dal::detail::pimpl<X>`` →
-# ``["oneapi", "dal", "detail", "pimpl"]``.
+# argument lists. ``acme::lib::detail::pimpl<X>`` →
+# ``["acme", "lib", "detail", "pimpl"]``.
 _TEMPLATE_ARG_RE = re.compile(r"<[^<>]*>")
 
 
@@ -111,8 +111,8 @@ def _name_segments(name: str) -> list[str]:
     """Return ``::``-separated identifier segments of *name*.
 
     Template arguments are stripped first so that
-    ``oneapi::dal::detail::pimpl<Foo<int>>`` yields
-    ``["oneapi", "dal", "detail", "pimpl"]``.
+    ``acme::lib::detail::pimpl<Foo<int>>`` yields
+    ``["acme", "lib", "detail", "pimpl"]``.
     """
     if not name:
         return []
@@ -131,8 +131,8 @@ def is_internal_type(
 
     Examples (with default namespaces)::
 
-        is_internal_type("oneapi::dal::detail::impl") -> True
-        is_internal_type("oneapi::dal::detail::pimpl<X>") -> True
+        is_internal_type("acme::lib::detail::impl") -> True
+        is_internal_type("acme::lib::detail::pimpl<X>") -> True
         is_internal_type("std::__detail::node") -> True
         is_internal_type("MyClass") -> False
         is_internal_type("Details") -> False   # not a segment match
@@ -166,7 +166,7 @@ def _strip_decorators(typename: str) -> str:
 def _candidate_type_names(typename: str) -> list[str]:
     """Yield candidate type names to look up for *typename*.
 
-    For ``std::unique_ptr<oneapi::dal::detail::impl>`` we want to surface
+    For ``std::unique_ptr<acme::lib::detail::impl>`` we want to surface
     both the outer template and the inner type, because the inner
     ``detail::impl`` is what users will see leaking.
     """

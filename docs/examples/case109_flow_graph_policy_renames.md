@@ -10,7 +10,7 @@
 | **Detected `ChangeKind`s** | `typedef_removed`, `type_removed` |
 | **Source files** | `examples/case109_flow_graph_policy_renames/` |
 
-**Category:** Source API / oneTBB regression suite | **Verdict:** 🔴 BREAKING
+**Category:** Source API / regression suite | **Verdict:** 🔴 BREAKING
 
 ## What breaks
 
@@ -25,7 +25,7 @@ Because the offending types are header-only template parameter tags,
 identical between v1 and v2. The .so will continue to link with old
 consumers, but any rebuild against the new headers breaks.
 
-## Why this is in the oneTBB regression suite
+## Why this matters
 
 Mirrors oneTBB 2021's reshuffle of `tbb::flow::*` policy types — a
 documented historical break from the upstream maintainers.

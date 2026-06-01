@@ -31,8 +31,8 @@ based detectors.
 Concept tightening is the C++20 evolution of the older SFINAE-narrowing
 pattern (`std::enable_if<...>`): the library author narrows the set of
 types a template accepts in a way that the symbol table cannot reveal.
-oneTBB, the standard library, and many algorithm-heavy libraries do
-this on purpose — sometimes to fix a latent bug, sometimes to nudge
+Many algorithm-heavy libraries (for example oneTBB and the standard
+library) do this on purpose — sometimes to fix a latent bug, sometimes to nudge
 users toward "better" types — and every such tightening is a silent
 source-break for whoever was relying on the relaxed contract.
 

@@ -10,7 +10,7 @@
 | **Detected `ChangeKind`s** | `func_removed` |
 | **Source files** | `examples/case110_concurrent_unordered_map_api_drift/` |
 
-**Category:** ABI + source break / oneTBB regression suite | **Verdict:** 🔴 BREAKING
+**Category:** ABI + source break / regression suite | **Verdict:** 🔴 BREAKING
 
 ## What breaks
 
@@ -19,7 +19,7 @@ versions. The mangled symbol of the old overload disappears from the
 .so; the new overload has a different mangled name. Both the .so symbol
 table and any consumer source that called the old form change.
 
-## Why this is in the oneTBB regression suite
+## Why this matters
 
 Mirrors several documented historical signature tightenings on
 `tbb::concurrent_unordered_map` (and friends) where helper / hint

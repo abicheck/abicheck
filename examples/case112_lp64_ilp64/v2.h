@@ -1,5 +1,5 @@
 #pragma once
-/* oneMKL-style ILP64 integer interface: MKL_INT is 64-bit (long). */
+/* BLAS/LAPACK-style ILP64 integer interface (e.g. oneMKL): MKL_INT is 64-bit (long). */
 
 typedef long MKL_INT;
 

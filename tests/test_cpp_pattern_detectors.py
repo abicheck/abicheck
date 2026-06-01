@@ -6,7 +6,7 @@
 #
 #     http://www.apache.org/licenses/LICENSE-2.0
 
-"""Unit tests for the oneDAL-shaped detectors (case77–case89).
+"""Unit tests for the library-family C++ pattern detectors (case77–case89).
 
 Each detector is exercised with synthetic ``AbiSnapshot`` objects, so the
 suite runs without a C/C++ compiler, libabigail, abi-compliance-checker,
@@ -34,7 +34,7 @@ import pytest
 
 from abicheck.checker_policy import ChangeKind
 from abicheck.checker_types import Change
-from abicheck.diff_onedal import (
+from abicheck.diff_cpp_patterns import (
     BundleMember,
     _extract_soname_major,
     _has_sycl_queue_first_param,
@@ -1063,14 +1063,14 @@ class TestBundleSonameSkewDetector:
 
 
 class TestPipelineIntegration:
-    """The DetectOneDALPatterns step must run as part of DEFAULT_PIPELINE
+    """The DetectCppPatterns step must run as part of DEFAULT_PIPELINE
     and append new findings into the change list.
     """
 
     def test_pipeline_includes_step(self) -> None:
         from abicheck.post_processing import DEFAULT_PIPELINE
 
-        assert "detect_onedal_patterns" in DEFAULT_PIPELINE.step_names
+        assert "detect_cpp_patterns" in DEFAULT_PIPELINE.step_names
 
     def test_serialization_tag_finding_flows_through_pipeline(self) -> None:
         from abicheck.post_processing import DEFAULT_PIPELINE
@@ -1084,7 +1084,7 @@ class TestPipelineIntegration:
 
 class TestMatchesSuppressionKey:
     """CodeRabbit regression: the substring fallback in the
-    ``DetectOneDALPatterns`` suppression step must not over-fire on
+    ``DetectCppPatterns`` suppression step must not over-fire on
     short generic leaf names.
     """
 

@@ -563,7 +563,7 @@ def detect_unspecified_return_now_named(
 
 
 # ---------------------------------------------------------------------------
-# INSTANTIATION_MISSING_FROM_BINARY (moved from diff_onedal in PR-D)
+# INSTANTIATION_MISSING_FROM_BINARY (moved from diff_cpp_patterns in PR-D)
 # ---------------------------------------------------------------------------
 
 
@@ -575,10 +575,10 @@ def detect_missing_instantiations(
     symbols present in *old* that vanished in *new* but whose enclosing
     template still exists.
 
-    Generalised from the oneDAL-shaped detector originally added in
+    Generalised from the library-family detector originally added in
     PR #239; the heuristic (instantiation = function name contains
     ``<`` at top level) is library-agnostic. Re-exported from
-    :mod:`abicheck.diff_onedal` for backwards compatibility.
+    :mod:`abicheck.diff_cpp_patterns` for backwards compatibility.
     """
     old.index()
     new.index()

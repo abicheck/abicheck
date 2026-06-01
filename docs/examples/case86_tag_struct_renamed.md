@@ -59,13 +59,14 @@ cp /tmp/abicheck-examples-build/case86_tag_struct_renamed/libv2.so "$tmp/libv1.s
 
 Renaming a *non-empty* class is rare and would already trigger many
 layout-related findings. Renaming a tag struct — the *only* purpose of
-which is to participate in mangling — is uniquely a oneDAL/Boost/std-style
-risk, and no existing ChangeKind correlates the disappearance with the
+which is to participate in mangling — is a distinct risk of the
+empty-tag-struct idiom used by many C++ libraries (such as oneDAL, Boost,
+and the standard library), and no existing ChangeKind correlates the disappearance with the
 appearance. A new `TAG_TYPE_RENAMED` makes the correlation explicit.
 
 ## How abicheck detects it
 
-The new detector (`abicheck/diff_onedal.py::detect_tag_type_renamed`) runs after the
+The new detector (`abicheck/diff_cpp_patterns.py::detect_tag_type_renamed`) runs after the
 type-diff pass:
 
 1. Find every `TYPE_REMOVED` for a record type with zero fields and no

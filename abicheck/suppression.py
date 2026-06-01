@@ -205,7 +205,7 @@ class Suppression:
     ``::``-separated segments).  Template arguments are stripped before
     matching, so ``foo<int>::bar`` matches ``foo::bar``.  Example:
     ``namespace: "**::detail::r1::*"`` suppresses every finding inside
-    oneTBB's frozen runtime namespace."""
+    a versioned frozen runtime namespace (e.g. a ``detail::r1`` namespace)."""
     expires: date | None = None
     """Optional expiry date (ISO 8601). After this date, the suppression is inactive
     and a warning is emitted. Format: ``expires: 2026-06-01``."""

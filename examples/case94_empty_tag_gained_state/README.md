@@ -27,9 +27,9 @@ cp /tmp/abicheck-examples-build/case94_empty_tag_gained_state/libv2.so "$tmp/lib
 # run(7) = 14 (expect 14)
 ```
 
-## Why this is a oneTBB-flavored break
+## Why this is a breaking change
 
-The pattern is exactly the `tbb::auto_partitioner` / `tbb::simple_partitioner` /
+The pattern mirrors the `tbb::auto_partitioner` / `tbb::simple_partitioner` /
 `tbb::affinity_partitioner` shape: empty tag types are passed by value into header-only
 algorithm wrappers (`tbb::parallel_for`, `tbb::parallel_reduce`). The library author
 sees the tag as an implementation detail with "no public members" — but its sizeof

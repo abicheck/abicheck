@@ -281,7 +281,7 @@ template-form matcher uses substring matching against demangled names,
 which works in practice but isn't a complete equivalence to Itanium
 mangling. We expect to refine the entry shapes (especially how
 default template arguments and SFINAE-pruned overloads are expressed)
-based on usage feedback from oneDAL-shaped consumers.
+based on usage feedback from co-versioned multi-library bundles.
 
 ### Library identity within a bundle
 
@@ -314,7 +314,7 @@ The bundle layer additionally maintains SONAME identity:
 ## Consequences
 
 **Pro:**
-- Closes the headline gap: oneDAL-style bundles get correct verdicts.
+- Closes the headline gap: co-versioned multi-library bundles (for example oneDAL) get correct verdicts.
 - Reuses `resolver.py` and `binder.py` already shipped for `stack-check`;
   no new graph engine.
 - The new ChangeKinds plug into the existing registry, suppression, policy,
@@ -382,4 +382,4 @@ The bundle layer additionally maintains SONAME identity:
 - ADR-009: Verdict system and exit-code contract
 - ADR-010: Policy profile system
 - ADR-011: ABI change classification taxonomy
-- ADR-022: `internal_type_leaks_via_public_api` (oneDAL detail-namespace pattern)
+- ADR-022: `internal_type_leaks_via_public_api` (detail-namespace leak pattern, e.g. oneDAL)

@@ -116,11 +116,11 @@ Some policy-escalated source/contract breaks (notably case30, case35) may keep i
 | [71](case71_inline_namespace_moved/README.md) | Inline Namespace Moved (v1→v2) | Breaking | BREAKING 🔴 |
 | [72](case72_covariant_return_changed/README.md) | Covariant Return Type Changed (hierarchy insert) | Breaking | BREAKING 🔴 |
 | [73](case73_typedef_underlying_changed/README.md) | Typedef Underlying Type Changed (int→void*) | Breaking | BREAKING 🔴 |
-| [74](case74_detail_base_class_changed/README.md) | Internal `detail::` Base Class Layout Change (oneDAL-style leak) | Breaking | BREAKING 🔴 |
+| [74](case74_detail_base_class_changed/README.md) | Internal `detail::` Base Class Layout Change (detail-namespace leak) | Breaking | BREAKING 🔴 |
 | [75](case75_detail_embedded_by_value/README.md) | Internal `detail::` Impl Embedded by Value | Breaking | BREAKING 🔴 |
 | [76](case76_detail_pimpl_vtable_changed/README.md) | Internal `detail::` Polymorphic Base Vtable Change | Breaking | BREAKING 🔴 |
 | [77](case77_detail_templated_base_changed/README.md) | Internal `detail::` Templated Base Class Layout Change | Breaking | BREAKING 🔴 |
-| [78](case78_task_arena_attach_tag/README.md) | task_arena::attach Tag Replaces Enum (oneTBB regression suite) | Breaking | BREAKING 🔴 |
+| [78](case78_task_arena_attach_tag/README.md) | task_arena::attach Tag Replaces Enum | Breaking | BREAKING 🔴 |
 | [79](case79_missing_template_instantiation/README.md) | Missing Template Instantiation in Shipped Binary | Breaking | BREAKING 🔴 |
 | [80](case80_pimpl_shared_to_unique/README.md) | Pimpl Alias `shared_ptr` → `unique_ptr` | Breaking | BREAKING 🔴 |
 | [81](case81_serialization_tag_reassigned/README.md) | Serialization Tag ID Reassigned (silent data corruption) | Breaking | BREAKING 🔴 |
@@ -132,7 +132,7 @@ Some policy-escalated source/contract breaks (notably case30, case35) may keep i
 | [87](case87_default_template_arg_changed/README.md) | Default Template Argument Changed | Breaking | BREAKING 🔴 |
 | [88](case88_cpo_kind_changed/README.md) | CPO Kind Changed | Breaking | BREAKING 🔴 |
 | [89](case89_inline_accessor_renamed_pimpl_member/README.md) | Inline Accessor References Renamed Pimpl Member | Breaking | BREAKING 🔴 |
-| [94](case94_empty_tag_gained_state/README.md) | Empty Tag Gained State (oneTBB partitioner shape) | Breaking | BREAKING 🔴 |
+| [94](case94_empty_tag_gained_state/README.md) | Empty Tag Gained State | Breaking | BREAKING 🔴 |
 | [95](case95_allocator_nested_typedef_removed/README.md) | Allocator Nested-Typedef Removed (member_name suppression demo) | Breaking | BREAKING 🔴 |
 | [96](case96_hidden_friend_removed/README.md) | Hidden Friend Operator Removed (castxml `befriending` detection) | API Break | API_BREAK 🟠 |
 | [97](case97_api_depends_on_consumer_env/README.md) | Public API Depends on Consumer Build Environment | Quality | COMPATIBLE 🟡 (known gap) |
@@ -140,16 +140,16 @@ Some policy-escalated source/contract breaks (notably case30, case35) may keep i
 | [99](case99_experimental_graduated/README.md) | experimental → stable Graduation | Addition | COMPATIBLE 🟢 |
 | [100](case100_experimental_removed_without_replacement/README.md) | experimental:: Removed Without Replacement | Breaking | BREAKING 🔴 |
 | [101](case101_inline_namespace_version_bumped/README.md) | Inline Namespace Version Bumped | Breaking | BREAKING 🔴 |
-| [102](case102_frozen_runtime_signature_changed/README.md) | Frozen Runtime Signature Changed (oneTBB `detail::r1` shape) | Breaking | BREAKING 🔴 |
+| [102](case102_frozen_runtime_signature_changed/README.md) | Frozen Runtime Signature Changed (frozen `detail::` ABI boundary) | Breaking | BREAKING 🔴 |
 | [103](case103_toolchain_flag_drift/README.md) | Toolchain Flag Drift (ABI-affecting compiler flags differ via `DW_AT_producer`) | Quality | COMPATIBLE 🟢 |
 | [104](case104_glibcxx_dual_abi_flip/README.md) | libstdc++ Dual-ABI Flip (`_GLIBCXX_USE_CXX11_ABI` toggle) | Breaking | BREAKING 🔴 |
 | [105](case105_concept_tightening/README.md) | Concept Tightening (C++20, known gap) | Addition | COMPATIBLE 🟢 (known gap) |
 | [106](case106_ctor_became_explicit/README.md) | Conversion Operator Became `explicit` | API Break | API_BREAK 🟠 |
 | [107](case107_task_scheduler_init_removed/README.md) | `task_scheduler_init` Removed (oneTBB 2021.1) | Breaking | BREAKING 🔴 |
 | [108](case108_task_class_removed/README.md) | `task` Class Removed (oneTBB 2021.1) | Breaking | BREAKING 🔴 |
-| [109](case109_flow_graph_policy_renames/README.md) | flow::graph Policy Tag Renames (oneTBB regression suite) | Breaking | BREAKING 🔴 |
-| [110](case110_concurrent_unordered_map_api_drift/README.md) | concurrent_unordered_map API Drift (oneTBB regression suite) | Breaking | BREAKING 🔴 |
-| [111](case111_enumerable_thread_specific_lambda_ambiguity/README.md) | enumerable_thread_specific Lambda-Init Ambiguity (oneTBB regression suite) | Addition | COMPATIBLE 🟢 (known gap) |
+| [109](case109_flow_graph_policy_renames/README.md) | flow::graph Policy Tag Renames | Breaking | BREAKING 🔴 |
+| [110](case110_concurrent_unordered_map_api_drift/README.md) | concurrent_unordered_map API Drift | Breaking | BREAKING 🔴 |
+| [111](case111_enumerable_thread_specific_lambda_ambiguity/README.md) | enumerable_thread_specific Lambda-Init Ambiguity | Addition | COMPATIBLE 🟢 (known gap) |
 
 ---
 

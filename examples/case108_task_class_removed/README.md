@@ -1,4 +1,4 @@
-# Case 108: `task` Class Removed (oneTBB historical break — vtable angle)
+# Case 108: `task` Class Removed (historical ABI break — vtable angle)
 
 **Category:** Polymorphic Class Removal | **Verdict:** 🔴 BREAKING
 
@@ -46,9 +46,9 @@ g++ -std=c++17 -I"$tmp" -c "$tmp/app.cpp" -o "$tmp/app.o"
 # error: 'mylib_spawn_dummy' is not a member of 'mylib'
 ```
 
-## Why this is a oneTBB-flavored break
+## Why this matters
 
-Classic TBB's `tbb::task` low-level API was the recommended way to write
+This fixture mirrors a real historical ABI break. Classic TBB's `tbb::task` low-level API was the recommended way to write
 parallel algorithms before `parallel_invoke` / `task_group`. The class was
 fully removed in oneTBB 2021.1 along with `task_scheduler_init` (case107).
 

@@ -62,7 +62,7 @@ See [Getting Started](https://napetrov.github.io/abicheck/getting-started/) for 
 | I want to… | Use |
 |------------|-----|
 | Check whether a library upgrade breaks existing consumers | [`abicheck compare`](https://napetrov.github.io/abicheck/user-guide/cli-usage/) |
-| Compare **a multi-library release** (oneDAL-style) as a single bundle | [`abicheck compare-release`](https://napetrov.github.io/abicheck/user-guide/multi-binary/) |
+| Compare **a multi-library release** (a co-versioned bundle, e.g. oneDAL) as a single bundle | [`abicheck compare-release`](https://napetrov.github.io/abicheck/user-guide/multi-binary/) |
 | Check whether **my application** breaks with a new library version | [`abicheck appcompat`](https://napetrov.github.io/abicheck/user-guide/appcompat/) |
 | Validate a binary's full dependency stack across two sysroots | [`abicheck stack-check`](https://napetrov.github.io/abicheck/user-guide/cli-usage/) |
 | Drop-in replacement for `abi-compliance-checker` | [`abicheck compat`](https://napetrov.github.io/abicheck/user-guide/from-abicc/) |

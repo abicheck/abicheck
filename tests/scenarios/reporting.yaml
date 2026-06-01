@@ -26,7 +26,7 @@ scenarios:
     persona: CI engineer / automation
     narrative: >
       Exit codes alone are lossy (exit 0 covers NO_CHANGE / COMPATIBLE /
-      COMPATIBLE_WITH_RISK), so any non-trivial gate — including the oneDAL
+      COMPATIBLE_WITH_RISK), so any non-trivial gate — including the bundle
       strict gate — keys off the JSON report instead. That report is a stable,
       versioned contract: it must carry report_schema_version, a top-level
       verdict, and a per-finding changes list a decision script can branch on.

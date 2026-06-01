@@ -98,7 +98,7 @@ class Probe:
         lines = []
         for h in self.headers:
             # Bare angle/quote characters are accepted as-is; the
-            # YAML author writes ``<oneapi/dpl/algorithm>`` or
+            # YAML author writes ``<acme/lib/algorithm>`` or
             # ``"my_header.h"`` exactly as they would in C++.
             if h.startswith("<") or h.startswith('"'):
                 lines.append(f"#include {h}")

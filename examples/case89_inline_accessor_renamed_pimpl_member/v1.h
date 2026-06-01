@@ -1,6 +1,6 @@
 // case89 v1 — public inline getter touches a pimpl member by name.
 //
-// Pattern (oneDAL-style):
+// Pattern (pimpl idiom, as used by e.g. oneDAL):
 //
 //   class descriptor {
 //   public:

@@ -10,7 +10,7 @@
 | **Detected `ChangeKind`s** | `func_removed`, `type_removed`, `enum_member_removed` |
 | **Source files** | `examples/case78_task_arena_attach_tag/` |
 
-**Category:** ABI + source break / oneTBB regression suite | **Verdict:** 🔴 BREAKING
+**Category:** ABI + source break / regression suite | **Verdict:** 🔴 BREAKING
 
 ## What breaks
 
@@ -20,7 +20,7 @@ are replaced by an empty tag struct `task_arena::attach` and a
 old constructor's mangled name is gone, and consumer source that wrote
 `task_arena ta(attach_to_current);` no longer compiles.
 
-## Why this is in the oneTBB regression suite
+## Why this matters
 
 Mirrors a documented oneTBB API move from enum-value-based mode
 selection to tag-type-based selection. The motivation upstream was to

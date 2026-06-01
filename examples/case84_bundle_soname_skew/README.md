@@ -76,7 +76,7 @@ The underlying cohort detector can also be driven directly:
 
 ```bash
 python3 - <<'PY'
-from abicheck.diff_onedal import bundle_members_from_directory, detect_bundle_soname_skew
+from abicheck.diff_cpp_patterns import bundle_members_from_directory, detect_bundle_soname_skew
 old = bundle_members_from_directory('examples/case84_bundle_soname_skew/v1')
 new = bundle_members_from_directory('examples/case84_bundle_soname_skew/v2')
 for finding in detect_bundle_soname_skew(old, new, cohort_prefix='libonedal_'):
@@ -98,7 +98,7 @@ one did not."
 `compare-release` builds a bundle snapshot of each release directory and
 runs the bundle layer (`abicheck/bundle.py`). When one or more cohorts are
 declared via `--bundle-cohort PREFIX`, `_detect_soname_skew` delegates to
-`abicheck.diff_onedal.detect_bundle_soname_skew` for each declared cohort:
+`abicheck.diff_cpp_patterns.detect_bundle_soname_skew` for each declared cohort:
 it extracts each member's SONAME major from both releases and emits one
 `BUNDLE_SONAME_SKEW` finding when the cohort has mixed soname deltas (some
 bumped, some not). The finding is classified `BREAKING`, so the bundle (and

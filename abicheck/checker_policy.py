@@ -360,12 +360,12 @@ class ChangeKind(str, Enum):
     # ── Internal-namespace leak via public API ───────────────────────────
     # A type that lives in an "internal" namespace (e.g. ::detail::, ::impl::,
     # ::internal::) has changed and is reachable from a public exported type
-    # or symbol. This is the oneDAL-style break where users of the public
-    # API still observe ABI differences because the public type inherits
+    # or symbol. This is the detail-namespace leak break where users of the
+    # public API still observe ABI differences because the public type inherits
     # from / embeds-by-value / uses-as-template-argument the internal type.
     INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API = "internal_type_leaks_via_public_api"
 
-    # ── oneDAL-shaped breaks added in case77–case89 ──────────────────────
+    # ── library-family-shaped breaks added in case77–case89 ──────────────────────
     # See examples/case79_missing_template_instantiation/README.md
     INSTANTIATION_MISSING_FROM_BINARY = "instantiation_missing_from_binary"
     # See examples/case81_serialization_tag_reassigned/README.md
@@ -448,7 +448,7 @@ class ChangeKind(str, Enum):
     HIDDEN_FRIEND_REMOVED = "hidden_friend_removed"
     HIDDEN_FRIEND_ADDED = "hidden_friend_added"
 
-    # ── oneAPI / modern-C++ ABI hazards (gap analysis) ──────────────────────
+    # ── modern-C++ / numerical-library ABI hazards (gap analysis) ───────────
     INTEGER_MODEL_CHANGED = "integer_model_changed"
     ABI_TAG_CHANGED = "abi_tag_changed"
     CHAR8T_MIGRATION = "char8t_migration"

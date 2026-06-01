@@ -131,7 +131,7 @@ def _qualified_function_name(name: str, mangled: str) -> str:
     """Return the best-effort qualified declaration name for a function.
 
     Header-derived snapshots populate ``Function.name`` with the
-    qualified declaration name (``oneapi::dpl::sort``). ELF-only mode
+    qualified declaration name (``acme::lib::sort``). ELF-only mode
     leaves ``Function.name`` set to the mangled string; in that case we
     fall back to lazy demangling of the mangled name. We import
     ``demangle_batch`` lazily so that snapshots containing no functions

@@ -105,7 +105,7 @@ def _safe_index(snap: AbiSnapshot) -> bool:
 def _matches_suppression_key(symbol: str, key: str) -> bool:
     """Return ``True`` iff *symbol* is suppressed by *key*.
 
-    Used by :class:`DetectOneDALPatterns` to match per-symbol
+    Used by :class:`DetectCppPatterns` to match per-symbol
     ``Change.symbol`` strings against the suppression set built by the
     grouped SYCL / ISA detectors.
 
@@ -376,11 +376,11 @@ class EnrichAffectedSymbols:
         return changes
 
 
-class DetectOneDALPatterns:
-    """Run the oneDAL-shaped detectors added in PR #239 (case77–case89).
+class DetectCppPatterns:
+    """Run the C++ library-family detectors added in PR #239 (case77–case89).
 
-    Each individual detector lives in :mod:`abicheck.diff_onedal`; this
-    pipeline step wires them together, dedupes findings against the
+    Each individual detector lives in :mod:`abicheck.diff_cpp_patterns`;
+    this pipeline step wires them together, dedupes findings against the
     existing change list, and respects user suppression.
 
     Detectors run:
@@ -395,14 +395,14 @@ class DetectOneDALPatterns:
     * ``detect_inline_body_renamed_member``
     """
 
-    name = "detect_onedal_patterns"
+    name = "detect_cpp_patterns"
 
     def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:
         from .checker_policy import ChangeKind
 
         # Generic detectors live in dedicated modules after PR-D; the
-        # remaining oneDAL-shaped ones stay in diff_onedal.
-        from .diff_onedal import (
+        # remaining library-family ones stay in diff_cpp_patterns.
+        from .diff_cpp_patterns import (
             detect_cpu_dispatch_isa_dropped,
             detect_default_template_arg_changed,
             detect_inline_body_renamed_member,
@@ -804,11 +804,11 @@ DEFAULT_PIPELINE = PostProcessingPipeline(
         FilterRedundant(),
         EnrichAffectedSymbols(),
         DetectInternalLeaks(),
-        DetectOneDALPatterns(),
+        DetectCppPatterns(),
         DetectNamespacePatterns(),
         DetectTemplatePatterns(),
         # Runs last so it can tag both raw findings and the synthetic
-        # overlays added by DetectInternalLeaks / DetectOneDALPatterns.
+        # overlays added by DetectInternalLeaks / DetectCppPatterns.
         EscalateFrozenNamespaceViolations(),
     ]
 )

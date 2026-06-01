@@ -26,10 +26,11 @@ mangled names from both castxml and DWARF, while constructors only mangle
 via DWARF — a quirk that would otherwise prevent integration tests from
 exercising the detector through the default castxml dump path.
 
-## Why this is a oneTBB-flavored break
+## Why this is a breaking change
 
-oneTBB handle types (`task_arena`, `task_group`, `global_control`) frequently
-wrap a primitive (concurrency, version, count) and expose conversions to/from
+Handle types that wrap a primitive — for example oneTBB's `task_arena`,
+`task_group`, and `global_control` (concurrency, version, count) — frequently
+expose conversions to/from
 the underlying integer. Tightening these with `explicit` per the modern C++
 Core Guidelines is a tempting cleanup, but it silently breaks every consumer
 that used the implicit conversion at a function-call argument boundary or

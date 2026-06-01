@@ -14,8 +14,9 @@
 
 """Integer-model (LP64 <-> ILP64) switch detection.
 
-oneMKL and other numerical libraries ship two integer interfaces: an LP64 build
-where ``MKL_INT`` is 32-bit (``int``) and an ILP64 build where ``MKL_INT`` is
+Numerical libraries (for example a BLAS/LAPACK implementation such as oneMKL)
+often ship two integer interfaces: an LP64 build where the integer typedef
+(e.g. ``MKL_INT``) is 32-bit (``int``) and an ILP64 build where it is
 64-bit (``long`` / ``int64_t``). Switching the interface flips the width of a
 large fraction of public integer parameters/returns at once. This is detected
 as a single high-level diagnostic, mirroring the libstdc++ dual-ABI flip

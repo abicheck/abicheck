@@ -57,7 +57,7 @@ children.
 ## How abicheck detects it
 
 After the per-symbol removal pass, the new detector
-(`abicheck/diff_onedal.py::detect_sycl_overload_set_removal`) groups removed symbols by their
+(`abicheck/diff_cpp_patterns.py::detect_sycl_overload_set_removal`) groups removed symbols by their
 demangled *unqualified* name and parameter list-minus-first-arg.
 When ≥ K removed siblings share an unqualified name with a surviving
 non-SYCL overload AND the removed one's first parameter type contains

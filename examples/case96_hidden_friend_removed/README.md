@@ -14,12 +14,13 @@ v1's header fails to compile against v2's. The library's `.so` is byte-
 identical (the inline friend never had a public symbol to remove), so the
 break is invisible to any binary-only diff tool.
 
-## Why this is a oneTBB-flavored break
+## Why this is a breaking change
 
 Hidden friends are the idiomatic C++17+ way to declare ADL-only
 operators on a type (`operator==`, `operator<<`, `swap`, etc.) without
-polluting the surrounding namespace. oneTBB, oneDAL, Boost, and the
-standard library all use them extensively. Removing one looks like a
+polluting the surrounding namespace — an idiom used widely across C++
+libraries (for example oneTBB, oneDAL, Boost, and the standard library).
+Removing one looks like a
 "cosmetic header cleanup" that the maintainer believes is binary-safe —
 which it *is*, at the link layer. It's the source-recompile that explodes.
 
