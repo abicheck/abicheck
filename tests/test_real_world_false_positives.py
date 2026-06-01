@@ -256,3 +256,23 @@ def test_stdlib_size_change_is_filtered_for_a_normal_library():
     ])
     result = compare(old, new)
     assert result.verdict not in (Verdict.BREAKING,)
+
+
+def test_stdlib_union_field_churn_is_filtered_for_a_normal_library():
+    """std:: *union* field churn must be filtered too — the union-specific diff
+    path must apply the same surface filter as _diff_types (Codex review #273)."""
+    std_union = "std::__detail::_Variant_storage<char, int>"  # a std:: union
+    old = _elf_snapshot(name="libtbb.so.12", types=[
+        RecordType(name=std_union, kind="union", is_union=True, size_bits=64,
+                   fields=[TypeField(name="_M_first", type="char", offset_bits=0),
+                           TypeField(name="_M_rest", type="int", offset_bits=0)]),
+    ])
+    new = _elf_snapshot(name="libtbb.so.12", types=[
+        RecordType(name=std_union, kind="union", is_union=True, size_bits=64,
+                   fields=[TypeField(name="_M_first", type="char", offset_bits=0)]),  # field removed
+    ])
+    result = compare(old, new)
+    assert result.verdict not in (Verdict.BREAKING,), (
+        f"std:: union field churn in a non-runtime library must stay filtered; "
+        f"breaking symbols: {_breaking_symbols(result)}"
+    )

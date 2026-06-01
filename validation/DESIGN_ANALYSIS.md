@@ -32,10 +32,12 @@ GCC (9.4 vs 11.3 + LTO), which emit different static-member DIEs.
 **Architectural fix (IMPLEMENTED).** Extend the single-source-of-truth predicate
 in `model.py` to `is_non_abi_surface_type()` — a superset of
 `is_compiler_internal_type` adding standard-library/runtime namespace prefixes
-(`std::`, `__gnu_cxx::`, `__cxxabiv1::`, `__cxx11::`). Apply it where the old
-predicate was applied (`diff_types._diff_types` map construction). One predicate,
-used by both the differ and (future) the DWARF extractor, keeps "what is surface"
-consistent.
+(`std::`, `__gnu_cxx::`, `__cxxabiv1::`, `__cxx11::`). Apply it via the shared
+`diff_types._is_abi_surface_type()` helper in **every** type-level detector that
+builds a map from `old.types`/`new.types` — records, unions, field-qualifier,
+field-rename, type-kind, and reserved-field diffs — so the filter cannot be
+bypassed by an alternate map-construction path (Codex review on PR #273). One
+predicate keeps "what is surface" consistent across the whole differ.
 
 **Guard rail.** The std:: exclusion is scoped: when the inspected DSO *is* the
 C++ runtime (`libstdc++`/`libc++`/`libc++abi`/`libsupc++`, via

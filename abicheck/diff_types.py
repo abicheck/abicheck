@@ -35,21 +35,33 @@ from .model import is_cxx_runtime_library as _is_cxx_runtime_library
 from .model import is_non_abi_surface_type as _is_non_abi_surface_type
 
 
+def _exclude_stdlib_namespaces(old: AbiSnapshot, new: AbiSnapshot) -> bool:
+    """Whether ``std::``/runtime namespaces are leaked dependencies (filter them)
+    rather than the library's own surface.  False only when the inspected DSO IS
+    the C++ runtime (libstdc++ / libc++), where those types ARE the surface."""
+    return not (
+        _is_cxx_runtime_library(old.library) or _is_cxx_runtime_library(new.library)
+    )
+
+
+def _is_abi_surface_type(t: RecordType, *, exclude_stdlib: bool) -> bool:
+    """True if record *t* is part of the inspected library's ABI surface.
+
+    Shared by every type-level detector (records, unions, field/kind/reserved
+    diffs) so std::/anonymous filtering (FP-1/FP-2) is applied consistently and
+    cannot be bypassed via an alternate map-construction path.
+    """
+    return not _is_non_abi_surface_type(t.name, exclude_stdlib_namespaces=exclude_stdlib)
+
+
 @registry.detector("types")
 def _diff_types(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     changes: list[Change] = []
     # Include ALL types (including unions) for size/alignment/base/vtable checks.
     # TYPE_FIELD_* for unions is skipped below — handled by _diff_unions() instead.
-    # When the inspected DSO *is* the C++ runtime (libstdc++ / libc++), std::
-    # records are its own ABI surface and must NOT be filtered out.
-    keep_stdlib = _is_cxx_runtime_library(old.library) or _is_cxx_runtime_library(new.library)
-    excl = not keep_stdlib
-
-    def _surface(t: RecordType) -> bool:
-        return not _is_non_abi_surface_type(t.name, exclude_stdlib_namespaces=excl)
-
-    old_map = {t.name: t for t in old.types if _surface(t)}
-    new_map = {t.name: t for t in new.types if _surface(t)}
+    excl = _exclude_stdlib_namespaces(old, new)
+    old_map = {t.name: t for t in old.types if _is_abi_surface_type(t, exclude_stdlib=excl)}
+    new_map = {t.name: t for t in new.types if _is_abi_surface_type(t, exclude_stdlib=excl)}
 
     for name, t_old in old_map.items():
         t_new = new_map.get(name)
@@ -618,8 +630,9 @@ def _diff_method_qualifiers(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
 @registry.detector("unions")
 def _diff_unions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     changes: list[Change] = []
-    old_unions = {t.name: t for t in old.types if t.is_union}
-    new_unions = {t.name: t for t in new.types if t.is_union}
+    excl = _exclude_stdlib_namespaces(old, new)
+    old_unions = {t.name: t for t in old.types if t.is_union and _is_abi_surface_type(t, exclude_stdlib=excl)}
+    new_unions = {t.name: t for t in new.types if t.is_union and _is_abi_surface_type(t, exclude_stdlib=excl)}
 
     for name, t_old in old_unions.items():
         if name not in new_unions:
@@ -851,8 +864,9 @@ def _check_field_qualifier_pair(
 def _diff_field_qualifiers(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """Detect field-level const/volatile/mutable qualifier changes."""
     changes: list[Change] = []
-    old_map = {t.name: t for t in old.types if not t.is_union}
-    new_map = {t.name: t for t in new.types if not t.is_union}
+    excl = _exclude_stdlib_namespaces(old, new)
+    old_map = {t.name: t for t in old.types if not t.is_union and _is_abi_surface_type(t, exclude_stdlib=excl)}
+    new_map = {t.name: t for t in new.types if not t.is_union and _is_abi_surface_type(t, exclude_stdlib=excl)}
 
     for name, t_old in old_map.items():
         t_new = new_map.get(name)
@@ -874,8 +888,9 @@ def _diff_field_qualifiers(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
 def _diff_field_renames(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """Detect field renames: same offset+type, different name."""
     changes: list[Change] = []
-    old_map = {t.name: t for t in old.types if not t.is_union}
-    new_map = {t.name: t for t in new.types if not t.is_union}
+    excl = _exclude_stdlib_namespaces(old, new)
+    old_map = {t.name: t for t in old.types if not t.is_union and _is_abi_surface_type(t, exclude_stdlib=excl)}
+    new_map = {t.name: t for t in new.types if not t.is_union and _is_abi_surface_type(t, exclude_stdlib=excl)}
 
     for name, t_old in old_map.items():
         t_new = new_map.get(name)
@@ -947,8 +962,9 @@ def _diff_var_values(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
 def _diff_type_kind_changes(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """Detect struct↔union kind changes (ABICC: StructToUnion / DataType_Type)."""
     changes: list[Change] = []
-    old_map = {t.name: t for t in old.types}
-    new_map = {t.name: t for t in new.types}
+    excl = _exclude_stdlib_namespaces(old, new)
+    old_map = {t.name: t for t in old.types if _is_abi_surface_type(t, exclude_stdlib=excl)}
+    new_map = {t.name: t for t in new.types if _is_abi_surface_type(t, exclude_stdlib=excl)}
 
     for name, t_old in old_map.items():
         t_new = new_map.get(name)
@@ -979,8 +995,9 @@ def _diff_reserved_fields(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     both offset AND type match to avoid false positives (M5 fix).
     """
     changes: list[Change] = []
-    old_map = {t.name: t for t in old.types if not t.is_union}
-    new_map = {t.name: t for t in new.types if not t.is_union}
+    excl = _exclude_stdlib_namespaces(old, new)
+    old_map = {t.name: t for t in old.types if not t.is_union and _is_abi_surface_type(t, exclude_stdlib=excl)}
+    new_map = {t.name: t for t in new.types if not t.is_union and _is_abi_surface_type(t, exclude_stdlib=excl)}
 
     for name, t_old in old_map.items():
         t_new = new_map.get(name)
