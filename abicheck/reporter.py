@@ -38,7 +38,7 @@ from .checker_policy import (
 from .checker_policy import (
     policy_kind_sets as _policy_kind_sets,
 )
-from .report_summary import build_summary
+from .report_summary import build_summary, surface_breakdown
 from .schemas import REPORT_SCHEMA_VERSION
 from .semver import recommend_release
 
@@ -615,6 +615,17 @@ def to_json(
         "binary_compatibility_pct": round(summary.binary_compatibility_pct, 1),
         "affected_pct": round(summary.affected_pct, 1),
     }
+    # ABI surface breakdown of the breaking set: how much of the breaking count
+    # is RTTI/internal-namespace churn vs genuine public-API breaks. Additive,
+    # machine-facing; only present when there are breaking changes.
+    _bd = surface_breakdown(result.breaking)
+    if _bd.rtti or _bd.internal:
+        d["abi_surface_breakdown"] = {
+            "breaking_total": _bd.total,
+            "public": _bd.public,
+            "rtti_churn": _bd.rtti,
+            "internal_churn": _bd.internal,
+        }
     # Release recommendation (semver bump + soname action) — additive, machine-facing.
     d["release_recommendation"] = recommend_release(result).to_dict()
     effective_policy = result.policy or "strict_abi"
@@ -1138,6 +1149,20 @@ def to_markdown(
         f"| Compatible changes | {len(result.compatible)} |",
         "",
     ]
+
+    # When most of the breaking count is RTTI / internal-namespace churn, say so
+    # up front — otherwise a huge count from a library lacking -fvisibility=hidden
+    # buries the handful of genuine public-API breaks.
+    _bd = surface_breakdown(breaking)
+    if _bd.rtti or _bd.internal:
+        lines += [
+            f"> ℹ️ **{_bd.rtti + _bd.internal} of {_bd.total} breaking findings are "
+            f"internal/RTTI churn** ({_bd.rtti} RTTI, {_bd.internal} "
+            "internal-namespace) — typically a missing `-fvisibility=hidden`, not "
+            f"public-API breaks. Genuine public-surface breaking findings: "
+            f"**{_bd.public}**.",
+            "",
+        ]
 
     _append_confidence_section(lines, result)
 

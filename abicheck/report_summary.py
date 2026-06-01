@@ -22,6 +22,53 @@ from dataclasses import dataclass
 from .checker import _BREAKING_KINDS, DiffResult
 from .checker_policy import HasKind
 
+# RTTI artifact prefixes (Itanium ABI): vtables, VTT, typeinfo objects/names,
+# and virtual/covariant thunks. Churn in these mirrors churn in their owning
+# type rather than representing independent public-API breaks.
+_RTTI_PREFIXES = ("_ZTV", "_ZTT", "_ZTI", "_ZTS", "_ZTc", "_ZTh", "_ZTv")
+# Length-prefixed Itanium namespace components for the conventional internal
+# namespaces (``<len><name>``). Matching the length prefix avoids false hits on
+# unrelated identifiers that merely contain the substring.
+_INTERNAL_COMPONENTS = ("8internal", "6detail", "4impl", "8__detail", "5_impl")
+
+
+def classify_symbol_origin(symbol: str) -> str:
+    """Best-effort origin of a (usually mangled) symbol: 'rtti'/'internal'/'public'.
+
+    Used to explain why a large C++ ``breaking`` count is dominated by churn in
+    RTTI artifacts or internal-namespace symbols rather than genuine public-API
+    breaks (a common pattern in libraries built without ``-fvisibility=hidden``).
+    """
+    if symbol.startswith(_RTTI_PREFIXES):
+        return "rtti"
+    if any(comp in symbol for comp in _INTERNAL_COMPONENTS):
+        return "internal"
+    return "public"
+
+
+@dataclass(frozen=True)
+class SurfaceBreakdown:
+    """Split of a change set by symbol origin (see ``classify_symbol_origin``)."""
+    total: int
+    rtti: int
+    internal: int
+    public: int
+
+
+def surface_breakdown(changes: Sequence[HasKind]) -> SurfaceBreakdown:
+    """Classify *changes* by the origin of their symbol."""
+    rtti = internal = public = 0
+    for c in changes:
+        origin = classify_symbol_origin(getattr(c, "symbol", "") or "")
+        if origin == "rtti":
+            rtti += 1
+        elif origin == "internal":
+            internal += 1
+        else:
+            public += 1
+    return SurfaceBreakdown(total=rtti + internal + public, rtti=rtti,
+                            internal=internal, public=public)
+
 
 @dataclass(frozen=True)
 class ReportSummary:
