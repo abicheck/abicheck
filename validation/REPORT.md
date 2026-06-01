@@ -288,14 +288,19 @@ bigger than anything here).
 
 ## 9. Recommendations for the next planning round (prioritized)
 
-**P0 — Stop scoring non-ABI types by default.**
-- Exclude `std::`, `__gnu_cxx::`, `__cxxabiv1::`, and double-underscore /
-  reserved-name types from the public surface unless a header explicitly exposes
-  them. (FP-1, FP-2)
-- Never emit `type_*`/`typedef_*` findings for **anonymous** (`<lambda()>`,
-  unnamed) types. (FP-2)
-- Treat `static constexpr`/static-member presence in DWARF as non-signal — its
-  emission depends on compiler/LTO, not ABI. (FP-1)
+> **Code-level root cause + architectural fix evaluation for every item below is
+> in `validation/DESIGN_ANALYSIS.md`, and each scenario is encoded as a
+> regression test in `tests/test_real_world_false_positives.py`.**
+
+**P0 — Stop scoring non-ABI types by default.** ✅ *Implemented in this PR for the
+universal cases (FP-1, FP-2).*
+- Exclude `std::`, `__gnu_cxx::`, `__cxxabiv1::`, `__cxx11::` and anonymous
+  (`<lambda>`, unnamed) types from type diffing via the single-source predicate
+  `model.is_non_abi_surface_type()` (used by `diff_types`). Measured: oneTBB
+  216→168 breaking, zero suite regressions.
+- *Still open:* library-internal namespaces like `tbb::detail` (FP-1b) — left to
+  the policy/frozen-namespace layer, not hardcoded; treat static-member DIE
+  presence as non-signal.
 
 **P0 — Make mixed DWARF↔stripped safe.**
 - When one side lacks DWARF, **do not** report `type_removed`/`typedef_removed`/

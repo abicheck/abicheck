@@ -31,6 +31,7 @@ from .model import (
     canonicalize_type_name,
 )
 from .model import is_compiler_internal_type as _is_compiler_internal_type
+from .model import is_non_abi_surface_type as _is_non_abi_surface_type
 
 
 @registry.detector("types")
@@ -38,8 +39,8 @@ def _diff_types(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     changes: list[Change] = []
     # Include ALL types (including unions) for size/alignment/base/vtable checks.
     # TYPE_FIELD_* for unions is skipped below — handled by _diff_unions() instead.
-    old_map = {t.name: t for t in old.types if not _is_compiler_internal_type(t.name)}
-    new_map = {t.name: t for t in new.types if not _is_compiler_internal_type(t.name)}
+    old_map = {t.name: t for t in old.types if not _is_non_abi_surface_type(t.name)}
+    new_map = {t.name: t for t in new.types if not _is_non_abi_surface_type(t.name)}
 
     for name, t_old in old_map.items():
         t_new = new_map.get(name)

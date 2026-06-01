@@ -47,6 +47,43 @@ def is_compiler_internal_type(name: str) -> bool:
     """Return True if *name* is a compiler internal type that should be excluded."""
     return bool(name) and name in COMPILER_INTERNAL_TYPES
 
+
+# Standard-library / runtime namespaces whose *type layout* is owned by the
+# toolchain (libstdc++ / libc++ / Itanium C++ ABI), not by the library under
+# inspection.  These types leak into DWARF when a library inlines STL usage; the
+# layout the compiler happens to emit (and which static-member DIEs it keeps)
+# varies by compiler/LTO, so diffing them produces toolchain-artifact false
+# positives rather than real ABI changes (validation/REPORT.md FP-1).
+_STDLIB_TYPE_NAMESPACE_PREFIXES: tuple[str, ...] = (
+    "std::", "__gnu_cxx::", "__cxxabiv1::", "__cxx11::",
+)
+
+# Substrings that mark an anonymous / local type with no stable cross-version
+# ABI identity — lambdas and unnamed struct/union/enum (validation/REPORT.md
+# FP-2). gcc renders these as "<lambda...>", "{lambda...}", "(anonymous ...)";
+# clang/llvm uses "(unnamed ...)".
+_ANONYMOUS_TYPE_MARKERS: tuple[str, ...] = (
+    "<lambda", "{lambda", "(anonymous", "(unnamed", "<unnamed",
+)
+
+
+def is_non_abi_surface_type(name: str) -> bool:
+    """Return True if *name* is a type that is never the inspected library's own
+    ABI surface and must be excluded from type diffing.
+
+    Superset of :func:`is_compiler_internal_type`, additionally covering
+    standard-library / runtime namespaces and anonymous (lambda / unnamed)
+    types.  Single source of truth so the DWARF extractor and the type differ
+    agree on what counts as surface.
+    """
+    if not name:
+        return False
+    if name in COMPILER_INTERNAL_TYPES:
+        return True
+    if name.startswith(_STDLIB_TYPE_NAMESPACE_PREFIXES):
+        return True
+    return any(marker in name for marker in _ANONYMOUS_TYPE_MARKERS)
+
 # ---------------------------------------------------------------------------
 # Type name canonicalization — normalise type names for reliable matching.
 # ---------------------------------------------------------------------------
