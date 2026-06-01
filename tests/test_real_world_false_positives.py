@@ -26,6 +26,8 @@ from abicheck.model import (
     TypeField,
     Variable,
     Visibility,
+    is_cxx_runtime_library,
+    is_non_abi_surface_type,
 )
 
 REPORT = "validation/REPORT.md / validation/DESIGN_ANALYSIS.md"
@@ -191,3 +193,66 @@ def test_stripped_new_side_does_not_fabricate_type_removals():
         f"types absent only because the new side is stripped must not read as "
         f"removals; breaking symbols: {_breaking_symbols(result)}"
     )
+
+
+# ---------------------------------------------------------------------------
+# FP-1 guard rail — the std:: exclusion must NOT hide breaks when the inspected
+#   DSO *is* the C++ runtime/standard library (libstdc++/libc++).  There std::
+#   types ARE the surface under test (Codex review on PR #273).
+# ---------------------------------------------------------------------------
+@pytest.mark.parametrize(
+    "library,expected",
+    [
+        ("libstdc++.so.6", True),
+        ("/opt/gcc/lib64/libstdc++.so.6", True),
+        ("libc++.so.1", True),
+        ("libc++abi.so.1", True),
+        ("libsupc++.a", True),
+        ("libtbb.so.12", False),
+        ("libfoo.so.1", False),
+        (None, False),
+        ("", False),
+    ],
+)
+def test_is_cxx_runtime_library(library, expected):
+    assert is_cxx_runtime_library(library) is expected
+
+
+def test_is_non_abi_surface_type_keeps_stdlib_when_requested():
+    std_type = "std::__cxx11::basic_string<char>"
+    # default: std:: excluded from a normal library's surface
+    assert is_non_abi_surface_type(std_type) is True
+    # opt-out: std:: kept when the runtime owns the namespace
+    assert is_non_abi_surface_type(std_type, exclude_stdlib_namespaces=False) is False
+    # anonymous + compiler-internal stay excluded regardless of the flag
+    assert is_non_abi_surface_type("<lambda()>", exclude_stdlib_namespaces=False) is True
+    assert is_non_abi_surface_type("__va_list_tag", exclude_stdlib_namespaces=False) is True
+
+
+def test_stdlib_size_change_is_breaking_when_target_is_the_runtime():
+    """A real std::basic_string size change in libstdc++ must NOT be hidden."""
+    std_string = "std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >"
+    old = _elf_snapshot(name="libstdc++.so.6", types=[
+        RecordType(name=std_string, kind="class", size_bits=256),
+    ])
+    new = _elf_snapshot(name="libstdc++.so.6", types=[
+        RecordType(name=std_string, kind="class", size_bits=512),  # layout actually changed
+    ])
+    result = compare(old, new)
+    assert result.verdict == Verdict.BREAKING, (
+        "a std:: type size change in libstdc++ itself is a real ABI break and "
+        "must not be filtered out"
+    )
+
+
+def test_stdlib_size_change_is_filtered_for_a_normal_library():
+    """The same std:: churn in a non-runtime library stays filtered (FP-1)."""
+    std_string = "std::__cxx11::basic_string<char>"
+    old = _elf_snapshot(name="libtbb.so.12", types=[
+        RecordType(name=std_string, kind="class", size_bits=256),
+    ])
+    new = _elf_snapshot(name="libtbb.so.12", types=[
+        RecordType(name=std_string, kind="class", size_bits=512),
+    ])
+    result = compare(old, new)
+    assert result.verdict not in (Verdict.BREAKING,)

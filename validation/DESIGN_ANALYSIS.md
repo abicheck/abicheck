@@ -37,10 +37,19 @@ predicate was applied (`diff_types._diff_types` map construction). One predicate
 used by both the differ and (future) the DWARF extractor, keeps "what is surface"
 consistent.
 
-**Measured impact.** oneTBB T1 `libtbb`: 216 → 168 breaking (std:: class
-eliminated). Full fast suite: 7044 passed, 0 regressions.
+**Guard rail.** The std:: exclusion is scoped: when the inspected DSO *is* the
+C++ runtime (`libstdc++`/`libc++`/`libc++abi`/`libsupc++`, via
+`model.is_cxx_runtime_library`), `std::` records are that library's own surface
+and are kept (`is_non_abi_surface_type(..., exclude_stdlib_namespaces=False)`),
+so a real `std::basic_string` size change in libstdc++ is still a break. Anonymous
+and compiler-internal exclusions always apply.
 
-**Test.** `test_stdlib_type_change_is_not_breaking` (passes).
+**Measured impact.** oneTBB T1 `libtbb`: 216 → 168 breaking (std:: class
+eliminated). Full fast suite: 7056 passed, 0 regressions.
+
+**Test.** `test_stdlib_type_change_is_not_breaking`,
+`test_stdlib_size_change_is_breaking_when_target_is_the_runtime`,
+`test_is_cxx_runtime_library`, `test_is_non_abi_surface_type_keeps_stdlib_when_requested`.
 
 **Residual / follow-up.** The remaining 168 are dominated by `tbb::detail`
 (library-internal). That is deliberately *not* hardcoded — see FP-1b.

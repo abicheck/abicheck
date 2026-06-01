@@ -67,7 +67,7 @@ _ANONYMOUS_TYPE_MARKERS: tuple[str, ...] = (
 )
 
 
-def is_non_abi_surface_type(name: str) -> bool:
+def is_non_abi_surface_type(name: str, *, exclude_stdlib_namespaces: bool = True) -> bool:
     """Return True if *name* is a type that is never the inspected library's own
     ABI surface and must be excluded from type diffing.
 
@@ -75,14 +75,36 @@ def is_non_abi_surface_type(name: str) -> bool:
     standard-library / runtime namespaces and anonymous (lambda / unnamed)
     types.  Single source of truth so the DWARF extractor and the type differ
     agree on what counts as surface.
+
+    *exclude_stdlib_namespaces* must be set to ``False`` when the inspected DSO
+    is itself the C++ runtime (libstdc++ / libc++): there ``std::`` /
+    ``__gnu_cxx::`` records ARE the library's own ABI surface, so suppressing
+    them would hide real breaks (see :func:`is_cxx_runtime_library`).
     """
     if not name:
         return False
     if name in COMPILER_INTERNAL_TYPES:
         return True
-    if name.startswith(_STDLIB_TYPE_NAMESPACE_PREFIXES):
+    if exclude_stdlib_namespaces and name.startswith(_STDLIB_TYPE_NAMESPACE_PREFIXES):
         return True
     return any(marker in name for marker in _ANONYMOUS_TYPE_MARKERS)
+
+
+# SONAME stems of the C++ runtime / standard-library DSOs.  When abicheck is
+# pointed at one of *these* libraries, std::/__gnu_cxx:: types are the surface
+# under test and must NOT be filtered out (Codex review on PR #273).
+_CXX_RUNTIME_LIB_STEMS: tuple[str, ...] = (
+    "libstdc++", "libc++abi", "libc++", "libsupc++",
+)
+
+
+def is_cxx_runtime_library(library: str | None) -> bool:
+    """Return True if *library* (a filename/SONAME like ``libstdc++.so.6``) is a
+    C++ runtime / standard-library DSO that owns the ``std::`` namespace."""
+    if not library:
+        return False
+    base = library.rsplit("/", 1)[-1]
+    return base.startswith(_CXX_RUNTIME_LIB_STEMS)
 
 # ---------------------------------------------------------------------------
 # Type name canonicalization — normalise type names for reliable matching.
