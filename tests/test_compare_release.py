@@ -896,6 +896,22 @@ class TestLockstepSonameCoupling:
         kinds = [c.kind for c in umbrella["_diff_result"].changes]
         assert ChangeKind.SONAME_BUMP_UNNECESSARY in kinds
 
+    def test_kept_when_release_worst_is_source_only_api_break(self):
+        # A SONAME bump is only justified by a *binary* ABI break; a source-only
+        # API_BREAK elsewhere must NOT suppress the relink-forcing warning.
+        from abicheck.checker import Change, ChangeKind, Verdict
+        from abicheck.cli_compare_release import _suppress_lockstep_soname_findings
+
+        umbrella = self._entry(
+            "libonedal.so", [
+                Change(ChangeKind.SONAME_BUMP_UNNECESSARY, "DT_SONAME", "bump"),
+            ], Verdict.COMPATIBLE,
+        )
+        n = _suppress_lockstep_soname_findings([umbrella], "API_BREAK", None)
+        assert n == 0
+        kinds = [c.kind for c in umbrella["_diff_result"].changes]
+        assert ChangeKind.SONAME_BUMP_UNNECESSARY in kinds
+
     def test_rewrites_per_library_json(self, tmp_path):
         from abicheck.checker import Change, ChangeKind, Verdict
         from abicheck.cli_compare_release import _suppress_lockstep_soname_findings

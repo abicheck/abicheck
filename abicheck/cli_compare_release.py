@@ -240,13 +240,16 @@ def _suppress_lockstep_soname_findings(
 
     A library only earns ``SONAME_BUMP_UNNECESSARY`` when *it* had no breaking
     change yet its SONAME was bumped. In a multi-library release where a sibling
-    or dependency genuinely broke, bumping every member's SONAME in lockstep is
-    the correct, intentional practice — so the per-library "unnecessary" signal
-    is a false positive at the release level. Mutates the affected per-library
-    results (and re-writes their JSON when ``output_dir`` is set) and returns the
-    number of findings suppressed.
+    or dependency suffered a genuine *binary* ABI break, bumping every member's
+    SONAME in lockstep is the correct, intentional practice — so the per-library
+    "unnecessary" signal is a false positive at the release level. Mutates the
+    affected per-library results (and re-writes their JSON when ``output_dir`` is
+    set) and returns the number of findings suppressed.
+
+    Only a binary-incompatible (``BREAKING``) finding justifies a SONAME bump; a
+    source-only ``API_BREAK`` does not, so the warning is preserved in that case.
     """
-    if worst_verdict not in ("API_BREAK", "BREAKING"):
+    if worst_verdict != "BREAKING":
         return 0
     from .checker_policy import ChangeKind
 
