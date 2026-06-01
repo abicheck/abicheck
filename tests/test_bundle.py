@@ -1331,3 +1331,255 @@ class TestCompareReleaseBundleE2E:
         )
         assert "Bundle (Cross-Library) Findings" in result.stdout
         assert "bundle_intra_dep_removed" in result.stdout
+
+    def _build_versioned_so(
+        self, release_dir: Path, src: Path, soname: str,
+    ) -> None:
+        """Compile *src* into ``release_dir`` with an explicit ``-soname``.
+
+        The output filename matches the soname (e.g. ``libfoo.so.2``) so the
+        cohort detector sees the on-disk versioned name. Skips on missing gcc.
+        """
+        import shutil
+        import subprocess
+        gcc = shutil.which("gcc")
+        if gcc is None:
+            pytest.skip("gcc unavailable; cannot build bundle E2E fixture")
+        out = release_dir / soname
+        res = subprocess.run(
+            [gcc, "-shared", "-fPIC", "-g", "-O0", str(src),
+             "-o", str(out), f"-Wl,-soname,{soname}"],
+            capture_output=True, text=True,
+        )
+        if res.returncode != 0:
+            pytest.fail(f"gcc failed for {soname}: {res.stderr}")
+
+    def test_compare_release_emits_soname_skew_for_case84(
+        self, tmp_path: Path,
+    ) -> None:
+        # Reproduce examples/case84_bundle_soname_skew end-to-end: core+dpc
+        # bump SONAME .so.1 -> .so.2 while thread (deliberately) lags at .so.1.
+        # Each library passes its own per-library check; the cohort invariant
+        # fails. compare-release must surface BUNDLE_SONAME_SKEW and BREAK.
+        import json as _json
+
+        from click.testing import CliRunner
+
+        from abicheck.cli import main
+
+        case_dir = (
+            Path(__file__).parent.parent
+            / "examples" / "case84_bundle_soname_skew"
+        )
+        old = tmp_path / "v1"
+        new = tmp_path / "v2"
+        old.mkdir()
+        new.mkdir()
+        # v1: all three at .so.1
+        self._build_versioned_so(old, case_dir / "onedal_core.c", "libonedal_core.so.1")
+        self._build_versioned_so(old, case_dir / "onedal_thread.c", "libonedal_thread.so.1")
+        self._build_versioned_so(old, case_dir / "onedal_dpc.c", "libonedal_dpc.so.1")
+        # v2: core + dpc bumped to .so.2, thread lags at .so.1
+        self._build_versioned_so(new, case_dir / "onedal_core.c", "libonedal_core.so.2")
+        self._build_versioned_so(new, case_dir / "onedal_thread.c", "libonedal_thread.so.1")
+        self._build_versioned_so(new, case_dir / "onedal_dpc.c", "libonedal_dpc.so.2")
+
+        result = CliRunner().invoke(
+            main,
+            ["compare-release", str(old), str(new), "--format", "json",
+             "--bundle-cohort", "libonedal_"],
+        )
+        # Bundle BREAKING → exit 4 (matches ground_truth.json case84 == BREAKING).
+        assert result.exit_code == 4, result.output
+        data = _json.loads(result.stdout)
+        assert data["bundle_verdict"] == "BREAKING"
+        kinds = {f["kind"] for f in data["bundle_findings"]}
+        assert "bundle_soname_skew" in kinds
+        skew = next(
+            f for f in data["bundle_findings"]
+            if f["kind"] == "bundle_soname_skew"
+        )
+        # The lagging member must be attributed.
+        assert any("libonedal_thread" in lib for lib in skew["affected_libraries"])
+
+    def test_compare_release_lockstep_bump_has_no_skew(
+        self, tmp_path: Path,
+    ) -> None:
+        # Negative control: when the whole cohort bumps in lockstep there is
+        # no skew finding (the detector must not fire on a clean release).
+        import json as _json
+
+        from click.testing import CliRunner
+
+        from abicheck.cli import main
+
+        case_dir = (
+            Path(__file__).parent.parent
+            / "examples" / "case84_bundle_soname_skew"
+        )
+        old = tmp_path / "v1"
+        new = tmp_path / "v2"
+        old.mkdir()
+        new.mkdir()
+        self._build_versioned_so(old, case_dir / "onedal_core.c", "libonedal_core.so.1")
+        self._build_versioned_so(old, case_dir / "onedal_thread.c", "libonedal_thread.so.1")
+        # v2: BOTH bump to .so.2 — lockstep, no skew.
+        self._build_versioned_so(new, case_dir / "onedal_core.c", "libonedal_core.so.2")
+        self._build_versioned_so(new, case_dir / "onedal_thread.c", "libonedal_thread.so.2")
+
+        result = CliRunner().invoke(
+            main,
+            ["compare-release", str(old), str(new), "--format", "json",
+             "--bundle-cohort", "libonedal_"],
+        )
+        data = _json.loads(result.stdout)
+        kinds = {f["kind"] for f in data.get("bundle_findings", [])}
+        assert "bundle_soname_skew" not in kinds
+
+    def test_compare_release_skew_is_opt_in(self, tmp_path: Path) -> None:
+        # Without --bundle-cohort the skew check never runs: the case84 skew
+        # layout must produce NO bundle_soname_skew finding (opt-in default).
+        import json as _json
+
+        from click.testing import CliRunner
+
+        from abicheck.cli import main
+
+        case_dir = (
+            Path(__file__).parent.parent
+            / "examples" / "case84_bundle_soname_skew"
+        )
+        old = tmp_path / "v1"
+        new = tmp_path / "v2"
+        old.mkdir()
+        new.mkdir()
+        self._build_versioned_so(old, case_dir / "onedal_core.c", "libonedal_core.so.1")
+        self._build_versioned_so(old, case_dir / "onedal_thread.c", "libonedal_thread.so.1")
+        self._build_versioned_so(new, case_dir / "onedal_core.c", "libonedal_core.so.2")
+        self._build_versioned_so(new, case_dir / "onedal_thread.c", "libonedal_thread.so.1")
+
+        result = CliRunner().invoke(
+            main, ["compare-release", str(old), str(new), "--format", "json"],
+        )
+        data = _json.loads(result.stdout)
+        kinds = {f["kind"] for f in data.get("bundle_findings", [])}
+        assert "bundle_soname_skew" not in kinds
+
+
+# ---------------------------------------------------------------------------
+# Cohort-scoped SONAME skew logic (pure, no compiler / no disk)
+# ---------------------------------------------------------------------------
+
+class TestSonameSkewCohortScoping:
+    """Unit tests for the opt-in `_soname_skew_findings` / `_detect_soname_skew`.
+
+    Skew is only evaluated within explicitly declared cohorts (prefixes). With
+    no declared cohort nothing is emitted — independent libraries are never
+    inferred to be co-versioned from their filenames.
+    """
+
+    @staticmethod
+    def _member(library: str, major: int):
+        from abicheck.diff_onedal import BundleMember
+        return BundleMember(library=library, soname=library, soname_major=major)
+
+    def test_no_cohort_declared_emits_nothing(self) -> None:
+        # The opt-in default: even a real skew layout produces no finding when
+        # no cohort prefix is declared.
+        from abicheck.bundle import _soname_skew_findings
+        old = [
+            self._member("libonedal_core.so.1", 1),
+            self._member("libonedal_thread.so.1", 1),
+        ]
+        new = [
+            self._member("libonedal_core.so.2", 2),
+            self._member("libonedal_thread.so.1", 1),  # laggard
+        ]
+        assert _soname_skew_findings(old, new, []) == []
+
+    def test_skew_within_declared_cohort_is_flagged(self) -> None:
+        from abicheck.bundle import _soname_skew_findings
+        old = [
+            self._member("libonedal_core.so.1", 1),
+            self._member("libonedal_thread.so.1", 1),
+            self._member("libonedal_dpc.so.1", 1),
+        ]
+        new = [
+            self._member("libonedal_core.so.2", 2),
+            self._member("libonedal_thread.so.1", 1),  # laggard
+            self._member("libonedal_dpc.so.2", 2),
+        ]
+        findings = _soname_skew_findings(old, new, ["libonedal_"])
+        assert len(findings) == 1
+        assert findings[0].kind == ChangeKind.BUNDLE_SONAME_SKEW
+        assert any("libonedal_thread" in lib for lib in findings[0].affected_libraries)
+
+    def test_independent_libraries_outside_cohort_are_not_flagged(self) -> None:
+        # The reviewer's case: libfoo_core bumps while libfoo_plugin stays.
+        # Declaring only the libfoo_core cohort must not drag libfoo_plugin in,
+        # and declaring nothing emits nothing.
+        from abicheck.bundle import _soname_skew_findings
+        old = [
+            self._member("libfoo_core.so.1", 1),
+            self._member("libfoo_plugin.so.1", 1),
+        ]
+        new = [
+            self._member("libfoo_core.so.2", 2),
+            self._member("libfoo_plugin.so.1", 1),  # independent, unchanged
+        ]
+        assert _soname_skew_findings(old, new, []) == []
+        # A cohort that matches only the (single) bumped library: no skew,
+        # because there is no lagging sibling inside that declared cohort.
+        assert _soname_skew_findings(old, new, ["libfoo_core"]) == []
+
+    def test_lockstep_bump_within_cohort_is_clean(self) -> None:
+        from abicheck.bundle import _soname_skew_findings
+        old = [
+            self._member("libonedal_core.so.1", 1),
+            self._member("libonedal_thread.so.1", 1),
+        ]
+        new = [
+            self._member("libonedal_core.so.2", 2),
+            self._member("libonedal_thread.so.2", 2),
+        ]
+        assert _soname_skew_findings(old, new, ["libonedal_"]) == []
+
+    def test_blank_cohort_prefix_is_rejected(self) -> None:
+        # An empty/whitespace prefix (e.g. --bundle-cohort "" from an unset
+        # var) must NOT degrade into "compare every DSO": independent libfoo
+        # bumping while libbar stays must stay clean.
+        from abicheck.bundle import _soname_skew_findings
+        old = [self._member("libfoo.so.1", 1), self._member("libbar.so.1", 1)]
+        new = [self._member("libfoo.so.2", 2), self._member("libbar.so.1", 1)]
+        assert _soname_skew_findings(old, new, [""]) == []
+        assert _soname_skew_findings(old, new, ["  "]) == []
+        # A blank mixed with a real cohort still honours the real one only.
+        assert _soname_skew_findings(old, new, ["", "libqux_"]) == []
+
+    def test_detect_skew_requires_cohort_and_uses_snapshot_libraries(self) -> None:
+        # P2 regression: members come from snapshot.libraries/.metadata (so a
+        # cohort split across directories is still caught), and the check is
+        # opt-in (no cohort → nothing).
+        from abicheck.bundle import _detect_soname_skew
+
+        def _snap(core_soname: str, thread_soname: str) -> BundleSnapshot:
+            libs = {
+                "libonedal_core.so": Path("/rel/lib64") / core_soname,
+                "libonedal_thread.so": Path("/rel/lib32") / thread_soname,
+            }
+            meta = {
+                "libonedal_core.so": _meta(soname=core_soname, exports=["c"]),
+                "libonedal_thread.so": _meta(soname=thread_soname, exports=["t"]),
+            }
+            return BundleSnapshot(
+                root=Path("/rel/lib64"),  # only one dir; the other must still count
+                libraries=libs,
+                metadata=meta,
+                resolution=_compute_resolution_graph(libs, meta),
+            )
+
+        old = _snap("libonedal_core.so.1", "libonedal_thread.so.1")
+        new = _snap("libonedal_core.so.2", "libonedal_thread.so.1")  # thread lags
+        assert _detect_soname_skew(old, new, None) == []
+        findings = _detect_soname_skew(old, new, ["libonedal_"])
+        assert [f.kind for f in findings] == [ChangeKind.BUNDLE_SONAME_SKEW]

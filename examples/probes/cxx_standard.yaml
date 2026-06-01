@@ -1,0 +1,38 @@
+# C++ language-standard probe matrix (self-contained; stock `c++` only).
+#
+# Demonstrates CXX_STANDARD_FLOOR_RAISED detection. This manifest pins a
+# matrix that still supports C++14 (the `cxx14` configuration) alongside
+# C++17. A later release that drops the C++14 configuration raises the
+# minimum standard floor — comparing the two matrices surfaces the
+# source-incompatible bump even though the binary surface is unchanged.
+#
+# Usage:
+#   abicheck probe run examples/probes/cxx_standard.yaml \
+#       --library stddemo --version 1.0 --out std-1.0.json
+#   # ...drop the cxx14 configuration for the next release, then:
+#   abicheck probe run examples/probes/cxx_standard.yaml \
+#       --library stddemo --version 2.0 --out std-2.0.json
+#   abicheck compare libstddemo.so.1 libstddemo.so.2 \
+#       --probe-matrix-old std-1.0.json --probe-matrix-new std-2.0.json
+#
+# The configurations use only the portable `c++` driver and inline
+# probe bodies, so no external headers are required.
+name: stddemo
+
+configurations:
+  - id: cxx14
+    compiler: c++
+    flags: [-std=c++14, -O0, -g]
+
+  - id: cxx17
+    compiler: c++
+    flags: [-std=c++17, -O0, -g]
+
+probes:
+  - name: surface
+    headers: []
+    body: |
+      extern "C" int std_api(int x) { return x; }
+
+defaults:
+  standard_floor: "14"

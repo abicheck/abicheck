@@ -56,6 +56,19 @@ by `tests/test_platform_coverage_honesty.py`. See
 [Use-Case Coverage Evaluation](../development/usecase-coverage-evaluation.md)
 (gap **G1**) for the roadmap to closing this.
 
+### Castxml-free validation (no external tools)
+
+While the full header-driven pipeline uses `castxml`, a large slice of the
+catalog needs **no castxml at all**: a plain `-g` build embeds DWARF in the
+shared object, and `abicheck` reads type/layout/calling-convention facts
+straight from it. `tests/test_castxml_free_examples.py` validates **40 catalog
+cases** end-to-end on the Linux baseline using only a C/C++ compiler — building
+v1/v2, dumping with no headers (DWARF + symbol table only), and asserting the
+`ground_truth.json` verdict. This guards the pure-Python, drop-in path that many
+CI environments and developer machines actually run (no castxml installed). The
+~11 cases that genuinely require castxml (concept tightening, explicit-ctor
+mangling, header-only scoping) remain covered by the castxml integration lane.
+
 ---
 
 ## What "Symbols Only" Mode Means

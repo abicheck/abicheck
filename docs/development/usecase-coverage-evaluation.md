@@ -74,9 +74,9 @@ A real invocation is a point in this space:
 | `compare`/release/baseline/Debian/ABICC | `complete` | dedicated CLIs + tests |
 | MCP server | `complete` | unit-tested (mocks, Linux) |
 | Reporting: JSON/SARIF/JUnit | `complete` | versioned schema + 34 SARIF / 55 JUnit tests |
-| Reporting: Markdown/HTML | `partial` | thin test coverage (G3) |
-| Build-config matrix (`probe`) | `partial` | works, but not wired into `compare` (G2); cases 97/98 invisible per-binary |
-| Bundle / multi-library | `partial` | Linux-only; case84 `skip:true` (CLI wiring, G2) |
+| Reporting: Markdown/HTML | `complete` | structural coverage across verdict tiers + sections + escaping (G3 done) |
+| Build-config matrix (`probe`) | `partial` | wired into `compare` via `--probe-matrix-old/new`; CXX floor proven e2e; API_DEPENDS still blocked on `.o` surface capture (G2) |
+| Bundle / multi-library | `complete` | all detectors run via `compare-release`; case84 validated e2e (Linux-only by design; cross-platform → G1) |
 | Plugin (host↔plugin) | `partial` | policy + scenario tests; no bidirectional CLI/fixture (G5) |
 | Header-only / inline-only | `planned` | castxml can't emit concept bodies / ctor mangled names (G4; cases 78/105/106/111 dormant) |
 | Kernel / eBPF (BTF/CTF) | `modeled` | parsers exist; no workflow/example (G6) |
@@ -90,8 +90,8 @@ A real invocation is a point in this space:
 | ID | Gap | Code | Tests | Examples |
 |---|---|:--:|:--:|:--:|
 | **G1** | Cross-platform is aspirational, not validated (Win/macOS) | ARM64 AAPCS, MSVC mangling fidelity | PE/Mach-O **e2e** in CI | label tags honestly |
-| **G2** | Build-config matrix siloed in `probe` | fold matrix findings into `compare` | matrix e2e beyond oneDPL | 2–3 more probe specs |
-| **G3** | Catalog only exercises `compare`; Markdown/HTML test coverage thin | — | drive catalog through appcompat/stack/bundle; broaden Markdown/HTML | promote cases to scenarios |
+| **G2** | Build-config matrix siloed in `probe` | ✅ folded into `compare`/`compare-release` (`--probe-matrix-old/new`); bundle soname-skew wired | ✅ CXX floor e2e + case84 bundle e2e (`API_DEPENDS` e2e still pending `.o` surface capture) | ✅ `feature_macro.yaml`, `cxx_standard.yaml` |
+| **G3** | Catalog only exercises `compare`; Markdown/HTML test coverage thin | — | ✅ appcompat-from-catalog + stack-check sysroot e2e + Markdown/HTML structural coverage | scenarios asserted in new tests |
 | **G4** | Header-only / inline-only (detector frontier) | libclang header-AST extractor | unblock cases 78/105/106/111 | reuse dormant fixtures |
 | **G5** | Plugin host↔plugin contract is one-directional | optional host-contract check | bidirectional scenario | host/plugin fixture |
 | **G6** | Kernel/eBPF use case is parser-only | small workflow glue | BTF compare scenario | vmlinux/module fixture |

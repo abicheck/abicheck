@@ -227,15 +227,18 @@ use_cases:
   - id: UC-WF-bundle
     axis: workflow
     name: Multi-library bundle / cohort analysis
-    status: partial
-    gap: G2
-    plan: docs/development/plans/g2-build-config-and-bundle.md
+    status: complete
+    note: >
+      Linux/ELF only by design (ADR-018/ADR-023 — no DT_NEEDED/.gnu.version_*
+      equivalent elsewhere); cross-platform bundle analysis is tracked under
+      G1 / UC-PLAT-*. All bundle detectors run through compare-release; case84
+      is validated end-to-end. bundle_soname_skew is opt-in via
+      --bundle-cohort PREFIX so independent libraries are never inferred to be
+      co-versioned from their filenames.
     evidence:
-      modules: [abicheck/bundle.py]
-      tests: [tests/test_bundle.py]
-    next_steps: >
-      Complete compare-release CLI wiring (case84 is skip:true today) and extend
-      bundle analysis beyond Linux.
+      modules: [abicheck/bundle.py, abicheck/diff_onedal.py]
+      tests: [tests/test_bundle.py, tests/test_onedal_detectors.py]
+      examples: [examples/case84_bundle_soname_skew]
 
   - id: UC-WF-probe-matrix
     axis: workflow
@@ -245,12 +248,15 @@ use_cases:
     plan: docs/development/plans/g2-build-config-and-bundle.md
     evidence:
       modules: [abicheck/probe_harness.py, abicheck/diff_build_config.py]
-      tests: [tests/test_probe_harness.py]
-      examples: [examples/probes/onedpl.yaml]
+      tests: [tests/test_probe_harness.py, tests/test_probe_examples.py]
+      examples: [examples/probes/onedpl.yaml, examples/probes/cxx_standard.yaml, examples/probes/feature_macro.yaml]
     next_steps: >
-      Fold matrix findings (API_DEPENDS_ON_CONSUMER_ENV, CXX_STANDARD_FLOOR_RAISED,
-      BEHAVIOURAL_DEFAULT_CHANGED) into `compare`/`compare-release`; it is a
-      separate command today, so cases 97/98 are invisible to a per-binary diff.
+      Matrix findings now fold into `compare`/`compare-release` via
+      --probe-matrix-old/--probe-matrix-new (CXX_STANDARD_FLOOR_RAISED is proven
+      end-to-end through the mainline command in tests/test_probe_examples.py).
+      Remaining gap: capturing a probe's *symbol surface* from a relocatable .o
+      so API_DEPENDS_ON_CONSUMER_ENV fires end-to-end too (the dumper currently
+      reads .dynsym, which a .o lacks); the detector itself is unit-tested.
 
   # ── reporting ─────────────────────────────────────────────────────────────
   - id: UC-REP-json
@@ -280,13 +286,15 @@ use_cases:
   - id: UC-REP-markdown-html
     axis: reporting
     name: Markdown / HTML reports
-    status: partial
-    gap: G3
-    plan: docs/development/plans/g3-workflow-examples-and-reporting.md
+    status: complete
+    note: >
+      Structural coverage across verdict tiers and the major sections (summary,
+      severity groups, impact, release recommendation, confidence) plus HTML
+      escaping is asserted in tests/test_report_sections.py; appcompat and
+      stack-check render paths are exercised by the workflow E2E tests.
     evidence:
       modules: [abicheck/reporter.py, abicheck/html_report.py]
-      tests: [tests/test_format_compliance.py, tests/test_sprint9_html.py]
-    next_steps: Broaden Markdown/HTML test coverage across commands (currently thin).
+      tests: [tests/test_format_compliance.py, tests/test_sprint9_html.py, tests/test_report_sections.py]
 
   # ── toolchain / language standard ───────────────────────────────────────────
   - id: UC-TC-dual-abi
@@ -315,11 +323,11 @@ use_cases:
   - id: UC-TC-cxx-standard-floor
     axis: toolchain
     name: C++ standard floor raised (per-consumer source break)
-    status: partial
-    gap: G2
-    plan: docs/development/plans/g2-build-config-and-bundle.md
+    status: complete
+    note: >
+      Surfaced through the mainline `compare`/`compare-release` command via
+      --probe-matrix-old/--probe-matrix-new; the finding reaches the verdict and
+      the JSON/SARIF output (proven in tests/test_probe_examples.py).
     evidence:
-      examples: [examples/case98_cxx_standard_floor_raised]
-    next_steps: >
-      Only detectable via the probe matrix today; wire it into the mainline
-      compare so a per-binary run surfaces CXX_STANDARD_FLOOR_RAISED.
+      examples: [examples/case98_cxx_standard_floor_raised, examples/probes/cxx_standard.yaml]
+      tests: [tests/test_probe_examples.py, tests/test_diff_build_config.py]

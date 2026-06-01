@@ -398,6 +398,7 @@ def _run_bundle_analysis(
     *,
     manifest_path: Path | None,
     bundle_system_providers: str,
+    bundle_cohorts: tuple[str, ...] = (),
 ) -> BundleDiffResult | None:
     """Run bundle-level (ADR-023) analysis on a compare-release run.
 
@@ -449,6 +450,7 @@ def _run_bundle_analysis(
             old_snap, new_snap, per_lib_results,
             manifest=manifest,
             system_providers=system_extra or None,
+            cohorts=list(bundle_cohorts) or None,
         )
     except Exception as exc:
         # Analysis-engine bugs should not block the per-library report;
@@ -467,11 +469,16 @@ def _format_release_summary(
     warning_msgs: list[str],
     diff_pairs: list[tuple[DiffResult, AbiSnapshot]] | None = None,
     bundle_result: BundleDiffResult | None = None,
+    matrix_result: DiffResult | None = None,
 ) -> str:
     """Format the release comparison summary as JSON, markdown, or JUnit XML."""
     if fmt == "junit":
         from .junit_report import to_junit_xml_multi
         pairs: list[tuple[DiffResult, AbiSnapshot | None]] = list(diff_pairs or [])
+        # Release-global matrix findings ride in as their own synthetic
+        # testsuite so CI dashboards reading the JUnit report see the failure.
+        if matrix_result is not None:
+            pairs.append((matrix_result, None))
         error_libs = [
             entry for entry in library_results
             if entry.get("verdict") == "ERROR"
@@ -529,6 +536,21 @@ def _format_release_summary(
                 }
                 for f in bundle_result.bundle_findings
             ]
+        if matrix_result is not None:
+            # Release-global build-configuration findings (G2: probe matrix).
+            # `.changes` is post-suppression, so suppressed findings are
+            # excluded here just as they are from the verdict.
+            summary["matrix_verdict"] = matrix_result.verdict.value
+            summary["matrix_findings"] = [
+                {
+                    "kind": c.kind.value,
+                    "symbol": c.symbol,
+                    "description": c.description,
+                    "old_value": c.old_value,
+                    "new_value": c.new_value,
+                }
+                for c in matrix_result.changes
+            ]
         return json.dumps(summary, indent=2)
 
     _VERDICT_EMOJI = {
@@ -584,6 +606,13 @@ def _format_release_summary(
                 + (f" (provider: `{f.provider_library}`)" if f.provider_library else ""),
             )
             lines.append(f"  - {f.description}")
+    if matrix_result is not None and matrix_result.changes:
+        lines += ["", "## 🛠️ Build-Configuration (Matrix) Findings", ""]
+        for c in matrix_result.changes:
+            lines.append(
+                f"- **{c.kind.value}**" + (f" — `{c.symbol}`" if c.symbol else ""),
+            )
+            lines.append(f"  - {c.description}")
     return "\n".join(lines)
 
 
@@ -661,6 +690,7 @@ def _collect_bundle_result(
     worst_verdict: str,
     manifest_path: Path | None,
     bundle_system_providers: str,
+    bundle_cohorts: tuple[str, ...] = (),
 ) -> tuple[BundleDiffResult | None, str]:
     """Extract stashed DiffResults, run bundle analysis, update worst verdict."""
     stashed_diffs: list[DiffResult] = []
@@ -672,12 +702,70 @@ def _collect_bundle_result(
         old_map, new_map, stashed_diffs,
         manifest_path=manifest_path,
         bundle_system_providers=bundle_system_providers,
+        bundle_cohorts=bundle_cohorts,
     )
     if bundle_result is not None:
         bv = bundle_result.bundle_verdict.value
         if _RELEASE_VERDICT_ORDER.get(bv, 0) > _RELEASE_VERDICT_ORDER.get(worst_verdict, 0):
             worst_verdict = bv
     return bundle_result, worst_verdict
+
+
+def _collect_matrix_result(
+    probe_matrix_old: Path | None,
+    probe_matrix_new: Path | None,
+    policy: str,
+    worst_verdict: str,
+    *,
+    suppress: Path | None = None,
+    policy_file_path: Path | None = None,
+    old_version: str = "",
+    new_version: str = "",
+) -> tuple[DiffResult | None, str]:
+    """Load probe-matrix snapshots, run them through the compare pipeline, fold.
+
+    Returns (matrix_result, worst_verdict). When no matrix snapshots are
+    given, matrix_result is None and the verdict is unchanged. The matrix
+    findings are release-global build-configuration changes
+    (CXX_STANDARD_FLOOR_RAISED, API_DEPENDS_ON_CONSUMER_ENV,
+    BEHAVIOURAL_DEFAULT_CHANGED).
+
+    Rather than re-deriving a verdict, the changes are fed to
+    :func:`checker.compare` as ``extra_changes`` over a pair of empty
+    snapshots — exactly the path the single-pair ``compare`` command uses.
+    This routes them through the *whole* pipeline uniformly: ``--suppress``
+    rules, ``--policy-file`` per-kind overrides, and verdict composition all
+    apply, so a suppression like ``cxx_standard_floor_raised`` or a policy
+    override is honoured identically on both commands. The returned
+    :class:`DiffResult` carries the post-suppression kept findings, which the
+    report (JSON / markdown / JUnit) renders.
+    """
+    from .cli import _load_probe_matrix_changes
+
+    matrix_changes = _load_probe_matrix_changes(probe_matrix_old, probe_matrix_new)
+    if not matrix_changes:
+        return None, worst_verdict
+
+    from .checker import compare as _compare
+    from .model import AbiSnapshot
+
+    suppression, pf = _load_suppression_and_policy(suppress, policy, policy_file_path)
+    # Empty snapshots contribute no per-binary changes; the matrix findings
+    # ride in as extra_changes and inherit the full post-processing pipeline.
+    name = "<build-config matrix>"
+    result = _compare(
+        AbiSnapshot(library=name, version=old_version or "old"),
+        AbiSnapshot(library=name, version=new_version or "new"),
+        suppression=suppression,
+        policy=policy,
+        policy_file=pf,
+        scope_to_public_surface=False,
+        extra_changes=matrix_changes,
+    )
+    matrix_verdict = result.verdict.value
+    if _RELEASE_VERDICT_ORDER.get(matrix_verdict, 0) > _RELEASE_VERDICT_ORDER.get(worst_verdict, 0):
+        worst_verdict = matrix_verdict
+    return result, worst_verdict
 
 
 def _cleanup_temp_dirs(temp_dir_paths: list[str], keep_extracted: bool) -> None:
@@ -709,6 +797,7 @@ def _finalize_release_output(
     output_dir: Path | None,
     annotate: bool,
     fail_on_removed: bool,
+    matrix_result: DiffResult | None = None,
 ) -> None:
     """Write summary output, step summary, per-library dir report, then exit."""
     text = _format_release_summary(
@@ -717,6 +806,7 @@ def _finalize_release_output(
         old_map, new_map, warning_msgs,
         diff_pairs=diff_pairs if fmt == "junit" else None,
         bundle_result=bundle_result,
+        matrix_result=matrix_result,
     )
     _write_or_echo(output, text)
 
@@ -849,6 +939,12 @@ def _strip_diff_results_and_adjust_verdict(
 @click.option("--bundle-system-providers", "bundle_system_providers", default="",
               help="Comma-separated extra sonames to treat as system-provided "
                    "(extends the built-in libc/libstdc++/libgcc/libtbb allow-list).")
+@click.option("--bundle-cohort", "bundle_cohorts", multiple=True, metavar="PREFIX",
+              help="Declare a co-versioned library cohort by name prefix (e.g. "
+                   "'libonedal_'). Repeatable. Enables the BUNDLE_SONAME_SKEW check, "
+                   "which flags when some members of the cohort bump their major SONAME "
+                   "while siblings lag. Opt-in: with no --bundle-cohort, SONAME skew is "
+                   "never inferred from filenames (independent libraries are not compared).")
 @click.option("--no-bundle-analysis", "no_bundle_analysis", is_flag=True, default=False,
               help="Skip bundle-level cross-library analysis (debug/parity escape hatch). "
                    "Bundle findings catch intra-bundle symbol removals, signature drift "
@@ -860,6 +956,16 @@ def _strip_diff_results_and_adjust_verdict(
                    "reported. When a library's public surface cannot be resolved, scoping "
                    "falls back to the full export table and the release-level scope block "
                    "flags manual_review_required (issue #235). Requires -H/--header.")
+@click.option("--probe-matrix-old", "probe_matrix_old", type=click.Path(exists=True, path_type=Path),
+              default=None,
+              help="Old build-configuration matrix snapshot (from 'abicheck probe run'). "
+                   "When given with --probe-matrix-new, build-config findings "
+                   "(CXX_STANDARD_FLOOR_RAISED, API_DEPENDS_ON_CONSUMER_ENV, "
+                   "BEHAVIOURAL_DEFAULT_CHANGED) are folded into this release's "
+                   "verdict and report (G2: probe -> compare-release).")
+@click.option("--probe-matrix-new", "probe_matrix_new", type=click.Path(exists=True, path_type=Path),
+              default=None,
+              help="New build-configuration matrix snapshot (pairs with --probe-matrix-old).")
 def compare_release_cmd(
     old_dir: Path,
     new_dir: Path,
@@ -892,8 +998,11 @@ def compare_release_cmd(
     jobs: int,
     manifest_path: Path | None,
     bundle_system_providers: str,
+    bundle_cohorts: tuple[str, ...],
     no_bundle_analysis: bool,
     scope_public_headers: bool,
+    probe_matrix_old: Path | None,
+    probe_matrix_new: Path | None,
 ) -> None:
     """Compare all libraries in two release directories or packages.
 
@@ -992,10 +1101,20 @@ def compare_release_cmd(
                 library_results, old_map, new_map, worst_verdict,
                 manifest_path=manifest_path,
                 bundle_system_providers=bundle_system_providers,
+                bundle_cohorts=bundle_cohorts,
             )
 
         # Strip _diff_result from entries and bump verdict for removed libraries.
         worst_verdict = _strip_diff_results_and_adjust_verdict(library_results, removed_keys, worst_verdict)
+
+        # Build-configuration matrix findings (G2: probe -> compare-release).
+        # These are release-global, not per-library, so they fold into the
+        # worst-of verdict and surface as their own report section.
+        matrix_result, worst_verdict = _collect_matrix_result(
+            probe_matrix_old, probe_matrix_new, policy, worst_verdict,
+            suppress=suppress, policy_file_path=policy_file_path,
+            old_version=old_version, new_version=new_version,
+        )
 
         _finalize_release_output(
             fmt, worst_verdict, old_dir, new_dir,
@@ -1003,6 +1122,7 @@ def compare_release_cmd(
             old_map, new_map, warning_msgs,
             diff_pairs, bundle_result,
             output, output_dir, annotate, fail_on_removed,
+            matrix_result=matrix_result,
         )
     finally:
         _cleanup_temp_dirs(_temp_dir_paths, keep_extracted)

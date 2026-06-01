@@ -18,16 +18,35 @@ Two capabilities exist but are not reachable from the mainline gate:
 
 ## Goal & acceptance criteria
 
-- [ ] `compare`/`compare-release` accept `--probe-spec <spec.yaml>`; when given,
-      the matrix findings are merged into the change list and folded into the
-      verdict (worst-of), with the matrix ChangeKinds appearing in JSON/SARIF.
-- [ ] Case 98 (`CXX_STANDARD_FLOOR_RAISED`) and case 97
-      (`API_DEPENDS_ON_CONSUMER_ENV`) reach their intended verdict through the
-      mainline command with `--probe-spec`, not only through `probe compare`.
-- [ ] `compare-release` emits `bundle_soname_skew`; case84 loses `skip: true`
-      and is validated against `ground_truth.json`.
-- [ ] ≥2 additional probe specs under `examples/probes/` (a feature-macro C
-      library; a compiler/standard matrix) with an end-to-end test.
+- [x] `compare`/`compare-release` merge matrix findings into the verdict
+      (worst-of), with the matrix ChangeKinds appearing in the report.
+      **Shipped as `--probe-matrix-old` / `--probe-matrix-new`** (pre-built
+      matrix snapshots from `abicheck probe run`) rather than an inline
+      `--probe-spec`: running a matrix needs compilers, so it stays a separate
+      `probe run` step that feeds the comparison, keeping the compare commands
+      hermetic. On `compare` the findings join the change list (JSON + SARIF);
+      on `compare-release` they are release-global, so they run through the
+      same `checker.compare` pipeline (over empty snapshots) — `--suppress`
+      rules and `--policy-file` overrides apply identically to both commands —
+      then fold into the worst-of release verdict and surface as a
+      `matrix_findings` section in the JSON/markdown summary and as a
+      dedicated testsuite in JUnit output. Verified end-to-end for both
+      commands in `tests/test_probe_examples.py` and at the unit level in
+      `tests/test_cli_split_modules.py`.
+- [x] Case 98 (`CXX_STANDARD_FLOOR_RAISED`) reaches its intended verdict through
+      the mainline command (JSON + SARIF), not only `probe compare`. Case 97
+      (`API_DEPENDS_ON_CONSUMER_ENV`) — detector unit-tested; end-to-end is
+      blocked by a separate harness gap (the dumper reads `.dynsym`, which a
+      relocatable probe `.o` lacks, so a probe's symbol surface is not yet
+      captured). Tracked in the registry `next_steps` for `UC-WF-probe-matrix`.
+- [x] `compare-release` emits `bundle_soname_skew`; case84 lost `skip: true`
+      and is validated end-to-end (`tests/test_bundle.py::TestCompareReleaseBundleE2E`).
+      The check is **opt-in** via `--bundle-cohort PREFIX` (repeatable): cohorts
+      are declared, never inferred from filenames, so an ordinary release that
+      bumps one independent library while a sibling lags is not a false positive.
+- [x] Two additional self-contained probe specs under `examples/probes/`
+      (`feature_macro.yaml`, `cxx_standard.yaml`) with an end-to-end test
+      (stock `cc`/`c++`, no external toolchain).
 
 ## Design
 

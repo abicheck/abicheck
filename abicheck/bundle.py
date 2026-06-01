@@ -44,11 +44,14 @@ import logging
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 from .checker_policy import ChangeKind, Verdict, compute_verdict
 from .checker_types import Change, DiffResult
 from .elf_metadata import ElfMetadata, parse_elf_metadata
+
+if TYPE_CHECKING:
+    from .diff_onedal import BundleMember
 
 log = logging.getLogger(__name__)
 
@@ -572,6 +575,7 @@ def compare_bundle(
     *,
     manifest: InstantiationManifest | None = None,
     system_providers: Iterable[str] | None = None,
+    cohorts: list[str] | None = None,
 ) -> BundleDiffResult:
     """Compute bundle-level findings from per-library diffs and bundle snapshots.
 
@@ -585,6 +589,9 @@ def compare_bundle(
             ``BUNDLE_MANIFEST_INSTANTIATION_REMOVED`` findings.
         system_providers: Sonames to treat as system-provided (extends
             :data:`DEFAULT_SYSTEM_PROVIDERS`).
+        cohorts: Explicit co-versioned cohort prefixes (e.g. ``"libonedal_"``)
+            for the opt-in ``BUNDLE_SONAME_SKEW`` check. When empty/None the
+            skew check is disabled — cohorts are never inferred from filenames.
     """
     sys_libs = set(DEFAULT_SYSTEM_PROVIDERS) | set(system_providers or ())
     findings: list[BundleFinding] = []
@@ -623,7 +630,14 @@ def compare_bundle(
     #    different gnu.version_d between old and new providers.
     findings.extend(_detect_version_drift(old, new))
 
-    # 7. Manifest enforcement
+    # 7. bundle_soname_skew: declared co-versioned cohort members bumped
+    #    their major SONAME inconsistently (some bumped, some lagged). A
+    #    cohort-level invariant: no individual library is wrong, but the set
+    #    is. Opt-in only — runs solely for the cohorts the caller declares
+    #    (compare-release --bundle-cohort). See examples/case84_bundle_soname_skew/.
+    findings.extend(_detect_soname_skew(old, new, cohorts))
+
+    # 8. Manifest enforcement
     if manifest is not None:
         findings.extend(_detect_manifest_drift(old, new, manifest))
 
@@ -994,6 +1008,97 @@ def _detect_version_drift(
         )
 
     return findings
+
+
+def _soname_skew_findings(
+    old_members: list[BundleMember],
+    new_members: list[BundleMember],
+    cohorts: list[str],
+) -> list[BundleFinding]:
+    """Pure cohort-skew logic over already-read bundle members.
+
+    SONAME skew is **only** evaluated within explicitly declared cohorts —
+    each entry of *cohorts* is a cohort-key prefix (e.g. ``"libonedal_"``)
+    naming a set of libraries the release engineer asserts are co-versioned.
+    Libraries that match no declared cohort are never compared, so a normal
+    release that bumps an independent ``libfoo.so.1 → libfoo.so.2`` while an
+    unrelated ``libbar.so.1`` stays put is never reported. With an empty
+    *cohorts* list this returns nothing: there is no implicit lockstep
+    invariant to infer from filenames alone.
+    """
+    # An empty prefix (e.g. --bundle-cohort "" from an unset shell var) would
+    # be treated as "no filter" by the detector and compare every DSO —
+    # reintroducing the global false positive the opt-in exists to prevent.
+    # Strip and drop blanks so only genuine cohort prefixes are honoured.
+    prefixes = [p.strip() for p in cohorts if p and p.strip()]
+    if not prefixes:
+        return []
+    from .diff_onedal import detect_bundle_soname_skew
+
+    findings: list[BundleFinding] = []
+    for prefix in prefixes:
+        for change in detect_bundle_soname_skew(
+            old_members, new_members, cohort_prefix=prefix,
+        ):
+            findings.append(
+                BundleFinding(
+                    kind=change.kind,
+                    symbol=change.symbol,
+                    description=change.description,
+                    old_value=change.old_value,
+                    new_value=change.new_value,
+                    affected_libraries=list(change.affected_symbols or []),
+                )
+            )
+    return findings
+
+
+def _detect_soname_skew(
+    old: BundleSnapshot,
+    new: BundleSnapshot,
+    cohorts: list[str] | None,
+) -> list[BundleFinding]:
+    """Detect inconsistent SONAME major bumps within declared cohorts.
+
+    *cohorts* is the explicit opt-in: a list of cohort-key prefixes naming
+    co-versioned library sets (from ``compare-release --bundle-cohort``).
+    When it is empty/None nothing is emitted — there is no auto-grouping of
+    independent libraries by filename, which avoids false positives on
+    normal multi-library releases.
+
+    Members are derived from the *matched* release libraries
+    (``BundleSnapshot.libraries`` / ``.metadata``) rather than by rescanning
+    a single directory — release discovery is recursive, so a cohort member
+    living in another subdirectory must still participate. The authoritative
+    major comes from each library's DT_SONAME, falling back to the on-disk
+    filename; libraries with no derivable major (unversioned ``libfoo.so``)
+    are dropped.
+    """
+    cohorts = [c.strip() for c in (cohorts or []) if c and c.strip()]
+    if not cohorts:
+        return []
+    from .diff_onedal import BundleMember, _extract_soname_major
+
+    def _members(snap: BundleSnapshot) -> list[BundleMember]:
+        members: list[BundleMember] = []
+        for name, path in snap.libraries.items():
+            meta = snap.metadata.get(name)
+            soname = (meta.soname if meta and meta.soname else "") or path.name
+            major = _extract_soname_major(soname)
+            if major is None:
+                major = _extract_soname_major(path.name)
+            if major is None:
+                continue
+            members.append(
+                BundleMember(library=path.name, soname=soname, soname_major=major)
+            )
+        return members
+
+    old_members = _members(old)
+    new_members = _members(new)
+    if not old_members or not new_members:
+        return []
+    return _soname_skew_findings(old_members, new_members, cohorts)
 
 
 def _entry_targets(entry: ManifestEntry) -> list[tuple[str, str]]:

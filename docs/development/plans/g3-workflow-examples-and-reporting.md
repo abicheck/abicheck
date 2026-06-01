@@ -20,15 +20,19 @@ Two test-breadth gaps:
 
 ## Goal & acceptance criteria
 
-- [ ] A parametrized harness drives a curated subset of catalog cases through
-      `appcompat` (app uses a subset of the changed library) and asserts the
-      app-scoped verdict — turning the dormant `examples/case*/app.c` consumers
-      into asserted regressions rather than runtime demos.
-- [ ] A `stack-check` scenario fixture (two sysroots) with an asserted
-      stack-level verdict.
-- [ ] Markdown and HTML reporters gain golden/structural coverage across
-      verdict tiers and the major sections (summary, severity, impact,
-      recommendation, confidence) so output structure is regression-guarded.
+- [x] A parametrized harness drives catalog cases through `appcompat` and
+      asserts the app-scoped verdict — including the key
+      application-centric-filtering property (the same library break is
+      BREAKING for an app that imports the removed symbol, COMPATIBLE for one
+      that does not). See `tests/test_appcompat_examples.py`.
+- [x] A `stack-check` scenario fixture (two sysroots) with an asserted
+      stack-level verdict, including a clean control and the CLI surface. See
+      `tests/test_stack_sysroot_e2e.py`.
+- [x] Markdown and HTML reporters gain structural coverage across verdict tiers
+      and the major sections (summary, severity, impact, recommendation,
+      confidence) plus HTML escaping. See `tests/test_report_sections.py`.
+      (Implemented as in-lane structural assertions rather than committed
+      golden snapshots, to avoid brittle full-text fixtures.)
 
 ## Design
 

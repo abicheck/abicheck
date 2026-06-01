@@ -27,6 +27,15 @@ upgrade end-to-end" is currently answered by extrapolation, not by CI.
       and `tests/test_platform_coverage_honesty.py` is updated so macOS/Windows
       counts reflect the newly-validated reality.
 
+## Progress
+
+- **Castxml-free portable subset (Linux baseline):** `tests/test_castxml_free_examples.py`
+  validates 40 catalog cases end-to-end using only a C/C++ compiler + DWARF (no
+  castxml), in the default lane. This hardens the no-external-tools path and is a
+  prerequisite for extending the same compiler-only validation to macOS (`.dSYM`)
+  and MinGW Windows (DWARF), where castxml is the current blocker. Documented under
+  "Castxml-free validation" in `docs/reference/platforms.md`.
+
 ## Design
 
 1. **Curate a portable subset** of the catalog that compiles cleanly under

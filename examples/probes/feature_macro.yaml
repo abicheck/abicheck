@@ -1,0 +1,44 @@
+# Feature-macro probe matrix (self-contained; stock `cc` only).
+#
+# Demonstrates API_DEPENDS_ON_CONSUMER_ENV: a C library whose public
+# surface changes shape based on a consumer-controlled preprocessor
+# macro. The `with_extra` configuration defines `ENABLE_EXTRA`, which
+# makes `extra_api` part of the compiled surface; the `baseline`
+# configuration does not. The probe-harness sees `extra_api` present in
+# some configurations but not others and flags the dependency.
+#
+# Usage:
+#   abicheck probe run examples/probes/feature_macro.yaml \
+#       --library featuredemo --version 1.0 --out fm-1.0.json
+#   abicheck probe run examples/probes/feature_macro.yaml \
+#       --library featuredemo --version 2.0 --out fm-2.0.json
+#   abicheck compare libfeaturedemo.so.1 libfeaturedemo.so.2 \
+#       --probe-matrix-old fm-1.0.json --probe-matrix-new fm-2.0.json
+#
+# Unlike onedpl.yaml this manifest needs no external toolchain or
+# include paths — `cc` from the base system is enough — so it doubles as
+# the end-to-end fixture in tests/test_probe_examples.py.
+name: featuredemo
+
+configurations:
+  - id: baseline
+    compiler: cc
+    flags: [-O0, -g]
+
+  - id: with_extra
+    compiler: cc
+    flags: [-O0, -g]
+    defines:
+      ENABLE_EXTRA: "1"
+
+probes:
+  - name: surface
+    headers: []
+    body: |
+      int base_api(int x) { return x; }
+      #ifdef ENABLE_EXTRA
+      int extra_api(int x) { return x + 1; }
+      #endif
+
+defaults:
+  feature: extra
