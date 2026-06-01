@@ -1,0 +1,98 @@
+# Scenario group: library-archetype coverage (planned — need real BTF/CTF
+# blobs, a SYCL plugin, an `ar` archive, or a libclang header-AST, so they are
+# defined now and automated as the G4/G6/G8 capabilities land). These close the
+# documented header-only (G4), kernel-BTF / SYCL (G6), and static-library (G8)
+# archetype gaps in the use-case registry.
+#
+# See tests/scenarios/README.md for the catalog format and how it is validated.
+schema_version: 1
+
+scenarios:
+  - id: SC-KERNEL-BTF-FIELD
+    title: Kernel struct gains a field — BTF-based ABI compare for modules
+    persona: Kernel / eBPF module maintainer
+    narrative: >
+      An out-of-tree module or eBPF program is built against a kernel's BTF. When
+      a kernel struct gains a field (changing its layout), modules compiled
+      against the old BTF are ABI-incompatible. The scanner must compare two BTF
+      blobs (module vs vmlinux, or old vs new kernel) and report the layout break.
+    flow:
+      - abicheck compare old.btf new.btf --btf
+    expected:
+      exit_code: 4
+      verdict: BREAKING
+    validates: UC-ARCH-kernel-btf
+    automated: false
+    status: planned
+    plan: docs/development/plans/g6-kernel-btf-and-accelerator.md
+    note: >
+      BTF/CTF parsing is unit-tested (tests/test_btf_metadata.py). Full
+      automation needs real BTF blob fixtures and a documented "module vs
+      vmlinux BTF" workflow so the compare runs end-to-end.
+
+  - id: SC-SYCL-PLUGIN-SURFACE
+    title: SYCL / accelerator plugin interface (PI/UR) surface change is caught
+    persona: Heterogeneous-runtime maintainer
+    narrative: >
+      A SYCL runtime exposes a plugin interface (PI/UR) that backends implement.
+      Removing or reshaping a plugin entrypoint breaks every backend. The scanner
+      must read the SYCL plugin surface and report the contract change at the
+      workflow level, not only via low-level symbol diffing.
+    flow:
+      - abicheck compare old.so new.so -H sycl/ --sycl
+    expected:
+      exit_code: 4
+      verdict: BREAKING
+    validates: UC-ARCH-sycl
+    automated: false
+    status: planned
+    plan: docs/development/plans/g6-kernel-btf-and-accelerator.md
+    note: >
+      SYCL metadata + diff is unit-tested (tests/test_diff_sycl.py) and there is
+      a change-type example (examples/case82_sycl_overload_set_removed). Full
+      automation needs a SYCL plugin fixture wired into a workflow-level run;
+      CUDA is deferred.
+
+  - id: SC-STATIC-LIB-LINK
+    title: Static library (.a/.lib) member removed — link-time API break is caught
+    persona: SDK maintainer shipping static archives
+    narrative: >
+      Some SDKs ship static archives. Removing or reshaping a public symbol in an
+      archive member breaks consumers at link time. The scanner must iterate the
+      archive members and report the link-time API break (or this archetype must
+      be documented as an explicit non-goal).
+    flow:
+      - abicheck compare old.a new.a -H include/
+    expected:
+      exit_code: 4
+      verdict: BREAKING
+    validates: UC-ARCH-static-lib
+    automated: false
+    status: planned
+    plan: docs/development/plans/g8-static-libraries.md
+    note: >
+      Scope is still open (iterate `ar` members vs. document as a non-goal —
+      see the G8 plan). Defined here so the decision and its workflow are tracked.
+
+  - id: SC-HEADER-ONLY-CONCEPT
+    title: Header-only library tightens a concept — source-only API break is caught
+    persona: Header-only / inline-only library maintainer
+    narrative: >
+      A header-only library has no shared object, so the contract lives entirely
+      in headers. Tightening a concept, changing a hidden friend, or altering an
+      inline signature is a source break consumers hit on recompile. The scanner
+      must extract the header AST and report the API break with no binary to diff.
+    flow:
+      - abicheck compare old/ new/ -H include/ --lang c++
+    expected:
+      exit_code: 2
+      verdict: API_BREAK
+    validates: UC-ARCH-header-only
+    automated: false
+    status: planned
+    plan: docs/development/plans/g4-header-ast-extractor.md
+    note: >
+      castxml-based extraction exists (abicheck/dumper_castxml.py) but cannot
+      resolve concept tightening / hidden friends / user-ctor mangled names
+      (dormant fixtures: cases 78/105/106/111). Full automation needs the
+      libclang-based header-AST extractor from the G4 plan.

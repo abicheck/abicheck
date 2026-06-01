@@ -40,6 +40,7 @@ import yaml
 from click.testing import CliRunner
 
 from abicheck.cli import main
+from abicheck.dwarf_advanced import AdvancedDwarfMetadata
 from abicheck.model import (
     AbiSnapshot,
     EnumMember,
@@ -650,3 +651,56 @@ def test_sc_exported_var_removed(tmp_path: Path) -> None:
     doc = json.loads(res.output)
     assert doc["verdict"] == "BREAKING"
     assert any(c["kind"] == "var_removed" for c in doc["changes"])
+
+
+def test_sc_dual_abi_flip(tmp_path: Path) -> None:
+    # libstdc++ dual-ABI flip: the std::string family re-mangles when
+    # _GLIBCXX_USE_CXX11_ABI toggles. A naive diff sees mass add/remove churn;
+    # the scanner must recognise the __cxx11 marker pattern and emit one grouped
+    # glibcxx_dual_abi_flip_detected (still a real break: exit 4).
+    legacy = [_fn(f"_ZN3foo3barESs{i}") for i in range(6)]  # no __cxx11 marker
+    cxx11 = [_fn(f"_ZN3foo3barENSt7__cxx1112basic_stringE{i}") for i in range(6)]
+    res = _compare(
+        tmp_path,
+        _lib("1", legacy),
+        _lib("2", cxx11),
+        "--no-scope-public-headers",
+        "--format",
+        "json",
+    )
+    assert res.exit_code == 4
+    doc = json.loads(res.output)
+    assert doc["verdict"] == "BREAKING"
+    assert any(c["kind"] == "glibcxx_dual_abi_flip_detected" for c in doc["changes"])
+
+
+def test_sc_integer_model_flip(tmp_path: Path) -> None:
+    # LP64↔ILP64 switch: an integer-named typedef (MKL_INT) flips width 32→64.
+    # No symbol added/removed, yet every caller now passes/reads the wrong width
+    # (integer_model_changed → BREAKING).
+    old = _lib("1", [_fn("solve")], typedefs={"MKL_INT": "int"})
+    new = _lib("2", [_fn("solve")], typedefs={"MKL_INT": "int64_t"})
+    res = _compare(tmp_path, old, new, "--no-scope-public-headers", "--format", "json")
+    assert res.exit_code == 4
+    doc = json.loads(res.output)
+    assert doc["verdict"] == "BREAKING"
+    assert any(c["kind"] == "integer_model_changed" for c in doc["changes"])
+
+
+def test_sc_toolchain_flag_drift(tmp_path: Path) -> None:
+    # ABI-affecting compiler flags (recorded in DWARF toolchain metadata) drift
+    # between two builds of the same sources. The scanner surfaces
+    # toolchain_flag_drift as a *risk* signal — visible, but not a confirmed
+    # break, so the default gate stays green (exit 0).
+    def _adv(flags: set[str]) -> AdvancedDwarfMetadata:
+        meta = AdvancedDwarfMetadata(has_dwarf=True)
+        meta.toolchain.abi_flags = flags
+        return meta
+
+    old = _lib("1", [_fn("a")], dwarf_advanced=_adv({"-fno-exceptions"}))
+    new = _lib("2", [_fn("a")], dwarf_advanced=_adv({"-fno-exceptions", "-ffast-math"}))
+    res = _compare(tmp_path, old, new, "--no-scope-public-headers", "--format", "json")
+    assert res.exit_code == 0
+    doc = json.loads(res.output)
+    assert doc["verdict"] == "COMPATIBLE"
+    assert any(c["kind"] == "toolchain_flag_drift" for c in doc["changes"])
