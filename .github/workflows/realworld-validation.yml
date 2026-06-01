@@ -1,0 +1,99 @@
+name: Real-world ABI validation
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 5 * * 1"
+  pull_request:
+    paths:
+      - "abicheck/package.py"
+      - "abicheck/cli_compare_release.py"
+      - "abicheck/bundle.py"
+      - "tests/test_package.py"
+      - "tests/test_compare_release.py"
+      - "tests/test_bundle.py"
+      - ".github/workflows/realworld-validation.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  ubuntu-package-smoke:
+    name: Ubuntu package and bundle smoke
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.13"
+          cache: "pip"
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y castxml gcc g++ binutils zstd abigail-tools zlib1g-dev
+
+      - name: Install abicheck
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Focused regression tests
+        run: |
+          pytest -q \
+            tests/test_package.py::TestDebExtractorExtended \
+            tests/test_package.py::TestDebExtractorNoDataTar \
+            tests/test_compare_release.py::TestCompareReleaseIncludes \
+            tests/test_bundle.py::TestCompareReleaseBundleE2E
+
+      - name: Download Ubuntu package inputs
+        run: |
+          mkdir -p reports/realworld inputs/debs
+          cd inputs/debs
+          apt-get download zlib1g zlib1g-dev
+
+      - name: Compare a real Debian package against itself
+        run: |
+          set -euo pipefail
+          cd inputs/debs
+          runtime_deb="$(ls zlib1g_*.deb | head -1)"
+          devel_deb="$(ls zlib1g-dev_*.deb | head -1)"
+          cd ../..
+          abicheck compare-release \
+            "inputs/debs/${runtime_deb}" \
+            "inputs/debs/${runtime_deb}" \
+            --devel-pkg1 "inputs/debs/${devel_deb}" \
+            --devel-pkg2 "inputs/debs/${devel_deb}" \
+            --no-bundle-analysis \
+            --format json \
+            -o reports/realworld/zlib-deb-self.json
+          python - <<'PY'
+          import json
+          data = json.load(open("reports/realworld/zlib-deb-self.json"))
+          assert data["verdict"] in {"NO_CHANGE", "COMPATIBLE"}
+          assert "bundle_findings" not in data
+          PY
+
+      - name: Cross-check package self-compare with abidiff
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/abicheck-realworld-old /tmp/abicheck-realworld-new
+          runtime_deb="$(ls inputs/debs/zlib1g_*.deb | head -1)"
+          dpkg-deb -x "${runtime_deb}" /tmp/abicheck-realworld-old
+          dpkg-deb -x "${runtime_deb}" /tmp/abicheck-realworld-new
+          abidiff \
+            /tmp/abicheck-realworld-old/usr/lib/x86_64-linux-gnu/libz.so.1.3 \
+            /tmp/abicheck-realworld-new/usr/lib/x86_64-linux-gnu/libz.so.1.3 \
+            > reports/realworld/zlib-abidiff.txt
+
+      - name: Upload real-world validation artifacts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: realworld-validation
+          path: reports/realworld

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import io
 import struct
+import sys
 import tarfile
 import zipfile
 from pathlib import Path
@@ -1063,6 +1064,131 @@ class TestDebExtractorExtended:
         with mock.patch("abicheck.package.shutil.which", return_value=None):
             with pytest.raises(RuntimeError, match="ar not found"):
                 DebExtractor().extract(f, out)
+
+    def test_extract_data_tar_zst_uses_zstd_tar_helper(self, tmp_path: Path) -> None:
+        """DebExtractor handles modern Debian data.tar.zst payloads."""
+        f = tmp_path / "test.deb"
+        f.write_bytes(b"!<arch>\n" + b"\x00" * 100)
+        out = tmp_path / "output"
+        out.mkdir()
+
+        def fake_run(*args, **kwargs):
+            staging = Path(kwargs.get("cwd", "."))
+            (staging / "data.tar.zst").write_bytes(b"zstd payload")
+            return mock.Mock(returncode=0)
+
+        with mock.patch("abicheck.package.shutil.which", return_value="/usr/bin/ar"):
+            with mock.patch("abicheck.package.subprocess.run", side_effect=fake_run) as mock_run:
+                with mock.patch("abicheck.package.TarExtractor._safe_extract_zst_tar") as extract_zst:
+                    DebExtractor().extract(f, out)
+
+        mock_run.assert_called_once()
+        ar_cmd = mock_run.call_args.args[0]
+        assert Path(ar_cmd[2]).is_absolute()
+        extract_zst.assert_called_once()
+        assert extract_zst.call_args.args[0].name == "data.tar.zst"
+
+    def test_extract_relative_deb_path_passes_absolute_path_to_ar(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """DebExtractor changes cwd for ar, so relative input paths must be resolved."""
+        f = tmp_path / "test.deb"
+        f.write_bytes(b"!<arch>\n" + b"\x00" * 100)
+        out = tmp_path / "output"
+        out.mkdir()
+        monkeypatch.chdir(tmp_path)
+        ar_input_paths: list[Path] = []
+
+        def fake_run(args, **kwargs):
+            ar_input_paths.append(Path(args[2]))
+            staging = Path(kwargs.get("cwd", "."))
+            (staging / "data.tar.xz").write_bytes(b"tar payload")
+            return mock.Mock(returncode=0)
+
+        with mock.patch("abicheck.package.shutil.which", return_value="/usr/bin/ar"):
+            with mock.patch("abicheck.package.subprocess.run", side_effect=fake_run):
+                with mock.patch("abicheck.package.TarExtractor._safe_extract"):
+                    DebExtractor().extract(Path("test.deb"), out)
+
+        assert ar_input_paths == [f.resolve()]
+
+    def test_tar_zst_is_package(self, tmp_path: Path) -> None:
+        """Plain .tar.zst archives are recognized as package inputs."""
+        f = tmp_path / "sdk.tar.zst"
+        f.write_bytes(b"not real zstd")
+        assert TarExtractor().detect(f)
+        assert is_package(f)
+
+    def test_safe_extract_zst_tar_uses_private_staging_dir(self, tmp_path: Path) -> None:
+        """Decompression must not clobber a sibling .tar next to user input."""
+        cache = tmp_path / "cache"
+        target = tmp_path / "target"
+        cache.mkdir()
+        target.mkdir()
+        zst_path = cache / "sdk.tar.zst"
+        sibling_tar = cache / "sdk.tar"
+        zst_path.write_bytes(b"compressed")
+        sibling_tar.write_text("do not touch")
+
+        mock_zstd = mock.MagicMock()
+        mock_dctx = mock.MagicMock()
+        mock_zstd.ZstdDecompressor.return_value = mock_dctx
+
+        class FakeReader:
+            def __enter__(self):
+                return io.BytesIO(b"tar data")
+
+            def __exit__(self, *args):
+                return None
+
+        mock_dctx.stream_reader.return_value = FakeReader()
+
+        with mock.patch.dict(sys.modules, {"zstandard": mock_zstd}):
+            with mock.patch("abicheck.package.TarExtractor._safe_extract") as safe_extract:
+                TarExtractor._safe_extract_zst_tar(zst_path, target)
+
+        tar_path = safe_extract.call_args.args[0]
+        extract_target = safe_extract.call_args.args[1]
+        assert tar_path.parent.parent == target
+        assert not tar_path.exists()
+        assert not tar_path.parent.exists()
+        assert extract_target == target
+        assert sibling_tar.read_text() == "do not touch"
+
+    def test_safe_extract_zst_tar_cli_fallback_writes_to_staging_dir(
+        self, tmp_path: Path,
+    ) -> None:
+        """The zstd CLI fallback must also avoid writing next to the input."""
+        cache = tmp_path / "cache"
+        target = tmp_path / "target"
+        cache.mkdir()
+        target.mkdir()
+        zst_path = cache / "sdk.tar.zst"
+        sibling_tar = cache / "sdk.tar"
+        zst_path.write_bytes(b"compressed")
+        sibling_tar.write_text("do not touch")
+
+        real_import = __import__
+
+        def fake_import(name, *args, **kwargs):
+            if name == "zstandard":
+                raise ImportError
+            return real_import(name, *args, **kwargs)
+
+        with mock.patch("builtins.__import__", side_effect=fake_import):
+            with mock.patch("abicheck.package.shutil.which", return_value="/usr/bin/zstd"):
+                with mock.patch("abicheck.package.subprocess.run") as run_zstd:
+                    with mock.patch("abicheck.package.TarExtractor._safe_extract") as safe_extract:
+                        TarExtractor._safe_extract_zst_tar(zst_path, target)
+
+        cmd = run_zstd.call_args.args[0]
+        output_path = Path(cmd[cmd.index("-o") + 1])
+        tar_path = safe_extract.call_args.args[0]
+        assert output_path == tar_path
+        assert output_path.parent.parent == target
+        assert not output_path.parent.exists()
+        assert safe_extract.call_args.args[1] == target
+        assert sibling_tar.read_text() == "do not touch"
 
 
 # ── Conda extractor extended ────────────────────────────────────────────

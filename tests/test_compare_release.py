@@ -13,7 +13,11 @@ from abicheck.cli import (
     _version_sort_key,
     main,
 )
-from abicheck.cli_compare_release import _extract_if_package
+from abicheck.cli_compare_release import (
+    _discover_include_roots,
+    _extract_if_package,
+    _prepare_compare_release_inputs,
+)
 from abicheck.model import (
     AbiSnapshot,
     Function,
@@ -788,3 +792,49 @@ class TestExtractIfPackage:
         assert lib_out == main_lib
         assert debug_out == extracted_debug  # .debug_dir preferred over .lib_dir
         assert header_out is None
+
+
+class TestCompareReleaseIncludes:
+    def test_discover_include_roots_for_debian_layout(self, tmp_path: Path) -> None:
+        """Devel package roots include common distro include subroots."""
+        root = tmp_path / "dev"
+        (root / "usr" / "include" / "x86_64-linux-gnu").mkdir(parents=True)
+        (root / "usr" / "include" / "libxml2").mkdir()
+        roots = _discover_include_roots(root)
+        assert root in roots
+        assert root / "usr" / "include" in roots
+        assert root / "usr" / "include" / "x86_64-linux-gnu" in roots
+        assert root / "usr" / "include" / "libxml2" in roots
+
+    def test_prepare_inputs_accepts_side_specific_includes(self, tmp_path: Path) -> None:
+        """compare-release has compare-like --old-include/--new-include plumbing."""
+        old = tmp_path / "old"
+        new = tmp_path / "new"
+        old.mkdir()
+        new.mkdir()
+        old_lib = old / "libfoo.so"
+        new_lib = new / "libfoo.so"
+        old_lib.write_text("old")
+        new_lib.write_text("new")
+        old_inc_only = tmp_path / "old-include"
+        new_inc_only = tmp_path / "new-include"
+        old_inc_only.mkdir()
+        new_inc_only.mkdir()
+
+        result = _prepare_compare_release_inputs(
+            old, new,
+            None, None, None, None,
+            False, False,
+            (), (), (),
+            (),
+            (old_inc_only,), (new_inc_only,),
+            lambda p, _dbg, _dev: (p, None, None),
+            lambda *_args, **_kwargs: [],
+            lambda _p: False,
+            lambda _p: True,
+        )
+
+        old_inc = result[4]
+        new_inc = result[5]
+        assert old_inc == [old_inc_only]
+        assert new_inc == [new_inc_only]

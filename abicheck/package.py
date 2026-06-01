@@ -1,4 +1,5 @@
 # Copyright 2026 Nikolay Petrov
+# SPDX-License-Identifier: Apache-2.0
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -130,11 +131,14 @@ class TarExtractor:
 
     def detect(self, pkg_path: Path) -> bool:
         name = pkg_path.name.lower()
-        return name.endswith((".tar", ".tar.gz", ".tar.xz", ".tar.bz2", ".tgz"))
+        return name.endswith((".tar", ".tar.gz", ".tar.xz", ".tar.bz2", ".tar.zst", ".tgz"))
 
     def extract(self, pkg_path: Path, target_dir: Path) -> ExtractResult:
         _log.info("Extracting tar archive: %s", pkg_path)
-        self._safe_extract(pkg_path, target_dir)
+        if pkg_path.name.lower().endswith(".tar.zst"):
+            self._safe_extract_zst_tar(pkg_path, target_dir)
+        else:
+            self._safe_extract(pkg_path, target_dir)
         return ExtractResult(lib_dir=target_dir)
 
     @staticmethod
@@ -175,6 +179,38 @@ class TarExtractor:
                 tf.extractall(path=target_dir, filter="data")  # nosec B202 — members validated above
             else:
                 tf.extractall(path=target_dir)  # nosec B202 — members validated above
+
+    @staticmethod
+    def _safe_extract_zst_tar(zst_path: Path, target_dir: Path) -> None:
+        """Extract a zstd-compressed tar archive with the normal tar safety checks."""
+        staging = Path(tempfile.mkdtemp(dir=target_dir, prefix=".abicheck-zst-"))
+        tar_path = staging / "payload.tar"
+        try:
+            try:
+                import zstandard
+            except ImportError:
+                zstandard = None
+            if zstandard is not None:
+                dctx = zstandard.ZstdDecompressor()
+                with open(zst_path, "rb") as compressed, open(tar_path, "wb") as out:
+                    with dctx.stream_reader(compressed) as reader:
+                        shutil.copyfileobj(reader, out)
+            else:
+                zstd = shutil.which("zstd")
+                if zstd is None:
+                    raise SnapshotError(
+                        "Cannot extract .tar.zst: install 'zstandard' Python package "
+                        "or 'zstd' command-line tool."
+                    )
+                subprocess.run(
+                    [zstd, "-d", "-f", str(zst_path), "-o", str(tar_path)],
+                    check=True,
+                    capture_output=True,
+                    timeout=120,
+                )
+            TarExtractor._safe_extract(tar_path, target_dir)
+        finally:
+            shutil.rmtree(staging, ignore_errors=True)
 
 
 # ── RPM extractor ────────────────────────────────────────────────────────────
@@ -331,7 +367,7 @@ class DebExtractor:
         staging = Path(tempfile.mkdtemp(dir=target_dir, prefix=".deb_staging_"))
         try:
             subprocess.run(
-                [ar, "x", str(deb_path)],
+                [ar, "x", str(deb_path.resolve())],
                 cwd=str(staging),
                 check=True,
                 capture_output=True,
@@ -351,7 +387,10 @@ class DebExtractor:
                 )
 
             # Extract data.tar.* with security checks
-            TarExtractor._safe_extract(data_tar, target_dir)
+            if data_tar.name.endswith(".tar.zst"):
+                TarExtractor._safe_extract_zst_tar(data_tar, target_dir)
+            else:
+                TarExtractor._safe_extract(data_tar, target_dir)
         finally:
             shutil.rmtree(staging, ignore_errors=True)
 
@@ -434,60 +473,7 @@ class CondaExtractor:
     @staticmethod
     def _extract_zst_tar(zst_path: Path, target_dir: Path) -> None:
         """Extract a .tar.zst file using zstd + tar or Python zstandard."""
-        # Try Python zstandard first
-        try:
-            import zstandard
-            dctx = zstandard.ZstdDecompressor()
-            with open(zst_path, "rb") as compressed:
-                with dctx.stream_reader(compressed) as reader:
-                    with tarfile.open(fileobj=reader, mode="r|") as tf:
-                        target_root = target_dir.resolve()
-                        for member in tf:
-                            _validate_member_path(member.name, target_root)
-                            if member.ischr() or member.isblk() or member.isfifo():
-                                raise ExtractionSecurityError(
-                                    member.name,
-                                    "archive contains a device or FIFO entry",
-                                )
-                            if member.issym():
-                                _validate_symlink_target(
-                                    member.name, member.linkname, target_root
-                                )
-                            elif member.islnk():
-                                _validate_member_path(
-                                    member.linkname, target_root
-                                )
-                        # Re-read for extraction (stream was consumed)
-                with open(zst_path, "rb") as compressed2:
-                    with dctx.stream_reader(compressed2) as reader2:
-                        with tarfile.open(fileobj=reader2, mode="r|") as tf2:
-                            if sys.version_info >= (3, 12):
-                                tf2.extractall(path=target_dir, filter="data")  # nosec B202
-                            else:
-                                tf2.extractall(path=target_dir)  # nosec B202
-            return
-        except ImportError:
-            pass
-
-        # Fall back to system zstd command
-        zstd = shutil.which("zstd")
-        if zstd is None:
-            raise SnapshotError(
-                "Cannot extract .tar.zst: install 'zstandard' Python package "
-                "or 'zstd' command-line tool."
-            )
-        # Decompress to tar, then extract
-        tar_path = zst_path.with_suffix("")  # strip .zst
-        subprocess.run(
-            [zstd, "-d", str(zst_path), "-o", str(tar_path)],
-            check=True,
-            capture_output=True,
-            timeout=120,
-        )
-        try:
-            TarExtractor._safe_extract(tar_path, target_dir)
-        finally:
-            tar_path.unlink(missing_ok=True)
+        TarExtractor._safe_extract_zst_tar(zst_path, target_dir)
 
 
 # ── Wheel (pip) extractor ────────────────────────────────────────────────────
@@ -551,7 +537,7 @@ def is_package(path: Path) -> bool:
         return False
     name = path.name.lower()
     if name.endswith((
-        ".rpm", ".deb", ".tar", ".tar.gz", ".tar.xz", ".tar.bz2", ".tgz",
+        ".rpm", ".deb", ".tar", ".tar.gz", ".tar.xz", ".tar.bz2", ".tar.zst", ".tgz",
         ".conda", ".whl",
     )):
         return True

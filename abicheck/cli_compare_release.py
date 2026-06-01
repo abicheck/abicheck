@@ -1,4 +1,5 @@
 # Copyright 2026 Nikolay Petrov
+# SPDX-License-Identifier: Apache-2.0
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -103,6 +104,31 @@ def _resolve_release_headers(
     if new_header_dir and not new_headers_only:
         new_h = [new_header_dir]
     return old_h, new_h
+
+
+def _discover_include_roots(header_dir: Path | None) -> list[Path]:
+    """Return common include roots from an extracted devel/header package."""
+    if header_dir is None:
+        return []
+    candidates = [
+        header_dir,
+        header_dir / "usr" / "include",
+        header_dir / "usr" / "local" / "include",
+    ]
+    usr_include = header_dir / "usr" / "include"
+    if usr_include.is_dir():
+        candidates.extend(p for p in usr_include.iterdir() if p.is_dir())
+    seen: set[Path] = set()
+    roots: list[Path] = []
+    for candidate in candidates:
+        if not candidate.is_dir():
+            continue
+        resolved = candidate.resolve()
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        roots.append(candidate)
+    return roots
 
 
 def _match_release_keys(
@@ -875,6 +901,12 @@ def _strip_diff_results_and_adjust_verdict(
 @click.option("-I", "--include", "includes", multiple=True,
               type=click.Path(path_type=Path),
               help="Extra include directory for castxml.")
+@click.option("--old-include", "old_includes_only", multiple=True,
+              type=click.Path(path_type=Path),
+              help="Include directory for old side only (overrides -I for old).")
+@click.option("--new-include", "new_includes_only", multiple=True,
+              type=click.Path(path_type=Path),
+              help="Include directory for new side only (overrides -I for new).")
 @click.option("--old-header", "old_headers_only", multiple=True,
               type=click.Path(path_type=Path),
               help="Header for old side only (overrides -H for old).")
@@ -943,8 +975,7 @@ def _strip_diff_results_and_adjust_verdict(
               help="Declare a co-versioned library cohort by name prefix (e.g. "
                    "'libonedal_'). Repeatable. Enables the BUNDLE_SONAME_SKEW check, "
                    "which flags when some members of the cohort bump their major SONAME "
-                   "while siblings lag. Opt-in: with no --bundle-cohort, SONAME skew is "
-                   "never inferred from filenames (independent libraries are not compared).")
+                   "while siblings lag, and enables bundle-level cross-library analysis.")
 @click.option("--no-bundle-analysis", "no_bundle_analysis", is_flag=True, default=False,
               help="Skip bundle-level cross-library analysis (debug/parity escape hatch). "
                    "Bundle findings catch intra-bundle symbol removals, signature drift "
@@ -971,6 +1002,8 @@ def compare_release_cmd(
     new_dir: Path,
     headers: tuple[Path, ...],
     includes: tuple[Path, ...],
+    old_includes_only: tuple[Path, ...],
+    new_includes_only: tuple[Path, ...],
     old_headers_only: tuple[Path, ...],
     new_headers_only: tuple[Path, ...],
     old_version: str,
@@ -1067,7 +1100,8 @@ def compare_release_cmd(
             old_dir, new_dir,
             debug_info1, debug_info2, devel_pkg1, devel_pkg2,
             include_private_dso, dso_only,
-            headers, old_headers_only, new_headers_only, includes,
+            headers, old_headers_only, new_headers_only,
+            includes, old_includes_only, new_includes_only,
             _do_extract, discover_shared_libraries, is_package, _is_elf_shared_object,
         )
 
@@ -1096,7 +1130,8 @@ def compare_release_cmd(
         )
 
         bundle_result: BundleDiffResult | None = None
-        if not no_bundle_analysis:
+        bundle_requested = manifest_path is not None or bool(bundle_cohorts)
+        if not no_bundle_analysis and bundle_requested:
             bundle_result, worst_verdict = _collect_bundle_result(
                 library_results, old_map, new_map, worst_verdict,
                 manifest_path=manifest_path,
@@ -1141,6 +1176,8 @@ def _prepare_compare_release_inputs(
     old_headers_only: tuple[Path, ...],
     new_headers_only: tuple[Path, ...],
     includes: tuple[Path, ...],
+    old_includes_only: tuple[Path, ...],
+    new_includes_only: tuple[Path, ...],
     extract_if_package: Callable[[Path, Path | None, Path | None], tuple[Path, Path | None, Path | None]],
     discover_shared_libraries: Callable[..., list[Path]],
     is_package: Callable[[Path], bool],
@@ -1173,8 +1210,10 @@ def _prepare_compare_release_inputs(
     old_h, new_h = _resolve_release_headers(
         headers, old_headers_only, new_headers_only, old_header_dir, new_header_dir,
     )
-    old_inc = list(includes)
-    new_inc = list(includes)
+    old_inc = list(old_includes_only) if old_includes_only else list(includes)
+    new_inc = list(new_includes_only) if new_includes_only else list(includes)
+    old_inc.extend(_discover_include_roots(old_header_dir))
+    new_inc.extend(_discover_include_roots(new_header_dir))
     matched_keys, removed_keys, added_keys, old_map, new_map = _match_release_keys(
         old_dir, new_dir, old_map, new_map, old_files, new_files, is_package,
     )
@@ -1204,4 +1243,3 @@ def _exit_compare_release(
 
 
 # ── Suggest suppressions command ──────────────────────────────────────────────
-
