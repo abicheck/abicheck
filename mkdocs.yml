@@ -83,7 +83,6 @@ nav:
     - Backlog: development/backlog.md
     - User Scenarios & Flows: development/user-scenarios.md
     - Use-Case Coverage Evaluation: development/usecase-coverage-evaluation.md
-    - "Real-world Validation (2026-06)": development/realworld-validation-2026-06.md
     - Implementation Plans:
       - Overview: development/plans/index.md
       - "G1: Cross-platform e2e": development/plans/g1-cross-platform-e2e.md
