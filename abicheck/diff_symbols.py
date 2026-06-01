@@ -65,6 +65,16 @@ def _type_unknown(type_name: str | None) -> bool:
     return type_name is None or type_name.strip() == _UNKNOWN_TYPE
 
 
+def _params_unknown(f: Function) -> bool:
+    """True when a function's *parameter* evidence is absent, not merely its
+    return type. A stripped, symbols-only export has an unknown return ("?") and
+    no parameter DIEs at all; a DWARF/header snapshot resolves the return and
+    each parameter independently, so an unresolved return with recorded params
+    is NOT unknown params (RD2-5; Codex review on PR #275 — int→long param
+    changes under an unresolved return must still be diffed)."""
+    return _type_unknown(f.return_type) and not f.params
+
+
 def _is_local_type_rtti(mangled: str) -> bool:
     """True for typeinfo/vtable symbols of a function-local type (e.g. a lambda).
 
@@ -155,10 +165,11 @@ def _check_return_type_change(mangled: str, f_old: Function, f_new: Function) ->
 
 def _check_params_change(mangled: str, f_old: Function, f_new: Function) -> list[Change]:
     """Emit a change if the parameter list was modified."""
-    # RD2-5: when either side's return type is the unknown sentinel ("?"), its
-    # whole signature (including params) is unresolved — a stripped ELF export.
-    # An empty param list there means "unknown", not "takes no arguments".
-    if _type_unknown(f_old.return_type) or _type_unknown(f_new.return_type):
+    # RD2-5: skip only when a side's *parameter* evidence is absent (stripped
+    # ELF export: unknown return AND no param DIEs). A DWARF/header side with an
+    # unresolved return but recorded params still has comparable params, so an
+    # int→long param change must not be dropped (Codex review on PR #275).
+    if _params_unknown(f_old) or _params_unknown(f_new):
         return []
     old_params = [(canonicalize_type_name(p.type), p.kind) for p in f_old.params]
     new_params = [(canonicalize_type_name(p.type), p.kind) for p in f_new.params]
@@ -586,13 +597,17 @@ def _diff_pointer_levels(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         f_new = new_map.get(mangled)
         if f_new is None:
             continue
-        # RD2-5: skip when either signature is unknown (stripped ELF export):
-        # pointer depths default to 0 and would read as phantom level changes.
-        if _type_unknown(f_old.return_type) or _type_unknown(f_new.return_type):
-            continue
 
+        # RD2-5: guard each axis independently — a stripped ELF export reports
+        # an unknown return ("?") and no params, where depths default to 0 and
+        # would read as phantom level changes. Skip the return-depth check only
+        # when the return is unknown, and the param-depth loop only when the
+        # parameter evidence is absent (Codex review on PR #275).
+        return_known = not (
+            _type_unknown(f_old.return_type) or _type_unknown(f_new.return_type)
+        )
         # Return pointer depth
-        if f_old.return_pointer_depth != f_new.return_pointer_depth and (
+        if return_known and f_old.return_pointer_depth != f_new.return_pointer_depth and (
             f_old.return_pointer_depth > 0 or f_new.return_pointer_depth > 0
         ):
             changes.append(Change(
@@ -602,6 +617,9 @@ def _diff_pointer_levels(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                 old_value=str(f_old.return_pointer_depth),
                 new_value=str(f_new.return_pointer_depth),
             ))
+
+        if _params_unknown(f_old) or _params_unknown(f_new):
+            continue
 
         # Param pointer depths
         for i, (p_old, p_new) in enumerate(zip(f_old.params, f_new.params)):

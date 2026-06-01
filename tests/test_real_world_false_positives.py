@@ -332,6 +332,25 @@ def test_unknown_signature_not_flagged_as_change():
     assert offenders == [], f"unknown ('?') signatures must not be diffed: {offenders}"
 
 
+def test_param_change_still_detected_when_only_return_is_unknown():
+    """A DWARF/header snapshot can resolve params while leaving the return type
+    unknown ('?'). A real param change (int->long) must still be flagged — the
+    unknown-return guard must not swallow it (Codex review on PR #275)."""
+    from abicheck.checker_policy import ChangeKind
+    from abicheck.model import Function, Param
+    old = _elf_snapshot(functions=[Function(
+        name="f", mangled="_Z1fi", return_type="?",
+        params=[Param(name="a", type="int")], visibility=Visibility.PUBLIC)])
+    new = _elf_snapshot(functions=[Function(
+        name="f", mangled="_Z1fi", return_type="?",
+        params=[Param(name="a", type="long")], visibility=Visibility.PUBLIC)])
+    result = compare(old, new)
+    assert any(c.kind == ChangeKind.FUNC_PARAMS_CHANGED for c in result.changes), (
+        "param int->long under an unresolved return must still be detected; "
+        f"changes: {[(c.kind.value, c.symbol) for c in result.changes]}"
+    )
+
+
 # ---------------------------------------------------------------------------
 # FP-1 guard rail — the std:: exclusion must NOT hide breaks when the inspected
 #   DSO *is* the C++ runtime/standard library (libstdc++/libc++).  There std::
