@@ -90,10 +90,21 @@ def _removals_are_unconfirmed(old: AbiSnapshot, new: AbiSnapshot) -> bool:
     # Corroborate with symbol retention: a stripped-but-intact binary keeps
     # (almost) all of the old side's exported functions. If most of them are
     # gone, the library genuinely changed and removals are real.
-    old_funcs = {f.mangled for f in old.functions if f.mangled}
+    #
+    # Only count *exported* old functions. A DWARF-primary old snapshot also
+    # records internal/static subprograms, but the stripped new side carries
+    # dynamic exports only — counting internals would deflate retention and
+    # defeat the suppression for a genuinely intact DWARF→stripped comparison.
+    old_funcs = {
+        f.mangled for f in old.functions
+        if f.mangled and f.visibility in _PUBLIC_VIS
+    }
     if not old_funcs:
-        return True  # no functions to corroborate; absence of types is just stripping
-    new_funcs = {f.mangled for f in new.functions if f.mangled}
+        return True  # no exported functions to corroborate; absence of types is just stripping
+    new_funcs = {
+        f.mangled for f in new.functions
+        if f.mangled and f.visibility in _PUBLIC_VIS
+    }
     retained = len(old_funcs & new_funcs) / len(old_funcs)
     return retained >= 0.9
 

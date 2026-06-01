@@ -209,6 +209,7 @@ def test_stripped_new_side_does_not_fabricate_type_removals():
             RecordType(name="_xmlDoc", kind="struct", size_bits=512),
         ],
     )
+    old.typedefs = {"xmlNodePtr": "_xmlNode *", "xmlDocPtr": "_xmlDoc *"}
     # new: same library, but the binary is stripped -> exports the same symbols,
     # zero type DWARF (a real stripped .so still has a dynamic symbol table).
     new = _elf_snapshot(
@@ -223,6 +224,7 @@ def test_stripped_new_side_does_not_fabricate_type_removals():
     )
     from abicheck.checker_policy import ChangeKind
     assert not any(c.kind == ChangeKind.TYPE_REMOVED for c in result.changes)
+    assert not any(c.kind == ChangeKind.TYPEDEF_REMOVED for c in result.changes)
 
 
 def test_real_removal_still_reported_when_symbols_also_dropped():
@@ -242,6 +244,69 @@ def test_real_removal_still_reported_when_symbols_also_dropped():
         "removing a class together with its exported methods must still break; "
         f"changes: {[(c.kind.value, c.symbol) for c in result.changes]}"
     )
+
+
+def test_stripped_suppression_counts_only_exported_functions():
+    """The stripped-side retention check must ignore internal/static DWARF
+    subprograms: a DWARF-primary old snapshot records them as functions, but the
+    stripped new side only has dynamic exports. Counting internals would deflate
+    retention and defeat the suppression for an intact DWARF→stripped bump
+    (Codex review on PR #275)."""
+    from abicheck.checker_policy import ChangeKind
+    from abicheck.model import Function
+    exported = [_exported_func("xmlNewNode"), _exported_func("xmlFreeDoc")]
+    # old: 2 exported + many internal (HIDDEN) DWARF subprograms + rich types.
+    internal = [
+        Function(name=f"__internal_{i}", mangled=f"__internal_{i}",
+                 return_type="void", visibility=Visibility.HIDDEN)
+        for i in range(50)
+    ]
+    old = _elf_snapshot(
+        functions=exported + internal,
+        types=[RecordType(name="_xmlNode", kind="struct", size_bits=960)],
+    )
+    # new: stripped → exports the same 2 public symbols, no types, no internals.
+    new = _elf_snapshot(functions=list(exported), types=[])
+    new.dwarf = None
+    result = compare(old, new)
+    assert not any(c.kind == ChangeKind.TYPE_REMOVED for c in result.changes), (
+        "internal DWARF functions must not deflate retention and re-enable the "
+        f"phantom avalanche; changes: {[(c.kind.value, c.symbol) for c in result.changes]}"
+    )
+
+
+def test_has_type_evidence_via_dwarf_structs_blocks_suppression():
+    """When the new side still carries DWARF *content* (structs), it is not
+    stripped and removals are NOT suppressed (covers the DWARF branch of the
+    type-evidence check)."""
+    from abicheck.checker_policy import ChangeKind
+    from abicheck.dwarf_metadata import DwarfMetadata, StructLayout
+    old = _elf_snapshot(
+        functions=[_exported_func("api")],
+        types=[RecordType(name="Gone", kind="struct", size_bits=32)],
+    )
+    new = _elf_snapshot(functions=[_exported_func("api")], types=[])
+    # new has real DWARF content → has type evidence → not "stripped".
+    new.dwarf = DwarfMetadata(structs={"Other": StructLayout(name="Other", byte_size=4)}, has_dwarf=True)
+    result = compare(old, new)
+    assert any(c.kind == ChangeKind.TYPE_REMOVED and c.symbol == "Gone" for c in result.changes)
+
+
+def test_stripped_suppression_with_only_variable_exports():
+    """A stripped new side that exports only variables (no functions) is still
+    recognised as stripped (covers the 'no exported functions' branch)."""
+    from abicheck.checker_policy import ChangeKind
+    old = _elf_snapshot(
+        variables=[Variable(name="g", mangled="g", type="int", visibility=Visibility.ELF_ONLY)],
+        types=[RecordType(name="_xmlNode", kind="struct", size_bits=960)],
+    )
+    new = _elf_snapshot(
+        variables=[Variable(name="g", mangled="g", type="?", visibility=Visibility.ELF_ONLY)],
+        types=[],
+    )
+    new.dwarf = None
+    result = compare(old, new)
+    assert not any(c.kind == ChangeKind.TYPE_REMOVED for c in result.changes)
 
 
 def test_unknown_signature_not_flagged_as_change():
