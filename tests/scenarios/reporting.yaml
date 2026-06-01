@@ -21,6 +21,28 @@ scenarios:
     automated: true
     test: test_sc_scan_sarif
 
+  - id: SC-CONSUME-JSON
+    title: Consume the versioned JSON report as the machine decision contract
+    persona: CI engineer / automation
+    narrative: >
+      Exit codes alone are lossy (exit 0 covers NO_CHANGE / COMPATIBLE /
+      COMPATIBLE_WITH_RISK), so any non-trivial gate — including the oneDAL
+      strict gate — keys off the JSON report instead. That report is a stable,
+      versioned contract: it must carry report_schema_version, a top-level
+      verdict, and a per-finding changes list a decision script can branch on.
+    flow:
+      - abicheck compare old.json new.json --format json -o abi.json
+    expected:
+      exit_code: 4
+      verdict: BREAKING
+      require_summary_fields:
+        - report_schema_version
+        - verdict
+        - changes
+    validates: UC-REP-json
+    automated: true
+    test: test_sc_consume_json
+
   - id: SC-SCAN-JUNIT
     title: Produce JUnit XML for CI test dashboards
     persona: CI engineer
