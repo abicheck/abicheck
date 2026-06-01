@@ -710,6 +710,7 @@ def _collect_matrix_result(
     probe_matrix_new: Path | None,
     policy: str,
     worst_verdict: str,
+    policy_file_path: Path | None = None,
 ) -> tuple[list[Change] | None, str]:
     """Load probe-matrix snapshots, compute their verdict, fold into worst-of.
 
@@ -717,17 +718,28 @@ def _collect_matrix_result(
     given, matrix_changes is None and the verdict is unchanged. The matrix
     findings are release-global build-configuration changes
     (CXX_STANDARD_FLOOR_RAISED, API_DEPENDS_ON_CONSUMER_ENV,
-    BEHAVIOURAL_DEFAULT_CHANGED); their verdict is computed with the same
-    policy-aware :func:`compute_verdict` the single-pair ``compare`` uses, so
-    the two commands agree on how a matrix finding maps to a verdict.
+    BEHAVIOURAL_DEFAULT_CHANGED).
+
+    The verdict honours a ``--policy-file`` when supplied — applying its
+    per-kind overrides via :meth:`PolicyFile.compute_verdict` exactly as the
+    single-pair ``compare`` path does (which routes the same changes through
+    ``checker.compare``) — otherwise it falls back to the built-in
+    ``--policy`` profile. This keeps an override such as
+    ``cxx_standard_floor_raised: ignore`` effective on both commands.
     """
     from .cli import _load_probe_matrix_changes
 
     matrix_changes = _load_probe_matrix_changes(probe_matrix_old, probe_matrix_new)
     if matrix_changes:
-        from .checker_policy import compute_verdict
+        pf = None
+        if policy_file_path is not None:
+            _, pf = _load_suppression_and_policy(None, policy, policy_file_path)
+        if pf is not None:
+            matrix_verdict = pf.compute_verdict(matrix_changes).value
+        else:
+            from .checker_policy import compute_verdict
 
-        matrix_verdict = compute_verdict(matrix_changes, policy=policy).value
+            matrix_verdict = compute_verdict(matrix_changes, policy=policy).value
         if _RELEASE_VERDICT_ORDER.get(matrix_verdict, 0) > _RELEASE_VERDICT_ORDER.get(worst_verdict, 0):
             worst_verdict = matrix_verdict
     return matrix_changes, worst_verdict
@@ -1077,6 +1089,7 @@ def compare_release_cmd(
         # worst-of verdict and surface as their own report section.
         matrix_changes, worst_verdict = _collect_matrix_result(
             probe_matrix_old, probe_matrix_new, policy, worst_verdict,
+            policy_file_path=policy_file_path,
         )
 
         _finalize_release_output(
