@@ -231,6 +231,52 @@ def _compare_one_library(
         return {"library": old_path.name, "verdict": "ERROR", "error": str(exc)}
 
 
+def _suppress_lockstep_soname_findings(
+    library_results: list[dict[str, object]],
+    worst_verdict: str,
+    output_dir: Path | None,
+) -> int:
+    """Drop ``SONAME_BUMP_UNNECESSARY`` when the release is a coordinated break.
+
+    A library only earns ``SONAME_BUMP_UNNECESSARY`` when *it* had no breaking
+    change yet its SONAME was bumped. In a multi-library release where a sibling
+    or dependency genuinely broke, bumping every member's SONAME in lockstep is
+    the correct, intentional practice — so the per-library "unnecessary" signal
+    is a false positive at the release level. Mutates the affected per-library
+    results (and re-writes their JSON when ``output_dir`` is set) and returns the
+    number of findings suppressed.
+    """
+    if worst_verdict not in ("API_BREAK", "BREAKING"):
+        return 0
+    from .checker_policy import ChangeKind
+
+    suppressed = 0
+    for entry in library_results:
+        result = entry.get("_diff_result")
+        if not isinstance(result, DiffResult):
+            continue
+        unnecessary = [
+            c for c in result.changes
+            if c.kind == ChangeKind.SONAME_BUMP_UNNECESSARY
+        ]
+        if not unnecessary:
+            continue
+        result.changes = [
+            c for c in result.changes
+            if c.kind != ChangeKind.SONAME_BUMP_UNNECESSARY
+        ]
+        suppressed += len(unnecessary)
+        # Recompute the cached per-library counts after the mutation.
+        entry["breaking"] = len(result.breaking)
+        entry["source_breaks"] = len(result.source_breaks)
+        entry["risk_changes"] = len(result.risk)
+        entry["compatible_additions"] = len(result.compatible)
+        if output_dir is not None:
+            lib_report_path = output_dir / f"{Path(str(entry['library'])).stem}.json"
+            _safe_write_output(lib_report_path, to_json(result))
+    return suppressed
+
+
 def _compare_release_libraries(
     matched_keys: list[str],
     old_map: dict[str, Path], new_map: dict[str, Path],
@@ -292,6 +338,19 @@ def _compare_release_libraries(
                 click.echo(f"Error comparing {entry['library']}: {entry['error']}", err=True)
         if _RELEASE_VERDICT_ORDER.get(v, 0) > _RELEASE_VERDICT_ORDER.get(worst_verdict, 0):
             worst_verdict = v
+
+    # Cross-library coupling: a coordinated SONAME bump across the release is not
+    # "unnecessary" just because one member had no break of its own.
+    suppressed_soname = _suppress_lockstep_soname_findings(
+        library_results, worst_verdict, output_dir,
+    )
+    if suppressed_soname:
+        click.echo(
+            f"Note: suppressed {suppressed_soname} 'soname_bump_unnecessary' "
+            "finding(s) — the release contains coordinated ABI breaks, so "
+            "lockstep SONAME bumps are justified.",
+            err=True,
+        )
 
     # collect_diff_results and annotate require re-running comparison for
     # affected libraries (only used for JUnit / GitHub annotations which

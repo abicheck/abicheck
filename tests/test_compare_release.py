@@ -838,3 +838,78 @@ class TestCompareReleaseIncludes:
         new_inc = result[5]
         assert old_inc == [old_inc_only]
         assert new_inc == [new_inc_only]
+
+
+class TestLockstepSonameCoupling:
+    """A coordinated lockstep SONAME bump across a multi-library release should
+    not be flagged 'unnecessary' on members that had no break of their own when
+    a sibling/dependency genuinely broke (real-world: oneDAL bumps every
+    libonedal* SONAME together because libonedal_core breaks)."""
+
+    @staticmethod
+    def _entry(lib, changes, verdict):
+        from abicheck.checker import DiffResult
+        result = DiffResult(
+            old_version="1", new_version="2", library=lib,
+            changes=changes, verdict=verdict,
+        )
+        return {
+            "library": lib, "verdict": verdict.value,
+            "breaking": len(result.breaking),
+            "source_breaks": len(result.source_breaks),
+            "risk_changes": len(result.risk),
+            "compatible_additions": len(result.compatible),
+            "_diff_result": result,
+        }
+
+    def test_suppressed_when_sibling_breaks(self):
+        from abicheck.checker import Change, ChangeKind, Verdict
+        from abicheck.cli_compare_release import _suppress_lockstep_soname_findings
+
+        umbrella = self._entry(
+            "libonedal.so", [
+                Change(ChangeKind.SONAME_BUMP_UNNECESSARY, "DT_SONAME", "bump"),
+            ], Verdict.COMPATIBLE,
+        )
+        core = self._entry(
+            "libonedal_core.so",
+            [Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed")],
+            Verdict.BREAKING,
+        )
+        n = _suppress_lockstep_soname_findings([umbrella, core], "BREAKING", None)
+        assert n == 1
+        kinds = [c.kind for c in umbrella["_diff_result"].changes]
+        assert ChangeKind.SONAME_BUMP_UNNECESSARY not in kinds
+        assert umbrella["compatible_additions"] == 0
+
+    def test_kept_when_no_real_break_in_release(self):
+        from abicheck.checker import Change, ChangeKind, Verdict
+        from abicheck.cli_compare_release import _suppress_lockstep_soname_findings
+
+        umbrella = self._entry(
+            "libonedal.so", [
+                Change(ChangeKind.SONAME_BUMP_UNNECESSARY, "DT_SONAME", "bump"),
+            ], Verdict.COMPATIBLE,
+        )
+        n = _suppress_lockstep_soname_findings([umbrella], "COMPATIBLE", None)
+        assert n == 0
+        kinds = [c.kind for c in umbrella["_diff_result"].changes]
+        assert ChangeKind.SONAME_BUMP_UNNECESSARY in kinds
+
+    def test_rewrites_per_library_json(self, tmp_path):
+        from abicheck.checker import Change, ChangeKind, Verdict
+        from abicheck.cli_compare_release import _suppress_lockstep_soname_findings
+
+        umbrella = self._entry(
+            "libonedal.so.3", [
+                Change(ChangeKind.SONAME_BUMP_UNNECESSARY, "DT_SONAME", "bump"),
+            ], Verdict.COMPATIBLE,
+        )
+        core = self._entry(
+            "libonedal_core.so.3",
+            [Change(ChangeKind.FUNC_REMOVED, "_Z3foov", "removed")],
+            Verdict.BREAKING,
+        )
+        _suppress_lockstep_soname_findings([umbrella, core], "BREAKING", tmp_path)
+        data = json.loads((tmp_path / "libonedal.so.json").read_text())
+        assert all(c["kind"] != "soname_bump_unnecessary" for c in data["changes"])
