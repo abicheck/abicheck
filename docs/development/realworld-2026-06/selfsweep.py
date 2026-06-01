@@ -22,7 +22,8 @@ REPORTS = Path("/tmp/val/reports")
 SEARCH = ["/usr/lib/x86_64-linux-gnu", "/lib/x86_64-linux-gnu"]
 
 
-def collect(n: int) -> list[Path]:
+def collect() -> list[Path]:
+    """Stratified sample: 20 smallest, 20 largest, 60 random-middle libraries."""
     seen: dict[str, Path] = {}
     for root in SEARCH:
         for p in Path(root).glob("*.so*"):
@@ -42,7 +43,7 @@ def collect(n: int) -> list[Path]:
 
 
 def main() -> None:
-    libs = collect(100)
+    libs = collect()
     results = []
     kind_global: Counter = Counter()
     for i, lib in enumerate(libs):

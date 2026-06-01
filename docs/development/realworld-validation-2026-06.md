@@ -10,9 +10,9 @@ positives, usability gaps, and rough edges, and (c) collect concrete data to
 seed the next planning/improvement round.
 
 Raw machine-readable artifacts referenced below live in
-[`realworld-2026-06/`](realworld-2026-06/) — see its
-[`README.md`](realworld-2026-06/README.md) for the file inventory (harness
-scripts, per-pair result lines, slimmed reports, and sweep summaries).
+[`realworld-2026-06/`](realworld-2026-06/README.md) — see its
+`README.md` for the file inventory (harness scripts, per-pair result lines,
+slimmed reports, and sweep summaries).
 
 ---
 
@@ -343,13 +343,18 @@ actionable review.
 
 ```bash
 pip install -e ".[dev]"
-# oneDAL real binaries:
+# oneDAL real binaries — download and unzip the wheels anywhere:
+mkdir -p wheels && cd wheels
 pip download --no-deps daal==2024.7.0 daal==2025.11.0 daal==2026.0.0
-#   unzip each wheel; libraries are under <wheel>/*.data/data/lib/*.so.*
-python docs/development/realworld-2026-06/harness.py     # cross-version oneDAL
-python docs/development/realworld-2026-06/selfsweep.py    # 100-lib self-compare
+for w in daal-*.whl; do unzip -q -o "$w" -d "${w%.whl}"; done   # libs under */*.data/data/lib/*.so.*
+cd ..
+
+# harness.py auto-discovers `daal-*` dirs in the args (or cwd / /tmp/val/work);
+# pass the wheel roots explicitly for reproducibility, and choose an output dir:
+python docs/development/realworld-2026-06/harness.py wheels --out reports   # cross-version oneDAL
+python docs/development/realworld-2026-06/selfsweep.py                      # 100-lib self-compare
 ```
 
-Artifacts in [`realworld-2026-06/`](realworld-2026-06/): `harness.py`,
+Artifacts in [`realworld-2026-06/`](realworld-2026-06/README.md): `harness.py`,
 `selfsweep.py`, `onedal_results.jsonl`, `selfsweep_results.jsonl`,
 `selfsweep_summary.json`, and slimmed headline reports (`*.slim.json`).
