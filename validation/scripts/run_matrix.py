@@ -5,14 +5,33 @@ For each curated version pair, find every shared object present in BOTH the old
 and new package (matched by logical library name, e.g. libtbb / libcrypto), then
 run `abicheck compare` capturing JSON, exit code, wall time, and stderr.
 Aggregates into results.json for the report.
+
+Paths resolve from the checkout: the manifest is read from and results written to
+``validation/data/`` next to this script. The extracted-libraries directory is NOT
+committed (binaries are large); point the harness at it via the
+``ABICHECK_VALIDATION_LIBS`` environment variable (default: ``validation/libs/ex``
+relative to the repo). Each package extracts to ``<libs>/<pkg_stem>/lib/*.so*`` —
+see ``data/manifest.json`` for the conda-forge files to fetch and extract.
 """
 from __future__ import annotations
 import json, os, re, subprocess, time, glob, sys
+from pathlib import Path
 
-ROOT = "/home/user/validation"
-EX = f"{ROOT}/libs/ex"
-OUT = f"{ROOT}/reports"
-os.makedirs(OUT, exist_ok=True)
+VALID_DIR = Path(__file__).resolve().parent.parent          # validation/
+DATA = VALID_DIR / "data"
+EX = os.environ.get("ABICHECK_VALIDATION_LIBS", str(VALID_DIR / "libs" / "ex"))
+OUT = str(DATA)
+MANIFEST = DATA / "manifest.json"
+os.makedirs(f"{OUT}/runs", exist_ok=True)  # per-library JSONs (gitignored)
+
+if not MANIFEST.is_file():
+    sys.exit(f"manifest not found: {MANIFEST}")
+if not os.path.isdir(EX):
+    sys.exit(
+        f"extracted-libraries dir not found: {EX}\n"
+        "Fetch+extract the packages in data/manifest.json (binaries are not "
+        "committed), then set ABICHECK_VALIDATION_LIBS to their parent directory."
+    )
 
 def logical_name(path: str) -> str:
     b = os.path.basename(path)
@@ -42,7 +61,7 @@ def run(cmd: list[str]) -> tuple[int, str, str, float]:
     p = subprocess.run(cmd, capture_output=True, text=True)
     return p.returncode, p.stdout, p.stderr, time.time() - t
 
-manifest = json.load(open(f"{ROOT}/manifest.json"))
+manifest = json.load(open(MANIFEST))
 results = []
 for m in manifest:
     old_dir = m["old_file"].replace(".conda", "").replace(".tar.bz2", "")
@@ -54,7 +73,7 @@ for m in manifest:
         op, np = old[lname], new[lname]
         mode = ("dwarf" if has_dwarf(op) else "sym") + "->" + ("dwarf" if has_dwarf(np) else "sym")
         tag = f"{m['pair']}__{lname}"
-        jpath = f"{OUT}/{tag}.json"
+        jpath = f"{OUT}/runs/{tag}.json"
         cmd = ["abicheck", "compare", op, np,
                "--old-version", m["old_ver"], "--new-version", m["new_ver"],
                "--format", "json", "-o", jpath, "--recommend"]
