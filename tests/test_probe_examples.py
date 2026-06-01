@@ -131,6 +131,68 @@ def test_cxx_standard_floor_raised_through_compare(tmp_path: Path) -> None:
     assert "cxx_standard_floor_raised" in sarif_res.stdout
 
 
+def test_cxx_standard_floor_raised_through_compare_release(tmp_path: Path) -> None:
+    """The same matrix finding folds into ``compare-release`` (not only the
+    single-pair ``compare``): build-config findings are release-global, so
+    they must reach the release verdict and JSON output.
+
+    The two library directories carry an identical ``libstddemo.so`` so the
+    per-library diff is NO_CHANGE — the verdict and the ``matrix_findings``
+    section therefore come solely from the probe matrix.
+    """
+    from click.testing import CliRunner
+
+    from abicheck.cli import main
+
+    spec = load_probe_spec(PROBES_DIR / "cxx_standard.yaml")
+    m_old = run_probe_matrix(
+        spec, library_name="stddemo", version="1.0", snapshot=False,
+    )
+    new_spec = dataclasses.replace(
+        spec,
+        configurations=tuple(c for c in spec.configurations if c.id != "cxx14"),
+    )
+    m_new = run_probe_matrix(
+        new_spec, library_name="stddemo", version="2.0", snapshot=False,
+    )
+    old_matrix = tmp_path / "std-1.0.json"
+    new_matrix = tmp_path / "std-2.0.json"
+    write_matrix_snapshot(m_old, old_matrix)
+    write_matrix_snapshot(m_new, new_matrix)
+
+    old_dir = tmp_path / "rel-old"
+    new_dir = tmp_path / "rel-new"
+    old_dir.mkdir()
+    new_dir.mkdir()
+    # Identical soname in both dirs → matched, NO_CHANGE per-library.
+    _build_trivial_so(old_dir / "libstddemo.so", "libstddemo.so")
+    _build_trivial_so(new_dir / "libstddemo.so", "libstddemo.so")
+
+    runner = CliRunner()
+    res = runner.invoke(
+        main,
+        ["compare-release", str(old_dir), str(new_dir),
+         "--probe-matrix-old", str(old_matrix),
+         "--probe-matrix-new", str(new_matrix),
+         "--format", "json"],
+    )
+    # Floor-raised is a source-level break → API_BREAK → release exit 2.
+    assert res.exit_code == 2, res.output
+    data = json.loads(res.stdout)
+    matrix_kinds = {c["kind"] for c in data.get("matrix_findings", [])}
+    assert "cxx_standard_floor_raised" in matrix_kinds
+    # The matrix verdict folded into the release-level worst-of.
+    assert data["verdict"] == "API_BREAK"
+
+    # Without the matrix flags the same release is clean (regression guard
+    # against the matrix path firing unconditionally).
+    res_clean = runner.invoke(
+        main, ["compare-release", str(old_dir), str(new_dir), "--format", "json"],
+    )
+    assert res_clean.exit_code == 0, res_clean.output
+    assert "matrix_findings" not in json.loads(res_clean.stdout)
+
+
 def test_feature_macro_spec_compiles_cleanly(tmp_path: Path) -> None:
     """feature_macro.yaml compiles under stock ``cc`` for every config.
 

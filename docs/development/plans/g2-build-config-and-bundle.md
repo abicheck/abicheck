@@ -18,13 +18,17 @@ Two capabilities exist but are not reachable from the mainline gate:
 
 ## Goal & acceptance criteria
 
-- [x] `compare`/`compare-release` merge matrix findings into the change list and
-      fold them into the verdict (worst-of), with the matrix ChangeKinds
-      appearing in JSON/SARIF. **Shipped as `--probe-matrix-old` /
-      `--probe-matrix-new`** (pre-built matrix snapshots from `abicheck probe
-      run`) rather than an inline `--probe-spec`: running a matrix needs
-      compilers, so it stays a separate `probe run` step that feeds `compare`,
-      keeping `compare` itself hermetic. Verified in `tests/test_probe_examples.py`.
+- [x] `compare`/`compare-release` merge matrix findings into the verdict
+      (worst-of), with the matrix ChangeKinds appearing in the report.
+      **Shipped as `--probe-matrix-old` / `--probe-matrix-new`** (pre-built
+      matrix snapshots from `abicheck probe run`) rather than an inline
+      `--probe-spec`: running a matrix needs compilers, so it stays a separate
+      `probe run` step that feeds the comparison, keeping the compare commands
+      hermetic. On `compare` the findings join the change list (JSON + SARIF);
+      on `compare-release` they are release-global, so they fold into the
+      worst-of release verdict and surface as a `matrix_findings` section in
+      the JSON/markdown summary. Verified end-to-end for both commands in
+      `tests/test_probe_examples.py`.
 - [x] Case 98 (`CXX_STANDARD_FLOOR_RAISED`) reaches its intended verdict through
       the mainline command (JSON + SARIF), not only `probe compare`. Case 97
       (`API_DEPENDS_ON_CONSUMER_ENV`) — detector unit-tested; end-to-end is

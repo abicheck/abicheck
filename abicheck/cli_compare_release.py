@@ -47,6 +47,7 @@ from .model import AbiSnapshot
 from .reporter import to_json
 
 if TYPE_CHECKING:
+    from .checker_types import Change
     from .package import PackageExtractor
 
 # ---------------------------------------------------------------------------
@@ -469,6 +470,7 @@ def _format_release_summary(
     warning_msgs: list[str],
     diff_pairs: list[tuple[DiffResult, AbiSnapshot]] | None = None,
     bundle_result: BundleDiffResult | None = None,
+    matrix_changes: list[Change] | None = None,
 ) -> str:
     """Format the release comparison summary as JSON, markdown, or JUnit XML."""
     if fmt == "junit":
@@ -531,6 +533,18 @@ def _format_release_summary(
                 }
                 for f in bundle_result.bundle_findings
             ]
+        if matrix_changes is not None:
+            # Release-global build-configuration findings (G2: probe matrix).
+            summary["matrix_findings"] = [
+                {
+                    "kind": c.kind.value,
+                    "symbol": c.symbol,
+                    "description": c.description,
+                    "old_value": c.old_value,
+                    "new_value": c.new_value,
+                }
+                for c in matrix_changes
+            ]
         return json.dumps(summary, indent=2)
 
     _VERDICT_EMOJI = {
@@ -586,6 +600,13 @@ def _format_release_summary(
                 + (f" (provider: `{f.provider_library}`)" if f.provider_library else ""),
             )
             lines.append(f"  - {f.description}")
+    if matrix_changes:
+        lines += ["", "## 🛠️ Build-Configuration (Matrix) Findings", ""]
+        for c in matrix_changes:
+            lines.append(
+                f"- **{c.kind.value}**" + (f" — `{c.symbol}`" if c.symbol else ""),
+            )
+            lines.append(f"  - {c.description}")
     return "\n".join(lines)
 
 
@@ -684,6 +705,34 @@ def _collect_bundle_result(
     return bundle_result, worst_verdict
 
 
+def _collect_matrix_result(
+    probe_matrix_old: Path | None,
+    probe_matrix_new: Path | None,
+    policy: str,
+    worst_verdict: str,
+) -> tuple[list[Change] | None, str]:
+    """Load probe-matrix snapshots, compute their verdict, fold into worst-of.
+
+    Returns (matrix_changes, worst_verdict). When no matrix snapshots are
+    given, matrix_changes is None and the verdict is unchanged. The matrix
+    findings are release-global build-configuration changes
+    (CXX_STANDARD_FLOOR_RAISED, API_DEPENDS_ON_CONSUMER_ENV,
+    BEHAVIOURAL_DEFAULT_CHANGED); their verdict is computed with the same
+    policy-aware :func:`compute_verdict` the single-pair ``compare`` uses, so
+    the two commands agree on how a matrix finding maps to a verdict.
+    """
+    from .cli import _load_probe_matrix_changes
+
+    matrix_changes = _load_probe_matrix_changes(probe_matrix_old, probe_matrix_new)
+    if matrix_changes:
+        from .checker_policy import compute_verdict
+
+        matrix_verdict = compute_verdict(matrix_changes, policy=policy).value
+        if _RELEASE_VERDICT_ORDER.get(matrix_verdict, 0) > _RELEASE_VERDICT_ORDER.get(worst_verdict, 0):
+            worst_verdict = matrix_verdict
+    return matrix_changes, worst_verdict
+
+
 def _cleanup_temp_dirs(temp_dir_paths: list[str], keep_extracted: bool) -> None:
     """Remove or report temporary directories created during package extraction."""
     import shutil as _shutil
@@ -713,6 +762,7 @@ def _finalize_release_output(
     output_dir: Path | None,
     annotate: bool,
     fail_on_removed: bool,
+    matrix_changes: list[Change] | None = None,
 ) -> None:
     """Write summary output, step summary, per-library dir report, then exit."""
     text = _format_release_summary(
@@ -721,6 +771,7 @@ def _finalize_release_output(
         old_map, new_map, warning_msgs,
         diff_pairs=diff_pairs if fmt == "junit" else None,
         bundle_result=bundle_result,
+        matrix_changes=matrix_changes,
     )
     _write_or_echo(output, text)
 
@@ -870,6 +921,16 @@ def _strip_diff_results_and_adjust_verdict(
                    "reported. When a library's public surface cannot be resolved, scoping "
                    "falls back to the full export table and the release-level scope block "
                    "flags manual_review_required (issue #235). Requires -H/--header.")
+@click.option("--probe-matrix-old", "probe_matrix_old", type=click.Path(exists=True, path_type=Path),
+              default=None,
+              help="Old build-configuration matrix snapshot (from 'abicheck probe run'). "
+                   "When given with --probe-matrix-new, build-config findings "
+                   "(CXX_STANDARD_FLOOR_RAISED, API_DEPENDS_ON_CONSUMER_ENV, "
+                   "BEHAVIOURAL_DEFAULT_CHANGED) are folded into this release's "
+                   "verdict and report (G2: probe -> compare-release).")
+@click.option("--probe-matrix-new", "probe_matrix_new", type=click.Path(exists=True, path_type=Path),
+              default=None,
+              help="New build-configuration matrix snapshot (pairs with --probe-matrix-old).")
 def compare_release_cmd(
     old_dir: Path,
     new_dir: Path,
@@ -905,6 +966,8 @@ def compare_release_cmd(
     bundle_cohorts: tuple[str, ...],
     no_bundle_analysis: bool,
     scope_public_headers: bool,
+    probe_matrix_old: Path | None,
+    probe_matrix_new: Path | None,
 ) -> None:
     """Compare all libraries in two release directories or packages.
 
@@ -1009,12 +1072,20 @@ def compare_release_cmd(
         # Strip _diff_result from entries and bump verdict for removed libraries.
         worst_verdict = _strip_diff_results_and_adjust_verdict(library_results, removed_keys, worst_verdict)
 
+        # Build-configuration matrix findings (G2: probe -> compare-release).
+        # These are release-global, not per-library, so they fold into the
+        # worst-of verdict and surface as their own report section.
+        matrix_changes, worst_verdict = _collect_matrix_result(
+            probe_matrix_old, probe_matrix_new, policy, worst_verdict,
+        )
+
         _finalize_release_output(
             fmt, worst_verdict, old_dir, new_dir,
             library_results, removed_keys, added_keys,
             old_map, new_map, warning_msgs,
             diff_pairs, bundle_result,
             output, output_dir, annotate, fail_on_removed,
+            matrix_changes=matrix_changes,
         )
     finally:
         _cleanup_temp_dirs(_temp_dir_paths, keep_extracted)
