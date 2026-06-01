@@ -30,7 +30,6 @@ from .model import (
     TypeField,
     canonicalize_type_name,
 )
-from .model import is_compiler_internal_type as _is_compiler_internal_type
 from .model import is_cxx_runtime_library as _is_cxx_runtime_library
 from .model import is_non_abi_surface_type as _is_non_abi_surface_type
 
@@ -439,8 +438,13 @@ def _diff_type_vtable(name: str, t_old: RecordType, t_new: RecordType) -> list[C
 @registry.detector("enums")
 def _diff_enums(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     changes: list[Change] = []
-    old_map: dict[str, EnumType] = {e.name: e for e in old.enums}
-    new_map: dict[str, EnumType] = {e.name: e for e in new.enums}
+    excl = _exclude_stdlib_namespaces(old, new)
+    old_map: dict[str, EnumType] = {
+        e.name: e for e in old.enums if not _is_non_abi_surface_type(e.name, exclude_stdlib_namespaces=excl)
+    }
+    new_map: dict[str, EnumType] = {
+        e.name: e for e in new.enums if not _is_non_abi_surface_type(e.name, exclude_stdlib_namespaces=excl)
+    }
 
     for name, e_old in old_map.items():
         if name not in new_map:
@@ -713,8 +717,9 @@ def _has_version_family_successor(name: str, new_typedefs: dict[str, str]) -> bo
 @registry.detector("typedefs")
 def _diff_typedefs(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     changes: list[Change] = []
+    excl = _exclude_stdlib_namespaces(old, new)
     for alias, old_type in old.typedefs.items():
-        if _is_compiler_internal_type(alias):
+        if _is_non_abi_surface_type(alias, exclude_stdlib_namespaces=excl):
             continue
         new_type = new.typedefs.get(alias)
         if new_type is None:
@@ -762,8 +767,13 @@ def _diff_typedefs(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
 def _diff_enum_renames(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """Detect enum member renames: same value present under different name."""
     changes: list[Change] = []
-    old_map: dict[str, EnumType] = {e.name: e for e in old.enums}
-    new_map: dict[str, EnumType] = {e.name: e for e in new.enums}
+    excl = _exclude_stdlib_namespaces(old, new)
+    old_map: dict[str, EnumType] = {
+        e.name: e for e in old.enums if not _is_non_abi_surface_type(e.name, exclude_stdlib_namespaces=excl)
+    }
+    new_map: dict[str, EnumType] = {
+        e.name: e for e in new.enums if not _is_non_abi_surface_type(e.name, exclude_stdlib_namespaces=excl)
+    }
 
     for name, e_old in old_map.items():
         if name not in new_map:

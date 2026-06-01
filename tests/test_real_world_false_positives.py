@@ -22,6 +22,8 @@ from abicheck.checker import compare
 from abicheck.checker_policy import Verdict
 from abicheck.model import (
     AbiSnapshot,
+    EnumMember,
+    EnumType,
     RecordType,
     TypeField,
     Variable,
@@ -285,3 +287,33 @@ def test_stdlib_union_field_churn_is_filtered_for_a_normal_library():
         f"std:: union field churn in a non-runtime library must stay filtered; "
         f"breaking symbols: {_breaking_symbols(result)}"
     )
+
+
+def test_stdlib_enum_member_churn_is_filtered_for_a_normal_library():
+    """std:: *enum* member churn must be filtered too — the enum detectors must
+    apply the same surface filter (Codex review on PR #273)."""
+    std_enum = "std::__detail::_S_state"  # a std:: enum
+    old = _elf_snapshot(name="libtbb.so.12")
+    old.enums = [EnumType(name=std_enum, members=[
+        EnumMember(name="_S_a", value=0), EnumMember(name="_S_b", value=1)])]
+    new = _elf_snapshot(name="libtbb.so.12")
+    new.enums = [EnumType(name=std_enum, members=[
+        EnumMember(name="_S_a", value=0)])]  # member removed
+    result = compare(old, new)
+    assert result.verdict not in (Verdict.BREAKING,), (
+        f"std:: enum member churn in a non-runtime library must stay filtered; "
+        f"breaking symbols: {_breaking_symbols(result)}"
+    )
+
+
+def test_stdlib_enum_member_change_is_breaking_when_target_is_the_runtime():
+    """The same std:: enum churn IS a break when the target is libstdc++ itself."""
+    std_enum = "std::__detail::_S_state"
+    old = _elf_snapshot(name="libstdc++.so.6")
+    old.enums = [EnumType(name=std_enum, members=[
+        EnumMember(name="_S_a", value=0), EnumMember(name="_S_b", value=1)])]
+    new = _elf_snapshot(name="libstdc++.so.6")
+    new.enums = [EnumType(name=std_enum, members=[
+        EnumMember(name="_S_a", value=0)])]
+    result = compare(old, new)
+    assert result.verdict == Verdict.BREAKING
