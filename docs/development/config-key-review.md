@@ -45,58 +45,54 @@ type.** That is the core UX problem, far more than the raw count.
 
 ## 2. Cross-mode inconsistencies — ranked by user impact
 
-### 🔴 2.1 `--scope-public-headers` has *opposite* defaults across modes
+### 🔴 2.1 `--scope-public-headers` had *opposite* defaults across modes ✅ resolved
 
-This is the single most confusing thing in the whole surface.
+This was the single most confusing thing in the whole surface. The table below
+shows the **original** state that motivated the fix:
 
-| Entry point | Flag form | Default | Source |
-|-------------|-----------|---------|--------|
-| `compare` | `--scope-public-headers/--no-scope-public-headers` (toggle) | **ON** | `cli.py:1519-1525` |
-| `compare-release` | `--scope-public-headers` (plain `is_flag`, no `--no-`) | **OFF** | `cli_compare_release.py:1046` |
-| `appcompat` | *no CLI flag* — but **always-on**: `check_appcompat()` calls `compare()` without overriding its `scope_to_public_surface=True` default | **ON (forced)** | `appcompat.py:710`, `checker.py:180` |
-| `run_compare()` (Python API) | `scope_to_public_surface=True` | **ON** | `service.py:615` |
+| Entry point | Original flag form | Original default |
+|-------------|-----------|---------|
+| `compare` | `--scope-public-headers/--no-scope-public-headers` (toggle) | **ON** |
+| `compare-release` | `--scope-public-headers` (plain `is_flag`, no `--no-`) | **OFF** |
+| `appcompat` | *no CLI flag* — always-on via `compare()`'s `scope_to_public_surface=True` default | **ON (forced)** |
+| `run_compare()` (Python API) | `scope_to_public_surface=True` | **ON** |
 
-Consequences:
-- A user who runs `compare` sees findings silently filtered to the public-header
-  surface (with a one-line warning if it can't resolve, `cli.py:1404`), then runs
-  `compare-release` on the same libraries and sees a *different, larger* finding
-  set — for no reason they can infer.
-- `compare` exposes `--no-...` to turn it off; `compare-release` has no way to
-  turn it *on* with a negation, and no `--no-bundle`-style symmetry.
-- `appcompat`, which is *also* a comparison, scopes to the public surface
-  **always** (it inherits `compare()`'s `True` default) but gives the user **no
-  CLI toggle** to inspect or disable it — so a third, opaque variant.
+The problem: a user who ran `compare` saw findings filtered to the public-header
+surface, then ran `compare-release` on the same libraries and saw a *different,
+larger* finding set with no way to infer why; `appcompat` scoped always but gave
+no toggle — three behaviors for one conceptual knob.
 
-**Recommendation:** Pick one default (ON is the better UX — it's what
-distinguishes this tool from raw `abidiff` noise), make all three comparison
-commands use the **same toggle flag and the same default**, and add the toggle
-to `appcompat`. If `compare-release` must stay OFF-by-default for backwards
-compatibility, at minimum give it the `/--no-` toggle form and document *why*
-it differs.
+**Resolution (implemented, see §7 do-first #1):** all three comparison commands now expose
+the **same `--scope-public-headers/--no-scope-public-headers` toggle**, and
+`compare-release` was flipped to **default ON** to match `compare` and the Python
+API (`cli_compare_release.py`, `cli_appcompat.py`). The default flip is a breaking
+change for `compare-release` callers that relied on unscoped output — pass
+`--no-scope-public-headers` to restore.
 
-### 🔴 2.2 Severity system exists only on `compare`
+### 🔴 2.2 Severity system was `compare`-only ✅ resolved (additive + explicit)
 
-`--severity-preset` and the four `--severity-*` category flags
-(`cli.py:1486-1507`) are **`compare`-only**. `compare-release` and `appcompat`
-— both of which run the exact same diff engine — have no severity control and
-fall back to verdict-based exit codes.
+Originally `--severity-preset` and the four `--severity-*` category flags were
+**`compare`-only**. `compare-release` and `appcompat` — both of which run the
+same diff engine — had no severity control and fell back to verdict-based exit
+codes. Worse, on `compare` the scheme switched **silently**: passing *any*
+`--severity-*` flag moved you from the 0/2/4 verdict scheme to the 0/1/2/4
+severity scheme with no signal.
 
-This also creates the **dual-path exit-code behavior** that only `compare` has
-(`cli.py:1294-1309`, `_resolve_severity` at `1171`): pass *any* `--severity-*`
-flag and you silently switch from the 0/2/4 verdict scheme to the 0/1/2/4
-severity scheme. Users cannot tell from the command which scheme they're in.
+**Resolution (implemented, see §7 do-first #2):**
+- The `--severity-preset`/`--severity-*` option group was added to
+  `compare-release` (aggregated across per-library, bundle, and matrix findings,
+  honoring per-library `--policy-file` overrides; removed-library exit `8` still
+  wins) and `appcompat` (full-compare mode only; app-scoped to `breaking_for_app`,
+  with missing required symbols/versions floored at `4`).
+- `compare` now **prints the active exit-code scheme to stderr** for human
+  formats, so the switch is no longer silent. Exit-code numbers are unchanged.
 
-**Recommendation:** Either (a) promote severity config to a shared option group
-used by `compare`, `compare-release`, and `appcompat`, or (b) if severity is
-meant to be the *one true* gating mechanism, deprecate the legacy verdict-exit
-path and always run severity-aware. Note that this requires a **new
-legacy-equivalent preset** — the existing `default` preset leaves
-`potential_breaking` at `warning`, and `compute_exit_code()` only emits a
-non-zero code for categories set to `error` (`severity.py:185`, the
-`compute_exit_code` docstring), so `default` would map API_BREAK to exit **0**,
-not the legacy **2**. Reproducing 0/2/4 needs `abi_breaking=error` **and**
-`potential_breaking=error` (with quality/addition below error). Today's
-"implicit mode switch on first `--severity-*` flag" is the worst of both worlds.
+It was *not* made "always severity-aware", because a literal legacy-equivalent
+preset can't be expressed through the four-category model: API_BREAK and RISK
+share `POTENTIAL_BREAKING` while the verdict path maps `COMPATIBLE_WITH_RISK`→0,
+so `compute_exit_code()` with any single preset would change RISK handling
+(`severity.py:185`). Making the scheme *visible* avoids that regression while
+removing the "which scheme am I in?" confusion.
 
 ### 🟠 2.3 Policy availability is uneven
 
