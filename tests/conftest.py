@@ -102,6 +102,57 @@ def update_goldens(request: pytest.FixtureRequest) -> bool:
     return bool(request.config.getoption("--update-goldens"))
 
 
+# ---------------------------------------------------------------------------
+# Silent-skip guard
+# ---------------------------------------------------------------------------
+#
+# Marker-gated lanes (abicc / libabigail / integration / msvc) self-skip when
+# their external tool is missing — correct locally, but dangerous in CI: if the
+# tool silently fails to install, every test in the lane skips and the lane goes
+# *green with zero work done*. To close that hole, a lane can export
+# ``ABICHECK_MIN_EXECUTED=<n>``; the session then fails unless at least <n>
+# tests actually reached their call phase (passed or failed — skips don't count).
+
+_EXECUTED_TESTS = 0
+
+
+def pytest_runtest_logreport(report: pytest.TestReport) -> None:
+    """Count tests that actually executed (ran their call phase)."""
+    global _EXECUTED_TESTS
+    if report.when == "call" and report.outcome in ("passed", "failed"):
+        _EXECUTED_TESTS += 1
+
+
+def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
+    """Fail the session if fewer tests ran than ``ABICHECK_MIN_EXECUTED`` demands.
+
+    Skipped on xdist workers (the controller aggregates every worker's reports
+    and is the one that owns the final exit status).
+    """
+    if hasattr(session.config, "workerinput"):
+        return  # this is an xdist worker; let the controller decide
+    raw = os.environ.get("ABICHECK_MIN_EXECUTED")
+    if not raw:
+        return
+    try:
+        minimum = int(raw)
+    except ValueError:
+        return
+    if _EXECUTED_TESTS < minimum:
+        session.exitstatus = 1
+        reporter = session.config.pluginmanager.get_plugin("terminalreporter")
+        msg = (
+            f"ABICHECK_MIN_EXECUTED={minimum} but only {_EXECUTED_TESTS} test(s) "
+            "actually ran — the lane's external tool likely failed to install "
+            "(tests silently skipped). Treating as a CI failure."
+        )
+        if reporter is not None:
+            reporter.write_line("")
+            reporter.write_line(msg, red=True, bold=True)
+        else:  # pragma: no cover - terminalreporter always present in practice
+            print(msg)
+
+
 def _cmake_configure_once(build_dir: Path) -> bool:
     """Run cmake configure into *build_dir*.  Returns True on success."""
     examples_dir = Path(__file__).parent.parent / "examples"

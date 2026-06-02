@@ -48,6 +48,7 @@ from abicheck.model import (  # noqa: E402
     RecordType,
     ScopeOrigin,
     TypeField,
+    Variable,
     Visibility,
 )
 
@@ -83,10 +84,19 @@ def _rec(name, *, size=64, fields=(), origin=ScopeOrigin.UNKNOWN) -> RecordType:
     )
 
 
-def _snap(version, *, functions=(), types=(), enums=()) -> AbiSnapshot:
+def _snap(version, *, functions=(), types=(), enums=(), variables=()) -> AbiSnapshot:
     return AbiSnapshot(
         library="libfp", version=version,
         functions=list(functions), types=list(types), enums=list(enums),
+        variables=list(variables),
+    )
+
+
+def _var(name, *, type="int", vis=Visibility.PUBLIC,
+         origin=ScopeOrigin.UNKNOWN) -> Variable:
+    return Variable(
+        name=name, mangled=f"_ZV{len(name)}{name}", type=type,
+        visibility=vis, origin=origin,
     )
 
 
@@ -111,6 +121,31 @@ def _internal_struct_size() -> tuple[AbiSnapshot, AbiSnapshot]:
 def _elf_only_function_removed() -> tuple[AbiSnapshot, AbiSnapshot]:
     old = _snap("1", functions=[_fn("api"), _fn("helper", vis=Visibility.ELF_ONLY)])
     new = _snap("2", functions=[_fn("api")])
+    return old, new
+
+
+def _internal_field_reordered() -> tuple[AbiSnapshot, AbiSnapshot]:
+    # A struct nobody public reaches: reordering its fields is invisible to ABI.
+    old = _snap("1", functions=[_fn("api")],
+                types=[_rec("InternalCache", size=128,
+                            fields=[("a", "int"), ("b", "long")])])
+    new = _snap("2", functions=[_fn("api")],
+                types=[_rec("InternalCache", size=128,
+                            fields=[("b", "long"), ("a", "int")])])
+    return old, new
+
+
+def _hidden_function_signature_changed() -> tuple[AbiSnapshot, AbiSnapshot]:
+    # A hidden-visibility helper is not part of the exported surface, so a
+    # parameter change to it must not be reported as a public break.
+    old = _snap("1", functions=[
+        _fn("api"),
+        _fn("helper", params=("int",), vis=Visibility.HIDDEN),
+    ])
+    new = _snap("2", functions=[
+        _fn("api"),
+        _fn("helper", params=("long long",), vis=Visibility.HIDDEN),
+    ])
     return old, new
 
 
@@ -158,13 +193,40 @@ def _leaked_internal_via_public_api() -> tuple[AbiSnapshot, AbiSnapshot]:
     return old, new
 
 
+def _public_return_type_changed() -> tuple[AbiSnapshot, AbiSnapshot]:
+    old = _snap("1", functions=[_fn("api", ret="int")])
+    new = _snap("2", functions=[_fn("api", ret="long long")])
+    return old, new
+
+
+def _public_variable_removed() -> tuple[AbiSnapshot, AbiSnapshot]:
+    # An exported data symbol disappearing breaks consumers that link it.
+    old = _snap("1", functions=[_fn("api")], variables=[_var("g_config")])
+    new = _snap("2", functions=[_fn("api")])
+    return old, new
+
+
+# NOTE on corpus scope: every case here is one the *current* implementation
+# already gets right, so a correct build keeps a clean 0/0 sheet (the gate's
+# core invariant). Two tempting cases were deliberately left out because their
+# "correct" verdict is genuinely ambiguous and would make this gate assert a
+# behaviour change rather than guard a regression:
+#   * an internal (unreferenced) enum value change — enum reachability scoping
+#     is coarser than struct reachability;
+#   * appending a field to a public struct — often a *compatible* extension, so
+#     it is not an unambiguous real-break.
+# Track those as detector/scoping work, not as FP-gate corpus entries.
 CORPUS: list[Case] = [
     Case("internal_struct_size", True, _internal_struct_size),
     Case("elf_only_function_removed", True, _elf_only_function_removed),
+    Case("internal_field_reordered", True, _internal_field_reordered),
+    Case("hidden_function_signature_changed", True, _hidden_function_signature_changed),
     Case("private_header_type_change", True, _private_header_type_change),
     Case("public_struct_size", False, _public_struct_size),
     Case("public_function_removed", False, _public_function_removed),
     Case("public_param_type_changed", False, _public_param_type_changed),
+    Case("public_return_type_changed", False, _public_return_type_changed),
+    Case("public_variable_removed", False, _public_variable_removed),
     Case("leaked_internal_via_public_api", False, _leaked_internal_via_public_api),
 ]
 

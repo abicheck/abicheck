@@ -747,6 +747,111 @@ def check_banned_imports(f: Findings) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Check: test assertion density (coverage-honesty guard)
+# ---------------------------------------------------------------------------
+
+
+# Substrings that mark a call as assertion-bearing: explicit asserts, the
+# unittest-style ``self.assert*`` family, ``pytest.raises``/``warns``/``fail``,
+# and common project helper-naming (``_check_*``, ``verify_*``, ``*_roundtrip``).
+_ASSERTION_CALL_HINTS: tuple[str, ...] = (
+    "assert",
+    "check",
+    "verify",
+    "expect",
+    "validate",
+    "ensure",
+    "roundtrip",
+    "raises",
+    "warns",
+    "fail",
+)
+
+
+def _call_attr_or_name(node: ast.Call) -> str:
+    func = node.func
+    if isinstance(func, ast.Name):
+        return func.id
+    if isinstance(func, ast.Attribute):
+        return func.attr
+    return ""
+
+
+def _has_direct_assertion(fn: ast.AST) -> bool:
+    """True if *fn*'s body itself asserts (assert stmt, with-block, or a call
+    whose name hints at an assertion)."""
+    for node in ast.walk(fn):
+        if isinstance(node, ast.Assert):
+            return True
+        # ``with pytest.raises(...)`` / ``with caplog ...`` express expectations.
+        if isinstance(node, ast.With | ast.AsyncWith):
+            return True
+        if isinstance(node, ast.Call):
+            name = _call_attr_or_name(node).lower()
+            if any(h in name for h in _ASSERTION_CALL_HINTS):
+                return True
+    return False
+
+
+def _called_function_names(fn: ast.AST) -> set[str]:
+    return {
+        _call_attr_or_name(n) for n in ast.walk(fn) if isinstance(n, ast.Call)
+    }
+
+
+def check_test_assertion_density(f: Findings) -> None:
+    """WARN on ``test_*`` functions that make no assertion, directly or via a
+    same-file helper.
+
+    This is the coverage-honesty guard the testing review asked for: a test
+    that executes code without asserting anything still lifts line coverage but
+    verifies nothing. The check resolves same-file helper calls to a fixed
+    point, so tests that delegate their checks to a helper (e.g. golden-file
+    comparisons) are not flagged. Remaining hits are genuine smoke tests —
+    legitimate, but worth a deliberate confirmation rather than an accident.
+    """
+    if not TESTS.exists():
+        return
+    for path in sorted(TESTS.glob("test_*.py")):
+        rel = _rel(path)
+        try:
+            tree = ast.parse(_read(path), filename=rel)
+        except SyntaxError:
+            continue
+
+        funcs: dict[str, ast.AST] = {}
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+                funcs.setdefault(node.name, node)  # first definition wins
+
+        asserting = {
+            name for name, fn in funcs.items() if _has_direct_assertion(fn)
+        }
+        # Propagate: a function asserts if it calls a function that asserts.
+        changed = True
+        while changed:
+            changed = False
+            for name, fn in funcs.items():
+                if name in asserting:
+                    continue
+                if _called_function_names(fn) & asserting:
+                    asserting.add(name)
+                    changed = True
+
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
+                and node.name.startswith("test")
+                and node.name not in asserting
+            ):
+                f.warn(
+                    "test-assertion-density",
+                    f"{rel}:{node.lineno}: {node.name}() makes no assertion "
+                    "(directly or via a helper) — confirm it's an intentional smoke test",
+                )
+
+
+# ---------------------------------------------------------------------------
 # Check: Apache-2.0 license header
 # ---------------------------------------------------------------------------
 
@@ -801,6 +906,7 @@ CHECKS: dict[str, Callable[[Findings], None]] = {
     "mkdocs-nav-coverage": check_mkdocs_nav_coverage,
     "banned-imports": check_banned_imports,
     "license-header": check_license_header,
+    "test-assertion-density": check_test_assertion_density,
 }
 
 

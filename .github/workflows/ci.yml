@@ -137,6 +137,10 @@ jobs:
         run: pip install -e ".[dev]"
       - name: Run integration tests (Linux/macOS — with coverage)
         if: runner.os != 'Windows'
+        # ABICHECK_MIN_EXECUTED guards against a silent toolchain-install failure
+        # turning the whole lane into 0-ran-but-green (see tests/conftest.py).
+        env:
+          ABICHECK_MIN_EXECUTED: '20'
         run: |
           pytest tests/ -v -m integration --tb=short --cov=abicheck --cov-report=xml:coverage-integration.xml --ignore=tests/test_abi_examples.py
       - name: Run integration tests (Windows — parallel, no coverage)
@@ -245,6 +249,10 @@ jobs:
       - name: Install package
         run: pip install -e ".[dev]"
       - name: Run libabigail parity tests
+        # Fail loudly if abigail-tools didn't install (lane would otherwise skip
+        # every test and pass) — see tests/conftest.py silent-skip guard.
+        env:
+          ABICHECK_MIN_EXECUTED: '5'
         run: pytest tests/test_abidiff_parity.py tests/test_abicompat_parity.py tests/test_abipkgdiff_parity.py -v -m libabigail --tb=short
 
   abicc-parity:
@@ -265,6 +273,10 @@ jobs:
       - name: Install package
         run: pip install -e ".[dev]"
       - name: Run ABICC parity tests
+        # Fail loudly if abi-compliance-checker didn't install (lane would
+        # otherwise skip every test and pass) — see tests/conftest.py guard.
+        env:
+          ABICHECK_MIN_EXECUTED: '10'
         run: pytest tests/test_abicc_parity.py tests/test_xml_parity.py -v -m abicc --tb=short
       - name: Run XML schema validation tests (no ABICC required)
         run: pytest tests/test_xml_parity.py::TestXmlSchemaValidation tests/test_xml_report.py -v --tb=short
