@@ -19,7 +19,7 @@ import logging
 import re
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import click
 
@@ -491,7 +491,45 @@ def _collect_metadata(path: Path) -> LibraryMetadata | None:
     )
 
 
-@click.group()
+# Exit code for an invalid invocation (bad arguments, unknown option, invalid
+# option value, unreadable/unrecognised input path). Chosen as sysexits.h
+# ``EX_USAGE`` so it sits *outside* the compare/compat result space
+# {0, 1, 2, 4} — a CI script can therefore tell "you called me wrong" apart
+# from a real ABI verdict. Click defaults ``UsageError`` to exit 2, which
+# collides with ``compare``'s documented "2 = source break"; this remaps it.
+_EXIT_USAGE_ERROR = 64
+
+
+class _AbicheckGroup(click.Group):
+    """Root group that maps Click *usage* errors to a dedicated exit code.
+
+    Click exits 2 for ``UsageError`` / ``BadParameter`` (bad arguments, unknown
+    options, invalid option values, missing/unreadable input paths), which
+    collides with ``compare``'s documented ``2 = source break`` result. Remap
+    just that code to ``_EXIT_USAGE_ERROR`` so an invalid invocation is never
+    mistaken for an ABI verdict. Other ``ClickException``s (exit 1, used for
+    operational failures such as malformed input or an expired strict waiver),
+    verdict exits (``SystemExit`` 2/4), and the ``compat`` error scheme (3–11)
+    are deliberately left untouched.
+    """
+
+    def main(self, *args: Any, standalone_mode: bool = True, **kwargs: Any) -> Any:  # type: ignore[override]
+        if not standalone_mode:
+            return super().main(*args, standalone_mode=False, **kwargs)  # type: ignore[call-overload]
+        try:
+            super().main(*args, standalone_mode=False, **kwargs)  # type: ignore[call-overload]
+        except click.exceptions.Abort:
+            click.echo("Aborted!", err=True)
+            sys.exit(1)
+        except click.exceptions.ClickException as exc:
+            exc.show()
+            # Only Click's usage-error code (2) collides with a compare verdict.
+            sys.exit(_EXIT_USAGE_ERROR if exc.exit_code == 2 else exc.exit_code)
+        else:
+            sys.exit(0)
+
+
+@click.group(cls=_AbicheckGroup)
 @click.version_option(
     version=_abicheck_version,
     prog_name="abicheck",
@@ -1670,6 +1708,10 @@ def compare_cmd(
       1  Error-level findings in addition or quality_issues only
       2  Error-level findings in potential_breaking (but not abi_breaking)
       4  Error-level findings in abi_breaking
+    \b
+    Invalid invocation (bad arguments/options, unreadable or unrecognised
+    input) exits 64, outside the result space above, so it is never mistaken
+    for an ABI verdict.
 
     \b
     Examples:

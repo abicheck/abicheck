@@ -417,4 +417,8 @@ class TestNoFailOnAdditionsFlag:
 
         runner = CliRunner()
         result = runner.invoke(main, ["compare", str(p), str(p), "--fail-on-additions"])
-        assert result.exit_code == 2  # Click returns 2 for unrecognised options
+        # Unrecognised option → Click usage error, remapped to the dedicated
+        # usage-error code (outside the compare result space {0,1,2,4}) so it is
+        # not mistaken for a "2 = source break" verdict.
+        from abicheck.cli import _EXIT_USAGE_ERROR
+        assert result.exit_code == _EXIT_USAGE_ERROR

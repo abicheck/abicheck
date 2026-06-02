@@ -344,10 +344,13 @@ class TestCompatGroupStructure:
 
     def test_compat_no_subcommand_shows_usage(self):
         """'abicheck compat' without a subcommand shows usage."""
+        from abicheck.cli import _EXIT_USAGE_ERROR
+
         runner = CliRunner()
         result = runner.invoke(main, ["compat"])
-        # Click shows usage and exits with code 2 when no subcommand given
-        assert result.exit_code == 2
+        # Missing subcommand → Click usage error, remapped to the dedicated
+        # usage-error code (outside the compare result space {0,1,2,4}).
+        assert result.exit_code == _EXIT_USAGE_ERROR
         assert "Usage" in result.output or "check" in result.output
 
     def test_compat_dump_help(self):
