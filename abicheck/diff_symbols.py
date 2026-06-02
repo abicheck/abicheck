@@ -181,19 +181,25 @@ def _check_params_change(
 ) -> list[Change]:
     """Emit a change if the parameter list was modified."""
     # RD2-5: suppress only when one side is a stripped symbols-only stub (its
-    # empty param list is "unknown", not "zero args"), or when an individual
-    # parameter type is the unresolved "?" sentinel — diffing against unknown is
-    # meaningless. A DWARF/header side with resolved params is always compared,
-    # so int→long and f(void)→f(int) are still detected (Codex reviews, PR #275).
+    # empty param list is "unknown", not "zero args"). Otherwise compare
+    # position-by-position, ignoring only the individual parameters whose type is
+    # the unresolved "?" sentinel — diffing a known type against unknown is
+    # meaningless, but an unrelated unknown must not mask a real change on a
+    # fully-known parameter (e.g. f(?, int) -> f(?, long)). Parameter *count*
+    # changes are always real in a resolved snapshot (Codex reviews, PR #275).
     if params_unconfirmed:
         return []
-    if any(_type_unknown(p.type) for p in f_old.params) or any(
-        _type_unknown(p.type) for p in f_new.params
-    ):
-        return []
-    old_params = [(canonicalize_type_name(p.type), p.kind) for p in f_old.params]
-    new_params = [(canonicalize_type_name(p.type), p.kind) for p in f_new.params]
-    if old_params == new_params:
+    changed: bool
+    if len(f_old.params) != len(f_new.params):
+        changed = True
+    else:
+        changed = any(
+            not _type_unknown(p_old.type) and not _type_unknown(p_new.type)
+            and (canonicalize_type_name(p_old.type), p_old.kind)
+            != (canonicalize_type_name(p_new.type), p_new.kind)
+            for p_old, p_new in zip(f_old.params, f_new.params)
+        )
+    if not changed:
         return []
     return [Change(
         kind=ChangeKind.FUNC_PARAMS_CHANGED,

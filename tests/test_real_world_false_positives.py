@@ -403,6 +403,27 @@ def test_stripped_suppression_with_no_exported_surface():
     assert not any(c.kind == ChangeKind.TYPE_REMOVED for c in result.changes)
 
 
+def test_param_change_on_known_param_detected_despite_unrelated_unknown():
+    """A real change on a fully-known parameter must still be flagged even when
+    another parameter in the same signature is unresolved ('?'); parameters are
+    resolved independently (Codex review on PR #275)."""
+    from abicheck.checker_policy import ChangeKind
+    from abicheck.model import Function, Param
+    old = _resolved_snapshot(functions=[Function(
+        name="f", mangled="_Z1f", return_type="void",
+        params=[Param(name="a", type="?"), Param(name="b", type="int")],
+        visibility=Visibility.PUBLIC)])
+    new = _resolved_snapshot(functions=[Function(
+        name="f", mangled="_Z1f", return_type="void",
+        params=[Param(name="a", type="?"), Param(name="b", type="long")],
+        visibility=Visibility.PUBLIC)])
+    result = compare(old, new)
+    assert any(c.kind == ChangeKind.FUNC_PARAMS_CHANGED for c in result.changes), (
+        "int->long on a known param must be detected despite an unrelated '?' param; "
+        f"changes: {[(c.kind.value, c.symbol) for c in result.changes]}"
+    )
+
+
 def test_param_pointer_depth_not_diffed_for_unresolved_param():
     """An individually unresolved ('?') parameter must not produce a phantom
     PARAM_POINTER_LEVEL_CHANGED (depth falls back to 0) (CodeRabbit, PR #275)."""
