@@ -696,4 +696,8 @@ class TestVersionNodeBumpDeduplication:
             ),
         ]
         kept = _deduplicate_cross_detector(changes)
-        assert ChangeKind.SYMBOL_MOVED_VERSION_NODE in {c.kind for c in kept}
+        kinds = {c.kind for c in kept}
+        # Transitions differ, so both findings are kept (no de-duplication).
+        assert ChangeKind.SYMBOL_MOVED_VERSION_NODE in kinds
+        assert ChangeKind.SYMBOL_VERSION_ALIAS_CHANGED in kinds
+        assert len(kept) == 2

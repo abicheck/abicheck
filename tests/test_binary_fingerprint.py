@@ -484,9 +484,14 @@ class TestPlausibleRename:
         # Identical operator spelling is an exact-leaf match.
         assert _plausible_rename("A::operator==(int)", "B::operator==(int)") is True
 
-    def test_undemangleable_mangled_names_rejected(self) -> None:
-        # Without a demangler the leaf is the raw mangled spelling; its shared
-        # boilerplate must not be affix-scored into a false rename.
+    def test_undemangleable_mangled_names_rejected(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # Force the no-demangler branch so the raw "_Z..." fallback is actually
+        # exercised: without a demangler the leaf is the raw mangled spelling,
+        # whose shared boilerplate must not be affix-scored into a false rename.
+        import abicheck.demangle as demangle_mod
+        monkeypatch.setattr(demangle_mod, "demangle", lambda _sym: None)
         assert _plausible_rename("_ZN1A3fooEv", "_ZN1B3barEv") is False
 
     def test_operator_substring_not_treated_as_operator(self) -> None:

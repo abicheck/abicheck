@@ -1,4 +1,5 @@
 # Copyright 2026 Nikolay Petrov
+# SPDX-License-Identifier: Apache-2.0
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -155,12 +156,13 @@ def _provenance_timestamp(source_date_epoch: str | None) -> str:
     if source_date_epoch:
         try:
             epoch = int(source_date_epoch.strip())
-        except ValueError:
-            pass
-        else:
             return datetime.datetime.fromtimestamp(
                 epoch, tz=datetime.timezone.utc
             ).isoformat()
+        except (ValueError, OverflowError, OSError):
+            # Non-numeric or out-of-range epoch — fall back to wall clock
+            # rather than aborting the dump.
+            pass
     return datetime.datetime.now(datetime.timezone.utc).isoformat()
 
 

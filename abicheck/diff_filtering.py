@@ -898,7 +898,7 @@ def _deduplicate_cross_detector(changes: list[Change]) -> list[Change]:
     # (symbol, old -> new), keeping the node-level change. Halves the
     # version-bump noise on real libraries (libLLVM 17->18: ~46k instead of
     # ~92k risk findings).
-    moved_transitions: set[tuple[str, object, object]] = {
+    moved_transitions: set[tuple[str, str | None, str | None]] = {
         (c.symbol, c.old_value, c.new_value)
         for c in changes
         if c.kind is ChangeKind.SYMBOL_MOVED_VERSION_NODE

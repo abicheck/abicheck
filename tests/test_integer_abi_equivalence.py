@@ -31,35 +31,44 @@ from abicheck.model import AbiSnapshot, Function, Param, Visibility
 
 
 @pytest.mark.parametrize("a,b", [
-    ("long", "long long"),
-    ("long int", "long long int"),
+    # Pointer-width spellings co-vary on any non-LLP64 target (long == size).
     ("unsigned long", "size_t"),
     ("long unsigned int", "size_t"),
-    ("unsigned long", "uint64_t"),
-    ("long", "int64_t"),
+    ("size_t", "uintptr_t"),
+    ("long", "ptrdiff_t"),
+    ("ssize_t", "ptrdiff_t"),
+    ("long", "long int"),
+    # Fixed-width spellings, data-model independent.
     ("int", "int32_t"),
     ("unsigned int", "uint32_t"),
+    ("long long", "int64_t"),
+    ("unsigned long long", "uint64_t"),
 ])
-def test_lp64_equivalent(a: str, b: str) -> None:
+def test_nonllp64_equivalent(a: str, b: str) -> None:
     assert _abi_equivalent_scalar(a, b, is_llp64=False)
 
 
 @pytest.mark.parametrize("a,b", [
-    ("int", "long"),                  # 32 vs 64
-    ("int", "size_t"),                # 32 vs 64
+    ("int", "long"),                  # 32 vs pointer-width
+    ("int", "size_t"),                # 32 vs pointer-width
     ("long", "unsigned long"),        # signedness differs
     ("size_t", "ssize_t"),            # signedness differs
+    # Data-model-dependent vs fixed width: equal only on LP64, a real width
+    # change on ILP32 — and the snapshot does not record bitness, so these are
+    # conservatively reported rather than suppressed.
+    ("long", "long long"),
+    ("long", "int64_t"),
+    ("unsigned long", "uint64_t"),
     ("long*", "long long*"),          # pointers are not bare scalars
     ("int", "float"),                 # float not modelled
 ])
-def test_lp64_not_equivalent(a: str, b: str) -> None:
+def test_nonllp64_not_equivalent(a: str, b: str) -> None:
     assert not _abi_equivalent_scalar(a, b, is_llp64=False)
 
 
-def test_llp64_long_vs_long_long_differs() -> None:
-    # On Windows LLP64 long is 32-bit, so long != long long there.
+def test_llp64_differs() -> None:
+    # On Windows LLP64 long is 32-bit while size_t/pointer types stay 64-bit.
     assert not _abi_equivalent_scalar("long", "long long", is_llp64=True)
-    # size_t stays pointer-width (64) on LLP64, unsigned long is 32 → differ.
     assert not _abi_equivalent_scalar("unsigned long", "size_t", is_llp64=True)
 
 
@@ -68,20 +77,29 @@ def _fn(ret: str) -> Function:
                     params=[], visibility=Visibility.PUBLIC)
 
 
-def _snap(ver: str, ret: str) -> AbiSnapshot:
-    return AbiSnapshot(library="lib.so", version=ver, platform="elf",
+def _snap(ver: str, ret: str, platform: str = "elf") -> AbiSnapshot:
+    return AbiSnapshot(library="lib.so", version=ver, platform=platform,
                        functions=[_fn(ret)])
 
 
-def test_return_long_to_long_long_compatible() -> None:
-    r = compare(_snap("1", "long"), _snap("2", "long long"))
+def test_return_unsigned_long_to_size_t_compatible() -> None:
+    # size_t IS unsigned long on LP64 (and co-varies on ILP32) → not a break.
+    r = compare(_snap("1", "unsigned long"), _snap("2", "size_t"))
     assert ChangeKind.FUNC_RETURN_CHANGED not in {c.kind for c in r.changes}
     assert r.verdict in (Verdict.NO_CHANGE, Verdict.COMPATIBLE)
 
 
 def test_return_int_to_size_t_still_breaking() -> None:
-    # 32 -> 64 bit is a real representation change.
+    # 32 -> pointer-width is a real representation change.
     r = compare(_snap("1", "int"), _snap("2", "size_t"))
+    assert ChangeKind.FUNC_RETURN_CHANGED in {c.kind for c in r.changes}
+
+
+def test_return_long_to_long_long_reported_unknown_bitness() -> None:
+    # long vs long long is only ABI-equal on LP64; on ILP32 it is a real width
+    # change. The snapshot does not record bitness, so it is conservatively
+    # reported rather than silently suppressed.
+    r = compare(_snap("1", "long"), _snap("2", "long long"))
     assert ChangeKind.FUNC_RETURN_CHANGED in {c.kind for c in r.changes}
 
 
@@ -90,15 +108,39 @@ def _fn_param(ptype: str) -> Function:
                     params=[Param(name="a", type=ptype)], visibility=Visibility.PUBLIC)
 
 
+def _snap_param(ver: str, ptype: str, platform: str = "elf") -> AbiSnapshot:
+    return AbiSnapshot(library="l", version=ver, platform=platform,
+                       functions=[_fn_param(ptype)])
+
+
 def test_param_size_t_to_unsigned_long_compatible() -> None:
-    old = AbiSnapshot(library="l", version="1", platform="elf", functions=[_fn_param("size_t")])
-    new = AbiSnapshot(library="l", version="2", platform="elf", functions=[_fn_param("unsigned long")])
-    r = compare(old, new)
+    r = compare(_snap_param("1", "size_t"), _snap_param("2", "unsigned long"))
     assert ChangeKind.FUNC_PARAMS_CHANGED not in {c.kind for c in r.changes}
 
 
 def test_param_int_to_long_still_breaking() -> None:
-    old = AbiSnapshot(library="l", version="1", platform="elf", functions=[_fn_param("int")])
-    new = AbiSnapshot(library="l", version="2", platform="elf", functions=[_fn_param("long")])
-    r = compare(old, new)
+    r = compare(_snap_param("1", "int"), _snap_param("2", "long"))
     assert ChangeKind.FUNC_PARAMS_CHANGED in {c.kind for c in r.changes}
+
+
+# ── End-to-end LLP64 (platform="pe") — is_llp64 derived from snapshot ─────────
+
+def test_llp64_return_long_to_long_long_breaking() -> None:
+    r = compare(_snap("1", "long", platform="pe"), _snap("2", "long long", platform="pe"))
+    assert ChangeKind.FUNC_RETURN_CHANGED in {c.kind for c in r.changes}
+
+
+def test_llp64_return_unsigned_long_to_size_t_breaking() -> None:
+    # On LLP64 unsigned long is 32-bit but size_t is 64-bit → a real change.
+    r = compare(_snap("1", "unsigned long", platform="pe"), _snap("2", "size_t", platform="pe"))
+    assert ChangeKind.FUNC_RETURN_CHANGED in {c.kind for c in r.changes}
+
+
+def test_int_to_long_param_breaking_on_both_models() -> None:
+    # int vs long are distinct built-ins; the change is reported regardless of
+    # data model (mirrors examples/case102: a frozen extern-C signature widened
+    # from int to long must stay a FUNC_PARAMS_CHANGED on Windows too, where
+    # both are 32-bit).
+    for platform in ("elf", "pe"):
+        r = compare(_snap_param("1", "int", platform), _snap_param("2", "long", platform))
+        assert ChangeKind.FUNC_PARAMS_CHANGED in {c.kind for c in r.changes}, platform

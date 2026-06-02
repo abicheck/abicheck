@@ -162,14 +162,11 @@ def _check_removed_function(
     )
 
 
-# Scalar integer spellings whose width/signedness are data-model *independent*,
-# mapped to (bit-width, is_signed). Used to recognise ABI-equivalent integer
-# type changes (e.g. ``long`` ↔ ``long long`` on LP64, ``size_t`` ↔
-# ``unsigned long``): a name-only change between two spellings with the same
-# width and signedness is not a binary ABI break — the calling convention and
-# storage are identical. ``size_t``/``ptrdiff_t``/pointer-width types are 64-bit
-# on every supported 64-bit target (LP64 and LLP64).
-_FIXED_SCALAR_REPR: dict[str, tuple[int, bool]] = {
+# Integer spellings whose width is *fixed* regardless of data model, mapped to
+# (bit-width, is_signed). A name-only change between two spellings with the same
+# representation is not a binary ABI break — storage and calling convention are
+# identical.
+_FIXED_SCALAR_REPR: dict[str, tuple[object, bool]] = {
     "int": (32, True), "signed int": (32, True), "signed": (32, True),
     "int32_t": (32, True),
     "unsigned int": (32, False), "unsigned": (32, False), "uint32_t": (32, False),
@@ -182,21 +179,35 @@ _FIXED_SCALAR_REPR: dict[str, tuple[int, bool]] = {
     "uint16_t": (16, False),
     "signed char": (8, True), "int8_t": (8, True),
     "unsigned char": (8, False), "uint8_t": (8, False),
-    "size_t": (64, False), "uintptr_t": (64, False),
-    "ssize_t": (64, True), "ptrdiff_t": (64, True), "intptr_t": (64, True),
 }
-# The ``long`` family: 64-bit under LP64 (Linux/macOS), 32-bit under LLP64
-# (Windows) — resolved against the snapshot's data model.
+# Data-model-dependent spellings. On LP64 (Linux/macOS 64-bit) the ``long``
+# family and the pointer-width types are all 64-bit; on ILP32 they are all
+# 32-bit; on LLP64 (Windows) ``long`` is 32-bit while the pointer-width types
+# stay 64-bit. The snapshot does not record target bitness, so for non-LLP64
+# targets we cannot tell LP64 from ILP32 — but the ``long`` family and the
+# pointer-width family *co-vary* there (both equal the pointer size), so they
+# are equivalent to each other yet NOT to a fixed-width spelling (e.g. ``long``
+# vs ``long long`` is a real width change on ILP32 and must not be suppressed).
+# A shared ``"long"`` width sentinel captures exactly that: it is equal to
+# itself (same sign) but never to a concrete bit-width, so ``size_t`` ↔
+# ``unsigned long`` is suppressed on non-LLP64 while ``int`` ↔ ``long`` and
+# ``long`` ↔ ``long long`` stay reportable everywhere.
 _LONG_SIGNED_SPELLINGS = frozenset({"long", "long int", "signed long"})
 _LONG_UNSIGNED_SPELLINGS = frozenset({"unsigned long", "long unsigned int"})
+_PTR_SIGNED_SPELLINGS = frozenset({"ssize_t", "ptrdiff_t", "intptr_t"})
+_PTR_UNSIGNED_SPELLINGS = frozenset({"size_t", "uintptr_t"})
 
 
-def _scalar_repr(type_name: str, is_llp64: bool) -> tuple[int, bool] | None:
-    """Map a *bare* integer spelling to (bit-width, is_signed), or None.
+def _scalar_repr(type_name: str, is_llp64: bool) -> tuple[object, bool] | None:
+    """Map a *bare* integer spelling to (width, is_signed), or None.
 
-    Returns None for anything that is not a plain integer scalar (pointers,
-    references, templates, cv-qualified or unknown spellings), so equivalence is
-    only ever asserted between two unambiguous integer names.
+    Width is an ``int`` (fixed bit count) or the sentinel ``"long"`` for the
+    data-model-dependent ``long`` family (and, on non-LLP64, the pointer-width
+    typedefs that co-vary with it). The sentinel is never equal to any fixed
+    width, so a distinct built-in change such as ``int`` vs ``long`` is reported
+    even where the widths coincide. Returns None for anything that is not a
+    plain integer scalar (pointers, references, templates, cv-qualified or
+    unknown spellings).
     """
     t = " ".join(type_name.split())
     if not t or any(c in t for c in "*&<>([,") or "const" in t or "volatile" in t:
@@ -204,10 +215,22 @@ def _scalar_repr(type_name: str, is_llp64: bool) -> tuple[int, bool] | None:
     fixed = _FIXED_SCALAR_REPR.get(t)
     if fixed is not None:
         return fixed
+    # The ``long`` family is its own distinct built-in: it must never be equated
+    # with a fixed-width spelling, even where the widths happen to coincide
+    # (e.g. ``int`` vs ``long`` are both 32-bit on LLP64 but are different
+    # types, and changing one to the other is a real signature change). Map it
+    # to a dedicated, platform-independent sentinel.
     if t in _LONG_SIGNED_SPELLINGS:
-        return (32 if is_llp64 else 64, True)
+        return ("long", True)
     if t in _LONG_UNSIGNED_SPELLINGS:
-        return (32 if is_llp64 else 64, False)
+        return ("long", False)
+    # Pointer-width typedefs co-vary with the ``long`` family on non-LLP64
+    # (``size_t`` *is* ``unsigned long`` there), but are a fixed 64-bit under
+    # LLP64 (where ``long`` is 32-bit and thus a different representation).
+    if t in _PTR_SIGNED_SPELLINGS:
+        return (64, True) if is_llp64 else ("long", True)
+    if t in _PTR_UNSIGNED_SPELLINGS:
+        return (64, False) if is_llp64 else ("long", False)
     return None
 
 
@@ -216,9 +239,11 @@ def _abi_equivalent_scalar(old_type: str, new_type: str, is_llp64: bool) -> bool
 
     True only when both resolve to the same width *and* signedness on the
     target data model — i.e. the change is a spelling/typedef difference, not a
-    binary ABI break (``size_t`` ↔ ``unsigned long``, ``long`` ↔ ``long long``
-    on LP64). A signedness difference (``long`` ↔ ``unsigned long``) is *not*
-    equivalent and is still reported.
+    binary ABI break (e.g. ``size_t`` ↔ ``unsigned long``). A signedness
+    difference (``long`` ↔ ``unsigned long``) is not equivalent, and a
+    data-model-dependent spelling is never equated with a fixed width
+    (``long`` ↔ ``long long`` stays a reportable change, since it is a real
+    width change on ILP32 and the snapshot does not record target bitness).
     """
     old_r = _scalar_repr(old_type, is_llp64)
     return old_r is not None and old_r == _scalar_repr(new_type, is_llp64)

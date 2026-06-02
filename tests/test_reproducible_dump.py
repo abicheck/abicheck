@@ -40,6 +40,13 @@ def test_malformed_epoch_falls_back_to_now() -> None:
     assert out and out != "2021-01-01T00:00:00+00:00"
 
 
+def test_out_of_range_epoch_falls_back_to_now() -> None:
+    # An absurd out-of-range epoch makes datetime.fromtimestamp raise
+    # OverflowError/OSError; it must fall back rather than abort the dump.
+    out = _provenance_timestamp("99999999999999999999")
+    assert out and out != "2021-01-01T00:00:00+00:00"
+
+
 def test_unset_epoch_uses_now() -> None:
     out = _provenance_timestamp(None)
     assert out  # current wall-clock ISO timestamp
