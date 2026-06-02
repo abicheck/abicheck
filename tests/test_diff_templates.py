@@ -245,11 +245,33 @@ class TestOverloadSetRerouted:
         set (e.g. `f(int)` + `f(int) const`) replaced by `f(long)` must still
         fire OVERLOAD_SET_REROUTED — the guard counts actual overloads, not
         distinct parameter-type tuples."""
+        f_const = _fn("lib::f", mangled="_ZNK3lib1fEi", params=[("a", "int")])
+        f_const.is_const = True
         old = _snap(funcs=[
             _fn("lib::f", mangled="_ZN3lib1fEi", params=[("a", "int")]),
-            _fn("lib::f", mangled="_ZNK3lib1fEi", params=[("a", "int")]),  # const
+            f_const,
         ])
         new = _snap(funcs=[
+            _fn("lib::f", mangled="_ZN3lib1fEl", params=[("a", "long")]),
+        ])
+        changes = detect_overload_set_rerouted(old, new)
+        assert len(changes) == 1
+        assert changes[0].kind == ChangeKind.OVERLOAD_SET_REROUTED
+
+    def test_cv_ref_only_removal_in_mixed_change_fires(self) -> None:
+        """Membership diff must use the cv/ref-aware overload key, not just
+        parameter-type tuples. {f(int), f(int) const} -> {f(int), f(long)}
+        removes the `const` overload and adds `f(long)`; with a param-only key
+        the shared `(int)` tuple would hide the removal and the reroute would be
+        missed. The const overload's disappearance must be detected."""
+        f_const = _fn("lib::f", mangled="_ZNK3lib1fEi", params=[("a", "int")])
+        f_const.is_const = True
+        old = _snap(funcs=[
+            _fn("lib::f", mangled="_ZN3lib1fEi", params=[("a", "int")]),
+            f_const,
+        ])
+        new = _snap(funcs=[
+            _fn("lib::f", mangled="_ZN3lib1fEi", params=[("a", "int")]),
             _fn("lib::f", mangled="_ZN3lib1fEl", params=[("a", "long")]),
         ])
         changes = detect_overload_set_rerouted(old, new)

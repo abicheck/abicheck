@@ -1018,28 +1018,36 @@ _FUNC_LIKE_TYPES = frozenset({SymbolType.FUNC, SymbolType.IFUNC, SymbolType.NOTY
 # coincidental symbol-size collision. On a large library that produces nonsense
 # pairings of completely unrelated functions that merely happen to share a byte
 # size (observed on real libLLVM release-to-release diffs: e.g. fixupIndexV4 ->
-# SmallVectorImpl<...>). A genuine rename or namespace relocation keeps the
-# function's unqualified base name (e.g. CompileUnit::dump ->
-# dwarf_linker::classic::CompileUnit::dump), so requiring base-name similarity
-# discriminates real renames (ratio ~1.0) from coincidences (ratio < 0.3).
+# SmallVectorImpl<...>). A genuine rename or namespace relocation preserves most
+# of the qualified spelling (e.g. llvm::CompileUnit::markEverythingAsKept ->
+# llvm::dwarf_linker::classic::CompileUnit::markEverythingAsKept), so requiring
+# whole-name similarity discriminates real renames from coincidences. Measured
+# on real libLLVM 17->18 symbols: genuine namespace moves score ~0.75-1.0,
+# unrelated same-size pairs <=0.48.
 _RENAME_NAME_SIMILARITY_MIN = 0.5
 
 
 def _plausible_rename(old_name: str, new_name: str) -> bool:
     """Whether two symbol names are similar enough to credibly be a rename.
 
-    Compares the *unqualified* base names (demangled when possible) so a
-    namespace move scores ~1.0 while unrelated functions score low. Used only
-    to gate hash-less matches, where size alone is not evidence of identity.
+    Compares the *whole* names — demangled when a demangler is available,
+    otherwise the raw (mangled) spelling. Both are matching-safe representations:
+    unlike ``demangle.base_name`` (a display-only, best-effort unqualified-name
+    extractor that is explicitly unreliable for ``operator<<``, ``operator()``,
+    and templates containing ``::``), the full spelling has no parser to mislead
+    it. A namespace move keeps most of the string; an unrelated function that
+    merely shares a byte size does not. Used only to gate hash-less matches,
+    where size alone is not evidence of identity.
     """
+    if old_name == new_name:
+        return True
+
     import difflib
 
-    from .demangle import base_name
+    from .demangle import demangle
 
-    a = base_name(old_name)
-    b = base_name(new_name)
-    if a == b:
-        return True
+    a = demangle(old_name) or old_name
+    b = demangle(new_name) or new_name
     return difflib.SequenceMatcher(None, a, b).ratio() >= _RENAME_NAME_SIMILARITY_MIN
 
 
@@ -1095,15 +1103,13 @@ def _diff_fingerprint_renames(old: AbiSnapshot, new: AbiSnapshot) -> list[Change
     if not old_fps or not new_fps:
         return changes
 
-    candidates = match_renamed_functions(old_fps, new_fps)
+    # Matches in this path are hash-less (size-only), inferred from symbol size
+    # alone since _fingerprints_from_elf has no code bytes. Pass the name-
+    # similarity predicate into the matcher so it participates in candidate
+    # *selection*: a coincidental same-size symbol can neither be reported as a
+    # rename nor greedily consume a partner that a plausible rename should claim.
+    candidates = match_renamed_functions(old_fps, new_fps, name_filter=_plausible_rename)
     for c in candidates:
-        # Hash-less matches (the only kind this path can produce, since
-        # _fingerprints_from_elf has no code bytes) are inferred from symbol
-        # size alone. Require name similarity so coincidental size collisions
-        # between unrelated functions are not reported as renames.
-        if not c.old_fingerprint.code_hash and not c.new_fingerprint.code_hash:
-            if not _plausible_rename(c.old_name, c.new_name):
-                continue
         conf_pct = int(c.confidence * 100)
         changes.append(Change(
             kind=ChangeKind.FUNC_LIKELY_RENAMED,

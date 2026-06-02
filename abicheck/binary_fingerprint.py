@@ -33,6 +33,7 @@ import hashlib
 import logging
 import os
 import stat
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import IO
@@ -219,6 +220,7 @@ def compute_section_summary(binary_path: str | Path) -> BinarySummary:
 def match_renamed_functions(
     old_fps: dict[str, FunctionFingerprint],
     new_fps: dict[str, FunctionFingerprint],
+    name_filter: Callable[[str, str], bool] | None = None,
 ) -> list[RenameCandidate]:
     """Find likely renamed functions by matching fingerprints.
 
@@ -239,6 +241,14 @@ def match_renamed_functions(
     shared libraries (< 10k symbols).
 
     Matches are returned sorted by confidence (highest first).
+
+    ``name_filter`` (optional): a predicate ``(old_name, new_name) -> bool``
+    consulted during candidate *selection* for the hash-less size/fuzzy passes
+    (3 and 4 above). When supplied, an old symbol only considers new partners
+    the predicate accepts, so an implausible same-size symbol cannot greedily
+    consume a partner that a plausible rename should claim. Exact (code-hash)
+    matches ignore the filter — identical code is strong evidence regardless of
+    name. When omitted, matching behaves exactly as before.
     """
     old_only = set(old_fps) - set(new_fps)
     new_only = set(new_fps) - set(old_fps)
@@ -264,8 +274,8 @@ def match_renamed_functions(
     used_new: set[str] = set()
     candidates = _match_exact(old_candidates, new_by_hash, used_new)
     matched_old = {c.old_name for c in candidates}
-    candidates += _match_size(old_candidates, new_by_size, used_new, matched_old)
-    candidates += _match_fuzzy(old_candidates, new_candidates, used_new, matched_old)
+    candidates += _match_size(old_candidates, new_by_size, used_new, matched_old, name_filter)
+    candidates += _match_fuzzy(old_candidates, new_candidates, used_new, matched_old, name_filter)
 
     # Sort by confidence descending
     candidates.sort(key=lambda c: (-c.confidence, c.old_name))
@@ -321,6 +331,7 @@ def _match_size(
     new_by_size: dict[int, list[tuple[str, FunctionFingerprint]]],
     used_new: set[str],
     matched_old: set[str],
+    name_filter: Callable[[str, str], bool] | None = None,
 ) -> list[RenameCandidate]:
     """Pass 2: size-only matches (same size, unique among remaining candidates)."""
     out: list[RenameCandidate] = []
@@ -329,7 +340,7 @@ def _match_size(
             continue
         size_matches = [
             (n, fp) for n, fp in new_by_size.get(old_fp.size, [])
-            if n not in used_new
+            if n not in used_new and (name_filter is None or name_filter(old_name, n))
         ]
         # Only match if there's exactly one candidate at this size
         # (ambiguous matches are not reliable)
@@ -356,11 +367,14 @@ def _fuzzy_partners(
     old_fp: FunctionFingerprint,
     new_candidates: dict[str, FunctionFingerprint],
     used_new: set[str],
+    name_filter: Callable[[str, str], bool] | None = None,
 ) -> list[tuple[str, FunctionFingerprint]]:
     """New candidates whose size is within tolerance of ``old_fp`` and unused."""
     partners: list[tuple[str, FunctionFingerprint]] = []
     for new_name, new_fp in new_candidates.items():
         if new_name in used_new or new_fp.size == 0:
+            continue
+        if name_filter is not None and not name_filter(old_fp.name, new_name):
             continue
         # If both have code hashes but they differ, skip
         if old_fp.code_hash and new_fp.code_hash and old_fp.code_hash != new_fp.code_hash:
@@ -376,13 +390,14 @@ def _match_fuzzy(
     new_candidates: dict[str, FunctionFingerprint],
     used_new: set[str],
     matched_old: set[str],
+    name_filter: Callable[[str, str], bool] | None = None,
 ) -> list[RenameCandidate]:
     """Pass 3: fuzzy size matches (within tolerance, unique match only)."""
     out: list[RenameCandidate] = []
     for old_name, old_fp in sorted(old_candidates.items()):
         if old_name in matched_old or old_fp.size == 0:
             continue
-        fuzzy_matches = _fuzzy_partners(old_fp, new_candidates, used_new)
+        fuzzy_matches = _fuzzy_partners(old_fp, new_candidates, used_new, name_filter)
         if len(fuzzy_matches) == 1:
             new_name, new_fp = fuzzy_matches[0]
             out.append(RenameCandidate(

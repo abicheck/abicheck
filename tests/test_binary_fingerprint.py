@@ -287,6 +287,27 @@ class TestMatchRenamedFunctions:
         assert result[0].old_name == "a"
         assert result[0].new_name == "c"
 
+    def test_name_filter_participates_in_selection(self) -> None:
+        """When a size bucket has one added symbol and several removed symbols,
+        the name filter must steer candidate *selection*, not just discard a
+        greedily-chosen pair afterward. An unrelated removed name that sorts
+        first must not consume the partner a plausible rename should claim."""
+        old = {
+            # 'aaa_unrelated' sorts before 'foo_v1' and shares the size bucket
+            "aaa_unrelated": _fp("aaa_unrelated", 256),
+            "foo_v1": _fp("foo_v1", 256),
+        }
+        new = {"foo_v2": _fp("foo_v2", 256)}
+
+        def plausible(o: str, n: str) -> bool:
+            import difflib
+            return difflib.SequenceMatcher(None, o, n).ratio() >= 0.5
+
+        result = match_renamed_functions(old, new, name_filter=plausible)
+        assert len(result) == 1
+        assert result[0].old_name == "foo_v1"
+        assert result[0].new_name == "foo_v2"
+
     def test_empty_inputs(self) -> None:
         assert match_renamed_functions({}, {}) == []
         assert match_renamed_functions({"a": _fp("a", 100)}, {}) == []
@@ -496,6 +517,23 @@ class TestFingerprintRenameDetector:
         result = compare(old, new)
         rename_changes = [c for c in result.changes if c.kind == ChangeKind.FUNC_LIKELY_RENAMED]
         assert rename_changes == []
+
+    def test_collision_does_not_hide_plausible_rename(self) -> None:
+        """A real rename in a crowded size bucket is still found even when an
+        unrelated same-size symbol sorts earlier — the similarity check drives
+        selection, so the unrelated symbol cannot consume the partner."""
+        old = _snap_elf_only("1.0", [
+            _func_sym("aaa_unrelated_function", 256),
+            _func_sym("foo_v1_dosomething", 256),
+        ])
+        new = _snap_elf_only("2.0", [
+            _func_sym("foo_v2_dosomething", 256),
+        ])
+        result = compare(old, new)
+        renames = [c for c in result.changes if c.kind == ChangeKind.FUNC_LIKELY_RENAMED]
+        assert len(renames) == 1
+        assert renames[0].old_value == "foo_v1_dosomething"
+        assert renames[0].new_value == "foo_v2_dosomething"
 
     def test_namespace_relocation_detected(self) -> None:
         """A genuine namespace move keeps the unqualified base name, so a

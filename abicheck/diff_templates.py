@@ -346,13 +346,37 @@ def detect_overload_set_rerouted(
             out[stem].append(f)
         return out
 
+    def _overload_key(f: Function) -> tuple[object, ...]:
+        # An overload is distinguished by its parameter types *and* its
+        # implicit-object cv/ref qualifiers. Two member functions f(int) and
+        # f(int) const are separate overloads sharing a parameter-type tuple;
+        # keying on params alone would hide the removal/addition of one of them
+        # in a mixed change (e.g. {f(int), f(int) const} -> {f(int), f(long)}).
+        return (
+            tuple(p.type for p in f.params),
+            f.is_const,
+            f.is_volatile,
+            f.ref_qualifier,
+        )
+
+    def _fmt_key(key: tuple[object, ...]) -> str:
+        params, is_const, is_volatile, ref_qual = key
+        sig = "(" + ", ".join(params) + ")"  # type: ignore[arg-type]
+        if is_const:
+            sig += " const"
+        if is_volatile:
+            sig += " volatile"
+        if ref_qual:
+            sig += f" {ref_qual}"
+        return sig
+
     old_by_stem = _by_stem(old)
     new_by_stem = _by_stem(new)
 
     changes: list[Change] = []
     for stem in sorted(set(old_by_stem) & set(new_by_stem)):
-        old_sigs = {tuple(p.type for p in f.params) for f in old_by_stem[stem]}
-        new_sigs = {tuple(p.type for p in f.params) for f in new_by_stem[stem]}
+        old_sigs = {_overload_key(f) for f in old_by_stem[stem]}
+        new_sigs = {_overload_key(f) for f in new_by_stem[stem]}
         removed = old_sigs - new_sigs
         added = new_sigs - old_sigs
         if not (removed and added):
@@ -364,13 +388,9 @@ def detect_overload_set_rerouted(
         # on both sides (1→1) is just a signature change (already reported as
         # FUNC_PARAMS_CHANGED); C has no overloading at all, so such a name can
         # never re-route. Skip it to avoid a spurious RISK finding that
-        # double-counts the same change.
-        #
-        # Count actual overloads (Function entries), not distinct parameter-type
-        # tuples: C++ overloads may differ only in implicit-object cv/ref
-        # qualifiers (e.g. `f(int)` vs `f(int) const`), which share a param-type
-        # tuple but are separate overloads. Keying on the tuple would
-        # under-count them and wrongly suppress a real overload-set change.
+        # double-counts the same change. Count actual overloads (Function
+        # entries) so cv/ref-only overloads (which share a parameter-type tuple)
+        # are not under-counted.
         if len(old_by_stem[stem]) < 2 and len(new_by_stem[stem]) < 2:
             continue
         changes.append(Change(
@@ -383,8 +403,8 @@ def detect_overload_set_rerouted(
                 f"resolved to a removed overload may silently re-route to "
                 f"a different overload."
             ),
-            old_value=str(sorted(["(" + ", ".join(t) + ")" for t in old_sigs])),
-            new_value=str(sorted(["(" + ", ".join(t) + ")" for t in new_sigs])),
+            old_value=str(sorted(_fmt_key(k) for k in old_sigs)),
+            new_value=str(sorted(_fmt_key(k) for k in new_sigs)),
         ))
 
     return changes
