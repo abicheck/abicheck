@@ -557,9 +557,12 @@ class TestPlausibleRename:
         assert _plausible_rename("_ZN1AD1Ev", "_ZN1B1AEv") is False
 
     def test_same_variant_ctor_relocation_accepted(self) -> None:
-        # A genuine constructor relocation keeps the same variant code, so a
-        # move to a new enclosing scope (A::A() -> ns::A::A()) still matches.
-        assert _plausible_rename("_ZN1AC1Ev", "_ZN2ns1AC1Ev") is True
+        # A genuine constructor relocation to a new enclosing scope
+        # (A::A() -> ns::A::A()) is still a plausible rename — the tightened
+        # guard must not reject same-kind ctors. Demangled-style names are used
+        # so the test is independent of c++filt/cxxfilt availability (raw _Z
+        # names without a demangler fall to the conservative exact-only gate).
+        assert _plausible_rename("A::A()", "ns::A::A()") is True
 
     def test_ctor_dtor_variant_malformed_symbols_yield_none(self) -> None:
         # Defensive bail-outs: a malformed nested-name must never raise or
