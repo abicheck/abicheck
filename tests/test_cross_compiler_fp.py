@@ -101,6 +101,33 @@ def _require_tool(name: str) -> None:
         pytest.skip(f"{name} not found in PATH")
 
 
+# Generous compile timeout: a cold clang/gcc on a Windows CI runner (cold
+# toolchain cache, on-access AV scanning, slow temp filesystem) can take far
+# longer than a warm Linux invocation. This test verifies abicheck's diff
+# behavior, not compiler throughput, so a slow/hung toolchain should skip
+# (like a compilation failure does below), not fail the suite.
+_COMPILE_TIMEOUT_S = 180
+
+
+def _run_compile_or_skip(cmd: list[str], *, label: str = "Compilation") -> None:
+    """Run a compile command, skipping (not failing) on timeout or error.
+
+    A non-zero exit or a timeout both mean "this runner's toolchain couldn't
+    produce the artifact" — neither is an abicheck defect, so both skip.
+    """
+    try:
+        r = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=_COMPILE_TIMEOUT_S,
+        )
+    except subprocess.TimeoutExpired:
+        pytest.skip(
+            f"{label} timed out after {_COMPILE_TIMEOUT_S}s; "
+            "slow/cold toolchain on this runner"
+        )
+    if r.returncode != 0:
+        pytest.skip(f"{label} failed: {r.stderr[:200]}")
+
+
 def _compile_so(src: str, out: Path, compiler: str, lang: str) -> None:
     ext = ".c" if lang == "c" else ".cpp"
     src_file = out.with_suffix(ext)
@@ -113,9 +140,7 @@ def _compile_so(src: str, out: Path, compiler: str, lang: str) -> None:
         # Force C mode when using a C++ driver on .c files
         cmd.insert(1, "-x")
         cmd.insert(2, "c")
-    r = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-    if r.returncode != 0:
-        pytest.skip(f"Compilation failed ({compiler}): {r.stderr[:200]}")
+    _run_compile_or_skip(cmd, label=f"Compilation ({compiler})")
 
 
 def _dump_and_compare(gcc_so: Path, clang_so: Path, hdr: str | None,
@@ -230,9 +255,7 @@ class TestOptimizationLevelFP:
             src_file.write_text(textwrap.dedent(C_SRC).strip(), encoding="utf-8")
             cmd = ["gcc", "-shared", "-fPIC", "-g", "-fvisibility=default",
                    opt, "-o", str(so), str(src_file)]
-            r = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-            if r.returncode != 0:
-                pytest.skip(f"Compilation failed: {r.stderr[:200]}")
+            _run_compile_or_skip(cmd)
 
         r = _dump_and_compare(o0_so, o2_so, C_HDR, "c", tmp_path)
         assert not r.breaking, (
@@ -257,9 +280,7 @@ class TestOptimizationLevelFP:
             src_file.write_text(textwrap.dedent(CPP_SRC).strip(), encoding="utf-8")
             cmd = ["g++", "-shared", "-fPIC", "-g", "-fvisibility=default",
                    "-std=c++17", opt, "-o", str(so), str(src_file)]
-            r = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-            if r.returncode != 0:
-                pytest.skip(f"Compilation failed: {r.stderr[:200]}")
+            _run_compile_or_skip(cmd)
 
         r = _dump_and_compare(o0_so, o2_so, CPP_HDR, "cpp", tmp_path)
         assert not r.breaking
@@ -283,9 +304,7 @@ class TestStrippedVsUnstrippedFP:
         src_file.write_text(textwrap.dedent(C_SRC).strip(), encoding="utf-8")
         cmd = ["gcc", "-shared", "-fPIC", "-g", "-fvisibility=default",
                "-o", str(debug_so), str(src_file)]
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-        if r.returncode != 0:
-            pytest.skip(f"Compilation failed: {r.stderr[:200]}")
+        _run_compile_or_skip(cmd)
 
         # Copy and strip
         shutil.copy2(debug_so, stripped_so)

@@ -662,6 +662,7 @@ def check_appcompat(
     suppression: SuppressionList | None = None,
     policy: str = "strict_abi",
     policy_file: PolicyFile | None = None,
+    scope_to_public_surface: bool = True,
 ) -> AppCompatResult:
     """Check application compatibility with a library update.
 
@@ -707,7 +708,7 @@ def check_appcompat(
         lang="c" if lang == "c" else None,
     )
 
-    diff = compare(old_snap, new_snap, suppression=suppression, policy=policy, policy_file=policy_file)
+    diff = compare(old_snap, new_snap, suppression=suppression, policy=policy, policy_file=policy_file, scope_to_public_surface=scope_to_public_surface)
 
     # 3. Check symbol availability in new library
     new_exports = _get_new_lib_exports(new_lib_path)
