@@ -20,7 +20,7 @@ This document answers three questions:
 |------|-----------|--------------------:|:------:|:--------:|:----------------------:|------------------|
 | Compare | `compare` | ~55 | ✅ `--policy`/`--policy-file` | ✅ `--severity-*` | ✅ **default ON** | 0/2/4 (legacy) **or** 0/1/2/4 (severity) |
 | Multi-binary | `compare-release` | ~40 | ✅ `--policy`/`--policy-file` | ❌ | ✅ **default OFF** | 0/2/4/8 |
-| App-centric | `appcompat` | ~22 | ✅ `--policy`/`--policy-file` | ❌ | ❌ (absent) | 0/1/2/4 |
+| App-centric | `appcompat` | ~22 | ✅ `--policy`/`--policy-file` | ❌ | ✅ **always-on, no CLI toggle** | 0/1/2/4 |
 | Snapshot | `dump` | ~30 | ❌ | ❌ | n/a | 0/1/2 |
 | ABICC drop-in | `compat check`/`dump` | ~110 (≈24 no-op stubs) | ❌ (hard-wired) | ❌ | ❌ | 0/1/2, 3–11 errors |
 | Stack | `stack-check`, `deps` | ~7 each | ❌ | ❌ | n/a | 0/1/4 / 0/1 |
@@ -51,7 +51,7 @@ This is the single most confusing thing in the whole surface.
 |-------------|-----------|---------|--------|
 | `compare` | `--scope-public-headers/--no-scope-public-headers` (toggle) | **ON** | `cli.py:1519-1525` |
 | `compare-release` | `--scope-public-headers` (plain `is_flag`, no `--no-`) | **OFF** | `cli_compare_release.py:1046` |
-| `appcompat` | *flag does not exist* | n/a | `cli_appcompat.py` |
+| `appcompat` | *no CLI flag* — but **always-on**: `check_appcompat()` calls `compare()` without overriding its `scope_to_public_surface=True` default | **ON (forced)** | `appcompat.py:710`, `checker.py:180` |
 | `run_compare()` (Python API) | `scope_to_public_surface=True` | **ON** | `service.py:615` |
 
 Consequences:
@@ -61,7 +61,9 @@ Consequences:
   set — for no reason they can infer.
 - `compare` exposes `--no-...` to turn it off; `compare-release` has no way to
   turn it *on* with a negation, and no `--no-bundle`-style symmetry.
-- `appcompat`, which is *also* a comparison, has no scoping concept at all.
+- `appcompat`, which is *also* a comparison, scopes to the public surface
+  **always** (it inherits `compare()`'s `True` default) but gives the user **no
+  CLI toggle** to inspect or disable it — so a third, opaque variant.
 
 **Recommendation:** Pick one default (ON is the better UX — it's what
 distinguishes this tool from raw `abidiff` noise), make all three comparison
