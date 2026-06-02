@@ -1339,10 +1339,57 @@ def _unqualified_name(symbol: str) -> str:
     return _unqualified_name_of(demangle(symbol) or symbol)
 
 
+def _unwrap_funcptr_declarator(s: str) -> str:
+    """Unwrap a function-pointer/-reference *return* declarator so the real
+    function name is visible.
+
+    A C++ function that returns a function pointer demangles to declarator
+    syntax — ``RET (*name(args))(fnptr-args)``, e.g. ``int (*foo<int>())()`` —
+    where the first top-level ``(`` opens the declarator group, *not* the
+    parameter list. Left as-is, leaf extraction would stop at that ``(`` and
+    collapse the name to the return type. When ``s`` has this shape (the first
+    top-level ``(`` is immediately followed by ``*``/``&``), return the inner
+    ``name(args)`` so the normal leaf/parameter logic sees the real name;
+    otherwise return ``s`` unchanged. Ordinary parameter lists (whose first char
+    is a type or ``)``, never ``*``/``&`` at the very front) are left intact, as
+    are functions that merely *take* a function-pointer parameter.
+    """
+    depth = 0  # <> template depth — ignore '(' inside template arguments
+    for i, ch in enumerate(s):
+        if ch == "<":
+            depth += 1
+        elif ch == ">":
+            depth = max(0, depth - 1)
+        elif ch == "(" and depth == 0:
+            j = i + 1
+            while j < len(s) and s[j] == " ":
+                j += 1
+            if j >= len(s) or s[j] not in "*&":
+                return s  # ordinary parameter list, not a pointer declarator
+            # Find the ')' matching this declarator-group '(' (bracket-aware).
+            pdepth = 0
+            tdepth = 0
+            for k in range(i, len(s)):
+                c = s[k]
+                if c == "<":
+                    tdepth += 1
+                elif c == ">":
+                    tdepth = max(0, tdepth - 1)
+                elif c == "(" and tdepth == 0:
+                    pdepth += 1
+                elif c == ")" and tdepth == 0:
+                    pdepth -= 1
+                    if pdepth == 0:
+                        return s[i + 1:k].lstrip("*& ")
+            return s  # unbalanced — leave alone
+    return s
+
+
 def _unqualified_name_of(s: str) -> str:
     """Leaf-name core of ``_unqualified_name`` operating on an already-demangled
     (or raw, when no demangler is available) string. Split out so callers that
     need both the leaf and the parameter signature can demangle once."""
+    s = _unwrap_funcptr_declarator(s)
     # An operator name encodes punctuation (``<<``, ``()``, ``[]``) that defeats
     # bracket tracking, so handle it first: keep everything from the ``operator``
     # token to the end. It is stable and symmetric, which is all the matcher
@@ -1436,6 +1483,7 @@ def _param_signature(symbol: str) -> str:
 def _param_signature_of(s: str) -> str:
     """Parameter-signature core of ``_param_signature`` operating on an
     already-demangled (or raw) string."""
+    s = _unwrap_funcptr_declarator(s)
     depth = 0
     for i, ch in enumerate(s):
         if ch == "<":

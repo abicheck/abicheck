@@ -20,9 +20,11 @@ from abicheck.binary_fingerprint import (
 from abicheck.checker import ChangeKind, compare
 from abicheck.diff_symbols import (
     _ctor_dtor_variant,
+    _param_signature_of,
     _plausible_rename,
     _strip_template_args,
     _unqualified_name,
+    _unqualified_name_of,
 )
 from abicheck.elf_metadata import ElfMetadata, ElfSymbol, SymbolBinding, SymbolType
 from abicheck.model import AbiSnapshot, Function, Visibility
@@ -555,6 +557,26 @@ class TestPlausibleRename:
         assert _plausible_rename("_ZN1B1AEv", "_ZN1AC1Ev") is False
         # Likewise a destructor vs an ordinary same-leaf member.
         assert _plausible_rename("_ZN1AD1Ev", "_ZN1B1AEv") is False
+
+    def test_funcptr_return_declarator_name_extracted(self) -> None:
+        # A function returning a function pointer demangles to declarator syntax
+        # (int (*foo<int>())()) where the first top-level '(' opens the
+        # declarator group, not the parameter list. The real name must be
+        # recovered for leaf/param extraction (demangled-style inputs keep the
+        # test independent of c++filt availability).
+        assert _unqualified_name_of("int (*foo_v1<int>())()") == "foo_v1<int>"
+        assert _param_signature_of("int (*foo_v1<int>())()") == "()"
+        # A function that merely *takes* a function-pointer parameter must be
+        # left intact (the '(' there is the real parameter list).
+        assert _unqualified_name_of("void foo(int (*)())") == "foo"
+        assert _param_signature_of("void foo(int (*)())") == "(int (*)())"
+
+    def test_funcptr_return_rename_detected(self) -> None:
+        # End-to-end: a versioned rename of a function-pointer-returning template
+        # (foo_v1<int> -> foo_v2<int>) is a plausible rename, not removed/added.
+        assert _plausible_rename(
+            "int (*foo_v1<int>())()", "int (*foo_v2<int>())()"
+        ) is True
 
     def test_same_variant_ctor_relocation_accepted(self) -> None:
         # A genuine constructor relocation to a new enclosing scope
