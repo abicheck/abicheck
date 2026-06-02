@@ -89,6 +89,28 @@ def test_pointer_width_typedefs_equivalent_to_each_other() -> None:
     assert _abi_equivalent_scalar("size_t", "uintptr_t", is_llp64=True)
 
 
+@pytest.mark.parametrize("a,b", [
+    # Legal specifier-order / redundant-``int`` variants are the same type:
+    # different toolchains spell them differently and it is not an ABI change.
+    ("size_t", "unsigned long int"),       # vs GCC's "long unsigned int"
+    ("unsigned long", "unsigned long int"),
+    ("uint16_t", "unsigned short int"),
+    ("uint64_t", "unsigned long long int"),
+    ("int64_t", "signed long long int"),
+    ("ptrdiff_t", "signed long int"),
+    ("size_t", "int long unsigned"),       # arbitrary specifier order
+])
+def test_specifier_order_variants_equivalent_nonllp64(a: str, b: str) -> None:
+    assert _abi_equivalent_scalar(a, b, is_llp64=False)
+
+
+def test_specifier_order_variants_still_distinguish_real_changes() -> None:
+    # Normalization must not collapse genuinely different widths/signs.
+    assert not _abi_equivalent_scalar("unsigned long int", "unsigned int", is_llp64=False)
+    assert not _abi_equivalent_scalar("unsigned long int", "long int", is_llp64=False)
+    assert not _abi_equivalent_scalar("unsigned short int", "unsigned long long int", is_llp64=False)
+
+
 def _fn(ret: str) -> Function:
     return Function(name="f", mangled="f", return_type=ret,
                     params=[], visibility=Visibility.PUBLIC)
