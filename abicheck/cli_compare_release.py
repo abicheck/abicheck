@@ -1139,11 +1139,21 @@ def compare_release_cmd(
     When directories are given, libraries are matched by filename stem.
 
     \b
-    Exit codes:
+    Exit codes (verdict-based, the default):
       0  All libraries: NO_CHANGE, COMPATIBLE, or COMPATIBLE_WITH_RISK
       2  At least one library: API_BREAK
       4  At least one library: BREAKING
       8  Library removed (only when --fail-on-removed-library)
+
+    \b
+    With any --severity-* option, exit codes follow the severity-aware scheme
+    aggregated across all libraries (and bundle/matrix findings):
+      0  no error-level findings
+      1  error in quality/addition categories only
+      2  error in potential_breaking
+      4  error in abi_breaking
+    A removed library (--fail-on-removed-library) still exits 8, and a per-library
+    comparison ERROR still floors the exit at 4, regardless of severity settings.
 
     \b
     Examples:

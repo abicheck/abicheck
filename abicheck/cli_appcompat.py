@@ -252,10 +252,20 @@ def appcompat_cmd(
       abicheck appcompat myapp --list-required-symbols --check-against libfoo.so.2
 
     \b
-    Exit codes:
+    Exit codes (verdict-based, the default):
       0  COMPATIBLE — application is safe with the new library
       2  API_BREAK — source-level break affecting app's symbols
       4  BREAKING — binary ABI break or missing symbols
+
+    \b
+    With any --severity-* option (full mode only — weak/--check-against keeps the
+    verdict-based codes above), exit codes follow the severity-aware scheme over
+    the app-relevant changes:
+      0  no error-level findings
+      1  error in quality/addition categories only
+      2  error in potential_breaking
+      4  error in abi_breaking
+    Missing required symbols/versions always floor the exit at 4.
     """
     _setup_verbosity(verbose)
 
