@@ -1244,6 +1244,11 @@ def _ctor_dtor_variant(symbol: str) -> str | None:
             i = _skip_template_args(symbol, i)
             if i < 0:
                 return None  # unbalanced / unmodeled — bail out
+        elif symbol[i] == "S":
+            # A standard/standard-library substitution can open the prefix, e.g.
+            # ``_ZNSt6vectorIiEC1Ev`` (St = std::) — consume it before the
+            # source-name components so the ctor/dtor code is still found.
+            i = _skip_substitution(symbol, i)
         else:
             break
     m = _CTOR_DTOR_CODE_RE.match(symbol[i:])
@@ -1258,6 +1263,24 @@ def _skip_source_name(symbol: str, i: int) -> int:
         j += 1
     end = j + int(symbol[i:j])
     return end if end <= len(symbol) else -1
+
+
+def _skip_substitution(symbol: str, i: int) -> int:
+    """Skip an Itanium ``<substitution>`` starting at ``symbol[i]`` (an ``S``);
+    return the index past it.
+
+    Handles ``S_``, ``S<seq-id>_`` (seq-id is base-36 ``[0-9A-Z]``), and the
+    special two-character abbreviations (``St`` std, ``Ss`` std::string, ``Sa``,
+    ``Sb``, ``Si``, ``So``, ``Sd``). Consuming it whole keeps any digits in a
+    seq-id from being misread as a ``<source-name>`` length.
+    """
+    n = len(symbol)
+    i += 1  # consume 'S'
+    if i < n and (symbol[i].isdigit() or symbol[i].isupper()):
+        while i < n and symbol[i] != "_":
+            i += 1
+        return i + 1  # consume the closing '_'
+    return i + 1  # special two-char abbreviation (St, Ss, …) or bare 'S_'
 
 
 def _skip_template_args(symbol: str, i: int) -> int:
@@ -1283,16 +1306,9 @@ def _skip_template_args(symbol: str, i: int) -> int:
             if i < 0:
                 return -1
         elif c == "S":
-            # <substitution>: ``S_`` / ``S<seq-id>_`` (seq-id is base-36) or a
-            # special two-char form (``St``, ``Ss``, …). Consume so its digits
-            # are not mistaken for a source-name length.
-            i += 1
-            if i < n and (symbol[i].isdigit() or symbol[i].isupper()):
-                while i < n and symbol[i] != "_":
-                    i += 1
-                i += 1  # consume the closing '_'
-            else:
-                i += 1  # special two-char substitution
+            # <substitution>: consume whole so its digits are not mistaken for a
+            # source-name length.
+            i = _skip_substitution(symbol, i)
         elif c == "L":
             # <expr-primary> literal: ``L<type><value>E``. Scan to its own
             # terminating ``E`` literally — its value digits are not lengths.

@@ -541,6 +541,18 @@ class TestPlausibleRename:
         assert _ctor_dtor_variant("_ZN3FooIS_EC1Ev") == "C1"
         assert _ctor_dtor_variant("_ZN3FooISsEC1Ev") == "C1"
 
+    def test_std_substitution_prefix_ctor_variant_detected(self) -> None:
+        # A standard-substitution abbreviation can open the prefix: St = std::,
+        # so std::vector<int>::vector() = _ZNSt6vectorIiEC1Ev. The variant code
+        # must still be found after consuming the substitution.
+        assert _ctor_dtor_variant("_ZNSt6vectorIiEC1Ev") == "C1"
+        assert _ctor_dtor_variant("_ZNSt6vectorIiEC2Ev") == "C2"
+        assert _ctor_dtor_variant("_ZNSsC1Ev") == "C1"  # Ss = std::string
+        # A non-ctor std:: member is still not a variant.
+        assert _ctor_dtor_variant("_ZNSt6vectorIiE3fooEv") is None
+        # C1 vs C2 of a std container are distinct ABI symbols, not a rename.
+        assert _plausible_rename("_ZNSt6vectorIiEC1Ev", "_ZNSt6vectorIiEC2Ev") is False
+
     def test_templated_class_ctor_variant_pair_rejected(self) -> None:
         # C1 vs C2 of the same templated class are distinct ABI symbols, not a
         # rename — the variant guard must fire even with template args present.
