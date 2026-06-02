@@ -401,7 +401,8 @@ class TestParseAdvancedDwarf:
         fake_path.write_bytes(b"\x00")
 
         mock_elf = MagicMock()
-        mock_elf.has_dwarf_info.return_value = False
+        # Strict DWARF check: no .debug_info / .zdebug_info section present.
+        mock_elf.get_section_by_name.return_value = None
 
         with patch("abicheck.dwarf_advanced.ELFFile", return_value=mock_elf):
             result = parse_advanced_dwarf(fake_path)
@@ -1320,7 +1321,8 @@ class TestDwarfSnapshotFallbacks:
         fake_path.write_bytes(b"\x00")
 
         mock_elf = MagicMock()
-        mock_elf.has_dwarf_info.return_value = False
+        # Strict DWARF check: no .debug_info / .zdebug_info section present.
+        mock_elf.get_section_by_name.return_value = None
 
         elf_meta = self._make_elf_meta()
 

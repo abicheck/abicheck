@@ -97,7 +97,8 @@ class TestParseDwarfMetadata:
 class TestParse:
     def test_no_dwarf_info(self):
         mock_elf = MagicMock()
-        mock_elf.has_dwarf_info.return_value = False
+        # Strict DWARF check: no .debug_info / .zdebug_info section present.
+        mock_elf.get_section_by_name.return_value = None
 
         with patch("abicheck.dwarf_metadata.ELFFile", return_value=mock_elf):
             result = _parse(MagicMock(), Path("/fake.so"))

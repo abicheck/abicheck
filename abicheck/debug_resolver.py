@@ -234,12 +234,14 @@ class SplitDwarfResolver:
         except ImportError:
             return None
 
+        from .dwarf_utils import has_real_dwarf_info
+
         dwo_names: list[str] = []
         comp_dirs: set[str] = set()
         try:
             with open(binary_path, "rb") as f:
                 elf = ELFFile(f)  # type: ignore[no-untyped-call]
-                if not elf.has_dwarf_info(strict=True):  # type: ignore[no-untyped-call]
+                if not has_real_dwarf_info(elf):
                     return dwo_names, comp_dirs
                 dwarf = elf.get_dwarf_info()  # type: ignore[no-untyped-call]
                 for cu in dwarf.iter_CUs():

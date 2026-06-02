@@ -195,4 +195,12 @@ def test_golden_leaked_dependency_symbol(update_goldens: bool) -> None:
         ],
     )
 
+    # This fixture models a header + ELF comparison: 'compute' is a clean
+    # header-derived PUBLIC declaration and ELF metadata supplies the leaked
+    # dependency symbol. Mark the surface as header-parsed so the evidence tier
+    # is HEADER_AWARE — without it, the presence of ELF metadata would
+    # (correctly) downgrade a symbols-only snapshot to ELF_ONLY.
+    old.from_headers = True
+    new.from_headers = True
+
     _run_golden("leaked_dependency_symbol", old, new, update_goldens)

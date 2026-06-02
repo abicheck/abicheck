@@ -125,3 +125,38 @@ def test_dwarf_advanced_check_packed_detects_misaligned_field(monkeypatch):
 
     assert "S" in meta.all_struct_names
     assert "S" in meta.packed_structs
+
+
+# ---------------------------------------------------------------------------
+# has_real_dwarf_info — strict DWARF detection (excludes .eh_frame)
+# ---------------------------------------------------------------------------
+
+class _FakeElf:
+    """Minimal ELFFile stand-in exposing get_section_by_name."""
+
+    def __init__(self, section_names: set[str]) -> None:
+        self._sections = set(section_names)
+
+    def get_section_by_name(self, name: str):
+        return object() if name in self._sections else None
+
+
+def test_has_real_dwarf_info_true_with_debug_info():
+    from abicheck.dwarf_utils import has_real_dwarf_info
+    assert has_real_dwarf_info(_FakeElf({".debug_info", ".eh_frame"})) is True
+
+
+def test_has_real_dwarf_info_true_with_compressed_zdebug_info():
+    from abicheck.dwarf_utils import has_real_dwarf_info
+    assert has_real_dwarf_info(_FakeElf({".zdebug_info"})) is True
+
+
+def test_has_real_dwarf_info_false_when_only_eh_frame():
+    """A stripped binary keeps .eh_frame but no .debug_* — must read as no DWARF."""
+    from abicheck.dwarf_utils import has_real_dwarf_info
+    assert has_real_dwarf_info(_FakeElf({".eh_frame"})) is False
+
+
+def test_has_real_dwarf_info_false_when_no_sections():
+    from abicheck.dwarf_utils import has_real_dwarf_info
+    assert has_real_dwarf_info(_FakeElf(set())) is False

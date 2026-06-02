@@ -23,6 +23,27 @@ from __future__ import annotations
 from typing import Any
 
 
+def has_real_dwarf_info(elf: Any) -> bool:
+    """Return True iff the ELF carries real DWARF debug info (``.debug_info``
+    or its compressed ``.zdebug_info`` form).
+
+    This is the ``strict=True`` semantics of pyelftools'
+    ``ELFFile.has_dwarf_info()``: unlike the default, it does NOT count the
+    always-present ``.eh_frame`` section, so stripped binaries (which keep
+    ``.eh_frame`` but drop every ``.debug_*`` section) correctly report no
+    DWARF.
+
+    Implemented via direct section lookup rather than the
+    ``has_dwarf_info(strict=...)`` keyword because that keyword only exists in
+    pyelftools >= 0.30, while the project supports ``pyelftools >= 0.29``.
+    ``get_section_by_name`` has been stable across all supported versions.
+    """
+    return bool(
+        elf.get_section_by_name(".debug_info")
+        or elf.get_section_by_name(".zdebug_info")
+    )
+
+
 def attr_str(die: Any, attr: str) -> str:
     """Return string value of a DIE attribute, or ''."""
     if attr not in die.attributes:

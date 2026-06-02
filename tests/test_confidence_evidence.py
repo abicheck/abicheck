@@ -204,6 +204,21 @@ class TestCanonicalEvidenceTier:
         assert "dwarf" not in r.evidence_tiers
         assert "header" not in r.evidence_tiers
 
+    def test_header_provenance_on_either_side_promotes_tier(self):
+        """from_headers is honored when set on only one side of the compare."""
+        f = _pub_func("api", "_Z3apiv")
+        elf = ElfMetadata(
+            symbols=[ElfSymbol(name="_Z3apiv", binding=SymbolBinding.GLOBAL,
+                               sym_type=SymbolType.FUNC)],
+        )
+        # Old side carries no header provenance; new side does (e.g. baseline
+        # JSON dumped pre-flag vs a freshly header-parsed build).
+        r = compare(
+            _snap(functions=[f], elf=elf, from_headers=False),
+            _snap(functions=[f], elf=elf, from_headers=True),
+        )
+        assert r.evidence_tier == EvidenceTier.HEADER_AWARE
+
     def test_evidence_tier_in_json_output(self):
         """The formalized tier must appear in the JSON report schema."""
         f = _pub_func("api", "_Z3apiv")

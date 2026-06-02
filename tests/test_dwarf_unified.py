@@ -145,12 +145,13 @@ class TestUnifiedEdgeCases:
 
         Note: GCC on Linux always emits at least .debug_frame for stack
         unwinding, so stripping is not reliable cross-platform. We simulate
-        a DWARF-less binary by mocking elf.has_dwarf_info to return False.
+        a DWARF-less binary by mocking get_section_by_name to return None for
+        the .debug_info / .zdebug_info sections (the strict DWARF check).
         """
         from unittest.mock import MagicMock, patch
 
         mock_elf = MagicMock()
-        mock_elf.has_dwarf_info.return_value = False
+        mock_elf.get_section_by_name.return_value = None
 
         with patch("abicheck.dwarf_unified.ELFFile", return_value=mock_elf), \
              patch("abicheck.dwarf_unified.os.fstat") as mock_fstat:

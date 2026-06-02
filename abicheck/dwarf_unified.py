@@ -48,6 +48,7 @@ from .dwarf_advanced import AdvancedDwarfMetadata
 from .dwarf_advanced import _process_cu_impl as _adv_process_cu
 from .dwarf_metadata import DwarfMetadata
 from .dwarf_metadata import _process_cu_impl as _meta_process_cu
+from .dwarf_utils import has_real_dwarf_info
 
 log = logging.getLogger(__name__)
 
@@ -77,7 +78,7 @@ def parse_dwarf(so_path: Path) -> tuple[DwarfMetadata, AdvancedDwarfMetadata]:
 
             elf = ELFFile(f)  # type: ignore[no-untyped-call]
 
-            if not elf.has_dwarf_info(strict=True):  # type: ignore[no-untyped-call]
+            if not has_real_dwarf_info(elf):
                 log.debug("parse_dwarf: no DWARF info in %s", so_path)
                 return empty
 

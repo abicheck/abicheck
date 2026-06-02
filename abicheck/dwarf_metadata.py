@@ -60,7 +60,7 @@ from typing import Any
 from elftools.common.exceptions import ELFError
 from elftools.elf.elffile import ELFFile
 
-from .dwarf_utils import BASE_PRUNE_TAGS
+from .dwarf_utils import BASE_PRUNE_TAGS, has_real_dwarf_info
 from .dwarf_utils import attr_bool as _attr_bool  # noqa: F401
 from .dwarf_utils import attr_int as _attr_int
 from .dwarf_utils import attr_str as _attr_str
@@ -176,7 +176,7 @@ def _parse(f: Any, so_path: Path) -> DwarfMetadata:
     meta = DwarfMetadata()
     elf = ELFFile(f)  # type: ignore[no-untyped-call]
 
-    if not elf.has_dwarf_info(strict=True):  # type: ignore[no-untyped-call]
+    if not has_real_dwarf_info(elf):
         log.debug("parse_dwarf_metadata: no DWARF info in %s", so_path)
         return meta
 

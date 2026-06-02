@@ -49,7 +49,7 @@ from typing import Any
 from elftools.common.exceptions import ELFError
 from elftools.elf.elffile import ELFFile
 
-from .dwarf_utils import BASE_PRUNE_TAGS
+from .dwarf_utils import BASE_PRUNE_TAGS, has_real_dwarf_info
 from .dwarf_utils import attr_bool as _attr_bool
 from .dwarf_utils import attr_int as _attr_int
 from .dwarf_utils import attr_str as _attr_str
@@ -175,7 +175,7 @@ def parse_advanced_dwarf(so_path: Path) -> AdvancedDwarfMetadata:
     try:
         with open(so_path, "rb") as f:
             elf = ELFFile(f)  # type: ignore[no-untyped-call]
-            if not elf.has_dwarf_info(strict=True):  # type: ignore[no-untyped-call]
+            if not has_real_dwarf_info(elf):
                 return AdvancedDwarfMetadata()
             meta = AdvancedDwarfMetadata(has_dwarf=True)
             dwarf = elf.get_dwarf_info()  # type: ignore[no-untyped-call]

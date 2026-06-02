@@ -39,6 +39,7 @@ from .dwarf_utils import attr_bool as _attr_bool
 from .dwarf_utils import attr_int as _attr_int
 from .dwarf_utils import attr_str as _attr_str
 from .dwarf_utils import decode_member_location as _decode_member_location
+from .dwarf_utils import has_real_dwarf_info
 from .dwarf_utils import resolve_die_ref as _resolve_ref
 from .dwarf_utils import resolve_type_die as _resolve_type_die
 from .model import (
@@ -232,7 +233,7 @@ class _DwarfSnapshotBuilder:
         try:
             with open(self._elf_path, "rb") as f:
                 elf = ELFFile(f)  # type: ignore[no-untyped-call]
-                if not elf.has_dwarf_info(strict=True):  # type: ignore[no-untyped-call]
+                if not has_real_dwarf_info(elf):
                     return
                 dwarf = elf.get_dwarf_info()  # type: ignore[no-untyped-call]
 
