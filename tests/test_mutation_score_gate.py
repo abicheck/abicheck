@@ -96,10 +96,19 @@ def test_run_mode_fails_when_mutmut_missing(monkeypatch: pytest.MonkeyPatch) -> 
     assert gate.main(["--run"]) == 1
 
 
-def test_run_mode_fails_when_results_unparseable(monkeypatch: pytest.MonkeyPatch) -> None:
-    """--run where the run aborts (unparseable results) must fail."""
+def test_run_mode_fails_when_run_aborts_unparseable(monkeypatch: pytest.MonkeyPatch) -> None:
+    """--run where the run aborts (non-zero exit, unparseable results) must fail."""
     monkeypatch.setattr(gate.shutil, "which", lambda name: "/usr/bin/mutmut")
-    monkeypatch.setattr(gate, "_run", lambda cmd: "config error: nothing to mutate")
+    monkeypatch.setattr(gate, "_run", lambda cmd: ("config error: nothing to mutate", 1))
+    assert gate.main(["--run", "--baseline", "0"]) == 1
+
+
+def test_run_mode_fails_on_interrupted_progress(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An interrupted run that printed only progress ("309/464") but exited
+    non-zero must NOT be mistaken for a clean zero-survivor run."""
+    monkeypatch.setattr(gate.shutil, "which", lambda name: "/usr/bin/mutmut")
+    # Progress text present, no survivor rows, non-zero exit (interrupted).
+    monkeypatch.setattr(gate, "_run", lambda cmd: ("309/464  🎉 300", 2))
     assert gate.main(["--run", "--baseline", "0"]) == 1
 
 
@@ -107,33 +116,18 @@ def test_run_mode_counts_survivors(monkeypatch: pytest.MonkeyPatch) -> None:
     """--run with a parseable survivor count is gated normally (not failed just
     because mutmut's own exit code is non-zero when mutants survive)."""
     monkeypatch.setattr(gate.shutil, "which", lambda name: "/usr/bin/mutmut")
-    monkeypatch.setattr(gate, "_run", lambda cmd: "🙁 2")
+    monkeypatch.setattr(gate, "_run", lambda cmd: ("🙁 2", 1))
     assert gate.main(["--run", "--baseline", "5"]) == 0   # within baseline
     assert gate.main(["--run", "--baseline", "1"]) == 1   # exceeds baseline
 
 
 def test_run_mode_clean_run_zero_survivors_passes(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A perfect run (completion markers, no survivor rows) counts as 0, not as
-    'could not measure' — so baseline 0 passes."""
+    """A complete run (mutmut exit 0) with no survivor rows counts as 0, not as
+    'could not measure' — so baseline 0 passes regardless of progress text."""
     monkeypatch.setattr(gate.shutil, "which", lambda name: "/usr/bin/mutmut")
-    # Completed summary with no 🙁 and no ': survived' rows.
-    monkeypatch.setattr(gate, "_run", lambda cmd: "12/12  🎉 12  🫥 0  ⏰ 0")
+    # Exit 0 == every mutant killed; no 🙁 / survivor rows in the text.
+    monkeypatch.setattr(gate, "_run", lambda cmd: ("12/12 done", 0))
     assert gate.main(["--run", "--baseline", "0"]) == 0
-
-
-@pytest.mark.parametrize(
-    "text, expected",
-    [
-        ("12/12  🎉 12", True),
-        ("Killed 30 mutants", True),
-        ("🤔 2", True),
-        ("ImportError: no module named foo", False),
-        ("", False),
-        ("config error: nothing to mutate", False),
-    ],
-)
-def test_run_completed_clean(text: str, expected: bool) -> None:
-    assert gate.run_completed_clean(text) is expected
 
 
 def test_no_run_unparseable_is_still_a_skip(tmp_path: Path) -> None:

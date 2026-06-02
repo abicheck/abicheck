@@ -67,13 +67,6 @@ _EMOJI_SURVIVED = re.compile(r"🙁\s*(\d+)")
 _WORD_SURVIVED_COUNT = re.compile(r"(\d+)\s+survived\b", re.IGNORECASE)
 _LINE_SURVIVED = re.compile(r":\s*survived\b", re.IGNORECASE)
 
-# Evidence that a mutmut run actually *finished* (as opposed to aborting before
-# producing any measurement): the legend emojis from its summary line, a
-# "killed N" phrase, or a "<done>/<total>" progress fraction. Used to tell a
-# clean run with zero survivors (legitimately little/no `results` output) apart
-# from a run that crashed and produced nothing.
-_RUN_COMPLETED = re.compile(r"🎉|🫥|⏰|🤔|🔇|\bkilled\b|\b\d+/\d+\b", re.IGNORECASE)
-
 
 def parse_survivors(text: str) -> int | None:
     """Extract the number of surviving mutants from ``mutmut`` output.
@@ -97,32 +90,32 @@ def parse_survivors(text: str) -> int | None:
     return None
 
 
-def run_completed_clean(text: str) -> bool:
-    """True if *text* shows mutmut finished a run that has **no** survivors.
-
-    A perfect run can legitimately print no ``: survived`` rows (often almost no
-    output), so ``parse_survivors`` returns ``None`` for it. When the output
-    still carries mutmut's completion markers, that ``None`` means "zero
-    survivors", not "could not measure" — distinguishing a clean run from a run
-    that aborted before producing anything.
-    """
-    return bool(text) and _RUN_COMPLETED.search(text) is not None
-
-
-def _run(cmd: list[str]) -> str:
+def _run(cmd: list[str]) -> tuple[str, int]:
+    """Run *cmd*, returning ``(combined_output, returncode)``."""
     proc = subprocess.run(  # noqa: S603 — fixed argv, no shell
         cmd, capture_output=True, text=True, timeout=7200
     )
-    return proc.stdout + proc.stderr
+    return proc.stdout + proc.stderr, proc.returncode
 
 
-def _gather_results(args: argparse.Namespace) -> str | None:
+def _gather_results(args: argparse.Namespace) -> tuple[str, int | None] | None:
+    """Return ``(output_text, run_exit_code)``.
+
+    ``run_exit_code`` is the exit status of ``mutmut run`` when we invoked it,
+    else ``None`` (results-file / no ``--run``). A ``None`` *return* means no
+    output could be obtained at all.
+
+    Using the run's exit code — rather than scraping progress text — is what
+    lets the caller tell a clean, complete run (mutmut exits 0 only when every
+    mutant was killed) apart from a run that was interrupted after printing
+    progress like ``309/464`` but before finishing.
+    """
     if args.results_file:
         if args.results_file == "-":
-            return sys.stdin.read()
+            return sys.stdin.read(), None
         try:
             with open(args.results_file, encoding="utf-8") as fh:
-                return fh.read()
+                return fh.read(), None
         except OSError as e:
             print(f"ERROR: cannot read --results-file: {e}")
             return None
@@ -132,14 +125,14 @@ def _gather_results(args: argparse.Namespace) -> str | None:
         return None
 
     combined = ""
+    run_exit: int | None = None
     if args.run:
         print("mutation-score: running `mutmut run` (this is slow)…")
-        # Capture the run's own summary (it carries the 🙁 count and completion
-        # markers) — `mutmut run` exits non-zero merely because mutants survive,
-        # so its output, not its return code, is the measurement.
-        combined += _run(["mutmut", "run"]) + "\n"
-    combined += _run(["mutmut", "results"])
-    return combined
+        run_text, run_exit = _run(["mutmut", "run"])
+        combined += run_text + "\n"
+    results_text, _ = _run(["mutmut", "results"])
+    combined += results_text
+    return combined, run_exit
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -159,32 +152,35 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    text = _gather_results(args)
-    if text is None:
-        # No output at all. When --run was requested the job's whole purpose is
-        # to produce a measurement, so an empty result means the run aborted
-        # (bad config, runner failure, mutmut missing) — fail rather than let
-        # the gate be a silent no-op. Without --run (report-only / file modes)
-        # this stays a graceful skip, matching the mypy-baseline behaviour.
+    gathered = _gather_results(args)
+    if gathered is None:
+        # No output at all (mutmut missing / file unreadable). When --run was
+        # requested the job's whole purpose is to produce a measurement, so this
+        # is a failure, not a silent no-op. Otherwise (report-only / file modes)
+        # it is a graceful skip, matching the mypy-baseline behaviour.
         if args.run:
             print(
-                "ERROR: --run requested but mutmut produced no output — the run "
-                "aborted (bad config / runner failure / mutmut not installed). "
-                "Failing so the mutation gate is not a silent no-op."
+                "ERROR: --run requested but mutmut produced no output "
+                "(not installed / could not start). Failing so the mutation "
+                "gate is not a silent no-op."
             )
             return 1
         return 0
 
+    text, run_exit = gathered
     survivors = parse_survivors(text)
-    if survivors is None and run_completed_clean(text):
-        # The run finished with no surviving-mutant rows — that is zero
-        # survivors, not a failure to measure (a perfect run prints little).
+    if survivors is None and args.run and run_exit == 0:
+        # mutmut exits 0 only when a *complete* run killed every mutant. A
+        # perfect run prints no survivor rows, so parse_survivors is None — but
+        # the zero exit proves it finished cleanly: that is zero survivors, not
+        # a failure to measure. (An interrupted run exits non-zero, so progress
+        # text like "309/464" can never be mistaken for completion.)
         survivors = 0
     if survivors is None:
         print("mutation-score: could not parse survivor count from mutmut output")
-        # An unparseable result with no completion markers under --run means the
-        # run aborted before yielding a usable measurement; fail so the gate is
-        # not a silent no-op. Only skip when we were not asked to run mutmut.
+        # Under --run, no parseable count and a non-zero/unknown run exit means
+        # the run did not yield a usable measurement (aborted/interrupted) —
+        # fail so the gate is not a silent no-op. Only skip without --run.
         return 1 if args.run else 0
 
     baseline = args.baseline if args.baseline is not None else SURVIVOR_BASELINE
