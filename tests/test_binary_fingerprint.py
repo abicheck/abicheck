@@ -659,12 +659,15 @@ class TestFingerprintRenameDetector:
 
     def test_namespace_relocation_detected(self) -> None:
         """A genuine namespace move keeps the unqualified base name, so a
-        hash-less size match is still reported as a rename."""
+        hash-less size match is still reported as a rename. Uses already-
+        demangled spellings so the test is independent of c++filt/cxxfilt
+        availability (without a demangler, raw _Z names are treated
+        conservatively and a real move can't be inferred — by design)."""
         old = _snap_elf_only("1.0", [
-            _func_sym("_ZN4llvm11CompileUnit20markEverythingAsKeptEv", 256),
+            _func_sym("llvm::CompileUnit::markEverythingAsKept()", 256),
         ])
         new = _snap_elf_only("2.0", [
-            _func_sym("_ZN4llvm12dwarf_linker7classic11CompileUnit20markEverythingAsKeptEv", 256),
+            _func_sym("llvm::dwarf_linker::classic::CompileUnit::markEverythingAsKept()", 256),
         ])
         result = compare(old, new)
         rename_changes = [c for c in result.changes if c.kind == ChangeKind.FUNC_LIKELY_RENAMED]
