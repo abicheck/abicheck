@@ -25,8 +25,8 @@ This document answers three questions:
 | ABICC drop-in | `compat check`/`dump` | ~110 (≈24 no-op stubs) | ❌ (hard-wired) | ❌ | ❌ | 0/1/2, 3–11 errors |
 | Stack | `stack-check`, `deps` | ~7 each | ❌ | ❌ | n/a | 0/1/4 / 0/1 |
 | Baseline | `baseline push/pull/list/delete` | ~8 | ❌ | ❌ | n/a | 0/1 |
-| Probe (G2) | `probe run/compare` | ~9 | ✅ `--policy` | ❌ | n/a | 0/2/4 |
-| Debian | `debian-symbols generate/validate/diff` | ~4 | ❌ | ❌ | n/a | 0/1 |
+| Probe (G2) | `probe run/compare` | ~9 | ✅ `--policy` | ❌ | n/a | 0/2/4 (+3 = incomplete matrix without `--allow-failures`) |
+| Debian | `debian-symbols generate/validate/diff` | ~4 | ❌ | ❌ | n/a | 0/1 (+2 = `validate` symbols mismatch) |
 | Suggest | `suggest-suppressions` | 2 | ❌ | ❌ | n/a | 0 |
 | MCP server | `abicheck-mcp` | 3 (env + 3 CLI) | ❌ | ❌ | inherits API | n/a |
 | Python API | `abicheck.service` | function kwargs | via args | n/a | ✅ **default ON** | n/a |
@@ -105,14 +105,20 @@ start). Consider a `compat`-side opt-in (e.g. mapping `-s/--strict` and a future
 
 `0/2/4` (compare legacy), `0/1/2/4` (compare severity, appcompat),
 `0/2/4/8` (compare-release, +8 = removed library), `0/1/4` (stack-check),
-`0/1` (deps/baseline), `0/1/2 + 3–11` (compat). And `1` means *severity error*
-in `compare`, *tool error* in `appcompat`, *WARN* in `stack-check`, *missing
-deps* in `deps`. Same number, four meanings.
+`0/1` (deps/baseline), `0/2/4` + `3` (probe; 3 = incomplete matrix),
+`0/1/2` (debian-symbols; 2 = `validate` mismatch), `0/1/2 + 3–11` (compat).
+Two collisions stand out:
+- `1` means *severity error* in `compare`, *tool error* in `appcompat`, *WARN*
+  in `stack-check`, *missing deps* in `deps`. Same number, four meanings.
+- `2` means *API_BREAK* in the comparison family, but *symbols mismatch* in
+  `debian-symbols validate` and *incompatible change* in `compat` — and `3`
+  means *incomplete matrix* in `probe` but a *tool/error* class in `compat`.
 
-**Recommendation:** This is partly inherent (different tasks), but the collision
-on exit `1` is avoidable. At minimum, the [exit-codes reference](../reference/exit-codes.md) should carry a
-single decision-tree, and `1` should not mean both "tool crashed" and "a real
-finding" within the comparison family.
+**Recommendation:** This is partly inherent (different tasks), but the exit-`1`
+collision is avoidable. At minimum, the
+[exit-codes reference](../reference/exit-codes.md) should carry a single
+decision-tree covering every command, and `1` should not mean both "tool
+crashed" and "a real finding" within the comparison family.
 
 ### ✅ 2.5 `--annotate` stream is already consistent (verified — non-issue)
 
