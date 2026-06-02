@@ -19,6 +19,7 @@ from abicheck.binary_fingerprint import (
 )
 from abicheck.checker import ChangeKind, compare
 from abicheck.diff_symbols import (
+    _ctor_dtor_variant,
     _plausible_rename,
     _strip_template_args,
     _unqualified_name,
@@ -502,12 +503,22 @@ class TestPlausibleRename:
         assert _plausible_rename("_ZN6WidgetC1Ev", "_ZN6WidgetC2Ev") is False
         assert _plausible_rename("_ZN6WidgetD1Ev", "_ZN6WidgetD0Ev") is False
 
-    def test_free_function_with_ctor_like_name_not_rejected(self) -> None:
+    def test_free_function_with_ctor_like_name_not_a_ctor_variant(self) -> None:
         # A free function whose identifier merely contains 'C1E'/'C2E'
         # (_Z6fooC1Ev = fooC1E()) is NOT a constructor variant — it is a
-        # non-nested (_Z, not _ZN) mangling, so the variant guard must not block
-        # a legitimate fooC1E -> fooC2E rename.
-        assert _plausible_rename("_Z6fooC1Ev", "_Z6fooC2Ev") is True
+        # non-nested (_Z, not _ZN) mangling, so the variant guard must not fire.
+        # (Asserted on _ctor_dtor_variant directly so the check is independent
+        # of demangler availability; a real ctor IS a nested _ZN name.)
+        assert _ctor_dtor_variant("_Z6fooC1Ev") is None
+        assert _ctor_dtor_variant("_Z6fooC2Ev") is None
+        assert _ctor_dtor_variant("_ZN6WidgetC1Ev") == "C1"
+        # A nested MEMBER named fooC1E (_ZN1A6fooC1EEv = A::fooC1E()) is also not
+        # a constructor — the length-prefix parser must not be fooled by the
+        # 'C1E' substring inside the source-name component.
+        assert _ctor_dtor_variant("_ZN1A6fooC1EEv") is None
+        assert _ctor_dtor_variant("_ZN1A6fooC2EEv") is None
+        # Namespaced constructor is still detected.
+        assert _ctor_dtor_variant("_ZN2ns6WidgetC1Ev") == "C1"
 
     def test_operator_substring_not_treated_as_operator(self) -> None:
         # Identifiers that merely contain 'operator' are ordinary names and

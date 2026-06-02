@@ -1154,26 +1154,45 @@ _OPERATOR_TOKEN_RE = re.compile(r"(?<![A-Za-z0-9_])operator(?![A-Za-z0-9_])")
 
 # Itanium constructor/destructor variant codes: ``C1``/``C2``/``C3`` (complete /
 # base / allocating constructor) and ``D0``/``D1``/``D2`` (deleting / complete /
-# base destructor), each terminating a nested-name (``...C1E...``). These
-# variants demangle to the *same* leaf yet are distinct exported symbols.
-_CTOR_DTOR_VARIANT_RE = re.compile(r"(C[123]|D[012])E")
+# base destructor). These variants demangle to the *same* leaf yet are distinct
+# exported symbols. A ``<ctor-dtor-name>`` is a real grammar production — it is
+# NOT a length-prefixed ``<source-name>`` — so it must be located by parsing the
+# nested-name's length-prefixed components, not by substring search (an ordinary
+# identifier such as ``fooC1E`` would otherwise match).
+_CTOR_DTOR_CODE_RE = re.compile(r"^(C[123]|D[012])E")
 
 
 def _ctor_dtor_variant(symbol: str) -> str | None:
-    """Return the Itanium ctor/dtor variant code (e.g. ``C1``) in a mangled
+    """Return the Itanium ctor/dtor variant code (e.g. ``C1``) for a mangled
     name, or None when the symbol is not a constructor/destructor.
 
-    Ctor/dtor variant codes only occur inside a *nested-name* encoding
-    (``_ZN...C1E...``), so the check is anchored to ``_ZN`` — otherwise an
-    ordinary function whose identifier merely contains ``C1E``/``D1E`` (e.g.
-    the free function ``_Z6fooC1Ev`` = ``fooC1E()``) would be misread as a
-    constructor. The variant is the *last* such code in the nested name (the
-    ctor/dtor follows the class-name prefix).
+    Parses the ``_ZN`` nested-name: skips implicit-object cv/ref qualifiers,
+    consumes the ``<len><identifier>`` ``<source-name>`` components, then checks
+    whether the remainder *begins* with a ``<ctor-dtor-name>`` code. This
+    distinguishes a real constructor (``_ZN6WidgetC1Ev`` -> ``C1``) from an
+    ordinary member whose identifier merely contains the characters
+    (``_ZN1A6fooC1EEv`` = ``A::fooC1E()`` -> None). Encodings this simple parser
+    does not model (templates, substitutions) yield None — safe, since the only
+    consequence is not suppressing a (rare) templated-ctor variant pair.
     """
     if not symbol.startswith("_ZN"):
         return None
-    matches = _CTOR_DTOR_VARIANT_RE.findall(symbol)
-    return matches[-1] if matches else None
+    i = 3
+    # Skip implicit-object cv-/ref-qualifiers (K const, V volatile, r restrict,
+    # R lvalue-ref, O rvalue-ref).
+    while i < len(symbol) and symbol[i] in "KVrRO":
+        i += 1
+    # Consume <source-name> components: <decimal-length><identifier>.
+    while i < len(symbol) and symbol[i].isdigit():
+        j = i
+        while j < len(symbol) and symbol[j].isdigit():
+            j += 1
+        length = int(symbol[i:j])
+        i = j + length
+        if i > len(symbol):
+            return None  # malformed length — bail out
+    m = _CTOR_DTOR_CODE_RE.match(symbol[i:])
+    return m.group(1) if m else None
 
 
 def _unqualified_name(symbol: str) -> str:
