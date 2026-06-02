@@ -1012,6 +1012,36 @@ def _diff_var_access(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
 
 _FUNC_LIKE_TYPES = frozenset({SymbolType.FUNC, SymbolType.IFUNC, SymbolType.NOTYPE})
 
+# Minimum base-name similarity required to accept a *hash-less* (size-only /
+# fuzzy) rename match. When no code hash is available — the only mode the
+# snapshot/elf_only path can reach — a "rename" is inferred purely from a
+# coincidental symbol-size collision. On a large library that produces nonsense
+# pairings of completely unrelated functions that merely happen to share a byte
+# size (observed on real libLLVM release-to-release diffs: e.g. fixupIndexV4 ->
+# SmallVectorImpl<...>). A genuine rename or namespace relocation keeps the
+# function's unqualified base name (e.g. CompileUnit::dump ->
+# dwarf_linker::classic::CompileUnit::dump), so requiring base-name similarity
+# discriminates real renames (ratio ~1.0) from coincidences (ratio < 0.3).
+_RENAME_NAME_SIMILARITY_MIN = 0.5
+
+
+def _plausible_rename(old_name: str, new_name: str) -> bool:
+    """Whether two symbol names are similar enough to credibly be a rename.
+
+    Compares the *unqualified* base names (demangled when possible) so a
+    namespace move scores ~1.0 while unrelated functions score low. Used only
+    to gate hash-less matches, where size alone is not evidence of identity.
+    """
+    import difflib
+
+    from .demangle import base_name
+
+    a = base_name(old_name)
+    b = base_name(new_name)
+    if a == b:
+        return True
+    return difflib.SequenceMatcher(None, a, b).ratio() >= _RENAME_NAME_SIMILARITY_MIN
+
 
 def _fingerprints_from_elf(snap: AbiSnapshot) -> dict[str, FunctionFingerprint]:
     """Build FunctionFingerprint dict from ELF metadata (size-only, no code hash).
@@ -1067,6 +1097,13 @@ def _diff_fingerprint_renames(old: AbiSnapshot, new: AbiSnapshot) -> list[Change
 
     candidates = match_renamed_functions(old_fps, new_fps)
     for c in candidates:
+        # Hash-less matches (the only kind this path can produce, since
+        # _fingerprints_from_elf has no code bytes) are inferred from symbol
+        # size alone. Require name similarity so coincidental size collisions
+        # between unrelated functions are not reported as renames.
+        if not c.old_fingerprint.code_hash and not c.new_fingerprint.code_hash:
+            if not _plausible_rename(c.old_name, c.new_name):
+                continue
         conf_pct = int(c.confidence * 100)
         changes.append(Change(
             kind=ChangeKind.FUNC_LIKELY_RENAMED,

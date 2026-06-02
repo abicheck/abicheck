@@ -478,6 +478,38 @@ class TestFingerprintRenameDetector:
         assert rename_changes[0].old_value == "old_only"
         assert rename_changes[0].new_value == "new_only"
 
+    def test_unrelated_names_same_size_not_renamed(self) -> None:
+        """Two unrelated functions that merely share a byte size must NOT be
+        reported as a rename when no code hash is available.
+
+        Regression for false renames observed on real libLLVM diffs, where
+        size-only matching paired completely unrelated mangled symbols (e.g.
+        ``fixupIndexV4`` -> ``SmallVectorImpl<...>``) purely because they hit a
+        unique size bucket. Without code-identity evidence, dissimilar names are
+        a coincidence, not a rename."""
+        old = _snap_elf_only("1.0", [
+            _func_sym("_Z12fixupIndexV4RKN4llvm11DWARFObjectE", 256),
+        ])
+        new = _snap_elf_only("2.0", [
+            _func_sym("_ZN4llvm15SmallVectorImplINS_11CompileUnitEE5eraseEPS2_", 256),
+        ])
+        result = compare(old, new)
+        rename_changes = [c for c in result.changes if c.kind == ChangeKind.FUNC_LIKELY_RENAMED]
+        assert rename_changes == []
+
+    def test_namespace_relocation_detected(self) -> None:
+        """A genuine namespace move keeps the unqualified base name, so a
+        hash-less size match is still reported as a rename."""
+        old = _snap_elf_only("1.0", [
+            _func_sym("_ZN4llvm11CompileUnit20markEverythingAsKeptEv", 256),
+        ])
+        new = _snap_elf_only("2.0", [
+            _func_sym("_ZN4llvm12dwarf_linker7classic11CompileUnit20markEverythingAsKeptEv", 256),
+        ])
+        result = compare(old, new)
+        rename_changes = [c for c in result.changes if c.kind == ChangeKind.FUNC_LIKELY_RENAMED]
+        assert len(rename_changes) == 1
+
     def test_fuzzy_match_appears_in_compare_output(self) -> None:
         """A fuzzy size match (within 5%) makes it through the full pipeline."""
         old = _snap_elf_only("1.0", [_func_sym("old_func", _NORMAL_SIZE)])
