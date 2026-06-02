@@ -44,6 +44,60 @@ _log = logging.getLogger(__name__)
 # Visibility levels that constitute the public ABI surface.
 _PUBLIC_VIS = (Visibility.PUBLIC, Visibility.ELF_ONLY)
 
+# Itanium RTTI artifact prefixes (typeinfo, typeinfo-name, vtable, VTT) followed
+# immediately by ``Z`` — the Itanium "local-name" production ``Z <encoding> E``.
+# An RTTI symbol of this shape belongs to a *function-local* type (a lambda
+# closure, or any class/struct declared inside a function body). Such a type can
+# never be named in a public header, so the presence/absence of its typeinfo is
+# build-dependent churn, not a public-ABI break. Filtering it here mirrors how
+# anonymous/lambda *types* are excluded from type diffing (model.is_non_abi_surface_type).
+_LOCAL_RTTI_PREFIXES = ("_ZTIZ", "_ZTSZ", "_ZTVZ", "_ZTTZ")
+
+
+# Sentinel the dumper writes for the type/return type of a symbol whose
+# signature is unknown — e.g. an ELF export from a stripped binary with no DWARF
+# or header info. Diffing a known type against "?" yields a phantom change
+# ("void → ?"), so type-bearing comparisons must treat "?" as "no evidence".
+_UNKNOWN_TYPE = "?"
+
+
+def _type_unknown(type_name: str | None) -> bool:
+    return type_name is None or type_name.strip() == _UNKNOWN_TYPE
+
+
+def _is_stripped_symbols_only(snap: AbiSnapshot) -> bool:
+    """True when *snap* is a stripped, symbols-only dump: it exports symbols but
+    carries no type-level evidence (no records/enums/typedefs, no DWARF content)
+    and was flagged ``elf_only_mode`` by the dumper.
+
+    Used to gate *parameter* comparison (RD2-5; Codex reviews on PR #275). The
+    bare ``"?"`` sentinel is **not** a reliable per-function signal — castxml and
+    dwarf_snapshot also emit ``"?"`` for an individually unresolved return/param
+    while resolving the rest — so an empty parameter list only means "unknown
+    params" when the whole snapshot is a symbols-only stub. In a real
+    DWARF/header snapshot an empty list means "takes no arguments", and changes
+    like ``f(void)`` → ``f(int)`` must still be diffed.
+    """
+    if not getattr(snap, "elf_only_mode", False):
+        return False
+    if snap.types or snap.enums or snap.typedefs:
+        return False
+    dwarf = getattr(snap, "dwarf", None)
+    if dwarf is not None and (dwarf.structs or dwarf.enums):
+        return False
+    return bool(snap.functions or snap.variables)
+
+
+def _is_local_type_rtti(mangled: str) -> bool:
+    """True for typeinfo/vtable symbols of a function-local type (e.g. a lambda).
+
+    Regression: RD2-4 (validation) — protobuf patch releases churn
+    ``_ZTIZN…EUl…E_`` / ``_ZTSZN…`` typeinfo symbols for anonymous lambdas nested
+    in ``Printer::WithDefs/WithVars``; they were scored as public ``var_removed``
+    and drove a false ``BREAKING`` verdict on an ABI-compatible bump.
+    """
+    return mangled.startswith(_LOCAL_RTTI_PREFIXES)
+
 
 def _public_functions(snap: AbiSnapshot) -> dict[str, Function]:
     """Return public/ELF-only functions from *snap*."""
@@ -51,8 +105,16 @@ def _public_functions(snap: AbiSnapshot) -> dict[str, Function]:
 
 
 def _public_variables(snap: AbiSnapshot) -> dict[str, Variable]:
-    """Return public/ELF-only variables from *snap*."""
-    return {k: v for k, v in snap.variable_map.items() if v.visibility in _PUBLIC_VIS}
+    """Return public/ELF-only variables from *snap*.
+
+    Excludes RTTI/vtable symbols of function-local types (lambda closures and
+    other in-function types): they are not nameable public ABI and only churn
+    across builds (RD2-4).
+    """
+    return {
+        k: v for k, v in snap.variable_map.items()
+        if v.visibility in _PUBLIC_VIS and not _is_local_type_rtti(k)
+    }
 
 
 
@@ -100,6 +162,9 @@ def _check_removed_function(
 
 def _check_return_type_change(mangled: str, f_old: Function, f_new: Function) -> list[Change]:
     """Emit a change if the return type was modified."""
+    # RD2-5: a stripped side reports return_type "?"; that is unknown, not a change.
+    if _type_unknown(f_old.return_type) or _type_unknown(f_new.return_type):
+        return []
     if canonicalize_type_name(f_old.return_type) == canonicalize_type_name(f_new.return_type):
         return []
     return [Change(
@@ -111,11 +176,30 @@ def _check_return_type_change(mangled: str, f_old: Function, f_new: Function) ->
     )]
 
 
-def _check_params_change(mangled: str, f_old: Function, f_new: Function) -> list[Change]:
+def _check_params_change(
+    mangled: str, f_old: Function, f_new: Function, *, params_unconfirmed: bool = False,
+) -> list[Change]:
     """Emit a change if the parameter list was modified."""
-    old_params = [(canonicalize_type_name(p.type), p.kind) for p in f_old.params]
-    new_params = [(canonicalize_type_name(p.type), p.kind) for p in f_new.params]
-    if old_params == new_params:
+    # RD2-5: suppress only when one side is a stripped symbols-only stub (its
+    # empty param list is "unknown", not "zero args"). Otherwise compare
+    # position-by-position, ignoring only the individual parameters whose type is
+    # the unresolved "?" sentinel — diffing a known type against unknown is
+    # meaningless, but an unrelated unknown must not mask a real change on a
+    # fully-known parameter (e.g. f(?, int) -> f(?, long)). Parameter *count*
+    # changes are always real in a resolved snapshot (Codex reviews, PR #275).
+    if params_unconfirmed:
+        return []
+    changed: bool
+    if len(f_old.params) != len(f_new.params):
+        changed = True
+    else:
+        changed = any(
+            not _type_unknown(p_old.type) and not _type_unknown(p_new.type)
+            and (canonicalize_type_name(p_old.type), p_old.kind)
+            != (canonicalize_type_name(p_new.type), p_new.kind)
+            for p_old, p_new in zip(f_old.params, f_new.params)
+        )
+    if not changed:
         return []
     return [Change(
         kind=ChangeKind.FUNC_PARAMS_CHANGED,
@@ -216,11 +300,13 @@ def _check_explicit_change(mangled: str, f_old: Function, f_new: Function) -> li
     )
 
 
-def _check_function_signature(mangled: str, f_old: Function, f_new: Function) -> list[Change]:
+def _check_function_signature(
+    mangled: str, f_old: Function, f_new: Function, *, params_unconfirmed: bool = False,
+) -> list[Change]:
     """Compare signatures and qualifiers of two matched functions."""
     changes: list[Change] = []
     changes.extend(_check_return_type_change(mangled, f_old, f_new))
-    changes.extend(_check_params_change(mangled, f_old, f_new))
+    changes.extend(_check_params_change(mangled, f_old, f_new, params_unconfirmed=params_unconfirmed))
     changes.extend(_check_ref_qualifier_change(mangled, f_old, f_new))
     changes.extend(_check_linkage_change(mangled, f_old, f_new))
     changes.extend(_check_noexcept_change(mangled, f_old, f_new))
@@ -275,10 +361,11 @@ def _match_old_function(
     new_all: dict[str, Function],
     matched_by_name: set[str],
     elf_only_mode: bool,
+    params_unconfirmed: bool = False,
 ) -> list[Change]:
     """Classify a single old function: matched by mangled, extern-C fallback, or removed."""
     if mangled in new_map:
-        return list(_check_function_signature(mangled, f_old, new_map[mangled]))
+        return list(_check_function_signature(mangled, f_old, new_map[mangled], params_unconfirmed=params_unconfirmed))
 
     # Fallback by plain name when either side uses extern "C".
     # The name->Function mapping is a MULTIMAP: only fall back when there is
@@ -291,7 +378,7 @@ def _match_old_function(
         extern_c_candidates = candidates  # any single candidate is acceptable
     if len(extern_c_candidates) == 1:
         f_new = extern_c_candidates[0]
-        result = list(_check_function_signature(f_old.name, f_old, f_new))
+        result = list(_check_function_signature(f_old.name, f_old, f_new, params_unconfirmed=params_unconfirmed))
         matched_by_name.add(f_old.name)
         return result
 
@@ -338,6 +425,9 @@ def _detect_newly_deleted_functions(
 @registry.detector("functions")
 def _diff_functions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     elf_only_mode = getattr(old, "elf_only_mode", False)
+    # RD2-5: when one side is a stripped symbols-only stub, its parameter lists
+    # are unknown (not "zero args"), so parameter diffs are unconfirmed.
+    params_unconfirmed = _is_stripped_symbols_only(old) or _is_stripped_symbols_only(new)
     changes: list[Change] = []
     old_map = {k: v for k, v in old.function_map.items() if v.visibility in (Visibility.PUBLIC, Visibility.ELF_ONLY)}
     new_map = {k: v for k, v in new.function_map.items() if v.visibility in (Visibility.PUBLIC, Visibility.ELF_ONLY)}
@@ -356,7 +446,10 @@ def _diff_functions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
 
     for mangled, f_old in old_map.items():
         changes.extend(
-            _match_old_function(mangled, f_old, new_map, new_by_name, new_all, matched_by_name, elf_only_mode)
+            _match_old_function(
+                mangled, f_old, new_map, new_by_name, new_all, matched_by_name,
+                elf_only_mode, params_unconfirmed,
+            )
         )
 
     for mangled, f_new in new_map.items():
@@ -424,6 +517,9 @@ def _diff_inline_hidden_friends(
 
 def _check_variable(mangled: str, v_old: Variable, v_new: Variable) -> list[Change]:
     """Compare a matched pair of public variables."""
+    # RD2-5: a stripped side reports type "?"; unknown is not a type change.
+    if _type_unknown(v_old.type) or _type_unknown(v_new.type):
+        return []
     if canonicalize_type_name(v_old.type) != canonicalize_type_name(v_new.type):
         return [Change(
             kind=ChangeKind.VAR_TYPE_CHANGED,
@@ -531,14 +627,21 @@ def _diff_pointer_levels(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     changes: list[Change] = []
     old_map = _public_functions(old)
     new_map = _public_functions(new)
+    # RD2-5: param depths from a stripped symbols-only stub default to 0 and
+    # would read as phantom level changes; suppress them. The return depth is
+    # guarded independently by the unknown-return ("?") check below.
+    params_unconfirmed = _is_stripped_symbols_only(old) or _is_stripped_symbols_only(new)
 
     for mangled, f_old in old_map.items():
         f_new = new_map.get(mangled)
         if f_new is None:
             continue
 
+        return_known = not (
+            _type_unknown(f_old.return_type) or _type_unknown(f_new.return_type)
+        )
         # Return pointer depth
-        if f_old.return_pointer_depth != f_new.return_pointer_depth and (
+        if return_known and f_old.return_pointer_depth != f_new.return_pointer_depth and (
             f_old.return_pointer_depth > 0 or f_new.return_pointer_depth > 0
         ):
             changes.append(Change(
@@ -549,8 +652,15 @@ def _diff_pointer_levels(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                 new_value=str(f_new.return_pointer_depth),
             ))
 
+        if params_unconfirmed:
+            continue
+
         # Param pointer depths
         for i, (p_old, p_new) in enumerate(zip(f_old.params, f_new.params)):
+            # Skip individually unresolved params ("?"): depth falls back to 0
+            # and would read as a phantom level change (matches _check_params_change).
+            if _type_unknown(p_old.type) or _type_unknown(p_new.type):
+                continue
             if p_old.pointer_depth != p_new.pointer_depth and (
                 p_old.pointer_depth > 0 or p_new.pointer_depth > 0
             ):

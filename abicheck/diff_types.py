@@ -44,6 +44,70 @@ def _is_abi_surface_type(t: RecordType, *, exclude_stdlib: bool) -> bool:
     return not _is_non_abi_surface_type(t.name, exclude_stdlib_namespaces=exclude_stdlib)
 
 
+def _has_type_evidence(snap: AbiSnapshot) -> bool:
+    """True if *snap* carries any type-level surface (records/enums/typedefs/DWARF).
+
+    A stripped, symbols-only snapshot has none of these.
+    """
+    if snap.types or snap.enums or snap.typedefs:
+        return True
+    dwarf = getattr(snap, "dwarf", None)
+    # has_dwarf alone is not enough: a stripped binary can carry an empty
+    # .debug_* section (has_dwarf=True, zero structs/enums). Require real content.
+    return bool(dwarf is not None and (dwarf.structs or dwarf.enums))
+
+
+def _removals_are_unconfirmed(old: AbiSnapshot, new: AbiSnapshot) -> bool:
+    """True when type-level *removals* must be suppressed because the new side
+    has no type evidence to confirm them (RD2-5).
+
+    When the old binary carries DWARF/header type info but the new one is
+    *stripped, symbols-only* (``elf_only_mode``), every old type/typedef/enum
+    appears "missing" — but that is absence of *evidence*, not evidence of
+    *removal*. Reporting hundreds of phantom ``type_removed``/``typedef_removed``
+    for types that obviously still exist (``_xmlNode``, ``_IO_FILE`` …) is a
+    false-positive avalanche on an otherwise compatible bump. The ``dwarf``
+    detector already emits ``DWARF_INFO_MISSING`` for this asymmetry, so the
+    coverage gap is still disclosed; here we simply decline to manufacture
+    removal findings from it.
+
+    Detecting a genuinely *stripped* new side (vs. a build that really removed
+    types) requires care: the dumper marks small DWARF libraries ``elf_only_mode``
+    too, so that flag alone is not enough. The distinguishing fact is that a
+    stripped binary is otherwise *intact* — it still exports essentially all of
+    the old side's symbols; only its debug info is gone. A build that genuinely
+    removed a class (e.g. examples/case107) also drops that class's exported
+    methods, so symbol retention is low and the removal is still reported.
+    """
+    new_stripped_of_types = (
+        getattr(new, "elf_only_mode", False)
+        and bool(new.functions or new.variables)
+        and not _has_type_evidence(new)
+        and _has_type_evidence(old)
+    )
+    if not new_stripped_of_types:
+        return False
+    # Corroborate with exported-symbol retention: a stripped-but-intact binary
+    # keeps (almost) all of the old side's exports; if most are gone, the library
+    # genuinely changed and removals are real.
+    #
+    # Only count *exported* symbols (PUBLIC/ELF_ONLY). A DWARF-primary old
+    # snapshot also records internal/static subprograms, but the stripped new
+    # side carries dynamic exports only — counting internals would deflate
+    # retention and defeat the suppression for a genuinely intact comparison.
+    # Prefer functions; fall back to variables for data-only DSOs so a changed
+    # variable surface still surfaces removals (CodeRabbit review on PR #275).
+    old_funcs = {k for k, v in old.function_map.items() if v.visibility in _PUBLIC_VIS}
+    if old_funcs:
+        new_funcs = {k for k, v in new.function_map.items() if v.visibility in _PUBLIC_VIS}
+        return len(old_funcs & new_funcs) / len(old_funcs) >= 0.9
+    old_vars = {k for k, v in old.variable_map.items() if v.visibility in _PUBLIC_VIS}
+    if not old_vars:
+        return True  # no exported surface to corroborate; absence of types is just stripping
+    new_vars = {k for k, v in new.variable_map.items() if v.visibility in _PUBLIC_VIS}
+    return len(old_vars & new_vars) / len(old_vars) >= 0.9
+
+
 @registry.detector("types")
 def _diff_types(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     changes: list[Change] = []
@@ -52,10 +116,14 @@ def _diff_types(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     excl = _exclude_stdlib_namespaces(old, new)
     old_map = {t.name: t for t in old.types if _is_abi_surface_type(t, exclude_stdlib=excl)}
     new_map = {t.name: t for t in new.types if _is_abi_surface_type(t, exclude_stdlib=excl)}
+    # RD2-5: don't manufacture phantom TYPE_REMOVED when the new side is stripped.
+    suppress_removed = _removals_are_unconfirmed(old, new)
 
     for name, t_old in old_map.items():
         t_new = new_map.get(name)
         if t_new is None:
+            if suppress_removed:
+                continue
             changes.append(Change(
                 kind=ChangeKind.TYPE_REMOVED,
                 symbol=name,
@@ -709,10 +777,14 @@ def _has_version_family_successor(name: str, new_typedefs: dict[str, str]) -> bo
 def _diff_typedefs(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     changes: list[Change] = []
     excl = _exclude_stdlib_namespaces(old, new)
+    # RD2-5: don't manufacture phantom TYPEDEF_REMOVED when the new side is stripped.
+    suppress_removed = _removals_are_unconfirmed(old, new)
     for alias, old_type in old.typedefs.items():
         if _is_non_abi_surface_type(alias, exclude_stdlib_namespaces=excl):
             continue
         new_type = new.typedefs.get(alias)
+        if new_type is None and suppress_removed:
+            continue
         if new_type is None:
             # Version-stamped typedefs (e.g. png_libpng_version_1_6_46) are
             # compile-time sentinels — their name encodes the version and

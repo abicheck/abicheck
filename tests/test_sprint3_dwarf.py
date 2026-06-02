@@ -156,6 +156,95 @@ def test_field_removed() -> None:
 
 # ── field type size changed ───────────────────────────────────────────────────
 
+def test_stdlib_struct_layout_filtered_in_dwarf_only_mode() -> None:
+    """std::/__gnu_cxx::/anonymous types leaked into DWARF (no header model)
+    must not be diffed as the inspected library's own struct layout.
+
+    Regression for validation RD2-1: the std::/anonymous surface filter was
+    wired into the type/enum/typedef detectors but NOT the DWARF struct-layout
+    detector, so e.g. ``std::__cxx11::basic_string<...>::npos`` and
+    ``std::integral_constant<...>::value`` still scored STRUCT_FIELD_REMOVED and
+    drove a false BREAKING verdict on an ABI-compatible bump.
+    """
+    leaked = {
+        "std::__cxx11::basic_string<char>": _struct(
+            "std::__cxx11::basic_string<char>", 32, fields=[
+                _field("npos", "unsigned long", 0, 8),
+                _field("_M_p", "char*", 8, 8),
+            ]),
+        "std::integral_constant<bool, false>": _struct(
+            "std::integral_constant<bool, false>", 1, fields=[_field("value", "bool", 0, 1)]),
+        "__gnu_cxx::__ops::_Iter_less_iter": _struct(
+            "__gnu_cxx::__ops::_Iter_less_iter", 8, fields=[_field("_M_x", "int", 0, 4)]),
+    }
+    # New side drops fields from every leaked std:: type (toolchain DWARF churn).
+    leaked_new = {
+        "std::__cxx11::basic_string<char>": _struct(
+            "std::__cxx11::basic_string<char>", 32, fields=[_field("_M_p", "char*", 8, 8)]),
+        "std::integral_constant<bool, false>": _struct(
+            "std::integral_constant<bool, false>", 1, fields=[]),
+        "__gnu_cxx::__ops::_Iter_less_iter": _struct(
+            "__gnu_cxx::__ops::_Iter_less_iter", 8, fields=[]),
+    }
+    old = _snap(_meta(structs=leaked))
+    new = _snap(_meta(structs=leaked_new))
+    result = compare(old, new)
+    offenders = [
+        c for c in result.changes
+        if c.kind in {
+            ChangeKind.STRUCT_FIELD_REMOVED,
+            ChangeKind.STRUCT_FIELD_TYPE_CHANGED,
+            ChangeKind.STRUCT_SIZE_CHANGED,
+        }
+        and c.symbol.startswith(("std::", "__gnu_cxx::"))
+    ]
+    assert offenders == [], f"std:: layout changes leaked as findings: {[c.symbol for c in offenders]}"
+    assert result.verdict in (Verdict.COMPATIBLE, Verdict.NO_CHANGE)
+
+
+def test_stdlib_struct_layout_kept_when_target_is_cxx_runtime() -> None:
+    """When the inspected DSO *is* the C++ runtime, std:: layout IS its own ABI
+    surface and must still be diffed (the filter must not hide real breaks)."""
+    old_s = _struct("std::__cxx11::basic_string<char>", 32, fields=[
+        _field("npos", "unsigned long", 0, 8),
+        _field("_M_p", "char*", 8, 8),
+    ])
+    new_s = _struct("std::__cxx11::basic_string<char>", 32, fields=[
+        _field("_M_p", "char*", 8, 8),
+    ])
+    old = AbiSnapshot(library="libstdc++.so.6", version="v1")
+    new = AbiSnapshot(library="libstdc++.so.6", version="v2")
+    old.dwarf = _meta(structs={"std::__cxx11::basic_string<char>": old_s})  # type: ignore[attr-defined]
+    new.dwarf = _meta(structs={"std::__cxx11::basic_string<char>": new_s})  # type: ignore[attr-defined]
+    result = compare(old, new)
+    kinds = {c.kind for c in result.changes}
+    assert ChangeKind.STRUCT_FIELD_REMOVED in kinds
+
+
+def test_anonymous_dwarf_types_filtered_even_for_cxx_runtime() -> None:
+    """Even when the target IS the C++ runtime (std:: kept), anonymous/lambda
+    types are never stable ABI and must still be filtered from the DWARF layout
+    diff (regression for the Codex review: the filter must run for runtimes too,
+    just with std:: preserved)."""
+    old = AbiSnapshot(library="libstdc++.so.6", version="v1")
+    new = AbiSnapshot(library="libstdc++.so.6", version="v2")
+    old.dwarf = _meta(structs={  # type: ignore[attr-defined]
+        "std::vector<int>": _struct("std::vector<int>", 24, fields=[_field("_M_start", "int*", 0, 8)]),
+        "<lambda(int)>": _struct("<lambda(int)>", 8, fields=[_field("__captured", "int", 0, 4)]),
+    })
+    new.dwarf = _meta(structs={  # type: ignore[attr-defined]
+        # std:: kept and unchanged; the lambda closure type "lost" its field.
+        "std::vector<int>": _struct("std::vector<int>", 24, fields=[_field("_M_start", "int*", 0, 8)]),
+        "<lambda(int)>": _struct("<lambda(int)>", 8, fields=[]),
+    })
+    result = compare(old, new)
+    offenders = [
+        c for c in result.changes
+        if c.kind == ChangeKind.STRUCT_FIELD_REMOVED and "lambda" in c.symbol
+    ]
+    assert offenders == [], f"anonymous/lambda DWARF churn must be filtered for runtimes too: {[c.symbol for c in offenders]}"
+
+
 def test_field_type_size_changed() -> None:
     # int → long (size 4 → 8)
     old_s = _struct("Foo", 8, fields=[_field("n", "int", 0, 4)])

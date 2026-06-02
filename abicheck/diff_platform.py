@@ -38,6 +38,8 @@ from .elf_metadata import SymbolBinding, SymbolType
 from .model import (
     AbiSnapshot,
     Visibility,
+    is_non_abi_surface_type,
+    stdlib_namespaces_excluded,
 )
 
 # Module-level constant: ELF visibility values that form the default<->protected pair (case51).
@@ -1132,6 +1134,24 @@ def _diff_dwarf(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     else:
         o_enums = o.enums
         n_enums = n.enums
+
+    # Drop non-ABI types from the DWARF layout maps. The header-scoped branch
+    # above only filters when a castxml model is present; in DWARF-only mode (no
+    # headers) it falls back to ALL DWARF types, which leaks
+    # std::/__gnu_cxx::/<lambda>/compiler-internal records into the struct & enum
+    # layout detectors (STRUCT_FIELD_REMOVED etc.). This is the same surface gate
+    # the type differ uses (model.stdlib_namespaces_excluded), so every detector
+    # that consumes DWARF types agrees on what counts as ABI surface.
+    #
+    # The filter ALWAYS runs: when the inspected DSO *is* the C++ runtime,
+    # ``excl`` is False so std::/__gnu_cxx:: records are kept (they ARE its
+    # surface), but anonymous/lambda and compiler-internal types are still
+    # dropped — those are never stable ABI even for the runtime itself.
+    excl = stdlib_namespaces_excluded(old, new)
+    o_structs = {k: v for k, v in o_structs.items() if not is_non_abi_surface_type(k, exclude_stdlib_namespaces=excl)}
+    n_structs = {k: v for k, v in n_structs.items() if not is_non_abi_surface_type(k, exclude_stdlib_namespaces=excl)}
+    o_enums = {k: v for k, v in o_enums.items() if not is_non_abi_surface_type(k, exclude_stdlib_namespaces=excl)}
+    n_enums = {k: v for k, v in n_enums.items() if not is_non_abi_surface_type(k, exclude_stdlib_namespaces=excl)}
 
     filtered_old = DwarfMetadata(structs=o_structs, enums=o_enums, has_dwarf=o.has_dwarf)
     filtered_new = DwarfMetadata(structs=n_structs, enums=n_enums, has_dwarf=n.has_dwarf)

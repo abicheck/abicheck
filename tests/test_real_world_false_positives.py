@@ -6,10 +6,13 @@ binaries (oneTBB, Protobuf, libxml2, …). They drive the public
 :func:`abicheck.checker.compare` pipeline with minimal synthetic snapshots that
 isolate the responsible mechanism.
 
-The four scenarios correspond to FP-1…FP-4 in ``validation/DESIGN_ANALYSIS.md``.
-Tests asserting behaviour that abicheck does **not** yet implement are marked
-``xfail(strict=True)`` so they flip to PASS the moment the architectural fix
-lands (and fail loudly if someone "fixes" them without removing the marker).
+These cover the FP-1…FP-4 families from ``validation/DESIGN_ANALYSIS.md`` plus
+the RD2-* refinements (std:: leaks via the DWARF struct/enum detector, lambda
+RTTI churn, mixed DWARF→stripped phantom removals, and unknown-``"?"`` signature
+handling). Each now asserts the implemented behaviour directly — the scenarios
+that were previously ``xfail(strict=True)`` placeholders are live assertions —
+and several guard-rail tests ensure the suppressions do not hide genuine breaks
+(public-type RTTI removal, low-retention class removal, real param changes).
 
 No external tools or binaries are required — these run in the default fast lane.
 """
@@ -59,18 +62,14 @@ def _breaking_symbols(result) -> set[str]:
 
 
 # ---------------------------------------------------------------------------
-# FP-3 — RTTI/typeinfo of an anonymous lambda must not be a breaking var_removed
+# FP-3 / RD2-4 — RTTI/typeinfo of an anonymous lambda must not be a breaking var_removed
 #   Real case: Protobuf 6.33.2 -> 6.33.5 (a *patch*) flagged BREAKING because
 #   `_ZTIZN6google8protobuf2io7Printer8WithDefs...EUlSt17basic_string...E_`
 #   (typeinfo for an internal lambda) "disappeared".  Lambda identity is not
-#   stable ABI.  Root cause: dumper._elf_classify_symbols() does not apply
-#   _is_abi_relevant_symbol(), and diff_symbols._var_removed has no _ZTI/_ZTS
-#   guard, so the symbol becomes a public Variable -> VAR_REMOVED (breaking).
+#   stable ABI.  Fixed in diff_symbols._public_variables: RTTI/vtable symbols of
+#   function-local types (Itanium ``_ZTIZ``/``_ZTSZ``/``_ZTVZ``/``_ZTTZ`` local-name
+#   production) are excluded from the public-variable surface.
 # ---------------------------------------------------------------------------
-@pytest.mark.xfail(
-    strict=True,
-    reason=f"known FP-3: lambda RTTI removal scored as breaking; see {REPORT}",
-)
 def test_lambda_rtti_removal_is_not_breaking():
     lambda_rtti = "_ZTIZN3foo3barEvEUlvE_"  # typeinfo of a lambda defined in foo::bar()
     lambda_rtti_name = "_ZTSZN3foo3barEvEUlvE_"
@@ -95,6 +94,28 @@ def test_lambda_rtti_removal_is_not_breaking():
     assert result.verdict not in (Verdict.BREAKING,), (
         f"removing RTTI of an anonymous lambda must not read as an ABI break; "
         f"breaking symbols: {_breaking_symbols(result)}"
+    )
+    # The lambda RTTI symbols must not surface as findings at all.
+    assert lambda_rtti not in _breaking_symbols(result)
+    assert lambda_rtti_name not in _breaking_symbols(result)
+
+
+def test_public_type_rtti_removal_is_still_breaking():
+    """Guard against over-filtering: typeinfo/vtable of a NON-local (public,
+    nameable) type must still count as a break when removed (RD2-4)."""
+    public_rtti = "_ZTIN3foo3BarE"   # typeinfo for foo::Bar (not function-local)
+    public_vtable = "_ZTVN3foo3BarE"  # vtable for foo::Bar
+    old = _elf_snapshot(
+        variables=[
+            Variable(name=public_rtti, mangled=public_rtti, type="?", visibility=Visibility.ELF_ONLY),
+            Variable(name=public_vtable, mangled=public_vtable, type="?", visibility=Visibility.ELF_ONLY),
+        ]
+    )
+    new = _elf_snapshot(variables=[])
+    result = compare(old, new)
+    breaking = _breaking_symbols(result)
+    assert public_rtti in breaking or public_vtable in breaking, (
+        "removing typeinfo/vtable of a public, nameable type must still be a break"
     )
 
 
@@ -165,16 +186,22 @@ def test_anonymous_type_removal_is_not_breaking():
 #   removals.  Real case: libxml2 2.9.7 (DWARF) -> 2.9.9 (stripped) reported
 #   1149 breaks incl. `type_removed: _xmlNode` — a core public type that still
 #   exists.  Absence of debug info on the new side is absence of *evidence*, not
-#   evidence of removal.  Root cause: diff_types emits TYPE_REMOVED whenever a
-#   type is absent from new_map, with no guard for asymmetric type coverage.
+#   evidence of removal.  Fixed in diff_types._removals_are_unconfirmed:
+#   TYPE_REMOVED/TYPEDEF_REMOVED are suppressed when the new side is a stripped
+#   binary (elf_only_mode, exports symbols, no type evidence) while the old side
+#   has type info. The dwarf detector still emits DWARF_INFO_MISSING so the
+#   coverage gap is disclosed.
 # ---------------------------------------------------------------------------
-@pytest.mark.xfail(
-    strict=True,
-    reason=f"known FP-4: mixed DWARF/stripped fabricates removals; see {REPORT}",
-)
+def _exported_func(mangled: str):
+    from abicheck.model import Function
+    return Function(name=mangled, mangled=mangled, return_type="?",
+                    visibility=Visibility.ELF_ONLY)
+
+
 def test_stripped_new_side_does_not_fabricate_type_removals():
-    # old: rich DWARF types
+    # old: rich DWARF types + exported symbols
     old = _elf_snapshot(
+        functions=[_exported_func("xmlNewNode"), _exported_func("xmlFreeDoc")],
         types=[
             RecordType(
                 name="_xmlNode",
@@ -183,15 +210,308 @@ def test_stripped_new_side_does_not_fabricate_type_removals():
                 fields=[TypeField(name="type", type="int", offset_bits=0)],
             ),
             RecordType(name="_xmlDoc", kind="struct", size_bits=512),
-        ]
+        ],
     )
-    # new: same library, but the binary is stripped -> zero type DWARF
-    new = _elf_snapshot(types=[])
+    old.typedefs = {"xmlNodePtr": "_xmlNode *", "xmlDocPtr": "_xmlDoc *"}
+    # new: same library, but the binary is stripped -> exports the same symbols,
+    # zero type DWARF (a real stripped .so still has a dynamic symbol table).
+    new = _elf_snapshot(
+        functions=[_exported_func("xmlNewNode"), _exported_func("xmlFreeDoc")],
+        types=[],
+    )
     new.dwarf = None
     result = compare(old, new)
     assert result.verdict not in (Verdict.BREAKING,), (
         f"types absent only because the new side is stripped must not read as "
         f"removals; breaking symbols: {_breaking_symbols(result)}"
+    )
+    from abicheck.checker_policy import ChangeKind
+    assert not any(c.kind == ChangeKind.TYPE_REMOVED for c in result.changes)
+    assert not any(c.kind == ChangeKind.TYPEDEF_REMOVED for c in result.changes)
+
+
+def test_real_removal_still_reported_when_symbols_also_dropped():
+    """The stripped-side guard must NOT hide a genuine class removal: when the
+    removed type's exported methods are also gone, symbol retention is low and
+    the removal is real (validation RD2-5; examples/case107)."""
+    from abicheck.checker_policy import BREAKING_KINDS
+    old = _elf_snapshot(
+        functions=[_exported_func("_ZN5mylib3Foo3barEv"), _exported_func("_ZN5mylib3FooC1Ev")],
+        types=[RecordType(name="mylib::Foo", kind="class", size_bits=64)],
+    )
+    # new: class and ALL its methods gone (retention 0%), only a new free fn.
+    new = _elf_snapshot(functions=[_exported_func("_ZN5mylib5otherEv")], types=[])
+    new.dwarf = None
+    result = compare(old, new)
+    assert any(c.kind in BREAKING_KINDS for c in result.changes), (
+        "removing a class together with its exported methods must still break; "
+        f"changes: {[(c.kind.value, c.symbol) for c in result.changes]}"
+    )
+
+
+def test_stripped_suppression_counts_only_exported_functions():
+    """The stripped-side retention check must ignore internal/static DWARF
+    subprograms: a DWARF-primary old snapshot records them as functions, but the
+    stripped new side only has dynamic exports. Counting internals would deflate
+    retention and defeat the suppression for an intact DWARF→stripped bump
+    (Codex review on PR #275)."""
+    from abicheck.checker_policy import ChangeKind
+    from abicheck.model import Function
+    exported = [_exported_func("xmlNewNode"), _exported_func("xmlFreeDoc")]
+    # old: 2 exported + many internal (HIDDEN) DWARF subprograms + rich types.
+    internal = [
+        Function(name=f"__internal_{i}", mangled=f"__internal_{i}",
+                 return_type="void", visibility=Visibility.HIDDEN)
+        for i in range(50)
+    ]
+    old = _elf_snapshot(
+        functions=exported + internal,
+        types=[RecordType(name="_xmlNode", kind="struct", size_bits=960)],
+    )
+    # new: stripped → exports the same 2 public symbols, no types, no internals.
+    new = _elf_snapshot(functions=list(exported), types=[])
+    new.dwarf = None
+    result = compare(old, new)
+    assert not any(c.kind == ChangeKind.TYPE_REMOVED for c in result.changes), (
+        "internal DWARF functions must not deflate retention and re-enable the "
+        f"phantom avalanche; changes: {[(c.kind.value, c.symbol) for c in result.changes]}"
+    )
+
+
+def test_has_type_evidence_via_dwarf_structs_blocks_suppression():
+    """When the new side still carries DWARF *content* (structs), it is not
+    stripped and removals are NOT suppressed (covers the DWARF branch of the
+    type-evidence check)."""
+    from abicheck.checker_policy import ChangeKind
+    from abicheck.dwarf_metadata import DwarfMetadata, StructLayout
+    old = _elf_snapshot(
+        functions=[_exported_func("api")],
+        types=[RecordType(name="Gone", kind="struct", size_bits=32)],
+    )
+    new = _elf_snapshot(functions=[_exported_func("api")], types=[])
+    # new has real DWARF content → has type evidence → not "stripped".
+    new.dwarf = DwarfMetadata(structs={"Other": StructLayout(name="Other", byte_size=4)}, has_dwarf=True)
+    result = compare(old, new)
+    assert any(c.kind == ChangeKind.TYPE_REMOVED and c.symbol == "Gone" for c in result.changes)
+
+
+def test_stripped_suppression_with_only_variable_exports():
+    """A stripped new side that exports only variables (no functions) is still
+    recognised as stripped (covers the 'no exported functions' branch)."""
+    from abicheck.checker_policy import ChangeKind
+    old = _elf_snapshot(
+        variables=[Variable(name="g", mangled="g", type="int", visibility=Visibility.ELF_ONLY)],
+        types=[RecordType(name="_xmlNode", kind="struct", size_bits=960)],
+    )
+    new = _elf_snapshot(
+        variables=[Variable(name="g", mangled="g", type="?", visibility=Visibility.ELF_ONLY)],
+        types=[],
+    )
+    new.dwarf = None
+    result = compare(old, new)
+    assert not any(c.kind == ChangeKind.TYPE_REMOVED for c in result.changes)
+
+
+def test_unknown_signature_not_flagged_as_change():
+    """When the NEW side is a stripped symbols-only stub (return/type '?', no
+    params, no type evidence), diffing a known old signature against it must not
+    fabricate func_return/params/var_type changes (RD2-5)."""
+    from abicheck.checker_policy import ChangeKind
+    from abicheck.model import Function, Param
+    # old: a resolved (DWARF/header) snapshot — NOT stripped.
+    old = _elf_snapshot(
+        functions=[Function(name="f", mangled="_Z1fi", return_type="int",
+                            params=[Param(name="a", type="int")], visibility=Visibility.PUBLIC)],
+        variables=[Variable(name="g", mangled="g", type="int", visibility=Visibility.PUBLIC)],
+        types=[RecordType(name="Cfg", kind="struct", size_bits=32)],
+    )
+    old.elf_only_mode = False
+    # new: stripped symbols-only — same symbols, signatures unknown, no types.
+    new = _elf_snapshot(
+        functions=[Function(name="f", mangled="_Z1fi", return_type="?",
+                            params=[], visibility=Visibility.PUBLIC)],
+        variables=[Variable(name="g", mangled="g", type="?", visibility=Visibility.PUBLIC)],
+    )
+    new.dwarf = None
+    result = compare(old, new)
+    phantom = {ChangeKind.FUNC_RETURN_CHANGED, ChangeKind.FUNC_PARAMS_CHANGED,
+               ChangeKind.VAR_TYPE_CHANGED, ChangeKind.RETURN_POINTER_LEVEL_CHANGED}
+    offenders = [c.kind.value for c in result.changes if c.kind in phantom]
+    assert offenders == [], f"unknown ('?') signatures must not be diffed: {offenders}"
+
+
+def _resolved_snapshot(**kw):
+    """A resolved (DWARF/header) snapshot — elf_only_mode False, so its empty
+    parameter lists mean 'zero args', not 'unknown'."""
+    snap = _elf_snapshot(**kw)
+    snap.elf_only_mode = False
+    return snap
+
+
+def test_param_change_still_detected_when_only_return_is_unknown():
+    """A DWARF/header snapshot can resolve params while leaving the return type
+    unknown ('?'). A real param change (int->long) must still be flagged — the
+    unknown-return guard must not swallow it (Codex review on PR #275)."""
+    from abicheck.checker_policy import ChangeKind
+    from abicheck.model import Function, Param
+    old = _resolved_snapshot(functions=[Function(
+        name="f", mangled="_Z1fi", return_type="?",
+        params=[Param(name="a", type="int")], visibility=Visibility.PUBLIC)])
+    new = _resolved_snapshot(functions=[Function(
+        name="f", mangled="_Z1fi", return_type="?",
+        params=[Param(name="a", type="long")], visibility=Visibility.PUBLIC)])
+    result = compare(old, new)
+    assert any(c.kind == ChangeKind.FUNC_PARAMS_CHANGED for c in result.changes), (
+        "param int->long under an unresolved return must still be detected; "
+        f"changes: {[(c.kind.value, c.symbol) for c in result.changes]}"
+    )
+
+
+def test_individually_unresolved_param_type_not_diffed():
+    """In a resolved snapshot, a single parameter whose type DWARF left as '?'
+    must not be diffed against a known type (diffing against unknown is
+    meaningless), even though the function is otherwise comparable (RD2-5)."""
+    from abicheck.checker_policy import ChangeKind
+    from abicheck.model import Function, Param
+    old = _resolved_snapshot(functions=[Function(
+        name="f", mangled="_Z1fi", return_type="int",
+        params=[Param(name="a", type="int")], visibility=Visibility.PUBLIC)])
+    new = _resolved_snapshot(functions=[Function(
+        name="f", mangled="_Z1fi", return_type="int",
+        params=[Param(name="a", type="?")], visibility=Visibility.PUBLIC)])
+    result = compare(old, new)
+    assert not any(c.kind == ChangeKind.FUNC_PARAMS_CHANGED for c in result.changes), (
+        "a parameter with an unresolved '?' type must not be diffed; "
+        f"changes: {[(c.kind.value, c.symbol) for c in result.changes]}"
+    )
+
+
+def test_stripped_suppression_with_no_exported_surface():
+    """When the old side has type evidence but no exported functions or
+    variables to corroborate, a stripped new side is treated as pure stripping
+    and removals are suppressed (covers the 'no exported surface' branch)."""
+    from abicheck.checker_policy import ChangeKind
+    old = _elf_snapshot(types=[RecordType(name="_xmlNode", kind="struct", size_bits=960)])
+    # new: stripped — exports a symbol (so it is recognised as a real binary)
+    # but carries no type evidence; old has no exported symbols to compare.
+    new = _elf_snapshot(
+        functions=[_exported_func("xmlNewNode")],
+        types=[],
+    )
+    new.dwarf = None
+    result = compare(old, new)
+    assert not any(c.kind == ChangeKind.TYPE_REMOVED for c in result.changes)
+
+
+def test_param_change_on_known_param_detected_despite_unrelated_unknown():
+    """A real change on a fully-known parameter must still be flagged even when
+    another parameter in the same signature is unresolved ('?'); parameters are
+    resolved independently (Codex review on PR #275)."""
+    from abicheck.checker_policy import ChangeKind
+    from abicheck.model import Function, Param
+    old = _resolved_snapshot(functions=[Function(
+        name="f", mangled="_Z1f", return_type="void",
+        params=[Param(name="a", type="?"), Param(name="b", type="int")],
+        visibility=Visibility.PUBLIC)])
+    new = _resolved_snapshot(functions=[Function(
+        name="f", mangled="_Z1f", return_type="void",
+        params=[Param(name="a", type="?"), Param(name="b", type="long")],
+        visibility=Visibility.PUBLIC)])
+    result = compare(old, new)
+    assert any(c.kind == ChangeKind.FUNC_PARAMS_CHANGED for c in result.changes), (
+        "int->long on a known param must be detected despite an unrelated '?' param; "
+        f"changes: {[(c.kind.value, c.symbol) for c in result.changes]}"
+    )
+
+
+def test_param_pointer_depth_not_diffed_for_unresolved_param():
+    """An individually unresolved ('?') parameter must not produce a phantom
+    PARAM_POINTER_LEVEL_CHANGED (depth falls back to 0) (CodeRabbit, PR #275)."""
+    from abicheck.checker_policy import ChangeKind
+    from abicheck.model import Function, Param
+    old = _resolved_snapshot(functions=[Function(
+        name="f", mangled="_Z1fPi", return_type="void",
+        params=[Param(name="p", type="int *", pointer_depth=1)],
+        visibility=Visibility.PUBLIC)])
+    new = _resolved_snapshot(functions=[Function(
+        name="f", mangled="_Z1fPi", return_type="void",
+        params=[Param(name="p", type="?", pointer_depth=0)],
+        visibility=Visibility.PUBLIC)])
+    result = compare(old, new)
+    assert not any(c.kind == ChangeKind.PARAM_POINTER_LEVEL_CHANGED for c in result.changes), (
+        "unresolved '?' param must not yield a phantom pointer-level change; "
+        f"changes: {[(c.kind.value, c.symbol) for c in result.changes]}"
+    )
+
+
+def test_data_only_library_removal_still_reported_when_variables_change():
+    """For a data-only DSO (no exported functions), a stripped new side must not
+    auto-suppress removals when the exported *variable* surface also shrank — the
+    retention corroboration falls back to variables (CodeRabbit, PR #275)."""
+    from abicheck.checker_policy import ChangeKind
+    old = _elf_snapshot(
+        variables=[
+            Variable(name=f"v{i}", mangled=f"v{i}", type="int", visibility=Visibility.ELF_ONLY)
+            for i in range(10)
+        ],
+        types=[RecordType(name="Cfg", kind="struct", size_bits=64)],
+    )
+    # new: stripped of types AND most variables gone (only 1 of 10 retained) →
+    # the library genuinely changed, so the type removal must still be reported.
+    new = _elf_snapshot(
+        variables=[Variable(name="v0", mangled="v0", type="?", visibility=Visibility.ELF_ONLY)],
+        types=[],
+    )
+    new.dwarf = None
+    result = compare(old, new)
+    assert any(c.kind == ChangeKind.TYPE_REMOVED and c.symbol == "Cfg" for c in result.changes), (
+        "low variable retention must not auto-suppress a real type removal; "
+        f"changes: {[(c.kind.value, c.symbol) for c in result.changes]}"
+    )
+
+
+def test_data_only_library_stripped_suppresses_when_variables_retained():
+    """Mirror of the above: a data-only DSO that is merely stripped (all exported
+    variables retained) must still suppress phantom type removals."""
+    from abicheck.checker_policy import ChangeKind
+    old = _elf_snapshot(
+        variables=[
+            Variable(name=f"v{i}", mangled=f"v{i}", type="int", visibility=Visibility.ELF_ONLY)
+            for i in range(10)
+        ],
+        types=[RecordType(name="Cfg", kind="struct", size_bits=64)],
+    )
+    new = _elf_snapshot(
+        variables=[
+            Variable(name=f"v{i}", mangled=f"v{i}", type="?", visibility=Visibility.ELF_ONLY)
+            for i in range(10)
+        ],
+        types=[],
+    )
+    new.dwarf = None
+    result = compare(old, new)
+    assert not any(c.kind == ChangeKind.TYPE_REMOVED for c in result.changes), (
+        "a merely-stripped data-only DSO must not fabricate type removals; "
+        f"changes: {[(c.kind.value, c.symbol) for c in result.changes]}"
+    )
+
+
+def test_zero_arg_to_one_arg_detected_under_unknown_return():
+    """f(void) -> f(int) with an unresolved ('?') return in a resolved snapshot
+    must still be a parameter change: an empty list there means zero args, not
+    'unknown params' (Codex review on PR #275)."""
+    from abicheck.checker_policy import ChangeKind
+    from abicheck.model import Function, Param
+    old = _resolved_snapshot(functions=[Function(
+        name="f", mangled="_Z1fv", return_type="?", params=[],
+        visibility=Visibility.PUBLIC)])
+    new = _resolved_snapshot(functions=[Function(
+        name="f", mangled="_Z1fv", return_type="?",
+        params=[Param(name="a", type="int")], visibility=Visibility.PUBLIC)])
+    result = compare(old, new)
+    assert any(c.kind == ChangeKind.FUNC_PARAMS_CHANGED for c in result.changes), (
+        "f(void)->f(int) under an unresolved return must still be detected; "
+        f"changes: {[(c.kind.value, c.symbol) for c in result.changes]}"
     )
 
 
