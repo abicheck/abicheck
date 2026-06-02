@@ -18,7 +18,11 @@ from abicheck.binary_fingerprint import (
     match_renamed_functions,
 )
 from abicheck.checker import ChangeKind, compare
-from abicheck.diff_symbols import _plausible_rename, _unqualified_name
+from abicheck.diff_symbols import (
+    _plausible_rename,
+    _strip_template_args,
+    _unqualified_name,
+)
 from abicheck.elf_metadata import ElfMetadata, ElfSymbol, SymbolBinding, SymbolType
 from abicheck.model import AbiSnapshot, Function, Visibility
 
@@ -404,15 +408,23 @@ class TestUnqualifiedName:
         ("ns::Class::method", "method"),                 # qualified
         ("ns::Class::method(int, long)", "method"),      # with params
         ("ns::foo<bar::baz>::run()", "run"),             # '::' inside template args
-        ("ns::make<a::b, c::d>", "make"),                # trailing template args dropped
-        ("ns::foo<bar<int>>", "foo"),                    # nested trailing template args
-        ("a>", "a>"),                                    # unbalanced '>' left as-is
-        ("void get<int>()", "get"),                      # return type + template dropped
+        ("ns::make<a::b, c::d>", "make<a::b, c::d>"),    # template args kept
+        ("ns::foo<bar<int>>", "foo<bar<int>>"),          # nested template args kept
+        ("void get<int>()", "get<int>"),                 # return type dropped, args kept
         ("std::ostream::operator<<(int)", "operator<<(int)"),  # operator kept whole
         ("Widget::operator()(int)", "operator()(int)"),        # call operator
     ])
     def test_extraction(self, symbol: str, expected: str) -> None:
         assert _unqualified_name(symbol) == expected
+
+    @pytest.mark.parametrize("leaf,expected", [
+        ("get<int>", "get"),                 # simple template args
+        ("foo<bar<int>>", "foo"),            # nested template args
+        ("plain", "plain"),                  # no template args
+        ("a>", "a>"),                        # unbalanced '>' left as-is
+    ])
+    def test_strip_template_args(self, leaf: str, expected: str) -> None:
+        assert _strip_template_args(leaf) == expected
 
 
 class TestPlausibleRename:
@@ -438,9 +450,10 @@ class TestPlausibleRename:
         # stripped, below the shared-affix floor.
         assert _plausible_rename("Class::get()", "Class::set()") is False
 
-    def test_template_instantiations_same_leaf_accepted(self) -> None:
-        # Same function template, different instantiation → same leaf.
-        assert _plausible_rename("void get<int>()", "void get<long>()") is True
+    def test_template_specializations_rejected(self) -> None:
+        # foo<int> and foo<long> are distinct ABI symbols (different mangled
+        # names), so swapping one for the other is not a rename.
+        assert _plausible_rename("void get<int>()", "void get<long>()") is False
 
     def test_unrelated_templates_same_return_rejected(self) -> None:
         # Shared return type and template args must not inflate the score.

@@ -1041,9 +1041,11 @@ def _unqualified_name(symbol: str) -> str:
     * drops the namespace/class qualifier (segment after the last top-level
       ``::``);
     * drops a leading return type (global function templates demangle as
-      ``ret name<args>(...)``);
-    * drops trailing template arguments, so instantiations of one template
-      (``get<int>`` / ``get<long>``) share a leaf.
+      ``ret name<args>(...)``).
+
+    Trailing template arguments are *kept*: a specialization like ``foo<int>``
+    is a distinct ABI symbol from ``foo<long>``, so they must not collapse to a
+    shared leaf (that would mis-report a specialization swap as a rename).
     """
     from .demangle import demangle
 
@@ -1093,18 +1095,21 @@ def _unqualified_name(symbol: str) -> str:
             sp = i
     if sp != -1:
         s = s[sp + 1:]
-    # Drop trailing template arguments (``get<int>`` -> ``get``).
-    if s.endswith(">"):
+    return s.strip()
+
+
+def _strip_template_args(leaf: str) -> str:
+    """Drop trailing template arguments from a leaf (``get<int>`` -> ``get``)."""
+    if leaf.endswith(">"):
         depth = 0
-        for i in range(len(s) - 1, -1, -1):
-            if s[i] == ">":
+        for i in range(len(leaf) - 1, -1, -1):
+            if leaf[i] == ">":
                 depth += 1
-            elif s[i] == "<":
+            elif leaf[i] == "<":
                 depth -= 1
                 if depth == 0:
-                    s = s[:i]
-                    break
-    return s.strip()
+                    return leaf[:i]
+    return leaf
 
 
 def _shared_affix_len(a: str, b: str) -> int:
@@ -1123,12 +1128,13 @@ def _plausible_rename(old_name: str, new_name: str) -> bool:
     """Whether two symbol names are similar enough to credibly be a rename.
 
     Compares the *unqualified* leaf names (see ``_unqualified_name``). A rename
-    or namespace relocation keeps the leaf name (identical leaf) or a
-    substantial common prefix/suffix token; unrelated functions that merely
-    share a byte size — including different methods under a common scope such as
-    ``Class::get`` vs ``Class::set`` — share at most a character or two because
-    the qualifier and any return type / template arguments are stripped. Used
-    only to gate hash-less matches, where size alone is not evidence of identity.
+    or namespace relocation keeps the leaf name (identical leaf, template
+    arguments included) or a substantial common prefix/suffix token; unrelated
+    functions that merely share a byte size — including different methods under
+    a common scope (``Class::get`` vs ``Class::set``) and different template
+    specializations of one name (``foo<int>`` vs ``foo<long>``) — are rejected.
+    Used only to gate hash-less matches, where size alone is not evidence of
+    identity.
     """
     if old_name == new_name:
         return True
@@ -1146,7 +1152,14 @@ def _plausible_rename(old_name: str, new_name: str) -> bool:
     for leaf in (a, b):
         if leaf.startswith("operator") or leaf.startswith("~"):
             return False
-    return _shared_affix_len(a, b) >= _RENAME_MIN_SHARED_AFFIX
+    base_a = _strip_template_args(a)
+    base_b = _strip_template_args(b)
+    # Same base name but different (non-equal) leaves means the template
+    # arguments differ: distinct specializations are distinct ABI symbols, not a
+    # rename — a consumer of foo<int> still fails to link against foo<long>.
+    if base_a == base_b:
+        return False
+    return _shared_affix_len(base_a, base_b) >= _RENAME_MIN_SHARED_AFFIX
 
 
 def _fingerprints_from_elf(snap: AbiSnapshot) -> dict[str, FunctionFingerprint]:
