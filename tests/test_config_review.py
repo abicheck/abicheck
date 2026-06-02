@@ -391,42 +391,59 @@ class TestAppcompatSeverityExit:
             p.write_bytes(b"\x7fELF")
         return app, old, new
 
-    def _patch_result(self, monkeypatch, *, missing=None, with_break=False):
+    def _patch_result(self, monkeypatch, *, missing=None, app_break=False):
         import abicheck.appcompat as _ac
         from abicheck.appcompat import AppCompatResult
         from abicheck.checker import Verdict
 
+        diff = _breaking_diff()
         res = AppCompatResult(
             app_path="app", old_lib_path="old.so", new_lib_path="new.so",
             missing_symbols=list(missing or []),
-            full_diff=_breaking_diff() if with_break else None,
-            verdict=Verdict.BREAKING if (missing or with_break) else Verdict.COMPATIBLE,
+            # app_break -> the break is relevant to the app (breaking_for_app);
+            # otherwise the break is present in full_diff but NOT app-scoped, so
+            # it must not gate the app.
+            breaking_for_app=list(diff.changes) if app_break else [],
+            full_diff=diff,
+            verdict=Verdict.BREAKING if (missing or app_break) else Verdict.COMPATIBLE,
         )
         monkeypatch.setattr(_ac, "check_appcompat", lambda *a, **k: res)
         return res
 
-    def test_info_only_downgrades_library_break(self, tmp_path, monkeypatch):
+    def test_info_only_downgrades_app_break(self, tmp_path, monkeypatch):
         app, old, new = self._dummy_libs(tmp_path)
-        self._patch_result(monkeypatch, with_break=True)
+        self._patch_result(monkeypatch, app_break=True)
         result = CliRunner().invoke(
             main, ["appcompat", str(app), str(old), str(new),
                    "--severity-preset", "info-only"],
         )
-        # A library-diff break is governed by severity -> info-only exits 0.
+        # An app-relevant break is governed by severity -> info-only exits 0.
         assert result.exit_code == 0
 
-    def test_default_preset_exits_breaking(self, tmp_path, monkeypatch):
+    def test_default_preset_exits_on_app_break(self, tmp_path, monkeypatch):
         app, old, new = self._dummy_libs(tmp_path)
-        self._patch_result(monkeypatch, with_break=True)
+        self._patch_result(monkeypatch, app_break=True)
         result = CliRunner().invoke(
             main, ["appcompat", str(app), str(old), str(new),
                    "--severity-preset", "default"],
         )
         assert result.exit_code == 4
 
+    def test_unrelated_library_break_not_app_scoped(self, tmp_path, monkeypatch):
+        app, old, new = self._dummy_libs(tmp_path)
+        # full_diff has a break, but it is NOT relevant to the app
+        # (breaking_for_app empty). The severity exit must stay app-scoped -> 0,
+        # even under the default preset.
+        self._patch_result(monkeypatch, app_break=False)
+        result = CliRunner().invoke(
+            main, ["appcompat", str(app), str(old), str(new),
+                   "--severity-preset", "default"],
+        )
+        assert result.exit_code == 0
+
     def test_missing_symbols_floor_not_downgraded(self, tmp_path, monkeypatch):
         app, old, new = self._dummy_libs(tmp_path)
-        # No library-diff changes, but the app is missing a required symbol:
+        # No app-relevant changes, but the app is missing a required symbol:
         # info-only must NOT downgrade this hard runtime break below 4.
         self._patch_result(monkeypatch, missing=["_Z3barv"])
         result = CliRunner().invoke(

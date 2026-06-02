@@ -340,13 +340,18 @@ def appcompat_cmd(
             quality_issues=severity_quality_issues,
             addition=severity_addition,
         )
-        diff = result.full_diff
+        # appcompat is application-scoped: classify only the changes that
+        # actually affect the application (result.breaking_for_app), mirroring
+        # how the app verdict is computed — NOT the whole library diff. A
+        # library break in a symbol the app never imports must not gate the app.
+        # full_diff carries the effective kind sets (incl. policy-file overrides)
+        # and breaking_for_app is a subset of its changes, so they share sets.
         exit_code = compute_exit_code(
-            diff.changes, resolved_config,
-            kind_sets=diff._effective_kind_sets(),
+            result.breaking_for_app, resolved_config,
+            kind_sets=result.full_diff._effective_kind_sets(),
         )
         # Missing required symbols/versions are a hard runtime break (the app
-        # won't load) that is NOT represented in the library diff's changes, so
+        # won't load) that is NOT represented in the diff's changes, so
         # compute_exit_code() can't see it. Never let a severity preset (e.g.
         # info-only) downgrade that below BREAKING.
         if result.missing_symbols or result.missing_versions:
