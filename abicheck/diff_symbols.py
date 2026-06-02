@@ -1249,6 +1249,17 @@ def _ctor_dtor_variant(symbol: str) -> str | None:
             # ``_ZNSt6vectorIiEC1Ev`` (St = std::) — consume it before the
             # source-name components so the ctor/dtor code is still found.
             i = _skip_substitution(symbol, i)
+        elif symbol[i] == "B":
+            # ABI-tag component ``B<source-name>`` on the class name, e.g.
+            # ``_ZN3FooB1xC1Ev`` (Foo[abi:x]). Consume it so the ctor/dtor code
+            # that follows is still reached.
+            i += 1
+            if i < len(symbol) and symbol[i].isdigit():
+                i = _skip_source_name(symbol, i)
+                if i < 0:
+                    return None  # malformed ABI tag — bail out
+            else:
+                break  # not a well-formed ABI tag
         else:
             break
     m = _CTOR_DTOR_CODE_RE.match(symbol[i:])
@@ -1511,6 +1522,43 @@ def _param_signature_of(s: str) -> str:
     return ""
 
 
+def _return_type_of(s: str) -> str:
+    """The leading return type of a demangled name, or "" when there is none.
+
+    A return type appears in demangled output only when it is part of the
+    mangled ABI symbol — chiefly C++ function-template instantiations
+    (``int foo<int>()``) — so for ordinary functions this is empty and the
+    comparison in ``_plausible_rename`` is a no-op. It is the run before the
+    last top-level space that precedes the (qualified) function name, with
+    template ``<…>`` and ``::`` kept intact (``unsigned int foo<int>()`` ->
+    ``unsigned int``; ``std::vector<int> bar()`` -> ``std::vector<int>``).
+    """
+    s = _unwrap_funcptr_declarator(s)
+    if _OPERATOR_TOKEN_RE.search(s):
+        return ""  # operator spellings carry no separable leading return type
+    # Truncate at the parameter-list '(' at template depth 0.
+    depth = 0
+    for i, ch in enumerate(s):
+        if ch == "<":
+            depth += 1
+        elif ch == ">":
+            depth = max(0, depth - 1)
+        elif ch == "(" and depth == 0:
+            s = s[:i]
+            break
+    # The return type, if any, is everything before the last top-level space.
+    depth = 0
+    sp = -1
+    for i, ch in enumerate(s):
+        if ch == "<":
+            depth += 1
+        elif ch == ">":
+            depth = max(0, depth - 1)
+        elif ch == " " and depth == 0:
+            sp = i
+    return s[:sp].strip() if sp != -1 else ""
+
+
 def _plausible_rename(old_name: str, new_name: str) -> bool:
     """Whether two symbol names are similar enough to credibly be a rename.
 
@@ -1563,13 +1611,19 @@ def _plausible_rename(old_name: str, new_name: str) -> bool:
     for leaf in (a, b):
         if _OPERATOR_TOKEN_RE.match(leaf) is not None or leaf.startswith("~"):
             return a == b
-    # A rename/relocation preserves the parameter list; a parameter change is a
-    # different ABI symbol (foo(int) -> foo(long)), not a rename.
-    params_match = _param_signature_of(da) == _param_signature_of(db)
+    # A rename/relocation preserves the full signature: parameters AND — for
+    # the function templates whose mangling encodes it — the return type. A
+    # change to either is a distinct ABI symbol (foo(int) -> foo(long), or
+    # int foo<int>() -> long foo<int>()), not a rename. Ordinary (non-template)
+    # functions demangle without a return type, so that check is a no-op there.
+    sig_match = (
+        _param_signature_of(da) == _param_signature_of(db)
+        and _return_type_of(da) == _return_type_of(db)
+    )
     if a == b:
-        # Same unqualified name + template args: a rename only if the parameters
-        # also match (else it is a signature change).
-        return params_match
+        # Same unqualified name + template args: a rename only if the signature
+        # also matches (else it is a signature change).
+        return sig_match
     base_a = _strip_template_args(a)
     base_b = _strip_template_args(b)
     # Same base name but different leaves means the template arguments differ:
@@ -1577,7 +1631,7 @@ def _plausible_rename(old_name: str, new_name: str) -> bool:
     # consumer of foo<int> still fails to link against foo<long>.
     if base_a == base_b:
         return False
-    return params_match and _shared_affix_len(base_a, base_b) >= _RENAME_MIN_SHARED_AFFIX
+    return sig_match and _shared_affix_len(base_a, base_b) >= _RENAME_MIN_SHARED_AFFIX
 
 
 def _fingerprints_from_elf(snap: AbiSnapshot) -> dict[str, FunctionFingerprint]:

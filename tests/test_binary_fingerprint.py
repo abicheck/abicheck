@@ -22,6 +22,7 @@ from abicheck.diff_symbols import (
     _ctor_dtor_variant,
     _param_signature_of,
     _plausible_rename,
+    _return_type_of,
     _strip_template_args,
     _unqualified_name,
     _unqualified_name_of,
@@ -552,6 +553,33 @@ class TestPlausibleRename:
         assert _ctor_dtor_variant("_ZNSt6vectorIiE3fooEv") is None
         # C1 vs C2 of a std container are distinct ABI symbols, not a rename.
         assert _plausible_rename("_ZNSt6vectorIiEC1Ev", "_ZNSt6vectorIiEC2Ev") is False
+
+    def test_abi_tag_prefix_ctor_variant_detected(self) -> None:
+        # An ABI-tag component B<source-name> sits on the class name before the
+        # ctor/dtor code: Foo[abi:x]::Foo() = _ZN3FooB1xC1Ev. The variant must
+        # still be found after consuming the tag, so C1/C2 are not a rename.
+        assert _ctor_dtor_variant("_ZN3FooB1xC1Ev") == "C1"
+        assert _ctor_dtor_variant("_ZN3FooB1xC2Ev") == "C2"
+        assert _plausible_rename("_ZN3FooB1xC1Ev", "_ZN3FooB1xC2Ev") is False
+
+    def test_return_type_only_template_change_rejected(self) -> None:
+        # Function templates encode the return type in the ABI symbol, so a
+        # same-leaf/same-params return-type change (int foo<int>() ->
+        # long foo<int>()) is a distinct symbol, not a rename. Demangled-style
+        # inputs keep the test independent of c++filt availability.
+        assert _plausible_rename("int foo<int>()", "long foo<int>()") is False
+        assert _plausible_rename("void g<int>()", "int g<int>()") is False
+        # An ordinary (non-template) rename has no return type either side, so
+        # the check is a no-op and a genuine relocation still matches.
+        assert _plausible_rename("ns::Widget::run()", "ns2::Widget::run()") is True
+
+    def test_return_type_of_extraction(self) -> None:
+        assert _return_type_of("int foo<int>()") == "int"
+        assert _return_type_of("unsigned int g<int>()") == "unsigned int"
+        assert _return_type_of("std::vector<int> bar()") == "std::vector<int>"
+        assert _return_type_of("foo(int)") == ""           # ordinary function
+        assert _return_type_of("ns::Class::method()") == ""
+        assert _return_type_of("operator<<(int)") == ""
 
     def test_templated_class_ctor_variant_pair_rejected(self) -> None:
         # C1 vs C2 of the same templated class are distinct ABI symbols, not a
