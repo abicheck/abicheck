@@ -110,7 +110,7 @@ in `compare`, *tool error* in `appcompat`, *WARN* in `stack-check`, *missing
 deps* in `deps`. Same number, four meanings.
 
 **Recommendation:** This is partly inherent (different tasks), but the collision
-on exit `1` is avoidable. At minimum, the [exit-codes reference] should carry a
+on exit `1` is avoidable. At minimum, the [exit-codes reference](../reference/exit-codes.md) should carry a
 single decision-tree, and `1` should not mean both "tool crashed" and "a real
 finding" within the comparison family.
 
