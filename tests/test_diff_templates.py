@@ -239,6 +239,20 @@ class TestOverloadSetRerouted:
         ])
         assert detect_overload_set_rerouted(old, new) == []
 
+    def test_single_function_signature_change_no_finding(self) -> None:
+        """A name that maps to exactly one function on both sides is not an
+        overload set — a 1→1 signature change cannot re-route to a different
+        overload, so it must not produce a spurious OVERLOAD_SET_REROUTED
+        finding (it is already reported as FUNC_PARAMS_CHANGED). This also
+        covers every plain C function, which can never be overloaded."""
+        old = _snap(funcs=[
+            _fn("add", mangled="add", params=[("a", "int"), ("b", "int")]),
+        ])
+        new = _snap(funcs=[
+            _fn("add", mangled="add", params=[("a", "long"), ("b", "int")]),
+        ])
+        assert detect_overload_set_rerouted(old, new) == []
+
 
 # ---------------------------------------------------------------------------
 # MANDATORY_TEMPLATE_PARAM_ADDED
