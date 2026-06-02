@@ -564,35 +564,123 @@ class TestDumpRoutingMachoPe:
 # ── from_headers provenance flag ─────────────────────────────────────────────
 
 class TestFromHeadersProvenance:
-    """dump() sets AbiSnapshot.from_headers only when castxml actually parses
-    headers. The --dwarf-only skip applies to ELF only; PE/Mach-O ignore it
-    and still parse supplied headers (issue: Codex P2)."""
+    """The format-specific builders (_dump_elf / _dump_pe / _dump_macho) set
+    AbiSnapshot.from_headers=True only when castxml actually parses headers.
 
-    @pytest.mark.parametrize(
-        "fmt,dumper_attr,headers,dwarf_only,expected",
-        [
-            ("elf", "_dump_elf", True, False, True),    # header-parsed ELF
-            ("elf", "_dump_elf", True, True, False),    # ELF --dwarf-only skips castxml
-            ("elf", "_dump_elf", False, False, False),  # no headers → DWARF/symbols
-            ("pe", "_dump_pe", True, True, True),        # PE ignores dwarf_only → still header-aware
-            ("pe", "_dump_pe", False, False, False),
-            ("macho", "_dump_macho", True, True, True),  # Mach-O ignores dwarf_only → still header-aware
-            ("macho", "_dump_macho", False, False, False),
-        ],
-    )
-    def test_from_headers(self, tmp_path: Path, fmt, dumper_attr, headers, dwarf_only, expected) -> None:
+    This is set in the builders rather than dump() so that every entry point
+    records it — including the CLI/service native paths that call the builders
+    directly via service._try_header_scoped_dump, bypassing dump() (Codex P2).
+    """
+
+    @staticmethod
+    def _mock_parser():
+        from unittest.mock import MagicMock
+        p = MagicMock()
+        p.parse_functions.return_value = []
+        p.parse_variables.return_value = []
+        p.parse_types.return_value = []
+        p.parse_enums.return_value = []
+        p.parse_typedefs.return_value = []
+        return p
+
+    def test_pe_with_headers_is_header_parsed(self, tmp_path: Path) -> None:
+        from unittest.mock import MagicMock, patch
+
+        import abicheck.pe_metadata as _pe
+        from abicheck import dumper
+
+        dll = tmp_path / "foo.dll"
+        dll.write_bytes(b"MZ\x90\x00")
+        meta = MagicMock(exports=[MagicMock(name="Foo", ordinal=1)])
+        with patch.object(_pe, "parse_pe_metadata", return_value=meta), \
+             patch.object(dumper, "_castxml_dump", return_value=object()), \
+             patch.object(dumper, "_CastxmlParser", return_value=self._mock_parser()):
+            snap = dumper._dump_pe(dll, [tmp_path / "h.h"], [], "1.0", "c++")
+        assert snap.from_headers is True
+
+    def test_pe_without_headers_is_not_header_parsed(self, tmp_path: Path) -> None:
+        from unittest.mock import MagicMock, patch
+
+        import abicheck.pe_metadata as _pe
+        from abicheck import dumper
+
+        dll = tmp_path / "foo.dll"
+        dll.write_bytes(b"MZ\x90\x00")
+        meta = MagicMock(exports=[MagicMock(name="Foo", ordinal=1)])
+        with patch.object(_pe, "parse_pe_metadata", return_value=meta):
+            snap = dumper._dump_pe(dll, [], [], "1.0", "c++")
+        assert snap.from_headers is False
+
+    def test_macho_with_headers_is_header_parsed(self, tmp_path: Path) -> None:
+        from unittest.mock import MagicMock, patch
+
+        import abicheck.macho_metadata as _macho
+        from abicheck import dumper
+
+        dylib = tmp_path / "foo.dylib"
+        dylib.write_bytes(b"\xcf\xfa\xed\xfe")
+        meta = MagicMock(exports=[])
+        with patch.object(_macho, "parse_macho_metadata", return_value=meta), \
+             patch.object(dumper, "_castxml_dump", return_value=object()), \
+             patch.object(dumper, "_CastxmlParser", return_value=self._mock_parser()):
+            snap = dumper._dump_macho(dylib, [tmp_path / "h.h"], [], "1.0", "c++")
+        assert snap.from_headers is True
+
+    def test_macho_without_headers_is_not_header_parsed(self, tmp_path: Path) -> None:
+        from unittest.mock import MagicMock, patch
+
+        import abicheck.macho_metadata as _macho
+        from abicheck import dumper
+
+        dylib = tmp_path / "foo.dylib"
+        dylib.write_bytes(b"\xcf\xfa\xed\xfe")
+        meta = MagicMock(exports=[])
+        with patch.object(_macho, "parse_macho_metadata", return_value=meta):
+            snap = dumper._dump_macho(dylib, [], [], "1.0", "c++")
+        assert snap.from_headers is False
+
+    def test_elf_with_headers_is_header_parsed(self, tmp_path: Path) -> None:
         from unittest.mock import patch
 
+        import abicheck.elf_metadata as _elfmod
         from abicheck import dumper
+        from abicheck.dwarf_advanced import AdvancedDwarfMetadata
+        from abicheck.dwarf_metadata import DwarfMetadata
+
+        so = tmp_path / "lib.so"
+        so.write_bytes(b"\x7fELF")
+        with patch.object(dumper, "_pyelftools_exported_symbols", return_value=({"foo"}, set())), \
+             patch.object(_elfmod, "parse_elf_metadata", return_value=_elfmod.ElfMetadata()), \
+             patch.object(dumper, "_elf_classify_symbols",
+                          return_value=({"foo"}, {"foo"}, set(), set())), \
+             patch.object(dumper, "_resolve_debug_metadata",
+                          return_value=(DwarfMetadata(), AdvancedDwarfMetadata())), \
+             patch.object(dumper, "_castxml_dump", return_value=object()), \
+             patch.object(dumper, "_CastxmlParser", return_value=self._mock_parser()), \
+             patch.object(dumper, "_populate_elf_visibility", lambda snap: None):
+            snap = dumper._dump_elf(so, [tmp_path / "h.h"], [], "1.0", "c++")
+        assert snap.from_headers is True
+
+    def test_elf_dwarf_only_is_not_header_parsed(self, tmp_path: Path) -> None:
+        # --dwarf-only forces the DWARF path and never reaches castxml, even
+        # when headers are supplied → from_headers must stay False.
+        from unittest.mock import patch
+
+        import abicheck.elf_metadata as _elfmod
+        from abicheck import dumper
+        from abicheck.dwarf_advanced import AdvancedDwarfMetadata
+        from abicheck.dwarf_metadata import DwarfMetadata
         from abicheck.model import AbiSnapshot
 
-        lib = tmp_path / "lib.bin"
-        lib.write_bytes(b"\x00\x00\x00\x00")
-        header_list = [tmp_path / "foo.h"] if headers else []
-
-        with patch.object(dumper, "_detect_format", return_value=fmt), \
-             patch.object(dumper, dumper_attr,
-                          side_effect=lambda *a, **k: AbiSnapshot(library="lib", version="1.0")):
-            snap = dump(lib, headers=header_list, dwarf_only=dwarf_only)
-
-        assert snap.from_headers is expected
+        so = tmp_path / "lib.so"
+        so.write_bytes(b"\x7fELF")
+        with patch.object(dumper, "_pyelftools_exported_symbols", return_value=({"foo"}, set())), \
+             patch.object(_elfmod, "parse_elf_metadata", return_value=_elfmod.ElfMetadata()), \
+             patch.object(dumper, "_elf_classify_symbols",
+                          return_value=({"foo"}, {"foo"}, set(), set())), \
+             patch.object(dumper, "_resolve_debug_metadata",
+                          return_value=(DwarfMetadata(has_dwarf=True), AdvancedDwarfMetadata(has_dwarf=True))), \
+             patch.object(dumper, "_try_dwarf_snapshot",
+                          return_value=(AbiSnapshot(library="lib", version="1.0", elf_only_mode=True), [])):
+            snap = dumper._dump_elf(so, [tmp_path / "h.h"], [], "1.0", "c++", dwarf_only=True)
+        assert snap.from_headers is False

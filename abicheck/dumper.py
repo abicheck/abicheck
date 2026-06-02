@@ -645,16 +645,12 @@ def dump(
             f"Ensure the file is a valid shared library."
         )
 
-    # Record whether the ABI surface was actually parsed from public headers
-    # (castxml/AST). This is the only honest signal for the HEADER_AWARE
-    # evidence tier: DWARF-only and symbols-only modes also populate the
-    # functions/types lists, so "has declarations" cannot stand in for
-    # "headers were parsed". castxml runs whenever headers are supplied, with
-    # one exception: ELF in forced --dwarf-only mode skips castxml and uses
-    # DWARF. PE and Mach-O ignore dwarf_only (it is unsupported there) and
-    # always parse supplied headers, so a header-parsed PE/Mach-O dump is still
-    # header-aware even under --dwarf-only.
-    snapshot.from_headers = bool(headers) and not (dwarf_only and fmt == "elf")
+    # Note: from_headers (the HEADER_AWARE evidence-tier signal) is set by the
+    # format-specific builders (_dump_elf / _dump_pe / _dump_macho) at the point
+    # castxml actually parses headers, so every entry point — including the CLI
+    # and service native-binary paths that call those builders directly (e.g.
+    # service._try_header_scoped_dump), bypassing this function — records it
+    # correctly. DWARF-only and symbols-only builds leave it False.
 
     # Tag declaration provenance (source_header + origin). Always derives
     # source_header from the parsed source location; origin is only
@@ -1018,6 +1014,9 @@ def _dump_elf(
         elf=elf_meta,
         dwarf=dwarf_meta,
         dwarf_advanced=dwarf_adv,
+        # Reached only when headers were supplied and castxml ran (the no-header
+        # and DWARF-only branches return earlier): this surface is header-parsed.
+        from_headers=True,
         platform="elf",
         language_profile=profile_hint,
     )
@@ -1147,6 +1146,9 @@ def _dump_macho(
         enums=parser.parse_enums(),
         typedefs=parser.parse_typedefs(),
         macho=macho_meta,
+        # Reached only when headers were supplied and castxml ran (the no-header
+        # branch returns earlier): this surface is header-parsed.
+        from_headers=True,
         platform="macho",
         language_profile=profile_hint,
     )
@@ -1226,6 +1228,9 @@ def _dump_pe(
         enums=parser.parse_enums(),
         typedefs=parser.parse_typedefs(),
         pe=pe_meta,
+        # Reached only when headers were supplied and castxml ran (the no-header
+        # branch returns earlier): this surface is header-parsed.
+        from_headers=True,
         platform="pe",
         language_profile=profile_hint,
     )
