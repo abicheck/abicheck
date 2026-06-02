@@ -232,7 +232,7 @@ class _DwarfSnapshotBuilder:
         try:
             with open(self._elf_path, "rb") as f:
                 elf = ELFFile(f)  # type: ignore[no-untyped-call]
-                if not elf.has_dwarf_info():  # type: ignore[no-untyped-call]
+                if not elf.has_dwarf_info(strict=True):  # type: ignore[no-untyped-call]
                     return
                 dwarf = elf.get_dwarf_info()  # type: ignore[no-untyped-call]
 

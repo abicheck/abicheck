@@ -176,7 +176,7 @@ def _parse(f: Any, so_path: Path) -> DwarfMetadata:
     meta = DwarfMetadata()
     elf = ELFFile(f)  # type: ignore[no-untyped-call]
 
-    if not elf.has_dwarf_info():  # type: ignore[no-untyped-call]
+    if not elf.has_dwarf_info(strict=True):  # type: ignore[no-untyped-call]
         log.debug("parse_dwarf_metadata: no DWARF info in %s", so_path)
         return meta
 

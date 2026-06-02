@@ -471,6 +471,7 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
         elf=elf, pe=pe, macho=macho,
         dwarf=dwarf, dwarf_advanced=dwarf_advanced, sycl=sycl,
         elf_only_mode=bool(d.get("elf_only_mode", False)),
+        from_headers=bool(d.get("from_headers", False)),
         constants=d.get("constants", {}),
         platform=d.get("platform"),
         language_profile=d.get("language_profile"),

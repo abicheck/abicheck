@@ -77,7 +77,7 @@ def parse_dwarf(so_path: Path) -> tuple[DwarfMetadata, AdvancedDwarfMetadata]:
 
             elf = ELFFile(f)  # type: ignore[no-untyped-call]
 
-            if not elf.has_dwarf_info():  # type: ignore[no-untyped-call]
+            if not elf.has_dwarf_info(strict=True):  # type: ignore[no-untyped-call]
                 log.debug("parse_dwarf: no DWARF info in %s", so_path)
                 return empty
 

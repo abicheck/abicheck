@@ -175,7 +175,7 @@ def parse_advanced_dwarf(so_path: Path) -> AdvancedDwarfMetadata:
     try:
         with open(so_path, "rb") as f:
             elf = ELFFile(f)  # type: ignore[no-untyped-call]
-            if not elf.has_dwarf_info():  # type: ignore[no-untyped-call]
+            if not elf.has_dwarf_info(strict=True):  # type: ignore[no-untyped-call]
                 return AdvancedDwarfMetadata()
             meta = AdvancedDwarfMetadata(has_dwarf=True)
             dwarf = elf.get_dwarf_info()  # type: ignore[no-untyped-call]

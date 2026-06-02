@@ -1067,10 +1067,31 @@ def _detect_evidence_tiers(
     has_dwarf_advanced = (old.dwarf_advanced is not None and old.dwarf_advanced.has_dwarf) or (new.dwarf_advanced is not None and new.dwarf_advanced.has_dwarf)
     has_pe = getattr(old, "pe", None) is not None or getattr(new, "pe", None) is not None
     has_macho = getattr(old, "macho", None) is not None or getattr(new, "macho", None) is not None
-    has_headers = bool(
+    # HEADER_AWARE requires that the surface was actually parsed from public
+    # headers (castxml/AST). DWARF-only and symbols-only dumps populate the
+    # same functions/types lists, so the mere presence of declarations is not
+    # evidence of header analysis — only the ``from_headers`` provenance flag
+    # set by the dumper distinguishes them. When a snapshot carries any
+    # binary-derived metadata (ELF/PE/Mach-O/DWARF) but no ``from_headers``
+    # flag, its surface came from DWARF or the symbol table, not headers.
+    # A snapshot with no binary metadata at all is a pure in-memory/header
+    # surface (the library-API and unit-test construction path), so the
+    # presence of declarations is taken as header-level evidence there.
+    from_headers = bool(getattr(old, "from_headers", False) or getattr(new, "from_headers", False))
+    has_declarations = bool(
         old.functions or old.types or old.enums or old.typedefs or old.variables
         or new.functions or new.types or new.enums or new.typedefs or new.variables
     )
+    has_binary_metadata = (
+        has_elf or has_pe or has_macho or has_dwarf or has_dwarf_advanced
+        or getattr(old, "elf_only_mode", False) or getattr(new, "elf_only_mode", False)
+    )
+    if from_headers:
+        has_headers = True
+    elif has_binary_metadata:
+        has_headers = False
+    else:
+        has_headers = has_declarations
 
     tiers: list[str] = []
     if has_elf:

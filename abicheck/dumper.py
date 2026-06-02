@@ -645,6 +645,14 @@ def dump(
             f"Ensure the file is a valid shared library."
         )
 
+    # Record whether the ABI surface was actually parsed from public headers
+    # (castxml/AST). This is the only honest signal for the HEADER_AWARE
+    # evidence tier: DWARF-only and symbols-only modes also populate the
+    # functions/types lists, so "has declarations" cannot stand in for
+    # "headers were parsed". castxml runs iff headers are supplied and DWARF
+    # mode was not forced; otherwise dump falls back to DWARF/symbols.
+    snapshot.from_headers = bool(headers) and not dwarf_only
+
     # Tag declaration provenance (source_header + origin). Always derives
     # source_header from the parsed source location; origin is only
     # classified when a public-header set is supplied (ADR-015, D4).

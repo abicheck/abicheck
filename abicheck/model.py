@@ -400,6 +400,7 @@ class AbiSnapshot:
     typedefs: dict[str, str] = field(default_factory=dict)  # alias -> underlying type name
     constants: dict[str, str] = field(default_factory=dict)  # #define / constexpr name -> value string
     elf_only_mode: bool = False  # True when dumped without headers (all functions are ELF_ONLY provenance)
+    from_headers: bool = False  # True when the ABI surface was parsed from public headers (castxml/AST), as opposed to DWARF debug info or the symbol table. Drives the HEADER_AWARE evidence tier — DWARF-derived declarations populate the same functions/types lists but must NOT be mistaken for header-level evidence.
 
     # Phase 3: binary format platform — detected from ELF/PE/MachO metadata.
     # None = unknown / not yet detected.

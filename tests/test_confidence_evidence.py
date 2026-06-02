@@ -23,13 +23,13 @@ from abicheck.model import (
 
 def _snap(version="1.0", functions=None, variables=None, types=None,
           enums=None, typedefs=None, elf=None, dwarf=None,
-          dwarf_advanced=None):
+          dwarf_advanced=None, from_headers=False):
     return AbiSnapshot(
         library="libtest.so.1", version=version,
         functions=functions or [], variables=variables or [],
         types=types or [], enums=enums or [],
         typedefs=typedefs or {}, elf=elf, dwarf=dwarf,
-        dwarf_advanced=dwarf_advanced,
+        dwarf_advanced=dwarf_advanced, from_headers=from_headers,
     )
 
 
@@ -83,9 +83,13 @@ class TestEvidenceTiers:
             structs={"Cfg": StructLayout(name="Cfg", byte_size=4)},
             has_dwarf=True,
         )
+        # A real header-parsed dump that also carries ELF + DWARF metadata:
+        # from_headers marks that the surface came from castxml/AST, which is
+        # what promotes it to the header tier (DWARF-derived declarations alone
+        # do not).
         r = compare(
-            _snap(functions=[f], elf=elf, dwarf=dwarf),
-            _snap(functions=[f], elf=elf, dwarf=dwarf),
+            _snap(functions=[f], elf=elf, dwarf=dwarf, from_headers=True),
+            _snap(functions=[f], elf=elf, dwarf=dwarf, from_headers=True),
         )
         assert "header" in r.evidence_tiers
         assert "elf" in r.evidence_tiers
@@ -133,10 +137,14 @@ class TestCanonicalEvidenceTier:
         """The documented goal: HEADER_AWARE must be distinguishable from DWARF_AWARE."""
         f = _pub_func("api", "_Z3apiv")
         dwarf = DwarfMetadata(has_dwarf=True)
-        header_aware = compare(_snap(functions=[f], dwarf=dwarf),
-                               _snap(functions=[f], dwarf=dwarf))
-        dwarf_only = compare(_snap(dwarf=dwarf, elf=ElfMetadata()),
-                             _snap(dwarf=dwarf, elf=ElfMetadata()))
+        # header_aware: the surface was parsed from headers (from_headers=True),
+        # even though DWARF is also present. dwarf_only: same declarations would
+        # come from DWARF alone, so from_headers stays False — this is exactly
+        # the distinction that was previously impossible to express.
+        header_aware = compare(_snap(functions=[f], dwarf=dwarf, from_headers=True),
+                               _snap(functions=[f], dwarf=dwarf, from_headers=True))
+        dwarf_only = compare(_snap(functions=[f], dwarf=dwarf, elf=ElfMetadata()),
+                             _snap(functions=[f], dwarf=dwarf, elf=ElfMetadata()))
         assert header_aware.evidence_tier == EvidenceTier.HEADER_AWARE
         assert dwarf_only.evidence_tier == EvidenceTier.DWARF_AWARE
         assert header_aware.evidence_tier != dwarf_only.evidence_tier
@@ -148,6 +156,53 @@ class TestCanonicalEvidenceTier:
             < EvidenceTier.DWARF_AWARE.rank
             < EvidenceTier.HEADER_AWARE.rank
         )
+
+    def test_real_dwarf_dump_is_not_header_aware(self):
+        """Regression: a DWARF-derived dump (no headers parsed) must report
+        DWARF_AWARE, not HEADER_AWARE.
+
+        The real dumper populates ``functions``/``types`` from DWARF DIEs in
+        DWARF-only mode, so "has declarations" must not be mistaken for header
+        analysis. Mirrors a real ``abicheck compare libfoo.so libfoo.so`` run
+        on a ``-g`` binary with no ``--header`` flag.
+        """
+        f = _pub_func("api", "_Z3apiv")
+        elf = ElfMetadata(
+            symbols=[ElfSymbol(name="_Z3apiv", binding=SymbolBinding.GLOBAL,
+                               sym_type=SymbolType.FUNC)],
+        )
+        dwarf = DwarfMetadata(
+            structs={"Cfg": StructLayout(name="Cfg", byte_size=4)},
+            has_dwarf=True,
+        )
+        # from_headers is False — castxml never ran.
+        r = compare(
+            _snap(functions=[f], elf=elf, dwarf=dwarf),
+            _snap(functions=[f], elf=elf, dwarf=dwarf),
+        )
+        assert r.evidence_tier == EvidenceTier.DWARF_AWARE
+        assert "header" not in r.evidence_tiers
+
+    def test_real_symbols_only_dump_is_elf_only(self):
+        """Regression: a stripped, symbols-only dump must report ELF_ONLY with
+        no DWARF/header tiers — never the highest confidence.
+
+        Before the provenance fix, a stripped binary (``.eh_frame`` only,
+        no real DWARF) was mislabeled HEADER_AWARE/HIGH and could silently
+        report NO_CHANGE for an undetectable struct break.
+        """
+        f = _pub_func("api", "_Z3apiv")
+        elf = ElfMetadata(
+            symbols=[ElfSymbol(name="_Z3apiv", binding=SymbolBinding.GLOBAL,
+                               sym_type=SymbolType.FUNC)],
+        )
+        r = compare(
+            _snap(functions=[f], elf=elf),
+            _snap(functions=[f], elf=elf),
+        )
+        assert r.evidence_tier == EvidenceTier.ELF_ONLY
+        assert "dwarf" not in r.evidence_tiers
+        assert "header" not in r.evidence_tiers
 
     def test_evidence_tier_in_json_output(self):
         """The formalized tier must appear in the JSON report schema."""
@@ -224,13 +279,15 @@ class TestConfidenceLevels:
                                sym_type=SymbolType.FUNC)],
         )
 
+        # Both sides model a header-parsed surface (from_headers=True); the only
+        # difference is the added ELF metadata, which must not lower confidence.
         header_only = compare(
-            _snap(functions=[f]),
-            copy.deepcopy(_snap(functions=[f])),
+            _snap(functions=[f], from_headers=True),
+            copy.deepcopy(_snap(functions=[f], from_headers=True)),
         )
         with_elf = compare(
-            _snap(functions=[f], elf=elf),
-            _snap(functions=[f], elf=elf),
+            _snap(functions=[f], elf=elf, from_headers=True),
+            _snap(functions=[f], elf=elf, from_headers=True),
         )
 
         confidence_order = {Confidence.LOW: 0, Confidence.MEDIUM: 1, Confidence.HIGH: 2}
