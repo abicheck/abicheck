@@ -461,6 +461,17 @@ class TestPlausibleRename:
         # Shared return type and template args must not inflate the score.
         assert _plausible_rename("void get<int>()", "void set<int>()") is False
 
+    def test_same_name_param_change_rejected(self) -> None:
+        # foo(int) and foo(long) are distinct mangled symbols (different
+        # parameters), so a same-size collision is a signature change, not a
+        # rename — a consumer of foo(int) still fails to link against foo(long).
+        assert _plausible_rename("foo(int)", "foo(long)") is False
+        assert _plausible_rename("ns::Cls::run(int)", "ns::Cls::run(double)") is False
+
+    def test_namespace_move_same_params_accepted(self) -> None:
+        # Same function (name + parameters), different scope → a relocation.
+        assert _plausible_rename("ns1::foo(int)", "ns2::foo(int)") is True
+
     def test_version_suffix_rename_accepted(self) -> None:
         assert _plausible_rename("libfoo_v1_create", "libfoo_create") is True
 

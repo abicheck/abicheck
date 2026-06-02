@@ -1134,15 +1134,39 @@ def _shared_affix_len(a: str, b: str) -> int:
     return max(common_prefix(a, b), common_prefix(a[::-1], b[::-1]))
 
 
+def _param_signature(symbol: str) -> str:
+    """The parameter-list portion of a symbol (``foo(int)`` -> ``(int)``).
+
+    Empty when there is no parameter list — a plain C symbol, a variable, or a
+    mangled C++ symbol with no demangler available. A genuine rename or
+    namespace relocation keeps the parameters; a parameter change is a distinct
+    ABI symbol, so comparing this lets the gate reject ``foo(int)`` -> ``foo(long)``.
+    """
+    from .demangle import demangle
+
+    s = demangle(symbol) or symbol
+    depth = 0
+    for i, ch in enumerate(s):
+        if ch == "<":
+            depth += 1
+        elif ch == ">":
+            depth = max(0, depth - 1)
+        elif ch == "(" and depth == 0:
+            return s[i:]
+    return ""
+
+
 def _plausible_rename(old_name: str, new_name: str) -> bool:
     """Whether two symbol names are similar enough to credibly be a rename.
 
     Compares the *unqualified* leaf names (see ``_unqualified_name``). A rename
     or namespace relocation keeps the leaf name (identical leaf, template
-    arguments included) or a substantial common prefix/suffix token; unrelated
-    functions that merely share a byte size — including different methods under
-    a common scope (``Class::get`` vs ``Class::set``) and different template
-    specializations of one name (``foo<int>`` vs ``foo<long>``) — are rejected.
+    arguments included) or a substantial common prefix/suffix token **and** the
+    same parameter list; unrelated functions that merely share a byte size are
+    rejected. Rejected cases include different methods under a common scope
+    (``Class::get`` vs ``Class::set``), different template specializations of
+    one name (``foo<int>`` vs ``foo<long>``), and same-name parameter changes
+    (``foo(int)`` vs ``foo(long)``) — all of which are distinct ABI symbols.
     Used only to gate hash-less matches, where size alone is not evidence of
     identity.
     """
@@ -1150,26 +1174,29 @@ def _plausible_rename(old_name: str, new_name: str) -> bool:
         return True
     a = _unqualified_name(old_name)
     b = _unqualified_name(new_name)
-    if a == b:
-        return True
-    # Operator leaves all share the literal ``operator`` token, and a
-    # destructor leaf (``~Widget``) shares the class name with that class's
-    # constructor leaf (``Widget``); in both cases an affix match would pair
-    # genuinely different ABI functions (operator+ vs operator-, ctor vs dtor).
-    # Require an exact spelling match for these — handled by the ``a == b``
-    # check above, so anything of this kind reaching here is a different
-    # operator/destructor and must be rejected.
+    # Operator leaves include their parameters and share the literal
+    # ``operator`` token; a destructor leaf (``~Widget``) shares the class name
+    # with that class's constructor leaf (``Widget``). For both, an affix match
+    # would pair genuinely different ABI functions (operator+ vs operator-, ctor
+    # vs dtor), so accept only an exact leaf match.
     for leaf in (a, b):
         if _OPERATOR_TOKEN_RE.match(leaf) is not None or leaf.startswith("~"):
-            return False
+            return a == b
+    # A rename/relocation preserves the parameter list; a parameter change is a
+    # different ABI symbol (foo(int) -> foo(long)), not a rename.
+    params_match = _param_signature(old_name) == _param_signature(new_name)
+    if a == b:
+        # Same unqualified name + template args: a rename only if the parameters
+        # also match (else it is a signature change).
+        return params_match
     base_a = _strip_template_args(a)
     base_b = _strip_template_args(b)
-    # Same base name but different (non-equal) leaves means the template
-    # arguments differ: distinct specializations are distinct ABI symbols, not a
-    # rename — a consumer of foo<int> still fails to link against foo<long>.
+    # Same base name but different leaves means the template arguments differ:
+    # distinct specializations are distinct ABI symbols, not a rename — a
+    # consumer of foo<int> still fails to link against foo<long>.
     if base_a == base_b:
         return False
-    return _shared_affix_len(base_a, base_b) >= _RENAME_MIN_SHARED_AFFIX
+    return params_match and _shared_affix_len(base_a, base_b) >= _RENAME_MIN_SHARED_AFFIX
 
 
 def _fingerprints_from_elf(snap: AbiSnapshot) -> dict[str, FunctionFingerprint]:
