@@ -886,6 +886,7 @@ def _finalize_release_output(
     annotate: bool,
     fail_on_removed: bool,
     matrix_result: DiffResult | None = None,
+    severity_exit_code: int | None = None,
 ) -> None:
     """Write summary output, step summary, per-library dir report, then exit."""
     text = _format_release_summary(
@@ -907,7 +908,7 @@ def _finalize_release_output(
             removed_keys, added_keys, old_map, new_map,
         )
 
-    _exit_compare_release(worst_verdict, fail_on_removed, removed_keys)
+    _exit_compare_release(worst_verdict, fail_on_removed, removed_keys, severity_exit_code)
 
 
 def _validate_suppression_early(
@@ -1023,9 +1024,8 @@ def _strip_diff_results_and_adjust_verdict(
               help="Include additions/compatible changes as ::notice annotations "
                    "(requires --annotate).")
 @click.option("-v", "--verbose", is_flag=True, default=False)
-@click.option("-j", "--jobs", "jobs", type=int, default=1, show_default=True,
-              help="Number of parallel library comparisons. "
-                   "Use 0 for auto-detect (CPU count).")
+@click.option("-j", "--jobs", "jobs", type=int, default=0, show_default=True,
+              help="Number of parallel library comparisons (0 = auto-detect CPU count, the default).")
 @click.option("--manifest", "manifest_path", type=click.Path(exists=True, path_type=Path),
               default=None,
               help="ABI instantiation manifest (YAML/JSON) listing symbols the "
@@ -1043,12 +1043,11 @@ def _strip_diff_results_and_adjust_verdict(
                    "Bundle findings catch intra-bundle symbol removals, signature drift "
                    "across DSO boundaries, type drift across siblings, provider "
                    "migration, and manifest mismatches.")
-@click.option("--scope-public-headers", "scope_public_headers", is_flag=True, default=False,
-              help="Restrict each library's findings to its public-header ABI surface "
-                   "(ADR-024): private/internal changes are recorded as filtered, not "
-                   "reported. When a library's public surface cannot be resolved, scoping "
-                   "falls back to the full export table and the release-level scope block "
-                   "flags manual_review_required (issue #235). Requires -H/--header.")
+@click.option("--scope-public-headers/--no-scope-public-headers", "scope_public_headers",
+              default=True, show_default=True,
+              help="Restrict findings to the public-header ABI surface (ADR-024). "
+                   "On by default (matches `compare`); use --no-scope-public-headers "
+                   "to report every finding.")
 @click.option("--probe-matrix-old", "probe_matrix_old", type=click.Path(exists=True, path_type=Path),
               default=None,
               help="Old build-configuration matrix snapshot (from 'abicheck probe run'). "
@@ -1059,6 +1058,29 @@ def _strip_diff_results_and_adjust_verdict(
 @click.option("--probe-matrix-new", "probe_matrix_new", type=click.Path(exists=True, path_type=Path),
               default=None,
               help="New build-configuration matrix snapshot (pairs with --probe-matrix-old).")
+# ── Severity (mirrors `compare`) ──────────────────────────────────────────────
+@click.option("--severity-preset", "severity_preset",
+              type=click.Choice(["default", "strict", "info-only"], case_sensitive=True),
+              default=None,
+              help="Severity preset: 'default', 'strict', or 'info-only'. "
+                   "When set (or any --severity-* option), exit codes follow the "
+                   "severity-aware scheme aggregated across all libraries.")
+@click.option("--severity-abi-breaking", "severity_abi_breaking",
+              type=click.Choice(["error", "warning", "info"], case_sensitive=True),
+              default=None,
+              help="Severity for clear ABI/API incompatibilities (overrides preset).")
+@click.option("--severity-potential-breaking", "severity_potential_breaking",
+              type=click.Choice(["error", "warning", "info"], case_sensitive=True),
+              default=None,
+              help="Severity for potential incompatibilities needing review (overrides preset).")
+@click.option("--severity-quality-issues", "severity_quality_issues",
+              type=click.Choice(["error", "warning", "info"], case_sensitive=True),
+              default=None,
+              help="Severity for problematic behaviors (overrides preset).")
+@click.option("--severity-addition", "severity_addition",
+              type=click.Choice(["error", "warning", "info"], case_sensitive=True),
+              default=None,
+              help="Severity for new public API additions (overrides preset).")
 def compare_release_cmd(
     old_dir: Path,
     new_dir: Path,
@@ -1098,6 +1120,11 @@ def compare_release_cmd(
     scope_public_headers: bool,
     probe_matrix_old: Path | None,
     probe_matrix_new: Path | None,
+    severity_preset: str | None,
+    severity_abi_breaking: str | None,
+    severity_potential_breaking: str | None,
+    severity_quality_issues: str | None,
+    severity_addition: str | None,
 ) -> None:
     """Compare all libraries in two release directories or packages.
 
@@ -1191,6 +1218,16 @@ def compare_release_cmd(
             scope_to_public_surface=scope_public_headers,
         )
 
+        # Compute the severity-aware exit code while per-library DiffResults
+        # are still stashed (before _strip_diff_results_and_adjust_verdict).
+        # Returns None when no --severity-* option was supplied, in which case
+        # the legacy verdict-based exit is used downstream.
+        severity_exit_code = _compute_release_severity_exit_code(
+            library_results,
+            severity_preset, severity_abi_breaking, severity_potential_breaking,
+            severity_quality_issues, severity_addition,
+        )
+
         bundle_result: BundleDiffResult | None = None
         bundle_requested = manifest_path is not None or bool(bundle_cohorts)
         if not no_bundle_analysis and bundle_requested:
@@ -1220,6 +1257,7 @@ def compare_release_cmd(
             diff_pairs, bundle_result,
             output, output_dir, annotate, fail_on_removed,
             matrix_result=matrix_result,
+            severity_exit_code=severity_exit_code,
         )
     finally:
         _cleanup_temp_dirs(_temp_dir_paths, keep_extracted)
@@ -1290,12 +1328,81 @@ def _prepare_compare_release_inputs(
     )
 
 
+def _compute_release_severity_exit_code(
+    library_results: list[dict[str, object]],
+    severity_preset: str | None,
+    severity_abi_breaking: str | None,
+    severity_potential_breaking: str | None,
+    severity_quality_issues: str | None,
+    severity_addition: str | None,
+) -> int | None:
+    """Compute the severity-aware exit code aggregated across all libraries.
+
+    Returns ``None`` when no ``--severity-*`` option was supplied (callers
+    keep the legacy verdict-based exit). Otherwise returns the worst exit
+    code from :func:`compute_exit_code` over the concatenated per-library
+    changes. Must run before ``_diff_result`` entries are stripped.
+    """
+    severity_set = any(
+        v is not None
+        for v in (
+            severity_preset, severity_abi_breaking, severity_potential_breaking,
+            severity_quality_issues, severity_addition,
+        )
+    )
+    if not severity_set:
+        return None
+
+    from .checker_policy import (
+        API_BREAK_KINDS,
+        BREAKING_KINDS,
+        COMPATIBLE_KINDS,
+        RISK_KINDS,
+    )
+    from .severity import compute_exit_code, resolve_severity_config
+
+    resolved_config = resolve_severity_config(
+        severity_preset,
+        abi_breaking=severity_abi_breaking,
+        potential_breaking=severity_potential_breaking,
+        quality_issues=severity_quality_issues,
+        addition=severity_addition,
+    )
+    all_changes = []
+    for entry in library_results:
+        diff = entry.get("_diff_result") if isinstance(entry, dict) else None
+        if isinstance(diff, DiffResult):
+            all_changes.extend(diff.changes)
+    # Aggregate using the canonical kind sets; per-library PolicyFile overrides
+    # are not merged here because the release-level config is a single policy.
+    kind_sets = (
+        frozenset(BREAKING_KINDS), frozenset(API_BREAK_KINDS),
+        frozenset(COMPATIBLE_KINDS), frozenset(RISK_KINDS),
+    )
+    return compute_exit_code(all_changes, resolved_config, kind_sets=kind_sets)
+
+
 def _exit_compare_release(
     worst_verdict: str,
     fail_on_removed: bool,
     removed_keys: list[str],
+    severity_exit_code: int | None = None,
 ) -> None:
-    """Exit compare-release with ABI-compatible status code mapping."""
+    """Exit compare-release with ABI-compatible status code mapping.
+
+    When *severity_exit_code* is not None, the severity-aware scheme is in
+    effect: that code replaces the verdict-based 2/4 mapping, except that
+    a removed library still exits 8 in preference to the severity code.
+    When None, the legacy verdict-based mapping is unchanged.
+    """
+    if severity_exit_code is not None:
+        # Severity-aware scheme: removed-library 8 takes precedence over the
+        # severity code, otherwise emit the aggregated severity exit code.
+        if fail_on_removed and removed_keys:
+            sys.exit(8)
+        if severity_exit_code != 0:
+            sys.exit(severity_exit_code)
+        return
     if worst_verdict in ("BREAKING", "ERROR"):
         sys.exit(4)
     if worst_verdict == "API_BREAK":

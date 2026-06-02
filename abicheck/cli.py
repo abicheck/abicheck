@@ -581,11 +581,15 @@ def _populate_dependency_info(
 @click.option("--show-data-sources", is_flag=True, default=False,
               help="Print which data layers (L0/L1/L2) are available for the "
                    "binary and exit.")
-@click.option("--btf", "debug_format", flag_value="btf", default=None,
+@click.option("--debug-format", "debug_format_opt",
+              type=click.Choice(["auto", "dwarf", "btf", "ctf"], case_sensitive=False), default=None,
+              help="Force the ELF debug format (auto=pick best available). "
+                   "Supersedes the individual --btf/--ctf/--dwarf flags.")
+@click.option("--btf", "debug_format", flag_value="btf", default=None, hidden=True,
               help="Force BTF debug format (ELF only).")
-@click.option("--ctf", "debug_format", flag_value="ctf",
+@click.option("--ctf", "debug_format", flag_value="ctf", hidden=True,
               help="Force CTF debug format (ELF only).")
-@click.option("--dwarf", "debug_format", flag_value="dwarf",
+@click.option("--dwarf", "debug_format", flag_value="dwarf", hidden=True,
               help="Force DWARF debug format (ELF only).")
 # ── Build context capture (ADR-020) ──────────────────────────────────────────
 @click.option("-p", "--build-dir", "compile_db_path", type=click.Path(path_type=Path), default=None,
@@ -593,6 +597,7 @@ def _populate_dependency_info(
                    "file itself. Enables deterministic header parsing with exact build "
                    "flags. Requires -H/--header.")
 @click.option("--compile-db", "compile_db_path_alt", type=click.Path(path_type=Path), default=None,
+              hidden=True,
               help="Explicit path to compile_commands.json (alias for -p).")
 @click.option("--compile-db-filter", "compile_db_filter", default=None,
               help="Glob pattern to filter compile_commands.json entries by source file "
@@ -622,6 +627,7 @@ def dump_cmd(so_path: Path, headers: tuple[Path, ...], includes: tuple[Path, ...
              sysroot: Path | None, nostdinc: bool, pdb_path: Path | None,
              follow_deps: bool, search_paths: tuple[Path, ...], ld_library_path: str,
              dwarf_only: bool, show_data_sources: bool,
+             debug_format_opt: str | None,
              debug_format: str | None,
              compile_db_path: Path | None, compile_db_path_alt: Path | None,
              compile_db_filter: str | None,
@@ -644,6 +650,12 @@ def dump_cmd(so_path: Path, headers: tuple[Path, ...], includes: tuple[Path, ...
     """
     _setup_verbosity(verbose)
 
+    # Reconcile the --debug-format selector with the legacy --btf/--ctf/--dwarf
+    # flags. The selector wins unless it is unset or "auto" (auto-detect).
+    effective_debug_format = (
+        debug_format_opt if debug_format_opt and debug_format_opt != "auto" else None
+    ) or debug_format
+
     # Resolve -p / --compile-db aliases
     effective_compile_db = compile_db_path or compile_db_path_alt
     if effective_compile_db and not headers:
@@ -661,9 +673,9 @@ def dump_cmd(so_path: Path, headers: tuple[Path, ...], includes: tuple[Path, ...
     # conventional ``libfoo.so`` dev symlink is often a GNU ld linker script;
     # follow it to the real shared library before dispatching.
     so_path, binary_fmt = _normalize_binary_input(so_path)
-    if debug_format is not None and binary_fmt in ("pe", "macho"):
+    if effective_debug_format is not None and binary_fmt in ("pe", "macho"):
         raise click.BadParameter(
-            f"--{debug_format} is only supported for ELF binaries, not {binary_fmt.upper()}."
+            f"--{effective_debug_format} is only supported for ELF binaries, not {binary_fmt.upper()}."
         )
     if binary_fmt in ("pe", "macho"):
         _handle_non_elf_dump(
@@ -713,7 +725,7 @@ def dump_cmd(so_path: Path, headers: tuple[Path, ...], includes: tuple[Path, ...
             nostdinc=nostdinc,
             lang=lang if lang == "c" else None,
             dwarf_only=dwarf_only,
-            debug_format=debug_format,
+            debug_format=effective_debug_format,
             public_headers=list(public_headers),
             public_header_dirs=list(public_header_dirs),
         )
@@ -1291,6 +1303,33 @@ def _write_or_echo(output: Path | None, text: str) -> None:
         click.echo(text)
 
 
+def _announce_exit_scheme(
+    severity_explicitly_set: bool, sev_config: SeverityConfig | None,
+    *, fmt: str = "markdown", stat: bool = False,
+) -> None:
+    """Announce (on stderr) which exit-code scheme the compare command uses.
+
+    Kept on stderr so it never pollutes the report on stdout. Emitted only by
+    the ``compare`` command (not compare-release / appcompat), and only for the
+    human-readable formats — machine formats (json/sarif/junit) and the
+    one-line ``--stat`` summary are consumed by tooling that treats the whole
+    captured stream as data, so the banner is suppressed there.
+    """
+    if stat or fmt not in {"markdown", "html", "text", "review"}:
+        return
+    if severity_explicitly_set:
+        click.echo(
+            "Exit-code scheme: severity-aware (per-category --severity-* settings).",
+            err=True,
+        )
+    else:
+        click.echo(
+            "Exit-code scheme: legacy verdict (0=compatible, 2=API break, 4=ABI break). "
+            "Pass --severity-preset/--severity-* for the severity-aware scheme.",
+            err=True,
+        )
+
+
 def _exit_with_severity_or_verdict(
     result: DiffResult, sev_config: SeverityConfig | None, severity_explicitly_set: bool,
 ) -> None:
@@ -1455,10 +1494,10 @@ def _finalize_compare_result(
               help="Output format. 'review' emits a compact GitHub-facing digest "
                    "(verdict + counts + release recommendation + manual-review banner) "
                    "suitable for a job summary or PR comment.")
-@click.option("--demangle/--no-demangle", default=False, show_default=True,
-              help="Demangle C++ symbol names in human-facing output (markdown, "
-                   "review). Recommended for C++ libraries; machine formats "
-                   "(json/sarif/junit) always keep raw mangled symbols.")
+@click.option("--demangle/--no-demangle", default=None,
+              help="Demangle C++ symbol names in human-readable output. Defaults "
+                   "ON for markdown/html/text/review, OFF for json/sarif; override "
+                   "explicitly with --demangle/--no-demangle.")
 @click.option("-o", "--output", type=click.Path(path_type=Path), default=None)
 @click.option("--suppress", type=click.Path(exists=True, path_type=Path), default=None,
               help="Suppression file (YAML) to filter known/intentional changes.")
@@ -1556,20 +1595,26 @@ def _finalize_compare_result(
               help="One-line summary output for CI gates. "
                    "With --format json, emits only the summary object.")
 @click.option("--report-mode", "report_mode",
-              type=click.Choice(["full", "leaf"], case_sensitive=True),
+              type=click.Choice(["full", "leaf", "impact"], case_sensitive=True),
               default="full", show_default=True,
               help="Report mode: 'full' lists all changes individually (default), "
-                   "'leaf' groups by root type changes with impact lists.")
+                   "'leaf' groups by root type changes with impact lists, "
+                   "'impact' behaves as 'full' with the impact summary table enabled "
+                   "(equivalent to --report-mode full --show-impact).")
 @click.option("--show-impact", is_flag=True, default=False,
               help="Append an impact summary table showing root changes and affected interfaces.")
 @click.option("--recommend", is_flag=True, default=False,
               help="Append a release recommendation (semver bump + SONAME action) to the "
                    "report. Always present in --format json under 'release_recommendation'.")
-@click.option("--btf", "debug_format", flag_value="btf", default=None,
+@click.option("--debug-format", "debug_format_opt",
+              type=click.Choice(["auto", "dwarf", "btf", "ctf"], case_sensitive=False), default=None,
+              help="Force the ELF debug format for both sides (auto=pick best available). "
+                   "Supersedes the individual --btf/--ctf/--dwarf flags.")
+@click.option("--btf", "debug_format", flag_value="btf", default=None, hidden=True,
               help="Force BTF debug format for both sides (ELF only).")
-@click.option("--ctf", "debug_format", flag_value="ctf",
+@click.option("--ctf", "debug_format", flag_value="ctf", hidden=True,
               help="Force CTF debug format for both sides (ELF only).")
-@click.option("--dwarf", "debug_format", flag_value="dwarf",
+@click.option("--dwarf", "debug_format", flag_value="dwarf", hidden=True,
               help="Force DWARF debug format for both sides (ELF only).")
 @click.option("--annotate", is_flag=True, default=False,
               help="Emit GitHub Actions workflow command annotations to stderr. "
@@ -1598,7 +1643,7 @@ def compare_cmd(
     old_headers_only: tuple[Path, ...], new_headers_only: tuple[Path, ...],
     old_includes_only: tuple[Path, ...], new_includes_only: tuple[Path, ...],
     old_version: str, new_version: str,
-    fmt: str, demangle: bool, output: Path | None,
+    fmt: str, demangle: bool | None, output: Path | None,
     suppress: Path | None, strict_suppressions: bool, require_justification: bool,
     policy: str, policy_file_path: Path | None,
     pdb_path: Path | None, old_pdb_path: Path | None, new_pdb_path: Path | None,
@@ -1614,6 +1659,7 @@ def compare_cmd(
     public_symbols: tuple[str, ...], public_symbols_list: Path | None,
     report_mode: str, show_impact: bool,
     recommend: bool,
+    debug_format_opt: str | None,
     debug_format: str | None,
     annotate: bool,
     annotate_additions: bool,
@@ -1678,6 +1724,22 @@ def compare_cmd(
     if annotate_additions and not annotate:
         raise click.UsageError("--annotate-additions requires --annotate")
 
+    # Reconcile the --debug-format selector with the legacy --btf/--ctf/--dwarf
+    # flags. The selector wins unless it is unset or "auto" (auto-detect).
+    effective_debug_format = (
+        debug_format_opt if debug_format_opt and debug_format_opt != "auto" else None
+    ) or debug_format
+
+    # Tri-state --demangle: default ON for human-readable formats, OFF for the
+    # machine formats (json/sarif), unless the user set the flag explicitly.
+    if demangle is None:
+        demangle = fmt in {"markdown", "html", "text", "review"}
+
+    # --report-mode impact is sugar for "full" report with the impact table on.
+    if report_mode == "impact":
+        report_mode = "full"
+        show_impact = True
+
     sev_config, severity_explicitly_set = _resolve_severity(
         severity_preset, severity_abi_breaking,
         severity_potential_breaking, severity_quality_issues, severity_addition,
@@ -1713,7 +1775,7 @@ def compare_cmd(
         old_h, new_h, old_inc, new_inc,
         old_version, new_version, lang,
         pdb_path, old_pdb_path, new_pdb_path,
-        dwarf_only, debug_format,
+        dwarf_only, effective_debug_format,
         follow_deps, search_paths, ld_library_path,
     )
 
@@ -1758,6 +1820,7 @@ def compare_cmd(
 
     _write_or_echo(output, text)
 
+    _announce_exit_scheme(severity_explicitly_set, sev_config, fmt=fmt, stat=stat)
     _exit_with_severity_or_verdict(result, sev_config, severity_explicitly_set)
 
 

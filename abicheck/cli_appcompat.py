@@ -47,6 +47,7 @@ def _validate_appcompat_args(
     list_symbols: bool,
     old_headers_only: tuple[Path, ...], new_headers_only: tuple[Path, ...],
     old_includes_only: tuple[Path, ...], new_includes_only: tuple[Path, ...],
+    headers: tuple[Path, ...] = (), includes: tuple[Path, ...] = (),
 ) -> None:
     """Validate appcompat CLI argument combinations."""
     if weak_mode and (old_lib is not None or new_lib is not None):
@@ -56,6 +57,16 @@ def _validate_appcompat_args(
     if not weak_mode and (old_lib is None or new_lib is None):
         raise click.UsageError(
             "Provide OLD_LIB and NEW_LIB arguments, or use --check-against for weak mode."
+        )
+    if (weak_mode or list_symbols) and (headers or includes):
+        # Plain -H/-I are silently ignored in these modes because the library
+        # ABI is never extracted there; warn rather than fail so existing
+        # invocations keep working.
+        click.echo(
+            "Warning: -H/--header and -I/--include are ignored in weak "
+            "(--check-against) / --list-required-symbols mode; library ABI is "
+            "not extracted there.",
+            err=True,
         )
     if weak_mode or list_symbols:
         _rejected: list[str] = []
@@ -164,6 +175,34 @@ def _handle_list_required_symbols(
               default="strict_abi", show_default=True)
 @click.option("--policy-file", "policy_file_path",
               type=click.Path(exists=True, path_type=Path), default=None)
+@click.option("--scope-public-headers/--no-scope-public-headers", "scope_public_headers",
+              default=True, show_default=True,
+              help="Restrict findings to the public-header ABI surface (ADR-024). "
+                   "On by default; matches `compare`. Use --no-scope-public-headers "
+                   "to report every finding.")
+# ── Severity (mirrors `compare`) ──────────────────────────────────────────────
+@click.option("--severity-preset", "severity_preset",
+              type=click.Choice(["default", "strict", "info-only"], case_sensitive=True),
+              default=None,
+              help="Severity preset: 'default', 'strict', or 'info-only'. "
+                   "When set (or any --severity-* option), exit codes follow the "
+                   "severity-aware scheme instead of the verdict-based one.")
+@click.option("--severity-abi-breaking", "severity_abi_breaking",
+              type=click.Choice(["error", "warning", "info"], case_sensitive=True),
+              default=None,
+              help="Severity for clear ABI/API incompatibilities (overrides preset).")
+@click.option("--severity-potential-breaking", "severity_potential_breaking",
+              type=click.Choice(["error", "warning", "info"], case_sensitive=True),
+              default=None,
+              help="Severity for potential incompatibilities needing review (overrides preset).")
+@click.option("--severity-quality-issues", "severity_quality_issues",
+              type=click.Choice(["error", "warning", "info"], case_sensitive=True),
+              default=None,
+              help="Severity for problematic behaviors (overrides preset).")
+@click.option("--severity-addition", "severity_addition",
+              type=click.Choice(["error", "warning", "info"], case_sensitive=True),
+              default=None,
+              help="Severity for new public API additions (overrides preset).")
 @click.option("-v", "--verbose", is_flag=True, default=False)
 def appcompat_cmd(
     app_path: Path,
@@ -186,6 +225,12 @@ def appcompat_cmd(
     suppress: Path | None,
     policy: str,
     policy_file_path: Path | None,
+    scope_public_headers: bool,
+    severity_preset: str | None,
+    severity_abi_breaking: str | None,
+    severity_potential_breaking: str | None,
+    severity_quality_issues: str | None,
+    severity_addition: str | None,
     verbose: bool,
 ) -> None:
     """Check if an application is compatible with a library update.
@@ -224,6 +269,7 @@ def appcompat_cmd(
         weak_mode, old_lib, new_lib, list_symbols,
         old_headers_only, new_headers_only,
         old_includes_only, new_includes_only,
+        headers, includes,
     )
 
     if list_symbols:
@@ -259,6 +305,7 @@ def appcompat_cmd(
             suppression=suppression,
             policy=policy,
             policy_file=pf,
+            scope_to_public_surface=scope_public_headers,
         )
 
     if fmt == "json":
@@ -273,6 +320,34 @@ def appcompat_cmd(
         click.echo(f"Report written to {output}", err=True)
     else:
         click.echo(text)
+
+    severity_set = any(
+        v is not None
+        for v in (
+            severity_preset, severity_abi_breaking, severity_potential_breaking,
+            severity_quality_issues, severity_addition,
+        )
+    )
+    # Severity-aware exit only applies in full-compare mode, where a full
+    # library DiffResult (with effective kind-sets) is available. Weak mode
+    # has no extracted library ABI, so it keeps the verdict-based exit.
+    if severity_set and not weak_mode and result.full_diff is not None:
+        from .severity import compute_exit_code, resolve_severity_config
+        resolved_config = resolve_severity_config(
+            severity_preset,
+            abi_breaking=severity_abi_breaking,
+            potential_breaking=severity_potential_breaking,
+            quality_issues=severity_quality_issues,
+            addition=severity_addition,
+        )
+        diff = result.full_diff
+        exit_code = compute_exit_code(
+            diff.changes, resolved_config,
+            kind_sets=diff._effective_kind_sets(),
+        )
+        if exit_code != 0:
+            sys.exit(exit_code)
+        return
 
     if result.verdict == Verdict.BREAKING:
         sys.exit(4)
