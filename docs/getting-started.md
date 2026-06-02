@@ -36,10 +36,16 @@ conda install -c conda-forge abicheck
 ### Requirements
 
 - Python 3.10+
-- `castxml` + C/C++ compiler — for header AST analysis (optional but recommended, all platforms)
+- `castxml` + a C/C++ compiler — **required for header AST analysis** (all platforms)
 
-All Python dependencies (`pyelftools`, `pefile`, `macholib`) come with `abicheck` install.
-Without `castxml`, abicheck still works in binary-only mode.
+All Python dependencies (`pyelftools`, `pefile`, `macholib`) come with the `abicheck` install.
+
+> **Important:** `pip install abicheck` does **not** install `castxml`. Any command
+> that takes headers (`--old-header` / `--new-header` / `-H`) needs `castxml` on
+> your `PATH` — without it those commands fail with `castxml not found`. Install it
+> with the system/conda packages below (the conda-forge package pulls it in
+> automatically). If you have no `castxml`, run **binary-only mode** by omitting the
+> header flags — abicheck falls back to DWARF/symbols analysis (weaker, but works).
 
 #### Option A: system packages
 
@@ -52,6 +58,12 @@ sudo apt-get update && sudo apt-get install -y castxml gcc g++
 # macOS
 brew install castxml
 # plus Xcode Command Line Tools for clang
+```
+
+```powershell
+# Windows (PowerShell, as administrator)
+choco install castxml
+# plus MSVC Build Tools (cl.exe) for PE/PDB debug-info analysis
 ```
 
 #### Option B: conda-forge (recommended for reproducible envs)
@@ -77,7 +89,7 @@ pip install -e .
 
 ## 2) First check (using repo examples)
 
-The repo includes 74 ABI scenario examples with paired `v1`/`v2` sources and headers.
+The repo includes 121 ABI scenario examples with paired `v1`/`v2` sources and headers.
 Browse them in the [Examples & Case Encyclopedia](examples/index.md),
 or pick one and run it locally:
 
@@ -92,10 +104,19 @@ gcc -shared -fPIC -g v2.c -o libv2.so
 ```
 
 ```bash
-# Compare
+# Compare (header-aware — needs castxml; see Requirements above)
 abicheck compare libv1.so libv2.so --old-header v1.h --new-header v2.h
 # Verdict: BREAKING (symbol 'helper' was removed)
 ```
+
+> **No `castxml`?** The command above will fail with `castxml not found`. Either
+> install castxml (see [Requirements](#requirements)), or run the same comparison
+> in binary-only mode by dropping the header flags — it still catches the removed
+> symbol from the ELF/DWARF metadata:
+>
+> ```bash
+> abicheck compare libv1.so libv2.so   # binary-only fallback, no castxml needed
+> ```
 
 For your own library:
 

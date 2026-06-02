@@ -10,11 +10,11 @@ _11 case(s)._ [← back to all examples](../index.md)
 | [case05_soname](../case05_soname.md) | Missing SONAME | 🟢 COMPATIBLE | Quality (Compatible) |
 | [case103_toolchain_flag_drift](../case103_toolchain_flag_drift.md) | Toolchain flag drift (`toolchain_flag_drift`) | 🟢 COMPATIBLE | Quality (Compatible) |
 | [case13_symbol_versioning](../case13_symbol_versioning.md) | Symbol Versioning Script | 🟢 COMPATIBLE | Quality (Compatible) |
-| [case27_symbol_binding_weakened](../case27_symbol_binding_weakened.md) | Case 27 — Symbol Binding Weakened (GLOBAL → WEAK) | 🟢 COMPATIBLE | Quality (Compatible) |
-| [case29_ifunc_transition](../case29_ifunc_transition.md) | Case 29 — GNU IFUNC Transition | 🟢 COMPATIBLE | Quality (Compatible) |
+| [case27_symbol_binding_weakened](../case27_symbol_binding_weakened.md) | Symbol Binding Weakened (GLOBAL → WEAK) | 🟢 COMPATIBLE | Quality (Compatible) |
+| [case29_ifunc_transition](../case29_ifunc_transition.md) | GNU IFUNC Transition | 🟢 COMPATIBLE | Quality (Compatible) |
 | [case49_executable_stack](../case49_executable_stack.md) | Executable Stack (GNU_STACK RWX) | 🟢 COMPATIBLE | Quality (Compatible) |
 | [case50_soname_inconsistent](../case50_soname_inconsistent.md) | SONAME Inconsistent (Wrong Major Version) | 🟢 COMPATIBLE | Quality (Compatible) |
 | [case51_protected_visibility](../case51_protected_visibility.md) | Protected Visibility (DEFAULT to PROTECTED) | 🟢 COMPATIBLE | Quality (Compatible) |
 | [case52_rpath_leak](../case52_rpath_leak.md) | RPATH Leak (Hardcoded Build Directory) | 🟢 COMPATIBLE | Quality (Compatible) |
 | [case54_used_reserved_field](../case54_used_reserved_field.md) | Used Reserved Field | 🟢 COMPATIBLE | Quality (Compatible) |
-| [case97_api_depends_on_consumer_env](../case97_api_depends_on_consumer_env.md) | case97 — public API depends on consumer build environment (RISK) | 🟢 COMPATIBLE | Quality (Compatible) |
+| [case97_api_depends_on_consumer_env](../case97_api_depends_on_consumer_env.md) | public API depends on consumer build environment (RISK) | 🟢 COMPATIBLE | Quality (Compatible) |

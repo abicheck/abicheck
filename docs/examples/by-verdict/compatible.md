@@ -13,11 +13,11 @@ _21 case(s)._ [← back to all examples](../index.md)
 | [case105_concept_tightening](../case105_concept_tightening.md) | Concept Tightening (C++20) | 🟢 COMPATIBLE | Addition (Compatible) |
 | [case111_enumerable_thread_specific_lambda_ambiguity](../case111_enumerable_thread_specific_lambda_ambiguity.md) | enumerable_thread_specific Lambda-Init Ambiguity | 🟢 COMPATIBLE | Addition (Compatible) |
 | [case13_symbol_versioning](../case13_symbol_versioning.md) | Symbol Versioning Script | 🟢 COMPATIBLE | Quality (Compatible) |
-| [case16_inline_to_non_inline](../case16_inline_to_non_inline.md) | Case 16 — Inline → Non-inline (ODR / Symbol Appearance) | 🟢 COMPATIBLE | Addition (Compatible) |
-| [case25_enum_member_added](../case25_enum_member_added.md) | Case 25 — Enum Member Added | 🟢 COMPATIBLE | Addition (Compatible) |
-| [case26b_union_field_added_compatible](../case26b_union_field_added_compatible.md) | Case 26b — Union Field Added (No Size Change) | 🟢 COMPATIBLE | Addition (Compatible) |
-| [case27_symbol_binding_weakened](../case27_symbol_binding_weakened.md) | Case 27 — Symbol Binding Weakened (GLOBAL → WEAK) | 🟢 COMPATIBLE | Quality (Compatible) |
-| [case29_ifunc_transition](../case29_ifunc_transition.md) | Case 29 — GNU IFUNC Transition | 🟢 COMPATIBLE | Quality (Compatible) |
+| [case16_inline_to_non_inline](../case16_inline_to_non_inline.md) | Inline → Non-inline (ODR / Symbol Appearance) | 🟢 COMPATIBLE | Addition (Compatible) |
+| [case25_enum_member_added](../case25_enum_member_added.md) | Enum Member Added | 🟢 COMPATIBLE | Addition (Compatible) |
+| [case26b_union_field_added_compatible](../case26b_union_field_added_compatible.md) | Union Field Added (No Size Change) | 🟢 COMPATIBLE | Addition (Compatible) |
+| [case27_symbol_binding_weakened](../case27_symbol_binding_weakened.md) | Symbol Binding Weakened (GLOBAL → WEAK) | 🟢 COMPATIBLE | Quality (Compatible) |
+| [case29_ifunc_transition](../case29_ifunc_transition.md) | GNU IFUNC Transition | 🟢 COMPATIBLE | Quality (Compatible) |
 | [case47_inline_to_outlined](../case47_inline_to_outlined.md) | Inline Function Moved to Outlined | 🟢 COMPATIBLE | Addition (Compatible) |
 | [case49_executable_stack](../case49_executable_stack.md) | Executable Stack (GNU_STACK RWX) | 🟢 COMPATIBLE | Quality (Compatible) |
 | [case50_soname_inconsistent](../case50_soname_inconsistent.md) | SONAME Inconsistent (Wrong Major Version) | 🟢 COMPATIBLE | Quality (Compatible) |
@@ -26,5 +26,5 @@ _21 case(s)._ [← back to all examples](../index.md)
 | [case54_used_reserved_field](../case54_used_reserved_field.md) | Used Reserved Field | 🟢 COMPATIBLE | Quality (Compatible) |
 | [case61_var_added](../case61_var_added.md) | Global Variable Added | 🟢 COMPATIBLE | Addition (Compatible) |
 | [case62_type_field_added_compatible](../case62_type_field_added_compatible.md) | Type Field Added (Compatible — Opaque Struct) | 🟢 COMPATIBLE | Addition (Compatible) |
-| [case97_api_depends_on_consumer_env](../case97_api_depends_on_consumer_env.md) | case97 — public API depends on consumer build environment (RISK) | 🟢 COMPATIBLE | Quality (Compatible) |
-| [case99_experimental_graduated](../case99_experimental_graduated.md) | case99 — experimental → stable graduation (compatible) | 🟢 COMPATIBLE | Addition (Compatible) |
+| [case97_api_depends_on_consumer_env](../case97_api_depends_on_consumer_env.md) | public API depends on consumer build environment (RISK) | 🟢 COMPATIBLE | Quality (Compatible) |
+| [case99_experimental_graduated](../case99_experimental_graduated.md) | experimental → stable graduation (compatible) | 🟢 COMPATIBLE | Addition (Compatible) |

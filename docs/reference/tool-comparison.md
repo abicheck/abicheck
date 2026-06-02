@@ -4,9 +4,11 @@ This document explains how each ABI checking tool works, what analysis method it
 benchmark results across real-world test cases, and why the numbers come out the way they do.
 
 > **Note:** abicheck detects 100+ change types (see [Change Kind Reference](change-kinds.md)).
-> The current cross-tool benchmark covers the full 74-case `examples/` catalog
-> (`case01`-`case73` + `case26b`). A historical 42-case snapshot is kept below
-> only for comparison with older reports.
+> The current cross-tool benchmark covers a pinned 74-case subset of the
+> `examples/` catalog (`case01`-`case73` + `case26b`); the full catalog now has
+> 121 cases. The subset is pinned so accuracy numbers stay reproducible across
+> releases. A historical 42-case snapshot is kept below only for comparison with
+> older reports.
 
 ---
 

@@ -1,6 +1,6 @@
 # ABI Scenario Catalog
 
-This directory contains **112 cases** numbered contiguously (`01–111` + `26b`), including **4 multi-library bundle cases** (`90–93`, tracked separately under [ADR-023](../docs/development/adr/023-bundle-aware-multi-binary-analysis.md)) demonstrating real-world ABI/API break scenarios. Each case is a minimal, compilable C/C++ example with:
+This directory contains **121 cases** numbered contiguously (`01–120` + `26b`), including **5 multi-library bundle cases** (`84`, `90–93`, tracked separately under [ADR-023](../docs/development/adr/023-bundle-aware-multi-binary-analysis.md)) demonstrating real-world ABI/API break scenarios. Each case is a minimal, compilable C/C++ example with:
 
 - Paired `v1/` and `v2/` source + headers.
 - A consumer `app.c` / `app.cpp` that demonstrates the actual failure at runtime.
@@ -17,13 +17,13 @@ The catalog drives abicheck's benchmark and serves as an encyclopedia of ABI pit
 
 | Verdict | Count | `checker_policy.py` set | Icon |
 |---------|-------|-------------------------|------|
-| BREAKING | 78 | `BREAKING_KINDS` | 🔴 |
+| BREAKING | 83 | `BREAKING_KINDS` | 🔴 |
 | API_BREAK | 4 | `API_BREAK_KINDS` | 🟠 |
 | COMPATIBLE_WITH_RISK | 2 | `RISK_KINDS` | 🟡 |
 | COMPATIBLE (addition) | 10 | `ADDITION_KINDS` | 🟢 |
 | COMPATIBLE (quality) | 11 | `QUALITY_KINDS` | 🟡 |
-| NO_CHANGE | 3 | — | ✅ |
-| Bundle (multi-binary) | 4 | see [ADR-023](../docs/development/adr/023-bundle-aware-multi-binary-analysis.md) | 🔴 |
+| NO_CHANGE | 6 | — | ✅ |
+| Bundle (multi-binary) | 5 | see [ADR-023](../docs/development/adr/023-bundle-aware-multi-binary-analysis.md) | 🔴 |
 
 > **Verdict source of truth:** [`ground_truth.json`](ground_truth.json), which aligns with the 5-tier classification in [`abicheck/checker_policy.py`](../abicheck/checker_policy.py): `BREAKING_KINDS` → `API_BREAK_KINDS` → `RISK_KINDS` → `QUALITY_KINDS` → `ADDITION_KINDS`.
 

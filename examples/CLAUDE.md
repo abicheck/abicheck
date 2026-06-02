@@ -1,7 +1,7 @@
 # CLAUDE.md — `examples/`
 
-The ABI-scenario catalog: 112 cases numbered contiguously (`01–111` +
-`26b`), including 4 multi-library bundle cases. Each case is a minimal,
+The ABI-scenario catalog: 121 cases numbered contiguously (`01–120` +
+`26b`), including 5 multi-library bundle cases. Each case is a minimal,
 compilable C/C++ example demonstrating a specific ABI/API pitfall.
 
 Read `README.md` in this directory first — it indexes every case and

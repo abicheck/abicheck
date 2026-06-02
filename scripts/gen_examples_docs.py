@@ -109,6 +109,19 @@ WARNING = (
     "Source: examples/<case>/README.md + examples/ground_truth.json. -->\n"
 )
 
+# Strip a leading "caseNN" / "Case NN" / "caseNNb" token (and its trailing
+# separator) from a title for use in compact index tables. Anchored so it only
+# removes the case-number prefix — titles that legitimately contain a colon
+# (e.g. "... (per-binary: NO_CHANGE)" or "experimental:: removed ...") keep the
+# rest of the text intact.
+_CASE_PREFIX_RE = re.compile(r"^\s*case\s*\d+[a-z]?\s*(?:[-—:]\s*)?", re.IGNORECASE)
+
+
+def _short_title(title: str) -> str:
+    """Title with any leading caseNN prefix removed (for index table rows)."""
+    stripped = _CASE_PREFIX_RE.sub("", title, count=1).strip()
+    return stripped or title
+
 
 @dataclass
 class Case:
@@ -243,7 +256,7 @@ def _case_row(case: Case) -> str:
     vinfo = VERDICT_META[case.verdict]
     return (
         f"| [{case.name}]({case.name}.md) "
-        f"| {case.title.split(':', 1)[-1].strip()} "
+        f"| {_short_title(case.title)} "
         f"| {vinfo['icon']} {vinfo['label']} "
         f"| {CATEGORY_META[case.category]['label']} |"
     )
@@ -331,7 +344,7 @@ def _render_group_index(
         vinfo = VERDICT_META[c.verdict]
         lines.append(
             f"| [{c.name}](../{c.name}.md) "
-            f"| {c.title.split(':', 1)[-1].strip()} "
+            f"| {_short_title(c.title)} "
             f"| {vinfo['icon']} {vinfo['label']} "
             f"| {CATEGORY_META[c.category]['label']} |\n"
         )

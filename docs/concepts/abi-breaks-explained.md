@@ -1,6 +1,6 @@
 # Examples & Breakage Guide
 
-The `examples/` directory contains real-world ABI/API break scenarios — 74
+The `examples/` directory contains real-world ABI/API break scenarios — 121
 cases in total. Each case has paired `v1`/`v2` source files, a consumer
 (`app.c`/`app.cpp`), a CMake build, expected verdicts, and a `README.md`
 walkthrough. Run any case yourself:
@@ -26,7 +26,7 @@ For the complete list of detected change types, see the
     [by category](../examples/index.md#browse-by-category).
 
 The sections below give a *conceptual* tour of the major break families with
-representative cases. For the full catalog (all 74 cases, kept in sync
+representative cases. For the full catalog (all 116 documented cases, kept in sync
 automatically), use the Encyclopedia.
 
 ## Categories

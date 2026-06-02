@@ -1,6 +1,59 @@
 # Troubleshooting
 
-Use this page when results look surprising (false positive, false negative, or unexpected verdict).
+Use this page when a run fails to start (setup/environment) or when results look
+surprising (false positive, false negative, or unexpected verdict).
+
+---
+
+## 0) Setup & environment failures
+
+### "castxml not found in PATH"
+
+Header AST analysis requires `castxml`. `pip install abicheck` does **not** install it,
+so any command that passes headers (`--old-header` / `--new-header` / `-H`) fails with
+this error until `castxml` is on your `PATH`.
+
+```bash
+# Ubuntu / Debian
+sudo apt-get install -y castxml gcc g++
+# macOS
+brew install castxml
+# Windows (PowerShell, admin)
+choco install castxml
+# conda (any OS) — bundles castxml + compiler automatically
+conda install -c conda-forge abicheck
+```
+
+No castxml and can't install it? Run **binary-only mode** by omitting the header flags —
+abicheck falls back to DWARF/symbols analysis (weaker, but catches symbol- and
+layout-level breaks):
+
+```bash
+abicheck compare old.so new.so   # no -H / --*-header → binary-only fallback
+```
+
+### "command not found: abicheck" or wrong tool runs
+
+Some distros ship unrelated tools with similar names (`abi-compliance-checker`
+wrappers in Debian `devscripts`, or `abicheck` in Fedora's `libabigail-tools`).
+Confirm you're running this project:
+
+```bash
+abicheck --version   # should print: abicheck X.Y.Z (napetrov/abicheck)
+```
+
+If a different tool shadows it, invoke via the module form: `python -m abicheck`.
+
+### Header parsing fails or finds nothing
+
+If castxml runs but reports parse errors or an empty surface, the inputs usually
+don't match the build environment of the analyzed `.so`:
+
+- Pass the same include dirs the library was built with: `-I include/ -I deps/include/`.
+- Pass the same preprocessor macros: `--gcc-options "-DFEATURE_X=1 -DNDEBUG"`.
+- Best option: feed the real build flags from `compile_commands.json` with `-p build/`
+  (see [CLI Usage → Build-context capture](user-guide/cli-usage.md)).
+- For pure C libraries, add `--lang c` (the default is `c++`).
 
 ---
 

@@ -59,8 +59,8 @@ Source files (`v1.*`, `v2.*`, `app.*`, `CMakeLists.txt`) are listed at the botto
 | [case07_struct_layout](case07_struct_layout.md) | Struct Layout Change | 🔴 BREAKING | Breaking |
 | [case08_enum_value_change](case08_enum_value_change.md) | Enum Value Change | 🔴 BREAKING | Breaking |
 | [case09_cpp_vtable](case09_cpp_vtable.md) | C++ Vtable Change | 🔴 BREAKING | Breaking |
-| [case100_experimental_removed_without_replacement](case100_experimental_removed_without_replacement.md) | : removed without replacement (API break) | 🔴 BREAKING | Breaking |
-| [case101_inline_namespace_version_bumped](case101_inline_namespace_version_bumped.md) | case101 — inline namespace version bumped (BREAKING) | 🔴 BREAKING | Breaking |
+| [case100_experimental_removed_without_replacement](case100_experimental_removed_without_replacement.md) | experimental:: removed without replacement (API break) | 🔴 BREAKING | Breaking |
+| [case101_inline_namespace_version_bumped](case101_inline_namespace_version_bumped.md) | inline namespace version bumped (BREAKING) | 🔴 BREAKING | Breaking |
 | [case102_frozen_runtime_signature_changed](case102_frozen_runtime_signature_changed.md) | Frozen Runtime Signature Changed (oneTBB `detail::r1` shape) | 🔴 BREAKING | Breaking |
 | [case103_toolchain_flag_drift](case103_toolchain_flag_drift.md) | Toolchain flag drift (`toolchain_flag_drift`) | 🟢 COMPATIBLE | Quality (Compatible) |
 | [case104_glibcxx_dual_abi_flip](case104_glibcxx_dual_abi_flip.md) | libstdc++ dual-ABI flip (`glibcxx_dual_abi_flip_detected`) | 🔴 BREAKING | Breaking |
@@ -85,30 +85,30 @@ Source files (`v1.*`, `v2.*`, `app.*`, `CMakeLists.txt`) are listed at the botto
 | [case12_function_removed](case12_function_removed.md) | Function Removed from Shared Library | 🔴 BREAKING | Breaking |
 | [case13_symbol_versioning](case13_symbol_versioning.md) | Symbol Versioning Script | 🟢 COMPATIBLE | Quality (Compatible) |
 | [case14_cpp_class_size](case14_cpp_class_size.md) | C++ Class Size Change | 🔴 BREAKING | Breaking |
-| [case15_noexcept_change](case15_noexcept_change.md) | Case 15 — `noexcept` Changed | 🟡 COMPATIBLE_WITH_RISK | Risk |
-| [case16_inline_to_non_inline](case16_inline_to_non_inline.md) | Case 16 — Inline → Non-inline (ODR / Symbol Appearance) | 🟢 COMPATIBLE | Addition (Compatible) |
-| [case17_template_abi](case17_template_abi.md) | Case 17 — Template Instantiation ABI Change | 🔴 BREAKING | Breaking |
-| [case18_dependency_leak](case18_dependency_leak.md) | Case 18 — Dependency ABI Leak | 🔴 BREAKING | Breaking |
-| [case19_enum_member_removed](case19_enum_member_removed.md) | Case 19 — Enum Member Removed | 🔴 BREAKING | Breaking |
-| [case20_enum_member_value_changed](case20_enum_member_value_changed.md) | Case 20 — Enum Member Value Changed | 🔴 BREAKING | Breaking |
-| [case21_method_became_static](case21_method_became_static.md) | Case 21 — Method Became Static | 🔴 BREAKING | Breaking |
-| [case22_method_const_changed](case22_method_const_changed.md) | Case 22 — Method Const Qualifier Changed | 🔴 BREAKING | Breaking |
-| [case23_pure_virtual_added](case23_pure_virtual_added.md) | Case 23 — Virtual Method Became Pure Virtual | 🔴 BREAKING | Breaking |
-| [case24_union_field_removed](case24_union_field_removed.md) | Case 24 — Union Field Removed | 🔴 BREAKING | Breaking |
-| [case25_enum_member_added](case25_enum_member_added.md) | Case 25 — Enum Member Added | 🟢 COMPATIBLE | Addition (Compatible) |
-| [case26_union_field_added](case26_union_field_added.md) | Case 26 — Union Field Added | 🔴 BREAKING | Breaking |
-| [case26b_union_field_added_compatible](case26b_union_field_added_compatible.md) | Case 26b — Union Field Added (No Size Change) | 🟢 COMPATIBLE | Addition (Compatible) |
-| [case27_symbol_binding_weakened](case27_symbol_binding_weakened.md) | Case 27 — Symbol Binding Weakened (GLOBAL → WEAK) | 🟢 COMPATIBLE | Quality (Compatible) |
-| [case28_typedef_opaque](case28_typedef_opaque.md) | Case 28 — Typedef and Opaque Type Changes | 🔴 BREAKING | Breaking |
-| [case29_ifunc_transition](case29_ifunc_transition.md) | Case 29 — GNU IFUNC Transition | 🟢 COMPATIBLE | Quality (Compatible) |
-| [case30_field_qualifiers](case30_field_qualifiers.md) | Case 30 — Field Qualifier Changes (const, volatile) | 🔴 BREAKING | Breaking |
-| [case31_enum_rename](case31_enum_rename.md) | Case 31 — Enum Member Rename | 🟠 API_BREAK | API Break |
-| [case32_param_defaults](case32_param_defaults.md) | Case 32 — Parameter Default Value Changes (C++) | ✅ NO_CHANGE | No Change |
-| [case33_pointer_level](case33_pointer_level.md) | Case 33 -- Pointer Level Change | 🔴 BREAKING | Breaking |
-| [case34_access_level](case34_access_level.md) | Case 34 — Access Level Changed | 🟠 API_BREAK | API Break |
-| [case35_field_rename](case35_field_rename.md) | Case 35 -- Field Rename | 🔴 BREAKING | Breaking |
-| [case36_anon_struct](case36_anon_struct.md) | Case 36 -- Anonymous Struct/Union Change | 🔴 BREAKING | Breaking |
-| [case37_base_class](case37_base_class.md) | Case 37 -- Base Class Changes | 🔴 BREAKING | Breaking |
+| [case15_noexcept_change](case15_noexcept_change.md) | `noexcept` Changed | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case16_inline_to_non_inline](case16_inline_to_non_inline.md) | Inline → Non-inline (ODR / Symbol Appearance) | 🟢 COMPATIBLE | Addition (Compatible) |
+| [case17_template_abi](case17_template_abi.md) | Template Instantiation ABI Change | 🔴 BREAKING | Breaking |
+| [case18_dependency_leak](case18_dependency_leak.md) | Dependency ABI Leak | 🔴 BREAKING | Breaking |
+| [case19_enum_member_removed](case19_enum_member_removed.md) | Enum Member Removed | 🔴 BREAKING | Breaking |
+| [case20_enum_member_value_changed](case20_enum_member_value_changed.md) | Enum Member Value Changed | 🔴 BREAKING | Breaking |
+| [case21_method_became_static](case21_method_became_static.md) | Method Became Static | 🔴 BREAKING | Breaking |
+| [case22_method_const_changed](case22_method_const_changed.md) | Method Const Qualifier Changed | 🔴 BREAKING | Breaking |
+| [case23_pure_virtual_added](case23_pure_virtual_added.md) | Virtual Method Became Pure Virtual | 🔴 BREAKING | Breaking |
+| [case24_union_field_removed](case24_union_field_removed.md) | Union Field Removed | 🔴 BREAKING | Breaking |
+| [case25_enum_member_added](case25_enum_member_added.md) | Enum Member Added | 🟢 COMPATIBLE | Addition (Compatible) |
+| [case26_union_field_added](case26_union_field_added.md) | Union Field Added | 🔴 BREAKING | Breaking |
+| [case26b_union_field_added_compatible](case26b_union_field_added_compatible.md) | Union Field Added (No Size Change) | 🟢 COMPATIBLE | Addition (Compatible) |
+| [case27_symbol_binding_weakened](case27_symbol_binding_weakened.md) | Symbol Binding Weakened (GLOBAL → WEAK) | 🟢 COMPATIBLE | Quality (Compatible) |
+| [case28_typedef_opaque](case28_typedef_opaque.md) | Typedef and Opaque Type Changes | 🔴 BREAKING | Breaking |
+| [case29_ifunc_transition](case29_ifunc_transition.md) | GNU IFUNC Transition | 🟢 COMPATIBLE | Quality (Compatible) |
+| [case30_field_qualifiers](case30_field_qualifiers.md) | Field Qualifier Changes (const, volatile) | 🔴 BREAKING | Breaking |
+| [case31_enum_rename](case31_enum_rename.md) | Enum Member Rename | 🟠 API_BREAK | API Break |
+| [case32_param_defaults](case32_param_defaults.md) | Parameter Default Value Changes (C++) | ✅ NO_CHANGE | No Change |
+| [case33_pointer_level](case33_pointer_level.md) | - Pointer Level Change | 🔴 BREAKING | Breaking |
+| [case34_access_level](case34_access_level.md) | Access Level Changed | 🟠 API_BREAK | API Break |
+| [case35_field_rename](case35_field_rename.md) | - Field Rename | 🔴 BREAKING | Breaking |
+| [case36_anon_struct](case36_anon_struct.md) | - Anonymous Struct/Union Change | 🔴 BREAKING | Breaking |
+| [case37_base_class](case37_base_class.md) | - Base Class Changes | 🔴 BREAKING | Breaking |
 | [case38_virtual_methods](case38_virtual_methods.md) | Virtual Method Changes | 🔴 BREAKING | Breaking |
 | [case39_var_const](case39_var_const.md) | Variable Const Change | 🔴 BREAKING | Breaking |
 | [case40_field_layout](case40_field_layout.md) | Field Layout Changes | 🔴 BREAKING | Breaking |
@@ -155,14 +155,14 @@ Source files (`v1.*`, `v2.*`, `app.*`, `CMakeLists.txt`) are listed at the botto
 | [case81_serialization_tag_reassigned](case81_serialization_tag_reassigned.md) | Serialization tag ID reassigned | 🔴 BREAKING | Breaking |
 | [case82_sycl_overload_set_removed](case82_sycl_overload_set_removed.md) | SYCL overload set removed (DPC++ build withdrawn) | 🔴 BREAKING | Breaking |
 | [case83_cpu_dispatch_isa_dropped](case83_cpu_dispatch_isa_dropped.md) | CPU-dispatch ISA family dropped | 🟡 COMPATIBLE_WITH_RISK | Risk |
-| [case85_internal_template_signature_changed](case85_internal_template_signature_changed.md) | case85 — internal function-template signature leaks via public API (BREAKING) | 🔴 BREAKING | Breaking |
+| [case85_internal_template_signature_changed](case85_internal_template_signature_changed.md) | internal function-template signature leaks via public API (BREAKING) | 🔴 BREAKING | Breaking |
 | [case86_tag_struct_renamed](case86_tag_struct_renamed.md) | Tag struct renamed (empty class re-mangling) | 🔴 BREAKING | Breaking |
 | [case87_default_template_arg_changed](case87_default_template_arg_changed.md) | Default template argument changed | 🔴 BREAKING | Breaking |
-| [case88_cpo_kind_changed](case88_cpo_kind_changed.md) | case88 — CPO kind changed (BREAKING) | 🔴 BREAKING | Breaking |
+| [case88_cpo_kind_changed](case88_cpo_kind_changed.md) | CPO kind changed (BREAKING) | 🔴 BREAKING | Breaking |
 | [case89_inline_accessor_renamed_pimpl_member](case89_inline_accessor_renamed_pimpl_member.md) | Inline accessor references renamed pimpl member | 🔴 BREAKING | Breaking |
 | [case94_empty_tag_gained_state](case94_empty_tag_gained_state.md) | Empty Tag Gained State | 🔴 BREAKING | Breaking |
 | [case95_allocator_nested_typedef_removed](case95_allocator_nested_typedef_removed.md) | Allocator Nested-Typedef Removed | 🔴 BREAKING | Breaking |
 | [case96_hidden_friend_removed](case96_hidden_friend_removed.md) | Hidden Friend Operator Removed | 🟠 API_BREAK | API Break |
-| [case97_api_depends_on_consumer_env](case97_api_depends_on_consumer_env.md) | case97 — public API depends on consumer build environment (RISK) | 🟢 COMPATIBLE | Quality (Compatible) |
-| [case98_cxx_standard_floor_raised](case98_cxx_standard_floor_raised.md) | NO_CHANGE) | ✅ NO_CHANGE | No Change |
-| [case99_experimental_graduated](case99_experimental_graduated.md) | case99 — experimental → stable graduation (compatible) | 🟢 COMPATIBLE | Addition (Compatible) |
+| [case97_api_depends_on_consumer_env](case97_api_depends_on_consumer_env.md) | public API depends on consumer build environment (RISK) | 🟢 COMPATIBLE | Quality (Compatible) |
+| [case98_cxx_standard_floor_raised](case98_cxx_standard_floor_raised.md) | C++ standard floor raised (per-binary: NO_CHANGE) | ✅ NO_CHANGE | No Change |
+| [case99_experimental_graduated](case99_experimental_graduated.md) | experimental → stable graduation (compatible) | 🟢 COMPATIBLE | Addition (Compatible) |

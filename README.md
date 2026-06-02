@@ -9,7 +9,7 @@
 
 **abicheck** detects breaking changes in C/C++ shared libraries before they reach production. It compares two versions of a shared library — along with their public headers — and reports whether existing binaries will continue to work or break at runtime.
 
-It catches removed or renamed symbols, changed function signatures, struct layout drift, vtable reordering, enum value reassignment, and many more — **145 ABI/API change types** in total — that cause crashes, silent data corruption, or linker failures after a library upgrade.
+It catches removed or renamed symbols, changed function signatures, struct layout drift, vtable reordering, enum value reassignment, and many more — **183 ABI/API change types** in total — that cause crashes, silent data corruption, or linker failures after a library upgrade.
 
 > **Platforms:** Linux (ELF), Windows (PE/COFF), macOS (Mach-O). Binary and header AST analysis on all platforms; debug-info cross-check uses DWARF (Linux, macOS) and PDB (Windows).
 
@@ -144,13 +144,13 @@ See `abicheck.service` for the full signature, plus the [MCP server integration]
 
 ## Examples
 
-The [`examples/`](examples/README.md) directory contains **74 real-world ABI scenarios** — each with paired `v1`/`v2` source, a consumer app that demonstrates the actual failure, and a ground-truth verdict. These drive the validation snapshot below.
+The [`examples/`](examples/README.md) directory contains **121 real-world ABI/API scenarios** (116 single-library cases plus 5 multi-library bundle cases) — each with paired `v1`/`v2` source, a consumer app that demonstrates the actual failure, and a ground-truth verdict. A pinned **74-case subset** drives the reproducible validation snapshot below.
 
 ---
 
 ## Validation snapshot
 
-Accuracy on the full 74-case catalog (`01–73` + `26b`):
+Accuracy on the pinned 74-case benchmark subset (`01–73` + `26b`, drawn from the full 121-case catalog):
 
 | Configuration | Exact verdict accuracy | Scan status |
 |---|---:|---|
