@@ -898,6 +898,12 @@ def _deduplicate_cross_detector(changes: list[Change]) -> list[Change]:
     # (symbol, old -> new), keeping the node-level change. Halves the
     # version-bump noise on real libraries (libLLVM 17->18: ~46k instead of
     # ~92k risk findings).
+    #
+    # The match keys on (symbol, old_value, new_value): both detectors live in
+    # diff_versioning.py and populate old_value/new_value with the same version
+    # node labels for one bump, so the tuples coincide. If that ever diverges
+    # the dedup simply no-ops (both findings are kept) — a missed dedup, never a
+    # dropped real change — so this stays a safe, best-effort filter.
     moved_transitions: set[tuple[str, str | None, str | None]] = {
         (c.symbol, c.old_value, c.new_value)
         for c in changes

@@ -1253,7 +1253,13 @@ def _unqualified_name(symbol: str) -> str:
     """
     from .demangle import demangle
 
-    s = demangle(symbol) or symbol
+    return _unqualified_name_of(demangle(symbol) or symbol)
+
+
+def _unqualified_name_of(s: str) -> str:
+    """Leaf-name core of ``_unqualified_name`` operating on an already-demangled
+    (or raw, when no demangler is available) string. Split out so callers that
+    need both the leaf and the parameter signature can demangle once."""
     # An operator name encodes punctuation (``<<``, ``()``, ``[]``) that defeats
     # bracket tracking, so handle it first: keep everything from the ``operator``
     # token to the end. It is stable and symmetric, which is all the matcher
@@ -1341,7 +1347,12 @@ def _param_signature(symbol: str) -> str:
     """
     from .demangle import demangle
 
-    s = demangle(symbol) or symbol
+    return _param_signature_of(demangle(symbol) or symbol)
+
+
+def _param_signature_of(s: str) -> str:
+    """Parameter-signature core of ``_param_signature`` operating on an
+    already-demangled (or raw) string."""
     depth = 0
     for i, ch in enumerate(s):
         if ch == "<":
@@ -1378,8 +1389,15 @@ def _plausible_rename(old_name: str, new_name: str) -> bool:
     ov, nv = _ctor_dtor_variant(old_name), _ctor_dtor_variant(new_name)
     if ov is not None and nv is not None and ov != nv:
         return False
-    a = _unqualified_name(old_name)
-    b = _unqualified_name(new_name)
+    # Demangle each name exactly once and reuse the result for both the leaf and
+    # the parameter signature (rather than relying on the demangle LRU cache,
+    # which can thrash on libraries with > 16k symbols).
+    from .demangle import demangle
+
+    da = demangle(old_name) or old_name
+    db = demangle(new_name) or new_name
+    a = _unqualified_name_of(da)
+    b = _unqualified_name_of(db)
     # Undemangleable mangled names: when no demangler is available the leaf is
     # the raw Itanium spelling, whose shared boilerplate (``_ZN``, type codes,
     # …) would inflate the affix score and pair unrelated symbols. Demangling is
@@ -1397,7 +1415,7 @@ def _plausible_rename(old_name: str, new_name: str) -> bool:
             return a == b
     # A rename/relocation preserves the parameter list; a parameter change is a
     # different ABI symbol (foo(int) -> foo(long)), not a rename.
-    params_match = _param_signature(old_name) == _param_signature(new_name)
+    params_match = _param_signature_of(da) == _param_signature_of(db)
     if a == b:
         # Same unqualified name + template args: a rename only if the parameters
         # also match (else it is a signature change).
