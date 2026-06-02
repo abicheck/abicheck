@@ -358,14 +358,20 @@ def detect_overload_set_rerouted(
         if not (removed and added):
             continue
         # Re-routing is only possible within a genuine overload set — i.e. at
-        # least one side carries two or more distinct overloads under the same
-        # name, so a call that bound to a removed overload can silently rebind
-        # to a *different* surviving/added one. A name that maps to a single
-        # function on both sides (1→1) is just a signature change (already
-        # reported as FUNC_PARAMS_CHANGED); C has no overloading at all, so
-        # such a name can never re-route. Skip it to avoid a spurious RISK
-        # finding that double-counts the same change.
-        if len(old_sigs) < 2 and len(new_sigs) < 2:
+        # least one side carries two or more overloads under the same name, so a
+        # call that bound to a removed overload can silently rebind to a
+        # *different* surviving/added one. A name that maps to a single function
+        # on both sides (1→1) is just a signature change (already reported as
+        # FUNC_PARAMS_CHANGED); C has no overloading at all, so such a name can
+        # never re-route. Skip it to avoid a spurious RISK finding that
+        # double-counts the same change.
+        #
+        # Count actual overloads (Function entries), not distinct parameter-type
+        # tuples: C++ overloads may differ only in implicit-object cv/ref
+        # qualifiers (e.g. `f(int)` vs `f(int) const`), which share a param-type
+        # tuple but are separate overloads. Keying on the tuple would
+        # under-count them and wrongly suppress a real overload-set change.
+        if len(old_by_stem[stem]) < 2 and len(new_by_stem[stem]) < 2:
             continue
         changes.append(Change(
             kind=ChangeKind.OVERLOAD_SET_REROUTED,

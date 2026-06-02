@@ -239,6 +239,23 @@ class TestOverloadSetRerouted:
         ])
         assert detect_overload_set_rerouted(old, new) == []
 
+    def test_cv_ref_only_overload_set_still_fires(self) -> None:
+        """Overloads that differ only in implicit-object cv/ref qualifiers share
+        a parameter-type tuple but are distinct overloads. A genuine overload
+        set (e.g. `f(int)` + `f(int) const`) replaced by `f(long)` must still
+        fire OVERLOAD_SET_REROUTED — the guard counts actual overloads, not
+        distinct parameter-type tuples."""
+        old = _snap(funcs=[
+            _fn("lib::f", mangled="_ZN3lib1fEi", params=[("a", "int")]),
+            _fn("lib::f", mangled="_ZNK3lib1fEi", params=[("a", "int")]),  # const
+        ])
+        new = _snap(funcs=[
+            _fn("lib::f", mangled="_ZN3lib1fEl", params=[("a", "long")]),
+        ])
+        changes = detect_overload_set_rerouted(old, new)
+        assert len(changes) == 1
+        assert changes[0].kind == ChangeKind.OVERLOAD_SET_REROUTED
+
     def test_single_function_signature_change_no_finding(self) -> None:
         """A name that maps to exactly one function on both sides is not an
         overload set — a 1→1 signature change cannot re-route to a different
