@@ -434,3 +434,69 @@ class TestAppcompatSeverityExit:
                    "--severity-preset", "info-only"],
         )
         assert result.exit_code == 4
+
+
+class TestReleaseSeverityPolicyAndGlobal:
+    """P2: per-library policy-file kind overrides; P1: bundle/matrix folding."""
+
+    def test_per_library_uses_effective_kind_sets(self, monkeypatch):
+        from abicheck.cli_compare_release import _compute_release_severity_exit_code
+
+        diff = _breaking_diff()
+        # Simulate a policy-file that reclassifies the (normally breaking) change
+        # as compatible via the per-library effective kind sets. Proves the exit
+        # consults diff._effective_kind_sets(), not the canonical sets.
+        empty = frozenset()
+        all_kinds = frozenset(c.kind for c in diff.changes)
+        monkeypatch.setattr(
+            diff, "_effective_kind_sets",
+            lambda: (empty, empty, all_kinds, empty),
+        )
+        entry = {"_diff_result": diff}
+        assert _compute_release_severity_exit_code(
+            [entry], "default", None, None, None, None) == 0
+
+    def test_fold_matrix_break_raises_exit(self):
+        from abicheck.cli_compare_release import _fold_release_global_severity
+
+        # Per-library clean (base 0), but a matrix DiffResult carries a break.
+        matrix = _breaking_diff()
+        assert _fold_release_global_severity(
+            0, None, matrix, "default", None, None, None, None) == 4
+
+    def test_fold_bundle_break_raises_exit(self):
+        import types
+
+        from abicheck.cli_compare_release import _fold_release_global_severity
+
+        change = _breaking_diff().changes[0]
+        finding = types.SimpleNamespace(to_change=lambda: change)
+        bundle = types.SimpleNamespace(bundle_findings=[finding])
+        assert _fold_release_global_severity(
+            0, bundle, None, "default", None, None, None, None) == 4
+
+    def test_fold_info_only_does_not_escalate(self):
+        from abicheck.cli_compare_release import _fold_release_global_severity
+
+        matrix = _breaking_diff()
+        # info-only downgrades the matrix break below error -> base 0 preserved.
+        assert _fold_release_global_severity(
+            0, None, matrix, "info-only", None, None, None, None) == 0
+
+    def test_fold_no_extras_returns_base(self):
+        from abicheck.cli_compare_release import _fold_release_global_severity
+
+        assert _fold_release_global_severity(
+            2, None, None, "default", None, None, None, None) == 2
+
+    def test_resolve_config_none_without_flags(self):
+        from abicheck.cli_compare_release import _resolve_release_severity_config
+
+        assert _resolve_release_severity_config(
+            None, None, None, None, None) is None
+
+    def test_resolve_config_set_with_flag(self):
+        from abicheck.cli_compare_release import _resolve_release_severity_config
+
+        assert _resolve_release_severity_config(
+            "strict", None, None, None, None) is not None

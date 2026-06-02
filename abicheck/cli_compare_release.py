@@ -49,6 +49,7 @@ from .reporter import to_json
 
 if TYPE_CHECKING:
     from .package import PackageExtractor
+    from .severity import SeverityConfig
 
 # ---------------------------------------------------------------------------
 # compare-release helpers
@@ -1250,6 +1251,15 @@ def compare_release_cmd(
             old_version=old_version, new_version=new_version,
         )
 
+        # Fold release-global bundle/matrix findings into the severity exit so a
+        # clean-per-library release with a bundle/matrix break is not masked.
+        if severity_exit_code is not None:
+            severity_exit_code = _fold_release_global_severity(
+                severity_exit_code, bundle_result, matrix_result,
+                severity_preset, severity_abi_breaking, severity_potential_breaking,
+                severity_quality_issues, severity_addition,
+            )
+
         _finalize_release_output(
             fmt, worst_verdict, old_dir, new_dir,
             library_results, removed_keys, added_keys,
@@ -1339,47 +1349,105 @@ def _compute_release_severity_exit_code(
     """Compute the severity-aware exit code aggregated across all libraries.
 
     Returns ``None`` when no ``--severity-*`` option was supplied (callers
-    keep the legacy verdict-based exit). Otherwise returns the worst exit
-    code from :func:`compute_exit_code` over the concatenated per-library
-    changes. Must run before ``_diff_result`` entries are stripped.
+    keep the legacy verdict-based exit). Otherwise returns the worst
+    :func:`compute_exit_code` over the per-library changes. Each library is
+    classified with *its own* ``DiffResult._effective_kind_sets()`` so that
+    per-library ``--policy-file`` kind overrides (e.g. escalating a kind to
+    BREAKING) are honored in the exit code, not just in the report.
+
+    This only covers per-library findings and must run before ``_diff_result``
+    entries are stripped; release-global bundle/matrix findings are folded in
+    separately via :func:`_fold_release_global_severity`.
     """
-    severity_set = any(
+    resolved_config = _resolve_release_severity_config(
+        severity_preset, severity_abi_breaking, severity_potential_breaking,
+        severity_quality_issues, severity_addition,
+    )
+    if resolved_config is None:
+        return None
+
+    from .severity import compute_exit_code
+
+    worst = 0
+    for entry in library_results:
+        diff = entry.get("_diff_result") if isinstance(entry, dict) else None
+        if isinstance(diff, DiffResult):
+            code = compute_exit_code(
+                diff.changes, resolved_config,
+                kind_sets=diff._effective_kind_sets(),
+            )
+            worst = max(worst, code)
+    return worst
+
+
+def _resolve_release_severity_config(
+    severity_preset: str | None,
+    severity_abi_breaking: str | None,
+    severity_potential_breaking: str | None,
+    severity_quality_issues: str | None,
+    severity_addition: str | None,
+) -> SeverityConfig | None:
+    """Resolve the severity config, or None when no ``--severity-*`` was set."""
+    if not any(
         v is not None
         for v in (
             severity_preset, severity_abi_breaking, severity_potential_breaking,
             severity_quality_issues, severity_addition,
         )
-    )
-    if not severity_set:
+    ):
         return None
-
-    from .checker_policy import (
-        API_BREAK_KINDS,
-        BREAKING_KINDS,
-        COMPATIBLE_KINDS,
-        RISK_KINDS,
-    )
-    from .severity import compute_exit_code, resolve_severity_config
-
-    resolved_config = resolve_severity_config(
+    from .severity import resolve_severity_config
+    return resolve_severity_config(
         severity_preset,
         abi_breaking=severity_abi_breaking,
         potential_breaking=severity_potential_breaking,
         quality_issues=severity_quality_issues,
         addition=severity_addition,
     )
-    all_changes = []
-    for entry in library_results:
-        diff = entry.get("_diff_result") if isinstance(entry, dict) else None
-        if isinstance(diff, DiffResult):
-            all_changes.extend(diff.changes)
-    # Aggregate using the canonical kind sets; per-library PolicyFile overrides
-    # are not merged here because the release-level config is a single policy.
-    kind_sets = (
-        frozenset(BREAKING_KINDS), frozenset(API_BREAK_KINDS),
-        frozenset(COMPATIBLE_KINDS), frozenset(RISK_KINDS),
+
+
+def _fold_release_global_severity(
+    base_code: int,
+    bundle_result: BundleDiffResult | None,
+    matrix_result: DiffResult | None,
+    severity_preset: str | None,
+    severity_abi_breaking: str | None,
+    severity_potential_breaking: str | None,
+    severity_quality_issues: str | None,
+    severity_addition: str | None,
+) -> int:
+    """Fold release-global (bundle + matrix) findings into the severity exit.
+
+    The per-library aggregation in :func:`_compute_release_severity_exit_code`
+    cannot see bundle-level findings or build-config matrix findings, which are
+    computed later and update ``worst_verdict``. Without this, a release whose
+    per-library diffs are clean but whose bundle/matrix analysis flags an
+    error-level break would exit 0 under, e.g., the default preset. Returns the
+    worst of *base_code* and the bundle/matrix severity codes.
+    """
+    config = _resolve_release_severity_config(
+        severity_preset, severity_abi_breaking, severity_potential_breaking,
+        severity_quality_issues, severity_addition,
     )
-    return compute_exit_code(all_changes, resolved_config, kind_sets=kind_sets)
+    if config is None:
+        return base_code
+
+    from .severity import compute_exit_code
+
+    worst = base_code
+    if bundle_result is not None and bundle_result.bundle_findings:
+        # Bundle findings carry canonical (partitioned) ChangeKinds.
+        bundle_changes = [f.to_change() for f in bundle_result.bundle_findings]
+        worst = max(worst, compute_exit_code(bundle_changes, config))
+    if matrix_result is not None and matrix_result.changes:
+        worst = max(
+            worst,
+            compute_exit_code(
+                matrix_result.changes, config,
+                kind_sets=matrix_result._effective_kind_sets(),
+            ),
+        )
+    return worst
 
 
 def _exit_compare_release(
