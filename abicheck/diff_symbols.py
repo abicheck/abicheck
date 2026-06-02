@@ -201,13 +201,25 @@ _PTR_UNSIGNED_SPELLINGS = frozenset({"size_t", "uintptr_t"})
 def _scalar_repr(type_name: str, is_llp64: bool) -> tuple[object, bool] | None:
     """Map a *bare* integer spelling to (width, is_signed), or None.
 
-    Width is an ``int`` (fixed bit count) or the sentinel ``"long"`` for the
-    data-model-dependent ``long`` family (and, on non-LLP64, the pointer-width
-    typedefs that co-vary with it). The sentinel is never equal to any fixed
-    width, so a distinct built-in change such as ``int`` vs ``long`` is reported
-    even where the widths coincide. Returns None for anything that is not a
-    plain integer scalar (pointers, references, templates, cv-qualified or
-    unknown spellings).
+    Width is an ``int`` (fixed bit count) or one of two abstract sentinels for
+    data-model-dependent spellings whose absolute width the snapshot does not
+    record:
+
+    * ``"ptr"`` — pointer-width types (``size_t``, ``ptrdiff_t``, …). Their
+      absolute width is unknown (64-bit on LP64/LLP64, 32-bit on ILP32 and
+      32-bit Windows), so they must never be equated with a *fixed* width such
+      as ``uint64_t``. Used on every platform.
+    * ``"long"`` — the ``long`` family on LLP64 only, where ``long`` is 32-bit
+      and thus a distinct representation from the 64-bit pointer-width types.
+
+    On non-LLP64 the ``long`` family co-varies with the pointer-width types
+    (``size_t`` *is* ``unsigned long`` there), so it shares the ``"ptr"``
+    sentinel — making ``size_t`` ↔ ``unsigned long`` a non-break while keeping
+    ``long`` ↔ ``long long`` (sentinel vs fixed 64) reportable. Neither
+    sentinel ever equals a fixed width, so a distinct built-in change such as
+    ``int`` vs ``long`` is reported even where the widths coincide. Returns
+    None for anything that is not a plain integer scalar (pointers, references,
+    templates, cv-qualified or unknown spellings).
     """
     t = " ".join(type_name.split())
     if not t or any(c in t for c in "*&<>([,") or "const" in t or "volatile" in t:
@@ -215,22 +227,22 @@ def _scalar_repr(type_name: str, is_llp64: bool) -> tuple[object, bool] | None:
     fixed = _FIXED_SCALAR_REPR.get(t)
     if fixed is not None:
         return fixed
-    # The ``long`` family is its own distinct built-in: it must never be equated
-    # with a fixed-width spelling, even where the widths happen to coincide
-    # (e.g. ``int`` vs ``long`` are both 32-bit on LLP64 but are different
-    # types, and changing one to the other is a real signature change). Map it
-    # to a dedicated, platform-independent sentinel.
+    # The ``long`` family is its own distinct built-in. On LLP64 it is 32-bit
+    # and must stay distinct from both fixed widths and the 64-bit pointer-width
+    # types, so it gets its own ``"long"`` sentinel. Elsewhere it co-varies with
+    # the pointer-width types and shares the ``"ptr"`` sentinel.
     if t in _LONG_SIGNED_SPELLINGS:
-        return ("long", True)
+        return ("long", True) if is_llp64 else ("ptr", True)
     if t in _LONG_UNSIGNED_SPELLINGS:
-        return ("long", False)
-    # Pointer-width typedefs co-vary with the ``long`` family on non-LLP64
-    # (``size_t`` *is* ``unsigned long`` there), but are a fixed 64-bit under
-    # LLP64 (where ``long`` is 32-bit and thus a different representation).
+        return ("long", False) if is_llp64 else ("ptr", False)
+    # Pointer-width typedefs have an unknown absolute width on every platform
+    # (64-bit on LP64/LLP64, 32-bit on ILP32 and 32-bit Windows), so they map to
+    # the ``"ptr"`` sentinel and are never equated with a fixed width such as
+    # ``uint64_t``.
     if t in _PTR_SIGNED_SPELLINGS:
-        return (64, True) if is_llp64 else ("long", True)
+        return ("ptr", True)
     if t in _PTR_UNSIGNED_SPELLINGS:
-        return (64, False) if is_llp64 else ("long", False)
+        return ("ptr", False)
     return None
 
 
@@ -1167,12 +1179,14 @@ def _ctor_dtor_variant(symbol: str) -> str | None:
     name, or None when the symbol is not a constructor/destructor.
 
     Parses the ``_ZN`` nested-name: skips implicit-object cv/ref qualifiers,
-    consumes the ``<len><identifier>`` ``<source-name>`` components, then checks
-    whether the remainder *begins* with a ``<ctor-dtor-name>`` code. This
-    distinguishes a real constructor (``_ZN6WidgetC1Ev`` -> ``C1``) from an
-    ordinary member whose identifier merely contains the characters
-    (``_ZN1A6fooC1EEv`` = ``A::fooC1E()`` -> None). Encodings this simple parser
-    does not model (templates, substitutions) yield None — safe, since the only
+    consumes the ``<len><identifier>`` ``<source-name>`` components (skipping any
+    balanced ``I…E`` ``<template-args>`` block that follows a templated class
+    name), then checks whether the remainder *begins* with a ``<ctor-dtor-name>``
+    code. This distinguishes a real constructor (``_ZN6WidgetC1Ev`` -> ``C1``,
+    ``_ZN3FooIiEC1Ev`` = ``Foo<int>::Foo()`` -> ``C1``) from an ordinary member
+    whose identifier merely contains the characters (``_ZN1A6fooC1EEv`` =
+    ``A::fooC1E()`` -> None). Encodings this simple parser does not model
+    (substitutions, exotic template arguments) yield None — safe, since the only
     consequence is not suppressing a (rare) templated-ctor variant pair.
     """
     if not symbol.startswith("_ZN"):
@@ -1182,15 +1196,38 @@ def _ctor_dtor_variant(symbol: str) -> str | None:
     # R lvalue-ref, O rvalue-ref).
     while i < len(symbol) and symbol[i] in "KVrRO":
         i += 1
-    # Consume <source-name> components: <decimal-length><identifier>.
-    while i < len(symbol) and symbol[i].isdigit():
-        j = i
-        while j < len(symbol) and symbol[j].isdigit():
-            j += 1
-        length = int(symbol[i:j])
-        i = j + length
-        if i > len(symbol):
-            return None  # malformed length — bail out
+    # Consume <prefix> components: <source-name> (<decimal-length><identifier>),
+    # each optionally followed by a <template-args> block ``I…E``. A templated
+    # class name (``_ZN3FooIiEC1Ev``) places the args before the ctor/dtor code.
+    while i < len(symbol):
+        if symbol[i].isdigit():
+            j = i
+            while j < len(symbol) and symbol[j].isdigit():
+                j += 1
+            length = int(symbol[i:j])
+            i = j + length
+            if i > len(symbol):
+                return None  # malformed length — bail out
+        elif symbol[i] == "I":
+            # Skip a balanced <template-args> block. Productions that open with a
+            # trailing ``E`` — I template-args, N nested-name, F function-type,
+            # L expr-primary literal — count as openers; ``E`` closes one.
+            depth = 0
+            while i < len(symbol):
+                c = symbol[i]
+                if c in "INFL":
+                    depth += 1
+                elif c == "E":
+                    depth -= 1
+                    i += 1
+                    if depth == 0:
+                        break
+                    continue
+                i += 1
+            if depth != 0:
+                return None  # unbalanced — bail out
+        else:
+            break
     m = _CTOR_DTOR_CODE_RE.match(symbol[i:])
     return m.group(1) if m else None
 

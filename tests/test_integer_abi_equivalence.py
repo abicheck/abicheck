@@ -72,6 +72,23 @@ def test_llp64_differs() -> None:
     assert not _abi_equivalent_scalar("unsigned long", "size_t", is_llp64=True)
 
 
+@pytest.mark.parametrize("is_llp64", [False, True])
+def test_pointer_width_never_equated_with_fixed_width(is_llp64: bool) -> None:
+    # A pointer-width typedef has an unknown absolute width on every platform
+    # (32-bit on ILP32 / 32-bit Windows, 64-bit on LP64 / LLP64), so it must
+    # never be treated as ABI-equal to a fixed-width spelling such as uint64_t.
+    # On 32-bit Windows size_t is 32-bit, so equating it with uint64_t would be
+    # a false negative.
+    assert not _abi_equivalent_scalar("size_t", "uint64_t", is_llp64=is_llp64)
+    assert not _abi_equivalent_scalar("ptrdiff_t", "int64_t", is_llp64=is_llp64)
+
+
+def test_pointer_width_typedefs_equivalent_to_each_other() -> None:
+    # size_t and uintptr_t are both pointer-width unsigned on every platform.
+    assert _abi_equivalent_scalar("size_t", "uintptr_t", is_llp64=False)
+    assert _abi_equivalent_scalar("size_t", "uintptr_t", is_llp64=True)
+
+
 def _fn(ret: str) -> Function:
     return Function(name="f", mangled="f", return_type=ret,
                     params=[], visibility=Visibility.PUBLIC)
@@ -136,11 +153,11 @@ def test_llp64_return_unsigned_long_to_size_t_breaking() -> None:
     assert ChangeKind.FUNC_RETURN_CHANGED in {c.kind for c in r.changes}
 
 
-def test_int_to_long_param_breaking_on_both_models() -> None:
+@pytest.mark.parametrize("platform", ["elf", "pe"])
+def test_int_to_long_param_breaking_on_both_models(platform: str) -> None:
     # int vs long are distinct built-ins; the change is reported regardless of
     # data model (mirrors examples/case102: a frozen extern-C signature widened
     # from int to long must stay a FUNC_PARAMS_CHANGED on Windows too, where
     # both are 32-bit).
-    for platform in ("elf", "pe"):
-        r = compare(_snap_param("1", "int", platform), _snap_param("2", "long", platform))
-        assert ChangeKind.FUNC_PARAMS_CHANGED in {c.kind for c in r.changes}, platform
+    r = compare(_snap_param("1", "int", platform), _snap_param("2", "long", platform))
+    assert ChangeKind.FUNC_PARAMS_CHANGED in {c.kind for c in r.changes}, platform

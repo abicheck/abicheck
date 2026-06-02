@@ -520,6 +520,22 @@ class TestPlausibleRename:
         # Namespaced constructor is still detected.
         assert _ctor_dtor_variant("_ZN2ns6WidgetC1Ev") == "C1"
 
+    def test_templated_class_ctor_variant_detected(self) -> None:
+        # A templated class places its <template-args> (I…E) between the class
+        # name and the ctor/dtor code; the parser must skip the balanced block.
+        # _ZN3FooIiEC1Ev = Foo<int>::Foo().
+        assert _ctor_dtor_variant("_ZN3FooIiEC1Ev") == "C1"
+        assert _ctor_dtor_variant("_ZN3FooIiEC2Ev") == "C2"
+        assert _ctor_dtor_variant("_ZN3FooIiED1Ev") == "D1"
+        # Nested template args and non-type (literal) params still balance.
+        assert _ctor_dtor_variant("_ZN3FooIN2ns1XEEC1Ev") == "C1"
+        assert _ctor_dtor_variant("_ZN3FooILi5EEC1Ev") == "C1"
+
+    def test_templated_class_ctor_variant_pair_rejected(self) -> None:
+        # C1 vs C2 of the same templated class are distinct ABI symbols, not a
+        # rename — the variant guard must fire even with template args present.
+        assert _plausible_rename("_ZN3FooIiEC1Ev", "_ZN3FooIiEC2Ev") is False
+
     def test_operator_substring_not_treated_as_operator(self) -> None:
         # Identifiers that merely contain 'operator' are ordinary names and
         # must still match on affix, not be forced to exact-only.
