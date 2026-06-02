@@ -144,19 +144,24 @@ each path describing what surface is actually being analyzed.
 
 ## 3. Redundant / removable / consolidatable keys
 
-### 3.1 ABICC `compat` no-op stubs (~24 flags) — *keep hidden, but stop silently lying*
+### 3.1 ABICC `compat` no-op stubs (~24 flags) — *keep hidden; already handled well*
 
 `compat check` accepts ~24 hidden P2 stub flags (`-mingw-compatible`, `-static`,
 `-ext`, `-quick`, `-force`, `-tolerance`, `-count-symbols`, `-sort`, `-xml`, …)
 that do **nothing**, plus `-params`, `-app`, and `-filter` that are accepted but
-**not applied**. Drop-in parity is a real feature, so deleting them would break
-copy-pasted ABICC command lines. But `-app` (application portability) and
-`-filter` (skip rules) *look* functional and are silently ignored.
+not yet applied. Drop-in parity is a real feature, so deleting them would break
+copy-pasted ABICC command lines.
 
-**Recommendation:** Keep the pure stubs hidden (they're harmless). For
-`-app`/`-filter`/`-params`, emit a one-line stderr warning: *"accepted for ABICC
-compatibility but not applied; use `appcompat` / `--suppress` instead."* Silent
-no-ops on flags that imply analysis are a correctness trap.
+Importantly, the analysis-implying ones are **not** silently ignored:
+`_emit_compat_info_notes()` already prints a stderr note for `-filter`/`-params`/
+`-app` (and `-count-symbols`/`-count-all-symbols`) — *"Note: -app … is accepted
+for compatibility (not yet applied)."* (`compat/cli.py:1297-1309`, `1405-1422`,
+quiet-respecting via `_do_echo`).
+
+**Recommendation:** No action needed — keep the pure stubs hidden, and the
+existing info-notes already prevent the "silent no-op" correctness trap. The only
+optional polish would be pointing users at `appcompat` (for `-app`) and
+`--suppress` (for `-filter`) in those note strings.
 
 ### 3.2 `--compile-db` is a pure alias of `-p/--build-dir`
 
@@ -279,19 +284,18 @@ categories. Coherent. The only issue is reach (§2.2), not the schema.
    `compare-release`, `appcompat` (§2.1).
 2. Make the legacy-vs-severity exit-code switch explicit, or always run
    severity-aware (§2.2).
-3. Warn (don't silently ignore) on `compat -app`/`-filter`/`-params` (§3.1).
 
 **Do next (consolidation):**
-4. Collapse `--btf/--ctf/--dwarf` into `--debug-format`; rename `--dwarf-only`
+3. Collapse `--btf/--ctf/--dwarf` into `--debug-format`; rename `--dwarf-only`
    (§3.4).
-5. Fold `--show-impact` into `--report-mode`; document the three "what's shown"
+4. Fold `--show-impact` into `--report-mode`; document the three "what's shown"
    axes (§3.3).
-6. Hide/drop `--compile-db` alias (§3.2).
+5. Hide/drop `--compile-db` alias (§3.2).
 
 **Do later (defaults polish):**
-7. `compare-release -j` default `0` (auto) (§4).
-8. `--demangle` default ON for human formats (§4).
-9. Document `ABICHECK_MCP_*` env vars in the MCP guide (§5).
+6. `compare-release -j` default `0` (auto) (§4).
+7. `--demangle` default ON for human formats (§4).
+8. Document `ABICHECK_MCP_*` env vars in the MCP guide (§5).
 
 **Keep as-is (don't remove):**
 - ABICC P2 no-op stubs (hidden, harmless, real drop-in value).
