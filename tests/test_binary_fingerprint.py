@@ -494,6 +494,14 @@ class TestPlausibleRename:
         monkeypatch.setattr(demangle_mod, "demangle", lambda _sym: None)
         assert _plausible_rename("_ZN1A3fooEv", "_ZN1B3barEv") is False
 
+    def test_ctor_dtor_variant_pairs_rejected(self) -> None:
+        # Itanium ctor/dtor variants demangle to the same leaf but are distinct
+        # exported symbols; a size collision between them is not a rename.
+        # Deterministic regardless of demangler availability (checked on the
+        # raw mangled name).
+        assert _plausible_rename("_ZN6WidgetC1Ev", "_ZN6WidgetC2Ev") is False
+        assert _plausible_rename("_ZN6WidgetD1Ev", "_ZN6WidgetD0Ev") is False
+
     def test_operator_substring_not_treated_as_operator(self) -> None:
         # Identifiers that merely contain 'operator' are ordinary names and
         # must still match on affix, not be forced to exact-only.

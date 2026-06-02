@@ -1152,6 +1152,19 @@ _RENAME_MIN_SHARED_AFFIX = 3
 # are not mistaken for an operator function name.
 _OPERATOR_TOKEN_RE = re.compile(r"(?<![A-Za-z0-9_])operator(?![A-Za-z0-9_])")
 
+# Itanium constructor/destructor variant codes: ``C1``/``C2``/``C3`` (complete /
+# base / allocating constructor) and ``D0``/``D1``/``D2`` (deleting / complete /
+# base destructor), each terminating a nested-name (``...C1E...``). These
+# variants demangle to the *same* leaf yet are distinct exported symbols.
+_CTOR_DTOR_VARIANT_RE = re.compile(r"(C[123]|D[012])E")
+
+
+def _ctor_dtor_variant(symbol: str) -> str | None:
+    """Return the Itanium ctor/dtor variant code (e.g. ``C1``) in a mangled
+    name, or None when the symbol is not a constructor/destructor."""
+    m = _CTOR_DTOR_VARIANT_RE.search(symbol)
+    return m.group(1) if m else None
+
 
 def _unqualified_name(symbol: str) -> str:
     """Extract the unqualified (leaf) function name from a symbol, robustly.
@@ -1290,6 +1303,15 @@ def _plausible_rename(old_name: str, new_name: str) -> bool:
     """
     if old_name == new_name:
         return True
+    # Itanium ctor/dtor variants (C1/C2/C3, D0/D1/D2) demangle to the same leaf
+    # but are distinct exported symbols. A pair whose variant codes differ
+    # (e.g. complete-object C1 vs base-object C2) is never a rename, even if
+    # sizes collide; a genuine ctor/dtor relocation keeps the same variant.
+    # (Checked on the raw mangled name, so it catches the case the demangler
+    # would otherwise collapse to an identical leaf.)
+    ov, nv = _ctor_dtor_variant(old_name), _ctor_dtor_variant(new_name)
+    if ov is not None and nv is not None and ov != nv:
+        return False
     a = _unqualified_name(old_name)
     b = _unqualified_name(new_name)
     # Undemangleable mangled names: when no demangler is available the leaf is
