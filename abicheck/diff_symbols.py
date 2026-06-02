@@ -1,4 +1,5 @@
 # Copyright 2026 Nikolay Petrov
+# SPDX-License-Identifier: Apache-2.0
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -1174,6 +1175,13 @@ def _plausible_rename(old_name: str, new_name: str) -> bool:
         return True
     a = _unqualified_name(old_name)
     b = _unqualified_name(new_name)
+    # Undemangleable mangled names: when no demangler is available the leaf is
+    # the raw Itanium spelling, whose shared boilerplate (``_ZN``, type codes,
+    # …) would inflate the affix score and pair unrelated symbols. Demangling is
+    # optional for this package, so treat such names conservatively — accept
+    # only an exact match (rejected here, since removed/added names differ).
+    if a.startswith("_Z") or b.startswith("_Z"):
+        return a == b
     # Operator leaves include their parameters and share the literal
     # ``operator`` token; a destructor leaf (``~Widget``) shares the class name
     # with that class's constructor leaf (``Widget``). For both, an affix match

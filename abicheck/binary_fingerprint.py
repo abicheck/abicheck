@@ -1,4 +1,5 @@
 # Copyright 2026 Nikolay Petrov
+# SPDX-License-Identifier: Apache-2.0
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -339,18 +340,22 @@ def _match_size(
         if old_name in matched_old:
             continue
         size_matches = [
-            (n, fp) for n, fp in new_by_size.get(old_fp.size, [])
-            if n not in used_new and (name_filter is None or name_filter(old_name, n))
+            (n, fp)
+            for n, fp in new_by_size.get(old_fp.size, [])
+            if n not in used_new
+            # A same-size candidate with a conflicting code hash can never match
+            # — exclude it before the ambiguity check so it does not block the
+            # one eligible partner and drop a real rename.
+            and not (old_fp.code_hash and fp.code_hash and old_fp.code_hash != fp.code_hash)
+            and (name_filter is None or name_filter(old_name, n))
         ]
         # Only match if there's exactly one candidate at this size
         # (ambiguous matches are not reliable)
         if len(size_matches) != 1:
             continue
         new_name, new_fp = size_matches[0]
-        # If both have code hashes but they differ, skip
-        if old_fp.code_hash and new_fp.code_hash and old_fp.code_hash != new_fp.code_hash:
-            continue
-        # 0.8 when either side lacks a code hash (size match only)
+        # 0.8 when either side lacks a code hash (size match only); conflicting
+        # code hashes were already excluded from size_matches above.
         out.append(RenameCandidate(
             old_name=old_name,
             new_name=new_name,
