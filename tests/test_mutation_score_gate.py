@@ -150,7 +150,9 @@ def test_unresolved_does_not_fail_report_only(monkeypatch: pytest.MonkeyPatch) -
         ("🙁 0  ⏰ 2  🤔 1", 3),
         ("🙁 5", 0),
         ("⏰ 4", 4),
-        ("🔇 2", 2),
+        ("🫥 2", 2),          # no-tests (uncovered) counts as unresolved
+        ("🔇 2", 0),          # skipped is intentional → NOT unresolved
+        ("🙁 0  🫥 5  🔇 3", 5),  # 5 uncovered count; 3 skipped do not
         ("no markers", 0),
     ],
 )

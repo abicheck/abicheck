@@ -61,9 +61,9 @@ import sys
 SURVIVOR_BASELINE: int | None = None
 
 # mutmut summary lines use emoji status markers (the legend is the same in
-# 2.x/3.x): 🎉 killed, 🙁 survived, ⏰ timeout, 🤔 suspicious, 🫥 skipped,
-# 🔇 no-tests. We also accept plain-text forms so the parser is resilient to
-# version and locale differences.
+# 2.x/3.x): 🎉 killed, 🙁 survived, ⏰ timeout, 🤔 suspicious, 🫥 no-tests
+# (no covering test), 🔇 skipped (intentionally excluded). We also accept
+# plain-text forms so the parser is resilient to version and locale differences.
 #
 # The gate only ever acts on an *explicit* parsed count — it never infers a
 # result from an exit code or from progress text. That is deliberate: mutmut's
@@ -78,9 +78,11 @@ _LINE_SURVIVED = re.compile(r":\s*survived\b", re.IGNORECASE)
 # Non-killed, non-survived statuses that mean the measurement is *incomplete*:
 # the mutant was neither killed nor confirmed surviving. Accepting these as
 # "zero survivors" would let an under-resolved run pass a zero baseline.
+# Note: 🫥 is "no tests" (an uncovered mutant — a real gap, counted here); 🔇 is
+# "skipped" (intentionally excluded — NOT counted as unresolved).
 _EMOJI_TIMEOUT = re.compile(r"⏰\s*(\d+)")
 _EMOJI_SUSPICIOUS = re.compile(r"🤔\s*(\d+)")
-_EMOJI_NO_TESTS = re.compile(r"🔇\s*(\d+)")
+_EMOJI_NO_TESTS = re.compile(r"🫥\s*(\d+)")
 
 
 def parse_survivors(text: str) -> int | None:
