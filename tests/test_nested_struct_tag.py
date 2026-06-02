@@ -175,6 +175,24 @@ class TestNestedStructTagNormalization:
             "size drift of an anonymous member must still be reported"
         )
 
+    def test_anonymous_aggregate_kind_change_still_detected(self) -> None:
+        """A same-size anonymous *kind* change (union → struct) is ABI-relevant
+        and must still be reported — the placeholder collapse preserves the
+        aggregate keyword, so it is not masked."""
+        from abicheck.checker import (
+            ChangeKind,
+            _diff_struct_layouts,  # type: ignore[attr-defined]
+        )
+
+        old_meta = self._make_meta("Outer", "u", "<anonymous union>")
+        new_meta = self._make_meta("Outer", "u", "<anonymous struct>")
+
+        changes = _diff_struct_layouts(old_meta, new_meta)
+        kinds = {c.kind for c in changes}
+        assert ChangeKind.STRUCT_FIELD_TYPE_CHANGED in kinds, (
+            "anonymous union → anonymous struct must still be a field type change"
+        )
+
 
 # ---------------------------------------------------------------------------
 # Reserved-field reuse: type matching (architecture review fix #4)
