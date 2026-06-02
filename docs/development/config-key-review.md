@@ -121,24 +121,34 @@ Both `compare` (`cli.py:1255`, `_maybe_emit_annotations`) and `compare-release`
 (`click.echo(..., err=True)`). No divergence; no action needed. (An earlier draft
 of this review incorrectly claimed `compare-release` used stdout.)
 
-### 🟡 2.6 Suppression input formats differ
+### 🟡 2.6 Suppression: extra plaintext inputs in `compat`, but YAML is shared
 
-`compare`/`compare-release`/`appcompat` take a YAML `--suppress` file;
-`compat` reuses ABICC plaintext `-symbols-list`/`-types-list`/`-skip-symbols`.
-A team cannot share one suppression source across `compat` and `compare`.
+`compare`/`compare-release`/`appcompat` take a YAML `--suppress` file. `compat`
+*also* accepts the same YAML `--suppress` (`compat/cli.py:1056`, loaded via
+`SuppressionList.load()` at `1527` and merged in `_build_compat_suppression()`),
+**on top of** the ABICC plaintext `-symbols-list`/`-types-list`/`-skip-symbols`
+inputs. So a team **can** share one YAML suppression source across `compat` and
+`compare` today.
 
-**Recommendation:** Acceptable for drop-in parity, but `compat` should also
-accept `--suppress <yaml>` (it already does per agent inventory at
-`compat/cli.py`) — make sure that's documented as the bridge.
+**Recommendation:** No bridge needed — just make sure the
+[from-abicc guide](../user-guide/from-abicc.md) documents that `--suppress
+<yaml>` works in `compat` too, so users migrating off ABICC plaintext lists know
+the shared YAML path exists.
 
 ### 🟡 2.7 "No headers" means three different things
 
 - `compare` without `-H`: symbols-only fallback + warning.
 - `dump` without `-H`: DWARF-only if debug info present.
-- `appcompat --check-against` / `--list-required-symbols`: headers *rejected*.
+- `appcompat --check-against` / `--list-required-symbols`: the per-side
+  `--old-*`/`--new-*` header & include flags are **rejected** with a
+  `UsageError` (`cli_appcompat.py:61-73`), but plain `-H/--header` and
+  `-I/--include` are accepted by Click and then **silently ignored** by the
+  weak/list branches.
 
 **Recommendation:** Unify the help text and emit a consistent one-line note on
-each path describing what surface is actually being analyzed.
+each path describing what surface is actually analyzed. In particular, the
+weak/list `appcompat` branches should *warn* that any supplied `-H`/`-I` are
+ignored, rather than accepting them silently.
 
 ---
 
@@ -295,7 +305,8 @@ categories. Coherent. The only issue is reach (§2.2), not the schema.
 **Do later (defaults polish):**
 6. `compare-release -j` default `0` (auto) (§4).
 7. `--demangle` default ON for human formats (§4).
-8. Document `ABICHECK_MCP_*` env vars in the MCP guide (§5).
+8. Warn (don't silently ignore) on `-H`/`-I` in the weak/list `appcompat`
+   branches (§2.7).
 
 **Keep as-is (don't remove):**
 - ABICC P2 no-op stubs (hidden, harmless, real drop-in value).
