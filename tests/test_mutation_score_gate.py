@@ -85,3 +85,35 @@ def test_gate_at_baseline_is_ok(tmp_path: Path, capsys: pytest.CaptureFixture[st
     rc = gate.main(["--results-file", str(results), "--baseline", "3"])
     assert rc == 0
     assert "OK" in capsys.readouterr().out
+
+
+# --- --run strict mode: a run that produces no measurement must FAIL ----------
+
+
+def test_run_mode_fails_when_mutmut_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """--run with mutmut absent must fail, not silently skip (no-op gate guard)."""
+    monkeypatch.setattr(gate.shutil, "which", lambda name: None)
+    assert gate.main(["--run"]) == 1
+
+
+def test_run_mode_fails_when_results_unparseable(monkeypatch: pytest.MonkeyPatch) -> None:
+    """--run where the run aborts (unparseable results) must fail."""
+    monkeypatch.setattr(gate.shutil, "which", lambda name: "/usr/bin/mutmut")
+    monkeypatch.setattr(gate, "_run", lambda cmd: "config error: nothing to mutate")
+    assert gate.main(["--run", "--baseline", "0"]) == 1
+
+
+def test_run_mode_counts_survivors(monkeypatch: pytest.MonkeyPatch) -> None:
+    """--run with a parseable survivor count is gated normally (not failed just
+    because mutmut's own exit code is non-zero when mutants survive)."""
+    monkeypatch.setattr(gate.shutil, "which", lambda name: "/usr/bin/mutmut")
+    monkeypatch.setattr(gate, "_run", lambda cmd: "🙁 2")
+    assert gate.main(["--run", "--baseline", "5"]) == 0   # within baseline
+    assert gate.main(["--run", "--baseline", "1"]) == 1   # exceeds baseline
+
+
+def test_no_run_unparseable_is_still_a_skip(tmp_path: Path) -> None:
+    """Without --run, an unparseable/empty result stays a graceful skip."""
+    results = tmp_path / "garbage.txt"
+    results.write_text("nothing useful", encoding="utf-8")
+    assert gate.main(["--results-file", str(results), "--baseline", "0"]) == 0

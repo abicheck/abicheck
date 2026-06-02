@@ -137,12 +137,27 @@ def main(argv: list[str] | None = None) -> int:
 
     text = _gather_results(args)
     if text is None:
-        return 0  # could not measure — non-fatal (matches mypy-skip behaviour)
+        # No output at all. When --run was requested the job's whole purpose is
+        # to produce a measurement, so an empty result means the run aborted
+        # (bad config, runner failure, mutmut missing) — fail rather than let
+        # the gate be a silent no-op. Without --run (report-only / file modes)
+        # this stays a graceful skip, matching the mypy-baseline behaviour.
+        if args.run:
+            print(
+                "ERROR: --run requested but mutmut produced no output — the run "
+                "aborted (bad config / runner failure / mutmut not installed). "
+                "Failing so the mutation gate is not a silent no-op."
+            )
+            return 1
+        return 0
 
     survivors = parse_survivors(text)
     if survivors is None:
         print("mutation-score: could not parse survivor count from mutmut output")
-        return 0
+        # Same reasoning: an unparseable result under --run means the run did
+        # not yield a usable measurement; only treat it as a skip when we were
+        # not asked to run mutmut ourselves.
+        return 1 if args.run else 0
 
     baseline = args.baseline if args.baseline is not None else SURVIVOR_BASELINE
     print(f"mutation-score: {survivors} surviving mutant(s)")
