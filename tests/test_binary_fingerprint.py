@@ -502,6 +502,13 @@ class TestPlausibleRename:
         assert _plausible_rename("_ZN6WidgetC1Ev", "_ZN6WidgetC2Ev") is False
         assert _plausible_rename("_ZN6WidgetD1Ev", "_ZN6WidgetD0Ev") is False
 
+    def test_free_function_with_ctor_like_name_not_rejected(self) -> None:
+        # A free function whose identifier merely contains 'C1E'/'C2E'
+        # (_Z6fooC1Ev = fooC1E()) is NOT a constructor variant — it is a
+        # non-nested (_Z, not _ZN) mangling, so the variant guard must not block
+        # a legitimate fooC1E -> fooC2E rename.
+        assert _plausible_rename("_Z6fooC1Ev", "_Z6fooC2Ev") is True
+
     def test_operator_substring_not_treated_as_operator(self) -> None:
         # Identifiers that merely contain 'operator' are ordinary names and
         # must still match on affix, not be forced to exact-only.

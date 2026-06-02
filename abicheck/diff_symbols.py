@@ -1161,9 +1161,19 @@ _CTOR_DTOR_VARIANT_RE = re.compile(r"(C[123]|D[012])E")
 
 def _ctor_dtor_variant(symbol: str) -> str | None:
     """Return the Itanium ctor/dtor variant code (e.g. ``C1``) in a mangled
-    name, or None when the symbol is not a constructor/destructor."""
-    m = _CTOR_DTOR_VARIANT_RE.search(symbol)
-    return m.group(1) if m else None
+    name, or None when the symbol is not a constructor/destructor.
+
+    Ctor/dtor variant codes only occur inside a *nested-name* encoding
+    (``_ZN...C1E...``), so the check is anchored to ``_ZN`` — otherwise an
+    ordinary function whose identifier merely contains ``C1E``/``D1E`` (e.g.
+    the free function ``_Z6fooC1Ev`` = ``fooC1E()``) would be misread as a
+    constructor. The variant is the *last* such code in the nested name (the
+    ctor/dtor follows the class-name prefix).
+    """
+    if not symbol.startswith("_ZN"):
+        return None
+    matches = _CTOR_DTOR_VARIANT_RE.findall(symbol)
+    return matches[-1] if matches else None
 
 
 def _unqualified_name(symbol: str) -> str:
