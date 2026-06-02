@@ -249,7 +249,7 @@ opaque `"old"`/`"new"` — more useful in reports for zero extra typing.
 | Knob | Current default | Why it surprises | Suggested |
 |------|-----------------|------------------|-----------|
 | `compare --scope-public-headers` | **ON** | Findings are silently filtered out of the report | Keep ON, but always print the filtered count (it does on resolve-fail only) |
-| `compare-release -j/--jobs` | **1 (serial)** | Multi-library releases are slow by default; `0` = auto exists but isn't the default | Default to `0` (auto) or document prominently |
+| `compare-release -j/--jobs` | ~~1 (serial)~~ → **0 (auto)** | Was serial by default, making multi-library releases slow | ✅ Implemented: defaults to `0` (auto-detect CPUs); parallel output is deterministic (matched-key order) |
 | `compare --demangle` | **OFF** | Human-readable output shows mangled `_ZN…` names by default | ✅ Implemented: default ON for `markdown`/`review`; `json`/`sarif`/`html` keep mangled (HTML can't be safely string-demangled) |
 | `--lang` | **`c++`** | C libraries parsed as C++ can mis-parse | Reasonable default; add autodetect note |
 | `compat -report-format` | **`html`** | A CLI invocation writes an HTML file by default | ABICC parity — keep, but document |
