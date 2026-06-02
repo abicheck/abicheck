@@ -21,8 +21,8 @@ This document answers three questions:
 | Mode | Command(s) | Knob count (approx) | Policy | Severity | Public-surface scoping | Exit-code scheme |
 |------|-----------|--------------------:|:------:|:--------:|:----------------------:|------------------|
 | Compare | `compare` | ~55 | ✅ `--policy`/`--policy-file` | ✅ `--severity-*` | ✅ **default ON** | 0/2/4 (legacy) **or** 0/1/2/4 (severity) |
-| Multi-binary | `compare-release` | ~40 | ✅ `--policy`/`--policy-file` | ❌ | ✅ **default OFF** | 0/2/4/8 |
-| App-centric | `appcompat` | ~22 | ✅ `--policy`/`--policy-file` | ❌ | ✅ **always-on, no CLI toggle** | 0/1/2/4 |
+| Multi-binary | `compare-release` | ~45 | ✅ `--policy`/`--policy-file` | ✅ `--severity-*` (aggregated) | ✅ **default ON, toggle** | 0/2/4/8 (+severity) |
+| App-centric | `appcompat` | ~27 | ✅ `--policy`/`--policy-file` | ✅ `--severity-*` (app-scoped) | ✅ **default ON, toggle** | 0/1/2/4 |
 | Snapshot | `dump` | ~30 | ❌ | ❌ | n/a | 0/1/2 |
 | ABICC drop-in | `compat check`/`dump` | ~110 (≈24 no-op stubs) | ❌ (hard-wired) | ❌ | ❌ | 0/1/2, 3–11 errors |
 | Stack | `stack-check`, `deps` | ~7 each | ❌ | ❌ | n/a | 0/1/4 / 0/1 |
