@@ -127,6 +127,9 @@ abicheck appcompat ./myapp --list-required-symbols --check-against libfoo.so.2 -
 | `-o` / `--output` | Write report to file |
 | `--show-irrelevant` | Include library changes that don't affect the application |
 | `--list-required-symbols` | List symbols the application requires and exit |
+| `--scope-public-headers` / `--no-scope-public-headers` | Restrict findings to the public-header ABI surface (on by default; matches `compare`) |
+| `--severity-preset` | `default`, `strict`, or `info-only` (switches to the severity-aware exit scheme — full mode only) |
+| `--severity-abi-breaking` / `--severity-potential-breaking` / `--severity-quality-issues` / `--severity-addition` | Per-category severity overrides (`error`/`warning`/`info`; full mode only) |
 | `--suppress` | Suppression file (YAML) |
 | `--policy` | Verdict policy: `strict_abi` (default), `sdk_vendor`, `plugin_abi` |
 | `--policy-file` | Custom YAML policy overrides |
@@ -144,6 +147,20 @@ abicheck appcompat ./myapp --list-required-symbols --check-against libfoo.so.2 -
 | `1` | `TOOL_ERROR` | Operational or runtime error (tool failure, invalid input, or unexpected exception) |
 | `2` | `API_BREAK` | Source-level break affecting app's symbols |
 | `4` | `BREAKING` | Binary ABI break or missing symbols |
+
+### Severity-aware exit codes
+
+Passing any `--severity-*` option switches `appcompat` to the same severity-aware
+exit scheme as `compare`, classifying the **app-relevant** changes (the ones that
+affect the application, not the whole library diff) by category. Two caveats:
+
+- It applies in **full mode only** (with `OLD_LIB NEW_LIB`). Weak mode
+  (`--check-against`) has no extracted library ABI, so it always uses the
+  verdict-based exit codes above.
+- Missing required symbols/versions are treated as a hard runtime break and
+  always floor the exit code at `4`, even under `--severity-preset info-only` —
+  an application that can't resolve a symbol it needs is not something a severity
+  downgrade should hide.
 
 ---
 

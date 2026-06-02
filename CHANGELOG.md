@@ -109,6 +109,46 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   `SYMBOL_VERSION_DEFINED_REMOVED`.
 - 35 new tests covering all version-policy scenarios and checker integration.
 
+### Changed
+
+#### Cross-mode config-key consistency (CLI surface review)
+- **Breaking (default change):** `compare-release` now restricts findings to the
+  public-header ABI surface **by default** (`--scope-public-headers` on), matching
+  `compare` and the Python API. Previously it was off-by-default. Pass
+  `--no-scope-public-headers` to restore the old unscoped output. This can change
+  which findings (and therefore exit codes) a release surfaces in CI.
+- **Breaking (default change):** `compare-release -j/--jobs` now defaults to `0`
+  (auto-detect CPU count, i.e. parallel) instead of `1` (serial). Report ordering
+  is deterministic regardless of `-j` (results are emitted in matched-library
+  order), so this does not churn snapshots — but multi-library runs now parallelize
+  by default.
+- `compare --demangle` is now tri-state: it defaults **on** for human-readable
+  formats (`markdown`/`html`/`text`/`review`) and **off** for `json`/`sarif`;
+  explicit `--demangle`/`--no-demangle` still wins.
+- `compare` prints the active exit-code scheme (legacy verdict vs severity-aware)
+  to stderr for human formats, so the previously-silent switch on the first
+  `--severity-*` flag is now visible. Exit-code numbers are unchanged.
+
+### Added
+
+#### Config-key consistency follow-ups
+- `--scope-public-headers/--no-scope-public-headers` toggle added to `appcompat`
+  (previously always-on with no control) and to `compare-release` (toggle form).
+- `--severity-preset`/`--severity-*` added to `compare-release` (aggregated across
+  per-library, bundle, and matrix findings, honoring per-library `--policy-file`
+  overrides; removed-library exit `8` still takes precedence) and `appcompat`
+  (full-compare mode only — weak/`--check-against` keeps the verdict-based exit;
+  app-scoped to `breaking_for_app`, with missing required symbols/versions floored
+  as hard breaks).
+- `--debug-format {auto,dwarf,btf,ctf}` selector on `compare`/`dump`; the legacy
+  `--btf`/`--ctf`/`--dwarf` flags are hidden from `--help` but remain functional.
+  `--compile-db` is likewise hidden (still an alias of `-p/--build-dir`).
+- `--report-mode impact` (sugar for `full` + `--show-impact`).
+- `appcompat` now warns (instead of silently ignoring) when `-H`/`-I` are supplied
+  in weak (`--check-against`) / `--list-required-symbols` mode.
+- New rationale doc `docs/development/config-key-review.md` (full CLI/config-key
+  surface audit with per-mode inconsistency analysis and implementation status).
+
 ### Planned
 - `--policy-file` schema validation improvements
 - Version-stamped typedef suppression (libpng `png_libpng_version_X_Y_Z` pattern)
