@@ -665,6 +665,79 @@ class TestCheckerIntegration:
         assert ChangeKind.FUNC_LIKELY_RENAMED in kinds
         assert ChangeKind.SONAME_BUMP_RECOMMENDED not in kinds
 
+    def test_compare_soname_unnecessary_uses_postprocessed_changes(self):
+        """SONAME bumped but the only change is a downgraded rename → UNNECESSARY.
+
+        Exercises the second branch of check_soname_bump_policy through the
+        post-processed change set: because the breaking removed/added halves are
+        rename-redundant (and so excluded from the verdict input), there are no
+        binary-incompatible changes, so a SONAME bump reads as unnecessary —
+        and must not also emit the contradictory RECOMMENDED advisory.
+        """
+        from abicheck.checker import compare
+        from abicheck.checker_policy import Verdict
+        from abicheck.model import AbiSnapshot, Function, Visibility
+
+        old = AbiSnapshot(
+            library="libfoo.so.1",
+            version="1.0",
+            functions=[
+                Function(
+                    name="old_name",
+                    mangled="old_name",
+                    return_type="void",
+                    params=[],
+                    visibility=Visibility.PUBLIC,
+                ),
+            ],
+            elf=ElfMetadata(soname="libfoo.so.1", symbols=[_sym("old_name")]),
+        )
+        new = AbiSnapshot(
+            library="libfoo.so.2",
+            version="2.0",
+            functions=[
+                Function(
+                    name="new_name",
+                    mangled="new_name",
+                    return_type="void",
+                    params=[],
+                    visibility=Visibility.PUBLIC,
+                ),
+            ],
+            elf=ElfMetadata(soname="libfoo.so.2", symbols=[_sym("new_name")]),
+        )
+        result = compare(
+            old,
+            new,
+            extra_changes=[
+                Change(
+                    kind=ChangeKind.FUNC_REMOVED,
+                    symbol="old_name",
+                    description="Function removed: old_name",
+                    old_value="old_name",
+                ),
+                Change(
+                    kind=ChangeKind.FUNC_ADDED,
+                    symbol="new_name",
+                    description="Function added: new_name",
+                    new_value="new_name",
+                ),
+                Change(
+                    kind=ChangeKind.FUNC_LIKELY_RENAMED,
+                    symbol="old_name",
+                    description="Function likely renamed: old_name -> new_name",
+                    old_value="old_name",
+                    new_value="new_name",
+                ),
+            ],
+        )
+        kinds = {c.kind for c in result.changes}
+
+        assert result.verdict == Verdict.COMPATIBLE_WITH_RISK
+        assert ChangeKind.FUNC_LIKELY_RENAMED in kinds
+        assert ChangeKind.SONAME_BUMP_UNNECESSARY in kinds
+        assert ChangeKind.SONAME_BUMP_RECOMMENDED not in kinds
+
     def test_compare_soname_bump_recommendation_honors_suppression(self):
         """Late-generated SONAME advisories must still pass suppression."""
         from abicheck.checker import compare
