@@ -31,8 +31,9 @@ theme:
 
 nav:
   - Home: index.md
-  - Getting Started: getting-started.md
   - User Guide:
+    - Getting Started: getting-started.md
+    - GitHub Action: user-guide/github-action.md
     - CLI Usage: user-guide/cli-usage.md
     - Tool Modes: user-guide/tool-modes.md
     - Application Compatibility: user-guide/appcompat.md
@@ -45,19 +46,21 @@ nav:
     - Baseline Management: user-guide/baseline-management.md
     - Local Compare: user-guide/local-compare.md
     - MCP Integration: user-guide/mcp-integration.md
-    - GitHub Action: user-guide/github-action.md
     - Migrating from ABICC: user-guide/from-abicc.md
     - Migrating from libabigail: user-guide/from-libabigail.md
   - Concepts:
     - ABI Cheat Sheet: concepts/abi-cheat-sheet.md
     - Verdicts: concepts/verdicts.md
     - Architecture: concepts/architecture.md
-    - ABI Breaks Explained: concepts/abi-breaks-explained.md
-    - Breaking Cases Catalog: concepts/breaking-cases-catalog.md
-    - ABI Stability Guide: concepts/abi-stability-guide.md
     - Limitations: concepts/limitations.md
-  - Examples:
-    - Overview: examples/index.md
+    - Change Kinds: reference/change-kinds.md
+    - Exit Codes: reference/exit-codes.md
+    - Platforms: reference/platforms.md
+    - Tool Comparison: reference/tool-comparison.md
+    - ABICC Format Compliance: reference/abicc-format-compliance.md
+  - ABI/API Handling & Recommendations:
+    - Guide: concepts/abi-api-handling.md
+    - Examples Encyclopedia: examples/index.md
     - By Verdict:
       - "BREAKING": examples/by-verdict/breaking.md
       - "API_BREAK": examples/by-verdict/api-break.md
@@ -71,19 +74,21 @@ nav:
       - Addition: examples/by-category/addition.md
       - Quality: examples/by-category/quality.md
       - No Change: examples/by-category/no_change.md
-  - Reference:
-    - Change Kinds: reference/change-kinds.md
-    - Exit Codes: reference/exit-codes.md
-    - Platforms: reference/platforms.md
-    - Tool Comparison: reference/tool-comparison.md
-    - ABICC Format Compliance: reference/abicc-format-compliance.md
-  - Troubleshooting: troubleshooting.md
   - Development:
-    - Goals: development/goals.md
-    - Backlog: development/backlog.md
-    - Config Key Review: development/config-key-review.md
-    - User Scenarios & Flows: development/user-scenarios.md
-    - Use-Case Coverage Evaluation: development/usecase-coverage-evaluation.md
+    - Contributing:
+      - Codebase Overview: development/codebase-overview.md
+      - Testing: development/testing.md
+      - Troubleshooting: troubleshooting.md
+      - Config Key Review: development/config-key-review.md
+    - Roadmap & Status:
+      - Goals: development/goals.md
+      - Backlog: development/backlog.md
+      - Use-Case Coverage Evaluation: development/usecase-coverage-evaluation.md
+      - User Scenarios & Flows: development/user-scenarios.md
+    - Parity & Reports:
+      - ABICC Parity Status: development/abicc-parity-status.md
+      - ABICC Test Coverage Comparison: development/abicc-test-coverage-comparison.md
+      - Report Comparison: development/report-comparison.md
     - Implementation Plans:
       - Overview: development/plans/index.md
       - "G1: Cross-platform e2e": development/plans/g1-cross-platform-e2e.md
@@ -93,11 +98,6 @@ nav:
       - "G5: Plugin contract": development/plans/g5-plugin-bidirectional-contract.md
       - "G6: Kernel BTF & accelerator": development/plans/g6-kernel-btf-and-accelerator.md
       - "G8: Static libraries": development/plans/g8-static-libraries.md
-    - Codebase Overview: development/codebase-overview.md
-    - Testing: development/testing.md
-    - Report Comparison: development/report-comparison.md
-    - ABICC Parity Status: development/abicc-parity-status.md
-    - ABICC Test Coverage Comparison: development/abicc-test-coverage-comparison.md
     - ADR:
       - Overview: development/adr/index.md
       - "001: Technology Stack": development/adr/001-technology-stack.md
@@ -128,7 +128,11 @@ plugins:
 markdown_extensions:
   - admonition
   - pymdownx.details
-  - pymdownx.superfences
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
   - pymdownx.highlight:
       anchor_linenums: true
   - pymdownx.inlinehilite

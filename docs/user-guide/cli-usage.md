@@ -341,11 +341,13 @@ abicheck classifies every detected change into a verdict:
 A change is BREAKING only when it causes binary-level failures: symbol resolution errors,
 type layout corruption, vtable mismatch, or calling convention incompatibility.
 
-Changes like `noexcept` addition/removal, enum member addition, union field addition,
+Changes like enum member addition, union field addition (without growth),
 GLOBAL→WEAK binding, and IFUNC transitions are classified as **COMPATIBLE** — they are
-detected and reported for awareness but do not trigger a BREAKING verdict. See the
-[ABI Break Catalog](../concepts/breaking-cases-catalog.md) for the full
-rationale table.
+detected and reported for awareness but do not trigger a BREAKING verdict.
+`noexcept` removal is classified **COMPATIBLE_WITH_RISK** (binary-linkable but a
+deployment/behavioral hazard). See
+[ABI/API Handling & Recommendations](../concepts/abi-api-handling.md) for the full
+rationale.
 
 ## ABI/API breakages and what each tool mode can detect
 

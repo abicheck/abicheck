@@ -1,42 +1,109 @@
 # ABI Tool Modes Reference
 
-This document explains the three modes used for ABI analysis in `abicheck`,
-their correct names (as used in ABICC official documentation), requirements,
-and limitations.
+This document explains the analysis modes relevant to `abicheck`: **abicheck's
+own native 3-layer mode** (what you get by default) plus the three external
+reference modes (`abidiff` and the two ABICC usages) that abicheck is benchmarked
+against and can emulate. The external-tool names match ABICC's official
+documentation.
 
 ---
 
 ## Mode Overview
 
-| Mode | Official name | Compiler needed? | Debug info needed? | Headers needed? |
-|------|--------------|:----------------:|:------------------:|:---------------:|
+| Mode | What it is | Compiler needed? | Debug info needed? | Headers needed? |
+|------|------------|:----------------:|:------------------:|:---------------:|
+| **abicheck (native, default)** | abicheck's own 3-layer pipeline: binary metadata + header AST (castxml) + DWARF/PDB cross-check | ⚠️ for headers only (castxml; GCC/Clang/MSVC) | optional (improves accuracy) | recommended (falls back to symbols-only) |
 | abidiff + headers | `abidiff` (libabigail) | ❌ | optional (improves accuracy) | ✅ always |
 | ABICC+headers (ABICC Usage #2) | Original / headers mode | ✅ **GCC only** | ❌ | ✅ |
 | ABICC+dump (ABICC Usage #1) | abi-dumper / binary mode | ❌ | ✅ (`-g -Og`) | ❌ (optional) |
+
+> The default mode is **abicheck native** — you do not need `abidiff` or
+> `abi-compliance-checker` installed. The external modes are documented here
+> because abicheck reports parity against them ([Tool Comparison](../reference/tool-comparison.md))
+> and ships an ABICC-compatible CLI ([Migrating from ABICC](from-abicc.md)).
+
+---
+
+## abicheck (native 3-layer analysis)
+
+### Overview
+
+By default `abicheck` does **not** shell out to any external ABI tool. It runs
+its own three independent analysis layers and reconciles them into a single
+verdict. This is the mode behind `abicheck compare`, `abicheck dump`, and the
+[GitHub Action](github-action.md).
+
+### How it works
+
+```mermaid
+flowchart LR
+    BIN["Binary metadata<br/>ELF / PE / Mach-O<br/>(symbols, SONAME, versions)"]
+    AST["Header AST<br/>castxml → Clang<br/>(signatures, layout, vtables)"]
+    DWARF["Debug-info cross-check<br/>DWARF / PDB<br/>(sizes, offsets, calling conv.)"]
+    V["Reconciled verdict"]
+    BIN --> V
+    AST --> V
+    DWARF --> V
+```
+
+See [Architecture](../concepts/architecture.md) for the full per-layer breakdown.
+
+### Requirements
+
+| Requirement | Mandatory? | Notes |
+|-------------|-----------|-------|
+| Two inputs (`.so`/`.dll`/`.dylib`, JSON snapshot, package, or directory) | ✅ | Core input; mix freely |
+| `castxml` + a compiler | ⚠️ for header AST | Needed only when you pass `-H`/`--*-header`. GCC, Clang, or MSVC — castxml emulates whichever you point it at |
+| Debug info (`-g`) | ❌ optional | DWARF/PDB enrich layout, calling-convention, and packing checks |
+| Headers | strongly recommended | Without them abicheck runs **symbols-only mode** and warns; type/signature breaks may be missed |
+
+### What it catches
+
+abicheck is a superset of the external modes for most categories — see the
+[quick-reference table](#tool-comparison-quick-reference) below and the
+[183-kind Change Kind Reference](../reference/change-kinds.md). Highlights the
+single external tools miss:
+
+- ✅ `noexcept`, `const`/`static` qualifier, and access-level changes (header AST)
+- ✅ Calling-convention, `#pragma pack`, and alignment drift (DWARF/PDB)
+- ✅ ELF/PE/Mach-O symbol-table changes (visibility, binding, versioning)
+- ✅ Trivially-copyable → non-trivial calling-convention flips (DWARF traits)
+- ✅ Cross-platform: ELF, PE/COFF, and Mach-O from one tool
+
+### Usage
+
+```bash
+# Header-aware (recommended; needs castxml)
+abicheck compare libv1.so libv2.so --old-header v1.h --new-header v2.h
+
+# Binary-only fallback (no castxml required)
+abicheck compare libv1.so libv2.so
+```
+
+Full flag reference: [CLI Usage](cli-usage.md).
 
 ---
 
 ## Decision Flowchart
 
-```
-[Project policy] PUBLIC HEADERS are mandatory for analysis
-│
-├─ headers missing → fail fast / fetch devel/include package first
-│
-└─ headers available
-    │
-    Was the .so compiled with -g (debug symbols)?
-    │
-    ├─ NO (production/stripped .so)
-    │
-    │   Use abidiff+headers + ABICC+headers (ABICC Usage #2) (combined verdict)
-    │   Any break from either → flag as ABI-breaking
-    │
-    └─ YES (CI/staging debug build)
+This flowchart applies when you replicate the analysis with the **external
+reference tools**. With abicheck native, you simply pass headers (and `-g`
+binaries when available) and abicheck picks the strongest layers automatically.
 
-        Use abidiff+headers + ABICC+dump (ABICC Usage #1) (combined verdict)
-        Most accurate: DWARF ground truth for types
-        (no compiler needed — abi-dumper reads binary directly)
+```mermaid
+flowchart TD
+    P["Project policy:<br/>public headers mandatory"]
+    H{"Headers available?"}
+    FAIL["Fail fast — fetch the<br/>devel/include package first"]
+    G{"Was the .so compiled<br/>with -g (debug symbols)?"}
+    PROD["Production / stripped .so<br/><br/>abidiff+headers + ABICC+headers (Usage #2)<br/>Any break from either → ABI-breaking"]
+    DBG["CI / staging debug build<br/><br/>abidiff+headers + ABICC+dump (Usage #1)<br/>Most accurate: DWARF ground truth<br/>(no compiler needed)"]
+
+    P --> H
+    H -- no --> FAIL
+    H -- yes --> G
+    G -- no --> PROD
+    G -- yes --> DBG
 ```
 
 > **Production default:** abidiff+headers + ABICC+headers (ABICC Usage #2).
@@ -239,16 +306,20 @@ abi-compliance-checker -lib libfoo -old ABI-1.dump -new ABI-2.dump
 
 ---
 
-## Our Pipeline (Production Default)
+## Reference parity combination
 
-`abicheck` runs **abidiff+headers + ABICC+headers (ABICC Usage #2)** by default:
+abicheck's **native** mode (above) is the production default and needs no
+external tools. When you instead want to replicate the analysis with the
+external reference tools — for parity benchmarking or in an ABICC-only
+environment — the recommended combination is **abidiff+headers + ABICC+headers
+(ABICC Usage #2)**, taking the worst-of verdict:
 
-```
-abidiff+headers  ──────────────────────────────────────────► ELF-level report
-ABICC+headers (ABICC Usage #2) (GCC compiles headers) ────────────────────► AST-level report
-                                                              │
-                                           combined verdict ◄─┘
-                                  (worst-of: any break = breaking)
+```mermaid
+flowchart LR
+    A["abidiff + headers"] --> R1["ELF-level report"]
+    B["ABICC + headers (Usage #2)<br/>GCC compiles headers"] --> R2["AST-level report"]
+    R1 --> V["Combined verdict<br/>(worst-of: any break = breaking)"]
+    R2 --> V
 ```
 
 **Why not Usage #1 by default:**
@@ -266,19 +337,21 @@ ABICC+headers (ABICC Usage #2) (GCC compiles headers) ────────�
 
 ## Tool Comparison Quick Reference
 
-| ABI break type | abidiff+headers | ABICC+headers (ABICC Usage #2) | ABICC+dump (ABICC Usage #1) |
-|---|:---:|:---:|:---:|
-| Symbol removed | ✅ | ✅ | ✅ |
-| Symbol added | ✅ | ✅ | ✅ |
-| Param type change | ✅ | ✅ | ✅ |
-| Struct layout change | ⚠️ DWARF | ✅ | ✅ |
-| vtable change | ⚠️ DWARF | ✅ | ✅ |
-| `noexcept` removed | ❌ | ✅ | ❌ |
-| `inline` → non-inline | ❌ | ✅ | ❌ |
-| Template ABI | ⚠️ DWARF | ✅ | ✅ |
-| Dependency leak | ⚠️ DWARF | ✅ | ✅ |
-| Anonymous types | ❌ | ❌ | ✅ |
-| Macro-resolved types | ❌ | ❌ | ✅ |
-| ELF-only visibility | ✅ | ❌ | ❌ |
-| Needs compiler (GCC) | ❌ | ✅ GCC | ❌ |
-| Needs debug build | ❌ | ❌ | ✅ |
+| ABI break type | abicheck (native) | abidiff+headers | ABICC+headers (ABICC Usage #2) | ABICC+dump (ABICC Usage #1) |
+|---|:---:|:---:|:---:|:---:|
+| Symbol removed | ✅ | ✅ | ✅ | ✅ |
+| Symbol added | ✅ | ✅ | ✅ | ✅ |
+| Param type change | ✅ | ✅ | ✅ | ✅ |
+| Struct layout change | ✅ | ⚠️ DWARF | ✅ | ✅ |
+| vtable change | ✅ | ⚠️ DWARF | ✅ | ✅ |
+| `noexcept` removed | ✅ | ❌ | ✅ | ❌ |
+| `inline` → non-inline | ✅ | ❌ | ✅ | ❌ |
+| Template ABI | ✅ | ⚠️ DWARF | ✅ | ✅ |
+| Dependency leak | ⚠️ DWARF | ⚠️ DWARF | ✅ | ✅ |
+| Anonymous types | ⚠️ DWARF | ❌ | ❌ | ✅ |
+| Macro-resolved types | ⚠️ DWARF | ❌ | ❌ | ✅ |
+| ELF/PE/Mach-O visibility | ✅ | ✅ | ❌ | ❌ |
+| Calling-convention drift | ✅ | ❌ | ❌ | ⚠️ DWARF |
+| Cross-platform (PE, Mach-O) | ✅ | ❌ | ❌ | ❌ |
+| Needs compiler | ⚠️ headers only | ❌ | ✅ GCC | ❌ |
+| Needs debug build | ❌ | ❌ | ❌ | ✅ |

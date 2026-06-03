@@ -1,4 +1,41 @@
-# ABI Stability Guide
+# ABI/API Handling & Recommendations
+
+This is the single conceptual hub for understanding ABI/API change handling in
+abicheck. It combines what used to be three separate pages — the stability
+guide, the "ABI breaks explained" taxonomy, and the breaking-cases catalog —
+into one narrative: *why* breaks happen, *which families* exist, and *how to
+design for stability*. For per-case reproductions with code, runtime demos, and
+fixes, see the generated **[Examples & Case Encyclopedia](../examples/index.md)**.
+
+## Break families at a glance
+
+Every detected change maps to one of these families. The verdict column shows
+the typical classification; the exact verdict per fixture lives in
+`examples/ground_truth.json` and the [Examples Encyclopedia](../examples/index.md).
+
+| Family | Representative cases | Typical verdict |
+|--------|---------------------|-----------------|
+| Symbol/function removal & rename | 01, 12, 58, 66 | 🔴 BREAKING |
+| Signature changes (params, return, pointer level) | 02, 10, 33, 46 | 🔴 BREAKING |
+| Struct/class layout, alignment & packing | 07, 14, 40, 42, 43, 56, 117 | 🔴 BREAKING |
+| Enum value/underlying changes | 08, 19, 20, 57 | 🔴 BREAKING |
+| Union layout | 24, 26 (grows) · 26b (no growth) | 🔴 / 🟢 |
+| C++ vtable & virtual methods | 09, 23, 38, 68, 72 | 🔴 BREAKING |
+| C++ qualifiers, mangling & ABI tags | 21, 22, 30, 71, 86, 101, 113 | 🔴 / 🟠 |
+| Trivial → non-trivial (calling convention) | 64, 69 | 🔴 BREAKING |
+| Templates, inline & ODR | 16, 17, 47, 59, 79, 85, 87 | 🔴 / 🟢 |
+| Modern C/C++ contract shifts (char8_t, _BitInt, _Atomic, concepts) | 105, 114, 115, 116 | 🔴 / 🟢 |
+| Transitive/dependency & `detail::` leaks | 18, 48, 74–77, 80, 97, 104, 112 | 🔴 BREAKING |
+| ELF/linker metadata (SONAME, visibility, versioning, RPATH, TLS) | 05, 06, 13, 49, 51, 52, 65, 67 | 🔴 / 🟢 |
+| Source-only / API-level (rename, access, explicit) | 31, 34, 96, 106 | 🟠 API_BREAK |
+| Deployment risk (noexcept, ISA dispatch, version-require) | 15, 83 | 🟡 COMPATIBLE_WITH_RISK |
+| Compatible additions & quality signals | 03, 25, 26b, 27, 29, 61, 62, 99 | 🟢 COMPATIBLE |
+| Scoped/non-public internal changes | 118, 119, 120 | ✅ NO_CHANGE |
+
+The rest of this page explains the *mechanisms* behind these families and the
+design patterns that prevent each one. For a 2-minute scannable card, see the
+[ABI Cheat Sheet](abi-cheat-sheet.md); for verdict semantics and exit codes, see
+[Verdicts](verdicts.md).
 
 ## Introduction
 
@@ -6,7 +43,7 @@ An **API** (Application Programming Interface) is a *source-level* contract: the
 
 The cost of an ABI break compounds with the size of the ecosystem depending on the library. When `libfoo.so.1` breaks ABI without bumping its SONAME, a Linux distribution must rebuild — and re-test, re-sign, and re-ship — every reverse-dependency in the archive; Debian and Fedora each track hundreds of such transitions per release. In embedded and firmware contexts, an ABI break shipped in an OTA update can brick devices in the field when a pre-linked application loads a new system library whose struct offsets have shifted. Plugin ecosystems — audio hosts loading VST modules, game engines loading mods, browsers loading NPAPI/PPAPI components, IDEs loading extensions — fracture entirely when the host's ABI changes: third-party binaries that shipped years earlier fault on first call, and the plugin author may no longer exist to rebuild them.
 
-abicheck classifies every comparison into one of five verdicts — `NO_CHANGE`, `COMPATIBLE`, `COMPATIBLE_WITH_RISK`, `API_BREAK`, and `BREAKING` — mapped to CI exit codes so that release gates can distinguish a harmless symbol addition from a silent memory-corruption hazard. The five tiers and their exit-code semantics are documented in detail in [./verdicts.md](./verdicts.md). This guide catalogs the concrete mechanisms by which ABI breaks occur; for a condensed checklist consult [./abi-cheat-sheet.md](./abi-cheat-sheet.md), and for a taxonomy of detected breaks see [./abi-breaks-explained.md](./abi-breaks-explained.md).
+abicheck classifies every comparison into one of five verdicts — `NO_CHANGE`, `COMPATIBLE`, `COMPATIBLE_WITH_RISK`, `API_BREAK`, and `BREAKING` — mapped to CI exit codes so that release gates can distinguish a harmless symbol addition from a silent memory-corruption hazard. The five tiers and their exit-code semantics are documented in detail in [Verdicts](verdicts.md). This guide catalogs the concrete mechanisms by which ABI breaks occur; for a condensed checklist consult the [ABI Cheat Sheet](abi-cheat-sheet.md), and for per-case reproductions see the [Examples & Case Encyclopedia](../examples/index.md).
 
 ## Part 1: Symbol Contract Breaks
 
@@ -399,3 +436,39 @@ is private to the library.
 >   can't guarantee a struct's layout for the lifetime of a SONAME, don't
 >   expose the definition — expose a forward-declared tag and a
 >   constructor/destructor pair.
+
+## Global recommendations
+
+Five rules subsume every mechanism above:
+
+1. **Treat public headers as ABI contracts.** Anything reachable from a public
+   header — type layout, enum values, vtable shape, exported globals — is part
+   of the binary contract whether or not you intended it to be.
+2. **Govern release identity.** Use SONAME + symbol versioning + a
+   `-fvisibility=hidden` export policy on every release; bump the SONAME major
+   on any binary-incompatible change. abicheck surfaces these as
+   `soname_bump_recommended`, `symbol_version_node_removed`,
+   `symbol_moved_version_node`, and `version_script_missing`.
+3. **Prefer opaque handles and Pimpl** over exposing mutable layouts, so the
+   library — not the consumer — owns size, offsets, and the kind-tag of a type.
+4. **Evolve additively, never in place.** Append new symbols, enum members, and
+   struct fields (where no embedded `sizeof` assumption exists); ship breaking
+   changes under a new inline-namespace or a new symbol rather than mutating an
+   existing one.
+5. **Gate every PR with abicheck in CI.** Dump the last released artifact and
+   compare the candidate; block anything above `COMPATIBLE_WITH_RISK` that is
+   not paired with a deliberate SONAME bump. See the
+   [GitHub Action](../user-guide/github-action.md) for a ready-to-paste workflow.
+
+## Detection coverage and roadmap
+
+abicheck detects **183 change kinds** today (see the
+[Change Kind Reference](../reference/change-kinds.md)), spanning every family in
+the table above — including the calling-convention, alignment/packing,
+bit-field, dual-ABI (`_GLIBCXX_USE_CXX11_ABI`), ABI-tag, `char8_t`, `_BitInt`,
+`_Atomic`, and CPU-dispatch cases that were once on the wishlist. Areas still
+deepening: richer cross-compiler ABI-drift modelling (GCC vs Clang vs MSVC for
+the same headers) and LTO/visibility interactions where an inlined symbol
+disappears. The authoritative, always-current taxonomy is the generated
+[Change Kind Reference](../reference/change-kinds.md) and
+[Examples Encyclopedia](../examples/index.md).

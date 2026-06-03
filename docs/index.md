@@ -4,6 +4,19 @@
 
 It supports ELF (Linux), PE/COFF (Windows), and Mach-O (macOS) binaries, and it's a drop-in replacement for `abi-compliance-checker`.
 
+> **Gate ABI in CI in 5 lines.** Drop the first-class
+> [GitHub Action](user-guide/github-action.md) into any workflow — it installs
+> everything, runs the comparison, sets the exit code, and can upload SARIF to
+> the Security tab:
+>
+> ```yaml
+> - uses: napetrov/abicheck@v1
+>   with:
+>     old-library: abi-baseline.json
+>     new-library: build/libfoo.so
+>     new-header: include/foo.h
+> ```
+
 ## Why abicheck
 
 - **Three-layer analysis** — ELF/PE/Mach-O symbol tables + Clang AST (via castxml) + DWARF/PDB cross-check. Each layer catches things the others miss.
@@ -26,7 +39,7 @@ It supports ELF (Linux), PE/COFF (Windows), and Mach-O (macOS) binaries, and it'
 
 - [Tool Comparison & Benchmarks](reference/tool-comparison.md) — abicheck vs `abidiff` vs ABICC on a pinned 74-case benchmark subset.
 - [Examples & Case Encyclopedia](examples/index.md) — generated pages for the single-library cases; bundle cases live under `examples/`.
-- [ABI Breaks Explained](concepts/abi-breaks-explained.md) — real-world scenarios with code.
+- [ABI/API Handling & Recommendations](concepts/abi-api-handling.md) — real-world scenarios with code, plus design patterns that prevent each break.
 - [Limitations](concepts/limitations.md) — what abicheck does *not* catch.
 
 **Integrating into a release pipeline?**

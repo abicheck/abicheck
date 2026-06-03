@@ -21,8 +21,8 @@ map across all three.
 ## Headline
 
 abicheck is **exceptionally deep on the change-taxonomy axis and comparatively
-thin on the breadth axes.** The "what changed" dimension — **145 `ChangeKind`s**
-in a 5-tier policy model, **120 calibrated example cases**, ABICC + libabigail
+thin on the breadth axes.** The "what changed" dimension — **183 `ChangeKind`s**
+in a 5-tier policy model, **121 calibrated example cases**, ABICC + libabigail
 parity — is essentially complete and has diminishing returns.
 
 The remaining gaps are **not in detecting more change types**. They are in
@@ -65,7 +65,7 @@ A real invocation is a point in this space:
 
 | Use case | Status | Notes |
 |---|---|---|
-| Change taxonomy | `complete` | 145 kinds; 120 cases; parity tests |
+| Change taxonomy | `complete` | 183 kinds; 121 cases; parity tests |
 | **Release recommendation (semver + SONAME)** | `complete` | **added in this change** |
 | C / C++ archetypes | `complete` | 35 C + 52 C++ example pairs |
 | Linux ELF platform | `complete` | the CI-validated baseline |

@@ -18,39 +18,36 @@ to achieve higher accuracy than tools that rely on a single data source.
 
 ## Analysis pipeline
 
-```text
-                    ┌─────────────────────────────────────────────┐
-                    │                abicheck CLI                  │
-                    │      dump · compare · compat check/dump     │
-                    └──────────┬──────────────┬───────────────────┘
-                               │              │
-                    ┌──────────▼──────────┐   │
-                    │   Format detection  │   │
-                    │  (ELF / PE / Mach-O)│   │
-                    └──┬──────┬───────┬───┘   │
-                       │      │       │       │
-              ┌────────▼┐ ┌───▼────┐ ┌▼───────▼──┐
-              │   ELF   │ │   PE   │ │  Mach-O   │
-              │ pyelftools│ │ pefile │ │ macholib  │
-              └────┬────┘ └───┬────┘ └─────┬─────┘
-                   │          │            │
-              ┌────▼──────────▼────────────▼─────┐
-              │        Snapshot (JSON model)       │
-              └────────────────┬──────────────────┘
-                               │
-              ┌────────────────▼──────────────────┐
-              │  Header AST (castxml) — all platforms│
-              └────────────────┬──────────────────┘
-                               │
-              ┌────────────────▼──────────────────┐
-              │ Debug info cross-check             │
-              │  DWARF (Linux, macOS) │ PDB (Win)  │
-              └────────────────┬──────────────────┘
-                               │
-              ┌────────────────▼──────────────────┐
-              │    Checker → Changes → Verdict     │
-              └───────────────────────────────────┘
+The CLI dumps each input into a normalized snapshot, enriches it with header
+AST and debug-info layers, then diffs the two snapshots to produce a verdict:
+
+```mermaid
+flowchart TD
+    CLI["abicheck CLI<br/>(dump · compare · compat check/dump)"]
+    FMT{"Format detection<br/>(ELF / PE / Mach-O)"}
+    ELF["ELF<br/>pyelftools"]
+    PE["PE/COFF<br/>pefile"]
+    MACHO["Mach-O<br/>macholib"]
+    SNAP["Layer 1 — Binary metadata<br/>Snapshot (JSON model)"]
+    AST["Layer 2 — Header AST<br/>castxml (all platforms)"]
+    DBG["Layer 3 — Debug-info cross-check<br/>DWARF (Linux, macOS) · PDB (Windows)"]
+    CHK["Checker → Changes → Verdict"]
+
+    CLI --> FMT
+    FMT --> ELF
+    FMT --> PE
+    FMT --> MACHO
+    ELF --> SNAP
+    PE --> SNAP
+    MACHO --> SNAP
+    SNAP --> AST
+    AST --> DBG
+    DBG --> CHK
 ```
+
+The three analysis layers are independent and additive — each catches changes
+the others miss, and the checker reconciles them into a single verdict. The
+layers are described in detail below.
 
 ### Layer 1: Binary metadata
 

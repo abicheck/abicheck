@@ -6,22 +6,8 @@ On all platforms it provides binary metadata analysis (exports, imports, depende
 
 > **Platforms:** Linux, Windows, macOS.
 
----
-
-## Which command do I need?
-
-abicheck ships several commands. Pick the one that matches your question:
-
-| Your question | Command | See |
-|---------------|---------|-----|
-| Does upgrading this library break existing consumers? | `abicheck compare` | [§2 below](#2-first-check-using-repo-examples) |
-| Does **my application** still work with the new library version? | `abicheck appcompat` | [§5 below](#5-application-compatibility-check) |
-| Will this binary load and run correctly in this sysroot? | `abicheck stack-check` | [CLI Usage](user-guide/cli-usage.md) |
-| Does my library dependency tree resolve without unresolved symbols? | `abicheck deps` | [CLI Usage](user-guide/cli-usage.md) |
-| I'm migrating from `abi-compliance-checker` and want the same flags. | `abicheck compat` | [Migrating from ABICC](user-guide/from-abicc.md) |
-| Save a reusable ABI baseline for CI. | `abicheck dump` | [§4 below](#4-snapshot-workflow-for-ci-baselines) |
-
-If you're unsure, start with `abicheck compare` — it's the default workflow.
+> **In CI already?** Skip straight to the [GitHub Action](user-guide/github-action.md)
+> — it installs everything and runs the check in a few lines of YAML.
 
 ---
 
@@ -87,7 +73,24 @@ pip install -e .
 
 ---
 
-## 2) First check (using repo examples)
+## 2) Which command do I need?
+
+abicheck ships several commands. Pick the one that matches your question:
+
+| Your question | Command | See |
+|---------------|---------|-----|
+| Does upgrading this library break existing consumers? | `abicheck compare` | [§3 below](#3-first-check-using-repo-examples) |
+| Does **my application** still work with the new library version? | `abicheck appcompat` | [§6 below](#6-application-compatibility-check) |
+| Will this binary load and run correctly in this sysroot? | `abicheck stack-check` | [CLI Usage](user-guide/cli-usage.md) |
+| Does my library dependency tree resolve without unresolved symbols? | `abicheck deps` | [CLI Usage](user-guide/cli-usage.md) |
+| I'm migrating from `abi-compliance-checker` and want the same flags. | `abicheck compat` | [Migrating from ABICC](user-guide/from-abicc.md) |
+| Save a reusable ABI baseline for CI. | `abicheck dump` | [§5 below](#5-snapshot-workflow-for-ci-baselines) |
+
+If you're unsure, start with `abicheck compare` — it's the default workflow.
+
+---
+
+## 3) First check (using repo examples)
 
 The repo includes 121 ABI scenario examples. Most are single-library cases with
 paired `v1`/`v2` sources and headers; bundle/release-level cases use
@@ -144,7 +147,7 @@ and prints a warning (weaker analysis: may miss type/signature ABI breaks).
 
 ---
 
-## 3) Output formats
+## 4) Output formats
 
 abicheck supports four output formats: `markdown` (default), `json`, `sarif`, `html`.
 
@@ -174,7 +177,7 @@ abicheck compare libfoo.so.1 libfoo.so.2 -H foo.h --format html -o report.html
 
 ---
 
-## 4) Snapshot workflow (for CI baselines)
+## 5) Snapshot workflow (for CI baselines)
 
 Save a snapshot once per release, then compare against new builds without re-dumping:
 
@@ -225,7 +228,7 @@ abicheck compare old.json new.json -v
 
 ---
 
-## 5) Application compatibility check
+## 6) Application compatibility check
 
 Check whether your **application** is affected by a library update — filtering out irrelevant changes:
 
@@ -245,7 +248,7 @@ See [Application Compatibility](user-guide/appcompat.md) for the full reference.
 
 ---
 
-## 6) Exit codes and CI
+## 7) Exit codes and CI
 
 | Exit code | Verdict | Meaning |
 |-----------|---------|---------|
@@ -256,9 +259,29 @@ See [Application Compatibility](user-guide/appcompat.md) for the full reference.
 
 Full reference (including `compat` mode): [Exit Codes](reference/exit-codes.md)
 
-### GitHub Actions example
+### GitHub Actions — the easy way
 
-Save a baseline once at release time, then compare every new build:
+The fastest way to gate ABI in CI is the **first-class
+[GitHub Action](user-guide/github-action.md)**. It installs Python, `castxml`,
+and abicheck for you, runs the comparison, sets the step exit code, and can
+upload SARIF — all in a few lines of YAML:
+
+```yaml
+- uses: napetrov/abicheck@v1
+  with:
+    old-library: abi-baseline.json   # committed or downloaded baseline
+    new-library: build/libfoo.so
+    new-header: include/foo.h
+    upload-sarif: true
+```
+
+See the [GitHub Action reference](user-guide/github-action.md) for every input,
+baseline workflows, package/`compare-release` mode, and multi-platform matrices.
+
+### GitHub Actions — raw CLI
+
+If you prefer to drive the CLI directly, save a baseline once at release time,
+then compare every new build:
 
 ```bash
 # Release step — save baseline as an artifact
@@ -293,6 +316,6 @@ steps:
 
 - [Verdicts](concepts/verdicts.md) — what each verdict means
 - [Policy Profiles](user-guide/policies.md) — control how changes are classified
-- [Examples & Breakage Guide](concepts/abi-breaks-explained.md) — real-world ABI/API break scenarios
+- [ABI/API Handling & Recommendations](concepts/abi-api-handling.md) — real-world ABI/API break scenarios and how to prevent them
 - [ABICC Compatibility](user-guide/from-abicc.md) — migrating from abi-compliance-checker
 - [Limitations](concepts/limitations.md)

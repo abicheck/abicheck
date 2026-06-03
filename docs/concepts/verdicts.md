@@ -1,6 +1,25 @@
 # Verdicts
 
-Every `abicheck compare` run produces one of five verdicts.
+Every `abicheck compare` run produces one of five core verdicts, ordered from
+safest to most severe: `NO_CHANGE`, `COMPATIBLE`, `COMPATIBLE_WITH_RISK`,
+`API_BREAK`, `BREAKING`. The verdict is the *worst* classification across all
+detected changes under the active [policy](../user-guide/policies.md).
+
+Each change kind is partitioned into exactly one classification set in
+`checker_policy.py` — `BREAKING_KINDS`, `API_BREAK_KINDS`, `RISK_KINDS`, or
+`COMPATIBLE_KINDS` — and `COMPATIBLE_KINDS` is further split into **additions**
+(`ADDITION_KINDS`, new public surface) and **quality** signals
+(`QUALITY_KINDS`, hygiene/metadata). The [Examples Encyclopedia](../examples/index.md)
+groups every fixture by both verdict and category.
+
+> **Beyond the five core verdicts.** `compare` in severity-aware mode (any
+> `--severity-*` flag) can also report **`SEVERITY_ERROR`** with exit code `1`
+> when an addition/quality finding is promoted to error level — for example to
+> block accidental public-API expansion. The `compare-release` package mode adds
+> **`REMOVED_LIBRARY`** (exit `8`) when a shared object present in the old
+> package is absent from the new one. See the
+> [GitHub Action](../user-guide/github-action.md#outputs) and
+> [Exit Codes](../reference/exit-codes.md) for the full matrix.
 
 ---
 
@@ -14,25 +33,35 @@ The two snapshots are **identical** — no differences found.
 ---
 
 ### `COMPATIBLE`
-Changes found, but **backwards-compatible** — existing compiled consumers can upgrade without recompiling.
+Changes found, but **backwards-compatible** — existing compiled consumers can upgrade without recompiling. abicheck splits this tier into two reportable categories:
 
-Examples:
-- New exported symbol added
-- `noexcept` specifier added/removed (mangled name unchanged; binary-compatible)
-- `GLOBAL` → `WEAK` symbol binding (ELF/Linux only — weak symbols have different semantics on Mach-O/macOS; abicheck targets Linux ELF)
-- Enum member added at end of enum
+**Additions** (`ADDITION_KINDS`) — new public surface:
+- New exported symbol or global variable added
+- Enum member appended at the end of an enum (no value shift)
+- Union field added without growing the union's size
+- Inline function outlined into the `.so` (new export, old inlined copies still work)
+- `experimental::` graduated to stable while keeping the old alias
 
-**CI action:** warn; do not fail. Use `-s` to promote to BREAKING if your policy requires.
+**Quality** (`QUALITY_KINDS`) — hygiene/metadata signals, not ABI breaks:
+- `GLOBAL` → `WEAK` symbol binding (ELF/Linux; relaxes interposition only)
+- GNU IFUNC introduced/removed
+- SONAME/visibility/versioning hygiene findings (missing SONAME, RPATH leak, executable stack)
+
+> **Note:** `noexcept` removal is **not** `COMPATIBLE` — it is `COMPATIBLE_WITH_RISK` (see below), because callers compiled assuming `noexcept` omit exception landing pads.
+
+**CI action:** warn; do not fail. Use a severity flag (e.g. `--severity-addition error`) to promote additions/quality to an error-level `SEVERITY_ERROR` if your policy requires it.
 
 ---
 
 ### `COMPATIBLE_WITH_RISK`
 A change that **does not break** existing compiled consumers (they are already linked and continue to work), but introduces a **deployment risk** that must be verified manually.
 
-The library upgrade may fail on some target environments — for example, if the new library requires a newer glibc version that is absent on the deployment target.
+The library upgrade may fail on some target environments — for example, if the new library requires a newer glibc version that is absent on the deployment target — or the change is binary-linkable but semantically unsafe for binaries built under the old contract.
 
-Examples:
+Examples (`RISK_KINDS`):
 - New symbol version requirement added to `DT_VERNEED` (e.g. `GLIBC_2.17`) — existing binaries are safe, but the new `.so` won't load on systems with older glibc
+- `noexcept` removed ([case15](../examples/case15_noexcept_change.md)) — links fine, but callers built assuming `noexcept` omit landing pads, so a real throw calls `std::terminate`
+- A CPU-dispatch ISA family dropped ([case83](../examples/case83_cpu_dispatch_isa_dropped.md)) — loads fine, but the optimized path a consumer expected is gone
 
 **CI action:** warn; inspect the specific change kind and verify target environment requirements. Do not fail automatically unless your policy mandates it.
 

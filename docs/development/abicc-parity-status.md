@@ -1,6 +1,6 @@
 # ABI Checker Gap Analysis — abicheck vs ABICC vs libabigail
 
-> Generated: 2026-03-09 (ChangeKind counts reflect v0.1.0; current total is 114)
+> Generated: 2026-03-09 (ChangeKind counts in this doc are a historical snapshot; the current total is **183** — see the [Change Kind Reference](../reference/change-kinds.md) for the authoritative list)
 > abicheck version: HEAD of `napetrov/abicheck`  
 > Compared against: ABICC (lvc/abi-compliance-checker) + libabigail (abidiff/abidw)
 
