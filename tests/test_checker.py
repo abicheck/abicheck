@@ -289,7 +289,7 @@ class TestVerdictPriority:
 
 
 
-def test_func_removed_elf_only_is_compatible_not_breaking() -> None:
+def test_func_removed_elf_only_is_breaking() -> None:
     old = AbiSnapshot(
         library="libfoo.so", version="1.0",
         functions=[Function(name="internal", mangled="internal", return_type="void", visibility=Visibility.ELF_ONLY)],
@@ -299,7 +299,7 @@ def test_func_removed_elf_only_is_compatible_not_breaking() -> None:
     result = compare(old, new)
     kinds = {c.kind for c in result.changes}
     assert ChangeKind.FUNC_REMOVED_ELF_ONLY in kinds
-    assert result.verdict == Verdict.COMPATIBLE
+    assert result.verdict == Verdict.BREAKING
 
 
 # ── WS-4a: ELF visibility tracking ─────────────────────────────────────────

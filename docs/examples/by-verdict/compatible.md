@@ -3,7 +3,7 @@
 
 Backward-compatible changes (additions or quality-only).
 
-_21 case(s)._ [← back to all examples](../index.md)
+_20 case(s)._ [← back to all examples](../index.md)
 
 | Case | Title | Verdict | Category |
 |------|-------|---------|----------|
@@ -26,5 +26,4 @@ _21 case(s)._ [← back to all examples](../index.md)
 | [case54_used_reserved_field](../case54_used_reserved_field.md) | Used Reserved Field | 🟢 COMPATIBLE | Quality (Compatible) |
 | [case61_var_added](../case61_var_added.md) | Global Variable Added | 🟢 COMPATIBLE | Addition (Compatible) |
 | [case62_type_field_added_compatible](../case62_type_field_added_compatible.md) | Type Field Added (Compatible — Opaque Struct) | 🟢 COMPATIBLE | Addition (Compatible) |
-| [case97_api_depends_on_consumer_env](../case97_api_depends_on_consumer_env.md) | public API depends on consumer build environment (RISK) | 🟢 COMPATIBLE | Quality (Compatible) |
 | [case99_experimental_graduated](../case99_experimental_graduated.md) | experimental → stable graduation (compatible) | 🟢 COMPATIBLE | Addition (Compatible) |

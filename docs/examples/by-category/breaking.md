@@ -3,7 +3,7 @@
 
 Listed in `BREAKING_KINDS` — runtime ABI break.
 
-_83 case(s)._ [← back to all examples](../index.md)
+_84 case(s)._ [← back to all examples](../index.md)
 
 | Case | Title | Verdict | Category |
 |------|-------|---------|----------|
@@ -90,3 +90,4 @@ _83 case(s)._ [← back to all examples](../index.md)
 | [case89_inline_accessor_renamed_pimpl_member](../case89_inline_accessor_renamed_pimpl_member.md) | Inline accessor references renamed pimpl member | 🔴 BREAKING | Breaking |
 | [case94_empty_tag_gained_state](../case94_empty_tag_gained_state.md) | Empty Tag Gained State | 🔴 BREAKING | Breaking |
 | [case95_allocator_nested_typedef_removed](../case95_allocator_nested_typedef_removed.md) | Allocator Nested-Typedef Removed | 🔴 BREAKING | Breaking |
+| [case97_api_depends_on_consumer_env](../case97_api_depends_on_consumer_env.md) | public API depends on consumer build environment (RISK) | 🔴 BREAKING | Breaking |

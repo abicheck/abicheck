@@ -79,6 +79,12 @@ def main() -> None:
             return_type="int", visibility=Visibility.PUBLIC,
         ))
 
+        # The simulated future snapshot mutates headers/functions in memory, not
+        # a real rebuilt .so. Drop stale ELF metadata so the comparison uses the
+        # synthetic header surface consistently.
+        snap_v1.elf = None
+        snap_v2.elf = None
+
         snap2_path = tmp / "libz-1.4.json"
         save_snapshot(snap_v2, snap2_path)
         print(f"  Removed : {removed}")

@@ -53,9 +53,9 @@ is an ABI break for any consumer that depended on them, even if the symbols
 were only exported by accident.
 
 > **Note:** In ELF-only mode (without `-H`), both removals are classified as
-> `FUNC_REMOVED_ELF_ONLY` (COMPATIBLE) because the tool cannot distinguish
-> intentional public API from accidentally-leaked internals. Use `-H` to get
-> the accurate BREAKING verdict.
+> `FUNC_REMOVED_ELF_ONLY` (BREAKING). Header-scoped mode with `-H` can still
+> distinguish intentional public API from accidentally-leaked internals, but
+> strict binary-only mode treats removed exports as ABI breaks.
 
 ## Dual nature of this case
 

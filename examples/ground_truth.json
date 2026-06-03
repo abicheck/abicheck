@@ -784,7 +784,7 @@
       "api_break": true,
       "bad_practice": false,
       "description": "Global variable lib_debug_level removed from export table (VAR_REMOVED)",
-      "known_gap": "macOS: Tool returns COMPATIBLE \u2014 Mach-O export table does not distinguish functions from variables; lib_debug_level detected as func_removed_elf_only instead of var_removed",
+      "known_gap": "macOS: Mach-O export table does not distinguish functions from variables, so lib_debug_level can be detected as func_removed_elf_only instead of var_removed; both are breaking under strict binary policy.",
       "expected_kinds": [
         "var_removed"
       ]
@@ -1564,17 +1564,17 @@
       ]
     },
     "case97_api_depends_on_consumer_env": {
-      "expected": "COMPATIBLE",
-      "category": "quality",
+      "expected": "BREAKING",
+      "category": "breaking",
       "platforms": [
         "linux",
         "macos",
         "windows"
       ],
-      "abi_break": false,
+      "abi_break": true,
       "api_break": false,
       "bad_practice": false,
-      "known_gap": "The single-config build harness does not exercise the matrix-aware API_DEPENDS_ON_CONSUMER_ENV detector \u2014 that detector consumes a MatrixSnapshot (multiple per-configuration snapshots) which is only produced by the `abicheck probe` subcommand (not wired into the default `compare` CLI yet). In the current single-config build, castxml dumps v1.h and v2.h WITHOUT USE_FEATURE defined, so the declared-function set is identical between v1 and v2; the underlying lib v1 still exports `extended` because v1.cpp `#define USE_FEATURE 1` before include \u2014 that surfaces as FUNC_REMOVED_ELF_ONLY (a quality-level finding) when CI builds the case, so the per-binary verdict is COMPATIBLE. The case is preserved as documentation of the macro-conditioned shape; the real BREAKING-grade finding only appears via the matrix detector.",
+      "known_gap": "The single-config build harness does not exercise the matrix-aware API_DEPENDS_ON_CONSUMER_ENV detector \u2014 that detector consumes a MatrixSnapshot (multiple per-configuration snapshots) which is only produced by the `abicheck probe` subcommand (not wired into the default `compare` CLI yet). In the current single-config build, castxml dumps v1.h and v2.h WITHOUT USE_FEATURE defined, so the declared-function set is identical between v1 and v2; the underlying lib v1 still exports `extended` because v1.cpp `#define USE_FEATURE 1` before include \u2014 that surfaces as FUNC_REMOVED_ELF_ONLY in per-binary comparison. The case is preserved as documentation of the macro-conditioned shape; the matrix detector remains the richer explanation channel.",
       "description": "Header declares `lib::extended()` only when the consumer defines `USE_FEATURE`. The v1 build defines the macro and exports extended(); v2 builds without it. The matrix-aware API_DEPENDS_ON_CONSUMER_ENV finding is the channel that exposes this when both macro states are probed.",
       "expected_kinds": [
         "func_removed_elf_only"

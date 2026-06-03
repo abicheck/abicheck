@@ -193,7 +193,7 @@ class TestElfOnlyMode:
         )
         # In elf_only mode, removal produces FUNC_REMOVED_ELF_ONLY
         assert ChangeKind.FUNC_REMOVED_ELF_ONLY in _kinds(r)
-        assert r.verdict == Verdict.COMPATIBLE  # ELF_ONLY removal is not BREAKING
+        assert r.verdict == Verdict.BREAKING
 
     def test_elf_only_lower_confidence(self):
         """ELF-only mode should have lower confidence than header+ELF."""

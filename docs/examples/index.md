@@ -16,10 +16,10 @@ Use this catalog to:
 
 | Verdict | Count | What it means |
 |---------|-------|---------------|
-| 🔴 [BREAKING](by-verdict/breaking.md) | 83 | ABI breaks: existing consumers will fail at runtime. |
+| 🔴 [BREAKING](by-verdict/breaking.md) | 84 | ABI breaks: existing consumers will fail at runtime. |
 | 🟠 [API_BREAK](by-verdict/api-break.md) | 4 | Source-level / API-only breaks; recompilation fails or behavior shifts. |
 | 🟡 [COMPATIBLE_WITH_RISK](by-verdict/compatible-risk.md) | 2 | Backward-compatible at the symbol level but with behavioral risk. |
-| 🟢 [COMPATIBLE](by-verdict/compatible.md) | 21 | Backward-compatible changes (additions or quality-only). |
+| 🟢 [COMPATIBLE](by-verdict/compatible.md) | 20 | Backward-compatible changes (additions or quality-only). |
 | ✅ [NO_CHANGE](by-verdict/no-change.md) | 6 | Identical ABI/API — baseline control cases. |
 
 ## How to read a case page
@@ -39,11 +39,11 @@ Source files (`v1.*`, `v2.*`, `app.*`, `CMakeLists.txt`) are listed at the botto
 
 | Category | Cases | What it covers |
 |----------|-------|----------------|
-| [Breaking](by-category/breaking.md) | 83 | Listed in `BREAKING_KINDS` — runtime ABI break. |
+| [Breaking](by-category/breaking.md) | 84 | Listed in `BREAKING_KINDS` — runtime ABI break. |
 | [API Break](by-category/api_break.md) | 4 | Listed in `API_BREAK_KINDS` — source/API-level break. |
 | [Risk](by-category/risk.md) | 2 | Listed in `RISK_KINDS` — symbol-compatible but behaviorally risky. |
 | [Addition (Compatible)](by-category/addition.md) | 10 | Listed in `ADDITION_KINDS` — backward-compatible additions. |
-| [Quality (Compatible)](by-category/quality.md) | 11 | Listed in `QUALITY_KINDS` — metadata/quality issues, not ABI breaks. |
+| [Quality (Compatible)](by-category/quality.md) | 10 | Listed in `QUALITY_KINDS` — metadata/quality issues, not ABI breaks. |
 | [No Change](by-category/no_change.md) | 6 | Identical ABI/API — sanity-check baselines. |
 
 ## All cases
@@ -163,6 +163,6 @@ Source files (`v1.*`, `v2.*`, `app.*`, `CMakeLists.txt`) are listed at the botto
 | [case94_empty_tag_gained_state](case94_empty_tag_gained_state.md) | Empty Tag Gained State | 🔴 BREAKING | Breaking |
 | [case95_allocator_nested_typedef_removed](case95_allocator_nested_typedef_removed.md) | Allocator Nested-Typedef Removed | 🔴 BREAKING | Breaking |
 | [case96_hidden_friend_removed](case96_hidden_friend_removed.md) | Hidden Friend Operator Removed | 🟠 API_BREAK | API Break |
-| [case97_api_depends_on_consumer_env](case97_api_depends_on_consumer_env.md) | public API depends on consumer build environment (RISK) | 🟢 COMPATIBLE | Quality (Compatible) |
+| [case97_api_depends_on_consumer_env](case97_api_depends_on_consumer_env.md) | public API depends on consumer build environment (RISK) | 🔴 BREAKING | Breaking |
 | [case98_cxx_standard_floor_raised](case98_cxx_standard_floor_raised.md) | C++ standard floor raised (per-binary: NO_CHANGE) | ✅ NO_CHANGE | No Change |
 | [case99_experimental_graduated](case99_experimental_graduated.md) | experimental → stable graduation (compatible) | 🟢 COMPATIBLE | Addition (Compatible) |

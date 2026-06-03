@@ -49,7 +49,7 @@ from .change_registry import Verdict as Verdict
 class ChangeKind(str, Enum):
     # Function / variable changes
     FUNC_REMOVED = "func_removed"  # public symbol removed → BREAKING
-    FUNC_REMOVED_ELF_ONLY = "func_removed_elf_only"  # ELF-only symbol removed (visibility cleanup, not hard break)
+    FUNC_REMOVED_ELF_ONLY = "func_removed_elf_only"  # exported ELF-only function removed -> binary break
     FUNC_ADDED = "func_added"  # new public symbol → COMPATIBLE
     FUNC_RETURN_CHANGED = "func_return_changed"  # return type changed → BREAKING
     FUNC_PARAMS_CHANGED = "func_params_changed"  # parameter types changed → BREAKING

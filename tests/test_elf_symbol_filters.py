@@ -10,6 +10,13 @@ from __future__ import annotations
 import pytest
 
 from abicheck.dumper import _is_abi_relevant_symbol
+from abicheck.dwarf_snapshot import _DwarfSnapshotBuilder
+from abicheck.elf_metadata import ElfMetadata, ElfSymbol, SymbolType
+from abicheck.elf_symbol_filter import (
+    FUNCTION_SYMBOL_TYPES,
+    VARIABLE_SYMBOL_TYPES,
+    exported_symbol_names,
+)
 
 # ---------------------------------------------------------------------------
 # Bug 1: GCC / compiler-internal symbols — must be filtered
@@ -76,8 +83,12 @@ def test_private_double_underscore_symbols_are_filtered(name: str) -> None:
     # libc++ inline namespace __1
     "_ZNSt3__16threadC1Ev",
     "_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEE6assignEPKc",
-    # const std:: methods
+    # cv/ref-qualified std:: methods
     "_ZNKSt6vectorIiSaIiEE4sizeEv",
+    "_ZNVSt6atomicIiEaSERKi",
+    "_ZNRSt6atomicIiEaSERKi",
+    "_ZNKRSt6atomicIiEcviv",
+    "_ZNVRSt6atomicIiEaSERKi",
     # operator delete / new
     "_ZdlPv",
     "_ZdlPvSt11align_val_t",
@@ -116,6 +127,8 @@ def test_stdlib_transitive_symbols_are_filtered(name: str) -> None:
     "_ZN3Foo3barEv",
     "_ZN6MyLib4CoreC1Ev",
     "_ZNK6MyLib4Core4nameEv",
+    "_ZTIN3foo3BarE",   # typeinfo for foo::Bar
+    "_ZTSN3foo3BarE",   # typeinfo name for foo::Bar
     # Regular single-underscore prefixed symbols (not double)
     "_init",
     "_fini",
@@ -168,3 +181,85 @@ def test_double_underscore_boundary(name: str, expected: bool) -> None:
     assert _is_abi_relevant_symbol(name) is expected, (
         f"_is_abi_relevant_symbol({name!r}) expected {expected}"
     )
+
+
+def test_dwarf_export_index_uses_same_abi_relevance_filter(tmp_path) -> None:
+    """DWARF mode must not re-admit stdlib weak exports as public functions."""
+    meta = ElfMetadata(
+        symbols=[
+            ElfSymbol(name="_ZNSt10unique_ptrINSt6thread6_StateEEC1Ev"),
+            ElfSymbol(name="_ZNVSt6atomicIiEaSERKi"),
+            ElfSymbol(name="_ZN6MyLib4CoreC1Ev"),
+        ]
+    )
+    builder = _DwarfSnapshotBuilder(tmp_path / "libfoo.so", meta)
+
+    assert "_ZNSt10unique_ptrINSt6thread6_StateEEC1Ev" not in builder._exported_names
+    assert "_ZNVSt6atomicIiEaSERKi" not in builder._exported_names
+    assert "_ZN6MyLib4CoreC1Ev" in builder._exported_names
+    assert builder._is_exported("_ZNSt10unique_ptrINSt6thread6_StateEEC1Ev", "std::unique_ptr") is False
+    assert builder._is_exported("_ZNVSt6atomicIiEaSERKi", "std::atomic<int>::operator=") is False
+
+
+def test_dwarf_export_index_preserves_runtime_owned_stdlib_exports(tmp_path) -> None:
+    """libstdc++/libc++ own std:: symbols, so DWARF mode must not filter them."""
+    meta = ElfMetadata(
+        soname="libstdc++.so.6",
+        symbols=[
+            ElfSymbol(name="_ZNSt6vectorIiSaIiEE4sizeEv"),
+            ElfSymbol(name="_ZSt4cout"),
+        ],
+    )
+    builder = _DwarfSnapshotBuilder(tmp_path / "libstdc++.so.6", meta)
+
+    assert "_ZNSt6vectorIiSaIiEE4sizeEv" in builder._exported_names
+    assert "_ZSt4cout" in builder._exported_names
+
+
+# ---------------------------------------------------------------------------
+# Shared exported_symbol_names helper (used by diff_symbols / diff_types)
+# ---------------------------------------------------------------------------
+
+
+def test_exported_symbol_names_returns_empty_without_symbols() -> None:
+    """No ELF table (None or empty) yields an empty set so callers fall back."""
+    assert exported_symbol_names(None, FUNCTION_SYMBOL_TYPES) == set()
+    assert exported_symbol_names(ElfMetadata(symbols=[]), FUNCTION_SYMBOL_TYPES) == set()
+
+
+def test_exported_symbol_names_filters_by_symbol_type() -> None:
+    """Only the requested STT_* types are returned; empty names are skipped."""
+    meta = ElfMetadata(
+        symbols=[
+            ElfSymbol(name="do_work", sym_type=SymbolType.FUNC),
+            ElfSymbol(name="resolver", sym_type=SymbolType.IFUNC),
+            ElfSymbol(name="g_table", sym_type=SymbolType.OBJECT),
+            ElfSymbol(name="", sym_type=SymbolType.FUNC),
+        ]
+    )
+    assert exported_symbol_names(meta, FUNCTION_SYMBOL_TYPES) == {"do_work", "resolver"}
+    assert exported_symbol_names(meta, VARIABLE_SYMBOL_TYPES) == {"g_table"}
+
+
+def test_exported_symbol_names_notype_counts_for_both_surfaces() -> None:
+    """STT_NOTYPE is intentionally accepted as both a func and a variable export."""
+    meta = ElfMetadata(symbols=[ElfSymbol(name="stub", sym_type=SymbolType.NOTYPE)])
+    assert "stub" in exported_symbol_names(meta, FUNCTION_SYMBOL_TYPES)
+    assert "stub" in exported_symbol_names(meta, VARIABLE_SYMBOL_TYPES)
+
+
+def test_exported_symbol_names_abi_relevant_only_drops_transitive_runtime() -> None:
+    """abi_relevant_only excludes transitive stdlib exports but keeps own symbols."""
+    meta = ElfMetadata(
+        symbols=[
+            ElfSymbol(name="_ZN6MyLib4CoreC1Ev", sym_type=SymbolType.FUNC),
+            ElfSymbol(name="_ZNSt6vectorIiSaIiEE4sizeEv", sym_type=SymbolType.FUNC),
+        ]
+    )
+    assert exported_symbol_names(meta, FUNCTION_SYMBOL_TYPES) == {
+        "_ZN6MyLib4CoreC1Ev",
+        "_ZNSt6vectorIiSaIiEE4sizeEv",
+    }
+    assert exported_symbol_names(meta, FUNCTION_SYMBOL_TYPES, abi_relevant_only=True) == {
+        "_ZN6MyLib4CoreC1Ev",
+    }

@@ -339,13 +339,14 @@ def _elf_only_snap(symbols: list[str]) -> AbiSnapshot:
 
 
 def test_visibility_leak_detected() -> None:
-    """Internal-looking ELF_ONLY symbols in old lib → VISIBILITY_LEAK."""
+    """Internal-looking ELF_ONLY symbols in old lib → VISIBILITY_LEAK plus removal breaks."""
     old = _elf_only_snap(["public_api", "internal_helper", "another_impl"])
     new = _elf_only_snap(["public_api"])
     result = compare(old, new)
     kinds = {c.kind for c in result.changes}
     assert ChangeKind.VISIBILITY_LEAK in kinds
-    assert result.verdict == Verdict.COMPATIBLE
+    assert ChangeKind.FUNC_REMOVED_ELF_ONLY in kinds
+    assert result.verdict == Verdict.BREAKING
 
 
 def test_visibility_leak_not_fired_without_elf_only_mode() -> None:

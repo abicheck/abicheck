@@ -122,8 +122,8 @@ REGISTRY = ChangeKindRegistry([
     # ── Function / variable changes ────────────────────────────────────────
     _E("func_removed", _B,
        impact="Old binaries call a symbol that no longer exists; dynamic linker will refuse to load or crash at call site."),
-    _E("func_removed_elf_only", _C,
-       impact="Symbol removed from ELF but was not in public headers; low risk unless dlsym() callers depend on it."),
+    _E("func_removed_elf_only", _B,
+       impact="Exported function symbol removed from the binary; old binaries that link or dlsym() it can fail even without header evidence."),
     _E("func_added", _C, is_addition=True,
        impact="New function available; existing binaries are unaffected."),
     _E("func_return_changed", _B,

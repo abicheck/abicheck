@@ -3,7 +3,7 @@
 
 Listed in `QUALITY_KINDS` — metadata/quality issues, not ABI breaks.
 
-_11 case(s)._ [← back to all examples](../index.md)
+_10 case(s)._ [← back to all examples](../index.md)
 
 | Case | Title | Verdict | Category |
 |------|-------|---------|----------|
@@ -17,4 +17,3 @@ _11 case(s)._ [← back to all examples](../index.md)
 | [case51_protected_visibility](../case51_protected_visibility.md) | Protected Visibility (DEFAULT to PROTECTED) | 🟢 COMPATIBLE | Quality (Compatible) |
 | [case52_rpath_leak](../case52_rpath_leak.md) | RPATH Leak (Hardcoded Build Directory) | 🟢 COMPATIBLE | Quality (Compatible) |
 | [case54_used_reserved_field](../case54_used_reserved_field.md) | Used Reserved Field | 🟢 COMPATIBLE | Quality (Compatible) |
-| [case97_api_depends_on_consumer_env](../case97_api_depends_on_consumer_env.md) | public API depends on consumer build environment (RISK) | 🟢 COMPATIBLE | Quality (Compatible) |

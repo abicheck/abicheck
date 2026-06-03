@@ -30,6 +30,7 @@ from .checker_types import Change
 from .detector_registry import registry
 from .diff_helpers import bool_transition, diff_by_key
 from .elf_metadata import SymbolType
+from .elf_symbol_filter import FUNCTION_SYMBOL_TYPES, exported_symbol_names
 from .model import (
     AbiSnapshot,
     Function,
@@ -102,8 +103,29 @@ def _is_local_type_rtti(mangled: str) -> bool:
 
 
 def _public_functions(snap: AbiSnapshot) -> dict[str, Function]:
-    """Return public/ELF-only functions from *snap*."""
-    return {k: v for k, v in snap.function_map.items() if v.visibility in _PUBLIC_VIS}
+    """Return public/ELF-only functions from *snap*.
+
+    When ELF dynamic-symbol evidence is available, narrow the DWARF-derived
+    public set to names that are actually exported (or explicitly ``= delete``,
+    so an API becoming deleted stays observable). This keeps transitive
+    runtime/stdlib subprograms that slipped into the DWARF DIEs out of the diff.
+
+    The narrowing only happens when exports are present: a snapshot with no ELF
+    symbol table (``elf`` absent/empty) keeps the full DWARF set untouched.
+
+    Caveat: this trusts the ELF symbol table to be reasonably complete. A
+    *partially* captured table (e.g. only a stripped ``.symtab`` subset) could in
+    theory hide a genuine removal — but DWARF-primary snapshots carry the full
+    ``.dynsym``, so in practice the export set is authoritative here.
+    """
+    funcs = {k: v for k, v in snap.function_map.items() if v.visibility in _PUBLIC_VIS}
+    exported = exported_symbol_names(getattr(snap, "elf", None), FUNCTION_SYMBOL_TYPES)
+    if not exported:
+        return funcs
+    return {
+        k: v for k, v in funcs.items()
+        if k in exported or v.is_deleted
+    }
 
 
 def _public_variables(snap: AbiSnapshot) -> dict[str, Variable]:
@@ -595,8 +617,8 @@ def _diff_functions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     # data-model-dependent integer ABI-equivalence checks below.
     is_llp64 = "pe" in (getattr(old, "platform", None), getattr(new, "platform", None))
     changes: list[Change] = []
-    old_map = {k: v for k, v in old.function_map.items() if v.visibility in (Visibility.PUBLIC, Visibility.ELF_ONLY)}
-    new_map = {k: v for k, v in new.function_map.items() if v.visibility in (Visibility.PUBLIC, Visibility.ELF_ONLY)}
+    old_map = _public_functions(old)
+    new_map = _public_functions(new)
 
     # Build a lookup of ALL functions in new snapshot (including hidden).
     new_all = new.function_map
@@ -1712,4 +1734,3 @@ def _diff_fingerprint_renames(old: AbiSnapshot, new: AbiSnapshot) -> list[Change
         )
 
     return changes
-

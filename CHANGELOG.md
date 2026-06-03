@@ -129,6 +129,30 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Changed
 
+#### ELF-only function removals are now BREAKING
+- **Breaking (verdict change):** a removed *exported* function symbol with no
+  header/DWARF confirmation (`func_removed_elf_only`) is now classified
+  **BREAKING** instead of compatible. Removing a dynamic export breaks old
+  binaries that link or `dlsym()` it regardless of header evidence, matching
+  `abidiff`/ABICC. This can change a `compare`/`compat` run from compatible to
+  breaking (legacy `compare` exit `0`→`4`); the false-positive avalanche this
+  could otherwise cause is held back by the shared transitive-runtime symbol
+  filter below (those symbols no longer enter a non-runtime library's surface).
+
+### Fixed
+
+#### Transitive stdlib/runtime symbols no longer leak into the ABI surface
+- Centralized ELF ABI-relevance filtering into `abicheck/elf_symbol_filter.py`
+  and shared it across the symbols-only dumper, DWARF snapshot extraction, and
+  symbol/type diffing. Previously a weak transitive libstdc++/libc++ export
+  could be filtered from symbols-only reports yet re-enter as a `PUBLIC` DWARF
+  function, producing phantom `FUNC_REMOVED` and type-reachability findings
+  (observed on oneTBB `libtbbmalloc` 2021.5→2021.9, where `abidiff` was clean).
+- DWARF export indexing and `DW_AT_deleted` subprograms now consult the same
+  filter; libstdc++/libc++ themselves are exempt (they *own* `std::`).
+- Project-owned RTTI (`_ZTI*`/`_ZTS*` for the library's own types) is preserved;
+  only standard-library RTTI prefixes are dropped.
+
 #### Cross-mode config-key consistency (CLI surface review)
 - **Breaking (default change):** `compare-release` now restricts findings to the
   public-header ABI surface **by default** (`--scope-public-headers` on), matching
