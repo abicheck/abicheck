@@ -153,7 +153,7 @@ New inputs needed:
 
 Example:
 ```yaml
-- uses: napetrov/abicheck@v1
+- uses: napetrov/abicheck@v0.3.0
   with:
     old-library-dir: release-1.0/lib/
     new-library-dir: release-2.0/lib/

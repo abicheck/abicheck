@@ -129,7 +129,7 @@ jobs:
         run: mkdir build && cd build && cmake .. && make
 
       - name: Dump ABI baseline
-        uses: napetrov/abicheck@v1
+        uses: napetrov/abicheck@v0.3.0
         with:
           mode: dump
           new-library: build/libfoo.so
@@ -165,7 +165,7 @@ jobs:
         run: mkdir build && cd build && cmake .. && make
 
       - name: ABI check vs baseline
-        uses: napetrov/abicheck@v1
+        uses: napetrov/abicheck@v0.3.0
         with:
           old-library: abi-baseline.json
           new-library: build/libfoo.so

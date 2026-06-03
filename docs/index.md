@@ -10,7 +10,7 @@ It supports ELF (Linux), PE/COFF (Windows), and Mach-O (macOS) binaries, and it'
 > the Security tab:
 >
 > ```yaml
-> - uses: napetrov/abicheck@v1
+> - uses: napetrov/abicheck@v0.3.0
 >   with:
 >     old-library: abi-baseline.json
 >     new-library: build/libfoo.so

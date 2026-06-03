@@ -145,7 +145,7 @@ still exit non-zero for any detected changes, even those the policy downgrades.
 The GitHub Action supports severity configuration via inputs:
 
 ```yaml
-- uses: napetrov/abicheck@v1
+- uses: napetrov/abicheck@v0.3.0
   with:
     old-library: libfoo-v1.json
     new-library: libfoo-v2.json
@@ -156,7 +156,7 @@ The GitHub Action supports severity configuration via inputs:
 For arbitrary `--severity-*` overrides not exposed as inputs, use `extra-args`:
 
 ```yaml
-- uses: napetrov/abicheck@v1
+- uses: napetrov/abicheck@v0.3.0
   with:
     old-library: libfoo-v1.json
     new-library: libfoo-v2.json

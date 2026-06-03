@@ -149,7 +149,7 @@ and prints a warning (weaker analysis: may miss type/signature ABI breaks).
 
 ## 4) Output formats
 
-abicheck supports four output formats: `markdown` (default), `json`, `sarif`, `html`.
+abicheck supports five output formats: `markdown` (default), `json`, `sarif`, `html`, and `junit` (plus a compact `review` digest). See [Output Formats](user-guide/output-formats.md) for the full reference.
 
 Markdown (default, printed to stdout):
 
@@ -267,7 +267,7 @@ and abicheck for you, runs the comparison, sets the step exit code, and can
 upload SARIF — all in a few lines of YAML:
 
 ```yaml
-- uses: napetrov/abicheck@v1
+- uses: napetrov/abicheck@v0.3.0
   with:
     old-library: abi-baseline.json   # committed or downloaded baseline
     new-library: build/libfoo.so

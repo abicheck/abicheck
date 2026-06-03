@@ -81,7 +81,7 @@ jobs:
         run: make
 
       - name: Dump ABI baseline
-        uses: napetrov/abicheck@v1
+        uses: napetrov/abicheck@v0.3.0
         with:
           mode: dump
           new-library: build/libfoo.so
@@ -112,7 +112,7 @@ jobs:
         run: make
 
       - name: ABI compatibility check
-        uses: napetrov/abicheck@v1
+        uses: napetrov/abicheck@v0.3.0
         with:
           abi-baseline: latest-release
           new-library: build/libfoo.so
@@ -126,7 +126,7 @@ To pin to a specific release:
 
 ```yaml
       - name: ABI compatibility check
-        uses: napetrov/abicheck@v1
+        uses: napetrov/abicheck@v0.3.0
         with:
           abi-baseline: v2.0.0
           new-library: build/libfoo.so
@@ -159,7 +159,7 @@ git push
 
 ```yaml
       - name: ABI compatibility check
-        uses: napetrov/abicheck@v1
+        uses: napetrov/abicheck@v0.3.0
         with:
           old-library: abi/libfoo.abicheck.json
           new-library: build/libfoo.so
@@ -195,7 +195,7 @@ Best for: large binaries, private repos, retention policies.
         run: aws s3 cp s3://my-bucket/abi-baselines/libfoo-2.0.0.abicheck.json baseline.json
 
       - name: ABI check
-        uses: napetrov/abicheck@v1
+        uses: napetrov/abicheck@v0.3.0
         with:
           old-library: baseline.json
           new-library: build/libfoo.so

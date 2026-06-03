@@ -139,7 +139,7 @@ Each candidate is rated by **urgency**:
 
 **Urgency: MEDIUM**
 
-**What exists:** Four output formats implemented across `reporter.py`, `sarif.py`, `html_report.py`. SARIF 2.1.0 is specifically targeted for GitHub Code Scanning integration.
+**What exists:** Five output formats (`markdown`, `json`, `sarif`, `html`, `junit`, plus a compact `review` digest) implemented across `reporter.py`, `sarif.py`, `html_report.py`, `junit_report.py`. SARIF 2.1.0 is specifically targeted for GitHub Code Scanning integration.
 
 **Key decisions embedded in code:**
 - Markdown is the default format (human-readable, CI-friendly)

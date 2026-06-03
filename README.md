@@ -47,7 +47,7 @@ abicheck dump libfoo.so -H include/foo.h --version 1.0 -o baseline.json
 abicheck compare baseline.json ./build/libfoo.so --new-header include/foo.h
 ```
 
-Supported output formats: `markdown` (default), `json`, `sarif`, `html`.
+Supported output formats: `markdown` (default), `json`, `sarif`, `html`, and `junit`.
 
 ```bash
 abicheck compare old.so new.so -H foo.h --format sarif -o report.sarif
@@ -89,7 +89,7 @@ Use these to gate CI pipelines.
 ## GitHub Action
 
 ```yaml
-- uses: napetrov/abicheck@v1
+- uses: napetrov/abicheck@v0.3.0
   with:
     old-library: abi-baseline.json
     new-library: build/libfoo.so

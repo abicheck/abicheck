@@ -13,7 +13,7 @@ Add `--annotate` to your existing abicheck step:
 
 ```yaml
 - name: Check ABI compatibility
-  uses: napetrov/abicheck@v1
+  uses: napetrov/abicheck@v0.3.0
   with:
     old-library: abi-baseline.json
     new-library: build/libfoo.so
@@ -104,7 +104,7 @@ jobs:
         run: mkdir build && cd build && cmake .. && make
 
       - name: Check ABI compatibility
-        uses: napetrov/abicheck@v1
+        uses: napetrov/abicheck@v0.3.0
         with:
           old-library: abi-baseline.json
           new-library: build/libfoo.so
@@ -116,7 +116,7 @@ jobs:
 
 ```yaml
       - name: Check ABI compatibility
-        uses: napetrov/abicheck@v1
+        uses: napetrov/abicheck@v0.3.0
         with:
           old-library: abi-baseline.json
           new-library: build/libfoo.so
@@ -128,7 +128,7 @@ jobs:
 
 ```yaml
       - name: Compare RPM packages
-        uses: napetrov/abicheck@v1
+        uses: napetrov/abicheck@v0.3.0
         with:
           mode: compare-release
           old-library: libfoo-1.0-1.el9.x86_64.rpm
@@ -144,7 +144,7 @@ persistent alerts.
 
 ```yaml
       - name: Check ABI compatibility
-        uses: napetrov/abicheck@v1
+        uses: napetrov/abicheck@v0.3.0
         with:
           old-library: abi-baseline.json
           new-library: build/libfoo.so
