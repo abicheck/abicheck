@@ -5,7 +5,7 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
-| **Platforms** | Linux, macOS, Windows |
+| **Platforms** | Linux, macOS |
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | `func_removed` |
 | **Source files** | `examples/case110_concurrent_unordered_map_api_drift/` |

@@ -5,7 +5,7 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
-| **Platforms** | Linux, macOS, Windows |
+| **Platforms** | Linux, macOS |
 | **Flags** | ABI break |
 | **Detected `ChangeKind`s** | `internal_template_leaks_via_public_api`, `func_removed` |
 | **Source files** | `examples/case85_internal_template_signature_changed/` |

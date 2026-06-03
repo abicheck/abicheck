@@ -5,7 +5,7 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
-| **Platforms** | Linux, macOS, Windows |
+| **Platforms** | Linux, macOS |
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | `func_params_changed`, `func_return_changed` |
 | **Source files** | `examples/case102_frozen_runtime_signature_changed/` |

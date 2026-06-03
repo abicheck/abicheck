@@ -5,7 +5,7 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
-| **Platforms** | Linux, macOS, Windows |
+| **Platforms** | Linux, macOS |
 | **Flags** | API break |
 | **Detected `ChangeKind`s** | `typedef_removed` |
 | **Source files** | `examples/case95_allocator_nested_typedef_removed/` |

@@ -5,7 +5,7 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
-| **Platforms** | Linux, macOS, Windows |
+| **Platforms** | Linux, macOS |
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | `experimental_removed_without_replacement`, `func_removed` |
 | **Source files** | `examples/case100_experimental_removed_without_replacement/` |

@@ -5,7 +5,7 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
-| **Platforms** | Linux, macOS, Windows |
+| **Platforms** | Linux, macOS |
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | `instantiation_missing_from_binary` |
 | **Source files** | `examples/case79_missing_template_instantiation/` |

@@ -5,7 +5,7 @@
 |-------|-------|
 | **Verdict** | 🔴 **BREAKING** |
 | **Category** | Breaking |
-| **Platforms** | Linux, macOS, Windows |
+| **Platforms** | Linux, macOS |
 | **Flags** | ABI break |
 | **Detected `ChangeKind`s** | `inline_namespace_version_bumped` |
 | **Source files** | `examples/case101_inline_namespace_version_bumped/` |

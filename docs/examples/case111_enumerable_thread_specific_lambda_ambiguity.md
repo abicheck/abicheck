@@ -5,7 +5,7 @@
 |-------|-------|
 | **Verdict** | 🟢 **COMPATIBLE** |
 | **Category** | Addition (Compatible) |
-| **Platforms** | Linux, macOS, Windows |
+| **Platforms** | Linux, macOS |
 | **Flags** | Bad practice |
 | **Detected `ChangeKind`s** | `func_added` |
 | **Source files** | `examples/case111_enumerable_thread_specific_lambda_ambiguity/` |
