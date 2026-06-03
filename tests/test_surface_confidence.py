@@ -11,11 +11,14 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from abicheck.checker import compare
 from abicheck.checker_policy import ChangeKind
 from abicheck.checker_types import Change
 from abicheck.model import (
     AbiSnapshot,
+    EnumType,
     Function,
     Param,
     RecordType,
@@ -212,6 +215,56 @@ class TestExportOnlyAntiHiding:
         in_surf, reason = classify_change_surface(c, s, s)
         assert in_surf is False
         assert reason == REASON_NON_PUBLIC_TYPE
+
+    @pytest.mark.parametrize("kind, symbol", [
+        # Struct/union field findings (``Type::field``).
+        (ChangeKind.STRUCT_FIELD_TYPE_CHANGED, "p11_virtual::funcs"),
+        (ChangeKind.STRUCT_FIELD_REMOVED, "p11_virtual::funcs"),
+        (ChangeKind.TYPE_FIELD_OFFSET_CHANGED, "p11_virtual::funcs"),
+        (ChangeKind.UNION_FIELD_TYPE_CHANGED, "p11_virtual::funcs"),
+        # Enum member findings (``Enum::member``) — same owner-qualified shape,
+        # and ENUM_MEMBER_REMOVED/VALUE_CHANGED are BREAKING, so a private enum's
+        # member churn would otherwise read as a public break (the gap this fix
+        # closes alongside struct fields).
+        (ChangeKind.ENUM_MEMBER_REMOVED, "p11_secret::SECRET"),
+        (ChangeKind.ENUM_MEMBER_VALUE_CHANGED, "p11_secret::SECRET"),
+    ])
+    def test_member_level_private_owner_demoted(self, kind, symbol):
+        # Owner-qualified member findings must be classified by the owning type,
+        # not the full ``Owner::member`` spelling (which is never a known type
+        # name and so used to stay in-surface as an "unknown").
+        snap = AbiSnapshot(
+            library="l", version="1",
+            functions=[_fn("api", ret="Public *")],
+            types=[_rec("Public"), _rec("p11_virtual")],
+            enums=[EnumType(name="p11_secret")],
+        )
+        s = compute_public_surface(snap)
+        assert "p11_virtual" not in s.public_types
+        assert "p11_secret" not in s.public_types
+        c = Change(kind=kind, symbol=symbol, description="member change")
+        in_surf, reason = classify_change_surface(c, s, s)
+        assert in_surf is False
+        assert reason == REASON_NON_PUBLIC_TYPE
+
+    def test_member_level_public_owner_stays_in_surface(self):
+        # The owner reclassification must not over-demote: a member change on a
+        # public, reachable type stays in-surface.
+        snap = AbiSnapshot(
+            library="l", version="1",
+            functions=[_fn("api", ret="Public *")],
+            types=[_rec("Public")],
+        )
+        s = compute_public_surface(snap)
+        assert "Public" in s.public_types
+        c = Change(
+            kind=ChangeKind.STRUCT_FIELD_TYPE_CHANGED,
+            symbol="Public::field",
+            description="Field type changed",
+        )
+        in_surf, reason = classify_change_surface(c, s, s)
+        assert in_surf is True
+        assert reason is None
 
 
 # ── ledger disclosure (JSON + SARIF) ──────────────────────────────────────────

@@ -105,8 +105,9 @@ _TYPE_LEVEL_KIND_NAMES: frozenset[str] = frozenset(
     }
 )
 
-_FIELD_LEVEL_TYPE_KIND_NAMES: frozenset[str] = frozenset(
+_MEMBER_LEVEL_TYPE_KIND_NAMES: frozenset[str] = frozenset(
     {
+        # Struct/union field findings, encoded as ``Type::field``.
         "type_field_removed",
         "type_field_added",
         "type_field_offset_changed",
@@ -119,7 +120,23 @@ _FIELD_LEVEL_TYPE_KIND_NAMES: frozenset[str] = frozenset(
         "struct_field_offset_changed",
         "struct_field_removed",
         "struct_field_type_changed",
+        # Enum member findings, encoded as ``Enum::member`` — same owner-qualified
+        # shape, so they must reclassify by the owning enum just like fields do.
+        "enum_member_removed",
+        "enum_member_added",
+        "enum_member_value_changed",
+        "enum_last_member_value_changed",
     }
+)
+
+# Owner-qualified member findings are a strict subset of type-level findings:
+# the owner-type reclassification in classify_change_surface() only runs inside
+# the type-level branch, so any member kind missing from _TYPE_LEVEL_KIND_NAMES
+# would silently never be reclassified. Guard the invariant at import time so a
+# future kind cannot drift out of sync.
+assert _MEMBER_LEVEL_TYPE_KIND_NAMES <= _TYPE_LEVEL_KIND_NAMES, (
+    "member-level kinds must also be type-level: "
+    f"{_MEMBER_LEVEL_TYPE_KIND_NAMES - _TYPE_LEVEL_KIND_NAMES}"
 )
 
 # Tokens that are type qualifiers / keywords, not type names.
@@ -518,10 +535,13 @@ def classify_change_surface(
     # constructor/destructor/helper symbol named ``Foo``. In that case the
     # layout change's ``symbol`` still denotes the type, so reachability decides.
     type_level_finding = change.kind.value in _TYPE_LEVEL_KIND_NAMES
-    if type_level_finding and change.kind.value in _FIELD_LEVEL_TYPE_KIND_NAMES and "::" in sym:
-        # Field-level findings are encoded as ``Type::field``. Classifying the
-        # full string as a type keeps private fields in-surface as "unknown";
-        # use the owner type for reachability/provenance decisions.
+    if change.kind.value in _MEMBER_LEVEL_TYPE_KIND_NAMES and "::" in sym:
+        # Member-level findings are owner-qualified: ``Type::field`` (struct/union
+        # field) or ``Enum::member`` (enum member). Classifying the full string as
+        # a type keeps a private member's churn in-surface as an "unknown" type;
+        # use the owner type for reachability/provenance decisions. (Membership in
+        # this set implies type_level_finding — see the import-time assert above —
+        # so a qualified *type name* like ``ns::Foo`` is never mis-split here.)
         candidates = {sym.rsplit("::", 1)[0]} | _type_identifiers(change.caused_by_type)
     else:
         candidates = _type_identifiers(sym) | _type_identifiers(change.caused_by_type)
