@@ -665,6 +665,49 @@ class TestCheckerIntegration:
         assert ChangeKind.FUNC_LIKELY_RENAMED in kinds
         assert ChangeKind.SONAME_BUMP_RECOMMENDED not in kinds
 
+    def test_compare_soname_bump_recommendation_honors_suppression(self):
+        """Late-generated SONAME advisories must still pass suppression."""
+        from abicheck.checker import compare
+        from abicheck.model import AbiSnapshot, Function, Visibility
+        from abicheck.suppression import Suppression, SuppressionList
+
+        old = AbiSnapshot(
+            library="libfoo.so.1",
+            version="1.0",
+            functions=[
+                Function(
+                    name="removed_func",
+                    mangled="removed_func",
+                    return_type="void",
+                    params=[],
+                    visibility=Visibility.PUBLIC,
+                ),
+            ],
+            elf=ElfMetadata(soname="libfoo.so.1", symbols=[_sym("removed_func")]),
+        )
+        new = AbiSnapshot(
+            library="libfoo.so.1",
+            version="2.0",
+            functions=[],
+            elf=ElfMetadata(soname="libfoo.so.1", symbols=[]),
+        )
+        suppression = SuppressionList([
+            Suppression(
+                symbol="DT_SONAME",
+                change_kind=ChangeKind.SONAME_BUMP_RECOMMENDED.value,
+                reason="tracked separately",
+            )
+        ])
+
+        result = compare(old, new, suppression=suppression)
+        kinds = {c.kind for c in result.changes}
+        suppressed_kinds = {c.kind for c in result.suppressed_changes}
+
+        assert ChangeKind.FUNC_REMOVED in kinds
+        assert ChangeKind.SONAME_BUMP_RECOMMENDED not in kinds
+        assert ChangeKind.SONAME_BUMP_RECOMMENDED in suppressed_kinds
+        assert result.suppressed_count == 1
+
     def test_compare_version_script_missing(self):
         """Full pipeline: version script dropped -> warning fires."""
         from abicheck.model import AbiSnapshot

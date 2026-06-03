@@ -246,6 +246,14 @@ def compare(
     _old_elf = getattr(old, "elf", None) or _ElfMetadata()
     _new_elf = getattr(new, "elf", None) or _ElfMetadata()
     soname_changes = check_soname_bump_policy(all_unsuppressed, _old_elf, _new_elf)
+    if suppression is not None and soname_changes:
+        visible_soname_changes: list[Change] = []
+        for c in soname_changes:
+            if suppression.is_suppressed(c):
+                suppressed.append(c)
+            else:
+                visible_soname_changes.append(c)
+        soname_changes = visible_soname_changes
     if soname_changes:
         kept.extend(soname_changes)
         all_unsuppressed = kept + verdict_redundant
