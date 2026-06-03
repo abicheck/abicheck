@@ -38,6 +38,7 @@ def test_parse_args_defaults():
         args = mod.parse_args()
     assert args.abicc_timeout == mod.DEFAULT_ABICC_TIMEOUT
     assert args.abicc_mode == "both"
+    assert args.suite == "all"
     assert not args.skip_abicc
 
 
@@ -74,6 +75,28 @@ def test_parse_args_skip_compat_default_false():
     with patch("sys.argv", ["benchmark_comparison.py"]):
         args = mod.parse_args()
     assert args.skip_compat is False
+
+
+def test_parse_args_pinned_suite():
+    mod = _load_benchmark()
+    with patch("sys.argv", ["benchmark_comparison.py", "--suite", "pinned74"]):
+        args = mod.parse_args()
+    assert args.suite == "pinned74"
+
+
+def test_pinned_suite_matches_historical_74_cases():
+    mod = _load_benchmark()
+    cases = sorted(
+        d.name for d in (Path(__file__).parent.parent / "examples").iterdir()
+        if d.is_dir() and d.name.startswith("case")
+    )
+    pinned = [c for c in cases if mod.PINNED_74_CASE_RE.match(c)]
+
+    assert len(pinned) == 74
+    assert "case01_symbol_removal" in pinned
+    assert "case26b_union_field_added_compatible" in pinned
+    assert "case73_typedef_underlying_changed" in pinned
+    assert "case74_detail_base_class_changed" not in pinned
 
 
 # ── case64 compiler selection ────────────────────────────────────────────────
@@ -180,10 +203,11 @@ def test_collect_metadata_shape_and_accuracy():
         # SKIP rows must not be scored.
         {"case": "case04", "expected": "BREAKING", "abicheck": "SKIP", "abicheck_ms": 0},
     ]
-    meta = mod._collect_metadata(results, [_FakeTool()])
+    meta = mod._collect_metadata(results, [_FakeTool()], "pinned74")
 
     assert meta["schema"] == "abicheck-benchmark/1.0"
     assert meta["case_count"] == 4
+    assert meta["suite"] == "pinned74"
     assert "abicheck_version" in meta
     assert set(meta["tool_versions"]) >= {"abidiff", "gcc", "castxml"}
     assert meta["results"] is results

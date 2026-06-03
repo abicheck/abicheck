@@ -144,13 +144,13 @@ See `abicheck.service` for the full signature, plus the [MCP server integration]
 
 ## Examples
 
-The [`examples/`](examples/README.md) directory contains **121 real-world ABI/API scenarios** (116 single-library cases plus 5 multi-library bundle cases) with ground-truth verdicts. Most are single-library `v1`/`v2` examples with a consumer app; bundle/release-level cases use release-style layouts. A pinned **74-case subset** drives the reproducible validation snapshot below.
+The [`examples/`](examples/README.md) directory contains **121 real-world ABI/API scenarios** (116 single-library cases plus 5 multi-library bundle cases) with ground-truth verdicts. Most are single-library `v1`/`v2` examples with a consumer app; bundle/release-level cases use release-style layouts. The full catalog is the development regression corpus; the table below is a smaller historical cross-tool benchmark kept stable for release-to-release comparison with libabigail and ABICC.
 
 ---
 
 ## Validation snapshot
 
-Accuracy on the pinned 74-case benchmark subset (`01–73` + `26b`, drawn from the full 121-case catalog):
+Current release-pinned cross-tool benchmark: accuracy on the historical 74-case subset (`case01`–`case73` + `case26b`, drawn from the full 121-case catalog):
 
 | Configuration | Exact verdict accuracy | Scan status |
 |---|---:|---|
@@ -162,14 +162,18 @@ Accuracy on the pinned 74-case benchmark subset (`01–73` + `26b`, drawn from t
 | `ABICC(dump)` | **51/71 (71%)** | 71/74 scored |
 | `ABICC(xml)` | **50/72 (69%)** | 72/74 scored |
 
-These numbers are reproducible from `scripts/benchmark_comparison.py`, which
-writes `benchmark_reports/benchmark_report.json` with the abicheck version, git
-commit, oracle tool versions, the `ground_truth.json` SHA-256, and per-tool
-accuracy. Release workflows attach that report to future GitHub Releases. To
-generate a fresh report for the current checkout, run:
+These numbers are reproducible from `scripts/benchmark_comparison.py --suite pinned74`, which writes `benchmark_reports/benchmark_report.json` with the selected suite, abicheck version, git commit, oracle tool versions, the `ground_truth.json` SHA-256, and per-tool accuracy. Release workflows attach that pinned-suite report to future GitHub Releases.
+
+To regenerate the release-pinned cross-tool report:
 
 ```bash
-python scripts/benchmark_comparison.py   # writes benchmark_reports/benchmark_report.json
+python scripts/benchmark_comparison.py --suite pinned74
+```
+
+To scan the full 121-case catalog for the current checkout:
+
+```bash
+python scripts/benchmark_comparison.py --suite all
 ```
 
 Per-case matrix, methodology, and the pinned comparison table: [Tool Comparison & Benchmarks](https://napetrov.github.io/abicheck/reference/tool-comparison/).
