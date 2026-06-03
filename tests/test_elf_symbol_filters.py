@@ -10,6 +10,8 @@ from __future__ import annotations
 import pytest
 
 from abicheck.dumper import _is_abi_relevant_symbol
+from abicheck.dwarf_snapshot import _DwarfSnapshotBuilder
+from abicheck.elf_metadata import ElfMetadata, ElfSymbol
 
 # ---------------------------------------------------------------------------
 # Bug 1: GCC / compiler-internal symbols — must be filtered
@@ -168,3 +170,18 @@ def test_double_underscore_boundary(name: str, expected: bool) -> None:
     assert _is_abi_relevant_symbol(name) is expected, (
         f"_is_abi_relevant_symbol({name!r}) expected {expected}"
     )
+
+
+def test_dwarf_export_index_uses_same_abi_relevance_filter(tmp_path) -> None:
+    """DWARF mode must not re-admit stdlib weak exports as public functions."""
+    meta = ElfMetadata(
+        symbols=[
+            ElfSymbol(name="_ZNSt10unique_ptrINSt6thread6_StateEEC1Ev"),
+            ElfSymbol(name="_ZN6MyLib4CoreC1Ev"),
+        ]
+    )
+    builder = _DwarfSnapshotBuilder(tmp_path / "libfoo.so", meta)
+
+    assert "_ZNSt10unique_ptrINSt6thread6_StateEEC1Ev" not in builder._exported_names
+    assert "_ZN6MyLib4CoreC1Ev" in builder._exported_names
+    assert builder._is_exported("_ZNSt10unique_ptrINSt6thread6_StateEEC1Ev", "std::unique_ptr") is False

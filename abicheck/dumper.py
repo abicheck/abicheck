@@ -47,6 +47,7 @@ from .dumper_castxml import (
 from .dumper_castxml import (
     _vt_sort_key as _vt_sort_key,
 )
+from .elf_symbol_filter import is_abi_relevant_elf_symbol
 from .errors import SnapshotError, ValidationError
 from .model import (
     AbiSnapshot,
@@ -66,38 +67,6 @@ def _castxml_available() -> bool:
 
 _HIDDEN_VIS = frozenset({"STV_HIDDEN", "STV_INTERNAL"})
 
-# ---------------------------------------------------------------------------
-# ELF-only mode: ABI-relevance filter
-# ---------------------------------------------------------------------------
-# Prefixes that identify GCC/compiler-internal symbols which may leak into
-# .dynsym through statically-linked runtime (e.g. libgcc_s, SVML).
-_GCC_INTERNAL_PREFIXES = (
-    "ix86_",
-    "x86_64_",
-    "__cpu_model",
-    "__cpu_features",
-    "_ZGV",          # GCC SIMD vector variants (e.g. _ZGVbN2v_sin)
-    "__svml_",       # Intel Short Vector Math Library
-    "__libm_sse2_",
-    "__libm_avx_",
-)
-
-# Prefixes that identify transitive C++ standard-library symbols which may
-# appear in .dynsym via weak linkage (libstdc++ / libc++).
-_STDLIB_PREFIXES = (
-    "_ZNSt",              # std:: namespace members (libstdc++)
-    "_ZNKSt",             # const std:: methods
-    "_ZNSt3__1",          # libc++ inline-namespace __1
-    "_ZdlPv",             # operator delete(void*)
-    "_ZnwSt",             # operator new(std::size_t)
-    "_ZnaSt",             # operator new[](std::size_t)
-    "_ZdaPv",             # operator delete[](void*)
-    "_ZTVN10__cxxabiv",   # vtables for RTTI (typeinfo infrastructure)
-    "_ZTI",               # typeinfo objects
-    "_ZTS",               # typeinfo strings
-    "_ZSt",               # std:: global symbols (e.g. _ZSt4cout)
-)
-
 
 def _is_abi_relevant_symbol(name: str) -> bool:
     """Return False for symbols that are NOT part of the library's public ABI.
@@ -112,32 +81,7 @@ def _is_abi_relevant_symbol(name: str) -> bool:
        naming convention and are *not* part of the public API, even though
        they may have global ELF visibility.
     """
-    if not name:
-        return False
-
-    # GCC/compiler internals
-    for prefix in _GCC_INTERNAL_PREFIXES:
-        if name.startswith(prefix):
-            return False
-
-    # Transitive libstdc++/libc++ symbols
-    for prefix in _STDLIB_PREFIXES:
-        if name.startswith(prefix):
-            return False
-
-    # Private C symbols with __ as a namespace separator
-    # (e.g. H5C__flush_marked_entries, MPI__send).
-    # Exclusions:
-    #   • C++ mangled names start with _Z — handled separately by demangler.
-    #   • System symbols start with __ or _ followed by an uppercase letter
-    #     (POSIX/C reserved) — they are already excluded because they start
-    #     with __ which would be caught if we checked name[0:2], but we want
-    #     to be precise: we only filter names that have __ *after* the first
-    #     two characters, meaning the library itself added the separator.
-    if not name.startswith("_Z") and "__" in name[2:]:
-        return False
-
-    return True
+    return is_abi_relevant_elf_symbol(name)
 
 
 def _pyelftools_exported_symbols(so_path: Path) -> tuple[set[str], set[str]]:

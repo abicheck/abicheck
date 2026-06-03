@@ -42,6 +42,7 @@ from .dwarf_utils import decode_member_location as _decode_member_location
 from .dwarf_utils import has_real_dwarf_info
 from .dwarf_utils import resolve_die_ref as _resolve_ref
 from .dwarf_utils import resolve_type_die as _resolve_type_die
+from .elf_symbol_filter import is_abi_relevant_elf_symbol
 from .model import (
     AbiSnapshot,
     AccessLevel,
@@ -191,7 +192,11 @@ class _DwarfSnapshotBuilder:
         self._exported_names: set[str] = set()
         if elf_meta.symbols:
             for sym in elf_meta.symbols:
-                if sym.name and sym.visibility not in _HIDDEN_VIS:
+                if (
+                    sym.name
+                    and sym.visibility not in _HIDDEN_VIS
+                    and is_abi_relevant_elf_symbol(sym.name)
+                ):
                     self._exported_names.add(sym.name)
 
         # Build demangled export index for C++ fallback matching (FIX-B).
@@ -315,6 +320,13 @@ class _DwarfSnapshotBuilder:
         if not linkage_name:
             linkage_name = _attr_str(die, "DW_AT_MIPS_linkage_name")
         mangled = linkage_name or name
+
+        # Deleted functions intentionally bypass the exported-symbol check below
+        # so a public API that becomes ``= delete`` is still observable. Do not
+        # let that bypass re-admit transitive stdlib/runtime subprograms into a
+        # non-runtime library's public surface.
+        if not is_abi_relevant_elf_symbol(mangled):
+            return
 
         # DWARF5 DW_AT_deleted: function marked as = delete by the compiler.
         # Currently only emitted by very recent compilers (not yet in GCC/Clang mainline).
