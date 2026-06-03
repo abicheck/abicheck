@@ -33,6 +33,10 @@ _GCC_INTERNAL_PREFIXES = (
 _STDLIB_PREFIXES = (
     "_ZNSt",              # std:: namespace members (libstdc++)
     "_ZNKSt",             # const std:: methods
+    "_ZNVSt",             # volatile std:: methods
+    "_ZNRSt",             # ref-qualified std:: methods
+    "_ZNKRSt",            # const/ref-qualified std:: methods
+    "_ZNVRSt",            # volatile/ref-qualified std:: methods
     "_ZNSt3__1",          # libc++ inline-namespace __1
     "_ZdlPv",             # operator delete(void*)
     "_ZnwSt",             # operator new(std::size_t)

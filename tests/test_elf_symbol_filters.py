@@ -78,8 +78,12 @@ def test_private_double_underscore_symbols_are_filtered(name: str) -> None:
     # libc++ inline namespace __1
     "_ZNSt3__16threadC1Ev",
     "_ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEE6assignEPKc",
-    # const std:: methods
+    # cv/ref-qualified std:: methods
     "_ZNKSt6vectorIiSaIiEE4sizeEv",
+    "_ZNVSt6atomicIiEaSERKi",
+    "_ZNRSt6atomicIiEaSERKi",
+    "_ZNKRSt6atomicIiEcviv",
+    "_ZNVRSt6atomicIiEaSERKi",
     # operator delete / new
     "_ZdlPv",
     "_ZdlPvSt11align_val_t",
@@ -177,11 +181,14 @@ def test_dwarf_export_index_uses_same_abi_relevance_filter(tmp_path) -> None:
     meta = ElfMetadata(
         symbols=[
             ElfSymbol(name="_ZNSt10unique_ptrINSt6thread6_StateEEC1Ev"),
+            ElfSymbol(name="_ZNVSt6atomicIiEaSERKi"),
             ElfSymbol(name="_ZN6MyLib4CoreC1Ev"),
         ]
     )
     builder = _DwarfSnapshotBuilder(tmp_path / "libfoo.so", meta)
 
     assert "_ZNSt10unique_ptrINSt6thread6_StateEEC1Ev" not in builder._exported_names
+    assert "_ZNVSt6atomicIiEaSERKi" not in builder._exported_names
     assert "_ZN6MyLib4CoreC1Ev" in builder._exported_names
     assert builder._is_exported("_ZNSt10unique_ptrINSt6thread6_StateEEC1Ev", "std::unique_ptr") is False
+    assert builder._is_exported("_ZNVSt6atomicIiEaSERKi", "std::atomic<int>::operator=") is False
