@@ -227,7 +227,7 @@ const). ABICC has no ELF pass (misses SONAME, visibility). ABICC(dump) has no AS
 
 ## Current benchmark summary (2026-05-19, 74-case subset)
 
-Release-pinned scan status from `python3 scripts/benchmark_comparison.py` on the original
+Release-pinned scan status from `python3 scripts/benchmark_comparison.py --suite pinned74` on the original
 74-case benchmark subset. ABICC runs used `--abicc-timeout 20` to keep known hangs bounded.
 
 | Tool | Cases attempted | Scored | Correct | Accuracy | Not scored / notes |
@@ -256,22 +256,26 @@ Release-pinned scan status from `python3 scripts/benchmark_comparison.py` on the
 
 ```bash
 python3 scripts/benchmark_comparison.py \
+  --suite pinned74 \
   --tools abicheck abicheck_compat abicheck_strict \
   --skip-abicc
 
 # abidiff and abidiff+headers were run on all cases except case16,
 # which hangs in both modes in this environment.
 python3 scripts/benchmark_comparison.py \
+  --suite pinned74 \
   --tools abidiff abidiff_headers \
   --skip-abicc \
   --cases case01_symbol_removal ... case73_typedef_underlying_changed
 
 timeout 600 python3 scripts/benchmark_comparison.py \
+  --suite pinned74 \
   --tools abicc_xml \
   --abicc-mode xml \
   --abicc-timeout 20
 
 timeout 600 python3 scripts/benchmark_comparison.py \
+  --suite pinned74 \
   --tools abicc_dumper \
   --abicc-mode dumper \
   --abicc-timeout 20

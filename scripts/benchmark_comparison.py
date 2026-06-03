@@ -17,6 +17,7 @@ Supports two case layouts:
 
 Usage:
     python3 scripts/benchmark_comparison.py
+    python3 scripts/benchmark_comparison.py --suite pinned74
     python3 scripts/benchmark_comparison.py --abicc-timeout 60
     python3 scripts/benchmark_comparison.py --abicc-mode dumper
     python3 scripts/benchmark_comparison.py --skip-abicc
@@ -80,6 +81,12 @@ _HAS_ABICHECK: bool = _abicheck_available()
 
 DEFAULT_ABICC_TIMEOUT = 120  # seconds
 
+# Historical release-pinned cross-tool benchmark:
+# cases 01-73 plus the 26b compatible-union edge case.  The full catalog can
+# grow freely, while this suite stays stable enough to compare abicheck,
+# libabigail, and ABICC across releases.
+PINNED_74_CASE_RE = re.compile(r"^case(?:0[1-9]|[1-6][0-9]|7[0-3])_|^case26b_")
+
 # Expected verdicts loaded from ground_truth.json — single source of truth.
 # To add/change a verdict, edit examples/ground_truth.json only.
 _GT_PATH = Path(__file__).parent.parent / "examples" / "ground_truth.json"
@@ -93,8 +100,13 @@ try:
 except (FileNotFoundError, json.JSONDecodeError, ValueError) as _e:
     raise SystemExit(f"ERROR: cannot load {_GT_PATH}: {_e}") from _e
 
+def _expected_or_unknown(value: object) -> str:
+    """Return a printable/scorable expected verdict, or '?' for unscored cases."""
+    return value if isinstance(value, str) and value else "?"
+
+
 EXPECTED: dict[str, str] = {
-    k: v["expected"] for k, v in _gt_data["verdicts"].items()
+    k: _expected_or_unknown(v["expected"]) for k, v in _gt_data["verdicts"].items()
 }
 # Per-tool overrides sourced from ground_truth.json:
 #   expected_compat — compat mode can't emit API_BREAK (case31, case34)
@@ -105,7 +117,7 @@ EXPECTED_COMPAT: dict[str, str] = {
     if "expected_compat" in v
 }
 EXPECTED_ABICC: dict[str, str] = {
-    k: ("COMPATIBLE" if v["expected"] == "NO_CHANGE" else v["expected"])
+    k: ("COMPATIBLE" if EXPECTED[k] == "NO_CHANGE" else EXPECTED[k])
     for k, v in _gt_data["verdicts"].items()
 }
 
@@ -460,7 +472,6 @@ def _abicheck_verdict_from_compare(stdout: str, returncode: int) -> str:
         "COMPATIBLE_WITH_RISK": "COMPATIBLE_WITH_RISK",
         "COMPATIBLE": "COMPATIBLE",
         "NO_CHANGE": "NO_CHANGE",
-        "COMPATIBLE_WITH_RISK": "COMPATIBLE_WITH_RISK",
     }.get(str(data.get("verdict", "")).upper(), "ERROR")
 
 
@@ -826,6 +837,8 @@ def parse_args() -> argparse.Namespace:
                    help="Skip abicheck compat column")
     p.add_argument("--cases", nargs="+", metavar="CASE",
                    help="Run only these case prefixes (e.g. case09 case16)")
+    p.add_argument("--suite", choices=["all", "pinned74"], default="all",
+                   help="Case suite to run: all catalog cases, or the historical 74-case release-pinned subset")
     p.add_argument("--tools", nargs="+", metavar="TOOL",
                    choices=["abicheck", "abicheck_compat", "abicheck_strict",
                             "abidiff", "abidiff_headers", "abicc_dumper", "abicc_xml"],
@@ -947,7 +960,7 @@ def _ground_truth_digest() -> str | None:
     return hashlib.sha256(gt.read_bytes()).hexdigest()
 
 
-def _collect_metadata(results: list[dict], active_tools: list[Any]) -> dict[str, Any]:
+def _collect_metadata(results: list[dict], active_tools: list[Any], suite: str) -> dict[str, Any]:
     """Assemble reproducibility metadata + machine-readable accuracy.
 
     This is the release-pinnable artifact: it records the exact inputs
@@ -976,6 +989,7 @@ def _collect_metadata(results: list[dict], active_tools: list[Any]) -> dict[str,
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "abicheck_version": abicheck_version,
         "git_commit": _git_commit(),
+        "suite": suite,
         "case_count": len(results),
         "ground_truth_sha256": _ground_truth_digest(),
         "tool_versions": {
@@ -1375,6 +1389,8 @@ def main() -> None:
     BUILD_DIR.mkdir(exist_ok=True)
 
     all_cases = sorted(d for d in EXAMPLES_DIR.iterdir() if d.is_dir() and d.name.startswith("case"))
+    if args.suite == "pinned74":
+        all_cases = [d for d in all_cases if PINNED_74_CASE_RE.match(d.name)]
     selected_tools = _resolve_selected_tools(args)
     active_tools = [t for t in TOOL_REGISTRY if t.name in selected_tools]
 
@@ -1393,7 +1409,7 @@ def main() -> None:
     summary.write_text(json.dumps(results, indent=2))
 
     # Release-pinnable artifact: metadata + accuracy + results in one file.
-    report = _collect_metadata(results, active_tools)
+    report = _collect_metadata(results, active_tools, args.suite)
     report_path = REPORT_DIR / "benchmark_report.json"
     report_path.write_text(json.dumps(report, indent=2))
 
