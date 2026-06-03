@@ -17,6 +17,33 @@
 The default fast command excludes all external-tool markers. Use it. It
 finishes in ~45 seconds.
 
+## Test-quality guards (don't just chase coverage)
+
+- **Detector oracle/metamorphic tests** — three files sharing one mutation
+  catalogue (`_detector_mutations.py`, a non-`test_` helper):
+  - `test_detector_oracle.py` (fast, deterministic) — applies each *known* ABI
+    edit and asserts the exact `ChangeKind`, verdict severity, and that
+    unrelated context stays unflagged. **In mutmut's scope** (not `slow`), so
+    mutation testing measures these oracles.
+  - `test_detector_properties.py` (`slow`) — wraps the same mutations in a
+    Hypothesis-randomized context, plus structural properties (idempotence,
+    determinism, emitted-kind partition) and grounding on committed real
+    snapshots in `fixtures/`.
+  - `test_detector_properties_integration.py` (`integration`) — same invariants
+    on snapshots dumped from **real compiled binaries** (gcc + castxml).
+  Independent-random snapshot pairs almost never share symbols, so they only
+  exercise add/remove; the controlled-mutation design is what reaches the
+  *modification* detectors.
+- `test_fp_rate_gate.py` — mirrors `scripts/check_fp_rate.py`; per-case FP/FN
+  checks under public-surface scoping (baselines 0/0).
+- `test_mutation_score_gate.py` — unit-tests the mutation-score gate parser so
+  it works without `mutmut` installed.
+- **Silent-skip guard** (`conftest.py`): export `ABICHECK_MIN_EXECUTED=<n>` and
+  the session fails unless ≥ n tests actually ran — used by the marker lanes in
+  CI so a missing tool can't pass with 0 tests. Every `test_*` should assert
+  something (the `test-assertion-density` AI-readiness check flags those that
+  don't); pure smoke tests are allowed but should be deliberate.
+
 ## Conventions
 
 - Use `assert` freely — no need for unittest-style methods.

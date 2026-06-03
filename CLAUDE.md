@@ -149,8 +149,32 @@ CI runs `mypy abicheck/` as a required gate. The baseline is currently **0 error
 | `mkdocs-nav-coverage` | WARN | Every `docs/**/*.md` is in `mkdocs.yml` nav or linked from another doc |
 | `banned-imports` | ERROR | No `print(...)` outside CLI/reporter modules; no `subprocess(..., shell=True)` |
 | `license-header` | WARN | Every `abicheck/**/*.py` carries the Apache-2.0 header / SPDX identifier |
+| `test-assertion-density` | WARN | Every `test_*` function asserts something (directly or via a same-file helper) — flags zero-assertion smoke tests so coverage isn't "filled" without verification |
 
 Run locally: `python scripts/check_ai_readiness.py`. Errors fail; warnings print and pass.
+
+## Test-quality gates (beyond line coverage)
+
+Line coverage measures *reach*, not whether a test actually checks the result.
+Four mechanisms guard test quality so coverage can't be "filled" without verifying behaviour:
+
+- **FP-rate gate** — `scripts/check_fp_rate.py` (mirrored in `tests/test_fp_rate_gate.py`).
+  A labelled corpus of `(old, new)` snapshot pairs run under public-surface scoping:
+  internal-noise cases must stay non-breaking (no false positives), real-break cases
+  must stay breaking (no false negatives). Both baselines are 0; grow the corpus only
+  with cases the correct implementation already passes.
+- **Mutation testing** — `scripts/check_mutation_score.py` + `.github/workflows/mutation.yml`.
+  `mutmut` mutates the detector core (`diff_*`, `checker_policy`); a *surviving* mutant
+  is a covered-but-unverified line. Runs weekly / on the `mutation` PR label, gating on a
+  survivor baseline (`SURVIVOR_BASELINE`) once the first run establishes it.
+- **Metamorphic property tests** — `tests/test_detector_properties.py` (`slow`).
+  Hypothesis-generated snapshot pairs checked against invariants that hold for *any*
+  input (idempotence, determinism, direction-symmetry of touched symbols, emitted-kind
+  partition, additive monotonicity) — generalization guards, not example-shaped tests.
+- **Silent-skip guard** — `tests/conftest.py`. A marker lane can export
+  `ABICHECK_MIN_EXECUTED=<n>`; the session fails unless at least `<n>` tests actually ran,
+  so a missing external tool can't turn a lane green with zero work done. Wired into the
+  `abicc`, `libabigail`, and `integration` CI lanes.
 
 ## Files that are large — edit carefully
 

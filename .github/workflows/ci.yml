@@ -137,10 +137,24 @@ jobs:
         run: pip install -e ".[dev]"
       - name: Run integration tests (Linux/macOS — with coverage)
         if: runner.os != 'Windows'
+        # ABICHECK_MIN_EXECUTED guards against a silent toolchain-install failure
+        # turning the whole lane into 0-ran-but-green (see tests/conftest.py).
+        # Linux's ELF integration count is known (~195) so it gets a real floor;
+        # the macOS Mach-O subset count isn't verified here, so it uses a minimal
+        # "> 0" floor — enough to catch a missing toolchain without risking a
+        # false failure from platform subsetting.
+        env:
+          ABICHECK_MIN_EXECUTED: ${{ runner.os == 'macOS' && '1' || '20' }}
         run: |
           pytest tests/ -v -m integration --tb=short --cov=abicheck --cov-report=xml:coverage-integration.xml --ignore=tests/test_abi_examples.py
       - name: Run integration tests (Windows — parallel, no coverage)
         if: runner.os == 'Windows'
+        # Same silent-skip guard: the xdist controller aggregates every worker's
+        # reports, so the session-finish check in conftest.py works under -n auto
+        # (verified). The Windows PE integration count isn't measured here, so a
+        # minimal "> 0" floor catches a missing MinGW without false failures.
+        env:
+          ABICHECK_MIN_EXECUTED: '1'
         run: |
           pytest tests/ -v -m integration --tb=short -n auto --dist worksteal --ignore=tests/test_abi_examples.py
       - name: Upload integration coverage to Codecov
@@ -245,6 +259,10 @@ jobs:
       - name: Install package
         run: pip install -e ".[dev]"
       - name: Run libabigail parity tests
+        # Fail loudly if abigail-tools didn't install (lane would otherwise skip
+        # every test and pass) — see tests/conftest.py silent-skip guard.
+        env:
+          ABICHECK_MIN_EXECUTED: '5'
         run: pytest tests/test_abidiff_parity.py tests/test_abicompat_parity.py tests/test_abipkgdiff_parity.py -v -m libabigail --tb=short
 
   abicc-parity:
@@ -265,6 +283,10 @@ jobs:
       - name: Install package
         run: pip install -e ".[dev]"
       - name: Run ABICC parity tests
+        # Fail loudly if abi-compliance-checker didn't install (lane would
+        # otherwise skip every test and pass) — see tests/conftest.py guard.
+        env:
+          ABICHECK_MIN_EXECUTED: '10'
         run: pytest tests/test_abicc_parity.py tests/test_xml_parity.py -v -m abicc --tb=short
       - name: Run XML schema validation tests (no ABICC required)
         run: pytest tests/test_xml_parity.py::TestXmlSchemaValidation tests/test_xml_report.py -v --tb=short

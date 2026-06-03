@@ -1,4 +1,10 @@
 codecov:
+  # Codecov posts its own status independent of the GitHub Actions result; we do
+  # not want a flaky upload to gate merges, so coverage statuses are advisory at
+  # the Codecov layer. To make any of them *blocking*, mark the corresponding
+  # "codecov/*" status as a required check in the repo's branch-protection rules
+  # (Settings → Branches). The targets below define what "passing" means once
+  # they are required.
   require_ci_to_pass: false
 
 coverage:
@@ -10,12 +16,28 @@ coverage:
     project:
       default:
         target: auto
-        threshold: 1%       # allow 1% drop without failing
+        threshold: 1%       # allow a 1% drop without failing
+        if_ci_failed: error
+      # Integration lane (real castxml/gcc parsing) tracked separately so the
+      # parser frontends have a no-regression floor of their own, independent of
+      # the synthetic-snapshot unit lane.
+      integration:
+        flags:
+          - integration
+        target: auto
+        # Wider threshold than the project default: integration coverage is the
+        # noisier flag (depends on castxml/toolchain availability across OSes),
+        # so 2% absorbs normal variance while still catching a real regression.
+        threshold: 2%
         if_ci_failed: error
     patch:
       default:
-        target: 80%         # new code should be well-tested
+        # New code should be well-tested. This is the gate that resists
+        # coverage-filling: changed lines must be covered even if the project
+        # total drifts. Make "codecov/patch" a required check to enforce it.
+        target: 80%
         threshold: 5%
+        informational: false
 
 comment:
   layout: "reach,diff,flags,files"
