@@ -1090,8 +1090,7 @@
       "category": "breaking",
       "platforms": [
         "linux",
-        "macos",
-        "windows"
+        "macos"
       ],
       "abi_break": true,
       "api_break": true,
@@ -1369,8 +1368,7 @@
       "category": "breaking",
       "platforms": [
         "linux",
-        "macos",
-        "windows"
+        "macos"
       ],
       "abi_break": false,
       "api_break": true,
@@ -1483,8 +1481,7 @@
       "category": "breaking",
       "platforms": [
         "linux",
-        "macos",
-        "windows"
+        "macos"
       ],
       "abi_break": true,
       "api_break": true,
@@ -1499,8 +1496,7 @@
       "category": "addition",
       "platforms": [
         "linux",
-        "macos",
-        "windows"
+        "macos"
       ],
       "abi_break": false,
       "api_break": false,
@@ -1535,8 +1531,7 @@
       "category": "breaking",
       "platforms": [
         "linux",
-        "macos",
-        "windows"
+        "macos"
       ],
       "abi_break": true,
       "api_break": false,
@@ -1617,8 +1612,7 @@
       "category": "breaking",
       "platforms": [
         "linux",
-        "macos",
-        "windows"
+        "macos"
       ],
       "abi_break": true,
       "api_break": true,
@@ -1634,8 +1628,7 @@
       "category": "breaking",
       "platforms": [
         "linux",
-        "macos",
-        "windows"
+        "macos"
       ],
       "abi_break": true,
       "api_break": false,
@@ -1650,8 +1643,7 @@
       "category": "breaking",
       "platforms": [
         "linux",
-        "macos",
-        "windows"
+        "macos"
       ],
       "abi_break": true,
       "api_break": true,

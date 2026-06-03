@@ -4,5 +4,5 @@ abicheck_add_case(case95_allocator_nested_typedef_removed
     V1_HEADERS v1.h
     V2_HEADERS v2.h
     APP_SOURCES app.cpp
-    PLATFORMS linux macos windows
+    PLATFORMS linux macos
 )

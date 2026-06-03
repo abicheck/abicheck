@@ -147,6 +147,13 @@ No changes yet.
 
 ### Fixed
 
+#### Windows example-platform metadata matches the validated build surface
+- Corrected the platform declarations for eight advanced C++/template example
+  fixtures (`case79`, `case85`, `case95`, `case100`, `case101`, `case102`,
+  `case110`, `case111`) from Linux/macOS/Windows to Linux/macOS. These cases
+  remain in the full catalog, but Windows CI no longer attempts CMake builds
+  for fixtures that are not validated on the Windows toolchain.
+
 #### Transitive stdlib/runtime symbols no longer leak into the ABI surface
 - Centralized ELF ABI-relevance filtering into `abicheck/elf_symbol_filter.py`
   and shared it across the symbols-only dumper, DWARF snapshot extraction, and
