@@ -189,7 +189,7 @@ public."
 | Case | Behavior under this design |
 |------|----------------------------|
 | **A.** PE/Mach-O headers ignored | **Fixed (PR #259):** headers plumbed through, directories expanded, explicit warning + export-table fallback when castxml is unavailable or names don't match. |
-| **B.** Private *symbol* change/removal flagged | `header-scoped` mode: demoted to compatible/informational, recorded in the ledger as `private-header`/`not-exported`. Removal already maps to `FUNC_REMOVED_ELF_ONLY` (compatible). |
+| **B.** Private *symbol* change/removal flagged | `header-scoped` mode: demoted to compatible/informational, recorded in the ledger as `private-header`/`not-exported`. Binary-only removal maps to `FUNC_REMOVED_ELF_ONLY`, which strict ABI policy treats as breaking without header evidence. |
 | **C.** Private *field* inside a public struct changes layout | **Still a real break** — reachability (D3) keeps it in surface. Documented as *not* a false positive: it is observable to consumers. |
 | **D.** Private declaration pulled in via transitive `#include` of a public header | Excluded by provenance (D2): its `source_header` is not in the provided public-header set — *unless* it is reachable from a public API, in which case the leak guard (D5.2) reports it. |
 

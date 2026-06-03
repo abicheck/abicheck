@@ -132,20 +132,21 @@ class TestFuncVisibilityChanged:
         assert "_Z3apiv" in vis_changes[0].symbol
 
     def test_elf_only_symbol_absent_is_func_removed_elf_only(self) -> None:
-        """ELF_ONLY symbol absent from new snapshot → FUNC_REMOVED_ELF_ONLY (compatible).
+        """ELF_ONLY symbol absent from new snapshot → FUNC_REMOVED_ELF_ONLY.
 
-        ELF-only symbols (no header/DWARF data) that disappear could be internal
-        symbols getting properly hidden via -fvisibility=hidden.  Emitting
-        FUNC_REMOVED would produce a false BREAKING verdict in that case.
+        ELF-only symbols (no header/DWARF data) that disappear may be internal
+        symbols getting properly hidden via -fvisibility=hidden, but in strict
+        binary-only mode abicheck must still treat removed dynamic exports as
+        breaks because old binaries or dlsym() consumers may depend on them.
         Requires elf_only_mode=True on the old snapshot (set by dumper when
-        no headers are provided) to avoid false COMPATIBLE on real removals.
+        no headers are provided).
         """
         old_f = _func("sym", "_Z3symv", visibility=Visibility.ELF_ONLY)
         r = compare(_snap(functions=[old_f], elf_only_mode=True), _snap("2.0", functions=[]))
         assert any(c.kind == ChangeKind.FUNC_REMOVED_ELF_ONLY for c in r.changes)
         assert not any(c.kind == ChangeKind.FUNC_REMOVED for c in r.changes)
         assert not any(c.kind == ChangeKind.FUNC_VISIBILITY_CHANGED for c in r.changes)
-        assert r.verdict == Verdict.COMPATIBLE
+        assert r.verdict == Verdict.BREAKING
 
     def test_elf_only_to_hidden_is_visibility_change(self) -> None:
         """ELF_ONLY → HIDDEN: callers that resolved the symbol dynamically break.

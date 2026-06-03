@@ -1040,9 +1040,8 @@ def _dump_macho(
                     mangled=_normalize_macho_sym(exp.name),
                     return_type="?",
                     # ELF_ONLY: marks symbols as export-table-only (no header
-                    # confirmation).  This ensures the checker uses
-                    # FUNC_REMOVED_ELF_ONLY (compatible) rather than
-                    # FUNC_REMOVED (breaking) for visibility-cleanup removals.
+                    # confirmation). This lets the checker distinguish
+                    # binary-only removals as FUNC_REMOVED_ELF_ONLY.
                     visibility=Visibility.ELF_ONLY,
                     is_extern_c=not _normalize_macho_sym(exp.name).startswith("_Z"),
                 )
