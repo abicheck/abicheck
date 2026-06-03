@@ -9,6 +9,12 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+No changes yet.
+
+---
+
+## [0.3.0] — 2026-06-03
+
 ### Added
 
 #### Release Recommendation (semver + SONAME)
@@ -487,4 +493,5 @@ additional capabilities.
 
 [0.1.0]: https://github.com/napetrov/abicheck/releases/tag/v0.1.0
 [0.2.0]: https://github.com/napetrov/abicheck/releases/tag/v0.2.0
-[Unreleased]: https://github.com/napetrov/abicheck/compare/v0.2.0...HEAD
+[0.3.0]: https://github.com/napetrov/abicheck/releases/tag/v0.3.0
+[Unreleased]: https://github.com/napetrov/abicheck/compare/v0.3.0...HEAD
