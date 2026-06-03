@@ -100,8 +100,13 @@ try:
 except (FileNotFoundError, json.JSONDecodeError, ValueError) as _e:
     raise SystemExit(f"ERROR: cannot load {_GT_PATH}: {_e}") from _e
 
+def _expected_or_unknown(value: object) -> str:
+    """Return a printable/scorable expected verdict, or '?' for unscored cases."""
+    return value if isinstance(value, str) and value else "?"
+
+
 EXPECTED: dict[str, str] = {
-    k: v["expected"] for k, v in _gt_data["verdicts"].items()
+    k: _expected_or_unknown(v["expected"]) for k, v in _gt_data["verdicts"].items()
 }
 # Per-tool overrides sourced from ground_truth.json:
 #   expected_compat — compat mode can't emit API_BREAK (case31, case34)
@@ -112,7 +117,7 @@ EXPECTED_COMPAT: dict[str, str] = {
     if "expected_compat" in v
 }
 EXPECTED_ABICC: dict[str, str] = {
-    k: ("COMPATIBLE" if v["expected"] == "NO_CHANGE" else v["expected"])
+    k: ("COMPATIBLE" if EXPECTED[k] == "NO_CHANGE" else EXPECTED[k])
     for k, v in _gt_data["verdicts"].items()
 }
 

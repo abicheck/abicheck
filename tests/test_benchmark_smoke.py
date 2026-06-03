@@ -99,6 +99,13 @@ def test_pinned_suite_matches_historical_74_cases():
     assert "case74_detail_base_class_changed" not in pinned
 
 
+def test_null_expected_verdict_is_unscored_unknown():
+    mod = _load_benchmark()
+
+    assert mod.EXPECTED["case84_bundle_soname_skew"] == "?"
+    assert mod.EXPECTED_ABICC["case84_bundle_soname_skew"] == "?"
+
+
 # ── case64 compiler selection ────────────────────────────────────────────────
 
 def test_case64_auto_prefers_versioned_clang():

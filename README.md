@@ -144,39 +144,27 @@ See `abicheck.service` for the full signature, plus the [MCP server integration]
 
 ## Examples
 
-The [`examples/`](examples/README.md) directory contains **121 real-world ABI/API scenarios** (116 single-library cases plus 5 multi-library bundle cases) with ground-truth verdicts. Most are single-library `v1`/`v2` examples with a consumer app; bundle/release-level cases use release-style layouts. The full catalog is the development regression corpus; the table below is a smaller historical cross-tool benchmark kept stable for release-to-release comparison with libabigail and ABICC.
+The [`examples/`](examples/README.md) directory contains **121 real-world ABI/API scenarios** (116 single-library cases plus 5 multi-library bundle cases) with ground-truth verdicts. Most are single-library `v1`/`v2` examples with a consumer app; bundle/release-level cases use release-style layouts. The full catalog is the development regression corpus; a smaller historical cross-tool subset is kept in the reference docs for release-to-release comparison with libabigail and ABICC.
 
 ---
 
 ## Validation snapshot
 
-Current release-pinned cross-tool benchmark: accuracy on the historical 74-case subset (`case01`–`case73` + `case26b`, drawn from the full 121-case catalog):
-
-| Configuration | Exact verdict accuracy | Scan status |
-|---|---:|---|
-| `abicheck compare` | **74/74 (100%)** | 74/74 completed |
-| `abicheck compat` | **71/74 (95%)** | 74/74 completed |
-| `abicheck strict` | **62/74 (83%)** | 74/74 completed |
-| `abidiff` | **22/73 (30%)** | 73/74 completed; `case16` hangs |
-| `abidiff+headers` | **22/73 (30%)** | 73/74 completed; `case16` hangs |
-| `ABICC(dump)` | **51/71 (71%)** | 71/74 scored |
-| `ABICC(xml)` | **50/72 (69%)** | 72/74 scored |
-
-These numbers are reproducible from `scripts/benchmark_comparison.py --suite pinned74`, which writes `benchmark_reports/benchmark_report.json` with the selected suite, abicheck version, git commit, oracle tool versions, the `ground_truth.json` SHA-256, and per-tool accuracy. Release workflows attach that pinned-suite report to future GitHub Releases.
-
-To regenerate the release-pinned cross-tool report:
-
-```bash
-python scripts/benchmark_comparison.py --suite pinned74
-```
-
-To scan the full 121-case catalog for the current checkout:
+The main validation target is the full **121-case catalog**. To scan it for the current checkout:
 
 ```bash
 python scripts/benchmark_comparison.py --suite all
 ```
 
-Per-case matrix, methodology, and the pinned comparison table: [Tool Comparison & Benchmarks](https://napetrov.github.io/abicheck/reference/tool-comparison/).
+The command writes `benchmark_reports/benchmark_report.json` with the selected suite, abicheck version, git commit, tool versions, the `ground_truth.json` SHA-256, and per-tool accuracy. Cases that require bundle/release harnesses or unavailable compiler features are marked as unscored instead of being folded into single-library verdict accuracy.
+
+For apples-to-apples comparison with libabigail and ABICC, release workflows also run the historical pinned cross-tool subset (`case01`-`case73` + `case26b`) and attach that report to GitHub Releases:
+
+```bash
+python scripts/benchmark_comparison.py --suite pinned74
+```
+
+Per-case matrix, methodology, full-catalog notes, and the pinned cross-tool comparison table: [Tool Comparison & Benchmarks](https://napetrov.github.io/abicheck/reference/tool-comparison/).
 
 ---
 
