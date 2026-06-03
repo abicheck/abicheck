@@ -192,6 +192,27 @@ class TestExportOnlyAntiHiding:
         in_surf, _ = classify_change_surface(c, s, s)
         assert in_surf is False
 
+    def test_field_level_private_type_uses_owner_for_surface(self):
+        # Real-world regression: p11-kit DWARF reports
+        # ``p11_virtual::funcs`` while ``p11_virtual`` is internal and not
+        # reachable from any public API root. Treating the full field spelling
+        # as an unknown type kept the private layout change as BREAKING.
+        snap = AbiSnapshot(
+            library="l", version="1",
+            functions=[_fn("api", ret="Public *")],
+            types=[_rec("Public"), _rec("p11_virtual")],
+        )
+        s = compute_public_surface(snap)
+        assert "p11_virtual" not in s.public_types
+        c = Change(
+            kind=ChangeKind.STRUCT_FIELD_TYPE_CHANGED,
+            symbol="p11_virtual::funcs",
+            description="Field type changed",
+        )
+        in_surf, reason = classify_change_surface(c, s, s)
+        assert in_surf is False
+        assert reason == REASON_NON_PUBLIC_TYPE
+
 
 # ── ledger disclosure (JSON + SARIF) ──────────────────────────────────────────
 

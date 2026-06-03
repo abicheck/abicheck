@@ -105,6 +105,23 @@ _TYPE_LEVEL_KIND_NAMES: frozenset[str] = frozenset(
     }
 )
 
+_FIELD_LEVEL_TYPE_KIND_NAMES: frozenset[str] = frozenset(
+    {
+        "type_field_removed",
+        "type_field_added",
+        "type_field_offset_changed",
+        "type_field_type_changed",
+        "type_field_added_compatible",
+        "field_bitfield_changed",
+        "union_field_added",
+        "union_field_removed",
+        "union_field_type_changed",
+        "struct_field_offset_changed",
+        "struct_field_removed",
+        "struct_field_type_changed",
+    }
+)
+
 # Tokens that are type qualifiers / keywords, not type names.
 _TYPE_NOISE: frozenset[str] = frozenset(
     {
@@ -496,13 +513,18 @@ def classify_change_surface(
     all_types = surf_old.all_types | surf_new.all_types
 
     sym = change.symbol or ""
-    candidates = _type_identifiers(sym) | _type_identifiers(change.caused_by_type)
-
     # Type-level findings must not be classified via the symbol universe first:
     # a public type such as ``Foo`` can legitimately collide with a hidden
     # constructor/destructor/helper symbol named ``Foo``. In that case the
     # layout change's ``symbol`` still denotes the type, so reachability decides.
     type_level_finding = change.kind.value in _TYPE_LEVEL_KIND_NAMES
+    if type_level_finding and change.kind.value in _FIELD_LEVEL_TYPE_KIND_NAMES and "::" in sym:
+        # Field-level findings are encoded as ``Type::field``. Classifying the
+        # full string as a type keeps private fields in-surface as "unknown";
+        # use the owner type for reachability/provenance decisions.
+        candidates = {sym.rsplit("::", 1)[0]} | _type_identifiers(change.caused_by_type)
+    else:
+        candidates = _type_identifiers(sym) | _type_identifiers(change.caused_by_type)
 
     # Symbol-level finding (function/variable): public iff a public symbol.
     # A confident private/system-header origin demotes even an exported
