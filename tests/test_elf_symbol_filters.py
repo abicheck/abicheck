@@ -115,6 +115,17 @@ def test_stdlib_transitive_symbols_are_filtered(name: str) -> None:
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("name", [
+    # ELF lifecycle stubs emitted by the linker/toolchain, not library API.
+    "_init",
+    "_fini",
+])
+def test_elf_lifecycle_stubs_are_filtered(name: str) -> None:
+    assert _is_abi_relevant_symbol(name) is False, (
+        f"ELF lifecycle stub {name!r} should be filtered out"
+    )
+
+
+@pytest.mark.parametrize("name", [
     # mpfr public API
     "mpfr_add",
     "mpfr_mul",
@@ -129,10 +140,7 @@ def test_stdlib_transitive_symbols_are_filtered(name: str) -> None:
     "_ZNK6MyLib4Core4nameEv",
     "_ZTIN3foo3BarE",   # typeinfo for foo::Bar
     "_ZTSN3foo3BarE",   # typeinfo name for foo::Bar
-    # Regular single-underscore prefixed symbols (not double)
-    "_init",
-    "_fini",
-    # Symbol with single underscore separator — not private
+    # Public initialization-style APIs must not be confused with lifecycle stubs.
     "my_function",
     "lib_init",
     # Empty-ish edge cases that are valid names
@@ -249,17 +257,24 @@ def test_exported_symbol_names_notype_counts_for_both_surfaces() -> None:
 
 
 def test_exported_symbol_names_abi_relevant_only_drops_transitive_runtime() -> None:
-    """abi_relevant_only excludes transitive stdlib exports but keeps own symbols."""
+    """abi_relevant_only excludes transitive/toolchain exports but keeps own symbols."""
     meta = ElfMetadata(
         symbols=[
             ElfSymbol(name="_ZN6MyLib4CoreC1Ev", sym_type=SymbolType.FUNC),
             ElfSymbol(name="_ZNSt6vectorIiSaIiEE4sizeEv", sym_type=SymbolType.FUNC),
+            ElfSymbol(name="_init", sym_type=SymbolType.FUNC),
+            ElfSymbol(name="_fini", sym_type=SymbolType.FUNC),
+            ElfSymbol(name="lib_init", sym_type=SymbolType.FUNC),
         ]
     )
     assert exported_symbol_names(meta, FUNCTION_SYMBOL_TYPES) == {
         "_ZN6MyLib4CoreC1Ev",
         "_ZNSt6vectorIiSaIiEE4sizeEv",
+        "_init",
+        "_fini",
+        "lib_init",
     }
     assert exported_symbol_names(meta, FUNCTION_SYMBOL_TYPES, abi_relevant_only=True) == {
         "_ZN6MyLib4CoreC1Ev",
+        "lib_init",
     }
