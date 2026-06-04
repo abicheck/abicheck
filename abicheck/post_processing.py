@@ -648,8 +648,8 @@ class DemoteUnreachableInternalChurn:
     def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:
         from .checker_policy import ChangeKind
         from .internal_leak import (
-            DEFAULT_INTERNAL_NAMESPACES,
             _LEAK_TRIGGERING_KINDS,
+            DEFAULT_INTERNAL_NAMESPACES,
             _root_type_name_for_change,
             is_internal_type,
         )
