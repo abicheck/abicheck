@@ -199,6 +199,68 @@ def canonicalize_type_name(name: str) -> str:
     return result.strip()
 
 
+# Matches whole-word ``const`` / ``volatile`` qualifier tokens. Word boundaries
+# keep identifiers such as ``std::integral_constant`` or ``ConstIterator``
+# untouched — only the standalone cv keywords are stripped.
+_CV_TOKEN_RE = _re.compile(r"\b(?:const|volatile)\b")
+
+
+def _strip_cv_qualifiers(name: str) -> str:
+    """Return *name* with all ``const`` / ``volatile`` tokens removed.
+
+    Whitespace introduced by the removal is collapsed, and spaces adjacent to
+    pointer/reference sigils are normalised so that ``const char *`` and
+    ``char *`` reduce to the same string.
+    """
+    stripped = _CV_TOKEN_RE.sub(" ", name)
+    stripped = _MULTI_SPACE_RE.sub(" ", stripped)
+    # Normalise spacing around pointer/reference sigils so "char  *" == "char *".
+    stripped = _re.sub(r"\s*([*&])\s*", r" \1", stripped)
+    return _MULTI_SPACE_RE.sub(" ", stripped).strip()
+
+
+def cv_qualifiers_only_differ(old_type: str, new_type: str) -> bool:
+    """Return True when two *pointer/reference* spellings differ only by ``const`` / ``volatile``.
+
+    ``const`` / ``volatile`` qualifiers on (or behind) a pointer or reference
+    never change the parameter's calling convention, the pointer's width, or a
+    struct field's size/offset. Adding ``const`` to a pointed-to type
+    (``char *`` → ``const char *``), or to the pointer value itself
+    (``int *`` → ``int * const``), leaves the binary ABI identical — it is at
+    most a source/API-signature difference, not a binary break (ISSUE-29/52,
+    ISSUE-30/35/65).
+
+    The check is deliberately restricted to types containing a pointer (``*``)
+    or reference (``&``) sigil. A *by-value* cv change such as
+    ``int`` → ``const int`` is intentionally **not** neutralised here: although
+    it too is binary-layout-neutral, abicheck treats top-level field/variable
+    const/volatile as a source-level contract change (see the ``field_qualifiers``
+    detector and the ``case30_field_qualifiers`` example), reported through its
+    own dedicated change kinds.
+
+    Returns ``False`` when the canonical forms are already identical (no
+    difference), when stripping cv-qualifiers still leaves a genuine type
+    difference (a real ABI-relevant change), or when neither spelling is a
+    pointer/reference type.
+
+    >>> cv_qualifiers_only_differ("char *", "const char *")
+    True
+    >>> cv_qualifiers_only_differ("int", "const int")
+    False
+    >>> cv_qualifiers_only_differ("int *", "long *")
+    False
+    >>> cv_qualifiers_only_differ("Foo *", "Foo *")
+    False
+    """
+    if "*" not in old_type and "&" not in old_type:
+        return False
+    co = canonicalize_type_name(old_type)
+    cn = canonicalize_type_name(new_type)
+    if co == cn:
+        return False
+    return _strip_cv_qualifiers(co) == _strip_cv_qualifiers(cn)
+
+
 class Visibility(str, Enum):
     PUBLIC = "public"       # default visibility / exported
     HIDDEN = "hidden"       # __attribute__((visibility("hidden")))

@@ -40,6 +40,7 @@ from .elf_symbol_filter import is_abi_relevant_elf_symbol
 from .model import (
     AbiSnapshot,
     Visibility,
+    cv_qualifiers_only_differ,
     is_non_abi_surface_type,
     stdlib_namespaces_excluded,
 )
@@ -1323,7 +1324,15 @@ def _diff_struct_layouts(o: object, n: object) -> list[Change]:
             # - catches same-size type substitutions (int→float, Foo*→Bar*)
             # - strip "struct "/"class "/"union " prefixes for stable comparison
             # - still includes explicit size drift when known on both sides
-            type_name_changed = _normalize_type_name(old_f.type_name) != _normalize_type_name(new_f.type_name)
+            # A pointee/by-value cv-qualifier change (``char *`` ->
+            # ``const char *``) keeps the field's size and offset identical, so
+            # it is not a binary layout break (ISSUE-30/35/65: libuv
+            # ``uv_cpu_info_s::model`` const-pointer churn). A genuine size
+            # change is still reported via ``type_size_changed`` below.
+            type_name_changed = (
+                _normalize_type_name(old_f.type_name) != _normalize_type_name(new_f.type_name)
+                and not cv_qualifiers_only_differ(old_f.type_name, new_f.type_name)
+            )
             type_size_changed = (
                 old_f.byte_size > 0
                 and new_f.byte_size > 0

@@ -35,6 +35,7 @@ from .model import (
     RecordType,
     TypeField,
     canonicalize_type_name,
+    cv_qualifiers_only_differ,
 )
 from .model import is_non_abi_surface_type as _is_non_abi_surface_type
 from .model import stdlib_namespaces_excluded as _exclude_stdlib_namespaces
@@ -341,7 +342,14 @@ def _diff_type_field_pair(name: str, fname: str, f_old: TypeField, f_new: TypeFi
     changes: list[Change] = []
     # Use canonical form for type comparison to avoid false positives from
     # "struct Foo" vs "Foo" or "const int" vs "int const" differences.
-    if canonicalize_type_name(f_old.type) != canonicalize_type_name(f_new.type):
+    # A pointee/by-value cv-qualifier change (``char *`` -> ``const char *``)
+    # leaves the field's size and offset unchanged — it is source-level churn,
+    # not a binary layout break (ISSUE-30/35/65). Top-level field const/volatile
+    # is reported separately by the ``field_qualifiers`` detector.
+    if (
+        canonicalize_type_name(f_old.type) != canonicalize_type_name(f_new.type)
+        and not cv_qualifiers_only_differ(f_old.type, f_new.type)
+    ):
         changes.append(Change(
             kind=ChangeKind.TYPE_FIELD_TYPE_CHANGED,
             symbol=name,
@@ -738,7 +746,10 @@ def _diff_unions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                     description=f"Union field removed: {name}::{fname}",
                     old_value=f_old.type,
                 ))
-            elif canonicalize_type_name(f_old.type) != canonicalize_type_name(new_fields[fname].type):
+            elif (
+                canonicalize_type_name(f_old.type) != canonicalize_type_name(new_fields[fname].type)
+                and not cv_qualifiers_only_differ(f_old.type, new_fields[fname].type)
+            ):
                 changes.append(Change(
                     kind=ChangeKind.UNION_FIELD_TYPE_CHANGED,
                     symbol=name,

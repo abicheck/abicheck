@@ -42,6 +42,7 @@ from .model import (
     Variable,
     Visibility,
     canonicalize_type_name,
+    cv_qualifiers_only_differ,
     is_abi_surface_type_name,
     stdlib_namespaces_excluded,
 )
@@ -352,6 +353,12 @@ def _check_return_type_change(
         return []
     if canonicalize_type_name(f_old.return_type) == canonicalize_type_name(f_new.return_type):
         return []
+    # A pointee/by-value const-or-volatile qualification change (e.g.
+    # ``char *`` -> ``const char *``) does not change the return register or
+    # calling convention; it is a source/API-signature difference, not a
+    # binary ABI break (ISSUE-29/52: libuv/Wayland const-pointer churn).
+    if cv_qualifiers_only_differ(f_old.return_type, f_new.return_type):
+        return []
     # A name-only change between ABI-equivalent integer spellings (e.g.
     # long -> long long, size_t -> unsigned long on LP64) is not a binary ABI
     # break: same width, signedness, and calling convention.
@@ -373,6 +380,12 @@ def _params_differ(p_old: Param, p_new: Param, is_llp64: bool) -> bool:
     if p_old.kind != p_new.kind:
         return True
     if canonicalize_type_name(p_old.type) == canonicalize_type_name(p_new.type):
+        return False
+    # A pointee/by-value const-or-volatile qualification change (e.g.
+    # ``wl_display *`` -> ``const wl_display *``) leaves the parameter's
+    # calling convention and binary layout identical — it is source/API churn,
+    # not a binary ABI break (ISSUE-29/52).
+    if cv_qualifiers_only_differ(p_old.type, p_new.type):
         return False
     # Same kind, different spelling: not a change if the integer types are
     # ABI-equivalent (long -> long long, size_t -> unsigned long on LP64).
