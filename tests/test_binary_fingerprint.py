@@ -20,6 +20,7 @@ from abicheck.binary_fingerprint import (
 from abicheck.checker import ChangeKind, compare
 from abicheck.diff_symbols import (
     _ctor_dtor_variant,
+    _fingerprints_from_elf,
     _param_signature_of,
     _plausible_rename,
     _return_type_of,
@@ -669,6 +670,24 @@ class TestPlausibleRename:
 class TestFingerprintRenameDetector:
     """Test the fingerprint_renames detector via the full compare() pipeline."""
 
+    def test_fingerprints_from_elf_handles_missing_metadata(self) -> None:
+        snap = AbiSnapshot(
+            library="libtest.so.1",
+            version="1.0",
+            elf=None,
+            elf_only_mode=True,
+        )
+
+        assert _fingerprints_from_elf(snap) == {}
+
+    def test_fingerprints_from_elf_skips_non_function_symbols(self) -> None:
+        snap = _snap_elf_only("1.0", [
+            ElfSymbol(name="global_table", sym_type=SymbolType.OBJECT, size=_NORMAL_SIZE),
+            _func_sym("public_func", _NORMAL_SIZE),
+        ])
+
+        assert set(_fingerprints_from_elf(snap)) == {"public_func"}
+
     def test_likely_renamed_detected_in_elf_only_mode(self) -> None:
         """Renamed function with same size is detected as FUNC_LIKELY_RENAMED."""
         old = _snap_elf_only("1.0", [_func_sym("libfoo_v1_create", 256)])
@@ -767,6 +786,55 @@ class TestFingerprintRenameDetector:
         assert len(rename_changes) == 1
         assert rename_changes[0].old_value == "old_only"
         assert rename_changes[0].new_value == "new_only"
+
+    def test_retained_wrapper_not_reported_as_rename(self) -> None:
+        """A retained ABI symbol that shrinks to a wrapper is not a rename.
+
+        Real libssh2 1.11.0 -> 1.11.1 keeps libssh2_session_callback_set as a
+        tiny compatibility wrapper and adds libssh2_session_callback_set2 with
+        the old implementation size. The old symbol must not be reported as a
+        loader-breaking rename because existing binaries can still resolve it.
+        """
+        old = _snap_elf_only("1.0", [
+            _func_sym("libssh2_session_callback_set", 185),
+        ])
+        new = _snap_elf_only("2.0", [
+            _func_sym("libssh2_session_callback_set", _TINY_SIZE),
+            _func_sym("libssh2_session_callback_set2", 185),
+        ])
+        result = compare(old, new)
+
+        rename_changes = [c for c in result.changes if c.kind == ChangeKind.FUNC_LIKELY_RENAMED]
+        assert rename_changes == []
+        kinds = {c.kind for c in result.changes}
+        assert ChangeKind.FUNC_ADDED in kinds
+
+    def test_retained_export_not_used_as_rename_target(self) -> None:
+        """An unchanged exported function cannot be consumed as a rename target."""
+        old = _snap_elf_only("1.0", [
+            _func_sym("foo_v1", 128),
+            _func_sym("foo_v2", 128),
+        ])
+        new = _snap_elf_only("2.0", [
+            _func_sym("foo_v1", 128),
+        ])
+        result = compare(old, new)
+
+        rename_changes = [c for c in result.changes if c.kind == ChangeKind.FUNC_LIKELY_RENAMED]
+        assert rename_changes == []
+
+    def test_elf_linker_artifact_not_reported_as_rename(self) -> None:
+        """Filtered linker artifacts must not participate in fingerprint renames."""
+        old = _snap_elf_only("1.0", [
+            _func_sym("_init", 128),
+        ])
+        new = _snap_elf_only("2.0", [
+            _func_sym("lib_init", 128),
+        ])
+        result = compare(old, new)
+
+        rename_changes = [c for c in result.changes if c.kind == ChangeKind.FUNC_LIKELY_RENAMED]
+        assert rename_changes == []
 
     def test_unrelated_names_same_size_not_renamed(self) -> None:
         """Two unrelated functions that merely share a byte size must NOT be

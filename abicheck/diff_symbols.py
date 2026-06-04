@@ -30,7 +30,11 @@ from .checker_types import Change
 from .detector_registry import registry
 from .diff_helpers import bool_transition, diff_by_key
 from .elf_metadata import SymbolType
-from .elf_symbol_filter import FUNCTION_SYMBOL_TYPES, exported_symbol_names
+from .elf_symbol_filter import (
+    FUNCTION_SYMBOL_TYPES,
+    exported_symbol_names,
+    is_abi_relevant_elf_symbol,
+)
 from .model import (
     AbiSnapshot,
     Function,
@@ -118,7 +122,16 @@ def _public_functions(snap: AbiSnapshot) -> dict[str, Function]:
     theory hide a genuine removal — but DWARF-primary snapshots carry the full
     ``.dynsym``, so in practice the export set is authoritative here.
     """
-    funcs = {k: v for k, v in snap.function_map.items() if v.visibility in _PUBLIC_VIS}
+    funcs = {
+        k: v for k, v in snap.function_map.items()
+        if (
+            v.visibility in _PUBLIC_VIS
+            and (
+                v.visibility != Visibility.ELF_ONLY
+                or is_abi_relevant_elf_symbol(k)
+            )
+        )
+    }
     elf = getattr(snap, "elf", None)
     if elf is None or not getattr(elf, "symbols", None):
         return funcs
@@ -142,7 +155,14 @@ def _public_variables(snap: AbiSnapshot) -> dict[str, Variable]:
     """
     return {
         k: v for k, v in snap.variable_map.items()
-        if v.visibility in _PUBLIC_VIS and not _is_local_type_rtti(k)
+        if (
+            v.visibility in _PUBLIC_VIS
+            and (
+                v.visibility != Visibility.ELF_ONLY
+                or is_abi_relevant_elf_symbol(k)
+            )
+            and not _is_local_type_rtti(k)
+        )
     }
 
 
@@ -1676,6 +1696,8 @@ def _fingerprints_from_elf(snap: AbiSnapshot) -> dict[str, FunctionFingerprint]:
     for sym in snap.elf.symbols:
         if sym.sym_type not in _FUNC_LIKE_TYPES:
             continue
+        if not is_abi_relevant_elf_symbol(sym.name):
+            continue
         if sym.size < _MIN_SYMBOL_SIZE:
             continue
         result[sym.name] = FunctionFingerprint(
@@ -1710,6 +1732,32 @@ def _diff_fingerprint_renames(old: AbiSnapshot, new: AbiSnapshot) -> list[Change
     old_fps = _fingerprints_from_elf(old)
     new_fps = _fingerprints_from_elf(new)
 
+    if not old_fps or not new_fps:
+        return changes
+
+    old_elf = getattr(old, "elf", None)
+    new_elf = getattr(new, "elf", None)
+    old_exported_funcs = {
+        sym.name
+        for sym in (old_elf.symbols if old_elf is not None else [])
+        if sym.sym_type in _FUNC_LIKE_TYPES and is_abi_relevant_elf_symbol(sym.name)
+    }
+    new_exported_funcs = {
+        sym.name
+        for sym in (new_elf.symbols if new_elf is not None else [])
+        if sym.sym_type in _FUNC_LIKE_TYPES and is_abi_relevant_elf_symbol(sym.name)
+    }
+    retained_exported_funcs = old_exported_funcs & new_exported_funcs
+    old_fps = {
+        name: fp
+        for name, fp in old_fps.items()
+        if name not in retained_exported_funcs
+    }
+    new_fps = {
+        name: fp
+        for name, fp in new_fps.items()
+        if name not in retained_exported_funcs
+    }
     if not old_fps or not new_fps:
         return changes
 
