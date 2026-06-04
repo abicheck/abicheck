@@ -119,9 +119,14 @@ def _public_functions(snap: AbiSnapshot) -> dict[str, Function]:
     ``.dynsym``, so in practice the export set is authoritative here.
     """
     funcs = {k: v for k, v in snap.function_map.items() if v.visibility in _PUBLIC_VIS}
-    exported = exported_symbol_names(getattr(snap, "elf", None), FUNCTION_SYMBOL_TYPES)
-    if not exported:
+    elf = getattr(snap, "elf", None)
+    if elf is None or not getattr(elf, "symbols", None):
         return funcs
+    exported = exported_symbol_names(
+        elf,
+        FUNCTION_SYMBOL_TYPES,
+        abi_relevant_only=True,
+    )
     return {
         k: v for k, v in funcs.items()
         if k in exported or v.is_deleted
