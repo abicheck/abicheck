@@ -379,6 +379,17 @@ def test_visibility_leak_not_fired_for_clean_public_symbols() -> None:
     assert ChangeKind.VISIBILITY_LEAK not in kinds
 
 
+def test_visibility_leak_ignores_linker_artifact_symbols() -> None:
+    """Linker boundary symbols should not be counted as visibility leaks."""
+    old = _elf_only_snap(["public_api", "__bss_start", "_edata", "_end"])
+    new = _elf_only_snap(["public_api"])
+    result = compare(old, new)
+    kinds = {c.kind for c in result.changes}
+    assert ChangeKind.VISIBILITY_LEAK not in kinds
+    assert ChangeKind.FUNC_REMOVED_ELF_ONLY not in kinds
+    assert result.verdict == Verdict.NO_CHANGE
+
+
 def test_symbol_version_required_added_older_is_compat() -> None:
     """Adding an OLDER version requirement (e.g. GLIBC_2.2.5 when max was GLIBC_2.34)
     is NOT breaking — callers already satisfied the higher requirement.

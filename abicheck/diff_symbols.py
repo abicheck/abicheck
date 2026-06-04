@@ -30,7 +30,11 @@ from .checker_types import Change
 from .detector_registry import registry
 from .diff_helpers import bool_transition, diff_by_key
 from .elf_metadata import SymbolType
-from .elf_symbol_filter import FUNCTION_SYMBOL_TYPES, exported_symbol_names
+from .elf_symbol_filter import (
+    FUNCTION_SYMBOL_TYPES,
+    exported_symbol_names,
+    is_abi_relevant_elf_symbol,
+)
 from .model import (
     AbiSnapshot,
     Function,
@@ -118,7 +122,16 @@ def _public_functions(snap: AbiSnapshot) -> dict[str, Function]:
     theory hide a genuine removal — but DWARF-primary snapshots carry the full
     ``.dynsym``, so in practice the export set is authoritative here.
     """
-    funcs = {k: v for k, v in snap.function_map.items() if v.visibility in _PUBLIC_VIS}
+    funcs = {
+        k: v for k, v in snap.function_map.items()
+        if (
+            v.visibility in _PUBLIC_VIS
+            and (
+                v.visibility != Visibility.ELF_ONLY
+                or is_abi_relevant_elf_symbol(k)
+            )
+        )
+    }
     elf = getattr(snap, "elf", None)
     if elf is None or not getattr(elf, "symbols", None):
         return funcs
@@ -142,7 +155,14 @@ def _public_variables(snap: AbiSnapshot) -> dict[str, Variable]:
     """
     return {
         k: v for k, v in snap.variable_map.items()
-        if v.visibility in _PUBLIC_VIS and not _is_local_type_rtti(k)
+        if (
+            v.visibility in _PUBLIC_VIS
+            and (
+                v.visibility != Visibility.ELF_ONLY
+                or is_abi_relevant_elf_symbol(k)
+            )
+            and not _is_local_type_rtti(k)
+        )
     }
 
 

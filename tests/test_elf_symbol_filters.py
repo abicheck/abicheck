@@ -128,6 +128,18 @@ def test_elf_lifecycle_stubs_are_filtered(name: str) -> None:
 
 
 @pytest.mark.parametrize("name", [
+    # Linker-defined section boundary symbols, not callable library APIs.
+    "__bss_start",
+    "_edata",
+    "_end",
+])
+def test_elf_linker_boundary_symbols_are_filtered(name: str) -> None:
+    assert _is_abi_relevant_symbol(name) is False, (
+        f"ELF linker boundary symbol {name!r} should be filtered out"
+    )
+
+
+@pytest.mark.parametrize("name", [
     # mpfr public API
     "mpfr_add",
     "mpfr_mul",
@@ -266,6 +278,9 @@ def test_exported_symbol_names_abi_relevant_only_drops_transitive_runtime() -> N
             ElfSymbol(name="_ZNSt6vectorIiSaIiEE4sizeEv", sym_type=SymbolType.FUNC),
             ElfSymbol(name="_init", sym_type=SymbolType.FUNC),
             ElfSymbol(name="_fini", sym_type=SymbolType.FUNC),
+            ElfSymbol(name="__bss_start", sym_type=SymbolType.NOTYPE),
+            ElfSymbol(name="_edata", sym_type=SymbolType.NOTYPE),
+            ElfSymbol(name="_end", sym_type=SymbolType.NOTYPE),
             ElfSymbol(name="lib_init", sym_type=SymbolType.FUNC),
         ]
     )
@@ -274,6 +289,9 @@ def test_exported_symbol_names_abi_relevant_only_drops_transitive_runtime() -> N
         "_ZNSt6vectorIiSaIiEE4sizeEv",
         "_init",
         "_fini",
+        "__bss_start",
+        "_edata",
+        "_end",
         "lib_init",
     }
     assert exported_symbol_names(meta, FUNCTION_SYMBOL_TYPES, abi_relevant_only=True) == {

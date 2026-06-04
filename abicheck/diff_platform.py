@@ -36,6 +36,7 @@ from .diff_platform_templates import (
 from .diff_symbols import _public_functions
 from .diff_types import _RESERVED_FIELD_RE
 from .elf_metadata import SymbolBinding, SymbolType
+from .elf_symbol_filter import is_abi_relevant_elf_symbol
 from .model import (
     AbiSnapshot,
     Visibility,
@@ -281,7 +282,11 @@ def _diff_visibility_leak(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
 
     leaked = [
         f for f in old.functions
-        if f.visibility == Visibility.ELF_ONLY and _looks_internal(f.name)
+        if (
+            f.visibility == Visibility.ELF_ONLY
+            and is_abi_relevant_elf_symbol(f.name)
+            and _looks_internal(f.name)
+        )
     ]
     if not leaked:
         return []
@@ -1512,4 +1517,3 @@ def _diff_elf_deleted_fallback(old: AbiSnapshot, new: AbiSnapshot) -> list[Chang
 # AI-readiness file-size soft cap. Re-exported below so existing imports from
 # ``abicheck.diff_platform`` keep working.
 # Re-exports for backwards compatibility — see top-of-file imports.
-

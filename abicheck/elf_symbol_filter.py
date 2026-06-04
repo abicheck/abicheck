@@ -42,9 +42,16 @@ _GCC_INTERNAL_PREFIXES = (
     "__libm_avx_",
 )
 
-# ELF lifecycle entry/exit stubs are emitted by toolchains/linkers rather than
-# by the library's public ABI contract. Treat exact names only as non-ABI.
-_ELF_LIFECYCLE_STUBS = frozenset({"_init", "_fini"})
+# ELF lifecycle entry/exit stubs and linker-defined section boundary symbols are
+# emitted by toolchains/linkers rather than by the library's public ABI contract.
+# Treat exact names only as non-ABI.
+_ELF_LINKER_ARTIFACTS = frozenset({
+    "_init",
+    "_fini",
+    "__bss_start",
+    "_edata",
+    "_end",
+})
 
 # Prefixes that identify transitive C++ standard-library symbols which may
 # appear in .dynsym via weak linkage (libstdc++ / libc++).
@@ -94,7 +101,7 @@ def is_abi_relevant_elf_symbol(name: str) -> bool:
     if not name:
         return False
 
-    if name in _ELF_LIFECYCLE_STUBS:
+    if name in _ELF_LINKER_ARTIFACTS:
         return False
 
     for prefix in _GCC_INTERNAL_PREFIXES:
