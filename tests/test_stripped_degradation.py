@@ -274,6 +274,57 @@ class TestPartialMetadata:
         assert ChangeKind.FUNC_REMOVED not in process_kinds
         assert ChangeKind.FUNC_REMOVED_ELF_ONLY not in process_kinds
 
+    def test_unexported_dwarf_deleted_function_not_public_surface(self):
+        """DWARF-only deleted special members must not become public ABI.
+
+        oneTBB debug builds expose internal deleted copy constructors/operators
+        through DW_AT_deleted, but the functions are not in .dynsym. When a
+        later build is stripped, those internal DWARF declarations must not
+        become public removals.
+        """
+        internal = _pub_func(
+            "tbb::detail::d0::atomic_backoff::atomic_backoff",
+            "_ZN3tbb6detail2d014atomic_backoffC4ERKS2_",
+            is_deleted=True,
+            deleted_from_dwarf=True,
+        )
+        exported = _pub_func("api", "_Z3apiv")
+        elf = ElfMetadata(
+            symbols=[ElfSymbol(name="_Z3apiv", binding=SymbolBinding.GLOBAL,
+                               sym_type=SymbolType.FUNC)],
+        )
+
+        r = compare(
+            _snap(functions=[internal, exported], elf=elf, dwarf=DwarfMetadata(has_dwarf=True)),
+            _snap(functions=[exported], elf=elf, elf_only_mode=True),
+        )
+
+        assert ChangeKind.FUNC_REMOVED not in _kinds(r)
+        assert ChangeKind.FUNC_REMOVED_ELF_ONLY not in _kinds(r)
+        assert r.verdict != Verdict.BREAKING
+
+    def test_exported_dwarf_deleted_function_still_detected(self):
+        """Confirmed exported DWARF-deleted APIs still report a deletion."""
+        old = _pub_func("api", "_Z3apiv")
+        new = _pub_func(
+            "api",
+            "_Z3apiv",
+            is_deleted=True,
+            deleted_from_dwarf=True,
+        )
+        elf = ElfMetadata(
+            symbols=[ElfSymbol(name="_Z3apiv", binding=SymbolBinding.GLOBAL,
+                               sym_type=SymbolType.FUNC)],
+        )
+
+        r = compare(
+            _snap(functions=[old], elf=elf, dwarf=DwarfMetadata(has_dwarf=True)),
+            _snap(functions=[new], elf=elf, dwarf=DwarfMetadata(has_dwarf=True)),
+        )
+
+        assert ChangeKind.FUNC_DELETED_DWARF in _kinds(r)
+        assert r.verdict == Verdict.BREAKING
+
     def test_dwarf_present_elf_absent(self):
         """DWARF metadata present, ELF absent — should not crash."""
         dwarf = DwarfMetadata(
