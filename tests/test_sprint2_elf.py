@@ -105,6 +105,29 @@ def test_symbol_version_defined_removed() -> None:
     assert result.verdict == Verdict.BREAKING
 
 
+def test_unattached_private_symbol_version_marker_removed_is_ignored() -> None:
+    old = _snap(_elf(versions_defined=["LIBFOO_1.0", "LIBFOO_PRIVATE"]))
+    new = _snap(_elf(versions_defined=["LIBFOO_1.0"]))
+    result = compare(old, new)
+    kinds = {c.kind for c in result.changes}
+    assert ChangeKind.SYMBOL_VERSION_DEFINED_REMOVED not in kinds
+    assert result.verdict == Verdict.NO_CHANGE
+
+
+def test_private_symbol_version_with_exported_symbol_removed_is_breaking() -> None:
+    old = _snap(
+        _elf(
+            versions_defined=["LIBFOO_1.0", "LIBFOO_PRIVATE"],
+            symbols=[_sym("private_api", version="LIBFOO_PRIVATE")],
+        )
+    )
+    new = _snap(_elf(versions_defined=["LIBFOO_1.0"], symbols=[]))
+    result = compare(old, new)
+    kinds = {c.kind for c in result.changes}
+    assert ChangeKind.SYMBOL_VERSION_NODE_REMOVED in kinds
+    assert result.verdict == Verdict.BREAKING
+
+
 def test_symbol_version_defined_added_compatible() -> None:
     old = _snap(_elf(versions_defined=[]))
     new = _snap(_elf(versions_defined=["LIBFOO_1.0"]))
