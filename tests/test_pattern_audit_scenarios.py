@@ -127,6 +127,7 @@ def _snap(
         enums=list(enums or []),
         constants=dict(constants or {}),
         typedefs=dict(typedefs or {}),
+        from_headers=True,
     )
 
 

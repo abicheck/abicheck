@@ -39,7 +39,7 @@ def _snap(
     if funcs is None:
         funcs = [Function(name="foo", mangled="_Z3foov", return_type="int",
                           visibility=Visibility.PUBLIC)]
-    return AbiSnapshot(library=library, version=version, functions=funcs)
+    return AbiSnapshot(library=library, version=version, functions=funcs, from_headers=True)
 
 
 def _write_snap(path: Path, snap: AbiSnapshot) -> Path:

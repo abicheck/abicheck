@@ -35,7 +35,7 @@ from abicheck.model import (
 
 
 def _snap(**kwargs: object) -> AbiSnapshot:
-    defaults: dict[str, object] = dict(library="lib.so", version="1.0")
+    defaults: dict[str, object] = dict(library="lib.so", version="1.0", from_headers=True)
     defaults.update(kwargs)
     return AbiSnapshot(**defaults)  # type: ignore[arg-type]
 
@@ -543,8 +543,8 @@ class TestParamRenamed:
         assert result.verdict == Verdict.API_BREAK
 
     def test_dwarf_only_param_rename_is_not_source_break(self) -> None:
-        old = _snap(functions=[_func("f", "_Z1fi", params=[Param("arg_size", "int")])])
-        new = _snap(functions=[_func("f", "_Z1fi", params=[Param("size", "int")])])
+        old = _snap(functions=[_func("f", "_Z1fi", params=[Param("arg_size", "int")])], from_headers=False)
+        new = _snap(functions=[_func("f", "_Z1fi", params=[Param("size", "int")])], from_headers=False)
         result = compare(old, new)
         assert ChangeKind.PARAM_RENAMED not in _kinds(result)
         assert result.verdict == Verdict.NO_CHANGE

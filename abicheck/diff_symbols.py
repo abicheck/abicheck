@@ -836,7 +836,17 @@ def _diff_variables(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
 
 @registry.detector("param_defaults")
 def _diff_param_defaults(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
-    """Detect parameter default value changes/removals."""
+    """Detect parameter default value changes/removals.
+
+    Header-tier only: default-argument values are populated solely from castxml
+    header parsing. If either side was NOT parsed from headers (DWARF/symbols
+    mode, or an older headerless snapshot), ``Param.default`` is ``None`` only
+    because the value is *unavailable*, not removed — comparing would report
+    every defaulted parameter as ``PARAM_DEFAULT_VALUE_REMOVED``. Skip unless
+    both snapshots are header-aware.
+    """
+    if not (old.from_headers and new.from_headers):
+        return []
     changes: list[Change] = []
     old_map = _public_functions(old)
     new_map = _public_functions(new)
@@ -1223,7 +1233,17 @@ def _diff_param_va_list(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
 
 @registry.detector("constants")
 def _diff_constants(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
-    """Detect preprocessor constant (#define) changes (ABICC: Changed/Added/Removed_Constant)."""
+    """Detect preprocessor / const-constant changes (ABICC: Changed/Added/Removed_Constant).
+
+    Header-tier only: ``AbiSnapshot.constants`` is populated solely from castxml
+    header parsing. If either side was NOT parsed from headers (DWARF/symbols
+    mode, or a snapshot taken before constant extraction), its ``constants`` map
+    is empty only because the data is *unavailable* — comparing would report
+    every constant as removed (or added, depending on direction). Skip unless
+    both snapshots are header-aware.
+    """
+    if not (old.from_headers and new.from_headers):
+        return []
     changes: list[Change] = []
     old_consts = old.constants
     new_consts = new.constants

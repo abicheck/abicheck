@@ -19,7 +19,7 @@ from abicheck.model import (
 
 
 def _snap(version="1.0", functions=None, variables=None, types=None,
-          enums=None, typedefs=None, elf=None, constants=None, from_headers=False):
+enums=None, typedefs=None, elf=None, constants=None, from_headers=True):
     return AbiSnapshot(
         library="libtest.so.1", version=version,
         functions=functions or [], variables=variables or [],

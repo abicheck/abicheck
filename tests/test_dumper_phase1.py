@@ -29,7 +29,8 @@ def test_dump_without_headers_warns_and_returns_exported_symbols(tmp_path, monke
 
 
 class _FakeParser:
-    def __init__(self, root, exported_dynamic, exported_static, header_files=None):
+    def __init__(self, root, exported_dynamic, exported_static,
+                 public_header_paths=None, public_dir_paths=None):
         assert root.tag == "GCC_XML"
         assert exported_dynamic == {"pub"}
         assert exported_static == {"pub", "local"}

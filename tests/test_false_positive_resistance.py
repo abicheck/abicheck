@@ -37,6 +37,7 @@ def _snap(version="1.0", functions=None, variables=None, types=None,
         types=types or [], enums=enums or [],
         typedefs=typedefs or {}, elf=elf,
         constants=constants or {},
+        from_headers=True,
     )
 
 

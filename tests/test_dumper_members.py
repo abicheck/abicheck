@@ -16,11 +16,11 @@ from abicheck.dumper import _CastxmlParser
 def _make_parser(
     xml_str: str,
     exported: set[str] | None = None,
-    header_files: set[str] | None = None,
+    public_header_paths: list[str] | None = None,
 ) -> _CastxmlParser:
     root = fromstring(xml_str)  # noqa: S314  # nosec B314 (trusted test data)
     exp = exported or set()
-    return _CastxmlParser(root, exp, exp, header_files=header_files)
+    return _CastxmlParser(root, exp, exp, public_header_paths=public_header_paths)
 
 
 # ── fixtures ─────────────────────────────────────────────────────────────
@@ -173,14 +173,14 @@ class TestConstantExtraction:
         # A private static constexpr member is an implementation detail a
         # consumer cannot name — its value must not be reported as an API
         # constant. Only the public member is extracted.
-        p = _make_parser(_PRIVATE_CONST_XML, header_files={"test.h"})
+        p = _make_parser(_PRIVATE_CONST_XML, public_header_paths=["test.h"])
         assert p.parse_constants() == {"Widget::kPublic": "1"}
 
     def test_same_named_constants_in_different_scopes_do_not_alias(self) -> None:
         # Regression: bare-name keys would collapse A::kLimit/B::kLimit/C::kLimit
         # into one entry (last-wins), masking a real change. Keys must qualify by
         # namespace/class context (and a global constant stays bare).
-        p = _make_parser(_CONSTANTS_XML, header_files={"test.h"})
+        p = _make_parser(_CONSTANTS_XML, public_header_paths=["test.h"])
         consts = p.parse_constants()
         assert consts == {
             "kLimit": "4", "A::kLimit": "1", "B::kLimit": "2", "C::kLimit": "3",

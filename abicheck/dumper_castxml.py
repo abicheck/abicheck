@@ -21,7 +21,6 @@ soft cap. Re-exported from ``abicheck.dumper`` so existing imports of
 """
 from __future__ import annotations
 
-import os
 import re
 from pathlib import Path
 from typing import Any
@@ -60,15 +59,23 @@ class _CastxmlParser:
 
     def __init__(self, root: Element, exported_dynamic: set[str],
                  exported_static: set[str],
-                 header_files: set[str] | None = None):
+                 public_header_paths: list[str] | None = None,
+                 public_dir_paths: list[str] | None = None):
         self._root = root
         self._exported_dynamic = exported_dynamic
         self._exported_static = exported_static
-        # Realpaths of the user-provided public headers. Used to restrict
-        # constant extraction (parse_constants) to the public API surface so
-        # constants from transitively-included system/private headers do not
-        # leak in. None / empty → constant extraction is skipped.
-        self._header_files = {os.path.realpath(h) for h in (header_files or set())}
+        # Public-header surface used to scope constant extraction
+        # (parse_constants). Seeded from the parsed headers (-H/--header) plus
+        # any explicit --public-header / --public-header-dir inputs, and matched
+        # with the same provenance segment logic used elsewhere — so constants
+        # reached via an umbrella header or a public include dir are kept, while
+        # transitively-included system/private-header constants are excluded.
+        # Empty → constant extraction is skipped (provenance is opt-in).
+        from .provenance import build_public_set
+        (self._pub_header_segs, self._pub_dir_segs,
+         self._have_public_set) = build_public_set(
+            public_header_paths, public_dir_paths,
+        )
         self._id_map: dict[str, Element] = {}
         self._virtual_methods_by_class: dict[str, list[Element]] = {}
         self._source_lines_cache: dict[str, list[str]] = {}
@@ -432,13 +439,15 @@ class _CastxmlParser:
         exported symbol, so it is invisible to DWARF/object comparison; only the
         header (castxml) tier can see it.
 
-        Restricted to declarations in the user-provided headers (``self._header_files``)
-        so constants pulled in transitively from system/private headers do not
-        leak in — keeping the resulting CONSTANT_* findings provenance-clean.
-        Returns ``name -> value``; empty when no public headers were provided
-        (e.g. DWARF/symbols-only mode).
+        Scoped to the public-header surface via provenance: a constant is kept
+        only when its declaring header classifies as ``PUBLIC_HEADER`` (the
+        parsed ``-H`` headers, plus any ``--public-header``/``--public-header-dir``
+        inputs — so constants reached through an umbrella header or a public
+        include dir are captured, while transitively-included system/private
+        headers are excluded). Returns ``name -> value``; empty when no public
+        header set is available (e.g. DWARF/symbols-only mode).
         """
-        if not self._header_files:
+        if not self._have_public_set:
             return {}
         constants: dict[str, str] = {}
         for el in self._root:
@@ -467,7 +476,7 @@ class _CastxmlParser:
             )
             if not is_const:
                 continue
-            if not self._decl_in_provided_header(el):
+            if not self._decl_is_public(el):
                 continue
             # Qualify the key with its namespace/class context so that
             # constants sharing an unqualified name in different scopes
@@ -497,15 +506,22 @@ class _CastxmlParser:
             ctx_id = ctx.get("context", "")
         return "::".join(reversed(parts))
 
-    def _decl_in_provided_header(self, el: Any) -> bool:
-        """True if *el* is declared in one of the user-provided public headers."""
-        loc = self._source_location(el)
-        if not loc:
+    def _decl_is_public(self, el: Any) -> bool:
+        """True if *el*'s declaring header classifies as a public header.
+
+        Uses the shared provenance segment matcher (suffix/basename/public-dir
+        containment), so build-prefixed paths and umbrella-included public
+        headers match while system/private headers do not.
+        """
+        from .model import ScopeOrigin
+        from .provenance import classify_origin, header_from_location
+        sh = header_from_location(self._source_location(el))
+        if not sh:
             return False
-        fname = loc.rsplit(":", 1)[0]
-        if not fname:
-            return False
-        return os.path.realpath(fname) in self._header_files
+        return classify_origin(
+            sh, self._pub_header_segs, self._pub_dir_segs,
+            have_public_set=self._have_public_set,
+        ) == ScopeOrigin.PUBLIC_HEADER
 
     def parse_types(self) -> list[RecordType]:
         # Build reverse mapping: struct/union ID → typedef name for anonymous types.

@@ -25,12 +25,12 @@ from abicheck.model import (
 
 
 def _snap(version="1.0", functions=None, variables=None, types=None,
-          enums=None, typedefs=None, elf=None):
+          enums=None, typedefs=None, elf=None, from_headers=False):
     return AbiSnapshot(
         library="libtest.so.1", version=version,
         functions=functions or [], variables=variables or [],
         types=types or [], enums=enums or [],
-        typedefs=typedefs or {}, elf=elf,
+        typedefs=typedefs or {}, elf=elf, from_headers=from_headers,
     )
 
 
@@ -577,29 +577,42 @@ def _func_with_default(default):
     ])
 
 
+def _hsnap(**kw):
+    # Header-aware snapshot: default-arg values and constants are header-tier
+    # signals, so the detectors only run when both sides are from_headers.
+    return _snap(from_headers=True, **kw)
+
+
 class TestParamDefaultValue:
     def test_default_removed_is_api_break(self):
-        r = compare(_snap(functions=[_func_with_default("1")]),
-                    _snap(functions=[_func_with_default(None)]))
+        r = compare(_hsnap(functions=[_func_with_default("1")]),
+                    _hsnap(functions=[_func_with_default(None)]))
         assert _has_kind(r, ChangeKind.PARAM_DEFAULT_VALUE_REMOVED)
 
     def test_default_value_changed(self):
-        r = compare(_snap(functions=[_func_with_default("1")]),
-                    _snap(functions=[_func_with_default("2")]))
+        r = compare(_hsnap(functions=[_func_with_default("1")]),
+                    _hsnap(functions=[_func_with_default("2")]))
         assert _has_kind(r, ChangeKind.PARAM_DEFAULT_VALUE_CHANGED)
 
     def test_same_default_no_change(self):
-        r = compare(_snap(functions=[_func_with_default("1")]),
-                    _snap(functions=[_func_with_default("1")]))
+        r = compare(_hsnap(functions=[_func_with_default("1")]),
+                    _hsnap(functions=[_func_with_default("1")]))
         assert not _has_kind(r, ChangeKind.PARAM_DEFAULT_VALUE_CHANGED)
         assert not _has_kind(r, ChangeKind.PARAM_DEFAULT_VALUE_REMOVED)
 
     def test_adding_default_is_not_a_break(self):
         # Adding a default is source-compatible; no removal/changed finding.
-        r = compare(_snap(functions=[_func_with_default(None)]),
-                    _snap(functions=[_func_with_default("1")]))
+        r = compare(_hsnap(functions=[_func_with_default(None)]),
+                    _hsnap(functions=[_func_with_default("1")]))
         assert not _has_kind(r, ChangeKind.PARAM_DEFAULT_VALUE_REMOVED)
         assert not _has_kind(r, ChangeKind.PARAM_DEFAULT_VALUE_CHANGED)
+
+    def test_skipped_when_one_side_lacks_headers(self):
+        # Mixed-tier: baseline has headers, candidate is DWARF/symbols-only.
+        # The bare None default on the headerless side must NOT read as removed.
+        r = compare(_hsnap(functions=[_func_with_default("1")]),
+                    _snap(functions=[_func_with_default(None)], from_headers=False))
+        assert not _has_kind(r, ChangeKind.PARAM_DEFAULT_VALUE_REMOVED)
 
 
 # ── CONSTANT_* (const / constexpr header constant values) ─────────────────────
@@ -628,9 +641,16 @@ class TestHeaderConstants:
         assert not _has_kind(r, ChangeKind.CONSTANT_CHANGED)
         assert not _has_kind(r, ChangeKind.CONSTANT_REMOVED)
 
+    def test_skipped_when_one_side_lacks_headers(self):
+        # Mixed-tier: a header baseline vs a DWARF/symbols-only candidate (empty
+        # constants because unavailable, not removed) must not report removals.
+        r = compare(_snap_with_constants({"kLimit": "100"}),
+                    _snap_with_constants({}, from_headers=False))
+        assert not _has_kind(r, ChangeKind.CONSTANT_REMOVED)
 
-def _snap_with_constants(constants):
-    s = _snap()
+
+def _snap_with_constants(constants, from_headers=True):
+    s = _snap(from_headers=from_headers)
     s.constants = dict(constants)
     return s
 

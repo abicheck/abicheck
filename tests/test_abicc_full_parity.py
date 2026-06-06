@@ -38,7 +38,7 @@ from abicheck.model import (
 
 
 def _snap(**kwargs: object) -> AbiSnapshot:
-    defaults: dict[str, object] = dict(library="lib.so", version="1.0")
+    defaults: dict[str, object] = dict(library="lib.so", version="1.0", from_headers=True)
     defaults.update(kwargs)
     return AbiSnapshot(**defaults)  # type: ignore[arg-type]
 
