@@ -509,6 +509,7 @@ class TestParamRenamed:
 
     def test_param_renamed_detected(self) -> None:
         old = _snap(
+            from_headers=True,
             functions=[
                 _func(
                     "draw",
@@ -518,6 +519,7 @@ class TestParamRenamed:
             ]
         )
         new = _snap(
+            from_headers=True,
             functions=[
                 _func(
                     "draw", "_Z4drawii", params=[Param("w", "int"), Param("h", "int")]
@@ -529,10 +531,23 @@ class TestParamRenamed:
         assert len(renames) == 2
 
     def test_param_renamed_is_source_break(self) -> None:
-        old = _snap(functions=[_func("f", "_Z1fi", params=[Param("count", "int")])])
-        new = _snap(functions=[_func("f", "_Z1fi", params=[Param("n", "int")])])
+        old = _snap(
+            from_headers=True,
+            functions=[_func("f", "_Z1fi", params=[Param("count", "int")])],
+        )
+        new = _snap(
+            from_headers=True,
+            functions=[_func("f", "_Z1fi", params=[Param("n", "int")])],
+        )
         result = compare(old, new)
         assert result.verdict == Verdict.API_BREAK
+
+    def test_dwarf_only_param_rename_is_not_source_break(self) -> None:
+        old = _snap(functions=[_func("f", "_Z1fi", params=[Param("arg_size", "int")])])
+        new = _snap(functions=[_func("f", "_Z1fi", params=[Param("size", "int")])])
+        result = compare(old, new)
+        assert ChangeKind.PARAM_RENAMED not in _kinds(result)
+        assert result.verdict == Verdict.NO_CHANGE
 
     def test_no_rename_when_unchanged(self) -> None:
         old = _snap(functions=[_func("f", "_Z1fi", params=[Param("x", "int")])])

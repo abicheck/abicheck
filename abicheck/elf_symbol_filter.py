@@ -89,7 +89,6 @@ _STDLIB_RTTI_PREFIXES = (
     "_ZTSN7__cxx11",
 )
 
-
 def is_abi_relevant_elf_symbol(name: str) -> bool:
     """Return False for ELF symbols that are not the library's own ABI.
 

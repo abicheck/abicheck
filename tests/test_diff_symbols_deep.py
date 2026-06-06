@@ -19,13 +19,14 @@ from abicheck.model import (
 
 
 def _snap(version="1.0", functions=None, variables=None, types=None,
-          enums=None, typedefs=None, elf=None, constants=None):
+          enums=None, typedefs=None, elf=None, constants=None, from_headers=False):
     return AbiSnapshot(
         library="libtest.so.1", version=version,
         functions=functions or [], variables=variables or [],
         types=types or [], enums=enums or [],
         typedefs=typedefs or {}, elf=elf,
         constants=constants or {},
+        from_headers=from_headers,
     )
 
 
@@ -370,7 +371,10 @@ class TestParamRenamed:
                           params=[Param(name="x_pos", type="int")])
         f_v2 = _pub_func("draw", "_Z4drawv",
                           params=[Param(name="horizontal", type="int")])
-        r = compare(_snap(functions=[f_v1]), _snap(functions=[f_v2]))
+        r = compare(
+            _snap(functions=[f_v1], from_headers=True),
+            _snap(functions=[f_v2], from_headers=True),
+        )
         assert ChangeKind.PARAM_RENAMED in _kinds(r)
 
 

@@ -42,10 +42,21 @@ COMPILER_INTERNAL_TYPES: frozenset[str] = frozenset({
     "__NSConstantString_tag", "__NSConstantString",
 })
 
+_TYPEDEF_ALIAS_RE = _re.compile(r"^typedef\s+(.+?)\s+([A-Za-z_][\w:]*)$")
+
 
 def is_compiler_internal_type(name: str) -> bool:
     """Return True if *name* is a compiler internal type that should be excluded."""
-    return bool(name) and name in COMPILER_INTERNAL_TYPES
+    if not name:
+        return False
+    stripped = name.strip()
+    if stripped in COMPILER_INTERNAL_TYPES:
+        return True
+    m = _TYPEDEF_ALIAS_RE.match(stripped)
+    if not m:
+        return False
+    aliased, alias = m.groups()
+    return aliased.strip() in COMPILER_INTERNAL_TYPES and alias in COMPILER_INTERNAL_TYPES
 
 
 # Standard-library / runtime namespaces whose *type layout* is owned by the
@@ -83,7 +94,7 @@ def is_non_abi_surface_type(name: str, *, exclude_stdlib_namespaces: bool = True
     """
     if not name:
         return False
-    if name in COMPILER_INTERNAL_TYPES:
+    if is_compiler_internal_type(name):
         return True
     if exclude_stdlib_namespaces and name.startswith(_STDLIB_TYPE_NAMESPACE_PREFIXES):
         return True

@@ -10,7 +10,7 @@ from __future__ import annotations
 import pytest
 
 from abicheck.diff_symbols import _public_functions, _public_variables
-from abicheck.dumper import _is_abi_relevant_symbol
+from abicheck.dumper import _elf_classify_symbols, _is_abi_relevant_symbol
 from abicheck.dwarf_snapshot import _DwarfSnapshotBuilder
 from abicheck.elf_metadata import ElfMetadata, ElfSymbol, SymbolType
 from abicheck.elf_symbol_filter import (
@@ -109,6 +109,21 @@ def test_private_double_underscore_symbols_are_filtered(name: str) -> None:
 def test_stdlib_transitive_symbols_are_filtered(name: str) -> None:
     assert _is_abi_relevant_symbol(name) is False, (
         f"Transitive stdlib symbol {name!r} should be filtered out"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Bug 4: Linker-defined ELF boundary symbols — must be filtered
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("name", [
+    "__bss_start",
+    "_edata",
+    "_end",
+])
+def test_linker_boundary_symbols_are_filtered(name: str) -> None:
+    assert _is_abi_relevant_symbol(name) is False, (
+        f"Linker boundary symbol {name!r} should be filtered out"
     )
 
 
@@ -411,3 +426,47 @@ def test_public_variables_filters_elf_only_linker_artifacts() -> None:
     )
 
     assert set(_public_variables(snap)) == {"public_table"}
+
+
+def test_exported_symbol_names_abi_relevant_only_drops_linker_boundaries() -> None:
+    """abi_relevant_only excludes linker boundary markers but keeps real exports."""
+    meta = ElfMetadata(
+        symbols=[
+            ElfSymbol(name="ev_run", sym_type=SymbolType.FUNC),
+            ElfSymbol(name="__bss_start", sym_type=SymbolType.NOTYPE),
+            ElfSymbol(name="_edata", sym_type=SymbolType.NOTYPE),
+            ElfSymbol(name="_end", sym_type=SymbolType.NOTYPE),
+        ]
+    )
+    assert exported_symbol_names(meta, FUNCTION_SYMBOL_TYPES) == {
+        "ev_run",
+        "__bss_start",
+        "_edata",
+        "_end",
+    }
+    assert exported_symbol_names(meta, FUNCTION_SYMBOL_TYPES, abi_relevant_only=True) == {
+        "ev_run",
+    }
+
+
+def test_elf_classify_symbols_drops_linker_boundaries_from_symbol_only_mode() -> None:
+    """The no-header ELF path must not re-admit linker boundary NOTYPE names."""
+    meta = ElfMetadata(
+        symbols=[
+            ElfSymbol(name="ev_run", sym_type=SymbolType.FUNC),
+            ElfSymbol(name="__bss_start", sym_type=SymbolType.NOTYPE),
+            ElfSymbol(name="_edata", sym_type=SymbolType.NOTYPE),
+            ElfSymbol(name="_end", sym_type=SymbolType.NOTYPE),
+            ElfSymbol(name="ev_loop_default", sym_type=SymbolType.OBJECT),
+        ]
+    )
+
+    exported, funcs, objects, tls = _elf_classify_symbols(
+        meta,
+        {"ev_run", "__bss_start", "_edata", "_end", "ev_loop_default"},
+    )
+
+    assert exported == {"ev_run", "ev_loop_default"}
+    assert funcs == {"ev_run"}
+    assert objects == {"ev_loop_default"}
+    assert tls == set()

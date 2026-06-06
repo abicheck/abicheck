@@ -507,6 +507,8 @@ def _diff_elf_symbol_versioning(old_elf: Any, new_elf: Any) -> list[Change]:
     old_def = set(old_elf.versions_defined)
     new_def = set(new_elf.versions_defined)
     for ver in sorted(old_def - new_def):
+        if _is_unattached_private_version_node(old_elf, ver):
+            continue
         changes.append(Change(
             kind=ChangeKind.SYMBOL_VERSION_DEFINED_REMOVED,
             symbol=ver,
@@ -571,6 +573,18 @@ def _diff_elf_symbol_versioning(old_elf: Any, new_elf: Any) -> list[Change]:
                 old_value=f"{lib}:{ver}",
             ))
     return changes
+
+
+def _is_unattached_private_version_node(elf: Any, version: str) -> bool:
+    """Return True for private version-script marker nodes with no exports.
+
+    Thin wrapper around the canonical helper in :mod:`diff_versioning` so the
+    version-def removal path and the version-script-missing path agree on what
+    counts as an unattached private marker.
+    """
+    from .diff_versioning import _is_unattached_private_version_node as _impl
+
+    return _impl(elf, version)
 
 
 def _diff_elf_symbol_metadata(old_elf: Any, new_elf: Any) -> list[Change]:

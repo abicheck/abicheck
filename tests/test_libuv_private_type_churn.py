@@ -43,9 +43,12 @@ def _fn(name: str, params: list[Param]) -> Function:
 
 
 def test_param_rename_is_source_level_not_binary_breaking():
-    old = AbiSnapshot(library="libuv.so.1", version="1",
+    # from_headers=True: parameter renames are only reported as source-level API
+    # breaks when both snapshots are header-derived (DWARF-only param names are
+    # unreliable build-to-build noise and are intentionally suppressed).
+    old = AbiSnapshot(library="libuv.so.1", version="1", from_headers=True,
                       functions=[_fn("uv_tcp_keepalive", [Param(name="enable", type="int")])])
-    new = AbiSnapshot(library="libuv.so.1", version="2",
+    new = AbiSnapshot(library="libuv.so.1", version="2", from_headers=True,
                       functions=[_fn("uv_tcp_keepalive", [Param(name="on", type="int")])])
     r = compare(old, new)
     assert ChangeKind.PARAM_RENAMED in {c.kind for c in r.changes}

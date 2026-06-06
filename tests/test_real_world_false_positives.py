@@ -781,6 +781,7 @@ def test_is_non_abi_surface_type_keeps_stdlib_when_requested():
     # anonymous + compiler-internal stay excluded regardless of the flag
     assert is_non_abi_surface_type("<lambda()>", exclude_stdlib_namespaces=False) is True
     assert is_non_abi_surface_type("__va_list_tag", exclude_stdlib_namespaces=False) is True
+    assert is_non_abi_surface_type("typedef __va_list_tag __va_list_tag", exclude_stdlib_namespaces=False) is True
     # libstdc++ debug-mode namespace is toolchain-owned too
     assert is_non_abi_surface_type("__gnu_debug::_Safe_iterator<int>") is True
     assert is_non_abi_surface_type("__gnu_debug::_Safe_iterator<int>", exclude_stdlib_namespaces=False) is False
