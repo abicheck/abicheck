@@ -143,6 +143,7 @@ CI runs `mypy abicheck/` as a required gate. The baseline is currently **0 error
 | `changekind-detector` | WARN | Every `ChangeKind` is produced somewhere (not orphaned) |
 | `changekind-docs` | WARN | Every `ChangeKind` is mentioned in `docs/` |
 | `doc-count-sync` | ERROR on drift, WARN if anchor moved | Headline counts in docs (ChangeKind count, example-catalog size) match their source of truth (`len(ChangeKind)`, `ground_truth.json`) |
+| `adr-index-sync` | ERROR on drift, WARN on dup number | `docs/development/adr/index.md` matches `scripts/gen_adr_index.py` output (table generated from the `NNN-*.md` files, not hand-edited) |
 | `import-cycles` | ERROR | No import cycles within `abicheck/` |
 | `mypy-baseline` | ERROR if drifted up | mypy error count ≤ documented baseline |
 | `examples-ground-truth` | ERROR | Every `examples/case*/` has a `README.md` and an entry in `ground_truth.json` |

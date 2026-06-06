@@ -26,7 +26,11 @@ elsewhere in the nav — keep links pointing at the real file path.
   regenerate after adding a new example. Navigated under **ABI/API Handling &
   Recommendations** alongside `concepts/abi-api-handling.md`.
 - `development/` — contributor-facing docs (architecture, parity status,
-  goals, ADRs in `development/adr/`).
+  goals, ADRs in `development/adr/`). The ADR index table
+  (`development/adr/index.md`) is **generated** from the `NNN-*.md` files by
+  `scripts/gen_adr_index.py` — add the ADR file, then regenerate; never
+  hand-edit the table (a CI drift gate + the `adr-index-sync` AI-readiness
+  check enforce this). Adding an ADR to the `mkdocs.yml` nav is still manual.
 
 ## Conventions
 
@@ -46,3 +50,16 @@ python scripts/gen_examples_docs.py
 ```
 
 Then commit the resulting `docs/examples/*.md`.
+
+## Regenerating the ADR index
+
+After adding or editing an ADR (`docs/development/adr/NNN-*.md`):
+
+```bash
+python scripts/gen_adr_index.py
+```
+
+Then commit the resulting `docs/development/adr/index.md`. Each ADR file is the
+source of truth for its own row (title from the `# ADR-NNN: <title>` heading,
+status from the `**Status:**` line), so contributors no longer hand-edit the
+shared table — which removes the recurring merge conflict on it.

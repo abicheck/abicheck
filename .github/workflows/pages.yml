@@ -31,6 +31,9 @@ jobs:
       - name: Regenerate examples docs (idempotent)
         run: python scripts/gen_examples_docs.py
 
+      - name: Regenerate ADR index (idempotent)
+        run: python scripts/gen_adr_index.py
+
       - name: Build site
         run: mkdocs build --strict
 

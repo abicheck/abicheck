@@ -8,6 +8,7 @@ on:
       - 'examples/**'
       - 'mkdocs.yml'
       - 'scripts/gen_examples_docs.py'
+      - 'scripts/gen_adr_index.py'
       - '.github/workflows/pages.yml'
       - '.github/workflows/docs-pr.yml'
 
@@ -28,6 +29,9 @@ jobs:
 
       - name: Check generated examples docs are up to date
         run: python scripts/gen_examples_docs.py --check
+
+      - name: Check generated ADR index is up to date
+        run: python scripts/gen_adr_index.py --check
 
       - name: Build docs (strict)
         run: mkdocs build --strict

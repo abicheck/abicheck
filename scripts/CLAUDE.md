@@ -12,6 +12,7 @@ Each must run with Python 3.10+ and the package installed in dev mode
 | `check_fp_rate.py` | False-positive/false-negative gate for public-surface scoping (ADR-024 §7). Labelled `(old, new)` corpus; baselines FP=0/FN=0. | CI (`ai-readiness`). Mirrored in `tests/test_fp_rate_gate.py`. |
 | `check_mutation_score.py` | Mutation-score baseline-drift gate. Counts surviving `mutmut` mutants in the detector core and compares to `SURVIVOR_BASELINE`. Parser unit-tested in `tests/test_mutation_score_gate.py`. | CI (`mutation.yml`: weekly / `mutation` label / dispatch). |
 | `gen_examples_docs.py` | Regenerates `docs/examples/caseNN_*.md` from `examples/case*/README.md`. Run after adding a new example case. | manual |
+| `gen_adr_index.py` | Regenerates `docs/development/adr/index.md` from the `NNN-*.md` ADR files (title + status parsed from each file). Run after adding an ADR — never hand-edit the index table. `--check` drift gate. | CI (`docs-pr`, `pages`); `adr-index-sync` mirrors it in `check_ai_readiness.py`. |
 | `benchmark_comparison.py` | Benchmarks abicheck vs ABICC / libabigail across the `examples/` catalog. | manual |
 | `demo_libz.py` | End-to-end demo on libz, used by the `e2e` CI job. | CI (`e2e` job) |
 | `extract_bundle_manifest.py` | Extracts a manifest from multi-library bundles (cases 90–93). | manual |
