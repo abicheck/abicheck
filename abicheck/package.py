@@ -563,7 +563,7 @@ _ELF_MAGIC = b"\x7fELF"
 _ET_DYN = 3
 # Program header type PT_INTERP (interpreter segment — present in executables, absent in DSOs)
 _PT_INTERP = 3
-_SO_NAME_RE = re.compile(r"\.so(?:$|\.\d)", re.IGNORECASE)
+_SO_NAME_RE = re.compile(r"\.so(?:$|\.\d+(?:\.\d+)*)$", re.IGNORECASE)
 
 
 def _has_shared_object_name(path: Path | str) -> bool:
@@ -571,7 +571,7 @@ def _has_shared_object_name(path: Path | str) -> bool:
     return _SO_NAME_RE.search(Path(path).name) is not None
 
 
-def _has_interp_segment(f: IO[bytes], ei_class: int, byte_order: str) -> bool:
+def _has_interp_segment(f: IO[bytes], ei_class: int, byte_order: str) -> bool | None:
     """Check if an ELF file has a PT_INTERP program header (i.e. is an executable)."""
     try:
         if ei_class == 1:  # 32-bit
@@ -599,7 +599,7 @@ def _has_interp_segment(f: IO[bytes], ei_class: int, byte_order: str) -> bool:
                 return True
         return False
     except (OSError, struct.error):
-        return False
+        return None
 
 
 def _is_elf_shared_object(path: Path) -> bool:
@@ -623,6 +623,8 @@ def _is_elf_shared_object(path: Path) -> bool:
             # Distinguish PIE executables from true shared objects:
             # executables have a PT_INTERP segment, shared objects don't.
             has_interp = _has_interp_segment(f, ei_class, byte_order)
+            if has_interp is None:
+                return False
             if has_interp:
                 # A few distro runtime DSOs are ET_DYN, named like libraries,
                 # and intentionally carry PT_INTERP so they can be invoked
