@@ -732,17 +732,26 @@ def _elf_classify_symbols(
     exported_dynamic_objects: set[str] = set()
     exported_dynamic_tls: set[str] = set()
     if elf_meta.symbols:
+        # Apply the shared ABI-relevance filter here too: this no-header path
+        # rebuilds the exported sets directly from ``elf_meta.symbols`` rather
+        # than the already-filtered ``_pyelftools_exported_symbols`` result, so
+        # lifecycle stubs (``_init``/``_fini``) and transitive runtime symbols
+        # would otherwise re-enter the symbol-only ABI surface as ELF_ONLY
+        # functions. Keeping it consistent with the DWARF-backed path.
         exported_dynamic_funcs = {
             sym.name for sym in elf_meta.symbols
             if sym.sym_type in (SymbolType.FUNC, SymbolType.IFUNC, SymbolType.NOTYPE)
+            and is_abi_relevant_elf_symbol(sym.name)
         }
         exported_dynamic_objects = {
             sym.name for sym in elf_meta.symbols
             if sym.sym_type == SymbolType.OBJECT
+            and is_abi_relevant_elf_symbol(sym.name)
         }
         exported_dynamic_tls = {
             sym.name for sym in elf_meta.symbols
             if sym.sym_type == SymbolType.TLS
+            and is_abi_relevant_elf_symbol(sym.name)
         }
         # Full set for CastxmlParser: determines PUBLIC vs ELF_ONLY visibility
         exported_dynamic = exported_dynamic_funcs | exported_dynamic_objects | exported_dynamic_tls

@@ -143,7 +143,7 @@ def _public_functions(snap: AbiSnapshot) -> dict[str, Function]:
     )
     return {
         k: v for k, v in funcs.items()
-        if k in exported or v.is_deleted
+        if k in exported or (v.is_deleted and not v.deleted_from_dwarf)
     }
 
 
@@ -586,6 +586,22 @@ def _match_old_function(
         return list(_check_function_signature(
             mangled, f_old, new_map[mangled],
             params_unconfirmed=params_unconfirmed, is_llp64=is_llp64))
+
+    # A function that still exists on the new side but is ``= delete``'d is a
+    # deletion, not a removal: _detect_newly_deleted_functions reports it once
+    # as FUNC_DELETED / FUNC_DELETED_DWARF from the full function map. When a
+    # DWARF-deleted member also drops out of .dynsym, _public_functions excludes
+    # it from new_map (it is no longer exported), so without this guard the old
+    # exported peer would additionally be flagged FUNC_REMOVED here, double-
+    # reporting the same symbol. The castxml-deleted path keeps such functions
+    # in new_map and is matched above; this aligns the deleted_from_dwarf path.
+    f_new_all = new_all.get(mangled)
+    if (
+        f_new_all is not None
+        and f_new_all.is_deleted
+        and f_new_all.visibility in _PUBLIC_VIS
+    ):
+        return []
 
     # Fallback by plain name when either side uses extern "C".
     # The name->Function mapping is a MULTIMAP: only fall back when there is

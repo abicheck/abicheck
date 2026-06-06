@@ -240,6 +240,40 @@ class TestPartialMetadata:
         assert "elf" in r.evidence_tiers
         assert "dwarf" not in r.evidence_tiers
 
+    def test_dwarf_deleted_dropped_from_dynsym_reported_once(self):
+        """A DWARF-deleted export that also leaves .dynsym is one event.
+
+        When a function gains ``= delete`` (DW_AT_deleted) and disappears from
+        .dynsym while the DSO still exports other functions, _public_functions
+        drops it from new_map (no longer exported). Without deduplication the
+        old exported peer would be flagged FUNC_REMOVED *and*
+        _detect_newly_deleted_functions would flag FUNC_DELETED_DWARF for the
+        same symbol. It must be reported once, as the deletion.
+        """
+        old_elf = ElfMetadata(symbols=[
+            ElfSymbol(name="_Z7processv", binding=SymbolBinding.GLOBAL, sym_type=SymbolType.FUNC),
+            ElfSymbol(name="_Z4keepv", binding=SymbolBinding.GLOBAL, sym_type=SymbolType.FUNC),
+        ])
+        new_elf = ElfMetadata(symbols=[
+            ElfSymbol(name="_Z4keepv", binding=SymbolBinding.GLOBAL, sym_type=SymbolType.FUNC),
+        ])
+        old = _snap(
+            functions=[_pub_func("process", "_Z7processv"), _pub_func("keep", "_Z4keepv")],
+            elf=old_elf, dwarf=DwarfMetadata(has_dwarf=True),
+        )
+        new = _snap(
+            functions=[
+                _pub_func("keep", "_Z4keepv"),
+                _pub_func("process", "_Z7processv", is_deleted=True, deleted_from_dwarf=True),
+            ],
+            elf=new_elf, dwarf=DwarfMetadata(has_dwarf=True),
+        )
+        r = compare(old, new)
+        process_kinds = {c.kind for c in r.changes if c.symbol == "_Z7processv"}
+        assert ChangeKind.FUNC_DELETED_DWARF in process_kinds
+        assert ChangeKind.FUNC_REMOVED not in process_kinds
+        assert ChangeKind.FUNC_REMOVED_ELF_ONLY not in process_kinds
+
     def test_dwarf_present_elf_absent(self):
         """DWARF metadata present, ELF absent — should not crash."""
         dwarf = DwarfMetadata(

@@ -300,6 +300,38 @@ def test_exported_symbol_names_abi_relevant_only_drops_transitive_runtime() -> N
     }
 
 
+def test_elf_classify_symbols_filters_lifecycle_stubs_at_dump_surface() -> None:
+    """The no-header dump path must drop lifecycle stubs from the ABI surface.
+
+    ``_elf_classify_symbols`` rebuilds the exported sets directly from
+    ``elf_meta.symbols`` (not the already-filtered
+    ``_pyelftools_exported_symbols`` result). Without the shared
+    ABI-relevance filter, ``_init``/``_fini`` and transitive runtime symbols
+    re-enter ELF-only snapshots as ``ELF_ONLY`` functions.
+    """
+    from abicheck.dumper import _elf_classify_symbols
+
+    meta = ElfMetadata(
+        symbols=[
+            ElfSymbol(name="_init", sym_type=SymbolType.FUNC),
+            ElfSymbol(name="_fini", sym_type=SymbolType.FUNC),
+            ElfSymbol(name="_ZNSt6vectorIiSaIiEE4sizeEv", sym_type=SymbolType.FUNC),
+            ElfSymbol(name="api", sym_type=SymbolType.FUNC),
+            ElfSymbol(name="g_table", sym_type=SymbolType.OBJECT),
+            ElfSymbol(name="__cpu_model", sym_type=SymbolType.OBJECT),
+            ElfSymbol(name="tls_var", sym_type=SymbolType.TLS),
+        ]
+    )
+
+    full, funcs, objects, tls = _elf_classify_symbols(meta, {"api"})
+
+    assert funcs == {"api"}
+    assert "_init" not in full and "_fini" not in full
+    assert objects == {"g_table"}
+    assert tls == {"tls_var"}
+    assert full == {"api", "g_table", "tls_var"}
+
+
 def _function(name: str) -> Function:
     return Function(
         name=name,
