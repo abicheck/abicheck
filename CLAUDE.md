@@ -176,6 +176,16 @@ Four mechanisms guard test quality so coverage can't be "filled" without verifyi
   so a missing external tool can't turn a lane green with zero work done. Wired into the
   `abicc`, `libabigail`, and `integration` CI lanes.
 
+## Line-coverage floor
+
+The fast lane enforces a **95%** line+branch coverage floor (`--cov-fail-under=95`),
+but **only on the Linux unit-test lane** in `.github/workflows/ci.yml` — that's where
+the full unit suite runs. macOS/Windows skip the Linux-only ELF/DWARF parsing tests,
+which structurally lowers their coverage (~93% on macOS), so those lanes run the same
+tests without the fail-under gate (macOS still emits a coverage report). If the macOS
+lane ever fails on coverage, the fix is to keep the gate Linux-scoped — **do not lower
+the global 95% floor** to make another platform pass.
+
 ## Files that are large — edit carefully
 
 - `cli.py` (~1,500 lines) — main CLI, Click commands; sub-command modules below register on it

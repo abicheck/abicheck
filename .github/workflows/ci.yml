@@ -83,10 +83,18 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev,mcp]"
-      - name: Run tests with coverage
-        if: runner.os != 'Windows'
+      - name: Run tests with coverage (Linux — enforces 95% floor)
+        # Linux is the canonical lane: the full unit suite runs here, so the
+        # 95% minimum-coverage floor is enforced on it. macOS/Windows skip the
+        # Linux-only ELF/DWARF parsing tests, structurally lowering coverage,
+        # so they run the same suite without the fail-under gate.
+        if: runner.os == 'Linux'
         run: |
-          pytest tests/ -v --tb=short -m "not integration and not libabigail and not abicc and not slow" -n auto --dist worksteal --cov=abicheck --cov-report=term-missing --cov-report=xml --cov-fail-under=80
+          pytest tests/ -v --tb=short -m "not integration and not libabigail and not abicc and not slow" -n auto --dist worksteal --cov=abicheck --cov-report=term-missing --cov-report=xml --cov-fail-under=95
+      - name: Run tests with coverage (macOS — report only, platform tests skip)
+        if: runner.os == 'macOS'
+        run: |
+          pytest tests/ -v --tb=short -m "not integration and not libabigail and not abicc and not slow" -n auto --dist worksteal --cov=abicheck --cov-report=term-missing --cov-report=xml
       - name: Run tests (Windows — parallel, no coverage)
         if: runner.os == 'Windows'
         run: |
