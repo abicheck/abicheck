@@ -28,18 +28,55 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 # ---------------------------------------------------------------------------
-# Mock the mcp package before importing mcp_server (mirrors existing pattern in
-# tests/test_mcp_server_coverage.py so the import never requires the real dep).
+# Import mcp_server under a temporary `mcp` mock (mirrors the pattern in
+# tests/test_mcp_server_coverage.py). We then restore sys.modules to its
+# pre-import state so this module does NOT globally flip mcp-conditional skips
+# in sibling test files (e.g. tests/test_mcp_hardening.py), which would change
+# session-wide test ordering/state. The imported mcp_server symbols stay valid
+# because the module object is already bound to the names we need.
 # ---------------------------------------------------------------------------
-_mock_fastmcp = MagicMock()
-_mock_mcp_module = MagicMock()
-_mock_mcp_module.server.fastmcp.FastMCP = _mock_fastmcp
-sys.modules.setdefault("mcp", _mock_mcp_module)
-sys.modules.setdefault("mcp.server", _mock_mcp_module.server)
-sys.modules.setdefault("mcp.server.fastmcp", _mock_mcp_module.server.fastmcp)
-_mock_mcp_instance = MagicMock()
-_mock_mcp_instance.tool.return_value = lambda fn: fn
-_mock_fastmcp.return_value = _mock_mcp_instance
+
+
+def _import_mcp_server_symbols():  # noqa: ANN202
+    """Import the mcp_server symbols we test, leaving sys.modules unperturbed."""
+    injected = [
+        k for k in ("mcp", "mcp.server", "mcp.server.fastmcp") if k not in sys.modules
+    ]
+    mcp_server_was_present = "abicheck.mcp_server" in sys.modules
+
+    _mock_fastmcp = MagicMock()
+    _mock_mcp_module = MagicMock()
+    _mock_mcp_module.server.fastmcp.FastMCP = _mock_fastmcp
+    _mock_instance = MagicMock()
+    _mock_instance.tool.return_value = lambda fn: fn
+    _mock_fastmcp.return_value = _mock_instance
+    for key, mod in (
+        ("mcp", _mock_mcp_module),
+        ("mcp.server", _mock_mcp_module.server),
+        ("mcp.server.fastmcp", _mock_mcp_module.server.fastmcp),
+    ):
+        sys.modules.setdefault(key, mod)
+
+    import abicheck.mcp_server as _ms
+
+    # Restore sys.modules to look exactly as it did before this import, so we
+    # don't enable mcp for files collected after us.
+    for key in injected:
+        sys.modules.pop(key, None)
+    if not mcp_server_was_present:
+        sys.modules.pop("abicheck.mcp_server", None)
+    return _ms
+
+
+_ms = _import_mcp_server_symbols()
+_env_int = _ms._env_int
+_check_file_size = _ms._check_file_size
+_audit_log = _ms._audit_log
+_impact_category = _ms._impact_category
+_resolve_input = _ms._resolve_input
+_snapshot_summary = _ms._snapshot_summary
+abi_dump = _ms.abi_dump
+abi_compare = _ms.abi_compare
 
 
 # ===========================================================================
@@ -744,15 +781,6 @@ class TestStripNamespacePrefix:
 # mcp_server.py — pure helpers (no real mcp dependency needed)
 # ===========================================================================
 
-from abicheck.mcp_server import (  # noqa: E402
-    _audit_log,
-    _check_file_size,
-    _env_int,
-    _impact_category,
-    _resolve_input,
-    _snapshot_summary,
-)
-
 
 class TestMcpEnvInt:
     def test_valid_int(self, monkeypatch) -> None:
@@ -779,13 +807,13 @@ class TestMcpCheckFileSize:
         """Oversized file raises (line 107)."""
         p = tmp_path / "big.so"
         p.write_bytes(b"\x00" * 16)
-        with patch("abicheck.mcp_server.MCP_MAX_FILE_SIZE", 4):
+        with patch.object(_ms, "MCP_MAX_FILE_SIZE", 4):
             with pytest.raises(ValueError, match="exceeds limit"):
                 _check_file_size(p, label="input")
 
     def test_oserror_raises(self) -> None:
         """A stat OSError surfaces as a ValueError (lines 104-105)."""
-        with patch("abicheck.mcp_server.Path.stat", side_effect=OSError("io")):
+        with patch.object(_ms.Path, "stat", side_effect=OSError("io")):
             with pytest.raises(ValueError, match="Cannot check"):
                 _check_file_size(Path("/whatever.so"), label="input")
 
@@ -795,7 +823,7 @@ class TestMcpAuditLog:
         """Structured logging emits a JSON record (line 130)."""
         import json as _json
 
-        with patch("abicheck.mcp_server._structured_logging", True):
+        with patch.object(_ms, "_structured_logging", True):
             with caplog.at_level("INFO", logger="abicheck.mcp"):
                 _audit_log("t", {"a": "b"}, 1.5, "ok", verdict="BREAKING")
         # Last record is valid JSON carrying our fields.
@@ -804,7 +832,7 @@ class TestMcpAuditLog:
         assert payload["verdict"] == "BREAKING"
 
     def test_text_logging(self, caplog) -> None:
-        with patch("abicheck.mcp_server._structured_logging", False):
+        with patch.object(_ms, "_structured_logging", False):
             with caplog.at_level("INFO", logger="abicheck.mcp"):
                 _audit_log("t", {"a": "b"}, 1.5, "ok")
         assert "tool=t" in caplog.text
@@ -837,7 +865,7 @@ class TestMcpResolveInputText:
         snap = AbiSnapshot(library="libfoo.so", version="1.0", functions=[])
         path = tmp_path / "snap.json"
         path.write_text(snapshot_to_json(snap), encoding="utf-8")
-        with patch("abicheck.mcp_server._detect_binary_format", return_value=None):
+        with patch.object(_ms, "_detect_binary_format", return_value=None):
             result = _resolve_input(path, [], [], "v", "c++")
         assert result.library == "libfoo.so"
 
@@ -847,7 +875,7 @@ class TestMcpResolveInputText:
 
         path = tmp_path / "lib.a"
         path.write_bytes(b"!<arch>\nsome members")
-        with patch("abicheck.mcp_server._detect_binary_format", return_value=None):
+        with patch.object(_ms, "_detect_binary_format", return_value=None):
             with patch("abicheck.binary_utils.detect_archive", return_value=True):
                 with pytest.raises(AbicheckError, match="archive"):
                     _resolve_input(path, [], [], "v", "c++")
@@ -858,7 +886,7 @@ class TestMcpResolveInputText:
 
         path = tmp_path / "mystery.dat"
         path.write_text("plain text that is neither json nor perl", encoding="utf-8")
-        with patch("abicheck.mcp_server._detect_binary_format", return_value=None):
+        with patch.object(_ms, "_detect_binary_format", return_value=None):
             with patch("abicheck.binary_utils.detect_archive", return_value=False):
                 with pytest.raises(AbicheckError, match="Cannot detect input format"):
                     _resolve_input(path, [], [], "v", "c++")
@@ -891,7 +919,8 @@ class TestMcpSnapshotSummary:
 import concurrent.futures as _futures  # noqa: E402
 import json as _json  # noqa: E402
 
-from abicheck.mcp_server import abi_compare, abi_dump  # noqa: E402
+# abi_compare / abi_dump are already imported at the top of this module via
+# _import_mcp_server_symbols().
 
 
 class _TimeoutFuture:
@@ -927,7 +956,7 @@ class TestMcpDumpTool:
         """abi_dump returns a timeout error when the worker times out (535-538)."""
         lib = tmp_path / "libfoo.so"
         lib.write_bytes(b"\x7fELF" + b"\x00" * 60)
-        with patch("abicheck.mcp_server._futures.ThreadPoolExecutor", _TimeoutPool):
+        with patch.object(_ms._futures, "ThreadPoolExecutor", _TimeoutPool):
             out = _json.loads(abi_dump(str(lib)))
         assert out["status"] == "error"
         assert "timed out" in out["error"]
@@ -970,7 +999,7 @@ class TestMcpCompareTool:
         b = tmp_path / "b.json"
         a.write_text(snapshot_to_json(snap), encoding="utf-8")
         b.write_text(snapshot_to_json(snap), encoding="utf-8")
-        with patch("abicheck.mcp_server._futures.ThreadPoolExecutor", _TimeoutPool):
+        with patch.object(_ms._futures, "ThreadPoolExecutor", _TimeoutPool):
             out = _json.loads(abi_compare(str(a), str(b)))
         assert out["status"] == "error"
         assert "timed out" in out["error"]
