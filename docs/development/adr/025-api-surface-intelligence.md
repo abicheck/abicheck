@@ -155,8 +155,17 @@ class Idiom(str, Enum):
     FACTORY          = "factory"           # exported fn returning a pointer to an abstract/base type
     CREATE_DESTROY   = "create_destroy"    # paired create_X / destroy_X (or _new/_free) lifecycle fns
     CALLBACK_ABI     = "callback_abi"      # function-pointer-typed parameter/field (ABI-sensitive)
-    OUT_PARAM        = "out_param"         # non-const pointer/ref parameter written through
 ```
+
+> **OUT_PARAM is deliberately *not* a recognised idiom.** Detecting that a
+> pointer/reference parameter is genuinely *written through* requires body/IR
+> evidence (write effects), which the header/declaration graph does not carry —
+> a non-`const` pointer like `int lookup(Foo *key)` is input-only. Inferring it
+> from declaration facts alone would mis-tag ordinary pointer parameters, so it
+> is omitted from the modulating recognisers; if a purely *descriptive*
+> `may_out_param` hint is ever wanted it must be marked as such and must **not**
+> be allowed to drive verdict modulation. The `idioms.py` implementation omits
+> it accordingly.
 
 Each recogniser is intentionally conservative: it tags only when the graph
 evidence is unambiguous, and records *why* (the edges that matched) for the
