@@ -24,6 +24,19 @@ from .checker_types import Change
 from .elf_metadata import ElfMetadata
 
 
+def _is_unattached_private_version_node(elf: ElfMetadata, version: str) -> bool:
+    """Return True for private version-script marker nodes with no exports.
+
+    A version definition whose name contains ``PRIVATE`` and which no exported
+    symbol is bound to is a linker bookkeeping marker, not a real ABI version
+    node. Such markers are ignored as removals and must not count toward
+    "the old library had a version script".
+    """
+    if "PRIVATE" not in version.upper():
+        return False
+    return not any(getattr(sym, "version", "") == version for sym in getattr(elf, "symbols", []))
+
+
 def detect_version_node_changes(
     old_elf: ElfMetadata, new_elf: ElfMetadata,
 ) -> list[Change]:
@@ -105,7 +118,17 @@ def detect_version_script_missing(
     # If the old library also lacks a version script, this is a pre-existing
     # condition — not a new change.  Only warn when a version script was
     # dropped or when comparing a brand-new library (old has no symbols).
-    old_had_version_script = bool(old_elf.versions_defined) or any(
+    #
+    # Unattached private version-script markers (e.g. ``FOO_PRIVATE`` with no
+    # old exported symbol bound to that node) do not constitute a real version
+    # script: they are deliberately ignored as version-node removals elsewhere,
+    # so they must not count as "old had a version script" here either —
+    # otherwise dropping a marker-only script re-introduces VERSION_SCRIPT_MISSING.
+    old_real_versions_defined = [
+        ver for ver in old_elf.versions_defined
+        if not _is_unattached_private_version_node(old_elf, ver)
+    ]
+    old_had_version_script = bool(old_real_versions_defined) or any(
         s.version for s in old_elf.symbols
     )
     if not old_had_version_script and old_elf.symbols:

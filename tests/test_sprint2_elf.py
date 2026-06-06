@@ -114,6 +114,29 @@ def test_unattached_private_symbol_version_marker_removed_is_ignored() -> None:
     assert result.verdict == Verdict.NO_CHANGE
 
 
+def test_marker_only_private_version_script_removed_emits_no_warning() -> None:
+    """A version script consisting solely of an unattached private marker must
+    not trigger VERSION_SCRIPT_MISSING when it is dropped.
+
+    The old side's only version definition is ``LIBFOO_PRIVATE`` with no symbol
+    bound to it; the new side keeps the exported symbols but has no version
+    script. Since the marker is not a real version script, dropping it should
+    stay NO_CHANGE rather than escalate via VERSION_SCRIPT_MISSING.
+    """
+    old = _snap(
+        _elf(
+            versions_defined=["LIBFOO_PRIVATE"],
+            symbols=[_sym("api")],
+        )
+    )
+    new = _snap(_elf(versions_defined=[], symbols=[_sym("api")]))
+    result = compare(old, new)
+    kinds = {c.kind for c in result.changes}
+    assert ChangeKind.SYMBOL_VERSION_DEFINED_REMOVED not in kinds
+    assert ChangeKind.VERSION_SCRIPT_MISSING not in kinds
+    assert result.verdict == Verdict.NO_CHANGE
+
+
 def test_private_symbol_version_with_exported_symbol_removed_is_breaking() -> None:
     old = _snap(
         _elf(
