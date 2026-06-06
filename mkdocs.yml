@@ -61,7 +61,15 @@ nav:
     - Tool Comparison: reference/tool-comparison.md
     - ABICC Format Compliance: reference/abicc-format-compliance.md
   - ABI/API Handling & Recommendations:
-    - Guide: concepts/abi-api-handling.md
+    - Overview: concepts/abi-api-handling.md
+    - Learning Series:
+      - "1. Foundations": concepts/abi-series/01-foundations.md
+      - "2. Symbol Contracts": concepts/abi-series/02-symbol-contracts.md
+      - "3. Type Layout": concepts/abi-series/03-type-layout.md
+      - "4. C++ ABI": concepts/abi-series/04-cpp-abi.md
+      - "5. Linker & ELF": concepts/abi-series/05-linker-elf.md
+      - "6. Transitive Breaks": concepts/abi-series/06-transitive-breaks.md
+      - "7. Designing for Stability": concepts/abi-series/07-designing-for-stability.md
     - Examples Encyclopedia: examples/index.md
     - By Verdict:
       - "BREAKING": examples/by-verdict/breaking.md

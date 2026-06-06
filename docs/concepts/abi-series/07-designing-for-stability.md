@@ -1,0 +1,320 @@
+# Part 7 — Designing for Stability
+
+> **Series navigation:** [1. Foundations](01-foundations.md) ·
+> [2. Symbol Contracts](02-symbol-contracts.md) ·
+> [3. Type Layout](03-type-layout.md) ·
+> [4. C++ ABI](04-cpp-abi.md) ·
+> [5. Linker & ELF](05-linker-elf.md) ·
+> [6. Transitive Breaks](06-transitive-breaks.md) ·
+> **7. Designing for Stability**
+
+**What you'll learn on this page**
+
+- The handful of design patterns that make a library *evolvable*, each with
+  copy-pasteable code: **opaque handles, Pimpl, reserved padding, version
+  scripts, visibility control, inline-namespace generations**.
+- Five top-level rules that subsume every mechanism in the series.
+- How to wire `abicheck` into CI as a release gate, and how to read its verdict.
+
+This is the capstone. Each previous page ended with a "how to fix" box pointing
+here; this page gives the full pattern.
+
+---
+
+## The one idea behind every pattern
+
+Every break in this series came from the same root: **a fact the library
+publishes (a size, an offset, a symbol name, a register choice, a vtable slot)
+got baked into a consumer's binary and then changed.**
+
+So every fix is a variation on a single move:
+
+> **Stop publishing the fact.** If consumers can't see a struct's layout, you can
+> change the layout. If they can't see a symbol's mangling, you can re-mangle it.
+> If they only ever hold a pointer, the size on the other end is yours forever.
+
+The patterns below are concrete ways to *not publish* a fact you'd otherwise be
+committed to for the lifetime of a SONAME.
+
+---
+
+## Pattern 1 — Opaque handles (the strongest C firewall)
+
+Expose only a pointer to an incomplete type. Define the struct in the `.c` file
+so callers can never take `sizeof` or `offsetof`.
+
+```c
+// foo.h — the public header
+typedef struct foo foo_t;        // incomplete: callers know only that foo_t exists
+
+foo_t *foo_create(void);
+void   foo_destroy(foo_t *);
+int    foo_get_version(foo_t *);
+void   foo_set_name(foo_t *, const char *);
+```
+
+```c
+// foo.c — the implementation; layout lives here and ONLY here
+struct foo {
+    int   version;
+    char  name[64];
+    void *anything_you_want_to_add_later;   // free to change forever
+};
+
+foo_t *foo_create(void) { return calloc(1, sizeof(struct foo)); }
+void   foo_destroy(foo_t *f) { free(f); }
+int    foo_get_version(foo_t *f) { return f->version; }
+```
+
+**Why it works:** the only thing crossing the ABI boundary is `foo_t *` — pointer
+size is fixed per ABI. You can add, remove, and reorder fields in `struct foo`
+across releases and no consumer is affected. This is exactly how `FILE*`,
+`sqlite3*`, and `git_repository*` stay stable for decades. It neutralizes the
+entire [Part 3](03-type-layout.md) family in one move.
+
+---
+
+## Pattern 2 — Pimpl (the C++ equivalent)
+
+The public class holds a single pointer to a privately-defined `Impl`. All state
+lives in `Impl`, so `sizeof` of the public class never changes and no field
+offset is ever visible.
+
+```cpp
+// widget.hpp — public
+class Widget {
+public:
+    Widget();
+    ~Widget();
+    Widget(Widget&&) noexcept;
+    Widget& operator=(Widget&&) noexcept;
+
+    void resize(int w, int h);
+    int  area() const;
+
+private:
+    struct Impl;                       // forward declaration only
+    std::unique_ptr<Impl> d_;          // sizeof(Widget) == sizeof(void*), forever
+};
+```
+
+```cpp
+// widget.cpp — private
+struct Widget::Impl {
+    int w = 0, h = 0;
+    std::string label;                 // safe to add: never crosses the boundary
+};
+
+Widget::Widget() : d_(std::make_unique<Impl>()) {}
+Widget::~Widget() = default;           // defined here, where Impl is complete
+void Widget::resize(int w, int h) { d_->w = w; d_->h = h; }
+int  Widget::area() const { return d_->w * d_->h; }
+```
+
+**Why it works:** `sizeof(Widget)` is one pointer regardless of how `Impl` grows.
+Qt enforces this across every public class, which is why Qt 5.x held ABI for
+years through deep internal refactors. It also closes off
+[trivial→non-trivial](04-cpp-abi.md) surprises, because the public class's
+special members are declared once and pinned.
+
+> !!! warning "Pimpl gotcha"
+>     Declare and *out-of-line define* the destructor (and move operations) in
+>     the `.cpp` where `Impl` is complete. A defaulted destructor in the header
+>     forces the compiler to see `Impl`'s definition there — defeating the
+>     firewall.
+
+---
+
+## Pattern 3 — Reserved padding (evolve a value type in place)
+
+When you *must* expose a struct by value (a C plain-old-data DTO), pre-reserve
+space so you can add fields later without changing `sizeof` or moving offsets.
+
+```c
+// v1
+typedef struct {
+    int     priority;
+    int     timeout_ms;
+    uint64_t _reserved[6];     // 48 bytes held in reserve
+} job_config_t;
+
+// v2 — consumes two reserved slots; sizeof and all prior offsets UNCHANGED
+typedef struct {
+    int     priority;
+    int     timeout_ms;
+    int     max_retries;       // was _reserved[0]'s low word
+    int     _pad;
+    uint64_t _reserved[5];
+} job_config_t;
+```
+
+**The contract you must document and consumers must honor:** zero-initialize the
+whole struct and never read or write the reserved bytes. Linux `struct stat`,
+glibc `pthread_attr_t`, and Wayland protocol structs all rely on this. The hazard
+([Part 6, reserved-field misuse](06-transitive-breaks.md)) is that you cannot
+*prove* a consumer obeyed it — so reserve generously and document loudly.
+
+---
+
+## Pattern 4 — Version scripts + visibility (own your export surface)
+
+Compile with hidden visibility and enumerate exactly what you export. Everything
+else stays internal and never becomes an ABI commitment.
+
+```c
+// foo_export.h
+#define FOO_API __attribute__((visibility("default")))
+
+FOO_API int  foo_compute(int);
+/* internal helpers carry no macro → hidden under -fvisibility=hidden */
+```
+
+```text
+# libfoo.map — the canonical list of intentional exports
+LIBFOO_1.0 {
+    global:
+        foo_compute;
+        foo_create;
+        foo_destroy;
+    local:
+        *;            # everything else is hidden
+};
+```
+
+```bash
+gcc -fvisibility=hidden -shared -fPIC *.c \
+    -Wl,--version-script=libfoo.map \
+    -Wl,-soname,libfoo.so.1 -o libfoo.so.1
+```
+
+**Why it works:** `-fvisibility=hidden` plus the `local: *` rule means only the
+names you listed enter `.dynsym` — closing off the accidental-leak hazard from
+[Part 5](05-linker-elf.md). When you genuinely need a breaking change, add a new
+node (`LIBFOO_2.0 { ... } LIBFOO_1.0;`) and keep the old symbols exported, so old
+binaries keep resolving the old implementation.
+
+---
+
+## Pattern 5 — Inline namespaces for generational C++ ABI
+
+Wrap public declarations in an inline namespace. Source ignores it; the symbol
+encodes it. When you need a breaking change, ship a new generation alongside the
+old.
+
+```cpp
+namespace mylib {
+inline namespace abi_v1 {
+    class Codec { /* v1 layout & vtable */ };
+    void process(Codec&);
+}
+}
+// consumers write mylib::Codec / mylib::process — unaware of abi_v1
+```
+
+To ship an incompatible `Codec`, add `inline namespace abi_v2 { ... }` and demote
+`abi_v1` to a *non-inline* namespace that still compiles for old TUs. New builds
+bind `abi_v2` symbols; old binaries keep resolving `abi_v1`. This is libstdc++'s
+`__cxx11` mechanism, used deliberately.
+
+---
+
+## Pattern 6 — Pure-virtual interface + factory
+
+For polymorphic C++ APIs, never expose a concrete class with data members.
+Expose an abstract interface and a C-linkage factory.
+
+```cpp
+// codec.hpp
+struct ICodec {
+    virtual ~ICodec() = default;
+    virtual int  encode(const Frame&) = 0;
+    virtual void reset() = 0;
+};
+extern "C" ICodec *codec_create();     // stable C symbol; hides the concrete type
+```
+
+**Why it works:** consumers hold only `ICodec*` and call through the vtable. The
+concrete implementation class — its data members, its `sizeof`, its non-virtual
+helpers — lives entirely in your `.so` and can change freely. The one rule you
+inherit from [Part 4](04-cpp-abi.md): you may only **append** virtual methods to
+`ICodec`, never insert or reorder.
+
+---
+
+## The five rules that subsume everything
+
+1. **Treat public headers as ABI contracts.** Anything reachable from a public
+   header — type layout, enum values, vtable shape, exported globals — is part of
+   the binary contract whether or not you intended it to be.
+2. **Govern release identity.** Use SONAME + symbol versioning + a
+   `-fvisibility=hidden` export policy on every release; bump the SONAME *major*
+   on any binary-incompatible change. abicheck surfaces the signals as
+   `soname_bump_recommended`, `symbol_version_node_removed`,
+   `symbol_moved_version_node`, and `version_script_missing`.
+3. **Prefer opaque handles and Pimpl** over exposing mutable layouts, so the
+   library — not the consumer — owns size, offsets, and the kind-tag of a type.
+4. **Evolve additively, never in place.** Append new symbols, enum members, and
+   struct fields (where no embedded `sizeof` assumption exists); ship breaking
+   changes under a new inline-namespace or a new symbol rather than mutating an
+   existing one.
+5. **Gate every PR with abicheck in CI.** Dump the last released artifact and
+   compare the candidate; block anything above `COMPATIBLE_WITH_RISK` that isn't
+   paired with a deliberate SONAME bump.
+
+---
+
+## Wiring abicheck into CI
+
+The minimal gate compares the candidate against the last released `.so`:
+
+```bash
+abicheck compare libfoo.so.old libfoo.so.new \
+  --old-header include/old/foo.h \
+  --new-header include/new/foo.h \
+  --policy strict_abi
+```
+
+It exits non-zero on any 🔴 BREAKING or 🟠 API_BREAK finding. Add
+`--suppress suppressions.yaml` to allowlist changes you've consciously accepted.
+
+For a ready-to-paste GitHub Actions workflow that dumps the previous release and
+fails the build on regressions, see the
+[GitHub Action guide](../../user-guide/github-action.md). For the full CLI surface
+and policy options, see [CLI Usage](../../user-guide/cli-usage.md) and
+[Policy Profiles](../../user-guide/policies.md).
+
+**Reading the verdict in CI:**
+
+| Verdict | Exit behavior | What to do |
+|---------|--------------|------------|
+| ✅ `NO_CHANGE` / 🟢 `COMPATIBLE` | pass | merge |
+| 🟡 `COMPATIBLE_WITH_RISK` | configurable | review the deployment risk (e.g. new GLIBC requirement, `noexcept` removal) |
+| 🟠 `API_BREAK` | non-zero | intended? bump minor and document; else revert |
+| 🔴 `BREAKING` | non-zero | bump SONAME major, or revert the change |
+
+Ship your release builds **with debug info** (or feed abicheck the public
+headers) — the [transitive breaks](06-transitive-breaks.md) in Part 6 are
+invisible to any tool working from a stripped `.so` alone.
+
+---
+
+## You've finished the series
+
+You now have the full picture: how a library becomes a running process
+([Part 1](01-foundations.md)), the four families of break
+([Parts 2–5](02-symbol-contracts.md)), the ones that hide from code review
+([Part 6](06-transitive-breaks.md)), and the patterns that make a library
+evolvable (this page).
+
+**Where to go next:**
+
+- [ABI Cheat Sheet](../abi-cheat-sheet.md) — the 2-minute scannable card of all
+  of the above.
+- [Examples & Case Encyclopedia](../../examples/index.md) — every mechanism here
+  as a minimal, runnable v1/v2 reproduction with a real failure demo.
+- [Verdicts](../verdicts.md) & [Exit Codes](../../reference/exit-codes.md) — the
+  full classification and CI-integration semantics.
+- [Change Kind Reference](../../reference/change-kinds.md) — the authoritative,
+  always-current taxonomy of every detected change.
+
+*Back to the [series overview](../abi-api-handling.md).*
