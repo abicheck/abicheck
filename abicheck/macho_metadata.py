@@ -23,6 +23,7 @@ from __future__ import annotations
 import logging
 import os
 import platform
+import re
 import stat
 import struct
 from dataclasses import dataclass, field
@@ -352,35 +353,55 @@ _AAPCS64_HFA_BASE_TYPES = frozenset({
 #: larger aggregates are passed indirectly (by reference to a caller copy).
 AAPCS64_AGGREGATE_REGISTER_LIMIT = 16
 
+#: Short-vector (SIMD) member types that can form an HVA (Homogeneous
+#: short-Vector Aggregate) under AAPCS64 §5.9.5 — NEON intrinsic types like
+#: ``float32x4_t`` / ``int8x16_t`` / ``poly16x8_t`` (incl. the array-of-vector
+#: ``...x4x2_t`` forms), plus generically-named GCC/Clang vector types.
+_AAPCS64_VECTOR_RE = re.compile(r"(?:u?int|float|poly|bfloat)\d+x\d+", re.IGNORECASE)
+
+
+def _is_short_vector(type_name: str) -> bool:
+    """True if *type_name* looks like an AArch64 short-vector (SIMD) type."""
+    lowered = type_name.lower()
+    return (
+        bool(_AAPCS64_VECTOR_RE.search(lowered))
+        or "vector" in lowered
+        or "__simd" in lowered
+    )
+
 
 def classify_aapcs64_aggregate(byte_size: int, member_base_types: list[str]) -> str:
     """Classify how AArch64 (AAPCS64) passes an aggregate *by value*.
 
     This is the calling-convention dimension that differs from the SysV
     x86-64 path and is otherwise invisible to a size-only diff. Crossing one
-    of these boundaries (e.g. growing past 16 bytes, or ceasing to be an HFA)
+    of these boundaries (e.g. growing past 16 bytes, or ceasing to be an HFA/HVA)
     is a real ARM64 ABI change for by-value parameters/returns.
 
     Args:
         byte_size: ``sizeof`` of the aggregate.
         member_base_types: fundamental type names of the aggregate's members
             (flattened). An HFA requires 1..4 members all of the same
-            floating-point fundamental type.
+            floating-point fundamental type; an HVA the same of a short-vector
+            (SIMD) type.
 
     Returns:
         - ``"hfa<N>"`` — Homogeneous Floating-point Aggregate of N members,
           passed in N SIMD/FP registers (v0..v3).
+        - ``"hva<N>"`` — Homogeneous short-Vector Aggregate of N members, also
+          passed in N SIMD/FP registers regardless of total size (≤ 4×16 = 64 B).
         - ``"register"`` — aggregate <= 16 bytes, passed in up to two GP
           registers (x0/x1).
         - ``"indirect"`` — aggregate > 16 bytes, passed by reference.
     """
     members = [m for m in member_base_types if m]
-    if (
-        1 <= len(members) <= 4
-        and all(m in _AAPCS64_HFA_BASE_TYPES for m in members)
-        and len(set(members)) == 1
-    ):
+    homogeneous = 1 <= len(members) <= 4 and len(set(members)) == 1
+    if homogeneous and members[0] in _AAPCS64_HFA_BASE_TYPES:
         return f"hfa{len(members)}"
+    # HVA must be checked BEFORE the 16-byte cutoff: an HVA is register-passed
+    # even at up to 64 bytes (4 × 16-byte vectors).
+    if homogeneous and _is_short_vector(members[0]):
+        return f"hva{len(members)}"
     if byte_size > AAPCS64_AGGREGATE_REGISTER_LIMIT:
         return "indirect"
     return "register"
