@@ -248,11 +248,35 @@ only feeds A4's modulation with a disclosed rationale.
 
 #### D2.4 Persistence
 
-Idiom tags and inferred conventions are persisted on the snapshot
-(`AbiSnapshot.idioms: dict[str, list[str]]`, `AbiSnapshot.conventions`) behind
-an `ADR-015` schema bump. Older snapshots without the fields degrade to
-"no idiom evidence" → A4 modulation simply doesn't fire (safe default). Dump
-without idiom analysis (`--no-idioms`) leaves the fields empty.
+Idiom tags and inferred conventions are persisted on the snapshot behind an
+`ADR-015` schema bump. Crucially, the persisted form is **structured evidence,
+not bare tag names** — a later `--pattern-verdicts` / `--explain-patterns` run
+loaded from a `.abi.json` must be able to enforce D2.1 confidence thresholds,
+prove the both-snapshots anti-hiding guards (D4.1), and populate the ledger's
+`edges_matched` (D4.3) entirely from what was saved. So:
+
+```python
+@dataclass
+class IdiomTag:
+    idiom: Idiom
+    confidence: Confidence            # so D4.1 thresholds survive serialization
+    evidence: list[str]               # the matched edges/reasons → ledger edges_matched
+    # idiom-specific proof needed by the both-snapshots guards:
+    layout_signature: str | None = None   # OPAQUE/PIMPL wrapper's own layout (D4.1 PIMPL guard)
+    hidden_pointee: str | None = None      # PIMPL impl pointee identity
+    definition_hidden: bool = False        # T incomplete in the public include closure (D2.1 cond.1)
+
+# AbiSnapshot.idioms: dict[str, list[IdiomTag]]   # declaration name → tags
+# AbiSnapshot.conventions: ...
+```
+
+A tag with only its name would let a loaded run know a declaration *was*
+`OPAQUE_POINTER` but not at what confidence, nor whether the definition-hidden
+condition held — so it could neither apply the tier/threshold gates nor show the
+evidence. Persisting the `IdiomTag` record closes that gap and keeps the diff
+stage source-agnostic (it reads evidence, never re-derives it). Older snapshots
+without the field degrade to "no idiom evidence" → A4 modulation simply doesn't
+fire (safe default). Dump without idiom analysis (`--no-idioms`) leaves it empty.
 
 ---
 
@@ -460,7 +484,7 @@ Every modulation is disclosed exactly like the ADR-024 surface ledger:
 
 | Surface | Change | Compatibility |
 |---------|--------|---------------|
-| `model.py` | `AbiSnapshot.idioms`, `.conventions`; helper `RecordType` opaque/handle flags if not already derivable. | Additive; schema bump (ADR-015). Old snapshots → empty → safe no-op. |
+| `model.py` | `AbiSnapshot.idioms: dict[str, list[IdiomTag]]` (structured evidence — `idiom` + `confidence` + matched `evidence` + the opaque/PIMPL proof fields, **not** bare tag names, so loaded snapshots can enforce thresholds/guards and populate `edges_matched` — D2.4), `.conventions`; new `IdiomTag` dataclass; helper `RecordType` opaque/handle flags if not already derivable. | Additive; schema bump (ADR-015). Old snapshots → empty → safe no-op. |
 | `checker_types.py` | `Change.confidence: Confidence` (reusing `checker_policy.Confidence`, default `HIGH`) — per-finding trust, distinct from verdict-level `DiffResult.confidence`; `Change.effective_verdict: Verdict \| None = None` — per-finding category override (default `None` = classify by `kind`); plus `Change.modulation_reason: str \| None`, `.modulation_rule: str \| None`. Add the shared `effective_category(change, kind_sets)` helper (D4.1 mechanism). | Additive dataclass fields with safe defaults; classification is a no-op while every `effective_verdict` is `None` (`--no-pattern-verdicts` / pre-Phase-3). |
 | `checker_policy.py` / `reporter.py` / `severity.py` | **Behavioural change:** every kind-based classification site must route through `effective_category(...)` instead of bare `c.kind in <set>` — `compute_verdict()`; `reporter._change_to_dict` + `filtered_summary` + type/non-type splits; `severity.categorize_changes` + `compute_exit_code`. | No-op while no finding carries an override; otherwise demoted findings read compatible in **all** outputs and both exit-code paths (enforced by the cross-output validation matrix). |
 | `bundle.py` | `BundleFinding` gains the same `effective_verdict` / `modulation_reason` / `modulation_rule` fields; `to_change()` propagates them onto the lowered `Change`; `BundleDiffResult.bundle_verdict` and the `compare-release` JSON/SARIF + exit-code paths classify via `effective_category(...)`, not bare `compute_verdict()` on the raw kind (D3.2). | Additive fields, default `None` → no-op for existing bundle runs; required so an A3 reachability demotion actually reaches the product verdict rather than being dropped at `to_change()`. |
