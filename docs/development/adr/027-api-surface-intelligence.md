@@ -1,4 +1,4 @@
-# ADR-025: API Surface Intelligence — Structure Metrics, Idiom Detection, Cross-Library Reasoning, and Pattern-Aware Verdicts
+# ADR-027: API Surface Intelligence — Structure Metrics, Idiom Detection, Cross-Library Reasoning, and Pattern-Aware Verdicts
 
 **Date:** 2026-06-06
 **Status:** Proposed
