@@ -254,6 +254,17 @@ the `(producer, consumer)` library pair so the report shows the propagation
 path. They are gated on `--product`/bundle mode and never fire in
 single-library comparisons (no false product edges).
 
+`CROSS_LIBRARY_TYPE_LAYOUT_BREAK` relies on matching a changed type to a
+consumer's surface by shared `source_header`, and that match is inherently
+fuzzy — provenance paths are build-time absolute paths matched on segments
+(`provenance.py` already documents this), so two libraries built in different
+trees may spell the same header differently. The detector therefore treats a
+header match as *corroborating* evidence layered on top of the type's
+fully-qualified name + layout signature (the primary key), never as the sole
+trigger, and `--product` gating bounds the blast radius. Dedicated bundle
+fixtures with divergent build-path prefixes are called for in the validation
+section (§A3) to pin this behaviour.
+
 #### D3.3 SDK-level verdict roll-up
 
 A product comparison currently yields *N* independent verdicts the user must
@@ -325,13 +336,17 @@ Every modulation is disclosed exactly like the ADR-024 surface ledger:
 | `checker_types.py` | `Change.confidence: Confidence` (reusing the existing `checker_policy.Confidence` enum, default `HIGH`) — a **per-finding** trust level, distinct from the existing **verdict-level** `DiffResult.confidence`; plus `Change.modulation_reason: str \| None`, `.modulation_rule: str \| None`. | Additive dataclass fields with defaults; A4 (D4.1) reads/writes the per-finding `confidence`, reporters surface it alongside the existing `DiffResult` one. |
 | `checker_policy.py` | New `ChangeKind`s (A1.2, A2.2, A3.2) each placed in exactly one of `BREAKING/API_BREAK/COMPATIBLE/RISK` (import-time partition assertion enforces it). | Enum grows; follow the 4-step `/CLAUDE.md` procedure. |
 | `surface.py` | Extract reachability helper into `surface_graph.py`, import back. | Internal refactor, no behaviour change. |
-| New modules | `surface_graph.py`, `idioms.py`, `pattern_verdicts.py`, `cli_surface.py`. | All < 600 lines (AI-readiness file-size gate). |
+| New modules | `surface_graph.py`, `idioms.py`, `pattern_verdicts.py`, `cli_surface.py`. | Each *targeted* at < 600 lines; the AI-readiness file-size gate warns at 1500 / errors at 2000, so `idioms.py` (7 recognisers + convention inference) and `pattern_verdicts.py` (4 rules + ledger) should be split (e.g. one recogniser-registry module + a rules module) before they approach the soft limit, the same way `diff_platform.py` spun out `diff_platform_templates.py`. |
 | CLI | `surface-report` command; `--surface-metrics`, `--idioms/--no-idioms`, `--pattern-verdicts/--no-pattern-verdicts`, `--explain-patterns`, `--product` flags. | Opt-in; defaults preserve current behaviour except `--pattern-verdicts` (see phasing — default-on only after validation). |
 
 All new ChangeKinds must also satisfy the AI-readiness gates: partition
 (ERROR), produced-somewhere (`changekind-detector` WARN), documented in
 `docs/` (`changekind-docs` WARN), and headline-count sync (`doc-count-sync`
-ERROR — update the ChangeKind count wherever it is asserted).
+ERROR). Because `doc-count-sync` is an **ERROR** gate keyed off
+`len(ChangeKind)`, the implementing PR for each phase must bump the ChangeKind
+headline count **in the same commit** that adds the enum values — across this
+multi-phase rollout it is the easiest gate to trip by adding a `ChangeKind`
+in one PR and forgetting the doc count.
 
 ---
 
@@ -396,7 +411,7 @@ before Phase 5 changes a default verdict.
 |--------|---------|
 | Keep per-symbol-only analysis (status quo) | Leaves the declaration graph, idioms, and cross-library edges unused; the four decisions above remain unmakeable. |
 | **Hard** idiom-based suppression (drop opaque-type findings) | Repeats the libabigail `--headers-dir` mistake ADR-024 rejected — loses auditability and can hide a lost-opaqueness break. Chosen: demote + disclose. |
-| Modulate verdicts inline inside each detector | Scatters pattern logic across 30 `diff_*` modules; couples detection to inference. Chosen: a single post-processing pass with a ledger, mirroring `FilterNonPublicSurface`. |
+| Modulate verdicts inline inside each detector | Scatters pattern logic across the `diff_*` detector modules; couples detection to inference. Chosen: a single post-processing pass with a ledger, mirroring `FilterNonPublicSurface`. |
 | Require libclang (richer AST) for idioms | Heavyweight, violates the lightweight-core posture; castxml + DWARF already expose pointer-depth, fields, bases, vtables — enough for the conservative recognisers here. libclang (G4) would *extend* recall later, not gate this. |
 | Push cross-library logic into ADR-023 bundle layer only | ADR-023 is symbol-level; A3 needs the *type-level* reachability graph this ADR introduces. A3 builds **on** ADR-023's edges rather than duplicating them. |
 
