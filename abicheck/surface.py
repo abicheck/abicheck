@@ -365,6 +365,12 @@ def _walk_type_closure(
         rec_node = record_by_name.get(name)
         if rec_node is None:
             continue
+        # A short alias (``A``) reached inside its namespace resolves here to the
+        # namespaced record (``ns::A``); record the *canonical* full name as
+        # public so callers that count/scope by ``RecordType.name`` see it
+        # (otherwise a reachable namespaced type is silently missed — ADR-027
+        # review). ``rec_node.name`` is always in ``all_types``.
+        surface.public_types.add(rec_node.name)
         for f in rec_node.fields:
             for ident in _type_identifiers(f.type):
                 if ident not in seen:

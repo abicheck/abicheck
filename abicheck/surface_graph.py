@@ -285,8 +285,18 @@ def _public_type_counts(snap: AbiSnapshot) -> tuple[int, int]:
     psurf = compute_public_surface(snap)
     if not psurf.resolvable:
         return len(snap.types), len(snap.enums)
-    public_records = sum(1 for r in snap.types if r.name in psurf.public_types)
-    public_enums = sum(1 for e in snap.enums if e.name in psurf.public_types)
+
+    def _in_surface(name: str) -> bool:
+        # A public signature may name a namespaced record unqualified (``A`` for
+        # ``ns::A``), so the closure can hold only the short spelling. Count the
+        # record if *either* its canonical name or its trailing segment is in
+        # the public surface.
+        if name in psurf.public_types:
+            return True
+        return "::" in name and name.rsplit("::", 1)[1] in psurf.public_types
+
+    public_records = sum(1 for r in snap.types if _in_surface(r.name))
+    public_enums = sum(1 for e in snap.enums if _in_surface(e.name))
     return public_records, public_enums
 
 
@@ -314,8 +324,14 @@ def _header_cohesion_clusters(graph: SurfaceGraph, decls: frozenset[str]) -> int
 
     for n in nodes:
         for ref in graph.type_refs.get(n, frozenset()):
-            if ref in nodes:
-                union(n, ref)
+            # A reference may use the unqualified spelling (``A`` for ``ns::A``);
+            # canonicalise it through types_by_name to the record's full name
+            # before testing membership, so a single ``ns::B -> ns::A`` component
+            # is not split into two clusters (ADR-027 review).
+            rec = graph.types_by_name.get(ref)
+            canonical = rec.name if rec is not None else ref
+            if canonical in nodes:
+                union(n, canonical)
     return len({find(n) for n in nodes})
 
 

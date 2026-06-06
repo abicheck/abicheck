@@ -37,7 +37,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 from .checker_policy import Confidence
-from .model import RecordType
+from .model import RecordType, Visibility
 from .surface_graph import SurfaceGraph
 
 
@@ -116,7 +116,10 @@ def _public_pointer_only(graph: SurfaceGraph, type_name: str) -> tuple[bool, boo
     only_pointer = True
     short = type_name.rsplit("::", 1)[-1]
     for fn in graph.snapshot.functions:
-        if fn.name not in graph.public_roots():
+        # Use the function's own visibility, not demangled-name membership in
+        # public_roots(): a *hidden* C++ overload sharing a public overload's
+        # name must not contribute its by-value parameter as "public" evidence.
+        if fn.visibility != Visibility.PUBLIC:
             continue
         sites: list[tuple[str, int]] = [(fn.return_type, fn.return_pointer_depth)]
         for p in fn.params:
@@ -197,7 +200,7 @@ def _recognise_handle(graph: SurfaceGraph) -> dict[str, IdiomTag]:
 def _recognise_factory(graph: SurfaceGraph) -> dict[str, IdiomTag]:
     out: dict[str, IdiomTag] = {}
     for fn in graph.snapshot.functions:
-        if fn.name not in graph.public_roots():
+        if fn.visibility != Visibility.PUBLIC:
             continue
         if fn.return_pointer_depth < 1 and not _is_pointer(fn.return_type):
             continue
@@ -284,7 +287,7 @@ def _recognise_callbacks(graph: SurfaceGraph) -> dict[str, IdiomTag]:
     out: dict[str, IdiomTag] = {}
     typedefs = graph.snapshot.typedefs
     for fn in graph.snapshot.functions:
-        if fn.name not in graph.public_roots():
+        if fn.visibility != Visibility.PUBLIC:
             continue
         for p in fn.params:
             ptype = getattr(p, "type", "") or ""

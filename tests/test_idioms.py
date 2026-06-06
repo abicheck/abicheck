@@ -307,6 +307,43 @@ def test_plain_pointer_param_is_not_callback() -> None:
     assert not any(t.idiom == Idiom.CALLBACK_ABI for t in _tags(snap).get("lookup", []))
 
 
+def test_hidden_overload_by_value_does_not_block_opaque() -> None:
+    # Public overload takes Ctx*; a HIDDEN overload `use(Ctx)` takes it by value.
+    # The hidden overload must NOT suppress the OPAQUE_POINTER tag (Codex P2:
+    # use per-function visibility, not demangled-name membership).
+    snap = AbiSnapshot(
+        library="l",
+        version="1",
+        from_headers=True,
+        functions=[
+            Function(
+                name="ctx_open",
+                mangled="ctx_open",
+                return_type="Ctx*",
+                visibility=Visibility.PUBLIC,
+                return_pointer_depth=1,
+            ),
+            Function(
+                name="use",
+                mangled="_Z3useP3Ctx",
+                return_type="void",
+                params=[Param(name="c", type="Ctx*", pointer_depth=1)],
+                visibility=Visibility.PUBLIC,
+            ),
+            # Hidden overload, same demangled name, by-value param.
+            Function(
+                name="use",
+                mangled="_Z3use3Ctx",
+                return_type="void",
+                params=[Param(name="c", type="Ctx")],
+                visibility=Visibility.HIDDEN,
+            ),
+        ],
+        types=[RecordType(name="Ctx", kind="struct", is_opaque=True)],
+    )
+    assert any(t.idiom == Idiom.OPAQUE_POINTER for t in _tags(snap).get("Ctx", []))
+
+
 def test_recognition_is_deterministic() -> None:
     snap = AbiSnapshot(
         library="l",

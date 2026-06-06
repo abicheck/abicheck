@@ -368,6 +368,79 @@ def test_virtual_bases_counted_in_public_types() -> None:
     assert m.public_types == 2  # both D and its virtual base B
 
 
+def test_public_type_count_for_unqualified_namespaced_reference() -> None:
+    # A public method takes "A*" (unqualified) but the record is stored as
+    # "ns::A". The public-type count must still include it (Codex P2:
+    # canonicalize aliases before the membership test).
+    from abicheck.surface_graph import _public_type_counts
+
+    snap = AbiSnapshot(
+        library="l",
+        version="1",
+        from_headers=True,
+        functions=[
+            Function(
+                name="ns::use",
+                mangled="_ZN2ns3useEPNS_1AE",
+                return_type="void",
+                params=[Param(name="a", type="A*", pointer_depth=1)],
+                visibility=Visibility.PUBLIC,
+                source_header="h.h",
+                origin=ScopeOrigin.PUBLIC_HEADER,
+            ),
+        ],
+        types=[
+            RecordType(
+                name="ns::A",
+                kind="class",
+                source_header="h.h",
+                origin=ScopeOrigin.PUBLIC_HEADER,
+            ),
+        ],
+    )
+    records, _enums = _public_type_counts(snap)
+    assert records == 1  # ns::A counted despite the unqualified "A" reference
+
+
+def test_cohesion_merges_unqualified_namespaced_reference() -> None:
+    # ns::B has a field of unqualified type "A" (== ns::A). The two records are
+    # one connected component, so cohesion must report 1 cluster, not 2.
+    snap = AbiSnapshot(
+        library="l",
+        version="1",
+        from_headers=True,
+        functions=[
+            Function(
+                name="use",
+                mangled="use",
+                return_type="void",
+                params=[Param(name="b", type="ns::B*", pointer_depth=1)],
+                visibility=Visibility.PUBLIC,
+                source_header="h.h",
+                origin=ScopeOrigin.PUBLIC_HEADER,
+            ),
+        ],
+        types=[
+            RecordType(
+                name="ns::B",
+                kind="class",
+                fields=[TypeField(name="a", type="A")],  # unqualified
+                source_header="h.h",
+                origin=ScopeOrigin.PUBLIC_HEADER,
+            ),
+            RecordType(
+                name="ns::A",
+                kind="class",
+                source_header="h.h",
+                origin=ScopeOrigin.PUBLIC_HEADER,
+            ),
+        ],
+    )
+    m = compute_surface_metrics(snap)
+    hc = next(c for c in m.header_coverage if c.header == "h.h")
+    assert hc.cohesion_clusters == 1  # ns::B -> ns::A is one component
+
+
 def test_public_type_count_falls_back_when_unresolvable() -> None:
     # An ELF-only snapshot (no header-derived visibility) cannot resolve a
     # public surface, so the raw parsed counts are used (nothing was scoped).
