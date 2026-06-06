@@ -294,12 +294,22 @@ def _loadable_fixtures() -> list[Path]:
     out: list[Path] = []
     for pat in ("action/*.json", "schema/*.json"):
         for p in sorted(glob.glob(str(_FIXTURE_ROOT / pat))):
-            try:
-                load_snapshot(Path(p))
-            except Exception:
-                continue  # not a full snapshot schema — skip
-            out.append(Path(p))
+            # A fixture that does not deserialize into a full snapshot schema
+            # (bad JSON, missing/typed-wrong keys, unreadable file) is simply
+            # not a candidate — skip it. Exception types are named explicitly
+            # so an unexpected failure still surfaces instead of being swallowed.
+            if _is_loadable_snapshot(Path(p)):
+                out.append(Path(p))
     return out
+
+
+def _is_loadable_snapshot(path: Path) -> bool:
+    """Return True iff *path* deserializes into a full snapshot schema."""
+    try:
+        load_snapshot(path)
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        return False
+    return True
 
 
 _REAL_SNAPSHOTS = _loadable_fixtures()

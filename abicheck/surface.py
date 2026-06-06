@@ -555,21 +555,49 @@ def classify_change_surface(
     # A confident private/system-header origin demotes even an exported
     # symbol — that is exactly the leaked-private-header case scoping targets.
     if not type_level_finding:
-        if sym in all_symbols:
-            reason = _origin_reason(surf_old, surf_new, sym)
-            if reason is not None:
-                return False, reason
-            return (True, None) if sym in public_symbols else (False, REASON_NOT_EXPORTED)
-        if sym and "::" in sym and sym.rsplit("::", 1)[1] in all_symbols:
-            tail = sym.rsplit("::", 1)[1]
-            reason = _origin_reason(surf_old, surf_new, tail)
-            if reason is not None:
-                return False, reason
-            return (True, None) if tail in public_symbols else (False, REASON_NOT_EXPORTED)
+        verdict = _classify_symbol_level(
+            sym, all_symbols, public_symbols, surf_old, surf_new,
+        )
+        if verdict is not None:
+            return verdict
 
-    # Type-level finding: check the implicated type name(s). A finding is
-    # in-surface if *any* implicated type is reachable from the public API.
+    return _classify_type_level(
+        candidates, all_types, public_types, surf_old, surf_new,
+    )
 
+
+def _classify_symbol_level(
+    sym: str,
+    all_symbols: frozenset[str] | set[str],
+    public_symbols: frozenset[str] | set[str],
+    surf_old: PublicSurface,
+    surf_new: PublicSurface,
+) -> tuple[bool, str | None] | None:
+    """Classify a symbol-level finding, or return None to fall through to
+    type-level reachability (the symbol is unknown to the surface)."""
+    if sym in all_symbols:
+        reason = _origin_reason(surf_old, surf_new, sym)
+        if reason is not None:
+            return False, reason
+        return (True, None) if sym in public_symbols else (False, REASON_NOT_EXPORTED)
+    if sym and "::" in sym and sym.rsplit("::", 1)[1] in all_symbols:
+        tail = sym.rsplit("::", 1)[1]
+        reason = _origin_reason(surf_old, surf_new, tail)
+        if reason is not None:
+            return False, reason
+        return (True, None) if tail in public_symbols else (False, REASON_NOT_EXPORTED)
+    return None
+
+
+def _classify_type_level(
+    candidates: set[str],
+    all_types: frozenset[str] | set[str],
+    public_types: frozenset[str] | set[str],
+    surf_old: PublicSurface,
+    surf_new: PublicSurface,
+) -> tuple[bool, str | None]:
+    """Classify a finding by the implicated type name(s). A finding is
+    in-surface if *any* implicated type is reachable from the public API."""
     # Anti-hiding (ADR-024 §D5.2): never filter a change to an
     # internal-namespace type (``detail::``, ``impl::``, …). The internal-leak
     # detector (post_processing.DetectInternalLeaks) runs *after* this step and
@@ -592,19 +620,36 @@ def classify_change_surface(
     # Prefer a provenance reason when every implicated type confidently
     # originates from a private/system header; this is a *confident* demotion
     # and applies even without typed roots (it is the leaked-private case).
+    header_reason = _confident_header_reason(known, surf_old, surf_new)
+    if header_reason is not None:
+        return False, header_reason
+    return _demote_by_reachability(known, surf_old, surf_new)
+
+
+def _confident_header_reason(
+    known: set[str], surf_old: PublicSurface, surf_new: PublicSurface,
+) -> str | None:
+    """Reason when every implicated type confidently originates from a
+    private/system header, else None."""
     type_reasons = {_origin_reason(surf_old, surf_new, c) for c in known}
-    if None not in type_reasons and type_reasons:
-        return False, (
-            REASON_PRIVATE_HEADER
-            if REASON_PRIVATE_HEADER in type_reasons
-            else REASON_SYSTEM_HEADER
-        )
-    # Beyond this point the only basis to demote is type-reachability. That is
-    # trustworthy *only* when the surface has real typed roots to walk from.
-    # An export-table-only snapshot (e.g. a PE binary whose header scoping fell
-    # back to the export table — functions are ``return_type="?"``) has none,
-    # so every type looks "unreachable". Demoting on that basis would hide a
-    # genuine public ABI break, including a change to a PUBLIC_HEADER type
+    if None in type_reasons or not type_reasons:
+        return None
+    return (
+        REASON_PRIVATE_HEADER
+        if REASON_PRIVATE_HEADER in type_reasons
+        else REASON_SYSTEM_HEADER
+    )
+
+
+def _demote_by_reachability(
+    known: set[str], surf_old: PublicSurface, surf_new: PublicSurface,
+) -> tuple[bool, str | None]:
+    """Final demotion stage: the only remaining basis is type-reachability."""
+    # That is trustworthy *only* when the surface has real typed roots to walk
+    # from. An export-table-only snapshot (e.g. a PE binary whose header scoping
+    # fell back to the export table — functions are ``return_type="?"``) has
+    # none, so every type looks "unreachable". Demoting on that basis would hide
+    # a genuine public ABI break, including a change to a PUBLIC_HEADER type
     # recovered from a PDB. Keep the finding in that case (ADR-024 §D5.2).
     if not (surf_old.has_typed_roots and surf_new.has_typed_roots):
         return True, None

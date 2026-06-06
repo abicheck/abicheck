@@ -1454,22 +1454,34 @@ def _unwrap_funcptr_declarator(s: str) -> str:
             if j >= len(s) or s[j] not in "*&":
                 return s  # ordinary parameter list, not a pointer declarator
             # Find the ')' matching this declarator-group '(' (bracket-aware).
-            pdepth = 0
-            tdepth = 0
-            for k in range(i, len(s)):
-                c = s[k]
-                if c == "<":
-                    tdepth += 1
-                elif c == ">":
-                    tdepth = max(0, tdepth - 1)
-                elif c == "(" and tdepth == 0:
-                    pdepth += 1
-                elif c == ")" and tdepth == 0:
-                    pdepth -= 1
-                    if pdepth == 0:
-                        return s[i + 1:k].lstrip("*& ")
-            return s  # unbalanced — leave alone
+            close = _match_declarator_group(s, i)
+            if close is None:
+                return s  # unbalanced — leave alone
+            return s[i + 1:close].lstrip("*& ")
     return s
+
+
+def _match_declarator_group(s: str, open_idx: int) -> int | None:
+    """Return the index of the ``)`` matching the ``(`` at *open_idx*, or None.
+
+    Bracket-aware: ``(``/``)`` nested inside template arguments (``<...>``) do
+    not affect the paren depth.
+    """
+    pdepth = 0
+    tdepth = 0
+    for k in range(open_idx, len(s)):
+        c = s[k]
+        if c == "<":
+            tdepth += 1
+        elif c == ">":
+            tdepth = max(0, tdepth - 1)
+        elif c == "(" and tdepth == 0:
+            pdepth += 1
+        elif c == ")" and tdepth == 0:
+            pdepth -= 1
+            if pdepth == 0:
+                return k
+    return None
 
 
 def _unqualified_name_of(s: str) -> str:
@@ -1486,7 +1498,14 @@ def _unqualified_name_of(s: str) -> str:
     op = _OPERATOR_TOKEN_RE.search(s)
     if op is not None:
         return s[op.start():].strip()
-    # Truncate at the parameter-list '(' that sits at template depth 0.
+    s = _truncate_at_param_list(s)
+    s = _after_last_top_level_scope(s).strip()
+    s = _drop_leading_return_type(s)
+    return s.strip()
+
+
+def _truncate_at_param_list(s: str) -> str:
+    """Drop everything from the parameter-list ``(`` at template depth 0 on."""
     depth = 0
     for i, ch in enumerate(s):
         if ch == "<":
@@ -1494,9 +1513,12 @@ def _unqualified_name_of(s: str) -> str:
         elif ch == ">":
             depth = max(0, depth - 1)
         elif ch == "(" and depth == 0:
-            s = s[:i]
-            break
-    # Take the segment after the last '::' that sits at template depth 0.
+            return s[:i]
+    return s
+
+
+def _after_last_top_level_scope(s: str) -> str:
+    """Return the segment after the last ``::`` that sits at template depth 0."""
     depth = 0
     last = 0
     i = 0
@@ -1511,9 +1533,12 @@ def _unqualified_name_of(s: str) -> str:
             i += 2
             continue
         i += 1
-    s = s[last:].strip()
-    # Drop a leading return type: take the part after the last top-level space
-    # (e.g. ``void get<int>`` -> ``get<int>``).
+    return s[last:]
+
+
+def _drop_leading_return_type(s: str) -> str:
+    """Drop a leading return type by taking the part after the last top-level
+    space (e.g. ``void get<int>`` -> ``get<int>``)."""
     depth = 0
     sp = -1
     for i, ch in enumerate(s):
@@ -1524,8 +1549,8 @@ def _unqualified_name_of(s: str) -> str:
         elif ch == " " and depth == 0:
             sp = i
     if sp != -1:
-        s = s[sp + 1:]
-    return s.strip()
+        return s[sp + 1:]
+    return s
 
 
 def _strip_template_args(leaf: str) -> str:

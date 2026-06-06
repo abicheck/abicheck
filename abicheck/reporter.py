@@ -1088,6 +1088,35 @@ def to_review_digest(result: DiffResult) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
+def _classify_changes_by_kind(
+    changes: list[Change], result: DiffResult,
+) -> tuple[list[Change], list[Change], list[Change], list[Change]]:
+    """Split *changes* into (breaking, source_breaks, risk, compatible) using the
+    effective kind sets (respects PolicyFile overrides)."""
+    breaking_set, api_break_set, compat_set, risk_set = result._effective_kind_sets()
+    breaking = [c for c in changes if c.kind in breaking_set]
+    source_breaks = [c for c in changes if c.kind in api_break_set]
+    risk = [c for c in changes if c.kind in risk_set]
+    compatible = [c for c in changes if c.kind in compat_set]
+    return breaking, source_breaks, risk, compatible
+
+
+def _build_internal_rtti_note(breaking: list[Change]) -> list[str]:
+    """Build the up-front note when breaking findings are mostly RTTI/internal
+    churn. Returns an empty list when there is nothing to note."""
+    _bd = surface_breakdown(breaking)
+    if not (_bd.rtti or _bd.internal):
+        return []
+    return [
+        f"> ℹ️ **{_bd.rtti + _bd.internal} of {_bd.total} breaking findings are "
+        f"internal/RTTI churn** ({_bd.rtti} RTTI, {_bd.internal} "
+        "internal-namespace) — typically a missing `-fvisibility=hidden`, not "
+        f"public-API breaks. Genuine public-surface breaking findings: "
+        f"**{_bd.public}**.",
+        "",
+    ]
+
+
 def to_markdown(
     result: DiffResult,
     *,
@@ -1129,11 +1158,7 @@ def to_markdown(
         changes = apply_show_only(changes, show_only, policy=result.policy)
 
     # Classify filtered changes using effective kind sets (respects PolicyFile overrides)
-    breaking_set, api_break_set, compat_set, risk_set = result._effective_kind_sets()
-    breaking = [c for c in changes if c.kind in breaking_set]
-    source_breaks = [c for c in changes if c.kind in api_break_set]
-    risk = [c for c in changes if c.kind in risk_set]
-    compatible = [c for c in changes if c.kind in compat_set]
+    breaking, source_breaks, risk, compatible = _classify_changes_by_kind(changes, result)
 
     lines: list[str] = [
         f"# ABI Report: {result.library}",
@@ -1153,16 +1178,7 @@ def to_markdown(
     # When most of the breaking count is RTTI / internal-namespace churn, say so
     # up front — otherwise a huge count from a library lacking -fvisibility=hidden
     # buries the handful of genuine public-API breaks.
-    _bd = surface_breakdown(breaking)
-    if _bd.rtti or _bd.internal:
-        lines += [
-            f"> ℹ️ **{_bd.rtti + _bd.internal} of {_bd.total} breaking findings are "
-            f"internal/RTTI churn** ({_bd.rtti} RTTI, {_bd.internal} "
-            "internal-namespace) — typically a missing `-fvisibility=hidden`, not "
-            f"public-API breaks. Genuine public-surface breaking findings: "
-            f"**{_bd.public}**.",
-            "",
-        ]
+    lines += _build_internal_rtti_note(breaking)
 
     _append_confidence_section(lines, result)
 

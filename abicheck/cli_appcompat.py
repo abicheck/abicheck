@@ -69,22 +69,33 @@ def _validate_appcompat_args(
             err=True,
         )
     if weak_mode or list_symbols:
-        _rejected: list[str] = []
-        if old_headers_only:
-            _rejected.append("--old-header")
-        if new_headers_only:
-            _rejected.append("--new-header")
-        if old_includes_only:
-            _rejected.append("--old-include")
-        if new_includes_only:
-            _rejected.append("--new-include")
-        if _rejected:
-            mode_label = "--check-against" if weak_mode else "--list-required-symbols"
-            raise click.UsageError(
-                f"{', '.join(_rejected)} cannot be used with {mode_label}. "
-                f"Per-side header/include flags are only supported in full "
-                f"comparison mode (OLD_LIB NEW_LIB)."
-            )
+        _reject_per_side_flags(
+            weak_mode,
+            old_headers_only, new_headers_only,
+            old_includes_only, new_includes_only,
+        )
+
+
+def _reject_per_side_flags(
+    weak_mode: bool,
+    old_headers_only: tuple[Path, ...], new_headers_only: tuple[Path, ...],
+    old_includes_only: tuple[Path, ...], new_includes_only: tuple[Path, ...],
+) -> None:
+    """Reject per-side header/include flags in weak / list-symbols modes."""
+    _flags = (
+        ("--old-header", old_headers_only),
+        ("--new-header", new_headers_only),
+        ("--old-include", old_includes_only),
+        ("--new-include", new_includes_only),
+    )
+    _rejected = [name for name, value in _flags if value]
+    if _rejected:
+        mode_label = "--check-against" if weak_mode else "--list-required-symbols"
+        raise click.UsageError(
+            f"{', '.join(_rejected)} cannot be used with {mode_label}. "
+            f"Per-side header/include flags are only supported in full "
+            f"comparison mode (OLD_LIB NEW_LIB)."
+        )
 
 
 def _handle_list_required_symbols(
