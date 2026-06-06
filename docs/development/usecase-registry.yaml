@@ -114,38 +114,40 @@ use_cases:
   - id: UC-ARCH-kernel-btf
     axis: archetype
     name: Kernel / eBPF modules (BTF/CTF)
-    status: partial
-    gap: G6
-    plan: docs/development/plans/g6-kernel-btf-and-accelerator.md
+    status: complete
+    note: >
+      G6 (kernel half) closed. The "module vs vmlinux BTF" workflow runs
+      end-to-end through compare: real BTF bytes → parse_btf_from_bytes →
+      layout detectors → BREAKING, with a CTF mirror scenario
+      (parse_ctf_from_bytes). A committed BTF-blob example
+      (examples/case121_kernel_btf_struct_field_added) carries v1.btf/v2.btf and
+      a ground_truth.json entry; resolve_input now ingests bare BTF/CTF blobs by
+      magic so `abicheck compare a.btf b.btf` works toolchain-free. A real
+      `.BTF`-section fixture is validated via `gcc -gbtf`
+      (tests/test_btf_integration.py, integration-marked). Full kernel-module
+      __ksymtab namespace analysis beyond BTF type layout stays out of scope.
     evidence:
-      modules: [abicheck/btf_metadata.py, abicheck/ctf_metadata.py]
-      tests: [tests/test_btf_metadata.py, tests/test_workflow_kernel_accel.py]
+      modules: [abicheck/btf_metadata.py, abicheck/ctf_metadata.py, abicheck/service.py]
+      tests: [tests/test_btf_metadata.py, tests/test_workflow_kernel_accel.py, tests/test_btf_integration.py]
+      examples: [examples/case121_kernel_btf_struct_field_added]
       docs: [docs/user-guide/kernel-btf.md]
-    next_steps: >
-      The "module vs vmlinux BTF" workflow is now exercised end-to-end through
-      compare (real BTF bytes → parse_btf_from_bytes → layout detectors →
-      BREAKING) in tests/test_workflow_kernel_accel.py, and documented in
-      docs/user-guide/kernel-btf.md. Remaining: a committed BTF-blob example
-      under examples/ with a ground_truth.json entry and a pahole/bpftool-based
-      integration fixture; CTF has no workflow scenario yet.
 
   - id: UC-ARCH-sycl
     axis: archetype
     name: SYCL / heterogeneous accelerator stacks (PI/UR)
-    status: partial
-    gap: G6
-    plan: docs/development/plans/g6-kernel-btf-and-accelerator.md
+    status: complete
+    note: >
+      G6 (accelerator half) closed. SYCL plugin-interface detection is driven
+      through the standard compare + report path at the workflow level for BOTH
+      interface generations: a dropped PI entrypoint (libpi_*.so) and a dropped
+      UR adapter entrypoint (libur_adapter_*.so) each → BREAKING and reach the
+      JSON/Markdown reports (tests/test_workflow_kernel_accel.py). CUDA device
+      code (.cubin/PTX) stays deferred by design.
     evidence:
       modules: [abicheck/sycl_metadata.py, abicheck/diff_sycl.py]
       tests: [tests/test_diff_sycl.py, tests/test_workflow_kernel_accel.py]
       examples: [examples/case82_sycl_overload_set_removed]
       docs: [docs/user-guide/kernel-btf.md]
-    next_steps: >
-      SYCL plugin-interface detection is now driven through the standard
-      compare + report path at the workflow level (a dropped PI entrypoint →
-      BREAKING, reaching the JSON/Markdown reports) in
-      tests/test_workflow_kernel_accel.py. Remaining: a UR-adapter workflow
-      fixture; CUDA device code (.cubin/PTX) stays deferred.
 
   - id: UC-ARCH-static-lib
     axis: archetype

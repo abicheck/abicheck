@@ -43,9 +43,25 @@ a binary break.
 ### Generating BTF
 
 BTF is emitted by the kernel build (`CONFIG_DEBUG_INFO_BTF`) and can be produced
-or extracted for individual objects with `pahole -J` or
+or extracted for individual objects with `pahole -J`, `gcc -gbtf`, or
 `bpftool btf dump file <elf>`. Any ELF with a `.BTF` section works as a
 `compare` input.
+
+### Comparing raw BTF/CTF blobs directly
+
+You don't need a full ELF: a **bare type-info blob** (a `.BTF` or CTF section
+extracted with `bpftool btf dump file <elf> format raw` or
+`objcopy -O binary --only-section=.BTF`) is accepted directly as a `compare`
+input — `abicheck` recognizes the BTF (`0xEB9F`) / CTF (`0xCFF1`) magic:
+
+```bash
+abicheck compare task_state.v1.btf task_state.v2.btf
+```
+
+The committed example
+[`examples/case121_kernel_btf_struct_field_added`](https://github.com/napetrov/abicheck/tree/main/examples/case121_kernel_btf_struct_field_added)
+is exactly this: two BTF blobs where `task_state` grows from 2 to 3 fields,
+reported as `struct_size_changed` / `BREAKING`.
 
 ---
 

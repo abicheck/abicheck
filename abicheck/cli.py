@@ -429,6 +429,13 @@ def _resolve_input(
             debug_format=debug_format,
         )
 
+    # Raw kernel type-info blob (a bare BTF/CTF section, e.g. from
+    # `bpftool btf dump file <elf> format raw`): parse directly.
+    from .service import _resolve_raw_typeinfo
+    raw_typeinfo = _resolve_raw_typeinfo(path, version)
+    if raw_typeinfo is not None:
+        return raw_typeinfo
+
     # Text-based formats: detect by sniffing only a small header chunk
     fmt = _sniff_text_format(path)
 

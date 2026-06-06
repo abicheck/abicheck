@@ -1822,6 +1822,20 @@
         "type_field_removed",
         "type_size_changed"
       ]
+    },
+    "case121_kernel_btf_struct_field_added": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "description": "Linux kernel BTF: a vmlinux struct (task_state) grows from 2 to 3 fields between kernel releases, changing sizeof 8→12. An out-of-tree module / eBPF CO-RE program built against the old layout accesses wrong offsets. Committed BTF blobs (v1.btf/v2.btf) are parsed by parse_btf_from_bytes and diffed through the same layout detectors as DWARF.",
+      "platforms": [
+        "linux"
+      ],
+      "abi_break": true,
+      "api_break": false,
+      "bad_practice": false,
+      "expected_kinds": [
+        "struct_size_changed"
+      ]
     }
   }
 }

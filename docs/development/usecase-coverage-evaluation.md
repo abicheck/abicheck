@@ -80,7 +80,8 @@ A real invocation is a point in this space:
 | Plugin (host↔plugin) | `complete` | **G5 closed**: `plugin-check` CLI + `check_plugin_host_contract` API + plugin_abi policy |
 | Security-hardening drift | `complete` | **G12 closed**: full checksec surface (RELRO/BIND_NOW/PIE/canary/FORTIFY/W^X) diffed; shipped `--policy-file security` gate |
 | Header-only / inline-only | `planned` | castxml can't emit concept bodies / ctor mangled names (G4; cases 78/105/106/111 dormant) |
-| Kernel / eBPF (BTF/CTF) | `partial` | **G6 advanced**: BTF struct-change + SYCL entrypoint-drop run through `compare` end-to-end; example fixture pending |
+| Kernel / eBPF (BTF/CTF) | `complete` | **G6 closed**: BTF + CTF struct-change run through `compare`; committed `case121` BTF blobs + bare-blob CLI ingestion + `gcc -gbtf` integration fixture |
+| SYCL / accelerator (PI/UR) | `complete` | **G6 closed**: PI *and* UR adapter entrypoint-drop driven through `compare` + reports |
 | Static libraries (`.a`/`.lib`) | `by_design_excluded` | **G8 decided (option A)**: non-goal; CLI rejects archives with guidance |
 | FFI consumers (Rust/Go/Python) | `by_design_excluded` | C ABI covered; other languages a stated non-goal |
 
@@ -95,7 +96,7 @@ A real invocation is a point in this space:
 | **G3** | Catalog only exercises `compare`; Markdown/HTML test coverage thin | — | ✅ appcompat-from-catalog + stack-check sysroot e2e + Markdown/HTML structural coverage | scenarios asserted in new tests |
 | **G4** | Header-only / inline-only (detector frontier) | libclang header-AST extractor | unblock cases 78/105/106/111 | reuse dormant fixtures |
 | **G5** | Plugin host↔plugin contract is one-directional | ✅ `check_plugin_host_contract` + `plugin-check` CLI | ✅ scenario + CLI tests | compiled host/plugin demo optional |
-| **G6** | Kernel/eBPF use case is parser-only | ✅ BTF/SYCL run through `compare` | ✅ workflow scenarios (real BTF parse) | committed BTF-blob example pending |
+| **G6** | ✅ **closed** — kernel/eBPF + accelerator workflows | ✅ BTF/CTF/SYCL(PI+UR) run through `compare`; bare-blob CLI ingestion | ✅ workflow scenarios + `gcc -gbtf` integration | ✅ committed `case121` BTF-blob example |
 | **G7** | No semver-bump recommendation | recommender + report wiring | mapping + integration | reuse cases |
 | **G8** | Static libraries undocumented | ✅ archive detection + clear error path | ✅ unit (archive → guidance error) | ✅ documented non-goal (goals + limitations) |
 

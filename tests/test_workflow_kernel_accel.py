@@ -32,7 +32,9 @@ docs/user-guide/kernel-btf.md.
 
 from __future__ import annotations
 
+import json
 import struct
+from pathlib import Path
 
 from abicheck.btf_metadata import (
     BTF_KIND_INT,
@@ -43,9 +45,18 @@ from abicheck.btf_metadata import (
 )
 from abicheck.checker import compare
 from abicheck.checker_policy import ChangeKind, Verdict
+from abicheck.ctf_metadata import (
+    CTF_K_INTEGER,
+    CTF_K_STRUCT,
+    CTF_MAGIC,
+    CTF_VERSION_3,
+    parse_ctf_from_bytes,
+)
 from abicheck.model import AbiSnapshot
 from abicheck.reporter import to_json, to_markdown
 from abicheck.sycl_metadata import SyclMetadata, SyclPluginInfo
+
+_REPO = Path(__file__).parent.parent
 
 # ── BTF blob builder (minimal, self-contained) ───────────────────────────────
 
@@ -161,3 +172,120 @@ def test_sycl_additive_entrypoint_is_not_breaking() -> None:
 
     result = compare(old, new)
     assert result.verdict is not Verdict.BREAKING
+
+
+# ── Scenario: UR (Unified Runtime) adapter — PI's successor ───────────────────
+
+
+def _ur_snapshot(version: str, entry_points: list[str]) -> AbiSnapshot:
+    plugin = SyclPluginInfo(
+        name="level_zero",
+        library="libur_adapter_level_zero.so",
+        interface_type="ur",          # Unified Runtime, not PI
+        pi_version="0.10",
+        entry_points=entry_points,
+        backend_type="level_zero",
+    )
+    sycl = SyclMetadata(
+        implementation="dpcpp",
+        runtime_version="",
+        pi_version="0.10",
+        plugins=[plugin],
+        plugin_search_paths=["/usr/lib/sycl"],
+    )
+    return AbiSnapshot(library="libur_loader.so", version=version, sycl=sycl)
+
+
+def test_ur_adapter_entrypoint_drop_is_breaking_and_reaches_reports() -> None:
+    """A dropped UR adapter entrypoint is a BREAKING SYCL change driven end-to-end
+    through compare + the report path — the UR mirror of the PI scenario."""
+    old = _ur_snapshot("1", ["urAdapterGet", "urPlatformGet", "urDeviceGet"])
+    new = _ur_snapshot("2", ["urAdapterGet", "urPlatformGet"])  # drops urDeviceGet
+
+    result = compare(old, new)
+    assert result.verdict is Verdict.BREAKING
+    assert any(c.kind is ChangeKind.SYCL_PI_ENTRYPOINT_REMOVED for c in result.changes)
+
+    payload = json.loads(to_json(result))
+    assert payload["verdict"] == "BREAKING"
+    assert "urDeviceGet" in to_markdown(result)
+
+
+def test_ur_adapter_additive_entrypoint_is_not_breaking() -> None:
+    old = _ur_snapshot("1", ["urAdapterGet", "urPlatformGet"])
+    new = _ur_snapshot("2", ["urAdapterGet", "urPlatformGet", "urDeviceGet"])
+
+    result = compare(old, new)
+    assert result.verdict is not Verdict.BREAKING
+
+
+# ── Scenario: kernel CTF struct layout change ─────────────────────────────────
+
+
+class _CtfBlob:
+    """Build a minimal CTF v3 blob: one INT type plus one struct."""
+
+    def __init__(self) -> None:
+        self._strings = bytearray(b"\x00")
+        self._offsets: dict[str, int] = {"": 0}
+        self._types: list[bytes] = []
+
+    def _str(self, s: str) -> int:
+        if s in self._offsets:
+            return self._offsets[s]
+        off = len(self._strings)
+        self._strings.extend(s.encode() + b"\x00")
+        self._offsets[s] = off
+        return off
+
+    def _add(self, name: str, kind: int, vlen: int, size_or_type: int, extra: bytes = b"") -> None:
+        info = (kind << 24) | (vlen & 0xFFFF)
+        self._types.append(struct.pack("<III", self._str(name) if name else 0, info, size_or_type) + extra)
+
+    def build_struct(self, struct_name: str, n_fields: int) -> bytes:
+        self._add("int", CTF_K_INTEGER, 0, 4, extra=struct.pack("<I", 32))
+        members = b""
+        for i in range(n_fields):
+            members += struct.pack("<II", self._str(f"f{i}"), (1 << 16) | (i * 32))
+        self._add(struct_name, CTF_K_STRUCT, n_fields, n_fields * 4, extra=members)
+        type_data = b"".join(self._types)
+        str_data = bytes(self._strings)
+        header = struct.pack("<HBB", CTF_MAGIC, CTF_VERSION_3, 0)
+        header += struct.pack("<IIIIIIII", 0, 0, 0, 0, 0, 0, len(type_data), len(str_data))
+        return header + type_data + str_data
+
+
+def _ctf_snapshot(version: str, struct_name: str, n_fields: int) -> AbiSnapshot:
+    meta = parse_ctf_from_bytes(_CtfBlob().build_struct(struct_name, n_fields))
+    return AbiSnapshot(library="vmlinux", version=version, dwarf=meta.to_dwarf_metadata())
+
+
+def test_ctf_struct_gains_field_is_breaking_through_compare() -> None:
+    """CTF mirror of the BTF struct-growth break, driven through compare."""
+    old = _ctf_snapshot("1", "task_state", n_fields=2)
+    new = _ctf_snapshot("2", "task_state", n_fields=3)
+
+    result = compare(old, new)
+    assert result.verdict is Verdict.BREAKING
+    assert ChangeKind.STRUCT_SIZE_CHANGED in {c.kind for c in result.changes}
+
+
+# ── Committed BTF example fixture (examples/case121) ──────────────────────────
+
+
+def test_committed_btf_example_matches_ground_truth() -> None:
+    """The committed examples/case121 BTF blobs reproduce the ground-truth verdict
+    through the real parse_btf_from_bytes → compare path (no kernel toolchain)."""
+    case = _REPO / "examples" / "case121_kernel_btf_struct_field_added"
+    gt = json.loads((_REPO / "examples" / "ground_truth.json").read_text())
+    entry = gt["verdicts"]["case121_kernel_btf_struct_field_added"]
+
+    def _snap(blob: str) -> AbiSnapshot:
+        meta = parse_btf_from_bytes((case / blob).read_bytes())
+        return AbiSnapshot(library="vmlinux", version=blob, dwarf=meta.to_dwarf_metadata())
+
+    result = compare(_snap("v1.btf"), _snap("v2.btf"))
+    assert result.verdict.value == entry["expected"]
+    emitted = {c.kind.value for c in result.changes}
+    for kind in entry["expected_kinds"]:
+        assert kind in emitted, f"expected {kind} in {sorted(emitted)}"

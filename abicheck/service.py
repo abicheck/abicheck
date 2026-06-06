@@ -124,6 +124,41 @@ def expand_header_inputs(inputs: list[Path]) -> list[Path]:
     return deduped
 
 
+def _resolve_raw_typeinfo(path: Path, version: str) -> AbiSnapshot | None:
+    """Parse a bare BTF or CTF blob into a snapshot, or return None.
+
+    BTF blobs start with magic ``0xEB9F`` and CTF with ``0xCFF1`` (either byte
+    order). The parsed type layout is converted to the checker's DWARF-shaped
+    metadata so the same struct/enum layout detectors apply.
+    """
+    from .btf_metadata import BTF_MAGIC, parse_btf_from_bytes
+    from .ctf_metadata import CTF_MAGIC, parse_ctf_from_bytes
+
+    try:
+        with open(path, "rb") as f:
+            head = f.read(2)
+    except OSError:
+        return None
+    if len(head) < 2:
+        return None
+
+    magics = (int.from_bytes(head, "little"), int.from_bytes(head, "big"))
+    data = path.read_bytes()
+    try:
+        if BTF_MAGIC in magics:
+            btf = parse_btf_from_bytes(data)
+            return AbiSnapshot(library=path.name, version=version,
+                               dwarf=btf.to_dwarf_metadata())
+        if CTF_MAGIC in magics:
+            ctf = parse_ctf_from_bytes(data)
+            return AbiSnapshot(library=path.name, version=version,
+                               dwarf=ctf.to_dwarf_metadata())
+    except (ValueError, OSError) as exc:
+        _logger.warning("failed to parse raw type-info blob %s: %s", path, exc)
+        return None
+    return None
+
+
 def resolve_input(
     path: Path,
     headers: list[Path] | None = None,
@@ -168,6 +203,14 @@ def resolve_input(
             pdb_path=pdb_path, dwarf_only=dwarf_only,
             debug_roots=debug_roots, enable_debuginfod=enable_debuginfod,
         )
+
+    # Raw kernel type-info blobs (a bare `.BTF` / CTF section extracted with
+    # `bpftool btf dump ... format raw` or `objcopy -O binary --only-section`).
+    # A real kernel carries BTF inside an ELF `.BTF` section, but the bare blob
+    # is a convenient, toolchain-free comparison input.
+    raw_typeinfo = _resolve_raw_typeinfo(path, version)
+    if raw_typeinfo is not None:
+        return raw_typeinfo
 
     # Text-based formats
     fmt = sniff_text_format(path)
