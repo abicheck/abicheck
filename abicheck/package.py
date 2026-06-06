@@ -563,11 +563,11 @@ _ELF_MAGIC = b"\x7fELF"
 _ET_DYN = 3
 # Program header type PT_INTERP (interpreter segment — present in executables, absent in DSOs)
 _PT_INTERP = 3
-_SO_NAME_RE = re.compile(r"\.so(?:\.|$)", re.IGNORECASE)
+_SO_NAME_RE = re.compile(r"\.so(?:$|\.\d)", re.IGNORECASE)
 
 
 def _has_shared_object_name(path: Path | str) -> bool:
-    """Return True for .so or versioned .so.N filenames."""
+    """Return True for .so or numeric-versioned .so.N filenames."""
     return _SO_NAME_RE.search(Path(path).name) is not None
 
 

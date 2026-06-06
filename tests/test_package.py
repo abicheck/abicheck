@@ -424,6 +424,11 @@ class TestIsElfSharedObject:
         _make_minimal_elf_dso_with_interp(f)
         assert _is_elf_shared_object(f) is False
 
+    def test_pie_name_with_non_versioned_so_suffix_is_rejected(self, tmp_path: Path) -> None:
+        f = tmp_path / "app.so.tmp"
+        _make_minimal_elf_dso_with_interp(f)
+        assert _is_elf_shared_object(f) is False
+
     def test_non_elf(self, tmp_path: Path) -> None:
         f = tmp_path / "text.txt"
         f.write_text("hello")
@@ -501,6 +506,11 @@ class TestDiscoverSharedLibraries:
         self, tmp_path: Path
     ) -> None:
         _make_minimal_elf_so(tmp_path / "tool.something")
+        result = discover_shared_libraries(tmp_path)
+        assert result == []
+
+    def test_skips_flat_layout_non_versioned_so_suffix(self, tmp_path: Path) -> None:
+        _make_minimal_elf_so(tmp_path / "tool.so.tmp")
         result = discover_shared_libraries(tmp_path)
         assert result == []
 
