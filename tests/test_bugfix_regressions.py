@@ -22,6 +22,8 @@ from abicheck.model import (
     Function,
     Param,
     ParamKind,
+    RecordType,
+    TypeField,
     Variable,
     Visibility,
 )
@@ -51,6 +53,65 @@ def _pub_func(name: str, mangled: str, ret: str = "void", params=None) -> Functi
 
 def _pub_var(name: str) -> Variable:
     return Variable(name=name, mangled=name, type="int", visibility=Visibility.PUBLIC)
+
+
+class TestGoRuntimeDwarfNoise:
+    """Go runtime/internal DWARF types are not the exported C ABI surface."""
+
+    def test_go_runtime_type_churn_does_not_break_c_shared_library(self):
+        old = _snap(
+            funcs=[_pub_func("AdbcDriverInit", "AdbcDriverInit")],
+            types=[
+                RecordType(
+                    name="runtime.g",
+                    kind="struct",
+                    size_bits=3520,
+                    fields=[TypeField(name="goid", type="uint64", offset_bits=1280)],
+                ),
+                RecordType(
+                    name="internal/abi.SwissMapType",
+                    kind="struct",
+                    size_bits=64,
+                ),
+                RecordType(
+                    name="google.golang.org/grpc/internal/channelz.Identifier",
+                    kind="struct",
+                    size_bits=128,
+                ),
+                RecordType(
+                    name="map<net/http.http2FrameType,string>",
+                    kind="struct",
+                    size_bits=256,
+                ),
+            ],
+        )
+        new = _snap(
+            "2.0",
+            funcs=[_pub_func("AdbcDriverInit", "AdbcDriverInit")],
+            types=[
+                RecordType(
+                    name="runtime.g",
+                    kind="struct",
+                    size_bits=3648,
+                    fields=[TypeField(name="goid", type="uint64", offset_bits=1216)],
+                ),
+                RecordType(
+                    name="google.golang.org/grpc/internal/channelz.Identifier",
+                    kind="struct",
+                    size_bits=192,
+                ),
+                RecordType(
+                    name="map<net/http.http2FrameType,string>",
+                    kind="struct",
+                    size_bits=320,
+                ),
+            ],
+        )
+
+        result = compare(old, new)
+
+        assert result.verdict is Verdict.NO_CHANGE
+        assert not any(c.kind == ChangeKind.TYPE_SIZE_CHANGED for c in result.changes)
 
 
 # ── Bug 1: Enum symbols use member-qualified format ──────────────────────────

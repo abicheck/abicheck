@@ -58,6 +58,32 @@ _STDLIB_TYPE_NAMESPACE_PREFIXES: tuple[str, ...] = (
     "std::", "__gnu_cxx::", "__gnu_debug::", "__cxxabiv1::", "__cxx11::",
 )
 
+# Go c-shared libraries embed DWARF for the Go runtime and internal packages.
+# Those implementation types are not part of the C ABI exposed through the
+# shared object's dynamic symbol table; comparing their layouts across Go
+# toolchain releases produces the same sort of runtime-owned noise as std::
+# layout churn in C++ consumers.
+_GO_RUNTIME_TYPE_PREFIXES: tuple[str, ...] = (
+    "runtime.",
+    "internal/",
+    "go.shape.",
+    "noalg.",
+    "hchan<",
+    "sudog<",
+    "map<",
+    "table<",
+    "groupReference<",
+)
+_GO_PACKAGE_QUALIFIED_RE = _re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+")
+_GO_EMBEDDED_MARKERS: tuple[str, ...] = (
+    "runtime.",
+    "go.shape.",
+    "internal/",
+    "main.",
+    "sync.",
+    "strconv.",
+)
+
 # Substrings that mark an anonymous / local type with no stable cross-version
 # ABI identity — lambdas and unnamed struct/union/enum (validation/REPORT.md
 # FP-2). gcc renders these as "<lambda...>", "{lambda...}", "(anonymous ...)";
@@ -86,6 +112,18 @@ def is_non_abi_surface_type(name: str, *, exclude_stdlib_namespaces: bool = True
     if name in COMPILER_INTERNAL_TYPES:
         return True
     if exclude_stdlib_namespaces and name.startswith(_STDLIB_TYPE_NAMESPACE_PREFIXES):
+        return True
+    go_candidate = name[2:] if name.startswith("[]") else name
+    if (
+        name.startswith(_GO_RUNTIME_TYPE_PREFIXES)
+        or go_candidate.startswith(_GO_RUNTIME_TYPE_PREFIXES)
+        or "/" in name
+        or _GO_PACKAGE_QUALIFIED_RE.match(go_candidate)
+        or (
+            go_candidate.startswith("struct {")
+            and any(marker in go_candidate for marker in _GO_EMBEDDED_MARKERS)
+        )
+    ):
         return True
     return any(marker in name for marker in _ANONYMOUS_TYPE_MARKERS)
 
