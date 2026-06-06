@@ -615,7 +615,15 @@ def _is_elf_shared_object(path: Path) -> bool:
 
             # Distinguish PIE executables from true shared objects:
             # executables have a PT_INTERP segment, shared objects don't.
-            return not _has_interp_segment(f, ei_class, byte_order)
+            has_interp = _has_interp_segment(f, ei_class, byte_order)
+            if has_interp:
+                # A few distro runtime DSOs are ET_DYN, named like libraries,
+                # and intentionally carry PT_INTERP so they can be invoked
+                # directly (for example Ubuntu's libcap.so.2.66).  Keep the
+                # PIE-executable guard for app-like filenames, but do not drop
+                # real versioned .so files from package discovery.
+                return ".so" in path.name.lower()
+            return True
     except (OSError, struct.error):
         return False
 

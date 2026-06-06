@@ -63,6 +63,27 @@ def _make_minimal_elf_exec(path: Path) -> None:
     path.write_bytes(e_ident + e_type + rest)
 
 
+def _make_minimal_elf_dso_with_interp(path: Path) -> None:
+    """Write a minimal ET_DYN ELF with a PT_INTERP program header."""
+    elf = bytearray(64)
+    elf[0:4] = b"\x7fELF"
+    elf[4] = 2  # EI_CLASS = ELFCLASS64
+    elf[5] = 1  # EI_DATA = ELFDATA2LSB
+    elf[6] = 1  # EI_VERSION = EV_CURRENT
+    struct.pack_into("<H", elf, 16, 3)  # e_type = ET_DYN
+    struct.pack_into("<H", elf, 18, 0x3E)  # e_machine = EM_X86_64
+    struct.pack_into("<I", elf, 20, 1)  # e_version
+    struct.pack_into("<Q", elf, 32, 64)  # e_phoff
+    struct.pack_into("<H", elf, 54, 56)  # e_phentsize
+    struct.pack_into("<H", elf, 56, 1)  # e_phnum
+
+    phdr = bytearray(56)
+    struct.pack_into("<I", phdr, 0, 3)  # p_type = PT_INTERP
+    struct.pack_into("<I", phdr, 4, 4)  # p_flags = PF_R
+    struct.pack_into("<Q", phdr, 48, 1)  # p_align
+    path.write_bytes(bytes(elf) + bytes(phdr))
+
+
 def _make_tar(archive_path: Path, files: dict[str, bytes]) -> None:
     """Create a tar.gz archive with given file contents."""
     with tarfile.open(archive_path, "w:gz") as tf:
@@ -388,6 +409,16 @@ class TestIsElfSharedObject:
         _make_minimal_elf_exec(f)
         assert _is_elf_shared_object(f) is False
 
+    def test_so_named_dso_with_interp(self, tmp_path: Path) -> None:
+        f = tmp_path / "libcap.so.2.66"
+        _make_minimal_elf_dso_with_interp(f)
+        assert _is_elf_shared_object(f) is True
+
+    def test_pie_like_name_with_interp(self, tmp_path: Path) -> None:
+        f = tmp_path / "capsh"
+        _make_minimal_elf_dso_with_interp(f)
+        assert _is_elf_shared_object(f) is False
+
     def test_non_elf(self, tmp_path: Path) -> None:
         f = tmp_path / "text.txt"
         f.write_text("hello")
@@ -424,6 +455,17 @@ class TestDiscoverSharedLibraries:
         names = [p.name for p in result]
         assert "libfoo.so" in names
         assert "myapp" not in names
+
+    def test_finds_so_named_dso_with_interp(self, tmp_path: Path) -> None:
+        lib_dir = tmp_path / "usr" / "lib"
+        lib_dir.mkdir(parents=True)
+        _make_minimal_elf_dso_with_interp(lib_dir / "libcap.so.2.66")
+        _make_minimal_elf_dso_with_interp(lib_dir / "capsh")
+
+        result = discover_shared_libraries(tmp_path)
+        names = [p.name for p in result]
+        assert "libcap.so.2.66" in names
+        assert "capsh" not in names
 
     def test_skips_private_by_default(self, tmp_path: Path) -> None:
         # A DSO in a non-standard path without .so in name
