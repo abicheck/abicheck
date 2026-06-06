@@ -126,9 +126,9 @@ reads `rcx`/`rdx`, and the function operates on stale register contents — zero
 results or a segfault. The *signature is unchanged*, so name-and-type-only checks
 miss it.
 
-> !!! note "How abicheck sees it"
->     `calling_convention_changed` → 🔴 **BREAKING**, by diffing the
->     `DW_AT_calling_convention` DWARF attribute.
+!!! note "How abicheck sees it"
+    `calling_convention_changed` → 🔴 **BREAKING**, by diffing the
+    `DW_AT_calling_convention` DWARF attribute.
 
 ---
 
@@ -180,20 +180,20 @@ layout, and access model of TLS exports as first-class ABI.
 
 ## How to govern the linker-level contract
 
-> !!! tip "Design patterns for Part 5"
->     - **Version scripts as the source of truth.** A `.map` file enumerating
->       every intentional export is the canonical place to negotiate API surface
->       — and it doubles as your `-fvisibility=hidden` allowlist.
->     - **`ABI_EXPORT` macro discipline.** Build with `-fvisibility=hidden` and
->       annotate public functions with a project-specific macro expanding to
->       `__attribute__((visibility("default")))` (ELF) /
->       `__declspec(dllexport)` (PE).
->     - **CI gate on every PR.** Dump the previous release, compare the
->       candidate, fail on any 🔴 BREAKING not paired with a SONAME bump.
->     - **Never link with absolute `--rpath`.** Use `$ORIGIN` or install-time
->       rewriting; absolute build paths are non-portable and a security hazard.
->     - **Declare TLS access models explicitly.** If a TLS variable is ever
->       reached via `dlopen`, pin `-ftls-model=global-dynamic`.
+!!! tip "Design patterns for Part 5"
+    - **Version scripts as the source of truth.** A `.map` file enumerating
+      every intentional export is the canonical place to negotiate API surface
+      — and it doubles as your `-fvisibility=hidden` allowlist.
+    - **`ABI_EXPORT` macro discipline.** Build with `-fvisibility=hidden` and
+      annotate public functions with a project-specific macro expanding to
+      `__attribute__((visibility("default")))` (ELF) /
+      `__declspec(dllexport)` (PE).
+    - **CI gate on every PR.** Dump the previous release, compare the
+      candidate, fail on any 🔴 BREAKING not paired with a SONAME bump.
+    - **Never link with absolute `--rpath`.** Use `$ORIGIN` or install-time
+      rewriting; absolute build paths are non-portable and a security hazard.
+    - **Declare TLS access models explicitly.** If a TLS variable is ever
+      reached via `dlopen`, pin `-ftls-model=global-dynamic`.
 
 ---
 

@@ -117,11 +117,11 @@ years through deep internal refactors. It also closes off
 [trivial→non-trivial](04-cpp-abi.md) surprises, because the public class's
 special members are declared once and pinned.
 
-> !!! warning "Pimpl gotcha"
->     Declare and *out-of-line define* the destructor (and move operations) in
->     the `.cpp` where `Impl` is complete. A defaulted destructor in the header
->     forces the compiler to see `Impl`'s definition there — defeating the
->     firewall.
+!!! warning "Pimpl gotcha"
+    Declare and *out-of-line define* the destructor (and move operations) in
+    the `.cpp` where `Impl` is complete. A defaulted destructor in the header
+    forces the compiler to see `Impl`'s definition there — defeating the
+    firewall.
 
 ---
 
@@ -316,5 +316,31 @@ evolvable (this page).
   full classification and CI-integration semantics.
 - [Change Kind Reference](../../reference/change-kinds.md) — the authoritative,
   always-current taxonomy of every detected change.
+
+---
+
+## Further reading (external, authoritative)
+
+The canonical primary sources behind this series. When a claim here matters for a
+real release decision, these are where to verify it:
+
+- **[KDE — Binary Compatibility Issues With C++](https://community.kde.org/Policies/Binary_Compatibility_Issues_With_C%2B%2B)**
+  — the most widely-cited practitioner checklist of what is and isn't binary-
+  compatible in C++. Pairs directly with Parts 3–4.
+- **[Itanium C++ ABI specification](https://itanium-cxx-abi.github.io/cxx-abi/abi.html)**
+  — the authority for vtable layout, name mangling, and the trivially-copyable
+  passing rules discussed in Part 4 (GCC/Clang on Linux/macOS/BSD).
+- **[GCC / libstdc++ ABI policy and guidelines](https://gcc.gnu.org/onlinedocs/libstdc++/manual/abi.html)**
+  — symbol versioning, the `_GLIBCXX_USE_CXX11_ABI` dual-ABI, and library
+  versioning practice behind Parts 5–6.
+- **[Ulrich Drepper — *How To Write Shared Libraries*](https://www.akkadia.org/drepper/dsohowto.pdf)**
+  — the definitive treatment of ELF symbol resolution, visibility, versioning,
+  and TLS that underpins Parts 1, 2, and 5.
+- **Martin Reddy — *C++ API Design* (Morgan Kaufmann, 2011)** — book-length
+  treatment of the opaque-handle / Pimpl / versioning patterns in this page.
+- **[“20 ABI-breaking changes every C++ developer should know”](https://www.acodersjourney.com/20-abi-breaking-changes/)**
+  — a concise lay summary (MSVC/DLL-flavored); this series is a strict superset
+  of its checklist and additionally covers enums, unions, bitfields, alignment,
+  TLS, and transitive/dependency leaks.
 
 *Back to the [series overview](../abi-api-handling.md).*

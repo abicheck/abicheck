@@ -55,11 +55,11 @@ from. libstdc++'s dual-ABI split (`std::string` after GCC 5) and TBB 2021.3's
 `task_arena` re-layout both propagated through exactly this mechanism, fracturing
 every consumer who had leaked the type into a public API.
 
-> !!! note "How abicheck sees it"
->     `type_size_changed` → 🔴 **BREAKING**, *only when DWARF for the third-party
->     type is present* in the shipped `.so`. Stripped distributions hide the
->     hazard entirely — which is why the fix is structural (pimpl / opaque
->     handles), not tooling.
+!!! note "How abicheck sees it"
+    `type_size_changed` → 🔴 **BREAKING**, *only when DWARF for the third-party
+    type is present* in the shipped `.so`. Stripped distributions hide the
+    hazard entirely — which is why the fix is structural (pimpl / opaque
+    handles), not tooling.
 
 ---
 
@@ -101,12 +101,12 @@ now clobbers the other. Even a *same-size* swap — `enum E : int` → plain `in
 in a C++ API — breaks overload resolution and name mangling (`E` and `int`
 mangle differently), so function symbols vanish from the new `.so`.
 
-> !!! note "How abicheck sees it"
->     abicheck reads DWARF's `DW_TAG_structure_type` vs `DW_TAG_union_type` vs
->     `DW_TAG_enumeration_type` and classifies any transition as
->     `type_kind_changed` → 🔴 **BREAKING**, regardless of byte-for-byte size
->     equality — because a consumer's *code generation* assumes the kind, not
->     just the footprint.
+!!! note "How abicheck sees it"
+    abicheck reads DWARF's `DW_TAG_structure_type` vs `DW_TAG_union_type` vs
+    `DW_TAG_enumeration_type` and classifies any transition as
+    `type_kind_changed` → 🔴 **BREAKING**, regardless of byte-for-byte size
+    equality — because a consumer's *code generation* assumes the kind, not
+    just the footprint.
 
 ---
 
@@ -123,14 +123,14 @@ becomes silent data corruption.
 pattern: v1 ships `__reserved1` and `__reserved2` at defined offsets; v2 renames
 them to `priority` and `max_retries` with the *same types and offsets*.
 
-> !!! note "How abicheck sees it"
->     `_diff_reserved_fields` recognizes the naming convention (`__reserved`,
->     `_reserved`, `__pad`, `_unused`) and classifies the rename → 🟢
->     **COMPATIBLE**. The catch the tool *cannot* verify: there is no way to
->     prove no consumer ever wrote to the slot — the pattern's safety rests on a
->     documented contract that users zero-initialize and ignore the field. Linux
->     `struct stat`, glibc `pthread_attr_t`, and Wayland protocol structs all
->     depend on exactly this contract.
+!!! note "How abicheck sees it"
+    `_diff_reserved_fields` recognizes the naming convention (`__reserved`,
+    `_reserved`, `__pad`, `_unused`) and classifies the rename → 🟢
+    **COMPATIBLE**. The catch the tool *cannot* verify: there is no way to
+    prove no consumer ever wrote to the slot — the pattern's safety rests on a
+    documented contract that users zero-initialize and ignore the field. Linux
+    `struct stat`, glibc `pthread_attr_t`, and Wayland protocol structs all
+    depend on exactly this contract.
 
 ---
 
@@ -164,25 +164,25 @@ opaque-handle C API (`FILE*`, `sqlite3*`, `git_repository*`).
 
 ## How to defend against transitive breaks
 
-> !!! tip "Design patterns for Part 6"
->     - **Opaque wrappers around third-party types.** Never forward-publish
->       `std::string`, `boost::any`, `tbb::task_arena`, or any
->       vendored-dependency type in your headers; wrap it in a type you own.
->     - **Stable DTOs at the API boundary.** Define plain structs with explicit
->       layout for every value that crosses the ABI, and treat those DTOs as a
->       versioned schema separate from your internal types.
->     - **Build-time abicheck in CI.** Run `abicheck compare` against the last
->       released `.so` on every PR; flag anything above `COMPATIBLE_WITH_RISK` as
->       a release blocker — and ship the build with debug info so transitive
->       layout shifts are *visible* to the tool.
->     - **Zero reserved fields before public release**, or commit in
->       documentation to never activating them. Reserved padding that is never
->       used is free; reserved padding whose safety you can't audit is a future
->       🔴 BREAKING verdict.
->     - **Pointer-to-incomplete-type for anything you might evolve.** If you
->       can't guarantee a struct's layout for the lifetime of a SONAME, expose a
->       forward-declared tag and a constructor/destructor pair — not the
->       definition.
+!!! tip "Design patterns for Part 6"
+    - **Opaque wrappers around third-party types.** Never forward-publish
+      `std::string`, `boost::any`, `tbb::task_arena`, or any
+      vendored-dependency type in your headers; wrap it in a type you own.
+    - **Stable DTOs at the API boundary.** Define plain structs with explicit
+      layout for every value that crosses the ABI, and treat those DTOs as a
+      versioned schema separate from your internal types.
+    - **Build-time abicheck in CI.** Run `abicheck compare` against the last
+      released `.so` on every PR; flag anything above `COMPATIBLE_WITH_RISK` as
+      a release blocker — and ship the build with debug info so transitive
+      layout shifts are *visible* to the tool.
+    - **Zero reserved fields before public release**, or commit in
+      documentation to never activating them. Reserved padding that is never
+      used is free; reserved padding whose safety you can't audit is a future
+      🔴 BREAKING verdict.
+    - **Pointer-to-incomplete-type for anything you might evolve.** If you
+      can't guarantee a struct's layout for the lifetime of a SONAME, expose a
+      forward-declared tag and a constructor/destructor pair — not the
+      definition.
 
 ---
 

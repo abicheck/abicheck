@@ -72,6 +72,7 @@ Now every old call to `resize()` (still using slot 0) dispatches to `recolor()`
 | Insert virtual before existing ([case09](../../examples/case09_cpp_vtable.md)) | reroutes calls to the wrong slot |
 | Make a method pure-virtual ([case23](../../examples/case23_pure_virtual_added.md)) | slot becomes `__cxa_pure_virtual` → unconditional `abort()` |
 | Add the **first** virtual to a non-polymorphic class ([case68](../../examples/case68_virtual_method_added.md)) | a vptr is *prepended*; every member shifts by `sizeof(void*)`, `sizeof` grows |
+| **Remove** a virtual method (`func_virtual_removed`) | every later slot shifts up by one, so every old call dispatches one slot off — the same reroute as insertion, in reverse |
 
 The only safe addition is to **append** new virtual methods after every existing
 slot — and only when no consumer-side derived classes exist that would
@@ -191,15 +192,15 @@ The `_WITH_RISK` tier exists for exactly this shape: binary-linkable,
 source-recompilable, but **semantically unsafe** for binaries built under the
 stricter old contract.
 
-> !!! note "The C++17 subtlety"
->     C++17 made `noexcept` part of the function *type*, but under Itanium that
->     only changes mangling where the *full function-type* is encoded — function
->     pointers, references to functions, and templates parameterized by function
->     type — **not** the `<bare-function-type>` used for ordinary member/free
->     symbols. So toggling `noexcept` on a plain declaration stays `_WITH_RISK`
->     for those direct symbols, but the **same change escalates to 🔴 BREAKING**
->     for callers that pass the function through a pointer or template where the
->     `E` tag now participates in the mangled name.
+!!! note "The C++17 subtlety"
+    C++17 made `noexcept` part of the function *type*, but under Itanium that
+    only changes mangling where the *full function-type* is encoded — function
+    pointers, references to functions, and templates parameterized by function
+    type — **not** the `<bare-function-type>` used for ordinary member/free
+    symbols. So toggling `noexcept` on a plain declaration stays `_WITH_RISK`
+    for those direct symbols, but the **same change escalates to 🔴 BREAKING**
+    for callers that pass the function through a pointer or template where the
+    `E` tag now participates in the mangled name.
 
 ---
 
@@ -223,17 +224,17 @@ reads `%rdi, %rsi` as *pointers* and dereferences them — segfault or silent
 garbage, with no toolchain diagnostic
 ([case69](../../examples/case69_trivial_to_nontrivial.md)).
 
-> !!! note "How abicheck sees it"
->     No header-diff tool that looks only at declarations catches this. abicheck
->     reports `value_abi_trait_changed` by inspecting the DWARF
->     trivially-copyable flag.
->
->     **Design rule:** pin the trivially-copyable status of any by-value type
->     from version 1. If cleanup might ever be needed, commit *from day one* to
->     a user-provided destructor — an empty body `~T() {}` or an out-of-line
->     `T::~T() = default;` in the `.cpp`. An in-class `~T() = default;` on the
->     first declaration is user-*declared* but not user-*provided*, so it does
->     **not** pin the convention.
+!!! note "How abicheck sees it"
+    No header-diff tool that looks only at declarations catches this. abicheck
+    reports `value_abi_trait_changed` by inspecting the DWARF
+    trivially-copyable flag.
+
+    **Design rule:** pin the trivially-copyable status of any by-value type
+    from version 1. If cleanup might ever be needed, commit *from day one* to
+    a user-provided destructor — an empty body `~T() {}` or an out-of-line
+    `T::~T() = default;` in the `.cpp`. An in-class `~T() = default;` on the
+    first declaration is user-*declared* but not user-*provided*, so it does
+    **not** pin the convention.
 
 ---
 
@@ -259,35 +260,43 @@ restructures the whole object (the virtual base moves to the end and a
 vbase-offset table is inserted); **appending** a base grows `sizeof` and shifts
 every member.
 
-> !!! note "How abicheck sees it"
->     Reported as `base_class_position_changed` / `type_base_changed` when DWARF
->     or headers are available — ELF symbol tables alone cannot see them, which
->     is why C++ ABI checking *requires* debug info or headers.
+A related multiple-inheritance trap is **overriding a virtual inherited from a
+*non-primary* base** — i.e. any base after the first. Because that base
+sub-object sits at a non-zero offset, the override needs a *thunk* that adjusts
+`this` back to the sub-object before dispatching. Introducing (or removing) such
+an override in a later release changes the set of thunks the vtable must carry
+and the `this`-adjustments baked into consumer call sites — a silent break even
+though the method's source signature is unchanged.
+
+!!! note "How abicheck sees it"
+    Reported as `base_class_position_changed` / `type_base_changed` when DWARF
+    or headers are available — ELF symbol tables alone cannot see them, which
+    is why C++ ABI checking *requires* debug info or headers.
 
 ---
 
 ## How to design C++ libraries for ABI stability
 
-> !!! tip "Design patterns for Part 4"
->     - **Pure-virtual interface + factory.** Expose an abstract class (no data
->       members, no inline methods) and a C-linkage `create_foo()`. Consumers
->       hold only the abstract pointer, so you can evolve the implementation
->       class without touching any consumer vtable.
->     - **Non-Virtual Interface (NVI).** Public methods are *non-virtual*
->       wrappers over a small, stable set of `virtual` hooks. You can add public
->       methods (non-virtual additions are ABI-safe) without growing the vtable.
->     - **Pimpl ABI firewall.** Every data member lives in an `Impl` defined in
->       the `.cpp`; the public class holds one `std::unique_ptr<Impl>`.
->       `sizeof(Widget)` never changes; offsets are invisible.
->     - **Inline namespaces for generational ABI.** Wrap public declarations in
->       `inline namespace abi_v1`. For a breaking change, ship `abi_v2` alongside
->       and keep the old symbols exported — consumers migrate on their schedule,
->       mirroring libstdc++ `__cxx11`.
->     - **`-fvisibility=hidden` + export macros.** Shrink the exported surface to
->       exactly what you intend to stabilize (see [Part 5](05-linker-elf.md)).
->
->     Full code for each is in
->     [Part 7 — Designing for Stability](07-designing-for-stability.md).
+!!! tip "Design patterns for Part 4"
+    - **Pure-virtual interface + factory.** Expose an abstract class (no data
+      members, no inline methods) and a C-linkage `create_foo()`. Consumers
+      hold only the abstract pointer, so you can evolve the implementation
+      class without touching any consumer vtable.
+    - **Non-Virtual Interface (NVI).** Public methods are *non-virtual*
+      wrappers over a small, stable set of `virtual` hooks. You can add public
+      methods (non-virtual additions are ABI-safe) without growing the vtable.
+    - **Pimpl ABI firewall.** Every data member lives in an `Impl` defined in
+      the `.cpp`; the public class holds one `std::unique_ptr<Impl>`.
+      `sizeof(Widget)` never changes; offsets are invisible.
+    - **Inline namespaces for generational ABI.** Wrap public declarations in
+      `inline namespace abi_v1`. For a breaking change, ship `abi_v2` alongside
+      and keep the old symbols exported — consumers migrate on their schedule,
+      mirroring libstdc++ `__cxx11`.
+    - **`-fvisibility=hidden` + export macros.** Shrink the exported surface to
+      exactly what you intend to stabilize (see [Part 5](05-linker-elf.md)).
+
+    Full code for each is in
+    [Part 7 — Designing for Stability](07-designing-for-stability.md).
 
 ---
 

@@ -74,12 +74,12 @@ Layout breaks are also **transitive through embedding and inheritance**. Adding
 shifts `Derived::value` from offset 12 to 16 — *every* subclass member in the
 ecosystem silently moves.
 
-> !!! note "How abicheck sees it"
->     `type_size_changed` / data-member offset deltas → 🔴 **BREAKING**, from
->     DWARF or headers. [case07](../../examples/case07_struct_layout.md),
->     [case14](../../examples/case14_cpp_class_size.md),
->     [case40](../../examples/case40_field_layout.md) (five field-level
->     mutations in one struct to show how "just one field" cascades).
+!!! note "How abicheck sees it"
+    `type_size_changed` / data-member offset deltas → 🔴 **BREAKING**, from
+    DWARF or headers. [case07](../../examples/case07_struct_layout.md),
+    [case14](../../examples/case14_cpp_class_size.md),
+    [case40](../../examples/case40_field_layout.md) (five field-level
+    mutations in one struct to show how "just one field" cascades).
 
 ---
 
@@ -106,10 +106,10 @@ and on ARM/SPARC the now-unaligned `int` access traps. Because `alignas` and
 `#pragma pack` propagate across translation-unit boundaries through the header, a
 **single-line change rewrites offsets for every TU that includes it.**
 
-> !!! note "How abicheck sees it"
->     `type_alignment_changed` / `struct_packing_changed` → 🔴 **BREAKING**.
->     [case42](../../examples/case42_type_alignment_changed.md),
->     [case56](../../examples/case56_struct_packing_changed.md).
+!!! note "How abicheck sees it"
+    `type_alignment_changed` / `struct_packing_changed` → 🔴 **BREAKING**.
+    [case42](../../examples/case42_type_alignment_changed.md),
+    [case56](../../examples/case56_struct_packing_changed.md).
 
 ---
 
@@ -201,35 +201,35 @@ function returning `int **` becomes `long **`, a two-level chain where only the
 ultimate pointee changes; callers that write an `int` through the chain write 4
 bytes into what v2 treats as an 8-byte cell.
 
-> !!! note "How abicheck sees it"
->     abicheck walks pointer and array types *structurally* during
->     `func_return_changed` and `func_params_changed` detection — a surface-level
->     "both sides return a pointer" comparison would miss these.
+!!! note "How abicheck sees it"
+    abicheck walks pointer and array types *structurally* during
+    `func_return_changed` and `func_params_changed` detection — a surface-level
+    "both sides return a pointer" comparison would miss these.
 
 ---
 
 ## How to defend type layout
 
-> !!! tip "Design patterns for Part 3"
->     - **Opaque handles.** Expose only `struct foo *`; define the struct in a
->       `.c` file. Callers can't take `sizeof` or `offsetof`, so layout is free
->       to change. OpenSSL 1.1.0's move to `EVP_MD_CTX_new`/`_free` opaque
->       handles is the canonical precedent.
->     - **Pimpl (C++).** The public class holds one `d_ptr` to a private `Impl`;
->       all state lives in `Impl`, so `sizeof` of the public class never
->       changes. Qt enforces this across every public class.
->     - **Reserved padding.** End every public struct with `void *reserved[N]` /
->       `uint64_t _pad[N]`; future releases repurpose slots without changing
->       `sizeof` or shifting offsets (POSIX `pthread_attr_t`, kernel UAPI).
->     - **Freeze the enum underlying type.** Write `enum class Color : int32_t`
->       in C++; in C keep values in `int` range or add an explicit sentinel.
->       Never let a new enumerator silently widen the type.
->     - **Append-only evolution.** Reordering, inserting, or removing a field is
->       always breaking. Append only at the end, and only when no embedded
->       `sizeof(T)` assumption exists (union analog: case26 vs case26b).
->
->     These patterns are developed in full, with code, in
->     [Part 7 — Designing for Stability](07-designing-for-stability.md).
+!!! tip "Design patterns for Part 3"
+    - **Opaque handles.** Expose only `struct foo *`; define the struct in a
+      `.c` file. Callers can't take `sizeof` or `offsetof`, so layout is free
+      to change. OpenSSL 1.1.0's move to `EVP_MD_CTX_new`/`_free` opaque
+      handles is the canonical precedent.
+    - **Pimpl (C++).** The public class holds one `d_ptr` to a private `Impl`;
+      all state lives in `Impl`, so `sizeof` of the public class never
+      changes. Qt enforces this across every public class.
+    - **Reserved padding.** End every public struct with `void *reserved[N]` /
+      `uint64_t _pad[N]`; future releases repurpose slots without changing
+      `sizeof` or shifting offsets (POSIX `pthread_attr_t`, kernel UAPI).
+    - **Freeze the enum underlying type.** Write `enum class Color : int32_t`
+      in C++; in C keep values in `int` range or add an explicit sentinel.
+      Never let a new enumerator silently widen the type.
+    - **Append-only evolution.** Reordering, inserting, or removing a field is
+      always breaking. Append only at the end, and only when no embedded
+      `sizeof(T)` assumption exists (union analog: case26 vs case26b).
+
+    These patterns are developed in full, with code, in
+    [Part 7 — Designing for Stability](07-designing-for-stability.md).
 
 ---
 

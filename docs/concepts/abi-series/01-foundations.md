@@ -293,7 +293,7 @@ flowchart LR
    symbols, type layouts, vtables, calling conventions, ELF metadata, and so on.
 2. **Diff.** It compares the two snapshots structurally (walking pointer chains,
    struct members, vtable slots — not just symbol names).
-3. **Classify.** Each detected difference is one of **184 change kinds**, and
+3. **Classify.** Each detected difference is one of **180+ change kinds**, and
    each change kind is partitioned into exactly one verdict tier.
 
 The five verdicts, from safest to most severe, are:
@@ -313,11 +313,11 @@ exit codes are in [Verdicts](../verdicts.md); a one-screen summary is the
 
 Throughout the rest of the series, look for callouts like this:
 
-> !!! note "How abicheck sees it"
->     Inline boxes like this name the specific **change kind** and **verdict**
->     abicheck reports for the scenario being discussed, and how it detects it
->     (ELF symbol table, DWARF debug info, or headers). They tie the general
->     mechanism back to something you can run in CI.
+!!! note "How abicheck sees it"
+    Inline boxes like this name the specific **change kind** and **verdict**
+    abicheck reports for the scenario being discussed, and how it detects it
+    (ELF symbol table, DWARF debug info, or headers). They tie the general
+    mechanism back to something you can run in CI.
 
 ---
 
