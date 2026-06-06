@@ -49,7 +49,9 @@ from .change_registry import Verdict as Verdict
 class ChangeKind(str, Enum):
     # Function / variable changes
     FUNC_REMOVED = "func_removed"  # public symbol removed → BREAKING
-    FUNC_REMOVED_ELF_ONLY = "func_removed_elf_only"  # exported ELF-only function removed -> binary break
+    FUNC_REMOVED_ELF_ONLY = (
+        "func_removed_elf_only"  # exported ELF-only function removed -> binary break
+    )
     FUNC_ADDED = "func_added"  # new public symbol → COMPATIBLE
     FUNC_RETURN_CHANGED = "func_return_changed"  # return type changed → BREAKING
     FUNC_PARAMS_CHANGED = "func_params_changed"  # parameter types changed → BREAKING
@@ -440,9 +442,7 @@ class ChangeKind(str, Enum):
 
     # ── Template / overload-set patterns (PR-B follow-up) ────────────────
     # See examples/case85_internal_template_signature_changed/README.md
-    INTERNAL_TEMPLATE_LEAKS_VIA_PUBLIC_API = (
-        "internal_template_leaks_via_public_api"
-    )
+    INTERNAL_TEMPLATE_LEAKS_VIA_PUBLIC_API = "internal_template_leaks_via_public_api"
     # See examples/case88_cpo_kind_changed/README.md
     CPO_KIND_CHANGED = "cpo_kind_changed"
     OVERLOAD_SET_REROUTED = "overload_set_rerouted"
@@ -774,6 +774,44 @@ def policy_kind_sets(
     )
 
 
+def effective_category(
+    change: HasKind,
+    breaking: frozenset[ChangeKind],
+    api_break: frozenset[ChangeKind],
+    compatible: frozenset[ChangeKind],
+    risk: frozenset[ChangeKind],
+) -> Verdict:
+    """The verdict category a single *change* contributes (ADR-025 D4.1).
+
+    This is the **one** place a finding's category is decided. When the finding
+    carries a per-finding ``effective_verdict`` override (set by the A4
+    pattern-aware modulation pass), that wins; otherwise the category derives
+    from ``change.kind``'s membership in the policy kind sets — exactly today's
+    behaviour. Unclassified kinds fail safe to ``BREAKING``.
+
+    Every classification site (``compute_verdict``, the ``DiffResult``
+    properties, the reporter, the severity helpers, and the bundle verdict) must
+    route through this helper so a demotion is honoured consistently across all
+    outputs and both exit-code paths.
+    """
+    # Require a real Verdict: ``isinstance`` (not ``is not None``) rejects
+    # MagicMock test doubles whose attribute access auto-creates a truthy mock,
+    # mirroring the ``frozen_namespace_violation`` guard in policy_file.
+    override = getattr(change, "effective_verdict", None)
+    if isinstance(override, Verdict):
+        return override
+    kind = change.kind
+    if kind in breaking:
+        return Verdict.BREAKING
+    if kind in api_break:
+        return Verdict.API_BREAK
+    if kind in risk:
+        return Verdict.COMPATIBLE_WITH_RISK
+    if kind in compatible:
+        return Verdict.COMPATIBLE
+    return Verdict.BREAKING  # unclassified → fail-safe
+
+
 def compute_verdict(
     changes: Sequence[HasKind], *, policy: str = "strict_abi"
 ) -> Verdict:
@@ -793,21 +831,19 @@ def compute_verdict(
     if not changes:
         return Verdict.NO_CHANGE
 
-    breaking, api_break, compatible, risk = policy_kind_sets(policy)
-    kinds = {c.kind for c in changes}
-    if kinds & breaking:
+    sets = policy_kind_sets(policy)
+    # Per-finding effective category (ADR-025 D4.1): a finding's own
+    # ``effective_verdict`` override wins over its kind's category; the overall
+    # verdict is the worst contributed category. With no overrides this is
+    # identical to the historical kind-set intersection.
+    verdicts = {effective_category(c, *sets) for c in changes}
+    if Verdict.BREAKING in verdicts:
         return Verdict.BREAKING
-    if kinds & api_break:
+    if Verdict.API_BREAK in verdicts:
         return Verdict.API_BREAK
-    # At this point: no BREAKING, no API_BREAK kinds remain.
-    # All remaining kinds are in compatible ∪ risk.
-    # RISK + BREAKING → already returned BREAKING above; RISK + API_BREAK → API_BREAK above.
-    if kinds - compatible - risk == set():
-        if kinds & risk:
-            return Verdict.COMPATIBLE_WITH_RISK  # binary-compat, deployment risk only
-        return Verdict.COMPATIBLE
-    # Unclassified change kinds default to BREAKING (fail-safe)
-    return Verdict.BREAKING
+    if Verdict.COMPATIBLE_WITH_RISK in verdicts:
+        return Verdict.COMPATIBLE_WITH_RISK  # binary-compat, deployment risk only
+    return Verdict.COMPATIBLE
 
 
 # ---------------------------------------------------------------------------
