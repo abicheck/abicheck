@@ -44,6 +44,22 @@ use_cases:
       modules: [abicheck/semver.py]
       tests: [tests/test_semver_recommendation.py]
 
+  - id: UC-CHANGE-inline-ns-version
+    axis: change_class
+    name: Inline-namespace version-stamp normalization (ICU-style)
+    status: planned
+    gap: G15
+    plan: docs/development/plans/g15-inline-namespace-version.md
+    next_steps: >
+      Detect a per-release version token carried by a strong majority of exported
+      symbols (ICU `_NN`, libstdc++ versioned namespaces, Abseil `lts_<date>`),
+      cross-check it against the SONAME, normalize symbol keys through it, then
+      diff. Empirically confirmed on ICU libicuuc 73→74: abicheck reports BREAKING
+      with 6288 changes, but after normalization the real delta is +34 / -0
+      (additive plus a deliberate soname bump). Same false-noise topology as G9
+      at the C++ symbol level. Must still surface the soname bump as the real
+      relink signal.
+
   # ── archetype ─────────────────────────────────────────────────────────────
   - id: UC-ARCH-c-library
     axis: archetype
@@ -193,6 +209,20 @@ use_cases:
       Add a macOS e2e CI lane running compare/appcompat on native dylibs and
       track ARM64 AAPCS HFA/HVA / small-struct calling convention.
 
+  - id: UC-PLAT-arch-guard
+    axis: platform
+    name: Cross-architecture comparison guardrail (ELF e_machine)
+    status: planned
+    gap: G13
+    plan: docs/development/plans/g13-arch-mismatch-guard.md
+    next_steps: >
+      Capture ELF e_machine / EI_CLASS / endianness into the snapshot (PE and
+      Mach-O already carry a machine field) and treat a machine mismatch in
+      compare/compare-release as a hard ARCHITECTURE_MISMATCH guard instead of a
+      false-green COMPATIBLE_WITH_RISK verdict. Confirmed by empirical scanning:
+      x86-64 vs aarch64 of the same version currently reports 100%
+      binary-compatible.
+
   # ── workflow ──────────────────────────────────────────────────────────────
   - id: UC-WF-compare
     axis: workflow
@@ -261,11 +291,71 @@ use_cases:
       G1 / UC-PLAT-*. All bundle detectors run through compare-release; case84
       is validated end-to-end. bundle_soname_skew is opt-in via
       --bundle-cohort PREFIX so independent libraries are never inferred to be
-      co-versioned from their filenames.
+      co-versioned from their filenames. Caveat: wheels whose vendored
+      dependencies carry auditwheel/delocate content-hash sonames are not yet
+      paired across rebuilds — that topology is tracked separately as
+      UC-WF-wheel-vendored (G9).
     evidence:
       modules: [abicheck/bundle.py, abicheck/diff_cpp_patterns.py]
       tests: [tests/test_bundle.py, tests/test_cpp_pattern_detectors.py]
       examples: [examples/case84_bundle_soname_skew]
+
+  - id: UC-WF-wheel-vendored
+    axis: workflow
+    name: manylinux/auditwheel vendored-library pairing (hashed sonames)
+    status: planned
+    gap: G9
+    plan: docs/development/plans/g9-wheel-vendored-matching.md
+    next_steps: >
+      Normalize the auditwheel/delocate content-hash suffix (-[0-9a-f]{6,16})
+      on filename AND soname before pairing in compare-release; pair on the
+      unhashed soname stem so a bundled libpng16.so.16 matches across rebuilds.
+      Add a two-wheel fixture. Empirically confirmed: today every vendored dep
+      of a manylinux wheel shows as removed+added.
+
+  - id: UC-WF-stable-abi-subset
+    axis: workflow
+    name: CPython Limited-API / abi3 import-contract conformance
+    status: planned
+    gap: G14
+    plan: docs/development/plans/g14-stable-abi-subset.md
+    next_steps: >
+      An abi3 wheel's compatibility surface is the set of CPython C-API symbols
+      it IMPORTS, not what it exports. Add a check that classifies an extension's
+      imported Py* symbols against the stable-ABI allowlist for a target
+      Py_LIMITED_API floor. Empirically confirmed on cryptography 42->43: abicheck
+      returns COMPATIBLE from the export table while the imported surface grows
+      +7 Py* symbols, entirely invisible. A symbol outside abi3 or newer than the
+      floor would fail to import on older Python yet stay COMPATIBLE today.
+
+  - id: UC-WF-audit
+    axis: workflow
+    name: Single-binary ABI audit / lint (no baseline)
+    status: planned
+    gap: G11
+    plan: docs/development/plans/g11-single-binary-audit.md
+    next_steps: >
+      Add an `audit`/`dump --lint` driver running the single-snapshot subset of
+      detectors (executable stack, insecure RPATH/RUNPATH, missing SONAME,
+      unversioned symbols, internal-looking globals) so a library author can
+      scan before their first release. Substrate already on the snapshot model;
+      only the one-sided driver + hygiene rules are missing (F3).
+
+  - id: UC-WF-security-hardening
+    axis: workflow
+    name: Security-hardening drift scan (checksec across releases)
+    status: partial
+    gap: G12
+    plan: docs/development/plans/g12-security-hardening.md
+    evidence:
+      modules: [abicheck/elf_metadata.py, abicheck/diff_platform.py, abicheck/checker_policy.py]
+      tests: [tests/test_diff_platform_deep.py]
+    next_steps: >
+      Detection of executable_stack / runpath_changed and per-kind policy gating
+      already exist (verified: executable_stack: break -> BREAKING). Remaining:
+      capture the rest of the checksec surface (RELRO/BIND_NOW/PIE/stack-canary/
+      FORTIFY/W^X) so it can be diffed, and ship a turnkey security preset /
+      policies/security.yaml so gating is discoverable rather than hand-rolled (F5).
 
   - id: UC-WF-probe-matrix
     axis: workflow
@@ -325,6 +415,18 @@ use_cases:
       tests: [tests/test_format_compliance.py, tests/test_sprint9_html.py, tests/test_report_sections.py]
 
   # ── toolchain / language standard ───────────────────────────────────────────
+  - id: UC-TC-glibc-floor
+    axis: toolchain
+    name: Platform baseline floor (manylinux glibc requirement)
+    status: planned
+    gap: G10
+    plan: docs/development/plans/g10-glibc-floor-check.md
+    next_steps: >
+      Compare the max GLIBC_2.x in elf.versions_required (already captured)
+      against a declared floor (--glibc-floor or the wheel's manylinux tag) and
+      emit a deployment-RISK finding when exceeded. New ChangeKind
+      (platform_baseline_floor_raised); composes with diff_versioning.py (F2).
+
   - id: UC-TC-dual-abi
     axis: toolchain
     name: libstdc++ dual ABI flip (_GLIBCXX_USE_CXX11_ABI)

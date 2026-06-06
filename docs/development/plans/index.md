@@ -15,6 +15,13 @@ scope**.
 | **G1** | [Cross-platform end-to-end validation](g1-cross-platform-e2e.md) | `UC-PLAT-windows-pe`, `UC-PLAT-macos-macho` | L |
 | **G4** | [libclang header-AST extractor](g4-header-ast-extractor.md) | `UC-ARCH-header-only` | XL |
 | **G6** | [Kernel BTF & accelerator workflows](g6-kernel-btf-and-accelerator.md) | `UC-ARCH-kernel-btf`, `UC-ARCH-sycl` | M |
+| **G9** | [manylinux/auditwheel vendored-library pairing](g9-wheel-vendored-matching.md) | `UC-WF-wheel-vendored` | M |
+| **G10** | [manylinux glibc-floor check](g10-glibc-floor-check.md) | `UC-TC-glibc-floor` | S |
+| **G11** | [Single-binary ABI audit / lint](g11-single-binary-audit.md) | `UC-WF-audit` | M |
+| **G12** | [Security-hardening drift surface + preset](g12-security-hardening.md) | `UC-WF-security-hardening` | M |
+| **G13** | [Cross-architecture comparison guardrail](g13-arch-mismatch-guard.md) | `UC-PLAT-arch-guard` | S |
+| **G14** | [CPython Limited-API / `abi3` import-contract](g14-stable-abi-subset.md) | `UC-WF-stable-abi-subset` | M |
+| **G15** | [Inline-namespace version-stamp normalization](g15-inline-namespace-version.md) | `UC-CHANGE-inline-ns-version` | M |
 
 > **G3** (workflow-scenario examples & Markdown/HTML coverage) is **done** —
 > see [`g3-workflow-examples-and-reporting.md`](g3-workflow-examples-and-reporting.md)

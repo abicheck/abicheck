@@ -100,6 +100,13 @@ nav:
       - "G5: Plugin contract": development/plans/g5-plugin-bidirectional-contract.md
       - "G6: Kernel BTF & accelerator": development/plans/g6-kernel-btf-and-accelerator.md
       - "G8: Static libraries": development/plans/g8-static-libraries.md
+      - "G9: Wheel vendored-library pairing": development/plans/g9-wheel-vendored-matching.md
+      - "G10: manylinux glibc-floor check": development/plans/g10-glibc-floor-check.md
+      - "G11: Single-binary audit / lint": development/plans/g11-single-binary-audit.md
+      - "G12: Security-hardening drift": development/plans/g12-security-hardening.md
+      - "G13: Cross-architecture guardrail": development/plans/g13-arch-mismatch-guard.md
+      - "G14: abi3 import-contract": development/plans/g14-stable-abi-subset.md
+      - "G15: Inline-namespace version stamp": development/plans/g15-inline-namespace-version.md
     - ADR:
       - Overview: development/adr/index.md
       - "001: Technology Stack": development/adr/001-technology-stack.md

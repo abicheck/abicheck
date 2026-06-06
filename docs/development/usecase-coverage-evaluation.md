@@ -98,6 +98,30 @@ A real invocation is a point in this space:
 | **G7** | No semver-bump recommendation | recommender + report wiring | mapping + integration | reuse cases |
 | **G8** | Static libraries undocumented | ✅ archive detection + clear error path | ✅ unit (archive → guidance error) | ✅ documented non-goal (goals + limitations) |
 
+### Gaps added from empirical scanning (G9–G15)
+
+A later pass ran abicheck against real open-source binaries (distro `.so`,
+manylinux wheels + their vendored stack, static archives) and surfaced these
+*topology/workflow* gaps now tracked in the registry. G14–G15 were added after a
+43-wheel empirical scan (two releases each of popular C-extension packages):
+
+| ID | Gap | Registry use case | Plan |
+|---|---|---|---|
+| **G9** | auditwheel/manylinux vendored libs never pair (content-hash sonames change every rebuild) | `UC-WF-wheel-vendored` | [g9](plans/g9-wheel-vendored-matching.md) |
+| **G10** | no manylinux glibc-floor / platform-baseline check (data captured, no detector) | `UC-TC-glibc-floor` | [g10](plans/g10-glibc-floor-check.md) |
+| **G11** | no single-binary audit/lint mode (every command is comparative) | `UC-WF-audit` | [g11](plans/g11-single-binary-audit.md) |
+| **G12** | hardening-drift detected + gateable, but thin captured surface and no security preset | `UC-WF-security-hardening` | [g12](plans/g12-security-hardening.md) |
+| **G13** | no cross-architecture guardrail (x86-64 vs aarch64 reports false-green) | `UC-PLAT-arch-guard` | [g13](plans/g13-arch-mismatch-guard.md) |
+| **G14** | abi3 wheel compatibility lives in *imported* CPython symbols, not exports — never checked (cryptography 42→43 stays COMPATIBLE while +7 `Py*` imports appear) | `UC-WF-stable-abi-subset` | [g14](plans/g14-stable-abi-subset.md) |
+| **G15** | inline-namespace version stamp makes every symbol churn (ICU 73→74: 6288 phantom changes vs a real +34/−0) | `UC-CHANGE-inline-ns-version` | [g15](plans/g15-inline-namespace-version.md) |
+
+The 43-wheel scan also reproduced **G9 at scale**: every package that vendors a
+stack hit the phantom removed+added failure — 42 phantom pairs total, led by
+Pillow (15), opencv-python (14), psycopg2-binary (5) — and exposed a *false
+negative* (pyzmq's bundled `libsodium` `SONAME 23→26` hidden as removed+added).
+None of these require new change-*type* detection; G9 and G14 are the two
+highest-value.
+
 ### Answer to the four driving questions
 
 1. **How does abicheck handle these configurations?** Superbly for *change-type
