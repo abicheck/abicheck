@@ -75,6 +75,10 @@ def snapshot_to_dict(snap: AbiSnapshot) -> dict[str, Any]:
     d.pop("_func_by_mangled", None)
     d.pop("_var_by_mangled", None)
     d.pop("_type_by_name", None)
+    # Runtime-only provenance qualifier — never persisted. ``from_headers`` is
+    # written verbatim, so a reloaded snapshot carries explicit (non-inferred)
+    # provenance.
+    d.pop("from_headers_inferred", None)
 
     # Serialize ElfMetadata enums to strings for JSON compatibility
     if d.get("elf"):
@@ -479,10 +483,16 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
     elf_only_mode = bool(d.get("elf_only_mode", False))
     if "from_headers" in d:
         from_headers = bool(d["from_headers"])
+        from_headers_inferred = False
     else:
         from_headers = (not elf_only_mode) and bool(
             funcs or variables or types or enums or typedefs
         )
+        # This provenance was guessed, not recorded. A legacy DWARF-only dump
+        # populates the same surface lists, so the inference cannot tell it
+        # apart from a header dump. Mark it inferred so source-level detectors
+        # that demand genuine header evidence (parameter renames) stay quiet.
+        from_headers_inferred = from_headers
 
     return AbiSnapshot(
         library=d["library"], version=d["version"],
@@ -493,6 +503,7 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
         dwarf=dwarf, dwarf_advanced=dwarf_advanced, sycl=sycl,
         elf_only_mode=elf_only_mode,
         from_headers=from_headers,
+        from_headers_inferred=from_headers_inferred,
         constants=d.get("constants", {}),
         platform=d.get("platform"),
         language_profile=d.get("language_profile"),
