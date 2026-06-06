@@ -235,9 +235,15 @@ extern "C" ICodec *codec_create();     // stable C symbol; hides the concrete ty
 
 **Why it works:** consumers hold only `ICodec*` and call through the vtable. The
 concrete implementation class — its data members, its `sizeof`, its non-virtual
-helpers — lives entirely in your `.so` and can change freely. The one rule you
-inherit from [Part 4](04-cpp-abi.md): you may only **append** virtual methods to
-`ICodec`, never insert or reorder.
+helpers — lives entirely in your `.so` and can change freely. The rule you
+inherit from [Part 4](04-cpp-abi.md): never insert or reorder virtual methods on
+`ICodec`. **Appending** is safe *only if your library owns every implementation
+of `ICodec`.* The moment downstreams are allowed to derive from it — the usual
+case for plugin or callback interfaces — even appending is breaking: an old
+plugin's vtable was compiled with the old shape, so a host call into the new slot
+dispatches past the end of that vtable. For a downstream-implementable interface,
+treat *any* vtable change as a SONAME-bump-worthy break and version the interface
+itself (a new `ICodec2`, or the inline-namespace generation pattern above).
 
 ---
 

@@ -129,9 +129,18 @@ The transition direction matters:
 
 | Transition | Result | Verdict |
 |------------|--------|---------|
-| inline-in-header → outlined-in-`.so` ([case47](../../examples/case47_inline_to_outlined.md)) | old binaries keep inlined copy; new export appears | 🟢 COMPATIBLE |
-| outlined → inline ([case59](../../examples/case59_func_became_inline.md)) | symbol *vanishes* from `.dynsym` | 🔴 BREAKING |
-| header says outlined but `.so` doesn't provide it ([case16](../../examples/case16_inline_to_non_inline.md)) | hard load-time failure | 🔴 BREAKING |
+| inline-in-header → outlined-in-`.so` ([case47](../../examples/case47_inline_to_outlined.md), [case16](../../examples/case16_inline_to_non_inline.md)) | old binaries keep their inlined copy; a new export simply *appears* | 🟢 COMPATIBLE (addition) |
+| outlined-in-`.so` → inline-in-header ([case59](../../examples/case59_func_became_inline.md)) | the exported symbol *vanishes* from `.dynsym` | 🔴 BREAKING |
+
+The compatible direction has a **build-order caveat** worth knowing
+([case16](../../examples/case16_inline_to_non_inline.md)): comparing old→new
+`.so` it is purely an added symbol, so the verdict is 🟢 COMPATIBLE — but a
+caller freshly compiled against the *new* header (which now expects an imported
+symbol) and then linked against the *old* `.so` (which never exported it) fails
+at link time. That is a downgrade/mismatched-build hazard, not a regression in
+the new release, and it dissolves once the symbol exists. If you *also* change
+the function's body in the same move, stale callers running their old inlined
+copy can disagree with the new export — an ODR hazard LTO sometimes catches.
 
 Template instantiations, inline functions, and `constexpr` bodies are part of
 the ABI **even though they never appear in `readelf -Ws`.**
