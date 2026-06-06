@@ -77,8 +77,10 @@ class TestDebugArtifact:
 
     def test_multi_source_description(self) -> None:
         a = DebugArtifact(
-            dwarf_path=Path("/a"), dsym_path=Path("/b"),
-            pdb_path=Path("/c"), source="test",
+            dwarf_path=Path("/a"),
+            dsym_path=Path("/b"),
+            pdb_path=Path("/c"),
+            source="test",
         )
         desc = a.description
         assert "DWARF" in desc
@@ -172,19 +174,26 @@ class TestBuildIdTreeResolver:
         assert result is None
 
     def test_no_build_id(self) -> None:
-        assert BuildIdTreeResolver().resolve(Path("/usr/lib/libfoo.so"), build_id=None) is None
+        assert (
+            BuildIdTreeResolver().resolve(Path("/usr/lib/libfoo.so"), build_id=None)
+            is None
+        )
 
     def test_short_build_id(self) -> None:
         assert BuildIdTreeResolver().resolve(Path("/x"), build_id="ab") is None
 
     def test_invalid_build_id(self) -> None:
-        assert BuildIdTreeResolver().resolve(Path("/x"), build_id="../etc/passwd") is None
+        assert (
+            BuildIdTreeResolver().resolve(Path("/x"), build_id="../etc/passwd") is None
+        )
         assert BuildIdTreeResolver().resolve(Path("/x"), build_id="UPPER") is None
 
     def test_no_debug_roots_uses_defaults(self) -> None:
         # With no debug_roots and non-existent defaults, returns None
         result = BuildIdTreeResolver().resolve(
-            Path("/x"), build_id="abcdef1234567890", debug_roots=[],
+            Path("/x"),
+            build_id="abcdef1234567890",
+            debug_roots=[],
         )
         assert result is None
 
@@ -195,7 +204,9 @@ class TestBuildIdTreeResolver:
 
 
 class TestPathMirrorResolver:
-    @pytest.mark.skipif(sys.platform == "win32", reason="Path mirror is a Unix/Linux convention")
+    @pytest.mark.skipif(
+        sys.platform == "win32", reason="Path mirror is a Unix/Linux convention"
+    )
     def test_found_appended_debug(self, tmp_path: Path) -> None:
         debug_root = tmp_path / "debug"
         binary_path = tmp_path / "usr" / "lib" / "libfoo.so"
@@ -210,12 +221,16 @@ class TestPathMirrorResolver:
         mirror_debug.parent.mkdir(parents=True, exist_ok=True)
         mirror_debug.write_bytes(b"\x7fELF")
 
-        result = PathMirrorResolver().resolve(binary_path=binary_path, debug_roots=[debug_root])
+        result = PathMirrorResolver().resolve(
+            binary_path=binary_path, debug_roots=[debug_root]
+        )
         assert result is not None
         assert result.dwarf_path == mirror_debug
         assert "path mirror" in result.source
 
-    @pytest.mark.skipif(sys.platform == "win32", reason="Path mirror is a Unix/Linux convention")
+    @pytest.mark.skipif(
+        sys.platform == "win32", reason="Path mirror is a Unix/Linux convention"
+    )
     def test_found_replaced_suffix(self, tmp_path: Path) -> None:
         """Test .so -> .debug suffix replacement."""
         debug_root = tmp_path / "debug"
@@ -231,19 +246,29 @@ class TestPathMirrorResolver:
         replaced.parent.mkdir(parents=True, exist_ok=True)
         replaced.write_bytes(b"\x7fELF")
 
-        result = PathMirrorResolver().resolve(binary_path=binary_path, debug_roots=[debug_root])
+        result = PathMirrorResolver().resolve(
+            binary_path=binary_path, debug_roots=[debug_root]
+        )
         assert result is not None
         assert "path mirror" in result.source
 
     def test_not_found(self, tmp_path: Path) -> None:
         binary_path = tmp_path / "libfoo.so"
         binary_path.write_bytes(b"\x7fELF")
-        assert PathMirrorResolver().resolve(binary_path=binary_path, debug_roots=[tmp_path]) is None
+        assert (
+            PathMirrorResolver().resolve(
+                binary_path=binary_path, debug_roots=[tmp_path]
+            )
+            is None
+        )
 
     def test_no_roots(self, tmp_path: Path) -> None:
         binary_path = tmp_path / "libfoo.so"
         binary_path.write_bytes(b"\x7fELF")
-        assert PathMirrorResolver().resolve(binary_path=binary_path, debug_roots=[]) is None
+        assert (
+            PathMirrorResolver().resolve(binary_path=binary_path, debug_roots=[])
+            is None
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -283,7 +308,9 @@ class TestDSYMResolver:
         debug_root = tmp_path / "symbols"
         dsym_dir, dwarf_file = self._make_dsym(debug_root, "libfoo.dylib")
 
-        result = DSYMResolver().resolve(binary_path=binary_path, debug_roots=[debug_root])
+        result = DSYMResolver().resolve(
+            binary_path=binary_path, debug_roots=[debug_root]
+        )
         assert result is not None
         assert result.dsym_path == dsym_dir
         assert result.dwarf_path == dwarf_file
@@ -300,11 +327,15 @@ class TestDSYMResolver:
         fw_dwarf.write_bytes(b"\xcf\xfa\xed\xfe")
 
         result = DSYMResolver().resolve(binary_path=binary_path)
-        assert result is not None or result is None  # May or may not match depending on structure
+        assert (
+            result is not None or result is None
+        )  # May or may not match depending on structure
 
     def test_dsym_dwarf_path_not_dir(self, tmp_path: Path) -> None:
         """_dsym_dwarf_path returns None for non-directory."""
-        assert DSYMResolver._dsym_dwarf_path(tmp_path / "nonexistent.dSYM", "foo") is None
+        assert (
+            DSYMResolver._dsym_dwarf_path(tmp_path / "nonexistent.dSYM", "foo") is None
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -331,11 +362,15 @@ class TestPDBResolver:
         pdb.parent.mkdir(parents=True)
         pdb.write_bytes(b"PDB data")
 
-        result = PDBResolver().resolve(binary_path=binary_path, debug_roots=[debug_root])
+        result = PDBResolver().resolve(
+            binary_path=binary_path, debug_roots=[debug_root]
+        )
         assert result is not None
         assert result.pdb_path == pdb
 
-    def test_nt_symbol_path(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_nt_symbol_path(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         binary_path = tmp_path / "foo.dll"
         binary_path.write_bytes(b"MZ")
         sym_dir = tmp_path / "symbols"
@@ -391,7 +426,8 @@ class TestSplitDwarfResolver:
         dwp.write_bytes(b"DWP data")
 
         result = SplitDwarfResolver().resolve(
-            binary_path=binary_path, debug_roots=[debug_root],
+            binary_path=binary_path,
+            debug_roots=[debug_root],
         )
         assert result is not None
         assert result.dwp_path == dwp
@@ -403,7 +439,9 @@ class TestSplitDwarfResolver:
         result = SplitDwarfResolver().resolve(binary_path=binary_path)
         assert result is None
 
-    def test_search_dirs_includes_comp_dir_and_debug_roots(self, tmp_path: Path) -> None:
+    def test_search_dirs_includes_comp_dir_and_debug_roots(
+        self, tmp_path: Path
+    ) -> None:
         binary_path = tmp_path / "libfoo.so"
         binary_path.write_bytes(b"\x7fELF")
         comp_dir = tmp_path / "build"
@@ -433,7 +471,9 @@ class TestSplitDwarfResolver:
         assert artifact.dwo_dir == search_dir
         assert "split DWARF" in artifact.source
 
-    def test_collect_dwo_names_returns_none_on_parse_error(self, tmp_path: Path, monkeypatch) -> None:
+    def test_collect_dwo_names_returns_none_on_parse_error(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
         binary_path = tmp_path / "libfoo.so"
         binary_path.write_bytes(b"\x7fELF")
 
@@ -601,7 +641,8 @@ class TestResolveDebugInfo:
 
     def test_with_debuginfod_disabled(self, tmp_path: Path) -> None:
         result = resolve_debug_info(
-            tmp_path / "nope.so", enable_debuginfod=False,
+            tmp_path / "nope.so",
+            enable_debuginfod=False,
         )
         assert result is None
 
@@ -622,7 +663,9 @@ class TestResolveDebugInfo:
 
 class TestFormatDataSources:
     def test_with_artifact(self) -> None:
-        artifact = DebugArtifact(dwarf_path=Path("/debug/libfoo.debug"), source="build-id tree")
+        artifact = DebugArtifact(
+            dwarf_path=Path("/debug/libfoo.debug"), source="build-id tree"
+        )
         output = format_data_sources(Path("/lib/libfoo.so"), artifact, has_headers=True)
         assert "build-id tree" in output
         assert "Headers:    available" in output
@@ -639,3 +682,308 @@ class TestFormatDataSources:
     def test_headers_available(self) -> None:
         output = format_data_sources(Path("/x"), None, has_headers=True)
         assert "available" in output
+
+
+# ---------------------------------------------------------------------------
+# Tests: extract_build_id / EmbeddedDwarfResolver / SplitDwarf with ELF mocks
+# ---------------------------------------------------------------------------
+
+from unittest.mock import MagicMock, patch  # noqa: E402
+
+
+class TestExtractBuildIdElfMock:
+    def _patch_elf(self, sections):
+        elf = MagicMock()
+        elf.iter_sections.return_value = sections
+        return patch("elftools.elf.elffile.ELFFile", return_value=elf)
+
+    def _note_section(self, notes):
+        from elftools.elf.sections import NoteSection
+
+        sec = MagicMock(spec=NoteSection)
+        sec.iter_notes.return_value = notes
+        return sec
+
+    def test_build_id_from_bytes_desc(self, tmp_path: Path) -> None:
+        f = tmp_path / "libfoo.so"
+        f.write_bytes(b"\x7fELF" + b"\x00" * 60)
+        note = {"n_type": "NT_GNU_BUILD_ID", "n_desc": b"\xab\xcd"}
+        with self._patch_elf([self._note_section([note])]):
+            assert extract_build_id(f) == "abcd"
+
+    def test_build_id_from_str_desc(self, tmp_path: Path) -> None:
+        f = tmp_path / "libfoo.so"
+        f.write_bytes(b"\x7fELF" + b"\x00" * 60)
+        note = {"n_type": "NT_GNU_BUILD_ID", "n_desc": "DEADbeef"}
+        with self._patch_elf([self._note_section([note])]):
+            assert extract_build_id(f) == "deadbeef"
+
+    def test_non_note_section_skipped(self, tmp_path: Path) -> None:
+        f = tmp_path / "libfoo.so"
+        f.write_bytes(b"\x7fELF" + b"\x00" * 60)
+        plain = MagicMock()  # not a NoteSection instance
+        with self._patch_elf([plain]):
+            assert extract_build_id(f) is None
+
+    def test_wrong_note_type_skipped(self, tmp_path: Path) -> None:
+        f = tmp_path / "libfoo.so"
+        f.write_bytes(b"\x7fELF" + b"\x00" * 60)
+        note = {"n_type": "NT_OTHER", "n_desc": b"\x01"}
+        with self._patch_elf([self._note_section([note])]):
+            assert extract_build_id(f) is None
+
+    def test_import_error_returns_none(self, tmp_path: Path, monkeypatch) -> None:
+        f = tmp_path / "libfoo.so"
+        f.write_bytes(b"\x7fELF")
+        real_import = __import__
+
+        def fake_import(name, *a, **k):
+            if "elftools" in name:
+                raise ImportError("no elftools")
+            return real_import(name, *a, **k)
+
+        monkeypatch.setattr("builtins.__import__", fake_import)
+        assert extract_build_id(f) is None
+
+
+class TestEmbeddedDwarfResolverFound:
+    def test_embedded_dwarf_found(self, tmp_path: Path) -> None:
+        f = tmp_path / "libfoo.so"
+        f.write_bytes(b"\x7fELF" + b"\x00" * 60)
+        elf = MagicMock()
+        debug_info = MagicMock()
+        debug_info.data_size = 1234
+        elf.get_section_by_name.return_value = debug_info
+        with patch("elftools.elf.elffile.ELFFile", return_value=elf):
+            artifact = EmbeddedDwarfResolver().resolve(f)
+        assert artifact is not None
+        assert artifact.dwarf_path == f
+        assert "embedded" in artifact.source.lower()
+
+    def test_empty_debug_info_returns_none(self, tmp_path: Path) -> None:
+        f = tmp_path / "libfoo.so"
+        f.write_bytes(b"\x7fELF" + b"\x00" * 60)
+        elf = MagicMock()
+        debug_info = MagicMock()
+        debug_info.data_size = 0
+        elf.get_section_by_name.return_value = debug_info
+        with patch("elftools.elf.elffile.ELFFile", return_value=elf):
+            assert EmbeddedDwarfResolver().resolve(f) is None
+
+    def test_import_error_returns_none(self, tmp_path: Path, monkeypatch) -> None:
+        f = tmp_path / "libfoo.so"
+        f.write_bytes(b"\x7fELF")
+        real_import = __import__
+
+        def fake_import(name, *a, **k):
+            if "elftools" in name:
+                raise ImportError("no elftools")
+            return real_import(name, *a, **k)
+
+        monkeypatch.setattr("builtins.__import__", fake_import)
+        assert EmbeddedDwarfResolver().resolve(f) is None
+
+
+class TestCollectDwoNames:
+    def _top_die(self, attrs):
+        die = MagicMock()
+        die.attributes = attrs
+        return die
+
+    def _attr(self, value):
+        a = MagicMock()
+        a.value = value
+        return a
+
+    def test_collects_dwo_names_and_comp_dirs(self, tmp_path: Path) -> None:
+        f = tmp_path / "libfoo.so"
+        f.write_bytes(b"\x7fELF" + b"\x00" * 60)
+        cu = MagicMock()
+        cu.get_top_DIE.return_value = self._top_die(
+            {
+                "DW_AT_GNU_dwo_name": self._attr(b"foo.dwo"),
+                "DW_AT_comp_dir": self._attr(b"/build/dir"),
+            }
+        )
+        dwarf = MagicMock()
+        dwarf.iter_CUs.return_value = [cu]
+        elf = MagicMock()
+        elf.get_dwarf_info.return_value = dwarf
+        with (
+            patch("elftools.elf.elffile.ELFFile", return_value=elf),
+            patch("abicheck.dwarf_utils.has_real_dwarf_info", return_value=True),
+        ):
+            result = SplitDwarfResolver._collect_dwo_names_and_comp_dirs(f)
+        assert result is not None
+        dwo_names, comp_dirs = result
+        assert "foo.dwo" in dwo_names
+        assert "/build/dir" in comp_dirs
+
+    def test_no_dwarf_info_returns_empty(self, tmp_path: Path) -> None:
+        f = tmp_path / "libfoo.so"
+        f.write_bytes(b"\x7fELF" + b"\x00" * 60)
+        elf = MagicMock()
+        with (
+            patch("elftools.elf.elffile.ELFFile", return_value=elf),
+            patch("abicheck.dwarf_utils.has_real_dwarf_info", return_value=False),
+        ):
+            result = SplitDwarfResolver._collect_dwo_names_and_comp_dirs(f)
+        assert result == ([], set())
+
+    def test_resolve_finds_dwo_dir(self, tmp_path: Path) -> None:
+        binary = tmp_path / "libfoo.so"
+        binary.write_bytes(b"\x7fELF" + b"\x00" * 60)
+        (tmp_path / "foo.dwo").write_bytes(b"dwo")
+        with patch.object(
+            SplitDwarfResolver,
+            "_collect_dwo_names_and_comp_dirs",
+            return_value=(["foo.dwo"], set()),
+        ):
+            artifact = SplitDwarfResolver().resolve(binary)
+        assert artifact is not None
+        assert artifact.dwo_dir == tmp_path
+
+
+class TestFindFrameworkRootNone:
+    def test_no_framework_returns_none(self, tmp_path: Path) -> None:
+        binary = tmp_path / "plain" / "libfoo.dylib"
+        assert DSYMResolver._find_framework_root(binary) is None
+
+
+class TestPdbResolverEmptySymbolPathEntry:
+    def test_empty_entry_skipped(self, tmp_path: Path, monkeypatch) -> None:
+        binary = tmp_path / "foo.dll"
+        binary.write_bytes(b"MZ")
+        sym_dir = tmp_path / "syms"
+        sym_dir.mkdir()
+        (sym_dir / "foo.pdb").write_bytes(b"PDB")
+        # Leading ';' and whitespace entries are skipped.
+        monkeypatch.setenv("_NT_SYMBOL_PATH", f" ; ;{sym_dir}")
+        artifact = PDBResolver().resolve(binary)
+        assert artifact is not None
+        assert artifact.pdb_path == sym_dir / "foo.pdb"
+
+
+# ---------------------------------------------------------------------------
+# Tests: DebuginfodResolver network helpers (no real network)
+# ---------------------------------------------------------------------------
+
+
+class TestDebuginfodNetwork:
+    def test_safe_urlopen_rejects_bad_scheme(self) -> None:
+        with pytest.raises(ValueError, match="Unsupported URL scheme"):
+            DebuginfodResolver._safe_urlopen("file:///etc/passwd")
+
+    def test_safe_urlopen_allows_https(self) -> None:
+        fake_resp = MagicMock()
+        with patch("urllib.request.urlopen", return_value=fake_resp) as mock_open:
+            result = DebuginfodResolver._safe_urlopen("https://example.com/x")
+        assert result is fake_resp
+        mock_open.assert_called_once()
+
+    def test_url_allowed_https(self) -> None:
+        resolver = DebuginfodResolver(server_urls=["https://x"])
+        assert resolver._url_allowed("https://example.com") is True
+
+    def test_url_allowed_http_with_insecure(self) -> None:
+        resolver = DebuginfodResolver(server_urls=["http://x"], allow_insecure=True)
+        assert resolver._url_allowed("http://example.com") is True
+
+    def test_url_allowed_http_rejected_by_default(self) -> None:
+        resolver = DebuginfodResolver(server_urls=["http://x"])
+        assert resolver._url_allowed("http://example.com") is False
+
+    def _resp(self, status=200, data=b"\x7fELF" + b"\x00" * 20):
+        resp = MagicMock()
+        resp.status = status
+        resp.read.return_value = data
+        resp.__enter__ = MagicMock(return_value=resp)
+        resp.__exit__ = MagicMock(return_value=False)
+        return resp
+
+    def test_fetch_data_success(self) -> None:
+        resolver = DebuginfodResolver(server_urls=["https://x"])
+        with patch.object(resolver, "_safe_urlopen", return_value=self._resp()):
+            data = resolver._fetch_data("https://x/buildid/aa/debuginfo")
+        assert data == b"\x7fELF" + b"\x00" * 20
+
+    def test_fetch_data_non_200(self) -> None:
+        resolver = DebuginfodResolver(server_urls=["https://x"])
+        with patch.object(
+            resolver, "_safe_urlopen", return_value=self._resp(status=404)
+        ):
+            assert resolver._fetch_data("https://x/y") is None
+
+    def test_fetch_data_oversize(self) -> None:
+        from abicheck.debug_resolver import _MAX_DEBUGINFOD_SIZE
+
+        resolver = DebuginfodResolver(server_urls=["https://x"])
+        big = b"\x00" * (_MAX_DEBUGINFOD_SIZE + 1)
+        with patch.object(resolver, "_safe_urlopen", return_value=self._resp(data=big)):
+            assert resolver._fetch_data("https://x/y") is None
+
+    def test_atomic_cache_write(self, tmp_path: Path) -> None:
+        resolver = DebuginfodResolver(server_urls=["https://x"])
+        dest = tmp_path / "sub" / "out.debug"
+        resolver._atomic_cache_write(dest, b"hello")
+        assert dest.read_bytes() == b"hello"
+
+    def test_atomic_cache_write_cleans_up_on_error(self, tmp_path: Path) -> None:
+        resolver = DebuginfodResolver(server_urls=["https://x"])
+        dest = tmp_path / "out.debug"
+        with patch("os.replace", side_effect=OSError("boom")):
+            with pytest.raises(OSError):
+                resolver._atomic_cache_write(dest, b"data")
+        # No leftover temp files in the directory.
+        assert list(tmp_path.iterdir()) == []
+
+    def test_fetch_one_url_disallowed_scheme(self) -> None:
+        resolver = DebuginfodResolver(server_urls=["http://x"])
+        result = resolver._fetch_one_url("http://x", "abcd1234", Path("/tmp/c"))
+        assert result is None
+
+    def test_fetch_one_url_success(self, tmp_path: Path) -> None:
+        resolver = DebuginfodResolver(server_urls=["https://x"], cache_dir=tmp_path)
+        cached = tmp_path / "out.debug"
+        with patch.object(
+            resolver, "_fetch_data", return_value=b"\x7fELF" + b"\x00" * 20
+        ):
+            artifact = resolver._fetch_one_url("https://x", "abcd1234", cached)
+        assert artifact is not None
+        assert artifact.dwarf_path == cached
+        assert cached.read_bytes() == b"\x7fELF" + b"\x00" * 20
+
+    def test_fetch_one_url_no_data(self, tmp_path: Path) -> None:
+        resolver = DebuginfodResolver(server_urls=["https://x"])
+        with patch.object(resolver, "_fetch_data", return_value=None):
+            assert (
+                resolver._fetch_one_url("https://x", "abcd1234", tmp_path / "c") is None
+            )
+
+    def test_fetch_one_url_not_elf(self, tmp_path: Path) -> None:
+        resolver = DebuginfodResolver(server_urls=["https://x"])
+        with patch.object(
+            resolver, "_fetch_data", return_value=b"NOTELF" + b"\x00" * 20
+        ):
+            assert (
+                resolver._fetch_one_url("https://x", "abcd1234", tmp_path / "c") is None
+            )
+
+    def test_fetch_one_url_handles_oserror(self, tmp_path: Path) -> None:
+        resolver = DebuginfodResolver(server_urls=["https://x"])
+        with patch.object(resolver, "_fetch_data", side_effect=OSError("net down")):
+            assert (
+                resolver._fetch_one_url("https://x", "abcd1234", tmp_path / "c") is None
+            )
+
+    def test_resolve_fetches_from_server(self, tmp_path: Path) -> None:
+        resolver = DebuginfodResolver(
+            server_urls=["https://example.com"],
+            cache_dir=tmp_path / "cache",
+        )
+        with patch.object(
+            resolver, "_fetch_data", return_value=b"\x7fELF" + b"\x00" * 20
+        ):
+            artifact = resolver.resolve(Path("/x"), build_id="abcdef1234567890")
+        assert artifact is not None
+        assert "debuginfod" in artifact.source

@@ -3,16 +3,25 @@
 All test data is synthetic — no real binaries required for the unit tests.
 Integration tests that use real ELF binaries are marked @pytest.mark.integration.
 """
+
 from __future__ import annotations
 
+import hashlib
 import os
+from unittest.mock import MagicMock, patch
 
 import pytest
+from elftools.elf.sections import SymbolTableSection
 
 from abicheck.binary_fingerprint import (
+    _EMPTY_HASH,
+    _MAX_SECTION_SIZE,
     BinarySummary,
     FunctionFingerprint,
     SectionSummary,
+    _compute_code_hash,
+    _extract_fingerprints,
+    _extract_section_summary,
     compute_function_fingerprints,
     compute_section_summary,
     match_renamed_functions,
@@ -32,13 +41,14 @@ from abicheck.elf_metadata import ElfMetadata, ElfSymbol, SymbolBinding, SymbolT
 from abicheck.model import AbiSnapshot, Function, Visibility
 
 # Concrete size values for clarity (avoids importing private _MIN_SYMBOL_SIZE).
-_TINY_SIZE = 4    # below minimum threshold — should never match
+_TINY_SIZE = 4  # below minimum threshold — should never match
 _NORMAL_SIZE = 100  # comfortably above threshold
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _fp(name: str, size: int, code_hash: str = "") -> FunctionFingerprint:
     """Shorthand for creating a FunctionFingerprint."""
@@ -54,7 +64,9 @@ def _snap_elf_only(
     if functions is None:
         functions = [
             Function(
-                name=s.name, mangled=s.name, return_type="void",
+                name=s.name,
+                mangled=s.name,
+                return_type="void",
                 visibility=Visibility.ELF_ONLY,
             )
             for s in symbols
@@ -82,6 +94,7 @@ def _func_sym(name: str, size: int = _NORMAL_SIZE) -> ElfSymbol:
 # FunctionFingerprint model tests
 # ---------------------------------------------------------------------------
 
+
 class TestFunctionFingerprint:
     def test_frozen(self) -> None:
         fp = _fp("foo", 100, "abc")
@@ -104,23 +117,30 @@ class TestFunctionFingerprint:
 # BinarySummary tests
 # ---------------------------------------------------------------------------
 
+
 class TestBinarySummary:
     def test_differs_from_identical(self) -> None:
-        s = BinarySummary(sections={
-            ".text": SectionSummary(".text", 1000, "aaa"),
-            ".rodata": SectionSummary(".rodata", 200, "bbb"),
-        })
+        s = BinarySummary(
+            sections={
+                ".text": SectionSummary(".text", 1000, "aaa"),
+                ".rodata": SectionSummary(".rodata", 200, "bbb"),
+            }
+        )
         assert s.differs_from(s) == {}
 
     def test_differs_from_changed(self) -> None:
-        old = BinarySummary(sections={
-            ".text": SectionSummary(".text", 1000, "aaa"),
-            ".rodata": SectionSummary(".rodata", 200, "bbb"),
-        })
-        new = BinarySummary(sections={
-            ".text": SectionSummary(".text", 1000, "ccc"),
-            ".rodata": SectionSummary(".rodata", 200, "bbb"),
-        })
+        old = BinarySummary(
+            sections={
+                ".text": SectionSummary(".text", 1000, "aaa"),
+                ".rodata": SectionSummary(".rodata", 200, "bbb"),
+            }
+        )
+        new = BinarySummary(
+            sections={
+                ".text": SectionSummary(".text", 1000, "ccc"),
+                ".rodata": SectionSummary(".rodata", 200, "bbb"),
+            }
+        )
         diffs = old.differs_from(new)
         assert ".text" in diffs
         assert ".rodata" not in diffs
@@ -128,39 +148,51 @@ class TestBinarySummary:
 
     def test_differs_from_sections_only_in_one(self) -> None:
         """Sections only in one binary are not reported as diffs."""
-        old = BinarySummary(sections={
-            ".text": SectionSummary(".text", 1000, "aaa"),
-        })
-        new = BinarySummary(sections={
-            ".text": SectionSummary(".text", 1000, "aaa"),
-            ".data": SectionSummary(".data", 100, "ddd"),
-        })
+        old = BinarySummary(
+            sections={
+                ".text": SectionSummary(".text", 1000, "aaa"),
+            }
+        )
+        new = BinarySummary(
+            sections={
+                ".text": SectionSummary(".text", 1000, "aaa"),
+                ".data": SectionSummary(".data", 100, "ddd"),
+            }
+        )
         assert old.differs_from(new) == {}
 
     def test_differs_from_bss_size_change(self) -> None:
         """Two .bss sections with same hash but different sizes are flagged."""
-        old = BinarySummary(sections={
-            ".bss": SectionSummary(".bss", 100, "same_hash"),
-        })
-        new = BinarySummary(sections={
-            ".bss": SectionSummary(".bss", 200, "same_hash"),
-        })
+        old = BinarySummary(
+            sections={
+                ".bss": SectionSummary(".bss", 100, "same_hash"),
+            }
+        )
+        new = BinarySummary(
+            sections={
+                ".bss": SectionSummary(".bss", 200, "same_hash"),
+            }
+        )
         diffs = old.differs_from(new)
         assert ".bss" in diffs
 
     def test_has_text_present(self) -> None:
-        s = BinarySummary(sections={
-            ".text": SectionSummary(".text", 42, "x"),
-        })
+        s = BinarySummary(
+            sections={
+                ".text": SectionSummary(".text", 42, "x"),
+            }
+        )
         assert s.has_text is True
 
     def test_has_text_absent(self) -> None:
         assert BinarySummary().has_text is False
 
     def test_text_size(self) -> None:
-        s = BinarySummary(sections={
-            ".text": SectionSummary(".text", 42, "x"),
-        })
+        s = BinarySummary(
+            sections={
+                ".text": SectionSummary(".text", 42, "x"),
+            }
+        )
         assert s.text_size == 42
 
     def test_text_size_absent(self) -> None:
@@ -170,6 +202,7 @@ class TestBinarySummary:
 # ---------------------------------------------------------------------------
 # match_renamed_functions tests
 # ---------------------------------------------------------------------------
+
 
 class TestMatchRenamedFunctions:
     def test_no_changes(self) -> None:
@@ -311,6 +344,7 @@ class TestMatchRenamedFunctions:
 
         def plausible(o: str, n: str) -> bool:
             import difflib
+
             return difflib.SequenceMatcher(None, o, n).ratio() >= 0.5
 
         result = match_renamed_functions(old, new, name_filter=plausible)
@@ -342,6 +376,7 @@ class TestMatchRenamedFunctions:
 # ---------------------------------------------------------------------------
 # compute_function_fingerprints / compute_section_summary — file-level tests
 # ---------------------------------------------------------------------------
+
 
 class TestComputeFunctionFingerprints:
     def test_non_elf_file_returns_empty(self, tmp_path: object) -> None:
@@ -407,29 +442,36 @@ class TestComputeSectionSummary:
 # Unqualified-name extraction and rename plausibility
 # ---------------------------------------------------------------------------
 
+
 class TestUnqualifiedName:
-    @pytest.mark.parametrize("symbol,expected", [
-        ("add", "add"),                                  # plain C name
-        ("ns::Class::method", "method"),                 # qualified
-        ("ns::Class::method(int, long)", "method"),      # with params
-        ("ns::foo<bar::baz>::run()", "run"),             # '::' inside template args
-        ("ns::make<a::b, c::d>", "make<a::b, c::d>"),    # template args kept
-        ("ns::foo<bar<int>>", "foo<bar<int>>"),          # nested template args kept
-        ("void get<int>()", "get<int>"),                 # return type dropped, args kept
-        ("std::ostream::operator<<(int)", "operator<<(int)"),  # operator kept whole
-        ("Widget::operator()(int)", "operator()(int)"),        # call operator
-        ("cooperator_v1", "cooperator_v1"),              # 'operator' substring, not keyword
-        ("myoperator::foo_v1()", "foo_v1"),              # 'operator' inside qualifier
-    ])
+    @pytest.mark.parametrize(
+        "symbol,expected",
+        [
+            ("add", "add"),  # plain C name
+            ("ns::Class::method", "method"),  # qualified
+            ("ns::Class::method(int, long)", "method"),  # with params
+            ("ns::foo<bar::baz>::run()", "run"),  # '::' inside template args
+            ("ns::make<a::b, c::d>", "make<a::b, c::d>"),  # template args kept
+            ("ns::foo<bar<int>>", "foo<bar<int>>"),  # nested template args kept
+            ("void get<int>()", "get<int>"),  # return type dropped, args kept
+            ("std::ostream::operator<<(int)", "operator<<(int)"),  # operator kept whole
+            ("Widget::operator()(int)", "operator()(int)"),  # call operator
+            ("cooperator_v1", "cooperator_v1"),  # 'operator' substring, not keyword
+            ("myoperator::foo_v1()", "foo_v1"),  # 'operator' inside qualifier
+        ],
+    )
     def test_extraction(self, symbol: str, expected: str) -> None:
         assert _unqualified_name(symbol) == expected
 
-    @pytest.mark.parametrize("leaf,expected", [
-        ("get<int>", "get"),                 # simple template args
-        ("foo<bar<int>>", "foo"),            # nested template args
-        ("plain", "plain"),                  # no template args
-        ("a>", "a>"),                        # unbalanced '>' left as-is
-    ])
+    @pytest.mark.parametrize(
+        "leaf,expected",
+        [
+            ("get<int>", "get"),  # simple template args
+            ("foo<bar<int>>", "foo"),  # nested template args
+            ("plain", "plain"),  # no template args
+            ("a>", "a>"),  # unbalanced '>' left as-is
+        ],
+    )
     def test_strip_template_args(self, leaf: str, expected: str) -> None:
         assert _strip_template_args(leaf) == expected
 
@@ -445,12 +487,16 @@ class TestPlausibleRename:
     def test_same_scope_different_leaf_rejected(self) -> None:
         # Shared qualifier must not inflate the score: unrelated leaves under a
         # common scope (begin/end) are not a rename.
-        assert _plausible_rename(
-            "std::vector<int>::begin()", "std::vector<int>::end()"
-        ) is False
+        assert (
+            _plausible_rename("std::vector<int>::begin()", "std::vector<int>::end()")
+            is False
+        )
 
     def test_unrelated_rejected(self) -> None:
-        assert _plausible_rename("fixupIndexV4(X)", "SmallVectorImpl<X>::erase(X*)") is False
+        assert (
+            _plausible_rename("fixupIndexV4(X)", "SmallVectorImpl<X>::erase(X*)")
+            is False
+        )
 
     def test_same_scope_short_leaves_rejected(self) -> None:
         # get/set share only an incidental 2-char suffix once the qualifier is
@@ -490,12 +536,14 @@ class TestPlausibleRename:
         assert _plausible_rename("A::operator==(int)", "B::operator==(int)") is True
 
     def test_undemangleable_mangled_names_rejected(
-        self, monkeypatch: pytest.MonkeyPatch,
+        self,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         # Force the no-demangler branch so the raw "_Z..." fallback is actually
         # exercised: without a demangler the leaf is the raw mangled spelling,
         # whose shared boilerplate must not be affix-scored into a false rename.
         import abicheck.demangle as demangle_mod
+
         monkeypatch.setattr(demangle_mod, "demangle", lambda _sym: None)
         assert _plausible_rename("_ZN1A3fooEv", "_ZN1B3barEv") is False
 
@@ -578,7 +626,7 @@ class TestPlausibleRename:
         assert _return_type_of("int foo<int>()") == "int"
         assert _return_type_of("unsigned int g<int>()") == "unsigned int"
         assert _return_type_of("std::vector<int> bar()") == "std::vector<int>"
-        assert _return_type_of("foo(int)") == ""           # ordinary function
+        assert _return_type_of("foo(int)") == ""  # ordinary function
         assert _return_type_of("ns::Class::method()") == ""
         assert _return_type_of("operator<<(int)") == ""
 
@@ -615,9 +663,10 @@ class TestPlausibleRename:
     def test_funcptr_return_rename_detected(self) -> None:
         # End-to-end: a versioned rename of a function-pointer-returning template
         # (foo_v1<int> -> foo_v2<int>) is a plausible rename, not removed/added.
-        assert _plausible_rename(
-            "int (*foo_v1<int>())()", "int (*foo_v2<int>())()"
-        ) is True
+        assert (
+            _plausible_rename("int (*foo_v1<int>())()", "int (*foo_v2<int>())()")
+            is True
+        )
 
     def test_same_variant_ctor_relocation_accepted(self) -> None:
         # A genuine constructor relocation to a new enclosing scope
@@ -630,12 +679,12 @@ class TestPlausibleRename:
     def test_ctor_dtor_variant_malformed_symbols_yield_none(self) -> None:
         # Defensive bail-outs: a malformed nested-name must never raise or
         # mis-report; it yields None (no suppression — the safe direction).
-        assert _ctor_dtor_variant("_ZN99FooC1Ev") is None     # length overruns
-        assert _ctor_dtor_variant("_ZN3FooIiC1Ev") is None    # template never closed
-        assert _ctor_dtor_variant("_ZN3FooI") is None         # truncated at 'I'
-        assert _ctor_dtor_variant("_ZN3FooILiC1Ev") is None   # L-literal never closed
-        assert _ctor_dtor_variant("_ZNK1A3fooEv") is None     # const member, not a ctor
-        assert _ctor_dtor_variant("not_mangled") is None      # not an _ZN name
+        assert _ctor_dtor_variant("_ZN99FooC1Ev") is None  # length overruns
+        assert _ctor_dtor_variant("_ZN3FooIiC1Ev") is None  # template never closed
+        assert _ctor_dtor_variant("_ZN3FooI") is None  # truncated at 'I'
+        assert _ctor_dtor_variant("_ZN3FooILiC1Ev") is None  # L-literal never closed
+        assert _ctor_dtor_variant("_ZNK1A3fooEv") is None  # const member, not a ctor
+        assert _ctor_dtor_variant("not_mangled") is None  # not an _ZN name
 
     def test_operator_substring_not_treated_as_operator(self) -> None:
         # Identifiers that merely contain 'operator' are ordinary names and
@@ -651,7 +700,9 @@ class TestPlausibleRename:
 
     def test_destructor_namespace_move_accepted(self) -> None:
         # The same destructor under a different scope is still a move.
-        assert _plausible_rename("ns::Widget::~Widget()", "ns2::Widget::~Widget()") is True
+        assert (
+            _plausible_rename("ns::Widget::~Widget()", "ns2::Widget::~Widget()") is True
+        )
 
     def test_plain_unqualified_names(self) -> None:
         # No '::', no template, no return type, no operator.
@@ -667,6 +718,7 @@ class TestPlausibleRename:
 # Detector integration tests (using compare())
 # ---------------------------------------------------------------------------
 
+
 class TestFingerprintRenameDetector:
     """Test the fingerprint_renames detector via the full compare() pipeline."""
 
@@ -681,10 +733,15 @@ class TestFingerprintRenameDetector:
         assert _fingerprints_from_elf(snap) == {}
 
     def test_fingerprints_from_elf_skips_non_function_symbols(self) -> None:
-        snap = _snap_elf_only("1.0", [
-            ElfSymbol(name="global_table", sym_type=SymbolType.OBJECT, size=_NORMAL_SIZE),
-            _func_sym("public_func", _NORMAL_SIZE),
-        ])
+        snap = _snap_elf_only(
+            "1.0",
+            [
+                ElfSymbol(
+                    name="global_table", sym_type=SymbolType.OBJECT, size=_NORMAL_SIZE
+                ),
+                _func_sym("public_func", _NORMAL_SIZE),
+            ],
+        )
 
         assert set(_fingerprints_from_elf(snap)) == {"public_func"}
 
@@ -694,7 +751,9 @@ class TestFingerprintRenameDetector:
         new = _snap_elf_only("2.0", [_func_sym("libfoo_create", 256)])
         result = compare(old, new)
 
-        rename_changes = [c for c in result.changes if c.kind == ChangeKind.FUNC_LIKELY_RENAMED]
+        rename_changes = [
+            c for c in result.changes if c.kind == ChangeKind.FUNC_LIKELY_RENAMED
+        ]
         assert len(rename_changes) == 1
         assert rename_changes[0].old_value == "libfoo_v1_create"
         assert rename_changes[0].new_value == "libfoo_create"
@@ -706,21 +765,37 @@ class TestFingerprintRenameDetector:
         regular diff pipeline while the fingerprint detector is disabled.
         """
         old = AbiSnapshot(
-            library="libtest.so.1", version="1.0",
-            functions=[Function(name="old_func", mangled="old_func",
-                                return_type="void", visibility=Visibility.PUBLIC)],
+            library="libtest.so.1",
+            version="1.0",
+            functions=[
+                Function(
+                    name="old_func",
+                    mangled="old_func",
+                    return_type="void",
+                    visibility=Visibility.PUBLIC,
+                )
+            ],
             elf=ElfMetadata(symbols=[_func_sym("old_func", 256)]),
             elf_only_mode=False,
         )
         new = AbiSnapshot(
-            library="libtest.so.1", version="2.0",
-            functions=[Function(name="new_func", mangled="new_func",
-                                return_type="void", visibility=Visibility.PUBLIC)],
+            library="libtest.so.1",
+            version="2.0",
+            functions=[
+                Function(
+                    name="new_func",
+                    mangled="new_func",
+                    return_type="void",
+                    visibility=Visibility.PUBLIC,
+                )
+            ],
             elf=ElfMetadata(symbols=[_func_sym("new_func", 256)]),
             elf_only_mode=False,
         )
         result = compare(old, new)
-        rename_changes = [c for c in result.changes if c.kind == ChangeKind.FUNC_LIKELY_RENAMED]
+        rename_changes = [
+            c for c in result.changes if c.kind == ChangeKind.FUNC_LIKELY_RENAMED
+        ]
         assert len(rename_changes) == 0
         # Regular diff still fires
         kinds = {c.kind for c in result.changes}
@@ -730,19 +805,35 @@ class TestFingerprintRenameDetector:
     def test_not_triggered_without_elf_metadata(self) -> None:
         """Detector requires ELF metadata — disabled for PE/Mach-O."""
         old = AbiSnapshot(
-            library="libtest.so.1", version="1.0",
-            functions=[Function(name="old_func", mangled="old_func",
-                                return_type="void", visibility=Visibility.ELF_ONLY)],
+            library="libtest.so.1",
+            version="1.0",
+            functions=[
+                Function(
+                    name="old_func",
+                    mangled="old_func",
+                    return_type="void",
+                    visibility=Visibility.ELF_ONLY,
+                )
+            ],
             elf_only_mode=True,
         )
         new = AbiSnapshot(
-            library="libtest.so.1", version="2.0",
-            functions=[Function(name="new_func", mangled="new_func",
-                                return_type="void", visibility=Visibility.ELF_ONLY)],
+            library="libtest.so.1",
+            version="2.0",
+            functions=[
+                Function(
+                    name="new_func",
+                    mangled="new_func",
+                    return_type="void",
+                    visibility=Visibility.ELF_ONLY,
+                )
+            ],
             elf_only_mode=True,
         )
         result = compare(old, new)
-        rename_changes = [c for c in result.changes if c.kind == ChangeKind.FUNC_LIKELY_RENAMED]
+        rename_changes = [
+            c for c in result.changes if c.kind == ChangeKind.FUNC_LIKELY_RENAMED
+        ]
         assert len(rename_changes) == 0
 
     def test_small_symbols_not_matched(self) -> None:
@@ -750,7 +841,9 @@ class TestFingerprintRenameDetector:
         old = _snap_elf_only("1.0", [_func_sym("stub_old", _TINY_SIZE)])
         new = _snap_elf_only("2.0", [_func_sym("stub_new", _TINY_SIZE)])
         result = compare(old, new)
-        rename_changes = [c for c in result.changes if c.kind == ChangeKind.FUNC_LIKELY_RENAMED]
+        rename_changes = [
+            c for c in result.changes if c.kind == ChangeKind.FUNC_LIKELY_RENAMED
+        ]
         assert len(rename_changes) == 0
 
     def test_different_sizes_not_matched(self) -> None:
@@ -758,7 +851,9 @@ class TestFingerprintRenameDetector:
         old = _snap_elf_only("1.0", [_func_sym("func_old", _NORMAL_SIZE)])
         new = _snap_elf_only("2.0", [_func_sym("func_new", 200)])
         result = compare(old, new)
-        rename_changes = [c for c in result.changes if c.kind == ChangeKind.FUNC_LIKELY_RENAMED]
+        rename_changes = [
+            c for c in result.changes if c.kind == ChangeKind.FUNC_LIKELY_RENAMED
+        ]
         assert len(rename_changes) == 0
 
     def test_multiple_renames_detected(self) -> None:
@@ -769,7 +864,9 @@ class TestFingerprintRenameDetector:
         new = _snap_elf_only("2.0", new_syms)
         result = compare(old, new)
 
-        rename_changes = [c for c in result.changes if c.kind == ChangeKind.FUNC_LIKELY_RENAMED]
+        rename_changes = [
+            c for c in result.changes if c.kind == ChangeKind.FUNC_LIKELY_RENAMED
+        ]
         assert len(rename_changes) == 2
         rename_pairs = {(c.old_value, c.new_value) for c in rename_changes}
         assert ("v1_init", "v2_init") in rename_pairs
@@ -782,7 +879,9 @@ class TestFingerprintRenameDetector:
         new = _snap_elf_only("2.0", [shared_sym, _func_sym("new_only", 128)])
         result = compare(old, new)
 
-        rename_changes = [c for c in result.changes if c.kind == ChangeKind.FUNC_LIKELY_RENAMED]
+        rename_changes = [
+            c for c in result.changes if c.kind == ChangeKind.FUNC_LIKELY_RENAMED
+        ]
         assert len(rename_changes) == 1
         assert rename_changes[0].old_value == "old_only"
         assert rename_changes[0].new_value == "new_only"
@@ -795,45 +894,69 @@ class TestFingerprintRenameDetector:
         the old implementation size. The old symbol must not be reported as a
         loader-breaking rename because existing binaries can still resolve it.
         """
-        old = _snap_elf_only("1.0", [
-            _func_sym("libssh2_session_callback_set", 185),
-        ])
-        new = _snap_elf_only("2.0", [
-            _func_sym("libssh2_session_callback_set", _TINY_SIZE),
-            _func_sym("libssh2_session_callback_set2", 185),
-        ])
+        old = _snap_elf_only(
+            "1.0",
+            [
+                _func_sym("libssh2_session_callback_set", 185),
+            ],
+        )
+        new = _snap_elf_only(
+            "2.0",
+            [
+                _func_sym("libssh2_session_callback_set", _TINY_SIZE),
+                _func_sym("libssh2_session_callback_set2", 185),
+            ],
+        )
         result = compare(old, new)
 
-        rename_changes = [c for c in result.changes if c.kind == ChangeKind.FUNC_LIKELY_RENAMED]
+        rename_changes = [
+            c for c in result.changes if c.kind == ChangeKind.FUNC_LIKELY_RENAMED
+        ]
         assert rename_changes == []
         kinds = {c.kind for c in result.changes}
         assert ChangeKind.FUNC_ADDED in kinds
 
     def test_retained_export_not_used_as_rename_target(self) -> None:
         """An unchanged exported function cannot be consumed as a rename target."""
-        old = _snap_elf_only("1.0", [
-            _func_sym("foo_v1", 128),
-            _func_sym("foo_v2", 128),
-        ])
-        new = _snap_elf_only("2.0", [
-            _func_sym("foo_v1", 128),
-        ])
+        old = _snap_elf_only(
+            "1.0",
+            [
+                _func_sym("foo_v1", 128),
+                _func_sym("foo_v2", 128),
+            ],
+        )
+        new = _snap_elf_only(
+            "2.0",
+            [
+                _func_sym("foo_v1", 128),
+            ],
+        )
         result = compare(old, new)
 
-        rename_changes = [c for c in result.changes if c.kind == ChangeKind.FUNC_LIKELY_RENAMED]
+        rename_changes = [
+            c for c in result.changes if c.kind == ChangeKind.FUNC_LIKELY_RENAMED
+        ]
         assert rename_changes == []
 
     def test_elf_linker_artifact_not_reported_as_rename(self) -> None:
         """Filtered linker artifacts must not participate in fingerprint renames."""
-        old = _snap_elf_only("1.0", [
-            _func_sym("_init", 128),
-        ])
-        new = _snap_elf_only("2.0", [
-            _func_sym("lib_init", 128),
-        ])
+        old = _snap_elf_only(
+            "1.0",
+            [
+                _func_sym("_init", 128),
+            ],
+        )
+        new = _snap_elf_only(
+            "2.0",
+            [
+                _func_sym("lib_init", 128),
+            ],
+        )
         result = compare(old, new)
 
-        rename_changes = [c for c in result.changes if c.kind == ChangeKind.FUNC_LIKELY_RENAMED]
+        rename_changes = [
+            c for c in result.changes if c.kind == ChangeKind.FUNC_LIKELY_RENAMED
+        ]
         assert rename_changes == []
 
     def test_unrelated_names_same_size_not_renamed(self) -> None:
@@ -845,29 +968,47 @@ class TestFingerprintRenameDetector:
         ``fixupIndexV4`` -> ``SmallVectorImpl<...>``) purely because they hit a
         unique size bucket. Without code-identity evidence, dissimilar names are
         a coincidence, not a rename."""
-        old = _snap_elf_only("1.0", [
-            _func_sym("_Z12fixupIndexV4RKN4llvm11DWARFObjectE", 256),
-        ])
-        new = _snap_elf_only("2.0", [
-            _func_sym("_ZN4llvm15SmallVectorImplINS_11CompileUnitEE5eraseEPS2_", 256),
-        ])
+        old = _snap_elf_only(
+            "1.0",
+            [
+                _func_sym("_Z12fixupIndexV4RKN4llvm11DWARFObjectE", 256),
+            ],
+        )
+        new = _snap_elf_only(
+            "2.0",
+            [
+                _func_sym(
+                    "_ZN4llvm15SmallVectorImplINS_11CompileUnitEE5eraseEPS2_", 256
+                ),
+            ],
+        )
         result = compare(old, new)
-        rename_changes = [c for c in result.changes if c.kind == ChangeKind.FUNC_LIKELY_RENAMED]
+        rename_changes = [
+            c for c in result.changes if c.kind == ChangeKind.FUNC_LIKELY_RENAMED
+        ]
         assert rename_changes == []
 
     def test_collision_does_not_hide_plausible_rename(self) -> None:
         """A real rename in a crowded size bucket is still found even when an
         unrelated same-size symbol sorts earlier — the similarity check drives
         selection, so the unrelated symbol cannot consume the partner."""
-        old = _snap_elf_only("1.0", [
-            _func_sym("aaa_unrelated_function", 256),
-            _func_sym("foo_v1_dosomething", 256),
-        ])
-        new = _snap_elf_only("2.0", [
-            _func_sym("foo_v2_dosomething", 256),
-        ])
+        old = _snap_elf_only(
+            "1.0",
+            [
+                _func_sym("aaa_unrelated_function", 256),
+                _func_sym("foo_v1_dosomething", 256),
+            ],
+        )
+        new = _snap_elf_only(
+            "2.0",
+            [
+                _func_sym("foo_v2_dosomething", 256),
+            ],
+        )
         result = compare(old, new)
-        renames = [c for c in result.changes if c.kind == ChangeKind.FUNC_LIKELY_RENAMED]
+        renames = [
+            c for c in result.changes if c.kind == ChangeKind.FUNC_LIKELY_RENAMED
+        ]
         assert len(renames) == 1
         assert renames[0].old_value == "foo_v1_dosomething"
         assert renames[0].new_value == "foo_v2_dosomething"
@@ -878,14 +1019,25 @@ class TestFingerprintRenameDetector:
         demangled spellings so the test is independent of c++filt/cxxfilt
         availability (without a demangler, raw _Z names are treated
         conservatively and a real move can't be inferred — by design)."""
-        old = _snap_elf_only("1.0", [
-            _func_sym("llvm::CompileUnit::markEverythingAsKept()", 256),
-        ])
-        new = _snap_elf_only("2.0", [
-            _func_sym("llvm::dwarf_linker::classic::CompileUnit::markEverythingAsKept()", 256),
-        ])
+        old = _snap_elf_only(
+            "1.0",
+            [
+                _func_sym("llvm::CompileUnit::markEverythingAsKept()", 256),
+            ],
+        )
+        new = _snap_elf_only(
+            "2.0",
+            [
+                _func_sym(
+                    "llvm::dwarf_linker::classic::CompileUnit::markEverythingAsKept()",
+                    256,
+                ),
+            ],
+        )
         result = compare(old, new)
-        rename_changes = [c for c in result.changes if c.kind == ChangeKind.FUNC_LIKELY_RENAMED]
+        rename_changes = [
+            c for c in result.changes if c.kind == ChangeKind.FUNC_LIKELY_RENAMED
+        ]
         assert len(rename_changes) == 1
 
     def test_fuzzy_match_appears_in_compare_output(self) -> None:
@@ -893,38 +1045,55 @@ class TestFingerprintRenameDetector:
         old = _snap_elf_only("1.0", [_func_sym("old_func", _NORMAL_SIZE)])
         new = _snap_elf_only("2.0", [_func_sym("new_func", 104)])  # 4% diff
         result = compare(old, new)
-        rename_changes = [c for c in result.changes if c.kind == ChangeKind.FUNC_LIKELY_RENAMED]
+        rename_changes = [
+            c for c in result.changes if c.kind == ChangeKind.FUNC_LIKELY_RENAMED
+        ]
         assert len(rename_changes) == 1
         assert "50%" in rename_changes[0].description
 
     def test_fires_when_only_new_is_elf_only(self) -> None:
         """Detector fires when only the *new* snapshot is elf_only_mode."""
         old = AbiSnapshot(
-            library="libtest.so.1", version="1.0",
-            functions=[Function(name="old_func", mangled="old_func",
-                                return_type="void", visibility=Visibility.ELF_ONLY)],
+            library="libtest.so.1",
+            version="1.0",
+            functions=[
+                Function(
+                    name="old_func",
+                    mangled="old_func",
+                    return_type="void",
+                    visibility=Visibility.ELF_ONLY,
+                )
+            ],
             elf=ElfMetadata(symbols=[_func_sym("old_func", 256)]),
             elf_only_mode=False,
         )
         new = _snap_elf_only("2.0", [_func_sym("new_func", 256)])
         result = compare(old, new)
-        rename_changes = [c for c in result.changes if c.kind == ChangeKind.FUNC_LIKELY_RENAMED]
+        rename_changes = [
+            c for c in result.changes if c.kind == ChangeKind.FUNC_LIKELY_RENAMED
+        ]
         assert len(rename_changes) == 1
 
     def test_notype_symbols_included(self) -> None:
         """NOTYPE symbols (assembly-heavy or stripped) participate in rename matching."""
         notype_old = ElfSymbol(
-            name="asm_func_old", binding=SymbolBinding.GLOBAL,
-            sym_type=SymbolType.NOTYPE, size=256,
+            name="asm_func_old",
+            binding=SymbolBinding.GLOBAL,
+            sym_type=SymbolType.NOTYPE,
+            size=256,
         )
         notype_new = ElfSymbol(
-            name="asm_func_new", binding=SymbolBinding.GLOBAL,
-            sym_type=SymbolType.NOTYPE, size=256,
+            name="asm_func_new",
+            binding=SymbolBinding.GLOBAL,
+            sym_type=SymbolType.NOTYPE,
+            size=256,
         )
         old = _snap_elf_only("1.0", [notype_old])
         new = _snap_elf_only("2.0", [notype_new])
         result = compare(old, new)
-        rename_changes = [c for c in result.changes if c.kind == ChangeKind.FUNC_LIKELY_RENAMED]
+        rename_changes = [
+            c for c in result.changes if c.kind == ChangeKind.FUNC_LIKELY_RENAMED
+        ]
         assert len(rename_changes) == 1
         assert rename_changes[0].old_value == "asm_func_old"
         assert rename_changes[0].new_value == "asm_func_new"
@@ -944,7 +1113,10 @@ class TestFingerprintRenameDetector:
         assert ChangeKind.FUNC_ADDED not in kept_kinds
         # The suppressed changes should appear in redundant_changes
         redundant_kinds = {c.kind for c in result.redundant_changes}
-        assert ChangeKind.FUNC_REMOVED_ELF_ONLY in redundant_kinds or ChangeKind.FUNC_REMOVED in redundant_kinds
+        assert (
+            ChangeKind.FUNC_REMOVED_ELF_ONLY in redundant_kinds
+            or ChangeKind.FUNC_REMOVED in redundant_kinds
+        )
 
     def test_pass1_ambiguous_exact_match_skipped(self) -> None:
         """Pass 1: multiple new symbols with same hash+size → no 1.0 confidence match."""
@@ -957,3 +1129,251 @@ class TestFingerprintRenameDetector:
         # No exact match due to ambiguity; may fall through to pass 2 or 3
         exact = [r for r in result if r.confidence == 1.0]
         assert len(exact) == 0
+
+
+# ---------------------------------------------------------------------------
+# Internal ELF-parsing helpers (mocked pyelftools — no real binaries needed)
+# ---------------------------------------------------------------------------
+
+
+def _make_sym(
+    name,
+    *,
+    typ="STT_FUNC",
+    shndx=1,
+    bind="STB_GLOBAL",
+    vis="STV_DEFAULT",
+    size=_NORMAL_SIZE,
+    value=0x1000,
+):
+    sym = MagicMock()
+    sym.name = name
+    sym.entry.st_info.type = typ
+    sym.entry.st_shndx = shndx
+    sym.entry.st_info.bind = bind
+    sym.entry.st_other.visibility = vis
+    sym.entry.st_size = size
+    sym.entry.st_value = value
+    return sym
+
+
+def _make_dynsym(symbols):
+    section = MagicMock(spec=SymbolTableSection)
+    section.name = ".dynsym"
+    section.iter_symbols.return_value = symbols
+    return section
+
+
+class TestExtractFingerprints:
+    def test_no_dynsym_returns_empty(self) -> None:
+        elf = MagicMock()
+        other = MagicMock(spec=SymbolTableSection)
+        other.name = ".symtab"  # not .dynsym
+        elf.iter_sections.return_value = [other]
+        with patch("abicheck.binary_fingerprint.ELFFile", return_value=elf):
+            assert _extract_fingerprints(MagicMock(), object()) == {}
+
+    def test_exported_func_collected(self) -> None:
+        elf = MagicMock()
+        elf.iter_sections.return_value = [_make_dynsym([_make_sym("foo")])]
+        # No code hash: get_section returns a NOBITS section
+        sec = MagicMock()
+        sec.header.sh_type = "SHT_NOBITS"
+        elf.get_section.return_value = sec
+        with patch("abicheck.binary_fingerprint.ELFFile", return_value=elf):
+            result = _extract_fingerprints(MagicMock(), object())
+        assert "foo" in result
+        assert result["foo"].size == _NORMAL_SIZE
+        assert result["foo"].code_hash == ""
+
+    @pytest.mark.parametrize(
+        "kwargs",
+        [
+            {"typ": "STT_OBJECT"},  # not a FUNC
+            {"shndx": "SHN_UNDEF"},  # undefined
+            {"shndx": "SHN_ABS"},  # absolute
+            {"bind": "STB_LOCAL"},  # local binding
+            {"vis": "STV_HIDDEN"},  # hidden
+            {"vis": "STV_INTERNAL"},  # internal
+            {"size": _TINY_SIZE},  # below min size
+        ],
+    )
+    def test_filtered_symbols(self, kwargs) -> None:
+        elf = MagicMock()
+        elf.iter_sections.return_value = [_make_dynsym([_make_sym("x", **kwargs)])]
+        sec = MagicMock()
+        sec.header.sh_type = "SHT_NOBITS"
+        elf.get_section.return_value = sec
+        with patch("abicheck.binary_fingerprint.ELFFile", return_value=elf):
+            assert _extract_fingerprints(MagicMock(), object()) == {}
+
+    def test_empty_name_skipped(self) -> None:
+        elf = MagicMock()
+        elf.iter_sections.return_value = [_make_dynsym([_make_sym("")])]
+        with patch("abicheck.binary_fingerprint.ELFFile", return_value=elf):
+            assert _extract_fingerprints(MagicMock(), object()) == {}
+
+    def test_string_shndx_section_index_zero(self) -> None:
+        elf = MagicMock()
+        elf.iter_sections.return_value = [
+            _make_dynsym([_make_sym("foo", shndx="SHN_COMMON")])
+        ]
+        with patch("abicheck.binary_fingerprint.ELFFile", return_value=elf):
+            result = _extract_fingerprints(MagicMock(), object())
+        # SHN_COMMON is not UNDEF/ABS so it passes the filter; shndx is a string
+        assert result["foo"].section_index == 0
+        assert result["foo"].code_hash == ""  # non-int shndx → no hash
+
+
+class TestComputeCodeHash:
+    def test_non_int_shndx_returns_empty(self) -> None:
+        assert _compute_code_hash(MagicMock(), MagicMock(), "SHN_ABS", {}) == ""
+
+    def test_nobits_section_returns_empty(self) -> None:
+        elf = MagicMock()
+        sec = MagicMock()
+        sec.header.sh_type = "SHT_NOBITS"
+        elf.get_section.return_value = sec
+        assert _compute_code_hash(elf, _make_sym("x"), 1, {}) == ""
+
+    def test_section_too_large_returns_empty(self) -> None:
+
+        elf = MagicMock()
+        sec = MagicMock()
+        sec.name = ".text"
+        sec.header.sh_type = "SHT_PROGBITS"
+        sec.header.sh_size = _MAX_SECTION_SIZE + 1
+        elf.get_section.return_value = sec
+        assert _compute_code_hash(elf, _make_sym("x"), 1, {}) == ""
+
+    def test_valid_code_hash(self) -> None:
+
+        elf = MagicMock()
+        sec = MagicMock()
+        sec.name = ".text"
+        sec.header.sh_type = "SHT_PROGBITS"
+        sec.header.sh_size = 256
+        sec.header.sh_addr = 0x1000
+        sec.data.return_value = b"\xaa" * 256
+        elf.get_section.return_value = sec
+        sym = _make_sym("foo", value=0x1010, size=16)
+        result = _compute_code_hash(elf, sym, 1, {})
+        expected = hashlib.sha256(b"\xaa" * 16).hexdigest()
+        assert result == expected
+
+    def test_offset_out_of_bounds_returns_empty(self) -> None:
+        elf = MagicMock()
+        sec = MagicMock()
+        sec.name = ".text"
+        sec.header.sh_type = "SHT_PROGBITS"
+        sec.header.sh_size = 16
+        sec.header.sh_addr = 0x1000
+        sec.data.return_value = b"\x00" * 16
+        elf.get_section.return_value = sec
+        # symbol before section start → negative offset
+        sym = _make_sym("foo", value=0x0, size=16)
+        assert _compute_code_hash(elf, sym, 1, {}) == ""
+
+    def test_uses_section_cache(self) -> None:
+
+        elf = MagicMock()
+        cache = {1: (0x1000, 256, b"\xbb" * 256)}
+        sym = _make_sym("foo", value=0x1000, size=8)
+        result = _compute_code_hash(elf, sym, 1, cache)
+        assert result == hashlib.sha256(b"\xbb" * 8).hexdigest()
+        elf.get_section.assert_not_called()
+
+    def test_exception_returns_empty(self) -> None:
+        elf = MagicMock()
+        elf.get_section.side_effect = IndexError("bad index")
+        assert _compute_code_hash(elf, _make_sym("x"), 99, {}) == ""
+
+
+class TestExtractSectionSummary:
+    def _section(self, name, *, sh_type="SHT_PROGBITS", sh_size=64, data=b"\x01" * 64):
+        sec = MagicMock()
+        sec.name = name
+        sec.header.sh_type = sh_type
+        sec.header.sh_size = sh_size
+        sec.data.return_value = data
+        return sec
+
+    def test_collects_abi_sections(self) -> None:
+
+        elf = MagicMock()
+        elf.iter_sections.return_value = [
+            self._section(".text"),
+            self._section(".note.foo"),  # ignored — not ABI relevant
+        ]
+        with patch("abicheck.binary_fingerprint.ELFFile", return_value=elf):
+            summary = _extract_section_summary(MagicMock())
+        assert ".text" in summary.sections
+        assert ".note.foo" not in summary.sections
+        assert (
+            summary.sections[".text"].content_hash
+            == hashlib.sha256(b"\x01" * 64).hexdigest()
+        )
+
+    def test_bss_uses_empty_hash(self) -> None:
+
+        elf = MagicMock()
+        elf.iter_sections.return_value = [
+            self._section(".bss", sh_type="SHT_NOBITS", sh_size=128),
+        ]
+        with patch("abicheck.binary_fingerprint.ELFFile", return_value=elf):
+            summary = _extract_section_summary(MagicMock())
+        assert summary.sections[".bss"].content_hash == _EMPTY_HASH
+        assert summary.sections[".bss"].size == 128
+
+    def test_oversize_section_skipped(self) -> None:
+
+        elf = MagicMock()
+        elf.iter_sections.return_value = [
+            self._section(".data", sh_size=_MAX_SECTION_SIZE + 1),
+        ]
+        with patch("abicheck.binary_fingerprint.ELFFile", return_value=elf):
+            summary = _extract_section_summary(MagicMock())
+        assert ".data" not in summary.sections
+
+    def test_unreadable_section_skipped(self) -> None:
+        elf = MagicMock()
+        sec = self._section(".rodata")
+        sec.data.side_effect = ValueError("cannot read")
+        elf.iter_sections.return_value = [sec]
+        with patch("abicheck.binary_fingerprint.ELFFile", return_value=elf):
+            summary = _extract_section_summary(MagicMock())
+        assert ".rodata" not in summary.sections
+
+
+class TestPublicFunctionsNonRegularFile:
+    def test_fingerprints_char_device_returns_empty(self) -> None:
+        # /dev/null is a character device — not a regular file (TOCTOU guard).
+        if not os.path.exists("/dev/null"):
+            pytest.skip("/dev/null not available")
+        assert compute_function_fingerprints("/dev/null") == {}
+
+    def test_section_summary_char_device_returns_empty(self) -> None:
+        if not os.path.exists("/dev/null"):
+            pytest.skip("/dev/null not available")
+        assert compute_section_summary("/dev/null").sections == {}
+
+    def test_section_summary_truncated_elf_returns_empty(
+        self, tmp_path: object
+    ) -> None:
+        p = os.path.join(str(tmp_path), "trunc.so")
+        with open(p, "wb") as f:
+            f.write(b"\x7fELF")
+        assert compute_section_summary(p).sections == {}
+
+    def test_section_summary_success_path(self, tmp_path: object) -> None:
+        # ELF magic so the seek/extract path runs; patch the extractor.
+        p = os.path.join(str(tmp_path), "ok.so")
+        with open(p, "wb") as f:
+            f.write(b"\x7fELF" + b"\x00" * 60)
+        sentinel = BinarySummary(sections={".text": SectionSummary(".text", 1, "h")})
+        with patch(
+            "abicheck.binary_fingerprint._extract_section_summary",
+            return_value=sentinel,
+        ):
+            result = compute_section_summary(p)
+        assert result is sentinel
