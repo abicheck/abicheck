@@ -21,12 +21,14 @@ from abicheck.checker import ChangeKind, compare
 from abicheck.diff_symbols import (
     _ctor_dtor_variant,
     _fingerprints_from_elf,
+    _match_declarator_group,
     _param_signature_of,
     _plausible_rename,
     _return_type_of,
     _strip_template_args,
     _unqualified_name,
     _unqualified_name_of,
+    _unwrap_funcptr_declarator,
 )
 from abicheck.elf_metadata import ElfMetadata, ElfSymbol, SymbolBinding, SymbolType
 from abicheck.model import AbiSnapshot, Function, Visibility
@@ -611,6 +613,27 @@ class TestPlausibleRename:
         # left intact (the '(' there is the real parameter list).
         assert _unqualified_name_of("void foo(int (*)())") == "foo"
         assert _param_signature_of("void foo(int (*)())") == "(int (*)())"
+
+    def test_funcptr_declarator_edge_cases(self) -> None:
+        # A space between the declarator-group '(' and the '*'/'&' is still a
+        # pointer-return declarator: the name must be unwrapped (exercises the
+        # whitespace-skip loop that sits between the '(' and the sigil).
+        assert _unwrap_funcptr_declarator("int ( *foo())()") == "foo()"
+        assert _unwrap_funcptr_declarator("int (  &bar())()") == "bar()"
+        # A declarator group whose ')' never closes is left untouched rather
+        # than truncated (the unbalanced bail-out).
+        assert _unwrap_funcptr_declarator("int (*foo(") == "int (*foo("
+        # An empty string and an ordinary parameter list are both returned as-is.
+        assert _unwrap_funcptr_declarator("") == ""
+        assert _unwrap_funcptr_declarator("foo(int)") == "foo(int)"
+
+    def test_match_declarator_group(self) -> None:
+        # Balanced: returns the index of the matching ')'.
+        assert _match_declarator_group("(*x())", 0) == 5
+        # Parens nested in template arguments do not affect paren depth.
+        assert _match_declarator_group("(*x<(int)>())", 0) == 12
+        # Unbalanced: no matching ')' yields None.
+        assert _match_declarator_group("(*x", 0) is None
 
     def test_funcptr_return_rename_detected(self) -> None:
         # End-to-end: a versioned rename of a function-pointer-returning template
