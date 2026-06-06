@@ -548,6 +548,15 @@ class AbiSnapshot:
     # Used by binary-only fallback detectors that need lightweight disassembly.
     source_path: str | None = field(default=None, kw_only=True)
 
+    # Runtime-only provenance qualifier (not serialized — popped in
+    # snapshot_to_dict). True when ``from_headers`` was *inferred* for a legacy
+    # snapshot that predates the explicit ``from_headers`` key, rather than set
+    # explicitly by the dumper or loaded verbatim. Source-level detectors that
+    # must only fire on genuine header evidence (e.g. parameter renames) require
+    # ``from_headers and not from_headers_inferred`` so ambiguous legacy
+    # DWARF-only baselines do not produce false API breaks.
+    from_headers_inferred: bool = field(default=False, repr=False, compare=False)
+
     # Indexes (built lazily)
     _func_by_mangled: dict[str, Function] | None = field(default=None, repr=False, compare=False)
     _var_by_mangled: dict[str, Variable] | None = field(default=None, repr=False, compare=False)

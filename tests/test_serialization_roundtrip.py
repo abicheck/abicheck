@@ -131,6 +131,44 @@ class TestDeletedFromDwarfRoundTrip:
         assert snapshot_from_dict(d).functions[0].deleted_from_dwarf is False
 
 
+# ── inferred from_headers provenance ──────────────────────────────────────
+
+
+class TestInferredFromHeadersProvenance:
+    """Inferred legacy provenance must not become explicit across a re-save.
+
+    A legacy snapshot (no ``from_headers`` key) infers ``from_headers=True`` but
+    marks ``from_headers_inferred=True``. Re-serializing must NOT emit
+    ``from_headers: true`` as explicit provenance, or reloading the migrated
+    baseline would re-enable source-level param-rename detection on DWARF-only
+    surfaces.
+    """
+
+    def _legacy_dict(self) -> dict:
+        return _minimal_dict(
+            functions=[{"name": "f", "mangled": "_Z1fi", "return_type": "void"}],
+        )
+
+    def test_inferred_provenance_not_persisted_as_explicit(self) -> None:
+        loaded = snapshot_from_dict(self._legacy_dict())
+        assert loaded.from_headers is True
+        assert loaded.from_headers_inferred is True
+        # The re-emitted dict must not carry an explicit from_headers key.
+        reemitted = json.loads(snapshot_to_json(loaded))
+        assert "from_headers" not in reemitted
+        # Reloading the migrated baseline stays inferred, not explicit.
+        reloaded = snapshot_from_dict(reemitted)
+        assert reloaded.from_headers is True
+        assert reloaded.from_headers_inferred is True
+
+    def test_explicit_provenance_is_persisted(self) -> None:
+        snap = _make_snap(from_headers=True)
+        assert snap.from_headers_inferred is False
+        reemitted = json.loads(snapshot_to_json(snap))
+        assert reemitted.get("from_headers") is True
+        assert snapshot_from_dict(reemitted).from_headers_inferred is False
+
+
 # ── file-based round-trip ─────────────────────────────────────────────────
 
 

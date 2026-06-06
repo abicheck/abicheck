@@ -871,7 +871,13 @@ def _diff_param_defaults(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
 def _diff_param_renames(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """Detect parameter renames (same type+position, different name)."""
     changes: list[Change] = []
+    # Require *explicit* header provenance on both sides. A legacy snapshot
+    # predating the from_headers key has it inferred from a populated surface,
+    # which a DWARF-only dump also satisfies — trusting that inference here
+    # reintroduces PARAM_RENAMED/API_BREAK false positives on DWARF baselines.
     if not (old.from_headers and new.from_headers):
+        return changes
+    if old.from_headers_inferred or new.from_headers_inferred:
         return changes
     old_map = _public_functions(old)
     new_map = _public_functions(new)
