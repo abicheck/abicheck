@@ -241,13 +241,18 @@ jobs:
           cache: 'pip'
       - name: Install package
         run: pip install -e ".[dev]"
-      - name: Native compare workflow + AAPCS64 tests
-        # The AArch64 AAPCS unit tests (18) always run, so a floor of 12 catches
-        # a silently-missing native compiler without risking a false failure
-        # from platform subsetting of the integration-marked compare tests.
+      - name: Native PE/Mach-O compare workflow tests
+        # Run ONLY the native, compiler-gated integration tests here. Every test
+        # in this file is @pytest.mark.integration and needs clang/MinGW, so if
+        # the native compiler is missing they all skip and the
+        # ABICHECK_MIN_EXECUTED floor fails the lane — closing the silent-skip
+        # hole where always-run unit tests could keep it green. (The AArch64
+        # AAPCS64 unit tests run in the regular unit-tests lane on all OSes.)
+        # Floor 5: each platform contributes ~7-8 native tests when the compiler
+        # is present, so 5 is comfortably reachable yet 0 (all-skipped) fails.
         env:
-          ABICHECK_MIN_EXECUTED: '12'
-        run: pytest tests/test_cross_platform_integration.py tests/test_macos_arm64_abi.py -v --tb=short
+          ABICHECK_MIN_EXECUTED: '5'
+        run: pytest tests/test_cross_platform_integration.py -v -m integration --tb=short
 
   heavy-parity-gate:
     runs-on: ubuntu-latest

@@ -253,10 +253,15 @@ class TestMachoIntegration:
     def test_native_identical_dylib_is_compatible(self) -> None:
         """Identical native dylibs compare COMPATIBLE (exit 0)."""
         src = "int api_fn(void){return 1;}\nint other_fn(void){return 2;}"
+        # Pin a *shared* install_name on both builds: without -install_name,
+        # clang derives LC_ID_DYLIB from the (differing) output path, which the
+        # Mach-O diff would report as SONAME_CHANGED → BREAKING and defeat this
+        # no-change control. Both being identical, their install_names must match.
+        same_id = ["-Wl,-install_name,@rpath/libidentical.dylib"]
         with tempfile.TemporaryDirectory() as td:
             td_path = Path(td)
-            a = _compile_dylib(src, "liba.dylib", td_path)
-            b = _compile_dylib(src, "libb.dylib", td_path)
+            a = _compile_dylib(src, "liba.dylib", td_path, extra_flags=same_id)
+            b = _compile_dylib(src, "libb.dylib", td_path, extra_flags=same_id)
             cmp = subprocess.run(
                 [sys.executable, "-m", "abicheck.cli", "compare", str(a), str(b)],
                 capture_output=True, text=True, check=False,
