@@ -844,6 +844,15 @@ def _resolvable_symbol_names(name: str, mangled: str | None) -> set[str]:
     return {name}
 
 
+#: Visibilities that correspond to a symbol actually exported from the binary.
+#: PUBLIC is the header/DWARF-aware default; ELF_ONLY is how a symbols-only dump
+#: (a stripped binary with no headers/DWARF — the common `plugin-check old.so
+#: new.so` case) represents an exported `.dynsym` entry. HIDDEN is not exported.
+_EXPORTED_VISIBILITIES: frozenset[Visibility] = frozenset(
+    {Visibility.PUBLIC, Visibility.ELF_ONLY}
+)
+
+
 def _snapshot_export_names(snap: AbiSnapshot) -> set[str]:
     """Linker-symbol names a host could resolve from a plugin via ``dlsym``.
 
@@ -851,13 +860,17 @@ def _snapshot_export_names(snap: AbiSnapshot) -> set[str]:
     plus the plain source name only for ``extern "C"`` / C symbols where it
     equals the mangled name. A demangled C++ name is deliberately excluded so a
     contract listing it is reported as *missing*, matching ``dlsym`` reality.
+
+    Both header/DWARF-aware (``PUBLIC``) and symbols-only (``ELF_ONLY``) exports
+    count: running ``plugin-check`` on real stripped binaries without headers is
+    the common case, and there every export is ``ELF_ONLY``.
     """
     names: set[str] = set()
     for fn in snap.functions:
-        if fn.visibility is Visibility.PUBLIC:
+        if fn.visibility in _EXPORTED_VISIBILITIES:
             names |= _resolvable_symbol_names(fn.name, fn.mangled)
     for var in snap.variables:
-        if var.visibility is Visibility.PUBLIC:
+        if var.visibility in _EXPORTED_VISIBILITIES:
             names |= _resolvable_symbol_names(var.name, getattr(var, "mangled", None))
     return names
 

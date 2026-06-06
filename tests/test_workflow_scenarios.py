@@ -240,6 +240,37 @@ def test_snapshot_export_names_covers_vars_and_unmangled() -> None:
     assert "internal_state" not in names
 
 
+def _elf_only_lib(version: str, symbols: list[str]) -> AbiSnapshot:
+    """A symbols-only snapshot, as produced by dumping a stripped binary with
+    no headers/DWARF: every export is Visibility.ELF_ONLY."""
+    fns = [
+        Function(name=s, mangled=s, return_type="int", visibility=Visibility.ELF_ONLY)
+        for s in symbols
+    ]
+    return AbiSnapshot(
+        library="libplugin.so", version=version, functions=fns, elf_only_mode=True,
+    )
+
+
+def test_host_contract_check_counts_elf_only_exports() -> None:
+    """plugin-check on real stripped binaries (no headers) sees ELF_ONLY
+    exports; those must count as satisfying the contract (regression: a
+    compatible binary-only plugin previously came out BREAKING / 0% coverage)."""
+    plugin_v1 = _elf_only_lib("1.0", ["plugin_init", "plugin_run"])
+    plugin_v2 = _elf_only_lib("2.0", ["plugin_init", "plugin_run"])
+
+    ok = check_plugin_host_contract(plugin_v1, plugin_v2, HOST_REQUIRED_ENTRYPOINTS)
+    assert ok.verdict is Verdict.COMPATIBLE
+    assert ok.missing_entrypoints == []
+    assert ok.coverage == 100.0
+
+    # Dropping a required entrypoint is still BREAKING in symbols-only mode.
+    plugin_v3 = _elf_only_lib("3.0", ["plugin_init"])
+    broke = check_plugin_host_contract(plugin_v1, plugin_v3, HOST_REQUIRED_ENTRYPOINTS)
+    assert broke.verdict is Verdict.BREAKING
+    assert broke.missing_entrypoints == ["plugin_run"]
+
+
 # ── Scenario D: policy-scoped release decision ───────────────────────────────
 
 
