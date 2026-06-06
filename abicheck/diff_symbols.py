@@ -626,6 +626,7 @@ def _match_old_function(
 def _detect_newly_deleted_functions(
     old_all: dict[str, Function],
     new_all: dict[str, Function],
+    old_snapshot: AbiSnapshot,
     new_snapshot: AbiSnapshot,
 ) -> list[Change]:
     """Detect functions that gained ``= delete`` between snapshots.
@@ -640,6 +641,9 @@ def _detect_newly_deleted_functions(
     changes: list[Change] = []
     new_elf = getattr(new_snapshot, "elf", None)
     exported = exported_symbol_names(new_elf, FUNCTION_SYMBOL_TYPES)
+    old_exported = exported_symbol_names(
+        getattr(old_snapshot, "elf", None), FUNCTION_SYMBOL_TYPES
+    )
     # Whether the new side has an ELF symbol table at all. This tells "no ELF
     # evidence available" apart from "ELF table present but this function is not
     # exported": when a table exists, an empty *function* export set (e.g. the
@@ -651,7 +655,18 @@ def _detect_newly_deleted_functions(
     for mangled, f_new in new_all.items():
         if not f_new.is_deleted:
             continue
-        if f_new.deleted_from_dwarf and has_elf_symbol_table and mangled not in exported:
+        # Suppress only a *genuinely internal* DWARF-deleted member: one that the
+        # new ELF table proves is not exported AND that was not exported in the
+        # old library either. A function that *was* an old export and is now
+        # ``= delete``'d + dropped from .dynsym is a real deletion of a public
+        # API and must still be reported (the removal-side path defers to this
+        # detector for it, so suppressing here would drop the finding entirely).
+        if (
+            f_new.deleted_from_dwarf
+            and has_elf_symbol_table
+            and mangled not in exported
+            and mangled not in old_exported
+        ):
             continue
         # Skip functions that are not part of the public ABI surface.
         if f_new.visibility not in _PUBLIC_VIS:
@@ -718,7 +733,7 @@ def _diff_functions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
 
     old_all = old.function_map
     new_all_map = new.function_map
-    changes.extend(_detect_newly_deleted_functions(old_all, new_all_map, new))
+    changes.extend(_detect_newly_deleted_functions(old_all, new_all_map, old, new))
 
     # FUNC_BECAME_INLINE / FUNC_LOST_INLINE: detect inline↔non-inline transitions
     changes.extend(_check_inline_transitions(old_map, new_map, new))
