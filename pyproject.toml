@@ -113,6 +113,7 @@ module = [
     "abicheck.cli_probe",
     "abicheck.cli_stack",
     "abicheck.cli_suggest",
+    "abicheck.cli_surface",
     "abicheck.compat.cli",
 ]
 disallow_untyped_decorators = false

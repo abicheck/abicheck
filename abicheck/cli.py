@@ -1987,6 +1987,7 @@ from . import (  # noqa: E402  — must run after `main` and helpers are defined
     cli_probe,  # noqa: F401  — registers probe (run, compare)
     cli_stack,  # noqa: F401  — registers deps, stack-check
     cli_suggest,  # noqa: F401  — registers suggest-suppressions
+    cli_surface,  # noqa: F401  — registers surface-report
 )
 
 if __name__ == "__main__":
