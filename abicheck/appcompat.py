@@ -827,25 +827,38 @@ def check_against(
 # Plugin host↔plugin load contract (the dlopen direction) — gap G5
 # ---------------------------------------------------------------------------
 
-def _snapshot_export_names(snap: AbiSnapshot) -> set[str]:
-    """Names a host could resolve from a plugin via ``dlsym``.
+def _resolvable_symbol_names(name: str, mangled: str | None) -> set[str]:
+    """The names ``dlsym`` could actually resolve for one exported entity.
 
-    Exported functions and variables, indexed by both their source name and
-    their mangled name so an ``extern "C"`` entrypoint (matched by plain name)
-    and a C++ symbol (matched by mangled name) both resolve.
+    ``dlsym`` resolves the *linker* symbol — the mangled name. The source
+    ``name`` is only resolvable when it *is* the linker symbol (``extern "C"``
+    or C, where ``mangled == name``); a demangled C++ name like ``foo(int)`` is
+    NOT a dlsym key and must not count as satisfying a host contract. When no
+    mangled name is recorded, fall back to ``name`` as the best available key.
+    """
+    if mangled:
+        names = {mangled}
+        if name == mangled:
+            names.add(name)
+        return names
+    return {name}
+
+
+def _snapshot_export_names(snap: AbiSnapshot) -> set[str]:
+    """Linker-symbol names a host could resolve from a plugin via ``dlsym``.
+
+    Exported functions and variables, keyed by their mangled (linker) symbol —
+    plus the plain source name only for ``extern "C"`` / C symbols where it
+    equals the mangled name. A demangled C++ name is deliberately excluded so a
+    contract listing it is reported as *missing*, matching ``dlsym`` reality.
     """
     names: set[str] = set()
     for fn in snap.functions:
         if fn.visibility is Visibility.PUBLIC:
-            names.add(fn.name)
-            if fn.mangled:
-                names.add(fn.mangled)
+            names |= _resolvable_symbol_names(fn.name, fn.mangled)
     for var in snap.variables:
         if var.visibility is Visibility.PUBLIC:
-            names.add(var.name)
-            mangled = getattr(var, "mangled", None)
-            if mangled:
-                names.add(mangled)
+            names |= _resolvable_symbol_names(var.name, getattr(var, "mangled", None))
     return names
 
 

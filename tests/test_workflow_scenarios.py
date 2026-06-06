@@ -183,6 +183,63 @@ def test_host_contract_check_additive_plugin_is_compatible() -> None:
     assert result.coverage == 100.0
 
 
+def _cpp_lib(version: str) -> AbiSnapshot:
+    """A plugin exporting a C++ entrypoint: source name != mangled linker name."""
+    fn = Function(
+        name="plugin_run(int)", mangled="_Z10plugin_runi",
+        return_type="int", visibility=Visibility.PUBLIC,
+    )
+    return AbiSnapshot(library="libplugin.so", version=version, functions=[fn])
+
+
+def test_host_contract_demangled_cpp_name_is_not_a_dlsym_export() -> None:
+    """A C++ entrypoint is only resolvable by its mangled linker symbol; a
+    contract listing the demangled source name must be reported as missing
+    (dlsym cannot resolve `plugin_run(int)`)."""
+    plugin = _cpp_lib("1.0")
+
+    by_demangled = check_plugin_host_contract(plugin, plugin, {"plugin_run(int)"})
+    assert by_demangled.verdict is Verdict.BREAKING
+    assert by_demangled.missing_entrypoints == ["plugin_run(int)"]
+
+    by_mangled = check_plugin_host_contract(plugin, plugin, {"_Z10plugin_runi"})
+    assert by_mangled.verdict is Verdict.COMPATIBLE
+    assert by_mangled.missing_entrypoints == []
+
+
+def test_snapshot_export_names_covers_vars_and_unmangled() -> None:
+    """The resolvable-export set includes exported variables and falls back to
+    the plain name when no mangled symbol is recorded."""
+    from abicheck.appcompat import _snapshot_export_names
+    from abicheck.model import Variable
+
+    snap = AbiSnapshot(
+        library="libplugin.so",
+        version="1.0",
+        functions=[
+            # extern "C": name == mangled → plain name resolvable
+            Function(name="plugin_init", mangled="plugin_init",
+                     return_type="int", visibility=Visibility.PUBLIC),
+            # no mangled recorded → fall back to name
+            Function(name="legacy_entry", mangled="",
+                     return_type="int", visibility=Visibility.PUBLIC),
+            # non-public → never a dlsym export
+            Function(name="internal_helper", mangled="internal_helper",
+                     return_type="int", visibility=Visibility.HIDDEN),
+        ],
+        variables=[
+            Variable(name="plugin_table", mangled="plugin_table", type="void*",
+                     visibility=Visibility.PUBLIC),
+            Variable(name="internal_state", mangled="internal_state", type="int",
+                     visibility=Visibility.HIDDEN),
+        ],
+    )
+    names = _snapshot_export_names(snap)
+    assert {"plugin_init", "legacy_entry", "plugin_table"} <= names
+    assert "internal_helper" not in names
+    assert "internal_state" not in names
+
+
 # ── Scenario D: policy-scoped release decision ───────────────────────────────
 
 

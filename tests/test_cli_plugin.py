@@ -85,6 +85,20 @@ def test_plugin_check_json_output_and_host_contract_file(tmp_path: Path) -> None
     assert payload["coverage"] == 50.0
 
 
+def test_plugin_check_writes_output_file(tmp_path: Path) -> None:
+    old = _plugin_snapshot(tmp_path, "p1.json", "1.0", ["plugin_init", "plugin_run"])
+    new = _plugin_snapshot(tmp_path, "p2.json", "2.0", ["plugin_init", "plugin_run"])
+    out = tmp_path / "report.md"
+
+    result = CliRunner().invoke(main, [
+        "plugin-check", str(old), str(new), "-r", "plugin_init", "-o", str(out),
+    ])
+    assert result.exit_code == 0, result.output
+    assert out.exists()
+    assert "host-contract" in out.read_text().lower()
+    assert "Report written to" in result.output
+
+
 def test_plugin_check_requires_entrypoints(tmp_path: Path) -> None:
     old = _plugin_snapshot(tmp_path, "p1.json", "1.0", ["plugin_init"])
     new = _plugin_snapshot(tmp_path, "p2.json", "2.0", ["plugin_init"])
