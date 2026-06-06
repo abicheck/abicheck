@@ -6,14 +6,22 @@ Integration tests that use real ELF binaries are marked @pytest.mark.integration
 
 from __future__ import annotations
 
+import hashlib
 import os
+from unittest.mock import MagicMock, patch
 
 import pytest
+from elftools.elf.sections import SymbolTableSection
 
 from abicheck.binary_fingerprint import (
+    _EMPTY_HASH,
+    _MAX_SECTION_SIZE,
     BinarySummary,
     FunctionFingerprint,
     SectionSummary,
+    _compute_code_hash,
+    _extract_fingerprints,
+    _extract_section_summary,
     compute_function_fingerprints,
     compute_section_summary,
     match_renamed_functions,
@@ -1127,16 +1135,6 @@ class TestFingerprintRenameDetector:
 # Internal ELF-parsing helpers (mocked pyelftools — no real binaries needed)
 # ---------------------------------------------------------------------------
 
-from unittest.mock import MagicMock, patch  # noqa: E402
-
-from elftools.elf.sections import SymbolTableSection  # noqa: E402
-
-from abicheck.binary_fingerprint import (  # noqa: E402
-    _compute_code_hash,
-    _extract_fingerprints,
-    _extract_section_summary,
-)
-
 
 def _make_sym(
     name,
@@ -1239,7 +1237,6 @@ class TestComputeCodeHash:
         assert _compute_code_hash(elf, _make_sym("x"), 1, {}) == ""
 
     def test_section_too_large_returns_empty(self) -> None:
-        from abicheck.binary_fingerprint import _MAX_SECTION_SIZE
 
         elf = MagicMock()
         sec = MagicMock()
@@ -1250,7 +1247,6 @@ class TestComputeCodeHash:
         assert _compute_code_hash(elf, _make_sym("x"), 1, {}) == ""
 
     def test_valid_code_hash(self) -> None:
-        import hashlib
 
         elf = MagicMock()
         sec = MagicMock()
@@ -1279,7 +1275,6 @@ class TestComputeCodeHash:
         assert _compute_code_hash(elf, sym, 1, {}) == ""
 
     def test_uses_section_cache(self) -> None:
-        import hashlib
 
         elf = MagicMock()
         cache = {1: (0x1000, 256, b"\xbb" * 256)}
@@ -1304,7 +1299,6 @@ class TestExtractSectionSummary:
         return sec
 
     def test_collects_abi_sections(self) -> None:
-        import hashlib
 
         elf = MagicMock()
         elf.iter_sections.return_value = [
@@ -1321,7 +1315,6 @@ class TestExtractSectionSummary:
         )
 
     def test_bss_uses_empty_hash(self) -> None:
-        from abicheck.binary_fingerprint import _EMPTY_HASH
 
         elf = MagicMock()
         elf.iter_sections.return_value = [
@@ -1333,7 +1326,6 @@ class TestExtractSectionSummary:
         assert summary.sections[".bss"].size == 128
 
     def test_oversize_section_skipped(self) -> None:
-        from abicheck.binary_fingerprint import _MAX_SECTION_SIZE
 
         elf = MagicMock()
         elf.iter_sections.return_value = [

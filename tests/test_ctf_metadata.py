@@ -18,10 +18,12 @@ from __future__ import annotations
 
 import struct
 import zlib
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from abicheck.ctf_metadata import (
+    _CTF_V2_LSTRUCT_THRESH,
     CTF_F_COMPRESS,
     CTF_K_ARRAY,
     CTF_K_CONST,
@@ -40,13 +42,19 @@ from abicheck.ctf_metadata import (
     CTF_VERSION_2,
     CTF_VERSION_3,
     CtfMetadata,
+    CtfType,
     _decompress_if_needed,
     _extra_data_size,
+    _extract_enums,
     _parse_header,
     _parse_info_v2,
     _parse_info_v3,
+    _parse_types,
+    _read_ctf_section,
     _read_string,
+    _TypeResolver,
     parse_ctf_from_bytes,
+    parse_ctf_metadata,
 )
 
 # ---------------------------------------------------------------------------
@@ -1021,16 +1029,6 @@ class TestCtfResolverThroughExtraction:
 # CTF v2 format coverage (v2 builder + direct parser tests)
 # ---------------------------------------------------------------------------
 
-from unittest.mock import MagicMock, patch  # noqa: E402
-
-from abicheck.ctf_metadata import (  # noqa: E402
-    _CTF_V2_LSTRUCT_THRESH,
-    CtfType,
-    _parse_types,
-    _read_ctf_section,
-    parse_ctf_metadata,
-)
-
 
 class CtfV2Builder:
     """Helper to construct synthetic CTF *v2* binary blobs for testing."""
@@ -1163,7 +1161,6 @@ class TestParseTypesTruncation:
 
 class TestResolverEdgeCases:
     def test_integer_missing_encoding_size_zero(self) -> None:
-        from abicheck.ctf_metadata import _TypeResolver
 
         # Integer type with no extra encoding word → size resolves to 0.
         t = CtfType(
@@ -1173,7 +1170,6 @@ class TestResolverEdgeCases:
         assert resolver.size(1) == 0
 
     def test_float_missing_encoding_size_zero(self) -> None:
-        from abicheck.ctf_metadata import _TypeResolver
 
         t = CtfType(
             type_id=1, name_off=0, info=(CTF_K_FLOAT << 24), size_or_type=4, extra=b""
@@ -1182,7 +1178,6 @@ class TestResolverEdgeCases:
         assert resolver.size(1) == 0
 
     def test_array_v2_short_extra_size_zero(self) -> None:
-        from abicheck.ctf_metadata import _TypeResolver
 
         # v2 array with too-short extra → size guard returns 0.
         t = CtfType(
@@ -1193,7 +1188,6 @@ class TestResolverEdgeCases:
 
     def test_cyclic_name_resolution(self) -> None:
         # Build a typedef that points to itself → name resolution must not recurse forever.
-        from abicheck.ctf_metadata import _TypeResolver
 
         # type 1 is a typedef whose target is itself (id 1).
         t1 = CtfType(type_id=1, name_off=0, info=(CTF_K_TYPEDEF << 24), size_or_type=1)
@@ -1202,14 +1196,12 @@ class TestResolverEdgeCases:
         assert resolver.name(1) is not None
 
     def test_cyclic_size_resolution(self) -> None:
-        from abicheck.ctf_metadata import _TypeResolver
 
         t1 = CtfType(type_id=1, name_off=0, info=(CTF_K_TYPEDEF << 24), size_or_type=1)
         resolver = _TypeResolver([CtfType(0, 0, 0, 0), t1], b"\x00", CTF_VERSION_3)
         assert resolver.size(1) == 0  # guard breaks the cycle
 
     def test_array_unparseable_name_fallback(self) -> None:
-        from abicheck.ctf_metadata import _TypeResolver
 
         # Array with too-short extra → name falls back to "[]".
         arr = CtfType(
@@ -1221,7 +1213,6 @@ class TestResolverEdgeCases:
 
 class TestEnumTruncation:
     def test_enum_truncated_members(self) -> None:
-        from abicheck.ctf_metadata import _extract_enums
 
         # vlen claims 2 entries but only one (8 bytes) of extra is provided,
         # so the member loop breaks early on the second iteration.

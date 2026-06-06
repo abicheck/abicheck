@@ -24,6 +24,9 @@ def test_run_as_module_invokes_cli(monkeypatch: pytest.MonkeyPatch) -> None:
     the ``if __name__ == "__main__": main()`` guard.
     """
     monkeypatch.setattr(sys, "argv", ["abicheck", "--help"])
+    # Drop the cached submodule so run_module executes it fresh as __main__
+    # without the "found in sys.modules" RuntimeWarning.
+    monkeypatch.delitem(sys.modules, "abicheck.__main__", raising=False)
     with pytest.raises(SystemExit) as exc_info:
         runpy.run_module("abicheck.__main__", run_name="__main__")
     assert exc_info.value.code == 0
