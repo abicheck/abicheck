@@ -171,11 +171,21 @@ inline/header code regardless of how the *exported* functions pass it — so a
 size/field change is still ABI-breaking. The recogniser therefore tags `T` as
 `OPAQUE_POINTER` only when **all** of:
 
-1. `T`'s complete definition is **not visible to callers** — it is incomplete
-   in the public surface (`RecordType.is_opaque`, i.e. forward-declared only),
-   *or* its defining `source_header` (provenance, ADR-024) is a
-   `PRIVATE_HEADER`/not in the public set. This is the load-bearing condition:
-   it proves callers cannot allocate or observe the layout.
+1. `T`'s complete definition is **not visible in the public include closure** —
+   i.e. when the supplied public headers are preprocessed, `T` is only ever
+   *incomplete* (forward-declared), never completed by any transitive
+   `#include`. The reliable signal is `RecordType.is_opaque` as observed by the
+   parser on the public-header translation unit: if a public header (even
+   transitively) pulls in the full definition, castxml sees `T` complete and
+   this condition is **false**. **Provenance classification alone is *not*
+   sufficient** — a `PRIVATE_HEADER` origin only means "outside the explicitly
+   supplied public set", but ADR-024 notes castxml parses transitively-included
+   private headers, and a user compiling the public header sees that definition
+   too (`sizeof(T)`, inline layout). So a complete `T` reachable through a
+   public header is observable and must **not** be treated as opaque, regardless
+   of which header file its definition physically sits in. This is the
+   load-bearing condition: it proves callers cannot allocate or observe the
+   layout.
 2. every public function that references `T` does so only through
    `pointer_depth >= 1` (never by value), and
 3. `T` exposes no public data members in the surface closure.
@@ -284,6 +294,21 @@ two DSOs changes layout, even if the consumer never exposes that type on its
 | `BUNDLE_INTRA_TYPE_CHANGED` | Only emit (or emit at full confidence vs. reduced) when the changed type is **reachable from the consumer library's own public surface** via its `SurfaceGraph`; a layout change to a type the consumer uses only internally is demoted, not dropped (same ledger contract as A4). |
 | `BUNDLE_INTRA_DEP_REMOVED` / `BUNDLE_INTRA_DEP_SIGNATURE_CHANGED` | Unchanged in *what* they fire on; A3 only enriches the finding with the `(producer → consumer)` reachability path for the report. |
 
+**The demotion must reach the bundle verdict, not just the per-library one.**
+`BundleFinding` (`bundle.py`) is a *separate* type from `Change`: its
+`to_change()` builds a fresh `Change` carrying only kind/symbol/description, and
+`BundleDiffResult.bundle_verdict` runs `compute_verdict()` over those lowered
+changes. So a reachability demotion expressed only on the per-library `Change`
+path would be **dropped** on the bundle path — `bundle_verdict` would still see
+the raw `BUNDLE_INTRA_TYPE_CHANGED` as breaking. The D4.1 override mechanism
+therefore extends to the bundle path identically: `BundleFinding` gains the same
+`effective_verdict` / `modulation_reason` / `modulation_rule` fields,
+`to_change()` propagates them onto the lowered `Change`, and `bundle_verdict`
+(plus the `compare-release` JSON/SARIF and its exit-code path) classifies via
+the shared `effective_category(...)` helper — never bare `compute_verdict()` on
+the raw kind. The demoted finding stays in `bundle_findings` (disclosed in the
+report), re-categorised in place, never dropped.
+
 The type→consumer match still leans on shared `source_header`, which is
 inherently fuzzy — provenance paths are build-time absolute paths matched on
 segments (`provenance.py` documents this), so two libraries built in different
@@ -335,7 +360,7 @@ mechanism below), **always** writing a `modulation_reason` and the rule id:
 
 | Rule | Effect | Guard (anti-hiding) |
 |------|--------|---------------------|
-| **Opaque-pointer layout** | `TYPE_SIZE_CHANGED` / `TYPE_FIELD_*` on an `OPAQUE_POINTER` type whose **definition is hidden from callers** (incomplete in the public surface or defined only in a private header — D2.1 condition 1) → demote to compatible, reason `opaque-by-construction`. | The definition-hidden condition must hold on **both** snapshots; if the definition *became* visible or a by-value public use appears, opaqueness was lost → emit `OPAQUE_INVARIANT_BROKEN` (D2.2) instead — never silent. A complete public type with only private fields is **not** opaque (callers still know its `sizeof`) and is never demoted. |
+| **Opaque-pointer layout** | `TYPE_SIZE_CHANGED` / `TYPE_FIELD_*` on an `OPAQUE_POINTER` type whose **complete definition is not reachable through the public include closure** (incomplete when the public headers are preprocessed — D2.1 condition 1) → demote to compatible, reason `opaque-by-construction`. | The definition-hidden condition must hold on **both** snapshots; if the definition *became* visible or a by-value public use appears, opaqueness was lost → emit `OPAQUE_INVARIANT_BROKEN` (D2.2) instead — never silent. A type whose full definition is reachable via a public header — even a *transitively-included* private one — is observable (`sizeof`/inline) and is **never** demoted, regardless of provenance classification. |
 | **PIMPL pointee-only** | A layout change to the *private/incomplete impl pointee* of a `PIMPL` type → demote, reason `pimpl-impl-hidden`. | **Strictly scoped:** the public wrapper is itself a complete type callers can `sizeof`/embed/stack-allocate, so a change to the **wrapper's own** layout (its size, or its single impl-pointer field) is **never** demoted — it stays breaking. Demotion fires only when the wrapper's own layout is byte-identical across both snapshots **and** only the hidden pointee changed. A wrapper gaining a second data member is a real break (and likely also `OPAQUE_INVARIANT_BROKEN`). |
 | **Versioned-addition** | A near-duplicate symbol matching the inferred version scheme (D2.3) → treat as managed addition, not accidental churn. | Only suppresses the *noise* classification; the addition is still reported as `FUNC_ADDED`. |
 | **Anti-pattern raise** | A change *on* a `POLYMORPHIC_TYPE_NON_VIRTUAL_DTOR` / STL-by-value surface → raise confidence / annotate elevated risk. | Pure raise; cannot hide. |
@@ -438,6 +463,7 @@ Every modulation is disclosed exactly like the ADR-024 surface ledger:
 | `model.py` | `AbiSnapshot.idioms`, `.conventions`; helper `RecordType` opaque/handle flags if not already derivable. | Additive; schema bump (ADR-015). Old snapshots → empty → safe no-op. |
 | `checker_types.py` | `Change.confidence: Confidence` (reusing `checker_policy.Confidence`, default `HIGH`) — per-finding trust, distinct from verdict-level `DiffResult.confidence`; `Change.effective_verdict: Verdict \| None = None` — per-finding category override (default `None` = classify by `kind`); plus `Change.modulation_reason: str \| None`, `.modulation_rule: str \| None`. Add the shared `effective_category(change, kind_sets)` helper (D4.1 mechanism). | Additive dataclass fields with safe defaults; classification is a no-op while every `effective_verdict` is `None` (`--no-pattern-verdicts` / pre-Phase-3). |
 | `checker_policy.py` / `reporter.py` / `severity.py` | **Behavioural change:** every kind-based classification site must route through `effective_category(...)` instead of bare `c.kind in <set>` — `compute_verdict()`; `reporter._change_to_dict` + `filtered_summary` + type/non-type splits; `severity.categorize_changes` + `compute_exit_code`. | No-op while no finding carries an override; otherwise demoted findings read compatible in **all** outputs and both exit-code paths (enforced by the cross-output validation matrix). |
+| `bundle.py` | `BundleFinding` gains the same `effective_verdict` / `modulation_reason` / `modulation_rule` fields; `to_change()` propagates them onto the lowered `Change`; `BundleDiffResult.bundle_verdict` and the `compare-release` JSON/SARIF + exit-code paths classify via `effective_category(...)`, not bare `compute_verdict()` on the raw kind (D3.2). | Additive fields, default `None` → no-op for existing bundle runs; required so an A3 reachability demotion actually reaches the product verdict rather than being dropped at `to_change()`. |
 | `checker_policy.py` | New `ChangeKind`s from A1.2 (metric drift) and A2.2 (anti-patterns), each placed in exactly one of `BREAKING/API_BREAK/COMPATIBLE/RISK` (import-time partition assertion enforces it). **A3 adds none** beyond at most one optional `PRODUCT_SURFACE_INCONSISTENT` — it reuses the existing `BUNDLE_INTRA_*` kinds (D3.2). | Enum grows modestly; follow the 4-step `/CLAUDE.md` procedure. |
 | `surface.py` | Extract reachability helper into `surface_graph.py`, import back. | Internal refactor, no behaviour change. |
 | New modules | `surface_graph.py`, `idioms.py`, `pattern_verdicts.py`, `cli_surface.py`. | Each *targeted* at < 600 lines; the AI-readiness file-size gate warns at 1500 / errors at 2000, so `idioms.py` (7 recognisers + convention inference) and `pattern_verdicts.py` (4 rules + ledger) should be split (e.g. one recogniser-registry module + a rules module) before they approach the soft limit, the same way `diff_platform.py` spun out `diff_platform_templates.py`. |
