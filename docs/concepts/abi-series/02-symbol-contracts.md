@@ -82,8 +82,9 @@ the loader cannot tell a removal from a rename, and why **neither is safe
 without a SONAME bump**.
 
 > !!! note "How abicheck sees it"
->     `symbol_removed` → 🔴 **BREAKING**, detected straight from the ELF/PE/Mach-O
->     symbol table — no debug info required.
+>     `func_removed` → 🔴 **BREAKING**, detected straight from the ELF/PE/Mach-O
+>     symbol table — no debug info required. (Removed exported *variables* are
+>     reported as `var_removed`; see §4.)
 >     See [case01](../../examples/case01_symbol_removal.md) (a `helper` that
 >     disappears) and [case12](../../examples/case12_function_removed.md)
 >     (`fast_add` removed while an unrelated `other_func` is added — proving the
@@ -134,7 +135,7 @@ types — so a single added `int64_t` field can push an entire argument onto the
 stack, shifting every later argument.
 
 > !!! note "How abicheck sees it"
->     `param_type_changed` / `func_return_changed` → 🔴 **BREAKING**, recovered
+>     `func_params_changed` / `func_return_changed` → 🔴 **BREAKING**, recovered
 >     from DWARF (or headers). The exported symbol name is unchanged, so a
 >     name-only `nm` diff sees nothing.
 >     [case02](../../examples/case02_param_type_change.md) (argument widening),
@@ -169,9 +170,10 @@ pointer-to-pointer as if it were a flat buffer and walk off into arbitrary
 memory.
 
 > !!! note "How abicheck sees it"
->     `param_type_changed` (pointer-depth delta) → 🔴 **BREAKING**. abicheck
->     walks the pointer chain *structurally* during diff, so it distinguishes
->     "both sides return a pointer" from "the indirection level changed."
+>     `param_pointer_level_changed` (and `return_pointer_level_changed` on the
+>     return path) → 🔴 **BREAKING**. abicheck walks the pointer chain
+>     *structurally* during diff, so it distinguishes "both sides return a
+>     pointer" from "the indirection level changed."
 >     [case33](../../examples/case33_pointer_level.md).
 
 ---
@@ -224,8 +226,8 @@ Two more flavors of the same root cause:
   PIE/GOT access the app's write faults with `SIGSEGV`.
 
 > !!! note "How abicheck sees it"
->     `global_var_type_changed` / `symbol_removed` → 🔴 **BREAKING**, detected
->     from the symbol table plus DWARF type info.
+>     `var_type_changed` / `var_removed` / `var_became_const` → 🔴 **BREAKING**,
+>     detected from the symbol table plus DWARF type info.
 >     [case11](../../examples/case11_global_var_type.md),
 >     [case58](../../examples/case58_var_removed.md),
 >     [case39](../../examples/case39_var_const.md).

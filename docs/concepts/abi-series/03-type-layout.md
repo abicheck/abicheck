@@ -203,7 +203,7 @@ bytes into what v2 treats as an 8-byte cell.
 
 > !!! note "How abicheck sees it"
 >     abicheck walks pointer and array types *structurally* during
->     `func_return_changed` and `param_type_changed` detection — a surface-level
+>     `func_return_changed` and `func_params_changed` detection — a surface-level
 >     "both sides return a pointer" comparison would miss these.
 
 ---
