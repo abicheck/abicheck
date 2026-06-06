@@ -361,7 +361,13 @@ _AAPCS64_VECTOR_RE = re.compile(r"(?:u?int|float|poly|bfloat)\d+x\d+", re.IGNORE
 
 
 def _is_short_vector(type_name: str) -> bool:
-    """True if *type_name* looks like an AArch64 short-vector (SIMD) type."""
+    """True if *type_name* looks like an AArch64 short-vector (SIMD) type.
+
+    This is a *name-based heuristic* (NEON intrinsic spelling + generic vector
+    names), not a DWARF/type-system query: it can over-match a scalar typedef
+    whose name happens to contain the pattern, or miss a toolchain-specific
+    vector spelling. Adequate for the AAPCS64 modeling primitive below.
+    """
     lowered = type_name.lower()
     return (
         bool(_AAPCS64_VECTOR_RE.search(lowered))
@@ -377,6 +383,13 @@ def classify_aapcs64_aggregate(byte_size: int, member_base_types: list[str]) -> 
     x86-64 path and is otherwise invisible to a size-only diff. Crossing one
     of these boundaries (e.g. growing past 16 bytes, or ceasing to be an HFA/HVA)
     is a real ARM64 ABI change for by-value parameters/returns.
+
+    NOTE: this is currently a *modeling primitive* — it is exercised by unit
+    tests (see ``tests/test_macos_arm64_abi.py``) but is not yet wired into the
+    diff pipeline, so it does not by itself emit findings. Wiring it into the
+    value-ABI trait path (so an aggregate crossing a register/indirect or
+    HFA/HVA boundary surfaces a ``value_abi_trait_changed``) is tracked under G1
+    and intentionally deferred to keep this change low-risk on the x86-64 path.
 
     Args:
         byte_size: ``sizeof`` of the aggregate.

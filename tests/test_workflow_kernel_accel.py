@@ -319,6 +319,8 @@ def test_resolve_input_rejects_truncated_btf_blob() -> None:
     import struct
     import tempfile
 
+    import pytest
+
     from abicheck.errors import ValidationError
     from abicheck.service import resolve_input
     # BTF magic (little-endian 0xEB9F) + version, then a truncated/garbage body.
@@ -326,26 +328,20 @@ def test_resolve_input_rejects_truncated_btf_blob() -> None:
     with tempfile.TemporaryDirectory() as td:
         blob = Path(td) / "truncated.btf"
         blob.write_bytes(bad)
-        try:
+        with pytest.raises(ValidationError, match="(?i)detect|format"):
             resolve_input(blob)
-        except (ValidationError, Exception) as exc:  # noqa: BLE001
-            assert "detect" in str(exc).lower() or "format" in str(exc).lower()
-        else:
-            raise AssertionError("expected detection error for a truncated BTF blob")
 
 
 def test_resolve_input_non_typeinfo_file_is_not_misdetected() -> None:
     """A plain non-binary file is not mistaken for a BTF/CTF blob."""
     import tempfile
 
+    import pytest
+
     from abicheck.errors import ValidationError
     from abicheck.service import resolve_input
     with tempfile.TemporaryDirectory() as td:
         f = Path(td) / "notes.txt"
         f.write_text("just some text, not a type-info blob\n")
-        try:
+        with pytest.raises(ValidationError, match="(?i)detect|format"):
             resolve_input(f)
-        except (ValidationError, Exception) as exc:  # noqa: BLE001
-            assert "detect" in str(exc).lower() or "format" in str(exc).lower()
-        else:
-            raise AssertionError("expected a detection error for a plain text file")

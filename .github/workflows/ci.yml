@@ -219,6 +219,10 @@ jobs:
     # Drives `abicheck compare` over binaries built by the *platform's own*
     # toolchain (Apple clang → .dylib, MinGW gcc → .dll) and asserts verdicts,
     # so the core workflow is validated end-to-end off the Linux baseline.
+    #
+    # Kept always-on (not path-gated): the jobs are short (~1 min) and a
+    # path-filtered "skipped" status complicates branch-protection required
+    # checks; the modest runner cost buys a reliable platform signal on every PR.
     name: Native PE/Mach-O compare workflows
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
