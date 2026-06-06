@@ -362,6 +362,12 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
             is_volatile=f.get("is_volatile", False),
             is_pure_virtual=f.get("is_pure_virtual", False),
             is_deleted=f.get("is_deleted", False),
+            # Provenance of is_deleted: True when set via DW_AT_deleted. Must be
+            # rehydrated (asdict writes it) so the public-map bypass in
+            # diff_symbols keeps DWARF-deleted unexported members out of the
+            # public surface after a dump-to-file → compare-files round-trip,
+            # rather than re-emitting FUNC_REMOVED against a stripped build.
+            deleted_from_dwarf=f.get("deleted_from_dwarf", False),
             is_inline=f.get("is_inline", False),
             is_extern_c=f.get("is_extern_c", False),
             access=AccessLevel(f.get("access", "public")),
