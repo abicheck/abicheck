@@ -614,6 +614,16 @@ class TestParamDefaultValue:
                     _snap(functions=[_func_with_default(None)], from_headers=False))
         assert not _has_kind(r, ChangeKind.PARAM_DEFAULT_VALUE_REMOVED)
 
+    def test_skipped_when_header_provenance_only_inferred(self):
+        # A legacy snapshot rehydrated with from_headers=True but
+        # from_headers_inferred=True is only a guess — its missing defaults must
+        # not read as removed against a confirmed-header baseline.
+        old = _hsnap(functions=[_func_with_default("1")])
+        new = _hsnap(functions=[_func_with_default(None)])
+        new.from_headers_inferred = True
+        r = compare(old, new)
+        assert not _has_kind(r, ChangeKind.PARAM_DEFAULT_VALUE_REMOVED)
+
 
 # ── CONSTANT_* (const / constexpr header constant values) ─────────────────────
 

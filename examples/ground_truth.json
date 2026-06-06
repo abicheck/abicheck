@@ -421,9 +421,7 @@
       "category": "api_break",
       "expected_compat": "NO_CHANGE",
       "platforms": [
-        "linux",
-        "macos",
-        "windows"
+        "linux"
       ],
       "abi_break": false,
       "api_break": true,
@@ -432,7 +430,8 @@
       "expected_kinds": [
         "param_default_value_changed",
         "param_default_value_removed"
-      ]
+      ],
+      "note": "castxml on macOS/Homebrew does not emit the `default=` attribute on <Argument> elements, so the param_default_value_* detection only fires with the Linux castxml build. Scoped to linux to avoid a platform-dependent castxml gap (constant/finality extraction is unaffected and stays cross-platform)."
     },
     "case33_pointer_level": {
       "expected": "BREAKING",
@@ -1832,7 +1831,7 @@
     "case121_kernel_btf_struct_field_added": {
       "expected": "BREAKING",
       "category": "breaking",
-      "description": "Linux kernel BTF: a vmlinux struct (task_state) grows from 2 to 3 fields between kernel releases, changing sizeof 8→12. An out-of-tree module / eBPF CO-RE program built against the old layout accesses wrong offsets. Committed BTF blobs (v1.btf/v2.btf) are parsed by parse_btf_from_bytes and diffed through the same layout detectors as DWARF.",
+      "description": "Linux kernel BTF: a vmlinux struct (task_state) grows from 2 to 3 fields between kernel releases, changing sizeof 8\u219212. An out-of-tree module / eBPF CO-RE program built against the old layout accesses wrong offsets. Committed BTF blobs (v1.btf/v2.btf) are parsed by parse_btf_from_bytes and diffed through the same layout detectors as DWARF.",
       "platforms": [
         "linux"
       ],
@@ -1857,7 +1856,7 @@
       "api_break": false,
       "bad_practice": false,
       "known_gap": "The library ships the function template header-only and instantiates nothing, so no symbol is emitted and the v1/v2 binaries are byte-identical. castxml also does not emit uninstantiated template declarations into its AST output, so the parameter-type change (int -> long) is invisible in BOTH object/DWARF mode and header/castxml mode. This is the fundamental boundary of comparing built artifacts: code that never becomes a symbol leaves no trace a binary or castxml comparison can observe. A pure source-AST (header-diff) tool can see it; the approaches are complementary.",
-      "description": "An uninstantiated function template's parameter types change (int -> long). A real source/API break for consumers of the template, but undetectable by abicheck in any mode — documented limitation demonstrating that some C++-only changes leave nothing in the objects to compare.",
+      "description": "An uninstantiated function template's parameter types change (int -> long). A real source/API break for consumers of the template, but undetectable by abicheck in any mode \u2014 documented limitation demonstrating that some C++-only changes leave nothing in the objects to compare.",
       "expected_kinds": [],
       "expected_absent_kinds": [
         "func_params_changed",
@@ -1870,9 +1869,7 @@
       "category": "api_break",
       "expected_compat": "NO_CHANGE",
       "platforms": [
-        "linux",
-        "macos",
-        "windows"
+        "linux"
       ],
       "abi_break": false,
       "api_break": true,
@@ -1880,7 +1877,8 @@
       "description": "A function's default argument is removed in v2. The mangled symbol is identical (defaults don't affect mangling), so binaries keep running, but callers relying on the default no longer compile. Detected only in header mode via the param_default_value_removed ChangeKind (castxml exposes the Argument `default` attribute); invisible in object/DWARF mode.",
       "expected_kinds": [
         "param_default_value_removed"
-      ]
+      ],
+      "note": "castxml on macOS/Homebrew does not emit the `default=` attribute on <Argument> elements, so the param_default_value_* detection only fires with the Linux castxml build. Scoped to linux to avoid a platform-dependent castxml gap (constant/finality extraction is unaffected and stays cross-platform)."
     },
     "case124_header_constant_value_changed": {
       "expected": "API_BREAK",

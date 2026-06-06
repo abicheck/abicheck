@@ -5,7 +5,7 @@
 |-------|-------|
 | **Verdict** | 🟠 **API_BREAK** |
 | **Category** | API Break |
-| **Platforms** | Linux, macOS, Windows |
+| **Platforms** | Linux |
 | **Flags** | API break |
 | **Detected `ChangeKind`s** | `param_default_value_removed` |
 | **Source files** | `examples/case123_default_argument_removed/` |
