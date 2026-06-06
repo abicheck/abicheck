@@ -332,6 +332,26 @@ def test_resolve_input_rejects_truncated_btf_blob() -> None:
             resolve_input(blob)
 
 
+def test_resolve_input_rejects_header_only_btf_blob() -> None:
+    """A valid BTF header with zero type records (type_len=0) must be rejected,
+    not accepted as an empty has_dwarf baseline (Codex P2)."""
+    import struct
+    import tempfile
+
+    import pytest
+
+    from abicheck.errors import ValidationError
+    from abicheck.service import resolve_input
+    # 24-byte BTF header with type_off/len=0 and a 1-byte string table — a valid
+    # header but no type records.
+    header = struct.pack("<HBBIIIII", BTF_MAGIC, BTF_VERSION, 0, 24, 0, 0, 0, 1)
+    with tempfile.TemporaryDirectory() as td:
+        blob = Path(td) / "header_only.btf"
+        blob.write_bytes(header + b"\x00")
+        with pytest.raises(ValidationError, match="(?i)detect|format"):
+            resolve_input(blob)
+
+
 def test_resolve_input_non_typeinfo_file_is_not_misdetected() -> None:
     """A plain non-binary file is not mistaken for a BTF/CTF blob."""
     import tempfile
