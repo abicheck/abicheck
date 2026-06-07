@@ -333,11 +333,26 @@ def compare(
     if surface_metrics:
         from .diff_surface_metrics import diff_surface_metrics
 
+        surface_metric_added = False
         for c in diff_surface_metrics(old, new):
             if suppression is not None and suppression.is_suppressed(c):
                 suppressed.append(c)
             else:
                 kept.append(c)
+                surface_metric_added = True
+        # These roll-ups are COMPATIBLE, never breaking, but they are still
+        # changes: appending them after `verdict` was computed above would leave
+        # a NO_CHANGE verdict alongside e.g. a `public_surface_grew` finding,
+        # making the CLI/JSON summary inconsistent with the finding set. Recompute
+        # so NO_CHANGE flips to COMPATIBLE when the only findings are these
+        # roll-ups (ADR-027 review).
+        if surface_metric_added:
+            all_unsuppressed = kept + verdict_redundant
+            verdict = (
+                policy_file.compute_verdict(all_unsuppressed)
+                if policy_file is not None
+                else compute_verdict(all_unsuppressed, policy=policy)
+            )
 
     # ADR-027 A4: pattern-aware verdict modulation. Runs after post-processing
     # and before the (recomputed) verdict so a demotion/raise reaches both the

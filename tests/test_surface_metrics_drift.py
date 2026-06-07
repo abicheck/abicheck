@@ -86,8 +86,24 @@ def test_metric_kinds_are_compatible() -> None:
     }
     emitted = {c.kind for c in result.changes}
     assert metric_kinds & emitted  # at least the grow + ratio findings present
-    # All metric findings classify compatible; verdict stays non-breaking.
-    assert result.verdict in (Verdict.COMPATIBLE, Verdict.NO_CHANGE)
+    # All metric findings classify compatible; verdict stays non-breaking. Since
+    # changes were emitted it must be COMPATIBLE, not NO_CHANGE (ADR-027 review:
+    # the verdict is recomputed after the surface-metrics roll-ups are appended).
+    assert result.verdict == Verdict.COMPATIBLE
+
+
+def test_surface_metrics_recompute_verdict_not_no_change() -> None:
+    # Regression: surface-metric roll-ups are appended after the verdict is first
+    # computed. Without a recompute the verdict would stay NO_CHANGE while
+    # `changes` carries a public_surface_grew finding — an inconsistent report.
+    old = _snap(["a"])
+    new = _snap(["a", "b", "c"])
+    result = checker.compare(
+        old, new, scope_to_public_surface=False, surface_metrics=True
+    )
+    assert any(c.kind == ChangeKind.PUBLIC_SURFACE_GREW for c in result.changes)
+    assert result.verdict == Verdict.COMPATIBLE
+    assert result.verdict != Verdict.NO_CHANGE
 
 
 def test_surface_metrics_off_by_default() -> None:
