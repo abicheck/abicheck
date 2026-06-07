@@ -68,6 +68,8 @@ _GO_RUNTIME_TYPE_PREFIXES: tuple[str, ...] = (
     "internal/",
     "go.shape.",
     "noalg.",
+)
+_GO_GENERIC_RUNTIME_TYPE_PREFIXES: tuple[str, ...] = (
     "hchan<",
     "sudog<",
     "map<",
@@ -83,6 +85,7 @@ _GO_EMBEDDED_MARKERS: tuple[str, ...] = (
     "sync.",
     "strconv.",
 )
+_GO_GENERIC_RUNTIME_MARKERS: tuple[str, ...] = ("/", ".")
 
 # Substrings that mark an anonymous / local type with no stable cross-version
 # ABI identity — lambdas and unnamed struct/union/enum (validation/REPORT.md
@@ -117,6 +120,10 @@ def is_non_abi_surface_type(name: str, *, exclude_stdlib_namespaces: bool = True
     if (
         name.startswith(_GO_RUNTIME_TYPE_PREFIXES)
         or go_candidate.startswith(_GO_RUNTIME_TYPE_PREFIXES)
+        or (
+            go_candidate.startswith(_GO_GENERIC_RUNTIME_TYPE_PREFIXES)
+            and any(marker in go_candidate for marker in _GO_GENERIC_RUNTIME_MARKERS)
+        )
         or "/" in name
         or _GO_PACKAGE_QUALIFIED_RE.match(go_candidate)
         or (

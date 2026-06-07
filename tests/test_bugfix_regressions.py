@@ -26,6 +26,7 @@ from abicheck.model import (
     TypeField,
     Variable,
     Visibility,
+    is_non_abi_surface_type,
 )
 from abicheck.report_summary import build_summary, compatibility_metrics
 
@@ -112,6 +113,16 @@ class TestGoRuntimeDwarfNoise:
 
         assert result.verdict is Verdict.NO_CHANGE
         assert not any(c.kind == ChangeKind.TYPE_SIZE_CHANGED for c in result.changes)
+
+    def test_global_cpp_map_template_type_is_kept(self):
+        old = _snap(types=[RecordType(name="map<int,int>", kind="struct", size_bits=64)])
+        new = _snap("2.0", types=[RecordType(name="map<int,int>", kind="struct", size_bits=128)])
+
+        result = compare(old, new)
+
+        assert is_non_abi_surface_type("map<int,int>") is False
+        assert result.verdict is Verdict.BREAKING
+        assert any(c.kind == ChangeKind.TYPE_SIZE_CHANGED for c in result.changes)
 
 
 # ── Bug 1: Enum symbols use member-qualified format ──────────────────────────
