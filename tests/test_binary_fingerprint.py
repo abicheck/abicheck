@@ -26,7 +26,7 @@ from abicheck.binary_fingerprint import (
     compute_section_summary,
     match_renamed_functions,
 )
-from abicheck.checker import ChangeKind, compare
+from abicheck.checker import ChangeKind, Verdict, compare
 from abicheck.diff_symbols import (
     _ctor_dtor_variant,
     _fingerprints_from_elf,
@@ -769,7 +769,7 @@ class TestFingerprintRenameDetector:
         assert set(_fingerprints_from_elf(snap)) == {"public_func"}
 
     def test_likely_renamed_detected_in_elf_only_mode(self) -> None:
-        """Renamed function with same size is detected as FUNC_LIKELY_RENAMED."""
+        """Renamed exported functions remain binary breaking after collapse."""
         old = _snap_elf_only("1.0", [_func_sym("libfoo_v1_create", 256)])
         new = _snap_elf_only("2.0", [_func_sym("libfoo_create", 256)])
         result = compare(old, new)
@@ -780,6 +780,9 @@ class TestFingerprintRenameDetector:
         assert len(rename_changes) == 1
         assert rename_changes[0].old_value == "libfoo_v1_create"
         assert rename_changes[0].new_value == "libfoo_create"
+        assert rename_changes[0].caused_count == 2
+        assert result.verdict == Verdict.BREAKING
+        assert result.breaking == rename_changes
 
     def test_not_triggered_without_elf_only_mode(self) -> None:
         """Detector is gated behind elf_only_mode — disabled for header-based analysis.
