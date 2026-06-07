@@ -150,8 +150,9 @@ class ChangeKind(str, Enum):
     # st_size changed on an internal-looking (reserved/underscore-prefixed)
     # exported data symbol — usually private state, so risk not hard break.
     SYMBOL_SIZE_CHANGED_INTERNAL = "symbol_size_changed_internal"
-    # st_size changed on a public const string-like object declared without a
-    # fixed bound in headers, e.g. extern char const version[].
+    # st_size changed on a public const string-like object, e.g.
+    # extern char const version[]. Old non-PIE executables can still carry copy
+    # relocations sized from the old DSO symbol, so this remains breaking.
     SYMBOL_SIZE_CHANGED_CONST_OBJECT = "symbol_size_changed_const_object"
     IFUNC_INTRODUCED = "ifunc_introduced"  # → STT_GNU_IFUNC
     IFUNC_REMOVED = "ifunc_removed"  # STT_GNU_IFUNC →

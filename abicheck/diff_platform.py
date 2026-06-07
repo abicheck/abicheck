@@ -53,14 +53,7 @@ _COPY_RELOC_TYPES = (SymbolType.OBJECT, SymbolType.COMMON)
 
 
 def _is_const_unbounded_string_object(snap: AbiSnapshot, sym_name: str) -> bool:
-    """Return True for header-visible const char string objects without a bound.
-
-    ELF ``st_size`` necessarily changes when a version/release string's contents
-    change. If the public header declares it as an incomplete const character
-    array, consumers have no fixed compile-time object extent to preserve; this
-    is still worth surfacing, but it is a risk finding rather than the same hard
-    copy-relocation break as mutable or fixed-size exported data.
-    """
+    """Return True for header-visible const char string objects without a bound."""
     var = snap.variable_map.get(sym_name)
     if var is None:
         var = next(
@@ -790,7 +783,9 @@ def _diff_elf_symbol_pair(
         # symbol's size change is usually private implementation state, so it is
         # downgraded to a risk finding rather than a hard break (ISSUE-45/54/55/56:
         # _XkeyTable, _pcre2_ucd_*, _UCD_/_UPT_accessors, _rl_*). A public-looking
-        # data symbol keeps the hard-breaking copy-relocation classification.
+        # data symbol keeps the hard-breaking copy-relocation classification,
+        # including const arrays declared without a fixed header bound: old
+        # non-PIE consumers can still carry copy relocations sized from st_size.
         if (
             _is_const_unbounded_string_object(old, sym_name)
             and _is_const_unbounded_string_object(new, sym_name)

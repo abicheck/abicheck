@@ -269,10 +269,10 @@ REGISTRY = ChangeKindRegistry([
        impact="ELF size changed on an internal-looking (reserved/underscore-prefixed) exported data symbol; "
               "usually private implementation state not part of the intended ABI. Flagged as risk: public copy-reloc "
               "consumers are unlikely, but verify the symbol is not relied upon. Override severity via --policy-file if needed."),
-    _E("symbol_size_changed_const_object", _R,
+    _E("symbol_size_changed_const_object", _B,
        impact="ELF size changed on a public const string-like object declared without a fixed bound in headers. "
-              "Address-based consumers remain load-compatible, but consumers that infer storage size from the binary "
-              "should verify the object is not part of a fixed-size data contract."),
+              "Old non-PIE consumers may have copy relocations sized from the old DSO symbol, so a later DSO can "
+              "truncate or otherwise mis-copy data at load time."),
     _E("ifunc_introduced", _C,
        impact="IFUNC resolver indirection added; transparent to well-behaved callers."),
     _E("ifunc_removed", _C,

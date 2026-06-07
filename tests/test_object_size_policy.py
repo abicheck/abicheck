@@ -69,6 +69,7 @@ def _const_string_var(name: str) -> Variable:
 def test_partition_kinds():
     assert ChangeKind.SYMBOL_SIZE_CHANGED in BREAKING_KINDS
     assert ChangeKind.SYMBOL_SIZE_CHANGED_INTERNAL in RISK_KINDS
+    assert ChangeKind.SYMBOL_SIZE_CHANGED_CONST_OBJECT in BREAKING_KINDS
 
 
 def test_internal_data_symbol_size_change_is_risk_by_default():
@@ -91,10 +92,10 @@ def test_public_data_symbol_size_change_is_still_breaking():
     assert r.verdict == Verdict.BREAKING
 
 
-def test_public_const_unbounded_string_size_change_is_risk():
+def test_public_const_unbounded_string_size_change_preserves_copy_reloc_break():
     # PROJ exposes pj_release as: extern char const pj_release[].
-    # The ELF object size tracks the string contents, but the header does not
-    # promise a fixed object bound to consumers.
+    # Even without a fixed header bound, old non-PIE consumers can still carry
+    # copy relocations sized from the old DSO symbol.
     r = compare(
         _snap_with_object("pj_release", 31, variable=_const_string_var("pj_release")),
         _snap_with_object("pj_release", 29, variable=_const_string_var("pj_release")),
@@ -102,7 +103,7 @@ def test_public_const_unbounded_string_size_change_is_risk():
     kinds = {c.kind for c in r.changes}
     assert ChangeKind.SYMBOL_SIZE_CHANGED_CONST_OBJECT in kinds
     assert ChangeKind.SYMBOL_SIZE_CHANGED not in kinds
-    assert r.verdict == Verdict.COMPATIBLE_WITH_RISK
+    assert r.verdict == Verdict.BREAKING
 
 
 def test_policy_override_can_escalate_internal_size_change():
