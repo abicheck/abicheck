@@ -15,7 +15,7 @@ import re
 import shutil
 import sys
 import tempfile
-from collections import defaultdict
+from collections import Counter, defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
@@ -24,7 +24,21 @@ ROOT = Path(__file__).resolve().parent.parent
 EXAMPLES_DIR = ROOT / "examples"
 DOCS_EXAMPLES_DIR = ROOT / "docs" / "examples"
 GROUND_TRUTH = EXAMPLES_DIR / "ground_truth.json"
+EXAMPLES_README = EXAMPLES_DIR / "README.md"
 REPO_ROOT_FROM_DOCS_EXAMPLES = "../.."
+
+# Short category labels used in the examples/README.md catalog index. These are
+# the exact strings the `examples-readme-sync` AI-readiness check asserts each
+# row against — keep the two in sync.
+README_CATEGORY_LABEL = {
+    "breaking": "Breaking",
+    "api_break": "API Break",
+    "risk": "Risk",
+    "addition": "Addition",
+    "quality": "Quality",
+    "no_change": "No Change",
+    "bundle": "Bundle",
+}
 
 VERDICT_META = {
     "BREAKING": {
@@ -351,6 +365,153 @@ def _render_group_index(
     return "".join(lines)
 
 
+# ---------------------------------------------------------------------------
+# examples/README.md catalog (the GitHub-facing index, not the docs site).
+#
+# Three regions are generated between sentinel comments so the headline count,
+# verdict distribution, and 126-row case index can't drift from ground_truth.
+# Bundle cases (skipped by the docs-site generator) ARE included here, since the
+# README indexes the whole catalog.
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class ReadmeEntry:
+    num: str  # case number as it appears in the dir name, e.g. "01", "26b", "110"
+    name: str
+    title: str
+    category: str
+    verdict: str  # ground_truth "expected", or "BUNDLE" for multi-library cases
+    bad_practice: bool
+
+
+def _case_title(name: str) -> str:
+    """Short H1 title of a per-case README (caseNN prefix stripped)."""
+    text = (EXAMPLES_DIR / name / "README.md").read_text(encoding="utf-8")
+    m = re.match(r"\s*#\s+(.+?)\n", text)
+    if not m:
+        raise ValueError(f"examples/{name}/README.md: first line must be an H1")
+    return _short_title(m.group(1).strip())
+
+
+def _load_readme_entries() -> list[ReadmeEntry]:
+    data = json.loads(GROUND_TRUTH.read_text(encoding="utf-8"))
+    entries: list[ReadmeEntry] = []
+    for name, meta in data["verdicts"].items():
+        m = re.match(r"case(\d+[a-z]?)", name)
+        if not m:
+            raise ValueError(f"unexpected case name {name!r}")
+        category = meta.get("category")
+        verdict = "BUNDLE" if category == "bundle" else meta["expected"]
+        entries.append(
+            ReadmeEntry(
+                num=m.group(1),
+                name=name,
+                title=_case_title(name),
+                category=category,
+                verdict=verdict,
+                bad_practice=bool(meta.get("bad_practice", False)),
+            )
+        )
+    entries.sort(key=lambda e: (int(re.match(r"(\d+)", e.num).group(1)), e.name))
+    return entries
+
+
+def _render_readme_headline(entries: list[ReadmeEntry]) -> str:
+    n_total = len(entries)
+    n_bundle = sum(1 for e in entries if e.category == "bundle")
+    n_single = n_total - n_bundle
+    return (
+        f"This directory contains **{n_total} cases** "
+        f"({n_single} single-library + {n_bundle} multi-library bundle cases, "
+        "the latter tracked under "
+        "[ADR-023](../docs/development/adr/023-bundle-aware-multi-binary-analysis.md)) "
+        "demonstrating real-world ABI/API break scenarios. Each case is a "
+        "minimal, compilable C/C++ example with:"
+    )
+
+
+def _render_readme_distribution(entries: list[ReadmeEntry]) -> str:
+    single = [e for e in entries if e.category != "bundle"]
+    n_bundle = len(entries) - len(single)
+    by_verdict = Counter(e.verdict for e in single)
+    by_category = Counter(e.category for e in single)
+    rows = [
+        ("BREAKING", by_verdict.get("BREAKING", 0), "`BREAKING_KINDS`", "🔴"),
+        ("API_BREAK", by_verdict.get("API_BREAK", 0), "`API_BREAK_KINDS`", "🟠"),
+        (
+            "COMPATIBLE_WITH_RISK",
+            by_verdict.get("COMPATIBLE_WITH_RISK", 0),
+            "`RISK_KINDS`",
+            "🟡",
+        ),
+        (
+            "COMPATIBLE (addition)",
+            by_category.get("addition", 0),
+            "`ADDITION_KINDS`",
+            "🟢",
+        ),
+        (
+            "COMPATIBLE (quality)",
+            by_category.get("quality", 0),
+            "`QUALITY_KINDS`",
+            "🟡",
+        ),
+        ("NO_CHANGE", by_verdict.get("NO_CHANGE", 0), "—", "✅"),
+        (
+            "Bundle (multi-binary)",
+            n_bundle,
+            "see [ADR-023](../docs/development/adr/023-bundle-aware-multi-binary-analysis.md)",
+            "🔵",
+        ),
+    ]
+    lines = [
+        "| Verdict | Count | `checker_policy.py` set | Icon |",
+        "|---------|-------|-------------------------|------|",
+    ]
+    lines += [
+        f"| {label} | {count} | {kset} | {icon} |" for label, count, kset, icon in rows
+    ]
+    return "\n".join(lines)
+
+
+def _render_readme_index(entries: list[ReadmeEntry]) -> str:
+    lines = [
+        "| # | Case | Category | abicheck verdict |",
+        "|---|------|----------|-----------------|",
+    ]
+    for e in entries:
+        icon = VERDICT_META[e.verdict]["icon"] if e.verdict in VERDICT_META else "🔵"
+        cell = f"{icon} {e.verdict}"
+        if e.bad_practice:
+            cell += " (bad practice)"
+        lines.append(
+            f"| [{e.num}]({e.name}/README.md) | {e.title} "
+            f"| {README_CATEGORY_LABEL[e.category]} | {cell} |"
+        )
+    return "\n".join(lines)
+
+
+def _splice_generated(text: str, marker: str, inner: str) -> str:
+    """Replace the text between BEGIN/END GENERATED sentinels for ``marker``."""
+    begin = re.search(rf"<!-- BEGIN GENERATED: {re.escape(marker)}[^\n]*-->\n", text)
+    end = re.search(rf"\n<!-- END GENERATED: {re.escape(marker)} -->", text)
+    if not begin or not end or begin.end() > end.start():
+        raise ValueError(
+            f"examples/README.md: missing/!ordered sentinels for {marker!r}"
+        )
+    return text[: begin.end()] + inner + text[end.start() :]
+
+
+def _render_examples_readme(text: str, entries: list[ReadmeEntry]) -> str:
+    text = _splice_generated(text, "catalog-headline", _render_readme_headline(entries))
+    text = _splice_generated(
+        text, "verdict-distribution", _render_readme_distribution(entries)
+    )
+    text = _splice_generated(text, "case-index", _render_readme_index(entries))
+    return text
+
+
 def _load_cases() -> list[Case]:
     data = json.loads(GROUND_TRUTH.read_text(encoding="utf-8"))
     cases = []
@@ -466,8 +627,12 @@ def main(argv: Iterable[str] | None = None) -> int:
     args = parser.parse_args(list(argv) if argv is not None else None)
 
     cases = _load_cases()
+    readme_entries = _load_readme_entries()
+    readme_current = EXAMPLES_README.read_text(encoding="utf-8")
+    readme_rendered = _render_examples_readme(readme_current, readme_entries)
 
     if args.check:
+        ok = True
         with tempfile.TemporaryDirectory() as tmp:
             tmp_out = Path(tmp) / "examples"
             _write_tree(tmp_out, cases)
@@ -480,13 +645,28 @@ def main(argv: Iterable[str] | None = None) -> int:
                 )
                 if DOCS_EXAMPLES_DIR.exists():
                     _print_diff(tmp_out, DOCS_EXAMPLES_DIR)
-                return 1
-        print(f"docs/examples/ is up to date ({len(cases)} cases).")
+                ok = False
+        if _normalize(readme_rendered.encode("utf-8")) != _normalize(
+            readme_current.encode("utf-8")
+        ):
+            print(
+                "examples/README.md generated regions are out of date. "
+                "Run: python scripts/gen_examples_docs.py",
+                file=sys.stderr,
+            )
+            ok = False
+        if not ok:
+            return 1
+        print(
+            f"docs/examples/ and examples/README.md are up to date ({len(cases)} cases)."
+        )
         return 0
 
     _write_tree(DOCS_EXAMPLES_DIR, cases)
+    _write(EXAMPLES_README, readme_rendered)
     print(
-        f"Generated {len(cases)} case pages in {DOCS_EXAMPLES_DIR.relative_to(ROOT)}/."
+        f"Generated {len(cases)} case pages in {DOCS_EXAMPLES_DIR.relative_to(ROOT)}/ "
+        f"and refreshed examples/README.md ({len(readme_entries)} catalog rows)."
     )
     return 0
 
