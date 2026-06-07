@@ -102,6 +102,10 @@ def test_private_double_underscore_symbols_are_filtered(name: str) -> None:
     "_ZTVN10__cxxabiv121__vmi_class_type_infoE",
     "_ZTISt9exception",
     "_ZTSSt9bad_alloc",
+    "_ZTVSt23_Sp_counted_ptr_inplaceINSt13__future_base15_Deferred_stateE",
+    "_ZTVNSt13__future_base17_Async_state_implE",
+    "_ZTTSt23_Sp_counted_ptr_inplaceINSt13__future_base15_Deferred_stateE",
+    "_ZTTNSt13__future_base17_Async_state_implE",
     # std:: global symbols
     "_ZSt4cout",
     "_ZSt4cerr",

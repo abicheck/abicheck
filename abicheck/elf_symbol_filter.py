@@ -79,14 +79,23 @@ _STDLIB_PREFIXES = (
 _STDLIB_RTTI_PREFIXES = (
     "_ZTISt",             # typeinfo for std::* / std::exception, etc.
     "_ZTSSt",             # typeinfo name for std::* / std::exception, etc.
+    "_ZTVSt",             # vtable for std::* / std::exception, etc.
+    "_ZTTSt",             # VTT for std::* / std::exception, etc.
     "_ZTINSt",            # typeinfo for nested std::* names
     "_ZTSNSt",            # typeinfo name for nested std::* names
+    "_ZTVNSt",            # vtable for nested std::* names
+    "_ZTTNSt",            # VTT for nested std::* names
     "_ZTIN9__gnu_cxx",
     "_ZTSN9__gnu_cxx",
+    "_ZTVN9__gnu_cxx",
+    "_ZTTN9__gnu_cxx",
     "_ZTIN10__cxxabiv",
     "_ZTSN10__cxxabiv",
+    "_ZTTN10__cxxabiv",
     "_ZTIN7__cxx11",
     "_ZTSN7__cxx11",
+    "_ZTVN7__cxx11",
+    "_ZTTN7__cxx11",
 )
 
 def is_abi_relevant_elf_symbol(name: str) -> bool:
