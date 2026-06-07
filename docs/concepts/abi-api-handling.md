@@ -18,7 +18,24 @@ when it sees one.
 > [ABI Cheat Sheet](abi-cheat-sheet.md). For per-case runnable reproductions with
 > code and a real failure demo, see the
 > [Examples & Case Encyclopedia](../examples/index.md). For verdict semantics and
-> CI exit codes, see [Verdicts](verdicts.md).
+> CI exit codes, see [Verdicts](verdicts.md). For unfamiliar terms (SONAME,
+> vtable, IFUNC, install name, TLS model…), see the
+> [Glossary](abi-series/glossary.md).
+
+!!! note "Scope & assumptions"
+    - **Examples are mostly ELF/Linux and Itanium-C++-ABI flavored** unless a
+      section says otherwise. PE/COFF (Windows) and Mach-O (macOS) have their own
+      loader, export, and versioning rules — see the per-platform parallels in
+      [Part 5](abi-series/05-linker-elf.md#pecoff-and-mach-o-parallels) and the
+      [Platform Support reference](../reference/platforms.md). For example, the
+      "lookup by name" model in Part 2 is exact for ELF and for most C/C++
+      exports, but **Windows DLLs can also export/import by ordinal**, where the
+      contract is a *number*, not a name.
+    - **Detectability depends on the inputs you give abicheck** — symbols only,
+      DWARF/PDB debug info, or public headers. Some changes (e.g. `#define`
+      macros, inline/template *bodies*, uninstantiated templates) are invisible
+      to *any* artifact comparison. See the per-change matrix in
+      [Limitations](limitations.md#source-only-changes-invisible-to-binaryobject-analysis).
 
 ---
 
@@ -59,25 +76,29 @@ typical classification; the exact verdict per fixture lives in
 `examples/ground_truth.json` and the [Examples Encyclopedia](../examples/index.md).
 The **Part** column points to where the mechanism is explained.
 
+Case numbers link straight to the generated example page; the **Typical verdict**
+column says "mixed" where the verdict is case-dependent (the per-fixture verdict
+is the source of truth).
+
 | Family | Representative cases | Typical verdict | Explained in |
 |--------|---------------------|-----------------|--------------|
-| Symbol/function removal & rename | 01, 12, 58, 66 | 🔴 BREAKING | [Part 2](abi-series/02-symbol-contracts.md) |
-| Signature changes (params, return, pointer level) | 02, 10, 33, 46 | 🔴 BREAKING | [Part 2](abi-series/02-symbol-contracts.md) |
-| Global variable type/qualifier/removal | 11, 39, 58 | 🔴 BREAKING | [Part 2](abi-series/02-symbol-contracts.md) |
-| Struct/class layout, alignment & packing | 07, 14, 40, 42, 43, 56, 117 | 🔴 BREAKING | [Part 3](abi-series/03-type-layout.md) |
-| Enum value/underlying changes | 08, 19, 20, 57 | 🔴 BREAKING | [Part 3](abi-series/03-type-layout.md) |
-| Union layout | 24, 26 (grows) · 26b (no growth) | 🔴 / 🟢 | [Part 3](abi-series/03-type-layout.md) |
-| C++ vtable & virtual methods | 09, 23, 38, 68, 72 | 🔴 BREAKING | [Part 4](abi-series/04-cpp-abi.md) |
-| C++ qualifiers, mangling & ABI tags | 21, 22, 30, 71, 86, 101, 113 | 🔴 / 🟠 | [Part 4](abi-series/04-cpp-abi.md) |
-| Trivial → non-trivial (calling convention) | 64, 69 | 🔴 BREAKING | [Part 4](abi-series/04-cpp-abi.md) |
-| Templates, inline & ODR | 16, 17, 47, 59, 79, 85, 87 | 🔴 / 🟢 | [Part 4](abi-series/04-cpp-abi.md) |
-| Modern C/C++ contract shifts (char8_t, _BitInt, _Atomic, concepts) | 105, 114, 115, 116 | 🔴 / 🟢 | [Part 4](abi-series/04-cpp-abi.md) |
-| ELF/linker metadata (SONAME, visibility, versioning, RPATH, TLS) | 05, 06, 13, 49, 51, 52, 65, 67 | 🔴 / 🟢 | [Part 5](abi-series/05-linker-elf.md) |
-| Transitive/dependency & `detail::` leaks | 18, 48, 74–77, 80, 97, 104, 112 | 🔴 BREAKING | [Part 6](abi-series/06-transitive-breaks.md) |
-| Source-only / API-level (rename, access, explicit) | 31, 34, 96, 106 | 🟠 API_BREAK | [Parts 4](abi-series/04-cpp-abi.md) & [6](abi-series/06-transitive-breaks.md) |
-| Deployment risk (noexcept, ISA dispatch, version-require) | 15, 83 | 🟡 COMPATIBLE_WITH_RISK | [Part 4](abi-series/04-cpp-abi.md) |
-| Compatible additions & quality signals | 03, 25, 26b, 27, 29, 61, 62, 99 | 🟢 COMPATIBLE | [Part 7](abi-series/07-designing-for-stability.md) |
-| Scoped/non-public internal changes | 118, 119, 120 | ✅ NO_CHANGE | [Part 6](abi-series/06-transitive-breaks.md) |
+| Symbol/function removal & rename | [01](../examples/case01_symbol_removal.md), [12](../examples/case12_function_removed.md), [58](../examples/case58_var_removed.md), [66](../examples/case66_language_linkage_changed.md) | 🔴 BREAKING | [Part 2](abi-series/02-symbol-contracts.md) |
+| Signature changes (params, return, pointer level) | [02](../examples/case02_param_type_change.md), [10](../examples/case10_return_type.md), [33](../examples/case33_pointer_level.md), [46](../examples/case46_pointer_chain_type_change.md) | 🔴 BREAKING | [Part 2](abi-series/02-symbol-contracts.md) |
+| Global variable type/qualifier/removal | [11](../examples/case11_global_var_type.md), [39](../examples/case39_var_const.md), [58](../examples/case58_var_removed.md) | 🔴 BREAKING | [Part 2](abi-series/02-symbol-contracts.md) |
+| Struct/class layout, alignment & packing | [07](../examples/case07_struct_layout.md), [14](../examples/case14_cpp_class_size.md), [40](../examples/case40_field_layout.md), [42](../examples/case42_type_alignment_changed.md), [43](../examples/case43_base_class_member_added.md), [56](../examples/case56_struct_packing_changed.md), [117](../examples/case117_no_unique_address.md) | 🔴 BREAKING | [Part 3](abi-series/03-type-layout.md) |
+| Enum value/underlying changes | [08](../examples/case08_enum_value_change.md), [19](../examples/case19_enum_member_removed.md), [20](../examples/case20_enum_member_value_changed.md), [57](../examples/case57_enum_underlying_size_changed.md) | 🔴 BREAKING | [Part 3](abi-series/03-type-layout.md) |
+| Union layout | [24](../examples/case24_union_field_removed.md), [26](../examples/case26_union_field_added.md) (grows) · [26b](../examples/case26b_union_field_added_compatible.md) (no growth) | mixed — 🔴 if size grows, else 🟢 | [Part 3](abi-series/03-type-layout.md) |
+| C++ vtable & virtual methods | [09](../examples/case09_cpp_vtable.md), [23](../examples/case23_pure_virtual_added.md), [38](../examples/case38_virtual_methods.md), [68](../examples/case68_virtual_method_added.md), [72](../examples/case72_covariant_return_changed.md) | 🔴 BREAKING | [Part 4](abi-series/04-cpp-abi.md) |
+| C++ qualifiers, mangling & ABI tags | [21](../examples/case21_method_became_static.md), [22](../examples/case22_method_const_changed.md), [30](../examples/case30_field_qualifiers.md), [71](../examples/case71_inline_namespace_moved.md), [86](../examples/case86_tag_struct_renamed.md), [101](../examples/case101_inline_namespace_version_bumped.md), [113](../examples/case113_abi_tag_changed.md) | mixed — 🔴 BREAKING or 🟠 API_BREAK | [Part 4](abi-series/04-cpp-abi.md) |
+| Trivial → non-trivial (calling convention) | [64](../examples/case64_calling_convention_changed.md), [69](../examples/case69_trivial_to_nontrivial.md) | 🔴 BREAKING | [Part 4](abi-series/04-cpp-abi.md) |
+| Templates, inline & ODR | [16](../examples/case16_inline_to_non_inline.md), [17](../examples/case17_template_abi.md), [47](../examples/case47_inline_to_outlined.md), [59](../examples/case59_func_became_inline.md), [79](../examples/case79_missing_template_instantiation.md), [85](../examples/case85_internal_template_signature_changed.md), [87](../examples/case87_default_template_arg_changed.md) | mixed — 🔴 BREAKING or 🟢 COMPATIBLE | [Part 4](abi-series/04-cpp-abi.md) |
+| Modern C/C++ contract shifts (char8_t, _BitInt, _Atomic, concepts) | [105](../examples/case105_concept_tightening.md), [114](../examples/case114_char8t_migration.md), [115](../examples/case115_bit_int_width_changed.md), [116](../examples/case116_atomic_qualifier_changed.md) | mixed — 🔴 BREAKING or 🟢 COMPATIBLE | [Part 4 §Modern](abi-series/04-cpp-abi.md#modern-cc-and-toolchain-abi-hazards) |
+| ELF/linker metadata (SONAME, visibility, versioning, RPATH, TLS) | [05](../examples/case05_soname.md), [06](../examples/case06_visibility.md), [13](../examples/case13_symbol_versioning.md), [49](../examples/case49_executable_stack.md), [51](../examples/case51_protected_visibility.md), [52](../examples/case52_rpath_leak.md), [65](../examples/case65_symbol_version_removed.md), [67](../examples/case67_tls_var_size_changed.md) | mixed — 🔴 BREAKING or 🟢 COMPATIBLE | [Part 5](abi-series/05-linker-elf.md) |
+| Transitive/dependency & `detail::` leaks | [18](../examples/case18_dependency_leak.md), [48](../examples/case48_leaf_struct_through_pointer.md), [74](../examples/case74_detail_base_class_changed.md), [75](../examples/case75_detail_embedded_by_value.md), [76](../examples/case76_detail_pimpl_vtable_changed.md), [77](../examples/case77_detail_templated_base_changed.md), [80](../examples/case80_pimpl_shared_to_unique.md), [97](../examples/case97_api_depends_on_consumer_env.md), [104](../examples/case104_glibcxx_dual_abi_flip.md), [112](../examples/case112_lp64_ilp64.md) | 🔴 BREAKING | [Part 6](abi-series/06-transitive-breaks.md) |
+| Source-only / API-level (rename, access, explicit, default args, hidden friends) | [31](../examples/case31_enum_rename.md), [34](../examples/case34_access_level.md), [96](../examples/case96_hidden_friend_removed.md), [106](../examples/case106_ctor_became_explicit.md), [123](../examples/case123_default_argument_removed.md), [124](../examples/case124_header_constant_value_changed.md) | 🟠 API_BREAK | [Part 6 §Source-only API breaks](abi-series/06-transitive-breaks.md#source-only-api-breaks-binary-identical) |
+| Deployment risk (noexcept, ISA dispatch, version-require) | [15](../examples/case15_noexcept_change.md), [83](../examples/case83_cpu_dispatch_isa_dropped.md) | 🟡 COMPATIBLE_WITH_RISK | [Part 4](abi-series/04-cpp-abi.md) |
+| Compatible additions & quality signals | [03](../examples/case03_compat_addition.md), [25](../examples/case25_enum_member_added.md), [26b](../examples/case26b_union_field_added_compatible.md), [27](../examples/case27_symbol_binding_weakened.md), [29](../examples/case29_ifunc_transition.md), [61](../examples/case61_var_added.md), [62](../examples/case62_type_field_added_compatible.md), [99](../examples/case99_experimental_graduated.md) | 🟢 COMPATIBLE | [Part 7](abi-series/07-designing-for-stability.md) |
+| Scoped/non-public internal changes | [118](../examples/case118_internal_struct_field_added_scoped.md), [119](../examples/case119_internal_struct_field_removed_scoped.md), [120](../examples/case120_internal_struct_reordered_scoped.md) | ✅ NO_CHANGE | [Part 6](abi-series/06-transitive-breaks.md) |
 
 ---
 

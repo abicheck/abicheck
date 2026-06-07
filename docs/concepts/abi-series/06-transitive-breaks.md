@@ -175,6 +175,44 @@ opaque-handle C API (`FILE*`, `sqlite3*`, `git_repository*`).
 
 ---
 
+## Source-only API breaks (binary-identical)
+
+The breaks above are *transitive* — invisible because they hide behind a
+pointer or a dependency. A related family is invisible for the opposite reason:
+the change is **purely at the source level**, so the two `.so` files are
+genuinely byte-identical and *every existing binary keeps running*, but code
+that **recompiles** against the new headers fails to build or silently changes
+meaning. abicheck classifies these as 🟠 **API_BREAK** — they should fail CI if
+you promise source compatibility, but they do **not** warrant a SONAME bump.
+
+| Source-only change | Why existing binaries survive | Why a recompile breaks | Case |
+|--------------------|-------------------------------|------------------------|------|
+| **Default argument removed/changed** | The default was baked into the *caller's* old object code, not the library. | A new call site that omitted the argument no longer compiles (or computes a different value). | [case123](../../examples/case123_default_argument_removed.md), [case32](../../examples/case32_param_defaults.md) |
+| **Access narrowed** (`public`→`protected`/`private`) | Access control is a compile-time concept; the symbol and layout are unchanged. | A consumer that called the now-private method no longer compiles. | [case34](../../examples/case34_access_level.md) |
+| **Constructor became `explicit`** | No symbol or layout change. | Implicit conversions/brace-init at call sites stop compiling. | [case106](../../examples/case106_ctor_became_explicit.md) |
+| **Overload removed from the set** | Remaining overloads keep their own mangled symbols. | A call that resolved to the removed overload now picks a different one or fails resolution. | [case82](../../examples/case82_sycl_overload_set_removed.md) |
+| **Hidden friend removed** | Hidden friends aren't ordinary exported symbols. | ADL no longer finds the operator; the expression stops compiling. | [case96](../../examples/case96_hidden_friend_removed.md) |
+| **Enum / field / member rename** | Same value, same offset, same size. | Source that named the old identifier no longer compiles. | [case31](../../examples/case31_enum_rename.md), [case35](../../examples/case35_field_rename.md) |
+| **Header `const`/`constexpr` constant changed** | The constant had internal linkage — it was inlined into old callers, no symbol. | A recompile picks up the new value, changing behavior. | [case124](../../examples/case124_header_constant_value_changed.md) |
+| **Class became `final`** | No layout/vtable change. | A consumer that derived from it no longer compiles. | [case125](../../examples/case125_class_became_final.md) |
+| **Source-standard floor raised** (e.g. C++17→20) | Already-compiled binaries are unaffected. | A consumer stuck on the old standard can no longer build against the headers. | [case98](../../examples/case98_cxx_standard_floor_raised.md) |
+
+!!! note "Detectability: these need *headers*, not just the binary"
+    Most of this family leaves **no trace in the compiled object** — default
+    arguments, access levels, `explicit`, and `const`/`constexpr` values have no
+    symbol at all. Comparing stripped or symbol-only `.so` files reports
+    `NO_CHANGE` for every row above. Supply the **public headers** (castxml /
+    `header_aware` tier) to detect them; `#define` macros and uninstantiated
+    template signatures are the residual blind spot even then (see the per-change
+    matrix in [Limitations](../limitations.md#source-only-changes-invisible-to-binaryobject-analysis)).
+
+    **CI guidance:** decide up front whether you promise *source* compatibility.
+    If you do, gate on 🟠 API_BREAK and treat it as a **semver-major** signal —
+    but keep the SONAME unless a 🔴 BREAKING also fired, since the binary ABI is
+    intact.
+
+---
+
 ## How to defend against transitive breaks
 
 !!! tip "Design patterns for Part 6"

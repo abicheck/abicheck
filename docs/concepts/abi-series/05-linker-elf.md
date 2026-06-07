@@ -20,7 +20,9 @@
   touching a single source-level declaration.
 
 Prerequisites: [Part 1 — Foundations](01-foundations.md) (the dynamic loader).
-This page is Linux/ELF-centric; PE/COFF and Mach-O have analogous mechanisms.
+This page is Linux/ELF-centric; the
+[PE/COFF and Mach-O parallels](#pecoff-and-mach-o-parallels) section near the end
+maps every mechanism to its Windows and macOS peer.
 
 ---
 
@@ -175,6 +177,37 @@ Libraries intended to be `dlopen`ed must avoid `initial-exec`. And any exported
 `__thread` struct whose layout shifts corrupts consumers per-thread
 ([case67](../../examples/case67_tls_var_size_changed.md)) — freeze the size,
 layout, and access model of TLS exports as first-class ABI.
+
+---
+
+## PE/COFF and Mach-O parallels
+
+Everything above is the **ELF/SysV** model. Windows and macOS solve the same
+problems — identity, export surface, versioning, lazy resolution, thread-local
+storage — with different mechanisms. abicheck parses all three (PE/COFF via the
+export table + optional PDB; Mach-O via load commands + optional DWARF/dSYM);
+the table below maps each ELF concept to its peer. The full support matrix is in
+the [Platform Support reference](../../reference/platforms.md).
+
+| ELF concept | Windows PE/COFF | macOS Mach-O |
+|-------------|-----------------|--------------|
+| **Symbol lookup** by name | By **name *or ordinal*** — an integer index into the export table. Ordinal-bound callers ignore the name; reordering exports breaks them. | **Two-level namespace**: each import records the *source library*, so the same bare name from a different library is a different symbol. |
+| **SONAME** (library identity) | DLL file name + the **import library** (`.lib`) used at link time. | **Install name** (`LC_ID_DYLIB`) baked into both the dylib and its clients; `@rpath`/`@loader_path`/`@executable_path` make it relocatable. |
+| **Symbol versioning** (`GLIBC_2.x` nodes) | No symbol versions; new ABI ⇒ new DLL name or **side-by-side assemblies**. | No GNU-style version nodes; uses **compatibility version** + **current version** numbers on the dylib. |
+| **Lazy binding** (PLT/GOT) | **Delay-load** DLLs (`/DELAYLOAD`) resolve on first use. | Lazy/`__stubs` binding; **weak imports** allow a missing symbol to resolve to null at load instead of failing. |
+| **Visibility** (`-fvisibility=hidden`) | Explicit **`__declspec(dllexport)`** / `.def` file — nothing is exported unless named. | `-fvisibility=hidden` + `__attribute__((visibility))`, same as ELF. |
+| **Mangling / decoration** | MSVC name **decoration** differs from Itanium; `extern "C"` still adds leading underscores / `@N` stdcall suffixes. | Itanium C++ ABI (same as Linux Clang). |
+| **Packaging unit** | The DLL, plus its **import library** and PDB for debug info. | The dylib, optionally inside a **framework** bundle, optionally a **universal (fat) binary** carrying multiple arch slices. |
+| **CRT / allocator boundary** | Each DLL may link its **own CRT**; `malloc` in one module must not be `free`d in another — a hard cross-module rule with no ELF analog. | Single system libc; less acute, but cross-dylib `delete` of a type with an inline destructor has the same Itanium pitfalls as Linux. |
+
+!!! tip "Practical consequences for abicheck users"
+    - On **Windows**, prefer exporting **by name** and keep a stable `.def` so a
+      rebuild can't shuffle ordinals; supply the **PDB** for layout/calling-convention
+      checks (symbol-only mode sees names but not offsets).
+    - On **macOS**, treat the **install name** and **compatibility version** as
+      part of the contract, design for **weak imports** when adding symbols a
+      client may run against an older dylib, and remember a **universal binary**
+      can differ slice-by-slice — compare the matching architecture.
 
 ---
 

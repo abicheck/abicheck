@@ -33,12 +33,20 @@ through a grammar that encodes qualifiers, namespaces, template arguments, and
 parameter types. Every struct with a user-defined destructor changes how it is
 *passed* between functions.
 
-The **Itanium C++ ABI** — used by GCC and Clang on Linux, macOS, the BSDs, and
-most embedded targets — is rigid *by design*: it guarantees cross-compiler
+The **Itanium C++ ABI** — followed by GCC and Clang on Linux, macOS, the BSDs,
+and most embedded targets — is rigid *by design*: it guarantees cross-compiler
 interoperability at the cost of making almost any visible change to a class a
 potential binary break. MSVC on Windows uses a different but equally rigid ABI
 with the same categories of pitfall. The seven sections below tour the
 mechanisms most likely to bite.
+
+!!! note "\"Itanium-style\", not gospel"
+    The Itanium C++ ABI specification states that it is *not* the authoritative
+    definition for any particular platform — each vendor pins its own details on
+    top of it (and the platform's data model). The examples below use the
+    **Itanium-style** model unless noted; treat the exact mangling, slot
+    ordering, and passing rules as illustrative of the *mechanism*, and consult
+    your toolchain's ABI document for the byte-exact contract.
 
 ---
 
@@ -294,6 +302,40 @@ though the method's source signature is unchanged.
     Reported as `base_class_position_changed` / `type_base_changed` when DWARF
     or headers are available — ELF symbol tables alone cannot see them, which
     is why C++ ABI checking *requires* debug info or headers.
+
+---
+
+## Modern C/C++ and toolchain ABI hazards
+
+The break families above predate C++11. Newer language features and toolchain
+*flags* introduce a second class of hazard: the **declaration looks unchanged in
+the header, but the bytes the compiler emits move** because a type's size,
+mangling, or passing rule shifted under it. These are the cases reviewers miss
+most often, because nothing in the diff "looks like" an ABI change.
+
+| Hazard | What silently changes | abicheck case |
+|--------|----------------------|---------------|
+| **`_GLIBCXX_USE_CXX11_ABI` flip** | libstdc++ ships *two* `std::string`/`std::list` ABIs in parallel behind the `__cxx11` inline namespace; flipping the macro re-mangles every symbol that touches those types. | [case104](../../examples/case104_glibcxx_dual_abi_flip.md) |
+| **ABI tags (`[[gnu::abi_tag]]`)** | A tag is mangled into the symbol name; adding/removing one renames the symbol with no source-visible signature change. | [case113](../../examples/case113_abi_tag_changed.md) |
+| **`char8_t` (C++20)** | `const char*` → `const char8_t*` is a *distinct type*: different mangling, and a new overload-resolution result. | [case114](../../examples/case114_char8t_migration.md) |
+| **`_BitInt(N)` width** | Changing `N` changes size/alignment and the register/stack class the value is passed in. | [case115](../../examples/case115_bit_int_width_changed.md) |
+| **`_Atomic` qualifier** | Adding/removing `_Atomic` can change size, alignment, and whether the object is passed by lock-free path. | [case116](../../examples/case116_atomic_qualifier_changed.md) |
+| **`[[no_unique_address]]`** | Lets an empty member overlap the next field; adding it shrinks the struct and shifts every following offset. | [case117](../../examples/case117_no_unique_address.md) |
+| **Concept tightening (C++20)** | Narrowing a constraint removes instantiations the consumer relied on — a *source* break with no symbol-table change for already-emitted instantiations. | [case105](../../examples/case105_concept_tightening.md) |
+| **LP64 → ILP64 / data-model drift** | `long`/pointer widths change out from under every struct and signature — a whole-ABI shift driven by the target, not the source. | [case112](../../examples/case112_lp64_ilp64.md) |
+
+Several more live only in the **build flags**, not the source, and abicheck
+surfaces them as toolchain/deployment risk when build context is captured:
+`-fno-exceptions` / `-fno-rtti` (drop EH/RTTI machinery callers may rely on),
+`-fshort-enums` (changes enum underlying size — see
+[Part 3](03-type-layout.md)), packing/alignment flags, vector-ABI flags, and
+CPU-dispatch/IFUNC selection ([case83](../../examples/case83_cpu_dispatch_isa_dropped.md),
+[case29](../../examples/case29_ifunc_transition.md)).
+
+!!! warning "Why these need debug info or headers"
+    Like the rest of Part 4, every hazard above is recoverable only when DWARF/PDB
+    *or* headers are supplied — and the dual-ABI and ABI-tag cases need the
+    *mangled* symbol names, so a stripped, name-demangled view can hide them.
 
 ---
 

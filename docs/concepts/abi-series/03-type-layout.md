@@ -225,8 +225,14 @@ bytes into what v2 treats as an 8-byte cell.
       in C++; in C keep values in `int` range or add an explicit sentinel.
       Never let a new enumerator silently widen the type.
     - **Append-only evolution.** Reordering, inserting, or removing a field is
-      always breaking. Append only at the end, and only when no embedded
-      `sizeof(T)` assumption exists (union analog: case26 vs case26b).
+      always breaking. Appending at the end is *not* automatically safe either:
+      it is ABI-safe **only** when the type is never caller-allocated, embedded
+      by value, or passed by value, **or** the API has an explicit
+      size/version-negotiation contract (a `struct_size`/`abi_version` field, or
+      reserved storage the caller never sizes itself). If any consumer can
+      `sizeof(T)`, `new T`, or hold a `T` by value, appending grows the type and
+      breaks them — see [Part 7 — Reserved padding](07-designing-for-stability.md#pattern-3-reserved-padding-evolve-a-value-type-in-place)
+      (union analog: case26 vs case26b).
 
     These patterns are developed in full, with code, in
     [Part 7 — Designing for Stability](07-designing-for-stability.md).

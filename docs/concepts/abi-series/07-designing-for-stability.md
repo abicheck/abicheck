@@ -118,10 +118,21 @@ years through deep internal refactors. It also closes off
 special members are declared once and pinned.
 
 !!! warning "Pimpl gotcha"
-    Declare and *out-of-line define* the destructor (and move operations) in
-    the `.cpp` where `Impl` is complete. A defaulted destructor in the header
-    forces the compiler to see `Impl`'s definition there — defeating the
-    firewall.
+    `std::unique_ptr<Impl>` is **not** an automatic ABI firewall. Three things
+    must hold:
+
+    1. **Out-of-line special members.** Declare and *define in the `.cpp`* the
+       destructor, move constructor, and move assignment (where `Impl` is
+       complete). A defaulted destructor in the header forces the compiler to
+       see `Impl`'s definition there — defeating the firewall.
+    2. **No custom deleter / completeness leak.** The default `unique_ptr`
+       deleter requires a complete type at the point of destruction; keep that
+       point out-of-line.
+    3. **Don't leak standard-library ABI.** If the public class still exposes
+       `std::string`, `std::vector`, etc. by value in its interface, you've
+       re-exported the stdlib's ABI (and its dual-ABI flips — see
+       [case104](../../examples/case104_glibcxx_dual_abi_flip.md)) through the
+       firewall. Keep standard-library types behind the `Impl` boundary too.
 
 ---
 

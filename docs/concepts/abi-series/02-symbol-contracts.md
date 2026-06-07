@@ -32,6 +32,16 @@ reference **by name**, at load time or first call. A symbol that existed at link
 time but is missing at load time is a hard error — no fallback, no default, just
 `symbol lookup error` and process termination.
 
+!!! note "Name-keyed is the ELF model (and most C/C++ exports)"
+    This "lookup by name" contract is exact for ELF and for the public C/C++
+    exports you normally care about. **Windows PE/COFF DLLs can also export and
+    import by *ordinal*** — a small integer index into the export table — in
+    which case the contract is the *number*, and renaming the symbol does not
+    break an ordinal-bound caller while reordering the export table does. Mach-O
+    uses a two-level namespace that records *which* library a name came from, so
+    the same bare name from a different install name is a different contract. See
+    [Part 5 §PE/COFF and Mach-O parallels](05-linker-elf.md#pecoff-and-mach-o-parallels).
+
 The four break classes below each violate the name-keyed contract in a different
 way:
 
