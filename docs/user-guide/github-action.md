@@ -4,6 +4,10 @@ abicheck ships as a reusable GitHub Action that you can add to any CI pipeline
 with a few lines of YAML. It installs Python, system dependencies, and abicheck
 automatically, then runs ABI comparison and reports results.
 
+> **Picking a mode or failure policy?** See
+> [Choose Your Workflow](choose-your-workflow.md) for the decision matrix —
+> which artifacts map to which `mode`, and which severity inputs gate the build.
+
 ## Quick start
 
 ```yaml

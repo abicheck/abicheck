@@ -32,8 +32,9 @@ It supports ELF (Linux), PE/COFF (Windows), and Mach-O (macOS) binaries, and it'
 **New to abicheck?**
 
 1. [Getting Started](getting-started.md) — install, first check, CI setup.
-2. [Verdicts](concepts/verdicts.md) — what each verdict means and how to react.
-3. [CLI Usage](user-guide/cli-usage.md) — every command, every flag.
+2. [Choose Your Workflow](user-guide/choose-your-workflow.md) — a decision guide that maps your artifacts and CI policy to the exact command.
+3. [Verdicts](concepts/verdicts.md) — what each verdict means and how to react.
+4. [CLI Usage](user-guide/cli-usage.md) — every command, every flag.
 
 **Evaluating or comparing tools?**
 

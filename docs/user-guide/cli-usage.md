@@ -13,6 +13,12 @@ abicheck is inspired by:
 
 Huge thanks to both projects for pioneering ABI compatibility analysis.
 
+> **Not sure which command fits your situation?** See
+> [Choose Your Workflow](choose-your-workflow.md) — a decision guide that maps
+> your artifacts (single library, release bundle, package, application, stripped
+> binaries…) and CI policy to the exact command and options. This page is the
+> per-command flag reference.
+
 ## How to use abicheck
 
 ### 1) Compare two libraries directly (primary flow)

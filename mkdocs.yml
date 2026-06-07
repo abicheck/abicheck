@@ -33,6 +33,7 @@ nav:
   - Home: index.md
   - User Guide:
     - Getting Started: getting-started.md
+    - Choose Your Workflow: user-guide/choose-your-workflow.md
     - GitHub Action: user-guide/github-action.md
     - CLI Usage: user-guide/cli-usage.md
     - Tool Modes: user-guide/tool-modes.md

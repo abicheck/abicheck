@@ -9,6 +9,26 @@ On all platforms it provides binary metadata analysis (exports, imports, depende
 > **In CI already?** Skip straight to the [GitHub Action](user-guide/github-action.md)
 > — it installs everything and runs the check in a few lines of YAML.
 
+> **Not sure which command or options fit your situation?** Jump to
+> [**Choose Your Workflow**](user-guide/choose-your-workflow.md) — a decision
+> guide that maps your artifacts (one library, a release bundle, a package, an
+> application, stripped binaries…) and your CI policy to the exact command to run.
+
+---
+
+## What question are you asking?
+
+abicheck answers three plain-language questions. Pick yours:
+
+| Your question | Start here |
+|---|---|
+| **Did my library break?** | [`abicheck compare`](#3-first-check-using-repo-examples) |
+| **Does my app still work?** | [`abicheck appcompat`](#6-application-compatibility-check) |
+| **Did my whole package / release break?** | [`abicheck compare-release`](user-guide/multi-binary.md) |
+
+For the full decision matrix — every artifact layout, accuracy tier, and CI
+policy — see [Choose Your Workflow](user-guide/choose-your-workflow.md).
+
 ---
 
 ## 1) Install abicheck
@@ -92,6 +112,10 @@ If you're unsure, start with `abicheck compare` — it's the default workflow.
 
 ## 3) First check (using repo examples)
 
+**Best first run:** compare two shared libraries with their public headers — it
+gives abicheck the most evidence to work with (see the
+[input-quality ladder](#input-quality-what-each-tier-catches) below).
+
 The repo includes 126 ABI scenario examples. Most are single-library cases with
 paired `v1`/`v2` sources and headers; bundle/release-level cases use
 release-style layouts.
@@ -144,6 +168,27 @@ abicheck compare libfoo.so.1 libfoo.so.2 -H include/
 
 If no headers are provided for ELF inputs, abicheck falls back to **symbols-only** mode
 and prints a warning (weaker analysis: may miss type/signature ABI breaks).
+
+### Input quality: what each tier catches
+
+How much abicheck can *prove* depends on what you give it. More evidence catches
+more breaks — start at the tier your artifacts allow and add headers + debug info
+when you need more confidence:
+
+| Inputs | Confidence | What it catches |
+|---|---|---|
+| Binaries only | **Low** | Symbol add/remove, basic metadata |
+| Binaries + debug info | **Medium** | Layout, enum, calling convention, emitted ABI |
+| Binaries + headers | **High** | Public API surface, source-level API, inline/template surface |
+| Binaries + debug info + headers + build flags | **Best** | The most accurate practical setup |
+
+This is why the header flags matter. The
+[ABI/API Handling overview](concepts/abi-api-handling.md) explains the full
+picture: debug info **plus** headers is the highest-coverage setup, while
+stripped binaries without headers only give symbol-level coverage. For stripped
+production builds, point abicheck at separate debug files (`--debug-root1/2`) or
+fetch them with `--debuginfod` — see
+[CLI Usage](user-guide/cli-usage.md#debug-artifact-resolution).
 
 ---
 
@@ -259,6 +304,35 @@ See [Application Compatibility](user-guide/appcompat.md) for the full reference.
 
 Full reference (including `compat` mode): [Exit Codes](reference/exit-codes.md)
 
+### Policy recipes — what should fail the build?
+
+abicheck separates *what fails CI* (severity → exit code) from *what shows up in
+the report* (display filtering). These three recipes cover the common cases; the
+[Choose Your Workflow → policy recipes](user-guide/choose-your-workflow.md#4-how-should-ci-behave-policy-recipes)
+and [Severity Configuration](user-guide/severity.md) pages have the rest.
+
+```bash
+# Breakage-only gate: report everything, fail ONLY on binary ABI breaks
+abicheck compare baseline.json build/libfoo.so \
+  --new-header include/ \
+  --severity-preset info-only \
+  --severity-abi-breaking error
+
+# Strict API-surface governance: also fail on new public ABI/API additions
+abicheck compare baseline.json build/libfoo.so \
+  --new-header include/ \
+  --severity-addition error
+
+# Show only additions in a review report — verdict and exit code unchanged
+abicheck compare baseline.json build/libfoo.so \
+  --new-header include/ \
+  --show-only compatible,added
+```
+
+The first maps to "just alert me on breakages"; the second to "fail when new
+public ABI/API appears." The third is **display-only** — `--show-only` filters
+what the report renders without changing the verdict or exit code.
+
 ### GitHub Actions — the easy way
 
 The fastest way to gate ABI in CI is the **first-class
@@ -314,8 +388,19 @@ steps:
 
 ## Next steps
 
-- [Verdicts](concepts/verdicts.md) — what each verdict means
-- [Policy Profiles](user-guide/policies.md) — control how changes are classified
+**Find your workflow:** [Choose Your Workflow](user-guide/choose-your-workflow.md)
+maps your artifacts and CI policy to the exact command. Or jump straight to your
+persona:
+
+- **Library maintainer** → [Verdicts](concepts/verdicts.md), [Policy Profiles](user-guide/policies.md)
+- **App developer** → [Application Compatibility](user-guide/appcompat.md)
+- **SDK / package maintainer** → [Multi-Binary Releases](user-guide/multi-binary.md), [Baseline Management](user-guide/baseline-management.md)
+- **CI owner** → [GitHub Action](user-guide/github-action.md), [Severity Configuration](user-guide/severity.md), [Output Formats](user-guide/output-formats.md)
+- **Plugin author** → [Plugin Systems](user-guide/plugin-systems.md)
+- **Distro / package maintainer** → [Multi-Binary Releases](user-guide/multi-binary.md)
+- **Migrating from ABICC / libabigail** → [from ABICC](user-guide/from-abicc.md), [from libabigail](user-guide/from-libabigail.md)
+
+Background reading:
+
 - [ABI/API Handling & Recommendations](concepts/abi-api-handling.md) — real-world ABI/API break scenarios and how to prevent them
-- [ABICC Compatibility](user-guide/from-abicc.md) — migrating from abi-compliance-checker
-- [Limitations](concepts/limitations.md)
+- [Limitations](concepts/limitations.md) — what abicheck does *not* catch
