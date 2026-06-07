@@ -1,7 +1,7 @@
 # ADR-027: API Surface Intelligence — Structure Metrics, Idiom Detection, Cross-Library Reasoning, and Pattern-Aware Verdicts
 
 **Date:** 2026-06-06
-**Status:** Proposed
+**Status:** Accepted
 **Decision maker:** Nikolay Petrov
 
 ---
@@ -61,7 +61,7 @@ governing constraint is identical and inherited verbatim:
 
 ---
 
-## Decision (proposed)
+## Decision
 
 ### D0. Shared substrate — `abicheck/surface_graph.py` (new)
 
@@ -227,7 +227,7 @@ new subsystem:
 
 | ChangeKind | Category | Condition |
 |------------|----------|-----------|
-| `PUBLIC_API_EXPOSES_STL_BY_VALUE` | `RISK` | Public function takes/returns a `std::` type by value across the boundary (notoriously ABI-fragile across toolchains; ties into ADR-020 build context). |
+| `PUBLIC_API_EXPOSES_STL_BY_VALUE` | `RISK` | Public function takes/returns a `std::` type by value across the boundary (notoriously ABI-fragile across toolchains; ties into ADR-020a build context). |
 | `POLYMORPHIC_TYPE_NON_VIRTUAL_DTOR` | `RISK` | A type with virtual methods (has vtable) used as a `FACTORY` return / base, but no virtual destructor — `delete` through base is UB. |
 | `OPAQUE_INVARIANT_BROKEN` | `BREAKING` | A type that was `OPAQUE_POINTER`/`PIMPL` in old gains a by-value public use in new (the opaqueness guarantee that callers relied on is gone). |
 | `HANDLE_TYPE_CHANGED` | `BREAKING` | A `HANDLE` typedef's underlying token type changed in a way callers can observe. |
@@ -622,7 +622,7 @@ edges in the common single-library case.
 - ADR-011 — Change Classification Taxonomy (where the new ChangeKinds live)
 - ADR-015 — Snapshot Serialization (schema bump for idiom/convention fields)
 - ADR-016 — Three-Tier Visibility Model
-- ADR-020 — Build-Context Aware Header Extraction (STL-by-value risk depends on it)
+- ADR-020a — Build-Context Aware Header Extraction (STL-by-value risk depends on it)
 - ADR-023 — Bundle-Aware Multi-Binary Analysis (A3 extends its dependency graph to types)
 - ADR-024 — Public ABI Surface Resolution (the demote-don't-delete contract and the
   reachability closure A4 reuses; `FilterNonPublicSurface` is the structural template

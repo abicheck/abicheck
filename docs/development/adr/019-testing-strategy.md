@@ -102,7 +102,7 @@ This means:
 
 ### Example cases as tests
 
-121 real-world ABI/API scenario cases in `examples/` serve dual purpose:
+126 real-world ABI/API scenario cases in `examples/` serve dual purpose:
 
 1. **Documentation**: Each case has `README.md` with scenario description,
    expected break type, and detection evidence
@@ -178,13 +178,13 @@ tests/
   abicheck's own Tier 2 test suite provides the primary safety net
 - Conditional gating means parity regressions can land if changes don't
   touch gated paths
-- 121 example cases require C/C++ compilation, adding CI complexity
+- 126 example cases require C/C++ compilation, adding CI complexity
 
 ---
 
 ## References
 
 - `.github/workflows/ci.yml` — CI pipeline definition
-- `tests/` — Test directory (120+ files, 2500+ tests)
-- `examples/` — 121 real-world ABI/API scenario cases
+- `tests/` — Test directory (large unit, integration, parity, and workflow suite)
+- `examples/` — 126 real-world ABI/API scenario cases
 - `pyproject.toml` — pytest markers, coverage configuration

@@ -1,6 +1,6 @@
 # ABI Checker Gap Analysis — abicheck vs ABICC vs libabigail
 
-> Generated: 2026-03-09 (ChangeKind counts in this doc are a historical snapshot; the current total is **183** — see the [Change Kind Reference](../reference/change-kinds.md) for the authoritative list)
+> Generated: 2026-03-09; content reviewed 2026-06-07. The scenario matrix is a historical ABICC/libabigail parity snapshot; the current ChangeKind total is **192** — see the [Change Kind Reference](../reference/change-kinds.md) for the authoritative list.
 > abicheck version: HEAD of `napetrov/abicheck`  
 > Compared against: ABICC (lvc/abi-compliance-checker) + libabigail (abidiff/abidw)
 
@@ -11,8 +11,8 @@
 - **abicheck covers:** ~55/55 de-duplicated ABI break scenarios (~100%) after recent releases
 - **Key differentiator:** abicheck uses multi-tier analysis (castxml headers + ELF symbols + DWARF layout) -- works on **release builds** with headers + `.so`, no debug symbols required for core checks. ABICC needs GCC `-fdump-lang-spec`, abidiff needs DWARF debug info.
 - **Closed gaps:** All original P0/P1/P2 scenarios are now detected, including enum rename, field/param rename, field qualifiers (const/volatile/mutable), pointer level changes, access level changes, param default value tracking, and anonymous struct/union fields.
-- **Coverage: exceeds ABICC** — 85 ChangeKinds (52 BREAKING, 27 COMPATIBLE, 6 API_BREAK), covering all 49 ABICC-equivalent scenarios plus 6 additional scenarios ABICC does not detect (anon field changes, combined qualifier+rename, access level, param defaults as API breaks).
-- **Test coverage:** 85/85 ChangeKinds referenced in unit tests, 429 tests passing, with coverage validated against the current examples suite.
+- **Coverage: exceeds ABICC** — the original ABICC-equivalent matrix remains covered, and the full current catalog has grown to 192 ChangeKinds.
+- **Test coverage:** ChangeKind assertion coverage is enforced by `tests/test_changekind_completeness.py`; parity and example coverage now live in the expanded `tests/` and `examples/` suites.
 
 > Note: ABICC has 90+ rules total, but many are sub-rules of the same scenario. The 55-row coverage table below is the expanded scenario count for the current implementation.
 >
@@ -23,7 +23,7 @@
 
 | Case | abicheck | ABICC | abidiff | Notes |
 |------|----------|-------|---------|-------|
-| Function removed | ✅ `FUNC_REMOVED` | ✅ | ✅ | Via readelf symtab |
+| Function removed | ✅ `FUNC_REMOVED` | ✅ | ✅ | Via ELF/PE/Mach-O symbol metadata |
 | Function added | ✅ `FUNC_ADDED` | ✅ | ✅ | |
 | Return type changed | ✅ `FUNC_RETURN_CHANGED` | ✅ | ✅ | |
 | Parameter type changed | ✅ `FUNC_PARAMS_CHANGED` | ✅ | ✅ | |
@@ -84,7 +84,7 @@
 | **Global data became const / non-const** | ✅ `Global_Data_Became_Const` | ✅ | Write to now-const data → SIGSEGV |
 | **Typedef base type changed** | ✅ `Typedef_BaseType` | ✅ | `typedef int T` → `typedef long T` — size/semantic change. **Note: treat as P0 for library CI** (dimension typedefs, primitive impl typedefs). |
 | **Type became opaque** | ✅ `Type_Became_Opaque` | ✅ | Was complete struct, now forward-decl only; breaks stack allocation |
-| **Anonymous struct/union changes** | ⚠️ | ✅ (test44,45) | castxml assigns IDs to anon types but field path tracking needs validation — **TODO: verify with castxml dump.** |
+| **Anonymous struct/union changes** | ✅ | ✅ (test44,45) | `ANON_FIELD_CHANGED` and castxml anonymous-field expansion cover nested anonymous members. |
 | **Base class became virtual/non-virtual** | ✅ `Base_Class_Became_Virtually_Inherited` | ✅ | Diamond inheritance layout change |
 | **Destructor ABI changes** | ✅ | ✅ | Itanium ABI has D0/D1/D2 destructors with separate vtable slots. Adding/removing virtual destructor, or trivial→non-trivial change, has specific ABI impact. |
 
@@ -144,7 +144,7 @@ abicheck workflow:         abidiff workflow:
        ↓                         ↓
   type graph                type graph
        ↓                         ↓
-  readelf (symtab)          DWARF symtab
+  binary metadata          DWARF symtab
        ↓                         ↓
   diff engine               diff engine
 ```
@@ -181,7 +181,7 @@ abicheck workflow:         abidiff workflow:
 > Current implementation closes all remaining gaps in this matrix. abicheck now exceeds ABICC coverage:
 > - ABICC lacks: anonymous struct field tracking, combined access+qualifier detection
 > - abidiff lacks: enum renames, param defaults, access level changes, field/param renames
-> - Remaining out-of-scope items: cross-architecture ABI diff (32-bit vs 64-bit), BTF/CTF kernel support
+> - Remaining non-core parity items are tracked as separate workflow gaps where applicable: cross-architecture guardrails are G13, while kernel BTF/CTF type-layout workflows are now covered by G6.
 
 ---
 
@@ -189,4 +189,4 @@ abicheck workflow:         abidiff workflow:
 
 | Issue | Topic | Status | Evidence | Notes |
 |------|-------|--------|----------|-------|
-| [#100](https://github.com/lvc/abi-compliance-checker/issues/100) | `= delete` functions | **PARTIAL (checker-covered; e2e parity follow-up)** | `tests/test_func_deleted.py` (`TestFuncDeletedDetection`, `TestFuncDeletedEdgeCases`) | Checker-level behavior is covered (including guarded ELF fallback); keep as partial until full headers+CastXML parity cases are aligned with expected `FUNC_DELETED` outcomes. |
+| [#100](https://github.com/lvc/abi-compliance-checker/issues/100) | `= delete` functions | **Covered; parity follow-up optional** | `tests/test_func_deleted.py` (`TestFuncDeletedDetection`, `TestFuncDeletedEdgeCases`) | Checker behavior is covered, including guarded ELF/DWARF fallback paths; additional ABICC fixture mirroring is optional parity polish rather than an open detector gap. |

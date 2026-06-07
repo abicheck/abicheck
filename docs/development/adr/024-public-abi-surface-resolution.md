@@ -65,7 +65,7 @@ silent deletion.**
 
 ---
 
-## Decision (proposed)
+## Decision
 
 ### D1. De-conflate the surface into two axes
 
@@ -219,7 +219,7 @@ The feature is only credible if we can prove it neither over- nor under-filters.
    `ground_truth.json` entries (per the AI-readiness `examples-ground-truth` gate).
 7. **False-positive-rate gate:** track FP count on a benchmark corpus; fail CI on regression,
    analogous to the mypy baseline gate.
-8. **Edge cases:** transitive includes, `#ifdef` build variants (interacts with ADR-020
+8. **Edge cases:** transitive includes, `#ifdef` build variants (interacts with ADR-020a
    build context), templates / inline-only declarations, generated headers, anonymous types,
    ordinal-only PE exports, missing/partial provenance.
 
@@ -313,6 +313,6 @@ C++-mangling gap on PE remains a reduced-confidence fallback (documented, not so
 - ADR-013 — Suppression System (the user-control narrowing layer)
 - ADR-015 — Snapshot Serialization (schema versioning for provenance fields)
 - ADR-016 — Three-Tier Visibility Model (the axis this ADR de-conflates)
-- ADR-020 — Build-Context Aware Header Extraction (which defers "public header scope
+- ADR-020a — Build-Context Aware Header Extraction (which defers "public header scope
   resolution" to this ADR; correct build context is a prerequisite for accurate provenance)
 - `abicheck/internal_leak.py`, `abicheck/dumper_castxml.py`, `abicheck/diff_symbols.py`

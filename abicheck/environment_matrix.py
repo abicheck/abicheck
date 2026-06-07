@@ -50,7 +50,7 @@ YAML format::
       driver_range: ["525.0", "580.0"]
       toolkit_version: "12.4"
 
-See ADR-020 for design rationale.
+See ADR-020b for design rationale.
 """
 from __future__ import annotations
 

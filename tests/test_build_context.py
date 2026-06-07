@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Tests for build_context.py — compile_commands.json ingestion (ADR-020)."""
+"""Tests for build_context.py — compile_commands.json ingestion (ADR-020a)."""
 
 from __future__ import annotations
 

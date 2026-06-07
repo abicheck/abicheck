@@ -33,7 +33,7 @@ Both interfaces use the same detection approach: glob for plugin libraries,
 parse ``.dynsym`` via pyelftools, match symbol patterns.  No SYCL compiler
 or runtime needed — pure static analysis of ELF binaries.
 
-See ADR-020 for design rationale.
+See ADR-020b for design rationale.
 """
 from __future__ import annotations
 

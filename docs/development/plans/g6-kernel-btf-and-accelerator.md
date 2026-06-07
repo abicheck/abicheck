@@ -1,27 +1,27 @@
 # G6 — Kernel BTF & accelerator (SYCL) workflows
 
-**Registry:** `UC-ARCH-kernel-btf` (`modeled`), `UC-ARCH-sycl` (`partial`)
+**Registry:** `UC-ARCH-kernel-btf` (`complete`), `UC-ARCH-sycl` (`complete`)
 **Effort:** M · **Risk:** medium (fixture generation needs kernel/SYCL toolchains)
 
 ## Problem
 
 - **Kernel / eBPF:** `abicheck/btf_metadata.py` and `ctf_metadata.py` parse the
-  formats and are unit-tested, but there is **no workflow or example** for the
+  formats and are unit-tested; this plan closed the workflow coverage for the
   canonical use case — *"does this kernel module's view of a struct still match
   `vmlinux` BTF?"* (the out-of-tree-module ABI break). ADR-007 is "Proposed".
 - **SYCL:** plugin-interface detection exists (`sycl_metadata.py`,
   `diff_sycl.py`, cases 82/83) but is not exercised at the workflow level; CUDA
-  is deferred.
+  remains deferred by design.
 
 ## Goal & acceptance criteria
 
-- [ ] A BTF `compare` scenario: two BTF blobs where a kernel struct gains/loses a
+- [x] A BTF `compare` scenario: two BTF blobs where a kernel struct gains/loses a
       field (or a field type changes) produces the existing layout ChangeKinds
       (`struct_size_changed`, `struct_field_offset_changed`, …) through `compare`,
       with an asserted verdict in `ground_truth.json`.
-- [ ] A documented "module vs `vmlinux` BTF" workflow in the user guide
+- [x] A documented "module vs `vmlinux` BTF" workflow in the user guide
       (how to extract BTF with `--btf` and compare).
-- [ ] A SYCL workflow-level scenario: a plugin-interface change (mirroring
+- [x] A SYCL workflow-level scenario: a plugin-interface change (mirroring
       case82/83) driven through the standard report path with an asserted
       verdict, not just the detector unit test.
 

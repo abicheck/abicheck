@@ -1,7 +1,7 @@
-# ADR-020: Build-Context Aware Header Extraction
+# ADR-020a: Build-Context Aware Header Extraction
 
 **Date:** 2026-03-23
-**Status:** Proposed
+**Status:** Accepted
 **Decision maker:** Nikolay Petrov
 
 ---
@@ -281,7 +281,7 @@ def _cache_key(header_path: Path, context: BuildContext, header_dirs: list[Path]
 ```
 
 Cache location: `$XDG_CACHE_HOME/abicheck/castxml/` or `--cache-dir` with
-`castxml/` subdirectory. See ADR-021 for unified cache strategy across subsystems.
+`castxml/` subdirectory. See ADR-021a for unified cache strategy across subsystems.
 
 Cache invalidation: any change to header content, header mtimes, or build flags
 produces a new key.
@@ -366,6 +366,6 @@ scope filtering can layer on top once build context is reliable.
 
 - `abicheck/dumper.py` — current CastXML invocation (`_castxml_dump`) and cache logic
 - ADR-003 — Data Source Architecture (L0/L1/L2 pipeline, `--show-data-sources`)
-- ADR-021 — Debug Artifact Resolution (unified `--cache-dir` strategy; split DWARF
-  flags in compile_commands.json produce artifacts resolved by ADR-021)
+- ADR-021a — Debug Artifact Resolution (unified `--cache-dir` strategy; split DWARF
+  flags in compile_commands.json produce artifacts resolved by ADR-021a)
 - Clang JSON Compilation Database specification

@@ -1,20 +1,19 @@
 # G2 — Build-config matrix into `compare`, and bundle completion
 
-**Registry:** `UC-WF-probe-matrix` (`partial`), `UC-WF-bundle` (`partial`), `UC-TC-cxx-standard-floor` (`partial`)
+**Registry:** `UC-WF-probe-matrix` (`complete`), `UC-WF-bundle` (`complete`), `UC-TC-cxx-standard-floor` (`complete`)
 **Effort:** M · **Risk:** medium (verdict-composition semantics)
 
 ## Problem
 
-Two capabilities exist but are not reachable from the mainline gate:
+This plan is now complete. It originally tracked two capabilities that existed
+but were not reachable from the mainline gate:
 
 1. **Build-config matrix** — `abicheck/probe_harness.py` + `diff_build_config.py`
    detect `API_DEPENDS_ON_CONSUMER_ENV`, `CXX_STANDARD_FLOOR_RAISED`, and
    `BEHAVIOURAL_DEFAULT_CHANGED`, but only via the separate `abicheck probe`
-   command. A user running `compare`/`compare-release` never sees them — so
-   cases 97/98 come out `NO_CHANGE`/quality on a per-binary diff.
+   command. They now feed `compare`/`compare-release` via `--probe-matrix-old/new`.
 2. **Bundle analysis** — `abicheck/bundle.py` detects cross-DSO breakage, but
-   `compare-release` wiring is incomplete (case84 `bundle_soname_skew` is
-   `skip: true` in `ground_truth.json`) and the layer is Linux-only.
+   `compare-release` wiring is now complete for explicit cohorts, including case84.
 
 ## Goal & acceptance criteria
 

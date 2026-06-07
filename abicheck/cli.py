@@ -674,7 +674,7 @@ def _populate_dependency_info(
               help="Force CTF debug format (ELF only).")
 @click.option("--dwarf", "debug_format", flag_value="dwarf", hidden=True,
               help="Force DWARF debug format (ELF only).")
-# ── Build context capture (ADR-020) ──────────────────────────────────────────
+# ── Build context capture (ADR-020a) ──────────────────────────────────────────
 @click.option("-p", "--build-dir", "compile_db_path", type=click.Path(path_type=Path), default=None,
               help="Build directory containing compile_commands.json, or path to the "
                    "file itself. Enables deterministic header parsing with exact build "
@@ -685,7 +685,7 @@ def _populate_dependency_info(
 @click.option("--compile-db-filter", "compile_db_filter", default=None,
               help="Glob pattern to filter compile_commands.json entries by source file "
                    "(e.g. 'src/libfoo/**'). Useful for large databases.")
-# ── Debug artifact resolution (ADR-021) ──────────────────────────────────────
+# ── Debug artifact resolution (ADR-021a) ──────────────────────────────────────
 @click.option("--debug-root", "debug_roots", multiple=True, type=click.Path(path_type=Path),
               help="Directory containing separate debug files (build-id trees, "
                    "path-mirror debug files, or dSYM bundles). Can be repeated.")
@@ -787,7 +787,7 @@ def dump_cmd(so_path: Path, headers: tuple[Path, ...], includes: tuple[Path, ...
     )
     effective_gcc_options = _merge_gcc_options(build_context_flags, gcc_options)
 
-    # Debug artifact resolution (ADR-021): resolve before dump
+    # Debug artifact resolution (ADR-021a): resolve before dump
     if debug_roots or debuginfod:
         artifact = _resolve_debug_artifact(
             so_path, debug_roots, debuginfod, debuginfod_url,
@@ -1710,7 +1710,7 @@ def _finalize_compare_result(
 @click.option("--annotate-additions", is_flag=True, default=False,
               help="Include additions/compatible changes as ::notice annotations "
                    "(requires --annotate).")
-# ── Debug artifact resolution (ADR-021) ──────────────────────────────────────
+# ── Debug artifact resolution (ADR-021a) ──────────────────────────────────────
 @click.option("--debug-root", "debug_roots", multiple=True, type=click.Path(path_type=Path),
               help="Directory containing separate debug files (build-id trees, "
                    "path-mirror, dSYM bundles). Applied to both sides. Can be repeated.")

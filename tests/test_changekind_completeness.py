@@ -175,7 +175,7 @@ ASSERTED_CHANGE_KINDS: set[ChangeKind] = {
     ChangeKind.INLINE_NAMESPACE_MOVED,
     ChangeKind.VTABLE_SYMBOL_IDENTITY_CHANGED,
     ChangeKind.ABI_SURFACE_EXPLOSION,
-    # SYCL Plugin Interface (ADR-020)
+    # SYCL Plugin Interface (ADR-020b)
     ChangeKind.SYCL_IMPLEMENTATION_CHANGED,
     ChangeKind.SYCL_PI_VERSION_CHANGED,
     ChangeKind.SYCL_PI_ENTRYPOINT_REMOVED,

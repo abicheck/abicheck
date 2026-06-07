@@ -1,256 +1,92 @@
-# Codebase Analysis Report -- abicheck
+# Codebase Overview -- abicheck
 
-**Date:** 2026-03-07
-**Scope:** Full repository analysis -- code patterns, logic correctness, documentation accuracy, improvement opportunities.
-
----
-
-## 1. Architecture Overview
-
-The project is a Python-based ABI compatibility checker for C/C++ shared libraries, structured in clear layers:
-
-| Module | Role |
-|--------|------|
-| `model.py` | Data model (AbiSnapshot, Function, RecordType, EnumType, etc.) |
-| `checker_types.py` | Core result types (Change, DiffResult, DetectorSpec) — extracted from checker.py |
-| `dumper.py` | Headers + binary → AbiSnapshot via castxml + pyelftools/pefile/macholib |
-| `checker.py` | Diff orchestration: delegates to sub-modules, collects changes |
-| `diff_symbols.py` | Symbol-level ABI diff detectors (functions, variables, parameters) |
-| `diff_types.py` | Type-level ABI diff detectors (structs, enums, unions, typedefs) |
-| `diff_platform.py` | Platform-specific ABI diff detectors (ELF, PE, Mach-O, DWARF) |
-| `diff_filtering.py` | Post-processing: enrichment, redundancy filtering, AST-DWARF dedup |
-| `checker_policy.py` | ChangeKind enum, built-in policy profiles, verdict computation |
-| `detectors.py` | Individual ABI change detection rules |
-| `service.py` | Service layer — shared orchestration for CLI and MCP server |
-| `reporter.py` | DiffResult → JSON / Markdown output |
-| `html_report.py` | Self-contained HTML report generator |
-| `sarif.py` | SARIF output for GitHub Code Scanning |
-| `serialization.py` | AbiSnapshot ↔ JSON round-trip |
-| `suppression.py` | YAML-based suppression rules for known changes |
-| `severity.py` | Severity classification for changes |
-| `binary_fingerprint.py` | Lightweight binary fingerprinting for rename detection in stripped binaries (exploratory, ADR-003 extension) |
-| `elf_metadata.py` | ELF dynamic section + symbol table via pyelftools |
-| `pe_metadata.py` | PE/COFF reader — Windows `.dll` binaries (via pefile) |
-| `macho_metadata.py` | Mach-O reader — macOS `.dylib` binaries (via macholib) |
-| `dwarf_metadata.py` | DWARF type layout extraction via pyelftools |
-| `dwarf_advanced.py` | Calling convention, packing, toolchain flag drift |
-| `dwarf_unified.py` | Unified DWARF handling (Linux/macOS) |
-| `pdb_parser.py` | Minimal PDB parser (MSF container, TPI, DBI streams) |
-| `pdb_metadata.py` | PDB debug info → DwarfMetadata/AdvancedDwarfMetadata |
-| `resolver.py` | Dependency tree resolution |
-| `binder.py` | Symbol binding simulation across loaded DSOs |
-| `stack_checker.py` | Full-stack ABI validation across dependency trees |
-| `appcompat.py` | Application compatibility checking |
-| `mcp_server.py` | MCP server for AI agent integration |
-| `compat/` | ABICC compatibility layer: descriptor parsing, XML report generation, CLI commands |
-| `cli.py` | Click-based CLI (dump, compare, compat, deps, stack-check, appcompat) |
+**Last reviewed:** 2026-06-07  
+**Scope:** contributor-facing map of the current implementation. Historical audit
+findings from the original 2026-03 review have been retired from this page; open
+work now lives in [Backlog](backlog.md), [Use-Case Coverage Evaluation](usecase-coverage-evaluation.md),
+and the [implementation plans](plans/index.md).
 
 ---
 
-## 2. Code Quality -- Strengths
+## 1. Architecture overview
 
-### 2.1 Well-Designed Data Model
-- `model.py` uses clean dataclasses with sensible defaults
-- Lazy indexing on `AbiSnapshot` (`function_map`, `variable_map`, `type_by_name`) avoids unnecessary work
-- `Visibility` enum cleanly separates PUBLIC / HIDDEN / ELF_ONLY
+`abicheck` is a Python-based ABI/API compatibility checker for C/C++ shared
+libraries, shared objects, platform binaries, snapshots, package extracts, and
+selected workflow topologies. The implementation is intentionally layered so
+ELF/PE/Mach-O metadata, debug formats, header ASTs, policy, filtering, and report
+rendering can evolve independently.
 
-### 2.2 Layered Detection Strategy
-The checker implements four detection tiers, each adding coverage:
-1. **Header/castxml layer** -- type-level ABI (struct layout, vtable, enum values)
-2. **ELF-only layer** -- no debug info needed (SONAME, NEEDED, symbol binding/type/size, versioning)
-3. **DWARF layout layer** -- struct sizes, field offsets from debug info
-4. **Advanced DWARF** -- calling convention, packing, toolchain flags
-
-This is architecturally sound and allows graceful degradation when debug info is absent.
-
-### 2.3 Security Considerations
-- `defusedxml` used for XML parsing (XXE prevention)
-- Path traversal check in `compat/descriptor.py:_resolve()` for descriptor paths
-- TOCTOU prevention via `os.fstat()` after `open()` in `elf_metadata.py`
-- `yaml.safe_load()` used (not `yaml.load()`)
-
-### 2.4 Robust DWARF Parsing
-- Iterative traversal (deque-based) avoids Python recursion limits
-- CU-relative vs absolute DWARF reference handling is correct
-- Type resolution is memoized per parse call
-- Forward declarations are properly excluded from struct name registration
-
-### 2.5 Suppression System
-- Well-designed with `fullmatch` semantics (prevents accidental over-suppression)
-- Regex patterns compiled eagerly (fail at load time, not match time)
-- Unknown keys rejected (catches typos)
-- Audit trail preserved (suppressed changes tracked)
+| Area | Primary modules | Role |
+|---|---|---|
+| Data model | `model.py`, `checker_types.py`, `serialization.py`, `diff_serialization.py` | Snapshot/result dataclasses, schema-compatible round trips, compatibility loading. |
+| Input resolution | `service.py`, `dumper.py`, `dumper_castxml.py`, `build_context.py`, `debug_resolver.py` | Turn binaries, snapshots, headers, build dirs, and debug artifacts into `AbiSnapshot`s. |
+| Binary metadata | `elf_metadata.py`, `pe_metadata.py`, `macho_metadata.py`, `binary_utils.py` | Platform metadata, exports/imports, versioning, hardening flags, archive detection. |
+| Debug metadata | `dwarf_metadata.py`, `dwarf_advanced.py`, `dwarf_unified.py`, `dwarf_snapshot.py`, `pdb_parser.py`, `pdb_metadata.py`, `btf_metadata.py`, `ctf_metadata.py`, `type_metadata.py` | DWARF/PDB/BTF/CTF type and ABI metadata. |
+| Core diffing | `checker.py`, `diff_symbols.py`, `diff_types.py`, `diff_platform.py`, `diff_cpp_patterns.py`, `diff_build_config.py`, `diff_sycl.py`, `diff_templates.py`, `diff_namespaces.py`, plus smaller `diff_*` modules | Registered detectors for symbols, types, platform metadata, C++ idioms, build matrices, SYCL/plugin interfaces, and language-specific edge cases. |
+| Policy and classification | `checker_policy.py`, `change_registry.py`, `severity.py`, `policy_file.py`, `report_classifications.py` | `ChangeKind` catalog, built-in/custom policies, severity mappings, verdicts, and classification summaries. |
+| Post-processing/scope | `diff_filtering.py`, `post_processing.py`, `surface.py`, `surface_graph.py`, `internal_leak.py`, `idioms.py`, `elf_symbol_filter.py` | Public-surface resolution, evidence tiers, redundancy filtering, reachability, idiom recognition, and false-positive controls. |
+| Workflows | `cli.py`, `cli_compare_release.py`, `cli_appcompat.py`, `cli_stack.py`, `cli_baseline.py`, `cli_plugin.py`, `cli_probe.py`, `cli_surface.py`, `package.py`, `baseline.py`, `bundle.py`, `appcompat.py`, `stack_checker.py`, `resolver.py`, `binder.py`, `debian_symbols.py`, `mcp_server.py` | User-facing commands and higher-level workflows beyond a single pairwise compare. |
+| Reporting | `reporter.py`, `html_report.py`, `sarif.py`, `junit_report.py`, `stack_report.py`, `stack_html.py`, `appcompat_html.py`, `report_summary.py`, `annotations.py` | Markdown/JSON/SARIF/HTML/JUnit reports, CI annotations, and workflow-specific renderers. |
+| Compatibility | `compat/` | ABICC-compatible CLI, descriptor parsing, ABICC dump import, and XML report generation. |
 
 ---
 
-## 3. Code Issues and Improvement Opportunities
+## 2. Current strengths
 
-### 3.1 CRITICAL: Dual XML Parser Usage in `dumper.py`
+### 2.1 Layered evidence model
 
-**File:** `dumper.py:12-13`
-```python
-from xml.etree import ElementTree as ET          # stdlib (unsafe)
-from defusedxml import ElementTree as DefusedET   # safe
-```
+The checker can compare at several evidence depths and reports that depth:
 
-The module imports BOTH the unsafe stdlib `xml.etree.ElementTree` and `defusedxml`. The castxml cache read path (`_castxml_dump` line 120) correctly uses `DefusedET.parse()`, but the type annotations and element creation use the stdlib `ET.Element` type. This is not a vulnerability (castxml output is trusted local data), but the dual import is confusing and violates the project's own security posture. **Recommendation:** Use `defusedxml` consistently throughout.
+1. **ELF/PE/Mach-O-only metadata** — exports/imports, SONAME/install names,
+   symbol binding/type/size, version requirements, and hardening metadata.
+2. **Debug metadata** — DWARF/PDB/BTF/CTF type layout, field offsets, enum values,
+   and selected calling-convention/toolchain signals.
+3. **Header-aware AST metadata** — public declarations, source-only API signals,
+   default arguments, deleted/final/noexcept/inline-style source features, and
+   provenance used by public-surface scoping.
+4. **Workflow overlays** — build matrices, bundle relationships, app-compat
+   reachability, stack/sysroot resolution, plugin host↔plugin contracts, and
+   baseline registry operations.
 
-### 3.2 ~~`dumper.py` Uses subprocess `readelf` Despite pyelftools Migration~~ (FIXED)
+### 2.2 Policy-first classification
 
-The `_readelf_exported_symbols()` subprocess call has been removed. Symbol extraction
-now uses pyelftools exclusively via `parse_elf_metadata()`, consistent with ADR-001.
+`ChangeKind` classification, built-in policies (`strict_abi`, `sdk_vendor`,
+`plugin_abi`), custom policy files, severity thresholds, and verdict/exit-code
+behavior are centralized in the policy modules rather than duplicated in report
+renderers or CLI entry points.
 
-### 3.3 ~~`_compute_verdict` Has Redundant Branch~~ (FIXED)
+### 2.3 False-positive control
 
-Verdict computation has been moved to `compute_verdict()` in `checker_policy.py` and now
-uses `policy_kind_sets()` which returns policy-specific kind sets. A compile-time
-completeness assertion ensures every `ChangeKind` is classified in exactly one of
-`BREAKING_KINDS`, `API_BREAK_KINDS`, `COMPATIBLE_KINDS`, or `RISK_KINDS` — unclassified
-kinds cause an `AssertionError` at import time (fail-safe).
+Public-surface resolution, source/header provenance, reachability closure,
+redundancy filtering, AST-DWARF deduplication, suppression audit trails, and
+confidence/evidence output are all part of the normal compare pipeline.
 
-### 3.4 ~~`_API_BREAK_KINDS` Is Empty and Unused~~ (FIXED)
+### 2.4 Workflow breadth
 
-`API_BREAK_KINDS` in `checker_policy.py` is now populated with source-level-only break
-kinds (e.g. `ENUM_MEMBER_RENAMED`, `PARAM_DEFAULT_VALUE_REMOVED`, `FIELD_RENAMED`,
-`PARAM_RENAMED`, `METHOD_ACCESS_CHANGED`). These produce the `API_BREAK` verdict
-(exit code 2).
+The codebase now covers more than single-library comparison: release/package
+comparison, bundle-aware analysis, application compatibility, stack checking,
+Debian symbols, ABICC compatibility, MCP integration, baseline registries,
+plugin contracts, build-matrix probes, and surface reports all have dedicated
+modules and tests.
 
-### 3.5 `RecordType.kind` Redundancy with `is_union`
+### 2.5 Defensive parsing posture
 
-**File:** `model.py:73-83`
-```python
-class RecordType:
-    kind: str  # "struct" | "class" | "union"
-    ...
-    is_union: bool = False
-```
-
-`kind` and `is_union` encode overlapping information. `is_union` is `True` when `kind == "union"`, but they're set independently, risking inconsistency. Several places in the codebase check `is_union` while others check `kind`.
-
-**Recommendation:** Derive `is_union` as a property: `@property def is_union(self) -> bool: return self.kind == "union"` and remove the stored field.
-
-### 3.6 HTML Report `bc_pct` Metric Is Misleading
-
-**File:** `html_report.py:78-85`
-```python
-if breaking == 0:
-    bc_pct = 100.0
-elif total > 0:
-    bc_pct = max(0.0, (total - breaking) / total * 100)
-```
-
-This calculates "Binary Compatibility %" as `(total_changes - breaking_changes) / total_changes * 100`. This is the percentage of *changes* that are non-breaking, NOT the percentage of the API surface that remains compatible. A library with 1000 symbols and 1 breaking change would show ~0% BC if only 1 total change exists (the breaking one), which is misleading. The inline comment acknowledges this (`approx. from changed symbols, not total exported surface`), but the metric itself is still confusing.
-
-**Recommendation:** Either compute BC% against total exported symbol count, or remove the percentage and just report counts.
-
-### 3.7 ~~Missing `is_extern_c` Deserialization~~ (FIXED)
-
-`is_extern_c` is now correctly deserialized in `serialization.py` via `f.get("is_extern_c", False)`.
-
-### 3.8 ~~Inconsistent `_public()` Helper~~ (FIXED)
-
-The unused `_public()` helper has been removed from `checker.py`. Filtering is handled inline in `_diff_functions` and `_diff_variables`.
-
-### 3.9 ~~`_vt_sort_key` Returns Inconsistent Types~~ (FIXED)
-
-The return type annotation has been corrected to `tuple[int, int]`.
-
-### 3.10 ~~`RecordType` Missing `alignment_bits` Deserialization~~ (FIXED)
-
-`alignment_bits` is now correctly deserialized in `serialization.py` via `t.get("alignment_bits")`.
+XML/YAML parsing uses safe loaders, binary readers avoid shelling out for core
+metadata, archive inputs are detected explicitly, and MCP write paths enforce
+extension and sensitive-directory restrictions. Parser/fuzzer safety checks
+remain a backlog item rather than an ignored risk.
 
 ---
 
-## 4. Documentation Issues
+## 3. Open work should be tracked elsewhere
 
-### 4.1 ~~README Claims `re.search` but Code Uses `re.fullmatch`~~ (FIXED)
+This page is not the issue tracker. For current status:
 
-The README no longer references `re.search` for suppression patterns.
-
-### 4.2 ~~README Uses Old CLI Name `abi-check`~~ (FIXED)
-
-The README now consistently uses `abicheck` as the CLI command name.
-
-### 4.3 ~~Goals Exit Code Documentation is Wrong~~ (FIXED)
-
-[Goals](goals.md) now documents the correct exit codes:
-- `compare` command: 0 = compatible/no_change, 2 = source break, 4 = breaking ABI change
-- `compat` command: 0 = compatible/no_change, 1 = breaking, 2 = error
-
-### 4.4 ~~Goals Claims ABICC and libabigail Are Unmaintained~~ (FIXED)
-
-[Goals](goals.md) has been updated. It now correctly states that
-ABICC is no longer actively maintained while libabigail is maintained by Red Hat but
-focuses on DWARF-only analysis.
-
-### 4.5 ~~`pyproject.toml` Description Says "castxml-based"~~ (FIXED)
-
-The description has been updated to "ABI compatibility checker for C/C++ shared libraries",
-reflecting the multi-tier detection approach (binary metadata, header AST, debug info).
-
-### 4.6 `gap_report.md` Phase Status Is Stale
-
-The gap report listed roadmap/TODO items that have now been implemented:
--  10 detection gaps -- all implemented and tested
--  ELF-only detectors -- all implemented
--  DWARF layout -- implemented
--  Advanced DWARF -- implemented
-
-### 4.7 ~~`__init__.py` Module Docstring Uses Old Name~~ (FIXED)
-
-The docstring now reads `"""abicheck — ABI compatibility checker."""`.
-
----
-
-## 5. Testing Gaps
-
-### 5.1 ~~No Error/Edge Case Tests~~ (PARTIALLY ADDRESSED)
-- `test_adversarial_inputs.py` and `test_error_handling.py` now cover corrupted inputs and failure paths
-- `test_castxml_errors.py` covers castxml failure modes
-- Remaining gaps: malformed DWARF info, circular typedef chains, very large symbol counts
-
-### 5.2 ~~Missing Negative Tests~~ (ADDRESSED)
-`test_negative.py` now verifies that benign changes are NOT flagged as breaking.
-
-### 5.3 ~~No Backward Compatibility Tests for Serialization~~ (ADDRESSED)
-`test_serialization_roundtrip.py` and `test_snapshot_roundtrip.py` now verify round-trip fidelity.
-
-### 5.4 `test_abi_examples.py` Silently Skips
-Integration tests skip silently when castxml/gcc aren't installed, which could mask real failures in CI.
-
-### 5.5 HTML Report Not Tested for XSS
-`html_report.py` uses `html.escape()` correctly, but no test verifies that malicious symbol names (containing `<script>` tags) are properly escaped in the output.
-
-### 5.6 Parity Test Coverage Expanding
-`test_abidiff_parity.py` covers 10 cases; additional parity suites (`test_abicc_parity.py`,
-`test_abicc_full_parity.py`, `test_sprint7_full_parity.py`, `test_sprint10_abicc_parity.py`)
-bring total parity coverage to ~54 test functions.
-
----
-
-## 6. Suggested Priority Improvements
-
-### P0 -- Correctness (all resolved)
-1. ~~**Fix `is_extern_c` deserialization**~~ — done
-2. ~~**Fix `alignment_bits` deserialization**~~ — done
-3. ~~**Fix README `re.search` vs `re.fullmatch` documentation**~~ — done
-4. ~~**Fix README CLI name** `abi-check` → `abicheck`~~ — done
-5. ~~**Fix `_compute_verdict` fallback**~~ — done (import-time assertion + policy-aware verdict)
-
-### P1 -- Technical Debt (mostly resolved)
-6. ~~**Remove `_readelf_exported_symbols`**~~ — done (pyelftools only)
-7. ~~**Remove unused `_public()` helper**~~ — done
-8. **Unify `RecordType.kind` and `is_union`** to prevent inconsistency — open
-9. ~~**Update `__init__.py` docstring**~~ — done
-10. ~~**Update `docs/development/goals.md` exit codes**~~ — done
-
-### P2 -- Test Coverage
-11. Add negative tests (benign changes should not be flagged) — `test_negative.py` added
-12. Add error handling tests (corrupted inputs) — `test_adversarial_inputs.py`, `test_error_handling.py` added
-13. Add serialization backward-compatibility tests — `test_serialization_roundtrip.py` added
-14. Expand parity test suite to match gap report scope — ongoing
-
-### P3 -- Documentation (mostly resolved)
-15. ~~**Update `gap_report.md` status text**~~ — done
-16. ~~**Fix `docs/development/goals.md` claim about libabigail**~~ — done
-17. ~~**Update `pyproject.toml` description**~~ — done
+- [Use-Case Coverage Evaluation](usecase-coverage-evaluation.md) lists the
+  current complete/planned/by-design-excluded use cases.
+- [`usecase-registry.yaml`](usecase-registry.yaml) is the machine-checked source
+  of truth for use-case status and evidence paths.
+- [Implementation Plans](plans/index.md) lists the remaining planned gaps and
+  links completed/decided plans for history.
+- [Backlog](backlog.md) holds the small set of near-term hardening tasks.
+- [Testing](testing.md) explains the test layers and CI gates.

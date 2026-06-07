@@ -27,7 +27,7 @@ Runtime, ``libur_adapter_*.so``) plugins using the same change kinds.
 Registered via ``@registry.detector("sycl")`` and automatically skipped when
 ``SyclMetadata`` is absent from either snapshot.
 
-See ADR-020 for design rationale.
+See ADR-020b for design rationale.
 """
 from __future__ import annotations
 
@@ -250,7 +250,7 @@ def _diff_backend_driver_reqs(
     ),
 )
 def _diff_sycl(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
-    """SYCL PI compatibility detector (ADR-020)."""
+    """SYCL PI compatibility detector (ADR-020b)."""
     o = old.sycl
     n = new.sycl
     assert o is not None and n is not None  # guaranteed by requires_support

@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Build-context capture from compile_commands.json (ADR-020).
+"""Build-context capture from compile_commands.json (ADR-020a).
 
 Parses a JSON Compilation Database (Clang standard) to extract the exact
 compiler flags, defines, include paths, and language standard used to build
@@ -98,7 +98,7 @@ class CompileEntry:
 
 @dataclass
 class BuildContext:
-    """Compilation context derived from compile_commands.json (ADR-020).
+    """Compilation context derived from compile_commands.json (ADR-020a).
 
     Captures the exact flags that were used to compile one or more TUs,
     enabling deterministic header parsing via CastXML.
@@ -435,7 +435,7 @@ def build_context_for_header(
     header_path: Path,
     source_filter: str | None = None,
 ) -> BuildContext:
-    """Find the best TU for a header and derive its build context (ADR-020).
+    """Find the best TU for a header and derive its build context (ADR-020a).
 
     Strategy:
     1. Filter entries by source_filter glob if specified
@@ -636,7 +636,7 @@ def build_context_union_fallback(
     entries: list[CompileEntry],
     source_filter: str | None = None,
 ) -> BuildContext:
-    """Union strategy: merge flags from all TUs (ADR-020 fallback).
+    """Union strategy: merge flags from all TUs (ADR-020a fallback).
 
     Used when a header cannot be matched to a specific TU.  Unions
     defines and include paths, warns on conflicts.

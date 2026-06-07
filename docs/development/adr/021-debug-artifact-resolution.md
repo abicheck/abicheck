@@ -1,7 +1,7 @@
-# ADR-021: Debug Artifact Resolution Subsystem
+# ADR-021a: Debug Artifact Resolution Subsystem
 
 **Date:** 2026-03-23
-**Status:** Proposed
+**Status:** Accepted
 **Decision maker:** Nikolay Petrov
 
 ---

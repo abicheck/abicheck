@@ -1,7 +1,7 @@
 # ADR-022: Baseline Registry and Snapshot Distribution
 
 **Date:** 2026-03-23
-**Status:** Proposed
+**Status:** Accepted
 **Decision maker:** Nikolay Petrov
 
 ---
@@ -111,7 +111,7 @@ class BaselineMetadata:
     abicheck_version: str           # Version of abicheck that produced the snapshot
     schema_version: int             # Snapshot schema version (ADR-015)
     created_at: datetime            # ISO 8601 timestamp
-    build_context_hash: str | None  # Hash of compile_commands.json / flags used (ADR-020)
+    build_context_hash: str | None  # Hash of compile_commands.json / flags used (ADR-020a)
     git_commit: str | None          # Source commit that produced the library
     checksum: str                   # SHA-256 of the serialized snapshot JSON
     signature: str | None           # Optional detached signature (GPG/sigstore)

@@ -1,13 +1,14 @@
 # Report Content & Quality Comparison: abicheck vs ABICC vs abidiff
 
-> **Note:** Last verified 2026-03-14. Output formats may have changed since then.
-> See [CHANGELOG.md](https://github.com/napetrov/abicheck/blob/main/CHANGELOG.md)
-> for recent changes to report filtering and deduplication.
+> **Status:** Historical comparison, content reviewed 2026-06-07. The examples
+> and side-by-side excerpts remain useful for report-quality context, but the
+> priority list is no longer the active roadmap; current reporting behavior is
+> documented in the user guide and enforced by report/schema tests.
 
 Focused comparison of **what information** each tool puts in its reports,
 how useful that information is, and what gaps exist — across all output formats.
 
-**Date:** 2026-03-14
+**Date:** 2026-03-14 (reviewed 2026-06-07)
 **Test suite:** historical 74-case benchmark subset (examples/case01..case73 + case26b)
 
 ---
@@ -93,7 +94,7 @@ struct Point — 2 changes:
 
 | Information                     | abicheck | ABICC | abidiff |
 |---------------------------------|----------|-------|---------|
-| Change kind/type classification | `type_size_changed` (machine-parseable enum, 150+ values) | Narrative text only | Narrative text |
+| Change kind/type classification | `type_size_changed` (machine-parseable enum, 192 values) | Narrative text only | Narrative text |
 | Affected symbol/type name       | Yes (`"symbol": "Leaf"`) | Yes (in HTML sections) | Yes (as context for function) |
 | Old value                       | Yes (`"old_value": "32"`) | Yes (in text) | Yes (in text) |
 | New value                       | Yes (`"new_value": "64"`) | Yes (in text) | Yes (in text) |
@@ -384,9 +385,9 @@ This is confusing in HTML where old/new columns show identical text.
 
 ---
 
-## 8. Summary: Priority Improvements
+## 8. Historical priority improvements
 
-### HIGH priority (meaningful information gaps)
+### HIGH priority from the March 2026 review
 
 1. **Impact explanations per change** — ABICC's biggest advantage over us.
    Add a `reason` or `impact` field: "Old callers allocate 8 bytes but struct
@@ -401,7 +402,7 @@ This is confusing in HTML where old/new columns show identical text.
 4. **SARIF source locations** — Use header file:line instead of .so path so
    GitHub Code Scanning shows findings inline in PRs.
 
-### MEDIUM priority (polish)
+### MEDIUM priority from the March 2026 review
 
 5. **Source file locations in all formats** — We have the data (`source_location`
    on Function/RecordType) but don't emit it.
@@ -413,10 +414,16 @@ This is confusing in HTML where old/new columns show identical text.
 
 8. **Change propagation chains** — Group Leaf→Container→flags as related.
 
-### LOW priority (nice to have)
+### LOW priority from the March 2026 review
 
 9. Architecture/compiler info in reports.
 10. Generation timestamp.
 11. `--no-legend` for Markdown.
 12. Expand/collapse in HTML for large reports.
 13. Demangled names in JSON output.
+
+
+> Review note (2026-06-07): many items above have since been implemented or
+> superseded by the report schema, impact text, affected-symbol propagation,
+> filtering/deduplication, SARIF/JUnit/HTML coverage, and structural report tests.
+> Treat this section as historical context rather than the canonical backlog.

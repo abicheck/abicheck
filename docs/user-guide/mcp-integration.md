@@ -404,7 +404,7 @@ With `--log-format json`:
 ```
 
 Only basenames are logged — never absolute paths. `status` is one of `ok`,
-`timeout`, or `error`. See [ADR-021](../development/adr/021-mcp-security-model.md)
+`timeout`, or `error`. See [ADR-021b](../development/adr/021-mcp-security-model.md)
 for the audit-logging rationale.
 
 ## Troubleshooting
@@ -474,7 +474,7 @@ The server uses **stdio** transport — the agent spawns `abicheck-mcp` as a loc
 
 ## Security
 
-See [ADR-021](../development/adr/021-mcp-security-model.md) for the full
+See [ADR-021b](../development/adr/021-mcp-security-model.md) for the full
 threat model and design rationale.
 
 ### Path restrictions for `output_path`
@@ -514,7 +514,7 @@ The default stdio transport has no network listener — the MCP client
 spawns `abicheck-mcp` as a local subprocess and inherits the user's
 filesystem permissions. There is no authentication layer because there is
 no remote surface. Do not expose the server over the network without
-adding loopback-only binding and bearer-token auth (see ADR-021).
+adding loopback-only binding and bearer-token auth (see ADR-021b).
 
 ## Related documentation
 
@@ -529,4 +529,4 @@ adding loopback-only binding and bearer-token auth (see ADR-021).
 - [Output Formats](output-formats.md) — JSON, Markdown, SARIF, HTML
 - [Architecture](../concepts/architecture.md) — where the MCP server
   sits in the overall pipeline
-- [ADR-021: MCP Security Model](../development/adr/021-mcp-security-model.md)
+- [ADR-021b: MCP Security Model](../development/adr/021-mcp-security-model.md)

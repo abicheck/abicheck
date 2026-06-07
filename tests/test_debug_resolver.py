@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Tests for debug_resolver.py — debug artifact resolution (ADR-021)."""
+"""Tests for debug_resolver.py — debug artifact resolution (ADR-021a)."""
 
 from __future__ import annotations
 

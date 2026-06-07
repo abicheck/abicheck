@@ -1,22 +1,20 @@
 # G3 — Workflow-scenario examples & Markdown/HTML coverage
 
-**Registry:** `UC-REP-markdown-html` (`partial`)
+**Registry:** `UC-REP-markdown-html` (`complete`)
 **Effort:** M · **Risk:** low
 
 ## Problem
 
-Two test-breadth gaps:
+This plan is now complete. It originally tracked two test-breadth gaps:
 
 1. The example catalog (`examples/case*`) is exhaustive about *change types* but
    every case is consumed through the single-pair `compare` workflow. The other
    workflows — `appcompat`, `deps`/`stack-check`, `bundle` — are unit-tested with
-   synthetic snapshots, not driven by catalog fixtures. (`tests/test_workflow_scenarios.py`,
-   added in this PR, covers the topologies synthetically but does not run the
-   catalog through those commands.)
+   synthetic snapshots, not driven by catalog fixtures. Dedicated workflow and
+   sysroot tests now cover those surfaces.
 2. **Markdown/HTML reporting** is thinly tested relative to JSON/SARIF/JUnit
    (`tests/test_format_compliance.py`, `tests/test_sprint9_html.py` only), so
-   regressions in human-facing output (like the misplaced table delimiter fixed
-   in this PR) can slip through.
+   regressions in human-facing output could slip through.
 
 ## Goal & acceptance criteria
 

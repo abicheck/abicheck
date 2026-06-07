@@ -143,7 +143,7 @@ not part of the initial implementation.
   the Action context.
 - **ADR-024 (Public ABI surface resolution)** — supplies the decl-location
   provenance D2 needs, and the fail-open philosophy D1 reuses.
-- **ADR-020 (Build-context capture)** — the build-file trigger in D1 dovetails
+- **ADR-020a (Build-context capture)** — the build-file trigger in D1 dovetails
   with build-context-aware header extraction.
 - **ADR-026 (Source-only undetectable changes)** *(companion)* — defines the
   class of changes the optional D4 pre-filter would target.

@@ -1,17 +1,13 @@
 # G8 — Static-library (`.a` / `.lib`) stance
 
-**Registry:** `UC-ARCH-static-lib` (`planned`)
+**Registry:** `UC-ARCH-static-lib` (`by_design_excluded`)
 **Effort:** S (decision) → M (if implemented) · **Risk:** low
 
 ## Problem
 
-Static libraries are **unhandled and undocumented** — they are not supported and
-not listed as a limitation or a non-goal. A user pointing `abicheck` at a `.a`
-gets no clear answer. The stated non-goals (`docs/development/goals.md`) cover
-runtime instrumentation, fix suggestions, and non-C/C++ languages, but say
-nothing about static archives.
-
-This plan's first deliverable is a **decision**, not code.
+Static/import library archives are now a documented non-goal. A user pointing
+`abicheck` at a `.a`/`.lib` gets an explicit guidance error instead of a late or
+misleading parse failure.
 
 ## Goal & acceptance criteria
 
@@ -26,10 +22,10 @@ Decision gate — choose one and make it explicit:
   the union of their symbol/type surface.
 
 Acceptance for **(A)** (recommended first step):
-- [ ] `goals.md` non-goals and `limitations.md` mention static archives.
-- [ ] Handing a `.a`/`.lib` to `dump`/`compare` produces a clear error (not a
+- [x] `goals.md` non-goals and `limitations.md` mention static archives.
+- [x] Handing a `.a`/`.lib` to `dump`/`compare` produces a clear error (not a
       traceback or a misleading "not a valid binary").
-- [ ] Registry entry → `by_design_excluded` (or stays `planned` if (B) is chosen).
+- [x] Registry entry → `by_design_excluded`.
 
 Acceptance for **(B)** (only if pursued):
 - [ ] `ar`-member iteration produces an `AbiSnapshot` over the archive's union

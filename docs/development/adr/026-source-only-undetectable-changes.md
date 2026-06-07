@@ -1,7 +1,7 @@
 # ADR-026: Source-Only Changes and the Evidence-Tier Boundary
 
 **Date:** 2026-06-06
-**Status:** Proposed
+**Status:** Accepted
 **Decision maker:** Nikolay Petrov
 
 ---
@@ -24,7 +24,7 @@ type/layout/vtable/function changes; the residual misses fell into three groups:
    (`header_aware` tier) carries these; DWARF/symbols do not. These are not
    capability gaps, they are *tier* gaps: run abicheck with headers and they are
    detected. The one true catalogue gap here — the `final` class-key, which
-   castxml exposes but abicheck did not model — is closed in this PR
+   castxml exposes but abicheck did not model — is closed in the current implementation
    (`TYPE_BECAME_FINAL` / `TYPE_LOST_FINAL`, `case121`).
 
 2. **Invisible to any artifact comparison.** Code that never becomes a symbol

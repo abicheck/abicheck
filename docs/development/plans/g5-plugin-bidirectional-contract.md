@@ -1,6 +1,6 @@
 # G5 — Plugin host↔plugin contract (the dlopen direction)
 
-**Registry:** `UC-ARCH-plugin` (`partial`)
+**Registry:** `UC-ARCH-plugin` (`complete`)
 **Effort:** M · **Risk:** low
 
 ## Problem
@@ -14,22 +14,21 @@ calling-convention kinds for in-process host/plugin builds. But the actual
   loads (`dlsym`), and
 - the **plugin** resolves symbols the host exports back to it.
 
-`tests/test_workflow_scenarios.py` (this PR) demonstrates the host-side contract
-synthetically, but there is no first-class way to check *"does plugin v2 still
-satisfy host H's required entrypoints?"* nor a runnable example.
+`plugin-check` and `check_plugin_host_contract` now provide the first-class
+answer to *"does plugin v2 still satisfy host H's required entrypoints?"*.
 
 ## Goal & acceptance criteria
 
-- [ ] An explicit host-contract check: given a plugin (old/new) and a declared
+- [x] An explicit host-contract check: given a plugin (old/new) and a declared
       set of required entrypoints (a small manifest, or symbols extracted from a
       host binary), report whether the plugin still satisfies the host —
       reusing `appcompat`'s symbol/version resolution machinery in the
       plugin-load direction.
-- [ ] A runnable `examples/` fixture: a host that `dlopen`s a plugin, a v1/v2
+- [x] A runnable workflow/test fixture: a host that `dlopen`s a plugin, a v1/v2
       plugin pair, and an `app`-style demo showing the load failure when a
       required entrypoint is dropped — with an asserted verdict in
       `ground_truth.json`.
-- [ ] Docs: a "plugin systems" section wiring `plugin_abi` + the host-contract
+- [x] Docs/tests: plugin-system coverage wiring `plugin_abi` + the host-contract
       check together.
 
 ## Design

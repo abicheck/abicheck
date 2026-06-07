@@ -508,7 +508,7 @@ class AbiSnapshot:
     macho: MachoMetadata | None = field(default=None)  # Mach-O metadata (macOS dylib)
     dwarf: DwarfMetadata | None = field(default=None)           # DWARF layout metadata (Sprint 3)
     dwarf_advanced: AdvancedDwarfMetadata | None = field(default=None)  # Sprint 4
-    sycl: SyclMetadata | None = field(default=None)  # SYCL PI plugin metadata (ADR-020)
+    sycl: SyclMetadata | None = field(default=None)  # SYCL PI plugin metadata (ADR-020b)
     enums: list[EnumType] = field(default_factory=list)
     typedefs: dict[str, str] = field(default_factory=dict)  # alias -> underlying type name
     constants: dict[str, str] = field(default_factory=dict)  # #define / constexpr name -> value string

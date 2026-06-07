@@ -1,15 +1,14 @@
 # G12 — security-hardening drift surface + preset
 
-**Registry:** `UC-WF-security-hardening` (`partial`)
+**Registry:** `UC-WF-security-hardening` (`complete`)
 **Effort:** M · **Risk:** low
 
 ## Problem
 
-The "did this release silently weaken hardening?" usage model is **partially**
-served today: abicheck detects `executable_stack` and `runpath_changed`/
-`rpath_changed`, and per-kind policy gating already works (a `--policy-file`
-with `overrides: { executable_stack: break }` flips the verdict to `BREAKING`,
-exit 4). Two gaps remain:
+The "did this release silently weaken hardening?" usage model is now covered for
+ELF. abicheck captures and diffs the checksec-style surface and ships a security
+policy preset so hardening drift can be gated without hand-authoring YAML. This
+plan records the implementation history; the original gaps were:
 
 1. **Discoverability** — there is no built-in `security` severity preset or
    shipped policy, so gating requires hand-authoring YAML and knowing the kind
@@ -22,13 +21,13 @@ exit 4). Two gaps remain:
 
 ## Goal & acceptance criteria
 
-- [ ] ELF snapshot captures RELRO, BIND_NOW, PIE, stack-canary, FORTIFY, and
+- [x] ELF snapshot captures RELRO, BIND_NOW, PIE, stack-canary, FORTIFY, and
       W^X segment presence (a `checksec`-equivalent block).
-- [ ] New `RISK` `ChangeKind`s for the meaningful regressions (e.g.
+- [x] New `RISK` `ChangeKind`s for the meaningful regressions (e.g.
       `relro_weakened`, `pie_disabled`) added per the root `CLAUDE.md` procedure.
-- [ ] A shipped `policies/security.yaml` and/or `--severity-preset security`
+- [x] A shipped `policies/security.yaml` and/or `--severity-preset security`
       makes hardening gating turnkey.
-- [ ] A release that weakens a hardening property fails under the security
+- [x] A release that weakens a hardening property fails under the security
       preset; an unchanged one passes.
 
 ## Design

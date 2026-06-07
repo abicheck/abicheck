@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Debug Artifact Resolution subsystem (ADR-021).
+"""Debug Artifact Resolution subsystem (ADR-021a).
 
 Locates debug artifacts (DWARF, PDB, dSYM) for binaries using a pluggable
 resolver chain.  The resolver chain tries strategies in order and returns
@@ -67,7 +67,7 @@ _MAX_DEBUGINFOD_SIZE = 512 * 1024 * 1024
 
 @dataclass
 class DebugArtifact:
-    """Resolved debug artifact location (ADR-021)."""
+    """Resolved debug artifact location (ADR-021a)."""
 
     dwarf_path: Path | None = None
     dwp_path: Path | None = None
@@ -381,7 +381,7 @@ class PathMirrorResolver:
 
 
 class DSYMResolver:
-    """Locate dSYM bundles for macOS binaries (ADR-021)."""
+    """Locate dSYM bundles for macOS binaries (ADR-021a)."""
 
     def resolve(
         self,
@@ -658,7 +658,7 @@ def resolve_debug_info(
     debuginfod_cache_dir: Path | None = None,
     debuginfod_allow_insecure: bool = False,
 ) -> DebugArtifact | None:
-    """Resolve debug artifacts for a binary using the resolver chain (ADR-021).
+    """Resolve debug artifacts for a binary using the resolver chain (ADR-021a).
 
     Tries each resolver in order and returns the first successful match.
     Returns None if no debug info is found (symbols-only mode fallback).

@@ -137,7 +137,16 @@ nav:
       - "017: GitHub Action": development/adr/017-github-action.md
       - "018: Cross-Platform Support": development/adr/018-cross-platform-support.md
       - "019: Testing Strategy": development/adr/019-testing-strategy.md
-      - "020: SYCL & Heterogeneous Stack": development/adr/020-sycl-and-heterogeneous-stack-support.md
+      - "020a: Build-Context Capture": development/adr/020-build-context-capture.md
+      - "020b: SYCL & Heterogeneous Stack": development/adr/020-sycl-and-heterogeneous-stack-support.md
+      - "021a: Debug Artifact Resolution": development/adr/021-debug-artifact-resolution.md
+      - "021b: MCP Security Model": development/adr/021-mcp-security-model.md
+      - "022: Baseline Registry": development/adr/022-baseline-registry.md
+      - "023: Bundle-Aware Analysis": development/adr/023-bundle-aware-multi-binary-analysis.md
+      - "024: Public ABI Surface Resolution": development/adr/024-public-abi-surface-resolution.md
+      - "025: PR-Diff Source Evaluation": development/adr/025-pr-diff-source-evaluation.md
+      - "026: Source-Only Evidence Boundary": development/adr/026-source-only-undetectable-changes.md
+      - "027: API Surface Intelligence": development/adr/027-api-surface-intelligence.md
       - Gap Analysis: development/adr/adr-gap-analysis.md
 
 plugins:

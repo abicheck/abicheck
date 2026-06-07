@@ -1,4 +1,4 @@
-# ADR-021: MCP Security Model
+# ADR-021b: MCP Security Model
 
 **Date:** 2026-03-24
 **Status:** Accepted
