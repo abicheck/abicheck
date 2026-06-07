@@ -198,7 +198,7 @@ def apply_pattern_verdicts(
     # 1. Lost-invariant transitions (raises) — emitted before demotion so a type
     #    that *lost* opaqueness is never both demoted and flagged.
     transitions = _emit_lost_invariants(
-        changes, old, new, old_graph, new_graph, old_idioms, new_idioms, tier
+        changes, old, new, new_graph, old_idioms, tier
     )
     changes.extend(t for t, _ in transitions)
     ledger.extend(m for _, m in transitions)
@@ -263,10 +263,8 @@ def _emit_lost_invariants(
     changes: list[Change],
     old: AbiSnapshot,
     new: AbiSnapshot,
-    old_graph: SurfaceGraph,
     new_graph: SurfaceGraph,
     old_idioms: dict[str, list[IdiomTag]],
-    new_idioms: dict[str, list[IdiomTag]],
     tier: str,
 ) -> list[tuple[Change, PatternModulation]]:
     """OPAQUE_INVARIANT_BROKEN + HANDLE_TYPE_CHANGED (D2.2 transitions)."""
