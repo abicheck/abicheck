@@ -205,7 +205,8 @@ SONAME bump — but they should fail CI when you promise source compatibility.
 | **Access narrowed** (`public`→`protected`/`private`) | Access control is a compile-time concept; the symbol and layout are unchanged. | A consumer that called the now-private method no longer compiles. | [case34](../../examples/case34_access_level.md) |
 | **Constructor became `explicit`** | No symbol or layout change. | Implicit conversions/brace-init at call sites stop compiling. | [case106](../../examples/case106_ctor_became_explicit.md) |
 | **Hidden friend removed** | Hidden friends aren't ordinary exported symbols. | ADL no longer finds the operator; the expression stops compiling. | [case96](../../examples/case96_hidden_friend_removed.md) |
-| **Enum / field / member rename** (policy-escalated to 🔴 BREAKING by default) | Same value, same offset, same size — the binary layout is unchanged. | Source that named the old identifier no longer compiles. | [case31](../../examples/case31_enum_rename.md), [case35](../../examples/case35_field_rename.md) |
+| **Enum / member rename** | Same value, same offset, same size — the binary layout is unchanged. | Source that named the old identifier no longer compiles. | [case31](../../examples/case31_enum_rename.md) |
+| **Struct field rename** (policy-escalated to 🔴 BREAKING by default) | Same offset and size — the binary layout is unchanged. | Source that named the old field no longer compiles. | [case35](../../examples/case35_field_rename.md) |
 | **Header `const`/`constexpr` constant changed** | The constant had internal linkage — it was inlined into old callers, no symbol. | A recompile picks up the new value, changing behavior. | [case124](../../examples/case124_header_constant_value_changed.md) |
 | **Class became `final`** | No layout/vtable change. | A consumer that derived from it no longer compiles. | [case125](../../examples/case125_class_became_final.md) |
 | **Source-standard floor raised** (e.g. C++17→20) | Already-compiled binaries are unaffected. | A consumer stuck on the old standard can no longer build against the headers. | [case98](../../examples/case98_cxx_standard_floor_raised.md) |
@@ -220,7 +221,7 @@ SONAME bump — but they should fail CI when you promise source compatibility.
     matrix in [Limitations](../limitations.md#source-only-changes-invisible-to-binaryobject-analysis)).
 
     **CI guidance:** decide up front whether you promise *source* compatibility.
-    If you do, gate on 🟠 API_BREAK (and the policy-escalated 🔴 rename cases) and
+    If you do, gate on 🟠 API_BREAK (and the policy-escalated 🔴 field-rename case) and
     treat it as a **semver-major** signal — you can keep the SONAME unless a
     *true binary* 🔴 BREAKING (a removed/changed symbol or a layout change) also
     fired, since these source-only changes leave the binary ABI intact.
