@@ -122,6 +122,25 @@ def test_opaque_layout_demoted_at_header_tier() -> None:
     assert ledger[0]["new_category"] == "compatible"
 
 
+def test_policy_override_protects_kind_from_demotion() -> None:
+    # ADR-027 review: an explicit user policy override on a kind is
+    # authoritative and must win over an automated pattern demotion, so the
+    # aggregate verdict (which applies the override) stays consistent with
+    # per-finding classification. A demote never fires on a protected kind.
+    old = _opaque_snapshot(opaque=True, size=None)
+    new = _opaque_snapshot(opaque=True, size=None)
+    changes = [_layout_change()]
+    ledger = apply_pattern_verdicts(
+        changes,
+        old,
+        new,
+        evidence_tier=EvidenceTier.HEADER_AWARE,
+        protected_kinds=frozenset({ChangeKind.TYPE_SIZE_CHANGED}),
+    )
+    assert changes[0].effective_verdict is None  # not demoted
+    assert not any(m["rule_id"] == "opaque-pointer-layout" for m in ledger)
+
+
 @pytest.mark.parametrize("tier", [EvidenceTier.ELF_ONLY, EvidenceTier.DWARF_AWARE])
 def test_demotion_refused_below_header_tier(tier: EvidenceTier) -> None:
     # Confidence floor by tier (D4.1): idiom demotion needs the AST.

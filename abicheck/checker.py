@@ -364,8 +364,15 @@ def compare(
         from .pattern_verdicts import apply_pattern_verdicts
 
         pre_pattern_count = len(kept)
+        # A user policy override on a kind is authoritative: a pattern demotion
+        # must not lower it, or the aggregate verdict (which applies the
+        # override) would disagree with per-finding classification (ADR-027
+        # review). Protect every explicitly-overridden kind from demotion.
+        protected_kinds = (
+            frozenset(policy_file.overrides) if policy_file is not None else frozenset()
+        )
         pattern_modulations = apply_pattern_verdicts(
-            kept, old, new, evidence_tier=evidence_tier
+            kept, old, new, evidence_tier=evidence_tier, protected_kinds=protected_kinds
         )
         if suppression is not None and len(kept) > pre_pattern_count:
             retained = kept[:pre_pattern_count]

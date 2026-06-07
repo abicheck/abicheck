@@ -889,6 +889,22 @@ def _detect_intra_type_changed(
     symbols. Misses extern-C function pointers that pass struct
     references (would require type-graph propagation from DWARF, future
     work — out of scope for ADR-023 first cut).
+
+    Reachability scope (ADR-027 A3 / D3.2 limitation). The public-vs-internal
+    split below is computed from ``ElfMetadata.symbols``, which is parsed from
+    ``.dynsym`` and therefore holds only **exported** (GLOBAL/WEAK,
+    non-hidden) definitions — LOCAL and hidden symbols are not retained
+    (``elf_metadata._parse_dynsym``). Consequently a consumer that references
+    the changed type **only** from its own internal/hidden functions leaves no
+    trace here: no exported symbol carries the type name, ``consumer_reach``
+    stays empty, and no finding is emitted for that consumer. The
+    ``internal_hit`` (demote-to-risk) branch therefore fires only for inputs
+    whose snapshots happen to carry local symbols (e.g. relocatable objects or
+    DWARF-derived graphs); detecting purely internal cross-DSO references from
+    a stripped shared object would require retaining non-exported symbols or a
+    full type graph, deliberately out of scope (documented per the ADR-027
+    review — the conservative miss is preferred over a parser/schema change
+    with broad blast radius).
     """
     findings: list[BundleFinding] = []
     # Dedup: one finding per (consumer, provider, type) triple — multiple

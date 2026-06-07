@@ -174,6 +174,7 @@ def apply_pattern_verdicts(
     *,
     evidence_tier: EvidenceTier,
     enabled: bool = True,
+    protected_kinds: frozenset[ChangeKind] = frozenset(),
 ) -> list[dict[str, object]]:
     """Modulate *changes* in place using idiom evidence; return the ledger.
 
@@ -182,6 +183,12 @@ def apply_pattern_verdicts(
     dropped). Lost-invariant transitions are appended to *changes* as new
     ``OPAQUE_INVARIANT_BROKEN`` / ``HANDLE_TYPE_CHANGED`` breaks. The returned
     list is the JSON/SARIF ``pattern_modulations`` ledger.
+
+    *protected_kinds* are kinds the user has explicitly reclassified via a
+    policy file. A pattern demotion never fires on such a kind: an explicit
+    user override is authoritative and must win over an automated heuristic in
+    **both** the aggregate verdict and per-finding classification (ADR-027
+    review). Raises and annotations still apply — they never hide a finding.
     """
     if not enabled:
         return []
@@ -217,7 +224,15 @@ def apply_pattern_verdicts(
     # 3. Per-finding modulation of existing changes.
     for c in changes:
         m = _modulate_change(
-            c, old, new, old_idioms, new_idioms, new_aps, tier, demote_allowed
+            c,
+            old,
+            new,
+            old_idioms,
+            new_idioms,
+            new_aps,
+            tier,
+            demote_allowed,
+            protected_kinds,
         )
         if m is not None:
             ledger.append(m)
@@ -392,6 +407,7 @@ def _modulate_change(
     new_aps: list[AntiPattern],
     tier: str,
     demote_allowed: bool,
+    protected_kinds: frozenset[ChangeKind] = frozenset(),
 ) -> PatternModulation | None:
     """Apply the per-finding modulation rules; return a ledger row or None."""
     # Never override a frozen-namespace break or a transition we just emitted.
@@ -407,7 +423,10 @@ def _modulate_change(
     if c.effective_verdict is not None:
         return None
 
-    if c.kind in _LAYOUT_KINDS:
+    # A user policy override on this kind is authoritative — never let an
+    # automated demotion lower a finding the user explicitly reclassified
+    # (ADR-027 review). Raises/annotations below still apply.
+    if c.kind in _LAYOUT_KINDS and c.kind not in protected_kinds:
         # Rule: opaque-pointer layout (demote).
         if demote_allowed:
             old_names = _type_names(old)
