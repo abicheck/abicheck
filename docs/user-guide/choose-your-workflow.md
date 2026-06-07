@@ -34,7 +34,7 @@ artifact layout, accuracy target, or CI policy.
 | I need human reports | Markdown / HTML | `--format markdown` or `--format html` | Add `--report-mode leaf --show-impact` for large diffs |
 | I need machine / CI reports | JSON / SARIF / JUnit | `--format json`, `--format sarif`, or `--format junit` | SARIF for GitHub Code Scanning; JUnit for GitLab / Jenkins / Azure dashboards |
 | I only have a static archive (`.a` / `.lib`) | Not supported directly | — | Extract members (`ar x libfoo.a`) and compare the resulting `.o` objects, or compare a shared library built from the same sources — see [Limitations](../concepts/limitations.md#static-import-library-archives-a-lib) |
-| I want a dependency / sysroot check | Stack validation | `abicheck stack-check ./app --root /sysroot` / `abicheck deps libfoo.so` | See [CLI Usage](cli-usage.md) |
+| I want a dependency / sysroot check | Stack validation | `abicheck deps ./app --sysroot /rootfs` (resolve one env) / `abicheck stack-check usr/bin/app --baseline /old-root --candidate /new-root` (compare two envs) | See [CLI Usage](cli-usage.md) |
 
 The rest of this page expands the four decisions packed into that table:
 **what** you are comparing, **how much accuracy** you need, **how CI should
@@ -95,8 +95,9 @@ have on disk.
 | An application + a library upgrade | `abicheck appcompat ./myapp old new -H include/` | Filters the diff to changes that affect *your* app. |
 | An app, no old library yet | `abicheck appcompat ./myapp --check-against new.so` | Weak mode: symbol-availability only. |
 | A host that `dlopen`s plugins | `abicheck plugin-check plugin.v1 plugin.v2 -r plugin_init` | Checks the host's required entrypoints. |
-| A sysroot / container rootfs | `abicheck stack-check ./app --root /sysroot` | Will the binary load and resolve in this environment? |
-| A dependency tree | `abicheck deps libfoo.so` | Does it resolve without unresolved symbols? |
+| A sysroot / container rootfs | `abicheck deps ./app --sysroot /rootfs` | Will the binary load and resolve in this environment? |
+| Two sysroots / container images to compare | `abicheck stack-check usr/bin/app --baseline /old-root --candidate /new-root` | Per-library ABI diff across the whole transitive dependency stack. |
+| A dependency tree | `abicheck deps ./app` | Does it resolve without unresolved symbols? |
 | Only a static `.a` / `.lib` archive | *(unsupported directly)* | Extract members and compare `.o` objects, or build a shared library from the same sources — see [Limitations](../concepts/limitations.md#static-import-library-archives-a-lib). |
 
 `compare` auto-detects each input: `.so` files are dumped on the fly, `.json`
