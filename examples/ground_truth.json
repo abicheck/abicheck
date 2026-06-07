@@ -667,8 +667,8 @@
       "description": "Library linked with -Wl,-z,execstack has GNU_STACK RWE \u2014 disables NX protection (bad practice \u2014 security)"
     },
     "case50_soname_inconsistent": {
-      "expected": "COMPATIBLE",
-      "category": "quality",
+      "expected": "COMPATIBLE_WITH_RISK",
+      "category": "risk",
       "platforms": [
         "linux"
       ],

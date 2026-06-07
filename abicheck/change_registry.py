@@ -217,12 +217,11 @@ REGISTRY = ChangeKindRegistry([
        impact="Bit-field width or offset changed; old code reads/writes wrong bits."),
 
     # ── ELF-only (Sprint 2) ───────────────────────────────────────────────
-    _E("soname_changed", _C,
-       impact="SONAME changed. This is a packaging/policy signal, not a binary ABI break: "
-              "the symbol table, types, and calling conventions are unchanged. "
-              "Deployment action may be required: update ldconfig symlinks or the "
-              "linker flag (-lfoo) in dependent packages. Already-compiled consumers "
-              "whose loader resolves the library by full path or DT_RPATH are unaffected."),
+    _E("soname_changed", _R,
+       impact="SONAME changed. Already-compiled consumers record the old SONAME "
+              "in DT_NEEDED and can fail to load unless the old SONAME remains "
+              "available. The exported ABI surface may still be compatible, but "
+              "deployment action is required."),
     _E("soname_missing", _C,
        impact="Library has no SONAME; package managers and ldconfig cannot track versions."),
     _E("visibility_leak", _C,

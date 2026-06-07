@@ -92,7 +92,7 @@ def test_target_cases_match_committed_post_fix_baseline(case_name: str) -> None:
 
     expected_post_fix = {
         "case49_executable_stack": "COMPATIBLE",
-        "case50_soname_inconsistent": "COMPATIBLE",
+        "case50_soname_inconsistent": "COMPATIBLE_WITH_RISK",
         "case51_protected_visibility": "COMPATIBLE",
         "case54_used_reserved_field": "COMPATIBLE",
         "case62_type_field_added_compatible": "COMPATIBLE",

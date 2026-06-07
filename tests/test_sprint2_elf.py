@@ -43,7 +43,7 @@ def test_soname_changed() -> None:
     result = compare(old, new)
     kinds = {c.kind for c in result.changes}
     assert ChangeKind.SONAME_CHANGED in kinds
-    assert result.verdict == Verdict.COMPATIBLE
+    assert result.verdict == Verdict.COMPATIBLE_WITH_RISK
 
 
 def test_soname_missing_reported_as_compatible_quality_issue() -> None:
@@ -338,8 +338,8 @@ def test_versions_required_entire_lib_removed() -> None:
 
 def test_elf_breaking_kinds_verdict() -> None:
     """BREAKING ELF kinds (defined version removed, type changed) produce BREAKING verdict."""
-    # NOTE: SONAME_CHANGED is excluded here — it is now in COMPATIBLE_KINDS because
-    # SONAME is a packaging/policy signal, not a binary ABI break. See test_soname_changed.
+    # NOTE: SONAME_CHANGED is excluded here because it is a deployment risk,
+    # not a hard ABI break. See test_soname_changed.
     breaking_cases = [
         _snap(_elf(versions_defined=["V1"])),  # SYMBOL_VERSION_DEFINED_REMOVED
         _snap(_elf(symbols=[_sym("f", sym_type=SymbolType.FUNC)])),  # TYPE_CHANGED

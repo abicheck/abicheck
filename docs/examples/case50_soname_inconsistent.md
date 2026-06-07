@@ -3,8 +3,8 @@
 
 | Field | Value |
 |-------|-------|
-| **Verdict** | 🟢 **COMPATIBLE** |
-| **Category** | Quality (Compatible) |
+| **Verdict** | 🟡 **COMPATIBLE_WITH_RISK** |
+| **Category** | Risk |
 | **Platforms** | Linux |
 | **Flags** | Bad practice |
 | **Detected `ChangeKind`s** | — |
@@ -123,4 +123,4 @@ rejected during review because they break upgrade paths.
 - `bad.c`
 - `good.c`
 
-_See also: [Examples overview](index.md) · [All COMPATIBLE cases](by-verdict/compatible.md) · [Category: Quality (Compatible)](by-category/quality.md)._
+_See also: [Examples overview](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md)._
