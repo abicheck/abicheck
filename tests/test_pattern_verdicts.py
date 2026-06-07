@@ -153,6 +153,60 @@ def test_frozen_namespace_never_demoted() -> None:
     assert c.effective_verdict is None
 
 
+def test_ambiguous_short_name_not_demoted() -> None:
+    # Codex P2: ns1::Ctx has a real size change; only ns2::Ctx is opaque. The
+    # unqualified short name "Ctx" is ambiguous across namespaces, so ns2::Ctx's
+    # opaque evidence must NOT demote the ns1::Ctx break.
+    def snap() -> AbiSnapshot:
+        return AbiSnapshot(
+            library="l",
+            version="1",
+            from_headers=True,
+            functions=[
+                Function(  # ns2::Ctx is opaque (incomplete, pointer-only)
+                    name="ns2_use",
+                    mangled="ns2_use",
+                    return_type="void",
+                    params=[Param(name="c", type="ns2::Ctx*", pointer_depth=1)],
+                    visibility=Visibility.PUBLIC,
+                ),
+                Function(  # ns1::Ctx is a complete, by-value public type
+                    name="ns1_use",
+                    mangled="ns1_use",
+                    return_type="void",
+                    params=[Param(name="c", type="ns1::Ctx", pointer_depth=0)],
+                    visibility=Visibility.PUBLIC,
+                ),
+            ],
+            types=[
+                RecordType(name="ns2::Ctx", kind="struct", is_opaque=True),
+                RecordType(
+                    name="ns1::Ctx",
+                    kind="struct",
+                    is_opaque=False,
+                    size_bits=64,
+                    fields=[
+                        TypeField(
+                            name="x",
+                            type="int",
+                            offset_bits=0,
+                            access=AccessLevel.PUBLIC,
+                        )
+                    ],
+                ),
+            ],
+        )
+
+    change = Change(
+        kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="ns1::Ctx", description="grew"
+    )
+    apply_pattern_verdicts(
+        [change], snap(), snap(), evidence_tier=EvidenceTier.HEADER_AWARE
+    )
+    # ns1::Ctx is not opaque; its break must stand despite ns2::Ctx being opaque.
+    assert change.effective_verdict is None
+
+
 # ---------------------------------------------------------------------------
 # Lost opaque invariant → OPAQUE_INVARIANT_BROKEN (D2.2, never silent)
 # ---------------------------------------------------------------------------

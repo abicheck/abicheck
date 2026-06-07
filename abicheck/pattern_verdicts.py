@@ -45,6 +45,7 @@ Anti-hiding guards:
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 
 from .checker_policy import ChangeKind, EvidenceTier, Verdict
@@ -101,25 +102,51 @@ class PatternModulation:
         }
 
 
-def _names(name: str) -> set[str]:
-    """A name plus its unqualified short form, for fuzzy idiom matching."""
-    return {name, name.rsplit("::", 1)[-1]}
+def _resolve_name(keys: Iterable[str], name: str) -> str | None:
+    """Resolve *name* to a single key, requiring an *unambiguous* match.
+
+    Exact (fully-qualified) match always wins. Otherwise fall back to matching
+    on the unqualified short name **only when exactly one key carries it** —
+    so two public types that share a short name across different namespaces
+    (e.g. ``ns1::Ctx`` and ``ns2::Ctx``) never borrow each other's idiom
+    evidence. An ambiguous short name returns ``None`` (no match), which keeps
+    a pattern demotion from firing on the wrong type (ADR-027 review).
+    """
+    keyset = list(keys)
+    if name in keyset:
+        return name
+    short = name.rsplit("::", 1)[-1]
+    candidates = [k for k in keyset if k.rsplit("::", 1)[-1] == short]
+    if len(candidates) == 1:
+        return candidates[0]
+    return None
 
 
-def _tags_for(idioms: dict[str, list[IdiomTag]], name: str) -> list[IdiomTag]:
-    out: list[IdiomTag] = []
-    for n in _names(name):
-        out.extend(idioms.get(n, []))
-    return out
+def _tags_for(
+    idioms: dict[str, list[IdiomTag]], name: str, type_names: Iterable[str]
+) -> list[IdiomTag]:
+    # Ambiguity is judged against the *whole* type universe, not just the
+    # idiom-tagged subset: if two public types share a short name, an
+    # unqualified reference is ambiguous and must not resolve to either (even if
+    # only one happens to carry an idiom tag) — ADR-027 review.
+    key = _resolve_name(type_names, name)
+    return idioms.get(key, []) if key is not None else []
 
 
 def _has_idiom(
-    idioms: dict[str, list[IdiomTag]], name: str, idiom: Idiom
+    idioms: dict[str, list[IdiomTag]],
+    name: str,
+    idiom: Idiom,
+    type_names: Iterable[str],
 ) -> IdiomTag | None:
-    for t in _tags_for(idioms, name):
+    for t in _tags_for(idioms, name, type_names):
         if t.idiom == idiom:
             return t
     return None
+
+
+def _type_names(snap: AbiSnapshot) -> frozenset[str]:
+    return frozenset(rec.name for rec in snap.types)
 
 
 def _verdict_label(v: Verdict) -> str:
@@ -127,10 +154,9 @@ def _verdict_label(v: Verdict) -> str:
 
 
 def _record_by_name(snap: AbiSnapshot, name: str) -> object | None:
-    short = name.rsplit("::", 1)[-1]
-    for rec in snap.types:
-        if rec.name == name or rec.name.rsplit("::", 1)[-1] == short:
-            return rec
+    by_name = {rec.name: rec for rec in snap.types}
+    key = _resolve_name(by_name.keys(), name)
+    return by_name.get(key) if key is not None else None
     return None
 
 
@@ -381,8 +407,10 @@ def _modulate_change(
     if c.kind in _LAYOUT_KINDS:
         # Rule: opaque-pointer layout (demote).
         if demote_allowed:
-            tag_old = _has_idiom(old_idioms, c.symbol, Idiom.OPAQUE_POINTER)
-            tag_new = _has_idiom(new_idioms, c.symbol, Idiom.OPAQUE_POINTER)
+            old_names = _type_names(old)
+            new_names = _type_names(new)
+            tag_old = _has_idiom(old_idioms, c.symbol, Idiom.OPAQUE_POINTER, old_names)
+            tag_new = _has_idiom(new_idioms, c.symbol, Idiom.OPAQUE_POINTER, new_names)
             if (
                 tag_old is not None
                 and tag_new is not None
@@ -397,7 +425,7 @@ def _modulate_change(
                     list(tag_new.evidence),
                 )
             # Rule: PIMPL pointee-only (demote).
-            pimpl = _pimpl_pointee_match(c.symbol, old_idioms, new_idioms)
+            pimpl = _pimpl_pointee_match(c.symbol, old_idioms, new_idioms, new_names)
             if pimpl is not None:
                 return _demote(
                     c,
@@ -460,41 +488,66 @@ def _pimpl_pointee_match(
     pointee: str,
     old_idioms: dict[str, list[IdiomTag]],
     new_idioms: dict[str, list[IdiomTag]],
+    new_type_names: Iterable[str],
 ) -> list[str] | None:
     """Return evidence if *pointee* is the hidden impl of a PIMPL wrapper whose
-    own layout is unchanged across both snapshots (D4.1 PIMPL guard)."""
+    own layout is unchanged across both snapshots (D4.1 PIMPL guard).
+
+    Matching is exact-qualified first; it falls back to the unqualified short
+    name only when exactly one PIMPL wrapper has a pointee with that short name,
+    so a real break on ``ns1::Impl`` is never demoted using ``ns2::Widget``'s
+    PIMPL evidence just because both impls are spelled ``Impl`` (ADR-027 review).
+    """
     short = pointee.rsplit("::", 1)[-1]
+    exact: list[tuple[str, IdiomTag]] = []
+    short_matches: list[tuple[str, IdiomTag]] = []
     for wrapper, tags in old_idioms.items():
         for t in tags:
             if t.idiom != Idiom.PIMPL or t.hidden_pointee is None:
                 continue
-            if t.hidden_pointee not in (pointee, short):
-                continue
-            # Find the matching wrapper tag in new and require identical layout.
-            new_tag = _has_idiom(new_idioms, wrapper, Idiom.PIMPL)
-            if new_tag is None:
-                continue
-            if t.layout_signature != new_tag.layout_signature:
-                # The wrapper's own layout changed — that is a real break.
-                continue
-            return [
-                f"{pointee} is the hidden impl of PIMPL {wrapper}; "
-                f"wrapper layout byte-identical across versions"
-            ]
+            if t.hidden_pointee == pointee:
+                exact.append((wrapper, t))
+            elif t.hidden_pointee.rsplit("::", 1)[-1] == short:
+                short_matches.append((wrapper, t))
+    if exact:
+        candidates = exact
+    elif len(short_matches) == 1:
+        candidates = short_matches
+    else:
+        return None  # no match, or an ambiguous short name → do not demote
+    new_names = list(new_type_names)
+    for wrapper, t in candidates:
+        # Find the matching wrapper tag in new and require identical layout.
+        new_tag = _has_idiom(new_idioms, wrapper, Idiom.PIMPL, new_names)
+        if new_tag is None:
+            continue
+        if t.layout_signature != new_tag.layout_signature:
+            # The wrapper's own layout changed — that is a real break.
+            continue
+        return [
+            f"{pointee} is the hidden impl of PIMPL {wrapper}; "
+            f"wrapper layout byte-identical across versions"
+        ]
     return None
 
 
 def _antipattern_annotation(
     c: Change, new_aps: list[AntiPattern]
 ) -> tuple[str, list[str]] | None:
-    """If *c* sits on a recognised ABI anti-pattern surface, return (rule, edges)."""
+    """If *c* sits on a recognised ABI anti-pattern surface, return (rule, edges).
+
+    This is a pure annotation (a raise that can never hide a finding), but it
+    still matches exact-qualified first and only falls back to an unqualified
+    short name when that name is unambiguous among the anti-patterns, so the
+    disclosed evidence always belongs to the finding it annotates.
+    """
     short = c.symbol.rsplit("::", 1)[-1]
+    exact = [ap for ap in new_aps if ap.symbol == c.symbol]
+    short_aps = [ap for ap in new_aps if ap.symbol.rsplit("::", 1)[-1] == short]
+    matched = exact if exact else (short_aps if len(short_aps) == 1 else [])
+    if not matched:
+        return None
     edges: list[str] = []
-    rule_id = ""
-    for ap in new_aps:
-        if ap.symbol in (c.symbol, short) or ap.symbol.rsplit("::", 1)[-1] == short:
-            edges.extend(ap.evidence)
-            rule_id = "anti-pattern-raise"
-    if edges:
-        return rule_id, edges
-    return None
+    for ap in matched:
+        edges.extend(ap.evidence)
+    return "anti-pattern-raise", edges
