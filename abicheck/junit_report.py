@@ -44,7 +44,7 @@ import io
 import xml.etree.ElementTree as ET
 from typing import TYPE_CHECKING
 
-from .checker_policy import ChangeKind, policy_for
+from .checker_policy import ChangeKind, Verdict, policy_for
 from .checker_types import Change, DiffResult
 from .reporter import apply_show_only
 
@@ -60,8 +60,7 @@ if TYPE_CHECKING:
 _FUNC_KINDS = frozenset(k for k in ChangeKind if k.value.startswith("func_"))
 _VAR_KINDS = frozenset(k for k in ChangeKind if k.value.startswith("var_"))
 _TYPE_KINDS = frozenset(
-    k for k in ChangeKind
-    if k.value.startswith("type_") or k.value.startswith("union_")
+    k for k in ChangeKind if k.value.startswith("type_") or k.value.startswith("union_")
 )
 _ENUM_KINDS = frozenset(k for k in ChangeKind if k.value.startswith("enum_"))
 
@@ -83,6 +82,7 @@ def _classname_for(change: Change) -> str:
 # Verdict → failure classification
 # ---------------------------------------------------------------------------
 
+
 def _is_failure(
     change: Change,
     breaking_set: frozenset[ChangeKind],
@@ -100,6 +100,29 @@ def _is_failure(
     ``--severity-*`` overrides), its level takes precedence so that
     the JUnit output honours user-configured severity escalations.
     """
+    # Honour an A4 per-finding effective_verdict (ADR-027): a demoted opaque/
+    # PIMPL layout change reads compatible and must not be a JUnit failure.
+    eff = getattr(change, "effective_verdict", None)
+    if isinstance(eff, Verdict):
+        if eff in (Verdict.BREAKING, Verdict.API_BREAK):
+            return True
+        # COMPATIBLE_WITH_RISK / COMPATIBLE / NO_CHANGE are not hard breaks, so a
+        # JUnit failure here happens only when the user's severity preset
+        # escalates the finding's EFFECTIVE category to error. Route through the
+        # same classifier the severity-aware exit code uses
+        # (``classify_change_object``, which honours ``effective_verdict``) so the
+        # JUnit file never disagrees with the exit status — e.g. a
+        # ``--pattern-verdicts`` demotion to compatible, or the A3 bundle
+        # reachability demotion to risk, still fails under
+        # ``--severity-preset strict`` (ADR-027 review).
+        if severity_config is not None:
+            from .severity import SeverityLevel, classify_change_object
+
+            return (
+                severity_config.level_for(classify_change_object(change))
+                == SeverityLevel.ERROR
+            )
+        return False
     if change.kind in breaking_set or change.kind in api_break_set:
         return True
     if severity_config is not None:
@@ -119,6 +142,13 @@ def _failure_type(
     risk_set: frozenset[ChangeKind],
 ) -> str:
     """Return the ``type`` attribute for a ``<failure>`` element."""
+    eff = getattr(change, "effective_verdict", None)
+    if isinstance(eff, Verdict):
+        return {
+            Verdict.BREAKING: "BREAKING",
+            Verdict.API_BREAK: "API_BREAK",
+            Verdict.COMPATIBLE_WITH_RISK: "COMPATIBLE_WITH_RISK",
+        }.get(eff, "COMPATIBLE")
     if change.kind in breaking_set:
         return "BREAKING"
     if change.kind in api_break_set:
@@ -131,6 +161,7 @@ def _failure_type(
 # ---------------------------------------------------------------------------
 # Single DiffResult → <testsuite>
 # ---------------------------------------------------------------------------
+
 
 def _partition_changes(
     changes: list[Change],
@@ -215,8 +246,11 @@ def _emit_testcases(
             tc.set("classname", classname)
             if sym in change_by_symbol:
                 _maybe_add_failure(
-                    tc, change_by_symbol[sym],
-                    breaking_set, api_break_set, risk_set,
+                    tc,
+                    change_by_symbol[sym],
+                    breaking_set,
+                    api_break_set,
+                    risk_set,
                     severity_config,
                 )
     else:
@@ -226,7 +260,12 @@ def _emit_testcases(
             tc.set("name", sym)
             tc.set("classname", _classname_for(c))
             _maybe_add_failure(
-                tc, c, breaking_set, api_break_set, risk_set, severity_config,
+                tc,
+                c,
+                breaking_set,
+                api_break_set,
+                risk_set,
+                severity_config,
             )
 
 
@@ -276,7 +315,9 @@ def _build_testsuite(
 
     change_by_symbol, extra_changes = _partition_changes(changes)
     all_symbols = _collect_all_symbols(old_snapshot, show_only, change_by_symbol)
-    failure_count = _count_failures(changes, breaking_set, api_break_set, risk_set, severity_config)
+    failure_count = _count_failures(
+        changes, breaking_set, api_break_set, risk_set, severity_config
+    )
 
     total = len(all_symbols) if all_symbols else len(change_by_symbol)
 
@@ -286,8 +327,18 @@ def _build_testsuite(
     ts.set("failures", str(failure_count))
     ts.set("errors", "0")
 
-    _emit_testcases(ts, all_symbols, change_by_symbol, breaking_set, api_break_set, risk_set, severity_config)
-    _append_extra_failures(ts, extra_changes, breaking_set, api_break_set, risk_set, severity_config)
+    _emit_testcases(
+        ts,
+        all_symbols,
+        change_by_symbol,
+        breaking_set,
+        api_break_set,
+        risk_set,
+        severity_config,
+    )
+    _append_extra_failures(
+        ts, extra_changes, breaking_set, api_break_set, risk_set, severity_config
+    )
 
     return ts
 
@@ -336,6 +387,7 @@ def _add_failure(
 # Error testsuite — represent failed compare-release pairs
 # ---------------------------------------------------------------------------
 
+
 def _build_error_testsuite(library: str, error_msg: str) -> ET.Element:
     """Build a ``<testsuite>`` with a single errored testcase.
 
@@ -364,6 +416,7 @@ def _build_error_testsuite(library: str, error_msg: str) -> ET.Element:
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
 
 def to_junit_xml(
     result: DiffResult,
@@ -398,8 +451,10 @@ def to_junit_xml(
     root.set("name", "abicheck")
 
     ts = _build_testsuite(
-        result, old_snapshot,
-        show_only=show_only, severity_config=severity_config,
+        result,
+        old_snapshot,
+        show_only=show_only,
+        severity_config=severity_config,
     )
     root.append(ts)
 
@@ -436,8 +491,10 @@ def to_junit_xml_multi(
 
     for result, old_snap in results:
         ts = _build_testsuite(
-            result, old_snap,
-            show_only=show_only, severity_config=severity_config,
+            result,
+            old_snap,
+            show_only=show_only,
+            severity_config=severity_config,
         )
         root.append(ts)
         total_tests += int(ts.get("tests", "0"))

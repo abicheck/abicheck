@@ -39,6 +39,7 @@ Bundle findings use the ``ChangeKind.BUNDLE_*`` values registered in
 suppression, severity, and reporter machinery identically to per-library
 ``Change`` entries.
 """
+
 from __future__ import annotations
 
 import logging
@@ -49,7 +50,7 @@ from typing import TYPE_CHECKING, cast
 
 from .checker_policy import ChangeKind, Verdict, compute_verdict
 from .checker_types import Change, DiffResult
-from .elf_metadata import ElfMetadata, parse_elf_metadata
+from .elf_metadata import ElfMetadata, ElfSymbol, SymbolBinding, parse_elf_metadata
 
 if TYPE_CHECKING:
     from .diff_cpp_patterns import BundleMember
@@ -61,39 +62,47 @@ log = logging.getLogger(__name__)
 # provided by the system loader, not by the bundle. Resolution against the
 # bundle is meaningless for these; ignore unresolved imports against this
 # set when emitting :class:`ChangeKind.BUNDLE_INTRA_DEP_REMOVED`.
-DEFAULT_SYSTEM_PROVIDERS: frozenset[str] = frozenset({
-    "libc.so.6", "libc.so.7",
-    "libm.so.6",
-    "libdl.so.2",
-    "libpthread.so.0",
-    "librt.so.1",
-    "libstdc++.so.6",
-    "libc++.so.1", "libc++abi.so.1",
-    "libgcc_s.so.1",
-    "libgomp.so.1",
-    "libtbb.so.12", "libtbb.so.2",
-    "libsycl.so", "libsycl.so.7", "libsycl.so.8",
-    "libOpenCL.so.1",
-    "libz.so.1",
-    "ld-linux-x86-64.so.2", "ld-linux-aarch64.so.1",
-})
+DEFAULT_SYSTEM_PROVIDERS: frozenset[str] = frozenset(
+    {
+        "libc.so.6",
+        "libc.so.7",
+        "libm.so.6",
+        "libdl.so.2",
+        "libpthread.so.0",
+        "librt.so.1",
+        "libstdc++.so.6",
+        "libc++.so.1",
+        "libc++abi.so.1",
+        "libgcc_s.so.1",
+        "libgomp.so.1",
+        "libtbb.so.12",
+        "libtbb.so.2",
+        "libsycl.so",
+        "libsycl.so.7",
+        "libsycl.so.8",
+        "libOpenCL.so.1",
+        "libz.so.1",
+        "ld-linux-x86-64.so.2",
+        "ld-linux-aarch64.so.1",
+    }
+)
 
 
 @dataclass(frozen=True)
 class ProviderEntry:
     """One library in the bundle that exports ``symbol``."""
 
-    library: str          # e.g. "libcore.so"
-    version: str          # gnu.version_d tag, "" if unversioned
+    library: str  # e.g. "libcore.so"
+    version: str  # gnu.version_d tag, "" if unversioned
 
 
 @dataclass(frozen=True)
 class ConsumerEntry:
     """One library in the bundle that imports ``symbol``."""
 
-    library: str          # e.g. "libalgo.so"
-    version: str          # gnu.version_r required version, "" if unversioned
-    weak: bool            # True when the import is weak (unresolved is OK)
+    library: str  # e.g. "libalgo.so"
+    version: str  # gnu.version_r required version, "" if unversioned
+    weak: bool  # True when the import is weak (unresolved is OK)
 
 
 @dataclass
@@ -131,9 +140,9 @@ class BundleSnapshot:
     Holds per-library ELF metadata and the precomputed resolution graph.
     """
 
-    root: Path                                      # the release directory
-    libraries: dict[str, Path]                      # library_name -> filesystem path
-    metadata: dict[str, ElfMetadata]                # library_name -> parsed ELF metadata
+    root: Path  # the release directory
+    libraries: dict[str, Path]  # library_name -> filesystem path
+    metadata: dict[str, ElfMetadata]  # library_name -> parsed ELF metadata
     resolution: ResolutionGraph
 
     @property
@@ -170,20 +179,29 @@ class BundleFinding:
     """
 
     kind: ChangeKind
-    symbol: str                              # mangled symbol name or type name
+    symbol: str  # mangled symbol name or type name
     description: str
-    consumer_library: str | None = None      # affected library (for intra-dep findings)
-    provider_library: str | None = None      # source-of-change library
+    consumer_library: str | None = None  # affected library (for intra-dep findings)
+    provider_library: str | None = None  # source-of-change library
     old_value: str | None = None
     new_value: str | None = None
     affected_libraries: list[str] = field(default_factory=list)
+    # ADR-027 A3/D3.2 — per-finding reachability modulation, mirroring the A4
+    # Change override so a demotion reaches the bundle verdict (which lowers
+    # findings to Change and classifies via effective_category). Default None =
+    # classify by kind, i.e. today's behaviour.
+    effective_verdict: Verdict | None = None
+    modulation_reason: str | None = None
+    modulation_rule: str | None = None
 
     def to_change(self) -> Change:
         """Lower a :class:`BundleFinding` into the :class:`Change` representation.
 
         Used by the JSON/Markdown reporters that already know how to render
         ``Change`` objects. The bundle attribution fields are flattened into
-        ``description`` so they survive the lowering.
+        ``description`` so they survive the lowering. A reachability modulation
+        (D3.2) is propagated onto the lowered ``Change`` so the bundle verdict
+        and the compare-release exit code honour it.
         """
         prefix = ""
         if self.consumer_library and self.provider_library:
@@ -199,6 +217,9 @@ class BundleFinding:
             old_value=self.old_value,
             new_value=self.new_value,
             affected_symbols=list(self.affected_libraries) or None,
+            effective_verdict=self.effective_verdict,
+            modulation_reason=self.modulation_reason,
+            modulation_rule=self.modulation_rule,
         )
 
 
@@ -225,8 +246,11 @@ class BundleDiffResult:
     @property
     def per_library_verdict(self) -> Verdict:
         order = [
-            Verdict.NO_CHANGE, Verdict.COMPATIBLE, Verdict.COMPATIBLE_WITH_RISK,
-            Verdict.API_BREAK, Verdict.BREAKING,
+            Verdict.NO_CHANGE,
+            Verdict.COMPATIBLE,
+            Verdict.COMPATIBLE_WITH_RISK,
+            Verdict.API_BREAK,
+            Verdict.BREAKING,
         ]
         worst = Verdict.NO_CHANGE
         for r in self.per_library:
@@ -237,8 +261,11 @@ class BundleDiffResult:
     @property
     def verdict(self) -> Verdict:
         order = [
-            Verdict.NO_CHANGE, Verdict.COMPATIBLE, Verdict.COMPATIBLE_WITH_RISK,
-            Verdict.API_BREAK, Verdict.BREAKING,
+            Verdict.NO_CHANGE,
+            Verdict.COMPATIBLE,
+            Verdict.COMPATIBLE_WITH_RISK,
+            Verdict.API_BREAK,
+            Verdict.BREAKING,
         ]
         return max(self.per_library_verdict, self.bundle_verdict, key=order.index)
 
@@ -246,6 +273,7 @@ class BundleDiffResult:
 # ---------------------------------------------------------------------------
 # Manifest input
 # ---------------------------------------------------------------------------
+
 
 @dataclass(frozen=True)
 class ManifestEntry:
@@ -271,12 +299,12 @@ class ManifestEntry:
       explicit instantiation matrix in their build system.
     """
 
-    symbol: str | None = None                    # literal mangled symbol
-    pattern: str | None = None                   # fnmatch glob on demangled form
-    template: str | None = None                  # C++ qualified template name
+    symbol: str | None = None  # literal mangled symbol
+    pattern: str | None = None  # fnmatch glob on demangled form
+    template: str | None = None  # C++ qualified template name
     instantiations: tuple[dict[str, str], ...] = ()  # for template form
-    library: str | None = None                   # provider when optional_provider=False
-    optional_provider: bool = True               # True = any sibling may provide
+    library: str | None = None  # provider when optional_provider=False
+    optional_provider: bool = True  # True = any sibling may provide
 
     def kind(self) -> str:
         """Return ``'symbol'``, ``'pattern'``, or ``'template'`` for diagnostics."""
@@ -323,7 +351,9 @@ class InstantiationManifest:
         return frozenset(e.symbol for e in self.entries if e.symbol is not None)
 
 
-def _expand_instantiations(template: str, instantiations: tuple[dict[str, str], ...]) -> list[str]:
+def _expand_instantiations(
+    template: str, instantiations: tuple[dict[str, str], ...]
+) -> list[str]:
     """Build demangled-form substring patterns from a template + parameter list.
 
     Returns a list of strings like ``"acme::lib::train_ops<float, method::dense, task::train>"``
@@ -347,6 +377,7 @@ def _load_manifest_data(path: Path) -> dict[str, object]:
     text = path.read_text(encoding="utf-8")
     if path.suffix.lower() in (".yaml", ".yml"):
         import yaml
+
         data = yaml.safe_load(text)
     else:
         data = json.loads(text)
@@ -371,7 +402,9 @@ def _validate_manifest_entry_shape(path: Path, raw: dict[str, object]) -> str:
     return shape_keys[0]
 
 
-def _parse_template_instantiations(path: Path, raw: dict[str, object]) -> tuple[dict[str, str], ...]:
+def _parse_template_instantiations(
+    path: Path, raw: dict[str, object]
+) -> tuple[dict[str, str], ...]:
     """Parse and coerce the 'instantiations' list from a template entry."""
     insts_raw = raw.get("instantiations", [])
     if not isinstance(insts_raw, list) or not insts_raw:
@@ -463,6 +496,7 @@ def load_manifest(path: Path) -> InstantiationManifest:
 # Bundle snapshot construction
 # ---------------------------------------------------------------------------
 
+
 def build_bundle_snapshot(libraries: dict[str, Path]) -> BundleSnapshot:
     """Parse every library in the release and build the resolution graph.
 
@@ -490,10 +524,17 @@ def build_bundle_snapshot(libraries: dict[str, Path]) -> BundleSnapshot:
             continue
         try:
             meta = parse_elf_metadata(path)
-        except Exception as exc:  # pragma: no cover — parse_elf_metadata already swallows most
+        except (
+            Exception
+        ) as exc:  # pragma: no cover — parse_elf_metadata already swallows most
             log.warning("bundle: failed to parse %s: %s", path, exc)
             continue
-        if meta is None or (not meta.soname and not meta.symbols and not meta.imports and not meta.needed):
+        if meta is None or (
+            not meta.soname
+            and not meta.symbols
+            and not meta.imports
+            and not meta.needed
+        ):
             log.debug("bundle: skipping non-ELF or empty input %s", path)
             continue
         metadata[name] = meta
@@ -568,6 +609,7 @@ def _compute_resolution_graph(
 # ---------------------------------------------------------------------------
 # Bundle diff
 # ---------------------------------------------------------------------------
+
 
 def compare_bundle(
     old: BundleSnapshot,
@@ -653,6 +695,7 @@ def compare_bundle(
 # ---------------------------------------------------------------------------
 # Detection helpers
 # ---------------------------------------------------------------------------
+
 
 def _detect_library_structural_changes(
     old: BundleSnapshot,
@@ -754,8 +797,7 @@ def _detect_intra_dep_removed(
             # bundle. This is what --bundle-system-providers controls.
             extra_needed = new.resolution.extra_needed.get(consumer.library, [])
             if extra_needed and all(
-                e in system_providers or _looks_system(e)
-                for e in extra_needed
+                e in system_providers or _looks_system(e) for e in extra_needed
             ):
                 # And the symbol itself looks system-shaped (mangled std::,
                 # well-known C runtime entry, etc.) — skip the finding.
@@ -803,7 +845,9 @@ def _detect_intra_dep_signature_changed(
             if change.kind not in relevant_kinds:
                 continue
             consumers = new.resolution.consumers_of(change.symbol)
-            consumer_libs = sorted({c.library for c in consumers if c.library != provider_lib})
+            consumer_libs = sorted(
+                {c.library for c in consumers if c.library != provider_lib}
+            )
             if not consumer_libs:
                 continue
             for consumer_lib in consumer_libs:
@@ -845,6 +889,22 @@ def _detect_intra_type_changed(
     symbols. Misses extern-C function pointers that pass struct
     references (would require type-graph propagation from DWARF, future
     work — out of scope for ADR-023 first cut).
+
+    Reachability scope (ADR-027 A3 / D3.2 limitation). The public-vs-internal
+    split below is computed from ``ElfMetadata.symbols``, which is parsed from
+    ``.dynsym`` and therefore holds only **exported** (GLOBAL/WEAK,
+    non-hidden) definitions — LOCAL and hidden symbols are not retained
+    (``elf_metadata._parse_dynsym``). Consequently a consumer that references
+    the changed type **only** from its own internal/hidden functions leaves no
+    trace here: no exported symbol carries the type name, ``consumer_reach``
+    stays empty, and no finding is emitted for that consumer. The
+    ``internal_hit`` (demote-to-risk) branch therefore fires only for inputs
+    whose snapshots happen to carry local symbols (e.g. relocatable objects or
+    DWARF-derived graphs); detecting purely internal cross-DSO references from
+    a stripped shared object would require retaining non-exported symbols or a
+    full type graph, deliberately out of scope (documented per the ADR-027
+    review — the conservative miss is preferred over a parser/schema change
+    with broad blast radius).
     """
     findings: list[BundleFinding] = []
     # Dedup: one finding per (consumer, provider, type) triple — multiple
@@ -866,38 +926,75 @@ def _detect_intra_type_changed(
             if change.kind not in type_kinds:
                 continue
             type_name = change.symbol
-            # Look for the type name embedded in any other library's
-            # exported symbol names (mangled C++ symbols include the type).
-            crossing_consumers: list[str] = []
+            # Look for the type name embedded in another library's symbols.
+            # ADR-027 A3/D3.2 reachability filter: classify each consumer match
+            # as reaching its *public* surface (the type leaks into a symbol the
+            # consumer itself exports — full-confidence cross-DSO break) vs only
+            # its *internal* surface (the type appears only in the consumer's
+            # local/hidden symbols — demoted to risk, not dropped, because the
+            # consumer does not re-expose the type across the boundary).
             stripped = _strip_namespace_prefix(type_name)
+            consumer_reach: dict[str, bool] = {}  # consumer -> reaches public surface
             for sib_name, sib_meta in new.metadata.items():
                 if sib_name == provider_lib:
                     continue
+                public_hit = False
+                internal_hit = False
                 for sym in sib_meta.symbols:
                     if stripped and stripped in sym.name:
-                        crossing_consumers.append(sib_name)
-                        break
-            for consumer_lib in sorted(set(crossing_consumers)):
+                        if _is_public_surface_symbol(sym):
+                            public_hit = True
+                            break
+                        internal_hit = True
+                if public_hit or internal_hit:
+                    consumer_reach[sib_name] = public_hit
+            for consumer_lib in sorted(consumer_reach):
                 key = (consumer_lib, provider_lib, type_name)
                 if key in seen:
                     continue
                 seen.add(key)
-                findings.append(
-                    BundleFinding(
-                        kind=ChangeKind.BUNDLE_INTRA_TYPE_CHANGED,
-                        symbol=type_name,
-                        description=(
-                            f"{provider_lib} changed type {type_name}; the type "
-                            f"is reachable from {consumer_lib}'s exported symbols. "
-                            f"{consumer_lib}'s ABI looks unchanged in isolation, "
-                            f"but every cross-DSO use of {type_name} is affected."
-                        ),
-                        consumer_library=consumer_lib,
-                        provider_library=provider_lib,
-                        affected_libraries=[consumer_lib],
+                on_public = consumer_reach[consumer_lib]
+                finding = BundleFinding(
+                    kind=ChangeKind.BUNDLE_INTRA_TYPE_CHANGED,
+                    symbol=type_name,
+                    description=(
+                        f"{provider_lib} changed type {type_name}; the type "
+                        f"is reachable from {consumer_lib}'s exported symbols. "
+                        f"{consumer_lib}'s ABI looks unchanged in isolation, "
+                        f"but every cross-DSO use of {type_name} is affected."
                     ),
+                    consumer_library=consumer_lib,
+                    provider_library=provider_lib,
+                    affected_libraries=[consumer_lib],
                 )
+                if not on_public:
+                    # Consumer uses the type only internally → demote (disclosed,
+                    # never dropped): the cross-DSO change cannot reach the
+                    # consumer's own public ABI surface.
+                    finding.effective_verdict = Verdict.COMPATIBLE_WITH_RISK
+                    finding.modulation_reason = "consumer-internal-use"
+                    finding.modulation_rule = "bundle-reachability"
+                    finding.description = (
+                        f"{provider_lib} changed type {type_name}; {consumer_lib} "
+                        f"references it only via internal (non-exported) symbols, "
+                        f"so the change does not reach {consumer_lib}'s public ABI "
+                        f"surface — review, but not a confirmed cross-DSO break."
+                    )
+                findings.append(finding)
     return findings
+
+
+def _is_public_surface_symbol(sym: ElfSymbol) -> bool:
+    """True when *sym* is part of a library's exported public ABI surface.
+
+    A defined GLOBAL/WEAK symbol with default/protected visibility is reachable
+    by external consumers; LOCAL binding or hidden/internal visibility is not
+    (it is the DSO's private implementation). Used by the A3 reachability filter
+    to tell a real cross-DSO break from an internal-only type reference.
+    """
+    if sym.binding not in (SymbolBinding.GLOBAL, SymbolBinding.WEAK):
+        return False
+    return sym.visibility in ("default", "protected")
 
 
 def _detect_provider_changed(
@@ -913,8 +1010,8 @@ def _detect_provider_changed(
     """
     findings: list[BundleFinding] = []
 
-    removed_by: dict[str, str] = {}        # symbol -> library that removed it
-    added_by: dict[str, str] = {}          # symbol -> library that added it
+    removed_by: dict[str, str] = {}  # symbol -> library that removed it
+    added_by: dict[str, str] = {}  # symbol -> library that added it
     for lib_name, diff in diff_by_library.items():
         for change in diff.changes:
             if change.kind in (
@@ -1039,7 +1136,9 @@ def _soname_skew_findings(
     findings: list[BundleFinding] = []
     for prefix in prefixes:
         for change in detect_bundle_soname_skew(
-            old_members, new_members, cohort_prefix=prefix,
+            old_members,
+            new_members,
+            cohort_prefix=prefix,
         ):
             findings.append(
                 BundleFinding(
@@ -1196,8 +1295,7 @@ def _match_target_against_index(
             matched.append(demangled)
             provider_set.add(lib_name)
     providers = [
-        ProviderEntry(library=name, version="")
-        for name in sorted(provider_set)
+        ProviderEntry(library=name, version="") for name in sorted(provider_set)
     ]
     return matched, providers
 
@@ -1228,10 +1326,7 @@ def _match_entry(
     :func:`_build_demangled_index` and pass it in to amortise the
     O(symbols) demangle pass across all targets.
     """
-    needs_index = any(
-        kind != "symbol"
-        for _, kind in _entry_targets(entry)
-    )
+    needs_index = any(kind != "symbol" for _, kind in _entry_targets(entry))
     if index is None and needs_index:
         index = _build_demangled_index(snapshot)
     out: list[tuple[str, str, list[str], list[ProviderEntry]]] = []
@@ -1284,11 +1379,15 @@ def _detect_manifest_drift(
                 )
                 continue
             if not entry.optional_provider and entry.library is not None:
-                def _matches(prov: ProviderEntry, _entry: ManifestEntry = entry) -> bool:
+
+                def _matches(
+                    prov: ProviderEntry, _entry: ManifestEntry = entry
+                ) -> bool:
                     if prov.library == _entry.library:
                         return True
                     meta = new.metadata.get(prov.library)
                     return meta is not None and meta.soname == _entry.library
+
                 if not any(_matches(p) for p in providers):
                     got = ", ".join(sorted(p.library for p in providers))
                     findings.append(
@@ -1335,16 +1434,44 @@ def _detect_manifest_drift(
 
 # Common system-provided symbols imported by almost every C/C++ DSO.
 # Avoids false-positive bundle findings for libc/libstdc++ symbols.
-DEFAULT_SYSTEM_SYMBOLS: frozenset[str] = frozenset({
-    "__libc_start_main", "__cxa_atexit", "__cxa_finalize", "__cxa_throw",
-    "__gxx_personality_v0", "__stack_chk_fail", "__stack_chk_guard",
-    "__tls_get_addr", "__errno_location", "_ITM_registerTMCloneTable",
-    "_ITM_deregisterTMCloneTable",
-    "abort", "exit", "malloc", "free", "calloc", "realloc",
-    "memcpy", "memmove", "memset", "memcmp", "strlen", "strcmp", "strncmp",
-    "strcpy", "strncpy", "strdup", "fprintf", "printf", "puts",
-    "pthread_once", "pthread_self", "pthread_create", "pthread_join",
-})
+DEFAULT_SYSTEM_SYMBOLS: frozenset[str] = frozenset(
+    {
+        "__libc_start_main",
+        "__cxa_atexit",
+        "__cxa_finalize",
+        "__cxa_throw",
+        "__gxx_personality_v0",
+        "__stack_chk_fail",
+        "__stack_chk_guard",
+        "__tls_get_addr",
+        "__errno_location",
+        "_ITM_registerTMCloneTable",
+        "_ITM_deregisterTMCloneTable",
+        "abort",
+        "exit",
+        "malloc",
+        "free",
+        "calloc",
+        "realloc",
+        "memcpy",
+        "memmove",
+        "memset",
+        "memcmp",
+        "strlen",
+        "strcmp",
+        "strncmp",
+        "strcpy",
+        "strncpy",
+        "strdup",
+        "fprintf",
+        "printf",
+        "puts",
+        "pthread_once",
+        "pthread_self",
+        "pthread_create",
+        "pthread_join",
+    }
+)
 
 
 def _looks_system(soname: str) -> bool:

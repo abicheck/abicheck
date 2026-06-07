@@ -57,6 +57,7 @@ nav:
     - Architecture: concepts/architecture.md
     - Limitations: concepts/limitations.md
     - Change Kinds: reference/change-kinds.md
+    - API Surface Intelligence: concepts/api-surface-intelligence.md
     - Exit Codes: reference/exit-codes.md
     - Platforms: reference/platforms.md
     - Tool Comparison: reference/tool-comparison.md

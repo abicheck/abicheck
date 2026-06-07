@@ -34,7 +34,7 @@ import click
 from .cli import _write_or_echo, main
 
 if TYPE_CHECKING:
-    from .idioms import IdiomTag
+    from .idioms import AntiPattern, IdiomTag
 
 
 @main.command("surface-report")
@@ -79,6 +79,14 @@ if TYPE_CHECKING:
     "factory, create/destroy, callback).",
 )
 @click.option(
+    "--anti-patterns/--no-anti-patterns",
+    "anti_patterns",
+    default=False,
+    show_default=True,
+    help="Detect and report ABI anti-patterns (std:: types crossed by value, "
+    "polymorphic types with no virtual destructor).",
+)
+@click.option(
     "-o",
     "--output",
     type=click.Path(path_type=Path),
@@ -92,6 +100,7 @@ def surface_report_cmd(
     fmt: str,
     top: int,
     idioms: bool,
+    anti_patterns: bool,
     output: Path | None,
 ) -> None:
     """Report structural metrics for a library's public ABI surface.
@@ -118,11 +127,19 @@ def surface_report_cmd(
     metrics = compute_surface_metrics(snap, top_n=top)
 
     idiom_tags: dict[str, list[IdiomTag]] = {}
-    if idioms:
-        from .idioms import recognise_idioms
+    anti_list: list[AntiPattern] = []
+    if idioms or anti_patterns:
         from .surface_graph import build_surface_graph
 
-        idiom_tags = recognise_idioms(build_surface_graph(snap))
+        graph = build_surface_graph(snap)
+        if idioms:
+            from .idioms import recognise_idioms
+
+            idiom_tags = recognise_idioms(graph)
+        if anti_patterns:
+            from .idioms import detect_antipatterns
+
+            anti_list = detect_antipatterns(graph)
 
     if fmt == "json":
         payload = metrics.to_dict()
@@ -141,14 +158,33 @@ def surface_report_cmd(
                 ]
                 for name, tags in idiom_tags.items()
             }
+        if anti_patterns:
+            payload["anti_patterns"] = [
+                {
+                    "symbol": a.symbol,
+                    "kind": a.kind.value,
+                    "description": a.description,
+                    "evidence": a.evidence,
+                }
+                for a in anti_list
+            ]
         _write_or_echo(output, json.dumps(payload, indent=2))
         return
 
-    _write_or_echo(output, _render_text(metrics, idiom_tags if idioms else None))
+    _write_or_echo(
+        output,
+        _render_text(
+            metrics,
+            idiom_tags if idioms else None,
+            anti_list if anti_patterns else None,
+        ),
+    )
 
 
 def _render_text(
-    metrics: object, idiom_tags: dict[str, list[IdiomTag]] | None = None
+    metrics: object,
+    idiom_tags: dict[str, list[IdiomTag]] | None = None,
+    anti_list: list[AntiPattern] | None = None,
 ) -> str:
     from .surface_graph import SurfaceMetrics
 
@@ -184,4 +220,8 @@ def _render_text(
                 lines.append(
                     f"    {tag.idiom.value:<16} {name}  [{tag.confidence.value}]"
                 )
+    if anti_list:
+        lines.append("  anti-patterns detected:")
+        for a in anti_list:
+            lines.append(f"    {a.kind.value:<34} {a.symbol}")
     return "\n".join(lines) + "\n"

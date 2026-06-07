@@ -777,6 +777,27 @@ class TestSeverityConfig:
         ts = root.find("testsuite")
         assert ts.get("failures") == "1"
 
+    def test_demoted_compatible_fails_under_strict_preset(self) -> None:
+        """ADR-027 review: a --pattern-verdicts demotion to COMPATIBLE must
+        still be a JUnit failure under a strict severity preset, matching the
+        severity-aware exit code (classify_change_object → QUALITY_ISSUES →
+        error). Otherwise CI consuming the JUnit file misses the failure that
+        the exit status reports."""
+        from abicheck.severity import PRESET_STRICT
+
+        demoted = Change(
+            kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="Ctx", description="size"
+        )
+        demoted.effective_verdict = Verdict.COMPATIBLE
+        result = _make_result([demoted], verdict=Verdict.COMPATIBLE)
+        # Default preset: quality issues are warnings → testcase passes.
+        default_xml = _parse(to_junit_xml(result))
+        assert default_xml.find("testsuite").get("failures") == "0"
+        # Strict preset: quality issues escalate to error → failure, agreeing
+        # with the nonzero severity-aware exit code.
+        strict_xml = _parse(to_junit_xml(result, severity_config=PRESET_STRICT))
+        assert strict_xml.find("testsuite").get("failures") == "1"
+
     def test_severity_config_demotes_breaking_to_pass(self) -> None:
         """When severity_config marks abi_breaking as 'warning', additions
         that were BREAKING still fail (breaking_set takes priority)."""

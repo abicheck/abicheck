@@ -36,9 +36,15 @@ import re
 from dataclasses import dataclass, field
 from enum import Enum
 
-from .checker_policy import Confidence
-from .model import RecordType, Visibility
+from .checker_policy import ChangeKind, Confidence
+from .model import ParamKind, RecordType, ScopeOrigin, Visibility
 from .surface_graph import SurfaceGraph
+
+# Provenance origins that are NOT part of the public ABI surface — a type defined
+# only in one of these is the library's private implementation (ADR-024/027).
+_NON_PUBLIC_ORIGINS = frozenset(
+    {ScopeOrigin.PRIVATE_HEADER, ScopeOrigin.SYSTEM_HEADER, ScopeOrigin.GENERATED}
+)
 
 
 class Idiom(str, Enum):
@@ -88,6 +94,49 @@ def _strip_ptr(type_str: str) -> str:
 
 def _is_pointer(type_str: str) -> bool:
     return "*" in type_str
+
+
+# Primitive/builtin type words; a pointer to one of these is not an opaque
+# handle token. ``_strip_ptr`` already removes struct/class/union/cv keywords,
+# so the pointee is just the core type spelling here.
+_PRIMITIVE_WORDS = frozenset(
+    {
+        "void",
+        "bool",
+        "char",
+        "wchar_t",
+        "char8_t",
+        "char16_t",
+        "char32_t",
+        "short",
+        "int",
+        "long",
+        "float",
+        "double",
+        "signed",
+        "unsigned",
+        "_Bool",
+        "__int128",
+    }
+)
+_STDINT_RE = re.compile(
+    r"^(u?int(_least|_fast)?(8|16|32|64|max|ptr)_t|size_t|ssize_t|ptrdiff_t)$"
+)
+
+
+def _is_builtin_type(pointee: str) -> bool:
+    """True when *pointee* names a builtin/primitive (not an opaque user type).
+
+    A typedef like ``int *`` / ``int32_t *`` is a pointer to a primitive, not an
+    opaque handle token — so it must not be tagged HANDLE (ADR-027 review).
+    """
+    name = pointee.strip()
+    if not name:
+        return False
+    if _STDINT_RE.match(name):
+        return True
+    words = name.split()
+    return bool(words) and all(w in _PRIMITIVE_WORDS for w in words)
 
 
 def _record_is_incomplete(rec: RecordType | None) -> bool:
@@ -175,6 +224,30 @@ def _recognise_pimpl(graph: SurfaceGraph, rec: RecordType) -> IdiomTag | None:
     )
 
 
+def _resolve_pointee(
+    graph: SurfaceGraph, pointee: str
+) -> tuple[RecordType | None, bool]:
+    """Resolve a pointee type name to a record, flagging short-name ambiguity.
+
+    Exact qualified identity wins. Otherwise the unqualified short name binds
+    only when exactly one snapshot type carries it; if several types share the
+    short name (e.g. ``ns1::Ctx`` + ``ns2::Ctx``), the reference is ambiguous —
+    return ``(None, True)`` so callers never bind to whichever record
+    ``types_by_name`` happened to store first (a typedef ``Ctx *`` might point
+    at the complete ``ns2::Ctx``, not the incomplete ``ns1::Ctx`` — ADR-027
+    review). A name no snapshot type carries is unknown / forward-declared:
+    ``(None, False)``.
+    """
+    exact = graph.types_by_name.get(pointee)
+    if exact is not None and exact.name == pointee:
+        return exact, False
+    short = pointee.rsplit("::", 1)[-1]
+    matches = [r for r in graph.snapshot.types if r.name.rsplit("::", 1)[-1] == short]
+    if len(matches) == 1:
+        return matches[0], False
+    return (None, True) if matches else (None, False)
+
+
 def _recognise_handle(graph: SurfaceGraph) -> dict[str, IdiomTag]:
     out: dict[str, IdiomTag] = {}
     for alias, target in sorted(graph.snapshot.typedefs.items()):
@@ -183,10 +256,22 @@ def _recognise_handle(graph: SurfaceGraph) -> dict[str, IdiomTag]:
             continue
         pointee = _strip_ptr(t)
         # void* token, or a pointer to a forward-declared / unknown struct.
-        rec = graph.types_by_name.get(pointee) or graph.types_by_name.get(
-            pointee.rsplit("::", 1)[-1]
+        # Resolve by qualified identity; an ambiguous short name does not bind.
+        rec, ambiguous = _resolve_pointee(graph, pointee)
+        # A handle is an opaque *token*: void*, or a pointer to a type that is
+        # genuinely incomplete (a known opaque record, or an unknown user type —
+        # a forward-declared struct). A pointer to a builtin/primitive (e.g.
+        # ``int *``, ``int32_t *``) is NOT an opaque handle, so excluding it
+        # avoids a false ``handle_type_changed`` when its pointee width changes
+        # (ADR-027 review). A *known but complete* record is likewise not a token,
+        # and an ambiguous short-name pointee is not provably opaque so it is not
+        # tagged (it may resolve to a complete type — ADR-027 review).
+        is_token = pointee in ("void", "") or (
+            not ambiguous
+            and _record_is_incomplete(rec)
+            and not _is_builtin_type(pointee)
         )
-        if pointee in ("void", "") or _record_is_incomplete(rec):
+        if is_token:
             out[alias] = IdiomTag(
                 idiom=Idiom.HANDLE,
                 confidence=Confidence.MEDIUM if pointee != "void" else Confidence.HIGH,
@@ -303,6 +388,146 @@ def _recognise_callbacks(graph: SurfaceGraph) -> dict[str, IdiomTag]:
                     ),
                 )
     return out
+
+
+@dataclass(frozen=True)
+class AntiPattern:
+    """A single-snapshot anti-pattern finding (ADR-027 D2.2).
+
+    ``kind`` is the :class:`ChangeKind` the finding maps to; ``evidence`` lists
+    the graph edges that matched (for ``surface-report`` and the A4 ledger).
+    """
+
+    symbol: str
+    kind: ChangeKind
+    description: str
+    evidence: list[str] = field(default_factory=list)
+
+
+def _is_std_by_value(type_str: str, pointer_depth: int, kind: ParamKind) -> bool:
+    """True when *type_str* names a ``std::`` type crossed **by value**.
+
+    A pointer/reference to a ``std::`` type is fine (only the pointer crosses
+    the boundary); it is passing/returning the container itself that is fragile.
+    """
+    if "std::" not in type_str:
+        return False
+    if pointer_depth >= 1 or _is_pointer(type_str) or "&" in type_str:
+        return False
+    if kind in (ParamKind.POINTER, ParamKind.REFERENCE, ParamKind.RVALUE_REF):
+        return False
+    return True
+
+
+def _has_virtual_destructor(rec: RecordType) -> bool:
+    """Heuristic: does *rec*'s vtable carry a destructor slot?
+
+    Itanium mangles destructors with ``D0``/``D1``/``D2`` suffixes; MSVC uses
+    ``??1`` / ``vector deleting destructor``. A polymorphic type whose vtable
+    has no destructor slot has a non-virtual destructor — deleting through a
+    base pointer is UB.
+    """
+    for entry in rec.vtable:
+        if re.search(r"D[012]\b|D[012]Ev|\?\?1|deleting destructor", entry):
+            return True
+    return False
+
+
+def detect_antipatterns(graph: SurfaceGraph) -> list[AntiPattern]:
+    """Recognise single-snapshot anti-patterns over *graph* (ADR-027 D2.2).
+
+    Returns the deterministic, order-stable list of RISK-level anti-patterns:
+    public functions exposing ``std::`` types by value, and polymorphic types
+    (used as a base or factory return) lacking a virtual destructor.
+    """
+    found: list[AntiPattern] = []
+
+    # PUBLIC_API_EXPOSES_STL_BY_VALUE — per public function.
+    for fn in graph.snapshot.functions:
+        if fn.visibility != Visibility.PUBLIC:
+            continue
+        hits: list[str] = []
+        if _is_std_by_value(fn.return_type, fn.return_pointer_depth, ParamKind.VALUE):
+            hits.append(f"returns {fn.return_type} by value")
+        for p in fn.params:
+            ptype = getattr(p, "type", "") or ""
+            if _is_std_by_value(ptype, getattr(p, "pointer_depth", 0), p.kind):
+                hits.append(f"parameter {p.name!r} is {ptype} by value")
+        if hits:
+            found.append(
+                AntiPattern(
+                    symbol=fn.name,
+                    kind=ChangeKind.PUBLIC_API_EXPOSES_STL_BY_VALUE,
+                    description=(
+                        f"public function {fn.name} crosses the ABI boundary with "
+                        f"a std:: type by value ({'; '.join(hits)})"
+                    ),
+                    evidence=hits,
+                )
+            )
+
+    # POLYMORPHIC_TYPE_NON_VIRTUAL_DTOR — polymorphic types used as base/factory.
+    # Resolve every base/factory target spelling to a *specific* snapshot type
+    # (exact qualified name, or short name only when unambiguous), so a factory
+    # returning ns1::Base* never tags an unrelated ns2::Base that merely shares a
+    # short name (ADR-027 review). Unresolvable / ambiguous targets are dropped.
+    all_type_names = {rec.name for rec in graph.snapshot.types}
+    by_short: dict[str, list[str]] = {}
+    for n in all_type_names:
+        by_short.setdefault(n.rsplit("::", 1)[-1], []).append(n)
+
+    def _resolve(spelling: str) -> str | None:
+        if spelling in all_type_names:
+            return spelling
+        cands = by_short.get(spelling.rsplit("::", 1)[-1], [])
+        return cands[0] if len(cands) == 1 else None
+
+    base_targets: set[str] = set()
+    for rec in graph.snapshot.types:
+        # Only count a base when the *deriving* type is on the public surface
+        # (ADR-027 review). A polymorphic Base inherited solely by a private /
+        # system / generated record is not a public ABI risk; counting it would
+        # also let that private-inheritance evidence pre-exist in old and wrongly
+        # suppress a *newly introduced* public factory risk for the same Base in
+        # _emit_new_antipatterns(). When no public-header set was supplied every
+        # record is UNKNOWN, which is treated as in-surface (no behaviour change).
+        if rec.origin in _NON_PUBLIC_ORIGINS:
+            continue
+        for b in rec.bases:
+            resolved = _resolve(b)
+            if resolved is not None:
+                base_targets.add(resolved)
+    factory_targets: set[str] = set()
+    for fn in graph.snapshot.functions:
+        if fn.visibility != Visibility.PUBLIC:
+            continue
+        if fn.return_pointer_depth >= 1 or _is_pointer(fn.return_type):
+            resolved = _resolve(_strip_ptr(fn.return_type))
+            if resolved is not None:
+                factory_targets.add(resolved)
+    for rec in graph.snapshot.types:
+        if not rec.vtable:
+            continue
+        used_as_base = rec.name in base_targets
+        used_as_factory = rec.name in factory_targets
+        if not (used_as_base or used_as_factory):
+            continue
+        if _has_virtual_destructor(rec):
+            continue
+        role = "base class" if used_as_base else "factory return"
+        found.append(
+            AntiPattern(
+                symbol=rec.name,
+                kind=ChangeKind.POLYMORPHIC_TYPE_NON_VIRTUAL_DTOR,
+                description=(
+                    f"polymorphic type {rec.name} (used as {role}) has a vtable "
+                    f"but no virtual destructor — delete through base is UB"
+                ),
+                evidence=[f"{rec.name} has vtable, no destructor slot; role={role}"],
+            )
+        )
+
+    return sorted(found, key=lambda a: (a.kind.value, a.symbol))
 
 
 def recognise_idioms(graph: SurfaceGraph) -> dict[str, list[IdiomTag]]:

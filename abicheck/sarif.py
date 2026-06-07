@@ -51,7 +51,20 @@ def _tool_version() -> str:
         return "unknown"
 
 
+_VERDICT_TO_SARIF_LEVEL = {
+    Verdict.BREAKING: "error",
+    Verdict.API_BREAK: "error",
+    Verdict.COMPATIBLE_WITH_RISK: "warning",
+    Verdict.COMPATIBLE: "note",
+}
+
+
 def _severity(change: Change) -> str:
+    # Honour an A4 per-finding effective_verdict (ADR-027): a demoted opaque/
+    # PIMPL layout change reports as a SARIF "note", not an "error".
+    eff = getattr(change, "effective_verdict", None)
+    if isinstance(eff, Verdict):
+        return _VERDICT_TO_SARIF_LEVEL.get(eff, policy_for(change.kind).severity)
     return policy_for(change.kind).severity
 
 

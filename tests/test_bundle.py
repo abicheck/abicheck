@@ -4,6 +4,7 @@ These tests use minimal in-memory ElfMetadata fixtures so they do not need
 gcc or castxml. Integration tests that build real .so files from the
 examples/case90-93 fixtures live in tests/test_bundle_examples.py.
 """
+
 from __future__ import annotations
 
 import sys
@@ -29,6 +30,7 @@ from abicheck.elf_metadata import ElfImport, ElfMetadata, ElfSymbol
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 def _meta(
     *,
     soname: str = "",
@@ -40,10 +42,13 @@ def _meta(
     """Construct a minimal ElfMetadata for testing."""
     syms = []
     for name in exports or []:
-        syms.append(ElfSymbol(
-            name=name, visibility="default",
-            version=(export_versions or {}).get(name, ""),
-        ))
+        syms.append(
+            ElfSymbol(
+                name=name,
+                visibility="default",
+                version=(export_versions or {}).get(name, ""),
+            )
+        )
     imps = []
     for name in imports or []:
         imps.append(ElfImport(name=name))
@@ -67,16 +72,22 @@ def _snapshot(libraries: dict[str, ElfMetadata]) -> BundleSnapshot:
     )
 
 
-def _diff(library: str, *changes: Change, verdict: Verdict = Verdict.BREAKING) -> DiffResult:
+def _diff(
+    library: str, *changes: Change, verdict: Verdict = Verdict.BREAKING
+) -> DiffResult:
     return DiffResult(
-        old_version="old", new_version="new",
-        library=library, changes=list(changes), verdict=verdict,
+        old_version="old",
+        new_version="new",
+        library=library,
+        changes=list(changes),
+        verdict=verdict,
     )
 
 
 # ---------------------------------------------------------------------------
 # Resolution graph
 # ---------------------------------------------------------------------------
+
 
 class TestResolutionGraph:
     def test_indexes_exports_and_imports(self) -> None:
@@ -100,10 +111,13 @@ class TestResolutionGraph:
 
     def test_skips_hidden_visibility(self) -> None:
         # Hidden exports are not part of the public surface.
-        meta = ElfMetadata(soname="lib.so", symbols=[
-            ElfSymbol(name="public_func", visibility="default"),
-            ElfSymbol(name="hidden_func", visibility="hidden"),
-        ])
+        meta = ElfMetadata(
+            soname="lib.so",
+            symbols=[
+                ElfSymbol(name="public_func", visibility="default"),
+                ElfSymbol(name="hidden_func", visibility="hidden"),
+            ],
+        )
         snap = _snapshot({"lib.so": meta})
         assert "public_func" in snap.resolution.provides
         assert "hidden_func" not in snap.resolution.provides
@@ -111,7 +125,9 @@ class TestResolutionGraph:
     def test_extra_needed_records_system_libs(self) -> None:
         # DT_NEEDED that doesn't match a sibling in the bundle goes into extra.
         meta = {
-            "libcore.so": _meta(soname="libcore.so", needed=["libc.so.6", "libalgo.so.1"]),
+            "libcore.so": _meta(
+                soname="libcore.so", needed=["libc.so.6", "libalgo.so.1"]
+            ),
             "libalgo.so": _meta(soname="libalgo.so.1"),
         }
         snap = _snapshot(meta)
@@ -123,23 +139,37 @@ class TestResolutionGraph:
 # bundle_intra_dep_removed
 # ---------------------------------------------------------------------------
 
+
 class TestIntraDepRemoved:
     def test_detects_missing_import(self) -> None:
-        old = _snapshot({
-            "libcore.so": _meta(soname="libcore.so.1", exports=["core_add", "core_mul"]),
-            "libalgo.so": _meta(soname="libalgo.so.1", needed=["libcore.so.1"],
-                                imports=["core_add", "core_mul"]),
-        })
-        new = _snapshot({
-            "libcore.so": _meta(soname="libcore.so.1", exports=["core_add"]),
-            "libalgo.so": _meta(soname="libalgo.so.1", needed=["libcore.so.1"],
-                                imports=["core_add", "core_mul"]),
-        })
+        old = _snapshot(
+            {
+                "libcore.so": _meta(
+                    soname="libcore.so.1", exports=["core_add", "core_mul"]
+                ),
+                "libalgo.so": _meta(
+                    soname="libalgo.so.1",
+                    needed=["libcore.so.1"],
+                    imports=["core_add", "core_mul"],
+                ),
+            }
+        )
+        new = _snapshot(
+            {
+                "libcore.so": _meta(soname="libcore.so.1", exports=["core_add"]),
+                "libalgo.so": _meta(
+                    soname="libalgo.so.1",
+                    needed=["libcore.so.1"],
+                    imports=["core_add", "core_mul"],
+                ),
+            }
+        )
         result = compare_bundle(old, new, per_library_results=[])
         kinds = {f.kind for f in result.bundle_findings}
         assert ChangeKind.BUNDLE_INTRA_DEP_REMOVED in kinds
         finding = next(
-            f for f in result.bundle_findings
+            f
+            for f in result.bundle_findings
             if f.kind == ChangeKind.BUNDLE_INTRA_DEP_REMOVED
         )
         assert finding.symbol == "core_mul"
@@ -147,12 +177,16 @@ class TestIntraDepRemoved:
 
     def test_ignores_system_symbols(self) -> None:
         # libc/libstdc++ imports must not fire bundle findings.
-        new = _snapshot({
-            "libfoo.so": _meta(soname="libfoo.so.1",
-                               needed=["libcore.so.1"],
-                               imports=["__cxa_atexit", "malloc", "memcpy"]),
-            "libcore.so": _meta(soname="libcore.so.1", exports=["dummy"]),
-        })
+        new = _snapshot(
+            {
+                "libfoo.so": _meta(
+                    soname="libfoo.so.1",
+                    needed=["libcore.so.1"],
+                    imports=["__cxa_atexit", "malloc", "memcpy"],
+                ),
+                "libcore.so": _meta(soname="libcore.so.1", exports=["dummy"]),
+            }
+        )
         result = compare_bundle(new, new, per_library_results=[])
         assert not any(
             f.kind == ChangeKind.BUNDLE_INTRA_DEP_REMOVED
@@ -160,19 +194,25 @@ class TestIntraDepRemoved:
         )
 
     def test_extends_system_providers_via_arg(self) -> None:
-        new = _snapshot({
-            "libfoo.so": _meta(soname="libfoo.so.1",
-                               needed=["libcore.so.1", "libcustom.so.1"],
-                               imports=["custom_init"]),
-            "libcore.so": _meta(soname="libcore.so.1", exports=["dummy"]),
-        })
+        new = _snapshot(
+            {
+                "libfoo.so": _meta(
+                    soname="libfoo.so.1",
+                    needed=["libcore.so.1", "libcustom.so.1"],
+                    imports=["custom_init"],
+                ),
+                "libcore.so": _meta(soname="libcore.so.1", exports=["dummy"]),
+            }
+        )
         # Without user-extended allow-list, custom_init is bundle-relevant.
         result_default = compare_bundle(new, new, per_library_results=[])
         # Note: heuristic — custom_init may already be excluded by the
         # "no intra-bundle siblings imported" path. Either way the
         # explicit allow-list must not introduce findings.
         with_extra = compare_bundle(
-            new, new, per_library_results=[],
+            new,
+            new,
+            per_library_results=[],
             system_providers=["libcustom.so.1"],
         )
         assert len(with_extra.bundle_findings) <= len(result_default.bundle_findings)
@@ -185,17 +225,20 @@ class TestIntraDepRemoved:
         # it. The unresolved import remains in .dynsym; the bundle layer
         # must still flag it (the system-symbol allow-list separately
         # filters out genuinely-external imports).
-        new = _snapshot({
-            "libcore.so": _meta(soname="libcore.so.1"),  # provider gone
-            "libalgo.so": _meta(
-                soname="libalgo.so.1",
-                needed=[],                        # DT_NEEDED stripped too
-                imports=["onedal_internal_op"],   # not a system symbol
-            ),
-        })
+        new = _snapshot(
+            {
+                "libcore.so": _meta(soname="libcore.so.1"),  # provider gone
+                "libalgo.so": _meta(
+                    soname="libalgo.so.1",
+                    needed=[],  # DT_NEEDED stripped too
+                    imports=["onedal_internal_op"],  # not a system symbol
+                ),
+            }
+        )
         result = compare_bundle(new, new, per_library_results=[])
         intra_removed = [
-            f for f in result.bundle_findings
+            f
+            for f in result.bundle_findings
             if f.kind == ChangeKind.BUNDLE_INTRA_DEP_REMOVED
         ]
         assert len(intra_removed) == 1
@@ -207,13 +250,17 @@ class TestIntraDepRemoved:
 # bundle_intra_dep_signature_changed
 # ---------------------------------------------------------------------------
 
+
 class TestIntraDepSignatureChanged:
     def test_promotes_provider_signature_change_to_consumer(self) -> None:
-        new = _snapshot({
-            "libcore.so": _meta(soname="libcore.so.1", exports=["core_add"]),
-            "libalgo.so": _meta(soname="libalgo.so.1", needed=["libcore.so.1"],
-                                imports=["core_add"]),
-        })
+        new = _snapshot(
+            {
+                "libcore.so": _meta(soname="libcore.so.1", exports=["core_add"]),
+                "libalgo.so": _meta(
+                    soname="libalgo.so.1", needed=["libcore.so.1"], imports=["core_add"]
+                ),
+            }
+        )
         diff_libcore = _diff(
             "libcore.so",
             Change(
@@ -224,7 +271,8 @@ class TestIntraDepSignatureChanged:
         )
         result = compare_bundle(new, new, [diff_libcore])
         findings = [
-            f for f in result.bundle_findings
+            f
+            for f in result.bundle_findings
             if f.kind == ChangeKind.BUNDLE_INTRA_DEP_SIGNATURE_CHANGED
         ]
         assert len(findings) == 1
@@ -234,19 +282,27 @@ class TestIntraDepSignatureChanged:
     def test_dedupe_params_plus_return_change(self) -> None:
         # libcore changes both params AND return of the same symbol; we
         # should emit a SINGLE bundle finding per (consumer, symbol).
-        new = _snapshot({
-            "libcore.so": _meta(soname="libcore.so.1", exports=["core_add"]),
-            "libalgo.so": _meta(soname="libalgo.so.1", needed=["libcore.so.1"],
-                                imports=["core_add"]),
-        })
+        new = _snapshot(
+            {
+                "libcore.so": _meta(soname="libcore.so.1", exports=["core_add"]),
+                "libalgo.so": _meta(
+                    soname="libalgo.so.1", needed=["libcore.so.1"], imports=["core_add"]
+                ),
+            }
+        )
         diff = _diff(
             "libcore.so",
-            Change(kind=ChangeKind.FUNC_PARAMS_CHANGED, symbol="core_add", description=""),
-            Change(kind=ChangeKind.FUNC_RETURN_CHANGED, symbol="core_add", description=""),
+            Change(
+                kind=ChangeKind.FUNC_PARAMS_CHANGED, symbol="core_add", description=""
+            ),
+            Change(
+                kind=ChangeKind.FUNC_RETURN_CHANGED, symbol="core_add", description=""
+            ),
         )
         result = compare_bundle(new, new, [diff])
         sig_findings = [
-            f for f in result.bundle_findings
+            f
+            for f in result.bundle_findings
             if f.kind == ChangeKind.BUNDLE_INTRA_DEP_SIGNATURE_CHANGED
         ]
         assert len(sig_findings) == 1
@@ -254,13 +310,17 @@ class TestIntraDepSignatureChanged:
     def test_no_finding_when_no_consumers(self) -> None:
         # Provider changes but no sibling imports the symbol — bundle-level
         # finding does NOT fire; the per-library diff already covers it.
-        new = _snapshot({
-            "libcore.so": _meta(soname="libcore.so.1", exports=["core_add"]),
-            "libother.so": _meta(soname="libother.so.1"),
-        })
+        new = _snapshot(
+            {
+                "libcore.so": _meta(soname="libcore.so.1", exports=["core_add"]),
+                "libother.so": _meta(soname="libother.so.1"),
+            }
+        )
         diff = _diff(
             "libcore.so",
-            Change(kind=ChangeKind.FUNC_PARAMS_CHANGED, symbol="core_add", description=""),
+            Change(
+                kind=ChangeKind.FUNC_PARAMS_CHANGED, symbol="core_add", description=""
+            ),
         )
         result = compare_bundle(new, new, [diff])
         assert not any(
@@ -273,27 +333,44 @@ class TestIntraDepSignatureChanged:
 # bundle_provider_changed
 # ---------------------------------------------------------------------------
 
+
 class TestProviderChanged:
     def test_detects_symbol_migration(self) -> None:
-        old = _snapshot({
-            "libcore.so": _meta(soname="libcore.so.1", exports=["util_x"]),
-            "libutil.so": _meta(soname="libutil.so.1"),
-        })
-        new = _snapshot({
-            "libcore.so": _meta(soname="libcore.so.1"),
-            "libutil.so": _meta(soname="libutil.so.1", exports=["util_x"]),
-        })
+        old = _snapshot(
+            {
+                "libcore.so": _meta(soname="libcore.so.1", exports=["util_x"]),
+                "libutil.so": _meta(soname="libutil.so.1"),
+            }
+        )
+        new = _snapshot(
+            {
+                "libcore.so": _meta(soname="libcore.so.1"),
+                "libutil.so": _meta(soname="libutil.so.1", exports=["util_x"]),
+            }
+        )
         diffs = [
-            _diff("libcore.so", Change(
-                kind=ChangeKind.FUNC_REMOVED, symbol="util_x", description="",
-            )),
-            _diff("libutil.so", Change(
-                kind=ChangeKind.FUNC_ADDED, symbol="util_x", description="",
-            ), verdict=Verdict.COMPATIBLE),
+            _diff(
+                "libcore.so",
+                Change(
+                    kind=ChangeKind.FUNC_REMOVED,
+                    symbol="util_x",
+                    description="",
+                ),
+            ),
+            _diff(
+                "libutil.so",
+                Change(
+                    kind=ChangeKind.FUNC_ADDED,
+                    symbol="util_x",
+                    description="",
+                ),
+                verdict=Verdict.COMPATIBLE,
+            ),
         ]
         result = compare_bundle(old, new, diffs)
         provider_findings = [
-            f for f in result.bundle_findings
+            f
+            for f in result.bundle_findings
             if f.kind == ChangeKind.BUNDLE_PROVIDER_CHANGED
         ]
         assert len(provider_findings) == 1
@@ -306,14 +383,15 @@ class TestProviderChanged:
         # NOT a provider migration.
         new = _snapshot({"libcore.so": _meta(soname="libcore.so.1", exports=["x"])})
         diffs = [
-            _diff("libcore.so",
-                  Change(kind=ChangeKind.FUNC_REMOVED, symbol="y", description=""),
-                  Change(kind=ChangeKind.FUNC_ADDED, symbol="y", description="")),
+            _diff(
+                "libcore.so",
+                Change(kind=ChangeKind.FUNC_REMOVED, symbol="y", description=""),
+                Change(kind=ChangeKind.FUNC_ADDED, symbol="y", description=""),
+            ),
         ]
         result = compare_bundle(new, new, diffs)
         assert not any(
-            f.kind == ChangeKind.BUNDLE_PROVIDER_CHANGED
-            for f in result.bundle_findings
+            f.kind == ChangeKind.BUNDLE_PROVIDER_CHANGED for f in result.bundle_findings
         )
 
 
@@ -321,16 +399,22 @@ class TestProviderChanged:
 # bundle_library_removed / bundle_library_added
 # ---------------------------------------------------------------------------
 
+
 class TestLibraryStructural:
     def test_added_library_emits_addition(self) -> None:
         old = _snapshot({"libcore.so": _meta(soname="libcore.so.1")})
-        new = _snapshot({
-            "libcore.so": _meta(soname="libcore.so.1"),
-            "libnew.so": _meta(soname="libnew.so.1"),
-        })
+        new = _snapshot(
+            {
+                "libcore.so": _meta(soname="libcore.so.1"),
+                "libnew.so": _meta(soname="libnew.so.1"),
+            }
+        )
         result = compare_bundle(old, new, [])
-        added = [f for f in result.bundle_findings
-                 if f.kind == ChangeKind.BUNDLE_LIBRARY_ADDED]
+        added = [
+            f
+            for f in result.bundle_findings
+            if f.kind == ChangeKind.BUNDLE_LIBRARY_ADDED
+        ]
         assert len(added) == 1
         assert added[0].symbol == "libnew.so"
 
@@ -338,30 +422,40 @@ class TestLibraryStructural:
         # If no sibling imported the removed library's symbols, the
         # bundle layer stays silent — the existing --fail-on-removed-library
         # flow is responsible.
-        old = _snapshot({
-            "libcore.so": _meta(soname="libcore.so.1", exports=["x"]),
-            "libstandalone.so": _meta(soname="libstandalone.so.1", exports=["y"]),
-        })
+        old = _snapshot(
+            {
+                "libcore.so": _meta(soname="libcore.so.1", exports=["x"]),
+                "libstandalone.so": _meta(soname="libstandalone.so.1", exports=["y"]),
+            }
+        )
         new = _snapshot({"libcore.so": _meta(soname="libcore.so.1", exports=["x"])})
         result = compare_bundle(old, new, [])
         assert not any(
-            f.kind == ChangeKind.BUNDLE_LIBRARY_REMOVED
-            for f in result.bundle_findings
+            f.kind == ChangeKind.BUNDLE_LIBRARY_REMOVED for f in result.bundle_findings
         )
 
     def test_removed_library_with_intra_consumer_fires(self) -> None:
-        old = _snapshot({
-            "libcore.so": _meta(soname="libcore.so.1", exports=["util_x"]),
-            "libalgo.so": _meta(soname="libalgo.so.1", needed=["libcore.so.1"],
-                                imports=["util_x"]),
-        })
-        new = _snapshot({
-            "libalgo.so": _meta(soname="libalgo.so.1", needed=["libcore.so.1"],
-                                imports=["util_x"]),
-        })
+        old = _snapshot(
+            {
+                "libcore.so": _meta(soname="libcore.so.1", exports=["util_x"]),
+                "libalgo.so": _meta(
+                    soname="libalgo.so.1", needed=["libcore.so.1"], imports=["util_x"]
+                ),
+            }
+        )
+        new = _snapshot(
+            {
+                "libalgo.so": _meta(
+                    soname="libalgo.so.1", needed=["libcore.so.1"], imports=["util_x"]
+                ),
+            }
+        )
         result = compare_bundle(old, new, [])
-        removed = [f for f in result.bundle_findings
-                   if f.kind == ChangeKind.BUNDLE_LIBRARY_REMOVED]
+        removed = [
+            f
+            for f in result.bundle_findings
+            if f.kind == ChangeKind.BUNDLE_LIBRARY_REMOVED
+        ]
         assert len(removed) == 1
         assert removed[0].symbol == "libcore.so"
         assert "libalgo.so" in removed[0].affected_libraries
@@ -371,6 +465,7 @@ class TestLibraryStructural:
 # bundle_intra_type_changed (cross-DSO type drift)
 # ---------------------------------------------------------------------------
 
+
 class TestIntraTypeChanged:
     def test_type_change_visible_in_sibling_emits_finding(self) -> None:
         # libcore defines DataCollection; libalgo's mangled symbol embeds
@@ -378,17 +473,19 @@ class TestIntraTypeChanged:
         # reports type_size_changed on DataCollection and a sibling
         # exports a symbol containing that name, the bundle layer emits
         # bundle_intra_type_changed.
-        new = _snapshot({
-            "libcore.so": _meta(
-                soname="libcore.so.1",
-                exports=["DataCollection_ctor"],
-            ),
-            "libalgo.so": _meta(
-                soname="libalgo.so.1",
-                needed=["libcore.so.1"],
-                exports=["_Z3runP14DataCollection"],
-            ),
-        })
+        new = _snapshot(
+            {
+                "libcore.so": _meta(
+                    soname="libcore.so.1",
+                    exports=["DataCollection_ctor"],
+                ),
+                "libalgo.so": _meta(
+                    soname="libalgo.so.1",
+                    needed=["libcore.so.1"],
+                    exports=["_Z3runP14DataCollection"],
+                ),
+            }
+        )
         diff = _diff(
             "libcore.so",
             Change(
@@ -399,7 +496,8 @@ class TestIntraTypeChanged:
         )
         result = compare_bundle(new, new, [diff])
         type_findings = [
-            f for f in result.bundle_findings
+            f
+            for f in result.bundle_findings
             if f.kind == ChangeKind.BUNDLE_INTRA_TYPE_CHANGED
         ]
         assert len(type_findings) == 1
@@ -411,68 +509,190 @@ class TestIntraTypeChanged:
         # A single type can produce several low-level diffs (size +
         # alignment + field_removed); the bundle layer must collapse
         # those into one cross-DSO finding per (consumer, provider, type).
-        new = _snapshot({
-            "libcore.so": _meta(
-                soname="libcore.so.1", exports=["DataCollection_ctor"],
-            ),
-            "libalgo.so": _meta(
-                soname="libalgo.so.1", needed=["libcore.so.1"],
-                exports=["_Z3runP14DataCollection"],
-            ),
-        })
+        new = _snapshot(
+            {
+                "libcore.so": _meta(
+                    soname="libcore.so.1",
+                    exports=["DataCollection_ctor"],
+                ),
+                "libalgo.so": _meta(
+                    soname="libalgo.so.1",
+                    needed=["libcore.so.1"],
+                    exports=["_Z3runP14DataCollection"],
+                ),
+            }
+        )
         diff = _diff(
             "libcore.so",
-            Change(kind=ChangeKind.TYPE_SIZE_CHANGED,
-                   symbol="DataCollection", description=""),
-            Change(kind=ChangeKind.TYPE_ALIGNMENT_CHANGED,
-                   symbol="DataCollection", description=""),
-            Change(kind=ChangeKind.TYPE_FIELD_REMOVED,
-                   symbol="DataCollection", description=""),
+            Change(
+                kind=ChangeKind.TYPE_SIZE_CHANGED,
+                symbol="DataCollection",
+                description="",
+            ),
+            Change(
+                kind=ChangeKind.TYPE_ALIGNMENT_CHANGED,
+                symbol="DataCollection",
+                description="",
+            ),
+            Change(
+                kind=ChangeKind.TYPE_FIELD_REMOVED,
+                symbol="DataCollection",
+                description="",
+            ),
         )
         result = compare_bundle(new, new, [diff])
         type_findings = [
-            f for f in result.bundle_findings
+            f
+            for f in result.bundle_findings
             if f.kind == ChangeKind.BUNDLE_INTRA_TYPE_CHANGED
         ]
         assert len(type_findings) == 1
 
 
 # ---------------------------------------------------------------------------
+# A3 (ADR-027 D3.2) — reachability-filtered cross-DSO type change
+# ---------------------------------------------------------------------------
+
+
+class TestIntraTypeReachability:
+    def _bundle_with_consumer(self, consumer_meta: ElfMetadata) -> BundleSnapshot:
+        return _snapshot(
+            {
+                "libcore.so": _meta(
+                    soname="libcore.so.1",
+                    exports=["DataCollection_ctor"],
+                ),
+                "libalgo.so": consumer_meta,
+            }
+        )
+
+    def _core_diff(self) -> DiffResult:
+        return _diff(
+            "libcore.so",
+            Change(
+                kind=ChangeKind.TYPE_SIZE_CHANGED,
+                symbol="DataCollection",
+                description="sizeof changed",
+            ),
+        )
+
+    def test_public_consumer_use_stays_breaking(self) -> None:
+        # libalgo exports a symbol embedding the changed type → on its public
+        # surface → full-confidence cross-DSO break (not demoted).
+        consumer = ElfMetadata(
+            soname="libalgo.so.1",
+            needed=["libcore.so.1"],
+            symbols=[ElfSymbol(name="_Z3runP14DataCollection", visibility="default")],
+        )
+        result = compare_bundle(
+            self._bundle_with_consumer(consumer),
+            self._bundle_with_consumer(consumer),
+            [self._core_diff()],
+        )
+        f = next(
+            f
+            for f in result.bundle_findings
+            if f.kind == ChangeKind.BUNDLE_INTRA_TYPE_CHANGED
+        )
+        assert f.effective_verdict is None
+        assert result.bundle_verdict == Verdict.BREAKING
+
+    def test_internal_only_consumer_use_demoted(self) -> None:
+        # libalgo references the type only via a hidden (non-exported) symbol →
+        # the change cannot reach its public ABI surface → demoted to risk,
+        # disclosed (never dropped), so the bundle verdict is not BREAKING.
+        consumer = ElfMetadata(
+            soname="libalgo.so.1",
+            needed=["libcore.so.1"],
+            symbols=[ElfSymbol(name="_Z3runP14DataCollection", visibility="hidden")],
+        )
+        result = compare_bundle(
+            self._bundle_with_consumer(consumer),
+            self._bundle_with_consumer(consumer),
+            [self._core_diff()],
+        )
+        f = next(
+            f
+            for f in result.bundle_findings
+            if f.kind == ChangeKind.BUNDLE_INTRA_TYPE_CHANGED
+        )
+        assert f.effective_verdict == Verdict.COMPATIBLE_WITH_RISK
+        assert f.modulation_reason == "consumer-internal-use"
+        assert f.modulation_rule == "bundle-reachability"
+        # The demotion reaches the bundle verdict (it lowers via to_change and
+        # classifies through effective_category): risk, not a hard break.
+        assert result.bundle_verdict == Verdict.COMPATIBLE_WITH_RISK
+        # Disclosed, never dropped.
+        assert f in result.bundle_findings
+
+    def test_internal_only_demotion_not_a_junit_failure(self) -> None:
+        # A risk-demoted BUNDLE_INTRA_TYPE_CHANGED must follow its EFFECTIVE risk
+        # category in JUnit, not the original breaking kind's severity — so by
+        # default it is NOT a <failure> (Codex review).
+        from abicheck.checker_policy import (
+            API_BREAK_KINDS,
+            BREAKING_KINDS,
+            RISK_KINDS,
+        )
+        from abicheck.junit_report import _is_failure
+
+        demoted = Change(
+            kind=ChangeKind.BUNDLE_INTRA_TYPE_CHANGED,
+            symbol="DataCollection",
+            description="internal-only cross-DSO change",
+            effective_verdict=Verdict.COMPATIBLE_WITH_RISK,
+            modulation_reason="consumer-internal-use",
+        )
+        assert not _is_failure(
+            demoted,
+            frozenset(BREAKING_KINDS),
+            frozenset(API_BREAK_KINDS),
+            frozenset(RISK_KINDS),
+        )
+
+
+# ---------------------------------------------------------------------------
 # bundle_intra_dep_resolved_to_different_version (gnu.version_d drift)
 # ---------------------------------------------------------------------------
+
 
 class TestVersionDrift:
     def test_default_version_drift_emits_finding(self) -> None:
         # core_fn is exported in old at GLIBCXX_3.4.20, in new at
         # GLIBCXX_3.4.30; libalgo imports it. Bundle layer flags the
         # version drift as COMPATIBLE_WITH_RISK.
-        old = _snapshot({
-            "libcore.so": _meta(
-                soname="libcore.so.1",
-                exports=["core_fn"],
-                export_versions={"core_fn": "GLIBCXX_3.4.20"},
-            ),
-            "libalgo.so": _meta(
-                soname="libalgo.so.1",
-                needed=["libcore.so.1"],
-                imports=["core_fn"],
-            ),
-        })
-        new = _snapshot({
-            "libcore.so": _meta(
-                soname="libcore.so.1",
-                exports=["core_fn"],
-                export_versions={"core_fn": "GLIBCXX_3.4.30"},
-            ),
-            "libalgo.so": _meta(
-                soname="libalgo.so.1",
-                needed=["libcore.so.1"],
-                imports=["core_fn"],
-            ),
-        })
+        old = _snapshot(
+            {
+                "libcore.so": _meta(
+                    soname="libcore.so.1",
+                    exports=["core_fn"],
+                    export_versions={"core_fn": "GLIBCXX_3.4.20"},
+                ),
+                "libalgo.so": _meta(
+                    soname="libalgo.so.1",
+                    needed=["libcore.so.1"],
+                    imports=["core_fn"],
+                ),
+            }
+        )
+        new = _snapshot(
+            {
+                "libcore.so": _meta(
+                    soname="libcore.so.1",
+                    exports=["core_fn"],
+                    export_versions={"core_fn": "GLIBCXX_3.4.30"},
+                ),
+                "libalgo.so": _meta(
+                    soname="libalgo.so.1",
+                    needed=["libcore.so.1"],
+                    imports=["core_fn"],
+                ),
+            }
+        )
         result = compare_bundle(old, new, [])
         drift = [
-            f for f in result.bundle_findings
+            f
+            for f in result.bundle_findings
             if f.kind == ChangeKind.BUNDLE_INTRA_DEP_VERSION_DRIFT
         ]
         assert len(drift) == 1
@@ -485,54 +705,74 @@ class TestVersionDrift:
 # Manifest
 # ---------------------------------------------------------------------------
 
+
 class TestManifest:
     def test_promised_symbol_missing_is_breaking(self) -> None:
-        manifest = InstantiationManifest(entries=(
-            ManifestEntry(symbol="promised_a", library="libcore.so",
-                          optional_provider=False),
-            ManifestEntry(symbol="promised_b", library=None,
-                          optional_provider=True),
-        ))
-        old = _snapshot({
-            "libcore.so": _meta(soname="libcore.so.1",
-                                exports=["promised_a", "promised_b"]),
-        })
-        new = _snapshot({
-            "libcore.so": _meta(soname="libcore.so.1", exports=["promised_a"]),
-        })
+        manifest = InstantiationManifest(
+            entries=(
+                ManifestEntry(
+                    symbol="promised_a", library="libcore.so", optional_provider=False
+                ),
+                ManifestEntry(
+                    symbol="promised_b", library=None, optional_provider=True
+                ),
+            )
+        )
+        old = _snapshot(
+            {
+                "libcore.so": _meta(
+                    soname="libcore.so.1", exports=["promised_a", "promised_b"]
+                ),
+            }
+        )
+        new = _snapshot(
+            {
+                "libcore.so": _meta(soname="libcore.so.1", exports=["promised_a"]),
+            }
+        )
         result = compare_bundle(old, new, [], manifest=manifest)
         kinds = [f.kind for f in result.bundle_findings]
         assert ChangeKind.BUNDLE_MANIFEST_INSTANTIATION_REMOVED in kinds
         missing = next(
-            f for f in result.bundle_findings
+            f
+            for f in result.bundle_findings
             if f.kind == ChangeKind.BUNDLE_MANIFEST_INSTANTIATION_REMOVED
         )
         assert missing.symbol == "promised_b"
 
     def test_wrong_provider_when_required(self) -> None:
-        manifest = InstantiationManifest(entries=(
-            ManifestEntry(symbol="x", library="libcore.so", optional_provider=False),
-        ))
-        new = _snapshot({
-            "libcore.so": _meta(soname="libcore.so.1"),
-            "libother.so": _meta(soname="libother.so.1", exports=["x"]),
-        })
+        manifest = InstantiationManifest(
+            entries=(
+                ManifestEntry(
+                    symbol="x", library="libcore.so", optional_provider=False
+                ),
+            )
+        )
+        new = _snapshot(
+            {
+                "libcore.so": _meta(soname="libcore.so.1"),
+                "libother.so": _meta(soname="libother.so.1", exports=["x"]),
+            }
+        )
         result = compare_bundle(new, new, [], manifest=manifest)
         wrong = [
-            f for f in result.bundle_findings
+            f
+            for f in result.bundle_findings
             if f.kind == ChangeKind.BUNDLE_MANIFEST_INSTANTIATION_REMOVED
         ]
         assert len(wrong) == 1
         assert "libother.so" in (wrong[0].new_value or "")
 
     def test_optional_provider_accepts_any_sibling(self) -> None:
-        manifest = InstantiationManifest(entries=(
-            ManifestEntry(symbol="x", library=None, optional_provider=True),
-        ))
-        new = _snapshot({
-            "libcore.so": _meta(soname="libcore.so.1"),
-            "libother.so": _meta(soname="libother.so.1", exports=["x"]),
-        })
+        manifest = InstantiationManifest(
+            entries=(ManifestEntry(symbol="x", library=None, optional_provider=True),)
+        )
+        new = _snapshot(
+            {
+                "libcore.so": _meta(soname="libcore.so.1"),
+                "libother.so": _meta(soname="libother.so.1", exports=["x"]),
+            }
+        )
         result = compare_bundle(new, new, [], manifest=manifest)
         assert not any(
             f.kind == ChangeKind.BUNDLE_MANIFEST_INSTANTIATION_REMOVED
@@ -557,9 +797,7 @@ class TestManifest:
     def test_load_manifest_json(self, tmp_path: Path) -> None:
         path = tmp_path / "m.json"
         path.write_text(
-            '{"version": 1, "provides": ['
-            '{"symbol": "x", "library": "libfoo.so.1"}'
-            ']}',
+            '{"version": 1, "provides": [{"symbol": "x", "library": "libfoo.so.1"}]}',
         )
         m = load_manifest(path)
         assert m.entries[0].symbol == "x"
@@ -593,13 +831,15 @@ class TestManifest:
         path.write_text(
             '{"version": 1, "provides": ['
             '{"symbol": "ok_func", "library": "libfoo.so.1"}'
-            ']}',
+            "]}",
         )
         m = load_manifest(path)
         assert len(m.entries) == 1
         assert m.entries[0].symbol == "ok_func"
 
-    def test_load_manifest_rejects_string_optional_provider(self, tmp_path: Path) -> None:
+    def test_load_manifest_rejects_string_optional_provider(
+        self, tmp_path: Path
+    ) -> None:
         # YAML quote-ifies bool-looking strings; users hand-editing
         # `optional_provider: "false"` (string) would silently get
         # parsed as truthy by bool() — validate strictly instead.
@@ -607,7 +847,7 @@ class TestManifest:
         path.write_text(
             '{"version": 1, "provides": ['
             '{"symbol": "x", "library": "lib.so.1", "optional_provider": "false"}'
-            ']}',
+            "]}",
         )
         with pytest.raises(ValueError, match="optional_provider.*must be a boolean"):
             load_manifest(path)
@@ -615,9 +855,7 @@ class TestManifest:
     def test_load_manifest_rejects_int_optional_provider(self, tmp_path: Path) -> None:
         path = tmp_path / "inty.json"
         path.write_text(
-            '{"version": 1, "provides": ['
-            '{"symbol": "x", "optional_provider": 1}'
-            ']}',
+            '{"version": 1, "provides": [{"symbol": "x", "optional_provider": 1}]}',
         )
         with pytest.raises(ValueError, match="optional_provider.*must be a boolean"):
             load_manifest(path)
@@ -627,7 +865,7 @@ class TestManifest:
         path.write_text(
             "version: 1\n"
             "provides:\n"
-            "  - pattern: \"oneapi::dal::train_ops<*>*\"\n"
+            '  - pattern: "oneapi::dal::train_ops<*>*"\n'
             "    library: libonedal_core.so.1\n"
             "    optional_provider: false\n",
         )
@@ -643,8 +881,8 @@ class TestManifest:
             "provides:\n"
             "  - template: oneapi::dal::train_ops\n"
             "    instantiations:\n"
-            "      - {Float: float,  Method: \"method::dense\", Task: \"task::train\"}\n"
-            "      - {Float: double, Method: \"method::dense\", Task: \"task::train\"}\n",
+            '      - {Float: float,  Method: "method::dense", Task: "task::train"}\n'
+            '      - {Float: double, Method: "method::dense", Task: "task::train"}\n',
         )
         m = load_manifest(path)
         assert m.entries[0].template == "oneapi::dal::train_ops"
@@ -655,10 +893,7 @@ class TestManifest:
     def test_load_manifest_rejects_multiple_shape_keys(self, tmp_path: Path) -> None:
         path = tmp_path / "mixed.yaml"
         path.write_text(
-            "version: 1\n"
-            "provides:\n"
-            "  - symbol: foo\n"
-            "    pattern: \"foo*\"\n",
+            'version: 1\nprovides:\n  - symbol: foo\n    pattern: "foo*"\n',
         )
         with pytest.raises(ValueError, match="conflicting fields"):
             load_manifest(path)
@@ -666,9 +901,7 @@ class TestManifest:
     def test_load_manifest_rejects_missing_shape_key(self, tmp_path: Path) -> None:
         path = tmp_path / "empty.yaml"
         path.write_text(
-            "version: 1\n"
-            "provides:\n"
-            "  - library: libfoo.so.1\n",
+            "version: 1\nprovides:\n  - library: libfoo.so.1\n",
         )
         with pytest.raises(ValueError, match="must have one of 'symbol'"):
             load_manifest(path)
@@ -676,9 +909,7 @@ class TestManifest:
     def test_load_manifest_template_needs_instantiations(self, tmp_path: Path) -> None:
         path = tmp_path / "no-insts.yaml"
         path.write_text(
-            "version: 1\n"
-            "provides:\n"
-            "  - template: oneapi::dal::train_ops\n",
+            "version: 1\nprovides:\n  - template: oneapi::dal::train_ops\n",
         )
         with pytest.raises(ValueError, match="non-empty 'instantiations:'"):
             load_manifest(path)
@@ -688,21 +919,27 @@ class TestManifest:
 # Pattern and template matching against the bundle
 # ---------------------------------------------------------------------------
 
+
 class TestManifestPatternMatching:
     def test_pattern_matches_mangled_extern_c_symbols(self) -> None:
         # extern "C" symbols aren't demangled (demangle returns None for
         # them); the matcher falls back to the mangled name. This means
         # patterns work uniformly for C and C++ symbols.
-        new = _snapshot({
-            "libcore.so": _meta(
-                soname="libcore.so.1",
-                exports=["onedal_train_float_dense", "onedal_train_float_sparse",
-                         "onedal_predict_float_dense"],
-            ),
-        })
-        manifest = InstantiationManifest(entries=(
-            ManifestEntry(pattern="onedal_train_*", optional_provider=True),
-        ))
+        new = _snapshot(
+            {
+                "libcore.so": _meta(
+                    soname="libcore.so.1",
+                    exports=[
+                        "onedal_train_float_dense",
+                        "onedal_train_float_sparse",
+                        "onedal_predict_float_dense",
+                    ],
+                ),
+            }
+        )
+        manifest = InstantiationManifest(
+            entries=(ManifestEntry(pattern="onedal_train_*", optional_provider=True),)
+        )
         result = compare_bundle(new, new, [], manifest=manifest)
         assert not any(
             f.kind == ChangeKind.BUNDLE_MANIFEST_INSTANTIATION_REMOVED
@@ -711,12 +948,13 @@ class TestManifestPatternMatching:
 
     def test_pattern_with_no_match_emits_removed(self) -> None:
         new = _snapshot({"libcore.so": _meta(soname="libcore.so.1")})
-        manifest = InstantiationManifest(entries=(
-            ManifestEntry(pattern="onedal_train_*", optional_provider=True),
-        ))
+        manifest = InstantiationManifest(
+            entries=(ManifestEntry(pattern="onedal_train_*", optional_provider=True),)
+        )
         result = compare_bundle(new, new, [], manifest=manifest)
         removed = [
-            f for f in result.bundle_findings
+            f
+            for f in result.bundle_findings
             if f.kind == ChangeKind.BUNDLE_MANIFEST_INSTANTIATION_REMOVED
         ]
         assert len(removed) == 1
@@ -728,30 +966,35 @@ class TestManifestPatternMatching:
         # demangling), the matcher falls back to the mangled name; we
         # set up symbol names that contain the substring so the test
         # doesn't depend on cxxfilt availability.
-        new = _snapshot({
-            "libcore.so": _meta(
-                soname="libcore.so.1",
-                exports=[
-                    "ns::T<float, dense>_ctor",   # carries the expanded form
-                    "ns::T<double, sparse>_ctor",
-                ],
-            ),
-        })
-        manifest = InstantiationManifest(entries=(
-            ManifestEntry(
-                template="ns::T",
-                instantiations=({"P1": "float", "P2": "dense"},),
-                optional_provider=True,
-            ),
-            ManifestEntry(
-                template="ns::T",
-                instantiations=({"P1": "int", "P2": "dense"},),  # not exported
-                optional_provider=True,
-            ),
-        ))
+        new = _snapshot(
+            {
+                "libcore.so": _meta(
+                    soname="libcore.so.1",
+                    exports=[
+                        "ns::T<float, dense>_ctor",  # carries the expanded form
+                        "ns::T<double, sparse>_ctor",
+                    ],
+                ),
+            }
+        )
+        manifest = InstantiationManifest(
+            entries=(
+                ManifestEntry(
+                    template="ns::T",
+                    instantiations=({"P1": "float", "P2": "dense"},),
+                    optional_provider=True,
+                ),
+                ManifestEntry(
+                    template="ns::T",
+                    instantiations=({"P1": "int", "P2": "dense"},),  # not exported
+                    optional_provider=True,
+                ),
+            )
+        )
         result = compare_bundle(new, new, [], manifest=manifest)
         removed = [
-            f for f in result.bundle_findings
+            f
+            for f in result.bundle_findings
             if f.kind == ChangeKind.BUNDLE_MANIFEST_INSTANTIATION_REMOVED
         ]
         # First entry must NOT fire (float,dense is present);
@@ -766,31 +1009,36 @@ class TestManifestPatternMatching:
         # Previously the matcher pooled all expansions and declared the
         # entry satisfied iff *any* matched — masking partial regressions
         # where, say, two of four promised instantiations were dropped.
-        new = _snapshot({
-            "libcore.so": _meta(
-                soname="libcore.so.1",
-                exports=[
-                    "ns::T<float, dense>_ctor",
-                    "ns::T<double, dense>_ctor",
-                    # <float, sparse> and <double, sparse> NOT exported
-                ],
-            ),
-        })
-        manifest = InstantiationManifest(entries=(
-            ManifestEntry(
-                template="ns::T",
-                instantiations=(
-                    {"P1": "float", "P2": "dense"},   # exported
-                    {"P1": "float", "P2": "sparse"},  # MISSING
-                    {"P1": "double", "P2": "dense"},  # exported
-                    {"P1": "double", "P2": "sparse"}, # MISSING
+        new = _snapshot(
+            {
+                "libcore.so": _meta(
+                    soname="libcore.so.1",
+                    exports=[
+                        "ns::T<float, dense>_ctor",
+                        "ns::T<double, dense>_ctor",
+                        # <float, sparse> and <double, sparse> NOT exported
+                    ],
                 ),
-                optional_provider=True,
-            ),
-        ))
+            }
+        )
+        manifest = InstantiationManifest(
+            entries=(
+                ManifestEntry(
+                    template="ns::T",
+                    instantiations=(
+                        {"P1": "float", "P2": "dense"},  # exported
+                        {"P1": "float", "P2": "sparse"},  # MISSING
+                        {"P1": "double", "P2": "dense"},  # exported
+                        {"P1": "double", "P2": "sparse"},  # MISSING
+                    ),
+                    optional_provider=True,
+                ),
+            )
+        )
         result = compare_bundle(new, new, [], manifest=manifest)
         removed = [
-            f for f in result.bundle_findings
+            f
+            for f in result.bundle_findings
             if f.kind == ChangeKind.BUNDLE_MANIFEST_INSTANTIATION_REMOVED
         ]
         # Exactly two findings, one for each missing instantiation.
@@ -802,7 +1050,8 @@ class TestManifestPatternMatching:
         assert all("ns::T<float, dense>" not in f.symbol for f in removed)
 
     def test_demangle_invoked_once_per_symbol_across_many_targets(
-        self, monkeypatch: pytest.MonkeyPatch,
+        self,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         # Performance regression guard: _detect_manifest_drift should
         # build the demangle index once per snapshot and reuse it
@@ -816,6 +1065,7 @@ class TestManifestPatternMatching:
         # _build_demangled_index by patching the module-level demangle
         # if it's imported inside the function.
         import abicheck.demangle as demangle_mod
+
         original_demangle = demangle_mod.demangle
 
         def counting_demangle(name: str) -> str | None:
@@ -824,33 +1074,37 @@ class TestManifestPatternMatching:
 
         monkeypatch.setattr(demangle_mod, "demangle", counting_demangle)
 
-        new = _snapshot({
-            "libcore.so": _meta(
-                soname="libcore.so.1",
-                exports=[
-                    "ns::T<float, dense>_ctor",
-                    "ns::T<float, sparse>_ctor",
-                    "ns::T<double, dense>_ctor",
-                    "ns::T<double, sparse>_ctor",
-                    "unrelated_symbol_1",
-                    "unrelated_symbol_2",
-                ],
-            ),
-        })
+        new = _snapshot(
+            {
+                "libcore.so": _meta(
+                    soname="libcore.so.1",
+                    exports=[
+                        "ns::T<float, dense>_ctor",
+                        "ns::T<float, sparse>_ctor",
+                        "ns::T<double, dense>_ctor",
+                        "ns::T<double, sparse>_ctor",
+                        "unrelated_symbol_1",
+                        "unrelated_symbol_2",
+                    ],
+                ),
+            }
+        )
         n_symbols = sum(len(m.symbols) for m in new.metadata.values())
 
         # Manifest with many targets — naïve scaling would multiply.
-        manifest = InstantiationManifest(entries=(
-            ManifestEntry(
-                template="ns::T",
-                instantiations=tuple(
-                    {"P1": p1, "P2": p2}
-                    for p1 in ("float", "double", "int", "long")
-                    for p2 in ("dense", "sparse", "csr", "csc")
-                ),  # 16 targets
-                optional_provider=True,
-            ),
-        ))
+        manifest = InstantiationManifest(
+            entries=(
+                ManifestEntry(
+                    template="ns::T",
+                    instantiations=tuple(
+                        {"P1": p1, "P2": p2}
+                        for p1 in ("float", "double", "int", "long")
+                        for p2 in ("dense", "sparse", "csr", "csc")
+                    ),  # 16 targets
+                    optional_provider=True,
+                ),
+            )
+        )
         compare_bundle(new, new, [], manifest=manifest)
         # Expected: one full pass per snapshot (old + new), each
         # producing n_symbols demangle calls. No per-target rescans.
@@ -865,19 +1119,23 @@ class TestManifestPatternMatching:
         # layer must accept either; if the manifest names libcore.so.1
         # (a SONAME) and the candidate provider's SONAME matches, that's
         # a hit, no spurious BUNDLE_MANIFEST_INSTANTIATION_REMOVED.
-        manifest = InstantiationManifest(entries=(
-            ManifestEntry(
-                symbol="train_v2",
-                library="libcore.so.1",        # SONAME, not filename key
-                optional_provider=False,
-            ),
-        ))
-        new = _snapshot({
-            "libcore.so": _meta(
-                soname="libcore.so.1",
-                exports=["train_v2"],
-            ),
-        })
+        manifest = InstantiationManifest(
+            entries=(
+                ManifestEntry(
+                    symbol="train_v2",
+                    library="libcore.so.1",  # SONAME, not filename key
+                    optional_provider=False,
+                ),
+            )
+        )
+        new = _snapshot(
+            {
+                "libcore.so": _meta(
+                    soname="libcore.so.1",
+                    exports=["train_v2"],
+                ),
+            }
+        )
         result = compare_bundle(new, new, [], manifest=manifest)
         assert not any(
             f.kind == ChangeKind.BUNDLE_MANIFEST_INSTANTIATION_REMOVED
@@ -888,16 +1146,21 @@ class TestManifestPatternMatching:
         # Symbol present in new manifest, absent from old bundle exports
         # but present in new bundle. Bundle layer emits
         # BUNDLE_MANIFEST_INSTANTIATION_ADDED.
-        manifest = InstantiationManifest(entries=(
-            ManifestEntry(symbol="new_train", library=None, optional_provider=True),
-        ))
+        manifest = InstantiationManifest(
+            entries=(
+                ManifestEntry(symbol="new_train", library=None, optional_provider=True),
+            )
+        )
         old = _snapshot({"libcore.so": _meta(soname="libcore.so.1")})
-        new = _snapshot({
-            "libcore.so": _meta(soname="libcore.so.1", exports=["new_train"]),
-        })
+        new = _snapshot(
+            {
+                "libcore.so": _meta(soname="libcore.so.1", exports=["new_train"]),
+            }
+        )
         result = compare_bundle(old, new, [], manifest=manifest)
         added = [
-            f for f in result.bundle_findings
+            f
+            for f in result.bundle_findings
             if f.kind == ChangeKind.BUNDLE_MANIFEST_INSTANTIATION_ADDED
         ]
         assert len(added) == 1
@@ -908,6 +1171,7 @@ class TestManifestPatternMatching:
 # system_providers allow-list (--bundle-system-providers flag)
 # ---------------------------------------------------------------------------
 
+
 class TestSystemProvidersAllowList:
     def test_user_extended_providers_suppresses_finding(self) -> None:
         # A consumer imports an out-of-bundle symbol; DT_NEEDED includes
@@ -916,19 +1180,23 @@ class TestSystemProvidersAllowList:
         # --bundle-system-providers extension the symbol fires.
         # With it, the symbol is treated as system-provided and the
         # finding is suppressed.
-        new = _snapshot({
-            "libfoo.so": _meta(
-                soname="libfoo.so.1",
-                needed=["libcore.so.1", "libcustom.so.1"],
-                imports=["__cxa_atexit"],   # known system symbol
-            ),
-            "libcore.so": _meta(soname="libcore.so.1", exports=["dummy"]),
-        })
+        new = _snapshot(
+            {
+                "libfoo.so": _meta(
+                    soname="libfoo.so.1",
+                    needed=["libcore.so.1", "libcustom.so.1"],
+                    imports=["__cxa_atexit"],  # known system symbol
+                ),
+                "libcore.so": _meta(soname="libcore.so.1", exports=["dummy"]),
+            }
+        )
         # Even without the extension, __cxa_atexit is on the default
         # symbol allow-list and the finding is suppressed.
         baseline = compare_bundle(new, new, per_library_results=[])
         with_extras = compare_bundle(
-            new, new, per_library_results=[],
+            new,
+            new,
+            per_library_results=[],
             system_providers=["libcustom.so.1"],
         )
         # Sanity: neither path should report __cxa_atexit as missing.
@@ -944,14 +1212,20 @@ class TestSystemProvidersAllowList:
 # Verdict aggregation
 # ---------------------------------------------------------------------------
 
+
 class TestVerdictAggregation:
     def test_bundle_verdict_promotes_aggregate(self) -> None:
         # All per-library diffs are NO_CHANGE; bundle finding alone forces BREAKING.
-        new = _snapshot({
-            "libcore.so": _meta(soname="libcore.so.1", exports=["x"]),
-            "libalgo.so": _meta(soname="libalgo.so.1", needed=["libcore.so.1"],
-                                imports=["x", "missing_sym"]),
-        })
+        new = _snapshot(
+            {
+                "libcore.so": _meta(soname="libcore.so.1", exports=["x"]),
+                "libalgo.so": _meta(
+                    soname="libalgo.so.1",
+                    needed=["libcore.so.1"],
+                    imports=["x", "missing_sym"],
+                ),
+            }
+        )
         result = compare_bundle(new, new, [])
         # The bundle layer should flag missing_sym as removed.
         assert result.bundle_verdict == Verdict.BREAKING
@@ -975,10 +1249,12 @@ class TestVerdictAggregation:
 # Non-ELF inputs
 # ---------------------------------------------------------------------------
 
+
 class TestNonElfInputs:
     def test_skips_non_elf_files_silently(self, tmp_path: Path) -> None:
         # Should not raise, should not produce findings.
         from abicheck.bundle import build_bundle_snapshot
+
         json_file = tmp_path / "libnotelf.so"
         json_file.write_text('{"library": "fake", "version": "1"}')
         snap = build_bundle_snapshot({"libnotelf.so": json_file})
@@ -987,11 +1263,13 @@ class TestNonElfInputs:
 
     def test_path_looks_like_elf_handles_missing(self, tmp_path: Path) -> None:
         from abicheck.bundle import _path_looks_like_elf
+
         # Non-existent path — OSError → False, no raise.
         assert _path_looks_like_elf(tmp_path / "does-not-exist.so") is False
 
     def test_path_looks_like_elf_accepts_magic(self, tmp_path: Path) -> None:
         from abicheck.bundle import _path_looks_like_elf
+
         p = tmp_path / "fake.so"
         p.write_bytes(b"\x7fELF" + b"\0" * 12)
         assert _path_looks_like_elf(p) is True
@@ -1002,6 +1280,7 @@ class TestNonElfInputs:
         # parse_elf_metadata path in build_bundle_snapshot (otherwise
         # bypassed by the in-memory _snapshot helper used elsewhere).
         from abicheck.bundle import build_bundle_snapshot
+
         candidate = None
         for p in (
             "/lib/x86_64-linux-gnu/libc.so.6",
@@ -1022,6 +1301,7 @@ class TestNonElfInputs:
 # ---------------------------------------------------------------------------
 # BundleSnapshot.is_intra_bundle_provider
 # ---------------------------------------------------------------------------
+
 
 class TestIsIntraBundleProvider:
     def test_matches_filename(self) -> None:
@@ -1046,10 +1326,12 @@ class TestIsIntraBundleProvider:
         assert snap.is_intra_bundle_provider("libother.so") is False
 
     def test_library_names_property(self) -> None:
-        snap = _snapshot({
-            "libb.so": _meta(soname="libb.so.1"),
-            "liba.so": _meta(soname="liba.so.1"),
-        })
+        snap = _snapshot(
+            {
+                "libb.so": _meta(soname="libb.so.1"),
+                "liba.so": _meta(soname="liba.so.1"),
+            }
+        )
         assert snap.library_names == ["liba.so", "libb.so"]
 
 
@@ -1057,9 +1339,11 @@ class TestIsIntraBundleProvider:
 # BundleFinding.to_change lowering
 # ---------------------------------------------------------------------------
 
+
 class TestBundleFindingToChange:
     def test_lowering_with_both_consumer_and_provider(self) -> None:
         from abicheck.bundle import BundleFinding
+
         f = BundleFinding(
             kind=ChangeKind.BUNDLE_INTRA_DEP_SIGNATURE_CHANGED,
             symbol="core_add",
@@ -1074,6 +1358,7 @@ class TestBundleFindingToChange:
 
     def test_lowering_provider_only(self) -> None:
         from abicheck.bundle import BundleFinding
+
         f = BundleFinding(
             kind=ChangeKind.BUNDLE_LIBRARY_REMOVED,
             symbol="libcore.so",
@@ -1085,6 +1370,7 @@ class TestBundleFindingToChange:
 
     def test_lowering_consumer_only(self) -> None:
         from abicheck.bundle import BundleFinding
+
         f = BundleFinding(
             kind=ChangeKind.BUNDLE_INTRA_DEP_REMOVED,
             symbol="core_mul",
@@ -1096,6 +1382,7 @@ class TestBundleFindingToChange:
 
     def test_lowering_neither(self) -> None:
         from abicheck.bundle import BundleFinding
+
         f = BundleFinding(
             kind=ChangeKind.BUNDLE_LIBRARY_ADDED,
             symbol="libnew.so",
@@ -1109,6 +1396,7 @@ class TestBundleFindingToChange:
 # End-to-end compare-release with bundle analysis enabled
 # ---------------------------------------------------------------------------
 
+
 def _build_tiny_so(release_dir: Path, name: str, src: str) -> Path:
     """Compile *src* into ``release_dir/name`` (a .so file).
 
@@ -1119,6 +1407,7 @@ def _build_tiny_so(release_dir: Path, name: str, src: str) -> Path:
     """
     import shutil
     import subprocess
+
     gcc = shutil.which("gcc")
     if gcc is None:
         pytest.skip("gcc unavailable; cannot build bundle E2E fixture")
@@ -1129,9 +1418,19 @@ def _build_tiny_so(release_dir: Path, name: str, src: str) -> Path:
     out = release_dir / name
     soname = name.split(".so")[0] + ".so.1"
     res = subprocess.run(
-        [gcc, "-shared", "-fPIC", "-g", "-O0", str(src_path),
-         "-o", str(out), f"-Wl,-soname,{soname}"],
-        capture_output=True, text=True,
+        [
+            gcc,
+            "-shared",
+            "-fPIC",
+            "-g",
+            "-O0",
+            str(src_path),
+            "-o",
+            str(out),
+            f"-Wl,-soname,{soname}",
+        ],
+        capture_output=True,
+        text=True,
     )
     if res.returncode != 0:
         pytest.fail(f"gcc failed for {name}: {res.stderr}")
@@ -1141,8 +1440,8 @@ def _build_tiny_so(release_dir: Path, name: str, src: str) -> Path:
 @pytest.mark.skipif(
     sys.platform != "linux",
     reason="Uses GNU ld flags (-Wl,-soname, -Wl,--no-as-needed); "
-           "Mach-O ld and link.exe don't accept them. Bundle analysis "
-           "itself is ELF/Linux-only per ADR-018 / ADR-023.",
+    "Mach-O ld and link.exe don't accept them. Bundle analysis "
+    "itself is ELF/Linux-only per ADR-018 / ADR-023.",
 )
 @pytest.mark.integration
 class TestCompareReleaseBundleE2E:
@@ -1169,13 +1468,15 @@ class TestCompareReleaseBundleE2E:
         old.mkdir()
         new.mkdir()
         _build_tiny_so(
-            old, "libcore.so",
+            old,
+            "libcore.so",
             "int core_add(int a, int b){return a+b;}\n"
             "int core_mul(int a, int b){return a*b;}\n",
         )
         _build_tiny_so(
-            new, "libcore.so",
-            "int core_add(int a, int b){return a+b;}\n",   # core_mul removed
+            new,
+            "libcore.so",
+            "int core_add(int a, int b){return a+b;}\n",  # core_mul removed
         )
         # libalgo: byte-identical in old and new, still imports core_mul.
         algo_src = (
@@ -1191,21 +1492,41 @@ class TestCompareReleaseBundleE2E:
             src_file.write_text(algo_src)
             import shutil as _shutil
             import subprocess as _sub
+
             gcc = _shutil.which("gcc")
             if gcc is None:
                 pytest.skip("gcc unavailable; cannot build bundle E2E fixture")
             _sub.run(
-                [gcc, "-shared", "-fPIC", "-g", "-O0", str(src_file),
-                 "-o", str(side / "libalgo.so"),
-                 "-L", str(side), "-Wl,--no-as-needed", "-lcore",
-                 "-Wl,-soname,libalgo.so.1"],
-                check=True, capture_output=True,
+                [
+                    gcc,
+                    "-shared",
+                    "-fPIC",
+                    "-g",
+                    "-O0",
+                    str(src_file),
+                    "-o",
+                    str(side / "libalgo.so"),
+                    "-L",
+                    str(side),
+                    "-Wl,--no-as-needed",
+                    "-lcore",
+                    "-Wl,-soname,libalgo.so.1",
+                ],
+                check=True,
+                capture_output=True,
             )
 
         result = CliRunner().invoke(
             main,
-            ["compare-release", str(old), str(new), "--format", "json",
-             "--bundle-cohort", "lib"],
+            [
+                "compare-release",
+                str(old),
+                str(new),
+                "--format",
+                "json",
+                "--bundle-cohort",
+                "lib",
+            ],
         )
         # Bundle BREAKING → exit 4.
         assert result.exit_code == 4, result.output
@@ -1215,13 +1536,16 @@ class TestCompareReleaseBundleE2E:
         assert "bundle_intra_dep_removed" in kinds
         # The consumer attribution must point at libalgo.so.
         intra = next(
-            f for f in data["bundle_findings"]
+            f
+            for f in data["bundle_findings"]
             if f["kind"] == "bundle_intra_dep_removed"
         )
         assert intra["consumer_library"] == "libalgo.so"
         assert intra["symbol"] == "core_mul"
 
-    def test_compare_release_default_skips_bundle_analysis(self, tmp_path: Path) -> None:
+    def test_compare_release_default_skips_bundle_analysis(
+        self, tmp_path: Path
+    ) -> None:
         """Plain compare-release should not emit bundle findings by default."""
         import json as _json
 
@@ -1233,7 +1557,9 @@ class TestCompareReleaseBundleE2E:
         new = tmp_path / "new"
         old.mkdir()
         new.mkdir()
-        _build_tiny_so(old, "libfoo.so", "int foo(void){return 1;}\nint bar(void){return 2;}\n")
+        _build_tiny_so(
+            old, "libfoo.so", "int foo(void){return 1;}\nint bar(void){return 2;}\n"
+        )
         _build_tiny_so(new, "libfoo.so", "int foo(void){return 1;}\n")
 
         result = CliRunner().invoke(
@@ -1259,13 +1585,21 @@ class TestCompareReleaseBundleE2E:
         new = tmp_path / "new"
         old.mkdir()
         new.mkdir()
-        _build_tiny_so(old, "libfoo.so", "int foo(void){return 1;}\nint bar(void){return 2;}\n")
+        _build_tiny_so(
+            old, "libfoo.so", "int foo(void){return 1;}\nint bar(void){return 2;}\n"
+        )
         _build_tiny_so(new, "libfoo.so", "int foo(void){return 1;}\n")
 
         result = CliRunner().invoke(
             main,
-            ["compare-release", str(old), str(new),
-             "--no-bundle-analysis", "--format", "json"],
+            [
+                "compare-release",
+                str(old),
+                str(new),
+                "--no-bundle-analysis",
+                "--format",
+                "json",
+            ],
         )
         data = _json.loads(result.stdout)
         # bundle_verdict / bundle_findings must NOT be present.
@@ -1273,7 +1607,8 @@ class TestCompareReleaseBundleE2E:
         assert "bundle_findings" not in data
 
     def test_compare_release_with_manifest_emits_manifest_finding(
-        self, tmp_path: Path,
+        self,
+        tmp_path: Path,
     ) -> None:
         # Manifest lists `bar` as a promise; new bundle drops it.
         import json as _json
@@ -1286,7 +1621,9 @@ class TestCompareReleaseBundleE2E:
         new = tmp_path / "new"
         old.mkdir()
         new.mkdir()
-        _build_tiny_so(old, "libfoo.so", "int foo(void){return 1;}\nint bar(void){return 2;}\n")
+        _build_tiny_so(
+            old, "libfoo.so", "int foo(void){return 1;}\nint bar(void){return 2;}\n"
+        )
         _build_tiny_so(new, "libfoo.so", "int foo(void){return 1;}\n")
 
         manifest = tmp_path / "manifest.yaml"
@@ -1303,15 +1640,23 @@ class TestCompareReleaseBundleE2E:
 
         result = CliRunner().invoke(
             main,
-            ["compare-release", str(old), str(new),
-             "--manifest", str(manifest), "--format", "json"],
+            [
+                "compare-release",
+                str(old),
+                str(new),
+                "--manifest",
+                str(manifest),
+                "--format",
+                "json",
+            ],
         )
         data = _json.loads(result.stdout)
         kinds = {f["kind"] for f in data["bundle_findings"]}
         assert "bundle_manifest_instantiation_removed" in kinds
 
     def test_compare_release_markdown_shows_bundle_section(
-        self, tmp_path: Path,
+        self,
+        tmp_path: Path,
     ) -> None:
         # Bundle finding must show up in the markdown summary output.
         from click.testing import CliRunner
@@ -1323,12 +1668,14 @@ class TestCompareReleaseBundleE2E:
         old.mkdir()
         new.mkdir()
         _build_tiny_so(
-            old, "libcore.so",
+            old,
+            "libcore.so",
             "int core_add(int a, int b){return a+b;}\n"
             "int core_mul(int a, int b){return a*b;}\n",
         )
         _build_tiny_so(
-            new, "libcore.so",
+            new,
+            "libcore.so",
             "int core_add(int a, int b){return a+b;}\n",
         )
         algo_src = (
@@ -1342,25 +1689,42 @@ class TestCompareReleaseBundleE2E:
             src_file.write_text(algo_src)
             import shutil as _shutil
             import subprocess as _sub
+
             gcc = _shutil.which("gcc")
             if gcc is None:
                 pytest.skip("gcc unavailable; cannot build bundle E2E fixture")
             _sub.run(
-                [gcc, "-shared", "-fPIC", "-g", "-O0", str(src_file),
-                 "-o", str(side / "libalgo.so"),
-                 "-L", str(side), "-Wl,--no-as-needed", "-lcore",
-                 "-Wl,-soname,libalgo.so.1"],
-                check=True, capture_output=True,
+                [
+                    gcc,
+                    "-shared",
+                    "-fPIC",
+                    "-g",
+                    "-O0",
+                    str(src_file),
+                    "-o",
+                    str(side / "libalgo.so"),
+                    "-L",
+                    str(side),
+                    "-Wl,--no-as-needed",
+                    "-lcore",
+                    "-Wl,-soname,libalgo.so.1",
+                ],
+                check=True,
+                capture_output=True,
             )
 
         result = CliRunner().invoke(
-            main, ["compare-release", str(old), str(new), "--bundle-cohort", "lib"],
+            main,
+            ["compare-release", str(old), str(new), "--bundle-cohort", "lib"],
         )
         assert "Bundle (Cross-Library) Findings" in result.stdout
         assert "bundle_intra_dep_removed" in result.stdout
 
     def _build_versioned_so(
-        self, release_dir: Path, src: Path, soname: str,
+        self,
+        release_dir: Path,
+        src: Path,
+        soname: str,
     ) -> None:
         """Compile *src* into ``release_dir`` with an explicit ``-soname``.
 
@@ -1369,20 +1733,32 @@ class TestCompareReleaseBundleE2E:
         """
         import shutil
         import subprocess
+
         gcc = shutil.which("gcc")
         if gcc is None:
             pytest.skip("gcc unavailable; cannot build bundle E2E fixture")
         out = release_dir / soname
         res = subprocess.run(
-            [gcc, "-shared", "-fPIC", "-g", "-O0", str(src),
-             "-o", str(out), f"-Wl,-soname,{soname}"],
-            capture_output=True, text=True,
+            [
+                gcc,
+                "-shared",
+                "-fPIC",
+                "-g",
+                "-O0",
+                str(src),
+                "-o",
+                str(out),
+                f"-Wl,-soname,{soname}",
+            ],
+            capture_output=True,
+            text=True,
         )
         if res.returncode != 0:
             pytest.fail(f"gcc failed for {soname}: {res.stderr}")
 
     def test_compare_release_emits_soname_skew_for_case84(
-        self, tmp_path: Path,
+        self,
+        tmp_path: Path,
     ) -> None:
         # Reproduce examples/case84_bundle_soname_skew end-to-end: core+dpc
         # bump SONAME .so.1 -> .so.2 while thread (deliberately) lags at .so.1.
@@ -1395,8 +1771,7 @@ class TestCompareReleaseBundleE2E:
         from abicheck.cli import main
 
         case_dir = (
-            Path(__file__).parent.parent
-            / "examples" / "case84_bundle_soname_skew"
+            Path(__file__).parent.parent / "examples" / "case84_bundle_soname_skew"
         )
         old = tmp_path / "v1"
         new = tmp_path / "v2"
@@ -1404,17 +1779,28 @@ class TestCompareReleaseBundleE2E:
         new.mkdir()
         # v1: all three at .so.1
         self._build_versioned_so(old, case_dir / "onedal_core.c", "libonedal_core.so.1")
-        self._build_versioned_so(old, case_dir / "onedal_thread.c", "libonedal_thread.so.1")
+        self._build_versioned_so(
+            old, case_dir / "onedal_thread.c", "libonedal_thread.so.1"
+        )
         self._build_versioned_so(old, case_dir / "onedal_dpc.c", "libonedal_dpc.so.1")
         # v2: core + dpc bumped to .so.2, thread lags at .so.1
         self._build_versioned_so(new, case_dir / "onedal_core.c", "libonedal_core.so.2")
-        self._build_versioned_so(new, case_dir / "onedal_thread.c", "libonedal_thread.so.1")
+        self._build_versioned_so(
+            new, case_dir / "onedal_thread.c", "libonedal_thread.so.1"
+        )
         self._build_versioned_so(new, case_dir / "onedal_dpc.c", "libonedal_dpc.so.2")
 
         result = CliRunner().invoke(
             main,
-            ["compare-release", str(old), str(new), "--format", "json",
-             "--bundle-cohort", "libonedal_"],
+            [
+                "compare-release",
+                str(old),
+                str(new),
+                "--format",
+                "json",
+                "--bundle-cohort",
+                "libonedal_",
+            ],
         )
         # Bundle BREAKING → exit 4 (matches ground_truth.json case84 == BREAKING).
         assert result.exit_code == 4, result.output
@@ -1423,14 +1809,14 @@ class TestCompareReleaseBundleE2E:
         kinds = {f["kind"] for f in data["bundle_findings"]}
         assert "bundle_soname_skew" in kinds
         skew = next(
-            f for f in data["bundle_findings"]
-            if f["kind"] == "bundle_soname_skew"
+            f for f in data["bundle_findings"] if f["kind"] == "bundle_soname_skew"
         )
         # The lagging member must be attributed.
         assert any("libonedal_thread" in lib for lib in skew["affected_libraries"])
 
     def test_compare_release_lockstep_bump_has_no_skew(
-        self, tmp_path: Path,
+        self,
+        tmp_path: Path,
     ) -> None:
         # Negative control: when the whole cohort bumps in lockstep there is
         # no skew finding (the detector must not fire on a clean release).
@@ -1441,23 +1827,33 @@ class TestCompareReleaseBundleE2E:
         from abicheck.cli import main
 
         case_dir = (
-            Path(__file__).parent.parent
-            / "examples" / "case84_bundle_soname_skew"
+            Path(__file__).parent.parent / "examples" / "case84_bundle_soname_skew"
         )
         old = tmp_path / "v1"
         new = tmp_path / "v2"
         old.mkdir()
         new.mkdir()
         self._build_versioned_so(old, case_dir / "onedal_core.c", "libonedal_core.so.1")
-        self._build_versioned_so(old, case_dir / "onedal_thread.c", "libonedal_thread.so.1")
+        self._build_versioned_so(
+            old, case_dir / "onedal_thread.c", "libonedal_thread.so.1"
+        )
         # v2: BOTH bump to .so.2 — lockstep, no skew.
         self._build_versioned_so(new, case_dir / "onedal_core.c", "libonedal_core.so.2")
-        self._build_versioned_so(new, case_dir / "onedal_thread.c", "libonedal_thread.so.2")
+        self._build_versioned_so(
+            new, case_dir / "onedal_thread.c", "libonedal_thread.so.2"
+        )
 
         result = CliRunner().invoke(
             main,
-            ["compare-release", str(old), str(new), "--format", "json",
-             "--bundle-cohort", "libonedal_"],
+            [
+                "compare-release",
+                str(old),
+                str(new),
+                "--format",
+                "json",
+                "--bundle-cohort",
+                "libonedal_",
+            ],
         )
         data = _json.loads(result.stdout)
         kinds = {f["kind"] for f in data.get("bundle_findings", [])}
@@ -1473,20 +1869,24 @@ class TestCompareReleaseBundleE2E:
         from abicheck.cli import main
 
         case_dir = (
-            Path(__file__).parent.parent
-            / "examples" / "case84_bundle_soname_skew"
+            Path(__file__).parent.parent / "examples" / "case84_bundle_soname_skew"
         )
         old = tmp_path / "v1"
         new = tmp_path / "v2"
         old.mkdir()
         new.mkdir()
         self._build_versioned_so(old, case_dir / "onedal_core.c", "libonedal_core.so.1")
-        self._build_versioned_so(old, case_dir / "onedal_thread.c", "libonedal_thread.so.1")
+        self._build_versioned_so(
+            old, case_dir / "onedal_thread.c", "libonedal_thread.so.1"
+        )
         self._build_versioned_so(new, case_dir / "onedal_core.c", "libonedal_core.so.2")
-        self._build_versioned_so(new, case_dir / "onedal_thread.c", "libonedal_thread.so.1")
+        self._build_versioned_so(
+            new, case_dir / "onedal_thread.c", "libonedal_thread.so.1"
+        )
 
         result = CliRunner().invoke(
-            main, ["compare-release", str(old), str(new), "--format", "json"],
+            main,
+            ["compare-release", str(old), str(new), "--format", "json"],
         )
         data = _json.loads(result.stdout)
         kinds = {f["kind"] for f in data.get("bundle_findings", [])}
@@ -1496,6 +1896,7 @@ class TestCompareReleaseBundleE2E:
 # ---------------------------------------------------------------------------
 # Cohort-scoped SONAME skew logic (pure, no compiler / no disk)
 # ---------------------------------------------------------------------------
+
 
 class TestSonameSkewCohortScoping:
     """Unit tests for the opt-in `_soname_skew_findings` / `_detect_soname_skew`.
@@ -1508,12 +1909,14 @@ class TestSonameSkewCohortScoping:
     @staticmethod
     def _member(library: str, major: int):
         from abicheck.diff_cpp_patterns import BundleMember
+
         return BundleMember(library=library, soname=library, soname_major=major)
 
     def test_no_cohort_declared_emits_nothing(self) -> None:
         # The opt-in default: even a real skew layout produces no finding when
         # no cohort prefix is declared.
         from abicheck.bundle import _soname_skew_findings
+
         old = [
             self._member("libonedal_core.so.1", 1),
             self._member("libonedal_thread.so.1", 1),
@@ -1526,6 +1929,7 @@ class TestSonameSkewCohortScoping:
 
     def test_skew_within_declared_cohort_is_flagged(self) -> None:
         from abicheck.bundle import _soname_skew_findings
+
         old = [
             self._member("libonedal_core.so.1", 1),
             self._member("libonedal_thread.so.1", 1),
@@ -1546,6 +1950,7 @@ class TestSonameSkewCohortScoping:
         # Declaring only the libfoo_core cohort must not drag libfoo_plugin in,
         # and declaring nothing emits nothing.
         from abicheck.bundle import _soname_skew_findings
+
         old = [
             self._member("libfoo_core.so.1", 1),
             self._member("libfoo_plugin.so.1", 1),
@@ -1561,6 +1966,7 @@ class TestSonameSkewCohortScoping:
 
     def test_lockstep_bump_within_cohort_is_clean(self) -> None:
         from abicheck.bundle import _soname_skew_findings
+
         old = [
             self._member("libonedal_core.so.1", 1),
             self._member("libonedal_thread.so.1", 1),
@@ -1576,6 +1982,7 @@ class TestSonameSkewCohortScoping:
         # var) must NOT degrade into "compare every DSO": independent libfoo
         # bumping while libbar stays must stay clean.
         from abicheck.bundle import _soname_skew_findings
+
         old = [self._member("libfoo.so.1", 1), self._member("libbar.so.1", 1)]
         new = [self._member("libfoo.so.2", 2), self._member("libbar.so.1", 1)]
         assert _soname_skew_findings(old, new, [""]) == []

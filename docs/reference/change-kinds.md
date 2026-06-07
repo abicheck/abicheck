@@ -170,6 +170,15 @@ These breaks come from language-standard features or build-model choices (oneAPI
 | `bit_int_width_changed` | A public type used C23 `_BitInt(N)` and the width `N` changed, or a parameter/field/return type changed to or from `_BitInt(N)`. The width is part of the type identity and layout, so old code reads/writes the wrong number of bits and the mangled name changes. |
 | `atomic_qualifier_changed` | The `_Atomic` qualifier was added to or removed from a public field, parameter, or return type. The size, alignment, and (for some struct types) representation of atomic-qualified types can diverge from their non-atomic counterparts and across compilers (WG14), so old code misinterprets the data. |
 
+### API-surface intelligence transitions (ADR-027)
+
+These breaks are recognised from the declaration *graph* (idioms), not a single per-symbol diff. They fire when an opacity or handle guarantee that callers relied on is lost between versions. See the [API Surface Intelligence](../concepts/api-surface-intelligence.md) guide.
+
+| Kind | Description |
+|------|-------------|
+| `opaque_invariant_broken` | A type that was opaque (definition hidden from callers, crossed only by pointer) or PIMPL now exposes its layout — its complete definition became visible in the public include closure, or a public function began passing it by value. Callers can now `sizeof`/embed it, so its size and fields have joined the ABI and any later change to them is a hard break. The pattern-verdict pass emits this **instead** of silently demoting an opaque-layout change once opaqueness is lost. |
+| `handle_type_changed` | An opaque handle typedef (a `void*` token or a pointer to a forward-declared struct) changed its underlying token type in a way callers can observe. Code that stored or compared the old handle representation now operates on an incompatible token. |
+
 ## Source API Breaks (`API_BREAK`)
 
 These changes break the source-level API contract but do not affect already-compiled binaries.
@@ -259,6 +268,8 @@ library from loading in some deployment environments. Manual review is required.
 | `stack_canary_removed` | The stack-smashing protector (`-fstack-protector`) is no longer referenced (`__stack_chk_fail` / `__stack_chk_guard` absent). Stack-buffer overflows are no longer detected at runtime. Gate via `--policy-file security`. |
 | `fortify_source_weakened` | `_FORTIFY_SOURCE` fortified libc wrappers (the `*_chk` family, e.g. `__memcpy_chk`) are no longer referenced, dropping compile-time/runtime buffer-overflow checks. Gate via `--policy-file security`. |
 | `writable_executable_segment` | A loadable segment is now simultaneously writable **and** executable (a W^X violation). Injected code in that page becomes executable. Gate via `--policy-file security`. |
+| `public_api_exposes_stl_by_value` | A public function takes or returns a `std::` type by value across the library boundary. Standard-library layouts differ across toolchains, standard-library versions, and the C++11 dual-ABI setting, so a consumer built with a different STL silently reads the wrong layout. A graph-shaped anti-pattern (ADR-027 A2): reported by `surface-report`, and at diff time only when newly introduced. |
+| `polymorphic_type_non_virtual_dtor` | A type with virtual methods (it has a vtable) is used as a factory return or base class but declares no virtual destructor. Deleting a derived object through a base pointer is undefined behaviour. A graph-shaped anti-pattern (ADR-027 A2): reported by `surface-report`, and at diff time only when newly introduced. |
 
 See the [Security-hardening drift](../user-guide/security-hardening.md) guide for how to scan for these across releases.
 
@@ -345,6 +356,16 @@ These changes are safe: they add new capabilities or carry diagnostic informatio
 |------|-------------|
 | `glibcxx_dual_abi_flip_detected` | Mass symbol churn matches a libstdc++ dual ABI toggle (`_GLIBCXX_USE_CXX11_ABI`). Individual removed/added symbols are likely caused by this single root cause rather than intentional API changes — the underlying per-symbol findings are reported separately. |
 | `abi_surface_explosion` | The public ABI surface grew or shrank dramatically (e.g. a lost `-fvisibility=hidden` flag). This is a configuration/packaging signal, not a per-symbol break, but may indicate an unintended visibility regression. |
+
+### Surface-metric drift (ADR-027, opt-in `--surface-metrics`)
+
+Aggregate roll-up signals computed from the [API surface metrics](../concepts/api-surface-intelligence.md). Informational only — the individual additions/removals are reported per-symbol; these never drive a verdict on their own and are emitted only with `--surface-metrics`.
+
+| Kind | Description |
+|------|-------------|
+| `public_surface_grew` | The net count of public declarations (functions, variables, types, enums) increased between versions. A trendable signal for CI dashboards and release notes. |
+| `public_surface_shrank` | The net count of public declarations decreased between versions. A roll-up signal; the individual removals (which may be breaking) are reported separately. |
+| `undocumented_export_ratio_increased` | The fraction of exported symbols with no public-header declaration (EXPORT_ONLY origin) rose — a packaging-hygiene regression where a symbol was exported without a corresponding public header. |
 
 ### Field Qualifier Changes
 

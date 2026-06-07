@@ -859,4 +859,51 @@ REGISTRY = ChangeKindRegistry([
               "_Atomic-qualified type may differ from the unqualified type and "
               "varies across compilers, so layout and calling convention "
               "diverge and old code is miscompiled."),
+
+    # ── API-surface intelligence anti-patterns (ADR-027 A2 / D2.2) ──────────
+    _E("public_api_exposes_stl_by_value", _R,
+       impact="A public function takes or returns a `std::` type by value across "
+              "the library boundary. Standard-library layouts (string, vector, "
+              "etc.) differ across toolchains, standard-library versions, and "
+              "the C++11 dual-ABI setting, so passing one by value at the ABI "
+              "boundary is fragile: a consumer built with a different STL silently "
+              "reads the wrong layout. Pass an opaque handle or a C-style view "
+              "instead."),
+    _E("polymorphic_type_non_virtual_dtor", _R,
+       impact="A type with virtual methods (it has a vtable) is used as a factory "
+              "return or base class but declares no virtual destructor. Deleting "
+              "a derived object through a base pointer is undefined behaviour: the "
+              "derived destructor never runs and the wrong amount of memory may be "
+              "freed. Declare the base destructor `virtual`."),
+    _E("opaque_invariant_broken", _B,
+       impact="A type that was opaque (its definition hidden from callers, crossed "
+              "only by pointer) or PIMPL now exposes its layout — its complete "
+              "definition became visible in the public include closure, or a "
+              "public function began passing it by value. Callers that relied on "
+              "never seeing the layout can now `sizeof`/embed it, so the type's "
+              "size and fields have joined the ABI and any later change to them is "
+              "a hard break."),
+    _E("handle_type_changed", _B,
+       impact="An opaque handle typedef (a `void*` token or a pointer to a "
+              "forward-declared struct) changed its underlying token type in a way "
+              "callers can observe. Code that stored or compared the old handle "
+              "representation now operates on an incompatible token."),
+
+    # ── API-surface metric drift (ADR-027 A1 / D1.2) ────────────────────────
+    _E("public_surface_grew", _C,
+       impact="The aggregate count of public declarations (functions, variables, "
+              "types, enums) increased between versions. Informational only — the "
+              "individual additions are reported separately; this is the net "
+              "signal for CI dashboards and release notes. Emitted only with "
+              "--surface-metrics."),
+    _E("public_surface_shrank", _C,
+       impact="The aggregate count of public declarations decreased between "
+              "versions. Informational roll-up only — individual removals are "
+              "reported (and may be breaking) on their own. Emitted only with "
+              "--surface-metrics."),
+    _E("undocumented_export_ratio_increased", _C,
+       impact="The fraction of exported symbols with no public-header declaration "
+              "(EXPORT_ONLY origin) rose between versions — a packaging-hygiene "
+              "regression: a symbol was exported without a corresponding public "
+              "header. Informational; emitted only with --surface-metrics."),
 ])

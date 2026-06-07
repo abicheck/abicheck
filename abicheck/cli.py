@@ -25,6 +25,8 @@ from typing import TYPE_CHECKING, Any
 import click
 
 from .checker import DiffResult, LibraryMetadata, compare
+from .cli_audit import echo_filtered_surface, echo_pattern_modulations
+from .cli_options import adr027_compare_options
 from .cli_params import POLICY_FILE_PARAM
 from .compat.abicc_dump_import import import_abicc_perl_dump, looks_like_perl_dump
 from .compat.cli import compat_group
@@ -1147,6 +1149,7 @@ def _run_compare_pair(
     old_pdb_path: Path | None,
     new_pdb_path: Path | None,
     scope_to_public_surface: bool = False,
+    pattern_verdicts: bool = False,
 ) -> tuple[DiffResult, AbiSnapshot, AbiSnapshot]:
     """Run compare for one old/new pair and return result + resolved snapshots."""
     # Follow GNU ld linker scripts up front so metadata/dependency analysis use
@@ -1177,6 +1180,7 @@ def _run_compare_pair(
     result = compare(
         old, new, suppression=suppression, policy=policy, policy_file=pf,
         scope_to_public_surface=scope_to_public_surface,
+        pattern_verdicts=pattern_verdicts,
     )
     result.old_metadata = _collect_metadata(old_input)
     result.new_metadata = _collect_metadata(new_input)
@@ -1299,20 +1303,6 @@ def _merge_redundant_changes(result: DiffResult) -> None:
     result.changes = result.changes + result.redundant_changes
     result.redundant_changes = []
     result.redundant_count = 0
-
-
-def _echo_filtered_surface(result: DiffResult) -> None:
-    """Print the public-surface audit ledger (ADR-024 §D5 traceability)."""
-    n = result.out_of_surface_count
-    click.echo(
-        f"\nFiltered as non-public ABI surface ({n} "
-        f"{'finding' if n == 1 else 'findings'}, --scope-public-headers):",
-        err=True,
-    )
-    for c in result.out_of_surface_changes:
-        loc = f" [{c.source_location}]" if c.source_location else ""
-        reason = f" ({c.surface_exclusion_reason})" if c.surface_exclusion_reason else ""
-        click.echo(f"  - {c.kind.value}: {c.symbol}{loc}{reason}", err=True)
 
 
 def _warn_all_suppressed(result: DiffResult) -> None:
@@ -1519,7 +1509,7 @@ def _finalize_compare_result(
     if show_redundant and result.redundant_changes:
         _merge_redundant_changes(result)
     if show_filtered and result.out_of_surface_changes:
-        _echo_filtered_surface(result)
+        echo_filtered_surface(result)
 
     # The scoping fallback warning goes to stderr so it never corrupts the
     # machine-readable payload on stdout (which carries scope_resolved /
@@ -1722,6 +1712,7 @@ def _finalize_compare_result(
               help="Enable debuginfod network resolution for debug info (opt-in).")
 @click.option("--debuginfod-url", "debuginfod_url", default=None,
               help="debuginfod server URL (overrides DEBUGINFOD_URLS env var).")
+@adr027_compare_options  # ADR-027: --pattern-verdicts/--explain-patterns/--surface-metrics
 @click.option("-v", "--verbose", is_flag=True, default=False,
               help="Enable verbose/debug output.")
 def compare_cmd(
@@ -1755,6 +1746,9 @@ def compare_cmd(
     debug_roots_new: tuple[Path, ...],
     debuginfod: bool,
     debuginfod_url: str | None,
+    pattern_verdicts: bool,
+    explain_patterns: bool,
+    surface_metrics: bool,
     verbose: bool,
     probe_matrix_old: Path | None = None,
     probe_matrix_new: Path | None = None,
@@ -1903,12 +1897,18 @@ def compare_cmd(
 
     extra_changes = _load_probe_matrix_changes(probe_matrix_old, probe_matrix_new)
 
+    apply_patterns = pattern_verdicts or explain_patterns  # --explain implies on
     result = compare(
         old, new, suppression=suppression, policy=policy, policy_file=pf,
         scope_to_public_surface=scope_public_headers,
         force_public_symbols=force_public,
         extra_changes=extra_changes,
+        pattern_verdicts=apply_patterns,
+        surface_metrics=surface_metrics,
     )
+
+    if explain_patterns:
+        echo_pattern_modulations(result)
 
     _finalize_compare_result(
         result, old_input, new_input,

@@ -69,6 +69,8 @@ from .checker_policy import (
     RISK_KINDS,
     ChangeKind,
     HasKind,
+    Verdict,
+    effective_category,
     policy_kind_sets,
 )
 from .errors import PolicyError
@@ -163,6 +165,35 @@ def classify_change(
         return IssueCategory.QUALITY_ISSUES
     # Fail-safe: unclassified kinds are treated as breaking.
     return IssueCategory.ABI_BREAKING
+
+
+def classify_change_object(
+    change: HasKind,
+    *,
+    policy: str | None = None,
+    kind_sets: KindSets | None = None,
+) -> IssueCategory:
+    """Classify a *change* honouring its per-finding ``effective_verdict`` (A4).
+
+    Routes through :func:`checker_policy.effective_category` — the single place
+    a finding's category is decided — so an ADR-027 pattern-aware demotion (a
+    ``Change`` carrying ``effective_verdict``) reads compatible in the
+    severity-aware exit code and category counts, not just the verdict. Falls
+    back to kind-based ``classify_change`` for plain stubs with no override.
+    """
+    sets = _resolve_kind_sets(policy, kind_sets)
+    verdict = effective_category(change, *sets)
+    if verdict == Verdict.BREAKING:
+        return IssueCategory.ABI_BREAKING
+    if verdict in (Verdict.API_BREAK, Verdict.COMPATIBLE_WITH_RISK):
+        return IssueCategory.POTENTIAL_BREAKING
+    # COMPATIBLE (and the unreachable NO_CHANGE — effective_category only ever
+    # returns BREAKING/API_BREAK/RISK/COMPATIBLE): an addition keeps its
+    # ADDITION bucket; everything else (including a demoted break, or a
+    # hypothetical NO_CHANGE) is a quality issue, never an addition.
+    if change.kind in ADDITION_KINDS and change.kind in sets[2]:
+        return IssueCategory.ADDITION
+    return IssueCategory.QUALITY_ISSUES
 
 
 # ---------------------------------------------------------------------------
@@ -374,7 +405,7 @@ def compute_exit_code(
     """
     worst = 0
     for change in changes:
-        cat = classify_change(change.kind, policy=policy, kind_sets=kind_sets)
+        cat = classify_change_object(change, policy=policy, kind_sets=kind_sets)
         if config.level_for(cat) == SeverityLevel.ERROR:
             code = _CATEGORY_EXIT_CODES[cat]
             if code > worst:
@@ -411,7 +442,7 @@ def categorize_changes(
     adds: list[HasKind] = []
 
     for c in changes:
-        cat = classify_change(c.kind, policy=policy, kind_sets=kind_sets)
+        cat = classify_change_object(c, policy=policy, kind_sets=kind_sets)
         if cat == IssueCategory.ABI_BREAKING:
             abi.append(c)
         elif cat == IssueCategory.POTENTIAL_BREAKING:

@@ -187,6 +187,9 @@ paths_to_mutate = [
     "abicheck/diff_platform.py",     # ELF/DWARF/PE/Mach-O detectors
     "abicheck/diff_filtering.py",    # deduplication and redundancy logic
     "abicheck/checker_policy.py",    # verdict classification
+    "abicheck/idioms.py",            # ADR-027 idiom & anti-pattern recognisers
+    "abicheck/pattern_verdicts.py",  # ADR-027 A4 verdict modulation
+    "abicheck/surface_graph.py",     # ADR-027 declaration-graph substrate
 ]
 tests_dir = "tests/"
 runner = "python -m pytest -x -q --tb=no -m 'not integration and not libabigail and not abicc and not slow'"

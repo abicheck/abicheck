@@ -471,6 +471,26 @@ class ChangeKind(str, Enum):
     BIT_INT_WIDTH_CHANGED = "bit_int_width_changed"
     ATOMIC_QUALIFIER_CHANGED = "atomic_qualifier_changed"
 
+    # ── API-surface intelligence anti-patterns (ADR-027 A2 / D2.2) ──────────
+    # Graph-shaped findings recognised from the declaration graph rather than a
+    # per-symbol diff. The two RISK kinds are single-snapshot anti-patterns
+    # (reported by `surface-report`, and at diff time only when newly
+    # introduced); the two BREAKING kinds are idiom *transitions* emitted by the
+    # A4 pattern-verdict pass when an opacity/handle guarantee callers relied on
+    # is lost.
+    PUBLIC_API_EXPOSES_STL_BY_VALUE = "public_api_exposes_stl_by_value"
+    POLYMORPHIC_TYPE_NON_VIRTUAL_DTOR = "polymorphic_type_non_virtual_dtor"
+    OPAQUE_INVARIANT_BROKEN = "opaque_invariant_broken"
+    HANDLE_TYPE_CHANGED = "handle_type_changed"
+
+    # ── API-surface metric drift (ADR-027 A1 / D1.2) ────────────────────────
+    # Aggregate, informational signals emitted only with --surface-metrics.
+    # COMPATIBLE: never breaking on their own; useful for CI dashboards and
+    # release notes.
+    PUBLIC_SURFACE_GREW = "public_surface_grew"
+    PUBLIC_SURFACE_SHRANK = "public_surface_shrank"
+    UNDOCUMENTED_EXPORT_RATIO_INCREASED = "undocumented_export_ratio_increased"
+
 
 class HasKind(Protocol):
     kind: ChangeKind

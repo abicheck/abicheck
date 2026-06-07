@@ -170,6 +170,12 @@ class DiffResult:
     # Distinct from the raw ``evidence_tiers`` list above — this is the single
     # scalar consumers should key trust decisions off of. See EvidenceTier.
     evidence_tier: EvidenceTier = EvidenceTier.ELF_ONLY
+    # ADR-027 A4 — pattern-aware verdict modulation ledger. Each entry records a
+    # demotion/raise the pattern pass made (symbol, original→new category, the
+    # rule id, the disclosed reason, the evidence tier, and the graph edges that
+    # matched). Empty unless --pattern-verdicts was enabled. Findings themselves
+    # carry the override on Change.effective_verdict; this is the audit trail.
+    pattern_modulations: list[dict[str, object]] = field(default_factory=list)
 
     def _effective_kind_sets(
         self,

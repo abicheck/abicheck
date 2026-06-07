@@ -249,6 +249,18 @@ ASSERTED_CHANGE_KINDS: set[ChangeKind] = {
     ChangeKind.CHAR8T_MIGRATION,
     ChangeKind.BIT_INT_WIDTH_CHANGED,
     ChangeKind.ATOMIC_QUALIFIER_CHANGED,
+    # API-surface intelligence anti-patterns (ADR-027) — exercised in
+    # tests/test_idioms.py (detection) and tests/test_pattern_verdicts.py
+    # (diff-time transitions and modulation).
+    ChangeKind.PUBLIC_API_EXPOSES_STL_BY_VALUE,
+    ChangeKind.POLYMORPHIC_TYPE_NON_VIRTUAL_DTOR,
+    ChangeKind.OPAQUE_INVARIANT_BROKEN,
+    ChangeKind.HANDLE_TYPE_CHANGED,
+    # API-surface metric drift (ADR-027 D1.2) — exercised in
+    # tests/test_surface_metrics_drift.py.
+    ChangeKind.PUBLIC_SURFACE_GREW,
+    ChangeKind.PUBLIC_SURFACE_SHRANK,
+    ChangeKind.UNDOCUMENTED_EXPORT_RATIO_INCREASED,
 }
 
 
