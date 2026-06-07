@@ -317,6 +317,53 @@ def test_pimpl_pointee_change_demoted() -> None:
     assert change.modulation_rule == "pimpl-pointee-only"
 
 
+def test_pimpl_ambiguous_pointee_short_name_not_demoted() -> None:
+    # Codex P2: a wrapper records an unqualified hidden_pointee "Impl", but the
+    # snapshot has two Impl types (ns1::Impl, ns2::Impl). A real break on
+    # ns1::Impl must NOT be demoted via the wrapper whose Impl* is ambiguous.
+    def snap() -> AbiSnapshot:
+        wrapper = RecordType(
+            name="Widget",
+            kind="class",
+            is_opaque=False,
+            size_bits=64,
+            alignment_bits=64,
+            fields=[
+                TypeField(
+                    name="impl", type="Impl*", offset_bits=0, access=AccessLevel.PRIVATE
+                )
+            ],
+        )
+        return AbiSnapshot(
+            library="l",
+            version="1",
+            from_headers=True,
+            functions=[
+                Function(
+                    name="make",
+                    mangled="make",
+                    return_type="Widget*",
+                    params=[],
+                    visibility=Visibility.PUBLIC,
+                    return_pointer_depth=1,
+                )
+            ],
+            types=[
+                wrapper,
+                RecordType(name="ns1::Impl", kind="class", is_opaque=True),
+                RecordType(name="ns2::Impl", kind="class", is_opaque=True),
+            ],
+        )
+
+    change = Change(
+        kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="ns1::Impl", description="grew"
+    )
+    apply_pattern_verdicts(
+        [change], snap(), snap(), evidence_tier=EvidenceTier.HEADER_AWARE
+    )
+    assert change.effective_verdict is None  # ambiguous pointee → not demoted
+
+
 def test_pimpl_wrapper_layout_change_not_demoted() -> None:
     # The wrapper's own layout changed (64 -> 128): callers can sizeof it, so a
     # change to the wrapper is a real break and must NOT be demoted.

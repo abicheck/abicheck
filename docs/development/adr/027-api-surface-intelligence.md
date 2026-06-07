@@ -4,17 +4,24 @@
 **Status:** Accepted
 **Decision maker:** Nikolay Petrov
 
-> **Implementation status (2026-06-07).** Phase 0 (`surface_graph.py`),
-> Phase 1 (`surface-report` / A1 metrics), Phase 2 (`idioms.py` recognisers +
-> the four D2.2 anti-pattern `ChangeKind`s), and Phase 3 (A4 pattern-aware
-> verdicts: `pattern_verdicts.py`, the per-finding `effective_verdict` override
-> threaded through every classification site, `--pattern-verdicts` /
-> `--explain-patterns`, and the `pattern_modulations` ledger) have shipped.
-> Idiom evidence is recomputed at diff time from the persisted declaration
-> graph rather than serialized as bare tag names (D2.4 intent), so no schema
-> bump was required. **Pending:** A3 cross-library reasoning (D3, Phase 4) and
-> the metric-drift `ChangeKind`s (D1.2, Phase 5) — `--pattern-verdicts` remains
-> opt-in until the FP-rate corpus and parity lanes validate a default flip.
+> **Implementation status (2026-06-07).** All phases have shipped:
+> Phase 0 (`surface_graph.py`), Phase 1 (`surface-report` / A1 metrics),
+> Phase 2 (`idioms.py` recognisers + the four D2.2 anti-pattern `ChangeKind`s),
+> Phase 3 (A4 pattern-aware verdicts: `pattern_verdicts.py`, the per-finding
+> `effective_verdict` override threaded through every classification site,
+> `--pattern-verdicts` / `--explain-patterns`, the `pattern_modulations`
+> ledger), Phase 4 (A3 cross-library: the `BUNDLE_INTRA_TYPE_CHANGED`
+> reachability filter in `bundle.py` — a cross-DSO type change a consumer uses
+> only via internal/non-exported symbols is demoted to risk via a per-finding
+> `BundleFinding.effective_verdict`, propagated onto the lowered `Change` so the
+> bundle verdict and the `compare-release` exit code honour it), and Phase 5
+> (the D1.2 metric-drift `ChangeKind`s behind `--surface-metrics`). Idiom
+> evidence is recomputed at diff time from the persisted declaration graph
+> rather than serialized as bare tag names (D2.4 intent), so no schema bump was
+> required; A3 uses ELF exported-symbol membership as the consumer public-surface
+> proxy (the bundle path carries ELF metadata, not full type graphs).
+> **Still deferred by design:** flipping `--pattern-verdicts` to default-on,
+> which the ADR gates on FP-rate + parity stability across a release cycle.
 
 ---
 

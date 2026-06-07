@@ -493,12 +493,19 @@ def _pimpl_pointee_match(
     """Return evidence if *pointee* is the hidden impl of a PIMPL wrapper whose
     own layout is unchanged across both snapshots (D4.1 PIMPL guard).
 
-    Matching is exact-qualified first; it falls back to the unqualified short
-    name only when exactly one PIMPL wrapper has a pointee with that short name,
-    so a real break on ``ns1::Impl`` is never demoted using ``ns2::Widget``'s
-    PIMPL evidence just because both impls are spelled ``Impl`` (ADR-027 review).
+    Matching is exact-qualified first. It falls back to the unqualified short
+    name only when (a) exactly one PIMPL wrapper has a pointee with that short
+    name **and** (b) the short name is unambiguous among the snapshot's own
+    types — because ``_recognise_pimpl`` may record an unqualified
+    ``hidden_pointee`` (``Impl *``). Without (b), a real break on ``ns1::Impl``
+    could be demoted using a wrapper whose ``Impl *`` actually meant
+    ``ns2::Impl`` (ADR-027 review).
     """
     short = pointee.rsplit("::", 1)[-1]
+    new_names = list(new_type_names)
+    pointee_unambiguous = (
+        sum(1 for n in new_names if n.rsplit("::", 1)[-1] == short) <= 1
+    )
     exact: list[tuple[str, IdiomTag]] = []
     short_matches: list[tuple[str, IdiomTag]] = []
     for wrapper, tags in old_idioms.items():
@@ -511,11 +518,10 @@ def _pimpl_pointee_match(
                 short_matches.append((wrapper, t))
     if exact:
         candidates = exact
-    elif len(short_matches) == 1:
+    elif len(short_matches) == 1 and pointee_unambiguous:
         candidates = short_matches
     else:
         return None  # no match, or an ambiguous short name → do not demote
-    new_names = list(new_type_names)
     for wrapper, t in candidates:
         # Find the matching wrapper tag in new and require identical layout.
         new_tag = _has_idiom(new_idioms, wrapper, Idiom.PIMPL, new_names)
