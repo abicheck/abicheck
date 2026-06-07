@@ -36,6 +36,7 @@ from .model import (
     TypeField,
     canonicalize_type_name,
     cv_qualifiers_only_differ,
+    go_runtime_types_excluded,
 )
 from .model import is_non_abi_surface_type as _is_non_abi_surface_type
 from .model import stdlib_namespaces_excluded as _exclude_stdlib_namespaces
@@ -55,14 +56,36 @@ def _exported_elf_symbol_names(snap: AbiSnapshot, *, symbol_types: Collection[st
     )
 
 
-def _is_abi_surface_type(t: RecordType, *, exclude_stdlib: bool) -> bool:
+def _is_abi_surface_type(
+    t: RecordType,
+    *,
+    exclude_stdlib: bool,
+    exclude_go_runtime: bool,
+) -> bool:
     """True if record *t* is part of the inspected library's ABI surface.
 
     Shared by every type-level detector (records, unions, field/kind/reserved
     diffs) so std::/anonymous filtering (FP-1/FP-2) is applied consistently and
     cannot be bypassed via an alternate map-construction path.
     """
-    return not _is_non_abi_surface_type(t.name, exclude_stdlib_namespaces=exclude_stdlib)
+    return not _is_non_abi_surface_type(
+        t.name,
+        exclude_stdlib_namespaces=exclude_stdlib,
+        exclude_go_runtime_types=exclude_go_runtime,
+    )
+
+
+def _is_abi_surface_name(
+    name: str,
+    *,
+    exclude_stdlib: bool,
+    exclude_go_runtime: bool,
+) -> bool:
+    return not _is_non_abi_surface_type(
+        name,
+        exclude_stdlib_namespaces=exclude_stdlib,
+        exclude_go_runtime_types=exclude_go_runtime,
+    )
 
 
 def _has_type_evidence(snap: AbiSnapshot) -> bool:
@@ -141,8 +164,17 @@ def _diff_types(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     # Include ALL types (including unions) for size/alignment/base/vtable checks.
     # TYPE_FIELD_* for unions is skipped below — handled by _diff_unions() instead.
     excl = _exclude_stdlib_namespaces(old, new)
-    old_map = {t.name: t for t in old.types if _is_abi_surface_type(t, exclude_stdlib=excl)}
-    new_map = {t.name: t for t in new.types if _is_abi_surface_type(t, exclude_stdlib=excl)}
+    go_excl = go_runtime_types_excluded(old, new)
+    old_map = {
+        t.name: t
+        for t in old.types
+        if _is_abi_surface_type(t, exclude_stdlib=excl, exclude_go_runtime=go_excl)
+    }
+    new_map = {
+        t.name: t
+        for t in new.types
+        if _is_abi_surface_type(t, exclude_stdlib=excl, exclude_go_runtime=go_excl)
+    }
     # RD2-5: don't manufacture phantom TYPE_REMOVED when the new side is stripped.
     suppress_removed = _removals_are_unconfirmed(old, new)
 
@@ -532,11 +564,16 @@ def _diff_type_vtable(name: str, t_old: RecordType, t_new: RecordType) -> list[C
 def _diff_enums(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     changes: list[Change] = []
     excl = _exclude_stdlib_namespaces(old, new)
+    go_excl = go_runtime_types_excluded(old, new)
     old_map: dict[str, EnumType] = {
-        e.name: e for e in old.enums if not _is_non_abi_surface_type(e.name, exclude_stdlib_namespaces=excl)
+        e.name: e
+        for e in old.enums
+        if _is_abi_surface_name(e.name, exclude_stdlib=excl, exclude_go_runtime=go_excl)
     }
     new_map: dict[str, EnumType] = {
-        e.name: e for e in new.enums if not _is_non_abi_surface_type(e.name, exclude_stdlib_namespaces=excl)
+        e.name: e
+        for e in new.enums
+        if _is_abi_surface_name(e.name, exclude_stdlib=excl, exclude_go_runtime=go_excl)
     }
 
     for name, e_old in old_map.items():
@@ -728,8 +765,17 @@ def _diff_method_qualifiers(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
 def _diff_unions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     changes: list[Change] = []
     excl = _exclude_stdlib_namespaces(old, new)
-    old_unions = {t.name: t for t in old.types if t.is_union and _is_abi_surface_type(t, exclude_stdlib=excl)}
-    new_unions = {t.name: t for t in new.types if t.is_union and _is_abi_surface_type(t, exclude_stdlib=excl)}
+    go_excl = go_runtime_types_excluded(old, new)
+    old_unions = {
+        t.name: t
+        for t in old.types
+        if t.is_union and _is_abi_surface_type(t, exclude_stdlib=excl, exclude_go_runtime=go_excl)
+    }
+    new_unions = {
+        t.name: t
+        for t in new.types
+        if t.is_union and _is_abi_surface_type(t, exclude_stdlib=excl, exclude_go_runtime=go_excl)
+    }
 
     for name, t_old in old_unions.items():
         if name not in new_unions:
@@ -814,10 +860,11 @@ def _has_version_family_successor(name: str, new_typedefs: dict[str, str]) -> bo
 def _diff_typedefs(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     changes: list[Change] = []
     excl = _exclude_stdlib_namespaces(old, new)
+    go_excl = go_runtime_types_excluded(old, new)
     # RD2-5: don't manufacture phantom TYPEDEF_REMOVED when the new side is stripped.
     suppress_removed = _removals_are_unconfirmed(old, new)
     for alias, old_type in old.typedefs.items():
-        if _is_non_abi_surface_type(alias, exclude_stdlib_namespaces=excl):
+        if not _is_abi_surface_name(alias, exclude_stdlib=excl, exclude_go_runtime=go_excl):
             continue
         new_type = new.typedefs.get(alias)
         if new_type is None and suppress_removed:
@@ -868,11 +915,16 @@ def _diff_enum_renames(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """Detect enum member renames: same value present under different name."""
     changes: list[Change] = []
     excl = _exclude_stdlib_namespaces(old, new)
+    go_excl = go_runtime_types_excluded(old, new)
     old_map: dict[str, EnumType] = {
-        e.name: e for e in old.enums if not _is_non_abi_surface_type(e.name, exclude_stdlib_namespaces=excl)
+        e.name: e
+        for e in old.enums
+        if _is_abi_surface_name(e.name, exclude_stdlib=excl, exclude_go_runtime=go_excl)
     }
     new_map: dict[str, EnumType] = {
-        e.name: e for e in new.enums if not _is_non_abi_surface_type(e.name, exclude_stdlib_namespaces=excl)
+        e.name: e
+        for e in new.enums
+        if _is_abi_surface_name(e.name, exclude_stdlib=excl, exclude_go_runtime=go_excl)
     }
 
     for name, e_old in old_map.items():
@@ -975,8 +1027,17 @@ def _diff_field_qualifiers(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """Detect field-level const/volatile/mutable qualifier changes."""
     changes: list[Change] = []
     excl = _exclude_stdlib_namespaces(old, new)
-    old_map = {t.name: t for t in old.types if not t.is_union and _is_abi_surface_type(t, exclude_stdlib=excl)}
-    new_map = {t.name: t for t in new.types if not t.is_union and _is_abi_surface_type(t, exclude_stdlib=excl)}
+    go_excl = go_runtime_types_excluded(old, new)
+    old_map = {
+        t.name: t
+        for t in old.types
+        if not t.is_union and _is_abi_surface_type(t, exclude_stdlib=excl, exclude_go_runtime=go_excl)
+    }
+    new_map = {
+        t.name: t
+        for t in new.types
+        if not t.is_union and _is_abi_surface_type(t, exclude_stdlib=excl, exclude_go_runtime=go_excl)
+    }
 
     for name, t_old in old_map.items():
         t_new = new_map.get(name)
@@ -999,8 +1060,17 @@ def _diff_field_renames(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """Detect field renames: same offset+type, different name."""
     changes: list[Change] = []
     excl = _exclude_stdlib_namespaces(old, new)
-    old_map = {t.name: t for t in old.types if not t.is_union and _is_abi_surface_type(t, exclude_stdlib=excl)}
-    new_map = {t.name: t for t in new.types if not t.is_union and _is_abi_surface_type(t, exclude_stdlib=excl)}
+    go_excl = go_runtime_types_excluded(old, new)
+    old_map = {
+        t.name: t
+        for t in old.types
+        if not t.is_union and _is_abi_surface_type(t, exclude_stdlib=excl, exclude_go_runtime=go_excl)
+    }
+    new_map = {
+        t.name: t
+        for t in new.types
+        if not t.is_union and _is_abi_surface_type(t, exclude_stdlib=excl, exclude_go_runtime=go_excl)
+    }
 
     for name, t_old in old_map.items():
         t_new = new_map.get(name)
@@ -1073,8 +1143,17 @@ def _diff_type_kind_changes(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """Detect struct↔union kind changes (ABICC: StructToUnion / DataType_Type)."""
     changes: list[Change] = []
     excl = _exclude_stdlib_namespaces(old, new)
-    old_map = {t.name: t for t in old.types if _is_abi_surface_type(t, exclude_stdlib=excl)}
-    new_map = {t.name: t for t in new.types if _is_abi_surface_type(t, exclude_stdlib=excl)}
+    go_excl = go_runtime_types_excluded(old, new)
+    old_map = {
+        t.name: t
+        for t in old.types
+        if _is_abi_surface_type(t, exclude_stdlib=excl, exclude_go_runtime=go_excl)
+    }
+    new_map = {
+        t.name: t
+        for t in new.types
+        if _is_abi_surface_type(t, exclude_stdlib=excl, exclude_go_runtime=go_excl)
+    }
 
     for name, t_old in old_map.items():
         t_new = new_map.get(name)
@@ -1106,8 +1185,17 @@ def _diff_reserved_fields(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """
     changes: list[Change] = []
     excl = _exclude_stdlib_namespaces(old, new)
-    old_map = {t.name: t for t in old.types if not t.is_union and _is_abi_surface_type(t, exclude_stdlib=excl)}
-    new_map = {t.name: t for t in new.types if not t.is_union and _is_abi_surface_type(t, exclude_stdlib=excl)}
+    go_excl = go_runtime_types_excluded(old, new)
+    old_map = {
+        t.name: t
+        for t in old.types
+        if not t.is_union and _is_abi_surface_type(t, exclude_stdlib=excl, exclude_go_runtime=go_excl)
+    }
+    new_map = {
+        t.name: t
+        for t in new.types
+        if not t.is_union and _is_abi_surface_type(t, exclude_stdlib=excl, exclude_go_runtime=go_excl)
+    }
 
     for name, t_old in old_map.items():
         t_new = new_map.get(name)

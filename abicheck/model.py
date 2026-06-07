@@ -86,7 +86,6 @@ _GO_EMBEDDED_MARKERS: tuple[str, ...] = (
     "strconv.",
 )
 _GO_GENERIC_RUNTIME_MARKERS: tuple[str, ...] = ("/", ".")
-
 # Substrings that mark an anonymous / local type with no stable cross-version
 # ABI identity — lambdas and unnamed struct/union/enum (validation/REPORT.md
 # FP-2). gcc renders these as "<lambda...>", "{lambda...}", "(anonymous ...)";
@@ -96,7 +95,66 @@ _ANONYMOUS_TYPE_MARKERS: tuple[str, ...] = (
 )
 
 
-def is_non_abi_surface_type(name: str, *, exclude_stdlib_namespaces: bool = True) -> bool:
+def _go_type_candidate(name: str) -> str:
+    return name[2:] if name.startswith("[]") else name
+
+
+def _is_go_runtime_evidence_type_name(name: str) -> bool:
+    """Return True when *name* is strong evidence that a snapshot came from Go."""
+    if not name:
+        return False
+    candidate = _go_type_candidate(name)
+    return (
+        candidate.startswith(_GO_RUNTIME_TYPE_PREFIXES)
+        or (
+            candidate.startswith("struct {")
+            and any(marker in candidate for marker in _GO_EMBEDDED_MARKERS)
+        )
+    )
+
+
+def is_go_runtime_type_name(name: str) -> bool:
+    """Return True for Go runtime/internal DWARF type names."""
+    if not name:
+        return False
+    go_candidate = _go_type_candidate(name)
+    return (
+        name.startswith(_GO_RUNTIME_TYPE_PREFIXES)
+        or go_candidate.startswith(_GO_RUNTIME_TYPE_PREFIXES)
+        or (
+            go_candidate.startswith(_GO_GENERIC_RUNTIME_TYPE_PREFIXES)
+            and any(marker in go_candidate for marker in _GO_GENERIC_RUNTIME_MARKERS)
+        )
+        or "/" in name
+        or bool(_GO_PACKAGE_QUALIFIED_RE.match(go_candidate))
+        or (
+            go_candidate.startswith("struct {")
+            and any(marker in go_candidate for marker in _GO_EMBEDDED_MARKERS)
+        )
+    )
+
+
+def go_runtime_types_excluded(old: AbiSnapshot, new: AbiSnapshot) -> bool:
+    """Return True when Go runtime/internal DWARF type filtering should run."""
+    names: list[str] = []
+    for snap in (old, new):
+        names.extend(t.name for t in snap.types)
+        names.extend(e.name for e in snap.enums)
+        names.extend(snap.typedefs)
+        names.extend(snap.typedefs.values())
+        dwarf = getattr(snap, "dwarf", None)
+        if dwarf is not None:
+            names.extend(getattr(dwarf, "structs", {}))
+            names.extend(getattr(dwarf, "enums", {}))
+    return any(_is_go_runtime_evidence_type_name(name) for name in names)
+
+
+def is_non_abi_surface_type(
+    name: str,
+    *,
+    exclude_stdlib_namespaces: bool = True,
+    exclude_go_runtime_types: bool = False,
+) -> bool:
     """Return True if *name* is a type that is never the inspected library's own
     ABI surface and must be excluded from type diffing.
 
@@ -116,21 +174,7 @@ def is_non_abi_surface_type(name: str, *, exclude_stdlib_namespaces: bool = True
         return True
     if exclude_stdlib_namespaces and name.startswith(_STDLIB_TYPE_NAMESPACE_PREFIXES):
         return True
-    go_candidate = name[2:] if name.startswith("[]") else name
-    if (
-        name.startswith(_GO_RUNTIME_TYPE_PREFIXES)
-        or go_candidate.startswith(_GO_RUNTIME_TYPE_PREFIXES)
-        or (
-            go_candidate.startswith(_GO_GENERIC_RUNTIME_TYPE_PREFIXES)
-            and any(marker in go_candidate for marker in _GO_GENERIC_RUNTIME_MARKERS)
-        )
-        or "/" in name
-        or _GO_PACKAGE_QUALIFIED_RE.match(go_candidate)
-        or (
-            go_candidate.startswith("struct {")
-            and any(marker in go_candidate for marker in _GO_EMBEDDED_MARKERS)
-        )
-    ):
+    if exclude_go_runtime_types and is_go_runtime_type_name(name):
         return True
     return any(marker in name for marker in _ANONYMOUS_TYPE_MARKERS)
 
@@ -176,14 +220,23 @@ def stdlib_namespaces_excluded(old: AbiSnapshot, new: AbiSnapshot) -> bool:
     )
 
 
-def is_abi_surface_type_name(name: str, *, exclude_stdlib: bool) -> bool:
+def is_abi_surface_type_name(
+    name: str,
+    *,
+    exclude_stdlib: bool,
+    exclude_go_runtime: bool = False,
+) -> bool:
     """Return True if a type *name* belongs to the inspected library's ABI
     surface (i.e. is NOT filtered as std::/anonymous/compiler-internal).
 
     Convenience inverse of :func:`is_non_abi_surface_type` for use in the
     ``{t.name: t for t in snap.types if is_abi_surface_type_name(...)}`` idiom
     shared across detector modules."""
-    return not is_non_abi_surface_type(name, exclude_stdlib_namespaces=exclude_stdlib)
+    return not is_non_abi_surface_type(
+        name,
+        exclude_stdlib_namespaces=exclude_stdlib,
+        exclude_go_runtime_types=exclude_go_runtime,
+    )
 
 # ---------------------------------------------------------------------------
 # Type name canonicalization — normalise type names for reliable matching.

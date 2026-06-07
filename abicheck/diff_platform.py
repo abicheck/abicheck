@@ -41,6 +41,7 @@ from .model import (
     AbiSnapshot,
     Visibility,
     cv_qualifiers_only_differ,
+    go_runtime_types_excluded,
     is_non_abi_surface_type,
     stdlib_namespaces_excluded,
 )
@@ -1184,10 +1185,35 @@ def _diff_dwarf(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     # surface), but anonymous/lambda and compiler-internal types are still
     # dropped — those are never stable ABI even for the runtime itself.
     excl = stdlib_namespaces_excluded(old, new)
-    o_structs = {k: v for k, v in o_structs.items() if not is_non_abi_surface_type(k, exclude_stdlib_namespaces=excl)}
-    n_structs = {k: v for k, v in n_structs.items() if not is_non_abi_surface_type(k, exclude_stdlib_namespaces=excl)}
-    o_enums = {k: v for k, v in o_enums.items() if not is_non_abi_surface_type(k, exclude_stdlib_namespaces=excl)}
-    n_enums = {k: v for k, v in n_enums.items() if not is_non_abi_surface_type(k, exclude_stdlib_namespaces=excl)}
+    go_excl = go_runtime_types_excluded(old, new)
+    o_structs = {
+        k: v
+        for k, v in o_structs.items()
+        if not is_non_abi_surface_type(
+            k, exclude_stdlib_namespaces=excl, exclude_go_runtime_types=go_excl
+        )
+    }
+    n_structs = {
+        k: v
+        for k, v in n_structs.items()
+        if not is_non_abi_surface_type(
+            k, exclude_stdlib_namespaces=excl, exclude_go_runtime_types=go_excl
+        )
+    }
+    o_enums = {
+        k: v
+        for k, v in o_enums.items()
+        if not is_non_abi_surface_type(
+            k, exclude_stdlib_namespaces=excl, exclude_go_runtime_types=go_excl
+        )
+    }
+    n_enums = {
+        k: v
+        for k, v in n_enums.items()
+        if not is_non_abi_surface_type(
+            k, exclude_stdlib_namespaces=excl, exclude_go_runtime_types=go_excl
+        )
+    }
 
     filtered_old = DwarfMetadata(structs=o_structs, enums=o_enums, has_dwarf=o.has_dwarf)
     filtered_new = DwarfMetadata(structs=n_structs, enums=n_enums, has_dwarf=n.has_dwarf)
