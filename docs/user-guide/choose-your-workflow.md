@@ -128,11 +128,14 @@ verdict or exit code.
 | Everything is an error (strictest) | `--severity-preset strict` | `severity-preset: strict` |
 
 > **GitHub Action note:** the `severity-preset` / `severity-addition` inputs are
-> wired into **`compare` mode only**. For `compare-release` (package/release
-> workflows) and other modes, pass the equivalent CLI flags through
-> [`extra-args`](github-action.md) instead — e.g.
-> `extra-args: '--severity-addition error'`. The `fail-on-breaking` /
-> `fail-on-api-break` inputs apply to both `compare` and `compare-release`.
+> wired into **`compare` mode only**. The Action's `compare-release` branch does
+> **not** interpret the CLI's severity-aware exit codes — it only recognizes the
+> verdict codes (`0/2/4/8`) and treats anything else (including the severity exit
+> code `1`) as a tool error. So gate a release/bundle in the Action with
+> `fail-on-breaking` / `fail-on-api-break` (verdict-based; these apply to both
+> `compare` and `compare-release`). To gate `compare-release` on **severity**
+> (e.g. fail on additions), run the CLI directly in a shell step — where the
+> severity exit code is honored — rather than through the Action wrapper.
 
 ```bash
 # Report everything, fail ONLY on binary ABI breaks
