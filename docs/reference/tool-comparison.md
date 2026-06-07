@@ -10,6 +10,11 @@ benchmark results across real-world test cases, and why the numbers come out the
 > releases. A historical 42-case snapshot is kept below only for comparison with
 > older reports.
 
+> **Why the tools disagree.** The accuracy gaps below are mostly an *evidence*
+> story: each tool sees a different subset of the binary/debug/header inputs. For
+> the conceptual model — which evidence detects which change class — see
+> [Evidence & Detectability](../concepts/evidence-and-detectability.md).
+
 ---
 
 ## How each tool analyses ABI

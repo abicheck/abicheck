@@ -3,6 +3,11 @@
 `abicheck` is designed to catch real ABI and API breaks with high accuracy, but has specific
 limitations you should understand before relying on it in production.
 
+> **Conceptual companion.** This page is the *practical* boundary list. For the
+> *why* — which evidence (symbols, debug info, headers, source, runtime, bundle)
+> lets any tool see a given change at all, and what no artifact comparison can
+> prove — see [Evidence & Detectability](evidence-and-detectability.md).
+
 ---
 
 ## Platform support matrix
