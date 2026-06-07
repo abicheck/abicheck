@@ -28,10 +28,13 @@ specify the PDB file location if automatic discovery fails.
 
 Windows support depends on the compiler/toolchain used for headers and binary production:
 
-| Toolchain | Status | Notes |
+Two distinct paths have different maturity — don't read "MSVC" as a single status:
+
+| Toolchain / path | Status | Notes |
 |----------|--------|-------|
 | MinGW (GCC) | **Experimental** | Covered by current CI smoke/integration jobs. |
-| MSVC (`cl.exe`) | **Untested in CI** | Expected to work in many cases, but not yet validated end-to-end in project CI. |
+| MSVC PE/COFF + PDB — *binary & verdicts* | **Validated in CI** | The `windows-msvc` lane asserts MSVC+PDB verdicts (PDB layout depth best-effort); the PE/PDB parsers have unit tests. |
+| MSVC `castxml` + `cl.exe` — *native header/type analysis* | **Untested in CI** | Expected to work in many cases, but this native header path is not yet validated end-to-end. |
 
 Tracked ABICC compatibility issues for this area: **#9, #50, #56, #121**.
 For detailed matrix + per-issue notes, see [Platform Support](../reference/platforms.md#windows-toolchain-support-matrix).

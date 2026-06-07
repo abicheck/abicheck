@@ -26,6 +26,16 @@ This page assumes **no prior knowledge** of linkers or loaders. If you already
 know what `.dynsym`, COPY relocations, and the dynamic loader are, skip ahead to
 [Part 2 — Symbol Contracts](02-symbol-contracts.md).
 
+!!! note "Mental model: ELF/Linux unless stated"
+    This series teaches with the **ELF/Linux** model (symbols resolved *by
+    name*, SONAME, version scripts) because it's the cleanest to reason about.
+    Windows **PE/COFF** and macOS **Mach-O** add their own mechanisms —
+    ordinal exports, import libraries, install names, compatibility versions,
+    two-level namespaces, and platform-specific C++ ABIs. Where it matters the
+    text calls it out; the consolidated map is in
+    [Part 5 §PE/COFF and Mach-O parallels](05-linker-elf.md#pecoff-and-mach-o-parallels)
+    and the [Platform Support reference](../../reference/platforms.md).
+
 ---
 
 ## 1. The build pipeline: where does a library come from?

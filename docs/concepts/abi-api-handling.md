@@ -151,6 +151,30 @@ headers. A handful of changes remain invisible to any artifact comparison
 [Limitations → Source-only changes](limitations.md#source-only-changes-invisible-to-binaryobject-analysis)
 for the full per-change detectability matrix.
 
+#### Which input proves which family
+
+The minimum input needed to *detect* each family — and the most common reason a
+real change is missed:
+
+| Change family | Symbols only | + DWARF/PDB | + Headers | Common false negative |
+|---------------|:---:|:---:|:---:|------|
+| Exported function/variable removed or renamed | ✅ | ✅ | ✅ | symbol filtered as non-public (visibility/scope) |
+| Parameter / return / pointer-level signature change | ⚠️ partial¹ | ✅ | ✅ | stripped binary, C symbol carries no type |
+| Struct/class layout, alignment, packing, bitfields | ❌ | ✅ | ✅ | stripped **and** no headers → reported `NO_CHANGE` |
+| Enum value / underlying-type change | ❌ | ✅ | ✅ | no debug info and no headers |
+| C++ vtable / virtual-method change | ❌ | ✅ | ✅ | mangled symbols stripped or demangled-away |
+| Calling convention (trivial→non-trivial) | ⚠️ | ✅ | ⚠️ | no debug info to see triviality |
+| Source-only API (access, `explicit`, default args, renames, constants) | ❌ | ❌² | ✅ | no headers supplied (no symbol exists at all) |
+| Templates / inline bodies | ⚠️ instantiated only | ⚠️ | ⚠️ | uninstantiated / header-only body — invisible to any artifact |
+| Modern C/C++ (dual-ABI, ABI tags, `char8_t`, `_BitInt`, `_Atomic`) | ⚠️ mangling only | ✅ | ✅ | demangled view hides the tag/ABI flip |
+| SONAME / visibility / versioning / RPATH / TLS metadata | ✅ | ✅ | ✅ | platform-specific (PE/Mach-O differ — see [Part 5](abi-series/05-linker-elf.md)) |
+
+¹ C++ mangled names encode parameter types, so symbol-only catches many C++
+signature changes; C symbols do not. ² A few source-only changes (e.g. enum/field
+*renames*) are visible in DWARF too; most (default args, `explicit`, `const`
+values) leave no binary trace and require headers. The authoritative per-change
+table is in [Limitations](limitations.md#source-only-changes-invisible-to-binaryobject-analysis).
+
 ## Detection coverage and roadmap
 
 abicheck detects **190 change kinds** today (see the

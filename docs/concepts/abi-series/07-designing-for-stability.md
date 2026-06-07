@@ -133,6 +133,33 @@ special members are declared once and pinned.
        re-exported the stdlib's ABI (and its dual-ABI flips — see
        [case104](../../examples/case104_glibcxx_dual_abi_flip.md)) through the
        firewall. Keep standard-library types behind the `Impl` boundary too.
+    4. **The wrapper itself is still a commitment.** Pimpl freezes `Impl`'s
+       layout, but `Widget`'s *own* size/alignment is still public — and so is
+       the *type* of the pointer member. Switching `std::unique_ptr<Impl>` to a
+       raw pointer, a `shared_ptr`, or a different deleter, or adding an inline
+       member function / changing a special member, is itself ABI-relevant
+       ([case80](../../examples/case80_pimpl_shared_to_unique.md) shows a
+       `shared_ptr`→`unique_ptr` flip detected as breaking).
+
+!!! tip "Stricter variant: hide even the smart pointer"
+    For the most conservative C++ ABI, hold a **raw** `Impl*` so the public
+    class layout doesn't depend on the standard library's smart-pointer ABI at
+    all — at the cost of writing lifetime management by hand:
+
+    ```cpp
+    class Widget {
+    public:
+        Widget();
+        ~Widget();
+        Widget(Widget&&) noexcept;
+        Widget& operator=(Widget&&) noexcept;
+        Widget(const Widget&) = delete;
+        Widget& operator=(const Widget&) = delete;
+    private:
+        struct Impl;
+        Impl* p_;   // layout depends on nothing but pointer size
+    };
+    ```
 
 ---
 
@@ -203,6 +230,44 @@ names you listed enter `.dynsym` — closing off the accidental-leak hazard from
 [Part 5](05-linker-elf.md). When you genuinely need a breaking change, add a new
 node (`LIBFOO_2.0 { ... } LIBFOO_1.0;`) and keep the old symbols exported, so old
 binaries keep resolving the old implementation.
+
+### The same surface control on Windows and macOS
+
+The *principle* — export exactly what you intend, version your identity — is
+universal; only the spelling changes. (Loader-level details are in
+[Part 5 §PE/COFF and Mach-O parallels](05-linker-elf.md#pecoff-and-mach-o-parallels).)
+
+| Goal | Linux / ELF | Windows / PE | macOS / Mach-O |
+|------|-------------|--------------|----------------|
+| **Hide everything by default** | `-fvisibility=hidden` | nothing is exported unless marked | `-fvisibility=hidden` |
+| **Mark a public export** | `__attribute__((visibility("default")))` | `__declspec(dllexport)` (and `dllimport` in consumers) | `__attribute__((visibility("default")))` |
+| **Authoritative export list** | version script (`--version-script`) | a **`.def`** file (`EXPORTS`) — and pin **ordinals** so a rebuild can't renumber | `-exported_symbols_list file.txt` |
+| **Library identity / epoch** | `-Wl,-soname,libfoo.so.1` | the **DLL file name** + its **import library** | **install name** + `-compatibility_version` / `-current_version` |
+| **Generational ABI** | new version node, keep old symbols | side-by-side DLL (new name) | bump compatibility version; ship alongside |
+
+```text
+; libfoo.def — stable Windows export surface (pin ordinals!)
+LIBRARY libfoo
+EXPORTS
+    foo_compute   @1
+    foo_create    @2
+    foo_destroy   @3
+```
+
+```bash
+# macOS — explicit export list + versioned install name
+clang -dynamiclib -fvisibility=hidden *.c \
+    -exported_symbols_list exports.txt \
+    -install_name @rpath/libfoo.1.dylib \
+    -compatibility_version 1.0 -current_version 1.2 -o libfoo.1.dylib
+```
+
+!!! warning "Windows: the CRT allocation boundary"
+    A DLL with its own statically-linked CRT must not hand out memory the caller
+    `free`s (or vice versa) — `malloc`/`free` and `new`/`delete` must pair within
+    the **same** module. Expose explicit `foo_create()`/`foo_destroy()` instead
+    of letting callers `delete` your objects; this has no ELF equivalent but is a
+    hard rule on Windows.
 
 ---
 
