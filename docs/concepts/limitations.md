@@ -33,7 +33,7 @@ Two distinct paths have different maturity — don't read "MSVC" as a single sta
 | Toolchain / path | Status | Notes |
 |----------|--------|-------|
 | MinGW (GCC) | **Experimental** | Covered by current CI smoke/integration jobs. |
-| MSVC PE/COFF + PDB — *binary & verdicts* | **Validated in CI** | The `windows-msvc` lane asserts MSVC+PDB verdicts (PDB layout depth best-effort); the PE/PDB parsers have unit tests. |
+| MSVC PE/COFF + PDB — *binary & verdicts* | **Parsers unit-tested; MSVC e2e non-blocking** | The PE/PDB parsers have (blocking) unit tests. The `windows-msvc` end-to-end lane asserts MSVC+PDB verdicts (PDB layout depth best-effort) but runs `continue-on-error` (informational, does **not** block CI) until proven stable — treat MSVC verdicts as experimental. |
 | MSVC `castxml` + `cl.exe` — *native header/type analysis* | **Untested in CI** | Expected to work in many cases, but this native header path is not yet validated end-to-end. |
 
 Tracked ABICC compatibility issues for this area: **#9, #50, #56, #121**.
