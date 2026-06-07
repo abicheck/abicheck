@@ -39,6 +39,7 @@ from abicheck.model import (
     Visibility,
 )
 from abicheck.pattern_verdicts import apply_pattern_verdicts
+from abicheck.suppression import Suppression, SuppressionList
 
 # ---------------------------------------------------------------------------
 # Snapshot builders
@@ -361,6 +362,24 @@ def test_handle_token_change_emits_break() -> None:
     )
     assert any(c.kind == ChangeKind.HANDLE_TYPE_CHANGED for c in changes)
     assert any(m["rule_id"] == "handle-token-changed" for m in ledger)
+
+
+def test_pattern_generated_change_respects_suppression() -> None:
+    suppression = SuppressionList(
+        [
+            Suppression(symbol="my_handle_t", change_kind="typedef_base_changed"),
+            Suppression(symbol="my_handle_t", change_kind="handle_type_changed"),
+        ]
+    )
+    result = checker.compare(
+        _handle_snapshot("struct Foo *"),
+        _handle_snapshot("struct Bar *"),
+        suppression=suppression,
+        pattern_verdicts=True,
+    )
+    assert result.verdict == Verdict.NO_CHANGE
+    assert ChangeKind.HANDLE_TYPE_CHANGED not in {c.kind for c in result.changes}
+    assert ChangeKind.HANDLE_TYPE_CHANGED in {c.kind for c in result.suppressed_changes}
 
 
 def test_antipattern_annotation_on_existing_change() -> None:

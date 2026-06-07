@@ -313,9 +313,18 @@ def compare(
     pattern_modulations: list[dict[str, object]] = []
     if pattern_verdicts:
         from .pattern_verdicts import apply_pattern_verdicts
+        pre_pattern_count = len(kept)
         pattern_modulations = apply_pattern_verdicts(
             kept, old, new, evidence_tier=evidence_tier
         )
+        if suppression is not None and len(kept) > pre_pattern_count:
+            retained = kept[:pre_pattern_count]
+            for c in kept[pre_pattern_count:]:
+                if suppression.is_suppressed(c):
+                    suppressed.append(c)
+                else:
+                    retained.append(c)
+            kept = retained
         if pattern_modulations:
             all_unsuppressed = kept + verdict_redundant
             verdict = (
