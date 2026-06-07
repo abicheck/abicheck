@@ -79,8 +79,14 @@ class TestDataStructures:
 # ---------------------------------------------------------------------------
 
 class TestIsRelevantToApp:
-    def _make_app(self, symbols: set[str] | None = None, versions: dict[str, str] | None = None):
+    def _make_app(
+        self,
+        symbols: set[str] | None = None,
+        versions: dict[str, str] | None = None,
+        needed_libs: list[str] | None = None,
+    ):
         return AppRequirements(
+            needed_libs=needed_libs or [],
             undefined_symbols=symbols or {"foo_init", "foo_process", "foo_cleanup"},
             required_versions=versions or {},
         )
@@ -123,10 +129,19 @@ class TestIsRelevantToApp:
         )
         assert _is_relevant_to_app(change, app) is False
 
-    def test_soname_changed_not_relevant_to_app(self):
-        # SONAME_CHANGED is classified as COMPATIBLE (packaging/policy signal);
-        # appcompat must agree — it should not mark this as affecting app consumers.
-        app = self._make_app()
+    def test_soname_changed_relevant_when_app_needs_old_soname(self):
+        app = self._make_app(needed_libs=["libfoo.so.1"])
+        change = Change(
+            kind=ChangeKind.SONAME_CHANGED,
+            symbol="",
+            description="SONAME changed",
+            old_value="libfoo.so.1",
+            new_value="libfoo.so.2",
+        )
+        assert _is_relevant_to_app(change, app) is True
+
+    def test_soname_changed_not_relevant_without_old_needed_soname(self):
+        app = self._make_app(needed_libs=["libbar.so.1"])
         change = Change(
             kind=ChangeKind.SONAME_CHANGED,
             symbol="",

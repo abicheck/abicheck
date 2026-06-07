@@ -497,6 +497,12 @@ def _is_relevant_to_app(change: Change, app: AppRequirements) -> bool:
         if app.undefined_symbols & set(change.affected_symbols):
             return True
 
+    # ELF SONAME changes affect consumers that record the old SONAME in
+    # DT_NEEDED: even with the same exported symbols, the dynamic loader may
+    # fail unless the old SONAME remains available.
+    if change.kind == ChangeKind.SONAME_CHANGED:
+        return bool(change.old_value and change.old_value in app.needed_libs)
+
     # Mach-O compat version change affects all consumers
     if change.kind == ChangeKind.COMPAT_VERSION_CHANGED:
         return True
