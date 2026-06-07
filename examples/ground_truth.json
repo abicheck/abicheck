@@ -668,7 +668,7 @@
     },
     "case50_soname_inconsistent": {
       "expected": "COMPATIBLE_WITH_RISK",
-      "category": "quality",
+      "category": "risk",
       "platforms": [
         "linux"
       ],

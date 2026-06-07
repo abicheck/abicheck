@@ -18,8 +18,8 @@ Use this catalog to:
 |---------|-------|---------------|
 | 🔴 [BREAKING](by-verdict/breaking.md) | 85 | ABI breaks: existing consumers will fail at runtime. |
 | 🟠 [API_BREAK](by-verdict/api-break.md) | 8 | Source-level / API-only breaks; recompilation fails or behavior shifts. |
-| 🟡 [COMPATIBLE_WITH_RISK](by-verdict/compatible-risk.md) | 2 | Backward-compatible at the symbol level but with behavioral risk. |
-| 🟢 [COMPATIBLE](by-verdict/compatible.md) | 20 | Backward-compatible changes (additions or quality-only). |
+| 🟡 [COMPATIBLE_WITH_RISK](by-verdict/compatible-risk.md) | 3 | Backward-compatible at the symbol level but with behavioral risk. |
+| 🟢 [COMPATIBLE](by-verdict/compatible.md) | 19 | Backward-compatible changes (additions or quality-only). |
 | ✅ [NO_CHANGE](by-verdict/no-change.md) | 6 | Identical ABI/API — baseline control cases. |
 
 ## How to read a case page
@@ -41,9 +41,9 @@ Source files (`v1.*`, `v2.*`, `app.*`, `CMakeLists.txt`) are listed at the botto
 |----------|-------|----------------|
 | [Breaking](by-category/breaking.md) | 85 | Listed in `BREAKING_KINDS` — runtime ABI break. |
 | [API Break](by-category/api_break.md) | 8 | Listed in `API_BREAK_KINDS` — source/API-level break. |
-| [Risk](by-category/risk.md) | 2 | Listed in `RISK_KINDS` — symbol-compatible but behaviorally risky. |
+| [Risk](by-category/risk.md) | 3 | Listed in `RISK_KINDS` — symbol-compatible but behaviorally risky. |
 | [Addition (Compatible)](by-category/addition.md) | 10 | Listed in `ADDITION_KINDS` — backward-compatible additions. |
-| [Quality (Compatible)](by-category/quality.md) | 10 | Listed in `QUALITY_KINDS` — metadata/quality issues, not ABI breaks. |
+| [Quality (Compatible)](by-category/quality.md) | 9 | Listed in `QUALITY_KINDS` — metadata/quality issues, not ABI breaks. |
 | [No Change](by-category/no_change.md) | 6 | Identical ABI/API — sanity-check baselines. |
 
 ## All cases
@@ -126,7 +126,7 @@ Source files (`v1.*`, `v2.*`, `app.*`, `CMakeLists.txt`) are listed at the botto
 | [case47_inline_to_outlined](case47_inline_to_outlined.md) | Inline Function Moved to Outlined | 🟢 COMPATIBLE | Addition (Compatible) |
 | [case48_leaf_struct_through_pointer](case48_leaf_struct_through_pointer.md) | Leaf Struct Change Propagated Through Pointer | 🔴 BREAKING | Breaking |
 | [case49_executable_stack](case49_executable_stack.md) | Executable Stack (GNU_STACK RWX) | 🟢 COMPATIBLE | Quality (Compatible) |
-| [case50_soname_inconsistent](case50_soname_inconsistent.md) | SONAME Inconsistent (Wrong Major Version) | 🟢 COMPATIBLE | Quality (Compatible) |
+| [case50_soname_inconsistent](case50_soname_inconsistent.md) | SONAME Inconsistent (Wrong Major Version) | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case51_protected_visibility](case51_protected_visibility.md) | Protected Visibility (DEFAULT to PROTECTED) | 🟢 COMPATIBLE | Quality (Compatible) |
 | [case52_rpath_leak](case52_rpath_leak.md) | RPATH Leak (Hardcoded Build Directory) | 🟢 COMPATIBLE | Quality (Compatible) |
 | [case53_namespace_pollution](case53_namespace_pollution.md) | Namespace Pollution (Generic Symbol Names) | 🔴 BREAKING | Breaking |
