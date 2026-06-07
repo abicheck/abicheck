@@ -725,7 +725,10 @@ def check_examples_readme_sync(f: Findings) -> None:
     dist_anchors = [
         (r"\| BREAKING \| (\d+) \|", expected_counts.get("BREAKING", 0)),
         (r"\| API_BREAK \| (\d+) \|", expected_counts.get("API_BREAK", 0)),
-        (r"\| COMPATIBLE_WITH_RISK \| (\d+) \|", expected_counts.get("COMPATIBLE_WITH_RISK", 0)),
+        (
+            r"\| COMPATIBLE_WITH_RISK \| (\d+) \|",
+            expected_counts.get("COMPATIBLE_WITH_RISK", 0),
+        ),
         (r"\| COMPATIBLE \(addition\) \| (\d+) \|", cat_counts.get("addition", 0)),
         (r"\| COMPATIBLE \(quality\) \| (\d+) \|", cat_counts.get("quality", 0)),
         (r"\| NO_CHANGE \| (\d+) \|", expected_counts.get("NO_CHANGE", 0)),
@@ -964,9 +967,7 @@ def _has_direct_assertion(fn: ast.AST) -> bool:
 
 
 def _called_function_names(fn: ast.AST) -> set[str]:
-    return {
-        _call_attr_or_name(n) for n in ast.walk(fn) if isinstance(n, ast.Call)
-    }
+    return {_call_attr_or_name(n) for n in ast.walk(fn) if isinstance(n, ast.Call)}
 
 
 def check_test_assertion_density(f: Findings) -> None:
@@ -994,9 +995,7 @@ def check_test_assertion_density(f: Findings) -> None:
             if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
                 funcs.setdefault(node.name, node)  # first definition wins
 
-        asserting = {
-            name for name, fn in funcs.items() if _has_direct_assertion(fn)
-        }
+        asserting = {name for name, fn in funcs.items() if _has_direct_assertion(fn)}
         # Propagate: a function asserts if it calls a function that asserts.
         changed = True
         while changed:
