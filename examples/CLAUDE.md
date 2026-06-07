@@ -1,6 +1,6 @@
 # CLAUDE.md — `examples/`
 
-The ABI-scenario catalog: 125 cases numbered contiguously (`01–124` +
+The ABI-scenario catalog: 126 cases numbered contiguously (`01–125` +
 `26b`), including 5 multi-library bundle cases. Each case is a minimal,
 compilable C/C++ example demonstrating a specific ABI/API pitfall.
 
@@ -46,5 +46,7 @@ top of this directory. **If a per-case README disagrees with
 2. Write `v1/`, `v2/`, `app.c|cpp`, and a README.
 3. Add the expected verdict to `ground_truth.json`.
 4. Run `python scripts/gen_examples_docs.py` and commit the regenerated
-   `docs/examples/caseNN_*.md`.
+   `docs/examples/caseNN_*.md` **and** the refreshed `README.md` catalog
+   (its headline/distribution/case-index regions are generated from
+   `ground_truth.json`; don't hand-edit them).
 5. Validate with `pytest tests/test_abi_examples.py -k caseNN -m integration`.

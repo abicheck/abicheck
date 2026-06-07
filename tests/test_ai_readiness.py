@@ -103,3 +103,62 @@ def test_main_returns_zero_on_clean_tree(car, capsys):
     """
     rc = car.main(["--skip", "mypy-baseline"])
     assert rc == 0, capsys.readouterr().out
+
+
+def test_examples_readme_sync_in_sync(car):
+    """The live examples/README.md catalog must agree with ground_truth.json."""
+    f = car.Findings()
+    car.check_examples_readme_sync(f)
+    assert f.errors == [], f"examples/README.md out of sync: {f.errors}"
+
+
+def _write_synthetic_catalog(tmp_path, *, case02_verdict_cell):
+    """Write a minimal ground_truth.json + README.md pair into tmp_path.
+
+    Two single-library cases (one BREAKING, one COMPATIBLE/addition). The
+    caller controls case02's verdict cell so a test can inject row drift.
+    """
+    import json
+
+    (tmp_path / "ground_truth.json").write_text(
+        json.dumps(
+            {
+                "verdicts": {
+                    "case01_foo": {"expected": "BREAKING", "category": "breaking"},
+                    "case02_bar": {"expected": "COMPATIBLE", "category": "addition"},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "README.md").write_text(
+        "This directory contains **2 cases**.\n\n"
+        "| BREAKING | 1 |\n"
+        "| COMPATIBLE (addition) | 1 |\n\n"
+        "| [01](case01_foo/README.md) | Foo | Breaking | 🔴 BREAKING |\n"
+        f"| [02](case02_bar/README.md) | Bar | Addition | {case02_verdict_cell} |\n",
+        encoding="utf-8",
+    )
+
+
+def test_examples_readme_sync_passes_on_correct_synthetic(car, tmp_path, monkeypatch):
+    """A synthetic catalog whose rows match ground_truth yields no errors."""
+    monkeypatch.setattr(car, "EXAMPLES", tmp_path)
+    _write_synthetic_catalog(tmp_path, case02_verdict_cell="🟢 COMPATIBLE")
+    f = car.Findings()
+    car.check_examples_readme_sync(f)
+    assert f.errors == [], f.errors
+
+
+def test_examples_readme_sync_catches_swapped_row_verdict(car, tmp_path, monkeypatch):
+    """A stale per-row verdict (counts unchanged) must fail — the drift the
+    aggregate-count checks alone cannot see (Codex review, PR #318)."""
+    monkeypatch.setattr(car, "EXAMPLES", tmp_path)
+    # case02 is COMPATIBLE/addition in ground_truth, but its row claims BREAKING.
+    # The distribution counts still tally, so only row-content parsing catches it.
+    _write_synthetic_catalog(tmp_path, case02_verdict_cell="🔴 BREAKING")
+    f = car.Findings()
+    car.check_examples_readme_sync(f)
+    assert any("case02_bar" in msg and "BREAKING" in msg for _, msg in f.errors), (
+        f"expected a verdict-mismatch error for case02_bar, got {f.errors}"
+    )

@@ -47,6 +47,7 @@ here for a specific problem, jump straight to the relevant part.
 
 | Part | Page | What it covers | Read it when… |
 |------|------|----------------|---------------|
+| **0** | [Compatibility as a Product Contract](abi-series/00-product-contract.md) | Public surface, SemVer mapping, contract shapes — the *framing* | …before anything else: a change is only a "break" if it breaks a promise |
 | **1** | [Foundations](abi-series/01-foundations.md) | Source → object → link → load; what a symbol is; API vs ABI | …you want the ground-up mental model (start here) |
 | **2** | [Symbol Contracts](abi-series/02-symbol-contracts.md) | Removal, rename, signature, pointer-level, globals | …a symbol disappeared or changed meaning |
 | **3** | [Type Layout](abi-series/03-type-layout.md) | Struct size/offset, alignment, enums, unions, bitfields | …you changed a struct, enum, or union |
@@ -57,7 +58,8 @@ here for a specific problem, jump straight to the relevant part.
 
 ```mermaid
 flowchart LR
-    P1["1 · Foundations"] --> P2["2 · Symbol<br/>Contracts"]
+    P0["0 · Product<br/>Contract"] --> P1["1 · Foundations"]
+    P1 --> P2["2 · Symbol<br/>Contracts"]
     P1 --> P3["3 · Type<br/>Layout"]
     P2 --> P4["4 · C++ ABI"]
     P3 --> P4
@@ -66,6 +68,25 @@ flowchart LR
     P5 --> P7["7 · Designing<br/>for Stability"]
     P6 --> P7
 ```
+
+> **Cross-cutting companion:** [Evidence & Detectability](evidence-and-detectability.md)
+> explains *which inputs* (symbols, debug info, headers, app, bundle) let a tool
+> see a given change at all — read it alongside any part when you're wondering
+> "why did the tool catch this but not that?"
+
+## Pick a reading path for your role
+
+The series is ordered, but you rarely need all of it at once. These paths get
+each audience to the pages that matter for them fastest:
+
+| Audience | Recommended path |
+|----------|------------------|
+| **New C/C++ library author** | [Product Contract](abi-series/00-product-contract.md) → [Foundations](abi-series/01-foundations.md) → [Symbol Contracts](abi-series/02-symbol-contracts.md) → [Type Layout](abi-series/03-type-layout.md) → [Designing for Stability](abi-series/07-designing-for-stability.md) |
+| **C++ library maintainer** | [Foundations](abi-series/01-foundations.md) → [C++ ABI](abi-series/04-cpp-abi.md) → [Type Layout](abi-series/03-type-layout.md) → [Transitive Breaks](abi-series/06-transitive-breaks.md) → [Designing for Stability](abi-series/07-designing-for-stability.md) |
+| **CI / release engineer** | [Product Contract](abi-series/00-product-contract.md) → [Tool Comparison](../reference/tool-comparison.md) → [Policy Profiles](../user-guide/policies.md) → [Baselines](../user-guide/baseline-management.md) → [Exit Codes](../reference/exit-codes.md) → [Output Formats](../user-guide/output-formats.md) |
+| **Distribution / package maintainer** | [Linker & ELF](abi-series/05-linker-elf.md) → [Transitive Breaks](abi-series/06-transitive-breaks.md) → [Multi-Binary Releases](../user-guide/multi-binary.md) → [Application Compatibility](../user-guide/appcompat.md) |
+| **Plugin / SDK author** | [Symbol Contracts](abi-series/02-symbol-contracts.md) → [Plugin Systems](../user-guide/plugin-systems.md) → [Policy Profiles](../user-guide/policies.md) → [Product Contract §4](abi-series/00-product-contract.md#4-name-your-contract-shape) |
+| **AI agent / automated reviewer** | [Overview](abi-api-handling.md) → [Evidence & Detectability](evidence-and-detectability.md) → [Examples Encyclopedia](../examples/index.md) → [Change Kind Reference](../reference/change-kinds.md) |
 
 ---
 

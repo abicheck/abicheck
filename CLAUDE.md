@@ -146,6 +146,7 @@ CI runs `mypy abicheck/` as a required gate. The baseline is currently **0 error
 | `import-cycles` | ERROR | No import cycles within `abicheck/` |
 | `mypy-baseline` | ERROR if drifted up | mypy error count ≤ documented baseline |
 | `examples-ground-truth` | ERROR | Every `examples/case*/` has a `README.md` and an entry in `ground_truth.json` |
+| `examples-readme-sync` | ERROR | `examples/README.md` headline count, verdict distribution, and case-index rows match `ground_truth.json` (catches missing/stale catalog rows) |
 | `mkdocs-nav-coverage` | WARN | Every `docs/**/*.md` is in `mkdocs.yml` nav or linked from another doc |
 | `banned-imports` | ERROR | No `print(...)` outside CLI/reporter modules; no `subprocess(..., shell=True)` |
 | `license-header` | WARN | Every `abicheck/**/*.py` carries the Apache-2.0 header / SPDX identifier |

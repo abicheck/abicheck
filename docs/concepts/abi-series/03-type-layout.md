@@ -1,6 +1,7 @@
 # Part 3 — Type Layout Breaks
 
-> **Series navigation:** [1. Foundations](01-foundations.md) ·
+> **Series navigation:** [0. Product Contract](00-product-contract.md) ·
+> [1. Foundations](01-foundations.md) ·
 > [2. Symbol Contracts](02-symbol-contracts.md) ·
 > **3. Type Layout** ·
 > [4. C++ ABI](04-cpp-abi.md) ·

@@ -1,6 +1,7 @@
 # Part 1 — Foundations: From Source Code to a Running Process
 
-> **Series navigation:** **1. Foundations** ·
+> **Series navigation:** [0. Product Contract](00-product-contract.md) ·
+> **1. Foundations** ·
 > [2. Symbol Contracts](02-symbol-contracts.md) ·
 > [3. Type Layout](03-type-layout.md) ·
 > [4. C++ ABI](04-cpp-abi.md) ·
