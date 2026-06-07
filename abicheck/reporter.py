@@ -101,6 +101,7 @@ def _kind_to_severity(kind: ChangeKind, policy: str) -> str:
         return "compatible"
     return "unknown"
 
+
 _VERDICT_EMOJI = {
     Verdict.NO_CHANGE: "✅",
     Verdict.COMPATIBLE: "✅",
@@ -122,6 +123,7 @@ _VERDICT_LABEL = {
 # Show-only filter
 # ---------------------------------------------------------------------------
 
+
 @dataclass(frozen=True)
 class ShowOnlyFilter:
     """Parsed --show-only tokens.
@@ -129,9 +131,10 @@ class ShowOnlyFilter:
     Tokens fall into three dimensions; within each dimension OR logic applies,
     across dimensions AND logic applies.
     """
+
     severities: frozenset[str]  # breaking, api-break, risk, compatible
-    elements: frozenset[str]    # functions, variables, types, enums, elf
-    actions: frozenset[str]     # added, removed, changed
+    elements: frozenset[str]  # functions, variables, types, enums, elf
+    actions: frozenset[str]  # added, removed, changed
 
     @classmethod
     def parse(cls, raw: str) -> ShowOnlyFilter:
@@ -168,6 +171,21 @@ class ShowOnlyFilter:
         if not self.severities:
             return True
         breaking_set, api_break_set, compat_set, risk_set = _policy_kind_sets(policy)
+        # Honour an A4 per-finding effective_verdict override (ADR-027): a
+        # demoted opaque/PIMPL layout change must be filtered by its *effective*
+        # category, so `--show-only=breaking` excludes it — consistent with the
+        # JSON severity field and filtered_summary counts (which already route
+        # through effective_category). Without this the severity filter would
+        # leak a demoted finding it was meant to exclude.
+        eff = getattr(change, "effective_verdict", None)
+        if isinstance(eff, Verdict):
+            label = {
+                Verdict.BREAKING: "breaking",
+                Verdict.API_BREAK: "api-break",
+                Verdict.COMPATIBLE_WITH_RISK: "risk",
+                Verdict.COMPATIBLE: "compatible",
+            }.get(eff)
+            return label in self.severities
         severity_map = {
             "breaking": breaking_set,
             "api-break": api_break_set,
@@ -185,25 +203,40 @@ class ShowOnlyFilter:
             return True
         _ELEMENT_PREFIXES: dict[str, tuple[str, ...]] = {
             "functions": (
-                "func_", "param_", "method_", "base_class_",
-                "template_", "return_pointer_level_",
+                "func_",
+                "param_",
+                "method_",
+                "base_class_",
+                "template_",
+                "return_pointer_level_",
             ),
             "variables": ("var_", "constant_"),
             "types": ("type_", "struct_", "union_", "field_", "typedef_"),
             "enums": ("enum_",),
             "elf": (
-                "soname_", "needed_", "symbol_", "rpath_", "runpath_",
-                "ifunc_", "common_", "dwarf_", "calling_convention_",
-                "compat_version_", "visibility_",
+                "soname_",
+                "needed_",
+                "symbol_",
+                "rpath_",
+                "runpath_",
+                "ifunc_",
+                "common_",
+                "dwarf_",
+                "calling_convention_",
+                "compat_version_",
+                "visibility_",
             ),
         }
         _ELEMENT_EXACT: dict[str, tuple[str, ...]] = {
             "functions": (
-                "removed_const_overload", "anon_field_changed",
-                "used_reserved_field", "frame_register_changed",
+                "removed_const_overload",
+                "anon_field_changed",
+                "used_reserved_field",
+                "frame_register_changed",
             ),
             "elf": (
-                "toolchain_flag_drift", "source_level_kind_changed",
+                "toolchain_flag_drift",
+                "source_level_kind_changed",
                 "value_abi_trait_changed",
             ),
         }
@@ -222,10 +255,18 @@ class ShowOnlyFilter:
         if not actions:
             return True
         _ADDED_SUFFIXES = ("_added", "_added_compatible")
-        _REMOVED_SUFFIXES = ("_removed", "_deleted", "_elf_only", "_elf_fallback", "_const_overload")
+        _REMOVED_SUFFIXES = (
+            "_removed",
+            "_deleted",
+            "_elf_only",
+            "_elf_fallback",
+            "_const_overload",
+        )
         if "added" in actions and any(kind_val.endswith(s) for s in _ADDED_SUFFIXES):
             return True
-        if "removed" in actions and any(kind_val.endswith(s) for s in _REMOVED_SUFFIXES):
+        if "removed" in actions and any(
+            kind_val.endswith(s) for s in _REMOVED_SUFFIXES
+        ):
             return True
         if "changed" in actions and not (
             any(kind_val.endswith(s) for s in _ADDED_SUFFIXES)
@@ -256,6 +297,7 @@ def apply_show_only(
 # ---------------------------------------------------------------------------
 # Stat mode
 # ---------------------------------------------------------------------------
+
 
 def to_stat(result: DiffResult) -> str:
     """One-line summary for CI gates."""
@@ -314,6 +356,7 @@ def to_stat_json(result: DiffResult, indent: int = 2) -> str:
 # Impact summary
 # ---------------------------------------------------------------------------
 
+
 def _build_impact_table(
     result: DiffResult,
     displayed_changes: list[Change] | None = None,
@@ -327,7 +370,9 @@ def _build_impact_table(
     """
     from .checker import _ROOT_TYPE_CHANGE_KINDS
 
-    changes = displayed_changes if displayed_changes is not None else list(result.changes)
+    changes = (
+        displayed_changes if displayed_changes is not None else list(result.changes)
+    )
 
     # Collect root type changes with their impact
     root_entries: list[tuple[str, str, int, int]] = []
@@ -335,11 +380,14 @@ def _build_impact_table(
         if c.kind in _ROOT_TYPE_CHANGE_KINDS:
             affected_count = len(c.affected_symbols) if c.affected_symbols else 0
             if affected_count > 0 or c.caused_count > 0:
-                root_entries.append((c.symbol, c.kind.value, affected_count, c.caused_count))
+                root_entries.append(
+                    (c.symbol, c.kind.value, affected_count, c.caused_count)
+                )
 
     # Count non-type direct changes
     direct_removals = sum(
-        1 for c in changes
+        1
+        for c in changes
         if c.kind.value.endswith("_removed") and c.kind not in _ROOT_TYPE_CHANGE_KINDS
     )
 
@@ -387,7 +435,11 @@ def _build_leaf_type_sections(type_changes: list[Change], policy: str) -> list[s
     breaking_set, api_break_set, _, _ = _policy_kind_sets(policy)
     breaking_types = [c for c in type_changes if c.kind in breaking_set]
     api_break_types = [c for c in type_changes if c.kind in api_break_set]
-    other_types = [c for c in type_changes if c.kind not in breaking_set and c.kind not in api_break_set]
+    other_types = [
+        c
+        for c in type_changes
+        if c.kind not in breaking_set and c.kind not in api_break_set
+    ]
 
     lines: list[str] = []
     for section_label, section_changes in [
@@ -433,7 +485,9 @@ def _to_markdown_leaf(
     changes = list(result.changes)
     if show_only:
         changes = apply_show_only(changes, show_only, policy=result.policy)
-        lines.append(f"> Filtered by: `--show-only {show_only}` ({len(changes)} of {len(result.changes)} changes shown)")
+        lines.append(
+            f"> Filtered by: `--show-only {show_only}` ({len(changes)} of {len(result.changes)} changes shown)"
+        )
         lines.append("")
 
     # Group root type changes by severity
@@ -527,7 +581,10 @@ def _to_json_leaf(
         }
         for c in type_changes
     ]
-    non_type_list = [_change_to_dict(c, policy=effective_policy, kind_sets=eff_sets) for c in non_type_changes]
+    non_type_list = [
+        _change_to_dict(c, policy=effective_policy, kind_sets=eff_sets)
+        for c in non_type_changes
+    ]
 
     d: dict[str, object] = {
         "report_schema_version": REPORT_SCHEMA_VERSION,
@@ -568,6 +625,7 @@ def _to_json_leaf(
 # ---------------------------------------------------------------------------
 # JSON output
 # ---------------------------------------------------------------------------
+
 
 def _metadata_dict(meta: object | None) -> dict[str, object] | None:
     if meta is None:
@@ -689,12 +747,15 @@ def to_json(
     # Severity-categorized summary when severity config is provided
     if severity_config is not None:
         d["severity"] = _build_severity_json(
-            changes, severity_config,
+            changes,
+            severity_config,
             all_changes=list(result.changes),
             kind_sets=eff_sets,
         )
 
-    d["changes"] = [_change_to_dict(c, policy=effective_policy, kind_sets=eff_sets) for c in changes]
+    d["changes"] = [
+        _change_to_dict(c, policy=effective_policy, kind_sets=eff_sets) for c in changes
+    ]
     if result.redundant_count > 0:
         d["redundant_count"] = result.redundant_count
     # ADR-027 A4 — pattern-aware modulation ledger (disclosed, reversible).
@@ -749,7 +810,13 @@ def _change_to_dict(
     c: object,
     *,
     policy: str = "strict_abi",
-    kind_sets: tuple[frozenset[ChangeKind], frozenset[ChangeKind], frozenset[ChangeKind], frozenset[ChangeKind]] | None = None,
+    kind_sets: tuple[
+        frozenset[ChangeKind],
+        frozenset[ChangeKind],
+        frozenset[ChangeKind],
+        frozenset[ChangeKind],
+    ]
+    | None = None,
 ) -> dict[str, object]:
     """Convert a Change to a JSON-serializable dict with impact and metadata."""
     kind = getattr(c, "kind", None)
@@ -804,6 +871,7 @@ def _change_to_dict(
 # Markdown output
 # ---------------------------------------------------------------------------
 
+
 def _fmt_size(size_bytes: int) -> str:
     """Format file size in human-readable form."""
     if size_bytes < 1024:
@@ -854,7 +922,9 @@ _SEVERITY_EMOJI = {
 }
 
 
-def _section_severity_label(severity_config: SeverityConfig | None, category_attr: str) -> str:
+def _section_severity_label(
+    severity_config: SeverityConfig | None, category_attr: str
+) -> str:
     """Return a severity label suffix like ' [ERROR]' for a report section header."""
     if severity_config is None:
         return ""
@@ -885,7 +955,11 @@ def _build_severity_summary_md(
 
     _CATEGORY_INFO: list[tuple[str, str, list[HasKind]]] = [
         ("ABI/API Incompatibilities", "abi_breaking", categorized.abi_breaking),
-        ("Potential Incompatibilities", "potential_breaking", categorized.potential_breaking),
+        (
+            "Potential Incompatibilities",
+            "potential_breaking",
+            categorized.potential_breaking,
+        ),
         ("Quality Issues", "quality_issues", categorized.quality_issues),
         ("Additions", "addition", categorized.addition),
     ]
@@ -895,7 +969,11 @@ def _build_severity_summary_md(
         level_val = level.value if hasattr(level, "value") else str(level)
         emoji = _SEVERITY_EMOJI.get(level_val, "")
         count = len(cat_changes)
-        impact = "causes non-zero exit" if level_val == "error" and count > 0 else "no exit impact"
+        impact = (
+            "causes non-zero exit"
+            if level_val == "error" and count > 0
+            else "no exit impact"
+        )
         lines.append(
             f"| {label} | {emoji} `{level_val.upper()}` | {count} | {impact} |"
         )
@@ -976,7 +1054,9 @@ def _footer_lines() -> list[str]:
     ]
 
 
-def _build_library_files_section(old_meta: LibraryMetadata | None, new_meta: LibraryMetadata | None) -> list[str]:
+def _build_library_files_section(
+    old_meta: LibraryMetadata | None, new_meta: LibraryMetadata | None
+) -> list[str]:
     """Build the '## Library Files' markdown section."""
     lines = ["## Library Files", "", "| | Old | New |", "|---|---|---|"]
     old_path = getattr(old_meta, "path", "—") if old_meta else "—"
@@ -1034,6 +1114,7 @@ def _build_severity_sections(
 
     if compatible:
         from .checker_policy import ADDITION_KINDS as _ADDITION_KINDS
+
         quality = [c for c in compatible if c.kind not in _ADDITION_KINDS]
         additions_list = [c for c in compatible if c.kind in _ADDITION_KINDS]
         if quality:
@@ -1107,7 +1188,9 @@ def to_review_digest(result: DiffResult) -> str:
         f"| ✅ {additions_label} | {summary.compatible_additions} |",
     ]
     if scoped:
-        lines.append(f"| 🔒 Filtered (internal/private) | {result.out_of_surface_count} |")
+        lines.append(
+            f"| 🔒 Filtered (internal/private) | {result.out_of_surface_count} |"
+        )
     lines.append("")
 
     rec = recommend_release(result)
@@ -1120,8 +1203,7 @@ def to_review_digest(result: DiffResult) -> str:
     # Top impacted symbols (breaking + API), capped for readability.
     breaking_set, api_break_set, _, _ = result._effective_kind_sets()
     impacted = [
-        c for c in result.changes
-        if c.kind in breaking_set or c.kind in api_break_set
+        c for c in result.changes if c.kind in breaking_set or c.kind in api_break_set
     ]
     if impacted:
         lines += ["**Top impacted symbols:**", ""]
@@ -1136,7 +1218,8 @@ def to_review_digest(result: DiffResult) -> str:
 
 
 def _classify_changes_by_kind(
-    changes: list[Change], result: DiffResult,
+    changes: list[Change],
+    result: DiffResult,
 ) -> tuple[list[Change], list[Change], list[Change], list[Change]]:
     """Split *changes* into (breaking, source_breaks, risk, compatible) using the
     effective kind sets (respects PolicyFile overrides) and per-finding A4
@@ -1191,16 +1274,21 @@ def to_markdown(
         if not demangle:
             return text
         from .demangle import demangle_text
+
         return demangle_text(text)
 
     if stat:
         return _out(to_stat(result))
 
     if report_mode == "leaf":
-        return _out(_to_markdown_leaf(
-            result, show_impact=show_impact, show_only=show_only,
-            show_recommendation=show_recommendation,
-        ))
+        return _out(
+            _to_markdown_leaf(
+                result,
+                show_impact=show_impact,
+                show_only=show_only,
+                show_recommendation=show_recommendation,
+            )
+        )
 
     v = result.verdict
     emoji = _VERDICT_EMOJI[v]
@@ -1215,7 +1303,9 @@ def to_markdown(
         changes = apply_show_only(changes, show_only, policy=result.policy)
 
     # Classify filtered changes using effective kind sets (respects PolicyFile overrides)
-    breaking, source_breaks, risk, compatible = _classify_changes_by_kind(changes, result)
+    breaking, source_breaks, risk, compatible = _classify_changes_by_kind(
+        changes, result
+    )
 
     lines: list[str] = [
         f"# ABI Report: {result.library}",
@@ -1247,18 +1337,25 @@ def to_markdown(
     # Severity configuration summary when provided
     if severity_config is not None:
         lines += _build_severity_summary_md(
-            changes, severity_config, kind_sets=result._effective_kind_sets(),
+            changes,
+            severity_config,
+            kind_sets=result._effective_kind_sets(),
         )
 
     if show_only:
-        lines.append(f"> Filtered by: `--show-only {show_only}` ({len(changes)} of {len(result.changes)} changes shown)")
+        lines.append(
+            f"> Filtered by: `--show-only {show_only}` ({len(changes)} of {len(result.changes)} changes shown)"
+        )
         lines.append("")
 
     if old_meta or new_meta:
         lines += _build_library_files_section(old_meta, new_meta)
 
     lines += _build_severity_sections(
-        breaking, source_breaks, risk, compatible,
+        breaking,
+        source_breaks,
+        risk,
+        compatible,
         severity_config=severity_config,
     )
 
@@ -1289,7 +1386,9 @@ def _append_confidence_section(lines: list[str], result: DiffResult) -> None:
     conf_val = conf.value if hasattr(conf, "value") else str(conf)
     tier_str = ", ".join(f"`{t}`" for t in tiers) if tiers else "_none_"
     etier = getattr(result, "evidence_tier", None)
-    etier_val = etier.value if (etier is not None and hasattr(etier, "value")) else str(etier)
+    etier_val = (
+        etier.value if (etier is not None and hasattr(etier, "value")) else str(etier)
+    )
     lines += [
         "## Analysis Confidence",
         "",
@@ -1385,6 +1484,7 @@ def _format_change_md(c: object) -> str:
 # Application compatibility reporters (ADR-005)
 # ---------------------------------------------------------------------------
 
+
 def appcompat_to_json(result: object, indent: int = 2) -> str:
     """Render an AppCompatResult as JSON."""
     import json as _json
@@ -1408,8 +1508,13 @@ def appcompat_to_json(result: object, indent: int = 2) -> str:
     d["missing_versions"] = list(missing_ver)
 
     breaking = getattr(result, "breaking_for_app", [])
-    appcompat_policy = getattr(getattr(result, "full_diff", None), "policy", "strict_abi") or "strict_abi"
-    d["relevant_changes"] = [_change_to_dict(c, policy=appcompat_policy) for c in breaking]
+    appcompat_policy = (
+        getattr(getattr(result, "full_diff", None), "policy", "strict_abi")
+        or "strict_abi"
+    )
+    d["relevant_changes"] = [
+        _change_to_dict(c, policy=appcompat_policy) for c in breaking
+    ]
     d["relevant_change_count"] = len(breaking)
 
     irrelevant = getattr(result, "irrelevant_for_app", [])
@@ -1429,7 +1534,9 @@ def appcompat_to_json(result: object, indent: int = 2) -> str:
             d["confidence"] = conf.value if hasattr(conf, "value") else str(conf)
             etier = getattr(full_diff, "evidence_tier", None)
             if etier is not None:
-                d["evidence_tier"] = etier.value if hasattr(etier, "value") else str(etier)
+                d["evidence_tier"] = (
+                    etier.value if hasattr(etier, "value") else str(etier)
+                )
             d["evidence_tiers"] = list(getattr(full_diff, "evidence_tiers", []) or [])
             cov_warns = getattr(full_diff, "coverage_warnings", []) or []
             if cov_warns:
@@ -1512,7 +1619,11 @@ def appcompat_to_markdown(result: object, *, show_irrelevant: bool = False) -> s
 
 
 def _appcompat_header_lines(
-    app_path: str, old_lib: str, new_lib: str, v_emoji: str, v_label: str,
+    app_path: str,
+    old_lib: str,
+    new_lib: str,
+    v_emoji: str,
+    v_label: str,
 ) -> list[str]:
     """Build the report header lines for appcompat markdown."""
     header = [
@@ -1533,7 +1644,11 @@ def _appcompat_coverage_lines(
     missing: list[object],
 ) -> list[str]:
     """Build symbol coverage section lines."""
-    lines = ["## Symbol Coverage", "", f"App requires **{required_count}** library symbols."]
+    lines = [
+        "## Symbol Coverage",
+        "",
+        f"App requires **{required_count}** library symbols.",
+    ]
     if missing:
         lines.append(
             f"**{len(missing)}** required symbol(s) missing from new version "
@@ -1556,7 +1671,9 @@ def _appcompat_missing_lines(
     lines: list[str] = []
     if missing:
         lines += ["## Missing Symbols", ""]
-        lines.append("These symbols are required by the application but absent from the new library:")
+        lines.append(
+            "These symbols are required by the application but absent from the new library:"
+        )
         lines.append("")
         for sym in missing:
             lines.append(f"- `{sym}`")
@@ -1595,7 +1712,9 @@ def _appcompat_relevant_lines(breaking: list[Change], total_changes: int) -> lis
     return []
 
 
-def _appcompat_irrelevant_lines(irrelevant: list[Change], show_irrelevant: bool) -> list[str]:
+def _appcompat_irrelevant_lines(
+    irrelevant: list[Change], show_irrelevant: bool
+) -> list[str]:
     """Build irrelevant changes section/note lines."""
     if irrelevant and not show_irrelevant:
         return [

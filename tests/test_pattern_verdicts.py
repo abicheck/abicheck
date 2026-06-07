@@ -183,6 +183,37 @@ def test_lost_opaqueness_by_value_use() -> None:
     assert any(c.kind == ChangeKind.OPAQUE_INVARIANT_BROKEN for c in changes)
 
 
+def test_still_hidden_opaque_not_flagged() -> None:
+    # Codex P2: the type stays incomplete in new but its last public Ctx* use
+    # was removed (so it's no longer *recognised* as an opaque idiom). Opacity
+    # is intact — the forward declaration is still all callers can see — so this
+    # must NOT emit a false OPAQUE_INVARIANT_BROKEN.
+    old = _opaque_snapshot(opaque=True, size=None)
+    new = AbiSnapshot(
+        library="l",
+        version="1",
+        from_headers=True,
+        functions=[
+            # No more public function references Ctx; only the forward decl
+            # remains. Ctx is still incomplete (is_opaque=True).
+            Function(
+                name="unrelated",
+                mangled="unrelated",
+                return_type="void",
+                params=[],
+                visibility=Visibility.PUBLIC,
+            ),
+        ],
+        types=[RecordType(name="Ctx", kind="struct", is_opaque=True)],
+    )
+    changes: list[Change] = []
+    ledger = apply_pattern_verdicts(
+        changes, old, new, evidence_tier=EvidenceTier.HEADER_AWARE
+    )
+    assert not any(c.kind == ChangeKind.OPAQUE_INVARIANT_BROKEN for c in changes)
+    assert not any(m["rule_id"] == "lost-opaque-invariant" for m in ledger)
+
+
 # ---------------------------------------------------------------------------
 # PIMPL pointee-only vs wrapper layout (D4.1 guard)
 # ---------------------------------------------------------------------------
@@ -455,10 +486,16 @@ def test_cross_output_completeness_for_demoted_finding() -> None:
     assert entry["effective_verdict"] == "COMPATIBLE"
     assert entry["modulation_reason"] == "opaque-by-construction"
 
-    # 3. JSON filtered_summary (show_only path)
+    # 3. JSON filtered_summary (show_only path) — and the show-only *filter*
+    # itself must exclude the demoted finding by its effective category (Codex
+    # P2): a demoted type_size_changed must not leak into `changes` under
+    # --show-only=breaking while filtered_summary reports breaking: 0.
     payload2 = json.loads(to_json(result, show_only="breaking"))
-    # the demoted finding must not be counted as breaking
     assert payload2["filtered_summary"]["breaking"] == 0
+    assert all(c["kind"] != "type_size_changed" for c in payload2["changes"])
+    # Conversely it IS selected under --show-only=compatible.
+    payload3 = json.loads(to_json(result, show_only="compatible"))
+    assert any(c["kind"] == "type_size_changed" for c in payload3["changes"])
 
     # 4. severity-aware exit code path
     assert compute_exit_code([demoted], PRESET_DEFAULT) == 0

@@ -49,7 +49,14 @@ from dataclasses import dataclass, field
 
 from .checker_policy import ChangeKind, EvidenceTier, Verdict
 from .checker_types import Change
-from .idioms import AntiPattern, Idiom, IdiomTag, detect_antipatterns, recognise_idioms
+from .idioms import (
+    AntiPattern,
+    Idiom,
+    IdiomTag,
+    _public_pointer_only,
+    detect_antipatterns,
+    recognise_idioms,
+)
 from .model import AbiSnapshot
 from .surface_graph import SurfaceGraph, build_surface_graph
 
@@ -240,36 +247,44 @@ def _emit_lost_invariants(
     out: list[tuple[Change, PatternModulation]] = []
     existing = {(c.kind, c.symbol) for c in changes}
 
-    # --- Opaque/PIMPL invariant lost --------------------------------------
+    # --- Opaque invariant lost --------------------------------------------
+    # Scoped to OPAQUE_POINTER: those are the types whose *layout* callers
+    # provably could not observe. A PIMPL wrapper is already a complete,
+    # by-value-usable type, so "gains a by-value use" loses nothing for it; a
+    # change to a PIMPL wrapper's own layout is caught by the normal layout
+    # detectors (and is never demoted — see the PIMPL guard), so it needs no
+    # separate transition here.
     for name, tags in old_idioms.items():
-        was_hidden = any(t.idiom in (Idiom.OPAQUE_POINTER, Idiom.PIMPL) for t in tags)
-        if not was_hidden:
+        if not any(t.idiom == Idiom.OPAQUE_POINTER for t in tags):
             continue
         new_rec = _record_by_name(new, name)
         if new_rec is None:
             continue  # removed entirely → handled by TYPE_REMOVED, not this
-        still_opaque = bool(
-            _has_idiom(new_idioms, name, Idiom.OPAQUE_POINTER)
-            or _has_idiom(new_idioms, name, Idiom.PIMPL)
-        )
-        # Opaqueness is lost when the type is no longer recognised as
-        # opaque/PIMPL while still being present on the new surface: either its
-        # definition became visible (is_opaque False) or it gained a by-value
-        # public use.
-        definition_now_visible = getattr(new_rec, "is_opaque", False) is False
-        if still_opaque or not definition_now_visible:
-            # Either still hidden, or still incomplete (still safe) — no break.
-            if still_opaque:
-                continue
+        # Opacity is lost only when callers can now observe the layout: either
+        # the complete definition is now visible (no longer incomplete), or a
+        # public function now crosses the type by value. A type that is still
+        # incomplete and still crossed only by pointer (or no longer referenced
+        # at all) keeps its opacity — emitting a break there is a false positive
+        # (e.g. removing the last `Ctx*` use while keeping the forward decl).
+        definition_now_visible = not getattr(new_rec, "is_opaque", False)
+        referenced, only_pointer = _public_pointer_only(new_graph, name)
+        by_value_use = referenced and not only_pointer
+        if not (definition_now_visible or by_value_use):
+            continue
         key = (ChangeKind.OPAQUE_INVARIANT_BROKEN, name)
         if key in existing:
             continue
-        edges = [f"{name} was opaque/PIMPL in old; layout now observable in new"]
+        why = (
+            "definition now visible"
+            if definition_now_visible
+            else "now passed by value"
+        )
+        edges = [f"{name} was opaque in old; {why} in new"]
         change = Change(
             kind=ChangeKind.OPAQUE_INVARIANT_BROKEN,
             symbol=name,
             description=(
-                f"{name} was an opaque/PIMPL type callers could not observe; its "
+                f"{name} was an opaque type callers could not observe; its "
                 f"layout is now visible (definition exposed or passed by value), "
                 f"so its size/fields are now part of the ABI"
             ),
