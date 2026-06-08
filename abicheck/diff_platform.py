@@ -41,6 +41,7 @@ from .model import (
     AbiSnapshot,
     Visibility,
     cv_qualifiers_only_differ,
+    is_cxx_runtime_library,
     is_non_abi_surface_type,
     stdlib_namespaces_excluded,
 )
@@ -318,11 +319,15 @@ def _diff_visibility_leak(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     if not getattr(old, "elf_only_mode", False):
         return []
 
+    filter_transitive_runtime_symbols = not is_cxx_runtime_library(old.library)
     leaked = [
         f for f in old.functions
         if (
             f.visibility == Visibility.ELF_ONLY
-            and is_abi_relevant_elf_symbol(f.name)
+            and is_abi_relevant_elf_symbol(
+                f.name,
+                filter_transitive_runtime_symbols=filter_transitive_runtime_symbols,
+            )
             and _looks_internal(f.name)
         )
     ]

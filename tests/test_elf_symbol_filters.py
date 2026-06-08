@@ -102,6 +102,10 @@ def test_private_double_underscore_symbols_are_filtered(name: str) -> None:
     "_ZTVN10__cxxabiv121__vmi_class_type_infoE",
     "_ZTISt9exception",
     "_ZTSSt9bad_alloc",
+    "_ZTVSt23_Sp_counted_ptr_inplaceINSt13__future_base15_Deferred_stateE",
+    "_ZTVNSt13__future_base17_Async_state_implE",
+    "_ZTTSt23_Sp_counted_ptr_inplaceINSt13__future_base15_Deferred_stateE",
+    "_ZTTNSt13__future_base17_Async_state_implE",
     # std:: global symbols
     "_ZSt4cout",
     "_ZSt4cerr",
@@ -315,6 +319,33 @@ def test_exported_symbol_names_abi_relevant_only_drops_transitive_runtime() -> N
     }
 
 
+def test_exported_symbol_names_can_preserve_runtime_owned_stdlib_exports() -> None:
+    """Symbols-only C++ runtime snapshots must keep their own stdlib exports."""
+    meta = ElfMetadata(
+        soname="libstdc++.so.6",
+        symbols=[
+            ElfSymbol(name="_ZNSt6vectorIiSaIiEE4sizeEv", sym_type=SymbolType.FUNC),
+            ElfSymbol(name="_ZTVSt9exception", sym_type=SymbolType.OBJECT),
+            ElfSymbol(name="_ZTTSt23_Sp_counted_ptr_inplaceE", sym_type=SymbolType.OBJECT),
+            ElfSymbol(name="_init", sym_type=SymbolType.FUNC),
+            ElfSymbol(name="__cpu_model", sym_type=SymbolType.OBJECT),
+        ],
+    )
+
+    assert exported_symbol_names(
+        meta,
+        FUNCTION_SYMBOL_TYPES,
+        abi_relevant_only=True,
+        filter_transitive_runtime_symbols=False,
+    ) == {"_ZNSt6vectorIiSaIiEE4sizeEv"}
+    assert exported_symbol_names(
+        meta,
+        VARIABLE_SYMBOL_TYPES,
+        abi_relevant_only=True,
+        filter_transitive_runtime_symbols=False,
+    ) == {"_ZTVSt9exception", "_ZTTSt23_Sp_counted_ptr_inplaceE"}
+
+
 def test_elf_classify_symbols_filters_lifecycle_stubs_at_dump_surface() -> None:
     """The no-header dump path must drop lifecycle stubs from the ABI surface.
 
@@ -345,6 +376,29 @@ def test_elf_classify_symbols_filters_lifecycle_stubs_at_dump_surface() -> None:
     assert objects == {"g_table"}
     assert tls == {"tls_var"}
     assert full == {"api", "g_table", "tls_var"}
+
+
+def test_elf_classify_symbols_preserves_runtime_owned_stdlib_exports() -> None:
+    """The no-header path must not hide libstdc++'s own vtables/VTT exports."""
+    from abicheck.dumper import _elf_classify_symbols
+
+    meta = ElfMetadata(
+        soname="libstdc++.so.6",
+        symbols=[
+            ElfSymbol(name="_ZNSt6vectorIiSaIiEE4sizeEv", sym_type=SymbolType.FUNC),
+            ElfSymbol(name="_ZTVSt9exception", sym_type=SymbolType.OBJECT),
+            ElfSymbol(name="_ZTTSt23_Sp_counted_ptr_inplaceE", sym_type=SymbolType.OBJECT),
+            ElfSymbol(name="_init", sym_type=SymbolType.FUNC),
+            ElfSymbol(name="__cpu_model", sym_type=SymbolType.OBJECT),
+        ],
+    )
+
+    full, funcs, objects, tls = _elf_classify_symbols(meta, set())
+
+    assert funcs == {"_ZNSt6vectorIiSaIiEE4sizeEv"}
+    assert objects == {"_ZTVSt9exception", "_ZTTSt23_Sp_counted_ptr_inplaceE"}
+    assert tls == set()
+    assert full == funcs | objects
 
 
 def _function(name: str) -> Function:
@@ -404,6 +458,26 @@ def test_public_functions_uses_abi_relevant_export_filter() -> None:
     assert set(_public_functions(snap)) == {"lib_init"}
 
 
+def test_public_functions_preserves_runtime_owned_stdlib_exports() -> None:
+    snap = AbiSnapshot(
+        library="libstdc++.so.6",
+        version="1",
+        functions=[
+            _function("_ZNSt6vectorIiSaIiEE4sizeEv"),
+            _function("_init"),
+        ],
+        elf=ElfMetadata(
+            soname="libstdc++.so.6",
+            symbols=[
+                ElfSymbol(name="_ZNSt6vectorIiSaIiEE4sizeEv", sym_type=SymbolType.FUNC),
+                ElfSymbol(name="_init", sym_type=SymbolType.FUNC),
+            ],
+        ),
+    )
+
+    assert set(_public_functions(snap)) == {"_ZNSt6vectorIiSaIiEE4sizeEv"}
+
+
 def _variable(name: str) -> Variable:
     return Variable(
         name=name,
@@ -426,6 +500,23 @@ def test_public_variables_filters_elf_only_linker_artifacts() -> None:
     )
 
     assert set(_public_variables(snap)) == {"public_table"}
+
+
+def test_public_variables_preserves_runtime_owned_stdlib_vtables() -> None:
+    snap = AbiSnapshot(
+        library="libstdc++.so.6",
+        version="1",
+        variables=[
+            _variable("_ZTVSt9exception"),
+            _variable("_ZTTSt23_Sp_counted_ptr_inplaceE"),
+            _variable("__cpu_model"),
+        ],
+    )
+
+    assert set(_public_variables(snap)) == {
+        "_ZTVSt9exception",
+        "_ZTTSt23_Sp_counted_ptr_inplaceE",
+    }
 
 
 def test_exported_symbol_names_abi_relevant_only_drops_linker_boundaries() -> None:

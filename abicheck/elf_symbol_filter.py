@@ -79,23 +79,40 @@ _STDLIB_PREFIXES = (
 _STDLIB_RTTI_PREFIXES = (
     "_ZTISt",             # typeinfo for std::* / std::exception, etc.
     "_ZTSSt",             # typeinfo name for std::* / std::exception, etc.
+    "_ZTVSt",             # vtable for std::* / std::exception, etc.
+    "_ZTTSt",             # VTT for std::* / std::exception, etc.
     "_ZTINSt",            # typeinfo for nested std::* names
     "_ZTSNSt",            # typeinfo name for nested std::* names
+    "_ZTVNSt",            # vtable for nested std::* names
+    "_ZTTNSt",            # VTT for nested std::* names
     "_ZTIN9__gnu_cxx",
     "_ZTSN9__gnu_cxx",
+    "_ZTVN9__gnu_cxx",
+    "_ZTTN9__gnu_cxx",
     "_ZTIN10__cxxabiv",
     "_ZTSN10__cxxabiv",
+    "_ZTTN10__cxxabiv",
     "_ZTIN7__cxx11",
     "_ZTSN7__cxx11",
+    "_ZTVN7__cxx11",
+    "_ZTTN7__cxx11",
 )
 
-def is_abi_relevant_elf_symbol(name: str) -> bool:
+def is_abi_relevant_elf_symbol(
+    name: str,
+    *,
+    filter_transitive_runtime_symbols: bool = True,
+) -> bool:
     """Return False for ELF symbols that are not the library's own ABI.
 
     This filter must be shared by both the ELF-only and DWARF-backed snapshot
     paths. Otherwise a weak transitive libstdc++ export can be excluded from
     symbols-only reports yet re-enter as a ``PUBLIC`` DWARF function, producing
     false ``FUNC_REMOVED`` and type-reachability findings.
+
+    Set *filter_transitive_runtime_symbols* to ``False`` when the inspected DSO
+    is itself the C++ runtime (``libstdc++`` / ``libc++``): stdlib exports are
+    then the library's own ABI surface, not a transitive dependency leak.
     """
     if not name:
         return False
@@ -107,13 +124,14 @@ def is_abi_relevant_elf_symbol(name: str) -> bool:
         if name.startswith(prefix):
             return False
 
-    for prefix in _STDLIB_PREFIXES:
-        if name.startswith(prefix):
-            return False
+    if filter_transitive_runtime_symbols:
+        for prefix in _STDLIB_PREFIXES:
+            if name.startswith(prefix):
+                return False
 
-    for prefix in _STDLIB_RTTI_PREFIXES:
-        if name.startswith(prefix):
-            return False
+        for prefix in _STDLIB_RTTI_PREFIXES:
+            if name.startswith(prefix):
+                return False
 
     # Private C symbols with __ as a namespace separator
     # (e.g. H5C__flush_marked_entries, MPI__send). C++ mangled names start
@@ -129,6 +147,7 @@ def exported_symbol_names(
     symbol_types: Collection[str],
     *,
     abi_relevant_only: bool = False,
+    filter_transitive_runtime_symbols: bool = True,
 ) -> set[str]:
     """Return dynamic-export names of the requested ``symbol_types`` from *elf*.
 
@@ -150,7 +169,10 @@ def exported_symbol_names(
         sym_type = getattr(sym.sym_type, "value", sym.sym_type)
         if sym_type not in symbol_types:
             continue
-        if abi_relevant_only and not is_abi_relevant_elf_symbol(sym.name):
+        if abi_relevant_only and not is_abi_relevant_elf_symbol(
+            sym.name,
+            filter_transitive_runtime_symbols=filter_transitive_runtime_symbols,
+        ):
             continue
         names.add(sym.name)
     return names
