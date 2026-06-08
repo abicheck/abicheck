@@ -56,6 +56,7 @@ from .model import (
     RecordType,
     Variable,
     Visibility,
+    is_cxx_runtime_library,
 )
 
 log = logging.getLogger(__name__)
@@ -744,6 +745,7 @@ def _elf_classify_symbols(
     exported_dynamic_objects: set[str] = set()
     exported_dynamic_tls: set[str] = set()
     if elf_meta.symbols:
+        filter_transitive_runtime_symbols = not is_cxx_runtime_library(elf_meta.soname)
         # Apply the shared ABI-relevance filter here too: this no-header path
         # rebuilds the exported sets directly from ``elf_meta.symbols`` rather
         # than the already-filtered ``_pyelftools_exported_symbols`` result, so
@@ -753,17 +755,26 @@ def _elf_classify_symbols(
         exported_dynamic_funcs = {
             sym.name for sym in elf_meta.symbols
             if sym.sym_type in (SymbolType.FUNC, SymbolType.IFUNC, SymbolType.NOTYPE)
-            and is_abi_relevant_elf_symbol(sym.name)
+            and is_abi_relevant_elf_symbol(
+                sym.name,
+                filter_transitive_runtime_symbols=filter_transitive_runtime_symbols,
+            )
         }
         exported_dynamic_objects = {
             sym.name for sym in elf_meta.symbols
             if sym.sym_type == SymbolType.OBJECT
-            and is_abi_relevant_elf_symbol(sym.name)
+            and is_abi_relevant_elf_symbol(
+                sym.name,
+                filter_transitive_runtime_symbols=filter_transitive_runtime_symbols,
+            )
         }
         exported_dynamic_tls = {
             sym.name for sym in elf_meta.symbols
             if sym.sym_type == SymbolType.TLS
-            and is_abi_relevant_elf_symbol(sym.name)
+            and is_abi_relevant_elf_symbol(
+                sym.name,
+                filter_transitive_runtime_symbols=filter_transitive_runtime_symbols,
+            )
         }
         # Full set for CastxmlParser: determines PUBLIC vs ELF_ONLY visibility
         exported_dynamic = exported_dynamic_funcs | exported_dynamic_objects | exported_dynamic_tls

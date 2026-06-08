@@ -419,9 +419,10 @@ class _DwarfSnapshotBuilder:
 
     def _is_abi_relevant_export(self, name: str) -> bool:
         """Return True when *name* belongs to this DSO's own ABI surface."""
-        if not self._filter_transitive_runtime_symbols:
-            return bool(name)
-        return is_abi_relevant_elf_symbol(name)
+        return is_abi_relevant_elf_symbol(
+            name,
+            filter_transitive_runtime_symbols=self._filter_transitive_runtime_symbols,
+        )
 
     def _process_param(self, die: Any, CU: Any) -> Param | None:
         """Extract a parameter from DW_TAG_formal_parameter."""

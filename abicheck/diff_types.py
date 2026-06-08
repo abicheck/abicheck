@@ -36,6 +36,7 @@ from .model import (
     TypeField,
     canonicalize_type_name,
     cv_qualifiers_only_differ,
+    is_cxx_runtime_library,
 )
 from .model import is_non_abi_surface_type as _is_non_abi_surface_type
 from .model import stdlib_namespaces_excluded as _exclude_stdlib_namespaces
@@ -50,8 +51,12 @@ def _exported_elf_symbol_names(snap: AbiSnapshot, *, symbol_types: Collection[st
     the DWARF-derived Function/Variable lists. Transitive runtime/compiler
     exports are excluded so they can't inflate retention.
     """
+    filter_transitive_runtime_symbols = not is_cxx_runtime_library(snap.library)
     return exported_symbol_names(
-        getattr(snap, "elf", None), symbol_types, abi_relevant_only=True
+        getattr(snap, "elf", None),
+        symbol_types,
+        abi_relevant_only=True,
+        filter_transitive_runtime_symbols=filter_transitive_runtime_symbols,
     )
 
 
