@@ -14,7 +14,14 @@ relative to the repo). Each package extracts to ``<libs>/<pkg_stem>/lib/*.so*`` 
 see ``data/manifest.json`` for the conda-forge files to fetch and extract.
 """
 from __future__ import annotations
-import json, os, re, subprocess, time, glob, sys
+
+import glob
+import json
+import os
+import re
+import subprocess
+import sys
+import time
 from pathlib import Path
 
 VALID_DIR = Path(__file__).resolve().parent.parent          # validation/
@@ -35,7 +42,8 @@ if not os.path.isdir(EX):
 
 def logical_name(path: str) -> str:
     b = os.path.basename(path)
-    return b.split(".so")[0]
+    stem = b.split(".so")[0]
+    return re.sub(r"-(?:\d+\.)+\d+$", "", stem)
 
 def real_sos(pkgdir: str) -> dict[str, str]:
     """logical_name -> path for every real (non-symlink) ELF .so in pkgdir/lib."""
