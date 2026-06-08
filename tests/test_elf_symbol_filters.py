@@ -249,12 +249,16 @@ def test_dwarf_export_index_preserves_runtime_owned_stdlib_exports(tmp_path) -> 
         symbols=[
             ElfSymbol(name="_ZNSt6vectorIiSaIiEE4sizeEv"),
             ElfSymbol(name="_ZSt4cout"),
+            ElfSymbol(name="_init"),
+            ElfSymbol(name="__cpu_model"),
         ],
     )
     builder = _DwarfSnapshotBuilder(tmp_path / "libstdc++.so.6", meta)
 
     assert "_ZNSt6vectorIiSaIiEE4sizeEv" in builder._exported_names
     assert "_ZSt4cout" in builder._exported_names
+    assert "_init" not in builder._exported_names
+    assert "__cpu_model" not in builder._exported_names
 
 
 # ---------------------------------------------------------------------------
@@ -397,6 +401,31 @@ def test_elf_classify_symbols_preserves_runtime_owned_stdlib_exports() -> None:
 
     assert funcs == {"_ZNSt6vectorIiSaIiEE4sizeEv"}
     assert objects == {"_ZTVSt9exception", "_ZTTSt23_Sp_counted_ptr_inplaceE"}
+    assert tls == set()
+    assert full == funcs | objects
+
+
+def test_elf_classify_symbols_uses_library_name_when_soname_is_missing() -> None:
+    """Symbols-only runtime dumps may need the input filename as owner context."""
+    from abicheck.dumper import _elf_classify_symbols
+
+    meta = ElfMetadata(
+        symbols=[
+            ElfSymbol(name="_ZNSt6vectorIiSaIiEE4sizeEv", sym_type=SymbolType.FUNC),
+            ElfSymbol(name="_ZTVSt9exception", sym_type=SymbolType.OBJECT),
+            ElfSymbol(name="_init", sym_type=SymbolType.FUNC),
+            ElfSymbol(name="__cpu_model", sym_type=SymbolType.OBJECT),
+        ],
+    )
+
+    full, funcs, objects, tls = _elf_classify_symbols(
+        meta,
+        set(),
+        library_name="libstdc++.so.6",
+    )
+
+    assert funcs == {"_ZNSt6vectorIiSaIiEE4sizeEv"}
+    assert objects == {"_ZTVSt9exception"}
     assert tls == set()
     assert full == funcs | objects
 

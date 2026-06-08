@@ -448,6 +448,17 @@ class TestVtableIdentity:
         r = compare(_snap(elf=old_elf), _snap(elf=new_elf))
         assert not _has_kind(r, ChangeKind.VTABLE_SYMBOL_IDENTITY_CHANGED)
 
+    def test_transitive_stdlib_rtti_is_filtered(self):
+        """Weak stdlib RTTI churn from dependencies is not this DSO's ABI."""
+        old_elf = ElfMetadata(symbols=[
+            _elf_sym("_ZTVSt9exception", sym_type=SymbolType.OBJECT, version="VER_1"),
+        ])
+        new_elf = ElfMetadata(symbols=[
+            _elf_sym("_ZTVSt9exception", sym_type=SymbolType.OBJECT, version="VER_2"),
+        ])
+        r = compare(_snap(elf=old_elf), _snap(elf=new_elf))
+        assert not _has_kind(r, ChangeKind.VTABLE_SYMBOL_IDENTITY_CHANGED)
+
 
 # ── ABI_SURFACE_EXPLOSION ────────────────────────────────────────────────────
 

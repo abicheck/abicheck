@@ -733,6 +733,8 @@ def _populate_elf_visibility(snap: AbiSnapshot) -> None:
 def _elf_classify_symbols(
     elf_meta: ElfMetadata,
     exported_dynamic: set[str],
+    *,
+    library_name: str | None = None,
 ) -> tuple[set[str], set[str], set[str], set[str]]:
     """Split ELF metadata symbols into typed subsets for the no-header path.
 
@@ -745,7 +747,8 @@ def _elf_classify_symbols(
     exported_dynamic_objects: set[str] = set()
     exported_dynamic_tls: set[str] = set()
     if elf_meta.symbols:
-        filter_transitive_runtime_symbols = not is_cxx_runtime_library(elf_meta.soname)
+        runtime_name = elf_meta.soname or library_name
+        filter_transitive_runtime_symbols = not is_cxx_runtime_library(runtime_name)
         # Apply the shared ABI-relevance filter here too: this no-header path
         # rebuilds the exported sets directly from ``elf_meta.symbols`` rather
         # than the already-filtered ``_pyelftools_exported_symbols`` result, so
@@ -948,7 +951,7 @@ def _dump_elf(
 
     elf_meta = parse_elf_metadata(so_path)
     exported_dynamic, exported_dynamic_funcs, exported_dynamic_objects, exported_dynamic_tls = (
-        _elf_classify_symbols(elf_meta, exported_dynamic)
+        _elf_classify_symbols(elf_meta, exported_dynamic, library_name=so_path.name)
     )
     dwarf_meta, dwarf_adv = _resolve_debug_metadata(so_path, debug_format)
     profile_hint = _elf_lang_to_profile(lang)

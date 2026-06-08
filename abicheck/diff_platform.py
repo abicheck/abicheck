@@ -1065,8 +1065,24 @@ def _diff_vtable_identity(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     # Find vtable/typeinfo symbols by mangling convention (_ZTV, _ZTI, _ZTS)
     _RTTI_PREFIXES = ("_ZTV", "_ZTI", "_ZTS")
 
-    old_rtti = {s.name for s in o.symbols if any(s.name.startswith(p) for p in _RTTI_PREFIXES)}
-    new_rtti = {s.name for s in n.symbols if any(s.name.startswith(p) for p in _RTTI_PREFIXES)}
+    old_filter_transitive_runtime_symbols = _should_filter_transitive_runtime_symbols(old)
+    new_filter_transitive_runtime_symbols = _should_filter_transitive_runtime_symbols(new)
+    old_rtti = {
+        s.name for s in o.symbols
+        if any(s.name.startswith(p) for p in _RTTI_PREFIXES)
+        and is_abi_relevant_elf_symbol(
+            s.name,
+            filter_transitive_runtime_symbols=old_filter_transitive_runtime_symbols,
+        )
+    }
+    new_rtti = {
+        s.name for s in n.symbols
+        if any(s.name.startswith(p) for p in _RTTI_PREFIXES)
+        and is_abi_relevant_elf_symbol(
+            s.name,
+            filter_transitive_runtime_symbols=new_filter_transitive_runtime_symbols,
+        )
+    }
 
     removed_rtti = old_rtti - new_rtti
     added_rtti = new_rtti - old_rtti
