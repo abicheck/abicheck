@@ -144,6 +144,68 @@ five verdicts mapped to CI exit codes. See
 [Part 1 §7](abi-series/01-foundations.md#7-where-abicheck-fits) for how that
 pipeline works, and [Verdicts](verdicts.md) for the exit-code semantics.
 
+### Runtime calls are not the same as ABI dependencies
+
+A public entry point may call a long chain of private helpers at runtime. That
+runtime call graph is **not** automatically the consumer's ABI contract. Existing
+binaries are bound only to the symbols, types, constants, layouts, and inline
+code that cross the **compile / link / load boundary**: what appears in installed
+public headers, what the consumer object directly references, and what the loader
+must resolve.
+
+```text
+Safe runtime call chain:
+app -> public_func
+       public_func -> hidden internal_helper
+
+Consumer binary depends on public_func only. internal_helper can change because
+it is not exported, not referenced by public headers, and not part of public
+layout or inline code.
+```
+
+The same private helper becomes an ABI dependency if the boundary shifts:
+
+```text
+Unsafe link-time dependency:
+inline public_func in an installed header -> detail::internal_helper
+
+The consumer object now directly references detail::internal_helper. Removing,
+renaming, hiding, or changing that helper can break already-built consumers.
+```
+
+Private types follow the same rule. A helper struct is safely private while it is
+fully hidden behind an opaque pointer or implementation file, but not when the
+public header exposes it by value:
+
+```text
+Unsafe compile-time layout dependency:
+public header exposes InternalType by value
+
+The consumer bakes sizeof(InternalType), alignment, field offsets, base-class
+layout, and calling-convention facts into its own object code.
+```
+
+Use this checklist before calling an internal change ABI-safe. A private change
+is safe only when **all** of these remain true:
+
+- the private symbol is not exported or otherwise load-resolvable by consumers;
+- public inline, template, `constexpr`, or macro bodies do not reference it;
+- it is not part of any public struct/class layout, base class, field, parameter,
+  return value, exception specification, allocator/deallocator rule, or calling
+  convention;
+- it is absent from installed public headers except behind an opaque declaration
+  that reveals no size, members, bases, or required helper symbols;
+- no plugin, callback, subclassing, serialization, or user-extension model
+  promises that consumers may provide or observe the changed detail;
+- the public behavior contract remains compatible, even if the binary boundary is
+  intact.
+
+This distinction is why [Part 5](abi-series/05-linker-elf.md) treats leaked
+private exports as dangerous, [Part 4](abi-series/04-cpp-abi.md) treats
+inline/template bodies as part of the contract, and
+[Part 6](abi-series/06-transitive-breaks.md) treats exposed dependency types as
+transitive ABI.
+
 ---
 
 ### Feed abicheck `.so` + debug info + headers for the best result
