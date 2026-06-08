@@ -665,7 +665,7 @@ class TestCheckerIntegration:
         assert ChangeKind.FUNC_LIKELY_RENAMED in kinds
         assert ChangeKind.SONAME_BUMP_RECOMMENDED in kinds
 
-    def test_compare_soname_unnecessary_uses_postprocessed_changes(self):
+    def test_compare_soname_bump_not_unnecessary_for_breaking_rename(self):
         """SONAME bumped for a breaking rename must not read as unnecessary.
 
         Exercises the second branch of check_soname_bump_policy through the
