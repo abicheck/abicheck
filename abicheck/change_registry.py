@@ -415,7 +415,7 @@ REGISTRY = ChangeKindRegistry([
     _E("symbol_renamed_batch", _B,
        impact="Multiple symbols renamed (e.g. namespace prefix added/removed); "
               "old binaries reference the old names and will get undefined symbol errors at load time."),
-    _E("func_likely_renamed", _R,
+    _E("func_likely_renamed", _B,
        impact="Function likely renamed (binary fingerprint match: identical code size and hash, "
               "different symbol name). Old binaries reference the old name and will fail to "
               "resolve at load time. This is a heuristic signal — verify the rename is intentional."),

@@ -601,7 +601,7 @@ class TestCheckerIntegration:
         assert ChangeKind.SONAME_BUMP_RECOMMENDED in kinds
 
     def test_compare_soname_policy_uses_postprocessed_changes(self):
-        """A downgraded rename must not leave a stale SONAME bump advisory."""
+        """A breaking rename with unchanged SONAME should recommend a bump."""
         from abicheck.checker import compare
         from abicheck.checker_policy import Verdict
         from abicheck.model import AbiSnapshot, Function, Visibility
@@ -661,18 +661,17 @@ class TestCheckerIntegration:
         )
         kinds = {c.kind for c in result.changes}
 
-        assert result.verdict == Verdict.COMPATIBLE_WITH_RISK
+        assert result.verdict == Verdict.BREAKING
         assert ChangeKind.FUNC_LIKELY_RENAMED in kinds
-        assert ChangeKind.SONAME_BUMP_RECOMMENDED not in kinds
+        assert ChangeKind.SONAME_BUMP_RECOMMENDED in kinds
 
-    def test_compare_soname_unnecessary_uses_postprocessed_changes(self):
-        """SONAME bumped but the only change is a downgraded rename → UNNECESSARY.
+    def test_compare_soname_bump_not_unnecessary_for_breaking_rename(self):
+        """SONAME bumped for a breaking rename must not read as unnecessary.
 
         Exercises the second branch of check_soname_bump_policy through the
-        post-processed change set: because the breaking removed/added halves are
-        rename-redundant (and so excluded from the verdict input), there are no
-        binary-incompatible changes, so a SONAME bump reads as unnecessary —
-        and must not also emit the contradictory RECOMMENDED advisory.
+        post-processed change set: the removed/added halves are rename-redundant
+        and excluded from the verdict input, but the collapsed rename remains a
+        binary-incompatible change.
         """
         from abicheck.checker import compare
         from abicheck.checker_policy import Verdict
@@ -733,9 +732,9 @@ class TestCheckerIntegration:
         )
         kinds = {c.kind for c in result.changes}
 
-        assert result.verdict == Verdict.COMPATIBLE_WITH_RISK
+        assert result.verdict == Verdict.BREAKING
         assert ChangeKind.FUNC_LIKELY_RENAMED in kinds
-        assert ChangeKind.SONAME_BUMP_UNNECESSARY in kinds
+        assert ChangeKind.SONAME_BUMP_UNNECESSARY not in kinds
         assert ChangeKind.SONAME_BUMP_RECOMMENDED not in kinds
 
     def test_compare_soname_bump_recommendation_honors_suppression(self):
