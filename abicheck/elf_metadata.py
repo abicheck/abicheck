@@ -455,6 +455,15 @@ def _find_fundamental_cxx_rtti_runtime(needed_libs: list[str]) -> str | None:
     return None
 
 
+def _is_libmvec_vector_symbol(name: str) -> bool:
+    """Return true for glibc libmvec vector ABI symbols, not C++ guard vars."""
+    if not name.startswith("_ZGV"):
+        return False
+    if name.startswith("_ZGVZ"):
+        return False
+    return len(name) > 4 and name[4] in {"b", "c", "d", "e", "n", "s"}
+
+
 # Lookup table: (prefix_tuple, finder_fn_or_None, default_if_no_finder_match)
 # When finder_fn is None, default is returned unconditionally.
 _FinderFn = Callable[[list[str]], str | None]
@@ -490,8 +499,6 @@ _ORIGIN_PREFIX_TABLE: list[tuple[tuple[str, ...], _FinderFn | None, str]] = [
     (("_Znwm", "_Znwj", "_Znam", "_Znaj", "_ZdlPv", "_ZdaPv", "_ZnwmSt", "_ZnamSt"), _find_cxx_stdlib, "libstdc++.so.6"),
     # Intel SVML
     (("__svml_",), None, "<intel-compiler-rt>"),
-    # Vectorized math functions (libmvec)
-    (("_ZGV",), None, "libmvec.so.1"),
     # x87 math helpers (libgcc.a static)
     (("ix86_",), None, "libgcc.a (static)"),
     # libm SIMD helpers
@@ -589,6 +596,9 @@ def _guess_symbol_origin(name: str, needed_libs: list[str]) -> str | None:
     """
     if _is_fundamental_cxx_rtti_symbol(name):
         return _find_fundamental_cxx_rtti_runtime(needed_libs) or "libstdc++.so.6"
+
+    if _is_libmvec_vector_symbol(name):
+        return "libmvec.so.1"
 
     for prefixes, finder_fn, default in _ORIGIN_PREFIX_TABLE:
         if name.startswith(prefixes):
