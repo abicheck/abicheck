@@ -15,6 +15,7 @@ import click
 import pytest
 
 from abicheck.checker import Change, ChangeKind, DiffResult, Verdict, compare
+from abicheck.dwarf_metadata import DwarfMetadata, StructLayout
 from abicheck.model import (
     AbiSnapshot,
     EnumMember,
@@ -26,6 +27,7 @@ from abicheck.model import (
     TypeField,
     Variable,
     Visibility,
+    go_runtime_types_excluded,
     is_non_abi_surface_type,
 )
 from abicheck.report_summary import build_summary, compatibility_metrics
@@ -123,6 +125,67 @@ class TestGoRuntimeDwarfNoise:
         assert is_non_abi_surface_type("map<int,int>") is False
         assert result.verdict is Verdict.BREAKING
         assert any(c.kind == ChangeKind.TYPE_SIZE_CHANGED for c in result.changes)
+
+    def test_non_go_dotted_and_slash_type_names_are_kept(self):
+        old = _snap(types=[
+            RecordType(name="module.Type", kind="struct", size_bits=64),
+            RecordType(name="vendor/type", kind="struct", size_bits=64),
+        ])
+        new = _snap("2.0", types=[
+            RecordType(name="module.Type", kind="struct", size_bits=128),
+            RecordType(name="vendor/type", kind="struct", size_bits=128),
+        ])
+
+        result = compare(old, new)
+
+        assert go_runtime_types_excluded(old, new) is False
+        assert is_non_abi_surface_type("module.Type") is False
+        assert is_non_abi_surface_type("vendor/type") is False
+        assert result.verdict is Verdict.BREAKING
+        assert {c.symbol for c in result.changes if c.kind == ChangeKind.TYPE_SIZE_CHANGED} == {
+            "module.Type",
+            "vendor/type",
+        }
+
+    def test_go_context_keeps_native_looking_generic_templates(self):
+        old = _snap(
+            funcs=[_pub_func("AdbcDriverInit", "AdbcDriverInit")],
+            types=[
+                RecordType(name="runtime.g", kind="struct", size_bits=3520),
+                RecordType(name="map<int,int>", kind="struct", size_bits=64),
+                RecordType(name="hchan<int>", kind="struct", size_bits=64),
+            ],
+        )
+        new = _snap(
+            "2.0",
+            funcs=[_pub_func("AdbcDriverInit", "AdbcDriverInit")],
+            types=[
+                RecordType(name="runtime.g", kind="struct", size_bits=3520),
+                RecordType(name="map<int,int>", kind="struct", size_bits=128),
+                RecordType(name="hchan<int>", kind="struct", size_bits=128),
+            ],
+        )
+
+        result = compare(old, new)
+
+        assert go_runtime_types_excluded(old, new) is True
+        assert is_non_abi_surface_type("map<int,int>", exclude_go_runtime_types=True) is False
+        assert is_non_abi_surface_type("hchan<int>", exclude_go_runtime_types=True) is False
+        assert result.verdict is Verdict.BREAKING
+        assert {c.symbol for c in result.changes if c.kind == ChangeKind.TYPE_SIZE_CHANGED} == {
+            "map<int,int>",
+            "hchan<int>",
+        }
+
+    def test_go_context_detects_raw_dwarf_runtime_evidence(self):
+        old = _snap(types=[RecordType(name="map<int,int>", kind="struct", size_bits=64)])
+        old.dwarf = DwarfMetadata(structs={"runtime.g": StructLayout("runtime.g", 440)})
+        new = _snap("2.0", types=[RecordType(name="map<int,int>", kind="struct", size_bits=128)])
+
+        assert go_runtime_types_excluded(old, new) is True
+        result = compare(old, new)
+        assert result.verdict is Verdict.BREAKING
+        assert any(c.symbol == "map<int,int>" for c in result.changes)
 
 
 # ── Bug 1: Enum symbols use member-qualified format ──────────────────────────

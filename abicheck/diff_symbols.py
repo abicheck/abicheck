@@ -43,6 +43,7 @@ from .model import (
     Visibility,
     canonicalize_type_name,
     cv_qualifiers_only_differ,
+    go_runtime_types_excluded,
     is_abi_surface_type_name,
     stdlib_namespaces_excluded,
 )
@@ -970,8 +971,19 @@ def _diff_access_levels(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     changes: list[Change] = []
     changes.extend(_check_method_access_changes(_public_functions(old), _public_functions(new)))
     excl = stdlib_namespaces_excluded(old, new)
-    old_types = {t.name: t for t in old.types if not t.is_union and is_abi_surface_type_name(t.name, exclude_stdlib=excl)}
-    new_types = {t.name: t for t in new.types if not t.is_union and is_abi_surface_type_name(t.name, exclude_stdlib=excl)}
+    go_excl = go_runtime_types_excluded(old, new)
+    old_types = {
+        t.name: t
+        for t in old.types
+        if not t.is_union
+        and is_abi_surface_type_name(t.name, exclude_stdlib=excl, exclude_go_runtime=go_excl)
+    }
+    new_types = {
+        t.name: t
+        for t in new.types
+        if not t.is_union
+        and is_abi_surface_type_name(t.name, exclude_stdlib=excl, exclude_go_runtime=go_excl)
+    }
     changes.extend(_check_field_access_changes(old_types, new_types))
     return changes
 
@@ -1033,8 +1045,17 @@ def _diff_anon_fields(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """Detect changes in anonymous struct/union members."""
     changes: list[Change] = []
     excl = stdlib_namespaces_excluded(old, new)
-    old_map = {t.name: t for t in old.types if is_abi_surface_type_name(t.name, exclude_stdlib=excl)}
-    new_map = {t.name: t for t in new.types if is_abi_surface_type_name(t.name, exclude_stdlib=excl)}
+    go_excl = go_runtime_types_excluded(old, new)
+    old_map = {
+        t.name: t
+        for t in old.types
+        if is_abi_surface_type_name(t.name, exclude_stdlib=excl, exclude_go_runtime=go_excl)
+    }
+    new_map = {
+        t.name: t
+        for t in new.types
+        if is_abi_surface_type_name(t.name, exclude_stdlib=excl, exclude_go_runtime=go_excl)
+    }
 
     for name, t_old in old_map.items():
         t_new = new_map.get(name)

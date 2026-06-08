@@ -33,6 +33,7 @@ from .model import (
     AbiSnapshot,
     Function,
     Visibility,
+    go_runtime_types_excluded,
     is_abi_surface_type_name,
     stdlib_namespaces_excluded,
 )
@@ -116,8 +117,17 @@ def _match_record_fields(
 ) -> Iterator[TypeSlotChange]:
     """Yield field-spelling changes for record types present in both snapshots."""
     excl = stdlib_namespaces_excluded(old, new)
-    old_types = {t.name: t for t in old.types if is_abi_surface_type_name(t.name, exclude_stdlib=excl)}
-    new_types = {t.name: t for t in new.types if is_abi_surface_type_name(t.name, exclude_stdlib=excl)}
+    go_excl = go_runtime_types_excluded(old, new)
+    old_types = {
+        t.name: t
+        for t in old.types
+        if is_abi_surface_type_name(t.name, exclude_stdlib=excl, exclude_go_runtime=go_excl)
+    }
+    new_types = {
+        t.name: t
+        for t in new.types
+        if is_abi_surface_type_name(t.name, exclude_stdlib=excl, exclude_go_runtime=go_excl)
+    }
     for name in set(old_types) & set(new_types):
         nt = new_types[name]
         new_fields = {f.name: f for f in nt.fields}
