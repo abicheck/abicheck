@@ -109,7 +109,11 @@ def _is_local_type_rtti(mangled: str) -> bool:
 
 
 def _should_filter_transitive_runtime_symbols(snap: AbiSnapshot) -> bool:
-    """Return False when *snap* identifies the inspected DSO as C++ runtime."""
+    """Return True when transitive C++ runtime symbols should be filtered.
+
+    Returns False when ``snap.library`` or the ELF SONAME identifies *snap* as
+    the C++ runtime itself, where runtime-owned symbols are the inspected ABI.
+    """
     elf = getattr(snap, "elf", None)
     return not (
         is_cxx_runtime_library(snap.library)
