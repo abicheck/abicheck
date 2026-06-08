@@ -26,7 +26,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.13"  # consistent with main CI matrix
+          python-version: "3.14"  # consistent with main CI matrix
 
       - name: Install build tools
         run: python -m pip install --upgrade build
@@ -76,7 +76,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.13"
+          python-version: "3.14"
           cache: 'pip'
 
       - name: Install package
