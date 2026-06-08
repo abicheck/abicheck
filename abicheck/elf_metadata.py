@@ -461,7 +461,7 @@ def _is_libmvec_vector_symbol(name: str) -> bool:
         return False
     if name.startswith("_ZGVZ"):
         return False
-    return len(name) > 4 and name[4] in {"b", "c", "d", "e", "n"}
+    return len(name) > 4 and name[4] in {"b", "c", "d", "e", "n", "s"}
 
 
 # Lookup table: (prefix_tuple, finder_fn_or_None, default_if_no_finder_match)

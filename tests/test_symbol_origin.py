@@ -149,7 +149,7 @@ class TestGuessSymbolOrigin:
         assert result == "libgcc.a (static)"
 
     def test_gcc_runtime_ZGV(self):
-        """_ZGV... → libmvec.so.1 (SIMD vectorized math, not libgcc_s)."""
+        """libmvec vector ABI symbol → libmvec.so.1 (not libgcc_s)."""
         result = _guess_symbol_origin("_ZGVnN4v_sin", [])
         assert result == "libmvec.so.1"
 
@@ -486,15 +486,20 @@ class TestUpdatedAttributions:
         assert result == "libgcc.a (static)"
 
     def test_ZGV_to_libmvec(self):
-        """M1: _ZGV* → libmvec.so.1 (vectorized math), not libgcc_s."""
+        """M1: libmvec vector ABI symbol → libmvec.so.1, not libgcc_s."""
         result = _guess_symbol_origin("_ZGVnN4v_sin", [])
         assert result == "libmvec.so.1"
 
     def test_ZGV_variants(self):
         """M1: Various _ZGV SIMD math variants."""
-        for name in ("_ZGVbN4v_sin", "_ZGVdN2v_cos", "_ZGVeN8v_exp"):
+        for name in ("_ZGVbN4v_sin", "_ZGVcN4v_sin", "_ZGVdN2v_cos", "_ZGVeN8v_exp"):
             result = _guess_symbol_origin(name, [])
             assert result == "libmvec.so.1", f"Expected libmvec.so.1 for {name}"
+
+    def test_ZGVs_sve_variant_to_libmvec(self):
+        """M1: AArch64 SVE libmvec symbols use the _ZGVs... ABI form."""
+        result = _guess_symbol_origin("_ZGVsMxv_sinf", [])
+        assert result == "libmvec.so.1"
 
     def test_ZGVN_guard_variable_not_libmvec(self):
         """M1: Namespace-scope Itanium C++ guard variables are project-owned."""
