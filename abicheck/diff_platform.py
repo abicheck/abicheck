@@ -33,7 +33,7 @@ from .diff_platform_templates import (
 from .diff_platform_templates import (
     _template_outer as _template_outer,
 )
-from .diff_symbols import _public_functions
+from .diff_symbols import _public_functions, _should_filter_transitive_runtime_symbols
 from .diff_types import _RESERVED_FIELD_RE
 from .elf_metadata import SymbolBinding, SymbolType
 from .elf_symbol_filter import is_abi_relevant_elf_symbol
@@ -41,7 +41,6 @@ from .model import (
     AbiSnapshot,
     Visibility,
     cv_qualifiers_only_differ,
-    is_cxx_runtime_library,
     is_non_abi_surface_type,
     stdlib_namespaces_excluded,
 )
@@ -301,7 +300,7 @@ def _diff_visibility_leak(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     if not getattr(old, "elf_only_mode", False):
         return []
 
-    filter_transitive_runtime_symbols = not is_cxx_runtime_library(old.library)
+    filter_transitive_runtime_symbols = _should_filter_transitive_runtime_symbols(old)
     leaked = [
         f for f in old.functions
         if (
