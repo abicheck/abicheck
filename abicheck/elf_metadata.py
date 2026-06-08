@@ -488,6 +488,41 @@ _ORIGIN_PREFIX_TABLE: list[tuple[tuple[str, ...], _FinderFn | None, str]] = [
 ]
 
 
+_FUNDAMENTAL_CXX_RTTI_TYPE_CODES: frozenset[str] = frozenset({
+    "v",   # void
+    "w",   # wchar_t
+    "b",   # bool
+    "c",   # char
+    "a",   # signed char
+    "h",   # unsigned char
+    "s",   # short
+    "t",   # unsigned short
+    "i",   # int
+    "j",   # unsigned int
+    "l",   # long
+    "m",   # unsigned long
+    "x",   # long long
+    "y",   # unsigned long long
+    "n",   # __int128
+    "o",   # unsigned __int128
+    "f",   # float
+    "d",   # double
+    "e",   # long double
+    "g",   # __float128
+    "z",   # ellipsis
+    "Dn",  # std::nullptr_t
+    "Di",  # char32_t
+    "Ds",  # char16_t
+})
+
+
+def _is_fundamental_cxx_rtti_symbol(name: str) -> bool:
+    """Return True for libstdc++ RTTI/typeinfo-name symbols for builtin types."""
+    if not (name.startswith("_ZTI") or name.startswith("_ZTS")):
+        return False
+    return name[4:] in _FUNDAMENTAL_CXX_RTTI_TYPE_CODES
+
+
 def _guess_symbol_origin(name: str, needed_libs: list[str]) -> str | None:
     """Guess which dependency library a symbol likely originates from.
 
@@ -503,6 +538,9 @@ def _guess_symbol_origin(name: str, needed_libs: list[str]) -> str | None:
     itself.  The result is used to annotate the ``origin_lib`` field of
     :class:`ElfSymbol`; it is informational and never suppresses real changes.
     """
+    if _is_fundamental_cxx_rtti_symbol(name):
+        return _find_cxx_stdlib(needed_libs) or "libstdc++.so.6"
+
     for prefixes, finder_fn, default in _ORIGIN_PREFIX_TABLE:
         if name.startswith(prefixes):
             if finder_fn is not None:

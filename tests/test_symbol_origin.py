@@ -56,6 +56,21 @@ class TestGuessSymbolOrigin:
         result = _guess_symbol_origin("_ZTSSt11logic_error", [])
         assert result == "libstdc++.so.6"
 
+    def test_cxx_fundamental_typeinfo_returns_libstdcxx(self):
+        """_ZTIi → libstdc++ (typeinfo for int)."""
+        result = _guess_symbol_origin("_ZTIi", [])
+        assert result == "libstdc++.so.6"
+
+    def test_cxx_fundamental_typeinfo_name_returns_libstdcxx(self):
+        """_ZTSi → libstdc++ (typeinfo-name for int)."""
+        result = _guess_symbol_origin("_ZTSi", [])
+        assert result == "libstdc++.so.6"
+
+    def test_cxx_fundamental_typeinfo_prefers_needed_libcxx(self):
+        """Fundamental RTTI attribution still honors the runtime in DT_NEEDED."""
+        result = _guess_symbol_origin("_ZTIi", ["libc++.so.1"])
+        assert result == "libc++.so.1"
+
     def test_native_project_typeinfo_returns_none(self):
         """Project-owned RTTI symbols must not be attributed to libstdc++."""
         result = _guess_symbol_origin("_ZTIN11flatbuffers13FileNameSaverE", ["libstdc++.so.6"])
