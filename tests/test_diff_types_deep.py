@@ -7,6 +7,7 @@ other type-related ChangeKinds that have minimal dedicated test coverage.
 from __future__ import annotations
 
 from abicheck.checker import ChangeKind, Verdict, compare
+from abicheck.elf_metadata import ElfMetadata
 from abicheck.model import (
     AbiSnapshot,
     AccessLevel,
@@ -36,6 +37,25 @@ def _pub_func(name, mangled, ret="void", params=None, **kwargs):
 
 def _kinds(result):
     return {c.kind for c in result.changes}
+
+
+def test_stdlib_type_filter_uses_elf_soname_for_runtime_snapshots() -> None:
+    old = AbiSnapshot(
+        library="old-renamed-copy.so",
+        version="1.0",
+        elf=ElfMetadata(soname="libstdc++.so.6"),
+        types=[RecordType(name="std::runtime_surface", kind="class", size_bits=64)],
+    )
+    new = AbiSnapshot(
+        library="new-renamed-copy.so",
+        version="2.0",
+        elf=ElfMetadata(soname="libstdc++.so.6"),
+        types=[RecordType(name="std::runtime_surface", kind="class", size_bits=128)],
+    )
+
+    result = compare(old, new)
+
+    assert ChangeKind.TYPE_SIZE_CHANGED in _kinds(result)
 
 
 # ── Union field changes (2-3 refs each) ──────────────────────────────────

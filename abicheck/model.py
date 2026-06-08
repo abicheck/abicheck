@@ -137,8 +137,13 @@ def stdlib_namespaces_excluded(old: AbiSnapshot, new: AbiSnapshot) -> bool:
     registered detector that consumes ``snapshot.types`` agrees on whether to
     keep std:: records (validation/REPORT.md FP-1; Codex reviews on PR #273).
     """
+    old_elf = getattr(old, "elf", None)
+    new_elf = getattr(new, "elf", None)
     return not (
-        is_cxx_runtime_library(old.library) or is_cxx_runtime_library(new.library)
+        is_cxx_runtime_library(old.library)
+        or is_cxx_runtime_library(new.library)
+        or is_cxx_runtime_library(getattr(old_elf, "soname", ""))
+        or is_cxx_runtime_library(getattr(new_elf, "soname", ""))
     )
 
 

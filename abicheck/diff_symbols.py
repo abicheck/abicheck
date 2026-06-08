@@ -108,6 +108,19 @@ def _is_local_type_rtti(mangled: str) -> bool:
     return mangled.startswith(_LOCAL_RTTI_PREFIXES)
 
 
+def _should_filter_transitive_runtime_symbols(snap: AbiSnapshot) -> bool:
+    """Return True when transitive C++ runtime symbols should be filtered.
+
+    Returns False when ``snap.library`` or the ELF SONAME identifies *snap* as
+    the C++ runtime itself, where runtime-owned symbols are the inspected ABI.
+    """
+    elf = getattr(snap, "elf", None)
+    return not (
+        is_cxx_runtime_library(snap.library)
+        or is_cxx_runtime_library(getattr(elf, "soname", ""))
+    )
+
+
 def _public_functions(snap: AbiSnapshot) -> dict[str, Function]:
     """Return public/ELF-only functions from *snap*.
 
@@ -124,7 +137,7 @@ def _public_functions(snap: AbiSnapshot) -> dict[str, Function]:
     theory hide a genuine removal — but DWARF-primary snapshots carry the full
     ``.dynsym``, so in practice the export set is authoritative here.
     """
-    filter_transitive_runtime_symbols = not is_cxx_runtime_library(snap.library)
+    filter_transitive_runtime_symbols = _should_filter_transitive_runtime_symbols(snap)
     funcs = {
         k: v for k, v in snap.function_map.items()
         if (
@@ -160,7 +173,7 @@ def _public_variables(snap: AbiSnapshot) -> dict[str, Variable]:
     other in-function types): they are not nameable public ABI and only churn
     across builds (RD2-4).
     """
-    filter_transitive_runtime_symbols = not is_cxx_runtime_library(snap.library)
+    filter_transitive_runtime_symbols = _should_filter_transitive_runtime_symbols(snap)
     return {
         k: v for k, v in snap.variable_map.items()
         if (
@@ -1829,7 +1842,7 @@ def _fingerprints_from_elf(snap: AbiSnapshot) -> dict[str, FunctionFingerprint]:
     """
     if snap.elf is None:
         return {}
-    filter_transitive_runtime_symbols = not is_cxx_runtime_library(snap.library)
+    filter_transitive_runtime_symbols = _should_filter_transitive_runtime_symbols(snap)
     result: dict[str, FunctionFingerprint] = {}
     for sym in snap.elf.symbols:
         if sym.sym_type not in _FUNC_LIKE_TYPES:
@@ -1878,8 +1891,8 @@ def _diff_fingerprint_renames(old: AbiSnapshot, new: AbiSnapshot) -> list[Change
 
     old_elf = getattr(old, "elf", None)
     new_elf = getattr(new, "elf", None)
-    old_filter_transitive_runtime_symbols = not is_cxx_runtime_library(old.library)
-    new_filter_transitive_runtime_symbols = not is_cxx_runtime_library(new.library)
+    old_filter_transitive_runtime_symbols = _should_filter_transitive_runtime_symbols(old)
+    new_filter_transitive_runtime_symbols = _should_filter_transitive_runtime_symbols(new)
     old_exported_funcs = {
         sym.name
         for sym in (old_elf.symbols if old_elf is not None else [])

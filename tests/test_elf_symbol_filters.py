@@ -249,12 +249,16 @@ def test_dwarf_export_index_preserves_runtime_owned_stdlib_exports(tmp_path) -> 
         symbols=[
             ElfSymbol(name="_ZNSt6vectorIiSaIiEE4sizeEv"),
             ElfSymbol(name="_ZSt4cout"),
+            ElfSymbol(name="_init"),
+            ElfSymbol(name="__cpu_model"),
         ],
     )
     builder = _DwarfSnapshotBuilder(tmp_path / "libstdc++.so.6", meta)
 
     assert "_ZNSt6vectorIiSaIiEE4sizeEv" in builder._exported_names
     assert "_ZSt4cout" in builder._exported_names
+    assert "_init" not in builder._exported_names
+    assert "__cpu_model" not in builder._exported_names
 
 
 # ---------------------------------------------------------------------------
@@ -401,6 +405,31 @@ def test_elf_classify_symbols_preserves_runtime_owned_stdlib_exports() -> None:
     assert full == funcs | objects
 
 
+def test_elf_classify_symbols_uses_library_name_when_soname_is_missing() -> None:
+    """Symbols-only runtime dumps may need the input filename as owner context."""
+    from abicheck.dumper import _elf_classify_symbols
+
+    meta = ElfMetadata(
+        symbols=[
+            ElfSymbol(name="_ZNSt6vectorIiSaIiEE4sizeEv", sym_type=SymbolType.FUNC),
+            ElfSymbol(name="_ZTVSt9exception", sym_type=SymbolType.OBJECT),
+            ElfSymbol(name="_init", sym_type=SymbolType.FUNC),
+            ElfSymbol(name="__cpu_model", sym_type=SymbolType.OBJECT),
+        ],
+    )
+
+    full, funcs, objects, tls = _elf_classify_symbols(
+        meta,
+        set(),
+        library_name="libstdc++.so.6",
+    )
+
+    assert funcs == {"_ZNSt6vectorIiSaIiEE4sizeEv"}
+    assert objects == {"_ZTVSt9exception"}
+    assert tls == set()
+    assert full == funcs | objects
+
+
 def _function(name: str) -> Function:
     return Function(
         name=name,
@@ -478,6 +507,26 @@ def test_public_functions_preserves_runtime_owned_stdlib_exports() -> None:
     assert set(_public_functions(snap)) == {"_ZNSt6vectorIiSaIiEE4sizeEv"}
 
 
+def test_public_functions_uses_elf_soname_for_runtime_context() -> None:
+    snap = AbiSnapshot(
+        library="tmp-renamed-copy.so",
+        version="1",
+        functions=[
+            _function("_ZNSt6vectorIiSaIiEE4sizeEv"),
+            _function("_init"),
+        ],
+        elf=ElfMetadata(
+            soname="libstdc++.so.6",
+            symbols=[
+                ElfSymbol(name="_ZNSt6vectorIiSaIiEE4sizeEv", sym_type=SymbolType.FUNC),
+                ElfSymbol(name="_init", sym_type=SymbolType.FUNC),
+            ],
+        ),
+    )
+
+    assert set(_public_functions(snap)) == {"_ZNSt6vectorIiSaIiEE4sizeEv"}
+
+
 def _variable(name: str) -> Variable:
     return Variable(
         name=name,
@@ -511,6 +560,24 @@ def test_public_variables_preserves_runtime_owned_stdlib_vtables() -> None:
             _variable("_ZTTSt23_Sp_counted_ptr_inplaceE"),
             _variable("__cpu_model"),
         ],
+    )
+
+    assert set(_public_variables(snap)) == {
+        "_ZTVSt9exception",
+        "_ZTTSt23_Sp_counted_ptr_inplaceE",
+    }
+
+
+def test_public_variables_uses_elf_soname_for_runtime_context() -> None:
+    snap = AbiSnapshot(
+        library="tmp-renamed-copy.so",
+        version="1",
+        variables=[
+            _variable("_ZTVSt9exception"),
+            _variable("_ZTTSt23_Sp_counted_ptr_inplaceE"),
+            _variable("__cpu_model"),
+        ],
+        elf=ElfMetadata(soname="libstdc++.so.6"),
     )
 
     assert set(_public_variables(snap)) == {
