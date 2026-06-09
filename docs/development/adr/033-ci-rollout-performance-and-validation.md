@@ -59,6 +59,23 @@ abicheck:
 | `graph-summary` | Compact graph facts and source/binary mapping | Nightly, or PR on smaller projects |
 | `graph-full` | External graph backend | Deep/nightly/release investigation |
 
+These CI modes and the ADR-030 D7 source-replay scopes are two different
+knobs: the CI mode selects which evidence layers run, and internally sets
+the replay scope. The mapping is:
+
+| CI evidence mode | Layers engaged | ADR-030 replay scope |
+|---|---|---|
+| `off` | none | `off` |
+| `build` | L3 | `off` |
+| `source-changed` | L3 + L4 | `changed` |
+| `source-target` | L3 + L4 | `target` |
+| `graph-summary` | L3 + L4 + L5 summary | `changed` (PR) or `target` (baseline) |
+| `graph-full` | L3 + L4 + L5 full | `target` or `full` |
+
+The remaining ADR-030 scopes (`headers-only`, `full`) have no dedicated CI
+mode; they stay reachable through explicit replay configuration for users
+who need them.
+
 ### D3. PR mode is trigger/localizer, not authority
 
 In PR workflows (ADR-025's model, extended with evidence):

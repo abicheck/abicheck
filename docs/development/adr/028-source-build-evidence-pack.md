@@ -222,9 +222,15 @@ abicheck compare old.abi.json new.abi.json \
 # One-shot CI convenience.
 abicheck compare old.so new.so \
   --headers include/ \
-  --collect-evidence auto \
+  --evidence-mode build \
   --build-dir build/
 ```
+
+`--evidence-mode` is the **single** compare-side knob for inline evidence
+collection; its values are the CI modes defined in ADR-033 D2
+(`off | build | source-changed | source-target | graph-summary | graph-full`).
+The standalone `collect-evidence` command is the only other entry point —
+no additional `--collect-evidence` style flags are introduced.
 
 `collect-evidence` must never run arbitrary build commands by default. It
 may inspect existing build outputs, generated metadata, and build-system

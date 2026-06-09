@@ -119,6 +119,15 @@ This allows third-party integrations without importing untrusted Python
 into the abicheck process: the boundary is a subprocess with declared
 inputs, outputs, and allowed actions.
 
+Manifests are trusted-by-operator, never auto-discovered. abicheck does
+not scan `PATH`, the working tree, or any plugin directory for manifests;
+an external extractor runs only when the operator registers it explicitly
+— via a config entry (e.g. `extractors:` in the project config) or a
+per-run `--extractor-manifest <path>` flag. A manifest's declared
+`allowed_actions` are a ceiling, not a grant: at run time they are
+intersected with the actions permitted for the run (D5), so a manifest
+cannot escalate beyond what the operator enabled.
+
 ### D4. Capability model
 
 ```json

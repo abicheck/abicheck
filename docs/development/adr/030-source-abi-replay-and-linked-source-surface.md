@@ -223,7 +223,9 @@ artifact-proven `BREAKING` ABI changes.
 | `full` | Replay all compile units in the build evidence | Nightly/deep mode |
 
 The MVP implements `headers-only` and `changed`; `target` and `full`
-follow.
+follow. These scopes are an internal knob: the user-facing CI evidence
+modes (ADR-033 D2) select a scope automatically, per the mapping table
+there.
 
 ### D8. Cache per-TU source ABI dumps
 
