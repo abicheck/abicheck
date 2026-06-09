@@ -170,15 +170,20 @@ high-level project model. Use Ninja's own tools:
 
 ```bash
 ninja -C build -t compdb cxx cc > compile_commands.json
-ninja -C build -t compdb-targets libfoo.so > libfoo.compile_commands.json
+ninja -C build -t compdb-targets libfoo.so > libfoo.compile_commands.json  # Ninja >= 1.12
 ninja -C build -t graph libfoo.so > libfoo.graph.dot
 ninja -C build -t commands libfoo.so > libfoo.commands.txt
 ninja -C build -t missingdeps libfoo.so > libfoo.missingdeps.txt
 ```
 
+`-t compdb-targets` (target-scoped compilation database) requires
+Ninja ≥ 1.12. The adapter must probe `ninja -t list` and, on older Ninja,
+fall back to whole-project `-t compdb` filtered to the target's inputs
+(`ninja -t inputs libfoo.so`), recording the fallback in `diagnostics`.
+
 Normalization:
 
-- `compdb` / `compdb-targets` → `compile_units`;
+- `compdb` / `compdb-targets` (or the filtered fallback) → `compile_units`;
 - `graph` → approximate target/file dependency graph;
 - `commands` → fallback link/compile command provenance;
 - `missingdeps` → `diagnostics` feeding the
@@ -286,10 +291,17 @@ ADR-011 and the CLAUDE.md ChangeKind rules):
 | `header_parse_context_drift` | `RISK_KINDS` | Header AST was parsed under a different context than the real build |
 | `toolchain_version_changed` | `RISK_KINDS` | Compiler/stdlib/sysroot changed |
 | `generated_file_dependency_unstable` | `RISK_KINDS` | Build graph indicates generated-file dependency risk |
-| `link_export_policy_changed` | `API_BREAK_KINDS` (escalates to a `BREAKING_KINDS` finding only with artifact evidence) | Version script/export map/`.def` file changed the exported surface |
+| `link_export_policy_changed` | `RISK_KINDS` | Version script/export map/`.def` file changed |
 
 These map into the existing five-tier verdict (ADR-009) with
-worst-verdict-wins; no new verdict values and no exit-code changes.
+worst-verdict-wins; no new verdict values and no exit-code changes. Each
+kind lives in exactly one partition set — the import-time assertion in
+`checker_policy.py` forbids overlap. In particular,
+`link_export_policy_changed` does **not** escalate itself: when an export
+policy change actually removes or alters exported symbols, the artifact
+diff (L0) emits the existing `BREAKING_KINDS` findings (e.g.
+`func_removed`) as separate, artifact-backed results, and this kind serves
+to explain and localize them.
 
 ### D10. No instrumented rebuild required for the MVP
 
