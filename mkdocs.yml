@@ -152,6 +152,12 @@ nav:
       - "025: PR-Diff Source Evaluation": development/adr/025-pr-diff-source-evaluation.md
       - "026: Source-Only Evidence Boundary": development/adr/026-source-only-undetectable-changes.md
       - "027: API Surface Intelligence": development/adr/027-api-surface-intelligence.md
+      - "028: Source & Build Evidence Pack": development/adr/028-source-build-evidence-pack.md
+      - "029: Build Graph & Toolchain Context": development/adr/029-build-graph-toolchain-context-capture.md
+      - "030: Source ABI Replay": development/adr/030-source-abi-replay-and-linked-source-surface.md
+      - "031: Source Graph Augmentation": development/adr/031-source-implementation-graph-augmentation.md
+      - "032: Evidence Extractor Plugins": development/adr/032-evidence-extractor-plugin-interface.md
+      - "033: Evidence CI Rollout": development/adr/033-ci-rollout-performance-and-validation.md
       - Gap Analysis: development/adr/adr-gap-analysis.md
 
 plugins:
