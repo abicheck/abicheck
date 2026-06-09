@@ -208,6 +208,12 @@ bazel aquery 'deps(//foo:libfoo)' --output=jsonproto > bazel.aquery.json
 bazel build //foo:libfoo --aspects=@abicheck//:abi_evidence.bzl%abi_evidence_aspect
 ```
 
+`--output=jsonproto` is an accepted cquery value (alongside `proto`,
+`streamed_proto`, and `textproto`) even though the cquery prose docs only
+describe `proto`; the flag reference is authoritative. The adapter must
+accept both the JSON and binary proto forms, since older Bazel releases or
+project tooling may produce either.
+
 Collected Bazel facts:
 
 | Bazel source | abicheck use |
