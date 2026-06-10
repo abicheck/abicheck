@@ -28,6 +28,7 @@ context→argv builder is pure and unit-testable; only :meth:`extract` shells ou
 
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
 import tempfile
@@ -47,6 +48,18 @@ CASTXML_EXTRACTOR_VERSION = "0.1"
 _CXX_LANGS = frozenset({"cxx", "c++", "cpp"})
 #: Compiler basenames that mean castxml should run in MSVC mode.
 _MSVC_BINARIES = frozenset({"cl", "cl.exe", "clang-cl", "clang-cl.exe"})
+
+
+def _basename(path: str) -> str:
+    """Final path component, splitting on both ``/`` and ``\\``.
+
+    ``Path(path).name`` on a POSIX host does not treat ``\\`` as a separator, so
+    a Windows compiler path from a cross/off-Windows compile database
+    (``C:\\VS\\bin\\cl.exe``) would otherwise return the whole string and miss
+    MSVC-mode detection. Splitting on both separators makes the basename
+    host-independent.
+    """
+    return re.split(r"[\\/]", path)[-1]
 
 
 def _compiler_binary(compile_unit: CompileUnit, override: str | None) -> str:
@@ -143,7 +156,7 @@ def build_castxml_command(
     headers the compiler actually saw under the flags it actually used.
     """
     cc_bin = _compiler_binary(compile_unit, compiler_binary)
-    cc_id = "msvc" if Path(cc_bin).name.lower() in _MSVC_BINARIES else "gnu"
+    cc_id = "msvc" if _basename(cc_bin).lower() in _MSVC_BINARIES else "gnu"
 
     cmd = [castxml_bin, "--castxml-output=1", f"--castxml-cc-{cc_id}", cc_bin]
     cmd += _std_flag(compile_unit.standard, cc_id)
@@ -291,15 +304,25 @@ class CastxmlSourceExtractor:
         ]
         for decl in decls:
             tag_provenance(decl, header_segs, dir_segs, have_set)
-            # classify_origin checks the public set before the generated
-            # heuristic, so a header that is both public and generated lands as
-            # PUBLIC_HEADER. Re-mark it GENERATED (still public) so a generated
-            # public type change is reported as generated_header_changed (D6),
-            # not silently merged into the plain public surface.
             if decl.origin == ScopeOrigin.PUBLIC_HEADER and is_generated_header(
                 decl.source_header
             ):
+                # classify_origin checks the public set before the generated
+                # heuristic, so a header that is both public and generated lands
+                # as PUBLIC_HEADER. Re-mark it GENERATED (still public) so a
+                # generated public type change is reported as
+                # generated_header_changed (D6), not silently merged into the
+                # plain public surface.
                 decl.origin = ScopeOrigin.GENERATED
+            elif decl.origin == ScopeOrigin.GENERATED:
+                # classify_origin only returns GENERATED for a generated-looking
+                # header that did *not* match the public set — i.e. a private
+                # generated header (build/generated/internal_config.h). The L4
+                # schema treats GENERATED as a public-surface origin, so demote
+                # it to PRIVATE_HEADER here to keep private generated decls/types
+                # off the linked public surface (no false generated_header_changed
+                # / ODR / mapping findings for internal headers).
+                decl.origin = ScopeOrigin.PRIVATE_HEADER
 
         return assemble_source_tu(
             compile_unit,
