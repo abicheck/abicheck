@@ -16,7 +16,7 @@
 
 Collects an optional EvidencePack from an existing build tree *without
 rebuilding*. The pack augments an ABI snapshot with L3 build-context evidence
-(compile DB / CMake File API / Ninja). Per ADR-028 D6 this command never runs
+(compile DB / CMake File API / Ninja / Bazel). Per ADR-028 D6 this command never runs
 arbitrary build commands: it only reads existing build outputs and build-system
 query interfaces. Anything that builds or executes project code is a separate,
 explicit opt-in not implemented here.
@@ -64,6 +64,10 @@ if TYPE_CHECKING:
               help="Collect Ninja compile/graph facts from --build-dir via `ninja -t` queries.")
 @click.option("--ninja-compdb", "ninja_compdb", type=click.Path(path_type=Path), default=None,
               help="Pre-captured `ninja -t compdb` output (for hermetic CI / no live ninja).")
+@click.option("--bazel-cquery", "bazel_cquery", type=click.Path(path_type=Path), default=None,
+              help="Pre-captured `bazel cquery --output=jsonproto` output (configured target graph).")
+@click.option("--bazel-aquery", "bazel_aquery", type=click.Path(path_type=Path), default=None,
+              help="Pre-captured `bazel aquery --output=jsonproto` output (compile/link action graph).")
 @click.option("--build-system", "build_system", default="generic", show_default=True,
               type=click.Choice(["generic", "cmake", "ninja", "bazel", "make"], case_sensitive=False),
               help="Build system hint for the compile-DB adapter.")
@@ -79,6 +83,8 @@ def collect_evidence_cmd(
     cmake: bool,
     ninja: bool,
     ninja_compdb: Path | None,
+    bazel_cquery: Path | None,
+    bazel_aquery: Path | None,
     build_system: str,
     output: Path,
     verbose: bool,
@@ -104,6 +110,8 @@ def collect_evidence_cmd(
         cmake=cmake,
         ninja=ninja,
         ninja_compdb=ninja_compdb,
+        bazel_cquery=bazel_cquery,
+        bazel_aquery=bazel_aquery,
         build_system=build_system,
         verbose=verbose,
     )
@@ -150,12 +158,15 @@ def _run_adapters(
     cmake: bool,
     ninja: bool,
     ninja_compdb: Path | None,
+    bazel_cquery: Path | None,
+    bazel_aquery: Path | None,
     build_system: str,
     verbose: bool,
 ) -> None:
     """Run the requested build-evidence adapters and fold them into *merged*."""
     # Import adapters lazily so `collect-evidence --help` stays cheap.
     from .evidence.adapters import (
+        BazelAdapter,
         CMakeFileApiAdapter,
         CompileDbAdapter,
         NinjaAdapter,
@@ -199,6 +210,19 @@ def _run_adapters(
             name="ninja", status="ok" if ev.compile_units else "partial",
             inputs=[DEFAULT_REDACTION.path(str(build_dir or ninja_compdb))],
             detail=f"{len(ev.compile_units)} compile units",
+        ))
+
+    if bazel_cquery is not None or bazel_aquery is not None:
+        ev = BazelAdapter(cquery=bazel_cquery, aquery=bazel_aquery).collect()
+        merged.merge(ev)
+        inputs = [DEFAULT_REDACTION.path(str(p)) for p in (bazel_cquery, bazel_aquery) if p is not None]
+        extractors.append(ExtractorRecord(
+            name="bazel", status="ok" if (ev.targets or ev.compile_units) else "partial",
+            inputs=inputs,
+            detail=(
+                f"{len(ev.targets)} targets, {len(ev.compile_units)} compile units, "
+                f"{len(ev.link_units)} link units"
+            ),
         ))
 
 

@@ -2,8 +2,8 @@
 
 **Date:** 2026-06-09
 **Status:** Accepted — MVP implemented (BuildEvidence model; compile DB,
-CMake File API, and Ninja adapters; build-evidence diff and the six D9
-change kinds)
+CMake File API, Ninja, and Bazel `cquery`/`aquery` adapters; build-evidence
+diff and the six D9 change kinds)
 **Decision maker:** Nikolay Petrov
 
 ---

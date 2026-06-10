@@ -67,6 +67,9 @@ abicheck compare old.abi.json new.abi.json \
   graph, public/private header file sets, toolchains).
 - `--build-dir DIR --ninja` / `--ninja-compdb FILE` — Ninja `-t compdb`/`graph`
   output (live query or pre-captured for hermetic CI).
+- `--bazel-cquery FILE` / `--bazel-aquery FILE` — pre-captured
+  `bazel cquery --output=jsonproto` (configured target graph) and
+  `bazel aquery --output=jsonproto` (compile/link action graph).
 
 ## Build-evidence findings (L3)
 
