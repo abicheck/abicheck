@@ -262,6 +262,30 @@ def test_cache_roundtrip_and_miss(tmp_path: Path) -> None:
     cache.put(None, tu)  # no-op, must not raise
 
 
+def test_cache_invalidates_when_included_header_changes(tmp_path: Path) -> None:
+    # Codex #339 P1: a TU that included a private header (not a configured root)
+    # must miss the cache once that header changes, or stale inline/default/
+    # constexpr facts are linked and a real source ABI change is silently lost.
+    hdr = tmp_path / "detail" / "config.h"
+    hdr.parent.mkdir()
+    hdr.write_text("#define N 1\n")
+    cache = SourceAbiCache(tmp_path / "cache")
+    tu = SourceAbiTu(tu_id="cu://x", read_files=[str(hdr)])
+    cache.put("k1", tu)
+    assert cache.get("k1") is not None  # unchanged dependency → hit
+    hdr.write_text("#define N 2\n")  # edit the transitively included header
+    assert cache.get("k1") is None  # changed dependency → miss (re-extract)
+
+
+def test_cache_invalidates_when_dependency_deleted(tmp_path: Path) -> None:
+    hdr = tmp_path / "h.h"
+    hdr.write_text("x\n")
+    cache = SourceAbiCache(tmp_path / "cache")
+    cache.put("k1", SourceAbiTu(tu_id="cu://x", read_files=[str(hdr)]))
+    hdr.unlink()  # a vanished dependency must miss, not hit (prefer false miss)
+    assert cache.get("k1") is None
+
+
 # -- driver ------------------------------------------------------------------
 
 

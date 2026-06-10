@@ -217,6 +217,23 @@ def _node_line(node: dict[str, Any]) -> int:
     return 0
 
 
+#: Single-child wrapper expression nodes to descend through before deciding
+#: whether an initializer is a lone literal — so `42` reads as the literal "42"
+#: while a compound expression is fingerprinted whole.
+_WRAPPER_EXPR_KINDS = frozenset(
+    {
+        "ImplicitCastExpr",
+        "CStyleCastExpr",
+        "CXXStaticCastExpr",
+        "ConstantExpr",
+        "ExprWithCleanups",
+        "ParenExpr",
+        "CXXFunctionalCastExpr",
+        "MaterializeTemporaryExpr",
+    }
+)
+
+
 def _has_body(node: dict[str, Any]) -> bool:
     return any(
         isinstance(c, dict) and c.get("kind") == "CompoundStmt"
@@ -224,45 +241,68 @@ def _has_body(node: dict[str, Any]) -> bool:
     )
 
 
-def _literal_value(node: dict[str, Any]) -> str | None:
-    """First literal value found anywhere under ``node`` (the constexpr value)."""
-    if node.get("kind") in _LITERAL_NODE_KINDS and "value" in node:
-        return str(node["value"])
-    for child in node.get("inner", []):
-        if isinstance(child, dict):
-            found = _literal_value(child)
-            if found is not None:
-                return found
-    return None
+def _unwrap_expr(node: dict[str, Any]) -> dict[str, Any]:
+    """Descend through single-child wrapper expressions (casts, ConstantExpr…)."""
+    cur = node
+    while isinstance(cur, dict) and cur.get("kind") in _WRAPPER_EXPR_KINDS:
+        inner = [c for c in cur.get("inner", []) if isinstance(c, dict)]
+        if len(inner) != 1:
+            break
+        cur = inner[0]
+    return cur
+
+
+def _init_expr(node: dict[str, Any]) -> dict[str, Any] | None:
+    """The initializer expression child of a Var/Parm decl, or ``None``.
+
+    A decl's ``inner`` holds attributes/nested decls plus, last, the initializer
+    expression; pick the last child that is not itself a decl/attribute/comment.
+    """
+    candidates = [
+        c
+        for c in node.get("inner", [])
+        if isinstance(c, dict)
+        and not str(c.get("kind", "")).endswith(("Decl", "Attr", "Comment"))
+    ]
+    return candidates[-1] if candidates else None
+
+
+def _expr_value(node: dict[str, Any]) -> str:
+    """A value string that changes iff the whole initializer expression changes.
+
+    A lone literal (after stripping wrapper casts) keeps its human-readable value
+    (``42``); any compound expression (``1 + 2``, a call, a braced-init) is
+    fingerprinted as a whole, so ``1 + 2`` and ``1 + 3`` are distinguished. The
+    earlier "first literal under the AST" heuristic collapsed them and missed the
+    change (Codex review #339, P2).
+    """
+    core = _unwrap_expr(node)
+    if (
+        isinstance(core, dict)
+        and core.get("kind") in _LITERAL_NODE_KINDS
+        and "value" in core
+    ):
+        return str(core["value"])
+    return _subtree_hash(node)
 
 
 def _default_arg_repr(node: dict[str, Any]) -> str:
     """Normalized default-argument string for a function's parameters.
 
-    A ``ParmVarDecl`` with a default argument carries a ``CXXDefaultArgExpr``-free
-    initializer in its ``inner``; we represent each defaulted parameter as
-    ``name=<value-or-fingerprint>`` so both presence and value changes surface.
+    Each defaulted parameter is rendered ``name=<value-or-fingerprint>`` so both
+    presence and value changes surface. The value covers the *whole* default
+    expression (not just its first literal), so ``x = 1 + 2`` → ``x = 1 + 3`` is
+    detected (Codex review #339, P2).
     """
     parts: list[str] = []
     for child in node.get("inner", []):
         if not isinstance(child, dict) or child.get("kind") != "ParmVarDecl":
             continue
-        init = [
-            g
-            for g in child.get("inner", [])
-            if isinstance(g, dict) and g.get("kind") != "ParmVarDecl"
-        ]
-        if not child.get("init") and not init:
+        init = _init_expr(child)
+        if not child.get("init") and init is None:
             continue
         pname = child.get("name", "")
-        value = None
-        for expr in init:
-            value = _literal_value(expr)
-            if value is not None:
-                break
-        rep = value if value is not None else (
-            _subtree_hash(init[0]) if init else "default"
-        )
+        rep = _expr_value(init) if init is not None else "default"
         parts.append(f"{pname}={rep}")
     return ",".join(parts)
 
@@ -351,7 +391,34 @@ def source_abi_from_clang_ast(
         diagnostics=list(diagnostics or []),
     )
     _walk(ast_root, ctx, tu, scope=[], current_file="")
+    # Record every file that contributed a node, so the per-TU cache (D8)
+    # invalidates on an edit to any transitively included header — not just the
+    # configured public roots (Codex review #339, P1).
+    tu.read_files = sorted(_collect_files(ast_root))
     return tu
+
+
+def _collect_files(node: Any, files: set[str] | None = None) -> set[str]:
+    """Every distinct file path referenced anywhere in the clang AST.
+
+    clang's ``file`` field is sticky (omitted when unchanged from the prior node
+    in source order), so each file it parsed is named at least once at its first
+    contributing node; the set of explicit mentions is the read-file set.
+    """
+    if files is None:
+        files = set()
+    if isinstance(node, dict):
+        loc = node.get("loc")
+        if isinstance(loc, dict):
+            for key in ("file", "expansionLoc", "spellingLoc", "includedFrom"):
+                val = loc.get(key)
+                if isinstance(val, str) and val:
+                    files.add(val)
+                elif isinstance(val, dict) and isinstance(val.get("file"), str):
+                    files.add(val["file"])
+        for child in node.get("inner", []):
+            _collect_files(child, files)
+    return files
 
 
 def _walk(
@@ -485,9 +552,8 @@ def _emit_constexpr(
     if not public:
         return
     name = _qualified(scope, str(node.get("name", "")))
-    value = _literal_value(node)
-    if value is None:
-        value = _subtree_hash(node)
+    init = _init_expr(node)
+    value = _expr_value(init) if init is not None else _subtree_hash(node)
     tu.constexpr_values.append(
         SourceEntity(
             id=_hash("constexpr", name, value),

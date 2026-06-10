@@ -226,6 +226,85 @@ def test_ast_constexpr_change_detected_end_to_end() -> None:
     assert by_kind["constexpr_value_changed"].old_value == "42"
 
 
+def test_ast_records_read_files_for_cache_deps() -> None:
+    # Codex #339 P1: the TU records every file it read so the per-TU cache can
+    # invalidate on a transitive-include edit. Both the public and private
+    # headers that contributed nodes appear.
+    tu = source_abi_from_clang_ast(_ast(), _cu(), ["include/foo.h"], "t")
+    assert "include/foo.h" in tu.read_files
+    assert "src/internal.h" in tu.read_files
+
+
+def _constexpr_ast(rhs_literal: str) -> dict:
+    """A constexpr `N = 1 + <rhs>` (a compound expression, not a lone literal)."""
+    return {
+        "kind": "TranslationUnitDecl",
+        "inner": [
+            {
+                "kind": "VarDecl", "name": "N", "loc": {"file": "include/foo.h"},
+                "constexpr": True, "type": {"qualType": "const int"},
+                "inner": [
+                    {
+                        "kind": "ConstantExpr", "value": "x",
+                        "inner": [
+                            {
+                                "kind": "BinaryOperator", "opcode": "+",
+                                "inner": [
+                                    {"kind": "IntegerLiteral", "value": "1"},
+                                    {"kind": "IntegerLiteral", "value": rhs_literal},
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            }
+        ],
+    }
+
+
+def test_constexpr_compound_expression_change_is_detected() -> None:
+    # Codex #339 P2: `1 + 2` and `1 + 3` must not collapse to the same "1".
+    old = source_abi_from_clang_ast(_constexpr_ast("2"), _cu(), ["include/foo.h"], "t")
+    new = source_abi_from_clang_ast(_constexpr_ast("3"), _cu(), ["include/foo.h"], "t")
+    assert old.constexpr_values[0].value != new.constexpr_values[0].value
+    kinds = {
+        c.kind.value
+        for c in diff_source_abi(link_source_abi([old]), link_source_abi([new]))
+    }
+    assert "constexpr_value_changed" in kinds
+
+
+def test_default_argument_compound_expression_change_is_detected() -> None:
+    def ast(rhs: str) -> dict:
+        return {
+            "kind": "TranslationUnitDecl",
+            "inner": [{
+                "kind": "FunctionDecl", "name": "f", "loc": {"file": "include/foo.h"},
+                "mangledName": "_Z1fi", "type": {"qualType": "void (int)"},
+                "inner": [{
+                    "kind": "ParmVarDecl", "name": "x", "type": {"qualType": "int"},
+                    "init": "c",
+                    "inner": [{
+                        "kind": "BinaryOperator", "opcode": "+",
+                        "inner": [
+                            {"kind": "IntegerLiteral", "value": "1"},
+                            {"kind": "IntegerLiteral", "value": rhs},
+                        ],
+                    }],
+                }],
+            }],
+        }
+
+    old = source_abi_from_clang_ast(ast("2"), _cu(), ["include/foo.h"], "t")
+    new = source_abi_from_clang_ast(ast("3"), _cu(), ["include/foo.h"], "t")
+    assert old.functions[0].value != new.functions[0].value
+    kinds = {
+        c.kind.value
+        for c in diff_source_abi(link_source_abi([old]), link_source_abi([new]))
+    }
+    assert "default_argument_changed" in kinds
+
+
 def test_forward_declaration_emits_no_type() -> None:
     ast = {
         "kind": "TranslationUnitDecl",

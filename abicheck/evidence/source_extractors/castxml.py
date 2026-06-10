@@ -282,7 +282,7 @@ class CastxmlSourceExtractor:
             if is_generated_header(header)
         }
 
-        return assemble_source_tu(
+        tu = assemble_source_tu(
             compile_unit,
             public_header_roots=public_header_roots,
             target_id=target_id,
@@ -304,3 +304,14 @@ class CastxmlSourceExtractor:
             # carry full type-change coverage with correct provenance.
             typedefs={},
         )
+        # Record every file castxml parsed (the GCC_XML <File> table) so the
+        # per-TU cache (ADR-030 D8) invalidates on an edit to any transitively
+        # included header, not just the configured public roots (Codex #339, P1).
+        tu.read_files = sorted(
+            {
+                name
+                for el in root.findall(".//File")
+                if (name := el.get("name"))
+            }
+        )
+        return tu

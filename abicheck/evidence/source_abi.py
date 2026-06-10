@@ -225,6 +225,11 @@ class SourceAbiTu:
     constexpr_values: list[SourceEntity] = field(default_factory=list)
     source_edges: list[dict[str, Any]] = field(default_factory=list)
     diagnostics: list[str] = field(default_factory=list)
+    #: Every file the extractor actually read for this TU — the source plus all
+    #: transitively included headers (public, private, generated, forced). The
+    #: per-TU cache (ADR-030 D8) hashes these so an edit to *any* included header
+    #: invalidates a stale dump, not just an edit to the configured public roots.
+    read_files: list[str] = field(default_factory=list)
 
     def all_entities(self) -> list[SourceEntity]:
         """Flatten every entity list, preserving the per-kind grouping order."""
@@ -261,6 +266,7 @@ class SourceAbiTu:
             "constexpr_values": [e.to_dict() for e in self.constexpr_values],
             "source_edges": list(self.source_edges),
             "diagnostics": list(self.diagnostics),
+            "read_files": list(self.read_files),
         }
 
     @classmethod
@@ -286,6 +292,7 @@ class SourceAbiTu:
             constexpr_values=_ents("constexpr_values"),
             source_edges=list(d.get("source_edges", [])),
             diagnostics=list(d.get("diagnostics", [])),
+            read_files=list(d.get("read_files", [])),
         )
 
 

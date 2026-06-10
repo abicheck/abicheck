@@ -282,9 +282,15 @@ def compute_tu_cache_key(
     Folds the extractor identity/version, the source-file content hash, each
     public-header-root content hash, the normalized compile-context hash, the
     public-header root set, language standard / target / sysroot, and the source
-    schema version — exactly the D8 inputs. Returns ``None`` when the source
-    content cannot be read, so the driver re-extracts rather than risk a false
-    cache hit on stale content (ADR-033 D5).
+    schema version. Returns ``None`` when the source content cannot be read, so
+    the driver re-extracts rather than risk a false cache hit on stale content
+    (ADR-033 D5).
+
+    This is the *preliminary* key: it cannot see a TU's transitively included
+    private/forced headers before parsing. :class:`SourceAbiCache` closes that gap
+    by additionally re-validating the content hashes of every file the extractor
+    recorded reading (``SourceAbiTu.read_files``), so the full D8 "transitive
+    included … header hashes" requirement is met across key + dependency check.
     """
     source = _resolve_source(compile_unit)
     if source is None:
@@ -315,9 +321,16 @@ def compute_tu_cache_key(
 class SourceAbiCache:
     """A content-addressed on-disk cache of per-TU :class:`SourceAbiTu` dumps (D8).
 
-    Keys come from :func:`compute_tu_cache_key`; values are the normalized dump
-    JSON. The cache is intentionally dumb — parsing is the expensive step, so a
-    plain keyed file store is enough, and linking is recomputed each run.
+    Keys come from :func:`compute_tu_cache_key` (source + roots + compile context).
+    Because that key cannot see a TU's *transitive* private/forced includes before
+    parsing, each entry also stores a **dependency map** — the content hash of
+    every file the extractor actually read (`SourceAbiTu.read_files`). On lookup
+    those hashes are re-validated, so an edit to any included header — not just a
+    configured public root — is a cache miss and forces re-extraction (Codex
+    review #339, P1; ADR-030 D8 "transitive included … header hashes"). A
+    missing/unreadable dependency also misses (prefer a false miss over a false
+    hit, ADR-033 D5). Parsing is the expensive step, so linking is still
+    recomputed each run rather than cached.
     """
 
     def __init__(self, cache_dir: Path | str) -> None:
@@ -333,22 +346,52 @@ class SourceAbiCache:
         if not path.is_file():
             return None
         try:
-            data = json.loads(path.read_text(encoding="utf-8"))
+            entry = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             # A corrupt/half-written cache entry is a miss, never a failure.
             return None
-        return SourceAbiTu.from_dict(data)
+        if not isinstance(entry, dict):
+            return None
+        # Re-validate every recorded dependency: a changed/missing included file
+        # invalidates the dump even though the preliminary key still matches.
+        for dep_path, dep_hash in (entry.get("deps") or {}).items():
+            if _dep_digest(dep_path) != dep_hash:
+                return None
+        tu_data = entry.get("tu")
+        if not isinstance(tu_data, dict):
+            return None
+        return SourceAbiTu.from_dict(tu_data)
 
     def put(self, key: str | None, tu: SourceAbiTu) -> None:
         if not key:
             return
+        deps: dict[str, str] = {}
+        for dep_path in tu.read_files:
+            digest = _dep_digest(dep_path)
+            if digest is not None:
+                deps[dep_path] = digest
+        entry = {"tu": tu.to_dict(), "deps": deps}
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         tmp = self._path(key).with_suffix(".json.tmp")
         tmp.write_text(
-            json.dumps(tu.to_dict(), indent=2, sort_keys=True) + "\n", encoding="utf-8"
+            json.dumps(entry, indent=2, sort_keys=True) + "\n", encoding="utf-8"
         )
         # Atomic publish so a concurrent reader never sees a partial file.
         tmp.replace(self._path(key))
+
+
+def _dep_digest(path: str) -> str | None:
+    """Content digest of a dependency file, or ``None`` if it cannot be read.
+
+    A ``None`` (missing/unreadable) dependency makes the entry miss on lookup —
+    preferring a false miss over a false hit (ADR-033 D5)."""
+    try:
+        fp = Path(os.path.expanduser(path)) if path else None
+        if fp is None or not fp.is_file():
+            return None
+        return _digest_file(fp)
+    except OSError:
+        return None
 
 
 # -- replay driver -----------------------------------------------------------
