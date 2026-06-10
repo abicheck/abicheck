@@ -109,6 +109,15 @@ def source_from_argv(argv: list[str]) -> str:
         if arg in SOURCE_OPERAND_FLAGS:
             i += 2  # skip the flag and the operand it consumes
             continue
+        # MSVC/clang-cl name the TU explicitly with /Tp<file> (C++) / /Tc<file>
+        # (C), or the space-separated `/Tp <file>` form. Return the bare path.
+        if arg in ("/Tp", "/Tc"):
+            if i + 1 < len(argv) and detect_language(argv[i + 1]):
+                return argv[i + 1]
+            i += 2
+            continue
+        if arg[:3] in ("/Tp", "/Tc") and detect_language(arg[3:]):
+            return arg[3:]
         if _is_source_token(arg):
             return arg
         i += 1

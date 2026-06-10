@@ -67,10 +67,23 @@ def test_make_msvc_slash_c_compile_marker():
     assert [c.source for c in ev.compile_units] == ["foo.cc"]
 
 
-def test_make_compound_recipe_with_cd():
-    ev = MakeAdapter(dry_run="cd sub && gcc -std=c17 -c sub/x.c -o sub/x.o").collect()
-    assert [c.source for c in ev.compile_units] == ["sub/x.c"]
-    assert ev.compile_units[0].standard == "c17"
+def test_make_cd_prefixed_recipe_resolves_in_subdir():
+    # `cd sub && …` makes the source and -I paths relative to sub/, not the parent.
+    ev = MakeAdapter(build_dir="/proj/build",
+                     dry_run="cd sub && gcc -Iinclude -std=c17 -c foo.c -o foo.o").collect()
+    cu = ev.compile_units[0]
+    assert cu.source == "foo.c"
+    assert cu.standard == "c17"
+    assert cu.directory.endswith("sub")                      # advanced into cd target
+    assert any(p.endswith("sub/include") for p in cu.include_paths)  # -I resolved there
+
+
+def test_make_msvc_tp_explicit_source():
+    # MSVC/clang-cl name the TU via /Tp<file> (C++) / /Tc<file> (C).
+    ev = MakeAdapter(dry_run="cl.exe /c /TpSrc/foo.cc /Fofoo.obj").collect()
+    assert [c.source for c in ev.compile_units] == ["Src/foo.cc"]
+    ev2 = MakeAdapter(dry_run="cl.exe /c /Tcfoo.c").collect()
+    assert [c.source for c in ev2.compile_units] == ["foo.c"]
 
 
 def test_make_no_compile_lines_yields_no_units():

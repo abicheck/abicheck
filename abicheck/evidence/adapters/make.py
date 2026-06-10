@@ -116,6 +116,9 @@ class MakeAdapter:
 
     def _compile_unit(self, line: str, directory: Path) -> CompileUnit | None:
         argv = _split_recipe(line)
+        # Recursive recipes prefix the compile with `cd sub && …`; the source and
+        # `-I` paths are then relative to `sub/`, not the parent build dir.
+        argv, directory = _consume_cd_prefix(argv, directory)
         # A translation-unit compile is a `-c` (GNU) / `/c` (MSVC, clang-cl)
         # invocation that names a source; link/info/`Entering directory` lines
         # lack one of those and are skipped.
@@ -142,6 +145,19 @@ class MakeAdapter:
             target_triple=ctx.target_triple or "",
             abi_relevant_flags=[self.redaction.arg(f) for f in extract_abi_relevant_flags(argv)],
         )
+
+
+def _consume_cd_prefix(argv: list[str], directory: Path) -> tuple[list[str], Path]:
+    """Strip leading ``cd <dir> &&|;`` segments, advancing *directory* into them.
+
+    Handles chained forms like ``cd a && cd b && cc …``. An absolute ``cd``
+    target resets the directory; a relative one is joined onto it.
+    """
+    while len(argv) >= 3 and argv[0] == "cd" and argv[2] in ("&&", ";"):
+        sub = Path(argv[1])
+        directory = sub if sub.is_absolute() else directory / sub
+        argv = argv[3:]
+    return argv, directory
 
 
 def _split_recipe(line: str) -> list[str]:
