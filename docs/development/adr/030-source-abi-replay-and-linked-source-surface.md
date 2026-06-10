@@ -1,7 +1,7 @@
 # ADR-030: Source ABI Replay and Linked Source Surface
 
 **Date:** 2026-06-09
-**Status:** Proposed
+**Status:** Accepted — partially implemented (phases 1, 3, 4)
 **Decision maker:** Nikolay Petrov
 
 ---
@@ -314,6 +314,27 @@ compatibility risk, and feeds the evidence coverage report (ADR-028 D7).
 | 5 | Clang LibTooling source dumper prototype | Inline/template/constexpr/body fingerprints |
 | 6 | Optional Android header checker adapter | External tool reuse, raw artifact preservation |
 | 7 | PR changed-mode and cache optimization | CI-ready source replay |
+
+### Implementation status
+
+Phases 1, 3, and 4 are implemented (the pure-Python, extractor-independent
+core), all in `abicheck/evidence/`:
+
+- **Phase 1** — `source_abi.py`: the `SourceAbiTu` (D4) and `SourceAbiSurface`
+  (D5) normalized schemas with `to_dict`/`from_dict` round-trips and the
+  `L4_SOURCE_ABI` evidence-boundary label (D10); `pack.py` reads/writes
+  `source/source_abi.json` and folds it into the content hash.
+- **Phase 3** — `source_link.py` (`link_source_abi`): merges per-TU dumps into a
+  per-library surface, mapping public source declarations to exported binary
+  symbols and detecting ODR conflicts (D5).
+- **Phase 4** — `source_diff.py` (`diff_source_abi`): the nine D6 `ChangeKind`s,
+  partitioned `API_BREAK`/`RISK` per ADR-028 D3 (never `BREAKING`), registered
+  in `change_registry.py`.
+
+Remaining: the per-TU extractors that populate `SourceAbiTu` — castxml replay
+(phase 2), the Clang LibTooling dumper (phase 5), the Android adapter (phase 6),
+and PR changed-mode/caching (phase 7). These require external tools and land as
+integration-marked follow-ups.
 
 ---
 

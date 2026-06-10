@@ -22,6 +22,9 @@ L3/L4/L5 are ordinary `ChangeKind` entries that default to `API_BREAK_KINDS`
 | `pack.py` | `EvidencePack` — on-disk layout, content addressing, write/load, `to_ref()` | 028 D1/D4 |
 | `build_evidence.py` | `BuildEvidence` normalized model: `Target`, `CompileUnit`, `LinkUnit`, `Toolchain`, `Generator`, `BuildOption` | 029 D1/D2 |
 | `build_diff.py` | `diff_build_evidence()` → build-flag/toolchain drift findings | 029 D9 |
+| `source_abi.py` | `SourceAbiTu` (per-TU dump) + `SourceAbiSurface` (linked `source_abi.json`) schemas, `SourceEntity`/`SourceLocation`, `L4_SOURCE_ABI` boundary | 030 D4/D5/D10 |
+| `source_link.py` | `link_source_abi()` — fold per-TU dumps into a per-library surface; map decls→exported symbols; ODR detection | 030 D5 |
+| `source_diff.py` | `diff_source_abi()` → the 9 source-replay findings (macros/default-args/inline/template/constexpr/…); never BREAKING | 030 D6 |
 | `redaction.py` | `RedactionPolicy` — strip secrets/abs paths from command lines | 032 D7 |
 | `adapters/compile_db.py` | `compile_commands.json` → `CompileUnit`s (reuses `build_context.py`) | 029 D3 |
 | `adapters/cmake_file_api.py` | CMake File API reply → targets/toolchains/fileSets | 029 D4 |
@@ -32,9 +35,10 @@ L3/L4/L5 are ordinary `ChangeKind` entries that default to `API_BREAK_KINDS`
 
 ## Versioning
 
-Three *independent* schema versions — do not conflate:
+Four *independent* schema versions — do not conflate:
 - `EVIDENCE_PACK_VERSION` (`model.py`) — pack manifest/layout.
 - `BUILD_EVIDENCE_VERSION` (`build_evidence.py`) — L3 normalized model.
+- `SOURCE_ABI_VERSION` (`source_abi.py`) — L4 `SourceAbiTu`/`SourceAbiSurface`.
 - `serialization.SCHEMA_VERSION` — the `AbiSnapshot`, which only stores an
   `EvidencePackRef` (so old snapshot readers ignore it; ADR-015).
 

@@ -52,9 +52,19 @@ from .model import (
     LayerCoverage,
 )
 from .pack import EvidencePack
+from .source_abi import (
+    SOURCE_ABI_VERSION,
+    SourceAbiSurface,
+    SourceAbiTu,
+    SourceEntity,
+    SourceLocation,
+)
+from .source_diff import diff_source_abi
+from .source_link import link_source_abi
 
 __all__ = [
     "EVIDENCE_PACK_VERSION",
+    "SOURCE_ABI_VERSION",
     "BuildEvidence",
     "BuildOption",
     "CompileUnit",
@@ -68,6 +78,12 @@ __all__ = [
     "Generator",
     "LayerCoverage",
     "LinkUnit",
+    "SourceAbiSurface",
+    "SourceAbiTu",
+    "SourceEntity",
+    "SourceLocation",
     "Target",
     "Toolchain",
+    "diff_source_abi",
+    "link_source_abi",
 ]

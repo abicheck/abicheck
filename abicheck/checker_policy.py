@@ -509,6 +509,23 @@ class ChangeKind(str, Enum):
     GENERATED_FILE_DEPENDENCY_UNSTABLE = "generated_file_dependency_unstable"  # generated-file dependency risk → RISK
     LINK_EXPORT_POLICY_CHANGED = "link_export_policy_changed"  # version script / export map / .def changed → RISK
 
+    # ── Source ABI replay evidence (ADR-028 L4 / ADR-030 D6) ────────────────
+    # Emitted only by the source-replay diff over two linked source ABI
+    # surfaces (source/source_abi.json). These cover source/API facts weakly or
+    # not represented in final artifacts: macro constants, default arguments,
+    # inline/template bodies, constexpr values, uninstantiated templates. Per
+    # ADR-028 D3 / ADR-030 D6 they are source/API findings, never sole authority
+    # for a shipped-ABI BREAKING verdict — they default to API_BREAK or RISK.
+    PUBLIC_MACRO_VALUE_CHANGED = "public_macro_value_changed"  # public macro constant changed → API_BREAK
+    DEFAULT_ARGUMENT_CHANGED = "default_argument_changed"  # default argument value changed → API_BREAK
+    INLINE_BODY_CHANGED = "inline_body_changed"  # public inline body changed, no symbol change → RISK
+    CONSTEXPR_VALUE_CHANGED = "constexpr_value_changed"  # public constexpr value changed → API_BREAK
+    TEMPLATE_BODY_CHANGED = "template_body_changed"  # uninstantiated template body changed → RISK
+    UNINSTANTIATED_TEMPLATE_REMOVED = "uninstantiated_template_removed"  # public template removed → API_BREAK
+    SOURCE_DECL_BINARY_SYMBOL_MISMATCH = "source_decl_binary_symbol_mismatch"  # decl no longer maps to a symbol → RISK
+    ODR_SOURCE_CONFLICT = "odr_source_conflict"  # same type name differs across TUs → RISK
+    GENERATED_HEADER_CHANGED = "generated_header_changed"  # generated public header changed → RISK
+
 
 class HasKind(Protocol):
     kind: ChangeKind
