@@ -662,7 +662,7 @@ _maybe_post_pr_comment() {
     --detail "${INPUT_PR_COMMENT_DETAIL:-standard}" \
     --on "${INPUT_PR_COMMENT_ON:-changes}" \
     --run-label "run #${GITHUB_RUN_NUMBER:-?}" \
-    "${PR_GATE_ARGS[@]}" \
+    ${PR_GATE_ARGS[@]+"${PR_GATE_ARGS[@]}"} \
     -o "$PR_BODY" || true
 
   if [[ ! -s "$PR_BODY" ]]; then
