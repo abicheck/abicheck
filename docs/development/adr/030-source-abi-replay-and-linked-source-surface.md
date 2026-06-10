@@ -371,6 +371,47 @@ The compare output prints an explicit **capability report** — which check
 categories are enabled and, for each disabled one, why (no binary / no debug
 info / no headers / no build data / no sources-or-clang).
 
+### Known limitations / follow-ups
+
+The phases above are implemented and wired, but the following are deliberately
+deferred and should be handled in later work. None of them weaken the authority
+rule (L4 never gates a shipped-ABI `BREAKING` verdict on its own, ADR-028 D3);
+they are coverage/precision gaps, not correctness holes.
+
+1. **Validation corpus not yet committed.** The "Validation" section below calls
+   for an `examples/case*` fixture corpus (public macro / default-argument /
+   inline / template / constexpr changes, extending the ADR-026 `case122`
+   calibration fixture), an L4-vs-L2 declaration/type-shape agreement check, an
+   L4-vs-L0 exported-symbol cross-check, and performance tests for the `changed`
+   and `target` scopes. The behaviours are covered by unit + integration tests,
+   but the ground-truth example cases and perf benchmarks are still to be added.
+2. **Macros are clang-only.** `public_macro_value_changed` is produced only by
+   the clang backend's `-E -dD` preprocessor pass. The castxml and Android
+   backends do not extract macros, so a macros-only run on those backends has no
+   macro coverage. Include-guard macros (`#ifndef FOO_H`) also surface as
+   (harmless, empty-valued) macro entities — a small-noise source a future filter
+   could suppress.
+3. **Typedef / alias entities are not modeled by clang.** The clang backend emits
+   `record`/`enum` types but not `TypedefDecl`/`TypeAliasDecl`; castxml omits
+   typedefs entirely (no per-entry provenance, see `castxml.py`). A public
+   typedef whose underlying type changes is therefore not surfaced as an L4
+   finding. Add provenance-aware typedef extraction (clang is the natural home).
+4. **Scope selection is approximate without a full include graph.** `headers-only`
+   picks one representative compile unit per target rather than the minimal set
+   that covers every public header, and `changed` maps a changed header to TUs
+   via target ownership (falling back to all TUs when there is no target/header
+   metadata, ADR-025 D3). A precise mapping needs a per-TU include graph
+   (depfiles or the L5 graph layer, ADR-031).
+5. **Inline auto-collection during `compare --evidence-mode` is still a stub.**
+   `compare` consumes pre-built packs via `--old/--new-evidence`; it does not yet
+   run `collect-evidence` inline for a requested evidence mode. That inline
+   collection is **ADR-033 D2** scope, tracked there, not in this ADR.
+6. **clang AST replay is a structural fingerprinter, not a full semantic ABI
+   model.** Bodies/values are hashed from a build-root-stable canonical form of
+   the clang JSON AST; this reliably detects *changes* but does not produce a
+   semantic ABI diff of the body itself. The Clang LibTooling backend in the D3
+   table remains the longer-term path for richer source-location/AST fidelity.
+
 ---
 
 ## Validation
