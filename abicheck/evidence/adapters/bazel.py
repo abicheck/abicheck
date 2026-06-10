@@ -140,6 +140,10 @@ class BazelAdapter:
             ev.diagnostics.append(f"bazel: executable not found on PATH; cannot run {kind}")
             return None
         cmd = [bazel, kind, f"deps({self.target})", "--output=jsonproto"]
+        if kind == "aquery":
+            # Without this, large C++ actions keep their argv in @...params files
+            # and the source/ABI flags never reach the jsonproto (ADR-029 D6).
+            cmd.append("--include_param_files")
         try:
             # An analysis query of an existing workspace (ADR-028 D6 / D10) —
             # never a build action.
@@ -218,7 +222,7 @@ class BazelAdapter:
                     ev.link_units.append(lu)
 
     def _compile_unit(self, action: dict[str, object], graph: _AqueryGraph) -> CompileUnit | None:
-        argv = _str_list(action.get("arguments"))
+        argv = _action_argv(action)
         source = _source_from_argv(argv)
         if not source:
             return None
@@ -252,7 +256,7 @@ class BazelAdapter:
             return None
         inputs = [p for p in graph.input_paths(action) if _is_link_input(p)]
         red_output = self.redaction.path(output)
-        argv = _str_list(action.get("arguments"))
+        argv = _action_argv(action)
         version_script, soname = _export_policy_from_argv(argv)
         return LinkUnit(
             id=f"link://{red_output}",
@@ -443,6 +447,20 @@ _SOURCE_OPERAND_FLAGS = frozenset({
     "-o", "-MF", "-MT", "-MQ", "-MJ",
     "-I", "-isystem", "-iquote", "-idirafter", "-D", "-U",
 })
+
+
+def _action_argv(action: dict[str, object]) -> list[str]:
+    """Return an action's full argv, expanding ``@...params`` param files.
+
+    Bazel moves the bulk of a large C++ action's command line into param files;
+    with ``--include_param_files`` aquery emits their contents under
+    ``paramFiles[].arguments``. Appending them lets source/flag extraction see
+    the real translation unit and ABI options instead of just ``@file`` refs.
+    """
+    argv = _str_list(action.get("arguments"))
+    for pf in _dicts(action.get("paramFiles")):
+        argv.extend(_str_list(pf.get("arguments")))
+    return argv
 
 
 def _source_from_argv(argv: list[str]) -> str:

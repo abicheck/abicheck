@@ -208,6 +208,41 @@ def test_bazel_forced_header_not_mistaken_for_source():
     assert ev.compile_units[0].source == "foo.cc"
 
 
+def test_bazel_param_file_arguments_are_expanded():
+    # A C++ action whose argv is just `gcc @foo.params`: the source and flags
+    # live in paramFiles[].arguments and must be merged before extraction.
+    aquery = json.dumps({
+        "artifacts": [{"id": "1", "pathFragmentId": "10"}],
+        "actions": [{
+            "mnemonic": "CppCompile",
+            "arguments": ["/usr/bin/gcc", "@bazel-out/foo.params"],
+            "paramFiles": [{"arguments": ["-std=c++20", "-c", "foo.cc", "-o", "foo.o"]}],
+            "primaryOutputId": "1",
+        }],
+        "pathFragments": [{"id": "10", "label": "foo.o"}],
+    })
+    cu = BazelAdapter(aquery=aquery).collect().compile_units[0]
+    assert cu.source == "foo.cc"
+    assert cu.standard == "c++20"
+
+
+def test_bazel_live_aquery_includes_param_files(monkeypatch, tmp_path):
+    captured: list[list[str]] = []
+    import subprocess as _sp
+
+    def fake_run(cmd, **kwargs):
+        captured.append(cmd)
+        return _sp.CompletedProcess(cmd, 0, stdout=AQUERY if "aquery" in cmd else CQUERY, stderr="")
+
+    monkeypatch.setattr("abicheck.evidence.adapters.bazel.shutil.which", lambda _x: "/usr/bin/bazel")
+    monkeypatch.setattr("abicheck.evidence.adapters.bazel.subprocess.run", fake_run)
+    BazelAdapter(workspace=tmp_path, target="//foo:foo").collect()
+    aquery_cmd = next(c for c in captured if "aquery" in c)
+    assert "--include_param_files" in aquery_cmd
+    cquery_cmd = next(c for c in captured if "cquery" in c)
+    assert "--include_param_files" not in cquery_cmd  # only meaningful for aquery
+
+
 def test_bazel_compile_action_without_source_is_skipped():
     aquery = json.dumps({
         "actions": [{"mnemonic": "CppCompile", "arguments": ["/usr/bin/gcc", "-v"]}],
