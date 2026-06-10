@@ -647,16 +647,53 @@ _maybe_post_pr_comment() {
     return 0
   fi
 
-  if [[ "${INPUT_PR_COMMENT_MODE:-update}" == "new" ]]; then
-    gh pr comment "$pr_number" --body-file "$PR_BODY" \
-      || echo "::warning::abicheck: failed to post PR comment (need 'pull-requests: write')."
-  else
-    # Sticky: edit the action's previous comment in place; create if none yet.
-    gh pr comment "$pr_number" --body-file "$PR_BODY" --edit-last 2>/dev/null \
-      || gh pr comment "$pr_number" --body-file "$PR_BODY" \
-      || echo "::warning::abicheck: failed to post/update PR comment (need 'pull-requests: write')."
-  fi
+  _post_pr_comment "$pr_number" "$PR_BODY"
   echo "::endgroup::"
+}
+
+# Hidden marker the renderer embeds; used to find OUR sticky comment.
+PR_COMMENT_MARKER="<!-- abicheck-sticky-report -->"
+
+_create_pr_comment() {
+  # Create a fresh comment from a body file via the REST API (jq builds the
+  # JSON payload so arbitrary markdown is escaped safely).
+  local repo="$1" pr_number="$2" body_file="$3"
+  jq -Rs '{body: .}' "$body_file" \
+    | gh api -X POST "repos/$repo/issues/$pr_number/comments" --input - >/dev/null
+}
+
+_post_pr_comment() {
+  local pr_number="$1" body_file="$2"
+  local repo="${GITHUB_REPOSITORY:-}"
+  local mode="${INPUT_PR_COMMENT_MODE:-update}"
+
+  # Fresh comment per run, or missing prerequisites for marker matching → just
+  # create one via the porcelain command.
+  if [[ "$mode" == "new" || -z "$repo" ]] || ! command -v jq >/dev/null 2>&1; then
+    gh pr comment "$pr_number" --body-file "$body_file" \
+      || echo "::warning::abicheck: failed to post PR comment (need 'pull-requests: write')."
+    return 0
+  fi
+
+  # Sticky: locate OUR previous comment by its hidden marker (not merely the
+  # last comment by this token, which could belong to other automation) and
+  # edit that specific comment in place.
+  local existing_id
+  existing_id=$(gh api --paginate "repos/$repo/issues/$pr_number/comments" \
+    --jq ".[] | select(.body | contains(\"$PR_COMMENT_MARKER\")) | .id" 2>/dev/null | tail -1)
+
+  if [[ -n "$existing_id" ]]; then
+    if jq -Rs '{body: .}' "$body_file" \
+        | gh api -X PATCH "repos/$repo/issues/comments/$existing_id" --input - >/dev/null 2>&1; then
+      echo "abicheck: updated sticky comment $existing_id."
+      return 0
+    fi
+    echo "::warning::abicheck: could not update comment $existing_id; posting a new one."
+  fi
+
+  _create_pr_comment "$repo" "$pr_number" "$body_file" 2>/dev/null \
+    || gh pr comment "$pr_number" --body-file "$body_file" \
+    || echo "::warning::abicheck: failed to post PR comment (need 'pull-requests: write')."
 }
 
 _maybe_post_pr_comment

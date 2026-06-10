@@ -60,7 +60,7 @@ from .cli import _write_or_echo, main
     default=None,
     help="Write the comment markdown (default: stdout).",
 )
-def pr_comment_cmd(
+def pr_comment_cmd(  # pylint: disable=too-many-arguments
     report: Path,
     sha: str,
     detail: str,

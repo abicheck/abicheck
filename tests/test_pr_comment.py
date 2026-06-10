@@ -149,6 +149,47 @@ def test_release_shape_detected_and_summed():
     assert len(model.library_rows) == 2
 
 
+def test_release_risk_only_library_counts_as_review():
+    # A COMPATIBLE_WITH_RISK library with only risk_changes must still register
+    # as a change so `--on changes` posts the warning-tone comment.
+    report = {
+        "verdict": "COMPATIBLE_WITH_RISK",
+        "old_dir": "/tmp/old",
+        "new_dir": "/tmp/new",
+        "libraries": [
+            {
+                "library": "librisk.so.1",
+                "verdict": "COMPATIBLE_WITH_RISK",
+                "breaking": 0,
+                "source_breaks": 0,
+                "risk_changes": 3,
+                "compatible_additions": 0,
+            },
+        ],
+        "unmatched_old": [],
+        "unmatched_new": [],
+    }
+    model = build_model(report)
+    assert model.counts == (0, 3, 0)
+    assert should_post(model, "changes") is True
+
+
+def test_release_added_libraries_rendered():
+    report = {
+        "verdict": "COMPATIBLE",
+        "old_dir": "/tmp/old",
+        "new_dir": "/tmp/new",
+        "libraries": [],
+        "unmatched_old": [],
+        "unmatched_new": ["libnew.so.1"],
+    }
+    model = build_model(report)
+    assert model.added_libraries == ["libnew.so.1"]
+    body = render_comment(model, sha="abc1234", detail="full")
+    assert "New libraries" in body
+    assert "libnew.so.1" in body
+
+
 def test_appcompat_missing_symbols_count_as_breaking():
     model = build_model(_appcompat_report())
     assert model.mode == "appcompat"

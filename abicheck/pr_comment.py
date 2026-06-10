@@ -81,8 +81,13 @@ class Finding:
 
 
 @dataclass
-class CommentModel:
-    """Mode-agnostic view of a report, ready to render."""
+class CommentModel:  # pylint: disable=too-many-instance-attributes
+    """Mode-agnostic view of a report, ready to render.
+
+    A plain data container aggregating the report's header fields, the three
+    reviewer buckets, and the release-mode rollup — the attribute count is
+    inherent to the DTO, not a complexity smell.
+    """
 
     mode: str  # "compare" | "release" | "appcompat"
     subject: str
@@ -203,12 +208,16 @@ def _from_release(report: dict[str, object]) -> CommentModel:
         for lib in libraries:
             if not isinstance(lib, dict):
                 continue
+            # Review = source breaks + risk findings: a library that is
+            # COMPATIBLE_WITH_RISK with only risk_changes must still count as a
+            # change so `--on changes` posts the warning-tone comment.
             rows.append(
                 (
                     str(lib.get("library", "?")),
                     str(lib.get("verdict", "?")),
                     _as_int(lib.get("breaking")),
-                    _as_int(lib.get("source_breaks")),
+                    _as_int(lib.get("source_breaks"))
+                    + _as_int(lib.get("risk_changes")),
                     _as_int(lib.get("compatible_additions")),
                 )
             )
@@ -366,6 +375,62 @@ def _release_table(model: CommentModel, detail: str) -> list[str]:
     return out
 
 
+def _header_block(model: CommentModel, short_sha: str) -> list[str]:
+    emoji, title = _header(model)
+    b, r, s = model.counts
+    head_ref = f"**Head `{short_sha}`**" if short_sha else "**Head**"
+    context = (
+        f"{head_ref} vs `{model.old_label}` · `{model.policy}` · `{model.subject}`"
+    )
+    return [
+        MARKER,
+        "",
+        f"## {emoji} abicheck — {title}",
+        "",
+        context,
+        "",
+        f"**{b} breaking** · {r} needs review · {s} safe",
+        "",
+    ]
+
+
+def _library_notes(model: CommentModel) -> list[str]:
+    out: list[str] = []
+    if model.removed_libraries:
+        listed = ", ".join(f"`{_esc(x)}`" for x in model.removed_libraries)
+        out += [f"> ⛔ Libraries removed: {listed}", ""]
+    if model.added_libraries:
+        listed = ", ".join(f"`{_esc(x)}`" for x in model.added_libraries)
+        out += [f"> ➕ New libraries: {listed}", ""]
+    return out
+
+
+def _body_sections(model: CommentModel, detail: str) -> list[str]:
+    if model.mode == "release":
+        return _release_table(model, detail)
+    out = _findings_table(
+        "❌ Breaking", model.breaking, detail, open_default=bool(model.breaking)
+    )
+    out += _findings_table(
+        "⚠️ Needs review",
+        model.review,
+        detail,
+        open_default=(not model.breaking and bool(model.review)),
+    )
+    out += _safe_section(model.safe, detail)
+    return out
+
+
+def _footer_block(ts: datetime, run_label: str | None, short_sha: str) -> list[str]:
+    footer = f"<sub>Updated {ts.strftime('%Y-%m-%d %H:%M UTC')}"
+    if run_label:
+        footer += f" · {run_label}"
+    if short_sha:
+        footer += f" · commit {short_sha}"
+    footer += "</sub>"
+    return [footer, ""]
+
+
 def render_comment(
     model: CommentModel,
     *,
@@ -378,54 +443,10 @@ def render_comment(
     if detail not in DETAIL_LEVELS:
         detail = "standard"
     ts = timestamp or datetime.now(timezone.utc)
-    emoji, title = _header(model)
-    b, r, s = model.counts
     short_sha = (sha or "")[:7]
-
-    head_ref = f"**Head `{short_sha}`**" if short_sha else "**Head**"
-    context = (
-        f"{head_ref} vs `{model.old_label}` · `{model.policy}` · `{model.subject}`"
-    )
-
-    lines: list[str] = [
-        MARKER,
-        "",
-        f"## {emoji} abicheck — {title}",
-        "",
-        context,
-        "",
-        f"**{b} breaking** · {r} needs review · {s} safe",
-        "",
-    ]
-
-    if model.removed_libraries:
-        listed = ", ".join(f"`{_esc(x)}`" for x in model.removed_libraries)
-        lines += [f"> ⛔ Libraries removed: {listed}", ""]
-    if model.added_libraries:
-        listed = ", ".join(f"`{_esc(x)}`" for x in model.added_libraries)
-        lines += [f"> ➕ New libraries: {listed}", ""]
-
+    lines = _header_block(model, short_sha)
+    lines += _library_notes(model)
     if detail != "summary":
-        if model.mode == "release":
-            lines += _release_table(model, detail)
-        else:
-            lines += _findings_table(
-                "❌ Breaking", model.breaking, detail, open_default=bool(model.breaking)
-            )
-            lines += _findings_table(
-                "⚠️ Needs review",
-                model.review,
-                detail,
-                open_default=(not model.breaking and bool(model.review)),
-            )
-            lines += _safe_section(model.safe, detail)
-
-    footer = f"<sub>Updated {ts.strftime('%Y-%m-%d %H:%M UTC')}"
-    if run_label:
-        footer += f" · {run_label}"
-    if short_sha:
-        footer += f" · commit {short_sha}"
-    footer += "</sub>"
-    lines += [footer, ""]
-
+        lines += _body_sections(model, detail)
+    lines += _footer_block(ts, run_label, short_sha)
     return "\n".join(lines)
