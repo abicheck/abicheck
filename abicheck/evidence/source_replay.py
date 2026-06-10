@@ -322,6 +322,12 @@ def compute_tu_cache_key(
         str(schema_version),
         extractor_name,
         extractor_version,
+        # Source *location* (not just content): two distinct TUs with identical
+        # contents must not collide — a relative `#include "local.h"` and
+        # `__FILE__` depend on the file's path, so a content-only key could reuse
+        # another TU's dump and read_files (CodeRabbit review).
+        "src_path:" + source.as_posix(),
+        "cwd:" + _norm(os.path.expanduser(compile_unit.directory or "")),
         compile_unit.standard,
         compile_unit.target_triple,
         compile_unit.sysroot or "",
@@ -374,15 +380,24 @@ class SourceAbiCache:
             return None
         if not isinstance(entry, dict):
             return None
+        # A non-dict deps payload is a malformed entry → miss, never a failure
+        # (CodeRabbit review): keep the "corrupt entry is a miss" contract.
+        deps = entry.get("deps") or {}
+        if not isinstance(deps, dict):
+            return None
         # Re-validate every recorded dependency: a changed/missing included file
         # invalidates the dump even though the preliminary key still matches.
-        for dep_path, dep_hash in (entry.get("deps") or {}).items():
+        for dep_path, dep_hash in deps.items():
             if _dep_digest(dep_path) != dep_hash:
                 return None
         tu_data = entry.get("tu")
         if not isinstance(tu_data, dict):
             return None
-        return SourceAbiTu.from_dict(tu_data)
+        try:
+            return SourceAbiTu.from_dict(tu_data)
+        except (KeyError, TypeError, ValueError):
+            # A structurally bad payload is a miss, not a crash that aborts replay.
+            return None
 
     def put(self, key: str | None, tu: SourceAbiTu) -> None:
         if not key:

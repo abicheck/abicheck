@@ -60,6 +60,7 @@ from ._argv import (
     is_msvc_mode,
     pick_compiler_binary,
     replay_extra_flags,
+    resolve_read_files,
     unredact_home,
 )
 from .base import SourceExtractionError
@@ -191,11 +192,15 @@ def build_clang_macro_command(
     compile context as the AST pass so the macro set matches the real build.
     """
     cmd, msvc = _clang_context_args(compile_unit, compiler_binary)
-    # /E + /d1PP? No portable clang-cl spelling for -dD; use the GNU options via
-    # the driver regardless (clang accepts -Xclang for the dump). -P drops line
-    # markers, so we keep them (no -P) to attribute each macro to its file.
-    preprocess = ["/E"] if msvc else ["-E"]
-    return [clang_bin, *cmd, *preprocess, "-dD", "-ferror-limit=0", str(source)]
+    # cl-driver mode ignores -dD; clang-cl's `/d1PP` is the documented "retain
+    # macro definitions in /E mode" flag, so a Windows/clang-cl build still emits
+    # #define directives for macros_from_preprocessor (Codex review #339, P2). We
+    # keep the line markers (no -P / no /EP) to attribute each macro to its file.
+    if msvc:
+        preprocess = ["/E", "/d1PP"]
+    else:
+        preprocess = ["-E", "-dD"]
+    return [clang_bin, *cmd, *preprocess, "-ferror-limit=0", str(source)]
 
 
 def _hash(*parts: str) -> str:
@@ -455,6 +460,29 @@ def _parse_define(rest: str) -> tuple[str, str] | None:
     return name, value
 
 
+def _unfold_continuations(lines: list[str]) -> list[str]:
+    """Join backslash-continued physical lines into single logical lines.
+
+    A multi-line macro (``#define FOO(x) \\`` then its body) is split by
+    ``splitlines()``; without unfolding, only the first physical line — usually
+    ending in ``\\`` — is captured and the rest of the body is dropped, hiding
+    any edit below the first line from ``public_macro_value_changed`` (CodeRabbit
+    review). ``#`` line markers never carry a trailing backslash, so they are
+    unaffected.
+    """
+    out: list[str] = []
+    pending: str | None = None
+    for line in lines:
+        chunk = line[:-1] if line.endswith("\\") else line
+        pending = chunk if pending is None else pending + " " + chunk.lstrip()
+        if not line.endswith("\\"):
+            out.append(pending)
+            pending = None
+    if pending is not None:
+        out.append(pending)
+    return out
+
+
 def macros_from_preprocessor(
     text: str, public_header_roots: list[str]
 ) -> tuple[list[SourceEntity], list[str]]:
@@ -472,7 +500,7 @@ def macros_from_preprocessor(
     ctx = _ClassifyContext(public_header_roots)
     current = ""
     defs: dict[str, tuple[str, str]] = {}  # name -> (value, file)
-    for line in text.splitlines():
+    for line in _unfold_continuations(text.splitlines()):
         marker = _LINE_MARKER_RE.match(line)
         if marker:
             current = marker.group(1)
@@ -540,8 +568,13 @@ def source_abi_from_clang_ast(
     _walk(ast_root, ctx, tu, scope=[], current_file="")
     # Record every file that contributed a node, so the per-TU cache (D8)
     # invalidates on an edit to any transitively included header — not just the
-    # configured public roots (Codex review #339, P1).
-    tu.read_files = sorted(_collect_files(ast_root))
+    # configured public roots (Codex review #339, P1). Resolve to absolute paths
+    # against the TU's build directory: clang emits *relative* paths for headers
+    # found via relative -I, which the cache (running in a different CWD) could
+    # not otherwise read, silently dropping the dependency (Codex review, P2).
+    tu.read_files = resolve_read_files(
+        _collect_files(ast_root), compile_unit.directory
+    )
     return tu
 
 
@@ -575,10 +608,18 @@ def _walk(
     *,
     scope: list[str],
     current_file: str,
-) -> None:
-    """Pre-order traversal that emits public entities, tracking file + scope."""
+) -> str:
+    """Pre-order traversal that emits public entities, tracking file + scope.
+
+    Returns the last file seen anywhere in this node's subtree. clang's
+    ``loc.file`` is sticky (omitted when unchanged from the previous node in
+    source order), so the last file a child's *subtree* saw must flow to the next
+    sibling — otherwise a sibling that omits ``loc.file`` after a nested file
+    switch is attributed to the wrong header, flipping public/private
+    classification (CodeRabbit review).
+    """
     if not isinstance(node, dict):
-        return
+        return current_file
     file = _node_file(node, current_file)
     kind = node.get("kind")
     name = node.get("name", "") or ""
@@ -590,7 +631,7 @@ def _walk(
         # descend into the templated pattern, or its inner FunctionDecl/Record
         # would be re-emitted as a duplicate non-template entity.
         _emit_template(node, ctx, tu, scope, file)
-        return
+        return file
     elif kind == "VarDecl" and name and node.get("constexpr"):
         _emit_constexpr(node, ctx, tu, scope, file)
     elif kind in ("CXXRecordDecl", "EnumDecl") and name:
@@ -603,8 +644,11 @@ def _walk(
         child_scope = [*scope, name]
     for child in node.get("inner", []):
         if isinstance(child, dict):
-            file = _node_file(child, file)
-            _walk(child, ctx, tu, scope=child_scope, current_file=file)
+            # Thread the last file seen in each child's subtree forward so the
+            # next sibling inherits it (clang's sticky loc.file), not just the
+            # child's own loc.file.
+            file = _walk(child, ctx, tu, scope=child_scope, current_file=file)
+    return file
 
 
 def _location(file: str, line: int, origin_label: str) -> SourceLocation:
@@ -866,16 +910,23 @@ class ClangSourceExtractor:
         except SourceExtractionError as exc:
             tu.diagnostics.append(f"macro pass skipped: {exc}")
             return
-        if result.returncode != 0 and not result.stdout.strip():
+        # A non-zero exit means clang stopped on a preprocessing error; it may
+        # still have emitted some markers/defines. Record the partial coverage so
+        # the capability report does not overstate L4 macro coverage, mirroring
+        # the AST pass (CodeRabbit review).
+        if result.returncode != 0:
             tu.diagnostics.append(
-                f"macro pass produced no output (exit {result.returncode})"
+                f"macro pass exited {result.returncode} (partial): "
+                f"{result.stderr[:300]}"
             )
+        if not result.stdout.strip():
             return
         macros, macro_files = macros_from_preprocessor(
             result.stdout, public_header_roots
         )
         tu.macros = macros
         # A header that only defines macros contributes no AST node, so add its
-        # path to the cache dependency set or a macro-only edit would be a stale
-        # hit (Codex review #339, P1).
-        tu.read_files = sorted(set(tu.read_files) | set(macro_files))
+        # path (resolved against the build directory) to the cache dependency set
+        # or a macro-only edit would be a stale hit (Codex review #339, P1/P2).
+        resolved = resolve_read_files(set(macro_files), compile_unit.directory)
+        tu.read_files = sorted(set(tu.read_files) | set(resolved))

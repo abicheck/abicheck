@@ -96,6 +96,27 @@ def unredact_home(value: str) -> str:
     return re.sub(r"~(?=[\\/]|$)", lambda _m: home, value)
 
 
+def resolve_read_files(files: set[str], directory: str) -> list[str]:
+    """Absolute, de-duplicated read-file paths resolved against ``directory``.
+
+    An extractor records the files it read (``SourceAbiTu.read_files``) for the
+    per-TU cache dependency set (ADR-030 D8). A compiler emits *relative* paths
+    for headers found via a relative ``-I``, which the cache — running in a
+    possibly different CWD — could not otherwise read, silently dropping the
+    dependency. Resolve each against the TU's build directory (un-redacting a
+    ``~`` home placeholder first, ADR-032 D7) so the path matches the CWD the
+    tool actually ran in.
+    """
+    base = unredact_home(directory) if directory else ""
+    out: set[str] = set()
+    for f in files:
+        path = os.path.expanduser(unredact_home(f))
+        if not os.path.isabs(path) and base:
+            path = os.path.join(base, path)
+        out.add(os.path.normpath(path))
+    return sorted(out)
+
+
 def basename(path: str) -> str:
     """Final path component, splitting on both ``/`` and ``\\`` (host-independent).
 

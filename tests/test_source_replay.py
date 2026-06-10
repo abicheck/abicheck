@@ -327,6 +327,50 @@ def test_cache_get_ignores_non_object_entry(tmp_path: Path) -> None:
     assert cache.get("k") is None
 
 
+def test_cache_get_ignores_non_dict_deps(tmp_path: Path) -> None:
+    # CodeRabbit: a malformed entry (deps not a dict) is a miss, never a crash.
+    import json as _json
+
+    cache = SourceAbiCache(tmp_path / "cache")
+    cache.cache_dir.mkdir(parents=True)
+    (cache.cache_dir / "k.json").write_text(
+        _json.dumps({"deps": "not-a-dict", "tu": {"tu_id": "x"}})
+    )
+    assert cache.get("k") is None
+
+
+def test_cache_get_ignores_bad_tu_payload(tmp_path: Path) -> None:
+    # A structurally bad `tu` payload (missing required entity id) is a miss.
+    import json as _json
+
+    cache = SourceAbiCache(tmp_path / "cache")
+    cache.cache_dir.mkdir(parents=True)
+    # An entity dict without "id" makes SourceEntity.from_dict raise KeyError.
+    (cache.cache_dir / "k.json").write_text(
+        _json.dumps({"deps": {}, "tu": {"tu_id": "x", "functions": [{}]}})
+    )
+    assert cache.get("k") is None
+
+
+def test_cache_key_includes_source_location(tmp_path: Path) -> None:
+    # CodeRabbit: two distinct TUs with identical content must not collide.
+    src_a = tmp_path / "a" / "foo.cpp"
+    src_b = tmp_path / "b" / "foo.cpp"
+    src_a.parent.mkdir()
+    src_b.parent.mkdir()
+    src_a.write_text("int x;\n")
+    src_b.write_text("int x;\n")  # identical content, different location
+    key_a = compute_tu_cache_key(
+        extractor_name="clang-source", extractor_version="0.1",
+        compile_unit=_cu("cu://a", str(src_a)), public_header_roots=[],
+    )
+    key_b = compute_tu_cache_key(
+        extractor_name="clang-source", extractor_version="0.1",
+        compile_unit=_cu("cu://b", str(src_b)), public_header_roots=[],
+    )
+    assert key_a and key_b and key_a != key_b
+
+
 def test_cache_key_changes_with_header_directory_content(tmp_path: Path) -> None:
     # A header *root that is a directory* folds in every contained file's content,
     # so editing any header under it invalidates the key (_digest_path dir branch).

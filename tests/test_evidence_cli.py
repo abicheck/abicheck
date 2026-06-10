@@ -294,8 +294,17 @@ def test_compare_source_abi_findings_and_capabilities(tmp_path):
         "--format", "json",
     ])
     assert result.exit_code in (0, 2, 4), result.output
+    payload = json.loads(result.stdout)
     # The source-replay finding is folded into the verdict pipeline.
     assert "default_argument_changed" in result.stdout.lower()
+    # Authority rule (ADR-028 D3): a source-only L4 finding with no artifact-backed
+    # break must NOT escalate to a breaking verdict — it stays API/source-level.
+    assert payload["verdict"] != "breaking"
+    kinds = {f.get("kind") for f in payload.get("changes", [])}
+    assert "default_argument_changed" in kinds
+    # And the L4 finding is partitioned as an API break, never a BREAKING kind.
+    from abicheck.checker_policy import BREAKING_KINDS, ChangeKind
+    assert ChangeKind.DEFAULT_ARGUMENT_CHANGED not in BREAKING_KINDS
     # The capability report names what is on/off and why.
     assert "Checks enabled for this scan" in result.stderr
     assert "[off]" in result.stderr

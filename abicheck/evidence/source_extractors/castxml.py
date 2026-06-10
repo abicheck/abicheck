@@ -43,6 +43,7 @@ from ._argv import (
     is_msvc_mode,
     pick_compiler_binary,
     replay_extra_flags,
+    resolve_read_files,
     unredact_home,
 )
 from .base import SourceExtractionError, assemble_source_tu
@@ -304,11 +305,10 @@ class CastxmlSourceExtractor:
         # Record every file castxml parsed (the GCC_XML <File> table) so the
         # per-TU cache (ADR-030 D8) invalidates on an edit to any transitively
         # included header, not just the configured public roots (Codex #339, P1).
-        tu.read_files = sorted(
-            {
-                name
-                for el in root.findall(".//File")
-                if (name := el.get("name"))
-            }
+        # Resolve to absolute against the build directory so the cache (run in a
+        # different CWD) can read a relative castxml <File> path (Codex P2).
+        tu.read_files = resolve_read_files(
+            {name for el in root.findall(".//File") if (name := el.get("name"))},
+            compile_unit.directory,
         )
         return tu

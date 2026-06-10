@@ -274,6 +274,15 @@ class SourceAbiTu:
         def _ents(key: str) -> list[SourceEntity]:
             return [SourceEntity.from_dict(e) for e in d.get(key, [])]
 
+        # Defensive: a newer/hand-edited pack may carry ``read_files: null`` or a
+        # stray string; ``list(...)`` on those raises or yields a char list, which
+        # would poison cache dependency tracking (CodeRabbit review). Coerce to a
+        # clean list of non-empty strings.
+        rf_raw = d.get("read_files")
+        read_files = (
+            [str(p) for p in rf_raw if p] if isinstance(rf_raw, list) else []
+        )
+
         return cls(
             schema_version=int(d.get("schema_version", SOURCE_ABI_VERSION)),
             tu_id=str(d.get("tu_id", "")),
@@ -292,7 +301,7 @@ class SourceAbiTu:
             constexpr_values=_ents("constexpr_values"),
             source_edges=list(d.get("source_edges", [])),
             diagnostics=list(d.get("diagnostics", [])),
-            read_files=list(d.get("read_files", [])),
+            read_files=read_files,
         )
 
 

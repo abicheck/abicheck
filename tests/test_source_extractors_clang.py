@@ -265,6 +265,49 @@ def _constexpr_ast(rhs_literal: str) -> dict:
     }
 
 
+def test_walk_threads_sticky_file_across_siblings() -> None:
+    # CodeRabbit: clang's loc.file is sticky. After a child subtree switches file,
+    # a following sibling that omits loc.file must inherit the *last seen* file
+    # (not the parent's own file), or it is misclassified public/private.
+    ast = {
+        "kind": "TranslationUnitDecl",
+        "inner": [
+            {
+                "kind": "CXXRecordDecl", "name": "Outer",
+                "loc": {"file": "include/pub.h"},
+                "inner": [
+                    {"kind": "FieldDecl", "name": "a", "type": {"qualType": "int"}},
+                    # Nested decl switches the current file to a private header.
+                    {"kind": "CXXRecordDecl", "name": "Nested",
+                     "loc": {"file": "src/detail/priv.h"},
+                     "inner": [{"kind": "FieldDecl", "name": "b",
+                                "type": {"qualType": "int"}}]},
+                ],
+            },
+            # Sibling omits loc.file → inherits the last seen file (priv.h),
+            # so it is private and must NOT land on the public surface.
+            {"kind": "FunctionDecl", "name": "leaked",
+             "mangledName": "_Z6leakedv", "type": {"qualType": "void ()"}},
+        ],
+    }
+    tu = source_abi_from_clang_ast(ast, _cu(), ["include/pub.h"], "t")
+    assert "leaked" not in {e.qualified_name for e in tu.functions}
+    # Outer (public) is still captured.
+    assert any("Outer" in e.qualified_name for e in tu.types)
+
+
+def test_read_files_resolved_against_build_directory() -> None:
+    # CodeRabbit/Codex P2: relative read_files (clang emits these for headers
+    # found via a relative -I) are resolved to absolute against the TU directory
+    # so the cache can read them from a different CWD.
+    import os
+
+    tu = source_abi_from_clang_ast(
+        _ast(), _cu(directory="/work/proj"), ["include/foo.h"], "t"
+    )
+    assert os.path.normpath("/work/proj/include/foo.h") in tu.read_files
+
+
 def test_constexpr_compound_expression_change_is_detected() -> None:
     # Codex #339 P2: `1 + 2` and `1 + 3` must not collapse to the same "1".
     old = source_abi_from_clang_ast(_constexpr_ast("2"), _cu(), ["include/foo.h"], "t")
@@ -390,6 +433,24 @@ def test_macros_from_preprocessor_scopes_to_public_headers() -> None:
     # ...while builtin and system macros are filtered out.
     assert "__STDC__" not in by_name and "SYS_ONLY" not in by_name
     assert files == ["include/foo.h"]
+
+
+def test_macros_unfold_line_continuations() -> None:
+    # CodeRabbit: a backslash-continued macro must be parsed whole, so an edit
+    # below the first physical line is still visible to the value comparison.
+    from abicheck.evidence.source_extractors import macros_from_preprocessor
+
+    text = (
+        '# 1 "include/foo.h" 1\n'
+        "#define BIG(a, b) \\\n"
+        "    ((a) + \\\n"
+        "     (b))\n"
+    )
+    macros, _ = macros_from_preprocessor(text, ["include/foo.h"])
+    by_name = {e.qualified_name: e.value for e in macros}
+    assert "BIG" in by_name
+    # The whole body is captured (both continuation lines), not just "(a, b)".
+    assert "(a) +" in by_name["BIG"] and "(b)" in by_name["BIG"]
 
 
 def test_macros_honor_undef() -> None:
@@ -562,7 +623,9 @@ def test_build_clang_macro_command_gnu_and_msvc() -> None:
     msvc = build_clang_macro_command(
         _cu(standard="c++20"), Path("a.cpp"), compiler_binary="clang-cl"
     )
-    assert "--driver-mode=cl" in msvc and "/E" in msvc and "-dD" in msvc
+    # cl-driver mode ignores -dD; clang-cl's /d1PP retains macro defs in /E mode.
+    assert "--driver-mode=cl" in msvc and "/E" in msvc and "/d1PP" in msvc
+    assert "-dD" not in msvc
 
 
 def test_forward_declaration_emits_no_type() -> None:

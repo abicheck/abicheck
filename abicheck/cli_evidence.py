@@ -767,8 +767,8 @@ _CHECK_CAPABILITIES: tuple[tuple[str, str, str, str], ...] = (
      "from build-system data (compile DB / CMake / Ninja / Bazel)",
      "no build data: flag/toolchain regressions are not detected"),
     ("Macros, default args, inline/template/constexpr bodies", "L4_source_abi",
-     "from source ABI replay (requires clang)",
-     "no sources/clang: source-only API changes are not detected"),
+     "from source ABI replay (requires a source extractor: clang, castxml, or android)",
+     "no source replay evidence: source-only API changes are not detected"),
     ("Impact / call / reachability graph", "L5_source_graph",
      "from the source graph summary",
      "no graph evidence: cross-symbol impact is not analyzed"),
@@ -785,10 +785,13 @@ def _echo_capabilities(
     (binary only → +debug → +headers → +build data → +sources), which checks ran
     and the concrete reason each disabled one is off.
     """
+    # Only a PRESENT layer enables its checks: a PARTIAL layer (e.g. L4 when clang
+    # was missing or every TU failed, so no entities were extracted) ran but
+    # produced nothing, and must read as [off], not [on] (CodeRabbit review).
     present = {
         c.layer
         for c in (*intrinsic, *optional)
-        if c.status != CoverageStatus.NOT_COLLECTED
+        if c.status == CoverageStatus.PRESENT
     }
     click.echo("Checks enabled for this scan (and why others are not):", err=True)
     for label, layer, how, why_off in _CHECK_CAPABILITIES:
