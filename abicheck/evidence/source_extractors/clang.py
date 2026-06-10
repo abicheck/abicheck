@@ -209,7 +209,7 @@ def _hash(*parts: str) -> str:
     return "sha256:" + hashlib.sha256(blob).hexdigest()
 
 
-def _canonical(node: Any) -> Any:
+def _canonical(node: Any, id_names: dict[str, str] | None = None) -> Any:
     """Reduce a clang AST node to a build-root-stable structural form for hashing.
 
     Keeps only structural scalars (``kind``/``name``/``value``/``opcode``/
@@ -227,20 +227,57 @@ def _canonical(node: Any) -> Any:
     if isinstance(type_obj, dict) and "qualType" in type_obj:
         out["type"] = type_obj["qualType"]
     # A DeclRefExpr stores the referenced entity (e.g. another constant) in
-    # ``referencedDecl``; without its name a value change `kOld` -> `kNew` of the
-    # same type would hash identically and the constexpr/default-arg change would
-    # be missed (Codex review #339, P2).
+    # ``referencedDecl``. clang's JSON exposes only its *unqualified* ``name``
+    # there, so a reference change `a::k` -> `b::k` between same-named, same-typed
+    # constants in different scopes would hash identically and the
+    # constexpr/default-arg change would be missed (Codex review #339, P2). When
+    # an ``id_names`` map is supplied we resolve the referenced decl's pointer id
+    # (stable within a single dump) to its scope-qualified name — build-root
+    # stable, unlike the raw id — so `a::k` and `b::k` differ. Without the map
+    # (e.g. a direct unit-test call) we fall back to the unqualified name.
     ref = node.get("referencedDecl")
-    if isinstance(ref, dict) and ref.get("name"):
-        out["ref"] = ref["name"]
+    if isinstance(ref, dict):
+        ref_id = ref.get("id")
+        resolved = id_names.get(ref_id) if id_names and isinstance(ref_id, str) else None
+        ref_name = resolved or ref.get("name")
+        if ref_name:
+            out["ref"] = ref_name
     inner = node.get("inner")
     if isinstance(inner, list):
-        out["inner"] = [_canonical(child) for child in inner]
+        out["inner"] = [_canonical(child, id_names) for child in inner]
     return out
 
 
-def _subtree_hash(node: dict[str, Any]) -> str:
-    return _hash("clang-ast", json.dumps(_canonical(node), sort_keys=True))
+def _subtree_hash(node: dict[str, Any], id_names: dict[str, str] | None = None) -> str:
+    return _hash("clang-ast", json.dumps(_canonical(node, id_names), sort_keys=True))
+
+
+def _decl_qualified_names(
+    node: Any, scope: list[str] | None = None, out: dict[str, str] | None = None
+) -> dict[str, str]:
+    """Map every named decl's pointer ``id`` to its scope-qualified name.
+
+    Built once per AST so a ``DeclRefExpr.referencedDecl.id`` can be resolved to a
+    build-root-stable qualified name (``a::k``) instead of the raw, run-varying
+    pointer or the bare unqualified ``name`` clang emits at the reference site
+    (Codex review #339, P2). Pointer ids are unique and stable *within a single*
+    clang dump, which is all the resolution needs.
+    """
+    if out is None:
+        out = {}
+    if scope is None:
+        scope = []
+    if not isinstance(node, dict):
+        return out
+    kind = node.get("kind")
+    name = node.get("name") or ""
+    node_id = node.get("id")
+    if isinstance(node_id, str) and name and isinstance(kind, str) and kind.endswith("Decl"):
+        out.setdefault(node_id, _qualified(scope, name))
+    child_scope = [*scope, name] if (kind in _SCOPE_NODE_KINDS and name) else scope
+    for child in node.get("inner", []) or []:
+        _decl_qualified_names(child, child_scope, out)
+    return out
 
 
 def _node_file(node: dict[str, Any], current: str) -> str:
@@ -329,14 +366,15 @@ def _init_expr(node: dict[str, Any]) -> dict[str, Any] | None:
     return candidates[-1] if candidates else None
 
 
-def _expr_value(node: dict[str, Any]) -> str:
+def _expr_value(node: dict[str, Any], id_names: dict[str, str] | None = None) -> str:
     """A value string that changes iff the whole initializer expression changes.
 
     A lone literal (after stripping wrapper casts) keeps its human-readable value
     (``42``); any compound expression (``1 + 2``, a call, a braced-init) is
     fingerprinted as a whole, so ``1 + 2`` and ``1 + 3`` are distinguished. The
     earlier "first literal under the AST" heuristic collapsed them and missed the
-    change (Codex review #339, P2).
+    change (Codex review #339, P2). ``id_names`` resolves referenced-decl ids to
+    qualified names inside the fingerprint (see :func:`_canonical`).
     """
     core = _unwrap_expr(node)
     if (
@@ -345,10 +383,10 @@ def _expr_value(node: dict[str, Any]) -> str:
         and "value" in core
     ):
         return str(core["value"])
-    return _subtree_hash(node)
+    return _subtree_hash(node, id_names)
 
 
-def _default_arg_repr(node: dict[str, Any]) -> str:
+def _default_arg_repr(node: dict[str, Any], id_names: dict[str, str] | None = None) -> str:
     """Normalized default-argument string for a function's parameters.
 
     Each defaulted parameter is rendered ``p<position>=<value-or-fingerprint>`` so
@@ -368,7 +406,7 @@ def _default_arg_repr(node: dict[str, Any]) -> str:
         init = _init_expr(child)
         if not child.get("init") and init is None:
             continue
-        rep = _expr_value(init) if init is not None else "default"
+        rep = _expr_value(init, id_names) if init is not None else "default"
         parts.append(f"p{position}={rep}")
     return ",".join(parts)
 
@@ -395,7 +433,11 @@ def _qualified(scope: list[str], name: str) -> str:
 class _ClassifyContext:
     """Public-surface classification for clang file paths (ADR-024 / ADR-030)."""
 
-    def __init__(self, public_header_roots: list[str]) -> None:
+    def __init__(
+        self,
+        public_header_roots: list[str],
+        id_names: dict[str, str] | None = None,
+    ) -> None:
         from ...provenance import build_public_set
 
         # A public root may be a *directory* (`--headers include/`). Feeding it to
@@ -406,6 +448,9 @@ class _ClassifyContext:
         self.header_segs, self.dir_segs, self.have_set = build_public_set(
             file_roots, dir_roots
         )
+        # decl pointer-id -> scope-qualified name, used to resolve referenced
+        # decls in default-arg/constexpr fingerprints (Codex review #339, P2).
+        self.id_names: dict[str, str] = id_names or {}
 
     def classify(self, file: str) -> tuple[str, str, bool]:
         """Return ``(visibility, origin_label, api_relevant)`` for a file.
@@ -563,7 +608,7 @@ def source_abi_from_clang_ast(
     in a test) reuses this. Emits only public-surface entities so the linker does
     not have to filter private/system decls.
     """
-    ctx = _ClassifyContext(public_header_roots)
+    ctx = _ClassifyContext(public_header_roots, _decl_qualified_names(ast_root))
     tu = SourceAbiTu(
         tu_id=compile_unit.id,
         target_id=target_id or compile_unit.target_id,
@@ -748,7 +793,7 @@ def _emit_function(
             qualified_name=name,
             mangled_name=mangled,
             signature_hash=_hash("sig", sig),
-            value=_default_arg_repr(node),
+            value=_default_arg_repr(node, ctx.id_names),
             source_location=loc,
             visibility=visibility,
             api_relevant=True,
@@ -772,7 +817,7 @@ def _emit_function(
                 qualified_name=name,
                 mangled_name=mangled,
                 signature_hash=_hash("sig", sig),
-                body_hash=_subtree_hash(body),
+                body_hash=_subtree_hash(body, ctx.id_names),
                 source_location=loc,
                 visibility=visibility,
                 api_relevant=True,
@@ -797,7 +842,7 @@ def _emit_template(
             id=_hash("template", name),
             kind="template",
             qualified_name=name,
-            body_hash=_subtree_hash(node),
+            body_hash=_subtree_hash(node, ctx.id_names),
             source_location=_location(file, _node_line(node), origin),
             visibility=visibility,
             api_relevant=True,
@@ -818,7 +863,11 @@ def _emit_constexpr(
         return
     name = _qualified(scope, str(node.get("name", "")))
     init = _init_expr(node)
-    value = _expr_value(init) if init is not None else _subtree_hash(node)
+    value = (
+        _expr_value(init, ctx.id_names)
+        if init is not None
+        else _subtree_hash(node, ctx.id_names)
+    )
     tu.constexpr_values.append(
         SourceEntity(
             id=_hash("constexpr", name, value),
@@ -856,7 +905,7 @@ def _emit_type(
             id=_hash("type", name),
             kind=kind,
             qualified_name=name,
-            type_hash=_subtree_hash(node),
+            type_hash=_subtree_hash(node, ctx.id_names),
             source_location=_location(file, _node_line(node), origin),
             visibility=visibility,
             api_relevant=True,

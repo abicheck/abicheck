@@ -609,6 +609,72 @@ def test_macros_track_private_macro_only_header_as_cache_dep() -> None:
     assert "include/detail/config.h" in files
 
 
+def _qualified_ref_ast(ref_id: str) -> dict:
+    """Public `f(int x = <const>)` whose default references the decl `ref_id`.
+
+    Both `a::k` and `b::k` are same-named, same-typed constants in different
+    namespaces, so clang's DeclRefExpr exposes only the unqualified name `k`; the
+    decl ids disambiguate them.
+    """
+    def const(ns_id: str) -> dict:
+        return {
+            "kind": "VarDecl", "id": ns_id, "name": "k", "constexpr": True,
+            "type": {"qualType": "const int"},
+            "inner": [{"kind": "IntegerLiteral", "value": "5"}],
+        }
+    return {
+        "kind": "TranslationUnitDecl",
+        "inner": [
+            {"kind": "NamespaceDecl", "name": "a",
+             "loc": {"file": "include/foo.h", "line": 1},
+             "inner": [const("0xAAA")]},
+            {"kind": "NamespaceDecl", "name": "b", "loc": {"line": 2},
+             "inner": [const("0xBBB")]},
+            {
+                "kind": "FunctionDecl", "name": "f", "loc": {"line": 5},
+                "mangledName": "_Z1fi", "type": {"qualType": "void (int)"},
+                "inner": [{
+                    "kind": "ParmVarDecl", "name": "x", "type": {"qualType": "int"},
+                    "init": "c",
+                    "inner": [{
+                        "kind": "DeclRefExpr", "type": {"qualType": "const int"},
+                        "referencedDecl": {
+                            "kind": "VarDecl", "id": ref_id, "name": "k",
+                            "type": {"qualType": "const int"},
+                        },
+                    }],
+                }],
+            },
+        ],
+    }
+
+
+def test_default_arg_referencing_different_scoped_constant_is_distinguished() -> None:
+    # Codex #339 P2: a default arg changing from `a::k` to `b::k` (same unqualified
+    # name + type, different namespace) must change the fingerprint, even though
+    # clang's DeclRefExpr only exposes the bare name `k`. The decl-id -> qualified
+    # name map resolves `a::k` vs `b::k`.
+    old = source_abi_from_clang_ast(_qualified_ref_ast("0xAAA"), _cu(), ["include/foo.h"], "t")
+    new = source_abi_from_clang_ast(_qualified_ref_ast("0xBBB"), _cu(), ["include/foo.h"], "t")
+    old_f = next(e for e in old.functions if e.qualified_name == "f")
+    new_f = next(e for e in new.functions if e.qualified_name == "f")
+    assert old_f.value != new_f.value
+
+
+def test_default_arg_same_scoped_constant_is_stable() -> None:
+    # The same reference re-parsed (ids vary across clang runs) must NOT change the
+    # fingerprint: resolution maps the id to the build-root-stable qualified name.
+    a = source_abi_from_clang_ast(_qualified_ref_ast("0xAAA"), _cu(), ["include/foo.h"], "t")
+    # A different pointer id for the *same* `a::k` decl (re-run) still resolves to
+    # `a::k`, so the value is unchanged.
+    b_ast = _qualified_ref_ast("0xZZZ")
+    b_ast["inner"][0]["inner"][0]["id"] = "0xZZZ"  # a::k now has id 0xZZZ
+    b = source_abi_from_clang_ast(b_ast, _cu(), ["include/foo.h"], "t")
+    a_f = next(e for e in a.functions if e.qualified_name == "f")
+    b_f = next(e for e in b.functions if e.qualified_name == "f")
+    assert a_f.value == b_f.value
+
+
 def test_macros_unfold_line_continuations() -> None:
     # CodeRabbit: a backslash-continued macro must be parsed whole, so an edit
     # below the first physical line is still visible to the value comparison.
