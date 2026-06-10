@@ -168,12 +168,13 @@ class BazelAdapter:
         if data is None:
             return
         # A single label can appear under several configurations (target vs exec)
-        # with different deps/attrs. Collect the rule + config first so we can
-        # disambiguate the id by configuration only for labels that actually span
-        # more than one — keeping the common single-config id plain so it still
-        # matches the label-only target ids that aquery emits.
+        # with different deps/attrs. Collect the rule + config first; the first
+        # config seen for a label is "canonical" and keeps the plain
+        # ``target://label`` id so aquery's label-only target ids still resolve to
+        # a collected Target. Additional configs are preserved under a
+        # ``#cfg:<id>`` suffix instead of being dropped.
         entries: list[tuple[dict[str, object], str]] = []
-        configs_per_label: dict[str, set[str]] = {}
+        canonical_cfg: dict[str, str] = {}
         for ct in _dicts(data.get("results")):
             target_obj = ct.get("target")
             rule = target_obj.get("rule") if isinstance(target_obj, dict) else None
@@ -184,14 +185,14 @@ class BazelAdapter:
                 continue
             cfg = str(ct.get("configurationId", "") or "")
             entries.append((rule, cfg))
-            configs_per_label.setdefault(name, set()).add(cfg)
+            canonical_cfg.setdefault(name, cfg)
 
         seen: set[str] = set()
         for rule, cfg in entries:
             target = self._target_from_rule(rule)
             if target is None:
                 continue
-            if cfg and len(configs_per_label[str(rule.get("name", ""))]) > 1:
+            if cfg and cfg != canonical_cfg.get(str(rule.get("name", ""))):
                 target.id = f"{target.id}#cfg:{cfg}"
             if target.id not in seen:
                 ev.targets.append(target)

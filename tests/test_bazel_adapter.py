@@ -148,7 +148,8 @@ def test_bazel_dll_output_classified_as_shared_library():
 
 def test_bazel_cquery_preserves_multiple_configurations():
     # One label under two configurations (target vs exec) with different deps:
-    # both configured instances must survive, disambiguated by configurationId.
+    # both survive. The first (canonical) config keeps the plain label id so
+    # aquery linkage resolves; the extra config is suffixed with its id.
     cquery = json.dumps({"results": [
         {"target": {"rule": {"name": "//foo:foo", "ruleClass": "cc_library",
             "attribute": [{"name": "deps", "type": "LABEL_LIST", "stringListValue": ["//a:a"]}]}},
@@ -160,9 +161,29 @@ def test_bazel_cquery_preserves_multiple_configurations():
     ev = BazelAdapter(cquery=cquery).collect()
     deps = {t.id: t.dependencies for t in ev.targets}
     assert deps == {
-        "target:////foo:foo#cfg:1": ["target:////a:a"],
-        "target:////foo:foo#cfg:2": ["target:////b:b"],
+        "target:////foo:foo": ["target:////a:a"],          # canonical (first) config
+        "target:////foo:foo#cfg:2": ["target:////b:b"],    # extra config preserved
     }
+
+
+def test_bazel_multi_config_aquery_links_to_canonical_target():
+    # Even when a label is multi-config, an aquery compile unit referencing the
+    # label-only target id must resolve to the canonical collected Target.
+    cquery = json.dumps({"results": [
+        {"target": {"rule": {"name": "//foo:foo", "ruleClass": "cc_library"}}, "configurationId": 1},
+        {"target": {"rule": {"name": "//foo:foo", "ruleClass": "cc_library"}}, "configurationId": 2},
+    ]})
+    aquery = json.dumps({
+        "artifacts": [{"id": "1", "pathFragmentId": "10"}],
+        "actions": [{"mnemonic": "CppCompile", "targetId": "100",
+                     "arguments": ["gcc", "-c", "foo.cc"], "primaryOutputId": "1"}],
+        "targets": [{"id": "100", "label": "//foo:foo"}],
+        "pathFragments": [{"id": "10", "label": "foo.o"}],
+    })
+    ev = BazelAdapter(cquery=cquery, aquery=aquery).collect()
+    target_ids = {t.id for t in ev.targets}
+    assert "target:////foo:foo" in target_ids                       # canonical present
+    assert ev.compile_units[0].target_id == "target:////foo:foo"    # links to it
 
 
 def test_bazel_cquery_single_config_keeps_plain_id():
