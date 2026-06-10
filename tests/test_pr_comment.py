@@ -364,6 +364,71 @@ def test_pipe_characters_escaped_in_cells():
     assert "f(int\\|long)" in body
 
 
+def test_finding_with_only_location_renders_location_cell():
+    report = _compare_report(
+        [
+            {
+                "kind": "func_removed",
+                "symbol": "f",
+                "description": "",
+                "severity": "breaking",
+                "source_location": "foo.h:9",
+            },
+        ]
+    )
+    body = render_comment(build_model(report), sha="x")
+    assert "foo.h:9" in body
+
+
+def test_safe_section_caps_symbols_per_kind():
+    changes = [
+        {
+            "kind": "func_added",
+            "symbol": f"add_{i}",
+            "description": "new",
+            "severity": "compatible",
+        }
+        for i in range(20)
+    ]
+    body = render_comment(build_model(_compare_report(changes)), sha="x")
+    assert "(+8)" in body  # 20 symbols, cap 12 → "+8" more
+
+
+def test_release_full_detail_table_with_rows():
+    body = render_comment(build_model(_release_report()), sha="x", detail="full")
+    assert "Per-library results (2)" in body
+    assert "libfoo.so.1" in body and "libbar.so.2" in body
+
+
+def test_release_summary_detail_omits_table():
+    body = render_comment(build_model(_release_report()), sha="x", detail="summary")
+    assert "Per-library results" not in body
+    assert "**2 breaking**" in body
+
+
+def test_release_skips_non_dict_library_entries():
+    report = {
+        "verdict": "COMPATIBLE",
+        "old_dir": "/o",
+        "new_dir": "/n",
+        "libraries": [
+            "not-a-dict",
+            {
+                "library": "ok.so",
+                "verdict": "COMPATIBLE",
+                "breaking": 0,
+                "source_breaks": 0,
+                "compatible_additions": 1,
+            },
+        ],
+        "unmatched_old": [],
+        "unmatched_new": [],
+    }
+    model = build_model(report)
+    assert len(model.library_rows) == 1
+    assert model.counts == (0, 0, 1)
+
+
 def test_empty_model_renders_clean_verdict():
     model = CommentModel(
         mode="compare", subject="lib", old_label="o", new_label="n", policy="strict_abi"
