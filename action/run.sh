@@ -634,11 +634,19 @@ _maybe_post_pr_comment() {
     return 0
   fi
 
+  # Mirror the step's gate: when fail-on-api-break is set, API/source breaks
+  # turn the check red, so the comment must file them under Breaking too.
+  PR_GATE_ARGS=()
+  if [[ "${INPUT_FAIL_ON_API_BREAK:-false}" == "true" ]]; then
+    PR_GATE_ARGS+=(--gate-api-break)
+  fi
+
   abicheck pr-comment "$PR_JSON" \
     --sha "${head_sha:-${GITHUB_SHA:-}}" \
     --detail "${INPUT_PR_COMMENT_DETAIL:-standard}" \
     --on "${INPUT_PR_COMMENT_ON:-changes}" \
     --run-label "run #${GITHUB_RUN_NUMBER:-?}" \
+    "${PR_GATE_ARGS[@]}" \
     -o "$PR_BODY" || true
 
   if [[ ! -s "$PR_BODY" ]]; then
@@ -662,38 +670,52 @@ _create_pr_comment() {
     | gh api -X POST "repos/$repo/issues/$pr_number/comments" --input - >/dev/null
 }
 
+_gh_pr_comment_fallback() {
+  # Porcelain fallback. Pass -R when we know the repo so it works without a
+  # local checkout of the PR's repository (or after checking out a different one).
+  local pr_number="$1" body_file="$2" repo="$3"
+  if [[ -n "$repo" ]]; then
+    gh pr comment "$pr_number" -R "$repo" --body-file "$body_file" \
+      || echo "::warning::abicheck: failed to post PR comment (need 'pull-requests: write')."
+  else
+    gh pr comment "$pr_number" --body-file "$body_file" \
+      || echo "::warning::abicheck: failed to post PR comment (need 'pull-requests: write')."
+  fi
+}
+
 _post_pr_comment() {
   local pr_number="$1" body_file="$2"
   local repo="${GITHUB_REPOSITORY:-}"
   local mode="${INPUT_PR_COMMENT_MODE:-update}"
 
-  # Fresh comment per run, or missing prerequisites for marker matching → just
-  # create one via the porcelain command.
-  if [[ "$mode" == "new" || -z "$repo" ]] || ! command -v jq >/dev/null 2>&1; then
-    gh pr comment "$pr_number" --body-file "$body_file" \
-      || echo "::warning::abicheck: failed to post PR comment (need 'pull-requests: write')."
+  # Without a known repo or jq we cannot use the REST path; fall back to the
+  # porcelain command (which then resolves the repo from the local checkout).
+  if [[ -z "$repo" ]] || ! command -v jq >/dev/null 2>&1; then
+    _gh_pr_comment_fallback "$pr_number" "$body_file" "$repo"
     return 0
   fi
 
-  # Sticky: locate OUR previous comment by its hidden marker (not merely the
-  # last comment by this token, which could belong to other automation) and
-  # edit that specific comment in place.
-  local existing_id
-  existing_id=$(gh api --paginate "repos/$repo/issues/$pr_number/comments" \
-    --jq ".[] | select(.body | contains(\"$PR_COMMENT_MARKER\")) | .id" 2>/dev/null | tail -1)
-
-  if [[ -n "$existing_id" ]]; then
-    if jq -Rs '{body: .}' "$body_file" \
-        | gh api -X PATCH "repos/$repo/issues/comments/$existing_id" --input - >/dev/null 2>&1; then
-      echo "abicheck: updated sticky comment $existing_id."
-      return 0
+  # Sticky (update) mode: locate OUR previous comment by its hidden marker (not
+  # merely the last comment by this token, which could belong to other
+  # automation) and edit that specific comment in place.
+  if [[ "$mode" != "new" ]]; then
+    local existing_id
+    existing_id=$(gh api --paginate "repos/$repo/issues/$pr_number/comments" \
+      --jq ".[] | select(.body | contains(\"$PR_COMMENT_MARKER\")) | .id" 2>/dev/null | tail -1)
+    if [[ -n "$existing_id" ]]; then
+      if jq -Rs '{body: .}' "$body_file" \
+          | gh api -X PATCH "repos/$repo/issues/comments/$existing_id" --input - >/dev/null 2>&1; then
+        echo "abicheck: updated sticky comment $existing_id."
+        return 0
+      fi
+      echo "::warning::abicheck: could not update comment $existing_id; posting a new one."
     fi
-    echo "::warning::abicheck: could not update comment $existing_id; posting a new one."
   fi
 
+  # Create via the REST API (repo-qualified, so it works without a local clone
+  # of the PR repo); fall back to the porcelain command with -R if that fails.
   _create_pr_comment "$repo" "$pr_number" "$body_file" 2>/dev/null \
-    || gh pr comment "$pr_number" --body-file "$body_file" \
-    || echo "::warning::abicheck: failed to post PR comment (need 'pull-requests: write')."
+    || _gh_pr_comment_fallback "$pr_number" "$body_file" "$repo"
 }
 
 _maybe_post_pr_comment

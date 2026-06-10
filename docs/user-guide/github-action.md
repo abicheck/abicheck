@@ -576,6 +576,10 @@ public-header surface scoping (`--scope-public-headers`) and policy profiles
 (e.g. `sdk_vendor` demoting a removal) flow through automatically; the comment
 never re-classifies anything.
 
+The comment also tracks the gate: with `fail-on-api-break: true` (which turns
+the check red on source/API breaks), those findings are filed under **Breaking**
+in the comment to match, rather than **Needs review**.
+
 ### Conditional failure
 
 Allow API breaks but block binary ABI breaks:

@@ -150,17 +150,26 @@ def _detail_text(change: dict[str, object]) -> str:
 
 def _bucket_changes(
     changes: object,
+    gate_api_break: bool = False,
 ) -> tuple[list[Finding], list[Finding], list[Finding]]:
     breaking: list[Finding] = []
     review: list[Finding] = []
     safe: list[Finding] = []
     target = {"breaking": breaking, "review": review, "safe": safe}
+    # When the step gates on API breaks (fail-on-api-break), the check goes red
+    # on them, so the comment must file them under Breaking to match — risk
+    # findings are never gated and stay in review.
+    sev_map = (
+        {**_SEVERITY_BUCKET, "api_break": "breaking"}
+        if gate_api_break
+        else _SEVERITY_BUCKET
+    )
     if isinstance(changes, list):
         for c in changes:
             if not isinstance(c, dict):
                 continue
             sev = str(c.get("severity", "unknown"))
-            bucket = _SEVERITY_BUCKET.get(sev, "review")
+            bucket = sev_map.get(sev, "review")
             loc = c.get("source_location")
             target[bucket].append(
                 Finding(
@@ -173,8 +182,10 @@ def _bucket_changes(
     return breaking, review, safe
 
 
-def _from_compare(report: dict[str, object]) -> CommentModel:
-    breaking, review, safe = _bucket_changes(report.get("changes"))
+def _from_compare(
+    report: dict[str, object], gate_api_break: bool = False
+) -> CommentModel:
+    breaking, review, safe = _bucket_changes(report.get("changes"), gate_api_break)
     return CommentModel(
         mode="compare",
         subject=str(report.get("library", "library")),
@@ -187,8 +198,12 @@ def _from_compare(report: dict[str, object]) -> CommentModel:
     )
 
 
-def _from_appcompat(report: dict[str, object]) -> CommentModel:
-    breaking, review, safe = _bucket_changes(report.get("relevant_changes"))
+def _from_appcompat(
+    report: dict[str, object], gate_api_break: bool = False
+) -> CommentModel:
+    breaking, review, safe = _bucket_changes(
+        report.get("relevant_changes"), gate_api_break
+    )
     missing = report.get("missing_symbols")
     if isinstance(missing, list):
         for sym in missing:
@@ -228,6 +243,7 @@ def _append_release_global_row(
     name: str,
     verdict: object,
     findings: object,
+    gate_api_break: bool = False,
 ) -> None:
     """Fold a release-global check (bundle / probe-matrix) into the rows.
 
@@ -239,7 +255,12 @@ def _append_release_global_row(
     """
     if not isinstance(findings, list) or not findings:
         return
-    bucket = _VERDICT_BUCKET.get(str(verdict or ""), "review")
+    verdict_map = (
+        {**_VERDICT_BUCKET, "API_BREAK": "breaking"}
+        if gate_api_break
+        else _VERDICT_BUCKET
+    )
+    bucket = verdict_map.get(str(verdict or ""), "review")
     n = len(findings)
     rows.append(
         (
@@ -252,7 +273,9 @@ def _append_release_global_row(
     )
 
 
-def _from_release(report: dict[str, object]) -> CommentModel:
+def _from_release(
+    report: dict[str, object], gate_api_break: bool = False
+) -> CommentModel:
     rows: list[tuple[str, str, int, int, int]] = []
     libraries = report.get("libraries")
     if isinstance(libraries, list):
@@ -261,14 +284,15 @@ def _from_release(report: dict[str, object]) -> CommentModel:
                 continue
             # Review = source breaks + risk findings: a library that is
             # COMPATIBLE_WITH_RISK with only risk_changes must still count as a
-            # change so `--on changes` posts the warning-tone comment.
+            # change so `--on changes` posts the warning-tone comment. When the
+            # step gates on API breaks, source breaks count as breaking instead.
+            src = _as_int(lib.get("source_breaks"))
             rows.append(
                 (
                     str(lib.get("library", "?")),
                     str(lib.get("verdict", "?")),
-                    _as_int(lib.get("breaking")),
-                    _as_int(lib.get("source_breaks"))
-                    + _as_int(lib.get("risk_changes")),
+                    _as_int(lib.get("breaking")) + (src if gate_api_break else 0),
+                    (0 if gate_api_break else src) + _as_int(lib.get("risk_changes")),
                     _as_int(lib.get("compatible_additions")),
                 )
             )
@@ -278,12 +302,14 @@ def _from_release(report: dict[str, object]) -> CommentModel:
         "(bundle checks)",
         report.get("bundle_verdict"),
         report.get("bundle_findings"),
+        gate_api_break,
     )
     _append_release_global_row(
         rows,
         "(build-config matrix)",
         report.get("matrix_verdict"),
         report.get("matrix_findings"),
+        gate_api_break,
     )
     removed = report.get("unmatched_old")
     added = report.get("unmatched_new")
@@ -314,13 +340,19 @@ def _as_int(value: object) -> int:
     return 0
 
 
-def build_model(report: dict[str, object]) -> CommentModel:
-    """Detect the report shape and normalise it into a :class:`CommentModel`."""
+def build_model(
+    report: dict[str, object], gate_api_break: bool = False
+) -> CommentModel:
+    """Detect the report shape and normalise it into a :class:`CommentModel`.
+
+    When *gate_api_break* is set (the action's ``fail-on-api-break``), API/source
+    breaks are filed under Breaking so the comment matches the now-red check.
+    """
     if isinstance(report.get("libraries"), list):
-        return _from_release(report)
+        return _from_release(report, gate_api_break)
     if "application" in report or isinstance(report.get("relevant_changes"), list):
-        return _from_appcompat(report)
-    return _from_compare(report)
+        return _from_appcompat(report, gate_api_break)
+    return _from_compare(report, gate_api_break)
 
 
 def should_post(model: CommentModel, on: str) -> bool:

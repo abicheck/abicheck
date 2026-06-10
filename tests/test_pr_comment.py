@@ -256,6 +256,58 @@ def test_appcompat_missing_version_counts_as_breaking():
     assert any(f.symbol == "LIBFOO_2.0" for f in model.breaking)
 
 
+def test_gate_api_break_files_api_break_as_breaking():
+    # With fail-on-api-break, the check goes red on api_break, so the comment
+    # must file it under Breaking (not review) to match.
+    report = _compare_report(
+        [
+            {
+                "kind": "enum_member_added",
+                "symbol": "E::X",
+                "description": "d",
+                "severity": "api_break",
+            },
+            {
+                "kind": "type_field_added",
+                "symbol": "S",
+                "description": "d",
+                "severity": "risk",
+            },
+        ]
+    )
+    gated = build_model(report, gate_api_break=True)
+    assert gated.counts == (1, 1, 0)  # api_break → breaking, risk stays review
+    body = render_comment(gated, sha="x")
+    assert "ABI BREAKING" in body
+    # default (ungated) keeps api_break in review
+    ungated = build_model(report)
+    assert ungated.counts == (0, 2, 0)
+
+
+def test_gate_api_break_release_source_breaks_count_as_breaking():
+    report = {
+        "verdict": "API_BREAK",
+        "old_dir": "/o",
+        "new_dir": "/n",
+        "libraries": [
+            {
+                "library": "lib.so",
+                "verdict": "API_BREAK",
+                "breaking": 0,
+                "source_breaks": 2,
+                "risk_changes": 1,
+                "compatible_additions": 0,
+            },
+        ],
+        "unmatched_old": [],
+        "unmatched_new": [],
+    }
+    gated = build_model(report, gate_api_break=True)
+    assert gated.counts == (2, 1, 0)  # source_breaks → breaking, risk → review
+    ungated = build_model(report)
+    assert ungated.counts == (0, 3, 0)  # source_breaks + risk → review
+
+
 def test_malformed_changes_are_skipped():
     model = build_model(
         {

@@ -54,6 +54,13 @@ from .cli import _write_or_echo, main
     help="Run label shown in the footer, e.g. 'run #128'.",
 )
 @click.option(
+    "--gate-api-break",
+    is_flag=True,
+    default=False,
+    help="Treat API/source breaks as breaking (mirror fail-on-api-break, which "
+    "turns the check red on them).",
+)
+@click.option(
     "-o",
     "--output",
     type=click.Path(path_type=Path),
@@ -66,6 +73,7 @@ def pr_comment_cmd(
     detail: str,
     post_on: str,
     run_label: str | None,
+    gate_api_break: bool,
     output: Path | None,
 ) -> None:
     """Render a sticky PR-comment body from a JSON REPORT.
@@ -90,7 +98,7 @@ def pr_comment_cmd(
     if not isinstance(data, dict):
         raise click.ClickException("JSON report must be an object")
 
-    model = build_model(data)
+    model = build_model(data, gate_api_break=gate_api_break)
     if not should_post(model, post_on):
         # Nothing to post — leave an empty file so a `-s` check skips posting.
         if output is not None:
