@@ -115,9 +115,6 @@ def extract_compiler_record(
         ev.diagnostics.append(f"compiler-record: cannot read {red.path(str(path))} as ELF: {exc}")
         return ev
 
-    if ev.compile_units:
-        # Re-derive options across all recovered command lines (deduped).
-        ev.build_options = derive_build_options(ev.compile_units)
     if ev.toolchains or ev.compile_units or ev.build_options:
         ev.diagnostics.append(
             "compiler-record: provenance recovered from compiler-recorded "
@@ -130,6 +127,7 @@ def _collect_command_line(elf: Any, ev: BuildEvidence, red: RedactionPolicy) -> 
     section = elf.get_section_by_name(_COMMAND_LINE_SECTION)
     if section is None:
         return
+    parsed: list[CompileUnit] = []
     for command in parse_gcc_command_line(section.data()):
         try:
             argv = shlex.split(command, posix=os.name != "nt")
@@ -137,22 +135,27 @@ def _collect_command_line(elf: Any, ev: BuildEvidence, red: RedactionPolicy) -> 
             continue
         if not argv:
             continue
-        cu = _command_to_unit(argv, red)
-        if cu is not None:
-            ev.compile_units.append(cu)
+        unit = _command_to_unit(argv, red)
+        parsed.append(unit)
+        # Only emit a compile unit when the record names a translation unit.
+        # ``-frecord-gcc-switches`` records switches with no source — those
+        # still carry ABI options, so they feed build_options below.
+        if unit.source:
+            ev.compile_units.append(unit)
+    if parsed:
+        ev.build_options = derive_build_options(parsed)
 
 
-def _command_to_unit(argv: list[str], red: RedactionPolicy) -> CompileUnit | None:
+def _command_to_unit(argv: list[str], red: RedactionPolicy) -> CompileUnit:
+    """Build a CompileUnit from a recorded command; ``source`` is "" if absent."""
     source = ""
     for arg in argv[1:]:
         if not arg.startswith(("-", "/")) and detect_language(arg):
             source = arg
             break
-    if not source:
-        return None
     ctx = _extract_flags(argv, Path("."))
     red_argv = red.argv(argv)
-    red_source = red.path(source)
+    red_source = red.path(source) if source else ""
     return CompileUnit(
         id=compile_unit_id(red_source, red_argv),
         source=red_source,

@@ -71,47 +71,21 @@ def test_make_missing_dry_run_file_diagnostic(tmp_path):
     assert any("not found or unreadable" in d for d in ev.diagnostics)
 
 
-def test_make_live_query_disabled_without_build_dir():
-    ev = MakeAdapter(allow_query=False).collect()
-    assert any("live query disabled" in d for d in ev.diagnostics)
+def test_make_never_runs_make_without_transcript():
+    # The adapter must NOT execute make (make -n still runs `+` recipes and
+    # $(shell ...)); with no transcript it just records a diagnostic.
+    import abicheck.evidence.adapters.make as make_mod
+
+    assert not hasattr(make_mod, "subprocess")  # no exec machinery imported at all
+    ev = MakeAdapter(build_dir="/some/build").collect()
+    assert not ev.compile_units
+    assert any("never runs make" in d for d in ev.diagnostics)
 
 
-def test_make_live_query_invokes_subprocess(monkeypatch, tmp_path):
-    import subprocess as _sp
-
-    def fake_run(cmd, **kwargs):
-        return _sp.CompletedProcess(cmd, 0, stdout="gcc -std=c++17 -c m.cpp -o m.o", stderr="")
-
-    monkeypatch.setattr("abicheck.evidence.adapters.make.shutil.which", lambda _x: "/usr/bin/make")
-    monkeypatch.setattr("abicheck.evidence.adapters.make.subprocess.run", fake_run)
-    ev = MakeAdapter(build_dir=tmp_path).collect()
-    assert [c.source for c in ev.compile_units] == ["m.cpp"]
-
-
-def test_make_live_query_nonzero_exit_diagnostic(monkeypatch, tmp_path):
-    import subprocess as _sp
-
-    monkeypatch.setattr("abicheck.evidence.adapters.make.shutil.which", lambda _x: "/usr/bin/make")
-    monkeypatch.setattr("abicheck.evidence.adapters.make.subprocess.run",
-                        lambda cmd, **k: _sp.CompletedProcess(cmd, 2, stdout="", stderr="boom"))
-    ev = MakeAdapter(build_dir=tmp_path).collect()
-    assert any("exited 2" in d for d in ev.diagnostics)
-
-
-def test_make_executable_missing_diagnostic(monkeypatch, tmp_path):
-    monkeypatch.setattr("abicheck.evidence.adapters.make.shutil.which", lambda _x: None)
-    ev = MakeAdapter(build_dir=tmp_path).collect()
-    assert any("executable not found" in d for d in ev.diagnostics)
-
-
-def test_make_live_query_oserror_diagnostic(monkeypatch, tmp_path):
-    def boom(*_a, **_k):
-        raise OSError("no make")
-
-    monkeypatch.setattr("abicheck.evidence.adapters.make.shutil.which", lambda _x: "/usr/bin/make")
-    monkeypatch.setattr("abicheck.evidence.adapters.make.subprocess.run", boom)
-    ev = MakeAdapter(build_dir=tmp_path).collect()
-    assert any("dry-run failed" in d for d in ev.diagnostics)
+def test_make_force_recipe_prefix_is_tokenized():
+    # `+`-prefixed recipe lines are still parsed for facts (we never run them).
+    ev = MakeAdapter(dry_run="+gcc -std=c++17 -c forced.cpp -o forced.o").collect()
+    assert [c.source for c in ev.compile_units] == ["forced.cpp"]
 
 
 def test_make_compile_recipe_without_source_skipped():

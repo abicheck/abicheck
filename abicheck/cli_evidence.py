@@ -241,13 +241,14 @@ def _run_adapters(
             ),
         ))
 
-    if make_dry_run is not None or (build_system.lower() == "make" and build_dir is not None
-                                    and compile_db is None):
+    if make_dry_run is not None:
+        # Only a pre-captured transcript — the Make adapter never runs make,
+        # because `make -n` still executes `+` recipes and `$(shell …)`.
         ev = MakeAdapter(build_dir, dry_run=make_dry_run).collect()
         merged.merge(ev)
         extractors.append(ExtractorRecord(
             name="make", status="ok" if ev.compile_units else "partial",
-            inputs=[DEFAULT_REDACTION.path(str(make_dry_run or build_dir))],
+            inputs=[DEFAULT_REDACTION.path(str(make_dry_run))],
             detail=f"{len(ev.compile_units)} compile units (reduced confidence)",
         ))
 

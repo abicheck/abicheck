@@ -21,22 +21,24 @@ as a *reduced-confidence* fallback tier:
    by Bear / compiledb / intercept-build) — fed through
    :class:`CompileDbAdapter` with ``--build-system make``; this module is not
    needed for that path.
-2. This adapter is the next tier: it scrapes a ``make -n`` / ``make --trace``
-   *dry-run* transcript for compiler invocations. The dry run does not build
-   anything, so it is safe by default (ADR-028 D6); a live ``make -n`` is run
-   only when a build directory is given and querying is allowed.
+2. This adapter is the next tier: it scrapes a **pre-captured** ``make -n`` /
+   ``make --trace`` transcript for compiler invocations.
+
+The adapter never *runs* Make. That is deliberate: ``make -n`` is not actually
+side-effect free — GNU Make still executes recipe lines prefixed with ``+`` and
+evaluates ``$(shell …)`` at makefile-parse time — so running it would violate
+the post-build, non-executing contract (ADR-028 D6). The caller runs the dry
+run themselves (an explicit, auditable step) and feeds the transcript via
+``--make-dry-run``. Compiler wrapper / interception (Bear-style) is a separate
+explicit opt-in (ADR-032 D5) and is not implemented here.
 
 The recovered compile units are always **reduced confidence** (a Make dry run
-is not an authoritative target graph), recorded via a diagnostic. Compiler
-wrapper / interception (Bear-style) that changes the build invocation is an
-explicit opt-in (ADR-032 D5) and is *not* implemented here.
+is not an authoritative target graph), recorded via a diagnostic.
 """
 from __future__ import annotations
 
 import os
 import shlex
-import shutil
-import subprocess
 from pathlib import Path
 
 from ...build_context import _extract_flags
@@ -51,7 +53,7 @@ from .base import (
 
 
 class MakeAdapter:
-    """Scrape a ``make -n``/``--trace`` transcript into reduced-confidence units."""
+    """Scrape a pre-captured ``make -n``/``--trace`` transcript into units."""
 
     name = "make"
 
@@ -60,12 +62,12 @@ class MakeAdapter:
         build_dir: Path | str | None = None,
         *,
         dry_run: str | Path | None = None,
-        allow_query: bool = True,
         redaction: RedactionPolicy | None = None,
     ) -> None:
+        # ``build_dir`` is only a passive directory hint for resolving relative
+        # include paths; it is never used to execute Make.
         self.build_dir = Path(build_dir) if build_dir is not None else None
         self._dry_run = dry_run
-        self.allow_query = allow_query
         self.redaction = redaction or DEFAULT_REDACTION
 
     def collect(self) -> BuildEvidence:
@@ -103,32 +105,11 @@ class MakeAdapter:
                 f"{self.redaction.path(str(self._dry_run))}"
             )
             return None
-        if self.build_dir is not None and self.allow_query:
-            return self._run_make_dry_run(ev)
-        ev.diagnostics.append("make: no dry-run transcript provided and live query disabled")
+        ev.diagnostics.append(
+            "make: no dry-run transcript provided (the adapter never runs make; "
+            "capture `make -n`/`--trace` output and pass it via --make-dry-run)"
+        )
         return None
-
-    def _run_make_dry_run(self, ev: BuildEvidence) -> str | None:
-        make = shutil.which("make")
-        if make is None or self.build_dir is None:
-            ev.diagnostics.append("make: executable not found on PATH; cannot run dry-run")
-            return None
-        # `make -n` only prints the recipes it *would* run; it builds nothing,
-        # so this is a query of an existing tree (ADR-028 D6), not a build.
-        cmd = [make, "-n", "--print-directory", "-C", str(self.build_dir)]
-        try:
-            proc = subprocess.run(  # noqa: S603 — fixed argv, no shell
-                cmd, capture_output=True, text=True, timeout=120, check=False,
-            )
-        except (OSError, subprocess.SubprocessError) as exc:
-            ev.diagnostics.append(f"make: dry-run failed: {exc}")
-            return None
-        if proc.returncode != 0:
-            ev.diagnostics.append(
-                f"make: dry-run exited {proc.returncode}: {proc.stderr.strip()[:200]}"
-            )
-            return None
-        return proc.stdout
 
     # -- normalization ------------------------------------------------------
 
@@ -163,7 +144,7 @@ class MakeAdapter:
 
 def _split_recipe(line: str) -> list[str]:
     """Tokenize one make recipe line, tolerating the usual ``@``/trace noise."""
-    stripped = line.strip().lstrip("@")  # make silences recipes with a leading @
+    stripped = line.strip().lstrip("@+-")  # make recipe prefixes: @ (silent), + (force), - (ignore)
     if not stripped:
         return []
     try:

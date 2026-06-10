@@ -132,6 +132,21 @@ def test_extract_compiler_record_success(tmp_path, monkeypatch):
     assert any("advisory" in d for d in ev.diagnostics)
 
 
+def test_extract_compiler_record_switches_only_record(tmp_path, monkeypatch):
+    # -frecord-gcc-switches records switches with no source token; the ABI
+    # options must still be recovered even though no compile unit is emitted.
+    binpath = tmp_path / "switches.so"
+    binpath.write_bytes(b"\x7fELF")
+    section = _FakeSection(b"GNU C11 13.3.0 -std=c11 -D_GLIBCXX_USE_CXX11_ABI=0 -O2\x00")
+    monkeypatch.setattr(cr, "ELFFile", lambda _fh: _FakeELF(section=section, dwarf=None))
+    ev = extract_compiler_record(binpath)
+    assert not ev.compile_units  # no source → no unit
+    opts = {(o.key, o.value) for o in ev.build_options}
+    # No source token → language unknown, so the std option key is the generic "std".
+    assert ("std", "c11") in opts
+    assert ("define:_GLIBCXX_USE_CXX11_ABI", "0") in opts
+
+
 def test_extract_compiler_record_no_section_no_dwarf(tmp_path, monkeypatch):
     binpath = tmp_path / "bare.so"
     binpath.write_bytes(b"\x7fELF")
