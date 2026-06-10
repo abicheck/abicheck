@@ -234,7 +234,7 @@ def test_unknown_builtin_policy_name_returns_none() -> None:
 def test_policy_file_param_accepts_builtin_name() -> None:
     from abicheck.cli_params import POLICY_FILE_PARAM
     out = POLICY_FILE_PARAM.convert("security", None, None)
-    assert Path(out).name == "security"
+    assert Path(out).name == "security.yaml"
 
 
 def test_policy_file_param_accepts_existing_path(tmp_path: Path) -> None:
@@ -251,6 +251,22 @@ def test_policy_file_param_rejects_unknown_name() -> None:
     from abicheck.cli_params import POLICY_FILE_PARAM
     with pytest.raises(click.BadParameter):
         POLICY_FILE_PARAM.convert("does-not-exist.yaml", None, None)
+
+
+def test_builtin_policy_name_not_shadowed_by_file(tmp_path: Path, monkeypatch) -> None:
+    """A local file named like a builtin must not shadow the shipped policy."""
+    (tmp_path / "security").write_text(
+        "base_policy: strict_abi\noverrides:\n  pie_disabled: ignore\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+
+    pf = PolicyFile.load(Path("security"))
+
+    assert pf.source_path is not None
+    assert pf.source_path.name == "security.yaml"
+    assert pf.overrides.get(ChangeKind.PIE_DISABLED) == Verdict.BREAKING
+    assert pf.compute_verdict([_change(ChangeKind.PIE_DISABLED)]) == Verdict.BREAKING
 
 
 def test_builtin_policy_name_not_shadowed_by_directory(tmp_path: Path, monkeypatch) -> None:
