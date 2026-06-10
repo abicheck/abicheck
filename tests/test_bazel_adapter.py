@@ -146,6 +146,34 @@ def test_bazel_dll_output_classified_as_shared_library():
     assert ev.link_units[0].kind == "shared_library"
 
 
+def test_bazel_cquery_preserves_multiple_configurations():
+    # One label under two configurations (target vs exec) with different deps:
+    # both configured instances must survive, disambiguated by configurationId.
+    cquery = json.dumps({"results": [
+        {"target": {"rule": {"name": "//foo:foo", "ruleClass": "cc_library",
+            "attribute": [{"name": "deps", "type": "LABEL_LIST", "stringListValue": ["//a:a"]}]}},
+         "configurationId": 1},
+        {"target": {"rule": {"name": "//foo:foo", "ruleClass": "cc_library",
+            "attribute": [{"name": "deps", "type": "LABEL_LIST", "stringListValue": ["//b:b"]}]}},
+         "configurationId": 2},
+    ]})
+    ev = BazelAdapter(cquery=cquery).collect()
+    deps = {t.id: t.dependencies for t in ev.targets}
+    assert deps == {
+        "target:////foo:foo#cfg:1": ["target:////a:a"],
+        "target:////foo:foo#cfg:2": ["target:////b:b"],
+    }
+
+
+def test_bazel_cquery_single_config_keeps_plain_id():
+    # A label with one configuration keeps the plain label id (aquery linkage).
+    cquery = json.dumps({"results": [
+        {"target": {"rule": {"name": "//foo:foo", "ruleClass": "cc_library"}}, "configurationId": 1},
+    ]})
+    ev = BazelAdapter(cquery=cquery).collect()
+    assert ev.targets[0].id == "target:////foo:foo"
+
+
 def test_bazel_aquery_builds_compile_and_link_units():
     ev = BazelAdapter(aquery=AQUERY).collect()
     assert len(ev.compile_units) == 1

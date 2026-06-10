@@ -167,14 +167,33 @@ class BazelAdapter:
         data = _load_jsonproto(text, "cquery", ev)
         if data is None:
             return
-        seen: set[str] = set()
+        # A single label can appear under several configurations (target vs exec)
+        # with different deps/attrs. Collect the rule + config first so we can
+        # disambiguate the id by configuration only for labels that actually span
+        # more than one — keeping the common single-config id plain so it still
+        # matches the label-only target ids that aquery emits.
+        entries: list[tuple[dict[str, object], str]] = []
+        configs_per_label: dict[str, set[str]] = {}
         for ct in _dicts(data.get("results")):
             target_obj = ct.get("target")
             rule = target_obj.get("rule") if isinstance(target_obj, dict) else None
             if not isinstance(rule, dict):
                 continue
+            name = str(rule.get("name", ""))
+            if not name:
+                continue
+            cfg = str(ct.get("configurationId", "") or "")
+            entries.append((rule, cfg))
+            configs_per_label.setdefault(name, set()).add(cfg)
+
+        seen: set[str] = set()
+        for rule, cfg in entries:
             target = self._target_from_rule(rule)
-            if target is not None and target.id not in seen:
+            if target is None:
+                continue
+            if cfg and len(configs_per_label[str(rule.get("name", ""))]) > 1:
+                target.id = f"{target.id}#cfg:{cfg}"
+            if target.id not in seen:
                 ev.targets.append(target)
                 seen.add(target.id)
 
