@@ -87,6 +87,13 @@ def _diff_generated(old: SourceAbiSurface, new: SourceAbiSurface) -> list[Change
     missed for either. Handled before the per-bucket diffs so a generated entity
     is reported once, as ``generated_header_changed`` rather than (e.g.) a
     constexpr/default-arg change.
+
+    Both *content changes* (entity in both surfaces, differing) and *removals*
+    (a generated public entity present only in the old surface) are reported:
+    the normal declaration diff intentionally skips generated entities and there
+    is no removal diff for ``reachable_types``, so without the removal pass a
+    generated config header dropping a public record/enum/typedef/decl would
+    produce no L4 finding at all.
     """
     changes: list[Change] = []
     for old_bucket, new_bucket in (
@@ -111,6 +118,24 @@ def _diff_generated(old: SourceAbiSurface, new: SourceAbiSurface) -> list[Change
                         old_value=ov.value or ov.type_hash or ov.signature_hash,
                         new_value=nv.value or nv.type_hash or nv.signature_hash,
                         source_location=_loc(nv),
+                    )
+                )
+        for key in sorted(set(old_b) - set(new_b)):
+            ov = old_b[key]
+            if _is_generated(ov):
+                name = ov.qualified_name
+                changes.append(
+                    Change(
+                        kind=ChangeKind.GENERATED_HEADER_CHANGED,
+                        symbol=name,
+                        description=(
+                            f"Generated public {ov.kind} {name!r} was removed; the "
+                            "generated header no longer emits it. Verify the "
+                            "generated configuration is intended."
+                        ),
+                        old_value=ov.value or ov.type_hash or ov.signature_hash,
+                        new_value="",
+                        source_location=_loc(ov),
                     )
                 )
     return changes

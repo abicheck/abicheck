@@ -515,6 +515,38 @@ def test_diff_generated_type_change_detected() -> None:
     assert changes[0].symbol == "cfg::Layout"
 
 
+def test_diff_generated_type_removal_detected() -> None:
+    # A generated public type/decl dropped by the generated header (present only
+    # in the old surface) must surface as generated_header_changed: the normal
+    # declaration diff skips generated entities and there is no removal diff for
+    # reachable_types, so it would otherwise be silently missed (Codex #335, P2).
+    old = _surface(
+        reachable_types=[
+            _entity(
+                "cfg::Layout",
+                "record",
+                visibility="generated",
+                origin="GENERATED",
+                type_hash="h1",
+            )
+        ],
+        reachable_declarations=[
+            _entity(
+                "cfg::FLAG",
+                "constexpr",
+                visibility="generated",
+                origin="GENERATED",
+                value="1",
+            )
+        ],
+    )
+    new = _surface()  # both generated entities gone
+    changes = diff_source_abi(old, new)
+    assert all(c.kind is ChangeKind.GENERATED_HEADER_CHANGED for c in changes)
+    assert {c.symbol for c in changes} == {"cfg::Layout", "cfg::FLAG"}
+    assert all(c.new_value == "" for c in changes)
+
+
 def test_diff_no_change_is_empty() -> None:
     s = _surface(
         reachable_macros=[_entity("FOO", "macro", value="1")],
