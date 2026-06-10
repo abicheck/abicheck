@@ -30,7 +30,7 @@ on:
     # Weekly, Monday 06:42 UTC — offset from other scheduled jobs.
     - cron: "42 6 * * 1"
   pull_request:
-    types: [labeled, synchronize]
+    types: [opened, reopened, synchronize, labeled]
     paths:
       - "abicheck/diff_*.py"
       - "abicheck/checker.py"
@@ -44,14 +44,15 @@ on:
 permissions:
   contents: read
 
-# Only run the PR lane when the `performance` label is present; the scheduled
-# and manual lanes always run.
+# The PR lane runs whenever a PR changes the detector core (the `paths` filter
+# above), plus on the weekly schedule and on manual dispatch. It is
+# `continue-on-error`, so auto-running on those PRs measures without blocking.
+# Adding the `performance` label re-triggers the lane on a PR (the `labeled`
+# event); for an arbitrary PR that does not touch the detector core, use
+# `workflow_dispatch` to run it on demand.
 jobs:
   scaling:
     name: Comparison scaling benchmark
-    if: >-
-      github.event_name != 'pull_request' ||
-      contains(github.event.pull_request.labels.*.name, 'performance')
     runs-on: ubuntu-latest
     timeout-minutes: 20
     continue-on-error: true

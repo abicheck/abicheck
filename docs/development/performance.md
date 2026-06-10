@@ -133,8 +133,11 @@ runs the scaling benchmark and the `slow` performance tests. It is deliberately
 **flexible and non-gating**:
 
 - Triggers: weekly schedule, manual `workflow_dispatch` (with size / budget
-  inputs), and on PRs carrying the **`performance`** label or touching the
-  detector core.
+  inputs), and **automatically on any PR that changes the detector core**
+  (`abicheck/diff_*.py`, `checker.py`, `post_processing.py`, `demangle.py`, the
+  benchmark script, or the perf test). Adding the **`performance`** label
+  re-triggers the lane on such a PR; for a PR that does not touch the detector
+  core, run it on demand with `workflow_dispatch`.
 - `continue-on-error: true` — it never blocks a merge.
 - Publishes the scaling table to the job summary and uploads the JSON.
 
