@@ -2,14 +2,15 @@
 """Scaling benchmark for the abicheck comparison pipeline.
 
 Real libraries can be large: ``libonedal_core.so`` exports ~10,550 functions.
-The snapshot/``dump`` step scales fine (~5 s for that library), but ``compare``
-can blow up super-linearly on the post-processing detectors (affected-symbol
-enrichment, opaque-type filtering, namespace pattern detection). This harness
-makes that visible *without* needing a real binary, castxml, or a compiler: it
-synthesises ``AbiSnapshot`` pairs of increasing size that exercise the
-expensive code paths, times :func:`abicheck.checker.compare`, and reports an
-empirical scaling exponent so a regression (or an improvement) shows up as a
-single number.
+The snapshot/``dump`` step scales fine (~5 s for that library); ``compare`` used
+to blow up super-linearly on the post-processing detectors (surface scoping,
+affected-symbol enrichment, namespace demangling, fingerprint rename matching).
+Those paths are now fixed (see ``docs/development/performance.md``), and this
+harness guards against regressions *without* needing a real binary, castxml, or
+a compiler: it synthesises ``AbiSnapshot`` pairs of increasing size that
+exercise each formerly-expensive path, times :func:`abicheck.checker.compare`,
+and reports an empirical scaling exponent so a regression (or an improvement)
+shows up as a single number.
 
 It is intentionally **flexible**: by default it only measures and prints, so it
 is safe to run unconditionally in CI as an informational job. Pass
@@ -56,12 +57,19 @@ if str(REPO_DIR) not in sys.path:
     sys.path.insert(0, str(REPO_DIR))
 
 from abicheck.checker import compare  # noqa: E402
+from abicheck.elf_metadata import (  # noqa: E402
+    ElfMetadata,
+    ElfSymbol,
+    SymbolBinding,
+    SymbolType,
+)
 from abicheck.model import (  # noqa: E402
     AbiSnapshot,
     Function,
     Param,
     RecordType,
     TypeField,
+    Variable,
     Visibility,
 )
 
@@ -168,10 +176,136 @@ def _build_elf_namespace(n_funcs: int) -> tuple[AbiSnapshot, AbiSnapshot]:
     return old, new
 
 
-SCENARIOS: dict[str, Callable[[int], tuple[AbiSnapshot, AbiSnapshot]]] = {
-    "add_remove": _build_add_remove,
-    "type_churn": _build_type_churn,
-    "elf_namespace": _build_elf_namespace,
+def _build_var_churn(n_vars: int) -> tuple[AbiSnapshot, AbiSnapshot]:
+    """Many public variables that all change type.
+
+    Isolates the public-surface classification path, which recomputes set
+    unions per change — quadratic in the number of findings regardless of
+    types or functions.
+    """
+    old = AbiSnapshot(
+        library="libscale.so",
+        version="1.0",
+        variables=[
+            Variable(
+                name=f"v{i}", mangled=f"v{i}", type="int", visibility=Visibility.PUBLIC
+            )
+            for i in range(n_vars)
+        ],
+    )
+    new = AbiSnapshot(
+        library="libscale.so",
+        version="2.0",
+        variables=[
+            Variable(
+                name=f"v{i}", mangled=f"v{i}", type="long", visibility=Visibility.PUBLIC
+            )
+            for i in range(n_vars)
+        ],
+    )
+    return old, new
+
+
+def _build_rename_churn(n_funcs: int) -> tuple[AbiSnapshot, AbiSnapshot]:
+    """Stripped (ELF-only) library where every symbol is renamed.
+
+    Old and new export disjoint, similarly-sized function symbols, so the
+    fingerprint rename matcher's size gate admits the whole cross-product and
+    the O(removed x added) name-similarity pass dominates — even when (as here)
+    it ultimately reports no confident rename.
+    """
+
+    def elf(prefix: str) -> ElfMetadata:
+        return ElfMetadata(
+            soname="libscale.so",
+            symbols=[
+                ElfSymbol(
+                    name=f"_Z3{prefix}v{i}",
+                    binding=SymbolBinding.GLOBAL,
+                    sym_type=SymbolType.FUNC,
+                    # Spread sizes the way a real stripped library does, so the
+                    # size-bucketed rename matcher behaves realistically (a few
+                    # symbols per size) rather than all-collide in one bucket.
+                    size=16 + (i * 7) % 4096,
+                )
+                for i in range(n_funcs)
+            ],
+        )
+
+    old = AbiSnapshot(
+        library="libscale.so", version="1.0", elf=elf("old"), elf_only_mode=True
+    )
+    new = AbiSnapshot(
+        library="libscale.so", version="2.0", elf=elf("new"), elf_only_mode=True
+    )
+    return old, new
+
+
+def _build_nested_types(n_types: int) -> tuple[AbiSnapshot, AbiSnapshot]:
+    """Chain of embedded types (each embeds the previous) — every one changes.
+
+    Stresses the transitive type-ancestor closure in affected-symbol
+    enrichment: each type's ancestor set is rescanned against all functions and
+    the per-ancestor function lists accumulate, so cost grows super-quadratically
+    with the depth of the embedding graph. Capped at a small size by design.
+    """
+    types_old, types_new = [], []
+    for i in range(n_types):
+        prev = f"Type_{i - 1}" if i else "int"
+        base = [
+            TypeField(name="inner", type=prev, offset_bits=0),
+            TypeField(name="a", type="int", offset_bits=64),
+        ]
+        grown = base + [TypeField(name="b", type="int", offset_bits=96)]
+        types_old.append(
+            RecordType(name=f"Type_{i}", kind="struct", size_bits=128, fields=base)
+        )
+        types_new.append(
+            RecordType(name=f"Type_{i}", kind="struct", size_bits=160, fields=grown)
+        )
+    funcs = [
+        Function(
+            name=f"f_{i}",
+            mangled=f"_Z3f_{i}P6Type_{i % n_types}",
+            return_type="int",
+            params=[Param(name="p", type=f"Type_{i % n_types} *")],
+            visibility=Visibility.PUBLIC,
+        )
+        for i in range(n_types)
+    ]
+    old = AbiSnapshot(
+        library="libscale.so", version="1.0", functions=list(funcs), types=types_old
+    )
+    new = AbiSnapshot(
+        library="libscale.so", version="2.0", functions=list(funcs), types=types_new
+    )
+    return old, new
+
+
+@dataclass
+class Scenario:
+    build: Callable[[int], tuple[AbiSnapshot, AbiSnapshot]]
+    # Per-scenario default sweep. Some scenarios are intentionally pathological
+    # (known super-linear paths) and must use a smaller sweep than the linear
+    # control scenarios. An explicit ``--sizes`` overrides this.
+    sizes: tuple[int, ...] = DEFAULT_SIZES
+    # Hard safety cap: sizes above this are skipped even if requested via
+    # ``--sizes``, so a known-pathological scenario can't be made to hang.
+    max_size: int = 1_000_000
+    # True if the scenario only does meaningful work with a demangler present.
+    needs_demangler: bool = False
+
+
+SCENARIOS: dict[str, Scenario] = {
+    "add_remove": Scenario(_build_add_remove),
+    "type_churn": Scenario(_build_type_churn),
+    "elf_namespace": Scenario(_build_elf_namespace, needs_demangler=True),
+    "var_churn": Scenario(_build_var_churn),
+    # Quadratic paths — keep the sweeps small so a default run stays bounded.
+    "rename_churn": Scenario(
+        _build_rename_churn, sizes=(250, 500, 1000), max_size=1200
+    ),
+    "nested_types": Scenario(_build_nested_types, sizes=(100, 200, 400), max_size=500),
 }
 
 
@@ -195,10 +329,12 @@ def _has_demangler() -> bool:
 
 
 def measure(scenario: str, sizes: list[int], repeat: int) -> list[Point]:
-    build = SCENARIOS[scenario]
+    spec = SCENARIOS[scenario]
     points: list[Point] = []
     for n in sizes:
-        old, new = build(n)
+        if n > spec.max_size:
+            continue
+        old, new = spec.build(n)
         best = math.inf
         changes = 0
         for _ in range(repeat):
@@ -289,8 +425,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--sizes",
         type=int,
         nargs="+",
-        default=list(DEFAULT_SIZES),
-        help=f"Function counts to sweep (default: {' '.join(map(str, DEFAULT_SIZES))})",
+        default=None,
+        help="Sizes to sweep, overriding each scenario's tuned default "
+        f"(linear scenarios default to {' '.join(map(str, DEFAULT_SIZES))})",
     )
     p.add_argument(
         "--repeat",
@@ -333,12 +470,20 @@ def main(argv: list[str] | None = None) -> int:
     failures: list[str] = []
 
     for scenario in scenarios:
-        if scenario == "elf_namespace" and not _has_demangler():
+        spec = SCENARIOS[scenario]
+        if spec.needs_demangler and not _has_demangler():
             print(
                 f"\nScenario: {scenario}  SKIP (no c++filt/cxxfilt demangler available)"
             )
             continue
-        points = measure(scenario, args.sizes, args.repeat)
+        sizes = args.sizes if args.sizes is not None else list(spec.sizes)
+        points = measure(scenario, sizes, args.repeat)
+        if not points:
+            print(
+                f"\nScenario: {scenario}  SKIP (all requested sizes exceed its cap "
+                f"of {SCENARIOS[scenario].max_size})"
+            )
+            continue
         exponent = scaling_exponent(points)
         tail = tail_exponent(points)
         _print_table(scenario, points, exponent, tail)

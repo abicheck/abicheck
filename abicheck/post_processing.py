@@ -250,7 +250,11 @@ class FilterNonPublicSurface:
     def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:
         if not ctx.scope_to_public_surface:
             return changes
-        from .surface import classify_change_surface, compute_public_surface
+        from .surface import (
+            classify_change_surface,
+            compute_public_surface,
+            surface_unions,
+        )
 
         surf_old = compute_public_surface(ctx.old)
         surf_new = compute_public_surface(ctx.new)
@@ -264,6 +268,10 @@ class FilterNonPublicSurface:
             ctx.scope_fell_back = True
             return changes
         force_public = ctx.force_public_symbols
+        # Compute the old∪new surface universes once for the whole pass; doing
+        # this per change is O(findings × surface) and makes large comparisons
+        # quadratic.
+        unions = surface_unions(surf_old, surf_new)
         kept: list[Change] = []
         for c in changes:
             # Widening overlay (ADR-024 §D6): a user-guaranteed public symbol
@@ -271,7 +279,7 @@ class FilterNonPublicSurface:
             if force_public and _change_matches_symbols(c, force_public):
                 kept.append(c)
                 continue
-            in_surface, reason = classify_change_surface(c, surf_old, surf_new)
+            in_surface, reason = classify_change_surface(c, surf_old, surf_new, unions=unions)
             if in_surface:
                 kept.append(c)
             else:

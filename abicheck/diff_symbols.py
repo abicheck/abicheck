@@ -16,8 +16,10 @@
 """Symbol-level ABI diff detectors (functions, variables, parameters)."""
 from __future__ import annotations
 
+import bisect
 import logging
 import re
+from functools import lru_cache
 from typing import Any
 
 from .binary_fingerprint import (
@@ -1152,18 +1154,30 @@ def _find_rename_pairs(
     old_map: dict[str, Function],
     new_map: dict[str, Function],
 ) -> list[tuple[str, str]]:
-    """Return (old_name, new_name) pairs where new_name has a common prefix added to old_name."""
+    """Return (old_name, new_name) pairs where new_name has a common prefix added to old_name.
+
+    The match condition is ``a_name.endswith(r_name)`` with ``a_name`` strictly
+    longer (a prefix was prepended). The old ``endswith("_" + r_name)`` branch
+    was redundant — any name ending with ``"_" + r_name`` already ends with
+    ``r_name``. To avoid the O(removed × added) cross-product, index the added
+    names *reversed* so the suffix test becomes a prefix lookup: a binary search
+    locates the contiguous block of reversed added names that start with the
+    reversed removed name. Both ``removed`` and the reversed index are iterated
+    in sorted order, so the result is deterministic.
+    """
+    rev_index = sorted((new_map[a_sym].name[::-1], new_map[a_sym].name) for a_sym in added)
+    rev_keys = [k for k, _ in rev_index]
     pairs: list[tuple[str, str]] = []
-    for r_sym in removed:
+    for r_sym in sorted(removed):
         r_name = old_map[r_sym].name
-        for a_sym in added:
-            a_name = new_map[a_sym].name
-            if a_name.endswith(r_name) and len(a_name) > len(r_name):
+        rk = r_name[::-1]
+        i = bisect.bisect_left(rev_keys, rk)
+        while i < len(rev_keys) and rev_keys[i].startswith(rk):
+            a_name = rev_index[i][1]
+            if len(a_name) > len(r_name):
                 pairs.append((r_name, a_name))
                 break
-            if a_name.endswith("_" + r_name) and len(a_name) > len(r_name) + 1:
-                pairs.append((r_name, a_name))
-                break
+            i += 1
     return pairs
 
 
@@ -1756,6 +1770,28 @@ def _return_type_of(s: str) -> str:
     return s[:sp].strip() if sp != -1 else ""
 
 
+@lru_cache(maxsize=65536)
+def _rename_name_parse(name: str) -> tuple[str | None, str, str, str]:
+    """Per-name pieces used by :func:`_plausible_rename`, demangled once.
+
+    Returns ``(ctor_dtor_variant, leaf, param_signature, return_type)``. The
+    name-similarity gate compares every removed symbol against every size-
+    eligible added one, so the same name is parsed many times; caching the
+    per-name derivation keeps that gate from re-demangling and re-parsing the
+    same symbol on each pair (the dominant cost of rename detection on large
+    ELF-only libraries). Bounded so it cannot grow without limit.
+    """
+    from .demangle import demangle
+
+    d = demangle(name) or name
+    return (
+        _ctor_dtor_variant(name),
+        _unqualified_name_of(d),
+        _param_signature_of(d),
+        _return_type_of(d),
+    )
+
+
 def _plausible_rename(old_name: str, new_name: str) -> bool:
     """Whether two symbol names are similar enough to credibly be a rename.
 
@@ -1781,18 +1817,10 @@ def _plausible_rename(old_name: str, new_name: str) -> bool:
     # ``B::A()`` both reduce to leaf ``A()``), since a constructor ABI symbol
     # cannot be satisfied by an ordinary member. (Checked on the raw mangled
     # name, so it catches the case the demangler collapses to an identical leaf.)
-    ov, nv = _ctor_dtor_variant(old_name), _ctor_dtor_variant(new_name)
+    ov, a, pa, ra = _rename_name_parse(old_name)
+    nv, b, pb, rb = _rename_name_parse(new_name)
     if (ov is not None or nv is not None) and ov != nv:
         return False
-    # Demangle each name exactly once and reuse the result for both the leaf and
-    # the parameter signature (rather than relying on the demangle LRU cache,
-    # which can thrash on libraries with > 16k symbols).
-    from .demangle import demangle
-
-    da = demangle(old_name) or old_name
-    db = demangle(new_name) or new_name
-    a = _unqualified_name_of(da)
-    b = _unqualified_name_of(db)
     # Undemangleable mangled names: when no demangler is available the leaf is
     # the raw Itanium spelling, whose shared boilerplate (``_ZN``, type codes,
     # …) would inflate the affix score and pair unrelated symbols. Demangling is
@@ -1813,10 +1841,7 @@ def _plausible_rename(old_name: str, new_name: str) -> bool:
     # change to either is a distinct ABI symbol (foo(int) -> foo(long), or
     # int foo<int>() -> long foo<int>()), not a rename. Ordinary (non-template)
     # functions demangle without a return type, so that check is a no-op there.
-    sig_match = (
-        _param_signature_of(da) == _param_signature_of(db)
-        and _return_type_of(da) == _return_type_of(db)
-    )
+    sig_match = pa == pb and ra == rb
     if a == b:
         # Same unqualified name + template args: a rename only if the signature
         # also matches (else it is a signature change).

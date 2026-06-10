@@ -530,10 +530,39 @@ def _origin_reason(
     return None
 
 
+@dataclass(frozen=True)
+class SurfaceUnions:
+    """The four old∪new surface universes used to classify a finding.
+
+    These depend only on the surface *pair*, not on the individual change, so
+    when classifying many findings against the same surfaces they should be
+    computed once and reused — recomputing the unions per change is
+    O(findings × surface) and makes large comparisons quadratic. Build with
+    :func:`surface_unions` and pass to :func:`classify_change_surface`.
+    """
+
+    public_symbols: frozenset[str]
+    all_symbols: frozenset[str]
+    public_types: frozenset[str]
+    all_types: frozenset[str]
+
+
+def surface_unions(surf_old: PublicSurface, surf_new: PublicSurface) -> SurfaceUnions:
+    """Compute the old∪new surface universes once for a surface pair."""
+    return SurfaceUnions(
+        public_symbols=frozenset(surf_old.public_symbols | surf_new.public_symbols),
+        all_symbols=frozenset(surf_old.all_symbols | surf_new.all_symbols),
+        public_types=frozenset(surf_old.public_types | surf_new.public_types),
+        all_types=frozenset(surf_old.all_types | surf_new.all_types),
+    )
+
+
 def classify_change_surface(
     change: Change,
     surf_old: PublicSurface,
     surf_new: PublicSurface,
+    *,
+    unions: SurfaceUnions | None = None,
 ) -> tuple[bool, str | None]:
     """Classify *change* against the public surface.
 
@@ -544,6 +573,11 @@ def classify_change_surface(
     Conservative by construction (ADR-024 §D5): leak findings, unknown
     symbols, and unknown types all stay in-surface so scoping can only ever
     remove findings it is *confident* are private.
+
+    When classifying many changes against the same surface pair, pass a
+    precomputed *unions* (see :func:`surface_unions`) to avoid recomputing the
+    four old∪new set unions on every call — that recomputation is what makes a
+    large comparison quadratic in the number of findings.
     """
     if change.kind.value in _NEVER_FILTER_KIND_NAMES:
         return True, None
@@ -553,10 +587,12 @@ def classify_change_surface(
         # rather than risk hiding a real change from the unresolved side.
         return True, None
 
-    public_symbols = surf_old.public_symbols | surf_new.public_symbols
-    all_symbols = surf_old.all_symbols | surf_new.all_symbols
-    public_types = surf_old.public_types | surf_new.public_types
-    all_types = surf_old.all_types | surf_new.all_types
+    if unions is None:
+        unions = surface_unions(surf_old, surf_new)
+    public_symbols = unions.public_symbols
+    all_symbols = unions.all_symbols
+    public_types = unions.public_types
+    all_types = unions.all_types
 
     sym = change.symbol or ""
     # Type-level findings must not be classified via the symbol universe first:

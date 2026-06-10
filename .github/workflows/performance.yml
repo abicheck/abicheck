@@ -2,15 +2,14 @@ name: Performance
 
 # Flexible, non-gating performance tracking for the comparison pipeline.
 #
-# Why non-gating: `compare` is known to scale super-linearly on large real
-# libraries (e.g. libonedal_core.so, ~10,550 functions, does not finish a
-# compare in 60 s) — see docs/development/performance.md. Until those
-# post-processing bottlenecks are addressed, this workflow only *measures*:
-# it runs the synthetic scaling benchmark and the `slow` perf tests, then
-# uploads the numbers and writes them to the job summary. Nothing here blocks
-# a merge.
+# The post-processing bottlenecks that made `compare` blow up on large real
+# libraries (e.g. libonedal_core.so, ~10,550 functions) are fixed — see
+# docs/development/performance.md. This workflow guards against regressions: it
+# runs the synthetic scaling benchmark and the `slow` perf tests, uploads the
+# numbers, and writes them to the job summary. It is intentionally non-gating
+# (continue-on-error) so it never blocks a merge while a budget is being tuned.
 #
-# How to turn gating on later: add `--max-seconds <budget>` and/or
+# How to turn gating on: add `--max-seconds <budget>` and/or
 # `--max-exponent <slope>` to the scaling step below and drop
 # `continue-on-error`. The thresholds are deliberately CLI flags so the budget
 # lives in this workflow, not hard-coded in the script.

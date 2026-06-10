@@ -127,19 +127,28 @@ def _strip_experimental(
     return qualified, None
 
 
-def _qualified_function_name(name: str, mangled: str) -> str:
+def _qualified_function_name(
+    name: str, mangled: str, demangled: dict[str, str] | None = None
+) -> str:
     """Return the best-effort qualified declaration name for a function.
 
     Header-derived snapshots populate ``Function.name`` with the
     qualified declaration name (``acme::lib::sort``). ELF-only mode
     leaves ``Function.name`` set to the mangled string; in that case we
-    fall back to lazy demangling of the mangled name. We import
-    ``demangle_batch`` lazily so that snapshots containing no functions
-    (a common case in unit-test fixtures) do not pay the import cost.
+    fall back to demangling of the mangled name.
+
+    When iterating all functions of a snapshot, pass a *demangled* map
+    (from :func:`_batch_demangle_public`) so the whole snapshot is demangled in
+    a single batched ``c++filt`` call instead of one subprocess per symbol —
+    the per-symbol path is what makes namespace detection explode on large
+    stripped libraries. The lazy single-symbol fallback is kept for callers
+    that have no batch (and is itself memoised in ``demangle_batch``).
     """
     if "::" in name or "<" in name:
         return name
     if mangled.startswith("_Z"):
+        if demangled is not None:
+            return demangled.get(mangled, name)
         from .demangle import demangle_batch
         return demangle_batch([mangled]).get(mangled, name)
     return name
@@ -173,11 +182,12 @@ def _index_funcs_by_stable_key(
     ``experimental::`` don't get reported.
     """
     from .model import Visibility
+    demangled = _batch_demangle_public(snap)
     out: dict[tuple[str, str], list[str]] = {}
     for f in snap.functions:
         if f.visibility != Visibility.PUBLIC:
             continue
-        qname = _qualified_function_name(f.name, f.mangled)
+        qname = _qualified_function_name(f.name, f.mangled, demangled)
         segs = _segments(qname)
         if not segs:
             continue
@@ -377,11 +387,12 @@ def _looks_like_std_reexport(
 def _collect_public_declared_names(snap: AbiSnapshot) -> set[str]:
     """Return the set of qualified declared names of public functions in *snap*."""
     from .model import Visibility
+    demangled = _batch_demangle_public(snap)
     out: set[str] = set()
     for f in snap.functions:
         if f.visibility != Visibility.PUBLIC:
             continue
-        qname = _qualified_function_name(f.name, f.mangled)
+        qname = _qualified_function_name(f.name, f.mangled, demangled)
         if qname:
             out.add(qname)
     return out
@@ -441,7 +452,7 @@ def detect_std_reexport_removed(
     for f in old.functions:
         if f.visibility != Visibility.PUBLIC:
             continue
-        declared = _qualified_function_name(f.name, f.mangled)
+        declared = _qualified_function_name(f.name, f.mangled, demangled)
         if not declared or declared in seen or declared in new_declared:
             continue
         underlying = demangled.get(f.mangled, "")
@@ -531,11 +542,12 @@ def _index_versioned(
 def _collect_versioned_entries(snap: AbiSnapshot) -> list[tuple[str, str]]:
     """Return ``[(qualified_name, "function"|"type"), …]`` for *snap*."""
     from .model import Visibility
+    demangled = _batch_demangle_public(snap)
     items: list[tuple[str, str]] = []
     for f in snap.functions:
         if f.visibility != Visibility.PUBLIC:
             continue
-        qname = _qualified_function_name(f.name, f.mangled)
+        qname = _qualified_function_name(f.name, f.mangled, demangled)
         if qname:
             items.append((qname, "function"))
     for t in snap.types:

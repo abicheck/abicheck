@@ -152,20 +152,25 @@ def _all_ancestors(
 def _resolve_ancestor_functions(
     tname: str,
     ancestors: set[str],
-    type_to_funcs: dict[str, list[str]],
-    type_to_mangled: dict[str, list[str]],
+    type_to_funcs: dict[str, set[str]],
+    type_to_mangled: dict[str, set[str]],
     old_pub: dict[str, Function],
     ancestor_func_cache: dict[str, list[tuple[str, str]]],
 ) -> None:
-    """Scan ancestor types and extend type_to_funcs/type_to_mangled for *tname*."""
+    """Union ancestor-type functions into type_to_funcs/type_to_mangled for *tname*.
+
+    Sets (not lists) are used so a type reachable through many ancestors does
+    not accumulate the same function name repeatedly — list accumulation here
+    made deeply-nested type graphs grow super-quadratically.
+    """
     for parent in ancestors:
         if parent in type_to_funcs:
-            type_to_funcs[tname].extend(type_to_funcs[parent])
-            type_to_mangled[tname].extend(type_to_mangled.get(parent, []))
+            type_to_funcs[tname].update(type_to_funcs[parent])
+            type_to_mangled[tname].update(type_to_mangled.get(parent, set()))
         elif parent in ancestor_func_cache:
             for fname, mname in ancestor_func_cache[parent]:
-                type_to_funcs[tname].append(fname)
-                type_to_mangled[tname].append(mname)
+                type_to_funcs[tname].add(fname)
+                type_to_mangled[tname].add(mname)
         else:
             parent_funcs: list[tuple[str, str]] = []
             for _m, func in old_pub.items():
@@ -174,8 +179,8 @@ def _resolve_ancestor_functions(
                     parent_funcs.append((func.name, func.mangled))
             ancestor_func_cache[parent] = parent_funcs
             for fname, mname in parent_funcs:
-                type_to_funcs[tname].append(fname)
-                type_to_mangled[tname].append(mname)
+                type_to_funcs[tname].add(fname)
+                type_to_mangled[tname].add(mname)
 
 
 def _collect_function_type_refs(func: Function) -> set[str]:
@@ -192,16 +197,16 @@ def _collect_function_type_refs(func: Function) -> set[str]:
 def _build_type_to_funcs(
     affected_types: set[str],
     old_pub: dict[str, Function],
-) -> tuple[dict[str, list[str]], dict[str, list[str]]]:
-    """Build type→(demangled, mangled) function name lists from public functions."""
-    type_to_funcs: dict[str, list[str]] = {t: [] for t in affected_types}
-    type_to_mangled: dict[str, list[str]] = {t: [] for t in affected_types}
+) -> tuple[dict[str, set[str]], dict[str, set[str]]]:
+    """Build type→(demangled, mangled) function name sets from public functions."""
+    type_to_funcs: dict[str, set[str]] = {t: set() for t in affected_types}
+    type_to_mangled: dict[str, set[str]] = {t: set() for t in affected_types}
     for _mangled, func in old_pub.items():
         func_types_used = _collect_function_type_refs(func)
         for tname in affected_types:
             if any(tname in ft for ft in func_types_used):
-                type_to_funcs[tname].append(func.name)
-                type_to_mangled[tname].append(func.mangled)
+                type_to_funcs[tname].add(func.name)
+                type_to_mangled[tname].add(func.mangled)
     return type_to_funcs, type_to_mangled
 
 
@@ -221,17 +226,17 @@ def _build_type_embed_index(
 
 def _assign_affected_symbols_to_changes(
     type_changes: list[Change],
-    type_to_funcs: dict[str, list[str]],
-    type_to_mangled: dict[str, list[str]],
+    type_to_funcs: dict[str, set[str]],
+    type_to_mangled: dict[str, set[str]],
 ) -> None:
     """Populate Change.affected_symbols from the type-to-function mappings."""
     for c in type_changes:
         type_name = _root_type_name(c)
-        funcs = type_to_funcs.get(type_name, [])
-        mangled_funcs = type_to_mangled.get(type_name, [])
+        funcs = type_to_funcs.get(type_name, set())
+        mangled_funcs = type_to_mangled.get(type_name, set())
         if funcs:
             # Store both demangled and mangled names for cross-format matching
-            c.affected_symbols = sorted(set(funcs) | set(mangled_funcs))
+            c.affected_symbols = sorted(funcs | mangled_funcs)
 
 
 def _enrich_affected_symbols(
