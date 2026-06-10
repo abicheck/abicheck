@@ -268,7 +268,13 @@ def collect_compare_evidence(
     new_build = new_pack.build_evidence if new_pack else None
     if old_build is not None and new_build is not None:
         changes.extend(diff_build_evidence(old_build, new_build))
-    if new_build is not None:
+    # Header-parse-context drift only applies when the new snapshot actually
+    # carries a public-header AST (L2). A binary-only compare has no header
+    # parse context that could have drifted, so the finding would be misleading.
+    new_has_headers = bool(
+        new_snapshot.from_headers and not new_snapshot.from_headers_inferred
+    )
+    if new_build is not None and new_has_headers:
         changes.extend(check_header_parse_drift(
             new_build, headers_parsed_with_context=old_parsed_with_context,
         ))

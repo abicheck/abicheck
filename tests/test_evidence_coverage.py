@@ -404,3 +404,28 @@ def test_compare_drift_fires_without_compile_db_context(tmp_path):
     ])
     assert result.exit_code in (0, 2, 4), result.output
     assert "header_parse_context_drift" in result.stdout
+
+
+def test_compare_binary_only_skips_header_drift(tmp_path):
+    """Codex: a binary-only new side (no header AST) must NOT emit drift."""
+    from abicheck.model import AbiSnapshot
+    from abicheck.serialization import save_snapshot
+
+    new_cdb = tmp_path / "cc.json"
+    new_cdb.write_text(json.dumps([{"directory": str(tmp_path), "file": "a.cpp",
+                                    "arguments": ["c++", "-std=c++20", "-c", "a.cpp"]}]))
+    ev_new = tmp_path / "new.evidence"
+    runner = CliRunner()
+    runner.invoke(main, ["collect-evidence", "--compile-db", str(new_cdb), "-o", str(ev_new)])
+
+    # Binary-only snapshots: from_headers is False, so there is no L2 AST.
+    for v in ("old", "new"):
+        save_snapshot(AbiSnapshot(library="libfoo.so", version=v, from_headers=False),
+                      tmp_path / f"{v}.json")
+
+    result = runner.invoke(main, [
+        "compare", str(tmp_path / "old.json"), str(tmp_path / "new.json"),
+        "--new-evidence", str(ev_new), "--format", "json",
+    ])
+    assert result.exit_code in (0, 2, 4), result.output
+    assert "header_parse_context_drift" not in result.stdout
