@@ -95,6 +95,7 @@ nav:
     - Contributing:
       - Codebase Overview: development/codebase-overview.md
       - Testing: development/testing.md
+      - Performance: development/performance.md
       - Troubleshooting: troubleshooting.md
       - Config Key Review: development/config-key-review.md
     - Roadmap & Status:
