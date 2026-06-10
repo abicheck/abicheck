@@ -234,8 +234,8 @@ def test_build_command_preserves_include_pch_operand() -> None:
 
 
 def test_build_command_carries_gnu_include_search_flags() -> None:
-    # GNU -iquote/-idirafter take a separate dir operand and are NOT normalized
-    # into include_paths/system_include_paths, so the replay must carry them or
+    # GNU -iquote/-idirafter take a dir operand and are NOT normalized into
+    # include_paths/system_include_paths, so the replay must carry them or
     # castxml searches a different set of directories (Codex review #335, P2).
     cmd = build_castxml_command(
         _cu(argv=["g++", "-iquote", "q/dir", "-idirafter", "late/dir", "-c", "a.cpp"]),
@@ -244,6 +244,18 @@ def test_build_command_carries_gnu_include_search_flags() -> None:
     )
     assert cmd[cmd.index("-iquote") + 1] == "q/dir"
     assert cmd[cmd.index("-idirafter") + 1] == "late/dir"
+
+
+def test_build_command_carries_joined_gnu_include_search_flags() -> None:
+    # gcc/clang also accept the joined spelling (-iquote/dir, -idirafter/dir);
+    # a compile DB recording that form must not drop the directory (Codex #338 P2).
+    cmd = build_castxml_command(
+        _cu(argv=["g++", "-iquoteq/dir", "-idirafterlate/dir", "-c", "a.cpp"]),
+        Path("a.cpp"),
+        Path("o.xml"),
+    )
+    assert "-iquoteq/dir" in cmd
+    assert "-idirafterlate/dir" in cmd
 
 
 def test_build_command_carries_msvc_include_search_flags() -> None:

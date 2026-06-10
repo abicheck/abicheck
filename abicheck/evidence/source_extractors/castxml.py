@@ -160,12 +160,13 @@ _STRUCTURED_TOOLCHAIN_FLAG_PREFIXES = ("--sysroot", "-isysroot", "--target", "-t
 #: (``/FI file`` or ``-FI file``); the joined ``/FIfile`` form is handled by
 #: prefix. (https://learn.microsoft.com/cpp/build/reference/fi-name-forced-include-file)
 _MSVC_FORCED_INCLUDE_OPTS = frozenset({"/FI", "-FI"})
-#: GNU include-search options that take a separate directory operand and are NOT
+#: GNU include-search options that take a directory operand and are NOT
 #: normalized into the structured ``include_paths``/``system_include_paths``
 #: buckets (those cover ``-I``/``-isystem`` only). Dropping them makes castxml
 #: search a different set of directories than the real compile (Codex review #335).
-#: Both are separate-operand only (``-iquote dir`` / ``-idirafter dir``; no joined
-#: spelling). (https://gcc.gnu.org/onlinedocs/gcc/Directory-Options.html)
+#: gcc/clang accept both the separate (``-iquote dir``) and joined
+#: (``-iquote/dir``) spellings, so both are carried through.
+#: (https://gcc.gnu.org/onlinedocs/gcc/Directory-Options.html)
 _GNU_INCLUDE_SEARCH_OPTS = frozenset({"-iquote", "-idirafter"})
 
 
@@ -204,8 +205,14 @@ def _replay_extra_flags(
             out += [tok, argv[i + 1]]  # -include / -imacros / -include-pch <file>
             i += 2
         elif tok in _GNU_INCLUDE_SEARCH_OPTS and i + 1 < len(argv):
-            out += [tok, argv[i + 1]]  # -iquote / -idirafter <dir>
+            out += [tok, argv[i + 1]]  # -iquote / -idirafter <dir> (separate)
             i += 2
+        elif tok not in _GNU_INCLUDE_SEARCH_OPTS and any(
+            tok.startswith(opt) and len(tok) > len(opt)
+            for opt in _GNU_INCLUDE_SEARCH_OPTS
+        ):
+            out.append(tok)  # -iquote/dir / -idirafter/dir (joined)
+            i += 1
         elif cc_id == "msvc" and tok == "/I" and i + 1 < len(argv):
             out += [tok, argv[i + 1]]  # MSVC /I dir (separate operand)
             i += 2
