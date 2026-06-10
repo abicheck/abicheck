@@ -89,8 +89,9 @@ runs the scaling benchmark and the `slow` performance tests. It is deliberately
 
 - Triggers: weekly schedule, manual `workflow_dispatch` (with size / budget
   inputs), and **automatically on any PR that changes the detector core**
-  (`abicheck/diff_*.py`, `checker.py`, `post_processing.py`, `demangle.py`, the
-  benchmark script, or the perf test). Adding the **`performance`** label
+  (`abicheck/diff_*.py`, `checker.py`, `post_processing.py`, `demangle.py`,
+  `binary_fingerprint.py`, `surface.py`, the benchmark script, or the perf
+  test). Adding the **`performance`** label
   re-triggers the lane; for a PR that does not touch the detector core, run it
   on demand with `workflow_dispatch`.
 - `continue-on-error: true` — it never blocks a merge.

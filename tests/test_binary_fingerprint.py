@@ -396,6 +396,22 @@ class TestMatchRenamedFunctions:
         new = {"new_func": _fp("new_func", 104)}  # 4% diff → fuzzy-only
         assert match_renamed_functions(old, new) == []
 
+    def test_fuzzy_window_scans_only_populated_sizes(self) -> None:
+        """A very large removed symbol with only distant candidates resolves via
+        the bisected size window — no match, and cost independent of byte size."""
+        old = {"old_big": _fp("old_big", 50_000_000)}
+        new = {f"new_{i}": _fp(f"new_{i}", 1000 + i) for i in range(5)}
+        # Candidates are far outside the ±5% window → no rename.
+        assert match_renamed_functions(old, new) == []
+
+    def test_fuzzy_window_matches_within_tolerance_large_size(self) -> None:
+        """A within-tolerance partner is still found for a large symbol."""
+        old = {"old_big": _fp("old_big", 1_000_000)}
+        new = {"new_big": _fp("new_big", 1_000_001)}  # 1 byte apart
+        result = match_renamed_functions(old, new)
+        assert len(result) == 1
+        assert result[0].confidence == 0.5
+
     def test_empty_inputs(self) -> None:
         assert match_renamed_functions({}, {}) == []
         assert match_renamed_functions({"a": _fp("a", 100)}, {}) == []

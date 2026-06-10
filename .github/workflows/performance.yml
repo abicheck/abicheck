@@ -36,6 +36,8 @@ on:
       - "abicheck/checker_policy.py"
       - "abicheck/post_processing.py"
       - "abicheck/demangle.py"
+      - "abicheck/binary_fingerprint.py"
+      - "abicheck/surface.py"
       - "scripts/benchmark_scaling.py"
       - "tests/test_performance.py"
       - ".github/workflows/performance.yml"
