@@ -78,6 +78,18 @@ class RedactionPolicy:
                     return value[:2] + key + "=" + _REDACTED
         return self.path(value)
 
+    def define_value(self, key: str, value: str) -> str:
+        """Redact a macro *value* stored under define name *key*.
+
+        Mirrors :meth:`arg` for the structured ``defines`` dict (adapters store
+        defines as ``{name: value}``, not ``-DNAME=value`` strings). A
+        secret-looking macro name redacts the whole value; otherwise home-path
+        prefixes in the value are still normalized.
+        """
+        if self.redact_secrets and value and _SECRET_DEFINE_RE.search(key):
+            return _REDACTED
+        return self.path(value)
+
     def argv(self, args: list[str]) -> list[str]:
         return [self.arg(a) for a in args]
 

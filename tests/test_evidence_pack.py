@@ -378,6 +378,29 @@ def test_redaction_rewrites_home_prefix():
     assert pol.path("/home/alice/proj/foo.cpp") == "~/proj/foo.cpp"
 
 
+def test_redaction_define_value_redacts_secret_macro():
+    pol = RedactionPolicy(home_replacements={"/home/bob": "~"})
+    assert pol.define_value("API_TOKEN", "hunter2") == "<redacted>"
+    assert pol.define_value("SECRET_KEY", "abc") == "<redacted>"
+    # Non-secret macros keep their value but still get home-path normalization.
+    assert pol.define_value("FOO", "1") == "1"
+    assert pol.define_value("PREFIX", "/home/bob/install") == "~/install"
+
+
+def test_compile_db_redacts_secret_define(tmp_path):
+    from abicheck.evidence.adapters import CompileDbAdapter
+
+    cdb = tmp_path / "compile_commands.json"
+    cdb.write_text(json.dumps([{
+        "directory": str(tmp_path), "file": "a.cpp",
+        "arguments": ["c++", "-DAPI_TOKEN=hunter2", "-DFOO=1", "-c", "a.cpp"],
+    }]))
+    ev = CompileDbAdapter(cdb).collect()
+    defines = ev.compile_units[0].defines
+    assert defines["API_TOKEN"] == "<redacted>"
+    assert defines["FOO"] == "1"
+
+
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 

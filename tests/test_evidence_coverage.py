@@ -167,6 +167,24 @@ def test_pack_load_with_build_evidence(tmp_path):
     assert loaded.content_hash().startswith("sha256:")
 
 
+def test_pack_rewrite_removes_stale_build_evidence(tmp_path):
+    """Codex P2: a rerun with no build evidence must drop the old L3 file."""
+    root = tmp_path / "p"
+    first = EvidencePack.empty(root)
+    first.build_evidence = BuildEvidence(
+        compile_units=[CompileUnit(id="cu://a", source="a.cpp", language="CXX", standard="c++20")],
+    )
+    first.write()
+    assert (root / "build" / "build_evidence.json").is_file()
+
+    # Rerun into the same directory producing no build evidence.
+    second = EvidencePack.empty(root)
+    second.build_evidence = None
+    second.write()
+    assert not (root / "build" / "build_evidence.json").exists()
+    assert EvidencePack.load(root).build_evidence is None
+
+
 def test_pack_to_ref_coverage_summary(tmp_path):
     pack = EvidencePack.empty(tmp_path / "p")
     pack.manifest.coverage = [LayerCoverage(layer="L3_build", status=CoverageStatus.PRESENT,
@@ -295,6 +313,34 @@ def test_diff_no_change_when_equal():
     ev = BuildEvidence(build_options=[BuildOption("std:CXX", "c++20", abi_relevant=True)])
     import copy
     assert diff_build_evidence(ev, copy.deepcopy(ev)) == []
+
+
+def test_diff_preserves_multiple_values_for_same_key():
+    """Codex P2: a removed variant of a multi-config option is not masked."""
+    old = BuildEvidence(build_options=[
+        BuildOption("std:CXX", "c++17", abi_relevant=True),
+        BuildOption("std:CXX", "c++20", abi_relevant=True),
+    ])
+    new = BuildEvidence(build_options=[BuildOption("std:CXX", "c++20", abi_relevant=True)])
+    changes = diff_build_evidence(old, new)
+    assert len(changes) == 1
+    c = changes[0]
+    assert c.kind is ChangeKind.ABI_RELEVANT_BUILD_FLAG_CHANGED
+    assert c.old_value == "c++17, c++20"
+    assert c.new_value == "c++20"
+
+
+def test_diff_multi_value_order_independent():
+    """Same value sets in different unit order produce no finding."""
+    a = BuildEvidence(build_options=[
+        BuildOption("std:CXX", "c++17", abi_relevant=True),
+        BuildOption("std:CXX", "c++20", abi_relevant=True),
+    ])
+    b = BuildEvidence(build_options=[
+        BuildOption("std:CXX", "c++20", abi_relevant=True),
+        BuildOption("std:CXX", "c++17", abi_relevant=True),
+    ])
+    assert diff_build_evidence(a, b) == []
 
 
 # ── collect-evidence CLI variants (ADR-028 D6) ───────────────────────────────

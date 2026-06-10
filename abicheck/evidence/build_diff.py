@@ -24,7 +24,7 @@ from __future__ import annotations
 
 from ..checker_policy import ChangeKind
 from ..checker_types import Change
-from .build_evidence import BuildEvidence, BuildOption
+from .build_evidence import BuildEvidence
 
 #: Canonical option keys whose drift specifically indicates a toolchain change
 #: (compiler/stdlib/sysroot), routed to TOOLCHAIN_VERSION_CHANGED rather than
@@ -87,33 +87,53 @@ def diff_build_evidence(old: BuildEvidence, new: BuildEvidence) -> list[Change]:
 # -- build options -----------------------------------------------------------
 
 
-def _option_map(ev: BuildEvidence) -> dict[str, BuildOption]:
-    return {opt.key: opt for opt in ev.build_options}
+def _option_index(ev: BuildEvidence) -> tuple[dict[str, set[str]], set[str]]:
+    """Index build options as key -> {values} plus the set of ABI-relevant keys.
+
+    A multi-config compile DB legitimately carries several values for one key
+    (e.g. ``std:CXX`` = c++17 and c++20). Indexing by a *set of values* keeps
+    every variant so the diff is order-independent and never drops an added or
+    removed variant (whereas a key -> single-option map collapsed them).
+    """
+    values: dict[str, set[str]] = {}
+    abi_keys: set[str] = set()
+    for opt in ev.build_options:
+        values.setdefault(opt.key, set()).add(opt.value)
+        if opt.abi_relevant:
+            abi_keys.add(opt.key)
+    return values, abi_keys
+
+
+def _fmt_values(values: set[str]) -> str | None:
+    """Render a value set for a finding's old/new fields (None when empty)."""
+    if not values:
+        return None
+    return ", ".join(sorted(values))
 
 
 def _diff_options(old: BuildEvidence, new: BuildEvidence) -> list[Change]:
-    old_opts = _option_map(old)
-    new_opts = _option_map(new)
+    old_vals, old_abi = _option_index(old)
+    new_vals, new_abi = _option_index(new)
     changes: list[Change] = []
 
-    for key in sorted(set(old_opts) | set(new_opts)):
-        o = old_opts.get(key)
-        n = new_opts.get(key)
-        old_val = o.value if o else None
-        new_val = n.value if n else None
-        if old_val == new_val and (o is not None) == (n is not None):
+    for key in sorted(set(old_vals) | set(new_vals)):
+        ov = old_vals.get(key, set())
+        nv = new_vals.get(key, set())
+        if ov == nv:
             continue
 
-        abi_relevant = (o.abi_relevant if o else False) or (n.abi_relevant if n else False)
+        old_disp = _fmt_values(ov)
+        new_disp = _fmt_values(nv)
+        abi_relevant = key in old_abi or key in new_abi
         # Toolchain-shaped options route to the dedicated toolchain finding.
         if key in _TOOLCHAIN_OPTION_KEYS and abi_relevant:
             changes.append(
                 Change(
                     kind=ChangeKind.TOOLCHAIN_VERSION_CHANGED,
                     symbol=f"build-option:{key}",
-                    description=f"Toolchain option {key!r} changed: {old_val!r} -> {new_val!r}",
-                    old_value=old_val,
-                    new_value=new_val,
+                    description=f"Toolchain option {key!r} changed: {old_disp!r} -> {new_disp!r}",
+                    old_value=old_disp,
+                    new_value=new_disp,
                 )
             )
             continue
@@ -123,14 +143,14 @@ def _diff_options(old: BuildEvidence, new: BuildEvidence) -> list[Change]:
             if abi_relevant
             else ChangeKind.BUILD_CONTEXT_CHANGED
         )
-        verb = "added" if old_val is None else "removed" if new_val is None else "changed"
+        verb = "added" if not ov else "removed" if not nv else "changed"
         changes.append(
             Change(
                 kind=kind,
                 symbol=f"build-option:{key}",
-                description=f"Build option {key!r} {verb}: {old_val!r} -> {new_val!r}",
-                old_value=old_val,
-                new_value=new_val,
+                description=f"Build option {key!r} {verb}: {old_disp!r} -> {new_disp!r}",
+                old_value=old_disp,
+                new_value=new_disp,
             )
         )
     return changes

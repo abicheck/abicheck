@@ -160,7 +160,7 @@ class NinjaAdapter:
             argv=red_argv,
             language=detect_language(source),
             standard=ctx.language_standard or "",
-            defines={k: (v or "") for k, v in ctx.defines.items()},
+            defines={k: self.redaction.define_value(k, v or "") for k, v in ctx.defines.items()},
             undefines=sorted(ctx.undefines),
             include_paths=[self.redaction.path(str(p)) for p in ctx.include_paths],
             system_include_paths=[self.redaction.path(str(p)) for p in ctx.system_includes],

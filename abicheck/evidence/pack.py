@@ -101,10 +101,16 @@ class EvidencePack:
             (self.root / sub).mkdir(parents=True, exist_ok=True)
 
         # Write normalized build evidence first so it is hashed as an artifact.
+        # When the new run produced no build evidence, remove any stale file left
+        # by an earlier collection into the same directory — otherwise load() and
+        # the content hash would keep using evidence the new manifest says was
+        # not collected.
+        be_path = self.root / BUILD_EVIDENCE_REL
         if self.build_evidence is not None:
-            be_path = self.root / BUILD_EVIDENCE_REL
             be_path.parent.mkdir(parents=True, exist_ok=True)
             _write_json(be_path, self.build_evidence.to_dict())
+        elif be_path.is_file():
+            be_path.unlink()
 
         # Record content-addressed digests of the normalized payloads.
         self.manifest.artifacts = self._artifact_digests()
