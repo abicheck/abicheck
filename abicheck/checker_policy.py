@@ -495,6 +495,20 @@ class ChangeKind(str, Enum):
     PUBLIC_SURFACE_SHRANK = "public_surface_shrank"
     UNDOCUMENTED_EXPORT_RATIO_INCREASED = "undocumented_export_ratio_increased"
 
+    # ── Build-context evidence (ADR-028 L3 / ADR-029 D9) ────────────────────
+    # Emitted only by the build-evidence diff over two EvidencePacks. These are
+    # source/build-context findings, not artifact-backed ABI breaks: per
+    # ADR-028 D3 they default to COMPATIBLE (quality) or RISK and never to
+    # BREAKING. When a build-context change actually breaks the ABI, the
+    # artifact diff (L0/L1/L2) emits the BREAKING finding separately; these
+    # kinds explain and localize it.
+    BUILD_CONTEXT_CHANGED = "build_context_changed"  # non-ABI build metadata drift → COMPATIBLE (quality)
+    ABI_RELEVANT_BUILD_FLAG_CHANGED = "abi_relevant_build_flag_changed"  # ABI-affecting flag changed → RISK
+    HEADER_PARSE_CONTEXT_DRIFT = "header_parse_context_drift"  # headers parsed under different context than the build → RISK
+    TOOLCHAIN_VERSION_CHANGED = "toolchain_version_changed"  # compiler/stdlib/sysroot changed → RISK
+    GENERATED_FILE_DEPENDENCY_UNSTABLE = "generated_file_dependency_unstable"  # generated-file dependency risk → RISK
+    LINK_EXPORT_POLICY_CHANGED = "link_export_policy_changed"  # version script / export map / .def changed → RISK
+
 
 class HasKind(Protocol):
     kind: ChangeKind

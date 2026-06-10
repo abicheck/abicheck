@@ -32,12 +32,14 @@ from typing import TYPE_CHECKING
 import click
 
 from .bundle import BundleDiffResult
-from .checker import DiffResult
+from .checker import DiffResult, compare
 from .cli import (
     _build_match_map,
+    _collect_metadata,
     _collect_release_inputs,
     _load_suppression_and_policy,
-    _run_compare_pair,
+    _normalize_binary_input,
+    _resolve_input,
     _safe_write_output,
     _setup_verbosity,
     _write_or_echo,
@@ -55,6 +57,51 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 # compare-release helpers
 # ---------------------------------------------------------------------------
+
+
+def _run_compare_pair(
+    old_input: Path,
+    new_input: Path,
+    old_headers: list[Path],
+    new_headers: list[Path],
+    old_includes: list[Path],
+    new_includes: list[Path],
+    old_version: str,
+    new_version: str,
+    lang: str,
+    suppress: Path | None,
+    policy: str,
+    policy_file_path: Path | None,
+    old_pdb_path: Path | None,
+    new_pdb_path: Path | None,
+    scope_to_public_surface: bool = False,
+    pattern_verdicts: bool = False,
+) -> tuple[DiffResult, AbiSnapshot, AbiSnapshot]:
+    """Run compare for one old/new pair and return result + resolved snapshots."""
+    # Follow GNU ld linker scripts up front so metadata/dependency analysis use
+    # the resolved DSO, not the text script.
+    old_input, old_fmt = _normalize_binary_input(old_input)
+    new_input, new_fmt = _normalize_binary_input(new_input)
+
+    old = _resolve_input(
+        old_input, old_headers, old_includes, old_version, lang,
+        is_elf=True if old_fmt == "elf" else None, pdb_path=old_pdb_path,
+    )
+    new = _resolve_input(
+        new_input, new_headers, new_includes, new_version, lang,
+        is_elf=True if new_fmt == "elf" else None, pdb_path=new_pdb_path,
+    )
+
+    suppression, pf = _load_suppression_and_policy(suppress, policy, policy_file_path)
+    result = compare(
+        old, new, suppression=suppression, policy=policy, policy_file=pf,
+        scope_to_public_surface=scope_to_public_surface,
+        pattern_verdicts=pattern_verdicts,
+    )
+    result.old_metadata = _collect_metadata(old_input)
+    result.new_metadata = _collect_metadata(new_input)
+    return result, old, new
+
 
 _RELEASE_VERDICT_ORDER: dict[str, int] = {
     "NO_CHANGE": 0, "COMPATIBLE": 1, "COMPATIBLE_WITH_RISK": 2,

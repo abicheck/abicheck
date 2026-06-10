@@ -1,7 +1,9 @@
 # ADR-029: Build Graph and Toolchain Context Capture
 
 **Date:** 2026-06-09
-**Status:** Proposed
+**Status:** Accepted — MVP implemented (BuildEvidence model; compile DB,
+CMake File API, and Ninja adapters; build-evidence diff and the six D9
+change kinds)
 **Decision maker:** Nikolay Petrov
 
 ---

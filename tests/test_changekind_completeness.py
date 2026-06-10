@@ -30,8 +30,10 @@ from abicheck.model import (
 # corresponding scenario) must be updated – the meta-test below will fail
 # until that happens.
 ASSERTED_CHANGE_KINDS: set[ChangeKind] = {
+    ChangeKind.ABI_RELEVANT_BUILD_FLAG_CHANGED,
     ChangeKind.ANON_FIELD_CHANGED,
     ChangeKind.BASE_CLASS_POSITION_CHANGED,
+    ChangeKind.BUILD_CONTEXT_CHANGED,
     ChangeKind.BASE_CLASS_VIRTUAL_CHANGED,
     ChangeKind.CALLING_CONVENTION_CHANGED,
     ChangeKind.COMMON_SYMBOL_RISK,
@@ -69,8 +71,11 @@ ASSERTED_CHANGE_KINDS: set[ChangeKind] = {
     ChangeKind.FUNC_VIRTUAL_BECAME_PURE,
     ChangeKind.FUNC_VIRTUAL_REMOVED,
     ChangeKind.FUNC_VISIBILITY_CHANGED,
+    ChangeKind.GENERATED_FILE_DEPENDENCY_UNSTABLE,
+    ChangeKind.HEADER_PARSE_CONTEXT_DRIFT,
     ChangeKind.IFUNC_INTRODUCED,
     ChangeKind.IFUNC_REMOVED,
+    ChangeKind.LINK_EXPORT_POLICY_CHANGED,
     ChangeKind.METHOD_ACCESS_CHANGED,
     ChangeKind.NEEDED_ADDED,
     ChangeKind.NEEDED_REMOVED,
@@ -112,6 +117,7 @@ ASSERTED_CHANGE_KINDS: set[ChangeKind] = {
     ChangeKind.VECTOR_ABI_CHANGED,
     ChangeKind.TYPEDEF_BASE_CHANGED,
     ChangeKind.TYPEDEF_REMOVED,
+    ChangeKind.TOOLCHAIN_VERSION_CHANGED,
     ChangeKind.TYPE_ADDED,
     ChangeKind.TYPE_ALIGNMENT_CHANGED,
     ChangeKind.TYPE_BASE_CHANGED,

@@ -48,7 +48,8 @@ from .model import (
 # v4: provenance metadata (git_commit, git_tag, created_at, build_id)
 # v5: build_mode capture (compiler/stdlib/std normalization)
 # v6: declaration provenance (source_header + origin on functions/variables/types/enums; ADR-015)
-SCHEMA_VERSION: int = 6
+# v7: optional evidence_pack reference (ADR-028; lightweight ref to an out-of-band EvidencePack)
+SCHEMA_VERSION: int = 7
 
 
 def _sets_to_lists(obj: Any) -> Any:
@@ -486,6 +487,15 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
     # leave as None so build-mode-aware detectors fall back to "unknown".
     build_mode = _build_mode_from_dict(d.get("build_mode"))
 
+    # Evidence-pack reference (schema v7, ADR-028). Optional: a missing key on
+    # an older snapshot loads as None. A malformed (non-dict) value is ignored
+    # rather than aborting the load, consistent with the rest of this loader.
+    ep_raw = d.get("evidence_pack")
+    evidence_pack = None
+    if isinstance(ep_raw, dict):
+        from .evidence.model import EvidencePackRef
+        evidence_pack = EvidencePackRef.from_dict(ep_raw)
+
     # from_headers provenance (added alongside the HEADER_AWARE tier-honesty
     # fix). An absent key means a legacy snapshot dumped before the field
     # existed: preserve the prior evidence-tier behavior by inferring header
@@ -529,6 +539,11 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
         build_id=d.get("build_id"),
         # Build-mode capture (v5)
         build_mode=build_mode,
+        # Evidence-pack reference (v7)
+        evidence_pack=evidence_pack,
+        # Build-context parse provenance (v7, ADR-029) — absent on older
+        # snapshots loads as False.
+        parsed_with_build_context=bool(d.get("parsed_with_build_context", False)),
     )
 
 

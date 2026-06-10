@@ -110,6 +110,21 @@
         "rationale": { "type": "string" }
       }
     },
+    "evidence_coverage": {
+      "type": "array",
+      "description": "Optional source/build evidence coverage (ADR-028 D7). One row per layer (L0 binary, L1 debug, L2 header AST, L3 build context, L4 source ABI, L5 source graph), present only when an EvidencePack was supplied to compare. Lets consumers distinguish artifact-proven from build-context-only findings.",
+      "items": {
+        "type": "object",
+        "required": ["layer", "status"],
+        "additionalProperties": true,
+        "properties": {
+          "layer": { "type": "string" },
+          "status": { "type": "string", "enum": ["present", "partial", "not_collected"] },
+          "confidence": { "type": "string", "enum": ["high", "reduced", "unknown"] },
+          "detail": { "type": "string" }
+        }
+      }
+    },
     "detectors": {
       "type": "array",
       "items": {

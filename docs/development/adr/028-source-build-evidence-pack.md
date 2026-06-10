@@ -1,7 +1,8 @@
 # ADR-028: Optional Source and Build Evidence Pack Architecture
 
 **Date:** 2026-06-09
-**Status:** Proposed
+**Status:** Accepted — Phase 0 implemented (EvidencePack model, manifest,
+coverage, snapshot reference, CLI surface, coverage reporting)
 **Decision maker:** Nikolay Petrov
 
 ---
