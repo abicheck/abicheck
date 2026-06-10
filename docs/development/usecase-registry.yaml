@@ -491,14 +491,17 @@ use_cases:
       `_Float64`/`_Float128`), a GCC 13 libstdc++ `__assume__` attribute, and
       `--lang c` rejecting `extern "C"` headers guarded by `#ifdef __cplusplus`.
       DONE (this increment): `_castxml_failure_hint` classifies all three stderr
-      signatures into a single actionable remediation, and `_castxml_dump`
-      auto-retries once with `_FLOATN_SHIM_DEFINES` (`-D_FloatN`) so a stock
-      GCC/glibc host parses the sized-float case instead of aborting — unit-tested
-      in `tests/test_castxml_toolchain_robustness.py`. REMAINING: an
-      integration-marked end-to-end check that `compare --headers` over a header
-      that transitively includes `<math.h>` succeeds on a real CI host; a real
-      workaround for the `__assume__` case (currently diagnosed only); and a
-      dedicated `HeaderToolchainError` type so callers can branch on it.
+      signatures into a single actionable remediation, and on a sized-float /
+      `__assume__` failure `_castxml_version_note` probes `castxml --version` and
+      folds in the recommended Clang floor (`_RECOMMENDED_CLANG_MAJOR` = 18) so
+      the user is told exactly what to upgrade — unit-tested in
+      `tests/test_castxml_toolchain_robustness.py`. A `-D_FloatN` preprocessor
+      shim was prototyped and REJECTED: glibc's own `typedef float _Float32;`
+      fallback would be rewritten into `typedef float float;` (PR review). The
+      durable cure is a castxml built against a newer Clang, or the libclang
+      extractor (G4). REMAINING: an integration-marked end-to-end check that
+      `compare --headers` over a `<math.h>`-including header succeeds on a real CI
+      host, and a dedicated `HeaderToolchainError` type.
 
   - id: UC-TC-cxx-standard-floor
     axis: toolchain

@@ -55,6 +55,32 @@ don't match the build environment of the analyzed `.so`:
   (see [CLI Usage → Build-context capture](user-guide/cli-usage.md)).
 - For pure C libraries, add `--lang c` (the default is `c++`).
 
+### castxml aborts in system headers (`_Float32`, `__assume__`)
+
+castxml drives an internal Clang while emulating your host GCC. If that bundled
+Clang is **older than your host gcc/glibc**, parsing your library's headers can
+fail inside the *system* headers — before abicheck compares anything — with
+errors like:
+
+- `unknown type name '_Float32'` (also `_Float64` / `_Float128`) — glibc's
+  sized-float types, understood by **Clang ≥ 16**.
+- a parse failure on the GCC 13+ libstdc++ `__assume__` attribute — understood
+  by **Clang ≥ 18**.
+
+The fix is a **castxml built against a newer Clang** — the recommended floor is
+**bundled Clang ≥ 18**. The `conda-forge` castxml package bundles a recent Clang
+and a matching compiler, which is the most reliable option:
+
+```bash
+conda install -c conda-forge castxml
+```
+
+abicheck detects this case and appends your detected `castxml --version` plus the
+recommended floor to the error. As an alternative, point abicheck at a
+clang-parsable toolchain/sysroot with `--gcc-path` / `--sysroot`. A
+`#ifdef __cplusplus extern "C"` C header that fails only under `--lang c` should
+be scanned **without** `--lang c` (castxml always parses in a C++-aware mode).
+
 ---
 
 ## 1) "Why did I get API_BREAK/BREAKING unexpectedly?"

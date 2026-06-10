@@ -39,6 +39,30 @@ G16 is about making the *existing* castxml header path **survive a stock host
 toolchain** and, when it cannot, **fail with an actionable, single-line hint**
 instead of an opaque compiler error.
 
+## Supported toolchain floor
+
+The durable cure for the `_FloatN` and `__assume__` aborts is **a castxml built
+against a new enough Clang**, because the failure is purely a frontend-version
+mismatch (castxml drives an internal Clang while emulating the host GCC). The
+recommended floor is **bundled Clang ≥ 18** (`_Float32/64/128` land in Clang 16;
+the `[[assume]]` / `__assume__` attribute in Clang 18). `abicheck/dumper.py`
+encodes this as `_RECOMMENDED_CLANG_MAJOR` and, on a failure, probes
+`castxml --version` to tell the user which version they have and what to upgrade
+to. `--lang c` + `extern "C"` is a *usage* issue (don't force C), handled by the
+diagnostic, not a version floor.
+
+### Why not "just fix it in CastXML" / shim it away?
+
+A `-D_Float32=float …` preprocessor shim was prototyped and **rejected**: glibc's
+`bits/floatn-common.h` emits its own `typedef float _Float32;` fallback in some
+configurations, which the shim rewrites into the invalid `typedef float float;`
+— so it can break the very headers it is meant to rescue (flagged in PR review).
+abicheck cannot reliably out-parse a frontend that is simply older than the host
+headers, so it **diagnoses precisely and recommends the upgrade** rather than
+guessing. The structural cure is the libclang extractor (**G4**), which parses
+with the host's own libclang and removes the dependence on castxml's bundled-Clang
+cadence entirely.
+
 ## Goal & acceptance criteria
 
 - [x] A parse-failure classifier recognises the known host-header symptoms
@@ -46,50 +70,48 @@ instead of an opaque compiler error.
       `extern "C"` case) in castxml stderr and surfaces a specific,
       copy-pasteable remediation. *Done:* `_castxml_failure_hint` in
       `abicheck/dumper.py`; the hint is appended to the raised `SnapshotError`.
-- [x] At least one known symptom is *worked around* rather than only diagnosed:
-      inject the minimal flag(s) that let a stock GCC/glibc host parse the
-      sized-float declarations through castxml's clang frontend. *Done:*
-      `_castxml_dump` auto-retries once with `_FLOATN_SHIM_DEFINES` (`-D_Float32=float`
-      …) after a sized-float failure; healthy hosts are unaffected (retry only
-      fires on the matching failure).
+- [x] On a sized-float/`__assume__` failure, probe `castxml --version` and fold
+      the detected version + the recommended Clang floor into the remediation.
+      *Done:* `_parse_castxml_version` / `_castxml_version_note` +
+      `_RECOMMENDED_CLANG_MAJOR`.
 - [ ] `abicheck compare --headers` over a tiny header that transitively includes
       `<math.h>` succeeds (or degrades with the actionable hint) on the CI host,
       asserted end-to-end. *Remaining* (needs the `integration` toolchain).
-- [x] The diagnostic text and retry are unit-tested against captured stderr
-      snippets (no live compiler needed). *Done:*
+- [x] The diagnostic text, the version parser, and the version note are
+      unit-tested without a live compiler. *Done:*
       `tests/test_castxml_toolchain_robustness.py`.
 - [ ] Promote to a dedicated `HeaderToolchainError` so callers can branch on the
-      class, and add a real `__assume__` workaround (currently diagnosed only).
-      *Remaining.*
+      class. *Remaining.*
+- [~] A reliable host-side *workaround* (vs. diagnosis). The `-D_FloatN` shim was
+      rejected (see above); the durable path is the Clang-floor recommendation
+      plus the libclang extractor (**G4**).
 
 ## Design
 
-1. **Classifier** — extend `_validate_castxml_output` (and the surrounding
-   failure path in `dumper_castxml.py`) with a `_classify_castxml_failure(stderr)`
-   helper that maps known stderr signatures → a remediation string, mirroring the
-   existing `--lang c` hint. Raise a dedicated `HeaderToolchainError`
-   (subclass of the current error) so callers/CLI can present it cleanly.
-2. **Workaround flags** — in `_build_castxml_command`, when the resolved compiler
-   is GCC/glibc, inject the minimal known-good shim (candidate:
-   `-resource-dir`/`-isystem` pointing at a sized-float-safe header set, or the
-   feature-test `-D` that gates `_FloatN`). Keep it opt-out and additive so
-   existing successful runs are unchanged.
-3. **CLI surfacing** — ensure the `compare`/`dump --headers` path renders the
-   `HeaderToolchainError` remediation as a single actionable line (not a 2 000-char
-   stderr blob) and exits with the existing tooling-error code.
+1. **Classifier** — `_castxml_failure_hint(stderr, …)` maps the known stderr
+   signatures → a remediation string, mirroring the existing `--lang c` hint;
+   appended to the `SnapshotError` raised by `_validate_castxml_output`.
+2. **Version probe** — on failure, `_castxml_version_note()` runs
+   `castxml --version`, parses it with the pure `_parse_castxml_version`, and adds
+   "Detected castxml X (clang Y); needs clang ≥ 18 — upgrade" when below the floor.
+3. **CLI surfacing** — the `compare`/`dump --headers` path renders the remediation
+   as a single actionable line (not a 2 000-char stderr blob); a dedicated
+   `HeaderToolchainError` so callers can branch is still open.
 
 ## Files & surfaces
 
-- `abicheck/dumper_castxml.py` — `_build_castxml_command`,
-  `_validate_castxml_output`, new `_classify_castxml_failure`.
-- `abicheck/errors.py` — `HeaderToolchainError`.
+- `abicheck/dumper.py` — `_castxml_failure_hint`, `_parse_castxml_version`,
+  `_castxml_version_note`, `_RECOMMENDED_CLANG_MAJOR`, wired into
+  `_validate_castxml_output`.
+- `abicheck/errors.py` — `HeaderToolchainError` (still open).
 - `abicheck/cli.py` / `abicheck/service.py` — render the remediation line.
 
 ## Tests
 
-- `tests/test_castxml_errors.py` — extend with the captured stderr signatures
-  (`_Float32`, `__assume__`, `--lang c` + `extern "C"`) → assert the specific
-  remediation text (message-only, no compiler).
+- `tests/test_castxml_toolchain_robustness.py` (done) — the captured stderr
+  signatures (`_Float32`, `__assume__`, `--lang c` + `extern "C"`) → assert the
+  specific remediation text; the version parser and the version note (message
+  only, no compiler).
 - `tests/test_header_scope_toolchain.py` (new, `integration`) — a header that
   `#include <math.h>` parses (or yields the hint) end-to-end on a GCC/glibc host.
 

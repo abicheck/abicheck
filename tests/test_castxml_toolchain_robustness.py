@@ -24,9 +24,13 @@ same three signatures, never an abicheck logic bug:
 * the GCC 13+ libstdc++ ``__assume__`` attribute;
 * explicit ``--lang c`` on headers that need C++ or guard ``extern "C"``.
 
-These tests pin (a) the actionable remediation text for each signature and
-(b) the one-shot auto-retry with the ``-D_FloatN`` compatibility shim. They are
-fully mocked, so they run in the default fast lane with no castxml present.
+The durable fix for the first two is a castxml built against a newer Clang (the
+``-D_FloatN`` shim was rejected — it rewrites glibc's own ``typedef float
+_Float32;`` fallback into ``typedef float float;``). So abicheck diagnoses
+precisely: it classifies the signature and, on a real failure, probes
+``castxml --version`` and folds in an upgrade recommendation. These tests pin the
+pure parser, the version note, and the per-signature remediation text — fully
+mocked, so they run in the default fast lane with no castxml present.
 """
 
 from __future__ import annotations
@@ -35,61 +39,82 @@ import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from abicheck.dumper import (
-    _FLOATN_SHIM_DEFINES,
-    _build_castxml_command,
     _castxml_failure_hint,
-    _stderr_wants_floatn_shim,
+    _castxml_version_note,
+    _parse_castxml_version,
 )
 
-# A captured-shape stderr for each known signature.
 _FLOATN_STDERR = (
     "/usr/include/bits/floatn-common.h:214:14: error: unknown type name '_Float32'"
 )
-_FLOATN128_STDERR = "error: unknown type name '_Float128x'"
 _ASSUME_STDERR = (
     "/usr/include/c++/13/bits/stl_algobase.h:2070: error: '__assume__' was not declared"
 )
 
 
-def _make_completed_process(
-    returncode: int = 0, stderr: str = ""
-) -> subprocess.CompletedProcess:
+def _completed(stdout: str = "", stderr: str = "", returncode: int = 0) -> subprocess.CompletedProcess:
     result: subprocess.CompletedProcess = MagicMock(spec=subprocess.CompletedProcess)
     result.returncode = returncode
+    result.stdout = stdout
     result.stderr = stderr
-    result.stdout = ""
     return result
 
 
-class TestFloatNShimTrigger:
-    def test_matches_sized_float_keywords(self) -> None:
-        assert _stderr_wants_floatn_shim(_FLOATN_STDERR)
-        assert _stderr_wants_floatn_shim(_FLOATN128_STDERR)
-        assert _stderr_wants_floatn_shim("unknown type name '_Float64'")
+class TestParseCastxmlVersion:
+    def test_parses_castxml_and_clang(self) -> None:
+        out = "castxml version 0.6.8\nclang version 17.0.6\n"
+        raw, clang = _parse_castxml_version(out)
+        assert raw == "0.6.8"
+        assert clang == (17, 0)
 
-    def test_ignores_unrelated_failures(self) -> None:
-        assert not _stderr_wants_floatn_shim("fatal error: header.h: No such file")
-        assert not _stderr_wants_floatn_shim("")
-        # bare word 'Float' without the _FloatN keyword shape must not match
-        assert not _stderr_wants_floatn_shim("error: use of undeclared 'FloatThing'")
+    def test_clang_major_only(self) -> None:
+        raw, clang = _parse_castxml_version("castxml version 0.5.1\nclang version 14\n")
+        assert raw == "0.5.1"
+        assert clang == (14, 0)
+
+    def test_missing_fields_are_none(self) -> None:
+        assert _parse_castxml_version("") == (None, None)
+        assert _parse_castxml_version("some unrelated output")[1] is None
+
+
+class TestVersionNote:
+    def test_old_clang_recommends_upgrade(self) -> None:
+        with patch(
+            "abicheck.dumper.subprocess.run",
+            return_value=_completed(stdout="castxml version 0.5.1\nclang version 14.0.0\n"),
+        ):
+            note = _castxml_version_note()
+        assert "clang 14" in note
+        assert ">= 18" in note
+        assert "upgrade" in note.lower()
+
+    def test_new_clang_gives_no_note(self) -> None:
+        with patch(
+            "abicheck.dumper.subprocess.run",
+            return_value=_completed(stdout="castxml version 0.6.8\nclang version 18.1.8\n"),
+        ):
+            assert _castxml_version_note() == ""
+
+    def test_probe_failure_is_silent(self) -> None:
+        with patch("abicheck.dumper.subprocess.run", side_effect=OSError("not found")):
+            assert _castxml_version_note() == ""
 
 
 class TestFailureHint:
-    def test_floatn_hint_mentions_auto_retry_first_time(self) -> None:
+    def test_floatn_hint_points_at_newer_castxml(self) -> None:
         hint = _castxml_failure_hint(_FLOATN_STDERR, force_cpp=True, headers=[])
         assert "_Float" in hint
-        assert "retry" in hint.lower()
+        assert "newer castxml" in hint
+        # no brittle -D shim is advertised any more
+        assert "-D_Float" not in hint
 
-    def test_floatn_hint_escalates_after_shim_failed(self) -> None:
+    def test_floatn_hint_includes_version_note(self) -> None:
         hint = _castxml_failure_hint(
-            _FLOATN_STDERR, force_cpp=True, headers=[], floatn_shim_tried=True
+            _FLOATN_STDERR, force_cpp=True, headers=[],
+            version_note=" Detected castxml 0.5.1 (clang 14.0); upgrade.",
         )
-        assert "even after" in hint.lower()
-        # points the user at a concrete remediation
-        assert "--gcc-path" in hint or "newer castxml" in hint
+        assert "Detected castxml 0.5.1" in hint
 
     def test_assume_attribute_hint(self) -> None:
         hint = _castxml_failure_hint(_ASSUME_STDERR, force_cpp=True, headers=[])
@@ -111,110 +136,3 @@ class TestFailureHint:
             "fatal error: missing.h: No such file", force_cpp=False, headers=[header]
         )
         assert hint == ""
-
-
-class TestCommandShim:
-    def test_extra_defines_appended(self) -> None:
-        cmd = _build_castxml_command(
-            "g++",
-            "gnu",
-            [],
-            Path("/tmp/out.xml"),
-            Path("/tmp/agg.hpp"),
-            force_cpp=True,
-            extra_defines=_FLOATN_SHIM_DEFINES,
-        )
-        for d in _FLOATN_SHIM_DEFINES:
-            assert d in cmd
-        # each shim define is a single argv token, value may contain a space
-        assert "-D_Float64x=long double" in cmd
-
-    def test_no_defines_by_default(self) -> None:
-        cmd = _build_castxml_command(
-            "g++",
-            "gnu",
-            [],
-            Path("/tmp/out.xml"),
-            Path("/tmp/agg.hpp"),
-            force_cpp=True,
-        )
-        assert not any(c.startswith("-D_Float") for c in cmd)
-
-
-_VALID_XML = b'<CastXML><Namespace id="_1" name=""/></CastXML>'
-
-
-class TestAutoRetry:
-    """The one-shot retry: a sized-float failure triggers exactly one re-run
-    carrying the shim, and a healthy retry yields a snapshot."""
-
-    def test_retry_with_shim_succeeds(self, tmp_path: Path) -> None:
-        calls: list[list[str]] = []
-
-        def fake_run(cmd, **kwargs):  # noqa: ANN001
-            calls.append(list(cmd))
-            o_idx = cmd.index("-o")
-            out_path = Path(cmd[o_idx + 1])
-            if len(calls) == 1:
-                # first attempt: sized-float parse failure, no output written
-                return _make_completed_process(returncode=1, stderr=_FLOATN_STDERR)
-            # retry: shim present → succeeds and writes valid XML
-            assert "-D_Float32=float" in cmd
-            out_path.write_bytes(_VALID_XML)
-            return _make_completed_process(returncode=0)
-
-        with (
-            patch("abicheck.dumper._castxml_available", return_value=True),
-            patch("abicheck.dumper.subprocess.run", side_effect=fake_run),
-            patch("abicheck.dumper._cache_path", return_value=tmp_path / "cache.xml"),
-        ):
-            from abicheck.dumper import _castxml_dump
-
-            header = tmp_path / "api.hpp"
-            header.write_text("int f();\n", encoding="utf-8")
-            root = _castxml_dump([header], [])
-
-        assert root is not None
-        assert len(calls) == 2  # exactly one retry
-        assert not any(c.startswith("-D_Float") for c in calls[0])
-        assert "-D_Float32=float" in calls[1]
-
-    def test_retry_failure_raises_escalated_hint(self, tmp_path: Path) -> None:
-        def fake_run(cmd, **kwargs):  # noqa: ANN001
-            # both attempts fail with the sized-float signature
-            return _make_completed_process(returncode=1, stderr=_FLOATN_STDERR)
-
-        with (
-            patch("abicheck.dumper._castxml_available", return_value=True),
-            patch("abicheck.dumper.subprocess.run", side_effect=fake_run),
-            patch("abicheck.dumper._cache_path", return_value=tmp_path / "cache.xml"),
-        ):
-            from abicheck.dumper import _castxml_dump
-
-            header = tmp_path / "api.hpp"
-            header.write_text("int f();\n", encoding="utf-8")
-            with pytest.raises(RuntimeError, match="even after"):
-                _castxml_dump([header], [])
-
-    def test_no_retry_for_unrelated_failure(self, tmp_path: Path) -> None:
-        calls: list[list[str]] = []
-
-        def fake_run(cmd, **kwargs):  # noqa: ANN001
-            calls.append(list(cmd))
-            return _make_completed_process(
-                returncode=1, stderr="fatal error: missing.h: No such file"
-            )
-
-        with (
-            patch("abicheck.dumper._castxml_available", return_value=True),
-            patch("abicheck.dumper.subprocess.run", side_effect=fake_run),
-            patch("abicheck.dumper._cache_path", return_value=tmp_path / "cache.xml"),
-        ):
-            from abicheck.dumper import _castxml_dump
-
-            header = tmp_path / "api.hpp"
-            header.write_text("int f();\n", encoding="utf-8")
-            with pytest.raises(RuntimeError, match="castxml failed"):
-                _castxml_dump([header], [])
-
-        assert len(calls) == 1  # no retry for non-floatn failures
