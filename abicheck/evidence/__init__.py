@@ -67,6 +67,15 @@ from .source_extractors import (
     SourceAbiExtractor,
     SourceExtractionError,
 )
+from .source_graph import (
+    SOURCE_GRAPH_VERSION,
+    GraphEdge,
+    GraphNode,
+    GraphSummaryDiff,
+    SourceGraphSummary,
+    build_source_graph,
+    diff_source_graph,
+)
 from .source_link import link_source_abi
 from .source_replay import (
     REPLAY_SCOPES,
@@ -80,6 +89,7 @@ __all__ = [
     "EVIDENCE_PACK_VERSION",
     "REPLAY_SCOPES",
     "SOURCE_ABI_VERSION",
+    "SOURCE_GRAPH_VERSION",
     "AndroidHeaderAbiAdapter",
     "BuildEvidence",
     "BuildOption",
@@ -94,6 +104,9 @@ __all__ = [
     "EvidencePackRef",
     "ExtractorRecord",
     "Generator",
+    "GraphEdge",
+    "GraphNode",
+    "GraphSummaryDiff",
     "LayerCoverage",
     "LinkUnit",
     "SourceAbiCache",
@@ -102,10 +115,13 @@ __all__ = [
     "SourceAbiTu",
     "SourceEntity",
     "SourceExtractionError",
+    "SourceGraphSummary",
     "SourceLocation",
     "Target",
     "Toolchain",
+    "build_source_graph",
     "diff_source_abi",
+    "diff_source_graph",
     "link_source_abi",
     "run_source_replay",
     "scope_for_ci_mode",

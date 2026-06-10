@@ -1,0 +1,484 @@
+# Copyright 2026 Nikolay Petrov
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Source / implementation graph summary (ADR-031 L5).
+
+abicheck's own normalized, ABI/API-relevant graph. Stored compactly as
+``graph/source_graph_summary.json`` inside an evidence pack (ADR-028 D8): the
+primary snapshot only ever keeps a coverage row + reference, never the full
+graph (ADR-031 D1, D7).
+
+This module implements the MVP scope of the ADR:
+
+- **Phase 1** — the node/edge schema, the compact ``SourceGraphSummary``
+  container, content addressing, and round-trip (de)serialization.
+- **Phase 2** — :func:`build_source_graph`, which folds an ADR-029
+  :class:`~abicheck.evidence.build_evidence.BuildEvidence` into a
+  target/source/header/compile-unit/build-option graph.
+- A structural :func:`diff_source_graph` (Phase 5 seed) that powers the
+  ``compare-graph`` command for explanation and triage.
+
+Every edge carries provenance and a confidence label (ADR-031 D2, D9): a graph
+fact must always say *how* it was derived so a reader never mistakes graph
+absence for safety. Deeper layers — public-reachability / type / include /
+call graphs (Phases 3-4, 6) and external backends like Kythe/CodeQL (Phase 7) —
+extend this same schema; per ADR-031 D6 graph diffs *explain and prioritize* and
+must never, on their own, silently decide or suppress an artifact-proven ABI
+break (ADR-028 D3).
+"""
+from __future__ import annotations
+
+import hashlib
+import json
+from dataclasses import dataclass, field
+from typing import Any
+
+from .build_evidence import BuildEvidence, Confidence
+
+#: Source-graph schema version, independent of the pack/build/source/snapshot
+#: versions (ADR-028 D8 versioning). Bump on any breaking change to
+#: ``SourceGraphSummary``, :class:`GraphNode`, or :class:`GraphEdge`.
+SOURCE_GRAPH_VERSION: int = 1
+
+#: Node kinds the graph schema understands (ADR-031 D2). Unknown kinds from a
+#: newer/hand-edited summary are preserved on load, never rejected.
+NODE_KINDS: frozenset[str] = frozenset({
+    "file", "header", "source", "compile_unit", "target", "link_unit",
+    "binary_symbol", "debug_type", "source_decl", "record_type", "enum_type",
+    "typedef", "macro", "build_option", "toolchain", "generated_file",
+    "external_dependency",
+})
+
+#: Edge kinds the graph schema understands (ADR-031 D2).
+EDGE_KINDS: frozenset[str] = frozenset({
+    "TARGET_HAS_SOURCE", "TARGET_HAS_PUBLIC_HEADER", "TARGET_DEPENDS_ON",
+    "COMPILE_UNIT_BUILDS_SOURCE", "COMPILE_UNIT_USES_OPTION",
+    "COMPILE_UNIT_INCLUDES_FILE", "FILE_GENERATED_FROM",
+    "SOURCE_DECLARES", "SOURCE_DEFINES", "DECL_HAS_TYPE",
+    "DECL_CALLS_DECL", "DECL_REFERENCES_DECL",
+    "TYPE_HAS_FIELD_TYPE", "TYPE_INHERITS",
+    "BINARY_EXPORTS_SYMBOL", "SOURCE_DECL_MAPS_TO_SYMBOL",
+    "SOURCE_TYPE_MAPS_TO_DEBUG_TYPE",
+    "BUILD_OPTION_AFFECTS_DECL", "BUILD_OPTION_AFFECTS_SYMBOL",
+    "FINDING_LOCALIZES_TO_DECL", "FINDING_CAUSED_BY_OPTION",
+})
+
+#: Confidence labels (ADR-031 D9). Mirrors the evidence-model vocabulary so the
+#: coverage report and graph speak the same language.
+CONF_HIGH = "high"
+CONF_REDUCED = "reduced"
+CONF_UNKNOWN = "unknown"
+
+
+def _conf_from_build(conf: Confidence) -> str:
+    """Map an ADR-029 build-evidence confidence onto a graph confidence label."""
+    if conf == Confidence.HIGH:
+        return CONF_HIGH
+    if conf == Confidence.REDUCED:
+        return CONF_REDUCED
+    return CONF_UNKNOWN
+
+
+@dataclass
+class GraphNode:
+    """A single ABI/API-relevant graph node (ADR-031 D2)."""
+
+    id: str
+    kind: str                       # one of NODE_KINDS (preserved even if unknown)
+    label: str = ""                 # human-readable name/path (redacted upstream)
+    attrs: dict[str, Any] = field(default_factory=dict)
+    provenance: str = ""            # how this node was derived, e.g. "build_evidence"
+    confidence: str = CONF_UNKNOWN
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "kind": self.kind,
+            "label": self.label,
+            "attrs": dict(self.attrs),
+            "provenance": self.provenance,
+            "confidence": self.confidence,
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> GraphNode:
+        return cls(
+            id=str(d["id"]),
+            kind=str(d.get("kind", "file")),
+            label=str(d.get("label", "")),
+            attrs=dict(d.get("attrs", {})),
+            provenance=str(d.get("provenance", "")),
+            confidence=str(d.get("confidence", CONF_UNKNOWN)),
+        )
+
+
+@dataclass
+class GraphEdge:
+    """A directed edge between two nodes, with provenance + confidence (D2, D9).
+
+    ``attrs`` carries edge-kind-specific labels — most importantly the
+    ``call_kind``/``resolution`` pair for ``DECL_CALLS_DECL`` edges (ADR-031 D4),
+    which a future call-graph extractor populates.
+    """
+
+    src: str
+    dst: str
+    kind: str                       # one of EDGE_KINDS (preserved even if unknown)
+    provenance: str = ""
+    confidence: str = CONF_UNKNOWN
+    attrs: dict[str, Any] = field(default_factory=dict)
+
+    def key(self) -> tuple[str, str, str]:
+        """Identity of an edge for diffing/de-duplication: (src, dst, kind)."""
+        return (self.src, self.dst, self.kind)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "edge": self.kind,
+            "src": self.src,
+            "dst": self.dst,
+            "provenance": self.provenance,
+            "confidence": self.confidence,
+            "attrs": dict(self.attrs),
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> GraphEdge:
+        return cls(
+            src=str(d["src"]),
+            dst=str(d["dst"]),
+            kind=str(d.get("edge", d.get("kind", ""))),
+            provenance=str(d.get("provenance", "")),
+            confidence=str(d.get("confidence", CONF_UNKNOWN)),
+            attrs=dict(d.get("attrs", {})),
+        )
+
+
+@dataclass
+class SourceGraphSummary:
+    """Compact, ABI/API-relevant source/implementation graph (ADR-031 D7).
+
+    Deliberately small: a report must never need to load a huge full graph to
+    compare core ABI snapshots (D7). The ``coverage`` block makes the graph's
+    extent — and what it does *not* cover (e.g. call edges) — explicit so graph
+    absence is never read as safety (D9). For very large projects the same
+    schema can be chunked/externalized; ``external_graph_refs`` points at any
+    deep backend store (Kythe/CodeQL, Phase 7).
+    """
+
+    schema_version: int = SOURCE_GRAPH_VERSION
+    graph_id: str = ""              # "sha256:..." content hash of nodes+edges
+    nodes: list[GraphNode] = field(default_factory=list)
+    edges: list[GraphEdge] = field(default_factory=list)
+    coverage: dict[str, Any] = field(default_factory=dict)
+    external_graph_refs: list[dict[str, Any]] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        # De-dup indexes for O(1) add_node/add_edge. Built from whatever the
+        # constructor (or from_dict) seeded so incremental building stays cheap.
+        self._node_ids: set[str] = {n.id for n in self.nodes}
+        self._edge_keys: set[tuple[str, str, str]] = {e.key() for e in self.edges}
+
+    # -- mutation helpers ---------------------------------------------------
+
+    def add_node(self, node: GraphNode) -> None:
+        """Add a node, de-duplicating by id (first writer wins on facts)."""
+        if node.id not in self._node_ids:
+            self.nodes.append(node)
+            self._node_ids.add(node.id)
+
+    def add_edge(self, edge: GraphEdge) -> None:
+        """Add an edge, de-duplicating by (src, dst, kind)."""
+        if edge.key() not in self._edge_keys:
+            self.edges.append(edge)
+            self._edge_keys.add(edge.key())
+
+    def indexes(self) -> dict[str, dict[str, list[str]]]:
+        """Build the lookup indexes (ADR-031 D7) on demand.
+
+        Lightweight reverse maps so a finding can be localized without a full
+        scan: by target, by file/source/header, by binary symbol, by source
+        decl. Computed from the current nodes/edges so they never drift.
+        """
+        by_target: dict[str, list[str]] = {}
+        by_file: dict[str, list[str]] = {}
+        by_binary_symbol: dict[str, list[str]] = {}
+        by_source_decl: dict[str, list[str]] = {}
+        kind_by_id = {n.id: n.kind for n in self.nodes}
+        for e in self.edges:
+            src_kind = kind_by_id.get(e.src, "")
+            dst_kind = kind_by_id.get(e.dst, "")
+            if src_kind == "target":
+                by_target.setdefault(e.src, []).append(e.dst)
+            if dst_kind in ("file", "header", "source", "generated_file"):
+                by_file.setdefault(e.dst, []).append(e.src)
+            if dst_kind == "binary_symbol" or src_kind == "binary_symbol":
+                sym = e.dst if dst_kind == "binary_symbol" else e.src
+                other = e.src if dst_kind == "binary_symbol" else e.dst
+                by_binary_symbol.setdefault(sym, []).append(other)
+            if dst_kind == "source_decl" or src_kind == "source_decl":
+                decl = e.dst if dst_kind == "source_decl" else e.src
+                other = e.src if dst_kind == "source_decl" else e.dst
+                by_source_decl.setdefault(decl, []).append(other)
+        return {
+            "by_target": {k: sorted(set(v)) for k, v in by_target.items()},
+            "by_file": {k: sorted(set(v)) for k, v in by_file.items()},
+            "by_binary_symbol": {k: sorted(set(v)) for k, v in by_binary_symbol.items()},
+            "by_source_decl": {k: sorted(set(v)) for k, v in by_source_decl.items()},
+        }
+
+    def compute_graph_id(self) -> str:
+        """Stable ``sha256:<hex>`` over the canonical node+edge set.
+
+        Order-independent (nodes/edges are sorted) so the same logical graph
+        always hashes identically regardless of construction order.
+        """
+        canonical = {
+            "schema_version": self.schema_version,
+            "nodes": sorted((n.id, n.kind) for n in self.nodes),
+            "edges": sorted(e.key() for e in self.edges),
+        }
+        blob = json.dumps(canonical, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        return "sha256:" + hashlib.sha256(blob).hexdigest()
+
+    def finalize(self) -> SourceGraphSummary:
+        """Fill ``graph_id`` and the structural ``coverage`` counts; return self."""
+        self.graph_id = self.compute_graph_id()
+        kinds: dict[str, int] = {}
+        for n in self.nodes:
+            kinds[n.kind] = kinds.get(n.kind, 0) + 1
+        edge_kinds: dict[str, int] = {}
+        for e in self.edges:
+            edge_kinds[e.kind] = edge_kinds.get(e.kind, 0) + 1
+        has_calls = any(e.kind == "DECL_CALLS_DECL" for e in self.edges)
+        has_includes = any(e.kind == "COMPILE_UNIT_INCLUDES_FILE" for e in self.edges)
+        self.coverage = {
+            "targets": kinds.get("target", 0),
+            "compile_units": kinds.get("compile_unit", 0),
+            "source_decls": kinds.get("source_decl", 0),
+            "binary_symbol_mappings": edge_kinds.get("SOURCE_DECL_MAPS_TO_SYMBOL", 0),
+            "include_edges": {"collected": has_includes, "count": edge_kinds.get("COMPILE_UNIT_INCLUDES_FILE", 0)},
+            "call_edges": {"collected": has_calls, "count": edge_kinds.get("DECL_CALLS_DECL", 0)},
+            "node_kinds": dict(sorted(kinds.items())),
+            "edge_kinds": dict(sorted(edge_kinds.items())),
+        }
+        return self
+
+    # -- (de)serialization --------------------------------------------------
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": self.schema_version,
+            "graph_id": self.graph_id or self.compute_graph_id(),
+            "coverage": dict(self.coverage),
+            "nodes": [n.to_dict() for n in self.nodes],
+            "edges": [e.to_dict() for e in self.edges],
+            "indexes": self.indexes(),
+            "external_graph_refs": [dict(r) for r in self.external_graph_refs],
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> SourceGraphSummary:
+        # Defensive ``.get`` parsing so a newer/hand-edited summary never aborts
+        # a load (evidence/CLAUDE.md forward-compat rule). ``indexes`` are derived
+        # and intentionally not read back — they are recomputed from nodes/edges.
+        return cls(
+            schema_version=int(d.get("schema_version", SOURCE_GRAPH_VERSION)),
+            graph_id=str(d.get("graph_id", "")),
+            nodes=[GraphNode.from_dict(n) for n in d.get("nodes", [])],
+            edges=[GraphEdge.from_dict(e) for e in d.get("edges", [])],
+            coverage=dict(d.get("coverage", {})),
+            external_graph_refs=[dict(r) for r in d.get("external_graph_refs", [])],
+        )
+
+
+# ── node-id helpers ───────────────────────────────────────────────────────
+#
+# Build-evidence entities already carry stable ids ("target://", "cu://").
+# File/header/option nodes are keyed by their (already-redacted) path/flag so
+# the same file referenced by two targets folds to one node.
+
+
+def _source_node_id(path: str) -> str:
+    return f"source://{path}"
+
+
+def _header_node_id(path: str) -> str:
+    return f"header://{path}"
+
+
+def _option_node_id(flag: str) -> str:
+    return f"build_option://{flag}"
+
+
+# ── Phase 2: build the graph from ADR-029 BuildEvidence ─────────────────────
+
+
+def build_source_graph(build: BuildEvidence) -> SourceGraphSummary:
+    """Fold an ADR-029 :class:`BuildEvidence` into an L5 graph summary (Phase 2).
+
+    Emits the build-level slice of the schema:
+
+    - ``target`` nodes, with ``TARGET_HAS_SOURCE`` / ``TARGET_HAS_PUBLIC_HEADER``
+      / ``TARGET_DEPENDS_ON`` edges;
+    - ``compile_unit`` nodes, with ``COMPILE_UNIT_BUILDS_SOURCE`` edges and
+      ``COMPILE_UNIT_USES_OPTION`` edges to the ABI-relevant flags they carry;
+    - ``source`` / ``header`` / ``generated_file`` nodes (a source listed in
+      ``build.generated_files`` is typed ``generated_file``).
+
+    Deeper edges (decl/type/symbol/call) are produced by later phases against
+    L2/L4 evidence and external backends; they extend the same returned graph.
+    """
+    graph = SourceGraphSummary()
+    generated = set(build.generated_files)
+
+    def file_node(path: str, *, header: bool = False) -> str:
+        if not path:
+            return ""
+        if path in generated:
+            node_id = _source_node_id(path)
+            graph.add_node(GraphNode(
+                id=node_id, kind="generated_file", label=path,
+                provenance="build_evidence", confidence=CONF_REDUCED,
+                attrs={"generated": True},
+            ))
+            return node_id
+        if header:
+            node_id = _header_node_id(path)
+            graph.add_node(GraphNode(
+                id=node_id, kind="header", label=path,
+                provenance="build_evidence", confidence=CONF_HIGH,
+            ))
+            return node_id
+        node_id = _source_node_id(path)
+        graph.add_node(GraphNode(
+            id=node_id, kind="source", label=path,
+            provenance="build_evidence", confidence=CONF_HIGH,
+        ))
+        return node_id
+
+    known_targets = {t.id for t in build.targets}
+    for tgt in build.targets:
+        conf = _conf_from_build(tgt.confidence)
+        graph.add_node(GraphNode(
+            id=tgt.id, kind="target", label=tgt.name or tgt.id,
+            provenance="build_evidence", confidence=conf,
+            attrs={"kind": tgt.kind.value, "visibility": tgt.visibility,
+                   "build_system": tgt.build_system},
+        ))
+        for src in tgt.source_files:
+            sid = file_node(src)
+            graph.add_edge(GraphEdge(
+                src=tgt.id, dst=sid, kind="TARGET_HAS_SOURCE",
+                provenance="build_evidence", confidence=conf,
+            ))
+        for hdr in tgt.public_headers:
+            hid = file_node(hdr, header=True)
+            graph.add_edge(GraphEdge(
+                src=tgt.id, dst=hid, kind="TARGET_HAS_PUBLIC_HEADER",
+                provenance="build_evidence", confidence=conf,
+            ))
+        for dep in tgt.dependencies:
+            # Reference an external dependency explicitly when it is not one of
+            # our own targets, so the graph distinguishes intra-project edges
+            # from third-party ones (informative for reachability triage).
+            if dep not in known_targets:
+                graph.add_node(GraphNode(
+                    id=dep, kind="external_dependency", label=dep,
+                    provenance="build_evidence", confidence=CONF_REDUCED,
+                ))
+            graph.add_edge(GraphEdge(
+                src=tgt.id, dst=dep, kind="TARGET_DEPENDS_ON",
+                provenance="build_evidence", confidence=conf,
+            ))
+
+    for cu in build.compile_units:
+        graph.add_node(GraphNode(
+            id=cu.id, kind="compile_unit", label=cu.output or cu.source or cu.id,
+            provenance="build_evidence", confidence=CONF_HIGH,
+            attrs={"language": cu.language, "standard": cu.standard,
+                   "target_id": cu.target_id},
+        ))
+        if cu.source:
+            sid = file_node(cu.source)
+            graph.add_edge(GraphEdge(
+                src=cu.id, dst=sid, kind="COMPILE_UNIT_BUILDS_SOURCE",
+                provenance="build_evidence", confidence=CONF_HIGH,
+            ))
+        for flag in cu.abi_relevant_flags:
+            oid = _option_node_id(flag)
+            graph.add_node(GraphNode(
+                id=oid, kind="build_option", label=flag,
+                provenance="build_evidence", confidence=CONF_HIGH,
+                attrs={"abi_relevant": True},
+            ))
+            graph.add_edge(GraphEdge(
+                src=cu.id, dst=oid, kind="COMPILE_UNIT_USES_OPTION",
+                provenance="build_evidence", confidence=CONF_HIGH,
+            ))
+
+    return graph.finalize()
+
+
+# ── Phase 5 (seed): structural graph-to-graph diff ──────────────────────────
+
+
+@dataclass
+class GraphSummaryDiff:
+    """Structural delta between two :class:`SourceGraphSummary` snapshots.
+
+    A pure structural diff (which nodes/edges entered or left the graph) — the
+    foundation the ``compare-graph`` command renders and that a later phase maps
+    onto the ADR-031 D6 secondary findings. Per ADR-028 D3 / ADR-031 D6 these
+    deltas *explain and prioritize*; they never decide an ABI break on their own.
+    """
+
+    added_nodes: list[GraphNode] = field(default_factory=list)
+    removed_nodes: list[GraphNode] = field(default_factory=list)
+    added_edges: list[GraphEdge] = field(default_factory=list)
+    removed_edges: list[GraphEdge] = field(default_factory=list)
+
+    @property
+    def changed(self) -> bool:
+        return bool(self.added_nodes or self.removed_nodes
+                    or self.added_edges or self.removed_edges)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "added_nodes": [n.to_dict() for n in self.added_nodes],
+            "removed_nodes": [n.to_dict() for n in self.removed_nodes],
+            "added_edges": [e.to_dict() for e in self.added_edges],
+            "removed_edges": [e.to_dict() for e in self.removed_edges],
+            "counts": {
+                "added_nodes": len(self.added_nodes),
+                "removed_nodes": len(self.removed_nodes),
+                "added_edges": len(self.added_edges),
+                "removed_edges": len(self.removed_edges),
+            },
+        }
+
+
+def diff_source_graph(old: SourceGraphSummary, new: SourceGraphSummary) -> GraphSummaryDiff:
+    """Compute the structural delta from *old* to *new* (Phase 5 seed)."""
+    old_nodes = {n.id: n for n in old.nodes}
+    new_nodes = {n.id: n for n in new.nodes}
+    old_edges = {e.key(): e for e in old.edges}
+    new_edges = {e.key(): e for e in new.edges}
+
+    return GraphSummaryDiff(
+        added_nodes=[new_nodes[i] for i in sorted(new_nodes.keys() - old_nodes.keys())],
+        removed_nodes=[old_nodes[i] for i in sorted(old_nodes.keys() - new_nodes.keys())],
+        added_edges=[new_edges[k] for k in sorted(new_edges.keys() - old_edges.keys())],
+        removed_edges=[old_edges[k] for k in sorted(old_edges.keys() - new_edges.keys())],
+    )

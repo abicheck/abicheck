@@ -40,7 +40,16 @@ backends — **clang** (the source-based default: inline/template/constexpr body
 fingerprints + default arguments), **castxml** (declarations/types/const values),
 and an **Android** header-checker adapter — plus the linker, source-replay diff,
 replay scopes, and per-TU cache (see [L4 findings](#source-abi-replay-findings-l4)).
-L5 is planned (ADR-031).
+
+L5 has landed in its first form (ADR-031, phases 1–2): a compact, abicheck-owned
+**source graph summary** folded from the L3 build evidence — `target`,
+`compile_unit`, `source`, `header`, `generated_file`, and `build_option` nodes
+linked by `TARGET_HAS_SOURCE` / `TARGET_HAS_PUBLIC_HEADER` / `TARGET_DEPENDS_ON`
+/ `COMPILE_UNIT_BUILDS_SOURCE` / `COMPILE_UNIT_USES_OPTION` edges, each carrying
+provenance and a confidence label. Collect it with `--source-graph summary` and
+compare two summaries with `compare-graph` (below). The deeper graph layers —
+public-reachability/type/call graphs and external Kythe/CodeQL backends — remain
+future work.
 
 > **Source ABI replay (L4) requires clang** (or castxml for the declaration
 > subset, or a pre-captured Android dump). It is the one tier gated on a C++
@@ -90,6 +99,29 @@ abicheck collect-evidence \
 - `--source-abi-extractor android --android-dump libfoo.lsdump` reuses a
   pre-captured Android `header-abi-dumper`/`header-abi-linker` dump instead of
   running a compiler.
+
+To additionally collect the **L5 source graph summary** (ADR-031), add
+`--source-graph summary`. It folds the already-collected L3 build evidence into
+a compact target/source/header/build-option graph (no extra tool, no rebuild):
+
+```bash
+abicheck collect-evidence \
+  --compile-db build/compile_commands.json \
+  --source-graph summary \
+  --output libfoo.evidence/
+```
+
+Compare two graph summaries directly — pass either the pack directories or the
+`graph/source_graph_summary.json` files:
+
+```bash
+abicheck compare-graph old.evidence/ new.evidence/            # structural delta
+abicheck compare-graph old.evidence/ new.evidence/ --format json
+```
+
+The diff is **structural** (which nodes/edges entered or left the graph). Per
+the authority rule it explains and prioritizes impact; it never, on its own,
+decides or suppresses an artifact-proven ABI break.
 
 `collect-evidence` accepts:
 

@@ -51,6 +51,7 @@ if TYPE_CHECKING:
         CastxmlSourceExtractor,
         ClangSourceExtractor,
     )
+    from .evidence.source_graph import SourceGraphSummary
     from .model import AbiSnapshot
 
 
@@ -103,6 +104,11 @@ if TYPE_CHECKING:
 @click.option("--source-abi-cache", "source_abi_cache", type=click.Path(path_type=Path), default=None,
               help="Directory for the per-TU source ABI dump cache (ADR-030 D8).")
 @click.option("--clang-bin", "clang_bin", default="clang", show_default=True, help="clang binary to use for source ABI replay.")
+@click.option("--source-graph", "source_graph", default="off", show_default=True,
+              type=click.Choice(["off", "summary"], case_sensitive=False),
+              help="Collect an L5 source graph (ADR-031). 'summary' folds the L3 "
+                   "build evidence into a compact target/source/header/option graph "
+                   "for graph-to-graph comparison and finding localization.")
 @click.option("-o", "--output", "output", type=click.Path(path_type=Path), required=True,
               help="Output evidence-pack directory.")
 @click.option("-v", "--verbose", is_flag=True, default=False)
@@ -128,6 +134,7 @@ def collect_evidence_cmd(
     android_dump: Path | None,
     source_abi_cache: Path | None,
     clang_bin: str,
+    source_graph: str,
     output: Path,
     verbose: bool,
 ) -> None:
@@ -178,6 +185,22 @@ def collect_evidence_cmd(
             verbose=verbose,
         )
 
+    graph: SourceGraphSummary | None = None
+    graph_detail = ""
+    if source_graph == "summary":
+        from .evidence.source_graph import build_source_graph
+        graph = build_source_graph(merged)
+        graph_detail = (
+            f"{len(graph.nodes)} nodes, {len(graph.edges)} edges "
+            f"({graph.coverage.get('targets', 0)} targets, "
+            f"{graph.coverage.get('compile_units', 0)} compile units)"
+        )
+        extractors.append(ExtractorRecord(
+            name="source_graph:summary",
+            status="ok" if graph.nodes else "partial",
+            detail=graph_detail if graph.nodes else "no build evidence to fold into a graph",
+        ))
+
     pack = EvidencePack.empty(
         output,
         abicheck_version=_abicheck_version,
@@ -200,7 +223,11 @@ def collect_evidence_cmd(
         pack.build_evidence = merged
     if surface is not None:
         pack.source_abi = surface
-    pack.manifest.coverage = _build_coverage(merged, has_build, surface, source_detail)
+    if graph is not None:
+        pack.source_graph = graph
+    pack.manifest.coverage = _build_coverage(
+        merged, has_build, surface, source_detail, graph, graph_detail
+    )
     pack.write()
 
     click.echo(f"Evidence pack written to {output}")
@@ -214,6 +241,8 @@ def collect_evidence_cmd(
         click.echo("  L3 build context: not collected (no adapters produced facts)")
     if source_abi:
         click.echo(f"  L4 source ABI replay: {source_detail}")
+    if graph is not None:
+        click.echo(f"  L5 source graph: {graph_detail or 'empty (no build evidence)'}")
     for diag in merged.diagnostics:
         click.echo(f"  note: {diag}", err=True)
 
@@ -328,6 +357,8 @@ def _build_coverage(
     has_build: bool,
     surface: SourceAbiSurface | None = None,
     source_detail: str = "",
+    graph: SourceGraphSummary | None = None,
+    graph_detail: str = "",
 ) -> list[LayerCoverage]:
     """Build the L3/L4/L5 coverage rows for the pack manifest (ADR-028 D7)."""
     if has_build:
@@ -368,11 +399,23 @@ def _build_coverage(
             )
     else:
         l4 = LayerCoverage(layer=EvidenceLayer.L4_SOURCE_ABI.value, status=CoverageStatus.NOT_COLLECTED)
-    return [
-        l3,
-        l4,
-        LayerCoverage(layer=EvidenceLayer.L5_SOURCE_GRAPH.value, status=CoverageStatus.NOT_COLLECTED),
-    ]
+    # L5 is PRESENT when the graph carries edges; PARTIAL when a graph was built
+    # but had no build evidence to fold (so it is empty), else NOT_COLLECTED.
+    if graph is not None:
+        if graph.edges:
+            l5 = LayerCoverage(
+                layer=EvidenceLayer.L5_SOURCE_GRAPH.value, status=CoverageStatus.PRESENT,
+                confidence=EvidenceConfidence.REDUCED, detail=graph_detail,
+            )
+        else:
+            l5 = LayerCoverage(
+                layer=EvidenceLayer.L5_SOURCE_GRAPH.value, status=CoverageStatus.PARTIAL,
+                confidence=EvidenceConfidence.UNKNOWN,
+                detail=graph_detail or "no build evidence to fold into a graph",
+            )
+    else:
+        l5 = LayerCoverage(layer=EvidenceLayer.L5_SOURCE_GRAPH.value, status=CoverageStatus.NOT_COLLECTED)
+    return [l3, l4, l5]
 
 
 def _exported_symbols_from_binary(binary: Path | None) -> list[str]:
@@ -799,3 +842,85 @@ def _echo_capabilities(
             click.echo(f"  [on]  {label} — {how}", err=True)
         else:
             click.echo(f"  [off] {label} — {why_off}", err=True)
+
+
+# ── compare-graph: structural graph-to-graph diff (ADR-031 D6, D8) ────────────
+
+
+def _load_source_graph(path: Path) -> SourceGraphSummary:
+    """Load a source graph summary from a JSON file or an evidence-pack dir.
+
+    Accepts either ``…/graph/source_graph_summary.json`` directly or a pack
+    directory (the graph is read from its manifest layout). Raises a Click error
+    when neither yields a graph so the failure is actionable.
+    """
+    import json as _json
+
+    from .evidence.source_graph import SourceGraphSummary
+
+    if path.is_dir():
+        pack = _load_pack_or_raise(path)
+        if pack.source_graph is None:
+            raise click.ClickException(
+                f"Evidence pack at {path} has no L5 source graph "
+                "(collect it with `collect-evidence --source-graph summary`)."
+            )
+        return pack.source_graph
+    if not path.is_file():
+        raise click.ClickException(f"No source graph summary at {path}.")
+    try:
+        data = _json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise click.ClickException(f"Cannot read source graph at {path}: {exc}") from exc
+    if not isinstance(data, dict):
+        raise click.ClickException(f"{path} must contain a JSON object.")
+    return SourceGraphSummary.from_dict(data)
+
+
+@main.command("compare-graph")
+@click.argument("old", type=click.Path(path_type=Path))
+@click.argument("new", type=click.Path(path_type=Path))
+@click.option("--format", "fmt", default="text", show_default=True,
+              type=click.Choice(["text", "json"], case_sensitive=False),
+              help="Output format for the structural graph diff.")
+def compare_graph_cmd(old: Path, new: Path, fmt: str) -> None:
+    """Compare two L5 source graph summaries (ADR-031 D6, D8).
+
+    \b
+    OLD and NEW may each be a `graph/source_graph_summary.json` file or an
+    evidence-pack directory produced by `collect-evidence --source-graph summary`.
+
+    The diff is structural — which nodes/edges entered or left the graph. Per
+    ADR-028 D3 / ADR-031 D6 it *explains and prioritizes* impact; it never, on
+    its own, decides or suppresses an artifact-proven ABI break.
+    """
+    import json as _json
+
+    from .evidence.source_graph import diff_source_graph
+
+    old_graph = _load_source_graph(old)
+    new_graph = _load_source_graph(new)
+    delta = diff_source_graph(old_graph, new_graph)
+
+    if fmt == "json":
+        click.echo(_json.dumps(delta.to_dict(), indent=2, sort_keys=True))
+        return
+
+    if not delta.changed:
+        click.echo("Source graphs are structurally identical.")
+        click.echo(f"  graph_id: {old_graph.graph_id or old_graph.compute_graph_id()}")
+        return
+
+    click.echo("Source graph structural diff:")
+    click.echo(
+        f"  nodes: +{len(delta.added_nodes)} / -{len(delta.removed_nodes)}    "
+        f"edges: +{len(delta.added_edges)} / -{len(delta.removed_edges)}"
+    )
+    for node in delta.added_nodes:
+        click.echo(f"  + node [{node.kind}] {node.label or node.id}")
+    for node in delta.removed_nodes:
+        click.echo(f"  - node [{node.kind}] {node.label or node.id}")
+    for edge in delta.added_edges:
+        click.echo(f"  + edge {edge.kind}: {edge.src} -> {edge.dst}")
+    for edge in delta.removed_edges:
+        click.echo(f"  - edge {edge.kind}: {edge.src} -> {edge.dst}")
