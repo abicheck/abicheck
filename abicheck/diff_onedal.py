@@ -389,11 +389,6 @@ def detect_sycl_overload_set_removal(
         for fn in removed:
             affected_mangled.append(fn.mangled)
             suppressed.add(fn.mangled)
-            # See `detect_cpu_dispatch_isa_dropped` for the rationale —
-            # platforms differ on whether `Change.symbol` is the
-            # castxml-derived mangled name or a sibling export-name form.
-            if fn.name:
-                suppressed.add(fn.name)
         # The report shows the unqualified leaf so it reads as
         # "compute, train, infer" rather than full namespaced paths.
         affected_unq.append(_last_segment(entity) or entity)
@@ -526,20 +521,6 @@ def detect_cpu_dispatch_isa_dropped(
         affected_stems = {stem for stem, _ in overlapping}
         affected_mangled = [m for _, m in overlapping]
         suppressed.update(affected_mangled)
-        # Belt-and-suspenders: also include the demangled function name in
-        # the suppression set. Different platforms emit ``func_removed``
-        # ``Change.symbol`` with different conventions — on Linux it's the
-        # Itanium mangled name (matches ``fn.mangled``); on Windows the PE
-        # diff (``diff_platform._diff_pe``) uses the MSVC export name,
-        # which is a mangled form that may not equal castxml's
-        # ``fn.mangled`` verbatim. Adding the demangled name catches the
-        # case where castxml-derived ``fn.mangled`` and PE-export-derived
-        # ``Change.symbol`` are sibling forms of the same underlying name.
-        old_index = {f.mangled: f for f in old.functions}
-        for _, mangled in overlapping:
-            removed_fn = old_index.get(mangled)
-            if removed_fn is not None and removed_fn.name:
-                suppressed.add(removed_fn.name)
         stems_sorted = sorted(affected_stems)
         findings.append(
             Change(
