@@ -359,7 +359,21 @@ _SIZED_FLOAT_RE = re.compile(r"_Float(?:16|32|64|128)(?:x)?\b")
 _RECOMMENDED_CLANG_MAJOR = 18
 
 _CASTXML_VERSION_RE = re.compile(r"castxml version\s+(\S+)", re.IGNORECASE)
-_CLANG_VERSION_RE = re.compile(r"clang version\s+(\d+)(?:\.(\d+))?", re.IGNORECASE)
+# `castxml --version` does not always print the bundled frontend version, and
+# when it does the spelling varies ("clang version 18.1.8", "LLVM version 18.1.8").
+# Accept either so the precise floor comparison can actually fire.
+_CLANG_VERSION_RE = re.compile(
+    r"(?:clang|LLVM) version\s+(\d+)(?:\.(\d+))?", re.IGNORECASE
+)
+
+
+def _is_toolchain_version_failure(stderr: str) -> bool:
+    """True when a castxml failure is a bundled-Clang-too-old signature
+    (sized-float keywords or the GCC ``__assume__`` attribute) — the only
+    failures for which the ``castxml --version`` upgrade note is relevant."""
+    return bool(stderr) and (
+        bool(_SIZED_FLOAT_RE.search(stderr)) or "__assume__" in stderr
+    )
 
 
 def _parse_castxml_version(output: str) -> tuple[str | None, tuple[int, int] | None]:
@@ -466,9 +480,15 @@ def _validate_castxml_output(
 ) -> Element:
     """Validate castxml output and return parsed XML root."""
     if result.returncode != 0:
+        # Only probe `castxml --version` when the failure is a frontend-too-old
+        # signature — otherwise the upgrade note is irrelevant (and unused).
+        version_note = (
+            _castxml_version_note()
+            if _is_toolchain_version_failure(result.stderr) else ""
+        )
         hint = _castxml_failure_hint(
             result.stderr, force_cpp=force_cpp, headers=headers,
-            version_note=_castxml_version_note(),
+            version_note=version_note,
         )
         raise SnapshotError(
             f"castxml failed (exit {result.returncode}):\n{result.stderr[:2000]}{hint}"

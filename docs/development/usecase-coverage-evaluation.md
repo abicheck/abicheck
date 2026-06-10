@@ -32,7 +32,7 @@ manylinux glibc-floor checks (G10), single-binary audit/lint mode (G11),
 cross-architecture guardrails (G13), CPython `abi3` import-contract checking
 (G14), and inline-namespace version-stamp normalization (G15) — plus one newly
 **partial** item, header-scoped source-mode toolchain robustness (G16), whose
-diagnostics and sized-float auto-retry have shipped.
+diagnostics and `castxml --version` floor probe have shipped.
 
 Several formerly broad gaps are now closed and should no longer be treated as
 open roadmap work: native PE/Mach-O compare validation (G1), build-config matrix

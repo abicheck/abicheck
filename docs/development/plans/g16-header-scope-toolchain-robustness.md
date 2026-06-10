@@ -6,8 +6,8 @@
 ## Problem
 
 Header-scoped scans (`--headers`, the castxml source path in
-`abicheck/dumper_castxml.py`) are the only way abicheck can separate *public
-source API* from *private/internal* surface — the single most-requested
+`abicheck/dumper.py` / `abicheck/dumper_castxml.py`) are the only way abicheck
+can separate *public source API* from *private/internal* surface — the single most-requested
 disambiguation in the real-world scan campaign. But in the 2026-06 real-world
 cron the header-scoped re-run **aborted before any ABI comparison** in 21
 separate issue records, always for the same small family of host-toolchain
@@ -122,11 +122,14 @@ cadence entirely.
 
 ## Effort & risk
 
-M. The classifier + message tests are small and high-value (they turn 21
-dead-end campaign runs into one-line, user-fixable diagnostics). The actual
-*workaround* is the risky part — castxml/clang resource-dir behaviour varies by
-host GCC/clang version — so it is gated behind the opt-out flag and proven on the
-CI host only, with the diagnostic as the guaranteed fallback.
+M. The classifier + version-probe + message tests are small and high-value
+(they turn 21 dead-end campaign runs into one-line, user-fixable diagnostics)
+and have shipped. The remaining risk sits in any *automatic* host-side
+workaround: the `-D_FloatN` preprocessor shim was prototyped and **rejected**
+(it rewrites glibc's own `typedef float _Float32;` fallback into the invalid
+`typedef float float;`), so abicheck deliberately stops at precise diagnosis +
+the Clang-floor recommendation. The structural cure is the libclang extractor
+(**G4**), not a brittle shim.
 
 ## Out of scope
 

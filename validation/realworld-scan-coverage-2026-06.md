@@ -84,7 +84,7 @@ campaign-harness infra (intentionally outside the abicheck capability registry).
 
 | Theme in catalog | Registry status |
 |---|---|
-| Header-scoped scan aborts in host system headers (21×) | **NEW → G16 `UC-TC-header-scope-robustness` (planned)** |
+| Header-scoped scan aborts in host system headers (21×) | **NEW → G16 `UC-TC-header-scope-robustness` (partial — diagnostics + `castxml --version` floor probe shipped)** |
 | New `GLIBC_2.x` floor as deployment risk (zfp, yaml-cpp, x264 …) | already **G10 `UC-TC-glibc-floor` (planned)** — reinforced |
 | Abseil `lts_*` / inline-namespace churn (protobuf, RE2) | already **G15 `UC-CHANGE-inline-ns-version` (planned)** — reinforced |
 | auditwheel/version-suffixed DSO pairing (openblas, dav1d) | partly PR #321; vendored-hash topology is **G9 (planned)** |
@@ -98,9 +98,12 @@ for the detailed problem statement and acceptance criteria.
 
 ## Recommended follow-ups (not blocking)
 
-1. **Implement G16 diagnostics first** (message-only classifier + tests) — it
-   turns 21 dead-end campaign runs into one-line, user-fixable errors at low
-   risk; the host-header workaround can follow.
+1. **G16 diagnostics — shipped.** The message-only classifier + `castxml
+   --version` floor probe turn 21 dead-end campaign runs into one-line,
+   user-fixable errors. A `-D_FloatN` auto-shim was prototyped and rejected (it
+   rewrites glibc's own `typedef float _Float32;`); the durable cure is a
+   newer-Clang castxml or the libclang extractor (G4). Remaining: a real-host
+   integration check.
 2. **Validation manifest hygiene** (campaign-side, not abicheck core): record
    the known split-package aliases (`libsqlite`, `liblzma`, `libexpat`,
    `libre2-11`, `libwebp-base`, `libbrotli*`) and prefer SONAME/normalized

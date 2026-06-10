@@ -39,9 +39,13 @@ import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from abicheck.dumper import (
+    _castxml_dump,
     _castxml_failure_hint,
     _castxml_version_note,
+    _is_toolchain_version_failure,
     _parse_castxml_version,
 )
 
@@ -72,6 +76,12 @@ class TestParseCastxmlVersion:
         raw, clang = _parse_castxml_version("castxml version 0.5.1\nclang version 14\n")
         assert raw == "0.5.1"
         assert clang == (14, 0)
+
+    def test_parses_llvm_version_spelling(self) -> None:
+        # castxml builds that print "LLVM version" rather than "clang version".
+        raw, clang = _parse_castxml_version("castxml version 0.6.8\nLLVM version 18.1.8\n")
+        assert raw == "0.6.8"
+        assert clang == (18, 1)
 
     def test_missing_fields_are_none(self) -> None:
         assert _parse_castxml_version("") == (None, None)
@@ -153,3 +163,57 @@ class TestFailureHint:
             "fatal error: missing.h: No such file", force_cpp=False, headers=[header]
         )
         assert hint == ""
+
+
+class TestProbeGating:
+    """The `castxml --version` probe is only triggered by frontend-too-old
+    signatures, and is wired end-to-end into the raised error."""
+
+    def test_signature_classification(self) -> None:
+        assert _is_toolchain_version_failure(_FLOATN_STDERR)
+        assert _is_toolchain_version_failure(_ASSUME_STDERR)
+        assert not _is_toolchain_version_failure("fatal error: missing.h: No such file")
+        assert not _is_toolchain_version_failure("")
+
+    def test_floatn_failure_probes_version_and_folds_note(self, tmp_path: Path) -> None:
+        calls: list[list[str]] = []
+
+        def fake_run(cmd, **kwargs):  # noqa: ANN001
+            calls.append(list(cmd))
+            if "--version" in cmd:
+                return _completed(stdout="castxml version 0.5.1\nclang version 14.0.0\n")
+            return _completed(returncode=1, stderr=_FLOATN_STDERR)
+
+        with (
+            patch("abicheck.dumper._castxml_available", return_value=True),
+            patch("abicheck.dumper.subprocess.run", side_effect=fake_run),
+            patch("abicheck.dumper._cache_path", return_value=tmp_path / "cache.xml"),
+        ):
+            header = tmp_path / "api.hpp"
+            header.write_text("int f();\n", encoding="utf-8")
+            with pytest.raises(RuntimeError) as exc:
+                _castxml_dump([header], [])
+
+        msg = str(exc.value)
+        assert "newer castxml" in msg          # base sized-float hint
+        assert "Detected castxml 0.5.1" in msg  # folded-in version note
+        assert any("--version" in c for c in calls)  # probe happened
+
+    def test_unrelated_failure_skips_version_probe(self, tmp_path: Path) -> None:
+        calls: list[list[str]] = []
+
+        def fake_run(cmd, **kwargs):  # noqa: ANN001
+            calls.append(list(cmd))
+            return _completed(returncode=1, stderr="fatal error: missing.h: No such file")
+
+        with (
+            patch("abicheck.dumper._castxml_available", return_value=True),
+            patch("abicheck.dumper.subprocess.run", side_effect=fake_run),
+            patch("abicheck.dumper._cache_path", return_value=tmp_path / "cache.xml"),
+        ):
+            header = tmp_path / "api.hpp"
+            header.write_text("int f();\n", encoding="utf-8")
+            with pytest.raises(RuntimeError):
+                _castxml_dump([header], [])
+
+        assert not any("--version" in c for c in calls)  # no needless probe
