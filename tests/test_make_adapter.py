@@ -55,6 +55,18 @@ def test_make_forced_include_not_mistaken_for_source():
     assert [c.source for c in ev.compile_units] == ["src/foo.cc"]
 
 
+def test_make_absolute_posix_source_path():
+    # An absolute Unix source path must be recognized (not mistaken for an option).
+    ev = MakeAdapter(dry_run="gcc -std=c11 -c /work/src/foo.c -o /work/build/foo.o").collect()
+    assert [c.source for c in ev.compile_units] == ["/work/src/foo.c"]
+
+
+def test_make_msvc_slash_c_compile_marker():
+    # MSVC/clang-cl recipes use `/c` (and `/Fo<obj>`) rather than `-c`.
+    ev = MakeAdapter(dry_run="cl.exe /std:c++17 /c foo.cc /Fofoo.obj").collect()
+    assert [c.source for c in ev.compile_units] == ["foo.cc"]
+
+
 def test_make_compound_recipe_with_cd():
     ev = MakeAdapter(dry_run="cd sub && gcc -std=c17 -c sub/x.c -o sub/x.o").collect()
     assert [c.source for c in ev.compile_units] == ["sub/x.c"]

@@ -116,9 +116,10 @@ class MakeAdapter:
 
     def _compile_unit(self, line: str, directory: Path) -> CompileUnit | None:
         argv = _split_recipe(line)
-        # A translation-unit compile is a `-c` invocation that names a source;
-        # link/info/`Entering directory` lines lack one of those and are skipped.
-        if "-c" not in argv:
+        # A translation-unit compile is a `-c` (GNU) / `/c` (MSVC, clang-cl)
+        # invocation that names a source; link/info/`Entering directory` lines
+        # lack one of those and are skipped.
+        if "-c" not in argv and "/c" not in argv:
             return None
         source = source_from_argv(argv)
         if not source:

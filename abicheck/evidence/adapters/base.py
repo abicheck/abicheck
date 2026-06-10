@@ -100,10 +100,8 @@ def source_from_argv(argv: list[str]) -> str:
 
     Operands of value-taking flags (e.g. ``-include foo.hpp`` / ``/FI foo.hpp``)
     are skipped so a forced/precompiled header is never mistaken for the source
-    TU. ``-``/``/``-prefixed tokens are options (never a relative source path),
-    so they are never selected — this also covers combined forms such as
-    ``/FIconfig.hpp``. The compiler at ``argv[0]`` carries no source extension,
-    so scanning from the start is safe (and handles ``cd dir && cc …`` recipes).
+    TU. The compiler at ``argv[0]`` carries no source extension, so scanning
+    from the start is safe (and handles ``cd dir && cc …`` recipes).
     """
     i = 0
     while i < len(argv):
@@ -111,10 +109,25 @@ def source_from_argv(argv: list[str]) -> str:
         if arg in SOURCE_OPERAND_FLAGS:
             i += 2  # skip the flag and the operand it consumes
             continue
-        if not arg.startswith(("-", "/")) and detect_language(arg):
+        if _is_source_token(arg):
             return arg
         i += 1
     return ""
+
+
+def _is_source_token(arg: str) -> bool:
+    """True if *arg* is a translation-unit source path, not a compiler option.
+
+    ``-``-prefixed tokens are always options. A ``/``-prefixed token is an
+    MSVC/clang-cl option (``/c``, ``/FIconfig.hpp``, ``/Fofoo.obj``) when it has
+    no embedded path separator; one that does (e.g. ``/work/src/foo.cc``) is a
+    Unix absolute source path and is kept.
+    """
+    if not arg or arg.startswith("-"):
+        return False
+    if arg.startswith("/") and "/" not in arg[1:]:
+        return False  # MSVC/clang-cl option, not an absolute path
+    return bool(detect_language(arg))
 
 
 def compile_unit_id(source: str, argv: list[str], output: str = "") -> str:
