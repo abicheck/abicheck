@@ -81,6 +81,95 @@ def detect_language(source: str) -> str:
     return ""
 
 
+#: Value-taking compiler flags whose *operand* is not the translation unit even
+#: when it looks source-like — e.g. ``-include config.hpp`` (GNU forced header),
+#: ``-x c++``, or the MSVC/clang-cl ``/FI`` / ``/FU`` forced-include/using flags.
+#: Skipping the operand keeps :func:`source_from_argv` from mistaking a forced or
+#: precompiled header for the real source. Combined MSVC forms like
+#: ``/FIconfig.hpp`` are handled by the ``/``-prefix guard.
+SOURCE_OPERAND_FLAGS: frozenset[str] = frozenset({
+    "-include", "-imacros", "-include-pch", "-Xclang", "-x",
+    "-o", "-MF", "-MT", "-MQ", "-MJ",
+    "-I", "-isystem", "-iquote", "-idirafter", "-D", "-U",
+    "/FI", "/FU",
+})
+
+
+def source_from_argv(argv: list[str]) -> str:
+    """Return the first argv token that names the compiled translation unit.
+
+    Operands of value-taking flags (e.g. ``-include foo.hpp`` / ``/FI foo.hpp``)
+    are skipped so a forced/precompiled header is never mistaken for the source
+    TU. The compiler at ``argv[0]`` carries no source extension, so scanning
+    from the start is safe (and handles ``cd dir && cc …`` recipes).
+
+    Source recognition is dialect-aware: an MSVC/clang-cl command (``/c`` present
+    or a ``cl``/``clang-cl`` driver) treats every ``/``-prefixed token as an
+    option — including combined value-taking forms like ``/FIsrc/config.hpp`` —
+    so only bare, ``C:\\``-rooted, or ``/Tp``/``/Tc``-named tokens are sources.
+    A GNU command treats ``/abs/path.cc`` as a Unix absolute source path.
+    """
+    msvc = _is_msvc_command(argv)
+    i = 0
+    while i < len(argv):
+        arg = argv[i]
+        if arg in SOURCE_OPERAND_FLAGS:
+            i += 2  # skip the flag and the operand it consumes
+            continue
+        # MSVC/clang-cl name the TU explicitly with /Tp<file> (C++) / /Tc<file>
+        # (C), or the space-separated `/Tp <file>` form. Return the bare path.
+        if arg in ("/Tp", "/Tc"):
+            if i + 1 < len(argv) and detect_language(argv[i + 1]):
+                return argv[i + 1]
+            i += 2
+            continue
+        if arg[:3] in ("/Tp", "/Tc") and detect_language(arg[3:]):
+            return arg[3:]
+        if _is_source_token(arg, msvc):
+            return arg
+        i += 1
+    return ""
+
+
+#: Driver basenames that mark a command as MSVC-dialect (``/`` introduces an
+#: option, not a path). ``clang-cl`` mimics ``cl`` exactly.
+_MSVC_DRIVERS: frozenset[str] = frozenset({"cl", "cl.exe", "clang-cl", "clang-cl.exe"})
+
+
+def _is_msvc_command(argv: list[str]) -> bool:
+    """True if *argv* uses MSVC/clang-cl option syntax (``/opt`` not paths).
+
+    Detected either by the ``/c`` compile marker (GNU uses ``-c``) or by a
+    ``cl``/``clang-cl`` driver basename anywhere in the leading tokens (the
+    driver may be a full path, e.g. ``C:\\VS\\bin\\cl.exe``).
+    """
+    if "/c" in argv:
+        return True
+    for arg in argv:
+        if arg in ("&&", ";"):
+            break
+        base = arg.replace("\\", "/").rsplit("/", 1)[-1].lower()
+        if base in _MSVC_DRIVERS:
+            return True
+    return False
+
+
+def _is_source_token(arg: str, msvc: bool) -> bool:
+    """True if *arg* is a translation-unit source path, not a compiler option.
+
+    ``-``-prefixed tokens are always options. In an MSVC/clang-cl command every
+    ``/``-prefixed token is an option (``/c``, ``/FIsrc/config.hpp``,
+    ``/Fofoo.obj``) regardless of an embedded ``/``. In a GNU command a
+    ``/``-prefixed token with a source extension is a Unix absolute source path
+    (e.g. ``/work/src/foo.cc``) and is kept.
+    """
+    if not arg or arg.startswith("-"):
+        return False
+    if arg.startswith("/") and msvc:
+        return False  # MSVC/clang-cl option (handled before us for /Tp,/Tc)
+    return bool(detect_language(arg))
+
+
 def compile_unit_id(source: str, argv: list[str], output: str = "") -> str:
     """Derive a stable compile-unit id from source + normalized argv + output.
 

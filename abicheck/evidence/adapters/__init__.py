@@ -27,15 +27,19 @@ from .base import (
     detect_language,
     extract_abi_relevant_flags,
 )
+from .bazel import BazelAdapter
 from .cmake_file_api import CMakeFileApiAdapter
 from .compile_db import CompileDbAdapter
+from .make import MakeAdapter
 from .ninja import NinjaAdapter
 
 __all__ = [
     "ABI_RELEVANT_FLAG_PREFIXES",
+    "BazelAdapter",
     "BuildAdapter",
     "CMakeFileApiAdapter",
     "CompileDbAdapter",
+    "MakeAdapter",
     "NinjaAdapter",
     "compile_unit_id",
     "detect_language",

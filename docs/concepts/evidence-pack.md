@@ -67,6 +67,21 @@ abicheck compare old.abi.json new.abi.json \
   graph, public/private header file sets, toolchains).
 - `--build-dir DIR --ninja` / `--ninja-compdb FILE` — Ninja `-t compdb`/`graph`
   output (live query or pre-captured for hermetic CI).
+- `--bazel-cquery FILE` / `--bazel-aquery FILE` — pre-captured
+  `bazel cquery --output=jsonproto` (configured target graph) and
+  `bazel aquery --output=jsonproto` (compile/link action graph). Use the
+  textual `jsonproto` form: a binary `--output=proto` blob is reported with a
+  diagnostic rather than decoded (binary-proto ingestion is a documented
+  follow-up).
+- `--make-dry-run FILE` — a pre-captured `make -n`/`make --trace` transcript.
+  Make has no authoritative target graph, so the recovered compile units are
+  **reduced confidence**; prefer a generated `compile_commands.json` when one
+  is available.
+- `--read-compiler-record` (with `--binary`) — recover compiler provenance from
+  the built binary itself: the `.GCC.command.line` ELF section
+  (`-frecord-gcc-switches` / `-frecord-command-line`) and DWARF
+  `DW_AT_producer`. These signals are **advisory** unless cross-checked against
+  build-system evidence.
 
 ## Build-evidence findings (L3)
 

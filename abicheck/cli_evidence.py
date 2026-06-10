@@ -15,8 +15,9 @@
 """`collect-evidence` command (ADR-028 D6, ADR-029).
 
 Collects an optional EvidencePack from an existing build tree *without
-rebuilding*. The pack augments an ABI snapshot with L3 build-context evidence
-(compile DB / CMake File API / Ninja). Per ADR-028 D6 this command never runs
+rebuilding*. The pack augments an ABI snapshot with L3 build-context evidence (compile DB /
+CMake File API / Ninja / Bazel / Make dry-run / compiler-recorded metadata).
+Per ADR-028 D6 this command never runs
 arbitrary build commands: it only reads existing build outputs and build-system
 query interfaces. Anything that builds or executes project code is a separate,
 explicit opt-in not implemented here.
@@ -64,6 +65,14 @@ if TYPE_CHECKING:
               help="Collect Ninja compile/graph facts from --build-dir via `ninja -t` queries.")
 @click.option("--ninja-compdb", "ninja_compdb", type=click.Path(path_type=Path), default=None,
               help="Pre-captured `ninja -t compdb` output (for hermetic CI / no live ninja).")
+@click.option("--bazel-cquery", "bazel_cquery", type=click.Path(path_type=Path), default=None,
+              help="Pre-captured `bazel cquery --output=jsonproto` output (configured target graph).")
+@click.option("--bazel-aquery", "bazel_aquery", type=click.Path(path_type=Path), default=None,
+              help="Pre-captured `bazel aquery --output=jsonproto` output (compile/link action graph).")
+@click.option("--make-dry-run", "make_dry_run", type=click.Path(path_type=Path), default=None,
+              help="Pre-captured `make -n`/`--trace` transcript (reduced-confidence compile units).")
+@click.option("--read-compiler-record", "read_compiler_record", is_flag=True, default=False,
+              help="Recover compiler provenance from --binary (.GCC.command.line / DWARF DW_AT_producer).")
 @click.option("--build-system", "build_system", default="generic", show_default=True,
               type=click.Choice(["generic", "cmake", "ninja", "bazel", "make"], case_sensitive=False),
               help="Build system hint for the compile-DB adapter.")
@@ -79,6 +88,10 @@ def collect_evidence_cmd(
     cmake: bool,
     ninja: bool,
     ninja_compdb: Path | None,
+    bazel_cquery: Path | None,
+    bazel_aquery: Path | None,
+    make_dry_run: Path | None,
+    read_compiler_record: bool,
     build_system: str,
     output: Path,
     verbose: bool,
@@ -104,6 +117,11 @@ def collect_evidence_cmd(
         cmake=cmake,
         ninja=ninja,
         ninja_compdb=ninja_compdb,
+        bazel_cquery=bazel_cquery,
+        bazel_aquery=bazel_aquery,
+        make_dry_run=make_dry_run,
+        binary=binary,
+        read_compiler_record=read_compiler_record,
         build_system=build_system,
         verbose=verbose,
     )
@@ -122,7 +140,9 @@ def collect_evidence_cmd(
         "headers": [red.path(str(h)) for h in headers],
         "build_dir": red.path(str(build_dir)) if build_dir else None,
     }
-    has_build = bool(merged.compile_units or merged.targets or merged.toolchains)
+    has_build = bool(
+        merged.compile_units or merged.targets or merged.toolchains or merged.link_units
+    )
     if has_build:
         pack.build_evidence = merged
     pack.manifest.coverage = _build_coverage(merged, has_build)
@@ -150,14 +170,21 @@ def _run_adapters(
     cmake: bool,
     ninja: bool,
     ninja_compdb: Path | None,
+    bazel_cquery: Path | None,
+    bazel_aquery: Path | None,
+    make_dry_run: Path | None,
+    binary: Path | None,
+    read_compiler_record: bool,
     build_system: str,
     verbose: bool,
 ) -> None:
     """Run the requested build-evidence adapters and fold them into *merged*."""
     # Import adapters lazily so `collect-evidence --help` stays cheap.
     from .evidence.adapters import (
+        BazelAdapter,
         CMakeFileApiAdapter,
         CompileDbAdapter,
+        MakeAdapter,
         NinjaAdapter,
     )
 
@@ -199,6 +226,43 @@ def _run_adapters(
             name="ninja", status="ok" if ev.compile_units else "partial",
             inputs=[DEFAULT_REDACTION.path(str(build_dir or ninja_compdb))],
             detail=f"{len(ev.compile_units)} compile units",
+        ))
+
+    if bazel_cquery is not None or bazel_aquery is not None:
+        ev = BazelAdapter(cquery=bazel_cquery, aquery=bazel_aquery).collect()
+        merged.merge(ev)
+        inputs = [DEFAULT_REDACTION.path(str(p)) for p in (bazel_cquery, bazel_aquery) if p is not None]
+        extractors.append(ExtractorRecord(
+            name="bazel", status="ok" if (ev.targets or ev.compile_units or ev.link_units) else "partial",
+            inputs=inputs,
+            detail=(
+                f"{len(ev.targets)} targets, {len(ev.compile_units)} compile units, "
+                f"{len(ev.link_units)} link units"
+            ),
+        ))
+
+    if make_dry_run is not None:
+        # Only a pre-captured transcript — the Make adapter never runs make,
+        # because `make -n` still executes `+` recipes and `$(shell …)`.
+        ev = MakeAdapter(build_dir, dry_run=make_dry_run).collect()
+        merged.merge(ev)
+        extractors.append(ExtractorRecord(
+            name="make", status="ok" if ev.compile_units else "partial",
+            inputs=[DEFAULT_REDACTION.path(str(make_dry_run))],
+            detail=f"{len(ev.compile_units)} compile units (reduced confidence)",
+        ))
+
+    if read_compiler_record:
+        if binary is None:
+            raise click.UsageError("--read-compiler-record requires --binary.")
+        from .evidence.compiler_record import extract_compiler_record
+        ev = extract_compiler_record(binary)
+        merged.merge(ev)
+        extractors.append(ExtractorRecord(
+            name="compiler_record",
+            status="ok" if (ev.toolchains or ev.compile_units) else "partial",
+            inputs=[DEFAULT_REDACTION.path(str(binary))],
+            detail=f"{len(ev.toolchains)} toolchains, {len(ev.compile_units)} compile units",
         ))
 
 

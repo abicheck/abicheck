@@ -1,9 +1,11 @@
 # ADR-029: Build Graph and Toolchain Context Capture
 
 **Date:** 2026-06-09
-**Status:** Accepted — MVP implemented (BuildEvidence model; compile DB,
-CMake File API, and Ninja adapters; build-evidence diff and the six D9
-change kinds)
+**Status:** Accepted — implemented (BuildEvidence model; compile DB, CMake
+File API, Ninja, Bazel `cquery`/`aquery`, and Make dry-run adapters;
+compiler-recorded metadata extractor; build-evidence diff and the six D9
+change kinds). Only Phase 7 (CI rollout + baseline registry) remains, tracked
+under ADR-033.
 **Decision maker:** Nikolay Petrov
 
 ---
@@ -223,9 +225,26 @@ bazel build //foo:libfoo --aspects=@abicheck//:abi_evidence.bzl%abi_evidence_asp
 
 `--output=jsonproto` is an accepted cquery value (alongside `proto`,
 `streamed_proto`, and `textproto`) even though the cquery prose docs only
-describe `proto`; the flag reference is authoritative. The adapter must
-accept both the JSON and binary proto forms, since older Bazel releases or
-project tooling may produce either.
+describe `proto`; the flag reference is authoritative.
+
+**MVP scope (implemented):** the adapter ingests the textual **`jsonproto`**
+form. A binary `--output=proto` blob is not decoded — it would require a
+protobuf runtime plus vendored Bazel `.proto` bindings, which this
+dependency-light tool deliberately avoids — so the adapter records a
+diagnostic asking for `--output=jsonproto` rather than failing. Binary-proto
+ingestion (for tooling that can only emit it) is a documented follow-up, not
+an MVP requirement.
+
+**Configured-graph fidelity (limitation):** when one label appears under
+several configurations, the first configuration seen is the *canonical*
+target and keeps the plain `target://<label>` id (so the label-based aquery
+action graph still links to a collected target); additional configurations
+are preserved under a `target://<label>#cfg:<id>` suffix. Dependency edges are
+read from the label-only `deps` attribute, which does not carry each
+dependency's configuration, so edges resolve to the canonical dependency
+target. Full per-configuration dependency resolution would require richer
+configured-edge output than the `jsonproto` rule attributes expose and is a
+follow-up.
 
 Collected Bazel facts:
 

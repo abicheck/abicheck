@@ -94,6 +94,7 @@ module = [
     "abicheck.pdb_utils",
     "abicheck.sycl_metadata",
     "abicheck.binary_fingerprint",
+    "abicheck.evidence.compiler_record",
 ]
 disallow_untyped_calls = false
 disable_error_code = ["attr-defined"]
