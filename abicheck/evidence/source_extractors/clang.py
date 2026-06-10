@@ -1,0 +1,628 @@
+# Copyright 2026 Nikolay Petrov
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Clang source ABI extractor (ADR-030 D3, phase 5).
+
+This is the *source-based* L4 backend. It parses a translation unit under its
+real per-TU build context (ADR-030 D2) with ``clang -Xclang -ast-dump=json`` and
+derives the fingerprints that final binary/debug artifacts under-represent and
+that castxml (phase 2) cannot produce:
+
+- inline function bodies (``inline_body_changed``);
+- function/class **template** bodies, instantiated or not
+  (``template_body_changed`` / ``uninstantiated_template_removed``);
+- ``constexpr`` values (``constexpr_value_changed``);
+- public default arguments (``default_argument_changed``).
+
+**Requires clang.** Source ABI replay is the one tier that depends on a C++
+front-end being present. When ``clang`` is not on ``PATH`` the extractor raises
+:class:`SourceExtractionError`; callers record that as *partial L4 coverage*
+(ADR-028 D7) and the artifact tiers (L0–L2) stay authoritative — abicheck never
+aborts a comparison because the source tier is unavailable.
+
+No new Python dependency is added (ADR-001): clang is an optional external tool,
+discovered at runtime exactly like castxml. For a GCC-built project clang
+replays the **GCC build's flags** (standard, defines, include paths, target,
+sysroot) so it parses the same headers under the same macros; a TU using a
+GCC-only extension clang rejects degrades to partial coverage rather than a hard
+failure (ADR-030 Consequences).
+
+The argv builder and the JSON-AST → :class:`SourceAbiTu` mapping are pure and
+unit-tested without clang installed; only :meth:`ClangSourceExtractor.extract`
+shells out (integration-marked).
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import shutil
+import subprocess
+from pathlib import Path
+from typing import Any
+
+from ..build_evidence import CompileUnit
+from ..model import EvidenceConfidence
+from ..source_abi import SourceAbiTu, SourceEntity, SourceLocation
+from ._argv import (
+    MACRO_DEFINITION_PREFIXES,
+    is_msvc_mode,
+    pick_compiler_binary,
+    replay_extra_flags,
+    unredact_home,
+)
+from .base import SourceExtractionError
+
+#: clang extractor schema/behaviour version, recorded in the dump provenance and
+#: folded into the per-TU cache key (ADR-030 D8).
+CLANG_EXTRACTOR_VERSION = "0.1"
+
+#: AST node kinds clang emits for the entities we fingerprint.
+_FUNCTION_NODE_KINDS = frozenset({"FunctionDecl", "CXXMethodDecl"})
+_TEMPLATE_NODE_KINDS = frozenset({"FunctionTemplateDecl", "ClassTemplateDecl"})
+#: Decl contexts we descend into to reach members/nested decls, tracking the
+#: enclosing scope name so a member's qualified name is built (``ns::Cls::f``).
+_SCOPE_NODE_KINDS = frozenset(
+    {"NamespaceDecl", "CXXRecordDecl", "ClassTemplateDecl", "LinkageSpecDecl"}
+)
+#: Literal nodes whose ``value`` is a stable, human-meaningful constexpr value.
+_LITERAL_NODE_KINDS = frozenset(
+    {
+        "IntegerLiteral",
+        "FloatingLiteral",
+        "CharacterLiteral",
+        "StringLiteral",
+        "CXXBoolLiteralExpr",
+        "FixedPointLiteral",
+    }
+)
+#: Scalar node keys that survive into the structural body fingerprint. Volatile
+#: keys (``id`` pointer values, ``loc``/``range`` offsets, ``previousDecl``) are
+#: dropped so the hash is stable across builds/checkouts (mirrors the build-root
+#: independence of ``SourceEntity.identity()``).
+_FINGERPRINT_SCALAR_KEYS = ("kind", "name", "value", "opcode", "castKind")
+
+
+def _std_flag(standard: str, msvc: bool) -> list[str]:
+    if not standard:
+        return []
+    return [f"/std:{standard}"] if msvc else [f"-std={standard}"]
+
+
+def build_clang_command(
+    compile_unit: CompileUnit,
+    source: Path,
+    *,
+    clang_bin: str = "clang",
+    compiler_binary: str | None = None,
+) -> list[str]:
+    """Build the ``clang -ast-dump=json`` argv for a compile unit's context (D2).
+
+    Mirrors the compile unit's language standard, defines/undefines, include and
+    system-include paths, sysroot, target triple, and ABI-relevant flags, so the
+    source replay parses the same translation unit the real build compiled. A
+    clang-cl/MSVC compile unit is driven through clang's ``cl`` driver mode.
+    """
+    cc_bin = pick_compiler_binary(compile_unit, compiler_binary)
+    msvc = is_msvc_mode(cc_bin)
+    cc_id = "msvc" if msvc else "gnu"
+
+    cmd = [clang_bin]
+    if msvc:
+        cmd.append("--driver-mode=cl")
+    # Force the language so a header replayed directly still parses as C/C++.
+    lang = "c++" if compile_unit.language.lower() in ("cxx", "c++", "cpp") else "c"
+    if not msvc:
+        cmd += ["-x", lang]
+    cmd += _std_flag(compile_unit.standard, msvc)
+    define_opt = "/D" if msvc else "-D"
+    undef_opt = "/U" if msvc else "-U"
+    for key, value in compile_unit.defines.items():
+        cmd.append(f"{define_opt}{key}={value}" if value else f"{define_opt}{key}")
+    for undef in compile_unit.undefines:
+        cmd.append(f"{undef_opt}{undef}")
+    inc_opt = "/I" if msvc else "-I"
+    for inc in compile_unit.include_paths:
+        cmd += [inc_opt, inc]
+    for inc in compile_unit.system_include_paths:
+        cmd += (["/I", inc] if msvc else ["-isystem", inc])
+    if compile_unit.sysroot and not msvc:
+        cmd.append(f"--sysroot={compile_unit.sysroot}")
+    if compile_unit.target_triple and not msvc:
+        cmd.append(f"--target={compile_unit.target_triple}")
+    cmd += replay_extra_flags(compile_unit, cmd, cc_id)
+    # Syntax-only AST dump to stdout as JSON. -ferror-limit=0 keeps parsing past
+    # recoverable errors so a single bad decl does not blank the whole dump.
+    cmd += ["-fsyntax-only", "-ferror-limit=0", "-Xclang", "-ast-dump=json"]
+    cmd.append(str(source))
+    return cmd
+
+
+def _hash(*parts: str) -> str:
+    blob = "\x00".join(parts).encode("utf-8")
+    return "sha256:" + hashlib.sha256(blob).hexdigest()
+
+
+def _canonical(node: Any) -> Any:
+    """Reduce a clang AST node to a build-root-stable structural form for hashing.
+
+    Keeps only structural scalars (``kind``/``name``/``value``/``opcode``/
+    ``castKind``) plus the node's ``type.qualType`` and its recursively
+    canonicalized children, dropping pointer ids and source locations so a pure
+    body edit changes the hash while a rebuild/relocation does not.
+    """
+    if not isinstance(node, dict):
+        return node
+    out: dict[str, Any] = {}
+    for key in _FINGERPRINT_SCALAR_KEYS:
+        if key in node:
+            out[key] = node[key]
+    type_obj = node.get("type")
+    if isinstance(type_obj, dict) and "qualType" in type_obj:
+        out["type"] = type_obj["qualType"]
+    inner = node.get("inner")
+    if isinstance(inner, list):
+        out["inner"] = [_canonical(child) for child in inner]
+    return out
+
+
+def _subtree_hash(node: dict[str, Any]) -> str:
+    return _hash("clang-ast", json.dumps(_canonical(node), sort_keys=True))
+
+
+def _node_file(node: dict[str, Any], current: str) -> str:
+    """The declaring file for a node, honoring clang's sticky-``file`` JSON.
+
+    clang omits a node's ``loc.file`` when it matches the previous node in source
+    order, so the file must be threaded through the traversal; ``current`` is the
+    last file seen.
+    """
+    loc = node.get("loc")
+    if isinstance(loc, dict):
+        f = loc.get("file")
+        if isinstance(f, str) and f:
+            return f
+        # An expansion of a macro carries spellingLoc/expansionLoc instead.
+        for sub in ("expansionLoc", "spellingLoc"):
+            s = loc.get(sub)
+            if isinstance(s, dict):
+                sf = s.get("file")
+                if isinstance(sf, str) and sf:
+                    return sf
+    return current
+
+
+def _node_line(node: dict[str, Any]) -> int:
+    loc = node.get("loc")
+    if isinstance(loc, dict):
+        line = loc.get("line")
+        if isinstance(line, int):
+            return line
+        exp = loc.get("expansionLoc")
+        if isinstance(exp, dict):
+            exp_line = exp.get("line")
+            if isinstance(exp_line, int):
+                return exp_line
+    return 0
+
+
+def _has_body(node: dict[str, Any]) -> bool:
+    return any(
+        isinstance(c, dict) and c.get("kind") == "CompoundStmt"
+        for c in node.get("inner", [])
+    )
+
+
+def _literal_value(node: dict[str, Any]) -> str | None:
+    """First literal value found anywhere under ``node`` (the constexpr value)."""
+    if node.get("kind") in _LITERAL_NODE_KINDS and "value" in node:
+        return str(node["value"])
+    for child in node.get("inner", []):
+        if isinstance(child, dict):
+            found = _literal_value(child)
+            if found is not None:
+                return found
+    return None
+
+
+def _default_arg_repr(node: dict[str, Any]) -> str:
+    """Normalized default-argument string for a function's parameters.
+
+    A ``ParmVarDecl`` with a default argument carries a ``CXXDefaultArgExpr``-free
+    initializer in its ``inner``; we represent each defaulted parameter as
+    ``name=<value-or-fingerprint>`` so both presence and value changes surface.
+    """
+    parts: list[str] = []
+    for child in node.get("inner", []):
+        if not isinstance(child, dict) or child.get("kind") != "ParmVarDecl":
+            continue
+        init = [
+            g
+            for g in child.get("inner", [])
+            if isinstance(g, dict) and g.get("kind") != "ParmVarDecl"
+        ]
+        if not child.get("init") and not init:
+            continue
+        pname = child.get("name", "")
+        value = None
+        for expr in init:
+            value = _literal_value(expr)
+            if value is not None:
+                break
+        rep = value if value is not None else (
+            _subtree_hash(init[0]) if init else "default"
+        )
+        parts.append(f"{pname}={rep}")
+    return ",".join(parts)
+
+
+def _signature(node: dict[str, Any]) -> str:
+    type_obj = node.get("type")
+    if isinstance(type_obj, dict):
+        return str(type_obj.get("qualType", ""))
+    return ""
+
+
+def _mangled(node: dict[str, Any]) -> str:
+    mangled = node.get("mangledName")
+    name = node.get("name", "")
+    if isinstance(mangled, str) and mangled and mangled != name:
+        return mangled
+    return ""
+
+
+def _qualified(scope: list[str], name: str) -> str:
+    return "::".join([*scope, name]) if scope else name
+
+
+class _ClassifyContext:
+    """Public-surface classification for clang file paths (ADR-024 / ADR-030)."""
+
+    def __init__(self, public_header_roots: list[str]) -> None:
+        from ...provenance import build_public_set
+
+        self.header_segs, self.dir_segs, self.have_set = build_public_set(
+            list(public_header_roots), []
+        )
+
+    def classify(self, file: str) -> tuple[str, str, bool]:
+        """Return ``(visibility, origin_label, api_relevant)`` for a file.
+
+        Mirrors the castxml extractor: a header that is both public and generated
+        stays public but is marked ``GENERATED`` (so ``generated_header_changed``
+        owns it); a generated *private* header (not in the public set) is demoted
+        off the public surface.
+        """
+        from ...model import ScopeOrigin
+        from ...provenance import classify_origin, is_generated_header
+
+        origin = classify_origin(
+            file, self.header_segs, self.dir_segs, have_public_set=self.have_set
+        )
+        if origin == ScopeOrigin.PUBLIC_HEADER and is_generated_header(file):
+            return "generated", "GENERATED", True
+        if origin == ScopeOrigin.PUBLIC_HEADER:
+            return "public_header", "PUBLIC_HEADER", True
+        if origin == ScopeOrigin.GENERATED:
+            return "private_header", "PRIVATE_HEADER", False
+        return "unknown", "UNKNOWN", False
+
+
+def source_abi_from_clang_ast(
+    ast_root: dict[str, Any],
+    compile_unit: CompileUnit,
+    public_header_roots: list[str],
+    target_id: str,
+    *,
+    diagnostics: list[str] | None = None,
+) -> SourceAbiTu:
+    """Map a clang JSON AST root to a normalized :class:`SourceAbiTu` (D4).
+
+    Pure: any producer of the clang AST JSON (the extractor below, or a fixture
+    in a test) reuses this. Emits only public-surface entities so the linker does
+    not have to filter private/system decls.
+    """
+    ctx = _ClassifyContext(public_header_roots)
+    tu = SourceAbiTu(
+        tu_id=compile_unit.id,
+        target_id=target_id or compile_unit.target_id,
+        extractor={"name": "clang-source", "version": CLANG_EXTRACTOR_VERSION},
+        compile_context_hash=_hash(
+            "ctx",
+            compile_unit.standard,
+            compile_unit.target_triple,
+            compile_unit.sysroot or "",
+            ",".join(f"{k}={v}" for k, v in sorted(compile_unit.defines.items())),
+            ",".join(compile_unit.include_paths),
+        ),
+        source=compile_unit.source,
+        public_header_roots=list(public_header_roots),
+        diagnostics=list(diagnostics or []),
+    )
+    _walk(ast_root, ctx, tu, scope=[], current_file="")
+    return tu
+
+
+def _walk(
+    node: dict[str, Any],
+    ctx: _ClassifyContext,
+    tu: SourceAbiTu,
+    *,
+    scope: list[str],
+    current_file: str,
+) -> None:
+    """Pre-order traversal that emits public entities, tracking file + scope."""
+    if not isinstance(node, dict):
+        return
+    file = _node_file(node, current_file)
+    kind = node.get("kind")
+    name = node.get("name", "") or ""
+
+    if kind in _FUNCTION_NODE_KINDS and name:
+        _emit_function(node, ctx, tu, scope, file)
+    elif kind in _TEMPLATE_NODE_KINDS and name:
+        # The template's body is captured whole in its fingerprint; do not
+        # descend into the templated pattern, or its inner FunctionDecl/Record
+        # would be re-emitted as a duplicate non-template entity.
+        _emit_template(node, ctx, tu, scope, file)
+        return
+    elif kind == "VarDecl" and name and node.get("constexpr"):
+        _emit_constexpr(node, ctx, tu, scope, file)
+    elif kind in ("CXXRecordDecl", "EnumDecl") and name:
+        _emit_type(node, ctx, tu, scope, file)
+
+    # Descend, extending the scope name stack for namespaces/records so members
+    # get a fully-qualified name.
+    child_scope = scope
+    if kind in _SCOPE_NODE_KINDS and name:
+        child_scope = [*scope, name]
+    for child in node.get("inner", []):
+        if isinstance(child, dict):
+            file = _node_file(child, file)
+            _walk(child, ctx, tu, scope=child_scope, current_file=file)
+
+
+def _location(file: str, line: int, origin_label: str) -> SourceLocation:
+    return SourceLocation(path=file, line=line, origin=origin_label)
+
+
+def _emit_function(
+    node: dict[str, Any],
+    ctx: _ClassifyContext,
+    tu: SourceAbiTu,
+    scope: list[str],
+    file: str,
+) -> None:
+    visibility, origin, public = ctx.classify(file)
+    if not public:
+        return
+    name = _qualified(scope, str(node.get("name", "")))
+    sig = _signature(node)
+    mangled = _mangled(node)
+    loc = _location(file, _node_line(node), origin)
+    is_inline = bool(node.get("inline")) or bool(node.get("constexpr"))
+    # A function entity always carries the signature + default-argument value so
+    # default_argument_changed fires; an inline/constexpr body additionally
+    # yields an inline-body fingerprint for inline_body_changed.
+    tu.functions.append(
+        SourceEntity(
+            id=_hash("function", mangled or name, sig),
+            kind="function",
+            qualified_name=name,
+            mangled_name=mangled,
+            signature_hash=_hash("sig", sig),
+            value=_default_arg_repr(node),
+            source_location=loc,
+            visibility=visibility,
+            api_relevant=True,
+            confidence=EvidenceConfidence.HIGH,
+        )
+    )
+    if is_inline and _has_body(node):
+        body = next(
+            c for c in node["inner"] if isinstance(c, dict) and c.get("kind") == "CompoundStmt"
+        )
+        tu.inline_bodies.append(
+            SourceEntity(
+                id=_hash("inline", mangled or name, sig),
+                kind="inline",
+                qualified_name=name,
+                mangled_name=mangled,
+                signature_hash=_hash("sig", sig),
+                body_hash=_subtree_hash(body),
+                source_location=loc,
+                visibility=visibility,
+                api_relevant=True,
+                confidence=EvidenceConfidence.HIGH,
+            )
+        )
+
+
+def _emit_template(
+    node: dict[str, Any],
+    ctx: _ClassifyContext,
+    tu: SourceAbiTu,
+    scope: list[str],
+    file: str,
+) -> None:
+    visibility, origin, public = ctx.classify(file)
+    if not public:
+        return
+    name = _qualified(scope, str(node.get("name", "")))
+    tu.templates.append(
+        SourceEntity(
+            id=_hash("template", name),
+            kind="template",
+            qualified_name=name,
+            body_hash=_subtree_hash(node),
+            source_location=_location(file, _node_line(node), origin),
+            visibility=visibility,
+            api_relevant=True,
+            confidence=EvidenceConfidence.HIGH,
+        )
+    )
+
+
+def _emit_constexpr(
+    node: dict[str, Any],
+    ctx: _ClassifyContext,
+    tu: SourceAbiTu,
+    scope: list[str],
+    file: str,
+) -> None:
+    visibility, origin, public = ctx.classify(file)
+    if not public:
+        return
+    name = _qualified(scope, str(node.get("name", "")))
+    value = _literal_value(node)
+    if value is None:
+        value = _subtree_hash(node)
+    tu.constexpr_values.append(
+        SourceEntity(
+            id=_hash("constexpr", name, value),
+            kind="constexpr",
+            qualified_name=name,
+            mangled_name=_mangled(node),
+            value=value,
+            source_location=_location(file, _node_line(node), origin),
+            visibility=visibility,
+            api_relevant=True,
+            confidence=EvidenceConfidence.HIGH,
+        )
+    )
+
+
+def _emit_type(
+    node: dict[str, Any],
+    ctx: _ClassifyContext,
+    tu: SourceAbiTu,
+    scope: list[str],
+    file: str,
+) -> None:
+    # Only definitions (a record with members / an enum with constants) carry a
+    # meaningful type hash; a forward declaration has no `inner`, so skip it to
+    # avoid a false same-name/empty-hash ODR signal.
+    if not node.get("inner"):
+        return
+    visibility, origin, public = ctx.classify(file)
+    if not public:
+        return
+    name = _qualified(scope, str(node.get("name", "")))
+    kind = "record" if node.get("kind") == "CXXRecordDecl" else "enum"
+    tu.types.append(
+        SourceEntity(
+            id=_hash("type", name),
+            kind=kind,
+            qualified_name=name,
+            type_hash=_subtree_hash(node),
+            source_location=_location(file, _node_line(node), origin),
+            visibility=visibility,
+            api_relevant=True,
+            confidence=EvidenceConfidence.HIGH,
+        )
+    )
+
+
+class ClangSourceExtractor:
+    """Produce a :class:`SourceAbiTu` from one compile unit via clang (D3, phase 5).
+
+    Requires ``clang`` on ``PATH``; :meth:`extract` raises
+    :class:`SourceExtractionError` otherwise, which callers record as partial L4
+    coverage (ADR-028 D7) without aborting the artifact comparison.
+    """
+
+    name = "clang-source"
+    version = CLANG_EXTRACTOR_VERSION
+
+    def __init__(
+        self,
+        *,
+        clang_bin: str = "clang",
+        compiler_binary: str | None = None,
+        timeout: int = 180,
+    ) -> None:
+        self.clang_bin = clang_bin
+        self.compiler_binary = compiler_binary
+        self.timeout = timeout
+
+    def available(self) -> bool:
+        return shutil.which(self.clang_bin) is not None
+
+    def extract(
+        self,
+        compile_unit: CompileUnit,
+        *,
+        public_header_roots: list[str],
+        target_id: str = "",
+    ) -> SourceAbiTu:
+        if not self.available():
+            raise SourceExtractionError(
+                f"{self.clang_bin} not found in PATH; source ABI replay (L4) requires "
+                "clang. Install clang to enable source-only checks (macros, default "
+                "arguments, inline/template/constexpr bodies), or omit --source-abi."
+            )
+        directory = unredact_home(compile_unit.directory)
+        source = Path(unredact_home(compile_unit.source))
+        if not source.is_absolute() and directory:
+            source = Path(directory) / source
+
+        cmd = build_clang_command(
+            compile_unit,
+            source,
+            clang_bin=self.clang_bin,
+            compiler_binary=self.compiler_binary,
+        )
+        cmd = [
+            tok if tok.startswith(MACRO_DEFINITION_PREFIXES) else unredact_home(tok)
+            for tok in cmd
+        ]
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=self.timeout,
+                check=False,
+                cwd=directory or None,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise SourceExtractionError(
+                f"clang timed out after {self.timeout}s on {compile_unit.source}"
+            ) from exc
+        if not result.stdout.strip():
+            raise SourceExtractionError(
+                f"clang produced no AST for {compile_unit.source} "
+                f"(exit {result.returncode}): {result.stderr[:1000]}"
+            )
+        try:
+            ast_root = json.loads(result.stdout)
+        except ValueError as exc:
+            raise SourceExtractionError(
+                f"clang AST for {compile_unit.source} was not valid JSON: {exc}"
+            ) from exc
+        # A non-zero exit with usable JSON means clang recovered from some errors;
+        # record it as a diagnostic (partial coverage) rather than discarding the
+        # dump (ADR-028 D7).
+        diags: list[str] = []
+        if result.returncode != 0:
+            diags.append(
+                f"clang exited {result.returncode} (recovered): {result.stderr[:300]}"
+            )
+        return source_abi_from_clang_ast(
+            ast_root,
+            compile_unit,
+            public_header_roots,
+            target_id,
+            diagnostics=diags,
+        )

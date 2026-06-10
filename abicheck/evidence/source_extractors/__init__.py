@@ -15,13 +15,28 @@
 """Source ABI extractors (ADR-030 D3) — backends that fill a ``SourceAbiTu``.
 
 One normalized contract (:class:`SourceAbiExtractor`, ADR-032) with several
-backends: castxml replay now (:class:`CastxmlSourceExtractor`), Clang LibTooling
-and Android adapters later. The shared, tool-independent model→entity mapping
-lives in ``base``.
+backends behind it:
+
+- :class:`CastxmlSourceExtractor` (phase 2) — declarations / types / public
+  const-constexpr values; reuses the existing castxml parser.
+- :class:`ClangSourceExtractor` (phase 5) — the *source-based* backend that adds
+  inline/template/constexpr **body** fingerprints and default arguments via
+  ``clang -ast-dump=json``. Requires clang; degrades to partial coverage if it
+  is absent.
+- :class:`AndroidHeaderAbiAdapter` (phase 6) — reuse Android header-checker
+  ``.sdump``/``.lsdump`` dumps, normalized into the abicheck schema (ADR-030 D9).
+
+The shared, tool-independent model→entity mapping lives in ``base``; the shared
+compile-context → argv helpers live in ``_argv``.
 """
 
 from __future__ import annotations
 
+from .android import (
+    ANDROID_EXTRACTOR_VERSION,
+    AndroidHeaderAbiAdapter,
+    parse_android_dump,
+)
 from .base import (
     SourceAbiExtractor,
     SourceExtractionError,
@@ -32,12 +47,25 @@ from .castxml import (
     CastxmlSourceExtractor,
     build_castxml_command,
 )
+from .clang import (
+    CLANG_EXTRACTOR_VERSION,
+    ClangSourceExtractor,
+    build_clang_command,
+    source_abi_from_clang_ast,
+)
 
 __all__ = [
+    "ANDROID_EXTRACTOR_VERSION",
     "CASTXML_EXTRACTOR_VERSION",
+    "CLANG_EXTRACTOR_VERSION",
+    "AndroidHeaderAbiAdapter",
     "CastxmlSourceExtractor",
+    "ClangSourceExtractor",
     "SourceAbiExtractor",
     "SourceExtractionError",
     "assemble_source_tu",
     "build_castxml_command",
+    "build_clang_command",
+    "parse_android_dump",
+    "source_abi_from_clang_ast",
 ]

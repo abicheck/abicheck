@@ -28,8 +28,6 @@ context→argv builder is pure and unit-testable; only :meth:`extract` shells ou
 
 from __future__ import annotations
 
-import os
-import re
 import shutil
 import subprocess
 import tempfile
@@ -41,203 +39,33 @@ from defusedxml import ElementTree as DefusedET
 
 from ..build_evidence import CompileUnit
 from ..source_abi import SourceAbiTu
+from ._argv import (
+    MACRO_DEFINITION_PREFIXES as _MACRO_DEFINITION_PREFIXES,
+)
+from ._argv import (
+    is_msvc_mode,
+    pick_compiler_binary,
+    replay_extra_flags,
+    unredact_home,
+)
 from .base import SourceExtractionError, assemble_source_tu
 
 #: castxml extractor schema/behaviour version, recorded in the dump provenance.
 CASTXML_EXTRACTOR_VERSION = "0.1"
 
-_CXX_LANGS = frozenset({"cxx", "c++", "cpp"})
-#: Compiler basenames that mean castxml should run in MSVC mode.
-_MSVC_BINARIES = frozenset({"cl", "cl.exe", "clang-cl", "clang-cl.exe"})
-
-
-def _unredact_home(value: str) -> str:
-    """Expand a redacted home placeholder (``~``) back to the real home dir.
-
-    The evidence redaction policy (ADR-032 D7) rewrites the user's home prefix to
-    ``~`` *wherever it appears* before persisting paths/argv. ``subprocess`` does
-    not expand ``~`` (no shell), so replaying a redacted ``CompileUnit`` would
-    treat ``~/...`` / ``-I~/...`` as literal paths and fail for any home-directory
-    build. Reverse the substitution for the *replay only* (persisted values stay
-    redacted) by mirroring how redaction applied it — replacing ``~`` with the
-    current home. A no-op when there is no ``~`` (live/unredacted units) or no
-    resolvable home.
-
-    Only a ``~`` that stands in for a home *directory* is expanded: the
-    placeholder is always either the whole token or immediately followed by a
-    path separator (``/`` or ``\\``). A ``~`` followed by anything else is left
-    untouched, so Windows 8.3 short names such as ``RUNNER~1`` in a freshly
-    created temp path are never mangled into ``RUNNER<home>1``.
-    """
-    if "~" not in value:
-        return value
-    home = os.path.expanduser("~")
-    if not home or home == "~":
-        return value
-    # Expand `~` only when it is the redaction placeholder for a home directory:
-    # the whole token, or followed by a path separator. `re.sub` with a function
-    # replacement avoids backslashes in `home` being read as group references.
-    return re.sub(r"~(?=[\\/]|$)", lambda _m: home, value)
-
-
-def _basename(path: str) -> str:
-    """Final path component, splitting on both ``/`` and ``\\``.
-
-    ``Path(path).name`` on a POSIX host does not treat ``\\`` as a separator, so
-    a Windows compiler path from a cross/off-Windows compile database
-    (``C:\\VS\\bin\\cl.exe``) would otherwise return the whole string and miss
-    MSVC-mode detection. Splitting on both separators makes the basename
-    host-independent.
-    """
-    return re.split(r"[\\/]", path)[-1]
-
-
-#: Compiler-launcher wrappers that prefix the real compiler in a build action
-#: (``ccache clang++ -c foo.cpp``). castxml must emulate the real compiler, not
-#: the launcher, which would otherwise be invoked without its compiler operand.
-_COMPILER_LAUNCHERS = frozenset(
-    {"ccache", "sccache", "distcc", "icecc", "icerun", "buildcache"}
-)
-
-
-def _strip_launchers(argv: list[str]) -> list[str]:
-    """Drop leading compiler-launcher tokens (``ccache``/``sccache``/…).
-
-    A launcher is recognized by basename (``/usr/bin/ccache`` → ``ccache``,
-    ``ccache.exe`` → ``ccache``) so the real compiler that follows it is the one
-    castxml emulates.
-    """
-    i = 0
-    while i < len(argv) and _basename(argv[i]).lower().removesuffix(
-        ".exe"
-    ) in _COMPILER_LAUNCHERS:
-        i += 1
-    return argv[i:]
-
-
-def _compiler_binary(compile_unit: CompileUnit, override: str | None) -> str:
-    """Pick the compiler binary castxml should emulate for this TU.
-
-    Prefers the compiler actually recorded in the build action (``argv[0]``,
-    after unwrapping any ``ccache``/``sccache`` launcher) so a
-    clang/clang-cl/cross TU is replayed against its real builtin include paths,
-    target defaults, and accepted flags — castxml invokes this binary to
-    discover them. Falls back to g++/gcc by language only when no command is
-    available (and an explicit ``override`` always wins).
-    """
-    if override:
-        return override
-    argv = _strip_launchers(compile_unit.argv)
-    if argv and argv[0] and not argv[0].startswith("-"):
-        return argv[0]
-    return "g++" if compile_unit.language.lower() in _CXX_LANGS else "gcc"
+#: Backwards-compatible aliases — the compile-context → argv helpers now live in
+#: the shared ``_argv`` module (reused by the clang backend, phase 5) but are
+#: re-exported here under their historical private names so existing call sites
+#: and tests keep working.
+_unredact_home = unredact_home
+_compiler_binary = pick_compiler_binary
+_replay_extra_flags = replay_extra_flags
 
 
 def _std_flag(standard: str, cc_id: str) -> list[str]:
     if not standard:
         return []
     return [f"/std:{standard}"] if cc_id == "msvc" else [f"-std={standard}"]
-
-
-#: GNU options that take a path operand and change *what* gets parsed (forced
-#: includes / macro files). Carried through from argv since they are not
-#: normalized into the structured CompileUnit fields. Only ``-include`` and
-#: ``-imacros`` also have a joined ``-include<file>`` spelling; ``-include-pch``
-#: is separate-operand only (clang ``-include-pch <file>``) and must not be
-#: treated as a joined ``-include`` or its operand will be dropped.
-_GNU_FORCED_INCLUDE_OPTS = frozenset({"-include", "-imacros"})
-_GNU_SEPARATE_INCLUDE_OPTS = frozenset({"-include", "-imacros", "-include-pch"})
-#: Value-taking toolchain flags already normalized into the structured
-#: ``sysroot``/``target_triple`` fields and re-emitted by
-#: :func:`build_castxml_command` as ``--sysroot=``/``--target=``. They must NOT
-#: be carried through from ``abi_relevant_flags``: the adapter records only the
-#: bare option token for the split spelling (``-isysroot /sdk`` → just
-#: ``-isysroot``, operand dropped), so re-appending it yields a dangling option
-#: that swallows the following argv token (``--sysroot=/sdk … -isysroot -o``).
-#: Mirrors ``_TOOLCHAIN_PATH_FLAG_PREFIXES`` in ``adapters/base.py``.
-_STRUCTURED_TOOLCHAIN_FLAG_PREFIXES = ("--sysroot", "-isysroot", "--target", "-target")
-#: MSVC/clang-cl forced-include options in their separate-operand spelling
-#: (``/FI file`` or ``-FI file``); the joined ``/FIfile`` form is handled by
-#: prefix. (https://learn.microsoft.com/cpp/build/reference/fi-name-forced-include-file)
-_MSVC_FORCED_INCLUDE_OPTS = frozenset({"/FI", "-FI"})
-#: GNU include-search options that take a directory operand and are NOT
-#: normalized into the structured ``include_paths``/``system_include_paths``
-#: buckets (those cover ``-I``/``-isystem`` only). Dropping them makes castxml
-#: search a different set of directories than the real compile (Codex review #335).
-#: gcc/clang accept both the separate (``-iquote dir``) and joined
-#: (``-iquote/dir``) spellings, so both are carried through.
-#: (https://gcc.gnu.org/onlinedocs/gcc/Directory-Options.html)
-_GNU_INCLUDE_SEARCH_OPTS = frozenset({"-iquote", "-idirafter"})
-
-
-def _replay_extra_flags(
-    compile_unit: CompileUnit, already: list[str], cc_id: str
-) -> list[str]:
-    """Carry through ABI/parse-relevant options not in the structured fields.
-
-    ``abi_relevant_flags`` (e.g. ``-fms-extensions``, ``-fabi-version``,
-    ``-fvisibility``, ``-m32``), forced-include options, and unnormalized
-    include-search options (GNU ``-iquote``/``-idirafter``, MSVC ``/I``) from
-    ``argv`` change the parsed translation unit / header search; dropping them
-    makes castxml parse a different TU than the real build (ADR-030 D2).
-    De-duplicated against the flags already emitted from the structured fields.
-    MSVC ``/FI`` forced includes and ``/I`` search dirs are carried only in MSVC
-    mode so a GNU ``-F``/``-I``-family flag is never mistaken for one.
-    """
-    seen = set(already)
-    out: list[str] = []
-    for flag in compile_unit.abi_relevant_flags:
-        # Value-taking toolchain flags (sysroot/target) are already normalized
-        # into the structured fields and re-emitted by build_castxml_command. The
-        # adapter records only the bare option token for the split spelling
-        # (operand dropped), so carrying it through would dangle and swallow the
-        # next argv token. Skip them here (see prefix-set docstring).
-        if flag.startswith(_STRUCTURED_TOOLCHAIN_FLAG_PREFIXES):
-            continue
-        if flag not in seen:
-            out.append(flag)
-            seen.add(flag)
-    argv = compile_unit.argv
-    i = 0
-    while i < len(argv):
-        tok = argv[i]
-        if tok in _GNU_SEPARATE_INCLUDE_OPTS and i + 1 < len(argv):
-            out += [tok, argv[i + 1]]  # -include / -imacros / -include-pch <file>
-            i += 2
-        elif tok in _GNU_INCLUDE_SEARCH_OPTS and i + 1 < len(argv):
-            out += [tok, argv[i + 1]]  # -iquote / -idirafter <dir> (separate)
-            i += 2
-        elif tok not in _GNU_INCLUDE_SEARCH_OPTS and any(
-            tok.startswith(opt) and len(tok) > len(opt)
-            for opt in _GNU_INCLUDE_SEARCH_OPTS
-        ):
-            out.append(tok)  # -iquote/dir / -idirafter/dir (joined)
-            i += 1
-        elif cc_id == "msvc" and tok == "/I" and i + 1 < len(argv):
-            out += [tok, argv[i + 1]]  # MSVC /I dir (separate operand)
-            i += 2
-        elif cc_id == "msvc" and len(tok) > 2 and tok.startswith("/I"):
-            out.append(tok)  # MSVC /Idir (joined)
-            i += 1
-        elif tok not in _GNU_SEPARATE_INCLUDE_OPTS and any(
-            tok.startswith(opt) and len(tok) > len(opt)
-            for opt in _GNU_FORCED_INCLUDE_OPTS
-        ):
-            out.append(tok)  # -includefile / -imacrosfile (joined)
-            i += 1
-        elif cc_id == "msvc" and tok in _MSVC_FORCED_INCLUDE_OPTS and i + 1 < len(argv):
-            out += [tok, argv[i + 1]]  # /FI file (separate operand)
-            i += 2
-        elif (
-            cc_id == "msvc"
-            and len(tok) > 3
-            and (tok.startswith("/FI") or tok.startswith("-FI"))
-        ):
-            out.append(tok)  # /FIfile (joined)
-            i += 1
-        else:
-            i += 1
-    return out
 
 
 def build_castxml_command(
@@ -254,8 +82,8 @@ def build_castxml_command(
     system-include paths, sysroot, and target triple, so source replay sees the
     headers the compiler actually saw under the flags it actually used.
     """
-    cc_bin = _compiler_binary(compile_unit, compiler_binary)
-    cc_id = "msvc" if _basename(cc_bin).lower() in _MSVC_BINARIES else "gnu"
+    cc_bin = pick_compiler_binary(compile_unit, compiler_binary)
+    cc_id = "msvc" if is_msvc_mode(cc_bin) else "gnu"
 
     cmd = [castxml_bin, "--castxml-output=1", f"--castxml-cc-{cc_id}", cc_bin]
     cmd += _std_flag(compile_unit.standard, cc_id)
@@ -280,6 +108,7 @@ class CastxmlSourceExtractor:
     """Produce a :class:`SourceAbiTu` from one compile unit via castxml (D3)."""
 
     name = "castxml-source"
+    version = CASTXML_EXTRACTOR_VERSION
 
     def __init__(
         self,

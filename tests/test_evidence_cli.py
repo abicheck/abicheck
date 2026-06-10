@@ -205,3 +205,99 @@ def test_compare_without_evidence_is_unchanged(tmp_path):
     result = CliRunner().invoke(main, ["compare", str(old_snap), str(new_snap)])
     assert result.exit_code == 0, result.output
     assert "Evidence coverage:" not in result.stderr
+
+
+# -- L4 source ABI replay (ADR-030 phases 5-7 + CLI wiring) ------------------
+
+
+def test_collect_evidence_source_abi_graceful_without_tool(tmp_path):
+    """Source ABI replay degrades gracefully when the tool is missing.
+
+    The user message must be explicit that clang is required and that source-only
+    checks are disabled (never abort the collection).
+    """
+    cdb = _write_cdb(tmp_path, "c++17")
+    out = tmp_path / "ev"
+    result = CliRunner().invoke(main, [
+        "collect-evidence", "--compile-db", str(cdb),
+        "--source-abi", "--source-abi-scope", "full",
+        "--clang-bin", "clang-definitely-not-installed-xyz",
+        "-o", str(out),
+    ])
+    assert result.exit_code == 0, result.output
+    assert "source-only checks disabled" in result.output
+    pack = EvidencePack.load(out)
+    cov = pack.manifest.coverage_for("L4_source_abi")
+    # Replay ran but the tool was absent → partial, not present (and not silent).
+    assert cov is not None and cov.status.value == "partial"
+
+
+def test_collect_evidence_source_abi_android_dump(tmp_path):
+    """The Android backend normalizes a pre-captured dump into the pack (D9)."""
+    dump = tmp_path / "libfoo.lsdump"
+    dump.write_text(json.dumps({
+        "source_file": "include/foo.h",
+        "functions": [{"function_name": "foo", "linker_set_key": "_Z3foov", "return_type": "void"}],
+        "record_types": [{"name": "Foo", "size": 8, "source_file": "include/foo.h"}],
+    }))
+    out = tmp_path / "ev"
+    result = CliRunner().invoke(main, [
+        "collect-evidence", "--source-abi", "--source-abi-extractor", "android",
+        "--android-dump", str(dump), "-o", str(out),
+    ])
+    assert result.exit_code == 0, result.output
+    pack = EvidencePack.load(out)
+    assert pack.source_abi is not None
+    assert any(e.qualified_name == "Foo" for e in pack.source_abi.reachable_types)
+    cov = pack.manifest.coverage_for("L4_source_abi")
+    assert cov is not None and cov.status.value == "present"
+
+
+def test_collect_evidence_android_requires_dump(tmp_path):
+    result = CliRunner().invoke(main, [
+        "collect-evidence", "--source-abi", "--source-abi-extractor", "android",
+        "-o", str(tmp_path / "ev"),
+    ])
+    assert result.exit_code != 0
+    assert "requires --android-dump" in result.output
+
+
+def _ev_with_default_arg(tmp_path, name, default):
+    """Write an evidence pack whose L4 surface has one function with a default arg."""
+    from abicheck.evidence.source_abi import SourceAbiTu, SourceEntity, SourceLocation
+    from abicheck.evidence.source_link import link_source_abi
+
+    ent = SourceEntity(
+        id="id", kind="function", qualified_name="add", mangled_name="_Z3addii",
+        signature_hash="sig", value=default,
+        source_location=SourceLocation(path="include/foo.h", origin="PUBLIC_HEADER"),
+        visibility="public_header", api_relevant=True,
+    )
+    tu = SourceAbiTu(tu_id="cu://a", functions=[ent], public_header_roots=["include/foo.h"])
+    pack = EvidencePack.empty(tmp_path / name)
+    pack.source_abi = link_source_abi([tu], library="libfoo.so")
+    pack.write()
+    return tmp_path / name
+
+
+def test_compare_source_abi_findings_and_capabilities(tmp_path):
+    """An L4 default-argument change surfaces as a finding, and the capability
+    report explains which checks ran and which did not (the user's ask)."""
+    ev_old = _ev_with_default_arg(tmp_path, "old.evidence", "x=1")
+    ev_new = _ev_with_default_arg(tmp_path, "new.evidence", "x=2")
+    old_snap = _make_snap(tmp_path, "old.json", "1.0")
+    new_snap = _make_snap(tmp_path, "new.json", "2.0")
+
+    result = CliRunner().invoke(main, [
+        "compare", str(old_snap), str(new_snap),
+        "--old-evidence", str(ev_old), "--new-evidence", str(ev_new),
+        "--format", "json",
+    ])
+    assert result.exit_code in (0, 2, 4), result.output
+    # The source-replay finding is folded into the verdict pipeline.
+    assert "default_argument_changed" in result.stdout.lower()
+    # The capability report names what is on/off and why.
+    assert "Checks enabled for this scan" in result.stderr
+    assert "[off]" in result.stderr
+    # Macros/default-args/bodies row references its source/clang requirement.
+    assert "inline/template/constexpr" in result.stderr

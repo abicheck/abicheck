@@ -35,11 +35,19 @@ unless an artifact diff also proves the break. They flow through the normal
 | **L4** | per-TU source ABI replay | Source-visible ABI/API facts | API/source-risk evidence; never sole shipped-ABI authority |
 | **L5** | Clang/Kythe/CodeQL graph summaries | Include/type/call/build reasoning | Explanation, localization, impact |
 
-L3 is implemented today (ADR-029). L4's schema, linker, source-replay diff, and
-the **castxml** per-TU extractor are implemented (ADR-030 phases 1–4 — see
-[L4 findings](#source-abi-replay-findings-l4)); the Clang and Android extractors
-(for inline/template body fingerprints) are the remaining ADR-030 work. L5 is
-planned (ADR-031).
+L3 and L4 are implemented today (ADR-029, ADR-030). L4 ships three extractor
+backends — **clang** (the source-based default: inline/template/constexpr body
+fingerprints + default arguments), **castxml** (declarations/types/const values),
+and an **Android** header-checker adapter — plus the linker, source-replay diff,
+replay scopes, and per-TU cache (see [L4 findings](#source-abi-replay-findings-l4)).
+L5 is planned (ADR-031).
+
+> **Source ABI replay (L4) requires clang** (or castxml for the declaration
+> subset, or a pre-captured Android dump). It is the one tier gated on a C++
+> front-end. If the tool is missing, abicheck **fails gracefully**: L4 is marked
+> partial, the source-only checks are reported as disabled, and the
+> artifact-backed tiers (L0–L2) remain fully authoritative — the comparison is
+> never aborted.
 
 ## Workflow
 
@@ -62,6 +70,26 @@ abicheck dump build/libfoo.so -H include/ \
 abicheck compare old.abi.json new.abi.json \
   --old-evidence old.evidence/ --new-evidence new.evidence/
 ```
+
+To additionally collect **L4 source ABI replay**, add `--source-abi` (requires
+clang). The replay scope (ADR-030 D7) decides how many translation units are
+parsed:
+
+```bash
+abicheck collect-evidence \
+  --compile-db build/compile_commands.json \
+  --source-abi \
+  --source-abi-extractor clang \          # clang (default) | castxml | android
+  --source-abi-scope target \             # off | headers-only | changed | target | full
+  --source-abi-cache .abicache/source \   # optional per-TU dump cache (ADR-030 D8)
+  --output libfoo.evidence/
+```
+
+- `--source-abi-scope changed --changed-path src/foo.cpp` replays only changed
+  TUs (and TUs of any target whose public header changed) — PR mode.
+- `--source-abi-extractor android --android-dump libfoo.lsdump` reuses a
+  pre-captured Android `header-abi-dumper`/`header-abi-linker` dump instead of
+  running a compiler.
 
 `collect-evidence` accepts:
 
@@ -147,13 +175,36 @@ Evidence coverage:
   L1 debug info              present, high confidence: DWARF
   L2 public header AST       present, high confidence: header-scoped
   L3 build context           present, high confidence: cmake+ninja, 142 compile units, 1 target
-  L4 source ABI replay       not_collected
+  L4 source ABI replay       present, high confidence: clang extractor, scope=target, parsed 142/142 TUs
   L5 source graph summary    not_collected
 ```
 
 The same rows are emitted as a structured `evidence_coverage` array in the
 `--format json` report (schema `report_schema_version` 1.2+), so machine
 consumers can key off layer status and confidence.
+
+### What is being checked — and what is not, and why
+
+Right below the coverage table, every pack-aware compare prints a **capability
+report** that translates the available evidence into the concrete *check
+categories* it enables — and, for each disabled category, the precise reason.
+This makes the cumulative picture explicit as you add inputs (binary → +debug
+info → +headers → +build data → +sources):
+
+```text
+Checks enabled for this scan (and why others are not):
+  [on]  Symbol presence & linkage (added/removed/SONAME) — from the binary's dynamic symbol table
+  [on]  Type layout, members, vtables, signatures — from DWARF/PDB debug info
+  [on]  API decls absent from the symbol table; public-surface scoping — from the public header AST
+  [on]  Build-flag & toolchain drift (visibility, std, ABI flags) — from build-system data
+  [off] Macros, default args, inline/template/constexpr bodies — no sources/clang: source-only API changes are not detected
+  [off] Impact / call / reachability graph — no graph evidence: cross-symbol impact is not analyzed
+```
+
+Each category is gated on exactly one evidence layer, so a `[off]` line tells you
+exactly which input (or tool) to add to enable it — e.g. installing clang and
+passing `--source-abi` turns on the macro / default-argument / inline-body /
+template-body / constexpr checks.
 
 ### Header parse context
 

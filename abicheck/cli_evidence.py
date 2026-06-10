@@ -42,9 +42,15 @@ from .evidence.model import (
 )
 from .evidence.pack import EvidencePack
 from .evidence.redaction import DEFAULT_REDACTION
+from .evidence.source_replay import REPLAY_SCOPES
 
 if TYPE_CHECKING:
     from .checker_types import Change
+    from .evidence.source_abi import SourceAbiSurface
+    from .evidence.source_extractors import (
+        CastxmlSourceExtractor,
+        ClangSourceExtractor,
+    )
     from .model import AbiSnapshot
 
 
@@ -76,6 +82,27 @@ if TYPE_CHECKING:
 @click.option("--build-system", "build_system", default="generic", show_default=True,
               type=click.Choice(["generic", "cmake", "ninja", "bazel", "make"], case_sensitive=False),
               help="Build system hint for the compile-DB adapter.")
+@click.option("--source-abi", "source_abi", is_flag=True, default=False,
+              help="Collect L4 source ABI replay (parses sources/headers). REQUIRES clang "
+                   "(or castxml/an Android dump); without the tool this fails gracefully and "
+                   "source-only checks stay disabled.")
+@click.option("--source-abi-extractor", "source_abi_extractor", default="clang", show_default=True,
+              type=click.Choice(["clang", "castxml", "android"], case_sensitive=False),
+              help="L4 backend: clang (inline/template/constexpr bodies + default args), "
+                   "castxml (declarations/types/const values only), or android (reuse a "
+                   "pre-captured header-abi .lsdump/.sdump).")
+@click.option("--source-abi-scope", "source_abi_scope", default="target", show_default=True,
+              type=click.Choice(list(REPLAY_SCOPES), case_sensitive=False),
+              help="Which translation units to replay (ADR-030 D7): off | headers-only | "
+                   "changed | target | full.")
+@click.option("--source-abi-target", "source_abi_target", default="", help="Target id to scope replay to (e.g. target://libfoo).")
+@click.option("--changed-path", "changed_paths", multiple=True, type=str,
+              help="Changed file path for --source-abi-scope changed (repeat).")
+@click.option("--android-dump", "android_dump", type=click.Path(path_type=Path), default=None,
+              help="Pre-captured Android header-abi .lsdump/.sdump JSON (for --source-abi-extractor android).")
+@click.option("--source-abi-cache", "source_abi_cache", type=click.Path(path_type=Path), default=None,
+              help="Directory for the per-TU source ABI dump cache (ADR-030 D8).")
+@click.option("--clang-bin", "clang_bin", default="clang", show_default=True, help="clang binary to use for source ABI replay.")
 @click.option("-o", "--output", "output", type=click.Path(path_type=Path), required=True,
               help="Output evidence-pack directory.")
 @click.option("-v", "--verbose", is_flag=True, default=False)
@@ -93,6 +120,14 @@ def collect_evidence_cmd(
     make_dry_run: Path | None,
     read_compiler_record: bool,
     build_system: str,
+    source_abi: bool,
+    source_abi_extractor: str,
+    source_abi_scope: str,
+    source_abi_target: str,
+    changed_paths: tuple[str, ...],
+    android_dump: Path | None,
+    source_abi_cache: Path | None,
+    clang_bin: str,
     output: Path,
     verbose: bool,
 ) -> None:
@@ -126,6 +161,23 @@ def collect_evidence_cmd(
         verbose=verbose,
     )
 
+    surface: SourceAbiSurface | None = None
+    source_detail = ""
+    if source_abi:
+        surface, source_detail = _collect_source_abi(
+            merged, extractors,
+            extractor=source_abi_extractor,
+            scope=source_abi_scope,
+            target_id=source_abi_target,
+            changed_paths=list(changed_paths),
+            android_dump=android_dump,
+            cache_dir=source_abi_cache,
+            clang_bin=clang_bin,
+            headers=headers,
+            binary=binary,
+            verbose=verbose,
+        )
+
     pack = EvidencePack.empty(
         output,
         abicheck_version=_abicheck_version,
@@ -146,7 +198,9 @@ def collect_evidence_cmd(
     )
     if has_build:
         pack.build_evidence = merged
-    pack.manifest.coverage = _build_coverage(merged, has_build)
+    if surface is not None:
+        pack.source_abi = surface
+    pack.manifest.coverage = _build_coverage(merged, has_build, surface, source_detail)
     pack.write()
 
     click.echo(f"Evidence pack written to {output}")
@@ -158,6 +212,8 @@ def collect_evidence_cmd(
         )
     else:
         click.echo("  L3 build context: not collected (no adapters produced facts)")
+    if source_abi:
+        click.echo(f"  L4 source ABI replay: {source_detail}")
     for diag in merged.diagnostics:
         click.echo(f"  note: {diag}", err=True)
 
@@ -267,7 +323,12 @@ def _run_adapters(
         ))
 
 
-def _build_coverage(merged: BuildEvidence, has_build: bool) -> list[LayerCoverage]:
+def _build_coverage(
+    merged: BuildEvidence,
+    has_build: bool,
+    surface: SourceAbiSurface | None = None,
+    source_detail: str = "",
+) -> list[LayerCoverage]:
     """Build the L3/L4/L5 coverage rows for the pack manifest (ADR-028 D7)."""
     if has_build:
         systems = sorted({g.kind for g in merged.generators}) or ["generic"]
@@ -282,11 +343,197 @@ def _build_coverage(merged: BuildEvidence, has_build: bool) -> list[LayerCoverag
         )
     else:
         l3 = LayerCoverage(layer=EvidenceLayer.L3_BUILD.value, status=CoverageStatus.NOT_COLLECTED)
+    # L4 is PRESENT when at least one TU parsed into the surface, PARTIAL when
+    # replay ran but every TU failed/was empty (e.g. clang missing), else
+    # NOT_COLLECTED. The surface keeps decls/types only when extraction worked.
+    if surface is not None:
+        # PRESENT when the surface actually carries reachable entities; PARTIAL
+        # when replay ran but yielded nothing (tool missing, all TUs failed, or
+        # no public surface matched) — never silently NOT_COLLECTED, so the
+        # capability report can explain the gap.
+        any_entities = bool(
+            surface.reachable_declarations or surface.reachable_types
+            or surface.reachable_macros or surface.reachable_templates
+            or surface.reachable_inline_bodies
+        )
+        if any_entities:
+            l4 = LayerCoverage(
+                layer=EvidenceLayer.L4_SOURCE_ABI.value, status=CoverageStatus.PRESENT,
+                confidence=EvidenceConfidence.HIGH, detail=source_detail,
+            )
+        else:
+            l4 = LayerCoverage(
+                layer=EvidenceLayer.L4_SOURCE_ABI.value, status=CoverageStatus.PARTIAL,
+                confidence=EvidenceConfidence.REDUCED, detail=source_detail,
+            )
+    else:
+        l4 = LayerCoverage(layer=EvidenceLayer.L4_SOURCE_ABI.value, status=CoverageStatus.NOT_COLLECTED)
     return [
         l3,
-        LayerCoverage(layer=EvidenceLayer.L4_SOURCE_ABI.value, status=CoverageStatus.NOT_COLLECTED),
+        l4,
         LayerCoverage(layer=EvidenceLayer.L5_SOURCE_GRAPH.value, status=CoverageStatus.NOT_COLLECTED),
     ]
+
+
+def _exported_symbols_from_binary(binary: Path | None) -> list[str]:
+    """Best-effort exported (mangled) symbol names from ``binary`` for D5 linking.
+
+    Used so the source-decl → binary-symbol mapping (and
+    ``source_decl_binary_symbol_mismatch``) is populated. Failures are swallowed
+    (returns ``[]``): the other eight source findings do not need symbols, so a
+    binary that cannot be parsed must not block L4 collection.
+    """
+    if binary is None or not Path(binary).is_file():
+        return []
+    try:
+        from .service import detect_binary_format, run_dump
+
+        fmt = detect_binary_format(Path(binary))
+        if not fmt:
+            return []
+        snap = run_dump(Path(binary), fmt)
+    except Exception:  # noqa: BLE001 - best-effort; never fail collection on this
+        return []
+    syms = {fn.mangled for fn in snap.functions if fn.mangled}
+    syms |= {v.mangled for v in snap.variables if getattr(v, "mangled", "")}
+    return sorted(syms)
+
+
+def _collect_source_abi(
+    merged: BuildEvidence,
+    extractors: list[ExtractorRecord],
+    *,
+    extractor: str,
+    scope: str,
+    target_id: str,
+    changed_paths: list[str],
+    android_dump: Path | None,
+    cache_dir: Path | None,
+    clang_bin: str,
+    headers: tuple[Path, ...],
+    binary: Path | None,
+    verbose: bool,
+) -> tuple[SourceAbiSurface | None, str]:
+    """Run L4 source ABI replay and return ``(surface, human-readable detail)``.
+
+    Never raises on a missing tool: a clang-less environment yields a partial
+    surface and a clear note, keeping artifact tiers authoritative (ADR-028 D3).
+    """
+    from .evidence.source_abi import SourceAbiSurface
+    from .evidence.source_replay import (
+        SourceAbiCache,
+        public_header_roots_for,
+        run_source_replay,
+    )
+
+    exported = _exported_symbols_from_binary(binary)
+    library = str(binary) if binary else ""
+    # Header roots: explicit --headers win; else pull from the build targets.
+    roots = [str(h) for h in headers] or public_header_roots_for(merged, target_id)
+
+    if extractor == "android":
+        return _collect_source_abi_android(
+            android_dump, extractors, target_id=target_id,
+            exported=exported, library=library, roots=roots,
+        )
+
+    impl: ClangSourceExtractor | CastxmlSourceExtractor
+    if extractor == "clang":
+        from .evidence.source_extractors import ClangSourceExtractor
+        impl = ClangSourceExtractor(clang_bin=clang_bin)
+        tool_name = clang_bin
+    else:
+        from .evidence.source_extractors import CastxmlSourceExtractor
+        impl = CastxmlSourceExtractor()
+        tool_name = "castxml"
+
+    if not merged.compile_units:
+        extractors.append(ExtractorRecord(
+            name=f"source_abi:{extractor}", status="partial",
+            detail="no compile units in build evidence; collect L3 first (e.g. --compile-db)",
+        ))
+        return (
+            SourceAbiSurface(library=library, target_id=target_id),
+            "skipped: no L3 build context (need compile units to replay)",
+        )
+    if not impl.available():
+        extractors.append(ExtractorRecord(
+            name=f"source_abi:{extractor}", status="failed",
+            detail=f"{tool_name} not found in PATH; source-only checks disabled",
+        ))
+        return (
+            SourceAbiSurface(library=library, target_id=target_id),
+            f"unavailable: {tool_name} not on PATH — source-only checks disabled "
+            "(macros, default args, inline/template/constexpr bodies). Install "
+            f"{tool_name} or omit --source-abi.",
+        )
+
+    cache = SourceAbiCache(cache_dir) if cache_dir else None
+    surface, diagnostics = run_source_replay(
+        merged, impl, scope=scope, changed_paths=changed_paths,
+        target_id=target_id, library=library, exported_symbols=exported,
+        public_header_roots=roots, cache=cache,
+    )
+    for diag in diagnostics:
+        merged.diagnostics.append(f"source_abi: {diag}")
+    parsed = int(surface.coverage.get("compile_units_parsed", 0) or 0)
+    selected = int(surface.coverage.get("compile_units_selected", 0) or 0)
+    extractors.append(ExtractorRecord(
+        name=f"source_abi:{extractor}",
+        status="ok" if parsed else "partial",
+        detail=f"scope={scope}, {parsed}/{selected} TUs parsed, {len(diagnostics)} failures",
+    ))
+    return surface, (
+        f"{extractor} extractor, scope={scope}: parsed {parsed}/{selected} TUs, "
+        f"{len(surface.reachable_declarations)} decls, {len(surface.reachable_types)} types, "
+        f"{len(surface.reachable_inline_bodies)} inline bodies, "
+        f"{len(surface.reachable_templates)} templates"
+        + (f", {len(diagnostics)} TU(s) failed (partial coverage)" if diagnostics else "")
+    )
+
+
+def _collect_source_abi_android(
+    android_dump: Path | None,
+    extractors: list[ExtractorRecord],
+    *,
+    target_id: str,
+    exported: list[str],
+    library: str,
+    roots: list[str],
+) -> tuple[SourceAbiSurface | None, str]:
+    """Normalize a pre-captured Android header-abi dump into a linked surface (D9)."""
+    from .evidence.source_abi import SourceAbiSurface
+    from .evidence.source_extractors import (
+        AndroidHeaderAbiAdapter,
+        SourceExtractionError,
+    )
+    from .evidence.source_link import link_source_abi
+
+    if android_dump is None:
+        raise click.UsageError(
+            "--source-abi-extractor android requires --android-dump <file.lsdump|.sdump>."
+        )
+    adapter = AndroidHeaderAbiAdapter()
+    try:
+        tu = adapter.load(android_dump, target_id=target_id, public_header_roots=roots)
+    except SourceExtractionError as exc:
+        extractors.append(ExtractorRecord(
+            name="source_abi:android", status="failed",
+            inputs=[DEFAULT_REDACTION.path(str(android_dump))], detail=str(exc),
+        ))
+        return SourceAbiSurface(library=library, target_id=target_id), f"failed: {exc}"
+    surface = link_source_abi(
+        [tu], exported_symbols=exported, library=library, target_id=target_id,
+    )
+    extractors.append(ExtractorRecord(
+        name="source_abi:android", status="ok",
+        inputs=[DEFAULT_REDACTION.path(str(android_dump))],
+        detail=f"{len(surface.reachable_declarations)} decls, {len(surface.reachable_types)} types",
+    ))
+    return surface, (
+        f"android dump: {len(surface.reachable_declarations)} decls, "
+        f"{len(surface.reachable_types)} types"
+    )
 
 
 # ── Attach / compare integration (ADR-028 D6, D7; ADR-029 D9) ─────────────────
@@ -361,6 +608,15 @@ def collect_compare_evidence(
             _detect_coverage_asymmetry(old_snapshot, old_pack, new_snapshot, new_pack)
         )
 
+    # L4 source ABI replay diff (ADR-030 D6): both packs must carry a source
+    # surface. Per ADR-028 D3 these are ordinary API_BREAK/RISK findings folded
+    # into the verdict pipeline — never sole authority for a BREAKING verdict.
+    old_surface = old_pack.source_abi if old_pack else None
+    new_surface = new_pack.source_abi if new_pack else None
+    if old_surface is not None and new_surface is not None:
+        from .evidence.source_diff import diff_source_abi
+        changes.extend(diff_source_abi(old_surface, new_surface))
+
     src_pack = new_pack or old_pack
     coverage = list(src_pack.manifest.coverage) if src_pack else []
     if not coverage:
@@ -370,6 +626,7 @@ def collect_compare_evidence(
         ]
     intrinsic = _intrinsic_coverage(new_snapshot)
     _echo_coverage(intrinsic, coverage)
+    _echo_capabilities(intrinsic, coverage)
     coverage_rows: list[dict[str, object]] = [c.to_dict() for c in (*intrinsic, *coverage)]
     return changes, coverage_rows
 
@@ -490,3 +747,52 @@ def _detect_coverage_asymmetry(
             new_value="not collected on target",
         )
     ]
+
+
+#: One row per check category: (label, evidence layer that enables it, the
+#: question it answers, and why it is off when that layer is absent). This is the
+#: "what is and is not being checked, and why" report (ADR-028 D7): the tiers run
+#: from a bare binary up through debug symbols, headers, build data, and sources.
+_CHECK_CAPABILITIES: tuple[tuple[str, str, str, str], ...] = (
+    ("Symbol presence & linkage (added/removed/SONAME)", "L0",
+     "from the binary's dynamic symbol table",
+     "needs the built binary"),
+    ("Type layout, members, vtables, signatures", "L1",
+     "from DWARF/PDB debug info",
+     "no debug info: checks limited to symbol-level, not struct/member/layout"),
+    ("API decls absent from the symbol table; public-surface scoping", "L2",
+     "from the public header AST",
+     "no headers: header-only/inline-API declarations are invisible"),
+    ("Build-flag & toolchain drift (visibility, std, ABI flags)", "L3_build",
+     "from build-system data (compile DB / CMake / Ninja / Bazel)",
+     "no build data: flag/toolchain regressions are not detected"),
+    ("Macros, default args, inline/template/constexpr bodies", "L4_source_abi",
+     "from source ABI replay (requires clang)",
+     "no sources/clang: source-only API changes are not detected"),
+    ("Impact / call / reachability graph", "L5_source_graph",
+     "from the source graph summary",
+     "no graph evidence: cross-symbol impact is not analyzed"),
+)
+
+
+def _echo_capabilities(
+    intrinsic: list[LayerCoverage], optional: list[LayerCoverage]
+) -> None:
+    """Print exactly which check categories are enabled — and why others are not.
+
+    Driven by the evidence coverage (ADR-028 D7): each check category is gated on
+    one evidence layer, so the user sees, for the inputs they actually provided
+    (binary only → +debug → +headers → +build data → +sources), which checks ran
+    and the concrete reason each disabled one is off.
+    """
+    present = {
+        c.layer
+        for c in (*intrinsic, *optional)
+        if c.status != CoverageStatus.NOT_COLLECTED
+    }
+    click.echo("Checks enabled for this scan (and why others are not):", err=True)
+    for label, layer, how, why_off in _CHECK_CAPABILITIES:
+        if layer in present:
+            click.echo(f"  [on]  {label} — {how}", err=True)
+        else:
+            click.echo(f"  [off] {label} — {why_off}", err=True)

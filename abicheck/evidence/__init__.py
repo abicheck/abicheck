@@ -61,18 +61,30 @@ from .source_abi import (
 )
 from .source_diff import diff_source_abi
 from .source_extractors import (
+    AndroidHeaderAbiAdapter,
     CastxmlSourceExtractor,
+    ClangSourceExtractor,
     SourceAbiExtractor,
     SourceExtractionError,
 )
 from .source_link import link_source_abi
+from .source_replay import (
+    REPLAY_SCOPES,
+    SourceAbiCache,
+    run_source_replay,
+    scope_for_ci_mode,
+    select_compile_units,
+)
 
 __all__ = [
     "EVIDENCE_PACK_VERSION",
+    "REPLAY_SCOPES",
     "SOURCE_ABI_VERSION",
+    "AndroidHeaderAbiAdapter",
     "BuildEvidence",
     "BuildOption",
     "CastxmlSourceExtractor",
+    "ClangSourceExtractor",
     "CompileUnit",
     "EvidenceConfidence",
     "EvidenceEntity",
@@ -84,6 +96,7 @@ __all__ = [
     "Generator",
     "LayerCoverage",
     "LinkUnit",
+    "SourceAbiCache",
     "SourceAbiExtractor",
     "SourceAbiSurface",
     "SourceAbiTu",
@@ -94,4 +107,7 @@ __all__ = [
     "Toolchain",
     "diff_source_abi",
     "link_source_abi",
+    "run_source_replay",
+    "scope_for_ci_mode",
+    "select_compile_units",
 ]

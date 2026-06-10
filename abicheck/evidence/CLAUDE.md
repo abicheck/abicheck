@@ -25,7 +25,8 @@ L3/L4/L5 are ordinary `ChangeKind` entries that default to `API_BREAK_KINDS`
 | `source_abi.py` | `SourceAbiTu` (per-TU dump) + `SourceAbiSurface` (linked `source_abi.json`) schemas, `SourceEntity`/`SourceLocation`, `L4_SOURCE_ABI` boundary | 030 D4/D5/D10 |
 | `source_link.py` | `link_source_abi()` — fold per-TU dumps into a per-library surface; map decls→exported symbols; ODR detection | 030 D5 |
 | `source_diff.py` | `diff_source_abi()` → the 9 source-replay findings (macros/default-args/inline/template/constexpr/…); never BREAKING | 030 D6 |
-| `source_extractors/` | `SourceAbiExtractor` interface + `CastxmlSourceExtractor` (parse a TU under its `CompileUnit` context → `SourceAbiTu`) | 030 D3 (phase 2) |
+| `source_extractors/` | `SourceAbiExtractor` interface + castxml (phase 2), clang (phase 5, body fingerprints), Android adapter (phase 6) | 030 D3 |
+| `source_replay.py` | `select_compile_units()` (D7 scopes), `SourceAbiCache` (D8 per-TU cache), `run_source_replay()` driver, `scope_for_ci_mode()` | 030 D7/D8 (phase 7) |
 | `redaction.py` | `RedactionPolicy` — strip secrets/abs paths from command lines | 032 D7 |
 | `adapters/compile_db.py` | `compile_commands.json` → `CompileUnit`s (reuses `build_context.py`) | 029 D3 |
 | `adapters/cmake_file_api.py` | CMake File API reply → targets/toolchains/fileSets | 029 D4 |
