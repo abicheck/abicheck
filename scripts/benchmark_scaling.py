@@ -457,15 +457,6 @@ def _build_pe_churn(n_syms: int) -> tuple[AbiSnapshot, AbiSnapshot]:
     both sides gates the PE detector) where half the exports are removed and an
     equal number added.
     """
-
-    def pe(prefix: str) -> PeMetadata:
-        return PeMetadata(
-            machine="x64",
-            exports=[
-                PeExport(name=f"{prefix}_fn{i}", ordinal=i + 1) for i in range(n_syms)
-            ],
-        )
-
     keep = n_syms // 2
     old_exports = [PeExport(name=f"fn{i}", ordinal=i + 1) for i in range(n_syms)]
     new_exports = old_exports[:keep] + [
