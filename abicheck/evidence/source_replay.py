@@ -217,16 +217,19 @@ def _select_changed(
             seen.add(cu.id)
     if picked:
         return picked
-    # Fail open (ADR-025 D3): a changed *header* we cannot map to any TU — e.g.
-    # compile-DB-only evidence with no Target/header metadata to scope by — must
+    # Fail open (ADR-025 D3): a changed *header* we could not map to any TU must
     # not silently select nothing, or source-only header changes
-    # (macros/defaults/constexpr/inline bodies) vanish from PR-mode replay.
-    # Conservatively replay every TU when a header changed and there is no target
-    # header metadata that could have scoped it.
-    has_target_header_meta = any(
-        t.public_headers or t.private_headers for t in build.targets
-    )
-    if not has_target_header_meta and any(_looks_like_header(c) for c in changed):
+    # (macros/defaults/constexpr/inline bodies) vanish from PR-mode replay. The
+    # include graph is not recorded in BuildEvidence, and a target's
+    # public/private header metadata lists only its *own* headers — not the
+    # transitive private headers it pulls in (e.g. include/detail/config.h
+    # included by a public header but listed on no target). Such a header is
+    # owned by nobody, so scoping by header metadata alone drops it even when
+    # other targets *do* carry header metadata. Conservatively replay every TU
+    # whenever a header changed; the per-TU dump cache (D8) then skips the TUs
+    # whose recorded read_files did not actually change, so the fan-out costs
+    # nothing for unaffected units (Codex review #339, P2).
+    if any(_looks_like_header(c) for c in changed):
         return list(build.compile_units)
     return []
 

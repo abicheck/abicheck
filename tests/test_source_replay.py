@@ -176,13 +176,17 @@ def test_scope_changed_non_header_no_match_stays_empty() -> None:
     assert select_compile_units(build, scope="changed", changed_paths=["README.md"]) == []
 
 
-def test_scope_changed_header_with_target_metadata_does_not_overselect() -> None:
-    # When targets DO carry header metadata, a header that no target owns scopes
-    # to nothing (the metadata is authoritative — no fail-open needed).
+def test_scope_changed_unowned_header_fails_open_despite_target_metadata() -> None:
+    # Codex #339 P2: even when targets carry header metadata, a changed header
+    # that no target owns must fail open to all TUs, not select nothing. Target
+    # public/private header lists name a target's *own* headers, not the
+    # transitive private headers it includes (e.g. a config header pulled in by
+    # a public header), so an unowned header can still affect any TU. The per-TU
+    # cache then skips units whose read_files did not actually change.
     units = select_compile_units(
-        _build(), scope="changed", changed_paths=["include/unowned.h"]
+        _build(), scope="changed", changed_paths=["include/detail/config.h"]
     )
-    assert units == []
+    assert {u.id for u in units} == {u.id for u in _build().compile_units}
 
 
 def test_unknown_scope_raises() -> None:
