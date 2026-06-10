@@ -102,6 +102,18 @@ Evidence coverage:
   L5 source graph summary    not_collected
 ```
 
+The same rows are emitted as a structured `evidence_coverage` array in the
+`--format json` report (schema `report_schema_version` 1.2+), so machine
+consumers can key off layer status and confidence.
+
+### Header parse context
+
+`header_parse_context_drift` fires when the new side carries a public-header AST
+that was **not** parsed with the build's ABI-relevant flags. To avoid this,
+dump the snapshot with the build's compile database — `abicheck dump … -p build/`
+records `parsed_with_build_context` on the snapshot, and a later `compare`
+honors it and suppresses the drift finding.
+
 ## Schema & storage
 
 - The pack is **content-addressed** and **versioned independently**

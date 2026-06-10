@@ -176,6 +176,12 @@ class DiffResult:
     # matched). Empty unless --pattern-verdicts was enabled. Findings themselves
     # carry the override on Change.effective_verdict; this is the audit trail.
     pattern_modulations: list[dict[str, object]] = field(default_factory=list)
+    # ADR-028 D7 — evidence-coverage rows (L0–L5) for the compare, when an
+    # EvidencePack was supplied. Each entry is a serialized LayerCoverage
+    # ({layer, status, confidence, detail}). Surfaced in the JSON report so
+    # machine consumers can tell artifact-proven from build-context-only
+    # findings; empty when no evidence was involved.
+    evidence_coverage: list[dict[str, object]] = field(default_factory=list)
 
     def _effective_kind_sets(
         self,

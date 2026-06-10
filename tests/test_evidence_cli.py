@@ -52,6 +52,30 @@ def test_collect_evidence_creates_pack(tmp_path):
     assert cov is not None and cov.status.value == "present"
 
 
+def test_collect_evidence_redacts_manifest_paths(tmp_path, monkeypatch):
+    """Codex: provenance paths in manifest.json are home-redacted before write."""
+    # Pretend tmp_path is under the user's home so redaction rewrites it.
+    monkeypatch.setenv("HOME", str(tmp_path))
+    from abicheck.evidence.redaction import RedactionPolicy
+    monkeypatch.setattr(
+        "abicheck.cli_evidence.DEFAULT_REDACTION",
+        RedactionPolicy(home_replacements={str(tmp_path): "~"}),
+    )
+    cdb = _write_cdb(tmp_path, "c++20")
+    out = tmp_path / "e"
+    result = CliRunner().invoke(main, [
+        "collect-evidence", "--compile-db", str(cdb), "--binary", str(tmp_path / "libfoo.so"),
+        "-o", str(out),
+    ])
+    assert result.exit_code == 0, result.output
+    manifest = json.loads((out / "manifest.json").read_text())
+    # No absolute tmp_path leaks into the manifest provenance.
+    blob = json.dumps(manifest)
+    assert str(tmp_path) not in blob
+    assert manifest["inputs"]["binary"].startswith("~")
+    assert any(e["inputs"] and e["inputs"][0].startswith("~") for e in manifest["extractors"])
+
+
 def test_collect_evidence_requires_output(tmp_path):
     cdb = _write_cdb(tmp_path, "c++20")
     result = CliRunner().invoke(main, ["collect-evidence", "--compile-db", str(cdb)])
@@ -133,6 +157,36 @@ def test_compare_with_evidence_emits_coverage_and_findings(tmp_path):
     assert "L3 build context" in result.stderr
     # The -std drift surfaces as an ABI-relevant build-flag finding (RISK).
     assert "COMPATIBLE_WITH_RISK" in result.stdout or "Deployment Risk" in result.stdout
+
+
+def test_compare_json_carries_evidence_coverage_block(tmp_path):
+    """ADR-028 D7: the JSON report carries a structured evidence_coverage block."""
+    cdb = _write_cdb(tmp_path, "c++20")
+    ev_new = tmp_path / "new.evidence"
+    runner = CliRunner()
+    runner.invoke(main, ["collect-evidence", "--compile-db", str(cdb), "-o", str(ev_new)])
+    old_snap = _make_snap(tmp_path, "old.json", "1.0")
+    new_snap = _make_snap(tmp_path, "new.json", "2.0")
+
+    result = runner.invoke(main, [
+        "compare", str(old_snap), str(new_snap), "--new-evidence", str(ev_new),
+        "--format", "json",
+    ])
+    assert result.exit_code in (0, 2, 4), result.output
+    payload = json.loads(result.stdout)
+    assert payload["report_schema_version"] == "1.2"
+    cov = {row["layer"]: row for row in payload["evidence_coverage"]}
+    assert set(cov) >= {"L0", "L1", "L2", "L3_build", "L4_source_abi", "L5_source_graph"}
+    assert cov["L3_build"]["status"] == "present"
+
+
+def test_compare_json_without_evidence_omits_coverage(tmp_path):
+    """No evidence → no evidence_coverage key (additive, opt-in)."""
+    old_snap = _make_snap(tmp_path, "old.json", "1.0")
+    new_snap = _make_snap(tmp_path, "new.json", "2.0")
+    result = CliRunner().invoke(main, ["compare", str(old_snap), str(new_snap), "--format", "json"])
+    assert result.exit_code == 0, result.output
+    assert "evidence_coverage" not in json.loads(result.stdout)
 
 
 def test_compare_evidence_mode_without_packs_is_noted(tmp_path):

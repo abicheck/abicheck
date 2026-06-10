@@ -40,6 +40,7 @@ from .evidence.model import (
     LayerCoverage,
 )
 from .evidence.pack import EvidencePack
+from .evidence.redaction import DEFAULT_REDACTION
 
 if TYPE_CHECKING:
     from .checker_types import Change
@@ -112,11 +113,14 @@ def collect_evidence_cmd(
         abicheck_version=_abicheck_version,
         created_at=_dt.datetime.now(_dt.timezone.utc).isoformat(),
     )
+    # Redact home/workspace prefixes from provenance paths before persisting,
+    # consistent with how the rest of the evidence model redacts paths.
+    red = DEFAULT_REDACTION
     pack.manifest.extractors = extractors
     pack.manifest.inputs = {
-        "binary": str(binary) if binary else None,
-        "headers": [str(h) for h in headers],
-        "build_dir": str(build_dir) if build_dir else None,
+        "binary": red.path(str(binary)) if binary else None,
+        "headers": [red.path(str(h)) for h in headers],
+        "build_dir": red.path(str(build_dir)) if build_dir else None,
     }
     has_build = bool(merged.compile_units or merged.targets or merged.toolchains)
     if has_build:
@@ -164,12 +168,12 @@ def _run_adapters(
             extractors.append(ExtractorRecord(
                 name="compile_commands",
                 status="ok",
-                inputs=[str(compile_db)],
+                inputs=[DEFAULT_REDACTION.path(str(compile_db))],
                 detail=f"{len(ev.compile_units)} compile units",
             ))
         except (OSError, ValueError) as exc:
             extractors.append(ExtractorRecord(
-                name="compile_commands", status="failed", inputs=[str(compile_db)],
+                name="compile_commands", status="failed", inputs=[DEFAULT_REDACTION.path(str(compile_db))],
                 detail=str(exc),
             ))
             merged.diagnostics.append(f"compile_commands: {exc}")
@@ -181,7 +185,7 @@ def _run_adapters(
         merged.merge(ev)
         extractors.append(ExtractorRecord(
             name="cmake_file_api", status="ok" if ev.targets else "partial",
-            inputs=[str(build_dir)],
+            inputs=[DEFAULT_REDACTION.path(str(build_dir))],
             detail=f"{len(ev.targets)} targets, {len(ev.toolchains)} toolchains",
         ))
 
@@ -193,7 +197,7 @@ def _run_adapters(
         merged.merge(ev)
         extractors.append(ExtractorRecord(
             name="ninja", status="ok" if ev.compile_units else "partial",
-            inputs=[str(build_dir or ninja_compdb)],
+            inputs=[DEFAULT_REDACTION.path(str(build_dir or ninja_compdb))],
             detail=f"{len(ev.compile_units)} compile units",
         ))
 
@@ -238,15 +242,15 @@ def collect_compare_evidence(
     new_evidence: Path | None,
     evidence_mode: str,
     new_snapshot: AbiSnapshot,
-    *,
-    old_parsed_with_context: bool,
-) -> list[Change]:
+) -> tuple[list[Change], list[dict[str, object]]]:
     """Load packs, diff their build evidence, echo coverage, return findings.
 
     Per ADR-028 D3 the build-context findings are folded into the ordinary
     verdict pipeline as ``extra_changes`` and never override artifact-backed
     verdicts. The D7 coverage table is printed to stderr here (covers every
-    output format). Returns the list of build-context :class:`Change` findings.
+    output format) and also returned as serialized rows so the JSON report can
+    carry a structured ``evidence_coverage`` block. Returns
+    ``(changes, coverage_rows)``.
     """
     from .evidence.build_diff import check_header_parse_drift, diff_build_evidence
 
@@ -258,7 +262,7 @@ def collect_compare_evidence(
                 "available. Use `abicheck collect-evidence` + --old/--new-evidence.",
                 err=True,
             )
-        return []
+        return [], []
 
     old_pack = _load_pack_or_raise(old_evidence) if old_evidence else None
     new_pack = _load_pack_or_raise(new_evidence) if new_evidence else None
@@ -276,7 +280,8 @@ def collect_compare_evidence(
     )
     if new_build is not None and new_has_headers:
         changes.extend(check_header_parse_drift(
-            new_build, headers_parsed_with_context=old_parsed_with_context,
+            new_build,
+            headers_parsed_with_context=new_snapshot.parsed_with_build_context,
         ))
 
     src_pack = new_pack or old_pack
@@ -286,8 +291,10 @@ def collect_compare_evidence(
             LayerCoverage(layer=layer.value, status=CoverageStatus.NOT_COLLECTED)
             for layer in (EvidenceLayer.L3_BUILD, EvidenceLayer.L4_SOURCE_ABI, EvidenceLayer.L5_SOURCE_GRAPH)
         ]
-    _echo_coverage(_intrinsic_coverage(new_snapshot), coverage)
-    return changes
+    intrinsic = _intrinsic_coverage(new_snapshot)
+    _echo_coverage(intrinsic, coverage)
+    coverage_rows: list[dict[str, object]] = [c.to_dict() for c in (*intrinsic, *coverage)]
+    return changes, coverage_rows
 
 
 def _load_pack_or_raise(evidence_dir: Path) -> EvidencePack:

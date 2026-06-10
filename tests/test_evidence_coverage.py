@@ -315,6 +315,28 @@ def test_diff_no_change_when_equal():
     assert diff_build_evidence(ev, copy.deepcopy(ev)) == []
 
 
+def test_derive_build_options_skips_structurally_captured_flags():
+    """Codex: split vs combined sysroot/target must not double-count.
+
+    --sysroot/-target are captured as the normalized structured sysroot/target
+    options; the raw flag (split or combined spelling) must not also appear, or
+    an identical build looks changed.
+    """
+    split = derive_build_options([CompileUnit(
+        id="1", language="CXX", sysroot="/sdk", target_triple="x86_64-linux-gnu",
+        abi_relevant_flags=["--sysroot", "-target"],
+    )])
+    combined = derive_build_options([CompileUnit(
+        id="1", language="CXX", sysroot="/sdk", target_triple="x86_64-linux-gnu",
+        abi_relevant_flags=["--sysroot=/sdk", "--target=x86_64-linux-gnu"],
+    )])
+    assert {(o.key, o.value) for o in split} == {("sysroot", "/sdk"), ("target", "x86_64-linux-gnu")}
+    assert {(o.key, o.value) for o in split} == {(o.key, o.value) for o in combined}
+    old = BuildEvidence(build_options=split)
+    new = BuildEvidence(build_options=combined)
+    assert diff_build_evidence(old, new) == []
+
+
 def test_diff_preserves_multiple_values_for_same_key():
     """Codex P2: a removed variant of a multi-config option is not masked."""
     old = BuildEvidence(build_options=[
@@ -404,6 +426,34 @@ def test_compare_drift_fires_without_compile_db_context(tmp_path):
     ])
     assert result.exit_code in (0, 2, 4), result.output
     assert "header_parse_context_drift" in result.stdout
+
+
+def test_compare_drift_suppressed_when_dumped_with_build_context(tmp_path):
+    """A snapshot dumped with `-p` (parsed_with_build_context) suppresses drift."""
+    from abicheck.model import AbiSnapshot
+    from abicheck.serialization import save_snapshot
+
+    new_cdb = tmp_path / "cc.json"
+    new_cdb.write_text(json.dumps([{"directory": str(tmp_path), "file": "a.cpp",
+                                    "arguments": ["c++", "-std=c++20", "-c", "a.cpp"]}]))
+    ev_new = tmp_path / "new.evidence"
+    runner = CliRunner()
+    runner.invoke(main, ["collect-evidence", "--compile-db", str(new_cdb), "-o", str(ev_new)])
+
+    # New side was dumped WITH the build's compile DB → no drift.
+    save_snapshot(AbiSnapshot(library="libfoo.so", version="old", from_headers=True),
+                  tmp_path / "old.json")
+    save_snapshot(
+        AbiSnapshot(library="libfoo.so", version="new", from_headers=True,
+                    parsed_with_build_context=True),
+        tmp_path / "new.json",
+    )
+    result = runner.invoke(main, [
+        "compare", str(tmp_path / "old.json"), str(tmp_path / "new.json"),
+        "--new-evidence", str(ev_new), "--format", "json",
+    ])
+    assert result.exit_code in (0, 2, 4), result.output
+    assert "header_parse_context_drift" not in result.stdout
 
 
 def test_compare_binary_only_skips_header_drift(tmp_path):

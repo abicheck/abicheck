@@ -357,7 +357,13 @@ class BuildEvidence:
         _merge_by_id(self.compile_units, other.compile_units)
         _merge_by_id(self.link_units, other.link_units)
         self.generated_files = sorted(set(self.generated_files) | set(other.generated_files))
-        self.build_options.extend(other.build_options)
+        # De-duplicate build options by (key, value) so running two adapters on
+        # one tree (e.g. compile DB + Ninja) doesn't store the same option twice.
+        seen_opts = {(o.key, o.value) for o in self.build_options}
+        for opt in other.build_options:
+            if (opt.key, opt.value) not in seen_opts:
+                self.build_options.append(opt)
+                seen_opts.add((opt.key, opt.value))
         self.diagnostics.extend(other.diagnostics)
         self.raw_artifacts = sorted(set(self.raw_artifacts) | set(other.raw_artifacts))
 

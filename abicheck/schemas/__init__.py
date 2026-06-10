@@ -41,7 +41,8 @@ from typing import Any
 
 #: SemVer-style (MAJOR.MINOR) version of the compare-report JSON schema.
 #: 1.1 — added the optional ``release_recommendation`` object (additive).
-REPORT_SCHEMA_VERSION = "1.1"
+#: 1.2 — added the optional ``evidence_coverage`` array (ADR-028 D7; additive).
+REPORT_SCHEMA_VERSION = "1.2"
 
 _SCHEMA_DIR = Path(__file__).resolve().parent
 COMPARE_REPORT_SCHEMA_PATH = _SCHEMA_DIR / "compare_report.schema.json"

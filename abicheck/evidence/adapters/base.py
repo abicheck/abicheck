@@ -156,6 +156,19 @@ def derive_build_options(compile_units: list[CompileUnit]) -> list[BuildOption]:
             if flag.startswith(("-D", "/D")):
                 key, _, value = flag[2:].partition("=")
                 add(f"define:{key}", value, raw=flag)
-            elif not flag.startswith("-std="):
+            elif flag.startswith(_STRUCTURED_FLAG_PREFIXES):
+                # std/sysroot/target are already emitted from the normalized
+                # structured fields above. Re-adding the raw flag would
+                # double-count and make split (``--sysroot /sdk``) vs combined
+                # (``--sysroot=/sdk``) spelling look like a change.
+                continue
+            else:
                 add(flag.split("=", 1)[0], flag, raw=flag)
     return out
+
+
+#: Flag prefixes whose value is already captured as a structured BuildOption
+#: (std / target / sysroot), so the raw flag must not also become an option.
+_STRUCTURED_FLAG_PREFIXES: tuple[str, ...] = (
+    "-std=", "/std:", "--sysroot", "-isysroot", "--target", "-target",
+)

@@ -571,6 +571,14 @@ class AbiSnapshot:
     # ignore this optional field (ADR-015 backward-compatibility).
     evidence_pack: EvidencePackRef | None = field(default=None, kw_only=True)
 
+    # ADR-029 — True when this snapshot's public-header AST was parsed using the
+    # real build context (a compile_commands.json supplied to `dump -p`), so the
+    # declared API facts reflect the build's ABI-relevant flags. Lets the
+    # build-evidence diff suppress HEADER_PARSE_CONTEXT_DRIFT when the headers
+    # were in fact parsed with that context. Defaults False (older snapshots and
+    # context-free dumps); ignored by old readers (additive optional field).
+    parsed_with_build_context: bool = field(default=False, kw_only=True)
+
     # Runtime-only provenance qualifier (not serialized — popped in
     # snapshot_to_dict). True when ``from_headers`` was *inferred* for a legacy
     # snapshot that predates the explicit ``from_headers`` key, rather than set

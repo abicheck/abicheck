@@ -746,6 +746,11 @@ def to_json(
         }
     # Release recommendation (semver bump + soname action) — additive, machine-facing.
     d["release_recommendation"] = recommend_release(result).to_dict()
+    # Evidence coverage (ADR-028 D7) — L0–L5 rows when an EvidencePack was
+    # supplied; lets consumers tell artifact-proven from build-context-only
+    # findings. Additive, present only when evidence was involved.
+    if getattr(result, "evidence_coverage", None):
+        d["evidence_coverage"] = result.evidence_coverage
     effective_policy = result.policy or "strict_abi"
     d["policy"] = effective_policy
     eff_sets = result._effective_kind_sets()

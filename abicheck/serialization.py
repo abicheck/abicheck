@@ -541,6 +541,9 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
         build_mode=build_mode,
         # Evidence-pack reference (v7)
         evidence_pack=evidence_pack,
+        # Build-context parse provenance (v7, ADR-029) — absent on older
+        # snapshots loads as False.
+        parsed_with_build_context=bool(d.get("parsed_with_build_context", False)),
     )
 
 

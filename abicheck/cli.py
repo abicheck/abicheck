@@ -834,6 +834,11 @@ def dump_cmd(so_path: Path, headers: tuple[Path, ...], includes: tuple[Path, ...
     except (AbicheckError, RuntimeError, OSError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
 
+    # Record that the header AST was parsed with the real build context (ADR-029),
+    # so a later compare can suppress header-parse-context drift for this side.
+    if effective_compile_db and resolved_headers:
+        snap.parsed_with_build_context = True
+
     if follow_deps:
         _populate_dependency_info(snap, so_path, list(search_paths), sysroot, ld_library_path)
 
@@ -1860,15 +1865,15 @@ def compare_cmd(
 
     extra_changes = _load_probe_matrix_changes(probe_matrix_old, probe_matrix_new)
 
+    evidence_coverage_rows: list[dict[str, object]] = []
     if old_evidence is not None or new_evidence is not None or evidence_mode != "off":
         from .cli_evidence import collect_compare_evidence
-        # `compare` has no -p/--compile-db option, so any header AST it parses is
-        # parsed WITHOUT the build's ABI-relevant flags. Passing headers via -H
-        # does not change that — so header-parse-context drift is disclosed (not
-        # suppressed) whenever the new pack carries ABI-relevant flags. Re-dump
-        # with `dump -p` to capture build context into the snapshot itself.
-        ev_changes = collect_compare_evidence(old_evidence, new_evidence, evidence_mode, new,
-                                              old_parsed_with_context=False)
+        # Header-parse-context drift is judged from the new snapshot's own
+        # provenance (parsed_with_build_context, set by `dump -p`); compare adds
+        # no build context of its own.
+        ev_changes, evidence_coverage_rows = collect_compare_evidence(
+            old_evidence, new_evidence, evidence_mode, new,
+        )
         extra_changes = (extra_changes or []) + ev_changes if ev_changes else extra_changes
 
     apply_patterns = pattern_verdicts or explain_patterns  # --explain implies on
@@ -1880,6 +1885,8 @@ def compare_cmd(
         pattern_verdicts=apply_patterns,
         surface_metrics=surface_metrics,
     )
+    if evidence_coverage_rows:
+        result.evidence_coverage = evidence_coverage_rows
 
     if explain_patterns:
         echo_pattern_modulations(result)
