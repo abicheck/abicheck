@@ -220,6 +220,13 @@ def _canonical(node: Any) -> Any:
     type_obj = node.get("type")
     if isinstance(type_obj, dict) and "qualType" in type_obj:
         out["type"] = type_obj["qualType"]
+    # A DeclRefExpr stores the referenced entity (e.g. another constant) in
+    # ``referencedDecl``; without its name a value change `kOld` -> `kNew` of the
+    # same type would hash identically and the constexpr/default-arg change would
+    # be missed (Codex review #339, P2).
+    ref = node.get("referencedDecl")
+    if isinstance(ref, dict) and ref.get("name"):
+        out["ref"] = ref["name"]
     inner = node.get("inner")
     if isinstance(inner, list):
         out["inner"] = [_canonical(child) for child in inner]
@@ -338,21 +345,25 @@ def _expr_value(node: dict[str, Any]) -> str:
 def _default_arg_repr(node: dict[str, Any]) -> str:
     """Normalized default-argument string for a function's parameters.
 
-    Each defaulted parameter is rendered ``name=<value-or-fingerprint>`` so both
-    presence and value changes surface. The value covers the *whole* default
-    expression (not just its first literal), so ``x = 1 + 2`` → ``x = 1 + 3`` is
-    detected (Codex review #339, P2).
+    Each defaulted parameter is rendered ``p<position>=<value-or-fingerprint>`` so
+    both presence and value changes surface. The *position* (not the parameter
+    name) keys the entry, so a pure parameter rename keeping the same default —
+    ``f(int x = 1)`` → ``f(int y = 1)`` — is not a change (callers that omit the
+    argument get the same value). The value covers the *whole* default expression
+    (not just its first literal), so ``1 + 2`` → ``1 + 3`` is detected (Codex
+    review #339, P2).
     """
     parts: list[str] = []
+    position = -1
     for child in node.get("inner", []):
         if not isinstance(child, dict) or child.get("kind") != "ParmVarDecl":
             continue
+        position += 1
         init = _init_expr(child)
         if not child.get("init") and init is None:
             continue
-        pname = child.get("name", "")
         rep = _expr_value(init) if init is not None else "default"
-        parts.append(f"{pname}={rep}")
+        parts.append(f"p{position}={rep}")
     return ",".join(parts)
 
 

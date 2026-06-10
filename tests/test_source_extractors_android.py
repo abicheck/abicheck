@@ -119,3 +119,65 @@ def test_run_dumper_requires_tool() -> None:
     assert adapter.available() is False
     with pytest.raises(SourceExtractionError, match="not found in PATH"):
         adapter.run_dumper("foo.h", output="out.sdump")
+
+
+def test_run_dumper_success(tmp_path: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    from abicheck.evidence.source_extractors import android as android_mod
+
+    adapter = AndroidHeaderAbiAdapter()
+    monkeypatch.setattr(adapter, "available", lambda: True)
+    out = tmp_path / "o.sdump"
+
+    class _Result:
+        returncode = 0
+        stderr = ""
+        stdout = ""
+
+    def fake_run(cmd, **kw):  # type: ignore[no-untyped-def]
+        # The dumper writes its JSON output to the -o path.
+        assert "-output-format" in cmd and "Json" in cmd
+        out.write_text(json.dumps(_dump()))
+        return _Result()
+
+    monkeypatch.setattr(android_mod.subprocess, "run", fake_run)
+    tu = adapter.run_dumper(
+        tmp_path / "foo.h", output=out, clang_argv=["-std=c++17"], target_id="t"
+    )
+    assert any(e.qualified_name == "Foo" for e in tu.types)
+
+
+def test_run_dumper_failure(tmp_path: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    from abicheck.evidence.source_extractors import android as android_mod
+
+    adapter = AndroidHeaderAbiAdapter()
+    monkeypatch.setattr(adapter, "available", lambda: True)
+
+    class _Result:
+        returncode = 2
+        stderr = "dump error"
+        stdout = ""
+
+    monkeypatch.setattr(android_mod.subprocess, "run", lambda cmd, **kw: _Result())
+    with pytest.raises(SourceExtractionError, match="failed"):
+        adapter.run_dumper("foo.h", output=tmp_path / "o.sdump")
+
+
+def test_run_dumper_timeout(tmp_path: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    import subprocess as sp
+
+    from abicheck.evidence.source_extractors import android as android_mod
+
+    adapter = AndroidHeaderAbiAdapter(timeout=1)
+    monkeypatch.setattr(adapter, "available", lambda: True)
+
+    def fake_run(cmd, **kw):  # type: ignore[no-untyped-def]
+        raise sp.TimeoutExpired(cmd, 1)
+
+    monkeypatch.setattr(android_mod.subprocess, "run", fake_run)
+    with pytest.raises(SourceExtractionError, match="timed out"):
+        adapter.run_dumper("foo.h", output=tmp_path / "o.sdump")
+
+
+def test_load_missing_file_raises(tmp_path: Path) -> None:
+    with pytest.raises(SourceExtractionError, match="cannot read"):
+        AndroidHeaderAbiAdapter().load(tmp_path / "nope.lsdump")

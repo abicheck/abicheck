@@ -301,3 +301,93 @@ def test_compare_source_abi_findings_and_capabilities(tmp_path):
     assert "[off]" in result.stderr
     # Macros/default-args/bodies row references its source/clang requirement.
     assert "inline/template/constexpr" in result.stderr
+
+
+def _fake_clang_extractor():
+    """A drop-in ClangSourceExtractor replacement that needs no real clang."""
+    from abicheck.evidence.source_abi import SourceAbiTu, SourceEntity, SourceLocation
+
+    class _Fake:
+        name = "clang-source"
+        version = "0.1"
+
+        def __init__(self, **kw):
+            pass
+
+        def available(self):
+            return True
+
+        def extract(self, cu, *, public_header_roots, target_id=""):
+            ent = SourceEntity(
+                id="e", kind="function", qualified_name="add",
+                mangled_name="_Z3addi", signature_hash="sig", value="p0=1",
+                source_location=SourceLocation(path="include/foo.h", origin="PUBLIC_HEADER"),
+                visibility="public_header", api_relevant=True,
+            )
+            return SourceAbiTu(
+                tu_id=cu.id, source=cu.source,
+                public_header_roots=list(public_header_roots), functions=[ent],
+            )
+
+    return _Fake
+
+
+def test_collect_evidence_source_abi_success(tmp_path, monkeypatch):
+    """The clang collection path writes a populated L4 surface and PRESENT row."""
+    import abicheck.evidence.source_extractors as se
+    monkeypatch.setattr(se, "ClangSourceExtractor", _fake_clang_extractor())
+
+    cdb = _write_cdb(tmp_path, "c++17")
+    out = tmp_path / "ev"
+    result = CliRunner().invoke(main, [
+        "collect-evidence", "--compile-db", str(cdb),
+        "--source-abi", "--source-abi-scope", "full",
+        "--source-abi-cache", str(tmp_path / "cache"),
+        "-o", str(out),
+    ])
+    assert result.exit_code == 0, result.output
+    assert "L4 source ABI replay: clang extractor" in result.output
+    pack = EvidencePack.load(out)
+    assert pack.source_abi is not None
+    assert any(e.qualified_name == "add" for e in pack.source_abi.reachable_declarations)
+    cov = pack.manifest.coverage_for("L4_source_abi")
+    assert cov is not None and cov.status.value == "present"
+
+
+def test_collect_evidence_source_abi_castxml_unavailable(tmp_path):
+    """The castxml backend degrades gracefully when castxml is absent."""
+    cdb = _write_cdb(tmp_path, "c++17")
+    out = tmp_path / "ev"
+    result = CliRunner().invoke(main, [
+        "collect-evidence", "--compile-db", str(cdb),
+        "--source-abi", "--source-abi-extractor", "castxml",
+        "-o", str(out),
+    ])
+    assert result.exit_code == 0, result.output
+    # Either castxml ran (present) or it was unavailable (graceful) — both fine,
+    # but the run must not crash and must record an L4 row.
+    pack = EvidencePack.load(out)
+    cov = pack.manifest.coverage_for("L4_source_abi")
+    assert cov is not None and cov.status.value in ("present", "partial")
+
+
+def test_collect_evidence_source_abi_without_compile_units(tmp_path):
+    """--source-abi with no L3 build context reports the missing prerequisite."""
+    out = tmp_path / "ev"
+    result = CliRunner().invoke(main, [
+        "collect-evidence", "--source-abi", "--source-abi-extractor", "clang",
+        "-o", str(out),
+    ])
+    assert result.exit_code == 0, result.output
+    assert "no L3 build context" in result.output
+
+
+def test_exported_symbols_from_binary_edge_cases(tmp_path):
+    from pathlib import Path
+
+    from abicheck.cli_evidence import _exported_symbols_from_binary
+    assert _exported_symbols_from_binary(None) == []
+    assert _exported_symbols_from_binary(Path(tmp_path / "missing")) == []
+    junk = tmp_path / "x.txt"
+    junk.write_text("not a binary")
+    assert _exported_symbols_from_binary(junk) == []

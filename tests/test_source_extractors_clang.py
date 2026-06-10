@@ -32,6 +32,7 @@ from abicheck.evidence.source_extractors import (
     ClangSourceExtractor,
     SourceExtractionError,
     build_clang_command,
+    build_clang_macro_command,
     source_abi_from_clang_ast,
 )
 from abicheck.evidence.source_link import link_source_abi
@@ -172,7 +173,9 @@ def test_ast_mapping_extracts_each_entity_kind() -> None:
     tu = source_abi_from_clang_ast(_ast(), _cu(), ["include/foo.h"], "target://libfoo")
     assert tu.extractor["name"] == "clang-source"
     funcs = {e.qualified_name: e for e in tu.functions}
-    assert funcs["ns::add"].value == "y=1"  # default argument captured
+    # Default argument captured, keyed by parameter *position* (p1 = 2nd param),
+    # not name — a rename keeping the same default is not a change.
+    assert funcs["ns::add"].value == "p1=1"
     assert funcs["ns::add"].mangled_name == "_ZN2ns3addEii"
     assert {e.qualified_name for e in tu.inline_bodies} == {"ns::add"}
     assert tu.inline_bodies[0].body_hash.startswith("sha256:")
@@ -417,6 +420,149 @@ def test_public_macro_value_change_detected_end_to_end() -> None:
     by_kind = {c.kind.value: c for c in changes}
     assert "public_macro_value_changed" in by_kind
     assert by_kind["public_macro_value_changed"].old_value == "16"
+
+
+def test_param_rename_with_same_default_is_not_a_change() -> None:
+    # Codex #339 P2: a pure parameter rename keeping the same default value must
+    # NOT fire default_argument_changed (callers omitting the arg get the same
+    # value). The comparable value is keyed by position, not name.
+    def fn(pname: str) -> dict:
+        return {"kind": "TranslationUnitDecl", "inner": [{
+            "kind": "FunctionDecl", "name": "f", "loc": {"file": "include/foo.h"},
+            "mangledName": "_Z1fi", "type": {"qualType": "void (int)"},
+            "inner": [{
+                "kind": "ParmVarDecl", "name": pname, "type": {"qualType": "int"},
+                "init": "c", "inner": [{"kind": "IntegerLiteral", "value": "1"}],
+            }],
+        }]}
+
+    old = source_abi_from_clang_ast(fn("x"), _cu(), ["include/foo.h"], "t")
+    new = source_abi_from_clang_ast(fn("y"), _cu(), ["include/foo.h"], "t")
+    assert old.functions[0].value == new.functions[0].value == "p0=1"
+    kinds = {
+        c.kind.value
+        for c in diff_source_abi(link_source_abi([old]), link_source_abi([new]))
+    }
+    assert "default_argument_changed" not in kinds
+
+
+def test_constexpr_referencing_changed_constant_is_detected() -> None:
+    # Codex #339 P2: a constexpr initialized from another named constant
+    # (DeclRefExpr) that changes kOld -> kNew (same type) must be detected;
+    # _canonical now preserves the referenced declaration name.
+    def ast(ref: str) -> dict:
+        return {"kind": "TranslationUnitDecl", "inner": [{
+            "kind": "VarDecl", "name": "N", "loc": {"file": "include/foo.h"},
+            "constexpr": True, "type": {"qualType": "const int"},
+            "inner": [{
+                "kind": "ConstantExpr", "type": {"qualType": "const int"},
+                "inner": [{
+                    "kind": "DeclRefExpr", "type": {"qualType": "const int"},
+                    "referencedDecl": {"kind": "VarDecl", "name": ref},
+                }],
+            }],
+        }]}
+
+    old = source_abi_from_clang_ast(ast("kOld"), _cu(), ["include/foo.h"], "t")
+    new = source_abi_from_clang_ast(ast("kNew"), _cu(), ["include/foo.h"], "t")
+    assert old.constexpr_values[0].value != new.constexpr_values[0].value
+    kinds = {
+        c.kind.value
+        for c in diff_source_abi(link_source_abi([old]), link_source_abi([new]))
+    }
+    assert "constexpr_value_changed" in kinds
+
+
+# -- extractor subprocess orchestration (mocked clang) -----------------------
+
+
+class _Result:
+    def __init__(self, rc: int, out: str, err: str = "") -> None:
+        self.returncode = rc
+        self.stdout = out
+        self.stderr = err
+
+
+def _patch_run(monkeypatch, handler) -> ClangSourceExtractor:  # type: ignore[no-untyped-def]
+    from abicheck.evidence.source_extractors import clang as clang_mod
+
+    extractor = ClangSourceExtractor()
+    monkeypatch.setattr(extractor, "available", lambda: True)
+    monkeypatch.setattr(clang_mod.subprocess, "run", handler)
+    return extractor
+
+
+def test_extract_runs_macro_pass(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    import json
+
+    calls: list[list[str]] = []
+
+    def handler(cmd, **kw):  # type: ignore[no-untyped-def]
+        calls.append(cmd)
+        if "-ast-dump=json" in cmd:
+            return _Result(0, json.dumps(_ast()))
+        return _Result(0, '# 1 "include/foo.h" 1\n#define FOO_SIZE 16\n')
+
+    extractor = _patch_run(monkeypatch, handler)
+    tu = extractor.extract(
+        _cu(source="foo.cpp"), public_header_roots=["include/foo.h"], target_id="t"
+    )
+    assert len(calls) == 2  # AST pass + macro pass
+    assert any(e.qualified_name == "FOO_SIZE" for e in tu.macros)
+
+
+def test_extract_macro_pass_failure_is_diagnostic(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    import json
+
+    def handler(cmd, **kw):  # type: ignore[no-untyped-def]
+        if "-ast-dump=json" in cmd:
+            return _Result(0, json.dumps(_ast()))
+        return _Result(1, "", "macro boom")
+
+    extractor = _patch_run(monkeypatch, handler)
+    tu = extractor.extract(_cu(), public_header_roots=["include/foo.h"])
+    assert tu.macros == []
+    assert any("macro pass" in d for d in tu.diagnostics)
+
+
+def test_extract_records_recovered_ast_exit(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    import json
+
+    def handler(cmd, **kw):  # type: ignore[no-untyped-def]
+        if "-ast-dump=json" in cmd:
+            return _Result(1, json.dumps(_ast()), "warning: recovered")
+        return _Result(0, "")
+
+    extractor = _patch_run(monkeypatch, handler)
+    tu = extractor.extract(_cu(), public_header_roots=["include/foo.h"])
+    assert any("recovered" in d for d in tu.diagnostics)
+
+
+def test_extract_timeout_raises(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    import subprocess as sp
+
+    def handler(cmd, **kw):  # type: ignore[no-untyped-def]
+        raise sp.TimeoutExpired(cmd, 1)
+
+    extractor = _patch_run(monkeypatch, handler)
+    extractor.timeout = 1
+    with pytest.raises(SourceExtractionError, match="timed out"):
+        extractor.extract(_cu(), public_header_roots=["include/foo.h"])
+
+
+def test_extract_invalid_json_raises(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    extractor = _patch_run(monkeypatch, lambda cmd, **kw: _Result(0, "{not json"))
+    with pytest.raises(SourceExtractionError, match="not valid JSON"):
+        extractor.extract(_cu(), public_header_roots=["include/foo.h"])
+
+
+def test_build_clang_macro_command_gnu_and_msvc() -> None:
+    gnu = build_clang_macro_command(_cu(standard="c++17"), Path("a.cpp"))
+    assert "-E" in gnu and "-dD" in gnu and gnu[-1] == str(Path("a.cpp"))
+    msvc = build_clang_macro_command(
+        _cu(standard="c++20"), Path("a.cpp"), compiler_binary="clang-cl"
+    )
+    assert "--driver-mode=cl" in msvc and "/E" in msvc and "-dD" in msvc
 
 
 def test_forward_declaration_emits_no_type() -> None:

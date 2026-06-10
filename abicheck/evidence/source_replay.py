@@ -185,6 +185,15 @@ def _select_target(build: BuildEvidence, target_id: str) -> list[CompileUnit]:
     return attached or list(build.compile_units)
 
 
+#: C/C++ header extensions used to tell a changed *header* (whose including TUs
+#: we cannot enumerate without a build graph) from a changed source file.
+_HEADER_EXTS = (".h", ".hpp", ".hh", ".hxx", ".h++", ".inc", ".ipp", ".tcc", ".inl")
+
+
+def _looks_like_header(path: str) -> bool:
+    return _norm(path).lower().endswith(_HEADER_EXTS)
+
+
 def _select_changed(
     build: BuildEvidence, changed: frozenset[str]
 ) -> list[CompileUnit]:
@@ -201,7 +210,20 @@ def _select_changed(
         if _path_matches(cu.source, changed) or cu.target_id in owning_targets:
             picked.append(cu)
             seen.add(cu.id)
-    return picked
+    if picked:
+        return picked
+    # Fail open (ADR-025 D3): a changed *header* we cannot map to any TU — e.g.
+    # compile-DB-only evidence with no Target/header metadata to scope by — must
+    # not silently select nothing, or source-only header changes
+    # (macros/defaults/constexpr/inline bodies) vanish from PR-mode replay.
+    # Conservatively replay every TU when a header changed and there is no target
+    # header metadata that could have scoped it.
+    has_target_header_meta = any(
+        t.public_headers or t.private_headers for t in build.targets
+    )
+    if not has_target_header_meta and any(_looks_like_header(c) for c in changed):
+        return list(build.compile_units)
+    return []
 
 
 def public_header_roots_for(build: BuildEvidence, target_id: str = "") -> list[str]:

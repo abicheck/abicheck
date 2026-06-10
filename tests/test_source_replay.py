@@ -158,6 +158,33 @@ def test_scope_changed_empty_paths_selects_nothing() -> None:
     assert select_compile_units(_build(), scope="changed", changed_paths=[]) == []
 
 
+def test_scope_changed_falls_back_for_header_without_target_metadata() -> None:
+    # Codex #339 P2: compile-DB-only evidence (compile units, no Target records),
+    # a changed *header* that maps to no TU must fail open to all TUs, not select
+    # nothing — else source-only header changes vanish from PR-mode replay.
+    build = BuildEvidence(
+        compile_units=[_cu("cu://a", "src/a.cpp"), _cu("cu://b", "src/b.cpp")]
+    )
+    units = select_compile_units(build, scope="changed", changed_paths=["include/api.h"])
+    assert {u.id for u in units} == {"cu://a", "cu://b"}
+
+
+def test_scope_changed_non_header_no_match_stays_empty() -> None:
+    # A changed *non-header* that matches no source must NOT trigger the
+    # fail-open header fallback (no over-broad replay for an unrelated file).
+    build = BuildEvidence(compile_units=[_cu("cu://a", "src/a.cpp")])
+    assert select_compile_units(build, scope="changed", changed_paths=["README.md"]) == []
+
+
+def test_scope_changed_header_with_target_metadata_does_not_overselect() -> None:
+    # When targets DO carry header metadata, a header that no target owns scopes
+    # to nothing (the metadata is authoritative — no fail-open needed).
+    units = select_compile_units(
+        _build(), scope="changed", changed_paths=["include/unowned.h"]
+    )
+    assert units == []
+
+
 def test_unknown_scope_raises() -> None:
     with pytest.raises(ValueError, match="unknown replay scope"):
         select_compile_units(_build(), scope="bogus")
@@ -284,6 +311,54 @@ def test_cache_invalidates_when_dependency_deleted(tmp_path: Path) -> None:
     cache.put("k1", SourceAbiTu(tu_id="cu://x", read_files=[str(hdr)]))
     hdr.unlink()  # a vanished dependency must miss, not hit (prefer false miss)
     assert cache.get("k1") is None
+
+
+def test_cache_get_ignores_corrupt_entry(tmp_path: Path) -> None:
+    cache = SourceAbiCache(tmp_path / "cache")
+    cache.cache_dir.mkdir(parents=True)
+    (cache.cache_dir / "k.json").write_text("{ not valid json")
+    assert cache.get("k") is None  # corrupt entry is a miss, never an error
+
+
+def test_cache_get_ignores_non_object_entry(tmp_path: Path) -> None:
+    cache = SourceAbiCache(tmp_path / "cache")
+    cache.cache_dir.mkdir(parents=True)
+    (cache.cache_dir / "k.json").write_text("[1, 2, 3]")
+    assert cache.get("k") is None
+
+
+def test_cache_key_changes_with_header_directory_content(tmp_path: Path) -> None:
+    # A header *root that is a directory* folds in every contained file's content,
+    # so editing any header under it invalidates the key (_digest_path dir branch).
+    src = tmp_path / "a.cpp"
+    src.write_text("int a;\n")
+    inc = tmp_path / "inc"
+    inc.mkdir()
+    (inc / "h.h").write_text("int x;\n")
+    cu = _cu("cu://x", str(src))
+    k1 = compute_tu_cache_key(
+        extractor_name="clang-source", extractor_version="0.1",
+        compile_unit=cu, public_header_roots=[str(inc)],
+    )
+    (inc / "h.h").write_text("int x; int y;\n")
+    k2 = compute_tu_cache_key(
+        extractor_name="clang-source", extractor_version="0.1",
+        compile_unit=cu, public_header_roots=[str(inc)],
+    )
+    assert k1 and k2 and k1 != k2
+
+
+def test_cache_key_uses_path_string_for_missing_root(tmp_path: Path) -> None:
+    # A missing header root contributes only its path string (the source being
+    # readable is what makes the TU cacheable; an absent root is not a miss-maker).
+    src = tmp_path / "a.cpp"
+    src.write_text("int a;\n")
+    cu = _cu("cu://x", str(src))
+    key = compute_tu_cache_key(
+        extractor_name="clang-source", extractor_version="0.1",
+        compile_unit=cu, public_header_roots=["does/not/exist.h"],
+    )
+    assert key is not None
 
 
 # -- driver ------------------------------------------------------------------
