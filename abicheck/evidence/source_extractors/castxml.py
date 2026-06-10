@@ -62,13 +62,22 @@ def _unredact_home(value: str) -> str:
     redacted) by mirroring how redaction applied it — replacing ``~`` with the
     current home. A no-op when there is no ``~`` (live/unredacted units) or no
     resolvable home.
+
+    Only a ``~`` that stands in for a home *directory* is expanded: the
+    placeholder is always either the whole token or immediately followed by a
+    path separator (``/`` or ``\\``). A ``~`` followed by anything else is left
+    untouched, so Windows 8.3 short names such as ``RUNNER~1`` in a freshly
+    created temp path are never mangled into ``RUNNER<home>1``.
     """
     if "~" not in value:
         return value
     home = os.path.expanduser("~")
     if not home or home == "~":
         return value
-    return value.replace("~", home)
+    # Expand `~` only when it is the redaction placeholder for a home directory:
+    # the whole token, or followed by a path separator. `re.sub` with a function
+    # replacement avoids backslashes in `home` being read as group references.
+    return re.sub(r"~(?=[\\/]|$)", lambda _m: home, value)
 
 
 def _basename(path: str) -> str:
@@ -138,6 +147,15 @@ def _std_flag(standard: str, cc_id: str) -> list[str]:
 #: treated as a joined ``-include`` or its operand will be dropped.
 _GNU_FORCED_INCLUDE_OPTS = frozenset({"-include", "-imacros"})
 _GNU_SEPARATE_INCLUDE_OPTS = frozenset({"-include", "-imacros", "-include-pch"})
+#: Value-taking toolchain flags already normalized into the structured
+#: ``sysroot``/``target_triple`` fields and re-emitted by
+#: :func:`build_castxml_command` as ``--sysroot=``/``--target=``. They must NOT
+#: be carried through from ``abi_relevant_flags``: the adapter records only the
+#: bare option token for the split spelling (``-isysroot /sdk`` → just
+#: ``-isysroot``, operand dropped), so re-appending it yields a dangling option
+#: that swallows the following argv token (``--sysroot=/sdk … -isysroot -o``).
+#: Mirrors ``_TOOLCHAIN_PATH_FLAG_PREFIXES`` in ``adapters/base.py``.
+_STRUCTURED_TOOLCHAIN_FLAG_PREFIXES = ("--sysroot", "-isysroot", "--target", "-target")
 #: MSVC/clang-cl forced-include options in their separate-operand spelling
 #: (``/FI file`` or ``-FI file``); the joined ``/FIfile`` form is handled by
 #: prefix. (https://learn.microsoft.com/cpp/build/reference/fi-name-forced-include-file)
@@ -159,6 +177,13 @@ def _replay_extra_flags(
     seen = set(already)
     out: list[str] = []
     for flag in compile_unit.abi_relevant_flags:
+        # Value-taking toolchain flags (sysroot/target) are already normalized
+        # into the structured fields and re-emitted by build_castxml_command. The
+        # adapter records only the bare option token for the split spelling
+        # (operand dropped), so carrying it through would dangle and swallow the
+        # next argv token. Skip them here (see prefix-set docstring).
+        if flag.startswith(_STRUCTURED_TOOLCHAIN_FLAG_PREFIXES):
+            continue
         if flag not in seen:
             out.append(flag)
             seen.add(flag)

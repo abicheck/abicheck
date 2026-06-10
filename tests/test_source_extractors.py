@@ -233,6 +233,32 @@ def test_build_command_preserves_include_pch_operand() -> None:
     assert cmd[cmd.index("-include-pch") + 1] == "pch.h"
 
 
+def test_build_command_drops_split_sysroot_flag_carried_without_operand() -> None:
+    # A split `-isysroot /sdk` is normalized into compile_unit.sysroot (emitted
+    # as --sysroot=/sdk), but extract_abi_relevant_flags records only the bare
+    # `-isysroot` token (operand dropped). Carrying it through would dangle and
+    # swallow the following `-o`, breaking castxml replay (Codex review #335, P2).
+    cmd = build_castxml_command(
+        _cu(
+            sysroot="/sdk",
+            target_triple="x86_64-linux-gnu",
+            abi_relevant_flags=["-isysroot", "--target", "-fvisibility=hidden"],
+        ),
+        Path("a.cpp"),
+        Path("o.xml"),
+    )
+    # Structured fields are emitted in combined form once...
+    assert "--sysroot=/sdk" in cmd
+    assert "--target=x86_64-linux-gnu" in cmd
+    # ...and the dangling bare toolchain tokens are NOT re-appended.
+    assert "-isysroot" not in cmd
+    assert "--target" not in cmd
+    # A genuine non-toolchain abi flag is still carried through.
+    assert "-fvisibility=hidden" in cmd
+    # The output option keeps its operand (nothing swallowed `-o`).
+    assert cmd[cmd.index("-o") + 1] == "o.xml"
+
+
 def test_extract_runs_in_compile_unit_directory(tmp_path: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
     # Mock castxml so we can assert the subprocess runs with cwd=directory and
     # exercise the extract() success path without the tool installed.
@@ -269,7 +295,23 @@ def test_unredact_home_expands_tilde() -> None:
     home = os.path.expanduser("~")
     assert _unredact_home("~/build/foo.cpp") == f"{home}/build/foo.cpp"
     assert _unredact_home("-I~/include") == f"-I{home}/include"  # joined flag
+    assert _unredact_home("~\\build\\foo.cpp") == f"{home}\\build\\foo.cpp"  # win sep
+    assert _unredact_home("~") == home  # whole-token placeholder
     assert _unredact_home("-std=c++17") == "-std=c++17"  # no tilde → untouched
+
+
+def test_unredact_home_leaves_embedded_short_name_tilde() -> None:
+    # Only a `~` standing in for a home *directory* (whole token or followed by a
+    # path separator) is expanded. A `~` embedded mid-component — e.g. a Windows
+    # 8.3 short name like RUNNER~1 in a freshly created temp path — is NOT a
+    # redaction placeholder and must be left intact, or the path is corrupted
+    # into RUNNER<home>1 and the castxml output file cannot be opened
+    # (Windows CI lane failure, #335).
+    from abicheck.evidence.source_extractors.castxml import _unredact_home
+
+    temp = "C:\\Users\\RUNNER~1\\AppData\\Local\\Temp\\tmpabcd.xml"
+    assert _unredact_home(temp) == temp
+    assert _unredact_home("/home/foo/RUNNER~1bar") == "/home/foo/RUNNER~1bar"
 
 
 def test_extract_unredacts_home_for_replay(tmp_path: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
