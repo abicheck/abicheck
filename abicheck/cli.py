@@ -1862,8 +1862,13 @@ def compare_cmd(
 
     if old_evidence is not None or new_evidence is not None or evidence_mode != "off":
         from .cli_evidence import collect_compare_evidence
+        # `compare` has no -p/--compile-db option, so any header AST it parses is
+        # parsed WITHOUT the build's ABI-relevant flags. Passing headers via -H
+        # does not change that — so header-parse-context drift is disclosed (not
+        # suppressed) whenever the new pack carries ABI-relevant flags. Re-dump
+        # with `dump -p` to capture build context into the snapshot itself.
         ev_changes = collect_compare_evidence(old_evidence, new_evidence, evidence_mode, new,
-                                              old_parsed_with_context=bool(old_h or old_headers_only))
+                                              old_parsed_with_context=False)
         extra_changes = (extra_changes or []) + ev_changes if ev_changes else extra_changes
 
     apply_patterns = pattern_verdicts or explain_patterns  # --explain implies on

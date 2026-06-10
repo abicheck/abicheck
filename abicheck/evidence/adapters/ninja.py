@@ -36,7 +36,12 @@ from pathlib import Path
 from ...build_context import _extract_flags
 from ..build_evidence import BuildEvidence, CompileUnit, Generator
 from ..redaction import DEFAULT_REDACTION, RedactionPolicy
-from .base import compile_unit_id, detect_language, extract_abi_relevant_flags
+from .base import (
+    compile_unit_id,
+    derive_build_options,
+    detect_language,
+    extract_abi_relevant_flags,
+)
 
 
 class NinjaAdapter:
@@ -79,6 +84,9 @@ class NinjaAdapter:
             cu = self._compile_unit(raw)
             if cu is not None:
                 ev.compile_units.append(cu)
+        # Project per-unit ABI flags into diffable build options (same as the
+        # compile-DB adapter) so a Ninja-only pack still reports flag drift.
+        ev.build_options = derive_build_options(ev.compile_units)
 
         graph_text = self._resolve_graph(ev)
         if graph_text:

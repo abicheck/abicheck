@@ -24,7 +24,7 @@ from __future__ import annotations
 import hashlib
 from typing import Protocol, runtime_checkable
 
-from ..build_evidence import BuildEvidence
+from ..build_evidence import BuildEvidence, BuildOption, CompileUnit
 
 # Source-file extension → normalized language token.
 _LANG_BY_EXT: dict[str, str] = {
@@ -107,4 +107,42 @@ def extract_abi_relevant_flags(argv: list[str]) -> list[str]:
             key = body.split("=", 1)[0]
             if key in _ABI_RELEVANT_DEFINES:
                 out.append(arg)
+    return out
+
+
+def derive_build_options(compile_units: list[CompileUnit]) -> list[BuildOption]:
+    """Project each compile unit's ABI-relevant flags into global BuildOptions.
+
+    Shared by every adapter so a pack always carries the ``build_options`` the
+    build-evidence diff (ADR-029 D9) reads — without this, a Ninja-only pack
+    would record per-unit ``abi_relevant_flags`` but no diffable options. The
+    unit fields are already redacted, so no further redaction happens here.
+    De-duplicated across units so a flag shared by 100 TUs records once.
+    """
+    out: list[BuildOption] = []
+    seen: set[tuple[str, str]] = set()
+
+    def add(key: str, value: str, *, raw: str) -> None:
+        sig = (key, value)
+        if sig in seen:
+            return
+        seen.add(sig)
+        out.append(BuildOption(key=key, value=value, abi_relevant=True, raw=raw))
+
+    for cu in compile_units:
+        if cu.standard:
+            # Per-language key so a mixed C/C++ project keeps std:C and std:CXX
+            # distinct (otherwise one masks the other in the diff).
+            std_key = f"std:{cu.language}" if cu.language else "std"
+            add(std_key, cu.standard, raw=f"-std={cu.standard}")
+        if cu.target_triple:
+            add("target", cu.target_triple, raw=cu.target_triple)
+        if cu.sysroot:
+            add("sysroot", cu.sysroot, raw=cu.sysroot)
+        for flag in cu.abi_relevant_flags:
+            if flag.startswith(("-D", "/D")):
+                key, _, value = flag[2:].partition("=")
+                add(f"define:{key}", value, raw=flag)
+            elif not flag.startswith("-std="):
+                add(flag.split("=", 1)[0], flag, raw=flag)
     return out
