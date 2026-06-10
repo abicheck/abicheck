@@ -152,15 +152,19 @@ def _build_elf_namespace(n_funcs: int) -> tuple[AbiSnapshot, AbiSnapshot]:
     emulate a stripped library where only the mangled symbol is known.
     """
 
-    def mangled(ns: str, leaf: str, i: int) -> str:
-        # _ZN12experimental4sortEi style; the exact mangling need not be valid
-        # for the demangler to attempt it — it just must start with _Z.
-        return f"_ZN{len(ns)}{ns}{len(leaf)}{leaf}{i}Ei"
+    def mangled(ns: str, i: int) -> str:
+        # Valid Itanium nested-name mangling: _ZN<len>ns<len>leafEi, e.g.
+        # _ZN12experimental5fn123Ei -> experimental::fn123(int). The index must
+        # be inside the encoded identifier (and counted in its length) or the
+        # name is invalid and c++filt leaves it unchanged, so the namespace
+        # detectors would never see the `experimental` segment.
+        leaf = f"fn{i}"
+        return f"_ZN{len(ns)}{ns}{len(leaf)}{leaf}Ei"
 
     old_funcs, new_funcs = [], []
     for i in range(n_funcs):
         ns = "experimental" if i % 2 == 0 else "stablelib"
-        m = mangled(ns, "fn", i)
+        m = mangled(ns, i)
         old_funcs.append(
             Function(name=m, mangled=m, return_type="int", visibility=Visibility.PUBLIC)
         )

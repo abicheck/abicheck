@@ -30,6 +30,7 @@ opens files as given and does not sanitize or restrict path traversal.
 """
 from __future__ import annotations
 
+import bisect
 import hashlib
 import logging
 import os
@@ -396,15 +397,18 @@ def _match_size(
 def _fuzzy_partners(
     old_fp: FunctionFingerprint,
     new_by_size: dict[int, list[tuple[str, FunctionFingerprint]]],
+    sorted_sizes: list[int],
     used_new: set[str],
     name_filter: Callable[[str, str], bool] | None = None,
 ) -> list[tuple[str, FunctionFingerprint]]:
     """New candidates whose size is within tolerance of ``old_fp`` and unused.
 
-    Only the sizes inside the tolerance window are scanned (via *new_by_size*)
-    instead of every new candidate, so a symbol with a distinctive size pays
-    O(window) rather than O(all candidates). The caller only needs to know
-    whether there is exactly one partner, so we stop after finding a second.
+    Only the *populated* candidate sizes inside the tolerance window are
+    scanned: a binary search over the pre-sorted size keys picks the window so
+    cost depends on the number of candidate sizes, not the symbol's byte size
+    (a multi-MB function would otherwise sweep millions of empty sizes). The
+    caller only needs to know whether there is exactly one partner, so we stop
+    after finding a second.
     """
     partners: list[tuple[str, FunctionFingerprint]] = []
     size = old_fp.size
@@ -414,7 +418,9 @@ def _fuzzy_partners(
     # [size*(1-tol), size/(1-tol)]; widen by 1 each way to absorb int rounding.
     lo = int(size * (1 - _SIZE_TOLERANCE_RATIO)) - 1
     hi = int(size / (1 - _SIZE_TOLERANCE_RATIO)) + 1
-    for s in range(lo, hi + 1):
+    left = bisect.bisect_left(sorted_sizes, lo)
+    right = bisect.bisect_right(sorted_sizes, hi)
+    for s in sorted_sizes[left:right]:
         for new_name, new_fp in new_by_size.get(s, ()):
             if new_name in used_new or new_fp.size == 0:
                 continue
@@ -444,10 +450,13 @@ def _match_fuzzy(
 ) -> list[RenameCandidate]:
     """Pass 3: fuzzy size matches (within tolerance, unique match only)."""
     out: list[RenameCandidate] = []
+    # Sorted size keys, computed once, so each old symbol's tolerance window is
+    # a binary-search slice over populated sizes rather than a dense range.
+    sorted_sizes = sorted(new_by_size)
     for old_name, old_fp in sorted(old_candidates.items()):
         if old_name in matched_old or old_fp.size == 0:
             continue
-        fuzzy_matches = _fuzzy_partners(old_fp, new_by_size, used_new, name_filter)
+        fuzzy_matches = _fuzzy_partners(old_fp, new_by_size, sorted_sizes, used_new, name_filter)
         if len(fuzzy_matches) == 1:
             new_name, new_fp = fuzzy_matches[0]
             out.append(RenameCandidate(
