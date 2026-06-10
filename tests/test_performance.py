@@ -14,6 +14,7 @@ from abicheck.checker import Change, ChangeKind, DiffResult, Verdict, compare
 from abicheck.model import (
     AbiSnapshot,
     Function,
+    Param,
     RecordType,
     TypeField,
     Visibility,
@@ -212,6 +213,84 @@ class TestManyChangeKinds:
 
         sarif = to_sarif_str(diff)
         assert len(sarif) > 0
+
+
+# ===========================================================================
+# 4b. Type-churn scaling regression guard
+# ===========================================================================
+
+
+def _build_type_churn(n_funcs: int) -> tuple[AbiSnapshot, AbiSnapshot]:
+    """Snapshot pair where every public function takes a *changed* struct by
+    pointer.
+
+    Unlike the add/remove workload above, this exercises the post-processing
+    detectors that relate each type change back to the functions that use it
+    (affected-symbol enrichment, opaque/pointer-only filtering, namespace
+    detection). That O(functions x types) path — not the core symbol diff — is
+    what makes ``compare`` blow up on large real libraries
+    (see docs/development/performance.md). Mirrors
+    ``scripts/benchmark_scaling.py``'s ``type_churn`` scenario.
+    """
+    n_types = max(50, n_funcs // 20)
+    types_old, types_new = [], []
+    for i in range(n_types):
+        base = [
+            TypeField(name="a", type="int", offset_bits=0),
+            TypeField(name="b", type="int", offset_bits=32),
+        ]
+        grown = base + [TypeField(name="c", type="int", offset_bits=64)]
+        types_old.append(RecordType(name=f"Type_{i}", kind="struct", size_bits=64, fields=base))
+        types_new.append(RecordType(name=f"Type_{i}", kind="struct", size_bits=96, fields=grown))
+    funcs = [
+        Function(
+            name=f"use_Type_{i % n_types}_{i}",
+            mangled=f"_Z4use_{i}P6Type_{i % n_types}",
+            return_type="int",
+            params=[Param(name="p", type=f"Type_{i % n_types} *")],
+            visibility=Visibility.PUBLIC,
+        )
+        for i in range(n_funcs)
+    ]
+    old = AbiSnapshot(library="libperf.so", version="1.0", functions=list(funcs), types=types_old)
+    new = AbiSnapshot(library="libperf.so", version="2.0", functions=list(funcs), types=types_new)
+    return old, new
+
+
+class TestTypeChurnScaling:
+    """Guard the realistic hot path that the add/remove benchmark does not hit.
+
+    Thresholds are deliberately generous: these tests catch a catastrophic
+    regression (e.g. a detector becoming truly O(n^2)), not a few-percent
+    drift, so they stay stable across CI runner speeds.
+    """
+
+    def test_type_churn_2000_functions_completes(self) -> None:
+        old, new = _build_type_churn(2000)
+        start = time.monotonic()
+        result = compare(old, new)
+        elapsed = time.monotonic() - start
+
+        # ~3.5s locally; allow a wide margin for slow shared CI runners.
+        assert elapsed < 30.0, f"type-churn compare took {elapsed:.2f}s, expected < 30s"
+        assert result.verdict == Verdict.BREAKING
+        assert len(result.changes) > 0
+
+    def test_type_churn_scaling_stays_subquadratic(self) -> None:
+        import math
+
+        timings: list[tuple[int, float]] = []
+        for n in (1000, 2000):
+            old, new = _build_type_churn(n)
+            start = time.monotonic()
+            compare(old, new)
+            timings.append((n, max(time.monotonic() - start, 1e-3)))
+
+        (n1, t1), (n2, t2) = timings
+        exponent = math.log(t2 / t1) / math.log(n2 / n1)
+        # True quadratic would be ~2.0; current behaviour is ~1.3. A regression
+        # to genuine O(n^2) (exponent >= 1.9) should fail this guard.
+        assert exponent < 1.9, f"compare scaling exponent {exponent:.2f} regressed toward O(n^2)"
 
 
 # ===========================================================================

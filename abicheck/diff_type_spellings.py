@@ -105,7 +105,10 @@ def _match_functions_by_mangled(
         yield from _emit_function_slot_changes(old_fns[key], new_fns[key])
 
     # Fallback: pair functions whose mangled name changed (char8_t/_BitInt/_Atomic).
-    leftover_old = [f for k, f in old_fns.items() if k not in set(new_fns)]
+    # Precompute the new-key set once — rebuilding it inside the comprehension
+    # is O(functions) per element, i.e. quadratic.
+    new_keys = set(new_fns)
+    leftover_old = [f for k, f in old_fns.items() if k not in new_keys]
     leftover_new = [f for k, f in new_fns.items() if k not in matched_new]
     if leftover_old and leftover_new:
         yield from _pair_leftover_functions_by_name(leftover_old, leftover_new)

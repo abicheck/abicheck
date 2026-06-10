@@ -13,6 +13,7 @@ Each must run with Python 3.10+ and the package installed in dev mode
 | `check_mutation_score.py` | Mutation-score baseline-drift gate. Counts surviving `mutmut` mutants in the detector core and compares to `SURVIVOR_BASELINE`. Parser unit-tested in `tests/test_mutation_score_gate.py`. | CI (`mutation.yml`: weekly / `mutation` label / dispatch). |
 | `gen_examples_docs.py` | Regenerates `docs/examples/caseNN_*.md` from `examples/case*/README.md`, and the generated regions (headline, verdict distribution, case index) of `examples/README.md` from `ground_truth.json`. `--check` gates both. Run after adding a new example case. | manual |
 | `benchmark_comparison.py` | Benchmarks abicheck vs ABICC / libabigail across the `examples/` catalog. | manual |
+| `benchmark_scaling.py` | Synthetic scaling benchmark for the `compare` pipeline — sweeps snapshot sizes, times `compare()`, reports a scaling exponent. Pure-Python (no compiler/castxml). Non-gating by default; `--max-seconds` / `--max-exponent` turn it into a gate. See `docs/development/performance.md`. | CI (`performance.yml`: weekly / `performance` label / dispatch); manual |
 | `demo_libz.py` | End-to-end demo on libz, used by the `e2e` CI job. | CI (`e2e` job) |
 | `extract_bundle_manifest.py` | Extracts a manifest from multi-library bundles (cases 90–93). | manual |
 
