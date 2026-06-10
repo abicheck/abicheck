@@ -173,6 +173,16 @@ def test_linker_keeps_overloads_distinct() -> None:
     assert surface.unmatched["decls_without_symbol"] == ["ns::f"]
 
 
+def test_linker_matches_unmangled_c_exports() -> None:
+    # A C / extern "C" decl has no mangled_name; the export is the plain name.
+    # It must still map, not be reported as unmatched (Codex review #335).
+    tu = SourceAbiTu(functions=[_entity("foo", "function", mangled="")])
+    surface = link_source_abi([tu], exported_symbols=["foo"])
+    assert surface.mappings["source_decl_to_binary_symbol"]["foo"] == "foo"
+    assert surface.unmatched["symbols_without_decl"] == []
+    assert surface.unmatched["decls_without_symbol"] == []
+
+
 def test_linker_excludes_non_public_entities() -> None:
     tu = SourceAbiTu(
         functions=[
@@ -302,6 +312,58 @@ def test_diff_source_decl_binary_symbol_mismatch() -> None:
     )
     changes = diff_source_abi(old, new)
     assert [c.kind for c in changes] == [ChangeKind.SOURCE_DECL_BINARY_SYMBOL_MISMATCH]
+
+
+def test_diff_mismatch_on_removed_decl_with_stale_export() -> None:
+    # Declaration removed from the new surface but its symbol is still exported
+    # (stale export). L0 sees no removed symbol, so L4 must flag it (Codex #335).
+    old = _surface(
+        mappings={
+            "source_decl_to_binary_symbol": {"foo": "foo"},
+            "source_type_to_debug_type": {},
+            "public_header_to_target": {},
+        }
+    )
+    new = _surface(
+        mappings={
+            "source_decl_to_binary_symbol": {},
+            "source_type_to_debug_type": {},
+            "public_header_to_target": {},
+        },
+        roots={
+            "exported_symbols": ["foo"],
+            "public_header_declarations": [],
+            "forced_public": [],
+        },
+    )
+    changes = diff_source_abi(old, new)
+    assert [c.kind for c in changes] == [ChangeKind.SOURCE_DECL_BINARY_SYMBOL_MISMATCH]
+    assert changes[0].old_value == "foo"
+
+
+def test_diff_no_mismatch_when_decl_and_export_both_removed() -> None:
+    # Declaration AND its export are gone → L0 owns the breaking finding; L4 must
+    # not double-report (the symbol is not in the new exported set).
+    old = _surface(
+        mappings={
+            "source_decl_to_binary_symbol": {"foo": "foo"},
+            "source_type_to_debug_type": {},
+            "public_header_to_target": {},
+        }
+    )
+    new = _surface(
+        mappings={
+            "source_decl_to_binary_symbol": {},
+            "source_type_to_debug_type": {},
+            "public_header_to_target": {},
+        },
+        roots={
+            "exported_symbols": [],
+            "public_header_declarations": [],
+            "forced_public": [],
+        },
+    )
+    assert diff_source_abi(old, new) == []
 
 
 def test_diff_odr_source_conflict_only_when_new() -> None:

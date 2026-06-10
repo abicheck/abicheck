@@ -133,9 +133,14 @@ def link_source_abi(
                 key = entity.identity()
                 if key:
                     identity_to_qname[key] = entity.qualified_name or key
-                    if entity.mangled_name and entity.mangled_name in exported:
-                        decl_to_symbol[key] = entity.mangled_name
-                        matched_symbols.add(entity.mangled_name)
+                    # The exported binary symbol is the mangled name for C++, or
+                    # the plain qualified name for C / extern "C" declarations
+                    # whose extractor leaves mangled_name empty. Matching on
+                    # either avoids false "unmatched" evidence for C libraries.
+                    export_sym = entity.mangled_name or entity.qualified_name
+                    if export_sym and export_sym in exported:
+                        decl_to_symbol[key] = export_sym
+                        matched_symbols.add(export_sym)
                     else:
                         decl_to_symbol.setdefault(key, "")
 

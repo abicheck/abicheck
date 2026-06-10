@@ -245,25 +245,37 @@ def _diff_templates(old: SourceAbiSurface, new: SourceAbiSurface) -> list[Change
 def _diff_mappings(old: SourceAbiSurface, new: SourceAbiSurface) -> list[Change]:
     old_map = old.mappings.get("source_decl_to_binary_symbol", {})
     new_map = new.mappings.get("source_decl_to_binary_symbol", {})
+    new_exports = set(new.roots.get("exported_symbols", []))
     changes: list[Change] = []
-    for name in sorted(set(old_map) & set(new_map)):
-        had = bool(old_map.get(name))
-        has = bool(new_map.get(name))
-        if had and not has:
-            changes.append(
-                Change(
-                    kind=ChangeKind.SOURCE_DECL_BINARY_SYMBOL_MISMATCH,
-                    symbol=name,
-                    description=(
-                        f"Public declaration {name!r} no longer maps to an "
-                        "exported symbol. If the export was removed, the artifact "
-                        "diff (L0) emits the authoritative breaking finding."
-                    ),
-                    old_value=str(old_map.get(name)),
-                    new_value="",
-                    source_location=f"[{EVIDENCE_TIER_L4}]",
-                )
+
+    def _emit(name: str, old_sym: str) -> None:
+        changes.append(
+            Change(
+                kind=ChangeKind.SOURCE_DECL_BINARY_SYMBOL_MISMATCH,
+                symbol=name,
+                description=(
+                    f"Public declaration {name!r} no longer maps to an exported "
+                    "symbol. If the export was removed, the artifact diff (L0) "
+                    "emits the authoritative breaking finding."
+                ),
+                old_value=old_sym,
+                new_value="",
+                source_location=f"[{EVIDENCE_TIER_L4}]",
             )
+        )
+
+    # Declaration still present but its mapping was lost (declared, not exported).
+    for name in sorted(set(old_map) & set(new_map)):
+        if bool(old_map.get(name)) and not bool(new_map.get(name)):
+            _emit(name, str(old_map.get(name)))
+
+    # Declaration removed from the new surface while its symbol is still exported
+    # (stale export): L0 sees no removed symbol, so without this the source/API
+    # regression would be missed entirely.
+    for name in sorted(set(old_map) - set(new_map)):
+        sym = old_map.get(name) or ""
+        if sym and sym in new_exports:
+            _emit(name, sym)
     return changes
 
 
