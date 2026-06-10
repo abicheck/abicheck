@@ -383,9 +383,10 @@ def _export_policy_from_argv(argv: list[str]) -> tuple[str, str]:
 
     Handles the common GNU/Clang spellings whether passed directly or via
     ``-Wl,`` / ``-Xlinker``: ``--version-script=FILE`` / ``--version-script FILE``
-    and ``-soname NAME`` / ``-h NAME`` / ``-soname=NAME``. These structured
-    fields feed the export-policy diff (ADR-029 D9); raw argv alone is not
-    indexed there.
+    and ``-soname NAME`` / ``-h NAME`` / ``-soname=NAME``, plus the MSVC/clang-cl
+    module-definition file ``/DEF:FILE`` / ``/DEF FILE`` (recorded as the
+    ``version_script`` export map). These structured fields feed the
+    export-policy diff (ADR-029 D9); raw argv alone is not indexed there.
     """
     tokens = _linker_tokens(argv)
     version_script = ""
@@ -393,9 +394,16 @@ def _export_policy_from_argv(argv: list[str]) -> tuple[str, str]:
     i = 0
     while i < len(tokens):
         tok = tokens[i]
+        upper = tok.upper()
         if tok.startswith("--version-script="):
             version_script = tok.split("=", 1)[1]
         elif tok == "--version-script" and i + 1 < len(tokens):
+            version_script = tokens[i + 1]
+            i += 2
+            continue
+        elif upper.startswith("/DEF:"):  # MSVC module-definition (not /DEFAULTLIB:)
+            version_script = tok.split(":", 1)[1]
+        elif upper == "/DEF" and i + 1 < len(tokens):
             version_script = tokens[i + 1]
             i += 2
             continue

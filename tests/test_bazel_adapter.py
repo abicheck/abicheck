@@ -444,6 +444,37 @@ def test_bazel_link_export_policy_xlinker_spelling():
     assert lu.soname == "libfoo.so.1"
 
 
+def test_bazel_link_export_policy_msvc_def_file():
+    # MSVC/clang-cl module-definition file is the Windows export map and must
+    # populate version_script so DLL export-policy drift is diffable (ADR-029 D9).
+    aquery = json.dumps({
+        "artifacts": [{"id": "1", "pathFragmentId": "10"}],
+        "actions": [{
+            "mnemonic": "CppLink",
+            "arguments": ["link.exe", "/DLL", "/DEF:exports.def", "/DEFAULTLIB:libcmt", "/OUT:foo.dll"],
+            "primaryOutputId": "1",
+        }],
+        "pathFragments": [{"id": "10", "label": "foo.dll"}],
+    })
+    lu = BazelAdapter(aquery=aquery).collect().link_units[0]
+    assert lu.version_script == "exports.def"   # /DEFAULTLIB: must not be mistaken for it
+    assert lu.kind == "shared_library"
+
+
+def test_bazel_link_export_policy_msvc_def_split_form():
+    aquery = json.dumps({
+        "artifacts": [{"id": "1", "pathFragmentId": "10"}],
+        "actions": [{
+            "mnemonic": "CppLink",
+            "arguments": ["link.exe", "/DLL", "/DEF", "exports.def", "/OUT:foo.dll"],
+            "primaryOutputId": "1",
+        }],
+        "pathFragments": [{"id": "10", "label": "foo.dll"}],
+    })
+    lu = BazelAdapter(aquery=aquery).collect().link_units[0]
+    assert lu.version_script == "exports.def"
+
+
 def test_bazel_live_query_disabled_without_workspace():
     # No pre-captured input and no workspace/target → nothing to query, no crash.
     ev = BazelAdapter(allow_query=True).collect()
