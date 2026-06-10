@@ -226,6 +226,93 @@ def test_ast_mapping_excludes_private_header_decls() -> None:
     assert "priv" not in all_names
 
 
+def _record_ast(tag: str, members: list[dict]) -> dict:
+    """A clang AST with one record (``tag`` = class/struct) in a public header."""
+    return {
+        "kind": "TranslationUnitDecl",
+        "inner": [{
+            "kind": "CXXRecordDecl", "name": "C", "tagUsed": tag,
+            "loc": {"file": "include/foo.h", "line": 1},
+            "inner": members,
+        }],
+    }
+
+
+def _method(name: str, *, default: str | None = None, body: bool = False) -> dict:
+    inner: list[dict] = []
+    if default is not None:
+        inner.append({
+            "kind": "ParmVarDecl", "name": "x", "type": {"qualType": "int"},
+            "init": "c", "inner": [{"kind": "IntegerLiteral", "value": default}],
+        })
+    if body:
+        inner.append({"kind": "CompoundStmt", "inner": []})
+    return {
+        "kind": "CXXMethodDecl", "name": name, "loc": {"line": 3},
+        "type": {"qualType": "int (int)"}, "inner": inner,
+    }
+
+
+def test_class_default_private_members_excluded() -> None:
+    # A `class` defaults to private; a member before any `public:` is hidden and
+    # must not reach the L4 surface (Codex #339 P2).
+    ast = _record_ast("class", [_method("secret", default="1", body=True)])
+    tu = source_abi_from_clang_ast(ast, _cu(), ["include/foo.h"], "t")
+    assert all(e.qualified_name != "C::secret" for e in tu.all_entities())
+
+
+def test_struct_default_public_members_emitted() -> None:
+    # A `struct` defaults to public, so its members are part of the surface.
+    ast = _record_ast("struct", [_method("visible", default="1", body=True)])
+    tu = source_abi_from_clang_ast(ast, _cu(), ["include/foo.h"], "t")
+    assert any(e.qualified_name == "C::visible" for e in tu.functions)
+    assert any(e.qualified_name == "C::visible" for e in tu.inline_bodies)
+
+
+def test_access_spec_section_switches_visibility() -> None:
+    # `public:` exposes following members; `private:` hides them again.
+    ast = _record_ast("class", [
+        {"kind": "AccessSpecDecl", "access": "public"},
+        _method("api", default="1"),
+        {"kind": "AccessSpecDecl", "access": "private"},
+        _method("impl", default="2"),
+    ])
+    tu = source_abi_from_clang_ast(ast, _cu(), ["include/foo.h"], "t")
+    names = {e.qualified_name for e in tu.functions}
+    assert "C::api" in names
+    assert "C::impl" not in names
+
+
+def test_explicit_per_decl_access_honored() -> None:
+    # Newer clang stamps `access` on each member decl; a private one is dropped
+    # even in a struct (default public).
+    ast = _record_ast("struct", [
+        dict(_method("api", default="1"), access="public"),
+        dict(_method("impl", default="2"), access="private"),
+    ])
+    tu = source_abi_from_clang_ast(ast, _cu(), ["include/foo.h"], "t")
+    names = {e.qualified_name for e in tu.functions}
+    assert "C::api" in names
+    assert "C::impl" not in names
+
+
+def test_members_of_private_nested_class_excluded() -> None:
+    # A private nested class is not public, so its (struct-default-public)
+    # members stay off the surface too.
+    nested = {
+        "kind": "CXXRecordDecl", "name": "Impl", "tagUsed": "struct",
+        "loc": {"line": 4}, "inner": [_method("run", default="1")],
+    }
+    ast = _record_ast("class", [
+        {"kind": "AccessSpecDecl", "access": "private"},
+        nested,
+    ])
+    tu = source_abi_from_clang_ast(ast, _cu(), ["include/foo.h"], "t")
+    names = {e.qualified_name for e in tu.all_entities()}
+    assert "C::Impl" not in names
+    assert "C::Impl::run" not in names
+
+
 def test_ast_mapping_template_not_double_counted_as_function() -> None:
     # The templated pattern FunctionDecl inside FunctionTemplateDecl must not also
     # surface as a plain function entity.

@@ -607,6 +607,29 @@ def _collect_files(node: Any, files: set[str] | None = None) -> set[str]:
     return files
 
 
+#: C++ access specifiers that hide a member from consumers. A private/protected
+#: member cannot be called or its inline body relied on, so it must stay off the
+#: L4 public surface even when declared in a public header (Codex review #339,
+#: P2). ``""``/``"none"``/``"public"`` mean "no restriction" (free functions,
+#: namespace-scope decls, public members).
+_NON_PUBLIC_ACCESS = frozenset({"private", "protected"})
+
+
+def _is_accessible(access: str) -> bool:
+    """Whether a decl with this C++ member-access is reachable by consumers."""
+    return access not in _NON_PUBLIC_ACCESS
+
+
+def _default_member_access(record: dict[str, Any]) -> str:
+    """Default member access for a record's body before any ``AccessSpecDecl``.
+
+    ``class`` defaults to private; ``struct``/``union`` default to public
+    (clang records this as ``tagUsed``). Determines the access of members that
+    appear before the first explicit ``public:``/``private:`` section.
+    """
+    return "private" if record.get("tagUsed") == "class" else "public"
+
+
 def _walk(
     node: dict[str, Any],
     ctx: _ClassifyContext,
@@ -614,6 +637,7 @@ def _walk(
     *,
     scope: list[str],
     current_file: str,
+    access: str = "public",
 ) -> str:
     """Pre-order traversal that emits public entities, tracking file + scope.
 
@@ -623,24 +647,32 @@ def _walk(
     sibling — otherwise a sibling that omits ``loc.file`` after a nested file
     switch is attributed to the wrong header, flipping public/private
     classification (CodeRabbit review).
+
+    ``access`` is the C++ member access that applies to ``node`` (established by
+    the enclosing record's default + ``AccessSpecDecl`` sections, or carried on
+    the node itself in newer clang). A private/protected member is never emitted
+    and its whole subtree stays non-public, matching the castxml path (Codex
+    review #339, P2).
     """
     if not isinstance(node, dict):
         return current_file
     file = _node_file(node, current_file)
     kind = node.get("kind")
     name = node.get("name", "") or ""
+    accessible = _is_accessible(access)
 
-    if kind in _FUNCTION_NODE_KINDS and name:
+    if kind in _FUNCTION_NODE_KINDS and name and accessible:
         _emit_function(node, ctx, tu, scope, file)
     elif kind in _TEMPLATE_NODE_KINDS and name:
         # The template's body is captured whole in its fingerprint; do not
         # descend into the templated pattern, or its inner FunctionDecl/Record
         # would be re-emitted as a duplicate non-template entity.
-        _emit_template(node, ctx, tu, scope, file)
+        if accessible:
+            _emit_template(node, ctx, tu, scope, file)
         return file
-    elif kind == "VarDecl" and name and node.get("constexpr"):
+    elif kind == "VarDecl" and name and node.get("constexpr") and accessible:
         _emit_constexpr(node, ctx, tu, scope, file)
-    elif kind in ("CXXRecordDecl", "EnumDecl") and name:
+    elif kind in ("CXXRecordDecl", "EnumDecl") and name and accessible:
         _emit_type(node, ctx, tu, scope, file)
 
     # Descend, extending the scope name stack for namespaces/records so members
@@ -648,12 +680,34 @@ def _walk(
     child_scope = scope
     if kind in _SCOPE_NODE_KINDS and name:
         child_scope = [*scope, name]
+    # Access applying to this node's children: a private/protected subtree stays
+    # hidden wholesale; a record opens with its tag default; any other context
+    # (namespace, linkage spec, TU) imposes no restriction.
+    if not accessible:
+        running_access = access
+    elif kind == "CXXRecordDecl":
+        running_access = _default_member_access(node)
+    else:
+        running_access = "public"
     for child in node.get("inner", []):
-        if isinstance(child, dict):
-            # Thread the last file seen in each child's subtree forward so the
-            # next sibling inherits it (clang's sticky loc.file), not just the
-            # child's own loc.file.
-            file = _walk(child, ctx, tu, scope=child_scope, current_file=file)
+        if not isinstance(child, dict):
+            continue
+        if accessible and child.get("kind") == "AccessSpecDecl":
+            # `public:` / `private:` / `protected:` switches the running access
+            # for subsequent siblings in this record body.
+            running_access = child.get("access", running_access)
+            continue
+        # Thread the last file seen in each child's subtree forward so the next
+        # sibling inherits it (clang's sticky loc.file). Honor an explicit
+        # per-decl `access` when clang emits one, else the running section access.
+        file = _walk(
+            child,
+            ctx,
+            tu,
+            scope=child_scope,
+            current_file=file,
+            access=child.get("access", running_access),
+        )
     return file
 
 
