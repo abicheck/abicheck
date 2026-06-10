@@ -174,6 +174,45 @@ def test_release_risk_only_library_counts_as_review():
     assert should_post(model, "changes") is True
 
 
+def test_release_bundle_findings_register_as_change():
+    # A clean per-library release that breaks only at the bundle/matrix level
+    # must still register a change so the comment is posted.
+    report = {
+        "verdict": "BREAKING",
+        "old_dir": "/o",
+        "new_dir": "/n",
+        "libraries": [
+            {
+                "library": "libok.so",
+                "verdict": "COMPATIBLE",
+                "breaking": 0,
+                "source_breaks": 0,
+                "compatible_additions": 0,
+            },
+        ],
+        "bundle_verdict": "BREAKING",
+        "bundle_findings": [
+            {"kind": "soname_mismatch", "symbol": "libfoo", "description": "x"},
+            {"kind": "soname_mismatch", "symbol": "libbar", "description": "y"},
+        ],
+        "matrix_verdict": "API_BREAK",
+        "matrix_findings": [
+            {"kind": "macro_guarded", "symbol": "FOO", "description": "z"},
+        ],
+        "unmatched_old": [],
+        "unmatched_new": [],
+    }
+    model = build_model(report)
+    # 2 bundle breaks, 1 matrix review, 0 per-library changes
+    assert model.counts == (2, 1, 0)
+    assert should_post(model, "changes") is True
+    # the per-library library count excludes the synthetic global rows
+    assert model.subject == "1 library"
+    body = render_comment(model, sha="abc1234")
+    assert "bundle checks" in body
+    assert "build-config matrix" in body
+
+
 def test_release_added_libraries_rendered():
     report = {
         "verdict": "COMPATIBLE",

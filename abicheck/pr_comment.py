@@ -56,6 +56,16 @@ _SEVERITY_BUCKET = {
     "unknown": "review",
 }
 
+# Verdict strings → reviewer bucket, for release-global findings (bundle /
+# probe-matrix) that carry no per-item severity, only a section verdict.
+_VERDICT_BUCKET = {
+    "BREAKING": "breaking",
+    "API_BREAK": "review",
+    "COMPATIBLE_WITH_RISK": "review",
+    "COMPATIBLE": "safe",
+    "NO_CHANGE": "safe",
+}
+
 # Per-detail row caps for the "standard" level (full = uncapped).
 _STANDARD_ROW_CAP = 25
 _SAFE_SYMBOLS_PER_KIND = 12
@@ -214,6 +224,35 @@ def _from_appcompat(report: dict[str, object]) -> CommentModel:
     )
 
 
+def _append_release_global_row(
+    rows: list[tuple[str, str, int, int, int]],
+    name: str,
+    verdict: object,
+    findings: object,
+) -> None:
+    """Fold a release-global check (bundle / probe-matrix) into the rows.
+
+    These findings live at the top level of the report and fold into the
+    release verdict; without this a clean per-library release that breaks only
+    at the bundle/matrix level would report zero changes and skip the comment.
+    The findings carry no per-item severity, so they are bucketed by the
+    section's own verdict.
+    """
+    if not isinstance(findings, list) or not findings:
+        return
+    bucket = _VERDICT_BUCKET.get(str(verdict or ""), "review")
+    n = len(findings)
+    rows.append(
+        (
+            name,
+            str(verdict or "?"),
+            n if bucket == "breaking" else 0,
+            n if bucket == "review" else 0,
+            n if bucket == "safe" else 0,
+        )
+    )
+
+
 def _from_release(report: dict[str, object]) -> CommentModel:
     rows: list[tuple[str, str, int, int, int]] = []
     libraries = report.get("libraries")
@@ -234,12 +273,24 @@ def _from_release(report: dict[str, object]) -> CommentModel:
                     _as_int(lib.get("compatible_additions")),
                 )
             )
+    n_libs = len(rows)
+    _append_release_global_row(
+        rows,
+        "(bundle checks)",
+        report.get("bundle_verdict"),
+        report.get("bundle_findings"),
+    )
+    _append_release_global_row(
+        rows,
+        "(build-config matrix)",
+        report.get("matrix_verdict"),
+        report.get("matrix_findings"),
+    )
     removed = report.get("unmatched_old")
     added = report.get("unmatched_new")
-    n = len(rows)
     return CommentModel(
         mode="release",
-        subject=f"{n} librar{'y' if n == 1 else 'ies'}",
+        subject=f"{n_libs} librar{'y' if n_libs == 1 else 'ies'}",
         old_label=_basename(report.get("old_dir", "old")),
         new_label=_basename(report.get("new_dir", "new")),
         policy="strict_abi",
