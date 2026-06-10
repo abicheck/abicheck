@@ -336,3 +336,88 @@ def test_compare_graph_identical(tmp_path) -> None:
 def test_compare_graph_missing_graph_errors(tmp_path) -> None:
     res = CliRunner().invoke(main, ["compare-graph", str(tmp_path / "nope.json"), str(tmp_path / "nope.json")])
     assert res.exit_code != 0
+
+
+def _collect_pack(tmp_path, name: str, *, two_units: bool = False) -> str:
+    """Run `collect-evidence --source-graph summary` and return the pack dir."""
+    src = tmp_path / f"{name}.cpp"
+    src.write_text("int x(){return 1;}\n")
+    entries = [{
+        "directory": str(tmp_path), "file": str(src),
+        "command": f"c++ -std=c++20 -fvisibility=hidden -c {src} -o {name}.o",
+    }]
+    if two_units:
+        src2 = tmp_path / f"{name}2.cpp"
+        src2.write_text("int y(){return 2;}\n")
+        entries.append({
+            "directory": str(tmp_path), "file": str(src2),
+            "command": f"c++ -std=c++20 -c {src2} -o {name}2.o",
+        })
+    cdb = tmp_path / f"{name}_cc.json"
+    cdb.write_text(json.dumps(entries))
+    out = tmp_path / f"{name}.evidence"
+    res = CliRunner().invoke(main, [
+        "collect-evidence", "--compile-db", str(cdb),
+        "--source-graph", "summary", "-o", str(out),
+    ])
+    assert res.exit_code == 0, res.output
+    return str(out)
+
+
+def test_compare_graph_accepts_pack_directories_and_shows_removals(tmp_path) -> None:
+    # The richer pack as OLD and the smaller as NEW exercises the removed-node /
+    # removed-edge rendering branches of the text output.
+    big = _collect_pack(tmp_path, "big", two_units=True)
+    small = _collect_pack(tmp_path, "small", two_units=False)
+    res = CliRunner().invoke(main, ["compare-graph", big, small])
+    assert res.exit_code == 0, res.output
+    assert "- node" in res.output or "- edge" in res.output
+
+
+def test_compare_graph_pack_without_graph_errors(tmp_path) -> None:
+    # A pack collected without --source-graph has no L5 graph → actionable error.
+    cdb = tmp_path / "cc.json"
+    src = tmp_path / "z.cpp"
+    src.write_text("int z(){return 0;}\n")
+    cdb.write_text(json.dumps([{
+        "directory": str(tmp_path), "file": str(src),
+        "command": f"c++ -c {src} -o z.o",
+    }]))
+    out = tmp_path / "nograph.evidence"
+    assert CliRunner().invoke(main, [
+        "collect-evidence", "--compile-db", str(cdb), "-o", str(out),
+    ]).exit_code == 0
+    res = CliRunner().invoke(main, ["compare-graph", str(out), str(out)])
+    assert res.exit_code != 0
+    assert "no L5 source graph" in res.output
+
+
+def test_compare_graph_malformed_json_errors(tmp_path) -> None:
+    bad = tmp_path / "bad.json"
+    bad.write_text("{not valid json")
+    res = CliRunner().invoke(main, ["compare-graph", str(bad), str(bad)])
+    assert res.exit_code != 0
+    assert "Cannot read source graph" in res.output
+
+
+def test_compare_graph_non_object_json_errors(tmp_path) -> None:
+    arr = tmp_path / "arr.json"
+    arr.write_text("[1, 2, 3]")
+    res = CliRunner().invoke(main, ["compare-graph", str(arr), str(arr)])
+    assert res.exit_code != 0
+    assert "must contain a JSON object" in res.output
+
+
+def test_collect_evidence_summary_without_build_is_partial(tmp_path) -> None:
+    # --source-graph summary with no build adapter inputs yields an empty graph;
+    # the L5 coverage row must read PARTIAL (ran, produced nothing), not PRESENT.
+    out = tmp_path / "empty.evidence"
+    res = CliRunner().invoke(main, [
+        "collect-evidence", "--source-graph", "summary", "-o", str(out),
+    ])
+    assert res.exit_code == 0, res.output
+    pack = EvidencePack.load(out)
+    assert pack.source_graph is not None
+    l5 = pack.manifest.coverage_for(EvidenceLayer.L5_SOURCE_GRAPH)
+    assert l5 is not None
+    assert l5.status == CoverageStatus.PARTIAL
