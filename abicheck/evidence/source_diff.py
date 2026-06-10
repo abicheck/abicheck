@@ -316,6 +316,12 @@ def _diff_mappings(old: SourceAbiSurface, new: SourceAbiSurface) -> list[Change]
     old_map = old.mappings.get("source_decl_to_binary_symbol", {})
     new_map = new.mappings.get("source_decl_to_binary_symbol", {})
     new_exports = set(new.roots.get("exported_symbols", []))
+    # The set of symbols still provided by *some* new declaration. Reconciling
+    # by symbol (not by decl identity) keeps this diff correct across differing
+    # build roots: an unmangled decl's identity can change between old and new
+    # checkouts even when the API and its exported symbol are unchanged, so a
+    # disappeared identity key alone must not imply a lost mapping.
+    new_mapped_symbols = {sym for sym in new_map.values() if sym}
     changes: list[Change] = []
 
     def _emit(name: str, old_sym: str) -> None:
@@ -334,17 +340,22 @@ def _diff_mappings(old: SourceAbiSurface, new: SourceAbiSurface) -> list[Change]
             )
         )
 
-    # Declaration still present but its mapping was lost (declared, not exported).
+    # Declaration still present (same identity) but its mapping was lost
+    # (declared, not exported) — and no other new decl picked the symbol up.
     for name in sorted(set(old_map) & set(new_map)):
-        if bool(old_map.get(name)) and not bool(new_map.get(name)):
-            _emit(name, str(old_map.get(name)))
+        old_sym = str(old_map.get(name) or "")
+        if old_sym and not bool(new_map.get(name)) and old_sym not in new_mapped_symbols:
+            _emit(name, old_sym)
 
-    # Declaration removed from the new surface while its symbol is still exported
-    # (stale export): L0 sees no removed symbol, so without this the source/API
-    # regression would be missed entirely.
+    # Declaration's identity gone from the new surface while its symbol is still
+    # exported (stale export): L0 sees no removed symbol, so without this the
+    # source/API regression would be missed. Guarded by ``not in
+    # new_mapped_symbols`` so a decl that merely changed identity (e.g. a
+    # build-root path shift) but still provides the symbol is not falsely
+    # flagged.
     for name in sorted(set(old_map) - set(new_map)):
         sym = old_map.get(name) or ""
-        if sym and sym in new_exports:
+        if sym and sym in new_exports and sym not in new_mapped_symbols:
             _emit(name, sym)
     return changes
 

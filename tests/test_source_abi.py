@@ -205,33 +205,42 @@ def test_linker_keeps_unmangled_overloads_distinct() -> None:
     assert _entity("FOO", "constexpr", value="1").identity() == "FOO"
 
 
-def test_identity_disambiguates_unmangled_same_signature_by_header() -> None:
-    # castxml reports a constructor with the bare class name and no scope, so
-    # a::Widget(int) and b::Widget(int) share qualified_name AND signature_hash.
-    # identity() folds in the declaring header path to keep them distinct, so a
-    # default-arg change on one is detected and not lost to a collision (Codex P2).
-    def _ctor(header: str, value: str) -> SourceEntity:
+def test_identity_is_build_root_independent() -> None:
+    # identity() must NOT include the declaring header path: castxml reports an
+    # absolute build path that differs between old/new checkout roots, so baking
+    # it in would make an unchanged decl look removed. Same name+signature from
+    # two different roots must share one identity (Codex P2).
+    def _ctor(header: str) -> SourceEntity:
         return SourceEntity(
             id=f"decl://{header}",
             kind="function",
-            qualified_name="Widget",
+            qualified_name="foo",
             mangled_name="",
             signature_hash="sig",
-            value=value,
-            source_location=SourceLocation(path=header, line=1, origin="PUBLIC_HEADER"),
+            source_location=SourceLocation(path=header, origin="PUBLIC_HEADER"),
             visibility="public_header",
         )
 
-    a_old, b_old = _ctor("a/widget.h", "x=1"), _ctor("b/widget.h", "x=9")
-    assert a_old.identity() != b_old.identity()
-    old = _surface(reachable_declarations=[a_old, b_old])
-    # Only a::Widget's default changes; b::Widget is untouched.
-    new = _surface(
-        reachable_declarations=[_ctor("a/widget.h", "x=2"), _ctor("b/widget.h", "x=9")]
+    assert _ctor("/tmp/old/include/foo.h").identity() == _ctor(
+        "/tmp/new/include/foo.h"
+    ).identity()
+
+
+def test_diff_mappings_robust_to_build_root_path_shift() -> None:
+    # An unmangled extern-C decl `foo` keeps exporting the same symbol across two
+    # build roots. The decl's identity may shift (different header paths), but the
+    # mapping diff reconciles by exported symbol, so no false
+    # source_decl_binary_symbol_mismatch is emitted (Codex review #335, P2).
+    old = _surface(
+        roots={"exported_symbols": ["foo"]},
+        mappings={"source_decl_to_binary_symbol": {"foo#sigOLD": "foo"}},
     )
-    changes = diff_source_abi(old, new)
-    assert [c.kind for c in changes] == [ChangeKind.DEFAULT_ARGUMENT_CHANGED]
-    assert changes[0].old_value == "x=1" and changes[0].new_value == "x=2"
+    new = _surface(
+        roots={"exported_symbols": ["foo"]},
+        mappings={"source_decl_to_binary_symbol": {"foo#sigNEW": "foo"}},
+    )
+    kinds = [c.kind for c in diff_source_abi(old, new)]
+    assert ChangeKind.SOURCE_DECL_BINARY_SYMBOL_MISMATCH not in kinds
 
 
 def test_diff_default_arg_change_on_unmangled_overload() -> None:

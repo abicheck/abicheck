@@ -129,26 +129,33 @@ class SourceEntity:
         changes (which the diff detects via ``body_hash``/``value``).
 
         When no mangled name is present, fold in the type-level
-        ``signature_hash`` **and the declaring header path** so unmangled
-        declarations stay distinct. castxml omits a mangled name for some
-        declarations — notably constructors — and reports them with the *bare*
-        class name (``Widget``), without namespace/class scope. So overloaded
-        constructors (``Widget(int)`` vs ``Widget(double)``) need the signature,
-        and same-named, same-signature constructors from different scopes
-        (``a::Widget(int)`` vs ``b::Widget(int)``, declared in ``a/widget.h`` and
-        ``b/widget.h``) need the header path — otherwise they collapse onto one
-        key and the linker/diff silently drops one. The header path is stable
-        across versions (unlike a line number), so a body/default-argument edit
-        still matches old↔new; the signature/scope changing reads as add+remove,
-        exactly as a mangled-name change would. Entities with no signature
-        (macros, ``constexpr`` constants, types) fall back to the bare qualified
-        name.
+        ``signature_hash`` so unmangled overloads stay distinct. castxml omits a
+        mangled name for some declarations — notably constructors — so
+        overloaded public constructors (``Widget(int)`` and ``Widget(double)``,
+        both bare-named ``Widget``) would otherwise collapse onto one key and
+        silently drop an overload from the linked surface / diff. The signature
+        hash is stable across body/default-argument edits, so those
+        modifications are still matched (and detected via ``body_hash``/
+        ``value``); a true signature change reads as add+remove, exactly as a
+        mangled-name change would. Entities with no signature (macros,
+        ``constexpr`` constants, types) fall back to the bare qualified name.
+
+        The identity deliberately does **not** include the declaring header
+        path: castxml reports an absolute build path, which differs between two
+        checkout/build roots (old vs new) even for an unchanged declaration, so
+        baking it in would make every unmangled identity build-root-dependent
+        and emit false ``source_decl_binary_symbol_mismatch`` findings. The
+        residual cost is that two unmangled, same-signature declarations sharing
+        a bare name in different scopes (``a::Widget(int)`` vs ``b::Widget(int)``)
+        collapse onto one key — a rare case, accepted until a backend that
+        carries fully-qualified names (Clang, phase 5) replaces the bare name.
+        The symbol-mapping diff reconciles by exported symbol (not identity), so
+        it stays correct across build roots regardless.
         """
         if self.mangled_name:
             return self.mangled_name
         if self.signature_hash:
-            scope = self.source_location.path if self.source_location else ""
-            return f"{self.qualified_name}#{self.signature_hash}#{scope}"
+            return f"{self.qualified_name}#{self.signature_hash}"
         return self.qualified_name
 
     def to_dict(self) -> dict[str, Any]:
