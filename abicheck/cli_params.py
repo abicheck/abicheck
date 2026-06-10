@@ -36,8 +36,13 @@ class PolicyFileParam(click.ParamType):
         from .policies import builtin_policy_names
         from .policy_file import builtin_policy_path
 
-        p = Path(value)
-        if p.exists() or builtin_policy_path(str(value)) is not None:
+        value_str = str(value)
+        builtin = builtin_policy_path(value_str)
+        if builtin is not None:
+            return builtin
+
+        p = Path(value_str)
+        if p.exists():
             return p
         names = ", ".join(builtin_policy_names())
         raise click.BadParameter(

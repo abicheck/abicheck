@@ -79,11 +79,15 @@ _VALID_BASE_POLICIES = VALID_BASE_POLICIES  # re-export alias for backward compa
 def builtin_policy_path(name: str) -> Path | None:
     """Resolve a bare built-in policy name (e.g. ``"security"``) to its file.
 
-    Returns the packaged ``abicheck/policies/<name>.yaml`` path if it exists,
-    else ``None``. Used so ``--policy-file security`` is turnkey without the
-    user shipping their own YAML.
+    Returns the packaged ``abicheck/policies/<name>.yaml`` path if *name*
+    exactly matches a shipped policy stem, else ``None``. Only bare names are
+    accepted so path-like values cannot traverse or accidentally resolve as
+    built-ins.
     """
-    from .policies import POLICIES_DIR
+    from .policies import POLICIES_DIR, builtin_policy_names
+
+    if name not in builtin_policy_names():
+        return None
 
     candidate = POLICIES_DIR / f"{name}.yaml"
     return candidate if candidate.is_file() else None
@@ -147,14 +151,13 @@ class PolicyFile:
                 "Install it with: pip install pyyaml"
             ) from exc
 
-        # Allow a bare built-in policy name (e.g. "security") to resolve to the
-        # packaged policy of that name. Gate on is_file() (not exists()) so a
-        # *directory* named e.g. "security/" in the CWD doesn't shadow the
-        # builtin and then make read_text() raise IsADirectoryError.
-        if not path.is_file():
-            builtin = builtin_policy_path(str(path))
-            if builtin is not None:
-                path = builtin
+        # A bare built-in policy name (e.g. "security") must resolve to the
+        # packaged policy before consulting the working directory. Otherwise an
+        # attacker-controlled checkout can shadow the built-in with a local file
+        # named "security" and silently downgrade security-hardening verdicts.
+        builtin = builtin_policy_path(str(path))
+        if builtin is not None:
+            path = builtin
 
         raw: Any = yaml.safe_load(path.read_text(encoding="utf-8"))
         if raw is None:
