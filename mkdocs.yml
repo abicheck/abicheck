@@ -58,6 +58,7 @@ nav:
     - Architecture: concepts/architecture.md
     - Limitations: concepts/limitations.md
     - Evidence & Detectability: concepts/evidence-and-detectability.md
+    - Source & Build Evidence Packs: concepts/evidence-pack.md
     - Change Kinds: reference/change-kinds.md
     - API Surface Intelligence: concepts/api-surface-intelligence.md
     - Exit Codes: reference/exit-codes.md

@@ -26,7 +26,11 @@ import click
 
 from .checker import DiffResult, LibraryMetadata, compare
 from .cli_audit import echo_filtered_surface, echo_pattern_modulations
-from .cli_options import adr027_compare_options
+from .cli_options import (
+    adr027_compare_options,
+    evidence_compare_options,
+    evidence_dump_option,
+)
 from .cli_params import POLICY_FILE_PARAM
 from .compat.abicc_dump_import import import_abicc_perl_dump, looks_like_perl_dump
 from .compat.cli import compat_group
@@ -172,8 +176,15 @@ def _provenance_timestamp(source_date_epoch: str | None) -> str:
 def _write_snapshot_output(
     snap: AbiSnapshot,
     output: Path | None,
+    evidence_dir: Path | None = None,
 ) -> None:
-    """Serialize snapshot and write to file or stdout."""
+    """Serialize snapshot and write to file or stdout.
+
+    When *evidence_dir* is given, attach the EvidencePack reference first (D8).
+    """
+    if evidence_dir is not None:
+        from .cli_evidence import attach_evidence_pack
+        attach_evidence_pack(snap, evidence_dir)
     result = snapshot_to_json(snap)
     if output:
         _safe_write_output(output, result)
@@ -705,6 +716,7 @@ def _populate_dependency_info(
               help="Opaque build identifier (CI run ID, build number, etc.).")
 @click.option("--no-git", "no_git", is_flag=True, default=False,
               help="Do not auto-detect git commit SHA.")
+@evidence_dump_option  # ADR-028: --evidence
 def dump_cmd(so_path: Path, headers: tuple[Path, ...], includes: tuple[Path, ...],
              public_headers: tuple[Path, ...], public_header_dirs: tuple[Path, ...],
              version: str, lang: str, output: Path | None,
@@ -719,7 +731,8 @@ def dump_cmd(so_path: Path, headers: tuple[Path, ...], includes: tuple[Path, ...
              debug_roots: tuple[Path, ...],
              debuginfod: bool, debuginfod_url: str | None,
              verbose: bool,
-             git_tag: str | None, build_id: str | None, no_git: bool) -> None:
+             git_tag: str | None, build_id: str | None, no_git: bool,
+             evidence_dir: Path | None = None) -> None:
     """Dump ABI snapshot of a shared library to JSON.
 
     \b
@@ -781,6 +794,7 @@ def dump_cmd(so_path: Path, headers: tuple[Path, ...], includes: tuple[Path, ...
             output,
             public_headers,
             public_header_dirs,
+            evidence_dir,
         )
         return
 
@@ -824,7 +838,7 @@ def dump_cmd(so_path: Path, headers: tuple[Path, ...], includes: tuple[Path, ...
         _populate_dependency_info(snap, so_path, list(search_paths), sysroot, ld_library_path)
 
     _stamp_provenance(snap, git_tag=git_tag, build_id=build_id, no_git=no_git)
-    _write_snapshot_output(snap, output)
+    _write_snapshot_output(snap, output, evidence_dir)
 
 
 def _handle_non_elf_dump(
@@ -842,6 +856,7 @@ def _handle_non_elf_dump(
     output: Path | None,
     public_headers: tuple[Path, ...] = (),
     public_header_dirs: tuple[Path, ...] = (),
+    evidence_dir: Path | None = None,
 ) -> None:
     """Handle PE/Mach-O native dump path and output writing."""
     if follow_deps:
@@ -858,7 +873,7 @@ def _handle_non_elf_dump(
     except (AbicheckError, RuntimeError, OSError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
     _stamp_provenance(snap, git_tag=git_tag, build_id=build_id, no_git=no_git)
-    _write_snapshot_output(snap, output)
+    _write_snapshot_output(snap, output, evidence_dir)
 
 
 def _resolve_build_context_flags(
@@ -1131,60 +1146,6 @@ def _load_probe_matrix_changes(
     old_matrix = load_matrix_snapshot(probe_matrix_old)
     new_matrix = load_matrix_snapshot(probe_matrix_new)
     return list(diff_matrix(old_matrix, new_matrix))
-
-
-def _run_compare_pair(
-    old_input: Path,
-    new_input: Path,
-    old_headers: list[Path],
-    new_headers: list[Path],
-    old_includes: list[Path],
-    new_includes: list[Path],
-    old_version: str,
-    new_version: str,
-    lang: str,
-    suppress: Path | None,
-    policy: str,
-    policy_file_path: Path | None,
-    old_pdb_path: Path | None,
-    new_pdb_path: Path | None,
-    scope_to_public_surface: bool = False,
-    pattern_verdicts: bool = False,
-) -> tuple[DiffResult, AbiSnapshot, AbiSnapshot]:
-    """Run compare for one old/new pair and return result + resolved snapshots."""
-    # Follow GNU ld linker scripts up front so metadata/dependency analysis use
-    # the resolved DSO, not the text script.
-    old_input, old_fmt = _normalize_binary_input(old_input)
-    new_input, new_fmt = _normalize_binary_input(new_input)
-
-    old = _resolve_input(
-        old_input,
-        old_headers,
-        old_includes,
-        old_version,
-        lang,
-        is_elf=True if old_fmt == "elf" else None,
-        pdb_path=old_pdb_path,
-    )
-    new = _resolve_input(
-        new_input,
-        new_headers,
-        new_includes,
-        new_version,
-        lang,
-        is_elf=True if new_fmt == "elf" else None,
-        pdb_path=new_pdb_path,
-    )
-
-    suppression, pf = _load_suppression_and_policy(suppress, policy, policy_file_path)
-    result = compare(
-        old, new, suppression=suppression, policy=policy, policy_file=pf,
-        scope_to_public_surface=scope_to_public_surface,
-        pattern_verdicts=pattern_verdicts,
-    )
-    result.old_metadata = _collect_metadata(old_input)
-    result.new_metadata = _collect_metadata(new_input)
-    return result, old, new
 
 
 def _canonical_library_key(path: Path) -> str:
@@ -1712,6 +1673,7 @@ def _finalize_compare_result(
               help="Enable debuginfod network resolution for debug info (opt-in).")
 @click.option("--debuginfod-url", "debuginfod_url", default=None,
               help="debuginfod server URL (overrides DEBUGINFOD_URLS env var).")
+@evidence_compare_options  # ADR-028/029: --old-evidence/--new-evidence/--evidence-mode
 @adr027_compare_options  # ADR-027: --pattern-verdicts/--explain-patterns/--surface-metrics
 @click.option("-v", "--verbose", is_flag=True, default=False,
               help="Enable verbose/debug output.")
@@ -1750,6 +1712,7 @@ def compare_cmd(
     explain_patterns: bool,
     surface_metrics: bool,
     verbose: bool,
+    old_evidence: Path | None = None, new_evidence: Path | None = None, evidence_mode: str = "off",
     probe_matrix_old: Path | None = None,
     probe_matrix_new: Path | None = None,
 ) -> None:
@@ -1897,6 +1860,12 @@ def compare_cmd(
 
     extra_changes = _load_probe_matrix_changes(probe_matrix_old, probe_matrix_new)
 
+    if old_evidence is not None or new_evidence is not None or evidence_mode != "off":
+        from .cli_evidence import collect_compare_evidence
+        ev_changes = collect_compare_evidence(old_evidence, new_evidence, evidence_mode, new,
+                                              old_parsed_with_context=bool(old_h or old_headers_only))
+        extra_changes = (extra_changes or []) + ev_changes if ev_changes else extra_changes
+
     apply_patterns = pattern_verdicts or explain_patterns  # --explain implies on
     result = compare(
         old, new, suppression=suppression, policy=policy, policy_file=pf,
@@ -1930,7 +1899,6 @@ def compare_cmd(
 
     _announce_exit_scheme(severity_explicitly_set, sev_config, fmt=fmt, stat=stat)
     _exit_with_severity_or_verdict(result, sev_config, severity_explicitly_set)
-
 
 
 # ── ABICC compat subcommands (implementation in abicheck.compat) ─────────────
@@ -1971,8 +1939,6 @@ main.add_command(compat_group)
 
 
 
-
-
 # ---------------------------------------------------------------------------
 # Sub-command modules. Imported for side-effect so their @main.command(...)
 # decorators register the commands on the Click group above. They sit in
@@ -1983,6 +1949,7 @@ from . import (  # noqa: E402  — must run after `main` and helpers are defined
     cli_baseline,  # noqa: F401  — registers baseline
     cli_compare_release,  # noqa: F401  — registers compare-release
     cli_debian_symbols,  # noqa: F401  — registers debian-symbols
+    cli_evidence,  # noqa: F401  — registers collect-evidence
     cli_plugin,  # noqa: F401  — registers plugin-check
     cli_probe,  # noqa: F401  — registers probe (run, compare)
     cli_stack,  # noqa: F401  — registers deps, stack-check

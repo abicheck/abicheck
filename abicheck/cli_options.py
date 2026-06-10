@@ -64,3 +64,53 @@ def adr027_compare_options(func: F) -> F:
         "the pattern_modulations ledger; reversible.",
     )(func)
     return func
+
+
+def evidence_dump_option(func: F) -> F:
+    """Add the ADR-028 ``--evidence`` attach option to ``dump``."""
+    from pathlib import Path
+
+    func = click.option(
+        "--evidence", "evidence_dir",
+        type=click.Path(exists=True, file_okay=False, path_type=Path),
+        default=None,
+        help="Attach an existing EvidencePack directory (from `abicheck "
+        "collect-evidence`) to the snapshot. Stores a lightweight, "
+        "content-addressed reference; the pack itself stays out-of-band.",
+    )(func)
+    return func
+
+
+def evidence_compare_options(func: F) -> F:
+    """Add the ADR-028/ADR-029 evidence options to ``compare``.
+
+    ``--old-evidence`` / ``--new-evidence`` attach packs whose build evidence is
+    diffed into the verdict (never overriding artifact-backed findings, ADR-028
+    D3); ``--evidence-mode`` selects the inline collection mode (ADR-033 D2).
+    Applied bottom-up, so listed in reverse of displayed order.
+    """
+    from pathlib import Path
+
+    func = click.option(
+        "--evidence-mode", "evidence_mode",
+        type=click.Choice(["off", "build", "source-changed", "source-target", "graph-summary", "graph-full"]),
+        default="off", show_default=True,
+        help="Inline evidence collection mode (ADR-033 D2). 'off' uses only "
+        "explicitly-provided --old/--new-evidence packs. Other modes are "
+        "recognized and reported in the coverage table but not yet collected "
+        "inline in this release.",
+    )(func)
+    func = click.option(
+        "--new-evidence", "new_evidence",
+        type=click.Path(exists=True, file_okay=False, path_type=Path), default=None,
+        help="EvidencePack directory for the new side.",
+    )(func)
+    func = click.option(
+        "--old-evidence", "old_evidence",
+        type=click.Path(exists=True, file_okay=False, path_type=Path), default=None,
+        help="EvidencePack directory for the old side (from `abicheck "
+        "collect-evidence`). Adds L3 build-context findings and an "
+        "evidence-coverage table; never overrides artifact-backed ABI "
+        "verdicts (ADR-028 D3).",
+    )(func)
+    return func

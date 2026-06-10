@@ -109,6 +109,7 @@ module = [
     "abicheck.cli_compare_release",
     "abicheck.cli_debian_symbols",
     "abicheck.cli_baseline",
+    "abicheck.cli_evidence",
     "abicheck.cli_plugin",
     "abicheck.cli_probe",
     "abicheck.cli_stack",

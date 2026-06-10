@@ -26,6 +26,7 @@ if TYPE_CHECKING:
     from .dwarf_advanced import AdvancedDwarfMetadata
     from .dwarf_metadata import DwarfMetadata
     from .elf_metadata import ElfMetadata
+    from .evidence.model import EvidencePackRef
     from .macho_metadata import MachoMetadata
     from .pe_metadata import PeMetadata
     from .sycl_metadata import SyclMetadata
@@ -561,6 +562,14 @@ class AbiSnapshot:
     # Keyword-only (placed after all other fields) to prevent accidental positional binding.
     # Used by binary-only fallback detectors that need lightweight disassembly.
     source_path: str | None = field(default=None, kw_only=True)
+
+    # ADR-028 (schema v7) — optional reference to an out-of-band EvidencePack
+    # carrying L3/L4/L5 source/build/graph evidence. Only a lightweight
+    # reference (content hash + coverage summary) lives in the snapshot; the
+    # heavyweight pack is content-addressed on disk and versions independently
+    # (EVIDENCE_PACK_VERSION). None when no evidence was collected. Old readers
+    # ignore this optional field (ADR-015 backward-compatibility).
+    evidence_pack: EvidencePackRef | None = field(default=None, kw_only=True)
 
     # Runtime-only provenance qualifier (not serialized — popped in
     # snapshot_to_dict). True when ``from_headers`` was *inferred* for a legacy

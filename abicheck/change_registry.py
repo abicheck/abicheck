@@ -909,4 +909,40 @@ REGISTRY = ChangeKindRegistry([
               "(EXPORT_ONLY origin) rose between versions — a packaging-hygiene "
               "regression: a symbol was exported without a corresponding public "
               "header. Informational; emitted only with --surface-metrics."),
+
+    # ── Build-context evidence (ADR-028 L3 / ADR-029 D9) ────────────────────
+    # Produced by the build-evidence diff over two EvidencePacks. Per ADR-028
+    # D3 these are never BREAKING on their own: a build change that actually
+    # breaks the ABI is caught by the artifact diff (L0/L1/L2) as a separate,
+    # artifact-backed finding; these explain and localize it.
+    _E("build_context_changed", _C,
+       impact="Non-ABI-relevant build metadata changed between versions (e.g. "
+              "include-path ordering, output paths, or generator version). "
+              "Informational quality signal; no ABI impact on its own."),
+    _E("abi_relevant_build_flag_changed", _R,
+       impact="An ABI-affecting compiler/build option changed (e.g. -std, "
+              "-fabi-version, _GLIBCXX_USE_CXX11_ABI, -fvisibility, -fpack-struct, "
+              "--target/-mabi, sysroot). The artifact diff decides whether the "
+              "shipped ABI actually broke; this flags the elevated risk and "
+              "localizes the cause for review."),
+    _E("header_parse_context_drift", _R,
+       impact="The public-header AST was parsed under a different context (flags, "
+              "defines, include paths) than the real build used. Header-derived "
+              "API facts may be unreliable; align the parse context (e.g. via "
+              "compile_commands.json) to restore confidence."),
+    _E("toolchain_version_changed", _R,
+       impact="The compiler, standard library, or sysroot/SDK changed between "
+              "versions. Layout, mangling, and codegen can shift even with "
+              "identical sources; review for ABI-affecting toolchain drift."),
+    _E("generated_file_dependency_unstable", _R,
+       impact="The build graph indicates a generated-file dependency risk "
+              "(e.g. missing or unstable generator dependencies). Generated "
+              "public declarations may differ from what was analyzed; rebuild "
+              "determinism is not guaranteed."),
+    _E("link_export_policy_changed", _R,
+       impact="The export policy changed — version script, export map, or .def "
+              "file. The set of exported symbols may have shifted. When this "
+              "actually removes or alters exports, the artifact diff (L0) emits "
+              "the corresponding BREAKING findings separately; this kind explains "
+              "and localizes them and does not escalate on its own."),
 ])

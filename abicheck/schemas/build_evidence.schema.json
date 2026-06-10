@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://napetrov.github.io/abicheck/schemas/build_evidence.schema.json",
+  "title": "abicheck BuildEvidence (L3)",
+  "description": "Schema for build/build_evidence.json inside an EvidencePack: abicheck's build-system-neutral normalized L3 build context (ADR-029). External build-system formats (CMake File API, Ninja -t output, Bazel proto) are normalized into this model; they never become the stable public schema.",
+  "type": "object",
+  "required": ["schema_version"],
+  "additionalProperties": true,
+  "properties": {
+    "schema_version": {"type": "integer", "minimum": 1},
+    "source_root": {"type": "string"},
+    "build_root": {"type": "string"},
+    "generators": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "kind": {"type": "string"},
+          "version": {"type": "string"},
+          "generator": {"type": "string"}
+        },
+        "additionalProperties": true
+      }
+    },
+    "toolchains": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id"],
+        "properties": {
+          "id": {"type": "string"},
+          "compiler_id": {"type": "string"},
+          "version": {"type": "string"},
+          "language": {"type": "string"},
+          "target_triple": {"type": "string"}
+        },
+        "additionalProperties": true
+      }
+    },
+    "targets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id"],
+        "properties": {
+          "id": {"type": "string"},
+          "name": {"type": "string"},
+          "kind": {"type": "string", "enum": ["shared_library", "static_library", "object_library", "executable", "interface", "unknown"]},
+          "build_system": {"type": "string"},
+          "source_files": {"type": "array", "items": {"type": "string"}},
+          "public_headers": {"type": "array", "items": {"type": "string"}},
+          "private_headers": {"type": "array", "items": {"type": "string"}},
+          "outputs": {"type": "array", "items": {"type": "string"}},
+          "dependencies": {"type": "array", "items": {"type": "string"}},
+          "visibility": {"type": "string"},
+          "confidence": {"type": "string", "enum": ["high", "reduced", "unknown"]}
+        },
+        "additionalProperties": true
+      }
+    },
+    "compile_units": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id"],
+        "properties": {
+          "id": {"type": "string"},
+          "source": {"type": "string"},
+          "output": {"type": "string"},
+          "target_id": {"type": "string"},
+          "language": {"type": "string"},
+          "standard": {"type": "string"},
+          "defines": {"type": "object", "additionalProperties": {"type": "string"}},
+          "include_paths": {"type": "array", "items": {"type": "string"}},
+          "abi_relevant_flags": {"type": "array", "items": {"type": "string"}}
+        },
+        "additionalProperties": true
+      }
+    },
+    "link_units": {"type": "array", "items": {"type": "object", "additionalProperties": true}},
+    "generated_files": {"type": "array", "items": {"type": "string"}},
+    "build_options": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["key"],
+        "properties": {
+          "key": {"type": "string"},
+          "value": {"type": "string"},
+          "abi_relevant": {"type": "boolean"},
+          "scope": {"type": "string"},
+          "raw": {"type": "string"}
+        },
+        "additionalProperties": true
+      }
+    },
+    "diagnostics": {"type": "array", "items": {"type": "string"}},
+    "raw_artifacts": {"type": "array", "items": {"type": "string"}}
+  }
+}
