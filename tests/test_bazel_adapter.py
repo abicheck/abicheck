@@ -286,6 +286,42 @@ def test_bazel_live_query_oserror_diagnostic(monkeypatch, tmp_path):
     assert any("failed" in d for d in ev.diagnostics)
 
 
+def test_bazel_link_export_policy_from_argv():
+    # version-script and soname carried in -Wl, args must populate the structured
+    # LinkUnit fields so the export-policy diff (D9) can index them.
+    aquery = json.dumps({
+        "artifacts": [{"id": "1", "pathFragmentId": "10"}],
+        "actions": [{
+            "mnemonic": "CppLink",
+            "arguments": ["gcc", "-shared", "-o", "libfoo.so.2",
+                          "-Wl,--version-script=exports.map", "-Wl,-soname,libfoo.so.2"],
+            "primaryOutputId": "1",
+        }],
+        "pathFragments": [{"id": "10", "label": "libfoo.so.2"}],
+    })
+    lu = BazelAdapter(aquery=aquery).collect().link_units[0]
+    assert lu.version_script == "exports.map"
+    assert lu.soname == "libfoo.so.2"
+
+
+def test_bazel_link_export_policy_xlinker_spelling():
+    # The -Xlinker / space-separated spelling must resolve the same fields.
+    aquery = json.dumps({
+        "artifacts": [{"id": "1", "pathFragmentId": "10"}],
+        "actions": [{
+            "mnemonic": "CppLink",
+            "arguments": ["gcc", "-shared", "-o", "libfoo.so",
+                          "-Xlinker", "--version-script", "-Xlinker", "v.map",
+                          "-Xlinker", "-h", "-Xlinker", "libfoo.so.1"],
+            "primaryOutputId": "1",
+        }],
+        "pathFragments": [{"id": "10", "label": "libfoo.so"}],
+    })
+    lu = BazelAdapter(aquery=aquery).collect().link_units[0]
+    assert lu.version_script == "v.map"
+    assert lu.soname == "libfoo.so.1"
+
+
 def test_bazel_live_query_disabled_without_workspace():
     # No pre-captured input and no workspace/target → nothing to query, no crash.
     ev = BazelAdapter(allow_query=True).collect()

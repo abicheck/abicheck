@@ -250,13 +250,19 @@ class BazelAdapter:
             return None
         inputs = [p for p in graph.input_paths(action) if _is_link_input(p)]
         red_output = self.redaction.path(output)
+        argv = _str_list(action.get("arguments"))
+        version_script, soname = _export_policy_from_argv(argv)
         return LinkUnit(
             id=f"link://{red_output}",
             target_id=graph.target_id(action.get("targetId")),
             output=red_output,
             kind=_link_kind(output),
             inputs=[self.redaction.path(p) for p in inputs],
-            linker_argv=self.redaction.argv(_str_list(action.get("arguments"))),
+            linker_argv=self.redaction.argv(argv),
+            # Surface export-policy facts structurally so the build-evidence diff
+            # can report LINK_EXPORT_POLICY_CHANGED (D9); empty when absent.
+            version_script=self.redaction.path(version_script) if version_script else "",
+            soname=soname,
         )
 
 
@@ -327,6 +333,54 @@ class _AqueryGraph:
             artifacts.extend(_str_list(ds.get("directArtifactIds")))
             stack.extend(_str_list(ds.get("transitiveDepSetIds")))
         return artifacts
+
+
+def _linker_tokens(argv: list[str]) -> list[str]:
+    """Flatten linker sub-options into individual tokens.
+
+    ``-Wl,a,b`` groups are split on commas; bare ``-Xlinker`` markers are
+    dropped so the linker arg they introduce becomes a plain token.
+    """
+    tokens: list[str] = []
+    for arg in argv:
+        if arg == "-Xlinker":
+            continue
+        if arg.startswith("-Wl,"):
+            tokens.extend(arg[len("-Wl,"):].split(","))
+        else:
+            tokens.append(arg)
+    return tokens
+
+
+def _export_policy_from_argv(argv: list[str]) -> tuple[str, str]:
+    """Extract (version_script, soname) from a link action's arguments.
+
+    Handles the common GNU/Clang spellings whether passed directly or via
+    ``-Wl,`` / ``-Xlinker``: ``--version-script=FILE`` / ``--version-script FILE``
+    and ``-soname NAME`` / ``-h NAME`` / ``-soname=NAME``. These structured
+    fields feed the export-policy diff (ADR-029 D9); raw argv alone is not
+    indexed there.
+    """
+    tokens = _linker_tokens(argv)
+    version_script = ""
+    soname = ""
+    i = 0
+    while i < len(tokens):
+        tok = tokens[i]
+        if tok.startswith("--version-script="):
+            version_script = tok.split("=", 1)[1]
+        elif tok == "--version-script" and i + 1 < len(tokens):
+            version_script = tokens[i + 1]
+            i += 2
+            continue
+        elif tok.startswith(("-soname=", "--soname=")):
+            soname = tok.split("=", 1)[1]
+        elif tok in ("-soname", "--soname", "-h") and i + 1 < len(tokens):
+            soname = tokens[i + 1]
+            i += 2
+            continue
+        i += 1
+    return version_script, soname
 
 
 def _is_link_input(path: str) -> bool:
