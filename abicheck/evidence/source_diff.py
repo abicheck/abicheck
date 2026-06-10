@@ -29,9 +29,29 @@ binary break.
 
 from __future__ import annotations
 
+import re
+
 from ..checker_policy import ChangeKind
 from ..checker_types import Change
 from .source_abi import EVIDENCE_TIER_L4, SourceAbiSurface, SourceEntity
+
+
+def _header_basename(path: str) -> str:
+    """Build-root-stable form of a declaring-header path for cross-surface keys.
+
+    The linker keys ODR conflicts by ``(qualified_name, declaring_header)`` where
+    the header is an absolute ``source_location.path``. When the old and new
+    packs are produced from different checkout/build roots
+    (``/old/include/api.h`` vs ``/new/include/api.h``), comparing those raw paths
+    makes a *pre-existing* conflict look new. Reduce the path to its basename
+    (splitting on both separators so a Windows path is handled off-Windows) so
+    the discriminator stays stable across roots while still telling
+    ``a.h``/``b.h`` apart — the disambiguation the header key exists for. This
+    mirrors the build-root independence of ``SourceEntity.identity()``; the rare
+    same-basename-different-directory collision is an accepted L4 limitation
+    (ADR-030 D6; L4 is never sole BREAKING authority).
+    """
+    return re.split(r"[\\/]", path)[-1] if path else ""
 
 
 def _loc(entity: SourceEntity) -> str:
@@ -366,17 +386,20 @@ def _diff_mappings(old: SourceAbiSurface, new: SourceAbiSurface) -> list[Change]
 def _diff_odr(old: SourceAbiSurface, new: SourceAbiSurface) -> list[Change]:
     """Flag ODR conflicts newly introduced on the new side (D6).
 
-    Keyed by ``(qualified_name, header)`` — the same discriminator the linker
-    uses — so a new conflict for a same-named type in a *different* header is
-    not suppressed just because a same-name conflict already existed elsewhere.
+    Keyed by ``(qualified_name, header_basename)`` — the same discriminator the
+    linker uses, but with the header reduced to a build-root-stable basename
+    (see ``_header_basename``) so a pre-existing conflict whose header path only
+    differs by checkout/build root is not re-reported as new, while a genuine new
+    conflict for a same-named type in a *different* header is still surfaced.
     """
     old_keys = {
-        (c.get("qualified_name", ""), c.get("header", "")) for c in old.odr_conflicts
+        (c.get("qualified_name", ""), _header_basename(str(c.get("header", ""))))
+        for c in old.odr_conflicts
     }
     changes: list[Change] = []
     for conflict in new.odr_conflicts:
         name = conflict.get("qualified_name", "")
-        key = (name, conflict.get("header", ""))
+        key = (name, _header_basename(str(conflict.get("header", ""))))
         if name and key not in old_keys:
             changes.append(
                 Change(

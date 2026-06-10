@@ -510,13 +510,38 @@ def test_diff_odr_tracked_by_name_and_header() -> None:
     # A new conflict for a same-named type in a *different* header must still be
     # flagged even when a same-name conflict already exists elsewhere — the diff
     # keys by (qualified_name, header), matching the linker (Codex review #335).
-    a = {"qualified_name": "Widget", "header": "a/widget.h", "new_type_hash": "x"}
-    b = {"qualified_name": "Widget", "header": "b/widget.h", "new_type_hash": "y"}
+    # Distinct basenames so the discriminator survives build-root normalization.
+    a = {"qualified_name": "Widget", "header": "gui/widget_a.h", "new_type_hash": "x"}
+    b = {"qualified_name": "Widget", "header": "gui/widget_b.h", "new_type_hash": "y"}
     changes = diff_source_abi(
         _surface(odr_conflicts=[a]), _surface(odr_conflicts=[a, b])
     )
     assert [c.kind for c in changes] == [ChangeKind.ODR_SOURCE_CONFLICT]
-    assert changes[0].new_value == "y"  # the b/widget.h conflict, not a/widget.h
+    assert changes[0].new_value == "y"  # the widget_b.h conflict, not widget_a.h
+
+
+def test_diff_odr_stable_across_build_roots() -> None:
+    # The same pre-existing conflict reported from two different checkout/build
+    # roots (only the absolute path prefix differs) must NOT be re-flagged as a
+    # new odr_source_conflict — the header discriminator is normalized to a
+    # build-root-stable basename (Codex review #335, P2; build-root-stability
+    # decision). Old and new carry the identical conflict under different roots.
+    old_c = {
+        "qualified_name": "Widget",
+        "header": "/build/old/include/api.h",
+        "old_type_hash": "a",
+        "new_type_hash": "b",
+    }
+    new_c = {
+        "qualified_name": "Widget",
+        "header": "/build/new/include/api.h",
+        "old_type_hash": "a",
+        "new_type_hash": "b",
+    }
+    changes = diff_source_abi(
+        _surface(odr_conflicts=[old_c]), _surface(odr_conflicts=[new_c])
+    )
+    assert changes == []
 
 
 def test_diff_generated_header_changed() -> None:
