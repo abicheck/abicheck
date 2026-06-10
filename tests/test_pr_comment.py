@@ -79,8 +79,8 @@ def _compare_report(changes: list[dict] | None = None) -> dict:
 def _release_report() -> dict:
     return {
         "verdict": "BREAKING",
-        "old_dir": "/tmp/old",
-        "new_dir": "/tmp/new",
+        "old_dir": "/pkg/old",
+        "new_dir": "/pkg/new",
         "libraries": [
             {
                 "library": "libfoo.so.1",
@@ -154,8 +154,8 @@ def test_release_risk_only_library_counts_as_review():
     # as a change so `--on changes` posts the warning-tone comment.
     report = {
         "verdict": "COMPATIBLE_WITH_RISK",
-        "old_dir": "/tmp/old",
-        "new_dir": "/tmp/new",
+        "old_dir": "/pkg/old",
+        "new_dir": "/pkg/new",
         "libraries": [
             {
                 "library": "librisk.so.1",
@@ -216,8 +216,8 @@ def test_release_bundle_findings_register_as_change():
 def test_release_added_libraries_rendered():
     report = {
         "verdict": "COMPATIBLE",
-        "old_dir": "/tmp/old",
-        "new_dir": "/tmp/new",
+        "old_dir": "/pkg/old",
+        "new_dir": "/pkg/new",
         "libraries": [],
         "unmatched_old": [],
         "unmatched_new": ["libnew.so.1"],

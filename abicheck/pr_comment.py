@@ -91,12 +91,11 @@ class Finding:
 
 
 @dataclass
-class CommentModel:  # pylint: disable=too-many-instance-attributes
+class CommentModel:
     """Mode-agnostic view of a report, ready to render.
 
     A plain data container aggregating the report's header fields, the three
-    reviewer buckets, and the release-mode rollup — the attribute count is
-    inherent to the DTO, not a complexity smell.
+    reviewer buckets, and the release-mode rollup.
     """
 
     mode: str  # "compare" | "release" | "appcompat"
