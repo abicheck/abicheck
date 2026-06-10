@@ -1053,7 +1053,7 @@ def _run_cmake_configure_and_build(
     try:
         cr = subprocess.run(
             ["cmake", "-S", str(case_dir.parent), "-B", str(cmake_build),
-             "-DCMAKE_BUILD_TYPE=Debug"],
+             "-DCMAKE_BUILD_TYPE=Debug", "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON"],
             capture_output=True, text=True, timeout=60, env=cmake_env,
         )
         if cr.returncode == 0:
@@ -1416,13 +1416,19 @@ def _strip_debug(src: Path, dst: Path) -> bool:
     return r.returncode == 0 and dst.exists()
 
 
-def _abicheck_tier_verdict(
+def _abicheck_tier_result(
     v1_so: Path, v2_so: Path, v1_h: Path | None, v2_h: Path | None,
     case: str, tier: str, build_dir: Path | None,
-) -> str:
-    """Dump+compare both libs at one evidence tier; return the normalized verdict."""
+) -> tuple[str, list[str]]:
+    """Dump+compare both libs at one evidence tier.
+
+    Returns ``(verdict, emitted_kinds)`` — the normalized verdict and the list of
+    ChangeKind values abicheck actually emitted, so a tier is only credited with
+    *discovering* a case when it produces the cataloged kind, not merely a
+    verdict that happens to match (e.g. a broad COMPATIBLE).
+    """
     if not _HAS_ABICHECK:
-        return "SKIP"
+        return "SKIP", []
     bdir = BUILD_DIR / case
     bdir.mkdir(parents=True, exist_ok=True)
 
@@ -1441,15 +1447,21 @@ def _abicheck_tier_verdict(
     snap1 = bdir / f"tier_{tier}_v1.json"
     snap2 = bdir / f"tier_{tier}_v2.json"
     if not (dump(v1_so, v1_h, snap1, "v1") and dump(v2_so, v2_h, snap2, "v2")):
-        return "ERROR"
+        return "ERROR", []
     try:
         r = subprocess.run(
             [_PYTHON, "-m", "abicheck.cli", "compare", str(snap1), str(snap2), "--format", "json"],
             capture_output=True, text=True, timeout=60, env=_ABICHECK_ENV,
         )
     except subprocess.TimeoutExpired:
-        return "TIMEOUT"
-    return _abicheck_verdict_from_compare(r.stdout, r.returncode)
+        return "TIMEOUT", []
+    verdict = _abicheck_verdict_from_compare(r.stdout, r.returncode)
+    kinds: list[str] = []
+    try:
+        kinds = [c.get("kind", "") for c in json.loads(r.stdout).get("changes", [])]
+    except (json.JSONDecodeError, AttributeError, TypeError):
+        pass
+    return verdict, kinds
 
 
 def _find_compile_db(bdir: Path) -> Path | None:
@@ -1461,11 +1473,36 @@ def _find_compile_db(bdir: Path) -> Path | None:
     return None
 
 
-def _detected_at(tier_verdicts: dict[str, str], expected: str) -> str | None:
-    """First tier (weakest evidence) whose verdict matches *expected*, or None."""
+# Verdicts a tier emits *by default when it finds nothing*. For these, a matching
+# verdict alone does not prove discovery, so we additionally require the cataloged
+# change kind (Codex review: a build-context-only L3 case must not look "found" at
+# L1 just because L1 also returns COMPATIBLE). Active BREAKING/API_BREAK verdicts
+# are genuine findings, so a verdict match suffices there — and avoids penalizing
+# tier-appropriate variant kinds (e.g. L0 emits `func_removed_elf_only`).
+_QUIET_VERDICTS = frozenset({"NO_CHANGE", "COMPATIBLE", "COMPATIBLE_WITH_RISK"})
+
+
+def _detected_at(
+    tier_verdicts: dict[str, str],
+    tier_kinds: dict[str, list[str]],
+    expected: str,
+    expected_kinds: list[str],
+) -> str | None:
+    """First tier (weakest evidence) that actually *discovers* the case.
+
+    A tier qualifies when its verdict matches *expected*; for the quiet default
+    verdicts it must additionally have emitted every cataloged ``expected_kind``,
+    so a tier that returns a bare COMPATIBLE/NO_CHANGE for unrelated reasons is
+    not miscredited.
+    """
+    want = set(expected_kinds)
+    require_kinds = bool(want) and expected in _QUIET_VERDICTS
     for tier in EVIDENCE_TIERS:
-        if tier_verdicts.get(tier) == expected:
-            return tier
+        if tier_verdicts.get(tier) != expected:
+            continue
+        if require_kinds and not want.issubset(set(tier_kinds.get(tier, []))):
+            continue
+        return tier
     return None
 
 
@@ -1499,23 +1536,31 @@ def _run_case_evidence_tiers(case_dir: Path, args: Any) -> dict[str, Any] | None
     compile_db = _find_compile_db(bdir)
 
     verdicts: dict[str, str] = {}
-    verdicts["L0"] = (
-        _abicheck_tier_verdict(v1_strip, v2_strip, None, None, name, "L0", None)
-        if have_strip else "n/a"
-    )
-    verdicts["L1"] = _abicheck_tier_verdict(br.v1_so, br.v2_so, None, None, name, "L1", None)
-    verdicts["L2"] = _abicheck_tier_verdict(br.v1_so, br.v2_so, v1_h, v2_h, name, "L2", None)
-    verdicts["L3"] = (
-        _abicheck_tier_verdict(br.v1_so, br.v2_so, v1_h, v2_h, name, "L3", compile_db.parent)
-        if compile_db else "n/a"
-    )
+    kinds: dict[str, list[str]] = {}
 
+    def tier(t: str, v1: Path, v2: Path, h1: Path | None, h2: Path | None,
+             bd: Path | None, enabled: bool = True) -> None:
+        if not enabled:
+            verdicts[t] = "n/a"
+            kinds[t] = []
+            return
+        verdicts[t], kinds[t] = _abicheck_tier_result(v1, v2, h1, h2, name, t, bd)
+
+    tier("L0", v1_strip, v2_strip, None, None, None, enabled=have_strip)
+    tier("L1", br.v1_so, br.v2_so, None, None, None)
+    tier("L2", br.v1_so, br.v2_so, v1_h, v2_h, None)
+    tier("L3", br.v1_so, br.v2_so, v1_h, v2_h,
+         compile_db.parent if compile_db else None, enabled=compile_db is not None)
+
+    expected_kinds = list(_gt_data["verdicts"].get(name, {}).get("expected_kinds", []))
     return {
         "case": name,
         "expected": expected,
+        "expected_kinds": expected_kinds,
         "min_evidence": _gt_data["verdicts"].get(name, {}).get("min_evidence", "?"),
         "tier_verdicts": verdicts,
-        "detected_at": _detected_at(verdicts, expected),
+        "tier_kinds": kinds,
+        "detected_at": _detected_at(verdicts, kinds, expected, expected_kinds),
     }
 
 
@@ -1551,8 +1596,11 @@ def _print_evidence_tier_summary(rows: list[dict]) -> None:
     misses = [r["case"] for r in scored if r["detected_at"] is None]
     if misses:
         print(f"\n  Not reached by any tier ({len(misses)}): {', '.join(misses)}")
-        print("  (a MISS usually means the tier that would see it — L2 headers or "
-              "L4 source — was unavailable in this environment, e.g. no castxml.)")
+        print("  (a MISS means no tier emitted the cataloged change kind with the "
+              "right verdict — usually the layer that would see it was unavailable "
+              "(no castxml for L2, no compile DB for L3, no EvidencePack for L4), or "
+              "the case's L3/L4 drift can't be reproduced by building v1/v2 with "
+              "identical flags in this harness.)")
     # Honesty check: empirical first-detection vs ground_truth min_evidence.
     # NO_CHANGE cases whose change is *invisible* to artifacts (e.g. case122) are
     # trivially correct at L0, so a higher declared min_evidence is expected, not

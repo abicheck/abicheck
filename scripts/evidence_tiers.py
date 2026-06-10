@@ -116,6 +116,11 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     "func_virtual_added": "L1",
     "func_pure_virtual_added": "L1",
     "used_reserved_field": "L1",
+    # Build flags are recorded redundantly in debug info (DW_AT_producer /
+    # .GCC.command.line), so a `-g` build exposes toolchain flag drift at L1 — a
+    # compile DB (L3) is only required when debug info is stripped/absent.
+    # Empirically confirmed by `benchmark_comparison.py --evidence-tiers`.
+    "toolchain_flag_drift": "L1",
     # ── L2: needs the public-header AST (source-only API, scoping, decls) ──
     "ctor_explicit_added": "L2",
     "type_became_final": "L2",
@@ -130,8 +135,12 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     "constant_changed": "L2",
     "param_default_value_changed": "L2",
     "param_default_value_removed": "L2",
-    # ── L3: needs build-system context (toolchain / ABI-relevant flags) ──
-    "toolchain_flag_drift": "L3",
+    # ── L3: build-system context (compile DB) uniquely required ──
+    # The dedicated L3 build-evidence kinds (abi_relevant_build_flag_changed,
+    # toolchain_version_changed, link_export_policy_changed, …) are produced by
+    # the EvidencePack build diff (ADR-029); the example catalog has no case that
+    # *only* L3 can see yet — the one flag-drift case (103) is already visible at
+    # L1 via DWARF-recorded flags — so no kind maps here today.
 }
 
 # Cases with no ``expected_kinds`` (NO_CHANGE baselines, scoped-internal cases,

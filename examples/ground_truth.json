@@ -1774,7 +1774,7 @@
     "case103_toolchain_flag_drift": {
       "expected": "COMPATIBLE",
       "category": "quality",
-      "min_evidence": "L3",
+      "min_evidence": "L1",
       "platforms": [
         "linux"
       ],

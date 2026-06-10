@@ -277,10 +277,28 @@ prints:
 | Source provided | Layer | Cases first detectable here | Cumulative | Representative cases |
 |-----------------|:-----:|:---------------------------:|:----------:|----------------------|
 | Just the binary | L0 | 40 | **40 / 126 (32%)** | symbol removal ([01](../examples/case01_symbol_removal.md)), SONAME ([05](../examples/case05_soname.md)), visibility ([06](../examples/case06_visibility.md)), symbol-version removed ([65](../examples/case65_symbol_version_removed.md)), all 5 bundle cases |
-| + Debug symbols | L1 | 61 | **101 / 126 (80%)** | struct layout ([07](../examples/case07_struct_layout.md)), enum value ([08](../examples/case08_enum_value_change.md)), vtable ([09](../examples/case09_cpp_vtable.md)), calling convention ([64](../examples/case64_calling_convention_changed.md)), bitfield ([63](../examples/case63_bitfield_changed.md)) |
-| + Public headers | L2 | 23 | **124 / 126 (98%)** | access level ([34](../examples/case34_access_level.md)), default arg removed ([123](../examples/case123_default_argument_removed.md)), class `final` ([125](../examples/case125_class_became_final.md)), `detail::` leaks ([74](../examples/case74_detail_base_class_changed.md)–[77](../examples/case77_detail_templated_base_changed.md)), scoped-internal *no-change* ([118](../examples/case118_internal_struct_field_added_scoped.md)–[120](../examples/case120_internal_struct_reordered_scoped.md)) |
-| + Build data | L3 | 1 | **125 / 126 (99%)** | toolchain flag drift ([103](../examples/case103_toolchain_flag_drift.md)) |
+| + Debug symbols | L1 | 62 | **102 / 126 (81%)** | struct layout ([07](../examples/case07_struct_layout.md)), enum value ([08](../examples/case08_enum_value_change.md)), vtable ([09](../examples/case09_cpp_vtable.md)), calling convention ([64](../examples/case64_calling_convention_changed.md)), bitfield ([63](../examples/case63_bitfield_changed.md)), toolchain flag drift ([103](../examples/case103_toolchain_flag_drift.md)) |
+| + Public headers | L2 | 23 | **125 / 126 (99%)** | access level ([34](../examples/case34_access_level.md)), default arg removed ([123](../examples/case123_default_argument_removed.md)), class `final` ([125](../examples/case125_class_became_final.md)), `detail::` leaks ([74](../examples/case74_detail_base_class_changed.md)–[77](../examples/case77_detail_templated_base_changed.md)), scoped-internal *no-change* ([118](../examples/case118_internal_struct_field_added_scoped.md)–[120](../examples/case120_internal_struct_reordered_scoped.md)) |
+| + Build data | L3 | 0 | **125 / 126 (99%)** | *(no catalog case requires L3 alone yet — see note)* |
 | + Sources | L4 | 1 | **126 / 126 (100%)** | uninstantiated template ([122](../examples/case122_template_signature_uninstantiated.md), documented gap) |
+
+> **Why L3 adds 0 here.** Build-flag drift *is* an L3 concern, but compilers
+> record their flags redundantly in debug info (`DW_AT_producer` /
+> `.GCC.command.line`), so the catalog's flag-drift case
+> ([103](../examples/case103_toolchain_flag_drift.md)) is already discoverable at
+> **L1** from a `-g` build — the `--evidence-tiers` run confirms it emits
+> `toolchain_flag_drift` at L1. A compile database (L3) becomes *necessary* only
+> when debug info is stripped, or for the broader build-evidence kinds
+> (`abi_relevant_build_flag_changed`, `link_export_policy_changed`) that aren't
+> recorded in any artifact — none of which is represented as a standalone catalog
+> case yet.
+>
+> **Crediting rule.** A tier only counts as *discovering* a case when it emits
+> the cataloged change **kind** with the right verdict, not merely a matching
+> verdict — otherwise a weak tier that returns a bare `COMPATIBLE`/`NO_CHANGE`
+> (the "found nothing" defaults) would be miscredited. Active `BREAKING`/`API_BREAK`
+> verdicts are genuine findings, so a verdict match suffices there (and avoids
+> penalising tier-appropriate variant kinds such as L0's `func_removed_elf_only`).
 
 Two directions matter, not just one:
 

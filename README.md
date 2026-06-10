@@ -164,6 +164,23 @@ For apples-to-apples comparison with libabigail and ABICC, release workflows als
 python scripts/benchmark_comparison.py --suite pinned74
 ```
 
+### Detection by evidence source
+
+abicheck reasons over **five sources of information** — just the binary (`L0`), debug symbols (`L1`), public headers (`L2`), build-system data & options (`L3`), and sources (`L4`) — and each one finds breaks the weaker sources are blind to. The `--evidence-tiers` mode scans the catalog at each level so you can see what every source unlocks:
+
+```bash
+python scripts/benchmark_comparison.py --evidence-tiers
+```
+
+| Source you provide | Cumulative cases reaching the correct verdict |
+|--------------------|:---------------------------------------------:|
+| Just the binary (`L0`) | 40 / 126 (32%) |
+| + Debug symbols (`L1`) | 102 / 126 (81%) |
+| + Public headers (`L2`) | 125 / 126 (99%) |
+| + Build data / sources (`L3`/`L4`) | 126 / 126 (100%) |
+
+More evidence also *removes* false positives (e.g. header scoping correctly dismisses internal-struct changes). See [Evidence & Detectability](https://napetrov.github.io/abicheck/concepts/evidence-and-detectability/) for what each source reveals and [Benchmarking by evidence tier](https://napetrov.github.io/abicheck/reference/tool-comparison/#benchmarking-by-evidence-tier) for the methodology.
+
 Per-case matrix, methodology, full-catalog notes, and the pinned cross-tool comparison table: [Tool Comparison & Benchmarks](https://napetrov.github.io/abicheck/reference/tool-comparison/).
 
 ---

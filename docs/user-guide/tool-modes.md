@@ -1,10 +1,17 @@
 # ABI Tool Modes Reference
 
 This document explains the analysis modes relevant to `abicheck`: **abicheck's
-own native 3-layer mode** (what you get by default) plus the three external
-reference modes (`abidiff` and the two ABICC usages) that abicheck is benchmarked
-against and can emulate. The external-tool names match ABICC's official
-documentation.
+own native mode** (what you get by default — which itself adapts to the
+[evidence sources](../concepts/evidence-and-detectability.md#0-the-five-sources-of-information)
+you give it) plus the three external reference modes (`abidiff` and the two
+ABICC usages) that abicheck is benchmarked against and can emulate. The
+external-tool names match ABICC's official documentation.
+
+> **Looking for what each *data source* gives you** (just the binary, debug
+> symbols, headers, build data, sources) rather than what each *tool* does? That
+> is the [five-source / L0–L4 model](../concepts/evidence-and-detectability.md#0-the-five-sources-of-information);
+> the [next section](#abicheck-native-modes-by-evidence-source-l0l4) maps it onto
+> the abicheck commands you actually run.
 
 ---
 
@@ -12,7 +19,7 @@ documentation.
 
 | Mode | What it is | Compiler needed? | Debug info needed? | Headers needed? |
 |------|------------|:----------------:|:------------------:|:---------------:|
-| **abicheck (native, default)** | abicheck's own 3-layer pipeline: binary metadata + header AST (castxml) + DWARF/PDB cross-check | ⚠️ for headers only (castxml; GCC/Clang/MSVC) | optional (improves accuracy) | recommended (falls back to symbols-only) |
+| **abicheck (native, default)** | abicheck's own pipeline, which adapts to the evidence you give it: binary metadata (L0) + DWARF/PDB layout (L1) + header AST via castxml (L2), optionally + build context (L3) / source replay (L4) — see [modes by source](#abicheck-native-modes-by-evidence-source-l0l4) | ⚠️ for headers only (castxml; GCC/Clang/MSVC) | optional (improves accuracy) | recommended (falls back to symbols-only) |
 | abidiff + headers | `abidiff` (libabigail) | ❌ | optional (improves accuracy) | ✅ always |
 | ABICC+headers (ABICC Usage #2) | Original / headers mode | ✅ **GCC only** | ❌ | ✅ |
 | ABICC+dump (ABICC Usage #1) | abi-dumper / binary mode | ❌ | ✅ (`-g -Og`) | ❌ (optional) |
@@ -24,14 +31,17 @@ documentation.
 
 ---
 
-## abicheck (native 3-layer analysis)
+## abicheck (native layered analysis)
 
 ### Overview
 
 By default `abicheck` does **not** shell out to any external ABI tool. It runs
-its own three independent analysis layers and reconciles them into a single
-verdict. This is the mode behind `abicheck compare`, `abicheck dump`, and the
-[GitHub Action](github-action.md).
+its own independent analysis layers — binary metadata (L0), debug-info layout
+(L1), and header AST (L2), optionally enriched with build (L3) and source (L4)
+evidence — and reconciles them into a single verdict. This is the mode behind
+`abicheck compare`, `abicheck dump`, and the [GitHub Action](github-action.md).
+See [modes by evidence source](#abicheck-native-modes-by-evidence-source-l0l4)
+for what each one provides.
 
 ### How it works
 
@@ -81,6 +91,38 @@ abicheck compare libv1.so libv2.so
 ```
 
 Full flag reference: [CLI Usage](cli-usage.md).
+
+---
+
+## abicheck native modes by evidence source (L0–L4)
+
+The "native mode" above is not one fixed mode — it **adapts to the evidence you
+give it**. Each additional source (the five of the
+[L0–L4 model](../concepts/evidence-and-detectability.md#0-the-five-sources-of-information))
+switches on more detectors. Run `abicheck dump <lib> --show-data-sources` to see
+exactly which sources a binary affords and which mode abicheck will use.
+
+| Mode | You provide | `--show-data-sources` label | What data you get | Detectors | How you use it |
+|------|-------------|-----------------------------|-------------------|:---------:|----------------|
+| **L0 — symbols-only** | a stripped `.so`/`.dll`, no `-H` | *Symbols-only mode* | Exported symbols, SONAME/install-name, symbol versions, visibility, binding, `DT_NEEDED` deps | ~6 / 30 | Fast gate on production/stripped artifacts — catches removed/added/renamed symbols, SONAME and versioning regressions. Cannot see layout or source API. |
+| **L1 — + debug info** | a `-g` build (DWARF/PDB), no `-H` | *DWARF-only mode* | L0 **plus** type layout: sizes, field offsets, enum values, vtable slots, calling convention, packing, recorded build flags | ~24 / 30 | The accurate no-headers path: `abicheck compare v1.so v2.so` on debug builds. Catches struct/enum/vtable/calling-convention breaks. Add `--dwarf-only` to force it even when headers exist. |
+| **L2 — + public headers** | `-g` build **and** `-H include/` (needs castxml) | *Full (AST + DWARF)* | L1 **plus** source API: signatures, overloads, access, `final`/`explicit`/`noexcept`, templates, public/internal scoping | 30 / 30 | The recommended default: `abicheck compare … -H include/`. Catches source-only API breaks **and** scopes out internal types to avoid false positives. |
+| **L3 — + build data** | L2 **plus** `-p build/` (a `compile_commands.json`) | *Full + build context* | L2 **plus** the exact ABI-relevant flags/toolchain the lib was built with | 30 / 30 + build | `abicheck dump … -H include/ -p build/`. Confirms headers were parsed with the real build flags (suppresses `header_parse_context_drift`) and flags toolchain/flag drift on stripped binaries. |
+| **L4 — + sources** | an EvidencePack (`--evidence pack/`) | *Full + source replay* | L3 **plus** macro/`constexpr` values, default-argument values, inline/template bodies | 30 / 30 + source | Catch the source-only facts no artifact carries. Opt-in, post-build; see [Evidence Packs](../concepts/evidence-pack.md). |
+
+**Reading the modes.** Going down the table only ever *adds* — each mode is a
+superset of the one above, both finding more breaks and (from L2) removing false
+positives by scoping to the public surface. The
+[`--evidence-tiers` benchmark](../reference/tool-comparison.md#benchmarking-by-evidence-tier)
+quantifies the cumulative gain across the example catalog (32% → 81% → 99% →
+100%). The [authority rule](../concepts/architecture.md#evidence-layers-the-five-sources)
+keeps the modes honest: only L0/L1/L2 can declare a binary `BREAKING`; L3/L4
+explain, scope, and add their own source-/API-level findings.
+
+> **Quick decision.** Stripped production binary → **L0**. Debug build, no
+> headers handy → **L1**. Have the public headers → **L2** (do this whenever you
+> can). Reproducible build tree → add **L3**. Need macro/default-arg/inline
+> guarantees → **L4**.
 
 ---
 
