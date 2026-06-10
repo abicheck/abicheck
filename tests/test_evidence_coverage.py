@@ -315,6 +315,36 @@ def test_diff_no_change_when_equal():
     assert diff_build_evidence(ev, copy.deepcopy(ev)) == []
 
 
+def test_derive_build_options_captures_msvc_std_flag():
+    """Codex: MSVC /std: is normalized into the std:<lang> option (not dropped).
+
+    `_extract_flags` only fills cu.standard from GCC `-std=`, so without this the
+    /std: change would be invisible on Windows/MSVC builds.
+    """
+    old = derive_build_options([CompileUnit(
+        id="1", language="CXX", standard="", abi_relevant_flags=["/std:c++17"],
+    )])
+    new = derive_build_options([CompileUnit(
+        id="1", language="CXX", standard="", abi_relevant_flags=["/std:c++20"],
+    )])
+    assert {(o.key, o.value) for o in old} == {("std:CXX", "c++17")}
+    assert {(o.key, o.value) for o in new} == {("std:CXX", "c++20")}
+    changes = diff_build_evidence(BuildEvidence(build_options=old), BuildEvidence(build_options=new))
+    assert any(
+        c.kind is ChangeKind.ABI_RELEVANT_BUILD_FLAG_CHANGED
+        and c.old_value == "c++17" and c.new_value == "c++20"
+        for c in changes
+    )
+
+
+def test_derive_build_options_gcc_std_no_double_emit():
+    """GCC -std= is captured once via the structured field, not duplicated."""
+    opts = derive_build_options([CompileUnit(
+        id="1", language="CXX", standard="c++20", abi_relevant_flags=["-std=c++20"],
+    )])
+    assert sum(o.key == "std:CXX" for o in opts) == 1
+
+
 def test_derive_build_options_skips_structurally_captured_flags():
     """Codex: split vs combined sysroot/target must not double-count.
 

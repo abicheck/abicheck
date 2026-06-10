@@ -156,8 +156,17 @@ def derive_build_options(compile_units: list[CompileUnit]) -> list[BuildOption]:
             if flag.startswith(("-D", "/D")):
                 key, _, value = flag[2:].partition("=")
                 add(f"define:{key}", value, raw=flag)
-            elif flag.startswith(_STRUCTURED_FLAG_PREFIXES):
-                # std/sysroot/target are already emitted from the normalized
+            elif flag.startswith(_STD_FLAG_PREFIXES):
+                # Language standard. GCC ``-std=`` is already captured via
+                # cu.standard above; MSVC ``/std:`` is not parsed into
+                # cu.standard, so normalize it into the same std:<lang> option
+                # here (only when the structured field didn't already set it).
+                if not cu.standard:
+                    sep = "=" if "=" in flag else ":"
+                    std_val = flag.split(sep, 1)[1] if sep in flag else flag
+                    add(f"std:{cu.language}" if cu.language else "std", std_val, raw=flag)
+            elif flag.startswith(_TOOLCHAIN_PATH_FLAG_PREFIXES):
+                # sysroot/target are already emitted from the normalized
                 # structured fields above. Re-adding the raw flag would
                 # double-count and make split (``--sysroot /sdk``) vs combined
                 # (``--sysroot=/sdk``) spelling look like a change.
@@ -167,8 +176,12 @@ def derive_build_options(compile_units: list[CompileUnit]) -> list[BuildOption]:
     return out
 
 
-#: Flag prefixes whose value is already captured as a structured BuildOption
-#: (std / target / sysroot), so the raw flag must not also become an option.
-_STRUCTURED_FLAG_PREFIXES: tuple[str, ...] = (
-    "-std=", "/std:", "--sysroot", "-isysroot", "--target", "-target",
+#: Language-standard flag prefixes (GCC ``-std=`` / MSVC ``/std:``).
+_STD_FLAG_PREFIXES: tuple[str, ...] = ("-std=", "/std:")
+
+#: Value-taking toolchain flags already captured as structured target/sysroot
+#: options, so the raw flag must not also become an option (split vs combined
+#: spelling would otherwise read as a change).
+_TOOLCHAIN_PATH_FLAG_PREFIXES: tuple[str, ...] = (
+    "--sysroot", "-isysroot", "--target", "-target",
 )
