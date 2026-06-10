@@ -352,6 +352,46 @@ def test_extract_unredacts_home_for_replay(tmp_path: Path, monkeypatch) -> None:
     assert f"{home}/proj/include" in captured["cmd"]  # type: ignore[operator]
 
 
+def test_extract_preserves_literal_tilde_in_macro_value(tmp_path: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    # A literal `~` in a macro *value* (e.g. -DDEFAULT_DIR=~/app) must survive
+    # replay verbatim: the compiler receives it literally (argv, no shell), so
+    # home-expanding it would parse a different TU (Codex review #335, P2). Path
+    # operands are still unredacted in the same command.
+    import os
+
+    from abicheck.evidence.source_extractors import castxml as castxml_mod
+
+    extractor = CastxmlSourceExtractor()
+    monkeypatch.setattr(extractor, "available", lambda: True)
+    captured: dict[str, object] = {}
+
+    class _Result:
+        returncode = 0
+        stderr = ""
+
+    def _fake_run(cmd: list[str], **kw: object) -> _Result:
+        captured["cmd"] = cmd
+        out = cmd[cmd.index("-o") + 1]
+        Path(out).write_text('<GCC_XML><File id="f1" name="foo.h"/></GCC_XML>')
+        return _Result()
+
+    monkeypatch.setattr(castxml_mod.subprocess, "run", _fake_run)
+    cu = _cu(
+        source="~/proj/src/foo.cpp",
+        directory="~/proj",
+        include_paths=["~/proj/include"],
+        defines={"DEFAULT_DIR": "~/app"},
+    )
+    extractor.extract(cu, public_header_roots=["foo.h"], target_id="target://x")
+    home = os.path.expanduser("~")
+    cmd = captured["cmd"]
+    # Macro value keeps its literal tilde...
+    assert "-DDEFAULT_DIR=~/app" in cmd  # type: ignore[operator]
+    assert f"-DDEFAULT_DIR={home}/app" not in cmd  # type: ignore[operator]
+    # ...while the include path operand is still expanded.
+    assert f"{home}/proj/include" in cmd  # type: ignore[operator]
+
+
 # -- model → SourceEntity mapping (pure, D4) ---------------------------------
 
 

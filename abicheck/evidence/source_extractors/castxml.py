@@ -156,6 +156,11 @@ _GNU_SEPARATE_INCLUDE_OPTS = frozenset({"-include", "-imacros", "-include-pch"})
 #: that swallows the following argv token (``--sysroot=/sdk … -isysroot -o``).
 #: Mirrors ``_TOOLCHAIN_PATH_FLAG_PREFIXES`` in ``adapters/base.py``.
 _STRUCTURED_TOOLCHAIN_FLAG_PREFIXES = ("--sysroot", "-isysroot", "--target", "-target")
+#: Preprocessor macro define/undef option prefixes. Their *values* are passed to
+#: the compiler verbatim (argv, no shell expansion), so a literal ``~`` in e.g.
+#: ``-DDEFAULT_DIR=~/app`` must NOT be home-expanded during replay — unlike the
+#: path operands (includes/sysroot/source), which carry redacted home prefixes.
+_MACRO_DEFINITION_PREFIXES = ("-D", "-U", "/D", "/U")
 #: MSVC/clang-cl forced-include options in their separate-operand spelling
 #: (``/FI file`` or ``-FI file``); the joined ``/FIfile`` form is handled by
 #: prefix. (https://learn.microsoft.com/cpp/build/reference/fi-name-forced-include-file)
@@ -305,9 +310,20 @@ class CastxmlSourceExtractor:
                 castxml_bin=self.castxml_bin,
                 compiler_binary=self.compiler_binary,
             )
-            # Expand any redacted `~` in the include/system/sysroot/argv flags the
-            # command builder emitted from the (possibly redacted) CompileUnit.
-            cmd = [_unredact_home(tok) for tok in cmd]
+            # Expand any redacted `~` in the include/system/sysroot/source/argv
+            # *path* operands the command builder emitted from the (possibly
+            # redacted) CompileUnit. Macro definitions (`-D`/`-U`, `/D`/`/U`) are
+            # left verbatim: the compiler receives a `-DDIR=~/app` value literally
+            # (argv, no shell expansion), so unredacting a legitimate literal tilde
+            # in a macro value would parse a different TU (Codex review #335, P2).
+            # Other emitted flags (`-std=`, `--target=`, `-f*`) carry no `~`, so
+            # expanding them is a no-op.
+            cmd = [
+                tok
+                if tok.startswith(_MACRO_DEFINITION_PREFIXES)
+                else _unredact_home(tok)
+                for tok in cmd
+            ]
             try:
                 # Run in the compile unit's directory so relative -I/-isystem
                 # and forced-include paths resolve exactly as the real build did
