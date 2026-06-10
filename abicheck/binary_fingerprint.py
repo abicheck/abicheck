@@ -283,15 +283,17 @@ def match_renamed_functions(
     used_new: set[str] = set()
     candidates = _match_exact(old_candidates, new_by_hash, used_new)
     matched_old = {c.old_name for c in candidates}
-    # The name-similarity predicate is the expensive per-pair gate. When the
-    # candidate sets are large enough that passes 2/3 would degrade to an
-    # O(removed×added) name-filter scan, a *unique* size match cannot exist
-    # anyway, so applying the predicate is pure waste: drop it (pass 2 still
-    # runs as cheap size-uniqueness) and skip the fuzzy pass entirely.
-    small_enough = len(old_candidates) * len(new_candidates) <= _FUZZY_MAX_PAIRS
-    pass_filter = name_filter if small_enough else None
-    candidates += _match_size(old_candidates, new_by_size, used_new, matched_old, pass_filter)
-    if small_enough:
+    # Pass 2 (size-only) ALWAYS keeps the name predicate: matching a removed
+    # symbol to an unrelated same-size added one would mislabel a real
+    # removal/addition as a rename and hide an ABI break. The predicate cost is
+    # bounded by the size-bucket short-circuit in _match_size, so it stays cheap
+    # for the spread-out symbol sizes real libraries have.
+    candidates += _match_size(old_candidates, new_by_size, used_new, matched_old, name_filter)
+    # Pass 3 (fuzzy) is the only O(removed×added) pass and is a low-confidence
+    # heuristic, so skip it entirely when the candidate sets are large enough
+    # that a *unique* fuzzy match could not be meaningful anyway. Skipping fuzzy
+    # only forgoes speculative rename matches — it never hides a break.
+    if len(old_candidates) * len(new_candidates) <= _FUZZY_MAX_PAIRS:
         candidates += _match_fuzzy(old_candidates, new_by_size, used_new, matched_old, name_filter)
 
     # Sort by confidence descending

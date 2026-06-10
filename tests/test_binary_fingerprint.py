@@ -354,6 +354,48 @@ class TestMatchRenamedFunctions:
         assert result[0].old_name == "foo_v1"
         assert result[0].new_name == "foo_v2"
 
+    def test_size_only_match_respects_name_filter(self) -> None:
+        """A unique same-size pair with *unrelated* names must NOT be reported
+        as a rename when the name filter rejects it — otherwise a real
+        removal/addition would be mislabelled as a rename and hide a break."""
+        old = {"completely_unrelated": _fp("completely_unrelated", 128)}
+        new = {"nothing_alike": _fp("nothing_alike", 128)}
+
+        def never(_o: str, _n: str) -> bool:
+            return False
+
+        assert match_renamed_functions(old, new, name_filter=never) == []
+
+    def test_name_filter_kept_over_fuzzy_cap(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Above the fuzzy-pass pair cap the *size* pass still applies the name
+        filter, so a same-size pair with unrelated names is not a false rename
+        (the cap only skips the speculative fuzzy pass, never hides a break)."""
+        import abicheck.binary_fingerprint as bf
+
+        # Force the cap so old×new (1×1) exceeds it.
+        monkeypatch.setattr(bf, "_FUZZY_MAX_PAIRS", 0)
+        old = {"old_unrelated": _fp("old_unrelated", 200)}
+        new = {"new_distinct": _fp("new_distinct", 200)}
+
+        # With a rejecting filter the size-only match must be suppressed even
+        # though the fuzzy pass is capped out.
+        assert match_renamed_functions(old, new, name_filter=lambda o, n: False) == []
+        # With no filter, the size-only (pass 2) match still fires — the cap
+        # only gates the fuzzy pass.
+        result = match_renamed_functions(old, new)
+        assert len(result) == 1
+        assert result[0].confidence == 0.8
+
+    def test_fuzzy_pass_skipped_over_cap(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A within-tolerance (non-equal size) pair is a fuzzy-only match; above
+        the cap the fuzzy pass is skipped, so no candidate is produced."""
+        import abicheck.binary_fingerprint as bf
+
+        monkeypatch.setattr(bf, "_FUZZY_MAX_PAIRS", 0)
+        old = {"old_func": _fp("old_func", _NORMAL_SIZE)}
+        new = {"new_func": _fp("new_func", 104)}  # 4% diff → fuzzy-only
+        assert match_renamed_functions(old, new) == []
+
     def test_empty_inputs(self) -> None:
         assert match_renamed_functions({}, {}) == []
         assert match_renamed_functions({"a": _fp("a", 100)}, {}) == []
