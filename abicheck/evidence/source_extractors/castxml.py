@@ -60,6 +60,38 @@ def _std_flag(standard: str, cc_id: str) -> list[str]:
     return [f"/std:{standard}"] if cc_id == "msvc" else [f"-std={standard}"]
 
 
+#: argv options that take a path operand and change *what* gets parsed (forced
+#: includes / macro files). Carried through from argv since they are not
+#: normalized into the structured CompileUnit fields.
+_FORCED_INCLUDE_OPTS = frozenset({"-include", "-imacros"})
+
+
+def _replay_extra_flags(compile_unit: CompileUnit, already: list[str]) -> list[str]:
+    """Carry through ABI/parse-relevant options not in the structured fields.
+
+    ``abi_relevant_flags`` (e.g. ``-fms-extensions``, ``-fabi-version``,
+    ``-fvisibility``, ``-m32``) and forced-include options from ``argv`` change
+    the parsed translation unit; dropping them makes castxml parse a different TU
+    than the real build (ADR-030 D2). De-duplicated against the flags already
+    emitted from the structured fields.
+    """
+    seen = set(already)
+    out: list[str] = []
+    for flag in compile_unit.abi_relevant_flags:
+        if flag not in seen:
+            out.append(flag)
+            seen.add(flag)
+    argv = compile_unit.argv
+    i = 0
+    while i < len(argv):
+        if argv[i] in _FORCED_INCLUDE_OPTS and i + 1 < len(argv):
+            out += [argv[i], argv[i + 1]]
+            i += 2
+        else:
+            i += 1
+    return out
+
+
 def build_castxml_command(
     compile_unit: CompileUnit,
     source: Path,
@@ -91,6 +123,7 @@ def build_castxml_command(
         cmd.append(f"--sysroot={compile_unit.sysroot}")
     if compile_unit.target_triple and cc_id != "msvc":
         cmd.append(f"--target={compile_unit.target_triple}")
+    cmd += _replay_extra_flags(compile_unit, cmd)
     cmd += ["-o", str(out_xml), str(source)]
     return cmd
 
@@ -146,12 +179,16 @@ class CastxmlSourceExtractor:
                 compiler_binary=self.compiler_binary,
             )
             try:
+                # Run in the compile unit's directory so relative -I/-isystem
+                # and forced-include paths resolve exactly as the real build did
+                # (compile_commands.json `directory`).
                 result = subprocess.run(
                     cmd,
                     capture_output=True,
                     text=True,
                     timeout=self.timeout,
                     check=False,
+                    cwd=compile_unit.directory or None,
                 )
             except subprocess.TimeoutExpired as exc:
                 raise SourceExtractionError(

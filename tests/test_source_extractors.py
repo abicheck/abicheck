@@ -110,6 +110,48 @@ def test_build_command_c_uses_gcc_and_no_target_for_msvc() -> None:
     assert not any(a.startswith("--target=") for a in msvc)
 
 
+def test_build_command_carries_argv_only_options() -> None:
+    # ABI-relevant flags and forced includes that live only in argv must be
+    # carried through so castxml parses the same TU as the build (Codex review).
+    cu = _cu(
+        abi_relevant_flags=["-fms-extensions", "-fabi-version=11"],
+        argv=["g++", "-include", "config.h", "-imacros", "m.h", "-c", "foo.cpp"],
+    )
+    cmd = build_castxml_command(cu, Path("foo.cpp"), Path("o.xml"))
+    assert "-fms-extensions" in cmd
+    assert "-fabi-version=11" in cmd
+    assert cmd[cmd.index("-include") + 1] == "config.h"
+    assert cmd[cmd.index("-imacros") + 1] == "m.h"
+    # the build action's own -c/source/-o are NOT blindly forwarded
+    assert "-c" not in cmd
+
+
+def test_extract_runs_in_compile_unit_directory(tmp_path: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    # Mock castxml so we can assert the subprocess runs with cwd=directory and
+    # exercise the extract() success path without the tool installed.
+    from abicheck.evidence.source_extractors import castxml as castxml_mod
+
+    extractor = CastxmlSourceExtractor()
+    monkeypatch.setattr(extractor, "available", lambda: True)
+    captured: dict[str, object] = {}
+
+    class _Result:
+        returncode = 0
+        stderr = ""
+
+    def _fake_run(cmd: list[str], **kw: object) -> _Result:
+        captured["cwd"] = kw.get("cwd")
+        out = cmd[cmd.index("-o") + 1]
+        Path(out).write_text('<GCC_XML><File id="f1" name="foo.h"/></GCC_XML>')
+        return _Result()
+
+    monkeypatch.setattr(castxml_mod.subprocess, "run", _fake_run)
+    cu = _cu(source="src/foo.cpp", directory=str(tmp_path))
+    tu = extractor.extract(cu, public_header_roots=["foo.h"], target_id="target://x")
+    assert captured["cwd"] == str(tmp_path)
+    assert tu.extractor["name"] == "castxml-source"
+
+
 # -- model → SourceEntity mapping (pure, D4) ---------------------------------
 
 
