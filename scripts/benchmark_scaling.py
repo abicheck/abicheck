@@ -60,6 +60,8 @@ Usage
 from __future__ import annotations
 
 import argparse
+import functools
+import gc
 import json
 import math
 import shutil
@@ -512,6 +514,34 @@ def _has_demangler() -> bool:
         return False
 
 
+def _clear_process_caches() -> None:
+    """Clear process-wide caches so the memory pass measures a *cold* run.
+
+    Some scenarios fill input-scaled process-wide caches during the timing loop
+    (e.g. the ``functools.lru_cache`` demanglers in ``abicheck/demangle.py``).
+    Those allocations happen *before* ``tracemalloc`` starts, so a warm memory
+    pass would not see them and cache-driven space growth could slip past the
+    ``--max-memory-mb`` gate (Codex review, #336). Clearing every live
+    ``lru_cache`` (plus the demangle batch cache) before the traced run forces
+    it to repopulate them, so their allocation is counted and each size is
+    measured from the same cold baseline.
+    """
+    wrapper = getattr(functools, "_lru_cache_wrapper", None)
+    if wrapper is not None:
+        for obj in gc.get_objects():
+            if isinstance(obj, wrapper):
+                try:
+                    obj.cache_clear()
+                except Exception:  # noqa: BLE001 — best-effort cache reset
+                    pass
+    try:
+        from abicheck.demangle import _reset_demangle_batch_cache
+
+        _reset_demangle_batch_cache()
+    except Exception:  # noqa: BLE001 — optional internal helper
+        pass
+
+
 def measure(
     scenario: str, sizes: list[int], repeat: int, *, track_memory: bool = True
 ) -> list[Point]:
@@ -530,9 +560,11 @@ def measure(
             best = min(best, dt)
         peak_mb: float | None = None
         if track_memory:
-            # Inputs are built outside the traced window, so tracemalloc only
-            # attributes the timed call's own allocations — exactly the peak we
-            # want to track for space regressions.
+            # Inputs are built outside the traced window, and process-wide caches
+            # warmed by the timing loop are cleared first, so tracemalloc sees a
+            # cold run's full allocation — including input-scaled caches — which
+            # is exactly the peak we want to track for space regressions.
+            _clear_process_caches()
             tracemalloc.start()
             spec.run(prepared)
             _, peak = tracemalloc.get_traced_memory()

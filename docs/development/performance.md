@@ -77,10 +77,13 @@ reporting stages — see [Coverage beyond `compare()`](#coverage-beyond-compare)
 
 Every measurement also records the **peak tracked heap** (`peak_mb`, via
 `tracemalloc`) of the timed call. The inputs are built *outside* the traced
-window, so the figure attributes only the call's own allocations. A flat
-per-item time alongside a rising `peak_mb` flags an intermediate O(n²) *space*
-blow-up that a wall-clock-only gate would miss. Disable with `--no-memory`
-(timing only); gate with `--max-memory-mb <budget>`.
+window, so the figure attributes only the call's own allocations. The memory
+pass also runs **cold**: process-wide caches warmed by the timing loop (e.g. the
+`functools.lru_cache` demanglers) are cleared first, so input-scaled cache
+growth is counted rather than hidden behind a warm cache. A flat per-item time
+alongside a rising `peak_mb` flags an intermediate O(n²) *space* blow-up that a
+wall-clock-only gate would miss. Disable with `--no-memory` (timing only); gate
+with `--max-memory-mb <budget>`.
 
 ### Coverage beyond `compare()`
 
