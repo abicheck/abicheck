@@ -124,6 +124,14 @@ def entity_from_function(fn: Function) -> SourceEntity:
     emits ``default="<expr>"``), so both adding/removing a default and changing
     its value (``x = 1`` → ``x = 2``) surface as a value change
     (``default_argument_changed``).
+
+    The castxml parser stores ``Function.mangled`` as ``el.get("mangled","") or
+    name``, so a public constructor (or any decl castxml emits without a mangled
+    attribute) carries the *bare name* there. Treat ``mangled == name`` as "no
+    distinguishing mangled name" and leave ``mangled_name`` empty so
+    :meth:`SourceEntity.identity` falls back to ``qualified_name#signature_hash``
+    and keeps unmangled overloads (``Widget(int)`` vs ``Widget(double)``)
+    distinct — copying the bare-name fallback verbatim would collapse them.
     """
     qualifiers = []
     if fn.is_const:
@@ -138,11 +146,12 @@ def entity_from_function(fn: Function) -> SourceEntity:
     default_repr = ",".join(
         f"{p.name}={p.default}" for p in fn.params if p.default is not None
     )
+    mangled = fn.mangled if fn.mangled and fn.mangled != fn.name else ""
     return SourceEntity(
-        id=_content_hash("function", fn.mangled or fn.name, sig),
+        id=_content_hash("function", mangled or fn.name, sig),
         kind="function",
         qualified_name=fn.name,
-        mangled_name=fn.mangled,
+        mangled_name=mangled,
         signature_hash=_content_hash("sig", sig),
         value=default_repr,
         source_location=_location(fn.source_header, fn.source_location, fn.origin),

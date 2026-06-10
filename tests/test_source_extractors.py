@@ -296,6 +296,35 @@ def test_entity_from_function_signature_stable_under_default_change() -> None:
     assert default_1.source_location.origin == "PUBLIC_HEADER"
 
 
+def test_entity_from_function_drops_bare_name_mangled_fallback() -> None:
+    # The castxml parser stores Function.mangled as `el.get("mangled","") or
+    # name`, so a constructor with no mangled attribute arrives as mangled==name.
+    # entity_from_function must treat that as "no mangled name" so identity()
+    # falls back to qualified_name#signature_hash and unmangled overloads stay
+    # distinct (Codex review #335, P2).
+    ctor_int = entity_from_function(
+        Function(
+            name="Widget", mangled="Widget", return_type="void",
+            params=[Param("x", "int")],
+        )
+    )
+    ctor_dbl = entity_from_function(
+        Function(
+            name="Widget", mangled="Widget", return_type="void",
+            params=[Param("x", "double")],
+        )
+    )
+    assert ctor_int.mangled_name == ""
+    assert ctor_dbl.mangled_name == ""
+    assert ctor_int.identity() != ctor_dbl.identity()
+    # A real mangled name is preserved verbatim.
+    real = entity_from_function(
+        Function(name="ns::f", mangled="_ZN2ns1fEv", return_type="void")
+    )
+    assert real.mangled_name == "_ZN2ns1fEv"
+    assert real.identity() == "_ZN2ns1fEv"
+
+
 def test_entity_from_function_signature_changes_with_param_type() -> None:
     a = entity_from_function(
         Function(name="f", mangled="m", return_type="int", params=[Param("x", "int")])

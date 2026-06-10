@@ -44,6 +44,11 @@ def _loc(entity: SourceEntity) -> str:
     return f"{base} [{EVIDENCE_TIER_L4}]" if base else f"[{EVIDENCE_TIER_L4}]"
 
 
+#: Entity kinds that can carry a default argument (so a ``value`` change is a
+#: default-argument change, not a variable-initializer or constant change).
+_FUNCTION_KINDS = frozenset({"function", "method"})
+
+
 def _by_identity(entities: list[SourceEntity]) -> dict[str, SourceEntity]:
     """Index entities by stable identity so C++ overloads stay distinct.
 
@@ -206,8 +211,16 @@ def _diff_declarations(old: SourceAbiSurface, new: SourceAbiSurface) -> list[Cha
             continue
 
         # Default-argument change: same type signature, different normalized
-        # default-argument string (ADR-030 D6).
-        if ov.signature_hash == nv.signature_hash and ov.value != nv.value:
+        # default-argument string (ADR-030 D6). Restricted to function/method
+        # entities: a non-function decl (notably a `variable`) carries an empty
+        # signature_hash on both sides and a `value` (its initializer), which
+        # would otherwise spuriously fire default_argument_changed even though it
+        # has no default argument.
+        if (
+            nv.kind in _FUNCTION_KINDS
+            and ov.signature_hash == nv.signature_hash
+            and ov.value != nv.value
+        ):
             changes.append(
                 Change(
                     kind=ChangeKind.DEFAULT_ARGUMENT_CHANGED,

@@ -346,6 +346,16 @@ def test_diff_default_argument_change_on_non_last_overload() -> None:
     assert changes[0].symbol == "g"
 
 
+def test_diff_variable_initializer_change_is_not_default_argument() -> None:
+    # A non-function decl (e.g. a `variable`) carries an empty signature_hash and
+    # a `value` (its initializer); a 1->2 change must NOT be reported as
+    # default_argument_changed — that branch is function/method only (Codex P2).
+    old = _surface(reachable_declarations=[_entity("gVar", "variable", value="1")])
+    new = _surface(reachable_declarations=[_entity("gVar", "variable", value="2")])
+    kinds = [c.kind for c in diff_source_abi(old, new)]
+    assert ChangeKind.DEFAULT_ARGUMENT_CHANGED not in kinds
+
+
 def test_diff_constexpr_value_changed() -> None:
     old = _surface(reachable_declarations=[_entity("kMax", "constexpr", value="10")])
     new = _surface(reachable_declarations=[_entity("kMax", "constexpr", value="20")])
