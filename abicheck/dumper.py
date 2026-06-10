@@ -25,6 +25,7 @@ import subprocess
 import sys
 import tempfile
 import warnings
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 from xml.etree.ElementTree import (
@@ -484,6 +485,49 @@ def _validate_castxml_output(
     return root
 
 
+def _run_castxml_subprocess(cmd: list[str]) -> subprocess.CompletedProcess[str]:
+    """Run castxml, converting a timeout into an actionable SnapshotError."""
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=120, check=False)
+    except subprocess.TimeoutExpired as exc:
+        stderr_snippet = ""
+        if exc.stderr:
+            text = exc.stderr if isinstance(exc.stderr, str) else exc.stderr.decode("utf-8", errors="replace")
+            stderr_snippet = f"\nPartial stderr: {text[:1000].strip()}"
+        raise SnapshotError(
+            "castxml timed out after 120 seconds. The header file may contain "
+            "syntax that causes the compiler to hang. Check that the header "
+            f"is valid and can be compiled with gcc/g++.{stderr_snippet}"
+        ) from exc
+
+
+def _run_castxml_with_floatn_retry(
+    cmd: list[str],
+    rebuild_with_floatn_shim: Callable[[], list[str]],
+    out_xml: Path,
+    headers: list[Path],
+    force_cpp: bool,
+) -> Element:
+    """Run castxml; on a glibc sized-float (_FloatN) parse failure, retry once
+    with the ``-D_FloatN`` shim, then validate.
+
+    The retry only fires on the matching failure, so healthy hosts run exactly
+    once. See ``_FLOATN_SHIM_DEFINES`` and plan G16.
+    """
+    result = _run_castxml_subprocess(cmd)
+    floatn_shim_tried = False
+    if result.returncode != 0 and _stderr_wants_floatn_shim(result.stderr):
+        log.warning(
+            "castxml failed on host sized-float types (_FloatN); retrying "
+            "once with a -D_FloatN compatibility shim."
+        )
+        result = _run_castxml_subprocess(rebuild_with_floatn_shim())
+        floatn_shim_tried = True
+    return _validate_castxml_output(
+        result, out_xml, headers, force_cpp, floatn_shim_tried=floatn_shim_tried
+    )
+
+
 def _castxml_dump(
     headers: list[Path],
     extra_includes: list[Path],
@@ -559,42 +603,16 @@ def _castxml_dump(
         force_cpp20=force_cpp20,
     )
 
-    def _run(run_cmd: list[str]) -> subprocess.CompletedProcess[str]:
-        try:
-            return subprocess.run(run_cmd, capture_output=True, text=True, timeout=120, check=False)
-        except subprocess.TimeoutExpired as exc:
-            stderr_snippet = ""
-            if exc.stderr:
-                text = exc.stderr if isinstance(exc.stderr, str) else exc.stderr.decode("utf-8", errors="replace")
-                stderr_snippet = f"\nPartial stderr: {text[:1000].strip()}"
-            raise SnapshotError(
-                f"castxml timed out after 120 seconds. The header file may contain "
-                f"syntax that causes the compiler to hang. Check that the header "
-                f"is valid and can be compiled with gcc/g++.{stderr_snippet}"
-            ) from exc
-
     try:
-        result = _run(cmd)
-        floatn_shim_tried = False
-        # One-shot auto-retry for the dominant host-toolchain failure: glibc
-        # sized-float keywords (_Float32/64/128) the bundled clang can't parse.
-        # Only triggers after a real failure, so healthy hosts are unaffected.
-        if result.returncode != 0 and _stderr_wants_floatn_shim(result.stderr):
-            log.warning(
-                "castxml failed on host sized-float types (_FloatN); retrying "
-                "once with a -D_FloatN compatibility shim."
-            )
-            retry_cmd = _build_castxml_command(
+        root = _run_castxml_with_floatn_retry(
+            cmd,
+            lambda: _build_castxml_command(
                 cc_bin, cc_id, extra_includes, out_xml, agg_path,
                 sysroot=sysroot, nostdinc=nostdinc, gcc_options=gcc_options,
                 force_cpp=bool(force_cpp), force_cpp20=force_cpp20,
                 extra_defines=_FLOATN_SHIM_DEFINES,
-            )
-            result = _run(retry_cmd)
-            floatn_shim_tried = True
-        root = _validate_castxml_output(
-            result, out_xml, headers, bool(force_cpp),
-            floatn_shim_tried=floatn_shim_tried,
+            ),
+            out_xml, headers, bool(force_cpp),
         )
         shutil.copy2(str(out_xml), str(cached))
         return root
