@@ -165,6 +165,11 @@ jobs:
 
       - name: Measure head and compare to base
         run: |
+          # pipefail so the benchmark's nonzero exit on a detected regression is
+          # not masked by `tee` (the default Actions shell is `bash -e`, no
+          # pipefail). The step then goes red on a regression; it still does not
+          # block the merge while `continue-on-error` is set above.
+          set -euo pipefail
           python -m venv head_env
           ./head_env/bin/pip install -q --upgrade pip
           ./head_env/bin/pip install -q -e "./head[dev]"
