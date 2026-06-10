@@ -448,9 +448,28 @@ class _CastxmlParser:
         headers are excluded). Returns ``name -> value``; empty when no public
         header set is available (e.g. DWARF/symbols-only mode).
         """
+        return {name: init for name, init, _ in self._iter_public_constants()}
+
+    def parse_constant_headers(self) -> dict[str, str]:
+        """Map each public constant's qualified name to its declaring header path.
+
+        Same public-header scoping and key qualification as
+        :meth:`parse_constants` (they share one filtering pass, so the maps never
+        disagree). The L4 source-ABI extractor uses this to mark constants from a
+        *generated* public header as ``GENERATED`` — otherwise a constant removed
+        from a generated config header produces no L4 finding (the value-change
+        case is already covered). The L2 snapshot path does not call this.
+        """
+        return {name: header for name, _, header in self._iter_public_constants()}
+
+    def _iter_public_constants(self) -> list[tuple[str, str, str]]:
+        """Return ``(qualified_name, init_value, declaring_header)`` for every
+        public ``const``/``constexpr`` — the single source of truth shared by
+        :meth:`parse_constants` and :meth:`parse_constant_headers`.
+        """
         if not self._have_public_set:
-            return {}
-        constants: dict[str, str] = {}
+            return []
+        out: list[tuple[str, str, str]] = []
         for el in self._root:
             if el.tag != "Variable":
                 continue
@@ -483,8 +502,14 @@ class _CastxmlParser:
             # constants sharing an unqualified name in different scopes
             # (``A::kLimit`` vs ``B::kLimit``) don't alias and overwrite each
             # other — which would mask or misreport a CONSTANT_CHANGED.
-            constants[self._qualified_name(el)] = init
-        return constants
+            out.append(
+                (
+                    self._qualified_name(el),
+                    init,
+                    header_from_location(self._source_location(el)) or "",
+                )
+            )
+        return out
 
     def _qualified_name(self, el: Any) -> str:
         """Build a namespace/class-qualified name by walking ``context``.

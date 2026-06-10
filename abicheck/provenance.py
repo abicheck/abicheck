@@ -141,6 +141,21 @@ def _is_generated_header(header_segs: tuple[str, ...]) -> bool:
     return bool(_GENERATED_BASENAME.match(header_segs[-1]))
 
 
+def is_generated_header(source_header: str | None) -> bool:
+    """Whether a header path looks machine-generated (``moc_*``, ``*.pb.h``,
+    a ``generated/`` directory, …).
+
+    Public wrapper around the segment-based heuristic. ``classify_origin``
+    checks the public-header set *before* this heuristic, so a header that is
+    both public and generated classifies as ``PUBLIC_HEADER``; callers that need
+    to preserve the generated marker (ADR-030 ``generated_header_changed``) can
+    consult this directly.
+    """
+    if not source_header:
+        return False
+    return _is_generated_header(_segments(source_header))
+
+
 def classify_origin(
     source_header: str | None,
     public_header_segs: list[tuple[str, ...]],
@@ -204,26 +219,39 @@ def apply_provenance(
     header_segs, dir_segs, have_set = build_public_set(
         public_headers, public_header_dirs
     )
-
-    def _tag(decl: object) -> None:
-        loc = getattr(decl, "source_location", None)
-        sh = header_from_location(loc)
-        export_only = getattr(decl, "visibility", None) == Visibility.ELF_ONLY
-        decl.source_header = sh  # type: ignore[attr-defined]
-        decl.origin = classify_origin(  # type: ignore[attr-defined]
-            sh,
-            header_segs,
-            dir_segs,
-            have_public_set=have_set,
-            export_only=export_only,
-        )
-
     for fn in snapshot.functions:
-        _tag(fn)
+        tag_provenance(fn, header_segs, dir_segs, have_set)
     for var in snapshot.variables:
-        _tag(var)
+        tag_provenance(var, header_segs, dir_segs, have_set)
     for rec in snapshot.types:
-        _tag(rec)
+        tag_provenance(rec, header_segs, dir_segs, have_set)
     for en in snapshot.enums:
-        _tag(en)
+        tag_provenance(en, header_segs, dir_segs, have_set)
     return snapshot
+
+
+def tag_provenance(
+    decl: object,
+    header_segs: list[tuple[str, ...]],
+    dir_segs: list[tuple[str, ...]],
+    have_set: bool,
+) -> None:
+    """Populate ``source_header`` and ``origin`` on a single declaration in place.
+
+    Factored out of :func:`apply_provenance` so other producers of model objects
+    that bypass the snapshot path — notably the ADR-030 source ABI extractor,
+    which parses headers directly — can classify origin against the same public
+    set instead of leaving every declaration ``UNKNOWN``. ``header_segs`` /
+    ``dir_segs`` come from :func:`build_public_set`.
+    """
+    loc = getattr(decl, "source_location", None)
+    sh = header_from_location(loc)
+    export_only = getattr(decl, "visibility", None) == Visibility.ELF_ONLY
+    decl.source_header = sh  # type: ignore[attr-defined]
+    decl.origin = classify_origin(  # type: ignore[attr-defined]
+        sh,
+        header_segs,
+        dir_segs,
+        have_public_set=have_set,
+        export_only=export_only,
+    )

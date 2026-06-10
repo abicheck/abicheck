@@ -945,4 +945,63 @@ REGISTRY = ChangeKindRegistry([
               "actually removes or alters exports, the artifact diff (L0) emits "
               "the corresponding BREAKING findings separately; this kind explains "
               "and localizes them and does not escalate on its own."),
+
+    # ── Source ABI replay evidence (ADR-028 L4 / ADR-030 D6) ────────────────
+    # Produced by the source-replay diff over two linked source ABI surfaces.
+    # These recover source/API facts that final artifacts under-represent
+    # (macros, default args, inline/template bodies, constexpr, uninstantiated
+    # templates). Per ADR-028 D3 / ADR-030 D6 they are never BREAKING on their
+    # own: they default to API_BREAK (source breaks) or RISK (deployment/context
+    # risk). A shipped-ABI break is still proven only by the artifact diff.
+    _E("public_macro_value_changed", _A,
+       impact="The value of a macro constant in a public header changed (e.g. "
+              "FOO_SIZE). Source that bakes the old value into compiled code "
+              "(array sizes, switch labels, struct layout) silently mismatches a "
+              "library built with the new value. A source/API break; recompile "
+              "consumers against the new headers."),
+    _E("default_argument_changed", _A,
+       impact="A default argument of a public function changed (e.g. f(int x=1) "
+              "to x=2). The signature is unchanged, so old binaries link, but "
+              "newly compiled callers that omit the argument get a different "
+              "value — a source-visible behavioral break. Build-context replay "
+              "adds provenance over header-only detection."),
+    _E("inline_body_changed", _R,
+       impact="The body of a public inline function changed while no exported "
+              "binary symbol changed. Callers that inlined the old body keep the "
+              "old behavior until recompiled, so a mixed-build deployment can run "
+              "two versions of the same function. A deployment/ODR risk, not a "
+              "proven binary break."),
+    _E("constexpr_value_changed", _A,
+       impact="The value of a public constexpr constant changed. Like a macro "
+              "constant, the old value may be baked into consumer code; a "
+              "source/API break until consumers are recompiled against the new "
+              "headers."),
+    _E("template_body_changed", _R,
+       impact="The implementation of an uninstantiated public template changed. "
+              "No binary symbol exists to compare (the ADR-026 case122 residual), "
+              "so this is invisible to artifact comparison; consumers that "
+              "instantiate the template pick up the new body on recompile. A "
+              "source-visible risk surfaced only by source replay."),
+    _E("uninstantiated_template_removed", _A,
+       impact="A public template that was never instantiated into a binary symbol "
+              "was removed from the headers. Source that instantiates it no longer "
+              "compiles; there is no binary footprint, so only source replay sees "
+              "it. A source/API break."),
+    _E("source_decl_binary_symbol_mismatch", _R,
+       impact="A public source declaration no longer maps to an exported binary "
+              "symbol — the declaration is present in the headers but absent from "
+              "the library's exports. With artifact backing this escalates to the "
+              "authoritative removed-export finding; on its own it is a "
+              "surface/export consistency risk to investigate."),
+    _E("odr_source_conflict", _R,
+       impact="The same type name resolves to different definitions across "
+              "translation units (One Definition Rule conflict). Linking or "
+              "loading code that mixes the definitions is undefined behavior; a "
+              "correctness risk surfaced by comparing per-TU source surfaces."),
+    _E("generated_header_changed", _R,
+       impact="A generated public configuration header changed between versions. "
+              "Generated headers encode build-time configuration into the public "
+              "API surface, so a change can alter declarations or macro contracts "
+              "seen by consumers. Policy may escalate to an API break; by default "
+              "a risk to review."),
 ])

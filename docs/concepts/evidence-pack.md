@@ -35,7 +35,11 @@ unless an artifact diff also proves the break. They flow through the normal
 | **L4** | per-TU source ABI replay | Source-visible ABI/API facts | API/source-risk evidence; never sole shipped-ABI authority |
 | **L5** | Clang/Kythe/CodeQL graph summaries | Include/type/call/build reasoning | Explanation, localization, impact |
 
-L3 is implemented today (ADR-029); L4/L5 are planned (ADR-030/031).
+L3 is implemented today (ADR-029). L4's schema, linker, source-replay diff, and
+the **castxml** per-TU extractor are implemented (ADR-030 phases 1–4 — see
+[L4 findings](#source-abi-replay-findings-l4)); the Clang and Android extractors
+(for inline/template body fingerprints) are the remaining ADR-030 work. L5 is
+planned (ADR-031).
 
 ## Workflow
 
@@ -101,6 +105,36 @@ None of these escalate to *breaking* on their own. When an export-policy change
 actually removes exported symbols, the artifact diff (L0) emits the breaking
 `symbol_removed` finding separately; `link_export_policy_changed` explains and
 localizes it.
+
+## Source ABI replay findings (L4)
+
+Some API/ABI-relevant facts are weakly represented or absent in final
+binary/debug artifacts — macro constants, default arguments, inline/template
+bodies, `constexpr` values, and uninstantiated templates. ADR-030 adds an
+**optional** source ABI replay layer that parses selected translation units and
+public headers under their real per-TU build context (from L3) and links the
+result against the library's exported surface (`source/source_abi.json`).
+
+Comparing two linked source surfaces emits these change kinds (ADR-030 D6):
+
+| Kind | Category | Meaning |
+|---|---|---|
+| `public_macro_value_changed` | API break | A macro constant in a public header changed value |
+| `default_argument_changed` | API break | A default argument changed (signature unchanged) |
+| `constexpr_value_changed` | API break | A public `constexpr` constant changed value |
+| `uninstantiated_template_removed` | API break | A public template was removed without any binary presence |
+| `inline_body_changed` | risk | A public inline body changed with no exported-symbol change (mixed-build/ODR risk) |
+| `template_body_changed` | risk | An uninstantiated public template implementation changed (the ADR-026 `case122` residual) |
+| `source_decl_binary_symbol_mismatch` | risk | A public declaration no longer maps to an exported symbol |
+| `odr_source_conflict` | risk | The same type name resolves to different definitions across TUs |
+| `generated_header_changed` | risk | A generated public configuration header changed (policy may escalate) |
+
+Per the authority rule, **none of these are `breaking` on their own**: they are
+source/API findings (`API_BREAK`) or deployment/context risks. Every L4 finding
+carries an explicit `L4_SOURCE_ABI` evidence-tier boundary (ADR-030 D10) so a
+source/API risk is never read as a proven shipped-binary ABI break. A shipped
+binary ABI break is still proven only by the artifact diff (L0/L1/L2), and
+policy profiles decide whether a source-only finding blocks a release.
 
 ## Evidence coverage
 

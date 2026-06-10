@@ -38,9 +38,11 @@ from typing import Any
 
 from .build_evidence import BuildEvidence
 from .model import EvidencePackManifest, EvidencePackRef
+from .source_abi import SourceAbiSurface
 
 MANIFEST_NAME = "manifest.json"
 BUILD_EVIDENCE_REL = "build/build_evidence.json"
+SOURCE_ABI_REL = "source/source_abi.json"
 
 #: Sub-directories created for every pack so adapters have a stable place to
 #: write. Empty directories are harmless and keep the layout self-documenting.
@@ -59,6 +61,7 @@ class EvidencePack:
     root: Path
     manifest: EvidencePackManifest = field(default_factory=EvidencePackManifest)
     build_evidence: BuildEvidence | None = None
+    source_abi: SourceAbiSurface | None = None
 
     # -- construction -------------------------------------------------------
 
@@ -86,7 +89,16 @@ class EvidencePack:
         be_path = root / BUILD_EVIDENCE_REL
         if be_path.is_file():
             build_evidence = BuildEvidence.from_dict(_read_json(be_path))
-        return cls(root=root, manifest=manifest, build_evidence=build_evidence)
+        source_abi: SourceAbiSurface | None = None
+        sa_path = root / SOURCE_ABI_REL
+        if sa_path.is_file():
+            source_abi = SourceAbiSurface.from_dict(_read_json(sa_path))
+        return cls(
+            root=root,
+            manifest=manifest,
+            build_evidence=build_evidence,
+            source_abi=source_abi,
+        )
 
     # -- persistence --------------------------------------------------------
 
@@ -112,6 +124,14 @@ class EvidencePack:
         elif be_path.is_file():
             be_path.unlink()
 
+        # Same stale-file discipline for the optional L4 source ABI surface.
+        sa_path = self.root / SOURCE_ABI_REL
+        if self.source_abi is not None:
+            sa_path.parent.mkdir(parents=True, exist_ok=True)
+            _write_json(sa_path, self.source_abi.to_dict())
+        elif sa_path.is_file():
+            sa_path.unlink()
+
         # Record content-addressed digests of the normalized payloads.
         self.manifest.artifacts = self._artifact_digests()
         _write_json(self.root / MANIFEST_NAME, self.manifest.to_dict())
@@ -128,6 +148,9 @@ class EvidencePack:
         be_path = self.root / BUILD_EVIDENCE_REL
         if be_path.is_file():
             digests.append("sha256:" + _file_sha256(be_path))
+        sa_path = self.root / SOURCE_ABI_REL
+        if sa_path.is_file():
+            digests.append("sha256:" + _file_sha256(sa_path))
         normalized = self.root / "normalized"
         if normalized.is_dir():
             for p in sorted(normalized.rglob("*")):

@@ -1,7 +1,7 @@
 # ADR-030: Source ABI Replay and Linked Source Surface
 
 **Date:** 2026-06-09
-**Status:** Proposed
+**Status:** Accepted — partially implemented (phases 1–4)
 **Decision maker:** Nikolay Petrov
 
 ---
@@ -314,6 +314,33 @@ compatibility risk, and feeds the evidence coverage report (ADR-028 D7).
 | 5 | Clang LibTooling source dumper prototype | Inline/template/constexpr/body fingerprints |
 | 6 | Optional Android header checker adapter | External tool reuse, raw artifact preservation |
 | 7 | PR changed-mode and cache optimization | CI-ready source replay |
+
+### Implementation status
+
+Phases 1–4 are implemented, in `abicheck/evidence/`:
+
+- **Phase 1** — `source_abi.py`: the `SourceAbiTu` (D4) and `SourceAbiSurface`
+  (D5) normalized schemas with `to_dict`/`from_dict` round-trips and the
+  `L4_SOURCE_ABI` evidence-boundary label (D10); `pack.py` reads/writes
+  `source/source_abi.json` and folds it into the content hash.
+- **Phase 2** — `source_extractors/`: the `SourceAbiExtractor` interface
+  (ADR-032) and `CastxmlSourceExtractor`, which parses a translation unit under
+  its real per-TU `CompileUnit` build context (D2) and emits a `SourceAbiTu`.
+  It reuses the existing castxml XML parser, so no new dependency is added
+  (ADR-001). The context→argv builder and the model→entity mapping are pure and
+  unit-tested; the castxml run itself is integration-marked. castxml covers
+  declarations, types, and public const/constexpr values; inline/template *body*
+  fingerprints await the Clang backend (phase 5, per the D3 table).
+- **Phase 3** — `source_link.py` (`link_source_abi`): merges per-TU dumps into a
+  per-library surface, mapping public source declarations to exported binary
+  symbols and detecting ODR conflicts (D5).
+- **Phase 4** — `source_diff.py` (`diff_source_abi`): the nine D6 `ChangeKind`s,
+  partitioned `API_BREAK`/`RISK` per ADR-028 D3 (never `BREAKING`), registered
+  in `change_registry.py`.
+
+Remaining: the Clang LibTooling dumper (phase 5, for inline/template/constexpr
+body fingerprints), the Android `header-abi-dumper` adapter (phase 6), and PR
+changed-mode scoping + per-TU caching (phase 7).
 
 ---
 
