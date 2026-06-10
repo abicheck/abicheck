@@ -56,16 +56,47 @@ python scripts/benchmark_scaling.py --scenario type_churn \
 ```
 
 Scenarios (`add_remove` is the linear control; the rest target a specific
-former bottleneck):
+path). The first group exercises `compare()` (the original focus); the second
+group, added later, extends coverage beyond `compare()` to the suppression and
+reporting stages — see [Coverage beyond `compare()`](#coverage-beyond-compare):
 
-| Scenario | Stresses |
-|----------|----------|
-| `add_remove` | Core symbol diff + surface scoping (control) |
-| `type_churn` | Affected-symbol enrichment, opaque filtering |
-| `elf_namespace` | Namespace detection + demangling (stripped lib) |
-| `var_churn` | Public-surface classification |
-| `rename_churn` | ELF-only fingerprint rename matching |
-| `nested_types` | Transitive type-ancestor closure |
+| Scenario | Measures | Stresses |
+|----------|----------|----------|
+| `add_remove` | `compare()` | Core symbol diff + surface scoping (control) |
+| `type_churn` | `compare()` | Affected-symbol enrichment, opaque filtering (structs) |
+| `enum_churn` | `compare()` | Enum diffing (`diff_types._diff_enums`) |
+| `elf_namespace` | `compare()` | Namespace detection + demangling (stripped lib) |
+| `var_churn` | `compare()` | Public-surface classification |
+| `rename_churn` | `compare()` | ELF-only fingerprint rename matching |
+| `nested_types` | `compare()` | Transitive type-ancestor closure |
+| `suppression_audit` | `SuppressionList.audit()` | Rule-vs-finding matching (O(rules × findings)) |
+| `report_html` | `generate_html_report()` | HTML document assembly |
+| `report_sarif` | `to_sarif_str()` | SARIF JSON assembly |
+
+### Peak memory
+
+Every measurement also records the **peak tracked heap** (`peak_mb`, via
+`tracemalloc`) of the timed call. The inputs are built *outside* the traced
+window, so the figure attributes only the call's own allocations. A flat
+per-item time alongside a rising `peak_mb` flags an intermediate O(n²) *space*
+blow-up that a wall-clock-only gate would miss. Disable with `--no-memory`
+(timing only); gate with `--max-memory-mb <budget>`.
+
+### Coverage beyond `compare()`
+
+The original sweep (PR #331) only covered `compare()` post-processing. A
+follow-up gap analysis extended it to the two other stages that build the
+largest data structures from the finding set:
+
+- **Suppression audit** (`suppression.py`, `SuppressionList.audit`) tests every
+  rule against every change — O(rules × findings). The `suppression_audit`
+  scenario holds the rule count fixed (a project's ruleset is roughly fixed
+  while its library grows) and scales findings, so it stays **linear in
+  findings**; a regression that makes per-finding matching itself super-linear
+  (e.g. recompiling a pattern per change) shows up as a rising exponent.
+- **Reporting** — `to_markdown`/`to_json` were already guarded by `slow` tests;
+  `report_html` and `report_sarif` extend that to the HTML and SARIF renderers,
+  which assemble the largest output documents. Both are linear.
 
 ## Measured scaling (after fixes)
 
@@ -104,8 +135,43 @@ flags so the budget lives in the workflow, not the script. The harness exits
 non-zero when a comparison exceeds the budget or the tail (largest-two-size)
 scaling exponent exceeds the allowed slope.
 
-A `slow` regression guard also lives in
+`slow` regression guards also live in
 [`tests/test_performance.py`](https://github.com/napetrov/abicheck/blob/main/tests/test_performance.py)
-(`TestTypeChurnScaling`): it runs in the existing slow lane with generous
-thresholds, so a regression back to genuine O(n²) fails fast without flaking on
-normal drift.
+— `TestTypeChurnScaling` (compare back to genuine O(n²)),
+`TestSuppressionAuditScaling` (audit stays linear in findings), and the
+HTML/SARIF cases in `TestReporterScaling`. They run in the existing slow lane
+with generous thresholds, so a catastrophic regression fails fast without
+flaking on normal drift.
+
+## Coverage gap analysis & remaining gaps
+
+A second pass (continuation of PR #331) audited the whole pipeline for
+scaling risk and extended the harness to the highest-value uncovered paths
+(`enum_churn`, `suppression_audit`, `report_html`, `report_sarif`) plus
+per-call peak-memory tracking. Findings and what is still **not** guarded:
+
+| Path | Status | Notes |
+|------|--------|-------|
+| `compare()` post-processing | ✅ covered | Original PR #331 scenarios. |
+| Suppression audit | ✅ covered | New `suppression_audit` scenario + `slow` test. O(rules × findings); linear in findings for a fixed ruleset. |
+| HTML / SARIF reporting | ✅ covered | New `report_html` / `report_sarif` scenarios + `slow` tests; both linear. (`to_markdown`/`to_json` already guarded.) |
+| Enum diffing | ✅ covered | New `enum_churn` scenario. **Mildly super-linear** at the sizes swept (tail exponent ≈1.7) — comparable to `type_churn`'s opaque-filter residual; tracked, not yet optimised. |
+| Peak memory (all scenarios) | ✅ covered | `tracemalloc` `peak_mb` column + `--max-memory-mb` gate. |
+| **Dump / snapshot creation** | ⚠️ **not benchmarked** | The synthetic harness builds `AbiSnapshot` directly, bypassing all parsing. `dump` is only anecdotally "~5 s for libonedal" and DWARF/PE/PDB parsing has **no scaling guard**. Closing this needs either a committed large real binary or a synthetic DWARF/ELF generator (heavier than the pure-Python harness — out of scope here). |
+| **PE/COFF & Mach-O diff paths** | ⚠️ partial | Only ELF-style inputs are swept; `diff_platform.py`'s PE/Mach-O arms are untimed. |
+| Typedef / union / large-single-struct churn | ⚠️ partial | `type_churn` covers structs-by-pointer; `enum_churn` covers enums. Unions, typedef storms, and 100+-field single structs are not isolated. |
+| JUnit reporting, appcompat HTML | ⚠️ not benchmarked | `junit_report.py` / `appcompat_html.py` renderers untimed (linear by inspection). |
+| Stack analysis / appcompat filtering | ⚠️ not benchmarked | `stack_checker` runs one `compare()` per dependency (inherent); appcompat finding-vs-required-symbol filtering untimed. |
+| **Historical / PR-vs-base regression** | ⚠️ **gap** | The benchmark is *standalone* — it only catches catastrophic super-linear blow-ups via the per-run exponent, not a gradual 20–30 % regression. There is no stored baseline nor a PR-head-vs-base comparison. A future step could persist `scaling.json` as a baseline artifact and diff per-`us/change` against it with a tolerance. |
+
+### Recommended next steps (in priority order)
+
+1. **Wire a budget gate on the linear scenarios** now that they're stable —
+   e.g. `--max-exponent 1.4` on `add_remove`/`var_churn`/`report_html` and a
+   `--max-memory-mb` ceiling — while leaving the known super-linear scenarios
+   (`type_churn`, `enum_churn`, `nested_types`) non-gating.
+2. **Add a dump/parse scaling guard** — the largest untracked surface. Either
+   commit one large stripped real `.so` behind the `integration` marker, or
+   add a synthetic DWARF/ELF byte-stream generator.
+3. **Persist a baseline** for PR-vs-base regression detection (gradual drift),
+   not just absolute-budget gating.

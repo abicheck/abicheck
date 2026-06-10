@@ -3,6 +3,7 @@
 All tests are marked with @pytest.mark.slow so they can be skipped with:
     pytest -m "not slow"
 """
+
 from __future__ import annotations
 
 import json
@@ -11,6 +12,7 @@ import time
 import pytest
 
 from abicheck.checker import Change, ChangeKind, DiffResult, Verdict, compare
+from abicheck.html_report import generate_html_report
 from abicheck.model import (
     AbiSnapshot,
     Function,
@@ -20,7 +22,9 @@ from abicheck.model import (
     Visibility,
 )
 from abicheck.reporter import to_json, to_markdown
+from abicheck.sarif import to_sarif_str
 from abicheck.serialization import snapshot_from_dict, snapshot_to_json
+from abicheck.suppression import Suppression, SuppressionList
 
 pytestmark = pytest.mark.slow
 
@@ -129,17 +133,21 @@ class TestReporterScaling:
     def _make_large_diff(self) -> DiffResult:
         changes = []
         for i in range(250):
-            changes.append(Change(
-                ChangeKind.FUNC_REMOVED,
-                f"_Z{len(str(i)) + 5}func_{i}v",
-                f"Function func_{i} removed",
-            ))
+            changes.append(
+                Change(
+                    ChangeKind.FUNC_REMOVED,
+                    f"_Z{len(str(i)) + 5}func_{i}v",
+                    f"Function func_{i} removed",
+                )
+            )
         for i in range(250):
-            changes.append(Change(
-                ChangeKind.FUNC_ADDED,
-                f"_Z{len(str(i)) + 4}new_{i}v",
-                f"New function new_{i} added",
-            ))
+            changes.append(
+                Change(
+                    ChangeKind.FUNC_ADDED,
+                    f"_Z{len(str(i)) + 4}new_{i}v",
+                    f"New function new_{i} added",
+                )
+            )
         return DiffResult(
             old_version="1.0",
             new_version="2.0",
@@ -166,6 +174,96 @@ class TestReporterScaling:
         assert elapsed < 2.0, f"to_json took {elapsed:.2f}s, expected < 2s"
         assert len(j) > 0
 
+    def test_to_html_scaling(self) -> None:
+        # The HTML renderer builds the largest output document; markdown/json
+        # were guarded above but HTML was previously unbenchmarked.
+        diff = self._make_large_diff()
+        start = time.monotonic()
+        html = generate_html_report(diff, lib_name="libperf.so")
+        elapsed = time.monotonic() - start
+
+        assert elapsed < 2.0, f"generate_html_report took {elapsed:.2f}s, expected < 2s"
+        assert len(html) > 0
+
+    def test_to_sarif_scaling(self) -> None:
+        diff = self._make_large_diff()
+        start = time.monotonic()
+        sarif = to_sarif_str(diff)
+        elapsed = time.monotonic() - start
+
+        assert elapsed < 2.0, f"to_sarif_str took {elapsed:.2f}s, expected < 2s"
+        assert len(sarif) > 0
+
+
+# ===========================================================================
+# 3b. Suppression audit scaling
+# ===========================================================================
+
+
+class TestSuppressionAuditScaling:
+    """``SuppressionList.audit`` tests every rule against every change.
+
+    A real project keeps a roughly fixed ruleset while its library (and so its
+    finding count) grows, so with the rule count held fixed the audit must stay
+    linear in the number of findings. This guards against a regression that
+    makes *per-finding* matching itself super-linear (e.g. recompiling a regex
+    per change). Mirrors ``scripts/benchmark_scaling.py``'s ``suppression_audit``
+    scenario.
+    """
+
+    def _make_rules(self) -> SuppressionList:
+        rules: list[Suppression] = []
+        for i in range(20):
+            rules.append(Suppression(symbol_pattern=f".*foo<{i}>.*", reason="symbol"))
+        for i in range(10):
+            rules.append(Suppression(type_pattern=f".*Widget{i}.*", reason="type"))
+        for i in range(10):
+            rules.append(Suppression(namespace=f"**::detail{i}::*", reason="ns"))
+        return SuppressionList(rules)
+
+    def _make_changes(self, n: int) -> list[Change]:
+        kinds = [
+            ChangeKind.FUNC_REMOVED,
+            ChangeKind.FUNC_ADDED,
+            ChangeKind.TYPEDEF_REMOVED,
+        ]
+        return [
+            Change(
+                kind=kinds[i % len(kinds)],
+                symbol=f"_ZN3lib6detail3fooILi{i}EEEv",
+                description=f"finding {i}",
+            )
+            for i in range(n)
+        ]
+
+    def test_audit_2000_findings_completes(self) -> None:
+        supp = self._make_rules()
+        changes = self._make_changes(2000)
+        start = time.monotonic()
+        audit = supp.audit(changes)
+        elapsed = time.monotonic() - start
+
+        # Generous bound for shared CI runners; ~2s locally for 40 rules x 2000.
+        assert elapsed < 20.0, f"audit took {elapsed:.2f}s, expected < 20s"
+        assert audit.total_rules == 40
+
+    def test_audit_scaling_stays_linear_in_findings(self) -> None:
+        import math
+
+        supp = self._make_rules()
+        timings: list[tuple[int, float]] = []
+        for n in (1000, 2000):
+            changes = self._make_changes(n)
+            start = time.monotonic()
+            supp.audit(changes)
+            timings.append((n, max(time.monotonic() - start, 1e-3)))
+
+        (n1, t1), (n2, t2) = timings
+        exponent = math.log(t2 / t1) / math.log(n2 / n1)
+        # Fixed ruleset → linear in findings (~1.0). A regression to per-finding
+        # super-linear matching (exponent >= 1.6) should fail this guard.
+        assert exponent < 1.6, f"audit scaling exponent {exponent:.2f} regressed"
+
 
 # ===========================================================================
 # 4. Many change kinds
@@ -177,7 +275,11 @@ class TestManyChangeKinds:
 
     def test_all_changekind_values_render_without_error(self) -> None:
         changes = [
-            Change(kind=kind, symbol=f"_sym_{kind.value}", description=f"Change: {kind.value}")
+            Change(
+                kind=kind,
+                symbol=f"_sym_{kind.value}",
+                description=f"Change: {kind.value}",
+            )
             for kind in ChangeKind
         ]
         diff = DiffResult(
@@ -200,7 +302,11 @@ class TestManyChangeKinds:
         from abicheck.sarif import to_sarif_str
 
         changes = [
-            Change(kind=kind, symbol=f"_sym_{kind.value}", description=f"Change: {kind.value}")
+            Change(
+                kind=kind,
+                symbol=f"_sym_{kind.value}",
+                description=f"Change: {kind.value}",
+            )
             for kind in ChangeKind
         ]
         diff = DiffResult(
@@ -240,8 +346,12 @@ def _build_type_churn(n_funcs: int) -> tuple[AbiSnapshot, AbiSnapshot]:
             TypeField(name="b", type="int", offset_bits=32),
         ]
         grown = base + [TypeField(name="c", type="int", offset_bits=64)]
-        types_old.append(RecordType(name=f"Type_{i}", kind="struct", size_bits=64, fields=base))
-        types_new.append(RecordType(name=f"Type_{i}", kind="struct", size_bits=96, fields=grown))
+        types_old.append(
+            RecordType(name=f"Type_{i}", kind="struct", size_bits=64, fields=base)
+        )
+        types_new.append(
+            RecordType(name=f"Type_{i}", kind="struct", size_bits=96, fields=grown)
+        )
     funcs = [
         Function(
             name=f"use_Type_{i % n_types}_{i}",
@@ -252,8 +362,12 @@ def _build_type_churn(n_funcs: int) -> tuple[AbiSnapshot, AbiSnapshot]:
         )
         for i in range(n_funcs)
     ]
-    old = AbiSnapshot(library="libperf.so", version="1.0", functions=list(funcs), types=types_old)
-    new = AbiSnapshot(library="libperf.so", version="2.0", functions=list(funcs), types=types_new)
+    old = AbiSnapshot(
+        library="libperf.so", version="1.0", functions=list(funcs), types=types_old
+    )
+    new = AbiSnapshot(
+        library="libperf.so", version="2.0", functions=list(funcs), types=types_new
+    )
     return old, new
 
 
@@ -290,7 +404,9 @@ class TestTypeChurnScaling:
         exponent = math.log(t2 / t1) / math.log(n2 / n1)
         # True quadratic would be ~2.0; current behaviour is ~1.3. A regression
         # to genuine O(n^2) (exponent >= 1.9) should fail this guard.
-        assert exponent < 1.9, f"compare scaling exponent {exponent:.2f} regressed toward O(n^2)"
+        assert exponent < 1.9, (
+            f"compare scaling exponent {exponent:.2f} regressed toward O(n^2)"
+        )
 
 
 # ===========================================================================
