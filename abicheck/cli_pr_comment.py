@@ -91,7 +91,7 @@ def pr_comment_cmd(
     from .pr_comment import build_model, render_comment, should_post
 
     try:
-        data = json.loads(Path(report).read_text(encoding="utf-8"))
+        data = json.loads(report.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as e:
         raise click.ClickException(f"Cannot read JSON report: {e}") from e
 

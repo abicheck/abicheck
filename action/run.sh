@@ -636,8 +636,10 @@ _maybe_post_pr_comment() {
   fi
 
   echo "::group::abicheck PR comment"
-  PR_JSON=$(mktemp --suffix=.json)
-  PR_BODY=$(mktemp --suffix=.md)
+  # Template-based mktemp (X's at the end) — portable across GNU and BSD/macOS,
+  # unlike the GNU-only --suffix option.
+  PR_JSON=$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-pr-json.XXXXXX")
+  PR_BODY=$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-pr-body.XXXXXX")
   _build_json_cmd
   # Re-run for JSON; a non-zero exit here is expected on breaks — the report
   # file is still written, so we ignore the status.
@@ -665,6 +667,11 @@ _maybe_post_pr_comment() {
 
   if [[ ! -s "$PR_BODY" ]]; then
     echo "abicheck: no comment to post (no changes / --on=${INPUT_PR_COMMENT_ON:-changes})."
+    # Sticky mode: clear any prior comment so a once-dirty PR that is now clean
+    # doesn't keep showing a stale BREAKING report.
+    if [[ "${INPUT_PR_COMMENT_MODE:-update}" != "new" ]]; then
+      _delete_sticky_pr_comment "$pr_number"
+    fi
     echo "::endgroup::"
     return 0
   fi
@@ -682,6 +689,24 @@ _create_pr_comment() {
   local repo="$1" pr_number="$2" body_file="$3"
   jq -Rs '{body: .}' "$body_file" \
     | gh api -X POST "repos/$repo/issues/$pr_number/comments" --input - >/dev/null
+}
+
+_delete_sticky_pr_comment() {
+  # Remove OUR previous sticky comment (located by marker) so a once-dirty PR
+  # that is now clean stops showing a stale report.
+  local pr_number="$1"
+  local repo="${GITHUB_REPOSITORY:-}"
+  if [[ -z "$repo" ]] || ! command -v jq >/dev/null 2>&1; then
+    return 0
+  fi
+  local existing_id
+  existing_id=$(gh api --paginate "repos/$repo/issues/$pr_number/comments" \
+    --jq ".[] | select(.body | contains(\"$PR_COMMENT_MARKER\")) | .id" 2>/dev/null | tail -1)
+  if [[ -n "$existing_id" ]]; then
+    if gh api -X DELETE "repos/$repo/issues/comments/$existing_id" >/dev/null 2>&1; then
+      echo "abicheck: cleared stale sticky comment $existing_id (no current changes)."
+    fi
+  fi
 }
 
 _gh_pr_comment_fallback() {
