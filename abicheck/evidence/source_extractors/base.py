@@ -224,7 +224,14 @@ def entity_from_constant(name: str, value: str) -> SourceEntity:
 
 
 def entity_from_typedef(name: str, target: str) -> SourceEntity:
-    """Map a typedef alias (name→underlying type) to a ``typedef`` type entity."""
+    """Map a typedef alias (name→underlying type) to a ``typedef`` type entity.
+
+    Stamped ``PUBLIC_HEADER``: the ``typedefs`` map has no per-entry provenance,
+    so the **caller must pre-scope it to the public surface** (as ``parse_constants``
+    does for constants). The castxml extractor cannot — ``parse_typedefs`` is
+    unscoped — so it passes none rather than pull private/system aliases onto the
+    surface (which would also risk false ``odr_source_conflict``).
+    """
     return SourceEntity(
         id=_content_hash("typedef", name, target),
         kind="typedef",

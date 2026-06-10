@@ -131,6 +131,26 @@ def test_build_command_uses_build_action_compiler() -> None:
     assert "g++" in override and "clang++" not in override
 
 
+def test_build_command_carries_msvc_forced_includes() -> None:
+    # MSVC /FI forced includes (joined and separate) must be carried for cl /
+    # clang-cl TUs (Codex review #335).
+    cmd = build_castxml_command(
+        _cu(argv=["clang-cl", "/FIjoined.h", "/FI", "sep.h", "/c", "a.cpp"]),
+        Path("a.cpp"),
+        Path("o.xml"),
+    )
+    assert "--castxml-cc-msvc" in cmd
+    assert "/FIjoined.h" in cmd
+    assert cmd[cmd.index("/FI") + 1] == "sep.h"
+    # In GNU mode a stray /FI-looking token is not carried (avoids -F-family
+    # false matches); only the GNU -include/-imacros forms are.
+    gnu = build_castxml_command(
+        _cu(argv=["g++", "/FInotmine.h", "-c", "a.cpp"]), Path("a.cpp"), Path("o.xml")
+    )
+    assert "--castxml-cc-gnu" in gnu
+    assert "/FInotmine.h" not in gnu
+
+
 def test_build_command_carries_argv_only_options() -> None:
     # ABI-relevant flags and forced includes that live only in argv must be
     # carried through so castxml parses the same TU as the build (Codex review).
@@ -393,6 +413,31 @@ def test_parse_root_marks_generated_public_header_as_generated() -> None:
 
     surface = link_source_abi([tu], target_id="target://libfoo")
     assert any("Cfg" in e.qualified_name for e in surface.reachable_types)
+
+
+def test_parse_root_omits_unscoped_typedefs() -> None:
+    # parse_typedefs() carries no provenance, so the extractor must not emit
+    # typedefs (they would be falsely marked public and could create spurious
+    # odr_source_conflict). Records/enums still come through (Codex review #335).
+    from xml.etree.ElementTree import Element, SubElement
+
+    root = Element("GCC_XML")
+    SubElement(root, "File", id="f1", name="foo.h")
+    SubElement(root, "FundamentalType", id="t_int", name="int")
+    SubElement(root, "Location", id="loc1", file="f1", line="3")
+    # A typedef (no provenance) and a record (has provenance).
+    SubElement(root, "Typedef", id="td1", name="Handle", type="t_int")
+    SubElement(
+        root, "Class", id="c1", name="Rec", size="32", align="32", location="loc1"
+    )
+
+    extractor = CastxmlSourceExtractor()
+    tu = extractor._parse_root(
+        root, _cu(), public_header_roots=["foo.h"], target_id="target://libfoo"
+    )
+    kinds = {e.kind for e in tu.types}
+    assert "typedef" not in kinds
+    assert any(e.qualified_name == "Rec" for e in tu.types)
 
 
 # -- end-to-end via real castxml (integration) -------------------------------

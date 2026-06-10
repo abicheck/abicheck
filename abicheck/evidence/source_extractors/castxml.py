@@ -72,20 +72,27 @@ def _std_flag(standard: str, cc_id: str) -> list[str]:
     return [f"/std:{standard}"] if cc_id == "msvc" else [f"-std={standard}"]
 
 
-#: argv options that take a path operand and change *what* gets parsed (forced
+#: GNU options that take a path operand and change *what* gets parsed (forced
 #: includes / macro files). Carried through from argv since they are not
 #: normalized into the structured CompileUnit fields.
-_FORCED_INCLUDE_OPTS = frozenset({"-include", "-imacros"})
+_GNU_FORCED_INCLUDE_OPTS = frozenset({"-include", "-imacros"})
+#: MSVC/clang-cl forced-include options in their separate-operand spelling
+#: (``/FI file`` or ``-FI file``); the joined ``/FIfile`` form is handled by
+#: prefix. (https://learn.microsoft.com/cpp/build/reference/fi-name-forced-include-file)
+_MSVC_FORCED_INCLUDE_OPTS = frozenset({"/FI", "-FI"})
 
 
-def _replay_extra_flags(compile_unit: CompileUnit, already: list[str]) -> list[str]:
+def _replay_extra_flags(
+    compile_unit: CompileUnit, already: list[str], cc_id: str
+) -> list[str]:
     """Carry through ABI/parse-relevant options not in the structured fields.
 
     ``abi_relevant_flags`` (e.g. ``-fms-extensions``, ``-fabi-version``,
     ``-fvisibility``, ``-m32``) and forced-include options from ``argv`` change
     the parsed translation unit; dropping them makes castxml parse a different TU
     than the real build (ADR-030 D2). De-duplicated against the flags already
-    emitted from the structured fields.
+    emitted from the structured fields. MSVC ``/FI`` forced includes are carried
+    only in MSVC mode so a GNU ``-F``-family flag is never mistaken for one.
     """
     seen = set(already)
     out: list[str] = []
@@ -96,9 +103,20 @@ def _replay_extra_flags(compile_unit: CompileUnit, already: list[str]) -> list[s
     argv = compile_unit.argv
     i = 0
     while i < len(argv):
-        if argv[i] in _FORCED_INCLUDE_OPTS and i + 1 < len(argv):
-            out += [argv[i], argv[i + 1]]
+        tok = argv[i]
+        if tok in _GNU_FORCED_INCLUDE_OPTS and i + 1 < len(argv):
+            out += [tok, argv[i + 1]]
             i += 2
+        elif cc_id == "msvc" and tok in _MSVC_FORCED_INCLUDE_OPTS and i + 1 < len(argv):
+            out += [tok, argv[i + 1]]  # /FI file (separate operand)
+            i += 2
+        elif (
+            cc_id == "msvc"
+            and len(tok) > 3
+            and (tok.startswith("/FI") or tok.startswith("-FI"))
+        ):
+            out.append(tok)  # /FIfile (joined)
+            i += 1
         else:
             i += 1
     return out
@@ -135,7 +153,7 @@ def build_castxml_command(
         cmd.append(f"--sysroot={compile_unit.sysroot}")
     if compile_unit.target_triple and cc_id != "msvc":
         cmd.append(f"--target={compile_unit.target_triple}")
-    cmd += _replay_extra_flags(compile_unit, cmd)
+    cmd += _replay_extra_flags(compile_unit, cmd, cc_id)
     cmd += ["-o", str(out_xml), str(source)]
     return cmd
 
@@ -288,5 +306,12 @@ class CastxmlSourceExtractor:
             enums=enums,
             variables=variables,
             constants=parser.parse_constants(),
-            typedefs=parser.parse_typedefs(),
+            # parse_typedefs() returns a flat name->target map with no source
+            # provenance, so — unlike parse_constants(), which scopes itself to
+            # public headers — typedefs cannot be marked PUBLIC_HEADER without
+            # pulling private/system aliases onto the surface (and risking false
+            # odr_source_conflict). Omitted until a provenance-aware typedef
+            # extractor exists (Clang backend, phase 5); records/enums still
+            # carry full type-change coverage with correct provenance.
+            typedefs={},
         )
