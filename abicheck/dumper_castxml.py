@@ -19,6 +19,7 @@ soft cap. Re-exported from ``abicheck.dumper`` so existing imports of
 ``_CastxmlParser``, ``_parse_vtable_index``, and ``_vt_sort_key`` from
 ``abicheck.dumper`` keep working.
 """
+
 from __future__ import annotations
 
 import re
@@ -59,10 +60,14 @@ def _vt_sort_key(item: tuple[int | None, str]) -> tuple[int, int]:
 class _CastxmlParser:
     """Parse castxml XML into ABI model objects."""
 
-    def __init__(self, root: Element, exported_dynamic: set[str],
-                 exported_static: set[str],
-                 public_header_paths: list[str] | None = None,
-                 public_dir_paths: list[str] | None = None):
+    def __init__(
+        self,
+        root: Element,
+        exported_dynamic: set[str],
+        exported_static: set[str],
+        public_header_paths: list[str] | None = None,
+        public_dir_paths: list[str] | None = None,
+    ):
         self._root = root
         self._exported_dynamic = exported_dynamic
         self._exported_static = exported_static
@@ -73,9 +78,11 @@ class _CastxmlParser:
         # reached via an umbrella header or a public include dir are kept, while
         # transitively-included system/private-header constants are excluded.
         # Empty → constant extraction is skipped (provenance is opt-in).
-        (self._pub_header_segs, self._pub_dir_segs,
-         self._have_public_set) = build_public_set(
-            public_header_paths, public_dir_paths,
+        (self._pub_header_segs, self._pub_dir_segs, self._have_public_set) = (
+            build_public_set(
+                public_header_paths,
+                public_dir_paths,
+            )
         )
         self._id_map: dict[str, Element] = {}
         self._virtual_methods_by_class: dict[str, list[Element]] = {}
@@ -132,13 +139,15 @@ class _CastxmlParser:
         window_parts: list[str] = []
         for line in lines[start : min(len(lines), line_no + 5)]:
             window_parts.append(line.strip())
-            if line_no - 1 <= start + len(window_parts) - 1 and (";" in line or "{" in line):
+            if line_no - 1 <= start + len(window_parts) - 1 and (
+                ";" in line or "{" in line
+            ):
                 break
         window = " ".join(window_parts)
         operator_match = re.search(r"\boperator\b", window)
         if operator_match is None:
             return False
-        prefix = window[:operator_match.start()]
+        prefix = window[: operator_match.start()]
         declaration_start = max(prefix.rfind(";"), prefix.rfind("{"), prefix.rfind("}"))
         return bool(re.search(r"\bexplicit\b", prefix[declaration_start + 1 :]))
 
@@ -259,8 +268,13 @@ class _CastxmlParser:
         # (e.g. `bool operator==(const Foo&, const Foo&)` at namespace scope,
         # including hidden friends declared inside a class body).
         function_tags = (
-            "Function", "Method", "Constructor", "Destructor",
-            "Converter", "OperatorFunction", "OperatorMethod",
+            "Function",
+            "Method",
+            "Constructor",
+            "Destructor",
+            "Converter",
+            "OperatorFunction",
+            "OperatorMethod",
         )
         for el in self._root:
             # castxml emits user-defined conversion operators as <Converter>
@@ -279,7 +293,11 @@ class _CastxmlParser:
             # Normalize to the canonical "operator==" form for readability and
             # to match how the rest of the pipeline (and human reports)
             # refer to operator overloads.
-            if name and el.tag in ("OperatorFunction", "OperatorMethod") and not name.startswith("operator"):
+            if (
+                name
+                and el.tag in ("OperatorFunction", "OperatorMethod")
+                and not name.startswith("operator")
+            ):
                 name = f"operator{name}"
             if not name:
                 continue
@@ -303,15 +321,21 @@ class _CastxmlParser:
                     # (and silent-behaviour) concern even though the mangled name
                     # is unchanged; capture it so the param_defaults detector can
                     # fire. Absent attribute → None (no default).
-                    params.append(Param(
-                        name=p_name, type=p_type, pointer_depth=p_depth,
-                        default=arg.get("default"),
-                    ))
+                    params.append(
+                        Param(
+                            name=p_name,
+                            type=p_type,
+                            pointer_depth=p_depth,
+                            default=arg.get("default"),
+                        )
+                    )
 
             vis = self._visibility(el.get("mangled", ""), name)
             is_virtual = el.get("virtual") == "1"
             noexcept_re = re.search(r"noexcept", el.get("attributes", ""))
-            vtable_index = _parse_vtable_index(el.get("vtable_index")) if is_virtual else None
+            vtable_index = (
+                _parse_vtable_index(el.get("vtable_index")) if is_virtual else None
+            )
 
             # Detect extern "C": explicit extern attribute OR no mangled name (C linkage)
             raw_mangled = el.get("mangled", "")
@@ -373,29 +397,31 @@ class _CastxmlParser:
             # the referenced ids upfront and check membership here.
             is_hidden_friend = el.get("id", "") in hidden_friend_ids
 
-            funcs.append(Function(
-                name=name,
-                mangled=mangled,
-                return_type=ret_type,
-                params=params,
-                visibility=vis,
-                is_virtual=is_virtual,
-                is_noexcept=bool(noexcept_re),
-                is_extern_c=is_extern_c,
-                vtable_index=vtable_index,
-                source_location=source_loc,
-                is_static=is_static,
-                is_const=is_const,
-                is_volatile=is_volatile,
-                is_pure_virtual=is_pure_virtual,
-                is_deleted=is_deleted,
-                is_inline=is_inline,
-                access=self._access_level(el),
-                return_pointer_depth=ret_ptr_depth,
-                ref_qualifier=ref_qualifier,
-                is_explicit=is_explicit,
-                is_hidden_friend=is_hidden_friend,
-            ))
+            funcs.append(
+                Function(
+                    name=name,
+                    mangled=mangled,
+                    return_type=ret_type,
+                    params=params,
+                    visibility=vis,
+                    is_virtual=is_virtual,
+                    is_noexcept=bool(noexcept_re),
+                    is_extern_c=is_extern_c,
+                    vtable_index=vtable_index,
+                    source_location=source_loc,
+                    is_static=is_static,
+                    is_const=is_const,
+                    is_volatile=is_volatile,
+                    is_pure_virtual=is_pure_virtual,
+                    is_deleted=is_deleted,
+                    is_inline=is_inline,
+                    access=self._access_level(el),
+                    return_pointer_depth=ret_ptr_depth,
+                    ref_qualifier=ref_qualifier,
+                    is_explicit=is_explicit,
+                    is_hidden_friend=is_hidden_friend,
+                )
+            )
         return funcs
 
     def parse_variables(self) -> list[Variable]:
@@ -417,16 +443,20 @@ class _CastxmlParser:
             # Use castxml structured attribute first; fall back to word-boundary
             # regex on type_name to avoid false positives on names like
             # "constructor_t", "const_iterator", "myconstant".
-            is_const = (
-                el.get("const") == "1"
-                or bool(re.search(r"\bconst\b", type_name))
+            is_const = el.get("const") == "1" or bool(
+                re.search(r"\bconst\b", type_name)
             )
             vis = self._visibility(mangled, name)
-            variables.append(Variable(
-                name=name, mangled=mangled, type=type_name, visibility=vis,
-                is_const=is_const,
-                source_location=self._source_location(el),
-            ))
+            variables.append(
+                Variable(
+                    name=name,
+                    mangled=mangled,
+                    type=type_name,
+                    visibility=vis,
+                    is_const=is_const,
+                    source_location=self._source_location(el),
+                )
+            )
         return variables
 
     def parse_constants(self) -> dict[str, str]:
@@ -490,9 +520,8 @@ class _CastxmlParser:
             # Only const / constexpr: the initializer is a baked-in contract.
             # (constexpr implies const, so this captures both.)
             type_name = self._type_name(el.get("type", ""))
-            is_const = (
-                el.get("const") == "1"
-                or bool(re.search(r"\bconst\b", type_name))
+            is_const = el.get("const") == "1" or bool(
+                re.search(r"\bconst\b", type_name)
             )
             if not is_const:
                 continue
@@ -542,10 +571,15 @@ class _CastxmlParser:
         sh = header_from_location(self._source_location(el))
         if not sh:
             return False
-        return classify_origin(
-            sh, self._pub_header_segs, self._pub_dir_segs,
-            have_public_set=self._have_public_set,
-        ) == ScopeOrigin.PUBLIC_HEADER
+        return (
+            classify_origin(
+                sh,
+                self._pub_header_segs,
+                self._pub_dir_segs,
+                have_public_set=self._have_public_set,
+            )
+            == ScopeOrigin.PUBLIC_HEADER
+        )
 
     def parse_types(self) -> list[RecordType]:
         # Build reverse mapping: struct/union ID → typedef name for anonymous types.
@@ -563,7 +597,8 @@ class _CastxmlParser:
             # Follow through ElaboratedType / CvQualifiedType wrappers
             # that castxml may insert between Typedef and the actual Struct.
             while target_el is not None and target_el.tag in (
-                "ElaboratedType", "CvQualifiedType",
+                "ElaboratedType",
+                "CvQualifiedType",
             ):
                 target_id = target_el.get("type", "")
                 target_el = self._resolve(target_id)
@@ -586,7 +621,9 @@ class _CastxmlParser:
                 eid = el.get("id", "")
                 override_name = typedef_name_for.get(eid)
                 if override_name and not self._is_builtin_element(el):
-                    types.append(self._build_record_type(el, override_name=override_name))
+                    types.append(
+                        self._build_record_type(el, override_name=override_name)
+                    )
         return types
 
     def _is_public_record_type(self, el: Any) -> bool:
@@ -602,26 +639,55 @@ class _CastxmlParser:
             return False
         return True
 
-    def _build_record_type(self, el: Any, override_name: str | None = None) -> RecordType:
+    def _build_record_type(
+        self, el: Any, override_name: str | None = None
+    ) -> RecordType:
         name = override_name or el.get("name", "")
         is_opaque = el.get("incomplete") == "1"
+        vtable = [] if is_opaque else self._build_vtable(el.get("id", ""))
+        # Best-effort layout descriptor (layout-closure work). Direct (non-virtual)
+        # base subobject offsets from each ``<Base offset=...>``; the unit only has
+        # to be consistent across snapshots for change detection, and it is.
+        base_offsets: dict[str, int] = {}
+        if not is_opaque:
+            for b in el:
+                if b.tag == "Base" and b.get("virtual") != "1":
+                    off = self._optional_int_attr(b, "offset")
+                    if off is not None:
+                        base_offsets[self._type_name(b.get("type", ""))] = off
+        # is_standard_layout / is_trivially_copyable / data_size_bits are left
+        # None: "not polymorphic and no virtual bases" is not a sound
+        # standard-layout signal (a mixed-access class is already non-standard-
+        # layout, so the heuristic would flip True→False on gaining a virtual and
+        # emit a spurious STANDARD_LAYOUT_LOST), and CastXML doesn't expose the
+        # trivially-copyable trait directly (Codex review #345).
         return RecordType(
             name=name,
             kind=el.tag.lower(),
             size_bits=self._optional_int_attr(el, "size"),
             alignment_bits=self._optional_int_attr(el, "align"),
             fields=[] if is_opaque else self._parse_record_fields(el),
-            bases=[] if is_opaque else [
+            bases=[]
+            if is_opaque
+            else [
                 self._type_name(b.get("type", ""))
-                for b in el if b.tag == "Base" and b.get("virtual") != "1"
+                for b in el
+                if b.tag == "Base" and b.get("virtual") != "1"
             ],
-            virtual_bases=[] if is_opaque else [
+            virtual_bases=[]
+            if is_opaque
+            else [
                 self._type_name(b.get("type", ""))
-                for b in el if b.tag == "Base" and b.get("virtual") == "1"
+                for b in el
+                if b.tag == "Base" and b.get("virtual") == "1"
             ],
-            vtable=[] if is_opaque else self._build_vtable(el.get("id", "")),
+            vtable=vtable,
             is_union=el.tag == "Union",
             is_opaque=is_opaque,
+            # Polymorphic (non-empty vtable) → vtable pointer at offset 0; None
+            # when non-polymorphic so the diff can tell "gained a vptr" apart.
+            vptr_offset_bits=0 if vtable else None,
+            base_offsets=base_offsets,
             # castxml records the `final` class-key specifier as a `final`
             # token inside the compound ``attributes`` string (e.g.
             # ``attributes="final"``), the same channel used for noexcept.
@@ -686,14 +752,16 @@ class _CastxmlParser:
                 fields.extend(self._expand_anonymous_field(child))
                 continue
             bitfield_bits, is_bitfield = self._parse_bitfield_bits(child.get("bits"))
-            fields.append(TypeField(
-                name=child_name,
-                type=self._type_name(child.get("type", "")),
-                offset_bits=self._optional_int_attr(child, "offset"),
-                is_bitfield=is_bitfield,
-                bitfield_bits=bitfield_bits,
-                access=self._access_level(child),
-            ))
+            fields.append(
+                TypeField(
+                    name=child_name,
+                    type=self._type_name(child.get("type", "")),
+                    offset_bits=self._optional_int_attr(child, "offset"),
+                    is_bitfield=is_bitfield,
+                    bitfield_bits=bitfield_bits,
+                    access=self._access_level(child),
+                )
+            )
         return fields
 
     def _expand_anonymous_field(
@@ -733,20 +801,26 @@ class _CastxmlParser:
             inner_name = inner.get("name", "")
             if not inner_name:
                 # Doubly-nested anonymous member — recurse, passing accumulated offset
-                result.extend(self._expand_anonymous_field(
-                    inner, _depth + 1, _outer_offset=this_offset,
-                ))
+                result.extend(
+                    self._expand_anonymous_field(
+                        inner,
+                        _depth + 1,
+                        _outer_offset=this_offset,
+                    )
+                )
                 continue
             inner_offset = self._optional_int_attr(inner, "offset") or 0
             bitfield_bits, is_bitfield = self._parse_bitfield_bits(inner.get("bits"))
-            result.append(TypeField(
-                name=inner_name,
-                type=self._type_name(inner.get("type", "")),
-                offset_bits=this_offset + inner_offset,
-                is_bitfield=is_bitfield,
-                bitfield_bits=bitfield_bits,
-                access=self._access_level(inner),
-            ))
+            result.append(
+                TypeField(
+                    name=inner_name,
+                    type=self._type_name(inner.get("type", "")),
+                    offset_bits=this_offset + inner_offset,
+                    is_bitfield=is_bitfield,
+                    bitfield_bits=bitfield_bits,
+                    access=self._access_level(inner),
+                )
+            )
         return result
 
     @staticmethod
@@ -763,7 +837,9 @@ class _CastxmlParser:
         return [m for _, m in virtual_methods]
 
     def _collect_virtual_methods(
-        self, cid: str, seen: set[str] | None = None,
+        self,
+        cid: str,
+        seen: set[str] | None = None,
     ) -> list[tuple[int | None, str]]:
         if seen is None:
             seen = set()
@@ -786,7 +862,9 @@ class _CastxmlParser:
                 continue
             base_type_el = self._resolve(base.get("type", ""))
             if base_type_el is not None:
-                for idx, name in self._collect_virtual_methods(base_type_el.get("id", ""), seen):
+                for idx, name in self._collect_virtual_methods(
+                    base_type_el.get("id", ""), seen
+                ):
                     if idx is None:
                         unindexed.append(name)
                     else:
@@ -803,7 +881,6 @@ class _CastxmlParser:
                 slots[idx] = mangled_name
 
         return list(slots.items()) + [(None, name) for name in unindexed]
-
 
     def parse_enums(self) -> list[EnumType]:
         enums = []
@@ -828,10 +905,13 @@ class _CastxmlParser:
                     except ValueError:
                         m_val = 0
                     members.append(EnumMember(name=m_name, value=m_val))
-            enums.append(EnumType(
-                name=name, members=members,
-                source_location=self._source_location(el),
-            ))
+            enums.append(
+                EnumType(
+                    name=name,
+                    members=members,
+                    source_location=self._source_location(el),
+                )
+            )
         return enums
 
     def _underlying_type_name(self, id_: str, depth: int = 0) -> str:
@@ -860,5 +940,3 @@ class _CastxmlParser:
             underlying = self._underlying_type_name(type_id) if type_id else "?"
             typedefs[name] = underlying
         return typedefs
-
-

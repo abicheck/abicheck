@@ -13,6 +13,7 @@
 # limitations under the License.
 
 "Post-processing: enrichment, redundancy filtering, and deduplication."
+
 from __future__ import annotations
 
 import re
@@ -35,27 +36,54 @@ _DWARF_TO_AST_EQUIV: dict[ChangeKind, set[ChangeKind]] = {
 }
 
 # Type/enum/struct change kinds for which affected-symbol enrichment makes sense.
-_TYPE_CHANGE_KINDS: frozenset[ChangeKind] = frozenset({
-    ChangeKind.TYPE_SIZE_CHANGED, ChangeKind.TYPE_ALIGNMENT_CHANGED,
-    ChangeKind.TYPE_FIELD_REMOVED, ChangeKind.TYPE_FIELD_ADDED,
-    ChangeKind.TYPE_FIELD_OFFSET_CHANGED, ChangeKind.TYPE_FIELD_TYPE_CHANGED,
-    ChangeKind.TYPE_BASE_CHANGED, ChangeKind.TYPE_VTABLE_CHANGED,
-    ChangeKind.TYPE_REMOVED, ChangeKind.TYPE_FIELD_ADDED_COMPATIBLE,
-    ChangeKind.TYPE_BECAME_OPAQUE,
-    ChangeKind.BASE_CLASS_POSITION_CHANGED, ChangeKind.BASE_CLASS_VIRTUAL_CHANGED,
-    ChangeKind.ENUM_MEMBER_REMOVED, ChangeKind.ENUM_MEMBER_ADDED,
-    ChangeKind.ENUM_MEMBER_VALUE_CHANGED, ChangeKind.ENUM_LAST_MEMBER_VALUE_CHANGED,
-    ChangeKind.ENUM_UNDERLYING_SIZE_CHANGED,
-    ChangeKind.UNION_FIELD_ADDED, ChangeKind.UNION_FIELD_REMOVED,
-    ChangeKind.UNION_FIELD_TYPE_CHANGED, ChangeKind.TYPEDEF_BASE_CHANGED,
-    ChangeKind.STRUCT_SIZE_CHANGED, ChangeKind.STRUCT_FIELD_OFFSET_CHANGED,
-    ChangeKind.STRUCT_FIELD_REMOVED, ChangeKind.STRUCT_FIELD_TYPE_CHANGED,
-    ChangeKind.STRUCT_ALIGNMENT_CHANGED,
-})
+_TYPE_CHANGE_KINDS: frozenset[ChangeKind] = frozenset(
+    {
+        ChangeKind.TYPE_SIZE_CHANGED,
+        ChangeKind.TYPE_ALIGNMENT_CHANGED,
+        ChangeKind.TYPE_FIELD_REMOVED,
+        ChangeKind.TYPE_FIELD_ADDED,
+        ChangeKind.TYPE_FIELD_OFFSET_CHANGED,
+        ChangeKind.TYPE_FIELD_TYPE_CHANGED,
+        ChangeKind.TYPE_BASE_CHANGED,
+        ChangeKind.TYPE_VTABLE_CHANGED,
+        ChangeKind.TYPE_REMOVED,
+        ChangeKind.TYPE_FIELD_ADDED_COMPATIBLE,
+        ChangeKind.TYPE_BECAME_OPAQUE,
+        ChangeKind.BASE_CLASS_POSITION_CHANGED,
+        ChangeKind.BASE_CLASS_VIRTUAL_CHANGED,
+        ChangeKind.ENUM_MEMBER_REMOVED,
+        ChangeKind.ENUM_MEMBER_ADDED,
+        ChangeKind.ENUM_MEMBER_VALUE_CHANGED,
+        ChangeKind.ENUM_LAST_MEMBER_VALUE_CHANGED,
+        ChangeKind.ENUM_UNDERLYING_SIZE_CHANGED,
+        ChangeKind.UNION_FIELD_ADDED,
+        ChangeKind.UNION_FIELD_REMOVED,
+        ChangeKind.UNION_FIELD_TYPE_CHANGED,
+        ChangeKind.TYPEDEF_BASE_CHANGED,
+        ChangeKind.STRUCT_SIZE_CHANGED,
+        ChangeKind.STRUCT_FIELD_OFFSET_CHANGED,
+        ChangeKind.STRUCT_FIELD_REMOVED,
+        ChangeKind.STRUCT_FIELD_TYPE_CHANGED,
+        ChangeKind.STRUCT_ALIGNMENT_CHANGED,
+        # Fine-grained class-layout descriptor kinds (layout-closure work): each
+        # carries the owner type name in Change.symbol, so affected-symbol
+        # enrichment must scan them too — otherwise a layout-only BREAKING
+        # finding (e.g. TRIVIALLY_COPYABLE_LOST on a size-stable type used by an
+        # exported by-value API) gets no affected_symbols and app-compat
+        # filtering could mark a consumer as unaffected (Codex review #345).
+        ChangeKind.BASE_CLASS_OFFSET_CHANGED,
+        ChangeKind.VPTR_INTRODUCED,
+        ChangeKind.TRIVIALLY_COPYABLE_LOST,
+        ChangeKind.STANDARD_LAYOUT_LOST,
+        ChangeKind.TAIL_PADDING_REUSE_CHANGED,
+        ChangeKind.LAYOUT_UNVERIFIABLE,
+    }
+)
 
 
 def _build_location_index(
-    old: AbiSnapshot, new: AbiSnapshot,
+    old: AbiSnapshot,
+    new: AbiSnapshot,
 ) -> tuple[dict[str, str], dict[str, str], dict[str, str]]:
     """Build type, function, and variable location lookup dicts from snapshots."""
     type_loc: dict[str, str] = {}
@@ -100,7 +128,9 @@ def _safe_index(snap: AbiSnapshot) -> bool:
 
 
 def _enrich_source_locations(
-    changes: list[Change], old: AbiSnapshot, new: AbiSnapshot,
+    changes: list[Change],
+    old: AbiSnapshot,
+    new: AbiSnapshot,
 ) -> None:
     """Fill in source_location and qualified_name on Changes from the model data."""
     type_loc, func_loc, var_loc = _build_location_index(old, new)
@@ -122,7 +152,11 @@ def _enrich_source_locations(
     for c in changes:
         if not c.source_location:
             # Try function/variable first (symbol is mangled name), then type name
-            loc = func_loc.get(c.symbol) or var_loc.get(c.symbol) or type_loc.get(c.symbol)
+            loc = (
+                func_loc.get(c.symbol)
+                or var_loc.get(c.symbol)
+                or type_loc.get(c.symbol)
+            )
             # For qualified symbols like "ns::MyStruct::field", fall back to root type name
             if not loc and "::" in c.symbol:
                 loc = type_loc.get(_root_type_name(c))
@@ -135,7 +169,8 @@ def _enrich_source_locations(
 
 
 def _all_ancestors(
-    tname: str, type_embeds: dict[str, set[str]],
+    tname: str,
+    type_embeds: dict[str, set[str]],
 ) -> set[str]:
     """BFS over type_embeds to find all transitive parent types."""
     visited: set[str] = set()
@@ -240,7 +275,8 @@ def _assign_affected_symbols_to_changes(
 
 
 def _enrich_affected_symbols(
-    changes: list[Change], old: AbiSnapshot,
+    changes: list[Change],
+    old: AbiSnapshot,
 ) -> None:
     """For type/enum changes, find exported functions that use the affected type."""
     # Only compute if there are type-related changes
@@ -272,8 +308,12 @@ def _enrich_affected_symbols(
     for tname in affected_types:
         ancestors = _all_ancestors(tname, type_embeds)
         _resolve_ancestor_functions(
-            tname, ancestors, type_to_funcs, type_to_mangled,
-            old_pub, ancestor_func_cache,
+            tname,
+            ancestors,
+            type_to_funcs,
+            type_to_mangled,
+            old_pub,
+            ancestor_func_cache,
         )
 
     # Assign to changes — include both demangled names (display) and
@@ -281,72 +321,186 @@ def _enrich_affected_symbols(
     _assign_affected_symbols_to_changes(type_changes, type_to_funcs, type_to_mangled)
 
 
+# Owner size/offset changes that the embedding attribution can annotate.
+_LAYOUT_OWNER_KINDS: frozenset[ChangeKind] = frozenset(
+    {
+        ChangeKind.TYPE_SIZE_CHANGED,
+        ChangeKind.STRUCT_SIZE_CHANGED,
+        ChangeKind.TYPE_FIELD_OFFSET_CHANGED,
+        ChangeKind.STRUCT_FIELD_OFFSET_CHANGED,
+    }
+)
+
+
+def _embedded_stdlib_fields(rec: object) -> list[tuple[str, str]]:
+    """Return ``(field_name, field_type)`` for by-value ``std::`` members of *rec*.
+
+    A by-value field whose type names a standard-library namespace makes the
+    owner's layout depend on the stdlib implementation/version. Pointer/reference
+    fields are layout-neutral and skipped (only a top-level ``*``/``&`` counts —
+    a ``*`` inside template args, e.g. ``std::vector<int*>`` held by value, still
+    embeds the container).
+    """
+    from .model import is_non_abi_surface_type
+
+    out: list[tuple[str, str]] = []
+    for fld in getattr(rec, "fields", []):
+        tname = (fld.type or "").strip()
+        if not tname or tname.endswith("*") or tname.endswith("&"):
+            continue
+        if is_non_abi_surface_type(tname.replace("const ", "").strip()):
+            out.append((fld.name, tname))
+    return out
+
+
+def _attribute_stdlib_embedding(changes: list[Change], new: AbiSnapshot) -> None:
+    """Attribute an owner type's size/offset change to an embedded ``std::`` member.
+
+    The redundancy filter links a derived change to a root type change only when
+    that root *emits its own change*. A standard-library member embedded by value
+    is filtered out (toolchain-owned) and emits no change, so an owner whose
+    layout shifted because of it is left unattributed. This appends a concise,
+    non-escalating clause naming the responsible member so the root cause is not
+    lost — purely informational: it does not alter the verdict, the kind, or the
+    redundancy linkage (it only touches already-unattributed owner changes).
+    """
+    owner_changes = [
+        c for c in changes if c.kind in _LAYOUT_OWNER_KINDS and c.caused_by_type is None
+    ]
+    if not owner_changes:
+        return
+    by_name = {t.name: t for t in new.types}
+    for c in owner_changes:
+        rec = by_name.get(_root_type_name(c))
+        if rec is None:
+            continue
+        embedded = _embedded_stdlib_fields(rec)
+        if not embedded:
+            continue
+        members = ", ".join(f"{fname} ({ftype})" for fname, ftype in embedded)
+        clause = (
+            f" This type embeds a standard-library type by value ({members}); "
+            "its layout depends on the standard-library implementation and "
+            "version, so the change may originate there."
+        )
+        if clause.strip() not in c.description:
+            c.description += clause
+
 
 # Change kinds that represent root type/enum changes (for redundancy filtering).
-_ROOT_TYPE_CHANGE_KINDS: frozenset[ChangeKind] = frozenset({
-    ChangeKind.TYPE_SIZE_CHANGED, ChangeKind.TYPE_ALIGNMENT_CHANGED,
-    ChangeKind.TYPE_FIELD_REMOVED, ChangeKind.TYPE_FIELD_ADDED,
-    ChangeKind.TYPE_FIELD_OFFSET_CHANGED, ChangeKind.TYPE_FIELD_TYPE_CHANGED,
-    ChangeKind.TYPE_BASE_CHANGED, ChangeKind.TYPE_VTABLE_CHANGED,
-    ChangeKind.TYPE_REMOVED, ChangeKind.TYPE_BECAME_OPAQUE,
-    ChangeKind.ENUM_MEMBER_REMOVED, ChangeKind.ENUM_MEMBER_ADDED,
-    ChangeKind.ENUM_MEMBER_VALUE_CHANGED, ChangeKind.ENUM_LAST_MEMBER_VALUE_CHANGED,
-    ChangeKind.ENUM_UNDERLYING_SIZE_CHANGED, ChangeKind.ENUM_MEMBER_RENAMED,
-    ChangeKind.UNION_FIELD_REMOVED, ChangeKind.UNION_FIELD_TYPE_CHANGED,
-    ChangeKind.TYPEDEF_BASE_CHANGED, ChangeKind.TYPE_KIND_CHANGED,
-    ChangeKind.STRUCT_SIZE_CHANGED, ChangeKind.STRUCT_FIELD_OFFSET_CHANGED,
-    ChangeKind.STRUCT_FIELD_REMOVED, ChangeKind.STRUCT_FIELD_TYPE_CHANGED,
-    ChangeKind.STRUCT_ALIGNMENT_CHANGED, ChangeKind.STRUCT_PACKING_CHANGED,
-})
+_ROOT_TYPE_CHANGE_KINDS: frozenset[ChangeKind] = frozenset(
+    {
+        ChangeKind.TYPE_SIZE_CHANGED,
+        ChangeKind.TYPE_ALIGNMENT_CHANGED,
+        ChangeKind.TYPE_FIELD_REMOVED,
+        ChangeKind.TYPE_FIELD_ADDED,
+        ChangeKind.TYPE_FIELD_OFFSET_CHANGED,
+        ChangeKind.TYPE_FIELD_TYPE_CHANGED,
+        ChangeKind.TYPE_BASE_CHANGED,
+        ChangeKind.TYPE_VTABLE_CHANGED,
+        ChangeKind.TYPE_REMOVED,
+        ChangeKind.TYPE_BECAME_OPAQUE,
+        ChangeKind.ENUM_MEMBER_REMOVED,
+        ChangeKind.ENUM_MEMBER_ADDED,
+        ChangeKind.ENUM_MEMBER_VALUE_CHANGED,
+        ChangeKind.ENUM_LAST_MEMBER_VALUE_CHANGED,
+        ChangeKind.ENUM_UNDERLYING_SIZE_CHANGED,
+        ChangeKind.ENUM_MEMBER_RENAMED,
+        ChangeKind.UNION_FIELD_REMOVED,
+        ChangeKind.UNION_FIELD_TYPE_CHANGED,
+        ChangeKind.TYPEDEF_BASE_CHANGED,
+        ChangeKind.TYPE_KIND_CHANGED,
+        ChangeKind.STRUCT_SIZE_CHANGED,
+        ChangeKind.STRUCT_FIELD_OFFSET_CHANGED,
+        ChangeKind.STRUCT_FIELD_REMOVED,
+        ChangeKind.STRUCT_FIELD_TYPE_CHANGED,
+        ChangeKind.STRUCT_ALIGNMENT_CHANGED,
+        ChangeKind.STRUCT_PACKING_CHANGED,
+    }
+)
 
 # Change kinds that are always independent (never considered redundant).
-_ALWAYS_INDEPENDENT_KINDS: frozenset[ChangeKind] = frozenset({
-    ChangeKind.FUNC_REMOVED, ChangeKind.FUNC_ADDED,
-    ChangeKind.FUNC_REMOVED_ELF_ONLY,
-    ChangeKind.VAR_REMOVED, ChangeKind.VAR_ADDED,
-    ChangeKind.SONAME_CHANGED, ChangeKind.SONAME_MISSING,
-    ChangeKind.NEEDED_ADDED, ChangeKind.NEEDED_REMOVED,
-    ChangeKind.RPATH_CHANGED, ChangeKind.RUNPATH_CHANGED,
-    ChangeKind.SYMBOL_BINDING_CHANGED, ChangeKind.SYMBOL_BINDING_STRENGTHENED,
-    ChangeKind.SYMBOL_TYPE_CHANGED, ChangeKind.SYMBOL_SIZE_CHANGED,
-    ChangeKind.SYMBOL_VERSION_DEFINED_REMOVED, ChangeKind.SYMBOL_VERSION_DEFINED_ADDED,
-    ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED, ChangeKind.SYMBOL_VERSION_REQUIRED_REMOVED,
-    ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED_COMPAT,
-    ChangeKind.IFUNC_INTRODUCED, ChangeKind.IFUNC_REMOVED,
-    ChangeKind.COMMON_SYMBOL_RISK, ChangeKind.DWARF_INFO_MISSING,
-    ChangeKind.TOOLCHAIN_FLAG_DRIFT, ChangeKind.COMPAT_VERSION_CHANGED,
-    ChangeKind.VISIBILITY_LEAK,
-    ChangeKind.FUNC_DELETED, ChangeKind.FUNC_DELETED_ELF_FALLBACK,
-    ChangeKind.CONSTANT_CHANGED, ChangeKind.CONSTANT_ADDED, ChangeKind.CONSTANT_REMOVED,
-})
+_ALWAYS_INDEPENDENT_KINDS: frozenset[ChangeKind] = frozenset(
+    {
+        ChangeKind.FUNC_REMOVED,
+        ChangeKind.FUNC_ADDED,
+        ChangeKind.FUNC_REMOVED_ELF_ONLY,
+        ChangeKind.VAR_REMOVED,
+        ChangeKind.VAR_ADDED,
+        ChangeKind.SONAME_CHANGED,
+        ChangeKind.SONAME_MISSING,
+        ChangeKind.NEEDED_ADDED,
+        ChangeKind.NEEDED_REMOVED,
+        ChangeKind.RPATH_CHANGED,
+        ChangeKind.RUNPATH_CHANGED,
+        ChangeKind.SYMBOL_BINDING_CHANGED,
+        ChangeKind.SYMBOL_BINDING_STRENGTHENED,
+        ChangeKind.SYMBOL_TYPE_CHANGED,
+        ChangeKind.SYMBOL_SIZE_CHANGED,
+        ChangeKind.SYMBOL_VERSION_DEFINED_REMOVED,
+        ChangeKind.SYMBOL_VERSION_DEFINED_ADDED,
+        ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED,
+        ChangeKind.SYMBOL_VERSION_REQUIRED_REMOVED,
+        ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED_COMPAT,
+        ChangeKind.IFUNC_INTRODUCED,
+        ChangeKind.IFUNC_REMOVED,
+        ChangeKind.COMMON_SYMBOL_RISK,
+        ChangeKind.DWARF_INFO_MISSING,
+        ChangeKind.TOOLCHAIN_FLAG_DRIFT,
+        ChangeKind.COMPAT_VERSION_CHANGED,
+        ChangeKind.VISIBILITY_LEAK,
+        ChangeKind.FUNC_DELETED,
+        ChangeKind.FUNC_DELETED_ELF_FALLBACK,
+        ChangeKind.CONSTANT_CHANGED,
+        ChangeKind.CONSTANT_ADDED,
+        ChangeKind.CONSTANT_REMOVED,
+    }
+)
 
 # Derived change kinds that may be caused by a root type change.
-_DERIVED_CHANGE_KINDS: frozenset[ChangeKind] = frozenset({
-    ChangeKind.FUNC_PARAMS_CHANGED, ChangeKind.FUNC_RETURN_CHANGED,
-    ChangeKind.VAR_TYPE_CHANGED, ChangeKind.TYPE_FIELD_TYPE_CHANGED,
-    ChangeKind.STRUCT_FIELD_TYPE_CHANGED, ChangeKind.UNION_FIELD_TYPE_CHANGED,
-    ChangeKind.TEMPLATE_PARAM_TYPE_CHANGED, ChangeKind.TEMPLATE_RETURN_TYPE_CHANGED,
-    ChangeKind.PARAM_POINTER_LEVEL_CHANGED, ChangeKind.RETURN_POINTER_LEVEL_CHANGED,
-})
+_DERIVED_CHANGE_KINDS: frozenset[ChangeKind] = frozenset(
+    {
+        ChangeKind.FUNC_PARAMS_CHANGED,
+        ChangeKind.FUNC_RETURN_CHANGED,
+        ChangeKind.VAR_TYPE_CHANGED,
+        ChangeKind.TYPE_FIELD_TYPE_CHANGED,
+        ChangeKind.STRUCT_FIELD_TYPE_CHANGED,
+        ChangeKind.UNION_FIELD_TYPE_CHANGED,
+        ChangeKind.TEMPLATE_PARAM_TYPE_CHANGED,
+        ChangeKind.TEMPLATE_RETURN_TYPE_CHANGED,
+        ChangeKind.PARAM_POINTER_LEVEL_CHANGED,
+        ChangeKind.RETURN_POINTER_LEVEL_CHANGED,
+    }
+)
 
 
 # Field-level change kinds where the symbol is "TypeName::fieldName".
 # For these, the root type is the part before the *last* "::".
-_FIELD_LEVEL_KINDS: frozenset[ChangeKind] = frozenset({
-    ChangeKind.TYPE_FIELD_REMOVED, ChangeKind.TYPE_FIELD_ADDED,
-    ChangeKind.TYPE_FIELD_OFFSET_CHANGED, ChangeKind.TYPE_FIELD_TYPE_CHANGED,
-    ChangeKind.TYPE_FIELD_ADDED_COMPATIBLE,
-    ChangeKind.STRUCT_FIELD_OFFSET_CHANGED, ChangeKind.STRUCT_FIELD_REMOVED,
-    ChangeKind.STRUCT_FIELD_TYPE_CHANGED,
-    ChangeKind.UNION_FIELD_REMOVED, ChangeKind.UNION_FIELD_TYPE_CHANGED,
-    ChangeKind.UNION_FIELD_ADDED,
-    ChangeKind.FIELD_BITFIELD_CHANGED, ChangeKind.FIELD_RENAMED,
-    ChangeKind.FIELD_BECAME_CONST, ChangeKind.FIELD_LOST_CONST,
-    ChangeKind.FIELD_BECAME_VOLATILE, ChangeKind.FIELD_LOST_VOLATILE,
-    ChangeKind.FIELD_BECAME_MUTABLE, ChangeKind.FIELD_LOST_MUTABLE,
-    ChangeKind.FIELD_ACCESS_CHANGED, ChangeKind.ANON_FIELD_CHANGED,
-})
-
+_FIELD_LEVEL_KINDS: frozenset[ChangeKind] = frozenset(
+    {
+        ChangeKind.TYPE_FIELD_REMOVED,
+        ChangeKind.TYPE_FIELD_ADDED,
+        ChangeKind.TYPE_FIELD_OFFSET_CHANGED,
+        ChangeKind.TYPE_FIELD_TYPE_CHANGED,
+        ChangeKind.TYPE_FIELD_ADDED_COMPATIBLE,
+        ChangeKind.STRUCT_FIELD_OFFSET_CHANGED,
+        ChangeKind.STRUCT_FIELD_REMOVED,
+        ChangeKind.STRUCT_FIELD_TYPE_CHANGED,
+        ChangeKind.UNION_FIELD_REMOVED,
+        ChangeKind.UNION_FIELD_TYPE_CHANGED,
+        ChangeKind.UNION_FIELD_ADDED,
+        ChangeKind.FIELD_BITFIELD_CHANGED,
+        ChangeKind.FIELD_RENAMED,
+        ChangeKind.FIELD_BECAME_CONST,
+        ChangeKind.FIELD_LOST_CONST,
+        ChangeKind.FIELD_BECAME_VOLATILE,
+        ChangeKind.FIELD_LOST_VOLATILE,
+        ChangeKind.FIELD_BECAME_MUTABLE,
+        ChangeKind.FIELD_LOST_MUTABLE,
+        ChangeKind.FIELD_ACCESS_CHANGED,
+        ChangeKind.ANON_FIELD_CHANGED,
+    }
+)
 
 
 def _root_type_name(c: Change) -> str:
@@ -394,7 +548,7 @@ def _collect_root_types(changes: list[Change]) -> dict[str, Change]:
 def _compile_root_patterns(root_types: dict[str, Change]) -> dict[str, re.Pattern[str]]:
     """Pre-compile word-boundary regex patterns for each root type name."""
     return {
-        name: re.compile(r'(?<![A-Za-z0-9_])' + re.escape(name) + r'(?![A-Za-z0-9_])')
+        name: re.compile(r"(?<![A-Za-z0-9_])" + re.escape(name) + r"(?![A-Za-z0-9_])")
         for name in root_types
     }
 
@@ -501,7 +655,7 @@ def _match_root_type(
             pat = compiled_patterns[type_name]
         else:
             pat = re.compile(
-                r'(?<![A-Za-z0-9_])' + re.escape(type_name) + r'(?![A-Za-z0-9_])'
+                r"(?<![A-Za-z0-9_])" + re.escape(type_name) + r"(?![A-Za-z0-9_])"
             )
         if c.old_value and pat.search(c.old_value):
             return type_name
@@ -515,11 +669,13 @@ def _match_root_type(
 # Enum change kinds eligible for same-kind symbol-based dedup (FIX-C).
 # Scoped to enum kinds only to avoid incorrectly merging legitimately
 # different changes that share the same kind+symbol.
-_ENUM_DEDUP_KINDS = frozenset({
-    ChangeKind.ENUM_MEMBER_VALUE_CHANGED,
-    ChangeKind.ENUM_MEMBER_REMOVED,
-    ChangeKind.ENUM_LAST_MEMBER_VALUE_CHANGED,
-})
+_ENUM_DEDUP_KINDS = frozenset(
+    {
+        ChangeKind.ENUM_MEMBER_VALUE_CHANGED,
+        ChangeKind.ENUM_MEMBER_REMOVED,
+        ChangeKind.ENUM_LAST_MEMBER_VALUE_CHANGED,
+    }
+)
 
 
 def _type_used_by_value(type_str: str, bare_re: re.Pattern[str]) -> bool:
@@ -537,7 +693,9 @@ def _type_used_by_value(type_str: str, bare_re: re.Pattern[str]) -> bool:
     return False
 
 
-def _public_function_uses_type_by_value(snap: AbiSnapshot, bare_re: re.Pattern[str]) -> bool:
+def _public_function_uses_type_by_value(
+    snap: AbiSnapshot, bare_re: re.Pattern[str]
+) -> bool:
     """True if any PUBLIC function uses the type (matched by *bare_re*) by value."""
     for f in snap.functions:
         if f.visibility not in _PUBLIC_VIS:
@@ -550,7 +708,9 @@ def _public_function_uses_type_by_value(snap: AbiSnapshot, bare_re: re.Pattern[s
     return False
 
 
-def _public_variable_uses_type_by_value(snap: AbiSnapshot, bare_re: re.Pattern[str]) -> bool:
+def _public_variable_uses_type_by_value(
+    snap: AbiSnapshot, bare_re: re.Pattern[str]
+) -> bool:
     """True if any PUBLIC variable uses the type (matched by *bare_re*) by value."""
     for v in snap.variables:
         if v.visibility not in _PUBLIC_VIS:
@@ -561,7 +721,8 @@ def _public_variable_uses_type_by_value(snap: AbiSnapshot, bare_re: re.Pattern[s
 
 
 def _is_pointer_only_type(
-    type_name: str, snap: AbiSnapshot,
+    type_name: str,
+    snap: AbiSnapshot,
     _re_cache: dict[str, re.Pattern[str]] | None = None,
 ) -> bool:
     """Return True if all PUBLIC API functions/variables use this type via pointer only.
@@ -577,17 +738,20 @@ def _is_pointer_only_type(
     if _re_cache is not None and type_name in _re_cache:
         bare_re = _re_cache[type_name]
     else:
-        bare_re = re.compile(r'\b' + re.escape(type_name) + r'\b')
+        bare_re = re.compile(r"\b" + re.escape(type_name) + r"\b")
         if _re_cache is not None:
             _re_cache[type_name] = bare_re
 
-    if _public_function_uses_type_by_value(snap, bare_re) or _public_variable_uses_type_by_value(snap, bare_re):
+    if _public_function_uses_type_by_value(
+        snap, bare_re
+    ) or _public_variable_uses_type_by_value(snap, bare_re):
         return False
     return True
 
 
 def _has_public_pointer_factory(
-    type_name: str, snap: AbiSnapshot,
+    type_name: str,
+    snap: AbiSnapshot,
     _factory_re_cache: dict[str, re.Pattern[str]] | None = None,
 ) -> bool:
     """True if snapshot has at least one PUBLIC function returning exactly ``type_name*``.
@@ -599,7 +763,7 @@ def _has_public_pointer_factory(
     if _factory_re_cache is not None and type_name in _factory_re_cache:
         factory_re = _factory_re_cache[type_name]
     else:
-        factory_re = re.compile(r'\b' + re.escape(type_name) + r'\s*\*')
+        factory_re = re.compile(r"\b" + re.escape(type_name) + r"\s*\*")
         if _factory_re_cache is not None:
             _factory_re_cache[type_name] = factory_re
     for f in snap.functions:
@@ -708,18 +872,20 @@ def _filter_reserved_field_renames(changes: list[Change]) -> list[Change]:
       Also remove the redundant TYPE_FIELD_ADDED_COMPATIBLE that fires because
       the field was detected as "added" with the new name.
     """
-    _SUPPRESS_ON_RESERVED = frozenset({
-        ChangeKind.TYPE_FIELD_REMOVED,
-        ChangeKind.STRUCT_FIELD_REMOVED,
-        ChangeKind.TYPE_FIELD_ADDED_COMPATIBLE,
-        # TYPE_FIELD_ADDED: class types and polymorphic records emit this instead of
-        # TYPE_FIELD_ADDED_COMPATIBLE; must suppress here too.
-        ChangeKind.TYPE_FIELD_ADDED,
-        # FIELD_RENAMED: suppressed only when the exact old_value matches the reserved
-        # field name (see == check below — not substring). Safe for structs with both
-        # reserved and non-reserved renames in the same diff.
-        ChangeKind.FIELD_RENAMED,
-    })
+    _SUPPRESS_ON_RESERVED = frozenset(
+        {
+            ChangeKind.TYPE_FIELD_REMOVED,
+            ChangeKind.STRUCT_FIELD_REMOVED,
+            ChangeKind.TYPE_FIELD_ADDED_COMPATIBLE,
+            # TYPE_FIELD_ADDED: class types and polymorphic records emit this instead of
+            # TYPE_FIELD_ADDED_COMPATIBLE; must suppress here too.
+            ChangeKind.TYPE_FIELD_ADDED,
+            # FIELD_RENAMED: suppressed only when the exact old_value matches the reserved
+            # field name (see == check below — not substring). Safe for structs with both
+            # reserved and non-reserved renames in the same diff.
+            ChangeKind.FIELD_RENAMED,
+        }
+    )
 
     # Collect (struct_name, old_field_name, new_field_name) for each USED_RESERVED_FIELD
     reserved_renames: list[tuple[str, str, str]] = []
@@ -745,8 +911,11 @@ def _filter_reserved_field_renames(changes: list[Change]) -> list[Change]:
             if old_field and c.symbol == f"{struct_name}::{old_field}":
                 suppressed = True
                 break
-            if new_field and c.kind in (ChangeKind.TYPE_FIELD_ADDED_COMPATIBLE, ChangeKind.TYPE_FIELD_ADDED) and (
-                c.symbol == f"{struct_name}::{new_field}"
+            if (
+                new_field
+                and c.kind
+                in (ChangeKind.TYPE_FIELD_ADDED_COMPATIBLE, ChangeKind.TYPE_FIELD_ADDED)
+                and (c.symbol == f"{struct_name}::{new_field}")
             ):
                 suppressed = True
                 break
@@ -754,8 +923,6 @@ def _filter_reserved_field_renames(changes: list[Change]) -> list[Change]:
             result.append(c)
 
     return result
-
-
 
 
 def _dedup_exact(changes: list[Change]) -> list[Change]:
@@ -940,19 +1107,21 @@ def _deduplicate_cross_detector(changes: list[Change]) -> list[Change]:
     return result
 
 
-_STRUCTURAL_TYPE_CHANGE_KINDS: frozenset[ChangeKind] = frozenset({
-    ChangeKind.TYPE_SIZE_CHANGED,
-    ChangeKind.TYPE_ALIGNMENT_CHANGED,
-    ChangeKind.TYPE_FIELD_REMOVED,
-    ChangeKind.TYPE_FIELD_ADDED,
-    ChangeKind.TYPE_FIELD_OFFSET_CHANGED,
-    ChangeKind.TYPE_FIELD_TYPE_CHANGED,
-    ChangeKind.STRUCT_SIZE_CHANGED,
-    ChangeKind.STRUCT_FIELD_OFFSET_CHANGED,
-    ChangeKind.STRUCT_FIELD_REMOVED,
-    ChangeKind.STRUCT_FIELD_TYPE_CHANGED,
-    ChangeKind.STRUCT_ALIGNMENT_CHANGED,
-})
+_STRUCTURAL_TYPE_CHANGE_KINDS: frozenset[ChangeKind] = frozenset(
+    {
+        ChangeKind.TYPE_SIZE_CHANGED,
+        ChangeKind.TYPE_ALIGNMENT_CHANGED,
+        ChangeKind.TYPE_FIELD_REMOVED,
+        ChangeKind.TYPE_FIELD_ADDED,
+        ChangeKind.TYPE_FIELD_OFFSET_CHANGED,
+        ChangeKind.TYPE_FIELD_TYPE_CHANGED,
+        ChangeKind.STRUCT_SIZE_CHANGED,
+        ChangeKind.STRUCT_FIELD_OFFSET_CHANGED,
+        ChangeKind.STRUCT_FIELD_REMOVED,
+        ChangeKind.STRUCT_FIELD_TYPE_CHANGED,
+        ChangeKind.STRUCT_ALIGNMENT_CHANGED,
+    }
+)
 
 
 # Source file extensions that indicate an implementation (non-header) file.
@@ -1030,7 +1199,9 @@ def _find_by_value_types(snap: AbiSnapshot, opaque: set[str]) -> set[str]:
 
 
 def _downgrade_opaque_type_changes(
-    changes: list[Change], old: AbiSnapshot, new: AbiSnapshot,
+    changes: list[Change],
+    old: AbiSnapshot,
+    new: AbiSnapshot,
 ) -> list[Change]:
     """Suppress structural type changes for opaque types.
 
@@ -1061,17 +1232,27 @@ def _downgrade_opaque_type_changes(
 
 
 def _detect_evidence_tiers(
-    old: AbiSnapshot, new: AbiSnapshot,
+    old: AbiSnapshot,
+    new: AbiSnapshot,
 ) -> tuple[list[str], bool, bool, bool, bool, bool, bool]:
     """Detect which evidence tiers are available from the snapshots.
 
     Returns (tiers, has_elf, has_dwarf, has_dwarf_advanced, has_pe, has_macho, has_headers).
     """
     has_elf = old.elf is not None or new.elf is not None
-    has_dwarf = (old.dwarf is not None and old.dwarf.has_dwarf) or (new.dwarf is not None and new.dwarf.has_dwarf)
-    has_dwarf_advanced = (old.dwarf_advanced is not None and old.dwarf_advanced.has_dwarf) or (new.dwarf_advanced is not None and new.dwarf_advanced.has_dwarf)
-    has_pe = getattr(old, "pe", None) is not None or getattr(new, "pe", None) is not None
-    has_macho = getattr(old, "macho", None) is not None or getattr(new, "macho", None) is not None
+    has_dwarf = (old.dwarf is not None and old.dwarf.has_dwarf) or (
+        new.dwarf is not None and new.dwarf.has_dwarf
+    )
+    has_dwarf_advanced = (
+        old.dwarf_advanced is not None and old.dwarf_advanced.has_dwarf
+    ) or (new.dwarf_advanced is not None and new.dwarf_advanced.has_dwarf)
+    has_pe = (
+        getattr(old, "pe", None) is not None or getattr(new, "pe", None) is not None
+    )
+    has_macho = (
+        getattr(old, "macho", None) is not None
+        or getattr(new, "macho", None) is not None
+    )
     # HEADER_AWARE requires that the surface was actually parsed from public
     # headers (castxml/AST). DWARF-only and symbols-only dumps populate the
     # same functions/types lists, so the mere presence of declarations is not
@@ -1082,14 +1263,29 @@ def _detect_evidence_tiers(
     # A snapshot with no binary metadata at all is a pure in-memory/header
     # surface (the library-API and unit-test construction path), so the
     # presence of declarations is taken as header-level evidence there.
-    from_headers = bool(getattr(old, "from_headers", False) or getattr(new, "from_headers", False))
+    from_headers = bool(
+        getattr(old, "from_headers", False) or getattr(new, "from_headers", False)
+    )
     has_declarations = bool(
-        old.functions or old.types or old.enums or old.typedefs or old.variables
-        or new.functions or new.types or new.enums or new.typedefs or new.variables
+        old.functions
+        or old.types
+        or old.enums
+        or old.typedefs
+        or old.variables
+        or new.functions
+        or new.types
+        or new.enums
+        or new.typedefs
+        or new.variables
     )
     has_binary_metadata = (
-        has_elf or has_pe or has_macho or has_dwarf or has_dwarf_advanced
-        or getattr(old, "elf_only_mode", False) or getattr(new, "elf_only_mode", False)
+        has_elf
+        or has_pe
+        or has_macho
+        or has_dwarf
+        or has_dwarf_advanced
+        or getattr(old, "elf_only_mode", False)
+        or getattr(new, "elf_only_mode", False)
     )
     if from_headers:
         has_headers = True
@@ -1116,7 +1312,9 @@ def _detect_evidence_tiers(
 
 
 def _determine_evidence_tier(
-    has_dwarf: bool, has_dwarf_advanced: bool, has_headers: bool,
+    has_dwarf: bool,
+    has_dwarf_advanced: bool,
+    has_headers: bool,
 ) -> EvidenceTier:
     """Collapse the raw evidence booleans into the canonical analysis tier.
 
@@ -1133,7 +1331,10 @@ def _determine_evidence_tier(
 
 
 def _determine_confidence_level(
-    has_elf: bool, has_dwarf: bool, has_pe: bool, has_macho: bool,
+    has_elf: bool,
+    has_dwarf: bool,
+    has_pe: bool,
+    has_macho: bool,
     has_headers: bool,
     detector_results: list[DetectorResult],
     warnings: list[str],
@@ -1153,9 +1354,7 @@ def _determine_confidence_level(
     elif has_elf and has_dwarf:
         confidence = Confidence.MEDIUM
         if not has_headers:
-            warnings.append(
-                "No header/AST data; type-level changes may be missed"
-            )
+            warnings.append("No header/AST data; type-level changes may be missed")
     elif has_elf or has_pe or has_macho:
         confidence = Confidence.LOW
         warnings.append(
@@ -1168,7 +1367,8 @@ def _determine_confidence_level(
 
     # DWARF-specific warning: if DWARF is expected but stripped.
     dwarf_detector = next(
-        (dr for dr in detector_results if dr.name == "dwarf"), None,
+        (dr for dr in detector_results if dr.name == "dwarf"),
+        None,
     )
     if dwarf_detector and not dwarf_detector.enabled:
         if confidence == Confidence.HIGH:
@@ -1216,27 +1416,34 @@ def _compute_confidence(
             warnings.append(f"Detector '{dr.name}' disabled: {dr.coverage_gap}")
 
     confidence = _determine_confidence_level(
-        has_elf, has_dwarf, has_pe, has_macho, has_headers,
-        detector_results, warnings,
+        has_elf,
+        has_dwarf,
+        has_pe,
+        has_macho,
+        has_headers,
+        detector_results,
+        warnings,
     )
 
     return tiers, confidence, warnings, evidence_tier
 
 
 # ChangeKinds that should be downgraded when the type is opaque in both snapshots.
-_OPAQUE_DOWNGRADEABLE: frozenset[ChangeKind] = frozenset({
-    ChangeKind.TYPE_SIZE_CHANGED,
-    ChangeKind.TYPE_FIELD_ADDED,
-    ChangeKind.TYPE_FIELD_REMOVED,
-    ChangeKind.TYPE_FIELD_OFFSET_CHANGED,
-    ChangeKind.TYPE_FIELD_TYPE_CHANGED,
-    ChangeKind.TYPE_ALIGNMENT_CHANGED,
-    ChangeKind.STRUCT_SIZE_CHANGED,
-    ChangeKind.STRUCT_FIELD_OFFSET_CHANGED,
-    ChangeKind.STRUCT_FIELD_REMOVED,
-    ChangeKind.STRUCT_FIELD_TYPE_CHANGED,
-    ChangeKind.STRUCT_ALIGNMENT_CHANGED,
-})
+_OPAQUE_DOWNGRADEABLE: frozenset[ChangeKind] = frozenset(
+    {
+        ChangeKind.TYPE_SIZE_CHANGED,
+        ChangeKind.TYPE_FIELD_ADDED,
+        ChangeKind.TYPE_FIELD_REMOVED,
+        ChangeKind.TYPE_FIELD_OFFSET_CHANGED,
+        ChangeKind.TYPE_FIELD_TYPE_CHANGED,
+        ChangeKind.TYPE_ALIGNMENT_CHANGED,
+        ChangeKind.STRUCT_SIZE_CHANGED,
+        ChangeKind.STRUCT_FIELD_OFFSET_CHANGED,
+        ChangeKind.STRUCT_FIELD_REMOVED,
+        ChangeKind.STRUCT_FIELD_TYPE_CHANGED,
+        ChangeKind.STRUCT_ALIGNMENT_CHANGED,
+    }
+)
 
 
 def _downgrade_opaque_struct_changes(
@@ -1292,15 +1499,16 @@ def _downgrade_opaque_struct_changes(
     for c in changes:
         if c.kind in _OPAQUE_DOWNGRADEABLE and c.symbol in truly_opaque:
             # Downgrade: replace with TYPE_FIELD_ADDED_COMPATIBLE
-            result.append(Change(
-                kind=ChangeKind.TYPE_FIELD_ADDED_COMPATIBLE,
-                symbol=c.symbol,
-                description=f"(opaque struct) {c.description}",
-                old_value=c.old_value,
-                new_value=c.new_value,
-                source_location=c.source_location,
-            ))
+            result.append(
+                Change(
+                    kind=ChangeKind.TYPE_FIELD_ADDED_COMPATIBLE,
+                    symbol=c.symbol,
+                    description=f"(opaque struct) {c.description}",
+                    old_value=c.old_value,
+                    new_value=c.new_value,
+                    source_location=c.source_location,
+                )
+            )
         else:
             result.append(c)
     return result
-

@@ -446,6 +446,13 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
             is_final=t.get("is_final"),  # tri-state; absent on pre-v? snapshots → None
             source_header=t.get("source_header"),
             origin=_scope_origin_or_unknown(t.get("origin")),
+            # Fine-grained layout descriptor (layout-closure work); all
+            # optional/tri-state, absent on snapshots predating these fields.
+            data_size_bits=t.get("data_size_bits"),
+            is_standard_layout=t.get("is_standard_layout"),
+            is_trivially_copyable=t.get("is_trivially_copyable"),
+            vptr_offset_bits=t.get("vptr_offset_bits"),
+            base_offsets=t.get("base_offsets", {}),
         )
         for t in d.get("types", [])
     ]

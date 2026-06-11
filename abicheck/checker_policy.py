@@ -538,6 +538,30 @@ class ChangeKind(str, Enum):
     CALL_GRAPH_PUBLIC_ENTRY_REACHABILITY_CHANGED = "call_graph_public_entry_reachability_changed"  # impl reachable from an exported entry changed → COMPATIBLE (quality)
     INCLUDE_GRAPH_PUBLIC_HEADER_DRIFT = "include_graph_public_header_drift"  # the include closure of a public header changed → RISK
     BUILD_OPTION_REACHES_PUBLIC_SYMBOL = "build_option_reaches_public_symbol"  # a changed ABI-relevant option reaches a public symbol → RISK
+    # ── Cross-implementation standard-library compatibility (D-stdlib) ───────
+    # Emitted by the build-mode diff (diff_stdlib_impl.py) when the two
+    # snapshots were produced against *different standard-library
+    # implementations* — a third compatibility axis (alongside backward /
+    # forward) that the C++ standard does not guarantee. These are RISK, not
+    # BREAKING: when an embedded stdlib type's layout actually differs, the
+    # artifact/type diff emits the BREAKING size/offset finding separately;
+    # these kinds explain and localize the cause without escalating on their
+    # own (and stay silent when build-mode evidence is absent).
+    STDLIB_IMPLEMENTATION_CHANGED = "stdlib_implementation_changed"  # libstdc++ ↔ libc++ ↔ MSVC STL → RISK
+    LIBCPP_ABI_VERSION_CHANGED = "libcpp_abi_version_changed"  # _LIBCPP_ABI_VERSION 1 ↔ 2 → RISK
+
+    # ── Fine-grained class-layout descriptor (layout-closure work) ───────────
+    # Emitted by diff_layout.py from the optional layout fields on RecordType
+    # (base offsets, vptr offset, dsize/tail-padding, standard-layout /
+    # trivially-copyable traits). Each is guarded tri-state: skipped when either
+    # side lacks the evidence, so an evidence-tier downgrade never fabricates a
+    # finding.
+    BASE_CLASS_OFFSET_CHANGED = "base_class_offset_changed"  # base subobject moved → this-ptr/field offsets shift → BREAKING
+    VPTR_INTRODUCED = "vptr_introduced"  # first virtual added → vtable pointer prepended → all offsets shift → BREAKING
+    TRIVIALLY_COPYABLE_LOST = "trivially_copyable_lost"  # type no longer trivially-copyable → pass-by-value/register ABI changes → BREAKING
+    STANDARD_LAYOUT_LOST = "standard_layout_lost"  # type no longer standard-layout → offsetof/C-compat/tail-padding reuse changes → RISK
+    TAIL_PADDING_REUSE_CHANGED = "tail_padding_reuse_changed"  # data-size (dsize) changed at stable sizeof → derived tail-padding reuse shifts → RISK
+    LAYOUT_UNVERIFIABLE = "layout_unverifiable"  # layout could not be verified at this evidence tier (no debug info) → RISK, non-escalating
 
 
 class HasKind(Protocol):

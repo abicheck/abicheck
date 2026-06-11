@@ -83,6 +83,19 @@ _LEAK_TRIGGERING_KINDS: frozenset[ChangeKind] = frozenset({
     ChangeKind.STRUCT_FIELD_REMOVED,
     ChangeKind.STRUCT_FIELD_TYPE_CHANGED,
     ChangeKind.STRUCT_ALIGNMENT_CHANGED,
+    # Fine-grained class-layout descriptor kinds (layout-closure work): like the
+    # coarse type/struct kinds above, they carry an owner type name and are a
+    # layout change on a type, so they must participate in the internal-leak
+    # pipeline too — otherwise a private ``detail::Impl`` with only a
+    # TRIVIALLY_COPYABLE_LOST / BASE_CLASS_OFFSET_CHANGED finding is neither
+    # attributed to a real public leak nor demoted as unreachable internal churn
+    # (Codex review #345).
+    ChangeKind.BASE_CLASS_OFFSET_CHANGED,
+    ChangeKind.VPTR_INTRODUCED,
+    ChangeKind.TRIVIALLY_COPYABLE_LOST,
+    ChangeKind.STANDARD_LAYOUT_LOST,
+    ChangeKind.TAIL_PADDING_REUSE_CHANGED,
+    ChangeKind.LAYOUT_UNVERIFIABLE,
 })
 
 

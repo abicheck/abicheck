@@ -114,6 +114,16 @@ These changes are immediately incompatible with existing compiled binaries.
 | `struct_packing_changed` | `__attribute__((packed))` was added or removed. Changes every field offset and the total size — complete struct layout break. |
 | `type_visibility_changed` | RTTI typeinfo or vtable visibility changed. Cross-DSO `dynamic_cast` and exception matching can silently fail. |
 
+### Class Layout Descriptor
+
+Fine-grained layout mechanics that the coarse `struct_size_changed` / `struct_field_offset_changed` detectors under-represent. Read from the optional layout fields on a record (`base_offsets`, `vptr_offset_bits`, `data_size_bits`, `is_standard_layout`, `is_trivially_copyable`). Each is **tri-state guarded** — emitted only when *both* sides carry the relevant evidence — so an evidence-tier downgrade (DWARF-only / symbols-only dump, or an older snapshot) never fabricates a finding.
+
+| Kind | Description |
+|------|-------------|
+| `base_class_offset_changed` | A base-class subobject moved to a different offset within the derived object (e.g. an empty-base optimization was lost, or a member/base was inserted ahead of it) without the base list reordering. The `this`-pointer adjustment for that base and every field after it shifts; old binaries read the wrong addresses. |
+| `vptr_introduced` | A previously non-polymorphic class gained its first virtual function, so the compiler prepends a vtable pointer. `sizeof` grows and every data member's offset shifts by a pointer width; existing binaries that embed or derive from the type are laid out incompatibly. |
+| `trivially_copyable_lost` | A type stopped being trivially copyable (e.g. a user-declared copy/move constructor, destructor, or a non-trivial member was added). Non-trivially-copyable types are passed and returned by value differently (via a hidden reference / not in registers), so the calling convention for any function taking or returning it by value changes. |
+
 ### Pointer / Parameter Level Changes
 
 | Kind | Description |
@@ -271,6 +281,11 @@ library from loading in some deployment environments. Manual review is required.
 | `writable_executable_segment` | A loadable segment is now simultaneously writable **and** executable (a W^X violation). Injected code in that page becomes executable. Gate via `--policy-file security`. |
 | `public_api_exposes_stl_by_value` | A public function takes or returns a `std::` type by value across the library boundary. Standard-library layouts differ across toolchains, standard-library versions, and the C++11 dual-ABI setting, so a consumer built with a different STL silently reads the wrong layout. A graph-shaped anti-pattern (ADR-027 A2): reported by `surface-report`, and at diff time only when newly introduced. |
 | `polymorphic_type_non_virtual_dtor` | A type with virtual methods (it has a vtable) is used as a factory return or base class but declares no virtual destructor. Deleting a derived object through a base pointer is undefined behaviour. A graph-shaped anti-pattern (ADR-027 A2): reported by `surface-report`, and at diff time only when newly introduced. |
+| `stdlib_implementation_changed` | The two artifacts were built against **different C++ standard-library implementations** (e.g. libstdc++ vs libc++, or vs the MSVC STL) — a third compatibility axis the standard never guarantees, alongside backward and forward compatibility. Any public type embedding a `std::` container/string **by value** (`class A { std::vector<T> v; };`) is laid out differently across implementations, and inline `std::` code can ODR-conflict. Derived from the normalized `BuildMode` capture; stays silent when build-mode evidence is absent rather than guessing. RISK, never breaking on its own: when an embedded `std::` type's layout actually differs, the type diff emits the concrete size/offset `BREAKING` finding separately. **Recommended action:** pin a single standard-library implementation or rebuild consumers against the matching runtime. |
+| `libcpp_abi_version_changed` | The libc++ ABI version changed (e.g. `_LIBCPP_ABI_VERSION` 1 → 2). libc++ selects incompatible internal layouts for `std::` types via an inline namespace (`std::__1` vs `std::__2`), so types embedding them by value are laid out differently. **Recommended action:** rebuild consumers against the matching libc++ ABI version. |
+| `standard_layout_lost` | A type stopped being standard-layout (e.g. it gained a mix of access specifiers, a base with members, or virtual members). `offsetof` and C interoperability are no longer guaranteed and tail-padding reuse rules change. Tri-state guarded (read from `is_standard_layout`). **Recommended action:** review code relying on the C-compatible layout. |
+| `tail_padding_reuse_changed` | The type's **data size** (the bytes its own members occupy, excluding trailing tail padding — `dsize`) changed while `sizeof` stayed the same. A derived class may reuse a base's tail padding, so this can silently shift a derived layout even though the base's `sizeof` is unchanged. Tri-state guarded (read from `data_size_bits`). |
+| `layout_unverifiable` | A public type's layout could not be verified at the available evidence tier — one side carries a layout descriptor but the other has no size/offset evidence (e.g. a symbols-only or partial dump), so a real layout change cannot be ruled out. Informational and non-escalating. **Recommended action:** rebuild with debug info (or supply headers) to confirm. |
 
 See the [Security-hardening drift](../user-guide/security-hardening.md) guide for how to scan for these across releases.
 
