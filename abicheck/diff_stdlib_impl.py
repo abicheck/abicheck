@@ -152,6 +152,13 @@ def _effective_build_mode(snap: AbiSnapshot) -> BuildMode | None:
                 if bm.libcpp_abi_version is None:
                     bm.libcpp_abi_version = int(m.group(1))
                 break
+    if bm.stdlib is StdlibFamily.UNKNOWN and any(
+        # MSVC STL: COFF-decorated C++ symbols (``?...@@``) are non-Itanium, so
+        # the shared ``_Z``-only detector skips them entirely. MSVC encodes the
+        # ``std`` namespace as ``std@@`` in the mangled name (Codex review #345).
+        sym.startswith("?") and "std@@" in sym for sym in mangled
+    ):
+        bm.stdlib = StdlibFamily.MSVC_STL
     return bm
 
 

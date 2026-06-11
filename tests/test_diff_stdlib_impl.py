@@ -261,6 +261,21 @@ class TestBuildModeFallback:
         # Same family both sides → no implementation-change finding.
         assert ChangeKind.STDLIB_IMPLEMENTATION_CHANGED not in kinds
 
+    def test_fires_for_msvc_stl_from_coff_mangling(self) -> None:
+        # MSVC C++ symbols are COFF-decorated (non-Itanium); the std namespace
+        # is encoded as ``std@@``. MSVC STL → libc++ must still be detected.
+        msvc = (
+            "?api@@YAXV?$basic_string@DU?$char_traits@D@std@@"
+            "V?$allocator@D@2@@std@@@Z"
+        )
+        old = AbiSnapshot(
+            library="lib.dll", version="1", functions=[self._fn(msvc)])
+        new = AbiSnapshot(
+            library="lib.so", version="2",
+            functions=[self._fn("_Z3apiNSt3__16vectorIiNS_9allocatorIiEEEE")])
+        kinds = {c.kind for c in compare(old, new).changes}
+        assert ChangeKind.STDLIB_IMPLEMENTATION_CHANGED in kinds
+
     def test_silent_when_no_mangled_symbols(self) -> None:
         old = AbiSnapshot(library="lib.so", version="1")
         new = AbiSnapshot(library="lib.so", version="2")
