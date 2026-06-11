@@ -23,19 +23,69 @@ from __future__ import annotations
 
 from .checker_policy import ChangeKind
 from .checker_types import Change
+from .demangle import demangle
 from .model import Function, RecordType
 
 
-def owner_class_of(display_name: str) -> str | None:
-    """The enclosing class/struct of a method, parsed from its demangled name.
+def _scope_before_last_separator(s: str) -> str | None:
+    """Everything before the last ``::`` at template depth 0, or ``None``.
 
-    ``Foo::bar`` → ``Foo``; ``ns::Foo::bar`` → ``ns::Foo``; a free function
-    (no ``::``) → ``None``. Operator/conversion names never contain ``::`` in
-    their trailing component, so a single right-split is safe.
+    ``ns::Foo::bar`` → ``ns::Foo``; ``bar`` → ``None``. Template-depth aware so
+    ``ns::Foo<a::b>`` is not split inside its argument list.
     """
-    if "::" not in display_name:
+    depth = 0
+    last = -1
+    i = 0
+    while i < len(s) - 1:
+        ch = s[i]
+        if ch == "<":
+            depth += 1
+        elif ch == ">":
+            depth = max(0, depth - 1)
+        elif ch == ":" and s[i + 1] == ":" and depth == 0:
+            last = i
+            i += 2
+            continue
+        i += 1
+    return s[:last] if last != -1 else None
+
+
+def _owner_from_mangled(mangled: str) -> str | None:
+    """Resolve a method's enclosing class/struct from its mangled name.
+
+    Needed for header/CastXML snapshots, which record ``Function.name`` without
+    namespace/class scope (``bar`` rather than ``C::bar``), so the display name
+    alone cannot identify the owner. Demangle, drop the parameter list, and take
+    the scope before the leaf. Returns ``None`` when the symbol is not a scoped
+    C++ name (free function, C symbol, or no demangler available).
+    """
+    demangled = demangle(mangled)
+    if demangled is None:
         return None
-    return display_name.rsplit("::", 1)[0]
+    depth = 0
+    head = demangled
+    for i, ch in enumerate(demangled):
+        if ch == "<":
+            depth += 1
+        elif ch == ">":
+            depth = max(0, depth - 1)
+        elif ch == "(" and depth == 0:
+            head = demangled[:i]
+            break
+    return _scope_before_last_separator(head.strip())
+
+
+def owner_class_of(f: Function) -> str | None:
+    """The enclosing class/struct of a method.
+
+    Prefer the (already scope-qualified) display name; fall back to demangling
+    the mangled name when the dumper recorded an unqualified leaf (CastXML).
+    ``Foo::bar`` → ``Foo``; ``ns::Foo::bar`` → ``ns::Foo``; a free function
+    → ``None``.
+    """
+    if "::" in f.name:
+        return f.name.rsplit("::", 1)[0]
+    return _owner_from_mangled(f.mangled)
 
 
 def virtual_method_addition(
@@ -55,7 +105,7 @@ def virtual_method_addition(
     """
     if not f_new.is_virtual:
         return None
-    owner = owner_class_of(f_new.name)
+    owner = owner_class_of(f_new)
     if owner is None:
         return None
     t_old = old_types.get(owner)

@@ -177,6 +177,26 @@ class TestVirtualMethodAdded:
         result = compare(old, new)
         assert ChangeKind.VIRTUAL_METHOD_ADDED in _kinds(result)
 
+    def test_unqualified_castxml_name_resolves_owner_from_mangled(self):
+        """castxml records the bare leaf (``bar``) on methods, so the owner must
+        be recovered from the mangled name — otherwise the detector's own
+        blind-spot case (empty vtable array) degrades to a compatible
+        FUNC_ADDED instead of the BREAKING vtable growth."""
+        old = _snap(
+            functions=[_method("foo", "_ZN1C3fooEv", is_virtual=True)],
+            types=[_cls("C")],
+        )
+        new = _snap(
+            functions=[
+                _method("foo", "_ZN1C3fooEv", is_virtual=True),
+                _method("bar", "_ZN1C3barEv", is_virtual=True),  # unqualified leaf
+            ],
+            types=[_cls("C")],
+        )
+        result = compare(old, new)
+        assert ChangeKind.VIRTUAL_METHOD_ADDED in _kinds(result)
+        assert result.verdict == Verdict.BREAKING
+
     def test_unchanged_class_no_finding(self):
         old = _snap(
             functions=[_method("Widget::paint", "_ZN6Widget5paintEv", is_virtual=True)],
