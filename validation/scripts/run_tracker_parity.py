@@ -125,7 +125,12 @@ def _extract_sos(pkg: Path, into: Path) -> dict[str, str]:
     into.mkdir(parents=True, exist_ok=True)
     if pkg.name.endswith(".tar.bz2"):
         with tarfile.open(pkg, "r:bz2") as tf:
-            tf.extractall(into, filter="data")
+            try:
+                tf.extractall(into, filter="data")
+            except TypeError:
+                # The extraction `filter` kwarg predates some Python 3.10.x
+                # patch releases; conda packages are a trusted source.
+                tf.extractall(into)  # noqa: S202
     elif pkg.name.endswith(".conda"):
         with zipfile.ZipFile(pkg) as zf:
             inner = next(
@@ -274,10 +279,13 @@ def main(argv: list[str] | None = None) -> int:
     done = 0
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
-        for pair in oracle["pairs"]:
+        for i, pair in enumerate(oracle["pairs"]):
             if args.max_pairs and done >= args.max_pairs:
                 break
-            verdict = _verdict_for_pair(pair, api, args.subdir, tmp, done)
+            # Use the loop index (not `done`) for extraction slots so every
+            # attempted pair gets a fresh directory — a pair that extracts but
+            # isn't scored must not leak stale .so files into the next one.
+            verdict = _verdict_for_pair(pair, api, args.subdir, tmp, i)
             if verdict is None:
                 continue
             results[pair["pair"]] = verdict
