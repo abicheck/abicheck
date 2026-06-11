@@ -87,15 +87,29 @@ class TestHelpers:
         assert _vtable_slots(48, -1) == 4
         assert "no base" in _inheritance_shape(16, 0)
 
-    def test_class_name_demangles_vtable_symbol(self) -> None:
+    # The demangler is monkeypatched so these branch tests are deterministic
+    # across platforms (macOS CI ships no Itanium demangler, so the real
+    # demangle() returns the input unchanged there).
+    def test_class_name_extracts_after_for_marker(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            "abicheck.diff_elf_layout.demangle", lambda s: "vtable for Widget"
+        )
         assert _class_name("_ZTV6Widget") == "Widget"
 
-    def test_class_name_without_for_marker_returns_demangled(self) -> None:
+    def test_class_name_without_for_marker_returns_demangled(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         # A demanglable symbol that is not a "X for Y" form → return as demangled.
+        monkeypatch.setattr("abicheck.diff_elf_layout.demangle", lambda s: "foo()")
         assert _class_name("_Z3foov") == "foo()"
 
-    def test_class_name_non_mangled_returns_input(self) -> None:
+    def test_class_name_non_mangled_returns_input(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         # Non-C++ name: demangle yields nothing → fall back to the raw symbol.
+        monkeypatch.setattr("abicheck.diff_elf_layout.demangle", lambda s: None)
         assert _class_name("plain_c_symbol") == "plain_c_symbol"
 
     def test_sized_rtti_without_elf_is_empty(self) -> None:
