@@ -199,3 +199,53 @@ class TestStdlibEmbeddingAttribution:
         assert not any(
             "embeds a standard-library type by value" in c.description for c in changes
         )
+
+    def test_pointer_to_stdlib_member_not_attributed(self) -> None:
+        # A pointer to a std:: type is layout-neutral, so a size change on the
+        # owner is NOT attributed to it.
+        def owner(size: int) -> RecordType:
+            return RecordType(
+                name="C",
+                kind="struct",
+                size_bits=size,
+                fields=[TypeField(name="p", type="std::vector<int> *", offset_bits=0)],
+            )
+
+        changes = compare(
+            _snap("1", types=[owner(64)]), _snap("2", types=[owner(128)])
+        ).changes
+        assert not any(
+            "embeds a standard-library type by value" in c.description for c in changes
+        )
+
+    def test_attribution_helper_idempotent_and_tolerates_missing_type(self) -> None:
+        # Direct-call coverage for the dedup branch (clause appended once) and the
+        # "owner type absent from the new snapshot" guard.
+        from abicheck.checker_types import Change
+        from abicheck.diff_filtering import _attribute_stdlib_embedding
+
+        new = _snap(
+            "2",
+            types=[
+                RecordType(
+                    name="A",
+                    kind="struct",
+                    size_bits=192,
+                    fields=[
+                        TypeField(name="v", type="std::vector<int>", offset_bits=0)
+                    ],
+                )
+            ],
+        )
+        present = Change(
+            kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="A", description="size changed"
+        )
+        missing = Change(
+            kind=ChangeKind.TYPE_SIZE_CHANGED, symbol="Gone", description="size changed"
+        )
+        changes = [present, missing]
+        _attribute_stdlib_embedding(changes, new)
+        _attribute_stdlib_embedding(changes, new)  # second pass must not duplicate
+        assert present.description.count("embeds a standard-library type by value") == 1
+        # The change whose type is absent from `new` is left untouched.
+        assert "embeds a standard-library type by value" not in missing.description
