@@ -184,10 +184,15 @@ def _effective_build_mode(snap: AbiSnapshot) -> BuildMode | None:
         #   * libstdc++ → a real ``std::`` token without that versioned namespace;
         #   * a user type → no ``std::`` token at all.
         # Reuses the demangler already used across the diff core; degrades to
-        # ``None`` (→ stay quiet) when no demangler is available.
-        from .demangle import demangle
-        for sym in mangled:
-            d = demangle(sym)
+        # empty (→ stay quiet) when no demangler is available. Uses the *batch*
+        # API so that, without the in-process ``cxxfilt`` module, a large C++
+        # library is not demangled one ``c++filt`` subprocess per symbol
+        # (Codex review #345).
+        from .demangle import demangle_batch
+        cpp = [s for s in mangled if s.startswith("_Z")]
+        demangled = demangle_batch(cpp)
+        for sym in cpp:
+            d = demangled.get(sym)
             if not d:
                 continue
             if _LIBCXX_DEMANGLED_NS.search(d):
