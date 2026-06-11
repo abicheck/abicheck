@@ -64,7 +64,6 @@ if TYPE_CHECKING:
     from .model import AbiSnapshot
     from .policy_file import PolicyFile
 
-
 @main.command("collect")
 @click.option("--binary", "binary", type=click.Path(path_type=Path), default=None,
               help="Built shared library this evidence describes (recorded as provenance).")
@@ -303,7 +302,6 @@ def collect_cmd(
         graph_detail=graph_detail,
     )
 
-
 def _collect_source_graph(
     merged: BuildEvidence,
     extractors: list[ExtractorRecord],
@@ -354,7 +352,6 @@ def _collect_source_graph(
     ))
     return graph, graph_detail
 
-
 def _enforce_strict_mode(
     extractors: list[ExtractorRecord], merged: BuildEvidence, collection_mode: str
 ) -> None:
@@ -378,7 +375,6 @@ def _enforce_strict_mode(
         f"produce valid evidence ({names}). Fix the inputs/tools, grant the "
         "needed actions, or use --collection-mode permissive."
     )
-
 
 def _echo_collection_summary(
     pack: BuildSourcePack,
@@ -407,7 +403,6 @@ def _echo_collection_summary(
         click.echo(f"  L5 source graph: {graph_detail or 'empty (no build evidence)'}")
     for diag in merged.diagnostics:
         click.echo(f"  note: {diag}", err=True)
-
 
 def _run_adapters(
     merged: BuildEvidence,
@@ -512,7 +507,6 @@ def _run_adapters(
             inputs=[DEFAULT_REDACTION.path(str(binary))],
             detail=f"{len(ev.toolchains)} toolchains, {len(ev.compile_units)} compile units",
         ))
-
 
 def _run_external_extractors(
     merged: BuildEvidence,
@@ -647,7 +641,6 @@ def _run_external_extractors(
         else:
             _purge_external_outputs(pack_root, manifest)
 
-
 def _purge_external_outputs(pack_root: Path, manifest: object) -> None:
     """Remove a failed external extractor's normalized outputs from the pack.
 
@@ -670,7 +663,6 @@ def _purge_external_outputs(pack_root: Path, manifest: object) -> None:
     norm_dir = pack_root / "normalized" / name
     if norm_dir.is_dir():
         shutil.rmtree(norm_dir, ignore_errors=True)
-
 
 def _collect_call_graph(
     graph: SourceGraphSummary,
@@ -712,7 +704,6 @@ def _collect_call_graph(
         detail=f"{added} call edges from {len(merged.compile_units)} compile units",
     ))
 
-
 def _include_map_for_replay(
     merged: BuildEvidence, clang_bin: str
 ) -> dict[str, list[str]] | None:
@@ -734,7 +725,6 @@ def _include_map_for_replay(
     for diag in extractor.diagnostics:
         merged.diagnostics.append(f"source_abi_include_graph: {diag}")
     return includes or None
-
 
 def _collect_include_graph(
     graph: SourceGraphSummary,
@@ -770,7 +760,6 @@ def _collect_include_graph(
         status="ok" if added else "partial",
         detail=f"{added} include edges from {len(includes)} compile units",
     ))
-
 
 def _ingest_graph_backends(
     graph: SourceGraphSummary,
@@ -821,7 +810,6 @@ def _ingest_graph_backends(
                 name="graph_backend:codeql", status="ok" if added else "partial",
                 inputs=[DEFAULT_REDACTION.path(str(codeql_results))], detail=f"{added} edges ingested",
             ))
-
 
 def _build_coverage(
     merged: BuildEvidence,
@@ -888,7 +876,6 @@ def _build_coverage(
         l5 = LayerCoverage(layer=DataLayer.L5_SOURCE_GRAPH.value, status=CoverageStatus.NOT_COLLECTED)
     return [l3, l4, l5]
 
-
 def _exported_symbols_from_binary(binary: Path | None) -> list[str]:
     """Best-effort exported (mangled) symbol names from ``binary`` for D5 linking.
 
@@ -911,7 +898,6 @@ def _exported_symbols_from_binary(binary: Path | None) -> list[str]:
     syms = {fn.mangled for fn in snap.functions if fn.mangled}
     syms |= {v.mangled for v in snap.variables if getattr(v, "mangled", "")}
     return sorted(syms)
-
 
 def _collect_source_abi(
     merged: BuildEvidence,
@@ -1018,7 +1004,6 @@ def _collect_source_abi(
         + (f", {len(diagnostics)} TU(s) failed (partial coverage)" if diagnostics else "")
     )
 
-
 def _collect_source_abi_android(
     android_dump: Path | None,
     extractors: list[ExtractorRecord],
@@ -1062,13 +1047,10 @@ def _collect_source_abi_android(
         f"{len(surface.reachable_types)} types"
     )
 
-
 # ── Attach / compare integration (ADR-028 D6, D7; ADR-029 D9) ─────────────────
-
 
 def _layer_value(layer: object) -> str:
     return layer.value if hasattr(layer, "value") else str(layer)
-
 
 def _filter_pack_layers(
     pack: BuildSourcePack | None, layers: tuple[str, ...]
@@ -1086,7 +1068,6 @@ def _filter_pack_layers(
     if "L5" not in layers:
         pack.source_graph = None
     return pack
-
 
 def _combine_packs(
     bi_pack: BuildSourcePack | None,
@@ -1209,7 +1190,6 @@ def _combine_packs(
         source_graph=source_graph,  # type: ignore[arg-type]
     )
 
-
 def embed_build_source(
     snap: AbiSnapshot,
     build_info: Path | None,
@@ -1292,7 +1272,6 @@ def embed_build_source(
     hint = str(sources) if sources is not None else str(build_info)
     snap.build_source_pack = merged.to_ref(path_hint=hint)
 
-
 def dump_source_only(
     sources: Path | None,
     build_info: Path | None,
@@ -1329,7 +1308,6 @@ def dump_source_only(
     _write_snapshot_output(
         snap, output, build_info, sources, build_config, allow_build_query, collect_mode
     )
-
 
 @main.command("merge")
 @click.argument("inputs", nargs=-1, required=True, type=click.Path(exists=True, dir_okay=False, path_type=Path))
@@ -1401,7 +1379,6 @@ def merge_cmd(inputs: tuple[Path, ...], output: Path, verbose: bool) -> None:
             }:
                 click.echo(f"  {cov.layer}: {cov.status.value}", err=True)
 
-
 def _resolve_side_pack(
     build_info: Path | None,
     sources: Path | None,
@@ -1424,7 +1401,6 @@ def _resolve_side_pack(
     # L3, --sources wins for L4/L5, the embedded payload backfills, and the
     # coverage manifest is rebuilt per-layer from the supplying pack.
     return _combine_packs(bi_pack, src_pack, embedded)
-
 
 def diff_embedded_build_source(
     old_build_info: Path | None,
@@ -1546,23 +1522,22 @@ def diff_embedded_build_source(
     # Coverage/capability reflect the *target* (new) side only: the L3/L4/L5
     # diffs run only when both sides supply a layer, so reporting the old pack's
     # coverage when the new side has none would over-claim that source/build
-    # checks ran for this scan (Codex review). new_pack's manifest already
-    # carries one honest row per managed layer (_combine_packs); when the new
-    # side has no pack at all, every managed layer is not_collected.
-    if new_pack is not None:
-        coverage = list(new_pack.manifest.coverage)
-    else:
-        coverage = [
-            LayerCoverage(layer=layer.value, status=CoverageStatus.NOT_COLLECTED)
-            for layer in (DataLayer.L3_BUILD, DataLayer.L4_SOURCE_ABI, DataLayer.L5_SOURCE_GRAPH)
-        ]
+    # checks ran for this scan (Codex review). The side-by-side table below
+    # still exposes old/new asymmetry to humans.
+    coverage = _optional_coverage(new_pack)
     intrinsic = _intrinsic_coverage(new_snapshot)
     _echo_coverage(intrinsic, coverage)
+    if old_snapshot is not None:
+        _echo_compare_side_coverage(
+            _intrinsic_coverage(old_snapshot),
+            _optional_coverage(old_pack),
+            intrinsic,
+            coverage,
+        )
     _echo_capabilities(intrinsic, coverage)
     coverage_rows: list[dict[str, object]] = [c.to_dict() for c in (*intrinsic, *coverage)]
     metrics = evidence_coverage_metrics(coverage)
     return changes, coverage_rows, metrics
-
 
 def prepare_embedded_build_source(
     old_snapshot: AbiSnapshot,
@@ -1611,7 +1586,6 @@ def prepare_embedded_build_source(
         extra_changes = (extra_changes or []) + ev_changes
     return extra_changes, coverage_rows, metrics, ev_changes
 
-
 def attach_evidence_metrics(
     result: DiffResult,
     metrics: dict[str, object],
@@ -1637,13 +1611,11 @@ def attach_evidence_metrics(
     result.evidence_metrics = metrics
     echo_evidence_metrics(metrics)
 
-
 def _load_pack_or_raise(evidence_dir: Path) -> BuildSourcePack:
     try:
         return BuildSourcePack.load(evidence_dir)
     except (FileNotFoundError, ValueError) as exc:
         raise click.ClickException(f"Invalid evidence pack at {evidence_dir}: {exc}") from exc
-
 
 def _intrinsic_coverage(snap: AbiSnapshot) -> list[LayerCoverage]:
     """Derive L0/L1/L2 coverage rows from a snapshot (ADR-028 D7)."""
@@ -1663,6 +1635,13 @@ def _intrinsic_coverage(snap: AbiSnapshot) -> list[LayerCoverage]:
         row("L2", has_headers, "header-scoped" if has_headers else ""),
     ]
 
+def _optional_coverage(pack: BuildSourcePack | None) -> list[LayerCoverage]:
+    if pack is not None:
+        return list(pack.manifest.coverage)
+    return [
+        LayerCoverage(layer=layer.value, status=CoverageStatus.NOT_COLLECTED)
+        for layer in (DataLayer.L3_BUILD, DataLayer.L4_SOURCE_ABI, DataLayer.L5_SOURCE_GRAPH)
+    ]
 
 # Human-readable layer names, ordered shallow→deep, shared by the coverage
 # table and the asymmetry finding so both speak the same vocabulary.
@@ -1671,7 +1650,6 @@ _LAYER_NAMES: dict[str, str] = {
     "L3_build": "L3 build context", "L4_source_abi": "L4 source ABI replay",
     "L5_source_graph": "L5 source graph summary",
 }
-
 
 def _echo_coverage(intrinsic: list[LayerCoverage], optional: list[LayerCoverage]) -> None:
     """Print the D7 evidence-coverage table to stderr (all output formats)."""
@@ -1684,6 +1662,26 @@ def _echo_coverage(intrinsic: list[LayerCoverage], optional: list[LayerCoverage]
                 extra += f": {cov.detail}"
         click.echo(f"  {_LAYER_NAMES.get(cov.layer, cov.layer):<26} {cov.status.value}{extra}", err=True)
 
+def _echo_compare_side_coverage(
+    old_intrinsic: list[LayerCoverage],
+    old_optional: list[LayerCoverage],
+    new_intrinsic: list[LayerCoverage],
+    new_optional: list[LayerCoverage],
+) -> None:
+    """Print old/new layer coverage so mixed-evidence compares are explicit."""
+    old_by_layer = {c.layer: c for c in (*old_intrinsic, *old_optional)}
+    new_by_layer = {c.layer: c for c in (*new_intrinsic, *new_optional)}
+    click.echo("Evidence coverage by side:", err=True)
+    for layer, name in _LAYER_NAMES.items():
+        old = old_by_layer.get(layer)
+        new = new_by_layer.get(layer)
+        old_status = old.status.value if old is not None else "not_collected"
+        new_status = new.status.value if new is not None else "not_collected"
+        marker = " (asymmetric)" if old_status != new_status else ""
+        click.echo(
+            f"  {name:<26} old={old_status:<13} new={new_status}{marker}",
+            err=True,
+        )
 
 def _layer_presence(snap: AbiSnapshot, pack: BuildSourcePack | None) -> dict[str, bool]:
     """Map every evidence layer id → present? for one side of the compare.
@@ -1702,7 +1700,6 @@ def _layer_presence(snap: AbiSnapshot, pack: BuildSourcePack | None) -> dict[str
     if pack is not None and pack.build_evidence is not None:
         present[DataLayer.L3_BUILD.value] = True
     return present
-
 
 def _detect_coverage_asymmetry(
     old_snap: AbiSnapshot,
@@ -1755,7 +1752,6 @@ def _detect_coverage_asymmetry(
         )
     ]
 
-
 #: One row per check category: (label, evidence layer that enables it, the
 #: question it answers, and why it is off when that layer is absent). This is the
 #: "what is and is not being checked, and why" report (ADR-028 D7): the tiers run
@@ -1780,7 +1776,6 @@ _CHECK_CAPABILITIES: tuple[tuple[str, str, str, str], ...] = (
      "from the source graph summary",
      "no graph evidence: cross-symbol impact is not analyzed"),
 )
-
 
 def _echo_capabilities(
     intrinsic: list[LayerCoverage], optional: list[LayerCoverage]
@@ -1807,9 +1802,7 @@ def _echo_capabilities(
         else:
             click.echo(f"  [off] {label} — {why_off}", err=True)
 
-
 # ── compare-graph: structural graph-to-graph diff (ADR-031 D6, D8) ────────────
-
 
 def _load_source_graph(path: Path) -> SourceGraphSummary:
     """Load a source graph summary from a JSON file or an evidence-pack dir.
@@ -1848,7 +1841,6 @@ def _load_source_graph(path: Path) -> SourceGraphSummary:
             "(expected top-level 'nodes' and 'edges' lists)."
         )
     return SourceGraphSummary.from_dict(data)
-
 
 @main.command("compare-graph")
 @click.argument("old", type=click.Path(path_type=Path))
@@ -1917,7 +1909,6 @@ def compare_graph_cmd(old: Path, new: Path, fmt: str) -> None:
         for c in findings:
             click.echo(f"  [{c.kind.value}] {c.symbol}: {c.description}")
 
-
 @main.command("explain-finding")
 @click.option("--sources", "sources", type=click.Path(path_type=Path), required=True,
               help="Source/graph pack directory (or a source_graph_summary.json) to explain through.")
@@ -1968,7 +1959,6 @@ def explain_finding_cmd(
     ]
     for label, values in rows:
         click.echo(f"  {label}: {', '.join(values) if values else '(none in graph)'}")
-
 
 def _resolve_symbol_from_report(report: Path, finding_id: str) -> str:
     """Resolve a symbol from a `compare --format json` report finding.

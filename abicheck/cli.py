@@ -26,6 +26,7 @@ import click
 
 from .checker import DiffResult, LibraryMetadata, compare
 from .cli_audit import echo_filtered_surface, echo_pattern_modulations
+from .cli_datasources import print_data_sources as _print_data_sources
 from .cli_options import (
     adr027_compare_options,
     build_source_compare_options,
@@ -685,10 +686,10 @@ def _populate_dependency_info(
               help="Simulated LD_LIBRARY_PATH (with --follow-deps).")
 @click.option("--dwarf-only", is_flag=True, default=False,
               help="Force DWARF-only mode: use DWARF debug info as the primary "
-                   "data source even when headers are available. Enables 24/30 "
-                   "detectors without requiring castxml.")
+                   "data source even when headers are available. Enables type-aware "
+                   "artifact checks without requiring castxml.")
 @click.option("--show-data-sources", is_flag=True, default=False,
-              help="Print which data layers (L0/L1/L2) are available for the "
+              help="Print which data layers (L0-L5) are available for the "
                    "binary and exit.")
 @click.option("--debug-format", "debug_format_opt",
               type=click.Choice(["auto", "dwarf", "btf", "ctf"], case_sensitive=False), default=None,
@@ -782,7 +783,12 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
 
     # --show-data-sources: diagnostic output and exit
     if show_data_sources:
-        _print_data_sources(so_path, bool(headers))
+        _print_data_sources(
+            so_path,
+            bool(headers),
+            build_source_path=build_info,
+            sources_path=sources,
+        )
         return
 
     # Auto-detect binary format — PE/Mach-O skip the ELF/castxml path. The
@@ -952,23 +958,6 @@ def _resolve_debug_artifact(
         enable_debuginfod=debuginfod,
         debuginfod_urls=[debuginfod_url] if debuginfod_url else None,
     )
-
-
-def _print_data_sources(so_path: Path, has_headers: bool) -> None:
-    """Print data source diagnostic information for a binary."""
-    from .dwarf_snapshot import show_data_sources
-
-    binary_fmt = _detect_binary_format(so_path)
-    elf_meta = None
-    dwarf_meta = None
-
-    if binary_fmt == "elf":
-        from .dwarf_unified import parse_dwarf
-        from .elf_metadata import parse_elf_metadata
-        elf_meta = parse_elf_metadata(so_path)
-        dwarf_meta, _ = parse_dwarf(so_path)
-
-    click.echo(show_data_sources(so_path, elf_meta, dwarf_meta, has_headers))
 
 
 def _resolve_per_side_options(

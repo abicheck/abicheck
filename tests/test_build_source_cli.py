@@ -200,6 +200,9 @@ def test_compare_with_evidence_emits_coverage_and_findings(tmp_path):
     assert result.exit_code in (0, 2, 4), result.output
     # D7 coverage table is emitted to stderr.
     assert "Evidence coverage:" in result.stderr
+    assert "Evidence coverage by side:" in result.stderr
+    assert "old=present" in result.stderr
+    assert "new=present" in result.stderr
     assert "L3 build context" in result.stderr
     # The -std drift surfaces as an ABI-relevant build-flag finding (RISK).
     assert "COMPATIBLE_WITH_RISK" in result.stdout or "Deployment Risk" in result.stdout
@@ -245,6 +248,11 @@ def test_compare_asymmetric_old_only_reports_target_not_collected(tmp_path):
     payload = json.loads(result.stdout)
     cov = {row["layer"]: row for row in payload["layer_coverage"]}
     assert cov["L3_build"]["status"] == "not_collected"
+    assert "Evidence coverage by side:" in result.stderr
+    assert "L3 build context" in result.stderr
+    assert "old=present" in result.stderr
+    assert "new=not_collected" in result.stderr
+    assert "(asymmetric)" in result.stderr
 
 
 def test_compare_json_without_evidence_omits_coverage(tmp_path):
