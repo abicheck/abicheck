@@ -184,6 +184,31 @@ class TestDetectorFindings:
         # was trimmed from the FP corpus and is asserted here instead).
         assert result.verdict.value not in {"BREAKING", "API_BREAK"}
 
+    def test_standalone_stdlib_record_is_not_a_public_embedding(self) -> None:
+        # Debug info carries a standalone std:: record whose fields are naturally
+        # std:: types, but NO public owner type embeds the stdlib. The detector
+        # must not read those toolchain-owned internals as a public embedding
+        # (Codex review #345): the description carries no embed-specific note.
+        std_record = RecordType(
+            name="std::vector<int>",
+            kind="class",
+            size_bits=192,
+            fields=[
+                TypeField(
+                    name="_M_start", type="std::__1::__wrap_iter<int *>", offset_bits=0
+                )
+            ],
+        )
+        old = _snap("1", stdlib=StdlibFamily.LIBSTDCXX, types=[std_record])
+        new = _snap("2", stdlib=StdlibFamily.LIBCXX, types=[std_record])
+        result = compare(old, new)
+        finding = next(
+            c
+            for c in result.changes
+            if c.kind == ChangeKind.STDLIB_IMPLEMENTATION_CHANGED
+        )
+        assert "embeds a std::" not in finding.description
+
     def test_stdlib_container_of_pointers_by_value_is_embedding(self) -> None:
         # std::vector<int*> held BY VALUE is layout-dependent: the `*` is in the
         # template argument, not the field type. Must count as an embedding.

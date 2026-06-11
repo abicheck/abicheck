@@ -93,10 +93,20 @@ def _public_type_embeds_stdlib_by_value(snap: AbiSnapshot) -> bool:
     makes a public type's layout implementation-dependent. Pointers/references
     to stdlib types are layout-neutral (just a ``void*``), so this only looks
     at the field's spelled type — pointer/reference spellings are skipped.
+
+    Only *public owner* records count. A standalone toolchain-owned ``std::``
+    record (e.g. a debug-info ``std::vector`` entry) naturally has ``std::``
+    fields, but it is not a public type embedding the stdlib — counting it would
+    falsely claim a public layout change exists when the global stdlib filter has
+    kept all the matching records out of the surface (Codex review #345).
     """
     from .model import is_non_abi_surface_type
 
     for rec in snap.types:
+        # Skip non-ABI-surface owner records (std::/__gnu_cxx:: internals): their
+        # std:: fields are not a *public* type embedding the stdlib by value.
+        if is_non_abi_surface_type(rec.name):
+            continue
         for fld in rec.fields:
             tname = (fld.type or "").strip()
             # Skip only when the *field itself* is a pointer or reference (a
