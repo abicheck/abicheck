@@ -3,7 +3,7 @@
 ## What is abicheck?
 
 ABI compatibility checker for C/C++ shared libraries. Pure Python (3.10+).
-Detects 216 ABI/API change types across ELF, PE/COFF, and Mach-O binaries,
+Detects 232 ABI/API change types across ELF, PE/COFF, and Mach-O binaries,
 categorized into `BREAKING_KINDS`, `API_BREAK_KINDS`, `COMPATIBLE_KINDS`, and `RISK_KINDS` (see `ChangeKind`).
 Drop-in replacement for abi-compliance-checker (ABICC).
 
@@ -62,6 +62,7 @@ Core pipeline (in order of data flow):
    - `diff_symbols.py` — function/variable/parameter changes
    - `diff_types.py` — struct/enum/union/typedef changes
    - `diff_platform.py` — ELF/PE/Mach-O specific changes
+   - `diff_elf_layout.py` — binary-only (no-DWARF/L0) vtable & RTTI layout diff from `_ZTV`/`_ZTI` symbol sizes
    - `diff_filtering.py` — deduplication and redundancy removal
    - `diff_versioning.py` — symbol version checks
    - `diff_sycl.py` — SYCL-specific diffs

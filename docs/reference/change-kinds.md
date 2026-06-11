@@ -124,6 +124,15 @@ Fine-grained layout mechanics that the coarse `struct_size_changed` / `struct_fi
 | `vptr_introduced` | A previously non-polymorphic class gained its first virtual function, so the compiler prepends a vtable pointer. `sizeof` grows and every data member's offset shifts by a pointer width; existing binaries that embed or derive from the type are laid out incompatibly. |
 | `trivially_copyable_lost` | A type stopped being trivially copyable (e.g. a user-declared copy/move constructor, destructor, or a non-trivial member was added). Non-trivially-copyable types are passed and returned by value differently (via a hidden reference / not in registers), so the calling convention for any function taking or returning it by value changes. |
 
+### Binary-only C++ Layout (no DWARF / L0)
+
+Recovered from `.dynsym` symbol sizes alone by `diff_elf_layout.py`. The Itanium C++ ABI fixes the on-disk size of a class's vtable (`_ZTV`) and typeinfo (`_ZTI`) objects, so these break detections work on libraries shipped fully stripped of debug info and headers — closing the blind spot a pure exported-symbol dump has (a virtual-method or base-class change need not rename any mangled symbol). Each fires only when the *same* `_ZTV`/`_ZTI` symbol is present on both sides with a different size.
+
+| Kind | Description |
+|------|-------------|
+| `vtable_slot_count_changed` | A polymorphic class's vtable (`_ZTV`) object changed size — it now holds a different number of virtual-function slots (a virtual method was added, removed, or reordered). Existing binaries dispatch through fixed vtable offsets, so they call the wrong slot. The binary-only analogue of `func_virtual_added` / `type_vtable_changed`. |
+| `rtti_inheritance_changed` | A polymorphic class's RTTI typeinfo (`_ZTI`) object changed size, which in the Itanium ABI means its base-class shape changed: no-base (`__class_type_info`) ↔ single-base (`__si_class_type_info`) ↔ multiple/virtual-base (`__vmi_class_type_info`), or the base count differs. Base-class changes shift `this`-pointer adjustments, member offsets, and the vtable. The binary-only analogue of `type_base_changed`. |
+
 ### Pointer / Parameter Level Changes
 
 | Kind | Description |

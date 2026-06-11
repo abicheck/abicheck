@@ -563,6 +563,15 @@ class ChangeKind(str, Enum):
     TAIL_PADDING_REUSE_CHANGED = "tail_padding_reuse_changed"  # data-size (dsize) changed at stable sizeof → derived tail-padding reuse shifts → RISK
     LAYOUT_UNVERIFIABLE = "layout_unverifiable"  # layout could not be verified at this evidence tier (no debug info) → RISK, non-escalating
 
+    # ── Binary-only (no-DWARF / L0) C++ layout descriptors ───────────────────
+    # Emitted by diff_elf_layout.py purely from .dynsym symbol sizes — no debug
+    # info, no headers. The Itanium C++ ABI encodes a class's vtable slot count
+    # in the size of its `_ZTV` vtable object and its inheritance shape in the
+    # size of its `_ZTI` typeinfo object, so a virtual-method or base-class
+    # change is observable even when the library ships fully stripped of DWARF.
+    VTABLE_SLOT_COUNT_CHANGED = "vtable_slot_count_changed"  # _ZTV size delta → virtual method add/remove/reorder → BREAKING
+    RTTI_INHERITANCE_CHANGED = "rtti_inheritance_changed"  # _ZTI size delta → base-class set/shape changed → BREAKING
+
 
 class HasKind(Protocol):
     kind: ChangeKind

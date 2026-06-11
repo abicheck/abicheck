@@ -49,6 +49,9 @@ from .checker_types import (  # noqa: F401
     LibraryMetadata,
 )
 from .detector_registry import registry as _detector_registry
+from .diff_elf_layout import (  # noqa: F401 — triggers detector registration
+    _diff_elf_layout,
+)
 from .diff_filtering import (  # noqa: F401
     _ROOT_TYPE_CHANGE_KINDS,
     _compute_confidence,

@@ -137,6 +137,12 @@ class ElfMetadata:
     # W^X violation: a loadable segment is simultaneously writable + executable.
     has_writable_executable_segment: bool = False
 
+    # Target pointer width in bytes (4 for ELFCLASS32, 8 for ELFCLASS64).
+    # Used by diff_elf_layout.py to turn `_ZTV`/`_ZTI` object sizes into vtable
+    # slot counts and inheritance shapes. Defaults to 8 (the common 64-bit case)
+    # so in-memory snapshots constructed in tests need not set it explicitly.
+    pointer_size: int = 8
+
     @cached_property
     def symbol_map(self) -> dict[str, ElfSymbol]:
         """Name → ElfSymbol mapping (built once, cached on first access).
@@ -202,6 +208,13 @@ def parse_elf_metadata(so_path: Path) -> ElfMetadata:
 def _parse(f: IO[bytes], so_path: Path) -> ElfMetadata:
     meta = ElfMetadata()
     elf = ELFFile(f)
+
+    # Pointer width: ELFCLASS32 → 4 bytes, ELFCLASS64 → 8 bytes. Used to decode
+    # vtable/typeinfo object sizes in diff_elf_layout.py.
+    try:
+        meta.pointer_size = 4 if elf.elfclass == 32 else 8
+    except Exception as exc:  # noqa: BLE001
+        log.warning("parse_elf_metadata: failed to read ELF class from %s: %s", so_path, exc)
 
     # Extract PT_INTERP (ELF interpreter path) and the segment-level hardening
     # surface (PT_GNU_STACK, PT_GNU_RELRO, W^X loadable segments).

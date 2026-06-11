@@ -9,7 +9,7 @@
 
 **abicheck** detects breaking changes in C/C++ shared libraries before they reach production. It compares two versions of a shared library — along with their public headers — and reports whether existing binaries will continue to work or break at runtime.
 
-It catches removed or renamed symbols, changed function signatures, struct layout drift, vtable reordering, enum value reassignment, and many more — **230 ABI/API change types** in total — that cause crashes, silent data corruption, or linker failures after a library upgrade.
+It catches removed or renamed symbols, changed function signatures, struct layout drift, vtable reordering, enum value reassignment, and many more — **232 ABI/API change types** in total — that cause crashes, silent data corruption, or linker failures after a library upgrade.
 
 > **Platforms:** Linux (ELF), Windows (PE/COFF), macOS (Mach-O). Binary and header AST analysis on all platforms; debug-info cross-check uses DWARF (Linux, macOS) and PDB (Windows).
 
@@ -175,7 +175,7 @@ See `abicheck.service` for the full signature, plus the [MCP server integration]
 
 ## Examples
 
-The [`examples/`](examples/README.md) directory contains **126 real-world ABI/API scenarios** (121 single-library cases plus 5 multi-library bundle cases) with ground-truth verdicts. Most are single-library `v1`/`v2` examples with a consumer app; bundle/release-level cases use release-style layouts. The full catalog is the development regression corpus; a smaller historical cross-tool subset is kept in the reference docs for release-to-release comparison with libabigail and ABICC.
+The [`examples/`](examples/README.md) directory contains **127 real-world ABI/API scenarios** (122 single-library cases plus 5 multi-library bundle cases) with ground-truth verdicts. Most are single-library `v1`/`v2` examples with a consumer app; bundle/release-level cases use release-style layouts. The full catalog is the development regression corpus; a smaller historical cross-tool subset is kept in the reference docs for release-to-release comparison with libabigail and ABICC.
 
 ---
 

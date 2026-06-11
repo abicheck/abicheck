@@ -2041,6 +2041,21 @@
       "expected_kinds": [
         "type_became_final"
       ]
+    },
+    "case126_sycl_device_impl_ptr": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "min_evidence": "L1",
+      "platforms": [
+        "linux"
+      ],
+      "abi_break": true,
+      "api_break": true,
+      "bad_practice": false,
+      "description": "Distilled from intel/llvm PR #20821 (the `abi-break`-labelled change that swapped `std::shared_ptr<device_impl>` for a raw `device_impl*` inside `sycl::device`, surfacing as issue #20915 / fix #21028). The shared_ptr member is two pointers (16 bytes) on LP64; the raw pointer is one (8 bytes), so sizeof(sycl::device) shrinks 16->8 — an ABI break for every consumer that holds a device by value or embeds it. The method mangled names are unchanged, so a pure exported-symbol dump (sycl_symbols_*.dump) does not see the layout change directly; abicheck's type/layout diff reports the root cause as TYPE_SIZE_CHANGED. Built with -fvisibility-inlines-hidden so the diff shows the public ABI break rather than libstdc++ template noise, mirroring how libsycl is built.",
+      "expected_kinds": [
+        "type_size_changed"
+      ]
     }
   }
 }

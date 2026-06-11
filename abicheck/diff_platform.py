@@ -785,6 +785,12 @@ def _diff_elf_symbol_pair(
         and s_new.size > 0
         and s_old.size != s_new.size
         and s_new.sym_type in (SymbolType.OBJECT, SymbolType.COMMON, SymbolType.TLS)
+        # Vtable (_ZTV) and typeinfo (_ZTI) object size changes are owned by
+        # diff_elf_layout.py, which decodes them into vtable-slot-count /
+        # inheritance-shape findings; typeinfo-name (_ZTS) and VTT (_ZTT) size
+        # changes only track the mangled spelling and are not ABI-meaningful.
+        # Skip them here so the generic SYMBOL_SIZE_CHANGED does not double-emit.
+        and not sym_name.startswith(("_ZTV", "_ZTI", "_ZTS", "_ZTT"))
     ):
         # Use a distinct kind for internal-looking (reserved/underscore-prefixed)
         # exported data symbols so policy files can target them, but keep the

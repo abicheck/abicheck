@@ -1107,4 +1107,26 @@ REGISTRY = ChangeKindRegistry([
               "dump with no debug info), so a real layout change cannot be ruled out. "
               "Informational and non-escalating; rebuild with debug info (or supply "
               "headers) to confirm."),
+
+    # ── Binary-only (no-DWARF / L0) C++ layout descriptors ───────────────────
+    # Recovered from .dynsym symbol sizes alone by diff_elf_layout.py. The
+    # Itanium C++ ABI fixes the on-disk size of a class's vtable (`_ZTV`) and
+    # typeinfo (`_ZTI`) objects, so these break detections work on libraries
+    # shipped without any DWARF debug info or public headers.
+    _E("vtable_slot_count_changed", _B,
+       impact="A polymorphic class's vtable changed size — its `_ZTV` object now holds "
+              "a different number of virtual-function slots (a virtual method was added, "
+              "removed, or reordered). Existing binaries dispatch through fixed vtable "
+              "offsets, so they call the wrong slot or run off the end of the table. "
+              "Recovered from the ELF symbol size without DWARF — the binary-only analogue "
+              "of FUNC_VIRTUAL_ADDED / TYPE_VTABLE_CHANGED."),
+    _E("rtti_inheritance_changed", _B,
+       impact="A polymorphic class's RTTI typeinfo (`_ZTI`) object changed size, which in "
+              "the Itanium C++ ABI means its base-class shape changed: no-base "
+              "(`__class_type_info`, 2 words) ↔ single-base (`__si_class_type_info`, "
+              "3 words) ↔ multiple/virtual-base (`__vmi_class_type_info`, larger), or the "
+              "number of bases differs. Base-class changes shift `this`-pointer "
+              "adjustments, member offsets, and the vtable, so derived classes and "
+              "by-value users are miscompiled. Recovered from the ELF symbol size without "
+              "DWARF — the binary-only analogue of TYPE_BASE_CHANGED."),
 ])
