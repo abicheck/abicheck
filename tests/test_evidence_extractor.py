@@ -285,6 +285,23 @@ def test_manifest_missing_name(tmp_path):
         load_extractor_manifest(_dump(tmp_path, {"commands": {"collect": ["x"]}}))
 
 
+@pytest.mark.parametrize(
+    "bad_name",
+    ["/tmp/escape", "../escape", "a/b", "a\\b", ".."],
+)
+def test_manifest_name_must_be_safe_path_component(tmp_path, bad_name):
+    # A name set to an absolute path or containing traversal is later used to
+    # build raw/<name> and normalized/<name> dirs; reject at load so it cannot
+    # escape the pack root.
+    data = {
+        "name": bad_name,
+        "commands": {"collect": ["x"]},
+        "outputs": {"build_evidence": ["build/build.json"]},
+    }
+    with pytest.raises(ManifestError, match="single safe path component"):
+        load_extractor_manifest(_dump(tmp_path, data))
+
+
 def test_manifest_commands_not_mapping(tmp_path):
     with pytest.raises(ManifestError, match="'commands' must be a mapping"):
         load_extractor_manifest(_dump(tmp_path, {"name": "x", "commands": ["x"]}))
