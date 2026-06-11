@@ -280,6 +280,17 @@ def compare(
 
     _old_elf = getattr(old, "elf", None) or _ElfMetadata()
     _new_elf = getattr(new, "elf", None) or _ElfMetadata()
+
+    # Demote findings confined to symbols the library marks internal/private via
+    # an ELF version node (``GLIBC_PRIVATE`` / ``*_INTERNAL_*``): they are
+    # exported but not public ABI, so a real change to them is a deployment risk,
+    # not a break (validation parity class A — nettle 3.6→3.7). Runs before the
+    # SONAME-bump policy and verdict so a demoted internal change neither drives a
+    # BREAKING verdict nor triggers a spurious bump recommendation.
+    from .diff_versioning import demote_internal_version_node_findings
+
+    demote_internal_version_node_findings(kept + verdict_redundant, _old_elf, _new_elf)
+
     soname_changes = check_soname_bump_policy(
         kept + verdict_redundant, _old_elf, _new_elf
     )

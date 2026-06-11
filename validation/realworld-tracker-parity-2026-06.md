@@ -42,7 +42,8 @@ oracles below harvested and scored live.
   difference is scope (binary vs public-header) or evidence (DWARF coverage), not
   a bug. Grouped in §3:
   - **A — author-internal symbol / version-node churn** (nettle): real signature
-    changes on `*_INTERNAL_*` version-node symbols ABICC scopes out.
+    changes on `*_INTERNAL_*` version-node symbols ABICC scopes out. **✅ now fixed
+    in abicheck core** (§4.1) — nettle agreement 67 %→100 %.
   - **B — internal/opaque *type* layout churn seen via DWARF** (readline, xz,
     librdkafka): the public header only forward-declares the type (opaque /
     reserved `__name`); abicheck reads the full internal layout from DWARF, ABICC
@@ -51,7 +52,8 @@ oracles below harvested and scored live.
     C++ vtable growth in `libhdf5_hl_cpp`, while the tracker scores only the C
     `libhdf5` soname.
   - **D — partial DWARF evidence** (openssl, the lone *weaker*): a 0.09 % type-only
-    ABICC break not observable in conda `libcrypto`'s sparse DWARF.
+    ABICC break not observable in conda `libcrypto`'s sparse DWARF. **✅ now fixed
+    in the harness probe** (§4.2) — reclassified evidence-limited, not a miss.
   - **E — correct product break ABICC under-scoped** (oniguruma): an exported
     data-object size change under a stable SONAME — a real binary break.
 - **40 pairs auto-classified as scope divergences** (abicheck stricter, gated on
@@ -211,32 +213,38 @@ abicheck BREAKING.
 
 ---
 
-## 4. Recommendations (tracked, not blocking)
+## 4. Recommendations
 
-1. **Recognise `*_INTERNAL_*` / `*PRIVATE*` ELF version nodes as non-public ABI
-   (abicheck core).** abicheck already half-does this:
-   `diff_versioning._is_unattached_private_version_node` skips `PRIVATE`-named
-   nodes *with no bound symbols*. Extend the concept to **attached** internal/
-   private version-node symbols (`HOGWEED_INTERNAL_6_1`, `NETTLE_INTERNAL_8_1`,
-   `GLIBC_PRIVATE`), demoting changes confined to them from BREAKING to a
-   risk/internal classification. This is a real, recurring upstream convention and
-   the single change that would turn nettle 3.6→3.7 into a correct
-   COMPATIBLE(_WITH_RISK). It touches several detectors
-   (`func_removed`/`func_params_changed`/`symbol_size_changed`/version-node) and is
-   guarded by the FP-rate + mutation + golden gates, so it warrants its own change
-   with full coverage — deliberately **not** bundled into this validation pass.
-   As a precursor, populate the already-declared-but-always-null `version_node`
-   field on ELF findings so both users and the harness can see a symbol's node.
+1. **✅ DONE — Recognise `*_INTERNAL_*` / `*PRIVATE*` ELF version nodes as
+   non-public ABI (abicheck core).** Implemented in `abicheck/diff_versioning.py`
+   (`is_internal_version_node`, `internal_versioned_symbols`,
+   `demote_internal_version_node_findings`), wired into `abicheck/checker.py`
+   before the SONAME-bump and verdict steps. A finding confined to a symbol the
+   library binds to an internal/private version node (glibc `GLIBC_PRIVATE`,
+   nettle `HOGWEED_INTERNAL_6_1`) is reclassified BREAKING→`COMPATIBLE_WITH_RISK`
+   via the per-finding `effective_verdict` hook (ADR-025) — the `GLIBC_PRIVATE`
+   semantics. Conservative by construction: only kinds already BREAKING/API_BREAK
+   are touched, the per-symbol set is derived from the **actual** ELF version
+   bindings (a public function merely *named* `…internal…` is never matched), and
+   frozen-namespace escalations are never weakened. **Verified live: nettle
+   agreement 67 %→100 %** (3.6→3.7 and 3.8→3.8.1 now correct
+   `COMPATIBLE_WITH_RISK`); a public-node removal (nettle 3.3→3.4) stays BREAKING.
+   Regression coverage: `tests/test_internal_version_node_scope.py` (helpers +
+   end-to-end), plus the updated `tests/test_sprint2_elf.py`. FP-rate gate, mypy,
+   and the full fast suite (9 600+ tests) stay green.
 
-2. **Sharpen the harness evidence probe (validation only, low-risk).**
-   `conda_harness.has_dwarf` currently tests only for a `.debug_info` *section*.
-   The openssl case shows presence ≠ coverage: a binary can carry sparse DWARF
-   that does not include the changed interface. A type-only oracle break
-   (`removed_symbols == 0`) on a binary whose DWARF type surface is below a
-   meaningful coverage floor should be treated as **evidence-limited**, not a
-   scored `ABICHECK_WEAKER`. Care is needed not to mask genuine misses, so gate it
-   on the oracle's own type-only signal (`removed_symbols == 0`) plus a measured
-   coverage floor rather than loosening unconditionally.
+2. **✅ DONE — Sharpen the harness evidence probe (validation only).**
+   `conda_harness.has_dwarf` only proves a `.debug_info` *section* exists; the new
+   `has_type_evidence` additionally requires the DWARF to **cover** a meaningful
+   fraction (≥ 25 %) of the exported functions (`DW_TAG_subprogram` DIEs vs
+   exported FUNC count). `evaluate_pair` now records `has_type_evidence`, and
+   `validate._is_evidence_limited` keys on it. **Verified live: openssl libcrypto
+   reports 4 subprograms against 4 237 exported functions → `has_type_evidence`
+   False**, so the type-only ABICC break (1.1.1a→1.1.1b) is now correctly
+   excused as evidence-limited instead of scored as the lone `ABICHECK_WEAKER`; a
+   genuinely debug-built library (nettle, ~1 400 subprograms) still clears the
+   floor and stays scored. The gate stays guarded by the oracle's own
+   `removed_symbols == 0` signal so it cannot mask a symbol-level miss.
 
 3. **Per-soname scoping in the harness (class C).** When the oracle tracks a
    single soname (e.g. hdf5's C `libhdf5`), optionally score only the matching

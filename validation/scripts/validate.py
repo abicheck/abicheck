@@ -117,14 +117,16 @@ def _is_evidence_limited(pair: dict, verdict: str, ev: dict) -> bool:
     """True when a divergence is an evidence limit, not an abicheck miss.
 
     The oracle break is type-level only (``removed_symbols == 0``) but the
-    compared binary carries no DWARF, so abicheck can only see the symbol table
-    and cannot observe the change ABICC saw in its debug build. A non-breaking
-    verdict there is expected, not a false negative.
+    compared binary carries no usable type evidence — either no DWARF at all, or a
+    present-but-sparse ``.debug_info`` that does not cover the exported surface
+    (see ``conda_harness.has_type_evidence``). abicheck can only see the symbol
+    table and cannot observe the change ABICC saw in its debug build, so a
+    non-breaking verdict there is expected, not a false negative.
     """
     return (
         pair.get("expected_verdict") == "BREAKING"
         and pair.get("removed_symbols") == 0
-        and not ev.get("has_dwarf", False)
+        and not ev.get("has_type_evidence", False)
         and _normalize_verdict(verdict) != "BREAKING"
     )
 

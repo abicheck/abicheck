@@ -17,11 +17,106 @@
 Extends the existing L0 detector pattern (ADR-011) with version-node graph
 diffing, SONAME bump recommendations, and version-script-missing detection.
 """
+
 from __future__ import annotations
 
-from .checker_policy import ChangeKind
+from .checker_policy import API_BREAK_KINDS, BREAKING_KINDS, ChangeKind, Verdict
 from .checker_types import Change
 from .elf_metadata import ElfMetadata
+
+# Tokens that mark an ELF symbol-version node as implementation-internal rather
+# than public ABI. This is a widespread upstream convention: implementation-only
+# exports are bound to a version node whose name carries one of these markers —
+# glibc's ``GLIBC_PRIVATE``, nettle's ``NETTLE_INTERNAL_8_1`` /
+# ``HOGWEED_INTERNAL_6_1``. Symbols on such a node are dynamically exported but
+# are *not* part of the public ABI contract, so changes confined to them are a
+# deployment risk (a consumer who illegally linked them rebuilds), not a break.
+_INTERNAL_VERSION_NODE_TOKENS = ("PRIVATE", "INTERNAL")
+
+# Change kinds whose ``symbol`` field is itself a version-node name (not a
+# symbol name) — for these, the node-name marker test applies directly.
+_VERSION_NODE_NAME_KINDS = frozenset(
+    {
+        ChangeKind.SYMBOL_VERSION_NODE_REMOVED,
+        ChangeKind.SYMBOL_MOVED_VERSION_NODE,
+        ChangeKind.SYMBOL_VERSION_DEFINED_REMOVED,
+        ChangeKind.SYMBOL_VERSION_DEFINED_ADDED,
+    }
+)
+
+
+def is_internal_version_node(version: str) -> bool:
+    """True if an ELF version-node name marks it implementation-internal/private.
+
+    Matches the ``GLIBC_PRIVATE`` / ``*_INTERNAL_*`` convention (see
+    :data:`_INTERNAL_VERSION_NODE_TOKENS`). The check is on the *version-node*
+    name only — never an arbitrary symbol name — so a public function that merely
+    has ``internal`` in its identifier is unaffected.
+    """
+    upper = (version or "").upper()
+    return any(token in upper for token in _INTERNAL_VERSION_NODE_TOKENS)
+
+
+def internal_versioned_symbols(elf: ElfMetadata) -> set[str]:
+    """Names of exported symbols bound to an internal/private version node."""
+    out: set[str] = set()
+    for sym in getattr(elf, "symbols", []) or []:
+        ver = getattr(sym, "version", "") or ""
+        if ver and is_internal_version_node(ver):
+            name = getattr(sym, "name", "")
+            if name:
+                out.add(name)
+    return out
+
+
+def demote_internal_version_node_findings(
+    changes: list[Change], old_elf: ElfMetadata, new_elf: ElfMetadata
+) -> list[Change]:
+    """Demote breaking findings confined to internal/private version-node symbols.
+
+    A symbol the library author bound to a ``*_INTERNAL_*`` / ``*PRIVATE*`` ELF
+    version node is exported but is not public ABI (the
+    ``abi-compliance-checker`` header-scoped tracker correctly ignores it; see
+    ``validation/realworld-tracker-parity-2026-06.md`` class A — nettle 3.6→3.7).
+    abicheck's binary-strict default would otherwise score a real change to such a
+    symbol (removal, signature change, internal data-table resize, or the rename
+    of the internal node itself) as ``BREAKING``.
+
+    This reclassifies each such finding to ``COMPATIBLE_WITH_RISK`` via the
+    per-finding ``effective_verdict`` modulation hook (ADR-025) — binary-compatible
+    for conforming consumers, a deployment risk only for anyone who illegally
+    linked an internal symbol, exactly the ``GLIBC_PRIVATE`` semantics. It is
+    deliberately conservative:
+
+    * only findings whose *kind* is already BREAKING/API_BREAK are touched (it
+      never escalates a compatible finding);
+    * the per-symbol set is derived from the **actual** ELF version bindings, so a
+      public function whose name merely contains ``internal`` is never matched;
+    * findings already carrying a ``frozen_namespace_violation`` or a prior
+      ``effective_verdict`` override are left untouched.
+
+    Mutates and returns ``changes``.
+    """
+    internal = internal_versioned_symbols(old_elf) | internal_versioned_symbols(new_elf)
+    for change in changes:
+        if change.frozen_namespace_violation is not None:
+            continue
+        if change.effective_verdict is not None:
+            continue
+        if change.kind not in BREAKING_KINDS and change.kind not in API_BREAK_KINDS:
+            continue
+        symbol = change.symbol or ""
+        on_internal_node = symbol in internal or (
+            change.kind in _VERSION_NODE_NAME_KINDS and is_internal_version_node(symbol)
+        )
+        if not on_internal_node:
+            continue
+        change.effective_verdict = Verdict.COMPATIBLE_WITH_RISK
+        change.modulation_reason = (
+            "symbol bound to an internal/private ELF version node (not public ABI)"
+        )
+        change.modulation_rule = "internal_version_node_scope"
+    return changes
 
 
 def _is_unattached_private_version_node(elf: ElfMetadata, version: str) -> bool:
@@ -34,11 +129,14 @@ def _is_unattached_private_version_node(elf: ElfMetadata, version: str) -> bool:
     """
     if "PRIVATE" not in version.upper():
         return False
-    return not any(getattr(sym, "version", "") == version for sym in getattr(elf, "symbols", []))
+    return not any(
+        getattr(sym, "version", "") == version for sym in getattr(elf, "symbols", [])
+    )
 
 
 def detect_version_node_changes(
-    old_elf: ElfMetadata, new_elf: ElfMetadata,
+    old_elf: ElfMetadata,
+    new_elf: ElfMetadata,
 ) -> list[Change]:
     """Compare ELF symbol version definition graphs.
 
@@ -59,16 +157,18 @@ def detect_version_node_changes(
         sym_names = sorted(old_node_syms[node])
         sample = ", ".join(sym_names[:5])
         suffix = f" (+{len(sym_names) - 5} more)" if len(sym_names) > 5 else ""
-        changes.append(Change(
-            kind=ChangeKind.SYMBOL_VERSION_NODE_REMOVED,
-            symbol=node,
-            description=(
-                f"Version node {node} was entirely removed from the version script. "
-                f"Symbols previously under this node: {sample}{suffix}. "
-                f"Applications linked against {node} will get unresolved symbol errors."
-            ),
-            old_value=node,
-        ))
+        changes.append(
+            Change(
+                kind=ChangeKind.SYMBOL_VERSION_NODE_REMOVED,
+                symbol=node,
+                description=(
+                    f"Version node {node} was entirely removed from the version script. "
+                    f"Symbols previously under this node: {sample}{suffix}. "
+                    f"Applications linked against {node} will get unresolved symbol errors."
+                ),
+                old_value=node,
+            )
+        )
 
     # Detect symbols that moved between version nodes
     old_sym_to_node = _build_sym_to_node_map(old_node_syms)
@@ -78,24 +178,27 @@ def detect_version_node_changes(
         old_node = old_sym_to_node[sym_name]
         new_node = new_sym_to_node[sym_name]
         if old_node != new_node:
-            changes.append(Change(
-                kind=ChangeKind.SYMBOL_MOVED_VERSION_NODE,
-                symbol=sym_name,
-                description=(
-                    f"Symbol {sym_name} moved from version node {old_node} to "
-                    f"{new_node}. Applications linked against {old_node} will not "
-                    f"find this symbol at the expected version. This is typically "
-                    f"intentional during a major release."
-                ),
-                old_value=old_node,
-                new_value=new_node,
-            ))
+            changes.append(
+                Change(
+                    kind=ChangeKind.SYMBOL_MOVED_VERSION_NODE,
+                    symbol=sym_name,
+                    description=(
+                        f"Symbol {sym_name} moved from version node {old_node} to "
+                        f"{new_node}. Applications linked against {old_node} will not "
+                        f"find this symbol at the expected version. This is typically "
+                        f"intentional during a major release."
+                    ),
+                    old_value=old_node,
+                    new_value=new_node,
+                )
+            )
 
     return changes
 
 
 def detect_version_script_missing(
-    old_elf: ElfMetadata, new_elf: ElfMetadata,
+    old_elf: ElfMetadata,
+    new_elf: ElfMetadata,
 ) -> list[Change]:
     """Check whether the new library exports symbols without a version script.
 
@@ -125,7 +228,8 @@ def detect_version_script_missing(
     # so they must not count as "old had a version script" here either —
     # otherwise dropping a marker-only script re-introduces VERSION_SCRIPT_MISSING.
     old_real_versions_defined = [
-        ver for ver in old_elf.versions_defined
+        ver
+        for ver in old_elf.versions_defined
         if not _is_unattached_private_version_node(old_elf, ver)
     ]
     old_had_version_script = bool(old_real_versions_defined) or any(
@@ -133,17 +237,19 @@ def detect_version_script_missing(
     )
     if not old_had_version_script and old_elf.symbols:
         return []
-    return [Change(
-        kind=ChangeKind.VERSION_SCRIPT_MISSING,
-        symbol="<version-script>",
-        description=(
-            f"Library exports {len(new_elf.symbols)} symbol(s) without "
-            f"a version script. This is a common oversight that prevents "
-            f"fine-grained symbol versioning and makes future ABI evolution "
-            f"harder to manage. Consider adding a version script "
-            f"(--version-script=libfoo.map)."
-        ),
-    )]
+    return [
+        Change(
+            kind=ChangeKind.VERSION_SCRIPT_MISSING,
+            symbol="<version-script>",
+            description=(
+                f"Library exports {len(new_elf.symbols)} symbol(s) without "
+                f"a version script. This is a common oversight that prevents "
+                f"fine-grained symbol versioning and makes future ABI evolution "
+                f"harder to manage. Consider adding a version script "
+                f"(--version-script=libfoo.map)."
+            ),
+        )
+    ]
 
 
 def check_soname_bump_policy(
@@ -176,39 +282,39 @@ def check_soname_bump_policy(
     if has_breaking and not soname_bumped and old_elf.soname:
         breaking_count = sum(1 for c in changes if c.kind in breaking_kinds)
         if new_elf.soname:
-            detail = (
-                f"SONAME remains {old_elf.soname!r}"
-            )
+            detail = f"SONAME remains {old_elf.soname!r}"
         else:
-            detail = (
-                f"SONAME was dropped (was {old_elf.soname!r})"
+            detail = f"SONAME was dropped (was {old_elf.soname!r})"
+        result.append(
+            Change(
+                kind=ChangeKind.SONAME_BUMP_RECOMMENDED,
+                symbol="DT_SONAME",
+                description=(
+                    f"{breaking_count} binary-incompatible change(s) detected but "
+                    f"{detail}. Consumers linked against "
+                    f"{old_elf.soname!r} will encounter runtime failures. "
+                    f"Recommended: bump SONAME to signal the ABI break."
+                ),
+                old_value=old_elf.soname,
+                new_value=new_elf.soname,
             )
-        result.append(Change(
-            kind=ChangeKind.SONAME_BUMP_RECOMMENDED,
-            symbol="DT_SONAME",
-            description=(
-                f"{breaking_count} binary-incompatible change(s) detected but "
-                f"{detail}. Consumers linked against "
-                f"{old_elf.soname!r} will encounter runtime failures. "
-                f"Recommended: bump SONAME to signal the ABI break."
-            ),
-            old_value=old_elf.soname,
-            new_value=new_elf.soname,
-        ))
+        )
 
     if not has_breaking and soname_bumped:
-        result.append(Change(
-            kind=ChangeKind.SONAME_BUMP_UNNECESSARY,
-            symbol="DT_SONAME",
-            description=(
-                f"SONAME changed from {old_elf.soname!r} to {new_elf.soname!r} "
-                f"but no binary-incompatible changes were detected. This forces "
-                f"all consumers to relink unnecessarily. Consider whether the "
-                f"bump was intentional."
-            ),
-            old_value=old_elf.soname,
-            new_value=new_elf.soname,
-        ))
+        result.append(
+            Change(
+                kind=ChangeKind.SONAME_BUMP_UNNECESSARY,
+                symbol="DT_SONAME",
+                description=(
+                    f"SONAME changed from {old_elf.soname!r} to {new_elf.soname!r} "
+                    f"but no binary-incompatible changes were detected. This forces "
+                    f"all consumers to relink unnecessarily. Consider whether the "
+                    f"bump was intentional."
+                ),
+                old_value=old_elf.soname,
+                new_value=new_elf.soname,
+            )
+        )
 
     return result
 
@@ -216,6 +322,7 @@ def check_soname_bump_policy(
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
 
 def _build_version_node_map(elf: ElfMetadata) -> dict[str, set[str]]:
     """Build a mapping from version node name → set of symbol names."""

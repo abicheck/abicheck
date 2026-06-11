@@ -211,17 +211,25 @@ def test_hdf5_vtable_break_is_not_scope_sensitive() -> None:
 # ---------------------------------------------------------------------------
 # openssl 1.1.1a -> 1.1.1b — ABICC BREAKING (99.91%, removed_symbols=0: a
 # type-only change), abicheck COMPATIBLE. The conda libcrypto carries a
-# ``.debug_info`` section but only sparse DWARF (no coverage of the changed
-# interface), so the harness's coarse ``has_dwarf`` probe reports True and the
-# pair is scored (WEAKER), NOT auto-excused as evidence-limited. This pins the
-# documented limitation: presence of a debug section != type evidence, so the
-# evidence-limited excuse only fires when DWARF is truly absent.
+# ``.debug_info`` section but only sparse DWARF (4 subprograms vs ~4200 exported
+# functions), so it does not cover the changed interface. The harness's evidence
+# probe (``has_type_evidence``) now distinguishes a debug *section* from actual
+# *coverage*: a type-only oracle break the binary cannot substantiate is excused
+# as evidence-limited, not scored as a false negative. The gate keys on
+# ``has_type_evidence``, so a binary with real DWARF coverage still stays scored.
 # ---------------------------------------------------------------------------
-def test_openssl_typeonly_break_with_dwarf_section_is_scored_not_excused() -> None:
+def test_openssl_partial_dwarf_typeonly_break_is_evidence_limited() -> None:
     mod = _validate()
     pair = {"expected_verdict": "BREAKING", "removed_symbols": 0}
-    # has_dwarf True (a .debug_info section exists, even if sparse) -> the pair is
-    # NOT excused as an evidence limit; it stays a scored disagreement.
-    assert mod._is_evidence_limited(pair, "COMPATIBLE", {"has_dwarf": True}) is False
-    # Only a genuinely stripped binary (no .debug_info at all) earns the excuse.
-    assert mod._is_evidence_limited(pair, "COMPATIBLE", {"has_dwarf": False}) is True
+    # Real DWARF coverage of the surface -> abicheck could see the types, so a
+    # miss WOULD be a real FN; the pair stays scored, not excused.
+    assert (
+        mod._is_evidence_limited(pair, "COMPATIBLE", {"has_type_evidence": True})
+        is False
+    )
+    # Partial/absent type evidence (openssl's sparse libcrypto DWARF) -> the
+    # change is unobservable, so the pair is excused as evidence-limited.
+    assert (
+        mod._is_evidence_limited(pair, "COMPATIBLE", {"has_type_evidence": False})
+        is True
+    )

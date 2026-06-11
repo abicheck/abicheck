@@ -113,27 +113,28 @@ def test_tracker_pairs_missing_oracle_raises(
 
 
 def test_is_evidence_limited() -> None:
-    # A type-level-only oracle break (removed_symbols == 0) on a no-DWARF binary
-    # that abicheck didn't flag is an evidence limit, not a false negative.
+    # A type-level-only oracle break (removed_symbols == 0) on a binary with no
+    # usable type evidence that abicheck didn't flag is an evidence limit, not a
+    # false negative.
     mod = _load_module()
     base = {"expected_verdict": "BREAKING", "removed_symbols": 0}
 
-    assert mod._is_evidence_limited(base, "COMPATIBLE", {"has_dwarf": False})
-    # had DWARF -> abicheck could see types, so a miss WOULD be a real FN
-    assert not mod._is_evidence_limited(base, "COMPATIBLE", {"has_dwarf": True})
+    assert mod._is_evidence_limited(base, "COMPATIBLE", {"has_type_evidence": False})
+    # had usable DWARF coverage -> abicheck could see types, so a miss WOULD be a real FN
+    assert not mod._is_evidence_limited(base, "COMPATIBLE", {"has_type_evidence": True})
     # symbols were removed -> visible without DWARF, so not evidence-limited
     assert not mod._is_evidence_limited(
         {"expected_verdict": "BREAKING", "removed_symbols": 2},
         "COMPATIBLE",
-        {"has_dwarf": False},
+        {"has_type_evidence": False},
     )
     # abicheck already flagged it breaking -> not a miss at all
-    assert not mod._is_evidence_limited(base, "BREAKING", {"has_dwarf": False})
+    assert not mod._is_evidence_limited(base, "BREAKING", {"has_type_evidence": False})
     # oracle says compatible -> nothing to excuse
     assert not mod._is_evidence_limited(
         {"expected_verdict": "COMPATIBLE", "removed_symbols": 0},
         "COMPATIBLE",
-        {"has_dwarf": False},
+        {"has_type_evidence": False},
     )
 
 
@@ -215,17 +216,33 @@ def test_is_scope_divergence_requires_oracle_corroboration() -> None:
     mod = _load_module()
     ev = {"scope_divergent": True}
     # oracle saw a public removal -> not a scope divergence
-    pair = {"expected_verdict": "COMPATIBLE", "removed_symbols": 2, "backward_compat_pct": 98.0}
+    pair = {
+        "expected_verdict": "COMPATIBLE",
+        "removed_symbols": 2,
+        "backward_compat_pct": 98.0,
+    }
     assert mod._is_scope_divergence(pair, "BREAKING", ev) is False
 
 
 def test_is_scope_divergence_false_without_engine_flag() -> None:
     mod = _load_module()
-    pair = {"expected_verdict": "COMPATIBLE", "removed_symbols": 0, "backward_compat_pct": 100.0}
-    assert mod._is_scope_divergence(pair, "BREAKING", {"scope_divergent": False}) is False
+    pair = {
+        "expected_verdict": "COMPATIBLE",
+        "removed_symbols": 0,
+        "backward_compat_pct": 100.0,
+    }
+    assert (
+        mod._is_scope_divergence(pair, "BREAKING", {"scope_divergent": False}) is False
+    )
 
 
 def test_is_scope_divergence_false_when_oracle_also_breaking() -> None:
     mod = _load_module()
-    pair = {"expected_verdict": "BREAKING", "removed_symbols": 0, "backward_compat_pct": 100.0}
-    assert mod._is_scope_divergence(pair, "BREAKING", {"scope_divergent": True}) is False
+    pair = {
+        "expected_verdict": "BREAKING",
+        "removed_symbols": 0,
+        "backward_compat_pct": 100.0,
+    }
+    assert (
+        mod._is_scope_divergence(pair, "BREAKING", {"scope_divergent": True}) is False
+    )

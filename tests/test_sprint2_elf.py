@@ -137,7 +137,15 @@ def test_marker_only_private_version_script_removed_emits_no_warning() -> None:
     assert result.verdict == Verdict.NO_CHANGE
 
 
-def test_private_symbol_version_with_exported_symbol_removed_is_breaking() -> None:
+def test_private_symbol_version_with_exported_symbol_removed_is_risk_not_breaking() -> (
+    None
+):
+    # A symbol bound to a ``*PRIVATE*`` / ``*_INTERNAL_*`` ELF version node is
+    # exported but is not public ABI (the ``GLIBC_PRIVATE`` convention; nettle's
+    # ``*_INTERNAL_*`` nodes). Removing it is still reported, but demoted from
+    # BREAKING to COMPATIBLE_WITH_RISK — a deployment risk for anyone who illegally
+    # linked it, not a public-ABI break. See diff_versioning
+    # .demote_internal_version_node_findings and tests/test_internal_version_node_scope.py.
     old = _snap(
         _elf(
             versions_defined=["LIBFOO_1.0", "LIBFOO_PRIVATE"],
@@ -147,8 +155,16 @@ def test_private_symbol_version_with_exported_symbol_removed_is_breaking() -> No
     new = _snap(_elf(versions_defined=["LIBFOO_1.0"], symbols=[]))
     result = compare(old, new)
     kinds = {c.kind for c in result.changes}
+    # The node removal is still surfaced for the audit trail …
     assert ChangeKind.SYMBOL_VERSION_NODE_REMOVED in kinds
-    assert result.verdict == Verdict.BREAKING
+    # … but demoted: an internal/private node removal is not a public-ABI break.
+    assert result.verdict == Verdict.COMPATIBLE_WITH_RISK
+    node_removed = [
+        c for c in result.changes if c.kind == ChangeKind.SYMBOL_VERSION_NODE_REMOVED
+    ]
+    assert node_removed and all(
+        c.effective_verdict == Verdict.COMPATIBLE_WITH_RISK for c in node_removed
+    )
 
 
 def test_symbol_version_defined_added_compatible() -> None:

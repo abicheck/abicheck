@@ -296,7 +296,9 @@ def abicheck_verdict(old: str, new: str, old_ver: str, new_ver: str) -> str | No
 def _breaking_changes(data: dict) -> list[dict]:
     """Return the breaking-severity findings from an ``abicheck compare`` result."""
     changes = data.get("changes") or data.get("findings") or []
-    return [c for c in changes if isinstance(c, dict) and c.get("severity") == "breaking"]
+    return [
+        c for c in changes if isinstance(c, dict) and c.get("severity") == "breaking"
+    ]
 
 
 def scope_sensitive_breaking_only(data: dict) -> bool:
@@ -329,10 +331,12 @@ def resolve_pair(pair: dict, api: dict, subdir: str) -> tuple[str, str] | None:
 
 
 def has_dwarf(so_path: str) -> bool:
-    """True if the ELF shared object carries DWARF debug info.
+    """True if the ELF shared object carries a ``.debug_info`` section.
 
     Stripped release binaries (typical on conda-forge) have none, so abicheck
     can only see the symbol table — it cannot observe type-level ABI changes.
+    Note this only proves a debug *section* exists, not that it covers a
+    meaningful surface — see :func:`has_type_evidence`.
     """
     try:
         out = subprocess.run(
@@ -341,6 +345,55 @@ def has_dwarf(so_path: str) -> bool:
     except (OSError, subprocess.SubprocessError):
         return False
     return ".debug_info" in out
+
+
+def _exported_func_count(so_path: str) -> int:
+    """Count defined (non-undefined) exported FUNC dynamic symbols."""
+    try:
+        out = subprocess.run(
+            ["readelf", "--dyn-syms", "-W", so_path], capture_output=True, text=True
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        return 0
+    return sum(
+        1 for line in out.splitlines() if " FUNC " in line and " UND " not in line
+    )
+
+
+def _dwarf_subprogram_count(so_path: str) -> int:
+    """Count ``DW_TAG_subprogram`` DIEs in the binary's DWARF (function coverage)."""
+    try:
+        out = subprocess.run(
+            ["readelf", "--debug-dump=info", so_path], capture_output=True, text=True
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        return 0
+    return out.count("DW_TAG_subprogram")
+
+
+def has_type_evidence(so_path: str, min_coverage: float = 0.25) -> bool:
+    """True only when the binary's DWARF actually *covers* its exported surface.
+
+    A ``.debug_info`` section can be present yet sparse — e.g. conda's openssl
+    ``libcrypto`` carries debug info for only a couple of compilation units (4
+    ``DW_TAG_subprogram`` DIEs against ~4200 exported functions), so abicheck
+    cannot observe the specific public-API change ABICC saw from a full-headers
+    source build (validation parity class D — openssl 1.1.1a→1.1.1b). Presence of
+    a debug section therefore does **not** prove usable type evidence.
+
+    This requires the DWARF to describe at least ``min_coverage`` of the exported
+    functions before the binary is treated as type-evidenced. A genuinely
+    debug-built library (e.g. nettle: ~1400 subprograms / ~430 exported funcs)
+    clears it easily; a partially-stripped one does not. A library that exports no
+    functions (pure data) cannot be measured this way, so the section's presence
+    is accepted as-is.
+    """
+    if not has_dwarf(so_path):
+        return False
+    funcs = _exported_func_count(so_path)
+    if funcs == 0:
+        return True
+    return _dwarf_subprogram_count(so_path) >= min_coverage * funcs
 
 
 def evaluate_pair(
@@ -412,14 +465,17 @@ def evaluate_pair(
             for d in datas.values()
             if _normalize_verdict(verdict_of(d) or "") == "BREAKING"
         ]
-        # Type-level diffing needs debug info on BOTH sides: if only the new
-        # build carries DWARF and the old one is stripped, abicheck still cannot
-        # compare old-vs-new layouts, so a type-only oracle break is an evidence
-        # limit, not a miss. Require usable DWARF on both sides of some shared
-        # object before treating the pair as type-evidenced (Codex review #349).
+        # Type-level diffing needs usable debug info on BOTH sides: if only the
+        # new build carries DWARF and the old one is stripped, abicheck still
+        # cannot compare old-vs-new layouts, so a type-only oracle break is an
+        # evidence limit, not a miss (Codex review #349). ``has_type_evidence``
+        # additionally rejects a *present-but-sparse* ``.debug_info`` section that
+        # does not cover the exported surface (parity class D — openssl), so a
+        # partial-DWARF binary is correctly treated as evidence-limited rather
+        # than scored as a false negative.
         evidence[pid] = {
-            "has_dwarf": any(
-                has_dwarf(old_sos[name]) and has_dwarf(new_sos[name])
+            "has_type_evidence": any(
+                has_type_evidence(old_sos[name]) and has_type_evidence(new_sos[name])
                 for name in common
             ),
             "scope_divergent": bool(breaking_datas)
