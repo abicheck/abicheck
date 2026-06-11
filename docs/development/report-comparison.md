@@ -94,7 +94,7 @@ struct Point — 2 changes:
 
 | Information                     | abicheck | ABICC | abidiff |
 |---------------------------------|----------|-------|---------|
-| Change kind/type classification | `type_size_changed` (machine-parseable enum, 230 values) | Narrative text only | Narrative text |
+| Change kind/type classification | `type_size_changed` (machine-parseable enum, 234 values) | Narrative text only | Narrative text |
 | Affected symbol/type name       | Yes (`"symbol": "Leaf"`) | Yes (in HTML sections) | Yes (as context for function) |
 | Old value                       | Yes (`"old_value": "32"`) | Yes (in text) | Yes (in text) |
 | New value                       | Yes (`"new_value": "64"`) | Yes (in text) | Yes (in text) |
