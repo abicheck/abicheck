@@ -715,3 +715,22 @@ class TestEvidencePackStorage:
         again = registry.pull_evidence(key)
         assert again is not None
         assert again.content_hash() == pack.content_hash()
+
+
+    def test_push_without_evidence_clears_stale_recorded_hash(
+        self, registry: FilesystemRegistry, sample_snapshot: AbiSnapshot
+    ) -> None:
+        # A caller-supplied metadata carrying a stale evidence hash, pushed with
+        # evidence=None for a fresh key (no evidence dir), must not leave the hash
+        # promising a pack that was never stored (Codex review).
+        from abicheck.serialization import snapshot_to_json
+
+        key = BaselineKey(library="libfoo", version="1.0.0", platform="linux-x86_64")
+        # Checksum must match the stored snapshot (pull verifies it first).
+        meta = BaselineMetadata.create(
+            snapshot_to_json(sample_snapshot), evidence_content_hash="sha256:stale"
+        )
+        registry.push(key, sample_snapshot, meta)
+        _, stored_meta = registry.pull(key)  # type: ignore[misc]
+        assert stored_meta.evidence_content_hash is None
+        assert registry.pull_evidence(key) is None

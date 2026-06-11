@@ -532,6 +532,28 @@ class TestBaselineEvidenceCli:
         assert pull.exit_code != 0
         assert "content hash mismatch" in pull.output
 
+    def test_pull_evidence_output_to_registry_dir_is_noop(self, tmp_path: Path) -> None:
+        snap = self._snapshot(tmp_path)
+        pack_dir = self._pack(tmp_path / "ev.evidence")
+        registry = tmp_path / "registry"
+        runner = CliRunner()
+        runner.invoke(main, [
+            "baseline", "push", "libfoo", "--version", "1.0",
+            "--platform", "linux-x86_64", "--snapshot", str(snap),
+            "--registry", str(registry), "--evidence", str(pack_dir),
+        ])
+        # Point --evidence-output at the stored pack itself: must be a no-op,
+        # not delete the registry's pack (Codex review).
+        stored = registry / "libfoo" / "1.0" / "linux-x86_64" / "evidence"
+        pull = runner.invoke(main, [
+            "baseline", "pull", "libfoo:1.0:linux-x86_64",
+            "-o", str(tmp_path / "snap-out.json"),
+            "--registry", str(registry), "--evidence-output", str(stored),
+        ])
+        assert pull.exit_code == 0, pull.output
+        assert "already at" in pull.output
+        assert (stored / "manifest.json").is_file()
+
     def test_push_with_bad_evidence_dir_errors(self, tmp_path: Path) -> None:
         snap = self._snapshot(tmp_path)
         bad = tmp_path / "not-a-pack"

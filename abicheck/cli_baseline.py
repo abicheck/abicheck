@@ -202,6 +202,10 @@ def baseline_pull(
             raise click.ClickException(str(exc)) from exc
         if pack is None:
             click.echo("Baseline has no evidence pack to extract.", err=True)
+        elif evidence_output.resolve() == pack.root.resolve():
+            # --evidence-output points at the stored pack itself; removing it
+            # before copytree would delete the registry's own pack. No-op.
+            click.echo(f"Evidence pack already at {evidence_output}", err=True)
         else:
             import shutil
             if evidence_output.exists():

@@ -349,9 +349,13 @@ class FilesystemRegistry:
         evidence_dir = key_dir / _EVIDENCE_SUBDIR
         if evidence is not None:
             metadata.evidence_content_hash = self._store_evidence(evidence, evidence_dir)
-        elif evidence_dir.exists():
-            # Re-pushing without evidence must not leave a stale pack behind.
-            shutil.rmtree(evidence_dir)
+        else:
+            # No pack supplied: drop any stale stored pack and always clear the
+            # recorded hash, so the metadata never promises a pack that is not on
+            # disk (a caller-supplied metadata could carry a stale hash even when
+            # the evidence dir does not exist — Codex review).
+            if evidence_dir.exists():
+                shutil.rmtree(evidence_dir)
             metadata.evidence_content_hash = None
 
         snap_path = key_dir / "snapshot.json"
