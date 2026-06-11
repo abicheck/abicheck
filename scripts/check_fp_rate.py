@@ -167,26 +167,6 @@ def _private_header_type_change() -> tuple[AbiSnapshot, AbiSnapshot]:
     return old, new
 
 
-def _cross_stdlib_pointer_held_is_safe() -> tuple[AbiSnapshot, AbiSnapshot]:
-    # Cross-implementation comparison, but the public type holds its std:: member
-    # by POINTER (layout-neutral): the owner's size is identical across stdlibs,
-    # so this must stay non-breaking — only the RISK build-mode note fires, never
-    # a hard ABI break. Guards that a pointer-held std:: is not over-flagged.
-    old = _snap(
-        "1",
-        functions=[_fn("api", ret="Handle *")],
-        types=[_rec("Handle", size=64, fields=[("vec", "std::vector<int> *")])],
-        build_mode=_bm(StdlibFamily.LIBSTDCXX),
-    )
-    new = _snap(
-        "2",
-        functions=[_fn("api", ret="Handle *")],
-        types=[_rec("Handle", size=64, fields=[("vec", "std::vector<int> *")])],
-        build_mode=_bm(StdlibFamily.LIBCXX),
-    )
-    return old, new
-
-
 def _same_stdlib_internal_stl_churn() -> tuple[AbiSnapshot, AbiSnapshot]:
     # Same stdlib family on both sides (libstdc++ → libstdc++): the comparison is
     # NOT cross-implementation, so std:: layout stays filtered as toolchain noise
@@ -278,43 +258,6 @@ def _cross_stdlib_embedded_layout_diverges() -> tuple[AbiSnapshot, AbiSnapshot]:
     return old, new
 
 
-def _cross_stdlib_libcpp_abi_version_embedded() -> tuple[AbiSnapshot, AbiSnapshot]:
-    # Same libc++, but its ABI version flips (1 → 2): std::__1 vs std::__2 lay
-    # std:: types out differently, so a public type embedding std::string by
-    # value resizes — a real break that must stay breaking.
-    old = _snap(
-        "1",
-        functions=[_fn("make_holder", ret="Holder *")],
-        types=[_rec("Holder", size=256, fields=[("name", "std::string")])],
-        build_mode=BuildMode(stdlib=StdlibFamily.LIBCXX, libcpp_abi_version=1),
-    )
-    new = _snap(
-        "2",
-        functions=[_fn("make_holder", ret="Holder *")],
-        types=[_rec("Holder", size=192, fields=[("name", "std::string")])],
-        build_mode=BuildMode(stdlib=StdlibFamily.LIBCXX, libcpp_abi_version=2),
-    )
-    return old, new
-
-
-def _cross_stdlib_msvc_to_libstdcxx_embedded() -> tuple[AbiSnapshot, AbiSnapshot]:
-    # MSVC STL → libstdc++ (e.g. a library ported across toolchains). A public
-    # type embedding std::map by value is laid out differently → real break.
-    old = _snap(
-        "1",
-        functions=[_fn("make_cfg", ret="Cfg *")],
-        types=[_rec("Cfg", size=512, fields=[("index", "std::map<int, int>")])],
-        build_mode=_bm(StdlibFamily.MSVC_STL),
-    )
-    new = _snap(
-        "2",
-        functions=[_fn("make_cfg", ret="Cfg *")],
-        types=[_rec("Cfg", size=384, fields=[("index", "std::map<int, int>")])],
-        build_mode=_bm(StdlibFamily.LIBSTDCXX),
-    )
-    return old, new
-
-
 # NOTE on corpus scope: every case here is one the *current* implementation
 # already gets right, so a correct build keeps a clean 0/0 sheet (the gate's
 # core invariant). Two tempting cases were deliberately left out because their
@@ -332,14 +275,13 @@ CORPUS: list[Case] = [
     Case("hidden_function_signature_changed", True, _hidden_function_signature_changed),
     Case("private_header_type_change", True, _private_header_type_change),
     Case("same_stdlib_internal_stl_churn", True, _same_stdlib_internal_stl_churn),
-    Case("cross_stdlib_pointer_held_is_safe", True,
-         _cross_stdlib_pointer_held_is_safe),
+    # Cross-implementation stdlib: one real-break + one internal-noise guard.
+    # The full breadth (libc++ ABI version, MSVC↔libstdc++, pointer-held-is-safe,
+    # the symbol-only fallback and false-positive guards) lives in the detector's
+    # unit tests (tests/test_diff_stdlib_impl.py); the corpus keeps only the two
+    # minimal FP/FN sentinels for the public-surface scoping gate.
     Case("cross_stdlib_embedded_layout_diverges", False,
          _cross_stdlib_embedded_layout_diverges),
-    Case("cross_stdlib_libcpp_abi_version_embedded", False,
-         _cross_stdlib_libcpp_abi_version_embedded),
-    Case("cross_stdlib_msvc_to_libstdcxx_embedded", False,
-         _cross_stdlib_msvc_to_libstdcxx_embedded),
     Case("public_struct_size", False, _public_struct_size),
     Case("public_function_removed", False, _public_function_removed),
     Case("public_param_type_changed", False, _public_param_type_changed),

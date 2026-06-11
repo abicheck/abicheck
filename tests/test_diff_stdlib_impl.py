@@ -175,6 +175,10 @@ class TestDetectorFindings:
             if c.kind == ChangeKind.STDLIB_IMPLEMENTATION_CHANGED
         )
         assert "embeds a std::" not in finding.description
+        # Pointer-held std:: is layout-neutral: the only finding is the RISK
+        # build-mode note, so the verdict must stay non-breaking (this scenario
+        # was trimmed from the FP corpus and is asserted here instead).
+        assert result.verdict.value not in {"BREAKING", "API_BREAK"}
 
     def test_stdlib_container_of_pointers_by_value_is_embedding(self) -> None:
         # std::vector<int*> held BY VALUE is layout-dependent: the `*` is in the
