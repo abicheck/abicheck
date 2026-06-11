@@ -21,15 +21,13 @@ from collections.abc import Collection
 
 from .checker_policy import ChangeKind
 from .checker_types import Change
-from .demangle import demangle
 from .detector_registry import registry
+from .diff_cxx_rules import itanium_qualified_name
 from .diff_symbols import (
     _PUBLIC_VIS,
-    _drop_leading_return_type,
     _public_functions,
     _public_variables,
     _should_filter_transitive_runtime_symbols,
-    _truncate_at_param_list,
 )
 from .elf_symbol_filter import (
     FUNCTION_SYMBOL_TYPES,
@@ -186,19 +184,17 @@ def _overload_group_key(f: Function) -> str:
     """A scope-qualified identity for grouping overloads of the same name.
 
     Two declarations are overloads of one another iff they share this key but
-    have distinct mangled names. The key is derived from the *mangled* name
-    (demangled, then stripped of return type and parameter list) so it is stable
-    across dumpers: a castxml/header snapshot records ``Function.name`` without
-    namespace/class scope, so grouping on ``name`` alone would collapse unrelated
-    declarations like ``A::size`` and a newly added ``B::size`` into one group
-    and emit a spurious ``OVERLOAD_ADDED``. When no mangled C++ form is available
-    (C symbols, which cannot overload), fall back to the display name.
+    have distinct mangled names. The key is the fully scope-qualified name parsed
+    structurally from the *mangled* symbol (no external demangler — see
+    ``itanium_qualified_name``), so it is stable across dumpers and platforms: a
+    castxml/header snapshot records ``Function.name`` without namespace/class
+    scope, so grouping on ``name`` alone would both collapse unrelated
+    declarations like ``A::size`` and ``B::size`` into one group *and* hide a
+    genuine ``A::size`` overload behind an unrelated ``B::size``. When the symbol
+    is not a recognised C++ mangled name (C symbols, which cannot overload), fall
+    back to the display name.
     """
-    demangled = demangle(f.mangled)
-    if demangled is None:
-        return f.name
-    qualified = _drop_leading_return_type(_truncate_at_param_list(demangled)).strip()
-    return qualified or f.name
+    return itanium_qualified_name(f.mangled) or f.name
 
 
 @registry.detector("overload_additions")
@@ -215,53 +211,42 @@ def _diff_overload_additions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]
     (remove+add of the same name) does not masquerade as an overload addition,
     and an unrelated same-leaf declaration in a different scope does not either.
 
-    Grouping is two-phase: a cheap pass over the display name finds candidate
-    names (old count 1, new count ≥2), and only those candidates are demangled
-    to confirm the declarations share a scope. This keeps the common case free of
-    any demangler call — important because demangling is comparatively expensive
-    and, when no demangler is installed, would emit a one-time warning.
+    Grouping is on the scope-qualified key, not the bare display name, so the
+    uniqueness test is per scope: ``A::size`` stays distinct from ``B::size``
+    even when the dumper recorded both as the leaf ``size``.
     """
     old_map = _public_functions(old)
     new_map = _public_functions(new)
 
-    old_by_name: dict[str, list[Function]] = {}
+    old_by_key: dict[str, list[Function]] = {}
     for f in old_map.values():
-        old_by_name.setdefault(f.name, []).append(f)
-    new_by_name: dict[str, list[Function]] = {}
+        old_by_key.setdefault(_overload_group_key(f), []).append(f)
+    new_by_key: dict[str, list[Function]] = {}
     for f in new_map.values():
-        new_by_name.setdefault(f.name, []).append(f)
+        new_by_key.setdefault(_overload_group_key(f), []).append(f)
 
     changes: list[Change] = []
-    for name, olds in old_by_name.items():
+    for key, olds in old_by_key.items():
         if len(olds) != 1:
             continue  # already overloaded → KDE allows adding further overloads
         original = olds[0]
-        news = new_by_name.get(name, [])
+        news = new_by_key.get(key, [])
         if len(news) < 2:
-            continue  # no new declaration shares this display name
+            continue  # no new overload under this qualified name
         new_mangleds = {f.mangled for f in news}
         if original.mangled not in new_mangleds:
             continue  # original declaration gone → a replacement/rename, not an addition
         if not (new_mangleds - {original.mangled}):
             continue  # nothing genuinely new
-        # Display name alone is ambiguous: castxml records it without scope, so
-        # confirm the extra declarations truly share the original's qualified
-        # scope (A::size vs an unrelated new B::size). Only here do we demangle.
-        original_key = _overload_group_key(original)
-        same_scope = {
-            f.mangled for f in news if _overload_group_key(f) == original_key
-        }
-        if len(same_scope) < 2:
-            continue  # the additional same-leaf declarations were in other scopes
         changes.append(Change(
             kind=ChangeKind.OVERLOAD_ADDED,
             symbol=original.mangled,
             description=(
-                f"Overload added to previously non-overloaded function: {original_key} "
-                f"— `&{original_key}` becomes ambiguous and overload resolution may change"
+                f"Overload added to previously non-overloaded function: {key} "
+                f"— `&{key}` becomes ambiguous and overload resolution may change"
             ),
             old_value="1 overload",
-            new_value=f"{len(same_scope)} overloads",
+            new_value=f"{len(news)} overloads",
         ))
     return changes
 

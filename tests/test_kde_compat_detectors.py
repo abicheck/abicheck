@@ -30,7 +30,14 @@ previously had no dedicated detector:
 
 from __future__ import annotations
 
+import pytest
+
 from abicheck.checker import ChangeKind, Verdict, compare
+from abicheck.diff_cxx_rules import (
+    itanium_qualified_name,
+    itanium_scope_components,
+    owner_class_of,
+)
 from abicheck.model import (
     AbiSnapshot,
     Function,
@@ -342,3 +349,63 @@ class TestOverloadAdded:
         )
         result = compare(old, new)
         assert ChangeKind.OVERLOAD_ADDED not in _kinds(result)
+
+    def test_uniqueness_is_per_scope_not_per_leaf(self):
+        """Even when an unrelated same-leaf ``B::size`` exists, adding a real
+        ``A::size`` overload must still fire — the uniqueness test is per
+        scope-qualified name, not the bare leaf (CastXML records both as
+        ``size``)."""
+        old = _snap(functions=[
+            _method("size", "_ZN1A4sizeEv"),  # A::size (unique in its scope)
+            _method("size", "_ZN1B4sizeEv"),  # unrelated B::size, same leaf
+        ])
+        new = _snap(functions=[
+            _method("size", "_ZN1A4sizeEv"),
+            _method("size", "_ZN1B4sizeEv"),
+            _method("size", "_ZN1A4sizeEi"),  # A::size(int) overload added
+        ])
+        result = compare(old, new)
+        assert ChangeKind.OVERLOAD_ADDED in _kinds(result)
+
+
+class TestItaniumScopeParser:
+    """The structural Itanium parser must work with no external demangler."""
+
+    @pytest.mark.parametrize("mangled,expected", [
+        ("_Z4drawi", ["draw"]),                              # free function
+        ("_ZN1C3barEv", ["C", "bar"]),                       # member
+        ("_ZNK1C3barEv", ["C", "bar"]),                      # const member (NK)
+        ("_ZNV1C3barEv", ["C", "bar"]),                      # volatile member (NV)
+        ("_ZN3lib12experimental4sortEv", ["lib", "experimental", "sort"]),
+    ])
+    def test_components(self, mangled, expected):
+        assert itanium_scope_components(mangled) == expected
+
+    @pytest.mark.parametrize("mangled", [
+        "foo",            # not Itanium-mangled (C symbol)
+        "_ZN1CC1Ev",      # constructor — not modelled
+        "_ZN1C3barIiEEv",  # template args — not modelled
+        "_ZN1C99barEv",   # length runs past the string (malformed)
+    ])
+    def test_unmodelled_returns_none(self, mangled):
+        assert itanium_scope_components(mangled) is None
+        assert itanium_qualified_name(mangled) is None
+
+    def test_qualified_name(self):
+        assert itanium_qualified_name("_ZN1A4sizeEv") == "A::size"
+        assert itanium_qualified_name("_Z4drawi") == "draw"
+
+    def test_owner_prefers_display_name(self):
+        f = Function(name="ns::C::bar", mangled="_ZN2ns1C3barEv",
+                     return_type="void", visibility=Visibility.PUBLIC)
+        assert owner_class_of(f) == "ns::C"
+
+    def test_owner_falls_back_to_mangled(self):
+        f = Function(name="bar", mangled="_ZN1C3barEv",
+                     return_type="void", visibility=Visibility.PUBLIC)
+        assert owner_class_of(f) == "C"
+
+    def test_owner_none_for_free_function(self):
+        f = Function(name="draw", mangled="_Z4drawi",
+                     return_type="void", visibility=Visibility.PUBLIC)
+        assert owner_class_of(f) is None

@@ -23,69 +23,75 @@ from __future__ import annotations
 
 from .checker_policy import ChangeKind
 from .checker_types import Change
-from .demangle import demangle
 from .model import Function, RecordType
 
 
-def _scope_before_last_separator(s: str) -> str | None:
-    """Everything before the last ``::`` at template depth 0, or ``None``.
+def itanium_scope_components(mangled: str) -> list[str] | None:
+    """Scope components of an Itanium-mangled C++ symbol, parsed structurally.
 
-    ``ns::Foo::bar`` → ``ns::Foo``; ``bar`` → ``None``. Template-depth aware so
-    ``ns::Foo<a::b>`` is not split inside its argument list.
+    Decoding the nested-name encoding directly avoids any dependency on an
+    external demangler (``c++filt`` / ``cxxfilt``), which is not installed on
+    every platform — so this works identically on Linux, macOS, and Windows and
+    never shells out. Handles the common length-prefixed forms::
+
+        _Z4drawi                       -> ["draw"]                  (free function)
+        _ZN1C3barEv                    -> ["C", "bar"]              (member)
+        _ZNK1C3barEv                   -> ["C", "bar"]              (const member)
+        _ZN3lib12experimental4sortEv   -> ["lib", "experimental", "sort"]
+
+    Returns ``None`` for forms it does not model (templates, substitutions,
+    constructors/operators, non-Itanium or unmangled names) so callers fall back
+    to the display name.
     """
-    depth = 0
-    last = -1
-    i = 0
-    while i < len(s) - 1:
-        ch = s[i]
-        if ch == "<":
-            depth += 1
-        elif ch == ">":
-            depth = max(0, depth - 1)
-        elif ch == ":" and s[i + 1] == ":" and depth == 0:
-            last = i
-            i += 2
-            continue
-        i += 1
-    return s[:last] if last != -1 else None
-
-
-def _owner_from_mangled(mangled: str) -> str | None:
-    """Resolve a method's enclosing class/struct from its mangled name.
-
-    Needed for header/CastXML snapshots, which record ``Function.name`` without
-    namespace/class scope (``bar`` rather than ``C::bar``), so the display name
-    alone cannot identify the owner. Demangle, drop the parameter list, and take
-    the scope before the leaf. Returns ``None`` when the symbol is not a scoped
-    C++ name (free function, C symbol, or no demangler available).
-    """
-    demangled = demangle(mangled)
-    if demangled is None:
+    if not mangled.startswith("_Z"):
         return None
-    depth = 0
-    head = demangled
-    for i, ch in enumerate(demangled):
-        if ch == "<":
-            depth += 1
-        elif ch == ">":
-            depth = max(0, depth - 1)
-        elif ch == "(" and depth == 0:
-            head = demangled[:i]
+    s = mangled[2:]
+    nested = s.startswith("N")
+    if nested:
+        s = s[1:]
+        # Skip CV-/ref-qualifiers on the implicit object parameter (e.g. NK / NV).
+        while s[:1] in ("r", "V", "K"):
+            s = s[1:]
+    components: list[str] = []
+    while s:
+        if nested and s[0] == "E":
             break
-    return _scope_before_last_separator(head.strip())
+        if not s[0].isdigit():
+            return None  # operator / ctor / template / substitution — not modelled
+        j = 0
+        while j < len(s) and s[j].isdigit():
+            j += 1
+        n = int(s[:j])
+        name = s[j : j + n]
+        if len(name) != n:
+            return None  # truncated / malformed
+        components.append(name)
+        s = s[j + n :]
+        if not nested:
+            break  # free function: one component, the rest is the parameter encoding
+    return components or None
+
+
+def itanium_qualified_name(mangled: str) -> str | None:
+    """Fully scope-qualified name (``ns::C::bar``) from a mangled symbol, or None."""
+    comps = itanium_scope_components(mangled)
+    return "::".join(comps) if comps else None
 
 
 def owner_class_of(f: Function) -> str | None:
     """The enclosing class/struct of a method.
 
-    Prefer the (already scope-qualified) display name; fall back to demangling
-    the mangled name when the dumper recorded an unqualified leaf (CastXML).
-    ``Foo::bar`` → ``Foo``; ``ns::Foo::bar`` → ``ns::Foo``; a free function
-    → ``None``.
+    Prefer the (already scope-qualified) display name; fall back to the mangled
+    name when the dumper recorded an unqualified leaf (CastXML records the bare
+    ``bar`` rather than ``C::bar``). ``Foo::bar`` → ``Foo``;
+    ``ns::Foo::bar`` → ``ns::Foo``; a free function → ``None``.
     """
     if "::" in f.name:
         return f.name.rsplit("::", 1)[0]
-    return _owner_from_mangled(f.mangled)
+    comps = itanium_scope_components(f.mangled)
+    if not comps or len(comps) < 2:
+        return None
+    return "::".join(comps[:-1])
 
 
 def virtual_method_addition(
