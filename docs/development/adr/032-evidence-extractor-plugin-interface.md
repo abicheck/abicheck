@@ -1,7 +1,11 @@
 # ADR-032: Evidence Extractor Plugin Interface and Security Model
 
 **Date:** 2026-06-09
-**Status:** Proposed
+**Status:** Accepted — implemented (D1–D10). The extractor interface, capability
+model, action-permission ceiling, external-CLI manifest, collection modes, and
+reproducibility ledger ship in `abicheck/evidence/extractor.py` +
+`extractor_manifest.py`, wired into `collect-evidence`
+(`--extractor-manifest` / `--allow-build-query` / `--collection-mode`).
 **Decision maker:** Nikolay Petrov
 
 ---

@@ -122,6 +122,22 @@ if TYPE_CHECKING:
 @click.option("--codeql-results", "codeql_results", type=click.Path(path_type=Path), default=None,
               help="Pre-captured CodeQL call-graph query result JSON to fold into "
                    "the L5 graph (ADR-031 D5; non-executing). Implies --source-graph summary.")
+@click.option("--extractor-manifest", "extractor_manifests", multiple=True,
+              type=click.Path(path_type=Path),
+              help="Register an external CLI evidence extractor by manifest path "
+                   "(ADR-032 D3; trusted-by-operator, never auto-discovered). Repeat "
+                   "for several. Its declared actions are intersected with the actions "
+                   "enabled for this run (see --allow-build-query).")
+@click.option("--allow-build-query", "allow_build_query", is_flag=True, default=False,
+              help="Permit extractors to query the build system (ninja -t, bazel "
+                   "cquery/aquery, CMake File API regeneration). Off by default: only "
+                   "reading existing build outputs is allowed (ADR-032 D5).")
+@click.option("--collection-mode", "collection_mode", default="permissive", show_default=True,
+              type=click.Choice(["permissive", "strict", "audit"], case_sensitive=False),
+              help="How extractor failures are handled (ADR-032 D9): permissive "
+                   "(failures degrade coverage, collection continues), strict (a "
+                   "failed/invalid extractor exits non-zero), audit (preserve raw "
+                   "artifacts + full diagnostics).")
 @click.option("-o", "--output", "output", type=click.Path(path_type=Path), required=True,
               help="Output evidence-pack directory.")
 @click.option("-v", "--verbose", is_flag=True, default=False)
@@ -152,6 +168,9 @@ def collect_evidence_cmd(
     include_graph: bool,
     kythe_entries: Path | None,
     codeql_results: Path | None,
+    extractor_manifests: tuple[Path, ...],
+    allow_build_query: bool,
+    collection_mode: str,
     output: Path,
     verbose: bool,
 ) -> None:
@@ -184,6 +203,22 @@ def collect_evidence_cmd(
         build_system=build_system,
         verbose=verbose,
     )
+
+    # External CLI extractors (ADR-032 D3): explicitly-registered subprocess
+    # adapters, run under the resolved action ceiling (D5). Their normalized
+    # build_evidence is folded into `merged` so it shares coverage and the pack.
+    if extractor_manifests:
+        _run_external_extractors(
+            merged, extractors,
+            manifests=extractor_manifests,
+            pack_root=output,
+            binary=binary,
+            build_dir=build_dir,
+            compile_db=effective_compile_db,
+            allow_build_query=allow_build_query,
+            collection_mode=collection_mode,
+            verbose=verbose,
+        )
 
     surface: SourceAbiSurface | None = None
     source_detail = ""
@@ -247,6 +282,7 @@ def collect_evidence_cmd(
         "binary": red.path(str(binary)) if binary else None,
         "headers": [red.path(str(h)) for h in headers],
         "build_dir": red.path(str(build_dir)) if build_dir else None,
+        "collection_mode": collection_mode,
     }
     has_build = bool(
         merged.compile_units or merged.targets or merged.toolchains
@@ -278,6 +314,17 @@ def collect_evidence_cmd(
         click.echo(f"  L5 source graph: {graph_detail or 'empty (no build evidence)'}")
     for diag in merged.diagnostics:
         click.echo(f"  note: {diag}", err=True)
+
+    # Strict mode (ADR-032 D9): requested evidence must be collected and valid,
+    # otherwise the command exits non-zero. A failed extractor row is the signal.
+    if collection_mode == "strict":
+        failed = [e for e in extractors if e.status == "failed"]
+        if failed:
+            names = ", ".join(sorted(e.name for e in failed))
+            raise click.ClickException(
+                f"strict collection mode: {len(failed)} extractor(s) failed ({names}). "
+                "Fix the inputs/tools or use --collection-mode permissive."
+            )
 
 
 def _run_adapters(
@@ -383,6 +430,100 @@ def _run_adapters(
             inputs=[DEFAULT_REDACTION.path(str(binary))],
             detail=f"{len(ev.toolchains)} toolchains, {len(ev.compile_units)} compile units",
         ))
+
+
+def _run_external_extractors(
+    merged: BuildEvidence,
+    extractors: list[ExtractorRecord],
+    *,
+    manifests: tuple[Path, ...],
+    pack_root: Path,
+    binary: Path | None,
+    build_dir: Path | None,
+    compile_db: Path | None,
+    allow_build_query: bool,
+    collection_mode: str,
+    verbose: bool,
+) -> None:
+    """Run explicitly-registered external CLI extractors (ADR-032 D3/D5/D9).
+
+    Each manifest is loaded from the operator-provided path (never auto-
+    discovered). The run-permitted action set starts at ``inspect`` and adds
+    ``query_build_system`` only with ``--allow-build-query``; a manifest that
+    needs an action outside that set is recorded as skipped rather than run
+    (its declared actions are a ceiling intersected with what the run allows).
+    Normalized ``build_evidence`` outputs are folded into *merged*; failures are
+    captured as extractor rows so the collection-mode policy (D9) can act on them.
+    """
+    from .evidence.build_evidence import BuildEvidence as _BuildEvidence
+    from .evidence.extractor import (
+        ActionNotPermittedError,
+        CollectionAction,
+        CollectionContext,
+        CollectionMode,
+    )
+    from .evidence.extractor_manifest import (
+        ManifestError,
+        load_extractor_manifest,
+        run_external_extractor,
+    )
+
+    run_permitted = {CollectionAction.INSPECT}
+    if allow_build_query:
+        run_permitted.add(CollectionAction.QUERY_BUILD_SYSTEM)
+
+    pack_root.mkdir(parents=True, exist_ok=True)
+
+    for manifest_path in manifests:
+        try:
+            manifest = load_extractor_manifest(manifest_path)
+        except ManifestError as exc:
+            extractors.append(ExtractorRecord(
+                name=f"external:{manifest_path.name}", status="failed",
+                inputs=[DEFAULT_REDACTION.path(str(manifest_path))], detail=str(exc),
+            ))
+            merged.diagnostics.append(f"extractor manifest {manifest_path}: {exc}")
+            continue
+
+        context = CollectionContext(
+            binary_paths=[binary] if binary else [],
+            build_root=build_dir,
+            compile_db=compile_db,
+            allowed_actions=set(run_permitted),
+            collection_mode=CollectionMode(collection_mode),
+            redaction_policy=DEFAULT_REDACTION,
+        )
+        try:
+            _norm, record = run_external_extractor(manifest, context, pack_root)
+        except ActionNotPermittedError as exc:
+            extractors.append(ExtractorRecord(
+                name=manifest.name, status="skipped", detail=str(exc),
+                capabilities=[k for k, v in manifest.capabilities.to_dict().items() if v is True],
+            ))
+            merged.diagnostics.append(f"{manifest.name}: {exc}")
+            continue
+
+        extractors.append(record)
+        if record.status != "ok":
+            merged.diagnostics.append(
+                f"{manifest.name}: {record.detail or 'extractor did not complete'}"
+            )
+            continue
+
+        # Fold any normalized build_evidence output into the merged L3 evidence.
+        for output in manifest.outputs:
+            if output.kind != "build_evidence":
+                continue
+            be_path = pack_root / output.path
+            try:
+                import json as _json
+                merged.merge(_BuildEvidence.from_dict(
+                    _json.loads(be_path.read_text(encoding="utf-8"))
+                ))
+            except (OSError, ValueError) as exc:
+                merged.diagnostics.append(
+                    f"{manifest.name}: could not fold {output.path}: {exc}"
+                )
 
 
 def _collect_call_graph(

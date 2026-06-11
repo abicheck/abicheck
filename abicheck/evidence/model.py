@@ -146,7 +146,16 @@ class EvidenceEntity:
 
 @dataclass
 class ExtractorRecord:
-    """Provenance for one extractor run, recorded in the manifest (D8)."""
+    """Provenance for one extractor run — the reproducibility ledger (D8, ADR-032 D10).
+
+    Beyond the core ``name``/``version``/``status``, the optional fields capture
+    the full ADR-032 D10 ledger for an external/CLI extractor: the exact
+    (redacted) ``command`` and its ``command_hash``, the declared
+    ``capabilities``, ``started_at``/``finished_at`` wall-clock bounds, and any
+    ``diagnostics``. They are *only emitted when set*, so a built-in adapter's
+    record stays byte-for-byte what it was before ADR-032 (and old readers keep
+    working). This ledger is carried into JSON/SARIF output (ADR-014).
+    """
 
     name: str                       # e.g. "compile_commands", "cmake_file_api", "ninja"
     version: str = ""               # extractor/tool version
@@ -154,9 +163,16 @@ class ExtractorRecord:
     inputs: list[str] = field(default_factory=list)   # redacted input descriptors
     artifacts: list[str] = field(default_factory=list)  # content-addressed paths under raw/ or normalized/
     detail: str = ""
+    # ADR-032 D10 reproducibility ledger (optional; emitted only when populated).
+    command: str = ""               # redacted command line of an external extractor
+    command_hash: str = ""          # "sha256:..." over the command + inputs + versions
+    capabilities: list[str] = field(default_factory=list)  # declared capability tokens
+    started_at: str = ""            # ISO 8601
+    finished_at: str = ""           # ISO 8601
+    diagnostics: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        out: dict[str, Any] = {
             "name": self.name,
             "version": self.version,
             "status": self.status,
@@ -164,6 +180,21 @@ class ExtractorRecord:
             "artifacts": list(self.artifacts),
             "detail": self.detail,
         }
+        # Emit the D10 ledger fields only when populated so built-in adapters
+        # serialize exactly as before (stable hashes, no test churn).
+        if self.command:
+            out["command"] = self.command
+        if self.command_hash:
+            out["command_hash"] = self.command_hash
+        if self.capabilities:
+            out["capabilities"] = list(self.capabilities)
+        if self.started_at:
+            out["started_at"] = self.started_at
+        if self.finished_at:
+            out["finished_at"] = self.finished_at
+        if self.diagnostics:
+            out["diagnostics"] = list(self.diagnostics)
+        return out
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> ExtractorRecord:
@@ -174,6 +205,12 @@ class ExtractorRecord:
             inputs=list(d.get("inputs", [])),
             artifacts=list(d.get("artifacts", [])),
             detail=str(d.get("detail", "")),
+            command=str(d.get("command", "")),
+            command_hash=str(d.get("command_hash", "")),
+            capabilities=list(d.get("capabilities", [])),
+            started_at=str(d.get("started_at", "")),
+            finished_at=str(d.get("finished_at", "")),
+            diagnostics=list(d.get("diagnostics", [])),
         )
 
 

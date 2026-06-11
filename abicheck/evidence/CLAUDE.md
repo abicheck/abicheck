@@ -31,6 +31,8 @@ L3/L4/L5 are ordinary `ChangeKind` entries that default to `API_BREAK_KINDS`
 | `graph_backends.py` | `ingest_kythe_entries()` / `ingest_codeql_call_results()` — fold **pre-captured** Kythe/CodeQL exports into the graph (non-executing), recording the store in `external_graph_refs` | 031 D5 (phase 7) |
 | `source_extractors/` | `SourceAbiExtractor` interface + castxml (phase 2), clang (phase 5, body fingerprints), Android adapter (phase 6) | 030 D3 |
 | `source_replay.py` | `select_compile_units()` (D7 scopes), `SourceAbiCache` (D8 per-TU cache), `run_source_replay()` driver, `scope_for_ci_mode()` | 030 D7/D8 (phase 7) |
+| `extractor.py` | `EvidenceExtractor` protocol (`discover`/`collect`/`normalize`/`validate`), `CollectionContext`, `ExtractorCapabilities`, `CollectionAction`/`CollectionMode`, `resolve_allowed_actions()`/`require_action()` — the plugin interface + security model | 032 D1/D2/D4/D5/D9 |
+| `extractor_manifest.py` | `ExtractorManifest` + `load_extractor_manifest()` (trusted-by-operator YAML), `render_command()`, `ExternalCliExtractor` + `run_external_extractor()` — external CLI extractors over a subprocess boundary (no shell, sanitized env, action ceiling) | 032 D3/D8/D10 |
 | `redaction.py` | `RedactionPolicy` — strip secrets/abs paths from command lines | 032 D7 |
 | `adapters/compile_db.py` | `compile_commands.json` → `CompileUnit`s (reuses `build_context.py`) | 029 D3 |
 | `adapters/cmake_file_api.py` | CMake File API reply → targets/toolchains/fileSets | 029 D4 |
@@ -57,8 +59,12 @@ Five *independent* schema versions — do not conflate:
   tool output under `raw/` is provenance only (ADR-028 D4) and never feeds the
   content hash.
 - Adapters must be **post-build and non-executing by default** (ADR-028 D6):
-  inspect existing build outputs / query interfaces only. Anything that builds
-  or runs project code is explicit opt-in (ADR-032 D5) — not implemented here.
+  inspect existing build outputs / query interfaces only. Anything heavier than
+  reading files is gated by the ADR-032 D5 action model (`CollectionAction` in
+  `extractor.py`): only `inspect` is allowed by default; `query_build_system`,
+  `run_compiler`, `run_build`, `wrap_build`, and `network` are explicit opt-in,
+  and a manifest's declared actions are a *ceiling* intersected with the
+  run-permitted set — never an escalation.
 - Adding an L3/L4/L5 `ChangeKind`: follow the four-step procedure in the root
   `CLAUDE.md`, place it in `API_BREAK_KINDS`/`RISK_KINDS` per the rule above,
   and emit it from `build_diff.py` (or the relevant diff module).
