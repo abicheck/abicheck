@@ -255,9 +255,9 @@ def _validate_flags(raw_flags: Any) -> tuple[str, ...]:
     for f in raw_flags:
         if not isinstance(f, str):
             raise ValueError(f"flag values must be strings, got {f!r}")
-        normalized = f.split("=", 1)[0]
-        if normalized in _DISALLOWED_COMPILER_FLAGS or any(
-            normalized.startswith(prefix) for prefix in _DISALLOWED_FLAG_PREFIXES
+        flag_name = f.split("=", 1)[0]
+        if flag_name in _DISALLOWED_COMPILER_FLAGS or any(
+            flag_name.startswith(prefix) for prefix in _DISALLOWED_FLAG_PREFIXES
         ):
             raise ValueError(f"flag {f!r} is disallowed in probe configuration")
         flags.append(f)
