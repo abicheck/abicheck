@@ -150,8 +150,7 @@ The build context above (L3) and **source evidence** (L4) can also be bundled
 into a reusable *evidence pack* — a post-build, opt-in artifact that abicheck
 reads alongside your binaries. A pack never rebuilds your project or runs
 arbitrary commands; it reads existing build outputs and build-system query
-interfaces only. Packs let L3/L4 evidence travel with a baseline snapshot or be
-diffed at compare time. See [Source & Build Evidence
+interfaces only. See [Source & Build Evidence
 Packs](../concepts/evidence-pack.md) for the full model.
 
 ```bash
@@ -161,19 +160,31 @@ abicheck collect-evidence \
     --build-dir build --cmake \
     --output libfoo.evidence/
 
-# 2a. Attach it to a snapshot at dump time…
+# 2a. Record a content-addressed reference to the pack on a snapshot…
+#     (the pack directory itself stays out-of-band — keep it around).
 abicheck dump build/libfoo.so -H include/ \
     --evidence libfoo.evidence/ -o libfoo.abi.json
 
-# 2b. …or diff two packs at compare time.
+# 2b. …and pass the pack directories explicitly at compare time to get
+#     their L3/L4 findings.
 abicheck compare old.abi.json new.abi.json \
     --old-evidence old.evidence/ --new-evidence new.evidence/
 ```
 
+!!! warning "Packs do not travel inside a snapshot"
+    `dump --evidence` records only a lightweight, content-addressed
+    *reference* on the snapshot — the pack directory stays out-of-band, and
+    `compare` does **not** follow that reference. To get pack-based L3/L4
+    findings you must **preserve the pack directory** and pass it explicitly
+    via `--old-evidence` / `--new-evidence`. If you archive only the dumped
+    JSON and later run `abicheck compare old.json new.json` without the packs,
+    you get the snapshot's intrinsic layers (L0–L2, plus any L3 build *flags*
+    baked in at dump time via `-p`) but not the pack's L3/L4 findings.
+
 | Flag | Command | Description |
 |------|---------|-------------|
-| `--evidence <dir>` | `dump` | Attach an evidence pack to the snapshot (content-addressed ref) |
-| `--old-evidence <dir>` / `--new-evidence <dir>` | `compare` | Diff per-side packs into the verdict — adds L3 build-context findings and an evidence-coverage table |
+| `--evidence <dir>` | `dump` | Record a content-addressed *reference* to a pack on the snapshot (the pack stays out-of-band; still pass it to `compare` to use its findings) |
+| `--old-evidence <dir>` / `--new-evidence <dir>` | `compare` | Load and diff per-side packs into the verdict — adds L3 build-context findings and an evidence-coverage table |
 | `--evidence-mode <mode>` | `compare` | Inline collection mode (`off` by default; uses only the explicitly-provided packs) |
 
 To additionally capture **L4 source ABI replay** (macro/`constexpr` values,
