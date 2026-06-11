@@ -139,6 +139,15 @@ def itanium_scope_components(mangled: str) -> list[str] | None:
                     return None
                 name = name + s[i:end]
                 i = end
+            # GNU ABI tags (`B<source-name>`, e.g. the libstdc++ `cxx11` tag on
+            # std::string returns) are part of the unqualified-name identity;
+            # keep them so a tagged name groups with itself across overloads.
+            while i < n and s[i] == "B":
+                tag, j = _read_length_prefixed_name(s, i + 1)
+                if tag is None:
+                    break
+                name = f"{name}B{tag}"
+                i = j
             components.append(name)
         elif c == "C" and i + 1 < n and s[i + 1] in "12345":
             components.append("{ctor}")  # constructor (C1/C2/C3/…)

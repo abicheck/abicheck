@@ -391,6 +391,17 @@ class TestOverloadAdded:
         result = compare(old, new)
         assert ChangeKind.OVERLOAD_ADDED in _kinds(result)
 
+    def test_abi_tagged_overload_is_overload_added(self):
+        """GNU ABI tags (`B5cxx11`, e.g. libstdc++ cxx11 std::string returns) are
+        part of the unqualified name; a tagged overload must still group."""
+        old = _snap(functions=[_method("C::get", "_ZN1C3getB5cxx11Ev")])
+        new = _snap(functions=[
+            _method("C::get", "_ZN1C3getB5cxx11Ev"),
+            _method("C::get", "_ZN1C3getB5cxx11Ei", params=[Param(name="i", type="int")]),
+        ])
+        result = compare(old, new)
+        assert ChangeKind.OVERLOAD_ADDED in _kinds(result)
+
     def test_added_constructor_overload_is_not_overload_added(self):
         """Constructors can't be named or address-taken (`&C::C` is invalid), so
         adding a constructor overload is a compatible FUNC_ADDED, not the
