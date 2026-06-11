@@ -479,7 +479,21 @@ def should_post(model: CommentModel, on: str) -> bool:
 
 
 def _esc(value: object) -> str:
-    return str(value).replace("|", "\\|").replace("\n", " ").strip()
+    # Sanitise for a single markdown table cell: escape pipes, neutralise
+    # backticks (which would break the surrounding code span) and flatten
+    # newlines. C/C++ symbols never contain backticks, so this is defensive.
+    return (
+        str(value)
+        .replace("|", "\\|")
+        .replace("`", "ˋ")
+        .replace("\n", " ")
+        .strip()
+    )
+
+
+def _md_url(url: str) -> str:
+    """Percent-encode characters that would break a markdown ``(url)`` target."""
+    return url.replace("(", "%28").replace(")", "%29").replace(" ", "%20")
 
 
 def _header(model: CommentModel) -> tuple[str, str]:
@@ -530,6 +544,7 @@ def _api_group(symbol: str) -> str:
 
 
 def _group_by_api(findings: list[Finding]) -> OrderedDict[str, list[Finding]]:
+    """Group findings by their enclosing API, preserving first-seen order."""
     groups: OrderedDict[str, list[Finding]] = OrderedDict()
     for f in findings:
         groups.setdefault(_api_group(f.symbol), []).append(f)
@@ -537,12 +552,14 @@ def _group_by_api(findings: list[Finding]) -> OrderedDict[str, list[Finding]]:
 
 
 def _flat_row(f: Finding) -> str:
+    """Render one finding as a per-symbol table row."""
     loc = f" · `{_esc(f.location)}`" if f.location else ""
     cell = (_esc(f.detail) + loc) if f.detail else _esc(f.location or "—")
     return f"| `{_esc(f.kind)}` | `{_esc(f.symbol)}` | {cell} |"
 
 
 def _group_row(key: str, members: list[Finding]) -> str:
+    """Render an API family as a single aggregated row (kinds, key, members)."""
     kinds = ", ".join(f"`{_esc(k)}`" for k in dict.fromkeys(m.kind for m in members))
     syms = [m.symbol for m in members]
     shown = syms[:_GROUP_MEMBERS_INLINE]
@@ -691,7 +708,7 @@ def _footer_block(
     if short_sha:
         footer += f" · commit {short_sha}"
     if report_url:
-        footer += f" · [full report]({report_url})"
+        footer += f" · [full report]({_md_url(report_url)})"
     footer += "</sub>"
     return [footer, ""]
 
@@ -706,10 +723,11 @@ def _render_body(
     *,
     condensed: bool,
 ) -> str:
+    """Render the comment body at one detail level (optionally condensed)."""
     lines = _header_block(model, short_sha)
     if condensed:
         note = "> ℹ️ _Condensed to fit GitHub's comment size limit"
-        note += f" — see the [full report]({report_url})._" if report_url else "._"
+        note += f" — see the [full report]({_md_url(report_url)})._" if report_url else "._"
         lines += [note, ""]
     lines += _library_notes(model)
     if detail != "summary":
@@ -719,8 +737,13 @@ def _render_body(
 
 
 def _truncate_to_budget(body: str, report_url: str | None) -> str:
+    """Hard-cut an over-budget body, appending a truncation note + report link."""
     suffix = "\n\n<sub>… comment truncated to fit GitHub's size limit"
-    suffix += f" — see the [full report]({report_url}).</sub>" if report_url else ".</sub>"
+    suffix += (
+        f" — see the [full report]({_md_url(report_url)}).</sub>"
+        if report_url
+        else ".</sub>"
+    )
     return body[: max(_BODY_BUDGET - len(suffix), 0)] + suffix
 
 

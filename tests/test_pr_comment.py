@@ -691,6 +691,25 @@ def test_comment_stays_under_github_size_limit():
     assert body.startswith(MARKER)  # header survives the downgrade/truncate
 
 
+def test_backtick_in_symbol_neutralised():
+    # A backtick in a symbol must not break the surrounding markdown code span.
+    report = _compare_report(
+        [{"kind": "func_removed", "symbol": "weird`sym", "description": "d",
+          "severity": "breaking"}]
+    )
+    body = render_comment(build_model(report), sha="x")
+    assert "weird`sym" not in body
+    assert "weirdˋsym" in body
+
+
+def test_report_url_parens_percent_encoded():
+    # Parentheses in the report URL would terminate the markdown link target.
+    body = render_comment(
+        build_model(_compare_report()), sha="x", report_url="https://e/run(1)"
+    )
+    assert "https://e/run%281%29" in body
+
+
 def test_report_url_linked_in_footer():
     body = render_comment(
         build_model(_compare_report()), sha="x", report_url="https://example/run/9"

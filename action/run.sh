@@ -588,6 +588,23 @@ fi
 # ---------------------------------------------------------------------------
 # Rebuild the run command with `--format json` so the comment renderer has a
 # structured report, regardless of the format chosen for the main output.
+_can_reuse_primary_json() {
+  # Reuse the primary run's output as the comment's JSON report instead of
+  # re-running the comparison — but only when it is a faithful, unfiltered
+  # report. It must already be JSON, written to a non-empty file, and free of
+  # display filters (--show-only / --stat) that hide gated changes from the
+  # comment (which _build_json_cmd strips for exactly that reason).
+  [[ "${FORMAT:-}" == "json" ]] || return 1
+  [[ -n "${OUTPUT_FILE:-}" && -s "${OUTPUT_FILE:-}" ]] || return 1
+  local arg
+  for arg in ${CMD[@]+"${CMD[@]}"}; do
+    case "$arg" in
+      --show-only | --show-only=* | --stat) return 1 ;;
+    esac
+  done
+  return 0
+}
+
 _build_json_cmd() {
   PR_CMD_JSON=()
   local i
@@ -650,10 +667,16 @@ _maybe_post_pr_comment() {
   # unlike the GNU-only --suffix option.
   PR_JSON=$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-pr-json.XXXXXX")
   PR_BODY=$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-pr-body.XXXXXX")
-  _build_json_cmd
-  # Re-run for JSON; a non-zero exit here is expected on breaks — the report
-  # file is still written, so we ignore the status.
-  "${PR_CMD_JSON[@]}" >/dev/null 2>/dev/null || true
+  if _can_reuse_primary_json; then
+    # The primary run already produced a faithful JSON report — reuse it instead
+    # of re-running the whole comparison.
+    cp "$OUTPUT_FILE" "$PR_JSON"
+  else
+    _build_json_cmd
+    # Re-run for JSON; a non-zero exit here is expected on breaks — the report
+    # file is still written, so we ignore the status.
+    "${PR_CMD_JSON[@]}" >/dev/null 2>/dev/null || true
+  fi
   if [[ ! -s "$PR_JSON" ]]; then
     echo "::warning::abicheck: no JSON report produced; skipping PR comment."
     echo "::endgroup::"
