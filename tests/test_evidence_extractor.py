@@ -993,6 +993,34 @@ def test_cli_source_root_placeholder_supplied(tmp_path):
     assert rec["status"] == "ok"
 
 
+def test_cli_failed_extractor_does_not_pollute_pack_artifacts(tmp_path):
+    # A failed external extractor's invalid normalized output must not be hashed
+    # into the pack's artifact digests (the ledger row legitimately still records
+    # the failed run, but its invalid evidence must be isolated) (Codex P2).
+    from abicheck.evidence.pack import EvidencePack
+
+    # An extractor whose normalized output is valid JSON but invalid BuildEvidence.
+    bad = (
+        "import json,sys,os;p=sys.argv[1];os.makedirs(os.path.dirname(p),exist_ok=True);"
+        "json.dump({'compile_units':[{}]},open(p,'w'))"  # missing id -> fold fails
+    )
+    data = {
+        "name": "polluter",
+        "commands": {"collect": [sys.executable, "-c", bad, "{normalized_dir}/build_evidence.json"]},
+        "outputs": {"normalized": [{"kind": "build_evidence", "path": "normalized/polluter/build_evidence.json"}]},
+    }
+    manifest = _dump(tmp_path, data, name="poll.yaml")
+    out = tmp_path / "pack"
+    r1 = _cli(["collect-evidence", "--extractor-manifest", str(manifest), "-o", str(out)])
+    assert r1.exit_code == 0, r1.output
+    pack = EvidencePack.load(out)
+    rec = next(e for e in pack.manifest.extractors if e.name == "polluter")
+    assert rec.status == "failed"
+    # The invalid normalized output is purged and contributes no artifact digest.
+    assert not (out / "normalized" / "polluter").exists()
+    assert pack.manifest.artifacts == []
+
+
 def test_cli_unsupported_output_kind_is_failed(tmp_path):
     # A manifest declaring a source_abi/source_graph_summary output (which the
     # CLI cannot fold yet) must be recorded failed, not silently dropped (Codex P2).

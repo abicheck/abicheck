@@ -516,6 +516,7 @@ def _run_external_extractors(
             merged.diagnostics.append(
                 f"{manifest.name}: {record.detail or 'extractor did not complete'}"
             )
+            _purge_external_outputs(pack_root, manifest)
             continue
 
         # Reject output kinds collect-evidence cannot fold yet — only
@@ -532,6 +533,7 @@ def _run_external_extractors(
                 f"{manifest.name}: output kind(s) {', '.join(unsupported)} are not yet "
                 "supported by collect-evidence (only build_evidence is folded into the pack)"
             )
+            _purge_external_outputs(pack_root, manifest)
             continue
 
         # Fold any normalized build_evidence outputs into the merged L3 evidence.
@@ -565,6 +567,32 @@ def _run_external_extractors(
         if fold_ok:
             for build_evidence in parsed:
                 merged.merge(build_evidence)
+        else:
+            _purge_external_outputs(pack_root, manifest)
+
+
+def _purge_external_outputs(pack_root: Path, manifest: object) -> None:
+    """Remove a failed external extractor's normalized outputs from the pack.
+
+    A failed/skipped extractor must be isolated from the collected pack: its
+    normalized output files (and its ``normalized/<name>/`` subtree) would
+    otherwise be hashed into ``EvidencePack`` ``manifest.artifacts`` and the
+    content hash, so an invalid output would change pack identity and publish a
+    digest for evidence that was never folded (Codex P2). Raw artifacts under
+    ``raw/`` are *not* removed — they are provenance-only, never hashed, and are
+    what audit mode preserves for debugging.
+    """
+    import shutil
+
+    name = getattr(manifest, "name", "")
+    for output in getattr(manifest, "outputs", []):
+        try:
+            (pack_root / output.path).unlink()
+        except OSError:
+            pass
+    norm_dir = pack_root / "normalized" / name
+    if norm_dir.is_dir():
+        shutil.rmtree(norm_dir, ignore_errors=True)
 
 
 def _collect_call_graph(
