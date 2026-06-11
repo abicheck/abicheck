@@ -223,6 +223,25 @@ class TestVirtualMethodAdded:
         assert ChangeKind.VIRTUAL_METHOD_ADDED in _kinds(result)
         assert result.verdict == Verdict.BREAKING
 
+    def test_brand_new_namespaced_class_sharing_a_leaf_is_compatible(self):
+        """A brand-new ``kde::View`` must not be attached to an unrelated
+        pre-existing ``foo::View`` just because CastXML records both as the leaf
+        ``View``. Pre-existence is decided by the qualified owner of sibling
+        symbols, so adding ``kde::View::hide`` here stays a compatible addition."""
+        old = _snap(
+            functions=[_method("bar", "_ZN3foo4View3barEv", is_virtual=True)],  # foo::View
+            types=[_cls("View")],
+        )
+        new = _snap(
+            functions=[
+                _method("bar", "_ZN3foo4View3barEv", is_virtual=True),
+                _method("hide", "_ZN3kde4View4hideEv", is_virtual=True),  # kde::View (new)
+            ],
+            types=[_cls("View")],
+        )
+        result = compare(old, new)
+        assert ChangeKind.VIRTUAL_METHOD_ADDED not in _kinds(result)
+
     def test_added_virtual_destructor_resolves_owner_from_mangled(self):
         """A virtual destructor added to an existing class (empty-vtable blind
         spot) is a vtable break; its CastXML leaf name is just ``~C`` so the

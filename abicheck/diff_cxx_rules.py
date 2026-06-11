@@ -165,24 +165,31 @@ def owner_class_of(f: Function) -> str | None:
 
 
 def _resolve_owner_type(
-    owner: str, types: dict[str, RecordType]
+    owner: str, types: dict[str, RecordType], known_owners: set[str]
 ) -> RecordType | None:
     """Look up the owner's record, tolerating qualified-vs-leaf naming.
 
     DWARF records a class under its qualified name (``kde::View``); the CastXML
     dumper records it under the leaf (``View``). The owner derived from a mangled
     symbol is always qualified, so when the qualified key misses, fall back to
-    the leaf component.
+    the leaf component — but only when ``owner`` is a *known* qualified owner
+    (i.e. the old surface actually had a symbol scoped to it). Without that
+    corroboration a bare-leaf match could wrongly attach a brand-new
+    ``kde::View`` to an unrelated existing ``foo::View`` that the dumper also
+    recorded as ``View``.
     """
     t = types.get(owner)
     if t is not None:
         return t
+    if owner not in known_owners:
+        return None
     leaf = owner.rsplit("::", 1)[-1]
     return types.get(leaf) if leaf != owner else None
 
 
 def virtual_method_addition(
     f_new: Function,
+    old_owner_classes: set[str],
     old_types: dict[str, RecordType],
     new_types: dict[str, RecordType],
 ) -> Change | None:
@@ -195,16 +202,23 @@ def virtual_method_addition(
     ``TYPE_VTABLE_CHANGED`` detector cannot see the growth, so this is the only
     signal. When the vtable array *does* differ, ``TYPE_VTABLE_CHANGED`` already
     reports it and we defer to avoid a duplicate finding.
+
+    The owner's record must be present on both sides (the DWARF blind spot this
+    targets). ``old_owner_classes`` — the set of *scope-qualified* owners of the
+    old snapshot's public functions — authorizes the leaf-name fallback in
+    ``_resolve_owner_type``: a qualified owner (``kde::View``) is unambiguous,
+    but CastXML record names are leaf-only, so a bare-leaf match is only trusted
+    when a sibling symbol confirms that exact qualified owner existed before.
     """
     if not f_new.is_virtual:
         return None
     owner = owner_class_of(f_new)
     if owner is None:
         return None
-    t_old = _resolve_owner_type(owner, old_types)
-    t_new = _resolve_owner_type(owner, new_types)
+    t_old = _resolve_owner_type(owner, old_types, old_owner_classes)
+    t_new = _resolve_owner_type(owner, new_types, old_owner_classes)
     if t_old is None or t_new is None:
-        return None  # brand-new class → adding it (with virtuals) is compatible
+        return None  # no pre-existing record on both sides → compatible / out of scope
     if t_old.vtable != t_new.vtable:
         return None  # TYPE_VTABLE_CHANGED covers this case
     return Change(
