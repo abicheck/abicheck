@@ -292,3 +292,33 @@ class TestOverloadAdded:
         )
         result = compare(old, new)
         assert ChangeKind.OVERLOAD_ADDED not in _kinds(result)
+
+    def test_same_leaf_different_scope_is_not_overload(self):
+        """Regression for the castxml/header path: ``Function.name`` is recorded
+        without namespace/class scope, so ``A::size`` and a newly added
+        ``B::size`` both arrive as the leaf ``size``. Grouping must use the
+        scope-qualified identity (from the mangled name) so adding ``B::size``
+        does not look like a second overload of ``A::size``."""
+        old = _snap(functions=[_method("size", "_ZN1A4sizeEv")])  # A::size
+        new = _snap(
+            functions=[
+                _method("size", "_ZN1A4sizeEv"),  # A::size retained
+                _method("size", "_ZN1B4sizeEv"),  # B::size added in a different scope
+            ]
+        )
+        result = compare(old, new)
+        assert ChangeKind.OVERLOAD_ADDED not in _kinds(result)
+        assert ChangeKind.FUNC_ADDED in _kinds(result)
+
+    def test_graduated_namespace_is_not_overload(self):
+        """case99 shape: a stable ``lib::sort`` is added alongside the retained
+        ``lib::experimental::sort``. Different scopes → not an overload add."""
+        old = _snap(functions=[_method("sort", "_ZN3lib12experimental4sortEv")])
+        new = _snap(
+            functions=[
+                _method("sort", "_ZN3lib12experimental4sortEv"),
+                _method("sort", "_ZN3lib4sortEv"),
+            ]
+        )
+        result = compare(old, new)
+        assert ChangeKind.OVERLOAD_ADDED not in _kinds(result)

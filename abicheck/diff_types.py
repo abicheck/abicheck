@@ -21,12 +21,15 @@ from collections.abc import Collection
 
 from .checker_policy import ChangeKind
 from .checker_types import Change
+from .demangle import demangle
 from .detector_registry import registry
 from .diff_symbols import (
     _PUBLIC_VIS,
+    _drop_leading_return_type,
     _public_functions,
     _public_variables,
     _should_filter_transitive_runtime_symbols,
+    _truncate_at_param_list,
 )
 from .elf_symbol_filter import (
     FUNCTION_SYMBOL_TYPES,
@@ -179,6 +182,25 @@ def _diff_types(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     return changes
 
 
+def _overload_group_key(f: Function) -> str:
+    """A scope-qualified identity for grouping overloads of the same name.
+
+    Two declarations are overloads of one another iff they share this key but
+    have distinct mangled names. The key is derived from the *mangled* name
+    (demangled, then stripped of return type and parameter list) so it is stable
+    across dumpers: a castxml/header snapshot records ``Function.name`` without
+    namespace/class scope, so grouping on ``name`` alone would collapse unrelated
+    declarations like ``A::size`` and a newly added ``B::size`` into one group
+    and emit a spurious ``OVERLOAD_ADDED``. When no mangled C++ form is available
+    (C symbols, which cannot overload), fall back to the display name.
+    """
+    demangled = demangle(f.mangled)
+    if demangled is None:
+        return f.name
+    qualified = _drop_leading_return_type(_truncate_at_param_list(demangled)).strip()
+    return qualified or f.name
+
+
 @registry.detector("overload_additions")
 def _diff_overload_additions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """Detect an overload added to a previously *unique* public name.
@@ -186,30 +208,31 @@ def _diff_overload_additions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]
     KDE's C++ binary-compatibility policy treats adding an overload to a
     non-overloaded function as a change to avoid: it is binary-compatible but
     not source-compatible (`&Foo::bar` becomes ambiguous, and overload
-    resolution at existing call sites may shift). We only fire when a name had
-    exactly one public declaration in the old snapshot, still has that same
-    declaration (same mangled name) in the new snapshot, and gains at least one
-    additional overload — so a plain signature change (remove+add of the same
-    name) does not masquerade as an overload addition.
+    resolution at existing call sites may shift). We only fire when a
+    scope-qualified name had exactly one public declaration in the old snapshot,
+    still has that same declaration (same mangled name) in the new snapshot, and
+    gains at least one additional overload — so a plain signature change
+    (remove+add of the same name) does not masquerade as an overload addition,
+    and an unrelated same-leaf declaration in a different scope does not either.
     """
     old_map = _public_functions(old)
     new_map = _public_functions(new)
 
-    old_by_name: dict[str, list[Function]] = {}
+    old_by_key: dict[str, list[Function]] = {}
     for f in old_map.values():
-        old_by_name.setdefault(f.name, []).append(f)
-    new_by_name: dict[str, list[Function]] = {}
+        old_by_key.setdefault(_overload_group_key(f), []).append(f)
+    new_by_key: dict[str, list[Function]] = {}
     for f in new_map.values():
-        new_by_name.setdefault(f.name, []).append(f)
+        new_by_key.setdefault(_overload_group_key(f), []).append(f)
 
     changes: list[Change] = []
-    for name, olds in old_by_name.items():
+    for key, olds in old_by_key.items():
         if len(olds) != 1:
             continue  # already overloaded → KDE allows adding further overloads
         original = olds[0]
-        news = new_by_name.get(name, [])
+        news = new_by_key.get(key, [])
         if len(news) < 2:
-            continue  # no new overload under this name
+            continue  # no new overload under this qualified name
         new_mangleds = {f.mangled for f in news}
         if original.mangled not in new_mangleds:
             continue  # original declaration gone → a replacement/rename, not an addition
@@ -219,8 +242,8 @@ def _diff_overload_additions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]
             kind=ChangeKind.OVERLOAD_ADDED,
             symbol=original.mangled,
             description=(
-                f"Overload added to previously non-overloaded function: {name} "
-                f"— `&{name}` becomes ambiguous and overload resolution may change"
+                f"Overload added to previously non-overloaded function: {key} "
+                f"— `&{key}` becomes ambiguous and overload resolution may change"
             ),
             old_value="1 overload",
             new_value=f"{len(news)} overloads",
