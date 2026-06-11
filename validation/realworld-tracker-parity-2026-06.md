@@ -77,7 +77,7 @@ Libraries matching ABICC **100 %** on every comparable pair include harfbuzz
 (12/12), libxml2 (10/10), openssl (10/11), freetype, gsl, libgcrypt, libsodium,
 libssh2, lz4, libvorbis, gnutls, libpng, zstd, openjpeg, p11-kit, libtasn1,
 libidn2, pcre2, glib, cairo, curl, fontconfig, libarchive, libevent, libffi,
-mpfr, glpk, … . The 6 libraries with a divergence are detailed below.
+mpfr, glpk, … . The 7 libraries with a divergence are detailed below.
 
 **All 11 non-matching pairs (the only disagreements in 185 comparable):**
 
@@ -270,12 +270,13 @@ Each non-matching class above is pinned by an offline, network-free test in
 - **Symbols-only and DWARF-present comparisons agree with the canonical ABICC
   oracle on 174/185 real upstream pairs (94.1 %)** across 54 libraries, with **no
   confirmed false positive or false negative**.
-- The harness's **evidence-aware + scope-aware scoring holds up on live data**: 15
-  scope divergences and 8 evidence limits were correctly separated from genuine
+- The harness's **evidence-aware + scope-aware scoring holds up on live data**: 40
+  scope divergences and 23 evidence limits were correctly separated from genuine
   disagreements, each gated on ABICC's own published counts — so abicheck's
   binary-strict policy is not punished as "wrong" where it is merely stricter, and
   abicheck is not credited for matches it lacks the evidence to substantiate.
-- The two remaining divergences are precisely the two understood boundaries of a
-  binary-only checker vs a header-scoped one: **author-declared-internal symbols**
-  (abicheck stricter, §3.1) and **partial debug coverage** (abicheck blind to a
-  type-only change, §3.2) — both with concrete, scoped follow-ups in §4.
+- The 11 remaining divergences fall entirely into the understood boundaries of a
+  binary-only checker vs a header-scoped one (classes A–E, §3): author-internal
+  symbols/version-nodes, internal/opaque type layout seen via DWARF, real breaks
+  in untracked sibling shared objects, partial debug coverage, and a correct
+  object-size product break — every one with a concrete, scoped follow-up in §4.
