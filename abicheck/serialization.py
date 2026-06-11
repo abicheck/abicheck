@@ -203,6 +203,7 @@ def _elf_from_dict(e: dict[str, Any]) -> Any:
         has_stack_canary=e.get("has_stack_canary", False),
         has_fortify_source=e.get("has_fortify_source", False),
         has_writable_executable_segment=e.get("has_writable_executable_segment", False),
+        pointer_size=e.get("pointer_size", 8),
     )
 
 

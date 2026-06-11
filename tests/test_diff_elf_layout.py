@@ -190,6 +190,16 @@ class TestWiring:
         assert ChangeKind.VTABLE_SLOT_COUNT_CHANGED in kinds
         assert ChangeKind.SYMBOL_SIZE_CHANGED not in kinds
 
+    def test_pointer_size_survives_serialization_roundtrip(self) -> None:
+        # A 32-bit ELF snapshot must reload with pointer_size=4, else
+        # diff_elf_layout would decode ILP32 _ZTV/_ZTI sizes as LP64.
+        from abicheck.serialization import snapshot_from_dict, snapshot_to_dict
+
+        snap = _snap(_obj("_ZTV3Foo", 24), pointer_size=4)
+        restored = snapshot_from_dict(snapshot_to_dict(snap))
+        assert restored.elf is not None
+        assert restored.elf.pointer_size == 4
+
     def test_vtt_size_change_keeps_generic_coverage(self) -> None:
         # VTT (_ZTT, emitted for virtual-base classes) has no dedicated detector
         # and is part of the construction ABI, so a size change must still surface
