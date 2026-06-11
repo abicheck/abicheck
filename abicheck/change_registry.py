@@ -1027,4 +1027,9 @@ REGISTRY = ChangeKindRegistry([
               "closure (it is a public header, or it declares a reachable public "
               "entity). Build-time-generated content now shapes the public API "
               "surface, so its provenance and reproducibility warrant review."),
+    _E("call_graph_public_entry_reachability_changed", _C,
+       impact="The set of implementation declarations statically reachable from "
+              "an exported entry point changed (per the approximate Clang call "
+              "graph). A quality/behavioral signal that the implementation behind "
+              "a stable public symbol moved; never an ABI break on its own."),
 ])

@@ -535,6 +535,7 @@ class ChangeKind(str, Enum):
     PUBLIC_REACHABILITY_CHANGED = "public_reachability_changed"  # decl entered/left the public-API reachability closure → RISK
     SOURCE_TO_BINARY_MAPPING_CHANGED = "source_to_binary_mapping_changed"  # a persisting decl now maps to a different exported symbol → RISK
     GENERATED_HEADER_REACHES_PUBLIC_API = "generated_header_reaches_public_api"  # a generated file entered the public declaration closure → RISK
+    CALL_GRAPH_PUBLIC_ENTRY_REACHABILITY_CHANGED = "call_graph_public_entry_reachability_changed"  # impl reachable from an exported entry changed → COMPATIBLE (quality)
 
 
 class HasKind(Protocol):

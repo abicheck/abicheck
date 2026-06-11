@@ -117,6 +117,12 @@ abicheck collect-evidence \
   --output libfoo.evidence/
 ```
 
+Add `--call-graph` (requires `clang++`) to also fold approximate direct-call
+edges (`DECL_CALLS_DECL`, each labelled with a `call_kind` and `resolution`
+confidence) into the graph — enabling the
+`call_graph_public_entry_reachability_changed` quality finding. Without `clang`
+the graph is still collected, just without call edges.
+
 Compare two graph summaries directly — pass either the pack directories or the
 `graph/source_graph_summary.json` files:
 
@@ -213,6 +219,7 @@ graph-derived **risk** findings (ADR-031 D6):
 | `public_reachability_changed` | risk | A declaration entered or left the public-API reachability closure (target → public header → declaration → exported symbol) |
 | `source_to_binary_mapping_changed` | risk | A declaration present in both versions now maps to a different exported binary symbol |
 | `generated_header_reaches_public_api` | risk | A generated file newly participates in the public declaration closure (it is a public header) |
+| `call_graph_public_entry_reachability_changed` | compatible (quality) | The implementation statically reachable from an exported entry point changed (approximate Clang call graph; needs `--call-graph`) |
 
 These **explain and prioritize** impact; like the L4 findings they are never
 `breaking` on their own. Each carries the `L5_SOURCE_GRAPH` evidence-tier

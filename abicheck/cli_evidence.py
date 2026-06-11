@@ -109,6 +109,10 @@ if TYPE_CHECKING:
               help="Collect an L5 source graph (ADR-031). 'summary' folds the L3 "
                    "build evidence into a compact target/source/header/option graph "
                    "for graph-to-graph comparison and finding localization.")
+@click.option("--call-graph", "call_graph", is_flag=True, default=False,
+              help="Add approximate direct-call edges to the L5 source graph via "
+                   "clang AST (ADR-031 D4, phase 6). REQUIRES clang++; without it "
+                   "the graph is collected without call edges. Implies --source-graph summary.")
 @click.option("-o", "--output", "output", type=click.Path(path_type=Path), required=True,
               help="Output evidence-pack directory.")
 @click.option("-v", "--verbose", is_flag=True, default=False)
@@ -135,6 +139,7 @@ def collect_evidence_cmd(
     source_abi_cache: Path | None,
     clang_bin: str,
     source_graph: str,
+    call_graph: bool,
     output: Path,
     verbose: bool,
 ) -> None:
@@ -187,16 +192,22 @@ def collect_evidence_cmd(
 
     graph: SourceGraphSummary | None = None
     graph_detail = ""
+    # --call-graph implies graph collection (the call edges go into the graph).
+    if call_graph and source_graph == "off":
+        source_graph = "summary"
     if source_graph == "summary":
         from .evidence.source_graph import build_source_graph
         # Fold the L4 surface in too when it was collected (--source-abi), so
         # the graph carries the public-reachability + source↔binary slices.
         graph = build_source_graph(merged, source_abi=surface)
+        if call_graph:
+            _collect_call_graph(graph, merged, extractors, clang_bin=clang_bin)
         graph_detail = (
             f"{len(graph.nodes)} nodes, {len(graph.edges)} edges "
             f"({graph.coverage.get('targets', 0)} targets, "
             f"{graph.coverage.get('compile_units', 0)} compile units, "
-            f"{graph.coverage.get('source_decls', 0)} source decls)"
+            f"{graph.coverage.get('source_decls', 0)} source decls, "
+            f"{graph.coverage.get('call_edges', {}).get('count', 0)} call edges)"
         )
         extractors.append(ExtractorRecord(
             name="source_graph:summary",
@@ -353,6 +364,44 @@ def _run_adapters(
             inputs=[DEFAULT_REDACTION.path(str(binary))],
             detail=f"{len(ev.toolchains)} toolchains, {len(ev.compile_units)} compile units",
         ))
+
+
+def _collect_call_graph(
+    graph: SourceGraphSummary,
+    merged: BuildEvidence,
+    extractors: list[ExtractorRecord],
+    *,
+    clang_bin: str,
+) -> None:
+    """Run the Clang call extractor over the build and fold edges into *graph*.
+
+    Best-effort (ADR-031 D4 / ADR-028 D3): a missing clang or a parse failure
+    records a partial/failed extractor row and leaves the graph without call
+    edges — it never aborts collection. Re-finalizes the graph so the content
+    hash and coverage counts reflect the added edges.
+    """
+    from .evidence.call_graph import ClangCallGraphExtractor, augment_graph_with_calls
+
+    # clang_bin defaults to "clang" (the L4 extractor's tool); the call
+    # extractor needs a C++ driver, so prefer clang++ unless the user pointed
+    # --clang-bin at a specific clang.
+    extractor = ClangCallGraphExtractor(clang_bin=clang_bin if clang_bin != "clang" else "clang++")
+    if not extractor.available():
+        extractors.append(ExtractorRecord(
+            name="call_graph:clang", status="failed",
+            detail=f"{extractor.clang_bin} not found in PATH; graph collected without call edges",
+        ))
+        return
+    edges = extractor.extract_from_build(merged)
+    added = augment_graph_with_calls(graph, edges)
+    graph.finalize()
+    for diag in extractor.diagnostics:
+        merged.diagnostics.append(f"call_graph: {diag}")
+    extractors.append(ExtractorRecord(
+        name="call_graph:clang",
+        status="ok" if added else "partial",
+        detail=f"{added} call edges from {len(merged.compile_units)} compile units",
+    ))
 
 
 def _build_coverage(

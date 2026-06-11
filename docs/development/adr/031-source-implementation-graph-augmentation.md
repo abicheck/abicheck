@@ -1,16 +1,16 @@
 # ADR-031: Source and Implementation Graph Augmentation
 
 **Date:** 2026-06-09
-**Status:** Accepted — phases 1–5 (most) implemented: graph schema +
-build-evidence graph + L4 public-reachability/source↔binary graph +
-storage/CLI wiring + structural `compare-graph` + three D6 graph-derived risk
-findings (`public_reachability_changed`, `source_to_binary_mapping_changed`,
-`generated_header_reaches_public_api`) folded into the verdict pipeline. The
-remaining D6 kinds that need call/include/option-flow data
-(`call_graph_public_entry_reachability_changed`,
-`include_graph_public_header_drift`, `build_option_reaches_public_symbol`),
-the `explain-finding` command, the Clang call extractor (phase 6), and the
-Kythe/CodeQL adapters (phase 7) remain future work.
+**Status:** Accepted — phases 1–6 implemented: graph schema + build-evidence
+graph + L4 public-reachability/source↔binary graph + storage/CLI wiring +
+structural `compare-graph` + four D6 graph-derived findings
+(`public_reachability_changed`, `source_to_binary_mapping_changed`,
+`generated_header_reaches_public_api`, and — from the phase-6 Clang call
+extractor — `call_graph_public_entry_reachability_changed`) folded into the
+verdict pipeline. The remaining D6 kinds that need include/option-flow data
+(`include_graph_public_header_drift`, `build_option_reaches_public_symbol`),
+the `explain-finding` command, and the Kythe/CodeQL adapters (phase 7) remain
+future work.
 **Decision maker:** Nikolay Petrov
 
 ---
@@ -250,7 +250,7 @@ proves it. Prefer "known static callers" or "observed graph edges".
 | 3 | Header/type/declaration graph from L2/L4 | public reachability graph | **Done** — `build_source_graph(build, source_abi=…)` folds an ADR-030 `SourceAbiSurface` into `source_decl`/`record_type`/`enum_type`/`typedef`/`macro` nodes linked to their declaring public header via `SOURCE_DECLARES` |
 | 4 | Source-to-binary mapping graph | symbol/declaration/debug mapping explanations | **Done** — `SOURCE_DECL_MAPS_TO_SYMBOL`, `SOURCE_TYPE_MAPS_TO_DEBUG_TYPE`, and `BINARY_EXPORTS_SYMBOL` edges from the surface mappings, completing the target → header → decl → exported-symbol closure |
 | 5 | Graph diff and `explain-finding` | graph-to-graph compare, finding localization | **Mostly done** — `diff_source_graph()` (structural delta) + `diff_source_graph_findings()` emit three D6 risk `ChangeKind`s, surfaced by `compare-graph` and folded into the `compare --old/--new-evidence` verdict pipeline. The call/include/option-flow D6 kinds and `explain-finding` remain future work |
-| 6 | Optional Clang direct-call extractor | direct call graph summary | Future |
+| 6 | Optional Clang direct-call extractor | direct call graph summary | **Done** — `evidence/call_graph.py`: `parse_clang_ast_calls()` (pure AST-JSON parser, unit-tested) + `ClangCallGraphExtractor` (live `clang -ast-dump=json`, integration-only) emit `DECL_CALLS_DECL` edges labelled with `call_kind`/`resolution` (D4); `collect-evidence --call-graph` collects them and the `call_graph_public_entry_reachability_changed` finding consumes them |
 | 7 | Kythe/CodeQL adapters | external graph backend summaries | Future |
 
 ---

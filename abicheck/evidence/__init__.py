@@ -41,6 +41,12 @@ from .build_evidence import (
     Target,
     Toolchain,
 )
+from .call_graph import (
+    CallEdge,
+    ClangCallGraphExtractor,
+    augment_graph_with_calls,
+    parse_clang_ast_calls,
+)
 from .model import (
     EVIDENCE_PACK_VERSION,
     EvidenceConfidence,
@@ -94,7 +100,9 @@ __all__ = [
     "AndroidHeaderAbiAdapter",
     "BuildEvidence",
     "BuildOption",
+    "CallEdge",
     "CastxmlSourceExtractor",
+    "ClangCallGraphExtractor",
     "ClangSourceExtractor",
     "CompileUnit",
     "EvidenceConfidence",
@@ -120,11 +128,13 @@ __all__ = [
     "SourceLocation",
     "Target",
     "Toolchain",
+    "augment_graph_with_calls",
     "build_source_graph",
     "diff_source_abi",
     "diff_source_graph",
     "diff_source_graph_findings",
     "link_source_abi",
+    "parse_clang_ast_calls",
     "run_source_replay",
     "scope_for_ci_mode",
     "select_compile_units",

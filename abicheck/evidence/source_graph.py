@@ -703,6 +703,38 @@ def _generated_in_public_closure(graph: SourceGraphSummary) -> set[str]:
     }
 
 
+def _public_entry_call_reachability(graph: SourceGraphSummary) -> dict[str, frozenset[str]]:
+    """For each exported-entry decl, the impl decls statically reachable from it.
+
+    Public entries are ``source_decl`` nodes with an outgoing
+    ``SOURCE_DECL_MAPS_TO_SYMBOL`` edge (they back an exported symbol). The
+    reachable set is the transitive closure over ``DECL_CALLS_DECL`` edges — an
+    *approximate* implementation footprint (ADR-031 D4). Returns ``{}`` when the
+    graph carries no call edges, so callers can skip the comparison entirely.
+    """
+    calls: dict[str, list[str]] = {}
+    for e in graph.edges:
+        if e.kind == "DECL_CALLS_DECL":
+            calls.setdefault(e.src, []).append(e.dst)
+    if not calls:
+        return {}
+    entries = {
+        e.src for e in graph.edges if e.kind == "SOURCE_DECL_MAPS_TO_SYMBOL"
+    }
+    out: dict[str, frozenset[str]] = {}
+    for entry in entries:
+        seen: set[str] = set()
+        stack = list(calls.get(entry, []))
+        while stack:
+            node = stack.pop()
+            if node in seen:
+                continue
+            seen.add(node)
+            stack.extend(calls.get(node, []))
+        out[entry] = frozenset(seen)
+    return out
+
+
 def diff_source_graph_findings(
     old: SourceGraphSummary, new: SourceGraphSummary
 ) -> list[Change]:
@@ -802,5 +834,28 @@ def diff_source_graph_findings(
             new_value="in public closure",
             source_location=boundary,
         ))
+
+    # 4) implementation reachable from an exported entry changed (phase 6, needs
+    #    Clang call edges). Quality signal only — reported for entries present in
+    #    both graphs whose approximate call-reachable set differs.
+    old_reach = _public_entry_call_reachability(old)
+    new_reach = _public_entry_call_reachability(new)
+    for entry in sorted(old_reach.keys() & new_reach.keys()):
+        if old_reach[entry] != new_reach[entry]:
+            label = new_labels.get(entry, entry)
+            old_n, new_n = len(old_reach[entry]), len(new_reach[entry])
+            findings.append(Change(
+                kind=ChangeKind.CALL_GRAPH_PUBLIC_ENTRY_REACHABILITY_CHANGED,
+                symbol=label,
+                description=(
+                    f"Implementation statically reachable from exported entry "
+                    f"{label!r} changed ({old_n} → {new_n} known static callees, "
+                    "approximate). Source-graph quality signal: the code behind a "
+                    "stable public symbol moved; not an ABI break."
+                ),
+                old_value=f"{old_n} reachable",
+                new_value=f"{new_n} reachable",
+                source_location=boundary,
+            ))
 
     return findings
