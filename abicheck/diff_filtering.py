@@ -65,6 +65,18 @@ _TYPE_CHANGE_KINDS: frozenset[ChangeKind] = frozenset(
         ChangeKind.STRUCT_FIELD_REMOVED,
         ChangeKind.STRUCT_FIELD_TYPE_CHANGED,
         ChangeKind.STRUCT_ALIGNMENT_CHANGED,
+        # Fine-grained class-layout descriptor kinds (layout-closure work): each
+        # carries the owner type name in Change.symbol, so affected-symbol
+        # enrichment must scan them too — otherwise a layout-only BREAKING
+        # finding (e.g. TRIVIALLY_COPYABLE_LOST on a size-stable type used by an
+        # exported by-value API) gets no affected_symbols and app-compat
+        # filtering could mark a consumer as unaffected (Codex review #345).
+        ChangeKind.BASE_CLASS_OFFSET_CHANGED,
+        ChangeKind.VPTR_INTRODUCED,
+        ChangeKind.TRIVIALLY_COPYABLE_LOST,
+        ChangeKind.STANDARD_LAYOUT_LOST,
+        ChangeKind.TAIL_PADDING_REUSE_CHANGED,
+        ChangeKind.LAYOUT_UNVERIFIABLE,
     }
 )
 

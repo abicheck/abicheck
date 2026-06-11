@@ -13,6 +13,7 @@
 # limitations under the License.
 
 """Unit tests for the cross-implementation standard-library diff (D-stdlib)."""
+
 from __future__ import annotations
 
 from abicheck.build_mode import BuildMode, StdlibFamily
@@ -140,7 +141,8 @@ class TestDetectorFindings:
         )
         result = compare(old, new)
         finding = next(
-            c for c in result.changes
+            c
+            for c in result.changes
             if c.kind == ChangeKind.STDLIB_IMPLEMENTATION_CHANGED
         )
         assert "no layout evidence" in finding.description.lower()
@@ -152,7 +154,8 @@ class TestDetectorFindings:
         new = _snap("2", stdlib=StdlibFamily.LIBCXX, types=[])
         result = compare(old, new)
         finding = next(
-            c for c in result.changes
+            c
+            for c in result.changes
             if c.kind == ChangeKind.STDLIB_IMPLEMENTATION_CHANGED
         )
         assert "embeds a std::" not in finding.description
@@ -171,7 +174,8 @@ class TestDetectorFindings:
         new = _snap("2", stdlib=StdlibFamily.LIBCXX, types=[rec])
         result = compare(old, new)
         finding = next(
-            c for c in result.changes
+            c
+            for c in result.changes
             if c.kind == ChangeKind.STDLIB_IMPLEMENTATION_CHANGED
         )
         assert "embeds a std::" not in finding.description
@@ -193,7 +197,8 @@ class TestDetectorFindings:
         new = _snap("2", stdlib=StdlibFamily.LIBCXX, types=[rec])
         result = compare(old, new)
         finding = next(
-            c for c in result.changes
+            c
+            for c in result.changes
             if c.kind == ChangeKind.STDLIB_IMPLEMENTATION_CHANGED
         )
         assert "embeds a std::" in finding.description
@@ -203,7 +208,8 @@ class TestDetectorFindings:
         new = _snap("2", stdlib=StdlibFamily.LIBCXX, types=[_embed_stdlib_record()])
         result = compare(old, new)
         finding = next(
-            c for c in result.changes
+            c
+            for c in result.changes
             if c.kind == ChangeKind.STDLIB_IMPLEMENTATION_CHANGED
         )
         assert "MSVC STL" in finding.description
@@ -217,18 +223,22 @@ class TestBuildModeFallback:
     @staticmethod
     def _fn(mangled: str) -> Function:
         return Function(
-            name=mangled, mangled=mangled, return_type="void",
+            name=mangled,
+            mangled=mangled,
+            return_type="void",
             visibility=Visibility.PUBLIC,
         )
 
     def test_fires_without_build_mode_from_mangled_symbols(self) -> None:
         # libstdc++ (no __1) → libc++ (std::__1), no build_mode captured.
         old = AbiSnapshot(
-            library="lib.so", version="1",
+            library="lib.so",
+            version="1",
             functions=[self._fn("_ZNSt6vectorIiSaIiEE9push_backEi")],
         )
         new = AbiSnapshot(
-            library="lib.so", version="2",
+            library="lib.so",
+            version="2",
             functions=[self._fn("_ZNSt3__16vectorIiNS_9allocatorIiEEEE9push_backEOi")],
         )
         assert old.build_mode is None and new.build_mode is None
@@ -238,8 +248,10 @@ class TestBuildModeFallback:
     @staticmethod
     def _require_demangler() -> None:
         from abicheck.demangle import demangle
+
         if demangle("_Z3apiNSt3__16vectorIiNS_9allocatorIiEEEE") is None:
             import pytest
+
             pytest.skip("no C++ demangler available")
 
     def test_fires_from_libcxx_user_api_mangling(self) -> None:
@@ -248,12 +260,15 @@ class TestBuildModeFallback:
         # libc++ user-API detection goes through the demangler (Codex #345).
         self._require_demangler()
         old = AbiSnapshot(
-            library="lib.so", version="1",
-            functions=[self._fn(
-                "_Z3apiNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE")],
+            library="lib.so",
+            version="1",
+            functions=[
+                self._fn("_Z3apiNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE")
+            ],
         )
         new = AbiSnapshot(
-            library="lib.so", version="2",
+            library="lib.so",
+            version="2",
             functions=[self._fn("_Z3apiNSt3__16vectorIiNS_9allocatorIiEEEE")],
         )
         kinds = {c.kind for c in compare(old, new).changes}
@@ -264,11 +279,13 @@ class TestBuildModeFallback:
         # Recovering libc++ from user-API symbols goes through the demangler.
         self._require_demangler()
         old = AbiSnapshot(
-            library="lib.so", version="1",
+            library="lib.so",
+            version="1",
             functions=[self._fn("_Z3apiNSt3__16vectorIiNS_9allocatorIiEEEE")],
         )
         new = AbiSnapshot(
-            library="lib.so", version="2",
+            library="lib.so",
+            version="2",
             functions=[self._fn("_Z3apiNSt3__26vectorIiNS_9allocatorIiEEEE")],
         )
         kinds = {c.kind for c in compare(old, new).changes}
@@ -282,14 +299,14 @@ class TestBuildModeFallback:
         # The libc++ side is recovered via the demangler.
         self._require_demangler()
         msvc = (
-            "?api@@YAXV?$basic_string@DU?$char_traits@D@std@@"
-            "V?$allocator@D@2@@std@@@Z"
+            "?api@@YAXV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@@Z"
         )
-        old = AbiSnapshot(
-            library="lib.dll", version="1", functions=[self._fn(msvc)])
+        old = AbiSnapshot(library="lib.dll", version="1", functions=[self._fn(msvc)])
         new = AbiSnapshot(
-            library="lib.so", version="2",
-            functions=[self._fn("_Z3apiNSt3__16vectorIiNS_9allocatorIiEEEE")])
+            library="lib.so",
+            version="2",
+            functions=[self._fn("_Z3apiNSt3__16vectorIiNS_9allocatorIiEEEE")],
+        )
         kinds = {c.kind for c in compare(old, new).changes}
         assert ChangeKind.STDLIB_IMPLEMENTATION_CHANGED in kinds
 
@@ -297,15 +314,21 @@ class TestBuildModeFallback:
         # std::vector<int> by value under libstdc++ carries no __cxx11 tag and no
         # libc++ __1 marker, so it is recovered via demangling (Codex #345).
         from abicheck.demangle import demangle
+
         if demangle("_Z3apiSt6vectorIiSaIiEE") is None:
             import pytest
+
             pytest.skip("no C++ demangler available")
         old = AbiSnapshot(
-            library="lib.so", version="1",
-            functions=[self._fn("_Z3apiSt6vectorIiSaIiEE")])  # libstdc++
+            library="lib.so",
+            version="1",
+            functions=[self._fn("_Z3apiSt6vectorIiSaIiEE")],
+        )  # libstdc++
         new = AbiSnapshot(
-            library="lib.so", version="2",
-            functions=[self._fn("_Z3apiNSt3__16vectorIiNS_9allocatorIiEEEE")])
+            library="lib.so",
+            version="2",
+            functions=[self._fn("_Z3apiNSt3__16vectorIiNS_9allocatorIiEEEE")],
+        )
         kinds = {c.kind for c in compare(old, new).changes}
         assert ChangeKind.STDLIB_IMPLEMENTATION_CHANGED in kinds
 
@@ -313,15 +336,19 @@ class TestBuildModeFallback:
         # A user type "St3Db" must NOT be misread as libstdc++: demangling shows
         # it carries no `std::`, so the side stays UNKNOWN and no finding fires.
         from abicheck.demangle import demangle
+
         if demangle("_Z3apiSt6vectorIiSaIiEE") is None:
             import pytest
+
             pytest.skip("no C++ demangler available")
         old = AbiSnapshot(
-            library="lib.so", version="1",
-            functions=[self._fn("_Z3api5St3Db")])  # user type, not std
+            library="lib.so", version="1", functions=[self._fn("_Z3api5St3Db")]
+        )  # user type, not std
         new = AbiSnapshot(
-            library="lib.so", version="2",
-            functions=[self._fn("_Z3apiNSt3__16vectorIiNS_9allocatorIiEEEE")])
+            library="lib.so",
+            version="2",
+            functions=[self._fn("_Z3apiNSt3__16vectorIiNS_9allocatorIiEEEE")],
+        )
         kinds = {c.kind for c in compare(old, new).changes}
         assert ChangeKind.STDLIB_IMPLEMENTATION_CHANGED not in kinds
 
@@ -331,15 +358,20 @@ class TestBuildModeFallback:
         # classify it as libc++ (not libstdc++) so a libstdc++ → Android-libc++
         # comparison emits the finding (Codex #345).
         from abicheck.demangle import demangle
+
         ndk = "_Z3apiNSt6__ndk16vectorIiNS_9allocatorIiEEEE"
         if demangle(ndk) is None:
             import pytest
+
             pytest.skip("no C++ demangler available")
         old = AbiSnapshot(
-            library="lib.so", version="1",
-            functions=[self._fn("_Z3apiSt6vectorIiSaIiEE")])  # libstdc++
+            library="lib.so",
+            version="1",
+            functions=[self._fn("_Z3apiSt6vectorIiSaIiEE")],
+        )  # libstdc++
         new = AbiSnapshot(
-            library="lib.so", version="2", functions=[self._fn(ndk)])  # Android libc++
+            library="lib.so", version="2", functions=[self._fn(ndk)]
+        )  # Android libc++
         kinds = {c.kind for c in compare(old, new).changes}
         assert ChangeKind.STDLIB_IMPLEMENTATION_CHANGED in kinds
 
@@ -347,15 +379,19 @@ class TestBuildModeFallback:
         # A user type mangled `6St3__1` contains the bytes `St3__1` but is not
         # libc++ (it demangles to `api(St3__1)`, no std::). Must not be flagged.
         from abicheck.demangle import demangle
+
         if demangle("_Z3apiSt6vectorIiSaIiEE") is None:
             import pytest
+
             pytest.skip("no C++ demangler available")
         old = AbiSnapshot(
-            library="lib.so", version="1",
-            functions=[self._fn("_Z3api6St3__1")])  # user type "St3__1"
+            library="lib.so", version="1", functions=[self._fn("_Z3api6St3__1")]
+        )  # user type "St3__1"
         new = AbiSnapshot(
-            library="lib.so", version="2",
-            functions=[self._fn("_Z3apiNSt3__16vectorIiNS_9allocatorIiEEEE")])
+            library="lib.so",
+            version="2",
+            functions=[self._fn("_Z3apiNSt3__16vectorIiNS_9allocatorIiEEEE")],
+        )
         kinds = {c.kind for c in compare(old, new).changes}
         assert ChangeKind.STDLIB_IMPLEMENTATION_CHANGED not in kinds
 
@@ -363,11 +399,13 @@ class TestBuildModeFallback:
         # `?api@mystd@@YAXXZ` (mystd:: user namespace) contains `std@@` but not
         # the component `@std@@`, so it must not be read as MSVC STL.
         old = AbiSnapshot(
-            library="lib.dll", version="1",
-            functions=[self._fn("?api@mystd@@YAXXZ")])  # mystd::api()
+            library="lib.dll", version="1", functions=[self._fn("?api@mystd@@YAXXZ")]
+        )  # mystd::api()
         new = AbiSnapshot(
-            library="lib.so", version="2",
-            functions=[self._fn("_Z3apiNSt3__16vectorIiNS_9allocatorIiEEEE")])
+            library="lib.so",
+            version="2",
+            functions=[self._fn("_Z3apiNSt3__16vectorIiNS_9allocatorIiEEEE")],
+        )
         kinds = {c.kind for c in compare(old, new).changes}
         assert ChangeKind.STDLIB_IMPLEMENTATION_CHANGED not in kinds
 
@@ -375,15 +413,19 @@ class TestBuildModeFallback:
         # `mystd::api()` demangles to a name that *contains* the substring
         # "std::" but is NOT the std namespace; it must not be read as libstdc++.
         from abicheck.demangle import demangle
+
         if demangle("_ZN5mystd3apiEv") is None:
             import pytest
+
             pytest.skip("no C++ demangler available")
         old = AbiSnapshot(
-            library="lib.so", version="1",
-            functions=[self._fn("_ZN5mystd3apiEv")])  # mystd::api()
+            library="lib.so", version="1", functions=[self._fn("_ZN5mystd3apiEv")]
+        )  # mystd::api()
         new = AbiSnapshot(
-            library="lib.so", version="2",
-            functions=[self._fn("_Z3apiNSt3__16vectorIiNS_9allocatorIiEEEE")])
+            library="lib.so",
+            version="2",
+            functions=[self._fn("_Z3apiNSt3__16vectorIiNS_9allocatorIiEEEE")],
+        )
         kinds = {c.kind for c in compare(old, new).changes}
         assert ChangeKind.STDLIB_IMPLEMENTATION_CHANGED not in kinds
 
@@ -392,15 +434,19 @@ class TestBuildModeFallback:
         # not the global std::; the demangle fallback must not read it as
         # libstdc++ (Codex #345).
         from abicheck.demangle import demangle
+
         if demangle("_ZN5boost3std3apiEv") is None:
             import pytest
+
             pytest.skip("no C++ demangler available")
         old = AbiSnapshot(
-            library="lib.so", version="1",
-            functions=[self._fn("_ZN5boost3std3apiEv")])  # boost::std::api()
+            library="lib.so", version="1", functions=[self._fn("_ZN5boost3std3apiEv")]
+        )  # boost::std::api()
         new = AbiSnapshot(
-            library="lib.so", version="2",
-            functions=[self._fn("_Z3apiNSt3__16vectorIiNS_9allocatorIiEEEE")])
+            library="lib.so",
+            version="2",
+            functions=[self._fn("_Z3apiNSt3__16vectorIiNS_9allocatorIiEEEE")],
+        )
         kinds = {c.kind for c in compare(old, new).changes}
         assert ChangeKind.STDLIB_IMPLEMENTATION_CHANGED not in kinds
 
@@ -418,19 +464,46 @@ class TestBuildModeFallback:
         kinds = {c.kind for c in compare(old, new).changes}
         assert ChangeKind.STDLIB_IMPLEMENTATION_CHANGED in kinds
 
+    def test_libcxx_capture_missing_abi_version_recovered_from_symbols(self) -> None:
+        # Both sides captured as libc++ but with no libcpp_abi_version. The
+        # version is recoverable from the std::__1 / __2 manglings, so the
+        # partial capture must not short-circuit the symbol fallback and the
+        # ABI-version change must still be reported (Codex review #345).
+        self._require_demangler()
+        old = AbiSnapshot(
+            library="lib.so",
+            version="1",
+            functions=[self._fn("_Z3apiNSt3__16vectorIiNS_9allocatorIiEEEE")],
+            build_mode=BuildMode(stdlib=StdlibFamily.LIBCXX),
+        )
+        new = AbiSnapshot(
+            library="lib.so",
+            version="2",
+            functions=[self._fn("_Z3apiNSt3__26vectorIiNS_9allocatorIiEEEE")],
+            build_mode=BuildMode(stdlib=StdlibFamily.LIBCXX),
+        )
+        kinds = {c.kind for c in compare(old, new).changes}
+        assert ChangeKind.LIBCPP_ABI_VERSION_CHANGED in kinds
+        # Same family both sides → no implementation-change finding.
+        assert ChangeKind.STDLIB_IMPLEMENTATION_CHANGED not in kinds
+
     def test_partial_capture_enriched_from_symbols(self) -> None:
         # A captured BuildMode whose stdlib is still UNKNOWN (e.g. the producer
         # named the compiler but not the runtime) must not short-circuit the
         # symbol fallback: the mangled evidence still recovers the family
         # (Codex review #345).
         old = AbiSnapshot(
-            library="lib.so", version="1",
+            library="lib.so",
+            version="1",
             functions=[self._fn("_ZNSt6vectorIiSaIiEE9push_backEi")],  # libstdc++
             build_mode=BuildMode(stdlib=StdlibFamily.UNKNOWN),
         )
         new = AbiSnapshot(
-            library="lib.so", version="2",
-            functions=[self._fn("_ZNSt3__16vectorIiNS_9allocatorIiEEEE9push_backEOi")],  # libc++
+            library="lib.so",
+            version="2",
+            functions=[
+                self._fn("_ZNSt3__16vectorIiNS_9allocatorIiEEEE9push_backEOi")
+            ],  # libc++
             build_mode=BuildMode(stdlib=StdlibFamily.UNKNOWN),
         )
         kinds = {c.kind for c in compare(old, new).changes}

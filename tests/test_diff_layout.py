@@ -99,6 +99,32 @@ class TestLayoutDescriptorDiff:
         assert ChangeKind.TRIVIALLY_COPYABLE_LOST in _kinds(old, new)
         assert ChangeKind.TRIVIALLY_COPYABLE_LOST in BREAKING_KINDS
 
+    def test_layout_finding_gets_affected_symbols(self) -> None:
+        # A layout-only BREAKING finding on a type used by an exported by-value
+        # API must carry affected_symbols, so app-compat filtering doesn't mark
+        # a consumer of take(A) as unaffected (Codex review #345).
+        from abicheck.model import Function, Param, ParamKind
+
+        def snap(version: str, trivially_copyable: bool) -> AbiSnapshot:
+            fn = Function(
+                name="take",
+                mangled="_Z4take1A",
+                return_type="void",
+                params=[Param(name="a", type="A", kind=ParamKind.VALUE)],
+            )
+            return AbiSnapshot(
+                library="lib.so",
+                version=version,
+                functions=[fn],
+                types=[_rec(name="A", is_trivially_copyable=trivially_copyable)],
+            )
+
+        changes = compare(snap("1", True), snap("2", False)).changes
+        tc = [c for c in changes if c.kind == ChangeKind.TRIVIALLY_COPYABLE_LOST]
+        assert tc, "expected a TRIVIALLY_COPYABLE_LOST finding"
+        assert tc[0].affected_symbols, "layout finding must carry affected_symbols"
+        assert any("take" in s for s in tc[0].affected_symbols)
+
     def test_trivially_copyable_unknown_old_not_flagged(self) -> None:
         # Tri-state guard: old side unknown (None) → no finding.
         old = _snap("1", types=[_rec(is_trivially_copyable=None)])

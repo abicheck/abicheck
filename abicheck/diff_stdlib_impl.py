@@ -47,6 +47,7 @@ conservative:
   attribution of the specific embedded ``std::`` field is deferred to the
   layout-closure work.
 """
+
 from __future__ import annotations
 
 import re
@@ -122,6 +123,21 @@ def _layout_evidence_present(snap: AbiSnapshot) -> bool:
     return any(rec.size_bits is not None for rec in snap.types)
 
 
+def _capture_is_complete(bm: BuildMode) -> bool:
+    """Return True when a captured :class:`BuildMode` needs no symbol enrichment.
+
+    A capture is complete once its ``stdlib`` family is resolved — except libc++,
+    which also needs its ``libcpp_abi_version`` to drive ``LIBCPP_ABI_VERSION_CHANGED``;
+    a libc++ capture missing that version is partial and is enriched from the
+    ``std::__1`` / ``__2`` evidence in the exported symbols (Codex review #345).
+    """
+    if bm.stdlib is StdlibFamily.UNKNOWN:
+        return False
+    if bm.stdlib is StdlibFamily.LIBCXX and bm.libcpp_abi_version is None:
+        return False
+    return True
+
+
 def _effective_build_mode(snap: AbiSnapshot) -> BuildMode | None:
     """Return the snapshot's :class:`BuildMode`, deriving it on the fly when the
     captured field is absent.
@@ -136,17 +152,21 @@ def _effective_build_mode(snap: AbiSnapshot) -> BuildMode | None:
     there are no mangled symbols at all to reason from (then the detector stays
     silent rather than guessing).
 
-    A *captured* build-mode whose ``stdlib`` is still ``UNKNOWN`` (a partial
-    capture — e.g. the producer string named the compiler but not the runtime)
-    is enriched from the symbols too, rather than short-circuiting on the mere
-    presence of the field (Codex review #345). Enrichment works on a copy so a
-    shared captured ``BuildMode`` is never mutated in place.
+    A *partial* captured build-mode is enriched from the symbols too, rather than
+    short-circuiting on the mere presence of the field (Codex review #345): that
+    covers a capture whose ``stdlib`` is still ``UNKNOWN`` (the producer string
+    named the compiler but not the runtime) **and** a libc++ capture that is
+    missing its ``libcpp_abi_version`` (recoverable from ``std::__1`` / ``__2``
+    in the exported manglings). Enrichment works on a copy so a shared captured
+    ``BuildMode`` is never mutated in place.
     """
     import dataclasses
 
     captured = snap.build_mode
-    # A fully-resolved capture wins outright — symbols can't improve on it.
-    if captured is not None and captured.stdlib is not StdlibFamily.UNKNOWN:
+    # A fully-resolved capture wins outright — symbols can't improve on it. A
+    # libc++ capture missing its ABI version is still partial (the version is
+    # recoverable from the symbols), so it does NOT count as resolved here.
+    if captured is not None and _capture_is_complete(captured):
         return captured
     mangled = [f.mangled for f in snap.functions if getattr(f, "mangled", None)]
     mangled += [v.mangled for v in snap.variables if getattr(v, "mangled", None)]
@@ -175,10 +195,17 @@ def _effective_build_mode(snap: AbiSnapshot) -> BuildMode | None:
         # ``std`` namespace as the *component* ``@std@@`` — the leading ``@`` is
         # the name-separator, so a user namespace like ``mystd@@`` (no leading
         # ``@`` before ``std``) does NOT match (Codex review #345).
-        s.startswith("?") and "@std@@" in s for s in mangled
+        s.startswith("?") and "@std@@" in s
+        for s in mangled
     ):
         bm.stdlib = StdlibFamily.MSVC_STL
-    if bm.stdlib is StdlibFamily.UNKNOWN:
+    # Run the demangle pass when the family is unknown, OR when it is libc++ but
+    # the ABI version is still missing (a partial capture we can complete from the
+    # ``std::__N`` namespace digit) — Codex review #345.
+    _libcxx_needs_version = (
+        bm.stdlib is StdlibFamily.LIBCXX and bm.libcpp_abi_version is None
+    )
+    if bm.stdlib is StdlibFamily.UNKNOWN or _libcxx_needs_version:
         # Stdlib evidence carried *inside* ordinary user-API manglings (e.g.
         # ``void api(std::vector<int>)``) isn't recognized by the shared
         # prefix-anchored detector. A substring match on the mangled name can't
@@ -194,6 +221,7 @@ def _effective_build_mode(snap: AbiSnapshot) -> BuildMode | None:
         # demangled one ``c++filt`` subprocess per symbol; degrades to staying
         # quiet when no demangler is available (Codex reviews on #345).
         from .demangle import demangle_batch
+
         cpp = [s for s in mangled if s.startswith("_Z")]
         demangled = demangle_batch(cpp)
         for sym in cpp:
@@ -208,7 +236,10 @@ def _effective_build_mode(snap: AbiSnapshot) -> BuildMode | None:
                 if m.group(1) is None and bm.libcpp_abi_version is None:
                     bm.libcpp_abi_version = int(m.group(2))
                 break
-            if _STD_NAMESPACE_TOKEN.search(d):
+            # Only infer libstdc++ from a bare std:: token when the family is not
+            # already known — never let it override a resolved libc++ capture
+            # whose version we were merely completing.
+            if bm.stdlib is StdlibFamily.UNKNOWN and _STD_NAMESPACE_TOKEN.search(d):
                 bm.stdlib = StdlibFamily.LIBSTDCXX
                 break
     return bm
@@ -269,30 +300,34 @@ def _diff_stdlib_implementation(old: AbiSnapshot, new: AbiSnapshot) -> list[Chan
                 "divergence — pin the implementation or rebuild against the "
                 "matching runtime to be safe."
             )
-        changes.append(Change(
-            kind=ChangeKind.STDLIB_IMPLEMENTATION_CHANGED,
-            symbol=_STDLIB_IMPL_MARKER,
-            description=desc,
-            old_value=old_bm.stdlib.value,
-            new_value=new_bm.stdlib.value,
-        ))
+        changes.append(
+            Change(
+                kind=ChangeKind.STDLIB_IMPLEMENTATION_CHANGED,
+                symbol=_STDLIB_IMPL_MARKER,
+                description=desc,
+                old_value=old_bm.stdlib.value,
+                new_value=new_bm.stdlib.value,
+            )
+        )
 
     # ── libc++ ABI version changed (_LIBCPP_ABI_VERSION 1 ↔ 2) ───────────────
     old_v = old_bm.libcpp_abi_version
     new_v = new_bm.libcpp_abi_version
     if old_v is not None and new_v is not None and old_v != new_v:
-        changes.append(Change(
-            kind=ChangeKind.LIBCPP_ABI_VERSION_CHANGED,
-            symbol=_STDLIB_IMPL_MARKER,
-            description=(
-                f"libc++ ABI version changed ({old_v} → {new_v}). libc++ selects "
-                "incompatible internal layouts for std:: types via an inline "
-                f"namespace (std::__{old_v} vs std::__{new_v}); types embedding "
-                "them by value are laid out differently. Rebuild consumers against "
-                "the matching libc++ ABI version."
-            ),
-            old_value=str(old_v),
-            new_value=str(new_v),
-        ))
+        changes.append(
+            Change(
+                kind=ChangeKind.LIBCPP_ABI_VERSION_CHANGED,
+                symbol=_STDLIB_IMPL_MARKER,
+                description=(
+                    f"libc++ ABI version changed ({old_v} → {new_v}). libc++ selects "
+                    "incompatible internal layouts for std:: types via an inline "
+                    f"namespace (std::__{old_v} vs std::__{new_v}); types embedding "
+                    "them by value are laid out differently. Rebuild consumers against "
+                    "the matching libc++ ABI version."
+                ),
+                old_value=str(old_v),
+                new_value=str(new_v),
+            )
+        )
 
     return changes
