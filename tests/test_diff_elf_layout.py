@@ -32,8 +32,10 @@ import pytest
 from abicheck.checker import Verdict, compare
 from abicheck.checker_policy import ChangeKind
 from abicheck.diff_elf_layout import (
+    _class_name,
     _diff_elf_layout,
     _inheritance_shape,
+    _sized_rtti,
     _vtable_slots,
 )
 from abicheck.elf_metadata import ElfMetadata, ElfSymbol, SymbolType
@@ -78,6 +80,27 @@ class TestHelpers:
         # 2 words on ILP32 = 8 bytes → still "no base"
         assert "no base" in _inheritance_shape(8, 4)
         assert "single base" in _inheritance_shape(12, 4)
+
+    def test_slot_and_shape_fall_back_on_bad_pointer_size(self) -> None:
+        # A zero/negative pointer width must not divide-by-zero; fall back to 8.
+        assert _vtable_slots(48, 0) == 4
+        assert _vtable_slots(48, -1) == 4
+        assert "no base" in _inheritance_shape(16, 0)
+
+    def test_class_name_demangles_vtable_symbol(self) -> None:
+        assert _class_name("_ZTV6Widget") == "Widget"
+
+    def test_class_name_without_for_marker_returns_demangled(self) -> None:
+        # A demanglable symbol that is not a "X for Y" form → return as demangled.
+        assert _class_name("_Z3foov") == "foo()"
+
+    def test_class_name_non_mangled_returns_input(self) -> None:
+        # Non-C++ name: demangle yields nothing → fall back to the raw symbol.
+        assert _class_name("plain_c_symbol") == "plain_c_symbol"
+
+    def test_sized_rtti_without_elf_is_empty(self) -> None:
+        snap = AbiSnapshot(library="lib.so", version="1")  # elf is None
+        assert _sized_rtti(snap, "_ZTV", skip_runtime=True) == {}
 
 
 # ---------------------------------------------------------------------------
