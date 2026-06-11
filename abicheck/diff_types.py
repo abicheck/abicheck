@@ -229,6 +229,12 @@ def _diff_overload_additions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]
 
     changes: list[Change] = []
     for key, olds in old_by_key.items():
+        if key.endswith("{ctor}") or key.endswith("{dtor}"):
+            # Constructors/destructors can't be named or have their address
+            # taken (`&C::C` is invalid), so the address-of-ambiguity rationale
+            # doesn't apply; adding a constructor overload stays a compatible
+            # FUNC_ADDED. (Destructors can't be overloaded at all.)
+            continue
         if len(olds) != 1:
             continue  # already overloaded → KDE allows adding further overloads
         original = olds[0]

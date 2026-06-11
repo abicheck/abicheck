@@ -377,6 +377,19 @@ class TestOverloadAdded:
         result = compare(old, new)
         assert ChangeKind.OVERLOAD_ADDED not in _kinds(result)
 
+    def test_added_constructor_overload_is_not_overload_added(self):
+        """Constructors can't be named or address-taken (`&C::C` is invalid), so
+        adding a constructor overload is a compatible FUNC_ADDED, not the
+        address-of-ambiguity OVERLOAD_ADDED."""
+        old = _snap(functions=[_method("C", "_ZN1CC1Ev")])  # C::C()
+        new = _snap(functions=[
+            _method("C", "_ZN1CC1Ev"),
+            _method("C", "_ZN1CC1Ei", params=[Param(name="x", type="int")]),  # C::C(int)
+        ])
+        result = compare(old, new)
+        assert ChangeKind.OVERLOAD_ADDED not in _kinds(result)
+        assert ChangeKind.FUNC_ADDED in _kinds(result)
+
     def test_same_leaf_different_scope_is_not_overload(self):
         """Regression for the castxml/header path: ``Function.name`` is recorded
         without namespace/class scope, so ``A::size`` and a newly added
