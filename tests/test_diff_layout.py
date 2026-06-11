@@ -169,10 +169,36 @@ class TestLayoutDescriptorDiff:
 
     def test_stdlib_record_not_flagged(self) -> None:
         # Toolchain-owned std:: records are excluded from public-surface
-        # reasoning, so their layout churn does not produce a finding.
-        old = _snap("1", types=[_rec(name="std::__1::thing", vptr_offset_bits=None)])
-        new = _snap("2", types=[_rec(name="std::__1::thing", vptr_offset_bits=0)])
+        # reasoning for a normal library, so their layout churn (here a real
+        # vtable/vptr transition) does not produce a finding.
+        old = _snap(
+            "1", types=[_rec(name="std::__1::thing", vtable=[], vptr_offset_bits=None)]
+        )
+        new = _snap(
+            "2",
+            types=[
+                _rec(name="std::__1::thing", vtable=["_ZN1A3fooEv"], vptr_offset_bits=0)
+            ],
+        )
         assert ChangeKind.VPTR_INTRODUCED not in _kinds(old, new)
+
+    def test_stdlib_record_flagged_when_comparing_the_runtime_itself(self) -> None:
+        # When abicheck compares the C++ runtime to itself (libstdc++/libc++
+        # SONAME), the std:: filter is OFF — the runtime's own std:: layout
+        # changes ARE the surface under test and must be reported (Codex #345).
+        old = AbiSnapshot(
+            library="libstdc++.so.6",
+            version="1",
+            types=[_rec(name="std::__1::thing", vtable=[], vptr_offset_bits=None)],
+        )
+        new = AbiSnapshot(
+            library="libstdc++.so.6",
+            version="2",
+            types=[
+                _rec(name="std::__1::thing", vtable=["_ZN1A3fooEv"], vptr_offset_bits=0)
+            ],
+        )
+        assert ChangeKind.VPTR_INTRODUCED in _kinds(old, new)
 
 
 class TestStdlibEmbeddingAttribution:

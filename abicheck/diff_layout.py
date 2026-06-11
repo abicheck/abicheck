@@ -57,18 +57,22 @@ if TYPE_CHECKING:
     from .model import AbiSnapshot, RecordType
 
 
-def _index(snap: AbiSnapshot) -> dict[str, RecordType]:
+def _index(snap: AbiSnapshot, *, exclude_stdlib: bool) -> dict[str, RecordType]:
     """Index a snapshot's record types by name, skipping non-ABI-surface types.
 
     Standard-library / compiler-internal records (``std::``, ``__gnu_cxx::`` …)
     are toolchain-owned and excluded from public-surface reasoning, mirroring the
-    other type detectors.
+    other type detectors. ``exclude_stdlib`` is threaded from
+    :func:`abicheck.model.stdlib_namespaces_excluded`: when abicheck compares the
+    C++ runtime *itself* (e.g. ``libstdc++.so`` / ``libc++.so``) that toggle is
+    False, so the runtime's own ``std::`` records stay in the surface and their
+    layout changes are reported (Codex review #345).
     """
     from .model import is_non_abi_surface_type
 
     out: dict[str, RecordType] = {}
     for rec in snap.types:
-        if is_non_abi_surface_type(rec.name):
+        if is_non_abi_surface_type(rec.name, exclude_stdlib_namespaces=exclude_stdlib):
             continue
         out[rec.name] = rec
     return out
@@ -97,9 +101,14 @@ def _diff_layout_descriptor(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     Each comparison is tri-state guarded (both sides must carry the evidence),
     so the detector is inert on snapshots without the layout descriptor.
     """
+    from .model import stdlib_namespaces_excluded
+
     changes: list[Change] = []
-    old_idx = _index(old)
-    new_idx = _index(new)
+    # Respect the runtime-self-comparison toggle: when comparing libstdc++/libc++
+    # to itself this is False, keeping the runtime's own std:: records in surface.
+    excl = stdlib_namespaces_excluded(old, new)
+    old_idx = _index(old, exclude_stdlib=excl)
+    new_idx = _index(new, exclude_stdlib=excl)
 
     for name, new_rec in new_idx.items():
         old_rec = old_idx.get(name)
