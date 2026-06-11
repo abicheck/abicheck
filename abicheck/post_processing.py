@@ -279,7 +279,9 @@ class FilterNonPublicSurface:
             if force_public and _change_matches_symbols(c, force_public):
                 kept.append(c)
                 continue
-            in_surface, reason = classify_change_surface(c, surf_old, surf_new, unions=unions)
+            in_surface, reason = classify_change_surface(
+                c, surf_old, surf_new, unions=unions
+            )
             if in_surface:
                 kept.append(c)
             else:
@@ -381,6 +383,19 @@ class EnrichAffectedSymbols:
         from .diff_filtering import _enrich_affected_symbols
 
         _enrich_affected_symbols(changes, ctx.old)
+        return changes
+
+
+class AttributeStdlibEmbedding:
+    """Attribute an unattributed owner size/offset change to an embedded ``std::``
+    member by value (the layout-closure case the redundancy filter can't link)."""
+
+    name = "attribute_stdlib_embedding"
+
+    def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:
+        from .diff_filtering import _attribute_stdlib_embedding
+
+        _attribute_stdlib_embedding(changes, ctx.new)
         return changes
 
 
@@ -489,8 +504,7 @@ class DetectCppPatterns:
             to_keep: list[Change] = []
             for ch in changes:
                 if ch.kind == ChangeKind.FUNC_REMOVED and any(
-                    _matches_suppression_key(ch.symbol, key)
-                    for key in suppressed_keys
+                    _matches_suppression_key(ch.symbol, key) for key in suppressed_keys
                 ):
                     ctx.suppressed.append(ch)
                     continue
@@ -565,11 +579,11 @@ class DetectNamespacePatterns:
             detect_namespace_patterns,
         )
 
-        namespaces = (
-            self._experimental_namespaces or DEFAULT_EXPERIMENTAL_NAMESPACES
-        )
+        namespaces = self._experimental_namespaces or DEFAULT_EXPERIMENTAL_NAMESPACES
         new_findings = detect_namespace_patterns(
-            ctx.old, ctx.new, experimental_namespaces=namespaces,
+            ctx.old,
+            ctx.new,
+            experimental_namespaces=namespaces,
         )
         if not new_findings:
             return changes
@@ -812,17 +826,13 @@ class EscalateFrozenNamespaceViolations:
                 # overlay that synthesised a finding with the field set).
                 return
             pat = (
-                _match(c.symbol)
-                or _match(c.caused_by_type)
-                or _match(c.qualified_name)
+                _match(c.symbol) or _match(c.caused_by_type) or _match(c.qualified_name)
             )
             if pat is None:
                 return
             c.frozen_namespace_violation = pat
             if not c.description.startswith("[frozen-namespace violation"):
-                c.description = (
-                    f"[frozen-namespace violation: {pat}] " + c.description
-                )
+                c.description = f"[frozen-namespace violation: {pat}] " + c.description
 
         for c in changes:
             _tag(c)
@@ -896,6 +906,7 @@ DEFAULT_PIPELINE = PostProcessingPipeline(
         SuppressRenamedPairs(),
         FilterRedundant(),
         EnrichAffectedSymbols(),
+        AttributeStdlibEmbedding(),
         DetectInternalLeaks(),
         # Must run immediately after DetectInternalLeaks: it consumes that step's
         # leak verdict to demote confirmed-unreachable internal-namespace churn.
