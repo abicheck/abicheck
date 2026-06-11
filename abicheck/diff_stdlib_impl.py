@@ -61,25 +61,17 @@ if TYPE_CHECKING:
     from .build_mode import BuildMode
     from .model import AbiSnapshot
 
-#: libc++'s ``std::__1`` / ``std::__2`` inline namespace, as it appears mangled
-#: (``St3__1`` / ``St3__2``). Unlike the shared prefix-anchored detector, this is
-#: searched as a *substring* so it is recognized inside ordinary user-API
-#: manglings too — e.g. ``void api(std::vector<int>)`` mangles as
-#: ``_Z3apiNSt3__16vector...`` under libc++, where the marker is not at the start
-#: of the symbol (Codex review on #345).
-_LIBCXX_INLINE_NS_SUBSTR = re.compile(r"St\d+__([12])")
-
 #: Real ``std::`` namespace token in a *demangled* name. The negative lookbehind
 #: rejects a match inside a user identifier such as ``mystd::`` (Codex #345) — it
 #: only fires when ``std::`` is preceded by a non-identifier character or starts
 #: the string.
 _STD_NAMESPACE_TOKEN = re.compile(r"(?<![A-Za-z0-9_])std::")
 
-#: libc++'s *versioned* inline namespace in a demangled name — ``std::__1`` /
+#: libc++'s *versioned* inline namespace in a *demangled* name — ``std::__1`` /
 #: ``std::__2`` and Android NDK's ``std::__ndk1`` (Codex #345). Distinct from
-#: libstdc++'s ``std::__cxx11`` (which does not match), so a demangled name
-#: carrying this token is libc++, not libstdc++.
-_LIBCXX_DEMANGLED_NS = re.compile(r"(?<![A-Za-z0-9_])std::__(?:ndk)?\d")
+#: libstdc++'s ``std::__cxx11`` (which does not match). ``group(1)`` is ``"ndk"``
+#: for the Android form (no standard ABI version); ``group(2)`` is the digit.
+_LIBCXX_DEMANGLED_NS = re.compile(r"(?<![A-Za-z0-9_])std::__(ndk)?(\d)")
 
 #: Marker symbol used for the synthetic build-mode findings (they are not tied
 #: to a single exported symbol). Mirrors ``__glibcxx_dual_abi`` in diff_platform.
@@ -151,43 +143,30 @@ def _effective_build_mode(snap: AbiSnapshot) -> BuildMode | None:
     if not mangled:
         return None
     bm = build_mode_from_signals(mangled_symbols=mangled)
-    if bm.stdlib is StdlibFamily.UNKNOWN:
-        # The shared detector only recognizes the libc++ inline namespace as a
-        # symbol *prefix* (anchored match), so it misses it inside ordinary
-        # user-API manglings such as ``void api(std::vector<int>)`` →
-        # ``_Z3apiNSt3__16vector...``. Recover it as a substring (Codex #345).
-        # libstdc++'s C++11 dual-ABI tag is already substring-detected upstream.
-        for sym in mangled:
-            m = _LIBCXX_INLINE_NS_SUBSTR.search(sym)
-            if m:
-                bm.stdlib = StdlibFamily.LIBCXX
-                if bm.libcpp_abi_version is None:
-                    bm.libcpp_abi_version = int(m.group(1))
-                break
     if bm.stdlib is StdlibFamily.UNKNOWN and any(
         # MSVC STL: COFF-decorated C++ symbols (``?...@@``) are non-Itanium, so
         # the shared ``_Z``-only detector skips them entirely. MSVC encodes the
-        # ``std`` namespace as ``std@@`` in the mangled name (Codex review #345).
-        sym.startswith("?") and "std@@" in sym for sym in mangled
+        # ``std`` namespace as the *component* ``@std@@`` — the leading ``@`` is
+        # the name-separator, so a user namespace like ``mystd@@`` (no leading
+        # ``@`` before ``std``) does NOT match (Codex review #345).
+        s.startswith("?") and "@std@@" in s for s in mangled
     ):
         bm.stdlib = StdlibFamily.MSVC_STL
     if bm.stdlib is StdlibFamily.UNKNOWN:
-        # Demangle-based last resort. A parameter type like ``std::vector<int>``
-        # mangles with the Itanium ``St`` substitution but, under libstdc++,
-        # carries no ``__cxx11`` tag and no libc++ ``__N`` inline namespace, so a
-        # substring heuristic cannot separate it from an identifier that merely
-        # contains "St" (e.g. a user type ``St3Db``). Demangling parses the
-        # substitution correctly:
-        #   * libc++  → a versioned namespace ``std::__1`` / ``std::__2`` /
-        #     Android ``std::__ndk1`` (the cheap ``St\d__[12]`` substring above
-        #     misses the non-numeric NDK form, so catch it here — Codex #345);
+        # Stdlib evidence carried *inside* ordinary user-API manglings (e.g.
+        # ``void api(std::vector<int>)``) isn't recognized by the shared
+        # prefix-anchored detector. A substring match on the mangled name can't
+        # separate the Itanium ``St`` std substitution from a user identifier
+        # that merely contains those bytes (a user type mangled ``6St3__1`` is
+        # NOT libc++), so we *demangle* and read the parsed namespace:
+        #   * libc++   → a versioned namespace ``std::__1`` / ``std::__2`` /
+        #     Android ``std::__ndk1`` (the ABI version comes from the digit);
         #   * libstdc++ → a real ``std::`` token without that versioned namespace;
         #   * a user type → no ``std::`` token at all.
-        # Reuses the demangler already used across the diff core; degrades to
-        # empty (→ stay quiet) when no demangler is available. Uses the *batch*
-        # API so that, without the in-process ``cxxfilt`` module, a large C++
-        # library is not demangled one ``c++filt`` subprocess per symbol
-        # (Codex review #345).
+        # Uses the *batched* demangler already used across the diff core so that,
+        # without the in-process ``cxxfilt`` module, a large C++ library is not
+        # demangled one ``c++filt`` subprocess per symbol; degrades to staying
+        # quiet when no demangler is available (Codex reviews on #345).
         from .demangle import demangle_batch
         cpp = [s for s in mangled if s.startswith("_Z")]
         demangled = demangle_batch(cpp)
@@ -195,8 +174,13 @@ def _effective_build_mode(snap: AbiSnapshot) -> BuildMode | None:
             d = demangled.get(sym)
             if not d:
                 continue
-            if _LIBCXX_DEMANGLED_NS.search(d):
+            m = _LIBCXX_DEMANGLED_NS.search(d)
+            if m:
                 bm.stdlib = StdlibFamily.LIBCXX
+                # Numeric ABI version (std::__1 / __2); Android ``__ndkN`` has no
+                # standard libcpp_abi_version, so leave it unset there.
+                if m.group(1) is None and bm.libcpp_abi_version is None:
+                    bm.libcpp_abi_version = int(m.group(2))
                 break
             if _STD_NAMESPACE_TOKEN.search(d):
                 bm.stdlib = StdlibFamily.LIBSTDCXX

@@ -330,6 +330,34 @@ class TestBuildModeFallback:
         kinds = {c.kind for c in compare(old, new).changes}
         assert ChangeKind.STDLIB_IMPLEMENTATION_CHANGED in kinds
 
+    def test_user_type_resembling_libcxx_namespace_not_flagged(self) -> None:
+        # A user type mangled `6St3__1` contains the bytes `St3__1` but is not
+        # libc++ (it demangles to `api(St3__1)`, no std::). Must not be flagged.
+        from abicheck.demangle import demangle
+        if demangle("_Z3apiSt6vectorIiSaIiEE") is None:
+            import pytest
+            pytest.skip("no C++ demangler available")
+        old = AbiSnapshot(
+            library="lib.so", version="1",
+            functions=[self._fn("_Z3api6St3__1")])  # user type "St3__1"
+        new = AbiSnapshot(
+            library="lib.so", version="2",
+            functions=[self._fn("_Z3apiNSt3__16vectorIiNS_9allocatorIiEEEE")])
+        kinds = {c.kind for c in compare(old, new).changes}
+        assert ChangeKind.STDLIB_IMPLEMENTATION_CHANGED not in kinds
+
+    def test_user_namespace_resembling_msvc_std_not_flagged(self) -> None:
+        # `?api@mystd@@YAXXZ` (mystd:: user namespace) contains `std@@` but not
+        # the component `@std@@`, so it must not be read as MSVC STL.
+        old = AbiSnapshot(
+            library="lib.dll", version="1",
+            functions=[self._fn("?api@mystd@@YAXXZ")])  # mystd::api()
+        new = AbiSnapshot(
+            library="lib.so", version="2",
+            functions=[self._fn("_Z3apiNSt3__16vectorIiNS_9allocatorIiEEEE")])
+        kinds = {c.kind for c in compare(old, new).changes}
+        assert ChangeKind.STDLIB_IMPLEMENTATION_CHANGED not in kinds
+
     def test_user_namespace_resembling_std_not_flagged(self) -> None:
         # `mystd::api()` demangles to a name that *contains* the substring
         # "std::" but is NOT the std namespace; it must not be read as libstdc++.
