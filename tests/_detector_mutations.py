@@ -203,11 +203,44 @@ def _m_method_became_pure(tag: int):
             ChangeKind.FUNC_VIRTUAL_BECAME_PURE, True)
 
 
+def _m_virtual_method_added(tag: int):
+    """A new virtual method on a pre-existing class whose vtable array does not
+    record the growth (DWARF/symbol-only blind spot) → VIRTUAL_METHOD_ADDED."""
+    cls_name = f"Cv{tag}"
+    n = len(cls_name)  # Itanium source-name length prefix (valid for multi-digit tags)
+    cls = RecordType(name=cls_name, kind="class", size_bits=64, vtable=[])
+    keep = Function(name=f"{cls_name}::foo", mangled=f"_ZN{n}{cls_name}3fooEv", return_type="void",
+                    visibility=Visibility.PUBLIC, access=AccessLevel.PUBLIC, is_virtual=True)
+    new = Function(name=f"{cls_name}::bar", mangled=f"_ZN{n}{cls_name}3barEv", return_type="void",
+                   visibility=Visibility.PUBLIC, access=AccessLevel.PUBLIC, is_virtual=True)
+    return ({"functions": [keep], "types": [cls]},
+            {"functions": [keep, new], "types": [cls]},
+            ChangeKind.VIRTUAL_METHOD_ADDED, True)
+
+
+def _m_overload_added(tag: int):
+    """A second overload added to a previously unique public name → OVERLOAD_ADDED.
+
+    The finding attaches to the *original* declaration, so the reverse edit (a
+    removal of the new overload) surfaces a different symbol — direction
+    symmetry does not hold; see ASYMMETRIC below."""
+    base = f"ov{tag}"
+    n = len(base)  # Itanium source-name length prefix (valid for multi-digit tags)
+    f1 = Function(name=base, mangled=f"_Z{n}{base}i", return_type="void",
+                  params=[Param(name="a", type="int")], visibility=Visibility.PUBLIC)
+    f2 = Function(name=base, mangled=f"_Z{n}{base}d", return_type="void",
+                  params=[Param(name="a", type="double")], visibility=Visibility.PUBLIC)
+    return ({"functions": [f1]}, {"functions": [f1, f2]},
+            ChangeKind.OVERLOAD_ADDED, False)
+
+
 # Mutations whose reverse is legitimately a non-change, so touched-symbol
 # direction-symmetry does NOT hold and must not be asserted: making a virtual
 # method pure is a break, but the reverse (providing a concrete implementation)
-# is ABI-compatible and emits nothing.
-ASYMMETRIC = {"_m_method_became_pure"}
+# is ABI-compatible and emits nothing. Adding an overload flags the original
+# declaration, but the reverse (removing the new overload) touches a different
+# symbol, so it is asymmetric too.
+ASYMMETRIC = {"_m_method_became_pure", "_m_overload_added"}
 
 
 MUTATIONS: list[Mutation] = [
@@ -225,6 +258,8 @@ MUTATIONS: list[Mutation] = [
     _m_base_class_added,
     _m_method_became_virtual,
     _m_method_became_pure,
+    _m_virtual_method_added,
+    _m_overload_added,
 ]
 
 

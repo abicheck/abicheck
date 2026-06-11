@@ -29,6 +29,7 @@ These changes are immediately incompatible with existing compiled binaries.
 | `func_params_changed` | Function parameter types or count changed. The calling convention breaks: arguments are placed in wrong registers/stack slots. |
 | `func_virtual_added` | A non-virtual method became virtual. Changes the vtable layout: any class with this as a base will have a different vtable offset for all methods after this one. |
 | `func_virtual_removed` | A virtual method is no longer virtual. Vtable layout collapses — all vtable offsets shift for derived classes. |
+| `virtual_method_added` | A new virtual method was added to a class that already exists across versions. If the class had no virtuals it gains a hidden vtable pointer (size/offsets shift); if it was already polymorphic the new slot grows/relayouts the vtable. Derived classes and old binaries dispatch through the wrong slots. This is the KDE "do not add a virtual to a non-leaf class" rule, caught even when the snapshot carries no diff-able vtable array (DWARF/symbol-only mode); when the vtable array *does* change, `type_vtable_changed` reports it instead. |
 | `func_static_changed` | A method changed from static to non-static or vice versa. The calling convention changes (implicit `this` pointer added/removed). |
 | `func_cv_changed` | `const` or `volatile` qualifier on `this` changed. This changes the mangled name and the overload set — existing binaries resolve the wrong symbol. |
 | `func_visibility_changed` | Function visibility changed from default to hidden. The symbol disappears from the dynamic symbol table — callers get undefined symbol at link or load time. |
@@ -113,6 +114,25 @@ These changes are immediately incompatible with existing compiled binaries.
 | `vector_abi_changed` | The vector-function (SIMD clone) ABI selection drifted between builds (from vector-ABI flags in DWARF `DW_AT_producer`: `-mveclibabi=` GCC, `-fveclib=` clang, `-vecabi=` Intel-style). Vectorized call variants resolve to a different ABI, breaking callers of the vector entry points. Downgraded to compatible under the `plugin_abi` policy. |
 | `struct_packing_changed` | `__attribute__((packed))` was added or removed. Changes every field offset and the total size — complete struct layout break. |
 | `type_visibility_changed` | RTTI typeinfo or vtable visibility changed. Cross-DSO `dynamic_cast` and exception matching can silently fail. |
+
+### Class Layout Descriptor
+
+Fine-grained layout mechanics that the coarse `struct_size_changed` / `struct_field_offset_changed` detectors under-represent. Read from the optional layout fields on a record (`base_offsets`, `vptr_offset_bits`, `data_size_bits`, `is_standard_layout`, `is_trivially_copyable`). Each is **tri-state guarded** — emitted only when *both* sides carry the relevant evidence — so an evidence-tier downgrade (DWARF-only / symbols-only dump, or an older snapshot) never fabricates a finding.
+
+| Kind | Description |
+|------|-------------|
+| `base_class_offset_changed` | A base-class subobject moved to a different offset within the derived object (e.g. an empty-base optimization was lost, or a member/base was inserted ahead of it) without the base list reordering. The `this`-pointer adjustment for that base and every field after it shifts; old binaries read the wrong addresses. |
+| `vptr_introduced` | A previously non-polymorphic class gained its first virtual function, so the compiler prepends a vtable pointer. `sizeof` grows and every data member's offset shifts by a pointer width; existing binaries that embed or derive from the type are laid out incompatibly. |
+| `trivially_copyable_lost` | A type stopped being trivially copyable (e.g. a user-declared copy/move constructor, destructor, or a non-trivial member was added). Non-trivially-copyable types are passed and returned by value differently (via a hidden reference / not in registers), so the calling convention for any function taking or returning it by value changes. |
+
+### Binary-only C++ Layout (no DWARF / L0)
+
+Recovered from `.dynsym` symbol sizes alone by `diff_elf_layout.py`. The Itanium C++ ABI fixes the on-disk size of a class's vtable (`_ZTV`) and typeinfo (`_ZTI`) objects, so these break detections work on libraries shipped fully stripped of debug info and headers — closing the blind spot a pure exported-symbol dump has (a virtual-method or base-class change need not rename any mangled symbol). Each fires only when the *same* `_ZTV`/`_ZTI` symbol is present on both sides with a different size.
+
+| Kind | Description |
+|------|-------------|
+| `vtable_slot_count_changed` | A polymorphic class's vtable (`_ZTV`) object changed size — it now holds a different number of virtual-function slots (a virtual method was added, removed, or reordered). Existing binaries dispatch through fixed vtable offsets, so they call the wrong slot. The binary-only analogue of `func_virtual_added` / `type_vtable_changed`. |
+| `rtti_inheritance_changed` | A polymorphic class's RTTI typeinfo (`_ZTI`) object changed size, which in the Itanium ABI means its base-class shape changed: no-base (`__class_type_info`) ↔ single-base (`__si_class_type_info`) ↔ multiple/virtual-base (`__vmi_class_type_info`), or the base count differs. Base-class changes shift `this`-pointer adjustments, member offsets, and the vtable. The binary-only analogue of `type_base_changed`. |
 
 ### Pointer / Parameter Level Changes
 
@@ -263,6 +283,9 @@ library from loading in some deployment environments. Manual review is required.
 | `protected_visibility_changed` | An ELF symbol's visibility changed between `STV_DEFAULT` and `STV_PROTECTED`. For data symbols this can break copy relocations; for functions it changes interposition semantics. The symbol remains exported, but consumers using `LD_PRELOAD`-based interposition may stop seeing the override. |
 | `vtable_symbol_identity_changed` | A vtable or `typeinfo` symbol's identity changed (e.g. via a visibility or version-script change) while the class layout is stable. Cross-DSO `dynamic_cast` and exception matching can silently fail because they compare RTTI pointers, not contents. |
 | `overload_set_rerouted` | The overload set under a public name changed in a way where some overloads were removed and others added. Existing call sites that previously resolved to a removed overload now resolve to a different one (often via implicit conversion or a templated catch-all) — compiles, links, runs, but runs **different** code. |
+| `overload_added` | A new overload was added under a public name that previously had exactly one declaration. Old binaries are unaffected (binary compatible), but it is not source-compatible: taking the function's address (`&Foo::bar`) becomes ambiguous and fails to compile, and call sites relying on an implicit conversion may now resolve to the new overload. KDE's C++ binary-compatibility policy lists adding an overload to a non-overloaded function as a change to avoid. Raise to `API_BREAK` under a strict source-compatibility profile. |
+| `func_noexcept_removed` | `noexcept` removed from a function. The function symbol itself is unchanged (Itanium mangling does not encode `noexcept` on the symbol), so existing binaries keep resolving it — not a binary break. But since C++17 `noexcept` is part of the function *type*, so it is encoded in function-pointer and template-argument mangling: a consumer forming `void(*)() noexcept` or passing the function as a non-type template argument no longer compiles, and code relying on the guarantee can hit `std::terminate`. KDE lists this as a change to avoid unless the spec was `noexcept(false)`. Raise to `API_BREAK` under a strict source-compatibility profile. |
+| `type_lost_final` | A class/struct lost the `final` specifier. Deriving from it is now allowed and previously-valid source still compiles, so it is not a source break — but consumers compiled while the class was `final` may have had virtual calls **devirtualized**, and if a later version introduces an overriding subclass those old binaries dispatch statically to the wrong target. KDE lists removing `final` as a change to avoid. Header/castxml-mode only (DWARF/symbol mode carries no `final` info). |
 | `behavioural_default_changed` | A documented default value changed without altering any signature — e.g. the default device selector, the default execution backend, or the default policy. Source compiles and links unchanged; runtime behaviour silently differs. Read from the probe manifest's `defaults:` section. |
 | `relro_weakened` | RELRO protection was weakened (e.g. **full → partial** or **→ none**). The GOT is no longer fully read-only after relocation, widening the GOT-overwrite attack surface. Captured from `PT_GNU_RELRO` + `BIND_NOW`. Not a binary-compatibility break, but a hardening regression. Gate it via the shipped `security` policy (`--policy-file security`). |
 | `pie_disabled` | A position-independent **executable** became non-PIE (`DF_1_PIE` dropped on an `ET_DYN` image), so it loads at a fixed address and ASLR no longer randomizes it. Hardening regression; gate via `--policy-file security`. |
@@ -271,6 +294,11 @@ library from loading in some deployment environments. Manual review is required.
 | `writable_executable_segment` | A loadable segment is now simultaneously writable **and** executable (a W^X violation). Injected code in that page becomes executable. Gate via `--policy-file security`. |
 | `public_api_exposes_stl_by_value` | A public function takes or returns a `std::` type by value across the library boundary. Standard-library layouts differ across toolchains, standard-library versions, and the C++11 dual-ABI setting, so a consumer built with a different STL silently reads the wrong layout. A graph-shaped anti-pattern (ADR-027 A2): reported by `surface-report`, and at diff time only when newly introduced. |
 | `polymorphic_type_non_virtual_dtor` | A type with virtual methods (it has a vtable) is used as a factory return or base class but declares no virtual destructor. Deleting a derived object through a base pointer is undefined behaviour. A graph-shaped anti-pattern (ADR-027 A2): reported by `surface-report`, and at diff time only when newly introduced. |
+| `stdlib_implementation_changed` | The two artifacts were built against **different C++ standard-library implementations** (e.g. libstdc++ vs libc++, or vs the MSVC STL) — a third compatibility axis the standard never guarantees, alongside backward and forward compatibility. Any public type embedding a `std::` container/string **by value** (`class A { std::vector<T> v; };`) is laid out differently across implementations, and inline `std::` code can ODR-conflict. Derived from the normalized `BuildMode` capture; stays silent when build-mode evidence is absent rather than guessing. RISK, never breaking on its own: when an embedded `std::` type's layout actually differs, the type diff emits the concrete size/offset `BREAKING` finding separately. **Recommended action:** pin a single standard-library implementation or rebuild consumers against the matching runtime. |
+| `libcpp_abi_version_changed` | The libc++ ABI version changed (e.g. `_LIBCPP_ABI_VERSION` 1 → 2). libc++ selects incompatible internal layouts for `std::` types via an inline namespace (`std::__1` vs `std::__2`), so types embedding them by value are laid out differently. **Recommended action:** rebuild consumers against the matching libc++ ABI version. |
+| `standard_layout_lost` | A type stopped being standard-layout (e.g. it gained a mix of access specifiers, a base with members, or virtual members). `offsetof` and C interoperability are no longer guaranteed and tail-padding reuse rules change. Tri-state guarded (read from `is_standard_layout`). **Recommended action:** review code relying on the C-compatible layout. |
+| `tail_padding_reuse_changed` | The type's **data size** (the bytes its own members occupy, excluding trailing tail padding — `dsize`) changed while `sizeof` stayed the same. A derived class may reuse a base's tail padding, so this can silently shift a derived layout even though the base's `sizeof` is unchanged. Tri-state guarded (read from `data_size_bits`). |
+| `layout_unverifiable` | A public type's layout could not be verified at the available evidence tier — one side carries a layout descriptor but the other has no size/offset evidence (e.g. a symbols-only or partial dump), so a real layout change cannot be ruled out. Informational and non-escalating. **Recommended action:** rebuild with debug info (or supply headers) to confirm. |
 
 See the [Security-hardening drift](../user-guide/security-hardening.md) guide for how to scan for these across releases.
 
@@ -288,7 +316,6 @@ These changes are safe: they add new capabilities or carry diagnostic informatio
 | `var_added` | A new public global variable was exported. Existing binaries are unaffected. |
 | `type_added` | A new type was added to the public API. Additive — existing consumers are unchanged. |
 | `type_field_added_compatible` | A field was appended to a standard-layout, non-polymorphic struct. Size increases but no existing field offsets shift. Compatible only for types meeting the standard-layout criteria. |
-| `type_lost_final` | A class/struct lost the `final` specifier. Strictly more permissive — deriving from it is now allowed and previously-valid code still compiles. Header/castxml-mode only. |
 
 ### Enum Additions
 
@@ -307,7 +334,6 @@ These changes are safe: they add new capabilities or carry diagnostic informatio
 | Kind | Description |
 |------|-------------|
 | `func_noexcept_added` | `noexcept` added to a function. The Itanium ABI mangling does not change in practice; existing compiled binaries resolve the same symbol. A source-level concern for function-pointer typing only. |
-| `func_noexcept_removed` | `noexcept` removed from a function. Existing binaries continue to resolve the symbol. A source-level exception-specification concern only. |
 
 ### Function Visibility and Inline Attribute Changes
 

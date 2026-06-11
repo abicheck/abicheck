@@ -22,6 +22,7 @@ from collections.abc import Collection
 from .checker_policy import ChangeKind
 from .checker_types import Change
 from .detector_registry import registry
+from .diff_cxx_rules import itanium_qualified_name
 from .diff_symbols import (
     _PUBLIC_VIS,
     _public_functions,
@@ -176,6 +177,85 @@ def _diff_types(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                 description=f"New type: {name}",
             ))
 
+    return changes
+
+
+def _overload_group_key(f: Function) -> str:
+    """A scope-qualified identity for grouping overloads of the same name.
+
+    Two declarations are overloads of one another iff they share this key but
+    have distinct mangled names. The key is the fully scope-qualified name parsed
+    structurally from the *mangled* symbol (no external demangler — see
+    ``itanium_qualified_name``), so it is stable across dumpers and platforms: a
+    castxml/header snapshot records ``Function.name`` without namespace/class
+    scope, so grouping on ``name`` alone would both collapse unrelated
+    declarations like ``A::size`` and ``B::size`` into one group *and* hide a
+    genuine ``A::size`` overload behind an unrelated ``B::size``. When the symbol
+    is not a recognised C++ mangled name, fall back to the *full mangled name*
+    rather than the bare leaf — distinct symbols then land in distinct groups, so
+    an unparseable form can never manufacture a false overload (at worst a
+    genuine overload goes unreported).
+    """
+    return itanium_qualified_name(f.mangled) or f.mangled
+
+
+@registry.detector("overload_additions")
+def _diff_overload_additions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
+    """Detect an overload added to a previously *unique* public name.
+
+    KDE's C++ binary-compatibility policy treats adding an overload to a
+    non-overloaded function as a change to avoid: it is binary-compatible but
+    not source-compatible (`&Foo::bar` becomes ambiguous, and overload
+    resolution at existing call sites may shift). We only fire when a
+    scope-qualified name had exactly one public declaration in the old snapshot,
+    still has that same declaration (same mangled name) in the new snapshot, and
+    gains at least one additional overload — so a plain signature change
+    (remove+add of the same name) does not masquerade as an overload addition,
+    and an unrelated same-leaf declaration in a different scope does not either.
+
+    Grouping is on the scope-qualified key, not the bare display name, so the
+    uniqueness test is per scope: ``A::size`` stays distinct from ``B::size``
+    even when the dumper recorded both as the leaf ``size``.
+    """
+    old_map = _public_functions(old)
+    new_map = _public_functions(new)
+
+    old_by_key: dict[str, list[Function]] = {}
+    for f in old_map.values():
+        old_by_key.setdefault(_overload_group_key(f), []).append(f)
+    new_by_key: dict[str, list[Function]] = {}
+    for f in new_map.values():
+        new_by_key.setdefault(_overload_group_key(f), []).append(f)
+
+    changes: list[Change] = []
+    for key, olds in old_by_key.items():
+        if key.endswith("{ctor}") or key.endswith("{dtor}"):
+            # Constructors/destructors can't be named or have their address
+            # taken (`&C::C` is invalid), so the address-of-ambiguity rationale
+            # doesn't apply; adding a constructor overload stays a compatible
+            # FUNC_ADDED. (Destructors can't be overloaded at all.)
+            continue
+        if len(olds) != 1:
+            continue  # already overloaded → KDE allows adding further overloads
+        original = olds[0]
+        news = new_by_key.get(key, [])
+        if len(news) < 2:
+            continue  # no new overload under this qualified name
+        new_mangleds = {f.mangled for f in news}
+        if original.mangled not in new_mangleds:
+            continue  # original declaration gone → a replacement/rename, not an addition
+        if not (new_mangleds - {original.mangled}):
+            continue  # nothing genuinely new
+        changes.append(Change(
+            kind=ChangeKind.OVERLOAD_ADDED,
+            symbol=original.mangled,
+            description=(
+                f"Overload added to previously non-overloaded function: {key} "
+                f"— `&{key}` becomes ambiguous and overload resolution may change"
+            ),
+            old_value="1 overload",
+            new_value=f"{len(news)} overloads",
+        ))
     return changes
 
 

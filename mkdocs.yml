@@ -65,6 +65,7 @@ nav:
     - Platforms: reference/platforms.md
     - Tool Comparison: reference/tool-comparison.md
     - ABICC Format Compliance: reference/abicc-format-compliance.md
+    - SYCL test/abi Coverage: reference/sycl-test-abi-coverage.md
   - ABI/API Handling & Recommendations:
     - Overview: concepts/abi-api-handling.md
     - Learning Series:

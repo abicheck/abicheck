@@ -32,7 +32,9 @@ from abicheck.model import AbiSnapshot, Function, RecordType, TypeField, Visibil
 from abicheck.surface import REASON_PRIVATE_INTERNAL_UNREACHABLE
 
 
-def _dwarf_snap(version: str, structs: dict[str, StructLayout], funcs=None) -> AbiSnapshot:
+def _dwarf_snap(
+    version: str, structs: dict[str, StructLayout], funcs=None
+) -> AbiSnapshot:
     s = AbiSnapshot(library="libtbbmalloc.so.2", version=version, functions=funcs or [])
     s.dwarf = DwarfMetadata(has_dwarf=True, structs=structs)  # type: ignore[attr-defined]
     return s
@@ -44,36 +46,63 @@ def _layout(name: str, size: int, fields: list[FieldInfo]) -> StructLayout:
 
 def test_unreachable_internal_namespace_churn_is_demoted():
     # tbb::detail::* layout churn, DWARF-only, not referenced by any public API.
-    old = _dwarf_snap("1", {
-        "tbb::detail::d0::atomic_backoff": _layout(
-            "tbb::detail::d0::atomic_backoff", 8, [FieldInfo("count", "int", 0, 4)]),
-        "rml::internal::Block": _layout(
-            "rml::internal::Block", 16, [FieldInfo("next", "void *", 0, 8)]),
-    })
-    new = _dwarf_snap("2", {
-        "tbb::detail::d0::atomic_backoff": _layout(
-            "tbb::detail::d0::atomic_backoff", 16, [FieldInfo("count", "long", 0, 8)]),
-        "rml::internal::Block": _layout(
-            "rml::internal::Block", 24, [FieldInfo("next", "void *", 0, 8),
-                                         FieldInfo("pad", "long", 8, 8)]),
-    })
+    old = _dwarf_snap(
+        "1",
+        {
+            "tbb::detail::d0::atomic_backoff": _layout(
+                "tbb::detail::d0::atomic_backoff", 8, [FieldInfo("count", "int", 0, 4)]
+            ),
+            "rml::internal::Block": _layout(
+                "rml::internal::Block", 16, [FieldInfo("next", "void *", 0, 8)]
+            ),
+        },
+    )
+    new = _dwarf_snap(
+        "2",
+        {
+            "tbb::detail::d0::atomic_backoff": _layout(
+                "tbb::detail::d0::atomic_backoff",
+                16,
+                [FieldInfo("count", "long", 0, 8)],
+            ),
+            "rml::internal::Block": _layout(
+                "rml::internal::Block",
+                24,
+                [FieldInfo("next", "void *", 0, 8), FieldInfo("pad", "long", 8, 8)],
+            ),
+        },
+    )
     r = compare(old, new)
     assert r.verdict in (Verdict.NO_CHANGE, Verdict.COMPATIBLE), r.verdict
     # The churn is not silently dropped — it lands in the audit ledger.
     assert r.out_of_surface_count >= 1
     # No hard structural finding survives into the verdict-driving change list.
-    hard = {ChangeKind.STRUCT_SIZE_CHANGED, ChangeKind.STRUCT_FIELD_TYPE_CHANGED,
-            ChangeKind.STRUCT_FIELD_OFFSET_CHANGED, ChangeKind.TYPE_SIZE_CHANGED}
+    hard = {
+        ChangeKind.STRUCT_SIZE_CHANGED,
+        ChangeKind.STRUCT_FIELD_TYPE_CHANGED,
+        ChangeKind.STRUCT_FIELD_OFFSET_CHANGED,
+        ChangeKind.TYPE_SIZE_CHANGED,
+    }
     assert not (hard & {c.kind for c in r.changes})
 
 
 def test_demotion_records_the_ledger_reason():
-    old = _dwarf_snap("1", {
-        "tbb::detail::Foo": _layout("tbb::detail::Foo", 8, [FieldInfo("a", "int", 0, 4)]),
-    })
-    new = _dwarf_snap("2", {
-        "tbb::detail::Foo": _layout("tbb::detail::Foo", 16, [FieldInfo("a", "long", 0, 8)]),
-    })
+    old = _dwarf_snap(
+        "1",
+        {
+            "tbb::detail::Foo": _layout(
+                "tbb::detail::Foo", 8, [FieldInfo("a", "int", 0, 4)]
+            ),
+        },
+    )
+    new = _dwarf_snap(
+        "2",
+        {
+            "tbb::detail::Foo": _layout(
+                "tbb::detail::Foo", 16, [FieldInfo("a", "long", 0, 8)]
+            ),
+        },
+    )
     r = compare(old, new)
     reasons = {c.surface_exclusion_reason for c in r.out_of_surface_changes}
     assert REASON_PRIVATE_INTERNAL_UNREACHABLE in reasons
@@ -81,8 +110,12 @@ def test_demotion_records_the_ledger_reason():
 
 def test_public_struct_layout_change_still_breaks():
     # Negative control: a non-internal (public) struct layout change is breaking.
-    old = _dwarf_snap("1", {"PublicCfg": _layout("PublicCfg", 8, [FieldInfo("a", "int", 0, 4)])})
-    new = _dwarf_snap("2", {"PublicCfg": _layout("PublicCfg", 16, [FieldInfo("a", "long", 0, 8)])})
+    old = _dwarf_snap(
+        "1", {"PublicCfg": _layout("PublicCfg", 8, [FieldInfo("a", "int", 0, 4)])}
+    )
+    new = _dwarf_snap(
+        "2", {"PublicCfg": _layout("PublicCfg", 16, [FieldInfo("a", "long", 0, 8)])}
+    )
     r = compare(old, new)
     assert r.verdict == Verdict.BREAKING
 
@@ -95,12 +128,22 @@ def test_frozen_namespace_churn_is_not_demoted():
 
     old = AbiSnapshot(library="lib.so.1", version="1")
     new = AbiSnapshot(library="lib.so.1", version="2")
-    old.dwarf = DwarfMetadata(has_dwarf=True, structs={  # type: ignore[attr-defined]
-        "ns::detail::r1::Impl": _layout("ns::detail::r1::Impl", 8, [FieldInfo("a", "int", 0, 4)]),
-    })
-    new.dwarf = DwarfMetadata(has_dwarf=True, structs={  # type: ignore[attr-defined]
-        "ns::detail::r1::Impl": _layout("ns::detail::r1::Impl", 16, [FieldInfo("a", "long", 0, 8)]),
-    })
+    old.dwarf = DwarfMetadata(
+        has_dwarf=True,
+        structs={  # type: ignore[attr-defined]
+            "ns::detail::r1::Impl": _layout(
+                "ns::detail::r1::Impl", 8, [FieldInfo("a", "int", 0, 4)]
+            ),
+        },
+    )
+    new.dwarf = DwarfMetadata(
+        has_dwarf=True,
+        structs={  # type: ignore[attr-defined]
+            "ns::detail::r1::Impl": _layout(
+                "ns::detail::r1::Impl", 16, [FieldInfo("a", "long", 0, 8)]
+            ),
+        },
+    )
     pf = PolicyFile(base_policy="strict_abi", frozen_namespaces=["**::detail::r1::*"])
     r = compare(old, new, policy_file=pf)
     # The change is kept (not demoted to the ledger) and drives a verdict.
@@ -111,12 +154,18 @@ def test_frozen_namespace_churn_is_not_demoted():
 def _frozen_dwarf_pair(type_name: str):
     old = AbiSnapshot(library="lib.so.1", version="1")
     new = AbiSnapshot(library="lib.so.1", version="2")
-    old.dwarf = DwarfMetadata(has_dwarf=True, structs={  # type: ignore[attr-defined]
-        type_name: _layout(type_name, 8, [FieldInfo("a", "int", 0, 4)]),
-    })
-    new.dwarf = DwarfMetadata(has_dwarf=True, structs={  # type: ignore[attr-defined]
-        type_name: _layout(type_name, 16, [FieldInfo("a", "long", 0, 8)]),
-    })
+    old.dwarf = DwarfMetadata(
+        has_dwarf=True,
+        structs={  # type: ignore[attr-defined]
+            type_name: _layout(type_name, 8, [FieldInfo("a", "int", 0, 4)]),
+        },
+    )
+    new.dwarf = DwarfMetadata(
+        has_dwarf=True,
+        structs={  # type: ignore[attr-defined]
+            type_name: _layout(type_name, 16, [FieldInfo("a", "long", 0, 8)]),
+        },
+    )
     return old, new
 
 
@@ -137,7 +186,9 @@ def test_non_matching_frozen_namespace_still_demotes():
     from abicheck.policy_file import PolicyFile
 
     old, new = _frozen_dwarf_pair("ns::detail::Impl")
-    pf = PolicyFile(base_policy="strict_abi", frozen_namespaces=["**::other::frozen::*"])
+    pf = PolicyFile(
+        base_policy="strict_abi", frozen_namespaces=["**::other::frozen::*"]
+    )
     r = compare(old, new, policy_file=pf)
     assert r.verdict in (Verdict.NO_CHANGE, Verdict.COMPATIBLE)
     assert r.out_of_surface_count >= 1
@@ -149,26 +200,86 @@ def test_reachable_internal_type_still_leaks_and_breaks():
     # it in-surface and the change still drives a hard verdict — the anti-hiding
     # protection must be preserved.
     pub_fn = Function(
-        name="get_widget", mangled="get_widget", return_type="Widget *",
-        params=[], visibility=Visibility.PUBLIC,
+        name="get_widget",
+        mangled="get_widget",
+        return_type="Widget *",
+        params=[],
+        visibility=Visibility.PUBLIC,
     )
     old = AbiSnapshot(
-        library="lib.so.1", version="1", functions=[pub_fn],
+        library="lib.so.1",
+        version="1",
+        functions=[pub_fn],
         types=[
-            RecordType(name="Widget", kind="struct", size_bits=64,
-                       fields=[TypeField(name="impl", type="ns::detail::Impl", offset_bits=0)]),
-            RecordType(name="ns::detail::Impl", kind="struct", size_bits=64,
-                       fields=[TypeField(name="x", type="int", offset_bits=0)]),
+            RecordType(
+                name="Widget",
+                kind="struct",
+                size_bits=64,
+                fields=[TypeField(name="impl", type="ns::detail::Impl", offset_bits=0)],
+            ),
+            RecordType(
+                name="ns::detail::Impl",
+                kind="struct",
+                size_bits=64,
+                fields=[TypeField(name="x", type="int", offset_bits=0)],
+            ),
         ],
     )
     new = AbiSnapshot(
-        library="lib.so.1", version="2", functions=[pub_fn],
+        library="lib.so.1",
+        version="2",
+        functions=[pub_fn],
         types=[
-            RecordType(name="Widget", kind="struct", size_bits=128,
-                       fields=[TypeField(name="impl", type="ns::detail::Impl", offset_bits=0)]),
-            RecordType(name="ns::detail::Impl", kind="struct", size_bits=128,
-                       fields=[TypeField(name="x", type="long long", offset_bits=0)]),
+            RecordType(
+                name="Widget",
+                kind="struct",
+                size_bits=128,
+                fields=[TypeField(name="impl", type="ns::detail::Impl", offset_bits=0)],
+            ),
+            RecordType(
+                name="ns::detail::Impl",
+                kind="struct",
+                size_bits=128,
+                fields=[TypeField(name="x", type="long long", offset_bits=0)],
+            ),
         ],
     )
     r = compare(old, new)
     assert r.verdict == Verdict.BREAKING
+
+
+def test_unreachable_internal_layout_descriptor_finding_is_demoted():
+    # A private ns::detail::Impl that only acquires a fine-grained layout finding
+    # (TRIVIALLY_COPYABLE_LOST), unreachable from any public API, must take the
+    # same internal-leak demotion path as the coarse type kinds — not survive in
+    # the verdict-driving change list (Codex review #345).
+    old = AbiSnapshot(
+        library="lib.so.1",
+        version="1",
+        types=[
+            RecordType(
+                name="ns::detail::Impl",
+                kind="struct",
+                size_bits=64,
+                is_trivially_copyable=True,
+            )
+        ],
+    )
+    new = AbiSnapshot(
+        library="lib.so.1",
+        version="2",
+        types=[
+            RecordType(
+                name="ns::detail::Impl",
+                kind="struct",
+                size_bits=64,
+                is_trivially_copyable=False,
+            )
+        ],
+    )
+    r = compare(old, new)
+    assert r.verdict in (Verdict.NO_CHANGE, Verdict.COMPATIBLE), r.verdict
+    # The layout churn is recorded in the audit ledger, not silently dropped...
+    assert r.out_of_surface_count >= 1
+    # ...and does not survive as a verdict-driving change.
+    assert ChangeKind.TRIVIALLY_COPYABLE_LOST not in {c.kind for c in r.changes}

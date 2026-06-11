@@ -132,12 +132,30 @@ REGISTRY = ChangeKindRegistry([
        impact="Callers push arguments with the old layout; callee reads wrong data from stack/registers."),
     _E("func_noexcept_added", _C,
        impact="In C++17 noexcept is part of the function type; old callers compiled against non-noexcept signature get a different mangled name."),
-    _E("func_noexcept_removed", _C,
-       impact="Old callers may rely on noexcept guarantee for optimizations; removing it can cause unexpected std::terminate."),
+    _E("func_noexcept_removed", _R,
+       impact="`noexcept` removed from a function. Old binaries keep resolving "
+              "the symbol, so this is not a binary break — but since C++17 "
+              "`noexcept` is part of the function *type*, so it is encoded in "
+              "function-pointer and template-argument mangling: consumers that "
+              "form a `void(*)() noexcept` pointer or pass the function as a "
+              "non-type template argument no longer compile, and code relying on "
+              "the guarantee can hit `std::terminate`. KDE's C++ binary-"
+              "compatibility policy treats removing `noexcept` as a change to "
+              "avoid unless it was `noexcept(false)`. Verdict is policy-"
+              "adjustable; raise to API_BREAK under a strict source profile."),
     _E("func_virtual_added", _B,
        impact="Vtable layout changes; old binaries call wrong virtual function slot, leading to crashes or wrong behavior."),
     _E("func_virtual_removed", _B,
        impact="Vtable entry removed; old binaries that dispatch through the vtable call the wrong slot."),
+    _E("virtual_method_added", _B,
+       impact="A new virtual method was added to a class that already exists across "
+              "versions. If the class had no virtuals it gains a hidden vtable pointer "
+              "(its size and field offsets shift); if it was already polymorphic the new "
+              "slot grows/relayouts the vtable. Either way derived classes compiled "
+              "against the old layout dispatch through the wrong slots and old binaries "
+              "embedding the type read the wrong offsets. This is the KDE "
+              "\"do not add virtuals to a non-leaf class\" rule, caught even when the "
+              "snapshot carries no diff-able vtable array (DWARF/symbol-only mode)."),
     _E("var_removed", _B,
        impact="Old binaries reference a global variable that no longer exists; link or load failure."),
     _E("var_added", _C, is_addition=True,
@@ -704,11 +722,16 @@ REGISTRY = ChangeKindRegistry([
               "fails — a source/API break. Invisible to binary analysis: "
               "`final` is not recorded in DWARF or the object file, so this is "
               "detected only in header (castxml) mode."),
-    _E("type_lost_final", _C,
-       impact="A class/struct lost the `final` specifier. This is strictly "
-              "more permissive — code that compiled before still compiles, and "
-              "deriving from the type is now allowed. Reported as a compatible "
-              "change for surface-tracking completeness."),
+    _E("type_lost_final", _R,
+       impact="A class/struct lost the `final` specifier. Deriving from it is "
+              "now allowed and previously-valid source still compiles, so this "
+              "is not a source break. The risk is on already-compiled consumers: "
+              "code built while the class was `final` may have had its virtual "
+              "calls *devirtualized*, and if a later version introduces a "
+              "subclass that overrides, those old binaries keep dispatching "
+              "statically to the wrong target. KDE's C++ binary-compatibility "
+              "policy lists removing `final` as a change to avoid; surfaced as a "
+              "deployment risk for review rather than a hard break."),
 
     # ── Namespace-shape patterns (PR follow-up to #238) ─────────────────
     # Generic detectors for template / header-only libraries (the patterns
@@ -778,6 +801,17 @@ REGISTRY = ChangeKindRegistry([
               "changing the called function. Compiles, links, runs — but "
               "runs different code."),
 
+    _E("overload_added", _R,
+       impact="A new overload was added under a public name that previously had "
+              "exactly one declaration. Old binaries are unaffected (binary "
+              "compatible), but the change is not source-compatible: taking the "
+              "function's address (`&Foo::bar`) becomes ambiguous and fails to "
+              "compile, and existing call sites that relied on an implicit "
+              "conversion may now resolve to the new overload, silently changing "
+              "which function runs. KDE's C++ binary-compatibility policy lists "
+              "adding an overload to a non-overloaded function as a change to "
+              "avoid. Verdict is policy-adjustable — raise to API_BREAK under a "
+              "strict source-compatibility profile."),
     _E("mandatory_template_param_added", _A,
        impact="A function or class template parameter that was defaulted "
               "(or deduced) became mandatory. Consumer source that wrote "
@@ -1042,4 +1076,91 @@ REGISTRY = ChangeKindRegistry([
               "produces an exported public symbol (per the build/source graph). "
               "It localizes a flag-drift risk to the public surface it can affect; "
               "a risk to review, never on its own an artifact-proven ABI break."),
+    # ── Cross-implementation standard-library compatibility (D-stdlib) ───────
+    # Produced by the build-mode diff (diff_stdlib_impl.py). Compatibility
+    # between *different* C++ standard-library implementations is a third axis
+    # the standard never guarantees: a class that holds a std:: container by
+    # value gets a different layout under libstdc++ vs libc++ vs MSVC STL, so
+    # the same source linked against a mismatched runtime is silently
+    # ABI-incompatible. These default to RISK — when an embedded stdlib type's
+    # layout actually differs, the type diff emits the BREAKING size/offset
+    # finding separately; these explain and localize it and never escalate on
+    # their own. They are emitted only when build-mode evidence is present on
+    # both sides; absent that, the diff stays silent rather than guessing.
+    _E("stdlib_implementation_changed", _R,
+       impact="The two artifacts were built against different C++ standard-library "
+              "implementations (e.g. libstdc++ vs libc++, or vs MSVC STL). The "
+              "standard does not guarantee ABI compatibility across implementations: "
+              "any public type embedding a std:: container/string by value gets a "
+              "different layout, and inline std:: code can ODR-conflict. Pin a single "
+              "implementation or rebuild consumers against the matching runtime."),
+    _E("libcpp_abi_version_changed", _R,
+       impact="The libc++ ABI version changed (e.g. _LIBCPP_ABI_VERSION 1 → 2). "
+              "libc++ selects incompatible internal layouts for std:: types via an "
+              "inline namespace (std::__1 vs std::__2), so types embedding them by "
+              "value are laid out differently. Rebuild consumers against the matching "
+              "libc++ ABI version."),
+
+    # ── Fine-grained class-layout descriptor (layout-closure work) ───────────
+    # Produced by diff_layout.py from the optional RecordType layout fields
+    # (base offsets, vptr offset, dsize/tail-padding, standard-layout /
+    # trivially-copyable traits). They capture layout mechanics the coarse
+    # size/offset detectors under-represent. Each is guarded tri-state — emitted
+    # only when both sides carry the evidence — so an evidence-tier downgrade
+    # never fabricates one.
+    _E("base_class_offset_changed", _B,
+       impact="A base-class subobject moved to a different offset within the derived "
+              "object (e.g. an empty-base optimization was lost, or a member/base was "
+              "inserted ahead of it) without the base list reordering. The `this` "
+              "pointer adjustment for that base and every field after it shifts; old "
+              "binaries read the wrong addresses."),
+    _E("vptr_introduced", _B,
+       impact="A previously non-polymorphic class gained its first virtual function, "
+              "so the compiler prepends a vtable pointer. sizeof grows and every data "
+              "member's offset shifts by a pointer width; existing binaries that embed "
+              "or derive from the type are laid out incompatibly."),
+    _E("trivially_copyable_lost", _B,
+       impact="A type stopped being trivially copyable (e.g. a user-declared "
+              "copy/move constructor, destructor, or a non-trivial member was added). "
+              "Non-trivially-copyable types are passed and returned by value "
+              "differently (via a hidden reference / not in registers), so the calling "
+              "convention for any function taking or returning it by value changes."),
+    _E("standard_layout_lost", _R,
+       impact="A type stopped being standard-layout (e.g. it gained a mix of access "
+              "specifiers, a base with members, or virtual members). `offsetof` and "
+              "C interoperability are no longer guaranteed and tail-padding reuse "
+              "rules change; review code that relies on the C-compatible layout."),
+    _E("tail_padding_reuse_changed", _R,
+       impact="The type's data size (the bytes its own members occupy, excluding "
+              "trailing tail padding) changed while sizeof stayed the same. A derived "
+              "class may reuse a base's tail padding, so this can silently shift a "
+              "derived layout even though the base's sizeof is unchanged."),
+    _E("layout_unverifiable", _R,
+       impact="A public type's layout could not be verified at the available evidence "
+              "tier — its size/offsets are not present (e.g. a symbols-only or partial "
+              "dump with no debug info), so a real layout change cannot be ruled out. "
+              "Informational and non-escalating; rebuild with debug info (or supply "
+              "headers) to confirm."),
+
+    # ── Binary-only (no-DWARF / L0) C++ layout descriptors ───────────────────
+    # Recovered from .dynsym symbol sizes alone by diff_elf_layout.py. The
+    # Itanium C++ ABI fixes the on-disk size of a class's vtable (`_ZTV`) and
+    # typeinfo (`_ZTI`) objects, so these break detections work on libraries
+    # shipped without any DWARF debug info or public headers.
+    _E("vtable_slot_count_changed", _B,
+       impact="A polymorphic class's vtable changed size — its `_ZTV` object now holds "
+              "a different number of virtual-function slots (a virtual method was added, "
+              "removed, or reordered). Existing binaries dispatch through fixed vtable "
+              "offsets, so they call the wrong slot or run off the end of the table. "
+              "Recovered from the ELF symbol size without DWARF — the binary-only analogue "
+              "of FUNC_VIRTUAL_ADDED / TYPE_VTABLE_CHANGED."),
+    _E("rtti_inheritance_changed", _B,
+       impact="A polymorphic class's RTTI typeinfo (`_ZTI`) object changed size, which in "
+              "the Itanium C++ ABI means its base-class shape changed: no-base "
+              "(`__class_type_info`, 2 words) ↔ single-base (`__si_class_type_info`, "
+              "3 words) ↔ multiple/virtual-base (`__vmi_class_type_info`, larger), or the "
+              "number of bases differs. Base-class changes shift `this`-pointer "
+              "adjustments, member offsets, and the vtable, so derived classes and "
+              "by-value users are miscompiled. Recovered from the ELF symbol size without "
+              "DWARF — the binary-only analogue of TYPE_BASE_CHANGED."),
 ])

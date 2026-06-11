@@ -40,6 +40,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from abicheck.build_mode import BuildMode, StdlibFamily  # noqa: E402
 from abicheck.checker import Verdict, compare  # noqa: E402
 from abicheck.model import (  # noqa: E402
     AbiSnapshot,
@@ -84,12 +85,17 @@ def _rec(name, *, size=64, fields=(), origin=ScopeOrigin.UNKNOWN) -> RecordType:
     )
 
 
-def _snap(version, *, functions=(), types=(), enums=(), variables=()) -> AbiSnapshot:
+def _snap(version, *, functions=(), types=(), enums=(), variables=(),
+          build_mode=None) -> AbiSnapshot:
     return AbiSnapshot(
         library="libfp", version=version,
         functions=list(functions), types=list(types), enums=list(enums),
-        variables=list(variables),
+        variables=list(variables), build_mode=build_mode,
     )
+
+
+def _bm(stdlib: StdlibFamily) -> BuildMode:
+    return BuildMode(stdlib=stdlib)
 
 
 def _var(name, *, type="int", vis=Visibility.PUBLIC,
@@ -161,6 +167,29 @@ def _private_header_type_change() -> tuple[AbiSnapshot, AbiSnapshot]:
     return old, new
 
 
+def _same_stdlib_internal_stl_churn() -> tuple[AbiSnapshot, AbiSnapshot]:
+    # Same stdlib family on both sides (libstdc++ → libstdc++): the comparison is
+    # NOT cross-implementation, so std:: layout stays filtered as toolchain noise
+    # and an internal, unreachable type embedding it produces no public break.
+    # Guards that the cross-implementation filter relaxation did not regress the
+    # ordinary same-toolchain path into emitting STL-layout false positives.
+    old = _snap(
+        "1",
+        functions=[_fn("api")],
+        types=[_rec("InternalCache", size=192,
+                    fields=[("data", "std::vector<int>")])],
+        build_mode=_bm(StdlibFamily.LIBSTDCXX),
+    )
+    new = _snap(
+        "2",
+        functions=[_fn("api")],
+        types=[_rec("InternalCache", size=256,
+                    fields=[("data", "std::vector<int>")])],
+        build_mode=_bm(StdlibFamily.LIBSTDCXX),
+    )
+    return old, new
+
+
 # --- real-break cases (a non-breaking verdict here is a FALSE NEGATIVE) -------
 
 def _public_struct_size() -> tuple[AbiSnapshot, AbiSnapshot]:
@@ -206,6 +235,29 @@ def _public_variable_removed() -> tuple[AbiSnapshot, AbiSnapshot]:
     return old, new
 
 
+def _cross_stdlib_embedded_layout_diverges() -> tuple[AbiSnapshot, AbiSnapshot]:
+    # The canonical std::vector trap: a public type embeds a std:: container by
+    # value, and the two builds use *different* stdlib implementations
+    # (libstdc++ → libc++). Across implementations that embedded type is laid out
+    # differently, so the public *owner* type's size diverges — a real, cross-impl
+    # ABI break that must stay breaking. The owner type (Buffer) is non-std:: and
+    # is never filtered, so its TYPE_SIZE_CHANGED is caught through the ordinary
+    # path; the cross-implementation build_mode adds the RISK build-mode finding.
+    old = _snap(
+        "1",
+        functions=[_fn("make_buffer", ret="Buffer *")],
+        types=[_rec("Buffer", size=192, fields=[("data", "std::vector<int>")])],
+        build_mode=_bm(StdlibFamily.LIBSTDCXX),
+    )
+    new = _snap(
+        "2",
+        functions=[_fn("make_buffer", ret="Buffer *")],
+        types=[_rec("Buffer", size=256, fields=[("data", "std::vector<int>")])],
+        build_mode=_bm(StdlibFamily.LIBCXX),
+    )
+    return old, new
+
+
 # NOTE on corpus scope: every case here is one the *current* implementation
 # already gets right, so a correct build keeps a clean 0/0 sheet (the gate's
 # core invariant). Two tempting cases were deliberately left out because their
@@ -222,6 +274,14 @@ CORPUS: list[Case] = [
     Case("internal_field_reordered", True, _internal_field_reordered),
     Case("hidden_function_signature_changed", True, _hidden_function_signature_changed),
     Case("private_header_type_change", True, _private_header_type_change),
+    Case("same_stdlib_internal_stl_churn", True, _same_stdlib_internal_stl_churn),
+    # Cross-implementation stdlib: one real-break + one internal-noise guard.
+    # The full breadth (libc++ ABI version, MSVC↔libstdc++, pointer-held-is-safe,
+    # the symbol-only fallback and false-positive guards) lives in the detector's
+    # unit tests (tests/test_diff_stdlib_impl.py); the corpus keeps only the two
+    # minimal FP/FN sentinels for the public-surface scoping gate.
+    Case("cross_stdlib_embedded_layout_diverges", False,
+         _cross_stdlib_embedded_layout_diverges),
     Case("public_struct_size", False, _public_struct_size),
     Case("public_function_removed", False, _public_function_removed),
     Case("public_param_type_changed", False, _public_param_type_changed),

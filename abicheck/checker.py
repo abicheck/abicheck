@@ -49,6 +49,9 @@ from .checker_types import (  # noqa: F401
     LibraryMetadata,
 )
 from .detector_registry import registry as _detector_registry
+from .diff_elf_layout import (  # noqa: F401 — triggers detector registration
+    _diff_elf_layout,
+)
 from .diff_filtering import (  # noqa: F401
     _ROOT_TYPE_CHANGE_KINDS,
     _compute_confidence,
@@ -63,6 +66,9 @@ from .diff_filtering import (  # noqa: F401
     _filter_reserved_field_renames,
     _match_root_type,
 )
+from .diff_layout import (  # noqa: F401 — triggers detector registration
+    _diff_layout_descriptor,
+)
 from .diff_platform import (  # noqa: F401
     _diff_dwarf,
     _diff_elf,
@@ -75,6 +81,9 @@ from .diff_platform import (  # noqa: F401
     _diff_template_inner_types,
     _extract_template_args,
     _template_outer,
+)
+from .diff_stdlib_impl import (  # noqa: F401 — triggers detector registration
+    _diff_stdlib_implementation,
 )
 from .diff_sycl import _diff_sycl  # noqa: F401 — triggers detector registration
 from .diff_symbols import _PUBLIC_VIS

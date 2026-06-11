@@ -113,6 +113,17 @@ _TYPE_LEVEL_KIND_NAMES: frozenset[str] = frozenset(
         "value_abi_trait_changed",
         "type_became_final",
         "type_lost_final",
+        # Fine-grained class-layout descriptor findings (layout-closure work):
+        # each carries the owner *type* name in Change.symbol, so they must take
+        # the type-level surface path (reclassify by type reachability) rather
+        # than being read as a function/variable symbol and demoted as
+        # not-exported (Codex review #345).
+        "base_class_offset_changed",
+        "vptr_introduced",
+        "trivially_copyable_lost",
+        "standard_layout_lost",
+        "tail_padding_reuse_changed",
+        "layout_unverifiable",
     }
 )
 

@@ -36,6 +36,19 @@ _SECRET_DEFINE_RE = re.compile(
 _REDACTED = "<redacted>"
 
 
+def _is_secret_flag(token: str) -> bool:
+    """True if *token* is an option flag whose value is a likely credential.
+
+    Matches credential-style options such as ``--token``, ``--api-key``,
+    ``--password``, and ``--auth-token`` (the same secret keywords used for
+    ``-D`` macros), so both ``--flag=value`` and split ``--flag value`` forms
+    can have their value redacted before a command line is persisted (D7).
+    """
+    if not token.startswith("-"):
+        return False
+    return bool(_SECRET_DEFINE_RE.search(token.lstrip("-")))
+
+
 @dataclass
 class RedactionPolicy:
     """Replace home directories and obvious secrets in argv/paths.
@@ -82,6 +95,10 @@ class RedactionPolicy:
                 key, _, _ = body.partition("=")
                 if _SECRET_DEFINE_RE.search(key):
                     return value[:2] + key + "=" + _REDACTED
+        if self.redact_secrets and "=" in value and _is_secret_flag(value.partition("=")[0]):
+            # --token=VALUE / --api-key=VALUE — redact a credential option's value.
+            flag, _, _ = value.partition("=")
+            return flag + "=" + _REDACTED
         return self.path(value)
 
     def define_value(self, key: str, value: str) -> str:
@@ -97,12 +114,13 @@ class RedactionPolicy:
         return self.path(value)
 
     def argv(self, args: list[str]) -> list[str]:
-        """Redact a full argument list, handling split ``-D KEY=VALUE`` form.
+        """Redact a full argument list, handling split secret-option forms.
 
-        A secret macro may be passed as a single ``-DKEY=secret`` token (handled
-        by :meth:`arg`) or as two tokens ``['-D', 'KEY=secret']``; the latter
-        needs lookahead so the value token is redacted before it is persisted in
-        ``CompileUnit.argv``.
+        A secret may be passed as a single ``-DKEY=secret`` / ``--token=secret``
+        token (handled by :meth:`arg`) or split across two tokens —
+        ``['-D', 'KEY=secret']`` or ``['--token', 'secret']``. The split forms
+        need lookahead so the value token is redacted before the command line is
+        persisted in ``CompileUnit.argv`` or an extractor ledger command (D7).
         """
         out: list[str] = []
         i = 0
@@ -120,6 +138,19 @@ class RedactionPolicy:
                     out.append(key + "=" + _REDACTED)
                     i += 2
                     continue
+            if (
+                self.redact_secrets
+                and "=" not in a
+                and _is_secret_flag(a)
+                and i + 1 < len(args)
+                and not args[i + 1].startswith("-")
+            ):
+                # --token secret / --api-key secret — redact the value token, but
+                # leave the next token alone if it is itself a flag.
+                out.append(a)
+                out.append(_REDACTED)
+                i += 2
+                continue
             out.append(self.arg(a))
             i += 1
         return out

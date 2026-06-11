@@ -94,6 +94,16 @@ ASSERTED_CHANGE_KINDS: set[ChangeKind] = {
     ChangeKind.CALL_GRAPH_PUBLIC_ENTRY_REACHABILITY_CHANGED,
     ChangeKind.INCLUDE_GRAPH_PUBLIC_HEADER_DRIFT,
     ChangeKind.BUILD_OPTION_REACHES_PUBLIC_SYMBOL,
+    # Cross-implementation stdlib compatibility (tests/test_diff_stdlib_impl.py).
+    ChangeKind.STDLIB_IMPLEMENTATION_CHANGED,
+    ChangeKind.LIBCPP_ABI_VERSION_CHANGED,
+    # Fine-grained class-layout descriptor (tests/test_diff_layout.py).
+    ChangeKind.BASE_CLASS_OFFSET_CHANGED,
+    ChangeKind.VPTR_INTRODUCED,
+    ChangeKind.TRIVIALLY_COPYABLE_LOST,
+    ChangeKind.STANDARD_LAYOUT_LOST,
+    ChangeKind.TAIL_PADDING_REUSE_CHANGED,
+    ChangeKind.LAYOUT_UNVERIFIABLE,
     ChangeKind.METHOD_ACCESS_CHANGED,
     ChangeKind.NEEDED_ADDED,
     ChangeKind.NEEDED_REMOVED,
@@ -199,6 +209,8 @@ ASSERTED_CHANGE_KINDS: set[ChangeKind] = {
     ChangeKind.GLIBCXX_DUAL_ABI_FLIP_DETECTED,
     ChangeKind.INLINE_NAMESPACE_MOVED,
     ChangeKind.VTABLE_SYMBOL_IDENTITY_CHANGED,
+    ChangeKind.VTABLE_SLOT_COUNT_CHANGED,
+    ChangeKind.RTTI_INHERITANCE_CHANGED,
     ChangeKind.ABI_SURFACE_EXPLOSION,
     # SYCL Plugin Interface (ADR-020b)
     ChangeKind.SYCL_IMPLEMENTATION_CHANGED,
@@ -259,6 +271,9 @@ ASSERTED_CHANGE_KINDS: set[ChangeKind] = {
     ChangeKind.INTERNAL_TEMPLATE_LEAKS_VIA_PUBLIC_API,
     ChangeKind.CPO_KIND_CHANGED,
     ChangeKind.OVERLOAD_SET_REROUTED,
+    # KDE C++ binary-compatibility gaps — exercised in tests/test_kde_compat_detectors.py
+    ChangeKind.OVERLOAD_ADDED,
+    ChangeKind.VIRTUAL_METHOD_ADDED,
     ChangeKind.MANDATORY_TEMPLATE_PARAM_ADDED,
     ChangeKind.UNSPECIFIED_RETURN_NOW_NAMED,
     # Build-config / probe-harness patterns — exercised in tests/test_diff_build_config.py

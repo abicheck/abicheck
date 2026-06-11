@@ -116,7 +116,7 @@ If you're unsure, start with `abicheck compare` — it's the default workflow.
 gives abicheck the most evidence to work with (see the
 [input-quality ladder](#input-quality-what-each-tier-catches) below).
 
-The repo includes 126 ABI scenario examples. Most are single-library cases with
+The repo includes 127 ABI scenario examples. Most are single-library cases with
 paired `v1`/`v2` sources and headers; bundle/release-level cases use
 release-style layouts.
 Browse the generated single-library pages in the

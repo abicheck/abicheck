@@ -56,11 +56,19 @@ class ChangeKind(str, Enum):
     FUNC_RETURN_CHANGED = "func_return_changed"  # return type changed → BREAKING
     FUNC_PARAMS_CHANGED = "func_params_changed"  # parameter types changed → BREAKING
     FUNC_NOEXCEPT_ADDED = "func_noexcept_added"  # noexcept added → BREAKING (C++17 P0012R1: noexcept is part of function type)
-    FUNC_NOEXCEPT_REMOVED = "func_noexcept_removed"  # noexcept removed → BREAKING (can widen exception spec)
+    FUNC_NOEXCEPT_REMOVED = "func_noexcept_removed"  # noexcept removed → COMPATIBLE_WITH_RISK (C++17: part of fn-pointer/template mangling; source risk)
     FUNC_VIRTUAL_ADDED = (
         "func_virtual_added"  # became virtual → vtable change → BREAKING
     )
     FUNC_VIRTUAL_REMOVED = "func_virtual_removed"  # → BREAKING
+    VIRTUAL_METHOD_ADDED = (
+        # a brand-new virtual *method* added to a class that already exists across
+        # versions → grows/relayouts the vtable, breaking derived classes (and the
+        # vptr if the class had none). Catches the KDE "add a virtual to a non-leaf
+        # class" rule when the vtable array itself is not diff-able (DWARF/symbol-only
+        # snapshots), where it would otherwise be mistaken for a compatible func_added.
+        "virtual_method_added"  # → BREAKING
+    )
 
     VAR_REMOVED = "var_removed"
     VAR_ADDED = "var_added"
@@ -213,7 +221,7 @@ class ChangeKind(str, Enum):
     # the binary carry no `final` information). Source-level: gaining `final`
     # breaks any consumer that derives from the class.
     TYPE_BECAME_FINAL = "type_became_final"  # gained `final` → derivation no longer compiles → API_BREAK
-    TYPE_LOST_FINAL = "type_lost_final"      # lost `final` → strictly more permissive → COMPATIBLE
+    TYPE_LOST_FINAL = "type_lost_final"      # lost `final` → devirtualization desync risk on old binaries → COMPATIBLE_WITH_RISK
     BASE_CLASS_POSITION_CHANGED = (
         "base_class_position_changed"  # base reorder → this-ptr offset change
     )
@@ -451,6 +459,12 @@ class ChangeKind(str, Enum):
     # See examples/case88_cpo_kind_changed/README.md
     CPO_KIND_CHANGED = "cpo_kind_changed"
     OVERLOAD_SET_REROUTED = "overload_set_rerouted"
+    # a new overload added to a previously *unique* (non-overloaded) public name.
+    # Binary-compatible (old binaries unaffected) but source-risky: taking the
+    # function's address (`&f`) becomes ambiguous and overload resolution at
+    # existing call sites may silently change. KDE "Binary Compatibility Issues
+    # With C++" lists this under changes to avoid. → COMPATIBLE_WITH_RISK.
+    OVERLOAD_ADDED = "overload_added"
     MANDATORY_TEMPLATE_PARAM_ADDED = "mandatory_template_param_added"
     UNSPECIFIED_RETURN_NOW_NAMED = "unspecified_return_now_named"
 
@@ -538,6 +552,39 @@ class ChangeKind(str, Enum):
     CALL_GRAPH_PUBLIC_ENTRY_REACHABILITY_CHANGED = "call_graph_public_entry_reachability_changed"  # impl reachable from an exported entry changed → COMPATIBLE (quality)
     INCLUDE_GRAPH_PUBLIC_HEADER_DRIFT = "include_graph_public_header_drift"  # the include closure of a public header changed → RISK
     BUILD_OPTION_REACHES_PUBLIC_SYMBOL = "build_option_reaches_public_symbol"  # a changed ABI-relevant option reaches a public symbol → RISK
+    # ── Cross-implementation standard-library compatibility (D-stdlib) ───────
+    # Emitted by the build-mode diff (diff_stdlib_impl.py) when the two
+    # snapshots were produced against *different standard-library
+    # implementations* — a third compatibility axis (alongside backward /
+    # forward) that the C++ standard does not guarantee. These are RISK, not
+    # BREAKING: when an embedded stdlib type's layout actually differs, the
+    # artifact/type diff emits the BREAKING size/offset finding separately;
+    # these kinds explain and localize the cause without escalating on their
+    # own (and stay silent when build-mode evidence is absent).
+    STDLIB_IMPLEMENTATION_CHANGED = "stdlib_implementation_changed"  # libstdc++ ↔ libc++ ↔ MSVC STL → RISK
+    LIBCPP_ABI_VERSION_CHANGED = "libcpp_abi_version_changed"  # _LIBCPP_ABI_VERSION 1 ↔ 2 → RISK
+
+    # ── Fine-grained class-layout descriptor (layout-closure work) ───────────
+    # Emitted by diff_layout.py from the optional layout fields on RecordType
+    # (base offsets, vptr offset, dsize/tail-padding, standard-layout /
+    # trivially-copyable traits). Each is guarded tri-state: skipped when either
+    # side lacks the evidence, so an evidence-tier downgrade never fabricates a
+    # finding.
+    BASE_CLASS_OFFSET_CHANGED = "base_class_offset_changed"  # base subobject moved → this-ptr/field offsets shift → BREAKING
+    VPTR_INTRODUCED = "vptr_introduced"  # first virtual added → vtable pointer prepended → all offsets shift → BREAKING
+    TRIVIALLY_COPYABLE_LOST = "trivially_copyable_lost"  # type no longer trivially-copyable → pass-by-value/register ABI changes → BREAKING
+    STANDARD_LAYOUT_LOST = "standard_layout_lost"  # type no longer standard-layout → offsetof/C-compat/tail-padding reuse changes → RISK
+    TAIL_PADDING_REUSE_CHANGED = "tail_padding_reuse_changed"  # data-size (dsize) changed at stable sizeof → derived tail-padding reuse shifts → RISK
+    LAYOUT_UNVERIFIABLE = "layout_unverifiable"  # layout could not be verified at this evidence tier (no debug info) → RISK, non-escalating
+
+    # ── Binary-only (no-DWARF / L0) C++ layout descriptors ───────────────────
+    # Emitted by diff_elf_layout.py purely from .dynsym symbol sizes — no debug
+    # info, no headers. The Itanium C++ ABI encodes a class's vtable slot count
+    # in the size of its `_ZTV` vtable object and its inheritance shape in the
+    # size of its `_ZTI` typeinfo object, so a virtual-method or base-class
+    # change is observable even when the library ships fully stripped of DWARF.
+    VTABLE_SLOT_COUNT_CHANGED = "vtable_slot_count_changed"  # _ZTV size delta → virtual method add/remove/reorder → BREAKING
+    RTTI_INHERITANCE_CHANGED = "rtti_inheritance_changed"  # _ZTI size delta → base-class set/shape changed → BREAKING
 
 
 class HasKind(Protocol):

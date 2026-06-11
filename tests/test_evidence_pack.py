@@ -434,6 +434,29 @@ def test_redaction_argv_redacts_split_define_secret():
     assert "FOO=1" in out
 
 
+def test_redaction_redacts_secret_option_flags():
+    """Credential-style CLI flags (not just -D macros) must be redacted (D7)."""
+    pol = RedactionPolicy(redact_home=False)
+    # Combined --flag=value form.
+    assert pol.arg("--token=hunter2") == "--token=<redacted>"
+    assert pol.arg("--api-key=abc123") == "--api-key=<redacted>"
+    assert pol.arg("--password=p@ss") == "--password=<redacted>"
+    # Non-secret options are left untouched.
+    assert pol.arg("--output=build/x.json") == "--output=build/x.json"
+
+
+def test_redaction_argv_redacts_split_secret_option():
+    """Split '--token secret' form must redact the value token, not later flags."""
+    pol = RedactionPolicy(redact_home=False)
+    out = pol.argv(["tool", "--token", "hunter2", "--auth-token", "abc", "--verbose", "-c", "a.cpp"])
+    joined = " ".join(out)
+    assert "hunter2" not in joined
+    assert "abc" not in joined.split()  # value after --auth-token redacted
+    assert out == ["tool", "--token", "<redacted>", "--auth-token", "<redacted>", "--verbose", "-c", "a.cpp"]
+    # A secret flag immediately followed by another flag has no value to redact.
+    assert pol.argv(["tool", "--token", "--verbose"]) == ["tool", "--token", "--verbose"]
+
+
 def test_compile_db_split_define_secret_not_leaked_in_argv(tmp_path):
     """End-to-end: split-form secret never reaches CompileUnit.argv."""
     from abicheck.evidence.adapters import CompileDbAdapter

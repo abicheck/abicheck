@@ -35,7 +35,13 @@
           "status": {"type": "string", "enum": ["ok", "partial", "failed", "skipped"]},
           "inputs": {"type": "array", "items": {"type": "string"}},
           "artifacts": {"type": "array", "items": {"type": "string"}},
-          "detail": {"type": "string"}
+          "detail": {"type": "string"},
+          "command": {"type": "string"},
+          "command_hash": {"type": "string"},
+          "capabilities": {"type": "array", "items": {"type": "string"}},
+          "started_at": {"type": "string"},
+          "finished_at": {"type": "string"},
+          "diagnostics": {"type": "array", "items": {"type": "string"}}
         },
         "additionalProperties": true
       }

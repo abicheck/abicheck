@@ -142,11 +142,15 @@ class TestParameterChanges:
 # ── noexcept specifier ────────────────────────────────────────────────────────
 
 class TestNoexcept:
-    def test_noexcept_removed_is_compatible(self):
+    def test_noexcept_removed_is_compatible_with_risk(self):
+        # Since C++17 `noexcept` is part of the function type (encoded in
+        # function-pointer / template-argument mangling) and removing it can hit
+        # std::terminate, so it is a deployment/source risk, not a clean
+        # compatible change.
         old_f = _pub_func("move", "_Z4movev", noexcept=True)
         new_f = _pub_func("move", "_Z4movev", noexcept=False)
         r = compare(_snap("1.0", [old_f]), _snap("2.0", [new_f]))
-        assert r.verdict == Verdict.COMPATIBLE
+        assert r.verdict == Verdict.COMPATIBLE_WITH_RISK
         assert any(c.kind == ChangeKind.FUNC_NOEXCEPT_REMOVED for c in r.changes)
 
     def test_noexcept_added_is_compatible(self):

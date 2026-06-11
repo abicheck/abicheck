@@ -3,7 +3,7 @@
 **Category:** Risk | **Verdict:** 🟡 COMPATIBLE_WITH_RISK
 
 > **ground_truth.json:** `expected: COMPATIBLE_WITH_RISK`, `category: risk`
-> **checker_policy.py:** `FUNC_NOEXCEPT_REMOVED` ∈ `COMPATIBLE_KINDS`;
+> **checker_policy.py:** `FUNC_NOEXCEPT_REMOVED` ∈ `RISK_KINDS`;
 > `SYMBOL_VERSION_REQUIRED_ADDED` ∈ `RISK_KINDS`
 
 ## What changes
@@ -17,11 +17,15 @@
 
 The verdict has **two independent components**:
 
-1. **`FUNC_NOEXCEPT_REMOVED` → COMPATIBLE**: In the Itanium C++ ABI (GCC/Clang),
-   `noexcept` does **not** change the mangled symbol name. The symbol is identical
-   in both `.so` files. Existing binaries resolve the same symbol — no linkage
-   failure occurs. This is a source-level contract concern (C++17 function type
-   system), not a binary ABI break.
+1. **`FUNC_NOEXCEPT_REMOVED` → COMPATIBLE_WITH_RISK**: In the Itanium C++ ABI
+   (GCC/Clang), `noexcept` does **not** change the *function's* mangled symbol
+   name. The symbol is identical in both `.so` files, so existing binaries
+   resolve it — no linkage failure, not a binary ABI break. The risk is at the
+   source/type level: since C++17 `noexcept` is part of the function type, so it
+   *is* encoded in function-pointer and template-argument mangling (a consumer
+   forming `void(*)() noexcept` or using the function as a non-type template
+   argument no longer compiles), and code relying on the no-throw guarantee can
+   hit `std::terminate`.
 
 2. **`SYMBOL_VERSION_REQUIRED_ADDED` → COMPATIBLE_WITH_RISK**: When v2's
    implementation uses `throw` (linking `__cxa_throw` / `std::runtime_error`),
@@ -35,18 +39,19 @@ risk present from the new GLIBCXX requirement.
 
 ## What abicheck detects
 
-- **`FUNC_NOEXCEPT_REMOVED`** (COMPATIBLE) — detected in header mode (`-H`).
+- **`FUNC_NOEXCEPT_REMOVED`** (COMPATIBLE_WITH_RISK) — detected in header mode (`-H`).
   The dumper reads the `noexcept` attribute from castxml output and stores it as
   `is_noexcept` on each function; the checker emits `FUNC_NOEXCEPT_REMOVED` when
-  the flag changes between versions. This kind is classified as COMPATIBLE because
-  it does not change the mangled symbol name (Itanium ABI).
+  the flag changes between versions. It is not a binary break (the function symbol
+  is unchanged) but is flagged as a deployment/source risk: `noexcept` is part of
+  the function type since C++17 and removing it can break function-pointer/template
+  consumers or cause `std::terminate`.
 - **`SYMBOL_VERSION_REQUIRED_ADDED: GLIBCXX_3.4.21`** (COMPATIBLE_WITH_RISK) —
   detected via ELF VERNEED comparison. When v2's implementation uses `throw`,
   the compiled `.so` acquires a newer GLIBCXX symbol version requirement.
 
 Both kinds are detected. The combined verdict is **COMPATIBLE_WITH_RISK** because
-`FUNC_NOEXCEPT_REMOVED` ∈ `COMPATIBLE_KINDS` and `SYMBOL_VERSION_REQUIRED_ADDED`
-∈ `RISK_KINDS`, and RISK trumps COMPATIBLE in the verdict hierarchy.
+both `FUNC_NOEXCEPT_REMOVED` and `SYMBOL_VERSION_REQUIRED_ADDED` ∈ `RISK_KINDS`.
 
 ## Behavioral risk (runtime)
 
