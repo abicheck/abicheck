@@ -93,10 +93,18 @@ def parse_timeline(html: str) -> list[dict[str, object]]:
     """
     rows: list[dict[str, object]] = []
     # Data rows are anchored by an id like <tr id='v1.5.4'>.
+    #
+    # Two layouts exist: 7 columns
+    #   Version | Date | Soname | ChangeLog | BackwardCompat. | Added | Removed
+    # and 6 columns (no ChangeLog, e.g. expat / libpng)
+    #   Version | Date | Soname | BackwardCompat. | Added | Removed
+    # Version/Date/Soname are always the first three cells and
+    # BackwardCompat./Added/Removed the last three, so index the metrics from
+    # the end to handle both.
     for m in re.finditer(r"<tr[^>]*\bid='v([^']+)'[^>]*>(.*?)</tr>", html, re.S):
         version = m.group(1)
         cells = re.findall(r"<td[^>]*>(.*?)</td>", m.group(2), re.S)
-        if len(cells) < 7:
+        if len(cells) < 6:
             continue
         text = [_strip_tags(c) for c in cells]
         rows.append(
@@ -104,9 +112,9 @@ def parse_timeline(html: str) -> list[dict[str, object]]:
                 "version": version,
                 "date": text[1],
                 "soname": text[2],
-                "backward_compat": _parse_percent(text[4]),
-                "added": _parse_count(text[5]),
-                "removed": _parse_count(text[6]),
+                "backward_compat": _parse_percent(text[-3]),
+                "added": _parse_count(text[-2]),
+                "removed": _parse_count(text[-1]),
             }
         )
     return rows

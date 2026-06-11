@@ -83,6 +83,38 @@ def test_parse_timeline_extracts_rows_newest_first() -> None:
     assert rows[2]["added"] == 2 and rows[2]["removed"] == 0
 
 
+# Some tracker timelines (e.g. expat, libpng) omit the ChangeLog column, so
+# rows have only 6 cells. Metrics are still the last three columns.
+_FIXTURE_6COL = """
+<table>
+<tr><th>Version</th><th>Date</th><th>Soname</th>
+<th>BackwardCompat.</th><th>AddedSymbols</th><th>RemovedSymbols</th></tr>
+<tr id='v2.5.0'><td>2.5.0</td><td>2024-01-01</td><td class='sover'>1</td>
+<td class='warning'><a href='#'>97.0%</a></td>
+<td class='added'><a class='num' href='#'>1 new</a></td>
+<td class='removed'><a class='num' href='#'>2 removed</a></td></tr>
+<tr id='v2.4.0'><td>2.4.0</td><td>2023-01-01</td><td class='sover'>1</td>
+<td class='ok'>&#160;</td><td class='ok'>0</td><td class='ok'>0</td></tr>
+</table>
+"""
+
+
+def test_parse_timeline_handles_six_column_layout() -> None:
+    # The ChangeLog-less 6-column layout must parse, or build_oracle yields
+    # pair_count == 0 and the whole workflow fails for those libraries.
+    mod = _load_module()
+    rows = mod.parse_timeline(_FIXTURE_6COL)
+
+    assert [r["version"] for r in rows] == ["2.5.0", "2.4.0"]
+    assert rows[0]["soname"] == "1"
+    assert rows[0]["backward_compat"] == 97.0
+    assert rows[0]["added"] == 1 and rows[0]["removed"] == 2
+
+    oracle = mod.build_oracle("expatish", _FIXTURE_6COL)
+    assert oracle["pair_count"] == 1
+    assert oracle["pairs"][0]["expected_verdict"] == "BREAKING"  # 97% + removals
+
+
 def test_derive_verdict_rules() -> None:
     mod = _load_module()
 
