@@ -783,6 +783,46 @@ def test_cli_malformed_build_evidence_is_failed_not_crash(tmp_path):
     assert rec["status"] == "failed"
 
 
+def test_cli_malformed_later_output_merges_nothing(tmp_path):
+    # A manifest with two build_evidence outputs where the second is invalid:
+    # the first must NOT be folded (atomic all-or-nothing), so no L3 build
+    # evidence reaches the pack and the extractor is recorded failed (Codex P2).
+    script = (
+        "import json,sys,os\n"
+        "good=sys.argv[1]; bad=sys.argv[2]\n"
+        "os.makedirs(os.path.dirname(good),exist_ok=True)\n"
+        "json.dump({'schema_version':1,'compile_units':[{'id':'cu://a','source':'a.cpp',"
+        "'argv':['cc'],'language':'CXX'}]},open(good,'w'))\n"
+        "json.dump({'compile_units':[{}]},open(bad,'w'))\n"  # missing id -> invalid
+    )
+    data = {
+        "name": "cli-multi",
+        "commands": {
+            "collect": [
+                sys.executable, "-c", script,
+                "{normalized_dir}/good.json", "{normalized_dir}/bad.json",
+            ]
+        },
+        "outputs": {
+            "normalized": [
+                {"kind": "build_evidence", "path": "normalized/cli-multi/good.json"},
+                {"kind": "build_evidence", "path": "normalized/cli-multi/bad.json"},
+            ]
+        },
+    }
+    manifest = _dump(tmp_path, data, name="multi.yaml")
+    out = tmp_path / "pack"
+    result = _cli(["collect-evidence", "--extractor-manifest", str(manifest), "-o", str(out)])
+    assert result.exit_code == 0, result.output
+    rec = next(
+        e for e in json.loads((out / "manifest.json").read_text())["extractors"]
+        if e["name"] == "cli-multi"
+    )
+    assert rec["status"] == "failed"
+    # The good output's evidence must not have leaked into the merged L3 facts.
+    assert not (out / "build" / "build_evidence.json").exists()
+
+
 def test_cli_strict_mode_fails_on_skipped_extractor(tmp_path):
     # A requested manifest gated out by the action ceiling is 'skipped'; under
     # strict mode the requested evidence is absent, so the run must fail (Codex P2).

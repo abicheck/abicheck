@@ -511,27 +511,37 @@ def _run_external_extractors(
             )
             continue
 
-        # Fold any normalized build_evidence output into the merged L3 evidence.
-        # `validate` only proved the file is JSON; it may still be structurally
+        # Fold any normalized build_evidence outputs into the merged L3 evidence.
+        # `validate` only proved each file is JSON; it may still be structurally
         # invalid BuildEvidence (e.g. a compile unit missing its id), which
-        # BuildEvidence.from_dict surfaces as KeyError/TypeError. Treat that as a
-        # failed extractor — downgrade the ledger row so it never crashes the
-        # command (D9 permissive) and so strict mode rejects the bad output (D8).
+        # BuildEvidence.from_dict surfaces as KeyError/TypeError. Parse *all*
+        # declared outputs first and merge only if every one is valid — so a
+        # later malformed output never leaves an earlier one's evidence merged
+        # from an extractor we then mark failed (D8: invalid output must not
+        # influence collected facts). A failure downgrades the ledger row, never
+        # crashes the command (D9 permissive), and makes strict mode reject it.
         import json as _json
+        parsed: list[_BuildEvidence] = []
+        fold_ok = True
         for output in manifest.outputs:
             if output.kind != "build_evidence":
                 continue
             be_path = pack_root / output.path
             try:
-                merged.merge(_BuildEvidence.from_dict(
+                parsed.append(_BuildEvidence.from_dict(
                     _json.loads(be_path.read_text(encoding="utf-8"))
                 ))
             except (OSError, ValueError, KeyError, TypeError) as exc:
+                fold_ok = False
                 record.status = "failed"
                 record.detail = record.detail or f"invalid build_evidence output: {exc}"
                 merged.diagnostics.append(
                     f"{manifest.name}: could not fold {output.path}: {exc}"
                 )
+                break
+        if fold_ok:
+            for build_evidence in parsed:
+                merged.merge(build_evidence)
 
 
 def _collect_call_graph(
