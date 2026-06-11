@@ -27,10 +27,14 @@ captured on each snapshot and emits a RISK finding when the standard-library
 implementation (or the libc++ ABI version) differs. It is deliberately
 conservative:
 
-* It is **quiet when evidence is missing.** If either side lacks a build-mode
-  capture, or the stdlib family is ``UNKNOWN``, it emits nothing — it does not
-  guess and it does not escalate. The absence of debug/build evidence is a
-  reason to stay silent, not to raise an alarm.
+* It works on real snapshots, **not just captured build-mode.** The normalized
+  ``build_mode`` field is not populated by every dump path, so the detector
+  falls back to recovering the stdlib family from the mangled symbol names
+  (which are always present and serialized) — see :func:`_effective_build_mode`.
+* It is **quiet when evidence is missing.** When neither a captured build-mode
+  nor any mangled symbol reveals the stdlib family (it stays ``UNKNOWN``), it
+  emits nothing — it does not guess and it does not escalate. The absence of
+  evidence is a reason to stay silent, not to raise an alarm.
 * It defaults to **RISK, never BREAKING.** When a public type embeds a stdlib
   type *by value* and its layout actually differs, that owner type is itself a
   non-``std::`` type (e.g. ``class A``) and is therefore never filtered, so the
@@ -47,7 +51,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from .build_mode import StdlibFamily
+from .build_mode import StdlibFamily, build_mode_from_signals
 from .checker_policy import ChangeKind
 from .checker_types import Change
 from .detector_registry import registry
@@ -80,9 +84,14 @@ def _public_type_embeds_stdlib_by_value(snap: AbiSnapshot) -> bool:
 
     for rec in snap.types:
         for fld in rec.fields:
-            tname = fld.type or ""
-            if "*" in tname or "&" in tname:
-                continue  # pointer/reference: layout-neutral
+            tname = (fld.type or "").strip()
+            # Skip only when the *field itself* is a pointer or reference (a
+            # top-level ``*``/``&`` at the end of the spelling): those are
+            # layout-neutral. A ``*`` inside template arguments — e.g.
+            # ``std::vector<int*>`` held by value — still embeds the container
+            # by value, so it must NOT be skipped (CodeRabbit review on #345).
+            if tname.endswith("*") or tname.endswith("&"):
+                continue
             # is_non_abi_surface_type() is True for std::/__gnu_cxx:: etc. We
             # reuse it as the single source of truth for "is a stdlib type".
             if is_non_abi_surface_type(tname.replace("const ", "").strip()):
@@ -100,7 +109,31 @@ def _layout_evidence_present(snap: AbiSnapshot) -> bool:
     return any(rec.size_bits is not None for rec in snap.types)
 
 
+def _effective_build_mode(snap: AbiSnapshot) -> BuildMode | None:
+    """Return the snapshot's :class:`BuildMode`, deriving it on the fly when the
+    captured field is absent.
+
+    The normalized ``build_mode`` field is not populated by every dump path, and
+    serialized snapshots predating schema v5 lack it entirely — but the
+    standard-library family (and libc++ ABI version) this detector keys on is
+    encoded directly in the mangled symbol names (``_ZNSt3__1`` ⇒ libc++ v1,
+    ``B5cxx11`` ⇒ libstdc++ C++11 ABI). Those names are always present on a real
+    snapshot and are serialized to JSON, so we can recover the stdlib signal
+    from them whenever the field itself is missing. Returns ``None`` only when
+    there are no mangled symbols at all to reason from (then the detector stays
+    silent rather than guessing).
+    """
+    if snap.build_mode is not None:
+        return snap.build_mode
+    mangled = [f.mangled for f in snap.functions if getattr(f, "mangled", None)]
+    mangled += [v.mangled for v in snap.variables if getattr(v, "mangled", None)]
+    if not mangled:
+        return None
+    return build_mode_from_signals(mangled_symbols=mangled)
+
+
 def _describe(old_bm: BuildMode, new_bm: BuildMode) -> str:
+    """Render a human-readable ``old → new`` stdlib-implementation label."""
     old_lbl = _STDLIB_LABEL.get(old_bm.stdlib, old_bm.stdlib.value)
     new_lbl = _STDLIB_LABEL.get(new_bm.stdlib, new_bm.stdlib.value)
     return f"{old_lbl} → {new_lbl}"
@@ -115,11 +148,12 @@ def _diff_stdlib_implementation(old: AbiSnapshot, new: AbiSnapshot) -> list[Chan
     build-mode evidence is missing or inconclusive.
     """
     changes: list[Change] = []
-    old_bm = old.build_mode
-    new_bm = new.build_mode
+    old_bm = _effective_build_mode(old)
+    new_bm = _effective_build_mode(new)
 
-    # Quiet when evidence is absent: no build-mode on either side means we have
-    # no basis to claim an implementation change. Do not guess, do not escalate.
+    # Quiet when evidence is absent: no build-mode and no mangled symbols on a
+    # side means we have no basis to claim an implementation change. Do not
+    # guess, do not escalate.
     if old_bm is None or new_bm is None:
         return changes
 

@@ -20,8 +20,10 @@ from abicheck.checker import compare
 from abicheck.checker_policy import RISK_KINDS, ChangeKind
 from abicheck.model import (
     AbiSnapshot,
+    Function,
     RecordType,
     TypeField,
+    Visibility,
     stdlib_namespaces_excluded,
 )
 
@@ -174,6 +176,24 @@ class TestDetectorFindings:
         )
         assert "embeds a std::" not in finding.description
 
+    def test_stdlib_container_of_pointers_by_value_is_embedding(self) -> None:
+        # std::vector<int*> held BY VALUE is layout-dependent: the `*` is in the
+        # template argument, not the field type. Must count as an embedding.
+        rec = RecordType(
+            name="PtrBag",
+            kind="class",
+            size_bits=192,
+            fields=[TypeField(name="items", type="std::vector<int*>", offset_bits=0)],
+        )
+        old = _snap("1", stdlib=StdlibFamily.LIBSTDCXX, types=[rec])
+        new = _snap("2", stdlib=StdlibFamily.LIBCXX, types=[rec])
+        result = compare(old, new)
+        finding = next(
+            c for c in result.changes
+            if c.kind == ChangeKind.STDLIB_IMPLEMENTATION_CHANGED
+        )
+        assert "embeds a std::" in finding.description
+
     def test_msvc_stl_label_in_description(self) -> None:
         old = _snap("1", stdlib=StdlibFamily.MSVC_STL, types=[_embed_stdlib_record()])
         new = _snap("2", stdlib=StdlibFamily.LIBCXX, types=[_embed_stdlib_record()])
@@ -183,3 +203,44 @@ class TestDetectorFindings:
             if c.kind == ChangeKind.STDLIB_IMPLEMENTATION_CHANGED
         )
         assert "MSVC STL" in finding.description
+
+
+class TestBuildModeFallback:
+    """The detector must fire on real snapshots that lack a captured build_mode,
+    by recovering the stdlib family from mangled symbol names (Codex PR #345 P1).
+    """
+
+    @staticmethod
+    def _fn(mangled: str) -> Function:
+        return Function(
+            name=mangled, mangled=mangled, return_type="void",
+            visibility=Visibility.PUBLIC,
+        )
+
+    def test_fires_without_build_mode_from_mangled_symbols(self) -> None:
+        # libstdc++ (no __1) → libc++ (std::__1), no build_mode captured.
+        old = AbiSnapshot(
+            library="lib.so", version="1",
+            functions=[self._fn("_ZNSt6vectorIiSaIiEE9push_backEi")],
+        )
+        new = AbiSnapshot(
+            library="lib.so", version="2",
+            functions=[self._fn("_ZNSt3__16vectorIiNS_9allocatorIiEEEE9push_backEOi")],
+        )
+        assert old.build_mode is None and new.build_mode is None
+        kinds = {c.kind for c in compare(old, new).changes}
+        assert ChangeKind.STDLIB_IMPLEMENTATION_CHANGED in kinds
+
+    def test_silent_when_no_mangled_symbols(self) -> None:
+        old = AbiSnapshot(library="lib.so", version="1")
+        new = AbiSnapshot(library="lib.so", version="2")
+        kinds = {c.kind for c in compare(old, new).changes}
+        assert ChangeKind.STDLIB_IMPLEMENTATION_CHANGED not in kinds
+
+    def test_captured_build_mode_takes_precedence(self) -> None:
+        # Same C-linkage symbols on both sides (no stdlib signal in mangling),
+        # but captured build_mode says the implementation changed → still fires.
+        old = _snap("1", stdlib=StdlibFamily.LIBSTDCXX)
+        new = _snap("2", stdlib=StdlibFamily.LIBCXX)
+        kinds = {c.kind for c in compare(old, new).changes}
+        assert ChangeKind.STDLIB_IMPLEMENTATION_CHANGED in kinds
