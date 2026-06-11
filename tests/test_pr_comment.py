@@ -213,11 +213,8 @@ def test_release_bundle_findings_register_as_change():
     assert "build-config matrix" in body
 
 
-def test_release_global_compatible_finding_gated_to_breaking():
-    # A global (bundle/matrix) COMPATIBLE section buckets as Safe by verdict, but
-    # when a severity gate (addition error) turned the check red on exactly that
-    # finding, it must be filed under Breaking.
-    report = {
+def _release_global_report(config: dict) -> dict:
+    return {
         "verdict": "COMPATIBLE",
         "old_dir": "/o",
         "new_dir": "/n",
@@ -225,15 +222,33 @@ def test_release_global_compatible_finding_gated_to_breaking():
         "matrix_verdict": "COMPATIBLE",
         "matrix_findings": [
             {"kind": "func_added", "symbol": "probe_new", "description": "x"},
+            {"kind": "soname_bump_unnecessary", "symbol": "libp", "description": "y"},
         ],
-        "severity": {"config": {"addition": "error"}, "exit_code": 1},
+        "severity": {"config": config, "exit_code": 1},
         "unmatched_old": [],
         "unmatched_new": [],
     }
-    model = build_model(report)
-    # the global compatible finding is promoted to breaking, not safe
-    assert model.counts == (1, 0, 0)
+
+
+def test_release_global_addition_gate_promotes_only_additions():
+    # addition gated → only the func_added finding is Breaking; the quality
+    # finding stays Safe (gates are not interchangeable).
+    model = build_model(_release_global_report({"addition": "error"}))
+    assert model.counts == (1, 0, 1)
+
+
+def test_release_global_quality_gate_promotes_only_quality():
+    # quality gated → only the soname_bump_unnecessary finding is Breaking; the
+    # addition (func_added) stays Safe even though it's in the same section.
+    model = build_model(_release_global_report({"quality_issues": "error"}))
+    assert model.counts == (1, 0, 1)
     assert should_post(model, "changes") is True
+
+
+def test_release_global_ungated_compatible_stays_safe():
+    # No matching gate → the whole compatible section stays Safe.
+    model = build_model(_release_global_report({"potential_breaking": "error"}))
+    assert model.counts == (0, 0, 2)
 
 
 def test_release_errored_library_counts_as_breaking():

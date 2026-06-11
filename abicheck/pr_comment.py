@@ -289,11 +289,10 @@ def _append_release_global_row(
     These findings live at the top level of the report and fold into the
     release verdict; without this a clean per-library release that breaks only
     at the bundle/matrix level would report zero changes and skip the comment.
-    The findings carry no per-item severity, so they are bucketed by the
-    section's own verdict — but a severity gate set to error promotes the
-    matching section to Breaking (mirroring the per-library path), since
-    ``_fold_release_global_severity`` can turn the check red on exactly these
-    global findings.
+    Findings are bucketed by the section's own verdict, but each carries its
+    ``kind`` — so when a compatible section is gated, the additions and quality
+    issues are classified per finding and only the gated category is promoted to
+    Breaking, matching what ``_fold_release_global_severity`` actually computes.
     """
     if not isinstance(findings, list) or not findings:
         return
@@ -304,16 +303,29 @@ def _append_release_global_row(
     )
     bucket = verdict_map.get(str(verdict or ""), "review")
     levels = levels or {}
-    # A compatible section (additions / quality) gated to error, or a risk
-    # section under potential_breaking=error, turns the check red — file it
-    # under Breaking so the comment matches.
-    if bucket == "safe" and (
-        levels.get("addition") == "error" or levels.get("quality_issues") == "error"
-    ):
-        bucket = "breaking"
-    elif bucket == "review" and levels.get("potential_breaking") == "error":
-        bucket = "breaking"
     n = len(findings)
+    # A risk section under potential_breaking=error turns the check red.
+    if bucket == "review" and levels.get("potential_breaking") == "error":
+        bucket = "breaking"
+    # A compatible section is additions + quality; classify each finding by its
+    # kind and promote only the gated category to Breaking (addition and quality
+    # gates are not interchangeable).
+    if bucket == "safe":
+        add_err = levels.get("addition") == "error"
+        qual_err = levels.get("quality_issues") == "error"
+        if add_err or qual_err:
+            nb = sum(
+                1
+                for f in findings
+                if isinstance(f, dict)
+                and (
+                    add_err
+                    if str(f.get("kind", "")) in _ADDITION_KIND_VALUES
+                    else qual_err
+                )
+            )
+            rows.append((name, str(verdict or "?"), nb, 0, n - nb))
+            return
     rows.append(
         (
             name,
