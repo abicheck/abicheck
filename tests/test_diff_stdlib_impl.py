@@ -276,6 +276,38 @@ class TestBuildModeFallback:
         kinds = {c.kind for c in compare(old, new).changes}
         assert ChangeKind.STDLIB_IMPLEMENTATION_CHANGED in kinds
 
+    def test_fires_for_untagged_libstdcxx_user_api(self) -> None:
+        # std::vector<int> by value under libstdc++ carries no __cxx11 tag and no
+        # libc++ __1 marker, so it is recovered via demangling (Codex #345).
+        from abicheck.demangle import demangle
+        if demangle("_Z3apiSt6vectorIiSaIiEE") is None:
+            import pytest
+            pytest.skip("no C++ demangler available")
+        old = AbiSnapshot(
+            library="lib.so", version="1",
+            functions=[self._fn("_Z3apiSt6vectorIiSaIiEE")])  # libstdc++
+        new = AbiSnapshot(
+            library="lib.so", version="2",
+            functions=[self._fn("_Z3apiNSt3__16vectorIiNS_9allocatorIiEEEE")])
+        kinds = {c.kind for c in compare(old, new).changes}
+        assert ChangeKind.STDLIB_IMPLEMENTATION_CHANGED in kinds
+
+    def test_user_type_resembling_std_substitution_not_flagged(self) -> None:
+        # A user type "St3Db" must NOT be misread as libstdc++: demangling shows
+        # it carries no `std::`, so the side stays UNKNOWN and no finding fires.
+        from abicheck.demangle import demangle
+        if demangle("_Z3apiSt6vectorIiSaIiEE") is None:
+            import pytest
+            pytest.skip("no C++ demangler available")
+        old = AbiSnapshot(
+            library="lib.so", version="1",
+            functions=[self._fn("_Z3api5St3Db")])  # user type, not std
+        new = AbiSnapshot(
+            library="lib.so", version="2",
+            functions=[self._fn("_Z3apiNSt3__16vectorIiNS_9allocatorIiEEEE")])
+        kinds = {c.kind for c in compare(old, new).changes}
+        assert ChangeKind.STDLIB_IMPLEMENTATION_CHANGED not in kinds
+
     def test_silent_when_no_mangled_symbols(self) -> None:
         old = AbiSnapshot(library="lib.so", version="1")
         new = AbiSnapshot(library="lib.so", version="2")

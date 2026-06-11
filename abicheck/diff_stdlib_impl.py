@@ -159,6 +159,22 @@ def _effective_build_mode(snap: AbiSnapshot) -> BuildMode | None:
         sym.startswith("?") and "std@@" in sym for sym in mangled
     ):
         bm.stdlib = StdlibFamily.MSVC_STL
+    if bm.stdlib is StdlibFamily.UNKNOWN:
+        # Untagged libstdc++: a parameter type like ``std::vector<int>`` mangles
+        # with the Itanium ``St`` substitution but carries no ``__cxx11`` tag and
+        # no libc++ ``__1`` inline namespace, so a substring heuristic cannot
+        # separate it from an identifier that merely contains "St" (e.g. a user
+        # type ``St3Db``). Demangling parses the substitution correctly —
+        # libstdc++ → ``std::``; libc++ → ``std::__1`` (already handled above);
+        # a user type → no ``std::`` — and is already used across the diff core.
+        # It degrades to ``None`` (→ stay quiet) when no demangler is available
+        # (Codex review #345).
+        from .demangle import demangle
+        for sym in mangled:
+            d = demangle(sym)
+            if d and "std::" in d and "std::__1" not in d and "std::__2" not in d:
+                bm.stdlib = StdlibFamily.LIBSTDCXX
+                break
     return bm
 
 
