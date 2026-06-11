@@ -619,6 +619,42 @@ def test_cli_permissive_continues_on_failed_extractor(tmp_path):
     assert rec["status"] == "failed"
 
 
+def test_cli_malformed_build_evidence_is_failed_not_crash(tmp_path):
+    # Output is valid JSON but not valid BuildEvidence (compile unit missing id):
+    # BuildEvidence.from_dict raises KeyError/TypeError. Permissive mode must
+    # record it as failed, never abort the command (Codex P1).
+    bad_be = (
+        "import json,sys,os;p=sys.argv[1];os.makedirs(os.path.dirname(p),exist_ok=True);"
+        "json.dump({'compile_units':[{}]},open(p,'w'))"
+    )
+    data = {
+        "name": "cli-malformed",
+        "commands": {"collect": [sys.executable, "-c", bad_be, "{normalized_dir}/build_evidence.json"]},
+        "outputs": {"normalized": [{"kind": "build_evidence", "path": "normalized/cli-malformed/build_evidence.json"}]},
+    }
+    manifest = _dump(tmp_path, data, name="malformed.yaml")
+    out = tmp_path / "pack"
+    result = _cli(["collect-evidence", "--extractor-manifest", str(manifest), "-o", str(out)])
+    assert result.exit_code == 0, result.output
+    rec = next(
+        e for e in json.loads((out / "manifest.json").read_text())["extractors"]
+        if e["name"] == "cli-malformed"
+    )
+    assert rec["status"] == "failed"
+
+
+def test_cli_strict_mode_fails_on_skipped_extractor(tmp_path):
+    # A requested manifest gated out by the action ceiling is 'skipped'; under
+    # strict mode the requested evidence is absent, so the run must fail (Codex P2).
+    manifest = _dump(tmp_path, _tool_manifest_dict(name="cli-gated", action="query_build_system"), name="gated.yaml")
+    out = tmp_path / "pack"
+    result = _cli(
+        ["collect-evidence", "--extractor-manifest", str(manifest), "--collection-mode", "strict", "-o", str(out)]
+    )
+    assert result.exit_code != 0
+    assert "strict collection mode" in result.output
+
+
 def test_cli_strict_mode_fails_on_broken_extractor(tmp_path):
     data = {
         "name": "cli-broken",

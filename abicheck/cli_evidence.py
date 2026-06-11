@@ -316,14 +316,17 @@ def collect_evidence_cmd(
         click.echo(f"  note: {diag}", err=True)
 
     # Strict mode (ADR-032 D9): requested evidence must be collected and valid,
-    # otherwise the command exits non-zero. A failed extractor row is the signal.
+    # otherwise the command exits non-zero. Both a failed row and a skipped one
+    # (e.g. an extractor gated out by the action ceiling, so its requested
+    # evidence is absent) count — strict requires the evidence to be present.
     if collection_mode == "strict":
-        failed = [e for e in extractors if e.status == "failed"]
-        if failed:
-            names = ", ".join(sorted(e.name for e in failed))
+        incomplete = [e for e in extractors if e.status in ("failed", "skipped")]
+        if incomplete:
+            names = ", ".join(sorted(f"{e.name}:{e.status}" for e in incomplete))
             raise click.ClickException(
-                f"strict collection mode: {len(failed)} extractor(s) failed ({names}). "
-                "Fix the inputs/tools or use --collection-mode permissive."
+                f"strict collection mode: {len(incomplete)} extractor(s) did not "
+                f"produce valid evidence ({names}). Fix the inputs/tools, grant the "
+                "needed actions, or use --collection-mode permissive."
             )
 
 
@@ -511,16 +514,23 @@ def _run_external_extractors(
             continue
 
         # Fold any normalized build_evidence output into the merged L3 evidence.
+        # `validate` only proved the file is JSON; it may still be structurally
+        # invalid BuildEvidence (e.g. a compile unit missing its id), which
+        # BuildEvidence.from_dict surfaces as KeyError/TypeError. Treat that as a
+        # failed extractor — downgrade the ledger row so it never crashes the
+        # command (D9 permissive) and so strict mode rejects the bad output (D8).
+        import json as _json
         for output in manifest.outputs:
             if output.kind != "build_evidence":
                 continue
             be_path = pack_root / output.path
             try:
-                import json as _json
                 merged.merge(_BuildEvidence.from_dict(
                     _json.loads(be_path.read_text(encoding="utf-8"))
                 ))
-            except (OSError, ValueError) as exc:
+            except (OSError, ValueError, KeyError, TypeError) as exc:
+                record.status = "failed"
+                record.detail = record.detail or f"invalid build_evidence output: {exc}"
                 merged.diagnostics.append(
                     f"{manifest.name}: could not fold {output.path}: {exc}"
                 )
