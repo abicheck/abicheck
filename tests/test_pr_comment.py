@@ -213,6 +213,29 @@ def test_release_bundle_findings_register_as_change():
     assert "build-config matrix" in body
 
 
+def test_release_global_compatible_finding_gated_to_breaking():
+    # A global (bundle/matrix) COMPATIBLE section buckets as Safe by verdict, but
+    # when a severity gate (addition error) turned the check red on exactly that
+    # finding, it must be filed under Breaking.
+    report = {
+        "verdict": "COMPATIBLE",
+        "old_dir": "/o",
+        "new_dir": "/n",
+        "libraries": [],
+        "matrix_verdict": "COMPATIBLE",
+        "matrix_findings": [
+            {"kind": "func_added", "symbol": "probe_new", "description": "x"},
+        ],
+        "severity": {"config": {"addition": "error"}, "exit_code": 1},
+        "unmatched_old": [],
+        "unmatched_new": [],
+    }
+    model = build_model(report)
+    # the global compatible finding is promoted to breaking, not safe
+    assert model.counts == (1, 0, 0)
+    assert should_post(model, "changes") is True
+
+
 def test_release_errored_library_counts_as_breaking():
     # A library whose comparison errored has no count fields; it must still
     # register as a change so the failed comparison is reflected in the comment.

@@ -282,6 +282,7 @@ def _append_release_global_row(
     verdict: object,
     findings: object,
     gate_api_break: bool = False,
+    levels: dict[str, str] | None = None,
 ) -> None:
     """Fold a release-global check (bundle / probe-matrix) into the rows.
 
@@ -289,7 +290,10 @@ def _append_release_global_row(
     release verdict; without this a clean per-library release that breaks only
     at the bundle/matrix level would report zero changes and skip the comment.
     The findings carry no per-item severity, so they are bucketed by the
-    section's own verdict.
+    section's own verdict — but a severity gate set to error promotes the
+    matching section to Breaking (mirroring the per-library path), since
+    ``_fold_release_global_severity`` can turn the check red on exactly these
+    global findings.
     """
     if not isinstance(findings, list) or not findings:
         return
@@ -299,6 +303,16 @@ def _append_release_global_row(
         else _VERDICT_BUCKET
     )
     bucket = verdict_map.get(str(verdict or ""), "review")
+    levels = levels or {}
+    # A compatible section (additions / quality) gated to error, or a risk
+    # section under potential_breaking=error, turns the check red — file it
+    # under Breaking so the comment matches.
+    if bucket == "safe" and (
+        levels.get("addition") == "error" or levels.get("quality_issues") == "error"
+    ):
+        bucket = "breaking"
+    elif bucket == "review" and levels.get("potential_breaking") == "error":
+        bucket = "breaking"
     n = len(findings)
     rows.append(
         (
@@ -366,6 +380,7 @@ def _from_release(
         report.get("bundle_verdict"),
         report.get("bundle_findings"),
         gate_api_break,
+        levels,
     )
     _append_release_global_row(
         rows,
@@ -373,6 +388,7 @@ def _from_release(
         report.get("matrix_verdict"),
         report.get("matrix_findings"),
         gate_api_break,
+        levels,
     )
     removed = report.get("unmatched_old")
     added = report.get("unmatched_new")
