@@ -122,6 +122,25 @@ if TYPE_CHECKING:
 @click.option("--codeql-results", "codeql_results", type=click.Path(path_type=Path), default=None,
               help="Pre-captured CodeQL call-graph query result JSON to fold into "
                    "the L5 graph (ADR-031 D5; non-executing). Implies --source-graph summary.")
+@click.option("--extractor-manifest", "extractor_manifests", multiple=True,
+              type=click.Path(path_type=Path),
+              help="Register an external CLI evidence extractor by manifest path "
+                   "(ADR-032 D3; trusted-by-operator, never auto-discovered). Repeat "
+                   "for several. Its declared actions are intersected with the actions "
+                   "enabled for this run (see --allow-build-query).")
+@click.option("--source-root", "source_root", type=click.Path(path_type=Path), default=None,
+              help="Source checkout root, supplied to external extractors that reference "
+                   "the {source_root} placeholder (ADR-032 D3).")
+@click.option("--allow-build-query", "allow_build_query", is_flag=True, default=False,
+              help="Permit extractors to query the build system (ninja -t, bazel "
+                   "cquery/aquery, CMake File API regeneration). Off by default: only "
+                   "reading existing build outputs is allowed (ADR-032 D5).")
+@click.option("--collection-mode", "collection_mode", default="permissive", show_default=True,
+              type=click.Choice(["permissive", "strict", "audit"], case_sensitive=False),
+              help="How extractor failures are handled (ADR-032 D9): permissive "
+                   "(failures degrade coverage, collection continues), strict (a "
+                   "failed/invalid extractor exits non-zero), audit (preserve raw "
+                   "artifacts + full diagnostics).")
 @click.option("-o", "--output", "output", type=click.Path(path_type=Path), required=True,
               help="Output evidence-pack directory.")
 @click.option("-v", "--verbose", is_flag=True, default=False)
@@ -152,6 +171,10 @@ def collect_evidence_cmd(
     include_graph: bool,
     kythe_entries: Path | None,
     codeql_results: Path | None,
+    extractor_manifests: tuple[Path, ...],
+    source_root: Path | None,
+    allow_build_query: bool,
+    collection_mode: str,
     output: Path,
     verbose: bool,
 ) -> None:
@@ -185,6 +208,23 @@ def collect_evidence_cmd(
         verbose=verbose,
     )
 
+    # External CLI extractors (ADR-032 D3): explicitly-registered subprocess
+    # adapters, run under the resolved action ceiling (D5). Their normalized
+    # build_evidence is folded into `merged` so it shares coverage and the pack.
+    if extractor_manifests:
+        _run_external_extractors(
+            merged, extractors,
+            manifests=extractor_manifests,
+            pack_root=output,
+            binary=binary,
+            build_dir=build_dir,
+            source_root=source_root,
+            compile_db=effective_compile_db,
+            allow_build_query=allow_build_query,
+            collection_mode=collection_mode,
+            verbose=verbose,
+        )
+
     surface: SourceAbiSurface | None = None
     source_detail = ""
     if source_abi:
@@ -202,37 +242,16 @@ def collect_evidence_cmd(
             verbose=verbose,
         )
 
-    graph: SourceGraphSummary | None = None
-    graph_detail = ""
-    # Any graph-augmenting option implies graph collection (edges go into it).
-    if (call_graph or include_graph or kythe_entries or codeql_results) and source_graph == "off":
-        source_graph = "summary"
-    if source_graph == "summary":
-        from .evidence.source_graph import build_source_graph
-        # Fold the L4 surface in too when it was collected (--source-abi), so
-        # the graph carries the public-reachability + source↔binary slices.
-        graph = build_source_graph(merged, source_abi=surface)
-        if call_graph:
-            _collect_call_graph(graph, merged, extractors, clang_bin=clang_bin)
-        if include_graph:
-            _collect_include_graph(graph, merged, extractors, clang_bin=clang_bin)
-        if kythe_entries or codeql_results:
-            _ingest_graph_backends(graph, extractors,
-                                   kythe_entries=kythe_entries, codeql_results=codeql_results)
-        graph.finalize()
-        graph_detail = (
-            f"{len(graph.nodes)} nodes, {len(graph.edges)} edges "
-            f"({graph.coverage.get('targets', 0)} targets, "
-            f"{graph.coverage.get('compile_units', 0)} compile units, "
-            f"{graph.coverage.get('source_decls', 0)} source decls, "
-            f"{graph.coverage.get('call_edges', {}).get('count', 0)} call edges, "
-            f"{graph.coverage.get('include_edges', {}).get('count', 0)} include edges)"
-        )
-        extractors.append(ExtractorRecord(
-            name="source_graph:summary",
-            status="ok" if graph.nodes else "partial",
-            detail=graph_detail if graph.nodes else "no build evidence to fold into a graph",
-        ))
+    graph, graph_detail = _collect_source_graph(
+        merged, extractors,
+        source_graph=source_graph,
+        call_graph=call_graph,
+        include_graph=include_graph,
+        kythe_entries=kythe_entries,
+        codeql_results=codeql_results,
+        surface=surface,
+        clang_bin=clang_bin,
+    )
 
     pack = EvidencePack.empty(
         output,
@@ -247,6 +266,7 @@ def collect_evidence_cmd(
         "binary": red.path(str(binary)) if binary else None,
         "headers": [red.path(str(h)) for h in headers],
         "build_dir": red.path(str(build_dir)) if build_dir else None,
+        "collection_mode": collection_mode,
     }
     has_build = bool(
         merged.compile_units or merged.targets or merged.toolchains
@@ -263,6 +283,105 @@ def collect_evidence_cmd(
     )
     pack.write()
 
+    _enforce_strict_mode(extractors, merged, collection_mode)
+    _echo_collection_summary(
+        pack, merged, output,
+        has_build=has_build,
+        source_abi=source_abi,
+        source_detail=source_detail,
+        graph=graph,
+        graph_detail=graph_detail,
+    )
+
+
+def _collect_source_graph(
+    merged: BuildEvidence,
+    extractors: list[ExtractorRecord],
+    *,
+    source_graph: str,
+    call_graph: bool,
+    include_graph: bool,
+    kythe_entries: Path | None,
+    codeql_results: Path | None,
+    surface: SourceAbiSurface | None,
+    clang_bin: str,
+) -> tuple[SourceGraphSummary | None, str]:
+    """Build the optional L5 source graph and fold in any requested augmentations.
+
+    Any graph-augmenting option (call/include graph, Kythe/CodeQL ingest) implies
+    graph collection. Returns ``(graph, graph_detail)``; ``graph`` is ``None`` when
+    no graph was requested.
+    """
+    if (call_graph or include_graph or kythe_entries or codeql_results) and source_graph == "off":
+        source_graph = "summary"
+    if source_graph != "summary":
+        return None, ""
+
+    from .evidence.source_graph import build_source_graph
+    # Fold the L4 surface in too when it was collected (--source-abi), so the
+    # graph carries the public-reachability + source↔binary slices.
+    graph = build_source_graph(merged, source_abi=surface)
+    if call_graph:
+        _collect_call_graph(graph, merged, extractors, clang_bin=clang_bin)
+    if include_graph:
+        _collect_include_graph(graph, merged, extractors, clang_bin=clang_bin)
+    if kythe_entries or codeql_results:
+        _ingest_graph_backends(graph, extractors,
+                               kythe_entries=kythe_entries, codeql_results=codeql_results)
+    graph.finalize()
+    graph_detail = (
+        f"{len(graph.nodes)} nodes, {len(graph.edges)} edges "
+        f"({graph.coverage.get('targets', 0)} targets, "
+        f"{graph.coverage.get('compile_units', 0)} compile units, "
+        f"{graph.coverage.get('source_decls', 0)} source decls, "
+        f"{graph.coverage.get('call_edges', {}).get('count', 0)} call edges, "
+        f"{graph.coverage.get('include_edges', {}).get('count', 0)} include edges)"
+    )
+    extractors.append(ExtractorRecord(
+        name="source_graph:summary",
+        status="ok" if graph.nodes else "partial",
+        detail=graph_detail if graph.nodes else "no build evidence to fold into a graph",
+    ))
+    return graph, graph_detail
+
+
+def _enforce_strict_mode(
+    extractors: list[ExtractorRecord], merged: BuildEvidence, collection_mode: str
+) -> None:
+    """Fail the command if strict mode is set and any extractor is incomplete (ADR-032 D9).
+
+    Both a failed row and a skipped one (e.g. an extractor gated out by the action
+    ceiling, so its requested evidence is absent) count — strict requires the
+    evidence to be present. Called *before* the success output so a strict run
+    never prints "Evidence pack written" and then exits non-zero.
+    """
+    if collection_mode != "strict":
+        return
+    incomplete = [e for e in extractors if e.status in ("failed", "skipped")]
+    if not incomplete:
+        return
+    names = ", ".join(sorted(f"{e.name}:{e.status}" for e in incomplete))
+    for diag in merged.diagnostics:
+        click.echo(f"  note: {diag}", err=True)
+    raise click.ClickException(
+        f"strict collection mode: {len(incomplete)} extractor(s) did not "
+        f"produce valid evidence ({names}). Fix the inputs/tools, grant the "
+        "needed actions, or use --collection-mode permissive."
+    )
+
+
+def _echo_collection_summary(
+    pack: EvidencePack,
+    merged: BuildEvidence,
+    output: Path,
+    *,
+    has_build: bool,
+    source_abi: bool,
+    source_detail: str,
+    graph: SourceGraphSummary | None,
+    graph_detail: str,
+) -> None:
+    """Print the per-layer summary for a successfully written evidence pack."""
     click.echo(f"Evidence pack written to {output}")
     click.echo(f"  content hash: {pack.content_hash()}")
     if has_build:
@@ -383,6 +502,164 @@ def _run_adapters(
             inputs=[DEFAULT_REDACTION.path(str(binary))],
             detail=f"{len(ev.toolchains)} toolchains, {len(ev.compile_units)} compile units",
         ))
+
+
+def _run_external_extractors(
+    merged: BuildEvidence,
+    extractors: list[ExtractorRecord],
+    *,
+    manifests: tuple[Path, ...],
+    pack_root: Path,
+    binary: Path | None,
+    build_dir: Path | None,
+    source_root: Path | None,
+    compile_db: Path | None,
+    allow_build_query: bool,
+    collection_mode: str,
+    verbose: bool,
+) -> None:
+    """Run explicitly-registered external CLI extractors (ADR-032 D3/D5/D9).
+
+    Each manifest is loaded from the operator-provided path (never auto-
+    discovered). The run-permitted action set starts at ``inspect`` and adds
+    ``query_build_system`` only with ``--allow-build-query``; a manifest that
+    needs an action outside that set is recorded as skipped rather than run
+    (its declared actions are a ceiling intersected with what the run allows).
+    Normalized ``build_evidence`` outputs are folded into *merged*; failures are
+    captured as extractor rows so the collection-mode policy (D9) can act on them.
+    """
+    from .evidence.build_evidence import BuildEvidence as _BuildEvidence
+    from .evidence.extractor import (
+        CollectionAction,
+        CollectionContext,
+        CollectionMode,
+    )
+    from .evidence.extractor_manifest import (
+        ManifestError,
+        load_extractor_manifest,
+        run_external_extractor,
+    )
+
+    run_permitted = {CollectionAction.INSPECT}
+    if allow_build_query:
+        run_permitted.add(CollectionAction.QUERY_BUILD_SYSTEM)
+
+    pack_root.mkdir(parents=True, exist_ok=True)
+
+    for manifest_path in manifests:
+        try:
+            manifest = load_extractor_manifest(manifest_path)
+        except ManifestError as exc:
+            extractors.append(ExtractorRecord(
+                name=f"external:{manifest_path.name}", status="failed",
+                inputs=[DEFAULT_REDACTION.path(str(manifest_path))], detail=str(exc),
+            ))
+            merged.diagnostics.append(f"extractor manifest {manifest_path}: {exc}")
+            continue
+
+        context = CollectionContext(
+            binary_paths=[binary] if binary else [],
+            build_root=build_dir,
+            source_root=source_root,
+            compile_db=compile_db,
+            allowed_actions=set(run_permitted),
+            collection_mode=CollectionMode(collection_mode),
+            redaction_policy=DEFAULT_REDACTION,
+        )
+        # An extractor gated out by the action ceiling comes back as a 'skipped'
+        # record (run_external_extractor decides via discover()), so there is no
+        # permission exception for the caller to handle here.
+        _norm, record = run_external_extractor(manifest, context, pack_root)
+
+        extractors.append(record)
+        if record.status != "ok":
+            merged.diagnostics.append(
+                f"{manifest.name}: {record.detail or 'extractor did not complete'}"
+            )
+            _purge_external_outputs(pack_root, manifest)
+            continue
+
+        # Reject output kinds collect-evidence cannot fold yet — only
+        # build_evidence is wired into the pack here. A manifest that advertises
+        # a source_abi / source_graph_summary output would otherwise be recorded
+        # ok while its evidence is silently dropped (and pack.write() removes the
+        # canonical source/graph files), so the requested evidence is absent even
+        # though the extractor "succeeded" (Codex P2). Fail loudly instead.
+        unsupported = sorted({o.kind for o in manifest.outputs if o.kind != "build_evidence"})
+        if unsupported:
+            record.status = "failed"
+            record.detail = record.detail or f"unsupported output kind(s): {', '.join(unsupported)}"
+            # The outputs are about to be purged from the pack, so the ledger row
+            # must not keep advertising their (now-removed) paths (Codex P2).
+            record.artifacts = []
+            merged.diagnostics.append(
+                f"{manifest.name}: output kind(s) {', '.join(unsupported)} are not yet "
+                "supported by collect-evidence (only build_evidence is folded into the pack)"
+            )
+            _purge_external_outputs(pack_root, manifest)
+            continue
+
+        # Fold any normalized build_evidence outputs into the merged L3 evidence.
+        # `validate` only proved each file is JSON; it may still be structurally
+        # invalid BuildEvidence (e.g. a compile unit missing its id), which
+        # BuildEvidence.from_dict surfaces as KeyError/TypeError. Parse *all*
+        # declared outputs first and merge only if every one is valid — so a
+        # later malformed output never leaves an earlier one's evidence merged
+        # from an extractor we then mark failed (D8: invalid output must not
+        # influence collected facts). A failure downgrades the ledger row, never
+        # crashes the command (D9 permissive), and makes strict mode reject it.
+        import json as _json
+        parsed: list[_BuildEvidence] = []
+        fold_ok = True
+        for output in manifest.outputs:
+            if output.kind != "build_evidence":
+                continue
+            be_path = pack_root / output.path
+            try:
+                parsed.append(_BuildEvidence.from_dict(
+                    _json.loads(be_path.read_text(encoding="utf-8"))
+                ))
+            except (OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
+                fold_ok = False
+                record.status = "failed"
+                record.detail = record.detail or f"invalid build_evidence output: {exc}"
+                # _purge_external_outputs (below) removes these files, so the
+                # failed ledger row must not keep advertising stale paths to a
+                # missing/replaced artifact (Codex P2).
+                record.artifacts = []
+                merged.diagnostics.append(
+                    f"{manifest.name}: could not fold {output.path}: {exc}"
+                )
+                break
+        if fold_ok:
+            for build_evidence in parsed:
+                merged.merge(build_evidence)
+        else:
+            _purge_external_outputs(pack_root, manifest)
+
+
+def _purge_external_outputs(pack_root: Path, manifest: object) -> None:
+    """Remove a failed external extractor's normalized outputs from the pack.
+
+    A failed/skipped extractor must be isolated from the collected pack: its
+    normalized output files (and its ``normalized/<name>/`` subtree) would
+    otherwise be hashed into ``EvidencePack`` ``manifest.artifacts`` and the
+    content hash, so an invalid output would change pack identity and publish a
+    digest for evidence that was never folded (Codex P2). Raw artifacts under
+    ``raw/`` are *not* removed — they are provenance-only, never hashed, and are
+    what audit mode preserves for debugging.
+    """
+    import shutil
+
+    name = getattr(manifest, "name", "")
+    for output in getattr(manifest, "outputs", []):
+        try:
+            (pack_root / output.path).unlink()
+        except OSError:
+            pass
+    norm_dir = pack_root / "normalized" / name
+    if norm_dir.is_dir():
+        shutil.rmtree(norm_dir, ignore_errors=True)
 
 
 def _collect_call_graph(

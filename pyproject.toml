@@ -146,6 +146,7 @@ module = [
     "abicheck.environment_matrix",
     "abicheck.probe_harness",
     "abicheck.bundle",
+    "abicheck.evidence.extractor_manifest",
 ]
 disable_error_code = ["import-untyped"]
 

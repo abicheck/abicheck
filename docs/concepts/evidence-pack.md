@@ -185,6 +185,67 @@ decides or suppresses an artifact-proven ABI break.
   `DW_AT_producer`. These signals are **advisory** unless cross-checked against
   build-system evidence.
 
+## External CLI extractors & the security model (ADR-032)
+
+A build system abicheck does not natively support can be integrated through an
+**external CLI extractor** — a separate program registered by a YAML manifest,
+talked to over a subprocess boundary with declared inputs, outputs, and actions.
+No untrusted Python is ever imported into the abicheck process.
+
+```yaml
+# my-extractor.yaml
+name: abicheck-cmake-extractor
+version: "1.0"
+capabilities: { compile_db: true, target_graph: true }
+allowed_actions: [inspect, query_build_system]
+commands:
+  collect:   ["abicheck-cmake-extractor", "collect", "--output", "{raw_dir}"]
+  normalize: ["abicheck-cmake-extractor", "normalize", "--raw", "{raw_dir}", "--out", "{normalized_dir}"]
+outputs:
+  normalized:
+    - { kind: build_evidence, path: build/build_evidence.json }
+```
+
+```bash
+abicheck collect-evidence \
+  --extractor-manifest my-extractor.yaml \
+  --allow-build-query \
+  -o libfoo.evidence/
+```
+
+The security model has three pillars:
+
+- **Trusted-by-operator, never auto-discovered.** A manifest runs only when you
+  register it explicitly with `--extractor-manifest PATH`. abicheck never scans
+  `PATH`, the working tree, or any plugin directory.
+- **Declared actions are a ceiling, not a grant.** `inspect` (read existing
+  files) is the only action allowed by default. `query_build_system` is enabled
+  by `--allow-build-query`; `run_compiler`, `run_build`, `wrap_build`, and
+  `network` are denied by default (network always). A manifest's
+  `allowed_actions` are *intersected* with what the run permits, so a manifest
+  can never escalate beyond what you turned on — and an extractor that needs an
+  action you did not enable is **skipped** with a diagnostic, never run.
+- **No shell, sanitized environment.** Commands are an argv list (never a shell
+  string) run with `shell=False` and a minimal environment, so a third-party
+  tool never receives your full environment (which may hold tokens). Note the
+  action model gates *invocation* — abicheck refuses to launch an extractor that
+  needs a disallowed action — but it does not sandbox a process once launched;
+  `network` being denied means no extractor that *declares* it is run, not a
+  kernel-level block. This is why manifests are trusted-by-operator: register
+  only extractors you vet.
+
+Every external run records a full **reproducibility ledger** row in the pack
+manifest (ADR-032 D10): the redacted command, its content hash, declared
+capabilities, start/finish timestamps, status, and diagnostics.
+
+`--collection-mode` controls how failures are handled (ADR-032 D9):
+
+- `permissive` (default) — a failed extractor degrades coverage; collection
+  continues. Good for PR CI.
+- `strict` — a failed or invalid extractor exits non-zero. Good for baseline
+  generation, where missing evidence must be a hard error.
+- `audit` — preserve raw artifacts and full diagnostics for debugging.
+
 ## Build-evidence findings (L3)
 
 When two packs are compared, abicheck diffs their normalized build evidence and
