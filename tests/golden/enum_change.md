@@ -17,6 +17,7 @@
 | Confidence | MEDIUM |
 | Evidence tier | `header_aware` |
 | Evidence tiers | `header` |
+| Coverage gap | Detector 'elf_layout' disabled: missing ELF metadata on one side |
 | Coverage gap | Detector 'fingerprint_renames' disabled: requires ELF metadata in elf_only_mode |
 | Coverage gap | Detector 'pe' disabled: missing PE metadata |
 | Coverage gap | Detector 'macho' disabled: missing Mach-O metadata |
