@@ -61,6 +61,13 @@ def test_internal_versioned_symbols_collects_only_internal_bindings() -> None:
             ElfSymbol(name="public_api", version=""),
             # nameless symbol on an internal node must be skipped, not added as ""
             ElfSymbol(name="", version="FOO_INTERNAL_1"),
+            # mixed alias: same name on BOTH a public and an internal node must
+            # stay public — a real break to foo@LIBFOO_1.0 cannot be demoted.
+            ElfSymbol(name="foo", version="LIBFOO_1.0"),
+            ElfSymbol(name="foo", version="LIBFOO_PRIVATE"),
+            # internal node + unversioned default export -> public surface present
+            ElfSymbol(name="bar", version="BAR_INTERNAL_1"),
+            ElfSymbol(name="bar", version=""),
         ]
     )
     assert internal_versioned_symbols(elf) == {"_nettle_ecc_mod", "_priv_blob"}

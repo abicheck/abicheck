@@ -58,15 +58,28 @@ def is_internal_version_node(version: str) -> bool:
 
 
 def internal_versioned_symbols(elf: ElfMetadata) -> set[str]:
-    """Names of exported symbols bound to an internal/private version node."""
-    out: set[str] = set()
+    """Names whose **every** exported binding is on an internal/private node.
+
+    A name is returned only when it has at least one internal/private version
+    binding and **no** public binding — neither a public version node nor an
+    unversioned (default) export. If the same name is also exported on a public
+    node (``foo@LIBFOO_1.0`` alongside ``foo@LIBFOO_PRIVATE``), it stays public so
+    a real break to the public alias is never demoted (Codex review #354).
+    """
+    public: set[str] = set()
+    internal: set[str] = set()
     for sym in getattr(elf, "symbols", []) or []:
+        name = getattr(sym, "name", "")
+        if not name:
+            continue
         ver = getattr(sym, "version", "") or ""
         if ver and is_internal_version_node(ver):
-            name = getattr(sym, "name", "")
-            if name:
-                out.add(name)
-    return out
+            internal.add(name)
+        else:
+            # An unversioned (default) export or a public version node means the
+            # name is part of the public surface.
+            public.add(name)
+    return internal - public
 
 
 def demote_internal_version_node_findings(
