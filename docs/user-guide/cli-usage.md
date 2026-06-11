@@ -185,7 +185,7 @@ abicheck compare old.abi.json new.abi.json \
 |------|---------|-------------|
 | `--evidence <dir>` | `dump` | Record a content-addressed *reference* to a pack on the snapshot (the pack stays out-of-band; still pass it to `compare` to use its findings) |
 | `--old-evidence <dir>` / `--new-evidence <dir>` | `compare` | Load and diff per-side packs into the verdict — adds L3 build-context findings and an evidence-coverage table |
-| `--evidence-mode <mode>` | `compare` | Inline collection mode (`off` by default; uses only the explicitly-provided packs) |
+| `--evidence-mode <mode>` | `compare` | Inline collection mode. Defaults to `off`, which uses only the explicitly-provided `--old-evidence`/`--new-evidence` packs. **Other modes are currently recognized and reported in the coverage table but not yet collected inline** — pass packs explicitly to get L3/L4 findings in this release. |
 
 To additionally capture **L4 source ABI replay** (macro/`constexpr` values,
 default-argument values, uninstantiated templates), add `--source-abi` to
