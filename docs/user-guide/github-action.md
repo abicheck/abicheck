@@ -39,6 +39,32 @@ automatically, then runs ABI comparison and reports results.
 | `old-include` | no | Include dirs for old side only |
 | `new-include` | no | Include dirs for new side only |
 
+!!! note "Evidence layers in the Action"
+    The Action drives the same [five-layer evidence
+    model](../concepts/evidence-and-detectability.md) as the CLI. The inputs
+    above cover **L0** (`old-library`/`new-library`), **L1** (debug info —
+    embedded, or `debug-info1`/`debug-info2` packages in `compare-release`
+    mode), and **L2** (`header`/`include`).
+
+    **L3** build context (`-p build/`) can be folded in by pre-dumping a
+    snapshot with the CLI — the build flags are applied at dump time, so the
+    resulting snapshot is parsed with the correct ABI-affecting options — and
+    passing that JSON as `old-library`/`new-library`:
+
+    ```bash
+    abicheck dump build/libfoo.so -H include/ -p build/ -o abi-baseline.json
+    ```
+
+    Full **evidence packs** (`--evidence` / `--old-evidence` / `--new-evidence`)
+    and **L4** source ABI replay are **CLI-only** today: `dump --evidence`
+    stores only a lightweight, content-addressed *reference* (the pack stays
+    out-of-band), and the Action's `compare` has no `--old-evidence` /
+    `--new-evidence` wiring — so a dumped snapshot does **not** carry pack-based
+    L3/L4 findings into an Action run. To use them, run `abicheck compare …
+    --old-evidence … --new-evidence …` as a plain CLI step in your workflow
+    instead of through this Action. See [Source & Build Evidence
+    Packs](../concepts/evidence-pack.md).
+
 ### Application compatibility inputs (appcompat mode)
 
 | Input | Required | Description |

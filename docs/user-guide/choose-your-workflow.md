@@ -45,22 +45,28 @@ behave**, and **which report** to produce.
 ## 2) How much accuracy do you need?
 
 The single biggest lever on what abicheck can *prove* is the quality of the
-inputs you give it. More evidence catches more breaks. Start at the tier your
-artifacts allow, and add headers + debug info when you need more confidence.
+inputs you give it — its five additive evidence layers, **L0–L4**. More
+evidence catches more breaks. Start at the layer your artifacts allow, and add
+more when you need more confidence.
 
-| Inputs | Confidence | What it catches |
-|---|---|---|
-| Binaries only | **Low** | Symbol add/remove, SONAME/version changes, basic metadata |
-| Binaries + debug info | **Medium** | The above, plus struct layout, enum values, calling convention, emitted-ABI type changes |
-| Binaries + headers | **High** | The above, plus the declared public API surface, source-level API breaks, inline/template-related surface |
-| Binaries + debug info + headers + build flags | **Best** | The most accurate practical setup — the full public + emitted ABI surface |
+| Layer | Inputs | Confidence | What it newly catches |
+|:--:|---|---|---|
+| **L0** | Binaries only | **Low** | Symbol add/remove, SONAME/version changes, basic metadata |
+| **L1** | + debug info | **Medium** | Struct layout, field offsets, enum values, calling convention, emitted-ABI type changes |
+| **L2** | + headers | **High** | Declared public API surface, source-level API breaks, inline/template-related surface |
+| **L3** | + build flags (`-p build/`) | **Higher** | The exact ABI-affecting flags the library was built with (`-std`, `_GLIBCXX_USE_CXX11_ABI`, `-fvisibility`, …) |
+| **L4** | + sources (evidence pack) | **Best** | Facts that never reach the binary: macro/`constexpr` values, default-argument values, uninstantiated templates |
 
-abicheck reports which tier it actually used as the **`evidence_tier`** field
-(`elf_only` → `dwarf_aware` → `header_aware`) so you can calibrate trust in any
-given run. See [Output Formats → Analysis confidence and evidence
-tier](output-formats.md#analysis-confidence-and-evidence-tier) and the
-[ABI/API Handling overview](../concepts/abi-api-handling.md) for the full
-explanation of why headers and debug info change what abicheck can prove.
+abicheck reports the **artifact** depth it reached (L0–L2) as the
+**`evidence_tier`** field (`elf_only` → `dwarf_aware` → `header_aware`) so you
+can calibrate trust in any given run; build/source evidence (L3/L4) is reported
+separately in the evidence-coverage table rather than promoting this scalar. See
+[Output Formats → Analysis confidence and evidence
+tier](output-formats.md#analysis-confidence-and-evidence-tier), the per-layer
+[Tool Modes](tool-modes.md#abicheck-native-modes-by-evidence-source-l0l4)
+reference, and [Evidence &
+Detectability](../concepts/evidence-and-detectability.md) for the full
+explanation of why each source changes what abicheck can prove.
 
 **Rules of thumb:**
 

@@ -192,6 +192,14 @@ This combination gives you all three tiers at once:
   `final`, access, ref-qualifiers, `noexcept`/`explicit`, **default-argument
   values**, and **`const`/`constexpr` constant values** (which have no symbol).
 
+These three artifact tiers are layers **L0–L2** of the [five-source evidence
+model](evidence-and-detectability.md). Two further layers refine the result
+without ever overriding an artifact-proven break: **L3** build context
+(`-p build/`, the exact ABI-affecting flags) and **L4** source/evidence packs
+(`--old-evidence`/`--new-evidence`, recovering macro/`constexpr` and
+uninstantiated-template facts). They are optional but raise confidence and
+localize findings — see [Source & Build Evidence Packs](evidence-pack.md).
+
 Comparing a **stripped release binary with no headers** gives only `elf_only`
 coverage (symbol add/remove) and will silently miss every layout and
 source-level break above. If you ship stripped, build a **debug copy purely as an

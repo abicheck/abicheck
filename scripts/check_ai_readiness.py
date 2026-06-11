@@ -406,15 +406,39 @@ def check_doc_count_sync(f: Findings) -> None:
         ),
         (
             ROOT / "README.md",
+            "ChangeKind count (feature bullet)",
+            n_kinds,
+            r"\*\*(\d+) change types\*\*",
+        ),
+        (
+            ROOT / "README.md",
             "catalog size",
             n_catalog,
             r"contains \*\*(\d+) real-world ABI/API scenarios",
+        ),
+        (
+            ROOT / "README.md",
+            "catalog size (validation target)",
+            n_catalog,
+            r"the full \*\*(\d+)-case catalog\*\*",
         ),
         (
             DOCS / "getting-started.md",
             "catalog size",
             n_catalog,
             r"repo includes (\d+) ABI scenario examples",
+        ),
+        (
+            DOCS / "development/abicc-parity-status.md",
+            "ChangeKind count (current total)",
+            n_kinds,
+            r"current ChangeKind total is \*\*(\d+)\*\*",
+        ),
+        (
+            DOCS / "development/abicc-test-coverage-comparison.md",
+            "ChangeKind count (current total)",
+            n_kinds,
+            r"current ChangeKind total is \*\*(\d+)\*\*",
         ),
     ]
 

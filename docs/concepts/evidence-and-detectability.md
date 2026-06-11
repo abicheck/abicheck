@@ -25,7 +25,10 @@ A release engineer can hand a compatibility checker up to **five different
 sources of information** about a library, ordered from the least to the most.
 Each one *adds* facts the previous cannot see; none of them is complete on its
 own. abicheck names them with the layer codes `L0`–`L4` used throughout the
-docs (and emitted by `abicheck dump --show-data-sources`):
+docs. You can see which **artifact** layers (`L0`–`L2`) a given input exposes
+with `abicheck dump --show-data-sources`; the build/source layers (`L3`/`L4`)
+are not reported there — they surface in the pack-aware `compare`
+`evidence_coverage` table once you supply an EvidencePack:
 
 | # | Source you provide | Layer | abicheck input | What it newly reveals |
 |---|--------------------|:-----:|----------------|------------------------|
@@ -67,6 +70,46 @@ the per-case evidence each example needs is benchmarked in
 > together. With less, abicheck degrades *down the staircase* and tells you
 > exactly which layers it had via the `--show-data-sources` / `evidence_coverage`
 > report.
+
+### Why call it "evidence"?
+
+First, concretely: "evidence" is just the umbrella term for the **sources of
+information** in the table above. The artifact sources are the binary (L0), its
+debug info (L1), and its public headers (L2); the additional sources are the
+project's **build-system data** (L3 — compile flags, toolchain, target graph),
+its **source tree** (L4 — per-TU source ABI replay), and a **source/build graph**
+(L5 — include/type/call reachability). When the docs say "build/source evidence
+(L3/L4/L5)", that is exactly what they mean.
+
+The umbrella word is a deliberate **forensic metaphor**, not decoration: abicheck
+treats "is this compatible?" as something it must **prove from facts**, the way a
+case is built from evidence, rather than as a single computation over one data
+source. Three properties of evidence are exactly the properties abicheck needs,
+and "tier" or "level" would imply the wrong ones:
+
+- **Independent and partial.** Each source contributes *some* facts and none is
+  complete on its own — a binary shows symbols but not layout, headers show API
+  but not what was actually built. Evidence is **additive and overlaid**, not a
+  ranked ladder you fall back down. (Call them "tiers" and readers assume a
+  fallback chain; they aren't one.)
+- **Different authority.** Just like physical vs. circumstantial evidence in a
+  courtroom, not all of it carries equal weight. **Artifact evidence (L0–L2) is
+  what was actually built and shipped, so it is *authoritative*** — only it can
+  declare a binary `BREAKING`. **Build/source evidence (L3/L4/L5) is
+  *corroborating*** — it explains, localizes, scopes, adds confidence, removes
+  false positives, and can raise its *own* source-/API-level findings, but it can
+  **never overturn or silently delete an artifact-proven break**. This is the
+  *authority rule* ([ADR-028](../development/adr/028-source-build-evidence-pack.md)).
+- **Honest about what it had.** Because the verdict is only as strong as the
+  evidence behind it, every run reports the evidence it actually collected (the
+  `evidence_coverage` table and the "checks enabled… and why others are not"
+  capability report). The output literally says *"here is the evidence I had, so
+  here is what I could and couldn't check."*
+
+So "evidence" + the authority rule is the mental model that lets abicheck keep
+*adding* sources for more accuracy without ever letting a weaker source override
+a proven break.
+
 
 ---
 

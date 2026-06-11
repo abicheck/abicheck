@@ -67,6 +67,55 @@ pipeline, and `explain-finding` localizes a single finding through the graph.
 > artifact-backed tiers (L0–L2) remain fully authoritative — the comparison is
 > never aborted.
 
+## How the data flows
+
+Two independent producers feed one decision engine. The **artifact pipeline**
+(always on, authoritative) turns each binary into an `AbiSnapshot`; the
+**evidence pipeline** (optional, post-build, never rebuilds) collects an
+out-of-band `EvidencePack`. At `compare` time both are diffed and reconciled
+under the [authority rule](#the-authority-rule-the-one-rule-that-matters):
+
+```mermaid
+flowchart TD
+    subgraph artifact["Artifact pipeline — authoritative"]
+      BIN["binary (.so/.dll/.dylib)"] --> P["format parser<br/>ELF / PE / Mach-O"]
+      P --> L0["L0 binary metadata"]
+      L0 --> L1["+ L1 DWARF/PDB/BTF/CTF"]
+      L1 --> L2["+ L2 castxml header AST"]
+      L2 --> SNAP["AbiSnapshot (JSON)"]
+    end
+
+    subgraph evidence["Evidence pipeline — corroborating, post-build"]
+      BT["build tree (no rebuild)"] --> CE["collect-evidence"]
+      CE --> L3["L3 build facts<br/>compile DB / CMake / Ninja / Bazel / Make"]
+      CE --> L4["L4 source ABI replay<br/>clang (--source-abi)"]
+      CE --> L5["L5 graph summary<br/>(--source-graph)"]
+      L3 --> PACK["EvidencePack<br/>(content-addressed, out-of-band)"]
+      L4 --> PACK
+      L5 --> PACK
+    end
+
+    SNAP --> CMP{{"compare"}}
+    PACK -. "pass explicitly:<br/>--old/--new-evidence" .-> CMP
+    CMP --> DIFFA["diff artifact layers<br/>L0/L1/L2 → can prove BREAKING"]
+    CMP --> DIFFE["diff evidence layers<br/>L3/L4/L5 → API_BREAK / risk only"]
+    DIFFA --> REC["reconcile (worst-wins +<br/>authority rule: L3/L4/L5 never<br/>deletes an artifact-proven break)"]
+    DIFFE --> REC
+    REC --> OUT["Verdict + evidence-coverage table + capability report"]
+```
+
+Three consequences fall out of this shape, all by design:
+
+- The pack is a **sidecar**. `dump --evidence` stores only a content-addressed
+  *reference* on the snapshot; the pack directory stays out-of-band, and
+  `compare` does **not** follow that reference — you hand the packs in explicitly
+  with `--old-evidence` / `--new-evidence`.
+- Collection is **post-build and read-only**: it reads existing build outputs and
+  build-system query interfaces; it never rebuilds your project or runs arbitrary
+  commands.
+- The verdict is only as strong as the evidence behind it, so every pack-aware
+  run prints the `evidence_coverage` table and the capability report below.
+
 ## Workflow
 
 The default path is unchanged. Evidence is **post-build and opt-in** — it never
@@ -184,6 +233,48 @@ decides or suppresses an artifact-proven ABI break.
   (`-frecord-gcc-switches` / `-frecord-command-line`) and DWARF
   `DW_AT_producer`. These signals are **advisory** unless cross-checked against
   build-system evidence.
+
+### Worked example: a CMake library, end to end
+
+Two releases of `libfoo`, each built with CMake. The goal is a full
+**L0+L1+L2+L3(+L4)** compare so a build-flag change or a source-only API change
+is caught alongside the binary diff.
+
+```bash
+# --- For EACH release (old and new), at build time ---
+# 1. Build with -g and export the compile database (one extra CMake flag).
+cmake -S libfoo-1.0 -B build-old -DCMAKE_BUILD_TYPE=Debug \
+      -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+cmake --build build-old
+
+# 2. Collect the evidence pack from the existing build tree (no rebuild).
+#    Add --source-abi for L4 (needs clang); drop it for L3-only.
+abicheck collect-evidence \
+    --compile-db build-old/compile_commands.json \
+    --build-dir build-old --cmake \
+    --source-abi \
+    --output libfoo-1.0.evidence/
+
+# 3. Snapshot the built library WITH headers and the build context.
+#    -p bakes the L3 build flags into how the headers are parsed, and records
+#    parsed_with_build_context so the later compare won't flag header drift.
+abicheck dump build-old/libfoo.so -H libfoo-1.0/include -p build-old \
+    --version 1.0 -o libfoo-1.0.abi.json
+
+# (repeat steps 1-3 for the new release → libfoo-2.0.abi.json + libfoo-2.0.evidence/)
+
+# --- At compare time (CI), pass BOTH snapshots AND both packs ---
+abicheck compare libfoo-1.0.abi.json libfoo-2.0.abi.json \
+    --old-evidence libfoo-1.0.evidence/ \
+    --new-evidence libfoo-2.0.evidence/
+```
+
+The compare prints the [coverage table and capability report](#evidence-coverage)
+first, so you can confirm every layer landed before trusting the verdict — if a
+row says `not_collected` or `[off]`, that is exactly the input or tool to add.
+Keep the `*.evidence/` directories next to the snapshots (e.g. as CI artifacts):
+the snapshot only stores a reference, so a compare without the packs silently
+drops the L3/L4 findings.
 
 ## External CLI extractors & the security model (ADR-032)
 

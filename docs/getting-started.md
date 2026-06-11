@@ -114,7 +114,7 @@ If you're unsure, start with `abicheck compare` — it's the default workflow.
 
 **Best first run:** compare two shared libraries with their public headers — it
 gives abicheck the most evidence to work with (see the
-[input-quality ladder](#input-quality-what-each-tier-catches) below).
+[input-quality ladder](#input-quality-the-five-evidence-layers-l0l4) below).
 
 The repo includes 127 ABI scenario examples. Most are single-library cases with
 paired `v1`/`v2` sources and headers; bundle/release-level cases use
@@ -169,25 +169,37 @@ abicheck compare libfoo.so.1 libfoo.so.2 -H include/
 If no headers are provided for ELF inputs, abicheck falls back to **symbols-only** mode
 and prints a warning (weaker analysis: may miss type/signature ABI breaks).
 
-### Input quality: what each tier catches
+### Input quality: the five evidence layers (L0–L4)
 
-How much abicheck can *prove* depends on what you give it. More evidence catches
-more breaks — start at the tier your artifacts allow and add headers + debug info
+How much abicheck can *prove* depends on what you give it. It overlays up to
+**five independent, additive sources** — labelled `L0`–`L4` — and lets the
+strongest evidence win. Start at the layer your artifacts allow and add more
 when you need more confidence:
 
-| Inputs | Confidence | What it catches |
-|---|---|---|
-| Binaries only | **Low** | Symbol add/remove, basic metadata |
-| Binaries + debug info | **Medium** | Layout, enum, calling convention, emitted ABI |
-| Binaries + headers | **High** | Public API surface, source-level API, inline/template surface |
-| Binaries + debug info + headers + build flags | **Best** | The most accurate practical setup |
+| Layer | Inputs (flags) | Confidence | What it newly catches |
+|:--:|---|---|---|
+| **L0** | Binary only | **Low** | Symbol add/remove, SONAME, visibility, basic metadata |
+| **L1** | + debug info (`-g` build / sidecar) | **Medium** | Struct/class layout, field offsets, enum *values*, vtable slots, calling convention |
+| **L2** | + headers (`-H include/`) | **High** | Public API surface: signatures, overloads, access, `noexcept`, templates, public/internal scoping |
+| **L3** | + build data (`-p build/`) | **Higher** | The flags the library was *actually* built with: `-std`, `_GLIBCXX_USE_CXX11_ABI`, `-fvisibility`, sysroot, export maps |
+| **L4** | + sources (evidence pack via `compare --old-evidence/--new-evidence`) | **Best** | Facts that never reach the binary: macro/`constexpr` values, default-argument *values*, uninstantiated templates |
 
-This is why the header flags matter. The
-[ABI/API Handling overview](concepts/abi-api-handling.md) explains the full
-picture: debug info **plus** headers is the highest-coverage setup, while
-stripped binaries without headers only give symbol-level coverage. For stripped
-production builds, point abicheck at separate debug files (`--debug-root1/2`) or
-fetch them with `--debuginfod` — see
+The layers are **additive, not a fallback chain**: artifact-backed evidence
+(L0/L1/L2) is authoritative for the shipped-ABI verdict, while build/source
+evidence (L3/L4) *explains, localizes, and scopes* a finding (and can raise its
+own source-level findings) but never silently deletes an artifact-proven break.
+With less input, abicheck degrades gracefully *down the staircase* rather than
+failing — a stripped binary with no headers collapses toward symbol-only
+checking.
+
+Run `abicheck dump libfoo.so --show-data-sources` to see which layers abicheck
+found for a binary. For the full picture see [Evidence &
+Detectability](concepts/evidence-and-detectability.md) and the per-layer
+[Tool Modes](user-guide/tool-modes.md#abicheck-native-modes-by-evidence-source-l0l4)
+reference; build data (L3) and source evidence packs (L4) are documented under
+[CLI Usage → Evidence packs](user-guide/cli-usage.md#evidence-packs-build-source-context-l3-l4).
+For stripped production builds, point abicheck at separate debug files
+(`--debug-root1/2`) or fetch them with `--debuginfod` — see
 [CLI Usage](user-guide/cli-usage.md#debug-artifact-resolution).
 
 ---

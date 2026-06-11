@@ -106,11 +106,15 @@ Available cross-compilation flags:
 - `--sysroot` — alternative system root directory
 - `--nostdinc` — do not search standard system include paths
 
-#### Build-context capture (`compile_commands.json`)
+#### Build-context capture (`compile_commands.json`) — evidence layer L3
 
-Modern build systems (CMake, Meson, Ninja) generate a `compile_commands.json`
-file that captures the exact compiler flags for every source file. abicheck
-can ingest this file directly, eliminating manual flag specification:
+This is **evidence layer L3** in abicheck's [five-source evidence
+model](../concepts/evidence-and-detectability.md): on top of the binary (L0),
+debug info (L1), and headers (L2), it feeds abicheck the flags the library was
+*actually* built with. Modern build systems (CMake, Meson, Ninja) generate a
+`compile_commands.json` file that captures the exact compiler flags for every
+source file. abicheck can ingest this file directly, eliminating manual flag
+specification:
 
 ```bash
 # Generate compile_commands.json during build
@@ -139,6 +143,64 @@ explicit flags take precedence.
 abicheck dump libfoo.so -H include/ -p build/ \
     --gcc-options "-DEXTRA_DEFINE=1"
 ```
+
+#### Evidence packs — build & source context (L3 / L4)
+
+The build context above (L3) and **source evidence** (L4) can also be bundled
+into a reusable *evidence pack* — a post-build, opt-in artifact that abicheck
+reads alongside your binaries. A pack never rebuilds your project or runs
+arbitrary commands; it reads existing build outputs and build-system query
+interfaces only. See [Source & Build Evidence
+Packs](../concepts/evidence-pack.md) for the full model.
+
+```bash
+# 1. Collect a pack from an existing build tree (no rebuild).
+abicheck collect-evidence \
+    --compile-db build/compile_commands.json \
+    --build-dir build --cmake \
+    --output libfoo.evidence/
+
+# 2a. Record a content-addressed reference to the pack on a snapshot…
+#     (the pack directory itself stays out-of-band — keep it around).
+abicheck dump build/libfoo.so -H include/ \
+    --evidence libfoo.evidence/ -o libfoo.abi.json
+
+# 2b. …and pass the pack directories explicitly at compare time to get
+#     their L3/L4 findings.
+abicheck compare old.abi.json new.abi.json \
+    --old-evidence old.evidence/ --new-evidence new.evidence/
+```
+
+!!! warning "Packs do not travel inside a snapshot"
+    `dump --evidence` records only a lightweight, content-addressed
+    *reference* on the snapshot — the pack directory stays out-of-band, and
+    `compare` does **not** follow that reference. To get pack-based L3/L4
+    findings you must **preserve the pack directory** and pass it explicitly
+    via `--old-evidence` / `--new-evidence`. If you archive only the dumped
+    JSON and later run `abicheck compare old.json new.json` without the packs,
+    you get the snapshot's intrinsic layers (L0–L2, plus any L3 build *flags*
+    baked in at dump time via `-p`) but not the pack's L3/L4 findings.
+
+| Flag | Command | Description |
+|------|---------|-------------|
+| `--evidence <dir>` | `dump` | Record a content-addressed *reference* to a pack on the snapshot (the pack stays out-of-band; still pass it to `compare` to use its findings) |
+| `--old-evidence <dir>` / `--new-evidence <dir>` | `compare` | Load and diff per-side packs into the verdict — adds L3 build-context findings and an evidence-coverage table |
+| `--evidence-mode <mode>` | `compare` | Inline collection mode. Defaults to `off`, which uses only the explicitly-provided `--old-evidence`/`--new-evidence` packs. **Other modes are currently recognized and reported in the coverage table but not yet collected inline** — pass packs explicitly to get L3/L4 findings in this release. |
+
+To additionally capture **L4 source ABI replay** (macro/`constexpr` values,
+default-argument values, uninstantiated templates), add `--source-abi` to
+`collect-evidence`. L4 requires `clang` (or castxml for the declaration subset);
+if it is missing, abicheck **degrades gracefully** — L4 is marked partial and
+the artifact-backed tiers (L0–L2) remain fully authoritative. Build/source
+evidence (L3/L4) *explains, localizes, and scopes* findings or raises its own
+source-level findings, but it **never silently deletes an artifact-proven
+break** (the *authority rule*, ADR-028 D3).
+
+!!! tip "Diagnosing which layers you have"
+    Run `abicheck dump libfoo.so --show-data-sources` to print which evidence
+    layers (L0 binary metadata, L1 debug info, L2 header AST) abicheck found for
+    a binary, then exit — useful for confirming a stripped build really is
+    missing its debug info before you trust a symbols-only verdict.
 
 #### Debug artifact resolution
 

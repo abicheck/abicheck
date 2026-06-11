@@ -234,6 +234,14 @@ headers. A handful of changes remain invisible to any artifact comparison
 [Limitations → Source-only changes](limitations.md#source-only-changes-invisible-to-binaryobject-analysis)
 for the full per-change detectability matrix.
 
+These three tiers are artifact layers **L0–L2**. Two optional layers go
+further without overriding an artifact-proven break: **L3** build context
+(`-p build/`) pins the exact ABI-affecting flags, and **L4** source/evidence
+packs recover several of the otherwise-invisible source-only facts above
+(macro/`constexpr` values, uninstantiated templates). See [Source & Build
+Evidence Packs](evidence-pack.md) and the full [L0–L4
+model](evidence-and-detectability.md).
+
 #### Which input proves which family
 
 The minimum input needed to *detect* each family — and the most common reason a
