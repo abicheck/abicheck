@@ -112,24 +112,28 @@ def parse_timeline(html: str) -> list[dict[str, object]]:
     return rows
 
 
-def derive_verdict(
-    backward_compat: float | None, removed: int, soname_changed: bool
-) -> str:
+def derive_verdict(backward_compat: float | None, removed: int) -> str:
     """Map a tracker row to an expected abicheck verdict.
 
     - any removed symbol, or backward-compat below 100% -> ``BREAKING``
       (ABICC found a binary-incompatible change),
-    - a SONAME change is an intentional, declared break -> ``BREAKING``,
     - otherwise (100% backward-compatible, no removals) -> ``COMPATIBLE``.
 
     Added-only changes stay COMPATIBLE: new symbols do not break existing
     binaries. ``None`` backward-compat (tracker did not compute a figure, e.g.
     first release or a skipped pair) yields ``UNKNOWN`` and should be excluded
     from agreement scoring.
+
+    A SONAME change is **not** treated as breaking here: abicheck's policy
+    classifies a SONAME-only bump as ``COMPATIBLE_WITH_RISK`` (it is the correct
+    mitigation, not a break — see ``validation/realworld-scan-coverage-2026-06.md``),
+    which normalizes to COMPATIBLE. Forcing such pairs to BREAKING would flag
+    every correctly-handled major bump as a false ``ABICHECK_WEAKER``. The SONAME
+    change is still recorded in the pair metadata for context.
     """
     if backward_compat is None:
         return "UNKNOWN"
-    if soname_changed or removed > 0 or backward_compat < 100.0:
+    if removed > 0 or backward_compat < 100.0:
         return "BREAKING"
     return "COMPATIBLE"
 
@@ -146,9 +150,7 @@ def build_oracle(library: str, html: str) -> dict[str, object]:
     pairs: list[dict[str, object]] = []
     for prev, cur in zip(chron, chron[1:]):
         soname_changed = prev["soname"] != cur["soname"]
-        verdict = derive_verdict(
-            cur["backward_compat"], int(cur["removed"]), soname_changed
-        )
+        verdict = derive_verdict(cur["backward_compat"], int(cur["removed"]))
         pairs.append(
             {
                 "pair": f"{library}_{prev['version']}_to_{cur['version']}",

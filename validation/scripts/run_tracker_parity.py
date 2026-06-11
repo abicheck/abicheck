@@ -180,6 +180,52 @@ def _abicheck_verdict(old: str, new: str, old_ver: str, new_ver: str) -> str | N
     return data.get("verdict") or summ.get("verdict")
 
 
+def _verdict_for_pair(
+    pair: dict, api: dict, subdir: str, tmp: Path, idx: int
+) -> str | None:
+    """Resolve, fetch, extract, and run abicheck for one oracle pair.
+
+    Returns the (conservatively aggregated) abicheck verdict, or ``None`` when
+    the pair can't be evaluated (version not on conda-forge, fetch/extract
+    error, no shared object common to both versions, or abicheck produced no
+    verdict). Prints a per-pair line on success and a diagnostic on hard errors.
+    """
+    ov, nv, pid = pair["old_ver"], pair["new_ver"], pair["pair"]
+    ob = select_conda_basename(api, ov, subdir)
+    nb = select_conda_basename(api, nv, subdir)
+    if not ob or not nb:
+        return None  # version not on conda-forge; stays UNCOMPARABLE upstream
+
+    try:
+        # Preserve the real extension so _extract_sos can dispatch on it.
+        op = tmp / f"old_{idx}_{Path(ob).name}"
+        npath = tmp / f"new_{idx}_{Path(nb).name}"
+        _fetch(conda_download_url(ob), op)
+        _fetch(conda_download_url(nb), npath)
+        old_sos = _extract_sos(op, tmp / f"old_{idx}")
+        new_sos = _extract_sos(npath, tmp / f"new_{idx}")
+    except (OSError, tarfile.TarError, subprocess.CalledProcessError) as exc:
+        print(f"  {pid}: fetch/extract failed: {exc}", file=sys.stderr)
+        return None
+
+    common = sorted(set(old_sos) & set(new_sos))
+    if not common:
+        return None
+    # Take the most-breaking verdict across the shared objects in the pair.
+    verdicts = [
+        v
+        for name in common
+        if (v := _abicheck_verdict(old_sos[name], new_sos[name], ov, nv)) is not None
+    ]
+    if not verdicts:
+        return None
+    verdict = load_results_map([{"pair": pid, "verdict": v} for v in verdicts])[pid]
+    print(
+        f"  {pid}: abicheck={verdict} oracle={pair['expected_verdict']} ({','.join(common)})"
+    )
+    return verdict
+
+
 def main(argv: list[str] | None = None) -> int:
     """Run the harvest→fetch→compare parity loop for one library."""
     ap = argparse.ArgumentParser(
@@ -231,43 +277,11 @@ def main(argv: list[str] | None = None) -> int:
         for pair in oracle["pairs"]:
             if args.max_pairs and done >= args.max_pairs:
                 break
-            ov, nv, pid = pair["old_ver"], pair["new_ver"], pair["pair"]
-            ob = select_conda_basename(api, ov, args.subdir)
-            nb = select_conda_basename(api, nv, args.subdir)
-            if not ob or not nb:
-                continue  # version not on conda-forge; skip (stays UNCOMPARABLE)
-
-            try:
-                # Preserve the real extension so _extract_sos can dispatch on it.
-                op = tmp / f"old_{done}_{Path(ob).name}"
-                npath = tmp / f"new_{done}_{Path(nb).name}"
-                _fetch(conda_download_url(ob), op)
-                _fetch(conda_download_url(nb), npath)
-                old_sos = _extract_sos(op, tmp / f"old_{done}")
-                new_sos = _extract_sos(npath, tmp / f"new_{done}")
-            except (OSError, tarfile.TarError, subprocess.CalledProcessError) as exc:
-                print(f"  {pid}: fetch/extract failed: {exc}", file=sys.stderr)
+            verdict = _verdict_for_pair(pair, api, args.subdir, tmp, done)
+            if verdict is None:
                 continue
-
-            common = sorted(set(old_sos) & set(new_sos))
-            if not common:
-                continue
-            # Take the most-breaking verdict across shared objects in the pair.
-            verdicts = [
-                v
-                for name in common
-                if (v := _abicheck_verdict(old_sos[name], new_sos[name], ov, nv))
-                is not None
-            ]
-            if not verdicts:
-                continue
-            results[pid] = load_results_map(
-                [{"pair": pid, "verdict": v} for v in verdicts]
-            )[pid]
+            results[pair["pair"]] = verdict
             done += 1
-            print(
-                f"  {pid}: abicheck={results[pid]} oracle={pair['expected_verdict']} ({','.join(common)})"
-            )
 
     report = compare_to_results(oracle, results)
     PARITY_DIR.mkdir(parents=True, exist_ok=True)

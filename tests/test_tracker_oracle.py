@@ -86,18 +86,35 @@ def test_parse_timeline_extracts_rows_newest_first() -> None:
 def test_derive_verdict_rules() -> None:
     mod = _load_module()
 
-    # clean minor: 100%, no removals, same soname
-    assert mod.derive_verdict(100.0, 0, soname_changed=False) == "COMPATIBLE"
-    # added-only stays compatible (new symbols don't break existing binaries)
-    assert mod.derive_verdict(100.0, 0, soname_changed=False) == "COMPATIBLE"
+    # clean minor: 100%, no removals
+    assert mod.derive_verdict(100.0, 0) == "COMPATIBLE"
     # compat below 100% is breaking
-    assert mod.derive_verdict(96.5, 0, soname_changed=False) == "BREAKING"
+    assert mod.derive_verdict(96.5, 0) == "BREAKING"
     # a removal is breaking even at a (rounded) 100%
-    assert mod.derive_verdict(100.0, 1, soname_changed=False) == "BREAKING"
-    # SONAME bump is an intentional declared break
-    assert mod.derive_verdict(100.0, 0, soname_changed=True) == "BREAKING"
+    assert mod.derive_verdict(100.0, 1) == "BREAKING"
     # no published figure -> UNKNOWN (excluded from scoring)
-    assert mod.derive_verdict(None, 0, soname_changed=False) == "UNKNOWN"
+    assert mod.derive_verdict(None, 0) == "UNKNOWN"
+
+
+def test_soname_only_change_is_not_breaking() -> None:
+    # A SONAME bump with 100% backward-compat and no removals must stay
+    # COMPATIBLE: abicheck treats it as COMPATIBLE_WITH_RISK (-> COMPATIBLE),
+    # so labelling it BREAKING would manufacture false ABICHECK_WEAKER pairs.
+    mod = _load_module()
+    fixture = """
+    <table>
+    <tr><th>Version</th><th>Date</th><th>Soname</th><th>ChangeLog</th>
+    <th>BackwardCompat.</th><th>AddedSymbols</th><th>RemovedSymbols</th></tr>
+    <tr id='v2.0.0'><td>2.0.0</td><td>2024-01-01</td><td>2</td><td>x</td>
+    <td><a href='#'>100%</a></td><td>0</td><td class='ok'>0</td></tr>
+    <tr id='v1.0.0'><td>1.0.0</td><td>2023-01-01</td><td>1</td><td>x</td>
+    <td class='ok'>&#160;</td><td>0</td><td class='ok'>0</td></tr>
+    </table>
+    """
+    oracle = mod.build_oracle("examplelib", fixture)
+    pair = oracle["pairs"][0]
+    assert pair["soname_changed"] is True  # still recorded for context
+    assert pair["expected_verdict"] == "COMPATIBLE"
 
 
 def test_build_oracle_pairs_consecutive_versions_oldest_first() -> None:
