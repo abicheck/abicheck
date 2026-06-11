@@ -59,6 +59,8 @@ def test_internal_versioned_symbols_collects_only_internal_bindings() -> None:
             ElfSymbol(name="nettle_sha256_init", version="NETTLE_8"),
             ElfSymbol(name="_priv_blob", version="FOO_PRIVATE"),
             ElfSymbol(name="public_api", version=""),
+            # nameless symbol on an internal node must be skipped, not added as ""
+            ElfSymbol(name="", version="FOO_INTERNAL_1"),
         ]
     )
     assert internal_versioned_symbols(elf) == {"_nettle_ecc_mod", "_priv_blob"}
@@ -109,6 +111,18 @@ def test_demote_respects_frozen_namespace_violation() -> None:
     change.frozen_namespace_violation = "**::detail"
     demote_internal_version_node_findings([change], old_elf, ElfMetadata())
     assert change.effective_verdict is None
+
+
+def test_demote_leaves_a_prior_effective_verdict_override_untouched() -> None:
+    # A finding already carrying an effective_verdict (e.g. from an earlier
+    # modulation pass) must not be overwritten by the internal-node demotion.
+    old_elf = ElfMetadata(symbols=[ElfSymbol(name="_priv", version="FOO_INTERNAL_1")])
+    change = _change(ChangeKind.FUNC_REMOVED, "_priv")
+    change.effective_verdict = Verdict.BREAKING
+    change.modulation_rule = "some_other_rule"
+    demote_internal_version_node_findings([change], old_elf, ElfMetadata())
+    assert change.effective_verdict == Verdict.BREAKING
+    assert change.modulation_rule == "some_other_rule"
 
 
 # --------------------------------------------------------------------------- #
