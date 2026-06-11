@@ -194,9 +194,25 @@ def load_extractor_manifest(path: Path | str) -> ExtractorManifest:
     except ValueError as exc:
         raise ManifestError(f"extractor manifest {p}: {exc}") from exc
 
+    # Network is always denied (ADR-032 D5) and there is no run mode that grants
+    # it, so a manifest that needs it can never run. Reject it at registration —
+    # via an explicit ``network`` action *or* the ``requires_network`` capability
+    # — rather than silently accepting a manifest that would run under the
+    # default inspect-only context and bypass the gate.
+    if CollectionAction.NETWORK in actions:
+        raise ManifestError(
+            f"extractor manifest {p}: the 'network' action is always denied "
+            "(ADR-032 D5) and cannot be registered."
+        )
     capabilities = ExtractorCapabilities.from_dict(raw.get("capabilities"))
+    if capabilities.requires_network:
+        raise ManifestError(
+            f"extractor manifest {p}: 'requires_network' is not supported — network "
+            "access is always denied (ADR-032 D5). Use a non-networked extractor or "
+            "pre-capture the data and feed it as a file input."
+        )
     implied = capabilities.implied_actions()
-    missing = implied - actions - {CollectionAction.NETWORK}
+    missing = implied - actions
     if missing:
         raise ManifestError(
             f"extractor manifest {p}: capabilities require action(s) "
@@ -379,8 +395,17 @@ class ExternalCliExtractor:
         raw_dir = output_dir / "raw" / self.manifest.name
         raw_dir.mkdir(parents=True, exist_ok=True)
         argv = render_command(template, self._substitutions(context, output_dir))
-        proc = self._run(argv, cwd=context.source_root or context.build_root)
         diagnostics: list[str] = []
+        try:
+            proc = self._run(argv, cwd=context.source_root or context.build_root)
+        except (OSError, subprocess.SubprocessError) as exc:
+            # Missing binary (FileNotFoundError/OSError) or a hung tool
+            # (TimeoutExpired) is a tool failure, not a crash: record it so the
+            # collection-mode policy (D9) decides, rather than aborting the run.
+            return CollectionResult(
+                status="failed",
+                diagnostics=[f"collect could not run {argv[0]!r}: {exc}"],
+            )
         if proc.returncode != 0:
             diagnostics.append(
                 f"collect exited {proc.returncode}: {(proc.stderr or '').strip()[:500]}"
@@ -406,7 +431,13 @@ class ExternalCliExtractor:
                 "normalized_dir": str(norm_dir),
             }
             argv = render_command(template, _with_optional_only(template, sub))
-            proc = self._run(argv)
+            try:
+                proc = self._run(argv)
+            except (OSError, subprocess.SubprocessError) as exc:
+                return NormalizationResult(
+                    status="failed",
+                    diagnostics=[f"normalize could not run {argv[0]!r}: {exc}"],
+                )
             if proc.returncode != 0:
                 diagnostics.append(
                     f"normalize exited {proc.returncode}: {(proc.stderr or '').strip()[:500]}"
