@@ -1,7 +1,9 @@
 # ADR-030: Source ABI Replay and Linked Source Surface
 
 **Date:** 2026-06-09
-**Status:** Accepted — implemented (phases 1–7)
+**Status:** Accepted — implemented (phases 1–7); follow-ups #2 (include-guard
+macro noise) and #3 (typedef/alias modeling) resolved, #1 partially (pure-Python
+validation corpus committed)
 **Decision maker:** Nikolay Petrov
 
 ---
@@ -333,7 +335,8 @@ All seven phases are implemented, in `abicheck/evidence/`:
 - **Phase 3** — `source_link.py` (`link_source_abi`): merges per-TU dumps into a
   per-library surface, mapping public source declarations to exported binary
   symbols and detecting ODR conflicts (D5).
-- **Phase 4** — `source_diff.py` (`diff_source_abi`): the nine D6 `ChangeKind`s,
+- **Phase 4** — `source_diff.py` (`diff_source_abi`): the nine D6 `ChangeKind`s
+  (plus `public_typedef_target_changed`, added by follow-up #3 below),
   partitioned `API_BREAK`/`RISK` per ADR-028 D3 (never `BREAKING`), registered
   in `change_registry.py`.
 - **Phase 5** — `source_extractors/clang.py` (`ClangSourceExtractor`): the
@@ -373,29 +376,37 @@ info / no headers / no build data / no sources-or-clang).
 
 ### Known limitations / follow-ups
 
-The phases above are implemented and wired, but the following are deliberately
+The phases above are implemented and wired. Follow-ups #2 and #3 are now
+resolved and #1 is partially landed (see each item); the rest are deliberately
 deferred and should be handled in later work. None of them weaken the authority
 rule (L4 never gates a shipped-ABI `BREAKING` verdict on its own, ADR-028 D3);
 they are coverage/precision gaps, not correctness holes.
 
-1. **Validation corpus not yet committed.** The "Validation" section below calls
-   for an `examples/case*` fixture corpus (public macro / default-argument /
-   inline / template / constexpr changes, extending the ADR-026 `case122`
-   calibration fixture), an L4-vs-L2 declaration/type-shape agreement check, an
-   L4-vs-L0 exported-symbol cross-check, and performance tests for the `changed`
-   and `target` scopes. The behaviours are covered by unit + integration tests,
-   but the ground-truth example cases and perf benchmarks are still to be added.
-2. **Macros are clang-only.** `public_macro_value_changed` is produced only by
-   the clang backend's `-E -dD` preprocessor pass. The castxml and Android
-   backends do not extract macros, so a macros-only run on those backends has no
-   macro coverage. Include-guard macros (`#ifndef FOO_H`) also surface as
-   (harmless, empty-valued) macro entities — a small-noise source a future filter
-   could suppress.
-3. **Typedef / alias entities are not modeled by clang.** The clang backend emits
-   `record`/`enum` types but not `TypedefDecl`/`TypeAliasDecl`; castxml omits
-   typedefs entirely (no per-entry provenance, see `castxml.py`). A public
-   typedef whose underlying type changes is therefore not surfaced as an L4
-   finding. Add provenance-aware typedef extraction (clang is the natural home).
+1. **Validation corpus — pure-Python half committed; binary cases + perf still
+   pending.** `tests/test_source_replay_validation.py` is the committed labelled
+   corpus: every source-only edit is paired with the `ChangeKind` it must
+   produce and asserted to be `API_BREAK`/`RISK` and L4-stamped, never
+   `BREAKING` (the core "Validation" invariant below). Still to add: the
+   `examples/case*` *binary* fixture corpus (extending the ADR-026 `case122`
+   calibration fixture), the L4-vs-L2 declaration/type-shape agreement check, the
+   L4-vs-L0 exported-symbol cross-check, and the `changed`/`target` scope perf
+   benchmarks. Those need compiled fixtures + the example ground-truth machinery,
+   so they stay deferred.
+2. **Include-guard macro noise filtered; macros remain clang-only.** Resolved
+   the noise half: `clang.py:_is_include_guard` drops empty-valued, filename-
+   derived guards (`#ifndef FOO_H`) from the macro entities while keeping real
+   empty feature flags (`#define FOO_ENABLED`). The remaining statement of fact —
+   `public_macro_value_changed` is produced only by the clang backend's
+   `-E -dD` pass (castxml/Android extract no macros) — is a backend-capability
+   boundary, not an open defect: a macros-only run on those backends simply
+   reports partial L4 coverage (ADR-028 D7).
+3. **Typedef / alias modeling (clang) — done.** The clang backend now emits
+   `TypedefDecl`/`TypeAliasDecl` as `typedef` `SourceEntity`s carrying the
+   underlying type, and `source_diff.py` flags `public_typedef_target_changed`
+   (`API_BREAK`, L4) when a public alias's target changes — a change a bare
+   typedef leaves invisible to L0/L1. **castxml still omits typedefs** (no
+   per-entry provenance, see `castxml.py`), so this finding is clang-only, the
+   same backend-capability boundary as macros (#2).
 4. **Scope selection is approximate without a full include graph.** `headers-only`
    picks one representative compile unit per target rather than the minimal set
    that covers every public header, and `changed` maps a changed header to TUs

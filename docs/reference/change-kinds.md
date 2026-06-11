@@ -252,6 +252,12 @@ These changes break the source-level API contract but do not affect already-comp
 | `constant_changed` | A `#define` constant's value changed. Source code that used the constant in a way that depended on its exact value gets different behavior at compile time. |
 | `constant_removed` | A `#define` constant was removed entirely. Source code referencing it fails to compile. |
 
+### Source ABI Replay (L4)
+
+| Kind | Description |
+|------|-------------|
+| `public_typedef_target_changed` | A public typedef/alias now resolves to a different underlying type (e.g. `typedef int32_t handle_t;` became `typedef int64_t handle_t;`). A bare typedef leaves no exported symbol, so source replay (the clang L4 backend, ADR-030) surfaces the change; source relying on the old aliased type may change overload resolution or fail to compile while already-linked binaries are unaffected. |
+
 ### Template and Overload Set Changes
 
 | Kind | Description |

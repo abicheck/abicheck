@@ -186,6 +186,31 @@ def test_ast_mapping_extracts_each_entity_kind() -> None:
     assert SourceAbiTu.from_dict(tu.to_dict()).tu_id == tu.tu_id
 
 
+def test_ast_mapping_extracts_typedef_underlying_type() -> None:
+    # ADR-030 follow-up #3: a public typedef/alias records its underlying type so
+    # a later target change is detectable; bare typedefs have no exported symbol.
+    ast = {
+        "kind": "TranslationUnitDecl",
+        "inner": [
+            {
+                "kind": "TypedefDecl", "name": "handle_t",
+                "loc": {"file": "include/foo.h", "line": 4},
+                "type": {"qualifiedType": "int32_t"},
+            },
+            {
+                "kind": "TypeAliasDecl", "name": "size_alias",
+                "loc": {"file": "include/foo.h", "line": 5},
+                "type": {"qualifiedType": "unsigned long"},
+            },
+        ],
+    }
+    tu = source_abi_from_clang_ast(ast, _cu(), ["include/foo.h"], "t")
+    typedefs = {e.qualified_name: e for e in tu.types if e.kind == "typedef"}
+    assert typedefs["handle_t"].value == "int32_t"
+    assert typedefs["size_alias"].value == "unsigned long"
+    assert typedefs["handle_t"].type_hash.startswith("sha256:")
+
+
 def test_directory_header_root_classifies_decls_as_public(tmp_path: Path) -> None:
     # Codex #339 P2: `--headers include/` (a directory root) must classify a decl
     # reported under it (include/foo.h) as public, not drop the whole tree.
@@ -586,6 +611,34 @@ def test_macros_from_preprocessor_scopes_to_public_headers() -> None:
     # only a non-public macro — so a macro-only private/system header edit
     # invalidates the dump (Codex #339 P2). The <built-in> pseudo-file is skipped.
     assert files == ["/usr/include/sys.h", "include/foo.h", "src/foo.cpp"]
+
+
+def test_macros_suppress_include_guards() -> None:
+    # ADR-030 follow-up #2: an include guard (empty-valued, filename-derived) is
+    # filtered out, while a real empty feature flag and a valued macro survive.
+    from abicheck.evidence.source_extractors import macros_from_preprocessor
+
+    text = (
+        '# 1 "include/foo.h" 1\n'
+        "#define FOO_H\n"            # include guard for foo.h — suppressed
+        "#define __FOO_H__\n"        # guard with underscores — suppressed
+        "#define FOO_ENABLED\n"      # real empty feature flag — kept
+        "#define FOO_SIZE 16\n"      # valued macro — kept
+    )
+    macros, _ = macros_from_preprocessor(text, ["include/foo.h"])
+    names = {e.qualified_name for e in macros}
+    assert "FOO_H" not in names
+    assert "__FOO_H__" not in names
+    assert names == {"FOO_ENABLED", "FOO_SIZE"}
+
+
+def test_macros_suppress_hpp_include_guard() -> None:
+    from abicheck.evidence.source_extractors import macros_from_preprocessor
+
+    text = '# 1 "include/bar.hpp" 1\n#define BAR_HPP\n#define BAR_VALUE 3\n'
+    macros, _ = macros_from_preprocessor(text, ["include/bar.hpp"])
+    names = {e.qualified_name for e in macros}
+    assert names == {"BAR_VALUE"}
 
 
 def test_macros_track_private_macro_only_header_as_cache_dep() -> None:

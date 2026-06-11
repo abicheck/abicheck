@@ -87,6 +87,7 @@ ASSERTED_CHANGE_KINDS: set[ChangeKind] = {
     ChangeKind.SOURCE_DECL_BINARY_SYMBOL_MISMATCH,
     ChangeKind.ODR_SOURCE_CONFLICT,
     ChangeKind.GENERATED_HEADER_CHANGED,
+    ChangeKind.PUBLIC_TYPEDEF_TARGET_CHANGED,
     # Source graph (ADR-031 D6) — exercised in tests/test_source_graph.py.
     ChangeKind.PUBLIC_REACHABILITY_CHANGED,
     ChangeKind.SOURCE_TO_BINARY_MAPPING_CHANGED,

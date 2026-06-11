@@ -466,6 +466,30 @@ def _parse_define(rest: str) -> tuple[str, str] | None:
     return name, value
 
 
+def _is_include_guard(name: str, value: str, file: str) -> bool:
+    """Whether ``name`` is the include guard of ``file`` (ADR-030 follow-up #2).
+
+    Include guards (``#ifndef FOO_H`` / ``#define FOO_H``) surface from the
+    ``-E -dD`` pass as empty-valued macro entities — harmless but noisy. They are
+    suppressed when **both** hold, which keeps a real empty feature flag (e.g.
+    ``#define FOO_ENABLED``) from being dropped:
+
+    - the macro has an empty replacement (a guard never expands to anything), and
+    - its normalized name embeds the header's filename-derived token, including
+      the extension suffix (``foo.h`` → ``FOO_H``, ``bar.hpp`` → ``BAR_HPP``).
+
+    A guard that does not embed the filename (``#ifndef GUARD_12345``) is left in
+    place — a deliberate false-negative over risking a false suppression.
+    """
+    if value or not file:
+        return False
+    base = re.split(r"[\\/]", file)[-1]
+    stem = re.sub(r"[^A-Za-z0-9]+", "_", base).upper().strip("_")  # foo.h -> FOO_H
+    if not stem:
+        return False
+    return stem in name.upper().strip("_")
+
+
 def _unfold_continuations(lines: list[str]) -> list[str]:
     """Join backslash-continued physical lines into single logical lines.
 
@@ -533,6 +557,8 @@ def macros_from_preprocessor(
     for name, (value, file) in sorted(defs.items()):
         visibility, origin, public = ctx.classify(file)
         if not public:
+            continue
+        if _is_include_guard(name, value, file):
             continue
         entities.append(
             SourceEntity(
@@ -683,6 +709,8 @@ def _walk(
         _emit_constexpr(node, ctx, tu, scope, file)
     elif kind in ("CXXRecordDecl", "EnumDecl") and name and accessible:
         _emit_type(node, ctx, tu, scope, file)
+    elif kind in ("TypedefDecl", "TypeAliasDecl") and name and accessible:
+        _emit_typedef(node, ctx, tu, scope, file)
 
     # Descend, extending the scope name stack for namespaces/records so members
     # get a fully-qualified name.
@@ -857,6 +885,57 @@ def _emit_type(
             kind=kind,
             qualified_name=name,
             type_hash=_subtree_hash(node),
+            source_location=_location(file, _node_line(node), origin),
+            visibility=visibility,
+            api_relevant=True,
+            confidence=EvidenceConfidence.HIGH,
+        )
+    )
+
+
+def _typedef_underlying(node: dict[str, Any]) -> str:
+    """The underlying type a typedef/alias resolves to, build-root-stable.
+
+    clang records the aliased type in ``type.qualifiedType``
+    (``typedef int32_t handle_t;`` → ``"int"`` after the standard typedef chain
+    is spelled, or ``"int32_t"`` as written, depending on clang version). The
+    written spelling is what matters for a source/API change, so use it verbatim;
+    fall back to ``desugaredQualType`` only when the spelling is absent.
+    """
+    type_obj = node.get("type")
+    if not isinstance(type_obj, dict):
+        return ""
+    return str(type_obj.get("qualifiedType") or type_obj.get("desugaredQualType") or "")
+
+
+def _emit_typedef(
+    node: dict[str, Any],
+    ctx: _ClassifyContext,
+    tu: SourceAbiTu,
+    scope: list[str],
+    file: str,
+) -> None:
+    """Emit a public typedef/alias entity so a target change is detectable (D6).
+
+    A bare typedef leaves no exported symbol of its own, so an underlying-type
+    change is invisible to L0/L1 unless some other declaration's signature
+    happens to spell it. Recording the alias and its underlying type lets the
+    source diff flag ``public_typedef_target_changed`` (ADR-030 follow-up #3).
+    """
+    visibility, origin, public = ctx.classify(file)
+    if not public:
+        return
+    underlying = _typedef_underlying(node)
+    if not underlying:
+        return
+    name = _qualified(scope, str(node.get("name", "")))
+    tu.types.append(
+        SourceEntity(
+            id=_hash("typedef", name, underlying),
+            kind="typedef",
+            qualified_name=name,
+            type_hash=_hash("typedef-target", underlying),
+            value=underlying,
             source_location=_location(file, _node_line(node), origin),
             visibility=visibility,
             api_relevant=True,

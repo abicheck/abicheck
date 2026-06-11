@@ -560,3 +560,112 @@ class TestLoadSnapshotFromString:
         from abicheck.baseline import _load_snapshot_from_string
         with pytest.raises(Exception):
             _load_snapshot_from_string("not valid json")
+
+
+# ---------------------------------------------------------------------------
+# Tests: evidence-pack storage (ADR-028 Phase 5)
+# ---------------------------------------------------------------------------
+
+
+def _make_pack(root: Path) -> object:
+    """Build and write a minimal evidence pack with one build-evidence file."""
+    from abicheck.evidence import BuildEvidence, EvidencePack
+    from abicheck.evidence.build_evidence import Toolchain
+
+    pack = EvidencePack.empty(root, abicheck_version="9.9", created_at="t0")
+    pack.build_evidence = BuildEvidence(
+        toolchains=[Toolchain(id="toolchain://gcc-13", compiler_id="GNU", version="13")]
+    )
+    pack.write()
+    return pack
+
+
+class TestEvidencePackStorage:
+    def test_push_pull_evidence_roundtrip(
+        self, registry: FilesystemRegistry, sample_snapshot: AbiSnapshot, tmp_path: Path
+    ) -> None:
+        pack = _make_pack(tmp_path / "src.evidence")
+        key = BaselineKey(library="libfoo", version="1.0.0", platform="linux-x86_64")
+
+        registry.push(key, sample_snapshot, evidence=pack)
+
+        pulled = registry.pull_evidence(key)
+        assert pulled is not None
+        assert pulled.build_evidence is not None
+        assert pulled.build_evidence.toolchains[0].compiler_id == "GNU"
+        # Same logical evidence hashes identically.
+        assert pulled.content_hash() == pack.content_hash()
+
+    def test_push_records_evidence_hash_in_metadata(
+        self, registry: FilesystemRegistry, sample_snapshot: AbiSnapshot, tmp_path: Path
+    ) -> None:
+        pack = _make_pack(tmp_path / "src.evidence")
+        key = BaselineKey(library="libfoo", version="1.0.0", platform="linux-x86_64")
+        registry.push(key, sample_snapshot, evidence=pack)
+
+        _, meta = registry.pull(key)  # type: ignore[misc]
+        assert meta.evidence_content_hash == pack.content_hash()
+
+    def test_pull_evidence_none_when_absent(
+        self, registry: FilesystemRegistry, sample_snapshot: AbiSnapshot
+    ) -> None:
+        key = BaselineKey(library="libfoo", version="1.0.0", platform="linux-x86_64")
+        registry.push(key, sample_snapshot)
+        assert registry.pull_evidence(key) is None
+
+    def test_pull_evidence_none_for_missing_baseline(
+        self, registry: FilesystemRegistry
+    ) -> None:
+        key = BaselineKey(library="nope", version="0", platform="linux-x86_64")
+        assert registry.pull_evidence(key) is None
+
+    def test_repush_without_evidence_drops_stale_pack(
+        self, registry: FilesystemRegistry, sample_snapshot: AbiSnapshot, tmp_path: Path
+    ) -> None:
+        pack = _make_pack(tmp_path / "src.evidence")
+        key = BaselineKey(library="libfoo", version="1.0.0", platform="linux-x86_64")
+        registry.push(key, sample_snapshot, evidence=pack)
+        assert registry.pull_evidence(key) is not None
+
+        registry.push(key, sample_snapshot)  # no evidence this time
+        assert registry.pull_evidence(key) is None
+        _, meta = registry.pull(key)  # type: ignore[misc]
+        assert meta.evidence_content_hash is None
+
+    def test_pull_evidence_detects_tampering(
+        self, registry: FilesystemRegistry, sample_snapshot: AbiSnapshot, tmp_path: Path
+    ) -> None:
+        pack = _make_pack(tmp_path / "src.evidence")
+        key = BaselineKey(library="libfoo", version="1.0.0", platform="linux-x86_64")
+        registry.push(key, sample_snapshot, evidence=pack)
+
+        # Corrupt the stored build evidence so the recomputed digests drift.
+        stored = registry.root / key.path / "evidence" / "build" / "build_evidence.json"
+        stored.write_text('{"schema_version": 1, "tampered": true}\n', encoding="utf-8")
+
+        with pytest.raises(BaselineIntegrityError, match="content hash mismatch"):
+            registry.pull_evidence(key)
+
+    def test_push_unwritten_pack_raises(
+        self, registry: FilesystemRegistry, sample_snapshot: AbiSnapshot, tmp_path: Path
+    ) -> None:
+        from abicheck.evidence import EvidencePack
+
+        pack = EvidencePack.empty(tmp_path / "unwritten.evidence")  # never .write()
+        key = BaselineKey(library="libfoo", version="1.0.0", platform="linux-x86_64")
+        with pytest.raises(ValidationError, match="no manifest.json"):
+            registry.push(key, sample_snapshot, evidence=pack)
+
+    def test_delete_removes_evidence(
+        self, registry: FilesystemRegistry, sample_snapshot: AbiSnapshot, tmp_path: Path
+    ) -> None:
+        pack = _make_pack(tmp_path / "src.evidence")
+        key = BaselineKey(library="libfoo", version="1.0.0", platform="linux-x86_64")
+        registry.push(key, sample_snapshot, evidence=pack)
+        assert registry.delete(key) is True
+        assert registry.pull_evidence(key) is None
+
+    def test_metadata_evidence_hash_roundtrip(self) -> None:
+        meta = BaselineMetadata.create("snap-json", evidence_content_hash="sha256:abc")
+        restored = BaselineMetadata.from_dict(meta.to_dict())
+        assert restored.evidence_content_hash == "sha256:abc"

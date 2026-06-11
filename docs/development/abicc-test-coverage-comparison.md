@@ -1,6 +1,6 @@
 # ABICC vs Abicheck: Test Coverage Comparison
 
-> Updated: 2026-03-09; content reviewed 2026-06-07. The ABICC rule mapping is a historical parity snapshot; the current ChangeKind total is **234**, see the [Change Kind Reference](../reference/change-kinds.md).
+> Updated: 2026-03-09; content reviewed 2026-06-07. The ABICC rule mapping is a historical parity snapshot; the current ChangeKind total is **235**, see the [Change Kind Reference](../reference/change-kinds.md).
 > Source: ABICC `RulesBin.xml` (196 rules), `RulesSrc.xml` (100 rules + `Removed_Const_Overload`), `RegTests.pm` (~153 C++ + ~102 C named scenarios)
 > Target: abicheck `examples/` (127 cases; the original 74-case subset is the release-pinned cross-tool benchmark), `tests/` (large unit/integration/parity suite), `ChangeKind` enum (**234 kinds** today; the per-rule mappings below were written against an earlier snapshot)
 >
