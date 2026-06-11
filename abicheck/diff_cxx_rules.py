@@ -164,6 +164,23 @@ def owner_class_of(f: Function) -> str | None:
     return "::".join(comps[:-1])
 
 
+def _resolve_owner_type(
+    owner: str, types: dict[str, RecordType]
+) -> RecordType | None:
+    """Look up the owner's record, tolerating qualified-vs-leaf naming.
+
+    DWARF records a class under its qualified name (``kde::View``); the CastXML
+    dumper records it under the leaf (``View``). The owner derived from a mangled
+    symbol is always qualified, so when the qualified key misses, fall back to
+    the leaf component.
+    """
+    t = types.get(owner)
+    if t is not None:
+        return t
+    leaf = owner.rsplit("::", 1)[-1]
+    return types.get(leaf) if leaf != owner else None
+
+
 def virtual_method_addition(
     f_new: Function,
     old_types: dict[str, RecordType],
@@ -184,8 +201,8 @@ def virtual_method_addition(
     owner = owner_class_of(f_new)
     if owner is None:
         return None
-    t_old = old_types.get(owner)
-    t_new = new_types.get(owner)
+    t_old = _resolve_owner_type(owner, old_types)
+    t_new = _resolve_owner_type(owner, new_types)
     if t_old is None or t_new is None:
         return None  # brand-new class → adding it (with virtuals) is compatible
     if t_old.vtable != t_new.vtable:

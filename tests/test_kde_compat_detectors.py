@@ -204,6 +204,25 @@ class TestVirtualMethodAdded:
         assert ChangeKind.VIRTUAL_METHOD_ADDED in _kinds(result)
         assert result.verdict == Verdict.BREAKING
 
+    def test_namespaced_owner_matches_castxml_leaf_record_name(self):
+        """CastXML records the class under its leaf name (``View``) while the
+        owner derived from the mangled symbol is qualified (``kde::View``); the
+        lookup must reconcile the two so the vtable break is still caught."""
+        old = _snap(
+            functions=[_method("show", "_ZN3kde4View4showEv", is_virtual=True)],
+            types=[_cls("View")],  # leaf-only record name, as CastXML emits
+        )
+        new = _snap(
+            functions=[
+                _method("show", "_ZN3kde4View4showEv", is_virtual=True),
+                _method("hide", "_ZN3kde4View4hideEv", is_virtual=True),
+            ],
+            types=[_cls("View")],
+        )
+        result = compare(old, new)
+        assert ChangeKind.VIRTUAL_METHOD_ADDED in _kinds(result)
+        assert result.verdict == Verdict.BREAKING
+
     def test_added_virtual_destructor_resolves_owner_from_mangled(self):
         """A virtual destructor added to an existing class (empty-vtable blind
         spot) is a vtable break; its CastXML leaf name is just ``~C`` so the
@@ -432,6 +451,9 @@ class TestItaniumScopeParser:
         "_ZN1C99barEv",   # length runs past the string (malformed)
         "_Z1²0",     # fuzzed: Unicode digit must not reach int()
         "_ZN1CplEv",      # operator+ — not modelled
+        "_ZN3BoxIiE",     # unterminated nested name after template args
+        "_ZN3BoxIi4sizeEv",  # template-arg list with no closing E (unbalanced)
+        "_ZN1C",          # truncated nested name
     ])
     def test_unmodelled_or_degenerate_does_not_crash(self, mangled):
         # Must never raise; either parses to something or returns None.
