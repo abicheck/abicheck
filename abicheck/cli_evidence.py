@@ -478,19 +478,18 @@ def _ingest_graph_backends(
         ingest_kythe_entries,
     )
 
-    def _load(path: Path) -> object | None:
+    def _load(path: Path, name: str) -> object | None:
         try:
             return _json.loads(Path(path).read_text(encoding="utf-8"))
         except (OSError, ValueError) as exc:
-            merged_msg = str(exc)
             extractors.append(ExtractorRecord(
-                name="graph_backend", status="failed",
-                inputs=[DEFAULT_REDACTION.path(str(path))], detail=merged_msg,
+                name=name, status="failed",
+                inputs=[DEFAULT_REDACTION.path(str(path))], detail=str(exc),
             ))
             return None
 
     if kythe_entries is not None:
-        data = _load(kythe_entries)
+        data = _load(kythe_entries, "graph_backend:kythe")
         if data is not None:
             entries = data if isinstance(data, list) else (
                 data.get("entries", []) if isinstance(data, dict) else []
@@ -502,7 +501,7 @@ def _ingest_graph_backends(
             ))
 
     if codeql_results is not None:
-        data = _load(codeql_results)
+        data = _load(codeql_results, "graph_backend:codeql")
         if isinstance(data, dict):
             added = ingest_codeql_call_results(graph, data, ref=DEFAULT_REDACTION.path(str(codeql_results)))
             extractors.append(ExtractorRecord(

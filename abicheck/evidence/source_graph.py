@@ -980,8 +980,16 @@ def diff_source_graph_findings(
     # 6) a changed ABI-relevant build option that now reaches a public symbol
     #    (added BUILD_OPTION_AFFECTS_SYMBOL edges), grouped by option.
     added_opt_edges = _option_symbol_edges(new) - _option_symbol_edges(old)
+    # Only a *changed* (newly introduced) ABI-relevant flag is interesting here:
+    # a new target that merely reuses a pre-existing flag produces "added" edges
+    # too, but that is covered by symbol-level diffs, not flag drift. Scope to
+    # build-option nodes absent from the old graph (ADR-029 build_diff already
+    # reports the drift; this localizes a *new* flag to the public surface).
+    old_option_nodes = {n.id for n in old.nodes if n.kind == "build_option"}
     reached_by_option: dict[str, list[str]] = {}
     for opt, sym in added_opt_edges:
+        if opt in old_option_nodes:
+            continue
         reached_by_option.setdefault(opt, []).append(sym)
     for opt in sorted(reached_by_option):
         label = new_labels.get(opt, opt)

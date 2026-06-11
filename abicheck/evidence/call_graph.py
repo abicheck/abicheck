@@ -232,11 +232,13 @@ class ClangCallGraphExtractor:
             self.diagnostics.append(f"clang produced no AST (stderr: {proc.stderr[:200]})")
             return []
         try:
-            ast = json.loads(proc.stdout)
-        except ValueError as exc:
+            # Both json.loads and the recursive AST walk can hit Python's
+            # recursion limit on a pathologically deep TU; guard so a degenerate
+            # AST degrades to "no call edges" rather than aborting collection.
+            return parse_clang_ast_calls(json.loads(proc.stdout))
+        except (ValueError, RecursionError) as exc:
             self.diagnostics.append(f"could not parse clang AST JSON: {exc}")
             return []
-        return parse_clang_ast_calls(ast)
 
     def extract_from_build(self, build: BuildEvidence) -> list[CallEdge]:
         """Extract call edges across every compile unit in *build* (best effort)."""

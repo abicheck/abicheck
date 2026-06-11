@@ -398,6 +398,29 @@ def test_build_option_reaches_public_symbol_edges_and_finding() -> None:
     assert bo[0].source_location == f"[{EVIDENCE_TIER_L5}]"
 
 
+def test_build_option_reaches_public_symbol_ignores_reused_flag_on_new_target() -> None:
+    # A new target reusing a pre-existing flag must NOT raise the finding — that
+    # is symbol-level churn, not flag drift (only a *new* flag is interesting).
+    def _build(targets):
+        b = BuildEvidence()
+        for tid, hdr in targets:
+            b.targets.append(Target(id=tid, public_headers=[hdr], confidence=Confidence.HIGH))
+            b.compile_units.append(CompileUnit(
+                id=f"cu://{tid}", source=f"src/{tid}.cpp", target_id=tid,
+                abi_relevant_flags=["-std=c++20"]))
+        return b
+
+    old_surf = _surface_with([("foo::a", "inc/foo.h")], {"foo::a": "_Za"}, target="target://foo")
+    new_surf = _surface_with([("bar::b", "inc/bar.h")], {"bar::b": "_Zb"}, target="target://bar")
+    old = build_source_graph(_build([("target://foo", "inc/foo.h")]), source_abi=old_surf)
+    new = build_source_graph(
+        _build([("target://foo", "inc/foo.h"), ("target://bar", "inc/bar.h")]), source_abi=new_surf)
+    bo = [c for c in diff_source_graph_findings(old, new)
+          if c.kind == ChangeKind.BUILD_OPTION_REACHES_PUBLIC_SYMBOL]
+    # -std=c++20 already existed in the old graph → no flag-drift finding.
+    assert bo == []
+
+
 def test_include_graph_public_header_drift_finding() -> None:
     from abicheck.evidence.include_graph import augment_graph_with_includes
 

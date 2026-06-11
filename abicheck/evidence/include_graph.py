@@ -22,6 +22,7 @@ the L4 source extractors and the call-graph extractor.
 """
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess  # noqa: S404 - include extraction shells out to clang (never shell=True)
 from dataclasses import dataclass, field
@@ -53,9 +54,13 @@ def parse_depfile(text: str) -> list[str]:
     out: list[str] = []
     seen: set[str] = set()
     for line in joined.splitlines():
-        if ":" not in line:
+        # Split on the rule colon — the first ':' followed by whitespace or
+        # end-of-string — so a Windows drive-letter prefix (``C:\foo.o:``) is
+        # not mistaken for the target separator.
+        m = re.search(r":(?=\s|$)", line)
+        if m is None:
             continue
-        _target, _, prereqs = line.partition(":")
+        prereqs = line[m.end():]
         for tok in prereqs.split():
             tok = tok.strip()
             if tok and tok != "\\" and tok not in seen:

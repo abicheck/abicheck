@@ -40,6 +40,13 @@ def test_parse_depfile_dedupes_and_skips_no_colon() -> None:
     assert parse_depfile(text) == ["a.h", "b.h"]
 
 
+def test_parse_depfile_windows_drive_letter_target() -> None:
+    # The drive-letter colon must not be mistaken for the rule separator.
+    assert parse_depfile(r"C:\build\foo.o: C:\src\foo.cpp inc\a.h") == [
+        r"C:\src\foo.cpp", r"inc\a.h",
+    ]
+
+
 def test_augment_reuses_existing_header_node() -> None:
     g = SourceGraphSummary()
     g.add_node(GraphNode(id="header://inc/foo.h", kind="header", label="inc/foo.h"))
