@@ -275,6 +275,8 @@ library from loading in some deployment environments. Manual review is required.
 | `vtable_symbol_identity_changed` | A vtable or `typeinfo` symbol's identity changed (e.g. via a visibility or version-script change) while the class layout is stable. Cross-DSO `dynamic_cast` and exception matching can silently fail because they compare RTTI pointers, not contents. |
 | `overload_set_rerouted` | The overload set under a public name changed in a way where some overloads were removed and others added. Existing call sites that previously resolved to a removed overload now resolve to a different one (often via implicit conversion or a templated catch-all) — compiles, links, runs, but runs **different** code. |
 | `overload_added` | A new overload was added under a public name that previously had exactly one declaration. Old binaries are unaffected (binary compatible), but it is not source-compatible: taking the function's address (`&Foo::bar`) becomes ambiguous and fails to compile, and call sites relying on an implicit conversion may now resolve to the new overload. KDE's C++ binary-compatibility policy lists adding an overload to a non-overloaded function as a change to avoid. Raise to `API_BREAK` under a strict source-compatibility profile. |
+| `func_noexcept_removed` | `noexcept` removed from a function. The function symbol itself is unchanged (Itanium mangling does not encode `noexcept` on the symbol), so existing binaries keep resolving it — not a binary break. But since C++17 `noexcept` is part of the function *type*, so it is encoded in function-pointer and template-argument mangling: a consumer forming `void(*)() noexcept` or passing the function as a non-type template argument no longer compiles, and code relying on the guarantee can hit `std::terminate`. KDE lists this as a change to avoid unless the spec was `noexcept(false)`. Raise to `API_BREAK` under a strict source-compatibility profile. |
+| `type_lost_final` | A class/struct lost the `final` specifier. Deriving from it is now allowed and previously-valid source still compiles, so it is not a source break — but consumers compiled while the class was `final` may have had virtual calls **devirtualized**, and if a later version introduces an overriding subclass those old binaries dispatch statically to the wrong target. KDE lists removing `final` as a change to avoid. Header/castxml-mode only (DWARF/symbol mode carries no `final` info). |
 | `behavioural_default_changed` | A documented default value changed without altering any signature — e.g. the default device selector, the default execution backend, or the default policy. Source compiles and links unchanged; runtime behaviour silently differs. Read from the probe manifest's `defaults:` section. |
 | `relro_weakened` | RELRO protection was weakened (e.g. **full → partial** or **→ none**). The GOT is no longer fully read-only after relocation, widening the GOT-overwrite attack surface. Captured from `PT_GNU_RELRO` + `BIND_NOW`. Not a binary-compatibility break, but a hardening regression. Gate it via the shipped `security` policy (`--policy-file security`). |
 | `pie_disabled` | A position-independent **executable** became non-PIE (`DF_1_PIE` dropped on an `ET_DYN` image), so it loads at a fixed address and ASLR no longer randomizes it. Hardening regression; gate via `--policy-file security`. |
@@ -305,7 +307,6 @@ These changes are safe: they add new capabilities or carry diagnostic informatio
 | `var_added` | A new public global variable was exported. Existing binaries are unaffected. |
 | `type_added` | A new type was added to the public API. Additive — existing consumers are unchanged. |
 | `type_field_added_compatible` | A field was appended to a standard-layout, non-polymorphic struct. Size increases but no existing field offsets shift. Compatible only for types meeting the standard-layout criteria. |
-| `type_lost_final` | A class/struct lost the `final` specifier. Strictly more permissive — deriving from it is now allowed and previously-valid code still compiles. Header/castxml-mode only. |
 
 ### Enum Additions
 
@@ -324,7 +325,6 @@ These changes are safe: they add new capabilities or carry diagnostic informatio
 | Kind | Description |
 |------|-------------|
 | `func_noexcept_added` | `noexcept` added to a function. The Itanium ABI mangling does not change in practice; existing compiled binaries resolve the same symbol. A source-level concern for function-pointer typing only. |
-| `func_noexcept_removed` | `noexcept` removed from a function. Existing binaries continue to resolve the symbol. A source-level exception-specification concern only. |
 
 ### Function Visibility and Inline Attribute Changes
 

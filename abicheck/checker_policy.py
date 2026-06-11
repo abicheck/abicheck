@@ -56,7 +56,7 @@ class ChangeKind(str, Enum):
     FUNC_RETURN_CHANGED = "func_return_changed"  # return type changed → BREAKING
     FUNC_PARAMS_CHANGED = "func_params_changed"  # parameter types changed → BREAKING
     FUNC_NOEXCEPT_ADDED = "func_noexcept_added"  # noexcept added → BREAKING (C++17 P0012R1: noexcept is part of function type)
-    FUNC_NOEXCEPT_REMOVED = "func_noexcept_removed"  # noexcept removed → BREAKING (can widen exception spec)
+    FUNC_NOEXCEPT_REMOVED = "func_noexcept_removed"  # noexcept removed → COMPATIBLE_WITH_RISK (C++17: part of fn-pointer/template mangling; source risk)
     FUNC_VIRTUAL_ADDED = (
         "func_virtual_added"  # became virtual → vtable change → BREAKING
     )
@@ -221,7 +221,7 @@ class ChangeKind(str, Enum):
     # the binary carry no `final` information). Source-level: gaining `final`
     # breaks any consumer that derives from the class.
     TYPE_BECAME_FINAL = "type_became_final"  # gained `final` → derivation no longer compiles → API_BREAK
-    TYPE_LOST_FINAL = "type_lost_final"      # lost `final` → strictly more permissive → COMPATIBLE
+    TYPE_LOST_FINAL = "type_lost_final"      # lost `final` → devirtualization desync risk on old binaries → COMPATIBLE_WITH_RISK
     BASE_CLASS_POSITION_CHANGED = (
         "base_class_position_changed"  # base reorder → this-ptr offset change
     )

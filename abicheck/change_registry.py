@@ -132,8 +132,17 @@ REGISTRY = ChangeKindRegistry([
        impact="Callers push arguments with the old layout; callee reads wrong data from stack/registers."),
     _E("func_noexcept_added", _C,
        impact="In C++17 noexcept is part of the function type; old callers compiled against non-noexcept signature get a different mangled name."),
-    _E("func_noexcept_removed", _C,
-       impact="Old callers may rely on noexcept guarantee for optimizations; removing it can cause unexpected std::terminate."),
+    _E("func_noexcept_removed", _R,
+       impact="`noexcept` removed from a function. Old binaries keep resolving "
+              "the symbol, so this is not a binary break — but since C++17 "
+              "`noexcept` is part of the function *type*, so it is encoded in "
+              "function-pointer and template-argument mangling: consumers that "
+              "form a `void(*)() noexcept` pointer or pass the function as a "
+              "non-type template argument no longer compile, and code relying on "
+              "the guarantee can hit `std::terminate`. KDE's C++ binary-"
+              "compatibility policy treats removing `noexcept` as a change to "
+              "avoid unless it was `noexcept(false)`. Verdict is policy-"
+              "adjustable; raise to API_BREAK under a strict source profile."),
     _E("func_virtual_added", _B,
        impact="Vtable layout changes; old binaries call wrong virtual function slot, leading to crashes or wrong behavior."),
     _E("func_virtual_removed", _B,
@@ -713,11 +722,16 @@ REGISTRY = ChangeKindRegistry([
               "fails — a source/API break. Invisible to binary analysis: "
               "`final` is not recorded in DWARF or the object file, so this is "
               "detected only in header (castxml) mode."),
-    _E("type_lost_final", _C,
-       impact="A class/struct lost the `final` specifier. This is strictly "
-              "more permissive — code that compiled before still compiles, and "
-              "deriving from the type is now allowed. Reported as a compatible "
-              "change for surface-tracking completeness."),
+    _E("type_lost_final", _R,
+       impact="A class/struct lost the `final` specifier. Deriving from it is "
+              "now allowed and previously-valid source still compiles, so this "
+              "is not a source break. The risk is on already-compiled consumers: "
+              "code built while the class was `final` may have had its virtual "
+              "calls *devirtualized*, and if a later version introduces a "
+              "subclass that overrides, those old binaries keep dispatching "
+              "statically to the wrong target. KDE's C++ binary-compatibility "
+              "policy lists removing `final` as a change to avoid; surfaced as a "
+              "deployment risk for review rather than a hard break."),
 
     # ── Namespace-shape patterns (PR follow-up to #238) ─────────────────
     # Generic detectors for template / header-only libraries (the patterns
