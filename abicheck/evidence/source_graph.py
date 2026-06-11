@@ -47,7 +47,13 @@ from typing import TYPE_CHECKING, Any
 from .build_evidence import BuildEvidence, Confidence
 
 if TYPE_CHECKING:
+    from ..checker_types import Change
     from .source_abi import SourceAbiSurface, SourceEntity
+
+#: Evidence-boundary label stamped on every source-graph finding (ADR-031 D9),
+#: mirroring ``EvidenceLayer.L5_SOURCE_GRAPH``. It keeps a graph-derived risk
+#: visibly distinct from an artifact-proven shipped-ABI break (ADR-028 D3).
+EVIDENCE_TIER_L5 = "L5_SOURCE_GRAPH"
 
 #: Source-graph schema version, independent of the pack/build/source/snapshot
 #: versions (ADR-028 D8 versioning). Bump on any breaking change to
@@ -646,3 +652,155 @@ def diff_source_graph(old: SourceGraphSummary, new: SourceGraphSummary) -> Graph
         added_edges=[new_edges[k] for k in sorted(new_edges.keys() - old_edges.keys())],
         removed_edges=[old_edges[k] for k in sorted(old_edges.keys() - new_edges.keys())],
     )
+
+
+# ── Phase 5: graph-derived secondary risk findings (ADR-031 D6) ─────────────
+
+
+def _label_map(graph: SourceGraphSummary) -> dict[str, str]:
+    return {n.id: (n.label or n.id) for n in graph.nodes}
+
+
+def _kind_map(graph: SourceGraphSummary) -> dict[str, str]:
+    return {n.id: n.kind for n in graph.nodes}
+
+
+def _decl_to_symbol(graph: SourceGraphSummary) -> dict[str, str]:
+    """``source_decl`` node id → exported ``binary_symbol`` node id it maps to."""
+    return {
+        e.src: e.dst
+        for e in graph.edges
+        if e.kind == "SOURCE_DECL_MAPS_TO_SYMBOL"
+    }
+
+
+def _public_decls(graph: SourceGraphSummary) -> set[str]:
+    """``source_decl`` ids reachable from a public header (``SOURCE_DECLARES``)."""
+    kinds = _kind_map(graph)
+    return {
+        e.dst
+        for e in graph.edges
+        if e.kind == "SOURCE_DECLARES"
+        and kinds.get(e.src) == "header"
+        and kinds.get(e.dst) == "source_decl"
+    }
+
+
+def _generated_in_public_closure(graph: SourceGraphSummary) -> set[str]:
+    """``generated_file`` ids that are exposed as a target's public header.
+
+    A generated file in the public declaration closure is one a target lists as
+    a public header (``TARGET_HAS_PUBLIC_HEADER`` → ``generated_file``) — e.g. a
+    generated ``config.h``. That is the common, well-defined signal; richer
+    "generated file declares a public entity" detection awaits the include-graph
+    phase, which gives generated files and headers a shared identity.
+    """
+    kinds = _kind_map(graph)
+    return {
+        e.dst
+        for e in graph.edges
+        if e.kind == "TARGET_HAS_PUBLIC_HEADER" and kinds.get(e.dst) == "generated_file"
+    }
+
+
+def diff_source_graph_findings(
+    old: SourceGraphSummary, new: SourceGraphSummary
+) -> list[Change]:
+    """Map the graph delta onto ADR-031 D6 secondary risk findings.
+
+    Produces three RISK-tier ``ChangeKind``s, each stamped with the
+    ``[L5_SOURCE_GRAPH]`` evidence boundary so it reads as graph-derived, not an
+    artifact diff:
+
+    - ``SOURCE_TO_BINARY_MAPPING_CHANGED`` — a declaration present in *both*
+      graphs now maps to a different exported symbol;
+    - ``PUBLIC_REACHABILITY_CHANGED`` — a declaration entered/left the
+      public-header reachability closure;
+    - ``GENERATED_HEADER_REACHES_PUBLIC_API`` — a generated file newly entered
+      the public declaration closure.
+
+    Per ADR-028 D3 / ADR-031 D6 these explain and prioritize; the caller folds
+    them into the verdict pipeline as ordinary RISK changes that never override
+    an artifact-proven break.
+    """
+    from ..checker_policy import ChangeKind
+    from ..checker_types import Change
+
+    findings: list[Change] = []
+    boundary = f"[{EVIDENCE_TIER_L5}]"
+    old_labels, new_labels = _label_map(old), _label_map(new)
+
+    # 1) source↔binary mapping drift for declarations present in both graphs.
+    old_map, new_map = _decl_to_symbol(old), _decl_to_symbol(new)
+    old_decls = {n.id for n in old.nodes if n.kind == "source_decl"}
+    new_decls = {n.id for n in new.nodes if n.kind == "source_decl"}
+    for decl in sorted(old_decls & new_decls):
+        old_sym, new_sym = old_map.get(decl, ""), new_map.get(decl, "")
+        if old_sym != new_sym:
+            label = new_labels.get(decl, decl)
+            findings.append(Change(
+                kind=ChangeKind.SOURCE_TO_BINARY_MAPPING_CHANGED,
+                symbol=label,
+                description=(
+                    f"Declaration {label!r} maps to a different exported symbol "
+                    f"than before ({old_sym or '<none>'} → {new_sym or '<none>'}). "
+                    "Source-graph evidence: investigate the surface/export mapping; "
+                    "this does not by itself prove an ABI break."
+                ),
+                old_value=old_labels.get(old_sym, old_sym),
+                new_value=new_labels.get(new_sym, new_sym),
+                source_location=boundary,
+            ))
+
+    # 2) public-reachability closure changes (only when both sides have a
+    #    closure — an empty baseline would otherwise flag every declaration).
+    old_pub, new_pub = _public_decls(old), _public_decls(new)
+    if old_pub and new_pub:
+        for decl in sorted(new_pub - old_pub):
+            label = new_labels.get(decl, decl)
+            findings.append(Change(
+                kind=ChangeKind.PUBLIC_REACHABILITY_CHANGED,
+                symbol=label,
+                description=(
+                    f"Declaration {label!r} entered the public-API reachability "
+                    "closure (now declared by a public header). Source-graph "
+                    "evidence to prioritize review."
+                ),
+                old_value="not reachable",
+                new_value="reachable via public header",
+                source_location=boundary,
+            ))
+        for decl in sorted(old_pub - new_pub):
+            label = old_labels.get(decl, decl)
+            findings.append(Change(
+                kind=ChangeKind.PUBLIC_REACHABILITY_CHANGED,
+                symbol=label,
+                description=(
+                    f"Declaration {label!r} left the public-API reachability "
+                    "closure (no longer declared by a public header). Source-graph "
+                    "evidence to prioritize review."
+                ),
+                old_value="reachable via public header",
+                new_value="not reachable",
+                source_location=boundary,
+            ))
+
+    # 3) generated files that newly entered the public declaration closure.
+    newly_generated = _generated_in_public_closure(new) - _generated_in_public_closure(old)
+    for gen in sorted(newly_generated):
+        label = new_labels.get(gen, gen)
+        findings.append(Change(
+            kind=ChangeKind.GENERATED_HEADER_REACHES_PUBLIC_API,
+            symbol=label,
+            description=(
+                f"Generated file {label!r} now participates in the public "
+                "declaration closure (public header or declares a public entity). "
+                "Verify its provenance and that the generated content is "
+                "reproducible across builds."
+            ),
+            old_value="not in public closure",
+            new_value="in public closure",
+            source_location=boundary,
+        ))
+
+    return findings

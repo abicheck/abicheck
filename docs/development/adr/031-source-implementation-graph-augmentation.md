@@ -1,11 +1,16 @@
 # ADR-031: Source and Implementation Graph Augmentation
 
 **Date:** 2026-06-09
-**Status:** Accepted — phases 1–4 implemented (graph schema + build-evidence
-graph + L4 public-reachability/source↔binary graph + storage/CLI wiring +
-structural `compare-graph`); phases 5–7 (the D6 secondary `ChangeKind`
-findings + `explain-finding`, the Clang call extractor, and Kythe/CodeQL
-adapters) remain future work.
+**Status:** Accepted — phases 1–5 (most) implemented: graph schema +
+build-evidence graph + L4 public-reachability/source↔binary graph +
+storage/CLI wiring + structural `compare-graph` + three D6 graph-derived risk
+findings (`public_reachability_changed`, `source_to_binary_mapping_changed`,
+`generated_header_reaches_public_api`) folded into the verdict pipeline. The
+remaining D6 kinds that need call/include/option-flow data
+(`call_graph_public_entry_reachability_changed`,
+`include_graph_public_header_drift`, `build_option_reaches_public_symbol`),
+the `explain-finding` command, the Clang call extractor (phase 6), and the
+Kythe/CodeQL adapters (phase 7) remain future work.
 **Decision maker:** Nikolay Petrov
 
 ---
@@ -244,7 +249,7 @@ proves it. Prefer "known static callers" or "observed graph edges".
 | 2 | Build graph edges from ADR-029 `BuildEvidence` | target/source/header/output graph | **Done** — `build_source_graph()`; `collect-evidence --source-graph summary` collects it and flips the L5 coverage row to PRESENT |
 | 3 | Header/type/declaration graph from L2/L4 | public reachability graph | **Done** — `build_source_graph(build, source_abi=…)` folds an ADR-030 `SourceAbiSurface` into `source_decl`/`record_type`/`enum_type`/`typedef`/`macro` nodes linked to their declaring public header via `SOURCE_DECLARES` |
 | 4 | Source-to-binary mapping graph | symbol/declaration/debug mapping explanations | **Done** — `SOURCE_DECL_MAPS_TO_SYMBOL`, `SOURCE_TYPE_MAPS_TO_DEBUG_TYPE`, and `BINARY_EXPORTS_SYMBOL` edges from the surface mappings, completing the target → header → decl → exported-symbol closure |
-| 5 | Graph diff and `explain-finding` | graph-to-graph compare, finding localization | **Partial** — `diff_source_graph()` + the `compare-graph` command produce the structural delta; the D6 secondary `ChangeKind` findings and `explain-finding` are future work |
+| 5 | Graph diff and `explain-finding` | graph-to-graph compare, finding localization | **Mostly done** — `diff_source_graph()` (structural delta) + `diff_source_graph_findings()` emit three D6 risk `ChangeKind`s, surfaced by `compare-graph` and folded into the `compare --old/--new-evidence` verdict pipeline. The call/include/option-flow D6 kinds and `explain-finding` remain future work |
 | 6 | Optional Clang direct-call extractor | direct call graph summary | Future |
 | 7 | Kythe/CodeQL adapters | external graph backend summaries | Future |
 

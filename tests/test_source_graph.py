@@ -22,6 +22,7 @@ import json
 
 from click.testing import CliRunner
 
+from abicheck.checker_policy import RISK_KINDS, ChangeKind
 from abicheck.cli import main
 from abicheck.evidence.build_evidence import (
     BuildEvidence,
@@ -35,6 +36,7 @@ from abicheck.evidence.pack import EvidencePack
 from abicheck.evidence.source_abi import SourceAbiSurface, SourceEntity, SourceLocation
 from abicheck.evidence.source_graph import (
     EDGE_KINDS,
+    EVIDENCE_TIER_L5,
     NODE_KINDS,
     SOURCE_GRAPH_VERSION,
     GraphEdge,
@@ -42,6 +44,7 @@ from abicheck.evidence.source_graph import (
     SourceGraphSummary,
     build_source_graph,
     diff_source_graph,
+    diff_source_graph_findings,
 )
 
 
@@ -272,6 +275,103 @@ def test_source_abi_round_trip_and_determinism() -> None:
     g = build_source_graph(BuildEvidence(), source_abi=s)
     assert SourceGraphSummary.from_dict(g.to_dict()).compute_graph_id() == g.compute_graph_id()
     assert build_source_graph(BuildEvidence(), source_abi=s).graph_id == g.graph_id
+
+
+# ── Phase 5: graph-derived risk findings (D6) ───────────────────────────────
+
+
+def _surface_with(decls, mapping, *, generated_header=None,
+                  target="target://libfoo") -> SourceAbiSurface:
+    s = SourceAbiSurface(library="libfoo.so", target_id=target)
+    for qn, path in decls:
+        s.reachable_declarations.append(SourceEntity(
+            id=qn, kind="function", qualified_name=qn,
+            source_location=SourceLocation(path=path, line=1, origin="PUBLIC_HEADER"),
+            visibility="public_header", confidence=EvidenceConfidence.HIGH,
+        ))
+    s.mappings["source_decl_to_binary_symbol"] = dict(mapping)
+    return s
+
+
+def _build_with_public_header(headers=("inc/foo.h",), generated=()) -> BuildEvidence:
+    b = BuildEvidence(generated_files=list(generated))
+    b.targets.append(Target(
+        id="target://libfoo", public_headers=list(headers), confidence=Confidence.HIGH,
+    ))
+    return b
+
+
+def test_all_three_graph_kinds_are_risk() -> None:
+    for k in (ChangeKind.PUBLIC_REACHABILITY_CHANGED,
+              ChangeKind.SOURCE_TO_BINARY_MAPPING_CHANGED,
+              ChangeKind.GENERATED_HEADER_REACHES_PUBLIC_API):
+        assert k in RISK_KINDS
+
+
+def test_findings_mapping_changed_for_persisting_decl() -> None:
+    b = _build_with_public_header()
+    old = build_source_graph(b, source_abi=_surface_with([("foo::b", "inc/foo.h")], {"foo::b": "_Zb"}))
+    new = build_source_graph(b, source_abi=_surface_with([("foo::b", "inc/foo.h")], {"foo::b": "_Zb2"}))
+    findings = diff_source_graph_findings(old, new)
+    assert len(findings) == 1
+    c = findings[0]
+    assert c.kind == ChangeKind.SOURCE_TO_BINARY_MAPPING_CHANGED
+    assert c.old_value == "_Zb" and c.new_value == "_Zb2"
+    assert c.source_location == f"[{EVIDENCE_TIER_L5}]"
+
+
+def test_findings_reachability_entered_and_left() -> None:
+    b = _build_with_public_header()
+    old = build_source_graph(b, source_abi=_surface_with(
+        [("foo::a", "inc/foo.h"), ("foo::gone", "inc/foo.h")], {"foo::a": "_Za"}))
+    new = build_source_graph(b, source_abi=_surface_with(
+        [("foo::a", "inc/foo.h"), ("foo::new", "inc/foo.h")], {"foo::a": "_Za"}))
+    kinds_syms = {(c.kind, c.symbol) for c in diff_source_graph_findings(old, new)}
+    assert (ChangeKind.PUBLIC_REACHABILITY_CHANGED, "foo::new") in kinds_syms
+    assert (ChangeKind.PUBLIC_REACHABILITY_CHANGED, "foo::gone") in kinds_syms
+
+
+def test_findings_empty_baseline_does_not_spam_reachability() -> None:
+    # An empty old graph must not flag every new declaration as "entered".
+    b = _build_with_public_header()
+    new = build_source_graph(b, source_abi=_surface_with([("foo::a", "inc/foo.h")], {"foo::a": "_Za"}))
+    findings = diff_source_graph_findings(SourceGraphSummary(), new)
+    assert not any(c.kind == ChangeKind.PUBLIC_REACHABILITY_CHANGED for c in findings)
+
+
+def test_findings_generated_header_reaches_public_api() -> None:
+    # A public header that is also a generated file → reaches public API.
+    old = build_source_graph(_build_with_public_header(headers=("inc/foo.h",)))
+    new = build_source_graph(_build_with_public_header(
+        headers=("inc/foo.h", "gen/config.h"), generated=("gen/config.h",)))
+    findings = diff_source_graph_findings(old, new)
+    gen = [c for c in findings if c.kind == ChangeKind.GENERATED_HEADER_REACHES_PUBLIC_API]
+    assert len(gen) == 1
+    assert "gen/config.h" in gen[0].symbol
+
+
+def test_findings_identical_graphs_yield_nothing() -> None:
+    b = _build_with_public_header()
+    g = build_source_graph(b, source_abi=_surface_with([("foo::a", "inc/foo.h")], {"foo::a": "_Za"}))
+    assert diff_source_graph_findings(g, g) == []
+
+
+def test_compare_graph_cli_surfaces_findings(tmp_path) -> None:
+    b = _build_with_public_header()
+    old = build_source_graph(b, source_abi=_surface_with([("foo::b", "inc/foo.h")], {"foo::b": "_Zb"}))
+    new = build_source_graph(b, source_abi=_surface_with([("foo::b", "inc/foo.h")], {"foo::b": "_Zb2"}))
+    op, np = tmp_path / "o.json", tmp_path / "n.json"
+    op.write_text(json.dumps(old.to_dict()))
+    np.write_text(json.dumps(new.to_dict()))
+
+    res = CliRunner().invoke(main, ["compare-graph", str(op), str(np)])
+    assert res.exit_code == 0, res.output
+    assert "Graph-derived risk findings" in res.output
+    assert "source_to_binary_mapping_changed" in res.output
+
+    res_json = CliRunner().invoke(main, ["compare-graph", str(op), str(np), "--format", "json"])
+    payload = json.loads(res_json.output)
+    assert payload["findings"][0]["kind"] == "source_to_binary_mapping_changed"
 
 
 # ── Phase 1: schema round-trip + content addressing ─────────────────────────

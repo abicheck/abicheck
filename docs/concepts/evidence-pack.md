@@ -202,6 +202,23 @@ source/API risk is never read as a proven shipped-binary ABI break. A shipped
 binary ABI break is still proven only by the artifact diff (L0/L1/L2), and
 policy profiles decide whether a source-only finding blocks a release.
 
+## Source graph findings (L5)
+
+When both packs carry an L5 source graph summary, comparing them (via `compare`
+with `--old/--new-evidence`, or directly with `compare-graph`) produces
+graph-derived **risk** findings (ADR-031 D6):
+
+| ChangeKind | verdict | meaning |
+|---|---|---|
+| `public_reachability_changed` | risk | A declaration entered or left the public-API reachability closure (target → public header → declaration → exported symbol) |
+| `source_to_binary_mapping_changed` | risk | A declaration present in both versions now maps to a different exported binary symbol |
+| `generated_header_reaches_public_api` | risk | A generated file newly participates in the public declaration closure (it is a public header) |
+
+These **explain and prioritize** impact; like the L4 findings they are never
+`breaking` on their own. Each carries the `L5_SOURCE_GRAPH` evidence-tier
+boundary, and per ADR-028 D3 they never override or suppress an artifact-proven
+ABI break.
+
 ## Evidence coverage
 
 Every compare run that involves a pack prints an **evidence-coverage table** so

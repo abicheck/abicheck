@@ -527,6 +527,15 @@ class ChangeKind(str, Enum):
     ODR_SOURCE_CONFLICT = "odr_source_conflict"  # same type name differs across TUs → RISK
     GENERATED_HEADER_CHANGED = "generated_header_changed"  # generated public header changed → RISK
 
+    # ── Source graph evidence (ADR-028 L5 / ADR-031 D6) ─────────────────────
+    # Emitted only by the source-graph diff over two L5 graph summaries
+    # (graph/source_graph_summary.json). Per ADR-031 D6 these *explain and
+    # prioritize* impact — they never, on their own, decide or suppress an
+    # artifact-proven ABI break; all default to RISK (COMPATIBLE_WITH_RISK).
+    PUBLIC_REACHABILITY_CHANGED = "public_reachability_changed"  # decl entered/left the public-API reachability closure → RISK
+    SOURCE_TO_BINARY_MAPPING_CHANGED = "source_to_binary_mapping_changed"  # a persisting decl now maps to a different exported symbol → RISK
+    GENERATED_HEADER_REACHES_PUBLIC_API = "generated_header_reaches_public_api"  # a generated file entered the public declaration closure → RISK
+
 
 class HasKind(Protocol):
     kind: ChangeKind

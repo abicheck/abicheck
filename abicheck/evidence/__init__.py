@@ -75,6 +75,7 @@ from .source_graph import (
     SourceGraphSummary,
     build_source_graph,
     diff_source_graph,
+    diff_source_graph_findings,
 )
 from .source_link import link_source_abi
 from .source_replay import (
@@ -122,6 +123,7 @@ __all__ = [
     "build_source_graph",
     "diff_source_abi",
     "diff_source_graph",
+    "diff_source_graph_findings",
     "link_source_abi",
     "run_source_replay",
     "scope_for_ci_mode",

@@ -663,6 +663,15 @@ def collect_compare_evidence(
         from .evidence.source_diff import diff_source_abi
         changes.extend(diff_source_abi(old_surface, new_surface))
 
+    # L5 source graph diff (ADR-031 D6): both packs must carry a graph summary.
+    # Per ADR-028 D3 / ADR-031 D6 these are ordinary RISK findings folded into
+    # the verdict pipeline — they explain and prioritize, never sole authority.
+    old_graph = old_pack.source_graph if old_pack else None
+    new_graph = new_pack.source_graph if new_pack else None
+    if old_graph is not None and new_graph is not None:
+        from .evidence.source_graph import diff_source_graph_findings
+        changes.extend(diff_source_graph_findings(old_graph, new_graph))
+
     src_pack = new_pack or old_pack
     coverage = list(src_pack.manifest.coverage) if src_pack else []
     if not coverage:
@@ -899,14 +908,26 @@ def compare_graph_cmd(old: Path, new: Path, fmt: str) -> None:
     """
     import json as _json
 
-    from .evidence.source_graph import diff_source_graph
+    from .evidence.source_graph import diff_source_graph, diff_source_graph_findings
 
     old_graph = _load_source_graph(old)
     new_graph = _load_source_graph(new)
     delta = diff_source_graph(old_graph, new_graph)
+    findings = diff_source_graph_findings(old_graph, new_graph)
 
     if fmt == "json":
-        click.echo(_json.dumps(delta.to_dict(), indent=2, sort_keys=True))
+        payload = delta.to_dict()
+        payload["findings"] = [
+            {
+                "kind": c.kind.value,
+                "symbol": c.symbol,
+                "description": c.description,
+                "old_value": c.old_value,
+                "new_value": c.new_value,
+            }
+            for c in findings
+        ]
+        click.echo(_json.dumps(payload, indent=2, sort_keys=True))
         return
 
     if not delta.changed:
@@ -927,3 +948,10 @@ def compare_graph_cmd(old: Path, new: Path, fmt: str) -> None:
         click.echo(f"  + edge {edge.kind}: {edge.src} -> {edge.dst}")
     for edge in delta.removed_edges:
         click.echo(f"  - edge {edge.kind}: {edge.src} -> {edge.dst}")
+
+    if findings:
+        # Graph-derived RISK findings (ADR-031 D6): explanation/prioritization,
+        # never a standalone ABI-break verdict (ADR-028 D3).
+        click.echo(f"\nGraph-derived risk findings ({len(findings)}):")
+        for c in findings:
+            click.echo(f"  [{c.kind.value}] {c.symbol}: {c.description}")
