@@ -1,20 +1,24 @@
-"""Tests for the real-world validation harness helpers."""
+"""Tests for the real-world validation harness helpers.
+
+``logical_name`` now lives in the shared engine (``conda_harness``) that both
+``run_matrix.py`` and ``validate.py`` build on; these cases pin its behaviour
+on sonames the curated manifest relies on.
+"""
 
 from __future__ import annotations
 
-import ast
-import os
-import re
+import importlib.util
 from pathlib import Path
+
+_SCRIPT = Path("validation/scripts/conda_harness.py")
 
 
 def _load_logical_name():
-    script = Path("validation/scripts/run_matrix.py").read_text()
-    module = ast.parse(script)
-    func = next(node for node in module.body if isinstance(node, ast.FunctionDef) and node.name == "logical_name")
-    ns = {"os": os, "re": re}
-    exec(compile(ast.Module(body=[func], type_ignores=[]), str(Path("validation/scripts/run_matrix.py")), "exec"), ns)
-    return ns["logical_name"]
+    spec = importlib.util.spec_from_file_location("conda_harness", _SCRIPT)
+    assert spec and spec.loader
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod.logical_name
 
 
 def test_logical_name_handles_standard_soname_suffixes() -> None:

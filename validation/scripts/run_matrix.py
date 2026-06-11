@@ -13,23 +13,27 @@ committed (binaries are large); point the harness at it via the
 relative to the repo). Each package extracts to ``<libs>/<pkg_stem>/lib/*.so*`` —
 see ``data/manifest.json`` for the conda-forge files to fetch and extract.
 """
+
 from __future__ import annotations
 
 import glob
 import json
 import os
-import re
 import subprocess
 import sys
 import time
 from pathlib import Path
 
-VALID_DIR = Path(__file__).resolve().parent.parent          # validation/
+VALID_DIR = Path(__file__).resolve().parent.parent  # validation/
 DATA = VALID_DIR / "data"
 EX = os.environ.get("ABICHECK_VALIDATION_LIBS", str(VALID_DIR / "libs" / "ex"))
 OUT = str(DATA)
 MANIFEST = DATA / "manifest.json"
 os.makedirs(f"{OUT}/runs", exist_ok=True)  # per-library JSONs (gitignored)
+
+# Share the logical-library-name helper with the unified harness (validate.py).
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from conda_harness import logical_name  # noqa: E402
 
 if not MANIFEST.is_file():
     sys.exit(f"manifest not found: {MANIFEST}")
@@ -40,10 +44,6 @@ if not os.path.isdir(EX):
         "committed), then set ABICHECK_VALIDATION_LIBS to their parent directory."
     )
 
-def logical_name(path: str) -> str:
-    b = os.path.basename(path)
-    stem = b.split(".so")[0]
-    return re.sub(r"-(?:\d+\.)+\d+$", "", stem)
 
 def real_sos(pkgdir: str) -> dict[str, str]:
     """logical_name -> path for every real (non-symlink) ELF .so in pkgdir/lib."""
@@ -60,14 +60,17 @@ def real_sos(pkgdir: str) -> dict[str, str]:
         out[logical_name(p)] = p
     return out
 
+
 def has_dwarf(path: str) -> bool:
     r = subprocess.run(["readelf", "-S", path], capture_output=True, text=True)
     return "debug_info" in r.stdout
+
 
 def run(cmd: list[str]) -> tuple[int, str, str, float]:
     t = time.time()
     p = subprocess.run(cmd, capture_output=True, text=True)
     return p.returncode, p.stdout, p.stderr, time.time() - t
+
 
 manifest = json.load(open(MANIFEST))
 results = []
@@ -79,12 +82,28 @@ for m in manifest:
     common = sorted(set(old) & set(new))
     for lname in common:
         op, np = old[lname], new[lname]
-        mode = ("dwarf" if has_dwarf(op) else "sym") + "->" + ("dwarf" if has_dwarf(np) else "sym")
+        mode = (
+            ("dwarf" if has_dwarf(op) else "sym")
+            + "->"
+            + ("dwarf" if has_dwarf(np) else "sym")
+        )
         tag = f"{m['pair']}__{lname}"
         jpath = f"{OUT}/runs/{tag}.json"
-        cmd = ["abicheck", "compare", op, np,
-               "--old-version", m["old_ver"], "--new-version", m["new_ver"],
-               "--format", "json", "-o", jpath, "--recommend"]
+        cmd = [
+            "abicheck",
+            "compare",
+            op,
+            np,
+            "--old-version",
+            m["old_ver"],
+            "--new-version",
+            m["new_ver"],
+            "--format",
+            "json",
+            "-o",
+            jpath,
+            "--recommend",
+        ]
         rc, so, se, dt = run(cmd)
         data = None
         if os.path.exists(jpath):
@@ -93,20 +112,36 @@ for m in manifest:
             except Exception as e:
                 se += f"\n[harness] json parse failed: {e}"
         rec = {
-            "tag": tag, "pair": m["pair"], "library": m["library"], "logical": lname,
-            "old_ver": m["old_ver"], "new_ver": m["new_ver"],
-            "expectation": m["expectation"], "note": m["note"],
-            "mode": mode, "old_path": op, "new_path": np,
-            "exit_code": rc, "seconds": round(dt, 2),
+            "tag": tag,
+            "pair": m["pair"],
+            "library": m["library"],
+            "logical": lname,
+            "old_ver": m["old_ver"],
+            "new_ver": m["new_ver"],
+            "expectation": m["expectation"],
+            "note": m["note"],
+            "mode": mode,
+            "old_path": op,
+            "new_path": np,
+            "exit_code": rc,
+            "seconds": round(dt, 2),
             "stderr": se.strip(),
         }
         if data:
             summ = data.get("summary", {}) if isinstance(data, dict) else {}
             rec["verdict"] = data.get("verdict") or summ.get("verdict")
             rec["counts"] = {
-                k: summ.get(k) for k in
-                ("total", "breaking", "api_break", "compatible", "risk",
-                 "added", "removed", "changed")
+                k: summ.get(k)
+                for k in (
+                    "total",
+                    "breaking",
+                    "api_break",
+                    "compatible",
+                    "risk",
+                    "added",
+                    "removed",
+                    "changed",
+                )
                 if k in summ
             }
             rec["release_recommendation"] = data.get("release_recommendation")

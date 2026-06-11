@@ -1,3 +1,7 @@
 # Regenerable validation outputs (not part of the curated deliverable)
 libs/
 data/runs/
+# Oracles harvested from abi-laboratory.pro — regenerable, not redistributed here
+data/tracker_oracle/
+# Parity reports from run_tracker_parity.py — regenerable
+data/tracker_parity/
