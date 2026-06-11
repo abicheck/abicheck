@@ -82,6 +82,43 @@ def _parse_percent(cell_text: str) -> float | None:
     return float(m.group(1)) if m else None
 
 
+def _header_columns(html: str) -> dict[str, int] | None:
+    """Map BackwardCompat./Added/Removed (+ Version/Date/Soname) to column indices.
+
+    Locating cells by header label keeps parsing correct when the tracker emits
+    optional columns — ChangeLog, a separate *Source* compatibility cell, or a
+    trailing *Total Changes* count — that shift positions. The binary
+    backward-compat figure is matched on ``backward`` specifically (never the
+    source-compat cell), and the count columns by their ``Added``/``Removed``
+    prefixes, so extra columns are ignored rather than mis-read.
+
+    Returns ``None`` if no header row carrying all three metric columns is found
+    (the caller then falls back to a fixed layout).
+    """
+    for m in re.finditer(r"<tr[^>]*>(.*?)</tr>", html, re.S):
+        headers = re.findall(r"<th[^>]*>(.*?)</th>", m.group(1), re.S)
+        if not headers:
+            continue
+        col: dict[str, int] = {}
+        for i, raw in enumerate(headers):
+            label = re.sub(r"[^a-z0-9]", "", _strip_tags(raw).lower())
+            if label == "version":
+                col["version"] = i
+            elif label == "date":
+                col["date"] = i
+            elif label == "soname":
+                col["soname"] = i
+            elif "backward" in label:  # binary BackwardCompat., not SourceCompat.
+                col["backward_compat"] = i
+            elif label.startswith("added"):
+                col["added"] = i
+            elif label.startswith("removed"):
+                col["removed"] = i
+        if {"backward_compat", "added", "removed"} <= col.keys():
+            return col
+    return None
+
+
 def parse_timeline(html: str) -> list[dict[str, object]]:
     """Parse an abi-laboratory timeline page into per-release rows.
 
@@ -92,29 +129,47 @@ def parse_timeline(html: str) -> list[dict[str, object]]:
     Rows are returned newest-first, exactly as published.
     """
     rows: list[dict[str, object]] = []
-    # Data rows are anchored by an id like <tr id='v1.5.4'>.
-    #
-    # Two layouts exist: 7 columns
-    #   Version | Date | Soname | ChangeLog | BackwardCompat. | Added | Removed
-    # and 6 columns (no ChangeLog, e.g. expat / libpng)
-    #   Version | Date | Soname | BackwardCompat. | Added | Removed
-    # Version/Date/Soname are always the first three cells and
-    # BackwardCompat./Added/Removed the last three, so index the metrics from
-    # the end to handle both.
+    # Data rows are anchored by an id like <tr id='v1.5.4'>. Prefer locating the
+    # metric cells by header label (``_header_columns``) so optional columns —
+    # ChangeLog, a separate Source-Compatibility cell, or a trailing
+    # Total-Changes count — don't shift the binary BackwardCompat./Added/Removed
+    # values we score. Fall back to the fixed layout (Version|Date|Soname|...|
+    # BackwardCompat.|Added|Removed, metrics last) only when no header is found.
+    col = _header_columns(html)
     for m in re.finditer(r"<tr[^>]*\bid='v([^']+)'[^>]*>(.*?)</tr>", html, re.S):
         version = m.group(1)
-        cells = re.findall(r"<td[^>]*>(.*?)</td>", m.group(2), re.S)
-        if len(cells) < 6:
+        text = [
+            _strip_tags(c) for c in re.findall(r"<td[^>]*>(.*?)</td>", m.group(2), re.S)
+        ]
+        if col is not None and len(text) > max(col.values()):
+            date = (
+                text[col["date"]]
+                if "date" in col
+                else (text[1] if len(text) > 1 else "")
+            )
+            soname = (
+                text[col["soname"]]
+                if "soname" in col
+                else (text[2] if len(text) > 2 else "")
+            )
+            bc, added, removed = (
+                text[col["backward_compat"]],
+                text[col["added"]],
+                text[col["removed"]],
+            )
+        elif len(text) >= 6:
+            date, soname = text[1], text[2]
+            bc, added, removed = text[-3], text[-2], text[-1]
+        else:
             continue
-        text = [_strip_tags(c) for c in cells]
         rows.append(
             {
                 "version": version,
-                "date": text[1],
-                "soname": text[2],
-                "backward_compat": _parse_percent(text[-3]),
-                "added": _parse_count(text[-2]),
-                "removed": _parse_count(text[-1]),
+                "date": date,
+                "soname": soname,
+                "backward_compat": _parse_percent(bc),
+                "added": _parse_count(added),
+                "removed": _parse_count(removed),
             }
         )
     return rows

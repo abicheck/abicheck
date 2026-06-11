@@ -115,6 +115,45 @@ def test_parse_timeline_handles_six_column_layout() -> None:
     assert oracle["pairs"][0]["expected_verdict"] == "BREAKING"  # 97% + removals
 
 
+# A layout with the optional Source-Compatibility and Total-Changes columns
+# enabled: Version | Date | Soname | BackwardCompat. | SourceCompat. |
+# AddedSymbols | RemovedSymbols | TotalChanges. The binary BackwardCompat. is
+# *not* the third-from-last cell here, so positional indexing would mis-read it.
+_FIXTURE_EXTRA_COLS = """
+<table>
+<tr><th>Version</th><th>Date</th><th>Soname</th><th>BackwardCompat.</th>
+<th>SourceCompat.</th><th>AddedSymbols</th><th>RemovedSymbols</th><th>TotalChanges</th></tr>
+<tr id='v2.0.0'><td>2.0.0</td><td>2024-01-01</td><td class='sover'>1</td>
+<td class='ok'><a href='#'>100%</a></td>
+<td class='danger'><a href='#'>80%</a></td>
+<td class='added'><a class='num' href='#'>5 new</a></td>
+<td class='ok'>0</td>
+<td><a href='#'>12</a></td></tr>
+<tr id='v1.0.0'><td>1.0.0</td><td>2023-01-01</td><td class='sover'>1</td>
+<td class='ok'>&#160;</td><td class='ok'>&#160;</td>
+<td class='ok'>0</td><td class='ok'>0</td><td class='ok'>0</td></tr>
+</table>
+"""
+
+
+def test_parse_timeline_picks_binary_compat_with_extra_columns() -> None:
+    # With Source-Compat and Total-Changes columns present, the parser must read
+    # the *binary* BackwardCompat. cell (100%) and the Removed cell (0) by header
+    # — not the source-compat (80%) or total-changes (12) cells. Mis-reading
+    # either would flip COMPATIBLE -> BREAKING and corrupt the parity report.
+    mod = _load_module()
+    rows = mod.parse_timeline(_FIXTURE_EXTRA_COLS)
+
+    newest = rows[0]
+    assert newest["version"] == "2.0.0"
+    assert newest["backward_compat"] == 100.0  # binary BC, not the 80% SC
+    assert newest["added"] == 5
+    assert newest["removed"] == 0  # the Removed cell, not TotalChanges (12)
+
+    oracle = mod.build_oracle("extracols", _FIXTURE_EXTRA_COLS)
+    assert oracle["pairs"][0]["expected_verdict"] == "COMPATIBLE"
+
+
 def test_derive_verdict_rules() -> None:
     mod = _load_module()
 
