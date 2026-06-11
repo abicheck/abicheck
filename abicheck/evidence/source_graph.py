@@ -42,9 +42,12 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .build_evidence import BuildEvidence, Confidence
+
+if TYPE_CHECKING:
+    from .source_abi import SourceAbiSurface, SourceEntity
 
 #: Source-graph schema version, independent of the pack/build/source/snapshot
 #: versions (ADR-028 D8 versioning). Bump on any breaking change to
@@ -204,6 +207,10 @@ class SourceGraphSummary:
             self.edges.append(edge)
             self._edge_keys.add(edge.key())
 
+    def has_node(self, node_id: str) -> bool:
+        """Whether a node with ``node_id`` is already in the graph."""
+        return node_id in self._node_ids
+
     def indexes(self) -> dict[str, dict[str, list[str]]]:
         """Build the lookup indexes (ADR-031 D7) on demand.
 
@@ -322,13 +329,45 @@ def _option_node_id(flag: str) -> str:
     return f"build_option://{flag}"
 
 
+def _decl_node_id(identity: str) -> str:
+    return f"decl://{identity}"
+
+
+def _type_node_id(identity: str) -> str:
+    return f"type://{identity}"
+
+
+def _symbol_node_id(symbol: str) -> str:
+    return f"binary_symbol://{symbol}"
+
+
+def _macro_node_id(name: str) -> str:
+    return f"macro://{name}"
+
+
+def _debug_type_node_id(name: str) -> str:
+    return f"debug_type://{name}"
+
+
+#: SourceEntity.kind → graph type-node kind. Records/classes/unions all map to
+#: ``record_type``; enums and typedefs get their own node kind so reachability
+#: queries can distinguish them (ADR-031 D2).
+_TYPE_NODE_KINDS: dict[str, str] = {"enum": "enum_type", "typedef": "typedef"}
+
+
+def _type_node_kind(decl_kind: str) -> str:
+    return _TYPE_NODE_KINDS.get(decl_kind, "record_type")
+
+
 # ── Phase 2: build the graph from ADR-029 BuildEvidence ─────────────────────
 
 
-def build_source_graph(build: BuildEvidence) -> SourceGraphSummary:
-    """Fold an ADR-029 :class:`BuildEvidence` into an L5 graph summary (Phase 2).
+def build_source_graph(
+    build: BuildEvidence, source_abi: SourceAbiSurface | None = None
+) -> SourceGraphSummary:
+    """Fold ADR-029 build evidence (+ optional L4 source surface) into a graph.
 
-    Emits the build-level slice of the schema:
+    **Phase 2** emits the build-level slice from *build*:
 
     - ``target`` nodes, with ``TARGET_HAS_SOURCE`` / ``TARGET_HAS_PUBLIC_HEADER``
       / ``TARGET_DEPENDS_ON`` edges;
@@ -337,8 +376,15 @@ def build_source_graph(build: BuildEvidence) -> SourceGraphSummary:
     - ``source`` / ``header`` / ``generated_file`` nodes (a source listed in
       ``build.generated_files`` is typed ``generated_file``).
 
-    Deeper edges (decl/type/symbol/call) are produced by later phases against
-    L2/L4 evidence and external backends; they extend the same returned graph.
+    **Phases 3-4** — when an ADR-030 ``source_abi`` surface is supplied — add the
+    public-reachability and source↔binary slices: ``source_decl`` / type / macro
+    nodes declared by public headers (``SOURCE_DECLARES``), their
+    ``SOURCE_DECL_MAPS_TO_SYMBOL`` / ``SOURCE_TYPE_MAPS_TO_DEBUG_TYPE`` mappings,
+    and ``BINARY_EXPORTS_SYMBOL`` edges from the owning target. Together they
+    yield the target → public-header → decl → exported-symbol closure that
+    reachability triage needs.
+
+    Deeper call edges and external backends (Phases 6-7) extend the same graph.
     """
     graph = SourceGraphSummary()
     generated = set(build.generated_files)
@@ -428,7 +474,125 @@ def build_source_graph(build: BuildEvidence) -> SourceGraphSummary:
                 provenance="build_evidence", confidence=CONF_HIGH,
             ))
 
+    if source_abi is not None:
+        _augment_with_source_abi(graph, source_abi)
+
     return graph.finalize()
+
+
+# ── Phases 3-4: enrich the graph from the ADR-030 L4 source surface ─────────
+
+
+def _augment_with_source_abi(graph: SourceGraphSummary, surface: SourceAbiSurface) -> None:
+    """Fold a linked L4 source surface into *graph* (Phases 3-4).
+
+    Adds the public-reachability slice (declarations/types/macros, each linked
+    to the public header that declares it) and the source↔binary slice (decl →
+    exported symbol, type → debug type, target → exported symbol). All edges are
+    tagged ``provenance="source_abi"`` so a reachability claim always discloses
+    that it rests on source-replay evidence, not a binary diff (ADR-031 D9).
+    """
+    target_id = surface.target_id
+    if target_id and not graph.has_node(target_id):
+        # The surface may name a target the build evidence did not enumerate
+        # (e.g. binary+headers-only collection). Materialize it so its symbols
+        # have an owner in the graph.
+        graph.add_node(GraphNode(
+            id=target_id, kind="target", label=target_id,
+            provenance="source_abi", confidence=CONF_REDUCED,
+        ))
+
+    decl_to_sym: dict[str, str] = surface.mappings.get("source_decl_to_binary_symbol", {})
+    type_to_dbg: dict[str, str] = surface.mappings.get("source_type_to_debug_type", {})
+
+    def export_symbol(symbol: str, confidence: str) -> str:
+        sid = _symbol_node_id(symbol)
+        graph.add_node(GraphNode(
+            id=sid, kind="binary_symbol", label=symbol,
+            provenance="source_abi", confidence=CONF_HIGH,
+        ))
+        if target_id:
+            graph.add_edge(GraphEdge(
+                src=target_id, dst=sid, kind="BINARY_EXPORTS_SYMBOL",
+                provenance="source_abi", confidence=confidence,
+            ))
+        return sid
+
+    def header_declares(entity: SourceEntity, node_id: str, confidence: str) -> None:
+        loc = entity.source_location
+        if loc is None or not loc.path:
+            return
+        hid = _header_node_id(loc.path)
+        # add_node keeps the first writer's facts, so a build-evidence header
+        # node (HIGH confidence) is not downgraded by this source_abi one.
+        graph.add_node(GraphNode(
+            id=hid, kind="header", label=loc.path,
+            provenance="source_abi", confidence=confidence,
+            attrs={"origin": loc.origin},
+        ))
+        graph.add_edge(GraphEdge(
+            src=hid, dst=node_id, kind="SOURCE_DECLARES",
+            provenance="source_abi", confidence=confidence,
+        ))
+
+    # Represent every exported symbol the surface mapped, so the target's export
+    # set is visible even for symbols whose declaration was not reachable.
+    for symbol in decl_to_sym.values():
+        if symbol:
+            export_symbol(symbol, CONF_REDUCED)
+
+    declarations = (
+        *surface.reachable_declarations,
+        *surface.reachable_templates,
+        *surface.reachable_inline_bodies,
+    )
+    for ent in declarations:
+        did = _decl_node_id(ent.identity())
+        conf = ent.confidence.value
+        graph.add_node(GraphNode(
+            id=did, kind="source_decl", label=ent.qualified_name or ent.identity(),
+            provenance="source_abi", confidence=conf,
+            attrs={"decl_kind": ent.kind, "visibility": ent.visibility},
+        ))
+        header_declares(ent, did, conf)
+        symbol = decl_to_sym.get(ent.qualified_name, "")
+        if symbol:
+            graph.add_edge(GraphEdge(
+                src=did, dst=_symbol_node_id(symbol),
+                kind="SOURCE_DECL_MAPS_TO_SYMBOL",
+                provenance="source_abi", confidence=conf,
+            ))
+
+    for ent in surface.reachable_types:
+        tid = _type_node_id(ent.identity())
+        conf = ent.confidence.value
+        graph.add_node(GraphNode(
+            id=tid, kind=_type_node_kind(ent.kind),
+            label=ent.qualified_name or ent.identity(),
+            provenance="source_abi", confidence=conf,
+            attrs={"decl_kind": ent.kind, "visibility": ent.visibility},
+        ))
+        header_declares(ent, tid, conf)
+        debug_type = type_to_dbg.get(ent.qualified_name, "")
+        if debug_type:
+            bid = _debug_type_node_id(debug_type)
+            graph.add_node(GraphNode(
+                id=bid, kind="debug_type", label=debug_type,
+                provenance="source_abi", confidence=CONF_REDUCED,
+            ))
+            graph.add_edge(GraphEdge(
+                src=tid, dst=bid, kind="SOURCE_TYPE_MAPS_TO_DEBUG_TYPE",
+                provenance="source_abi", confidence=CONF_REDUCED,
+            ))
+
+    for ent in surface.reachable_macros:
+        mid = _macro_node_id(ent.qualified_name or ent.identity())
+        conf = ent.confidence.value
+        graph.add_node(GraphNode(
+            id=mid, kind="macro", label=ent.qualified_name or ent.identity(),
+            provenance="source_abi", confidence=conf,
+        ))
+        header_declares(ent, mid, conf)
 
 
 # ── Phase 5 (seed): structural graph-to-graph diff ──────────────────────────

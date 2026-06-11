@@ -30,8 +30,9 @@ from abicheck.evidence.build_evidence import (
     Target,
     TargetKind,
 )
-from abicheck.evidence.model import CoverageStatus, EvidenceLayer
+from abicheck.evidence.model import CoverageStatus, EvidenceConfidence, EvidenceLayer
 from abicheck.evidence.pack import EvidencePack
+from abicheck.evidence.source_abi import SourceAbiSurface, SourceEntity, SourceLocation
 from abicheck.evidence.source_graph import (
     EDGE_KINDS,
     NODE_KINDS,
@@ -159,6 +160,118 @@ def test_compile_unit_without_source_emits_no_source_edge() -> None:
     g = build_source_graph(b)
     assert any(n.id == "cu://nosrc" for n in g.nodes)
     assert not any(e.kind == "COMPILE_UNIT_BUILDS_SOURCE" for e in g.edges)
+
+
+# ── Phases 3-4: enrich from the L4 source surface ───────────────────────────
+
+
+def _entity(qn: str, kind: str, *, mangled: str = "", path: str = "include/foo.h",
+            origin: str = "PUBLIC_HEADER",
+            conf: EvidenceConfidence = EvidenceConfidence.HIGH) -> SourceEntity:
+    return SourceEntity(
+        id=qn, kind=kind, qualified_name=qn, mangled_name=mangled,
+        source_location=SourceLocation(path=path, line=1, origin=origin),
+        visibility="public_header", confidence=conf,
+    )
+
+
+def _sample_surface() -> SourceAbiSurface:
+    s = SourceAbiSurface(library="libfoo.so", target_id="target://libfoo")
+    s.reachable_declarations.append(_entity("foo::bar", "function", mangled="_ZN3foo3barEv"))
+    s.reachable_types.append(_entity("foo::Widget", "record"))
+    s.reachable_types.append(_entity("foo::Color", "enum"))
+    s.reachable_types.append(_entity("foo::Alias", "typedef"))
+    s.reachable_macros.append(_entity("FOO_VERSION", "macro", conf=EvidenceConfidence.REDUCED))
+    s.mappings["source_decl_to_binary_symbol"] = {"foo::bar": "_ZN3foo3barEv"}
+    s.mappings["source_type_to_debug_type"] = {"foo::Widget": "struct foo::Widget"}
+    return s
+
+
+def test_source_abi_builds_public_reachability_slice() -> None:
+    b = BuildEvidence()
+    b.targets.append(Target(
+        id="target://libfoo", public_headers=["include/foo.h"], confidence=Confidence.HIGH,
+    ))
+    g = build_source_graph(b, source_abi=_sample_surface())
+    edge_kinds = {e.kind for e in g.edges}
+    # target -> header -> decl -> exported symbol, plus target -> symbol.
+    assert "TARGET_HAS_PUBLIC_HEADER" in edge_kinds
+    assert "SOURCE_DECLARES" in edge_kinds
+    assert "SOURCE_DECL_MAPS_TO_SYMBOL" in edge_kinds
+    assert "BINARY_EXPORTS_SYMBOL" in edge_kinds
+    assert "SOURCE_TYPE_MAPS_TO_DEBUG_TYPE" in edge_kinds
+    assert all(e.kind in EDGE_KINDS for e in g.edges)
+    assert all(n.kind in NODE_KINDS for n in g.nodes)
+
+
+def test_source_abi_type_kind_dispatch() -> None:
+    g = build_source_graph(BuildEvidence(), source_abi=_sample_surface())
+    kinds = {n.label: n.kind for n in g.nodes}
+    assert kinds["foo::Widget"] == "record_type"
+    assert kinds["foo::Color"] == "enum_type"
+    assert kinds["foo::Alias"] == "typedef"
+    assert kinds["FOO_VERSION"] == "macro"
+
+
+def test_source_abi_coverage_counts_decls_and_mappings() -> None:
+    g = build_source_graph(BuildEvidence(), source_abi=_sample_surface())
+    assert g.coverage["source_decls"] == 1
+    assert g.coverage["binary_symbol_mappings"] == 1
+
+
+def test_source_abi_decl_without_symbol_has_no_mapping_edge() -> None:
+    s = SourceAbiSurface(library="l", target_id="target://t")
+    s.reachable_declarations.append(_entity("foo::unshipped", "function"))
+    # no entry in source_decl_to_binary_symbol
+    g = build_source_graph(BuildEvidence(), source_abi=s)
+    assert not any(e.kind == "SOURCE_DECL_MAPS_TO_SYMBOL" for e in g.edges)
+    assert any(n.kind == "source_decl" for n in g.nodes)
+
+
+def test_source_abi_materializes_missing_target() -> None:
+    # The surface names a target the (empty) build evidence never enumerated.
+    g = build_source_graph(BuildEvidence(), source_abi=_sample_surface())
+    target = next((n for n in g.nodes if n.id == "target://libfoo"), None)
+    assert target is not None
+    assert target.kind == "target"
+    assert target.provenance == "source_abi"
+
+
+def test_source_abi_edges_carry_source_provenance() -> None:
+    g = build_source_graph(BuildEvidence(), source_abi=_sample_surface())
+    src_edges = [e for e in g.edges if e.kind == "SOURCE_DECLARES"]
+    assert src_edges
+    assert all(e.provenance == "source_abi" for e in src_edges)
+
+
+def test_source_abi_degenerate_inputs_handled() -> None:
+    # No target_id (so no BINARY_EXPORTS_SYMBOL owner), a decl with no source
+    # location (so no SOURCE_DECLARES edge), and a blank symbol mapping value
+    # (skipped) must all be tolerated without error.
+    s = SourceAbiSurface(library="l", target_id="")
+    s.reachable_declarations.append(SourceEntity(
+        id="d", kind="function", qualified_name="loose", source_location=None,
+        confidence=EvidenceConfidence.UNKNOWN,
+    ))
+    s.mappings["source_decl_to_binary_symbol"] = {"loose": "", "other": "_Zsym"}
+    g = build_source_graph(BuildEvidence(), source_abi=s)
+    assert not any(e.kind == "SOURCE_DECLARES" for e in g.edges)
+    assert not any(e.kind == "BINARY_EXPORTS_SYMBOL" for e in g.edges)
+    # The blank mapping value is skipped; the real one becomes a symbol node.
+    assert any(n.kind == "binary_symbol" and n.label == "_Zsym" for n in g.nodes)
+
+
+def test_build_graph_without_surface_is_phase2_only() -> None:
+    g = build_source_graph(_sample_build())
+    assert not any(n.kind == "source_decl" for n in g.nodes)
+    assert not any(e.kind == "SOURCE_DECL_MAPS_TO_SYMBOL" for e in g.edges)
+
+
+def test_source_abi_round_trip_and_determinism() -> None:
+    s = _sample_surface()
+    g = build_source_graph(BuildEvidence(), source_abi=s)
+    assert SourceGraphSummary.from_dict(g.to_dict()).compute_graph_id() == g.compute_graph_id()
+    assert build_source_graph(BuildEvidence(), source_abi=s).graph_id == g.graph_id
 
 
 # ── Phase 1: schema round-trip + content addressing ─────────────────────────

@@ -1,11 +1,11 @@
 # ADR-031: Source and Implementation Graph Augmentation
 
 **Date:** 2026-06-09
-**Status:** Accepted — phases 1–2 implemented (graph schema + build-evidence
-graph + storage/CLI wiring + structural `compare-graph`); phases 3–7
-(header/type/decl from L2/L4, source↔binary mapping, the D6 secondary
-`ChangeKind` findings, the Clang call extractor, and Kythe/CodeQL adapters)
-remain future work.
+**Status:** Accepted — phases 1–4 implemented (graph schema + build-evidence
+graph + L4 public-reachability/source↔binary graph + storage/CLI wiring +
+structural `compare-graph`); phases 5–7 (the D6 secondary `ChangeKind`
+findings + `explain-finding`, the Clang call extractor, and Kythe/CodeQL
+adapters) remain future work.
 **Decision maker:** Nikolay Petrov
 
 ---
@@ -242,8 +242,8 @@ proves it. Prefer "known static callers" or "observed graph edges".
 |---|---|---|---|
 | 1 | Define node/edge schema and graph summary storage | Empty/metadata graph summaries | **Done** — `evidence/source_graph.py` (`SourceGraphSummary`/`GraphNode`/`GraphEdge`, content-addressed `graph_id`, coverage block, indexes); stored as `graph/source_graph_summary.json` and round-tripped by `EvidencePack` |
 | 2 | Build graph edges from ADR-029 `BuildEvidence` | target/source/header/output graph | **Done** — `build_source_graph()`; `collect-evidence --source-graph summary` collects it and flips the L5 coverage row to PRESENT |
-| 3 | Header/type/declaration graph from L2/L4 | public reachability graph | Future |
-| 4 | Source-to-binary mapping graph | symbol/declaration/debug mapping explanations | Future |
+| 3 | Header/type/declaration graph from L2/L4 | public reachability graph | **Done** — `build_source_graph(build, source_abi=…)` folds an ADR-030 `SourceAbiSurface` into `source_decl`/`record_type`/`enum_type`/`typedef`/`macro` nodes linked to their declaring public header via `SOURCE_DECLARES` |
+| 4 | Source-to-binary mapping graph | symbol/declaration/debug mapping explanations | **Done** — `SOURCE_DECL_MAPS_TO_SYMBOL`, `SOURCE_TYPE_MAPS_TO_DEBUG_TYPE`, and `BINARY_EXPORTS_SYMBOL` edges from the surface mappings, completing the target → header → decl → exported-symbol closure |
 | 5 | Graph diff and `explain-finding` | graph-to-graph compare, finding localization | **Partial** — `diff_source_graph()` + the `compare-graph` command produce the structural delta; the D6 secondary `ChangeKind` findings and `explain-finding` are future work |
 | 6 | Optional Clang direct-call extractor | direct call graph summary | Future |
 | 7 | Kythe/CodeQL adapters | external graph backend summaries | Future |

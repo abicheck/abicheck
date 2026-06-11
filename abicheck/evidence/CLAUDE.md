@@ -25,7 +25,7 @@ L3/L4/L5 are ordinary `ChangeKind` entries that default to `API_BREAK_KINDS`
 | `source_abi.py` | `SourceAbiTu` (per-TU dump) + `SourceAbiSurface` (linked `source_abi.json`) schemas, `SourceEntity`/`SourceLocation`, `L4_SOURCE_ABI` boundary | 030 D4/D5/D10 |
 | `source_link.py` | `link_source_abi()` — fold per-TU dumps into a per-library surface; map decls→exported symbols; ODR detection | 030 D5 |
 | `source_diff.py` | `diff_source_abi()` → the 9 source-replay findings (macros/default-args/inline/template/constexpr/…); never BREAKING | 030 D6 |
-| `source_graph.py` | `SourceGraphSummary`/`GraphNode`/`GraphEdge` (L5 schema), `build_source_graph()` (folds `BuildEvidence` → target/source/header/option graph, phase 2), `diff_source_graph()` (structural delta, phase 5 seed) | 031 D2/D7 |
+| `source_graph.py` | `SourceGraphSummary`/`GraphNode`/`GraphEdge` (L5 schema), `build_source_graph(build, source_abi=…)` (folds `BuildEvidence` → target/source/header/option graph [phase 2] + an optional `SourceAbiSurface` → decl/type/macro + source↔binary edges [phases 3-4]), `diff_source_graph()` (structural delta, phase 5 seed) | 031 D2/D7 |
 | `source_extractors/` | `SourceAbiExtractor` interface + castxml (phase 2), clang (phase 5, body fingerprints), Android adapter (phase 6) | 030 D3 |
 | `source_replay.py` | `select_compile_units()` (D7 scopes), `SourceAbiCache` (D8 per-TU cache), `run_source_replay()` driver, `scope_for_ci_mode()` | 030 D7/D8 (phase 7) |
 | `redaction.py` | `RedactionPolicy` — strip secrets/abs paths from command lines | 032 D7 |

@@ -189,11 +189,14 @@ def collect_evidence_cmd(
     graph_detail = ""
     if source_graph == "summary":
         from .evidence.source_graph import build_source_graph
-        graph = build_source_graph(merged)
+        # Fold the L4 surface in too when it was collected (--source-abi), so
+        # the graph carries the public-reachability + source↔binary slices.
+        graph = build_source_graph(merged, source_abi=surface)
         graph_detail = (
             f"{len(graph.nodes)} nodes, {len(graph.edges)} edges "
             f"({graph.coverage.get('targets', 0)} targets, "
-            f"{graph.coverage.get('compile_units', 0)} compile units)"
+            f"{graph.coverage.get('compile_units', 0)} compile units, "
+            f"{graph.coverage.get('source_decls', 0)} source decls)"
         )
         extractors.append(ExtractorRecord(
             name="source_graph:summary",

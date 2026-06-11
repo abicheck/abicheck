@@ -41,15 +41,21 @@ fingerprints + default arguments), **castxml** (declarations/types/const values)
 and an **Android** header-checker adapter — plus the linker, source-replay diff,
 replay scopes, and per-TU cache (see [L4 findings](#source-abi-replay-findings-l4)).
 
-L5 has landed in its first form (ADR-031, phases 1–2): a compact, abicheck-owned
-**source graph summary** folded from the L3 build evidence — `target`,
+L5 has landed (ADR-031, phases 1–4): a compact, abicheck-owned **source graph
+summary**. Folded from the L3 build evidence it carries `target`,
 `compile_unit`, `source`, `header`, `generated_file`, and `build_option` nodes
 linked by `TARGET_HAS_SOURCE` / `TARGET_HAS_PUBLIC_HEADER` / `TARGET_DEPENDS_ON`
-/ `COMPILE_UNIT_BUILDS_SOURCE` / `COMPILE_UNIT_USES_OPTION` edges, each carrying
-provenance and a confidence label. Collect it with `--source-graph summary` and
-compare two summaries with `compare-graph` (below). The deeper graph layers —
-public-reachability/type/call graphs and external Kythe/CodeQL backends — remain
-future work.
+/ `COMPILE_UNIT_BUILDS_SOURCE` / `COMPILE_UNIT_USES_OPTION` edges. When an L4
+source surface was also collected (`--source-abi`), it additionally folds in
+`source_decl` / `record_type` / `enum_type` / `typedef` / `macro` nodes linked
+to their declaring public header (`SOURCE_DECLARES`) and to their exported
+binary symbol / debug type (`SOURCE_DECL_MAPS_TO_SYMBOL`,
+`SOURCE_TYPE_MAPS_TO_DEBUG_TYPE`, `BINARY_EXPORTS_SYMBOL`) — giving the full
+`target → public header → declaration → exported symbol` reachability closure.
+Every node and edge carries provenance and a confidence label. Collect it with
+`--source-graph summary` and compare two summaries with `compare-graph` (below).
+The remaining layers — call graphs and external Kythe/CodeQL backends, plus the
+graph-derived risk findings — are future work.
 
 > **Source ABI replay (L4) requires clang** (or castxml for the declaration
 > subset, or a pre-captured Android dump). It is the one tier gated on a C++
