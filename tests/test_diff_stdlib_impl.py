@@ -235,9 +235,18 @@ class TestBuildModeFallback:
         kinds = {c.kind for c in compare(old, new).changes}
         assert ChangeKind.STDLIB_IMPLEMENTATION_CHANGED in kinds
 
+    @staticmethod
+    def _require_demangler() -> None:
+        from abicheck.demangle import demangle
+        if demangle("_Z3apiNSt3__16vectorIiNS_9allocatorIiEEEE") is None:
+            import pytest
+            pytest.skip("no C++ demangler available")
+
     def test_fires_from_libcxx_user_api_mangling(self) -> None:
         # The common case: the stdlib marker is inside a *user* API symbol, not
         # at its start. libstdc++ (cxx11 std::string) → libc++ (std::vector).
+        # libc++ user-API detection goes through the demangler (Codex #345).
+        self._require_demangler()
         old = AbiSnapshot(
             library="lib.so", version="1",
             functions=[self._fn(
@@ -252,6 +261,8 @@ class TestBuildModeFallback:
 
     def test_libcxx_abi_version_recovered_from_user_api(self) -> None:
         # Both libc++, ABI v1 → v2, marker inside user-API manglings.
+        # Recovering libc++ from user-API symbols goes through the demangler.
+        self._require_demangler()
         old = AbiSnapshot(
             library="lib.so", version="1",
             functions=[self._fn("_Z3apiNSt3__16vectorIiNS_9allocatorIiEEEE")],
@@ -268,6 +279,8 @@ class TestBuildModeFallback:
     def test_fires_for_msvc_stl_from_coff_mangling(self) -> None:
         # MSVC C++ symbols are COFF-decorated (non-Itanium); the std namespace
         # is encoded as ``std@@``. MSVC STL → libc++ must still be detected.
+        # The libc++ side is recovered via the demangler.
+        self._require_demangler()
         msvc = (
             "?api@@YAXV?$basic_string@DU?$char_traits@D@std@@"
             "V?$allocator@D@2@@std@@@Z"
@@ -368,6 +381,23 @@ class TestBuildModeFallback:
         old = AbiSnapshot(
             library="lib.so", version="1",
             functions=[self._fn("_ZN5mystd3apiEv")])  # mystd::api()
+        new = AbiSnapshot(
+            library="lib.so", version="2",
+            functions=[self._fn("_Z3apiNSt3__16vectorIiNS_9allocatorIiEEEE")])
+        kinds = {c.kind for c in compare(old, new).changes}
+        assert ChangeKind.STDLIB_IMPLEMENTATION_CHANGED not in kinds
+
+    def test_nested_user_std_namespace_not_flagged(self) -> None:
+        # `boost::std::api()` is a *nested* user namespace literally named `std`,
+        # not the global std::; the demangle fallback must not read it as
+        # libstdc++ (Codex #345).
+        from abicheck.demangle import demangle
+        if demangle("_ZN5boost3std3apiEv") is None:
+            import pytest
+            pytest.skip("no C++ demangler available")
+        old = AbiSnapshot(
+            library="lib.so", version="1",
+            functions=[self._fn("_ZN5boost3std3apiEv")])  # boost::std::api()
         new = AbiSnapshot(
             library="lib.so", version="2",
             functions=[self._fn("_Z3apiNSt3__16vectorIiNS_9allocatorIiEEEE")])

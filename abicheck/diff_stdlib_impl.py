@@ -65,13 +65,13 @@ if TYPE_CHECKING:
 #: rejects a match inside a user identifier such as ``mystd::`` (Codex #345) — it
 #: only fires when ``std::`` is preceded by a non-identifier character or starts
 #: the string.
-_STD_NAMESPACE_TOKEN = re.compile(r"(?<![A-Za-z0-9_])std::")
+_STD_NAMESPACE_TOKEN = re.compile(r"(?<![A-Za-z0-9_:])std::")
 
 #: libc++'s *versioned* inline namespace in a *demangled* name — ``std::__1`` /
 #: ``std::__2`` and Android NDK's ``std::__ndk1`` (Codex #345). Distinct from
 #: libstdc++'s ``std::__cxx11`` (which does not match). ``group(1)`` is ``"ndk"``
 #: for the Android form (no standard ABI version); ``group(2)`` is the digit.
-_LIBCXX_DEMANGLED_NS = re.compile(r"(?<![A-Za-z0-9_])std::__(ndk)?(\d)")
+_LIBCXX_DEMANGLED_NS = re.compile(r"(?<![A-Za-z0-9_:])std::__(ndk)?(\d)")
 
 #: Marker symbol used for the synthetic build-mode findings (they are not tied
 #: to a single exported symbol). Mirrors ``__glibcxx_dual_abi`` in diff_platform.
