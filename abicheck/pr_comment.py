@@ -320,8 +320,13 @@ def _release_lib_row(
     potential_breaking is gated to error; risk only when potential_breaking is
     error; additions and quality issues only when their own category is gated to
     error. Otherwise source breaks + risk are review and additions + quality are
-    safe.
+    safe. A library whose comparison errored carries no count fields, so it is
+    counted as one breaking finding to reflect the failed comparison.
     """
+    name = str(lib.get("library", "?"))
+    verdict = str(lib.get("verdict", "?"))
+    if verdict == "ERROR":
+        return name, verdict, 1, 0, 0
     src = _as_int(lib.get("source_breaks"))
     risk = _as_int(lib.get("risk_changes"))
     # compatible_additions is the *total* compatible count; quality_issues is the
@@ -340,7 +345,7 @@ def _release_lib_row(
     nb, nr = (nb + risk, nr) if pot_err else (nb, nr + risk)
     nb, ns = (nb + additions, ns) if add_err else (nb, ns + additions)
     nb, ns = (nb + quality, ns) if qual_err else (nb, ns + quality)
-    return str(lib.get("library", "?")), str(lib.get("verdict", "?")), nb, nr, ns
+    return name, verdict, nb, nr, ns
 
 
 def _from_release(

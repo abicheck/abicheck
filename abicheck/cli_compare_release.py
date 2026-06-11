@@ -20,7 +20,6 @@ AI-readiness file-size limit. Imported for side-effect at the bottom
 of :mod:`abicheck.cli` so the ``@main.command("compare-release")``
 decorator runs.
 """
-
 from __future__ import annotations
 
 import json
@@ -85,31 +84,17 @@ def _run_compare_pair(
     new_input, new_fmt = _normalize_binary_input(new_input)
 
     old = _resolve_input(
-        old_input,
-        old_headers,
-        old_includes,
-        old_version,
-        lang,
-        is_elf=True if old_fmt == "elf" else None,
-        pdb_path=old_pdb_path,
+        old_input, old_headers, old_includes, old_version, lang,
+        is_elf=True if old_fmt == "elf" else None, pdb_path=old_pdb_path,
     )
     new = _resolve_input(
-        new_input,
-        new_headers,
-        new_includes,
-        new_version,
-        lang,
-        is_elf=True if new_fmt == "elf" else None,
-        pdb_path=new_pdb_path,
+        new_input, new_headers, new_includes, new_version, lang,
+        is_elf=True if new_fmt == "elf" else None, pdb_path=new_pdb_path,
     )
 
     suppression, pf = _load_suppression_and_policy(suppress, policy, policy_file_path)
     result = compare(
-        old,
-        new,
-        suppression=suppression,
-        policy=policy,
-        policy_file=pf,
+        old, new, suppression=suppression, policy=policy, policy_file=pf,
         scope_to_public_surface=scope_to_public_surface,
         pattern_verdicts=pattern_verdicts,
     )
@@ -119,42 +104,29 @@ def _run_compare_pair(
 
 
 _RELEASE_VERDICT_ORDER: dict[str, int] = {
-    "NO_CHANGE": 0,
-    "COMPATIBLE": 1,
-    "COMPATIBLE_WITH_RISK": 2,
-    "API_BREAK": 3,
-    "BREAKING": 4,
-    "ERROR": 5,
+    "NO_CHANGE": 0, "COMPATIBLE": 1, "COMPATIBLE_WITH_RISK": 2,
+    "API_BREAK": 3, "BREAKING": 4, "ERROR": 5,
 }
 
 
 _CompareReleaseCommonArgs = tuple[
-    dict[str, Path],
-    dict[str, Path],
-    Path | None,
-    Path | None,
+    dict[str, Path], dict[str, Path],
+    Path | None, Path | None,
     Callable[[Path, Path], Path | None],
-    list[Path],
-    list[Path],
-    list[Path],
-    list[Path],
-    str,
-    str,
-    str,
-    Path | None,
-    str,
-    Path | None,
+    list[Path], list[Path],
+    list[Path], list[Path],
+    str, str,
+    str, Path | None,
+    str, Path | None,
     Path | None,
     bool,
 ]
 
 
 def _discover_files(
-    input_dir: Path,
-    lib_dir: Path,
+    input_dir: Path, lib_dir: Path,
     include_private: bool,
-    discover_shared_libraries: Callable[..., list[Path]],
-    is_package: Callable[[Path], bool],
+    discover_shared_libraries: Callable[..., list[Path]], is_package: Callable[[Path], bool],
 ) -> list[Path]:
     """Discover library files from a directory or extracted package."""
     if is_package(input_dir):
@@ -209,20 +181,15 @@ def _discover_include_roots(header_dir: Path | None) -> list[Path]:
 
 
 def _match_release_keys(
-    old_dir: Path,
-    new_dir: Path,
-    old_map: dict[str, Path],
-    new_map: dict[str, Path],
-    old_files: list[Path],
-    new_files: list[Path],
+    old_dir: Path, new_dir: Path,
+    old_map: dict[str, Path], new_map: dict[str, Path],
+    old_files: list[Path], new_files: list[Path],
     is_package: Callable[[Path], bool],
 ) -> tuple[list[str], list[str], list[str], dict[str, Path], dict[str, Path]]:
     """Match library keys between old and new, handling direct file pairs."""
     direct_file_pair = (
-        old_dir.is_file()
-        and new_dir.is_file()
-        and not is_package(old_dir)
-        and not is_package(new_dir)
+        old_dir.is_file() and new_dir.is_file()
+        and not is_package(old_dir) and not is_package(new_dir)
     )
     if direct_file_pair:
         matched_keys = ["__direct_pair__"]
@@ -238,11 +205,8 @@ def _match_release_keys(
 
 def _collect_release_warnings(
     warning_msgs: list[str],
-    matched_keys: list[str],
-    removed_keys: list[str],
-    added_keys: list[str],
-    old_map: dict[str, Path],
-    new_map: dict[str, Path],
+    matched_keys: list[str], removed_keys: list[str], added_keys: list[str],
+    old_map: dict[str, Path], new_map: dict[str, Path],
 ) -> None:
     """Collect warning messages for unmatched libraries."""
     for k in removed_keys:
@@ -257,21 +221,14 @@ def _collect_release_warnings(
 
 def _compare_one_library(
     key: str,
-    old_map: dict[str, Path],
-    new_map: dict[str, Path],
-    old_debug_dir: Path | None,
-    new_debug_dir: Path | None,
+    old_map: dict[str, Path], new_map: dict[str, Path],
+    old_debug_dir: Path | None, new_debug_dir: Path | None,
     resolve_debug_info: Callable[[Path, Path], Path | None],
-    old_h: list[Path],
-    new_h: list[Path],
-    old_inc: list[Path],
-    new_inc: list[Path],
-    old_version: str,
-    new_version: str,
-    lang: str,
-    suppress: Path | None,
-    policy: str,
-    policy_file_path: Path | None,
+    old_h: list[Path], new_h: list[Path],
+    old_inc: list[Path], new_inc: list[Path],
+    old_version: str, new_version: str,
+    lang: str, suppress: Path | None,
+    policy: str, policy_file_path: Path | None,
     output_dir: Path | None,
     scope_to_public_surface: bool = False,
 ) -> dict[str, object]:
@@ -292,20 +249,11 @@ def _compare_one_library(
         old_dbg = resolve_debug_info(old_path, old_debug_dir) if old_debug_dir else None
         new_dbg = resolve_debug_info(new_path, new_debug_dir) if new_debug_dir else None
         result, _, _ = _run_compare_pair(
-            old_path,
-            new_path,
-            old_h,
-            new_h,
-            old_inc,
-            new_inc,
-            old_version,
-            new_version,
-            lang,
-            suppress,
-            policy,
-            policy_file_path,
-            old_pdb_path=old_dbg,
-            new_pdb_path=new_dbg,
+            old_path, new_path,
+            old_h, new_h, old_inc, new_inc,
+            old_version, new_version,
+            lang, suppress, policy, policy_file_path,
+            old_pdb_path=old_dbg, new_pdb_path=new_dbg,
             scope_to_public_surface=scope_to_public_surface,
         )
         v = result.verdict.value
@@ -314,11 +262,9 @@ def _compare_one_library(
         # downstream consumers (e.g. the PR-comment renderer) can gate the two
         # categories independently under --severity-quality-issues.
         from .checker_policy import ADDITION_KINDS
-
         n_quality = sum(1 for c in result.compatible if c.kind not in ADDITION_KINDS)
         entry: dict[str, object] = {
-            "library": old_path.name,
-            "verdict": v,
+            "library": old_path.name, "verdict": v,
             "breaking": len(result.breaking),
             "source_breaks": len(result.source_breaks),
             "risk_changes": len(result.risk),
@@ -336,11 +282,7 @@ def _compare_one_library(
             _safe_write_output(lib_report_path, to_json(result))
         return entry
     except (click.ClickException, click.UsageError) as exc:
-        return {
-            "library": old_path.name,
-            "verdict": "ERROR",
-            "error": exc.format_message(),
-        }
+        return {"library": old_path.name, "verdict": "ERROR", "error": exc.format_message()}
     except Exception as exc:
         return {"library": old_path.name, "verdict": "ERROR", "error": str(exc)}
 
@@ -373,19 +315,23 @@ def _suppress_lockstep_soname_findings(
         if not isinstance(result, DiffResult):
             continue
         unnecessary = [
-            c for c in result.changes if c.kind == ChangeKind.SONAME_BUMP_UNNECESSARY
+            c for c in result.changes
+            if c.kind == ChangeKind.SONAME_BUMP_UNNECESSARY
         ]
         if not unnecessary:
             continue
         result.changes = [
-            c for c in result.changes if c.kind != ChangeKind.SONAME_BUMP_UNNECESSARY
+            c for c in result.changes
+            if c.kind != ChangeKind.SONAME_BUMP_UNNECESSARY
         ]
         suppressed += len(unnecessary)
         # Recompute the cached per-library counts after the mutation.
+        from .checker_policy import ADDITION_KINDS
         entry["breaking"] = len(result.breaking)
         entry["source_breaks"] = len(result.source_breaks)
         entry["risk_changes"] = len(result.risk)
         entry["compatible_additions"] = len(result.compatible)
+        entry["quality_issues"] = sum(1 for c in result.compatible if c.kind not in ADDITION_KINDS)
         if output_dir is not None:
             lib_report_path = output_dir / f"{Path(str(entry['library'])).stem}.json"
             _safe_write_output(lib_report_path, to_json(result))
@@ -394,21 +340,14 @@ def _suppress_lockstep_soname_findings(
 
 def _compare_release_libraries(
     matched_keys: list[str],
-    old_map: dict[str, Path],
-    new_map: dict[str, Path],
-    old_debug_dir: Path | None,
-    new_debug_dir: Path | None,
+    old_map: dict[str, Path], new_map: dict[str, Path],
+    old_debug_dir: Path | None, new_debug_dir: Path | None,
     resolve_debug_info: Callable[[Path, Path], Path | None],
-    old_h: list[Path],
-    new_h: list[Path],
-    old_inc: list[Path],
-    new_inc: list[Path],
-    old_version: str,
-    new_version: str,
-    lang: str,
-    suppress: Path | None,
-    policy: str,
-    policy_file_path: Path | None,
+    old_h: list[Path], new_h: list[Path],
+    old_inc: list[Path], new_inc: list[Path],
+    old_version: str, new_version: str,
+    lang: str, suppress: Path | None,
+    policy: str, policy_file_path: Path | None,
     output_dir: Path | None,
     collect_diff_results: bool = False,
     *,
@@ -435,30 +374,16 @@ def _compare_release_libraries(
     all_annotations: list[tuple[int, str]] = []
 
     common_args = (
-        old_map,
-        new_map,
-        old_debug_dir,
-        new_debug_dir,
-        resolve_debug_info,
-        old_h,
-        new_h,
-        old_inc,
-        new_inc,
-        old_version,
-        new_version,
-        lang,
-        suppress,
-        policy,
-        policy_file_path,
-        output_dir,
+        old_map, new_map, old_debug_dir, new_debug_dir, resolve_debug_info,
+        old_h, new_h, old_inc, new_inc,
+        old_version, new_version,
+        lang, suppress, policy, policy_file_path, output_dir,
         scope_to_public_surface,
     )
 
     if effective_jobs > 1 and len(matched_keys) > 1:
         library_results.extend(
-            _compare_release_parallel(
-                matched_keys, common_args, old_map, effective_jobs
-            ),
+            _compare_release_parallel(matched_keys, common_args, old_map, effective_jobs),
         )
     else:
         library_results.extend(
@@ -471,20 +396,14 @@ def _compare_release_libraries(
         v = str(entry["verdict"])
         if v == "ERROR":
             if "error" in entry:
-                click.echo(
-                    f"Error comparing {entry['library']}: {entry['error']}", err=True
-                )
-        if _RELEASE_VERDICT_ORDER.get(v, 0) > _RELEASE_VERDICT_ORDER.get(
-            worst_verdict, 0
-        ):
+                click.echo(f"Error comparing {entry['library']}: {entry['error']}", err=True)
+        if _RELEASE_VERDICT_ORDER.get(v, 0) > _RELEASE_VERDICT_ORDER.get(worst_verdict, 0):
             worst_verdict = v
 
     # Cross-library coupling: a coordinated SONAME bump across the release is not
     # "unnecessary" just because one member had no break of its own.
     suppressed_soname = _suppress_lockstep_soname_findings(
-        library_results,
-        worst_verdict,
-        output_dir,
+        library_results, worst_verdict, output_dir,
     )
     if suppressed_soname:
         click.echo(
@@ -499,22 +418,11 @@ def _compare_release_libraries(
     # are sequential-only features)
     if collect_diff_results or annotate:
         extra_pairs, extra_annotations = _collect_release_extras(
-            matched_keys,
-            old_map,
-            new_map,
-            old_debug_dir,
-            new_debug_dir,
-            resolve_debug_info,
-            old_h,
-            new_h,
-            old_inc,
-            new_inc,
-            old_version,
-            new_version,
-            lang,
-            suppress,
-            policy,
-            policy_file_path,
+            matched_keys, old_map, new_map,
+            old_debug_dir, new_debug_dir, resolve_debug_info,
+            old_h, new_h, old_inc, new_inc,
+            old_version, new_version, lang,
+            suppress, policy, policy_file_path,
             annotate_additions=annotate_additions,
             collect_diff_results=collect_diff_results,
             annotate=annotate,
@@ -563,9 +471,7 @@ def _compare_release_parallel(
             except Exception as exc:
                 click.echo(f"Error comparing {old_map[key].name}: {exc}", err=True)
                 results_by_key[key] = {
-                    "library": old_map[key].name,
-                    "verdict": "ERROR",
-                    "error": str(exc),
+                    "library": old_map[key].name, "verdict": "ERROR", "error": str(exc),
                 }
     return [results_by_key[key] for key in matched_keys if key in results_by_key]
 
@@ -611,20 +517,11 @@ def _collect_release_extras(
         new_dbg = resolve_debug_info(new_path, new_debug_dir) if new_debug_dir else None
         try:
             result, old_snap, _ = _run_compare_pair(
-                old_path,
-                new_path,
-                old_h,
-                new_h,
-                old_inc,
-                new_inc,
-                old_version,
-                new_version,
-                lang,
-                suppress,
-                policy,
-                policy_file_path,
-                old_pdb_path=old_dbg,
-                new_pdb_path=new_dbg,
+                old_path, new_path,
+                old_h, new_h, old_inc, new_inc,
+                old_version, new_version,
+                lang, suppress, policy, policy_file_path,
+                old_pdb_path=old_dbg, new_pdb_path=new_dbg,
                 scope_to_public_surface=scope_to_public_surface,
             )
         except Exception as exc:
@@ -701,9 +598,7 @@ def _run_bundle_analysis(
     ]
     try:
         return compare_bundle(
-            old_snap,
-            new_snap,
-            per_lib_results,
+            old_snap, new_snap, per_lib_results,
             manifest=manifest,
             system_providers=system_extra or None,
             cohorts=list(bundle_cohorts) or None,
@@ -717,15 +612,11 @@ def _run_bundle_analysis(
 
 
 def _format_release_summary(
-    fmt: str,
-    worst_verdict: str,
-    old_dir: Path,
-    new_dir: Path,
+    fmt: str, worst_verdict: str,
+    old_dir: Path, new_dir: Path,
     library_results: list[dict[str, object]],
-    removed_keys: list[str],
-    added_keys: list[str],
-    old_map: dict[str, Path],
-    new_map: dict[str, Path],
+    removed_keys: list[str], added_keys: list[str],
+    old_map: dict[str, Path], new_map: dict[str, Path],
     warning_msgs: list[str],
     diff_pairs: list[tuple[DiffResult, AbiSnapshot]] | None = None,
     bundle_result: BundleDiffResult | None = None,
@@ -738,31 +629,15 @@ def _format_release_summary(
         return _format_release_junit(diff_pairs, matrix_result, library_results)
     if fmt == "json":
         return _format_release_json(
-            worst_verdict,
-            old_dir,
-            new_dir,
-            library_results,
-            removed_keys,
-            added_keys,
-            old_map,
-            new_map,
-            warning_msgs,
-            bundle_result,
-            matrix_result,
+            worst_verdict, old_dir, new_dir, library_results,
+            removed_keys, added_keys, old_map, new_map, warning_msgs,
+            bundle_result, matrix_result,
             severity_config=severity_config,
             severity_exit_code=severity_exit_code,
         )
     return _format_release_markdown(
-        worst_verdict,
-        old_dir,
-        new_dir,
-        library_results,
-        removed_keys,
-        added_keys,
-        old_map,
-        new_map,
-        bundle_result,
-        matrix_result,
+        worst_verdict, old_dir, new_dir, library_results,
+        removed_keys, added_keys, old_map, new_map, bundle_result, matrix_result,
     )
 
 
@@ -773,28 +648,26 @@ def _format_release_junit(
 ) -> str:
     """Render the release summary as a JUnit XML report."""
     from .junit_report import to_junit_xml_multi
-
     pairs: list[tuple[DiffResult, AbiSnapshot | None]] = list(diff_pairs or [])
     # Release-global matrix findings ride in as their own synthetic
     # testsuite so CI dashboards reading the JUnit report see the failure.
     if matrix_result is not None:
         pairs.append((matrix_result, None))
-    error_libs = [entry for entry in library_results if entry.get("verdict") == "ERROR"]
+    error_libs = [
+        entry for entry in library_results
+        if entry.get("verdict") == "ERROR"
+    ]
     return to_junit_xml_multi(
-        pairs,
-        error_libraries=error_libs if error_libs else None,
+        pairs, error_libraries=error_libs if error_libs else None,
     )
 
 
 def _format_release_json(
     worst_verdict: str,
-    old_dir: Path,
-    new_dir: Path,
+    old_dir: Path, new_dir: Path,
     library_results: list[dict[str, object]],
-    removed_keys: list[str],
-    added_keys: list[str],
-    old_map: dict[str, Path],
-    new_map: dict[str, Path],
+    removed_keys: list[str], added_keys: list[str],
+    old_map: dict[str, Path], new_map: dict[str, Path],
     warning_msgs: list[str],
     bundle_result: BundleDiffResult | None,
     matrix_result: DiffResult | None,
@@ -803,8 +676,7 @@ def _format_release_json(
 ) -> str:
     """Render the release summary as a JSON document."""
     changed_libraries = [
-        str(lib["library"])
-        for lib in library_results
+        str(lib["library"]) for lib in library_results
         if str(lib.get("verdict")) not in ("NO_CHANGE", "ERROR")
     ]
     summary: dict[str, object] = {
@@ -871,10 +743,8 @@ def _format_release_json(
 
 def _release_json_scope(scoped_libs: list[dict[str, object]]) -> dict[str, object]:
     """Build the release-level public-surface scoping rollup for JSON output."""
-
     def _as_int(v: object) -> int:
         return v if isinstance(v, int) else 0
-
     return {
         "public_headers_applied": True,
         "manual_review_required": any(
@@ -891,30 +761,21 @@ def _release_json_scope(scoped_libs: list[dict[str, object]]) -> dict[str, objec
 
 def _format_release_markdown(
     worst_verdict: str,
-    old_dir: Path,
-    new_dir: Path,
+    old_dir: Path, new_dir: Path,
     library_results: list[dict[str, object]],
-    removed_keys: list[str],
-    added_keys: list[str],
-    old_map: dict[str, Path],
-    new_map: dict[str, Path],
+    removed_keys: list[str], added_keys: list[str],
+    old_map: dict[str, Path], new_map: dict[str, Path],
     bundle_result: BundleDiffResult | None,
     matrix_result: DiffResult | None,
 ) -> str:
     """Render the release summary as a Markdown document."""
     _VERDICT_EMOJI = {
-        "NO_CHANGE": "✅",
-        "COMPATIBLE": "✅",
-        "COMPATIBLE_WITH_RISK": "⚠️",
-        "API_BREAK": "⚠️",
-        "BREAKING": "❌",
-        "ERROR": "💥",
+        "NO_CHANGE": "✅", "COMPATIBLE": "✅", "COMPATIBLE_WITH_RISK": "⚠️",
+        "API_BREAK": "⚠️", "BREAKING": "❌", "ERROR": "💥",
     }
     lines: list[str] = [
-        "# ABI Release Comparison",
-        "",
-        "| | |",
-        "|---|---|",
+        "# ABI Release Comparison", "",
+        "| | |", "|---|---|",
         f"| **Old** | `{old_dir}` |",
         f"| **New** | `{new_dir}` |",
         f"| **Verdict** | {_VERDICT_EMOJI.get(worst_verdict, '?')} `{worst_verdict}` |",
@@ -934,14 +795,11 @@ def _format_release_markdown(
 
 
 def _release_md_libraries_table(
-    library_results: list[dict[str, object]],
-    emoji: dict[str, str],
+    library_results: list[dict[str, object]], emoji: dict[str, str],
 ) -> list[str]:
     """Markdown per-library results table."""
     lines = [
-        "",
-        "## Libraries",
-        "",
+        "", "## Libraries", "",
         "| Library | Verdict | Breaking | Source | Risk | Additions |",
         "|---|---|---|---|---|---|",
     ]
@@ -956,10 +814,8 @@ def _release_md_libraries_table(
 
 
 def _release_md_changed_libraries(
-    removed_keys: list[str],
-    added_keys: list[str],
-    old_map: dict[str, Path],
-    new_map: dict[str, Path],
+    removed_keys: list[str], added_keys: list[str],
+    old_map: dict[str, Path], new_map: dict[str, Path],
 ) -> list[str]:
     """Markdown sections listing removed/added libraries."""
     lines: list[str] = []
@@ -1006,13 +862,10 @@ def _release_md_matrix_findings(matrix_result: DiffResult | None) -> list[str]:
 
 
 def _write_release_summary_file(
-    output_dir: Path,
-    worst_verdict: str,
+    output_dir: Path, worst_verdict: str,
     library_results: list[dict[str, object]],
-    removed_keys: list[str],
-    added_keys: list[str],
-    old_map: dict[str, Path],
-    new_map: dict[str, Path],
+    removed_keys: list[str], added_keys: list[str],
+    old_map: dict[str, Path], new_map: dict[str, Path],
 ) -> None:
     """Write per-library summary JSON to output directory."""
     summary_data: dict[str, object] = {
@@ -1059,9 +912,7 @@ def _extract_if_package(
     if debug_pkg is not None:
         dbg_ext = detect_extractor(debug_pkg)
         if dbg_ext is None:
-            raise click.ClickException(
-                f"Unrecognized debug package format: {debug_pkg}"
-            )
+            raise click.ClickException(f"Unrecognized debug package format: {debug_pkg}")
         dbg_target = make_temp_dir("abicheck_dbg_")
         dbg_result = dbg_ext.extract(debug_pkg, dbg_target)
         debug_dir = dbg_result.debug_dir or dbg_result.lib_dir
@@ -1069,9 +920,7 @@ def _extract_if_package(
     if devel_pkg is not None:
         dev_ext = detect_extractor(devel_pkg)
         if dev_ext is None:
-            raise click.ClickException(
-                f"Unrecognized devel package format: {devel_pkg}"
-            )
+            raise click.ClickException(f"Unrecognized devel package format: {devel_pkg}")
         dev_target = make_temp_dir("abicheck_dev_")
         dev_result = dev_ext.extract(devel_pkg, dev_target)
         header_dir = dev_result.header_dir or dev_result.lib_dir
@@ -1095,18 +944,14 @@ def _collect_bundle_result(
         if isinstance(diff, DiffResult):
             stashed_diffs.append(diff)
     bundle_result = _run_bundle_analysis(
-        old_map,
-        new_map,
-        stashed_diffs,
+        old_map, new_map, stashed_diffs,
         manifest_path=manifest_path,
         bundle_system_providers=bundle_system_providers,
         bundle_cohorts=bundle_cohorts,
     )
     if bundle_result is not None:
         bv = bundle_result.bundle_verdict.value
-        if _RELEASE_VERDICT_ORDER.get(bv, 0) > _RELEASE_VERDICT_ORDER.get(
-            worst_verdict, 0
-        ):
+        if _RELEASE_VERDICT_ORDER.get(bv, 0) > _RELEASE_VERDICT_ORDER.get(worst_verdict, 0):
             worst_verdict = bv
     return bundle_result, worst_verdict
 
@@ -1163,9 +1008,7 @@ def _collect_matrix_result(
         extra_changes=matrix_changes,
     )
     matrix_verdict = result.verdict.value
-    if _RELEASE_VERDICT_ORDER.get(matrix_verdict, 0) > _RELEASE_VERDICT_ORDER.get(
-        worst_verdict, 0
-    ):
+    if _RELEASE_VERDICT_ORDER.get(matrix_verdict, 0) > _RELEASE_VERDICT_ORDER.get(worst_verdict, 0):
         worst_verdict = matrix_verdict
     return result, worst_verdict
 
@@ -1205,16 +1048,9 @@ def _finalize_release_output(
 ) -> None:
     """Write summary output, step summary, per-library dir report, then exit."""
     text = _format_release_summary(
-        fmt,
-        worst_verdict,
-        old_dir,
-        new_dir,
-        library_results,
-        removed_keys,
-        added_keys,
-        old_map,
-        new_map,
-        warning_msgs,
+        fmt, worst_verdict, old_dir, new_dir,
+        library_results, removed_keys, added_keys,
+        old_map, new_map, warning_msgs,
         diff_pairs=diff_pairs if fmt == "junit" else None,
         bundle_result=bundle_result,
         matrix_result=matrix_result,
@@ -1228,18 +1064,11 @@ def _finalize_release_output(
 
     if output_dir:
         _write_release_summary_file(
-            output_dir,
-            worst_verdict,
-            library_results,
-            removed_keys,
-            added_keys,
-            old_map,
-            new_map,
+            output_dir, worst_verdict, library_results,
+            removed_keys, added_keys, old_map, new_map,
         )
 
-    _exit_compare_release(
-        worst_verdict, fail_on_removed, removed_keys, severity_exit_code
-    )
+    _exit_compare_release(worst_verdict, fail_on_removed, removed_keys, severity_exit_code)
 
 
 def _validate_suppression_early(
@@ -1257,9 +1086,7 @@ def _validate_suppression_early(
     """
     if suppress is not None and (strict_suppressions or require_justification):
         _load_suppression_and_policy(
-            suppress,
-            policy,
-            policy_file_path,
+            suppress, policy, policy_file_path,
             strict_suppressions=strict_suppressions,
             require_justification=require_justification,
         )
@@ -1283,9 +1110,7 @@ def _strip_diff_results_and_adjust_verdict(
     for entry in library_results:
         if isinstance(entry, dict):
             entry.pop("_diff_result", None)
-    if removed_keys and _RELEASE_VERDICT_ORDER.get(
-        worst_verdict, 0
-    ) < _RELEASE_VERDICT_ORDER.get("COMPATIBLE_WITH_RISK", 0):
+    if removed_keys and _RELEASE_VERDICT_ORDER.get(worst_verdict, 0) < _RELEASE_VERDICT_ORDER.get("COMPATIBLE_WITH_RISK", 0):
         worst_verdict = "COMPATIBLE_WITH_RISK"
     return worst_verdict
 
@@ -1293,289 +1118,129 @@ def _strip_diff_results_and_adjust_verdict(
 @main.command("compare-release")
 @click.argument("old_dir", type=click.Path(exists=True, path_type=Path))
 @click.argument("new_dir", type=click.Path(exists=True, path_type=Path))
-@click.option(
-    "-H",
-    "--header",
-    "headers",
-    multiple=True,
-    type=click.Path(path_type=Path),
-    help="Public header file or directory applied to both sides.",
-)
-@click.option(
-    "-I",
-    "--include",
-    "includes",
-    multiple=True,
-    type=click.Path(path_type=Path),
-    help="Extra include directory for castxml.",
-)
-@click.option(
-    "--old-include",
-    "old_includes_only",
-    multiple=True,
-    type=click.Path(path_type=Path),
-    help="Include directory for old side only (overrides -I for old).",
-)
-@click.option(
-    "--new-include",
-    "new_includes_only",
-    multiple=True,
-    type=click.Path(path_type=Path),
-    help="Include directory for new side only (overrides -I for new).",
-)
-@click.option(
-    "--old-header",
-    "old_headers_only",
-    multiple=True,
-    type=click.Path(path_type=Path),
-    help="Header for old side only (overrides -H for old).",
-)
-@click.option(
-    "--new-header",
-    "new_headers_only",
-    multiple=True,
-    type=click.Path(path_type=Path),
-    help="Header for new side only (overrides -H for new).",
-)
-@click.option(
-    "--old-version",
-    "old_version",
-    default="old",
-    show_default=True,
-    help="Version label for old side.",
-)
-@click.option(
-    "--new-version",
-    "new_version",
-    default="new",
-    show_default=True,
-    help="Version label for new side.",
-)
-@click.option(
-    "--lang",
-    default="c++",
-    show_default=True,
-    type=click.Choice(["c++", "c"], case_sensitive=False),
-)
-@click.option(
-    "--format",
-    "fmt",
-    type=click.Choice(["json", "markdown", "junit"]),
-    default="markdown",
-    show_default=True,
-)
-@click.option(
-    "-o",
-    "--output",
-    type=click.Path(path_type=Path),
-    default=None,
-    help="Output file for summary report (default: stdout).",
-)
-@click.option(
-    "--output-dir",
-    "output_dir",
-    type=click.Path(path_type=Path),
-    default=None,
-    help="Directory to write per-library reports.",
-)
-@click.option(
-    "--suppress",
-    type=click.Path(exists=True, path_type=Path),
-    default=None,
-    help="Suppression file (YAML).",
-)
-@click.option(
-    "--strict-suppressions",
-    is_flag=True,
-    default=False,
-    help="Fail with exit code 1 if any suppression rule has expired.",
-)
-@click.option(
-    "--require-justification",
-    is_flag=True,
-    default=False,
-    help="Require every suppression rule to have a non-empty 'reason' field.",
-)
-@click.option(
-    "--policy",
-    "policy",
-    type=click.Choice(["strict_abi", "sdk_vendor", "plugin_abi"], case_sensitive=True),
-    default="strict_abi",
-    show_default=True,
-)
-@click.option("--policy-file", "policy_file_path", type=POLICY_FILE_PARAM, default=None)
-@click.option(
-    "--fail-on-removed-library/--no-fail-on-removed-library",
-    "fail_on_removed",
-    default=False,
-    help="Exit 8 when a library present in old_dir is absent in new_dir.",
-)
-@click.option(
-    "--debug-info1",
-    type=click.Path(exists=True, path_type=Path),
-    default=None,
-    help="Debug info package for old side (RPM/Deb/tar).",
-)
-@click.option(
-    "--debug-info2",
-    type=click.Path(exists=True, path_type=Path),
-    default=None,
-    help="Debug info package for new side (RPM/Deb/tar).",
-)
-@click.option(
-    "--devel-pkg1",
-    type=click.Path(exists=True, path_type=Path),
-    default=None,
-    help="Development package with headers for old side.",
-)
-@click.option(
-    "--devel-pkg2",
-    type=click.Path(exists=True, path_type=Path),
-    default=None,
-    help="Development package with headers for new side.",
-)
-@click.option(
-    "--dso-only",
-    is_flag=True,
-    default=False,
-    help="Only compare shared objects, skip executables.",
-)
-@click.option(
-    "--include-private-dso",
-    is_flag=True,
-    default=False,
-    help="Include private (non-public) shared objects from non-standard paths.",
-)
-@click.option(
-    "--keep-extracted",
-    is_flag=True,
-    default=False,
-    help="Keep extracted temporary files for debugging.",
-)
-@click.option(
-    "--annotate",
-    is_flag=True,
-    default=False,
-    help="Emit GitHub Actions workflow command annotations to stdout. "
-    "Only effective when GITHUB_ACTIONS=true.",
-)
-@click.option(
-    "--annotate-additions",
-    is_flag=True,
-    default=False,
-    help="Include additions/compatible changes as ::notice annotations "
-    "(requires --annotate).",
-)
+@click.option("-H", "--header", "headers", multiple=True,
+              type=click.Path(path_type=Path),
+              help="Public header file or directory applied to both sides.")
+@click.option("-I", "--include", "includes", multiple=True,
+              type=click.Path(path_type=Path),
+              help="Extra include directory for castxml.")
+@click.option("--old-include", "old_includes_only", multiple=True,
+              type=click.Path(path_type=Path),
+              help="Include directory for old side only (overrides -I for old).")
+@click.option("--new-include", "new_includes_only", multiple=True,
+              type=click.Path(path_type=Path),
+              help="Include directory for new side only (overrides -I for new).")
+@click.option("--old-header", "old_headers_only", multiple=True,
+              type=click.Path(path_type=Path),
+              help="Header for old side only (overrides -H for old).")
+@click.option("--new-header", "new_headers_only", multiple=True,
+              type=click.Path(path_type=Path),
+              help="Header for new side only (overrides -H for new).")
+@click.option("--old-version", "old_version", default="old", show_default=True,
+              help="Version label for old side.")
+@click.option("--new-version", "new_version", default="new", show_default=True,
+              help="Version label for new side.")
+@click.option("--lang", default="c++", show_default=True,
+              type=click.Choice(["c++", "c"], case_sensitive=False))
+@click.option("--format", "fmt",
+              type=click.Choice(["json", "markdown", "junit"]),
+              default="markdown", show_default=True)
+@click.option("-o", "--output", type=click.Path(path_type=Path), default=None,
+              help="Output file for summary report (default: stdout).")
+@click.option("--output-dir", "output_dir", type=click.Path(path_type=Path), default=None,
+              help="Directory to write per-library reports.")
+@click.option("--suppress", type=click.Path(exists=True, path_type=Path), default=None,
+              help="Suppression file (YAML).")
+@click.option("--strict-suppressions", is_flag=True, default=False,
+              help="Fail with exit code 1 if any suppression rule has expired.")
+@click.option("--require-justification", is_flag=True, default=False,
+              help="Require every suppression rule to have a non-empty 'reason' field.")
+@click.option("--policy", "policy",
+              type=click.Choice(["strict_abi", "sdk_vendor", "plugin_abi"], case_sensitive=True),
+              default="strict_abi", show_default=True)
+@click.option("--policy-file", "policy_file_path",
+              type=POLICY_FILE_PARAM, default=None)
+@click.option("--fail-on-removed-library/--no-fail-on-removed-library",
+              "fail_on_removed", default=False,
+              help="Exit 8 when a library present in old_dir is absent in new_dir.")
+@click.option("--debug-info1", type=click.Path(exists=True, path_type=Path), default=None,
+              help="Debug info package for old side (RPM/Deb/tar).")
+@click.option("--debug-info2", type=click.Path(exists=True, path_type=Path), default=None,
+              help="Debug info package for new side (RPM/Deb/tar).")
+@click.option("--devel-pkg1", type=click.Path(exists=True, path_type=Path), default=None,
+              help="Development package with headers for old side.")
+@click.option("--devel-pkg2", type=click.Path(exists=True, path_type=Path), default=None,
+              help="Development package with headers for new side.")
+@click.option("--dso-only", is_flag=True, default=False,
+              help="Only compare shared objects, skip executables.")
+@click.option("--include-private-dso", is_flag=True, default=False,
+              help="Include private (non-public) shared objects from non-standard paths.")
+@click.option("--keep-extracted", is_flag=True, default=False,
+              help="Keep extracted temporary files for debugging.")
+@click.option("--annotate", is_flag=True, default=False,
+              help="Emit GitHub Actions workflow command annotations to stdout. "
+                   "Only effective when GITHUB_ACTIONS=true.")
+@click.option("--annotate-additions", is_flag=True, default=False,
+              help="Include additions/compatible changes as ::notice annotations "
+                   "(requires --annotate).")
 @click.option("-v", "--verbose", is_flag=True, default=False)
-@click.option(
-    "-j",
-    "--jobs",
-    "jobs",
-    type=int,
-    default=0,
-    show_default=True,
-    help="Number of parallel library comparisons (0 = auto-detect CPU count, the default).",
-)
-@click.option(
-    "--manifest",
-    "manifest_path",
-    type=click.Path(exists=True, path_type=Path),
-    default=None,
-    help="ABI instantiation manifest (YAML/JSON) listing symbols the "
-    "release publicly promises. See ADR-023.",
-)
-@click.option(
-    "--bundle-system-providers",
-    "bundle_system_providers",
-    default="",
-    help="Comma-separated extra sonames to treat as system-provided "
-    "(extends the built-in libc/libstdc++/libgcc/libtbb allow-list).",
-)
-@click.option(
-    "--bundle-cohort",
-    "bundle_cohorts",
-    multiple=True,
-    metavar="PREFIX",
-    help="Declare a co-versioned library cohort by name prefix (e.g. "
-    "'libfoo_'). Repeatable. Enables the BUNDLE_SONAME_SKEW check, "
-    "which flags when some members of the cohort bump their major SONAME "
-    "while siblings lag, and enables bundle-level cross-library analysis.",
-)
-@click.option(
-    "--no-bundle-analysis",
-    "no_bundle_analysis",
-    is_flag=True,
-    default=False,
-    help="Skip bundle-level cross-library analysis (debug/parity escape hatch). "
-    "Bundle findings catch intra-bundle symbol removals, signature drift "
-    "across DSO boundaries, type drift across siblings, provider "
-    "migration, and manifest mismatches.",
-)
-@click.option(
-    "--scope-public-headers/--no-scope-public-headers",
-    "scope_public_headers",
-    default=True,
-    show_default=True,
-    help="Restrict findings to the public-header ABI surface (ADR-024). "
-    "On by default (matches `compare`); use --no-scope-public-headers "
-    "to report every finding.",
-)
-@click.option(
-    "--probe-matrix-old",
-    "probe_matrix_old",
-    type=click.Path(exists=True, path_type=Path),
-    default=None,
-    help="Old build-configuration matrix snapshot (from 'abicheck probe run'). "
-    "When given with --probe-matrix-new, build-config findings "
-    "(CXX_STANDARD_FLOOR_RAISED, API_DEPENDS_ON_CONSUMER_ENV, "
-    "BEHAVIOURAL_DEFAULT_CHANGED) are folded into this release's "
-    "verdict and report (G2: probe -> compare-release).",
-)
-@click.option(
-    "--probe-matrix-new",
-    "probe_matrix_new",
-    type=click.Path(exists=True, path_type=Path),
-    default=None,
-    help="New build-configuration matrix snapshot (pairs with --probe-matrix-old).",
-)
+@click.option("-j", "--jobs", "jobs", type=int, default=0, show_default=True,
+              help="Number of parallel library comparisons (0 = auto-detect CPU count, the default).")
+@click.option("--manifest", "manifest_path", type=click.Path(exists=True, path_type=Path),
+              default=None,
+              help="ABI instantiation manifest (YAML/JSON) listing symbols the "
+                   "release publicly promises. See ADR-023.")
+@click.option("--bundle-system-providers", "bundle_system_providers", default="",
+              help="Comma-separated extra sonames to treat as system-provided "
+                   "(extends the built-in libc/libstdc++/libgcc/libtbb allow-list).")
+@click.option("--bundle-cohort", "bundle_cohorts", multiple=True, metavar="PREFIX",
+              help="Declare a co-versioned library cohort by name prefix (e.g. "
+                   "'libfoo_'). Repeatable. Enables the BUNDLE_SONAME_SKEW check, "
+                   "which flags when some members of the cohort bump their major SONAME "
+                   "while siblings lag, and enables bundle-level cross-library analysis.")
+@click.option("--no-bundle-analysis", "no_bundle_analysis", is_flag=True, default=False,
+              help="Skip bundle-level cross-library analysis (debug/parity escape hatch). "
+                   "Bundle findings catch intra-bundle symbol removals, signature drift "
+                   "across DSO boundaries, type drift across siblings, provider "
+                   "migration, and manifest mismatches.")
+@click.option("--scope-public-headers/--no-scope-public-headers", "scope_public_headers",
+              default=True, show_default=True,
+              help="Restrict findings to the public-header ABI surface (ADR-024). "
+                   "On by default (matches `compare`); use --no-scope-public-headers "
+                   "to report every finding.")
+@click.option("--probe-matrix-old", "probe_matrix_old", type=click.Path(exists=True, path_type=Path),
+              default=None,
+              help="Old build-configuration matrix snapshot (from 'abicheck probe run'). "
+                   "When given with --probe-matrix-new, build-config findings "
+                   "(CXX_STANDARD_FLOOR_RAISED, API_DEPENDS_ON_CONSUMER_ENV, "
+                   "BEHAVIOURAL_DEFAULT_CHANGED) are folded into this release's "
+                   "verdict and report (G2: probe -> compare-release).")
+@click.option("--probe-matrix-new", "probe_matrix_new", type=click.Path(exists=True, path_type=Path),
+              default=None,
+              help="New build-configuration matrix snapshot (pairs with --probe-matrix-old).")
 # ── Severity (mirrors `compare`) ──────────────────────────────────────────────
-@click.option(
-    "--severity-preset",
-    "severity_preset",
-    type=click.Choice(["default", "strict", "info-only"], case_sensitive=True),
-    default=None,
-    help="Severity preset: 'default', 'strict', or 'info-only'. "
-    "When set (or any --severity-* option), exit codes follow the "
-    "severity-aware scheme aggregated across all libraries.",
-)
-@click.option(
-    "--severity-abi-breaking",
-    "severity_abi_breaking",
-    type=click.Choice(["error", "warning", "info"], case_sensitive=True),
-    default=None,
-    help="Severity for clear ABI/API incompatibilities (overrides preset).",
-)
-@click.option(
-    "--severity-potential-breaking",
-    "severity_potential_breaking",
-    type=click.Choice(["error", "warning", "info"], case_sensitive=True),
-    default=None,
-    help="Severity for potential incompatibilities needing review (overrides preset).",
-)
-@click.option(
-    "--severity-quality-issues",
-    "severity_quality_issues",
-    type=click.Choice(["error", "warning", "info"], case_sensitive=True),
-    default=None,
-    help="Severity for problematic behaviors (overrides preset).",
-)
-@click.option(
-    "--severity-addition",
-    "severity_addition",
-    type=click.Choice(["error", "warning", "info"], case_sensitive=True),
-    default=None,
-    help="Severity for new public API additions (overrides preset).",
-)
+@click.option("--severity-preset", "severity_preset",
+              type=click.Choice(["default", "strict", "info-only"], case_sensitive=True),
+              default=None,
+              help="Severity preset: 'default', 'strict', or 'info-only'. "
+                   "When set (or any --severity-* option), exit codes follow the "
+                   "severity-aware scheme aggregated across all libraries.")
+@click.option("--severity-abi-breaking", "severity_abi_breaking",
+              type=click.Choice(["error", "warning", "info"], case_sensitive=True),
+              default=None,
+              help="Severity for clear ABI/API incompatibilities (overrides preset).")
+@click.option("--severity-potential-breaking", "severity_potential_breaking",
+              type=click.Choice(["error", "warning", "info"], case_sensitive=True),
+              default=None,
+              help="Severity for potential incompatibilities needing review (overrides preset).")
+@click.option("--severity-quality-issues", "severity_quality_issues",
+              type=click.Choice(["error", "warning", "info"], case_sensitive=True),
+              default=None,
+              help="Severity for problematic behaviors (overrides preset).")
+@click.option("--severity-addition", "severity_addition",
+              type=click.Choice(["error", "warning", "info"], case_sensitive=True),
+              default=None,
+              help="Severity for new public API additions (overrides preset).")
 def compare_release_cmd(
     old_dir: Path,
     new_dir: Path,
@@ -1678,56 +1343,25 @@ def compare_release_cmd(
         _temp_dir_paths.append(path)
         return Path(path)
 
-    def _do_extract(
-        input_path: Path, debug_pkg: Path | None, devel_pkg: Path | None
-    ) -> tuple[Path, Path | None, Path | None]:
-        return _extract_if_package(
-            input_path,
-            debug_pkg,
-            devel_pkg,
-            _make_temp_dir,
-            is_package,
-            detect_extractor,
-        )
+    def _do_extract(input_path: Path, debug_pkg: Path | None, devel_pkg: Path | None) -> tuple[Path, Path | None, Path | None]:
+        return _extract_if_package(input_path, debug_pkg, devel_pkg, _make_temp_dir, is_package, detect_extractor)
 
     # Validate suppression file early (before per-library loop)
-    _validate_suppression_early(
-        suppress, policy, policy_file_path, strict_suppressions, require_justification
-    )
+    _validate_suppression_early(suppress, policy, policy_file_path, strict_suppressions, require_justification)
 
     try:
         (
-            old_debug_dir,
-            new_debug_dir,
-            old_h,
-            new_h,
-            old_inc,
-            new_inc,
-            old_map,
-            new_map,
-            warning_msgs,
-            matched_keys,
-            removed_keys,
-            added_keys,
+            old_debug_dir, new_debug_dir,
+            old_h, new_h, old_inc, new_inc,
+            old_map, new_map, warning_msgs,
+            matched_keys, removed_keys, added_keys,
         ) = _prepare_compare_release_inputs(
-            old_dir,
-            new_dir,
-            debug_info1,
-            debug_info2,
-            devel_pkg1,
-            devel_pkg2,
-            include_private_dso,
-            dso_only,
-            headers,
-            old_headers_only,
-            new_headers_only,
-            includes,
-            old_includes_only,
-            new_includes_only,
-            _do_extract,
-            discover_shared_libraries,
-            is_package,
-            _is_elf_shared_object,
+            old_dir, new_dir,
+            debug_info1, debug_info2, devel_pkg1, devel_pkg2,
+            include_private_dso, dso_only,
+            headers, old_headers_only, new_headers_only,
+            includes, old_includes_only, new_includes_only,
+            _do_extract, discover_shared_libraries, is_package, _is_elf_shared_object,
         )
 
         if fmt != "json":
@@ -1741,22 +1375,11 @@ def compare_release_cmd(
         # needs old AbiSnapshot too. Bundle analysis reuses the
         # _diff_result stashed in each library entry from the first pass.
         library_results, worst_verdict, diff_pairs = _compare_release_libraries(
-            matched_keys,
-            old_map,
-            new_map,
-            old_debug_dir,
-            new_debug_dir,
-            resolve_debug_info,
-            old_h,
-            new_h,
-            old_inc,
-            new_inc,
-            old_version,
-            new_version,
-            lang,
-            suppress,
-            policy,
-            policy_file_path,
+            matched_keys, old_map, new_map,
+            old_debug_dir, new_debug_dir, resolve_debug_info,
+            old_h, new_h, old_inc, new_inc,
+            old_version, new_version,
+            lang, suppress, policy, policy_file_path,
             output_dir,
             collect_diff_results=(fmt == "junit"),
             annotate=annotate,
@@ -1770,84 +1393,52 @@ def compare_release_cmd(
         # Returns None when no --severity-* option was supplied, in which case
         # the legacy verdict-based exit is used downstream.
         severity_config = _resolve_release_severity_config(
-            severity_preset,
-            severity_abi_breaking,
-            severity_potential_breaking,
-            severity_quality_issues,
-            severity_addition,
+            severity_preset, severity_abi_breaking, severity_potential_breaking,
+            severity_quality_issues, severity_addition,
         )
         severity_exit_code = _compute_release_severity_exit_code(
             library_results,
-            severity_preset,
-            severity_abi_breaking,
-            severity_potential_breaking,
-            severity_quality_issues,
-            severity_addition,
+            severity_preset, severity_abi_breaking, severity_potential_breaking,
+            severity_quality_issues, severity_addition,
         )
 
         bundle_result: BundleDiffResult | None = None
         bundle_requested = manifest_path is not None or bool(bundle_cohorts)
         if not no_bundle_analysis and bundle_requested:
             bundle_result, worst_verdict = _collect_bundle_result(
-                library_results,
-                old_map,
-                new_map,
-                worst_verdict,
+                library_results, old_map, new_map, worst_verdict,
                 manifest_path=manifest_path,
                 bundle_system_providers=bundle_system_providers,
                 bundle_cohorts=bundle_cohorts,
             )
 
         # Strip _diff_result from entries and bump verdict for removed libraries.
-        worst_verdict = _strip_diff_results_and_adjust_verdict(
-            library_results, removed_keys, worst_verdict
-        )
+        worst_verdict = _strip_diff_results_and_adjust_verdict(library_results, removed_keys, worst_verdict)
 
         # Build-configuration matrix findings (G2: probe -> compare-release).
         # These are release-global, not per-library, so they fold into the
         # worst-of verdict and surface as their own report section.
         matrix_result, worst_verdict = _collect_matrix_result(
-            probe_matrix_old,
-            probe_matrix_new,
-            policy,
-            worst_verdict,
-            suppress=suppress,
-            policy_file_path=policy_file_path,
-            old_version=old_version,
-            new_version=new_version,
+            probe_matrix_old, probe_matrix_new, policy, worst_verdict,
+            suppress=suppress, policy_file_path=policy_file_path,
+            old_version=old_version, new_version=new_version,
         )
 
         # Fold release-global bundle/matrix findings into the severity exit so a
         # clean-per-library release with a bundle/matrix break is not masked.
         if severity_exit_code is not None:
             severity_exit_code = _fold_release_global_severity(
-                severity_exit_code,
-                bundle_result,
-                matrix_result,
-                severity_preset,
-                severity_abi_breaking,
-                severity_potential_breaking,
-                severity_quality_issues,
-                severity_addition,
+                severity_exit_code, bundle_result, matrix_result,
+                severity_preset, severity_abi_breaking, severity_potential_breaking,
+                severity_quality_issues, severity_addition,
             )
 
         _finalize_release_output(
-            fmt,
-            worst_verdict,
-            old_dir,
-            new_dir,
-            library_results,
-            removed_keys,
-            added_keys,
-            old_map,
-            new_map,
-            warning_msgs,
-            diff_pairs,
-            bundle_result,
-            output,
-            output_dir,
-            annotate,
-            fail_on_removed,
+            fmt, worst_verdict, old_dir, new_dir,
+            library_results, removed_keys, added_keys,
+            old_map, new_map, warning_msgs,
+            diff_pairs, bundle_result,
+            output, output_dir, annotate, fail_on_removed,
             matrix_result=matrix_result,
             severity_exit_code=severity_exit_code,
             severity_config=severity_config,
@@ -1871,100 +1462,53 @@ def _prepare_compare_release_inputs(
     includes: tuple[Path, ...],
     old_includes_only: tuple[Path, ...],
     new_includes_only: tuple[Path, ...],
-    extract_if_package: Callable[
-        [Path, Path | None, Path | None], tuple[Path, Path | None, Path | None]
-    ],
+    extract_if_package: Callable[[Path, Path | None, Path | None], tuple[Path, Path | None, Path | None]],
     discover_shared_libraries: Callable[..., list[Path]],
     is_package: Callable[[Path], bool],
     is_elf_shared_object: Callable[[Path], bool],
 ) -> tuple[
-    Path | None,
-    Path | None,
-    list[Path],
-    list[Path],
-    list[Path],
-    list[Path],
-    dict[str, Path],
-    dict[str, Path],
-    list[str],
-    list[str],
-    list[str],
-    list[str],
+    Path | None, Path | None,
+    list[Path], list[Path], list[Path], list[Path],
+    dict[str, Path], dict[str, Path], list[str],
+    list[str], list[str], list[str],
 ]:
     """Prepare inputs/maps/keys for compare-release command."""
     old_lib_dir, old_debug_dir, old_header_dir = extract_if_package(
-        old_dir,
-        debug_info1,
-        devel_pkg1,
+        old_dir, debug_info1, devel_pkg1,
     )
     new_lib_dir, new_debug_dir, new_header_dir = extract_if_package(
-        new_dir,
-        debug_info2,
-        devel_pkg2,
+        new_dir, debug_info2, devel_pkg2,
     )
     old_files = _discover_files(
-        old_dir,
-        old_lib_dir,
-        include_private_dso,
-        discover_shared_libraries,
-        is_package,
+        old_dir, old_lib_dir, include_private_dso, discover_shared_libraries, is_package,
     )
     new_files = _discover_files(
-        new_dir,
-        new_lib_dir,
-        include_private_dso,
-        discover_shared_libraries,
-        is_package,
+        new_dir, new_lib_dir, include_private_dso, discover_shared_libraries, is_package,
     )
     if dso_only:
         old_files = [f for f in old_files if is_elf_shared_object(f)]
         new_files = [f for f in new_files if is_elf_shared_object(f)]
     old_map, old_warns = _build_match_map(old_files)
     new_map, new_warns = _build_match_map(new_files)
-    warning_msgs: list[str] = [
-        f"Warning: {warning}" for warning in (old_warns + new_warns)
-    ]
+    warning_msgs: list[str] = [f"Warning: {warning}" for warning in (old_warns + new_warns)]
     old_h, new_h = _resolve_release_headers(
-        headers,
-        old_headers_only,
-        new_headers_only,
-        old_header_dir,
-        new_header_dir,
+        headers, old_headers_only, new_headers_only, old_header_dir, new_header_dir,
     )
     old_inc = list(old_includes_only) if old_includes_only else list(includes)
     new_inc = list(new_includes_only) if new_includes_only else list(includes)
     old_inc.extend(_discover_include_roots(old_header_dir))
     new_inc.extend(_discover_include_roots(new_header_dir))
     matched_keys, removed_keys, added_keys, old_map, new_map = _match_release_keys(
-        old_dir,
-        new_dir,
-        old_map,
-        new_map,
-        old_files,
-        new_files,
-        is_package,
+        old_dir, new_dir, old_map, new_map, old_files, new_files, is_package,
     )
     _collect_release_warnings(
-        warning_msgs,
-        matched_keys,
-        removed_keys,
-        added_keys,
-        old_map,
-        new_map,
+        warning_msgs, matched_keys, removed_keys, added_keys, old_map, new_map,
     )
     return (
-        old_debug_dir,
-        new_debug_dir,
-        old_h,
-        new_h,
-        old_inc,
-        new_inc,
-        old_map,
-        new_map,
-        warning_msgs,
-        matched_keys,
-        removed_keys,
-        added_keys,
+        old_debug_dir, new_debug_dir,
+        old_h, new_h, old_inc, new_inc,
+        old_map, new_map, warning_msgs,
+        matched_keys, removed_keys, added_keys,
     )
 
 
@@ -1990,11 +1534,8 @@ def _compute_release_severity_exit_code(
     separately via :func:`_fold_release_global_severity`.
     """
     resolved_config = _resolve_release_severity_config(
-        severity_preset,
-        severity_abi_breaking,
-        severity_potential_breaking,
-        severity_quality_issues,
-        severity_addition,
+        severity_preset, severity_abi_breaking, severity_potential_breaking,
+        severity_quality_issues, severity_addition,
     )
     if resolved_config is None:
         return None
@@ -2006,8 +1547,7 @@ def _compute_release_severity_exit_code(
         diff = entry.get("_diff_result") if isinstance(entry, dict) else None
         if isinstance(diff, DiffResult):
             code = compute_exit_code(
-                diff.changes,
-                resolved_config,
+                diff.changes, resolved_config,
                 kind_sets=diff._effective_kind_sets(),
             )
             worst = max(worst, code)
@@ -2025,16 +1565,12 @@ def _resolve_release_severity_config(
     if not any(
         v is not None
         for v in (
-            severity_preset,
-            severity_abi_breaking,
-            severity_potential_breaking,
-            severity_quality_issues,
-            severity_addition,
+            severity_preset, severity_abi_breaking, severity_potential_breaking,
+            severity_quality_issues, severity_addition,
         )
     ):
         return None
     from .severity import resolve_severity_config
-
     return resolve_severity_config(
         severity_preset,
         abi_breaking=severity_abi_breaking,
@@ -2064,11 +1600,8 @@ def _fold_release_global_severity(
     worst of *base_code* and the bundle/matrix severity codes.
     """
     config = _resolve_release_severity_config(
-        severity_preset,
-        severity_abi_breaking,
-        severity_potential_breaking,
-        severity_quality_issues,
-        severity_addition,
+        severity_preset, severity_abi_breaking, severity_potential_breaking,
+        severity_quality_issues, severity_addition,
     )
     if config is None:
         return base_code
@@ -2084,8 +1617,7 @@ def _fold_release_global_severity(
         worst = max(
             worst,
             compute_exit_code(
-                matrix_result.changes,
-                config,
+                matrix_result.changes, config,
                 kind_sets=matrix_result._effective_kind_sets(),
             ),
         )
