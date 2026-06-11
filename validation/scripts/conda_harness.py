@@ -202,6 +202,12 @@ def extract_sos(pkg: Path, into: Path) -> dict[str, str]:
     for so in into.glob("lib/*.so*"):
         if so.is_symlink() or not so.is_file():
             continue
+        try:
+            with so.open("rb") as fh:
+                if fh.read(4) != b"\x7fELF":
+                    continue  # skip GNU ld linker scripts / other non-ELF .so files
+        except OSError:
+            continue
         out[logical_name(so.name)] = str(so)
     return out
 

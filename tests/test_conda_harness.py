@@ -139,3 +139,27 @@ def test_extract_tar_zst_python_backend(tmp_path: Path) -> None:
     extracted = into / "lib" / "libfoo.so.1"
     assert extracted.is_file()
     assert extracted.read_bytes() == payload
+
+
+def test_extract_sos_skips_non_elf_linker_scripts(tmp_path: Path) -> None:
+    # A conda package can ship a GNU ld linker-script `.so` (plain text). It must
+    # not be recorded as a shared object, or abicheck gets fed a text file and an
+    # otherwise comparable pair is wrongly skipped.
+    import tarfile
+
+    mod = _load_module()
+
+    pkgdir = tmp_path / "stage"
+    lib = pkgdir / "lib"
+    lib.mkdir(parents=True)
+    (lib / "libfoo.so.1").write_bytes(b"\x7fELF\x02\x01\x01\x00rest")  # real ELF
+    (lib / "libfoo.so").write_text("INPUT(libfoo.so.1)\n")  # ld linker script
+
+    pkg = tmp_path / "pkg-foo-1.0-0.tar.bz2"
+    with tarfile.open(pkg, "w:bz2") as tf:
+        tf.add(lib / "libfoo.so.1", arcname="lib/libfoo.so.1")
+        tf.add(lib / "libfoo.so", arcname="lib/libfoo.so")
+
+    sos = mod.extract_sos(pkg, tmp_path / "out")
+    assert list(sos) == ["libfoo"]  # one logical lib, from the ELF only
+    assert sos["libfoo"].endswith("libfoo.so.1")
