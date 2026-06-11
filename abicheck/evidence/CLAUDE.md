@@ -25,6 +25,10 @@ L3/L4/L5 are ordinary `ChangeKind` entries that default to `API_BREAK_KINDS`
 | `source_abi.py` | `SourceAbiTu` (per-TU dump) + `SourceAbiSurface` (linked `source_abi.json`) schemas, `SourceEntity`/`SourceLocation`, `L4_SOURCE_ABI` boundary | 030 D4/D5/D10 |
 | `source_link.py` | `link_source_abi()` — fold per-TU dumps into a per-library surface; map decls→exported symbols; ODR detection | 030 D5 |
 | `source_diff.py` | `diff_source_abi()` → the 9 source-replay findings (macros/default-args/inline/template/constexpr/…); never BREAKING | 030 D6 |
+| `source_graph.py` | `SourceGraphSummary`/`GraphNode`/`GraphEdge` (L5 schema), `build_source_graph(build, source_abi=…)` (folds `BuildEvidence` → target/source/header/option graph [phase 2] + an optional `SourceAbiSurface` → decl/type/macro + source↔binary edges [phases 3-4]), `diff_source_graph()` (structural delta) + `diff_source_graph_findings()` → the 4 D6 findings (phase 5/6) | 031 D2/D6/D7 |
+| `call_graph.py` | `parse_clang_ast_calls()` (pure `clang -ast-dump=json` → `CallEdge`s, unit-tested), `ClangCallGraphExtractor` (live clang, integration-only), `augment_graph_with_calls()` → `DECL_CALLS_DECL` edges labelled with `call_kind`/`resolution` | 031 D4 (phase 6) |
+| `include_graph.py` | `parse_depfile()` (pure `clang -MM` parser, unit-tested), `ClangIncludeExtractor` (live clang, integration-only), `augment_graph_with_includes()` → `COMPILE_UNIT_INCLUDES_FILE` edges | 031 D3 |
+| `graph_backends.py` | `ingest_kythe_entries()` / `ingest_codeql_call_results()` — fold **pre-captured** Kythe/CodeQL exports into the graph (non-executing), recording the store in `external_graph_refs` | 031 D5 (phase 7) |
 | `source_extractors/` | `SourceAbiExtractor` interface + castxml (phase 2), clang (phase 5, body fingerprints), Android adapter (phase 6) | 030 D3 |
 | `source_replay.py` | `select_compile_units()` (D7 scopes), `SourceAbiCache` (D8 per-TU cache), `run_source_replay()` driver, `scope_for_ci_mode()` | 030 D7/D8 (phase 7) |
 | `redaction.py` | `RedactionPolicy` — strip secrets/abs paths from command lines | 032 D7 |
@@ -37,10 +41,11 @@ L3/L4/L5 are ordinary `ChangeKind` entries that default to `API_BREAK_KINDS`
 
 ## Versioning
 
-Four *independent* schema versions — do not conflate:
+Five *independent* schema versions — do not conflate:
 - `EVIDENCE_PACK_VERSION` (`model.py`) — pack manifest/layout.
 - `BUILD_EVIDENCE_VERSION` (`build_evidence.py`) — L3 normalized model.
 - `SOURCE_ABI_VERSION` (`source_abi.py`) — L4 `SourceAbiTu`/`SourceAbiSurface`.
+- `SOURCE_GRAPH_VERSION` (`source_graph.py`) — L5 `SourceGraphSummary`.
 - `serialization.SCHEMA_VERSION` — the `AbiSnapshot`, which only stores an
   `EvidencePackRef` (so old snapshot readers ignore it; ADR-015).
 

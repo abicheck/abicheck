@@ -134,6 +134,36 @@ def _make_snap(tmp_path, name, version):
     return p
 
 
+def test_compare_with_source_graph_packs_runs_graph_diff(tmp_path):
+    """ADR-031: two --source-graph packs drive the graph-diff wiring in
+    collect_compare_evidence (folded into the verdict pipeline). Build-only
+    graphs yield no graph findings, but the L5 coverage must read present and
+    the comparison must still succeed."""
+    old_cdb = _write_cdb(tmp_path, "c++17")
+    new_cdb = _write_cdb(tmp_path, "c++20")
+    ev_old = tmp_path / "old.evidence"
+    ev_new = tmp_path / "new.evidence"
+    runner = CliRunner()
+    runner.invoke(main, ["collect-evidence", "--compile-db", str(old_cdb),
+                         "--source-graph", "summary", "-o", str(ev_old)])
+    runner.invoke(main, ["collect-evidence", "--compile-db", str(new_cdb),
+                         "--source-graph", "summary", "-o", str(ev_new)])
+    assert EvidencePack.load(ev_old).source_graph is not None
+    assert EvidencePack.load(ev_new).source_graph is not None
+
+    old_snap = _make_snap(tmp_path, "old.json", "1.0")
+    new_snap = _make_snap(tmp_path, "new.json", "2.0")
+    result = runner.invoke(main, [
+        "compare", str(old_snap), str(new_snap),
+        "--old-evidence", str(ev_old), "--new-evidence", str(ev_new),
+        "--format", "json",
+    ])
+    assert result.exit_code in (0, 1, 2, 4), result.output
+    payload = json.loads(result.stdout)
+    cov = {row["layer"]: row for row in payload["evidence_coverage"]}
+    assert cov["L5_source_graph"]["status"] == "present"
+
+
 def test_compare_with_evidence_emits_coverage_and_findings(tmp_path):
     old_cdb = _write_cdb(tmp_path, "c++17")
     new_cdb = _write_cdb(tmp_path, "c++20")

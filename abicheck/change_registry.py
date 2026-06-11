@@ -1010,4 +1010,36 @@ REGISTRY = ChangeKindRegistry([
               "API surface, so a change can alter declarations or macro contracts "
               "seen by consumers. Policy may escalate to an API break; by default "
               "a risk to review."),
+
+    # ── Source graph evidence (ADR-028 L5 / ADR-031 D6) ─────────────────────
+    _E("public_reachability_changed", _R,
+       impact="A public declaration entered or left the public-API reachability "
+              "closure (target → public header → declaration → exported symbol) "
+              "between versions. Explains and prioritizes impact derived from the "
+              "source graph; never on its own decides an ABI break."),
+    _E("source_to_binary_mapping_changed", _R,
+       impact="A declaration present in both versions now maps to a different "
+              "exported binary symbol (or its source↔symbol mapping changed) "
+              "without a clear artifact ABI diff. A surface/mapping consistency "
+              "risk to investigate, surfaced by comparing source graph summaries."),
+    _E("generated_header_reaches_public_api", _R,
+       impact="A generated file newly participates in the public declaration "
+              "closure (it is a public header, or it declares a reachable public "
+              "entity). Build-time-generated content now shapes the public API "
+              "surface, so its provenance and reproducibility warrant review."),
+    _E("call_graph_public_entry_reachability_changed", _C,
+       impact="The set of implementation declarations statically reachable from "
+              "an exported entry point changed (per the approximate Clang call "
+              "graph). A quality/behavioral signal that the implementation behind "
+              "a stable public symbol moved; never an ABI break on its own."),
+    _E("include_graph_public_header_drift", _R,
+       impact="The transitive include closure behind a public header changed "
+              "(per the depfile/-M include graph). Consumers may now pull in "
+              "different declarations or macros; a source/API risk to review, "
+              "never on its own an artifact-proven ABI break."),
+    _E("build_option_reaches_public_symbol", _R,
+       impact="A changed ABI-relevant build option feeds a compile unit that "
+              "produces an exported public symbol (per the build/source graph). "
+              "It localizes a flag-drift risk to the public surface it can affect; "
+              "a risk to review, never on its own an artifact-proven ABI break."),
 ])

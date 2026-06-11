@@ -51,6 +51,7 @@ if TYPE_CHECKING:
         CastxmlSourceExtractor,
         ClangSourceExtractor,
     )
+    from .evidence.source_graph import SourceGraphSummary
     from .model import AbiSnapshot
 
 
@@ -103,6 +104,24 @@ if TYPE_CHECKING:
 @click.option("--source-abi-cache", "source_abi_cache", type=click.Path(path_type=Path), default=None,
               help="Directory for the per-TU source ABI dump cache (ADR-030 D8).")
 @click.option("--clang-bin", "clang_bin", default="clang", show_default=True, help="clang binary to use for source ABI replay.")
+@click.option("--source-graph", "source_graph", default="off", show_default=True,
+              type=click.Choice(["off", "summary"], case_sensitive=False),
+              help="Collect an L5 source graph (ADR-031). 'summary' folds the L3 "
+                   "build evidence into a compact target/source/header/option graph "
+                   "for graph-to-graph comparison and finding localization.")
+@click.option("--call-graph", "call_graph", is_flag=True, default=False,
+              help="Add approximate direct-call edges to the L5 source graph via "
+                   "clang AST (ADR-031 D4, phase 6). REQUIRES clang++; without it "
+                   "the graph is collected without call edges. Implies --source-graph summary.")
+@click.option("--include-graph", "include_graph", is_flag=True, default=False,
+              help="Add compile-unit include edges to the L5 graph via `clang -MM` "
+                   "(ADR-031 D3). REQUIRES clang++. Implies --source-graph summary.")
+@click.option("--kythe-entries", "kythe_entries", type=click.Path(path_type=Path), default=None,
+              help="Pre-captured Kythe entries JSON to fold into the L5 graph "
+                   "(ADR-031 D5; non-executing). Implies --source-graph summary.")
+@click.option("--codeql-results", "codeql_results", type=click.Path(path_type=Path), default=None,
+              help="Pre-captured CodeQL call-graph query result JSON to fold into "
+                   "the L5 graph (ADR-031 D5; non-executing). Implies --source-graph summary.")
 @click.option("-o", "--output", "output", type=click.Path(path_type=Path), required=True,
               help="Output evidence-pack directory.")
 @click.option("-v", "--verbose", is_flag=True, default=False)
@@ -128,6 +147,11 @@ def collect_evidence_cmd(
     android_dump: Path | None,
     source_abi_cache: Path | None,
     clang_bin: str,
+    source_graph: str,
+    call_graph: bool,
+    include_graph: bool,
+    kythe_entries: Path | None,
+    codeql_results: Path | None,
     output: Path,
     verbose: bool,
 ) -> None:
@@ -178,6 +202,38 @@ def collect_evidence_cmd(
             verbose=verbose,
         )
 
+    graph: SourceGraphSummary | None = None
+    graph_detail = ""
+    # Any graph-augmenting option implies graph collection (edges go into it).
+    if (call_graph or include_graph or kythe_entries or codeql_results) and source_graph == "off":
+        source_graph = "summary"
+    if source_graph == "summary":
+        from .evidence.source_graph import build_source_graph
+        # Fold the L4 surface in too when it was collected (--source-abi), so
+        # the graph carries the public-reachability + source↔binary slices.
+        graph = build_source_graph(merged, source_abi=surface)
+        if call_graph:
+            _collect_call_graph(graph, merged, extractors, clang_bin=clang_bin)
+        if include_graph:
+            _collect_include_graph(graph, merged, extractors, clang_bin=clang_bin)
+        if kythe_entries or codeql_results:
+            _ingest_graph_backends(graph, extractors,
+                                   kythe_entries=kythe_entries, codeql_results=codeql_results)
+        graph.finalize()
+        graph_detail = (
+            f"{len(graph.nodes)} nodes, {len(graph.edges)} edges "
+            f"({graph.coverage.get('targets', 0)} targets, "
+            f"{graph.coverage.get('compile_units', 0)} compile units, "
+            f"{graph.coverage.get('source_decls', 0)} source decls, "
+            f"{graph.coverage.get('call_edges', {}).get('count', 0)} call edges, "
+            f"{graph.coverage.get('include_edges', {}).get('count', 0)} include edges)"
+        )
+        extractors.append(ExtractorRecord(
+            name="source_graph:summary",
+            status="ok" if graph.nodes else "partial",
+            detail=graph_detail if graph.nodes else "no build evidence to fold into a graph",
+        ))
+
     pack = EvidencePack.empty(
         output,
         abicheck_version=_abicheck_version,
@@ -200,7 +256,11 @@ def collect_evidence_cmd(
         pack.build_evidence = merged
     if surface is not None:
         pack.source_abi = surface
-    pack.manifest.coverage = _build_coverage(merged, has_build, surface, source_detail)
+    if graph is not None:
+        pack.source_graph = graph
+    pack.manifest.coverage = _build_coverage(
+        merged, has_build, surface, source_detail, graph, graph_detail
+    )
     pack.write()
 
     click.echo(f"Evidence pack written to {output}")
@@ -214,6 +274,8 @@ def collect_evidence_cmd(
         click.echo("  L3 build context: not collected (no adapters produced facts)")
     if source_abi:
         click.echo(f"  L4 source ABI replay: {source_detail}")
+    if graph is not None:
+        click.echo(f"  L5 source graph: {graph_detail or 'empty (no build evidence)'}")
     for diag in merged.diagnostics:
         click.echo(f"  note: {diag}", err=True)
 
@@ -323,11 +385,138 @@ def _run_adapters(
         ))
 
 
+def _collect_call_graph(
+    graph: SourceGraphSummary,
+    merged: BuildEvidence,
+    extractors: list[ExtractorRecord],
+    *,
+    clang_bin: str,
+) -> None:
+    """Run the Clang call extractor over the build and fold edges into *graph*.
+
+    Best-effort (ADR-031 D4 / ADR-028 D3): a missing clang or a parse failure
+    records a partial/failed extractor row and leaves the graph without call
+    edges — it never aborts collection. Re-finalizes the graph so the content
+    hash and coverage counts reflect the added edges.
+    """
+    from .evidence.call_graph import ClangCallGraphExtractor, augment_graph_with_calls
+
+    # clang_bin defaults to "clang" (the L4 extractor's tool); the call
+    # extractor needs a C++ driver, so prefer clang++ unless the user pointed
+    # --clang-bin at a specific clang.
+    extractor = ClangCallGraphExtractor(clang_bin=clang_bin if clang_bin != "clang" else "clang++")
+    if not extractor.available():
+        extractors.append(ExtractorRecord(
+            name="call_graph:clang", status="failed",
+            detail=f"{extractor.clang_bin} not found in PATH; graph collected without call edges",
+        ))
+        return
+    edges = extractor.extract_from_build(merged)
+    added = augment_graph_with_calls(graph, edges)
+    graph.finalize()
+    for diag in extractor.diagnostics:
+        merged.diagnostics.append(f"call_graph: {diag}")
+    extractors.append(ExtractorRecord(
+        name="call_graph:clang",
+        status="ok" if added else "partial",
+        detail=f"{added} call edges from {len(merged.compile_units)} compile units",
+    ))
+
+
+def _collect_include_graph(
+    graph: SourceGraphSummary,
+    merged: BuildEvidence,
+    extractors: list[ExtractorRecord],
+    *,
+    clang_bin: str,
+) -> None:
+    """Run `clang -MM` over the build and fold include edges into *graph* (D3).
+
+    Best-effort like the call extractor: a missing clang records a failed row
+    and leaves the graph without include edges, never aborting collection.
+    """
+    from .evidence.include_graph import (
+        ClangIncludeExtractor,
+        augment_graph_with_includes,
+    )
+
+    extractor = ClangIncludeExtractor(clang_bin=clang_bin if clang_bin != "clang" else "clang++")
+    if not extractor.available():
+        extractors.append(ExtractorRecord(
+            name="include_graph:clang", status="failed",
+            detail=f"{extractor.clang_bin} not found in PATH; graph collected without include edges",
+        ))
+        return
+    includes = extractor.extract_from_build(merged)
+    added = augment_graph_with_includes(graph, includes)
+    graph.finalize()
+    for diag in extractor.diagnostics:
+        merged.diagnostics.append(f"include_graph: {diag}")
+    extractors.append(ExtractorRecord(
+        name="include_graph:clang",
+        status="ok" if added else "partial",
+        detail=f"{added} include edges from {len(includes)} compile units",
+    ))
+
+
+def _ingest_graph_backends(
+    graph: SourceGraphSummary,
+    extractors: list[ExtractorRecord],
+    *,
+    kythe_entries: Path | None,
+    codeql_results: Path | None,
+) -> None:
+    """Fold pre-captured Kythe/CodeQL exports into *graph* (ADR-031 D5).
+
+    Non-executing (ADR-028 D6): reads the provided JSON exports only. A malformed
+    or missing file records a failed extractor row and is skipped.
+    """
+    import json as _json
+
+    from .evidence.graph_backends import (
+        ingest_codeql_call_results,
+        ingest_kythe_entries,
+    )
+
+    def _load(path: Path, name: str) -> object | None:
+        try:
+            return _json.loads(Path(path).read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            extractors.append(ExtractorRecord(
+                name=name, status="failed",
+                inputs=[DEFAULT_REDACTION.path(str(path))], detail=str(exc),
+            ))
+            return None
+
+    if kythe_entries is not None:
+        data = _load(kythe_entries, "graph_backend:kythe")
+        if data is not None:
+            entries = data if isinstance(data, list) else (
+                data.get("entries", []) if isinstance(data, dict) else []
+            )
+            added = ingest_kythe_entries(graph, entries, ref=DEFAULT_REDACTION.path(str(kythe_entries)))
+            extractors.append(ExtractorRecord(
+                name="graph_backend:kythe", status="ok" if added else "partial",
+                inputs=[DEFAULT_REDACTION.path(str(kythe_entries))], detail=f"{added} edges ingested",
+            ))
+
+    if codeql_results is not None:
+        data = _load(codeql_results, "graph_backend:codeql")
+        if isinstance(data, dict):
+            added = ingest_codeql_call_results(graph, data, ref=DEFAULT_REDACTION.path(str(codeql_results)))
+            extractors.append(ExtractorRecord(
+                name="graph_backend:codeql", status="ok" if added else "partial",
+                inputs=[DEFAULT_REDACTION.path(str(codeql_results))], detail=f"{added} edges ingested",
+            ))
+
+
 def _build_coverage(
     merged: BuildEvidence,
     has_build: bool,
     surface: SourceAbiSurface | None = None,
     source_detail: str = "",
+    graph: SourceGraphSummary | None = None,
+    graph_detail: str = "",
 ) -> list[LayerCoverage]:
     """Build the L3/L4/L5 coverage rows for the pack manifest (ADR-028 D7)."""
     if has_build:
@@ -368,11 +557,23 @@ def _build_coverage(
             )
     else:
         l4 = LayerCoverage(layer=EvidenceLayer.L4_SOURCE_ABI.value, status=CoverageStatus.NOT_COLLECTED)
-    return [
-        l3,
-        l4,
-        LayerCoverage(layer=EvidenceLayer.L5_SOURCE_GRAPH.value, status=CoverageStatus.NOT_COLLECTED),
-    ]
+    # L5 is PRESENT when the graph carries edges; PARTIAL when a graph was built
+    # but had no build evidence to fold (so it is empty), else NOT_COLLECTED.
+    if graph is not None:
+        if graph.edges:
+            l5 = LayerCoverage(
+                layer=EvidenceLayer.L5_SOURCE_GRAPH.value, status=CoverageStatus.PRESENT,
+                confidence=EvidenceConfidence.REDUCED, detail=graph_detail,
+            )
+        else:
+            l5 = LayerCoverage(
+                layer=EvidenceLayer.L5_SOURCE_GRAPH.value, status=CoverageStatus.PARTIAL,
+                confidence=EvidenceConfidence.UNKNOWN,
+                detail=graph_detail or "no build evidence to fold into a graph",
+            )
+    else:
+        l5 = LayerCoverage(layer=EvidenceLayer.L5_SOURCE_GRAPH.value, status=CoverageStatus.NOT_COLLECTED)
+    return [l3, l4, l5]
 
 
 def _exported_symbols_from_binary(binary: Path | None) -> list[str]:
@@ -617,6 +818,15 @@ def collect_compare_evidence(
         from .evidence.source_diff import diff_source_abi
         changes.extend(diff_source_abi(old_surface, new_surface))
 
+    # L5 source graph diff (ADR-031 D6): both packs must carry a graph summary.
+    # Per ADR-028 D3 / ADR-031 D6 these are ordinary RISK findings folded into
+    # the verdict pipeline — they explain and prioritize, never sole authority.
+    old_graph = old_pack.source_graph if old_pack else None
+    new_graph = new_pack.source_graph if new_pack else None
+    if old_graph is not None and new_graph is not None:
+        from .evidence.source_graph import diff_source_graph_findings
+        changes.extend(diff_source_graph_findings(old_graph, new_graph))
+
     src_pack = new_pack or old_pack
     coverage = list(src_pack.manifest.coverage) if src_pack else []
     if not coverage:
@@ -799,3 +1009,191 @@ def _echo_capabilities(
             click.echo(f"  [on]  {label} — {how}", err=True)
         else:
             click.echo(f"  [off] {label} — {why_off}", err=True)
+
+
+# ── compare-graph: structural graph-to-graph diff (ADR-031 D6, D8) ────────────
+
+
+def _load_source_graph(path: Path) -> SourceGraphSummary:
+    """Load a source graph summary from a JSON file or an evidence-pack dir.
+
+    Accepts either ``…/graph/source_graph_summary.json`` directly or a pack
+    directory (the graph is read from its manifest layout). Raises a Click error
+    when neither yields a graph so the failure is actionable.
+    """
+    import json as _json
+
+    from .evidence.source_graph import SourceGraphSummary
+
+    if path.is_dir():
+        pack = _load_pack_or_raise(path)
+        if pack.source_graph is None:
+            raise click.ClickException(
+                f"Evidence pack at {path} has no L5 source graph "
+                "(collect it with `collect-evidence --source-graph summary`)."
+            )
+        return pack.source_graph
+    if not path.is_file():
+        raise click.ClickException(f"No source graph summary at {path}.")
+    try:
+        data = _json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise click.ClickException(f"Cannot read source graph at {path}: {exc}") from exc
+    if not isinstance(data, dict):
+        raise click.ClickException(f"{path} must contain a JSON object.")
+    # SourceGraphSummary.from_dict is intentionally forgiving (it defaults a
+    # missing nodes/edges to empty), so guard here: an unrelated JSON file (e.g.
+    # a pack manifest) would otherwise load as an empty graph and report a bogus
+    # diff instead of an actionable error.
+    if not isinstance(data.get("nodes"), list) or not isinstance(data.get("edges"), list):
+        raise click.ClickException(
+            f"{path} is not a source graph summary "
+            "(expected top-level 'nodes' and 'edges' lists)."
+        )
+    return SourceGraphSummary.from_dict(data)
+
+
+@main.command("compare-graph")
+@click.argument("old", type=click.Path(path_type=Path))
+@click.argument("new", type=click.Path(path_type=Path))
+@click.option("--format", "fmt", default="text", show_default=True,
+              type=click.Choice(["text", "json"], case_sensitive=False),
+              help="Output format for the structural graph diff.")
+def compare_graph_cmd(old: Path, new: Path, fmt: str) -> None:
+    """Compare two L5 source graph summaries (ADR-031 D6, D8).
+
+    \b
+    OLD and NEW may each be a `graph/source_graph_summary.json` file or an
+    evidence-pack directory produced by `collect-evidence --source-graph summary`.
+
+    The diff is structural — which nodes/edges entered or left the graph. Per
+    ADR-028 D3 / ADR-031 D6 it *explains and prioritizes* impact; it never, on
+    its own, decides or suppresses an artifact-proven ABI break.
+    """
+    import json as _json
+
+    from .evidence.source_graph import diff_source_graph, diff_source_graph_findings
+
+    old_graph = _load_source_graph(old)
+    new_graph = _load_source_graph(new)
+    delta = diff_source_graph(old_graph, new_graph)
+    findings = diff_source_graph_findings(old_graph, new_graph)
+
+    if fmt == "json":
+        payload = delta.to_dict()
+        payload["findings"] = [
+            {
+                "kind": c.kind.value,
+                "symbol": c.symbol,
+                "description": c.description,
+                "old_value": c.old_value,
+                "new_value": c.new_value,
+            }
+            for c in findings
+        ]
+        click.echo(_json.dumps(payload, indent=2, sort_keys=True))
+        return
+
+    if not delta.changed:
+        click.echo("Source graphs are structurally identical.")
+        click.echo(f"  graph_id: {old_graph.graph_id or old_graph.compute_graph_id()}")
+        return
+
+    click.echo("Source graph structural diff:")
+    click.echo(
+        f"  nodes: +{len(delta.added_nodes)} / -{len(delta.removed_nodes)}    "
+        f"edges: +{len(delta.added_edges)} / -{len(delta.removed_edges)}"
+    )
+    for node in delta.added_nodes:
+        click.echo(f"  + node [{node.kind}] {node.label or node.id}")
+    for node in delta.removed_nodes:
+        click.echo(f"  - node [{node.kind}] {node.label or node.id}")
+    for edge in delta.added_edges:
+        click.echo(f"  + edge {edge.kind}: {edge.src} -> {edge.dst}")
+    for edge in delta.removed_edges:
+        click.echo(f"  - edge {edge.kind}: {edge.src} -> {edge.dst}")
+
+    if findings:
+        # Graph-derived RISK findings (ADR-031 D6): explanation/prioritization,
+        # never a standalone ABI-break verdict (ADR-028 D3).
+        click.echo(f"\nGraph-derived risk findings ({len(findings)}):")
+        for c in findings:
+            click.echo(f"  [{c.kind.value}] {c.symbol}: {c.description}")
+
+
+@main.command("explain-finding")
+@click.option("--evidence", "evidence", type=click.Path(path_type=Path), required=True,
+              help="Evidence-pack directory (or a source_graph_summary.json) to explain through.")
+@click.option("--symbol", "symbol", default="", help="Exported (mangled) binary symbol to localize.")
+@click.option("--report", "report", type=click.Path(path_type=Path), default=None,
+              help="A `compare --format json` report; with --finding-id, resolves the symbol from it.")
+@click.option("--finding-id", "finding_id", default="",
+              help="Index (or symbol) of a finding in --report to localize.")
+@click.option("--format", "fmt", default="text", show_default=True,
+              type=click.Choice(["text", "json"], case_sensitive=False))
+def explain_finding_cmd(
+    evidence: Path, symbol: str, report: Path | None, finding_id: str, fmt: str,
+) -> None:
+    """Localize a finding through L5 source-graph evidence (ADR-031 D8).
+
+    Given an exported symbol (directly via --symbol, or resolved from a
+    `--report` finding via --finding-id), walks the graph to show what produced
+    and reaches it: exporting target, source declaration(s), declaring public
+    header(s), ABI-relevant build option(s), and static callees. This explains
+    and prioritizes; it is never an ABI verdict (ADR-031 D6).
+    """
+    import json as _json
+
+    from .evidence.source_graph import localize_symbol
+
+    graph = _load_source_graph(evidence)
+    if not symbol and report is not None:
+        symbol = _resolve_symbol_from_report(report, finding_id)
+    if not symbol:
+        raise click.ClickException(
+            "No symbol to explain: pass --symbol, or --report with --finding-id."
+        )
+
+    result = localize_symbol(graph, symbol)
+    if fmt == "json":
+        click.echo(_json.dumps(result, indent=2, sort_keys=True))
+        return
+
+    click.echo(f"Explaining symbol: {symbol}")
+    if not result["found"]:
+        click.echo("  (symbol not present in the source graph — no localization available)")
+    rows = [
+        ("exported by target(s)", result["exported_by_targets"]),
+        ("source declaration(s)", result["source_declarations"]),
+        ("declared in header(s)", result["declared_in_headers"]),
+        ("reached by build option(s)", result["reached_by_build_options"]),
+        ("static callee(s)", result["static_callees"]),
+    ]
+    for label, values in rows:
+        click.echo(f"  {label}: {', '.join(values) if values else '(none in graph)'}")
+
+
+def _resolve_symbol_from_report(report: Path, finding_id: str) -> str:
+    """Resolve a symbol from a `compare --format json` report finding.
+
+    ``finding_id`` may be a 0-based index into the report's changes, or a symbol
+    substring to match. Returns the matched change's ``symbol`` (or "").
+    """
+    import json as _json
+
+    try:
+        data = _json.loads(Path(report).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise click.ClickException(f"Cannot read report {report}: {exc}") from exc
+    changes = data.get("changes") or data.get("findings") or []
+    if not isinstance(changes, list):
+        return ""
+    if finding_id.isdigit():
+        idx = int(finding_id)
+        if 0 <= idx < len(changes) and isinstance(changes[idx], dict):
+            return str(changes[idx].get("symbol", ""))
+        return ""
+    for change in changes:
+        if isinstance(change, dict) and finding_id and finding_id in str(change.get("symbol", "")):
+            return str(change.get("symbol", ""))
+    return ""
