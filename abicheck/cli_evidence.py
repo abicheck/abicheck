@@ -128,6 +128,9 @@ if TYPE_CHECKING:
                    "(ADR-032 D3; trusted-by-operator, never auto-discovered). Repeat "
                    "for several. Its declared actions are intersected with the actions "
                    "enabled for this run (see --allow-build-query).")
+@click.option("--source-root", "source_root", type=click.Path(path_type=Path), default=None,
+              help="Source checkout root, supplied to external extractors that reference "
+                   "the {source_root} placeholder (ADR-032 D3).")
 @click.option("--allow-build-query", "allow_build_query", is_flag=True, default=False,
               help="Permit extractors to query the build system (ninja -t, bazel "
                    "cquery/aquery, CMake File API regeneration). Off by default: only "
@@ -169,6 +172,7 @@ def collect_evidence_cmd(
     kythe_entries: Path | None,
     codeql_results: Path | None,
     extractor_manifests: tuple[Path, ...],
+    source_root: Path | None,
     allow_build_query: bool,
     collection_mode: str,
     output: Path,
@@ -214,6 +218,7 @@ def collect_evidence_cmd(
             pack_root=output,
             binary=binary,
             build_dir=build_dir,
+            source_root=source_root,
             compile_db=effective_compile_db,
             allow_build_query=allow_build_query,
             collection_mode=collection_mode,
@@ -447,6 +452,7 @@ def _run_external_extractors(
     pack_root: Path,
     binary: Path | None,
     build_dir: Path | None,
+    source_root: Path | None,
     compile_db: Path | None,
     allow_build_query: bool,
     collection_mode: str,
@@ -494,6 +500,7 @@ def _run_external_extractors(
         context = CollectionContext(
             binary_paths=[binary] if binary else [],
             build_root=build_dir,
+            source_root=source_root,
             compile_db=compile_db,
             allowed_actions=set(run_permitted),
             collection_mode=CollectionMode(collection_mode),
@@ -531,7 +538,7 @@ def _run_external_extractors(
                 parsed.append(_BuildEvidence.from_dict(
                     _json.loads(be_path.read_text(encoding="utf-8"))
                 ))
-            except (OSError, ValueError, KeyError, TypeError) as exc:
+            except (OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
                 fold_ok = False
                 record.status = "failed"
                 record.detail = record.detail or f"invalid build_evidence output: {exc}"

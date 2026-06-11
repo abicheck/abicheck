@@ -823,6 +823,63 @@ def test_cli_malformed_later_output_merges_nothing(tmp_path):
     assert not (out / "build" / "build_evidence.json").exists()
 
 
+def test_cli_non_object_build_evidence_is_failed_not_crash(tmp_path):
+    # A build_evidence output that is valid JSON but not an object ([] / null)
+    # makes BuildEvidence.from_dict raise AttributeError; permissive mode must
+    # record it failed, not crash (Codex P2).
+    bad = (
+        "import json,sys,os;p=sys.argv[1];os.makedirs(os.path.dirname(p),exist_ok=True);"
+        "json.dump([],open(p,'w'))"
+    )
+    data = {
+        "name": "cli-nonobj",
+        "commands": {"collect": [sys.executable, "-c", bad, "{normalized_dir}/build_evidence.json"]},
+        "outputs": {"normalized": [{"kind": "build_evidence", "path": "normalized/cli-nonobj/build_evidence.json"}]},
+    }
+    manifest = _dump(tmp_path, data, name="nonobj.yaml")
+    out = tmp_path / "pack"
+    result = _cli(["collect-evidence", "--extractor-manifest", str(manifest), "-o", str(out)])
+    assert result.exit_code == 0, result.output
+    rec = next(
+        e for e in json.loads((out / "manifest.json").read_text())["extractors"]
+        if e["name"] == "cli-nonobj"
+    )
+    assert rec["status"] == "failed"
+
+
+def test_cli_source_root_placeholder_supplied(tmp_path):
+    # A manifest using {source_root} works when --source-root is provided.
+    script = (
+        "import json,sys,os;root=sys.argv[1];out=sys.argv[2];"
+        "os.makedirs(os.path.dirname(out),exist_ok=True);"
+        "json.dump({'schema_version':1,'compile_units':[{'id':'cu://a','source':'a.cpp',"
+        "'argv':['cc'],'language':'CXX'}]},open(out,'w'))"
+    )
+    data = {
+        "name": "cli-srcroot",
+        "commands": {
+            "collect": [
+                sys.executable, "-c", script, "{source_root}",
+                "{normalized_dir}/build_evidence.json",
+            ]
+        },
+        "outputs": {"normalized": [{"kind": "build_evidence", "path": "normalized/cli-srcroot/build_evidence.json"}]},
+    }
+    manifest = _dump(tmp_path, data, name="srcroot.yaml")
+    src = tmp_path / "src"
+    src.mkdir()
+    out = tmp_path / "pack"
+    result = _cli(
+        ["collect-evidence", "--extractor-manifest", str(manifest), "--source-root", str(src), "-o", str(out)]
+    )
+    assert result.exit_code == 0, result.output
+    rec = next(
+        e for e in json.loads((out / "manifest.json").read_text())["extractors"]
+        if e["name"] == "cli-srcroot"
+    )
+    assert rec["status"] == "ok"
+
+
 def test_cli_strict_mode_fails_on_skipped_extractor(tmp_path):
     # A requested manifest gated out by the action ceiling is 'skipped'; under
     # strict mode the requested evidence is absent, so the run must fail (Codex P2).
