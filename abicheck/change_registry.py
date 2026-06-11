@@ -1032,4 +1032,14 @@ REGISTRY = ChangeKindRegistry([
               "an exported entry point changed (per the approximate Clang call "
               "graph). A quality/behavioral signal that the implementation behind "
               "a stable public symbol moved; never an ABI break on its own."),
+    _E("include_graph_public_header_drift", _R,
+       impact="The transitive include closure behind a public header changed "
+              "(per the depfile/-M include graph). Consumers may now pull in "
+              "different declarations or macros; a source/API risk to review, "
+              "never on its own an artifact-proven ABI break."),
+    _E("build_option_reaches_public_symbol", _R,
+       impact="A changed ABI-relevant build option feeds a compile unit that "
+              "produces an exported public symbol (per the build/source graph). "
+              "It localizes a flag-drift risk to the public surface it can affect; "
+              "a risk to review, never on its own an artifact-proven ABI break."),
 ])

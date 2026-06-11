@@ -54,8 +54,11 @@ binary symbol / debug type (`SOURCE_DECL_MAPS_TO_SYMBOL`,
 `target → public header → declaration → exported symbol` reachability closure.
 Every node and edge carries provenance and a confidence label. Collect it with
 `--source-graph summary` and compare two summaries with `compare-graph` (below).
-The remaining layers — call graphs and external Kythe/CodeQL backends, plus the
-graph-derived risk findings — are future work.
+Deeper layers extend the same graph: approximate Clang call edges
+(`--call-graph`), compile-unit include edges (`--include-graph`), and
+pre-captured Kythe/CodeQL backends (`--kythe-entries`/`--codeql-results`). All
+six graph-derived findings flow through `compare-graph` and the verdict
+pipeline, and `explain-finding` localizes a single finding through the graph.
 
 > **Source ABI replay (L4) requires clang** (or castxml for the declaration
 > subset, or a pre-captured Android dump). It is the one tier gated on a C++
@@ -122,6 +125,29 @@ edges (`DECL_CALLS_DECL`, each labelled with a `call_kind` and `resolution`
 confidence) into the graph — enabling the
 `call_graph_public_entry_reachability_changed` quality finding. Without `clang`
 the graph is still collected, just without call edges.
+
+Further graph layers (all optional, all non-aborting if the tool/file is
+absent):
+
+- `--include-graph` (requires `clang++`) folds compile-unit include edges
+  (`COMPILE_UNIT_INCLUDES_FILE`, from `clang -MM`), enabling
+  `include_graph_public_header_drift`.
+- `--kythe-entries FILE` / `--codeql-results FILE` fold a **pre-captured**
+  Kythe entries export or CodeQL call-graph query result into the graph
+  (ADR-031 D5). abicheck never runs Kythe or CodeQL — it ingests their exported
+  JSON and records the external store in `external_graph_refs`.
+
+Localize a single finding through the graph:
+
+```bash
+abicheck explain-finding --evidence libfoo.evidence/ --symbol _ZN3foo3barEv
+# or resolve the symbol from a JSON report:
+abicheck explain-finding --evidence libfoo.evidence/ --report report.json --finding-id 0
+```
+
+It reports what produced and reaches the symbol — exporting target, source
+declaration(s), declaring public header(s), ABI-relevant build option(s), and
+static callees — as graph-derived explanation, never an ABI verdict.
 
 Compare two graph summaries directly — pass either the pack directories or the
 `graph/source_graph_summary.json` files:
@@ -220,6 +246,8 @@ graph-derived **risk** findings (ADR-031 D6):
 | `source_to_binary_mapping_changed` | risk | A declaration present in both versions now maps to a different exported binary symbol |
 | `generated_header_reaches_public_api` | risk | A generated file newly participates in the public declaration closure (it is a public header) |
 | `call_graph_public_entry_reachability_changed` | compatible (quality) | The implementation statically reachable from an exported entry point changed (approximate Clang call graph; needs `--call-graph`) |
+| `include_graph_public_header_drift` | risk | A public header entered/left the compiled include graph (needs `--include-graph`) |
+| `build_option_reaches_public_symbol` | risk | A changed ABI-relevant build option feeds a compile unit producing an exported symbol |
 
 These **explain and prioritize** impact; like the L4 findings they are never
 `breaking` on their own. Each carries the `L5_SOURCE_GRAPH` evidence-tier

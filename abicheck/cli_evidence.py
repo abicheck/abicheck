@@ -113,6 +113,15 @@ if TYPE_CHECKING:
               help="Add approximate direct-call edges to the L5 source graph via "
                    "clang AST (ADR-031 D4, phase 6). REQUIRES clang++; without it "
                    "the graph is collected without call edges. Implies --source-graph summary.")
+@click.option("--include-graph", "include_graph", is_flag=True, default=False,
+              help="Add compile-unit include edges to the L5 graph via `clang -MM` "
+                   "(ADR-031 D3). REQUIRES clang++. Implies --source-graph summary.")
+@click.option("--kythe-entries", "kythe_entries", type=click.Path(path_type=Path), default=None,
+              help="Pre-captured Kythe entries JSON to fold into the L5 graph "
+                   "(ADR-031 D5; non-executing). Implies --source-graph summary.")
+@click.option("--codeql-results", "codeql_results", type=click.Path(path_type=Path), default=None,
+              help="Pre-captured CodeQL call-graph query result JSON to fold into "
+                   "the L5 graph (ADR-031 D5; non-executing). Implies --source-graph summary.")
 @click.option("-o", "--output", "output", type=click.Path(path_type=Path), required=True,
               help="Output evidence-pack directory.")
 @click.option("-v", "--verbose", is_flag=True, default=False)
@@ -140,6 +149,9 @@ def collect_evidence_cmd(
     clang_bin: str,
     source_graph: str,
     call_graph: bool,
+    include_graph: bool,
+    kythe_entries: Path | None,
+    codeql_results: Path | None,
     output: Path,
     verbose: bool,
 ) -> None:
@@ -192,8 +204,8 @@ def collect_evidence_cmd(
 
     graph: SourceGraphSummary | None = None
     graph_detail = ""
-    # --call-graph implies graph collection (the call edges go into the graph).
-    if call_graph and source_graph == "off":
+    # Any graph-augmenting option implies graph collection (edges go into it).
+    if (call_graph or include_graph or kythe_entries or codeql_results) and source_graph == "off":
         source_graph = "summary"
     if source_graph == "summary":
         from .evidence.source_graph import build_source_graph
@@ -202,12 +214,19 @@ def collect_evidence_cmd(
         graph = build_source_graph(merged, source_abi=surface)
         if call_graph:
             _collect_call_graph(graph, merged, extractors, clang_bin=clang_bin)
+        if include_graph:
+            _collect_include_graph(graph, merged, extractors, clang_bin=clang_bin)
+        if kythe_entries or codeql_results:
+            _ingest_graph_backends(graph, extractors,
+                                   kythe_entries=kythe_entries, codeql_results=codeql_results)
+        graph.finalize()
         graph_detail = (
             f"{len(graph.nodes)} nodes, {len(graph.edges)} edges "
             f"({graph.coverage.get('targets', 0)} targets, "
             f"{graph.coverage.get('compile_units', 0)} compile units, "
             f"{graph.coverage.get('source_decls', 0)} source decls, "
-            f"{graph.coverage.get('call_edges', {}).get('count', 0)} call edges)"
+            f"{graph.coverage.get('call_edges', {}).get('count', 0)} call edges, "
+            f"{graph.coverage.get('include_edges', {}).get('count', 0)} include edges)"
         )
         extractors.append(ExtractorRecord(
             name="source_graph:summary",
@@ -402,6 +421,94 @@ def _collect_call_graph(
         status="ok" if added else "partial",
         detail=f"{added} call edges from {len(merged.compile_units)} compile units",
     ))
+
+
+def _collect_include_graph(
+    graph: SourceGraphSummary,
+    merged: BuildEvidence,
+    extractors: list[ExtractorRecord],
+    *,
+    clang_bin: str,
+) -> None:
+    """Run `clang -MM` over the build and fold include edges into *graph* (D3).
+
+    Best-effort like the call extractor: a missing clang records a failed row
+    and leaves the graph without include edges, never aborting collection.
+    """
+    from .evidence.include_graph import (
+        ClangIncludeExtractor,
+        augment_graph_with_includes,
+    )
+
+    extractor = ClangIncludeExtractor(clang_bin=clang_bin if clang_bin != "clang" else "clang++")
+    if not extractor.available():
+        extractors.append(ExtractorRecord(
+            name="include_graph:clang", status="failed",
+            detail=f"{extractor.clang_bin} not found in PATH; graph collected without include edges",
+        ))
+        return
+    includes = extractor.extract_from_build(merged)
+    added = augment_graph_with_includes(graph, includes)
+    graph.finalize()
+    for diag in extractor.diagnostics:
+        merged.diagnostics.append(f"include_graph: {diag}")
+    extractors.append(ExtractorRecord(
+        name="include_graph:clang",
+        status="ok" if added else "partial",
+        detail=f"{added} include edges from {len(includes)} compile units",
+    ))
+
+
+def _ingest_graph_backends(
+    graph: SourceGraphSummary,
+    extractors: list[ExtractorRecord],
+    *,
+    kythe_entries: Path | None,
+    codeql_results: Path | None,
+) -> None:
+    """Fold pre-captured Kythe/CodeQL exports into *graph* (ADR-031 D5).
+
+    Non-executing (ADR-028 D6): reads the provided JSON exports only. A malformed
+    or missing file records a failed extractor row and is skipped.
+    """
+    import json as _json
+
+    from .evidence.graph_backends import (
+        ingest_codeql_call_results,
+        ingest_kythe_entries,
+    )
+
+    def _load(path: Path) -> object | None:
+        try:
+            return _json.loads(Path(path).read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            merged_msg = str(exc)
+            extractors.append(ExtractorRecord(
+                name="graph_backend", status="failed",
+                inputs=[DEFAULT_REDACTION.path(str(path))], detail=merged_msg,
+            ))
+            return None
+
+    if kythe_entries is not None:
+        data = _load(kythe_entries)
+        if data is not None:
+            entries = data if isinstance(data, list) else (
+                data.get("entries", []) if isinstance(data, dict) else []
+            )
+            added = ingest_kythe_entries(graph, entries, ref=DEFAULT_REDACTION.path(str(kythe_entries)))
+            extractors.append(ExtractorRecord(
+                name="graph_backend:kythe", status="ok" if added else "partial",
+                inputs=[DEFAULT_REDACTION.path(str(kythe_entries))], detail=f"{added} edges ingested",
+            ))
+
+    if codeql_results is not None:
+        data = _load(codeql_results)
+        if isinstance(data, dict):
+            added = ingest_codeql_call_results(graph, data, ref=DEFAULT_REDACTION.path(str(codeql_results)))
+            extractors.append(ExtractorRecord(
+                name="graph_backend:codeql", status="ok" if added else "partial",
+                inputs=[DEFAULT_REDACTION.path(str(codeql_results))], detail=f"{added} edges ingested",
+            ))
 
 
 def _build_coverage(
@@ -1013,3 +1120,81 @@ def compare_graph_cmd(old: Path, new: Path, fmt: str) -> None:
         click.echo(f"\nGraph-derived risk findings ({len(findings)}):")
         for c in findings:
             click.echo(f"  [{c.kind.value}] {c.symbol}: {c.description}")
+
+
+@main.command("explain-finding")
+@click.option("--evidence", "evidence", type=click.Path(path_type=Path), required=True,
+              help="Evidence-pack directory (or a source_graph_summary.json) to explain through.")
+@click.option("--symbol", "symbol", default="", help="Exported (mangled) binary symbol to localize.")
+@click.option("--report", "report", type=click.Path(path_type=Path), default=None,
+              help="A `compare --format json` report; with --finding-id, resolves the symbol from it.")
+@click.option("--finding-id", "finding_id", default="",
+              help="Index (or symbol) of a finding in --report to localize.")
+@click.option("--format", "fmt", default="text", show_default=True,
+              type=click.Choice(["text", "json"], case_sensitive=False))
+def explain_finding_cmd(
+    evidence: Path, symbol: str, report: Path | None, finding_id: str, fmt: str,
+) -> None:
+    """Localize a finding through L5 source-graph evidence (ADR-031 D8).
+
+    Given an exported symbol (directly via --symbol, or resolved from a
+    `--report` finding via --finding-id), walks the graph to show what produced
+    and reaches it: exporting target, source declaration(s), declaring public
+    header(s), ABI-relevant build option(s), and static callees. This explains
+    and prioritizes; it is never an ABI verdict (ADR-031 D6).
+    """
+    import json as _json
+
+    from .evidence.source_graph import localize_symbol
+
+    graph = _load_source_graph(evidence)
+    if not symbol and report is not None:
+        symbol = _resolve_symbol_from_report(report, finding_id)
+    if not symbol:
+        raise click.ClickException(
+            "No symbol to explain: pass --symbol, or --report with --finding-id."
+        )
+
+    result = localize_symbol(graph, symbol)
+    if fmt == "json":
+        click.echo(_json.dumps(result, indent=2, sort_keys=True))
+        return
+
+    click.echo(f"Explaining symbol: {symbol}")
+    if not result["found"]:
+        click.echo("  (symbol not present in the source graph — no localization available)")
+    rows = [
+        ("exported by target(s)", result["exported_by_targets"]),
+        ("source declaration(s)", result["source_declarations"]),
+        ("declared in header(s)", result["declared_in_headers"]),
+        ("reached by build option(s)", result["reached_by_build_options"]),
+        ("static callee(s)", result["static_callees"]),
+    ]
+    for label, values in rows:
+        click.echo(f"  {label}: {', '.join(values) if values else '(none in graph)'}")
+
+
+def _resolve_symbol_from_report(report: Path, finding_id: str) -> str:
+    """Resolve a symbol from a `compare --format json` report finding.
+
+    ``finding_id`` may be a 0-based index into the report's changes, or a symbol
+    substring to match. Returns the matched change's ``symbol`` (or "").
+    """
+    import json as _json
+
+    try:
+        data = _json.loads(Path(report).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise click.ClickException(f"Cannot read report {report}: {exc}") from exc
+    changes = data.get("changes") or data.get("findings") or []
+    if not isinstance(changes, list):
+        return ""
+    if finding_id.isdigit():
+        idx = int(finding_id)
+        if 0 <= idx < len(changes) and isinstance(changes[idx], dict):
+            return str(changes[idx].get("symbol", ""))
+        return ""
+    for change in changes:
+        if isinstance(change, dict) and finding_id and finding_id in str(change.get("symbol", "")):
+            return str(change.get("symbol", ""))
+    return ""

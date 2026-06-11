@@ -482,8 +482,39 @@ def build_source_graph(
 
     if source_abi is not None:
         _augment_with_source_abi(graph, source_abi)
+        _link_options_to_symbols(graph)
 
     return graph.finalize()
+
+
+def _link_options_to_symbols(graph: SourceGraphSummary) -> None:
+    """Add ``BUILD_OPTION_AFFECTS_SYMBOL`` edges (ADR-031 D2, build→symbol flow).
+
+    Connects each ABI-relevant build option to the exported symbols it can
+    affect, via the path *option ← compile_unit (target) → exported symbol*.
+    Only meaningful once the L4 surface has contributed ``BINARY_EXPORTS_SYMBOL``
+    edges, so it is a no-op for a build-only graph.
+    """
+    target_syms: dict[str, list[str]] = {}
+    for e in graph.edges:
+        if e.kind == "BINARY_EXPORTS_SYMBOL":
+            target_syms.setdefault(e.src, []).append(e.dst)
+    if not target_syms:
+        return
+    cu_target = {
+        n.id: str(n.attrs.get("target_id", ""))
+        for n in graph.nodes
+        if n.kind == "compile_unit"
+    }
+    for e in list(graph.edges):
+        if e.kind != "COMPILE_UNIT_USES_OPTION":
+            continue
+        target = cu_target.get(e.src, "")
+        for sym in target_syms.get(target, []):
+            graph.add_edge(GraphEdge(
+                src=e.dst, dst=sym, kind="BUILD_OPTION_AFFECTS_SYMBOL",
+                provenance="build_evidence+source_abi", confidence=CONF_REDUCED,
+            ))
 
 
 # ── Phases 3-4: enrich the graph from the ADR-030 L4 source surface ─────────
@@ -639,6 +670,51 @@ class GraphSummaryDiff:
         }
 
 
+def localize_symbol(graph: SourceGraphSummary, symbol: str) -> dict[str, Any]:
+    """Localize an exported symbol through the graph (ADR-031 D8 `explain-finding`).
+
+    Given a (mangled) binary symbol, walk the graph to report what produced and
+    reaches it: the exporting target(s), the source declaration(s) it maps to,
+    the public header(s) that declare those decls, the ABI-relevant build
+    option(s) that feed it, and the static callees of its declarations. Every
+    fact is graph-derived (provenance/confidence live on the edges), so the
+    result is explanatory, never an ABI verdict (ADR-031 D6).
+    """
+    labels = _label_map(graph)
+    kinds = _kind_map(graph)
+    sym_id = _symbol_node_id(symbol)
+    found = graph.has_node(sym_id)
+
+    targets = sorted({e.src for e in graph.edges
+                      if e.kind == "BINARY_EXPORTS_SYMBOL" and e.dst == sym_id})
+    decls = sorted({e.src for e in graph.edges
+                    if e.kind == "SOURCE_DECL_MAPS_TO_SYMBOL" and e.dst == sym_id})
+    options = sorted({e.src for e in graph.edges
+                      if e.kind == "BUILD_OPTION_AFFECTS_SYMBOL" and e.dst == sym_id})
+
+    headers: set[str] = set()
+    callees: set[str] = set()
+    for decl in decls:
+        headers |= {e.src for e in graph.edges
+                    if e.kind == "SOURCE_DECLARES" and e.dst == decl}
+        callees |= {e.dst for e in graph.edges
+                    if e.kind == "DECL_CALLS_DECL" and e.src == decl}
+
+    def names(ids: set[str] | list[str]) -> list[str]:
+        return sorted(labels.get(i, i) for i in ids)
+
+    return {
+        "symbol": symbol,
+        "found": found,
+        "exported_by_targets": names(targets),
+        "source_declarations": names(decls),
+        "declared_in_headers": names(headers),
+        "reached_by_build_options": names(options),
+        "static_callees": names(callees),
+        "header_kinds": {labels.get(h, h): kinds.get(h, "") for h in headers},
+    }
+
+
 def diff_source_graph(old: SourceGraphSummary, new: SourceGraphSummary) -> GraphSummaryDiff:
     """Compute the structural delta from *old* to *new* (Phase 5 seed)."""
     old_nodes = {n.id: n for n in old.nodes}
@@ -733,6 +809,29 @@ def _public_entry_call_reachability(graph: SourceGraphSummary) -> dict[str, froz
             stack.extend(calls.get(node, []))
         out[entry] = frozenset(seen)
     return out
+
+
+def _public_headers_in_include_graph(graph: SourceGraphSummary) -> set[str]:
+    """Public-header node ids that actually appear in the compiled include graph.
+
+    A public header (``TARGET_HAS_PUBLIC_HEADER`` target) that is also the target
+    of a ``COMPILE_UNIT_INCLUDES_FILE`` edge — i.e. the build genuinely compiled
+    a TU that included it. Returns ``set()`` when no include edges were collected.
+    """
+    included = {e.dst for e in graph.edges if e.kind == "COMPILE_UNIT_INCLUDES_FILE"}
+    if not included:
+        return set()
+    public = {e.dst for e in graph.edges if e.kind == "TARGET_HAS_PUBLIC_HEADER"}
+    return public & included
+
+
+def _option_symbol_edges(graph: SourceGraphSummary) -> set[tuple[str, str]]:
+    """``(build_option, binary_symbol)`` pairs from ``BUILD_OPTION_AFFECTS_SYMBOL``."""
+    return {
+        (e.src, e.dst)
+        for e in graph.edges
+        if e.kind == "BUILD_OPTION_AFFECTS_SYMBOL"
+    }
 
 
 def diff_source_graph_findings(
@@ -857,5 +956,48 @@ def diff_source_graph_findings(
                 new_value=f"{new_n} reachable",
                 source_location=boundary,
             ))
+
+    # 5) public headers entering/leaving the compiled include graph (needs
+    #    COMPILE_UNIT_INCLUDES_FILE edges from a depfile/-M include extractor).
+    old_inc, new_inc = _public_headers_in_include_graph(old), _public_headers_in_include_graph(new)
+    if old_inc or new_inc:
+        for hdr in sorted(new_inc - old_inc) + sorted(old_inc - new_inc):
+            entered = hdr in new_inc
+            label = (new_labels if entered else old_labels).get(hdr, hdr)
+            findings.append(Change(
+                kind=ChangeKind.INCLUDE_GRAPH_PUBLIC_HEADER_DRIFT,
+                symbol=label,
+                description=(
+                    f"Public header {label!r} {'entered' if entered else 'left'} "
+                    "the compiled include graph. Consumers may pull in different "
+                    "declarations/macros through it. Source-graph evidence to review."
+                ),
+                old_value="in include graph" if not entered else "not included",
+                new_value="in include graph" if entered else "not included",
+                source_location=boundary,
+            ))
+
+    # 6) a changed ABI-relevant build option that now reaches a public symbol
+    #    (added BUILD_OPTION_AFFECTS_SYMBOL edges), grouped by option.
+    added_opt_edges = _option_symbol_edges(new) - _option_symbol_edges(old)
+    reached_by_option: dict[str, list[str]] = {}
+    for opt, sym in added_opt_edges:
+        reached_by_option.setdefault(opt, []).append(sym)
+    for opt in sorted(reached_by_option):
+        label = new_labels.get(opt, opt)
+        n_syms = len(reached_by_option[opt])
+        findings.append(Change(
+            kind=ChangeKind.BUILD_OPTION_REACHES_PUBLIC_SYMBOL,
+            symbol=label,
+            description=(
+                f"Build option {label!r} now feeds a compile unit producing "
+                f"{n_syms} exported public symbol(s). A changed ABI-relevant flag "
+                "localized to the public surface it can affect. Source-graph "
+                "evidence to review."
+            ),
+            old_value="not reaching public symbols",
+            new_value=f"reaches {n_syms} public symbol(s)",
+            source_location=boundary,
+        ))
 
     return findings

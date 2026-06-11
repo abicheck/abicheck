@@ -47,6 +47,12 @@ from .call_graph import (
     augment_graph_with_calls,
     parse_clang_ast_calls,
 )
+from .graph_backends import ingest_codeql_call_results, ingest_kythe_entries
+from .include_graph import (
+    ClangIncludeExtractor,
+    augment_graph_with_includes,
+    parse_depfile,
+)
 from .model import (
     EVIDENCE_PACK_VERSION,
     EvidenceConfidence,
@@ -103,6 +109,7 @@ __all__ = [
     "CallEdge",
     "CastxmlSourceExtractor",
     "ClangCallGraphExtractor",
+    "ClangIncludeExtractor",
     "ClangSourceExtractor",
     "CompileUnit",
     "EvidenceConfidence",
@@ -129,12 +136,16 @@ __all__ = [
     "Target",
     "Toolchain",
     "augment_graph_with_calls",
+    "augment_graph_with_includes",
     "build_source_graph",
     "diff_source_abi",
     "diff_source_graph",
     "diff_source_graph_findings",
+    "ingest_codeql_call_results",
+    "ingest_kythe_entries",
     "link_source_abi",
     "parse_clang_ast_calls",
+    "parse_depfile",
     "run_source_replay",
     "scope_for_ci_mode",
     "select_compile_units",

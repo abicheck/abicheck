@@ -374,6 +374,148 @@ def test_compare_graph_cli_surfaces_findings(tmp_path) -> None:
     assert payload["findings"][0]["kind"] == "source_to_binary_mapping_changed"
 
 
+# ── Finalize: build-option→symbol flow, include drift, localization ─────────
+
+
+def test_build_option_reaches_public_symbol_edges_and_finding() -> None:
+    def _build(flags):
+        b = BuildEvidence()
+        b.targets.append(Target(id="target://libfoo", public_headers=["inc/foo.h"],
+                                confidence=Confidence.HIGH))
+        b.compile_units.append(CompileUnit(
+            id="cu://foo", source="src/foo.cpp", target_id="target://libfoo",
+            abi_relevant_flags=flags))
+        return b
+
+    surf = _surface_with([("foo::a", "inc/foo.h")], {"foo::a": "_Za"})
+    old = build_source_graph(_build(["-std=c++20"]), source_abi=surf)
+    new = build_source_graph(_build(["-std=c++20", "-fvisibility=hidden"]), source_abi=surf)
+    assert any(e.kind == "BUILD_OPTION_AFFECTS_SYMBOL" for e in new.edges)
+    bo = [c for c in diff_source_graph_findings(old, new)
+          if c.kind == ChangeKind.BUILD_OPTION_REACHES_PUBLIC_SYMBOL]
+    assert len(bo) == 1
+    assert "-fvisibility=hidden" in bo[0].symbol
+    assert bo[0].source_location == f"[{EVIDENCE_TIER_L5}]"
+
+
+def test_include_graph_public_header_drift_finding() -> None:
+    from abicheck.evidence.include_graph import augment_graph_with_includes
+
+    b = BuildEvidence()
+    b.targets.append(Target(id="target://libfoo", public_headers=["inc/foo.h"],
+                            confidence=Confidence.HIGH))
+    b.compile_units.append(CompileUnit(id="cu://foo", source="src/foo.cpp",
+                                       target_id="target://libfoo"))
+    old = build_source_graph(b)
+    new = build_source_graph(b)
+    augment_graph_with_includes(new, {"cu://foo": ["inc/foo.h"]})
+    new.finalize()
+    inc = [c for c in diff_source_graph_findings(old, new)
+           if c.kind == ChangeKind.INCLUDE_GRAPH_PUBLIC_HEADER_DRIFT]
+    assert len(inc) == 1
+    assert inc[0].symbol == "inc/foo.h"
+
+
+def test_localize_symbol_walks_the_graph() -> None:
+    from abicheck.evidence.source_graph import localize_symbol
+
+    b = BuildEvidence()
+    b.targets.append(Target(id="target://libfoo", public_headers=["include/foo.h"],
+                            confidence=Confidence.HIGH))
+    g = build_source_graph(b, source_abi=_sample_surface())
+    result = localize_symbol(g, "_ZN3foo3barEv")
+    assert result["found"] is True
+    assert "target://libfoo" in result["exported_by_targets"]
+    assert "foo::bar" in result["source_declarations"]
+    assert any("foo.h" in h for h in result["declared_in_headers"])
+
+
+def test_localize_symbol_absent_returns_empty() -> None:
+    from abicheck.evidence.source_graph import localize_symbol
+
+    result = localize_symbol(build_source_graph(BuildEvidence()), "_Zmissing")
+    assert result["found"] is False
+    assert result["exported_by_targets"] == []
+
+
+def test_explain_finding_cli(tmp_path) -> None:
+    b = BuildEvidence()
+    b.targets.append(Target(id="target://libfoo", public_headers=["include/foo.h"],
+                            confidence=Confidence.HIGH))
+    g = build_source_graph(b, source_abi=_sample_surface())
+    graph_json = tmp_path / "g.json"
+    graph_json.write_text(json.dumps(g.to_dict()))
+
+    res = CliRunner().invoke(main, [
+        "explain-finding", "--evidence", str(graph_json), "--symbol", "_ZN3foo3barEv",
+    ])
+    assert res.exit_code == 0, res.output
+    assert "target://libfoo" in res.output
+    assert "foo::bar" in res.output
+
+    res_json = CliRunner().invoke(main, [
+        "explain-finding", "--evidence", str(graph_json),
+        "--symbol", "_ZN3foo3barEv", "--format", "json",
+    ])
+    payload = json.loads(res_json.output)
+    assert payload["found"] is True
+    assert "foo::bar" in payload["source_declarations"]
+
+
+def test_explain_finding_resolves_symbol_from_report(tmp_path) -> None:
+    b = BuildEvidence()
+    b.targets.append(Target(id="target://libfoo", public_headers=["include/foo.h"],
+                            confidence=Confidence.HIGH))
+    g = build_source_graph(b, source_abi=_sample_surface())
+    graph_json = tmp_path / "g.json"
+    graph_json.write_text(json.dumps(g.to_dict()))
+    report = tmp_path / "report.json"
+    report.write_text(json.dumps({"changes": [{"symbol": "_ZN3foo3barEv"}]}))
+
+    res = CliRunner().invoke(main, [
+        "explain-finding", "--evidence", str(graph_json),
+        "--report", str(report), "--finding-id", "0", "--format", "json",
+    ])
+    assert res.exit_code == 0, res.output
+    assert json.loads(res.output)["symbol"] == "_ZN3foo3barEv"
+
+
+def test_explain_finding_requires_a_symbol(tmp_path) -> None:
+    g = build_source_graph(BuildEvidence())
+    graph_json = tmp_path / "g.json"
+    graph_json.write_text(json.dumps(g.to_dict()))
+    res = CliRunner().invoke(main, ["explain-finding", "--evidence", str(graph_json)])
+    assert res.exit_code != 0
+    assert "No symbol to explain" in res.output
+
+
+def test_resolve_symbol_from_report_variants(tmp_path) -> None:
+    from abicheck.cli_evidence import _resolve_symbol_from_report
+
+    report = tmp_path / "r.json"
+    report.write_text(json.dumps({"changes": [
+        {"symbol": "_ZN3foo3barEv"}, {"symbol": "_ZN3foo3bazEv"},
+    ]}))
+    # index lookup
+    assert _resolve_symbol_from_report(report, "1") == "_ZN3foo3bazEv"
+    # substring match
+    assert _resolve_symbol_from_report(report, "bar") == "_ZN3foo3barEv"
+    # out-of-range index → empty
+    assert _resolve_symbol_from_report(report, "9") == ""
+    # no match → empty
+    assert _resolve_symbol_from_report(report, "nope") == ""
+
+
+def test_resolve_symbol_from_report_unreadable(tmp_path) -> None:
+    import click
+    import pytest
+
+    from abicheck.cli_evidence import _resolve_symbol_from_report
+
+    with pytest.raises(click.ClickException):
+        _resolve_symbol_from_report(tmp_path / "missing.json", "0")
+
+
 # ── Phase 1: schema round-trip + content addressing ─────────────────────────
 
 
