@@ -697,3 +697,21 @@ class TestEvidencePackStorage:
         key = BaselineKey(library="libfoo", version="1.0.0", platform="linux-x86_64")
         with pytest.raises(ValidationError, match="fails its integrity check"):
             registry.push(key, sample_snapshot, evidence=pack)
+
+
+    def test_repush_in_place_pack_preserves_evidence(
+        self, registry: FilesystemRegistry, sample_snapshot: AbiSnapshot, tmp_path: Path
+    ) -> None:
+        # Re-pushing using the already-stored pack (source dir == dest dir) must
+        # not delete it mid-copy; the evidence survives (Codex review).
+        pack = _make_pack(tmp_path / "src.evidence")
+        key = BaselineKey(library="libfoo", version="1.0.0", platform="linux-x86_64")
+        registry.push(key, sample_snapshot, evidence=pack)
+
+        stored = registry.pull_evidence(key)
+        assert stored is not None  # stored.root is <registry>/<key>/evidence
+        # Push again with the in-place pack — no FileNotFoundError, pack preserved.
+        registry.push(key, sample_snapshot, evidence=stored)
+        again = registry.pull_evidence(key)
+        assert again is not None
+        assert again.content_hash() == pack.content_hash()

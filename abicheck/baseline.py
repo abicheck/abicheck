@@ -391,6 +391,14 @@ class FilesystemRegistry:
                 "to store it. Re-collect the pack."
             )
         content_hash = evidence.content_hash()
+        # Re-pushing the already-stored pack (e.g. --evidence pointing at
+        # <registry>/<key>/evidence, or evidence=registry.pull_evidence(key))
+        # makes source and destination the same directory. rmtree(dest) would
+        # then delete the source before copytree runs, raising FileNotFoundError
+        # and leaving the baseline pointing at a now-empty evidence dir. The pack
+        # is already in place, so treat that as a no-op (Codex review).
+        if evidence.root.resolve() == dest.resolve():
+            return content_hash
         if dest.exists():
             shutil.rmtree(dest)
         shutil.copytree(evidence.root, dest)
