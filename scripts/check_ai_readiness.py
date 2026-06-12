@@ -466,9 +466,11 @@ def check_doc_count_sync(f: Findings) -> None:
     # the long tail of casual mentions that historically drifted (190, 183,
     # 180+, 150+, 100+...). ADRs are dated decision records and keep the counts
     # that were true when they were written, so they are exempt.
+    # `?...`? tolerates markdown code spans: "183 `ChangeKind` values",
+    # "234 `ChangeKind`s".
     generic = re.compile(
         r"\b(\d{2,3})\+?"
-        r"(?:-kind\b|\s+(?:ABI/API\s+)?(?:[Cc]hange\s+(?:kinds?|types?)|ChangeKinds?|detection\s+rules))"
+        r"(?:-kind\b|\s+(?:ABI/API\s+)?(?:[Cc]hange\s+(?:kinds?|types?)|`?ChangeKinds?`?s?|detection\s+rules))"
     )
     adr_dir = DOCS / "development" / "adr"
     sweep_files = [
