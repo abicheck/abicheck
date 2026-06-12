@@ -148,24 +148,30 @@ def _provenance_finding(side: str, surface: SourceAbiSurface) -> Change | None:
     exports = set(surface.roots.get("exported_symbols", []))
     if not exports:
         return None
-    mapping = surface.mappings.get("source_decl_to_binary_symbol", {})
-    if len(mapping) < _PROVENANCE_MIN_DECLS:
+    # Count only declarations that are *expected* to export — real
+    # function/variable decls carrying a mangled symbol name. Inline bodies,
+    # uninstantiated templates and macros live in their own surface buckets and
+    # legitimately map to nothing, so they are excluded here: otherwise a
+    # header-only / inline-heavy public surface would inflate the miss ratio and
+    # false-fire even against the correct binary (review).
+    expected = [d for d in surface.reachable_declarations if d.mangled_name]
+    if len(expected) < _PROVENANCE_MIN_DECLS:
         return None
-    misses = sum(1 for sym in mapping.values() if not sym or sym not in exports)
-    if misses / len(mapping) < _PROVENANCE_MISS_THRESHOLD:
+    misses = sum(1 for d in expected if d.mangled_name not in exports)
+    if misses / len(expected) < _PROVENANCE_MISS_THRESHOLD:
         return None
     return Change(
         kind=ChangeKind.SOURCE_BINARY_PROVENANCE_MISMATCH,
         symbol="",
         description=(
-            f"{misses}/{len(mapping)} public declarations on the {side} side do "
-            "not map to any exported binary symbol — that source checkout likely "
-            "does not correspond to its binary (wrong tag/commit). Treat the "
-            "L4/L5 source findings for this pair as unreliable until the sources "
-            "are checked out at the binary's build tag."
+            f"{misses}/{len(expected)} exportable public declarations on the "
+            f"{side} side do not map to any exported binary symbol — that source "
+            "checkout likely does not correspond to its binary (wrong tag/commit). "
+            "Treat the L4/L5 source findings for this pair as unreliable until the "
+            "sources are checked out at the binary's build tag."
         ),
         old_value="",
-        new_value=f"{side}: {misses}/{len(mapping)} unmapped",
+        new_value=f"{side}: {misses}/{len(expected)} unmapped",
         source_location=f"[{EVIDENCE_TIER_L4}]",
     )
 

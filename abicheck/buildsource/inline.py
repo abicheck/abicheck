@@ -462,22 +462,36 @@ def _check_build_info_source_mismatch(
     if not tree.is_dir():
         return
 
-    # Match by file *basename* against the set of filenames anywhere under the
-    # tree. This is deliberately separator/drive/absolute-path agnostic — the
-    # compile-DB adapter may store a source as relative or absolute with platform
-    # separators, so resolving paths directly is fragile across OSes (Windows CI).
-    # A4 only needs a coarse "is this file even in the checkout?" signal.
+    # Match each compile-DB source against the tree by its *relative* path
+    # (directory-prefix-stripped, forward-slash normalized), falling back to the
+    # basename only when the source is not under its own compile-DB directory.
+    # All comparison is string-based on precomputed posix paths — no filesystem
+    # resolution — so it is robust to platform separators/drives (Windows CI) and
+    # to redacted home prefixes (`~/proj/...`), while still distinguishing two
+    # different checkouts that merely share filenames (review).
+    tree_rel: set[str] = set()
     tree_names: set[str] = set()
-    for _root, _dirs, files in os.walk(tree):
-        tree_names.update(files)
+    for root, _dirs, files in os.walk(tree):
+        for fn in files:
+            tree_rel.add((Path(root) / fn).relative_to(tree).as_posix())
+            tree_names.add(fn)
 
-    flags: list[bool] = []
-    for cu in merged.compile_units:
+    def _present(cu: object) -> bool | None:
         src = getattr(cu, "source", "")
         if not src:
-            continue
-        name = PurePosixPath(str(src).replace("\\", "/")).name
-        flags.append(name in tree_names)
+            return None
+        posix = str(src).replace("\\", "/")
+        name = PurePosixPath(posix).name
+        directory = str(getattr(cu, "directory", "") or "").replace("\\", "/").rstrip("/")
+        if directory and posix.startswith(directory + "/"):
+            return posix[len(directory) + 1:] in tree_rel
+        # Source already relative (not rooted at "/" or a drive "X:") → match rel.
+        if not (posix.startswith("/") or (len(posix) >= 2 and posix[1] == ":")):
+            return posix in tree_rel
+        # Absolute with an unknown root → basename is all we can compare on.
+        return name in tree_names
+
+    flags = [r for r in (_present(cu) for cu in merged.compile_units) if r is not None]
     if len(flags) < _MISMATCH_MIN_UNITS:
         return
     missing = sum(1 for present in flags if not present)

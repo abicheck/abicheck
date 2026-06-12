@@ -188,6 +188,10 @@ def _canonicalize(obj: Any, key: str | None = None) -> Any:
     argument sequences and ordered define lists, where order can change the
     produced ABI, so a reorder there *should* still read as a conflict. Dict key
     order is normalized by recursion.
+
+    Cost is O(n log n) per fact list (sort by canonical JSON) over a layer
+    payload that is already bounded by the on-disk pack size, so it is not a hot
+    path; no memoization needed.
     """
     if isinstance(obj, dict):
         return {k: _canonicalize(obj[k], k) for k in sorted(obj)}

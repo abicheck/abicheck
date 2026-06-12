@@ -170,11 +170,13 @@ def _odr_source_conflict() -> tuple[SourceAbiSurface, SourceAbiSurface]:
 
 
 def _provenance_mismatch() -> tuple[SourceAbiSurface, SourceAbiSurface]:
-    # A1: the new surface has L0 exports but (almost) none of its public decls
-    # map to an exported symbol → the source tree likely doesn't match the binary.
+    # A1: the new surface has L0 exports but (almost) none of its exportable
+    # public decls map to one → the source tree likely doesn't match the binary.
     new = _surface(
         roots={"exported_symbols": ["_Z3barv"]},
-        mappings={"source_decl_to_binary_symbol": {f"d{i}": "" for i in range(10)}},
+        reachable_declarations=[
+            _ent(f"f{i}", "function", mangled=f"_Z1f{i}v") for i in range(10)
+        ],
     )
     return _surface(), new
 
@@ -273,7 +275,9 @@ def test_provenance_mismatch_inert_without_l0_exports() -> None:
     # fire on an unmapped-but-export-less surface.
     new = _surface(
         roots={"exported_symbols": []},
-        mappings={"source_decl_to_binary_symbol": {f"d{i}": "" for i in range(10)}},
+        reachable_declarations=[
+            _ent(f"f{i}", "function", mangled=f"_Z1f{i}v") for i in range(10)
+        ],
     )
     kinds = [c.kind for c in diff_source_abi(_surface(), new)]
     assert ChangeKind.SOURCE_BINARY_PROVENANCE_MISMATCH not in kinds
@@ -283,11 +287,12 @@ def test_provenance_mismatch_inert_when_mostly_mapped() -> None:
     # Below the miss-ratio threshold (only 1/10 unmapped) → not a provenance
     # mismatch; a healthy surface with a single lost mapping is handled by the
     # per-declaration source_decl_binary_symbol_mismatch path instead.
-    mapping = {f"d{i}": "_Z3barv" for i in range(9)}
-    mapping["d9"] = ""
+    exports = [f"_Z1f{i}v" for i in range(9)]
+    decls = [_ent(f"f{i}", "function", mangled=f"_Z1f{i}v") for i in range(9)]
+    decls.append(_ent("f9", "function", mangled="_Z1f9v"))  # 1/10 unmapped
     new = _surface(
-        roots={"exported_symbols": ["_Z3barv"]},
-        mappings={"source_decl_to_binary_symbol": mapping},
+        roots={"exported_symbols": exports},
+        reachable_declarations=decls,
     )
     kinds = [c.kind for c in diff_source_abi(_surface(), new)]
     assert ChangeKind.SOURCE_BINARY_PROVENANCE_MISMATCH not in kinds
@@ -298,7 +303,9 @@ def test_provenance_mismatch_detected_on_baseline_side() -> None:
     # L4/L5 facts are as untrustworthy as a mismatched target's.
     bad = _surface(
         roots={"exported_symbols": ["_Z3barv"]},
-        mappings={"source_decl_to_binary_symbol": {f"d{i}": "" for i in range(10)}},
+        reachable_declarations=[
+            _ent(f"f{i}", "function", mangled=f"_Z1f{i}v") for i in range(10)
+        ],
     )
     kinds = [c.kind for c in diff_source_abi(bad, _surface())]
     assert ChangeKind.SOURCE_BINARY_PROVENANCE_MISMATCH in kinds
