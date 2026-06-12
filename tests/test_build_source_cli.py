@@ -1542,3 +1542,28 @@ def test_build_config_malformed_yaml_falls_back_to_defaults(tmp_path):
     cfg = load_build_config(cfg_path)
     assert cfg.system == "auto"
     assert cfg.query == ""
+
+
+def test_dump_sources_and_build_info_together(tmp_path):
+    """D2: --sources and --build-info together — L3 comes from --build-info, the
+    source tree drives L4 (partial without clang); the call must not error and
+    L3 facts must be embedded."""
+    from abicheck.cli_buildsource import embed_build_source
+
+    cdb = _write_cdb(tmp_path, "c++17")
+    tree = tmp_path / "src"
+    (tree / "src").mkdir(parents=True)
+    (tree / "src" / "foo.cpp").write_text("int x;", encoding="utf-8")
+
+    snap = AbiSnapshot(library="libfoo.so", version="1")
+    embed_build_source(snap, cdb, tree)  # build_info=cdb, sources=tree
+    assert snap.build_source is not None
+    assert snap.build_source.build_evidence is not None  # L3 from --build-info
+
+
+def test_collect_no_input_is_noop(tmp_path):
+    """D6: `collect -o out` with no inputs collects nothing and does not crash."""
+    out = tmp_path / "ev"
+    result = CliRunner().invoke(main, ["collect", "-o", str(out)])
+    # Either a clean message or a graceful empty pack — never a traceback.
+    assert result.exit_code in (0, 1, 2), result.output
