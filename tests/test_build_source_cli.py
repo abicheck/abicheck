@@ -1133,6 +1133,41 @@ def test_merge_identical_layer_is_not_a_conflict(tmp_path):
                 if e.name == "merge_layer_conflict"]
 
 
+def test_merge_conflict_digest_is_order_independent(tmp_path):
+    """A2 (Codex): same facts in a different list order is NOT a conflict.
+
+    The layer payloads are sets of facts keyed by identity downstream, so a
+    reversed compile_commands.json must canonicalize to the same digest.
+    """
+    from abicheck.cli_buildsource import embed_build_source
+
+    units = [
+        {"directory": str(tmp_path), "file": "src/a.cpp",
+         "arguments": ["c++", "-std=c++17", "-c", "src/a.cpp"]},
+        {"directory": str(tmp_path), "file": "src/b.cpp",
+         "arguments": ["c++", "-std=c++17", "-c", "src/b.cpp"]},
+    ]
+    fwd = tmp_path / "fwd.json"
+    fwd.write_text(json.dumps(units), encoding="utf-8")
+    rev = tmp_path / "rev.json"
+    rev.write_text(json.dumps(list(reversed(units))), encoding="utf-8")
+
+    a_snap = AbiSnapshot(library="libfoo.so", version="1")
+    embed_build_source(a_snap, fwd, None)
+    b_snap = AbiSnapshot(library="libfoo.so", version="1")
+    embed_build_source(b_snap, rev, None)
+    a = tmp_path / "a.json"; save_snapshot(a_snap, a)
+    b = tmp_path / "b.json"; save_snapshot(b_snap, b)
+
+    out = tmp_path / "baseline.json"
+    result = CliRunner().invoke(
+        main, ["merge", str(a), str(b), "--on-conflict", "error", "-o", str(out)]
+    )
+    # Order-only difference must NOT abort under --on-conflict=error.
+    assert result.exit_code == 0, result.output
+    assert "merge conflict" not in result.output
+
+
 def test_merge_three_inputs_folds_all(tmp_path):
     """D5: merge accepts 3+ inputs — a binary base plus a fact-bearing source
     snapshot plus a no-facts snapshot — folding without conflict."""
