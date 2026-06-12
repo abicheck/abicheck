@@ -700,6 +700,29 @@ def _collect_call_graph(
     ))
 
 
+def _include_map_for_replay(
+    merged: BuildEvidence, clang_bin: str
+) -> dict[str, list[str]] | None:
+    """Per-TU include graph ``{compile_unit_id: [included_path]}`` for replay scoping.
+
+    Runs ``clang -MM`` over the build (ADR-031 D3) so ``headers-only``/``changed``
+    replay can scope precisely (ADR-030 follow-up #4). Returns ``None`` when clang
+    is unavailable or yields nothing, so :func:`run_source_replay` falls back to
+    the target-ownership heuristics — collection never blocks on it.
+    """
+    from .evidence.include_graph import ClangIncludeExtractor
+
+    extractor = ClangIncludeExtractor(
+        clang_bin=clang_bin if clang_bin != "clang" else "clang++"
+    )
+    if not extractor.available():
+        return None
+    includes = extractor.extract_from_build(merged)
+    for diag in extractor.diagnostics:
+        merged.diagnostics.append(f"source_abi_include_graph: {diag}")
+    return includes or None
+
+
 def _collect_include_graph(
     graph: SourceGraphSummary,
     merged: BuildEvidence,
@@ -946,11 +969,21 @@ def _collect_source_abi(
             f"{tool_name} or omit --source-abi.",
         )
 
+    # For the scopes that benefit (ADR-030 follow-up #4), build a per-TU include
+    # graph from compiler depfiles and feed it to replay so headers-only does a
+    # minimal set cover and changed maps a header to exactly the TUs that include
+    # it. The extractor degrades to {} when clang is absent → heuristic fallback,
+    # so this never blocks collection. `target`/`full` ignore the include map.
+    include_map = (
+        _include_map_for_replay(merged, clang_bin)
+        if scope in ("headers-only", "changed")
+        else None
+    )
     cache = SourceAbiCache(cache_dir) if cache_dir else None
     surface, diagnostics = run_source_replay(
         merged, impl, scope=scope, changed_paths=changed_paths,
         target_id=target_id, library=library, exported_symbols=exported,
-        public_header_roots=roots, cache=cache,
+        public_header_roots=roots, cache=cache, include_map=include_map,
     )
     for diag in diagnostics:
         merged.diagnostics.append(f"source_abi: {diag}")
