@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 
 from click.testing import CliRunner
 
@@ -1117,6 +1118,43 @@ def test_merge_layer_conflict_warns_and_records(tmp_path):
     assert recs[0].status == "failed"
     assert recs[0].diagnostics  # carries a forward-looking note
     assert "kept a.json" in recs[0].diagnostics[0]
+
+
+def test_resolve_conflict_winner_latest_wins_on_digest_tie():
+    """A2 (Codex): for latest-wins layers (L4/L5), when two inputs share the
+    winning digest the recorded survivor must be the LAST contributor (the one
+    _combine_packs actually keeps), not the first same-digest sibling."""
+    from abicheck.buildsource.merge_support import (
+        _MERGE_LAYER_ATTRS,
+        _resolve_conflict_winners,
+    )
+    from abicheck.buildsource.model import DataLayer
+
+    l4 = DataLayer.L4_SOURCE_ABI.value
+    l3 = DataLayer.L3_BUILD.value
+
+    class _Payload:
+        def __init__(self, digest_src):
+            self._d = digest_src
+
+        def to_dict(self):
+            return self._d
+
+    # combined L4 facts == {"v": "x"}; inputs A=x, B=y, C=x → C is the survivor.
+    combined = SimpleNamespace(**{
+        _MERGE_LAYER_ATTRS[l4]: _Payload({"v": "x"}),
+        _MERGE_LAYER_ATTRS[l3]: _Payload({"v": "x"}),
+    })
+    from abicheck.buildsource.merge_support import _canonical_layer_digest
+    dx = _canonical_layer_digest({"v": "x"})
+    dy = _canonical_layer_digest({"v": "y"})
+    conflicts = {
+        l4: [("A", dx), ("B", dy), ("C", dx)],
+        l3: [("A", dx), ("B", dy), ("C", dx)],
+    }
+    winners = _resolve_conflict_winners(combined, conflicts)
+    assert winners[l4] == "C"   # latest-wins → last same-digest contributor
+    assert winners[l3] == "A"   # accumulator-wins → first same-digest contributor
 
 
 def test_merge_layer_conflict_error_mode_exits_nonzero(tmp_path):

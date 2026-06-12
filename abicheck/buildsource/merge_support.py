@@ -199,6 +199,15 @@ _MERGE_LAYER_ATTRS: dict[str, str] = {
     DataLayer.L5_SOURCE_GRAPH.value: "source_graph",
 }
 
+# Layers where `_combine_packs(accumulator, new_input)` keeps the *latest*
+# contributor (it prefers its second arg for source_abi/source_graph), as
+# opposed to L3 which keeps the accumulator (first contributor). The conflict
+# winner must be resolved in this direction so that, when two inputs share a
+# digest, the reported survivor is the one whose facts actually landed.
+_LATEST_WINS_LAYERS: frozenset[str] = frozenset(
+    {DataLayer.L4_SOURCE_ABI.value, DataLayer.L5_SOURCE_GRAPH.value}
+)
+
 # The only lists whose *order is significant* — compiler/linker argument
 # sequences and ordered define lists where a later entry overrides an earlier one.
 # Every other list (fact records, and unordered scalar fact sets like a target's
@@ -297,7 +306,12 @@ def _resolve_conflict_winners(
         if payload is None:
             continue
         won = _canonical_layer_digest(payload.to_dict())
-        for name, digest in entries:
+        # When two inputs share the winning digest, pick the one the fold actually
+        # kept: the last contributor for latest-wins layers (L4/L5), the first for
+        # accumulator-wins layers (L3) — so the recorded survivor is not an
+        # arbitrary same-digest sibling (Codex).
+        ordered = list(reversed(entries)) if layer in _LATEST_WINS_LAYERS else entries
+        for name, digest in ordered:
             if digest == won:
                 winners[layer] = name
                 break
