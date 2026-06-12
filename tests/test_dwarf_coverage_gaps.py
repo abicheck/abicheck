@@ -1847,3 +1847,72 @@ class TestAggregateHasUnalignedMemberNested:
         cu = MockCU(cu_offset=0, die_map={100: self._double(), 108: self._char(),
                                           200: self._inner(), 350: outer})
         assert _aggregate_has_unaligned_member(self._wrapper(350), cu) is False
+
+    def _int(self) -> MockDIE:
+        return MockDIE(tag="DW_TAG_base_type",
+                       attributes={"DW_AT_byte_size": MockAttr(4)}, offset=120)
+
+    def test_packed_outer_misaligns_array_element(self):
+        from abicheck.dwarf_advanced import _aggregate_has_unaligned_member
+
+        # struct __attribute__((packed)) R { char c; int a[1]; };
+        # a (int[1]) at offset 1 -> a[0] is a 4-byte int at a misaligned offset.
+        int_array = MockDIE(
+            tag="DW_TAG_array_type",
+            attributes={"DW_AT_type": MockAttr(120, form="DW_FORM_ref4")},
+            offset=400,
+        )
+        member_c = MockDIE(
+            tag="DW_TAG_member",
+            attributes={
+                "DW_AT_type": MockAttr(108, form="DW_FORM_ref4"),
+                "DW_AT_data_member_location": MockAttr(0),
+            },
+            offset=410,
+        )
+        member_a = MockDIE(
+            tag="DW_TAG_member",
+            attributes={
+                "DW_AT_type": MockAttr(400, form="DW_FORM_ref4"),
+                "DW_AT_data_member_location": MockAttr(1),
+            },
+            offset=420,
+        )
+        outer = MockDIE(tag="DW_TAG_structure_type",
+                        attributes={"DW_AT_byte_size": MockAttr(5)},
+                        offset=430, children=[member_c, member_a])
+        cu = MockCU(cu_offset=0, die_map={108: self._char(), 120: self._int(),
+                                          400: int_array, 430: outer})
+        assert _aggregate_has_unaligned_member(self._wrapper(430), cu) is True
+
+    def test_aligned_array_element_is_not_unaligned(self):
+        from abicheck.dwarf_advanced import _aggregate_has_unaligned_member
+
+        # struct S { int a[2]; char c; };  — a at offset 0, properly aligned.
+        int_array = MockDIE(
+            tag="DW_TAG_array_type",
+            attributes={"DW_AT_type": MockAttr(120, form="DW_FORM_ref4")},
+            offset=440,
+        )
+        member_a = MockDIE(
+            tag="DW_TAG_member",
+            attributes={
+                "DW_AT_type": MockAttr(440, form="DW_FORM_ref4"),
+                "DW_AT_data_member_location": MockAttr(0),
+            },
+            offset=450,
+        )
+        member_c = MockDIE(
+            tag="DW_TAG_member",
+            attributes={
+                "DW_AT_type": MockAttr(108, form="DW_FORM_ref4"),
+                "DW_AT_data_member_location": MockAttr(8),
+            },
+            offset=460,
+        )
+        outer = MockDIE(tag="DW_TAG_structure_type",
+                        attributes={"DW_AT_byte_size": MockAttr(12)},
+                        offset=470, children=[member_a, member_c])
+        cu = MockCU(cu_offset=0, die_map={108: self._char(), 120: self._int(),
+                                          440: int_array, 470: outer})
+        assert _aggregate_has_unaligned_member(self._wrapper(470), cu) is False

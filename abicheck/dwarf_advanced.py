@@ -501,22 +501,71 @@ def _aggregate_byte_size_for_typed_die(die: Any, CU: Any, cache: _DwarfTypeCache
     return size if size > 0 else None
 
 
-def _aggregate_has_unaligned_member(
-    die: Any, CU: Any, cache: _DwarfTypeCache | None = None, base_offset: int = 0
-) -> bool:
-    """Whether a by-value aggregate return type has an unaligned member.
+#: Scalar (leaf) type tags whose alignment is byte-size-derived (or DW_AT_alignment).
+_SCALAR_LEAF_TAGS: tuple[str, ...] = (
+    "DW_TAG_base_type",
+    "DW_TAG_pointer_type",
+    "DW_TAG_reference_type",
+    "DW_TAG_rvalue_reference_type",
+    "DW_TAG_enumeration_type",
+    "DW_TAG_ptr_to_member_type",
+)
+_AGGREGATE_TAGS: tuple[str, ...] = (
+    "DW_TAG_structure_type",
+    "DW_TAG_class_type",
+    "DW_TAG_union_type",
+)
 
-    A struct/class/union with a member at a misaligned offset (e.g. a packed
+
+def _scalar_leaf_align(t: Any) -> int:
+    """Natural alignment of an already-unwrapped scalar/enum/pointer type DIE."""
+    if "DW_AT_alignment" in t.attributes:
+        try:
+            return int(t.attributes["DW_AT_alignment"].value)
+        except (TypeError, ValueError):
+            pass
+    sz = _attr_int(t, "DW_AT_byte_size")
+    return _NATURAL_ALIGN.get(min(sz, 16), 1) if sz > 0 else 1
+
+
+def _type_unaligned_at(type_die: Any, CU: Any, base_offset: int, cache: _DwarfTypeCache | None) -> bool:
+    """Whether any scalar leaf of *type_die* lands at a misaligned absolute offset.
+
+    *base_offset* is the absolute offset at which this type starts within the
+    outermost aggregate. Recurses through nested aggregates (carrying member
+    offsets) and array members (an array shares its element's alignment, so the
+    array's own offset determines element alignment). A scalar/enum/pointer leaf
+    is misaligned when ``base_offset`` is not a multiple of its natural alignment.
+    By-value nesting is a DAG, so this terminates.
+    """
+    t = _unwrap_qualifiers(type_die, CU, cache=cache)
+    if t.tag in _SCALAR_LEAF_TAGS:
+        return base_offset % _scalar_leaf_align(t) != 0
+    if t.tag == "DW_TAG_array_type":
+        elem = _resolve_type_die(t, CU)
+        return elem is not None and _type_unaligned_at(elem, CU, base_offset, cache)
+    if t.tag in _AGGREGATE_TAGS:
+        for child in t.iter_children():
+            if child.tag != "DW_TAG_member" or _attr_int(child, "DW_AT_bit_size"):
+                continue
+            mt = _resolve_type_die(child, CU)
+            if mt is None:
+                continue
+            abs_offset = base_offset + _decode_member_location(child)
+            if _type_unaligned_at(mt, CU, abs_offset, cache):
+                return True
+    return False
+
+
+def _aggregate_has_unaligned_member(die: Any, CU: Any, cache: _DwarfTypeCache | None = None) -> bool:
+    """Whether a by-value aggregate return type has an unaligned member (recursively).
+
+    A struct/class/union with a leaf at a misaligned offset (e.g. a packed
     aggregate) is MEMORY-classified by the SysV AMD64 ABI regardless of size, so
-    it is returned via a hidden sret pointer either way. Reuses the same
-    offset-vs-natural-alignment check as packed-struct detection.
-
-    ``base_offset`` is the absolute offset of *this* aggregate within the
-    outermost return type, accumulated through nesting. A nested scalar is
-    misaligned when its *absolute* offset (``base_offset`` + its own member
-    offset) is not a multiple of its natural alignment — so a packed outer that
-    places an aligned-looking inner composite at a misaligned offset (e.g.
-    ``packed Outer{char c; Inner{double d};}`` → ``i.d`` at offset 1) is caught.
+    it is returned via a hidden sret pointer either way. Walks the full type tree
+    — nested aggregates and array members included — accumulating absolute
+    offsets, so e.g. ``packed R{char c; int a[1];}`` (``a[0]`` at offset 1) and
+    ``packed Outer{char c; Inner{double d};}`` (``i.d`` at offset 1) are caught.
     """
     t0 = _resolve_type_die(die, CU)
     if t0 is None or t0.tag in (
@@ -526,27 +575,9 @@ def _aggregate_has_unaligned_member(
     ):
         return False
     t = _unwrap_qualifiers(t0, CU, cache=cache)
-    if t.tag not in ("DW_TAG_structure_type", "DW_TAG_class_type", "DW_TAG_union_type"):
+    if t.tag not in _AGGREGATE_TAGS:
         return False
-    for child in t.iter_children():
-        if child.tag != "DW_TAG_member" or _attr_int(child, "DW_AT_bit_size"):
-            continue
-        abs_offset = base_offset + _decode_member_location(child)
-        natural = _get_type_align(child, CU)
-        if natural > 1 and abs_offset % natural != 0:
-            return True
-        # A by-value composite member (e.g. a packed inner struct) forces MEMORY
-        # classification of the outer type even when its own offset is aligned;
-        # _get_type_align returns 0 for composites, so recurse into it carrying
-        # the absolute offset so a nested scalar misaligned relative to the
-        # *outermost* type is detected. By-value nesting is a DAG (a struct cannot
-        # contain itself by value), so this terminates; pointer/reference members
-        # short-circuit at the top guard.
-        if natural <= 1 and _aggregate_has_unaligned_member(
-            child, CU, cache=cache, base_offset=abs_offset
-        ):
-            return True
-    return False
+    return _type_unaligned_at(t, CU, 0, cache)
 
 
 def _extract_calling_convention(die: Any, meta: AdvancedDwarfMetadata, CU: Any, cache: _DwarfTypeCache | None = None) -> None:
