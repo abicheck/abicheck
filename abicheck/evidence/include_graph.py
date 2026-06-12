@@ -51,18 +51,30 @@ _DEPFILE_DROP_FLAG = frozenset({"-c", "-MD", "-MMD", "-MM", "-M", "-MG", "-MP", 
 def depfile_args_from_argv(argv: list[str]) -> list[str]:
     """Strip a recorded compile argv down to the args usable after ``clang -MM``.
 
-    A compile database stores the full command — ``clang++ -c foo.cpp -o foo.o
-    -I…`` — whose first token is the *compiler executable*. Re-driving that as
-    ``clang++ -MM clang++ -c foo.cpp …`` makes clang treat the second ``clang++``
-    as an input file and emit no usable depfile (Codex review). Drop the leading
-    compiler token, the ``-c`` compile action, the ``-o``/``-MF``/… outputs, and
+    A compile database stores the full command — possibly launcher-wrapped, like
+    ``ccache clang++ -c foo.cpp -o foo.o -I…`` — whose leading tokens are a
+    compiler launcher and the *compiler executable*. Re-driving that as
+    ``clang++ -MM ccache clang++ -c foo.cpp …`` makes clang treat the leftover
+    launcher/compiler tokens as input files and emit no usable depfile (Codex
+    review). Strip leading ``ccache``/``sccache``/… launchers and the compiler
+    token, drop the ``-c`` compile action, the ``-o``/``-MF``/… outputs and any
     pre-existing dependency flags, keeping the source plus the ABI-relevant
     ``-I``/``-D``/``-std`` context that decides what is included.
     """
     if not argv:
         return []
-    # The first token is the compiler driver (an executable path, not a flag).
-    args = list(argv[1:]) if not argv[0].startswith("-") else list(argv)
+    # Reuse the source extractors' launcher-stripping so a ccache/sccache-wrapped
+    # command leaves only the compiler token to drop next.
+    from .source_extractors._argv import strip_launchers
+
+    unwrapped = strip_launchers(list(argv))
+    # After the launcher, the first token is the compiler driver (an executable
+    # path, not a flag); drop it. An argv that is already only flags keeps them.
+    args = (
+        unwrapped[1:]
+        if unwrapped and not unwrapped[0].startswith("-")
+        else list(unwrapped)
+    )
     out: list[str] = []
     skip_next = False
     for tok in args:

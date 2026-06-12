@@ -42,6 +42,18 @@ def test_depfile_args_strips_compiler_and_output() -> None:
     ]
 
 
+def test_depfile_args_strips_compiler_launcher() -> None:
+    # A ccache/sccache-wrapped command must drop BOTH the launcher and the real
+    # compiler token, else `clang++ -MM ccache clang++ …` reads them as inputs
+    # (Codex review).
+    assert depfile_args_from_argv(
+        ["ccache", "clang++", "-c", "foo.cpp", "-I", "x"]
+    ) == ["foo.cpp", "-I", "x"]
+    assert depfile_args_from_argv(
+        ["sccache", "g++", "-c", "a.cpp", "-std=c++20"]
+    ) == ["a.cpp", "-std=c++20"]
+
+
 def test_depfile_args_handles_glued_output_and_argv0_flag() -> None:
     # Glued -ofoo.o is dropped; an argv that already starts with a flag (no
     # leading compiler token) keeps every flag.
