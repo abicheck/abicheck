@@ -106,9 +106,17 @@ status; there is **no `DiffResult`/`Change` list at merge time**, so this is
 **not** a compare-pipeline `ChangeKind` and must not be modelled as one. Use the
 channels that already exist:
 
-- **Persist** the conflict into the pack **manifest `diagnostics` / extractor
-  ledger** (the same persisted field `_run_build_query` failures already use) —
-  it rides inside the embedded `build_source` payload, no new serialization path.
+- **Persist** the conflict into a field that is **actually serialized**.
+  `BuildSourceManifest.to_dict()` (`model.py` ~227–257) has **no `diagnostics`
+  key** — it serializes only version/source_root/inputs/**extractors**/artifacts/
+  coverage/redaction, so a manifest-level diagnostic would be dropped on
+  round-trip. Use the same persisted locations `_run_build_query` failures use
+  (`inline.py` ~352–365): record an **`ExtractorRecord`** row (with `status` +
+  `detail`) in `manifest.extractors` (which *is* in `to_dict()`), and/or append
+  to **`BuildEvidence.diagnostics`** for the L3 case. Both ride inside the
+  embedded `build_source` payload — no new schema/serialization path. (If a
+  dedicated manifest `diagnostics` field is ever wanted, that's an explicit
+  model/schema addition, not an existing channel.)
 - **Warn** on stderr from `merge_cmd`.
 - **Fail non-zero** under a merge failure policy. Note `merge_cmd` currently
   declares only `inputs` / `--output` / `--verbose` — `--collection-mode` lives
