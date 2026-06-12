@@ -189,7 +189,9 @@ def _sample_surface() -> SourceAbiSurface:
     s.reachable_types.append(_entity("foo::Color", "enum"))
     s.reachable_types.append(_entity("foo::Alias", "typedef"))
     s.reachable_macros.append(_entity("FOO_VERSION", "macro", conf=LayerConfidence.REDUCED))
-    s.mappings["source_decl_to_binary_symbol"] = {"foo::bar": "_ZN3foo3barEv"}
+    # Keyed by entity identity (the mangled name for C++), exactly as
+    # link_source_abi/relink_surface_exports persist it — not by qualified_name.
+    s.mappings["source_decl_to_binary_symbol"] = {"_ZN3foo3barEv": "_ZN3foo3barEv"}
     s.mappings["source_type_to_debug_type"] = {"foo::Widget": "struct foo::Widget"}
     return s
 
@@ -209,6 +211,20 @@ def test_source_abi_builds_public_reachability_slice() -> None:
     assert "SOURCE_TYPE_MAPS_TO_DEBUG_TYPE" in edge_kinds
     assert all(e.kind in EDGE_KINDS for e in g.edges)
     assert all(n.kind in NODE_KINDS for n in g.nodes)
+
+
+def test_cpp_decl_maps_to_symbol_with_identity_keyed_mapping() -> None:
+    # Regression (Codex): the persisted source_decl_to_binary_symbol map is keyed
+    # by entity identity (mangled name for C++), so build_source_graph must look
+    # it up by identity, not qualified_name, or the decl->symbol edge is dropped
+    # for every C++ symbol (qualified_name != mangled name).
+    g = build_source_graph(BuildEvidence(), source_abi=_sample_surface())
+    map_edges = [e for e in g.edges if e.kind == "SOURCE_DECL_MAPS_TO_SYMBOL"]
+    assert len(map_edges) == 1
+    decl_ids = {n.id for n in g.nodes if n.kind == "source_decl"}
+    sym_ids = {n.id for n in g.nodes if n.kind == "binary_symbol"}
+    assert map_edges[0].src in decl_ids
+    assert map_edges[0].dst in sym_ids
 
 
 def test_source_abi_type_kind_dispatch() -> None:
