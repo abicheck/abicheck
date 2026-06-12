@@ -637,6 +637,8 @@ def _source_layers_for_result(
     v2_hdr: Path | None,
     old_build_source: Path | None,
     new_build_source: Path | None,
+    sources: bool = False,
+    build_info: bool = False,
 ) -> tuple[str, ...]:
     """Return the evidence layers actually supplied for this case result."""
     layers = ["L0"]
@@ -644,9 +646,24 @@ def _source_layers_for_result(
         layers.append("L1")
     if v1_hdr and v1_hdr.exists() and v2_hdr and v2_hdr.exists():
         layers.append("L2")
+    # Out-of-band build-source packs (build-source variant) carry L3/L4/L5.
     if old_build_source is not None and new_build_source is not None:
         layers.extend(["L3", "L4", "L5"])
-    return tuple(layers)
+    # The inline `--sources` opt-in (ground_truth `sources: true`) runs
+    # `dump --sources`, which resolves a compile DB (L3), replays the source
+    # ABI (L4), and folds the source graph (L5) inline — report those layers so
+    # the JSON artifact does not under-count the case as L0/L1/L2 (Codex). The
+    # decoupled `--build-info` opt-in supplies L3 only.
+    if sources:
+        layers.extend(["L3", "L4", "L5"])
+    elif build_info:
+        layers.append("L3")
+    # De-duplicate while preserving first-seen order (the build-source variant
+    # and inline --sources can both contribute L3/L4/L5).
+    seen: dict[str, None] = {}
+    for layer in layers:
+        seen.setdefault(layer, None)
+    return tuple(seen)
 
 
 def _evaluate_verdict(
@@ -801,6 +818,8 @@ def run_case(
         v2_hdr=v2_hdr,
         old_build_source=old_build_source,
         new_build_source=new_build_source,
+        sources=bool(entry.get("sources", False)),
+        build_info=bool(entry.get("build_info", False)),
     )
     return _evaluate_verdict(
         name, expected_raw, got, known_gap,

@@ -405,6 +405,42 @@ class TestArtifactVariants:
             new_build_source=pack,
         ) == ("L0", "L1", "L2", "L3", "L4", "L5")
 
+    def test_source_layers_reflect_inline_sources(self, tmp_path: Path) -> None:
+        # ground_truth `sources: true` runs `dump --sources`, folding L3/L4/L5
+        # inline — the result must report them, not under-count as L0/L2 (Codex).
+        header = tmp_path / "v1.h"
+        header.write_text("int f(void);\n")
+        inline = _source_layers_for_result(
+            DEFAULT_ARTIFACT_VARIANT,
+            v1_hdr=header,
+            v2_hdr=header,
+            old_build_source=None,
+            new_build_source=None,
+            sources=True,
+        )
+        assert set(inline) >= {"L0", "L2", "L3", "L4", "L5"}
+        # `--build-info` (without --sources) supplies L3 but not L4/L5.
+        bi = _source_layers_for_result(
+            DEFAULT_ARTIFACT_VARIANT,
+            v1_hdr=header,
+            v2_hdr=header,
+            old_build_source=None,
+            new_build_source=None,
+            build_info=True,
+        )
+        assert "L3" in bi and "L4" not in bi and "L5" not in bi
+        # No double-count when build-source pack and inline --sources coincide.
+        pack2 = tmp_path / "pack2"
+        pack2.mkdir()
+        assert _source_layers_for_result(
+            "build-source",
+            v1_hdr=header,
+            v2_hdr=header,
+            old_build_source=pack2,
+            new_build_source=pack2,
+            sources=True,
+        ) == ("L0", "L1", "L2", "L3", "L4", "L5")
+
     def test_json_payload_includes_run_metadata(self) -> None:
         result = CaseResult("case01", "FAIL", "BREAKING", "NO_CHANGE", "mismatch")
 
