@@ -668,3 +668,15 @@ import pytest as _pytest  # noqa: E402
 def test_recommend_collect_mode(paths, expected):
     from abicheck.buildsource.source_replay import recommend_collect_mode
     assert recommend_collect_mode(paths) == expected
+
+
+def test_graph_full_maps_to_full_scope():
+    """ADR-033 D2 (Codex): graph-full collects the full replay scope, not target."""
+    from abicheck.buildsource.source_replay import (
+        collection_for_ci_mode,
+        scope_for_ci_mode,
+    )
+    assert scope_for_ci_mode("graph-full") == "full"
+    scope, layers = collection_for_ci_mode("graph-full")
+    assert scope == "full"
+    assert layers == ("L3", "L4", "L5")

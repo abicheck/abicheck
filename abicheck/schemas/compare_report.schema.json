@@ -137,6 +137,7 @@
         "findings.artifact_backed.count": { "type": "integer", "minimum": 0 },
         "findings.source_only.count": { "type": "integer", "minimum": 0 },
         "findings.build_context_drift.count": { "type": "integer", "minimum": 0 },
+        "findings.evidence_required_missing.count": { "type": "integer", "minimum": 0 },
         "findings.demoted_by_surface.count": { "type": "integer", "minimum": 0 },
         "findings.suppressed_with_reason.count": { "type": "integer", "minimum": 0 }
       }

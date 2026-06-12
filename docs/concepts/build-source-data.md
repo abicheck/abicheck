@@ -540,6 +540,7 @@ metric names:
   "findings.artifact_backed.count": 3,
   "findings.source_only.count": 0,
   "findings.build_context_drift.count": 1,
+  "findings.evidence_required_missing.count": 0,
   "findings.demoted_by_surface.count": 0,
   "findings.suppressed_with_reason.count": 0
 }

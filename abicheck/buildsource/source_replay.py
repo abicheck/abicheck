@@ -70,7 +70,7 @@ CI_MODE_TO_SCOPE: dict[str, str] = {
     "source-changed": "changed",
     "source-target": "target",
     "graph-summary": "changed",
-    "graph-full": "target",
+    "graph-full": "full",
 }
 
 

@@ -37,6 +37,7 @@ from .buildsource.evidence_policy import (
     apply_evidence_policy,
     echo_evidence_metrics,
     evidence_coverage_metrics,
+    finding_bucket_counts,
     require_evidence_findings,
     tag_evidence_category,
 )
@@ -1473,8 +1474,12 @@ def diff_embedded_build_source(
                 err=True,
             )
         # require_evidence still fires with no packs at all: every required layer
-        # is missing, so the run must fail rather than pass on zero evidence.
-        return require_evidence_findings(policy_file, None), [], {}
+        # is missing, so the run must fail rather than pass on zero evidence. Emit
+        # a coverage-only metrics dict so attach_evidence_metrics still counts the
+        # evidence_required_missing finding (Codex review) instead of dropping it.
+        req = require_evidence_findings(policy_file, None)
+        metrics = evidence_coverage_metrics([]) if req else {}
+        return req, [], metrics
 
     changes: list[Change] = []
     # Tag each finding with its D9 bucket as it is produced: each diff helper
@@ -1624,18 +1629,9 @@ def attach_evidence_metrics(
     """
     if not metrics:
         return
-    injected_ids = {id(c) for c in injected_changes}
-    artifact_backed = build_drift = source_only = 0
-    for c in result.changes:
-        if id(c) not in injected_ids:
-            artifact_backed += 1
-        elif getattr(c, "evidence_category", None) == "build_context":
-            build_drift += 1
-        elif getattr(c, "evidence_category", None) == "source_only":
-            source_only += 1
-    metrics["findings.artifact_backed.count"] = artifact_backed
-    metrics["findings.build_context_drift.count"] = build_drift
-    metrics["findings.source_only.count"] = source_only
+    counts = finding_bucket_counts(result.changes, injected_changes)
+    for bucket, n in counts.items():
+        metrics[f"findings.{bucket}.count"] = n
     metrics["findings.demoted_by_surface.count"] = result.out_of_surface_count
     metrics["findings.suppressed_with_reason.count"] = result.suppressed_count
     result.evidence_metrics = metrics

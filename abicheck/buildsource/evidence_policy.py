@@ -155,6 +155,32 @@ def evidence_coverage_metrics(coverage: list[LayerCoverage]) -> dict[str, object
     }
 
 
+def finding_bucket_counts(
+    changes: list[Change], injected_changes: list[Change]
+) -> dict[str, int]:
+    """Partition *retained* findings into the ADR-033 D9 count buckets.
+
+    ``evidence_required_missing`` is counted on its own (a require_evidence
+    failure is neither artifact-backed nor a drift/source finding, Codex review);
+    artifact-backed is everything not externally injected; build-context-drift /
+    source-only come from each finding's ``evidence_category`` tag.
+    """
+    from ..checker_policy import ChangeKind
+    injected_ids = {id(c) for c in injected_changes}
+    out = {"artifact_backed": 0, "build_context_drift": 0,
+           "source_only": 0, "evidence_required_missing": 0}
+    for c in changes:
+        if c.kind == ChangeKind.EVIDENCE_REQUIRED_MISSING:
+            out["evidence_required_missing"] += 1
+        elif id(c) not in injected_ids:
+            out["artifact_backed"] += 1
+        elif getattr(c, "evidence_category", None) == "build_context":
+            out["build_context_drift"] += 1
+        elif getattr(c, "evidence_category", None) == "source_only":
+            out["source_only"] += 1
+    return out
+
+
 def echo_evidence_metrics(metrics: dict[str, object]) -> None:
     """Print the ADR-033 D6 timing / D9 metrics summary to stderr (all formats)."""
     if not metrics:

@@ -452,8 +452,11 @@ def test_require_evidence_fails_when_layer_absent(tmp_path):
         "--policy-file", str(pol), "--format", "json",
     ])
     assert result.exit_code == 2, result.output  # API_BREAK
-    kinds = {c["kind"] for c in json.loads(result.stdout)["changes"]}
+    payload = json.loads(result.stdout)
+    kinds = {c["kind"] for c in payload["changes"]}
     assert "evidence_required_missing" in kinds
+    # D9: the failure is counted on its own metric, not lost (Codex review).
+    assert payload["evidence_metrics"]["findings.evidence_required_missing.count"] == 1
 
 
 def test_require_evidence_satisfied_when_layer_present(tmp_path):
