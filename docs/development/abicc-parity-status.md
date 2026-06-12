@@ -1,6 +1,6 @@
 # ABI Checker Gap Analysis — abicheck vs ABICC vs libabigail
 
-> Generated: 2026-03-09; content reviewed 2026-06-07. The scenario matrix is a historical ABICC/libabigail parity snapshot; the current ChangeKind total is **235** — see the [Change Kind Reference](../reference/change-kinds.md) for the authoritative list.
+> Generated: 2026-03-09; content reviewed 2026-06-07. The scenario matrix is a historical ABICC/libabigail parity snapshot; the current ChangeKind total is **238** — see the [Change Kind Reference](../reference/change-kinds.md) for the authoritative list.
 > abicheck version: HEAD of `napetrov/abicheck`  
 > Compared against: ABICC (lvc/abi-compliance-checker) + libabigail (abidiff/abidw)
 
@@ -11,7 +11,7 @@
 - **abicheck covers:** ~55/55 de-duplicated ABI break scenarios (~100%) after recent releases
 - **Key differentiator:** abicheck uses multi-tier analysis (castxml headers + ELF symbols + DWARF layout) -- works on **release builds** with headers + `.so`, no debug symbols required for core checks. ABICC needs GCC `-fdump-lang-spec`, abidiff needs DWARF debug info.
 - **Closed gaps:** All original P0/P1/P2 scenarios are now detected, including enum rename, field/param rename, field qualifiers (const/volatile/mutable), pointer level changes, access level changes, param default value tracking, and anonymous struct/union fields.
-- **Coverage: exceeds ABICC** — the original ABICC-equivalent matrix remains covered, and the full current catalog has grown to 234 ChangeKinds.
+- **Coverage: exceeds ABICC** — the original ABICC-equivalent matrix remains covered, and the full current catalog has grown to 238 ChangeKinds.
 - **Test coverage:** ChangeKind assertion coverage is enforced by `tests/test_changekind_completeness.py`; parity and example coverage now live in the expanded `tests/` and `examples/` suites.
 
 > Note: ABICC has 90+ rules total, but many are sub-rules of the same scenario. The 55-row coverage table below is the expanded scenario count for the current implementation.

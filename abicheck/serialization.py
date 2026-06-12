@@ -255,6 +255,7 @@ def _macho_from_dict(e: dict[str, Any]) -> Any:
     ]
     return MachoMetadata(
         cpu_type=e.get("cpu_type", ""),
+        cpu_types=e.get("cpu_types", []),
         filetype=e.get("filetype", ""),
         flags=e.get("flags", 0),
         install_name=e.get("install_name", ""),

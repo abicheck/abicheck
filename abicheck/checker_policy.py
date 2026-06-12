@@ -136,6 +136,13 @@ class ChangeKind(str, Enum):
     COMPAT_VERSION_CHANGED = (
         "compat_version_changed"  # LC_ID_DYLIB compat_version changed → BREAKING
     )
+    MACHO_CPU_TYPE_CHANGED = (
+        "macho_cpu_type_changed"  # Mach-O header CPU type/arch changed → BREAKING
+    )
+
+    # ── PE/COFF specific (binary-only, no PDB needed) ────────────────────
+    PE_FORWARDER_CHANGED = "pe_forwarder_changed"  # export forwarder target repointed
+    PE_MACHINE_CHANGED = "pe_machine_changed"  # PE machine/architecture drift
 
     # ELF security / bad practice
     EXECUTABLE_STACK = "executable_stack"  # PT_GNU_STACK gains PF_X — NX disabled (regression; gateable)

@@ -177,6 +177,17 @@ Recovered from `.dynsym` symbol sizes alone by `diff_elf_layout.py`. The Itanium
 | `symbol_size_changed_internal` | `st_size` changed on an **internal-looking** exported data symbol (reserved/underscore-prefixed, e.g. `_XkeyTable`, `_pcre2_ucd_records_8`, `_UCD_accessors`). Such symbols are often private implementation state rather than intended public ABI, but exported data is still part of the dynamic ABI and size changes can break copy relocations or direct data consumers. This is `BREAKING` by default; use a `--policy-file` override only when the symbol is known private and safe to accept as risk. A size change on a *public-looking* data symbol remains `symbol_size_changed` (`BREAKING`). |
 | `symbol_size_changed_const_object` | Size changed for a public exported const object such as `extern char const name[]`. Even when headers do not expose a fixed bound, old non-PIE consumers can carry copy relocations sized from the old DSO symbol, so this remains a hard binary-compatibility break. |
 
+
+### PE/COFF & Mach-O Platform Metadata (binary-only)
+
+These are recovered from the binary headers / export tables alone — no PDB or DWARF required.
+
+| Kind | Description |
+|------|-------------|
+| `pe_forwarder_changed` | A DLL export forwarder (`OTHERDLL.Symbol`) was repointed to a different target. The implementation behind the exported name changed; dependents get different — possibly missing — behaviour at load time. |
+| `pe_machine_changed` | The PE machine/architecture changed (e.g. `IMAGE_FILE_MACHINE_AMD64` → `IMAGE_FILE_MACHINE_ARM64`). The DLL is a different architecture and cannot be loaded by existing clients. |
+| `macho_cpu_type_changed` | A Mach-O architecture slice that used to ship is gone — e.g. `X86_64` → `ARM64`, or a universal `x86_64+arm64` dylib that dropped its `x86_64` slice. Clients built for the removed architecture can no longer link against or load the dylib. Adding a slice (single-arch → universal) is **not** flagged. |
+
 ---
 
 

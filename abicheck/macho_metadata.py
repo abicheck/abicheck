@@ -91,7 +91,8 @@ class MachoMetadata:
     writable ``__dict__``.
     """
     # Binary characteristics
-    cpu_type: str = ""                   # e.g. "ARM64", "X86_64"
+    cpu_type: str = ""                   # selected slice, e.g. "ARM64", "X86_64"
+    cpu_types: list[str] = field(default_factory=list)  # ALL slices in a fat/universal binary
     filetype: str = ""                   # e.g. "MH_DYLIB", "MH_BUNDLE"
     flags: int = 0                       # MH_* flags bitmask
 
@@ -249,6 +250,13 @@ def _parse(dylib_path: Path) -> MachoMetadata:
     # Basic header info
     cputype = int(hdr.cputype)
     meta.cpu_type = CPU_TYPE_NAMES.get(cputype, f"0x{cputype:x}")
+    # All architectures present (fat/universal binaries carry several). Used by
+    # the arch-drift detector so adding a slice (single-arch → universal) is not
+    # mistaken for an architecture change when the original slice still ships.
+    meta.cpu_types = [
+        CPU_TYPE_NAMES.get(int(h.header.cputype), f"0x{int(h.header.cputype):x}")
+        for h in macho.headers
+    ]
     filetype = int(hdr.filetype)
     meta.filetype = _FILETYPE_NAMES.get(filetype, f"0x{filetype:x}")
     meta.flags = int(hdr.flags)
