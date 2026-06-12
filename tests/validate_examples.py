@@ -393,6 +393,25 @@ def _build_info_path(
     return candidate if candidate.exists() else None
 
 
+def _sources_path(
+    case_dir: Path | None, stem: str, sources: bool = False
+) -> Path | None:
+    """Return the per-side L4/L5 source tree for *stem* (``v1``/``v2``) if any.
+
+    A case opts into source ABI replay (L4) + the source graph (L5) by declaring
+    ``sources: true`` in ``ground_truth.json`` *and* shipping a ``<stem>.sources/``
+    directory next to its sources; ``dump --sources`` then runs the replay inline
+    and embeds it. Like ``_build_info_path`` the ground-truth flag is the contract
+    — directory presence alone never silently upgrades a case to L4. Replay needs
+    a C++ front-end (clang/castxml); the runner skips the case when it is absent.
+    Pure/unit-testable: only checks for the directory, no I/O beyond ``is_dir()``.
+    """
+    if case_dir is None or not sources:
+        return None
+    candidate = case_dir / f"{stem}.sources"
+    return candidate if candidate.is_dir() else None
+
+
 def _dump_and_compare(
     tmp: Path,
     v1_so: Path,
@@ -404,6 +423,7 @@ def _dump_and_compare(
     new_build_source: Path | None = None,
     case_dir: Path | None = None,
     build_info: bool = False,
+    sources: bool = False,
 ) -> tuple[str | None, str | None]:
     """Run abicheck dump+compare. Returns (verdict, error_msg).
 
@@ -419,7 +439,10 @@ def _dump_and_compare(
     bi1 = _build_info_path(case_dir, "v1", build_info)
     if bi1 is not None:
         cmd1 += ["--build-info", str(bi1)]
-    r1 = subprocess.run(cmd1, capture_output=True, text=True, timeout=60)
+    sr1 = _sources_path(case_dir, "v1", sources)
+    if sr1 is not None:
+        cmd1 += ["--sources", str(sr1)]
+    r1 = subprocess.run(cmd1, capture_output=True, text=True, timeout=120)
     if r1.returncode != 0:
         return None, f"dump v1 failed: {r1.stderr[:200]}"
 
@@ -433,7 +456,10 @@ def _dump_and_compare(
     bi2 = _build_info_path(case_dir, "v2", build_info)
     if bi2 is not None:
         cmd2 += ["--build-info", str(bi2)]
-    r2 = subprocess.run(cmd2, capture_output=True, text=True, timeout=60)
+    sr2 = _sources_path(case_dir, "v2", sources)
+    if sr2 is not None:
+        cmd2 += ["--sources", str(sr2)]
+    r2 = subprocess.run(cmd2, capture_output=True, text=True, timeout=120)
     if r2.returncode != 0:
         return None, f"dump v2 failed: {r2.stderr[:200]}"
 
@@ -763,6 +789,7 @@ def run_case(
         new_build_source=new_build_source,
         case_dir=case_dir,
         build_info=bool(entry.get("build_info", False)),
+        sources=bool(entry.get("sources", False)),
     )
     if dc_err is not None:
         return CaseResult(name, "ERROR", expected_raw, None, dc_err, variant)

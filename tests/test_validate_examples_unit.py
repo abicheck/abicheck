@@ -26,6 +26,7 @@ from tests.validate_examples import (  # noqa: E402
     _result_to_json,
     _selected_variants,
     _source_layers_for_result,
+    _sources_path,
     _write_source_compile_db,
     main,
 )
@@ -151,6 +152,40 @@ class TestBuildInfoPath:
             case_dir = examples_dir / name
             assert _build_info_path(case_dir, "v1", True) is not None, name
             assert _build_info_path(case_dir, "v2", True) is not None, name
+
+
+class TestSourcesPath:
+    """_sources_path opts a case into L4/L5 source-replay comparison."""
+
+    def test_none_case_dir_returns_none(self) -> None:
+        assert _sources_path(None, "v1", True) is None
+
+    def test_missing_dir_returns_none(self, tmp_path: Path) -> None:
+        assert _sources_path(tmp_path, "v1", True) is None
+
+    def test_present_dir_returned(self, tmp_path: Path) -> None:
+        (tmp_path / "v1.sources").mkdir()
+        assert _sources_path(tmp_path, "v1", True) == tmp_path / "v1.sources"
+
+    def test_opt_out_ignores_present_dir(self, tmp_path: Path) -> None:
+        (tmp_path / "v1.sources").mkdir()
+        assert _sources_path(tmp_path, "v1", False) is None
+        assert _sources_path(tmp_path, "v1") is None  # default opt-out
+
+    def test_a_file_named_sources_is_not_a_tree(self, tmp_path: Path) -> None:
+        (tmp_path / "v1.sources").write_text("not a dir")
+        assert _sources_path(tmp_path, "v1", True) is None
+
+    def test_real_sources_cases_ship_both_sides(self) -> None:
+        # Every ground_truth case flagged sources must ship both per-side trees.
+        gt = json.loads(_GROUND_TRUTH.read_text())["verdicts"]
+        examples_dir = _GROUND_TRUTH.parent
+        for name, v in gt.items():
+            if not v.get("sources"):
+                continue
+            case_dir = examples_dir / name
+            assert _sources_path(case_dir, "v1", True) is not None, name
+            assert _sources_path(case_dir, "v2", True) is not None, name
 
 
 # ── CLI entry-point ───────────────────────────────────────────────────────
