@@ -297,6 +297,35 @@ def test_body_fingerprint_changes_when_reference_target_differs() -> None:
     assert _body_hash(returns_global) != _body_hash(returns_local)
 
 
+def _fn_with_static_local(static_name):
+    return {
+        "kind": "TranslationUnitDecl",
+        "inner": [{
+            "kind": "FunctionDecl", "name": "f", "mangledName": "_Z1fv",
+            "loc": {"file": "include/foo.h", "line": 1},
+            "type": {"qualType": "int ()"},
+            "inner": [{"kind": "CompoundStmt", "inner": [
+                {"kind": "DeclStmt", "inner": [
+                    {"kind": "VarDecl", "id": "S1", "name": static_name,
+                     "storageClass": "static", "type": {"qualType": "int"}}]},
+                {"kind": "ReturnStmt", "inner": [
+                    {"kind": "ImplicitCastExpr", "inner": [
+                        {"kind": "DeclRefExpr",
+                         "referencedDecl": {"id": "S1", "name": static_name}}]}]},
+            ]}],
+        }],
+    }
+
+
+def test_body_fingerprint_changes_on_static_local_rename() -> None:
+    # A function-local `static` emits a distinct linkage symbol (f()::counter),
+    # so renaming it is observable and must change the fingerprint — it is NOT
+    # alpha-renamed like an automatic local (Codex review).
+    assert _body_hash(_fn_with_static_local("counter")) != _body_hash(
+        _fn_with_static_local("state")
+    )
+
+
 def test_body_fingerprint_changes_on_global_rename() -> None:
     # Two bodies that reference *different* globals must stay distinct (the
     # alpha-renaming must not collapse non-local references).

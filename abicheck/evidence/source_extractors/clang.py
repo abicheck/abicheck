@@ -214,6 +214,27 @@ def _hash(*parts: str) -> str:
 #: so a pure rename of a local/parameter does not flip the body fingerprint.
 _LOCAL_DECL_KINDS = frozenset({"ParmVarDecl", "VarDecl", "BindingDecl", "DecompositionDecl"})
 
+#: ``storageClass`` values that give a block-scope ``VarDecl`` a stable *linkage*
+#: name — a function-local ``static`` emits a distinct weak symbol (``f()::x``)
+#: and an ``extern`` local names a global. Such names are **not** alpha-renamed,
+#: since renaming them is an observable change, not a cosmetic one.
+_NON_RENAMEABLE_STORAGE = frozenset({"static", "extern"})
+
+
+def _is_renameable_local(node: dict[str, Any]) -> bool:
+    """Whether a decl node is an automatic local whose name is alpha-renameable.
+
+    Parameters and ordinary block-scope variables are renameable; a
+    function-local ``static``/``extern`` ``VarDecl`` is not — its name is part of
+    a linkage symbol, so a rename must change the body fingerprint (Codex review).
+    """
+    kind = node.get("kind")
+    if kind not in _LOCAL_DECL_KINDS:
+        return False
+    if kind == "VarDecl" and node.get("storageClass") in _NON_RENAMEABLE_STORAGE:
+        return False
+    return True
+
 
 def _alpha_rename_map(node: dict[str, Any], param_ids: tuple[str, ...]) -> dict[str, str]:
     """Map each local-binding clang ``id`` to a positional placeholder (``$0``…).
@@ -242,7 +263,7 @@ def _alpha_rename_map(node: dict[str, Any], param_ids: tuple[str, ...]) -> dict[
         if not isinstance(n, dict):
             return
         nid = n.get("id")
-        if isinstance(nid, str) and n.get("kind") in _LOCAL_DECL_KINDS:
+        if isinstance(nid, str) and _is_renameable_local(n):
             local_ids.add(nid)
         inner = n.get("inner")
         if isinstance(inner, list):
