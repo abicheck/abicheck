@@ -36,6 +36,7 @@ def _snap(adv: AdvancedDwarfMetadata | None) -> AbiSnapshot:
 def _adv(
     *,
     has_dwarf: bool = True,
+    target_arch: str = "",
     calling: dict[str, str] | None = None,
     value_traits: dict[str, str] | None = None,
     packed: set[str] | None = None,
@@ -49,6 +50,7 @@ def _adv(
     struct_names = (all_structs or set()) | packed_set
     return AdvancedDwarfMetadata(
         has_dwarf=has_dwarf,
+        target_arch=target_arch,
         toolchain=ToolchainInfo(
             producer_string="gcc",
             compiler="GCC",
@@ -135,12 +137,70 @@ def test_calling_convention_unchanged_no_change() -> None:
 
 
 def test_value_abi_trait_changed_breaking() -> None:
-    old = _snap(_adv(value_traits={"foo": "ret:v(trivial)"}))
-    new = _snap(_adv(value_traits={"foo": "ret:v(nontrivial)"}))
+    # A parameter-position triviality flip (ret unchanged) stays a generic
+    # value-ABI trait change; a *return*-position flip is the more specific
+    # struct_return_convention_changed (see test below).
+    old = _snap(_adv(value_traits={"foo": "ret:v(trivial)|p0:trivial"}))
+    new = _snap(_adv(value_traits={"foo": "ret:v(trivial)|p0:nontrivial"}))
     r = compare(old, new)
     kinds = {c.kind for c in r.changes}
     assert ChangeKind.VALUE_ABI_TRAIT_CHANGED in kinds
     assert r.verdict == Verdict.BREAKING
+
+
+def test_return_trait_flip_is_struct_return_convention_changed() -> None:
+    # A return-position triviality flip means the aggregate moved between
+    # in-register return and hidden sret pointer — struct_return_convention_changed.
+    old = _snap(_adv(value_traits={"foo": "ret:v(trivial)"}))
+    new = _snap(_adv(value_traits={"foo": "ret:v(nontrivial)"}))
+    r = compare(old, new)
+    kinds = {c.kind for c in r.changes}
+    assert ChangeKind.STRUCT_RETURN_CONVENTION_CHANGED in kinds
+    assert ChangeKind.VALUE_ABI_TRAIT_CHANGED not in kinds
+    assert r.verdict == Verdict.BREAKING
+
+
+def test_return_trait_flip_on_sysv_amd64_arch_is_convention_change() -> None:
+    # Explicit x86_64 arch → SysV AMD64 model, sret-flip classification applies.
+    old = _snap(_adv(target_arch="x86_64", value_traits={"foo": "ret:v(trivial)"}))
+    new = _snap(_adv(target_arch="x86_64", value_traits={"foo": "ret:v(nontrivial)"}))
+    r = compare(old, new)
+    kinds = {c.kind for c in r.changes}
+    assert ChangeKind.STRUCT_RETURN_CONVENTION_CHANGED in kinds
+    assert ChangeKind.VALUE_ABI_TRAIT_CHANGED not in kinds
+
+
+def test_return_trait_flip_on_non_sysv_arch_is_generic_trait_change() -> None:
+    # On AArch64 an HFA can be returned in vector registers despite being >16
+    # bytes; on i386 every aggregate is memory-returned. The SysV-AMD64 16-byte
+    # register model does not apply, so a return-triviality flip is reported as a
+    # generic value-ABI trait change rather than a register<->sret convention flip.
+    for arch in ("aarch64", "i386"):
+        old = _snap(_adv(target_arch=arch, value_traits={"foo": "ret:v(trivial)"}))
+        new = _snap(_adv(target_arch=arch, value_traits={"foo": "ret:v(nontrivial)"}))
+        r = compare(old, new)
+        kinds = {c.kind for c in r.changes}
+        assert ChangeKind.STRUCT_RETURN_CONVENTION_CHANGED not in kinds, arch
+        assert ChangeKind.VALUE_ABI_TRAIT_CHANGED in kinds, arch
+        # Still a value-ABI change → still breaking.
+        assert r.verdict == Verdict.BREAKING
+
+
+def test_return_trait_flip_mixed_arch_falls_back_to_generic() -> None:
+    # If one side's arch is a known non-SysV target, do not claim a convention
+    # flip — only when BOTH sides use the SysV-AMD64 return model.
+    old = _snap(_adv(target_arch="x86_64", value_traits={"foo": "ret:v(trivial)"}))
+    new = _snap(_adv(target_arch="aarch64", value_traits={"foo": "ret:v(nontrivial)"}))
+    r = compare(old, new)
+    kinds = {c.kind for c in r.changes}
+    assert ChangeKind.STRUCT_RETURN_CONVENTION_CHANGED not in kinds
+    assert ChangeKind.VALUE_ABI_TRAIT_CHANGED in kinds
+
+
+def test_target_arch_round_trips_through_serialization() -> None:
+    snap = _snap(_adv(target_arch="aarch64", value_traits={"foo": "ret:v(trivial)"}))
+    restored = snapshot_from_dict(snapshot_to_dict(snap))
+    assert restored.dwarf_advanced.target_arch == "aarch64"  # type: ignore[attr-defined]
 
 
 def test_callee_saved_fallback_detects_calling_convention_drift() -> None:
@@ -411,9 +471,18 @@ def test_value_abi_traits_same_no_change_emitted() -> None:
 
 
 def test_value_abi_traits_changed_emits_change() -> None:
-    """Different value_abi_traits for same symbol → VALUE_ABI_TRAIT_CHANGED emitted."""
+    """Different value_abi_traits for same symbol → a value-ABI finding emitted.
+
+    A return-position flip is the struct-return-convention refinement; a
+    parameter-position flip stays the generic value-ABI trait change.
+    """
     old = _snap(_adv(value_traits={"_Z6computev": "ret:trivial"}))
     new = _snap(_adv(value_traits={"_Z6computev": "ret:nontrivial"}))
     r = compare(old, new)
     kinds = {c.kind for c in r.changes}
-    assert ChangeKind.VALUE_ABI_TRAIT_CHANGED in kinds
+    assert ChangeKind.STRUCT_RETURN_CONVENTION_CHANGED in kinds
+
+    old_p = _snap(_adv(value_traits={"_Z3fooP1S": "ret:trivial|p0:trivial"}))
+    new_p = _snap(_adv(value_traits={"_Z3fooP1S": "ret:trivial|p0:nontrivial"}))
+    r_p = compare(old_p, new_p)
+    assert ChangeKind.VALUE_ABI_TRAIT_CHANGED in {c.kind for c in r_p.changes}

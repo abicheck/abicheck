@@ -532,6 +532,21 @@ class ChangeKind(str, Enum):
     GENERATED_FILE_DEPENDENCY_UNSTABLE = "generated_file_dependency_unstable"  # generated-file dependency risk → RISK
     LINK_EXPORT_POLICY_CHANGED = "link_export_policy_changed"  # version script / export map / .def changed → RISK
 
+    # ── Runtime-model / build-mode flips (ADR-028 L3 — gap-analysis follow-up) ─
+    # Emitted by the build-evidence diff when a runtime-model build flag flips
+    # between versions. Like the other L3 kinds these are never BREAKING on their
+    # own (ADR-028 D3): the artifact diff proves an actual break; these flag the
+    # elevated risk and localize the cause. They default to RISK.
+    EXCEPTIONS_MODE_CHANGED = "exceptions_mode_changed"  # -fexceptions ↔ -fno-exceptions flip → RISK
+    RTTI_MODE_CHANGED = "rtti_mode_changed"  # -frtti ↔ -fno-rtti flip → RISK
+    TLS_MODEL_CHANGED = "tls_model_changed"  # -ftls-model / -fextern-tls-init flip → RISK
+    THREADSAFE_STATICS_MODE_CHANGED = "threadsafe_statics_mode_changed"  # -fno-threadsafe-statics flip → RISK
+    # Struct-return convention (-freg-struct-return / -fpcc-struct-return). Unlike
+    # the flag-only RISK kinds above this is artifact-proven from DWARF/ABI facts,
+    # so it defaults to BREAKING; the flag-only signal stays as the generic
+    # ABI_RELEVANT_BUILD_FLAG_CHANGED (RISK).
+    STRUCT_RETURN_CONVENTION_CHANGED = "struct_return_convention_changed"  # aggregate return passing changed → BREAKING
+
     # ── Source ABI replay evidence (ADR-028 L4 / ADR-030 D6) ────────────────
     # Emitted only by the source-replay diff over two linked source ABI
     # surfaces (source/source_abi.json). These cover source/API facts weakly or

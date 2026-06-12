@@ -1,0 +1,1 @@
+[{"directory":".","file":"v1.cpp","command":"g++ -fthreadsafe-statics -fPIC -c v1.cpp"}]

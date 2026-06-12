@@ -101,6 +101,10 @@ class TestSeverity:
     def test_medium_severity_calling_convention(self):
         assert severity("calling_convention_changed") == "Medium"
 
+    def test_medium_severity_struct_return_convention(self) -> None:
+        # A register<->sret flip is a silent-corruption break — not Low.
+        assert severity("struct_return_convention_changed") == "Medium"
+
     def test_low_severity_added(self):
         assert severity("func_added") == "Low"
 

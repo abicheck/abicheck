@@ -55,7 +55,7 @@ from ..redaction import DEFAULT_REDACTION, RedactionPolicy
 from .base import (
     compile_unit_id,
     derive_build_options,
-    detect_language,
+    effective_language,
     extract_abi_relevant_flags,
     source_from_argv,
 )
@@ -264,7 +264,7 @@ class BazelAdapter:
             output=red_output,
             target_id=graph.target_id(action.get("targetId")),
             argv=red_argv,
-            language=detect_language(source),
+            language=effective_language(argv, source),
             standard=ctx.language_standard or "",
             defines={k: self.redaction.define_value(k, v or "") for k, v in ctx.defines.items()},
             undefines=sorted(ctx.undefines),

@@ -1,0 +1,1 @@
+[{"directory":".","file":"v2.cpp","command":"g++ -ftls-model=initial-exec -fPIC -c v2.cpp"}]

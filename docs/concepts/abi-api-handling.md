@@ -240,8 +240,7 @@ These three tiers are artifact layers **L0–L2**. Two optional layers go
 further without overriding an artifact-proven break: **L3** build context
 (`-p build/`) pins the exact ABI-affecting flags, and **L4** source/evidence
 packs recover several of the otherwise-invisible source-only facts above
-(macro/`constexpr` values, uninstantiated templates). See [Source & Build
-Build & Source Packs](build-source-data.md) and the full [L0–L4
+(macro/`constexpr` values, uninstantiated templates). See [Build & Source Packs](build-source-data.md) and the full [L0–L4
 model](evidence-and-detectability.md).
 
 #### Which input proves which family
@@ -270,7 +269,7 @@ table is in [Limitations](limitations.md#source-only-changes-invisible-to-binary
 
 ## Detection coverage and roadmap
 
-abicheck detects **239 change kinds** today (see the
+abicheck detects **244 change kinds** today (see the
 [Change Kind Reference](../reference/change-kinds.md)), spanning every family in
 the table above — including the calling-convention, alignment/packing, bit-field,
 dual-ABI (`_GLIBCXX_USE_CXX11_ABI`), ABI-tag, `char8_t`, `_BitInt`, `_Atomic`,

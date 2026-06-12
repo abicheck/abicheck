@@ -55,6 +55,7 @@ BINARY_ONLY_KINDS: frozenset[str] = frozenset({
     "dwarf_info_missing", "toolchain_flag_drift",
     # DWARF-derived calling convention and frame register changes (#117)
     "calling_convention_changed", "value_abi_trait_changed",
+    "struct_return_convention_changed",
     "frame_register_changed",
     # DWARF producer-derived vector-function (SIMD clone) ABI flag drift
     "vector_abi_changed",
@@ -78,6 +79,7 @@ CHANGED_BREAKING_KINDS: frozenset[str] = frozenset({
     "struct_field_type_changed", "struct_alignment_changed",
     "field_bitfield_changed",
     "calling_convention_changed", "struct_packing_changed",
+    "struct_return_convention_changed",
     "func_visibility_changed",
     "typedef_base_changed",
     "union_field_type_changed",
@@ -106,6 +108,7 @@ MEDIUM_SEVERITY_KINDS: frozenset[str] = frozenset({
     "struct_field_offset_changed", "struct_field_removed",
     "struct_field_type_changed", "struct_alignment_changed",
     "var_type_changed", "calling_convention_changed",
+    "struct_return_convention_changed",
     "soname_changed", "symbol_type_changed",
     "symbol_version_defined_removed",
     "return_pointer_level_changed", "param_pointer_level_changed",

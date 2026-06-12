@@ -2052,7 +2052,7 @@
       "abi_break": true,
       "api_break": true,
       "bad_practice": false,
-      "description": "Distilled from intel/llvm PR #20821 (the `abi-break`-labelled change that swapped `std::shared_ptr<device_impl>` for a raw `device_impl*` inside `sycl::device`, surfacing as issue #20915 / fix #21028). The shared_ptr member is two pointers (16 bytes) on LP64; the raw pointer is one (8 bytes), so sizeof(sycl::device) shrinks 16->8 — an ABI break for every consumer that holds a device by value or embeds it. The method mangled names are unchanged, so a pure exported-symbol dump (sycl_symbols_*.dump) does not see the layout change directly; abicheck's type/layout diff reports the root cause as TYPE_SIZE_CHANGED. Built with -fvisibility-inlines-hidden so the diff shows the public ABI break rather than libstdc++ template noise, mirroring how libsycl is built.",
+      "description": "Distilled from intel/llvm PR #20821 (the `abi-break`-labelled change that swapped `std::shared_ptr<device_impl>` for a raw `device_impl*` inside `sycl::device`, surfacing as issue #20915 / fix #21028). The shared_ptr member is two pointers (16 bytes) on LP64; the raw pointer is one (8 bytes), so sizeof(sycl::device) shrinks 16->8 \u2014 an ABI break for every consumer that holds a device by value or embeds it. The method mangled names are unchanged, so a pure exported-symbol dump (sycl_symbols_*.dump) does not see the layout change directly; abicheck's type/layout diff reports the root cause as TYPE_SIZE_CHANGED. Built with -fvisibility-inlines-hidden so the diff shows the public ABI break rather than libstdc++ template noise, mirroring how libsycl is built.",
       "expected_kinds": [
         "type_size_changed"
       ]
@@ -2067,7 +2067,7 @@
       "abi_break": true,
       "api_break": false,
       "bad_practice": true,
-      "description": "An exported global data object (config_table) grows from int[16] (64 bytes) to int[32] (128 bytes), changing its ELF symbol st_size. Consumers that reference the object get a copy relocation sized for the v1 definition, so after the upgrade library code that indexes the new slots writes past the consumer's fixed-size copy — silent out-of-bounds corruption. This is the static-variable-size regression the glibc testsuite guards and that Apple's dynamic-library guidelines classify as a major change; detected at L0 from the symbol table alone.",
+      "description": "An exported global data object (config_table) grows from int[16] (64 bytes) to int[32] (128 bytes), changing its ELF symbol st_size. Consumers that reference the object get a copy relocation sized for the v1 definition, so after the upgrade library code that indexes the new slots writes past the consumer's fixed-size copy \u2014 silent out-of-bounds corruption. This is the static-variable-size regression the glibc testsuite guards and that Apple's dynamic-library guidelines classify as a major change; detected at L0 from the symbol table alone.",
       "expected_kinds": [
         "symbol_size_changed"
       ]
@@ -2085,6 +2085,85 @@
       "description": "The exported function helper changes from weak (STB_WEAK) to strong/global (STB_GLOBAL) binding. This is backward compatible: every binary that resolved to the weak definition still resolves to the same address, and the only difference is that the symbol can no longer be silently overridden by another strong definition. It is the benign counterpart to case27 (binding weakened, which is risky). Detected at L0 from the symbol table.",
       "expected_kinds": [
         "symbol_binding_strengthened"
+      ]
+    },
+    "case129_struct_return_convention": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "min_evidence": "L1",
+      "platforms": [
+        "linux"
+      ],
+      "abi_break": true,
+      "api_break": false,
+      "bad_practice": false,
+      "description": "A public function returns a small aggregate by value. In v2 the aggregate gains a user-declared destructor, making it non-trivial; by the System V AMD64 ABI a non-trivial class is returned through a hidden caller-provided pointer (sret) instead of in registers. The function's mangled name (_Z7computev) is unchanged, so a symbol-only check sees nothing, but the DWARF value-ABI return trait flips trivial -> nontrivial. abicheck emits struct_return_convention_changed (the return-specific refinement of value_abi_trait_changed); a caller built against the v1 in-register convention reads the result from the wrong place. Detected at L1 from DWARF.",
+      "expected_kinds": [
+        "struct_return_convention_changed"
+      ]
+    },
+    "case130_exceptions_mode_flip": {
+      "expected": "COMPATIBLE_WITH_RISK",
+      "category": "risk",
+      "min_evidence": "L3",
+      "platforms": [
+        "linux"
+      ],
+      "abi_break": false,
+      "api_break": false,
+      "bad_practice": false,
+      "build_info": true,
+      "description": "Identical source and exported symbols built once with -fexceptions (v1) and once with -fno-exceptions (v2). The per-side compile_commands.json carries the flag; the L3 build-evidence diff normalizes it to the canonical 'exceptions' option and reports exceptions_mode_changed. The two modes are not link-compatible (exceptions cannot safely unwind through -fno-exceptions frames), but per ADR-028 D3 a build-context finding is a risk signal, not a proven binary break. Validated via the CLI dump --build-info + compare path (the Python compare() API does not run the build-evidence diff).",
+      "expected_kinds": [
+        "exceptions_mode_changed"
+      ]
+    },
+    "case131_rtti_mode_flip": {
+      "expected": "COMPATIBLE_WITH_RISK",
+      "category": "risk",
+      "min_evidence": "L3",
+      "platforms": [
+        "linux"
+      ],
+      "abi_break": false,
+      "api_break": false,
+      "bad_practice": false,
+      "build_info": true,
+      "description": "Identical source and symbols built with -frtti (v1) vs -fno-rtti (v2), captured per-side in compile_commands.json. The L3 diff normalizes to the canonical 'rtti' option and reports rtti_mode_changed. -fno-rtti omits type_info for polymorphic types so dynamic_cast/typeid and cross-DSO exception matching can fail when modes are mixed; RISK per ADR-028 D3.",
+      "expected_kinds": [
+        "rtti_mode_changed"
+      ]
+    },
+    "case132_threadsafe_statics_flip": {
+      "expected": "COMPATIBLE_WITH_RISK",
+      "category": "risk",
+      "min_evidence": "L3",
+      "platforms": [
+        "linux"
+      ],
+      "abi_break": false,
+      "api_break": false,
+      "bad_practice": false,
+      "build_info": true,
+      "description": "Identical source and symbols built with -fthreadsafe-statics (v1, the default) vs -fno-threadsafe-statics (v2). The L3 diff normalizes to the canonical 'threadsafe_statics' option and reports threadsafe_statics_mode_changed. -fno-threadsafe-statics drops the __cxa_guard acquire/release around function-local static init, so mixed-mode TUs sharing a public inline race on first use; RISK per ADR-028 D3.",
+      "expected_kinds": [
+        "threadsafe_statics_mode_changed"
+      ]
+    },
+    "case133_tls_model_flip": {
+      "expected": "COMPATIBLE_WITH_RISK",
+      "category": "risk",
+      "min_evidence": "L3",
+      "platforms": [
+        "linux"
+      ],
+      "abi_break": false,
+      "api_break": false,
+      "bad_practice": false,
+      "build_info": true,
+      "description": "Identical source and symbols built with -ftls-model=global-dynamic (v1) vs -ftls-model=initial-exec (v2). The L3 diff normalizes both to the canonical 'tls_model' option and reports tls_model_changed. The TLS access sequence differs and initial-exec cannot be used from a library dlopen'd after startup; RISK per ADR-028 D3.",
+      "expected_kinds": [
+        "tls_model_changed"
       ]
     }
   }

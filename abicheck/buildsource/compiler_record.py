@@ -44,7 +44,7 @@ from ..build_context import _extract_flags
 from .adapters.base import (
     compile_unit_id,
     derive_build_options,
-    detect_language,
+    effective_language,
     extract_abi_relevant_flags,
     source_from_argv,
 )
@@ -157,7 +157,7 @@ def _command_to_unit(argv: list[str], red: RedactionPolicy) -> CompileUnit:
         id=compile_unit_id(red_source, red_argv),
         source=red_source,
         argv=red_argv,
-        language=detect_language(source),
+        language=effective_language(argv, source),
         standard=ctx.language_standard or "",
         defines={k: red.define_value(k, v or "") for k, v in ctx.defines.items()},
         undefines=sorted(ctx.undefines),

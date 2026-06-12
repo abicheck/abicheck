@@ -17,6 +17,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from tests.validate_examples import (  # noqa: E402
     CaseResult,
+    _build_info_path,
     _normalize_verdict,
     main,
 )
@@ -30,7 +31,7 @@ _VALID_CATEGORIES = frozenset(
 _VALID_VERDICTS = frozenset(
     {"BREAKING", "COMPATIBLE", "COMPATIBLE_WITH_RISK", "NO_CHANGE", "API_BREAK"}
 )
-_EXPECTED_CASE_COUNT = 129
+_EXPECTED_CASE_COUNT = 134
 
 
 # ── _normalize_verdict ────────────────────────────────────────────────────
@@ -90,6 +91,47 @@ class TestGroundTruthIntegrity:
             and v.get("expected") is not None
         }
         assert not invalid
+
+
+# ── L3 build-info detection ───────────────────────────────────────────────
+
+
+class TestBuildInfoPath:
+    """_build_info_path opts a case into L3 build-evidence comparison."""
+
+    def test_none_case_dir_returns_none(self) -> None:
+        assert _build_info_path(None, "v1", True) is None
+
+    def test_missing_file_returns_none(self, tmp_path: Path) -> None:
+        assert _build_info_path(tmp_path, "v1", True) is None
+
+    def test_present_file_returned(self, tmp_path: Path) -> None:
+        (tmp_path / "v1.compile_commands.json").write_text("[]")
+        assert _build_info_path(tmp_path, "v1", True) == tmp_path / "v1.compile_commands.json"
+
+    def test_opt_out_ignores_present_file(self, tmp_path: Path) -> None:
+        # Without the ground_truth build_info flag, a stray compile DB must not
+        # silently upgrade the case to L3.
+        (tmp_path / "v1.compile_commands.json").write_text("[]")
+        assert _build_info_path(tmp_path, "v1", False) is None
+        assert _build_info_path(tmp_path, "v1") is None  # default opt-out
+
+    def test_per_side_independent(self, tmp_path: Path) -> None:
+        (tmp_path / "v2.compile_commands.json").write_text("[]")
+        assert _build_info_path(tmp_path, "v1", True) is None
+        assert _build_info_path(tmp_path, "v2", True) is not None
+
+    def test_real_build_info_cases_ship_both_sides(self) -> None:
+        # Every ground_truth case flagged build_info must ship both per-side
+        # compile DBs so the harness actually exercises the L3 diff.
+        gt = json.loads(_GROUND_TRUTH.read_text())["verdicts"]
+        examples_dir = _GROUND_TRUTH.parent
+        bi_cases = [k for k, v in gt.items() if v.get("build_info")]
+        assert bi_cases, "expected at least one build_info example case"
+        for name in bi_cases:
+            case_dir = examples_dir / name
+            assert _build_info_path(case_dir, "v1", True) is not None, name
+            assert _build_info_path(case_dir, "v2", True) is not None, name
 
 
 # ── CLI entry-point ───────────────────────────────────────────────────────

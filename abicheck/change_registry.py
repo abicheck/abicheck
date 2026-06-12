@@ -366,6 +366,17 @@ REGISTRY = ChangeKindRegistry([
     _E("vector_abi_changed", _B,
        impact="Vector-function (SIMD clone) ABI selection changed (-mveclibabi/-fveclib/-vecabi); vectorized call variants resolve to a different ABI, so callers of the vector entry points pass/return data in the wrong registers.",
        policy_overrides={"plugin_abi": _C}),
+    _E("struct_return_convention_changed", _B,
+       impact="The aggregate (struct/class/union) return convention changed for a "
+              "public function — e.g. a small struct that was returned in registers "
+              "is now returned via a hidden caller-provided pointer (sret), or vice "
+              "versa (-freg-struct-return ↔ -fpcc-struct-return, or a "
+              "triviality/size change that crosses the register-return threshold). "
+              "Callers and callee disagree on where the result lives, so the return "
+              "value is read from the wrong location — silent corruption or a crash. "
+              "Proven from DWARF/ABI facts, so BREAKING; the flag-only signal stays "
+              "as the generic abi_relevant_build_flag_changed (RISK).",
+       policy_overrides={"plugin_abi": _C}),
 
     # ── Sprint 2 — gap detectors ──────────────────────────────────────────
     _E("func_deleted", _B,
@@ -1005,6 +1016,43 @@ REGISTRY = ChangeKindRegistry([
               "actually removes or alters exports, the artifact diff (L0) emits "
               "the corresponding BREAKING findings separately; this kind explains "
               "and localizes them and does not escalate on its own."),
+
+    # ── Runtime-model / build-mode flips (L3 gap-analysis follow-up) ─────────
+    # Produced by the build-evidence diff when a runtime-model flag flips. Never
+    # BREAKING on their own (ADR-028 D3); they flag the risk and localize the
+    # cause for the artifact diff to confirm.
+    _E("exceptions_mode_changed", _R,
+       impact="C++ exception support was toggled between builds (-fexceptions ↔ "
+              "-fno-exceptions). The two modes are not link-compatible: an "
+              "exception thrown in -fexceptions code that unwinds through a frame "
+              "compiled with -fno-exceptions is undefined behaviour (it calls "
+              "std::terminate at best), and -fno-exceptions changes the codegen "
+              "and emitted cleanup/EH tables of every public inline that uses "
+              "throw/try/catch. If the public API exposes exception types or "
+              "throwing inlines, rebuild all consumers in the matching mode."),
+    _E("rtti_mode_changed", _R,
+       impact="C++ RTTI support was toggled between builds (-frtti ↔ -fno-rtti). "
+              "-fno-rtti omits typeinfo for polymorphic types, so dynamic_cast / "
+              "typeid against those types, and cross-DSO exception matching that "
+              "relies on RTTI identity, can fail to link or silently misbehave "
+              "when one side was built with RTTI and the other without. If the "
+              "public API exposes polymorphic types or dynamic_cast/typeid in "
+              "inlines, rebuild consumers in the matching mode."),
+    _E("tls_model_changed", _R,
+       impact="The thread-local storage model changed between builds "
+              "(-ftls-model=, or -fextern-tls-init ↔ -fno-extern-tls-init). The "
+              "TLS access sequence (and, with -fextern-tls-init, whether a wrapper "
+              "function mediates access to a dynamically-initialized thread_local "
+              "from another TU) differs, so consumers built against the old model "
+              "can use the wrong access pattern for an exported thread_local."),
+    _E("threadsafe_statics_mode_changed", _R,
+       impact="Thread-safe initialization of function-local statics was toggled "
+              "(-fno-threadsafe-statics ↔ default). With -fno-threadsafe-statics "
+              "the compiler omits the __cxa_guard acquire/release calls around a "
+              "local static's first-use initialization, so a public inline holding "
+              "a function-local static, compiled in different modes across TUs, has "
+              "mismatched guard expectations — a data race or double-init on "
+              "concurrent first use."),
 
     # ── Source ABI replay evidence (ADR-028 L4 / ADR-030 D6) ────────────────
     # Produced by the source-replay diff over two linked source ABI surfaces.

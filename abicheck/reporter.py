@@ -252,6 +252,7 @@ class ShowOnlyFilter:
                 "toolchain_flag_drift",
                 "source_level_kind_changed",
                 "value_abi_trait_changed",
+                "struct_return_convention_changed",
             ),
         }
         for elem in self.elements:

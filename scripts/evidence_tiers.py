@@ -125,6 +125,7 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     "char8t_migration": "L1",
     "bit_int_width_changed": "L1",
     "value_abi_trait_changed": "L1",
+    "struct_return_convention_changed": "L1",
     "integer_model_changed": "L1",
     "type_became_opaque": "L1",
     "func_virtual_added": "L1",
@@ -152,9 +153,13 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     # ── L3: build-system context (compile DB) uniquely required ──
     # The dedicated L3 build-evidence kinds (abi_relevant_build_flag_changed,
     # toolchain_version_changed, link_export_policy_changed, …) are produced by
-    # the BuildSourcePack build diff (ADR-029); the example catalog has no case that
-    # *only* L3 can see yet — the one flag-drift case (103) is already visible at
-    # L1 via DWARF-recorded flags — so no kind maps here today.
+    # the BuildSourcePack build diff (ADR-029). The runtime-model flips below are
+    # only proven from the captured build options (a flag flip with no necessary
+    # binary footprint), so they are genuinely L3.
+    "exceptions_mode_changed": "L3",
+    "rtti_mode_changed": "L3",
+    "tls_model_changed": "L3",
+    "threadsafe_statics_mode_changed": "L3",
 }
 
 # Cases with no ``expected_kinds`` (NO_CHANGE baselines, scoped-internal cases,

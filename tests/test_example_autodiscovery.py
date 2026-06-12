@@ -103,6 +103,14 @@ SCOPE_PUBLIC_HEADERS: dict[str, bool] = {
     k: bool(v.get("scope_public_headers", False))
     for k, v in _gt_data["verdicts"].items()
 }
+# build_info: cases that ship per-side compile_commands.json and assert an L3
+# build-evidence finding (a runtime-model flip). This pipeline validates via the
+# Python compare() API, which does NOT run the build-evidence diff — only the CLI
+# path does — so these are validated by tests/validate_examples.py and skipped
+# here rather than producing a spurious "no change" verdict.
+BUILD_INFO_CASES: set[str] = {
+    k for k, v in _gt_data["verdicts"].items() if v.get("build_info")
+}
 
 
 # ---------------------------------------------------------------------------
@@ -510,6 +518,12 @@ def test_example_pipeline(
         pytest.skip(
             f"{case_name} not supported on {CURRENT_PLATFORM} "
             f"(requires {case_platforms})"
+        )
+
+    if case_name in BUILD_INFO_CASES:
+        pytest.skip(
+            f"{case_name}: L3 build-info case — validated by validate_examples.py "
+            "(the Python compare() API used here does not run the build-evidence diff)"
         )
 
     if not shutil.which("castxml"):

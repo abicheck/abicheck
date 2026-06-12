@@ -3,7 +3,7 @@
 
 Listed in `BREAKING_KINDS` — runtime ABI break.
 
-_87 case(s)._ [← back to all examples](../index.md)
+_88 case(s)._ [← back to all examples](../index.md)
 
 | Case | Title | Verdict | Category |
 |------|-------|---------|----------|
@@ -32,6 +32,7 @@ _87 case(s)._ [← back to all examples](../index.md)
 | [case121_kernel_btf_struct_field_added](../case121_kernel_btf_struct_field_added.md) | Kernel BTF struct grows a field (out-of-tree module break) | 🔴 BREAKING | Breaking |
 | [case126_sycl_device_impl_ptr](../case126_sycl_device_impl_ptr.md) | SYCL `device` impl pointer — `shared_ptr` → raw pointer | 🔴 BREAKING | Breaking |
 | [case127_data_object_size_changed](../case127_data_object_size_changed.md) | Exported Data Object Size Change | 🔴 BREAKING | Breaking |
+| [case129_struct_return_convention](../case129_struct_return_convention.md) | Struct-Return Convention Change | 🔴 BREAKING | Breaking |
 | [case12_function_removed](../case12_function_removed.md) | Function Removed from Shared Library | 🔴 BREAKING | Breaking |
 | [case14_cpp_class_size](../case14_cpp_class_size.md) | C++ Class Size Change | 🔴 BREAKING | Breaking |
 | [case17_template_abi](../case17_template_abi.md) | Template Instantiation ABI Change | 🔴 BREAKING | Breaking |

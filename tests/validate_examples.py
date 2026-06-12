@@ -312,6 +312,25 @@ def _build_libs(
     return v1_so, v2_so, None
 
 
+def _build_info_path(
+    case_dir: Path | None, stem: str, build_info: bool = False
+) -> Path | None:
+    """Return the per-side L3 build-info file for *stem* (``v1``/``v2``) if any.
+
+    A case opts into L3 build-evidence comparison by declaring ``build_info: true``
+    in ``ground_truth.json`` *and* shipping a ``<stem>.compile_commands.json`` next
+    to its sources; the dump then embeds that build context so ``compare`` runs the
+    build-evidence diff (the source of the runtime-model-flip findings). The
+    ground-truth flag is the contract — file presence alone never silently upgrades
+    a case to L3. Pure/​unit-testable: only checks for the file, no I/O beyond
+    ``exists()``.
+    """
+    if case_dir is None or not build_info:
+        return None
+    candidate = case_dir / f"{stem}.compile_commands.json"
+    return candidate if candidate.exists() else None
+
+
 def _dump_and_compare(
     tmp: Path,
     v1_so: Path,
@@ -319,6 +338,8 @@ def _dump_and_compare(
     v1_hdr: Path | None,
     v2_hdr: Path | None,
     scope_public_headers: bool = False,
+    case_dir: Path | None = None,
+    build_info: bool = False,
 ) -> tuple[str | None, str | None]:
     """Run abicheck dump+compare. Returns (verdict, error_msg).
 
@@ -328,6 +349,9 @@ def _dump_and_compare(
     cmd1 = [sys.executable, "-m", "abicheck.cli", "dump", str(v1_so), "-o", str(snap1)]
     if v1_hdr and Path(v1_hdr).exists():
         cmd1 += ["-H", str(v1_hdr)]
+    bi1 = _build_info_path(case_dir, "v1", build_info)
+    if bi1 is not None:
+        cmd1 += ["--build-info", str(bi1)]
     r1 = subprocess.run(cmd1, capture_output=True, text=True, timeout=60)
     if r1.returncode != 0:
         return None, f"dump v1 failed: {r1.stderr[:200]}"
@@ -336,6 +360,9 @@ def _dump_and_compare(
     cmd2 = [sys.executable, "-m", "abicheck.cli", "dump", str(v2_so), "-o", str(snap2)]
     if v2_hdr and Path(v2_hdr).exists():
         cmd2 += ["-H", str(v2_hdr)]
+    bi2 = _build_info_path(case_dir, "v2", build_info)
+    if bi2 is not None:
+        cmd2 += ["--build-info", str(bi2)]
     r2 = subprocess.run(cmd2, capture_output=True, text=True, timeout=60)
     if r2.returncode != 0:
         return None, f"dump v2 failed: {r2.stderr[:200]}"
@@ -471,6 +498,8 @@ def run_case(
     got, dc_err = _dump_and_compare(
         tmp, v1_so, v2_so, v1_hdr, v2_hdr,
         scope_public_headers=bool(entry.get("scope_public_headers", False)),
+        case_dir=case_dir,
+        build_info=bool(entry.get("build_info", False)),
     )
     if dc_err is not None:
         return CaseResult(name, "ERROR", expected_raw, None, dc_err)

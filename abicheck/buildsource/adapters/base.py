@@ -46,7 +46,41 @@ ABI_RELEVANT_FLAG_PREFIXES: tuple[str, ...] = (
     "-fpack-struct", "/Zp", "-fshort-enums", "-fshort-wchar",
     "-fabi-version", "-fno-rtti", "-frtti", "-fno-exceptions", "-fexceptions",
     "-flto", "-fno-lto", "-fwhole-program-vtables",
+    "-ftls-model", "-fextern-tls-init", "-fno-extern-tls-init",
+    "-fno-threadsafe-statics", "-fthreadsafe-statics",
+    "-freg-struct-return", "-fpcc-struct-return",
 )
+
+#: Runtime-model flags normalized to a canonical (key, value) so a mode flip is
+#: diffable regardless of spelling/order, and absence (= compiler default) never
+#: reads as a change. The build-evidence diff routes these canonical keys to the
+#: dedicated EXCEPTIONS/RTTI/TLS/THREADSAFE_STATICS_MODE_CHANGED findings.
+#: Keys here are intentionally distinct from the raw-flag keys other options use.
+_RUNTIME_MODE_FLAGS: dict[str, tuple[str, str]] = {
+    "-fexceptions": ("exceptions", "on"),
+    "-fno-exceptions": ("exceptions", "off"),
+    "-frtti": ("rtti", "on"),
+    "-fno-rtti": ("rtti", "off"),
+    "-fextern-tls-init": ("tls_init", "extern"),
+    "-fno-extern-tls-init": ("tls_init", "local"),
+    "-fthreadsafe-statics": ("threadsafe_statics", "on"),
+    "-fno-threadsafe-statics": ("threadsafe_statics", "off"),
+}
+
+#: Runtime-mode keys whose compiler default depends on the source language
+#: (C++ vs C), so the option is recorded as ``<key>:<lang>`` (like ``std:<lang>``)
+#: and the build-evidence diff infers the per-language default for an omitted
+#: flag. TLS keys are language-agnostic and are not qualified.
+_LANG_QUALIFIED_MODE_KEYS: frozenset[str] = frozenset(
+    {"exceptions", "rtti", "threadsafe_statics"}
+)
+# Known limitation: a TU that omits a runtime-mode flag entirely contributes no
+# option (the compiler default is implicit), so a *mixed* build where some TUs
+# are default-on and others carry an explicit ``-fno-*`` records only the
+# explicit value. A partial flip within such a heterogeneous library can be
+# under-reported here; the artifact diff still proves any concrete break, and
+# building a whole library half-and-half is rare. The common all-or-nothing
+# mode flip across versions is detected.
 
 #: Macro defines whose value is ABI-relevant even though they're plain -D flags.
 _ABI_RELEVANT_DEFINES: tuple[str, ...] = (
@@ -79,6 +113,46 @@ def detect_language(source: str) -> str:
         if lower.endswith(ext):
             return lang
     return ""
+
+
+#: GNU ``-x <language>`` operand → normalized language. ``none`` cancels an
+#: earlier ``-x`` and reverts to extension-based detection. Unknown languages
+#: (assembler, ``cuda``, …) leave the forced language unchanged.
+_X_LANG_TO_NORMALIZED: dict[str, str] = {
+    "c": "C", "c-header": "C", "cpp-output": "C",
+    "objective-c": "OBJC", "objective-c-header": "OBJC", "objc-cpp-output": "OBJC",
+    "c++": "CXX", "c++-header": "CXX", "c++-cpp-output": "CXX",
+    "objective-c++": "OBJCXX", "objective-c++-header": "OBJCXX", "objc++-cpp-output": "OBJCXX",
+}
+
+
+def effective_language(argv: list[str], source: str) -> str:
+    """Normalized language honoring a forced ``-x <lang>`` / MSVC ``/Tp``/``/Tc``.
+
+    The command line overrides the source extension: ``g++ -x c++ -c foo.c``
+    compiles C++ even though ``foo.c`` reads as C, and MSVC ``/TP`` / ``/Tp<f>``
+    (force C++) / ``/TC`` / ``/Tc<f>`` (force C) do the same. The last forcing
+    token wins for a single-source TU. Falls back to :func:`detect_language` on
+    the source path when nothing on the command line forces the language.
+    """
+    forced = ""
+    i = 0
+    while i < len(argv):
+        arg = argv[i]
+        if arg == "-x" and i + 1 < len(argv):
+            tok = argv[i + 1].lower()
+            forced = "" if tok == "none" else _X_LANG_TO_NORMALIZED.get(tok, forced)
+            i += 2
+            continue
+        if arg.startswith("-x") and len(arg) > 2:
+            tok = arg[2:].lower()
+            forced = "" if tok == "none" else _X_LANG_TO_NORMALIZED.get(tok, forced)
+        elif arg == "/TP" or arg[:3] == "/Tp":
+            forced = "CXX"
+        elif arg == "/TC" or arg[:3] == "/Tc":
+            forced = "C"
+        i += 1
+    return forced or detect_language(source)
 
 
 #: Value-taking compiler flags whose *operand* is not the translation unit even
@@ -241,8 +315,32 @@ def derive_build_options(compile_units: list[CompileUnit]) -> list[BuildOption]:
             add("target", cu.target_triple, raw=cu.target_triple)
         if cu.sysroot:
             add("sysroot", cu.sysroot, raw=cu.sysroot)
+        # Runtime-mode flags are resolved per TU with last-one-wins semantics
+        # (GCC: "if conflicting, the last such option is effective"), so a TU
+        # that carries e.g. ``-fno-exceptions -fexceptions`` records only the
+        # effective ``on`` rather than both values. Collected here and emitted
+        # after the flag loop so a later flag can override an earlier one.
+        mode_values: dict[str, tuple[str, str]] = {}  # key -> (value, raw)
         for flag in cu.abi_relevant_flags:
-            if flag.startswith(("-D", "/D")):
+            if flag in _RUNTIME_MODE_FLAGS:
+                base_key, value = _RUNTIME_MODE_FLAGS[flag]
+                # exceptions/rtti/threadsafe-statics have language-dependent
+                # compiler defaults (on for C++, off / N-A for C), so qualify the
+                # key per language (mirrors the ``std:<lang>`` option) — the
+                # build-evidence diff then infers the right default for an
+                # omitted flag. TLS keys are language-agnostic and stay bare.
+                key = (
+                    f"{base_key}:{cu.language}"
+                    if base_key in _LANG_QUALIFIED_MODE_KEYS and cu.language
+                    else base_key
+                )
+                mode_values[key] = (value, flag)
+            elif flag.startswith("-ftls-model"):
+                # -ftls-model=<model>: canonical key so a model switch diffs as a
+                # single option regardless of which model string is on each side.
+                model = flag.split("=", 1)[1] if "=" in flag else ""
+                mode_values["tls_model"] = (model, flag)
+            elif flag.startswith(("-D", "/D")):
                 key, _, value = flag[2:].partition("=")
                 add(f"define:{key}", value, raw=flag)
             elif flag.startswith(_STD_FLAG_PREFIXES):
@@ -262,6 +360,9 @@ def derive_build_options(compile_units: list[CompileUnit]) -> list[BuildOption]:
                 continue
             else:
                 add(flag.split("=", 1)[0], flag, raw=flag)
+        for key, (value, raw) in mode_values.items():
+            add(key, value, raw=raw)
+
     return out
 
 

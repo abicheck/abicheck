@@ -482,6 +482,473 @@ def test_header_parse_drift_silent_with_context():
     assert check_header_parse_drift(ev, headers_parsed_with_context=True) == []
 
 
+def _opt(key: str, value: str) -> BuildOption:
+    return BuildOption(key, value, abi_relevant=True)
+
+
+def test_runtime_mode_flags_normalize_to_canonical_keys():
+    from abicheck.buildsource.adapters.base import derive_build_options
+    from abicheck.buildsource.build_evidence import CompileUnit
+
+    cu = CompileUnit(
+        id="cu://x",
+        language="CXX",
+        abi_relevant_flags=[
+            "-fno-exceptions", "-fno-rtti",
+            "-ftls-model=initial-exec", "-fno-threadsafe-statics",
+        ],
+    )
+    opts = {(o.key, o.value) for o in derive_build_options([cu])}
+    # C++-concept mode keys are language-qualified (like std:<lang>); TLS is not.
+    assert ("exceptions:CXX", "off") in opts
+    assert ("rtti:CXX", "off") in opts
+    assert ("tls_model", "initial-exec") in opts
+    assert ("threadsafe_statics:CXX", "off") in opts
+
+
+@pytest.mark.parametrize("argv, source, expected", [
+    # No forcing: extension wins.
+    (["g++", "-c", "foo.cpp"], "foo.cpp", "CXX"),
+    (["gcc", "-c", "foo.c"], "foo.c", "C"),
+    # GNU -x forces the language over the extension (split and combined forms).
+    (["g++", "-x", "c++", "-c", "foo.c"], "foo.c", "CXX"),
+    (["gcc", "-xc", "-c", "foo.cpp"], "foo.cpp", "C"),
+    # -x none reverts to extension-based detection.
+    (["g++", "-x", "c++", "-x", "none", "-c", "foo.c"], "foo.c", "C"),
+    # Last -x wins for a single-source TU.
+    (["g++", "-x", "c", "-x", "c++", "-c", "foo.c"], "foo.c", "CXX"),
+    # MSVC /TP and /Tp<file> force C++, /TC and /Tc<file> force C.
+    (["cl", "/c", "/TP", "foo.c"], "foo.c", "CXX"),
+    (["cl", "/c", "/Tpfoo.c"], "foo.c", "CXX"),
+    (["cl", "/c", "/TC", "foo.cpp"], "foo.cpp", "C"),
+    (["cl", "/c", "/Tcfoo.cpp"], "foo.cpp", "C"),
+    # Unknown -x language leaves the extension-derived language intact.
+    (["clang", "-x", "assembler", "-c", "foo.cpp"], "foo.cpp", "CXX"),
+    # Forced Objective-C/Objective-C++ keep their own tokens (match .m/.mm
+    # extension detection), so a redundant -x on a .mm file is a no-op.
+    (["clang++", "-x", "objective-c++", "-c", "foo.mm"], "foo.mm", "OBJCXX"),
+    (["clang", "-x", "objective-c", "-c", "foo.m"], "foo.m", "OBJC"),
+])
+def test_effective_language_honors_forced_language(argv, source, expected):
+    from abicheck.buildsource.adapters.base import effective_language
+    assert effective_language(argv, source) == expected
+
+
+def test_redundant_objcxx_forced_language_is_no_op_drift(tmp_path):
+    # Codex P2: clang++ -x objective-c++ on a .mm TU must stay OBJCXX, not collapse
+    # to CXX — otherwise std:OBJCXX->std:CXX reads as false build-flag drift.
+    from abicheck.buildsource.adapters.compile_db import CompileDbAdapter
+
+    def _db(args):
+        p = tmp_path / f"cc_{abs(hash(tuple(args)))}.json"
+        p.write_text(json.dumps([{
+            "directory": str(tmp_path), "file": "foo.mm", "arguments": args,
+        }]))
+        return CompileDbAdapter(p).collect()
+
+    old = _db(["clang++", "-std=c++17", "-c", "foo.mm"])
+    new = _db(["clang++", "-x", "objective-c++", "-std=c++17", "-c", "foo.mm"])
+    assert old.compile_units[0].language == "OBJCXX"
+    assert new.compile_units[0].language == "OBJCXX"
+    # No std:CXX/std:OBJCXX add+remove churn — the only std option is std:OBJCXX.
+    assert not any(c.kind is ChangeKind.ABI_RELEVANT_BUILD_FLAG_CHANGED
+                   for c in diff_build_evidence(old, new))
+
+
+def test_compile_db_forced_language_drives_runtime_mode_key(tmp_path):
+    # Codex P2: g++ -x c++ -c foo.c is C++, so an omitted->-fno-exceptions flip
+    # must compare against the C++ default (on) and report a mode change, not be
+    # masked as C's default-off vs explicit-off.
+    from abicheck.buildsource.adapters.compile_db import CompileDbAdapter
+
+    def _db(extra_flags):
+        p = tmp_path / f"cc_{abs(hash(tuple(extra_flags)))}.json"
+        entries = [{
+            "directory": str(tmp_path),
+            "file": "foo.c",
+            "arguments": ["g++", "-x", "c++", *extra_flags, "-c", "foo.c"],
+        }]
+        p.write_text(json.dumps(entries))
+        return CompileDbAdapter(p).collect()
+
+    old = _db([])                 # omitted exceptions -> C++ default on
+    new = _db(["-fno-exceptions"])  # explicit off
+    # The forced language must record exceptions:CXX (not exceptions:C).
+    assert old.compile_units[0].language == "CXX"
+    changes = diff_build_evidence(old, new)
+    assert any(c.kind is ChangeKind.EXCEPTIONS_MODE_CHANGED for c in changes)
+
+
+def test_runtime_mode_flags_last_one_wins_per_tu():
+    # Codex P2: conflicting flags within one compile command resolve to the
+    # last one (GCC semantics), so -fno-exceptions -fexceptions records only
+    # the effective "on", not both values.
+    from abicheck.buildsource.adapters.base import derive_build_options
+    from abicheck.buildsource.build_evidence import CompileUnit
+
+    cu = CompileUnit(
+        id="cu://x", language="CXX",
+        abi_relevant_flags=["-fno-exceptions", "-fexceptions"],
+    )
+    opts = {(o.key, o.value) for o in derive_build_options([cu])}
+    assert ("exceptions:CXX", "on") in opts
+    assert ("exceptions:CXX", "off") not in opts
+
+    cu2 = CompileUnit(
+        id="cu://y", language="CXX",
+        abi_relevant_flags=["-frtti", "-fno-rtti"],
+    )
+    opts2 = {(o.key, o.value) for o in derive_build_options([cu2])}
+    assert ("rtti:CXX", "off") in opts2
+    assert ("rtti:CXX", "on") not in opts2
+
+
+def test_exceptions_default_is_language_aware():
+    # Codex P2: -fexceptions default is on for C++, off for C. An omitted flag
+    # must use the language-correct default so a C TU is neither a false flip
+    # nor a missed one.
+    from abicheck.buildsource.adapters.base import derive_build_options
+    from abicheck.buildsource.build_evidence import CompileUnit
+
+    def ev(lang, *flags, src="s.cpp"):
+        cu = CompileUnit(id=f"cu://{lang}", language=lang, source=src,
+                         abi_relevant_flags=list(flags))
+        return BuildEvidence(compile_units=[cu], build_options=derive_build_options([cu]))
+
+    # C: omitted (default off) vs explicit -fno-exceptions (off) → no change.
+    c_old = ev("C", src="s.c")
+    c_new = ev("C", "-fno-exceptions", src="s.c")
+    assert not any(
+        c.kind is ChangeKind.EXCEPTIONS_MODE_CHANGED
+        for c in diff_build_evidence(c_old, c_new)
+    )
+    # C: omitted (default off) → explicit -fexceptions (on) → real flip.
+    c_on = ev("C", "-fexceptions", src="s.c")
+    assert any(
+        c.kind is ChangeKind.EXCEPTIONS_MODE_CHANGED
+        for c in diff_build_evidence(c_old, c_on)
+    )
+    # C++: omitted (default on) → -fno-exceptions (off) → real flip.
+    cxx_old = ev("CXX")
+    cxx_new = ev("CXX", "-fno-exceptions")
+    assert any(
+        c.kind is ChangeKind.EXCEPTIONS_MODE_CHANGED
+        for c in diff_build_evidence(cxx_old, cxx_new)
+    )
+
+
+def test_diff_emits_exceptions_mode_changed():
+    old = BuildEvidence(build_options=[_opt("exceptions", "on")])
+    new = BuildEvidence(build_options=[_opt("exceptions", "off")])
+    changes = diff_build_evidence(old, new)
+    assert any(c.kind is ChangeKind.EXCEPTIONS_MODE_CHANGED for c in changes)
+    # The specific mode finding replaces the generic ABI-flag finding for this key.
+    assert not any(c.kind is ChangeKind.ABI_RELEVANT_BUILD_FLAG_CHANGED for c in changes)
+
+
+def test_diff_emits_rtti_mode_changed():
+    old = BuildEvidence(build_options=[_opt("rtti", "on")])
+    new = BuildEvidence(build_options=[_opt("rtti", "off")])
+    changes = diff_build_evidence(old, new)
+    assert any(c.kind is ChangeKind.RTTI_MODE_CHANGED for c in changes)
+
+
+def test_diff_emits_threadsafe_statics_mode_changed():
+    old = BuildEvidence(build_options=[_opt("threadsafe_statics", "on")])
+    new = BuildEvidence(build_options=[_opt("threadsafe_statics", "off")])
+    changes = diff_build_evidence(old, new)
+    assert any(c.kind is ChangeKind.THREADSAFE_STATICS_MODE_CHANGED for c in changes)
+
+
+def test_diff_emits_tls_model_changed():
+    old = BuildEvidence(build_options=[_opt("tls_model", "global-dynamic")])
+    new = BuildEvidence(build_options=[_opt("tls_model", "initial-exec")])
+    changes = diff_build_evidence(old, new)
+    assert any(c.kind is ChangeKind.TLS_MODEL_CHANGED for c in changes)
+
+
+@pytest.mark.parametrize("model", ("global-dynamic", "initial-exec"))
+def test_tls_model_omitted_vs_explicit_default_is_no_change(model):
+    # global-dynamic / initial-exec can equal the -fpic-dependent compiler
+    # default, so an omitted flag must not read as a flip against them.
+    old = BuildEvidence(build_options=[])
+    new = BuildEvidence(build_options=[_opt("tls_model", model)])
+    assert not any(
+        c.kind is ChangeKind.TLS_MODEL_CHANGED for c in diff_build_evidence(old, new)
+    )
+    assert not any(
+        c.kind is ChangeKind.TLS_MODEL_CHANGED for c in diff_build_evidence(new, old)
+    )
+
+
+@pytest.mark.parametrize("model", ("local-exec", "local-dynamic"))
+def test_tls_model_omitted_vs_never_default_is_reported(model):
+    # local-exec / local-dynamic are never the auto-default, so an omitted ->
+    # explicit transition to them is always a real, reportable change.
+    old = BuildEvidence(build_options=[])
+    new = BuildEvidence(build_options=[_opt("tls_model", model)])
+    assert any(
+        c.kind is ChangeKind.TLS_MODEL_CHANGED for c in diff_build_evidence(old, new)
+    )
+    # symmetric: dropping an explicit local-* model is also reportable.
+    assert any(
+        c.kind is ChangeKind.TLS_MODEL_CHANGED for c in diff_build_evidence(new, old)
+    )
+
+
+def test_tls_init_omitted_vs_no_extern_is_reported():
+    # GCC default is -fextern-tls-init (extern); an omitted->-fno-extern-tls-init
+    # flip is a real extern->local TLS-init mode change.
+    old = BuildEvidence(build_options=[])
+    new = BuildEvidence(build_options=[_opt("tls_init", "local")])
+    assert any(
+        c.kind is ChangeKind.TLS_MODEL_CHANGED for c in diff_build_evidence(old, new)
+    )
+    assert any(
+        c.kind is ChangeKind.TLS_MODEL_CHANGED for c in diff_build_evidence(new, old)
+    )
+
+
+def test_tls_init_omitted_vs_explicit_extern_is_no_change():
+    # Explicit -fextern-tls-init equals the omitted default, so no flip.
+    old = BuildEvidence(build_options=[])
+    new = BuildEvidence(build_options=[_opt("tls_init", "extern")])
+    assert not any(
+        c.kind is ChangeKind.TLS_MODEL_CHANGED for c in diff_build_evidence(old, new)
+    )
+
+
+def test_tls_model_omitted_vs_mixed_with_never_default_is_reported():
+    # Multi-config explicit side carries a *mix*: one TU at the (possibly-default)
+    # global-dynamic and one at local-exec (never the auto-default). The omitted
+    # side must not suppress the whole change — the local-exec TU is a real flip.
+    old = BuildEvidence(build_options=[])
+    new = BuildEvidence(build_options=[
+        _opt("tls_model", "global-dynamic"),
+        _opt("tls_model", "local-exec"),
+    ])
+    assert any(
+        c.kind is ChangeKind.TLS_MODEL_CHANGED for c in diff_build_evidence(old, new)
+    )
+    assert any(
+        c.kind is ChangeKind.TLS_MODEL_CHANGED for c in diff_build_evidence(new, old)
+    )
+
+
+def test_tls_model_omitted_vs_mixed_all_maybe_default_is_suppressed():
+    # A mix of only maybe-default models (global-dynamic / initial-exec) against
+    # an omitted side stays suppressed — none is guaranteed non-default.
+    old = BuildEvidence(build_options=[])
+    new = BuildEvidence(build_options=[
+        _opt("tls_model", "global-dynamic"),
+        _opt("tls_model", "initial-exec"),
+    ])
+    assert not any(
+        c.kind is ChangeKind.TLS_MODEL_CHANGED for c in diff_build_evidence(old, new)
+    )
+
+
+@pytest.mark.parametrize("key, kind", [
+    ("exceptions:OBJCXX", ChangeKind.EXCEPTIONS_MODE_CHANGED),
+    ("rtti:OBJCXX", ChangeKind.RTTI_MODE_CHANGED),
+    ("threadsafe_statics:OBJCXX", ChangeKind.THREADSAFE_STATICS_MODE_CHANGED),
+])
+def test_objcxx_mode_omitted_vs_off_is_a_change(key, kind):
+    # Native .mm TUs record OBJCXX; Objective-C++ is a C++ superset, so the
+    # runtime defaults are on. An omitted->explicit-off flip must be reported.
+    old = BuildEvidence(build_options=[])
+    new = BuildEvidence(build_options=[_opt(key, "off")])
+    assert any(c.kind is kind for c in diff_build_evidence(old, new))
+    assert any(c.kind is kind for c in diff_build_evidence(new, old))
+
+
+def test_objcxx_exceptions_omitted_vs_on_is_no_change():
+    # Explicit -fexceptions on a .mm TU equals the OBJCXX default (on).
+    old = BuildEvidence(build_options=[])
+    new = BuildEvidence(build_options=[_opt("exceptions:OBJCXX", "on")])
+    assert not any(
+        c.kind is ChangeKind.EXCEPTIONS_MODE_CHANGED for c in diff_build_evidence(old, new)
+    )
+
+
+def test_objc_exceptions_omitted_vs_off_is_no_change():
+    # Objective-C (.m) defaults exceptions off, like C — omitted vs explicit off
+    # is not a flip.
+    old = BuildEvidence(build_options=[])
+    new = BuildEvidence(build_options=[_opt("exceptions:OBJC", "off")])
+    assert not any(
+        c.kind is ChangeKind.EXCEPTIONS_MODE_CHANGED for c in diff_build_evidence(old, new)
+    )
+
+
+def test_exceptions_mode_cxx_on_vs_absent_is_no_change():
+    # For C++ (exceptions:CXX), absent == default on; an explicit -fexceptions
+    # against an omitted flag must not read as a mode flip.
+    old = BuildEvidence(build_options=[])
+    new = BuildEvidence(build_options=[_opt("exceptions:CXX", "on")])
+    changes = diff_build_evidence(old, new)
+    assert not any(c.kind is ChangeKind.EXCEPTIONS_MODE_CHANGED for c in changes)
+
+
+def test_exceptions_mode_cxx_off_vs_absent_is_a_change():
+    # C++ omitted (default on) → explicit off is a real flip.
+    old = BuildEvidence(build_options=[])
+    new = BuildEvidence(build_options=[_opt("exceptions:CXX", "off")])
+    changes = diff_build_evidence(old, new)
+    assert any(c.kind is ChangeKind.EXCEPTIONS_MODE_CHANGED for c in changes)
+
+
+def test_exceptions_mode_unknown_language_requires_both_explicit():
+    # A bare (source-less / unknown-language) record must not assume C++: an
+    # omitted -> explicit transition is suppressed since C defaults exceptions off.
+    old = BuildEvidence(build_options=[])
+    new = BuildEvidence(build_options=[_opt("exceptions", "off")])
+    assert not any(
+        c.kind is ChangeKind.EXCEPTIONS_MODE_CHANGED for c in diff_build_evidence(old, new)
+    )
+    # Both sides explicit still diffs.
+    both = diff_build_evidence(
+        BuildEvidence(build_options=[_opt("exceptions", "on")]),
+        BuildEvidence(build_options=[_opt("exceptions", "off")]),
+    )
+    assert any(c.kind is ChangeKind.EXCEPTIONS_MODE_CHANGED for c in both)
+
+
+def test_struct_return_convention_change_from_return_trait_flip():
+    from abicheck.dwarf_advanced import AdvancedDwarfMetadata, _diff_value_abi_traits
+
+    old = AdvancedDwarfMetadata()
+    new = AdvancedDwarfMetadata()
+    old.value_abi_traits["_Z3getv"] = "ret:trivial"
+    new.value_abi_traits["_Z3getv"] = "ret:nontrivial"
+    results = _diff_value_abi_traits(old, new, set())
+    kinds = {r[0] for r in results}
+    assert "struct_return_convention_changed" in kinds
+    assert "value_abi_trait_changed" not in kinds
+
+
+def test_large_aggregate_return_flip_stays_value_abi_trait():
+    # Codex P2: a >16-byte aggregate is memory-returned both before and after a
+    # triviality change (no register<->sret flip), so it must NOT be labelled a
+    # struct-return convention change.
+    from abicheck.dwarf_advanced import AdvancedDwarfMetadata, _diff_value_abi_traits
+
+    old = AdvancedDwarfMetadata()
+    new = AdvancedDwarfMetadata()
+    old.value_abi_traits["_Z3getv"] = "ret:trivial"
+    new.value_abi_traits["_Z3getv"] = "ret:nontrivial"
+    old.return_value_sizes["_Z3getv"] = 24
+    new.return_value_sizes["_Z3getv"] = 24
+    kinds = {r[0] for r in _diff_value_abi_traits(old, new, set())}
+    assert "value_abi_trait_changed" in kinds
+    assert "struct_return_convention_changed" not in kinds
+
+
+def test_small_aggregate_return_flip_is_struct_return():
+    from abicheck.dwarf_advanced import AdvancedDwarfMetadata, _diff_value_abi_traits
+
+    old = AdvancedDwarfMetadata()
+    new = AdvancedDwarfMetadata()
+    old.value_abi_traits["_Z3getv"] = "ret:trivial"
+    new.value_abi_traits["_Z3getv"] = "ret:nontrivial"
+    old.return_value_sizes["_Z3getv"] = 8
+    new.return_value_sizes["_Z3getv"] = 8
+    kinds = {r[0] for r in _diff_value_abi_traits(old, new, set())}
+    assert "struct_return_convention_changed" in kinds
+    assert "value_abi_trait_changed" not in kinds
+
+
+def test_mixed_size_and_triviality_flip_stays_value_abi():
+    # Codex P2: old trivial @24B (memory, >16) → new nontrivial @8B (memory,
+    # nontrivial) is memory-returned on BOTH sides — no register<->sret flip — so
+    # it must NOT be labelled a struct-return convention change.
+    from abicheck.dwarf_advanced import AdvancedDwarfMetadata, _diff_value_abi_traits
+
+    old = AdvancedDwarfMetadata()
+    new = AdvancedDwarfMetadata()
+    old.value_abi_traits["_Z3getv"] = "ret:trivial"
+    new.value_abi_traits["_Z3getv"] = "ret:nontrivial"
+    old.return_value_sizes["_Z3getv"] = 24
+    new.return_value_sizes["_Z3getv"] = 8
+    kinds = {r[0] for r in _diff_value_abi_traits(old, new, set())}
+    assert "value_abi_trait_changed" in kinds
+    assert "struct_return_convention_changed" not in kinds
+
+
+def test_returns_in_registers_helper():
+    from abicheck.dwarf_advanced import _returns_in_registers
+
+    assert _returns_in_registers("trivial", 8) is True
+    assert _returns_in_registers("trivial", 16) is True
+    assert _returns_in_registers("trivial", 24) is False   # large trivial → memory
+    assert _returns_in_registers("nontrivial", 8) is False  # nontrivial → memory
+    assert _returns_in_registers("trivial", None) is True   # unknown → conservative
+    assert _returns_in_registers(None, 8) is False
+    # An unaligned member (packed) forces memory even for a small trivial type.
+    assert _returns_in_registers("trivial", 8, memory_forced=True) is False
+
+
+def test_return_aggregate_added_or_removed_is_not_struct_return():
+    # Codex P2: when the return aggregate component is only added/removed
+    # (aggregate <-> scalar return), the scalar side can still be register-
+    # returned, so it is not a register<->sret flip.
+    from abicheck.dwarf_advanced import AdvancedDwarfMetadata, _diff_value_abi_traits
+
+    old = AdvancedDwarfMetadata()
+    new = AdvancedDwarfMetadata()
+    # Aggregate return removed; a by-value aggregate parameter still differs so
+    # the whole trait changed and the symbol stays in both maps.
+    old.value_abi_traits["_Z1fP1S"] = "ret:trivial|p0:trivial"
+    new.value_abi_traits["_Z1fP1S"] = "p0:nontrivial"
+    kinds = {r[0] for r in _diff_value_abi_traits(old, new, set())}
+    assert "struct_return_convention_changed" not in kinds
+    assert "value_abi_trait_changed" in kinds
+
+
+def test_small_packed_aggregate_return_flip_stays_value_abi():
+    # Codex P2: a small packed struct (unaligned member) is memory-returned both
+    # before and after gaining a destructor — no register<->sret flip.
+    from abicheck.dwarf_advanced import AdvancedDwarfMetadata, _diff_value_abi_traits
+
+    old = AdvancedDwarfMetadata()
+    new = AdvancedDwarfMetadata()
+    old.value_abi_traits["_Z3getv"] = "ret:trivial"
+    new.value_abi_traits["_Z3getv"] = "ret:nontrivial"
+    old.return_value_sizes["_Z3getv"] = 12
+    new.return_value_sizes["_Z3getv"] = 12
+    old.return_memory_classified.add("_Z3getv")
+    new.return_memory_classified.add("_Z3getv")
+    kinds = {r[0] for r in _diff_value_abi_traits(old, new, set())}
+    assert "value_abi_trait_changed" in kinds
+    assert "struct_return_convention_changed" not in kinds
+
+
+def test_unknown_size_return_flip_stays_struct_return():
+    # No recorded size (older snapshots / non-DWARF mocks) → stay conservative
+    # and keep the struct-return label (the pre-gate behaviour).
+    from abicheck.dwarf_advanced import AdvancedDwarfMetadata, _diff_value_abi_traits
+
+    old = AdvancedDwarfMetadata()
+    new = AdvancedDwarfMetadata()
+    old.value_abi_traits["_Z3getv"] = "ret:trivial"
+    new.value_abi_traits["_Z3getv"] = "ret:nontrivial"
+    kinds = {r[0] for r in _diff_value_abi_traits(old, new, set())}
+    assert "struct_return_convention_changed" in kinds
+
+
+def test_param_only_trait_flip_stays_value_abi_trait():
+    from abicheck.dwarf_advanced import AdvancedDwarfMetadata, _diff_value_abi_traits
+
+    old = AdvancedDwarfMetadata()
+    new = AdvancedDwarfMetadata()
+    old.value_abi_traits["_Z3fooP1S"] = "ret:trivial|p0:trivial"
+    new.value_abi_traits["_Z3fooP1S"] = "ret:trivial|p0:nontrivial"
+    results = _diff_value_abi_traits(old, new, set())
+    kinds = {r[0] for r in results}
+    assert "value_abi_trait_changed" in kinds
+    assert "struct_return_convention_changed" not in kinds
+
+
 def test_diff_identical_evidence_is_empty():
     ev = BuildEvidence(
         build_options=[BuildOption("std:CXX", "c++20", abi_relevant=True)],
