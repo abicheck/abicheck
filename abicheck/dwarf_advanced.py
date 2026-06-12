@@ -520,6 +520,13 @@ def _aggregate_has_unaligned_member(die: Any, CU: Any, cache: _DwarfTypeCache | 
         natural = _get_type_align(child, CU)
         if natural > 1 and _decode_member_location(child) % natural != 0:
             return True
+        # A by-value composite member (e.g. a packed inner struct) forces MEMORY
+        # classification of the outer type even when its own offset is aligned;
+        # _get_type_align returns 0 for composites, so recurse into it. By-value
+        # nesting is a DAG (a struct cannot contain itself by value), so this
+        # terminates; pointer/reference members short-circuit at the top guard.
+        if natural <= 1 and _aggregate_has_unaligned_member(child, CU, cache=cache):
+            return True
     return False
 
 
@@ -967,57 +974,40 @@ def _diff_value_abi_traits(
     for fname in sorted((old_trait_keys & new_trait_keys) - already_reported_cc):
         old_trait = old_meta.value_abi_traits[fname]
         new_trait = new_meta.value_abi_traits[fname]
-        if old_trait == new_trait:
-            continue
-        # When the *return* component (ret:trivial ↔ ret:nontrivial) is what
-        # flipped, the aggregate *may* now be returned through a different
-        # mechanism (in-register ↔ hidden sret pointer). That register↔sret flip
-        # only happens for a SysV AMD64 aggregate that is <= 16 bytes: a larger
-        # struct is memory-returned both ways, so a triviality change there is a
-        # generic value-ABI (copy-semantics) change, not a return-convention
-        # flip. Only label it struct_return_convention_changed when at least one
-        # side is register-eligible (small, or size unknown — stay conservative).
         old_rc = _ret_component(old_trait)
         new_rc = _ret_component(new_trait)
-        # Require BOTH sides to have an aggregate return: when the return
-        # component is only added or removed (aggregate <-> scalar return) the
-        # new scalar can still be register-returned, so it is not a register/sret
-        # flip — leave that to the generic return/type findings.
-        if old_rc is not None and new_rc is not None and old_rc != new_rc:
-            old_reg = _returns_in_registers(
-                old_rc, old_meta.return_value_sizes.get(fname),
-                fname in old_meta.return_memory_classified,
-            )
-            new_reg = _returns_in_registers(
-                new_rc, new_meta.return_value_sizes.get(fname),
-                fname in new_meta.return_memory_classified,
-            )
-            if old_reg != new_reg:
-                # One side is register-returned and the other memory/sret — a real
-                # return-convention flip.
-                results.append((
-                    "struct_return_convention_changed", fname,
-                    f"Aggregate return convention changed: {fname} "
-                    f"({old_trait} → {new_trait})",
-                    old_trait, new_trait,
-                ))
-            else:
-                # Both sides return the same way (both register or, more commonly,
-                # both memory — e.g. a large trivial aggregate and a non-trivial
-                # one are each memory-returned). The triviality flip is then a
-                # generic value-ABI (copy-semantics) change, not a convention flip.
-                results.append((
-                    "value_abi_trait_changed", fname,
-                    f"DWARF value-ABI trait changed (aggregate return, same return "
-                    f"mechanism both sides): {fname} ({old_trait} → {new_trait})",
-                    old_trait, new_trait,
-                ))
-        else:
+        old_reg = _returns_in_registers(
+            old_rc, old_meta.return_value_sizes.get(fname),
+            fname in old_meta.return_memory_classified,
+        )
+        new_reg = _returns_in_registers(
+            new_rc, new_meta.return_value_sizes.get(fname),
+            fname in new_meta.return_memory_classified,
+        )
+        # struct_return_convention_changed only when BOTH sides return an
+        # aggregate by value (both ret components present) AND the register-vs-
+        # hidden-sret mechanism actually flipped — this covers a triviality flip,
+        # a size crossing the SysV 16-byte threshold (trait unchanged), or a
+        # packing change that forces MEMORY. When the return component is only
+        # added/removed (aggregate <-> scalar) the scalar side can still be
+        # register-returned, so that is left to the generic return/type findings.
+        if old_rc is not None and new_rc is not None and old_reg != new_reg:
+            results.append((
+                "struct_return_convention_changed", fname,
+                f"Aggregate return convention changed: {fname} "
+                f"({old_trait} → {new_trait})",
+                old_trait, new_trait,
+            ))
+        elif old_trait != new_trait:
+            # Same return mechanism (or a non-return trait change), but the
+            # value-ABI fingerprint still changed — a generic value-ABI trait
+            # change (parameter passing or copy-semantics).
             results.append((
                 "value_abi_trait_changed", fname,
                 f"DWARF value-ABI trait changed: {fname} ({old_trait} → {new_trait})",
                 old_trait, new_trait,
             ))
+        # else: identical trait and same return mechanism — nothing to report.
     return results
 
 

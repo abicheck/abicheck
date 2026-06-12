@@ -282,9 +282,10 @@ def _render_index(cases: list[Case]) -> str:
         WARNING,
         "# Examples & Case Encyclopedia\n\n",
         f"This catalog covers **{len(cases)} cases** demonstrating real-world "
-        "ABI/API change scenarios for C/C++ shared libraries. Each case is a "
-        "minimal compilable v1/v2 pair plus a consumer (`app.c`/`app.cpp`) "
-        "that demonstrates the actual runtime effect.\n\n",
+        "ABI/API change scenarios for C/C++ shared libraries. Most cases are a "
+        "minimal compilable v1/v2 pair plus a consumer (`app.c`/`app.cpp`) that "
+        "demonstrates the actual runtime effect; some build-mode cases ship only "
+        "the v1/v2 sources plus a per-side `compile_commands.json`.\n\n",
         "Use this catalog to:\n\n",
         "- Learn **what kinds of changes break ABI** vs. which are safe.\n"
         "- See the **runtime failure mode** for each break (crash, wrong output, silent corruption…).\n"

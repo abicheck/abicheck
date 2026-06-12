@@ -10,7 +10,7 @@
 | **Detected `ChangeKind`s** | `threadsafe_statics_mode_changed` |
 | **Source files** | `examples/case132_threadsafe_statics_flip/` |
 
-**Category:** Build mode | **Verdict:** 🟠 COMPATIBLE_WITH_RISK
+**Category:** Build mode | **Verdict:** 🟡 COMPATIBLE_WITH_RISK
 
 > Same source, same symbols; v1 built with thread-safe local-static
 > initialization (`-fthreadsafe-statics`, the default), v2 with
@@ -34,8 +34,8 @@ normalizes to the canonical `threadsafe_statics` option and reports the flip.
 
 ## Reproduce manually
 ```bash
-g++ -shared -fPIC -g v1.cpp -o libv1.so
-g++ -shared -fPIC -g v2.cpp -o libv2.so
+g++ -shared -fPIC -g -fthreadsafe-statics v1.cpp -o libv1.so
+g++ -shared -fPIC -g -fno-threadsafe-statics v2.cpp -o libv2.so
 abicheck dump libv1.so --build-info v1.compile_commands.json -o v1.abi.json
 abicheck dump libv2.so --build-info v2.compile_commands.json -o v2.abi.json
 abicheck compare v1.abi.json v2.abi.json   # → threadsafe_statics_mode_changed

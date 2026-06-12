@@ -79,6 +79,7 @@ CHANGED_BREAKING_KINDS: frozenset[str] = frozenset({
     "struct_field_type_changed", "struct_alignment_changed",
     "field_bitfield_changed",
     "calling_convention_changed", "struct_packing_changed",
+    "struct_return_convention_changed",
     "func_visibility_changed",
     "typedef_base_changed",
     "union_field_type_changed",

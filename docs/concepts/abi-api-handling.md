@@ -240,8 +240,7 @@ These three tiers are artifact layers **L0–L2**. Two optional layers go
 further without overriding an artifact-proven break: **L3** build context
 (`-p build/`) pins the exact ABI-affecting flags, and **L4** source/evidence
 packs recover several of the otherwise-invisible source-only facts above
-(macro/`constexpr` values, uninstantiated templates). See [Source & Build
-Build & Source Packs](build-source-data.md) and the full [L0–L4
+(macro/`constexpr` values, uninstantiated templates). See [Build & Source Packs](build-source-data.md) and the full [L0–L4
 model](evidence-and-detectability.md).
 
 #### Which input proves which family

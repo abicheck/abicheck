@@ -1,6 +1,6 @@
 # Case 133: TLS Model Flip (`-ftls-model`)
 
-**Category:** Build mode | **Verdict:** 🟠 COMPATIBLE_WITH_RISK
+**Category:** Build mode | **Verdict:** 🟡 COMPATIBLE_WITH_RISK
 
 > Same source, same symbols; v1 built with `-ftls-model=global-dynamic`, v2 with
 > `-ftls-model=initial-exec`. The L3 build context reveals the change →
@@ -23,8 +23,8 @@ normalizes both to the canonical `tls_model` option and reports the switch.
 
 ## Reproduce manually
 ```bash
-g++ -shared -fPIC -g v1.cpp -o libv1.so
-g++ -shared -fPIC -g v2.cpp -o libv2.so
+g++ -shared -fPIC -g -ftls-model=global-dynamic v1.cpp -o libv1.so
+g++ -shared -fPIC -g -ftls-model=initial-exec v2.cpp -o libv2.so
 abicheck dump libv1.so --build-info v1.compile_commands.json -o v1.abi.json
 abicheck dump libv2.so --build-info v2.compile_commands.json -o v2.abi.json
 abicheck compare v1.abi.json v2.abi.json   # → tls_model_changed

@@ -594,33 +594,33 @@ def test_diff_emits_tls_model_changed():
     assert any(c.kind is ChangeKind.TLS_MODEL_CHANGED for c in changes)
 
 
-def test_tls_model_omitted_vs_explicit_default_is_no_change():
+@pytest.mark.parametrize("model", ("global-dynamic", "initial-exec"))
+def test_tls_model_omitted_vs_explicit_default_is_no_change(model):
     # global-dynamic / initial-exec can equal the -fpic-dependent compiler
     # default, so an omitted flag must not read as a flip against them.
-    for model in ("global-dynamic", "initial-exec"):
-        old = BuildEvidence(build_options=[])
-        new = BuildEvidence(build_options=[_opt("tls_model", model)])
-        assert not any(
-            c.kind is ChangeKind.TLS_MODEL_CHANGED for c in diff_build_evidence(old, new)
-        )
-        assert not any(
-            c.kind is ChangeKind.TLS_MODEL_CHANGED for c in diff_build_evidence(new, old)
-        )
+    old = BuildEvidence(build_options=[])
+    new = BuildEvidence(build_options=[_opt("tls_model", model)])
+    assert not any(
+        c.kind is ChangeKind.TLS_MODEL_CHANGED for c in diff_build_evidence(old, new)
+    )
+    assert not any(
+        c.kind is ChangeKind.TLS_MODEL_CHANGED for c in diff_build_evidence(new, old)
+    )
 
 
-def test_tls_model_omitted_vs_never_default_is_reported():
+@pytest.mark.parametrize("model", ("local-exec", "local-dynamic"))
+def test_tls_model_omitted_vs_never_default_is_reported(model):
     # local-exec / local-dynamic are never the auto-default, so an omitted ->
     # explicit transition to them is always a real, reportable change.
-    for model in ("local-exec", "local-dynamic"):
-        old = BuildEvidence(build_options=[])
-        new = BuildEvidence(build_options=[_opt("tls_model", model)])
-        assert any(
-            c.kind is ChangeKind.TLS_MODEL_CHANGED for c in diff_build_evidence(old, new)
-        )
-        # symmetric: dropping an explicit local-* model is also reportable.
-        assert any(
-            c.kind is ChangeKind.TLS_MODEL_CHANGED for c in diff_build_evidence(new, old)
-        )
+    old = BuildEvidence(build_options=[])
+    new = BuildEvidence(build_options=[_opt("tls_model", model)])
+    assert any(
+        c.kind is ChangeKind.TLS_MODEL_CHANGED for c in diff_build_evidence(old, new)
+    )
+    # symmetric: dropping an explicit local-* model is also reportable.
+    assert any(
+        c.kind is ChangeKind.TLS_MODEL_CHANGED for c in diff_build_evidence(new, old)
+    )
 
 
 def test_exceptions_mode_on_vs_absent_is_no_change():

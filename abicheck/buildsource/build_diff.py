@@ -170,8 +170,7 @@ def _diff_options(old: BuildEvidence, new: BuildEvidence) -> list[Change]:
                 # those are always a deliberate, reportable change, whereas
                 # global-dynamic / initial-exec could equal the -fpic-dependent
                 # default and stay suppressed to avoid a false positive.
-                if ov == nv:
-                    continue
+                # (ov != nv already guaranteed by the outer loop.)
                 if not ov or not nv:
                     explicit = nv or ov
                     if mode_base != "tls_model" or not explicit <= _NEVER_DEFAULT_TLS_MODELS:

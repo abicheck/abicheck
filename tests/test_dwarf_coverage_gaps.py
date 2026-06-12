@@ -670,7 +670,7 @@ class TestExtractCallingConvention:
         assert "returns_struct" in meta.value_abi_traits
         assert "ret:trivial" in meta.value_abi_traits["returns_struct"]
 
-    def test_return_value_size_recorded(self):
+    def test_return_value_size_recorded(self) -> None:
         """The by-value aggregate return size is captured for the sret gate."""
         from abicheck.dwarf_advanced import (
             AdvancedDwarfMetadata,
