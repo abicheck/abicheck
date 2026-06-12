@@ -403,9 +403,28 @@ class FilesystemRegistry:
         # is already in place, so treat that as a no-op (Codex review).
         if evidence.root.resolve() == dest.resolve():
             return content_hash
-        if dest.exists():
-            shutil.rmtree(dest)
-        shutil.copytree(evidence.root, dest)
+        # Stage the new pack in a sibling temp dir and swap it in with atomic
+        # renames, so a failed/interrupted copy (disk full, Ctrl-C) never deletes
+        # the current pack before its replacement is ready — which would leave the
+        # baseline's metadata recording a hash for a now-missing pack (Codex
+        # review). The slow copy goes to staging; only fast renames touch dest.
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        staging = Path(tempfile.mkdtemp(dir=dest.parent, prefix=".evstage-"))
+        new_pack = staging / "pack"
+        backup = None
+        try:
+            shutil.copytree(evidence.root, new_pack)
+            if dest.exists():
+                backup = staging / "old"
+                os.replace(dest, backup)  # move the current pack aside (same fs)
+            try:
+                os.replace(new_pack, dest)
+            except BaseException:
+                if backup is not None:  # roll the previous pack back into place
+                    os.replace(backup, dest)
+                raise
+        finally:
+            shutil.rmtree(staging, ignore_errors=True)
         return content_hash
 
     def pull(self, key: BaselineKey) -> tuple[AbiSnapshot, BaselineMetadata] | None:

@@ -748,3 +748,30 @@ class TestEvidencePackStorage:
         stored.write_text("{ not valid json", encoding="utf-8")
         with pytest.raises(BaselineIntegrityError, match="corrupt"):
             registry.pull_evidence(key)
+
+
+    def test_repush_replaces_evidence_pack_atomically(
+        self, registry: FilesystemRegistry, sample_snapshot: AbiSnapshot, tmp_path: Path
+    ) -> None:
+        # Re-pushing with a different pack swaps it in; no .evstage-* temp dirs are
+        # left behind and the new content is what pull_evidence returns.
+        from abicheck.evidence import BuildEvidence, EvidencePack
+        from abicheck.evidence.build_evidence import Toolchain
+
+        key = BaselineKey(library="libfoo", version="1.0.0", platform="linux-x86_64")
+        registry.push(key, sample_snapshot, evidence=_make_pack(tmp_path / "p1.evidence"))
+
+        p2 = EvidencePack.empty(tmp_path / "p2.evidence", abicheck_version="9.9")
+        p2.build_evidence = BuildEvidence(
+            toolchains=[Toolchain(id="toolchain://clang-18", compiler_id="Clang", version="18")]
+        )
+        p2.write()
+        registry.push(key, sample_snapshot, evidence=p2)
+
+        pulled = registry.pull_evidence(key)
+        assert pulled is not None
+        assert pulled.build_evidence.toolchains[0].compiler_id == "Clang"
+        assert pulled.content_hash() == p2.content_hash()
+        # No staging dirs left in the key directory.
+        key_dir = registry.root / key.path
+        assert not list(key_dir.glob(".evstage-*"))
