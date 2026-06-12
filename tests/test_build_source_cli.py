@@ -760,3 +760,63 @@ def test_merge_without_embedded_facts_is_noted(tmp_path):
     assert "no input carried embedded build_source" in result.output
     # Base ABI surface still written.
     assert load_snapshot(out).library == "l"
+
+
+def test_dump_source_only_no_binary(tmp_path):
+    """`dump --sources <tree>` with no SO_PATH writes a binary-less baseline.
+
+    The parallel-baseline flow that `merge` consumes (Codex P2): SO_PATH is
+    optional when --sources/--build-info is given.
+    """
+    tree = tmp_path / "src"
+    tree.mkdir()
+    cdb = [{"directory": str(tree), "file": "foo.cpp",
+            "arguments": ["c++", "-std=c++17", "-c", "foo.cpp"]}]
+    (tree / "compile_commands.json").write_text(json.dumps(cdb))
+
+    out = tmp_path / "libfoo.src.json"
+    result = CliRunner().invoke(main, ["dump", "--sources", str(tree), "-o", str(out)])
+    assert result.exit_code == 0, result.output
+
+    snap = load_snapshot(out)
+    assert snap.elf is None and snap.pe is None and snap.macho is None  # no binary
+    assert snap.build_source is not None
+    assert snap.build_source.build_evidence is not None
+    assert len(snap.build_source.build_evidence.compile_units) == 1
+
+
+def test_dump_with_no_binary_and_no_inputs_errors():
+    """A bare `dump` (no SO_PATH, no --sources/--build-info) errors clearly."""
+    result = CliRunner().invoke(main, ["dump"])
+    assert result.exit_code != 0
+    assert "source-only" in result.output
+
+
+def test_dump_source_only_then_merge_with_binary(tmp_path):
+    """End-to-end: source-only dump + binary dump combine via `merge`."""
+    from abicheck.elf_metadata import ElfMetadata
+    from abicheck.model import AbiSnapshot
+
+    tree = tmp_path / "src"
+    tree.mkdir()
+    cdb = [{"directory": str(tree), "file": "foo.cpp",
+            "arguments": ["c++", "-std=c++17", "-c", "foo.cpp"]}]
+    (tree / "compile_commands.json").write_text(json.dumps(cdb))
+    src_out = tmp_path / "libfoo.src.json"
+    assert CliRunner().invoke(
+        main, ["dump", "--sources", str(tree), "-o", str(src_out)]
+    ).exit_code == 0
+
+    bin_snap = AbiSnapshot(library="libfoo.so", version="1")
+    bin_snap.elf = ElfMetadata()
+    bin_path = tmp_path / "libfoo.bin.json"
+    save_snapshot(bin_snap, bin_path)
+
+    out = tmp_path / "baseline.json"
+    result = CliRunner().invoke(
+        main, ["merge", str(bin_path), str(src_out), "-o", str(out)]
+    )
+    assert result.exit_code == 0, result.output
+    merged = load_snapshot(out)
+    assert merged.elf is not None  # binary base kept
+    assert merged.build_source is not None and merged.build_source.build_evidence is not None

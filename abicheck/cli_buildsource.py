@@ -1231,6 +1231,43 @@ def embed_build_source(
     snap.build_source_pack = merged.to_ref(path_hint=hint)
 
 
+def dump_source_only(
+    sources: Path | None,
+    build_info: Path | None,
+    version: str,
+    output: Path | None,
+    build_config: Path | None,
+    allow_build_query: bool,
+    git_tag: str | None,
+    build_id: str | None,
+    no_git: bool,
+) -> None:
+    """Write a binary-less snapshot carrying only the embedded build/source facts.
+
+    The parallel-baseline flow: ``dump --sources <tree>`` / ``--build-info <path>``
+    with no ``SO_PATH`` collects L3/L4/L5 inline and embeds them in an otherwise
+    empty snapshot, to be combined with an artifact-side dump via ``merge``. A
+    bare ``dump`` (no binary and no source/build inputs) errors clearly here.
+    """
+    from .cli import _stamp_provenance, _write_snapshot_output
+    from .model import AbiSnapshot
+
+    if sources is None and build_info is None:
+        raise click.UsageError(
+            "dump requires a binary (SO_PATH), or --sources/--build-info for a "
+            "source-only snapshot."
+        )
+    # Library name from the source/build input so the snapshot is identifiable;
+    # `merge` keeps the artifact side as the base regardless.
+    hint = sources if sources is not None else build_info
+    library = hint.name if hint is not None else "source"
+    snap = AbiSnapshot(library=library, version=version)
+    _stamp_provenance(snap, git_tag=git_tag, build_id=build_id, no_git=no_git)
+    _write_snapshot_output(
+        snap, output, build_info, sources, build_config, allow_build_query
+    )
+
+
 @main.command("merge")
 @click.argument("inputs", nargs=-1, required=True, type=click.Path(exists=True, dir_okay=False, path_type=Path))
 @click.option("-o", "--output", "output", type=click.Path(path_type=Path), required=True,

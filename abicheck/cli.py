@@ -634,7 +634,7 @@ def _populate_dependency_info(
 
 
 @main.command("dump")
-@click.argument("so_path", type=click.Path(exists=True, path_type=Path))
+@click.argument("so_path", type=click.Path(exists=True, path_type=Path), required=False)
 @click.option("-H", "--header", "headers", multiple=True, type=click.Path(exists=True, path_type=Path),
               help="Public header file or directory (repeat for multiple).")
 @click.option("-I", "--include", "includes", multiple=True, type=click.Path(path_type=Path),
@@ -726,7 +726,7 @@ def _populate_dependency_info(
 @click.option("--no-git", "no_git", is_flag=True, default=False,
               help="Do not auto-detect git commit SHA.")
 @build_source_dump_options  # --build-info / --sources (embed inline)
-def dump_cmd(so_path: Path, headers: tuple[Path, ...], includes: tuple[Path, ...],
+def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Path, ...],
              public_headers: tuple[Path, ...], public_header_dirs: tuple[Path, ...],
              version: str, lang: str, output: Path | None,
              gcc_path: str | None, gcc_prefix: str | None, gcc_options: str | None,
@@ -748,15 +748,15 @@ def dump_cmd(so_path: Path, headers: tuple[Path, ...], includes: tuple[Path, ...
     \b
     Example:
       abicheck dump libfoo.so.1 -H include/foo.h --version 1.2.3 -o snap.json
-      abicheck dump libfoo.so.1 -H include/foo.h --lang c -o snap.json
-      abicheck dump libfoo.so.1 -H include/foo.h --gcc-prefix aarch64-linux-gnu-
-      abicheck dump libfoo.so.1 --follow-deps -o snap.json
-      abicheck dump libfoo.so.1 --dwarf-only -o snap.json
-      abicheck dump libfoo.so.1 --show-data-sources
-      abicheck dump libfoo.so.1 -H include/ -p build/  # build context from compile_commands.json
-      abicheck dump libfoo.so.1 --debug-root /usr/lib/debug  # separate debug files
+      abicheck dump --sources ./libfoo-src/ -o libfoo.src.json  # source-only (no binary)
     """
     _setup_verbosity(verbose)
+
+    # Source-only dump (no binary) for the parallel-baseline / merge flow.
+    if so_path is None:
+        from .cli_buildsource import dump_source_only
+        dump_source_only(sources, build_info, version, output, build_config, allow_build_query, git_tag, build_id, no_git)
+        return
 
     # Reconcile the --debug-format selector with the legacy --btf/--ctf/--dwarf
     # flags. The selector supersedes the legacy flags whenever it is given:
