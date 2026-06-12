@@ -943,13 +943,11 @@ def _diff_value_abi_traits(
         # generic value-ABI (copy-semantics) change, not a return-convention
         # flip. Only label it struct_return_convention_changed when at least one
         # side is register-eligible (small, or size unknown — stay conservative).
-        if _ret_component(old_trait) != _ret_component(new_trait):
-            old_reg = _returns_in_registers(
-                _ret_component(old_trait), old_meta.return_value_sizes.get(fname)
-            )
-            new_reg = _returns_in_registers(
-                _ret_component(new_trait), new_meta.return_value_sizes.get(fname)
-            )
+        old_rc = _ret_component(old_trait)
+        new_rc = _ret_component(new_trait)
+        if old_rc != new_rc:
+            old_reg = _returns_in_registers(old_rc, old_meta.return_value_sizes.get(fname))
+            new_reg = _returns_in_registers(new_rc, new_meta.return_value_sizes.get(fname))
             if old_reg != new_reg:
                 # One side is register-returned and the other memory/sret — a real
                 # return-convention flip.

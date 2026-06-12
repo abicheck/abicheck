@@ -165,8 +165,8 @@ def _diff_options(old: BuildEvidence, new: BuildEvidence) -> list[Change]:
                     description=(
                         f"Runtime-model option {key!r} changed: "
                         f"{_fmt_values(old_eff)!r} -> {_fmt_values(new_eff)!r}. "
-                        "Not link-compatible across consumers; the artifact diff "
-                        "confirms any concrete break."
+                        "May not be link- or runtime-compatible across consumers; "
+                        "the artifact diff confirms any concrete break."
                     ),
                     old_value=_fmt_values(old_eff),
                     new_value=_fmt_values(new_eff),
