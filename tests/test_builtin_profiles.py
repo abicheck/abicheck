@@ -72,6 +72,14 @@ def test_gnome_promotes_soname_bump_to_break() -> None:
     assert verdict == Verdict.BREAKING
 
 
+def test_gnome_surfaces_unnecessary_bump_as_risk() -> None:
+    """The non-redundant half of the profile: a needless major bump (COMPATIBLE
+    base verdict) is surfaced as a deployment risk, not silently accepted."""
+    pf = PolicyFile.load(builtin_policy_path("gnome_parallel_install"))
+    verdict = pf.compute_verdict([_change(ChangeKind.SONAME_BUMP_UNNECESSARY)])
+    assert verdict == Verdict.COMPATIBLE_WITH_RISK
+
+
 def test_rust_c_ffi_demotes_vtable_change_to_risk() -> None:
     pf = PolicyFile.load(builtin_policy_path("rust_c_ffi"))
     verdict = pf.compute_verdict([_change(ChangeKind.FUNC_VIRTUAL_ADDED)])

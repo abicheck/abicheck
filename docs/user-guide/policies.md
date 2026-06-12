@@ -118,7 +118,7 @@ guidance, not invented heuristics.
 | `msvc_pe` | [MSVC C++ binary compatibility](https://learn.microsoft.com/cpp/porting/binary-compat-2015-2017) + x64 ABI | Pins `calling_convention_changed` to `break`; dropped import DLL → `risk` (no RPATH fallback on Windows) |
 | `mach_o_dylib` | Apple Dynamic Library Design Guidelines | Pins `compat_version_changed` to `break` (dyld load check); dropped install-name dependency → `risk` |
 | `rust_c_ffi` | Rust Reference / Cargo SemVer (no stable Rust ABI) | Keeps the C-FFI surface (`repr(C)`/`extern "C"`) strict but demotes C++-object-model kinds to `risk` — they can't occur on a real C-FFI boundary |
-| `gnome_parallel_install` | GNOME/GTK parallel-install evolution | Promotes the advisory `soname_bump_recommended` to `break`, forcing a new parallel-installable major instead of an in-place break |
+| `gnome_parallel_install` | GNOME/GTK parallel-install evolution | Enforces both directions of SONAME discipline: pins `soname_bump_recommended` to `break` (broke ABI without bumping), and surfaces `soname_bump_unnecessary` as `risk` (bumped the major for nothing, fragmenting parallel-installed consumers) |
 
 > **Why most profiles are thin:** the default `strict_abi` already classifies the hard
 > native cases (symbol removal, layout, vtables, mangling, calling convention) correctly,

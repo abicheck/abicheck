@@ -15,6 +15,15 @@
 base_policy: strict_abi
 
 overrides:
-  # Force the parallel-install discipline: a recommended SONAME bump becomes a
-  # gating failure until the new major line is cut.
+  # A recommended SONAME bump is the advisory abicheck emits when a break is
+  # shipped without bumping the SONAME. strict_abi already fails on the
+  # underlying break itself, so this mainly pins the advisory as a hard gate
+  # too (belt-and-suspenders) — it keeps the build red specifically on the
+  # "broke ABI but kept the SONAME" condition this discipline forbids.
   soname_bump_recommended: break
+
+  # The other half of the discipline: a SONAME bump with NO breaking change is
+  # a wasteful major-version cut that fragments parallel-installed consumers for
+  # nothing. Its base verdict is COMPATIBLE, so surfacing it as a deployment
+  # risk is a genuine, non-redundant addition (visible, but does not fail CI).
+  soname_bump_unnecessary: risk
