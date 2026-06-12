@@ -149,6 +149,11 @@ class AdvancedDwarfMetadata:
     # struct is memory-returned regardless of triviality, so a triviality change
     # there is a value-ABI (copy-semantics) change, not a register<->sret flip.
     return_value_sizes: dict[str, int] = field(default_factory=dict)
+    # linkage_name (mangled) → set membership when the by-value aggregate return
+    # is forced to memory (sret) by an unaligned member (e.g. a packed struct).
+    # Such a type is memory-returned regardless of size/triviality, so a
+    # triviality flip there is never a register<->sret convention change.
+    return_memory_classified: set[str] = field(default_factory=set)
     # struct names where any field has a misaligned byte offset → __attribute__((packed))
     packed_structs: set[str] = field(default_factory=set)
     # All struct/class names seen (for cross-referencing in diff to avoid
@@ -491,6 +496,33 @@ def _aggregate_byte_size_for_typed_die(die: Any, CU: Any, cache: _DwarfTypeCache
     return size if size > 0 else None
 
 
+def _aggregate_has_unaligned_member(die: Any, CU: Any, cache: _DwarfTypeCache | None = None) -> bool:
+    """Whether a by-value aggregate return type has an unaligned member.
+
+    A struct/class/union with a member at a misaligned offset (e.g. a packed
+    aggregate) is MEMORY-classified by the SysV AMD64 ABI regardless of size, so
+    it is returned via a hidden sret pointer either way. Reuses the same
+    offset-vs-natural-alignment check as packed-struct detection.
+    """
+    t0 = _resolve_type_die(die, CU)
+    if t0 is None or t0.tag in (
+        "DW_TAG_pointer_type",
+        "DW_TAG_reference_type",
+        "DW_TAG_rvalue_reference_type",
+    ):
+        return False
+    t = _unwrap_qualifiers(t0, CU, cache=cache)
+    if t.tag not in ("DW_TAG_structure_type", "DW_TAG_class_type", "DW_TAG_union_type"):
+        return False
+    for child in t.iter_children():
+        if child.tag != "DW_TAG_member" or _attr_int(child, "DW_AT_bit_size"):
+            continue
+        natural = _get_type_align(child, CU)
+        if natural > 1 and _decode_member_location(child) % natural != 0:
+            return True
+    return False
+
+
 def _extract_calling_convention(die: Any, meta: AdvancedDwarfMetadata, CU: Any, cache: _DwarfTypeCache | None = None) -> None:
     """Record calling conventions + DWARF value-ABI traits for ABI-exported functions.
 
@@ -534,6 +566,8 @@ def _extract_calling_convention(die: Any, meta: AdvancedDwarfMetadata, CU: Any, 
         ret_size = _aggregate_byte_size_for_typed_die(die, CU, cache=cache)
         if ret_size is not None:
             meta.return_value_sizes[key] = ret_size
+        if _aggregate_has_unaligned_member(die, CU, cache=cache):
+            meta.return_memory_classified.add(key)
     pidx = 0
     for ch in die.iter_children():
         if ch.tag != "DW_TAG_formal_parameter":
@@ -946,8 +980,14 @@ def _diff_value_abi_traits(
         old_rc = _ret_component(old_trait)
         new_rc = _ret_component(new_trait)
         if old_rc != new_rc:
-            old_reg = _returns_in_registers(old_rc, old_meta.return_value_sizes.get(fname))
-            new_reg = _returns_in_registers(new_rc, new_meta.return_value_sizes.get(fname))
+            old_reg = _returns_in_registers(
+                old_rc, old_meta.return_value_sizes.get(fname),
+                fname in old_meta.return_memory_classified,
+            )
+            new_reg = _returns_in_registers(
+                new_rc, new_meta.return_value_sizes.get(fname),
+                fname in new_meta.return_memory_classified,
+            )
             if old_reg != new_reg:
                 # One side is register-returned and the other memory/sret — a real
                 # return-convention flip.
@@ -977,17 +1017,20 @@ def _diff_value_abi_traits(
     return results
 
 
-def _returns_in_registers(ret_component: str | None, size: int | None) -> bool:
+def _returns_in_registers(
+    ret_component: str | None, size: int | None, memory_forced: bool = False
+) -> bool:
     """Whether a by-value aggregate return is passed in registers (SysV AMD64).
 
     A struct is register-returned only when it is **trivial for the purposes of
-    calls** *and* fits in two eightbytes (<= 16 bytes). A non-trivial aggregate
-    is always memory-returned (hidden sret pointer) regardless of size; a large
-    trivial aggregate is also memory-returned. An unknown size on a trivial
-    aggregate is treated as register-eligible (stay conservative — preserves the
-    pre-size-gating behaviour for snapshots/mocks that carry no size).
+    calls**, fits in two eightbytes (<= 16 bytes), *and* has no unaligned member.
+    A non-trivial aggregate, a large one, or one with an unaligned member (e.g. a
+    packed struct, ``memory_forced``) is memory-returned via a hidden sret
+    pointer. An unknown size on an otherwise-eligible trivial aggregate is
+    treated as register-eligible (stay conservative — preserves the pre-size-
+    gating behaviour for snapshots/mocks that carry no size).
     """
-    if ret_component is None:
+    if ret_component is None or memory_forced:
         return False
     # Component is the triviality token: "trivial"/"nontrivial" (or the mock
     # "v(trivial)"/"v(nontrivial)"). It is non-trivial iff it says so.

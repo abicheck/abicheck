@@ -325,6 +325,7 @@ def _dwarf_advanced_from_dict(d: dict[str, Any]) -> Any:
         calling_conventions=d.get("calling_conventions", {}),
         value_abi_traits=d.get("value_abi_traits", {}),
         return_value_sizes=d.get("return_value_sizes", {}),
+        return_memory_classified=set(d.get("return_memory_classified", [])),
         packed_structs=set(d.get("packed_structs", [])),
         all_struct_names=set(d.get("all_struct_names", [])),
         frame_registers=d.get("frame_registers", {}),

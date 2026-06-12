@@ -710,6 +710,26 @@ def test_returns_in_registers_helper():
     assert _returns_in_registers("nontrivial", 8) is False  # nontrivial → memory
     assert _returns_in_registers("trivial", None) is True   # unknown → conservative
     assert _returns_in_registers(None, 8) is False
+    # An unaligned member (packed) forces memory even for a small trivial type.
+    assert _returns_in_registers("trivial", 8, memory_forced=True) is False
+
+
+def test_small_packed_aggregate_return_flip_stays_value_abi():
+    # Codex P2: a small packed struct (unaligned member) is memory-returned both
+    # before and after gaining a destructor — no register<->sret flip.
+    from abicheck.dwarf_advanced import AdvancedDwarfMetadata, _diff_value_abi_traits
+
+    old = AdvancedDwarfMetadata()
+    new = AdvancedDwarfMetadata()
+    old.value_abi_traits["_Z3getv"] = "ret:trivial"
+    new.value_abi_traits["_Z3getv"] = "ret:nontrivial"
+    old.return_value_sizes["_Z3getv"] = 12
+    new.return_value_sizes["_Z3getv"] = 12
+    old.return_memory_classified.add("_Z3getv")
+    new.return_memory_classified.add("_Z3getv")
+    kinds = {r[0] for r in _diff_value_abi_traits(old, new, set())}
+    assert "value_abi_trait_changed" in kinds
+    assert "struct_return_convention_changed" not in kinds
 
 
 def test_unknown_size_return_flip_stays_struct_return():
