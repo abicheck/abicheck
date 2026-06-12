@@ -561,6 +561,7 @@ class ChangeKind(str, Enum):
     TEMPLATE_BODY_CHANGED = "template_body_changed"  # uninstantiated template body changed → RISK
     UNINSTANTIATED_TEMPLATE_REMOVED = "uninstantiated_template_removed"  # public template removed → API_BREAK
     SOURCE_DECL_BINARY_SYMBOL_MISMATCH = "source_decl_binary_symbol_mismatch"  # decl no longer maps to a symbol → RISK
+    SOURCE_BINARY_PROVENANCE_MISMATCH = "source_binary_provenance_mismatch"  # source tree likely does not match the binary → RISK
     ODR_SOURCE_CONFLICT = "odr_source_conflict"  # same type name differs across TUs → RISK
     GENERATED_HEADER_CHANGED = "generated_header_changed"  # generated public header changed → RISK
     PUBLIC_TYPEDEF_TARGET_CHANGED = "public_typedef_target_changed"  # public typedef/alias underlying type changed → API_BREAK

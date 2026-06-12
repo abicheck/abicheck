@@ -169,6 +169,18 @@ def _odr_source_conflict() -> tuple[SourceAbiSurface, SourceAbiSurface]:
     return _surface(), _surface(odr_conflicts=[conflict])
 
 
+def _provenance_mismatch() -> tuple[SourceAbiSurface, SourceAbiSurface]:
+    # A1: the new surface has L0 exports but (almost) none of its exportable
+    # public decls map to one → the source tree likely doesn't match the binary.
+    new = _surface(
+        roots={"exported_symbols": ["_Z3barv"]},
+        reachable_declarations=[
+            _ent(f"f{i}", "function", mangled=f"_Z1f{i}v") for i in range(10)
+        ],
+    )
+    return _surface(), new
+
+
 CORPUS = [
     (
         "public_macro_value_changed",
@@ -203,6 +215,11 @@ CORPUS = [
         ChangeKind.GENERATED_HEADER_CHANGED,
     ),
     ("odr_source_conflict", _odr_source_conflict, ChangeKind.ODR_SOURCE_CONFLICT),
+    (
+        "source_binary_provenance_mismatch",
+        _provenance_mismatch,
+        ChangeKind.SOURCE_BINARY_PROVENANCE_MISMATCH,
+    ),
 ]
 
 
@@ -250,3 +267,131 @@ def test_corpus_covers_every_source_replay_kind() -> None:
         source_replay_kinds - covered - {ChangeKind.SOURCE_DECL_BINARY_SYMBOL_MISMATCH}
     )
     assert not missing, f"source-replay kinds without a corpus entry: {missing}"
+
+
+def test_provenance_mismatch_inert_without_l0_exports() -> None:
+    # A1 is inert when no L0 exports are plumbed in (Codex): without the binary's
+    # exported symbols the mapping-miss heuristic has no signal, so it must not
+    # fire on an unmapped-but-export-less surface.
+    new = _surface(
+        roots={"exported_symbols": []},
+        reachable_declarations=[
+            _ent(f"f{i}", "function", mangled=f"_Z1f{i}v") for i in range(10)
+        ],
+    )
+    kinds = [c.kind for c in diff_source_abi(_surface(), new)]
+    assert ChangeKind.SOURCE_BINARY_PROVENANCE_MISMATCH not in kinds
+
+
+def test_provenance_mismatch_inert_when_mostly_mapped() -> None:
+    # Below the miss-ratio threshold (only 1/10 unmapped) → not a provenance
+    # mismatch; a healthy surface with a single lost mapping is handled by the
+    # per-declaration source_decl_binary_symbol_mismatch path instead.
+    exports = [f"_Z1f{i}v" for i in range(9)]
+    decls = [_ent(f"f{i}", "function", mangled=f"_Z1f{i}v") for i in range(9)]
+    decls.append(_ent("f9", "function", mangled="_Z1f9v"))  # 1/10 unmapped
+    new = _surface(
+        roots={"exported_symbols": exports},
+        reachable_declarations=decls,
+    )
+    kinds = [c.kind for c in diff_source_abi(_surface(), new)]
+    assert ChangeKind.SOURCE_BINARY_PROVENANCE_MISMATCH not in kinds
+
+
+def test_provenance_mismatch_detected_on_baseline_side() -> None:
+    # A1 (Codex): a mismatched OLD/baseline checkout must also be flagged — its
+    # L4/L5 facts are as untrustworthy as a mismatched target's.
+    bad = _surface(
+        roots={"exported_symbols": ["_Z3barv"]},
+        reachable_declarations=[
+            _ent(f"f{i}", "function", mangled=f"_Z1f{i}v") for i in range(10)
+        ],
+    )
+    kinds = [c.kind for c in diff_source_abi(bad, _surface())]
+    assert ChangeKind.SOURCE_BINARY_PROVENANCE_MISMATCH in kinds
+
+
+def test_relink_surface_exports_rebuilds_mapping() -> None:
+    # A1 merge plumbing: re-linking a surface against the binary's exports turns
+    # all-miss mappings into hits for decls whose mangled name is exported.
+    from abicheck.buildsource.source_link import relink_surface_exports
+
+    foo = _ent("foo", "function", mangled="_Z3foov")
+    bar = _ent("bar", "function", mangled="_Z3barv")
+    surf = _surface(reachable_declarations=[foo, bar])
+    # Stale unmatched state from the original empty-export link: both decls listed
+    # as having no symbol. Relinking must drop the ones that now map (Codex).
+    surf.unmatched["decls_without_symbol"] = ["foo", "bar"]
+    # Initially no exports → mapping empty/all-miss → provenance would fire.
+    relink_surface_exports(surf, ["_Z3foov"])  # only foo is exported
+    mapping = surf.mappings["source_decl_to_binary_symbol"]
+    vals = set(mapping.values())
+    assert "_Z3foov" in vals          # foo matched its export
+    assert "" in vals                 # bar did not (not exported)
+    assert surf.roots["exported_symbols"] == ["_Z3foov"]
+    # decls_without_symbol must be recomputed: foo now maps, only bar remains —
+    # no contradictory "foo maps to _Z3foov but is also unmatched" state.
+    assert surf.unmatched["decls_without_symbol"] == ["bar"]
+
+
+def test_provenance_mismatch_fires_for_c_unmangled_exports() -> None:
+    # A1 (Codex): C / extern "C" decls have an empty mangled_name and export by
+    # qualified_name; a wrong checkout for a C library must still be flagged.
+    new = _surface(
+        roots={"exported_symbols": ["c_real_export"]},
+        reachable_declarations=[
+            _ent(f"c_func_{i}", "function", mangled="") for i in range(8)
+        ],
+    )
+    kinds = [c.kind for c in diff_source_abi(_surface(), new)]
+    assert ChangeKind.SOURCE_BINARY_PROVENANCE_MISMATCH in kinds
+
+
+def test_provenance_dedupes_decls_across_tus() -> None:
+    # A1 (Codex): link_source_abi appends the same public decl once per including
+    # TU. One unmapped function repeated 5x must NOT clear _PROVENANCE_MIN_DECLS —
+    # the threshold/miss ratio is over the unique public surface, not raw rows.
+    dup = [_ent("f", "function", mangled="_Z1fv") for _ in range(5)]
+    new = _surface(roots={"exported_symbols": ["_Z3barv"]}, reachable_declarations=dup)
+    kinds = [c.kind for c in diff_source_abi(_surface(), new)]
+    assert ChangeKind.SOURCE_BINARY_PROVENANCE_MISMATCH not in kinds
+
+
+def test_provenance_fires_for_method_only_class_api() -> None:
+    # A1 (Codex): C++ class members are emitted as kind="method"; a wrong
+    # checkout for a method-only API must still trip the provenance check.
+    new = _surface(
+        roots={"exported_symbols": ["_ZN3Foo3barEv"]},
+        reachable_declarations=[
+            _ent(f"Foo::m{i}", "method", mangled=f"_ZN3Foo1m{i}Ev") for i in range(8)
+        ],
+    )
+    kinds = [c.kind for c in diff_source_abi(_surface(), new)]
+    assert ChangeKind.SOURCE_BINARY_PROVENANCE_MISMATCH in kinds
+
+
+def test_provenance_inert_for_unmangled_ctor_only_class() -> None:
+    # A1 (Codex): castxml leaves constructors/destructors unmangled. A valid
+    # ctor/dtor-only class API must NOT false-fire — the class qualified_name is
+    # not a comparable export symbol, so these decls are skipped without a mangle.
+    new = _surface(
+        roots={"exported_symbols": ["_ZN3FooC1Ev", "_ZN3FooD1Ev"]},
+        reachable_declarations=[
+            _ent("Foo::Foo", "constructor", mangled="") for _ in range(3)
+        ] + [_ent("Foo::~Foo", "destructor", mangled="") for _ in range(3)],
+    )
+    kinds = [c.kind for c in diff_source_abi(_surface(), new)]
+    assert ChangeKind.SOURCE_BINARY_PROVENANCE_MISMATCH not in kinds
+
+
+def test_provenance_inert_for_constexpr_heavy_surface() -> None:
+    # constexpr/typedef decls don't export; a header full of them must NOT trip
+    # the provenance check even though none map to a symbol.
+    new = _surface(
+        roots={"exported_symbols": ["_Z3barv"]},
+        reachable_declarations=[
+            _ent(f"k{i}", "constexpr", value=str(i)) for i in range(20)
+        ],
+    )
+    kinds = [c.kind for c in diff_source_abi(_surface(), new)]
+    assert ChangeKind.SOURCE_BINARY_PROVENANCE_MISMATCH not in kinds

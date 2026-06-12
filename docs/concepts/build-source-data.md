@@ -465,6 +465,7 @@ Comparing two linked source surfaces emits these change kinds (ADR-030 D6):
 | `inline_body_changed` | risk | A public inline body changed with no exported-symbol change (mixed-build/ODR risk) |
 | `template_body_changed` | risk | An uninstantiated public template implementation changed (the ADR-026 `case122` residual) |
 | `source_decl_binary_symbol_mismatch` | risk | A public declaration no longer maps to an exported symbol |
+| `source_binary_provenance_mismatch` | risk | Most of the source tree's public declarations fail to map to any exported symbol — the source checkout likely does not correspond to the binary (wrong tag/commit) |
 | `odr_source_conflict` | risk | The same type name resolves to different definitions across TUs |
 | `generated_header_changed` | risk | A generated public configuration header changed (policy may escalate) |
 

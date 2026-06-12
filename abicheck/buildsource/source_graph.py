@@ -592,7 +592,11 @@ def _augment_with_source_abi(graph: SourceGraphSummary, surface: SourceAbiSurfac
             attrs={"decl_kind": ent.kind, "visibility": ent.visibility},
         ))
         header_declares(ent, did, conf)
-        symbol = decl_to_sym.get(ent.qualified_name, "")
+        # decl_to_sym is keyed by entity identity (the mangled name for C++, so
+        # overloads stay distinct) by both link_source_abi and
+        # relink_surface_exports — look it up the same way, not by qualified_name,
+        # or the SOURCE_DECL_MAPS_TO_SYMBOL edge is never created for C++.
+        symbol = decl_to_sym.get(ent.identity(), "")
         if symbol:
             graph.add_edge(GraphEdge(
                 src=did, dst=_symbol_node_id(symbol),

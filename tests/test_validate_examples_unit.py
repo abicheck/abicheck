@@ -20,12 +20,14 @@ from tests.validate_examples import (  # noqa: E402
     DEFAULT_ARTIFACT_VARIANT,
     CaseResult,
     _build_info_path,
+    _embedded_present_layers,
     _evaluate_verdict,
     _json_payload,
     _normalize_verdict,
     _result_to_json,
     _selected_variants,
     _source_layers_for_result,
+    _sources_path,
     _write_source_compile_db,
     main,
 )
@@ -151,6 +153,40 @@ class TestBuildInfoPath:
             case_dir = examples_dir / name
             assert _build_info_path(case_dir, "v1", True) is not None, name
             assert _build_info_path(case_dir, "v2", True) is not None, name
+
+
+class TestSourcesPath:
+    """_sources_path opts a case into L4/L5 source-replay comparison."""
+
+    def test_none_case_dir_returns_none(self) -> None:
+        assert _sources_path(None, "v1", True) is None
+
+    def test_missing_dir_returns_none(self, tmp_path: Path) -> None:
+        assert _sources_path(tmp_path, "v1", True) is None
+
+    def test_present_dir_returned(self, tmp_path: Path) -> None:
+        (tmp_path / "v1.sources").mkdir()
+        assert _sources_path(tmp_path, "v1", True) == tmp_path / "v1.sources"
+
+    def test_opt_out_ignores_present_dir(self, tmp_path: Path) -> None:
+        (tmp_path / "v1.sources").mkdir()
+        assert _sources_path(tmp_path, "v1", False) is None
+        assert _sources_path(tmp_path, "v1") is None  # default opt-out
+
+    def test_a_file_named_sources_is_not_a_tree(self, tmp_path: Path) -> None:
+        (tmp_path / "v1.sources").write_text("not a dir")
+        assert _sources_path(tmp_path, "v1", True) is None
+
+    def test_real_sources_cases_ship_both_sides(self) -> None:
+        # Every ground_truth case flagged sources must ship both per-side trees.
+        gt = json.loads(_GROUND_TRUTH.read_text())["verdicts"]
+        examples_dir = _GROUND_TRUTH.parent
+        for name, v in gt.items():
+            if not v.get("sources"):
+                continue
+            case_dir = examples_dir / name
+            assert _sources_path(case_dir, "v1", True) is not None, name
+            assert _sources_path(case_dir, "v2", True) is not None, name
 
 
 # ── CLI entry-point ───────────────────────────────────────────────────────
@@ -369,6 +405,59 @@ class TestArtifactVariants:
             old_build_source=pack,
             new_build_source=pack,
         ) == ("L0", "L1", "L2", "L3", "L4", "L5")
+
+    def test_source_layers_reflect_inline_sources(self, tmp_path: Path) -> None:
+        # ground_truth `sources: true` runs `dump --sources`, folding L3/L4/L5
+        # inline — the result must report them, not under-count as L0/L2 (Codex).
+        header = tmp_path / "v1.h"
+        header.write_text("int f(void);\n")
+        inline = _source_layers_for_result(
+            DEFAULT_ARTIFACT_VARIANT,
+            v1_hdr=header,
+            v2_hdr=header,
+            old_build_source=None,
+            new_build_source=None,
+            sources=True,
+        )
+        assert set(inline) >= {"L0", "L2", "L3", "L4", "L5"}
+        # `--build-info` (without --sources) supplies L3 but not L4/L5.
+        bi = _source_layers_for_result(
+            DEFAULT_ARTIFACT_VARIANT,
+            v1_hdr=header,
+            v2_hdr=header,
+            old_build_source=None,
+            new_build_source=None,
+            build_info=True,
+        )
+        assert "L3" in bi and "L4" not in bi and "L5" not in bi
+        # No double-count when build-source pack and inline --sources coincide.
+        pack2 = tmp_path / "pack2"
+        pack2.mkdir()
+        assert _source_layers_for_result(
+            "build-source",
+            v1_hdr=header,
+            v2_hdr=header,
+            old_build_source=pack2,
+            new_build_source=pack2,
+            sources=True,
+        ) == ("L0", "L1", "L2", "L3", "L4", "L5")
+
+    def test_embedded_present_layers_reads_real_coverage(self, tmp_path: Path) -> None:
+        # Codex: a degraded `dump --sources` embeds source_abi coverage as
+        # partial/not_collected — only `present` rows count as real L4/L5.
+        snap = tmp_path / "snap.json"
+        snap.write_text(json.dumps({"build_source": {"manifest": {"coverage": [
+            {"layer": "L3_build", "status": "present"},
+            {"layer": "L4_source_abi", "status": "present"},
+            {"layer": "L5_source_graph", "status": "partial"},
+        ]}}}), encoding="utf-8")
+        assert _embedded_present_layers(snap) == {"L3", "L4"}
+
+        # No build_source / missing file → no layers claimed.
+        bare = tmp_path / "bare.json"
+        bare.write_text(json.dumps({"library": "l"}), encoding="utf-8")
+        assert _embedded_present_layers(bare) == set()
+        assert _embedded_present_layers(tmp_path / "nonexistent.json") == set()
 
     def test_json_payload_includes_run_metadata(self) -> None:
         result = CaseResult("case01", "FAIL", "BREAKING", "NO_CHANGE", "mismatch")

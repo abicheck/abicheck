@@ -94,7 +94,7 @@ struct Point — 2 changes:
 
 | Information                     | abicheck | ABICC | abidiff |
 |---------------------------------|----------|-------|---------|
-| Change kind/type classification | `type_size_changed` (machine-parseable enum of 244 change kinds) | Narrative text only | Narrative text |
+| Change kind/type classification | `type_size_changed` (machine-parseable enum of 245 change kinds) | Narrative text only | Narrative text |
 | Affected symbol/type name       | Yes (`"symbol": "Leaf"`) | Yes (in HTML sections) | Yes (as context for function) |
 | Old value                       | Yes (`"old_value": "32"`) | Yes (in text) | Yes (in text) |
 | New value                       | Yes (`"new_value": "64"`) | Yes (in text) | Yes (in text) |
@@ -249,7 +249,7 @@ Our HTML does have demangled-as-display + mangled-as-tooltip support
 | **SARIF output** for GitHub Code Scanning | HIGH — neither ABICC nor abidiff produce SARIF |
 | **5-level verdict** (NO_CHANGE/COMPATIBLE/COMPATIBLE_WITH_RISK/API_BREAK/BREAKING) | MEDIUM — ABICC can't distinguish NO_CHANGE from COMPATIBLE; abidiff has no verdict |
 | **Binary compatibility %** in JSON | MEDIUM — ABICC has it in HTML only; abidiff doesn't have it |
-| **244-kind change taxonomy** | MEDIUM — machine-parseable enum vs free-text descriptions |
+| **245-kind change taxonomy** | MEDIUM — machine-parseable enum vs free-text descriptions |
 
 ---
 

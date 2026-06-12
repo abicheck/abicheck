@@ -15,7 +15,7 @@ Support everything ABICC currently does so existing users and pipelines can migr
 - JSON/HTML/Markdown reports with equivalent verdict semantics
 - Support for suppression files
 
-**Done:** 244 ChangeKinds implemented; YAML suppression files fully supported; ABICC compat CLI supports `-symbols-list` and `-types-list` whitelist flags (plain-text, one name per line); XML report generation for ABICC-compatible output; ABICC compat CLI with all major flags; auto-forwarding `abicheck compat <flags>` to `compat check`; test parity for ABICC 2.3.
+**Done:** 245 ChangeKinds implemented; YAML suppression files fully supported; ABICC compat CLI supports `-symbols-list` and `-types-list` whitelist flags (plain-text, one name per line); XML report generation for ABICC-compatible output; ABICC compat CLI with all major flags; auto-forwarding `abicheck compat <flags>` to `compat check`; test parity for ABICC 2.3.
 
 ---
 
@@ -105,7 +105,7 @@ Public documentation at <https://napetrov.github.io/abicheck/>:
 
 | Goal | Status |
 |------|--------|
-| G1: ABICC drop-in | Done — 244 ChangeKinds, compat CLI, suppression files, XML reports |
+| G1: ABICC drop-in | Done — 245 ChangeKinds, compat CLI, suppression files, XML reports |
 | G2: Known gaps | DWARF layout, toolchain flags, AST-DWARF dedup, confidence tracking, canonical evidence tier (ELF_ONLY/DWARF_AWARE/HEADER_AWARE) done |
 | G3: libabigail tests | Done — ~54 parity test functions + 134 example cases |
 | G4: Agent-friendly | Done — JSON, SARIF, exit codes, snapshots, MCP server, GitHub Action |

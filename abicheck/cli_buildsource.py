@@ -25,7 +25,6 @@ explicit opt-in not implemented here.
 from __future__ import annotations
 
 import datetime as _dt
-from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -40,6 +39,14 @@ from .buildsource.evidence_policy import (
     finding_bucket_counts,
     require_evidence_findings,
     tag_evidence_category,
+)
+from .buildsource.merge_support import (
+    _combine_packs,
+    _detect_merge_layer_conflicts,
+    _filter_pack_layers,
+    _layer_value,
+    _record_merge_conflicts,
+    _resolve_conflict_winners,
 )
 from .buildsource.model import (
     CoverageStatus,
@@ -899,6 +906,16 @@ def _exported_symbols_from_binary(binary: Path | None) -> list[str]:
     syms |= {v.mangled for v in snap.variables if getattr(v, "mangled", "")}
     return sorted(syms)
 
+def _exported_symbols_from_snapshot(snap: AbiSnapshot) -> tuple[str, ...]:
+    """Exported (mangled) symbol names already parsed into *snap* — no re-dump.
+
+    Used to plumb L0 exports into inline source replay (A1) for the
+    ``dump <binary> --sources`` flow. Empty for a source-only snapshot.
+    """
+    syms = {fn.mangled for fn in snap.functions if fn.mangled}
+    syms |= {v.mangled for v in snap.variables if getattr(v, "mangled", "")}
+    return tuple(sorted(syms))
+
 def _collect_source_abi(
     merged: BuildEvidence,
     extractors: list[ExtractorRecord],
@@ -1049,147 +1066,6 @@ def _collect_source_abi_android(
 
 # ── Attach / compare integration (ADR-028 D6, D7; ADR-029 D9) ─────────────────
 
-def _layer_value(layer: object) -> str:
-    return layer.value if hasattr(layer, "value") else str(layer)
-
-def _filter_pack_layers(
-    pack: BuildSourcePack | None, layers: tuple[str, ...]
-) -> BuildSourcePack | None:
-    """Null out a loaded pack's facts for layers the collect-mode excludes, so a
-    pre-captured pack can't smuggle past the ADR-033 D2 layer set (Codex review).
-    ``_combine_packs`` derives coverage from these attributes, so nulling them
-    drops both the facts and their coverage rows."""
-    if pack is None:
-        return None
-    if "L3" not in layers:
-        pack.build_evidence = None
-    if "L4" not in layers:
-        pack.source_abi = None
-    if "L5" not in layers:
-        pack.source_graph = None
-    return pack
-
-def _combine_packs(
-    bi_pack: BuildSourcePack | None,
-    src_pack: BuildSourcePack | None,
-    embedded: BuildSourcePack | None = None,
-) -> BuildSourcePack | None:
-    """Combine a build-info pack and a sources pack into one embeddable pack.
-
-    Facts are taken from the pack that supplies each layer — ``build_evidence``
-    from ``--build-info``, ``source_abi``/``source_graph`` from ``--sources`` —
-    with *embedded* backfilling any gap. The coverage manifest is rebuilt by
-    pulling each layer's row from the *same* pack that supplied its facts (not
-    just the base pack), then dropping rows for layers we do not actually carry.
-    This keeps a later compare's coverage/capability report honest when the two
-    flags point at different packs (Codex review). Returns ``None`` when no pack
-    contributes any facts.
-    """
-    def _first(attr: str, *packs: BuildSourcePack | None) -> object | None:
-        for cand in packs:
-            if cand is not None and getattr(cand, attr) is not None:
-                return getattr(cand, attr)
-        return None
-
-    build_evidence = _first("build_evidence", bi_pack, src_pack, embedded)
-    source_abi = _first("source_abi", src_pack, bi_pack, embedded)
-    source_graph = _first("source_graph", src_pack, bi_pack, embedded)
-
-    base = bi_pack or src_pack or embedded
-    if base is None:
-        return None
-
-    # supplier order per managed layer, and whether we actually carry it
-    supplier: dict[str, tuple[BuildSourcePack | None, ...]] = {
-        DataLayer.L3_BUILD.value: (bi_pack, src_pack, embedded),
-        DataLayer.L4_SOURCE_ABI.value: (src_pack, bi_pack, embedded),
-        DataLayer.L5_SOURCE_GRAPH.value: (src_pack, bi_pack, embedded),
-    }
-    present = {
-        DataLayer.L3_BUILD.value: build_evidence is not None,
-        DataLayer.L4_SOURCE_ABI.value: source_abi is not None,
-        DataLayer.L5_SOURCE_GRAPH.value: source_graph is not None,
-    }
-    managed = set(supplier)
-
-    coverage: list[LayerCoverage] = []
-    # Non-managed rows (L0/L1/L2/…) come from the base manifest.
-    for c in base.manifest.coverage:
-        if _layer_value(c.layer) not in managed:
-            coverage.append(c)
-    # Always emit one row per managed layer (ADR-028 D7 shows every layer). When
-    # we carry the facts, reuse the supplying pack's row; otherwise mark the
-    # layer not_collected so the report never advertises a check with no facts
-    # behind it (Codex review) — and never drops the row entirely either.
-    for layer, packs in supplier.items():
-        row: LayerCoverage | None = None
-        if present[layer]:
-            for cand in packs:
-                if cand is None:
-                    continue
-                row = next(
-                    (c for c in cand.manifest.coverage if _layer_value(c.layer) == layer),
-                    None,
-                )
-                if row is not None:
-                    break
-            if row is None:
-                row = LayerCoverage(layer=layer, status=CoverageStatus.PRESENT)
-        else:
-            row = LayerCoverage(layer=layer, status=CoverageStatus.NOT_COLLECTED)
-        coverage.append(row)
-
-    # Provenance: the combined manifest's artifacts/extractors must reflect every
-    # pack that supplied an embedded fact, not just the base pack — otherwise
-    # to_ref()/content_hash() would omit the source pack's artifacts for a
-    # cross-pack self-contained snapshot (Codex review). A pack "contributed"
-    # when one of its facts is the object we actually embedded.
-    chosen = (build_evidence, source_abi, source_graph)
-    chosen_ids = {id(x) for x in chosen if x is not None}
-    artifacts: list[str] = []
-    extractors: list[ExtractorRecord] = []
-    seen_extractors: set[tuple[str, str]] = set()
-    for p in (bi_pack, src_pack, embedded):
-        if p is None or not (
-            chosen_ids & {id(p.build_evidence), id(p.source_abi), id(p.source_graph)}
-        ):
-            continue
-        for a in p.manifest.artifacts:
-            if a not in artifacts:
-                artifacts.append(a)
-        for e in p.manifest.extractors:
-            key = (e.name, e.version)
-            if key not in seen_extractors:
-                seen_extractors.add(key)
-                extractors.append(e)
-    # An *inline*-collected contributor (e.g. `--sources <raw tree>`) is never
-    # written to disk, so its manifest.artifacts is empty and the loop above
-    # adds no digest for its source_abi/source_graph. Since content_hash() trusts
-    # a non-empty manifest.artifacts, a mixed `--build-info <pack> --sources
-    # <tree>` would then hash only the build pack's digest and ignore the source
-    # facts — two different trees with the same build pack collide (Codex P2). Add
-    # the in-memory payload digest for every chosen fact; a fact that *was*
-    # written to disk hashes identically (_payload_sha256 mirrors _write_json), so
-    # it dedups against the on-disk digest above rather than double-counting.
-    from .buildsource.pack import _payload_sha256
-
-    for payload in chosen:
-        if payload is None:
-            continue
-        digest = "sha256:" + _payload_sha256(payload.to_dict())  # type: ignore[attr-defined]
-        if digest not in artifacts:
-            artifacts.append(digest)
-
-    return BuildSourcePack(
-        root=Path(""),
-        manifest=replace(
-            base.manifest, coverage=coverage, artifacts=artifacts, extractors=extractors
-        ),
-        build_evidence=build_evidence,  # type: ignore[arg-type]
-        source_abi=source_abi,  # type: ignore[arg-type]
-        source_graph=source_graph,  # type: ignore[arg-type]
-    )
-
 def embed_build_source(
     snap: AbiSnapshot,
     build_info: Path | None,
@@ -1247,6 +1123,11 @@ def embed_build_source(
             cfg = load_build_config(cfg_path) if cfg_path is not None else None
         except ValueError as exc:
             raise click.ClickException(str(exc)) from exc
+        # A1: plumb the binary's L0 exports (already parsed into this snapshot)
+        # into the inline replay, so the linked source surface knows which decls
+        # map to exports and the provenance/mapping checks have a signal. Empty in
+        # the source-only `dump --sources` flow (no binary) — then A1 stays inert.
+        exported = _exported_symbols_from_snapshot(snap)
         inline_pack = collect_inline_pack(
             sources=raw_sources,
             build_info=raw_build_info,
@@ -1256,6 +1137,7 @@ def embed_build_source(
             clang_bin=clang_bin,
             scope=scope,
             layers=layers,
+            exported_symbols=exported,
         )
 
     # Pre-captured packs must also honour the collect-mode layer set (Codex).
@@ -1313,8 +1195,13 @@ def dump_source_only(
 @click.argument("inputs", nargs=-1, required=True, type=click.Path(exists=True, dir_okay=False, path_type=Path))
 @click.option("-o", "--output", "output", type=click.Path(path_type=Path), required=True,
               help="Output combined baseline snapshot (.abi.json).")
+@click.option("--on-conflict", "on_conflict", type=click.Choice(["warn", "error"]),
+              default="warn", show_default=True,
+              help="What to do when two inputs supply the SAME layer (L3/L4/L5) "
+              "with DIFFERING facts: `warn` keeps first-wins and records a "
+              "diagnostic; `error` exits non-zero (good for baseline generation).")
 @click.option("-v", "--verbose", is_flag=True, default=False)
-def merge_cmd(inputs: tuple[Path, ...], output: Path, verbose: bool) -> None:
+def merge_cmd(inputs: tuple[Path, ...], output: Path, on_conflict: str, verbose: bool) -> None:
     """Combine independently-produced dumps into one self-contained baseline.
 
     \b
@@ -1336,7 +1223,14 @@ def merge_cmd(inputs: tuple[Path, ...], output: Path, verbose: bool) -> None:
     if len(inputs) < 2:
         raise click.UsageError("merge needs at least two input snapshots.")
 
-    snaps = [(path, load_snapshot(path)) for path in inputs]
+    snaps = []
+    for path in inputs:
+        try:
+            snaps.append((path, load_snapshot(path)))
+        except Exception as exc:  # malformed/corrupted .abi.json → clean error
+            raise click.ClickException(
+                f"could not read snapshot {path.name}: {exc}"
+            ) from exc
 
     # Base = the input that carries binary metadata (L0); else the first input.
     base_path, base = next(
@@ -1347,6 +1241,13 @@ def merge_cmd(inputs: tuple[Path, ...], output: Path, verbose: bool) -> None:
         snaps[0],
     )
 
+    # A2: detect when two inputs both supply the same managed layer with DIFFERING
+    # normalized facts. `_combine_packs` silently first-wins per layer, so without
+    # this a parallel-baseline prep mistake (e.g. two different source trees) is
+    # dropped on the floor. Compared on a per-layer payload digest, not the
+    # pack-wide content_hash (which would false-positive on an unrelated layer).
+    conflicts = _detect_merge_layer_conflicts(snaps)
+
     # Fold every input's embedded pack together, left to right.
     combined: BuildSourcePack | None = None
     contributors = 0
@@ -1356,6 +1257,32 @@ def merge_cmd(inputs: tuple[Path, ...], output: Path, verbose: bool) -> None:
         contributors += 1
         combined = _combine_packs(combined, s.build_source)
 
+    if conflicts:
+        # Which input's facts actually survived per layer (_combine_packs is
+        # first-wins for L3 but last-wins for L4/L5), so the message is accurate.
+        winners = (
+            _resolve_conflict_winners(combined, conflicts)
+            if combined is not None else {}
+        )
+        for layer, entries in sorted(conflicts.items()):
+            srcs = ", ".join(f"{name}" for name, _digest in entries)
+            kept = f"kept {winners[layer]}" if layer in winners else "kept one input"
+            click.echo(
+                f"merge conflict: layer {layer} supplied with differing facts by "
+                f"multiple inputs ({srcs}); {kept}.",
+                err=True,
+            )
+        if on_conflict == "error":
+            raise click.ClickException(
+                "merge aborted: conflicting layer facts and --on-conflict=error. "
+                "Each layer (L3/L4/L5) should come from exactly one input."
+            )
+        # warn mode: persist the conflict into the combined pack's extractor
+        # ledger (a serialized field, unlike a nonexistent manifest.diagnostics),
+        # so the recorded baseline carries the divergence forward.
+        if combined is not None:
+            _record_merge_conflicts(combined, conflicts, winners)
+
     if combined is None:
         click.echo(
             "Note: no input carried embedded build_source facts; the merged "
@@ -1363,6 +1290,32 @@ def merge_cmd(inputs: tuple[Path, ...], output: Path, verbose: bool) -> None:
             err=True,
         )
     else:
+        # A1 merge-path L0 plumbing: the source surface was linked with no binary
+        # present (empty exports), so re-link it against the binary base's L0
+        # exports — otherwise the provenance / mapping checks stay inert in the
+        # parallel-baseline flow. Only when the base actually carries a binary.
+        base_exports = _exported_symbols_from_snapshot(base)
+        if base_exports and combined.source_abi is not None and not (
+            combined.source_abi.roots.get("exported_symbols")
+        ):
+            from .buildsource.build_evidence import BuildEvidence
+            from .buildsource.source_graph import build_source_graph
+            from .buildsource.source_link import relink_surface_exports
+
+            relink_surface_exports(combined.source_abi, base_exports)
+            # L5: the graph was folded with an empty export set, so it lacks the
+            # source↔binary edges that diff_embedded_build_source consumes —
+            # rebuild it from the relinked surface so L5 mapping/localization is
+            # not inert (Codex).
+            if combined.source_graph is not None:
+                combined.source_graph = build_source_graph(
+                    combined.build_evidence or BuildEvidence(),
+                    source_abi=combined.source_abi,
+                )
+            # Mutating the embedded payloads invalidates the artifact digests
+            # _combine_packs precomputed; clear them so content_hash()/to_ref()
+            # recompute from the updated payloads rather than a stale hash (Codex).
+            combined.manifest.artifacts = []
         base.build_source = combined
         base.build_source_pack = combined.to_ref(path_hint=str(output))
 

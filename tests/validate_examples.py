@@ -393,6 +393,25 @@ def _build_info_path(
     return candidate if candidate.exists() else None
 
 
+def _sources_path(
+    case_dir: Path | None, stem: str, sources: bool = False
+) -> Path | None:
+    """Return the per-side L4/L5 source tree for *stem* (``v1``/``v2``) if any.
+
+    A case opts into source ABI replay (L4) + the source graph (L5) by declaring
+    ``sources: true`` in ``ground_truth.json`` *and* shipping a ``<stem>.sources/``
+    directory next to its sources; ``dump --sources`` then runs the replay inline
+    and embeds it. Like ``_build_info_path`` the ground-truth flag is the contract
+    — directory presence alone never silently upgrades a case to L4. Replay needs
+    a C++ front-end (clang/castxml); the runner skips the case when it is absent.
+    Pure/unit-testable: only checks for the directory, no I/O beyond ``is_dir()``.
+    """
+    if case_dir is None or not sources:
+        return None
+    candidate = case_dir / f"{stem}.sources"
+    return candidate if candidate.is_dir() else None
+
+
 def _dump_and_compare(
     tmp: Path,
     v1_so: Path,
@@ -404,6 +423,7 @@ def _dump_and_compare(
     new_build_source: Path | None = None,
     case_dir: Path | None = None,
     build_info: bool = False,
+    sources: bool = False,
 ) -> tuple[str | None, str | None]:
     """Run abicheck dump+compare. Returns (verdict, error_msg).
 
@@ -419,7 +439,10 @@ def _dump_and_compare(
     bi1 = _build_info_path(case_dir, "v1", build_info)
     if bi1 is not None:
         cmd1 += ["--build-info", str(bi1)]
-    r1 = subprocess.run(cmd1, capture_output=True, text=True, timeout=60)
+    sr1 = _sources_path(case_dir, "v1", sources)
+    if sr1 is not None:
+        cmd1 += ["--sources", str(sr1)]
+    r1 = subprocess.run(cmd1, capture_output=True, text=True, timeout=120)
     if r1.returncode != 0:
         return None, f"dump v1 failed: {r1.stderr[:200]}"
 
@@ -433,7 +456,10 @@ def _dump_and_compare(
     bi2 = _build_info_path(case_dir, "v2", build_info)
     if bi2 is not None:
         cmd2 += ["--build-info", str(bi2)]
-    r2 = subprocess.run(cmd2, capture_output=True, text=True, timeout=60)
+    sr2 = _sources_path(case_dir, "v2", sources)
+    if sr2 is not None:
+        cmd2 += ["--sources", str(sr2)]
+    r2 = subprocess.run(cmd2, capture_output=True, text=True, timeout=120)
     if r2.returncode != 0:
         return None, f"dump v2 failed: {r2.stderr[:200]}"
 
@@ -604,6 +630,35 @@ def _collect_build_source_evidence(
     return results[0], results[1], None
 
 
+def _embedded_present_layers(snap_path: Path) -> set[str]:
+    """Short tags (``L3``/``L4``/``L5``) for layers the dumped snapshot's embedded
+    build_source actually carries with ``present`` coverage.
+
+    Directory/flag presence is not enough: ``dump --sources`` degrades to a
+    partial/empty surface (exit 0) when the source-replay front-end is missing or
+    no TU parses, so the inline opt-ins must be confirmed from the *real* embedded
+    coverage rather than assumed (Codex). Pure JSON parsing — no abicheck import —
+    so it stays unit-testable and robust to a hand-edited snapshot.
+    """
+    layer_tags = {"L3_build": "L3", "L4_source_abi": "L4", "L5_source_graph": "L5"}
+    try:
+        data = json.loads(snap_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return set()
+    pack = data.get("build_source")
+    if not isinstance(pack, dict):
+        return set()
+    coverage = (pack.get("manifest") or {}).get("coverage") or []
+    present: set[str] = set()
+    for row in coverage:
+        if not isinstance(row, dict):
+            continue
+        tag = layer_tags.get(str(row.get("layer", "")))
+        if tag and str(row.get("status", "")) == "present":
+            present.add(tag)
+    return present
+
+
 def _source_layers_for_result(
     variant: str,
     *,
@@ -611,6 +666,8 @@ def _source_layers_for_result(
     v2_hdr: Path | None,
     old_build_source: Path | None,
     new_build_source: Path | None,
+    sources: bool = False,
+    build_info: bool = False,
 ) -> tuple[str, ...]:
     """Return the evidence layers actually supplied for this case result."""
     layers = ["L0"]
@@ -618,9 +675,24 @@ def _source_layers_for_result(
         layers.append("L1")
     if v1_hdr and v1_hdr.exists() and v2_hdr and v2_hdr.exists():
         layers.append("L2")
+    # Out-of-band build-source packs (build-source variant) carry L3/L4/L5.
     if old_build_source is not None and new_build_source is not None:
         layers.extend(["L3", "L4", "L5"])
-    return tuple(layers)
+    # The inline `--sources` opt-in (ground_truth `sources: true`) runs
+    # `dump --sources`, which resolves a compile DB (L3), replays the source
+    # ABI (L4), and folds the source graph (L5) inline — report those layers so
+    # the JSON artifact does not under-count the case as L0/L1/L2 (Codex). The
+    # decoupled `--build-info` opt-in supplies L3 only.
+    if sources:
+        layers.extend(["L3", "L4", "L5"])
+    elif build_info:
+        layers.append("L3")
+    # De-duplicate while preserving first-seen order (the build-source variant
+    # and inline --sources can both contribute L3/L4/L5).
+    seen: dict[str, None] = {}
+    for layer in layers:
+        seen.setdefault(layer, None)
+    return tuple(seen)
 
 
 def _evaluate_verdict(
@@ -763,17 +835,31 @@ def run_case(
         new_build_source=new_build_source,
         case_dir=case_dir,
         build_info=bool(entry.get("build_info", False)),
+        sources=bool(entry.get("sources", False)),
     )
     if dc_err is not None:
         return CaseResult(name, "ERROR", expected_raw, None, dc_err, variant)
 
     allow_risk = bool(entry.get("bad_practice") or entry.get("category") == "quality")
+    # Report L3/L4/L5 from the inline opt-ins only when both dumped snapshots
+    # actually embedded those layers with `present` coverage. Directory/flag
+    # presence is insufficient: `_dump_and_compare` omits `--sources` when the
+    # tree is missing, AND inline replay degrades to an empty surface (exit 0)
+    # when the source front-end is absent, so a misconfigured/degraded case must
+    # not claim source-replay/graph coverage it never produced (Codex).
+    present1 = _embedded_present_layers(tmp / "snap1.json")
+    present2 = _embedded_present_layers(tmp / "snap2.json")
+    both_present = present1 & present2
+    sources_present = "L4" in both_present
+    build_info_present = "L3" in both_present
     source_layers = _source_layers_for_result(
         variant,
         v1_hdr=v1_hdr,
         v2_hdr=v2_hdr,
         old_build_source=old_build_source,
         new_build_source=new_build_source,
+        sources=sources_present,
+        build_info=build_info_present,
     )
     return _evaluate_verdict(
         name, expected_raw, got, known_gap,

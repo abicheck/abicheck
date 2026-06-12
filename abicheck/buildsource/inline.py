@@ -38,10 +38,11 @@ the artifact tiers (L0/L1/L2) stay authoritative.
 from __future__ import annotations
 
 import datetime as _dt
+import os
 import shlex
 import subprocess
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
 from .build_evidence import BuildEvidence
@@ -68,6 +69,10 @@ _COMPILE_DB_HINTS = ("", "build", "out", "_build", "cmake-build-debug")
 #: (cquery/aquery/ninja -t/make -n) should be fast; a runaway one is treated as
 #: a failed extractor rather than hanging the dump.
 _QUERY_TIMEOUT_S = 300
+# build_query extractor statuses worth surfacing as an A3 diagnostic (no facts):
+# skipped (not allowed), failed (errored/unparseable), partial (ran, no compile
+# DB produced). "ok" means a DB was produced, so it needs no special handling.
+_BUILD_QUERY_DIAG_STATUSES = ("failed", "skipped", "partial")
 
 
 @dataclass
@@ -155,6 +160,7 @@ def collect_inline_pack(
     scope: str = "target",
     layers: tuple[str, ...] = ("L3", "L4", "L5"),
     build_cache_dir: Path | None = None,
+    exported_symbols: tuple[str, ...] = (),
 ) -> BuildSourcePack | None:
     """Collect an in-memory pack from raw source-tree / build-info inputs.
 
@@ -187,6 +193,12 @@ def collect_inline_pack(
     if compile_db is not None:
         _run_compile_db(compile_db, cfg.system, merged, extractors, build_cache_dir)
 
+    # A4: with both a --sources tree and L3 compile units, flag when the build
+    # metadata describes a different checkout than the source tree (decoupled
+    # inputs assembled from different trees). Collection-time diagnostic, not a
+    # ChangeKind — collection has no findings list (cf. A2).
+    _check_build_info_source_mismatch(merged, sources, extractors)
+
     surface = None
     if "L4" in layers:
         # Inline dump has no PR diff, so a 'changed' scope would select zero TUs
@@ -198,6 +210,7 @@ def collect_inline_pack(
         surface = _run_inline_source_abi(
             sources, merged, extractors,
             extractor=extractor, scope=replay_scope, clang_bin=clang_bin,
+            exported_symbols=exported_symbols,
         )
     graph = _build_inline_graph(merged, surface) if "L5" in layers else None
 
@@ -205,7 +218,15 @@ def collect_inline_pack(
         merged.compile_units or merged.targets or merged.toolchains
         or merged.link_units or merged.build_options
     )
-    if not (has_build or surface is not None or graph is not None):
+    # A3: a failed/blocked build query produces no facts but is still worth
+    # surfacing — keep the (near-empty) pack so its `partial` L3 coverage row and
+    # the build_query diagnostic reach `compare`, rather than dropping it as if
+    # nothing was attempted (Codex).
+    has_query_diag = any(
+        e.name == "build_query" and e.status in _BUILD_QUERY_DIAG_STATUSES
+        for e in extractors
+    )
+    if not (has_build or surface is not None or graph is not None or has_query_diag):
         return None
 
     pack = BuildSourcePack.empty(
@@ -225,7 +246,9 @@ def collect_inline_pack(
         pack.source_abi = surface
     if graph is not None:
         pack.source_graph = graph
-    pack.manifest.coverage = build_inline_coverage(merged, has_build, surface, graph)
+    pack.manifest.coverage = build_inline_coverage(
+        merged, has_build, surface, graph, extractors
+    )
     return pack
 
 
@@ -424,6 +447,101 @@ def _run_build_query(
 # ── L4: source ABI replay ─────────────────────────────────────────────────────
 
 
+# A4 thresholds: fire only on a *strong* signal (almost no compile-DB source
+# resolves under the tree) over a non-trivial number of units, so an unusual
+# build layout is not mistaken for a wrong checkout.
+_MISMATCH_MIN_UNITS = 3
+_MISMATCH_THRESHOLD = 0.9
+
+
+def _check_build_info_source_mismatch(
+    merged: BuildEvidence,
+    sources: Path | None,
+    extractors: list[ExtractorRecord],
+) -> None:
+    """A4: record a diagnostic when the L3 compile units describe a different
+    checkout than the ``--sources`` tree.
+
+    Collection-time only: ``merge``/collection has no ``DiffResult`` list, so this
+    is **not** a ``ChangeKind`` — it rides in the extractor ledger and
+    ``BuildEvidence.diagnostics`` (the channels the later compare's coverage
+    report surfaces), never as a verdict-bearing finding. Conservative by design
+    (see thresholds) so it does not trip the FP-rate gate on unusual layouts.
+    """
+    if sources is None or not merged.compile_units:
+        return
+    tree = Path(sources)
+    if not tree.is_dir():
+        return
+
+    # Match each compile-DB source against the tree by its *relative* path
+    # (directory-prefix-stripped, forward-slash normalized), falling back to the
+    # basename only when the source is not under its own compile-DB directory.
+    # All comparison is string-based on precomputed posix paths — no filesystem
+    # resolution — so it is robust to platform separators/drives (Windows CI) and
+    # to redacted home prefixes (`~/proj/...`), while still distinguishing two
+    # different checkouts that merely share filenames (review).
+    tree_rel: set[str] = set()
+    tree_names: set[str] = set()
+    # Two-component suffixes (`parent/name`) of every tree file, so an
+    # absolute/redacted compile-DB source can be matched on more than its bare
+    # basename — a wrong checkout that ships `tests/foo.cpp` must not satisfy a
+    # compile unit whose source is `src/foo.cpp` (review).
+    tree_tail2: set[str] = set()
+    for root, _dirs, files in os.walk(tree):
+        for fn in files:
+            rel = (Path(root) / fn).relative_to(tree).as_posix()
+            tree_rel.add(rel)
+            tree_names.add(fn)
+            parts = rel.split("/")
+            if len(parts) >= 2:
+                tree_tail2.add("/".join(parts[-2:]))
+
+    def _present(cu: object) -> bool | None:
+        src = getattr(cu, "source", "")
+        if not src:
+            return None
+        posix = str(src).replace("\\", "/")
+        name = PurePosixPath(posix).name
+        directory = str(getattr(cu, "directory", "") or "").replace("\\", "/").rstrip("/")
+        if directory and posix.startswith(directory + "/"):
+            return posix[len(directory) + 1:] in tree_rel
+        # A genuinely relative source (not rooted at "/", a drive "X:", or a
+        # redacted home "~") can be matched against the tree's relative paths.
+        rooted = (
+            posix.startswith("/")
+            or posix.startswith("~")
+            or (len(posix) >= 2 and posix[1] == ":")
+        )
+        if not rooted:
+            return posix in tree_rel
+        # Absolute / redacted with an unknown root → the redacted/abs prefix is
+        # unrecoverable, but require the source's `parent/name` suffix to exist in
+        # the tree rather than its basename alone, so a same-named file in a
+        # different subtree does not mask a checkout mismatch. Sources with no
+        # parent component fall back to the basename.
+        parts = [p for p in posix.split("/") if p and p != "~"]
+        if len(parts) >= 2:
+            return "/".join(parts[-2:]) in tree_tail2
+        return name in tree_names
+
+    flags = [r for r in (_present(cu) for cu in merged.compile_units) if r is not None]
+    if len(flags) < _MISMATCH_MIN_UNITS:
+        return
+    missing = sum(1 for present in flags if not present)
+    if missing / len(flags) >= _MISMATCH_THRESHOLD:
+        detail = (
+            f"{missing}/{len(flags)} compile-DB source files are absent from the "
+            "--sources tree; build metadata and sources may be different checkouts"
+        )
+        extractors.append(
+            ExtractorRecord(
+                name="build_info_source_tree_mismatch", status="failed", detail=detail
+            )
+        )
+        merged.diagnostics.append(f"build_info/source mismatch: {detail}")
+
+
 def _run_inline_source_abi(
     sources: Path | None,
     merged: BuildEvidence,
@@ -432,6 +550,7 @@ def _run_inline_source_abi(
     extractor: str,
     scope: str,
     clang_bin: str,
+    exported_symbols: tuple[str, ...] = (),
 ) -> SourceAbiSurface | None:
     """Run L4 replay over a source tree; ``None`` when no source tree is given.
 
@@ -469,6 +588,7 @@ def _run_inline_source_abi(
     roots = public_header_roots_for(merged)
     surface, diagnostics = run_source_replay(
         merged, impl, scope=scope, public_header_roots=roots,
+        exported_symbols=exported_symbols,
     )
     for diag in diagnostics:
         merged.diagnostics.append(f"source_abi: {diag}")
@@ -520,6 +640,7 @@ def build_inline_coverage(
     has_build: bool,
     surface: SourceAbiSurface | None,
     graph: SourceGraphSummary | None,
+    extractors: list[ExtractorRecord] | tuple[ExtractorRecord, ...] = (),
 ) -> list[LayerCoverage]:
     """Build L3/L4/L5 coverage rows for an inline-collected pack (ADR-028 D7)."""
     if has_build:
@@ -534,7 +655,26 @@ def build_inline_coverage(
             ),
         )
     else:
-        l3 = LayerCoverage(layer=DataLayer.L3_BUILD.value, status=CoverageStatus.NOT_COLLECTED)
+        # A3: a build query that was attempted but failed (or was blocked because
+        # --allow-build-query was not set) yielded no L3 facts. Surface that as a
+        # `partial` row with the reason instead of a silent `not_collected`, so
+        # the coverage/capability report tells the user exactly what to fix.
+        bq = next(
+            (e for e in extractors
+             if e.name == "build_query" and e.status in _BUILD_QUERY_DIAG_STATUSES),
+            None,
+        )
+        if bq is not None:
+            l3 = LayerCoverage(
+                layer=DataLayer.L3_BUILD.value,
+                status=CoverageStatus.PARTIAL,
+                confidence=LayerConfidence.UNKNOWN,
+                detail=f"build query {bq.status}: {bq.detail}",
+            )
+        else:
+            l3 = LayerCoverage(
+                layer=DataLayer.L3_BUILD.value, status=CoverageStatus.NOT_COLLECTED
+            )
 
     if surface is not None:
         any_entities = bool(

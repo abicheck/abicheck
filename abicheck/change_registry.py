@@ -1101,6 +1101,13 @@ REGISTRY = ChangeKindRegistry([
               "the library's exports. With artifact backing this escalates to the "
               "authoritative removed-export finding; on its own it is a "
               "surface/export consistency risk to investigate."),
+    _E("source_binary_provenance_mismatch", _R,
+       impact="A large fraction of the source tree's public declarations fail to "
+              "map to any exported binary symbol, which strongly suggests the "
+              "source checkout does not correspond to the shipped binary (e.g. a "
+              "wrong tag/commit). All L4/L5 source findings for this pair are then "
+              "untrustworthy; re-check the source out at the binary's build tag. "
+              "Per ADR-028 D3 this is a context risk, never a proven binary break."),
     _E("odr_source_conflict", _R,
        impact="The same type name resolves to different definitions across "
               "translation units (One Definition Rule conflict). Linking or "
