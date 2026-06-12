@@ -1,5 +1,15 @@
 # Part 8 — Detecting Breaks: Evidence, Tools, and Why One Method Is Never Enough
 
+> **Series navigation:** [0. Product Contract](00-product-contract.md) ·
+> [1. Foundations](01-foundations.md) ·
+> [2. Symbol Contracts](02-symbol-contracts.md) ·
+> [3. Type Layout](03-type-layout.md) ·
+> [4. C++ ABI](04-cpp-abi.md) ·
+> [5. Linker & ELF](05-linker-elf.md) ·
+> [6. Transitive Breaks](06-transitive-breaks.md) ·
+> [7. Designing for Stability](07-designing-for-stability.md) ·
+> **8. Detecting Breaks**
+
 Parts 0–7 explained the *mechanisms*: what the compiler bakes into a binary, and
 which changes corrupt that contract. This part turns the telescope around and asks
 the engineering question: **how do you actually catch each of those breaks before
@@ -64,7 +74,7 @@ all. Per-case minimums are machine-readable in
 | Break family | Min evidence | Symbol-only (L0) sees it? | DWARF tools (L1) see it? | Why — and representative cases |
 |---|:---:|:---:|:---:|---|
 | Symbol/function/variable removal | **L0** | ✅ | ✅ | The symbol vanishes from `.dynsym` — every tool's home turf ([case01](../../examples/case01_symbol_removal.md), [case12](../../examples/case12_function_removed.md)) |
-| C++ signature/qualifier changes | **L0** | ✅ | ✅ | Itanium mangling encodes parameters, `const`, `static` — the *name itself* changes ([case21](../../examples/case21_method_became_static.md), [case22](../../examples/case22_method_const_changed.md)) |
+| C++ signature/qualifier changes | **L1** | ⚠️ partial | ✅ | Itanium mangling encodes parameters, `const`, `static` — so even a stripped binary shows *a symbol vanished and a new one appeared*. But classifying it as a qualifier change on the *same* method (rather than an unrelated removal + addition) takes debug info or headers ([case21](../../examples/case21_method_became_static.md), [case22](../../examples/case22_method_const_changed.md) are measured at L1) |
 | **C** signature changes | **L1/L2** | ❌ | ✅ | C symbols are just the function name — `foo(int)` → `foo(long)` keeps the identical symbol. Needs DWARF or headers ([case02](../../examples/case02_param_type_change.md), [case10](../../examples/case10_return_type.md)) |
 | Struct/class layout, packing, alignment | **L1/L2** | ❌ | ✅ | No symbol changes when a field moves; layout lives in debug info and headers ([case07](../../examples/case07_struct_layout.md), [case40](../../examples/case40_field_layout.md), [case56](../../examples/case56_struct_packing_changed.md)) |
 | Enum value reassignment | **L1/L2** | ❌ | ✅ | Constants are compiled into *callers*; the library's symbols are untouched ([case08](../../examples/case08_enum_value_change.md), [case20](../../examples/case20_enum_member_value_changed.md)) |
@@ -73,7 +83,7 @@ all. Per-case minimums are machine-readable in
 | ELF/linker metadata: SONAME, visibility, symbol versions, RPATH | **L0** | ✅ | ✅ | Binary-only facts — which means *header-only* checkers (ABICC's XML mode) are the blind ones here ([case05](../../examples/case05_soname.md), [case65](../../examples/case65_symbol_version_removed.md)) |
 | Toolchain/build-flag drift: `-std` floor, ABI version, flag changes | **L1/L3** | ❌ | partly | Compilers record their flags in `DW_AT_producer`, so a `-g` build exposes some drift; the rest needs the compile DB ([case103](../../examples/case103_toolchain_flag_drift.md)). The libstdc++ dual-ABI flip is the notable exception: it *renames mangled symbols* (`std::__cxx11::`), so even a stripped binary betrays it at L0 ([case104](../../examples/case104_glibcxx_dual_abi_flip.md)) |
 | Header constant / macro **values** | **L2** | ❌ | ❌ | The value lives in the declared AST, not the binary — header comparison sees it ([case124](../../examples/case124_header_constant_value_changed.md)) |
-| Inline/template **bodies**, uninstantiated templates | **L4** | ❌ | ❌ | These never reach the shipped binary at all — only source replay sees them ([case122](../../examples/case122_template_signature_uninstantiated.md)) |
+| Inline/template **bodies**, uninstantiated templates | **L4** | ❌ | ❌ | These never reach the shipped binary at all — only source replay sees them. [case122](../../examples/case122_template_signature_uninstantiated.md) is deliberately a *no-change* case: it marks the boundary of what even source analysis can prove about templates that were never instantiated |
 | Multi-library release skew (bundle SONAME/dependency drift) | release model | ❌ | ❌ | Not a property of any *single* binary diff — needs a bundle-level comparison ([multi-binary guide](../../user-guide/multi-binary.md), bundle cases 84/90–93 in `examples/`) |
 | Internal-only changes (**should be NO_CHANGE**) | **L2** | FP ⚠️ | FP ⚠️ | The inverse problem: without header scoping, tools *flag* private `detail::` churn as breaking. Evidence here removes false positives ([case118](../../examples/case118_internal_struct_field_added_scoped.md)–[120](../../examples/case120_internal_struct_reordered_scoped.md)) |
 

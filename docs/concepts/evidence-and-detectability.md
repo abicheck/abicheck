@@ -48,6 +48,10 @@ raise.** A struct-field insertion is invisible at L0 but obvious at L1
 *looks* like a break at L1 is correctly dismissed once L2 headers reveal the
 struct is non-public ([case118](../examples/case118_internal_struct_field_added_scoped.md)).
 
+> An optional sixth source — the **L5 source/build graph** (include/type/call
+> reachability, ADR-031) — extends L4 to *localize and explain* findings; it is
+> covered with the other pack layers in [Build & Source Packs](build-source-data.md).
+
 ### How they combine
 
 The layers are **independent and additive**, not a fallback chain — abicheck

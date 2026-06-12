@@ -1,7 +1,7 @@
 # ABI/API Handling — A Learning Series
 
 This is the **conceptual hub** for understanding ABI/API compatibility — written
-to *teach* the subject, not just catalog it. It is the front door to a seven-part
+to *teach* the subject, not just catalog it. It is the front door to a nine-part
 **learning series** that starts from first principles ("what is a symbol? what
 does the loader do?") and builds up to the design patterns that keep a C/C++
 shared library compatible across releases.
@@ -41,7 +41,7 @@ when it sees one.
 
 ## How to read this series
 
-The seven parts are ordered. If you're new to ABI compatibility, read them in
+The parts are ordered. If you're new to ABI compatibility, read them in
 sequence — each builds on the mental models established by the last. If you're
 here for a specific problem, jump straight to the relevant part.
 
@@ -125,7 +125,7 @@ is the source of truth).
 
 ---
 
-## The one idea to carry through all seven parts
+## The one idea to carry through the whole series
 
 If you remember nothing else:
 

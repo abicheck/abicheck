@@ -113,9 +113,9 @@ Examples:
 ```bash
 abicheck compare old.json new.json
 ret=$?
-[ $ret -eq 1 ] && echo "ERROR — check tool inputs" && exit 1
 [ $ret -eq 4 ] && echo "BREAKING — release blocked" && exit 1
 [ $ret -eq 2 ] && echo "API_BREAK — source-level break" && exit 1
+[ $ret -ne 0 ] && echo "unexpected exit code $ret — check tool inputs" && exit 1
 echo "OK (NO_CHANGE or COMPATIBLE)"
 ```
 
@@ -123,8 +123,8 @@ echo "OK (NO_CHANGE or COMPATIBLE)"
 ```bash
 abicheck compare old.json new.json --format json -o result.json
 ret=$?
-[ $ret -eq 1 ] && echo "::error::tool error" && exit 1
 [ $ret -eq 4 ] && echo "::error::BREAKING ABI change" && exit 1
+[ $ret -ne 0 ] && [ $ret -ne 2 ] && echo "::error::unexpected exit code $ret" && exit 1
 [ $ret -eq 2 ] && echo "::warning::API_BREAK (source-level)"
 verdict=$(python3 -c "import json; print(json.load(open('result.json'))['verdict'])" 2>/dev/null || echo "")
 [ "$verdict" = "COMPATIBLE" ] && echo "::warning::COMPATIBLE ABI change (new symbols or compatible modifications)"
@@ -135,8 +135,8 @@ echo "ABI check passed"
 ```bash
 abicheck compare old.json new.json
 ret=$?
-[ $ret -eq 1 ] && exit 1   # tool error
-[ $ret -eq 4 ] && exit 1   # BREAKING only; API_BREAK (exit 2) allowed
+[ $ret -eq 4 ] && exit 1                    # BREAKING only; API_BREAK (exit 2) allowed
+[ $ret -ne 0 ] && [ $ret -ne 2 ] && exit 1  # unexpected exit code (tool failure)
 exit 0
 ```
 

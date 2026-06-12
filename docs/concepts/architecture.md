@@ -55,7 +55,8 @@ flowchart TD
 The analysis layers are independent and additive — each catches changes the
 others miss, and the checker reconciles them into a single verdict. The
 artifact layers (L0/L1/L2) are described in detail below; the build/source
-layers (L3/L4) are covered in [Build & Source Packs](build-source-data.md).
+layers (L3/L4, plus the optional L5 reachability graph) are covered in
+[Build & Source Packs](build-source-data.md).
 
 ---
 
@@ -339,7 +340,7 @@ break.
 | Module | Responsibility |
 |--------|---------------|
 | `compat/` | ABICC compatibility layer (compat check, compat dump, XML parsing) |
-| `abicc_dump_import.py` | Import Perl-format ABICC dump files |
+| `compat/abicc_dump_import.py` | Import Perl-format ABICC dump files |
 | `demangle.py` | C++ symbol demangling utilities |
 
 ---
