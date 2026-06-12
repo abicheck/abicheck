@@ -1298,9 +1298,24 @@ def merge_cmd(inputs: tuple[Path, ...], output: Path, on_conflict: str, verbose:
         if base_exports and combined.source_abi is not None and not (
             combined.source_abi.roots.get("exported_symbols")
         ):
+            from .buildsource.build_evidence import BuildEvidence
+            from .buildsource.source_graph import build_source_graph
             from .buildsource.source_link import relink_surface_exports
 
             relink_surface_exports(combined.source_abi, base_exports)
+            # L5: the graph was folded with an empty export set, so it lacks the
+            # source↔binary edges that diff_embedded_build_source consumes —
+            # rebuild it from the relinked surface so L5 mapping/localization is
+            # not inert (Codex).
+            if combined.source_graph is not None:
+                combined.source_graph = build_source_graph(
+                    combined.build_evidence or BuildEvidence(),
+                    source_abi=combined.source_abi,
+                )
+            # Mutating the embedded payloads invalidates the artifact digests
+            # _combine_packs precomputed; clear them so content_hash()/to_ref()
+            # recompute from the updated payloads rather than a stale hash (Codex).
+            combined.manifest.artifacts = []
         base.build_source = combined
         base.build_source_pack = combined.to_ref(path_hint=str(output))
 

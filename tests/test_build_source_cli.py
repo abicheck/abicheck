@@ -1615,3 +1615,51 @@ def test_merge_relinks_source_surface_with_binary_exports(tmp_path):
     assert merged.build_source.source_abi.roots["exported_symbols"] == ["_Z3foov"]
     mapping = merged.build_source.source_abi.mappings["source_decl_to_binary_symbol"]
     assert "_Z3foov" in set(mapping.values())
+
+
+def test_merge_relink_rebuilds_l5_graph_and_refreshes_hash(tmp_path):
+    """A1 merge plumbing (Codex): when the source-only input carries an L5 graph,
+    relinking rebuilds it with the binary's exports (so it gains the
+    source↔binary edges) and clears stale artifact digests so content_hash
+    recomputes from the updated payloads."""
+    from pathlib import Path
+
+    from abicheck.buildsource.build_evidence import BuildEvidence
+    from abicheck.buildsource.model import BuildSourceManifest
+    from abicheck.buildsource.pack import BuildSourcePack
+    from abicheck.buildsource.source_abi import SourceAbiSurface, SourceEntity
+    from abicheck.buildsource.source_graph import build_source_graph
+    from abicheck.elf_metadata import ElfMetadata
+    from abicheck.model import Function
+
+    surf = SourceAbiSurface(library="libfoo.so", target_id="t")
+    surf.reachable_declarations = [
+        SourceEntity(id="decl://foo", kind="function", qualified_name="foo",
+                     mangled_name="_Z3foov")
+    ]
+    graph0 = build_source_graph(BuildEvidence(), source_abi=surf)  # empty exports
+    src_snap = AbiSnapshot(library="libfoo.so", version="1")
+    src_snap.build_source = BuildSourcePack(
+        root=Path(""), manifest=BuildSourceManifest(), source_abi=surf,
+        source_graph=graph0)
+    src_path = tmp_path / "src.json"
+    save_snapshot(src_snap, src_path)
+
+    bin_snap = AbiSnapshot(library="libfoo.so", version="1")
+    bin_snap.elf = ElfMetadata()
+    bin_snap.functions = [Function(name="foo", mangled="_Z3foov",
+                                   return_type="void", params=[])]
+    bin_path = tmp_path / "bin.json"
+    save_snapshot(bin_snap, bin_path)
+
+    out = tmp_path / "baseline.json"
+    result = CliRunner().invoke(main, ["merge", str(bin_path), str(src_path), "-o", str(out)])
+    assert result.exit_code == 0, result.output
+    merged = load_snapshot(out)
+    g = merged.build_source.source_graph
+    assert g is not None
+    # Rebuilt graph carries a symbol-mapping edge the empty-export graph lacked.
+    edge_kinds = {e.kind for e in g.edges}
+    assert any("SYMBOL" in k for k in edge_kinds), edge_kinds
+    # content_hash recomputes from the updated payloads (no stale artifacts).
+    assert merged.build_source.content_hash()
