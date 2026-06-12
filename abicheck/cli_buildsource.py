@@ -38,6 +38,7 @@ from .buildsource.evidence_policy import (
     echo_evidence_metrics,
     evidence_coverage_metrics,
     require_evidence_findings,
+    tag_evidence_category,
 )
 from .buildsource.model import (
     CoverageStatus,
@@ -1195,9 +1196,13 @@ def embed_build_source(
     build_config: Path | None = None,
     allow_build_query: bool = False,
     clang_bin: str = "clang",
-    scope: str = "target",
+    collect_mode: str = "source-target",
 ) -> None:
     """Embed build-info / source facts inline in *snap* (single-artifact UX).
+
+    *collect_mode* is the ADR-033 D2 CI evidence mode selecting which layers and
+    replay scope to collect: ``build`` captures L3 build context only, ``off``
+    embeds nothing, the source/graph modes collect L3+L4+L5 at the matching scope.
 
     Source-tree-centric inputs (ADR-028..033 amendment): ``sources`` is a source
     checkout — L4 source ABI replay and the L5 graph are run *inline* and
@@ -1219,6 +1224,11 @@ def embed_build_source(
         is_pack_dir,
         load_build_config,
     )
+    from .buildsource.source_replay import collection_for_ci_mode
+
+    scope, layers = collection_for_ci_mode(collect_mode)
+    if not layers:  # 'off' (or an unknown mode) embeds nothing
+        return
 
     bi_is_pack = is_pack_dir(build_info)
     src_is_pack = is_pack_dir(sources)
@@ -1243,6 +1253,7 @@ def embed_build_source(
             base_build=bi_pack.build_evidence if bi_pack else None,
             clang_bin=clang_bin,
             scope=scope,
+            layers=layers,
         )
 
     # --build-info (pack) wins L3, --sources (pack) wins L4/L5, the inline pack
@@ -1266,6 +1277,7 @@ def dump_source_only(
     git_tag: str | None,
     build_id: str | None,
     no_git: bool,
+    collect_mode: str = "source-target",
 ) -> None:
     """Write a binary-less snapshot carrying only the embedded build/source facts.
 
@@ -1289,7 +1301,7 @@ def dump_source_only(
     snap = AbiSnapshot(library=library, version=version)
     _stamp_provenance(snap, git_tag=git_tag, build_id=build_id, no_git=no_git)
     _write_snapshot_output(
-        snap, output, build_info, sources, build_config, allow_build_query
+        snap, output, build_info, sources, build_config, allow_build_query, collect_mode
     )
 
 
@@ -1440,16 +1452,16 @@ def diff_embedded_build_source(
         return require_evidence_findings(policy_file, None), [], {}
 
     changes: list[Change] = []
-    # Track the build-context-drift vs source-only split first-hand: each diff
-    # helper below owns one bucket, so we never have to re-classify by ChangeKind
-    # (which would drift as kinds move between modules).
-    build_drift_count = 0
-    source_only_count = 0
+    # Tag each finding with its D9 bucket as it is produced: each diff helper
+    # below owns one bucket, so we never re-classify by ChangeKind (which would
+    # drift as kinds move between modules). The metrics then count *retained*
+    # (post-suppression) findings per bucket in attach_evidence_metrics, so the
+    # D9 split partitions the reported findings (Codex review).
     old_build = old_pack.build_evidence if old_pack else None
     new_build = new_pack.build_evidence if new_pack else None
     if old_build is not None and new_build is not None:
         _build_changes = diff_build_evidence(old_build, new_build)
-        build_drift_count += len(_build_changes)
+        tag_evidence_category(_build_changes, "build_context")
         apply_evidence_policy(_build_changes, "build_context", policy_file)
         changes.extend(_build_changes)
     # Header-parse-context drift only applies when the new snapshot actually
@@ -1463,13 +1475,13 @@ def diff_embedded_build_source(
             new_build,
             headers_parsed_with_context=new_snapshot.parsed_with_build_context,
         )
-        build_drift_count += len(_drift)
+        tag_evidence_category(_drift, "build_context")
         apply_evidence_policy(_drift, "build_context", policy_file)
         changes.extend(_drift)
 
     if old_snapshot is not None:
         _asym = _detect_coverage_asymmetry(old_snapshot, old_pack, new_snapshot, new_pack)
-        build_drift_count += len(_asym)
+        tag_evidence_category(_asym, "build_context")
         apply_evidence_policy(_asym, "build_context", policy_file)
         changes.extend(_asym)
 
@@ -1481,7 +1493,7 @@ def diff_embedded_build_source(
     if old_surface is not None and new_surface is not None:
         from .buildsource.source_diff import diff_source_abi
         _src = diff_source_abi(old_surface, new_surface)
-        source_only_count += len(_src)
+        tag_evidence_category(_src, "source_only")
         apply_evidence_policy(_src, "source_only", policy_file)
         changes.extend(_src)
 
@@ -1493,7 +1505,7 @@ def diff_embedded_build_source(
     if old_graph is not None and new_graph is not None:
         from .buildsource.source_graph import diff_source_graph_findings
         _gr = diff_source_graph_findings(old_graph, new_graph)
-        source_only_count += len(_gr)
+        tag_evidence_category(_gr, "source_only")
         apply_evidence_policy(_gr, "graph_risk", policy_file)
         changes.extend(_gr)
 
@@ -1518,7 +1530,7 @@ def diff_embedded_build_source(
     _echo_coverage(intrinsic, coverage)
     _echo_capabilities(intrinsic, coverage)
     coverage_rows: list[dict[str, object]] = [c.to_dict() for c in (*intrinsic, *coverage)]
-    metrics = evidence_coverage_metrics(coverage, build_drift_count, source_only_count)
+    metrics = evidence_coverage_metrics(coverage)
     return changes, coverage_rows, metrics
 
 
@@ -1577,20 +1589,28 @@ def attach_evidence_metrics(
 ) -> None:
     """Finalize and attach the ADR-033 D9 evidence metrics onto ``result``.
 
-    Layers run-wide totals onto the partial metrics — the artifact-backed finding
-    count plus the suppression/surface-demotion totals — then echoes the D6 timing
-    summary. Artifact-backed findings are the reported changes whose identity is
-    *not* one of the externally-injected ``extra_changes`` — that is both the
-    build/source evidence findings *and* any probe-matrix findings, since none of
-    those come from the L0–L2 artifact diffing — so the split needs no
-    per-ChangeKind table. No-op when no evidence was involved.
+    Counts the finding buckets from the *retained* (post-suppression)
+    ``result.changes`` so they partition the reported findings consistently
+    (Codex review): build-context-drift and source-only come from each finding's
+    ``evidence_category`` tag, and artifact-backed is everything not externally
+    injected via ``extra_changes`` (build/source evidence *and* probe-matrix
+    findings — none from L0–L2 diffing). Adds the suppression/surface-demotion
+    totals, then echoes the D6 timing summary. No-op when no evidence involved.
     """
     if not metrics:
         return
     injected_ids = {id(c) for c in injected_changes}
-    metrics["findings.artifact_backed.count"] = sum(
-        1 for c in result.changes if id(c) not in injected_ids
-    )
+    artifact_backed = build_drift = source_only = 0
+    for c in result.changes:
+        if id(c) not in injected_ids:
+            artifact_backed += 1
+        elif getattr(c, "evidence_category", None) == "build_context":
+            build_drift += 1
+        elif getattr(c, "evidence_category", None) == "source_only":
+            source_only += 1
+    metrics["findings.artifact_backed.count"] = artifact_backed
+    metrics["findings.build_context_drift.count"] = build_drift
+    metrics["findings.source_only.count"] = source_only
     metrics["findings.demoted_by_surface.count"] = result.out_of_surface_count
     metrics["findings.suppressed_with_reason.count"] = result.suppressed_count
     result.evidence_metrics = metrics

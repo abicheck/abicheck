@@ -90,6 +90,12 @@ class Change:
     modulation_reason: str | None = None
     modulation_rule: str | None = None
     confidence: Confidence = Confidence.HIGH
+    # ADR-033 D9 — which build/source evidence bucket this finding belongs to
+    # ("build_context" or "source_only"), set when it is produced from L3/L4/L5
+    # evidence. Lets the metrics count *retained* (post-suppression) findings per
+    # bucket so the D9 split partitions the reported findings. ``None`` for
+    # ordinary artifact-backed findings.
+    evidence_category: str | None = None
 
 
 @dataclass

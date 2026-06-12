@@ -48,6 +48,14 @@ _ABI_RELEVANT_BUILD_KINDS: frozenset[str] = frozenset({
 })
 
 
+def tag_evidence_category(findings: list[Change], bucket: str) -> None:
+    """Tag each finding with its D9 metric *bucket* (``build_context`` /
+    ``source_only``) so the metrics can count *retained* findings per bucket
+    after suppression. Done unconditionally, independent of any policy knob."""
+    for change in findings:
+        change.evidence_category = bucket
+
+
 def apply_evidence_policy(
     findings: list[Change], category: str, policy_file: PolicyFile | None
 ) -> None:
@@ -130,17 +138,13 @@ def _layer_status(coverage: list[LayerCoverage], layer: DataLayer) -> str:
     return CoverageStatus.NOT_COLLECTED.value
 
 
-def evidence_coverage_metrics(
-    coverage: list[LayerCoverage],
-    build_drift_count: int,
-    source_only_count: int,
-) -> dict[str, object]:
-    """Build the part of the ADR-033 D9 metrics countable first-hand at diff time.
+def evidence_coverage_metrics(coverage: list[LayerCoverage]) -> dict[str, object]:
+    """Build the coverage-flag part of the ADR-033 D9 metrics at diff time.
 
-    Covers the coverage flags (which optional layers ran on the target side) and
-    the build-context-drift vs source-only finding split. Timing and run-wide
-    totals are layered on later by ``prepare_embedded_build_source`` /
-    ``attach_evidence_metrics``.
+    Which optional layers ran on the target side. The per-bucket finding counts
+    are computed later from the *retained* findings in ``attach_evidence_metrics``
+    (so they partition the reported findings post-suppression); timing and
+    run-wide totals are layered on there too.
     """
     return {
         "coverage.build_context.present": (
@@ -148,8 +152,6 @@ def evidence_coverage_metrics(
         ),
         "coverage.source_abi.mode": _layer_status(coverage, DataLayer.L4_SOURCE_ABI),
         "coverage.graph.mode": _layer_status(coverage, DataLayer.L5_SOURCE_GRAPH),
-        "findings.build_context_drift.count": build_drift_count,
-        "findings.source_only.count": source_only_count,
     }
 
 

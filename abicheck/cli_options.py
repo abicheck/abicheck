@@ -82,6 +82,15 @@ def build_source_dump_options(func: F) -> F:
     from pathlib import Path
 
     func = click.option(
+        "--collect-mode", "collect_mode",
+        type=click.Choice(["off", "build", "source-changed", "source-target", "graph-summary", "graph-full"]),
+        default="source-target", show_default=True,
+        help="ADR-033 D2 CI evidence mode selecting which layers to collect from "
+        "--sources/--build-info: 'build' captures L3 build context only (no source "
+        "replay), 'source-*'/'graph-*' collect L3+L4+L5 at the matching replay "
+        "scope, 'off' embeds nothing.",
+    )(func)
+    func = click.option(
         "--allow-build-query", "allow_build_query", is_flag=True, default=False,
         help="Permit running the configured `build.query` command to emit a "
         "compile DB / exports (ADR-032 D5 query_build_system). Off by default: "

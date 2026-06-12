@@ -287,6 +287,36 @@ def test_compare_json_carries_evidence_metrics_block(tmp_path):
     assert "Evidence metrics:" in result.stderr
 
 
+def test_evidence_metrics_bucket_counts_are_post_suppression(tmp_path):
+    """ADR-033 D9 (Codex review): a suppressed build-drift finding must drop out
+    of findings.build_context_drift.count so the buckets partition the *reported*
+    findings, not the pre-suppression set."""
+    runner = CliRunner()
+    ev_old, ev_new = _two_build_packs(tmp_path, runner)
+    supp = tmp_path / "supp.yaml"
+    supp.write_text(
+        "version: 1\n"
+        "suppressions:\n"
+        "  - change_kind: abi_relevant_build_flag_changed\n"
+        "    symbol_pattern: '.*'\n"
+        "    reason: known std bump\n"
+        "  - change_kind: header_parse_context_drift\n"
+        "    symbol_pattern: '.*'\n"
+        "    reason: known parse-context drift\n"
+    )
+    old_snap = _make_snap(tmp_path, "old.json", "1.0")
+    new_snap = _make_snap(tmp_path, "new.json", "2.0")
+    result = runner.invoke(main, [
+        "compare", str(old_snap), str(new_snap),
+        "--old-build-info", str(ev_old), "--new-build-info", str(ev_new),
+        "--suppress", str(supp), "--format", "json",
+    ])
+    assert result.exit_code in (0, 2, 4), result.output
+    metrics = json.loads(result.stdout)["evidence_metrics"]
+    # The only build finding was suppressed → it must not be counted.
+    assert metrics["findings.build_context_drift.count"] == 0
+
+
 def test_compare_json_without_evidence_omits_metrics(tmp_path):
     """No evidence → no evidence_metrics key (additive, opt-in)."""
     old_snap = _make_snap(tmp_path, "old.json", "1.0")
@@ -456,6 +486,47 @@ def test_evidence_policy_invalid_action_rejected(tmp_path):
     ])
     assert result.exit_code != 0
     assert "graph_risk_findings" in result.output
+
+
+def _source_tree(tmp_path):
+    tree = tmp_path / "src"
+    tree.mkdir()
+    (tree / "foo.cpp").write_text("int f(){return 0;}\n")
+    (tree / "compile_commands.json").write_text(json.dumps([{
+        "directory": str(tree), "file": "foo.cpp",
+        "arguments": ["c++", "-std=c++17", "-c", "foo.cpp"],
+    }]))
+    return tree
+
+
+def test_dump_collect_mode_build_collects_l3_only(tmp_path):
+    """ADR-033 D2/Phase-1: `dump --collect-mode build` captures L3 build context
+    only — no L4 source replay or L5 graph."""
+    tree = _source_tree(tmp_path)
+    out = tmp_path / "s.json"
+    result = CliRunner().invoke(main, [
+        "dump", "--sources", str(tree), "--collect-mode", "build", "-o", str(out),
+    ])
+    assert result.exit_code == 0, result.output
+    bs = load_snapshot(out).build_source
+    assert bs is not None and bs.build_evidence is not None
+    assert bs.source_abi is None and bs.source_graph is None
+    cov = {(c.layer if isinstance(c.layer, str) else c.layer.value): c.status.value
+           for c in bs.manifest.coverage}
+    assert cov["L3_build"] == "present"
+    assert cov["L4_source_abi"] == "not_collected"
+    assert cov["L5_source_graph"] == "not_collected"
+
+
+def test_dump_collect_mode_off_embeds_nothing(tmp_path):
+    """`--collect-mode off` collects no evidence even with a source tree."""
+    tree = _source_tree(tmp_path)
+    out = tmp_path / "s.json"
+    result = CliRunner().invoke(main, [
+        "dump", "--sources", str(tree), "--collect-mode", "off", "-o", str(out),
+    ])
+    assert result.exit_code == 0, result.output
+    assert load_snapshot(out).build_source is None
 
 
 def test_compare_collect_mode_without_packs_is_noted(tmp_path):

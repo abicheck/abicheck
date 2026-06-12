@@ -169,6 +169,30 @@ embedded `build_source` facts together per layer (each layer should come from
 exactly one input), so the result is a single `.abi.json` carrying all of
 L0–L5.
 
+### Choosing how much to collect — `dump --collect-mode`
+
+`dump --collect-mode` (the ADR-033 D2 CI evidence mode) selects *which* layers
+are collected from `--sources` / `--build-info`, trading cost for depth:
+
+```bash
+abicheck dump --sources ./src/ --collect-mode build         -o s.json  # L3 only
+abicheck dump --sources ./src/ --collect-mode source-target -o s.json  # L3+L4+L5 (default)
+abicheck dump --sources ./src/ --collect-mode off           -o s.json  # embed nothing
+```
+
+| Mode | Layers collected | Replay scope |
+|------|------------------|--------------|
+| `off` | none | — |
+| `build` | L3 build context only | — |
+| `source-changed` | L3 + L4 + L5 | changed TUs |
+| `source-target` *(default)* | L3 + L4 + L5 | target |
+| `graph-summary` | L3 + L4 + L5 | changed |
+| `graph-full` | L3 + L4 + L5 | full |
+
+`build` is the cheap PR default (build-flag/toolchain drift, no source parse);
+the `source-*` / `graph-*` modes add the L4 source replay and L5 graph at the
+matching replay scope.
+
 ### Build-tool query configuration (`.abicheck.yml`)
 
 A source checkout often *contains* the build system. abicheck can use it to

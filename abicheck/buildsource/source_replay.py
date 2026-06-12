@@ -83,6 +83,29 @@ def scope_for_ci_mode(mode: str) -> str:
     return CI_MODE_TO_SCOPE.get(mode, "off")
 
 
+#: Which data layers each ADR-033 CI evidence mode collects. ``build`` is L3
+#: only (build context, no source replay/graph); ``off`` collects nothing; the
+#: source/graph modes collect all three (the replay scope above bounds the cost).
+CI_MODE_TO_LAYERS: dict[str, tuple[str, ...]] = {
+    "off": (),
+    "build": ("L3",),
+    "source-changed": ("L3", "L4", "L5"),
+    "source-target": ("L3", "L4", "L5"),
+    "graph-summary": ("L3", "L4", "L5"),
+    "graph-full": ("L3", "L4", "L5"),
+}
+
+
+def collection_for_ci_mode(mode: str) -> tuple[str, tuple[str, ...]]:
+    """Return ``(replay_scope, layers)`` for an ADR-033 CI evidence mode.
+
+    Drives inline collection at ``dump`` time (ADR-028..033 amendment: the CI
+    mode selects the inputs/scopes internally). ``layers`` is empty for ``off``
+    so the caller skips embedding entirely; unknown modes fall back to that.
+    """
+    return scope_for_ci_mode(mode), CI_MODE_TO_LAYERS.get(mode, ())
+
+
 # -- scope selection (ADR-030 D7) --------------------------------------------
 
 

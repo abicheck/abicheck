@@ -153,6 +153,7 @@ def collect_inline_pack(
     clang_bin: str = "clang",
     extractor: str = "clang",
     scope: str = "target",
+    layers: tuple[str, ...] = ("L3", "L4", "L5"),
 ) -> BuildSourcePack | None:
     """Collect an in-memory pack from raw source-tree / build-info inputs.
 
@@ -164,6 +165,10 @@ def collect_inline_pack(
     ``base_build`` seeds the L3 evidence from an already-loaded pack (e.g. an
     explicit ``--build-info`` pack directory) so a raw ``--sources`` tree can
     replay L4 against it without re-resolving a compile DB.
+
+    ``layers`` selects which layers to collect (ADR-033 D2 CI modes): the
+    ``build`` mode passes ``("L3",)`` to capture build context only, skipping the
+    L4 source replay and L5 graph entirely. ``L5`` requires ``L4``.
     """
     cfg = build_config or BuildConfig()
     merged = BuildEvidence()
@@ -181,11 +186,13 @@ def collect_inline_pack(
     if compile_db is not None:
         _run_compile_db(compile_db, cfg.system, merged, extractors)
 
-    surface = _run_inline_source_abi(
-        sources, merged, extractors,
-        extractor=extractor, scope=scope, clang_bin=clang_bin,
-    )
-    graph = _build_inline_graph(merged, surface)
+    surface = None
+    if "L4" in layers:
+        surface = _run_inline_source_abi(
+            sources, merged, extractors,
+            extractor=extractor, scope=scope, clang_bin=clang_bin,
+        )
+    graph = _build_inline_graph(merged, surface) if "L5" in layers else None
 
     has_build = bool(
         merged.compile_units or merged.targets or merged.toolchains
