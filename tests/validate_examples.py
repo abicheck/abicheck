@@ -812,14 +812,29 @@ def run_case(
         return CaseResult(name, "ERROR", expected_raw, None, dc_err, variant)
 
     allow_risk = bool(entry.get("bad_practice") or entry.get("category") == "quality")
+    # Report L3/L4/L5 from the inline opt-ins only when the input actually
+    # resolved — `_dump_and_compare` silently omits `--sources`/`--build-info`
+    # when the `<stem>.sources/` dir or `<stem>.compile_commands.json` is missing,
+    # so reporting off the raw flag would over-count a misconfigured case as
+    # covering source replay/graph it never exercised (Codex). Require both sides.
+    sources_flag = bool(entry.get("sources", False))
+    build_info_flag = bool(entry.get("build_info", False))
+    sources_present = (
+        _sources_path(case_dir, "v1", sources_flag) is not None
+        and _sources_path(case_dir, "v2", sources_flag) is not None
+    )
+    build_info_present = (
+        _build_info_path(case_dir, "v1", build_info_flag) is not None
+        and _build_info_path(case_dir, "v2", build_info_flag) is not None
+    )
     source_layers = _source_layers_for_result(
         variant,
         v1_hdr=v1_hdr,
         v2_hdr=v2_hdr,
         old_build_source=old_build_source,
         new_build_source=new_build_source,
-        sources=bool(entry.get("sources", False)),
-        build_info=bool(entry.get("build_info", False)),
+        sources=sources_present,
+        build_info=build_info_present,
     )
     return _evaluate_verdict(
         name, expected_raw, got, known_gap,
