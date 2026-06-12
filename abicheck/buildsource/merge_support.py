@@ -166,28 +166,36 @@ _MERGE_LAYER_ATTRS: dict[str, str] = {
     DataLayer.L5_SOURCE_GRAPH.value: "source_graph",
 }
 
-def _canonicalize(obj: Any) -> Any:
+# The only lists whose *order is significant* — compiler/linker argument
+# sequences and ordered define lists where a later entry overrides an earlier one.
+# Every other list (fact records, and unordered scalar fact sets like a target's
+# source_files / public_headers / dependencies / generated_files) is sorted so a
+# reorder is not a false conflict (Codex review).
+_ORDERED_LIST_KEYS = frozenset(
+    {"argv", "linker_argv", "command", "inputs", "defines", "undefines"}
+)
+
+
+def _canonicalize(obj: Any, key: str | None = None) -> Any:
     """Order-normalize a layer payload so equivalent facts hash the same.
 
-    A list of **fact records** (all-dict elements) is an unordered set keyed by
-    identity downstream — compile units, graph nodes/edges, and the L4 surface's
-    ``reachable_declarations``/``reachable_types`` (nested several levels under
-    ``reachable_source_surface``) — so it is sorted by its canonical JSON, at any
-    depth. A list containing **scalars** is left in place: those are
-    order-significant sequences (``LinkUnit.linker_argv``, ``argv``, link
-    ``inputs``, ``defines``) whose order can change the produced ABI, so a
-    reorder there *should* still read as a conflict (Codex review). Dict key
+    Lists are sorted by canonical JSON — both lists of **fact records** (compile
+    units, graph nodes/edges, and the nested L4 ``reachable_declarations``/
+    ``reachable_types``) and **unordered scalar fact sets** (a target's
+    ``source_files``/``public_headers``/``dependencies``/``generated_files``),
+    which downstream checks consume by identity rather than position. Only lists
+    under an :data:`_ORDERED_LIST_KEYS` key are left in place — compiler/linker
+    argument sequences and ordered define lists, where order can change the
+    produced ABI, so a reorder there *should* still read as a conflict. Dict key
     order is normalized by recursion.
     """
     if isinstance(obj, dict):
-        return {k: _canonicalize(obj[k]) for k in sorted(obj)}
+        return {k: _canonicalize(obj[k], k) for k in sorted(obj)}
     if isinstance(obj, list):
         items = [_canonicalize(x) for x in obj]
-        if items and all(isinstance(x, dict) for x in obj):
-            return sorted(
-                items, key=lambda x: json.dumps(x, sort_keys=True, default=str)
-            )
-        return items
+        if key in _ORDERED_LIST_KEYS:
+            return items
+        return sorted(items, key=lambda x: json.dumps(x, sort_keys=True, default=str))
     return obj
 
 def _canonical_layer_digest(payload_dict: dict[str, Any]) -> str:

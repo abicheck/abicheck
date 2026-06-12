@@ -1460,10 +1460,15 @@ def test_canonical_layer_digest_sorts_nested_facts_keeps_scalar_order():
     # Nested fact records reversed → same digest (set semantics).
     assert _canonical_layer_digest(a) == _canonical_layer_digest(b)
 
-    # Scalar sequence reordered → different digest (order is significant).
+    # Ordered scalar sequence reordered → different digest (argv order matters).
     x = {"link_units": [{"linker_argv": ["-lfoo", "-lbar"]}]}
     y = {"link_units": [{"linker_argv": ["-lbar", "-lfoo"]}]}
     assert _canonical_layer_digest(x) != _canonical_layer_digest(y)
+
+    # Unordered scalar fact set reordered → same digest (source_files is a set).
+    p1 = {"targets": [{"source_files": ["a.cpp", "b.cpp"]}]}
+    p2 = {"targets": [{"source_files": ["b.cpp", "a.cpp"]}]}
+    assert _canonical_layer_digest(p1) == _canonical_layer_digest(p2)
 
 
 def test_build_inline_coverage_surfaces_failed_build_query():
