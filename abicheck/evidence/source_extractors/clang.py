@@ -209,38 +209,143 @@ def _hash(*parts: str) -> str:
     return "sha256:" + hashlib.sha256(blob).hexdigest()
 
 
-def _canonical(node: Any) -> Any:
+#: AST node kinds that introduce a *local* binding — a parameter or a
+#: block-scope variable. Their names are alpha-renamed to positional placeholders
+#: so a pure rename of a local/parameter does not flip the body fingerprint.
+_LOCAL_DECL_KINDS = frozenset({"ParmVarDecl", "VarDecl", "BindingDecl", "DecompositionDecl"})
+
+
+def _alpha_rename_map(node: dict[str, Any], param_ids: tuple[str, ...]) -> dict[str, str]:
+    """Map each local-binding clang ``id`` to a positional placeholder (``$0``…).
+
+    This is the semantic core of the fingerprint (ADR-030 follow-up #6): instead
+    of hashing the raw AST — where renaming a local variable or parameter changes
+    the structural shape and so the hash — we hash an **alpha-equivalence class**.
+    Two bodies that differ only by the spelling of their locals/parameters map to
+    the same placeholders and hash identically, so ``inline_body_changed`` /
+    ``template_body_changed`` no longer fire on a cosmetic rename.
+
+    Only ids that name a true local binding are renamed: the function's
+    parameters (``param_ids``, threaded in declared order so they get the first,
+    stable placeholders) plus every local ``VarDecl`` declared inside the subtree.
+    A reference to anything *else* — a global, another function, a named constant
+    — keeps its real name, because referencing a different entity is a real
+    semantic change the fingerprint must still catch.
+
+    Placeholders are assigned in first-occurrence (pre-order) order so the mapping
+    is itself rename-invariant.
+    """
+    # The set of ids that denote a local binding: parameters + in-body locals.
+    local_ids: set[str] = {pid for pid in param_ids if pid}
+
+    def _collect(n: Any) -> None:
+        if not isinstance(n, dict):
+            return
+        nid = n.get("id")
+        if isinstance(nid, str) and n.get("kind") in _LOCAL_DECL_KINDS:
+            local_ids.add(nid)
+        inner = n.get("inner")
+        if isinstance(inner, list):
+            for child in inner:
+                _collect(child)
+
+    _collect(node)
+    if not local_ids:
+        return {}
+
+    # Assign placeholders by first occurrence (params first, then by pre-order),
+    # counting both declarations and references so a use-before-decl still lands
+    # on a stable slot.
+    order: list[str] = [pid for pid in param_ids if pid in local_ids]
+    seen: set[str] = set(order)
+
+    def _order(n: Any) -> None:
+        if not isinstance(n, dict):
+            return
+        nid = n.get("id")
+        if isinstance(nid, str) and nid in local_ids and nid not in seen:
+            seen.add(nid)
+            order.append(nid)
+        ref = n.get("referencedDecl")
+        if isinstance(ref, dict):
+            rid = ref.get("id")
+            if isinstance(rid, str) and rid in local_ids and rid not in seen:
+                seen.add(rid)
+                order.append(rid)
+        inner = n.get("inner")
+        if isinstance(inner, list):
+            for child in inner:
+                _order(child)
+
+    _order(node)
+    return {nid: f"${i}" for i, nid in enumerate(order)}
+
+
+def _canonical(node: Any, amap: dict[str, str]) -> Any:
     """Reduce a clang AST node to a build-root-stable structural form for hashing.
 
     Keeps only structural scalars (``kind``/``name``/``value``/``opcode``/
     ``castKind``) plus the node's ``type.qualType`` and its recursively
     canonicalized children, dropping pointer ids and source locations so a pure
     body edit changes the hash while a rebuild/relocation does not.
+
+    ``amap`` (from :func:`_alpha_rename_map`) replaces a local binding's name —
+    on both its declaration and every reference — with a positional placeholder,
+    so the hash is an alpha-equivalence class invariant under local/parameter
+    renaming (ADR-030 follow-up #6).
     """
     if not isinstance(node, dict):
         return node
     out: dict[str, Any] = {}
+    nid = node.get("id")
+    placeholder = amap.get(nid) if isinstance(nid, str) else None
     for key in _FINGERPRINT_SCALAR_KEYS:
         if key in node:
-            out[key] = node[key]
+            # A local declaration's own name becomes its placeholder.
+            out[key] = placeholder if key == "name" and placeholder is not None else node[key]
     type_obj = node.get("type")
     if isinstance(type_obj, dict) and "qualType" in type_obj:
         out["type"] = type_obj["qualType"]
     # A DeclRefExpr stores the referenced entity (e.g. another constant) in
     # ``referencedDecl``; without its name a value change `kOld` -> `kNew` of the
     # same type would hash identically and the constexpr/default-arg change would
-    # be missed (Codex review #339, P2).
+    # be missed (Codex review #339, P2). A reference to a *local* binding uses the
+    # alpha-renamed placeholder; a reference to anything else keeps its real name.
     ref = node.get("referencedDecl")
-    if isinstance(ref, dict) and ref.get("name"):
-        out["ref"] = ref["name"]
+    if isinstance(ref, dict):
+        rid = ref.get("id")
+        ref_placeholder = amap.get(rid) if isinstance(rid, str) else None
+        if ref_placeholder is not None:
+            out["ref"] = ref_placeholder
+        elif ref.get("name"):
+            out["ref"] = ref["name"]
     inner = node.get("inner")
     if isinstance(inner, list):
-        out["inner"] = [_canonical(child) for child in inner]
+        out["inner"] = [_canonical(child, amap) for child in inner]
     return out
 
 
-def _subtree_hash(node: dict[str, Any]) -> str:
-    return _hash("clang-ast", json.dumps(_canonical(node), sort_keys=True))
+def _subtree_hash(node: dict[str, Any], param_ids: tuple[str, ...] = ()) -> str:
+    """Alpha-equivalence-normalized structural fingerprint of a clang subtree.
+
+    ``param_ids`` are the clang ids of the enclosing function's parameters (in
+    declared order), so a body that references its parameters is normalized
+    together with them even though the parameter declarations live on the
+    ``FunctionDecl``, outside the hashed ``CompoundStmt`` body (ADR-030 #6).
+    """
+    amap = _alpha_rename_map(node, param_ids)
+    return _hash("clang-ast", json.dumps(_canonical(node, amap), sort_keys=True))
+
+
+def _param_ids(node: dict[str, Any]) -> tuple[str, ...]:
+    """The clang ids of a function node's parameters, in declared order."""
+    out: list[str] = []
+    for child in node.get("inner", []) or []:
+        if isinstance(child, dict) and child.get("kind") == "ParmVarDecl":
+            cid = child.get("id")
+            if isinstance(cid, str):
+                out.append(cid)
+    return tuple(out)
 
 
 def _node_file(node: dict[str, Any], current: str) -> str:
@@ -806,7 +911,9 @@ def _emit_function(
                 qualified_name=name,
                 mangled_name=mangled,
                 signature_hash=_hash("sig", sig),
-                body_hash=_subtree_hash(body),
+                # Alpha-rename the function's parameters together with the body so
+                # a parameter rename does not flip the fingerprint (ADR-030 #6).
+                body_hash=_subtree_hash(body, _param_ids(node)),
                 source_location=loc,
                 visibility=visibility,
                 api_relevant=True,

@@ -234,6 +234,77 @@ def test_typedef_without_underlying_is_skipped() -> None:
     assert not [e for e in tu.types if e.kind == "typedef"]
 
 
+# -- alpha-equivalence body fingerprint (ADR-030 follow-up #6) ---------------
+
+
+def _fn_ast(param, local, ret_ref):
+    """A FunctionDecl `int f(int <param>) {{ int <local> = <param>; return <ret>; }}`.
+
+    Each of param/local/ret_ref is an ``(id, name)`` pair; ret_ref's id picks
+    which binding the `return` references (the local, or some other id).
+    """
+    pid, pname = param
+    lid, lname = local
+    rid, rname = ret_ref
+    return {
+        "kind": "TranslationUnitDecl",
+        "inner": [{
+            "kind": "FunctionDecl", "name": "f", "mangledName": "_Z1fi",
+            "loc": {"file": "include/foo.h", "line": 1},
+            "type": {"qualType": "int (int)"},
+            "inner": [
+                {"kind": "ParmVarDecl", "id": pid, "name": pname,
+                 "type": {"qualType": "int"}},
+                {"kind": "CompoundStmt", "inner": [
+                    {"kind": "DeclStmt", "inner": [
+                        {"kind": "VarDecl", "id": lid, "name": lname,
+                         "type": {"qualType": "int"}, "inner": [
+                            {"kind": "ImplicitCastExpr", "inner": [
+                                {"kind": "DeclRefExpr",
+                                 "referencedDecl": {"id": pid, "name": pname}}]}]}]},
+                    {"kind": "ReturnStmt", "inner": [
+                        {"kind": "ImplicitCastExpr", "inner": [
+                            {"kind": "DeclRefExpr",
+                             "referencedDecl": {"id": rid, "name": rname}}]}]},
+                ]},
+            ],
+        }],
+    }
+
+
+def _body_hash(ast):
+    tu = source_abi_from_clang_ast(ast, _cu(), ["include/foo.h"], "t")
+    return tu.inline_bodies[0].body_hash
+
+
+def test_body_fingerprint_invariant_under_local_and_param_rename() -> None:
+    # Same body, locals/params spelled differently and with different clang ids
+    # (as a real reparse would assign) → identical alpha-equivalence fingerprint.
+    base = _fn_ast(("P1", "x"), ("L1", "y"), ("L1", "y"))
+    renamed = _fn_ast(("P9", "arg"), ("L9", "result"), ("L9", "result"))
+    assert _body_hash(base) == _body_hash(renamed)
+
+
+def test_body_fingerprint_changes_when_reference_target_differs() -> None:
+    # Returning a *different* binding (a global `g`, id not among the locals) is a
+    # real semantic change — the global's name is kept, so the hash differs.
+    returns_local = _fn_ast(("P1", "x"), ("L1", "y"), ("L1", "y"))
+    returns_param = _fn_ast(("P1", "x"), ("L1", "y"), ("P1", "x"))
+    returns_global = _fn_ast(("P1", "x"), ("L1", "y"), ("G1", "g"))
+    # local vs param: both are alpha-renamed locals but to *different* slots → differ.
+    assert _body_hash(returns_local) != _body_hash(returns_param)
+    # referencing a non-local global keeps its real name → differs from either.
+    assert _body_hash(returns_global) != _body_hash(returns_local)
+
+
+def test_body_fingerprint_changes_on_global_rename() -> None:
+    # Two bodies that reference *different* globals must stay distinct (the
+    # alpha-renaming must not collapse non-local references).
+    g1 = _fn_ast(("P1", "x"), ("L1", "y"), ("G1", "alpha"))
+    g2 = _fn_ast(("P1", "x"), ("L1", "y"), ("G2", "beta"))
+    assert _body_hash(g1) != _body_hash(g2)
+
+
 def test_directory_header_root_classifies_decls_as_public(tmp_path: Path) -> None:
     # Codex #339 P2: `--headers include/` (a directory root) must classify a decl
     # reported under it (include/foo.h) as public, not drop the whole tree.

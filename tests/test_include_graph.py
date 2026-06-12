@@ -21,6 +21,7 @@ from abicheck.evidence.build_evidence import BuildEvidence, CompileUnit
 from abicheck.evidence.include_graph import (
     ClangIncludeExtractor,
     augment_graph_with_includes,
+    depfile_args_from_argv,
     parse_depfile,
 )
 from abicheck.evidence.source_graph import GraphNode, SourceGraphSummary
@@ -28,6 +29,25 @@ from abicheck.evidence.source_graph import GraphNode, SourceGraphSummary
 
 def test_parse_depfile_basic() -> None:
     assert parse_depfile("foo.o: foo.cpp a.h b.h") == ["foo.cpp", "a.h", "b.h"]
+
+
+def test_depfile_args_strips_compiler_and_output() -> None:
+    # A compile-DB argv begins with the compiler exe and carries -c/-o; re-driving
+    # it under `clang -MM` must drop those so the source + -I/-D/-std survive
+    # (Codex review): without this the second compiler token is read as input.
+    argv = ["clang++", "-c", "src/foo.cpp", "-o", "foo.o",
+            "-I", "include", "-DFOO=1", "-std=c++17", "-MF", "foo.d"]
+    assert depfile_args_from_argv(argv) == [
+        "src/foo.cpp", "-I", "include", "-DFOO=1", "-std=c++17",
+    ]
+
+
+def test_depfile_args_handles_glued_output_and_argv0_flag() -> None:
+    # Glued -ofoo.o is dropped; an argv that already starts with a flag (no
+    # leading compiler token) keeps every flag.
+    assert depfile_args_from_argv(["cc", "-ofoo.o", "foo.c", "-I."]) == ["foo.c", "-I."]
+    assert depfile_args_from_argv(["-Iinc", "foo.c"]) == ["-Iinc", "foo.c"]
+    assert depfile_args_from_argv([]) == []
 
 
 def test_parse_depfile_line_continuations() -> None:

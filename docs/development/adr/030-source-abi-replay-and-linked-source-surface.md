@@ -425,11 +425,21 @@ they are coverage/precision gaps, not correctness holes.
    `compare` consumes pre-built packs via `--old/--new-evidence`; it does not yet
    run `collect-evidence` inline for a requested evidence mode. That inline
    collection is **ADR-033 D2** scope, tracked there, not in this ADR.
-6. **clang AST replay is a structural fingerprinter, not a full semantic ABI
-   model.** Bodies/values are hashed from a build-root-stable canonical form of
-   the clang JSON AST; this reliably detects *changes* but does not produce a
-   semantic ABI diff of the body itself. The Clang LibTooling backend in the D3
-   table remains the longer-term path for richer source-location/AST fidelity.
+6. **clang AST replay is an alpha-equivalence fingerprinter — partially
+   semantic.** Bodies/values are hashed from a build-root-stable canonical form
+   of the clang JSON AST. The fingerprint is now an **alpha-equivalence class**:
+   `_alpha_rename_map` renames a function's parameters and in-body locals to
+   positional placeholders (`$0`, `$1`, …) on both their declarations and every
+   reference, so a pure local/parameter *rename* no longer flips
+   `inline_body_changed` / `template_body_changed`, while a reference to a
+   *different* global/function/constant, or any operator/control-flow/type
+   change, still changes the hash. This is a genuine, decidable semantic
+   normalization (a rename-invariant equivalence class), not a heuristic. It is
+   still not a *full* semantic model: it does not normalize commutative-operator
+   reordering or other behaviour-preserving rewrites, and it detects *that* a
+   body changed without producing a structured semantic diff of *what* changed.
+   The Clang LibTooling backend in the D3 table remains the longer-term path for
+   richer source-location/AST fidelity and a structured body diff.
 
 ---
 

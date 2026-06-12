@@ -41,6 +41,46 @@ if TYPE_CHECKING:
     from .source_graph import SourceGraphSummary
 
 
+#: Flags (with their value argument) that must be stripped before re-driving a
+#: recorded compile command as ``clang -MM``: the compile action, the object
+#: output, and any existing dependency-generation options.
+_DEPFILE_DROP_WITH_VALUE = frozenset({"-o", "--output", "-MF", "-MT", "-MQ", "-MJ", "-Xclang"})
+_DEPFILE_DROP_FLAG = frozenset({"-c", "-MD", "-MMD", "-MM", "-M", "-MG", "-MP", "-pipe"})
+
+
+def depfile_args_from_argv(argv: list[str]) -> list[str]:
+    """Strip a recorded compile argv down to the args usable after ``clang -MM``.
+
+    A compile database stores the full command — ``clang++ -c foo.cpp -o foo.o
+    -I…`` — whose first token is the *compiler executable*. Re-driving that as
+    ``clang++ -MM clang++ -c foo.cpp …`` makes clang treat the second ``clang++``
+    as an input file and emit no usable depfile (Codex review). Drop the leading
+    compiler token, the ``-c`` compile action, the ``-o``/``-MF``/… outputs, and
+    pre-existing dependency flags, keeping the source plus the ABI-relevant
+    ``-I``/``-D``/``-std`` context that decides what is included.
+    """
+    if not argv:
+        return []
+    # The first token is the compiler driver (an executable path, not a flag).
+    args = list(argv[1:]) if not argv[0].startswith("-") else list(argv)
+    out: list[str] = []
+    skip_next = False
+    for tok in args:
+        if skip_next:
+            skip_next = False
+            continue
+        if tok in _DEPFILE_DROP_WITH_VALUE:
+            skip_next = True
+            continue
+        # `-oFOO` / `-MFfoo.d` glued forms, and the standalone drop flags.
+        if any(tok.startswith(f) and tok != f for f in ("-o", "-MF", "-MT", "-MQ")):
+            continue
+        if tok in _DEPFILE_DROP_FLAG:
+            continue
+        out.append(tok)
+    return out
+
+
 def parse_depfile(text: str) -> list[str]:
     """Parse a make-style depfile (``clang -MM`` output) into prerequisite paths.
 
@@ -129,7 +169,9 @@ class ClangIncludeExtractor:
         for cu in build.compile_units:
             if not cu.source:
                 continue
-            argv = list(cu.argv) if cu.argv else [cu.source]
+            argv = depfile_args_from_argv(cu.argv) if cu.argv else [cu.source]
+            if not argv:
+                argv = [cu.source]
             cmd = [self.clang_bin, "-MM", *argv]
             try:
                 proc = subprocess.run(  # noqa: S603 - fixed argv, never shell=True
