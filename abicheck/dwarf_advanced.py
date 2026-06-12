@@ -143,6 +143,12 @@ class AdvancedDwarfMetadata:
     # Used as fallback signal when DW_AT_calling_convention is not emitted.
     # Example: "ret:v(trivial)" -> "ret:v(nontrivial)" can imply SysV ABI drift.
     value_abi_traits: dict[str, str] = field(default_factory=dict)
+    # linkage_name (mangled) → byte size of a by-value aggregate *return* type.
+    # Used only to label a return triviality flip: a SysV AMD64 aggregate is
+    # returned in registers only when it is trivial AND <= 16 bytes; a larger
+    # struct is memory-returned regardless of triviality, so a triviality change
+    # there is a value-ABI (copy-semantics) change, not a register<->sret flip.
+    return_value_sizes: dict[str, int] = field(default_factory=dict)
     # struct names where any field has a misaligned byte offset → __attribute__((packed))
     packed_structs: set[str] = field(default_factory=set)
     # All struct/class names seen (for cross-referencing in diff to avoid
@@ -462,6 +468,29 @@ def _value_abi_trait_for_typed_die(die: Any, CU: Any, cache: _DwarfTypeCache | N
     return triviality  # "trivial" or "nontrivial"
 
 
+def _aggregate_byte_size_for_typed_die(die: Any, CU: Any, cache: _DwarfTypeCache | None = None) -> int | None:
+    """Return the byte size of a by-value aggregate type (or None if irrelevant).
+
+    Mirrors :func:`_value_abi_trait_for_typed_die`'s type resolution: only
+    struct/class/union types passed/returned *by value* qualify. Used to gate
+    the return-convention classification on the SysV register-return threshold.
+    """
+    t0 = _resolve_type_die(die, CU)
+    if t0 is None:
+        return None
+    if t0.tag in (
+        "DW_TAG_pointer_type",
+        "DW_TAG_reference_type",
+        "DW_TAG_rvalue_reference_type",
+    ):
+        return None
+    t = _unwrap_qualifiers(t0, CU, cache=cache)
+    if t.tag not in ("DW_TAG_structure_type", "DW_TAG_class_type", "DW_TAG_union_type"):
+        return None
+    size = _attr_int(t, "DW_AT_byte_size")
+    return size if size > 0 else None
+
+
 def _extract_calling_convention(die: Any, meta: AdvancedDwarfMetadata, CU: Any, cache: _DwarfTypeCache | None = None) -> None:
     """Record calling conventions + DWARF value-ABI traits for ABI-exported functions.
 
@@ -502,6 +531,9 @@ def _extract_calling_convention(die: Any, meta: AdvancedDwarfMetadata, CU: Any, 
     ret_trait = _value_abi_trait_for_typed_die(die, CU, cache=cache)
     if ret_trait is not None:
         parts.append(f"ret:{ret_trait}")
+        ret_size = _aggregate_byte_size_for_typed_die(die, CU, cache=cache)
+        if ret_size is not None:
+            meta.return_value_sizes[key] = ret_size
     pidx = 0
     for ch in die.iter_children():
         if ch.tag != "DW_TAG_formal_parameter":
@@ -883,6 +915,12 @@ def _diff_callee_saved_regs(
     return results, already_reported_cc
 
 
+#: SysV AMD64 returns a trivial aggregate in registers only when it fits in two
+#: eightbytes (<= 16 bytes); larger aggregates are returned via a hidden pointer
+#: regardless of triviality. Used to gate the return-convention classification.
+_SYSV_MAX_REGISTER_RETURN_BYTES = 16
+
+
 def _diff_value_abi_traits(
     old_meta: AdvancedDwarfMetadata,
     new_meta: AdvancedDwarfMetadata,
@@ -898,17 +936,34 @@ def _diff_value_abi_traits(
         if old_trait == new_trait:
             continue
         # When the *return* component (ret:trivial ↔ ret:nontrivial) is what
-        # flipped, the aggregate is now returned through a different mechanism
-        # (in-register ↔ hidden sret pointer) — a struct-return convention
-        # change, the more specific finding. Otherwise it is a generic
-        # value-ABI (parameter-passing) trait change.
+        # flipped, the aggregate *may* now be returned through a different
+        # mechanism (in-register ↔ hidden sret pointer). That register↔sret flip
+        # only happens for a SysV AMD64 aggregate that is <= 16 bytes: a larger
+        # struct is memory-returned both ways, so a triviality change there is a
+        # generic value-ABI (copy-semantics) change, not a return-convention
+        # flip. Only label it struct_return_convention_changed when at least one
+        # side is register-eligible (small, or size unknown — stay conservative).
         if _ret_component(old_trait) != _ret_component(new_trait):
-            results.append((
-                "struct_return_convention_changed", fname,
-                f"Aggregate return convention changed: {fname} "
-                f"({old_trait} → {new_trait})",
-                old_trait, new_trait,
-            ))
+            old_sz = old_meta.return_value_sizes.get(fname)
+            new_sz = new_meta.return_value_sizes.get(fname)
+            both_memory_returned = (
+                old_sz is not None and old_sz > _SYSV_MAX_REGISTER_RETURN_BYTES
+                and new_sz is not None and new_sz > _SYSV_MAX_REGISTER_RETURN_BYTES
+            )
+            if both_memory_returned:
+                results.append((
+                    "value_abi_trait_changed", fname,
+                    f"DWARF value-ABI trait changed (large aggregate return, "
+                    f"memory-returned both ways): {fname} ({old_trait} → {new_trait})",
+                    old_trait, new_trait,
+                ))
+            else:
+                results.append((
+                    "struct_return_convention_changed", fname,
+                    f"Aggregate return convention changed: {fname} "
+                    f"({old_trait} → {new_trait})",
+                    old_trait, new_trait,
+                ))
         else:
             results.append((
                 "value_abi_trait_changed", fname,

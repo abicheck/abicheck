@@ -589,6 +589,50 @@ def test_struct_return_convention_change_from_return_trait_flip():
     assert "value_abi_trait_changed" not in kinds
 
 
+def test_large_aggregate_return_flip_stays_value_abi_trait():
+    # Codex P2: a >16-byte aggregate is memory-returned both before and after a
+    # triviality change (no register<->sret flip), so it must NOT be labelled a
+    # struct-return convention change.
+    from abicheck.dwarf_advanced import AdvancedDwarfMetadata, _diff_value_abi_traits
+
+    old = AdvancedDwarfMetadata()
+    new = AdvancedDwarfMetadata()
+    old.value_abi_traits["_Z3getv"] = "ret:trivial"
+    new.value_abi_traits["_Z3getv"] = "ret:nontrivial"
+    old.return_value_sizes["_Z3getv"] = 24
+    new.return_value_sizes["_Z3getv"] = 24
+    kinds = {r[0] for r in _diff_value_abi_traits(old, new, set())}
+    assert "value_abi_trait_changed" in kinds
+    assert "struct_return_convention_changed" not in kinds
+
+
+def test_small_aggregate_return_flip_is_struct_return():
+    from abicheck.dwarf_advanced import AdvancedDwarfMetadata, _diff_value_abi_traits
+
+    old = AdvancedDwarfMetadata()
+    new = AdvancedDwarfMetadata()
+    old.value_abi_traits["_Z3getv"] = "ret:trivial"
+    new.value_abi_traits["_Z3getv"] = "ret:nontrivial"
+    old.return_value_sizes["_Z3getv"] = 8
+    new.return_value_sizes["_Z3getv"] = 8
+    kinds = {r[0] for r in _diff_value_abi_traits(old, new, set())}
+    assert "struct_return_convention_changed" in kinds
+    assert "value_abi_trait_changed" not in kinds
+
+
+def test_unknown_size_return_flip_stays_struct_return():
+    # No recorded size (older snapshots / non-DWARF mocks) → stay conservative
+    # and keep the struct-return label (the pre-gate behaviour).
+    from abicheck.dwarf_advanced import AdvancedDwarfMetadata, _diff_value_abi_traits
+
+    old = AdvancedDwarfMetadata()
+    new = AdvancedDwarfMetadata()
+    old.value_abi_traits["_Z3getv"] = "ret:trivial"
+    new.value_abi_traits["_Z3getv"] = "ret:nontrivial"
+    kinds = {r[0] for r in _diff_value_abi_traits(old, new, set())}
+    assert "struct_return_convention_changed" in kinds
+
+
 def test_param_only_trait_flip_stays_value_abi_trait():
     from abicheck.dwarf_advanced import AdvancedDwarfMetadata, _diff_value_abi_traits
 
