@@ -1156,8 +1156,10 @@ def test_merge_conflict_digest_is_order_independent(tmp_path):
     embed_build_source(a_snap, fwd, None)
     b_snap = AbiSnapshot(library="libfoo.so", version="1")
     embed_build_source(b_snap, rev, None)
-    a = tmp_path / "a.json"; save_snapshot(a_snap, a)
-    b = tmp_path / "b.json"; save_snapshot(b_snap, b)
+    a = tmp_path / "a.json"
+    save_snapshot(a_snap, a)
+    b = tmp_path / "b.json"
+    save_snapshot(b_snap, b)
 
     out = tmp_path / "baseline.json"
     result = CliRunner().invoke(
