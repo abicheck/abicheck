@@ -1737,3 +1737,23 @@ def test_a3_query_ran_but_empty_is_reported(tmp_path):
         BuildEvidence(), has_build=False, surface=None, graph=None, extractors=[rec])}
     assert rows["L3_build"].status.value == "partial"
     assert "build query partial" in rows["L3_build"].detail
+
+
+def test_a3_diagnostic_only_pack_survives_embed_combine(tmp_path):
+    """A3 (Codex): a diagnostic-only inline pack (build query skipped, no facts)
+    must keep its build_query extractor + partial L3 coverage row through
+    embed_build_source -> _combine_packs, not become a silent not_collected pack."""
+    from abicheck.cli_buildsource import embed_build_source
+
+    tree = tmp_path / "src"
+    tree.mkdir()
+    (tree / ".abicheck.yml").write_text(
+        "build:\n  query: some-build-query --emit\n", encoding="utf-8")
+    snap = AbiSnapshot(library="libfoo.so", version="1")
+    # allow_build_query defaults False → query skipped, no facts collected.
+    embed_build_source(snap, None, tree)
+    assert snap.build_source is not None
+    l3 = snap.build_source.manifest.coverage_for("L3_build")
+    assert l3 is not None and l3.status.value == "partial"
+    assert [e for e in snap.build_source.manifest.extractors
+            if e.name == "build_query"]

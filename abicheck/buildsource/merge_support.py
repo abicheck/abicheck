@@ -108,7 +108,29 @@ def _combine_packs(
             if row is None:
                 row = LayerCoverage(layer=layer, status=CoverageStatus.PRESENT)
         else:
-            row = LayerCoverage(layer=layer, status=CoverageStatus.NOT_COLLECTED)
+            # No facts for this layer — but preserve a *diagnostic* coverage row
+            # (e.g. the A3 `partial` L3 from a failed/blocked build query) that an
+            # input pack reported, rather than overwriting it with not_collected
+            # and dropping the only explanation (Codex).
+            row = None
+            for cand in (bi_pack, src_pack, embedded):
+                if cand is None:
+                    continue
+                # Only a `partial` *diagnostic* row (e.g. the A3 build-query
+                # explanation) is preserved here; a `present` row claimed by a
+                # loaded pack whose facts we did NOT embed must still downgrade to
+                # not_collected so the report never advertises facts it lacks.
+                hit = next(
+                    (c for c in cand.manifest.coverage
+                     if _layer_value(c.layer) == layer
+                     and c.status == CoverageStatus.PARTIAL),
+                    None,
+                )
+                if hit is not None:
+                    row = hit
+                    break
+            if row is None:
+                row = LayerCoverage(layer=layer, status=CoverageStatus.NOT_COLLECTED)
         coverage.append(row)
 
     # Provenance: the combined manifest's artifacts/extractors must reflect every
@@ -120,17 +142,28 @@ def _combine_packs(
     chosen_ids = {id(x) for x in chosen if x is not None}
     artifacts: list[str] = []
     extractors: list[ExtractorRecord] = []
-    seen_extractors: set[tuple[str, str]] = set()
+    seen_extractors: set[tuple[str, str, str]] = set()
     for p in (bi_pack, src_pack, embedded):
-        if p is None or not (
-            chosen_ids & {id(p.build_evidence), id(p.source_abi), id(p.source_graph)}
-        ):
+        if p is None:
             continue
-        for a in p.manifest.artifacts:
-            if a not in artifacts:
-                artifacts.append(a)
+        contributed = bool(
+            chosen_ids & {id(p.build_evidence), id(p.source_abi), id(p.source_graph)}
+        )
+        # A diagnostic-only pack (e.g. an A3 build-query failure with no facts)
+        # contributes no payload but must still carry its build_query diagnostic
+        # forward — otherwise the combined pack is a silent all-not_collected
+        # surface and the only explanation is lost (Codex).
+        has_diag = any(e.name == "build_query" for e in p.manifest.extractors)
+        if not (contributed or has_diag):
+            continue
+        if contributed:
+            for a in p.manifest.artifacts:
+                if a not in artifacts:
+                    artifacts.append(a)
         for e in p.manifest.extractors:
-            key = (e.name, e.version)
+            if not contributed and e.name != "build_query":
+                continue
+            key = (e.name, e.version, e.detail)
             if key not in seen_extractors:
                 seen_extractors.add(key)
                 extractors.append(e)
