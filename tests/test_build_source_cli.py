@@ -1702,6 +1702,32 @@ def test_a4_redacted_absolute_source_uses_basename(tmp_path):
     assert not [e for e in extractors if e.name == "build_info_source_tree_mismatch"]
 
 
+def test_a4_basename_only_match_in_wrong_subtree_flags_mismatch(tmp_path):
+    """A4 (Codex): an absolute/redacted compile-DB source must match more than
+    its bare basename — a wrong checkout that ships the same filename under a
+    different parent dir (tests/ vs src/) must still flag the mismatch."""
+    from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
+    from abicheck.buildsource.inline import _check_build_info_source_mismatch
+
+    tree = tmp_path / "tree"
+    (tree / "tests").mkdir(parents=True)
+    units = []
+    for i in range(4):
+        # Same basename present, but under tests/ — the compile unit's src/ parent
+        # is absent, so the trees are different checkouts.
+        (tree / "tests" / f"f{i}.cpp").write_text("int x;", encoding="utf-8")
+        # directory does NOT prefix the source, so matching takes the
+        # absolute/redacted fallback (suffix match), not the directory branch.
+        units.append(CompileUnit(id=f"u{i}", source=f"/build/proj/src/f{i}.cpp",
+                                 directory="/unrelated"))
+    merged = BuildEvidence()
+    merged.compile_units = units
+    extractors = []
+    _check_build_info_source_mismatch(merged, tree, extractors)
+    recs = [e for e in extractors if e.name == "build_info_source_tree_mismatch"]
+    assert recs and recs[0].status == "failed"
+
+
 def test_a3_failed_query_pack_survives_with_no_facts(tmp_path):
     """A3 (Codex): when build.query is skipped/failed and no facts are collected,
     collect_inline_pack still returns a pack carrying the partial L3 coverage row

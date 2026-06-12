@@ -483,10 +483,19 @@ def _check_build_info_source_mismatch(
     # different checkouts that merely share filenames (review).
     tree_rel: set[str] = set()
     tree_names: set[str] = set()
+    # Two-component suffixes (`parent/name`) of every tree file, so an
+    # absolute/redacted compile-DB source can be matched on more than its bare
+    # basename — a wrong checkout that ships `tests/foo.cpp` must not satisfy a
+    # compile unit whose source is `src/foo.cpp` (review).
+    tree_tail2: set[str] = set()
     for root, _dirs, files in os.walk(tree):
         for fn in files:
-            tree_rel.add((Path(root) / fn).relative_to(tree).as_posix())
+            rel = (Path(root) / fn).relative_to(tree).as_posix()
+            tree_rel.add(rel)
             tree_names.add(fn)
+            parts = rel.split("/")
+            if len(parts) >= 2:
+                tree_tail2.add("/".join(parts[-2:]))
 
     def _present(cu: object) -> bool | None:
         src = getattr(cu, "source", "")
@@ -506,8 +515,14 @@ def _check_build_info_source_mismatch(
         )
         if not rooted:
             return posix in tree_rel
-        # Absolute / redacted with an unknown root → basename is all we can
-        # reliably compare on (the redacted home prefix is unrecoverable).
+        # Absolute / redacted with an unknown root → the redacted/abs prefix is
+        # unrecoverable, but require the source's `parent/name` suffix to exist in
+        # the tree rather than its basename alone, so a same-named file in a
+        # different subtree does not mask a checkout mismatch. Sources with no
+        # parent component fall back to the basename.
+        parts = [p for p in posix.split("/") if p and p != "~"]
+        if len(parts) >= 2:
+            return "/".join(parts[-2:]) in tree_tail2
         return name in tree_names
 
     flags = [r for r in (_present(cu) for cu in merged.compile_units) if r is not None]
