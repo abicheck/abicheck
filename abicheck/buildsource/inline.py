@@ -155,6 +155,7 @@ def collect_inline_pack(
     scope: str = "target",
     layers: tuple[str, ...] = ("L3", "L4", "L5"),
     build_cache_dir: Path | None = None,
+    exported_symbols: tuple[str, ...] = (),
 ) -> BuildSourcePack | None:
     """Collect an in-memory pack from raw source-tree / build-info inputs.
 
@@ -198,6 +199,7 @@ def collect_inline_pack(
         surface = _run_inline_source_abi(
             sources, merged, extractors,
             extractor=extractor, scope=replay_scope, clang_bin=clang_bin,
+            exported_symbols=exported_symbols,
         )
     graph = _build_inline_graph(merged, surface) if "L5" in layers else None
 
@@ -432,6 +434,7 @@ def _run_inline_source_abi(
     extractor: str,
     scope: str,
     clang_bin: str,
+    exported_symbols: tuple[str, ...] = (),
 ) -> SourceAbiSurface | None:
     """Run L4 replay over a source tree; ``None`` when no source tree is given.
 
@@ -469,6 +472,7 @@ def _run_inline_source_abi(
     roots = public_header_roots_for(merged)
     surface, diagnostics = run_source_replay(
         merged, impl, scope=scope, public_header_roots=roots,
+        exported_symbols=exported_symbols,
     )
     for diag in diagnostics:
         merged.diagnostics.append(f"source_abi: {diag}")

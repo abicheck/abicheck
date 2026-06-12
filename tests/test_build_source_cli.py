@@ -1340,7 +1340,8 @@ def test_inline_source_changed_falls_back_to_target_scope(tmp_path, monkeypatch)
     import abicheck.buildsource.inline as inline
     captured = {}
 
-    def _spy(sources, merged, extractors, *, extractor, scope, clang_bin):
+    def _spy(sources, merged, extractors, *, extractor, scope, clang_bin,
+             exported_symbols=()):
         captured["scope"] = scope
         return None
 
@@ -1354,3 +1355,20 @@ def test_inline_source_changed_falls_back_to_target_scope(tmp_path, monkeypatch)
     inline.collect_inline_pack(sources=tree, build_info=None, scope="changed",
                                layers=("L3", "L4", "L5"))
     assert captured["scope"] == "target"
+
+
+def test_exported_symbols_from_snapshot_extracts_mangled_names():
+    """A1 plumbing: export extraction pulls mangled function/variable names from
+    an already-parsed snapshot (no re-dump), and is empty for a bare snapshot."""
+    from abicheck.cli_buildsource import _exported_symbols_from_snapshot
+    from abicheck.model import Function, Variable
+
+    snap = AbiSnapshot(library="libfoo.so", version="1")
+    snap.functions = [
+        Function(name="foo", mangled="_Z3foov", return_type="void", params=[]),
+        Function(name="bar", mangled="", return_type="void", params=[]),  # no symbol
+    ]
+    snap.variables = [Variable(name="g", mangled="_Z1g", type="int")]
+    assert _exported_symbols_from_snapshot(snap) == ("_Z1g", "_Z3foov")
+
+    assert _exported_symbols_from_snapshot(AbiSnapshot(library="l", version="1")) == ()

@@ -906,6 +906,16 @@ def _exported_symbols_from_binary(binary: Path | None) -> list[str]:
     syms |= {v.mangled for v in snap.variables if getattr(v, "mangled", "")}
     return sorted(syms)
 
+def _exported_symbols_from_snapshot(snap: AbiSnapshot) -> tuple[str, ...]:
+    """Exported (mangled) symbol names already parsed into *snap* — no re-dump.
+
+    Used to plumb L0 exports into inline source replay (A1) for the
+    ``dump <binary> --sources`` flow. Empty for a source-only snapshot.
+    """
+    syms = {fn.mangled for fn in snap.functions if fn.mangled}
+    syms |= {v.mangled for v in snap.variables if getattr(v, "mangled", "")}
+    return tuple(sorted(syms))
+
 def _collect_source_abi(
     merged: BuildEvidence,
     extractors: list[ExtractorRecord],
@@ -1113,6 +1123,11 @@ def embed_build_source(
             cfg = load_build_config(cfg_path) if cfg_path is not None else None
         except ValueError as exc:
             raise click.ClickException(str(exc)) from exc
+        # A1: plumb the binary's L0 exports (already parsed into this snapshot)
+        # into the inline replay, so the linked source surface knows which decls
+        # map to exports and the provenance/mapping checks have a signal. Empty in
+        # the source-only `dump --sources` flow (no binary) — then A1 stays inert.
+        exported = _exported_symbols_from_snapshot(snap)
         inline_pack = collect_inline_pack(
             sources=raw_sources,
             build_info=raw_build_info,
@@ -1122,6 +1137,7 @@ def embed_build_source(
             clang_bin=clang_bin,
             scope=scope,
             layers=layers,
+            exported_symbols=exported,
         )
 
     # Pre-captured packs must also honour the collect-mode layer set (Codex).
