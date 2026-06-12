@@ -334,6 +334,25 @@ class TestSurfaceExclusionReason:
         c = Change(kind=ChangeKind.FUNC_RETURN_CHANGED, symbol="internal", description="")
         assert classify_change_surface(c, s, s) == (False, REASON_NOT_EXPORTED)
 
+    def test_struct_return_convention_symbol_scoped(self):
+        # struct_return_convention_changed carries the (mangled) function name in
+        # Change.symbol, like calling_convention_changed — a non-exported helper's
+        # return-convention churn must be demoted, not kept as an unknown type.
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("api"), _fn("internal", vis=Visibility.ELF_ONLY)],
+        )
+        s = self._surf(snap)
+        c = Change(
+            kind=ChangeKind.STRUCT_RETURN_CONVENTION_CHANGED, symbol="internal", description=""
+        )
+        assert classify_change_surface(c, s, s) == (False, REASON_NOT_EXPORTED)
+        c_pub = Change(
+            kind=ChangeKind.STRUCT_RETURN_CONVENTION_CHANGED, symbol="api", description=""
+        )
+        assert classify_change_surface(c_pub, s, s) == (True, None)
+
     def test_non_public_type_reason(self):
         snap = AbiSnapshot(
             library="l",

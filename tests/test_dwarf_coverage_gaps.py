@@ -1916,3 +1916,49 @@ class TestAggregateHasUnalignedMemberNested:
         cu = MockCU(cu_offset=0, die_map={108: self._char(), 120: self._int(),
                                           440: int_array, 470: outer})
         assert _aggregate_has_unaligned_member(self._wrapper(470), cu) is False
+
+    def test_dw_at_alignment_override_misaligned(self):
+        from abicheck.dwarf_advanced import _aggregate_has_unaligned_member
+
+        # A member type that declares DW_AT_alignment=8 (DWARF 5) placed at a
+        # misaligned offset is caught via the alignment override, not byte size.
+        over = MockDIE(
+            tag="DW_TAG_base_type",
+            attributes={"DW_AT_byte_size": MockAttr(1), "DW_AT_alignment": MockAttr(8)},
+            offset=500,
+        )
+        member_c = MockDIE(
+            tag="DW_TAG_member",
+            attributes={
+                "DW_AT_type": MockAttr(108, form="DW_FORM_ref4"),
+                "DW_AT_data_member_location": MockAttr(0),
+            },
+            offset=510,
+        )
+        member_x = MockDIE(
+            tag="DW_TAG_member",
+            attributes={
+                "DW_AT_type": MockAttr(500, form="DW_FORM_ref4"),
+                "DW_AT_data_member_location": MockAttr(1),
+            },
+            offset=520,
+        )
+        outer = MockDIE(tag="DW_TAG_structure_type",
+                        attributes={"DW_AT_byte_size": MockAttr(9)},
+                        offset=530, children=[member_c, member_x])
+        cu = MockCU(cu_offset=0, die_map={108: self._char(), 500: over, 530: outer})
+        assert _aggregate_has_unaligned_member(self._wrapper(530), cu) is True
+
+    def test_pointer_return_type_is_not_aggregate(self):
+        from abicheck.dwarf_advanced import _aggregate_has_unaligned_member
+
+        ptr = MockDIE(tag="DW_TAG_pointer_type",
+                      attributes={"DW_AT_byte_size": MockAttr(8)}, offset=600)
+        cu = MockCU(cu_offset=0, die_map={600: ptr})
+        assert _aggregate_has_unaligned_member(self._wrapper(600), cu) is False
+
+    def test_scalar_return_type_is_not_aggregate(self):
+        from abicheck.dwarf_advanced import _aggregate_has_unaligned_member
+
+        cu = MockCU(cu_offset=0, die_map={120: self._int()})
+        assert _aggregate_has_unaligned_member(self._wrapper(120), cu) is False
