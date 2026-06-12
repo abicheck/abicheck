@@ -524,10 +524,35 @@ def test_runtime_mode_flags_normalize_to_canonical_keys():
     (["cl", "/c", "/Tcfoo.cpp"], "foo.cpp", "C"),
     # Unknown -x language leaves the extension-derived language intact.
     (["clang", "-x", "assembler", "-c", "foo.cpp"], "foo.cpp", "CXX"),
+    # Forced Objective-C/Objective-C++ keep their own tokens (match .m/.mm
+    # extension detection), so a redundant -x on a .mm file is a no-op.
+    (["clang++", "-x", "objective-c++", "-c", "foo.mm"], "foo.mm", "OBJCXX"),
+    (["clang", "-x", "objective-c", "-c", "foo.m"], "foo.m", "OBJC"),
 ])
 def test_effective_language_honors_forced_language(argv, source, expected):
     from abicheck.buildsource.adapters.base import effective_language
     assert effective_language(argv, source) == expected
+
+
+def test_redundant_objcxx_forced_language_is_no_op_drift(tmp_path):
+    # Codex P2: clang++ -x objective-c++ on a .mm TU must stay OBJCXX, not collapse
+    # to CXX — otherwise std:OBJCXX->std:CXX reads as false build-flag drift.
+    from abicheck.buildsource.adapters.compile_db import CompileDbAdapter
+
+    def _db(args):
+        p = tmp_path / f"cc_{abs(hash(tuple(args)))}.json"
+        p.write_text(json.dumps([{
+            "directory": str(tmp_path), "file": "foo.mm", "arguments": args,
+        }]))
+        return CompileDbAdapter(p).collect()
+
+    old = _db(["clang++", "-std=c++17", "-c", "foo.mm"])
+    new = _db(["clang++", "-x", "objective-c++", "-std=c++17", "-c", "foo.mm"])
+    assert old.compile_units[0].language == "OBJCXX"
+    assert new.compile_units[0].language == "OBJCXX"
+    # No std:CXX/std:OBJCXX add+remove churn — the only std option is std:OBJCXX.
+    assert not any(c.kind is ChangeKind.ABI_RELEVANT_BUILD_FLAG_CHANGED
+                   for c in diff_build_evidence(old, new))
 
 
 def test_compile_db_forced_language_drives_runtime_mode_key(tmp_path):

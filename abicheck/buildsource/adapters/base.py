@@ -120,9 +120,9 @@ def detect_language(source: str) -> str:
 #: (assembler, ``cuda``, …) leave the forced language unchanged.
 _X_LANG_TO_NORMALIZED: dict[str, str] = {
     "c": "C", "c-header": "C", "cpp-output": "C",
-    "objective-c": "C", "objective-c-header": "C", "objc-cpp-output": "C",
+    "objective-c": "OBJC", "objective-c-header": "OBJC", "objc-cpp-output": "OBJC",
     "c++": "CXX", "c++-header": "CXX", "c++-cpp-output": "CXX",
-    "objective-c++": "CXX", "objective-c++-header": "CXX", "objc++-cpp-output": "CXX",
+    "objective-c++": "OBJCXX", "objective-c++-header": "OBJCXX", "objc++-cpp-output": "OBJCXX",
 }
 
 
