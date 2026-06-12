@@ -331,6 +331,12 @@ REGISTRY = ChangeKindRegistry([
               "comparison is scoped to the layers both sides share, so changes "
               "only the missing layers could prove are not reported. Re-scan "
               "the target with the same inputs to restore full coverage."),
+    _E("evidence_required_missing", _A,
+       impact="A policy require_evidence layer (build context, source ABI, or "
+              "source graph) was declared mandatory but is absent from this "
+              "compare, so the run is failed rather than passing on a silently "
+              "degraded scan (ADR-033 D7). Supply the missing evidence pack or "
+              "relax the policy."),
     _E("struct_size_changed", _B,
        impact="sizeof(T) changed in debug info; confirms layout break visible at binary level."),
     _E("struct_field_offset_changed", _B,

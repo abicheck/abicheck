@@ -152,6 +152,40 @@ Semantics:
 
 If both `--policy` and `--policy-file` are provided, `--policy-file` wins.
 
+### Evidence-aware controls (`evidence_policy`)
+
+When a compare also carries build/source evidence (build-info / source packs,
+ADR-028..033), an optional `evidence_policy` block tunes how each *category* of
+evidence finding is classified — independent of the per-`ChangeKind` `overrides`
+above:
+
+```yaml
+evidence_policy:
+  source_only_findings: warn          # ignore | warn | fail-api | fail-release
+  build_context_drift: warn           # ignore | warn | fail-on-abi-relevant
+  graph_risk_findings: warn           # ignore | warn | fail
+  require_evidence:                    # fail the run if a required layer is absent
+    build_context: false
+    source_abi: false
+    graph_summary: false
+```
+
+- `source_only_findings` — L4 source-replay / API-only findings (macros, default
+  args, inline/template/constexpr bodies). `ignore` → `COMPATIBLE`, `warn` →
+  `COMPATIBLE_WITH_RISK`, `fail-api`/`fail-release` → `API_BREAK` (exit 2).
+- `build_context_drift` — L3 build-flag / toolchain drift. `fail-on-abi-relevant`
+  escalates only genuinely ABI-relevant drift (std/visibility/packing flags,
+  export policy, toolchain) to `API_BREAK`; other drift stays a risk.
+- `graph_risk_findings` — L5 reachability/impact risks. `fail` → `API_BREAK`.
+- `require_evidence` — when a listed layer is `true` but absent from the
+  compare, an `evidence_required_missing` finding (`API_BREAK`) fails the run so
+  a silently-degraded scan can't pass (ADR-033 D7).
+
+Each knob is **unset by default**: leaving it out keeps the finding's normal
+category, so existing runs are unchanged. Per ADR-028 D3 these knobs never turn
+a source/build-only finding into a hard (artifact-proven) `BREAKING` verdict —
+the strongest they reach is `API_BREAK`.
+
 ---
 
 ## Exit Codes

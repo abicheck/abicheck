@@ -33,6 +33,12 @@ import click
 
 from . import __version__ as _abicheck_version
 from .buildsource.build_evidence import BuildEvidence
+from .buildsource.evidence_policy import (
+    apply_evidence_policy,
+    echo_evidence_metrics,
+    evidence_coverage_metrics,
+    require_evidence_findings,
+)
 from .buildsource.model import (
     CoverageStatus,
     DataLayer,
@@ -54,6 +60,7 @@ if TYPE_CHECKING:
     from .buildsource.source_graph import SourceGraphSummary
     from .checker_types import Change, DiffResult
     from .model import AbiSnapshot
+    from .policy_file import PolicyFile
 
 
 @main.command("collect")
@@ -1389,6 +1396,7 @@ def diff_embedded_build_source(
     collect_mode: str,
     new_snapshot: AbiSnapshot,
     old_snapshot: AbiSnapshot | None = None,
+    policy_file: PolicyFile | None = None,
 ) -> tuple[list[Change], list[dict[str, object]], dict[str, object]]:
     """Diff each side's build-info + source facts, echo coverage, return findings.
 
@@ -1427,7 +1435,9 @@ def diff_embedded_build_source(
                 "with `dump --build-info/--sources` (or pass --old/new pack dirs).",
                 err=True,
             )
-        return [], [], {}
+        # require_evidence still fires with no packs at all: every required layer
+        # is missing, so the run must fail rather than pass on zero evidence.
+        return require_evidence_findings(policy_file, None), [], {}
 
     changes: list[Change] = []
     # Track the build-context-drift vs source-only split first-hand: each diff
@@ -1440,6 +1450,7 @@ def diff_embedded_build_source(
     if old_build is not None and new_build is not None:
         _build_changes = diff_build_evidence(old_build, new_build)
         build_drift_count += len(_build_changes)
+        apply_evidence_policy(_build_changes, "build_context", policy_file)
         changes.extend(_build_changes)
     # Header-parse-context drift only applies when the new snapshot actually
     # carries a public-header AST (L2). A binary-only compare has no header
@@ -1453,11 +1464,13 @@ def diff_embedded_build_source(
             headers_parsed_with_context=new_snapshot.parsed_with_build_context,
         )
         build_drift_count += len(_drift)
+        apply_evidence_policy(_drift, "build_context", policy_file)
         changes.extend(_drift)
 
     if old_snapshot is not None:
         _asym = _detect_coverage_asymmetry(old_snapshot, old_pack, new_snapshot, new_pack)
         build_drift_count += len(_asym)
+        apply_evidence_policy(_asym, "build_context", policy_file)
         changes.extend(_asym)
 
     # L4 source ABI replay diff (ADR-030 D6): both packs must carry a source
@@ -1469,6 +1482,7 @@ def diff_embedded_build_source(
         from .buildsource.source_diff import diff_source_abi
         _src = diff_source_abi(old_surface, new_surface)
         source_only_count += len(_src)
+        apply_evidence_policy(_src, "source_only", policy_file)
         changes.extend(_src)
 
     # L5 source graph diff (ADR-031 D6): both packs must carry a graph summary.
@@ -1480,7 +1494,12 @@ def diff_embedded_build_source(
         from .buildsource.source_graph import diff_source_graph_findings
         _gr = diff_source_graph_findings(old_graph, new_graph)
         source_only_count += len(_gr)
+        apply_evidence_policy(_gr, "graph_risk", policy_file)
         changes.extend(_gr)
+
+    # ADR-033 D7 require_evidence: fail if a declared-mandatory layer is absent
+    # from the target. These are API_BREAK findings (not modulated by the knobs).
+    changes.extend(require_evidence_findings(policy_file, new_pack))
 
     # Coverage/capability reflect the *target* (new) side only: the L3/L4/L5
     # diffs run only when both sides supply a layer, so reporting the old pack's
@@ -1499,39 +1518,8 @@ def diff_embedded_build_source(
     _echo_coverage(intrinsic, coverage)
     _echo_capabilities(intrinsic, coverage)
     coverage_rows: list[dict[str, object]] = [c.to_dict() for c in (*intrinsic, *coverage)]
-    metrics = _evidence_coverage_metrics(coverage, build_drift_count, source_only_count)
+    metrics = evidence_coverage_metrics(coverage, build_drift_count, source_only_count)
     return changes, coverage_rows, metrics
-
-
-def _layer_status(coverage: list[LayerCoverage], layer: DataLayer) -> str:
-    """Return the recorded ``CoverageStatus`` value for one optional layer."""
-    for cov in coverage:
-        if _layer_value(cov.layer) == layer.value:
-            return cov.status.value
-    return CoverageStatus.NOT_COLLECTED.value
-
-
-def _evidence_coverage_metrics(
-    coverage: list[LayerCoverage],
-    build_drift_count: int,
-    source_only_count: int,
-) -> dict[str, object]:
-    """Build the part of the ADR-033 D9 metrics this function can count first-hand.
-
-    Covers the coverage flags (which optional layers ran on the target side) and
-    the build-context-drift vs source-only finding split. Timing and run-wide
-    totals are layered on later by :func:`prepare_embedded_build_source` and
-    :func:`attach_evidence_metrics`.
-    """
-    return {
-        "coverage.build_context.present": (
-            _layer_status(coverage, DataLayer.L3_BUILD) == CoverageStatus.PRESENT.value
-        ),
-        "coverage.source_abi.mode": _layer_status(coverage, DataLayer.L4_SOURCE_ABI),
-        "coverage.graph.mode": _layer_status(coverage, DataLayer.L5_SOURCE_GRAPH),
-        "findings.build_context_drift.count": build_drift_count,
-        "findings.source_only.count": source_only_count,
-    }
 
 
 def prepare_embedded_build_source(
@@ -1543,14 +1531,17 @@ def prepare_embedded_build_source(
     new_build_info: Path | None,
     old_sources: Path | None,
     new_sources: Path | None,
+    policy_file: PolicyFile | None = None,
 ) -> tuple[list[Change] | None, list[dict[str, object]], dict[str, object], list[Change]]:
     """Run inline build-info/source diffing for ``compare`` and time it.
 
     Gates on whether any pack flag, embedded payload, or non-``off`` collect mode
     is in play; folds the evidence findings into ``extra_changes``; and wall-clocks
     the inline diffing for the ADR-033 D6/D9 ``extractor.duration_seconds`` metric.
-    Returns ``(extra_changes, layer_coverage_rows, evidence_metrics, ev_changes)``;
-    the metrics still need :func:`attach_evidence_metrics` for run-wide totals.
+    ``policy_file`` carries the ADR-033 D7 evidence-policy knobs that modulate the
+    findings' verdict category. Returns
+    ``(extra_changes, layer_coverage_rows, evidence_metrics, ev_changes)``; the
+    metrics still need :func:`attach_evidence_metrics` for run-wide totals.
     """
     import time
 
@@ -1561,13 +1552,16 @@ def prepare_embedded_build_source(
     has_embedded = (
         old_snapshot.build_source is not None or new_snapshot.build_source is not None
     )
-    if not (any_pack_flag or collect_mode != "off" or has_embedded):
+    # require_evidence must be able to fail a run that supplied no evidence at
+    # all, so engage the pipeline when the policy declares any requirement.
+    requires_evidence = bool(policy_file is not None and policy_file.require_evidence)
+    if not (any_pack_flag or collect_mode != "off" or has_embedded or requires_evidence):
         return extra_changes, [], {}, []
 
     start = time.perf_counter()
     ev_changes, coverage_rows, metrics = diff_embedded_build_source(
         old_build_info, new_build_info, old_sources, new_sources,
-        collect_mode, new_snapshot, old_snapshot,
+        collect_mode, new_snapshot, old_snapshot, policy_file,
     )
     if metrics:
         metrics["extractor.duration_seconds"] = round(time.perf_counter() - start, 4)
@@ -1601,23 +1595,6 @@ def attach_evidence_metrics(
     metrics["findings.suppressed_with_reason.count"] = result.suppressed_count
     result.evidence_metrics = metrics
     echo_evidence_metrics(metrics)
-
-
-def echo_evidence_metrics(metrics: dict[str, object]) -> None:
-    """Print the ADR-033 D6 timing / D9 metrics summary to stderr (all formats)."""
-    if not metrics:
-        return
-    duration = metrics.get("extractor.duration_seconds")
-    click.echo("Evidence metrics:", err=True)
-    if duration is not None:
-        click.echo(f"  collection time            {duration}s", err=True)
-    click.echo(
-        "  findings                   "
-        f"artifact-backed={metrics.get('findings.artifact_backed.count', 0)}, "
-        f"source-only={metrics.get('findings.source_only.count', 0)}, "
-        f"build-context-drift={metrics.get('findings.build_context_drift.count', 0)}",
-        err=True,
-    )
 
 
 def _load_pack_or_raise(evidence_dir: Path) -> BuildSourcePack:

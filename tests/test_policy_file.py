@@ -278,3 +278,79 @@ def test_builtin_policy_name_not_shadowed_by_directory(tmp_path: Path, monkeypat
     # Resolved to the packaged policy, not the local directory.
     assert pf.base_policy == "strict_abi"
     assert pf.overrides.get(ChangeKind.RELRO_WEAKENED) == Verdict.BREAKING
+
+
+# ── ADR-033 D7 evidence-policy controls ──────────────────────────────────────
+
+
+def test_evidence_policy_parses_all_knobs(tmp_path: Path) -> None:
+    p = tmp_path / "policy.yaml"
+    p.write_text(
+        """
+evidence_policy:
+  source_only_findings: fail-api
+  build_context_drift: fail-on-abi-relevant
+  graph_risk_findings: ignore
+  require_evidence:
+    build_context: true
+    source_abi: false
+""".strip(),
+        encoding="utf-8",
+    )
+    pf = PolicyFile.load(p)
+    assert pf.source_only_findings == "fail-api"
+    assert pf.build_context_drift == "fail-on-abi-relevant"
+    assert pf.graph_risk_findings == "ignore"
+    assert pf.require_evidence == {"build_context": True, "source_abi": False}
+
+
+def test_evidence_policy_unset_is_none(tmp_path: Path) -> None:
+    p = tmp_path / "policy.yaml"
+    p.write_text("base_policy: strict_abi\n", encoding="utf-8")
+    pf = PolicyFile.load(p)
+    assert pf.source_only_findings is None
+    assert pf.build_context_drift is None
+    assert pf.graph_risk_findings is None
+    assert pf.require_evidence == {}
+    # Unset knobs leave the finding's default category untouched.
+    assert pf.evidence_verdict("source_only") is None
+
+
+def test_evidence_verdict_mapping(tmp_path: Path) -> None:
+    p = tmp_path / "policy.yaml"
+    p.write_text(
+        "evidence_policy:\n"
+        "  source_only_findings: ignore\n"
+        "  build_context_drift: fail-on-abi-relevant\n"
+        "  graph_risk_findings: fail\n",
+        encoding="utf-8",
+    )
+    pf = PolicyFile.load(p)
+    assert pf.evidence_verdict("source_only") == Verdict.COMPATIBLE
+    assert pf.evidence_verdict("graph_risk") == Verdict.API_BREAK
+    # fail-on-abi-relevant: only ABI-relevant build drift escalates.
+    assert pf.evidence_verdict("build_context", abi_relevant=True) == Verdict.API_BREAK
+    assert (
+        pf.evidence_verdict("build_context", abi_relevant=False)
+        == Verdict.COMPATIBLE_WITH_RISK
+    )
+
+
+@pytest.mark.parametrize(
+    "block",
+    [
+        "evidence_policy:\n  source_only_findings: nope\n",
+        "evidence_policy:\n  build_context_drift: fail\n",  # not a build-drift action
+        "evidence_policy:\n  graph_risk_findings: fail-api\n",  # not a graph action
+        "evidence_policy:\n  require_evidence:\n    bogus_layer: true\n",
+        "evidence_policy:\n  require_evidence:\n    build_context: yes-please\n",
+        "evidence_policy: not-a-mapping\n",
+    ],
+)
+def test_evidence_policy_invalid_values_raise(tmp_path: Path, block: str) -> None:
+    from abicheck.errors import PolicyError
+
+    p = tmp_path / "policy.yaml"
+    p.write_text(block, encoding="utf-8")
+    with pytest.raises(PolicyError):
+        PolicyFile.load(p)

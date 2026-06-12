@@ -299,13 +299,13 @@ def test_compare_json_without_evidence_omits_metrics(tmp_path):
 def test_evidence_metrics_helpers_edge_branches(capsys):
     """ADR-033 D6/D9 helper edge cases: empty-metrics no-ops, the
     missing-duration echo path, and the _layer_status fallback."""
-    from abicheck.buildsource.model import CoverageStatus, DataLayer, LayerCoverage
-    from abicheck.checker_types import DiffResult, Verdict
-    from abicheck.cli_buildsource import (
+    from abicheck.buildsource.evidence_policy import (
         _layer_status,
-        attach_evidence_metrics,
         echo_evidence_metrics,
     )
+    from abicheck.buildsource.model import CoverageStatus, DataLayer, LayerCoverage
+    from abicheck.checker_types import DiffResult, Verdict
+    from abicheck.cli_buildsource import attach_evidence_metrics
 
     # Unknown layer → not_collected fallback (no rows for L5).
     rows = [LayerCoverage(layer=DataLayer.L3_BUILD.value, status=CoverageStatus.PRESENT)]
@@ -364,6 +364,98 @@ def test_evidence_metrics_excludes_probe_matrix_from_artifact_backed(tmp_path):
     # ... but it is not counted as artifact-backed. These ELF-less snapshots have
     # no L0-L2 diff, so the only artifact-backed count here must be zero.
     assert metrics["findings.artifact_backed.count"] == 0
+
+
+def _two_build_packs(tmp_path, runner):
+    """Two build-info packs whose only delta is a C++ std bump (17 -> 20),
+    yielding an abi_relevant_build_flag_changed finding (RISK by default)."""
+    ev_old = tmp_path / "old.evidence"
+    ev_new = tmp_path / "new.evidence"
+    runner.invoke(main, ["collect", "--compile-db", str(_write_cdb(tmp_path, "c++17")),
+                         "-o", str(ev_old)])
+    runner.invoke(main, ["collect", "--compile-db", str(_write_cdb(tmp_path, "c++20")),
+                         "-o", str(ev_new)])
+    return ev_old, ev_new
+
+
+def test_evidence_policy_build_drift_fail_on_abi_relevant_escalates(tmp_path):
+    """ADR-033 D7: build_context_drift: fail-on-abi-relevant escalates the
+    ABI-relevant std-flag drift from RISK (exit 0) to API_BREAK (exit 2)."""
+    runner = CliRunner()
+    ev_old, ev_new = _two_build_packs(tmp_path, runner)
+    pol = tmp_path / "policy.yaml"
+    pol.write_text("evidence_policy:\n  build_context_drift: fail-on-abi-relevant\n")
+    old_snap = _make_snap(tmp_path, "old.json", "1.0")
+    new_snap = _make_snap(tmp_path, "new.json", "2.0")
+    result = runner.invoke(main, [
+        "compare", str(old_snap), str(new_snap),
+        "--old-build-info", str(ev_old), "--new-build-info", str(ev_new),
+        "--policy-file", str(pol), "--format", "json",
+    ])
+    assert result.exit_code == 2, result.output  # API_BREAK
+    payload = json.loads(result.stdout)
+    assert payload["verdict"] in ("API_BREAK", "source_break")
+
+
+def test_evidence_policy_build_drift_default_is_risk(tmp_path):
+    """Without the knob the same std drift stays a non-failing risk (exit 0)."""
+    runner = CliRunner()
+    ev_old, ev_new = _two_build_packs(tmp_path, runner)
+    old_snap = _make_snap(tmp_path, "old.json", "1.0")
+    new_snap = _make_snap(tmp_path, "new.json", "2.0")
+    result = runner.invoke(main, [
+        "compare", str(old_snap), str(new_snap),
+        "--old-build-info", str(ev_old), "--new-build-info", str(ev_new),
+    ])
+    assert result.exit_code == 0, result.output
+
+
+def test_require_evidence_fails_when_layer_absent(tmp_path):
+    """ADR-033 D7 require_evidence: a mandatory-but-absent layer fails the run
+    with an evidence_required_missing (API_BREAK) finding, even with no packs."""
+    pol = tmp_path / "policy.yaml"
+    pol.write_text("evidence_policy:\n  require_evidence:\n    build_context: true\n")
+    old_snap = _make_snap(tmp_path, "old.json", "1.0")
+    new_snap = _make_snap(tmp_path, "new.json", "2.0")
+    result = CliRunner().invoke(main, [
+        "compare", str(old_snap), str(new_snap),
+        "--policy-file", str(pol), "--format", "json",
+    ])
+    assert result.exit_code == 2, result.output  # API_BREAK
+    kinds = {c["kind"] for c in json.loads(result.stdout)["changes"]}
+    assert "evidence_required_missing" in kinds
+
+
+def test_require_evidence_satisfied_when_layer_present(tmp_path):
+    """When the required layer is present (build pack supplied), no finding."""
+    runner = CliRunner()
+    ev_new = tmp_path / "new.evidence"
+    runner.invoke(main, ["collect", "--compile-db", str(_write_cdb(tmp_path, "c++20")),
+                         "-o", str(ev_new)])
+    pol = tmp_path / "policy.yaml"
+    pol.write_text("evidence_policy:\n  require_evidence:\n    build_context: true\n")
+    old_snap = _make_snap(tmp_path, "old.json", "1.0")
+    new_snap = _make_snap(tmp_path, "new.json", "2.0")
+    result = runner.invoke(main, [
+        "compare", str(old_snap), str(new_snap), "--new-build-info", str(ev_new),
+        "--policy-file", str(pol), "--format", "json",
+    ])
+    assert result.exit_code == 0, result.output
+    kinds = {c["kind"] for c in json.loads(result.stdout)["changes"]}
+    assert "evidence_required_missing" not in kinds
+
+
+def test_evidence_policy_invalid_action_rejected(tmp_path):
+    """An out-of-range evidence_policy action is a clear policy-file error."""
+    pol = tmp_path / "policy.yaml"
+    pol.write_text("evidence_policy:\n  graph_risk_findings: maybe\n")
+    old_snap = _make_snap(tmp_path, "old.json", "1.0")
+    new_snap = _make_snap(tmp_path, "new.json", "2.0")
+    result = CliRunner().invoke(main, [
+        "compare", str(old_snap), str(new_snap), "--policy-file", str(pol),
+    ])
+    assert result.exit_code != 0
+    assert "graph_risk_findings" in result.output
 
 
 def test_compare_collect_mode_without_packs_is_noted(tmp_path):

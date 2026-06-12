@@ -1892,6 +1892,7 @@ def compare_cmd(
         prepare_embedded_build_source(
             old, new, collect_mode, extra_changes,
             old_build_info, new_build_info, old_sources, new_sources,
+            policy_file=pf,
         )
     )
 
