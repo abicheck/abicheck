@@ -167,15 +167,18 @@ def _diff_options(old: BuildEvidence, new: BuildEvidence) -> list[Change]:
             if default is None:
                 # Context-dependent compiler default. With both sides explicit,
                 # diff on inequality. With one side omitted the default is unknown
-                # — suppress, except for a tls_model that names a model which is
-                # *never* the compiler auto-default (local-exec / local-dynamic):
-                # those are always a deliberate, reportable change, whereas
-                # global-dynamic / initial-exec could equal the -fpic-dependent
-                # default and stay suppressed to avoid a false positive.
+                # — suppress, except for a tls_model whose explicit side names
+                # *any* model that is *never* the compiler auto-default
+                # (local-exec / local-dynamic): those are always a deliberate,
+                # reportable change, whereas global-dynamic / initial-exec could
+                # equal the -fpic-dependent default and stay suppressed to avoid a
+                # false positive. A multi-config explicit side may carry a *mix*
+                # (e.g. {global-dynamic, local-exec}); report it when at least one
+                # never-default model is present rather than requiring all of them.
                 # (ov != nv already guaranteed by the outer loop.)
                 if not ov or not nv:
                     explicit = nv or ov
-                    if mode_base != "tls_model" or not explicit <= _NEVER_DEFAULT_TLS_MODELS:
+                    if mode_base != "tls_model" or not (explicit & _NEVER_DEFAULT_TLS_MODELS):
                         continue
                     old_eff = ov or {"(default)"}
                     new_eff = nv or {"(default)"}

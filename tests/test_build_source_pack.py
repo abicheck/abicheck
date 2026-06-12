@@ -623,6 +623,36 @@ def test_tls_model_omitted_vs_never_default_is_reported(model):
     )
 
 
+def test_tls_model_omitted_vs_mixed_with_never_default_is_reported():
+    # Multi-config explicit side carries a *mix*: one TU at the (possibly-default)
+    # global-dynamic and one at local-exec (never the auto-default). The omitted
+    # side must not suppress the whole change — the local-exec TU is a real flip.
+    old = BuildEvidence(build_options=[])
+    new = BuildEvidence(build_options=[
+        _opt("tls_model", "global-dynamic"),
+        _opt("tls_model", "local-exec"),
+    ])
+    assert any(
+        c.kind is ChangeKind.TLS_MODEL_CHANGED for c in diff_build_evidence(old, new)
+    )
+    assert any(
+        c.kind is ChangeKind.TLS_MODEL_CHANGED for c in diff_build_evidence(new, old)
+    )
+
+
+def test_tls_model_omitted_vs_mixed_all_maybe_default_is_suppressed():
+    # A mix of only maybe-default models (global-dynamic / initial-exec) against
+    # an omitted side stays suppressed — none is guaranteed non-default.
+    old = BuildEvidence(build_options=[])
+    new = BuildEvidence(build_options=[
+        _opt("tls_model", "global-dynamic"),
+        _opt("tls_model", "initial-exec"),
+    ])
+    assert not any(
+        c.kind is ChangeKind.TLS_MODEL_CHANGED for c in diff_build_evidence(old, new)
+    )
+
+
 def test_exceptions_mode_cxx_on_vs_absent_is_no_change():
     # For C++ (exceptions:CXX), absent == default on; an explicit -fexceptions
     # against an omitted flag must not read as a mode flip.
