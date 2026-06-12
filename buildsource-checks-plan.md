@@ -15,10 +15,16 @@
 - ✅ **A2** `merge_layer_conflict` — `merge --on-conflict=warn|error`,
   order-independent per-layer digest, accurate winner, persisted to the ledger.
 - ✅ **A4** `build_info_source_tree_mismatch` — collection-time diagnostic (not a
-  ChangeKind; see A4).
-- ✅ **Workstream B (partial)** — D5 merge gaps landed with the above.
-- ⏳ **A3**, remaining **B** gaps (D2/D3/D4/D6/D7), **C** examples (L4/L5 harness),
-  and the `merge`-path L0 plumbing for A1 — not yet done.
+  ChangeKind; basename-match, redaction/OS-separator safe).
+- ✅ **A3** `build_query_unavailable` — failed/blocked build query now surfaces as
+  a `partial` L3 coverage row with the reason (no new ChangeKind).
+- ✅ **Workstream B** — D2–D7 pure-Python gaps landed (merge 3+/conflict/order/
+  winner/corrupted-input, embedded-L5 round-trip, invalid compile-DB graceful,
+  malformed `.abicheck.yml`, `--sources`+`--build-info`, `collect` no-input).
+- ⏳ **Not yet done:** **C** examples (L4/L5 cases — needs the CMake/`--sources`
+  harness extension + example-gate sync + clang/castxml), and the `merge`-path
+  L0-export plumbing for A1 (re-link source surface with the binary side's
+  exports; deferred to avoid an imperfect re-link tripping the FP-rate gate).
 
 ---
 
