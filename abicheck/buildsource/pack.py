@@ -157,22 +157,37 @@ class BuildSourcePack:
         return self.root / MANIFEST_NAME
 
     def _artifact_digests(self) -> list[str]:
-        """Return sorted ``sha256:<hex>`` digests of normalized payload files.
+        """Return sorted ``sha256:<hex>`` digests of normalized payloads.
 
-        Only normalized/canonical files contribute to the content hash; raw/
+        Only normalized/canonical facts contribute to the content hash; raw/
         provenance dumps are intentionally excluded so the same logical
         evidence hashes identically regardless of which tool produced it.
+
+        Each L3/L4/L5 payload is hashed from its on-disk file when the pack was
+        written, else from the in-memory object's canonical JSON. The in-memory
+        path matters for an *embedded* pack (``root=""``, single-artifact UX):
+        it is never written to disk, so without this its digests would be empty
+        and ``content_hash()`` would ignore the embedded build/source facts —
+        two different inputs with the same coverage would collide (Codex P2).
+        The two formulations hash identically (same canonical JSON as
+        ``_write_json``), so on-disk and embedded packs of the same facts agree.
         """
         digests: list[str] = []
         be_path = self.root / BUILD_EVIDENCE_REL
         if be_path.is_file():
             digests.append("sha256:" + _file_sha256(be_path))
+        elif self.build_evidence is not None:
+            digests.append("sha256:" + _payload_sha256(self.build_evidence.to_dict()))
         sa_path = self.root / SOURCE_ABI_REL
         if sa_path.is_file():
             digests.append("sha256:" + _file_sha256(sa_path))
+        elif self.source_abi is not None:
+            digests.append("sha256:" + _payload_sha256(self.source_abi.to_dict()))
         sg_path = self.root / SOURCE_GRAPH_REL
         if sg_path.is_file():
             digests.append("sha256:" + _file_sha256(sg_path))
+        elif self.source_graph is not None:
+            digests.append("sha256:" + _payload_sha256(self.source_graph.to_dict()))
         normalized = self.root / "normalized"
         if normalized.is_dir():
             for p in sorted(normalized.rglob("*")):
@@ -286,3 +301,15 @@ def _file_sha256(path: Path) -> str:
         for chunk in iter(lambda: fh.read(65536), b""):
             h.update(chunk)
     return h.hexdigest()
+
+
+def _payload_sha256(payload: dict[str, Any]) -> str:
+    """SHA-256 of a normalized payload using the same bytes ``_write_json`` writes.
+
+    Hashing the identical canonical form (``indent=2``, ``sort_keys=True``,
+    trailing newline) means an embedded pack and the on-disk pack of the same
+    facts produce the same digest — so ``content_hash()`` is stable across the
+    embedded/out-of-band representations.
+    """
+    blob = (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode("utf-8")
+    return hashlib.sha256(blob).hexdigest()

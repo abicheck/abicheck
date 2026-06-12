@@ -632,3 +632,131 @@ def test_merge_combines_binary_and_source_snapshots(tmp_path):
     assert merged.elf is not None          # base ABI surface preserved
     assert merged.build_source is not None  # source-side facts folded in
     assert merged.build_source.build_evidence is not None
+
+
+# ── inline.py pure-logic coverage (no external tools) ─────────────────────────
+
+
+def test_build_config_from_dict_and_load(tmp_path):
+    from abicheck.buildsource.inline import (
+        BuildConfig,
+        discover_build_config,
+        load_build_config,
+    )
+
+    cfg = BuildConfig.from_dict({
+        "build": {"system": "bazel", "query": "bazel cquery //x", "compile_db": "out/cc.json"},
+        "sources": {"public_headers": ["a/**.hpp"], "exclude": "**/test/**"},
+    })
+    assert cfg.system == "bazel"
+    assert cfg.query.startswith("bazel cquery")
+    assert cfg.compile_db == "out/cc.json"
+    assert cfg.public_headers == ["a/**.hpp"]
+    assert cfg.exclude == ["**/test/**"]
+
+    # Empty / malformed inputs fall back to all-defaults.
+    assert BuildConfig.from_dict({}).system == "auto"
+    assert BuildConfig.from_dict({"build": "nope"}).query == ""
+
+    # load_build_config: missing file → defaults; present file → parsed.
+    assert load_build_config(tmp_path / "nope.yml").system == "auto"
+    p = tmp_path / ".abicheck.yml"
+    p.write_text("build:\n  system: cmake\n", encoding="utf-8")
+    assert load_build_config(p).system == "cmake"
+    # A YAML scalar (not a mapping) is tolerated.
+    p.write_text("just a string\n", encoding="utf-8")
+    assert load_build_config(p).system == "auto"
+
+    # discover_build_config finds .abicheck.yml at the tree root.
+    tree = tmp_path / "src"
+    tree.mkdir()
+    assert discover_build_config(tree) is None
+    (tree / ".abicheck.yml").write_text("build: {}\n", encoding="utf-8")
+    assert discover_build_config(tree) == tree / ".abicheck.yml"
+    assert discover_build_config(None) is None
+
+
+def test_is_pack_dir_and_compile_db_resolution(tmp_path):
+    from abicheck.buildsource.inline import (
+        _autodiscover_compile_db,
+        _compile_db_at,
+        is_pack_dir,
+    )
+
+    assert is_pack_dir(None) is False
+    plain = tmp_path / "plain"
+    plain.mkdir()
+    assert is_pack_dir(plain) is False
+    (plain / "manifest.json").write_text("{}", encoding="utf-8")
+    assert is_pack_dir(plain) is True
+
+    # _compile_db_at: a build dir with build/compile_commands.json is found.
+    bd = tmp_path / "bd"
+    (bd / "build").mkdir(parents=True)
+    cdb = bd / "build" / "compile_commands.json"
+    cdb.write_text("[]", encoding="utf-8")
+    assert _compile_db_at(bd) == cdb
+    assert _compile_db_at(tmp_path / "empty-missing") is None
+
+    # auto-discovery inside a source tree (top-level).
+    tree = tmp_path / "src"
+    tree.mkdir()
+    assert _autodiscover_compile_db(tree) is None
+    top = tree / "compile_commands.json"
+    top.write_text("[]", encoding="utf-8")
+    assert _autodiscover_compile_db(tree) == top
+    assert _autodiscover_compile_db(None) is None
+
+
+def test_build_inline_coverage_rows():
+    from abicheck.buildsource.build_evidence import BuildEvidence
+    from abicheck.buildsource.inline import build_inline_coverage
+
+    rows = build_inline_coverage(BuildEvidence(), has_build=False, surface=None, graph=None)
+    by = {r.layer: r for r in rows}
+    assert by["L3_build"].status.value == "not_collected"
+    assert by["L4_source_abi"].status.value == "not_collected"
+    assert by["L5_source_graph"].status.value == "not_collected"
+
+
+def test_build_query_failure_is_recorded(tmp_path, monkeypatch):
+    """A failing build.query command degrades to a failed extractor, no abort."""
+    from abicheck.buildsource.inline import BuildConfig, collect_inline_pack
+
+    tree = tmp_path / "src"
+    tree.mkdir()
+    # An unparseable command string is handled gracefully.
+    cfg = BuildConfig(query='unterminated "quote', compile_db="cc.json")
+    pack = collect_inline_pack(
+        sources=tree, build_info=None, build_config=cfg, allow_build_query=True,
+    )
+    # Command never produced a DB and there is nothing else → no pack.
+    assert pack is None
+
+
+def test_merge_requires_two_inputs(tmp_path):
+    from abicheck.model import AbiSnapshot
+    from abicheck.serialization import save_snapshot
+
+    snap = AbiSnapshot(library="l", version="1")
+    p = tmp_path / "a.json"
+    save_snapshot(snap, p)
+    result = CliRunner().invoke(main, ["merge", str(p), "-o", str(tmp_path / "o.json")])
+    assert result.exit_code != 0
+    assert "at least two" in result.output
+
+
+def test_merge_without_embedded_facts_is_noted(tmp_path):
+    from abicheck.model import AbiSnapshot
+    from abicheck.serialization import load_snapshot, save_snapshot
+
+    a = tmp_path / "a.json"
+    b = tmp_path / "b.json"
+    save_snapshot(AbiSnapshot(library="l", version="1"), a)
+    save_snapshot(AbiSnapshot(library="l", version="2"), b)
+    out = tmp_path / "o.json"
+    result = CliRunner().invoke(main, ["merge", str(a), str(b), "-o", str(out)])
+    assert result.exit_code == 0, result.output
+    assert "no input carried embedded build_source" in result.output
+    # Base ABI surface still written.
+    assert load_snapshot(out).library == "l"

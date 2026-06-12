@@ -682,3 +682,45 @@ def test_coverage_status_default_round_trip():
 def test_coverage_status_enum_values():
     assert CoverageStatus.PRESENT.value == "present"
     assert CoverageStatus.NOT_COLLECTED.value == "not_collected"
+
+
+def test_inline_pack_content_hash_reflects_embedded_payloads():
+    """An embedded (never-written) pack hashes its in-memory facts (Codex P2).
+
+    Without hashing the in-memory payloads, two packs with identical coverage
+    but different build evidence would collide on content_hash, breaking the
+    content-addressed provenance ref embedded in the snapshot.
+    """
+    from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
+    from abicheck.buildsource.pack import BuildSourcePack
+
+    def _pack(source: str) -> BuildSourcePack:
+        ev = BuildEvidence()
+        ev.compile_units.append(CompileUnit(id=f"cu://{source}", source=source))
+        return BuildSourcePack(root=Path(""), build_evidence=ev)
+
+    a = _pack("a.cpp")
+    b = _pack("b.cpp")
+    same = _pack("a.cpp")
+
+    # Different embedded facts → different content hash; identical facts → equal.
+    assert a.content_hash() != b.content_hash()
+    assert a.content_hash() == same.content_hash()
+    # The digest is non-empty (the payload actually contributed).
+    assert a.content_hash().startswith("sha256:")
+
+
+def test_embedded_and_ondisk_pack_hash_agree(tmp_path):
+    """The same facts hash identically whether embedded or written to disk."""
+    from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
+    from abicheck.buildsource.pack import BuildSourcePack
+
+    ev = BuildEvidence()
+    ev.compile_units.append(CompileUnit(id="cu://x", source="x.cpp"))
+
+    embedded = BuildSourcePack(root=Path(""), build_evidence=ev)
+    on_disk = BuildSourcePack.empty(tmp_path / "pk")
+    on_disk.build_evidence = ev
+    on_disk.write()
+
+    assert embedded.content_hash() == on_disk.content_hash()
