@@ -63,7 +63,8 @@ def test_key_distinguishes_trees_with_identical_relative_db(tmp_path):
     share a cache entry — the resolved DB location is part of the key."""
     a = tmp_path / "treeA"
     b = tmp_path / "treeB"
-    a.mkdir(); b.mkdir()
+    a.mkdir()
+    b.mkdir()
     body = json.dumps([{"file": "f.cpp", "arguments": ["c++", "-c", "f.cpp"]}])
     (a / "compile_commands.json").write_text(body)
     (b / "compile_commands.json").write_text(body)  # identical bytes, different root
