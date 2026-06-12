@@ -36,7 +36,7 @@ The docs are two complementary tracks, each ordered from introductory to expert:
    compatibility is, why libraries break their consumers, and how to design
    against it. Start with the [learning series](concepts/abi-series/00-product-contract.md)
    (part 0 assumes nothing; part 7 is expert-level design guidance) and keep the
-   [127-case example encyclopedia](examples/index.md) as a catalog of real breaks.
+   [129-case example encyclopedia](examples/index.md) as a catalog of real breaks.
 2. **Use the tool** — the [User Guide](getting-started.md) takes you from install
    and first check through CI integration to specialised workflows;
    [Concepts](concepts/verdicts.md) explains how abicheck works — what a verdict

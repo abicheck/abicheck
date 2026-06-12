@@ -205,10 +205,10 @@ python scripts/benchmark_comparison.py --evidence-tiers
 
 | Source you provide | Cumulative cases reaching the correct verdict |
 |--------------------|:---------------------------------------------:|
-| Just the binary (`L0`) | 40 / 127 (31%) |
-| + Debug symbols (`L1`) | 103 / 127 (81%) |
-| + Public headers (`L2`) | 126 / 127 (99%) |
-| + Build data / sources (`L3`/`L4`) | 127 / 127 (100%) |
+| Just the binary (`L0`) | 42 / 129 (33%) |
+| + Debug symbols (`L1`) | 105 / 129 (81%) |
+| + Public headers (`L2`) | 128 / 129 (99%) |
+| + Build data / sources (`L3`/`L4`) | 129 / 129 (100%) |
 
 More evidence also *removes* false positives (e.g. header scoping correctly dismisses internal-struct changes). See [Evidence & Detectability](https://napetrov.github.io/abicheck/concepts/evidence-and-detectability/) for what each source reveals and [Benchmarking by evidence tier](https://napetrov.github.io/abicheck/reference/tool-comparison/#benchmarking-by-evidence-tier) for the methodology.
 

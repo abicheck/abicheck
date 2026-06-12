@@ -3,10 +3,10 @@
 This document explains how each ABI checking tool works, what analysis method it uses,
 benchmark results across real-world test cases, and why the numbers come out the way they do.
 
-> **Note:** abicheck detects 235 change kinds (see [Change Kind Reference](change-kinds.md)).
+> **Note:** abicheck detects 238 change kinds (see [Change Kind Reference](change-kinds.md)).
 > The current cross-tool benchmark covers a pinned 74-case subset of the
 > `examples/` catalog (`case01`-`case73` + `case26b`); the full catalog now has
-> 127 cases. The subset is pinned so accuracy numbers stay reproducible across
+> 129 cases. The subset is pinned so accuracy numbers stay reproducible across
 > releases.
 
 > **Why the tools disagree.** The accuracy gaps below are mostly an *evidence*
@@ -274,17 +274,17 @@ Each case in [`examples/ground_truth.json`](https://github.com/napetrov/abicheck
 carries a `min_evidence` field — the weakest source at which abicheck reaches the
 correct verdict — derived by
 [`scripts/evidence_tiers.py`](https://github.com/napetrov/abicheck/blob/main/scripts/evidence_tiers.py)
-and validated by `tests/test_evidence_tiers.py`. Aggregated over the 127-case
+and validated by `tests/test_evidence_tiers.py`. Aggregated over the 129-case
 catalog, that yields the cumulative coverage the `--evidence-tiers` summary
 prints:
 
 | Source provided | Layer | Cases first detectable here | Cumulative | Representative cases |
 |-----------------|:-----:|:---------------------------:|:----------:|----------------------|
-| Just the binary | L0 | 40 | **40 / 127 (31%)** | symbol removal ([01](../examples/case01_symbol_removal.md)), SONAME ([05](../examples/case05_soname.md)), visibility ([06](../examples/case06_visibility.md)), symbol-version removed ([65](../examples/case65_symbol_version_removed.md)), all 5 bundle cases |
-| + Debug symbols | L1 | 63 | **103 / 127 (81%)** | struct layout ([07](../examples/case07_struct_layout.md)), enum value ([08](../examples/case08_enum_value_change.md)), vtable ([09](../examples/case09_cpp_vtable.md)), calling convention ([64](../examples/case64_calling_convention_changed.md)), bitfield ([63](../examples/case63_bitfield_changed.md)), toolchain flag drift ([103](../examples/case103_toolchain_flag_drift.md)) |
-| + Public headers | L2 | 23 | **126 / 127 (99%)** | access level ([34](../examples/case34_access_level.md)), default arg removed ([123](../examples/case123_default_argument_removed.md)), class `final` ([125](../examples/case125_class_became_final.md)), `detail::` leaks ([74](../examples/case74_detail_base_class_changed.md)–[77](../examples/case77_detail_templated_base_changed.md)), scoped-internal *no-change* ([118](../examples/case118_internal_struct_field_added_scoped.md)–[120](../examples/case120_internal_struct_reordered_scoped.md)) |
-| + Build data | L3 | 0 | **126 / 127 (99%)** | *(no catalog case requires L3 alone yet — see note)* |
-| + Sources | L4 | 1 | **127 / 127 (100%)** | uninstantiated template ([122](../examples/case122_template_signature_uninstantiated.md), documented gap) |
+| Just the binary | L0 | 42 | **42 / 129 (33%)** | symbol removal ([01](../examples/case01_symbol_removal.md)), SONAME ([05](../examples/case05_soname.md)), visibility ([06](../examples/case06_visibility.md)), symbol-version removed ([65](../examples/case65_symbol_version_removed.md)), all 5 bundle cases |
+| + Debug symbols | L1 | 63 | **105 / 129 (81%)** | struct layout ([07](../examples/case07_struct_layout.md)), enum value ([08](../examples/case08_enum_value_change.md)), vtable ([09](../examples/case09_cpp_vtable.md)), calling convention ([64](../examples/case64_calling_convention_changed.md)), bitfield ([63](../examples/case63_bitfield_changed.md)), toolchain flag drift ([103](../examples/case103_toolchain_flag_drift.md)) |
+| + Public headers | L2 | 23 | **128 / 129 (99%)** | access level ([34](../examples/case34_access_level.md)), default arg removed ([123](../examples/case123_default_argument_removed.md)), class `final` ([125](../examples/case125_class_became_final.md)), `detail::` leaks ([74](../examples/case74_detail_base_class_changed.md)–[77](../examples/case77_detail_templated_base_changed.md)), scoped-internal *no-change* ([118](../examples/case118_internal_struct_field_added_scoped.md)–[120](../examples/case120_internal_struct_reordered_scoped.md)) |
+| + Build data | L3 | 0 | **128 / 129 (99%)** | *(no catalog case requires L3 alone yet — see note)* |
+| + Sources | L4 | 1 | **129 / 129 (100%)** | uninstantiated template ([122](../examples/case122_template_signature_uninstantiated.md), documented gap) |
 
 > **Why L3 adds 0 here.** Build-flag drift *is* an L3 concern, but compilers
 > record their flags redundantly in debug info (`DW_AT_producer` /
