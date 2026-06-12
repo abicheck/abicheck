@@ -449,7 +449,6 @@ _ALWAYS_INDEPENDENT_KINDS: frozenset[ChangeKind] = frozenset(
         ChangeKind.TOOLCHAIN_FLAG_DRIFT,
         ChangeKind.COMPAT_VERSION_CHANGED,
         ChangeKind.MACHO_CPU_TYPE_CHANGED,
-        ChangeKind.PE_ORDINAL_CHANGED,
         ChangeKind.PE_FORWARDER_CHANGED,
         ChangeKind.PE_MACHINE_CHANGED,
         ChangeKind.VISIBILITY_LEAK,

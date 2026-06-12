@@ -57,38 +57,27 @@ def _by_kind(changes, kind):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# PE ordinal stability
+# PE ordinal churn must NOT be flagged
 # ═══════════════════════════════════════════════════════════════════════════
 
-class TestPeOrdinalChanged:
-    def test_named_export_reassigned_ordinal_is_breaking(self) -> None:
+class TestPeOrdinalChurnIsBenign:
+    """PE ordinals are auto-assigned sequentially: adding/removing an export
+    renumbers everything after it. That benign churn must never be a finding —
+    name-bound clients (the common case) are unaffected, and ordinal-only
+    exports are keyed by ordinal so a genuine reorder is already a remove+add."""
+
+    def test_named_export_ordinal_shift_is_not_flagged(self) -> None:
         old = _pe_snap([PeExport(name="foo", ordinal=3)])
         new = _pe_snap([PeExport(name="foo", ordinal=7)])
-        changes = _diff_pe(old, new)
-        hits = _by_kind(changes, ChangeKind.PE_ORDINAL_CHANGED)
-        assert len(hits) == 1
-        assert hits[0].symbol == "foo"
-        assert hits[0].old_value == "3"
-        assert hits[0].new_value == "7"
-        assert ChangeKind.PE_ORDINAL_CHANGED in BREAKING_KINDS
+        # No PE-specific finding at all; certainly nothing breaking.
+        assert _diff_pe(old, new) == []
 
-    def test_same_ordinal_is_not_flagged(self) -> None:
-        old = _pe_snap([PeExport(name="foo", ordinal=3)])
-        new = _pe_snap([PeExport(name="foo", ordinal=3)])
-        assert ChangeKind.PE_ORDINAL_CHANGED not in _kinds(_diff_pe(old, new))
-
-    def test_zero_ordinal_either_side_is_not_flagged(self) -> None:
-        # ordinal 0 == "unknown" (e.g. parsed without an ordinal); avoid noise.
-        old = _pe_snap([PeExport(name="foo", ordinal=0)])
-        new = _pe_snap([PeExport(name="foo", ordinal=5)])
-        assert ChangeKind.PE_ORDINAL_CHANGED not in _kinds(_diff_pe(old, new))
-
-    def test_added_export_is_not_an_ordinal_change(self) -> None:
-        old = _pe_snap([PeExport(name="foo", ordinal=1)])
-        new = _pe_snap([PeExport(name="foo", ordinal=1), PeExport(name="bar", ordinal=2)])
+    def test_insertion_shifting_ordinals_is_only_an_addition(self) -> None:
+        old = _pe_snap([PeExport(name="get_version", ordinal=1)])
+        new = _pe_snap([PeExport(name="get_build", ordinal=1),
+                        PeExport(name="get_version", ordinal=2)])
         kinds = _kinds(_diff_pe(old, new))
-        assert ChangeKind.PE_ORDINAL_CHANGED not in kinds
-        assert ChangeKind.FUNC_ADDED in kinds
+        assert kinds == {ChangeKind.FUNC_ADDED}
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -193,6 +182,33 @@ class TestMachoCpuTypeChanged:
     def test_unknown_cpu_either_side_is_not_flagged(self) -> None:
         changes = _diff_macho(self._snap(""), self._snap("ARM64"))
         assert ChangeKind.MACHO_CPU_TYPE_CHANGED not in _kinds(changes)
+
+    def _fat(self, *arches: str) -> AbiSnapshot:
+        return AbiSnapshot(library="lib.dylib", version="1.0",
+                           macho=MachoMetadata(cpu_type=arches[0],
+                                               cpu_types=list(arches)))
+
+    def test_single_to_universal_is_not_flagged(self) -> None:
+        # x86_64 dylib replaced by a universal x86_64+ARM64 dylib: the original
+        # slice is still present, so no architecture was removed.
+        changes = _diff_macho(self._fat("X86_64"), self._fat("ARM64", "X86_64"))
+        assert ChangeKind.MACHO_CPU_TYPE_CHANGED not in _kinds(changes)
+
+    def test_universal_dropping_a_slice_is_breaking(self) -> None:
+        changes = _diff_macho(self._fat("X86_64", "ARM64"), self._fat("ARM64"))
+        hits = _by_kind(changes, ChangeKind.MACHO_CPU_TYPE_CHANGED)
+        assert len(hits) == 1
+        assert "X86_64" in hits[0].description
+
+    def test_cpu_types_survive_serialization_round_trip(self) -> None:
+        # Regression: the slice list must round-trip, or a reloaded universal
+        # snapshot would fall back to the single selected slice and falsely
+        # report a removed architecture.
+        from abicheck.serialization import snapshot_from_dict, snapshot_to_dict
+        snap = self._fat("ARM64", "X86_64")
+        restored = snapshot_from_dict(snapshot_to_dict(snap))
+        assert restored.macho is not None
+        assert set(restored.macho.cpu_types) == {"ARM64", "X86_64"}
 
 
 # ═══════════════════════════════════════════════════════════════════════════

@@ -161,20 +161,14 @@ def _diff_pe(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         oe = old_by_id[eid]
         ne = new_by_id[eid]
         label = oe.name or eid
-        # Ordinal reassignment: clients that bound by ordinal break even though
-        # the name still resolves. Only meaningful for *named* exports with two
-        # known ordinals — nameless exports are keyed BY ordinal, so a differing
-        # ordinal is already an add/remove, not a retained-export change.
-        if oe.name and oe.ordinal and ne.ordinal and oe.ordinal != ne.ordinal:
-            changes.append(Change(
-                kind=ChangeKind.PE_ORDINAL_CHANGED,
-                symbol=label,
-                old_value=str(oe.ordinal),
-                new_value=str(ne.ordinal),
-                description=(
-                    f"export '{label}' reassigned ordinal: {oe.ordinal} → {ne.ordinal}"
-                ),
-            ))
+        # NOTE: we deliberately do NOT flag a named export whose ordinal merely
+        # shifted. PE ordinals are auto-assigned sequentially, so inserting or
+        # removing any export renumbers everything after it — a benign, common
+        # occurrence in additive releases. The genuinely breaking case (an
+        # ordinal-only / NONAME export bound purely by ordinal) carries no name,
+        # so it is keyed by ``ordinal:N`` and a changed ordinal already surfaces
+        # as a remove+add above.
+        #
         # Forwarder repoint: the export resolves to a different DLL!Symbol target.
         # Applies to both named and ordinal-only exports.
         if oe.forwarder != ne.forwarder and (oe.forwarder or ne.forwarder):

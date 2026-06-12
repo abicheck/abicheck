@@ -259,10 +259,6 @@ REGISTRY = ChangeKindRegistry([
               "different architecture and cannot link against or load into existing clients."),
 
     # ── PE/COFF specific (binary-only, no PDB needed) ─────────────────────
-    _E("pe_ordinal_changed", _B,
-       impact="A named DLL export was reassigned to a different ordinal. Clients that bound by "
-              "ordinal (or via an import library that recorded the old ordinal) resolve the wrong "
-              "function or fail to load."),
     _E("pe_forwarder_changed", _B,
        impact="A DLL export forwarder was repointed to a different target (DLL!Symbol). The "
               "effective implementation behind the exported name changed; dependent binaries get "

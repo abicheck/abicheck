@@ -184,7 +184,6 @@ These are recovered from the binary headers / export tables alone — no PDB or 
 
 | Kind | Description |
 |------|-------------|
-| `pe_ordinal_changed` | A named DLL export was reassigned to a different ordinal. Clients that bound by ordinal (or via an import library that recorded the old ordinal) resolve the wrong function or fail to load. |
 | `pe_forwarder_changed` | A DLL export forwarder (`OTHERDLL.Symbol`) was repointed to a different target. The implementation behind the exported name changed; dependents get different — possibly missing — behaviour at load time. |
 | `pe_machine_changed` | The PE machine/architecture changed (e.g. `IMAGE_FILE_MACHINE_AMD64` → `IMAGE_FILE_MACHINE_ARM64`). The DLL is a different architecture and cannot be loaded by existing clients. |
 | `macho_cpu_type_changed` | The Mach-O CPU type/architecture changed (e.g. `X86_64` → `ARM64`). The dylib is a different architecture and cannot link against or load into existing clients. |

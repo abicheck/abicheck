@@ -71,7 +71,6 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     "func_language_linkage_changed": "L0",
     "soname_missing": "L0",
     "macho_cpu_type_changed": "L0",
-    "pe_ordinal_changed": "L0",
     "pe_forwarder_changed": "L0",
     "pe_machine_changed": "L0",
     "symbol_version_defined_removed": "L0",

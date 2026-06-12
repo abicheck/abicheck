@@ -141,7 +141,6 @@ class ChangeKind(str, Enum):
     )
 
     # ── PE/COFF specific (binary-only, no PDB needed) ────────────────────
-    PE_ORDINAL_CHANGED = "pe_ordinal_changed"  # named export reassigned to a new ordinal
     PE_FORWARDER_CHANGED = "pe_forwarder_changed"  # export forwarder target repointed
     PE_MACHINE_CHANGED = "pe_machine_changed"  # PE machine/architecture drift
 
