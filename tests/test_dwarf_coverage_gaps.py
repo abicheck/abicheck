@@ -316,6 +316,40 @@ class TestParseUnified:
         assert meta is not None
         assert adv is not None
 
+    def test_unified_path_sets_target_arch(self, tmp_path):
+        """parse_dwarf() records the normalized target arch on AdvancedDwarfMetadata.
+
+        Regression: the SysV-AMD64 struct-return guard reads adv.target_arch, so
+        the unified dump path (not just the standalone parse_advanced_dwarf) must
+        populate it — otherwise AArch64/i386 dumps keep "" and are mis-treated as
+        SysV AMD64.
+        """
+        from abicheck.dwarf_unified import parse_dwarf
+
+        fake_path = tmp_path / "fake.so"
+        fake_path.write_bytes(b"\x00")
+
+        mock_cu = MockCU()
+        mock_elf = MagicMock()
+        mock_elf.has_dwarf_info.return_value = True
+        mock_elf.get_machine_arch.return_value = "AArch64"
+        mock_dwarf = MagicMock()
+        mock_dwarf.iter_CUs.return_value = [mock_cu]
+        mock_elf.get_dwarf_info.return_value = mock_dwarf
+
+        fake_stat = MagicMock()
+        fake_stat.st_mode = stat.S_IFREG | 0o644
+
+        with (
+            patch("abicheck.dwarf_unified.os.fstat", return_value=fake_stat),
+            patch("abicheck.dwarf_unified.ELFFile", return_value=mock_elf),
+            patch("abicheck.dwarf_unified._meta_process_cu", side_effect=lambda cu, meta, tc: None),
+            patch("abicheck.dwarf_unified._adv_process_cu", side_effect=lambda cu, adv: None),
+        ):
+            _meta, adv = parse_dwarf(fake_path)
+
+        assert adv.target_arch == "aarch64"
+
     def test_elffile_raises_elferror(self, tmp_path):
         """Lines 105-107: ELFFile raises ELFError => returns empty tuple."""
         from abicheck.dwarf_advanced import AdvancedDwarfMetadata

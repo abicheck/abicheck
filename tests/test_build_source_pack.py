@@ -671,6 +671,28 @@ def test_tls_model_omitted_vs_never_default_is_reported(model):
     )
 
 
+def test_tls_init_omitted_vs_no_extern_is_reported():
+    # GCC default is -fextern-tls-init (extern); an omitted->-fno-extern-tls-init
+    # flip is a real extern->local TLS-init mode change.
+    old = BuildEvidence(build_options=[])
+    new = BuildEvidence(build_options=[_opt("tls_init", "local")])
+    assert any(
+        c.kind is ChangeKind.TLS_MODEL_CHANGED for c in diff_build_evidence(old, new)
+    )
+    assert any(
+        c.kind is ChangeKind.TLS_MODEL_CHANGED for c in diff_build_evidence(new, old)
+    )
+
+
+def test_tls_init_omitted_vs_explicit_extern_is_no_change():
+    # Explicit -fextern-tls-init equals the omitted default, so no flip.
+    old = BuildEvidence(build_options=[])
+    new = BuildEvidence(build_options=[_opt("tls_init", "extern")])
+    assert not any(
+        c.kind is ChangeKind.TLS_MODEL_CHANGED for c in diff_build_evidence(old, new)
+    )
+
+
 def test_tls_model_omitted_vs_mixed_with_never_default_is_reported():
     # Multi-config explicit side carries a *mix*: one TU at the (possibly-default)
     # global-dynamic and one at local-exec (never the auto-default). The omitted

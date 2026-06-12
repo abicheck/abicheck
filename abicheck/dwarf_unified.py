@@ -44,7 +44,7 @@ from pathlib import Path
 from elftools.common.exceptions import ELFError
 from elftools.elf.elffile import ELFFile
 
-from .dwarf_advanced import AdvancedDwarfMetadata
+from .dwarf_advanced import AdvancedDwarfMetadata, _normalize_arch
 from .dwarf_advanced import _process_cu_impl as _adv_process_cu
 from .dwarf_metadata import DwarfMetadata
 from .dwarf_metadata import _process_cu_impl as _meta_process_cu
@@ -84,6 +84,7 @@ def parse_dwarf(so_path: Path) -> tuple[DwarfMetadata, AdvancedDwarfMetadata]:
 
             meta = DwarfMetadata(has_dwarf=True)
             adv = AdvancedDwarfMetadata(has_dwarf=True)
+            adv.target_arch = _normalize_arch(elf)
 
             dwarf = elf.get_dwarf_info()  # type: ignore[no-untyped-call]
 

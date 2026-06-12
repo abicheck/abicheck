@@ -50,9 +50,13 @@ _MODE_OPTION_FINDINGS: dict[str, tuple[ChangeKind, dict[str, str]]] = {
     # there is no portable default, so require both sides explicit.
     "rtti": (ChangeKind.RTTI_MODE_CHANGED, {"CXX": "on"}),
     "threadsafe_statics": (ChangeKind.THREADSAFE_STATICS_MODE_CHANGED, {"CXX": "on"}),
+    # extern-tls-init: GCC's documented default is -fextern-tls-init (extern),
+    # so an omitted->-fno-extern-tls-init flip is a real extern->local TLS-init
+    # mode change. The key is language-agnostic (bare), so the default lives
+    # under the empty language suffix.
+    "tls_init": (ChangeKind.TLS_MODEL_CHANGED, {"": "extern"}),
     # TLS model default is -fpic-dependent — always require both sides explicit
     # (with the local-* exception handled below).
-    "tls_init": (ChangeKind.TLS_MODEL_CHANGED, {}),
     "tls_model": (ChangeKind.TLS_MODEL_CHANGED, {}),
 }
 
