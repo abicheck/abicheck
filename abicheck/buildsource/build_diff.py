@@ -31,19 +31,26 @@ from .build_evidence import BuildEvidence
 #: the generic ABI-flag finding.
 _TOOLCHAIN_OPTION_KEYS = frozenset({"target", "sysroot"})
 
-#: Canonical runtime-model option keys (set by ``derive_build_options``) routed
-#: to a dedicated mode-flip finding. Each maps to its ChangeKind plus the
-#: compiler default that an *absent* option implies — so an explicit value equal
-#: to the default vs an omitted flag never reads as a change. A ``None`` default
-#: means the compiler default is context-dependent (e.g. ``-ftls-model``'s
-#: default is ``initial-exec`` without ``-fpic`` and ``global-dynamic`` with it),
-#: so the option is only diffed when *both* sides are explicit.
-_MODE_OPTION_FINDINGS: dict[str, tuple[ChangeKind, str | None]] = {
-    "exceptions": (ChangeKind.EXCEPTIONS_MODE_CHANGED, "on"),
-    "rtti": (ChangeKind.RTTI_MODE_CHANGED, "on"),
-    "threadsafe_statics": (ChangeKind.THREADSAFE_STATICS_MODE_CHANGED, "on"),
-    "tls_init": (ChangeKind.TLS_MODEL_CHANGED, None),
-    "tls_model": (ChangeKind.TLS_MODEL_CHANGED, None),
+#: Canonical runtime-model option *base* keys (set by ``derive_build_options``,
+#: possibly suffixed ``:<lang>``) routed to a dedicated mode-flip finding. Each
+#: maps to its ChangeKind plus a per-language default that an *absent* option
+#: implies — so an explicit value equal to the default vs an omitted flag never
+#: reads as a change. The default is looked up by the key's language suffix; a
+#: missing language entry (``None``) means the default is unknown/context-
+#: dependent (e.g. ``-ftls-model`` defaults to ``initial-exec`` without ``-fpic``
+#: and ``global-dynamic`` with it, and RTTI/threadsafe-statics are C++-only), so
+#: the option is only diffed when *both* sides are explicit. The ``""`` entry
+#: applies to a bare (unqualified) key.
+_MODE_OPTION_FINDINGS: dict[str, tuple[ChangeKind, dict[str, str]]] = {
+    # exceptions: enabled by default for C++, disabled for C.
+    "exceptions": (ChangeKind.EXCEPTIONS_MODE_CHANGED, {"": "on", "CXX": "on", "C": "off"}),
+    # rtti / threadsafe-statics are C++ concepts (on by default there); for C
+    # there is no portable default, so require both sides explicit.
+    "rtti": (ChangeKind.RTTI_MODE_CHANGED, {"": "on", "CXX": "on"}),
+    "threadsafe_statics": (ChangeKind.THREADSAFE_STATICS_MODE_CHANGED, {"": "on", "CXX": "on"}),
+    # TLS model default is -fpic-dependent — always require both sides explicit.
+    "tls_init": (ChangeKind.TLS_MODEL_CHANGED, {}),
+    "tls_model": (ChangeKind.TLS_MODEL_CHANGED, {}),
 }
 
 
@@ -142,10 +149,13 @@ def _diff_options(old: BuildEvidence, new: BuildEvidence) -> list[Change]:
         abi_relevant = key in old_abi or key in new_abi
 
         # Runtime-model flips (exceptions/rtti/tls/threadsafe-statics) route to
-        # their dedicated finding. An absent option means the compiler default,
-        # so compare *effective* modes and skip an explicit-on vs omitted no-op.
-        if key in _MODE_OPTION_FINDINGS:
-            mode_kind, default = _MODE_OPTION_FINDINGS[key]
+        # their dedicated finding. An absent option means the compiler default
+        # (looked up per the key's language suffix), so compare *effective* modes
+        # and skip an explicit-equals-default vs omitted no-op.
+        mode_base, _, mode_lang = key.partition(":")
+        if mode_base in _MODE_OPTION_FINDINGS:
+            mode_kind, lang_defaults = _MODE_OPTION_FINDINGS[mode_base]
+            default = lang_defaults.get(mode_lang)
             if default is None:
                 # Context-dependent compiler default — only diff when both sides
                 # carry an explicit value, else an omitted flag would spuriously

@@ -499,10 +499,11 @@ def test_runtime_mode_flags_normalize_to_canonical_keys():
         ],
     )
     opts = {(o.key, o.value) for o in derive_build_options([cu])}
-    assert ("exceptions", "off") in opts
-    assert ("rtti", "off") in opts
+    # C++-concept mode keys are language-qualified (like std:<lang>); TLS is not.
+    assert ("exceptions:CXX", "off") in opts
+    assert ("rtti:CXX", "off") in opts
     assert ("tls_model", "initial-exec") in opts
-    assert ("threadsafe_statics", "off") in opts
+    assert ("threadsafe_statics:CXX", "off") in opts
 
 
 def test_runtime_mode_flags_last_one_wins_per_tu():
@@ -517,16 +518,50 @@ def test_runtime_mode_flags_last_one_wins_per_tu():
         abi_relevant_flags=["-fno-exceptions", "-fexceptions"],
     )
     opts = {(o.key, o.value) for o in derive_build_options([cu])}
-    assert ("exceptions", "on") in opts
-    assert ("exceptions", "off") not in opts
+    assert ("exceptions:CXX", "on") in opts
+    assert ("exceptions:CXX", "off") not in opts
 
     cu2 = CompileUnit(
         id="cu://y", language="CXX",
         abi_relevant_flags=["-frtti", "-fno-rtti"],
     )
     opts2 = {(o.key, o.value) for o in derive_build_options([cu2])}
-    assert ("rtti", "off") in opts2
-    assert ("rtti", "on") not in opts2
+    assert ("rtti:CXX", "off") in opts2
+    assert ("rtti:CXX", "on") not in opts2
+
+
+def test_exceptions_default_is_language_aware():
+    # Codex P2: -fexceptions default is on for C++, off for C. An omitted flag
+    # must use the language-correct default so a C TU is neither a false flip
+    # nor a missed one.
+    from abicheck.buildsource.adapters.base import derive_build_options
+    from abicheck.buildsource.build_evidence import CompileUnit
+
+    def ev(lang, *flags, src="s.cpp"):
+        cu = CompileUnit(id=f"cu://{lang}", language=lang, source=src,
+                         abi_relevant_flags=list(flags))
+        return BuildEvidence(compile_units=[cu], build_options=derive_build_options([cu]))
+
+    # C: omitted (default off) vs explicit -fno-exceptions (off) → no change.
+    c_old = ev("C", src="s.c")
+    c_new = ev("C", "-fno-exceptions", src="s.c")
+    assert not any(
+        c.kind is ChangeKind.EXCEPTIONS_MODE_CHANGED
+        for c in diff_build_evidence(c_old, c_new)
+    )
+    # C: omitted (default off) → explicit -fexceptions (on) → real flip.
+    c_on = ev("C", "-fexceptions", src="s.c")
+    assert any(
+        c.kind is ChangeKind.EXCEPTIONS_MODE_CHANGED
+        for c in diff_build_evidence(c_old, c_on)
+    )
+    # C++: omitted (default on) → -fno-exceptions (off) → real flip.
+    cxx_old = ev("CXX")
+    cxx_new = ev("CXX", "-fno-exceptions")
+    assert any(
+        c.kind is ChangeKind.EXCEPTIONS_MODE_CHANGED
+        for c in diff_build_evidence(cxx_old, cxx_new)
+    )
 
 
 def test_diff_emits_exceptions_mode_changed():

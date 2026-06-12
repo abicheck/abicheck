@@ -66,6 +66,14 @@ _RUNTIME_MODE_FLAGS: dict[str, tuple[str, str]] = {
     "-fthreadsafe-statics": ("threadsafe_statics", "on"),
     "-fno-threadsafe-statics": ("threadsafe_statics", "off"),
 }
+
+#: Runtime-mode keys whose compiler default depends on the source language
+#: (C++ vs C), so the option is recorded as ``<key>:<lang>`` (like ``std:<lang>``)
+#: and the build-evidence diff infers the per-language default for an omitted
+#: flag. TLS keys are language-agnostic and are not qualified.
+_LANG_QUALIFIED_MODE_KEYS: frozenset[str] = frozenset(
+    {"exceptions", "rtti", "threadsafe_statics"}
+)
 # Known limitation: a TU that omits a runtime-mode flag entirely contributes no
 # option (the compiler default is implicit), so a *mixed* build where some TUs
 # are default-on and others carry an explicit ``-fno-*`` records only the
@@ -275,7 +283,17 @@ def derive_build_options(compile_units: list[CompileUnit]) -> list[BuildOption]:
         mode_values: dict[str, tuple[str, str]] = {}  # key -> (value, raw)
         for flag in cu.abi_relevant_flags:
             if flag in _RUNTIME_MODE_FLAGS:
-                key, value = _RUNTIME_MODE_FLAGS[flag]
+                base_key, value = _RUNTIME_MODE_FLAGS[flag]
+                # exceptions/rtti/threadsafe-statics have language-dependent
+                # compiler defaults (on for C++, off / N-A for C), so qualify the
+                # key per language (mirrors the ``std:<lang>`` option) — the
+                # build-evidence diff then infers the right default for an
+                # omitted flag. TLS keys are language-agnostic and stay bare.
+                key = (
+                    f"{base_key}:{cu.language}"
+                    if base_key in _LANG_QUALIFIED_MODE_KEYS and cu.language
+                    else base_key
+                )
                 mode_values[key] = (value, flag)
             elif flag.startswith("-ftls-model"):
                 # -ftls-model=<model>: canonical key so a model switch diffs as a
