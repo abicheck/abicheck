@@ -504,7 +504,8 @@ Evidence metrics:
 ```
 
 The same numbers are emitted as a structured `evidence_metrics` object in the
-`--format json` report, keyed by the D9 metric names:
+`--format json` report (schema `report_schema_version` 2.1+), keyed by the D9
+metric names:
 
 ```json
 "evidence_metrics": {

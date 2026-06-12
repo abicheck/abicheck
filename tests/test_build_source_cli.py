@@ -220,7 +220,7 @@ def test_compare_json_carries_layer_coverage_block(tmp_path):
     ])
     assert result.exit_code in (0, 2, 4), result.output
     payload = json.loads(result.stdout)
-    assert payload["report_schema_version"] == "2.0"
+    assert payload["report_schema_version"] == "2.1"
     cov = {row["layer"]: row for row in payload["layer_coverage"]}
     assert set(cov) >= {"L0", "L1", "L2", "L3_build", "L4_source_abi", "L5_source_graph"}
     assert cov["L3_build"]["status"] == "present"
@@ -294,6 +294,36 @@ def test_compare_json_without_evidence_omits_metrics(tmp_path):
     result = CliRunner().invoke(main, ["compare", str(old_snap), str(new_snap), "--format", "json"])
     assert result.exit_code == 0, result.output
     assert "evidence_metrics" not in json.loads(result.stdout)
+
+
+def test_evidence_metrics_helpers_edge_branches(capsys):
+    """ADR-033 D6/D9 helper edge cases: empty-metrics no-ops, the
+    missing-duration echo path, and the _layer_status fallback."""
+    from abicheck.buildsource.model import CoverageStatus, DataLayer, LayerCoverage
+    from abicheck.checker_types import DiffResult, Verdict
+    from abicheck.cli_buildsource import (
+        _layer_status,
+        attach_evidence_metrics,
+        echo_evidence_metrics,
+    )
+
+    # Unknown layer → not_collected fallback (no rows for L5).
+    rows = [LayerCoverage(layer=DataLayer.L3_BUILD.value, status=CoverageStatus.PRESENT)]
+    assert _layer_status(rows, DataLayer.L5_SOURCE_GRAPH) == "not_collected"
+
+    # Empty metrics: attach is a no-op, nothing is echoed.
+    result = DiffResult(old_version="1", new_version="2", library="l", verdict=Verdict.NO_CHANGE)
+    attach_evidence_metrics(result, {}, [])
+    assert result.evidence_metrics == {}
+    echo_evidence_metrics({})
+    assert capsys.readouterr().err == ""
+
+    # Metrics without a measured duration still echo the findings line.
+    echo_evidence_metrics({"findings.source_only.count": 2})
+    err = capsys.readouterr().err
+    assert "Evidence metrics:" in err
+    assert "collection time" not in err
+    assert "source-only=2" in err
 
 
 def test_compare_collect_mode_without_packs_is_noted(tmp_path):
