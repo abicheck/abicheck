@@ -623,21 +623,37 @@ def test_tls_model_omitted_vs_never_default_is_reported(model):
     )
 
 
-def test_exceptions_mode_on_vs_absent_is_no_change():
-    # Absent option == compiler default (exceptions on); an explicit -fexceptions
+def test_exceptions_mode_cxx_on_vs_absent_is_no_change():
+    # For C++ (exceptions:CXX), absent == default on; an explicit -fexceptions
     # against an omitted flag must not read as a mode flip.
     old = BuildEvidence(build_options=[])
-    new = BuildEvidence(build_options=[_opt("exceptions", "on")])
+    new = BuildEvidence(build_options=[_opt("exceptions:CXX", "on")])
     changes = diff_build_evidence(old, new)
     assert not any(c.kind is ChangeKind.EXCEPTIONS_MODE_CHANGED for c in changes)
 
 
-def test_exceptions_mode_off_vs_absent_is_a_change():
-    # Omitted (default on) → explicit off is a real flip.
+def test_exceptions_mode_cxx_off_vs_absent_is_a_change():
+    # C++ omitted (default on) → explicit off is a real flip.
     old = BuildEvidence(build_options=[])
-    new = BuildEvidence(build_options=[_opt("exceptions", "off")])
+    new = BuildEvidence(build_options=[_opt("exceptions:CXX", "off")])
     changes = diff_build_evidence(old, new)
     assert any(c.kind is ChangeKind.EXCEPTIONS_MODE_CHANGED for c in changes)
+
+
+def test_exceptions_mode_unknown_language_requires_both_explicit():
+    # A bare (source-less / unknown-language) record must not assume C++: an
+    # omitted -> explicit transition is suppressed since C defaults exceptions off.
+    old = BuildEvidence(build_options=[])
+    new = BuildEvidence(build_options=[_opt("exceptions", "off")])
+    assert not any(
+        c.kind is ChangeKind.EXCEPTIONS_MODE_CHANGED for c in diff_build_evidence(old, new)
+    )
+    # Both sides explicit still diffs.
+    both = diff_build_evidence(
+        BuildEvidence(build_options=[_opt("exceptions", "on")]),
+        BuildEvidence(build_options=[_opt("exceptions", "off")]),
+    )
+    assert any(c.kind is ChangeKind.EXCEPTIONS_MODE_CHANGED for c in both)
 
 
 def test_struct_return_convention_change_from_return_trait_flip():

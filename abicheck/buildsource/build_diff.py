@@ -39,15 +39,17 @@ _TOOLCHAIN_OPTION_KEYS = frozenset({"target", "sysroot"})
 #: missing language entry (``None``) means the default is unknown/context-
 #: dependent (e.g. ``-ftls-model`` defaults to ``initial-exec`` without ``-fpic``
 #: and ``global-dynamic`` with it, and RTTI/threadsafe-statics are C++-only), so
-#: the option is only diffed when *both* sides are explicit. The ``""`` entry
-#: applies to a bare (unqualified) key.
+#: the option is only diffed when *both* sides are explicit. A bare (unqualified)
+#: key has no language entry, so its default is unknown — this happens for
+#: source-less ``.GCC.command.line`` records where the language can't be inferred,
+#: and assuming C++ there would mis-handle C artifacts (C defaults exceptions off).
 _MODE_OPTION_FINDINGS: dict[str, tuple[ChangeKind, dict[str, str]]] = {
     # exceptions: enabled by default for C++, disabled for C.
-    "exceptions": (ChangeKind.EXCEPTIONS_MODE_CHANGED, {"": "on", "CXX": "on", "C": "off"}),
+    "exceptions": (ChangeKind.EXCEPTIONS_MODE_CHANGED, {"CXX": "on", "C": "off"}),
     # rtti / threadsafe-statics are C++ concepts (on by default there); for C
     # there is no portable default, so require both sides explicit.
-    "rtti": (ChangeKind.RTTI_MODE_CHANGED, {"": "on", "CXX": "on"}),
-    "threadsafe_statics": (ChangeKind.THREADSAFE_STATICS_MODE_CHANGED, {"": "on", "CXX": "on"}),
+    "rtti": (ChangeKind.RTTI_MODE_CHANGED, {"CXX": "on"}),
+    "threadsafe_statics": (ChangeKind.THREADSAFE_STATICS_MODE_CHANGED, {"CXX": "on"}),
     # TLS model default is -fpic-dependent — always require both sides explicit
     # (with the local-* exception handled below).
     "tls_init": (ChangeKind.TLS_MODEL_CHANGED, {}),
