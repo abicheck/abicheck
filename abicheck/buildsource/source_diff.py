@@ -136,9 +136,15 @@ def diff_source_abi(old: SourceAbiSurface, new: SourceAbiSurface) -> list[Change
 _PROVENANCE_MIN_DECLS = 5
 _PROVENANCE_MISS_THRESHOLD = 0.8
 # Declaration kinds that produce a linker symbol (and so are *expected* to map to
-# an export). Excludes constexpr/typedef/record/enum/macro/inline/template, which
-# do not export and would otherwise inflate the miss ratio.
-_PROVENANCE_EXPORTABLE_KINDS = frozenset({"function", "variable"})
+# an export). Mirrors source_link's exportable-declaration routing — free
+# functions/variables plus C++ class members (method/constructor/destructor),
+# which `_route_entity` also treats as mappable declarations, so a method-only
+# class API still trips the check (Codex). Excludes
+# constexpr/typedef/record/enum/macro/inline/template, which do not export and
+# would otherwise inflate the miss ratio.
+_PROVENANCE_EXPORTABLE_KINDS = frozenset(
+    {"function", "variable", "method", "constructor", "destructor"}
+)
 
 
 def _provenance_finding(side: str, surface: SourceAbiSurface) -> Change | None:

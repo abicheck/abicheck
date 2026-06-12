@@ -357,6 +357,19 @@ def test_provenance_dedupes_decls_across_tus() -> None:
     assert ChangeKind.SOURCE_BINARY_PROVENANCE_MISMATCH not in kinds
 
 
+def test_provenance_fires_for_method_only_class_api() -> None:
+    # A1 (Codex): C++ class members are emitted as kind="method"; a wrong
+    # checkout for a method-only API must still trip the provenance check.
+    new = _surface(
+        roots={"exported_symbols": ["_ZN3Foo3barEv"]},
+        reachable_declarations=[
+            _ent(f"Foo::m{i}", "method", mangled=f"_ZN3Foo1m{i}Ev") for i in range(8)
+        ],
+    )
+    kinds = [c.kind for c in diff_source_abi(_surface(), new)]
+    assert ChangeKind.SOURCE_BINARY_PROVENANCE_MISMATCH in kinds
+
+
 def test_provenance_inert_for_constexpr_heavy_surface() -> None:
     # constexpr/typedef decls don't export; a header full of them must NOT trip
     # the provenance check even though none map to a symbol.
