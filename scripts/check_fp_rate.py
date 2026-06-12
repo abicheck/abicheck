@@ -358,12 +358,15 @@ def main(argv: list[str] | None = None) -> int:
             f"false_negative_delta={m['false_negative_delta_vs_baseline']}"
         )
 
+    # In --json mode the error lines go to stderr so stdout stays a single valid
+    # JSON document even on a gate failure (the case CI most needs to parse).
+    err = sys.stderr if args.json else sys.stdout
     failed = False
     if n_fp > FP_BASELINE:
-        print(f"ERROR: false positives {n_fp} exceed baseline {FP_BASELINE}")
+        print(f"ERROR: false positives {n_fp} exceed baseline {FP_BASELINE}", file=err)
         failed = True
     if n_fn > FN_BASELINE:
-        print(f"ERROR: false negatives {n_fn} exceed baseline {FN_BASELINE}")
+        print(f"ERROR: false negatives {n_fn} exceed baseline {FN_BASELINE}", file=err)
         failed = True
     if not failed and not args.json:
         print("FP-rate gate: OK (within baseline)")

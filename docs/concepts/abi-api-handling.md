@@ -270,7 +270,7 @@ table is in [Limitations](limitations.md#source-only-changes-invisible-to-binary
 
 ## Detection coverage and roadmap
 
-abicheck detects **238 change kinds** today (see the
+abicheck detects **239 change kinds** today (see the
 [Change Kind Reference](../reference/change-kinds.md)), spanning every family in
 the table above — including the calling-convention, alignment/packing, bit-field,
 dual-ABI (`_GLIBCXX_USE_CXX11_ABI`), ABI-tag, `char8_t`, `_BitInt`, `_Atomic`,

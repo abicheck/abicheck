@@ -58,6 +58,20 @@ def test_key_is_content_addressed(tmp_path):
     assert compute_build_cache_key(tmp_path / "missing.json", "generic") is None
 
 
+def test_key_distinguishes_trees_with_identical_relative_db(tmp_path):
+    """Codex review: two trees with byte-identical relative compile DBs must not
+    share a cache entry — the resolved DB location is part of the key."""
+    a = tmp_path / "treeA"
+    b = tmp_path / "treeB"
+    a.mkdir(); b.mkdir()
+    body = json.dumps([{"file": "f.cpp", "arguments": ["c++", "-c", "f.cpp"]}])
+    (a / "compile_commands.json").write_text(body)
+    (b / "compile_commands.json").write_text(body)  # identical bytes, different root
+    ka = compute_build_cache_key(a / "compile_commands.json", "generic")
+    kb = compute_build_cache_key(b / "compile_commands.json", "generic")
+    assert ka and kb and ka != kb
+
+
 def test_corrupt_entry_is_a_miss(tmp_path):
     cache = BuildEvidenceCache(tmp_path / "c")
     cache.cache_dir.mkdir(parents=True)

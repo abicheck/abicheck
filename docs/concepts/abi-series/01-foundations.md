@@ -305,7 +305,7 @@ flowchart LR
    symbols, type layouts, vtables, calling conventions, ELF metadata, and so on.
 2. **Diff.** It compares the two snapshots structurally (walking pointer chains,
    struct members, vtable slots — not just symbol names).
-3. **Classify.** Each detected difference is one of **238 change kinds**, and
+3. **Classify.** Each detected difference is one of **239 change kinds**, and
    each change kind is partitioned into exactly one verdict tier.
 
 The five verdicts, from safest to most severe, are:

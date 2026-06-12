@@ -34,17 +34,24 @@ from .build_evidence import BUILD_EVIDENCE_VERSION, BuildEvidence
 def compute_build_cache_key(compile_db: Path, adapter_hint: str) -> str | None:
     """Content-address a compile DB for the L3 cache, or ``None`` if unreadable.
 
-    Folds the file *content* (not its path), the adapter hint, and the
-    ``BUILD_EVIDENCE_VERSION`` so a schema bump or any edit is a clean miss.
-    Returns ``None`` when the DB cannot be read — the caller then skips the cache
-    (a false miss, never a false hit).
+    Folds the file content, the adapter hint, ``BUILD_EVIDENCE_VERSION``, **and the
+    resolved compile-DB location**. The location matters because a compile DB may
+    use omitted/relative ``directory``/``file`` fields that the adapter resolves
+    against the DB's parent dir — so two trees with byte-identical relative DBs but
+    different roots normalize to *different* paths and must not share a cache entry
+    (Codex review). Returns ``None`` when the DB cannot be read (false miss, never
+    a false hit).
     """
     try:
         data = compile_db.read_bytes()
     except OSError:
         return None
+    try:
+        location = str(compile_db.resolve())
+    except OSError:
+        location = str(compile_db)
     h = hashlib.sha256()
-    h.update(f"v{BUILD_EVIDENCE_VERSION}\0{adapter_hint}\0".encode())
+    h.update(f"v{BUILD_EVIDENCE_VERSION}\0{adapter_hint}\0{location}\0".encode())
     h.update(data)
     return h.hexdigest()
 
