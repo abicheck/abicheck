@@ -43,9 +43,14 @@ The authority rule still governs everything: every new finding below lands in
 
 ## Workstream A — New checks (detections)
 
-Each follows the root `CLAUDE.md` four-step procedure: add to `ChangeKind`,
-place in exactly one partition set, implement detection, add unit test, mention
-in `docs/`.
+**Only the genuine new `ChangeKind`s — A1 and A4 (and an A3 compare finding if
+one is added) — follow the root `CLAUDE.md` four-step procedure:** add to
+`ChangeKind`, place in exactly one partition set, implement detection, add unit
+test, mention in `docs/`. **A2 is a merge-time diagnostic and A3 is a
+coverage-status fix — they are not enum members**: they get detection + a
+unit/doc test for their own channel (manifest `ExtractorRecord`/`BuildEvidence.diagnostics`,
+stderr, `merge --on-conflict`, L3 coverage row) and **no** ChangeKind/partition/
+tier/doc-count work. See each item and the gating section below.
 
 ### A1. `source_binary_provenance_mismatch` (RISK)
 
