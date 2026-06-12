@@ -321,6 +321,7 @@ def _dwarf_advanced_from_dict(d: dict[str, Any]) -> Any:
     )
     return AdvancedDwarfMetadata(
         has_dwarf=d.get("has_dwarf", False),
+        target_arch=d.get("target_arch", ""),
         toolchain=toolchain,
         calling_conventions=d.get("calling_conventions", {}),
         value_abi_traits=d.get("value_abi_traits", {}),

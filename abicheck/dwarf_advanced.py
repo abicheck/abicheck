@@ -132,6 +132,10 @@ class ToolchainInfo:
 class AdvancedDwarfMetadata:
     """Sprint 4 metadata extracted from a single .so."""
     has_dwarf: bool = False
+    # Normalized target architecture (_normalize_arch): "x86_64", "aarch64",
+    # "i386", … Empty string when unknown (e.g. arch-less mock snapshots).
+    # Gates the SysV-AMD64-specific aggregate-return-convention classification.
+    target_arch: str = ""
     toolchain: ToolchainInfo = field(default_factory=ToolchainInfo)
     # linkage_name (mangled) → CC string for ALL externally-visible functions visited.
     # Storing "normal" explicitly lets the diff distinguish "became normal" from
@@ -189,6 +193,7 @@ def parse_advanced_dwarf(so_path: Path) -> AdvancedDwarfMetadata:
             if not has_real_dwarf_info(elf):
                 return AdvancedDwarfMetadata()
             meta = AdvancedDwarfMetadata(has_dwarf=True)
+            meta.target_arch = _normalize_arch(elf)
             dwarf = elf.get_dwarf_info()  # type: ignore[no-untyped-call]
             for CU in dwarf.iter_CUs():
                 try:
@@ -961,6 +966,22 @@ def _diff_callee_saved_regs(
 #: regardless of triviality. Used to gate the return-convention classification.
 _SYSV_MAX_REGISTER_RETURN_BYTES = 16
 
+#: Architectures whose by-value aggregate-return rules match the SysV AMD64
+#: model encoded in ``_returns_in_registers`` (trivial-for-calls AND <= 16
+#: bytes AND no unaligned member → registers, else hidden sret pointer). The
+#: register<->sret *convention-flip* classification is only sound for these.
+#: Other ABIs use different rules — an AArch64 HFA such as ``struct {double
+#: a,b,c,d;}`` is returned in vector registers despite being 32 bytes; i386
+#: returns every aggregate via memory — so a triviality flip there is just a
+#: generic value-ABI change, not a convention flip. An empty/unknown arch is
+#: treated as SysV AMD64 to preserve behaviour for arch-less mocks/snapshots.
+_SYSV_AMD64_RETURN_ARCHES = frozenset({"x86_64", "x64", ""})
+
+
+def _sysv_amd64_return_model(old_arch: str, new_arch: str) -> bool:
+    """Whether both sides use the SysV-AMD64 aggregate-return model (or unknown)."""
+    return old_arch in _SYSV_AMD64_RETURN_ARCHES and new_arch in _SYSV_AMD64_RETURN_ARCHES
+
 
 def _diff_value_abi_traits(
     old_meta: AdvancedDwarfMetadata,
@@ -971,6 +992,8 @@ def _diff_value_abi_traits(
     results: list[tuple[str, str, str, str | None, str | None]] = []
     old_trait_keys = set(old_meta.value_abi_traits)
     new_trait_keys = set(new_meta.value_abi_traits)
+    # The sret-flip classification is only sound for the SysV AMD64 return model.
+    sysv_return = _sysv_amd64_return_model(old_meta.target_arch, new_meta.target_arch)
     for fname in sorted((old_trait_keys & new_trait_keys) - already_reported_cc):
         old_trait = old_meta.value_abi_traits[fname]
         new_trait = new_meta.value_abi_traits[fname]
@@ -984,14 +1007,16 @@ def _diff_value_abi_traits(
             new_rc, new_meta.return_value_sizes.get(fname),
             fname in new_meta.return_memory_classified,
         )
-        # struct_return_convention_changed only when BOTH sides return an
-        # aggregate by value (both ret components present) AND the register-vs-
-        # hidden-sret mechanism actually flipped — this covers a triviality flip,
-        # a size crossing the SysV 16-byte threshold (trait unchanged), or a
-        # packing change that forces MEMORY. When the return component is only
+        # struct_return_convention_changed only on the SysV AMD64 return model
+        # (``sysv_return``) and when BOTH sides return an aggregate by value (both
+        # ret components present) AND the register-vs-hidden-sret mechanism
+        # actually flipped — this covers a triviality flip, a size crossing the
+        # SysV 16-byte threshold (trait unchanged), or a packing change that
+        # forces MEMORY. On other ABIs the rules differ, so a changed trait falls
+        # through to the generic finding. When the return component is only
         # added/removed (aggregate <-> scalar) the scalar side can still be
         # register-returned, so that is left to the generic return/type findings.
-        if old_rc is not None and new_rc is not None and old_reg != new_reg:
+        if sysv_return and old_rc is not None and new_rc is not None and old_reg != new_reg:
             results.append((
                 "struct_return_convention_changed", fname,
                 f"Aggregate return convention changed: {fname} "
