@@ -30,11 +30,15 @@ keep pace:
    L3/L4/L5 kinds.
 2. **Tests** — the six buildsource test files cover happy paths well but miss
    error / conflict / interaction paths.
-3. **Examples** — **0** examples *detect at* L3/L4/L5 or exercise the new
-   workflow. (`case122` is labelled `min_evidence: L4`, but encodes the
-   uninstantiated-template residual with no detection mechanism yet — it yields
-   `NO_CHANGE` today; see C1.) The CMake example harness (`abicheck_add_case`)
-   also cannot emit a compile DB or drive `--sources`/`--build-info`.
+3. **Examples** — **L3 is now covered** (PR #362, on `main`): `case130`–`case133`
+   are build-mode flips with `min_evidence: L3` and a new `build_info: true`
+   ground-truth field, plus `case129_struct_return_convention`. Their pattern is
+   **checked-in per-side `v1/v2.compile_commands.json` + `dump --build-info` +
+   compare** (no CMake-macro compile-DB generation). What is **still empty is
+   L4/L5**: **0** examples *detect at* L4/L5 or exercise the `--sources` source-tree
+   replay / `merge` workflow. (`case122` is `min_evidence: L4` but is the
+   uninstantiated-template residual with no detection mechanism — `NO_CHANGE`
+   today; see C1.) No example harness yet drives `--sources` (the L4/L5 replay).
 
 The authority rule still governs everything: every new finding below lands in
 `API_BREAK_KINDS` or `RISK_KINDS`, **never** `BREAKING` (ADR-028 D3).
@@ -171,7 +175,7 @@ For A1/A4 (and an A3 compare finding if added):
 - `changekind-partition` (ERROR): in exactly one partition set in `checker_policy.py`.
 - `changekind-detector` (WARN): emitted somewhere.
 - `changekind-docs` (WARN): mentioned in `docs/`.
-- `doc-count-sync` (ERROR): bump `len(ChangeKind)` headline counts (currently **238**).
+- `doc-count-sync` (ERROR): bump `len(ChangeKind)` headline counts (currently **244** on `main`).
 - `scripts/evidence_tiers.py`: map the kind to its tier (L4 for A1/A4).
 - `docs/concepts/build-source-data.md`: add to the L3/L4/L5 findings tables.
 
@@ -205,28 +209,37 @@ rest.
 
 ## Workstream C — New examples
 
-Largest piece: the harness itself needs extending first.
+Largest piece: the **L4/L5** example path needs building. The **L3 build-info
+path already exists** (PR #362) — reuse it.
 
-### C0. Harness extension (prerequisite)
+### C0. Harness — L3 done, L4/L5 still needed
 
-`abicheck_add_case` (CMake) only builds v1/v2 `.so`+headers — it cannot emit a
-compile DB or drive `--sources`/`--build-info`. Add either:
+**L3 (done, reuse the pattern):** PR #362 established the build-info example
+pattern without extending the CMake macro — each case (`case130`–`case133`)
+ships checked-in per-side `v1/v2.compile_commands.json`, sets `build_info: true`
+in `ground_truth.json`, and is validated via `dump --build-info` + `compare`
+(`tests/test_abi_examples.py` already drives this). New L3 examples just follow
+that template.
 
-- build-flag + `CMAKE_EXPORT_COMPILE_COMMANDS=ON` knobs on `abicheck_add_case`, or
-- a sibling `abicheck_add_buildsource_case` macro that builds each version with a
-  compile DB and runs `compare` with `--build-info`/`--sources`.
+**L4/L5 (still missing):** no example yet drives `--sources` (source-tree L4
+replay + L5 graph). This is the actual C0 work:
 
-Teach `tests/test_abi_examples.py` to pass the L3/L4 inputs for these cases and
-skip cleanly when clang/castxml is absent.
+- add a `--sources <tree>` example path — either checked-in source-replay inputs
+  per side (mirroring the `compile_commands.json` pattern), or a harness step
+  that runs `dump --sources` — with a `sources: true` ground-truth field; and
+- teach `tests/test_abi_examples.py` to drive it and **skip cleanly when
+  clang/castxml is absent** (L4 needs a C++ front-end).
 
 ### C1. New example cases
 
 Each: `v1/v2` source+headers, `README.md`, `ground_truth.json` entry,
-regenerated `examples/README.md` + `docs/examples/*.md`.
+regenerated `examples/README.md` + `docs/examples/*.md`. **L3 build-mode flips
+already exist** (`case130`–`case133` for exceptions/rtti/threadsafe/tls,
+`case129` struct-return) — do not re-add those; the remaining gaps are below.
 
 | Case | Layer / `min_evidence` | Encodes | Expected kind(s) |
 |---|---|---|---|
-| L3 build-flag drift | **L3** (first ever) | identical source/headers, `_GLIBCXX_USE_CXX11_ABI` (or `-fvisibility`) flipped | `abi_relevant_build_flag_changed` |
+| L3 generic ABI-flag drift | **L3** | complements the existing mode flips: `_GLIBCXX_USE_CXX11_ABI` (or `-fvisibility`) flipped via per-side `compile_commands.json` | `abi_relevant_build_flag_changed` |
 | L4 macro value | **L4** | public-header macro constant changed | `public_macro_value_changed` |
 | L4 default argument | **L4** | default arg changed, signature identical | `default_argument_changed` |
 | L4 constexpr value | **L4** | public `constexpr` value changed | `constexpr_value_changed` |
@@ -236,15 +249,16 @@ regenerated `examples/README.md` + `docs/examples/*.md`.
 
 ### C2. Gate sync (all ERROR-level)
 
-- `examples-ground-truth`: README + `ground_truth.json` entry per case.
+- `examples-ground-truth`: README + `ground_truth.json` entry per case (use the
+  `build_info: true` / `sources: true` fields PR #362 introduced for L3, and the
+  `sources` equivalent for L4/L5).
 - `examples-readme-sync`: regenerate via `scripts/gen_examples_docs.py` so
   headline count, verdict distribution, and case-index rows match.
 - `doc-count-sync`: bump case-count anchors.
-- `scripts/evidence_tiers.py`: give the new L3/L4 kinds a defined tier. (Verify
-  the current `evidence_tiers.py` kind→tier map first — early reading suggests no
-  *kind* has L3/L4 as its first-detection tier, but confirm against the file
-  before relying on it, since the cumulative per-case tier distribution is a
-  separate metric.)
+- `scripts/evidence_tiers.py`: give the new L4 kinds a defined tier. (L3 is now
+  populated — `case130`–`case133` map at L3; L4 is the open tier. Re-read the
+  current kind→tier map before editing, since the cumulative per-case tier
+  distribution is a separate metric from a kind's first-detection tier.)
 
 ---
 
@@ -266,7 +280,10 @@ Steps 1–4 are pure-Python (fast lane). Step 5 needs clang/castxml (behind
 - Extends `buildsource-redesign-plan.md` (the feature plan it complements).
 - Implements coverage for ADR-028 D3 (authority rule), ADR-029 D9 (L3 findings),
   ADR-030 D6 (L4 findings), ADR-031 D6 (L5 findings), ADR-032 D5 (action ceiling).
-- **`ChangeKind` count is a snapshot (238 on `main` at time of writing).** Other
-  in-flight PRs move it — e.g. PR #362 adds five kinds (238 → 243), some L3
-  build-evidence. Re-read `len(ChangeKind)` and the `evidence_tiers.py` map
-  before implementing, rather than trusting the numbers frozen here.
+- **`ChangeKind` count is a snapshot (244 on `main` after rebasing past PR #362,
+  which added the runtime-mode L3 kinds + `struct_return_convention_changed`).**
+  It still moves with other in-flight work, so re-read `len(ChangeKind)` and the
+  `evidence_tiers.py` map before implementing rather than trusting frozen numbers.
+- **PR #362 already landed the L3 build-mode examples** (`case129`–`case133`) and
+  the checked-in-`compile_commands.json` + `dump --build-info` example pattern,
+  so this plan's example work is now L4/L5-only (see C0/C1).
