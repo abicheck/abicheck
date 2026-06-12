@@ -33,14 +33,17 @@ _TOOLCHAIN_OPTION_KEYS = frozenset({"target", "sysroot"})
 
 #: Canonical runtime-model option keys (set by ``derive_build_options``) routed
 #: to a dedicated mode-flip finding. Each maps to its ChangeKind plus the
-#: compiler default that an *absent* option implies — so an explicit on-value vs
-#: an omitted flag (both effectively "on") never reads as a change.
-_MODE_OPTION_FINDINGS: dict[str, tuple[ChangeKind, str]] = {
+#: compiler default that an *absent* option implies — so an explicit value equal
+#: to the default vs an omitted flag never reads as a change. A ``None`` default
+#: means the compiler default is context-dependent (e.g. ``-ftls-model``'s
+#: default is ``initial-exec`` without ``-fpic`` and ``global-dynamic`` with it),
+#: so the option is only diffed when *both* sides are explicit.
+_MODE_OPTION_FINDINGS: dict[str, tuple[ChangeKind, str | None]] = {
     "exceptions": (ChangeKind.EXCEPTIONS_MODE_CHANGED, "on"),
     "rtti": (ChangeKind.RTTI_MODE_CHANGED, "on"),
     "threadsafe_statics": (ChangeKind.THREADSAFE_STATICS_MODE_CHANGED, "on"),
-    "tls_init": (ChangeKind.TLS_MODEL_CHANGED, "extern"),
-    "tls_model": (ChangeKind.TLS_MODEL_CHANGED, "default"),
+    "tls_init": (ChangeKind.TLS_MODEL_CHANGED, None),
+    "tls_model": (ChangeKind.TLS_MODEL_CHANGED, None),
 }
 
 
@@ -143,10 +146,18 @@ def _diff_options(old: BuildEvidence, new: BuildEvidence) -> list[Change]:
         # so compare *effective* modes and skip an explicit-on vs omitted no-op.
         if key in _MODE_OPTION_FINDINGS:
             mode_kind, default = _MODE_OPTION_FINDINGS[key]
-            old_eff = ov or {default}
-            new_eff = nv or {default}
-            if old_eff == new_eff:
-                continue
+            if default is None:
+                # Context-dependent compiler default — only diff when both sides
+                # carry an explicit value, else an omitted flag would spuriously
+                # differ from an explicit default.
+                if not ov or not nv or ov == nv:
+                    continue
+                old_eff, new_eff = ov, nv
+            else:
+                old_eff = ov or {default}
+                new_eff = nv or {default}
+                if old_eff == new_eff:
+                    continue
             changes.append(
                 Change(
                     kind=mode_kind,

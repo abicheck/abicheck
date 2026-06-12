@@ -207,6 +207,9 @@ _BINARY_ONLY_KINDS: frozenset[ChangeKind] = frozenset({
     ChangeKind.DWARF_INFO_MISSING,
     ChangeKind.TOOLCHAIN_FLAG_DRIFT,
     ChangeKind.VECTOR_ABI_CHANGED,
+    # DWARF-derived aggregate-return convention flip — a binary-only ABI fact
+    # with no source-API delta, so it is filtered from source-only views.
+    ChangeKind.STRUCT_RETURN_CONVENTION_CHANGED,
 })
 
 # ChangeKinds that represent new symbols being added (for -warn-newsym)

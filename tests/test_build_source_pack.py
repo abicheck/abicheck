@@ -559,6 +559,18 @@ def test_diff_emits_tls_model_changed():
     assert any(c.kind is ChangeKind.TLS_MODEL_CHANGED for c in changes)
 
 
+def test_tls_model_omitted_vs_explicit_is_no_change():
+    # The -ftls-model default is context-dependent (varies with -fpic), so an
+    # omitted flag must not read as a flip against an explicit model.
+    old = BuildEvidence(build_options=[])
+    new = BuildEvidence(build_options=[_opt("tls_model", "global-dynamic")])
+    changes = diff_build_evidence(old, new)
+    assert not any(c.kind is ChangeKind.TLS_MODEL_CHANGED for c in changes)
+    # ... and the reverse direction is likewise a no-op.
+    rev = diff_build_evidence(new, old)
+    assert not any(c.kind is ChangeKind.TLS_MODEL_CHANGED for c in rev)
+
+
 def test_exceptions_mode_on_vs_absent_is_no_change():
     # Absent option == compiler default (exceptions on); an explicit -fexceptions
     # against an omitted flag must not read as a mode flip.
