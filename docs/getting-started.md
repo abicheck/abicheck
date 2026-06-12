@@ -19,8 +19,8 @@ you're unsure, start with `abicheck compare` — it's the default workflow.
 | **Did my library break?** — does upgrading it break existing consumers? | `abicheck compare` | [§2 below](#2-first-check-using-repo-examples) |
 | **Does my application still work** with the new library version? | `abicheck appcompat` | [§5 below](#5-application-compatibility-check) |
 | **Did my whole package / release break?** | `abicheck compare-release` | [Multi-Binary Releases](user-guide/multi-binary.md) |
-| Will this binary load and run correctly in this sysroot? | `abicheck stack-check` | [CLI Usage](user-guide/cli-usage.md) |
-| Does my library dependency tree resolve without unresolved symbols? | `abicheck deps` | [CLI Usage](user-guide/cli-usage.md) |
+| Will this binary load and resolve correctly in this sysroot — and does its dependency tree have unresolved symbols? | `abicheck deps` (`--sysroot /rootfs` for a specific root) | [CLI Usage](user-guide/cli-usage.md) |
+| Did anything in the dependency stack change between two sysroots / images? | `abicheck stack-check --baseline … --candidate …` | [CLI Usage](user-guide/cli-usage.md) |
 | I'm migrating from `abi-compliance-checker` and want the same flags. | `abicheck compat` | [Migrating from ABICC](user-guide/from-abicc.md) |
 | Save a reusable ABI baseline for CI. | `abicheck dump` | [§4 below](#4-snapshot-workflow-for-ci-baselines) |
 
