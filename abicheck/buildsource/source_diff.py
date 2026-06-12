@@ -160,13 +160,21 @@ def _provenance_finding(side: str, surface: SourceAbiSurface) -> Change | None:
     # legitimately map to nothing, so restricting to function/variable kinds keeps
     # a header-only or constexpr-heavy public surface from inflating the miss
     # ratio and false-firing against the correct binary (review).
-    expected = [
-        sym
-        for d in surface.reachable_declarations
-        if d.kind in _PROVENANCE_EXPORTABLE_KINDS
-        for sym in (d.mangled_name or d.qualified_name,)
-        if sym
-    ]
+    # Deduplicate by entity identity first: link_source_abi appends the same
+    # public declaration once per including TU, so a header pulled into five
+    # compile units would otherwise count one unmapped function five times and
+    # clear _PROVENANCE_MIN_DECLS on a trivial surface (Codex). Key by identity
+    # (the same key the rest of this module uses) so the threshold and miss ratio
+    # are measured over the unique public surface.
+    by_identity: dict[str, str] = {}
+    for d in surface.reachable_declarations:
+        if d.kind not in _PROVENANCE_EXPORTABLE_KINDS:
+            continue
+        key = d.identity()
+        sym = d.mangled_name or d.qualified_name
+        if key and sym:
+            by_identity[key] = sym
+    expected = list(by_identity.values())
     if len(expected) < _PROVENANCE_MIN_DECLS:
         return None
     misses = sum(1 for sym in expected if sym not in exports)

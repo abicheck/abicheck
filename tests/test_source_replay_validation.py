@@ -347,6 +347,16 @@ def test_provenance_mismatch_fires_for_c_unmangled_exports() -> None:
     assert ChangeKind.SOURCE_BINARY_PROVENANCE_MISMATCH in kinds
 
 
+def test_provenance_dedupes_decls_across_tus() -> None:
+    # A1 (Codex): link_source_abi appends the same public decl once per including
+    # TU. One unmapped function repeated 5x must NOT clear _PROVENANCE_MIN_DECLS —
+    # the threshold/miss ratio is over the unique public surface, not raw rows.
+    dup = [_ent("f", "function", mangled="_Z1fv") for _ in range(5)]
+    new = _surface(roots={"exported_symbols": ["_Z3barv"]}, reachable_declarations=dup)
+    kinds = [c.kind for c in diff_source_abi(_surface(), new)]
+    assert ChangeKind.SOURCE_BINARY_PROVENANCE_MISMATCH not in kinds
+
+
 def test_provenance_inert_for_constexpr_heavy_surface() -> None:
     # constexpr/typedef decls don't export; a header full of them must NOT trip
     # the provenance check even though none map to a symbol.
