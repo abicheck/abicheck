@@ -292,7 +292,13 @@ def _read_json(path: Path) -> dict[str, Any]:
 
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    # newline="\n" disables the platform newline translation Path.write_text would
+    # otherwise apply (CRLF on Windows). The on-disk bytes must be the same LF form
+    # _payload_sha256 hashes, so a pack's content_hash is reproducible across
+    # platforms and an embedded pack agrees with its on-disk equivalent.
+    path.write_text(
+        json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="\n"
+    )
 
 
 def _file_sha256(path: Path) -> str:
