@@ -895,16 +895,19 @@ def test_castxml_parse_public_typedefs_scopes_to_public_headers() -> None:
 
     from abicheck.dumper_castxml import _CastxmlParser
 
+    def _set(parent, tag, **attrs):
+        el = SubElement(parent, tag)
+        for k, v in attrs.items():
+            el.set(k, v)
+        return el
+
     root = Element("CastXML")
-    pub = SubElement(root, "File"); pub.set("id", "f1"); pub.set("name", "/inc/api.h")
-    priv = SubElement(root, "File"); priv.set("id", "f2"); priv.set("name", "/src/detail.h")
-    fund = SubElement(root, "FundamentalType"); fund.set("id", "_int"); fund.set("name", "int")
-    pt = SubElement(root, "Typedef")
-    pt.set("id", "_t1"); pt.set("name", "handle_t"); pt.set("type", "_int")
-    pt.set("file", "f1"); pt.set("line", "4")
-    xt = SubElement(root, "Typedef")
-    xt.set("id", "_t2"); xt.set("name", "secret_t"); xt.set("type", "_int")
-    xt.set("file", "f2"); xt.set("line", "9")  # private header → filtered
+    _set(root, "File", id="f1", name="/inc/api.h")
+    _set(root, "File", id="f2", name="/src/detail.h")
+    _set(root, "FundamentalType", id="_int", name="int")
+    _set(root, "Typedef", id="_t1", name="handle_t", type="_int", file="f1", line="4")
+    # Private header → filtered out of the public-typedef set.
+    _set(root, "Typedef", id="_t2", name="secret_t", type="_int", file="f2", line="9")
 
     parser = _CastxmlParser(root, set(), set(), public_header_paths=["/inc/api.h"])
     tds = parser.parse_public_typedefs()
