@@ -371,3 +371,22 @@ def test_effective_verdict_wins_over_per_kind_override(tmp_path: Path) -> None:
     c.effective_verdict = Verdict.COMPATIBLE
     c.frozen_namespace_violation = None
     assert pf.compute_verdict([c]) == Verdict.COMPATIBLE
+
+
+def test_frozen_namespace_floor_survives_effective_verdict(tmp_path: Path) -> None:
+    """Codex: an effective_verdict demotion must not pull a frozen-namespace
+    violation below its raw category (the frozen-ns floor still applies)."""
+    p = tmp_path / "policy.yaml"
+    p.write_text("frozen_namespaces:\n  - '**::detail::r1'\n", encoding="utf-8")
+    pf = PolicyFile.load(p)
+    # func_removed is BREAKING; evidence/pattern modulation demoted it.
+    c = _change(ChangeKind.FUNC_REMOVED)
+    c.effective_verdict = Verdict.COMPATIBLE
+    c.frozen_namespace_violation = "**::detail::r1"
+    # Floor holds: stays BREAKING despite the demotion.
+    assert pf.compute_verdict([c]) == Verdict.BREAKING
+    # Without the frozen tag, the demotion is honored.
+    c2 = _change(ChangeKind.FUNC_REMOVED)
+    c2.effective_verdict = Verdict.COMPATIBLE
+    c2.frozen_namespace_violation = None
+    assert pf.compute_verdict([c2]) == Verdict.COMPATIBLE

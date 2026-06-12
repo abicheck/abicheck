@@ -372,16 +372,40 @@ class PolicyFile:
             Verdict.API_BREAK,
             Verdict.BREAKING,
         ]
+        # Raw per-kind category (no effective_verdict) for the frozen-namespace
+        # severity floor: a finding on a contractually frozen symbol must never be
+        # downgraded below this, whether by an override or a modulation.
+        _b, _a, _c, _r = policy_kind_sets(self.base_policy)
+
+        def _raw(kind: Any) -> Verdict:
+            if kind in _b:
+                return Verdict.BREAKING
+            if kind in _a:
+                return Verdict.API_BREAK
+            if kind in _r:
+                return Verdict.COMPATIBLE_WITH_RISK
+            if kind in _c:
+                return Verdict.COMPATIBLE
+            return Verdict.BREAKING
+
         for change in changes:
             kind = change.kind
+            fnv = getattr(change, "frozen_namespace_violation", None)
+            frozen = isinstance(fnv, str) and bool(fnv)
             # A per-finding ``effective_verdict`` (ADR-025 pattern modulation /
             # ADR-033 D7 evidence policy) is the highest-precedence category and
             # wins over a per-kind override here too — matching effective_category,
             # which every other classification site routes through, so the verdict
-            # and the per-finding JSON severity stay consistent (Codex review).
+            # and the per-finding JSON severity stay consistent (Codex review). The
+            # frozen-namespace floor still applies: a demotion below the raw
+            # category is rejected for a frozen-namespace violation (Codex review).
             eff = getattr(change, "effective_verdict", None)
             if isinstance(eff, Verdict):
-                verdicts.append(eff)
+                raw = _raw(kind)
+                if frozen and order.index(eff) < order.index(raw):
+                    verdicts.append(raw)
+                else:
+                    verdicts.append(eff)
                 continue
             base_v = compute_verdict([change], policy=self.base_policy)
             if kind in self.overrides:
@@ -395,8 +419,7 @@ class PolicyFile:
                 # ``isinstance(..., str)`` guards against MagicMock-style
                 # test doubles where any attribute access returns a truthy
                 # mock; only a real glob-pattern string counts as a tag.
-                fnv = getattr(change, "frozen_namespace_violation", None)
-                if isinstance(fnv, str) and fnv and (
+                if frozen and (
                     order.index(override_v) < order.index(base_v)
                 ):
                     verdicts.append(base_v)
