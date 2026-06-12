@@ -48,10 +48,16 @@ _MODE_OPTION_FINDINGS: dict[str, tuple[ChangeKind, dict[str, str]]] = {
     # there is no portable default, so require both sides explicit.
     "rtti": (ChangeKind.RTTI_MODE_CHANGED, {"": "on", "CXX": "on"}),
     "threadsafe_statics": (ChangeKind.THREADSAFE_STATICS_MODE_CHANGED, {"": "on", "CXX": "on"}),
-    # TLS model default is -fpic-dependent — always require both sides explicit.
+    # TLS model default is -fpic-dependent — always require both sides explicit
+    # (with the local-* exception handled below).
     "tls_init": (ChangeKind.TLS_MODEL_CHANGED, {}),
     "tls_model": (ChangeKind.TLS_MODEL_CHANGED, {}),
 }
+
+#: TLS models that are *never* the compiler auto-default (the default is always
+#: global-dynamic with -fpic or initial-exec without it). An omitted -ftls-model
+#: changing to one of these is therefore always a deliberate, reportable change.
+_NEVER_DEFAULT_TLS_MODELS: frozenset[str] = frozenset({"local-dynamic", "local-exec"})
 
 
 def check_header_parse_drift(
@@ -157,12 +163,23 @@ def _diff_options(old: BuildEvidence, new: BuildEvidence) -> list[Change]:
             mode_kind, lang_defaults = _MODE_OPTION_FINDINGS[mode_base]
             default = lang_defaults.get(mode_lang)
             if default is None:
-                # Context-dependent compiler default — only diff when both sides
-                # carry an explicit value, else an omitted flag would spuriously
-                # differ from an explicit default.
-                if not ov or not nv or ov == nv:
+                # Context-dependent compiler default. With both sides explicit,
+                # diff on inequality. With one side omitted the default is unknown
+                # — suppress, except for a tls_model that names a model which is
+                # *never* the compiler auto-default (local-exec / local-dynamic):
+                # those are always a deliberate, reportable change, whereas
+                # global-dynamic / initial-exec could equal the -fpic-dependent
+                # default and stay suppressed to avoid a false positive.
+                if ov == nv:
                     continue
-                old_eff, new_eff = ov, nv
+                if not ov or not nv:
+                    explicit = nv or ov
+                    if mode_base != "tls_model" or not explicit <= _NEVER_DEFAULT_TLS_MODELS:
+                        continue
+                    old_eff = ov or {"(default)"}
+                    new_eff = nv or {"(default)"}
+                else:
+                    old_eff, new_eff = ov, nv
             else:
                 old_eff = ov or {default}
                 new_eff = nv or {default}
