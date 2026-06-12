@@ -115,6 +115,43 @@ def link_source_abi(
     return surface
 
 
+def relink_surface_exports(
+    surface: SourceAbiSurface, exported_symbols: Iterable[str]
+) -> SourceAbiSurface:
+    """Re-derive a linked surface's L0-export mapping against a new export set.
+
+    The parallel-baseline ``merge`` flow links the source surface with no binary
+    present, so its ``source_decl_to_binary_symbol`` mapping is all-misses and the
+    provenance/mapping checks are inert. Given the binary side's exported symbols,
+    recompute ``roots['exported_symbols']`` and the decl→symbol mapping in place
+    from the already-recorded public declarations — using exactly the same rule
+    as :func:`link_source_abi` (``mangled_name or qualified_name`` matched against
+    the export set), so the result is identical to what ``dump <binary> --sources``
+    would have produced and introduces no new behaviour. Mutates and returns
+    *surface*.
+    """
+    exported = set(exported_symbols)
+    surface.roots["exported_symbols"] = sorted(exported)
+    mapping: dict[str, str] = {}
+    matched: set[str] = set()
+    for entity in surface.reachable_declarations:
+        key = entity.identity()
+        if not key:
+            continue
+        export_sym = entity.mangled_name or entity.qualified_name
+        if export_sym and export_sym in exported:
+            mapping[key] = export_sym
+            matched.add(export_sym)
+        else:
+            mapping.setdefault(key, "")
+    surface.mappings["source_decl_to_binary_symbol"] = dict(sorted(mapping.items()))
+    surface.unmatched["symbols_without_decl"] = sorted(exported - matched)
+    if isinstance(surface.coverage, dict):
+        surface.coverage["exported_symbols"] = len(exported)
+        surface.coverage["matched_symbols"] = len(matched)
+    return surface
+
+
 @dataclass
 class _LinkState:
     """Mutable accumulators threaded through the per-entity routing helpers."""

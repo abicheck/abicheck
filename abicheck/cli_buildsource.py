@@ -1290,6 +1290,17 @@ def merge_cmd(inputs: tuple[Path, ...], output: Path, on_conflict: str, verbose:
             err=True,
         )
     else:
+        # A1 merge-path L0 plumbing: the source surface was linked with no binary
+        # present (empty exports), so re-link it against the binary base's L0
+        # exports — otherwise the provenance / mapping checks stay inert in the
+        # parallel-baseline flow. Only when the base actually carries a binary.
+        base_exports = _exported_symbols_from_snapshot(base)
+        if base_exports and combined.source_abi is not None and not (
+            combined.source_abi.roots.get("exported_symbols")
+        ):
+            from .buildsource.source_link import relink_surface_exports
+
+            relink_surface_exports(combined.source_abi, base_exports)
         base.build_source = combined
         base.build_source_pack = combined.to_ref(path_hint=str(output))
 

@@ -1567,3 +1567,46 @@ def test_collect_no_input_is_noop(tmp_path):
     result = CliRunner().invoke(main, ["collect", "-o", str(out)])
     # Either a clean message or a graceful empty pack — never a traceback.
     assert result.exit_code in (0, 1, 2), result.output
+
+
+def test_merge_relinks_source_surface_with_binary_exports(tmp_path):
+    """A1 merge plumbing: a source-only snapshot's surface (linked with no binary)
+    gets the binary base's L0 exports folded in at merge time, so provenance has
+    a signal in the parallel-baseline flow."""
+    from pathlib import Path
+
+    from abicheck.buildsource.model import BuildSourceManifest
+    from abicheck.buildsource.pack import BuildSourcePack
+    from abicheck.buildsource.source_abi import SourceAbiSurface, SourceEntity
+    from abicheck.elf_metadata import ElfMetadata
+    from abicheck.model import Function
+
+    # Source-only snapshot: a surface with one public decl, no exports yet.
+    surf = SourceAbiSurface(library="libfoo.so", target_id="t")
+    surf.reachable_declarations = [
+        SourceEntity(id="decl://foo", kind="function", qualified_name="foo",
+                     mangled_name="_Z3foov")
+    ]
+    src_snap = AbiSnapshot(library="libfoo.so", version="1")
+    src_snap.build_source = BuildSourcePack(
+        root=Path(""), manifest=BuildSourceManifest(), source_abi=surf)
+    src_path = tmp_path / "src.json"
+    save_snapshot(src_snap, src_path)
+
+    # Binary snapshot exporting _Z3foov.
+    bin_snap = AbiSnapshot(library="libfoo.so", version="1")
+    bin_snap.elf = ElfMetadata()
+    bin_snap.functions = [Function(name="foo", mangled="_Z3foov",
+                                   return_type="void", params=[])]
+    bin_path = tmp_path / "bin.json"
+    save_snapshot(bin_snap, bin_path)
+
+    out = tmp_path / "baseline.json"
+    result = CliRunner().invoke(main, ["merge", str(bin_path), str(src_path), "-o", str(out)])
+    assert result.exit_code == 0, result.output
+    merged = load_snapshot(out)
+    assert merged.build_source is not None and merged.build_source.source_abi is not None
+    # Exports plumbed in, and foo now maps to its exported symbol.
+    assert merged.build_source.source_abi.roots["exported_symbols"] == ["_Z3foov"]
+    mapping = merged.build_source.source_abi.mappings["source_decl_to_binary_symbol"]
+    assert "_Z3foov" in set(mapping.values())

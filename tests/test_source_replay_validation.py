@@ -302,3 +302,20 @@ def test_provenance_mismatch_detected_on_baseline_side() -> None:
     )
     kinds = [c.kind for c in diff_source_abi(bad, _surface())]
     assert ChangeKind.SOURCE_BINARY_PROVENANCE_MISMATCH in kinds
+
+
+def test_relink_surface_exports_rebuilds_mapping() -> None:
+    # A1 merge plumbing: re-linking a surface against the binary's exports turns
+    # all-miss mappings into hits for decls whose mangled name is exported.
+    from abicheck.buildsource.source_link import relink_surface_exports
+
+    foo = _ent("foo", "function", mangled="_Z3foov")
+    bar = _ent("bar", "function", mangled="_Z3barv")
+    surf = _surface(reachable_declarations=[foo, bar])
+    # Initially no exports → mapping empty/all-miss → provenance would fire.
+    relink_surface_exports(surf, ["_Z3foov"])  # only foo is exported
+    mapping = surf.mappings["source_decl_to_binary_symbol"]
+    vals = set(mapping.values())
+    assert "_Z3foov" in vals          # foo matched its export
+    assert "" in vals                 # bar did not (not exported)
+    assert surf.roots["exported_symbols"] == ["_Z3foov"]
