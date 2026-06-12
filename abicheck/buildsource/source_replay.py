@@ -544,11 +544,31 @@ class SourceAbiCache:
 
     def __init__(self, cache_dir: Path | str) -> None:
         self.cache_dir = Path(cache_dir)
+        # ADR-033 D9 — hit/miss instrumentation for the cache_hit_rate metric.
+        self.hits = 0
+        self.misses = 0
+
+    @property
+    def hit_rate(self) -> float | None:
+        """Fraction of cacheable lookups served from cache, or ``None`` if none."""
+        total = self.hits + self.misses
+        return self.hits / total if total else None
 
     def _path(self, key: str) -> Path:
         return self.cache_dir / f"{key}.json"
 
     def get(self, key: str | None) -> SourceAbiTu | None:
+        tu = self._get(key)
+        # A None key is "uncacheable" (not a lookup); only count real lookups so
+        # the hit rate reflects cacheable TUs.
+        if key:
+            if tu is not None:
+                self.hits += 1
+            else:
+                self.misses += 1
+        return tu
+
+    def _get(self, key: str | None) -> SourceAbiTu | None:
         if not key:
             return None
         path = self._path(key)

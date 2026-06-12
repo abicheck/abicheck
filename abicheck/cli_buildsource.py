@@ -1001,10 +1001,13 @@ def _collect_source_abi(
         merged.diagnostics.append(f"source_abi: {diag}")
     parsed = int(surface.coverage.get("compile_units_parsed", 0) or 0)
     selected = int(surface.coverage.get("compile_units_selected", 0) or 0)
+    detail = f"scope={scope}, {parsed}/{selected} TUs parsed, {len(diagnostics)} failures"
+    if cache is not None and cache.hit_rate is not None:  # ADR-033 D9 cache_hit_rate
+        detail += f", cache_hit_rate={cache.hit_rate:.0%} ({cache.hits}/{cache.hits + cache.misses})"
     extractors.append(ExtractorRecord(
         name=f"source_abi:{extractor}",
         status="ok" if parsed else "partial",
-        detail=f"scope={scope}, {parsed}/{selected} TUs parsed, {len(diagnostics)} failures",
+        detail=detail,
     ))
     return surface, (
         f"{extractor} extractor, scope={scope}: parsed {parsed}/{selected} TUs, "
@@ -1064,6 +1067,24 @@ def _collect_source_abi_android(
 
 def _layer_value(layer: object) -> str:
     return layer.value if hasattr(layer, "value") else str(layer)
+
+
+def _filter_pack_layers(
+    pack: BuildSourcePack | None, layers: tuple[str, ...]
+) -> BuildSourcePack | None:
+    """Null out a loaded pack's facts for layers the collect-mode excludes, so a
+    pre-captured pack can't smuggle past the ADR-033 D2 layer set (Codex review).
+    ``_combine_packs`` derives coverage from these attributes, so nulling them
+    drops both the facts and their coverage rows."""
+    if pack is None:
+        return None
+    if "L3" not in layers:
+        pack.build_evidence = None
+    if "L4" not in layers:
+        pack.source_abi = None
+    if "L5" not in layers:
+        pack.source_graph = None
+    return pack
 
 
 def _combine_packs(
@@ -1255,6 +1276,10 @@ def embed_build_source(
             scope=scope,
             layers=layers,
         )
+
+    # Pre-captured packs must also honour the collect-mode layer set (Codex).
+    bi_pack = _filter_pack_layers(bi_pack, layers)
+    src_pack = _filter_pack_layers(src_pack, layers)
 
     # --build-info (pack) wins L3, --sources (pack) wins L4/L5, the inline pack
     # backfills both; coverage is rebuilt per layer from the supplying pack.

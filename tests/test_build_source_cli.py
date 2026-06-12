@@ -518,6 +518,41 @@ def test_dump_collect_mode_build_collects_l3_only(tmp_path):
     assert cov["L5_source_graph"] == "not_collected"
 
 
+def test_dump_collect_mode_build_filters_pre_captured_pack(tmp_path):
+    """ADR-033 D2 (Codex review): `--collect-mode build` must strip L4/L5 from a
+    pre-captured pack too, so an L3-only run can't smuggle in source evidence."""
+    runner = CliRunner()
+    cdb = _write_cdb(tmp_path, "c++17")
+    ev = tmp_path / "full.ev"
+    runner.invoke(main, ["collect", "--compile-db", str(cdb),
+                         "--source-graph", "summary", "-o", str(ev)])
+    assert BuildSourcePack.load(ev).source_graph is not None  # full pack
+    out = tmp_path / "s.json"
+    result = runner.invoke(main, [
+        "dump", "--build-info", str(ev), "--collect-mode", "build", "-o", str(out),
+    ])
+    assert result.exit_code == 0, result.output
+    bs = load_snapshot(out).build_source
+    assert bs.build_evidence is not None       # L3 kept
+    assert bs.source_abi is None               # L4 stripped
+    assert bs.source_graph is None             # L5 stripped
+
+
+def test_source_abi_cache_hit_rate_instrumented(tmp_path):
+    """ADR-033 D9: the per-TU SourceAbiCache tracks hits/misses → hit_rate."""
+    from abicheck.buildsource.source_abi import SourceAbiTu
+    from abicheck.buildsource.source_replay import SourceAbiCache
+
+    cache = SourceAbiCache(tmp_path / "cache")
+    assert cache.hit_rate is None              # no lookups yet
+    assert cache.get("missing-key") is None    # miss
+    cache.put("k1", SourceAbiTu(tu_id="cu://x", source="f.cpp"))
+    assert cache.get("k1") is not None         # hit
+    assert cache.get(None) is None             # uncacheable, not counted
+    assert cache.hits == 1 and cache.misses == 1
+    assert cache.hit_rate == 0.5
+
+
 def test_dump_collect_mode_off_embeds_nothing(tmp_path):
     """`--collect-mode off` collects no evidence even with a source tree."""
     tree = _source_tree(tmp_path)
