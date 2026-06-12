@@ -40,6 +40,33 @@ The catalog drives abicheck's benchmark and serves as an encyclopedia of ABI pit
 
 Some policy-escalated source/contract breaks (notably case30, case35) may keep identical runtime output for prebuilt binaries. For those, the demo shows: (1) binary still runs, and (2) recompilation against new headers fails or changes allowed behavior.
 
+## Runtime Demos vs. abicheck Analysis
+
+Each per-case README describes the intended ABI/API contract break, but there
+are two distinct validation layers:
+
+- **Runtime smoke:** build the old consumer app, run it with `libv1`, then
+  substitute `libv2` under the old library name. This catches loader failures,
+  crashes, and visible output changes without using abicheck analysis.
+- **abicheck analysis:** build v1/v2 libraries and run `dump` + `compare` with a
+  selected evidence mode.
+
+The runtime smoke result is not always the same as the policy verdict. Some
+examples are deliberately analysis-only: source/API breaks, bad-practice
+contract cases, and evidence-limited cases may keep the old binary running while
+still being valid `BREAKING`, `API_BREAK`, or `COMPATIBLE_WITH_RISK` examples.
+When a case is runtime-observable, its README should explain the concrete
+loader/runtime/output failure. When it is not runtime-observable, its README
+should explain which analysis layer proves the issue instead.
+
+The standard analysis modes are:
+
+- `debug-headers`: debug binary + public headers (`L0,L1,L2`)
+- `release-headers`: stock/release binary + public headers (`L0,L2`)
+- `stripped-headers`: stripped binary + public headers (`L0,L2`)
+- `build-source`: stock binary + headers + build/source evidence pack
+  (`L0,L1,L2,L3,L4,L5`)
+
 ---
 
 ## Case index
