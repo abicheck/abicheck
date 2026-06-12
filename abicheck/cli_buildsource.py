@@ -1133,7 +1133,8 @@ def _combine_packs(
     # to_ref()/content_hash() would omit the source pack's artifacts for a
     # cross-pack self-contained snapshot (Codex review). A pack "contributed"
     # when one of its facts is the object we actually embedded.
-    chosen_ids = {id(x) for x in (build_evidence, source_abi, source_graph) if x is not None}
+    chosen = (build_evidence, source_abi, source_graph)
+    chosen_ids = {id(x) for x in chosen if x is not None}
     artifacts: list[str] = []
     extractors: list[ExtractorRecord] = []
     seen_extractors: set[tuple[str, str]] = set()
@@ -1150,6 +1151,23 @@ def _combine_packs(
             if key not in seen_extractors:
                 seen_extractors.add(key)
                 extractors.append(e)
+    # An *inline*-collected contributor (e.g. `--sources <raw tree>`) is never
+    # written to disk, so its manifest.artifacts is empty and the loop above
+    # adds no digest for its source_abi/source_graph. Since content_hash() trusts
+    # a non-empty manifest.artifacts, a mixed `--build-info <pack> --sources
+    # <tree>` would then hash only the build pack's digest and ignore the source
+    # facts — two different trees with the same build pack collide (Codex P2). Add
+    # the in-memory payload digest for every chosen fact; a fact that *was*
+    # written to disk hashes identically (_payload_sha256 mirrors _write_json), so
+    # it dedups against the on-disk digest above rather than double-counting.
+    from .buildsource.pack import _payload_sha256
+
+    for payload in chosen:
+        if payload is None:
+            continue
+        digest = "sha256:" + _payload_sha256(payload.to_dict())  # type: ignore[attr-defined]
+        if digest not in artifacts:
+            artifacts.append(digest)
 
     return BuildSourcePack(
         root=Path(""),

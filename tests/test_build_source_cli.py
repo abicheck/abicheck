@@ -820,3 +820,36 @@ def test_dump_source_only_then_merge_with_binary(tmp_path):
     merged = load_snapshot(out)
     assert merged.elf is not None  # binary base kept
     assert merged.build_source is not None and merged.build_source.build_evidence is not None
+
+
+def test_mixed_build_pack_and_raw_sources_hash_distinguishes_trees(tmp_path):
+    """Same build-info pack + different source trees → different content_hash.
+
+    Codex P2: inline source facts must contribute to the combined
+    build_source_pack content hash even when the build side is an on-disk pack.
+    """
+    from pathlib import Path
+
+    from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
+    from abicheck.buildsource.pack import BuildSourcePack
+    from abicheck.buildsource.source_abi import SourceAbiSurface
+    from abicheck.cli_buildsource import _combine_packs
+
+    # On-disk build-info pack.
+    bi = BuildSourcePack.empty(tmp_path / "bi")
+    ev = BuildEvidence()
+    ev.compile_units.append(CompileUnit(id="cu://x", source="x.cpp"))
+    bi.build_evidence = ev
+    bi.write()
+    bi = BuildSourcePack.load(tmp_path / "bi")
+
+    def _inline_with(library: str) -> BuildSourcePack:
+        return BuildSourcePack(root=Path(""), source_abi=SourceAbiSurface(library=library))
+
+    a = _combine_packs(bi, None, _inline_with("tree_a"))
+    b = _combine_packs(bi, None, _inline_with("tree_b"))
+    assert a is not None and b is not None
+    assert a.content_hash() != b.content_hash()
+    # And the build evidence still participates (same pack → shared component).
+    same = _combine_packs(bi, None, _inline_with("tree_a"))
+    assert a.content_hash() == same.content_hash()
