@@ -1173,3 +1173,25 @@ def test_mixed_build_pack_and_raw_sources_hash_distinguishes_trees(tmp_path):
     # And the build evidence still participates (same pack → shared component).
     same = _combine_packs(bi, None, _inline_with("tree_a"))
     assert a.content_hash() == same.content_hash()
+
+
+def test_inline_source_changed_falls_back_to_target_scope(tmp_path, monkeypatch):
+    """ADR-033 (Codex): inline dump has no PR diff, so a 'changed' scope must fall
+    back to 'target' for replay — otherwise L4 selects zero TUs and is empty."""
+    import abicheck.buildsource.inline as inline
+    captured = {}
+
+    def _spy(sources, merged, extractors, *, extractor, scope, clang_bin):
+        captured["scope"] = scope
+        return None
+
+    monkeypatch.setattr(inline, "_run_inline_source_abi", _spy)
+    tree = tmp_path / "src"
+    tree.mkdir()
+    (tree / "f.cpp").write_text("int f(){return 0;}\n")
+    (tree / "compile_commands.json").write_text(json.dumps([{
+        "directory": str(tree), "file": "f.cpp",
+        "arguments": ["c++", "-c", "f.cpp"]}]))
+    inline.collect_inline_pack(sources=tree, build_info=None, scope="changed",
+                               layers=("L3", "L4", "L5"))
+    assert captured["scope"] == "target"

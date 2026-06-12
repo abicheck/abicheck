@@ -189,9 +189,15 @@ def collect_inline_pack(
 
     surface = None
     if "L4" in layers:
+        # Inline dump has no PR diff, so a 'changed' scope would select zero TUs
+        # and embed an empty L4 surface (Codex review). Fall back to 'target' —
+        # the non-empty choice that still enables the source-only checks the
+        # 'source-changed' mode is meant to turn on. The changed-only narrowing
+        # applies when a caller threads an explicit changed-path set (PR replay).
+        replay_scope = "target" if scope == "changed" else scope
         surface = _run_inline_source_abi(
             sources, merged, extractors,
-            extractor=extractor, scope=scope, clang_bin=clang_bin,
+            extractor=extractor, scope=replay_scope, clang_bin=clang_bin,
         )
     graph = _build_inline_graph(merged, surface) if "L5" in layers else None
 
