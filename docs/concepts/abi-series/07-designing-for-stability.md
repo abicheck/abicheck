@@ -442,4 +442,5 @@ real release decision, these are where to verify it:
   of its checklist and additionally covers enums, unions, bitfields, alignment,
   TLS, and transitive/dependency leaks.
 
-*Back to the [series overview](../abi-api-handling.md).*
+*Next: [Part 8 — Detecting Breaks](08-detection.md), or back to the
+[series overview](../abi-api-handling.md).*

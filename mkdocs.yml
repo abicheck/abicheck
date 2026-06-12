@@ -86,6 +86,7 @@ nav:
       - "5. Linker & ELF": concepts/abi-series/05-linker-elf.md
       - "6. Transitive Breaks": concepts/abi-series/06-transitive-breaks.md
       - "7. Designing for Stability": concepts/abi-series/07-designing-for-stability.md
+      - "8. Detecting Breaks": concepts/abi-series/08-detection.md
       - "Glossary": concepts/abi-series/glossary.md
     - Examples Encyclopedia: examples/index.md
     - By Verdict:
