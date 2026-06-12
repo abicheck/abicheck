@@ -1579,21 +1579,23 @@ def prepare_embedded_build_source(
 def attach_evidence_metrics(
     result: DiffResult,
     metrics: dict[str, object],
-    ev_changes: list[Change],
+    injected_changes: list[Change],
 ) -> None:
     """Finalize and attach the ADR-033 D9 evidence metrics onto ``result``.
 
     Layers run-wide totals onto the partial metrics — the artifact-backed finding
     count plus the suppression/surface-demotion totals — then echoes the D6 timing
     summary. Artifact-backed findings are the reported changes whose identity is
-    *not* one of the evidence findings folded in via ``extra_changes``, so the
-    split needs no per-ChangeKind table. No-op when no evidence was involved.
+    *not* one of the externally-injected ``extra_changes`` — that is both the
+    build/source evidence findings *and* any probe-matrix findings, since none of
+    those come from the L0–L2 artifact diffing — so the split needs no
+    per-ChangeKind table. No-op when no evidence was involved.
     """
     if not metrics:
         return
-    ev_ids = {id(c) for c in ev_changes}
+    injected_ids = {id(c) for c in injected_changes}
     metrics["findings.artifact_backed.count"] = sum(
-        1 for c in result.changes if id(c) not in ev_ids
+        1 for c in result.changes if id(c) not in injected_ids
     )
     metrics["findings.demoted_by_surface.count"] = result.out_of_surface_count
     metrics["findings.suppressed_with_reason.count"] = result.suppressed_count

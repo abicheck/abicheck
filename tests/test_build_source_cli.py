@@ -326,6 +326,46 @@ def test_evidence_metrics_helpers_edge_branches(capsys):
     assert "source-only=2" in err
 
 
+def test_evidence_metrics_excludes_probe_matrix_from_artifact_backed(tmp_path):
+    """ADR-033 D9 (Codex review): probe-matrix findings are injected via
+    extra_changes but are build-config/source-level, not L0-L2 artifact-backed,
+    so they must not inflate findings.artifact_backed.count on a mixed run."""
+    # Probe matrices whose only delta is a raised C++ standard floor (17 -> 20),
+    # which surfaces as a probe-matrix finding (cxx_standard_floor_raised).
+    def _matrix(path, version, stds):
+        path.write_text(json.dumps({
+            "library": "libfoo", "version": version, "spec_name": "libfoo",
+            "cxx_stds": stds, "defaults": {"backend": "tbb"}, "results": [],
+        }))
+
+    pm_old = tmp_path / "pm_old.json"
+    pm_new = tmp_path / "pm_new.json"
+    _matrix(pm_old, "1.0", {"a": 17, "b": 20})
+    _matrix(pm_new, "2.0", {"b": 20, "c": 23})
+
+    new_cdb = _write_cdb(tmp_path, "c++20")
+    ev_new = tmp_path / "new.evidence"
+    runner = CliRunner()
+    runner.invoke(main, ["collect", "--compile-db", str(new_cdb), "-o", str(ev_new)])
+    old_snap = _make_snap(tmp_path, "old.json", "1.0")
+    new_snap = _make_snap(tmp_path, "new.json", "2.0")
+
+    result = runner.invoke(main, [
+        "compare", str(old_snap), str(new_snap), "--new-build-info", str(ev_new),
+        "--probe-matrix-old", str(pm_old), "--probe-matrix-new", str(pm_new),
+        "--format", "json",
+    ])
+    assert result.exit_code in (0, 1, 2, 4), result.output
+    payload = json.loads(result.stdout)
+    metrics = payload["evidence_metrics"]
+    # The probe-matrix finding is reported (it is in result.changes) ...
+    kinds = {c["kind"] for c in payload["changes"]}
+    assert "cxx_standard_floor_raised" in kinds
+    # ... but it is not counted as artifact-backed. These ELF-less snapshots have
+    # no L0-L2 diff, so the only artifact-backed count here must be zero.
+    assert metrics["findings.artifact_backed.count"] == 0
+
+
 def test_compare_collect_mode_without_packs_is_noted(tmp_path):
     old_snap = _make_snap(tmp_path, "old.json", "1.0")
     new_snap = _make_snap(tmp_path, "new.json", "2.0")

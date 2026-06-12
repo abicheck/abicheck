@@ -1888,7 +1888,7 @@ def compare_cmd(
     # The helper wall-clocks inline diffing for the ADR-033 D6/D9 metrics and
     # returns the coverage/metrics blocks to attach to the result post-compare.
     from .cli_buildsource import attach_evidence_metrics, prepare_embedded_build_source
-    extra_changes, layer_coverage_rows, evidence_metrics, ev_changes = (
+    extra_changes, layer_coverage_rows, evidence_metrics, _ev_changes = (
         prepare_embedded_build_source(
             old, new, collect_mode, extra_changes,
             old_build_info, new_build_info, old_sources, new_sources,
@@ -1906,7 +1906,9 @@ def compare_cmd(
     )
     if layer_coverage_rows:
         result.layer_coverage = layer_coverage_rows
-    attach_evidence_metrics(result, evidence_metrics, ev_changes)
+    # Exclude *all* externally-injected findings (probe-matrix + build/source
+    # evidence) from the artifact-backed count — none come from L0-L2 diffing.
+    attach_evidence_metrics(result, evidence_metrics, extra_changes or [])
 
     if explain_patterns:
         echo_pattern_modulations(result)
