@@ -645,3 +645,26 @@ def test_run_source_replay_uses_cache_to_skip_reextraction(tmp_path: Path) -> No
     )
     assert second.calls == []
     assert len(surface.reachable_declarations) == 1
+
+
+# ── ADR-033 D3 PR-diff localizer ─────────────────────────────────────────────
+
+
+import pytest as _pytest  # noqa: E402
+
+
+@_pytest.mark.parametrize("paths,expected", [
+    (["CMakeLists.txt"], "build"),
+    (["cmake/foo.cmake"], "build"),
+    (["Makefile", "docs/x.md"], "build"),
+    (["BUILD.bazel"], "build"),
+    (["meson.build"], "build"),
+    (["src/foo.cpp"], "source-changed"),
+    (["include/foo.hpp"], "source-changed"),
+    (["src/foo.cpp", "CMakeLists.txt"], "source-changed"),  # source wins (superset)
+    (["README.md", "docs/x.rst"], "off"),
+    ([], "off"),
+])
+def test_recommend_collect_mode(paths, expected):
+    from abicheck.buildsource.source_replay import recommend_collect_mode
+    assert recommend_collect_mode(paths) == expected

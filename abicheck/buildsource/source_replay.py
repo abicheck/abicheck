@@ -106,6 +106,55 @@ def collection_for_ci_mode(mode: str) -> tuple[str, tuple[str, ...]]:
     return scope_for_ci_mode(mode), CI_MODE_TO_LAYERS.get(mode, ())
 
 
+# -- PR-diff localizer (ADR-033 D3) ------------------------------------------
+
+#: Filenames / suffixes that mark a build-system file. A change here is build
+#: context, so it triggers at least Phase-1 ``build`` collection (ADR-033 D3.3).
+_BUILD_FILE_NAMES = frozenset({
+    "cmakelists.txt", "makefile", "gnumakefile", "build", "build.bazel",
+    "workspace", "workspace.bazel", "meson.build", "meson_options.txt",
+    "configure", "configure.ac", "configure.in", "sconstruct", "sconscript",
+    "cargo.toml", "setup.py", "pyproject.toml",
+})
+_BUILD_FILE_SUFFIXES = (
+    ".cmake", ".mk", ".mak", ".bazel", ".bzl", ".ninja", ".pri", ".pro",
+)
+#: Source / header suffixes that warrant a source ABI replay (L4) on change.
+_SOURCE_FILE_SUFFIXES = (
+    ".c", ".cc", ".cpp", ".cxx", ".c++", ".h", ".hh", ".hpp", ".hxx", ".h++",
+    ".inl", ".ipp", ".tcc", ".cu", ".cuh", ".m", ".mm",
+)
+
+
+def _is_build_file(path: str) -> bool:
+    p = path.replace("\\", "/").rsplit("/", 1)[-1].lower()
+    return p in _BUILD_FILE_NAMES or p.endswith(_BUILD_FILE_SUFFIXES)
+
+
+def _is_source_file(path: str) -> bool:
+    return path.replace("\\", "/").lower().endswith(_SOURCE_FILE_SUFFIXES)
+
+
+def recommend_collect_mode(changed_paths: Iterable[str]) -> str:
+    """Recommend an ADR-033 CI evidence mode from a PR's changed paths (D3).
+
+    The PR-diff localizer: a build-system change alone triggers at least Phase-1
+    ``build`` (build-context drift); a source/header change pulls in the L4
+    source replay via ``source-changed`` (a superset that also engages build
+    context). No build- or source-relevant change ⇒ ``off`` (artifact compare
+    remains the authority, ADR-028 D3). This never *replaces* the artifact gate —
+    it only scopes which optional evidence to collect.
+    """
+    paths = list(changed_paths)
+    has_source = any(_is_source_file(p) for p in paths)
+    has_build = any(_is_build_file(p) for p in paths)
+    if has_source:
+        return "source-changed"
+    if has_build:
+        return "build"
+    return "off"
+
+
 # -- scope selection (ADR-030 D7) --------------------------------------------
 
 

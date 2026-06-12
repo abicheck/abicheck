@@ -553,6 +553,15 @@ def test_source_abi_cache_hit_rate_instrumented(tmp_path):
     assert cache.hit_rate == 0.5
 
 
+def test_recommend_collect_mode_cli():
+    """ADR-033 D3: the recommend-collect-mode command maps changed paths to a mode."""
+    runner = CliRunner()
+    assert runner.invoke(main, ["recommend-collect-mode", "CMakeLists.txt"]).output.strip() == "build"
+    assert runner.invoke(main, ["recommend-collect-mode", "src/a.cpp"]).output.strip() == "source-changed"
+    assert runner.invoke(main, ["recommend-collect-mode", "README.md"]).output.strip() == "off"
+    assert runner.invoke(main, ["recommend-collect-mode"]).output.strip() == "off"
+
+
 def test_dump_collect_mode_off_embeds_nothing(tmp_path):
     """`--collect-mode off` collects no evidence even with a source tree."""
     tree = _source_tree(tmp_path)

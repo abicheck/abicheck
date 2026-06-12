@@ -606,6 +606,28 @@ class TestBuildSourcePackStorage:
         _, meta = registry.pull(key)  # type: ignore[misc]
         assert meta.evidence_content_hash == pack.content_hash()
 
+    def test_push_records_evidence_coverage_in_metadata(
+        self, registry: FilesystemRegistry, sample_snapshot: AbiSnapshot, tmp_path: Path
+    ) -> None:
+        """ADR-033 D4: the metadata carries a coverage block for the stored pack."""
+        pack = _make_pack(tmp_path / "src.evidence")  # build_evidence only (L3)
+        key = BaselineKey(library="libfoo", version="1.0.0", platform="linux-x86_64")
+        registry.push(key, sample_snapshot, evidence=pack)
+
+        _, meta = registry.pull(key)  # type: ignore[misc]
+        assert meta.evidence_coverage is not None
+        assert meta.evidence_coverage["build_context"] is True
+        assert meta.evidence_coverage["source_abi"] == "not_collected"
+        assert meta.evidence_coverage["graph"] == "not_collected"
+
+    def test_push_without_evidence_has_no_coverage(
+        self, registry: FilesystemRegistry, sample_snapshot: AbiSnapshot
+    ) -> None:
+        key = BaselineKey(library="libfoo", version="1.0.0", platform="linux-x86_64")
+        registry.push(key, sample_snapshot)
+        _, meta = registry.pull(key)  # type: ignore[misc]
+        assert meta.evidence_coverage is None
+
     def test_pull_evidence_none_when_absent(
         self, registry: FilesystemRegistry, sample_snapshot: AbiSnapshot
     ) -> None:

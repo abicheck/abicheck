@@ -1,7 +1,7 @@
 # ADR-033: CI Rollout, Performance, Caching, and Validation Strategy
 
 **Date:** 2026-06-09
-**Status:** Proposed. **Amended 2026-06-12** (ADR-028 source-tree model) — see Amendment below.
+**Status:** Accepted / Implemented (2026-06-12). **Amended 2026-06-12** (ADR-028 source-tree model) — see Amendment below. Implementation status below.
 **Decision maker:** Nikolay Petrov
 
 ---
@@ -303,3 +303,19 @@ After every run, users should be able to answer:
   preparation (the embedded single-artifact storage, ADR-028 D8, exists for this).
 - `collect` is demoted to an advanced command; the CI evidence modes (D2) select
   the inputs/scopes for `dump --sources/--build-info` internally.
+
+## Implementation status (2026-06-12)
+
+| Decision | Status | Where |
+|---|---|---|
+| D1 complexity ladder | done | `buildsource/` L0–L5 layers |
+| D2 CI modes | done | `dump --collect-mode` (build = L3-only, source/graph = L3+L4+L5); pre-captured packs filtered to the layer set; `collection_for_ci_mode()` |
+| D3 PR localizer | done | `recommend_collect_mode()` + `abicheck recommend-collect-mode` (build-file ⇒ `build`, source/header ⇒ `source-changed`); artifact compare stays authoritative |
+| D4 baseline coverage block | done | `BaselineMetadata.evidence_coverage` persists `{build_context, source_abi, graph}` |
+| D5 deterministic caching | done | per-TU `SourceAbiCache` (L4, the dominant cost) + content-addressed `BuildEvidenceCache` (L3); both false-miss-preferring. The cheap L5 graph fold is recomputed by design (D6 rates it low-cost) |
+| D6 timing summary | done | compare `evidence_metrics` (stderr + JSON) |
+| D7 evidence policy | done | `evidence_policy` block: `source_only_findings`/`build_context_drift`/`graph_risk_findings`/`require_evidence` + `EVIDENCE_REQUIRED_MISSING` kind |
+| D8 validation | done | FP-rate gate exposes D9 deltas; corpus tests per layer |
+| D9 metrics | done | compare buckets (post-suppression), `cache_hit_rate` (collect), `false_positive_delta_vs_baseline` (FP gate) |
+| D10 docs | done | `docs/concepts/build-source-data.md`, `docs/user-guide/policies.md` |
+| Phases 1–7 | done | incl. `scripts/evidence_benchmark.py` (Phase 7 perf + FP report) |

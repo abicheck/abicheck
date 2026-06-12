@@ -1926,6 +1926,19 @@ def compare_cmd(
     _exit_with_severity_or_verdict(result, sev_config, severity_explicitly_set)
 
 
+@main.command("recommend-collect-mode")
+@click.argument("paths", nargs=-1)
+def recommend_collect_mode_cmd(paths: tuple[str, ...]) -> None:
+    """Recommend a `--collect-mode` from a PR's changed paths (ADR-033 D3).
+
+    Prints `build` for build-system-only changes, `source-changed` when sources
+    or headers changed, else `off`. The artifact compare stays authoritative —
+    this only scopes which optional evidence a CI job should collect.
+    """
+    from .buildsource.source_replay import recommend_collect_mode
+    click.echo(recommend_collect_mode(paths))
+
+
 # ── ABICC compat subcommands (implementation in abicheck.compat) ─────────────
 # NOTE: eagerly loads abicheck.compat.cli at import time — intentional so all
 # consumers get compat commands registered. Private helpers re-exported for

@@ -190,6 +190,11 @@ class BaselineMetadata:
     #: from what was recorded, the same integrity discipline ``checksum`` gives
     #: the snapshot (ADR-028 Phase 5).
     evidence_content_hash: str | None = None
+    #: ADR-033 D4 — coverage summary of the stored evidence pack: which optional
+    #: layers it carries (``{"build_context": bool, "source_abi": <status>,
+    #: "graph": <status>}``), or ``None`` when no pack was pushed. Lets a registry
+    #: consumer see a baseline's evidence depth without unpacking it.
+    evidence_coverage: dict[str, object] | None = None
 
     @classmethod
     def create(
@@ -249,7 +254,40 @@ class BaselineMetadata:
                 if data.get("evidence_content_hash") is not None
                 else None
             ),
+            evidence_coverage=(
+                {str(k): v for k, v in cov.items()}
+                if isinstance((cov := data.get("evidence_coverage")), dict)
+                else None
+            ),
         )
+
+
+def _pack_coverage(evidence: BuildSourcePack) -> dict[str, object] | None:
+    """Derive the ADR-033 D4 coverage block from a pack's manifest.
+
+    ``{"build_context": bool, "source_abi": <status>, "graph": <status>}``.
+    Presence is read from the pack's actual facts; the status string reuses the
+    manifest's recorded ``CoverageStatus`` value when present, else ``present`` /
+    ``not_collected``. Returns ``None`` when the pack carries no managed layer.
+    """
+    rows = {
+        (c.layer.value if hasattr(c.layer, "value") else str(c.layer)): c.status.value
+        for c in evidence.manifest.coverage
+    }
+
+    def status(layer: str, present: bool) -> str:
+        return rows.get(layer, "present" if present else "not_collected")
+
+    has_l3 = evidence.build_evidence is not None
+    has_l4 = evidence.source_abi is not None
+    has_l5 = evidence.source_graph is not None
+    if not (has_l3 or has_l4 or has_l5):
+        return None
+    return {
+        "build_context": has_l3,
+        "source_abi": status("L4_source_abi", has_l4),
+        "graph": status("L5_source_graph", has_l5),
+    }
 
 
 class BaselineRegistry(Protocol):
@@ -356,12 +394,14 @@ class FilesystemRegistry:
             metadata.evidence_content_hash, pending = self._store_evidence(
                 evidence, evidence_dir
             )
+            metadata.evidence_coverage = _pack_coverage(evidence)
         else:
             # No pack supplied: always clear the recorded hash so the metadata
             # never promises a pack that is not on disk (a caller-supplied
             # metadata could carry a stale hash even when the evidence dir does
             # not exist — Codex review).
             metadata.evidence_content_hash = None
+            metadata.evidence_coverage = None
             if evidence_dir.exists():
                 pending = Path(tempfile.mkdtemp(dir=key_dir, prefix=".evstage-"))
                 os.replace(evidence_dir, pending / "old")
