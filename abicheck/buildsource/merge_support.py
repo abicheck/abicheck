@@ -166,28 +166,33 @@ _MERGE_LAYER_ATTRS: dict[str, str] = {
     DataLayer.L5_SOURCE_GRAPH.value: "source_graph",
 }
 
-def _canonicalize(obj: Any) -> Any:
-    """Recursively order-normalize a payload so an equivalent set of facts hashes
-    the same regardless of list insertion order.
-
-    The L3/L4/L5 layer payloads are *sets of facts* (compile units, graph
-    nodes/edges, reachable decls) that downstream checks key by ID/identity, not
-    by position — so two inputs carrying the same facts in a different order
-    (e.g. a reversed ``compile_commands.json``) must not read as a conflict
-    (Codex review). Dict keys are sorted and every list is sorted by its
-    canonical JSON, making the digest position-independent.
-    """
-    if isinstance(obj, dict):
-        return {k: _canonicalize(obj[k]) for k in sorted(obj)}
-    if isinstance(obj, list):
-        items = [_canonicalize(x) for x in obj]
-        return sorted(items, key=lambda x: json.dumps(x, sort_keys=True, separators=(",", ":")))
-    return obj
-
 def _canonical_layer_digest(payload_dict: dict[str, Any]) -> str:
-    """Order-independent digest of a single layer's normalized facts (A2)."""
-    canon = json.dumps(_canonicalize(payload_dict), sort_keys=True, separators=(",", ":"))
-    return "sha256:" + hashlib.sha256(canon.encode("utf-8")).hexdigest()
+    """Digest of one layer's normalized facts that is independent of *fact*
+    ordering but preserves *ordered* fields (A2).
+
+    A layer payload's **top-level arrays** are unordered sets of facts (compile
+    units, link units, graph nodes/edges, reachable decls), so two inputs that
+    list the same facts in a different order (e.g. a reversed
+    ``compile_commands.json``) must hash the same — otherwise ``merge`` reports a
+    false conflict. But *nested* arrays can be order-significant —
+    ``LinkUnit.linker_argv`` and a link's inputs encode linker order, which can
+    change the produced ABI — so they are left verbatim: two inputs that differ
+    only by such an ordered field still hash differently and are correctly
+    flagged (Codex review). Only the top-level fact arrays are sorted; everything
+    nested is hashed as-is (``json.dumps(sort_keys=True)`` normalizes dict key
+    order without touching list order).
+    """
+    canon: dict[str, Any] = {}
+    for k in sorted(payload_dict):
+        v = payload_dict[k]
+        if isinstance(v, list):
+            canon[k] = sorted(
+                v, key=lambda x: json.dumps(x, sort_keys=True, default=str)
+            )
+        else:
+            canon[k] = v
+    blob = json.dumps(canon, sort_keys=True, separators=(",", ":"), default=str)
+    return "sha256:" + hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
 def _detect_merge_layer_conflicts(
     snaps: list[tuple[Path, AbiSnapshot]],
@@ -220,26 +225,53 @@ def _detect_merge_layer_conflicts(
             conflicts[layer] = entries
     return conflicts
 
-def _record_merge_conflicts(
+def _resolve_conflict_winners(
     combined: BuildSourcePack, conflicts: dict[str, list[tuple[str, str]]]
+) -> dict[str, str]:
+    """Return ``layer -> winning input name``: which input's facts actually
+    landed in the folded baseline for each conflicting layer.
+
+    ``_combine_packs`` has layer-specific preference (it keeps the accumulator's
+    L3 but the latest input's L4/L5), so the recorded/printed winner must be the
+    *actual* survivor, not an assumed first-wins (Codex review). Resolved by
+    matching the combined pack's per-layer digest back to the contributor digests.
+    """
+    winners: dict[str, str] = {}
+    for layer, entries in conflicts.items():
+        payload = getattr(combined, _MERGE_LAYER_ATTRS[layer], None)
+        if payload is None:
+            continue
+        won = _canonical_layer_digest(payload.to_dict())
+        for name, digest in entries:
+            if digest == won:
+                winners[layer] = name
+                break
+    return winners
+
+def _record_merge_conflicts(
+    combined: BuildSourcePack,
+    conflicts: dict[str, list[tuple[str, str]]],
+    winners: dict[str, str],
 ) -> None:
     """Persist A2 conflicts into the combined pack's extractor ledger.
 
     ``BuildSourceManifest.to_dict()`` serializes ``extractors`` (but has no
     ``diagnostics`` field), so an ``ExtractorRecord`` is the channel that
-    survives embedding/round-trip. ``warn`` mode keeps first-wins facts and
-    leaves this record behind so the divergence rides forward in the baseline.
+    survives embedding/round-trip. ``warn`` mode keeps one input's facts per
+    layer and leaves this record behind — naming the *actual* survivor — so the
+    divergence rides forward in the baseline.
     """
     records = list(combined.manifest.extractors)
     for layer, entries in sorted(conflicts.items()):
         detail = "; ".join(f"{name}={digest}" for name, digest in entries)
+        won = winners.get(layer, "one input")
         records.append(
             ExtractorRecord(
                 name="merge_layer_conflict",
                 status="failed",
                 detail=f"layer {layer} supplied with differing facts: {detail}",
                 diagnostics=[
-                    f"kept first-wins for {layer}; verify each layer comes from "
+                    f"kept {won} for {layer}; verify each layer comes from "
                     "exactly one input."
                 ],
             )

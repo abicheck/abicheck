@@ -1097,6 +1097,10 @@ def test_merge_layer_conflict_warns_and_records(tmp_path):
     assert "merge conflict" in result.output
     assert "L3_build" in result.output
 
+    # L3 is first-wins in _combine_packs, so the reported survivor is a.json —
+    # the message and record must name the ACTUAL winner (Codex), not a guess.
+    assert "kept a.json" in result.output
+
     merged = load_snapshot(out)
     assert merged.build_source is not None
     recs = [e for e in merged.build_source.manifest.extractors
@@ -1104,6 +1108,7 @@ def test_merge_layer_conflict_warns_and_records(tmp_path):
     assert recs, "conflict must be persisted in the extractor ledger"
     assert recs[0].status == "failed"
     assert recs[0].diagnostics  # carries a forward-looking note
+    assert "kept a.json" in recs[0].diagnostics[0]
 
 
 def test_merge_layer_conflict_error_mode_exits_nonzero(tmp_path):

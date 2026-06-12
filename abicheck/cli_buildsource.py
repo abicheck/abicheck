@@ -46,6 +46,7 @@ from .buildsource.merge_support import (
     _filter_pack_layers,
     _layer_value,
     _record_merge_conflicts,
+    _resolve_conflict_winners,
 )
 from .buildsource.model import (
     CoverageStatus,
@@ -1241,11 +1242,18 @@ def merge_cmd(inputs: tuple[Path, ...], output: Path, on_conflict: str, verbose:
         combined = _combine_packs(combined, s.build_source)
 
     if conflicts:
+        # Which input's facts actually survived per layer (_combine_packs is
+        # first-wins for L3 but last-wins for L4/L5), so the message is accurate.
+        winners = (
+            _resolve_conflict_winners(combined, conflicts)
+            if combined is not None else {}
+        )
         for layer, entries in sorted(conflicts.items()):
             srcs = ", ".join(f"{name}" for name, _digest in entries)
+            kept = f"kept {winners[layer]}" if layer in winners else "kept one input"
             click.echo(
                 f"merge conflict: layer {layer} supplied with differing facts by "
-                f"multiple inputs ({srcs}); kept first-wins.",
+                f"multiple inputs ({srcs}); {kept}.",
                 err=True,
             )
         if on_conflict == "error":
@@ -1257,7 +1265,7 @@ def merge_cmd(inputs: tuple[Path, ...], output: Path, on_conflict: str, verbose:
         # ledger (a serialized field, unlike a nonexistent manifest.diagnostics),
         # so the recorded baseline carries the divergence forward.
         if combined is not None:
-            _record_merge_conflicts(combined, conflicts)
+            _record_merge_conflicts(combined, conflicts, winners)
 
     if combined is None:
         click.echo(
