@@ -209,38 +209,183 @@ def _hash(*parts: str) -> str:
     return "sha256:" + hashlib.sha256(blob).hexdigest()
 
 
-def _canonical(node: Any) -> Any:
+#: AST node kinds that introduce a *local* binding — a parameter or a
+#: block-scope variable. Their names are alpha-renamed to positional placeholders
+#: so a pure rename of a local/parameter does not flip the body fingerprint.
+_LOCAL_DECL_KINDS = frozenset({"ParmVarDecl", "VarDecl", "BindingDecl", "DecompositionDecl"})
+
+#: ``storageClass`` values that give a block-scope ``VarDecl`` a stable *linkage*
+#: name — a function-local ``static`` emits a distinct weak symbol (``f()::x``)
+#: and an ``extern`` local names a global. Such names are **not** alpha-renamed,
+#: since renaming them is an observable change, not a cosmetic one.
+_NON_RENAMEABLE_STORAGE = frozenset({"static", "extern"})
+
+#: Commutative, non-short-circuiting binary operators whose two operands may be
+#: sorted into a canonical order in the fingerprint (ADR-030 #6). Excludes the
+#: short-circuit `&&`/`||` (reordering changes evaluation order/side effects) and
+#: every non-commutative operator (`-`, `/`, `%`, `<`, `<<`, assignments, …).
+_COMMUTATIVE_OPS = frozenset({"+", "*", "==", "!=", "&", "|", "^"})
+
+
+def _is_renameable_local(node: dict[str, Any]) -> bool:
+    """Whether a decl node is an automatic local whose name is alpha-renameable.
+
+    Parameters and ordinary block-scope variables are renameable; a
+    function-local ``static``/``extern`` ``VarDecl`` is not — its name is part of
+    a linkage symbol, so a rename must change the body fingerprint (Codex review).
+    """
+    kind = node.get("kind")
+    if kind not in _LOCAL_DECL_KINDS:
+        return False
+    if kind == "VarDecl" and node.get("storageClass") in _NON_RENAMEABLE_STORAGE:
+        return False
+    return True
+
+
+def _alpha_rename_map(node: dict[str, Any], param_ids: tuple[str, ...]) -> dict[str, str]:
+    """Map each local-binding clang ``id`` to a positional placeholder (``$0``…).
+
+    This is the semantic core of the fingerprint (ADR-030 follow-up #6): instead
+    of hashing the raw AST — where renaming a local variable or parameter changes
+    the structural shape and so the hash — we hash an **alpha-equivalence class**.
+    Two bodies that differ only by the spelling of their locals/parameters map to
+    the same placeholders and hash identically, so ``inline_body_changed`` /
+    ``template_body_changed`` no longer fire on a cosmetic rename.
+
+    Only ids that name a true local binding are renamed: the function's
+    parameters (``param_ids``, threaded in declared order so they get the first,
+    stable placeholders) plus every local ``VarDecl`` declared inside the subtree.
+    A reference to anything *else* — a global, another function, a named constant
+    — keeps its real name, because referencing a different entity is a real
+    semantic change the fingerprint must still catch.
+
+    Placeholders are assigned in first-occurrence (pre-order) order so the mapping
+    is itself rename-invariant.
+    """
+    # The set of ids that denote a local binding: parameters + in-body locals.
+    local_ids: set[str] = {pid for pid in param_ids if pid}
+
+    def _collect(n: Any) -> None:
+        if not isinstance(n, dict):
+            return
+        nid = n.get("id")
+        if isinstance(nid, str) and _is_renameable_local(n):
+            local_ids.add(nid)
+        inner = n.get("inner")
+        if isinstance(inner, list):
+            for child in inner:
+                _collect(child)
+
+    _collect(node)
+    if not local_ids:
+        return {}
+
+    # Assign placeholders by first occurrence (params first, then by pre-order),
+    # counting both declarations and references so a use-before-decl still lands
+    # on a stable slot.
+    order: list[str] = [pid for pid in param_ids if pid in local_ids]
+    seen: set[str] = set(order)
+
+    def _order(n: Any) -> None:
+        if not isinstance(n, dict):
+            return
+        nid = n.get("id")
+        if isinstance(nid, str) and nid in local_ids and nid not in seen:
+            seen.add(nid)
+            order.append(nid)
+        ref = n.get("referencedDecl")
+        if isinstance(ref, dict):
+            rid = ref.get("id")
+            if isinstance(rid, str) and rid in local_ids and rid not in seen:
+                seen.add(rid)
+                order.append(rid)
+        inner = n.get("inner")
+        if isinstance(inner, list):
+            for child in inner:
+                _order(child)
+
+    _order(node)
+    return {nid: f"${i}" for i, nid in enumerate(order)}
+
+
+def _canonical(node: Any, amap: dict[str, str]) -> Any:
     """Reduce a clang AST node to a build-root-stable structural form for hashing.
 
     Keeps only structural scalars (``kind``/``name``/``value``/``opcode``/
     ``castKind``) plus the node's ``type.qualType`` and its recursively
     canonicalized children, dropping pointer ids and source locations so a pure
     body edit changes the hash while a rebuild/relocation does not.
+
+    ``amap`` (from :func:`_alpha_rename_map`) replaces a local binding's name —
+    on both its declaration and every reference — with a positional placeholder,
+    so the hash is an alpha-equivalence class invariant under local/parameter
+    renaming (ADR-030 follow-up #6).
     """
     if not isinstance(node, dict):
         return node
     out: dict[str, Any] = {}
+    nid = node.get("id")
+    placeholder = amap.get(nid) if isinstance(nid, str) else None
     for key in _FINGERPRINT_SCALAR_KEYS:
         if key in node:
-            out[key] = node[key]
+            # A local declaration's own name becomes its placeholder.
+            out[key] = placeholder if key == "name" and placeholder is not None else node[key]
     type_obj = node.get("type")
     if isinstance(type_obj, dict) and "qualType" in type_obj:
         out["type"] = type_obj["qualType"]
     # A DeclRefExpr stores the referenced entity (e.g. another constant) in
     # ``referencedDecl``; without its name a value change `kOld` -> `kNew` of the
     # same type would hash identically and the constexpr/default-arg change would
-    # be missed (Codex review #339, P2).
+    # be missed (Codex review #339, P2). A reference to a *local* binding uses the
+    # alpha-renamed placeholder; a reference to anything else keeps its real name.
     ref = node.get("referencedDecl")
-    if isinstance(ref, dict) and ref.get("name"):
-        out["ref"] = ref["name"]
+    if isinstance(ref, dict):
+        rid = ref.get("id")
+        ref_placeholder = amap.get(rid) if isinstance(rid, str) else None
+        if ref_placeholder is not None:
+            out["ref"] = ref_placeholder
+        elif ref.get("name"):
+            out["ref"] = ref["name"]
     inner = node.get("inner")
     if isinstance(inner, list):
-        out["inner"] = [_canonical(child) for child in inner]
+        children = [_canonical(child, amap) for child in inner]
+        # Commutative-operator normalization (ADR-030 #6): the operands of a
+        # commutative binary operator (`a + b` vs `b + a`, `x == y` vs `y == x`)
+        # are sorted into a canonical order so a pure reordering does not change
+        # the fingerprint. Short-circuit `&&`/`||` are NOT commutative for the
+        # fingerprint — reordering them changes evaluation order/side effects — so
+        # they are excluded, as are all non-commutative operators.
+        if (
+            out.get("kind") == "BinaryOperator"
+            and out.get("opcode") in _COMMUTATIVE_OPS
+            and len(children) == 2
+        ):
+            children.sort(key=lambda c: json.dumps(c, sort_keys=True))
+        out["inner"] = children
     return out
 
 
-def _subtree_hash(node: dict[str, Any]) -> str:
-    return _hash("clang-ast", json.dumps(_canonical(node), sort_keys=True))
+def _subtree_hash(node: dict[str, Any], param_ids: tuple[str, ...] = ()) -> str:
+    """Alpha-equivalence-normalized structural fingerprint of a clang subtree.
+
+    ``param_ids`` are the clang ids of the enclosing function's parameters (in
+    declared order), so a body that references its parameters is normalized
+    together with them even though the parameter declarations live on the
+    ``FunctionDecl``, outside the hashed ``CompoundStmt`` body (ADR-030 #6).
+    """
+    amap = _alpha_rename_map(node, param_ids)
+    return _hash("clang-ast", json.dumps(_canonical(node, amap), sort_keys=True))
+
+
+def _param_ids(node: dict[str, Any]) -> tuple[str, ...]:
+    """The clang ids of a function node's parameters, in declared order."""
+    out: list[str] = []
+    for child in node.get("inner", []) or []:
+        if isinstance(child, dict) and child.get("kind") == "ParmVarDecl":
+            cid = child.get("id")
+            if isinstance(cid, str):
+                out.append(cid)
+    return tuple(out)
 
 
 def _node_file(node: dict[str, Any], current: str) -> str:
@@ -466,6 +611,36 @@ def _parse_define(rest: str) -> tuple[str, str] | None:
     return name, value
 
 
+def _is_include_guard(name: str, value: str, file: str) -> bool:
+    """Whether ``name`` is the include guard of ``file`` (ADR-030 follow-up #2).
+
+    Include guards (``#ifndef FOO_H`` / ``#define FOO_H``) surface from the
+    ``-E -dD`` pass as empty-valued macro entities — harmless but noisy. They are
+    suppressed when **both** hold, which keeps a real empty feature flag (e.g.
+    ``#define FOO_ENABLED``) from being dropped:
+
+    - the macro has an empty replacement (a guard never expands to anything), and
+    - its normalized name, with any surrounding underscores stripped, equals the
+      header's filename-derived token including the extension suffix
+      (``foo.h`` → ``FOO_H``; matches ``FOO_H``, ``_FOO_H``, ``FOO_H_``,
+      ``__FOO_H__``).
+
+    The match is *exact*, not a substring, so an intentional empty feature macro
+    that merely starts with the stem (``FOO_H_FEATURE``, ``FOO_H_DEPRECATED``) is
+    **not** dropped — only the guard spelling itself is. A guard that does not
+    derive from the filename (``#ifndef GUARD_12345``) is left in place — a
+    deliberate false-negative over risking a false suppression. (The parser does
+    not see the matching ``#ifndef``, so the spelling is the only signal.)
+    """
+    if value or not file:
+        return False
+    base = re.split(r"[\\/]", file)[-1]
+    stem = re.sub(r"[^A-Za-z0-9]+", "_", base).upper().strip("_")  # foo.h -> FOO_H
+    if not stem:
+        return False
+    return name.upper().strip("_") == stem
+
+
 def _unfold_continuations(lines: list[str]) -> list[str]:
     """Join backslash-continued physical lines into single logical lines.
 
@@ -533,6 +708,8 @@ def macros_from_preprocessor(
     for name, (value, file) in sorted(defs.items()):
         visibility, origin, public = ctx.classify(file)
         if not public:
+            continue
+        if _is_include_guard(name, value, file):
             continue
         entities.append(
             SourceEntity(
@@ -683,6 +860,8 @@ def _walk(
         _emit_constexpr(node, ctx, tu, scope, file)
     elif kind in ("CXXRecordDecl", "EnumDecl") and name and accessible:
         _emit_type(node, ctx, tu, scope, file)
+    elif kind in ("TypedefDecl", "TypeAliasDecl") and name and accessible:
+        _emit_typedef(node, ctx, tu, scope, file)
 
     # Descend, extending the scope name stack for namespaces/records so members
     # get a fully-qualified name.
@@ -772,7 +951,9 @@ def _emit_function(
                 qualified_name=name,
                 mangled_name=mangled,
                 signature_hash=_hash("sig", sig),
-                body_hash=_subtree_hash(body),
+                # Alpha-rename the function's parameters together with the body so
+                # a parameter rename does not flip the fingerprint (ADR-030 #6).
+                body_hash=_subtree_hash(body, _param_ids(node)),
                 source_location=loc,
                 visibility=visibility,
                 api_relevant=True,
@@ -857,6 +1038,61 @@ def _emit_type(
             kind=kind,
             qualified_name=name,
             type_hash=_subtree_hash(node),
+            source_location=_location(file, _node_line(node), origin),
+            visibility=visibility,
+            api_relevant=True,
+            confidence=EvidenceConfidence.HIGH,
+        )
+    )
+
+
+def _typedef_underlying(node: dict[str, Any]) -> str:
+    """The underlying type a typedef/alias resolves to, build-root-stable.
+
+    clang records the aliased spelling in ``type.qualType`` — the same key the
+    rest of this extractor reads for signatures (``typedef int32_t handle_t;`` →
+    ``"int32_t"`` as written). The written spelling is what matters for a
+    source/API change, so use it verbatim; fall back to ``desugaredQualType``
+    only when the spelling is absent.
+    """
+    type_obj = node.get("type")
+    if not isinstance(type_obj, dict):
+        return ""
+    return str(
+        type_obj.get("qualType")
+        or type_obj.get("desugaredQualType")
+        or ""
+    )
+
+
+def _emit_typedef(
+    node: dict[str, Any],
+    ctx: _ClassifyContext,
+    tu: SourceAbiTu,
+    scope: list[str],
+    file: str,
+) -> None:
+    """Emit a public typedef/alias entity so a target change is detectable (D6).
+
+    A bare typedef leaves no exported symbol of its own, so an underlying-type
+    change is invisible to L0/L1 unless some other declaration's signature
+    happens to spell it. Recording the alias and its underlying type lets the
+    source diff flag ``public_typedef_target_changed`` (ADR-030 follow-up #3).
+    """
+    visibility, origin, public = ctx.classify(file)
+    if not public:
+        return
+    underlying = _typedef_underlying(node)
+    if not underlying:
+        return
+    name = _qualified(scope, str(node.get("name", "")))
+    tu.types.append(
+        SourceEntity(
+            id=_hash("typedef", name, underlying),
+            kind="typedef",
+            qualified_name=name,
+            type_hash=_hash("typedef-target", underlying),
+            value=underlying,
             source_location=_location(file, _node_line(node), origin),
             visibility=visibility,
             api_relevant=True,

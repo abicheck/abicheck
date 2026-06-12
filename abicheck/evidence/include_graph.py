@@ -17,7 +17,7 @@
 Adds ``COMPILE_UNIT_INCLUDES_FILE`` edges from compiler depfiles (``-M``/``-MM``
 output) — the ADR-029 D3 / ADR-031 D3 source for "compile unit → include
 edges". The depfile *parser* is a pure function exercised by unit tests; the
-live ``clang -MM`` invocation is integration-only and degrades gracefully, like
+live ``clang -M`` invocation is integration-only and degrades gracefully, like
 the L4 source extractors and the call-graph extractor.
 """
 from __future__ import annotations
@@ -39,6 +39,77 @@ from .source_graph import (
 if TYPE_CHECKING:
     from .build_evidence import BuildEvidence
     from .source_graph import SourceGraphSummary
+
+
+#: Flags (with their value argument) that must be stripped before re-driving a
+#: recorded compile command as ``clang -MM``: the compile action, the object
+#: output, and any existing dependency-generation options.
+_DEPFILE_DROP_WITH_VALUE = frozenset({"-o", "--output", "-MF", "-MT", "-MQ", "-MJ", "-Xclang"})
+_DEPFILE_DROP_FLAG = frozenset({"-c", "-MD", "-MMD", "-MM", "-M", "-MG", "-MP", "-pipe"})
+
+
+def depfile_args_from_argv(argv: list[str]) -> list[str]:
+    """Strip a recorded compile argv down to the args usable after ``clang -MM``.
+
+    A compile database stores the full command — possibly launcher-wrapped, like
+    ``ccache clang++ -c foo.cpp -o foo.o -I…`` — whose leading tokens are a
+    compiler launcher and the *compiler executable*. Re-driving that as
+    ``clang++ -MM ccache clang++ -c foo.cpp …`` makes clang treat the leftover
+    launcher/compiler tokens as input files and emit no usable depfile (Codex
+    review). Strip leading ``ccache``/``sccache``/… launchers and the compiler
+    token, drop the ``-c`` compile action, the ``-o``/``-MF``/… outputs and any
+    pre-existing dependency flags, keeping the source plus the ABI-relevant
+    ``-I``/``-D``/``-std`` context that decides what is included.
+    """
+    if not argv:
+        return []
+    # Reuse the source extractors' launcher-stripping so a ccache/sccache-wrapped
+    # command leaves only the compiler token to drop next.
+    from .source_extractors._argv import strip_launchers
+
+    unwrapped = strip_launchers(list(argv))
+    # After the launcher, the first token is the compiler driver (an executable
+    # path, not a flag); drop it. An argv that is already only flags keeps them.
+    args = (
+        unwrapped[1:]
+        if unwrapped and not unwrapped[0].startswith("-")
+        else list(unwrapped)
+    )
+    out: list[str] = []
+    skip_next = False
+    for tok in args:
+        if skip_next:
+            skip_next = False
+            continue
+        if tok in _DEPFILE_DROP_WITH_VALUE:
+            skip_next = True
+            continue
+        # `-oFOO` / `-MFfoo.d` glued forms and the GCC long `--output=foo.o`
+        # spelling (clang -M with --output=… writes the depfile to that file and
+        # leaves stdout empty, losing the include entry — Codex review).
+        if tok.startswith("--output="):
+            continue
+        if any(tok.startswith(f) and tok != f for f in ("-o", "-MF", "-MT", "-MQ")):
+            continue
+        if tok in _DEPFILE_DROP_FLAG:
+            continue
+        out.append(tok)
+    return out
+
+
+def _lang_flag(language: str) -> list[str]:
+    """``-x <lang>`` forcing a compile unit's language for the depfile pass.
+
+    Preserves the compile command's language so a C TU replayed through the
+    ``clang++`` driver is parsed as C, not C++ (Codex review). An unknown
+    language adds no flag, leaving the driver/extension to decide.
+    """
+    lang = language.strip().upper()
+    if lang in ("C",):
+        return ["-x", "c"]
+    if lang in ("CXX", "C++", "CPP", "CC"):
+        return ["-x", "c++"]
+    return []
 
 
 def parse_depfile(text: str) -> list[str]:
@@ -108,7 +179,7 @@ def augment_graph_with_includes(
 
 @dataclass
 class ClangIncludeExtractor:
-    """Run ``clang -MM`` to recover a TU's included files (integration only).
+    """Run ``clang -M`` to recover a TU's included files (integration only).
 
     Compiler-dependent and side-effecting: a missing ``clang`` or a failure
     records a diagnostic and yields ``{}`` so collection never aborts.
@@ -125,19 +196,40 @@ class ClangIncludeExtractor:
         if not self.available():
             self.diagnostics.append(f"{self.clang_bin} not found in PATH")
             return {}
+        # The redaction policy (ADR-032 D7) persists argv/cwd with the home dir
+        # rewritten to `~`; subprocess does not expand `~`, so a depfile pass over
+        # the redacted values would fail and silently degrade replay scoping
+        # (Codex review). Un-redact for the run only, exactly as the clang source
+        # extractor does.
+        from .source_extractors._argv import unredact_home
+
         out: dict[str, list[str]] = {}
         for cu in build.compile_units:
             if not cu.source:
                 continue
-            argv = list(cu.argv) if cu.argv else [cu.source]
-            cmd = [self.clang_bin, "-MM", *argv]
+            argv = depfile_args_from_argv(cu.argv) if cu.argv else [cu.source]
+            if not argv:
+                argv = [cu.source]
+            # `-M` (not `-MM`) so depfiles include *system*-classified headers: a
+            # project whose public headers are reached via `-isystem` (installed
+            # / SYSTEM include dirs) would otherwise be omitted, and the `changed`
+            # scope, treating a complete graph as authoritative, would select no
+            # TU for edits to them (Codex review). `-x <lang>` forces the compile
+            # unit's real language so a `.c` TU replayed through the clang++ driver
+            # is not parsed as C++ (wrong __cplusplus / language-conditioned
+            # includes) (Codex review).
+            cmd = [
+                self.clang_bin, "-M", *_lang_flag(cu.language),
+                *(unredact_home(a) for a in argv),
+            ]
+            cwd = unredact_home(cu.directory) if cu.directory else None
             try:
                 proc = subprocess.run(  # noqa: S603 - fixed argv, never shell=True
-                    cmd, cwd=cu.directory or None, capture_output=True,
+                    cmd, cwd=cwd or None, capture_output=True,
                     text=True, timeout=120, check=False,
                 )
             except (OSError, subprocess.SubprocessError) as exc:
-                self.diagnostics.append(f"clang -MM failed for {cu.id}: {exc}")
+                self.diagnostics.append(f"clang -M failed for {cu.id}: {exc}")
                 continue
             if proc.stdout.strip():
                 out[cu.id] = parse_depfile(proc.stdout)

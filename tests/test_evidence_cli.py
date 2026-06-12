@@ -393,6 +393,60 @@ def test_collect_evidence_source_abi_success(tmp_path, monkeypatch):
     assert cov is not None and cov.status.value == "present"
 
 
+def test_include_map_for_replay_helper(monkeypatch):
+    """_include_map_for_replay returns the depfile map, or None when clang is absent."""
+    import abicheck.evidence.include_graph as ig
+    from abicheck.cli_evidence import _include_map_for_replay
+    from abicheck.evidence.build_evidence import BuildEvidence
+
+    class _Avail:
+        clang_bin = "clang++"
+
+        def __init__(self, **kw):
+            self.diagnostics = []
+
+        def available(self):
+            return True
+
+        def extract_from_build(self, build):
+            return {"cu://a": ["include/foo.h"]}
+
+    monkeypatch.setattr(ig, "ClangIncludeExtractor", _Avail)
+    assert _include_map_for_replay(BuildEvidence(), "clang") == {
+        "cu://a": ["include/foo.h"]
+    }
+
+    class _Unavail(_Avail):
+        def available(self):
+            return False
+
+    monkeypatch.setattr(ig, "ClangIncludeExtractor", _Unavail)
+    assert _include_map_for_replay(BuildEvidence(), "clang") is None
+
+
+def test_collect_evidence_source_abi_uses_include_graph(tmp_path, monkeypatch):
+    """headers-only/changed scopes feed the depfile include map into replay."""
+    import abicheck.cli_evidence as ce
+    import abicheck.evidence.source_extractors as se
+
+    monkeypatch.setattr(se, "ClangSourceExtractor", _fake_clang_extractor())
+    monkeypatch.setattr(
+        ce, "_include_map_for_replay",
+        lambda merged, clang_bin: {"cu://x": ["include/foo.h"]},
+    )
+    cdb = _write_cdb(tmp_path, "c++17")
+    out = tmp_path / "ev"
+    result = CliRunner().invoke(main, [
+        "collect-evidence", "--compile-db", str(cdb),
+        "--source-abi", "--source-abi-scope", "headers-only",
+        "-o", str(out),
+    ])
+    assert result.exit_code == 0, result.output
+    pack = EvidencePack.load(out)
+    assert pack.source_abi is not None
+    assert pack.source_abi.coverage.get("include_graph_used") is True
+
+
 def test_collect_evidence_source_abi_castxml_unavailable(tmp_path):
     """The castxml backend degrades gracefully when castxml is absent."""
     cdb = _write_cdb(tmp_path, "c++17")

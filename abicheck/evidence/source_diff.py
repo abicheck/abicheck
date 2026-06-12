@@ -119,6 +119,7 @@ def diff_source_abi(old: SourceAbiSurface, new: SourceAbiSurface) -> list[Change
     """
     changes: list[Change] = []
     changes.extend(_diff_generated(old, new))
+    changes.extend(_diff_typedefs(old, new))
     changes.extend(_diff_macros(old, new))
     changes.extend(_diff_declarations(old, new))
     changes.extend(_diff_inline_bodies(old, new))
@@ -191,6 +192,46 @@ def _diff_generated(old: SourceAbiSurface, new: SourceAbiSurface) -> list[Change
                         source_location=_loc(ov),
                     )
                 )
+    return changes
+
+
+# -- typedefs / aliases ------------------------------------------------------
+
+
+def _diff_typedefs(old: SourceAbiSurface, new: SourceAbiSurface) -> list[Change]:
+    """Flag a public typedef/alias whose underlying type changed (ADR-030 D6).
+
+    Typedef entities ride in ``reachable_types`` (kind ``typedef``); a bare
+    typedef has no exported symbol, so a target change is otherwise invisible to
+    artifact comparison. Generated typedefs are reported as
+    ``generated_header_changed`` by ``_diff_generated`` and skipped here so they
+    are not double-counted.
+    """
+    old_t = {e.identity(): e for e in old.reachable_types if e.kind == "typedef"}
+    new_t = {e.identity(): e for e in new.reachable_types if e.kind == "typedef"}
+    changes: list[Change] = []
+    for key in sorted(set(old_t) & set(new_t)):
+        ov, nv = old_t[key], new_t[key]
+        if _is_generated(nv):
+            continue
+        if ov.type_hash != nv.type_hash:
+            name = nv.qualified_name
+            changes.append(
+                Change(
+                    kind=ChangeKind.PUBLIC_TYPEDEF_TARGET_CHANGED,
+                    symbol=name,
+                    description=(
+                        f"Public typedef {name!r} now resolves to a different "
+                        f"underlying type: {ov.value!r} -> {nv.value!r}. Source "
+                        "relying on the old aliased type may change meaning or "
+                        "fail to compile; recompile consumers against the new "
+                        "headers."
+                    ),
+                    old_value=ov.value or ov.type_hash,
+                    new_value=nv.value or nv.type_hash,
+                    source_location=_loc(nv),
+                )
+            )
     return changes
 
 

@@ -422,3 +422,148 @@ class TestNoFailOnAdditionsFlag:
         # not mistaken for a "2 = source break" verdict.
         from abicheck.cli import _EXIT_USAGE_ERROR
         assert result.exit_code == _EXIT_USAGE_ERROR
+
+
+# ── baseline evidence-pack CLI (ADR-028 Phase 5) ─────────────────────────
+
+class TestBaselineEvidenceCli:
+    """Cover `baseline push --evidence` and `baseline pull --evidence-output`."""
+
+    def _snapshot(self, tmp_path: Path) -> Path:
+        snap = AbiSnapshot(library="libfoo.so", version="1.0", functions=[])
+        p = tmp_path / "snap.json"
+        p.write_text(snapshot_to_json(snap), encoding="utf-8")
+        return p
+
+    def _pack(self, root: Path) -> Path:
+        from abicheck.evidence import BuildEvidence, EvidencePack
+        from abicheck.evidence.build_evidence import Toolchain
+
+        pack = EvidencePack.empty(root, abicheck_version="9.9", created_at="t0")
+        pack.build_evidence = BuildEvidence(
+            toolchains=[Toolchain(id="toolchain://gcc-13", compiler_id="GNU", version="13")]
+        )
+        pack.write()
+        return root
+
+    def test_push_with_evidence_then_pull_roundtrip(self, tmp_path: Path) -> None:
+        snap = self._snapshot(tmp_path)
+        pack_dir = self._pack(tmp_path / "ev.evidence")
+        registry = tmp_path / "registry"
+        runner = CliRunner()
+
+        push = runner.invoke(main, [
+            "baseline", "push", "libfoo", "--version", "1.0",
+            "--platform", "linux-x86_64", "--snapshot", str(snap),
+            "--registry", str(registry), "--evidence", str(pack_dir),
+        ])
+        assert push.exit_code == 0, push.output
+        assert "with evidence pack" in push.output
+
+        out = tmp_path / "pulled.evidence"
+        pull = runner.invoke(main, [
+            "baseline", "pull", "libfoo:1.0:linux-x86_64",
+            "-o", str(tmp_path / "snap-out.json"),
+            "--registry", str(registry), "--evidence-output", str(out),
+        ])
+        assert pull.exit_code == 0, pull.output
+        assert "Evidence pack written" in pull.output
+        assert (out / "manifest.json").is_file()
+        assert (out / "build" / "build_evidence.json").is_file()
+
+    def test_pull_evidence_output_when_no_pack(self, tmp_path: Path) -> None:
+        snap = self._snapshot(tmp_path)
+        registry = tmp_path / "registry"
+        runner = CliRunner()
+        runner.invoke(main, [
+            "baseline", "push", "libfoo", "--version", "1.0",
+            "--platform", "linux-x86_64", "--snapshot", str(snap),
+            "--registry", str(registry),
+        ])
+        pull = runner.invoke(main, [
+            "baseline", "pull", "libfoo:1.0:linux-x86_64",
+            "-o", str(tmp_path / "snap-out.json"),
+            "--registry", str(registry),
+            "--evidence-output", str(tmp_path / "out.evidence"),
+        ])
+        assert pull.exit_code == 0, pull.output
+        assert "no evidence pack to extract" in pull.output
+
+    def test_pull_evidence_output_overwrites_existing_dir(self, tmp_path: Path) -> None:
+        snap = self._snapshot(tmp_path)
+        pack_dir = self._pack(tmp_path / "ev.evidence")
+        registry = tmp_path / "registry"
+        runner = CliRunner()
+        runner.invoke(main, [
+            "baseline", "push", "libfoo", "--version", "1.0",
+            "--platform", "linux-x86_64", "--snapshot", str(snap),
+            "--registry", str(registry), "--evidence", str(pack_dir),
+        ])
+        out = tmp_path / "out.evidence"
+        out.mkdir()
+        (out / "stale.txt").write_text("old", encoding="utf-8")  # must be cleared
+        pull = runner.invoke(main, [
+            "baseline", "pull", "libfoo:1.0:linux-x86_64",
+            "-o", str(tmp_path / "snap-out.json"),
+            "--registry", str(registry), "--evidence-output", str(out),
+        ])
+        assert pull.exit_code == 0, pull.output
+        assert not (out / "stale.txt").exists()
+        assert (out / "manifest.json").is_file()
+
+    def test_pull_evidence_output_integrity_error(self, tmp_path: Path) -> None:
+        snap = self._snapshot(tmp_path)
+        pack_dir = self._pack(tmp_path / "ev.evidence")
+        registry = tmp_path / "registry"
+        runner = CliRunner()
+        runner.invoke(main, [
+            "baseline", "push", "libfoo", "--version", "1.0",
+            "--platform", "linux-x86_64", "--snapshot", str(snap),
+            "--registry", str(registry), "--evidence", str(pack_dir),
+        ])
+        # Corrupt a stored normalized payload so the integrity check fails.
+        stored = registry / "libfoo" / "1.0" / "linux-x86_64" / "evidence" / "build" / "build_evidence.json"
+        stored.write_text('{"schema_version": 1, "x": true}\n', encoding="utf-8")
+        pull = runner.invoke(main, [
+            "baseline", "pull", "libfoo:1.0:linux-x86_64",
+            "-o", str(tmp_path / "snap-out.json"),
+            "--registry", str(registry), "--evidence-output", str(tmp_path / "out.evidence"),
+        ])
+        assert pull.exit_code != 0
+        assert "content hash mismatch" in pull.output
+
+    def test_pull_evidence_output_to_registry_dir_is_noop(self, tmp_path: Path) -> None:
+        snap = self._snapshot(tmp_path)
+        pack_dir = self._pack(tmp_path / "ev.evidence")
+        registry = tmp_path / "registry"
+        runner = CliRunner()
+        runner.invoke(main, [
+            "baseline", "push", "libfoo", "--version", "1.0",
+            "--platform", "linux-x86_64", "--snapshot", str(snap),
+            "--registry", str(registry), "--evidence", str(pack_dir),
+        ])
+        # Point --evidence-output at the stored pack itself: must be a no-op,
+        # not delete the registry's pack (Codex review).
+        stored = registry / "libfoo" / "1.0" / "linux-x86_64" / "evidence"
+        pull = runner.invoke(main, [
+            "baseline", "pull", "libfoo:1.0:linux-x86_64",
+            "-o", str(tmp_path / "snap-out.json"),
+            "--registry", str(registry), "--evidence-output", str(stored),
+        ])
+        assert pull.exit_code == 0, pull.output
+        assert "already at" in pull.output
+        assert (stored / "manifest.json").is_file()
+
+    def test_push_with_bad_evidence_dir_errors(self, tmp_path: Path) -> None:
+        snap = self._snapshot(tmp_path)
+        bad = tmp_path / "not-a-pack"
+        bad.mkdir()  # exists but has no manifest.json
+        registry = tmp_path / "registry"
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "baseline", "push", "libfoo", "--version", "1.0",
+            "--platform", "linux-x86_64", "--snapshot", str(snap),
+            "--registry", str(registry), "--evidence", str(bad),
+        ])
+        assert result.exit_code != 0
+        assert "Cannot load evidence pack" in result.output

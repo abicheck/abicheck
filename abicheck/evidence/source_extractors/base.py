@@ -248,23 +248,29 @@ def entity_from_constant(
     )
 
 
-def entity_from_typedef(name: str, target: str) -> SourceEntity:
+def entity_from_typedef(
+    name: str, target: str, *, source_header: str = "", generated: bool = False
+) -> SourceEntity:
     """Map a typedef alias (name→underlying type) to a ``typedef`` type entity.
 
-    Stamped ``PUBLIC_HEADER``: the ``typedefs`` map has no per-entry provenance,
-    so the **caller must pre-scope it to the public surface** (as ``parse_constants``
-    does for constants). The castxml extractor cannot — ``parse_typedefs`` is
-    unscoped — so it passes none rather than pull private/system aliases onto the
-    surface (which would also risk false ``odr_source_conflict``).
+    The **caller must pre-scope the typedefs to the public surface** (the castxml
+    parser's ``parse_public_typedefs`` does this by provenance, like
+    ``parse_constants`` for constants) so private/system aliases are not pulled
+    onto the surface. ``source_header`` carries the declaring-header path so the
+    linker's ODR detection — keyed on ``(qualified_name, header)`` — does not
+    collide two same-named public typedefs from different headers into a false
+    ``odr_source_conflict``. A typedef in a *generated* public header is marked
+    ``GENERATED`` so ``_diff_generated`` owns its add/remove/change.
     """
+    origin = "GENERATED" if generated else "PUBLIC_HEADER"
     return SourceEntity(
         id=_content_hash("typedef", name, target),
         kind="typedef",
         qualified_name=name,
         type_hash=_content_hash("type", target),
         value=target,
-        source_location=SourceLocation(origin="PUBLIC_HEADER"),
-        visibility="public_header",
+        source_location=SourceLocation(path=source_header, origin=origin),
+        visibility="generated" if generated else "public_header",
         api_relevant=True,
         confidence=EvidenceConfidence.HIGH,
     )
@@ -285,6 +291,8 @@ def assemble_source_tu(
     typedefs: dict[str, str],
     constant_headers: dict[str, str] | None = None,
     generated_constants: set[str] | None = None,
+    typedef_headers: dict[str, str] | None = None,
+    generated_typedefs: set[str] | None = None,
     diagnostics: list[str] | None = None,
 ) -> SourceAbiTu:
     """Assemble parsed model objects into a normalized :class:`SourceAbiTu` (D4).
@@ -311,7 +319,12 @@ def assemble_source_tu(
             [entity_from_record(r) for r in records]
             + [entity_from_enum(e) for e in enums]
             + [
-                entity_from_typedef(name, target)
+                entity_from_typedef(
+                    name,
+                    target,
+                    source_header=(typedef_headers or {}).get(name, ""),
+                    generated=name in (generated_typedefs or set()),
+                )
                 for name, target in sorted(typedefs.items())
             ]
         ),

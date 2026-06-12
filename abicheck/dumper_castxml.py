@@ -940,3 +940,46 @@ class _CastxmlParser:
             underlying = self._underlying_type_name(type_id) if type_id else "?"
             typedefs[name] = underlying
         return typedefs
+
+    def _iter_public_typedefs(self) -> list[tuple[str, str, str]]:
+        """``(qualified_name, underlying_type, declaring_header)`` for every
+        *public-header* typedef — the provenance-scoped source of truth shared by
+        :meth:`parse_public_typedefs` and :meth:`parse_public_typedef_headers`.
+
+        Unlike :meth:`parse_typedefs` (unscoped, used by the L2 snapshot), this is
+        filtered to the public surface so the L4 extractor does not pull
+        private/system aliases onto the linked source surface (ADR-030 #3).
+        """
+        if not self._have_public_set:
+            return []
+        out: list[tuple[str, str, str]] = []
+        for el in self._root:
+            if el.tag != "Typedef":
+                continue
+            name = el.get("name", "")
+            if not name:
+                continue
+            if self._is_builtin_element(el):
+                continue
+            if el.get("access") in ("private", "protected"):
+                continue
+            if not self._decl_is_public(el):
+                continue
+            type_id = el.get("type", "")
+            underlying = self._underlying_type_name(type_id) if type_id else "?"
+            out.append(
+                (
+                    self._qualified_name(el),
+                    underlying,
+                    header_from_location(self._source_location(el)) or "",
+                )
+            )
+        return out
+
+    def parse_public_typedefs(self) -> dict[str, str]:
+        """Public-header typedef aliases ``qualified_name → underlying type`` (ADR-030 #3)."""
+        return {name: target for name, target, _ in self._iter_public_typedefs()}
+
+    def parse_public_typedef_headers(self) -> dict[str, str]:
+        """Public typedef qualified name → declaring header (provenance, ADR-030 #3)."""
+        return {name: header for name, _, header in self._iter_public_typedefs()}

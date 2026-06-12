@@ -540,6 +540,7 @@ class ChangeKind(str, Enum):
     SOURCE_DECL_BINARY_SYMBOL_MISMATCH = "source_decl_binary_symbol_mismatch"  # decl no longer maps to a symbol → RISK
     ODR_SOURCE_CONFLICT = "odr_source_conflict"  # same type name differs across TUs → RISK
     GENERATED_HEADER_CHANGED = "generated_header_changed"  # generated public header changed → RISK
+    PUBLIC_TYPEDEF_TARGET_CHANGED = "public_typedef_target_changed"  # public typedef/alias underlying type changed → API_BREAK
 
     # ── Source graph evidence (ADR-028 L5 / ADR-031 D6) ─────────────────────
     # Emitted only by the source-graph diff over two L5 graph summaries

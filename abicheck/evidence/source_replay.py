@@ -43,7 +43,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 
 from .build_evidence import BuildEvidence, CompileUnit, Target
@@ -125,27 +125,55 @@ def _units_for_target(build: BuildEvidence, target_id: str) -> list[CompileUnit]
     return [cu for cu in build.compile_units if cu.target_id == target_id]
 
 
+def _norm_include_map(
+    include_map: Mapping[str, Iterable[str]] | None,
+) -> dict[str, list[str]]:
+    """Normalize a ``{compile_unit_id: includes}`` map to lists of strings.
+
+    Tolerates any iterable of paths per unit (the include extractor emits lists;
+    a hand-built map might pass a set/tuple). Empty/None → ``{}`` so callers can
+    treat "no include graph" uniformly.
+    """
+    if not include_map:
+        return {}
+    return {
+        str(cu_id): [str(p) for p in (paths or ()) if p]
+        for cu_id, paths in include_map.items()
+    }
+
+
 def select_compile_units(
     build: BuildEvidence,
     *,
     scope: str,
     changed_paths: Iterable[str] = (),
     target_id: str = "",
+    include_map: Mapping[str, Iterable[str]] | None = None,
 ) -> list[CompileUnit]:
     """Select which compile units to replay for an ADR-030 D7 ``scope``.
 
-    Pure: a function of the build evidence plus the changed-path set / target id.
+    Pure: a function of the build evidence plus the changed-path set / target id,
+    and — when supplied — a per-TU **include graph** ``{compile_unit_id:
+    [included_path, ...]}`` (ADR-031 D3, from compiler depfiles via
+    :func:`include_graph.parse_depfile` / :class:`include_graph.ClangIncludeExtractor`).
+    The include graph makes ``headers-only`` and ``changed`` *precise* instead of
+    approximate (ADR-030 follow-up #4); without it the previous target-ownership
+    heuristics apply unchanged, so the parameter is fully optional.
 
     - ``off`` — nothing.
-    - ``headers-only`` — a representative subset for fast public-API coverage:
-      the first compile unit (by id) of each target that declares public
-      headers. Falls back to every unit when no target carries public headers
-      (no build graph to scope by). This trades completeness for speed; a TU
-      that includes the public headers yields their declarations regardless of
-      which TU it is.
-    - ``changed`` — units whose source is a changed path, unioned with every unit
-      of any target that owns a changed header (a header edit can change the ABI
-      of every TU that includes it). PR mode (ADR-025 changed-path signal).
+    - ``headers-only`` — a subset that covers the public API surface for fast
+      replay. **With an include graph**: the minimal set of TUs (greedy set
+      cover) whose included files together cover every public header — so a
+      header included by no representative TU is not silently dropped.
+      **Without one**: the first compile unit (by id) of each target that
+      declares public headers (a representative subset). Either way falls back to
+      every unit when there is nothing to scope by.
+    - ``changed`` — units whose source is a changed path, plus the units a changed
+      *header* actually affects. **With an include graph**: exactly the TUs whose
+      transitive includes contain the changed header. **Without one**: every unit
+      of any target that owns a changed header, falling back to a full fan-out
+      when a header maps to no TU (the cache then skips the unaffected units).
+      PR mode (ADR-025 changed-path signal).
     - ``target`` — units of ``target_id`` (release-baseline mode). When no target
       is given, every unit attached to some target, falling back to all units.
     - ``full`` — every compile unit (nightly/deep mode).
@@ -159,27 +187,109 @@ def select_compile_units(
         return []
     if scope == "full":
         return list(units)
+    inc = _norm_include_map(include_map)
     if scope == "headers-only":
-        return _select_headers_only(build)
+        return _select_headers_only(build, inc)
     if scope == "target":
         return _select_target(build, target_id)
-    return _select_changed(build, frozenset(changed_paths))
+    return _select_changed(build, frozenset(changed_paths), inc)
 
 
-def _select_headers_only(build: BuildEvidence) -> list[CompileUnit]:
+def _select_headers_only(
+    build: BuildEvidence, include_map: dict[str, list[str]]
+) -> list[CompileUnit]:
+    if include_map:
+        picked = _headers_only_set_cover(build, include_map)
+        if picked is not None:
+            return picked
     by_target: dict[str, list[CompileUnit]] = {}
     for cu in build.compile_units:
         by_target.setdefault(cu.target_id, []).append(cu)
     targets_with_headers = {t.id for t in build.targets if t.public_headers}
-    picked: list[CompileUnit] = []
+    picked_heur: list[CompileUnit] = []
     for tid in sorted(targets_with_headers):
         group = sorted(by_target.get(tid, []), key=lambda c: c.id)
         if group:
-            picked.append(group[0])
+            picked_heur.append(group[0])
     # No target declares public headers (or none of them own a compile unit):
     # there is nothing to scope by, so fall back to a full parse rather than
     # silently producing an empty surface.
-    return picked or list(build.compile_units)
+    return picked_heur or list(build.compile_units)
+
+
+def _headers_only_set_cover(
+    build: BuildEvidence, include_map: dict[str, list[str]]
+) -> list[CompileUnit] | None:
+    """Minimal TU set whose includes cover every public header (greedy set cover).
+
+    Returns ``None`` to defer to the heuristic when there is no public-header set
+    to cover, or when the include graph covers none of them (so the surface would
+    otherwise be empty). The cover is over the headers the graph *can* reach; any
+    public header no recorded TU includes is left to the heuristic by returning
+    ``None`` only when the graph covers nothing at all.
+    """
+    public = public_header_roots_for(build)
+    if not public:
+        return None
+    by_id = {cu.id: cu for cu in build.compile_units}
+    # Which target(s) *declare* each public header. A header must be fingerprinted
+    # under the compile context of an owning target, not a downstream app/test TU
+    # that merely includes it (different defines/include paths would mis-fingerprint
+    # the surface) — so a TU may only "cover" a public header its own target
+    # declares (Codex review).
+    header_owners: dict[str, set[str]] = {}
+    for target in build.targets:
+        for ph in target.public_headers:
+            header_owners.setdefault(ph, set()).add(target.id)
+    # cu_id -> set of public headers that TU includes (build-root-stable match) and
+    # whose owning target it belongs to.
+    coverage: dict[str, set[str]] = {}
+    for cu_id, incs in include_map.items():
+        cu = by_id.get(cu_id)
+        if cu is None:
+            continue
+        incset = frozenset(incs)
+        covered = {
+            ph
+            for ph in public
+            if _included(ph, incset) and cu.target_id in header_owners.get(ph, set())
+        }
+        if covered:
+            coverage[cu_id] = covered
+    if not coverage:
+        return None
+    need = set(public)
+    chosen: list[str] = []
+    # Greedy: repeatedly take the TU covering the most still-needed headers;
+    # break ties by compile-unit id for determinism.
+    while need:
+        best = min(
+            (cid for cid in coverage if coverage[cid] & need),
+            key=lambda cid: (-len(coverage[cid] & need), cid),
+            default=None,
+        )
+        if best is None:
+            break
+        chosen.append(best)
+        need -= coverage[best]
+    # A *partial* include graph may not reach every public header. Returning the
+    # cover for only the reachable ones would silently drop a public header no
+    # recorded TU includes — its source-only changes would never be parsed. Defer
+    # to the representative-per-target heuristic (which covers every public-header
+    # target) whenever the cover cannot satisfy all public headers (Codex review).
+    if need:
+        return None
+    return [by_id[c] for c in chosen]
+
+
+def _included(public_header: str, includes: frozenset[str]) -> bool:
+    """Whether one of ``includes`` is the same file as ``public_header``.
+
+    Reuses the build-root-stable path-suffix match so an absolute included path
+    (``/work/include/foo.h``) lines up with a repo-relative public header
+    (``include/foo.h``).
+    """
+    return _path_matches(public_header, includes)
 
 
 def _select_target(build: BuildEvidence, target_id: str) -> list[CompileUnit]:
@@ -200,37 +310,58 @@ def _looks_like_header(path: str) -> bool:
 
 
 def _select_changed(
-    build: BuildEvidence, changed: frozenset[str]
+    build: BuildEvidence, changed: frozenset[str], include_map: dict[str, list[str]]
 ) -> list[CompileUnit]:
     if not changed:
         return []
+    units = build.compile_units
+    header_changed = any(_looks_like_header(c) for c in changed)
+    all_covered = bool(units) and all(cu.id in include_map for cu in units)
+    graph_partial = bool(include_map) and not all_covered
+
+    # A *partial* include graph cannot be trusted to **exclude** a TU on a header
+    # change: a covered TU whose depfile omitted the changed header would be
+    # wrongly marked unaffected, dropping its source-only macro/default/inline
+    # changes from PR-mode replay. So when a header changed and the graph does not
+    # cover every unit, fan out to all units — the per-TU dump cache (D8) then
+    # skips the TUs whose recorded read_files did not actually change, so the
+    # fan-out costs nothing for unaffected units (Codex review). Negative include
+    # matches are trusted only when the graph covers every compile unit (below).
+    if header_changed and graph_partial:
+        return list(units)
+
     owning_targets = {
         t.id for t in build.targets if _target_owns_changed_header(t, changed)
     }
     picked: list[CompileUnit] = []
     seen: set[str] = set()
-    for cu in build.compile_units:
+    for cu in units:
         if cu.id in seen:
             continue
-        if _path_matches(cu.source, changed) or cu.target_id in owning_targets:
+        if _path_matches(cu.source, changed):
+            hit = True
+        elif cu.id in include_map:
+            # Precise: the include graph knows exactly which files this TU pulls
+            # in (and here it covers every unit, so a negative is trustworthy), so
+            # it is affected iff a changed path is among them — the precision win
+            # over target-ownership (ADR-030 follow-up #4).
+            hit = any(_path_matches(inc, changed) for inc in include_map[cu.id])
+        else:
+            # No include-graph entry for this TU → fall back to the
+            # target-ownership heuristic for it.
+            hit = cu.target_id in owning_targets
+        if hit:
             picked.append(cu)
             seen.add(cu.id)
     if picked:
         return picked
-    # Fail open (ADR-025 D3): a changed *header* we could not map to any TU must
-    # not silently select nothing, or source-only header changes
-    # (macros/defaults/constexpr/inline bodies) vanish from PR-mode replay. The
-    # include graph is not recorded in BuildEvidence, and a target's
-    # public/private header metadata lists only its *own* headers — not the
-    # transitive private headers it pulls in (e.g. include/detail/config.h
-    # included by a public header but listed on no target). Such a header is
-    # owned by nobody, so scoping by header metadata alone drops it even when
-    # other targets *do* carry header metadata. Conservatively replay every TU
-    # whenever a header changed; the per-TU dump cache (D8) then skips the TUs
-    # whose recorded read_files did not actually change, so the fan-out costs
-    # nothing for unaffected units (Codex review #339, P2).
-    if any(_looks_like_header(c) for c in changed):
-        return list(build.compile_units)
+    # No unit matched. Fail open (ADR-025 D3) when there is **no** include graph
+    # and a header changed but mapped to no TU (target header metadata lists only
+    # a target's own headers, not transitive private ones like
+    # include/detail/config.h). With a full include graph the empty result is
+    # authoritative — a header included by no unit genuinely affects nothing.
+    if not include_map and header_changed:
+        return list(units)
     return []
 
 
@@ -473,6 +604,7 @@ def run_source_replay(
     public_header_roots: Sequence[str] | None = None,
     forced_public: Iterable[str] = (),
     cache: SourceAbiCache | None = None,
+    include_map: Mapping[str, Iterable[str]] | None = None,
 ) -> tuple[SourceAbiSurface, list[str]]:
     """Run source ABI replay over a build tree and return the linked surface.
 
@@ -491,7 +623,11 @@ def run_source_replay(
         else public_header_roots_for(build, target_id)
     )
     units = select_compile_units(
-        build, scope=scope, changed_paths=changed_paths, target_id=target_id
+        build,
+        scope=scope,
+        changed_paths=changed_paths,
+        target_id=target_id,
+        include_map=include_map,
     )
     tus: list[SourceAbiTu] = []
     diagnostics: list[str] = []
@@ -527,6 +663,7 @@ def run_source_replay(
         forced_public=forced_public,
     )
     surface.coverage["replay_scope"] = scope
+    surface.coverage["include_graph_used"] = bool(_norm_include_map(include_map))
     surface.coverage["compile_units_selected"] = len(units)
     surface.coverage["compile_units_parsed"] = len(tus)
     surface.coverage["extractor_failures"] = len(diagnostics)

@@ -186,6 +186,184 @@ def test_ast_mapping_extracts_each_entity_kind() -> None:
     assert SourceAbiTu.from_dict(tu.to_dict()).tu_id == tu.tu_id
 
 
+def test_ast_mapping_extracts_typedef_underlying_type() -> None:
+    # ADR-030 follow-up #3: a public typedef/alias records its underlying type so
+    # a later target change is detectable; bare typedefs have no exported symbol.
+    ast = {
+        "kind": "TranslationUnitDecl",
+        "inner": [
+            {
+                "kind": "TypedefDecl", "name": "handle_t",
+                "loc": {"file": "include/foo.h", "line": 4},
+                "type": {"qualType": "int32_t"},
+            },
+            {
+                "kind": "TypeAliasDecl", "name": "size_alias",
+                "loc": {"file": "include/foo.h", "line": 5},
+                "type": {"qualType": "unsigned long"},
+            },
+        ],
+    }
+    tu = source_abi_from_clang_ast(ast, _cu(), ["include/foo.h"], "t")
+    typedefs = {e.qualified_name: e for e in tu.types if e.kind == "typedef"}
+    assert typedefs["handle_t"].value == "int32_t"
+    assert typedefs["size_alias"].value == "unsigned long"
+    assert typedefs["handle_t"].type_hash.startswith("sha256:")
+
+
+def test_typedef_underlying_fallback_and_missing() -> None:
+    from abicheck.evidence.source_extractors.clang import _typedef_underlying
+
+    # qualType wins; desugaredQualType is the fallback; a non-dict/absent type
+    # yields "" so _emit_typedef skips the entity.
+    assert _typedef_underlying({"type": {"qualType": "int32_t"}}) == "int32_t"
+    assert _typedef_underlying({"type": {"desugaredQualType": "int"}}) == "int"
+    assert _typedef_underlying({"type": None}) == ""
+    assert _typedef_underlying({}) == ""
+
+
+def test_typedef_without_underlying_is_skipped() -> None:
+    ast = {
+        "kind": "TranslationUnitDecl",
+        "inner": [{
+            "kind": "TypedefDecl", "name": "opaque",
+            "loc": {"file": "include/foo.h", "line": 2}, "type": {},
+        }],
+    }
+    tu = source_abi_from_clang_ast(ast, _cu(), ["include/foo.h"], "t")
+    assert not [e for e in tu.types if e.kind == "typedef"]
+
+
+# -- alpha-equivalence body fingerprint (ADR-030 follow-up #6) ---------------
+
+
+def _fn_ast(param, local, ret_ref):
+    """A FunctionDecl `int f(int <param>) {{ int <local> = <param>; return <ret>; }}`.
+
+    Each of param/local/ret_ref is an ``(id, name)`` pair; ret_ref's id picks
+    which binding the `return` references (the local, or some other id).
+    """
+    pid, pname = param
+    lid, lname = local
+    rid, rname = ret_ref
+    return {
+        "kind": "TranslationUnitDecl",
+        "inner": [{
+            "kind": "FunctionDecl", "name": "f", "mangledName": "_Z1fi",
+            "loc": {"file": "include/foo.h", "line": 1},
+            "type": {"qualType": "int (int)"},
+            "inner": [
+                {"kind": "ParmVarDecl", "id": pid, "name": pname,
+                 "type": {"qualType": "int"}},
+                {"kind": "CompoundStmt", "inner": [
+                    {"kind": "DeclStmt", "inner": [
+                        {"kind": "VarDecl", "id": lid, "name": lname,
+                         "type": {"qualType": "int"}, "inner": [
+                            {"kind": "ImplicitCastExpr", "inner": [
+                                {"kind": "DeclRefExpr",
+                                 "referencedDecl": {"id": pid, "name": pname}}]}]}]},
+                    {"kind": "ReturnStmt", "inner": [
+                        {"kind": "ImplicitCastExpr", "inner": [
+                            {"kind": "DeclRefExpr",
+                             "referencedDecl": {"id": rid, "name": rname}}]}]},
+                ]},
+            ],
+        }],
+    }
+
+
+def _body_hash(ast):
+    tu = source_abi_from_clang_ast(ast, _cu(), ["include/foo.h"], "t")
+    return tu.inline_bodies[0].body_hash
+
+
+def test_body_fingerprint_invariant_under_local_and_param_rename() -> None:
+    # Same body, locals/params spelled differently and with different clang ids
+    # (as a real reparse would assign) → identical alpha-equivalence fingerprint.
+    base = _fn_ast(("P1", "x"), ("L1", "y"), ("L1", "y"))
+    renamed = _fn_ast(("P9", "arg"), ("L9", "result"), ("L9", "result"))
+    assert _body_hash(base) == _body_hash(renamed)
+
+
+def test_body_fingerprint_changes_when_reference_target_differs() -> None:
+    # Returning a *different* binding (a global `g`, id not among the locals) is a
+    # real semantic change — the global's name is kept, so the hash differs.
+    returns_local = _fn_ast(("P1", "x"), ("L1", "y"), ("L1", "y"))
+    returns_param = _fn_ast(("P1", "x"), ("L1", "y"), ("P1", "x"))
+    returns_global = _fn_ast(("P1", "x"), ("L1", "y"), ("G1", "g"))
+    # local vs param: both are alpha-renamed locals but to *different* slots → differ.
+    assert _body_hash(returns_local) != _body_hash(returns_param)
+    # referencing a non-local global keeps its real name → differs from either.
+    assert _body_hash(returns_global) != _body_hash(returns_local)
+
+
+def _fn_with_static_local(static_name):
+    return {
+        "kind": "TranslationUnitDecl",
+        "inner": [{
+            "kind": "FunctionDecl", "name": "f", "mangledName": "_Z1fv",
+            "loc": {"file": "include/foo.h", "line": 1},
+            "type": {"qualType": "int ()"},
+            "inner": [{"kind": "CompoundStmt", "inner": [
+                {"kind": "DeclStmt", "inner": [
+                    {"kind": "VarDecl", "id": "S1", "name": static_name,
+                     "storageClass": "static", "type": {"qualType": "int"}}]},
+                {"kind": "ReturnStmt", "inner": [
+                    {"kind": "ImplicitCastExpr", "inner": [
+                        {"kind": "DeclRefExpr",
+                         "referencedDecl": {"id": "S1", "name": static_name}}]}]},
+            ]}],
+        }],
+    }
+
+
+def test_body_fingerprint_changes_on_static_local_rename() -> None:
+    # A function-local `static` emits a distinct linkage symbol (f()::counter),
+    # so renaming it is observable and must change the fingerprint — it is NOT
+    # alpha-renamed like an automatic local (Codex review).
+    assert _body_hash(_fn_with_static_local("counter")) != _body_hash(
+        _fn_with_static_local("state")
+    )
+
+
+def test_body_fingerprint_changes_on_global_rename() -> None:
+    # Two bodies that reference *different* globals must stay distinct (the
+    # alpha-renaming must not collapse non-local references).
+    g1 = _fn_ast(("P1", "x"), ("L1", "y"), ("G1", "alpha"))
+    g2 = _fn_ast(("P1", "x"), ("L1", "y"), ("G2", "beta"))
+    assert _body_hash(g1) != _body_hash(g2)
+
+
+def _fn_binop(op, lname, rname):
+    """`int f() {{ return <lname> <op> <rname>; }}` with two global operands."""
+    def _ref(gid, name):
+        return {"kind": "DeclRefExpr", "referencedDecl": {"id": gid, "name": name}}
+    return {
+        "kind": "TranslationUnitDecl",
+        "inner": [{
+            "kind": "FunctionDecl", "name": "f", "mangledName": "_Z1fv",
+            "loc": {"file": "include/foo.h", "line": 1},
+            "type": {"qualType": "int ()"},
+            "inner": [{"kind": "CompoundStmt", "inner": [
+                {"kind": "ReturnStmt", "inner": [
+                    {"kind": "BinaryOperator", "opcode": op,
+                     "inner": [_ref("GL", lname), _ref("GR", rname)]}]}]}],
+        }],
+    }
+
+
+def test_commutative_operands_sorted_in_fingerprint() -> None:
+    # `a + b` and `b + a` hash identically; `a == b` / `b == a` too.
+    assert _body_hash(_fn_binop("+", "a", "b")) == _body_hash(_fn_binop("+", "b", "a"))
+    assert _body_hash(_fn_binop("==", "a", "b")) == _body_hash(_fn_binop("==", "b", "a"))
+
+
+def test_noncommutative_operands_kept_ordered() -> None:
+    # `a - b` != `b - a`; short-circuit `&&` is NOT reordered (side-effect order).
+    assert _body_hash(_fn_binop("-", "a", "b")) != _body_hash(_fn_binop("-", "b", "a"))
+    assert _body_hash(_fn_binop("&&", "a", "b")) != _body_hash(_fn_binop("&&", "b", "a"))
+
+
 def test_directory_header_root_classifies_decls_as_public(tmp_path: Path) -> None:
     # Codex #339 P2: `--headers include/` (a directory root) must classify a decl
     # reported under it (include/foo.h) as public, not drop the whole tree.
@@ -586,6 +764,37 @@ def test_macros_from_preprocessor_scopes_to_public_headers() -> None:
     # only a non-public macro — so a macro-only private/system header edit
     # invalidates the dump (Codex #339 P2). The <built-in> pseudo-file is skipped.
     assert files == ["/usr/include/sys.h", "include/foo.h", "src/foo.cpp"]
+
+
+def test_macros_suppress_include_guards() -> None:
+    # ADR-030 follow-up #2: an include guard (empty-valued, filename-derived) is
+    # filtered out, while a real empty feature flag and a valued macro survive.
+    from abicheck.evidence.source_extractors import macros_from_preprocessor
+
+    text = (
+        '# 1 "include/foo.h" 1\n'
+        "#define FOO_H\n"            # include guard for foo.h — suppressed
+        "#define __FOO_H__\n"        # guard with underscores — suppressed
+        "#define FOO_ENABLED\n"      # real empty feature flag — kept
+        "#define FOO_H_FEATURE\n"    # starts with stem but is NOT the guard — kept
+        "#define FOO_SIZE 16\n"      # valued macro — kept
+    )
+    macros, _ = macros_from_preprocessor(text, ["include/foo.h"])
+    names = {e.qualified_name for e in macros}
+    assert "FOO_H" not in names
+    assert "__FOO_H__" not in names
+    # Exact-spelling match only: a feature macro that merely starts with the
+    # stem must survive (Codex review — substring match was too aggressive).
+    assert names == {"FOO_ENABLED", "FOO_H_FEATURE", "FOO_SIZE"}
+
+
+def test_macros_suppress_hpp_include_guard() -> None:
+    from abicheck.evidence.source_extractors import macros_from_preprocessor
+
+    text = '# 1 "include/bar.hpp" 1\n#define BAR_HPP\n#define BAR_VALUE 3\n'
+    macros, _ = macros_from_preprocessor(text, ["include/bar.hpp"])
+    names = {e.qualified_name for e in macros}
+    assert names == {"BAR_VALUE"}
 
 
 def test_macros_track_private_macro_only_header_as_cache_dep() -> None:

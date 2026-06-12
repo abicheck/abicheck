@@ -1044,6 +1044,14 @@ REGISTRY = ChangeKindRegistry([
               "API surface, so a change can alter declarations or macro contracts "
               "seen by consumers. Policy may escalate to an API break; by default "
               "a risk to review."),
+    _E("public_typedef_target_changed", _A,
+       impact="A public typedef/alias now resolves to a different underlying type "
+              "(e.g. `typedef int32_t handle_t;` became `typedef int64_t "
+              "handle_t;`). Source that relied on the old aliased type — overload "
+              "resolution, template specialization, or the type's size in a "
+              "consumer-owned struct — can change meaning or fail to compile. "
+              "Surfaced by source replay because a bare typedef leaves no exported "
+              "symbol of its own; a source/API break until consumers recompile."),
 
     # ── Source graph evidence (ADR-028 L5 / ADR-031 D6) ─────────────────────
     _E("public_reachability_changed", _R,

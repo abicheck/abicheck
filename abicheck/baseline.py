@@ -46,18 +46,28 @@ import hashlib
 import json
 import logging
 import re
+import shutil
 import tempfile
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from . import __version__ as _abicheck_version
 from .errors import ValidationError
 from .model import AbiSnapshot
 from .serialization import snapshot_to_json
 
+if TYPE_CHECKING:
+    from .evidence.pack import EvidencePack
+
 _logger = logging.getLogger(__name__)
+
+#: Sub-directory of a baseline key directory that holds the optional evidence
+#: pack stored alongside the snapshot (ADR-028 D1/Phase 5, ADR-033 baseline
+#: storage). Kept separate from ``snapshot.json``/``metadata.json`` so an old
+#: registry reader that knows nothing about evidence packs simply ignores it.
+_EVIDENCE_SUBDIR = "evidence"
 
 # Current baseline metadata schema version
 _METADATA_SCHEMA_VERSION = 1
@@ -174,6 +184,12 @@ class BaselineMetadata:
     git_commit: str | None = None
     checksum: str | None = None
     signature: str | None = None
+    #: ``sha256:<hex>`` content hash of the optional evidence pack stored with
+    #: this baseline (``EvidencePack.content_hash()``), or ``None`` when no pack
+    #: was pushed. Lets ``pull_evidence`` verify the stored pack has not drifted
+    #: from what was recorded, the same integrity discipline ``checksum`` gives
+    #: the snapshot (ADR-028 Phase 5).
+    evidence_content_hash: str | None = None
 
     @classmethod
     def create(
@@ -182,6 +198,7 @@ class BaselineMetadata:
         *,
         build_context_hash: str | None = None,
         git_commit: str | None = None,
+        evidence_content_hash: str | None = None,
     ) -> BaselineMetadata:
         """Create metadata for a new baseline with computed checksum."""
         return cls(
@@ -191,6 +208,7 @@ class BaselineMetadata:
             build_context_hash=build_context_hash,
             git_commit=git_commit,
             checksum=hashlib.sha256(snapshot_json.encode("utf-8")).hexdigest(),
+            evidence_content_hash=evidence_content_hash,
         )
 
     def verify_checksum(self, snapshot_json: str) -> bool:
@@ -226,6 +244,11 @@ class BaselineMetadata:
             git_commit=str(data["git_commit"]) if data.get("git_commit") is not None else None,
             checksum=checksum_val,
             signature=str(data["signature"]) if data.get("signature") is not None else None,
+            evidence_content_hash=(
+                str(data["evidence_content_hash"])
+                if data.get("evidence_content_hash") is not None
+                else None
+            ),
         )
 
 
@@ -237,12 +260,17 @@ class BaselineRegistry(Protocol):
         key: BaselineKey,
         snapshot: AbiSnapshot,
         metadata: BaselineMetadata | None = None,
+        evidence: EvidencePack | None = None,
     ) -> str:
-        """Store a baseline snapshot. Returns a reference ID."""
+        """Store a baseline snapshot (and an optional evidence pack). Returns a reference ID."""
         ...
 
     def pull(self, key: BaselineKey) -> tuple[AbiSnapshot, BaselineMetadata] | None:
         """Retrieve a baseline by key. Returns None if not found."""
+        ...
+
+    def pull_evidence(self, key: BaselineKey) -> EvidencePack | None:
+        """Retrieve the evidence pack stored with a baseline, or None if absent."""
         ...
 
     def list(self, prefix: str | None = None) -> list[BaselineKey]:
@@ -300,8 +328,14 @@ class FilesystemRegistry:
         key: BaselineKey,
         snapshot: AbiSnapshot,
         metadata: BaselineMetadata | None = None,
+        evidence: EvidencePack | None = None,
     ) -> str:
-        """Store a baseline snapshot to the filesystem (atomic writes)."""
+        """Store a baseline snapshot to the filesystem (atomic writes).
+
+        When ``evidence`` is given, its on-disk pack directory is copied into
+        ``<key_dir>/evidence/`` and its content hash is recorded in the metadata
+        so ``pull_evidence`` can verify integrity (ADR-028 Phase 5).
+        """
         key_dir = self._key_dir(key)
         key_dir.mkdir(parents=True, exist_ok=True)
 
@@ -310,16 +344,118 @@ class FilesystemRegistry:
         if metadata is None:
             metadata = BaselineMetadata.create(snap_json)
 
+        # Stage the evidence change so it can be rolled back if the
+        # snapshot/metadata write fails: a previously-valid baseline must never be
+        # left with its metadata hash and stored pack disagreeing (Codex review).
+        # ``pending`` is a sibling temp dir holding the *prior* pack under ``old``
+        # (or None when there is nothing to preserve); on success it is dropped,
+        # on failure ``old`` is restored.
+        evidence_dir = key_dir / _EVIDENCE_SUBDIR
+        pending: Path | None = None
+        if evidence is not None:
+            metadata.evidence_content_hash, pending = self._store_evidence(
+                evidence, evidence_dir
+            )
+        else:
+            # No pack supplied: always clear the recorded hash so the metadata
+            # never promises a pack that is not on disk (a caller-supplied
+            # metadata could carry a stale hash even when the evidence dir does
+            # not exist — Codex review).
+            metadata.evidence_content_hash = None
+            if evidence_dir.exists():
+                pending = Path(tempfile.mkdtemp(dir=key_dir, prefix=".evstage-"))
+                os.replace(evidence_dir, pending / "old")
+
         snap_path = key_dir / "snapshot.json"
         meta_path = key_dir / "metadata.json"
 
-        # Atomic write: temp file then rename
-        _atomic_write(snap_path, snap_json)
-        _atomic_write(meta_path, json.dumps(metadata.to_dict(), indent=2))
+        try:
+            # Atomic write: temp file then rename
+            _atomic_write(snap_path, snap_json)
+            _atomic_write(meta_path, json.dumps(metadata.to_dict(), indent=2))
+        except BaseException:
+            # Roll the evidence change back to the pre-push state.
+            if pending is not None:
+                old = pending / "old"
+                if old.exists():
+                    if evidence_dir.exists():
+                        shutil.rmtree(evidence_dir, ignore_errors=True)
+                    os.replace(old, evidence_dir)
+                elif evidence_dir.exists():
+                    # Fresh key (no prior pack): drop the just-swapped new pack.
+                    shutil.rmtree(evidence_dir, ignore_errors=True)
+            raise
+        finally:
+            # Drop the staging dir (the prior pack is now stale on success, or has
+            # already been restored on failure).
+            if pending is not None:
+                shutil.rmtree(pending, ignore_errors=True)
 
         ref = f"fs://{key.path}"
         _logger.info("Baseline pushed: %s → %s", ref, key_dir)
         return ref
+
+    @staticmethod
+    def _store_evidence(evidence: EvidencePack, dest: Path) -> tuple[str, Path | None]:
+        """Swap an evidence pack into ``dest``; return ``(content_hash, staging)``.
+
+        The pack must already be materialized on disk (a ``manifest.json`` under
+        ``evidence.root``); ``collect-evidence`` and ``EvidencePack.write()``
+        guarantee that. Copying the whole tree preserves both ``normalized/``
+        facts and ``raw/`` provenance (ADR-028 D4).
+
+        ``staging`` is the sibling temp dir holding the *prior* pack under ``old``
+        (``None`` when there was no prior pack or this is a same-path no-op). The
+        caller drops it on success or restores ``old`` on a later failure, so the
+        evidence swap is reversible with respect to the metadata write (Codex
+        review). The slow copy goes to staging; only fast renames touch ``dest``.
+        """
+        manifest = evidence.root / "manifest.json"
+        if not manifest.is_file():
+            raise ValidationError(
+                f"Evidence pack at {evidence.root} has no manifest.json; "
+                "run `abicheck collect-evidence` (or EvidencePack.write()) first."
+            )
+        # Reject a source pack that already fails its own integrity check (a
+        # normalized payload edited/partially written after write()). Storing it
+        # anyway would record a content hash for a tree that every later
+        # pull_evidence() rejects — an unpullable evidence-bearing baseline.
+        if not evidence.verify_integrity():
+            raise ValidationError(
+                f"Evidence pack at {evidence.root} fails its integrity check "
+                "(a normalized payload no longer matches the manifest); refusing "
+                "to store it. Re-collect the pack."
+            )
+        content_hash = evidence.content_hash()
+        # Re-pushing the already-stored pack (e.g. --evidence pointing at
+        # <registry>/<key>/evidence, or evidence=registry.pull_evidence(key))
+        # makes source and destination the same directory. rmtree(dest) would
+        # then delete the source before copytree runs, raising FileNotFoundError
+        # and leaving the baseline pointing at a now-empty evidence dir. The pack
+        # is already in place, so treat that as a no-op (Codex review).
+        if evidence.root.resolve() == dest.resolve():
+            return content_hash, None
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        staging = Path(tempfile.mkdtemp(dir=dest.parent, prefix=".evstage-"))
+        new_pack = staging / "pack"
+        try:
+            shutil.copytree(evidence.root, new_pack)
+            backup = None
+            if dest.exists():
+                backup = staging / "old"
+                os.replace(dest, backup)  # move the current pack aside (same fs)
+            try:
+                os.replace(new_pack, dest)
+            except BaseException:
+                if backup is not None:  # roll the previous pack back into place
+                    os.replace(backup, dest)
+                raise
+        except BaseException:
+            shutil.rmtree(staging, ignore_errors=True)
+            raise
+        # Keep `staging` (now holding only the prior pack under `old`) so the
+        # caller can roll the swap back if the metadata write fails.
+        return content_hash, staging
 
     def pull(self, key: BaselineKey) -> tuple[AbiSnapshot, BaselineMetadata] | None:
         """Retrieve a baseline snapshot from the filesystem.
@@ -355,6 +491,86 @@ class FilesystemRegistry:
         snapshot = _load_snapshot_from_string(snap_json)
         _logger.info("Baseline pulled: %s", key.path)
         return snapshot, meta
+
+    def pull_evidence(self, key: BaselineKey) -> EvidencePack | None:
+        """Load the evidence pack stored with a baseline (ADR-028 Phase 5).
+
+        Returns ``None`` when the baseline has no pack. Raises
+        ``BaselineIntegrityError`` when the stored pack's content hash does not
+        match the hash recorded at push time — mirroring the snapshot checksum
+        guard so a tampered/partial pack is not silently trusted.
+        """
+        from .evidence.pack import EvidencePack
+
+        key_dir = self._key_dir(key)
+        evidence_dir = key_dir / _EVIDENCE_SUBDIR
+
+        # Read the recorded hash first. A baseline that explicitly recorded an
+        # evidence pack must not silently report "no pack" just because the
+        # manifest went missing (a deleted manifest, or an interrupted
+        # replacement) — that would drop evidence the metadata promised. Only a
+        # baseline with *no* recorded hash legitimately has no pack.
+        recorded = self._recorded_evidence_hash(key_dir)
+        if not (evidence_dir / "manifest.json").is_file():
+            if recorded is not None:
+                raise BaselineIntegrityError(
+                    f"Baseline {key.path} recorded an evidence pack "
+                    f"(evidence_content_hash={recorded}) but its manifest is "
+                    "missing — the stored pack is absent or corrupt. "
+                    "Re-push the baseline."
+                )
+            return None
+
+        # Loading parses the normalized build/source/graph payloads. A payload
+        # corrupted into invalid JSON would otherwise leak a raw ValueError past
+        # the integrity contract (e.g. through `baseline pull --evidence-output`,
+        # which only wraps AbicheckError) — a tampered stored pack must surface as
+        # a BaselineIntegrityError, not a stack trace (Codex review).
+        try:
+            pack = EvidencePack.load(evidence_dir)
+        except (ValueError, OSError) as exc:
+            raise BaselineIntegrityError(
+                f"Evidence pack for baseline {key.path} could not be loaded "
+                f"({exc}); the stored pack is corrupt. Re-push the baseline."
+            ) from exc
+
+        # Two layers of integrity:
+        #   1. the on-disk normalized payloads must still match the digests the
+        #      manifest recorded (catches an edited normalized file, which
+        #      content_hash alone would miss because it trusts those digests);
+        #   2. the pack's content hash must match the value recorded in the
+        #      baseline metadata at push time (catches a swapped pack/manifest).
+        if not pack.verify_integrity():
+            raise BaselineIntegrityError(
+                f"Evidence-pack content hash mismatch for baseline {key.path} — "
+                "a stored normalized payload no longer matches the pack manifest. "
+                "Re-push the baseline to update the recorded hashes."
+            )
+
+        # Verify against the recorded hash when present (legacy metadata without
+        # the field cannot be verified, so it is trusted — same rule as checksum).
+        if recorded is not None and recorded != pack.content_hash():
+            raise BaselineIntegrityError(
+                f"Evidence-pack content hash mismatch for baseline {key.path} — "
+                "the stored pack may have been modified since it was pushed. "
+                "Re-push the baseline to update the recorded hash."
+            )
+        _logger.info("Baseline evidence pulled: %s", key.path)
+        return pack
+
+    @staticmethod
+    def _recorded_evidence_hash(key_dir: Path) -> str | None:
+        """The ``evidence_content_hash`` recorded in a baseline's metadata, if any."""
+        meta_path = key_dir / "metadata.json"
+        if not meta_path.is_file():
+            return None
+        try:
+            meta = BaselineMetadata.from_dict(
+                json.loads(meta_path.read_text(encoding="utf-8"))
+            )
+        except (json.JSONDecodeError, KeyError, TypeError):
+            return None
+        return meta.evidence_content_hash
 
     def list(self, prefix: str | None = None) -> list[BaselineKey]:
         """List available baselines in the filesystem registry."""

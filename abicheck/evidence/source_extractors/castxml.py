@@ -283,6 +283,17 @@ class CastxmlSourceExtractor:
             if is_generated_header(header)
         }
 
+        # Public-header typedefs, provenance-scoped so private/system aliases stay
+        # off the surface (ADR-030 #3). The header map feeds ODR keying and the
+        # generated-header re-marking, mirroring constants above.
+        typedefs = parser.parse_public_typedefs()
+        typedef_headers = parser.parse_public_typedef_headers()
+        generated_typedefs = {
+            name
+            for name, header in typedef_headers.items()
+            if is_generated_header(header)
+        }
+
         tu = assemble_source_tu(
             compile_unit,
             public_header_roots=public_header_roots,
@@ -296,14 +307,12 @@ class CastxmlSourceExtractor:
             constants=constants,
             constant_headers=constant_headers,
             generated_constants=generated_constants,
-            # parse_typedefs() returns a flat name->target map with no source
-            # provenance, so — unlike parse_constants(), which scopes itself to
-            # public headers — typedefs cannot be marked PUBLIC_HEADER without
-            # pulling private/system aliases onto the surface (and risking false
-            # odr_source_conflict). Omitted until a provenance-aware typedef
-            # extractor exists (Clang backend, phase 5); records/enums still
-            # carry full type-change coverage with correct provenance.
-            typedefs={},
+            # Public typedefs with provenance (ADR-030 #3): parse_public_typedefs
+            # scopes to the public surface and the header map keeps ODR detection
+            # from colliding same-named typedefs across headers.
+            typedefs=typedefs,
+            typedef_headers=typedef_headers,
+            generated_typedefs=generated_typedefs,
         )
         # Record every file castxml parsed (the GCC_XML <File> table) so the
         # per-TU cache (ADR-030 D8) invalidates on an edit to any transitively

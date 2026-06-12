@@ -194,6 +194,21 @@ class EvidencePack:
         blob = json.dumps(ident, sort_keys=True, separators=(",", ":")).encode("utf-8")
         return "sha256:" + hashlib.sha256(blob).hexdigest()
 
+    def verify_integrity(self) -> bool:
+        """Whether the on-disk normalized payloads still match ``manifest.artifacts``.
+
+        ``content_hash`` trusts the digests recorded in the manifest, so on its
+        own it cannot tell that a normalized file was edited after the pack was
+        written. Recomputing the digests from disk and comparing them to the
+        recorded list detects exactly that drift — used by the baseline registry
+        to reject a tampered/partial stored pack (ADR-028 Phase 5). A manifest
+        with no recorded artifacts (legacy/empty pack) is treated as intact.
+        """
+        recorded = sorted(self.manifest.artifacts or [])
+        if not recorded:
+            return True
+        return recorded == self._artifact_digests()
+
     def to_ref(self, path_hint: str = "") -> EvidencePackRef:
         """Build the lightweight snapshot reference (ADR-028 D8)."""
         return EvidencePackRef(

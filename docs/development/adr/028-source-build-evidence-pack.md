@@ -1,8 +1,9 @@
 # ADR-028: Optional Source and Build Evidence Pack Architecture
 
 **Date:** 2026-06-09
-**Status:** Accepted — Phase 0 implemented (EvidencePack model, manifest,
-coverage, snapshot reference, CLI surface, coverage reporting)
+**Status:** Accepted — Phase 0 + Phase 5 implemented (EvidencePack model,
+manifest, coverage, snapshot reference, CLI surface, coverage reporting, and
+baseline-registry pack storage)
 **Decision maker:** Nikolay Petrov
 
 ---
@@ -343,6 +344,32 @@ normal ABI dumps.
 | 3 | Source graph summary (ADR-031) | `source_graph_summary.json`, graph-to-graph diff basics |
 | 4 | External graph backend adapters (ADR-031) | Kythe/CodeQL adapters emit normalized summaries |
 | 5 | Pack storage in baseline registry (ADR-022, ADR-033) | Baseline downloads can include optional evidence packs |
+
+### Implementation status
+
+**Phase 0** and **Phase 5** are implemented; Phases 1–4 are delivered by the
+sub-ADRs (ADR-029/030/031) and tracked there.
+
+- **Phase 0** — `abicheck/evidence/`: the `EvidencePack` model (`pack.py`),
+  manifest/coverage/`EvidencePackRef` (`model.py`), the `collect-evidence` CLI
+  surface, and the compare-side evidence-coverage report (D7). An empty,
+  manifest-only pack can be attached to a snapshot and reported (D1, D8).
+- **Phase 5** — `abicheck/baseline.py`: `FilesystemRegistry.push(...,
+  evidence=…)` copies a materialized `EvidencePack` into `<key>/evidence/`, and
+  `pull_evidence(key)` loads it back, so a stored baseline (ADR-022) can carry
+  its optional source/build evidence. Integrity is two-layered:
+  `EvidencePack.verify_integrity()` recomputes the on-disk normalized-payload
+  digests against the manifest (catching an edited normalized file that
+  `content_hash` alone would trust), and the pack `content_hash` is checked
+  against the value recorded in the baseline metadata at push time
+  (`BaselineMetadata.evidence_content_hash`) — the same checksum discipline the
+  snapshot already gets. Wired into the CLI as `baseline push --evidence <pack>`
+  and `baseline pull --evidence-output <dir>`. A re-push without `--evidence`
+  drops any stale pack; `delete` removes the pack with the baseline.
+
+The remaining items are sub-ADR scope: build adapters (Phase 1, ADR-029),
+source ABI replay (Phase 2, ADR-030), and the graph summary / external backends
+(Phases 3–4, ADR-031).
 
 ---
 

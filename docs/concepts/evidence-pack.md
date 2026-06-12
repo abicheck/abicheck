@@ -373,6 +373,7 @@ Comparing two linked source surfaces emits these change kinds (ADR-030 D6):
 | `default_argument_changed` | API break | A default argument changed (signature unchanged) |
 | `constexpr_value_changed` | API break | A public `constexpr` constant changed value |
 | `uninstantiated_template_removed` | API break | A public template was removed without any binary presence |
+| `public_typedef_target_changed` | API break | A public typedef/alias now resolves to a different underlying type (clang backend) |
 | `inline_body_changed` | risk | A public inline body changed with no exported-symbol change (mixed-build/ODR risk) |
 | `template_body_changed` | risk | An uninstantiated public template implementation changed (the ADR-026 `case122` residual) |
 | `source_decl_binary_symbol_mismatch` | risk | A public declaration no longer maps to an exported symbol |

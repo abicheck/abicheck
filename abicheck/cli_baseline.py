@@ -62,11 +62,16 @@ def baseline_group() -> None:
               help="Auto-detect platform from the binary in the snapshot.")
 @click.option("--git-commit", default=None,
               help="Source commit SHA to record in baseline metadata.")
+@click.option("--evidence", "evidence_path", type=click.Path(exists=True, file_okay=False, path_type=Path),
+              default=None,
+              help="Path to an evidence-pack directory (from `collect-evidence`) "
+                   "to store alongside the baseline snapshot.")
 @click.option("-v", "--verbose", is_flag=True, default=False)
 def baseline_push(
     library: str, version: str, platform: str, variant: str,
     snapshot_path: Path, registry_path: Path | None,
-    auto_platform: bool, git_commit: str | None, verbose: bool,
+    auto_platform: bool, git_commit: str | None,
+    evidence_path: Path | None, verbose: bool,
 ) -> None:
     """Push an ABI baseline snapshot to the registry.
 
@@ -123,8 +128,23 @@ def baseline_push(
         key = BaselineKey(library=library, version=version, platform=effective_platform, variant=variant)
     except (ValueError, AbicheckError) as exc:
         raise click.ClickException(str(exc)) from exc
-    ref = registry.push(key, snapshot, meta)
-    click.echo(f"Baseline pushed: {ref}", err=True)
+
+    evidence = None
+    if evidence_path is not None:
+        from .evidence.pack import EvidencePack
+        try:
+            evidence = EvidencePack.load(evidence_path)
+        except (FileNotFoundError, ValueError) as exc:
+            raise click.ClickException(f"Cannot load evidence pack: {exc}") from exc
+
+    try:
+        ref = registry.push(key, snapshot, meta, evidence=evidence)
+    except AbicheckError as exc:
+        raise click.ClickException(str(exc)) from exc
+    if evidence is not None:
+        click.echo(f"Baseline pushed: {ref} (with evidence pack)", err=True)
+    else:
+        click.echo(f"Baseline pushed: {ref}", err=True)
 
 
 @baseline_group.command("pull")
@@ -134,8 +154,15 @@ def baseline_push(
 @click.option("--registry", "registry_path", type=click.Path(path_type=Path),
               default=None,
               help="Path to the baseline registry directory.")
+@click.option("--evidence-output", "evidence_output", type=click.Path(path_type=Path),
+              default=None,
+              help="If the baseline carries an evidence pack, copy it to this "
+                   "directory.")
 @click.option("-v", "--verbose", is_flag=True, default=False)
-def baseline_pull(spec: str, output: Path, registry_path: Path | None, verbose: bool) -> None:
+def baseline_pull(
+    spec: str, output: Path, registry_path: Path | None,
+    evidence_output: Path | None, verbose: bool,
+) -> None:
     """Pull an ABI baseline snapshot from the registry.
 
     SPEC is a colon-separated key: library:version:platform[:variant]
@@ -167,6 +194,24 @@ def baseline_pull(spec: str, output: Path, registry_path: Path | None, verbose: 
         f"created {meta.created_at})",
         err=True,
     )
+
+    if evidence_output is not None:
+        try:
+            pack = registry.pull_evidence(key)
+        except AbicheckError as exc:
+            raise click.ClickException(str(exc)) from exc
+        if pack is None:
+            click.echo("Baseline has no evidence pack to extract.", err=True)
+        elif evidence_output.resolve() == pack.root.resolve():
+            # --evidence-output points at the stored pack itself; removing it
+            # before copytree would delete the registry's own pack. No-op.
+            click.echo(f"Evidence pack already at {evidence_output}", err=True)
+        else:
+            import shutil
+            if evidence_output.exists():
+                shutil.rmtree(evidence_output)
+            shutil.copytree(pack.root, evidence_output)
+            click.echo(f"Evidence pack written: {evidence_output}", err=True)
 
 
 @baseline_group.command("list")

@@ -1,7 +1,9 @@
 # ADR-030: Source ABI Replay and Linked Source Surface
 
 **Date:** 2026-06-09
-**Status:** Accepted — implemented (phases 1–7)
+**Status:** Accepted — implemented (phases 1–7); follow-ups #2 (include-guard
+macro noise), #3 (typedef/alias modeling) and #4 (include-graph scope selection)
+resolved, #1 partially (pure-Python validation corpus committed)
 **Decision maker:** Nikolay Petrov
 
 ---
@@ -333,7 +335,8 @@ All seven phases are implemented, in `abicheck/evidence/`:
 - **Phase 3** — `source_link.py` (`link_source_abi`): merges per-TU dumps into a
   per-library surface, mapping public source declarations to exported binary
   symbols and detecting ODR conflicts (D5).
-- **Phase 4** — `source_diff.py` (`diff_source_abi`): the nine D6 `ChangeKind`s,
+- **Phase 4** — `source_diff.py` (`diff_source_abi`): the nine D6 `ChangeKind`s
+  (plus `public_typedef_target_changed`, added by follow-up #3 below),
   partitioned `API_BREAK`/`RISK` per ADR-028 D3 (never `BREAKING`), registered
   in `change_registry.py`.
 - **Phase 5** — `source_extractors/clang.py` (`ClangSourceExtractor`): the
@@ -373,44 +376,75 @@ info / no headers / no build data / no sources-or-clang).
 
 ### Known limitations / follow-ups
 
-The phases above are implemented and wired, but the following are deliberately
+The phases above are implemented and wired. Follow-ups #2, #3 and #4 are now
+resolved and #1 is partially landed (see each item); the rest are deliberately
 deferred and should be handled in later work. None of them weaken the authority
 rule (L4 never gates a shipped-ABI `BREAKING` verdict on its own, ADR-028 D3);
 they are coverage/precision gaps, not correctness holes.
 
-1. **Validation corpus not yet committed.** The "Validation" section below calls
-   for an `examples/case*` fixture corpus (public macro / default-argument /
-   inline / template / constexpr changes, extending the ADR-026 `case122`
-   calibration fixture), an L4-vs-L2 declaration/type-shape agreement check, an
-   L4-vs-L0 exported-symbol cross-check, and performance tests for the `changed`
-   and `target` scopes. The behaviours are covered by unit + integration tests,
-   but the ground-truth example cases and perf benchmarks are still to be added.
-2. **Macros are clang-only.** `public_macro_value_changed` is produced only by
-   the clang backend's `-E -dD` preprocessor pass. The castxml and Android
-   backends do not extract macros, so a macros-only run on those backends has no
-   macro coverage. Include-guard macros (`#ifndef FOO_H`) also surface as
-   (harmless, empty-valued) macro entities — a small-noise source a future filter
-   could suppress.
-3. **Typedef / alias entities are not modeled by clang.** The clang backend emits
-   `record`/`enum` types but not `TypedefDecl`/`TypeAliasDecl`; castxml omits
-   typedefs entirely (no per-entry provenance, see `castxml.py`). A public
-   typedef whose underlying type changes is therefore not surfaced as an L4
-   finding. Add provenance-aware typedef extraction (clang is the natural home).
-4. **Scope selection is approximate without a full include graph.** `headers-only`
-   picks one representative compile unit per target rather than the minimal set
-   that covers every public header, and `changed` maps a changed header to TUs
-   via target ownership (falling back to all TUs when there is no target/header
-   metadata, ADR-025 D3). A precise mapping needs a per-TU include graph
-   (depfiles or the L5 graph layer, ADR-031).
+1. **Validation corpus — pure-Python half committed; binary cases + perf still
+   pending.** `tests/test_source_replay_validation.py` is the committed labelled
+   corpus: every source-only edit is paired with the `ChangeKind` it must
+   produce and asserted to be `API_BREAK`/`RISK` and L4-stamped, never
+   `BREAKING` (the core "Validation" invariant below). Still to add: the
+   `examples/case*` *binary* fixture corpus (extending the ADR-026 `case122`
+   calibration fixture), the L4-vs-L2 declaration/type-shape agreement check, the
+   L4-vs-L0 exported-symbol cross-check, and the `changed`/`target` scope perf
+   benchmarks. Those need compiled fixtures + the example ground-truth machinery,
+   so they stay deferred.
+2. **Include-guard macro noise filtered; macros remain clang-only.** Resolved
+   the noise half: `clang.py:_is_include_guard` drops empty-valued, filename-
+   derived guards (`#ifndef FOO_H`) from the macro entities while keeping real
+   empty feature flags (`#define FOO_ENABLED`). The remaining statement of fact —
+   `public_macro_value_changed` is produced only by the clang backend's
+   `-E -dD` pass (castxml/Android extract no macros) — is a backend-capability
+   boundary, not an open defect: a macros-only run on those backends simply
+   reports partial L4 coverage (ADR-028 D7).
+3. **Typedef / alias modeling (clang + castxml) — done.** The clang backend
+   emits `TypedefDecl`/`TypeAliasDecl` as `typedef` `SourceEntity`s carrying the
+   underlying type. The castxml backend now also surfaces public typedefs via
+   `parse_public_typedefs`, which scopes them to the public-header surface by
+   provenance (and a parallel header map keeps ODR detection from colliding
+   same-named typedefs across headers). Either way `source_diff.py` flags
+   `public_typedef_target_changed` (`API_BREAK`, L4) when a public alias's target
+   changes — a change a bare typedef leaves invisible to L0/L1.
+4. **Scope selection now uses the include graph when available — done.**
+   `select_compile_units` accepts an optional per-TU include map
+   (`{compile_unit_id: [included_path, …]}`, ADR-031 D3, sourced from compiler
+   depfiles via `include_graph.parse_depfile` / `ClangIncludeExtractor`). With it,
+   `headers-only` selects the **minimal** set of TUs (greedy set cover) whose
+   includes cover every public header, and `changed` selects **exactly** the TUs
+   whose transitive includes contain a changed path — and, when the graph covers
+   every unit, trusts it to select nothing for a header that affects nothing
+   (no fail-open fan-out). Without the map, the previous target-ownership
+   heuristics apply unchanged (the fan-out + D8 cache still keep PR mode correct),
+   so the include graph is a precision upgrade, not a new dependency. The
+   remaining gap is purely *provenance*: `BuildEvidence` does not yet persist
+   depfiles, so the map must be produced live (`clang -MM`) or from pre-captured
+   depfiles; persisting it in the pack is ADR-031 graph-layer scope.
 5. **Inline auto-collection during `compare --evidence-mode` is still a stub.**
    `compare` consumes pre-built packs via `--old/--new-evidence`; it does not yet
    run `collect-evidence` inline for a requested evidence mode. That inline
    collection is **ADR-033 D2** scope, tracked there, not in this ADR.
-6. **clang AST replay is a structural fingerprinter, not a full semantic ABI
-   model.** Bodies/values are hashed from a build-root-stable canonical form of
-   the clang JSON AST; this reliably detects *changes* but does not produce a
-   semantic ABI diff of the body itself. The Clang LibTooling backend in the D3
-   table remains the longer-term path for richer source-location/AST fidelity.
+6. **clang AST replay is an alpha-equivalence fingerprinter — partially
+   semantic.** Bodies/values are hashed from a build-root-stable canonical form
+   of the clang JSON AST. The fingerprint is now an **alpha-equivalence class**:
+   `_alpha_rename_map` renames a function's parameters and in-body locals to
+   positional placeholders (`$0`, `$1`, …) on both their declarations and every
+   reference, so a pure local/parameter *rename* no longer flips
+   `inline_body_changed` / `template_body_changed`, while a reference to a
+   *different* global/function/constant, or any operator/control-flow/type
+   change, still changes the hash. The canonical form also **sorts the operands
+   of commutative, non-short-circuiting binary operators** (`a + b` ≡ `b + a`,
+   `x == y` ≡ `y == x`; `&&`/`||` are excluded because reordering them changes
+   evaluation order). These are genuine, decidable semantic normalizations
+   (rename- and commutativity-invariant equivalence classes), not heuristics. It
+   is still not a *full* semantic model: it does not normalize every
+   behaviour-preserving rewrite (associativity, algebraic identities, statement
+   reordering), and it detects *that* a body changed without producing a
+   structured semantic diff of *what* changed. The Clang LibTooling backend in
+   the D3 table remains the longer-term path for richer source-location/AST
+   fidelity and a structured body diff.
 
 ---
 

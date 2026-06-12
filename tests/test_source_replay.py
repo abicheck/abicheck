@@ -189,6 +189,137 @@ def test_scope_changed_unowned_header_fails_open_despite_target_metadata() -> No
     assert {u.id for u in units} == {u.id for u in _build().compile_units}
 
 
+# -- scope selection with an include graph (ADR-030 follow-up #4) -------------
+
+
+def test_headers_only_set_cover_picks_minimal_units() -> None:
+    # One target owning both its public headers: the greedy cover picks the single
+    # owning TU that includes both, not one representative per source file.
+    build = BuildEvidence(
+        targets=[Target(id="t", public_headers=["include/a.h", "include/b.h"])],
+        compile_units=[
+            _cu("cu://x", "x.cpp", "t"),
+            _cu("cu://y", "y.cpp", "t"),
+        ],
+    )
+    include_map = {
+        "cu://x": ["include/a.h", "include/b.h"],  # owns + includes both
+        "cu://y": ["include/a.h"],
+    }
+    units = select_compile_units(build, scope="headers-only", include_map=include_map)
+    assert {u.id for u in units} == {"cu://x"}
+
+
+def test_headers_only_set_cover_ignores_non_owning_includer() -> None:
+    # A downstream TU (different target) that merely *includes* a public header
+    # must NOT cover it — only the owning target's TU may, so the header is
+    # fingerprinted under the right compile context (Codex review).
+    build = BuildEvidence(
+        targets=[
+            Target(id="lib", public_headers=["include/foo.h"]),
+            Target(id="app", public_headers=[]),
+        ],
+        compile_units=[
+            _cu("cu://lib", "lib.cpp", "lib"),
+            _cu("cu://app", "app.cpp", "app"),
+        ],
+    )
+    # The app TU includes foo.h but does not own it; the lib TU owns it.
+    include_map = {
+        "cu://app": ["include/foo.h"],
+        "cu://lib": ["include/foo.h"],
+    }
+    units = select_compile_units(build, scope="headers-only", include_map=include_map)
+    assert {u.id for u in units} == {"cu://lib"}
+
+
+def test_headers_only_set_cover_needs_two_units() -> None:
+    # No single TU covers both headers → cover needs two (one per header).
+    include_map = {
+        "cu://b": ["include/foo.h"],
+        "cu://c": ["include/bar.h"],
+    }
+    units = select_compile_units(
+        _build(), scope="headers-only", include_map=include_map
+    )
+    assert {u.id for u in units} == {"cu://b", "cu://c"}
+
+
+def test_headers_only_falls_back_when_include_graph_covers_no_header() -> None:
+    # Include graph present but reaches none of the public headers → defer to the
+    # representative-per-target heuristic rather than emit an empty surface.
+    include_map = {"cu://a": ["src/unrelated.h"]}
+    units = select_compile_units(
+        _build(), scope="headers-only", include_map=include_map
+    )
+    assert {u.id for u in units} == {"cu://a", "cu://c"}
+
+
+def test_headers_only_partial_cover_falls_back_to_heuristic() -> None:
+    # Graph reaches foo.h (via cu://b) but NOT bar.h → the greedy cover cannot
+    # satisfy every public header, so defer to the representative-per-target
+    # heuristic rather than drop bar.h's TUs (Codex review).
+    include_map = {"cu://b": ["include/foo.h"]}
+    units = select_compile_units(
+        _build(), scope="headers-only", include_map=include_map
+    )
+    assert {u.id for u in units} == {"cu://a", "cu://c"}
+
+
+def test_changed_with_include_graph_is_precise() -> None:
+    # Only cu://a actually includes the changed header; cu://b is in the same
+    # target but does NOT include it, so target-ownership would over-select it.
+    include_map = {
+        "cu://a": ["include/foo.h"],
+        "cu://b": ["include/other.h"],
+        "cu://c": ["include/bar.h"],
+        "cu://d": ["include/bar.h"],
+    }
+    units = select_compile_units(
+        _build(), scope="changed", changed_paths=["include/foo.h"],
+        include_map=include_map,
+    )
+    assert {u.id for u in units} == {"cu://a"}
+
+
+def test_changed_full_include_graph_no_match_selects_nothing() -> None:
+    # Every TU is covered by the graph and none includes the changed header →
+    # authoritative: select nothing (no fail-open fan-out).
+    include_map = {
+        "cu://a": ["include/other.h"],
+        "cu://b": ["include/other.h"],
+        "cu://c": ["include/other.h"],
+        "cu://d": ["include/other.h"],
+    }
+    units = select_compile_units(
+        _build(), scope="changed", changed_paths=["include/ghost.h"],
+        include_map=include_map,
+    )
+    assert units == []
+
+
+def test_changed_partial_include_graph_falls_back_to_fan_out() -> None:
+    # Graph covers only some TUs and the changed header matches none of them →
+    # a header changed with incomplete coverage still fails open to all units.
+    include_map = {"cu://a": ["include/other.h"]}
+    units = select_compile_units(
+        _build(), scope="changed", changed_paths=["include/ghost.h"],
+        include_map=include_map,
+    )
+    assert {u.id for u in units} == {u.id for u in _build().compile_units}
+
+
+def test_changed_with_graph_still_matches_changed_source() -> None:
+    # A TU whose own source changed is selected even if the graph says it
+    # includes nothing relevant.
+    include_map = {"cu://b": ["include/other.h"]}
+    units = select_compile_units(
+        _build(), scope="changed", changed_paths=["src/b.cpp"],
+        include_map=include_map,
+    )
+    assert {u.id for u in units} == {"cu://b"}
+
+
 def test_unknown_scope_raises() -> None:
     with pytest.raises(ValueError, match="unknown replay scope"):
         select_compile_units(_build(), scope="bogus")
@@ -458,6 +589,20 @@ def test_run_source_replay_links_selected_units() -> None:
     assert len(surface.reachable_declarations) == 2
     assert surface.coverage["replay_scope"] == "target"
     assert surface.coverage["compile_units_parsed"] == 2
+
+
+def test_run_source_replay_forwards_include_graph_for_precise_changed() -> None:
+    extractor = _FakeExtractor()
+    surface, _ = run_source_replay(
+        _build(), extractor, scope="changed",
+        changed_paths=["include/foo.h"],
+        public_header_roots=["include/foo.h"],
+        include_map={"cu://a": ["include/foo.h"], "cu://b": ["include/other.h"],
+                     "cu://c": ["include/bar.h"], "cu://d": ["include/bar.h"]},
+    )
+    # Only the TU that includes the changed header is parsed (precise mapping).
+    assert extractor.calls == ["cu://a"]
+    assert surface.coverage["include_graph_used"] is True
 
 
 def test_run_source_replay_records_failures_as_diagnostics() -> None:
