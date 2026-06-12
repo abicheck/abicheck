@@ -161,6 +161,16 @@ def _route_type(
     surface.reachable_types.append(entity)
     if not entity.qualified_name:
         return
+    # Typedefs are kept out of the ODR / source_type_to_debug_type path: a common
+    # C self-alias `typedef struct Foo Foo;` (and anonymous-struct typedefs) shares
+    # its `(qualified_name, header)` with the `record` the same header defines, so
+    # routing the typedef here would collide with that record and emit a spurious
+    # odr_source_conflict on an unchanged header (Codex review). Typedef target
+    # changes are still surfaced by source_diff._diff_typedefs, which keys by
+    # entity identity, so dropping them from the ODR/type-mapping path loses no
+    # detection.
+    if entity.kind == "typedef":
+        return
     # Key ODR detection by (name, declaring header) so same-named types in
     # different namespaces/headers (a::Widget vs b::Widget, which castxml emits
     # with the bare name) don't conflate into a false odr_source_conflict. A

@@ -763,3 +763,16 @@ def test_diff_generated_typedef_not_double_reported() -> None:
     ])
     kinds = [c.kind for c in diff_source_abi(old, new)]
     assert kinds == [ChangeKind.GENERATED_HEADER_CHANGED]
+
+
+def test_typedef_self_alias_no_odr_conflict() -> None:
+    # `typedef struct Foo Foo;` — the record Foo and the typedef Foo share the
+    # same (name, header). The typedef must NOT enter the ODR path (would emit a
+    # spurious odr_source_conflict against the record) — Codex review.
+    record = _entity("Foo", "record", type_hash="rec-hash")
+    typedef = _entity("Foo", "typedef", value="struct Foo", type_hash="td-hash")
+    tu = SourceAbiTu(types=[record, typedef])
+    surface = link_source_abi([tu])
+    assert surface.odr_conflicts == []
+    kinds = {e.kind for e in surface.reachable_types if e.qualified_name == "Foo"}
+    assert kinds == {"record", "typedef"}
