@@ -193,18 +193,44 @@ def test_scope_changed_unowned_header_fails_open_despite_target_metadata() -> No
 
 
 def test_headers_only_set_cover_picks_minimal_units() -> None:
-    # cu://a includes BOTH public headers, cu://b/c each include one. The greedy
-    # set cover must pick the single TU (cu://a) that covers everything, not one
-    # representative per target.
-    include_map = {
-        "cu://a": ["include/foo.h", "include/bar.h"],
-        "cu://b": ["include/foo.h"],
-        "cu://c": ["include/bar.h"],
-    }
-    units = select_compile_units(
-        _build(), scope="headers-only", include_map=include_map
+    # One target owning both its public headers: the greedy cover picks the single
+    # owning TU that includes both, not one representative per source file.
+    build = BuildEvidence(
+        targets=[Target(id="t", public_headers=["include/a.h", "include/b.h"])],
+        compile_units=[
+            _cu("cu://x", "x.cpp", "t"),
+            _cu("cu://y", "y.cpp", "t"),
+        ],
     )
-    assert {u.id for u in units} == {"cu://a"}
+    include_map = {
+        "cu://x": ["include/a.h", "include/b.h"],  # owns + includes both
+        "cu://y": ["include/a.h"],
+    }
+    units = select_compile_units(build, scope="headers-only", include_map=include_map)
+    assert {u.id for u in units} == {"cu://x"}
+
+
+def test_headers_only_set_cover_ignores_non_owning_includer() -> None:
+    # A downstream TU (different target) that merely *includes* a public header
+    # must NOT cover it — only the owning target's TU may, so the header is
+    # fingerprinted under the right compile context (Codex review).
+    build = BuildEvidence(
+        targets=[
+            Target(id="lib", public_headers=["include/foo.h"]),
+            Target(id="app", public_headers=[]),
+        ],
+        compile_units=[
+            _cu("cu://lib", "lib.cpp", "lib"),
+            _cu("cu://app", "app.cpp", "app"),
+        ],
+    )
+    # The app TU includes foo.h but does not own it; the lib TU owns it.
+    include_map = {
+        "cu://app": ["include/foo.h"],
+        "cu://lib": ["include/foo.h"],
+    }
+    units = select_compile_units(build, scope="headers-only", include_map=include_map)
+    assert {u.id for u in units} == {"cu://lib"}
 
 
 def test_headers_only_set_cover_needs_two_units() -> None:

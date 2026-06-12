@@ -232,13 +232,28 @@ def _headers_only_set_cover(
     if not public:
         return None
     by_id = {cu.id: cu for cu in build.compile_units}
-    # cu_id -> set of public headers that TU includes (build-root-stable match).
+    # Which target(s) *declare* each public header. A header must be fingerprinted
+    # under the compile context of an owning target, not a downstream app/test TU
+    # that merely includes it (different defines/include paths would mis-fingerprint
+    # the surface) — so a TU may only "cover" a public header its own target
+    # declares (Codex review).
+    header_owners: dict[str, set[str]] = {}
+    for target in build.targets:
+        for ph in target.public_headers:
+            header_owners.setdefault(ph, set()).add(target.id)
+    # cu_id -> set of public headers that TU includes (build-root-stable match) and
+    # whose owning target it belongs to.
     coverage: dict[str, set[str]] = {}
     for cu_id, incs in include_map.items():
-        if cu_id not in by_id:
+        cu = by_id.get(cu_id)
+        if cu is None:
             continue
         incset = frozenset(incs)
-        covered = {ph for ph in public if _included(ph, incset)}
+        covered = {
+            ph
+            for ph in public
+            if _included(ph, incset) and cu.target_id in header_owners.get(ph, set())
+        }
         if covered:
             coverage[cu_id] = covered
     if not coverage:
