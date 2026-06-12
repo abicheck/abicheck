@@ -1133,6 +1133,44 @@ def test_merge_identical_layer_is_not_a_conflict(tmp_path):
                 if e.name == "merge_layer_conflict"]
 
 
+def test_merge_three_inputs_folds_all(tmp_path):
+    """D5: merge accepts 3+ inputs — a binary base plus a fact-bearing source
+    snapshot plus a no-facts snapshot — folding without conflict."""
+    from abicheck.elf_metadata import ElfMetadata
+
+    bin_snap = AbiSnapshot(library="libfoo.so", version="1")
+    bin_snap.elf = ElfMetadata()
+    bin_path = tmp_path / "bin.json"
+    save_snapshot(bin_snap, bin_path)
+
+    src_path = _src_snapshot_with_l3(tmp_path, "c++17", "src.json")
+    plain_path = tmp_path / "plain.json"
+    save_snapshot(AbiSnapshot(library="libfoo.so", version="1"), plain_path)
+
+    out = tmp_path / "baseline.json"
+    result = CliRunner().invoke(
+        main, ["merge", str(bin_path), str(src_path), str(plain_path), "-o", str(out)]
+    )
+    assert result.exit_code == 0, result.output
+    assert "merge conflict" not in result.output
+    merged = load_snapshot(out)
+    assert merged.elf is not None                         # binary base kept
+    assert merged.build_source is not None
+    assert merged.build_source.build_evidence is not None  # L3 folded from src
+
+
+def test_merge_corrupted_input_errors_cleanly(tmp_path):
+    """D5: a non-JSON input fails with a non-zero exit, not a traceback dump."""
+    good = _src_snapshot_with_l3(tmp_path, "c++17", "good.json")
+    bad = tmp_path / "bad.json"
+    bad.write_text("this is not json", encoding="utf-8")
+    out = tmp_path / "baseline.json"
+    result = CliRunner().invoke(main, ["merge", str(good), str(bad), "-o", str(out)])
+    assert result.exit_code != 0
+    assert "could not read snapshot" in result.output
+    assert not out.exists()
+
+
 def test_merge_without_embedded_facts_is_noted(tmp_path):
     from abicheck.model import AbiSnapshot
     from abicheck.serialization import load_snapshot, save_snapshot

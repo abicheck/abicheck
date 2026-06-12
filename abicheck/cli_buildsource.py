@@ -1405,7 +1405,14 @@ def merge_cmd(inputs: tuple[Path, ...], output: Path, on_conflict: str, verbose:
     if len(inputs) < 2:
         raise click.UsageError("merge needs at least two input snapshots.")
 
-    snaps = [(path, load_snapshot(path)) for path in inputs]
+    snaps = []
+    for path in inputs:
+        try:
+            snaps.append((path, load_snapshot(path)))
+        except Exception as exc:  # malformed/corrupted .abi.json → clean error
+            raise click.ClickException(
+                f"could not read snapshot {path.name}: {exc}"
+            ) from exc
 
     # Base = the input that carries binary metadata (L0); else the first input.
     base_path, base = next(
