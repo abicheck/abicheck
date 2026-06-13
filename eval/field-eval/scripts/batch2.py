@@ -26,8 +26,10 @@ def best_so(pkg, ver):
     sos = cf.find_sos(out)
     best, bestn = None, -1
     for s in sos:
-        # quick dynsym count via readelf
-        p = subprocess.run(["bash", "-c", f"readelf -sW --dyn-syms '{s}' 2>/dev/null | grep -c ' FUNC '"],
+        # defined exported FUNCs only: dyn table, drop UND imports, keep GLOBAL/WEAK
+        p = subprocess.run(["bash", "-c",
+            f"readelf -W --dyn-syms '{s}' 2>/dev/null | "
+            f"awk '$4==\"FUNC\" && $7!=\"UND\" && ($5==\"GLOBAL\"||$5==\"WEAK\")' | wc -l"],
                            capture_output=True, text=True)
         try: n = int(p.stdout.strip() or 0)
         except ValueError: n = 0
