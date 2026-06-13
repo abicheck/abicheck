@@ -413,6 +413,42 @@ class TestSuppressionNamespaceSelector:
         r = compare(old, new, suppression=suppression)
         assert r.verdict == Verdict.NO_CHANGE
 
+    def test_extern_c_namespace_suppression_rejects_one_sided_spoof(self) -> None:
+        """A new-side namespace alone must not suppress an existing global export.
+
+        The C-linkage symbol is still ``dispatch`` in both snapshots, so a
+        trusted namespace suppression must not be satisfied by moving only the
+        new declaration under the suppressed C++ namespace.
+        """
+        old_fn = Function(
+            name="dispatch",
+            mangled="dispatch",
+            return_type="int",
+            params=[Param(name="n", type="int")],
+            visibility=Visibility.PUBLIC,
+            is_extern_c=True,
+        )
+        new_fn = Function(
+            name="mylib::detail::r1::dispatch",
+            mangled="dispatch",
+            return_type="long",
+            params=[Param(name="n", type="long")],
+            visibility=Visibility.PUBLIC,
+            is_extern_c=True,
+        )
+        old = _snap("1.0", [old_fn])
+        new = _snap("2.0", [new_fn])
+        suppression = SuppressionList(
+            [Suppression(namespace="**::detail::r1::*", reason="legacy churn")],
+        )
+        r = compare(old, new, suppression=suppression)
+        assert r.verdict == Verdict.BREAKING
+        assert r.suppressed_count == 0
+        assert {c.kind for c in r.changes} == {
+            ChangeKind.FUNC_RETURN_CHANGED,
+            ChangeKind.FUNC_PARAMS_CHANGED,
+        }
+
 
 # ── Regression: deep ancestor matching + extern "C" + ctx.redundant ─────
 

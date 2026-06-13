@@ -756,26 +756,6 @@ class EscalateFrozenNamespaceViolations:
 
     name = "escalate_frozen_namespace_violations"
 
-    @staticmethod
-    def _build_qualified_lookup(old: AbiSnapshot, new: AbiSnapshot) -> dict[str, str]:
-        """Build a mangled→qualified-name map from both snapshots.
-
-        Pre-building this lookup lets :meth:`run` recover the C++ namespace
-        of ``extern "C"`` symbols whose ``Change.symbol`` is just the
-        unqualified export name.  Both snapshots are consulted because
-        FUNC_REMOVED is only in old and FUNC_ADDED only in new.
-        """
-        qualified_lookup: dict[str, str] = {}
-        for snap in (old, new):
-            if snap is None or not _safe_index(snap):
-                continue
-            func_map = getattr(snap, "_func_by_mangled", None) or {}
-            for mangled, fn in func_map.items():
-                fname = getattr(fn, "name", None)
-                if fname and "::" in fname and mangled not in qualified_lookup:
-                    qualified_lookup[mangled] = fname
-        return qualified_lookup
-
     def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:
         if not ctx.frozen_namespaces:
             return changes
@@ -783,12 +763,17 @@ class EscalateFrozenNamespaceViolations:
         import fnmatch
 
         from .demangle import demangle
+        from .diff_filtering import (
+            _qualified_functions_by_mangled,
+            _qualified_name_for_change,
+        )
         from .internal_leak import _strip_template_args
 
         patterns = list(ctx.frozen_namespaces)
-        qualified_lookup = self._build_qualified_lookup(ctx.old, ctx.new)
+        old_qualified = _qualified_functions_by_mangled(ctx.old)
+        new_qualified = _qualified_functions_by_mangled(ctx.new)
 
-        def _match(name: str | None) -> str | None:
+        def _match(name: str | None, c: Change) -> str | None:
             if not name:
                 return None
             # Collect every plausible C++-qualified form of *name*:
@@ -802,9 +787,10 @@ class EscalateFrozenNamespaceViolations:
                 dm = demangle(name)
                 if dm:
                     forms.append(dm)
-            qual = qualified_lookup.get(name)
-            if qual:
-                forms.append(qual)
+            if name == c.symbol:
+                qual = _qualified_name_for_change(c, old_qualified, new_qualified)
+                if qual:
+                    forms.append(qual)
 
             for form in forms:
                 # Walk every ancestor prefix so ``**::detail::r1`` matches
@@ -826,7 +812,9 @@ class EscalateFrozenNamespaceViolations:
                 # overlay that synthesised a finding with the field set).
                 return
             pat = (
-                _match(c.symbol) or _match(c.caused_by_type) or _match(c.qualified_name)
+                _match(c.symbol, c)
+                or _match(c.caused_by_type, c)
+                or _match(c.qualified_name, c)
             )
             if pat is None:
                 return
