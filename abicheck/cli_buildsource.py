@@ -1477,7 +1477,7 @@ def diff_embedded_build_source(
         # is missing, so the run must fail rather than pass on zero evidence. Emit
         # a coverage-only metrics dict so attach_evidence_metrics still counts the
         # evidence_required_missing finding (Codex review) instead of dropping it.
-        req = require_evidence_findings(policy_file, None)
+        req = require_evidence_findings(policy_file, None, None)
         metrics = evidence_coverage_metrics([]) if req else {}
         return req, [], metrics
 
@@ -1539,9 +1539,10 @@ def diff_embedded_build_source(
         apply_evidence_policy(_gr, "graph_risk", policy_file)
         changes.extend(_gr)
 
-    # ADR-033 D7 require_evidence: fail if a declared-mandatory layer is absent
-    # from the target. These are API_BREAK findings (not modulated by the knobs).
-    changes.extend(require_evidence_findings(policy_file, new_pack))
+    # ADR-033 D7 require_evidence: fail if a declared-mandatory layer is not
+    # comparable on both sides. These are API_BREAK findings (not modulated by
+    # the knobs).
+    changes.extend(require_evidence_findings(policy_file, old_pack, new_pack))
 
     # Coverage/capability reflect the *target* (new) side only: the L3/L4/L5
     # diffs run only when both sides supply a layer, so reporting the old pack's

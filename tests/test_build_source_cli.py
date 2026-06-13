@@ -459,8 +459,8 @@ def test_require_evidence_fails_when_layer_absent(tmp_path):
     assert payload["evidence_metrics"]["findings.evidence_required_missing.count"] == 1
 
 
-def test_require_evidence_satisfied_when_layer_present(tmp_path):
-    """When the required layer is present (build pack supplied), no finding."""
+def test_require_evidence_fails_when_layer_only_on_target_side(tmp_path):
+    """A required evidence layer must be comparable on both sides."""
     runner = CliRunner()
     ev_new = tmp_path / "new.evidence"
     runner.invoke(main, ["collect", "--compile-db", str(_write_cdb(tmp_path, "c++20")),
@@ -471,6 +471,31 @@ def test_require_evidence_satisfied_when_layer_present(tmp_path):
     new_snap = _make_snap(tmp_path, "new.json", "2.0")
     result = runner.invoke(main, [
         "compare", str(old_snap), str(new_snap), "--new-build-info", str(ev_new),
+        "--policy-file", str(pol), "--format", "json",
+    ])
+    assert result.exit_code == 2, result.output
+    payload = json.loads(result.stdout)
+    changes = [c for c in payload["changes"] if c["kind"] == "evidence_required_missing"]
+    assert len(changes) == 1
+    assert "baseline side" in changes[0]["description"]
+
+
+def test_require_evidence_satisfied_when_layer_comparable(tmp_path):
+    """When the required layer is present on both sides, no finding."""
+    runner = CliRunner()
+    ev_old = tmp_path / "old.evidence"
+    ev_new = tmp_path / "new.evidence"
+    runner.invoke(main, ["collect", "--compile-db", str(_write_cdb(tmp_path, "c++20")),
+                         "-o", str(ev_old)])
+    runner.invoke(main, ["collect", "--compile-db", str(_write_cdb(tmp_path, "c++20")),
+                         "-o", str(ev_new)])
+    pol = tmp_path / "policy.yaml"
+    pol.write_text("evidence_policy:\n  require_evidence:\n    build_context: true\n")
+    old_snap = _make_snap(tmp_path, "old.json", "1.0")
+    new_snap = _make_snap(tmp_path, "new.json", "2.0")
+    result = runner.invoke(main, [
+        "compare", str(old_snap), str(new_snap),
+        "--old-build-info", str(ev_old), "--new-build-info", str(ev_new),
         "--policy-file", str(pol), "--format", "json",
     ])
     assert result.exit_code == 0, result.output

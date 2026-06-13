@@ -79,7 +79,8 @@ def apply_evidence_policy(
 
 # ── D7 require_evidence gate ─────────────────────────────────────────────────
 
-# require_evidence layer key -> (human label, pack attribute proving presence).
+# require_evidence layer key -> (human label, pack attribute needed on both sides
+# to make that layer comparable).
 _REQUIRE_EVIDENCE_LAYERS: tuple[tuple[str, str, str], ...] = (
     ("build_context", "L3 build context", "build_evidence"),
     ("source_abi", "L4 source ABI replay", "source_abi"),
@@ -88,14 +89,17 @@ _REQUIRE_EVIDENCE_LAYERS: tuple[tuple[str, str, str], ...] = (
 
 
 def require_evidence_findings(
-    policy_file: PolicyFile | None, new_pack: BuildSourcePack | None
+    policy_file: PolicyFile | None,
+    old_pack: BuildSourcePack | None,
+    new_pack: BuildSourcePack | None,
 ) -> list[Change]:
-    """Emit a finding for each ADR-033 D7 ``require_evidence`` layer that is absent.
+    """Emit findings for required evidence layers unavailable to compare.
 
     A required-but-missing layer fails the run (``EVIDENCE_REQUIRED_MISSING`` is an
-    API_BREAK kind) rather than letting a silently-degraded scan pass. Evaluated
-    against the *target* (new) side's pack, since that is what the verdict speaks
-    for. No-op when the policy declares no requirements.
+    API_BREAK kind) rather than letting a silently-degraded scan pass. Evidence
+    diffs are only meaningful when both baseline (old) and target (new) sides
+    supply the layer, so the requirement is enforced against comparable evidence
+    on both sides. No-op when the policy declares no requirements.
     """
     if policy_file is None or not policy_file.require_evidence:
         return []
@@ -106,16 +110,24 @@ def require_evidence_findings(
     for key, label, attr in _REQUIRE_EVIDENCE_LAYERS:
         if not policy_file.require_evidence.get(key):
             continue
-        present = new_pack is not None and getattr(new_pack, attr, None) is not None
-        if present:
+        old_present = old_pack is not None and getattr(old_pack, attr, None) is not None
+        new_present = new_pack is not None and getattr(new_pack, attr, None) is not None
+        if old_present and new_present:
             continue
+        missing_sides = []
+        if not old_present:
+            missing_sides.append("baseline")
+        if not new_present:
+            missing_sides.append("target")
+        missing = " and ".join(missing_sides)
         findings.append(
             Change(
                 kind=ChangeKind.EVIDENCE_REQUIRED_MISSING,
                 symbol=f"evidence:{key}",
                 description=(
-                    f"Policy requires {label} evidence, but it is absent from this "
-                    "compare. Supply the missing evidence pack (collect + "
+                    f"Policy requires comparable {label} evidence, but it is "
+                    f"absent from the {missing} side of this compare. "
+                    "Supply the missing evidence pack (collect + "
                     "dump --build-info/--sources) or relax evidence_policy."
                     "require_evidence in the policy file."
                 ),

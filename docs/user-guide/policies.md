@@ -164,7 +164,7 @@ evidence_policy:
   source_only_findings: warn          # ignore | warn | fail-api | fail-release
   build_context_drift: warn           # ignore | warn | fail-on-abi-relevant
   graph_risk_findings: warn           # ignore | warn | fail
-  require_evidence:                    # fail the run if a required layer is absent
+  require_evidence:                    # fail if a required layer is not comparable
     build_context: false
     source_abi: false
     graph_summary: false
@@ -177,9 +177,9 @@ evidence_policy:
   escalates only genuinely ABI-relevant drift (std/visibility/packing flags,
   export policy, toolchain) to `API_BREAK`; other drift stays a risk.
 - `graph_risk_findings` — L5 reachability/impact risks. `fail` → `API_BREAK`.
-- `require_evidence` — when a listed layer is `true` but absent from the
-  compare, an `evidence_required_missing` finding (`API_BREAK`) fails the run so
-  a silently-degraded scan can't pass (ADR-033 D7).
+- `require_evidence` — when a listed layer is `true` but absent from either the
+  baseline or target side of the compare, an `evidence_required_missing` finding
+  (`API_BREAK`) fails the run so a silently-degraded scan can't pass (ADR-033 D7).
 
 Each knob is **unset by default**: leaving it out keeps the finding's normal
 category, so existing runs are unchanged. Per ADR-028 D3 these knobs never turn
