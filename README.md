@@ -232,6 +232,6 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, testing, code style, and PR wo
 
 ## License
 
-Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE) and [NOTICE.md](NOTICE.md).
+Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
 
 Copyright 2026 Nikolay Petrov

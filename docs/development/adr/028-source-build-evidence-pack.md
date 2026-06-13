@@ -410,9 +410,10 @@ source ABI replay (Phase 2, ADR-030), and the graph summary / external backends
 Using the feature in practice — a prebuilt package (e.g. a conda-forge `.so`)
 checked against the **source checkout at its build tag** — showed the
 build-tree-centric framing was too narrow. This amendment *refines* the decisions
-above; the authority rule (D3) is unchanged. The full implementation checklist is
-`/buildsource-redesign-plan.md` (internal). Per-layer decisions live in the
-relevant ADRs (029 inputs, 030 scopes/flags, 032 build-tool config, 033 merge).
+above; the authority rule (D3) is unchanged. The temporary root-level
+implementation checklist has been removed after the work landed. Per-layer
+decisions live in the relevant ADRs (029 inputs, 030 scopes/flags, 032
+build-tool config, 033 merge).
 
 - **Rename (PR #356).** `EvidencePack`→`BuildSourcePack`; the opaque `--evidence`
   surface becomes concrete `--build-info` (L3) and `--sources` (L4/L5). The L0–L5
