@@ -197,6 +197,7 @@ def compare(
     extra_changes: list[Change] | None = None,
     pattern_verdicts: bool = False,
     surface_metrics: bool = False,
+    collapse_versioned_symbols: bool = False,
 ) -> DiffResult:
     """Diff two AbiSnapshots and return a DiffResult with verdict.
 
@@ -237,6 +238,7 @@ def compare(
         frozen_namespaces=frozen_ns,
         scope_to_public_surface=scope_to_public_surface,
         force_public_symbols=force_public_symbols,
+        collapse_versioned_symbols=collapse_versioned_symbols,
     )
     kept = pp_ctx.kept
     redundant = pp_ctx.redundant

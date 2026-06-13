@@ -107,6 +107,41 @@ _LITERAL_NODE_KINDS = frozenset(
 _FINGERPRINT_SCALAR_KEYS = ("kind", "name", "value", "opcode", "castKind")
 
 
+#: Header extensions that are typically *generated* by the build (TableGen `.inc`,
+#: autotools/CMake `*.h.in` → `config.h`, protobuf/flatbuffers/moc outputs). When a
+#: "file not found" names one of these, the real cause is "the target wasn't built".
+#: Matches both clang ("'X' file not found") and gcc ("X: No such file or
+#: directory") missing-include wording for a header-looking path.
+_GENERATED_HEADER_RE = re.compile(
+    r"fatal error:\s*['\"]?([^'\":\n]+\.(?:inc|def|h|hpp|hxx))['\"]?"
+    r"\s*(?:file not found|: No such file or directory)",
+    re.IGNORECASE,
+)
+_LIKELY_GENERATED_RE = re.compile(r"\.(inc|def)$|config\.h$|\.pb\.h$|moc_|\.generated\.", re.I)
+
+
+def _missing_generated_header_hint(stderr: str) -> str:
+    """P19: turn a bare clang 'file not found' into an actionable build hint.
+
+    L4 replay parses each TU under its real flags, but a *configure-only* tree has
+    not produced its generated headers (TableGen ``*.inc``, ``config.h``, protobuf
+    ``*.pb.h``…), so clang fails with a generic include error. Detect that shape and
+    point the user at building the target first, rather than reporting an opaque
+    parse failure. Returns ``""`` when the stderr is not a missing-header failure.
+    """
+    m = _GENERATED_HEADER_RE.search(stderr or "")
+    if not m:
+        return ""
+    header = m.group(1)
+    generated = bool(_LIKELY_GENERATED_RE.search(header))
+    what = "generated header" if generated else "header"
+    return (
+        f"\n  hint: missing {what} '{header}'. L4 source replay needs the target's "
+        "generated headers to exist — build the target (or its codegen step) first, "
+        "then re-run; configure-only trees do not produce them."
+    )
+
+
 def _std_flag(standard: str, msvc: bool) -> list[str]:
     if not standard:
         return []
@@ -1153,6 +1188,7 @@ class ClangSourceExtractor:
             raise SourceExtractionError(
                 f"clang produced no AST for {compile_unit.source} "
                 f"(exit {result.returncode}): {result.stderr[:1000]}"
+                + _missing_generated_header_hint(result.stderr)
             )
         try:
             ast_root = json.loads(result.stdout)
@@ -1167,6 +1203,7 @@ class ClangSourceExtractor:
         if result.returncode != 0:
             diags.append(
                 f"clang exited {result.returncode} (recovered): {result.stderr[:300]}"
+                + _missing_generated_header_hint(result.stderr)
             )
         tu = source_abi_from_clang_ast(
             ast_root, compile_unit, public_header_roots, target_id, diagnostics=diags,
