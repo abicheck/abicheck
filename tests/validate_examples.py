@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -85,8 +86,24 @@ def _shared_lib_suffix() -> str:
 SHARED_LIB_SUFFIX = _shared_lib_suffix()
 
 
-def _find_compiler(is_cpp: bool = False) -> str | None:
-    """Find a C/C++ compiler available on this platform."""
+# Toolchain family override (set by --toolchain on the CLI). When None the
+# platform-native default order is used. Promoting Clang to a first-class
+# validator (see examples-validation.yml) flips producer-sensitive cases such
+# as case64 (GCC does not emit DW_AT_calling_convention for ms_abi).
+PREFERRED_FAMILY: str | None = None
+
+
+def _find_compiler(is_cpp: bool = False, preferred_family: str | None = None) -> str | None:
+    """Find a C/C++ compiler available on this platform.
+
+    *preferred_family* ("gcc" | "clang" | "msvc") reorders the candidate list to
+    prefer that toolchain; it defaults to the module-level ``PREFERRED_FAMILY``
+    so a single ``--toolchain`` flag steers every compile in the run. Mirrors
+    ``scripts/benchmark_comparison.py._find_compiler`` so the two harnesses pick
+    the same producer.
+    """
+    if preferred_family is None:
+        preferred_family = PREFERRED_FAMILY
     if is_cpp:
         candidates = {
             "win32": ["cl", "g++", "clang++"],
@@ -97,6 +114,16 @@ def _find_compiler(is_cpp: bool = False) -> str | None:
             "win32": ["cl", "gcc", "clang"],
             "darwin": ["clang", "gcc"],
         }.get(sys.platform, ["gcc", "clang"])
+
+    if preferred_family == "clang":
+        pref = ["clang++-18", "clang++", "g++", "cl"] if is_cpp else ["clang-18", "clang", "gcc", "cl"]
+        candidates = [c for c in pref if c in set(candidates) or c.startswith("clang")]
+    elif preferred_family == "gcc":
+        pref = ["g++", "clang++", "cl"] if is_cpp else ["gcc", "clang", "cl"]
+        candidates = [c for c in pref if c in set(candidates)]
+    elif preferred_family == "msvc":
+        candidates = [c for c in candidates if c == "cl"]
+
     for cc in candidates:
         if shutil.which(cc):
             return cc
@@ -115,6 +142,12 @@ class CaseResult(NamedTuple):
     variant: str = DEFAULT_ARTIFACT_VARIANT
     seconds: float = 0.0
     source_layers: tuple[str, ...] = ()
+    # Strict-category signal: "ok" | "collapsed" | "n/a". "collapsed" means the
+    # verdict PASSed only because _normalize_verdict folds API_BREAK into
+    # COMPATIBLE, while the case had full (L2+) evidence and a source-level
+    # expected category — i.e. the exact semantic category was lost. Surfaced
+    # (not failed) by default; check_validate_results.py can gate on it.
+    category_strict: str = "n/a"
 
 
 # ---------------------------------------------------------------------------
@@ -923,10 +956,40 @@ def run_case(
         sources=sources_present,
         build_info=build_info_present,
     )
-    return _evaluate_verdict(
+    result = _evaluate_verdict(
         name, expected_raw, got, known_gap,
         allow_risk_for_compatible=allow_risk,
     )._replace(variant=variant, source_layers=source_layers)
+    return result._replace(
+        category_strict=_category_strict_signal(entry, result, source_layers)
+    )
+
+
+def _category_strict_signal(
+    entry: dict,
+    result: CaseResult,
+    source_layers: tuple[str, ...],
+) -> str:
+    """Detect an API_BREAK→COMPATIBLE category collapse masked by normalization.
+
+    Returns "collapsed" when the run PASSed only because API_BREAK and
+    COMPATIBLE normalize together, *and* the case had full header evidence (L2)
+    so the precise category was observable. Otherwise "ok" (PASS with no
+    collapse) or "n/a" (not a PASS, or no full evidence to judge by).
+    """
+    if result.status != "PASS":
+        return "n/a"
+    if "L2" not in source_layers:
+        return "n/a"
+    expected = result.expected or ""
+    got = result.got or ""
+    if expected == got:
+        return "ok"
+    # PASS with differing raw verdicts ⇒ normalization folded them. Flag only
+    # the source-level category boundary the doc cares about (api_break).
+    if entry.get("category") == "api_break" and _normalize_verdict(got) == _normalize_verdict(expected):
+        return "collapsed"
+    return "ok"
 
 
 # ---------------------------------------------------------------------------
@@ -982,10 +1045,13 @@ def _run_all_cases(
 
 
 def _summary_counts(results: list[CaseResult]) -> dict[str, int]:
-    """Count result statuses."""
+    """Count result statuses, plus the strict-category collapse tally."""
     counts: dict[str, int] = {}
     for r in results:
         counts[r.status] = counts.get(r.status, 0) + 1
+    collapsed = sum(1 for r in results if r.category_strict == "collapsed")
+    if collapsed:
+        counts["CATEGORY_COLLAPSED"] = collapsed
     return counts
 
 
@@ -1001,6 +1067,7 @@ def _result_to_json(r: CaseResult) -> dict[str, object]:
     )
     d["evidence_asymmetry"] = "symmetric"
     d["manual_review_ok"] = r.status in {"XFAIL", "SKIP"}
+    d["category_strict"] = r.category_strict
     return d
 
 
@@ -1021,6 +1088,9 @@ def _json_payload(
         "ground_truth_cases": total_ground_truth_cases,
         "selected_cases": len(names),
         "artifact_variants": list(variants),
+        "toolchain": PREFERRED_FAMILY or "auto",
+        "compiler_c": _find_compiler(is_cpp=False) or "none",
+        "compiler_cxx": _find_compiler(is_cpp=True) or "none",
         "summary": _summary_counts(results),
         "results": [_result_to_json(r) for r in results],
     }
@@ -1085,7 +1155,29 @@ def main(argv: list[str] | None = None) -> int:
             "release-headers, stripped-headers, build-source, or all."
         ),
     )
+    ap.add_argument(
+        "--toolchain",
+        choices=("auto", "gcc", "clang", "msvc"),
+        default="auto",
+        help=(
+            "Compiler family to prefer for every compile/build (default: auto = "
+            "platform-native order). Use 'clang' to exercise producer-sensitive "
+            "cases such as case64 (DW_AT_calling_convention for ms_abi)."
+        ),
+    )
     args = ap.parse_args(argv)
+
+    global PREFERRED_FAMILY
+    PREFERRED_FAMILY = None if args.toolchain == "auto" else args.toolchain
+    # CMake-built cases honour CC/CXX; export them so the chosen family also
+    # drives the cmake configure step, not just direct compilation.
+    if PREFERRED_FAMILY is not None:
+        cc = _find_compiler(is_cpp=False)
+        cxx = _find_compiler(is_cpp=True)
+        if cc:
+            os.environ.setdefault("CC", cc)
+        if cxx:
+            os.environ.setdefault("CXX", cxx)
 
     prereq_err = _check_prerequisites()
     if prereq_err:
