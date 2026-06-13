@@ -107,11 +107,12 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           test -f results/validate_examples.json && python tests/summarize_validate_results.py >> $GITHUB_STEP_SUMMARY || true
 
-  # Non-default artifact modes. release-headers and build-source are validated
-  # pass/fail; the full stripped-headers catalog is reported-only (stripping
-  # removes DWARF signal, so missed breaks like case129 are expected evidence
-  # loss, not failures) but is gated by a false-positive guard: a case the debug
-  # ground truth calls COMPATIBLE/NO_CHANGE must never become BREAKING stripped.
+  # Non-default artifact modes (release / stripped full-catalog / build-source
+  # smoke). All three change the available evidence — release/stripped binaries
+  # drop the DWARF a layout/calling-convention break needs — so verdicts are
+  # reported-only (a downgrade like case129 is expected evidence loss). The
+  # blockable invariant across all three is the false-positive guard: a case the
+  # debug ground truth calls COMPATIBLE/NO_CHANGE must never become BREAKING.
   artifact-modes:
     name: Artifact modes (release / stripped full-catalog / build-source)
     runs-on: ubuntu-latest
