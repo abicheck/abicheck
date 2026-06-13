@@ -58,3 +58,34 @@ def test_compile_db_present_does_not_warn(tmp_path, capsys):
     assert "no compile_commands.json found" not in err
     assert snap.build_source is not None
     assert snap.build_source.build_evidence.compile_units  # L3 collected
+
+
+def test_graph_build_collect_mode_skips_l4(tmp_path):
+    # P18: graph-build collects L3 + the L5 graph from build facts alone, with NO
+    # L4 source replay — so the structural graph + build options are available even
+    # where full L4 would be prohibitive (monorepos).
+    src = tmp_path / "foo.c"
+    src.write_text("int foo(void){return 0;}\n", encoding="utf-8")
+    (tmp_path / "compile_commands.json").write_text(
+        json.dumps([{"directory": str(tmp_path), "file": str(src),
+                     "command": f"cc -c {src}"}]),
+        encoding="utf-8",
+    )
+    snap = AbiSnapshot(library="l", version="1")
+
+    embed_build_source(snap, None, tmp_path, collect_mode="graph-build")
+
+    assert snap.build_source is not None
+    bs = snap.build_source
+    assert bs.build_evidence.compile_units          # L3 present
+    assert bs.source_graph is not None              # L5 graph built
+    assert bs.source_graph.nodes                     # ...with nodes folded from L3
+    assert bs.source_abi is None                     # L4 skipped (no source replay)
+
+
+def test_collection_for_ci_mode_graph_build():
+    from abicheck.buildsource.source_replay import collection_for_ci_mode
+
+    scope, layers = collection_for_ci_mode("graph-build")
+    assert scope == "off"          # no replay
+    assert layers == ("L3", "L5")  # build facts + graph, no L4

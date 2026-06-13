@@ -67,6 +67,7 @@ REPLAY_SCOPES = ("off", "headers-only", "changed", "target", "full")
 CI_MODE_TO_SCOPE: dict[str, str] = {
     "off": "off",
     "build": "off",
+    "graph-build": "off",  # L5 graph folds from L3 only — no source replay
     "source-changed": "changed",
     "source-target": "target",
     "graph-summary": "changed",
@@ -89,6 +90,10 @@ def scope_for_ci_mode(mode: str) -> str:
 CI_MODE_TO_LAYERS: dict[str, tuple[str, ...]] = {
     "off": (),
     "build": ("L3",),
+    # graph-build: L3 build facts + the L5 structural graph (target/source/header/
+    # build_option nodes), skipping the costly L4 source replay. Feasible on
+    # monorepos where full L4 is hours (field-eval P18 — LLVM graph in ~4s vs hours).
+    "graph-build": ("L3", "L5"),
     "source-changed": ("L3", "L4", "L5"),
     "source-target": ("L3", "L4", "L5"),
     "graph-summary": ("L3", "L4", "L5"),

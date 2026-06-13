@@ -184,14 +184,18 @@ abicheck dump --sources ./src/ --collect-mode off           -o s.json  # embed n
 |------|------------------|--------------|
 | `off` | none | — |
 | `build` | L3 build context only | — |
+| `graph-build` | L3 + L5 graph (no source replay) | — |
 | `source-changed` | L3 + L4 + L5 | changed TUs |
 | `source-target` *(default)* | L3 + L4 + L5 | target |
 | `graph-summary` | L3 + L4 + L5 | changed |
 | `graph-full` | L3 + L4 + L5 | full |
 
 `build` is the cheap PR default (build-flag/toolchain drift, no source parse);
-the `source-*` / `graph-*` modes add the L4 source replay and L5 graph at the
-matching replay scope.
+`graph-build` additionally folds the **L5 structural graph** (target → source →
+header → build-option nodes) from those L3 facts *without* the L4 source replay,
+so the graph + build options are available even on large monorepos where a full
+L4 parse would take hours; the `source-*` / `graph-*` modes add the L4 source
+replay and L5 graph at the matching replay scope.
 
 ### Build-tool query configuration (`.abicheck.yml`)
 
