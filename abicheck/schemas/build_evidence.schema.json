@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://napetrov.github.io/abicheck/schemas/build_evidence.schema.json",
   "title": "abicheck BuildEvidence (L3)",
-  "description": "Schema for build/build_evidence.json inside an EvidencePack: abicheck's build-system-neutral normalized L3 build context (ADR-029). External build-system formats (CMake File API, Ninja -t output, Bazel proto) are normalized into this model; they never become the stable public schema.",
+  "description": "Schema for build/build_evidence.json inside a BuildSourcePack: abicheck's build-system-neutral normalized L3 build context (ADR-029). External build-system formats (CMake File API, Ninja -t output, Bazel proto) are normalized into this model; they never become the stable public schema.",
   "type": "object",
   "required": ["schema_version"],
   "additionalProperties": true,

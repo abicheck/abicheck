@@ -1,0 +1,29 @@
+# abicheck built-in "qt_kde_cpp" policy — C++ library binary-compatibility
+# profile following the KDE Frameworks "Policies/Binary Compatibility Issues
+# With C++" rules (https://community.kde.org/Policies/Binary_Compatibility_Issues_With_C%2B%2B),
+# which Qt's own shared-library guidance also points maintainers to.
+#
+# Turnkey usage:
+#
+#   abicheck compare libfoo.so.1 libfoo.so.2 --policy-file qt_kde_cpp
+#
+# Already enforced by the strict_abi base (no override needed — listed here so
+# the contract is explicit):
+#   - add / remove / reorder virtuals .......... type_vtable_changed (BREAKING)
+#   - change class hierarchy / base layout ..... base_class_offset_changed,
+#                                                rtti_inheritance_changed (BREAKING)
+#   - add / remove / reorder data members ...... struct_field_* (BREAKING)
+#   - change a signature or return type ........ func_params_changed,
+#                                                func_return_changed (BREAKING)
+#   - widen an enum's underlying type .......... enum_underlying_size_changed (BREAKING)
+#
+# Explicitly allowed by KDE (already COMPATIBLE under strict_abi):
+#   - appending an enumerator WITHOUT widening the underlying type . enum_member_added
+#   - making a function noexcept ................................... func_noexcept_added
+base_policy: strict_abi
+
+overrides:
+  # KDE: removing noexcept is unsafe — callers compiled against the noexcept
+  # form may have elided exception-handling paths. strict_abi treats this as a
+  # deployment RISK; the KDE rule set treats it as a hard break.
+  func_noexcept_removed: break

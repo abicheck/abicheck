@@ -1,0 +1,60 @@
+# Case 129: Struct-Return Convention Change
+
+**Category:** Calling convention | **Verdict:** 🔴 BREAKING (exit 4)
+
+> A public function returns an aggregate by value. The aggregate gained a
+> user-declared destructor, making it **non-trivial**. By the System V AMD64 ABI a
+> non-trivial class is returned through a hidden caller-provided pointer (sret)
+> instead of in registers — the return convention flipped, even though the
+> function's mangled name (`_Z7computev`) is unchanged.
+
+## What breaks
+`Result compute()` returned a small trivially-copyable struct in registers
+(`RAX:XMM0`) in v1. In v2 `Result` has a user-declared destructor, so it is no
+longer trivially copyable and the ABI returns it via a hidden pointer the caller
+allocates and passes in `RDI`. A caller compiled against v1 expects the result in
+registers; relinked against v2 without recompiling it reads the return value from
+the wrong location — silent corruption or a crash.
+
+## Why abicheck catches it
+The DWARF value-ABI **return** trait for `compute` flips `trivial → nontrivial`,
+which crosses the in-register ↔ sret boundary. abicheck emits
+`struct_return_convention_changed` (the return-specific refinement of
+`value_abi_trait_changed`), verdict BREAKING.
+
+## Code diff
+
+| v1 | v2 |
+|------|------|
+| `struct Result { int code; double value; };` | `struct Result { int code; double value; ~Result(); };` |
+| `Result compute();` | `Result compute();` |
+
+The symbol `compute()` is byte-for-byte the same mangled name in both versions —
+only the *mechanism* by which its return value is delivered changed.
+
+## Reproduce manually
+```bash
+g++ -shared -fPIC -g -Og v1.cpp -o libfoo_v1.so
+g++ -shared -fPIC -g -Og v2.cpp -o libfoo_v2.so
+abicheck dump libfoo_v1.so -o v1.abi.json
+abicheck dump libfoo_v2.so -o v2.abi.json
+abicheck compare v1.abi.json v2.abi.json
+echo "exit: $?"   # → 4 (BREAKING)
+```
+
+## How to fix
+Treat a triviality change on a by-value public return type as an ABI break: keep
+the type trivially copyable, or bump the SONAME and rebuild all consumers. If a
+destructor is genuinely required, return through an opaque handle or an out-
+parameter instead of by value so the convention is explicit and stable.
+
+## Real-world example
+Adding a `std::unique_ptr` member, a user-declared destructor, or any non-trivial
+member to a small struct that a public factory returns by value is the common form
+of this break in C++ libraries — it looks like an innocuous source edit but it
+silently changes the call ABI of every function returning the type by value.
+
+## References
+
+- [System V AMD64 ABI: returning values / classification of aggregates](https://refspecs.linuxfoundation.org/elf/x86_64-abi-0.99.pdf)
+- [Itanium C++ ABI: non-trivial-for-the-purposes-of-calls](https://itanium-cxx-abi.github.io/cxx-abi/abi.html#non-trivial-parameters)

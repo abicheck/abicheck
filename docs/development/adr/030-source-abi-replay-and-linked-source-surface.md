@@ -3,7 +3,8 @@
 **Date:** 2026-06-09
 **Status:** Accepted — implemented (phases 1–7); follow-ups #2 (include-guard
 macro noise), #3 (typedef/alias modeling) and #4 (include-graph scope selection)
-resolved, #1 partially (pure-Python validation corpus committed)
+resolved, #1 partially (pure-Python validation corpus committed). **Amended
+2026-06-12** (ADR-028 source-tree model) — see Amendment below.
 **Decision maker:** Nikolay Petrov
 
 ---
@@ -255,7 +256,7 @@ Android's tools are useful, but their intermediate formats are documented
 as implementation details. abicheck may provide an adapter:
 
 ```bash
-abicheck collect-evidence --source-abi-extractor android-header-abi --output evidence/
+abicheck collect --source-abi-extractor android-header-abi --output evidence/
 ```
 
 The adapter must normalize into `SourceAbiTu` and `source_abi.json`. Raw
@@ -319,7 +320,7 @@ compatibility risk, and feeds the evidence coverage report (ADR-028 D7).
 
 ### Implementation status
 
-All seven phases are implemented, in `abicheck/evidence/`:
+All seven phases are implemented, in `abicheck/buildsource/`:
 
 - **Phase 1** — `source_abi.py`: the `SourceAbiTu` (D4) and `SourceAbiSurface`
   (D5) normalized schemas with `to_dict`/`from_dict` round-trips and the
@@ -366,9 +367,9 @@ All seven phases are implemented, in `abicheck/evidence/`:
   partial-coverage diagnostics together. `scope_for_ci_mode` maps the ADR-033 D2
   CI modes onto these scopes.
 
-The pipeline is wired into the CLI: `collect-evidence --source-abi
+The pipeline is wired into the CLI: `collect --source-abi
 [--source-abi-extractor clang|castxml|android] [--source-abi-scope ...]` writes
-`source/source_abi.json`, and `compare --old/--new-evidence` diffs the two
+`source/source_abi.json`, and `compare --old/--new-build-info` diffs the two
 surfaces (`diff_source_abi`) and folds the findings into the verdict pipeline.
 The compare output prints an explicit **capability report** — which check
 categories are enabled and, for each disabled one, why (no binary / no debug
@@ -422,9 +423,10 @@ they are coverage/precision gaps, not correctness holes.
    remaining gap is purely *provenance*: `BuildEvidence` does not yet persist
    depfiles, so the map must be produced live (`clang -MM`) or from pre-captured
    depfiles; persisting it in the pack is ADR-031 graph-layer scope.
-5. **Inline auto-collection during `compare --evidence-mode` is still a stub.**
-   `compare` consumes pre-built packs via `--old/--new-evidence`; it does not yet
-   run `collect-evidence` inline for a requested evidence mode. That inline
+5. **Inline auto-collection during `compare --collect-mode` is still a stub.**
+   `compare` consumes pre-built packs via `--old/--new-build-info`; it does not yet
+   run `collect` inline for a requested evidence mode (the source-tree redesign
+   moved inline collection to `dump --sources`). That inline
    collection is **ADR-033 D2** scope, tracked there, not in this ADR.
 6. **clang AST replay is an alpha-equivalence fingerprinter — partially
    semantic.** Bodies/values are hashed from a build-root-stable canonical form
@@ -472,3 +474,11 @@ they are coverage/precision gaps, not correctness holes.
   ([024-public-abi-surface-resolution.md](024-public-abi-surface-resolution.md))
 - Android VNDK header checker: `header-abi-dumper`, `header-abi-linker`, `header-abi-diff`
 - [Clang LibTooling](https://clang.llvm.org/docs/LibTooling.html) and AST Matchers
+
+
+## Amendment (2026-06-12): `--sources` selects the replay scope (see ADR-028)
+
+The D7 source-replay scopes remain, but they are no longer user-facing flags:
+passing `--sources <tree>` runs L4 replay (and the L5 graph) automatically and
+selects the scope from the CI mode / changed-path signal. The standalone
+`--source-abi` / `--source-graph` flags are removed (ADR-028 D6 amendment).

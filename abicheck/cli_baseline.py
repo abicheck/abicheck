@@ -64,7 +64,7 @@ def baseline_group() -> None:
               help="Source commit SHA to record in baseline metadata.")
 @click.option("--evidence", "evidence_path", type=click.Path(exists=True, file_okay=False, path_type=Path),
               default=None,
-              help="Path to an evidence-pack directory (from `collect-evidence`) "
+              help="Path to an evidence-pack directory (from `collect`) "
                    "to store alongside the baseline snapshot.")
 @click.option("-v", "--verbose", is_flag=True, default=False)
 def baseline_push(
@@ -131,9 +131,9 @@ def baseline_push(
 
     evidence = None
     if evidence_path is not None:
-        from .evidence.pack import EvidencePack
+        from .buildsource.pack import BuildSourcePack
         try:
-            evidence = EvidencePack.load(evidence_path)
+            evidence = BuildSourcePack.load(evidence_path)
         except (FileNotFoundError, ValueError) as exc:
             raise click.ClickException(f"Cannot load evidence pack: {exc}") from exc
 

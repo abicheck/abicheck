@@ -17,14 +17,14 @@ and graceful clang-absent degrade. The live `clang -MM` path is integration."""
 
 from __future__ import annotations
 
-from abicheck.evidence.build_evidence import BuildEvidence, CompileUnit
-from abicheck.evidence.include_graph import (
+from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
+from abicheck.buildsource.include_graph import (
     ClangIncludeExtractor,
     augment_graph_with_includes,
     depfile_args_from_argv,
     parse_depfile,
 )
-from abicheck.evidence.source_graph import GraphNode, SourceGraphSummary
+from abicheck.buildsource.source_graph import GraphNode, SourceGraphSummary
 
 
 def test_parse_depfile_basic() -> None:
@@ -132,7 +132,7 @@ def test_extractor_missing_clang_returns_empty() -> None:
 
 
 def test_extractor_parses_mocked_clang(monkeypatch) -> None:
-    import abicheck.evidence.include_graph as ig
+    import abicheck.buildsource.include_graph as ig
 
     monkeypatch.setattr(ig.shutil, "which", lambda _b: "/usr/bin/clang++")
 
@@ -150,7 +150,7 @@ def test_extractor_parses_mocked_clang(monkeypatch) -> None:
 
 
 def test_extractor_handles_subprocess_error(monkeypatch) -> None:
-    import abicheck.evidence.include_graph as ig
+    import abicheck.buildsource.include_graph as ig
 
     monkeypatch.setattr(ig.shutil, "which", lambda _b: "/usr/bin/clang++")
 
@@ -169,9 +169,9 @@ def test_collect_evidence_include_graph_missing_clang_degrades(tmp_path, monkeyp
 
     from click.testing import CliRunner
 
-    import abicheck.evidence.include_graph as ig
+    import abicheck.buildsource.include_graph as ig
+    from abicheck.buildsource.pack import BuildSourcePack
     from abicheck.cli import main
-    from abicheck.evidence.pack import EvidencePack
 
     monkeypatch.setattr(ig.shutil, "which", lambda _b: None)
     src = tmp_path / "foo.cpp"
@@ -182,10 +182,10 @@ def test_collect_evidence_include_graph_missing_clang_degrades(tmp_path, monkeyp
     }]))
     out = tmp_path / "ev"
     res = CliRunner().invoke(main, [
-        "collect-evidence", "--compile-db", str(cdb), "--include-graph", "-o", str(out),
+        "collect", "--compile-db", str(cdb), "--include-graph", "-o", str(out),
     ])
     assert res.exit_code == 0, res.output
-    pack = EvidencePack.load(out)
+    pack = BuildSourcePack.load(out)
     assert pack.source_graph is not None
     assert any(e.name == "include_graph:clang" and e.status == "failed"
                for e in pack.manifest.extractors)
@@ -194,7 +194,7 @@ def test_collect_evidence_include_graph_missing_clang_degrades(tmp_path, monkeyp
 def test_extract_from_build_unredacts_home(monkeypatch) -> None:
     # argv/cwd persist with the home dir redacted to `~`; the depfile pass must
     # un-redact them before subprocess, which does not expand `~` (Codex review).
-    import abicheck.evidence.include_graph as ig
+    import abicheck.buildsource.include_graph as ig
 
     captured: dict = {}
 
@@ -221,7 +221,7 @@ def test_extract_from_build_unredacts_home(monkeypatch) -> None:
 
 
 def test_lang_flag_preserves_language() -> None:
-    from abicheck.evidence.include_graph import _lang_flag
+    from abicheck.buildsource.include_graph import _lang_flag
     assert _lang_flag("C") == ["-x", "c"]
     assert _lang_flag("CXX") == ["-x", "c++"]
     assert _lang_flag("C++") == ["-x", "c++"]
@@ -231,7 +231,7 @@ def test_lang_flag_preserves_language() -> None:
 def test_extract_uses_dash_m_and_preserves_c_language(monkeypatch) -> None:
     # -M (not -MM) so system-classified public headers appear; -x c so a C unit
     # replayed through clang++ is parsed as C (Codex review).
-    import abicheck.evidence.include_graph as ig
+    import abicheck.buildsource.include_graph as ig
 
     captured: dict = {}
 

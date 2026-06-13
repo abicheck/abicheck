@@ -1,0 +1,29 @@
+# abicheck built-in "glibc_symbol_versioned" policy — ELF symbol-versioning
+# discipline as practiced by glibc and other versioned system libraries.
+#
+# glibc keeps forward binary compatibility within a SONAME by versioning every
+# exported symbol (the testsuite checks symbol names, symbol versions, and
+# static-variable sizes, and ships per-arch .abilist baselines). A SONAME bump
+# is the deliberate signal for a genuine break; everything else must remain
+# resolvable by binaries linked against an older release.
+#
+# Turnkey usage:
+#
+#   abicheck compare libc.so.6.old libc.so.6.new --policy-file glibc_symbol_versioned
+base_policy: strict_abi
+
+overrides:
+  # Dropping a version node (or a defined versioned symbol) strands every old
+  # binary that recorded a dependency on it — pinned to break so a versioned
+  # library cannot silently regress this even under a looser base policy.
+  symbol_version_node_removed: break
+  symbol_version_defined_removed: break
+
+  # Adding a compatibility version REQUIREMENT is how a rebuilt-against-newer
+  # consumer is expected to evolve; it is not a provider-side break.
+  symbol_version_required_added_compat: ignore
+
+  # A dropped DT_NEEDED is a latent failure for consumers that relied on the
+  # transitive symbol being present — surface it as a deployment risk rather
+  # than letting it pass silently.
+  needed_removed: risk

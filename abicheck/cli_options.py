@@ -66,51 +66,116 @@ def adr027_compare_options(func: F) -> F:
     return func
 
 
-def evidence_dump_option(func: F) -> F:
-    """Add the ADR-028 ``--evidence`` attach option to ``dump``."""
-    from pathlib import Path
+def build_source_dump_options(func: F) -> F:
+    """Add the ``--build-info`` / ``--sources`` embed options to ``dump``.
 
-    func = click.option(
-        "--evidence", "evidence_dir",
-        type=click.Path(exists=True, file_okay=False, path_type=Path),
-        default=None,
-        help="Attach an existing EvidencePack directory (from `abicheck "
-        "collect-evidence`) to the snapshot. Stores a lightweight, "
-        "content-addressed reference; the pack itself stays out-of-band.",
-    )(func)
-    return func
-
-
-def evidence_compare_options(func: F) -> F:
-    """Add the ADR-028/ADR-029 evidence options to ``compare``.
-
-    ``--old-evidence`` / ``--new-evidence`` attach packs whose build evidence is
-    diffed into the verdict (never overriding artifact-backed findings, ADR-028
-    D3); ``--evidence-mode`` selects the inline collection mode (ADR-033 D2).
-    Applied bottom-up, so listed in reverse of displayed order.
+    Source-tree-centric inputs (ADR-028..033 amendment): ``--sources`` is a
+    source checkout — L4 source ABI replay and the L5 graph are run inline and
+    embedded; ``--build-info`` is an optional build dir / ``compile_commands.json``
+    / pre-captured pack supplying L3 (auto-discovered inside the source tree when
+    omitted). A path that is itself a pack directory from ``abicheck collect``
+    is loaded as that pack instead. Embedding makes the ``.abi.json``
+    self-contained, so a later ``compare old.json new.json`` carries the facts
+    with no out-of-band directories. Applied bottom-up, so listed in reverse of
+    display.
     """
     from pathlib import Path
 
     func = click.option(
-        "--evidence-mode", "evidence_mode",
-        type=click.Choice(["off", "build", "source-changed", "source-target", "graph-summary", "graph-full"]),
+        "--collect-mode", "collect_mode",
+        type=click.Choice(["off", "build", "graph-build", "source-changed", "source-target", "graph-summary", "graph-full"]),
+        default="source-target", show_default=True,
+        help="ADR-033 D2 CI evidence mode selecting which layers to collect from "
+        "--sources/--build-info: 'build' captures L3 build context only (no source "
+        "replay), 'graph-build' adds the L5 structural graph (build options + "
+        "target/source/header nodes) from L3 alone — no L4 parse, feasible on "
+        "monorepos, 'source-*'/'graph-*' collect L3+L4+L5 at the matching replay "
+        "scope, 'off' embeds nothing.",
+    )(func)
+    func = click.option(
+        "--allow-build-query", "allow_build_query", is_flag=True, default=False,
+        help="Permit running the configured `build.query` command to emit a "
+        "compile DB / exports (ADR-032 D5 query_build_system). Off by default: "
+        "only existing build outputs are inspected — a full project build is "
+        "never run.",
+    )(func)
+    func = click.option(
+        "--build-config", "build_config",
+        type=click.Path(exists=True, dir_okay=False, path_type=Path),
+        default=None,
+        help="Path to an `.abicheck.yml` build config (build system, query "
+        "command, compile-DB location). Defaults to `.abicheck.yml` at the "
+        "--sources tree root.",
+    )(func)
+    func = click.option(
+        "--build-compile-db", "build_compile_db", default=None, metavar="GLOB",
+        help="Where a build/query lands its compile_commands.json, relative to "
+        "--sources (e.g. 'build/compile_commands.json'). CLI equivalent of "
+        "`.abicheck.yml` build.compile_db; overrides it when both are given.",
+    )(func)
+    func = click.option(
+        "--build-query", "build_query", default=None, metavar="CMD",
+        help="Build-system query command that emits a compile DB without a full "
+        "build (e.g. 'cmake -S . -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON'). "
+        "CLI equivalent of `.abicheck.yml` build.query — no config file needed. "
+        "Only runs with --allow-build-query.",
+    )(func)
+    func = click.option(
+        "--sources", "sources",
+        type=click.Path(exists=True, path_type=Path),
+        default=None,
+        help="Source checkout to run L4 source ABI replay + the L5 graph over "
+        "and embed inline. (A pack directory from `abicheck collect` is loaded "
+        "as that pack instead.)",
+    )(func)
+    func = click.option(
+        "--build-info", "build_info",
+        type=click.Path(exists=True, path_type=Path),
+        default=None,
+        help="Optional L3 build context: a build dir, a compile_commands.json, "
+        "or a pre-captured pack. Auto-discovered inside the --sources tree when "
+        "omitted.",
+    )(func)
+    return func
+
+
+def build_source_compare_options(func: F) -> F:
+    """Add the build-info / sources compare options.
+
+    By default ``compare old.json new.json`` reads build-info + source facts
+    **embedded** in each snapshot (single-artifact UX). The optional
+    ``--old-build-info`` / ``--new-build-info`` and ``--old-sources`` /
+    ``--new-sources`` point at out-of-band pack directories to supply or
+    override those facts per side; ``--collect-mode`` selects the inline
+    collection mode (ADR-033 D2). All folded into the verdict as ordinary
+    findings, never overriding artifact-backed ABI verdicts (ADR-028 D3).
+    Applied bottom-up, so listed in reverse of displayed order.
+    """
+    from pathlib import Path
+
+    pack_dir = click.Path(exists=True, file_okay=False, path_type=Path)
+    func = click.option(
+        "--collect-mode", "collect_mode",
+        type=click.Choice(["off", "build", "graph-build", "source-changed", "source-target", "graph-summary", "graph-full"]),
         default="off", show_default=True,
-        help="Inline evidence collection mode (ADR-033 D2). 'off' uses only "
-        "explicitly-provided --old/--new-evidence packs. Other modes are "
-        "recognized and reported in the coverage table but not yet collected "
-        "inline in this release.",
+        help="Inline collection mode (ADR-033 D2). 'off' uses embedded facts and "
+        "any explicitly-provided pack directories. Other modes are recognized "
+        "and reported in the coverage table but not yet collected inline.",
     )(func)
     func = click.option(
-        "--new-evidence", "new_evidence",
-        type=click.Path(exists=True, file_okay=False, path_type=Path), default=None,
-        help="EvidencePack directory for the new side.",
+        "--new-sources", "new_sources", type=pack_dir, default=None,
+        help="Out-of-band L4/L5 source pack for the new side (overrides embedded).",
     )(func)
     func = click.option(
-        "--old-evidence", "old_evidence",
-        type=click.Path(exists=True, file_okay=False, path_type=Path), default=None,
-        help="EvidencePack directory for the old side (from `abicheck "
-        "collect-evidence`). Adds L3 build-context findings and an "
-        "evidence-coverage table; never overrides artifact-backed ABI "
-        "verdicts (ADR-028 D3).",
+        "--old-sources", "old_sources", type=pack_dir, default=None,
+        help="Out-of-band L4/L5 source pack for the old side (overrides embedded).",
+    )(func)
+    func = click.option(
+        "--new-build-info", "new_build_info", type=pack_dir, default=None,
+        help="Out-of-band L3 build-info pack for the new side (overrides embedded).",
+    )(func)
+    func = click.option(
+        "--old-build-info", "old_build_info", type=pack_dir, default=None,
+        help="Out-of-band L3 build-info pack for the old side (overrides embedded).",
     )(func)
     return func

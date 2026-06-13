@@ -13,8 +13,8 @@ abicheck dump libfoo.so -H include/foo.h --version 2.0.0
 # Write to a specific file
 abicheck dump libfoo.so -H include/foo.h --version 2.0.0 -o baseline.json
 
-# Auto-named: writes libfoo-2.0.0.abicheck.json
-abicheck dump libfoo.so -H include/foo.h --version 2.0.0 --output-name auto
+# Conventionally named (see naming convention below)
+abicheck dump libfoo.so -H include/foo.h --version 2.0.0 -o libfoo-2.0.0.abicheck.json
 ```
 
 ### Provenance Metadata
@@ -26,7 +26,7 @@ abicheck dump libfoo.so -H include/foo.h \
   --version 2.0.0 \
   --git-tag v2.0.0 \
   --build-id "$CI_RUN_ID" \
-  --output-name auto
+  -o libfoo-2.0.0.abicheck.json
 ```
 
 This embeds in the snapshot JSON:
@@ -42,7 +42,7 @@ Use `--no-git` to skip automatic git commit detection (e.g., in non-git environm
 
 ### The `.abicheck.json` Naming Convention
 
-Using `--output-name auto` writes the snapshot to a predictable filename:
+Name baselines `<library>-<version>.abicheck.json` (via `-o`):
 
 | Library | Version | Output File |
 |---------|---------|-------------|
@@ -51,7 +51,8 @@ Using `--output-name auto` writes the snapshot to a predictable filename:
 | `libqux.dylib` | `1.0` | `libqux-1.0.abicheck.json` |
 
 This convention makes CI scripts predictable: upload with `*.abicheck.json`, download
-with `--pattern '*.abicheck.json'`.
+with `--pattern '*.abicheck.json'`. The GitHub Action's `abi-baseline` input looks for
+`*.abicheck.json` assets on releases.
 
 ## Storage Patterns
 
@@ -133,13 +134,13 @@ To pin to a specific release:
           new-header: include/foo.h
 ```
 
-**CLI shortcut** (`--upload-release`):
+**CLI equivalent** (requires the `gh` CLI and `GH_TOKEN`):
 
 ```bash
-# Dump + upload in one command (requires gh CLI and GH_TOKEN)
 abicheck dump libfoo.so -H include/foo.h \
   --version 2.0.0 --git-tag v2.0.0 \
-  --output-name auto --upload-release
+  -o libfoo-2.0.0.abicheck.json
+gh release upload v2.0.0 libfoo-2.0.0.abicheck.json --clobber
 ```
 
 ### Recipe B: Git-Committed Baselines

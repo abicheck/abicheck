@@ -1,7 +1,7 @@
 # ABI/API Handling — A Learning Series
 
 This is the **conceptual hub** for understanding ABI/API compatibility — written
-to *teach* the subject, not just catalog it. It is the front door to a seven-part
+to *teach* the subject, not just catalog it. It is the front door to a nine-part
 **learning series** that starts from first principles ("what is a symbol? what
 does the loader do?") and builds up to the design patterns that keep a C/C++
 shared library compatible across releases.
@@ -21,6 +21,12 @@ when it sees one.
 > CI exit codes, see [Verdicts](verdicts.md). For unfamiliar terms (SONAME,
 > vtable, IFUNC, install name, TLS model…), see the
 > [Glossary](abi-series/glossary.md).
+>
+> **Going deep on class layout?** The
+> [Class Layout ABI & API guide](class-layout-abi.md) is the single page that maps
+> every class-layout change (base offsets, EBO, vptr, vtable slots, RTTI,
+> standard-layout / trivially-copyable, packing) to the exact `ChangeKind`
+> abicheck emits, the evidence tier that reveals it, and a worked example.
 
 !!! note "Scope & assumptions"
     - **Examples are mostly ELF/Linux and Itanium-C++-ABI flavored** unless a
@@ -41,7 +47,7 @@ when it sees one.
 
 ## How to read this series
 
-The seven parts are ordered. If you're new to ABI compatibility, read them in
+The parts are ordered. If you're new to ABI compatibility, read them in
 sequence — each builds on the mental models established by the last. If you're
 here for a specific problem, jump straight to the relevant part.
 
@@ -55,6 +61,7 @@ here for a specific problem, jump straight to the relevant part.
 | **5** | [Linker & ELF](abi-series/05-linker-elf.md) | SONAME, visibility, versioning, calling conv., TLS, security metadata | …a load-time/linker contract changed |
 | **6** | [Transitive Breaks](abi-series/06-transitive-breaks.md) | Dependency leaks, anonymous structs, type-kind swaps, reserved fields | …the symbol table looks identical but consumers still break |
 | **7** | [Designing for Stability](abi-series/07-designing-for-stability.md) | Opaque handles, Pimpl, version scripts, CI gating — with full code | …you're designing an API to evolve safely |
+| **8** | [Detecting Breaks](abi-series/08-detection.md) | Tracking approaches, evidence each break family needs, why single-method checkers miss whole families | …you're deciding *how* to catch all of the above in CI |
 
 ```mermaid
 flowchart LR
@@ -67,6 +74,7 @@ flowchart LR
     P3 --> P6["6 · Transitive<br/>Breaks"]
     P5 --> P7["7 · Designing<br/>for Stability"]
     P6 --> P7
+    P7 --> P8["8 · Detecting<br/>Breaks"]
 ```
 
 > **Cross-cutting companion:** [Evidence & Detectability](evidence-and-detectability.md)
@@ -83,7 +91,7 @@ each audience to the pages that matter for them fastest:
 |----------|------------------|
 | **New C/C++ library author** | [Product Contract](abi-series/00-product-contract.md) → [Foundations](abi-series/01-foundations.md) → [Symbol Contracts](abi-series/02-symbol-contracts.md) → [Type Layout](abi-series/03-type-layout.md) → [Designing for Stability](abi-series/07-designing-for-stability.md) |
 | **C++ library maintainer** | [Foundations](abi-series/01-foundations.md) → [C++ ABI](abi-series/04-cpp-abi.md) → [Type Layout](abi-series/03-type-layout.md) → [Transitive Breaks](abi-series/06-transitive-breaks.md) → [Designing for Stability](abi-series/07-designing-for-stability.md) |
-| **CI / release engineer** | [Product Contract](abi-series/00-product-contract.md) → [Tool Comparison](../reference/tool-comparison.md) → [Policy Profiles](../user-guide/policies.md) → [Baselines](../user-guide/baseline-management.md) → [Exit Codes](../reference/exit-codes.md) → [Output Formats](../user-guide/output-formats.md) |
+| **CI / release engineer** | [Product Contract](abi-series/00-product-contract.md) → [Detecting Breaks](abi-series/08-detection.md) → [Tool Comparison](../reference/tool-comparison.md) → [Policy Profiles](../user-guide/policies.md) → [Baselines](../user-guide/baseline-management.md) → [Exit Codes](../reference/exit-codes.md) → [Output Formats](../user-guide/output-formats.md) |
 | **Distribution / package maintainer** | [Linker & ELF](abi-series/05-linker-elf.md) → [Transitive Breaks](abi-series/06-transitive-breaks.md) → [Multi-Binary Releases](../user-guide/multi-binary.md) → [Application Compatibility](../user-guide/appcompat.md) |
 | **Plugin / SDK author** | [Symbol Contracts](abi-series/02-symbol-contracts.md) → [Plugin Systems](../user-guide/plugin-systems.md) → [Policy Profiles](../user-guide/policies.md) → [Product Contract §4](abi-series/00-product-contract.md#4-name-your-contract-shape) |
 | **AI agent / automated reviewer** | [Overview](abi-api-handling.md) → [Evidence & Detectability](evidence-and-detectability.md) → [Examples Encyclopedia](../examples/index.md) → [Change Kind Reference](../reference/change-kinds.md) |
@@ -123,7 +131,7 @@ is the source of truth).
 
 ---
 
-## The one idea to carry through all seven parts
+## The one idea to carry through the whole series
 
 If you remember nothing else:
 
@@ -238,8 +246,7 @@ These three tiers are artifact layers **L0–L2**. Two optional layers go
 further without overriding an artifact-proven break: **L3** build context
 (`-p build/`) pins the exact ABI-affecting flags, and **L4** source/evidence
 packs recover several of the otherwise-invisible source-only facts above
-(macro/`constexpr` values, uninstantiated templates). See [Source & Build
-Evidence Packs](evidence-pack.md) and the full [L0–L4
+(macro/`constexpr` values, uninstantiated templates). See [Build & Source Packs](build-source-data.md) and the full [L0–L4
 model](evidence-and-detectability.md).
 
 #### Which input proves which family
@@ -268,7 +275,7 @@ table is in [Limitations](limitations.md#source-only-changes-invisible-to-binary
 
 ## Detection coverage and roadmap
 
-abicheck detects **190 change kinds** today (see the
+abicheck detects **246 change kinds** today (see the
 [Change Kind Reference](../reference/change-kinds.md)), spanning every family in
 the table above — including the calling-convention, alignment/packing, bit-field,
 dual-ABI (`_GLIBCXX_USE_CXX11_ABI`), ABI-tag, `char8_t`, `_BitInt`, `_Atomic`,

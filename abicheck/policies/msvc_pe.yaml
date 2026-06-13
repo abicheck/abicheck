@@ -1,0 +1,23 @@
+# abicheck built-in "msvc_pe" policy — Windows DLL / PE binary-compatibility
+# profile aligned with Microsoft's MSVC C++ binary-compatibility guidance
+# (https://learn.microsoft.com/cpp/porting/binary-compat-2015-2017) and the x64
+# ABI documentation (calling convention, type layout, stack/register usage).
+#
+# On Windows the decorated (mangled) export name encodes calling convention and
+# parameter types, and there is no RPATH-style fallback — a missing import DLL
+# is a hard load-time failure. Toolset, linker, and redistributable versions are
+# themselves compatibility metadata; record them alongside this gate.
+#
+# Turnkey usage:
+#
+#   abicheck compare foo.dll foo.new.dll --policy-file msvc_pe
+base_policy: strict_abi
+
+overrides:
+  # Decorated names bake in the calling convention; a mismatch corrupts the
+  # call frame. Pinned to break (already BREAKING under strict_abi).
+  calling_convention_changed: break
+
+  # A dropped import dependency (DT_NEEDED equivalent) fails to load with no
+  # search-path fallback on Windows — flag it as a deployment risk.
+  needed_removed: risk

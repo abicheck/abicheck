@@ -21,8 +21,8 @@ map across all three.
 ## Headline
 
 abicheck is **exceptionally deep on the change-taxonomy axis and comparatively
-thin on the breadth axes.** The "what changed" dimension — **234 `ChangeKind`s**
-in a 5-tier policy model, **126 calibrated example cases**, ABICC + libabigail
+thin on the breadth axes.** The "what changed" dimension — **246 `ChangeKind`s**
+in a 5-tier policy model, **129 calibrated example cases**, ABICC + libabigail
 parity — is essentially complete and has diminishing returns.
 
 The remaining gaps are **not in detecting more change types**. They are the
@@ -67,7 +67,7 @@ A real invocation is a point in this space:
 
 | Use case | Status | Notes |
 |---|---|---|
-| Change taxonomy | `complete` | 234 kinds; 127 cases; parity tests |
+| Change taxonomy | `complete` | 246 change kinds; 129 cases; parity tests |
 | **Release recommendation (semver + SONAME)** | `complete` | semver bump + SONAME action emitted in reports |
 | C / C++ archetypes | `complete` | 35 C + 52 C++ example pairs |
 | Linux ELF platform | `complete` | the CI-validated baseline |
@@ -107,7 +107,7 @@ A real invocation is a point in this space:
 | **G12** | ✅ closed | Security-hardening drift captures and diffs RELRO, BIND_NOW, PIE, canaries, FORTIFY, and W^X metadata; the security policy is shipped. |
 | **G13** | planned | Cross-architecture mismatch guardrail. |
 | **G14** | planned | CPython Limited-API / `abi3` import-contract conformance. |
-| **G15** | planned | Inline-namespace version-stamp normalization for ICU/Abseil/libstdc++-style churn. |
+| **G15** | partial | Inline-namespace version-stamp normalization for ICU/Abseil/libstdc++-style churn. Detector landed (advisory `versioned_symbol_scheme_detected`); normalize-and-collapse preset still planned. |
 | **G16** | partial | Header-scoped source-mode toolchain robustness. Surfaced by 21 real-world cron records. **Shipped**: actionable diagnostics for all three host-toolchain signatures (sized-float `_FloatN`, GCC `__assume__`, `--lang c` + `extern "C"`), plus a `castxml --version` probe that recommends the Clang floor (≥ 18) on a version-mismatch failure. A `-D_FloatN` shim was prototyped and **rejected** (it rewrites glibc's own `typedef float _Float32;` fallback); the durable cure is a newer-Clang castxml or the libclang extractor (G4). **Remaining**: real-host end-to-end check and a dedicated error type. |
 
 ## Proposed next steps (tracked in the registry)

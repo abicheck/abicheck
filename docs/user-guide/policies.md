@@ -96,6 +96,38 @@ where the plugin and host are always rebuilt together.
 
 ---
 
+## Built-in use-case profiles
+
+Beyond the three base policies, abicheck ships a catalog of **turnkey, ecosystem-specific
+profiles** as YAML files under `abicheck/policies/`. A bare name resolves to the shipped
+file, so they need no path:
+
+```bash
+abicheck compare libfoo.so.1 libfoo.so.2 --policy-file qt_kde_cpp
+```
+
+Each profile builds on `strict_abi` and adjusts only where the ecosystem's documented
+compatibility rules differ from the strict default. They are derived from primary-source
+guidance, not invented heuristics.
+
+| Profile | Ecosystem / source | What it changes vs `strict_abi` |
+|---------|--------------------|---------------------------------|
+| `security` | checksec-style hardening | Promotes RELRO/PIE/canary/FORTIFY/NX regressions to `break` |
+| `qt_kde_cpp` | [KDE C++ Binary Compatibility rules](https://community.kde.org/Policies/Binary_Compatibility_Issues_With_C%2B%2B) (Qt points here too) | Promotes `func_noexcept_removed` to `break`; documents the virtual/layout/enum rules strict already enforces |
+| `glibc_symbol_versioned` | glibc symbol-versioning discipline | Pins version-node removals to `break`, accepts compat-version requirement additions, flags dropped `DT_NEEDED` as `risk` |
+| `msvc_pe` | [MSVC C++ binary compatibility](https://learn.microsoft.com/cpp/porting/binary-compat-2015-2017) + x64 ABI | Pins `calling_convention_changed` to `break`; dropped import DLL → `risk` (no RPATH fallback on Windows) |
+| `mach_o_dylib` | Apple Dynamic Library Design Guidelines | Pins `compat_version_changed` to `break` (dyld load check); dropped install-name dependency → `risk` |
+| `rust_c_ffi` | Rust Reference / Cargo SemVer (no stable Rust ABI) | Keeps the C-FFI surface (`repr(C)`/`extern "C"`) strict but demotes C++-object-model kinds to `risk` — they can't occur on a real C-FFI boundary |
+| `gnome_parallel_install` | GNOME/GTK parallel-install evolution | Enforces both directions of SONAME discipline: pins `soname_bump_recommended` to `break` (broke ABI without bumping), and surfaces `soname_bump_unnecessary` as `risk` (bumped the major for nothing, fragmenting parallel-installed consumers) |
+
+> **Why most profiles are thin:** the default `strict_abi` already classifies the hard
+> native cases (symbol removal, layout, vtables, mangling, calling convention) correctly,
+> so a profile mostly adds a named entry point, primary-source documentation, and the few
+> genuine per-ecosystem divergences. Managed-runtime ecosystems (Java class-file linkage,
+> .NET assembly metadata) and source-only ecosystems (Go, non-FFI Rust) need dedicated
+> format frontends rather than a policy file — see
+> [ADR-034](../development/adr/034-managed-runtime-and-non-c-abi-frontends.md).
+
 ## Custom Policy Files (`--policy-file`)
 
 Custom policy files let you keep all detectors enabled and only override
@@ -119,6 +151,40 @@ Semantics:
 - kinds not listed in `overrides` use `base_policy`
 
 If both `--policy` and `--policy-file` are provided, `--policy-file` wins.
+
+### Evidence-aware controls (`evidence_policy`)
+
+When a compare also carries build/source evidence (build-info / source packs,
+ADR-028..033), an optional `evidence_policy` block tunes how each *category* of
+evidence finding is classified — independent of the per-`ChangeKind` `overrides`
+above:
+
+```yaml
+evidence_policy:
+  source_only_findings: warn          # ignore | warn | fail-api | fail-release
+  build_context_drift: warn           # ignore | warn | fail-on-abi-relevant
+  graph_risk_findings: warn           # ignore | warn | fail
+  require_evidence:                    # fail the run if a required layer is absent
+    build_context: false
+    source_abi: false
+    graph_summary: false
+```
+
+- `source_only_findings` — L4 source-replay / API-only findings (macros, default
+  args, inline/template/constexpr bodies). `ignore` → `COMPATIBLE`, `warn` →
+  `COMPATIBLE_WITH_RISK`, `fail-api`/`fail-release` → `API_BREAK` (exit 2).
+- `build_context_drift` — L3 build-flag / toolchain drift. `fail-on-abi-relevant`
+  escalates only genuinely ABI-relevant drift (std/visibility/packing flags,
+  export policy, toolchain) to `API_BREAK`; other drift stays a risk.
+- `graph_risk_findings` — L5 reachability/impact risks. `fail` → `API_BREAK`.
+- `require_evidence` — when a listed layer is `true` but absent from the
+  compare, an `evidence_required_missing` finding (`API_BREAK`) fails the run so
+  a silently-degraded scan can't pass (ADR-033 D7).
+
+Each knob is **unset by default**: leaving it out keeps the finding's normal
+category, so existing runs are unchanged. Per ADR-028 D3 these knobs never turn
+a source/build-only finding into a hard (artifact-proven) `BREAKING` verdict —
+the strongest they reach is `API_BREAK`.
 
 ---
 

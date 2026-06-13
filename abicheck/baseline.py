@@ -59,7 +59,7 @@ from .model import AbiSnapshot
 from .serialization import snapshot_to_json
 
 if TYPE_CHECKING:
-    from .evidence.pack import EvidencePack
+    from .buildsource.pack import BuildSourcePack
 
 _logger = logging.getLogger(__name__)
 
@@ -185,11 +185,16 @@ class BaselineMetadata:
     checksum: str | None = None
     signature: str | None = None
     #: ``sha256:<hex>`` content hash of the optional evidence pack stored with
-    #: this baseline (``EvidencePack.content_hash()``), or ``None`` when no pack
+    #: this baseline (``BuildSourcePack.content_hash()``), or ``None`` when no pack
     #: was pushed. Lets ``pull_evidence`` verify the stored pack has not drifted
     #: from what was recorded, the same integrity discipline ``checksum`` gives
     #: the snapshot (ADR-028 Phase 5).
     evidence_content_hash: str | None = None
+    #: ADR-033 D4 — coverage summary of the stored evidence pack: which optional
+    #: layers it carries (``{"build_context": bool, "source_abi": <status>,
+    #: "graph": <status>}``), or ``None`` when no pack was pushed. Lets a registry
+    #: consumer see a baseline's evidence depth without unpacking it.
+    evidence_coverage: dict[str, object] | None = None
 
     @classmethod
     def create(
@@ -249,7 +254,40 @@ class BaselineMetadata:
                 if data.get("evidence_content_hash") is not None
                 else None
             ),
+            evidence_coverage=(
+                {str(k): v for k, v in cov.items()}
+                if isinstance((cov := data.get("evidence_coverage")), dict)
+                else None
+            ),
         )
+
+
+def _pack_coverage(evidence: BuildSourcePack) -> dict[str, object] | None:
+    """Derive the ADR-033 D4 coverage block from a pack's manifest.
+
+    ``{"build_context": bool, "source_abi": <status>, "graph": <status>}``.
+    Presence is read from the pack's actual facts; the status string reuses the
+    manifest's recorded ``CoverageStatus`` value when present, else ``present`` /
+    ``not_collected``. Returns ``None`` when the pack carries no managed layer.
+    """
+    rows = {
+        (c.layer.value if hasattr(c.layer, "value") else str(c.layer)): c.status.value
+        for c in evidence.manifest.coverage
+    }
+
+    def status(layer: str, present: bool) -> str:
+        return rows.get(layer, "present" if present else "not_collected")
+
+    has_l3 = evidence.build_evidence is not None
+    has_l4 = evidence.source_abi is not None
+    has_l5 = evidence.source_graph is not None
+    if not (has_l3 or has_l4 or has_l5):
+        return None
+    return {
+        "build_context": has_l3,
+        "source_abi": status("L4_source_abi", has_l4),
+        "graph": status("L5_source_graph", has_l5),
+    }
 
 
 class BaselineRegistry(Protocol):
@@ -260,7 +298,7 @@ class BaselineRegistry(Protocol):
         key: BaselineKey,
         snapshot: AbiSnapshot,
         metadata: BaselineMetadata | None = None,
-        evidence: EvidencePack | None = None,
+        evidence: BuildSourcePack | None = None,
     ) -> str:
         """Store a baseline snapshot (and an optional evidence pack). Returns a reference ID."""
         ...
@@ -269,7 +307,7 @@ class BaselineRegistry(Protocol):
         """Retrieve a baseline by key. Returns None if not found."""
         ...
 
-    def pull_evidence(self, key: BaselineKey) -> EvidencePack | None:
+    def pull_evidence(self, key: BaselineKey) -> BuildSourcePack | None:
         """Retrieve the evidence pack stored with a baseline, or None if absent."""
         ...
 
@@ -328,7 +366,7 @@ class FilesystemRegistry:
         key: BaselineKey,
         snapshot: AbiSnapshot,
         metadata: BaselineMetadata | None = None,
-        evidence: EvidencePack | None = None,
+        evidence: BuildSourcePack | None = None,
     ) -> str:
         """Store a baseline snapshot to the filesystem (atomic writes).
 
@@ -356,12 +394,14 @@ class FilesystemRegistry:
             metadata.evidence_content_hash, pending = self._store_evidence(
                 evidence, evidence_dir
             )
+            metadata.evidence_coverage = _pack_coverage(evidence)
         else:
             # No pack supplied: always clear the recorded hash so the metadata
             # never promises a pack that is not on disk (a caller-supplied
             # metadata could carry a stale hash even when the evidence dir does
             # not exist — Codex review).
             metadata.evidence_content_hash = None
+            metadata.evidence_coverage = None
             if evidence_dir.exists():
                 pending = Path(tempfile.mkdtemp(dir=key_dir, prefix=".evstage-"))
                 os.replace(evidence_dir, pending / "old")
@@ -396,11 +436,11 @@ class FilesystemRegistry:
         return ref
 
     @staticmethod
-    def _store_evidence(evidence: EvidencePack, dest: Path) -> tuple[str, Path | None]:
+    def _store_evidence(evidence: BuildSourcePack, dest: Path) -> tuple[str, Path | None]:
         """Swap an evidence pack into ``dest``; return ``(content_hash, staging)``.
 
         The pack must already be materialized on disk (a ``manifest.json`` under
-        ``evidence.root``); ``collect-evidence`` and ``EvidencePack.write()``
+        ``evidence.root``); ``collect`` and ``BuildSourcePack.write()``
         guarantee that. Copying the whole tree preserves both ``normalized/``
         facts and ``raw/`` provenance (ADR-028 D4).
 
@@ -414,7 +454,7 @@ class FilesystemRegistry:
         if not manifest.is_file():
             raise ValidationError(
                 f"Evidence pack at {evidence.root} has no manifest.json; "
-                "run `abicheck collect-evidence` (or EvidencePack.write()) first."
+                "run `abicheck collect` (or BuildSourcePack.write()) first."
             )
         # Reject a source pack that already fails its own integrity check (a
         # normalized payload edited/partially written after write()). Storing it
@@ -492,7 +532,7 @@ class FilesystemRegistry:
         _logger.info("Baseline pulled: %s", key.path)
         return snapshot, meta
 
-    def pull_evidence(self, key: BaselineKey) -> EvidencePack | None:
+    def pull_evidence(self, key: BaselineKey) -> BuildSourcePack | None:
         """Load the evidence pack stored with a baseline (ADR-028 Phase 5).
 
         Returns ``None`` when the baseline has no pack. Raises
@@ -500,7 +540,7 @@ class FilesystemRegistry:
         match the hash recorded at push time — mirroring the snapshot checksum
         guard so a tampered/partial pack is not silently trusted.
         """
-        from .evidence.pack import EvidencePack
+        from .buildsource.pack import BuildSourcePack
 
         key_dir = self._key_dir(key)
         evidence_dir = key_dir / _EVIDENCE_SUBDIR
@@ -527,7 +567,7 @@ class FilesystemRegistry:
         # which only wraps AbicheckError) — a tampered stored pack must surface as
         # a BaselineIntegrityError, not a stack trace (Codex review).
         try:
-            pack = EvidencePack.load(evidence_dir)
+            pack = BuildSourcePack.load(evidence_dir)
         except (ValueError, OSError) as exc:
             raise BaselineIntegrityError(
                 f"Evidence pack for baseline {key.path} could not be loaded "

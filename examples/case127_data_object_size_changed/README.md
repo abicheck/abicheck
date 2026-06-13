@@ -1,0 +1,52 @@
+# Case 127: Exported Data Object Size Change
+
+**Category:** Symbol / Data Layout | **Verdict:** 🔴 BREAKING
+
+## What breaks
+
+The library exports a global data object, `config_table`. In v1 it is
+`int[16]` (64 bytes); in v2 it grows to `int[32]` (128 bytes). The exported
+symbol's `st_size` changes.
+
+This is the exact class of regression the glibc testsuite guards with its
+**static-variable-size** checks, and that Apple's dynamic-library guidelines
+classify as a *major* change ("changing a symbol's size"). It is detected at
+**L0** — the size lives in the ELF symbol table, so no debug info is required.
+
+## Why it is an ABI break
+
+When an executable references an exported data object, the static linker emits
+a **copy relocation**: it reserves space for the object in the executable's own
+BSS, sized using the *v1* definition (64 bytes), and the dynamic loader copies
+the library's initial value into that fixed-size slot at startup.
+
+After upgrading to v2:
+
+- The reserved copy in the old executable is still 64 bytes.
+- Any library code that indexes `config_table[16..31]` now reads or writes past
+  the consumer's 64-byte copy — silent out-of-bounds memory access.
+- The two definitions disagree on the object's size, which is undefined
+  behavior across the ABI boundary.
+
+Unlike a removed function (which fails loudly at load), a grown data object
+corrupts memory silently, making this a particularly dangerous break.
+
+## Code diff
+
+| v1 | v2 |
+|----|----|
+| `int config_table[16];` | `int config_table[32];` |
+| `st_size = 64` | `st_size = 128` |
+
+## How to fix
+
+- Do not change the size of an exported data object within a SONAME. Bump the
+  SONAME (major version) if the layout must change.
+- Better: never export mutable global arrays. Expose accessor functions
+  (`config_get` / `config_set`) and keep the storage private (Apple's explicit
+  recommendation), so its size is an implementation detail.
+
+## Related profile
+
+`--policy-file glibc_symbol_versioned` pins symbol-table regressions like this
+for versioned system libraries.

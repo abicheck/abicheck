@@ -136,6 +136,13 @@ class ChangeKind(str, Enum):
     COMPAT_VERSION_CHANGED = (
         "compat_version_changed"  # LC_ID_DYLIB compat_version changed → BREAKING
     )
+    MACHO_CPU_TYPE_CHANGED = (
+        "macho_cpu_type_changed"  # Mach-O header CPU type/arch changed → BREAKING
+    )
+
+    # ── PE/COFF specific (binary-only, no PDB needed) ────────────────────
+    PE_FORWARDER_CHANGED = "pe_forwarder_changed"  # export forwarder target repointed
+    PE_MACHINE_CHANGED = "pe_machine_changed"  # PE machine/architecture drift
 
     # ELF security / bad practice
     EXECUTABLE_STACK = "executable_stack"  # PT_GNU_STACK gains PF_X — NX disabled (regression; gateable)
@@ -179,7 +186,9 @@ class ChangeKind(str, Enum):
 
     # DWARF layout (Sprint 3)
     DWARF_INFO_MISSING = "dwarf_info_missing"  # new binary stripped of -g
-    EVIDENCE_COVERAGE_ASYMMETRIC = "evidence_coverage_asymmetric"  # base scanned with evidence the target lacks
+    EVIDENCE_COVERAGE_ASYMMETRIC = "layer_coverage_asymmetric"  # base scanned with evidence the target lacks
+    EVIDENCE_REQUIRED_MISSING = "evidence_required_missing"  # policy require_evidence layer absent (ADR-033 D7)
+    VERSIONED_SYMBOL_SCHEME_DETECTED = "versioned_symbol_scheme_detected"  # bulk removed↔added differ only by a version token (ICU u_*_NN / GNU symver); advisory
     STRUCT_SIZE_CHANGED = "struct_size_changed"  # sizeof(T) changed
     STRUCT_FIELD_OFFSET_CHANGED = "struct_field_offset_changed"  # field moved
     STRUCT_FIELD_REMOVED = "struct_field_removed"  # field deleted
@@ -511,7 +520,7 @@ class ChangeKind(str, Enum):
     UNDOCUMENTED_EXPORT_RATIO_INCREASED = "undocumented_export_ratio_increased"
 
     # ── Build-context evidence (ADR-028 L3 / ADR-029 D9) ────────────────────
-    # Emitted only by the build-evidence diff over two EvidencePacks. These are
+    # Emitted only by the build-evidence diff over two BuildSourcePacks. These are
     # source/build-context findings, not artifact-backed ABI breaks: per
     # ADR-028 D3 they default to COMPATIBLE (quality) or RISK and never to
     # BREAKING. When a build-context change actually breaks the ABI, the
@@ -523,6 +532,21 @@ class ChangeKind(str, Enum):
     TOOLCHAIN_VERSION_CHANGED = "toolchain_version_changed"  # compiler/stdlib/sysroot changed → RISK
     GENERATED_FILE_DEPENDENCY_UNSTABLE = "generated_file_dependency_unstable"  # generated-file dependency risk → RISK
     LINK_EXPORT_POLICY_CHANGED = "link_export_policy_changed"  # version script / export map / .def changed → RISK
+
+    # ── Runtime-model / build-mode flips (ADR-028 L3 — gap-analysis follow-up) ─
+    # Emitted by the build-evidence diff when a runtime-model build flag flips
+    # between versions. Like the other L3 kinds these are never BREAKING on their
+    # own (ADR-028 D3): the artifact diff proves an actual break; these flag the
+    # elevated risk and localize the cause. They default to RISK.
+    EXCEPTIONS_MODE_CHANGED = "exceptions_mode_changed"  # -fexceptions ↔ -fno-exceptions flip → RISK
+    RTTI_MODE_CHANGED = "rtti_mode_changed"  # -frtti ↔ -fno-rtti flip → RISK
+    TLS_MODEL_CHANGED = "tls_model_changed"  # -ftls-model / -fextern-tls-init flip → RISK
+    THREADSAFE_STATICS_MODE_CHANGED = "threadsafe_statics_mode_changed"  # -fno-threadsafe-statics flip → RISK
+    # Struct-return convention (-freg-struct-return / -fpcc-struct-return). Unlike
+    # the flag-only RISK kinds above this is artifact-proven from DWARF/ABI facts,
+    # so it defaults to BREAKING; the flag-only signal stays as the generic
+    # ABI_RELEVANT_BUILD_FLAG_CHANGED (RISK).
+    STRUCT_RETURN_CONVENTION_CHANGED = "struct_return_convention_changed"  # aggregate return passing changed → BREAKING
 
     # ── Source ABI replay evidence (ADR-028 L4 / ADR-030 D6) ────────────────
     # Emitted only by the source-replay diff over two linked source ABI
@@ -538,6 +562,7 @@ class ChangeKind(str, Enum):
     TEMPLATE_BODY_CHANGED = "template_body_changed"  # uninstantiated template body changed → RISK
     UNINSTANTIATED_TEMPLATE_REMOVED = "uninstantiated_template_removed"  # public template removed → API_BREAK
     SOURCE_DECL_BINARY_SYMBOL_MISMATCH = "source_decl_binary_symbol_mismatch"  # decl no longer maps to a symbol → RISK
+    SOURCE_BINARY_PROVENANCE_MISMATCH = "source_binary_provenance_mismatch"  # source tree likely does not match the binary → RISK
     ODR_SOURCE_CONFLICT = "odr_source_conflict"  # same type name differs across TUs → RISK
     GENERATED_HEADER_CHANGED = "generated_header_changed"  # generated public header changed → RISK
     PUBLIC_TYPEDEF_TARGET_CHANGED = "public_typedef_target_changed"  # public typedef/alias underlying type changed → API_BREAK
@@ -586,6 +611,16 @@ class ChangeKind(str, Enum):
     # change is observable even when the library ships fully stripped of DWARF.
     VTABLE_SLOT_COUNT_CHANGED = "vtable_slot_count_changed"  # _ZTV size delta → virtual method add/remove/reorder → BREAKING
     RTTI_INHERITANCE_CHANGED = "rtti_inheritance_changed"  # _ZTI size delta → base-class set/shape changed → BREAKING
+
+    @classmethod
+    def _missing_(cls, value: object) -> ChangeKind | None:
+        # Back-compat: accept the pre-rename serialized value so reports and
+        # policy files written before the evidence→buildsource rename still
+        # deserialize. ``evidence_coverage_asymmetric`` was renamed to
+        # ``layer_coverage_asymmetric``; the meaning is unchanged.
+        if value == "evidence_coverage_asymmetric":
+            return cls.EVIDENCE_COVERAGE_ASYMMETRIC
+        return None
 
 
 class HasKind(Protocol):

@@ -221,7 +221,7 @@ from disk instead.
 
 ### `abi_list_changes` — List detectable change kinds
 
-Enumerates all 183 `ChangeKind` values with their impact classification. See
+Enumerates all 246 `ChangeKind` values with their impact classification. See
 the [Change Kinds Reference](../reference/change-kinds.md) for canonical
 documentation of each kind.
 
@@ -235,7 +235,7 @@ documentation of each kind.
 
 ```json
 {
-  "count": 183,
+  "count": 246,
   "change_kinds": [
     {
       "kind": "func_removed",
@@ -312,7 +312,7 @@ User: "I added a field to FooConfig — is this ABI safe?"
 Agent: "What kinds of ABI breaks can you detect?"
 
 1. abi_list_changes(impact="breaking")
-   → 50+ change kinds with descriptions
+   → the breaking subset of the change-kind registry, with descriptions
 
 2. Agent summarizes the categories for the user
 ```

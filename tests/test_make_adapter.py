@@ -17,9 +17,9 @@ from __future__ import annotations
 
 from click.testing import CliRunner
 
+from abicheck.buildsource.adapters import MakeAdapter
+from abicheck.buildsource.pack import BuildSourcePack
 from abicheck.cli import main
-from abicheck.evidence.adapters import MakeAdapter
-from abicheck.evidence.pack import EvidencePack
 
 DRY_RUN = """\
 make: Entering directory '/home/user/proj'
@@ -113,7 +113,7 @@ def test_make_missing_dry_run_file_diagnostic(tmp_path):
 def test_make_never_runs_make_without_transcript():
     # The adapter must NOT execute make (make -n still runs `+` recipes and
     # $(shell ...)); with no transcript it just records a diagnostic.
-    import abicheck.evidence.adapters.make as make_mod
+    import abicheck.buildsource.adapters.make as make_mod
 
     assert not hasattr(make_mod, "subprocess")  # no exec machinery imported at all
     ev = MakeAdapter(build_dir="/some/build").collect()
@@ -137,9 +137,9 @@ def test_collect_evidence_make_dry_run_cli(tmp_path):
     dr = tmp_path / "dry.txt"
     dr.write_text(DRY_RUN)
     out = tmp_path / "e"
-    result = CliRunner().invoke(main, ["collect-evidence", "--make-dry-run", str(dr), "-o", str(out)])
+    result = CliRunner().invoke(main, ["collect", "--make-dry-run", str(dr), "-o", str(out)])
     assert result.exit_code == 0, result.output
-    pack = EvidencePack.load(out)
+    pack = BuildSourcePack.load(out)
     assert pack.build_evidence is not None
     assert len(pack.build_evidence.compile_units) == 2
     assert any(e.name == "make" and e.status == "ok" for e in pack.manifest.extractors)

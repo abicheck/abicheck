@@ -1399,7 +1399,7 @@ def _process_case(
 #   L1 + debug info     — -g .so, no headers            (DWARF/PDB layout)
 #   L2 + public headers — -g .so, -H include/           (castxml AST; default)
 #   L3 + build context  — L2 plus -p build/ when a compile_commands.json exists
-# L4 (source ABI replay via an EvidencePack) needs `collect-evidence`, which is
+# L4 (source ABI replay via an BuildSourcePack) needs `collect`, which is
 # not yet a CLI command, so it is reported as "n/a" here.
 EVIDENCE_TIERS: list[str] = ["L0", "L1", "L2", "L3"]
 
@@ -1577,7 +1577,7 @@ def _print_evidence_tier_summary(rows: list[dict]) -> None:
         print(f"\n  Not reached by any tier ({len(misses)}): {', '.join(misses)}")
         print("  (a MISS means no tier emitted the cataloged change kind with the "
               "right verdict — usually the layer that would see it was unavailable "
-              "(no castxml for L2, no compile DB for L3, no EvidencePack for L4), or "
+              "(no castxml for L2, no compile DB for L3, no BuildSourcePack for L4), or "
               "the case's L3/L4 drift can't be reproduced by building v1/v2 with "
               "identical flags in this harness.)")
     # Honesty check: empirical first-detection vs ground_truth min_evidence.
@@ -1607,7 +1607,7 @@ def _run_evidence_tiers(args: Any) -> None:
     case_prefixes = args.cases or []
 
     print("Evidence-tier benchmark — abicheck at five sources of information (L0–L4)")
-    print("  L0 binary only · L1 +debug · L2 +headers · L3 +build · (L4 +source = n/a, needs EvidencePack)")
+    print("  L0 binary only · L1 +debug · L2 +headers · L3 +build · (L4 +source = n/a, needs BuildSourcePack)")
 
     rows: list[dict] = []
     for case_dir in all_cases:

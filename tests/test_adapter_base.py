@@ -15,7 +15,7 @@
 """Shared adapter helpers — dialect-aware source detection (ADR-029)."""
 from __future__ import annotations
 
-from abicheck.evidence.adapters.base import (
+from abicheck.buildsource.adapters.base import (
     _is_msvc_command,
     source_from_argv,
 )

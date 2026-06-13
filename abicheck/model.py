@@ -23,10 +23,11 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .build_mode import BuildMode
+    from .buildsource.model import BuildSourceRef
+    from .buildsource.pack import BuildSourcePack
     from .dwarf_advanced import AdvancedDwarfMetadata
     from .dwarf_metadata import DwarfMetadata
     from .elf_metadata import ElfMetadata
-    from .evidence.model import EvidencePackRef
     from .macho_metadata import MachoMetadata
     from .pe_metadata import PeMetadata
     from .sycl_metadata import SyclMetadata
@@ -599,13 +600,23 @@ class AbiSnapshot:
     # Used by binary-only fallback detectors that need lightweight disassembly.
     source_path: str | None = field(default=None, kw_only=True)
 
-    # ADR-028 (schema v7) — optional reference to an out-of-band EvidencePack
+    # ADR-028 (schema v7) — optional reference to an out-of-band BuildSourcePack
     # carrying L3/L4/L5 source/build/graph evidence. Only a lightweight
     # reference (content hash + coverage summary) lives in the snapshot; the
     # heavyweight pack is content-addressed on disk and versions independently
-    # (EVIDENCE_PACK_VERSION). None when no evidence was collected. Old readers
+    # (BUILD_SOURCE_PACK_VERSION). None when no evidence was collected. Old readers
     # ignore this optional field (ADR-015 backward-compatibility).
-    evidence_pack: EvidencePackRef | None = field(default=None, kw_only=True)
+    build_source_pack: BuildSourceRef | None = field(default=None, kw_only=True)
+
+    # Single-artifact UX — optional *inline* BuildSourcePack carrying the
+    # normalized L3 build-info + L4/L5 source facts directly inside the
+    # snapshot, so `compare old.json new.json` works with no out-of-band pack
+    # directories. Populated by `dump --build-info/--sources`; serialized under
+    # the "build_source" key. None when nothing was embedded. Old readers ignore
+    # this optional field (ADR-015). When both are present, the embedded facts
+    # are authoritative for the compare and `build_source_pack` is the matching
+    # provenance reference.
+    build_source: BuildSourcePack | None = field(default=None, kw_only=True)
 
     # ADR-029 — True when this snapshot's public-header AST was parsed using the
     # real build context (a compile_commands.json supplied to `dump -p`), so the

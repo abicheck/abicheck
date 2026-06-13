@@ -16,29 +16,37 @@ artifact layout, accuracy target, or CI policy.
 
 ---
 
-## 1) The workflow chooser
+## 1) The workflow chooser — what are you comparing?
 
-| Your situation | Recommended workflow | Minimum command | Stronger / production command |
-|---|---|---|---|
-| I maintain one shared library and want to know if v2 breaks v1 consumers | Single-library ABI compare | `abicheck compare libv1.so libv2.so` | `abicheck compare libv1.so libv2.so --old-header include/v1/ --new-header include/v2/` |
-| Headers are unchanged between releases | Same-header compare | `abicheck compare libv1.so libv2.so -H include/foo.h` | When compiler flags affect the ABI, capture build context at dump time (`abicheck dump … -H include/foo.h -p build/`) and compare the snapshots |
-| I have no headers | Binary-only quick check | `abicheck compare libv1.so libv2.so` | Provide debug info via `--debug-root1/2` — this is weaker (see [the input-quality ladder](#2-how-much-accuracy-do-you-need)) |
-| I have stripped production binaries | Debug-assisted compare | `abicheck compare old.so new.so --debug-root1 old-debug --debug-root2 new-debug` | Also pass public headers (`-H`) for highest confidence |
-| I want a CI baseline | Snapshot workflow | `abicheck dump libfoo.so -H include/ -o baseline.json` then `abicheck compare baseline.json build/libfoo.so --new-header include/` | Store baselines in GitHub Releases, the repo, the Actions cache, or artifact storage — see [Baseline Management](baseline-management.md) |
-| I ship several DSOs together | Bundle / release compare | `abicheck compare-release release-1.0/ release-2.0/ -H include/` | Add `--manifest` only for template instantiations, dlsym/plugin contracts, internal stable exports, or symbol-version promises |
-| I ship RPM/Deb/tar/conda/wheel packages | Package compare | `abicheck compare-release old.rpm new.rpm` | Add `--debug-info1/2` (debuginfo packages) and `--devel-pkg1/2` (header/devel packages) where available |
-| I am an application developer | App compatibility | `abicheck appcompat ./myapp libfoo.so.1 libfoo.so.2` | Add `-H include/`; use `--check-against` when no old library exists |
-| I have a host/plugin system | Plugin contract check | `abicheck plugin-check plugin.v1.so plugin.v2.so -r plugin_init` | Use `--host-contract host.syms --policy plugin_abi` |
-| I only want to fail CI on binary ABI breaks | Breakage-only gate | `abicheck compare old.json new.so --severity-preset info-only --severity-abi-breaking error` | In the GitHub Action, use `fail-on-breaking: true`, `fail-on-api-break: false` |
-| I want visibility into new ABI additions | Addition reporting | `abicheck compare old.so new.so -H include/` | Additions show in the default report (any format); add `--severity-addition error` to also fail CI on them |
-| I need human reports | Markdown / HTML | `--format markdown` or `--format html` | Add `--report-mode leaf --show-impact` for large diffs |
-| I need machine / CI reports | JSON / SARIF / JUnit | `--format json`, `--format sarif`, or `--format junit` | SARIF for GitHub Code Scanning; JUnit for GitLab / Jenkins / Azure dashboards |
-| I only have a static archive (`.a` / `.lib`) | Not supported directly | — | Extract members (`ar x libfoo.a`) and compare the resulting `.o` objects, or compare a shared library built from the same sources — see [Limitations](../concepts/limitations.md#static-import-library-archives-a-lib) |
-| I want a dependency / sysroot check | Stack validation | `abicheck deps ./app --sysroot /rootfs` (resolve one env) / `abicheck stack-check usr/bin/app --baseline /old-root --candidate /new-root` (compare two envs) | See [CLI Usage](cli-usage.md) |
+Pick the row that matches what you physically have on disk and what you want to
+know. Run the **minimum command** first; reach for the **stronger / production
+command** when you need more confidence or a CI gate.
 
-The rest of this page expands the four decisions packed into that table:
-**what** you are comparing, **how much accuracy** you need, **how CI should
-behave**, and **which report** to produce.
+| Your situation | Minimum command | Stronger / production command |
+|---|---|---|
+| One shared library — does v2 break v1 consumers? | `abicheck compare libv1.so libv2.so` | `abicheck compare libv1.so libv2.so --old-header include/v1/ --new-header include/v2/` — the primary flow |
+| Same public header for both versions | `abicheck compare libv1.so libv2.so -H include/foo.h` (`-H include/` scans a directory recursively) | When compiler flags affect the ABI, capture build context at dump time (`abicheck dump … -H include/foo.h -p build/`) and compare the snapshots |
+| No headers at all | `abicheck compare libv1.so libv2.so` | Binary-only fallback is weaker (see [the input-quality ladder](#2-how-much-accuracy-do-you-need)); add debug info via `--debug-root1/2` |
+| Stripped production binaries | `abicheck compare old.so new.so --debug-root1 old-debug --debug-root2 new-debug` (or `--debuginfod` to fetch by build-id) | Also pass public headers (`-H`) for highest confidence |
+| A CI baseline vs a fresh build | `abicheck dump libfoo.so -H include/ -o baseline.json`, then `abicheck compare baseline.json build/libfoo.so --new-header include/` | Store baselines in GitHub Releases, the repo, the Actions cache, or artifact storage — see [Baseline Management](baseline-management.md) |
+| Two snapshots (offline / air-gapped) | `abicheck compare old.json new.json` | No headers/castxml/network needed — everything is baked into the snapshots |
+| Several DSOs shipped together | `abicheck compare-release release-1.0/ release-2.0/ -H include/` (per-library results on all platforms; the cross-library bundle/dependency-skew analysis is **Linux/ELF only**) | Add `--manifest` only for template instantiations, dlsym/plugin contracts, internal stable exports, or symbol-version promises |
+| RPM / Deb / tar / conda / wheel packages | `abicheck compare-release old.rpm new.rpm` | Add `--debug-info1/2` (debuginfo packages) and `--devel-pkg1/2` (header/devel packages) where available |
+| An application + a library upgrade | `abicheck appcompat ./myapp libfoo.so.1 libfoo.so.2` | Add `-H include/`; use `--check-against new.so` when no old library exists (symbol-availability only) |
+| A host that `dlopen`s plugins | `abicheck plugin-check plugin.v1.so plugin.v2.so -r plugin_init` | Use `--host-contract host.syms --policy plugin_abi` |
+| Will this binary load in this sysroot / rootfs? | `abicheck deps ./app --sysroot /rootfs` | `abicheck deps ./app` alone checks the dependency tree resolves |
+| Two sysroots / container images to compare | `abicheck stack-check usr/bin/app --baseline /old-root --candidate /new-root` | Per-library ABI diff across the whole transitive dependency stack |
+| Only a static `.a` / `.lib` archive | *(unsupported directly)* | Extract members (`ar x libfoo.a`) and compare the `.o` objects, or compare a shared library built from the same sources — see [Limitations](../concepts/limitations.md#static-import-library-archives-a-lib) |
+
+`compare` auto-detects each input: `.so` files are dumped on the fly, `.json`
+snapshots are loaded directly — you can mix them freely. Deeper references:
+[CLI Usage](cli-usage.md), [Tool Modes](tool-modes.md),
+[Multi-Binary Releases](multi-binary.md),
+[Application Compatibility](appcompat.md), [Plugin Systems](plugin-systems.md).
+
+The rest of this page covers the other three decisions, in the order you'll
+meet them: **how much accuracy** you need (§2), **how CI should behave** (§3),
+and **which report** to produce (§4).
 
 ---
 
@@ -55,7 +63,7 @@ more when you need more confidence.
 | **L1** | + debug info | **Medium** | Struct layout, field offsets, enum values, calling convention, emitted-ABI type changes |
 | **L2** | + headers | **High** | Declared public API surface, source-level API breaks, inline/template-related surface |
 | **L3** | + build flags (`-p build/`) | **Higher** | The exact ABI-affecting flags the library was built with (`-std`, `_GLIBCXX_USE_CXX11_ABI`, `-fvisibility`, …) |
-| **L4** | + sources (evidence pack) | **Best** | Facts that never reach the binary: macro/`constexpr` values, default-argument values, uninstantiated templates |
+| **L4** | + sources (build/source pack) | **Best** | Facts that never reach the binary: macro/`constexpr` values, default-argument values, uninstantiated templates |
 
 abicheck reports the **artifact** depth it reached (L0–L2) as the
 **`evidence_tier`** field (`elf_only` → `dwarf_aware` → `header_aware`) so you
@@ -84,39 +92,7 @@ explanation of why each source changes what abicheck can prove.
 
 ---
 
-## 3) Comparison variants — what are you comparing?
-
-abicheck has one command per artifact topology. Pick by what you physically
-have on disk.
-
-| You have… | Command | Notes |
-|---|---|---|
-| Two `.so` / `.dll` / `.dylib`, each with its own header | `abicheck compare old new --old-header … --new-header …` | The primary flow. |
-| Two binaries, **same** public header | `abicheck compare old new -H include/foo.h` | `-H` applies to both sides. |
-| A header **directory** (not one file) | `abicheck compare old new -H include/` | Recursive scan for `*.h`, `*.hpp`, … |
-| No headers at all | `abicheck compare old new` | Binary-only fallback; weaker (may miss type/signature breaks). |
-| Stripped binaries + separate debug files | `abicheck compare old.so new.so --debug-root1 … --debug-root2 …` | Or `--debuginfod` to fetch by build-id. |
-| A saved baseline vs a fresh build | `abicheck dump … -o baseline.json` then `abicheck compare baseline.json build/libfoo.so --new-header …` | The default CI baseline path. |
-| Two snapshots (offline / air-gapped) | `abicheck compare old.json new.json` | No headers/castxml needed — already baked in. |
-| Several `.so` files shipped together | `abicheck compare-release old/ new/ -H include/` | Catches cross-library breaks per-library compare misses. **Linux/ELF only.** |
-| RPM / Deb / tar / conda / wheel packages | `abicheck compare-release old.rpm new.rpm` | Add `--debug-info1/2` and `--devel-pkg1/2` for full type-level analysis. |
-| An application + a library upgrade | `abicheck appcompat ./myapp old new -H include/` | Filters the diff to changes that affect *your* app. |
-| An app, no old library yet | `abicheck appcompat ./myapp --check-against new.so` | Weak mode: symbol-availability only. |
-| A host that `dlopen`s plugins | `abicheck plugin-check plugin.v1 plugin.v2 -r plugin_init` | Checks the host's required entrypoints. |
-| A sysroot / container rootfs | `abicheck deps ./app --sysroot /rootfs` | Will the binary load and resolve in this environment? |
-| Two sysroots / container images to compare | `abicheck stack-check usr/bin/app --baseline /old-root --candidate /new-root` | Per-library ABI diff across the whole transitive dependency stack. |
-| A dependency tree | `abicheck deps ./app` | Does it resolve without unresolved symbols? |
-| Only a static `.a` / `.lib` archive | *(unsupported directly)* | Extract members and compare `.o` objects, or build a shared library from the same sources — see [Limitations](../concepts/limitations.md#static-import-library-archives-a-lib). |
-
-`compare` auto-detects each input: `.so` files are dumped on the fly, `.json`
-snapshots are loaded directly — you can mix them freely. Deeper references:
-[CLI Usage](cli-usage.md), [Tool Modes](tool-modes.md),
-[Multi-Binary Releases](multi-binary.md),
-[Application Compatibility](appcompat.md), [Plugin Systems](plugin-systems.md).
-
----
-
-## 4) How should CI behave? — policy recipes
+## 3) How should CI behave? — policy recipes
 
 abicheck separates two independent questions: **what fails the build** (verdict
 / severity / exit code) and **what appears in the report** (display filtering).
@@ -145,6 +121,7 @@ verdict or exit code.
 
 ```bash
 # Report everything, fail ONLY on binary ABI breaks
+# (i.e. source/API breaks are allowed through)
 abicheck compare old.json new.so \
   --new-header include/ \
   --severity-preset info-only \
@@ -154,12 +131,6 @@ abicheck compare old.json new.so \
 abicheck compare old.json new.so \
   --new-header include/ \
   --severity-addition error
-
-# Allow source/API breaks but block binary ABI breaks
-abicheck compare old.json new.so \
-  --new-header include/ \
-  --severity-preset info-only \
-  --severity-abi-breaking error
 ```
 
 ### Display filter (does **not** change verdict or exit code)
@@ -177,7 +148,7 @@ the `addition` category, which defaults to `info`.
 
 ---
 
-## 5) Which report? — output by audience
+## 4) Which report? — output by audience
 
 | You need… | Format | Best for |
 |---|---|---|
@@ -199,7 +170,7 @@ changes under their root cause. Full reference:
 
 ---
 
-## 6) CI recipes by platform
+## 5) CI recipes by platform
 
 | CI need | Pattern |
 |---|---|

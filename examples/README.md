@@ -1,7 +1,7 @@
 # ABI Scenario Catalog
 
 <!-- BEGIN GENERATED: catalog-headline (keep counts in sync with examples/ground_truth.json) -->
-This directory contains **127 cases** (122 single-library + 5 multi-library bundle cases, the latter tracked under [ADR-023](../docs/development/adr/023-bundle-aware-multi-binary-analysis.md)) demonstrating real-world ABI/API break scenarios. Each case is a minimal, compilable C/C++ example with:
+This directory contains **143 cases** (138 single-library + 5 multi-library bundle cases, the latter tracked under [ADR-023](../docs/development/adr/023-bundle-aware-multi-binary-analysis.md)) demonstrating real-world ABI/API break scenarios. Each case is a minimal, compilable C/C++ example with:
 <!-- END GENERATED: catalog-headline -->
 
 - Paired `v1/` and `v2/` source + headers.
@@ -20,11 +20,11 @@ The catalog drives abicheck's benchmark and serves as an encyclopedia of ABI pit
 <!-- BEGIN GENERATED: verdict-distribution (keep counts in sync with examples/ground_truth.json) -->
 | Verdict | Count | `checker_policy.py` set | Icon |
 |---------|-------|-------------------------|------|
-| BREAKING | 86 | `BREAKING_KINDS` | 🔴 |
+| BREAKING | 92 | `BREAKING_KINDS` | 🔴 |
 | API_BREAK | 8 | `API_BREAK_KINDS` | 🟠 |
-| COMPATIBLE_WITH_RISK | 3 | `RISK_KINDS` | 🟡 |
+| COMPATIBLE_WITH_RISK | 9 | `RISK_KINDS` | 🟡 |
 | COMPATIBLE (addition) | 10 | `ADDITION_KINDS` | 🟢 |
-| COMPATIBLE (quality) | 9 | `QUALITY_KINDS` | 🟡 |
+| COMPATIBLE (quality) | 13 | `QUALITY_KINDS` | 🟡 |
 | NO_CHANGE | 6 | — | ✅ |
 | Bundle (multi-binary) | 5 | see [ADR-023](../docs/development/adr/023-bundle-aware-multi-binary-analysis.md) | 🔵 |
 <!-- END GENERATED: verdict-distribution -->
@@ -39,6 +39,72 @@ The catalog drives abicheck's benchmark and serves as an encyclopedia of ABI pit
 - ✅ **BASELINE** — no change; expected passing state
 
 Some policy-escalated source/contract breaks (notably case30, case35) may keep identical runtime output for prebuilt binaries. For those, the demo shows: (1) binary still runs, and (2) recompilation against new headers fails or changes allowed behavior.
+
+## Runtime Demos vs. abicheck Analysis
+
+Each per-case README describes the intended ABI/API contract break, but there
+are two distinct validation layers:
+
+- **Runtime smoke:** build the old consumer app, run it with `libv1`, then
+  substitute `libv2` under the old library name. This catches loader failures,
+  crashes, and visible output changes without using abicheck analysis.
+- **abicheck analysis:** build v1/v2 libraries and run `dump` + `compare` with a
+  selected evidence mode.
+
+The runtime smoke result is not always the same as the policy verdict. Some
+examples are deliberately analysis-only: source/API breaks, bad-practice
+contract cases, and evidence-limited cases may keep the old binary running while
+still being valid `BREAKING`, `API_BREAK`, or `COMPATIBLE_WITH_RISK` examples.
+When a case is runtime-observable, its README should explain the concrete
+loader/runtime/output failure. When it is not runtime-observable, its README
+should explain which analysis layer proves the issue instead.
+
+The standard analysis modes are:
+
+- `debug-headers`: debug binary + public headers (`L0,L1,L2`)
+- `release-headers`: stock/release binary + public headers (`L0,L2`)
+- `stripped-headers`: stripped binary + public headers (`L0,L2`)
+- `build-source`: stock binary + headers + build/source evidence pack
+  (`L0,L1,L2,L3,L4,L5`)
+
+## Current Validation Status
+
+`Examples Validation` is the CI workflow for this catalog. It runs on changes
+that touch `examples/**`, `abicheck/**`, or the validate-example harness files.
+Commands below use `PYTHONPATH=.`.
+
+| Check | Command | Executed where | Scope | Result | Status |
+|---|---|---|---:|---|---|
+| Build/autodiscovery | `pytest tests/test_example_autodiscovery.py -v --tb=short -m integration` | CI Linux, Python 3.14 | 129 runnable single-library cases | 118 passed / 5 xfailed / 6 skipped | Passing |
+| Default/debug verdicts | `python tests/validate_examples.py --json` + `python tests/check_validate_results.py` | CI Linux, blocking gate | 134 catalog cases | 122 PASS / 5 XFAIL / 7 SKIP | Passing; no FAIL/ERROR |
+| Runtime smoke | `python validation/scripts/run_example_runtime_smoke.py --json` | CI Linux artifact | 134 catalog cases | 70 DEMONSTRATED / 47 NO_RUNTIME_SIGNAL / 7 BASELINE_SIGNAL / 10 SKIP | Passing; no BUILD_ERROR/BASELINE_ERROR |
+| Release headers smoke | `python tests/validate_examples.py case01 case04 case129 case130 case131 case132 case133 --artifact-variant release-headers --json` | CI Linux artifact | 7 representative cases | 7 PASS | Informational, clean |
+| Stripped headers smoke | `python tests/validate_examples.py case01 case04 case129 case130 case131 case132 case133 --artifact-variant stripped-headers --json` | CI Linux artifact | 7 representative cases | 6 PASS / 1 FAIL | Informational; `case129` loses stripped-only signal |
+| Build/source smoke | `python tests/validate_examples.py case01 case04 case129 case130 case131 case132 case133 --artifact-variant build-source --json` | CI Linux artifact | 7 representative cases | 7 PASS | Informational, clean |
+
+The full release/stripped/build-source matrix is not a blocking CI gate; CI
+keeps those modes to the representative smoke set so catalog changes do not make
+ordinary pull requests wait on the full extended matrix.
+
+Recent build/source and ABI-mode examples:
+
+| Case | Default/debug | Release | Stripped | Build/source |
+|---|---|---|---|---|
+| `case129_struct_return_convention` | PASS (`BREAKING`) | PASS (`BREAKING`) | FAIL (`COMPATIBLE`) | PASS (`BREAKING`) |
+| `case130_exceptions_mode_flip` | PASS (`COMPATIBLE_WITH_RISK`) | PASS (`COMPATIBLE_WITH_RISK`) | PASS (`COMPATIBLE_WITH_RISK`) | PASS (`COMPATIBLE_WITH_RISK`) |
+| `case131_rtti_mode_flip` | PASS (`COMPATIBLE_WITH_RISK`) | PASS (`COMPATIBLE_WITH_RISK`) | PASS (`COMPATIBLE_WITH_RISK`) | PASS (`COMPATIBLE_WITH_RISK`) |
+| `case132_threadsafe_statics_flip` | PASS (`COMPATIBLE_WITH_RISK`) | PASS (`COMPATIBLE_WITH_RISK`) | PASS (`COMPATIBLE_WITH_RISK`) | PASS (`COMPATIBLE_WITH_RISK`) |
+| `case133_tls_model_flip` | PASS (`COMPATIBLE_WITH_RISK`) | PASS (`COMPATIBLE_WITH_RISK`) | PASS (`COMPATIBLE_WITH_RISK`) | PASS (`COMPATIBLE_WITH_RISK`) |
+
+Current mode-specific backlog: the representative stripped-headers smoke
+under-classifies `case129_struct_return_convention` as `COMPATIBLE`; default,
+release, and build/source modes classify it as `BREAKING`.
+
+Expected non-pass buckets are already represented in `ground_truth.json`:
+
+- XFAIL: `case105`, `case111`, `case64`, `case78`, `case97`
+- SKIP: `case115`, `case121`, and bundle cases `case84`, `case90`, `case91`,
+  `case92`, `case93`
 
 ---
 
@@ -174,6 +240,22 @@ Some policy-escalated source/contract breaks (notably case30, case35) may keep i
 | [124](case124_header_constant_value_changed/README.md) | Header Constant Value Changed | API Break | 🟠 API_BREAK |
 | [125](case125_class_became_final/README.md) | Class Became `final` | API Break | 🟠 API_BREAK |
 | [126](case126_sycl_device_impl_ptr/README.md) | SYCL `device` impl pointer — `shared_ptr` → raw pointer | Breaking | 🔴 BREAKING |
+| [127](case127_data_object_size_changed/README.md) | Exported Data Object Size Change | Breaking | 🔴 BREAKING (bad practice) |
+| [128](case128_symbol_binding_strengthened/README.md) | Symbol Binding Strengthened (Weak → Global) | Quality | 🟢 COMPATIBLE |
+| [129](case129_struct_return_convention/README.md) | Struct-Return Convention Change | Breaking | 🔴 BREAKING |
+| [130](case130_exceptions_mode_flip/README.md) | Exceptions Mode Flip (`-fno-exceptions`) | Risk | 🟡 COMPATIBLE_WITH_RISK |
+| [131](case131_rtti_mode_flip/README.md) | RTTI Mode Flip (`-fno-rtti`) | Risk | 🟡 COMPATIBLE_WITH_RISK |
+| [132](case132_threadsafe_statics_flip/README.md) | Thread-Safe Statics Mode Flip (`-fno-threadsafe-statics`) | Risk | 🟡 COMPATIBLE_WITH_RISK |
+| [133](case133_tls_model_flip/README.md) | TLS Model Flip (`-ftls-model`) | Risk | 🟡 COMPATIBLE_WITH_RISK |
+| [134](case134_relro_weakened/README.md) | RELRO Weakened | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
+| [135](case135_stack_canary_removed/README.md) | Stack Canary Removed | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
+| [136](case136_executable_stack_removed/README.md) | Executable Stack Removed (the fix direction) | Quality | 🟢 COMPATIBLE |
+| [137](case137_runpath_changed/README.md) | DT_RUNPATH Changed | Quality | 🟢 COMPATIBLE |
+| [138](case138_needed_added/README.md) | DT_NEEDED Added | Quality | 🟢 COMPATIBLE |
+| [139](case139_symbol_version_node_removed/README.md) | Symbol Version Node Removed | Breaking | 🔴 BREAKING |
+| [140](case140_empty_base_optimization_lost/README.md) | Empty Base Optimization Lost (base subobject moved) | Breaking | 🔴 BREAKING |
+| [141](case141_versioned_symbol_scheme/README.md) | Versioned-Symbol Scheme (library-wide rename) | Breaking | 🔴 BREAKING (bad practice) |
+| [142](case142_vtable_slot_count_binary_only/README.md) | Vtable Slot Count Changed (detected from a stripped binary) | Breaking | 🔴 BREAKING |
 <!-- END GENERATED: case-index -->
 
 ---
@@ -212,7 +294,7 @@ cmake --build build
 
 ## Related documentation
 
-- **Unified 77-case accuracy table** (all configurations, FP/FN): [`../README.md#validation-snapshot`](../README.md#validation-snapshot)
+- **Pinned 74-case cross-tool accuracy table** (all configurations, FP/FN): [`../README.md#validation-snapshot`](../README.md#validation-snapshot)
 - **Per-case accuracy matrix and methodology:** [Tool Comparison & Benchmarks](../docs/reference/tool-comparison.md)
 - **What counts as an ABI break (with code):** [ABI/API Handling & Recommendations](../docs/concepts/abi-api-handling.md)
 - **Dependency ABI leaks** (case 18 background): [`case18_dependency_leak/README.md`](case18_dependency_leak/README.md)

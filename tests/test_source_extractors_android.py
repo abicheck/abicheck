@@ -25,14 +25,14 @@ from pathlib import Path
 
 import pytest
 
-from abicheck.evidence.source_abi import SourceAbiTu
-from abicheck.evidence.source_diff import diff_source_abi
-from abicheck.evidence.source_extractors import (
+from abicheck.buildsource.source_abi import SourceAbiTu
+from abicheck.buildsource.source_diff import diff_source_abi
+from abicheck.buildsource.source_extractors import (
     AndroidHeaderAbiAdapter,
     SourceExtractionError,
     parse_android_dump,
 )
-from abicheck.evidence.source_link import link_source_abi
+from abicheck.buildsource.source_link import link_source_abi
 
 
 def _dump(record_size: int = 8) -> dict:
@@ -122,7 +122,7 @@ def test_run_dumper_requires_tool() -> None:
 
 
 def test_run_dumper_success(tmp_path: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    from abicheck.evidence.source_extractors import android as android_mod
+    from abicheck.buildsource.source_extractors import android as android_mod
 
     adapter = AndroidHeaderAbiAdapter()
     monkeypatch.setattr(adapter, "available", lambda: True)
@@ -147,7 +147,7 @@ def test_run_dumper_success(tmp_path: Path, monkeypatch) -> None:  # type: ignor
 
 
 def test_run_dumper_failure(tmp_path: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    from abicheck.evidence.source_extractors import android as android_mod
+    from abicheck.buildsource.source_extractors import android as android_mod
 
     adapter = AndroidHeaderAbiAdapter()
     monkeypatch.setattr(adapter, "available", lambda: True)
@@ -165,7 +165,7 @@ def test_run_dumper_failure(tmp_path: Path, monkeypatch) -> None:  # type: ignor
 def test_run_dumper_timeout(tmp_path: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
     import subprocess as sp
 
-    from abicheck.evidence.source_extractors import android as android_mod
+    from abicheck.buildsource.source_extractors import android as android_mod
 
     adapter = AndroidHeaderAbiAdapter(timeout=1)
     monkeypatch.setattr(adapter, "available", lambda: True)

@@ -1,9 +1,11 @@
 # ADR-028: Optional Source and Build Evidence Pack Architecture
 
 **Date:** 2026-06-09
-**Status:** Accepted — Phase 0 + Phase 5 implemented (EvidencePack model,
-manifest, coverage, snapshot reference, CLI surface, coverage reporting, and
-baseline-registry pack storage)
+**Status:** Accepted — Phase 0 + Phase 5 implemented (the pack model — renamed
+`EvidencePack`→`BuildSourcePack` in PR #356 — manifest, coverage, snapshot
+reference, CLI surface, coverage reporting, and baseline-registry pack storage).
+**Amended 2026-06-12** for the source-tree-centric input model and embedded
+single-artifact storage (see the Amendment at the end of this ADR).
 **Decision maker:** Nikolay Petrov
 
 ---
@@ -202,7 +204,7 @@ Support both post-build and integrated workflows:
 abicheck dump libfoo.so -H include/ -o libfoo.abi.json
 
 # Collect optional evidence from an existing build tree without rebuilding.
-abicheck collect-evidence \
+abicheck collect \
   --binary build/libfoo.so \
   --headers include/ \
   --build-dir build/ \
@@ -212,29 +214,29 @@ abicheck collect-evidence \
 
 # Attach an evidence pack to a snapshot.
 abicheck dump build/libfoo.so -H include/ \
-  --evidence libfoo.evidence/ \
+  --build-info libfoo.evidence/ \
   -o libfoo.abi.json
 
 # Compare artifact snapshots and evidence packs together.
 abicheck compare old.abi.json new.abi.json \
-  --old-evidence old.evidence/ \
-  --new-evidence new.evidence/ \
+  --old-build-info old.evidence/ \
+  --new-build-info new.evidence/ \
   --format sarif
 
 # One-shot CI convenience.
 abicheck compare old.so new.so \
   --headers include/ \
-  --evidence-mode build \
+  --collect-mode build \
   --build-dir build/
 ```
 
-`--evidence-mode` is the **single** compare-side knob for inline evidence
+`--collect-mode` is the **single** compare-side knob for inline evidence
 collection; its values are the CI modes defined in ADR-033 D2
 (`off | build | source-changed | source-target | graph-summary | graph-full`).
-The standalone `collect-evidence` command is the only other entry point —
-no additional `--collect-evidence` style flags are introduced.
+The standalone `collect` command is the only other entry point —
+no additional `--collect` style flags are introduced.
 
-`collect-evidence` must never run arbitrary build commands by default. It
+`collect` must never run arbitrary build commands by default. It
 may inspect existing build outputs, generated metadata, and build-system
 query interfaces. Any action that can build, execute project code, or
 invoke a compiler wrapper requires an explicit opt-in flag (the capability
@@ -401,3 +403,33 @@ source ABI replay (Phase 2, ADR-030), and the graph summary / external backends
 - [Clang JSON Compilation Database](https://clang.llvm.org/docs/JSONCompilationDatabase.html)
 - [Clang LibTooling](https://clang.llvm.org/docs/LibTooling.html)
 - Android VNDK header checker architecture (`header-abi-dumper`/`-linker`/`-diff`)
+
+
+## Amendment (2026-06-12): source-tree-centric inputs
+
+Using the feature in practice — a prebuilt package (e.g. a conda-forge `.so`)
+checked against the **source checkout at its build tag** — showed the
+build-tree-centric framing was too narrow. This amendment *refines* the decisions
+above; the authority rule (D3) is unchanged. The temporary root-level
+implementation checklist has been removed after the work landed. Per-layer
+decisions live in the relevant ADRs (029 inputs, 030 scopes/flags, 032
+build-tool config, 033 merge).
+
+- **Rename (PR #356).** `EvidencePack`→`BuildSourcePack`; the opaque `--evidence`
+  surface becomes concrete `--build-info` (L3) and `--sources` (L4/L5). The L0–L5
+  *detectability* vocabulary (`min_evidence`) is a separate concept and keeps its
+  name.
+- **D6 (CLI) refined.** Three independent inputs, resolvable from different
+  locations: binary/package (L0/L1), public headers (L2), and a **source tree**
+  (`--sources <dir>` → auto L4 + L5; the `--source-abi`/`--source-graph` action
+  flags are removed). Build metadata (`--build-info`) is optional and decoupled
+  (029).
+- **D8 (storage) refined.** Embedded single-artifact storage is the **default**:
+  `dump --build-info/--sources` folds normalized facts into the `.abi.json` so
+  `compare old.json new.json` needs no out-of-band directories. The `collect`
+  pack directory remains an optional override / raw-provenance home.
+- **New: `merge`.** `abicheck merge a.json b.json -o out.json` combines an
+  independently-produced artifact-side and source-side dump into one baseline
+  (033).
+- **`collect` demoted** to an advanced command; the common path uses
+  `dump --sources/--build-info`.

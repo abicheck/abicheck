@@ -29,6 +29,7 @@ from .binary_fingerprint import (
 )
 from .checker_policy import ChangeKind
 from .checker_types import Change
+from .demangle import demangle, demangle_batch
 from .detector_registry import registry
 from .diff_cxx_rules import (
     old_virtual_signatures,
@@ -1477,8 +1478,11 @@ def _skip_source_name(symbol: str, i: int) -> int:
     j = i
     while j < len(symbol) and symbol[j].isdigit():
         j += 1
-    end = j + int(symbol[i:j])
-    return end if end <= len(symbol) else -1
+    remaining, length = len(symbol) - j, 0
+    for c in symbol[i:j]:
+        if (length := (length * 10) + (ord(c) - ord("0"))) > remaining:
+            return -1
+    return j + length
 
 
 def _skip_substitution(symbol: str, i: int) -> int:
@@ -1566,7 +1570,6 @@ def _unqualified_name(symbol: str) -> str:
     is a distinct ABI symbol from ``foo<long>``, so they must not collapse to a
     shared leaf (that would mis-report a specialization swap as a rename).
     """
-    from .demangle import demangle
 
     return _unqualified_name_of(demangle(symbol) or symbol)
 
@@ -1732,7 +1735,6 @@ def _param_signature(symbol: str) -> str:
     namespace relocation keeps the parameters; a parameter change is a distinct
     ABI symbol, so comparing this lets the gate reject ``foo(int)`` -> ``foo(long)``.
     """
-    from .demangle import demangle
 
     return _param_signature_of(demangle(symbol) or symbol)
 
@@ -1800,7 +1802,6 @@ def _rename_name_parse(name: str) -> tuple[str | None, str, str, str]:
     same symbol on each pair (the dominant cost of rename detection on large
     ELF-only libraries). Bounded so it cannot grow without limit.
     """
-    from .demangle import demangle
 
     d = demangle(name) or name
     return (
@@ -1974,6 +1975,8 @@ def _diff_fingerprint_renames(old: AbiSnapshot, new: AbiSnapshot) -> list[Change
     # similarity predicate into the matcher so it participates in candidate
     # *selection*: a coincidental same-size symbol can neither be reported as a
     # rename nor greedily consume a partner that a plausible rename should claim.
+    # P11: one batched c++filt warm so the rename gate's demangle() hits cache, not per-symbol forks.
+    demangle_batch([n for n in (*old_fps, *new_fps) if n.startswith("_Z")])
     candidates = match_renamed_functions(old_fps, new_fps, name_filter=_plausible_rename)
     for c in candidates:
         conf_pct = int(c.confidence * 100)

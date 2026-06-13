@@ -575,6 +575,20 @@ class TestValueAbiTraitChanged:
     """Value ABI trait fingerprint changed."""
 
     def test_abi_trait_changed(self):
+        # Parameter-position triviality flip → generic value-ABI trait change.
+        old_adv = AdvancedDwarfMetadata(
+            has_dwarf=True,
+            value_abi_traits={"_Z3fooP1S": "ret:v(trivial)|p0:trivial"},
+        )
+        new_adv = AdvancedDwarfMetadata(
+            has_dwarf=True,
+            value_abi_traits={"_Z3fooP1S": "ret:v(trivial)|p0:nontrivial"},
+        )
+        r = compare(_snap(dwarf_advanced=old_adv), _snap(dwarf_advanced=new_adv))
+        assert ChangeKind.VALUE_ABI_TRAIT_CHANGED in _kinds(r)
+
+    def test_return_trait_flip_is_struct_return_convention(self):
+        # Return-position triviality flip → struct_return_convention_changed.
         old_adv = AdvancedDwarfMetadata(
             has_dwarf=True,
             value_abi_traits={"_Z3foov": "ret:v(trivial)"},
@@ -584,7 +598,7 @@ class TestValueAbiTraitChanged:
             value_abi_traits={"_Z3foov": "ret:v(nontrivial)"},
         )
         r = compare(_snap(dwarf_advanced=old_adv), _snap(dwarf_advanced=new_adv))
-        assert ChangeKind.VALUE_ABI_TRAIT_CHANGED in _kinds(r)
+        assert ChangeKind.STRUCT_RETURN_CONVENTION_CHANGED in _kinds(r)
 
 
 class TestFrameRegisterChanged:

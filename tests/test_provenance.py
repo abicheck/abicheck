@@ -239,7 +239,7 @@ def test_apply_provenance_no_set_keeps_unknown_but_fills_header():
 def test_serialization_round_trip_preserves_provenance():
     snap = apply_provenance(_snapshot(), public_headers=["include/api.h"])
     d = snapshot_to_dict(snap)
-    assert d["schema_version"] == 7
+    assert d["schema_version"] == 8
     # Enum value serialized as a plain string.
     assert d["functions"][0]["origin"] == "public_header"
     assert d["functions"][0]["source_header"] == "/build/include/api.h"

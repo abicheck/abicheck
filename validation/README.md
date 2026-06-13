@@ -12,10 +12,28 @@ libraries (not synthetic fixtures), used to drive planning and improvement.
   FP-3/FP-4 are guarded by strict-xfail regression tests in
   `tests/test_real_world_false_positives.py`.
 - `data/manifest.json` — the curated version-pair matrix (exact upstream files)
-- `data/results.json` — raw per-`.so` comparison results
+- `data/results.json` — raw per-`.so` comparison results (`run_matrix.v2`
+  records include mode, platform, source layers, evidence asymmetry, runtime,
+  expected verdict, actual verdict, normalized compatibility-axis verdicts, and
+  comparison status)
+- `data/results.meta.json` — run-level metadata emitted by `scripts/run_matrix.py`
+- `data/component_suites.json` — component-suite run metadata emitted by
+  `scripts/run_component_suites.py`
+- `data/remeasurement_summary.json` — combined summary emitted by
+  `scripts/summarize_remeasurement.py`
 - `data/false_positive_evidence.json` — false-positive exemplars
 - `suppress_internal.yaml` — internal-namespace suppression used in the report
 - `scripts/run_matrix.py` — reproducible harness
+- `scripts/run_component_suites.py` — pytest suite harness for source-family
+  component remeasurement artifacts
+- `scripts/summarize_remeasurement.py` — combines example, component-suite, and
+  real-world artifacts into the release-gate summary
+
+For `run_matrix.v2`, non-zero `abicheck compare` exit codes are not failures by
+themselves: expected `BREAKING` / `API_BREAK` outcomes legitimately exit
+non-zero. Release-gate summaries score the normalized expected vs actual verdict
+instead, with `ABICHECK_STRICTER`, `ABICHECK_WEAKER`, and missing-verdict run
+errors counted as blocking real-world remeasurement failures.
 
 Binaries are intentionally not committed; reproduce them from `data/manifest.json`
 (conda-forge, `https://conda.anaconda.org/conda-forge/linux-64/<file>`).

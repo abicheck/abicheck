@@ -436,10 +436,10 @@ class TestBaselineEvidenceCli:
         return p
 
     def _pack(self, root: Path) -> Path:
-        from abicheck.evidence import BuildEvidence, EvidencePack
-        from abicheck.evidence.build_evidence import Toolchain
+        from abicheck.buildsource import BuildEvidence, BuildSourcePack
+        from abicheck.buildsource.build_evidence import Toolchain
 
-        pack = EvidencePack.empty(root, abicheck_version="9.9", created_at="t0")
+        pack = BuildSourcePack.empty(root, abicheck_version="9.9", created_at="t0")
         pack.build_evidence = BuildEvidence(
             toolchains=[Toolchain(id="toolchain://gcc-13", compiler_id="GNU", version="13")]
         )

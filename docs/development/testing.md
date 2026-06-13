@@ -40,8 +40,24 @@ Current CI command:
 pytest tests/ -v --tb=short \
   -m "not integration and not libabigail and not abicc and not slow" \
   -n auto --dist worksteal \
-  --cov=abicheck --cov-report=term-missing --cov-report=xml --cov-fail-under=80
+  --cov=abicheck --cov-report=term-missing --cov-report=xml --cov-fail-under=95
 ```
+
+The 95% line+branch floor is enforced **only on the Linux unit-test lane** — macOS
+and Windows skip the Linux-only ELF/DWARF tests, which structurally lowers their
+coverage, so those lanes run without the fail-under gate.
+
+### Test markers
+
+| Marker | Needs | When to run |
+|--------|-------|-------------|
+| *(default)* | Python only | Always — fast, no external deps |
+| `integration` | castxml + gcc/g++ | When modifying DWARF/ELF parsing |
+| `libabigail` | abidiff + gcc/g++ | Parity testing |
+| `abicc` | abi-compliance-checker + gcc/g++ | Parity testing |
+| `msvc` | MSVC `cl.exe` (Windows) | MSVC+PDB end-to-end lane |
+| `slow` | varies | Hypothesis/perf benchmarks |
+| `golden` | golden files | Snapshot tests — run when changing output format |
 
 ### Why this gate shape
 

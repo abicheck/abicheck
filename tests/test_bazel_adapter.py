@@ -23,10 +23,10 @@ import json
 
 from click.testing import CliRunner
 
+from abicheck.buildsource.adapters import BazelAdapter
+from abicheck.buildsource.build_evidence import TargetKind
+from abicheck.buildsource.pack import BuildSourcePack
 from abicheck.cli import main
-from abicheck.evidence.adapters import BazelAdapter
-from abicheck.evidence.build_evidence import TargetKind
-from abicheck.evidence.pack import EvidencePack
 
 # A configured-target graph: a cc_library with public headers + a deps edge,
 # and a cc_binary with no attributes (exercises the minimal-rule path).
@@ -317,8 +317,8 @@ def test_bazel_live_aquery_includes_param_files(monkeypatch, tmp_path):
         captured.append(cmd)
         return _sp.CompletedProcess(cmd, 0, stdout=AQUERY if "aquery" in cmd else CQUERY, stderr="")
 
-    monkeypatch.setattr("abicheck.evidence.adapters.bazel.shutil.which", lambda _x: "/usr/bin/bazel")
-    monkeypatch.setattr("abicheck.evidence.adapters.bazel.subprocess.run", fake_run)
+    monkeypatch.setattr("abicheck.buildsource.adapters.bazel.shutil.which", lambda _x: "/usr/bin/bazel")
+    monkeypatch.setattr("abicheck.buildsource.adapters.bazel.subprocess.run", fake_run)
     BazelAdapter(workspace=tmp_path, target="//foo:foo").collect()
     aquery_cmd = next(c for c in captured if "aquery" in c)
     assert "--include_param_files" in aquery_cmd
@@ -466,8 +466,8 @@ def test_bazel_live_query_oserror_diagnostic(monkeypatch, tmp_path):
     def boom(*_a, **_k):
         raise OSError("no bazel")
 
-    monkeypatch.setattr("abicheck.evidence.adapters.bazel.shutil.which", lambda _x: "/usr/bin/bazel")
-    monkeypatch.setattr("abicheck.evidence.adapters.bazel.subprocess.run", boom)
+    monkeypatch.setattr("abicheck.buildsource.adapters.bazel.shutil.which", lambda _x: "/usr/bin/bazel")
+    monkeypatch.setattr("abicheck.buildsource.adapters.bazel.subprocess.run", boom)
     ev = BazelAdapter(workspace=tmp_path, target="//foo:foo").collect()
     assert any("failed" in d for d in ev.diagnostics)
 
@@ -546,7 +546,7 @@ def test_bazel_live_query_disabled_without_workspace():
 
 
 def test_bazel_executable_missing_diagnostic(monkeypatch, tmp_path):
-    monkeypatch.setattr("abicheck.evidence.adapters.bazel.shutil.which", lambda _x: None)
+    monkeypatch.setattr("abicheck.buildsource.adapters.bazel.shutil.which", lambda _x: None)
     ev = BazelAdapter(workspace=tmp_path, target="//foo:foo").collect()
     assert any("executable not found" in d for d in ev.diagnostics)
 
@@ -558,8 +558,8 @@ def test_bazel_live_query_invokes_subprocess(monkeypatch, tmp_path):
         out = CQUERY if "cquery" in cmd else AQUERY
         return _sp.CompletedProcess(cmd, 0, stdout=out, stderr="")
 
-    monkeypatch.setattr("abicheck.evidence.adapters.bazel.shutil.which", lambda _x: "/usr/bin/bazel")
-    monkeypatch.setattr("abicheck.evidence.adapters.bazel.subprocess.run", fake_run)
+    monkeypatch.setattr("abicheck.buildsource.adapters.bazel.shutil.which", lambda _x: "/usr/bin/bazel")
+    monkeypatch.setattr("abicheck.buildsource.adapters.bazel.subprocess.run", fake_run)
     ev = BazelAdapter(workspace=tmp_path, target="//foo:foo").collect()
     assert ev.targets and ev.compile_units
 
@@ -570,13 +570,13 @@ def test_bazel_live_query_nonzero_exit_diagnostic(monkeypatch, tmp_path):
     def fake_run(cmd, **kwargs):
         return _sp.CompletedProcess(cmd, 1, stdout="", stderr="boom")
 
-    monkeypatch.setattr("abicheck.evidence.adapters.bazel.shutil.which", lambda _x: "/usr/bin/bazel")
-    monkeypatch.setattr("abicheck.evidence.adapters.bazel.subprocess.run", fake_run)
+    monkeypatch.setattr("abicheck.buildsource.adapters.bazel.shutil.which", lambda _x: "/usr/bin/bazel")
+    monkeypatch.setattr("abicheck.buildsource.adapters.bazel.subprocess.run", fake_run)
     ev = BazelAdapter(workspace=tmp_path, target="//foo:foo").collect()
     assert any("exited 1" in d for d in ev.diagnostics)
 
 
-# ── CLI wiring (collect-evidence --bazel-cquery/--bazel-aquery) ──────────────
+# ── CLI wiring (collect --bazel-cquery/--bazel-aquery) ──────────────
 
 
 def test_collect_evidence_bazel_files(tmp_path):
@@ -587,10 +587,10 @@ def test_collect_evidence_bazel_files(tmp_path):
     out = tmp_path / "e"
     result = CliRunner().invoke(
         main,
-        ["collect-evidence", "--bazel-cquery", str(cq), "--bazel-aquery", str(aq), "-o", str(out)],
+        ["collect", "--bazel-cquery", str(cq), "--bazel-aquery", str(aq), "-o", str(out)],
     )
     assert result.exit_code == 0, result.output
-    pack = EvidencePack.load(out)
+    pack = BuildSourcePack.load(out)
     assert pack.build_evidence is not None
     assert any(t.build_system == "bazel" for t in pack.build_evidence.targets)
     assert any(e.name == "bazel" and e.status == "ok" for e in pack.manifest.extractors)
@@ -607,9 +607,9 @@ def test_collect_evidence_bazel_link_only_pack_preserved(tmp_path):
         "pathFragments": [{"id": "10", "label": "libfoo.so"}],
     }))
     out = tmp_path / "e"
-    result = CliRunner().invoke(main, ["collect-evidence", "--bazel-aquery", str(aq), "-o", str(out)])
+    result = CliRunner().invoke(main, ["collect", "--bazel-aquery", str(aq), "-o", str(out)])
     assert result.exit_code == 0, result.output
-    pack = EvidencePack.load(out)
+    pack = BuildSourcePack.load(out)
     assert pack.build_evidence is not None
     assert len(pack.build_evidence.link_units) == 1
     assert any(e.name == "bazel" and e.status == "ok" for e in pack.manifest.extractors)

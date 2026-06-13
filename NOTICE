@@ -1,26 +1,32 @@
 abicheck
-
 Copyright 2026 Nikolay Petrov
 
-This product is licensed under the Apache License, Version 2.0.
+This project is licensed under the Apache License, Version 2.0.
 See the LICENSE file for details.
 
----
+abicheck is a Python-native ABI compatibility checker for C/C++ shared
+libraries. All source code in this repository was written independently.
+Test fixtures in tests/fixtures/ are original C/C++ snippets authored for this
+project.
 
-abicheck is a Python-native ABI compatibility checker for C/C++ shared libraries.
-All source code in this repository was written independently.
+This project is not derived from abi-compliance-checker, libabigail, or
+abi-dumper. No code or tests were copied from those projects.
 
-Runtime tool dependencies (invoked as subprocesses, not distributed):
-  - castxml (Apache-2.0)  https://github.com/CastXML/CastXML
-  - GCC / Clang           system C++ compiler backend for castxml
+Runtime tool dependencies are invoked as subprocesses and are not distributed
+with this project:
 
-Python package dependencies (not distributed, installed separately):
-  - click         (BSD-3-Clause)
-  - PyYAML        (MIT)
-  - defusedxml    (PSF-2.0)
-  - pyelftools    (Public Domain)
-  - packaging     (Apache-2.0 / BSD-2-Clause)
-  - pefile        (MIT)
-  - macholib      (MIT)
+  - castxml (Apache-2.0) https://github.com/CastXML/CastXML
+  - GCC / Clang          system compiler backend for castxml
 
-For third-party attribution details see NOTICE.md.
+Python package dependencies are installed separately and are not distributed
+with this project:
+
+  - click      (BSD-3-Clause)
+  - PyYAML     (MIT)
+  - defusedxml (PSF-2.0)
+  - pyelftools (Public Domain)
+  - packaging  (Apache-2.0 / BSD-2-Clause)
+  - pefile     (MIT)
+  - macholib   (MIT)
+
+See pyproject.toml for the full dependency list.

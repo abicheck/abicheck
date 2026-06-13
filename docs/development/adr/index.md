@@ -37,4 +37,5 @@
 | [031](031-source-implementation-graph-augmentation.md) | Source and Implementation Graph Augmentation | Proposed |
 | [032](032-evidence-extractor-plugin-interface.md) | Evidence Extractor Plugin Interface and Security Model | Proposed |
 | [033](033-ci-rollout-performance-and-validation.md) | CI Rollout, Performance, Caching, and Validation Strategy | Proposed |
+| [034](034-managed-runtime-and-non-c-abi-frontends.md) | Managed-Runtime and Non-C ABI Frontends | Proposed |
 | [Gap Analysis](adr-gap-analysis.md) | Decisions Needing Formal ADRs | Reference |

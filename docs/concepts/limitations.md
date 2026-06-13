@@ -149,7 +149,7 @@ So whether a change is detectable depends on the tier you give abicheck:
 
 | Change | object/DWARF | header (castxml) | source-AST tool |
 |--------|:---:|:---:|:---:|
-| Class gains `final` ([`case121`](../examples/case125_class_became_final.md)) | ❌ invisible | ✅ `type_became_final` | ✅ |
+| Class gains `final` ([`case125`](../examples/case125_class_became_final.md)) | ❌ invisible | ✅ `type_became_final` | ✅ |
 | Method access narrowed ([`case34`](../examples/case34_access_level.md)) | ❌ invisible | ✅ `method_access_changed` | ✅ |
 | Ref-qualifier change (`& → &&`) | ❌ (DWARF has no ref-qual) | ✅ `func_ref_qual_changed` | ✅ |
 | Default argument removed/changed ([`case123`](../examples/case123_default_argument_removed.md), [`case32`](../examples/case32_param_defaults.md)) | ❌ invisible | ✅ `param_default_value_removed` / `_changed` | ✅ |
@@ -195,10 +195,10 @@ This combination gives you all three tiers at once:
 These three artifact tiers are layers **L0–L2** of the [five-source evidence
 model](evidence-and-detectability.md). Two further layers refine the result
 without ever overriding an artifact-proven break: **L3** build context
-(`-p build/`, the exact ABI-affecting flags) and **L4** source/evidence packs
-(`--old-evidence`/`--new-evidence`, recovering macro/`constexpr` and
+(`-p build/`, the exact ABI-affecting flags) and **L4** source/build/source packs
+(`--old-build-info`/`--new-build-info`, recovering macro/`constexpr` and
 uninstantiated-template facts). They are optional but raise confidence and
-localize findings — see [Source & Build Evidence Packs](evidence-pack.md).
+localize findings — see [Source & Build Data](build-source-data.md).
 
 Comparing a **stripped release binary with no headers** gives only `elf_only`
 coverage (symbol add/remove) and will silently miss every layout and

@@ -20,12 +20,30 @@ It supports ELF (Linux), PE/COFF (Windows), and Mach-O (macOS) binaries, and it'
 ## Why abicheck
 
 - **Three-layer analysis** — ELF/PE/Mach-O symbol tables + Clang AST (via castxml) + DWARF/PDB cross-check. Each layer catches things the others miss.
-- **235 detection rules** — symbol removal, signature changes, struct/class layout drift, vtable reordering, enum value shifts, qualifier changes, calling conventions, and many more. See the [Change Kind Reference](reference/change-kinds.md).
+- **246 detection rules** — symbol removal, signature changes, struct/class layout drift, vtable reordering, enum value shifts, qualifier changes, calling conventions, and many more. See the [Change Kind Reference](reference/change-kinds.md).
 - **Multiple output formats** — Markdown, JSON, SARIF (GitHub Code Scanning), HTML.
 - **Policy profiles** — `strict_abi`, `sdk_vendor`, `plugin_abi`, or custom YAML overrides.
 - **ABICC drop-in** — full flag parity for migrating from `abi-compliance-checker`.
 - **CI-ready** — clear exit codes, SARIF upload, snapshot-based baselines, first-class GitHub Action.
 - **Agent-friendly** — structured JSON, Python API, and an [MCP server](user-guide/mcp-integration.md) for AI-driven workflows.
+
+## How the documentation is organized
+
+The docs are two complementary tracks, each ordered from introductory to expert:
+
+1. **Learn the problem** — [ABI/API Handling & Recommendations](concepts/abi-api-handling.md)
+   is educational material that needs no abicheck knowledge: what ABI/API
+   compatibility is, why libraries break their consumers, and how to design
+   against it. Start with the [learning series](concepts/abi-series/00-product-contract.md)
+   (part 0 assumes nothing; part 7 is expert-level design guidance) and keep the
+   [129-case example encyclopedia](examples/index.md) as a catalog of real breaks.
+2. **Use the tool** — the [User Guide](getting-started.md) takes you from install
+   and first check through CI integration to specialised workflows;
+   [Concepts](concepts/verdicts.md) explains how abicheck works — what a verdict
+   means, what each evidence source (binary, debug info, headers, build data,
+   sources) can and cannot see, and how the pipeline is built; and
+   [Reference](reference/change-kinds.md) holds the exhaustive lookup tables
+   (change kinds, exit codes, platforms, tool comparison).
 
 ## Where to go next
 
@@ -35,6 +53,12 @@ It supports ELF (Linux), PE/COFF (Windows), and Mach-O (macOS) binaries, and it'
 2. [Choose Your Workflow](user-guide/choose-your-workflow.md) — a decision guide that maps your artifacts and CI policy to the exact command.
 3. [Verdicts](concepts/verdicts.md) — what each verdict means and how to react.
 4. [CLI Usage](user-guide/cli-usage.md) — every command, every flag.
+
+**New to the ABI/API problem itself?**
+
+- [ABI/API Handling & Recommendations](concepts/abi-api-handling.md) — the consolidated guide.
+- [Learning series, part 0](concepts/abi-series/00-product-contract.md) — compatibility as a product contract, from first principles.
+- [ABI Cheat Sheet](concepts/abi-cheat-sheet.md) — which changes are safe, risky, or breaking, at a glance.
 
 **Evaluating or comparing tools?**
 

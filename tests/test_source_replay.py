@@ -25,10 +25,10 @@ from pathlib import Path
 
 import pytest
 
-from abicheck.evidence.build_evidence import BuildEvidence, CompileUnit, Target
-from abicheck.evidence.source_abi import SourceAbiTu, SourceEntity, SourceLocation
-from abicheck.evidence.source_extractors.base import SourceExtractionError
-from abicheck.evidence.source_replay import (
+from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit, Target
+from abicheck.buildsource.source_abi import SourceAbiTu, SourceEntity, SourceLocation
+from abicheck.buildsource.source_extractors.base import SourceExtractionError
+from abicheck.buildsource.source_replay import (
     CI_MODE_TO_SCOPE,
     REPLAY_SCOPES,
     SourceAbiCache,
@@ -645,3 +645,67 @@ def test_run_source_replay_uses_cache_to_skip_reextraction(tmp_path: Path) -> No
     )
     assert second.calls == []
     assert len(surface.reachable_declarations) == 1
+
+
+# ── ADR-033 D3 PR-diff localizer ─────────────────────────────────────────────
+
+
+import pytest as _pytest  # noqa: E402
+
+
+@_pytest.mark.parametrize("paths,expected", [
+    (["CMakeLists.txt"], "build"),
+    (["cmake/foo.cmake"], "build"),
+    (["Makefile", "docs/x.md"], "build"),
+    (["BUILD.bazel"], "build"),
+    (["meson.build"], "build"),
+    (["src/foo.cpp"], "source-changed"),
+    (["include/foo.hpp"], "source-changed"),
+    (["src/foo.cpp", "CMakeLists.txt"], "source-changed"),  # source wins (superset)
+    (["README.md", "docs/x.rst"], "off"),
+    ([], "off"),
+])
+def test_recommend_collect_mode(paths, expected):
+    from abicheck.buildsource.source_replay import recommend_collect_mode
+    assert recommend_collect_mode(paths) == expected
+
+
+def test_graph_full_maps_to_full_scope():
+    """ADR-033 D2 (Codex): graph-full collects the full replay scope, not target."""
+    from abicheck.buildsource.source_replay import (
+        collection_for_ci_mode,
+        scope_for_ci_mode,
+    )
+    assert scope_for_ci_mode("graph-full") == "full"
+    scope, layers = collection_for_ci_mode("graph-full")
+    assert scope == "full"
+    assert layers == ("L3", "L4", "L5")
+
+
+def _build_many(n: int) -> BuildEvidence:
+    return BuildEvidence(
+        targets=[Target(id="target://lib", public_headers=["include/foo.h"])],
+        compile_units=[_cu(f"cu://u{i}", f"src/u{i}.cpp", "target://lib") for i in range(n)],
+    )
+
+
+def _replay_all(extractor, jobs, monkeypatch):
+    monkeypatch.setenv("ABICHECK_L4_JOBS", str(jobs))
+    return run_source_replay(
+        _build_many(12), extractor, scope="target", target_id="target://lib",
+        public_header_roots=["include/foo.h"],
+    )
+
+
+def test_parallel_l4_is_deterministic(monkeypatch):
+    """P06: parallel extraction (ABICHECK_L4_JOBS>1) yields a byte-identical
+    surface + diagnostics to the serial run, including ordering."""
+    s_serial, d_serial = _replay_all(_FakeExtractor(fail_for={"cu://u3", "cu://u9"}), 1, monkeypatch)
+    s_par, d_par = _replay_all(_FakeExtractor(fail_for={"cu://u3", "cu://u9"}), 6, monkeypatch)
+
+    assert d_serial == d_par                      # same diagnostics, same order
+    assert len(d_serial) == 2
+    assert s_serial.coverage["compile_units_parsed"] == s_par.coverage["compile_units_parsed"] == 10
+    ids_serial = [e.id for e in s_serial.reachable_declarations]
+    ids_par = [e.id for e in s_par.reachable_declarations]
+    assert ids_serial == ids_par                  # same linked surface, same order

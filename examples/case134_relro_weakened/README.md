@@ -1,0 +1,55 @@
+# Case 134: RELRO Weakened
+
+**Category:** ELF / Security | **Verdict:** COMPATIBLE_WITH_RISK
+
+## What this case is about
+
+Both libraries export identical symbols with identical signatures. The only
+difference is link hardening: v1 is linked with **full RELRO**
+(`-Wl,-z,relro -Wl,-z,now`), giving it a `PT_GNU_RELRO` program header and an
+eagerly-bound, read-only GOT. v2 drops it (`-Wl,-z,norelro`), so the
+`GNU_RELRO` segment disappears and the GOT stays writable for the process
+lifetime.
+
+RELRO (RELocation Read-Only) is a standard exploit-mitigation: after the
+dynamic linker resolves relocations, the relevant sections are remapped
+read-only so an attacker can't overwrite GOT/PLT entries to hijack control
+flow. Weakening it from *full* to *none* is a security regression even though
+the functional ABI is untouched.
+
+## What abicheck detects
+
+- **`RELRO_WEAKENED`**: `RELRO full → none`. Classified as a deployment/security
+  risk, not an ABI break — the symbols and types are identical, so prebuilt
+  consumers keep working.
+
+**Overall verdict: COMPATIBLE_WITH_RISK.**
+
+## How to reproduce
+
+```bash
+gcc -shared -fPIC -g v1.c -o libv1.so -Wl,-z,relro -Wl,-z,now
+gcc -shared -fPIC -g v2.c -o libv2.so -Wl,-z,norelro
+
+readelf -lW libv1.so | grep GNU_RELRO   # present
+readelf -lW libv2.so | grep GNU_RELRO   # absent
+
+python3 -m abicheck.cli dump libv1.so -o v1.json
+python3 -m abicheck.cli dump libv2.so -o v2.json
+python3 -m abicheck.cli compare v1.json v2.json
+# → COMPATIBLE_WITH_RISK + RELRO_WEAKENED
+```
+
+## How to fix
+
+Keep full RELRO in release builds: `-Wl,-z,relro -Wl,-z,now`. Distribution
+hardening policies (Debian, Fedora) flag partial/absent RELRO on shared
+objects.
+
+## Real Failure Demo
+
+**Severity: SECURITY / BAD PRACTICE**
+
+The library loads and runs identically; the regression is that the v2 artifact
+no longer protects its GOT after startup, widening the attack surface for any
+process that loads it. Hardened-distro lint can reject it.

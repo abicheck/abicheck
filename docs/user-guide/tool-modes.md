@@ -71,7 +71,7 @@ See [Architecture](../concepts/architecture.md) for the full per-layer breakdown
 
 abicheck is a superset of the external modes for most categories — see the
 [quick-reference table](#tool-comparison-quick-reference) below and the
-[183-kind Change Kind Reference](../reference/change-kinds.md). Highlights the
+[246-kind Change Kind Reference](../reference/change-kinds.md). Highlights the
 single external tools miss:
 
 - ✅ `noexcept`, `const`/`static` qualifier, and access-level changes (header AST)
@@ -108,7 +108,7 @@ exactly which sources a binary affords and which mode abicheck will use.
 | **L1 — + debug info** | a `-g` build (DWARF/PDB), no `-H` | *DWARF-only mode* | L0 **plus** type layout: sizes, field offsets, enum values, vtable slots, calling convention, packing, recorded build flags | ~24 / 30 | The accurate no-headers path: `abicheck compare v1.so v2.so` on debug builds. Catches struct/enum/vtable/calling-convention breaks. Add `--dwarf-only` to force it even when headers exist. |
 | **L2 — + public headers** | `-g` build **and** `-H include/` (needs castxml) | *Full (AST + DWARF)* | L1 **plus** source API: signatures, overloads, access, `final`/`explicit`/`noexcept`, templates, public/internal scoping | 30 / 30 | The recommended default: `abicheck compare … -H include/`. Catches source-only API breaks **and** scopes out internal types to avoid false positives. |
 | **L3 — + build data** | L2 **plus** `-p build/` (a `compile_commands.json`) | *Full + build context* | L2 **plus** the exact ABI-relevant flags/toolchain the lib was built with | 30 / 30 + build | `abicheck dump … -H include/ -p build/`. Confirms headers were parsed with the real build flags (suppresses `header_parse_context_drift`) and flags toolchain/flag drift on stripped binaries. |
-| **L4 — + sources** | an EvidencePack (`--evidence pack/`) | *Full + source replay* | L3 **plus** macro/`constexpr` values, default-argument values, inline/template bodies | 30 / 30 + source | Catch the source-only facts no artifact carries. Opt-in, post-build; see [Evidence Packs](../concepts/evidence-pack.md). |
+| **L4 — + sources** | a build/source pack (`--build-info pack/`) | *Full + source replay* | L3 **plus** macro/`constexpr` values, default-argument values, inline/template bodies | 30 / 30 + source | Catch the source-only facts no artifact carries. Opt-in, post-build; see [Build & Source Packs](../concepts/build-source-data.md). |
 
 **Reading the modes.** Going down the table only ever *adds* — each mode is a
 superset of the one above, both finding more breaks and (from L2) removing false

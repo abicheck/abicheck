@@ -60,6 +60,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import Enum
+from typing import cast
 
 from .checker_policy import (
     ADDITION_KINDS,
@@ -181,8 +182,67 @@ def classify_change_object(
     severity-aware exit code and category counts, not just the verdict. Falls
     back to kind-based ``classify_change`` for plain stubs with no override.
     """
+    return classify_effective_change(change, policy=policy, kind_sets=kind_sets)
+
+
+_VERDICT_ORDER = [
+    Verdict.NO_CHANGE,
+    Verdict.COMPATIBLE,
+    Verdict.COMPATIBLE_WITH_RISK,
+    Verdict.API_BREAK,
+    Verdict.BREAKING,
+]
+
+
+def _has_frozen_namespace_violation(change: HasKind) -> bool:
+    """Return True only for a real frozen-namespace tag string."""
+    fnv = getattr(change, "frozen_namespace_violation", None)
+    return isinstance(fnv, str) and bool(fnv)
+
+
+def effective_verdict_for_change(
+    change: HasKind,
+    *,
+    policy: str | None = None,
+    kind_sets: KindSets | None = None,
+    policy_file: object | None = None,
+) -> Verdict:
+    """Return the effective verdict for one change.
+
+    Policy-file overrides usually move an entire ``ChangeKind`` into another
+    verdict bucket. Frozen-namespace violations are deliberately per-change: if
+    an override would downgrade a tagged finding below the base-policy verdict,
+    the override is ignored for that one finding.
+    """
+    kind = change.kind
+    overrides = getattr(policy_file, "overrides", None) if policy_file is not None else None
+    if overrides and kind in overrides:
+        base_policy = getattr(policy_file, "base_policy", policy)
+        base_sets = _resolve_kind_sets(base_policy, None)
+        base_v = effective_category(change, *base_sets)
+        override_v = cast(Verdict, overrides[kind])
+        if (
+            _has_frozen_namespace_violation(change)
+            and _VERDICT_ORDER.index(override_v) < _VERDICT_ORDER.index(base_v)
+        ):
+            return base_v
+        return override_v
     sets = _resolve_kind_sets(policy, kind_sets)
-    verdict = effective_category(change, *sets)
+    return effective_category(change, *sets)
+
+
+def classify_effective_change(
+    change: HasKind,
+    *,
+    policy: str | None = None,
+    kind_sets: KindSets | None = None,
+    policy_file: object | None = None,
+) -> IssueCategory:
+    """Classify one change, preserving per-finding verdict guards."""
+    sets = _resolve_kind_sets(policy, kind_sets)
+    verdict = effective_verdict_for_change(
+        change, policy=policy, kind_sets=kind_sets, policy_file=policy_file,
+    )
     if verdict == Verdict.BREAKING:
         return IssueCategory.ABI_BREAKING
     if verdict in (Verdict.API_BREAK, Verdict.COMPATIBLE_WITH_RISK):
@@ -391,6 +451,7 @@ def compute_exit_code(
     *,
     policy: str | None = None,
     kind_sets: KindSets | None = None,
+    policy_file: object | None = None,
 ) -> int:
     """Compute the process exit code based on severity configuration.
 
@@ -399,13 +460,17 @@ def compute_exit_code(
     - severity configured as ``error``.
 
     *kind_sets* (from ``DiffResult._effective_kind_sets()``) includes
-    PolicyFile overrides and takes precedence over *policy*.
+    PolicyFile overrides and takes precedence over *policy*. When
+    *policy_file* is provided, frozen-namespace downgrade guards are applied
+    per change before classifying severity.
 
     Returns 0 if no category at error level has findings.
     """
     worst = 0
     for change in changes:
-        cat = classify_change_object(change, policy=policy, kind_sets=kind_sets)
+        cat = classify_effective_change(
+            change, policy=policy, kind_sets=kind_sets, policy_file=policy_file,
+        )
         if config.level_for(cat) == SeverityLevel.ERROR:
             code = _CATEGORY_EXIT_CODES[cat]
             if code > worst:
@@ -434,6 +499,7 @@ def categorize_changes(
     *,
     policy: str | None = None,
     kind_sets: KindSets | None = None,
+    policy_file: object | None = None,
 ) -> CategorizedChanges:
     """Partition changes into the four issue categories."""
     abi: list[HasKind] = []
@@ -442,7 +508,9 @@ def categorize_changes(
     adds: list[HasKind] = []
 
     for c in changes:
-        cat = classify_change_object(c, policy=policy, kind_sets=kind_sets)
+        cat = classify_effective_change(
+            c, policy=policy, kind_sets=kind_sets, policy_file=policy_file,
+        )
         if cat == IssueCategory.ABI_BREAKING:
             abi.append(c)
         elif cat == IssueCategory.POTENTIAL_BREAKING:

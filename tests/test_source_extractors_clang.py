@@ -25,17 +25,17 @@ from pathlib import Path
 
 import pytest
 
-from abicheck.evidence.build_evidence import CompileUnit
-from abicheck.evidence.source_abi import SourceAbiTu
-from abicheck.evidence.source_diff import diff_source_abi
-from abicheck.evidence.source_extractors import (
+from abicheck.buildsource.build_evidence import CompileUnit
+from abicheck.buildsource.source_abi import SourceAbiTu
+from abicheck.buildsource.source_diff import diff_source_abi
+from abicheck.buildsource.source_extractors import (
     ClangSourceExtractor,
     SourceExtractionError,
     build_clang_command,
     build_clang_macro_command,
     source_abi_from_clang_ast,
 )
-from abicheck.evidence.source_link import link_source_abi
+from abicheck.buildsource.source_link import link_source_abi
 
 
 def _cu(**kw: object) -> CompileUnit:
@@ -212,7 +212,7 @@ def test_ast_mapping_extracts_typedef_underlying_type() -> None:
 
 
 def test_typedef_underlying_fallback_and_missing() -> None:
-    from abicheck.evidence.source_extractors.clang import _typedef_underlying
+    from abicheck.buildsource.source_extractors.clang import _typedef_underlying
 
     # qualType wins; desugaredQualType is the fallback; a non-dict/absent type
     # yields "" so _emit_typedef skips the entity.
@@ -740,7 +740,7 @@ def test_inline_defined_constructor_default_change_not_masked() -> None:
 
 
 def test_macros_from_preprocessor_scopes_to_public_headers() -> None:
-    from abicheck.evidence.source_extractors import macros_from_preprocessor
+    from abicheck.buildsource.source_extractors import macros_from_preprocessor
 
     text = (
         '# 1 "src/foo.cpp"\n'
@@ -769,7 +769,7 @@ def test_macros_from_preprocessor_scopes_to_public_headers() -> None:
 def test_macros_suppress_include_guards() -> None:
     # ADR-030 follow-up #2: an include guard (empty-valued, filename-derived) is
     # filtered out, while a real empty feature flag and a valued macro survive.
-    from abicheck.evidence.source_extractors import macros_from_preprocessor
+    from abicheck.buildsource.source_extractors import macros_from_preprocessor
 
     text = (
         '# 1 "include/foo.h" 1\n'
@@ -789,7 +789,7 @@ def test_macros_suppress_include_guards() -> None:
 
 
 def test_macros_suppress_hpp_include_guard() -> None:
-    from abicheck.evidence.source_extractors import macros_from_preprocessor
+    from abicheck.buildsource.source_extractors import macros_from_preprocessor
 
     text = '# 1 "include/bar.hpp" 1\n#define BAR_HPP\n#define BAR_VALUE 3\n'
     macros, _ = macros_from_preprocessor(text, ["include/bar.hpp"])
@@ -801,7 +801,7 @@ def test_macros_track_private_macro_only_header_as_cache_dep() -> None:
     # A private header that defines a macro gating an #if in a public header is
     # seen only by the preprocessor (no public macro entity, no AST node), but it
     # must still be a cache dependency so editing it invalidates the dump.
-    from abicheck.evidence.source_extractors import macros_from_preprocessor
+    from abicheck.buildsource.source_extractors import macros_from_preprocessor
 
     text = (
         '# 1 "include/api.h" 1\n'
@@ -821,7 +821,7 @@ def test_macros_track_private_macro_only_header_as_cache_dep() -> None:
 def test_macros_unfold_line_continuations() -> None:
     # CodeRabbit: a backslash-continued macro must be parsed whole, so an edit
     # below the first physical line is still visible to the value comparison.
-    from abicheck.evidence.source_extractors import macros_from_preprocessor
+    from abicheck.buildsource.source_extractors import macros_from_preprocessor
 
     text = (
         '# 1 "include/foo.h" 1\n'
@@ -837,7 +837,7 @@ def test_macros_unfold_line_continuations() -> None:
 
 
 def test_macros_honor_undef() -> None:
-    from abicheck.evidence.source_extractors import macros_from_preprocessor
+    from abicheck.buildsource.source_extractors import macros_from_preprocessor
 
     text = (
         '# 1 "include/foo.h" 1\n'
@@ -851,8 +851,8 @@ def test_macros_honor_undef() -> None:
 
 
 def test_public_macro_value_change_detected_end_to_end() -> None:
-    from abicheck.evidence.source_abi import SourceAbiTu
-    from abicheck.evidence.source_extractors import macros_from_preprocessor
+    from abicheck.buildsource.source_abi import SourceAbiTu
+    from abicheck.buildsource.source_extractors import macros_from_preprocessor
 
     def surface(value: str):  # type: ignore[no-untyped-def]
         macros, _ = macros_from_preprocessor(
@@ -928,7 +928,7 @@ class _Result:
 
 
 def _patch_run(monkeypatch, handler) -> ClangSourceExtractor:  # type: ignore[no-untyped-def]
-    from abicheck.evidence.source_extractors import clang as clang_mod
+    from abicheck.buildsource.source_extractors import clang as clang_mod
 
     extractor = ClangSourceExtractor()
     monkeypatch.setattr(extractor, "available", lambda: True)
@@ -974,12 +974,20 @@ def test_extract_records_recovered_ast_exit(monkeypatch) -> None:  # type: ignor
 
     def handler(cmd, **kw):  # type: ignore[no-untyped-def]
         if "-ast-dump=json" in cmd:
-            return _Result(1, json.dumps(_ast()), "warning: recovered")
+            return _Result(
+                1,
+                json.dumps(_ast()),
+                "fatal error: 'llvm/IR/Attributes.inc' file not found",
+            )
         return _Result(0, "")
 
     extractor = _patch_run(monkeypatch, handler)
     tu = extractor.extract(_cu(), public_header_roots=["include/foo.h"])
     assert any("recovered" in d for d in tu.diagnostics)
+    assert any(
+        "missing generated header 'llvm/IR/Attributes.inc'" in d
+        for d in tu.diagnostics
+    )
 
 
 def test_extract_timeout_raises(monkeypatch) -> None:  # type: ignore[no-untyped-def]
@@ -1036,7 +1044,7 @@ def test_extract_parses_fake_clang_json(tmp_path: Path, monkeypatch) -> None:  #
     # Mock clang so the extract() success path runs without the tool installed.
     import json
 
-    from abicheck.evidence.source_extractors import clang as clang_mod
+    from abicheck.buildsource.source_extractors import clang as clang_mod
 
     extractor = ClangSourceExtractor()
     monkeypatch.setattr(extractor, "available", lambda: True)
@@ -1059,7 +1067,7 @@ def test_extract_parses_fake_clang_json(tmp_path: Path, monkeypatch) -> None:  #
 
 
 def test_extract_raises_on_empty_clang_output(monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    from abicheck.evidence.source_extractors import clang as clang_mod
+    from abicheck.buildsource.source_extractors import clang as clang_mod
 
     extractor = ClangSourceExtractor()
     monkeypatch.setattr(extractor, "available", lambda: True)

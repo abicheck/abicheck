@@ -53,7 +53,7 @@ See ADR-020b's sibling discussion of evidence tiers; these are L0 signals.
 
 from __future__ import annotations
 
-from .checker_policy import ChangeKind
+from .checker_policy import ChangeKind, Confidence
 from .checker_types import Change
 from .demangle import demangle
 from .detector_registry import registry
@@ -220,6 +220,9 @@ def _diff_elf_layout(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                 ),
                 old_value=str(o_size),
                 new_value=str(n_size),
+                # Derived from symbol size alone (no DWARF/headers): the slot
+                # count is inferred, not authoritative, so label it MEDIUM.
+                confidence=Confidence.MEDIUM,
             )
         )
 
@@ -246,6 +249,8 @@ def _diff_elf_layout(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                 ),
                 old_value=str(o_size),
                 new_value=str(n_size),
+                # Inheritance shape inferred from _ZTI symbol size alone.
+                confidence=Confidence.MEDIUM,
             )
         )
 

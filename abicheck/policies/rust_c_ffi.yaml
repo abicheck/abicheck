@@ -1,0 +1,36 @@
+# abicheck built-in "rust_c_ffi" policy — Rust libraries whose *stable* surface
+# is a deliberately designed C FFI boundary (`extern "C"` + `#[repr(C)]`,
+# exported under fixed names via `#[no_mangle]` / `#[export_name]`).
+#
+# Rust offers NO stable native ABI: `repr(Rust)` type layout (size, alignment,
+# field offsets) may change on every compilation, and symbol mangling is
+# compiler-controlled. Only the C-FFI surface is a meaningful binary contract,
+# so this profile keeps the C-relevant checks strict (struct layout, type size,
+# symbol presence) while demoting C++-object-model findings to RISK: those kinds
+# cannot occur in a genuine `repr(C)` + `extern "C"` surface, so when they DO
+# appear they are non-FFI internals leaking and warrant review, not a hard fail.
+#
+# Turnkey usage:
+#
+#   abicheck compare libfoo.so libfoo.new.so --policy-file rust_c_ffi
+#
+# Kept strict (NOT overridden) because they are real for a repr(C)/extern "C"
+# surface: func_removed, func_params_changed, func_return_changed,
+# type_size_changed, struct_field_offset_changed, var_removed, var_type_changed.
+base_policy: strict_abi
+
+overrides:
+  # C++ object-model kinds — impossible on a pure C-FFI surface; if emitted they
+  # reflect non-FFI internals and should be reviewed, not gate the build.
+  func_virtual_added: risk
+  func_virtual_removed: risk
+  func_pure_virtual_added: risk
+  virtual_method_added: risk
+  rtti_inheritance_changed: risk
+  base_class_offset_changed: risk
+  # C++ mangling / tagging artifacts — not part of a #[no_mangle] C contract.
+  abi_tag_changed: risk
+  char8t_migration: risk
+  func_noexcept_removed: risk
+  symbol_renamed_batch: risk
+  func_likely_renamed: risk

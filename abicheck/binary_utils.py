@@ -20,6 +20,7 @@ and mcp_server.py.
 """
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 # Mach-O magic bytes — covers all variants:
@@ -38,6 +39,8 @@ _MACHO_MAGICS: frozenset[bytes] = frozenset({
 # analyses (see detect_archive / G8). Both magics are 8 bytes.
 _ARCHIVE_MAGICS: frozenset[bytes] = frozenset({b"!<arch>\n", b"!<thin>\n"})
 _ARCHIVE_MAGIC_LEN: int = 8
+_LD_SCRIPT_RE = re.compile(r"\b(?:INPUT|GROUP|OUTPUT_FORMAT)\s*\(")
+_LD_KEYWORDS = frozenset({"AS_NEEDED", "INPUT", "GROUP", "OUTPUT_FORMAT"})
 
 
 def classify_magic(magic: bytes) -> str | None:
@@ -66,6 +69,45 @@ def detect_binary_format(path: str | Path) -> str | None:
     except OSError:
         return None
     return classify_magic(magic)
+
+
+def resolve_linker_script(path: Path) -> tuple[Path | None, bool]:
+    """Resolve a GNU ld INPUT()/GROUP() script to a referenced library.
+
+    Returns ``(target, is_linker_script)``. ``target`` is ``None`` when the file
+    is not a linker script, or when no referenced library can be found.
+    """
+    try:
+        with open(path, "rb") as f:
+            raw = f.read(8192)
+        text = raw.decode("utf-8", errors="replace")
+    except OSError:
+        return None, False
+    text = re.sub(r"/\*.*?\*/", " ", text, flags=re.DOTALL)
+    if not _LD_SCRIPT_RE.search(text):
+        return None, False
+    for group in re.findall(r"(?:INPUT|GROUP)\s*\(([^)]*)\)", text):
+        for tok in group.replace(",", " ").split():
+            if tok in _LD_KEYWORDS or tok.startswith(("-l", "-L", "(")):
+                continue
+            if ".so" not in tok and not tok.endswith(".a"):
+                continue
+            candidate = Path(tok)
+            for cand in (candidate, path.parent / tok, path.parent / candidate.name):
+                if cand.is_file():
+                    return cand, True
+    return None, True
+
+
+def normalize_binary_input(path: Path) -> tuple[Path, str | None]:
+    """Detect binary format, following resolvable GNU ld linker scripts."""
+    fmt = detect_binary_format(path)
+    if fmt is not None:
+        return path, fmt
+    target, is_ld = resolve_linker_script(path)
+    if is_ld and target is not None:
+        return target, detect_binary_format(target)
+    return path, fmt
 
 
 def detect_archive(path: str | Path) -> bool:

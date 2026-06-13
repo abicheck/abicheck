@@ -48,8 +48,13 @@ from .model import (
 # v4: provenance metadata (git_commit, git_tag, created_at, build_id)
 # v5: build_mode capture (compiler/stdlib/std normalization)
 # v6: declaration provenance (source_header + origin on functions/variables/types/enums; ADR-015)
-# v7: optional evidence_pack reference (ADR-028; lightweight ref to an out-of-band EvidencePack)
-SCHEMA_VERSION: int = 7
+# v7: optional evidence_pack reference (ADR-028; lightweight ref to an out-of-band pack)
+# v8: pack ref key renamed evidence_pack→build_source_pack + optional inline-embedded
+#     build_source payload (single-artifact UX, PR #356). The bump is deliberate:
+#     a v7-only reader knows only the old evidence_pack key, so without it a v8
+#     snapshot's renamed provenance would be silently dropped — bumping makes such
+#     readers reject the format (forward-version error) instead of misreading it.
+SCHEMA_VERSION: int = 8
 
 
 def _sets_to_lists(obj: Any) -> Any:
@@ -122,6 +127,15 @@ def snapshot_to_dict(snap: AbiSnapshot) -> dict[str, Any]:
             v = bm.get(k)
             if v is not None and not isinstance(v, str):
                 bm[k] = v.value if hasattr(v, "value") else str(v)
+
+    # The inline embedded BuildSourcePack carries Path/enum/set-bearing nested
+    # models that asdict() cannot faithfully serialize; replace the raw asdict
+    # output with the pack's canonical inline form (single-artifact UX), or drop
+    # the key entirely when nothing was embedded.
+    if snap.build_source is not None:
+        converted["build_source"] = snap.build_source.to_embedded_dict()
+    else:
+        converted.pop("build_source", None)
 
     # Embed schema version for forward-compatibility.
     # Placed at top level so loaders can inspect it without parsing the full snapshot.
@@ -241,6 +255,7 @@ def _macho_from_dict(e: dict[str, Any]) -> Any:
     ]
     return MachoMetadata(
         cpu_type=e.get("cpu_type", ""),
+        cpu_types=e.get("cpu_types", []),
         filetype=e.get("filetype", ""),
         flags=e.get("flags", 0),
         install_name=e.get("install_name", ""),
@@ -306,9 +321,12 @@ def _dwarf_advanced_from_dict(d: dict[str, Any]) -> Any:
     )
     return AdvancedDwarfMetadata(
         has_dwarf=d.get("has_dwarf", False),
+        target_arch=d.get("target_arch", ""),
         toolchain=toolchain,
         calling_conventions=d.get("calling_conventions", {}),
         value_abi_traits=d.get("value_abi_traits", {}),
+        return_value_sizes=d.get("return_value_sizes", {}),
+        return_memory_classified=set(d.get("return_memory_classified", [])),
         packed_structs=set(d.get("packed_structs", [])),
         all_struct_names=set(d.get("all_struct_names", [])),
         frame_registers=d.get("frame_registers", {}),
@@ -495,14 +513,28 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
     # leave as None so build-mode-aware detectors fall back to "unknown".
     build_mode = _build_mode_from_dict(d.get("build_mode"))
 
-    # Evidence-pack reference (schema v7, ADR-028). Optional: a missing key on
-    # an older snapshot loads as None. A malformed (non-dict) value is ignored
+    # Build/source pack reference (schema v7, ADR-028). Optional: a missing key
+    # on an older snapshot loads as None. A malformed (non-dict) value is ignored
     # rather than aborting the load, consistent with the rest of this loader.
-    ep_raw = d.get("evidence_pack")
-    evidence_pack = None
+    # Back-compat: snapshots written before the evidence→buildsource rename store
+    # the ref under the legacy ``evidence_pack`` key. The ref shape is unchanged,
+    # so we fall back to it to keep existing ``.abi.json`` baselines readable.
+    ep_raw = d.get("build_source_pack")
+    if ep_raw is None:
+        ep_raw = d.get("evidence_pack")
+    build_source_pack = None
     if isinstance(ep_raw, dict):
-        from .evidence.model import EvidencePackRef
-        evidence_pack = EvidencePackRef.from_dict(ep_raw)
+        from .buildsource.model import BuildSourceRef
+        build_source_pack = BuildSourceRef.from_dict(ep_raw)
+
+    # Inline embedded build-info/source facts (single-artifact UX). Optional and
+    # additive: a missing or malformed value loads as None and the compare falls
+    # back to out-of-band --old/--new flags (or skips evidence entirely).
+    bs_raw = d.get("build_source")
+    build_source = None
+    if isinstance(bs_raw, dict):
+        from .buildsource.pack import BuildSourcePack
+        build_source = BuildSourcePack.from_embedded_dict(bs_raw)
 
     # from_headers provenance (added alongside the HEADER_AWARE tier-honesty
     # fix). An absent key means a legacy snapshot dumped before the field
@@ -548,7 +580,9 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
         # Build-mode capture (v5)
         build_mode=build_mode,
         # Evidence-pack reference (v7)
-        evidence_pack=evidence_pack,
+        build_source_pack=build_source_pack,
+        # Inline embedded build-info/source facts (single-artifact UX)
+        build_source=build_source,
         # Build-context parse provenance (v7, ADR-029) — absent on older
         # snapshots loads as False.
         parsed_with_build_context=bool(d.get("parsed_with_build_context", False)),

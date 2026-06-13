@@ -5,7 +5,7 @@
 File API, Ninja, Bazel `cquery`/`aquery`, and Make dry-run adapters;
 compiler-recorded metadata extractor; build-evidence diff and the six D9
 change kinds). Only Phase 7 (CI rollout + baseline registry) remains, tracked
-under ADR-033.
+under ADR-033. **Amended 2026-06-12** (ADR-028 source-tree model) — see Amendment below.
 **Decision maker:** Nikolay Petrov
 
 ---
@@ -122,8 +122,8 @@ Core entities:
 Reuse and extend the ADR-020a ingestion path (`build_context.py`):
 
 ```bash
-abicheck collect-evidence --compile-db build/compile_commands.json --output evidence/
-abicheck collect-evidence -p build/ --headers include/ --output evidence/
+abicheck collect --compile-db build/compile_commands.json --output evidence/
+abicheck collect -p build/ --headers include/ --output evidence/
 ```
 
 Implementation rules:
@@ -145,7 +145,7 @@ Do not parse `CMakeLists.txt` manually. The CMake adapter queries the CMake
 File API reply directory and optionally reads `compile_commands.json`:
 
 ```bash
-abicheck collect-evidence \
+abicheck collect \
   --build-dir build \
   --cmake-file-api \
   --compile-db build/compile_commands.json \
@@ -278,8 +278,8 @@ fallback tier:
    sensitive.
 
 ```bash
-abicheck collect-evidence --compile-db compile_commands.json --build-system make
-abicheck collect-evidence --make-dry-run "make -n libfoo.so" --confidence reduced
+abicheck collect --compile-db compile_commands.json --build-system make
+abicheck collect --make-dry-run "make -n libfoo.so" --confidence reduced
 ```
 
 ### D8. Capture compiler-recorded metadata when available
@@ -420,3 +420,14 @@ D1).
 - [Ninja manual](https://ninja-build.org/manual.html): `-t compdb`, `-t compdb-targets`, `-t graph`, `-t missingdeps`
 - Bazel `cquery`, `aquery`, aspects, and Build Event Protocol
 - GCC and Clang command-line recording options
+
+
+## Amendment (2026-06-12): inputs decoupled from the build tree (see ADR-028)
+
+D3/D10 generalized: build metadata is **optional and decoupled** from the source
+tree. `--build-info <path>` accepts a compile DB, a build directory, or a
+pre-captured pack from *any* location; when omitted, abicheck auto-discovers a
+`compile_commands.json` inside the `--sources` tree, else skips L3 and reports it
+`not_collected`. A prebuilt package with no build tree still gets L4/L5 from its
+source checkout. Driving the build system to *emit* flags/exports is the ADR-032
+D5 `query_build_system` action (read-by-default, query-opt-in, never a full build).

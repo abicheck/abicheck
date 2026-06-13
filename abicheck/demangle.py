@@ -40,6 +40,14 @@ def demangle(symbol: str) -> str | None:
     """
     if not symbol or not symbol.startswith("_Z"):
         return None
+    # Reuse a warmed batch cache so a single demangle never re-forks `c++filt`
+    # for a name a prior demangle_batch() already resolved (or proved
+    # non-demangleable). On large ELF-only C++ libs the rename gate warms this
+    # once, turning ~N per-name subprocesses into one batched call (field-eval P11).
+    if symbol in _BATCH_CACHE_OK:
+        return _BATCH_CACHE_OK[symbol]
+    if symbol in _BATCH_CACHE_FAIL:
+        return None
     try:
         import cxxfilt
         return str(cxxfilt.demangle(symbol))

@@ -1453,7 +1453,7 @@ class TestCompareReleaseBundleE2E:
     parsing path.
     """
 
-    def test_compare_release_emits_bundle_findings(self, tmp_path: Path) -> None:
+    def test_compare_release_emits_bundle_findings_by_default(self, tmp_path: Path) -> None:
         # libcore drops core_mul between old and new; libalgo still
         # imports it. Bundle layer must catch this; the CLI must surface
         # the bundle_verdict and bundle_findings in JSON output.
@@ -1518,15 +1518,7 @@ class TestCompareReleaseBundleE2E:
 
         result = CliRunner().invoke(
             main,
-            [
-                "compare-release",
-                str(old),
-                str(new),
-                "--format",
-                "json",
-                "--bundle-cohort",
-                "lib",
-            ],
+            ["compare-release", str(old), str(new), "--format", "json"],
         )
         # Bundle BREAKING → exit 4.
         assert result.exit_code == 4, result.output
@@ -1543,38 +1535,9 @@ class TestCompareReleaseBundleE2E:
         assert intra["consumer_library"] == "libalgo.so"
         assert intra["symbol"] == "core_mul"
 
-    def test_compare_release_default_skips_bundle_analysis(
-        self, tmp_path: Path
-    ) -> None:
-        """Plain compare-release should not emit bundle findings by default."""
-        import json as _json
-
-        from click.testing import CliRunner
-
-        from abicheck.cli import main
-
-        old = tmp_path / "old"
-        new = tmp_path / "new"
-        old.mkdir()
-        new.mkdir()
-        _build_tiny_so(
-            old, "libfoo.so", "int foo(void){return 1;}\nint bar(void){return 2;}\n"
-        )
-        _build_tiny_so(new, "libfoo.so", "int foo(void){return 1;}\n")
-
-        result = CliRunner().invoke(
-            main,
-            ["compare-release", str(old), str(new), "--format", "json"],
-        )
-        assert result.exit_code == 4, result.output
-        data = _json.loads(result.stdout)
-        assert data["libraries"][0]["verdict"] == "BREAKING"
-        assert "bundle_verdict" not in data
-        assert "bundle_findings" not in data
-
     def test_compare_release_no_bundle_analysis_opts_out(self, tmp_path: Path) -> None:
-        # Same broken bundle as above; --no-bundle-analysis must
-        # suppress bundle findings and report only per-library results.
+        # --no-bundle-analysis must suppress bundle output and report only
+        # per-library results.
         import json as _json
 
         from click.testing import CliRunner

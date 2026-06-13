@@ -569,10 +569,10 @@ class TestLoadSnapshotFromString:
 
 def _make_pack(root: Path) -> object:
     """Build and write a minimal evidence pack with one build-evidence file."""
-    from abicheck.evidence import BuildEvidence, EvidencePack
-    from abicheck.evidence.build_evidence import Toolchain
+    from abicheck.buildsource import BuildEvidence, BuildSourcePack
+    from abicheck.buildsource.build_evidence import Toolchain
 
-    pack = EvidencePack.empty(root, abicheck_version="9.9", created_at="t0")
+    pack = BuildSourcePack.empty(root, abicheck_version="9.9", created_at="t0")
     pack.build_evidence = BuildEvidence(
         toolchains=[Toolchain(id="toolchain://gcc-13", compiler_id="GNU", version="13")]
     )
@@ -580,7 +580,7 @@ def _make_pack(root: Path) -> object:
     return pack
 
 
-class TestEvidencePackStorage:
+class TestBuildSourcePackStorage:
     def test_push_pull_evidence_roundtrip(
         self, registry: FilesystemRegistry, sample_snapshot: AbiSnapshot, tmp_path: Path
     ) -> None:
@@ -605,6 +605,28 @@ class TestEvidencePackStorage:
 
         _, meta = registry.pull(key)  # type: ignore[misc]
         assert meta.evidence_content_hash == pack.content_hash()
+
+    def test_push_records_evidence_coverage_in_metadata(
+        self, registry: FilesystemRegistry, sample_snapshot: AbiSnapshot, tmp_path: Path
+    ) -> None:
+        """ADR-033 D4: the metadata carries a coverage block for the stored pack."""
+        pack = _make_pack(tmp_path / "src.evidence")  # build_evidence only (L3)
+        key = BaselineKey(library="libfoo", version="1.0.0", platform="linux-x86_64")
+        registry.push(key, sample_snapshot, evidence=pack)
+
+        _, meta = registry.pull(key)  # type: ignore[misc]
+        assert meta.evidence_coverage is not None
+        assert meta.evidence_coverage["build_context"] is True
+        assert meta.evidence_coverage["source_abi"] == "not_collected"
+        assert meta.evidence_coverage["graph"] == "not_collected"
+
+    def test_push_without_evidence_has_no_coverage(
+        self, registry: FilesystemRegistry, sample_snapshot: AbiSnapshot
+    ) -> None:
+        key = BaselineKey(library="libfoo", version="1.0.0", platform="linux-x86_64")
+        registry.push(key, sample_snapshot)
+        _, meta = registry.pull(key)  # type: ignore[misc]
+        assert meta.evidence_coverage is None
 
     def test_pull_evidence_none_when_absent(
         self, registry: FilesystemRegistry, sample_snapshot: AbiSnapshot
@@ -649,9 +671,9 @@ class TestEvidencePackStorage:
     def test_push_unwritten_pack_raises(
         self, registry: FilesystemRegistry, sample_snapshot: AbiSnapshot, tmp_path: Path
     ) -> None:
-        from abicheck.evidence import EvidencePack
+        from abicheck.buildsource import BuildSourcePack
 
-        pack = EvidencePack.empty(tmp_path / "unwritten.evidence")  # never .write()
+        pack = BuildSourcePack.empty(tmp_path / "unwritten.evidence")  # never .write()
         key = BaselineKey(library="libfoo", version="1.0.0", platform="linux-x86_64")
         with pytest.raises(ValidationError, match="no manifest.json"):
             registry.push(key, sample_snapshot, evidence=pack)
@@ -755,13 +777,13 @@ class TestEvidencePackStorage:
     ) -> None:
         # Re-pushing with a different pack swaps it in; no .evstage-* temp dirs are
         # left behind and the new content is what pull_evidence returns.
-        from abicheck.evidence import BuildEvidence, EvidencePack
-        from abicheck.evidence.build_evidence import Toolchain
+        from abicheck.buildsource import BuildEvidence, BuildSourcePack
+        from abicheck.buildsource.build_evidence import Toolchain
 
         key = BaselineKey(library="libfoo", version="1.0.0", platform="linux-x86_64")
         registry.push(key, sample_snapshot, evidence=_make_pack(tmp_path / "p1.evidence"))
 
-        p2 = EvidencePack.empty(tmp_path / "p2.evidence", abicheck_version="9.9")
+        p2 = BuildSourcePack.empty(tmp_path / "p2.evidence", abicheck_version="9.9")
         p2.build_evidence = BuildEvidence(
             toolchains=[Toolchain(id="toolchain://clang-18", compiler_id="Clang", version="18")]
         )
@@ -783,14 +805,14 @@ class TestEvidencePackStorage:
         # If the snapshot/metadata write fails mid-push, the previously-stored
         # evidence pack must be restored — the baseline stays valid (Codex review).
         import abicheck.baseline as bl
-        from abicheck.evidence import BuildEvidence, EvidencePack
-        from abicheck.evidence.build_evidence import Toolchain
+        from abicheck.buildsource import BuildEvidence, BuildSourcePack
+        from abicheck.buildsource.build_evidence import Toolchain
 
         key = BaselineKey(library="libfoo", version="1.0.0", platform="linux-x86_64")
         registry.push(key, sample_snapshot, evidence=_make_pack(tmp_path / "p1.evidence"))
         good_hash = registry.pull_evidence(key).content_hash()  # type: ignore[union-attr]
 
-        p2 = EvidencePack.empty(tmp_path / "p2.evidence", abicheck_version="9.9")
+        p2 = BuildSourcePack.empty(tmp_path / "p2.evidence", abicheck_version="9.9")
         p2.build_evidence = BuildEvidence(
             toolchains=[Toolchain(id="toolchain://clang", compiler_id="Clang", version="18")]
         )

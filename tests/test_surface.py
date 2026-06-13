@@ -12,6 +12,7 @@ import pytest
 from abicheck.checker import compare
 from abicheck.checker_policy import ChangeKind, Verdict
 from abicheck.checker_types import Change
+from abicheck.dwarf_advanced import AdvancedDwarfMetadata
 from abicheck.model import (
     AbiSnapshot,
     Function,
@@ -253,6 +254,26 @@ class TestChangeClassification:
 
         assert change_in_public_surface(c, s, s) is True
 
+    def test_value_abi_trait_change_uses_public_function_symbol_before_type_names(self):
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("api", ret="Result *")],
+            types=[_rec("Result"), _rec("api")],
+        )
+        s = self._surf(snap)
+        assert "api" in s.public_symbols
+        assert "api" in s.all_types
+        assert "api" not in s.public_types
+
+        c = Change(
+            kind=ChangeKind.VALUE_ABI_TRAIT_CHANGED,
+            symbol="api",
+            description="",
+        )
+
+        assert classify_change_surface(c, s, s) == (True, None)
+
     def test_leak_kind_never_filtered(self):
         snap = AbiSnapshot(
             library="l",
@@ -333,6 +354,25 @@ class TestSurfaceExclusionReason:
         s = self._surf(snap)
         c = Change(kind=ChangeKind.FUNC_RETURN_CHANGED, symbol="internal", description="")
         assert classify_change_surface(c, s, s) == (False, REASON_NOT_EXPORTED)
+
+    def test_struct_return_convention_symbol_scoped(self):
+        # struct_return_convention_changed carries the (mangled) function name in
+        # Change.symbol, like calling_convention_changed — a non-exported helper's
+        # return-convention churn must be demoted, not kept as an unknown type.
+        snap = AbiSnapshot(
+            library="l",
+            version="1",
+            functions=[_fn("api"), _fn("internal", vis=Visibility.ELF_ONLY)],
+        )
+        s = self._surf(snap)
+        c = Change(
+            kind=ChangeKind.STRUCT_RETURN_CONVENTION_CHANGED, symbol="internal", description=""
+        )
+        assert classify_change_surface(c, s, s) == (False, REASON_NOT_EXPORTED)
+        c_pub = Change(
+            kind=ChangeKind.STRUCT_RETURN_CONVENTION_CHANGED, symbol="api", description=""
+        )
+        assert classify_change_surface(c_pub, s, s) == (True, None)
 
     def test_non_public_type_reason(self):
         snap = AbiSnapshot(
@@ -443,6 +483,42 @@ class TestScopedCompareNoFalsePositives:
         )
         assert not any(
             c.kind == ChangeKind.TYPE_SIZE_CHANGED and c.symbol == "Foo"
+            for c in scoped.out_of_surface_changes
+        )
+        assert scoped.verdict in (Verdict.BREAKING, Verdict.API_BREAK)
+
+    def test_public_value_abi_trait_change_with_non_public_type_collision_still_reported(
+        self,
+    ):
+        old = AbiSnapshot(
+            library="lib",
+            version="1",
+            functions=[_fn("api", ret="Result *")],
+            types=[_rec("Result"), _rec("api")],
+        )
+        old.dwarf_advanced = AdvancedDwarfMetadata(
+            has_dwarf=True,
+            value_abi_traits={"api": "p0:trivial"},
+        )
+        new = AbiSnapshot(
+            library="lib",
+            version="2",
+            functions=[_fn("api", ret="Result *")],
+            types=[_rec("Result"), _rec("api")],
+        )
+        new.dwarf_advanced = AdvancedDwarfMetadata(
+            has_dwarf=True,
+            value_abi_traits={"api": "p0:nontrivial"},
+        )
+
+        scoped = compare(old, new, scope_to_public_surface=True)
+
+        assert any(
+            c.kind == ChangeKind.VALUE_ABI_TRAIT_CHANGED and c.symbol == "api"
+            for c in scoped.changes
+        )
+        assert not any(
+            c.kind == ChangeKind.VALUE_ABI_TRAIT_CHANGED and c.symbol == "api"
             for c in scoped.out_of_surface_changes
         )
         assert scoped.verdict in (Verdict.BREAKING, Verdict.API_BREAK)

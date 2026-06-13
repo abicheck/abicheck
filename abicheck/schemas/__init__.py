@@ -41,8 +41,14 @@ from typing import Any
 
 #: SemVer-style (MAJOR.MINOR) version of the compare-report JSON schema.
 #: 1.1 — added the optional ``release_recommendation`` object (additive).
-#: 1.2 — added the optional ``evidence_coverage`` array (ADR-028 D7; additive).
-REPORT_SCHEMA_VERSION = "1.2"
+#: 1.2 — added the optional source/build evidence coverage array (additive).
+#: 2.0 — renamed that coverage array's key ``evidence_coverage`` →
+#:       ``layer_coverage`` (ADR-028 D7) during the evidence→buildsource
+#:       rename. Renaming a key is breaking per the policy above, so the MAJOR
+#:       component bumps; consumers pinned to 1.x must update.
+#: 2.1 — added the optional ``evidence_metrics`` object (ADR-033 D6/D9):
+#:       evidence-collection timing + finding split. Additive optional key.
+REPORT_SCHEMA_VERSION = "2.1"
 
 _SCHEMA_DIR = Path(__file__).resolve().parent
 COMPARE_REPORT_SCHEMA_PATH = _SCHEMA_DIR / "compare_report.schema.json"

@@ -231,6 +231,79 @@ class TestFrozenNamespaceBlocksDowngrade:
         r = compare(old, new, policy_file=pf)
         assert r.verdict == Verdict.COMPATIBLE
 
+    def test_severity_exit_code_honors_frozen_downgrade_guard(self) -> None:
+        """Severity-aware CI exits must preserve the same frozen-namespace
+        downgrade guard as the legacy verdict path."""
+        from abicheck.severity import PRESET_DEFAULT, compute_exit_code
+
+        old = _snap("1.0", [
+            _fn("ns::detail::r1::dispatch", "_ZN2ns6detail2r18dispatchEi",
+                params=[Param(name="n", type="int")]),
+        ])
+        new = _snap("2.0", [
+            _fn("ns::detail::r1::dispatch", "_ZN2ns6detail2r18dispatchEi",
+                params=[Param(name="n", type="long")]),
+        ])
+        pf = PolicyFile(
+            base_policy="strict_abi",
+            overrides={ChangeKind.FUNC_PARAMS_CHANGED: Verdict.COMPATIBLE},
+            frozen_namespaces=["**::detail::r1::*"],
+        )
+        r = compare(old, new, policy_file=pf)
+
+        assert r.verdict == Verdict.BREAKING
+        assert any(
+            c.kind == ChangeKind.FUNC_PARAMS_CHANGED
+            and c.frozen_namespace_violation == "**::detail::r1::*"
+            for c in r.changes
+        )
+        assert compute_exit_code(
+            r.changes,
+            PRESET_DEFAULT,
+            policy=r.policy,
+            kind_sets=r._effective_kind_sets(),
+            policy_file=r.policy_file,
+        ) == 4
+
+        from abicheck.cli import _exit_with_severity_or_verdict
+
+        with pytest.raises(SystemExit) as excinfo:
+            _exit_with_severity_or_verdict(r, PRESET_DEFAULT, True)
+        assert excinfo.value.code == 4
+        assert len(r.breaking) >= 1
+
+    def test_severity_exit_code_still_allows_non_frozen_downgrade(self) -> None:
+        """The per-change guard must not make all overrides ineffective."""
+        from abicheck.severity import PRESET_DEFAULT, compute_exit_code
+
+        old = _snap("1.0", [
+            _fn("ns::pub::dispatch", "_ZN2ns3pub8dispatchEi",
+                params=[Param(name="n", type="int")]),
+        ])
+        new = _snap("2.0", [
+            _fn("ns::pub::dispatch", "_ZN2ns3pub8dispatchEi",
+                params=[Param(name="n", type="long")]),
+        ])
+        pf = PolicyFile(
+            base_policy="strict_abi",
+            overrides={
+                ChangeKind.FUNC_PARAMS_CHANGED: Verdict.COMPATIBLE,
+                ChangeKind.OVERLOAD_SET_REROUTED: Verdict.COMPATIBLE,
+            },
+            frozen_namespaces=["**::detail::r1::*"],
+        )
+        r = compare(old, new, policy_file=pf)
+
+        assert r.verdict == Verdict.COMPATIBLE
+        assert compute_exit_code(
+            r.changes,
+            PRESET_DEFAULT,
+            policy=r.policy,
+            kind_sets=r._effective_kind_sets(),
+            policy_file=r.policy_file,
+        ) == 0
+        assert r.breaking == []
+
 
 # ── Suppression namespace selector ─────────────────────────────────────────
 
@@ -339,6 +412,42 @@ class TestSuppressionNamespaceSelector:
         )
         r = compare(old, new, suppression=suppression)
         assert r.verdict == Verdict.NO_CHANGE
+
+    def test_extern_c_namespace_suppression_rejects_one_sided_spoof(self) -> None:
+        """A new-side namespace alone must not suppress an existing global export.
+
+        The C-linkage symbol is still ``dispatch`` in both snapshots, so a
+        trusted namespace suppression must not be satisfied by moving only the
+        new declaration under the suppressed C++ namespace.
+        """
+        old_fn = Function(
+            name="dispatch",
+            mangled="dispatch",
+            return_type="int",
+            params=[Param(name="n", type="int")],
+            visibility=Visibility.PUBLIC,
+            is_extern_c=True,
+        )
+        new_fn = Function(
+            name="mylib::detail::r1::dispatch",
+            mangled="dispatch",
+            return_type="long",
+            params=[Param(name="n", type="long")],
+            visibility=Visibility.PUBLIC,
+            is_extern_c=True,
+        )
+        old = _snap("1.0", [old_fn])
+        new = _snap("2.0", [new_fn])
+        suppression = SuppressionList(
+            [Suppression(namespace="**::detail::r1::*", reason="legacy churn")],
+        )
+        r = compare(old, new, suppression=suppression)
+        assert r.verdict == Verdict.BREAKING
+        assert r.suppressed_count == 0
+        assert {c.kind for c in r.changes} == {
+            ChangeKind.FUNC_RETURN_CHANGED,
+            ChangeKind.FUNC_PARAMS_CHANGED,
+        }
 
 
 # ── Regression: deep ancestor matching + extern "C" + ctx.redundant ─────

@@ -7,7 +7,8 @@
 > [4. C++ ABI](04-cpp-abi.md) ·
 > [5. Linker & ELF](05-linker-elf.md) ·
 > [6. Transitive Breaks](06-transitive-breaks.md) ·
-> [7. Designing for Stability](07-designing-for-stability.md)
+> [7. Designing for Stability](07-designing-for-stability.md) ·
+> [8. Detecting Breaks](08-detection.md)
 
 **What you'll learn on this page**
 

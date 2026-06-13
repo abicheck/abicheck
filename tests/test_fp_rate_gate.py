@@ -59,3 +59,22 @@ def test_fp_rate_within_baseline():
     outcome = fp_gate.evaluate()
     assert len(outcome.false_positives) <= fp_gate.FP_BASELINE, outcome.false_positives
     assert len(outcome.false_negatives) <= fp_gate.FN_BASELINE, outcome.false_negatives
+
+
+def test_metrics_report_delta_vs_baseline():
+    """ADR-033 D9: the gate exposes false_positive_delta_vs_baseline (0 = clean)."""
+    m = fp_gate.metrics()
+    assert m["false_positive_delta_vs_baseline"] == m["false_positives"] - fp_gate.FP_BASELINE
+    assert m["false_negative_delta_vs_baseline"] == m["false_negatives"] - fp_gate.FN_BASELINE
+    # Corpus is built for a clean sheet, so the deltas are zero.
+    assert m["false_positive_delta_vs_baseline"] == 0
+    assert m["false_negative_delta_vs_baseline"] == 0
+
+
+def test_json_mode_emits_metrics(capsys):
+    """`--json` prints the D9 metric keys for CI consumption."""
+    import json
+    rc = fp_gate.main(["--json"])
+    out = json.loads(capsys.readouterr().out)
+    assert rc == 0
+    assert "false_positive_delta_vs_baseline" in out

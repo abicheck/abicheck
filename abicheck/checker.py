@@ -164,6 +164,7 @@ def _diff_advanced_dwarf(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     _kind_map = {
         "calling_convention_changed": ChangeKind.CALLING_CONVENTION_CHANGED,
         "value_abi_trait_changed": ChangeKind.VALUE_ABI_TRAIT_CHANGED,
+        "struct_return_convention_changed": ChangeKind.STRUCT_RETURN_CONVENTION_CHANGED,
         "struct_packing_changed": ChangeKind.STRUCT_PACKING_CHANGED,
         "toolchain_flag_drift": ChangeKind.TOOLCHAIN_FLAG_DRIFT,
         "vector_abi_changed": ChangeKind.VECTOR_ABI_CHANGED,
@@ -196,6 +197,7 @@ def compare(
     extra_changes: list[Change] | None = None,
     pattern_verdicts: bool = False,
     surface_metrics: bool = False,
+    collapse_versioned_symbols: bool = False,
 ) -> DiffResult:
     """Diff two AbiSnapshots and return a DiffResult with verdict.
 
@@ -236,6 +238,7 @@ def compare(
         frozen_namespaces=frozen_ns,
         scope_to_public_surface=scope_to_public_surface,
         force_public_symbols=force_public_symbols,
+        collapse_versioned_symbols=collapse_versioned_symbols,
     )
     kept = pp_ctx.kept
     redundant = pp_ctx.redundant

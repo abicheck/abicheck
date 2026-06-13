@@ -17,15 +17,9 @@ source-replay diff findings (D4, D5, D6, D10)."""
 
 from __future__ import annotations
 
-from abicheck.checker_policy import (
-    API_BREAK_KINDS,
-    BREAKING_KINDS,
-    RISK_KINDS,
-    ChangeKind,
-)
-from abicheck.evidence import (
+from abicheck.buildsource import (
     SOURCE_ABI_VERSION,
-    EvidencePack,
+    BuildSourcePack,
     SourceAbiSurface,
     SourceAbiTu,
     SourceEntity,
@@ -33,7 +27,13 @@ from abicheck.evidence import (
     diff_source_abi,
     link_source_abi,
 )
-from abicheck.evidence.source_abi import EVIDENCE_TIER_L4
+from abicheck.buildsource.source_abi import EVIDENCE_TIER_L4
+from abicheck.checker_policy import (
+    API_BREAK_KINDS,
+    BREAKING_KINDS,
+    RISK_KINDS,
+    ChangeKind,
+)
 
 # -- helpers -----------------------------------------------------------------
 
@@ -571,6 +571,38 @@ def test_diff_generated_header_changed() -> None:
     assert [c.kind for c in changes] == [ChangeKind.GENERATED_HEADER_CHANGED]
 
 
+def test_diff_generated_constant_value_change_is_api_break() -> None:
+    # A generated public constexpr still behaves like a baked-in constant for
+    # consumers. Preserve constexpr_value_changed so legacy ABI gates see the
+    # API_BREAK severity, while removals remain covered by generated headers.
+    old = _surface(
+        reachable_declarations=[
+            _entity(
+                "cfg::KMax",
+                "constexpr",
+                visibility="generated",
+                origin="GENERATED",
+                value="64",
+            )
+        ]
+    )
+    new = _surface(
+        reachable_declarations=[
+            _entity(
+                "cfg::KMax",
+                "constexpr",
+                visibility="generated",
+                origin="GENERATED",
+                value="128",
+            )
+        ]
+    )
+    changes = diff_source_abi(old, new)
+    assert [c.kind for c in changes] == [ChangeKind.CONSTEXPR_VALUE_CHANGED]
+    assert changes[0].old_value == "64"
+    assert changes[0].new_value == "128"
+
+
 def test_diff_generated_constant_removed_detected() -> None:
     # A constexpr declared in a *generated* header that is removed in the new
     # version must surface as generated_header_changed. A namespace-scope
@@ -698,11 +730,11 @@ def test_pack_roundtrips_source_abi(tmp_path: object) -> None:
         exported_symbols=[],
         library="libfoo.so",
     )
-    pack = EvidencePack.empty(tmp_path)  # type: ignore[arg-type]
+    pack = BuildSourcePack.empty(tmp_path)  # type: ignore[arg-type]
     pack.source_abi = surface
     pack.write()
 
-    loaded = EvidencePack.load(tmp_path)  # type: ignore[arg-type]
+    loaded = BuildSourcePack.load(tmp_path)  # type: ignore[arg-type]
     assert loaded.source_abi is not None
     assert [e.qualified_name for e in loaded.source_abi.reachable_macros] == ["FOO"]
     # The source surface contributes to the content hash (it is a normalized payload).
@@ -710,13 +742,13 @@ def test_pack_roundtrips_source_abi(tmp_path: object) -> None:
 
 
 def test_pack_removes_stale_source_abi(tmp_path: object) -> None:
-    pack = EvidencePack.empty(tmp_path)  # type: ignore[arg-type]
+    pack = BuildSourcePack.empty(tmp_path)  # type: ignore[arg-type]
     pack.source_abi = link_source_abi([SourceAbiTu(macros=[_entity("FOO", "macro")])])
     pack.write()
     # A later collection with no source ABI must drop the stale file.
     pack.source_abi = None
     pack.write()
-    reloaded = EvidencePack.load(tmp_path)  # type: ignore[arg-type]
+    reloaded = BuildSourcePack.load(tmp_path)  # type: ignore[arg-type]
     assert reloaded.source_abi is None
 
 

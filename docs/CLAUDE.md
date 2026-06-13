@@ -15,23 +15,33 @@ elsewhere in the nav — keep links pointing at the real file path.
   the User Guide**.
 - `troubleshooting.md` — top-level file, but navigated under **Development**.
 - `user-guide/` — end-user docs (getting started, GitHub Action, CLI flags,
-  policy files, suppression, output formats).
-- `concepts/` — conceptual docs (verdicts, architecture, ABI cheat sheet,
-  and `abi-api-handling.md` — the consolidated ABI/API handling guide). The
-  `reference/` pages are navigated under the **Concepts** tab.
+  policy files, suppression, output formats). Nav is grouped basics-first:
+  Start Here → Everyday Use → CI & Gating → Specialised Checks →
+  Integrations & Migration.
+- `concepts/` — conceptual docs (verdicts, evidence model, architecture, and
+  `abi-api-handling.md` — the consolidated ABI/API handling guide).
+  `abi-cheat-sheet.md` and `abi-api-handling.md` are navigated under the
+  educational **ABI/API Handling & Recommendations** tab, not Concepts.
 - `reference/` — curated reference (change kinds, exit codes, platforms, tool
-  comparison, ABICC format compliance). Navigated under Concepts.
+  comparison, ABICC format compliance). Navigated as its own **Reference** tab.
 - `examples/` — per-case Markdown docs that match the binary fixtures
   in `/examples/`. Generated via `scripts/gen_examples_docs.py` —
-  regenerate after adding a new example. Navigated under **ABI/API Handling &
-  Recommendations** alongside `concepts/abi-api-handling.md`.
+  regenerate after adding a new example. Navigated as its own **Examples**
+  tab (index + by-verdict + by-category; per-case pages are linked, not
+  in nav).
 - `development/` — contributor-facing docs (architecture, parity status,
   goals, ADRs in `development/adr/`).
 
 ## Conventions
 
 - Every page must be reachable from `mkdocs.yml` nav (mkdocs --strict
-  enforces this).
+  enforces this). Exceptions: per-case `examples/*.md` pages are linked from
+  the encyclopedia indexes instead of the nav, and this `CLAUDE.md` is
+  excluded from the published site via `exclude_docs`.
+- The docs tell a two-track story: an **educational track** (ABI/API Handling
+  tab — understanding the problem) and a **tool track** (User Guide → Concepts
+  → Reference — using and understanding abicheck). Within each track, order
+  pages simple → advanced.
 - Use relative links (`../user-guide/x.md`), not absolute URLs.
 - Prefer pulling from `--help` output rather than hand-rolling CLI
   tables — use the same wording the user sees.

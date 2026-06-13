@@ -59,7 +59,10 @@ dev = [
     "filelock>=3.0",
     "hypothesis>=6.0",
     "ruff>=0.3",
-    "mypy>=1.0",
+    # Pinned exact: an unpinned mypy (`mypy>=1.0` + `pip install mypy` in CI) made the
+    # type gate non-reproducible — 2 errors slipped onto a branch and only surfaced on a
+    # newer mypy (field-eval CI gap). Bump deliberately when adopting a new mypy.
+    "mypy==1.19.1",
     "types-PyYAML",
     "jsonschema>=4.0",
 ]
@@ -94,7 +97,7 @@ module = [
     "abicheck.pdb_utils",
     "abicheck.sycl_metadata",
     "abicheck.binary_fingerprint",
-    "abicheck.evidence.compiler_record",
+    "abicheck.buildsource.compiler_record",
 ]
 disallow_untyped_calls = false
 disable_error_code = ["attr-defined"]
@@ -110,7 +113,7 @@ module = [
     "abicheck.cli_compare_release",
     "abicheck.cli_debian_symbols",
     "abicheck.cli_baseline",
-    "abicheck.cli_evidence",
+    "abicheck.cli_buildsource",
     "abicheck.cli_plugin",
     "abicheck.cli_pr_comment",
     "abicheck.cli_probe",
@@ -146,7 +149,8 @@ module = [
     "abicheck.environment_matrix",
     "abicheck.probe_harness",
     "abicheck.bundle",
-    "abicheck.evidence.extractor_manifest",
+    "abicheck.buildsource.extractor_manifest",
+    "abicheck.buildsource.inline",
 ]
 disable_error_code = ["import-untyped"]
 
@@ -157,6 +161,7 @@ markers = [
     "integration: requires castxml, gcc/g++ installed",
     "libabigail: requires abidiff + gcc/g++ — libabigail parity tests",
     "abicc: requires abi-compliance-checker + gcc/g++ — ABICC parity tests",
+    "msvc: requires MSVC cl.exe (Windows) — MSVC+PDB end-to-end lane",
     "slow: marks tests as slow (hypothesis / performance benchmarks)",
     "golden: golden-output snapshot tests",
 ]

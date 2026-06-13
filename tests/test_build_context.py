@@ -303,6 +303,10 @@ class TestBuildContext:
         flags = ctx.to_castxml_flags()
         assert "-UFOO" in flags
 
+    def test_to_castxml_flags_omits_c_language_standard(self) -> None:
+        ctx = BuildContext(language_standard="gnu17")
+        assert not any(flag.startswith("-std=") for flag in ctx.to_castxml_flags())
+
     def test_has_conflicts(self) -> None:
         ctx = BuildContext()
         assert not ctx.has_conflicts

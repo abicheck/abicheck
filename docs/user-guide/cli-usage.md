@@ -147,49 +147,49 @@ abicheck dump libfoo.so -H include/ -p build/ \
 #### Evidence packs — build & source context (L3 / L4)
 
 The build context above (L3) and **source evidence** (L4) can also be bundled
-into a reusable *evidence pack* — a post-build, opt-in artifact that abicheck
+into a reusable *build/source pack* — a post-build, opt-in artifact that abicheck
 reads alongside your binaries. A pack never rebuilds your project or runs
 arbitrary commands; it reads existing build outputs and build-system query
 interfaces only. See [Source & Build Evidence
-Packs](../concepts/evidence-pack.md) for the full model.
+Packs](../concepts/build-source-data.md) for the full model.
 
 ```bash
 # 1. Collect a pack from an existing build tree (no rebuild).
-abicheck collect-evidence \
+abicheck collect \
     --compile-db build/compile_commands.json \
-    --build-dir build --cmake \
-    --output libfoo.evidence/
+    --build-dir build --cmake --source-abi \
+    --output libfoo.bs/
 
-# 2a. Record a content-addressed reference to the pack on a snapshot…
-#     (the pack directory itself stays out-of-band — keep it around).
+# 2. Embed the build + source facts inline in the snapshot. The resulting
+#    .abi.json is self-contained.
 abicheck dump build/libfoo.so -H include/ \
-    --evidence libfoo.evidence/ -o libfoo.abi.json
+    --build-info libfoo.bs/ --sources libfoo.bs/ -o libfoo.abi.json
 
-# 2b. …and pass the pack directories explicitly at compare time to get
-#     their L3/L4 findings.
-abicheck compare old.abi.json new.abi.json \
-    --old-evidence old.evidence/ --new-evidence new.evidence/
+# 3. Compare two snapshots — the embedded facts diff automatically, with no
+#    pack directories to carry around.
+abicheck compare old.abi.json new.abi.json
 ```
 
-!!! warning "Packs do not travel inside a snapshot"
-    `dump --evidence` records only a lightweight, content-addressed
-    *reference* on the snapshot — the pack directory stays out-of-band, and
-    `compare` does **not** follow that reference. To get pack-based L3/L4
-    findings you must **preserve the pack directory** and pass it explicitly
-    via `--old-evidence` / `--new-evidence`. If you archive only the dumped
-    JSON and later run `abicheck compare old.json new.json` without the packs,
-    you get the snapshot's intrinsic layers (L0–L2, plus any L3 build *flags*
-    baked in at dump time via `-p`) but not the pack's L3/L4 findings.
+!!! tip "Build/source data travels inside the snapshot"
+    `dump --build-info`/`--sources` **embed** the normalized build + source
+    facts in the `.abi.json`, so `compare old.json new.json` carries them with
+    no out-of-band directories (single-artifact UX). For advanced use, the
+    `--old-build-info`/`--new-build-info` and `--old-sources`/`--new-sources`
+    flags supply or override those facts per side from a pack directory; raw
+    provenance is never embedded — only the normalized facts that feed the
+    comparison.
 
 | Flag | Command | Description |
 |------|---------|-------------|
-| `--evidence <dir>` | `dump` | Record a content-addressed *reference* to a pack on the snapshot (the pack stays out-of-band; still pass it to `compare` to use its findings) |
-| `--old-evidence <dir>` / `--new-evidence <dir>` | `compare` | Load and diff per-side packs into the verdict — adds L3 build-context findings and an evidence-coverage table |
-| `--evidence-mode <mode>` | `compare` | Inline collection mode. Defaults to `off`, which uses only the explicitly-provided `--old-evidence`/`--new-evidence` packs. **Other modes are currently recognized and reported in the coverage table but not yet collected inline** — pass packs explicitly to get L3/L4 findings in this release. |
+| `--build-info <dir>` | `dump` | Embed a pack's L3 build-info facts inline in the snapshot |
+| `--sources <dir>` | `dump` | Embed a pack's L4/L5 source facts (source ABI replay + graph) inline in the snapshot |
+| `--old-build-info <dir>` / `--new-build-info <dir>` | `compare` | Out-of-band L3 build-info pack per side (overrides embedded) |
+| `--old-sources <dir>` / `--new-sources <dir>` | `compare` | Out-of-band L4/L5 source pack per side (overrides embedded) |
+| `--collect-mode <mode>` | `compare` | Inline collection mode. Only `off` (the default) is functional in this release: it uses embedded facts and any explicitly-provided pack directories. Other modes are accepted and reported in the coverage table, but inline collection for them is not implemented yet — run `abicheck collect` separately instead. |
 
 To additionally capture **L4 source ABI replay** (macro/`constexpr` values,
 default-argument values, uninstantiated templates), add `--source-abi` to
-`collect-evidence`. L4 requires `clang` (or castxml for the declaration subset);
+`collect`. L4 requires `clang` (or castxml for the declaration subset);
 if it is missing, abicheck **degrades gracefully** — L4 is marked partial and
 the artifact-backed tiers (L0–L2) remain fully authoritative. Build/source
 evidence (L3/L4) *explains, localizes, and scopes* findings or raises its own
@@ -247,6 +247,27 @@ Add `-v` / `--verbose` to any native command to enable debug logging:
 abicheck dump libfoo.so -H foo.h -v
 abicheck compare old.json new.json -v
 ```
+
+#### Surface and source-graph reports
+
+Three companion commands report on the public surface and the L5 source graph
+rather than producing a compare verdict:
+
+```bash
+# Structural metrics + idiom/anti-pattern report for one library's public surface
+abicheck surface-report libfoo.so -H include/ --idioms --anti-patterns
+
+# Diff two L5 source-graph summaries (from `collect --source-graph`)
+abicheck compare-graph old-pack/ new-pack/
+
+# Localize a compare finding through the L5 source graph (which TU/include chain)
+abicheck explain-finding --report report.json --finding-id <id> --sources new-pack/
+```
+
+See [API Surface Intelligence](../concepts/api-surface-intelligence.md) for what
+the surface metrics and idiom recognizers mean, and
+[Build & Source Packs](../concepts/build-source-data.md) for producing the packs
+that `compare-graph` / `explain-finding` consume.
 
 ### Report filtering and display options
 

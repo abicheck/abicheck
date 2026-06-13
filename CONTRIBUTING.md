@@ -44,7 +44,7 @@ Fast unit and component tests — no external tools required:
 
 ```bash
 pytest tests/ -v --tb=short \
-  -m "not integration and not libabigail and not abicc" \
+  -m "not integration and not libabigail and not abicc and not slow and not golden" \
   --cov=abicheck --cov-report=term-missing
 ```
 

@@ -1088,8 +1088,8 @@ def _dump_elf(
 
     # ADR-003: Updated fallback chain
     # --dwarf-only → force DWARF mode regardless of headers
-    # no headers + DWARF available → DWARF-only mode (24/30 detectors)
-    # no headers + no DWARF → symbols-only mode (6/30 detectors)
+    # no headers + DWARF available -> DWARF-only mode with type-aware checks
+    # no headers + no DWARF -> symbols-only mode
     dwarf_only_types: list[RecordType] = []
     if dwarf_only or (not headers and dwarf_meta.has_dwarf):
         snap, dwarf_only_types = _try_dwarf_snapshot(

@@ -278,3 +278,115 @@ def test_builtin_policy_name_not_shadowed_by_directory(tmp_path: Path, monkeypat
     # Resolved to the packaged policy, not the local directory.
     assert pf.base_policy == "strict_abi"
     assert pf.overrides.get(ChangeKind.RELRO_WEAKENED) == Verdict.BREAKING
+
+
+# ── ADR-033 D7 evidence-policy controls ──────────────────────────────────────
+
+
+def test_evidence_policy_parses_all_knobs(tmp_path: Path) -> None:
+    p = tmp_path / "policy.yaml"
+    p.write_text(
+        """
+evidence_policy:
+  source_only_findings: fail-api
+  build_context_drift: fail-on-abi-relevant
+  graph_risk_findings: ignore
+  require_evidence:
+    build_context: true
+    source_abi: false
+""".strip(),
+        encoding="utf-8",
+    )
+    pf = PolicyFile.load(p)
+    assert pf.source_only_findings == "fail-api"
+    assert pf.build_context_drift == "fail-on-abi-relevant"
+    assert pf.graph_risk_findings == "ignore"
+    assert pf.require_evidence == {"build_context": True, "source_abi": False}
+
+
+def test_evidence_policy_unset_is_none(tmp_path: Path) -> None:
+    p = tmp_path / "policy.yaml"
+    p.write_text("base_policy: strict_abi\n", encoding="utf-8")
+    pf = PolicyFile.load(p)
+    assert pf.source_only_findings is None
+    assert pf.build_context_drift is None
+    assert pf.graph_risk_findings is None
+    assert pf.require_evidence == {}
+    # Unset knobs leave the finding's default category untouched.
+    assert pf.evidence_verdict("source_only") is None
+
+
+def test_evidence_verdict_mapping(tmp_path: Path) -> None:
+    p = tmp_path / "policy.yaml"
+    p.write_text(
+        "evidence_policy:\n"
+        "  source_only_findings: ignore\n"
+        "  build_context_drift: fail-on-abi-relevant\n"
+        "  graph_risk_findings: fail\n",
+        encoding="utf-8",
+    )
+    pf = PolicyFile.load(p)
+    assert pf.evidence_verdict("source_only") == Verdict.COMPATIBLE
+    assert pf.evidence_verdict("graph_risk") == Verdict.API_BREAK
+    # fail-on-abi-relevant: only ABI-relevant build drift escalates.
+    assert pf.evidence_verdict("build_context", abi_relevant=True) == Verdict.API_BREAK
+    assert (
+        pf.evidence_verdict("build_context", abi_relevant=False)
+        == Verdict.COMPATIBLE_WITH_RISK
+    )
+
+
+@pytest.mark.parametrize(
+    "block",
+    [
+        "evidence_policy:\n  source_only_findings: nope\n",
+        "evidence_policy:\n  build_context_drift: fail\n",  # not a build-drift action
+        "evidence_policy:\n  graph_risk_findings: fail-api\n",  # not a graph action
+        "evidence_policy:\n  require_evidence:\n    bogus_layer: true\n",
+        "evidence_policy:\n  require_evidence:\n    build_context: yes-please\n",
+        "evidence_policy: not-a-mapping\n",
+    ],
+)
+def test_evidence_policy_invalid_values_raise(tmp_path: Path, block: str) -> None:
+    from abicheck.errors import PolicyError
+
+    p = tmp_path / "policy.yaml"
+    p.write_text(block, encoding="utf-8")
+    with pytest.raises(PolicyError):
+        PolicyFile.load(p)
+
+
+def test_effective_verdict_wins_over_per_kind_override(tmp_path: Path) -> None:
+    """Codex: a per-finding effective_verdict (evidence/pattern modulation) must
+    win over a per-kind override, matching effective_category, so the verdict and
+    the JSON per-finding severity stay consistent."""
+    p = tmp_path / "policy.yaml"
+    p.write_text(
+        "overrides:\n  abi_relevant_build_flag_changed: warn\n",  # would be API_BREAK
+        encoding="utf-8",
+    )
+    pf = PolicyFile.load(p)
+    c = _change(ChangeKind.ABI_RELEVANT_BUILD_FLAG_CHANGED)
+    # evidence_policy demoted it to COMPATIBLE via effective_verdict.
+    c.effective_verdict = Verdict.COMPATIBLE
+    c.frozen_namespace_violation = None
+    assert pf.compute_verdict([c]) == Verdict.COMPATIBLE
+
+
+def test_frozen_namespace_floor_survives_effective_verdict(tmp_path: Path) -> None:
+    """Codex: an effective_verdict demotion must not pull a frozen-namespace
+    violation below its raw category (the frozen-ns floor still applies)."""
+    p = tmp_path / "policy.yaml"
+    p.write_text("frozen_namespaces:\n  - '**::detail::r1'\n", encoding="utf-8")
+    pf = PolicyFile.load(p)
+    # func_removed is BREAKING; evidence/pattern modulation demoted it.
+    c = _change(ChangeKind.FUNC_REMOVED)
+    c.effective_verdict = Verdict.COMPATIBLE
+    c.frozen_namespace_violation = "**::detail::r1"
+    # Floor holds: stays BREAKING despite the demotion.
+    assert pf.compute_verdict([c]) == Verdict.BREAKING
+    # Without the frozen tag, the demotion is honored.
+    c2 = _change(ChangeKind.FUNC_REMOVED)
+    c2.effective_verdict = Verdict.COMPATIBLE
+    c2.frozen_namespace_violation = None
+    assert pf.compute_verdict([c2]) == Verdict.COMPATIBLE

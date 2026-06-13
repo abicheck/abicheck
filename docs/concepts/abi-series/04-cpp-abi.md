@@ -7,7 +7,8 @@
 > **4. C++ ABI** ·
 > [5. Linker & ELF](05-linker-elf.md) ·
 > [6. Transitive Breaks](06-transitive-breaks.md) ·
-> [7. Designing for Stability](07-designing-for-stability.md)
+> [7. Designing for Stability](07-designing-for-stability.md) ·
+> [8. Detecting Breaks](08-detection.md)
 
 **What you'll learn on this page**
 
@@ -303,6 +304,36 @@ though the method's source signature is unchanged.
     Reported as `base_class_position_changed` / `type_base_changed` when DWARF
     or headers are available — ELF symbol tables alone cannot see them, which
     is why C++ ABI checking *requires* debug info or headers.
+
+### Empty bases, tail padding, and overlap optimizations
+
+Two Itanium-ABI space optimizations make class layout *more* fragile than the
+plain struct rules from [Part 3](03-type-layout.md), because they let a
+seemingly free change resize or re-pack an object:
+
+- **Empty-base optimization (EBO).** An empty base class occupies **zero bytes**
+  in the derived object. The moment that base gains its first data member — even
+  a single `char` "just for debugging" — it starts occupying real space at
+  offset 0 of every derived class, shifting every member after it. Tag types,
+  policy classes, and allocators are the classic victims:
+  [case94](../../examples/case94_empty_tag_gained_state.md) shows an empty tag
+  struct gaining state and silently re-laying-out everything built on it.
+- **Tail-padding reuse.** For non-POD bases, a derived class may place its first
+  member *inside the base's tail padding*. The consequence: changing a base's
+  members can change the **derived** class's layout even when
+  `sizeof(Base)` stays identical — the padding the derived class was reusing is
+  suddenly occupied. You cannot reason about a base class "in isolation"; its
+  padding is part of its ABI.
+- **`[[no_unique_address]]`** opts member sub-objects into the same overlap
+  rules: adding or removing the attribute (or changing whether the member is
+  empty) re-packs the enclosing object
+  ([case117](../../examples/case117_no_unique_address.md)).
+
+The common thread: these layouts are computed from *the whole inheritance and
+member graph*, so the break surfaces in classes the author never edited.
+Detection therefore needs the compiler's own record of the final layout — DWARF
+sizes/offsets (L1) or the header AST (L2); see
+[Part 8](08-detection.md) for the full evidence story.
 
 ---
 

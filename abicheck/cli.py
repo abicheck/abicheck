@@ -26,10 +26,11 @@ import click
 
 from .checker import DiffResult, LibraryMetadata, compare
 from .cli_audit import echo_filtered_surface, echo_pattern_modulations
+from .cli_datasources import print_data_sources as _print_data_sources
 from .cli_options import (
     adr027_compare_options,
-    evidence_compare_options,
-    evidence_dump_option,
+    build_source_compare_options,
+    build_source_dump_options,
 )
 from .cli_params import POLICY_FILE_PARAM
 from .compat.abicc_dump_import import import_abicc_perl_dump, looks_like_perl_dump
@@ -176,15 +177,33 @@ def _provenance_timestamp(source_date_epoch: str | None) -> str:
 def _write_snapshot_output(
     snap: AbiSnapshot,
     output: Path | None,
-    evidence_dir: Path | None = None,
+    build_info: Path | None = None,
+    sources: Path | None = None,
+    build_config: Path | None = None,
+    allow_build_query: bool = False,
+    collect_mode: str = "source-target",
+    build_query: str | None = None,
+    build_compile_db: str | None = None,
 ) -> None:
     """Serialize snapshot and write to file or stdout.
 
-    When *evidence_dir* is given, attach the EvidencePack reference first (D8).
+    When *build_info* and/or *sources* are given, their normalized L3/L4/L5 facts
+    are collected (inline from a source tree / build dir, or loaded from a pack
+    directory) and embedded in the snapshot first (single-artifact UX) so a later
+    ``compare old.json new.json`` needs no out-of-band packs. *collect_mode* (the
+    ADR-033 D2 CI evidence mode) selects which layers and replay scope to collect:
+    ``build`` captures L3 build context only, ``off`` collects nothing.
+    *build_query* / *build_compile_db* are the CLI equivalents of the
+    ``.abicheck.yml`` ``build.query`` / ``build.compile_db`` keys.
     """
-    if evidence_dir is not None:
-        from .cli_evidence import attach_evidence_pack
-        attach_evidence_pack(snap, evidence_dir)
+    if build_info is not None or sources is not None:
+        from .cli_buildsource import embed_build_source
+        embed_build_source(
+            snap, build_info, sources,
+            build_config=build_config, allow_build_query=allow_build_query,
+            collect_mode=collect_mode,
+            build_query=build_query, build_compile_db=build_compile_db,
+        )
     result = snapshot_to_json(snap)
     if output:
         _safe_write_output(output, result)
@@ -226,29 +245,9 @@ def _resolve_linker_script(path: Path) -> tuple[Path | None, bool]:
     even when no target file could be located); ``resolved_path`` is the first
     ``INPUT()``/``GROUP()`` member that exists next to the script, or *None*.
     """
-    try:
-        with open(path, "rb") as f:
-            raw = f.read(8192)
-        text = raw.decode("utf-8", errors="replace")
-    except OSError:
-        return None, False
-    # Strip C-style comments (real scripts start with ``/* GNU ld script */``).
-    text = re.sub(r"/\*.*?\*/", " ", text, flags=re.DOTALL)
-    if not _LD_SCRIPT_RE.search(text):
-        return None, False
-    # Collect candidate file tokens from inside INPUT()/GROUP() groups.
-    for group in re.findall(r"(?:INPUT|GROUP)\s*\(([^)]*)\)", text):
-        for tok in group.replace(",", " ").split():
-            if tok in _LD_KEYWORDS or tok.startswith(("-l", "-L", "(")):
-                continue
-            # Only consider tokens that name a library file.
-            if ".so" not in tok and not tok.endswith(".a"):
-                continue
-            candidate = Path(tok)
-            for cand in (candidate, path.parent / tok, path.parent / candidate.name):
-                if cand.is_file():
-                    return cand, True
-    return None, True
+    from .binary_utils import resolve_linker_script
+
+    return resolve_linker_script(path)
 
 
 def _maybe_follow_linker_script(path: Path) -> Path:
@@ -625,7 +624,7 @@ def _populate_dependency_info(
 
 
 @main.command("dump")
-@click.argument("so_path", type=click.Path(exists=True, path_type=Path))
+@click.argument("so_path", type=click.Path(exists=True, path_type=Path), required=False)
 @click.option("-H", "--header", "headers", multiple=True, type=click.Path(exists=True, path_type=Path),
               help="Public header file or directory (repeat for multiple).")
 @click.option("-I", "--include", "includes", multiple=True, type=click.Path(path_type=Path),
@@ -672,10 +671,10 @@ def _populate_dependency_info(
               help="Simulated LD_LIBRARY_PATH (with --follow-deps).")
 @click.option("--dwarf-only", is_flag=True, default=False,
               help="Force DWARF-only mode: use DWARF debug info as the primary "
-                   "data source even when headers are available. Enables 24/30 "
-                   "detectors without requiring castxml.")
+                   "data source even when headers are available. Enables type-aware "
+                   "artifact checks without requiring castxml.")
 @click.option("--show-data-sources", is_flag=True, default=False,
-              help="Print which data layers (L0/L1/L2) are available for the "
+              help="Print which data layers (L0-L5) are available for the "
                    "binary and exit.")
 @click.option("--debug-format", "debug_format_opt",
               type=click.Choice(["auto", "dwarf", "btf", "ctf"], case_sensitive=False), default=None,
@@ -716,8 +715,8 @@ def _populate_dependency_info(
               help="Opaque build identifier (CI run ID, build number, etc.).")
 @click.option("--no-git", "no_git", is_flag=True, default=False,
               help="Do not auto-detect git commit SHA.")
-@evidence_dump_option  # ADR-028: --evidence
-def dump_cmd(so_path: Path, headers: tuple[Path, ...], includes: tuple[Path, ...],
+@build_source_dump_options  # --build-info / --sources (embed inline)
+def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Path, ...],
              public_headers: tuple[Path, ...], public_header_dirs: tuple[Path, ...],
              version: str, lang: str, output: Path | None,
              gcc_path: str | None, gcc_prefix: str | None, gcc_options: str | None,
@@ -732,21 +731,29 @@ def dump_cmd(so_path: Path, headers: tuple[Path, ...], includes: tuple[Path, ...
              debuginfod: bool, debuginfod_url: str | None,
              verbose: bool,
              git_tag: str | None, build_id: str | None, no_git: bool,
-             evidence_dir: Path | None = None) -> None:
+             build_info: Path | None = None, sources: Path | None = None,
+             build_config: Path | None = None, allow_build_query: bool = False,
+             build_query: str | None = None, build_compile_db: str | None = None,
+             collect_mode: str = "source-target") -> None:
     """Dump ABI snapshot of a shared library to JSON.
 
     \b
     Example:
       abicheck dump libfoo.so.1 -H include/foo.h --version 1.2.3 -o snap.json
-      abicheck dump libfoo.so.1 -H include/foo.h --lang c -o snap.json
-      abicheck dump libfoo.so.1 -H include/foo.h --gcc-prefix aarch64-linux-gnu-
-      abicheck dump libfoo.so.1 --follow-deps -o snap.json
-      abicheck dump libfoo.so.1 --dwarf-only -o snap.json
-      abicheck dump libfoo.so.1 --show-data-sources
-      abicheck dump libfoo.so.1 -H include/ -p build/  # build context from compile_commands.json
-      abicheck dump libfoo.so.1 --debug-root /usr/lib/debug  # separate debug files
+      abicheck dump --sources ./libfoo-src/ -o libfoo.src.json  # source-only (no binary)
     """
     _setup_verbosity(verbose)
+
+    # Source-only dump (no binary) for the parallel-baseline / merge flow.
+    if so_path is None:
+        if show_data_sources:
+            raise click.UsageError(
+                "--show-data-sources requires SO_PATH; source-only dump cannot "
+                "produce binary data-source diagnostics."
+            )
+        from .cli_buildsource import dump_source_only
+        dump_source_only(sources, build_info, version, output, build_config, allow_build_query, git_tag, build_id, no_git, collect_mode, build_query=build_query, build_compile_db=build_compile_db)
+        return
 
     # Reconcile the --debug-format selector with the legacy --btf/--ctf/--dwarf
     # flags. The selector supersedes the legacy flags whenever it is given:
@@ -767,7 +774,12 @@ def dump_cmd(so_path: Path, headers: tuple[Path, ...], includes: tuple[Path, ...
 
     # --show-data-sources: diagnostic output and exit
     if show_data_sources:
-        _print_data_sources(so_path, bool(headers))
+        _print_data_sources(
+            so_path,
+            bool(headers),
+            build_source_path=build_info,
+            sources_path=sources,
+        )
         return
 
     # Auto-detect binary format — PE/Mach-O skip the ELF/castxml path. The
@@ -780,21 +792,10 @@ def dump_cmd(so_path: Path, headers: tuple[Path, ...], includes: tuple[Path, ...
         )
     if binary_fmt in ("pe", "macho"):
         _handle_non_elf_dump(
-            so_path,
-            binary_fmt,
-            headers,
-            includes,
-            version,
-            lang,
-            pdb_path,
-            follow_deps,
-            git_tag,
-            build_id,
-            no_git,
-            output,
-            public_headers,
-            public_header_dirs,
-            evidence_dir,
+            so_path, binary_fmt, headers, includes, version, lang, pdb_path,
+            follow_deps, git_tag, build_id, no_git, output, public_headers,
+            public_header_dirs, build_info, sources, build_config,
+            allow_build_query, collect_mode,
         )
         return
 
@@ -843,7 +844,7 @@ def dump_cmd(so_path: Path, headers: tuple[Path, ...], includes: tuple[Path, ...
         _populate_dependency_info(snap, so_path, list(search_paths), sysroot, ld_library_path)
 
     _stamp_provenance(snap, git_tag=git_tag, build_id=build_id, no_git=no_git)
-    _write_snapshot_output(snap, output, evidence_dir)
+    _write_snapshot_output(snap, output, build_info, sources, build_config, allow_build_query, collect_mode, build_query=build_query, build_compile_db=build_compile_db)
 
 
 def _handle_non_elf_dump(
@@ -861,7 +862,11 @@ def _handle_non_elf_dump(
     output: Path | None,
     public_headers: tuple[Path, ...] = (),
     public_header_dirs: tuple[Path, ...] = (),
-    evidence_dir: Path | None = None,
+    build_info: Path | None = None,
+    sources: Path | None = None,
+    build_config: Path | None = None,
+    allow_build_query: bool = False,
+    collect_mode: str = "source-target",
 ) -> None:
     """Handle PE/Mach-O native dump path and output writing."""
     if follow_deps:
@@ -878,7 +883,7 @@ def _handle_non_elf_dump(
     except (AbicheckError, RuntimeError, OSError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
     _stamp_provenance(snap, git_tag=git_tag, build_id=build_id, no_git=no_git)
-    _write_snapshot_output(snap, output, evidence_dir)
+    _write_snapshot_output(snap, output, build_info, sources, build_config, allow_build_query, collect_mode)
 
 
 def _resolve_build_context_flags(
@@ -944,23 +949,6 @@ def _resolve_debug_artifact(
         enable_debuginfod=debuginfod,
         debuginfod_urls=[debuginfod_url] if debuginfod_url else None,
     )
-
-
-def _print_data_sources(so_path: Path, has_headers: bool) -> None:
-    """Print data source diagnostic information for a binary."""
-    from .dwarf_snapshot import show_data_sources
-
-    binary_fmt = _detect_binary_format(so_path)
-    elf_meta = None
-    dwarf_meta = None
-
-    if binary_fmt == "elf":
-        from .dwarf_unified import parse_dwarf
-        from .elf_metadata import parse_elf_metadata
-        elf_meta = parse_elf_metadata(so_path)
-        dwarf_meta, _ = parse_dwarf(so_path)
-
-    click.echo(show_data_sources(so_path, elf_meta, dwarf_meta, has_headers))
 
 
 def _resolve_per_side_options(
@@ -1380,7 +1368,13 @@ def _exit_with_severity_or_verdict(
     if severity_explicitly_set:
         assert sev_config is not None
         eff_sets = result._effective_kind_sets()
-        exit_code = compute_exit_code(result.changes, sev_config, kind_sets=eff_sets)
+        exit_code = compute_exit_code(
+            result.changes,
+            sev_config,
+            policy=result.policy,
+            kind_sets=eff_sets,
+            policy_file=result.policy_file,
+        )
         if exit_code != 0:
             sys.exit(exit_code)
     else:
@@ -1605,6 +1599,12 @@ def _finalize_compare_result(
                    "exported API are recorded as filtered, not reported. Internal-type "
                    "leaks are never hidden. On by default; use --no-scope-public-headers "
                    "to report every finding regardless of surface.")
+@click.option("--collapse-versioned-symbols", "collapse_versioned_symbols", is_flag=True, default=False,
+              help="Opt-in (G15): when a versioned-symbol scheme is detected (most removed "
+                   "symbols reappear differing only by a version token, e.g. ICU u_*_NN), "
+                   "reclassify those version-rename pairs as compatible so the verdict "
+                   "reflects the real delta, not the rename churn. A real SONAME bump and "
+                   "non-versioned removals still drive the verdict.")
 @click.option("--show-filtered", "show_filtered", is_flag=True, default=False,
               help="List findings excluded by --scope-public-headers (audit trail).")
 @click.option("--public-symbol", "public_symbols", multiple=True,
@@ -1678,7 +1678,7 @@ def _finalize_compare_result(
               help="Enable debuginfod network resolution for debug info (opt-in).")
 @click.option("--debuginfod-url", "debuginfod_url", default=None,
               help="debuginfod server URL (overrides DEBUGINFOD_URLS env var).")
-@evidence_compare_options  # ADR-028/029: --old-evidence/--new-evidence/--evidence-mode
+@build_source_compare_options  # --old/new-build-info, --old/new-sources, --collect-mode
 @adr027_compare_options  # ADR-027: --pattern-verdicts/--explain-patterns/--surface-metrics
 @click.option("-v", "--verbose", is_flag=True, default=False,
               help="Enable verbose/debug output.")
@@ -1700,7 +1700,7 @@ def compare_cmd(
     severity_addition: str | None,
     follow_deps: bool, search_paths: tuple[Path, ...], ld_library_path: str,
     show_redundant: bool, show_only: str | None, stat: bool,
-    scope_public_headers: bool, show_filtered: bool,
+    scope_public_headers: bool, collapse_versioned_symbols: bool, show_filtered: bool,
     public_symbols: tuple[str, ...], public_symbols_list: Path | None,
     report_mode: str, show_impact: bool,
     recommend: bool,
@@ -1717,7 +1717,9 @@ def compare_cmd(
     explain_patterns: bool,
     surface_metrics: bool,
     verbose: bool,
-    old_evidence: Path | None = None, new_evidence: Path | None = None, evidence_mode: str = "off",
+    old_build_info: Path | None = None, new_build_info: Path | None = None,
+    old_sources: Path | None = None, new_sources: Path | None = None,
+    collect_mode: str = "off",
     probe_matrix_old: Path | None = None,
     probe_matrix_new: Path | None = None,
 ) -> None:
@@ -1865,16 +1867,16 @@ def compare_cmd(
 
     extra_changes = _load_probe_matrix_changes(probe_matrix_old, probe_matrix_new)
 
-    evidence_coverage_rows: list[dict[str, object]] = []
-    if old_evidence is not None or new_evidence is not None or evidence_mode != "off":
-        from .cli_evidence import collect_compare_evidence
-        # Header-parse-context drift is judged from the new snapshot's own
-        # provenance (parsed_with_build_context, set by `dump -p`); compare adds
-        # no build context of its own.
-        ev_changes, evidence_coverage_rows = collect_compare_evidence(
-            old_evidence, new_evidence, evidence_mode, new, old,
+    # Build-info + source facts (ADR-028/033): the helper times inline diffing
+    # for the D6/D9 metrics and returns coverage/metrics to attach post-compare.
+    from .cli_buildsource import attach_evidence_metrics, prepare_embedded_build_source
+    extra_changes, layer_coverage_rows, evidence_metrics, _ev_changes = (
+        prepare_embedded_build_source(
+            old, new, collect_mode, extra_changes,
+            old_build_info, new_build_info, old_sources, new_sources,
+            policy_file=pf,
         )
-        extra_changes = (extra_changes or []) + ev_changes if ev_changes else extra_changes
+    )
 
     apply_patterns = pattern_verdicts or explain_patterns  # --explain implies on
     result = compare(
@@ -1884,9 +1886,13 @@ def compare_cmd(
         extra_changes=extra_changes,
         pattern_verdicts=apply_patterns,
         surface_metrics=surface_metrics,
+        collapse_versioned_symbols=collapse_versioned_symbols,
     )
-    if evidence_coverage_rows:
-        result.evidence_coverage = evidence_coverage_rows
+    if layer_coverage_rows:
+        result.layer_coverage = layer_coverage_rows
+    # Pass all injected findings (probe-matrix + evidence) so artifact-backed
+    # excludes them — none come from L0-L2 diffing.
+    attach_evidence_metrics(result, evidence_metrics, extra_changes or [])
 
     if explain_patterns:
         echo_pattern_modulations(result)
@@ -1911,6 +1917,19 @@ def compare_cmd(
 
     _announce_exit_scheme(severity_explicitly_set, sev_config, fmt=fmt, stat=stat)
     _exit_with_severity_or_verdict(result, sev_config, severity_explicitly_set)
+
+
+@main.command("recommend-collect-mode")
+@click.argument("paths", nargs=-1)
+def recommend_collect_mode_cmd(paths: tuple[str, ...]) -> None:
+    """Recommend a `--collect-mode` from a PR's changed paths (ADR-033 D3).
+
+    Prints `build` for build-system-only changes, `source-changed` when sources
+    or headers changed, else `off`. The artifact compare stays authoritative —
+    this only scopes which optional evidence a CI job should collect.
+    """
+    from .buildsource.source_replay import recommend_collect_mode
+    click.echo(recommend_collect_mode(paths))
 
 
 # ── ABICC compat subcommands (implementation in abicheck.compat) ─────────────
@@ -1959,9 +1978,9 @@ main.add_command(compat_group)
 from . import (  # noqa: E402  — must run after `main` and helpers are defined
     cli_appcompat,  # noqa: F401  — registers appcompat
     cli_baseline,  # noqa: F401  — registers baseline
+    cli_buildsource,  # noqa: F401  — registers collect
     cli_compare_release,  # noqa: F401  — registers compare-release
     cli_debian_symbols,  # noqa: F401  — registers debian-symbols
-    cli_evidence,  # noqa: F401  — registers collect-evidence
     cli_plugin,  # noqa: F401  — registers plugin-check
     cli_pr_comment,  # noqa: F401  — registers pr-comment
     cli_probe,  # noqa: F401  — registers probe (run, compare)

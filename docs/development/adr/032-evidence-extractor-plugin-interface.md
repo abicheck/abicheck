@@ -4,8 +4,8 @@
 **Status:** Accepted — implemented (D1–D10). The extractor interface, capability
 model, action-permission ceiling, external-CLI manifest, collection modes, and
 reproducibility ledger ship in `abicheck/evidence/extractor.py` +
-`extractor_manifest.py`, wired into `collect-evidence`
-(`--extractor-manifest` / `--allow-build-query` / `--collection-mode`).
+`extractor_manifest.py`, wired into `collect`
+(`--extractor-manifest` / `--allow-build-query` / `--collection-mode`). **Amended 2026-06-12** (ADR-028 source-tree model) — see Amendment below.
 **Decision maker:** Nikolay Petrov
 
 ---
@@ -329,3 +329,15 @@ This ledger is included in JSON/SARIF output (ADR-014) for traceability.
 - ADR-021b — MCP Security Model ([021-mcp-security-model.md](021-mcp-security-model.md))
 - ADR-028 — Evidence Pack Architecture
   ([028-source-build-evidence-pack.md](028-source-build-evidence-pack.md))
+
+
+## Amendment (2026-06-12): build-tool query config (see ADR-028)
+
+A per-project `.abicheck.yml` `build:` block (`system:` + a `query:` command, or
+`--build-config`) lets abicheck recover exact ABI-affecting flags and generated
+headers from a source checkout — disambiguating multi-build-system projects
+(e.g. oneDAL's Make *and* Bazel). This is a direct application of the D5 action
+ceiling and adds no new capability: `inspect` (read existing outputs) is the
+default; running the configured query command is the opt-in `query_build_system`
+action (`--allow-build-query`); `run_build`/`wrap_build` stay denied — abicheck
+never performs a full project build.

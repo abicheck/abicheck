@@ -19,11 +19,11 @@ abicheck-owned graph schema."""
 
 from __future__ import annotations
 
-from abicheck.evidence.graph_backends import (
+from abicheck.buildsource.graph_backends import (
     ingest_codeql_call_results,
     ingest_kythe_entries,
 )
-from abicheck.evidence.source_graph import SourceGraphSummary
+from abicheck.buildsource.source_graph import SourceGraphSummary
 
 
 def test_kythe_call_and_ref_edges() -> None:
@@ -97,7 +97,7 @@ def test_backends_round_trip_through_summary() -> None:
     assert any(e.kind == "DECL_CALLS_DECL" for e in restored.edges)
 
 
-# ── collect-evidence --kythe-entries / --codeql-results wiring ──────────────
+# ── collect --kythe-entries / --codeql-results wiring ──────────────
 
 
 def _cdb(tmp_path):
@@ -117,8 +117,8 @@ def test_collect_evidence_kythe_entries_folds_edges(tmp_path) -> None:
 
     from click.testing import CliRunner
 
+    from abicheck.buildsource.pack import BuildSourcePack
     from abicheck.cli import main
-    from abicheck.evidence.pack import EvidencePack
 
     kythe = tmp_path / "kythe.json"
     kythe.write_text(json.dumps([
@@ -127,11 +127,11 @@ def test_collect_evidence_kythe_entries_folds_edges(tmp_path) -> None:
     ]))
     out = tmp_path / "ev"
     res = CliRunner().invoke(main, [
-        "collect-evidence", "--compile-db", str(_cdb(tmp_path)),
+        "collect", "--compile-db", str(_cdb(tmp_path)),
         "--kythe-entries", str(kythe), "-o", str(out),
     ])
     assert res.exit_code == 0, res.output
-    graph = EvidencePack.load(out).source_graph
+    graph = BuildSourcePack.load(out).source_graph
     assert graph is not None
     assert any(e.kind == "DECL_CALLS_DECL" for e in graph.edges)
     assert graph.external_graph_refs and graph.external_graph_refs[0]["backend"] == "kythe"
@@ -142,34 +142,34 @@ def test_collect_evidence_codeql_results_folds_edges(tmp_path) -> None:
 
     from click.testing import CliRunner
 
+    from abicheck.buildsource.pack import BuildSourcePack
     from abicheck.cli import main
-    from abicheck.evidence.pack import EvidencePack
 
     codeql = tmp_path / "codeql.json"
     codeql.write_text(json.dumps({"#select": {"tuples": [["_Za", "_Zb"]]}}))
     out = tmp_path / "ev"
     res = CliRunner().invoke(main, [
-        "collect-evidence", "--compile-db", str(_cdb(tmp_path)),
+        "collect", "--compile-db", str(_cdb(tmp_path)),
         "--codeql-results", str(codeql), "-o", str(out),
     ])
     assert res.exit_code == 0, res.output
-    graph = EvidencePack.load(out).source_graph
+    graph = BuildSourcePack.load(out).source_graph
     assert graph is not None and any(e.kind == "DECL_CALLS_DECL" for e in graph.edges)
 
 
 def test_collect_evidence_malformed_backend_export_degrades(tmp_path) -> None:
     from click.testing import CliRunner
 
+    from abicheck.buildsource.pack import BuildSourcePack
     from abicheck.cli import main
-    from abicheck.evidence.pack import EvidencePack
 
     bad = tmp_path / "bad.json"
     bad.write_text("{not json")
     out = tmp_path / "ev"
     res = CliRunner().invoke(main, [
-        "collect-evidence", "--compile-db", str(_cdb(tmp_path)),
+        "collect", "--compile-db", str(_cdb(tmp_path)),
         "--kythe-entries", str(bad), "-o", str(out),
     ])
     # Malformed export must not abort collection; the pack is still written.
     assert res.exit_code == 0, res.output
-    assert EvidencePack.load(out).source_graph is not None
+    assert BuildSourcePack.load(out).source_graph is not None

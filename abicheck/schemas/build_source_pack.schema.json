@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://napetrov.github.io/abicheck/schemas/build_source_pack.schema.json",
+  "title": "abicheck BuildSourcePack manifest",
+  "description": "Schema for the manifest.json at the root of an BuildSourcePack directory produced by `abicheck collect` (ADR-028). The pack is content-addressed and versioned independently of the ABI snapshot schema via build_source_pack_version. The snapshot stores only a lightweight reference (see the build_source_pack property of an AbiSnapshot).",
+  "type": "object",
+  "required": ["build_source_pack_version"],
+  "additionalProperties": true,
+  "properties": {
+    "build_source_pack_version": {
+      "type": "integer",
+      "description": "Schema version of the pack manifest/layout. Independent of the ABI snapshot schema_version.",
+      "minimum": 1
+    },
+    "abicheck_version": {"type": "string"},
+    "created_at": {"type": "string", "description": "ISO 8601 timestamp; excluded from the content hash."},
+    "source_root": {
+      "type": "object",
+      "description": "Redaction-aware source-root descriptor (ADR-032 D7): the real path is never stored.",
+      "properties": {
+        "path_redacted": {"type": "boolean"},
+        "repo_hash": {"type": "string"}
+      },
+      "additionalProperties": true
+    },
+    "inputs": {"type": "object", "additionalProperties": true},
+    "extractors": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name"],
+        "properties": {
+          "name": {"type": "string"},
+          "version": {"type": "string"},
+          "status": {"type": "string", "enum": ["ok", "partial", "failed", "skipped"]},
+          "inputs": {"type": "array", "items": {"type": "string"}},
+          "artifacts": {"type": "array", "items": {"type": "string"}},
+          "detail": {"type": "string"},
+          "command": {"type": "string"},
+          "command_hash": {"type": "string"},
+          "capabilities": {"type": "array", "items": {"type": "string"}},
+          "started_at": {"type": "string"},
+          "finished_at": {"type": "string"},
+          "diagnostics": {"type": "array", "items": {"type": "string"}}
+        },
+        "additionalProperties": true
+      }
+    },
+    "artifacts": {
+      "type": "array",
+      "description": "Content-addressed sha256 digests of the normalized payload files.",
+      "items": {"type": "string"}
+    },
+    "coverage": {
+      "type": "array",
+      "description": "Evidence-coverage rows for the optional layers (ADR-028 D7).",
+      "items": {
+        "type": "object",
+        "required": ["layer", "status"],
+        "properties": {
+          "layer": {"type": "string", "description": "Layer key, e.g. L3_build, L4_source_abi, L5_source_graph."},
+          "status": {"type": "string", "enum": ["present", "partial", "not_collected"]},
+          "confidence": {"type": "string", "enum": ["high", "reduced", "unknown"]},
+          "detail": {"type": "string"}
+        },
+        "additionalProperties": true
+      }
+    },
+    "redaction": {"type": "object", "additionalProperties": true}
+  }
+}

@@ -440,6 +440,12 @@ def check_doc_count_sync(f: Findings) -> None:
             n_kinds,
             r"current ChangeKind total is \*\*(\d+)\*\*",
         ),
+        (
+            DOCS / "user-guide/mcp-integration.md",
+            "ChangeKind count (abi_list_changes JSON sample)",
+            n_kinds,
+            r"\"count\": (\d+)",
+        ),
     ]
 
     for path, label, expected, pattern in anchors:
@@ -459,6 +465,44 @@ def check_doc_count_sync(f: Findings) -> None:
                 f"{_rel(path)}: {label} says {found}, but source of truth is {expected}. "
                 "Update the doc (or the source) so they agree.",
             )
+
+    # Generic sweep: any "<number> change kinds/types | ChangeKinds | detection
+    # rules | -kind" phrase anywhere in the published docs must equal the real
+    # enum size. The anchors above pin specific headline sentences; this catches
+    # the long tail of casual mentions that historically drifted (190, 183,
+    # 180+, 150+, 100+...). ADRs are dated decision records and keep the counts
+    # that were true when they were written, so they are exempt.
+    # `?...`? tolerates markdown code spans: "183 `ChangeKind` values",
+    # "234 `ChangeKind`s".
+    generic = re.compile(
+        r"\b(\d{2,3})\+?"
+        r"(?:-kind\b|\s+(?:ABI/API\s+)?(?:[Cc]hange\s+(?:kinds?|types?)|`?ChangeKinds?`?s?|detection\s+rules))"
+    )
+    adr_dir = DOCS / "development" / "adr"
+    sweep_files = [
+        ROOT / "README.md",
+        ROOT / "CLAUDE.md",
+        ROOT / "examples" / "README.md",
+    ]
+    sweep_files += [
+        p
+        for p in sorted(DOCS.rglob("*"))
+        if p.suffix in {".md", ".yaml", ".yml"} and not p.is_relative_to(adr_dir)
+    ]
+    for path in sweep_files:
+        if not path.is_file():
+            continue
+        text = _read(path)
+        for lineno, line in enumerate(text.splitlines(), start=1):
+            for m in generic.finditer(line):
+                found = int(m.group(1))
+                if found != n_kinds:
+                    f.err(
+                        "doc-count-sync",
+                        f"{_rel(path)}:{lineno}: mentions {m.group(0)!r}, but the "
+                        f"ChangeKind enum has {n_kinds} members. Update the doc "
+                        "(or drop the count if it describes a subset).",
+                    )
 
 
 # ---------------------------------------------------------------------------
@@ -552,7 +596,7 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
         frozenset({"cli", "cli_compare_release"}),
         frozenset({"cli", "cli_baseline"}),
         frozenset({"cli", "cli_debian_symbols"}),
-        frozenset({"cli", "cli_evidence"}),
+        frozenset({"cli", "cli_buildsource"}),
         frozenset({"cli", "cli_appcompat"}),
         frozenset({"cli", "cli_plugin"}),
         frozenset({"cli", "cli_pr_comment"}),
@@ -560,6 +604,15 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
         frozenset({"cli", "cli_stack"}),
         frozenset({"cli", "cli_suggest"}),
         frozenset({"cli", "cli_surface"}),
+        # TYPE_CHECKING-only typing cycle (no runtime import): AbiSnapshot
+        # annotates an embedded BuildSourcePack; pack annotates SourceGraphSummary;
+        # source_graph annotates Change from checker_types; checker_types annotates
+        # model. Every edge in this loop is under `if TYPE_CHECKING`, so it never
+        # executes — the single-artifact embed feature needs the snapshot to name
+        # the pack type.
+        frozenset(
+            {"buildsource.pack", "buildsource.source_graph", "checker_types", "model"}
+        ),
     }
 )
 

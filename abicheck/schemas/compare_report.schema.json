@@ -110,9 +110,9 @@
         "rationale": { "type": "string" }
       }
     },
-    "evidence_coverage": {
+    "layer_coverage": {
       "type": "array",
-      "description": "Optional source/build evidence coverage (ADR-028 D7). One row per layer (L0 binary, L1 debug, L2 header AST, L3 build context, L4 source ABI, L5 source graph), present only when an EvidencePack was supplied to compare. Lets consumers distinguish artifact-proven from build-context-only findings.",
+      "description": "Optional source/build evidence coverage (ADR-028 D7). One row per layer (L0 binary, L1 debug, L2 header AST, L3 build context, L4 source ABI, L5 source graph), present only when an BuildSourcePack was supplied to compare. Lets consumers distinguish artifact-proven from build-context-only findings.",
       "items": {
         "type": "object",
         "required": ["layer", "status"],
@@ -123,6 +123,23 @@
           "confidence": { "type": "string", "enum": ["high", "reduced", "unknown"] },
           "detail": { "type": "string" }
         }
+      }
+    },
+    "evidence_metrics": {
+      "type": "object",
+      "description": "Optional evidence-collection timing and observability metrics (ADR-033 D6/D9). Present only when build-info/source facts were involved in the compare. Keys follow the D9 metric names so CI can tune evidence-mode selection.",
+      "additionalProperties": true,
+      "properties": {
+        "extractor.duration_seconds": { "type": "number", "minimum": 0 },
+        "coverage.build_context.present": { "type": "boolean" },
+        "coverage.source_abi.mode": { "type": "string" },
+        "coverage.graph.mode": { "type": "string" },
+        "findings.artifact_backed.count": { "type": "integer", "minimum": 0 },
+        "findings.source_only.count": { "type": "integer", "minimum": 0 },
+        "findings.build_context_drift.count": { "type": "integer", "minimum": 0 },
+        "findings.evidence_required_missing.count": { "type": "integer", "minimum": 0 },
+        "findings.demoted_by_surface.count": { "type": "integer", "minimum": 0 },
+        "findings.suppressed_with_reason.count": { "type": "integer", "minimum": 0 }
       }
     },
     "detectors": {

@@ -199,12 +199,101 @@ class MatrixSnapshot:
 
 
 _CXX_STD_FLAG = "-std=c++"
-_SAFE_COMPONENT_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
-_DISALLOWED_COMPILER_FLAGS = frozenset({
-    "-c", "-o", "-x", "-E", "-S", "-M", "-MD", "-MMD", "-MF", "-MT", "-MQ", "-pipe", "--"
-})
-_DISALLOWED_FLAG_PREFIXES: tuple[str, ...] = ("-o", "-x", "-MF", "-MT", "-MQ")
-_ALLOWED_COMPILER_BASENAMES: frozenset[str] = frozenset({"g++", "gcc", "clang++", "clang", "c++", "cc"})
+_SAFE_ID_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
+_SAFE_COMPILER_RE = re.compile(
+    r"^(?:[A-Za-z0-9_.+-]+-)?"
+    r"(?:g\+\+|gcc|clang\+\+|clang|c\+\+|cc)"
+    r"(?:-[0-9][A-Za-z0-9_.-]*)?$"
+)
+
+# Keep manifest-provided flags to inert compiler options. Options that make
+# GCC/Clang load plugins, specs, wrappers, or arbitrary frontend arguments are
+# deliberately omitted because they can execute local code before compilation.
+_SAFE_FLAG_PREFIXES = (
+    "-D",
+    "-I",
+    "-O",
+    "-Werror=",
+    "-Wno-",
+    "-g",
+    "-march=",
+    "-mcpu=",
+    "-mfpu=",
+    "-mtune=",
+    "-stdlib=",
+)
+_SAFE_FLAG_EXACT = {
+    "-ansi",
+    "-fexceptions",
+    "-fno-exceptions",
+    "-frtti",
+    "-fno-rtti",
+    "-fPIC",
+    "-fopenmp",
+    "-fpic",
+    "-fsycl",
+    "-pipe",
+    "-pedantic",
+    "-pthread",
+    "-Wall",
+    "-Werror",
+    "-Wextra",
+    "-Wpedantic",
+    "-m32",
+    "-m64",
+}
+
+
+def _validate_manifest_id(kind: str, value: Any) -> str:
+    if not isinstance(value, str) or not _SAFE_ID_RE.fullmatch(value):
+        raise ValueError(
+            f"probe spec {kind} must be a non-empty identifier containing only "
+            "letters, digits, '_', '.', or '-'"
+        )
+    if value in {".", ".."}:
+        raise ValueError(f"probe spec {kind} must not be {value!r}")
+    return value
+
+
+def _validate_compiler_name(value: Any) -> str:
+    if not isinstance(value, str) or not value:
+        raise ValueError("probe spec compiler must be a non-empty string")
+    if Path(value).name != value:
+        raise ValueError(
+            "probe spec compiler must be a compiler executable name on PATH, "
+            "not a path"
+        )
+    if not _SAFE_COMPILER_RE.fullmatch(value):
+        raise ValueError(
+            "probe spec compiler must name a C/C++ compiler such as g++, gcc, "
+            "clang++, clang, c++, or cc"
+        )
+    return value
+
+
+def _validate_flag(value: Any) -> str:
+    if not isinstance(value, str) or not value:
+        raise ValueError("probe spec flags must be non-empty strings")
+    if value.startswith(_CXX_STD_FLAG):
+        return value
+    if value in _SAFE_FLAG_EXACT:
+        return value
+    if value.startswith(_SAFE_FLAG_PREFIXES):
+        return value
+    raise ValueError(f"probe spec compiler flag {value!r} is disallowed")
+
+
+def _validate_string_sequence(kind: str, value: Any) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if not isinstance(value, list | tuple):
+        raise ValueError(f"probe spec {kind} must be a sequence of strings")
+    out: list[str] = []
+    for item in value:
+        if not isinstance(item, str):
+            raise ValueError(f"probe spec {kind} must be a sequence of strings")
+        out.append(item)
+    return tuple(out)
 
 
 def _parse_cxx_std(flags: list[str]) -> int | None:
@@ -216,52 +305,6 @@ def _parse_cxx_std(flags: list[str]) -> int | None:
             except ValueError:
                 return None
     return None
-
-
-
-
-def _validate_safe_component(value: Any, *, field_name: str) -> str:
-    if not isinstance(value, str) or not value:
-        raise ValueError(f"{field_name} must be a non-empty string")
-    if not _SAFE_COMPONENT_RE.fullmatch(value):
-        raise ValueError(f"{field_name} contains unsafe characters: {value!r}")
-    if value in {".", ".."}:
-        raise ValueError(f"{field_name} cannot be '.' or '..'")
-    return value
-
-
-def _validate_compiler_name(value: Any) -> str:
-    if not isinstance(value, str) or not value:
-        raise ValueError("compiler must be a non-empty string")
-    compiler = os.path.basename(value)
-    if compiler != value:
-        raise ValueError(f"compiler must be a basename, got {value!r}")
-    if compiler.startswith("-"):
-        raise ValueError(f"compiler must not start with '-', got {value!r}")
-    if not any(
-        compiler == base or compiler.startswith(f"{base}-")
-        for base in _ALLOWED_COMPILER_BASENAMES
-    ):
-        raise ValueError(f"compiler must be a known C/C++ compiler basename, got {value!r}")
-    return compiler
-
-
-def _validate_flags(raw_flags: Any) -> tuple[str, ...]:
-    if raw_flags is None:
-        return ()
-    if not isinstance(raw_flags, list):
-        raise ValueError("flags must be a list of strings")
-    flags: list[str] = []
-    for f in raw_flags:
-        if not isinstance(f, str):
-            raise ValueError(f"flag values must be strings, got {f!r}")
-        flag_name = f.split("=", 1)[0]
-        if flag_name in _DISALLOWED_COMPILER_FLAGS or any(
-            flag_name.startswith(prefix) for prefix in _DISALLOWED_FLAG_PREFIXES
-        ):
-            raise ValueError(f"flag {f!r} is disallowed in probe configuration")
-        flags.append(f)
-    return tuple(flags)
 
 def load_probe_spec(path: str | Path) -> ProbeSpec:
     """Parse a YAML probe manifest. Accepts JSON too (a YAML subset)."""
@@ -291,21 +334,24 @@ def parse_probe_spec(data: dict[str, Any]) -> ProbeSpec:
 
     configs: list[ProbeConfiguration] = []
     for c in data["configurations"]:
-        flags = _validate_flags(c.get("flags", []))
+        raw_flags = _validate_string_sequence("flags", c.get("flags", []))
+        flags = tuple(_validate_flag(f) for f in raw_flags)
         configs.append(ProbeConfiguration(
-            id=_validate_safe_component(c["id"], field_name="configuration id"),
+            id=_validate_manifest_id("configuration id", c["id"]),
             compiler=_validate_compiler_name(c["compiler"]),
             flags=flags,
             defines=dict(c.get("defines", {})),
-            include_dirs=tuple(c.get("include_dirs", [])),
+            include_dirs=_validate_string_sequence(
+                "include_dirs", c.get("include_dirs", [])
+            ),
             cxx_std=_parse_cxx_std(list(flags)),
         ))
 
     probes: list[Probe] = []
     for p in data["probes"]:
         probes.append(Probe(
-            name=_validate_safe_component(p["name"], field_name="probe name"),
-            headers=tuple(p.get("headers", [])),
+            name=_validate_manifest_id("probe name", p["name"]),
+            headers=_validate_string_sequence("headers", p.get("headers", [])),
             body=p["body"],
         ))
 

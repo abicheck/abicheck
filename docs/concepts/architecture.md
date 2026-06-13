@@ -55,7 +55,8 @@ flowchart TD
 The analysis layers are independent and additive — each catches changes the
 others miss, and the checker reconciles them into a single verdict. The
 artifact layers (L0/L1/L2) are described in detail below; the build/source
-layers (L3/L4) are covered in [Evidence Packs](evidence-pack.md).
+layers (L3/L4, plus the optional L5 reachability graph) are covered in
+[Build & Source Packs](build-source-data.md).
 
 ---
 
@@ -71,15 +72,15 @@ are five, layered from the least input to the most:
 | **L0** | Just the **binary** | ELF/PE/Mach-O parsers (`elf_metadata.py`, `pe_metadata.py`, `macho_metadata.py`) | Authoritative | Exported symbols, SONAME/install-name, versions, visibility, binding, dependencies |
 | **L1** | **Debug symbols** | DWARF/PDB/BTF/CTF (`dwarf_*`, `pdb_*`, `btf_metadata.py`, `ctf_metadata.py`) | Authoritative when matched to the binary | Type **layout**: sizes, field offsets, enum values, vtable slots, calling convention, packing |
 | **L2** | **Public headers** | castxml AST (`dumper_castxml.py`) | Authoritative for header-visible API | Source **API**: signatures, overloads, access, `final`/`explicit`/`noexcept`, templates, public/internal scoping |
-| **L3** | **Build system data & options** | compile DB / CMake / Ninja / Bazel / Make (`build_context.py`, EvidencePack ADR-029) | Context / confidence | ABI-relevant flags (`-std`, `_GLIBCXX_USE_CXX11_ABI`, `-fvisibility`, `-fabi-version`), toolchain, target graph, export policy |
-| **L4** | **Sources** | per-TU source ABI replay (EvidencePack ADR-030) | Source-/API-risk evidence, never sole shipped-ABI authority | Macro/`constexpr` values, default-argument values, inline/template bodies, uninstantiated templates |
+| **L3** | **Build system data & options** | compile DB / CMake / Ninja / Bazel / Make (`build_context.py`, build/source pack ADR-029) | Context / confidence | ABI-relevant flags (`-std`, `_GLIBCXX_USE_CXX11_ABI`, `-fvisibility`, `-fabi-version`), toolchain, target graph, export policy |
+| **L4** | **Sources** | per-TU source ABI replay (build/source pack ADR-030) | Source-/API-risk evidence, never sole shipped-ABI authority | Macro/`constexpr` values, default-argument values, inline/template bodies, uninstantiated templates |
 
 ```mermaid
 flowchart LR
     L0["L0 · binary<br/>(stripped .so)"] --> L1["L1 · + debug<br/>(DWARF/PDB)"]
     L1 --> L2["L2 · + headers<br/>(castxml AST)"]
     L2 --> L3["L3 · + build data<br/>(compile DB)"]
-    L3 --> L4["L4 · + sources<br/>(EvidencePack)"]
+    L3 --> L4["L4 · + sources<br/>(build/source pack)"]
     L0 -.weaker evidence.-> L4
 ```
 
@@ -96,8 +97,8 @@ evidence carries the same weight:
 So L3 noticing a `-std` bump or L4 noticing a changed macro can *add* a finding
 or *explain* one, but only L0/L1/L2 can declare a binary `BREAKING`. Every
 compare that uses build/source evidence prints an **evidence-coverage** table
-(and a structured `evidence_coverage` array in JSON) so consumers can tell which
-findings are artifact-proven vs. context-only — see [Evidence Packs](evidence-pack.md).
+(and a structured `layer_coverage` array in JSON) so consumers can tell which
+findings are artifact-proven vs. context-only — see [Build & Source Packs](build-source-data.md).
 
 **Graceful degradation.** `abicheck dump --show-data-sources` reports exactly
 which of L0/L1/L2 a binary affords and how many detectors that enables
@@ -228,7 +229,7 @@ separate debug file directories, or `--debuginfod` for network-based resolution.
 The build (L3) and source (L4) layers are **post-build, opt-in, and never
 authoritative on their own** — abicheck reads existing build outputs and
 build-system query interfaces; it does not rebuild your project. They are
-collected into a content-addressed **EvidencePack** and attached to a snapshot:
+collected into a content-addressed **build/source pack** and attached to a snapshot:
 
 - **L3 — build context** (`build_context.py`, ADR-029): parses a
   `compile_commands.json` (`-p build/`) or a CMake/Ninja/Bazel/Make graph to
@@ -241,7 +242,7 @@ collected into a content-addressed **EvidencePack** and attached to a snapshot:
   `default_argument_changed`, `constexpr_value_changed`, and the uninstantiated
   templates that no artifact carries.
 
-Both are described in full in [Evidence Packs](evidence-pack.md). Per the
+Both are described in full in [Build & Source Packs](build-source-data.md). Per the
 authority rule, every L3/L4 finding defaults to `API_BREAK` or risk and carries
 an explicit evidence-tier boundary so it is never read as a proven shipped-ABI
 break.
@@ -339,7 +340,7 @@ break.
 | Module | Responsibility |
 |--------|---------------|
 | `compat/` | ABICC compatibility layer (compat check, compat dump, XML parsing) |
-| `abicc_dump_import.py` | Import Perl-format ABICC dump files |
+| `compat/abicc_dump_import.py` | Import Perl-format ABICC dump files |
 | `demangle.py` | C++ symbol demangling utilities |
 
 ---

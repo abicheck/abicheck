@@ -3,7 +3,7 @@
 ## What is abicheck?
 
 ABI compatibility checker for C/C++ shared libraries. Pure Python (3.10+).
-Detects 234 ABI/API change types across ELF, PE/COFF, and Mach-O binaries,
+Detects 246 ABI/API change types across ELF, PE/COFF, and Mach-O binaries,
 categorized into `BREAKING_KINDS`, `API_BREAK_KINDS`, `COMPATIBLE_KINDS`, and `RISK_KINDS` (see `ChangeKind`).
 Drop-in replacement for abi-compliance-checker (ABICC).
 
@@ -43,7 +43,7 @@ ruff format --check abicheck/ tests/
 ## Architecture — module map
 
 Entry points:
-- `abicheck/cli.py` — Click CLI (large file, ~2600 lines; be careful with edits)
+- `abicheck/cli.py` — Click CLI (large file, at the 2000-line hard cap; be careful with edits)
 - `abicheck/compat/cli.py` — ABICC-compatible CLI wrapper
 - `abicheck/mcp_server.py` — MCP server for AI agent integration
 - `abicheck/__main__.py` — `python -m abicheck` entry
@@ -100,12 +100,15 @@ Core pipeline (in order of data flow):
    - `change_registry.py` — change kind registry
    - `service.py` — service layer (Python API)
    - `stack_checker.py`, `stack_report.py`, `stack_html.py` — stack analysis
+9. **Build-source evidence (optional L3–L5 layers)** — `buildsource/` package
+   (collect/merge/source-ABI replay/source graph; ADR-028…033). See
+   `abicheck/buildsource/CLAUDE.md` for its module map.
 
 ## Key types
 
 - `AbiSnapshot` (`model.py`) — serializable snapshot of a library's ABI surface
 - `DiffResult` (`checker_types.py`) — single detected change with kind, severity, details
-- `ChangeKind` (`checker_policy.py`) — enum of 234 change types; categorized into `BREAKING_KINDS`, `API_BREAK_KINDS`, `COMPATIBLE_KINDS`, `RISK_KINDS`
+- `ChangeKind` (`checker_policy.py`) — enum of 246 change types; categorized into `BREAKING_KINDS`, `API_BREAK_KINDS`, `RISK_KINDS`, and `COMPATIBLE_KINDS` (further split into `ADDITION_KINDS` and `QUALITY_KINDS`)
 - `Verdict` (`checker.py`) — overall comparison result (compatible/source_break/breaking)
 - `LibraryMetadata` (`checker.py`) — parsed library info
 
@@ -190,19 +193,24 @@ the global 95% floor** to make another platform pass.
 
 ## Files that are large — edit carefully
 
-- `cli.py` (~1,500 lines) — main CLI, Click commands; sub-command modules below register on it
-- `cli_compare_release.py` (~950 lines) — `compare-release` command and helpers (split from `cli.py`)
-- `cli_appcompat.py` (~280 lines) — `appcompat` command and helpers (split from `cli.py`)
-- `cli_baseline.py` (~240 lines) — `baseline` command group (split from `cli.py`)
+- `cli.py` (2,000 lines — at the hard cap) — main CLI, Click commands; sub-command modules below register on it
+- `diff_symbols.py` (~2,000 lines — at the hard cap) — function/variable/parameter diffing
+- `cli_buildsource.py` (~1,840 lines) — `collect`/`merge`/graph commands (build-source evidence)
+- `diff_platform.py` (~1,810 lines) — all platform-specific detection
+- `reporter.py` (~1,770 lines) — JSON/Markdown/text output
+- `cli_compare_release.py` (~1,660 lines) — `compare-release` command and helpers (split from `cli.py`)
+- `compat/cli.py` (~1,580 lines) — ABICC compat CLI
+- `bundle.py` (~1,520 lines) — bundle-aware multi-binary analysis
+- `diff_filtering.py` (~1,520 lines) — deduplication and redundancy removal
+- `dumper.py` (~1,360 lines) — binary metadata extraction
+- `dumper_castxml.py` (~990 lines) — castxml XML parser (split from `dumper.py`)
+- `cli_appcompat.py` (~390 lines) — `appcompat` command and helpers (split from `cli.py`)
+- `cli_baseline.py` (~290 lines) — `baseline` command group (split from `cli.py`)
 - `cli_stack.py` (~190 lines) — `deps` and `stack-check` commands (split from `cli.py`)
+- `diff_platform_templates.py` (~180 lines) — template inner-type detectors (split from `diff_platform.py`)
+- `compat/_errors.py` (~150 lines) — ABICC compat error classification helpers (split from `compat/cli.py`)
 - `cli_debian_symbols.py` (~130 lines) — `debian-symbols` command group (split from `cli.py`)
 - `cli_suggest.py` (~80 lines) — `suggest-suppressions` command (split from `cli.py`)
-- `diff_platform.py` (~1,460 lines) — all platform-specific detection
-- `diff_platform_templates.py` (~180 lines) — template inner-type detectors (split from `diff_platform.py`)
-- `dumper.py` (~1,150 lines) — binary metadata extraction
-- `dumper_castxml.py` (~610 lines) — castxml XML parser (split from `dumper.py`)
-- `compat/cli.py` (~1,430 lines) — ABICC compat CLI
-- `compat/_errors.py` (~130 lines) — ABICC compat error classification helpers (split from `compat/cli.py`)
 
 The 2000-line hard cap is enforced for every source file (no allowlist). Files above 1500 lines emit a WARN as a refactor signal. When editing, read the specific section you need rather than the whole file.
 

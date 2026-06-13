@@ -28,7 +28,6 @@ from .checker_policy import (
     Confidence,
     EvidenceTier,
     Verdict,
-    effective_category,
 )
 from .checker_policy import (
     policy_kind_sets as _policy_kind_sets,
@@ -90,6 +89,12 @@ class Change:
     modulation_reason: str | None = None
     modulation_rule: str | None = None
     confidence: Confidence = Confidence.HIGH
+    # ADR-033 D9 — which build/source evidence bucket this finding belongs to
+    # ("build_context" or "source_only"), set when it is produced from L3/L4/L5
+    # evidence. Lets the metrics count *retained* (post-suppression) findings per
+    # bucket so the D9 split partitions the reported findings. ``None`` for
+    # ordinary artifact-backed findings.
+    evidence_category: str | None = None
 
 
 @dataclass
@@ -177,11 +182,17 @@ class DiffResult:
     # carry the override on Change.effective_verdict; this is the audit trail.
     pattern_modulations: list[dict[str, object]] = field(default_factory=list)
     # ADR-028 D7 — evidence-coverage rows (L0–L5) for the compare, when an
-    # EvidencePack was supplied. Each entry is a serialized LayerCoverage
+    # BuildSourcePack was supplied. Each entry is a serialized LayerCoverage
     # ({layer, status, confidence, detail}). Surfaced in the JSON report so
     # machine consumers can tell artifact-proven from build-context-only
     # findings; empty when no evidence was involved.
-    evidence_coverage: list[dict[str, object]] = field(default_factory=list)
+    layer_coverage: list[dict[str, object]] = field(default_factory=list)
+    # ADR-033 D6/D9 — evidence-collection timing and observability metrics for
+    # the compare. Populated only when build-info/source facts were involved
+    # (mirrors ``layer_coverage``). Keys follow the D9 metric names (e.g.
+    # ``extractor.duration_seconds``, ``findings.source_only.count``); surfaced
+    # in the JSON report so CI can tune mode selection. Empty otherwise.
+    evidence_metrics: dict[str, object] = field(default_factory=dict)
 
     def _effective_kind_sets(
         self,
@@ -215,40 +226,47 @@ class DiffResult:
                 sets[idx].add(kind)
         return frozenset(b), frozenset(a), frozenset(c), frozenset(r)
 
+    def _effective_verdict_for_change(self, change: Change) -> Verdict:
+        """Return the per-change verdict, including frozen namespace guards."""
+        from .severity import effective_verdict_for_change
+
+        return effective_verdict_for_change(
+            change,
+            policy=self.policy,
+            kind_sets=self._effective_kind_sets(),
+            policy_file=self.policy_file,
+        )
+
     @property
     def breaking(self) -> list[Change]:
         """Changes classified as BREAKING under the active policy."""
-        sets = self._effective_kind_sets()
         return [
-            c for c in self.changes if effective_category(c, *sets) == Verdict.BREAKING
+            c for c in self.changes
+            if self._effective_verdict_for_change(c) == Verdict.BREAKING
         ]
 
     @property
     def source_breaks(self) -> list[Change]:
         """Changes classified as API_BREAK under the active policy."""
-        sets = self._effective_kind_sets()
         return [
-            c for c in self.changes if effective_category(c, *sets) == Verdict.API_BREAK
+            c for c in self.changes
+            if self._effective_verdict_for_change(c) == Verdict.API_BREAK
         ]
 
     @property
     def compatible(self) -> list[Change]:
         """Changes classified as COMPATIBLE under the active policy."""
-        sets = self._effective_kind_sets()
         return [
-            c
-            for c in self.changes
-            if effective_category(c, *sets) == Verdict.COMPATIBLE
+            c for c in self.changes
+            if self._effective_verdict_for_change(c) == Verdict.COMPATIBLE
         ]
 
     @property
     def risk(self) -> list[Change]:
         """Changes classified as COMPATIBLE_WITH_RISK under the active policy."""
-        sets = self._effective_kind_sets()
         return [
-            c
-            for c in self.changes
-            if effective_category(c, *sets) == Verdict.COMPATIBLE_WITH_RISK
+            c for c in self.changes
+            if self._effective_verdict_for_change(c) == Verdict.COMPATIBLE_WITH_RISK
         ]
 
 

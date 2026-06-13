@@ -29,7 +29,7 @@ use_cases:
   # ── change_class ──────────────────────────────────────────────────────────
   - id: UC-CHANGE-taxonomy
     axis: change_class
-    name: ABI/API change taxonomy (234 ChangeKinds, 5-tier policy)
+    name: ABI/API change taxonomy (246 ChangeKinds, 5-tier policy)
     status: complete
     evidence:
       modules: [abicheck/change_registry.py, abicheck/checker_policy.py]
@@ -47,18 +47,23 @@ use_cases:
   - id: UC-CHANGE-inline-ns-version
     axis: change_class
     name: Inline-namespace version-stamp normalization (ICU-style)
-    status: planned
+    status: partial
     gap: G15
     plan: docs/development/plans/g15-inline-namespace-version.md
+    evidence:
+      modules: [abicheck/versioned_symbol_scheme.py, abicheck/post_processing.py]
+      tests: [tests/test_versioned_symbol_scheme.py]
     next_steps: >
-      Detect a per-release version token carried by a strong majority of exported
-      symbols (ICU `_NN`, libstdc++ versioned namespaces, Abseil `lts_<date>`),
-      cross-check it against the SONAME, normalize symbol keys through it, then
-      diff. Empirically confirmed on ICU libicuuc 73→74: abicheck reports BREAKING
-      with 6288 changes, but after normalization the real delta is +34 / -0
-      (additive plus a deliberate soname bump). Same false-noise topology as G9
-      at the C++ symbol level. Must still surface the soname bump as the real
-      relink signal.
+      DONE (detector half, field eval P08): the versioned-symbol-scheme recogniser
+      emits one advisory `versioned_symbol_scheme_detected` (RISK) when a strong
+      majority of removed symbols reappear as added symbols differing only by a
+      numeric version token (ICU `u_*_NN`). Additive — it explains the churn and
+      never downgrades the artifact-proven removals (authority rule).
+      STILL PLANNED: (1) normalize symbol keys *through* the detected token and
+      re-diff so the surface collapses to the real delta (ICU 73→74: BREAKING/6288
+      → +34/-0), behind an opt-in suppression preset; (2) cross-check the token
+      against the SONAME and still surface the soname bump as the relink signal;
+      (3) extend tokens to libstdc++ versioned namespaces / Abseil `lts_<date>`.
 
   # ── archetype ─────────────────────────────────────────────────────────────
   - id: UC-ARCH-c-library

@@ -86,6 +86,24 @@ verdict=$(python3 -c "import json,sys; d=json.load(open('result.json')); print(d
 
 ---
 
+## `abicheck compare-release`
+
+Aggregates the worst per-library verdict across the release; exit codes mirror
+`compare`, plus a dedicated code for removed libraries:
+
+| Exit code | Meaning |
+|-----------|---------|
+| `0` | All libraries compatible (no API/ABI break) |
+| `2` | Worst verdict is `API_BREAK` |
+| `4` | Worst verdict is `BREAKING`, **or** an operational `ERROR` (a library failed to dump/extract/compare) |
+| `8` | A library was removed between releases and `--fail-on-removed-library` is set — takes precedence over every other code |
+
+With any `--severity-*` flag, the severity-aware code (`0/1/2/4`) replaces the
+verdict-based `2/4` mapping — except exit `8` still wins, and an operational
+`ERROR` still floors the exit at `4`.
+
+---
+
 ## `abicheck appcompat`
 
 Uses the same exit codes as `compare`:

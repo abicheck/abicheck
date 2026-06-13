@@ -130,6 +130,7 @@ def _snap(
     functions: list[Function] | None = None,
     variables: list[Variable] | None = None,
     types: list[RecordType] | None = None,
+    typedefs: dict[str, str] | None = None,
 ) -> AbiSnapshot:
     return AbiSnapshot(
         library=library,
@@ -137,6 +138,7 @@ def _snap(
         functions=list(functions or []),
         variables=list(variables or []),
         types=list(types or []),
+        typedefs=dict(typedefs or {}),
     )
 
 
@@ -219,6 +221,26 @@ class TestComputeLeakPaths:
         )
         paths = compute_leak_paths(snap)
         assert "ns::detail::Helper" in paths
+
+    def test_via_public_typedef_return_type(self) -> None:
+        snap = _snap(
+            functions=[_public_fn("make", "PublicImpl", [])],
+            types=[RecordType(name="ns::detail::Impl", kind="struct")],
+            typedefs={"PublicImpl": "ns::detail::Impl"},
+        )
+        paths = compute_leak_paths(snap)
+        assert "ns::detail::Impl" in paths
+        joined = " ".join(" ".join(p) for p in paths["ns::detail::Impl"])
+        assert "typedef:PublicImpl" in joined
+
+    def test_via_chained_public_typedef_return_type(self) -> None:
+        snap = _snap(
+            functions=[_public_fn("make", "PublicImpl", [])],
+            types=[RecordType(name="ns::detail::Impl", kind="struct")],
+            typedefs={"PublicImpl": "ImplAlias", "ImplAlias": "ns::detail::Impl"},
+        )
+        paths = compute_leak_paths(snap)
+        assert "ns::detail::Impl" in paths
 
     def test_via_template_argument_in_return(self) -> None:
         snap = _snap(

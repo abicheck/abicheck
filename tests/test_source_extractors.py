@@ -25,13 +25,13 @@ from pathlib import Path
 
 import pytest
 
-from abicheck.evidence.build_evidence import CompileUnit
-from abicheck.evidence.source_extractors import (
+from abicheck.buildsource.build_evidence import CompileUnit
+from abicheck.buildsource.source_extractors import (
     CASTXML_EXTRACTOR_VERSION,
     CastxmlSourceExtractor,
     build_castxml_command,
 )
-from abicheck.evidence.source_extractors.base import (
+from abicheck.buildsource.source_extractors.base import (
     assemble_source_tu,
     entity_from_constant,
     entity_from_enum,
@@ -310,7 +310,7 @@ def test_build_command_drops_split_sysroot_flag_carried_without_operand() -> Non
 def test_extract_runs_in_compile_unit_directory(tmp_path: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
     # Mock castxml so we can assert the subprocess runs with cwd=directory and
     # exercise the extract() success path without the tool installed.
-    from abicheck.evidence.source_extractors import castxml as castxml_mod
+    from abicheck.buildsource.source_extractors import castxml as castxml_mod
 
     extractor = CastxmlSourceExtractor()
     monkeypatch.setattr(extractor, "available", lambda: True)
@@ -338,7 +338,7 @@ def test_unredact_home_expands_tilde() -> None:
     # must expand it back since subprocess does not (Codex review #335, P2).
     import os
 
-    from abicheck.evidence.source_extractors.castxml import _unredact_home
+    from abicheck.buildsource.source_extractors.castxml import _unredact_home
 
     home = os.path.expanduser("~")
     assert _unredact_home("~/build/foo.cpp") == f"{home}/build/foo.cpp"
@@ -355,7 +355,7 @@ def test_unredact_home_leaves_embedded_short_name_tilde() -> None:
     # redaction placeholder and must be left intact, or the path is corrupted
     # into RUNNER<home>1 and the castxml output file cannot be opened
     # (Windows CI lane failure, #335).
-    from abicheck.evidence.source_extractors.castxml import _unredact_home
+    from abicheck.buildsource.source_extractors.castxml import _unredact_home
 
     temp = "C:\\Users\\RUNNER~1\\AppData\\Local\\Temp\\tmpabcd.xml"
     assert _unredact_home(temp) == temp
@@ -370,7 +370,7 @@ def test_extract_unredacts_home_for_replay(tmp_path: Path, monkeypatch) -> None:
     # names like C:\Users\RUNNER~1), which is legitimate.
     import os
 
-    from abicheck.evidence.source_extractors import castxml as castxml_mod
+    from abicheck.buildsource.source_extractors import castxml as castxml_mod
 
     extractor = CastxmlSourceExtractor()
     monkeypatch.setattr(extractor, "available", lambda: True)
@@ -408,7 +408,7 @@ def test_extract_unredacts_home_in_macro_value(tmp_path: Path, monkeypatch) -> N
     # short name) is still left intact by _unredact_home.
     import os
 
-    from abicheck.evidence.source_extractors import castxml as castxml_mod
+    from abicheck.buildsource.source_extractors import castxml as castxml_mod
 
     extractor = CastxmlSourceExtractor()
     monkeypatch.setattr(extractor, "available", lambda: True)
@@ -690,7 +690,7 @@ def test_assemble_source_tu_routes_entities_to_buckets() -> None:
     assert [e.qualified_name for e in tu.variables] == ["g"]
     assert [e.qualified_name for e in tu.constexpr_values] == ["kMax"]
     # round-trips through the normalized schema
-    from abicheck.evidence.source_abi import SourceAbiTu
+    from abicheck.buildsource.source_abi import SourceAbiTu
 
     assert SourceAbiTu.from_dict(tu.to_dict()).tu_id == tu.tu_id
 
@@ -699,7 +699,7 @@ def test_assemble_source_tu_routes_entities_to_buckets() -> None:
 
 
 def test_extract_raises_when_castxml_unavailable() -> None:
-    from abicheck.evidence.source_extractors import SourceExtractionError
+    from abicheck.buildsource.source_extractors import SourceExtractionError
 
     extractor = CastxmlSourceExtractor(castxml_bin="castxml-does-not-exist-xyz")
     assert extractor.available() is False
@@ -738,7 +738,7 @@ def test_parse_root_maps_castxml_xml_without_running_castxml() -> None:
     assert any(e.api_relevant for e in tu.functions)
     assert any(e.api_relevant for e in tu.types)
     # And they survive linking onto the public source surface.
-    from abicheck.evidence import link_source_abi
+    from abicheck.buildsource import link_source_abi
 
     surface = link_source_abi([tu], target_id="target://libfoo")
     assert any("add" in e.qualified_name for e in surface.reachable_declarations)
@@ -772,7 +772,7 @@ def test_parse_root_marks_generated_public_header_as_generated() -> None:
     assert cfg.source_location is not None
     assert cfg.source_location.origin == "GENERATED"
     # It still survives linking onto the public surface (generated == public).
-    from abicheck.evidence import link_source_abi
+    from abicheck.buildsource import link_source_abi
 
     surface = link_source_abi([tu], target_id="target://libfoo")
     assert any("Cfg" in e.qualified_name for e in surface.reachable_types)
@@ -805,7 +805,7 @@ def test_parse_root_keeps_private_generated_header_off_public_surface() -> None:
     assert internal.visibility == "private_header"
     assert not internal.api_relevant
     # And it does not survive linking onto the public surface.
-    from abicheck.evidence import link_source_abi
+    from abicheck.buildsource import link_source_abi
 
     surface = link_source_abi([tu], target_id="target://libfoo")
     assert not any("Internal" in e.qualified_name for e in surface.reachable_types)
@@ -877,7 +877,7 @@ def test_castxml_extractor_end_to_end(tmp_path: Path) -> None:
 
 
 def test_entity_from_typedef_carries_provenance() -> None:
-    from abicheck.evidence.source_extractors.base import entity_from_typedef
+    from abicheck.buildsource.source_extractors.base import entity_from_typedef
 
     plain = entity_from_typedef("handle_t", "int32_t", source_header="include/foo.h")
     assert plain.kind == "typedef" and plain.value == "int32_t"

@@ -312,23 +312,63 @@ def evaluate(corpus: list[Case] = CORPUS) -> Outcome:
     return Outcome(false_positives=fp, false_negatives=fn)
 
 
-def main() -> int:
-    outcome = evaluate()
-    n_fp, n_fn = len(outcome.false_positives), len(outcome.false_negatives)
-    print(f"FP-rate gate: {len(CORPUS)} cases — {n_fp} false positive(s), {n_fn} false negative(s)")
-    if outcome.false_positives:
-        print(f"  false positives (internal noise reported as breaking): {outcome.false_positives}")
-    if outcome.false_negatives:
-        print(f"  false negatives (real break scoped away):               {outcome.false_negatives}")
+def metrics(outcome: Outcome | None = None) -> dict[str, int]:
+    """ADR-033 D9 metrics for the FP-rate gate — counts and deltas vs baseline.
 
+    ``false_positive_delta_vs_baseline`` / ``false_negative_delta_vs_baseline``
+    are the ADR-033 D9 signals: 0 means on-baseline, positive means a regression.
+    """
+    outcome = outcome or evaluate()
+    n_fp, n_fn = len(outcome.false_positives), len(outcome.false_negatives)
+    return {
+        "cases": len(CORPUS),
+        "false_positives": n_fp,
+        "false_negatives": n_fn,
+        "false_positive_delta_vs_baseline": n_fp - FP_BASELINE,
+        "false_negative_delta_vs_baseline": n_fn - FN_BASELINE,
+    }
+
+
+def main(argv: list[str] | None = None) -> int:
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Public-surface FP-rate gate.")
+    parser.add_argument(
+        "--json", action="store_true",
+        help="Emit the ADR-033 D9 metrics (counts + delta-vs-baseline) as JSON.",
+    )
+    args = parser.parse_args(argv)
+
+    outcome = evaluate()
+    m = metrics(outcome)
+    n_fp, n_fn = m["false_positives"], m["false_negatives"]
+
+    if args.json:
+        import json
+        print(json.dumps(m, indent=2))
+    else:
+        print(f"FP-rate gate: {len(CORPUS)} cases — {n_fp} false positive(s), {n_fn} false negative(s)")
+        if outcome.false_positives:
+            print(f"  false positives (internal noise reported as breaking): {outcome.false_positives}")
+        if outcome.false_negatives:
+            print(f"  false negatives (real break scoped away):               {outcome.false_negatives}")
+        print(
+            "  delta vs baseline: "
+            f"false_positive_delta={m['false_positive_delta_vs_baseline']}, "
+            f"false_negative_delta={m['false_negative_delta_vs_baseline']}"
+        )
+
+    # In --json mode the error lines go to stderr so stdout stays a single valid
+    # JSON document even on a gate failure (the case CI most needs to parse).
+    err = sys.stderr if args.json else sys.stdout
     failed = False
     if n_fp > FP_BASELINE:
-        print(f"ERROR: false positives {n_fp} exceed baseline {FP_BASELINE}")
+        print(f"ERROR: false positives {n_fp} exceed baseline {FP_BASELINE}", file=err)
         failed = True
     if n_fn > FN_BASELINE:
-        print(f"ERROR: false negatives {n_fn} exceed baseline {FN_BASELINE}")
+        print(f"ERROR: false negatives {n_fn} exceed baseline {FN_BASELINE}", file=err)
         failed = True
-    if not failed:
+    if not failed and not args.json:
         print("FP-rate gate: OK (within baseline)")
     return 1 if failed else 0
 

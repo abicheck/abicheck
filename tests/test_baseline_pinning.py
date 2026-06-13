@@ -27,7 +27,7 @@ def _sample_snap(**kwargs) -> AbiSnapshot:
 
 class TestSchemaV4:
     def test_schema_version_is_7(self):
-        assert SCHEMA_VERSION == 7
+        assert SCHEMA_VERSION == 8
 
     def test_provenance_fields_roundtrip(self):
         snap = _sample_snap(

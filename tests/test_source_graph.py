@@ -22,19 +22,21 @@ import json
 
 from click.testing import CliRunner
 
-from abicheck.checker_policy import RISK_KINDS, ChangeKind
-from abicheck.cli import main
-from abicheck.evidence.build_evidence import (
+from abicheck.buildsource.build_evidence import (
     BuildEvidence,
     CompileUnit,
     Confidence,
     Target,
     TargetKind,
 )
-from abicheck.evidence.model import CoverageStatus, EvidenceConfidence, EvidenceLayer
-from abicheck.evidence.pack import EvidencePack
-from abicheck.evidence.source_abi import SourceAbiSurface, SourceEntity, SourceLocation
-from abicheck.evidence.source_graph import (
+from abicheck.buildsource.model import CoverageStatus, DataLayer, LayerConfidence
+from abicheck.buildsource.pack import BuildSourcePack
+from abicheck.buildsource.source_abi import (
+    SourceAbiSurface,
+    SourceEntity,
+    SourceLocation,
+)
+from abicheck.buildsource.source_graph import (
     EDGE_KINDS,
     EVIDENCE_TIER_L5,
     NODE_KINDS,
@@ -46,6 +48,8 @@ from abicheck.evidence.source_graph import (
     diff_source_graph,
     diff_source_graph_findings,
 )
+from abicheck.checker_policy import RISK_KINDS, ChangeKind
+from abicheck.cli import main
 
 
 def _sample_build() -> BuildEvidence:
@@ -170,7 +174,7 @@ def test_compile_unit_without_source_emits_no_source_edge() -> None:
 
 def _entity(qn: str, kind: str, *, mangled: str = "", path: str = "include/foo.h",
             origin: str = "PUBLIC_HEADER",
-            conf: EvidenceConfidence = EvidenceConfidence.HIGH) -> SourceEntity:
+            conf: LayerConfidence = LayerConfidence.HIGH) -> SourceEntity:
     return SourceEntity(
         id=qn, kind=kind, qualified_name=qn, mangled_name=mangled,
         source_location=SourceLocation(path=path, line=1, origin=origin),
@@ -184,8 +188,10 @@ def _sample_surface() -> SourceAbiSurface:
     s.reachable_types.append(_entity("foo::Widget", "record"))
     s.reachable_types.append(_entity("foo::Color", "enum"))
     s.reachable_types.append(_entity("foo::Alias", "typedef"))
-    s.reachable_macros.append(_entity("FOO_VERSION", "macro", conf=EvidenceConfidence.REDUCED))
-    s.mappings["source_decl_to_binary_symbol"] = {"foo::bar": "_ZN3foo3barEv"}
+    s.reachable_macros.append(_entity("FOO_VERSION", "macro", conf=LayerConfidence.REDUCED))
+    # Keyed by entity identity (the mangled name for C++), exactly as
+    # link_source_abi/relink_surface_exports persist it — not by qualified_name.
+    s.mappings["source_decl_to_binary_symbol"] = {"_ZN3foo3barEv": "_ZN3foo3barEv"}
     s.mappings["source_type_to_debug_type"] = {"foo::Widget": "struct foo::Widget"}
     return s
 
@@ -205,6 +211,20 @@ def test_source_abi_builds_public_reachability_slice() -> None:
     assert "SOURCE_TYPE_MAPS_TO_DEBUG_TYPE" in edge_kinds
     assert all(e.kind in EDGE_KINDS for e in g.edges)
     assert all(n.kind in NODE_KINDS for n in g.nodes)
+
+
+def test_cpp_decl_maps_to_symbol_with_identity_keyed_mapping() -> None:
+    # Regression (Codex): the persisted source_decl_to_binary_symbol map is keyed
+    # by entity identity (mangled name for C++), so build_source_graph must look
+    # it up by identity, not qualified_name, or the decl->symbol edge is dropped
+    # for every C++ symbol (qualified_name != mangled name).
+    g = build_source_graph(BuildEvidence(), source_abi=_sample_surface())
+    map_edges = [e for e in g.edges if e.kind == "SOURCE_DECL_MAPS_TO_SYMBOL"]
+    assert len(map_edges) == 1
+    decl_ids = {n.id for n in g.nodes if n.kind == "source_decl"}
+    sym_ids = {n.id for n in g.nodes if n.kind == "binary_symbol"}
+    assert map_edges[0].src in decl_ids
+    assert map_edges[0].dst in sym_ids
 
 
 def test_source_abi_type_kind_dispatch() -> None:
@@ -254,7 +274,7 @@ def test_source_abi_degenerate_inputs_handled() -> None:
     s = SourceAbiSurface(library="l", target_id="")
     s.reachable_declarations.append(SourceEntity(
         id="d", kind="function", qualified_name="loose", source_location=None,
-        confidence=EvidenceConfidence.UNKNOWN,
+        confidence=LayerConfidence.UNKNOWN,
     ))
     s.mappings["source_decl_to_binary_symbol"] = {"loose": "", "other": "_Zsym"}
     g = build_source_graph(BuildEvidence(), source_abi=s)
@@ -287,7 +307,7 @@ def _surface_with(decls, mapping, *, generated_header=None,
         s.reachable_declarations.append(SourceEntity(
             id=qn, kind="function", qualified_name=qn,
             source_location=SourceLocation(path=path, line=1, origin="PUBLIC_HEADER"),
-            visibility="public_header", confidence=EvidenceConfidence.HIGH,
+            visibility="public_header", confidence=LayerConfidence.HIGH,
         ))
     s.mappings["source_decl_to_binary_symbol"] = dict(mapping)
     return s
@@ -422,7 +442,7 @@ def test_build_option_reaches_public_symbol_ignores_reused_flag_on_new_target() 
 
 
 def test_include_graph_public_header_drift_finding() -> None:
-    from abicheck.evidence.include_graph import augment_graph_with_includes
+    from abicheck.buildsource.include_graph import augment_graph_with_includes
 
     b = BuildEvidence()
     b.targets.append(Target(id="target://libfoo", public_headers=["inc/foo.h"],
@@ -440,7 +460,7 @@ def test_include_graph_public_header_drift_finding() -> None:
 
 
 def test_localize_symbol_walks_the_graph() -> None:
-    from abicheck.evidence.source_graph import localize_symbol
+    from abicheck.buildsource.source_graph import localize_symbol
 
     b = BuildEvidence()
     b.targets.append(Target(id="target://libfoo", public_headers=["include/foo.h"],
@@ -454,7 +474,7 @@ def test_localize_symbol_walks_the_graph() -> None:
 
 
 def test_localize_symbol_absent_returns_empty() -> None:
-    from abicheck.evidence.source_graph import localize_symbol
+    from abicheck.buildsource.source_graph import localize_symbol
 
     result = localize_symbol(build_source_graph(BuildEvidence()), "_Zmissing")
     assert result["found"] is False
@@ -470,14 +490,14 @@ def test_explain_finding_cli(tmp_path) -> None:
     graph_json.write_text(json.dumps(g.to_dict()))
 
     res = CliRunner().invoke(main, [
-        "explain-finding", "--evidence", str(graph_json), "--symbol", "_ZN3foo3barEv",
+        "explain-finding", "--sources", str(graph_json), "--symbol", "_ZN3foo3barEv",
     ])
     assert res.exit_code == 0, res.output
     assert "target://libfoo" in res.output
     assert "foo::bar" in res.output
 
     res_json = CliRunner().invoke(main, [
-        "explain-finding", "--evidence", str(graph_json),
+        "explain-finding", "--sources", str(graph_json),
         "--symbol", "_ZN3foo3barEv", "--format", "json",
     ])
     payload = json.loads(res_json.output)
@@ -496,7 +516,7 @@ def test_explain_finding_resolves_symbol_from_report(tmp_path) -> None:
     report.write_text(json.dumps({"changes": [{"symbol": "_ZN3foo3barEv"}]}))
 
     res = CliRunner().invoke(main, [
-        "explain-finding", "--evidence", str(graph_json),
+        "explain-finding", "--sources", str(graph_json),
         "--report", str(report), "--finding-id", "0", "--format", "json",
     ])
     assert res.exit_code == 0, res.output
@@ -507,13 +527,13 @@ def test_explain_finding_requires_a_symbol(tmp_path) -> None:
     g = build_source_graph(BuildEvidence())
     graph_json = tmp_path / "g.json"
     graph_json.write_text(json.dumps(g.to_dict()))
-    res = CliRunner().invoke(main, ["explain-finding", "--evidence", str(graph_json)])
+    res = CliRunner().invoke(main, ["explain-finding", "--sources", str(graph_json)])
     assert res.exit_code != 0
     assert "No symbol to explain" in res.output
 
 
 def test_resolve_symbol_from_report_variants(tmp_path) -> None:
-    from abicheck.cli_evidence import _resolve_symbol_from_report
+    from abicheck.cli_buildsource import _resolve_symbol_from_report
 
     report = tmp_path / "r.json"
     report.write_text(json.dumps({"changes": [
@@ -533,7 +553,7 @@ def test_resolve_symbol_from_report_unreadable(tmp_path) -> None:
     import click
     import pytest
 
-    from abicheck.cli_evidence import _resolve_symbol_from_report
+    from abicheck.cli_buildsource import _resolve_symbol_from_report
 
     with pytest.raises(click.ClickException):
         _resolve_symbol_from_report(tmp_path / "missing.json", "0")
@@ -638,25 +658,25 @@ def test_diff_identical_graphs_no_change() -> None:
 
 
 def test_pack_round_trips_source_graph(tmp_path) -> None:
-    pack = EvidencePack.empty(tmp_path / "p.evidence")
+    pack = BuildSourcePack.empty(tmp_path / "p.evidence")
     pack.source_graph = build_source_graph(_sample_build())
     pack.write()
-    loaded = EvidencePack.load(tmp_path / "p.evidence")
+    loaded = BuildSourcePack.load(tmp_path / "p.evidence")
     assert loaded.source_graph is not None
     assert loaded.source_graph.graph_id == pack.source_graph.graph_id
 
 
 def test_pack_drops_stale_graph_when_recollected(tmp_path) -> None:
     root = tmp_path / "p.evidence"
-    pack = EvidencePack.empty(root)
+    pack = BuildSourcePack.empty(root)
     pack.source_graph = build_source_graph(_sample_build())
     pack.write()
     # Re-write without a graph: the stale file must be removed.
-    pack2 = EvidencePack.load(root)
+    pack2 = BuildSourcePack.load(root)
     pack2.source_graph = None
     pack2.write()
     assert not (root / "graph" / "source_graph_summary.json").is_file()
-    assert EvidencePack.load(root).source_graph is None
+    assert BuildSourcePack.load(root).source_graph is None
 
 
 def test_collect_evidence_summary_writes_graph_and_coverage(tmp_path) -> None:
@@ -669,14 +689,14 @@ def test_collect_evidence_summary_writes_graph_and_coverage(tmp_path) -> None:
     }]))
     out = tmp_path / "out.evidence"
     res = CliRunner().invoke(main, [
-        "collect-evidence", "--compile-db", str(cdb),
+        "collect", "--compile-db", str(cdb),
         "--source-graph", "summary", "-o", str(out),
     ])
     assert res.exit_code == 0, res.output
     assert (out / "graph" / "source_graph_summary.json").is_file()
-    pack = EvidencePack.load(out)
+    pack = BuildSourcePack.load(out)
     assert pack.source_graph is not None
-    l5 = pack.manifest.coverage_for(EvidenceLayer.L5_SOURCE_GRAPH)
+    l5 = pack.manifest.coverage_for(DataLayer.L5_SOURCE_GRAPH)
     assert l5 is not None
     assert l5.status == CoverageStatus.PRESENT
 
@@ -717,7 +737,7 @@ def test_compare_graph_missing_graph_errors(tmp_path) -> None:
 
 
 def _collect_pack(tmp_path, name: str, *, two_units: bool = False) -> str:
-    """Run `collect-evidence --source-graph summary` and return the pack dir."""
+    """Run `collect --source-graph summary` and return the pack dir."""
     src = tmp_path / f"{name}.cpp"
     src.write_text("int x(){return 1;}\n")
     entries = [{
@@ -735,7 +755,7 @@ def _collect_pack(tmp_path, name: str, *, two_units: bool = False) -> str:
     cdb.write_text(json.dumps(entries))
     out = tmp_path / f"{name}.evidence"
     res = CliRunner().invoke(main, [
-        "collect-evidence", "--compile-db", str(cdb),
+        "collect", "--compile-db", str(cdb),
         "--source-graph", "summary", "-o", str(out),
     ])
     assert res.exit_code == 0, res.output
@@ -763,7 +783,7 @@ def test_compare_graph_pack_without_graph_errors(tmp_path) -> None:
     }]))
     out = tmp_path / "nograph.evidence"
     assert CliRunner().invoke(main, [
-        "collect-evidence", "--compile-db", str(cdb), "-o", str(out),
+        "collect", "--compile-db", str(cdb), "-o", str(out),
     ]).exit_code == 0
     res = CliRunner().invoke(main, ["compare-graph", str(out), str(out)])
     assert res.exit_code != 0
@@ -790,7 +810,7 @@ def test_compare_graph_rejects_non_graph_json_object(tmp_path) -> None:
     # An unrelated JSON object (e.g. a pack manifest) must fail with an
     # actionable error, not be read as an empty graph (CodeRabbit review).
     manifest = tmp_path / "manifest.json"
-    manifest.write_text(json.dumps({"evidence_pack_version": 1, "coverage": []}))
+    manifest.write_text(json.dumps({"build_source_pack_version": 1, "coverage": []}))
     res = CliRunner().invoke(main, ["compare-graph", str(manifest), str(manifest)])
     assert res.exit_code != 0
     assert "not a source graph summary" in res.output
@@ -801,11 +821,11 @@ def test_collect_evidence_summary_without_build_is_partial(tmp_path) -> None:
     # the L5 coverage row must read PARTIAL (ran, produced nothing), not PRESENT.
     out = tmp_path / "empty.evidence"
     res = CliRunner().invoke(main, [
-        "collect-evidence", "--source-graph", "summary", "-o", str(out),
+        "collect", "--source-graph", "summary", "-o", str(out),
     ])
     assert res.exit_code == 0, res.output
-    pack = EvidencePack.load(out)
+    pack = BuildSourcePack.load(out)
     assert pack.source_graph is not None
-    l5 = pack.manifest.coverage_for(EvidenceLayer.L5_SOURCE_GRAPH)
+    l5 = pack.manifest.coverage_for(DataLayer.L5_SOURCE_GRAPH)
     assert l5 is not None
     assert l5.status == CoverageStatus.PARTIAL

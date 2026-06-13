@@ -127,6 +127,37 @@ def _safe_index(snap: AbiSnapshot) -> bool:
     return True
 
 
+def _qualified_functions_by_mangled(snap: AbiSnapshot | None) -> dict[str, str]:
+    """Return mangled/exported function names that have C++ qualification."""
+    if snap is None or not _safe_index(snap):
+        return {}
+
+    qualified: dict[str, str] = {}
+    for mangled, fn in (getattr(snap, "_func_by_mangled", None) or {}).items():
+        fname = getattr(fn, "name", None)
+        if fname and "::" in fname and mangled not in qualified:
+            qualified[mangled] = fname
+    return qualified
+
+
+def _qualified_name_for_change(
+    c: Change,
+    old_qualified: dict[str, str],
+    new_qualified: dict[str, str],
+) -> str | None:
+    """Safely recover a C++ qualified name for a function change."""
+    if c.kind == ChangeKind.FUNC_ADDED:
+        return new_qualified.get(c.symbol)
+    if c.kind in (ChangeKind.FUNC_REMOVED, ChangeKind.FUNC_REMOVED_ELF_ONLY):
+        return old_qualified.get(c.symbol)
+
+    old_name = old_qualified.get(c.symbol)
+    new_name = new_qualified.get(c.symbol)
+    if old_name and old_name == new_name:
+        return old_name
+    return None
+
+
 def _enrich_source_locations(
     changes: list[Change],
     old: AbiSnapshot,
@@ -135,19 +166,8 @@ def _enrich_source_locations(
     """Fill in source_location and qualified_name on Changes from the model data."""
     type_loc, func_loc, var_loc = _build_location_index(old, new)
 
-    # Build mangled→qualified-name lookup so namespace-based selectors
-    # (Suppression.namespace, frozen_namespaces policy) can recover the
-    # C++ namespace of ``extern "C"`` symbols whose ``Change.symbol`` is
-    # the unqualified export name. Both snapshots are consulted because
-    # FUNC_REMOVED is only in old, FUNC_ADDED only in new.
-    qualified_lookup: dict[str, str] = {}
-    for snap in (old, new):
-        if snap is None or not _safe_index(snap):
-            continue
-        for mangled, fn in (getattr(snap, "_func_by_mangled", None) or {}).items():
-            fname = getattr(fn, "name", None)
-            if fname and "::" in fname and mangled not in qualified_lookup:
-                qualified_lookup[mangled] = fname
+    old_qualified = _qualified_functions_by_mangled(old)
+    new_qualified = _qualified_functions_by_mangled(new)
 
     for c in changes:
         if not c.source_location:
@@ -163,7 +183,7 @@ def _enrich_source_locations(
             if loc:
                 c.source_location = loc
         if not c.qualified_name:
-            qual = qualified_lookup.get(c.symbol)
+            qual = _qualified_name_for_change(c, old_qualified, new_qualified)
             if qual:
                 c.qualified_name = qual
 
@@ -448,6 +468,9 @@ _ALWAYS_INDEPENDENT_KINDS: frozenset[ChangeKind] = frozenset(
         ChangeKind.DWARF_INFO_MISSING,
         ChangeKind.TOOLCHAIN_FLAG_DRIFT,
         ChangeKind.COMPAT_VERSION_CHANGED,
+        ChangeKind.MACHO_CPU_TYPE_CHANGED,
+        ChangeKind.PE_FORWARDER_CHANGED,
+        ChangeKind.PE_MACHINE_CHANGED,
         ChangeKind.VISIBILITY_LEAK,
         ChangeKind.FUNC_DELETED,
         ChangeKind.FUNC_DELETED_ELF_FALLBACK,

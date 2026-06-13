@@ -126,7 +126,7 @@ class BuildContext:
         """
         flags: list[str] = []
 
-        if self.language_standard:
+        if self.language_standard and "++" in self.language_standard:
             flags.append(f"-std={self.language_standard}")
 
         if self.target_triple:

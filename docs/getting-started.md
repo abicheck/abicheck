@@ -4,30 +4,28 @@
 
 On all platforms it provides binary metadata analysis (exports, imports, dependencies) and header AST analysis (via castxml). Debug info cross-check uses DWARF (Linux, macOS) and PDB (Windows).
 
-> **Platforms:** Linux, Windows, macOS.
-
 > **In CI already?** Skip straight to the [GitHub Action](user-guide/github-action.md)
 > — it installs everything and runs the check in a few lines of YAML.
-
-> **Not sure which command or options fit your situation?** Jump to
-> [**Choose Your Workflow**](user-guide/choose-your-workflow.md) — a decision
-> guide that maps your artifacts (one library, a release bundle, a package, an
-> application, stripped binaries…) and your CI policy to the exact command to run.
 
 ---
 
 ## What question are you asking?
 
-abicheck answers three plain-language questions. Pick yours:
+abicheck ships several commands; pick the one that matches your question. If
+you're unsure, start with `abicheck compare` — it's the default workflow.
 
-| Your question | Start here |
-|---|---|
-| **Did my library break?** | [`abicheck compare`](#3-first-check-using-repo-examples) |
-| **Does my app still work?** | [`abicheck appcompat`](#6-application-compatibility-check) |
-| **Did my whole package / release break?** | [`abicheck compare-release`](user-guide/multi-binary.md) |
+| Your question | Command | See |
+|---------------|---------|-----|
+| **Did my library break?** — does upgrading it break existing consumers? | `abicheck compare` | [§2 below](#2-first-check-using-repo-examples) |
+| **Does my application still work** with the new library version? | `abicheck appcompat` | [§5 below](#5-application-compatibility-check) |
+| **Did my whole package / release break?** | `abicheck compare-release` | [Multi-Binary Releases](user-guide/multi-binary.md) |
+| Will this binary load and resolve correctly in this sysroot — and does its dependency tree have unresolved symbols? | `abicheck deps` (`--sysroot /rootfs` for a specific root) | [CLI Usage](user-guide/cli-usage.md) |
+| Did anything in the dependency stack change between two sysroots / images? | `abicheck stack-check --baseline … --candidate …` | [CLI Usage](user-guide/cli-usage.md) |
+| I'm migrating from `abi-compliance-checker` and want the same flags. | `abicheck compat` | [Migrating from ABICC](user-guide/from-abicc.md) |
+| Save a reusable ABI baseline for CI. | `abicheck dump` | [§4 below](#4-snapshot-workflow-for-ci-baselines) |
 
 For the full decision matrix — every artifact layout, accuracy tier, and CI
-policy — see [Choose Your Workflow](user-guide/choose-your-workflow.md).
+policy — see [**Choose Your Workflow**](user-guide/choose-your-workflow.md).
 
 ---
 
@@ -93,30 +91,13 @@ pip install -e .
 
 ---
 
-## 2) Which command do I need?
-
-abicheck ships several commands. Pick the one that matches your question:
-
-| Your question | Command | See |
-|---------------|---------|-----|
-| Does upgrading this library break existing consumers? | `abicheck compare` | [§3 below](#3-first-check-using-repo-examples) |
-| Does **my application** still work with the new library version? | `abicheck appcompat` | [§6 below](#6-application-compatibility-check) |
-| Will this binary load and run correctly in this sysroot? | `abicheck stack-check` | [CLI Usage](user-guide/cli-usage.md) |
-| Does my library dependency tree resolve without unresolved symbols? | `abicheck deps` | [CLI Usage](user-guide/cli-usage.md) |
-| I'm migrating from `abi-compliance-checker` and want the same flags. | `abicheck compat` | [Migrating from ABICC](user-guide/from-abicc.md) |
-| Save a reusable ABI baseline for CI. | `abicheck dump` | [§5 below](#5-snapshot-workflow-for-ci-baselines) |
-
-If you're unsure, start with `abicheck compare` — it's the default workflow.
-
----
-
-## 3) First check (using repo examples)
+## 2) First check (using repo examples)
 
 **Best first run:** compare two shared libraries with their public headers — it
 gives abicheck the most evidence to work with (see the
 [input-quality ladder](#input-quality-the-five-evidence-layers-l0l4) below).
 
-The repo includes 127 ABI scenario examples. Most are single-library cases with
+The repo includes 143 ABI scenario examples. Most are single-library cases with
 paired `v1`/`v2` sources and headers; bundle/release-level cases use
 release-style layouts.
 Browse the generated single-library pages in the
@@ -182,7 +163,7 @@ when you need more confidence:
 | **L1** | + debug info (`-g` build / sidecar) | **Medium** | Struct/class layout, field offsets, enum *values*, vtable slots, calling convention |
 | **L2** | + headers (`-H include/`) | **High** | Public API surface: signatures, overloads, access, `noexcept`, templates, public/internal scoping |
 | **L3** | + build data (`-p build/`) | **Higher** | The flags the library was *actually* built with: `-std`, `_GLIBCXX_USE_CXX11_ABI`, `-fvisibility`, sysroot, export maps |
-| **L4** | + sources (evidence pack via `compare --old-evidence/--new-evidence`) | **Best** | Facts that never reach the binary: macro/`constexpr` values, default-argument *values*, uninstantiated templates |
+| **L4** | + sources (build/source pack via `compare --old-build-info/--new-build-info`) | **Best** | Facts that never reach the binary: macro/`constexpr` values, default-argument *values*, uninstantiated templates |
 
 The layers are **additive, not a fallback chain**: artifact-backed evidence
 (L0/L1/L2) is authoritative for the shipped-ABI verdict, while build/source
@@ -196,7 +177,7 @@ Run `abicheck dump libfoo.so --show-data-sources` to see which layers abicheck
 found for a binary. For the full picture see [Evidence &
 Detectability](concepts/evidence-and-detectability.md) and the per-layer
 [Tool Modes](user-guide/tool-modes.md#abicheck-native-modes-by-evidence-source-l0l4)
-reference; build data (L3) and source evidence packs (L4) are documented under
+reference; build data (L3) and source build/source packs (L4) are documented under
 [CLI Usage → Evidence packs](user-guide/cli-usage.md#evidence-packs-build-source-context-l3-l4).
 For stripped production builds, point abicheck at separate debug files
 (`--debug-root1/2`) or fetch them with `--debuginfod` — see
@@ -204,7 +185,7 @@ For stripped production builds, point abicheck at separate debug files
 
 ---
 
-## 4) Output formats
+## 3) Output formats
 
 abicheck supports five output formats: `markdown` (default), `json`, `sarif`, `html`, and `junit` (plus a compact `review` digest). See [Output Formats](user-guide/output-formats.md) for the full reference.
 
@@ -234,7 +215,7 @@ abicheck compare libfoo.so.1 libfoo.so.2 -H foo.h --format html -o report.html
 
 ---
 
-## 5) Snapshot workflow (for CI baselines)
+## 4) Snapshot workflow (for CI baselines)
 
 Save a snapshot once per release, then compare against new builds without re-dumping:
 
@@ -285,7 +266,7 @@ abicheck compare old.json new.json -v
 
 ---
 
-## 6) Application compatibility check
+## 5) Application compatibility check
 
 Check whether your **application** is affected by a library update — filtering out irrelevant changes:
 
@@ -305,7 +286,9 @@ See [Application Compatibility](user-guide/appcompat.md) for the full reference.
 
 ---
 
-## 7) Exit codes and CI
+## 6) Exit codes and CI
+
+By default, `abicheck compare` exits with the verdict:
 
 | Exit code | Verdict | Meaning |
 |-----------|---------|---------|
@@ -314,13 +297,19 @@ See [Application Compatibility](user-guide/appcompat.md) for the full reference.
 | `2` | `API_BREAK` | Source-level API break (binary still works) |
 | `4` | `BREAKING` | Binary ABI break |
 
+> **Note:** passing any `--severity-*` flag (as the recipes below do) switches
+> `compare` to **severity-aware** exit codes: `0` = no error-level findings,
+> `1` = error-level findings in addition/quality categories, `2` = in
+> potential-breaking, `4` = in ABI-breaking. The shape stays the same —
+> `0` passes, `4` is worst — but `1` then means a *finding*, not a tool error.
+
 Full reference (including `compat` mode): [Exit Codes](reference/exit-codes.md)
 
 ### Policy recipes — what should fail the build?
 
 abicheck separates *what fails CI* (severity → exit code) from *what shows up in
 the report* (display filtering). These three recipes cover the common cases; the
-[Choose Your Workflow → policy recipes](user-guide/choose-your-workflow.md#4-how-should-ci-behave-policy-recipes)
+[Choose Your Workflow → policy recipes](user-guide/choose-your-workflow.md#3-how-should-ci-behave-policy-recipes)
 and [Severity Configuration](user-guide/severity.md) pages have the rest.
 
 ```bash

@@ -23,13 +23,13 @@ from __future__ import annotations
 import pytest
 from click.testing import CliRunner
 
-from abicheck.cli import main
-from abicheck.evidence import compiler_record as cr
-from abicheck.evidence.compiler_record import (
+from abicheck.buildsource import compiler_record as cr
+from abicheck.buildsource.compiler_record import (
     extract_compiler_record,
     parse_gcc_command_line,
     parse_producer,
 )
+from abicheck.cli import main
 
 # ── pure parsers ─────────────────────────────────────────────────────────────
 
@@ -200,7 +200,7 @@ def test_extract_compiler_record_missing_file(tmp_path):
 
 def test_collect_evidence_read_compiler_record_requires_binary(tmp_path):
     out = tmp_path / "e"
-    result = CliRunner().invoke(main, ["collect-evidence", "--read-compiler-record", "-o", str(out)])
+    result = CliRunner().invoke(main, ["collect", "--read-compiler-record", "-o", str(out)])
     assert result.exit_code != 0
     assert "requires --binary" in result.output
 
@@ -209,7 +209,7 @@ def test_collect_evidence_preserves_option_only_compiler_record(tmp_path, monkey
     # A stripped ELF whose only provenance is `.GCC.command.line` switches (no
     # source TU, no DWARF producer) yields build_options but no units/toolchains.
     # The pack must still persist that build evidence rather than drop it.
-    from abicheck.evidence.pack import EvidencePack
+    from abicheck.buildsource.pack import BuildSourcePack
 
     binpath = tmp_path / "switches.so"
     binpath.write_bytes(b"\x7fELF")
@@ -218,10 +218,10 @@ def test_collect_evidence_preserves_option_only_compiler_record(tmp_path, monkey
 
     out = tmp_path / "e"
     result = CliRunner().invoke(
-        main, ["collect-evidence", "--read-compiler-record", "--binary", str(binpath), "-o", str(out)]
+        main, ["collect", "--read-compiler-record", "--binary", str(binpath), "-o", str(out)]
     )
     assert result.exit_code == 0, result.output
-    pack = EvidencePack.load(out)
+    pack = BuildSourcePack.load(out)
     assert pack.build_evidence is not None  # option-only evidence not dropped
     assert not pack.build_evidence.compile_units and not pack.build_evidence.toolchains
     opts = {(o.key, o.value) for o in pack.build_evidence.build_options}

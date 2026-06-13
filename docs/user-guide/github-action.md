@@ -55,15 +55,15 @@ automatically, then runs ABI comparison and reports results.
     abicheck dump build/libfoo.so -H include/ -p build/ -o abi-baseline.json
     ```
 
-    Full **evidence packs** (`--evidence` / `--old-evidence` / `--new-evidence`)
-    and **L4** source ABI replay are **CLI-only** today: `dump --evidence`
-    stores only a lightweight, content-addressed *reference* (the pack stays
-    out-of-band), and the Action's `compare` has no `--old-evidence` /
-    `--new-evidence` wiring — so a dumped snapshot does **not** carry pack-based
-    L3/L4 findings into an Action run. To use them, run `abicheck compare …
-    --old-evidence … --new-evidence …` as a plain CLI step in your workflow
-    instead of through this Action. See [Source & Build Evidence
-    Packs](../concepts/evidence-pack.md).
+    Embedded **build-info / source data** (`dump --build-info`/`--sources`) and
+    **L4** source ABI replay are driven from the **CLI** today. Because
+    `dump --build-info`/`--sources` embed the facts inline in the snapshot, a
+    snapshot dumped that way *does* carry its L3/L4 findings into any later
+    `compare` — including one run from this Action on two such snapshots. What
+    the Action does not yet expose are dedicated inputs to *collect* build/source
+    data inline; to produce the embedded snapshots, run `abicheck collect` + `dump
+    --build-info/--sources` (or `compare … --old-build-info … --new-build-info …`)
+    as plain CLI steps in your workflow. See [Build Info & Sources](../concepts/build-source-data.md).
 
 ### Application compatibility inputs (appcompat mode)
 

@@ -7,7 +7,8 @@
 > [4. C++ ABI](04-cpp-abi.md) ·
 > [5. Linker & ELF](05-linker-elf.md) ·
 > [6. Transitive Breaks](06-transitive-breaks.md) ·
-> [7. Designing for Stability](07-designing-for-stability.md)
+> [7. Designing for Stability](07-designing-for-stability.md) ·
+> [8. Detecting Breaks](08-detection.md)
 
 **What you'll learn on this page**
 
@@ -304,7 +305,7 @@ flowchart LR
    symbols, type layouts, vtables, calling conventions, ELF metadata, and so on.
 2. **Diff.** It compares the two snapshots structurally (walking pointer chains,
    struct members, vtable slots — not just symbol names).
-3. **Classify.** Each detected difference is one of **180+ change kinds**, and
+3. **Classify.** Each detected difference is one of **246 change kinds**, and
    each change kind is partitioned into exactly one verdict tier.
 
 The five verdicts, from safest to most severe, are:

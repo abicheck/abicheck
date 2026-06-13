@@ -4,7 +4,7 @@
 **Status:** Accepted — implemented (phases 1–7). The graph schema +
 build-evidence graph + L4 public-reachability/source↔binary graph + Clang
 call (D4) and `-MM` include (D3) graphs + Kythe/CodeQL pre-captured backends
-(D5) are all collected via `collect-evidence`; `compare-graph` and the verdict
+(D5) are all collected via `collect`; `compare-graph` and the verdict
 pipeline emit all six D6 findings; `explain-finding` localizes a finding
 through the graph (D8). The compact single-file `source_graph_summary.json`
 plus `external_graph_refs` is the storage model (D7) — chunked SQLite/Parquet
@@ -185,14 +185,14 @@ core ABI snapshots.
 
 ```bash
 # Collect a compact graph summary.
-abicheck collect-evidence --source-graph summary --build-dir build --output evidence/
+abicheck collect --source-graph summary --build-dir build --output evidence/
 
 # Use an external backend.
-abicheck collect-evidence --source-graph kythe --kythe-kzip merged.kzip --output evidence/
-abicheck collect-evidence --source-graph codeql --codeql-db codeql-db/ --output evidence/
+abicheck collect --source-graph kythe --kythe-kzip merged.kzip --output evidence/
+abicheck collect --source-graph codeql --codeql-db codeql-db/ --output evidence/
 
 # Explain one finding through graph evidence.
-abicheck explain-finding report.json --finding-id F123 --evidence evidence/
+abicheck explain-finding report.json --finding-id F123 --sources evidence/
 
 # Compare graph summaries directly.
 abicheck compare-graph old.evidence/graph/source_graph_summary.json \
@@ -244,12 +244,12 @@ proves it. Prefer "known static callers" or "observed graph edges".
 | Phase | Scope | Output | Status |
 |---|---|---|---|
 | 1 | Define node/edge schema and graph summary storage | Empty/metadata graph summaries | **Done** — `evidence/source_graph.py` (`SourceGraphSummary`/`GraphNode`/`GraphEdge`, content-addressed `graph_id`, coverage block, indexes); stored as `graph/source_graph_summary.json` and round-tripped by `EvidencePack` |
-| 2 | Build graph edges from ADR-029 `BuildEvidence` | target/source/header/output graph | **Done** — `build_source_graph()`; `collect-evidence --source-graph summary` collects it and flips the L5 coverage row to PRESENT |
+| 2 | Build graph edges from ADR-029 `BuildEvidence` | target/source/header/output graph | **Done** — `build_source_graph()`; `collect --source-graph summary` collects it and flips the L5 coverage row to PRESENT |
 | 3 | Header/type/declaration graph from L2/L4 | public reachability graph | **Done** — `build_source_graph(build, source_abi=…)` folds an ADR-030 `SourceAbiSurface` into `source_decl`/`record_type`/`enum_type`/`typedef`/`macro` nodes linked to their declaring public header via `SOURCE_DECLARES` |
 | 4 | Source-to-binary mapping graph | symbol/declaration/debug mapping explanations | **Done** — `SOURCE_DECL_MAPS_TO_SYMBOL`, `SOURCE_TYPE_MAPS_TO_DEBUG_TYPE`, and `BINARY_EXPORTS_SYMBOL` edges from the surface mappings, completing the target → header → decl → exported-symbol closure |
-| 5 | Graph diff and `explain-finding` | graph-to-graph compare, finding localization | **Done** — `diff_source_graph()` (structural delta) + `diff_source_graph_findings()` emit all six D6 `ChangeKind`s, surfaced by `compare-graph` and folded into the `compare --old/--new-evidence` verdict pipeline; `localize_symbol()` + the `explain-finding` command localize a finding through the graph (D8) |
-| 6 | Optional Clang direct-call extractor | direct call graph summary | **Done** — `evidence/call_graph.py`: `parse_clang_ast_calls()` (pure AST-JSON parser, unit-tested) + `ClangCallGraphExtractor` (live `clang -ast-dump=json`, integration-only) emit `DECL_CALLS_DECL` edges labelled with `call_kind`/`resolution` (D4); `collect-evidence --call-graph` collects them and the `call_graph_public_entry_reachability_changed` finding consumes them |
-| 7 | Kythe/CodeQL adapters | external graph backend summaries | **Done** — `evidence/graph_backends.py`: `ingest_kythe_entries()` (Kythe entries → `DECL_CALLS_DECL`/`DECL_REFERENCES_DECL`) and `ingest_codeql_call_results()` (CodeQL BQRS→JSON → `DECL_CALLS_DECL`), wired via `collect-evidence --kythe-entries`/`--codeql-results`; non-executing (pre-captured exports), with the store noted in `external_graph_refs`. Compile-unit include edges (D3) land via `evidence/include_graph.py` (`clang -MM`) |
+| 5 | Graph diff and `explain-finding` | graph-to-graph compare, finding localization | **Done** — `diff_source_graph()` (structural delta) + `diff_source_graph_findings()` emit all six D6 `ChangeKind`s, surfaced by `compare-graph` and folded into the `compare --old/--new-build-info` verdict pipeline; `localize_symbol()` + the `explain-finding` command localize a finding through the graph (D8) |
+| 6 | Optional Clang direct-call extractor | direct call graph summary | **Done** — `evidence/call_graph.py`: `parse_clang_ast_calls()` (pure AST-JSON parser, unit-tested) + `ClangCallGraphExtractor` (live `clang -ast-dump=json`, integration-only) emit `DECL_CALLS_DECL` edges labelled with `call_kind`/`resolution` (D4); `collect --call-graph` collects them and the `call_graph_public_entry_reachability_changed` finding consumes them |
+| 7 | Kythe/CodeQL adapters | external graph backend summaries | **Done** — `evidence/graph_backends.py`: `ingest_kythe_entries()` (Kythe entries → `DECL_CALLS_DECL`/`DECL_REFERENCES_DECL`) and `ingest_codeql_call_results()` (CodeQL BQRS→JSON → `DECL_CALLS_DECL`), wired via `collect --kythe-entries`/`--codeql-results`; non-executing (pre-captured exports), with the store noted in `external_graph_refs`. Compile-unit include edges (D3) land via `evidence/include_graph.py` (`clang -MM`) |
 
 ---
 

@@ -48,6 +48,16 @@ from .model import (
 # Module-level constant: ELF visibility values that form the default<->protected pair (case51).
 _ELF_VIS_PROTECTED_PAIR: frozenset[str] = frozenset({"default", "protected"})
 
+
+def _pe_export_id(e: Any) -> str:
+    """Stable identity for a PE export: its name, or ``ordinal:N`` when nameless.
+
+    Keying nameless (NONAME) exports by ordinal lets the retained-export checks
+    still see an ordinal-only forwarder that is silently repointed.
+    """
+    return e.name if e.name else f"ordinal:{e.ordinal}"
+
+
 # Data symbol types subject to copy relocations (OBJECT/COMMON).
 _COPY_RELOC_TYPES = (SymbolType.OBJECT, SymbolType.COMMON)
 
@@ -141,6 +151,57 @@ def _diff_pe(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
             description=f"new export in DLL: {eid}",
         ))
 
+    # Ordinal / forwarder stability for exports retained across versions.
+    # These are metadata-only signals (the export id — name when present, else
+    # ordinal — is unchanged, so the add/remove loops above and _diff_functions()
+    # never see them) and are keyed by that same id, so they cannot double-count.
+    # Keying by ordinal for nameless exports means an ordinal-only forwarder that
+    # is silently repointed to a different target is still caught.
+    old_by_id: dict[str, Any] = {}
+    for e in o.exports:
+        old_by_id.setdefault(_pe_export_id(e), e)
+    new_by_id: dict[str, Any] = {}
+    for e in n.exports:
+        new_by_id.setdefault(_pe_export_id(e), e)
+
+    for eid in sorted(old_by_id.keys() & new_by_id.keys()):
+        oe = old_by_id[eid]
+        ne = new_by_id[eid]
+        label = oe.name or eid
+        # NOTE: we deliberately do NOT flag a named export whose ordinal merely
+        # shifted. PE ordinals are auto-assigned sequentially, so inserting or
+        # removing any export renumbers everything after it — a benign, common
+        # occurrence in additive releases. The genuinely breaking case (an
+        # ordinal-only / NONAME export bound purely by ordinal) carries no name,
+        # so it is keyed by ``ordinal:N`` and a changed ordinal already surfaces
+        # as a remove+add above.
+        #
+        # Forwarder repoint: the export resolves to a different DLL!Symbol target.
+        # Applies to both named and ordinal-only exports.
+        if oe.forwarder != ne.forwarder and (oe.forwarder or ne.forwarder):
+            changes.append(Change(
+                kind=ChangeKind.PE_FORWARDER_CHANGED,
+                symbol=label,
+                old_value=oe.forwarder or "(direct export)",
+                new_value=ne.forwarder or "(direct export)",
+                description=(
+                    f"export '{label}' forwarder changed: "
+                    f"{oe.forwarder or '(direct export)'} → "
+                    f"{ne.forwarder or '(direct export)'}"
+                ),
+            ))
+
+    # Architecture drift — a DLL that changes machine type is a different binary
+    # contract entirely (e.g. AMD64 → ARM64).
+    if o.machine and n.machine and o.machine != n.machine:
+        changes.append(Change(
+            kind=ChangeKind.PE_MACHINE_CHANGED,
+            symbol="PE_HEADER",
+            old_value=o.machine,
+            new_value=n.machine,
+            description=f"PE machine/architecture changed: {o.machine} → {n.machine}",
+        ))
+
     # Detect changed import dependencies
     old_deps = set(o.imports.keys())
     new_deps = set(n.imports.keys())
@@ -224,6 +285,31 @@ def _diff_macho(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
             old_value=o.install_name,
             new_value=n.install_name,
             description=f"install name changed: {o.install_name} → {n.install_name}",
+        ))
+
+    # Architecture drift — only breaking when an architecture slice that used to
+    # ship is GONE. Adding slices (single-arch → universal) keeps old clients
+    # loadable, so a superset is not a break. ``cpu_types`` carries every slice
+    # of a fat/universal binary; fall back to the single selected ``cpu_type``
+    # for snapshots that predate that field. NOTE: that fallback is lossy — an
+    # *old* snapshot serialized before ``cpu_types`` existed records only its
+    # selected slice, so dropping a non-selected slice of a then-universal
+    # binary can go unseen. Re-dumping the old binary restores full detection.
+    old_arches = set(getattr(o, "cpu_types", None) or ()) or ({o.cpu_type} if o.cpu_type else set())
+    new_arches = set(getattr(n, "cpu_types", None) or ()) or ({n.cpu_type} if n.cpu_type else set())
+    removed_arches = old_arches - new_arches
+    if old_arches and new_arches and removed_arches:
+        changes.append(Change(
+            kind=ChangeKind.MACHO_CPU_TYPE_CHANGED,
+            symbol="MACHO_HEADER",
+            old_value=", ".join(sorted(old_arches)),
+            new_value=", ".join(sorted(new_arches)),
+            description=(
+                "Mach-O architecture slice removed: "
+                f"{', '.join(sorted(removed_arches))} no longer present "
+                f"({', '.join(sorted(old_arches))} → {', '.join(sorted(new_arches))}); "
+                "existing clients of the dropped arch can no longer load the dylib"
+            ),
         ))
 
     # Compatibility version change (LC_ID_DYLIB compat_version — binary contract)

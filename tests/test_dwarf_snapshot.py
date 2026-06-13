@@ -8,6 +8,11 @@ from pathlib import Path
 
 import pytest
 
+from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit, Target
+from abicheck.buildsource.model import CoverageStatus, DataLayer, LayerCoverage
+from abicheck.buildsource.pack import BuildSourcePack
+from abicheck.buildsource.source_abi import SourceAbiSurface, SourceEntity
+from abicheck.buildsource.source_graph import GraphNode, SourceGraphSummary
 from abicheck.dwarf_advanced import AdvancedDwarfMetadata
 from abicheck.dwarf_metadata import DwarfMetadata, StructLayout
 from abicheck.dwarf_snapshot import (
@@ -228,7 +233,56 @@ class TestShowDataSources:
         assert "L0 Binary metadata: ELF" in output
         assert "L1 Debug info:      DWARF" in output
         assert "L2 Header AST:      available" in output
-        assert "Headers mode (30/30 detectors" in output
+        assert "L3 Build context:   not collected" in output
+        assert "Headers mode (artifact + public header evidence)" in output
+
+    def test_evidence_layers(self, tmp_path: Path) -> None:
+        elf = _elf_meta_with_symbols(["foo"])
+        pack = BuildSourcePack.empty(tmp_path / "evidence")
+        pack.build_evidence = BuildEvidence(
+            targets=[Target(id="target://libtest", name="libtest")],
+            compile_units=[CompileUnit(id="cu://lib.c", source="lib.c")],
+        )
+        pack.source_abi = SourceAbiSurface(
+            reachable_declarations=[
+                SourceEntity(id="source://foo", kind="function", qualified_name="foo")
+            ]
+        )
+        pack.source_graph = SourceGraphSummary(
+            nodes=[GraphNode(id="file://lib.c", kind="file", label="lib.c")]
+        )
+
+        output = show_data_sources(
+            Path("libtest.so"),
+            elf,
+            None,
+            has_headers=True,
+            build_source_pack=pack,
+        )
+        assert "L3 Build context: present (1 compile units, 1 targets)" in output
+        assert "L4 Source ABI: present (1 declarations)" in output
+        assert "L5 Source graph: present (1 nodes)" in output
+
+    def test_partial_evidence_manifest_is_preserved(self, tmp_path: Path) -> None:
+        elf = _elf_meta_with_symbols(["foo"])
+        pack = BuildSourcePack.empty(tmp_path / "evidence")
+        pack.source_abi = SourceAbiSurface(library="libtest.so")
+        pack.manifest.coverage = [
+            LayerCoverage(
+                layer=DataLayer.L4_SOURCE_ABI.value,
+                status=CoverageStatus.PARTIAL,
+                detail="extractor unavailable",
+            )
+        ]
+
+        output = show_data_sources(
+            Path("libtest.so"),
+            elf,
+            None,
+            has_headers=True,
+            build_source_pack=pack,
+        )
+        assert "L4 Source ABI: partial (extractor unavailable)" in output
 
     def test_dwarf_only_mode(self) -> None:
         elf = _elf_meta_with_symbols(["foo"])
@@ -1287,11 +1341,12 @@ class TestCLIInProcess:
 
 # ── _print_data_sources direct call ──────────────────────────────────────────
 
+@pytest.mark.integration
 @pytest.mark.skipif(not _HAS_GCC, reason="GCC not available")
 class TestPrintDataSourcesDirect:
     """Direct call to _print_data_sources for coverage."""
 
-    def test_print_data_sources(self, tmp_path: Path) -> None:
+    def test_print_data_sources(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
         c_src = tmp_path / "lib.c"
         c_src.write_text("int bar(void) { return 1; }\n")
         so_path = tmp_path / "libtest.so"
@@ -1302,10 +1357,12 @@ class TestPrintDataSourcesDirect:
 
         from abicheck.cli import _print_data_sources
 
-        # _print_data_sources uses click.echo; just ensure it doesn't crash
         _print_data_sources(so_path, has_headers=False)
+        out = capsys.readouterr().out
+        assert "Data sources for libtest.so" in out
+        assert "L3 Build context:   not collected" in out
 
-    def test_print_data_sources_with_headers(self, tmp_path: Path) -> None:
+    def test_print_data_sources_with_headers(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
         c_src = tmp_path / "lib.c"
         c_src.write_text("int bar(void) { return 1; }\n")
         so_path = tmp_path / "libtest.so"
@@ -1317,6 +1374,125 @@ class TestPrintDataSourcesDirect:
         from abicheck.cli import _print_data_sources
 
         _print_data_sources(so_path, has_headers=True)
+        out = capsys.readouterr().out
+        assert "L2 Header AST:      available" in out
+        assert "Headers mode (artifact + public header evidence)" in out
+
+    def test_print_data_sources_with_build_source_pack(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        c_src = tmp_path / "lib.c"
+        c_src.write_text("int bar(void) { return 1; }\n")
+        so_path = tmp_path / "libtest.so"
+        subprocess.run(
+            [_GCC, "-shared", "-fPIC", "-g", "-o", str(so_path), str(c_src)],
+            capture_output=True, check=True, timeout=30,
+        )
+        pack = BuildSourcePack.empty(tmp_path / "pack")
+        pack.build_evidence = BuildEvidence(
+            targets=[Target(id="target://libtest", name="libtest")],
+            compile_units=[CompileUnit(id="cu://lib.c", source="lib.c")],
+        )
+        pack.write()
+
+        from abicheck.cli import _print_data_sources
+
+        _print_data_sources(so_path, has_headers=True, build_source_path=pack.root)
+        out = capsys.readouterr().out
+        assert "L3 Build context: present (1 compile units, 1 targets)" in out
+
+    def test_print_data_sources_combines_build_info_and_sources(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        c_src = tmp_path / "lib.c"
+        c_src.write_text("int bar(void) { return 1; }\n")
+        so_path = tmp_path / "libtest.so"
+        subprocess.run(
+            [_GCC, "-shared", "-fPIC", "-g", "-o", str(so_path), str(c_src)],
+            capture_output=True, check=True, timeout=30,
+        )
+        build_pack = BuildSourcePack.empty(tmp_path / "build-pack")
+        build_pack.build_evidence = BuildEvidence(
+            targets=[Target(id="target://libtest", name="libtest")],
+            compile_units=[CompileUnit(id="cu://lib.c", source="lib.c")],
+        )
+        build_pack.write()
+        source_pack = BuildSourcePack.empty(tmp_path / "source-pack")
+        source_pack.source_abi = SourceAbiSurface(
+            reachable_declarations=[
+                SourceEntity(id="source://bar", kind="function", qualified_name="bar")
+            ]
+        )
+        source_pack.source_graph = SourceGraphSummary(
+            nodes=[GraphNode(id="file://lib.c", kind="file", label="lib.c")]
+        )
+        source_pack.write()
+
+        from abicheck.cli import _print_data_sources
+
+        _print_data_sources(
+            so_path,
+            has_headers=True,
+            build_source_path=build_pack.root,
+            sources_path=source_pack.root,
+        )
+        out = capsys.readouterr().out
+        assert "L3 Build context: present (1 compile units, 1 targets)" in out
+        assert "L4 Source ABI: present (1 declarations)" in out
+        assert "L5 Source graph: present (1 nodes)" in out
+
+    def test_print_data_sources_uses_fallback_pack_coverage(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        c_src = tmp_path / "lib.c"
+        c_src.write_text("int bar(void) { return 1; }\n")
+        so_path = tmp_path / "libtest.so"
+        subprocess.run(
+            [_GCC, "-shared", "-fPIC", "-g", "-o", str(so_path), str(c_src)],
+            capture_output=True, check=True, timeout=30,
+        )
+        full_pack = BuildSourcePack.empty(tmp_path / "full-pack")
+        full_pack.build_evidence = BuildEvidence(
+            targets=[Target(id="target://libtest", name="libtest")],
+            compile_units=[CompileUnit(id="cu://lib.c", source="lib.c")],
+        )
+        full_pack.source_abi = SourceAbiSurface(
+            reachable_declarations=[
+                SourceEntity(id="source://bar", kind="function", qualified_name="bar")
+            ]
+        )
+        full_pack.write()
+        manifest_only = BuildSourcePack.empty(tmp_path / "manifest-only")
+        manifest_only.write()
+
+        from abicheck.cli import _print_data_sources
+
+        _print_data_sources(
+            so_path,
+            has_headers=True,
+            build_source_path=full_pack.root,
+            sources_path=manifest_only.root,
+        )
+        out = capsys.readouterr().out
+        assert "L4 Source ABI: present (1 declarations)" in out
+
+    def test_print_data_sources_with_raw_build_source_input(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        c_src = tmp_path / "lib.c"
+        c_src.write_text("int bar(void) { return 1; }\n")
+        so_path = tmp_path / "libtest.so"
+        subprocess.run(
+            [_GCC, "-shared", "-fPIC", "-g", "-o", str(so_path), str(c_src)],
+            capture_output=True, check=True, timeout=30,
+        )
+
+        from abicheck.cli import _print_data_sources
+
+        _print_data_sources(so_path, has_headers=True, build_source_path=tmp_path)
+        captured = capsys.readouterr()
+        assert "L3 Build context:   not collected" in captured.out
+        assert "not collected in --show-data-sources" in captured.err
 
 
 # ── Error handling tests ─────────────────────────────────────────────────────

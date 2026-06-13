@@ -1,0 +1,27 @@
+# abicheck built-in "mach_o_dylib" policy — Apple macOS dynamic-library /
+# framework binary-compatibility profile, following Apple's "Dynamic Library
+# Design Guidelines" (compatibility is the exported symbol set plus the
+# dynamic-loader version metadata).
+#
+# dyld compares a dependent library's current version against the compatibility
+# version recorded in the client; if the current version is older than required,
+# the client refuses to load. Apple counts adding a symbol as a minor change and
+# removing a symbol, changing its size, or changing its visibility as a major
+# change, and recommends never exporting global variables (expose accessors).
+#
+# Note: the dyld compatibility-version check does NOT apply to dlopen()'d
+# bundles — exercise those with a separate runtime smoke test.
+#
+# Turnkey usage:
+#
+#   abicheck compare libfoo.dylib libfoo.new.dylib --policy-file mach_o_dylib
+base_policy: strict_abi
+
+overrides:
+  # If the dylib's compatibility version moves in a way that strands an existing
+  # client, dyld will refuse to load it — pinned to break.
+  compat_version_changed: break
+
+  # A dropped install-name dependency fails to load at launch — surface it as a
+  # deployment risk.
+  needed_removed: risk
