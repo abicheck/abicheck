@@ -1139,6 +1139,27 @@ def embed_build_source(
             layers=layers,
             exported_symbols=exported,
         )
+        # P09: don't fail *silently* when a source/build tree yields no compile DB.
+        # Autotools `configure` (and a bare checkout) emit no compile_commands.json,
+        # so L3/L4/L5 collect nothing — previously with no explanation. Warn with an
+        # actionable hint (unless a build.query diagnostic already explains it).
+        _ev = inline_pack.build_evidence if inline_pack is not None else None
+        _has_l3 = _ev is not None and bool(_ev.compile_units)
+        _has_query_note = inline_pack is not None and any(
+            e.name == "build_query" for e in inline_pack.manifest.extractors
+        )
+        if not _has_l3 and bi_pack is None and not _has_query_note:
+            _tree = raw_sources if raw_sources is not None else raw_build_info
+            _deeper = "/L4/L5" if ("L4" in layers or "L5" in layers) else ""
+            click.echo(
+                f"warning: no compile_commands.json found under {_tree} "
+                "(looked in: ., build, out, _build, cmake-build-debug); "
+                f"L3{_deeper} not collected. Generate one — CMake: configure with "
+                "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON; Meson: emitted by `meson setup`; "
+                "Autotools/Make: run `bear -- make` — or pass "
+                "--build-info <dir|compile_commands.json>.",
+                err=True,
+            )
 
     # Pre-captured packs must also honour the collect-mode layer set (Codex).
     bi_pack = _filter_pack_layers(bi_pack, layers)
