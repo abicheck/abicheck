@@ -13,7 +13,7 @@ and the diff (`../source_diff.py`) compares two surfaces.
 | `base.py` | `SourceAbiExtractor` protocol (ADR-032 interface), `SourceExtractionError`, and the **pure** model→`SourceEntity` mapping + `assemble_source_tu()` | 030 D3/D4 |
 | `_argv.py` | **Shared** compile-context → argv helpers (launcher unwrap, MSVC detection, `~` un-redaction, forced-include/abi-flag carry-through), reused by castxml + clang | 030 D2 |
 | `castxml.py` | `CastxmlSourceExtractor` + pure `build_castxml_command()`; reuses `dumper_castxml._CastxmlParser` | 030 D3 (phase 2) |
-| `clang.py` | `ClangSourceExtractor` + pure `build_clang_command()` / `source_abi_from_clang_ast()`; `clang -ast-dump=json` → inline/template/constexpr **body** fingerprints + default args | 030 D3 (phase 5) |
+| `clang.py` | `ClangSourceExtractor` + pure `build_clang_command()` / `source_abi_from_clang_ast()`; `clang -ast-dump=json` → public **declarations** (functions/methods incl. signatures + mangled names), **types** (record/enum/typedef + type hashes), inline/template/constexpr **body** fingerprints, default args, and (via a `-E -dD` pass) macros. Feeds both `reachable_declarations` and `reachable_types` (gap G4), so no separate libclang/cindex backend is needed | 030 D3 (phase 5) |
 | `android.py` | `AndroidHeaderAbiAdapter` + pure `parse_android_dump()`; normalize a pre-captured `.sdump`/`.lsdump` into a `SourceAbiTu` | 030 D9 (phase 6) |
 
 ## The one rule

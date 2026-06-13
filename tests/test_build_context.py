@@ -513,6 +513,26 @@ class TestPerHeaderMatching:
         assert ctx.compile_db_path is not None
         assert ctx.compile_db_path.name == "compile_commands.json"
 
+    def test_matched_tu_include_paths_flow_into_castxml_flags(
+        self, compile_db_dir: Path
+    ) -> None:
+        # A2 acceptance (gap G16/G4): a public header that includes a *generated*
+        # header (living in the build dir, reachable only via the build's -I) must
+        # parse without a manual -I. The matched TU's include paths + defines are
+        # derived from the compile DB and carried into the castxml invocation.
+        entries = load_compile_db(compile_db_dir)
+        header = compile_db_dir / "include" / "foo.h"
+        ctx = build_context_for_header(entries, header)
+        flags = ctx.to_castxml_flags()
+        # The build's own include dir (where generated headers land) is present,
+        # as adjacent ["-I", "<path>"] tokens, with no manual include required.
+        i_paths = [flags[i + 1] for i, f in enumerate(flags[:-1]) if f == "-I"]
+        assert any(p.endswith("include") for p in i_paths)
+        assert any(p.endswith("openssl") for p in i_paths)
+        # The TU's ABI-relevant define and visibility flag also carry through.
+        assert "-DFOO_ENABLE_SSL=1" in flags
+        assert "-fvisibility=hidden" in flags
+
 
 # ---------------------------------------------------------------------------
 # Tests: Finding 1 — relative sysroot resolution (CodeRabbit PR #256)

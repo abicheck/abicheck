@@ -17,7 +17,7 @@ and the work already shipped on this branch. Each item carries **context**,
 | P02 variant select | discovery | documented | — |
 | P03 `--show-data-sources` preview-only | UX | **shipped** (preview-only made explicit) | §B1 NEW |
 | P04 `-H` hard-errors w/o castxml | env | resolved (tool present) | — |
-| P05 clang L4 empty decl tables | C++ L4 | **OPEN** | §A1 (gap **G4**) |
+| P05 clang L4 empty decl tables | C++ L4 | **shipped** (clang AST emits decls/types) | §A1 (gap **G4**) |
 | P06 serial L4 | perf | **shipped** (parallel) | §C1 (scaling validation) |
 | P07 plain DB no toolchain | discovery | documented | §E3 NEW (validate) |
 | P08 versioned-symbol noise | correctness | **shipped** (detector+collapse) | §G (gap **G15**) |
@@ -26,8 +26,8 @@ and the work already shipped on this branch. Each item carries **context**,
 | P11 compare rename cost | perf | **shipped** (batch-demangle) | — |
 | P12 meson `builddir` | discovery | **shipped** | — |
 | P13 L4 infeasible on monorepo | perf/scope | documented + mitigations | §E4 (retry live) |
-| P14 castxml no compile-DB `-I` | C++ L2 | **OPEN** | §A2 (gap **G16**/G4) |
-| P15 castxml ✗ libstdc++ 13 | C++ L2/L4 | **OPEN** | §A1 (gap **G4**) |
+| P14 castxml no compile-DB `-I` | C++ L2 | **shipped** (compile-DB `-I`/flags bridged) | §A2 (gap **G16**/G4) |
+| P15 castxml ✗ libstdc++ 13 | C++ L2/L4 | **mitigated** (clang default backend) | §A1 (gap **G4**) |
 | P16 `--lang c` aborts on extern "C" | UX | **shipped** (warn + C++ retry) | §A3 (gap **G16**) |
 | P17 thin build-option normalization | discovery | **shipped** (broadened vocabulary) | §B2 NEW |
 | P18 L5 coupled to L4 | UX | **shipped** (`graph-build`) | — |
@@ -39,53 +39,50 @@ and the work already shipped on this branch. Each item carries **context**,
 
 ## A. C++ source-ABI unblock (the highest-leverage cluster)
 
-The single biggest gap the eval surfaced: **no real C++ source-ABI surface is
-obtainable today** on a stock toolchain. castxml ≤0.6.3 cannot parse libstdc++ 13
-(P15); the clang L4 extractor sidesteps that but emits only body fingerprints,
-**zero declarations/types** (P05). Result: L4 is empty for the C++ libraries that
-need it most. These map to existing gaps **G4** and **G16**.
+The eval (run against the pre-`b2b19bc` state) framed this as "no real C++
+source-ABI surface obtainable today". **The code has since advanced past the
+eval snapshot**: the clang AST-JSON backend is the *default* source extractor
+and already emits declarations + types, and the `-p`/compile-DB bridge already
+carries the build's include paths into the header parse. A1 and A2 are therefore
+**verified shipped** below (regression-tested at the unit level); the residual
+work is the live C++ validation campaign tracked under §C/§E.
 
-### A1. libclang declaration/type extractor (P15, P05) — gap **G4**
-- **Context.** `g4-header-ast-extractor.md` already plans "a libclang-based
-  header-AST extractor alongside castxml". The eval is the concrete motivation:
-  ICU/snappy yield `reachable_declarations: 0` today; castxml dies in
-  `/usr/include/c++/13/bits/basic_string.h`.
-- **Pointers.**
-  - `abicheck/buildsource/source_extractors/clang.py` — current clang extractor
-    (`extract` ~L1164); emits `SourceEntity` *body fingerprints*, not decl tables.
-  - `abicheck/buildsource/source_extractors/castxml.py` — the declaration backend
-    that breaks on modern libstdc++.
-  - `abicheck/buildsource/source_extractors/base.py` — `SourceAbiExtractor` iface.
-  - `abicheck/buildsource/source_abi.py` — `SourceAbiTu.reachable_declarations`
-    (the field that comes back empty).
-  - Registry: `UC-ARCH-header-only` / `UC-ARCH-c-library` evidence
-    `abicheck/dumper_castxml.py`.
-- **Approach.** Add a `libclang` (cindex) extractor producing real
-  `SourceEntity` decls/types/typedefs/enums from the AST (not text fingerprints);
-  prefer it over castxml when `python-clang`/`libclang` is present; fall back to
-  castxml, then to the body-fingerprint clang path. Reuse the compile-DB flags
-  per TU.
-- **Acceptance.** snappy/ICU `--sources` runs return non-zero
-  `reachable_declarations` / `reachable_types`; the 9 source-replay findings fire
-  on a real C++ lib; new integration test on a compiled C++ fixture.
-- **Effort·Risk.** L · medium (libclang version skew). **Do first — unblocks A2/A3, B, and all C++ validation.**
+### A1. clang declaration/type extractor (P15, P05) — gap **G4** — **shipped/verified**
+- **Context.** `g4-header-ast-extractor.md` planned "a libclang-based header-AST
+  extractor alongside castxml" because ICU/snappy yielded `reachable_declarations: 0`
+  in the eval and castxml dies in `/usr/include/c++/13/bits/basic_string.h`.
+- **What actually shipped (no new dependency).** The `clang -ast-dump=json`
+  backend (`source_extractors/clang.py`) already produces real `SourceEntity`
+  decls/types/typedefs/enums/constexpr/macros from the AST — not just body
+  fingerprints — and is the *default* inline extractor (`inline.py:161`,
+  `_make_source_extractor` returns `ClangSourceExtractor` unless `castxml` is
+  explicitly requested). The linker (`source_link._route_entity`) routes
+  functions → `reachable_declarations` and records/enums/typedefs →
+  `reachable_types`. So a stock clang toolchain yields a non-empty C++ source
+  surface and sidesteps the castxml-on-libstdc++13 break (P15) entirely — no
+  `python-clang`/`libclang` (cindex) dependency was needed (ADR-001).
+- **Acceptance (pinned).** `tests/test_source_extractors_clang.py::test_clang_ast_yields_nonzero_reachable_surface`
+  feeds a representative clang AST through `source_abi_from_clang_ast` →
+  `link_source_abi` and asserts both `reachable_declarations` and
+  `reachable_types` are non-empty (the literal eval metric), at the fast-lane
+  unit level (no clang needed). The live snappy/ICU `--sources` confirmation is
+  the §E source-tier campaign (D1/E4).
+- **Residual.** A dedicated cindex backend is *not* planned — the AST-JSON path
+  covers the acceptance. castxml remains an opt-in alternative (`--source-extractor castxml`).
 
-### A2. castxml/clang inherits compile-DB include paths (P14) — gap **G16**/G4
+### A2. castxml/clang inherits compile-DB include paths (P14) — gap **G16**/G4 — **shipped/verified**
 - **Context.** Public headers routinely `#include` *generated* headers
-  (`snappy-stubs-public.h`); the `-H` path doesn't pass the build's `-I`, so L2
-  fails `file not found` until the user adds `-I <builddir>` by hand.
-- **Pointers.**
-  - `abicheck/dumper_castxml.py` `_build_castxml_command` (~L302),
-    `extra_includes` handling (~L131/L149).
-  - `abicheck/build_context.py` — per-TU include flags already parsed
-    (`_try_consume_include` ~L250, `_try_consume_isystem` ~L262).
-  - Bridge point: the `-p`/`--compile-db` path in `abicheck/cli.py` `dump`.
-- **Approach.** When a compile DB is supplied/auto-discovered, derive `-I`/
-  `-isystem`/`-D`/`--target`/`--sysroot` from the matched compile unit and pass
-  them into the header-AST invocation automatically.
-- **Acceptance.** `dump <so> -H include/ -p build/` parses a public header that
-  includes a generated header **without** a manual `-I`.
-- **Effort·Risk.** S–M · low.
+  (`snappy-stubs-public.h`); without the build's `-I`, the header parse fails
+  `file not found`.
+- **What actually shipped.** `cli._resolve_build_context_flags` runs
+  `build_context_for_header(db, header).to_castxml_flags()` whenever a compile DB
+  is supplied via `-p`/`--compile-db`, deriving `-I`/`-isystem`/`-D`/`-U`/`-std`/
+  `--target`/`--sysroot` from the matched TU; `_merge_gcc_options` folds them into
+  the castxml invocation. So the build dir holding generated headers is on the
+  include path automatically — no manual `-I`.
+- **Acceptance (pinned).** `tests/test_build_context.py::TestPerHeaderMatching::test_matched_tu_include_paths_flow_into_castxml_flags`
+  asserts the matched TU's include dirs (where generated headers land), defines,
+  and ABI flags all reach `to_castxml_flags()` without a manual include.
 
 ### A3. `--lang c` heuristic should warn, not abort (P16) — gap **G16** — **shipped**
 - **Context.** `G16` already lists this (`--lang c` + `extern "C"` fails because
@@ -277,10 +274,14 @@ The entire eval was **Linux/ELF**. These are untested paths, not known bugs.
 ---
 
 ## Recommended order
-1. **A1 (G4 libclang decl extractor)** — unblocks A2/A3, all C++ validation, real L4 value.
-2. **D1 + D2 (eval source tier + CI)** — turns this research into a standing guard.
+1. ~~**A1 (G4 decl extractor) + A2 (compile-DB `-I`)**~~ — **shipped/verified**: the
+   clang AST-JSON backend (default) emits decls/types and feeds
+   `reachable_declarations`/`reachable_types`; the `-p` bridge carries the build's
+   include paths/flags into the parse. Both pinned by fast-lane regression tests.
+2. **D1 + D2 (eval source tier + CI)** — turns this research into a standing guard,
+   and is now the way to confirm A1/A2 *live* on snappy/ICU.
 3. ~~**B1, B2, A3**~~ — **shipped** (cheap, high-friction-removal UX/discovery fixes:
    `--show-data-sources` preview-only messaging, broadened build-flag vocabulary,
-   `--lang c` → C++ auto-retry). A2 still pending (needs A1).
+   `--lang c` → C++ auto-retry).
 4. **E1 (PE/Mach-O)** — close the platform-coverage hole.
 5. **C1, E2–E4, F, G** — depth & breadth as capacity allows.

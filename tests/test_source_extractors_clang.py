@@ -186,6 +186,23 @@ def test_ast_mapping_extracts_each_entity_kind() -> None:
     assert SourceAbiTu.from_dict(tu.to_dict()).tu_id == tu.tu_id
 
 
+def test_clang_ast_yields_nonzero_reachable_surface() -> None:
+    # A1 acceptance (gap G4): the eval reported `reachable_declarations: 0` /
+    # `reachable_types: 0` on real C++ libs because the source surface came back
+    # empty. The clang AST backend feeds both buckets — a function becomes a
+    # reachable declaration and a record/enum a reachable type — so a linked
+    # surface from a representative clang AST must be non-empty on both axes.
+    # Pure (no clang needed): pins the eval metric at the fast-lane unit level.
+    tu = source_abi_from_clang_ast(_ast(), _cu(), ["include/foo.h"], "target://libfoo")
+    surface = link_source_abi([tu])
+    assert surface.reachable_declarations, "expected non-zero reachable_declarations"
+    assert surface.reachable_types, "expected non-zero reachable_types"
+    # The private-header `priv` inline is excluded from the public surface.
+    assert all("priv" not in e.qualified_name for e in surface.reachable_declarations)
+    assert any(e.qualified_name == "ns::add" for e in surface.reachable_declarations)
+    assert any(e.qualified_name == "ns::Widget" for e in surface.reachable_types)
+
+
 def test_ast_mapping_extracts_typedef_underlying_type() -> None:
     # ADR-030 follow-up #3: a public typedef/alias records its underlying type so
     # a later target change is detectable; bare typedefs have no exported symbol.

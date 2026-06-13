@@ -16,14 +16,19 @@
 
 This is the *source-based* L4 backend. It parses a translation unit under its
 real per-TU build context (ADR-030 D2) with ``clang -Xclang -ast-dump=json`` and
-derives the fingerprints that final binary/debug artifacts under-represent and
-that castxml (phase 2) cannot produce:
+emits the full public source surface — the JSON AST already carries declarations
+and types, so a separate libclang/cindex backend is not needed (gap G4):
 
+- public **declarations**: free functions/methods with their type-level
+  signature and mangled name (→ ``reachable_declarations``);
+- public **types**: records/enums/typedefs with a build-root-stable type hash
+  (→ ``reachable_types``);
 - inline function bodies (``inline_body_changed``);
 - function/class **template** bodies, instantiated or not
   (``template_body_changed`` / ``uninstantiated_template_removed``);
 - ``constexpr`` values (``constexpr_value_changed``);
-- public default arguments (``default_argument_changed``).
+- public default arguments (``default_argument_changed``);
+- public macros (via a second ``-E -dD`` preprocess pass; ``public_macro_value_changed``).
 
 **Requires clang.** Source ABI replay is the one tier that depends on a C++
 front-end being present. When ``clang`` is not on ``PATH`` the extractor raises
