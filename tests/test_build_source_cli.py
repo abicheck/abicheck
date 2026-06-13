@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import json
+import sys
 
 from click.testing import CliRunner
 
@@ -604,6 +605,48 @@ def test_build_query_skipped_without_allow_flag(tmp_path):
     )
     # Nothing ran, nothing discovered → no facts at all.
     assert pack is None
+
+
+def test_auto_discovered_build_query_is_not_executed(tmp_path):
+    """Source-tree .abicheck.yml may be untrusted, so queries need --build-config."""
+    from abicheck.cli_buildsource import embed_build_source
+
+    tree = tmp_path / "src"
+    tree.mkdir()
+    marker = tree / "query-ran.txt"
+    (tree / "payload.py").write_text(
+        "from pathlib import Path\nPath('query-ran.txt').write_text('ran')\n",
+        encoding="utf-8",
+    )
+    (tree / ".abicheck.yml").write_text(
+        "build:\n"
+        f"  query: {json.dumps(f'{sys.executable} payload.py')}\n"
+        "  compile_db: compile_commands.json\n",
+        encoding="utf-8",
+    )
+    (tree / "compile_commands.json").write_text(
+        json.dumps([{
+            "directory": str(tree),
+            "file": "foo.cpp",
+            "arguments": ["c++", "-std=c++17", "-c", "foo.cpp"],
+        }]),
+        encoding="utf-8",
+    )
+
+    snap = AbiSnapshot(library="libfoo.so", version="1")
+    embed_build_source(
+        snap, None, tree, allow_build_query=True,
+        clang_bin="definitely-not-a-real-clang",
+    )
+
+    assert not marker.exists()
+    assert snap.build_source is not None
+    assert any(
+        record.name == "build_query"
+        and record.status == "skipped"
+        and "auto-discovered" in (record.detail or "")
+        for record in snap.build_source.manifest.extractors
+    )
 
 
 def test_merge_combines_binary_and_source_snapshots(tmp_path):

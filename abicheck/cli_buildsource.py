@@ -1224,6 +1224,10 @@ def embed_build_source(
     inline_pack: BuildSourcePack | None = None
     if raw_build_info is not None or raw_sources is not None:
         cfg_path = build_config or discover_build_config(raw_sources)
+        # Only an explicit --build-config is operator-supplied/trusted for
+        # subprocess execution. Auto-discovered source-tree configs may be
+        # attacker-controlled; their non-executable settings are still honored.
+        cfg_trusted_for_query = build_config is not None
         try:
             cfg = load_build_config(cfg_path) if cfg_path is not None else None
         except ValueError as exc:
@@ -1233,6 +1237,7 @@ def embed_build_source(
             build_info=raw_build_info,
             build_config=cfg,
             allow_build_query=allow_build_query,
+            build_config_trusted_for_query=cfg_trusted_for_query,
             base_build=bi_pack.build_evidence if bi_pack else None,
             clang_bin=clang_bin,
             scope=scope,

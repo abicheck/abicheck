@@ -339,5 +339,7 @@ headers from a source checkout — disambiguating multi-build-system projects
 (e.g. oneDAL's Make *and* Bazel). This is a direct application of the D5 action
 ceiling and adds no new capability: `inspect` (read existing outputs) is the
 default; running the configured query command is the opt-in `query_build_system`
-action (`--allow-build-query`); `run_build`/`wrap_build` stay denied — abicheck
+action and requires both `--allow-build-query` and an explicit trusted
+`--build-config` path; auto-discovered source-tree configs are honored only for
+non-executing settings. `run_build`/`wrap_build` stay denied — abicheck
 never performs a full project build.

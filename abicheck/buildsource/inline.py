@@ -28,8 +28,9 @@ the normalized L3/L4/L5 facts *inline* from raw inputs and embeds them in the
 
 A per-project ``.abicheck.yml`` ``build:`` block can name the build system and a
 *query* command that emits a compile DB without performing a full build; running
-that query is gated by ``--allow-build-query`` (ADR-032 D5 ``query_build_system``
-action ceiling — read by default, query opt-in, full build never).
+that query is gated by both an explicit operator-supplied build config and
+``--allow-build-query`` (ADR-032 D5 ``query_build_system`` action ceiling —
+read by default, trusted query opt-in, full build never).
 
 Everything here is best-effort (ADR-028 D3): a missing tool or unreadable input
 degrades L3/L4/L5 to partial/not-collected coverage and never aborts the dump —
@@ -77,8 +78,9 @@ class BuildConfig:
     All fields are optional; an absent file yields the all-defaults config and
     inline collection falls back to auto-detection. ``system`` is advisory (it
     selects the compile-DB adapter hint); ``query`` is the *query/extraction*
-    command run only under ``--allow-build-query``; ``compile_db`` is where that
-    query (or the build) lands its ``compile_commands.json``.
+    command run only when the config is explicitly supplied and
+    ``--allow-build-query`` is set; ``compile_db`` is where that query (or the
+    build) lands its ``compile_commands.json``.
     """
 
     system: str = "auto"
@@ -149,6 +151,7 @@ def collect_inline_pack(
     build_info: Path | None,
     build_config: BuildConfig | None = None,
     allow_build_query: bool = False,
+    build_config_trusted_for_query: bool = True,
     base_build: BuildEvidence | None = None,
     clang_bin: str = "clang",
     extractor: str = "clang",
@@ -164,6 +167,11 @@ def collect_inline_pack(
     ``base_build`` seeds the L3 evidence from an already-loaded pack (e.g. an
     explicit ``--build-info`` pack directory) so a raw ``--sources`` tree can
     replay L4 against it without re-resolving a compile DB.
+
+    ``build_config_trusted_for_query`` must be true before ``build.query`` can
+    run. CLI auto-discovered ``.abicheck.yml`` files live inside the supplied
+    source tree and may be attacker-controlled, so they are not trusted for
+    subprocess execution even when ``--allow-build-query`` is set.
     """
     cfg = build_config or BuildConfig()
     merged = BuildEvidence()
@@ -176,7 +184,8 @@ def collect_inline_pack(
         compile_db = None  # already seeded from a build-info pack
     else:
         compile_db = _resolve_compile_db(
-            build_info, sources, cfg, allow_build_query, merged, extractors
+            build_info, sources, cfg, allow_build_query,
+            build_config_trusted_for_query, merged, extractors
         )
     if compile_db is not None:
         _run_compile_db(compile_db, cfg.system, merged, extractors)
@@ -223,14 +232,16 @@ def _resolve_compile_db(
     sources: Path | None,
     cfg: BuildConfig,
     allow_build_query: bool,
+    build_config_trusted_for_query: bool,
     merged: BuildEvidence,
     extractors: list[ExtractorRecord],
 ) -> Path | None:
     """Resolve the compile DB to feed L3, honouring the action ceiling (D5).
 
     Order: an explicit ``--build-info`` path (file or dir) → a ``build.query``
-    command result (only with ``--allow-build-query``) → ``build.compile_db`` in
-    the source tree → an auto-discovered ``compile_commands.json`` in the tree.
+    command result (only with ``--allow-build-query`` and trusted config) →
+    ``build.compile_db`` in the source tree → an auto-discovered
+    ``compile_commands.json`` in the tree.
     """
     if build_info is not None:
         found = _compile_db_at(build_info)
@@ -241,9 +252,18 @@ def _resolve_compile_db(
         )
 
     # build.query (ADR-032 D5 query_build_system): opt-in command that EMITS a
-    # compile DB / exports without a full build. Off unless --allow-build-query.
+    # compile DB / exports without a full build. Off unless --allow-build-query
+    # is set *and* the config came from an explicit operator-supplied path.
     if cfg.query:
-        if allow_build_query:
+        if not build_config_trusted_for_query:
+            extractors.append(ExtractorRecord(
+                name="build_query", status="skipped",
+                detail=(
+                    "build.query ignored from auto-discovered .abicheck.yml; "
+                    "pass a trusted config with --build-config to permit queries"
+                ),
+            ))
+        elif allow_build_query:
             queried = _run_build_query(cfg, sources, merged, extractors)
             if queried is not None:
                 return queried
@@ -325,8 +345,8 @@ def _run_build_query(
 ) -> Path | None:
     """Run the configured ``build.query`` command and return the emitted DB.
 
-    Runs the operator-configured command with ``shell=False`` (parsed via
-    ``shlex``) in the source-tree cwd. This is the ADR-032 D5 ``query_build_system``
+    Runs the explicit operator-configured command with ``shell=False`` (parsed
+    via ``shlex``) in the source-tree cwd. This is the ADR-032 D5 ``query_build_system``
     tier: it emits flags/exports (a configured-graph/action query, ``make -n``,
     a CMake File API regeneration) — never ``cmake --build`` / ``make all``. A
     non-zero exit, missing tool, or timeout is recorded as a failed extractor and

@@ -171,13 +171,14 @@ L0–L5.
 
 ### Build-tool query configuration (`.abicheck.yml`)
 
-A source checkout often *contains* the build system. abicheck can use it to
-recover exact ABI-affecting flags and generated headers — gated by a per-project
-config and the ADR-032 D5 action ceiling (**read by default, query opt-in, full
-build never**):
+A source checkout often *contains* the build system. abicheck can use existing
+build outputs from the checkout, while executable build queries are gated by an
+explicit trusted config path and the ADR-032 D5 action ceiling (**read by
+default, trusted query opt-in, full build never**):
 
 ```yaml
-# .abicheck.yml at the source-tree root (or pass --build-config <path>)
+# .abicheck.yml at the source-tree root for non-executing settings
+# (pass a trusted --build-config <path> before build.query can run)
 build:
   system: bazel            # bazel | cmake | make | meson | auto (default: auto-detect)
   # A command that EMITS flags/exports without performing a full project build —
@@ -191,9 +192,12 @@ sources:
 
 - **`inspect` (default, always on):** read existing build outputs / compile DBs
   the checkout already has. No config needed.
-- **`query_build_system` (opt-in, `--allow-build-query`):** run the configured
-  `build.query` command to emit flags/exports. abicheck runs it with no shell
-  (parsed via `shlex`) in the source-tree directory.
+- **`query_build_system` (opt-in, explicit trusted config + `--allow-build-query`):**
+  run the configured `build.query` command to emit flags/exports. abicheck runs
+  it with no shell (parsed via `shlex`) in the source-tree directory. A
+  `.abicheck.yml` auto-discovered from `--sources` is still used for
+  non-executing settings such as `build.compile_db`, but its `build.query` is
+  ignored; pass a trusted config path with `--build-config` to enable queries.
 - **`run_build` / `wrap_build` (denied):** abicheck never performs a full
   project build or compiler-wrapper interception.
 

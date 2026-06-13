@@ -83,18 +83,20 @@ def build_source_dump_options(func: F) -> F:
 
     func = click.option(
         "--allow-build-query", "allow_build_query", is_flag=True, default=False,
-        help="Permit running the configured `build.query` command to emit a "
-        "compile DB / exports (ADR-032 D5 query_build_system). Off by default: "
-        "only existing build outputs are inspected — a full project build is "
-        "never run.",
+        help="Permit running `build.query` from an explicit trusted "
+        "--build-config to emit a compile DB / exports (ADR-032 D5 "
+        "query_build_system). Off by default, and ignored for auto-discovered "
+        "source-tree configs: only existing build outputs are inspected — "
+        "a full project build is never run.",
     )(func)
     func = click.option(
         "--build-config", "build_config",
         type=click.Path(exists=True, dir_okay=False, path_type=Path),
         default=None,
-        help="Path to an `.abicheck.yml` build config (build system, query "
-        "command, compile-DB location). Defaults to `.abicheck.yml` at the "
-        "--sources tree root.",
+        help="Path to a trusted `.abicheck.yml` build config (build system, "
+        "query command, compile-DB location). Defaults to `.abicheck.yml` "
+        "at the --sources tree root for non-executing settings; build.query "
+        "runs only from an explicit --build-config.",
     )(func)
     func = click.option(
         "--sources", "sources",
