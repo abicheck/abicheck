@@ -1,6 +1,6 @@
 {
   "description": "Formal detector specification matrix (generated).",
-  "count": 245,
+  "count": 246,
   "detectors": [
     {
       "kind": "abi_relevant_build_flag_changed",
@@ -55,7 +55,7 @@
       "category": "breaking",
       "default_verdict": "BREAKING",
       "severity": "error",
-      "min_evidence": "unspecified",
+      "min_evidence": "L1",
       "doc_slug": "base_class_offset_changed"
     },
     {
@@ -1135,7 +1135,7 @@
       "category": "breaking",
       "default_verdict": "BREAKING",
       "severity": "error",
-      "min_evidence": "unspecified",
+      "min_evidence": "L0",
       "doc_slug": "rtti_inheritance_changed"
     },
     {
@@ -1915,6 +1915,14 @@
       "doc_slug": "version_script_missing"
     },
     {
+      "kind": "versioned_symbol_scheme_detected",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "L0",
+      "doc_slug": "versioned_symbol_scheme_detected"
+    },
+    {
       "kind": "virtual_method_added",
       "category": "breaking",
       "default_verdict": "BREAKING",
@@ -1943,7 +1951,7 @@
       "category": "breaking",
       "default_verdict": "BREAKING",
       "severity": "error",
-      "min_evidence": "unspecified",
+      "min_evidence": "L0",
       "doc_slug": "vtable_slot_count_changed"
     },
     {

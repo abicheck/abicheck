@@ -207,6 +207,10 @@
       "api_break": false,
       "bad_practice": true,
       "description": "Public surface and every exported symbol are identical between v1 and v2; only the ABI-affecting compiler flag set differs (v2 adds -fshort-enums). The toolchain-flag drift detector parses DW_AT_producer and reports the mismatch as a compatible, informational quality signal \u2014 a leading indicator that the two builds were made under different ABI assumptions, before that drift turns into a real layout break on a library that exposes enums/packed structs/a different data model.",
+      "known_gap": "Clang: the toolchain-flag drift signal reads the compiler flag set from DW_AT_producer, but clang does not embed command-line flags there by default (it needs -grecord-command-line), so -fshort-enums is invisible and the tool returns NO_CHANGE. GCC records the switches in DW_AT_producer by default, so the drift is detected. Producer-specific; detection requires GCC or a clang build with -grecord-command-line.",
+      "known_gap_toolchains": [
+        "clang"
+      ],
       "expected_kinds": [
         "toolchain_flag_drift"
       ]

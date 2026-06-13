@@ -62,10 +62,6 @@ from .cli import main
 
 if TYPE_CHECKING:
     from .buildsource.source_abi import SourceAbiSurface
-    from .buildsource.source_extractors import (
-        CastxmlSourceExtractor,
-        ClangSourceExtractor,
-    )
     from .buildsource.source_graph import SourceGraphSummary
     from .checker_types import Change, DiffResult
     from .model import AbiSnapshot
@@ -956,28 +952,13 @@ def _collect_source_abi(
             exported=exported, library=library, roots=roots,
         )
 
-    from .buildsource.source_extractors import (
-        CastxmlSourceExtractor,
-        ClangSourceExtractor,
-        resolve_source_extractor,
-    )
+    from .buildsource.source_extractors import select_source_backend
 
     # Evaluate the available front-ends and pick a path (ADR-030 D3): "auto"
-    # selects the most capable available backend; an explicitly-requested clang
-    # that is absent falls back to castxml instead of silently disabling source
-    # checks. Availability is probed via each backend's own .available().
-    _backends: dict[str, ClangSourceExtractor | CastxmlSourceExtractor] = {
-        "clang": ClangSourceExtractor(clang_bin=clang_bin),
-        "castxml": CastxmlSourceExtractor(),
-    }
-
-    def _probe(name: str) -> bool:
-        backend = _backends.get(name)
-        return bool(backend and backend.available())
-
-    choice = resolve_source_extractor(extractor, available=_probe)
-    if choice.selected is None:
-        # Nothing usable. Record every skipped backend and disable source checks.
+    # picks the most capable available backend; an explicitly-requested clang
+    # that is absent falls back to castxml instead of disabling source checks.
+    choice, impl = select_source_backend(extractor, clang_bin=clang_bin)
+    if impl is None or choice.selected is None:
         detail = "; ".join(f"{n}: {why}" for n, why in choice.skipped) or choice.reason
         extractors.append(ExtractorRecord(
             name=f"source_abi:{extractor}", status="failed",
@@ -989,7 +970,6 @@ def _collect_source_abi(
             "source-only checks disabled. Install clang or castxml.",
         )
 
-    impl: ClangSourceExtractor | CastxmlSourceExtractor = _backends[choice.selected]
     extractor = choice.selected
     tool_name = clang_bin if choice.selected == "clang" else "castxml"
     # Surface the decision and the chosen backend's capability gaps so a

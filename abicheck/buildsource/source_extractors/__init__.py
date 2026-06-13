@@ -62,6 +62,7 @@ from .resolver import (
     SourceExtractorChoice,
     SourceExtractorProfile,
     resolve_source_extractor,
+    select_source_backend,
 )
 
 __all__ = [
@@ -85,5 +86,6 @@ __all__ = [
     "macros_from_preprocessor",
     "parse_android_dump",
     "resolve_source_extractor",
+    "select_source_backend",
     "source_abi_from_clang_ast",
 ]

@@ -41,6 +41,11 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .castxml import CastxmlSourceExtractor
+    from .clang import ClangSourceExtractor
 
 #: Canonical backend identifiers accepted on the CLI.
 CLANG = "clang"
@@ -243,3 +248,35 @@ def resolve_source_extractor(
         skipped=skipped,
         reason=f"no usable source-ABI backend for request {lead!r}",
     )
+
+
+def select_source_backend(
+    extractor: str,
+    *,
+    clang_bin: str = "clang",
+) -> tuple[SourceExtractorChoice, ClangSourceExtractor | CastxmlSourceExtractor | None]:
+    """Construct the clang/castxml backends, probe availability, and resolve one.
+
+    Returns ``(choice, impl)`` where ``impl`` is the chosen backend instance, or
+    ``None`` when nothing is usable (``choice.selected is None``). Keeps the
+    backend construction + availability probing out of the CLI so the selection
+    path lives next to the policy that drives it.
+    """
+    # Import via the package (not the submodules) so tests that monkeypatch
+    # ``source_extractors.ClangSourceExtractor`` / ``CastxmlSourceExtractor``
+    # still take effect here. The package is fully initialized by call time, so
+    # this late import is cycle-safe.
+    from . import CastxmlSourceExtractor, ClangSourceExtractor
+
+    backends: dict[str, ClangSourceExtractor | CastxmlSourceExtractor] = {
+        CLANG: ClangSourceExtractor(clang_bin=clang_bin),
+        CASTXML: CastxmlSourceExtractor(),
+    }
+
+    def _probe(name: str) -> bool:
+        backend = backends.get(name)
+        return bool(backend and backend.available())
+
+    choice = resolve_source_extractor(extractor, available=_probe)
+    impl = backends[choice.selected] if choice.selected in backends else None
+    return choice, impl
