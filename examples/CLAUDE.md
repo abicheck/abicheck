@@ -1,6 +1,6 @@
 # CLAUDE.md — `examples/`
 
-The ABI-scenario catalog: 128 cases numbered contiguously (`01–128` +
+The ABI-scenario catalog: 140 cases numbered contiguously (`01–139` +
 `26b`), including 5 multi-library bundle cases. Each case is a minimal,
 compilable C/C++ example demonstrating a specific ABI/API pitfall.
 
@@ -11,12 +11,18 @@ explains the verdict taxonomy.
 
 ```
 caseNN_<short_name>/
-├── v1/           # baseline source + headers
-├── v2/           # changed source + headers
-├── app.c|cpp     # runtime consumer that demonstrates the actual failure
-├── README.md     # what breaks and why
+├── v1.c|cpp + v1.h|hpp   # baseline source + headers
+├── v2.c|cpp + v2.h|hpp   # changed source + headers
+├── app.c|cpp             # runtime consumer that demonstrates the actual failure
+├── README.md             # what breaks and why
 └── (optional) CMakeLists.txt
 ```
+
+Note: `v1`/`v2` are **filename prefixes**, not subdirectories. A few cases
+deviate by design: BTF fixtures (e.g. `case121`) ship `v1.btf`/`v2.btf` +
+a generator and no `app.*`; the 5 multi-library bundle cases
+(`case84/90/91/92/93`) use a `gen_bundle.sh`-style generator to produce the
+per-library binaries instead of a single `v1`/`v2` source pair.
 
 ## Ground truth
 

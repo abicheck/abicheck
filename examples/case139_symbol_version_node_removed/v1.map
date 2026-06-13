@@ -1,0 +1,2 @@
+LIBX_1.0 { global: alpha; local: *; };
+LIBX_2.0 { global: beta; } LIBX_1.0;
