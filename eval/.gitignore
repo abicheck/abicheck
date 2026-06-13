@@ -1,0 +1,5 @@
+# Raw, regenerable artifacts — never committed (large/ephemeral).
+# The scratch cache (downloads, extracted .so, snapshots, source checkouts).
+/work/
+results/*.json
+!results/latest.json

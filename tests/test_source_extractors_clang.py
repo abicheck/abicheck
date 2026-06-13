@@ -974,12 +974,20 @@ def test_extract_records_recovered_ast_exit(monkeypatch) -> None:  # type: ignor
 
     def handler(cmd, **kw):  # type: ignore[no-untyped-def]
         if "-ast-dump=json" in cmd:
-            return _Result(1, json.dumps(_ast()), "warning: recovered")
+            return _Result(
+                1,
+                json.dumps(_ast()),
+                "fatal error: 'llvm/IR/Attributes.inc' file not found",
+            )
         return _Result(0, "")
 
     extractor = _patch_run(monkeypatch, handler)
     tu = extractor.extract(_cu(), public_header_roots=["include/foo.h"])
     assert any("recovered" in d for d in tu.diagnostics)
+    assert any(
+        "missing generated header 'llvm/IR/Attributes.inc'" in d
+        for d in tu.diagnostics
+    )
 
 
 def test_extract_timeout_raises(monkeypatch) -> None:  # type: ignore[no-untyped-def]

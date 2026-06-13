@@ -67,6 +67,7 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     "func_added": "L0",
     "var_added": "L0",
     "var_removed": "L0",
+    "versioned_symbol_scheme_detected": "L0",  # bulk removed↔added churn in the export table
     "func_visibility_changed": "L0",
     "func_language_linkage_changed": "L0",
     "soname_missing": "L0",

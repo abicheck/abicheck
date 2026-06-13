@@ -182,6 +182,8 @@ def _write_snapshot_output(
     build_config: Path | None = None,
     allow_build_query: bool = False,
     collect_mode: str = "source-target",
+    build_query: str | None = None,
+    build_compile_db: str | None = None,
 ) -> None:
     """Serialize snapshot and write to file or stdout.
 
@@ -191,6 +193,8 @@ def _write_snapshot_output(
     ``compare old.json new.json`` needs no out-of-band packs. *collect_mode* (the
     ADR-033 D2 CI evidence mode) selects which layers and replay scope to collect:
     ``build`` captures L3 build context only, ``off`` collects nothing.
+    *build_query* / *build_compile_db* are the CLI equivalents of the
+    ``.abicheck.yml`` ``build.query`` / ``build.compile_db`` keys.
     """
     if build_info is not None or sources is not None:
         from .cli_buildsource import embed_build_source
@@ -198,6 +202,7 @@ def _write_snapshot_output(
             snap, build_info, sources,
             build_config=build_config, allow_build_query=allow_build_query,
             collect_mode=collect_mode,
+            build_query=build_query, build_compile_db=build_compile_db,
         )
     result = snapshot_to_json(snap)
     if output:
@@ -728,6 +733,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
              git_tag: str | None, build_id: str | None, no_git: bool,
              build_info: Path | None = None, sources: Path | None = None,
              build_config: Path | None = None, allow_build_query: bool = False,
+             build_query: str | None = None, build_compile_db: str | None = None,
              collect_mode: str = "source-target") -> None:
     """Dump ABI snapshot of a shared library to JSON.
 
@@ -746,7 +752,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
                 "produce binary data-source diagnostics."
             )
         from .cli_buildsource import dump_source_only
-        dump_source_only(sources, build_info, version, output, build_config, allow_build_query, git_tag, build_id, no_git, collect_mode)
+        dump_source_only(sources, build_info, version, output, build_config, allow_build_query, git_tag, build_id, no_git, collect_mode, build_query=build_query, build_compile_db=build_compile_db)
         return
 
     # Reconcile the --debug-format selector with the legacy --btf/--ctf/--dwarf
@@ -838,7 +844,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         _populate_dependency_info(snap, so_path, list(search_paths), sysroot, ld_library_path)
 
     _stamp_provenance(snap, git_tag=git_tag, build_id=build_id, no_git=no_git)
-    _write_snapshot_output(snap, output, build_info, sources, build_config, allow_build_query, collect_mode)
+    _write_snapshot_output(snap, output, build_info, sources, build_config, allow_build_query, collect_mode, build_query=build_query, build_compile_db=build_compile_db)
 
 
 def _handle_non_elf_dump(
@@ -1593,6 +1599,12 @@ def _finalize_compare_result(
                    "exported API are recorded as filtered, not reported. Internal-type "
                    "leaks are never hidden. On by default; use --no-scope-public-headers "
                    "to report every finding regardless of surface.")
+@click.option("--collapse-versioned-symbols", "collapse_versioned_symbols", is_flag=True, default=False,
+              help="Opt-in (G15): when a versioned-symbol scheme is detected (most removed "
+                   "symbols reappear differing only by a version token, e.g. ICU u_*_NN), "
+                   "reclassify those version-rename pairs as compatible so the verdict "
+                   "reflects the real delta, not the rename churn. A real SONAME bump and "
+                   "non-versioned removals still drive the verdict.")
 @click.option("--show-filtered", "show_filtered", is_flag=True, default=False,
               help="List findings excluded by --scope-public-headers (audit trail).")
 @click.option("--public-symbol", "public_symbols", multiple=True,
@@ -1688,7 +1700,7 @@ def compare_cmd(
     severity_addition: str | None,
     follow_deps: bool, search_paths: tuple[Path, ...], ld_library_path: str,
     show_redundant: bool, show_only: str | None, stat: bool,
-    scope_public_headers: bool, show_filtered: bool,
+    scope_public_headers: bool, collapse_versioned_symbols: bool, show_filtered: bool,
     public_symbols: tuple[str, ...], public_symbols_list: Path | None,
     report_mode: str, show_impact: bool,
     recommend: bool,
@@ -1874,6 +1886,7 @@ def compare_cmd(
         extra_changes=extra_changes,
         pattern_verdicts=apply_patterns,
         surface_metrics=surface_metrics,
+        collapse_versioned_symbols=collapse_versioned_symbols,
     )
     if layer_coverage_rows:
         result.layer_coverage = layer_coverage_rows
