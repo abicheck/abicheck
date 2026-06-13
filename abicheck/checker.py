@@ -339,6 +339,7 @@ def _run_post_processing(
     policy_file: PolicyFile | None,
     scope_to_public_surface: bool,
     force_public_symbols: set[str] | None,
+    collapse_versioned_symbols: bool,
 ) -> tuple[list[Change], list[Change], list[Change], list[Change], list[Change], bool, PipelineContext]:
     """Run the post-processing pipeline and unpack results.
 
@@ -357,6 +358,7 @@ def _run_post_processing(
         frozen_namespaces=frozen_ns,
         scope_to_public_surface=scope_to_public_surface,
         force_public_symbols=force_public_symbols,
+        collapse_versioned_symbols=collapse_versioned_symbols,
     )
     # scoping is "resolved" unless it was requested and had to fall back to the
     # full export table (issue #235: an unconfirmed scope must not read as a
@@ -484,7 +486,8 @@ def compare(
     # EscalateFrozenNamespaceViolations step can tag matching findings.
     kept, redundant, opaque_filtered, suppressed, out_of_surface, scope_resolved, pp_ctx = (
         _run_post_processing(
-            changes, old, new, suppression, policy_file, scope_to_public_surface, force_public_symbols
+            changes, old, new, suppression, policy_file, scope_to_public_surface,
+            force_public_symbols, collapse_versioned_symbols,
         )
     )
 
