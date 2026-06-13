@@ -143,3 +143,23 @@ def test_recogniser_ignores_itanium_mangling_digits():
         _ch("func_removed", "_Z4sym5"), _ch("func_added", "_Z4sym6"),
     ]
     assert detect_versioned_symbol_scheme(changes) is None
+
+
+def test_collapse_preset_reclassifies_versioned_pairs():
+    """G15 opt-in: --collapse-versioned-symbols moves the C-style version-rename
+    pairs to compatible so the verdict reflects the real delta, not the churn."""
+    old, new = _snap("75.1", "75"), _snap("78.3", "78")
+    base = compare(old, new)
+    collapsed = compare(old, new, collapse_versioned_symbols=True)
+
+    bk = _kind_counts(base)
+    ck = _kind_counts(collapsed)
+    n = len(_BASES)
+    # default: the churn is present and BREAKING
+    assert bk.get("func_removed") == n and bk.get("func_added") == n
+    assert base.verdict == Verdict.BREAKING
+    # collapsed: the version-rename pairs are gone from the kept set, only the
+    # advisory remains, and the verdict is no longer a hard ABI break.
+    assert "func_removed" not in ck and "func_added" not in ck, ck
+    assert ck.get("versioned_symbol_scheme_detected") == 1, ck
+    assert collapsed.verdict != Verdict.BREAKING

@@ -1599,6 +1599,12 @@ def _finalize_compare_result(
                    "exported API are recorded as filtered, not reported. Internal-type "
                    "leaks are never hidden. On by default; use --no-scope-public-headers "
                    "to report every finding regardless of surface.")
+@click.option("--collapse-versioned-symbols", "collapse_versioned_symbols", is_flag=True, default=False,
+              help="Opt-in (G15): when a versioned-symbol scheme is detected (most removed "
+                   "symbols reappear differing only by a version token, e.g. ICU u_*_NN), "
+                   "reclassify those version-rename pairs as compatible so the verdict "
+                   "reflects the real delta, not the rename churn. A real SONAME bump and "
+                   "non-versioned removals still drive the verdict.")
 @click.option("--show-filtered", "show_filtered", is_flag=True, default=False,
               help="List findings excluded by --scope-public-headers (audit trail).")
 @click.option("--public-symbol", "public_symbols", multiple=True,
@@ -1694,7 +1700,7 @@ def compare_cmd(
     severity_addition: str | None,
     follow_deps: bool, search_paths: tuple[Path, ...], ld_library_path: str,
     show_redundant: bool, show_only: str | None, stat: bool,
-    scope_public_headers: bool, show_filtered: bool,
+    scope_public_headers: bool, collapse_versioned_symbols: bool, show_filtered: bool,
     public_symbols: tuple[str, ...], public_symbols_list: Path | None,
     report_mode: str, show_impact: bool,
     recommend: bool,
@@ -1880,6 +1886,7 @@ def compare_cmd(
         extra_changes=extra_changes,
         pattern_verdicts=apply_patterns,
         surface_metrics=surface_metrics,
+        collapse_versioned_symbols=collapse_versioned_symbols,
     )
     if layer_coverage_rows:
         result.layer_coverage = layer_coverage_rows

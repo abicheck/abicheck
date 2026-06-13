@@ -66,42 +66,49 @@ def _is_version_scheme_candidate(name: str) -> bool:
     return bool(name) and not name.startswith("_Z")
 
 
-def detect_versioned_symbol_scheme(changes: list[Change]) -> Change | None:
-    """Return one advisory ``Change`` if the removed/added churn is a versioned
-    scheme, else ``None``. Pure — no snapshot/IO, unit-testable."""
+def analyze_versioned_scheme(changes: list[Change]) -> tuple[Change | None, list[Change]]:
+    """Analyze removed/added churn for a versioned-symbol scheme.
+
+    Returns ``(advisory, matched)`` where *advisory* is the single
+    ``versioned_symbol_scheme_detected`` finding (or ``None`` when no scheme is
+    present) and *matched* is the list of the removed **and** added ``Change``
+    objects that form the version-rename pairs — the inputs the opt-in collapse
+    preset reclassifies as compatible. Pure — no snapshot/IO, unit-testable.
+    """
     from .checker_types import Change
 
-    removed = [
-        c.symbol
-        for c in changes
-        if c.kind in _REMOVED_KINDS and _is_version_scheme_candidate(c.symbol)
-    ]
-    added = [
-        c.symbol
-        for c in changes
-        if c.kind is ChangeKind.FUNC_ADDED and _is_version_scheme_candidate(c.symbol)
-    ]
+    removed = [c for c in changes
+               if c.kind in _REMOVED_KINDS and _is_version_scheme_candidate(c.symbol)]
+    added = [c for c in changes
+             if c.kind is ChangeKind.FUNC_ADDED and _is_version_scheme_candidate(c.symbol)]
     if len(removed) < _MIN_PAIRS or not added:
-        return None
+        return None, []
 
-    added_by_norm: dict[str, list[str]] = {}
+    added_by_norm: dict[str, list[Change]] = {}
     for a in added:
-        added_by_norm.setdefault(_normalize(a), []).append(a)
+        added_by_norm.setdefault(_normalize(a.symbol), []).append(a)
 
-    pairs = 0
+    matched_removed: list[Change] = []
+    matched_added: list[Change] = []
+    seen_added: set[int] = set()
     for r in removed:
-        norm = _normalize(r)
-        if norm == r:  # no digits → not a versioned name
+        norm = _normalize(r.symbol)
+        if norm == r.symbol:  # no digits → not a versioned name
             continue
-        cands = added_by_norm.get(norm)
-        # a versioned rename: same shape, but the raw (version) token differs
-        if cands and any(c != r for c in cands):
-            pairs += 1
+        cands = [a for a in added_by_norm.get(norm, []) if a.symbol != r.symbol]
+        if not cands:
+            continue
+        matched_removed.append(r)
+        for a in cands:
+            if id(a) not in seen_added:
+                seen_added.add(id(a))
+                matched_added.append(a)
 
+    pairs = len(matched_removed)
     if pairs < _MIN_PAIRS or pairs < _MIN_FRACTION * len(removed):
-        return None
+        return None, []
 
-    return Change(
+    advisory = Change(
         kind=ChangeKind.VERSIONED_SYMBOL_SCHEME_DETECTED,
         symbol="<library>",
         description=(
@@ -114,3 +121,10 @@ def detect_versioned_symbol_scheme(changes: list[Change]) -> Change | None:
         old_value=f"{len(removed)} removed",
         new_value=f"{pairs} version-renamed",
     )
+    return advisory, matched_removed + matched_added
+
+
+def detect_versioned_symbol_scheme(changes: list[Change]) -> Change | None:
+    """Return one advisory ``Change`` if the removed/added churn is a versioned
+    scheme, else ``None`` (back-compat wrapper over :func:`analyze_versioned_scheme`)."""
+    return analyze_versioned_scheme(changes)[0]

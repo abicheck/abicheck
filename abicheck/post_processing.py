@@ -48,6 +48,10 @@ class PipelineContext:
     # ADR-024 §D4: when True, FilterNonPublicSurface moves findings that are
     # not on the public-header-scoped ABI surface to ``out_of_surface``.
     scope_to_public_surface: bool = False
+    # G15 (opt-in): when True, DetectVersionedSymbolScheme reclassifies the
+    # version-rename pairs (ICU `u_*_NN`) as compatible so the verdict reflects
+    # the real delta instead of the rename churn. Off by default (authority rule).
+    collapse_versioned_symbols: bool = False
     # ADR-024 §D6 widening overlay: symbol names (mangled or demangled) the
     # user *guarantees* are public even when header provenance can't see them
     # (asm stubs, .def exports, extern "C" shims, MSVC-mangling gaps). Matching
@@ -728,25 +732,38 @@ class DemoteUnreachableInternalChurn:
 class DetectVersionedSymbolScheme:
     """Emit one advisory ``versioned_symbol_scheme_detected`` finding when most
     removed symbols reappear as added symbols differing only by a version token
-    (field-eval P08: ICU ``u_*_75`` → ``u_*_78``). Additive and never downgrades
-    an artifact-proven break — it explains the churn, the individual
-    func_removed/func_added findings and their verdict are untouched."""
+    (field-eval P08: ICU ``u_*_75`` → ``u_*_78``). Additive by default — it
+    explains the churn, the individual func_removed/func_added findings and their
+    verdict are untouched.
+
+    When ``ctx.collapse_versioned_symbols`` is set (opt-in, G15 second half), the
+    matched version-rename pairs are additionally **reclassified as compatible**:
+    moved to ``ctx.suppressed`` and dropped from the kept set, so the verdict
+    reflects the real delta instead of the rename churn. This is deliberately
+    behind a flag (authority rule: it downgrades artifact-level removals); a real
+    SONAME bump or non-versioned removals still drive their own verdict."""
 
     name = "detect_versioned_symbol_scheme"
 
     def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:
         from .checker_policy import ChangeKind
-        from .versioned_symbol_scheme import detect_versioned_symbol_scheme
+        from .versioned_symbol_scheme import analyze_versioned_scheme
 
         if any(c.kind is ChangeKind.VERSIONED_SYMBOL_SCHEME_DETECTED for c in changes):
             return changes  # idempotent if the pipeline is re-run
-        advisory = detect_versioned_symbol_scheme(changes)
+        advisory, matched = analyze_versioned_scheme(changes)
         if advisory is None:
             return changes
         if ctx.suppression is not None and ctx.suppression.is_suppressed(advisory):
             ctx.suppressed.append(advisory)
-            return changes
-        changes.append(advisory)
+        else:
+            changes.append(advisory)
+        if ctx.collapse_versioned_symbols and matched:
+            matched_ids = {id(c) for c in matched}
+            ctx.suppressed.extend(matched)
+            kept = [c for c in changes if id(c) not in matched_ids]
+            ctx.kept = kept  # keep verdict source in sync (set mid-pipeline by FilterRedundant)
+            return kept
         return changes
 
 
@@ -882,6 +899,7 @@ class PostProcessingPipeline:
         frozen_namespaces: list[str] | None = None,
         scope_to_public_surface: bool = False,
         force_public_symbols: set[str] | None = None,
+        collapse_versioned_symbols: bool = False,
     ) -> PipelineContext:
         """Run all steps, returning the final PipelineContext."""
         ctx = PipelineContext(
@@ -891,6 +909,7 @@ class PostProcessingPipeline:
             frozen_namespaces=list(frozen_namespaces or []),
             scope_to_public_surface=scope_to_public_surface,
             force_public_symbols=set(force_public_symbols or set()),
+            collapse_versioned_symbols=collapse_versioned_symbols,
         )
         for step in self.steps:
             changes = step.run(changes, ctx)
