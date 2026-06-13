@@ -229,7 +229,11 @@ def effective_verdict_for_change(
     """
     kind = change.kind
     base_policy = getattr(policy_file, "base_policy", policy)
-    base_sets = _resolve_kind_sets(base_policy, None)
+    base_sets = (
+        _resolve_kind_sets(base_policy, None)
+        if policy_file is not None
+        else _resolve_kind_sets(base_policy, kind_sets)
+    )
 
     eff = getattr(change, "effective_verdict", None)
     if isinstance(eff, Verdict):

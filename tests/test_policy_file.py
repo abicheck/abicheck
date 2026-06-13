@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from abicheck.checker_policy import ChangeKind, Verdict
+from abicheck.checker_policy import ChangeKind, Verdict, policy_kind_sets
 from abicheck.checker_types import DiffResult
 from abicheck.policy_file import PolicyFile
 from abicheck.severity import (
@@ -416,6 +416,17 @@ def test_effective_verdict_precedence_is_used_by_severity_paths(tmp_path: Path) 
     assert effective_verdict_for_change(c, policy_file=pf) == Verdict.BREAKING
     assert classify_effective_change(c, policy_file=pf) == IssueCategory.ABI_BREAKING
     assert compute_exit_code([c], PRESET_DEFAULT, policy_file=pf) == 4
+
+
+def test_frozen_floor_uses_supplied_effective_kind_sets() -> None:
+    """Release severity paths pass already-adjusted kind sets without a policy file."""
+    kind_sets = policy_kind_sets("plugin_abi")
+    c = _change(ChangeKind.CALLING_CONVENTION_CHANGED)
+    c.effective_verdict = Verdict.COMPATIBLE
+    c.frozen_namespace_violation = "**::detail::r1"
+
+    assert effective_verdict_for_change(c, kind_sets=kind_sets) == Verdict.COMPATIBLE
+    assert compute_exit_code([c], PRESET_DEFAULT, kind_sets=kind_sets) == 0
 
 
 def test_diffresult_buckets_honor_effective_verdict_over_policy_override(
