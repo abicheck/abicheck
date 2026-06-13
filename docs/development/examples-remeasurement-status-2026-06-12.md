@@ -23,9 +23,11 @@ CI entrypoint:
 - Runtime smoke artifact: the same workflow now runs
   `validation/scripts/run_example_runtime_smoke.py --json`.
 - Mode-matrix artifacts: the workflow also records release, stripped, and
-  build-source JSON artifacts as informational outputs. They remain
-  informational because the current baseline still intentionally contains known
-  non-green cases.
+  build-source JSON artifacts for a representative smoke set
+  (`case01`, `case04`, `case129`, `case130`-`case133`). They remain
+  informational because the current full baseline still intentionally contains
+  known non-green cases. Full mode-matrix artifacts below are generated as
+  remeasurement runs, not as a blocking PR check.
 
 ## Command
 

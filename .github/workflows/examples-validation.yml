@@ -70,12 +70,13 @@ jobs:
       - name: Artifact mode matrix (informational)
         if: always()
         run: |
+          MODE_SMOKE_CASES="case01 case04 case129 case130 case131 case132 case133"
           set +e
-          PYTHONPATH=. python tests/validate_examples.py --artifact-variant release-headers --json > results/validate_examples-release-headers.json
+          PYTHONPATH=. python tests/validate_examples.py $MODE_SMOKE_CASES --artifact-variant release-headers --json > results/validate_examples-release-headers.json
           echo "release-headers rc=$?"
-          PYTHONPATH=. python tests/validate_examples.py --artifact-variant stripped-headers --json > results/validate_examples-stripped-headers.json
+          PYTHONPATH=. python tests/validate_examples.py $MODE_SMOKE_CASES --artifact-variant stripped-headers --json > results/validate_examples-stripped-headers.json
           echo "stripped-headers rc=$?"
-          PYTHONPATH=. python tests/validate_examples.py --artifact-variant build-source --json > results/validate_examples-build-source.json
+          PYTHONPATH=. python tests/validate_examples.py $MODE_SMOKE_CASES --artifact-variant build-source --json > results/validate_examples-build-source.json
           echo "build-source rc=$?"
           set -e
 
