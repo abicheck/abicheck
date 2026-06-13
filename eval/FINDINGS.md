@@ -3,7 +3,7 @@
 > **This file is the qualitative problem log + analysis (the narrative).**
 > For **live, authoritative numbers** (verdicts, timings, surface sizes) see the
 > generated [`REPORT.md`](REPORT.md), reproduced from [`manifest.yaml`](manifest.yaml)
-> via `python eval/runner.py`. The per-iteration tables below are *illustrative
+> via `python eval/runner.py`. **Follow-up plan** (open items + pointers): [FOLLOWUPS.md](FOLLOWUPS.md). The per-iteration tables below are *illustrative
 > historical snapshots* from the exploration and are not kept in sync — trust
 > `REPORT.md` / `results/latest.json` for current figures.
 

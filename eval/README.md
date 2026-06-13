@@ -25,6 +25,7 @@ generated `REPORT.md` are committed.
 | `REPORT.md` | **generated** — do not hand-edit |
 | `results/latest.json` | latest schema'd results (`result_schema` 1) |
 | `FINDINGS.md` | qualitative problem log (P01–P21) + analysis — the human narrative |
+| `FOLLOWUPS.md` | detailed follow-up plan: each open item with context, code pointers, approach, acceptance, and cross-refs to gaps G4/G15/G16 |
 
 `runner.py` flags any library whose verdict drifts from its manifest `expect`,
 so the suite doubles as a real-world regression guard.
