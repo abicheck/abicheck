@@ -263,6 +263,11 @@ def _diff_generated(old: SourceAbiSurface, new: SourceAbiSurface) -> list[Change
         new_b = _by_identity(new_bucket)
         for key in sorted(set(old_b) & set(new_b)):
             ov, nv = old_b[key], new_b[key]
+            # A generated constexpr value change is still a baked-in public
+            # constant change, so keep the stronger constexpr_value_changed
+            # finding instead of downgrading it to generated_header_changed.
+            if nv.kind == "constexpr":
+                continue
             if _is_generated(nv) and _entity_changed(ov, nv):
                 name = nv.qualified_name
                 changes.append(
@@ -379,13 +384,6 @@ def _diff_declarations(old: SourceAbiSurface, new: SourceAbiSurface) -> list[Cha
         ov, nv = old_d[key], new_d[key]
         name = nv.qualified_name
 
-        # Generated entities are reported as generated_header_changed by
-        # _diff_generated (which also covers the reachable_types bucket); skip
-        # them here so they are not double-reported as a constexpr/default-arg
-        # change.
-        if _is_generated(nv):
-            continue
-
         if nv.kind == "constexpr":
             if ov.value != nv.value:
                 changes.append(
@@ -402,6 +400,14 @@ def _diff_declarations(old: SourceAbiSurface, new: SourceAbiSurface) -> list[Cha
                         source_location=_loc(nv),
                     )
                 )
+            continue
+
+        # Generated entities are reported as generated_header_changed by
+        # _diff_generated (which also covers the reachable_types bucket); skip
+        # them here so they are not double-reported as a default-argument
+        # change. Generated constexpr value changes are handled above because
+        # they remain source/API breaks even when declared in generated headers.
+        if _is_generated(nv):
             continue
 
         # Default-argument change: same type signature, different normalized
