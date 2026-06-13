@@ -19,10 +19,9 @@ from __future__ import annotations
 import json
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
-    from .checker_policy import HasKind
     from .severity import KindSets, SeverityConfig
 
 from .checker import (
@@ -33,6 +32,7 @@ from .checker import (
 )
 from .checker_policy import (
     ChangeKind,
+    HasKind,
     impact_for,
 )
 from .checker_policy import (
@@ -863,11 +863,14 @@ def _change_to_dict(
 ) -> dict[str, object]:
     """Convert a Change to a JSON-serializable dict with impact and metadata."""
     kind = getattr(c, "kind", None)
-    if kind and kind_sets:
+    if isinstance(kind, ChangeKind) and kind_sets:
         from .severity import effective_verdict_for_change
 
         verdict = effective_verdict_for_change(
-            c, policy=policy, kind_sets=kind_sets, policy_file=policy_file,
+            cast(HasKind, c),
+            policy=policy,
+            kind_sets=kind_sets,
+            policy_file=policy_file,
         )
         severity = _VERDICT_TO_SEVERITY_LABEL.get(verdict, "unknown")
     elif kind:
