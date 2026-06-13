@@ -48,6 +48,7 @@ def download(pkg, version, subdir="linux-64"):
 def extract(archive, outdir):
     """Extract a .conda or .tar.bz2 into outdir. Returns extract seconds."""
     t0 = time.time()
+    shutil.rmtree(outdir, ignore_errors=True)  # no stale files from a prior build/extract
     os.makedirs(outdir, exist_ok=True)
     if archive.endswith(".conda"):
         with zipfile.ZipFile(archive) as z:
