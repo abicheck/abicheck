@@ -132,10 +132,10 @@ def _public_type_embeds_stdlib_by_value(snap: AbiSnapshot) -> bool:
 
 def _public_by_value_type_closure(snap: AbiSnapshot) -> set[str]:
     """Record types reachable from public ABI roots through by-value edges."""
-    from .model import Visibility
+    from .model import RecordType, Visibility
     from .surface import _type_identifiers
 
-    record_by_name = {rec.name: rec for rec in snap.types}
+    record_by_name: dict[str, RecordType] = {rec.name: rec for rec in snap.types}
     for rec in snap.types:
         if "::" in rec.name:
             record_by_name.setdefault(rec.name.rsplit("::", 1)[1], rec)
@@ -166,7 +166,7 @@ def _public_by_value_type_closure(snap: AbiSnapshot) -> set[str]:
         target = snap.typedefs.get(name)
         if target:
             _add_type(queue, target)
-        record = record_by_name.get(name)
+        record: RecordType | None = record_by_name.get(name)
         if record is None:
             continue
         public_by_value.add(record.name)
