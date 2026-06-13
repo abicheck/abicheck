@@ -21,6 +21,12 @@ when it sees one.
 > CI exit codes, see [Verdicts](verdicts.md). For unfamiliar terms (SONAME,
 > vtable, IFUNC, install name, TLS model…), see the
 > [Glossary](abi-series/glossary.md).
+>
+> **Going deep on class layout?** The
+> [Class Layout ABI & API guide](class-layout-abi.md) is the single page that maps
+> every class-layout change (base offsets, EBO, vptr, vtable slots, RTTI,
+> standard-layout / trivially-copyable, packing) to the exact `ChangeKind`
+> abicheck emits, the evidence tier that reveals it, and a worked example.
 
 !!! note "Scope & assumptions"
     - **Examples are mostly ELF/Linux and Itanium-C++-ABI flavored** unless a
@@ -269,7 +275,7 @@ table is in [Limitations](limitations.md#source-only-changes-invisible-to-binary
 
 ## Detection coverage and roadmap
 
-abicheck detects **245 change kinds** today (see the
+abicheck detects **246 change kinds** today (see the
 [Change Kind Reference](../reference/change-kinds.md)), spanning every family in
 the table above — including the calling-convention, alignment/packing, bit-field,
 dual-ABI (`_GLIBCXX_USE_CXX11_ABI`), ABI-tag, `char8_t`, `_BitInt`, `_Atomic`,

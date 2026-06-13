@@ -1075,6 +1075,8 @@ def embed_build_source(
     allow_build_query: bool = False,
     clang_bin: str = "clang",
     collect_mode: str = "source-target",
+    build_query: str | None = None,
+    build_compile_db: str | None = None,
 ) -> None:
     """Embed build-info / source facts inline in *snap* (single-artifact UX).
 
@@ -1123,6 +1125,18 @@ def embed_build_source(
             cfg = load_build_config(cfg_path) if cfg_path is not None else None
         except ValueError as exc:
             raise click.ClickException(str(exc)) from exc
+        # CLI overrides (no config file needed): --build-query / --build-compile-db
+        # win over the .abicheck.yml values when supplied.
+        if build_query is not None or build_compile_db is not None:
+            import dataclasses
+
+            from .buildsource.inline import BuildConfig
+            cfg = cfg or BuildConfig()
+            cfg = dataclasses.replace(
+                cfg,
+                query=build_query if build_query is not None else cfg.query,
+                compile_db=build_compile_db if build_compile_db is not None else cfg.compile_db,
+            )
         # A1: plumb the binary's L0 exports (already parsed into this snapshot)
         # into the inline replay, so the linked source surface knows which decls
         # map to exports and the provenance/mapping checks have a signal. Empty in
@@ -1139,6 +1153,27 @@ def embed_build_source(
             layers=layers,
             exported_symbols=exported,
         )
+        # P09: don't fail *silently* when a source/build tree yields no compile DB.
+        # Autotools `configure` (and a bare checkout) emit no compile_commands.json,
+        # so L3/L4/L5 collect nothing — previously with no explanation. Warn with an
+        # actionable hint (unless a build.query diagnostic already explains it).
+        _ev = inline_pack.build_evidence if inline_pack is not None else None
+        _has_l3 = _ev is not None and bool(_ev.compile_units)
+        _has_query_note = inline_pack is not None and any(
+            e.name == "build_query" for e in inline_pack.manifest.extractors
+        )
+        if not _has_l3 and bi_pack is None and not _has_query_note:
+            _tree = raw_sources if raw_sources is not None else raw_build_info
+            _deeper = "/L4/L5" if ("L4" in layers or "L5" in layers) else ""
+            click.echo(
+                f"warning: no compile_commands.json found under {_tree} "
+                "(looked in: ., build, builddir, out, _build, cmake-build-debug); "
+                f"L3{_deeper} not collected. Generate one — CMake: configure with "
+                "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON; Meson: emitted by `meson setup`; "
+                "Autotools/Make: run `bear -- make` — or pass "
+                "--build-info <dir|compile_commands.json>.",
+                err=True,
+            )
 
     # Pre-captured packs must also honour the collect-mode layer set (Codex).
     bi_pack = _filter_pack_layers(bi_pack, layers)
@@ -1165,6 +1200,8 @@ def dump_source_only(
     build_id: str | None,
     no_git: bool,
     collect_mode: str = "source-target",
+    build_query: str | None = None,
+    build_compile_db: str | None = None,
 ) -> None:
     """Write a binary-less snapshot carrying only the embedded build/source facts.
 
@@ -1188,7 +1225,8 @@ def dump_source_only(
     snap = AbiSnapshot(library=library, version=version)
     _stamp_provenance(snap, git_tag=git_tag, build_id=build_id, no_git=no_git)
     _write_snapshot_output(
-        snap, output, build_info, sources, build_config, allow_build_query, collect_mode
+        snap, output, build_info, sources, build_config, allow_build_query, collect_mode,
+        build_query=build_query, build_compile_db=build_compile_db,
     )
 
 def _merge_load_snapshots(inputs: tuple[Path, ...]) -> list[tuple[Path, AbiSnapshot]]:

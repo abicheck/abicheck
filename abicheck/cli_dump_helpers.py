@@ -94,6 +94,8 @@ def perform_elf_dump(
     populate_dependency_info: object,
     stamp_provenance: object,
     write_snapshot_output: object,
+    build_query: str | None = None,
+    build_compile_db: str | None = None,
 ) -> None:
     """Run the ELF dump pipeline and write output.
 
@@ -140,4 +142,7 @@ def perform_elf_dump(
         _populate(snap, so_path, list(search_paths), sysroot, ld_library_path)
 
     _stamp(snap, git_tag=git_tag, build_id=build_id, no_git=no_git)
-    _write(snap, output, build_info, sources, build_config, allow_build_query, collect_mode)
+    _write(
+        snap, output, build_info, sources, build_config, allow_build_query,
+        collect_mode, build_query=build_query, build_compile_db=build_compile_db,
+    )

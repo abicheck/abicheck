@@ -278,6 +278,7 @@ class TestPostProcessingPipeline:
             "detect_cpp_patterns",
             "detect_namespace_patterns",
             "detect_template_patterns",
+            "detect_versioned_symbol_scheme",
             "escalate_frozen_namespace_violations",
         ]
         assert DEFAULT_PIPELINE.step_names == expected_names

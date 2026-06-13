@@ -451,6 +451,7 @@ def compare(
     extra_changes: list[Change] | None = None,
     pattern_verdicts: bool = False,
     surface_metrics: bool = False,
+    collapse_versioned_symbols: bool = False,
 ) -> DiffResult:
     """Diff two AbiSnapshots and return a DiffResult with verdict.
 

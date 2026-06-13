@@ -63,7 +63,9 @@ if TYPE_CHECKING:
 
 #: Default places to look for a compile DB inside a source checkout, in order.
 _COMPILE_DB_NAME = "compile_commands.json"
-_COMPILE_DB_HINTS = ("", "build", "out", "_build", "cmake-build-debug")
+#: ``builddir`` is the name the Meson docs/tutorials use for `meson setup builddir`
+#: (P12); ``build``/``_build``/``out`` cover CMake/Ninja conventions.
+_COMPILE_DB_HINTS = ("", "build", "builddir", "out", "_build", "cmake-build-debug")
 
 #: Build-query subprocess wall-clock ceiling. A query/extraction command
 #: (cquery/aquery/ninja -t/make -n) should be fast; a runaway one is treated as

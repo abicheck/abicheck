@@ -331,6 +331,13 @@ REGISTRY = ChangeKindRegistry([
               "comparison is scoped to the layers both sides share, so changes "
               "only the missing layers could prove are not reported. Re-scan "
               "the target with the same inputs to restore full coverage."),
+    _E("versioned_symbol_scheme_detected", _R,
+       impact="Most removed symbols reappear as added symbols differing only by a "
+              "version token in the name (e.g. ICU 'u_strlen_75' -> 'u_strlen_78', "
+              "or a GNU symbol-version node bump). The large removed/added churn is "
+              "likely a library-wide versioned-symbol scheme, not independent API "
+              "removals — review against the library's versioning convention; a "
+              "suppression preset can scope these renames to compatible."),
     _E("evidence_required_missing", _A,
        impact="A policy require_evidence layer (build context, source ABI, or "
               "source graph) was declared mandatory but is absent from this "
