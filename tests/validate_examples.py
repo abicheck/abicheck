@@ -104,6 +104,15 @@ def _find_compiler(is_cpp: bool = False, preferred_family: str | None = None) ->
     """
     if preferred_family is None:
         preferred_family = PREFERRED_FAMILY
+    # With no explicit family forced (--toolchain auto), honor CC/CXX from the
+    # environment: CMake-backed cases build with them, so direct compilation,
+    # the JSON metadata, and known_gap toolchain-scoping must agree with the
+    # producer CMake actually used. An explicit --toolchain already exports
+    # CC/CXX to match its family (see main), so it keeps the ordering below.
+    if preferred_family is None:
+        env = os.environ.get("CXX" if is_cpp else "CC")
+        if env and shutil.which(env):
+            return env
     if is_cpp:
         candidates = {
             "win32": ["cl", "g++", "clang++"],
