@@ -63,7 +63,10 @@ def _category_of(kind, policy) -> str:
 
 def build_spec() -> list[dict[str, str]]:
     """Build the per-ChangeKind spec rows (sorted by kind value)."""
+    # Make the command work from a clean checkout (no install / no PYTHONPATH):
+    # repo root for the `abicheck` package, scripts/ for the sibling module.
     sys.path.insert(0, str(REPO_DIR / "scripts"))
+    sys.path.insert(0, str(REPO_DIR))
     from evidence_tiers import EVIDENCE_TIER_BY_KIND  # type: ignore[import-not-found]
 
     from abicheck import checker_policy as policy
