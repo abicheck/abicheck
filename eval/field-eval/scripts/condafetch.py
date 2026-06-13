@@ -12,6 +12,27 @@ CDN = "https://conda.anaconda.org/conda-forge/linux-64/{}"
 CACHE = "/tmp/scan/pkgs"
 os.makedirs(CACHE, exist_ok=True)  # urlretrieve won't create parents
 
+def _ensure_within(root, path):
+    root = os.path.realpath(root)
+    path = os.path.realpath(path)
+    if os.path.commonpath([root, path]) != root:
+        raise RuntimeError(f"unsafe archive member path: {path}")
+
+def _validate_tar_member(member, outdir):
+    _ensure_within(outdir, os.path.join(outdir, member.name))
+    if member.ischr() or member.isblk() or member.isfifo():
+        raise RuntimeError(f"unsupported special archive member: {member.name}")
+    if member.issym() or member.islnk():
+        if os.path.isabs(member.linkname):
+            raise RuntimeError(f"unsafe absolute archive link: {member.name}")
+        link_base = os.path.dirname(os.path.join(outdir, member.name))
+        _ensure_within(outdir, os.path.join(link_base, member.linkname))
+
+def _safe_extract_tar(tf, outdir):
+    for member in tf.getmembers():
+        _validate_tar_member(member, outdir)
+    tf.extractall(outdir)
+
 def _get(url, dest):
     t0 = time.time()
     urllib.request.urlretrieve(url, dest)
@@ -60,7 +81,7 @@ def extract(archive, outdir):
         os.remove(tmp)
     else:
         with tarfile.open(archive, "r:bz2") as t:
-            t.extractall(outdir)
+            _safe_extract_tar(t, outdir)
     return time.time() - t0
 
 def find_sos(root):
