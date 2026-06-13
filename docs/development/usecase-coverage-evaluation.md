@@ -107,7 +107,7 @@ A real invocation is a point in this space:
 | **G12** | ✅ closed | Security-hardening drift captures and diffs RELRO, BIND_NOW, PIE, canaries, FORTIFY, and W^X metadata; the security policy is shipped. |
 | **G13** | planned | Cross-architecture mismatch guardrail. |
 | **G14** | planned | CPython Limited-API / `abi3` import-contract conformance. |
-| **G15** | planned | Inline-namespace version-stamp normalization for ICU/Abseil/libstdc++-style churn. |
+| **G15** | partial | Inline-namespace version-stamp normalization for ICU/Abseil/libstdc++-style churn. Detector landed (advisory `versioned_symbol_scheme_detected`); normalize-and-collapse preset still planned. |
 | **G16** | partial | Header-scoped source-mode toolchain robustness. Surfaced by 21 real-world cron records. **Shipped**: actionable diagnostics for all three host-toolchain signatures (sized-float `_FloatN`, GCC `__assume__`, `--lang c` + `extern "C"`), plus a `castxml --version` probe that recommends the Clang floor (≥ 18) on a version-mismatch failure. A `-D_FloatN` shim was prototyped and **rejected** (it rewrites glibc's own `typedef float _Float32;` fallback); the durable cure is a newer-Clang castxml or the libclang extractor (G4). **Remaining**: real-host end-to-end check and a dedicated error type. |
 
 ## Proposed next steps (tracked in the registry)
