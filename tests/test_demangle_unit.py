@@ -447,3 +447,43 @@ class TestDemangleText:
         if _mod.demangle("_Z3foov") is None:
             pytest.skip("no c++filt/cxxfilt demangler available")
         assert "foo()" in _mod.demangle_text("call _Z3foov now")
+
+
+def test_demangle_reads_warmed_batch_cache(monkeypatch):
+    """P11: a name resolved by demangle_batch is served from the shared batch
+    cache without demangle() re-forking a subprocess."""
+    import abicheck.demangle as dm
+
+    dm.demangle.cache_clear()
+    sym = "_ZN3FooEv_p11test"  # synthetic; need not be real Itanium
+    dm._BATCH_CACHE_OK[sym] = "Foo::warmed()"
+
+    # Any subprocess use here would be a regression — fail loudly if called.
+    def _boom(*a, **k):
+        raise AssertionError("demangle() spawned a subprocess despite a warm cache")
+    monkeypatch.setattr(dm.subprocess, "run", _boom)
+
+    try:
+        assert dm.demangle(sym) == "Foo::warmed()"
+    finally:
+        dm._BATCH_CACHE_OK.pop(sym, None)
+        dm.demangle.cache_clear()
+
+
+def test_demangle_batch_cache_fail_short_circuits(monkeypatch):
+    """A name proven non-demangleable by a batch run returns None without forking."""
+    import abicheck.demangle as dm
+
+    dm.demangle.cache_clear()
+    sym = "_Znot_really_mangled_p11"
+    dm._BATCH_CACHE_FAIL.add(sym)
+
+    def _boom(*a, **k):
+        raise AssertionError("demangle() spawned a subprocess for a known-fail name")
+    monkeypatch.setattr(dm.subprocess, "run", _boom)
+
+    try:
+        assert dm.demangle(sym) is None
+    finally:
+        dm._BATCH_CACHE_FAIL.discard(sym)
+        dm.demangle.cache_clear()

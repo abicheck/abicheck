@@ -171,6 +171,7 @@ Recovered from `.dynsym` symbol sizes alone by `diff_elf_layout.py`. The Itanium
 | Kind | Description |
 |------|-------------|
 | `symbol_renamed_batch` | Multiple symbols were renamed in a coordinated way (e.g. namespace prefix added or removed, mass refactor). Old binaries reference the old names and get undefined-symbol errors at load time. Emitted as a single roll-up finding so a namespace rename does not flood the report with one entry per symbol. |
+| `versioned_symbol_scheme_detected` | Most removed symbols reappear as added symbols differing only by a numeric version token in the name (e.g. ICU `u_strlen_75` → `u_strlen_78`, or a GNU symbol-version node bump). The large removed/added churn is likely a library-wide versioned-symbol scheme, not independent API removals. **Advisory only** (`COMPATIBLE_WITH_RISK`): it explains the churn and never downgrades the artifact-proven removals. To act on it, opt in with `compare --collapse-versioned-symbols`, which reclassifies the C-style version-rename pairs as compatible so the verdict reflects the real delta (a real SONAME bump and non-versioned removals still drive the verdict). |
 
 ### ELF Symbol Versioning
 

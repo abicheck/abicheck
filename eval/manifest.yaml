@@ -1,0 +1,48 @@
+# abicheck field-evaluation benchmark — source of truth.
+#
+# Hand-curated list of real conda-forge libraries + version pairs. `runner.py`
+# fetches each side, scans it with abicheck, and writes a schema'd results file
+# under results/ plus a GENERATED REPORT.md. Nothing here is hand-edited from
+# tool output, so the report can never drift from the data (the failure mode the
+# first iteration hit).
+#
+# Fields:
+#   lib       display name
+#   conda_pkg conda-forge package that ships the runtime .so (often a split pkg,
+#             e.g. zlib's runtime is in `libzlib`)
+#   old/new   version pair to compare
+#   expect    expected top-level verdict (regression guard; runner flags drift)
+#   so_stem   optional — for multi-.so packages, pick the .so whose basename
+#             starts with this stem on BOTH sides (avoids pairing different
+#             libraries across versions; field-eval P20)
+#   source    optional — {repo, tag_old, tag_new} for the build/source tier
+schema_version: 1
+
+libraries:
+  # ── small / common C libraries ──────────────────────────────────────────
+  - {lib: zlib,          conda_pkg: libzlib,       old: "1.2.13",  new: "1.3.1",   expect: COMPATIBLE_WITH_RISK, so_stem: libz,
+     source: {repo: "https://github.com/madler/zlib.git", tag_old: "v1.2.13", tag_new: "v1.3.1"}}
+  - {lib: zstd,          conda_pkg: zstd,          old: "1.5.5",   new: "1.5.7",   expect: BREAKING,             so_stem: libzstd,
+     source: {repo: "https://github.com/facebook/zstd.git", tag_old: "v1.5.5", tag_new: "v1.5.7"}}
+  - {lib: xz-liblzma,    conda_pkg: liblzma,       old: "5.6.4",   new: "5.8.3",   expect: COMPATIBLE,           so_stem: liblzma}
+  - {lib: bzip2,         conda_pkg: bzip2,         old: "1.0.6",   new: "1.0.8",   expect: COMPATIBLE_WITH_RISK, so_stem: libbz2}
+  - {lib: lz4,           conda_pkg: lz4-c,         old: "1.9.3",   new: "1.10.0",  expect: COMPATIBLE_WITH_RISK, so_stem: liblz4}
+  - {lib: libpng,        conda_pkg: libpng,        old: "1.6.55",  new: "1.6.58",  expect: COMPATIBLE,           so_stem: libpng16}
+  - {lib: libjpeg-turbo, conda_pkg: libjpeg-turbo, old: "3.0.0",   new: "3.1.4.1", expect: COMPATIBLE_WITH_RISK, so_stem: libturbojpeg}
+  - {lib: pcre2,         conda_pkg: pcre2,         old: "10.44",   new: "10.47",   expect: COMPATIBLE,           so_stem: libpcre2-8}
+  - {lib: libsodium,     conda_pkg: libsodium,     old: "1.0.18",  new: "1.0.22",  expect: COMPATIBLE_WITH_RISK, so_stem: libsodium}
+  - {lib: c-ares,        conda_pkg: c-ares,        old: "1.34.3",  new: "1.34.6",  expect: COMPATIBLE,           so_stem: libcares}
+  - {lib: libssh2,       conda_pkg: libssh2,       old: "1.10.0",  new: "1.11.1",  expect: BREAKING,             so_stem: libssh2}
+  - {lib: snappy,        conda_pkg: snappy,        old: "1.1.10",  new: "1.2.2",   expect: COMPATIBLE_WITH_RISK, so_stem: libsnappy,
+     source: {repo: "https://github.com/google/snappy.git", tag_old: "1.1.10", tag_new: "1.2.2"}}
+  - {lib: libuv,         conda_pkg: libuv,         old: "1.49.2",  new: "1.52.1",  expect: BREAKING,             so_stem: libuv}
+  - {lib: libwebp,       conda_pkg: libwebp-base,  old: "1.4.0",   new: "1.6.0",   expect: COMPATIBLE_WITH_RISK, so_stem: libwebp}
+  # ── larger products (major bumps) ─────────────────────────────────────────
+  - {lib: icu,           conda_pkg: icu,           old: "75.1",    new: "78.3",    expect: BREAKING,             so_stem: libicui18n}
+  - {lib: hdf5,          conda_pkg: hdf5,          old: "1.8.20",  new: "2.1.0",   expect: BREAKING,             so_stem: libhdf5}
+  - {lib: protobuf,      conda_pkg: libprotobuf,   old: "6.34.1",  new: "7.35.1",  expect: BREAKING,             so_stem: libprotobuf}
+  - {lib: glib,          conda_pkg: libglib,       old: "2.86.4",  new: "2.88.1",  expect: COMPATIBLE,           so_stem: libgio}
+  - {lib: openssl,       conda_pkg: openssl,       old: "3.6.1",   new: "4.0.1",   expect: BREAKING,             so_stem: libcrypto}
+  - {lib: gmp,           conda_pkg: gmp,           old: "6.2.1",   new: "6.3.0",   expect: BREAKING,             so_stem: libgmp}
+  - {lib: flac,          conda_pkg: libflac,       old: "1.4.3",   new: "1.5.0",   expect: BREAKING,             so_stem: libFLAC++}
+  - {lib: openblas,      conda_pkg: libopenblas,   old: "0.3.8",   new: "0.3.9",   expect: COMPATIBLE,           so_stem: libopenblas}

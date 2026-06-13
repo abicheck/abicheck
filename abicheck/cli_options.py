@@ -83,11 +83,13 @@ def build_source_dump_options(func: F) -> F:
 
     func = click.option(
         "--collect-mode", "collect_mode",
-        type=click.Choice(["off", "build", "source-changed", "source-target", "graph-summary", "graph-full"]),
+        type=click.Choice(["off", "build", "graph-build", "source-changed", "source-target", "graph-summary", "graph-full"]),
         default="source-target", show_default=True,
         help="ADR-033 D2 CI evidence mode selecting which layers to collect from "
         "--sources/--build-info: 'build' captures L3 build context only (no source "
-        "replay), 'source-*'/'graph-*' collect L3+L4+L5 at the matching replay "
+        "replay), 'graph-build' adds the L5 structural graph (build options + "
+        "target/source/header nodes) from L3 alone — no L4 parse, feasible on "
+        "monorepos, 'source-*'/'graph-*' collect L3+L4+L5 at the matching replay "
         "scope, 'off' embeds nothing.",
     )(func)
     func = click.option(
@@ -104,6 +106,19 @@ def build_source_dump_options(func: F) -> F:
         help="Path to an `.abicheck.yml` build config (build system, query "
         "command, compile-DB location). Defaults to `.abicheck.yml` at the "
         "--sources tree root.",
+    )(func)
+    func = click.option(
+        "--build-compile-db", "build_compile_db", default=None, metavar="GLOB",
+        help="Where a build/query lands its compile_commands.json, relative to "
+        "--sources (e.g. 'build/compile_commands.json'). CLI equivalent of "
+        "`.abicheck.yml` build.compile_db; overrides it when both are given.",
+    )(func)
+    func = click.option(
+        "--build-query", "build_query", default=None, metavar="CMD",
+        help="Build-system query command that emits a compile DB without a full "
+        "build (e.g. 'cmake -S . -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON'). "
+        "CLI equivalent of `.abicheck.yml` build.query — no config file needed. "
+        "Only runs with --allow-build-query.",
     )(func)
     func = click.option(
         "--sources", "sources",
@@ -141,7 +156,7 @@ def build_source_compare_options(func: F) -> F:
     pack_dir = click.Path(exists=True, file_okay=False, path_type=Path)
     func = click.option(
         "--collect-mode", "collect_mode",
-        type=click.Choice(["off", "build", "source-changed", "source-target", "graph-summary", "graph-full"]),
+        type=click.Choice(["off", "build", "graph-build", "source-changed", "source-target", "graph-summary", "graph-full"]),
         default="off", show_default=True,
         help="Inline collection mode (ADR-033 D2). 'off' uses embedded facts and "
         "any explicitly-provided pack directories. Other modes are recognized "
