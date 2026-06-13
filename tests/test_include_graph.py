@@ -66,6 +66,21 @@ def test_depfile_args_handles_glued_output_and_argv0_flag() -> None:
     assert depfile_args_from_argv([]) == []
 
 
+def test_depfile_args_strips_clang_plugin_loading_options() -> None:
+    # compile_commands.json is untrusted input for source-ABI replay.  The
+    # depfile pass must not forward Clang escape hatches that load plugins or
+    # LLVM passes while preserving the source and ordinary preprocessor context.
+    assert depfile_args_from_argv([
+        "clang++", "-c", "foo.cpp", "-I", "include",
+        "-Xclang", "-load", "-Xclang", "./evil.so",
+        "-fplugin=./plugin.so", "-fpass-plugin=./pass.so",
+        "-mllvm", "-load=./legacy-pass.so",
+    ]) == ["foo.cpp", "-I", "include"]
+    assert depfile_args_from_argv([
+        "clang++", "-cc1", "-load", "./evil.so", "foo.cpp", "-DABI=1",
+    ]) == ["foo.cpp", "-DABI=1"]
+
+
 def test_parse_depfile_line_continuations() -> None:
     text = "foo.o: foo.cpp \\\n  inc/a.h \\\n  inc/b.h\n"
     assert parse_depfile(text) == ["foo.cpp", "inc/a.h", "inc/b.h"]
