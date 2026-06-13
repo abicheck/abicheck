@@ -50,16 +50,21 @@ def drive(name, repo, tag, so, conda, src_subdir_for_cmake=".", cmake_extra=None
         rec["error"] = "no compile_commands.json: " + p.stderr[-300:]; return rec
     rec["tus"] = len(json.load(open(cdb)))
     L3 = f"/tmp/scan/snap/{name}.L3.json"; L345 = f"/tmp/scan/snap/{name}.L345.json"
+    for stale in (L3, L345):  # never read a previous run's snapshot if this dump fails
+        if os.path.exists(stale):
+            os.remove(stale)
     t3, p3 = t(["abicheck", "dump", so, "--sources", root, "--build-info", bld,
                 "--collect-mode", "build", "-o", L3])
     rec["L3_s"] = t3
+    if p3.returncode:
+        rec["error"] = "L3 dump: " + p3.stderr[-200:]; return rec
     t5, p5 = t(["abicheck", "dump", so, "--sources", root, "--build-info", bld,
                 "--collect-mode", "source-target", "-o", L345])
     rec["L3L4L5_s"] = t5
     rec["source_graph_s"] = round(t5 - t3, 2)
     if p5.returncode:
-        rec["error"] = "L4 dump: " + p5.stderr[-200:]
-    # payload counts
+        rec["error"] = "L4 dump: " + p5.stderr[-200:]; return rec
+    # payload counts (only after both dumps succeeded)
     try:
         bs = json.load(open(L345))["build_source"]
         sg = bs.get("source_graph", {})

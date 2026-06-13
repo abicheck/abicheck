@@ -83,7 +83,13 @@ if __name__ == "__main__":
         fs = list_files(sys.argv[2])
         import collections
         c = collections.Counter(f["version"] for f in fs)
-        for v in sorted(c, key=lambda s: [int(x) if x.isdigit() else x for x in s.replace('-', '.').split('.')]):
+        import re
+        def _vkey(s):
+            # homogeneous (int, str) tuples per component so mixed numeric/suffix
+            # versions (1.0.2 vs 1.1.1w) stay comparable under sorted()
+            return [(int(p), "") if p.isdigit() else (0, p)
+                    for p in re.split(r"(\d+)", s) if p]
+        for v in sorted(c, key=_vkey):
             print(v, c[v])
     elif cmd == "fetch":
         pkg, ver = sys.argv[2], sys.argv[3]
