@@ -2273,6 +2273,38 @@
         "experimental_graduated",
         "func_added"
       ]
+    },
+    "case140_empty_base_optimization_lost": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "min_evidence": "L1",
+      "platforms": [
+        "linux"
+      ],
+      "abi_break": true,
+      "api_break": false,
+      "bad_practice": false,
+      "expected_kinds": [
+        "base_class_offset_changed",
+        "type_size_changed",
+        "type_field_offset_changed"
+      ],
+      "description": "An empty `Tag` base gains one member, so the Empty Base Optimization is lost and the unrelated `Payload` base subobject moves from offset 0 to offset 8 (BASE_CLASS_OFFSET_CHANGED). sizeof grows and every later member shifts; a consumer upcasting Widget* to Payload* reads the wrong bytes."
+    },
+    "case142_vtable_slot_count_binary_only": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "min_evidence": "L0",
+      "platforms": [
+        "linux"
+      ],
+      "abi_break": true,
+      "api_break": false,
+      "bad_practice": false,
+      "expected_kinds": [
+        "vtable_slot_count_changed"
+      ],
+      "description": "A virtual method is inserted in the middle of a polymorphic class, growing the _ZTV vtable object by one pointer. abicheck detects the slot-count change from the ELF symbol size alone \u2014 no DWARF, no headers (VTABLE_SLOT_COUNT_CHANGED, evidence tier L0)."
     }
   }
 }

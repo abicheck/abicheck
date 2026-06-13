@@ -3,7 +3,7 @@
 
 Listed in `BREAKING_KINDS` — runtime ABI break.
 
-_90 case(s)._ [← back to all examples](../index.md)
+_92 case(s)._ [← back to all examples](../index.md)
 
 | Case | Title | Verdict | Category |
 |------|-------|---------|----------|
@@ -35,7 +35,9 @@ _90 case(s)._ [← back to all examples](../index.md)
 | [case129_struct_return_convention](../case129_struct_return_convention.md) | Struct-Return Convention Change | 🔴 BREAKING | Breaking |
 | [case12_function_removed](../case12_function_removed.md) | Function Removed from Shared Library | 🔴 BREAKING | Breaking |
 | [case139_symbol_version_node_removed](../case139_symbol_version_node_removed.md) | Symbol Version Node Removed | 🔴 BREAKING | Breaking |
+| [case140_empty_base_optimization_lost](../case140_empty_base_optimization_lost.md) | Empty Base Optimization Lost (base subobject moved) | 🔴 BREAKING | Breaking |
 | [case141_versioned_symbol_scheme](../case141_versioned_symbol_scheme.md) | Versioned-Symbol Scheme (library-wide rename) | 🔴 BREAKING | Breaking |
+| [case142_vtable_slot_count_binary_only](../case142_vtable_slot_count_binary_only.md) | Vtable Slot Count Changed (detected from a stripped binary) | 🔴 BREAKING | Breaking |
 | [case14_cpp_class_size](../case14_cpp_class_size.md) | C++ Class Size Change | 🔴 BREAKING | Breaking |
 | [case17_template_abi](../case17_template_abi.md) | Template Instantiation ABI Change | 🔴 BREAKING | Breaking |
 | [case18_dependency_leak](../case18_dependency_leak.md) | Dependency ABI Leak | 🔴 BREAKING | Breaking |

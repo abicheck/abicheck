@@ -175,7 +175,7 @@ See `abicheck.service` for the full signature, plus the [MCP server integration]
 
 ## Examples
 
-The [`examples/`](examples/README.md) directory contains **141 real-world ABI/API scenarios** (136 single-library cases plus 5 multi-library bundle cases) with ground-truth verdicts. Most are single-library `v1`/`v2` examples with a consumer app; bundle/release-level cases use release-style layouts. The full catalog is the development regression corpus; a smaller historical cross-tool subset is kept in the reference docs for release-to-release comparison with libabigail and ABICC.
+The [`examples/`](examples/README.md) directory contains **143 real-world ABI/API scenarios** (138 single-library cases plus 5 multi-library bundle cases) with ground-truth verdicts. Most are single-library `v1`/`v2` examples with a consumer app; bundle/release-level cases use release-style layouts. The full catalog is the development regression corpus; a smaller historical cross-tool subset is kept in the reference docs for release-to-release comparison with libabigail and ABICC.
 
 Current `Examples Validation` CI runs the full 134-case default/debug catalog and produces **122 PASS / 5 XFAIL / 7 SKIP** with no FAIL/ERROR bucket. The same workflow uploads full runtime-smoke results (**70 DEMONSTRATED / 47 NO_RUNTIME_SIGNAL / 7 BASELINE_SIGNAL / 10 SKIP**) and representative release/stripped/build-source mode-smoke artifacts. See [`examples/README.md#current-validation-status`](examples/README.md#current-validation-status) for the exact commands, execution scope, status, and known stripped-mode backlog.
 
@@ -183,7 +183,7 @@ Current `Examples Validation` CI runs the full 134-case default/debug catalog an
 
 ## Validation snapshot
 
-The main validation target is the full **141-case catalog**. To scan it for the current checkout:
+The main validation target is the full **143-case catalog**. To scan it for the current checkout:
 
 ```bash
 python scripts/benchmark_comparison.py --suite all

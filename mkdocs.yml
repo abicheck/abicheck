@@ -68,6 +68,7 @@ nav:
     - Architecture: concepts/architecture.md
     - Build Info & Sources (build-source data): concepts/build-source-data.md
     - API Surface Intelligence: concepts/api-surface-intelligence.md
+    - Class Layout ABI & API: concepts/class-layout-abi.md
     - Limitations: concepts/limitations.md
   # Lookup tables — precise, exhaustive, no narrative.
   - Reference:

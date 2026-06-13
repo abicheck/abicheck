@@ -1,7 +1,7 @@
 # ABI Scenario Catalog
 
 <!-- BEGIN GENERATED: catalog-headline (keep counts in sync with examples/ground_truth.json) -->
-This directory contains **141 cases** (136 single-library + 5 multi-library bundle cases, the latter tracked under [ADR-023](../docs/development/adr/023-bundle-aware-multi-binary-analysis.md)) demonstrating real-world ABI/API break scenarios. Each case is a minimal, compilable C/C++ example with:
+This directory contains **143 cases** (138 single-library + 5 multi-library bundle cases, the latter tracked under [ADR-023](../docs/development/adr/023-bundle-aware-multi-binary-analysis.md)) demonstrating real-world ABI/API break scenarios. Each case is a minimal, compilable C/C++ example with:
 <!-- END GENERATED: catalog-headline -->
 
 - Paired `v1/` and `v2/` source + headers.
@@ -20,7 +20,7 @@ The catalog drives abicheck's benchmark and serves as an encyclopedia of ABI pit
 <!-- BEGIN GENERATED: verdict-distribution (keep counts in sync with examples/ground_truth.json) -->
 | Verdict | Count | `checker_policy.py` set | Icon |
 |---------|-------|-------------------------|------|
-| BREAKING | 90 | `BREAKING_KINDS` | 🔴 |
+| BREAKING | 92 | `BREAKING_KINDS` | 🔴 |
 | API_BREAK | 8 | `API_BREAK_KINDS` | 🟠 |
 | COMPATIBLE_WITH_RISK | 9 | `RISK_KINDS` | 🟡 |
 | COMPATIBLE (addition) | 10 | `ADDITION_KINDS` | 🟢 |
@@ -253,7 +253,9 @@ Expected non-pass buckets are already represented in `ground_truth.json`:
 | [137](case137_runpath_changed/README.md) | DT_RUNPATH Changed | Quality | 🟢 COMPATIBLE |
 | [138](case138_needed_added/README.md) | DT_NEEDED Added | Quality | 🟢 COMPATIBLE |
 | [139](case139_symbol_version_node_removed/README.md) | Symbol Version Node Removed | Breaking | 🔴 BREAKING |
+| [140](case140_empty_base_optimization_lost/README.md) | Empty Base Optimization Lost (base subobject moved) | Breaking | 🔴 BREAKING |
 | [141](case141_versioned_symbol_scheme/README.md) | Versioned-Symbol Scheme (library-wide rename) | Breaking | 🔴 BREAKING (bad practice) |
+| [142](case142_vtable_slot_count_binary_only/README.md) | Vtable Slot Count Changed (detected from a stripped binary) | Breaking | 🔴 BREAKING |
 <!-- END GENERATED: case-index -->
 
 ---

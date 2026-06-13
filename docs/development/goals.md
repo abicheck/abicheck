@@ -73,7 +73,7 @@ For each break type: what it is, how it appears in the real world, and which too
 - Comparison table: `abicheck` vs `abicc` vs `libabigail` vs `nm`-only
 - Coverage matrix showing evidence tier required (ELF-only / DWARF / Header / Runtime)
 
-**Done:** 140 example cases with per-case `README.md`; the original 74-case subset remains the release-pinned cross-tool benchmark; gap report with coverage matrix (abicheck vs ABICC vs libabigail vs `nm`); the consolidated [ABI/API Handling & Recommendations](../concepts/abi-api-handling.md) guide plus the generated [Examples Encyclopedia](../examples/index.md); cross-platform CMake build support for all single-library example cases.
+**Done:** 143 example cases with per-case `README.md`; the original 74-case subset remains the release-pinned cross-tool benchmark; gap report with coverage matrix (abicheck vs ABICC vs libabigail vs `nm`); the consolidated [ABI/API Handling & Recommendations](../concepts/abi-api-handling.md) guide plus the generated [Examples Encyclopedia](../examples/index.md); cross-platform CMake build support for all single-library example cases.
 
 ---
 
@@ -107,9 +107,9 @@ Public documentation at <https://napetrov.github.io/abicheck/>:
 |------|--------|
 | G1: ABICC drop-in | Done — 246 ChangeKinds, compat CLI, suppression files, XML reports |
 | G2: Known gaps | DWARF layout, toolchain flags, AST-DWARF dedup, confidence tracking, canonical evidence tier (ELF_ONLY/DWARF_AWARE/HEADER_AWARE) done |
-| G3: libabigail tests | Done — ~54 parity test functions + 140 example cases |
+| G3: libabigail tests | Done — ~54 parity test functions + 143 example cases |
 | G4: Agent-friendly | Done — JSON, SARIF, exit codes, snapshots, MCP server, GitHub Action |
-| G5: Break encyclopedia | Done — 140 example cases + consolidated ABI/API handling guide + coverage matrix |
+| G5: Break encyclopedia | Done — 143 example cases + consolidated ABI/API handling guide + coverage matrix |
 | G6: Distribution & docs | Done — PyPI, conda-forge, MkDocs + GitHub Pages |
 
 ## Non-goals

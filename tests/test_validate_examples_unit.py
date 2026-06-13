@@ -41,7 +41,7 @@ _VALID_CATEGORIES = frozenset(
 _VALID_VERDICTS = frozenset(
     {"BREAKING", "COMPATIBLE", "COMPATIBLE_WITH_RISK", "NO_CHANGE", "API_BREAK"}
 )
-_EXPECTED_CASE_COUNT = 141
+_EXPECTED_CASE_COUNT = 143
 
 
 # ── _normalize_verdict ────────────────────────────────────────────────────

@@ -84,6 +84,10 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     "stack_canary_removed": "L0",
     "executable_stack_removed": "L0",
     "symbol_version_node_removed": "L0",
+    # Binary-only C++ layout: the _ZTV / _ZTI object sizes encode vtable slot
+    # count and inheritance shape, readable from .dynsym without DWARF/headers.
+    "vtable_slot_count_changed": "L0",
+    "rtti_inheritance_changed": "L0",
     "glibcxx_dual_abi_flip_detected": "L0",
     "abi_tag_changed": "L0",
     "inline_namespace_moved": "L0",
@@ -105,6 +109,10 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     "type_field_offset_changed": "L1",
     "type_field_added": "L1",
     "type_base_changed": "L1",
+    # Fine-grained class-layout descriptor: a base subobject moving (e.g. an
+    # empty-base optimization lost) is read from DWARF DW_TAG_inheritance
+    # offsets, or from the castxml record layout when headers are supplied.
+    "base_class_offset_changed": "L1",
     "type_kind_changed": "L1",
     "type_vtable_changed": "L1",
     "type_removed": "L1",

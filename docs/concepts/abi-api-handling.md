@@ -21,6 +21,12 @@ when it sees one.
 > CI exit codes, see [Verdicts](verdicts.md). For unfamiliar terms (SONAME,
 > vtable, IFUNC, install name, TLS model…), see the
 > [Glossary](abi-series/glossary.md).
+>
+> **Going deep on class layout?** The
+> [Class Layout ABI & API guide](class-layout-abi.md) is the single page that maps
+> every class-layout change (base offsets, EBO, vptr, vtable slots, RTTI,
+> standard-layout / trivially-copyable, packing) to the exact `ChangeKind`
+> abicheck emits, the evidence tier that reveals it, and a worked example.
 
 !!! note "Scope & assumptions"
     - **Examples are mostly ELF/Linux and Itanium-C++-ABI flavored** unless a
