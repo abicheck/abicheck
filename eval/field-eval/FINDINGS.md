@@ -54,24 +54,24 @@ gcc 13.3 / clang 18.1, castxml ABSENT.
 
 ## Iteration 2 — larger products + build-system discovery (meson vs autotools)
 
-### Binary scan (8 larger products, 81s total)
+### Binary scan (8 larger products, 156s total)
 
 | lib | old→new | so picked | funcs | verdict | total chg | compare_s | snap |
 |---|---|---|---|---|---|---|---|
-| icu | 75.1→78.3 | libicui18n | 20k | BREAKING | 16427 | **30.1s** | 18.6MB |
-| hdf5 | 1.8.20→2.1.0 | libhdf5 | 9k | BREAKING | 1968 | 1.1s | 4.6MB |
-| protobuf | 6.34→7.35 | libprotobuf | 10k | BREAKING | 400 | 1.6s | 8.2MB |
-| glib | 2.86→2.88 | libgio | 9.5k | COMPATIBLE | 11 | 0.9s | 4.5MB |
-| openssl | 3.6.1→4.0.1 | libcrypto | 19k | BREAKING | 5941 | 2.5s | 11MB |
-| gmp | 6.2.1→6.3.0 | libgmp | 1.9k | BREAKING | 7 | 0.5s | 1.7MB |
-| flac | 1.4.3→1.5.0 | libFLAC++ | 1.2k | BREAKING | 19 | 0.4s | 1MB |
-| openblas | 0.3.8→0.3.9 | libopenblas | 26k | COMPATIBLE(dwarf) | 1 | 4.4s | 23MB |
+| icu | 75.1→78.3 | libicui18n | 8k | BREAKING | 16022 | **94.5s** | 18.6MB |
+| hdf5 | 1.8.20→2.1.0 | libhdf5 | 3.4k | BREAKING | 1968 | 1.5s | 4.6MB |
+| protobuf | 6.34→7.35 | libprotobuf | 3.2k | BREAKING | 400 | 1.5s | 8.2MB |
+| glib | 2.86→2.88 | libgio | 2.2k | COMPATIBLE | 11 | 0.8s | 4.5MB |
+| openssl | 3.6.1→4.0.1 | libcrypto | 5.9k | BREAKING | 5941 | 1.9s | 11MB |
+| gmp | 6.2.1→6.3.0 | libgmp | 876 | BREAKING | 7 | 0.5s | 1.7MB |
+| flac | 1.4.3→1.5.0 | libFLAC++ | 417 | BREAKING | 19 | 0.4s | 1MB |
+| openblas | 0.3.8→0.3.9 | libopenblas | 12.2k | COMPATIBLE(dwarf) | 1 | 3.4s | 23MB |
 
 ### Problems found
 
 - **P08 [CORRECTNESS/USABILITY/high]** Symbol-naming conventions create huge noise.
-  **ICU** embeds the major version in every symbol (`u_foo_75`→`u_foo_78`) → 5800 removed +
-  5898 added + **2134 `func_likely_renamed`** = 16427 changes for a routine ICU upgrade. The
+  **ICU** embeds the major version in every symbol (`u_foo_75`→`u_foo_78`) → 5395 removed +
+  5493 added + **2539 `func_likely_renamed`** = 16022 changes for a routine ICU upgrade. The
   report is unusable without knowing ICU's convention. **OpenSSL** symbol versioning →
   **5640 `symbol_moved_version_node`**. *Fix idea:* convention-aware renamers / a "versioned
   symbol scheme" suppression preset for ICU/OpenSSL-style libs.
@@ -287,9 +287,10 @@ mypy to an exact version in `[dev]` and CI so the gate is deterministic. (The 2 
 → baseline back to 0.)
 
 ## Correction (Codex P2, batch2.py symbol counter)
-The `funcs` columns in iterations 2/3/6 were produced by `readelf -sW --dyn-syms | grep ' FUNC '`,
+Earlier `funcs` columns in iterations 2/3/6 were produced by `readelf -sW --dyn-syms | grep ' FUNC '`,
 which **double-counts** (`.symtab` + `.dynsym`) and includes **UND imports** — inflating counts
 ~3–5×. Real defined-export counts are lower (e.g. **libLLVM.so.18 = 30,913** defined FUNC exports,
-not 153,115). The counter is fixed (dyn table only, FUNC + defined + GLOBAL/WEAK). **Verdicts and
-change-counts are unaffected** — those come from abicheck's own dynsym parsing, not this helper. The
-relative scale story (small C → ICU → LLVM → oneDAL) holds; only the absolute `funcs` headline was off.
+not 153,115). The counter is fixed (dyn table only, FUNC + defined + GLOBAL/WEAK), and iteration-2
+data/table rows were regenerated. **Verdicts and change-counts are unaffected by the helper counter**
+— those come from abicheck's own dynsym parsing, not this helper. The relative scale story (small C →
+ICU → LLVM → oneDAL) holds; only the absolute `funcs` headline was off.

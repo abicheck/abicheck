@@ -5,6 +5,7 @@ from __future__ import annotations
 import collections
 import json
 import os
+import re
 import subprocess
 import time
 
@@ -59,6 +60,13 @@ def best_so(pkg, ver):
             best, bestn = s, n
     return best, bestn, round(dl, 2), round(ext, 2), sz // 1024
 
+def so_pair_key(path):
+    """Stable library identity for pairing old/new DSOs from multi-lib packages."""
+    name = os.path.basename(path)
+    name = re.sub(r"\.so(?:\..*)?$", "", name)
+    name = re.sub(r"-r?\d+(?:\.\d+)*$", "", name)
+    return name
+
 def main():
     out = []
     for disp, pkg, ov, nv in LIBS:
@@ -70,8 +78,15 @@ def main():
             rec["fetch_s"] = round(time.time() - t0, 2)
             rec["dl_mb"] = round((osz + nsz) / 1024, 1)
             rec["so"] = os.path.basename(oso)
+            rec["new_so"] = os.path.basename(nso)
             rec["old_funcs"] = on
             rec["new_funcs"] = nn
+            if so_pair_key(oso) != so_pair_key(nso):
+                rec["error"] = f"selected different DSOs: {os.path.basename(oso)} vs {os.path.basename(nso)}"
+                print(json.dumps(rec))
+                out.append(rec)
+                json.dump(out, open("/tmp/scan/results2.json", "w"), indent=2)
+                continue
             os_ = f"/tmp/scan/snap/{disp}_old.json"
             ns_ = f"/tmp/scan/snap/{disp}_new.json"
             for stale in (os_, ns_):  # don't read a prior run's snapshot if dump fails
