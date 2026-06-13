@@ -671,6 +671,13 @@ class TestPlausibleRename:
         assert _ctor_dtor_variant("_ZN3FooB1xC2Ev") == "C2"
         assert _plausible_rename("_ZN3FooB1xC1Ev", "_ZN3FooB1xC2Ev") is False
 
+    def test_overlong_source_name_length_is_malformed_not_crash(self) -> None:
+        # Snapshot / ELF symbol names are untrusted input.  A malformed nested
+        # name with a huge decimal source-name length must safely under-detect
+        # instead of feeding the whole digit run to int() and aborting diffing.
+        assert _ctor_dtor_variant("_ZN" + ("9" * 5000)) is None
+        assert _ctor_dtor_variant("_ZN9999999999FooC1Ev") is None
+
     def test_return_type_only_template_change_rejected(self) -> None:
         # Function templates encode the return type in the ABI symbol, so a
         # same-leaf/same-params return-type change (int foo<int>() ->

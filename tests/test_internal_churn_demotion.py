@@ -194,6 +194,44 @@ def test_non_matching_frozen_namespace_still_demotes():
     assert r.out_of_surface_count >= 1
 
 
+def test_public_typedef_to_internal_type_is_not_demoted():
+    pub_fn = Function(
+        name="make", mangled="make", return_type="PublicImpl",
+        params=[], visibility=Visibility.PUBLIC,
+    )
+    old = AbiSnapshot(
+        library="lib.so.1", version="1", functions=[pub_fn],
+        types=[
+            RecordType(name="ns::detail::Impl", kind="struct", size_bits=32,
+                       fields=[TypeField(name="x", type="int", offset_bits=0)]),
+        ],
+        typedefs={"PublicImpl": "ns::detail::Impl"},
+    )
+    new = AbiSnapshot(
+        library="lib.so.1", version="2", functions=[pub_fn],
+        types=[
+            RecordType(name="ns::detail::Impl", kind="struct", size_bits=64,
+                       fields=[TypeField(name="x", type="long long", offset_bits=0)]),
+        ],
+        typedefs={"PublicImpl": "ns::detail::Impl"},
+    )
+
+    r = compare(old, new)
+
+    assert r.verdict == Verdict.BREAKING
+    assert any(c.kind == ChangeKind.TYPE_SIZE_CHANGED for c in r.changes)
+    assert any(
+        c.kind == ChangeKind.INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API
+        and c.symbol == "ns::detail::Impl"
+        for c in r.changes
+    )
+    assert not any(
+        c.symbol == "ns::detail::Impl"
+        and c.surface_exclusion_reason == REASON_PRIVATE_INTERNAL_UNREACHABLE
+        for c in r.out_of_surface_changes
+    )
+
+
 def test_reachable_internal_type_still_leaks_and_breaks():
     # When the internal type IS reachable from the public API (embedded by value
     # in a public struct returned by a public function), the leak detector keeps

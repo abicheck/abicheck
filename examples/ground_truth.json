@@ -2165,6 +2165,96 @@
       "expected_kinds": [
         "tls_model_changed"
       ]
+    },
+    "case134_relro_weakened": {
+      "expected": "COMPATIBLE_WITH_RISK",
+      "category": "risk",
+      "min_evidence": "L0",
+      "platforms": [
+        "linux"
+      ],
+      "abi_break": false,
+      "api_break": false,
+      "bad_practice": true,
+      "expected_kinds": [
+        "relro_weakened"
+      ],
+      "description": "Full RELRO (-z relro -z now) dropped to none (-z norelro) \u2014 the GNU_RELRO segment disappears, removing read-only-after-relocation hardening (RELRO_WEAKENED). Identical ABI surface."
+    },
+    "case135_stack_canary_removed": {
+      "expected": "COMPATIBLE_WITH_RISK",
+      "category": "risk",
+      "min_evidence": "L0",
+      "platforms": [
+        "linux"
+      ],
+      "abi_break": false,
+      "api_break": false,
+      "bad_practice": true,
+      "expected_kinds": [
+        "stack_canary_removed"
+      ],
+      "description": "-fstack-protector-all dropped to -fno-stack-protector \u2014 __stack_chk_fail guard references disappear, removing stack-smashing protection (STACK_CANARY_REMOVED). Identical ABI surface."
+    },
+    "case136_executable_stack_removed": {
+      "expected": "COMPATIBLE",
+      "category": "quality",
+      "min_evidence": "L0",
+      "platforms": [
+        "linux"
+      ],
+      "abi_break": false,
+      "api_break": false,
+      "bad_practice": false,
+      "expected_kinds": [
+        "executable_stack_removed"
+      ],
+      "description": "Executable stack corrected: v1 GNU_STACK RWE (-z execstack) becomes RW (-z noexecstack) in v2 \u2014 the security-fix direction, complementing case49 (EXECUTABLE_STACK_REMOVED). Identical ABI surface."
+    },
+    "case137_runpath_changed": {
+      "expected": "COMPATIBLE",
+      "category": "quality",
+      "min_evidence": "L0",
+      "platforms": [
+        "linux"
+      ],
+      "abi_break": false,
+      "api_break": false,
+      "bad_practice": false,
+      "expected_kinds": [
+        "runpath_changed"
+      ],
+      "description": "DT_RUNPATH added in v2 (-rpath with new dtags) \u2014 the loader's library search path changes while the exported ABI surface stays identical (RUNPATH_CHANGED)."
+    },
+    "case138_needed_added": {
+      "expected": "COMPATIBLE",
+      "category": "quality",
+      "min_evidence": "L0",
+      "platforms": [
+        "linux"
+      ],
+      "abi_break": false,
+      "api_break": false,
+      "bad_practice": false,
+      "expected_kinds": [
+        "needed_added"
+      ],
+      "description": "DT_NEEDED added in v2 (libm force-linked via --no-as-needed) \u2014 a new runtime dependency appears with no change to the exported ABI surface (NEEDED_ADDED)."
+    },
+    "case139_symbol_version_node_removed": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "min_evidence": "L0",
+      "platforms": [
+        "linux"
+      ],
+      "abi_break": true,
+      "api_break": false,
+      "bad_practice": false,
+      "expected_kinds": [
+        "symbol_version_node_removed"
+      ],
+      "description": "Version node LIBX_2.0 (defining beta) deleted in v2; beta folded into LIBX_1.0 \u2014 a consumer linked against beta@LIBX_2.0 can no longer resolve its versioned symbol (SYMBOL_VERSION_NODE_REMOVED)."
     }
   }
 }

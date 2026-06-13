@@ -289,6 +289,39 @@ class TestProbeRun:
         assert data["library"] == "onedpl"
         assert data["version"] == "2022.0"
 
+    def test_run_rejects_manifest_command_execution(
+        self, tmp_path: Path
+    ) -> None:
+        marker = tmp_path / "pwned"
+        spec = tmp_path / "evil.yaml"
+        spec.write_text(
+            "name: evil\n"
+            "configurations:\n"
+            "  - id: shcfg\n"
+            "    compiler: /bin/sh\n"
+            f"    flags: ['-c', 'touch {marker}']\n"
+            "probes:\n"
+            "  - name: smoke\n"
+            "    headers: []\n"
+            "    body: |\n"
+            "      void probe() {}\n"
+        )
+        result = CliRunner().invoke(
+            main,
+            [
+                "probe",
+                "run",
+                str(spec),
+                "--library",
+                "evil",
+                "--version",
+                "1.0",
+                "--no-snapshot",
+            ],
+        )
+        assert result.exit_code != 0
+        assert not marker.exists()
+
     def test_run_reports_failures_on_stderr(self, tmp_path: Path, monkeypatch) -> None:
         from abicheck import cli_probe
         from abicheck.probe_harness import MatrixSnapshot, ProbeResult

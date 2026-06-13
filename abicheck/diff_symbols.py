@@ -1477,8 +1477,11 @@ def _skip_source_name(symbol: str, i: int) -> int:
     j = i
     while j < len(symbol) and symbol[j].isdigit():
         j += 1
-    end = j + int(symbol[i:j])
-    return end if end <= len(symbol) else -1
+    remaining, length = len(symbol) - j, 0
+    for c in symbol[i:j]:
+        if (length := (length * 10) + (ord(c) - ord("0"))) > remaining:
+            return -1
+    return j + length
 
 
 def _skip_substitution(symbol: str, i: int) -> int:

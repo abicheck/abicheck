@@ -274,6 +274,80 @@ def test_extract_from_args_parses_mocked_clang(monkeypatch) -> None:
     assert edges == [CallEdge("_Zc", "_Zcallee", CALL_KIND_DIRECT, RESOLUTION_EXACT)]
 
 
+def test_extract_from_args_reconstructs_safe_parse_command(monkeypatch, tmp_path) -> None:
+    import json as _json
+
+    import abicheck.buildsource.call_graph as cg
+
+    ast = {"kind": "TranslationUnitDecl", "inner": []}
+    captured: dict[str, list[str]] = {}
+    monkeypatch.setattr(cg.shutil, "which", lambda _b: "/usr/bin/clang++")
+
+    def fake_run(cmd, **_kwargs):
+        captured["cmd"] = cmd
+        return _FakeProc(_json.dumps(ast))
+
+    monkeypatch.setattr(cg.subprocess, "run", fake_run)
+    src = tmp_path / "victim.cpp"
+    src.write_text("int main() { return 0; }", encoding="utf-8")
+
+    ClangCallGraphExtractor().extract_from_args([
+        "/usr/bin/g++",
+        "-Xclang", "-load", "-Xclang", "./evil.so",
+        "-fplugin=./evil.so",
+        "-I", "include",
+        "-D", "FEATURE=1",
+        "-std=c++20",
+        str(src),
+    ], cwd=str(tmp_path))
+
+    cmd = captured["cmd"]
+    assert "-fplugin=./evil.so" not in cmd
+    assert "-load" not in cmd
+    assert "./evil.so" not in cmd
+    assert "-I" in cmd and str(tmp_path / "include") in cmd
+    assert "-DFEATURE=1" in cmd
+    assert "-std=c++20" in cmd
+    assert cmd[-2:] == ["--", str(src)]
+
+
+def test_extract_from_build_ignores_compile_unit_raw_argv(monkeypatch) -> None:
+    import json as _json
+
+    import abicheck.buildsource.call_graph as cg
+
+    ast = {"kind": "TranslationUnitDecl", "inner": []}
+    captured: dict[str, list[str]] = {}
+    monkeypatch.setattr(cg.shutil, "which", lambda _b: "/usr/bin/clang++")
+
+    def fake_run(cmd, **_kwargs):
+        captured["cmd"] = cmd
+        return _FakeProc(_json.dumps(ast))
+
+    monkeypatch.setattr(cg.subprocess, "run", fake_run)
+    build = BuildEvidence(compile_units=[CompileUnit(
+        id="cu://x",
+        source="victim.cpp",
+        argv=["/usr/bin/g++", "-fplugin=./evil.so", "victim.cpp"],
+        language="CXX",
+        standard="c++17",
+        defines={"FEATURE": "1"},
+        include_paths=["include"],
+        abi_relevant_flags=["-fvisibility=hidden"],
+    )])
+
+    ClangCallGraphExtractor().extract_from_build(build)
+
+    cmd = captured["cmd"]
+    assert "-fplugin=./evil.so" not in cmd
+    assert "-x" in cmd and "c++" in cmd
+    assert "-std=c++17" in cmd
+    assert "-DFEATURE=1" in cmd
+    assert "-I" in cmd and "include" in cmd
+    assert "-fvisibility=hidden" in cmd
+    assert cmd[-2:] == ["--", "victim.cpp"]
+
+
 def test_extract_from_args_empty_stdout(monkeypatch) -> None:
     _patch_clang(monkeypatch, proc=_FakeProc("", stderr="boom"))
     ext = ClangCallGraphExtractor()

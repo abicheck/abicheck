@@ -110,7 +110,6 @@ _TYPE_LEVEL_KIND_NAMES: frozenset[str] = frozenset(
         "enum_underlying_size_changed",
         "struct_packing_changed",
         "type_visibility_changed",
-        "value_abi_trait_changed",
         "type_became_final",
         "type_lost_final",
         # Fine-grained class-layout descriptor findings (layout-closure work):

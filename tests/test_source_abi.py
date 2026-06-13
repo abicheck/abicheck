@@ -571,6 +571,38 @@ def test_diff_generated_header_changed() -> None:
     assert [c.kind for c in changes] == [ChangeKind.GENERATED_HEADER_CHANGED]
 
 
+def test_diff_generated_constant_value_change_is_api_break() -> None:
+    # A generated public constexpr still behaves like a baked-in constant for
+    # consumers. Preserve constexpr_value_changed so legacy ABI gates see the
+    # API_BREAK severity, while removals remain covered by generated headers.
+    old = _surface(
+        reachable_declarations=[
+            _entity(
+                "cfg::KMax",
+                "constexpr",
+                visibility="generated",
+                origin="GENERATED",
+                value="64",
+            )
+        ]
+    )
+    new = _surface(
+        reachable_declarations=[
+            _entity(
+                "cfg::KMax",
+                "constexpr",
+                visibility="generated",
+                origin="GENERATED",
+                value="128",
+            )
+        ]
+    )
+    changes = diff_source_abi(old, new)
+    assert [c.kind for c in changes] == [ChangeKind.CONSTEXPR_VALUE_CHANGED]
+    assert changes[0].old_value == "64"
+    assert changes[0].new_value == "128"
+
+
 def test_diff_generated_constant_removed_detected() -> None:
     # A constexpr declared in a *generated* header that is removed in the new
     # version must surface as generated_header_changed. A namespace-scope

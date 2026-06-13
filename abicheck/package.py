@@ -41,7 +41,7 @@ import tempfile
 import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import IO, Protocol, runtime_checkable
+from typing import IO, Any, Protocol, runtime_checkable
 
 from .errors import ExtractionSecurityError, SnapshotError
 
@@ -188,9 +188,11 @@ class TarExtractor:
         tar_path = staging / "payload.tar"
         try:
             try:
-                import zstandard as zstandard_mod
+                import zstandard
             except ImportError:
-                zstandard_mod = None
+                zstandard_mod: Any | None = None
+            else:
+                zstandard_mod = zstandard
             if zstandard_mod is not None:
                 dctx = zstandard_mod.ZstdDecompressor()
                 with open(zst_path, "rb") as compressed, open(tar_path, "wb") as out:
