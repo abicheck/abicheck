@@ -1203,6 +1203,7 @@ class ClangSourceExtractor:
         if result.returncode != 0:
             diags.append(
                 f"clang exited {result.returncode} (recovered): {result.stderr[:300]}"
+                + _missing_generated_header_hint(result.stderr)
             )
         tu = source_abi_from_clang_ast(
             ast_root, compile_unit, public_header_roots, target_id, diagnostics=diags,
