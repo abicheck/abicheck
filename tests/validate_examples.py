@@ -131,9 +131,13 @@ def _find_compiler(is_cpp: bool = False, preferred_family: str | None = None) ->
 
 
 def _toolchain_family() -> str:
-    """Current C/C++ producer family ("gcc" | "clang" | "")."""
-    if PREFERRED_FAMILY in ("gcc", "clang"):
-        return PREFERRED_FAMILY
+    """Producer family of the compiler actually selected ("gcc" | "clang" | "").
+
+    Derived from the real ``_find_compiler`` result (which honours
+    ``PREFERRED_FAMILY`` but falls back when the requested family is absent), NOT
+    from the requested family — otherwise ``--toolchain clang`` on a clang-less
+    host would mis-scope known_gaps to clang while gcc actually built the cases.
+    """
     name = Path(_find_compiler(is_cpp=True) or _find_compiler(is_cpp=False) or "").name
     if "clang" in name:
         return "clang"

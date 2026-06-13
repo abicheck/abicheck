@@ -93,20 +93,22 @@ class TestKnownGapToolchainScope:
     """
 
     def test_unscoped_gap_applies_everywhere(self):
+        # Patch the resolved family so the test does not depend on which
+        # compilers happen to be installed in the test environment.
         for fam in ("gcc", "clang", ""):
-            with patch.object(ve, "PREFERRED_FAMILY", fam):
+            with patch.object(ve, "_toolchain_family", lambda f=fam: f):
                 assert _gap_applies({"known_gap": "x"}) is True
 
     def test_gcc_scoped_gap_only_under_gcc(self):
-        with patch.object(ve, "PREFERRED_FAMILY", "gcc"):
+        with patch.object(ve, "_toolchain_family", lambda: "gcc"):
             assert _gap_applies({"known_gap_toolchains": ["gcc"]}) is True
-        with patch.object(ve, "PREFERRED_FAMILY", "clang"):
+        with patch.object(ve, "_toolchain_family", lambda: "clang"):
             assert _gap_applies({"known_gap_toolchains": ["gcc"]}) is False
 
     def test_clang_scoped_gap_only_under_clang(self):
-        with patch.object(ve, "PREFERRED_FAMILY", "clang"):
+        with patch.object(ve, "_toolchain_family", lambda: "clang"):
             assert _gap_applies({"known_gap_toolchains": ["clang"]}) is True
-        with patch.object(ve, "PREFERRED_FAMILY", "gcc"):
+        with patch.object(ve, "_toolchain_family", lambda: "gcc"):
             assert _gap_applies({"known_gap_toolchains": ["clang"]}) is False
 
     def test_real_cases_are_scoped(self):
