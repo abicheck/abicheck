@@ -725,6 +725,31 @@ class DemoteUnreachableInternalChurn:
         return changes
 
 
+class DetectVersionedSymbolScheme:
+    """Emit one advisory ``versioned_symbol_scheme_detected`` finding when most
+    removed symbols reappear as added symbols differing only by a version token
+    (field-eval P08: ICU ``u_*_75`` → ``u_*_78``). Additive and never downgrades
+    an artifact-proven break — it explains the churn, the individual
+    func_removed/func_added findings and their verdict are untouched."""
+
+    name = "detect_versioned_symbol_scheme"
+
+    def run(self, changes: list[Change], ctx: PipelineContext) -> list[Change]:
+        from .checker_policy import ChangeKind
+        from .versioned_symbol_scheme import detect_versioned_symbol_scheme
+
+        if any(c.kind is ChangeKind.VERSIONED_SYMBOL_SCHEME_DETECTED for c in changes):
+            return changes  # idempotent if the pipeline is re-run
+        advisory = detect_versioned_symbol_scheme(changes)
+        if advisory is None:
+            return changes
+        if ctx.suppression is not None and ctx.suppression.is_suppressed(advisory):
+            ctx.suppressed.append(advisory)
+            return changes
+        changes.append(advisory)
+        return changes
+
+
 class EscalateFrozenNamespaceViolations:
     """Tag findings whose symbol / caused_by_type lies in a contractually
     frozen namespace (e.g. ``**::detail::r1``).
@@ -902,6 +927,9 @@ DEFAULT_PIPELINE = PostProcessingPipeline(
         DetectCppPatterns(),
         DetectNamespacePatterns(),
         DetectTemplatePatterns(),
+        # Advisory overlay: explains a versioned-symbol-scheme churn (P08). Runs
+        # after rename suppression so it only sees residual removed/added pairs.
+        DetectVersionedSymbolScheme(),
         # Runs last so it can tag both raw findings and the synthetic
         # overlays added by DetectInternalLeaks / DetectCppPatterns.
         EscalateFrozenNamespaceViolations(),

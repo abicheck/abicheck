@@ -77,8 +77,10 @@ def test_versioned_suffix_bump_reads_as_full_churn():
     # Every symbol disappears and reappears under the new suffix.
     assert kinds.get("func_removed") == n, kinds
     assert kinds.get("func_added") == n, kinds
-    # SPEC: no convention awareness yet → the source-compatible bump is BREAKING.
-    # When the versioned-scheme recogniser lands, flip this to the mitigated verdict.
+    # The recogniser emits exactly one advisory finding explaining the churn...
+    assert kinds.get("versioned_symbol_scheme_detected") == 1, kinds
+    # ...but it is *additive*: the artifact-proven removals still drive a BREAKING
+    # verdict (authority rule). Collapsing to compatible stays an opt-in preset.
     assert result.verdict == Verdict.BREAKING
 
 
@@ -89,3 +91,43 @@ def test_identical_versioned_surface_is_no_change():
     kinds = _kind_counts(result)
     assert "func_removed" not in kinds and "func_added" not in kinds, kinds
     assert result.verdict in (Verdict.NO_CHANGE, Verdict.COMPATIBLE)
+
+
+# --- pure recogniser: thresholds + false-positive guards ------------------
+
+def _ch(kind_value: str, symbol: str):
+    from abicheck.checker_types import Change, ChangeKind
+    return Change(kind=ChangeKind(kind_value), symbol=symbol, description="")
+
+
+def test_recogniser_fires_on_majority_versioned_churn():
+    from abicheck.versioned_symbol_scheme import detect_versioned_symbol_scheme
+    changes = []
+    for b in ("a", "b", "c", "d"):
+        changes.append(_ch("func_removed", f"u_{b}_75"))
+        changes.append(_ch("func_added", f"u_{b}_78"))
+    out = detect_versioned_symbol_scheme(changes)
+    assert out is not None
+    assert out.kind.value == "versioned_symbol_scheme_detected"
+
+
+def test_recogniser_silent_below_floor():
+    # Only one versioned pair amid real removals → not a scheme (no false positive).
+    from abicheck.versioned_symbol_scheme import detect_versioned_symbol_scheme
+    changes = [
+        _ch("func_removed", "u_a_75"), _ch("func_added", "u_a_78"),
+        _ch("func_removed", "real_gone_1"), _ch("func_removed", "real_gone_2"),
+        _ch("func_removed", "real_gone_3"),
+    ]
+    assert detect_versioned_symbol_scheme(changes) is None
+
+
+def test_recogniser_ignores_digitless_renames():
+    # Removals/additions without a numeric token are not a versioned scheme.
+    from abicheck.versioned_symbol_scheme import detect_versioned_symbol_scheme
+    changes = [
+        _ch("func_removed", "alpha"), _ch("func_added", "beta"),
+        _ch("func_removed", "gamma"), _ch("func_added", "delta"),
+        _ch("func_removed", "epsilon"), _ch("func_added", "zeta"),
+    ]
+    assert detect_versioned_symbol_scheme(changes) is None

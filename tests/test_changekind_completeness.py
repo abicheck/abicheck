@@ -43,6 +43,8 @@ ASSERTED_CHANGE_KINDS: set[ChangeKind] = {
     ChangeKind.DWARF_INFO_MISSING,
     ChangeKind.EVIDENCE_COVERAGE_ASYMMETRIC,
     ChangeKind.EVIDENCE_REQUIRED_MISSING,
+    # exercised by tests/test_versioned_symbol_scheme.py (P08 advisory recogniser)
+    ChangeKind.VERSIONED_SYMBOL_SCHEME_DETECTED,
     ChangeKind.ENUM_LAST_MEMBER_VALUE_CHANGED,
     ChangeKind.ENUM_MEMBER_ADDED,
     ChangeKind.ENUM_MEMBER_REMOVED,
