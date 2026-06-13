@@ -20,6 +20,8 @@ scope**.
 | **G14** | [CPython Limited-API / `abi3` import-contract](g14-stable-abi-subset.md) | `UC-WF-stable-abi-subset` | M |
 | **G15** | [Inline-namespace version-stamp normalization](g15-inline-namespace-version.md) | `UC-CHANGE-inline-ns-version` | M |
 | **G16** | [Header-scope toolchain robustness](g16-header-scope-toolchain-robustness.md) | `UC-TC-header-scope-robustness` | M |
+| **G17** | [Real-world validation corpus](g17-real-world-corpus.md) | `UC-WORKFLOW-real-world-corpus` | M |
+| **G18** | [Bazel build-evidence](g18-bazel-build-evidence.md) | `UC-TC-bazel-build-evidence` | M |
 
 Completed or decided plans are retained for implementation history:
 

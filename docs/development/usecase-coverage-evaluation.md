@@ -127,3 +127,5 @@ planned row from drifting away from its plan.
 | Small | G10 — glibc-floor check | [g10](plans/g10-glibc-floor-check.md) |
 | Small | G13 — cross-architecture guardrail | [g13](plans/g13-arch-mismatch-guard.md) |
 | Medium | G16 — header-scope toolchain robustness | [g16](plans/g16-header-scope-toolchain-robustness.md) |
+| Medium | G17 — real-world validation corpus | [g17](plans/g17-real-world-corpus.md) |
+| Medium | G18 — Bazel build-evidence | [g18](plans/g18-bazel-build-evidence.md) |

@@ -519,3 +519,39 @@ use_cases:
     evidence:
       examples: [examples/case98_cxx_standard_floor_raised, examples/probes/cxx_standard.yaml]
       tests: [tests/test_probe_examples.py, tests/test_diff_build_config.py]
+
+  # ── workflow: real-world validation corpus (field-eval G17) ────────────────
+  - id: UC-WORKFLOW-real-world-corpus
+    axis: workflow
+    name: Real-world upstream-library validation corpus (conda-forge)
+    status: partial
+    gap: G17
+    plan: docs/development/plans/g17-real-world-corpus.md
+    evidence:
+      modules: [eval/runner.py, eval/condafetch.py]
+      tests: [eval/manifest.yaml, eval/results/latest.json]
+    next_steps: >
+      Reproducible benchmark (eval/) of abicheck against real conda-forge
+      libraries: a curated manifest with expected verdicts, a runner that fetches
+      + scans, and a generated report. DONE: binary (L0/L1) tier — verdicts match
+      the manifest 'expect'. PLANNED: (1) a source (L3/L4/L5) tier in the runner
+      that clones at the tag and runs `dump --sources`; (2) a scheduled CI lane
+      that fails on verdict drift; (3) corpus growth to Rust/Go/Qt/Boost and
+      win-64/osx-64 subdirs.
+
+  # ── toolchain: Bazel build-evidence (field-eval P21 / G18) ─────────────────
+  - id: UC-TC-bazel-build-evidence
+    axis: toolchain
+    name: Bazel-built C++ project build evidence (L3)
+    status: modeled
+    gap: G18
+    plan: docs/development/plans/g18-bazel-build-evidence.md
+    evidence:
+      modules: [abicheck/buildsource/adapters/bazel.py]
+    next_steps: >
+      The cquery/aquery jsonproto adapter exists but is unvalidated end-to-end on
+      a real Bazel C++ project (field-eval P21: oneDAL is Bazel + makefile, no
+      CMake, so its L3/L4/L5 path was unreachable without the full Intel
+      toolchain). Capture a pre-recorded `bazel aquery --output=jsonproto` from a
+      small Bazel C++ project, add it as a non-executing fixture + test asserting
+      non-empty BuildEvidence, then flip to partial/complete.
