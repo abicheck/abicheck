@@ -120,6 +120,18 @@ def test_source_entries_filters_to_source_blocks_and_only() -> None:
     assert [e["lib"] for e in runner._source_entries(manifest, {"zstd"})] == ["zstd"]
 
 
+def test_checkout_key_distinguishes_repo_and_tag() -> None:
+    # A manifest tag or repo bump must land in a different cache dir so a stale
+    # checkout is never silently reused for a different revision (Codex review).
+    repo = "https://github.com/madler/zlib.git"
+    k_old = runner._checkout_key(repo, "v1.2.13")
+    k_new = runner._checkout_key(repo, "v1.3.1")
+    k_other_repo = runner._checkout_key("https://example.com/fork.git", "v1.2.13")
+    assert k_old != k_new
+    assert k_old != k_other_repo
+    assert runner._checkout_key(repo, "v1.2.13") == k_old  # stable
+
+
 def test_render_report_has_source_section_with_coverage() -> None:
     payload = {
         "generated_utc": "2026-01-01T00:00:00+00:00",

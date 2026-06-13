@@ -31,6 +31,7 @@ from __future__ import annotations
 import argparse
 import collections
 import datetime as _dt
+import hashlib
 import json
 import os
 import platform
@@ -190,8 +191,25 @@ def _source_coverage(snap: dict) -> dict:
     }
 
 
+def _checkout_key(repo: str, tag: str) -> str:
+    """Short stable token identifying a (repo, tag) checkout, for the cache dir.
+
+    Folding the repo+tag into the directory name means a manifest tag/repo bump
+    (or a different side) lands in a *different* directory, so a cached checkout
+    is never silently reused for a different revision (Codex review) — the dir
+    name no longer omits the tag.
+    """
+    return hashlib.sha1(f"{repo}@{tag}".encode()).hexdigest()[:10]
+
+
 def _git_clone_tag(repo: str, tag: str, dest: Path) -> None:
-    """Shallow-clone *repo* at *tag* into *dest* (cached: skip if already there)."""
+    """Shallow-clone *repo* at *tag* into *dest*.
+
+    *dest* is keyed by (repo, tag) via :func:`_checkout_key`, so reuse is only
+    ever of the same revision. A directory that exists but lacks a complete
+    checkout (an interrupted clone leaves no ``.git``, or a stale partial) is
+    wiped and re-cloned; a verified ``.git`` at the keyed path is reused.
+    """
     if (dest / ".git").is_dir():
         return
     shutil.rmtree(dest, ignore_errors=True)
@@ -226,10 +244,13 @@ def _scan_source_side(entry: dict, which: str, tag: str) -> tuple[Path, dict, fl
     src = entry["source"]
     lib = entry["lib"]
     t0 = time.time()
-    tree = SRC_DIR / f"{lib}_{which}"
+    # Key the checkout + build dirs by (repo, tag) so a manifest revision bump
+    # never reuses a stale checkout under the same name (Codex review).
+    key = _checkout_key(src["repo"], tag)
+    tree = SRC_DIR / f"{lib}_{which}_{key}"
     _git_clone_tag(src["repo"], tag, tree)
     cmake_src = tree / src["cmake_subdir"] if src.get("cmake_subdir") else tree
-    build = BUILD_DIR / f"{lib}_{which}"
+    build = BUILD_DIR / f"{lib}_{which}_{key}"
     _cmake_configure(cmake_src, build, list(src.get("cmake_args", [])))
     SNAP_DIR.mkdir(parents=True, exist_ok=True)
     snap = SNAP_DIR / f"{lib}_src_{which}.json"
