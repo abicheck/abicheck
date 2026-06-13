@@ -680,3 +680,32 @@ def test_graph_full_maps_to_full_scope():
     scope, layers = collection_for_ci_mode("graph-full")
     assert scope == "full"
     assert layers == ("L3", "L4", "L5")
+
+
+def _build_many(n: int) -> BuildEvidence:
+    return BuildEvidence(
+        targets=[Target(id="target://lib", public_headers=["include/foo.h"])],
+        compile_units=[_cu(f"cu://u{i}", f"src/u{i}.cpp", "target://lib") for i in range(n)],
+    )
+
+
+def _replay_all(extractor, jobs, monkeypatch):
+    monkeypatch.setenv("ABICHECK_L4_JOBS", str(jobs))
+    return run_source_replay(
+        _build_many(12), extractor, scope="target", target_id="target://lib",
+        public_header_roots=["include/foo.h"],
+    )
+
+
+def test_parallel_l4_is_deterministic(monkeypatch):
+    """P06: parallel extraction (ABICHECK_L4_JOBS>1) yields a byte-identical
+    surface + diagnostics to the serial run, including ordering."""
+    s_serial, d_serial = _replay_all(_FakeExtractor(fail_for={"cu://u3", "cu://u9"}), 1, monkeypatch)
+    s_par, d_par = _replay_all(_FakeExtractor(fail_for={"cu://u3", "cu://u9"}), 6, monkeypatch)
+
+    assert d_serial == d_par                      # same diagnostics, same order
+    assert len(d_serial) == 2
+    assert s_serial.coverage["compile_units_parsed"] == s_par.coverage["compile_units_parsed"] == 10
+    ids_serial = [e.id for e in s_serial.reachable_declarations]
+    ids_par = [e.id for e in s_par.reachable_declarations]
+    assert ids_serial == ids_par                  # same linked surface, same order
