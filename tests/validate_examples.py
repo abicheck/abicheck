@@ -1170,14 +1170,17 @@ def main(argv: list[str] | None = None) -> int:
     global PREFERRED_FAMILY
     PREFERRED_FAMILY = None if args.toolchain == "auto" else args.toolchain
     # CMake-built cases honour CC/CXX; export them so the chosen family also
-    # drives the cmake configure step, not just direct compilation.
+    # drives the cmake configure step, not just direct compilation. An explicit
+    # --toolchain must *override* any pre-existing CC/CXX in the environment —
+    # otherwise `CC=gcc ... --toolchain clang` would build CMake cases with gcc
+    # while the run reports clang. (auto leaves the environment untouched.)
     if PREFERRED_FAMILY is not None:
         cc = _find_compiler(is_cpp=False)
         cxx = _find_compiler(is_cpp=True)
         if cc:
-            os.environ.setdefault("CC", cc)
+            os.environ["CC"] = cc
         if cxx:
-            os.environ.setdefault("CXX", cxx)
+            os.environ["CXX"] = cxx
 
     prereq_err = _check_prerequisites()
     if prereq_err:

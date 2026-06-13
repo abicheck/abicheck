@@ -1,20 +1,22 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (C) 2024 CodeRabbit Inc.
-"""check_stripped_fp.py — false-positive guard for the stripped-headers lane.
+"""check_stripped_fp.py — false-positive guard for reduced-evidence artifact lanes.
 
-Stripping debug info can only *remove* ABI signal (field offsets, calling
-convention, packing), never add a real break. So the sound, blockable invariant
-for a full-catalog stripped run is: a case the debug ground truth calls
-COMPATIBLE / NO_CHANGE must never come out BREAKING when stripped. Missed
-breaks (BREAKING→COMPATIBLE, e.g. case129) are expected evidence loss and are
-reported, not failed — that backlog is tracked separately.
+A non-default artifact mode (stripped / release-without-debug / build-source)
+changes the evidence available to the detector. It may legitimately *lose*
+signal — a stripped or release binary drops the DWARF a layout/calling-convention
+break needs — but it must never *manufacture* a real break. So the sound,
+blockable invariant for any such full/partial run is: a case the debug ground
+truth calls COMPATIBLE / NO_CHANGE must never come out BREAKING in the reduced
+mode. Missed breaks (BREAKING→COMPATIBLE, e.g. case129 stripped/release) are
+expected evidence loss and are reported, not failed.
 
 Usage:
-    python tests/check_stripped_fp.py results/validate_examples-stripped-headers.json
+    python tests/check_stripped_fp.py <results.json> [label]
 
 Exit codes:
-    0  no stripped false positives
-    1  one or more cases gained a spurious BREAKING under stripping
+    0  no false positives in the reduced-evidence run
+    1  one or more cases gained a spurious BREAKING
     2  input/usage error
 """
 from __future__ import annotations
@@ -37,9 +39,10 @@ def _load(path: Path) -> dict:
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     if not argv:
-        print("usage: check_stripped_fp.py <stripped-results.json>", file=sys.stderr)
+        print("usage: check_stripped_fp.py <results.json> [label]", file=sys.stderr)
         return 2
     results_path = Path(argv[0])
+    label = argv[1] if len(argv) > 1 else "stripped"
     if not results_path.exists():
         print(f"ERROR: {results_path} not found", file=sys.stderr)
         return 2
@@ -59,18 +62,18 @@ def main(argv: list[str] | None = None) -> int:
         if expected in _COMPATIBLE_EXPECTED and got == "BREAKING":
             false_positives.append(f"{case}: expected {expected} got {got}")
         elif expected == "BREAKING" and got in _COMPATIBLE_EXPECTED:
-            downgrades.append(f"{case}: {expected}→{got} (evidence lost by stripping)")
+            downgrades.append(f"{case}: {expected}→{got} (evidence lost in {label} mode)")
 
     if downgrades:
-        print(f"Stripped downgrades (expected evidence loss, reported): {len(downgrades)}")
+        print(f"{label} downgrades (expected evidence loss, reported): {len(downgrades)}")
         for d in downgrades:
             print(f"  - {d}")
     if false_positives:
-        print(f"\nERROR: stripped false positives: {len(false_positives)}", file=sys.stderr)
+        print(f"\nERROR: {label} false positives: {len(false_positives)}", file=sys.stderr)
         for fp in false_positives:
             print(f"  - {fp}", file=sys.stderr)
         return 1
-    print("\nStripped FP guard: no spurious breaks.")
+    print(f"\n{label} FP guard: no spurious breaks.")
     return 0
 
 
