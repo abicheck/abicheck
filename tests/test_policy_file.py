@@ -6,7 +6,15 @@ from unittest.mock import MagicMock
 import pytest
 
 from abicheck.checker_policy import ChangeKind, Verdict
+from abicheck.checker_types import DiffResult
 from abicheck.policy_file import PolicyFile
+from abicheck.severity import (
+    PRESET_DEFAULT,
+    IssueCategory,
+    classify_effective_change,
+    compute_exit_code,
+    effective_verdict_for_change,
+)
 
 
 def _change(kind: ChangeKind):
@@ -390,3 +398,47 @@ def test_frozen_namespace_floor_survives_effective_verdict(tmp_path: Path) -> No
     c2.effective_verdict = Verdict.COMPATIBLE
     c2.frozen_namespace_violation = None
     assert pf.compute_verdict([c2]) == Verdict.COMPATIBLE
+
+
+def test_effective_verdict_precedence_is_used_by_severity_paths(tmp_path: Path) -> None:
+    """A per-finding verdict must outrank a policy-file kind override everywhere."""
+    p = tmp_path / "policy.yaml"
+    p.write_text(
+        "overrides:\n  func_params_changed: ignore\n",
+        encoding="utf-8",
+    )
+    pf = PolicyFile.load(p)
+    c = _change(ChangeKind.FUNC_PARAMS_CHANGED)
+    c.effective_verdict = Verdict.BREAKING
+    c.frozen_namespace_violation = None
+
+    assert pf.compute_verdict([c]) == Verdict.BREAKING
+    assert effective_verdict_for_change(c, policy_file=pf) == Verdict.BREAKING
+    assert classify_effective_change(c, policy_file=pf) == IssueCategory.ABI_BREAKING
+    assert compute_exit_code([c], PRESET_DEFAULT, policy_file=pf) == 4
+
+
+def test_diffresult_buckets_honor_effective_verdict_over_policy_override(
+    tmp_path: Path,
+) -> None:
+    p = tmp_path / "policy.yaml"
+    p.write_text(
+        "overrides:\n  func_params_changed: ignore\n",
+        encoding="utf-8",
+    )
+    pf = PolicyFile.load(p)
+    c = _change(ChangeKind.FUNC_PARAMS_CHANGED)
+    c.effective_verdict = Verdict.BREAKING
+    c.frozen_namespace_violation = None
+    result = DiffResult(
+        old_version="1",
+        new_version="2",
+        library="lib",
+        changes=[c],
+        verdict=pf.compute_verdict([c]),
+        policy_file=pf,
+    )
+
+    assert result.verdict == Verdict.BREAKING
+    assert result.breaking == [c]
+    assert result.compatible == []

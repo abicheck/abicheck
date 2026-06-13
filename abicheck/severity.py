@@ -199,6 +199,20 @@ def _has_frozen_namespace_violation(change: HasKind) -> bool:
     return isinstance(fnv, str) and bool(fnv)
 
 
+def _raw_verdict_for_kind(kind: ChangeKind, kind_sets: KindSets) -> Verdict:
+    """Return the verdict for *kind* without per-finding overrides."""
+    breaking, api_break, compatible, risk = kind_sets
+    if kind in breaking:
+        return Verdict.BREAKING
+    if kind in api_break:
+        return Verdict.API_BREAK
+    if kind in risk:
+        return Verdict.COMPATIBLE_WITH_RISK
+    if kind in compatible:
+        return Verdict.COMPATIBLE
+    return Verdict.BREAKING
+
+
 def effective_verdict_for_change(
     change: HasKind,
     *,
@@ -214,10 +228,25 @@ def effective_verdict_for_change(
     the override is ignored for that one finding.
     """
     kind = change.kind
-    overrides = getattr(policy_file, "overrides", None) if policy_file is not None else None
+    base_policy = getattr(policy_file, "base_policy", policy)
+    base_sets = _resolve_kind_sets(base_policy, None)
+
+    eff = getattr(change, "effective_verdict", None)
+    if isinstance(eff, Verdict):
+        raw_v = _raw_verdict_for_kind(kind, base_sets)
+        if (
+            _has_frozen_namespace_violation(change)
+            and _VERDICT_ORDER.index(eff) < _VERDICT_ORDER.index(raw_v)
+        ):
+            return raw_v
+        return eff
+
+    overrides = (
+        getattr(policy_file, "overrides", None)
+        if policy_file is not None
+        else None
+    )
     if overrides and kind in overrides:
-        base_policy = getattr(policy_file, "base_policy", policy)
-        base_sets = _resolve_kind_sets(base_policy, None)
         base_v = effective_category(change, *base_sets)
         override_v = overrides[kind]
         if (
