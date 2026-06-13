@@ -6,13 +6,36 @@ benchmark results across real-world test cases, and why the numbers come out the
 > **Note:** abicheck detects 245 change kinds (see [Change Kind Reference](change-kinds.md)).
 > The current cross-tool benchmark covers a pinned 74-case subset of the
 > `examples/` catalog (`case01`-`case73` + `case26b`); the full catalog now has
-> 129 cases. The subset is pinned so accuracy numbers stay reproducible across
-> releases.
+> 134 cases (129 single-library cases + 5 multi-library bundle cases). The
+> subset is pinned so accuracy numbers stay reproducible across releases.
 
 > **Why the tools disagree.** The accuracy gaps below are mostly an *evidence*
 > story: each tool sees a different subset of the binary/debug/header inputs. For
 > the conceptual model — which evidence detects which change class — see
 > [Evidence & Detectability](../concepts/evidence-and-detectability.md).
+
+---
+
+## Current scan-quality snapshot
+
+`Examples Validation` is the CI workflow for the full catalog. It validates the
+current abicheck scan quality separately from the pinned vendor benchmark below:
+the full catalog answers "what does abicheck currently cover?", while the pinned
+74-case subset answers "how does abicheck compare to ABICC/libabigail on a stable
+cross-tool corpus?"
+
+| Scan | Scope | Execution | Result | Quality signal |
+|------|:-----:|-----------|--------|----------------|
+| Build/autodiscovery | 129 runnable single-library cases | `pytest tests/test_example_autodiscovery.py -v --tb=short -m integration` in CI | 118 passed / 5 xfailed / 6 skipped | CMake/build harness is healthy for all runnable single-library examples |
+| Default/debug verdicts | 134 catalog cases | `python tests/validate_examples.py --json` + `python tests/check_validate_results.py` in CI | 122 PASS / 5 XFAIL / 7 SKIP | Blocking verdict gate; no FAIL/ERROR bucket |
+| Runtime smoke | 134 catalog cases | `python validation/scripts/run_example_runtime_smoke.py --json` in CI artifact | 70 DEMONSTRATED / 47 NO_RUNTIME_SIGNAL / 7 BASELINE_SIGNAL / 10 SKIP | Runtime harness has no BUILD_ERROR/BASELINE_ERROR bucket |
+| Release headers smoke | 7 representative cases | `validate_examples.py case01 case04 case129 case130 case131 case132 case133 --artifact-variant release-headers --json` in CI artifact | 7 PASS | Release/header mode matches ground truth on the representative smoke set |
+| Stripped headers smoke | 7 representative cases | same case set with `--artifact-variant stripped-headers` | 6 PASS / 1 FAIL | `case129_struct_return_convention` is the current stripped-mode signal-loss backlog |
+| Build/source smoke | 7 representative cases | same case set with `--artifact-variant build-source` | 7 PASS | Build/source evidence catches the build-flag mode cases in the smoke set |
+
+The full release/stripped/build-source mode matrix is intentionally not a
+blocking CI gate. It remains a manual extended-scan path because it is much
+heavier than the default/debug full-catalog gate.
 
 ---
 
@@ -188,8 +211,8 @@ v2.xml (headers dir + .so path) ──┘
    warning on every run when used with GCC 11+. Results may differ across GCC versions.
 4. **`case16_inline_to_non_inline`**: reliably hits 120s timeout
 
-**Our fix in PR #72:** Pass a specific header file path instead of a directory in
-`<headers>`. This drops runtime from 120s → ~1s and fixes wrong verdicts.
+**Current mitigation:** Pass a specific header file path instead of a directory
+in `<headers>`. This drops runtime from 120s → ~1s and fixes wrong verdicts.
 
 **Current benchmark result:** see the 74-case benchmark-subset matrix below.
 
@@ -270,10 +293,10 @@ pipeline four times:
 
 ### Which source discovers what
 
-Each case in [`examples/ground_truth.json`](https://github.com/napetrov/abicheck/blob/main/examples/ground_truth.json)
+Each case in [`examples/ground_truth.json`](https://github.com/abicheck/abicheck/blob/main/examples/ground_truth.json)
 carries a `min_evidence` field — the weakest source at which abicheck reaches the
 correct verdict — derived by
-[`scripts/evidence_tiers.py`](https://github.com/napetrov/abicheck/blob/main/scripts/evidence_tiers.py)
+[`scripts/evidence_tiers.py`](https://github.com/abicheck/abicheck/blob/main/scripts/evidence_tiers.py)
 and validated by `tests/test_evidence_tiers.py`. Aggregated over the 129-case
 catalog, that yields the cumulative coverage the `--evidence-tiers` summary
 prints:
@@ -323,7 +346,7 @@ Two directions matter, not just one:
 
 ---
 
-## Current benchmark summary (2026-05-19, 74-case subset)
+## Pinned vendor benchmark summary (2026-05-19, 74-case subset)
 
 Release-pinned scan status from `python3 scripts/benchmark_comparison.py --suite pinned74` on the original
 74-case benchmark subset. ABICC runs used `--abicc-timeout 20` to keep known hangs bounded.

@@ -67,6 +67,45 @@ The standard analysis modes are:
 - `build-source`: stock binary + headers + build/source evidence pack
   (`L0,L1,L2,L3,L4,L5`)
 
+## Current Validation Status
+
+`Examples Validation` is the CI workflow for this catalog. It runs on changes
+that touch `examples/**`, `abicheck/**`, or the validate-example harness files.
+Commands below use `PYTHONPATH=.`.
+
+| Check | Command | Executed where | Scope | Result | Status |
+|---|---|---|---:|---|---|
+| Build/autodiscovery | `pytest tests/test_example_autodiscovery.py -v --tb=short -m integration` | CI Linux, Python 3.14 | 129 runnable single-library cases | 118 passed / 5 xfailed / 6 skipped | Passing |
+| Default/debug verdicts | `python tests/validate_examples.py --json` + `python tests/check_validate_results.py` | CI Linux, blocking gate | 134 catalog cases | 122 PASS / 5 XFAIL / 7 SKIP | Passing; no FAIL/ERROR |
+| Runtime smoke | `python validation/scripts/run_example_runtime_smoke.py --json` | CI Linux artifact | 134 catalog cases | 70 DEMONSTRATED / 47 NO_RUNTIME_SIGNAL / 7 BASELINE_SIGNAL / 10 SKIP | Passing; no BUILD_ERROR/BASELINE_ERROR |
+| Release headers smoke | `python tests/validate_examples.py case01 case04 case129 case130 case131 case132 case133 --artifact-variant release-headers --json` | CI Linux artifact | 7 representative cases | 7 PASS | Informational, clean |
+| Stripped headers smoke | `python tests/validate_examples.py case01 case04 case129 case130 case131 case132 case133 --artifact-variant stripped-headers --json` | CI Linux artifact | 7 representative cases | 6 PASS / 1 FAIL | Informational; `case129` loses stripped-only signal |
+| Build/source smoke | `python tests/validate_examples.py case01 case04 case129 case130 case131 case132 case133 --artifact-variant build-source --json` | CI Linux artifact | 7 representative cases | 7 PASS | Informational, clean |
+
+The full release/stripped/build-source matrix is not a blocking CI gate; CI
+keeps those modes to the representative smoke set so catalog changes do not make
+ordinary pull requests wait on the full extended matrix.
+
+Recent build/source and ABI-mode examples:
+
+| Case | Default/debug | Release | Stripped | Build/source |
+|---|---|---|---|---|
+| `case129_struct_return_convention` | PASS (`BREAKING`) | PASS (`BREAKING`) | FAIL (`COMPATIBLE`) | PASS (`BREAKING`) |
+| `case130_exceptions_mode_flip` | PASS (`COMPATIBLE_WITH_RISK`) | PASS (`COMPATIBLE_WITH_RISK`) | PASS (`COMPATIBLE_WITH_RISK`) | PASS (`COMPATIBLE_WITH_RISK`) |
+| `case131_rtti_mode_flip` | PASS (`COMPATIBLE_WITH_RISK`) | PASS (`COMPATIBLE_WITH_RISK`) | PASS (`COMPATIBLE_WITH_RISK`) | PASS (`COMPATIBLE_WITH_RISK`) |
+| `case132_threadsafe_statics_flip` | PASS (`COMPATIBLE_WITH_RISK`) | PASS (`COMPATIBLE_WITH_RISK`) | PASS (`COMPATIBLE_WITH_RISK`) | PASS (`COMPATIBLE_WITH_RISK`) |
+| `case133_tls_model_flip` | PASS (`COMPATIBLE_WITH_RISK`) | PASS (`COMPATIBLE_WITH_RISK`) | PASS (`COMPATIBLE_WITH_RISK`) | PASS (`COMPATIBLE_WITH_RISK`) |
+
+Current mode-specific backlog: the representative stripped-headers smoke
+under-classifies `case129_struct_return_convention` as `COMPATIBLE`; default,
+release, and build/source modes classify it as `BREAKING`.
+
+Expected non-pass buckets are already represented in `ground_truth.json`:
+
+- XFAIL: `case105`, `case111`, `case64`, `case78`, `case97`
+- SKIP: `case115`, `case121`, and bundle cases `case84`, `case90`, `case91`,
+  `case92`, `case93`
+
 ---
 
 ## Case index
@@ -246,7 +285,7 @@ cmake --build build
 
 ## Related documentation
 
-- **Unified 77-case accuracy table** (all configurations, FP/FN): [`../README.md#validation-snapshot`](../README.md#validation-snapshot)
+- **Pinned 74-case cross-tool accuracy table** (all configurations, FP/FN): [`../README.md#validation-snapshot`](../README.md#validation-snapshot)
 - **Per-case accuracy matrix and methodology:** [Tool Comparison & Benchmarks](../docs/reference/tool-comparison.md)
 - **What counts as an ABI break (with code):** [ABI/API Handling & Recommendations](../docs/concepts/abi-api-handling.md)
 - **Dependency ABI leaks** (case 18 background): [`case18_dependency_leak/README.md`](case18_dependency_leak/README.md)
