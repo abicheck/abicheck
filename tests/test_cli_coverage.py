@@ -73,7 +73,7 @@ class TestResolveInputErrors:
         hdr.write_text("int f();", encoding="utf-8")
 
         monkeypatch.setattr(
-            "abicheck.cli.dump",
+            "abicheck.cli_dump_helpers.dump",
             lambda **_kw: (_ for _ in ()).throw(AbicheckError("castxml died")),
         )
         with pytest.raises(click.ClickException, match="Failed to dump"):
@@ -131,7 +131,7 @@ class TestDumpCmdStdout:
         hdr.write_text("int foo();", encoding="utf-8")
 
         snap = AbiSnapshot(library="libfoo.so", version="1.0")
-        monkeypatch.setattr("abicheck.cli.dump", lambda **_kw: snap)
+        monkeypatch.setattr("abicheck.cli_dump_helpers.dump", lambda **_kw: snap)
 
         runner = CliRunner()
         result = runner.invoke(main, ["dump", str(so), "-H", str(hdr)])

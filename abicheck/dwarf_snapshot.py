@@ -231,6 +231,24 @@ def _evidence_payload_summary(payload: object) -> str | None:
 
 
 # ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
+
+
+def _record_kind_from_tag(tag: str) -> str:
+    """Return the ABI kind string for a record-type DWARF tag.
+
+    Maps ``DW_TAG_union_type`` → ``"union"``, ``DW_TAG_class_type`` →
+    ``"class"``, and everything else (``DW_TAG_structure_type``) → ``"struct"``.
+    """
+    if tag == "DW_TAG_union_type":
+        return "union"
+    if tag == "DW_TAG_class_type":
+        return "class"
+    return "struct"
+
+
+# ---------------------------------------------------------------------------
 # Internal builder
 # ---------------------------------------------------------------------------
 
@@ -590,72 +608,19 @@ class _DwarfSnapshotBuilder:
         if byte_size == 0 and _attr_bool(die, "DW_AT_declaration"):
             return  # forward declaration only
 
-        if qualified in self._seen_type_names:
-            if qualified not in self._logged_type_dups:
-                self._logged_type_dups.add(qualified)
-                log.debug("Duplicate type skipped (first-wins): %s", qualified)
-            return  # ODR: first definition wins
-        self._seen_type_names.add(qualified)
+        if not self._check_and_register_type_name(qualified):
+            return  # ODR: first definition wins (duplicate logged inside)
 
         tag = die.tag
         is_union = tag == "DW_TAG_union_type"
-        kind = (
-            "union"
-            if is_union
-            else ("class" if tag == "DW_TAG_class_type" else "struct")
+        kind = _record_kind_from_tag(tag)
+
+        fields, bases, virtual_bases, vtable, base_offsets = (
+            self._collect_record_type_children(die, CU)
         )
-
-        # Parse fields
-        fields: list[TypeField] = []
-        bases: list[str] = []
-        virtual_bases: list[str] = []
-        vtable: list[str] = []
-        # Best-effort layout descriptor (layout-closure work). base_offsets maps
-        # base name → bit offset within this object (from the inheritance DIE's
-        # DW_AT_data_member_location); empty when no such offset is present.
-        base_offsets: dict[str, int] = {}
-
-        for child in die.iter_children():
-            if child.tag == "DW_TAG_member":
-                tf = self._process_field(child, CU)
-                if tf is not None:
-                    fields.append(tf)
-            elif child.tag == "DW_TAG_inheritance":
-                base_name = self._resolve_base_name(child, CU)
-                if base_name:
-                    is_virtual_base = _attr_int(child, "DW_AT_virtuality") > 0
-                    if is_virtual_base:
-                        virtual_bases.append(base_name)
-                    else:
-                        bases.append(base_name)
-                    # Record the (non-virtual) base subobject offset when present.
-                    # A virtual base's location is dynamic, so only capture the
-                    # static, direct-base offset.
-                    if (
-                        not is_virtual_base
-                        and "DW_AT_data_member_location" in child.attributes
-                    ):
-                        base_offsets[base_name] = (
-                            _decode_member_location(
-                                child.attributes["DW_AT_data_member_location"].value
-                            )
-                            * 8
-                        )
-            elif child.tag == "DW_TAG_subprogram":
-                # Collect virtual methods for vtable
-                if _attr_int(child, "DW_AT_virtuality") > 0:
-                    vt_mangled = (
-                        _attr_str(child, "DW_AT_linkage_name")
-                        or _attr_str(child, "DW_AT_MIPS_linkage_name")
-                        or _attr_str(child, "DW_AT_name")
-                    )
-                    if vt_mangled:
-                        vtable.append(vt_mangled)
 
         alignment = _attr_int(die, "DW_AT_alignment")
         is_opaque = byte_size == 0 and not fields
-
-        # Extract source location from DW_AT_decl_file / DW_AT_decl_line
         source_loc = self._resolve_decl_file(die, CU)
 
         # Best-effort vptr offset: a class with virtual methods (non-empty
@@ -692,6 +657,105 @@ class _DwarfSnapshotBuilder:
                 base_offsets=base_offsets,
             )
         )
+
+    def _check_and_register_type_name(self, qualified: str) -> bool:
+        """Return True and register *qualified* if it is new; False if already seen.
+
+        When the name was seen before, logs a one-time debug message (ODR).
+        """
+        if qualified in self._seen_type_names:
+            if qualified not in self._logged_type_dups:
+                self._logged_type_dups.add(qualified)
+                log.debug("Duplicate type skipped (first-wins): %s", qualified)
+            return False
+        self._seen_type_names.add(qualified)
+        return True
+
+    def _collect_record_type_children(
+        self,
+        die: Any,
+        CU: Any,
+    ) -> tuple[list[TypeField], list[str], list[str], list[str], dict[str, int]]:
+        """Iterate over the children of a record-type DIE.
+
+        Returns ``(fields, bases, virtual_bases, vtable, base_offsets)``.
+
+        - *fields*: data member ``TypeField`` objects (in order).
+        - *bases*: names of direct (non-virtual) base classes.
+        - *virtual_bases*: names of virtual base classes.
+        - *vtable*: mangled names of virtual member functions.
+        - *base_offsets*: base-name → bit offset for direct bases that carry a
+          ``DW_AT_data_member_location``; empty when none do.
+        """
+        fields: list[TypeField] = []
+        bases: list[str] = []
+        virtual_bases: list[str] = []
+        vtable: list[str] = []
+        # Best-effort layout descriptor (layout-closure work). base_offsets maps
+        # base name → bit offset within this object (from the inheritance DIE's
+        # DW_AT_data_member_location); empty when no such offset is present.
+        base_offsets: dict[str, int] = {}
+
+        for child in die.iter_children():
+            if child.tag == "DW_TAG_member":
+                tf = self._process_field(child, CU)
+                if tf is not None:
+                    fields.append(tf)
+            elif child.tag == "DW_TAG_inheritance":
+                self._process_inheritance_child(
+                    child, CU, bases, virtual_bases, base_offsets
+                )
+            elif child.tag == "DW_TAG_subprogram":
+                self._process_virtual_method_child(child, vtable)
+
+        return fields, bases, virtual_bases, vtable, base_offsets
+
+    def _process_inheritance_child(
+        self,
+        child: Any,
+        CU: Any,
+        bases: list[str],
+        virtual_bases: list[str],
+        base_offsets: dict[str, int],
+    ) -> None:
+        """Process a single ``DW_TAG_inheritance`` child DIE in-place.
+
+        Appends to *bases* or *virtual_bases* as appropriate, and records the
+        static bit-offset in *base_offsets* for direct (non-virtual) bases.
+        """
+        base_name = self._resolve_base_name(child, CU)
+        if not base_name:
+            return
+        is_virtual_base = _attr_int(child, "DW_AT_virtuality") > 0
+        if is_virtual_base:
+            virtual_bases.append(base_name)
+        else:
+            bases.append(base_name)
+        # Record the (non-virtual) base subobject offset when present.
+        # A virtual base's location is dynamic, so only capture the
+        # static, direct-base offset.
+        if not is_virtual_base and "DW_AT_data_member_location" in child.attributes:
+            base_offsets[base_name] = (
+                _decode_member_location(
+                    child.attributes["DW_AT_data_member_location"].value
+                )
+                * 8
+            )
+
+    @staticmethod
+    def _process_virtual_method_child(child: Any, vtable: list[str]) -> None:
+        """Append the mangled name of a virtual ``DW_TAG_subprogram`` to *vtable*.
+
+        No-op when the subprogram is not virtual or has no usable name.
+        """
+        if _attr_int(child, "DW_AT_virtuality") > 0:
+            vt_mangled = (
+                _attr_str(child, "DW_AT_linkage_name")
+                or _attr_str(child, "DW_AT_MIPS_linkage_name")
+                or _attr_str(child, "DW_AT_name")
+            )
+            if vt_mangled:
+                vtable.append(vt_mangled)
 
     def _resolve_decl_file(self, die: Any, CU: Any) -> str | None:
         """Resolve DW_AT_decl_file to a source file path.

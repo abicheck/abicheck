@@ -806,6 +806,153 @@ def _diff_elf_symbol_metadata(
     return changes
 
 
+def _check_ifunc_type_change(sym_name: str, s_old: Any, s_new: Any) -> list[Change]:
+    """Detect IFUNC introduction, removal, or generic symbol-type change."""
+    if s_old.sym_type != SymbolType.IFUNC and s_new.sym_type == SymbolType.IFUNC:
+        return [Change(
+            kind=ChangeKind.IFUNC_INTRODUCED,
+            symbol=sym_name,
+            description=f"Symbol became GNU_IFUNC: {sym_name}",
+            old_value=s_old.sym_type.value,
+            new_value="ifunc",
+        )]
+    if s_old.sym_type == SymbolType.IFUNC and s_new.sym_type != SymbolType.IFUNC:
+        return [Change(
+            kind=ChangeKind.IFUNC_REMOVED,
+            symbol=sym_name,
+            description=f"Symbol no longer GNU_IFUNC: {sym_name}",
+            old_value="ifunc",
+            new_value=s_new.sym_type.value,
+        )]
+    if s_old.sym_type != s_new.sym_type:
+        return [Change(
+            kind=ChangeKind.SYMBOL_TYPE_CHANGED,
+            symbol=sym_name,
+            description=f"Symbol type changed: {sym_name} ({s_old.sym_type.value} → {s_new.sym_type.value})",
+            old_value=s_old.sym_type.value,
+            new_value=s_new.sym_type.value,
+        )]
+    return []
+
+
+def _check_binding_change(sym_name: str, s_old: Any, s_new: Any) -> list[Change]:
+    """Detect symbol binding changes (GLOBAL↔WEAK and other binding transitions)."""
+    if s_old.binding == s_new.binding:
+        return []
+    is_weakening = s_old.binding == SymbolBinding.GLOBAL and s_new.binding == SymbolBinding.WEAK
+    kind = ChangeKind.SYMBOL_BINDING_CHANGED if is_weakening else ChangeKind.SYMBOL_BINDING_STRENGTHENED
+    return [Change(
+        kind=kind,
+        symbol=sym_name,
+        description=f"Symbol binding changed: {sym_name} ({s_old.binding.value} → {s_new.binding.value})",
+        old_value=s_old.binding.value,
+        new_value=s_new.binding.value,
+    )]
+
+
+def _check_elf_visibility_change(sym_name: str, s_old: Any, s_new: Any) -> list[Change]:
+    """Detect ELF st_other visibility transitions among exported visibilities.
+
+    HIDDEN/INTERNAL transitions are already caught by FUNC_VISIBILITY_CHANGED or
+    FUNC_REMOVED (symbol disappears from exported set). Only emit for transitions
+    among exported visibilities (DEFAULT↔PROTECTED).
+    """
+    if s_old.visibility == s_new.visibility:
+        return []
+    old_vis = s_old.visibility
+    new_vis = s_new.visibility
+    if old_vis in ("hidden", "internal") or new_vis in ("hidden", "internal"):
+        return []
+    return [Change(
+        kind=ChangeKind.SYMBOL_ELF_VISIBILITY_CHANGED,
+        symbol=sym_name,
+        description=f"ELF visibility changed: {sym_name} ({old_vis} → {new_vis})",
+        old_value=old_vis,
+        new_value=new_vis,
+    )]
+
+
+def _resolve_size_change_kind(
+    old: AbiSnapshot,
+    new: AbiSnapshot,
+    sym_name: str,
+    s_old: Any,
+    s_new: Any,
+) -> ChangeKind | None:
+    """Resolve the ChangeKind for a data-symbol size change, or None to suppress.
+
+    Const string-like objects without a fixed header bound use
+    SYMBOL_SIZE_CHANGED_CONST_OBJECT when growing; shrinking is suppressed because
+    old consumers already sized from the smaller DSO.  Internal-looking symbols use
+    SYMBOL_SIZE_CHANGED_INTERNAL.  All others use SYMBOL_SIZE_CHANGED.
+    """
+    if _is_const_unbounded_string_object(old, sym_name) and _is_const_unbounded_string_object(new, sym_name):
+        return None if s_new.size <= s_old.size else ChangeKind.SYMBOL_SIZE_CHANGED_CONST_OBJECT
+    return ChangeKind.SYMBOL_SIZE_CHANGED_INTERNAL if _is_internal_data_symbol(sym_name) else ChangeKind.SYMBOL_SIZE_CHANGED
+
+
+def _check_symbol_size_change(
+    old: AbiSnapshot,
+    new: AbiSnapshot,
+    sym_name: str,
+    s_old: Any,
+    s_new: Any,
+) -> list[Change]:
+    """Detect exported data-symbol size changes (OBJECT/COMMON/TLS).
+
+    Vtable (_ZTV) and typeinfo (_ZTI) object size changes are owned by
+    diff_elf_layout.py, which decodes them into vtable-slot-count /
+    inheritance-shape findings; typeinfo-name (_ZTS) size only tracks the
+    mangled spelling and is not ABI-meaningful. Skip those here so the
+    generic SYMBOL_SIZE_CHANGED does not double-emit. VTT (_ZTT) is NOT
+    skipped: it is part of the construction ABI for virtual-base classes
+    and has no dedicated detector, so it keeps generic size-change coverage.
+    """
+    if not (
+        s_old.size > 0
+        and s_new.size > 0
+        and s_old.size != s_new.size
+        and s_new.sym_type in (SymbolType.OBJECT, SymbolType.COMMON, SymbolType.TLS)
+        and not sym_name.startswith(("_ZTV", "_ZTI", "_ZTS"))
+    ):
+        return []
+    size_kind = _resolve_size_change_kind(old, new, sym_name, s_old, s_new)
+    if size_kind is None:
+        return []
+    return [Change(
+        kind=size_kind,
+        symbol=sym_name,
+        description=f"Symbol size changed: {sym_name} ({s_old.size} → {s_new.size} bytes)",
+        old_value=str(s_old.size),
+        new_value=str(s_new.size),
+    )]
+
+
+def _check_func_visibility_protected(sym_name: str, s_old: Any, s_new: Any) -> list[Change]:
+    """Detect DEFAULT↔PROTECTED visibility changes for function symbols (case51).
+
+    Data symbols with default→protected break copy relocations (real ABI break).
+    Only for functions is this safely compatible (interposition semantics change only).
+    """
+    old_vis = getattr(s_old, "visibility", "default") or "default"
+    new_vis = getattr(s_new, "visibility", "default") or "default"
+    if old_vis == new_vis or {old_vis, new_vis} != _ELF_VIS_PROTECTED_PAIR:
+        return []
+    if getattr(s_old, "sym_type", None) != SymbolType.FUNC:
+        return []
+    return [Change(
+        kind=ChangeKind.FUNC_VISIBILITY_PROTECTED_CHANGED,
+        symbol=sym_name,
+        description=(
+            f"ELF symbol visibility changed: {sym_name} "
+            f"({old_vis} → {new_vis}); symbol still exported, "
+            f"interposition semantics changed"
+        ),
+        old_value=old_vis,
+        new_value=new_vis,
+    )]
+
+
 def _diff_elf_symbol_pair(
     old: AbiSnapshot,
     new: AbiSnapshot,
@@ -814,124 +961,11 @@ def _diff_elf_symbol_pair(
     s_new: Any,
 ) -> list[Change]:
     changes: list[Change] = []
-    if s_old.sym_type != SymbolType.IFUNC and s_new.sym_type == SymbolType.IFUNC:
-        changes.append(Change(
-            kind=ChangeKind.IFUNC_INTRODUCED,
-            symbol=sym_name,
-            description=f"Symbol became GNU_IFUNC: {sym_name}",
-            old_value=s_old.sym_type.value,
-            new_value="ifunc",
-        ))
-    elif s_old.sym_type == SymbolType.IFUNC and s_new.sym_type != SymbolType.IFUNC:
-        changes.append(Change(
-            kind=ChangeKind.IFUNC_REMOVED,
-            symbol=sym_name,
-            description=f"Symbol no longer GNU_IFUNC: {sym_name}",
-            old_value="ifunc",
-            new_value=s_new.sym_type.value,
-        ))
-    elif s_old.sym_type != s_new.sym_type:
-        changes.append(Change(
-            kind=ChangeKind.SYMBOL_TYPE_CHANGED,
-            symbol=sym_name,
-            description=f"Symbol type changed: {sym_name} ({s_old.sym_type.value} → {s_new.sym_type.value})",
-            old_value=s_old.sym_type.value,
-            new_value=s_new.sym_type.value,
-        ))
-
-    if s_old.binding != s_new.binding:
-        is_weakening = s_old.binding == SymbolBinding.GLOBAL and s_new.binding == SymbolBinding.WEAK
-        kind = ChangeKind.SYMBOL_BINDING_CHANGED if is_weakening else ChangeKind.SYMBOL_BINDING_STRENGTHENED
-        changes.append(Change(
-            kind=kind,
-            symbol=sym_name,
-            description=f"Symbol binding changed: {sym_name} ({s_old.binding.value} → {s_new.binding.value})",
-            old_value=s_old.binding.value,
-            new_value=s_new.binding.value,
-        ))
-
-    # ELF st_other visibility transition (DEFAULT↔PROTECTED↔HIDDEN↔INTERNAL)
-    if s_old.visibility != s_new.visibility:
-        old_vis = s_old.visibility
-        new_vis = s_new.visibility
-        # HIDDEN/INTERNAL transitions are already caught by FUNC_VISIBILITY_CHANGED
-        # or FUNC_REMOVED (symbol disappears from exported set). Only emit for
-        # transitions among exported visibilities (DEFAULT↔PROTECTED).
-        if old_vis not in ("hidden", "internal") and new_vis not in ("hidden", "internal"):
-            changes.append(Change(
-                kind=ChangeKind.SYMBOL_ELF_VISIBILITY_CHANGED,
-                symbol=sym_name,
-                description=f"ELF visibility changed: {sym_name} ({old_vis} → {new_vis})",
-                old_value=old_vis,
-                new_value=new_vis,
-            ))
-
-    if (
-        s_old.size > 0
-        and s_new.size > 0
-        and s_old.size != s_new.size
-        and s_new.sym_type in (SymbolType.OBJECT, SymbolType.COMMON, SymbolType.TLS)
-        # Vtable (_ZTV) and typeinfo (_ZTI) object size changes are owned by
-        # diff_elf_layout.py, which decodes them into vtable-slot-count /
-        # inheritance-shape findings; typeinfo-name (_ZTS) size only tracks the
-        # mangled spelling and is not ABI-meaningful. Skip those here so the
-        # generic SYMBOL_SIZE_CHANGED does not double-emit. VTT (_ZTT) is NOT
-        # skipped: it is part of the construction ABI for virtual-base classes
-        # and has no dedicated detector, so it keeps generic size-change coverage.
-        and not sym_name.startswith(("_ZTV", "_ZTI", "_ZTS"))
-    ):
-        # Use a distinct kind for internal-looking (reserved/underscore-prefixed)
-        # exported data symbols so policy files can target them, but keep the
-        # default severity breaking: exported OBJECT/COMMON/TLS size changes can
-        # break copy relocations or direct data consumers regardless of spelling.
-        # Const string-like objects without a fixed header bound get their own
-        # kind (SYMBOL_SIZE_CHANGED_CONST_OBJECT) when growing (shrinking is
-        # filtered because old consumers already sized from the smaller DSO).
-        if (
-            _is_const_unbounded_string_object(old, sym_name)
-            and _is_const_unbounded_string_object(new, sym_name)
-        ):
-            if s_new.size <= s_old.size:
-                size_kind = None
-            else:
-                size_kind = ChangeKind.SYMBOL_SIZE_CHANGED_CONST_OBJECT
-        else:
-            size_kind = (
-                ChangeKind.SYMBOL_SIZE_CHANGED_INTERNAL
-                if _is_internal_data_symbol(sym_name)
-                else ChangeKind.SYMBOL_SIZE_CHANGED
-            )
-        if size_kind is not None:
-            changes.append(Change(
-                kind=size_kind,
-                symbol=sym_name,
-                description=f"Symbol size changed: {sym_name} ({s_old.size} → {s_new.size} bytes)",
-                old_value=str(s_old.size),
-                new_value=str(s_new.size),
-            ))
-
-    # case51: ELF visibility default→protected (or vice-versa) — function symbols only.
-    # Data symbols with default→protected break copy relocations (real ABI break).
-    # Only for functions is this safely compatible (interposition semantics change only).
-    old_vis = getattr(s_old, "visibility", "default") or "default"
-    new_vis = getattr(s_new, "visibility", "default") or "default"
-    if (
-        old_vis != new_vis
-        and {old_vis, new_vis} == _ELF_VIS_PROTECTED_PAIR
-        and getattr(s_old, "sym_type", None) == SymbolType.FUNC
-    ):
-        changes.append(Change(
-            kind=ChangeKind.FUNC_VISIBILITY_PROTECTED_CHANGED,
-            symbol=sym_name,
-            description=(
-                f"ELF symbol visibility changed: {sym_name} "
-                f"({old_vis} → {new_vis}); symbol still exported, "
-                f"interposition semantics changed"
-            ),
-            old_value=old_vis,
-            new_value=new_vis,
-        ))
-
+    changes.extend(_check_ifunc_type_change(sym_name, s_old, s_new))
+    changes.extend(_check_binding_change(sym_name, s_old, s_new))
+    changes.extend(_check_elf_visibility_change(sym_name, s_old, s_new))
+    changes.extend(_check_symbol_size_change(old, new, sym_name, s_old, s_new))
+    changes.extend(_check_func_visibility_protected(sym_name, s_old, s_new))
     return changes
 
 

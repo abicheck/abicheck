@@ -118,21 +118,33 @@ class SurfaceGraph:
         return count
 
 
-def build_surface_graph(snap: AbiSnapshot) -> SurfaceGraph:
-    """Construct the deterministic :class:`SurfaceGraph` for *snap*."""
+def _build_functions_by_name(snap: AbiSnapshot) -> dict[str, Function]:
+    """Index all functions by both demangled and mangled name."""
     functions_by_name: dict[str, Function] = {}
     for fn in snap.functions:
         for key in (fn.name, fn.mangled):
             functions_by_name.setdefault(key, fn)
+    return functions_by_name
 
+
+def _build_types_by_name(snap: AbiSnapshot) -> dict[str, RecordType]:
+    """Index records by full name and by trailing ``::`` segment."""
     types_by_name: dict[str, RecordType] = {}
     for rec in snap.types:
         types_by_name.setdefault(rec.name, rec)
         if "::" in rec.name:
             types_by_name.setdefault(rec.name.rsplit("::", 1)[1], rec)
+    return types_by_name
 
-    # Adjacency: a record references the types named in its fields and bases;
-    # a typedef references the types named in its target.
+
+def _build_type_refs(snap: AbiSnapshot) -> dict[str, frozenset[str]]:
+    """Build the adjacency map: type name -> types it directly references.
+
+    A record references the types named in its fields and bases; a typedef
+    references the types named in its target.  Keyed only by the canonical
+    full name so ``reachable_types()`` / cohesion resolution via
+    ``types_by_name`` avoids duplicate alias entries that would inflate fan-in.
+    """
     type_refs: dict[str, frozenset[str]] = {}
     for rec in snap.types:
         refs: set[str] = set()
@@ -142,14 +154,18 @@ def build_surface_graph(snap: AbiSnapshot) -> SurfaceGraph:
             refs |= _type_identifiers(base)
         for base in rec.virtual_bases:
             refs |= _type_identifiers(base)
-        # Keyed only by the canonical full name. An unqualified reference is
-        # resolved to this key by reachable_types()/cohesion via types_by_name,
-        # so there are no duplicate alias entries to double-count in fan-in.
         type_refs[rec.name] = frozenset(refs)
     for alias, target in snap.typedefs.items():
         type_refs.setdefault(alias, frozenset(_type_identifiers(target)))
+    return type_refs
 
-    # Public roots and the types their signatures directly touch.
+
+def _build_root_seed_types(snap: AbiSnapshot) -> dict[str, frozenset[str]]:
+    """Map each public root symbol to the type names its signature touches.
+
+    C++ overloads share a demangled name but reference different types; their
+    seed sets are unioned so no overload's types are lost by overwrite.
+    """
     root_seed_types: dict[str, frozenset[str]] = {}
     for fn in snap.functions:
         if fn.visibility != Visibility.PUBLIC:
@@ -157,8 +173,6 @@ def build_surface_graph(snap: AbiSnapshot) -> SurfaceGraph:
         seeds = set(_type_identifiers(fn.return_type))
         for p in fn.params:
             seeds |= _type_identifiers(getattr(p, "type", None))
-        # C++ overloads share a demangled name but reference different types;
-        # union their seeds so an overload's types are never lost by overwrite.
         root_seed_types[fn.name] = root_seed_types.get(
             fn.name, frozenset()
         ) | frozenset(seeds)
@@ -166,7 +180,11 @@ def build_surface_graph(snap: AbiSnapshot) -> SurfaceGraph:
         if var.visibility != Visibility.PUBLIC:
             continue
         root_seed_types[var.name] = frozenset(_type_identifiers(var.type))
+    return root_seed_types
 
+
+def _build_by_header(snap: AbiSnapshot) -> dict[str, set[str]]:
+    """Map each source header to the declaration names defined there."""
     by_header: dict[str, set[str]] = {}
     for fn in snap.functions:
         if fn.source_header:
@@ -180,6 +198,25 @@ def build_surface_graph(snap: AbiSnapshot) -> SurfaceGraph:
     for en in snap.enums:
         if en.source_header:
             by_header.setdefault(en.source_header, set()).add(en.name)
+    return by_header
+
+
+def _build_reached_by(graph: SurfaceGraph) -> dict[str, frozenset[str]]:
+    """Compute the inverse reachability closure: type name -> public roots that reach it."""
+    reached_by: dict[str, set[str]] = {}
+    for root in graph.public_roots():
+        for t in graph.reachable_types(root):
+            reached_by.setdefault(t, set()).add(root)
+    return {k: frozenset(v) for k, v in sorted(reached_by.items())}
+
+
+def build_surface_graph(snap: AbiSnapshot) -> SurfaceGraph:
+    """Construct the deterministic :class:`SurfaceGraph` for *snap*."""
+    functions_by_name = _build_functions_by_name(snap)
+    types_by_name = _build_types_by_name(snap)
+    type_refs = _build_type_refs(snap)
+    root_seed_types = _build_root_seed_types(snap)
+    by_header = _build_by_header(snap)
 
     graph = SurfaceGraph(
         snapshot=snap,
@@ -192,13 +229,7 @@ def build_surface_graph(snap: AbiSnapshot) -> SurfaceGraph:
     )
 
     # Inverse closure: type name -> roots that reach it.
-    reached_by: dict[str, set[str]] = {}
-    for root in graph.public_roots():
-        for t in graph.reachable_types(root):
-            reached_by.setdefault(t, set()).add(root)
-    object.__setattr__(
-        graph, "reached_by", {k: frozenset(v) for k, v in sorted(reached_by.items())}
-    )
+    object.__setattr__(graph, "reached_by", _build_reached_by(graph))
     return graph
 
 

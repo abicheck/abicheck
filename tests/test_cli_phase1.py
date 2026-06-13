@@ -20,7 +20,7 @@ def test_dump_cmd_writes_output_file(tmp_path, monkeypatch):
     header.write_text("int foo();\n", encoding="utf-8")
     out = tmp_path / "snap.json"
 
-    monkeypatch.setattr("abicheck.cli.dump", lambda **_: _snap("2.0"))
+    monkeypatch.setattr("abicheck.cli_dump_helpers.dump", lambda **_: _snap("2.0"))
 
     runner = CliRunner()
     result = runner.invoke(

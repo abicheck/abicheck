@@ -414,6 +414,72 @@ def _sources_path(
     return candidate if candidate.is_dir() else None
 
 
+def _build_dump_cmd(
+    so: Path,
+    snap: Path,
+    hdr: Path | None,
+    compile_db: Path,
+    build_source: Path | None,
+    build_info: Path | None,
+    sources_path: Path | None,
+) -> list[str]:
+    """Build an ``abicheck dump`` command for one library side.
+
+    *compile_db* is the side-specific compile_commands.json path (may not
+    exist yet); it is only appended when *build_source* is set and the file
+    actually exists.
+    """
+    cmd = [sys.executable, "-m", "abicheck.cli", "dump", str(so), "-o", str(snap)]
+    if hdr and Path(hdr).exists():
+        cmd += ["-H", str(hdr)]
+        if build_source is not None and compile_db.exists():
+            cmd += ["-p", str(compile_db)]
+    if build_info is not None:
+        cmd += ["--build-info", str(build_info)]
+    if sources_path is not None:
+        cmd += ["--sources", str(sources_path)]
+    return cmd
+
+
+def _build_compare_cmd(
+    snap1: Path,
+    snap2: Path,
+    scope_public_headers: bool,
+    old_build_source: Path | None,
+    new_build_source: Path | None,
+) -> list[str]:
+    """Build an ``abicheck compare`` command from two snapshots.
+
+    Appends ``--old-build-info``/``--old-sources`` and their ``new-*``
+    counterparts when the respective build-source paths are provided, and
+    always sets the scoping flag explicitly so verdicts are deterministic.
+    """
+    cmd = [
+        sys.executable, "-m", "abicheck.cli", "compare", str(snap1), str(snap2), "--format", "json",
+    ]
+    if old_build_source is not None:
+        cmd += ["--old-build-info", str(old_build_source), "--old-sources", str(old_build_source)]
+    if new_build_source is not None:
+        cmd += ["--new-build-info", str(new_build_source), "--new-sources", str(new_build_source)]
+    # Scoping is on by default since ADR-024 Phase 5; ground_truth.json verdicts
+    # are authored unscoped unless the case opts in, so be explicit either way.
+    cmd.append("--scope-public-headers" if scope_public_headers else "--no-scope-public-headers")
+    return cmd
+
+
+def _run_compare_and_parse(compare_cmd: list[str]) -> tuple[str | None, str | None]:
+    """Run the compare command and parse its JSON verdict.
+
+    Returns ``(verdict, None)`` on success or ``(None, error_msg)`` on failure.
+    """
+    rc = subprocess.run(compare_cmd, capture_output=True, text=True, timeout=60)
+    try:
+        data = json.loads(rc.stdout)
+        return data.get("verdict", "UNKNOWN"), None
+    except json.JSONDecodeError:
+        return None, f"invalid JSON from compare: {rc.stdout[:200]}"
+
+
 def _dump_and_compare(
     tmp: Path,
     v1_so: Path,
@@ -433,64 +499,41 @@ def _dump_and_compare(
     On success *error_msg* is None. On failure *verdict* is None.
     """
     snap1 = tmp / "snap1.json"
-    cmd1 = [sys.executable, "-m", "abicheck.cli", "dump", str(v1_so), "-o", str(snap1)]
-    if v1_hdr and Path(v1_hdr).exists():
-        cmd1 += ["-H", str(v1_hdr)]
-        old_compile_db = tmp / "old_compile_commands.json"
-        if old_build_source is not None and old_compile_db.exists():
-            cmd1 += ["-p", str(old_compile_db)]
-    if old_build_info is not None:
-        cmd1 += ["--build-info", str(old_build_info)]
-    sr1 = _sources_path(case_dir, "v1", sources)
-    if sr1 is not None:
-        cmd1 += ["--sources", str(sr1)]
+    cmd1 = _build_dump_cmd(
+        so=v1_so,
+        snap=snap1,
+        hdr=v1_hdr,
+        compile_db=tmp / "old_compile_commands.json",
+        build_source=old_build_source,
+        build_info=old_build_info,
+        sources_path=_sources_path(case_dir, "v1", sources),
+    )
     r1 = subprocess.run(cmd1, capture_output=True, text=True, timeout=120)
     if r1.returncode != 0:
         return None, f"dump v1 failed: {r1.stderr[:200]}"
 
     snap2 = tmp / "snap2.json"
-    cmd2 = [sys.executable, "-m", "abicheck.cli", "dump", str(v2_so), "-o", str(snap2)]
-    if v2_hdr and Path(v2_hdr).exists():
-        cmd2 += ["-H", str(v2_hdr)]
-        new_compile_db = tmp / "new_compile_commands.json"
-        if new_build_source is not None and new_compile_db.exists():
-            cmd2 += ["-p", str(new_compile_db)]
-    if new_build_info is not None:
-        cmd2 += ["--build-info", str(new_build_info)]
-    sr2 = _sources_path(case_dir, "v2", sources)
-    if sr2 is not None:
-        cmd2 += ["--sources", str(sr2)]
+    cmd2 = _build_dump_cmd(
+        so=v2_so,
+        snap=snap2,
+        hdr=v2_hdr,
+        compile_db=tmp / "new_compile_commands.json",
+        build_source=new_build_source,
+        build_info=new_build_info,
+        sources_path=_sources_path(case_dir, "v2", sources),
+    )
     r2 = subprocess.run(cmd2, capture_output=True, text=True, timeout=120)
     if r2.returncode != 0:
         return None, f"dump v2 failed: {r2.stderr[:200]}"
 
-    compare_cmd = [
-        sys.executable, "-m", "abicheck.cli", "compare", str(snap1), str(snap2), "--format", "json",
-    ]
-    if old_build_source is not None:
-        compare_cmd += [
-            "--old-build-info", str(old_build_source),
-            "--old-sources", str(old_build_source),
-        ]
-    if new_build_source is not None:
-        compare_cmd += [
-            "--new-build-info", str(new_build_source),
-            "--new-sources", str(new_build_source),
-        ]
-    # Scoping is on by default since ADR-024 Phase 5; ground_truth.json verdicts
-    # are authored unscoped unless the case opts in, so be explicit either way.
-    compare_cmd.append(
-        "--scope-public-headers" if scope_public_headers else "--no-scope-public-headers"
+    compare_cmd = _build_compare_cmd(
+        snap1=snap1,
+        snap2=snap2,
+        scope_public_headers=scope_public_headers,
+        old_build_source=old_build_source,
+        new_build_source=new_build_source,
     )
-    rc = subprocess.run(
-        compare_cmd,
-        capture_output=True, text=True, timeout=60,
-    )
-    try:
-        data = json.loads(rc.stdout)
-        return data.get("verdict", "UNKNOWN"), None
-    except json.JSONDecodeError:
-        return None, f"invalid JSON from compare: {rc.stdout[:200]}"
+    return _run_compare_and_parse(compare_cmd)
 
 
 def _write_compile_db(

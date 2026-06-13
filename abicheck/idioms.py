@@ -433,16 +433,9 @@ def _has_virtual_destructor(rec: RecordType) -> bool:
     return False
 
 
-def detect_antipatterns(graph: SurfaceGraph) -> list[AntiPattern]:
-    """Recognise single-snapshot anti-patterns over *graph* (ADR-027 D2.2).
-
-    Returns the deterministic, order-stable list of RISK-level anti-patterns:
-    public functions exposing ``std::`` types by value, and polymorphic types
-    (used as a base or factory return) lacking a virtual destructor.
-    """
+def _detect_stl_by_value(graph: SurfaceGraph) -> list[AntiPattern]:
+    """Collect PUBLIC_API_EXPOSES_STL_BY_VALUE findings for every public function."""
     found: list[AntiPattern] = []
-
-    # PUBLIC_API_EXPOSES_STL_BY_VALUE — per public function.
     for fn in graph.snapshot.functions:
         if fn.visibility != Visibility.PUBLIC:
             continue
@@ -465,46 +458,90 @@ def detect_antipatterns(graph: SurfaceGraph) -> list[AntiPattern]:
                     evidence=hits,
                 )
             )
+    return found
 
-    # POLYMORPHIC_TYPE_NON_VIRTUAL_DTOR — polymorphic types used as base/factory.
-    # Resolve every base/factory target spelling to a *specific* snapshot type
-    # (exact qualified name, or short name only when unambiguous), so a factory
-    # returning ns1::Base* never tags an unrelated ns2::Base that merely shares a
-    # short name (ADR-027 review). Unresolvable / ambiguous targets are dropped.
+
+def _build_type_name_index(
+    graph: SurfaceGraph,
+) -> tuple[set[str], dict[str, list[str]]]:
+    """Return (all_type_names, by_short) for unambiguous type-name resolution.
+
+    Resolve every base/factory target spelling to a *specific* snapshot type
+    (exact qualified name, or short name only when unambiguous), so a factory
+    returning ns1::Base* never tags an unrelated ns2::Base that merely shares a
+    short name (ADR-027 review). Unresolvable / ambiguous targets are dropped.
+    """
     all_type_names = {rec.name for rec in graph.snapshot.types}
     by_short: dict[str, list[str]] = {}
     for n in all_type_names:
         by_short.setdefault(n.rsplit("::", 1)[-1], []).append(n)
+    return all_type_names, by_short
 
-    def _resolve(spelling: str) -> str | None:
-        if spelling in all_type_names:
-            return spelling
-        cands = by_short.get(spelling.rsplit("::", 1)[-1], [])
-        return cands[0] if len(cands) == 1 else None
 
+def _resolve_type_name(
+    spelling: str,
+    all_type_names: set[str],
+    by_short: dict[str, list[str]],
+) -> str | None:
+    """Return the unique qualified name for *spelling*, or ``None`` if ambiguous/unknown."""
+    if spelling in all_type_names:
+        return spelling
+    cands = by_short.get(spelling.rsplit("::", 1)[-1], [])
+    return cands[0] if len(cands) == 1 else None
+
+
+def _collect_base_targets(
+    graph: SurfaceGraph,
+    all_type_names: set[str],
+    by_short: dict[str, list[str]],
+) -> set[str]:
+    """Gather fully-qualified names of types used as a base by public-surface records.
+
+    Only count a base when the *deriving* type is on the public surface
+    (ADR-027 review). A polymorphic Base inherited solely by a private /
+    system / generated record is not a public ABI risk; counting it would
+    also let that private-inheritance evidence pre-exist in old and wrongly
+    suppress a *newly introduced* public factory risk for the same Base in
+    _emit_new_antipatterns(). When no public-header set was supplied every
+    record is UNKNOWN, which is treated as in-surface (no behaviour change).
+    """
     base_targets: set[str] = set()
     for rec in graph.snapshot.types:
-        # Only count a base when the *deriving* type is on the public surface
-        # (ADR-027 review). A polymorphic Base inherited solely by a private /
-        # system / generated record is not a public ABI risk; counting it would
-        # also let that private-inheritance evidence pre-exist in old and wrongly
-        # suppress a *newly introduced* public factory risk for the same Base in
-        # _emit_new_antipatterns(). When no public-header set was supplied every
-        # record is UNKNOWN, which is treated as in-surface (no behaviour change).
         if rec.origin in _NON_PUBLIC_ORIGINS:
             continue
         for b in rec.bases:
-            resolved = _resolve(b)
+            resolved = _resolve_type_name(b, all_type_names, by_short)
             if resolved is not None:
                 base_targets.add(resolved)
+    return base_targets
+
+
+def _collect_factory_targets(
+    graph: SurfaceGraph,
+    all_type_names: set[str],
+    by_short: dict[str, list[str]],
+) -> set[str]:
+    """Gather fully-qualified names of types returned by pointer from public functions."""
     factory_targets: set[str] = set()
     for fn in graph.snapshot.functions:
         if fn.visibility != Visibility.PUBLIC:
             continue
         if fn.return_pointer_depth >= 1 or _is_pointer(fn.return_type):
-            resolved = _resolve(_strip_ptr(fn.return_type))
+            resolved = _resolve_type_name(
+                _strip_ptr(fn.return_type), all_type_names, by_short
+            )
             if resolved is not None:
                 factory_targets.add(resolved)
+    return factory_targets
+
+
+def _detect_non_virtual_dtor(
+    graph: SurfaceGraph,
+    base_targets: set[str],
+    factory_targets: set[str],
+) -> list[AntiPattern]:
+    """Collect POLYMORPHIC_TYPE_NON_VIRTUAL_DTOR findings."""
+    found: list[AntiPattern] = []
     for rec in graph.snapshot.types:
         if not rec.vtable:
             continue
@@ -526,6 +563,24 @@ def detect_antipatterns(graph: SurfaceGraph) -> list[AntiPattern]:
                 evidence=[f"{rec.name} has vtable, no destructor slot; role={role}"],
             )
         )
+    return found
+
+
+def detect_antipatterns(graph: SurfaceGraph) -> list[AntiPattern]:
+    """Recognise single-snapshot anti-patterns over *graph* (ADR-027 D2.2).
+
+    Returns the deterministic, order-stable list of RISK-level anti-patterns:
+    public functions exposing ``std::`` types by value, and polymorphic types
+    (used as a base or factory return) lacking a virtual destructor.
+    """
+    found: list[AntiPattern] = _detect_stl_by_value(graph)
+
+    # POLYMORPHIC_TYPE_NON_VIRTUAL_DTOR — build name indexes, collect targets,
+    # then flag vtable types with no virtual destructor.
+    all_type_names, by_short = _build_type_name_index(graph)
+    base_targets = _collect_base_targets(graph, all_type_names, by_short)
+    factory_targets = _collect_factory_targets(graph, all_type_names, by_short)
+    found += _detect_non_virtual_dtor(graph, base_targets, factory_targets)
 
     return sorted(found, key=lambda a: (a.kind.value, a.symbol))
 

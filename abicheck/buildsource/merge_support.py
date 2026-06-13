@@ -41,6 +41,201 @@ def _filter_pack_layers(
         pack.source_graph = None
     return pack
 
+def _first_attr(attr: str, *packs: BuildSourcePack | None) -> Any:
+    """Return the first non-None value of *attr* across *packs*."""
+    for cand in packs:
+        if cand is not None and getattr(cand, attr) is not None:
+            return getattr(cand, attr)
+    return None
+
+
+def _coverage_row_for_present_layer(
+    layer: str,
+    packs: tuple[BuildSourcePack | None, ...],
+) -> LayerCoverage:
+    """Return the supplying pack's existing coverage row for *layer*, or a
+    synthetic PRESENT row when none of *packs* carries one."""
+    for cand in packs:
+        if cand is None:
+            continue
+        row = next(
+            (c for c in cand.manifest.coverage if _layer_value(c.layer) == layer),
+            None,
+        )
+        if row is not None:
+            return row
+    return LayerCoverage(layer=layer, status=CoverageStatus.PRESENT)
+
+
+def _coverage_row_for_absent_layer(
+    layer: str,
+    bi_pack: BuildSourcePack | None,
+    src_pack: BuildSourcePack | None,
+    embedded: BuildSourcePack | None,
+) -> LayerCoverage:
+    """Return a diagnostic PARTIAL row if any input pack reported one, else a
+    NOT_COLLECTED row.
+
+    No facts for this layer — but preserve a *diagnostic* coverage row
+    (e.g. the A3 ``partial`` L3 from a failed/blocked build query) that an
+    input pack reported, rather than overwriting it with not_collected
+    and dropping the only explanation (Codex).
+    Only a ``partial`` *diagnostic* row (e.g. the A3 build-query explanation)
+    is preserved; a ``present`` row claimed by a loaded pack whose facts we did
+    NOT embed must still downgrade to not_collected so the report never
+    advertises facts it lacks.
+    """
+    for cand in (bi_pack, src_pack, embedded):
+        if cand is None:
+            continue
+        hit = next(
+            (c for c in cand.manifest.coverage
+             if _layer_value(c.layer) == layer
+             and c.status == CoverageStatus.PARTIAL),
+            None,
+        )
+        if hit is not None:
+            return hit
+    return LayerCoverage(layer=layer, status=CoverageStatus.NOT_COLLECTED)
+
+
+def _build_combined_coverage(
+    base: BuildSourcePack,
+    supplier: dict[str, tuple[BuildSourcePack | None, ...]],
+    present: dict[str, bool],
+    bi_pack: BuildSourcePack | None,
+    src_pack: BuildSourcePack | None,
+    embedded: BuildSourcePack | None,
+) -> list[LayerCoverage]:
+    """Rebuild the coverage manifest for the combined pack.
+
+    Non-managed rows (L0/L1/L2/…) come from the base manifest. Always emit one
+    row per managed layer (ADR-028 D7). When we carry the facts, reuse the
+    supplying pack's row; otherwise mark the layer not_collected so the report
+    never advertises a check with no facts behind it (Codex review) — and never
+    drops the row entirely either.
+    """
+    managed = set(supplier)
+    coverage: list[LayerCoverage] = [
+        c for c in base.manifest.coverage if _layer_value(c.layer) not in managed
+    ]
+    for layer, packs in supplier.items():
+        if present[layer]:
+            row = _coverage_row_for_present_layer(layer, packs)
+        else:
+            row = _coverage_row_for_absent_layer(layer, bi_pack, src_pack, embedded)
+        coverage.append(row)
+    return coverage
+
+
+def _merge_artifacts(
+    p: BuildSourcePack,
+    artifacts: list[str],
+) -> None:
+    """Append *p*'s on-disk artifact digests to *artifacts*, deduplicating."""
+    for a in p.manifest.artifacts:
+        if a not in artifacts:
+            artifacts.append(a)
+
+
+def _merge_extractors(
+    p: BuildSourcePack,
+    contributed: bool,
+    extractors: list[ExtractorRecord],
+    seen_extractors: set[tuple[str, str, str]],
+) -> None:
+    """Append *p*'s extractor records to *extractors*, deduplicating by key.
+
+    When the pack did not contribute any facts (*contributed* is False) only
+    ``build_query`` diagnostic records are forwarded — all others are skipped so
+    they do not pollute the combined manifest with unrelated extractor metadata.
+    """
+    for e in p.manifest.extractors:
+        if not contributed and e.name != "build_query":
+            continue
+        key = (e.name, e.version, e.detail)
+        if key not in seen_extractors:
+            seen_extractors.add(key)
+            extractors.append(e)
+
+
+def _accumulate_pack_provenance(
+    p: BuildSourcePack,
+    chosen_ids: set[int],
+    artifacts: list[str],
+    extractors: list[ExtractorRecord],
+    seen_extractors: set[tuple[str, str, str]],
+) -> None:
+    """Fold one pack's artifacts and extractor records into the running lists.
+
+    A pack "contributed" when at least one of its layer facts is the object
+    we actually embedded in *chosen_ids*. A diagnostic-only pack (e.g. an A3
+    build-query failure with no facts) contributes no payload but must still
+    carry its ``build_query`` diagnostic forward — otherwise the combined pack
+    is a silent all-not_collected surface and the only explanation is lost (Codex).
+    """
+    contributed = bool(
+        chosen_ids & {id(p.build_evidence), id(p.source_abi), id(p.source_graph)}
+    )
+    has_diag = any(e.name == "build_query" for e in p.manifest.extractors)
+    if not (contributed or has_diag):
+        return
+    if contributed:
+        _merge_artifacts(p, artifacts)
+    _merge_extractors(p, contributed, extractors, seen_extractors)
+
+
+def _append_chosen_payload_digests(
+    chosen: tuple[Any, Any, Any],
+    artifacts: list[str],
+) -> None:
+    for payload in chosen:
+        if payload is None:
+            continue
+        digest = "sha256:" + _payload_sha256(payload.to_dict())  # type: ignore[attr-defined]
+        if digest not in artifacts:
+            artifacts.append(digest)
+
+
+def _build_combined_provenance(
+    bi_pack: BuildSourcePack | None,
+    src_pack: BuildSourcePack | None,
+    embedded: BuildSourcePack | None,
+    chosen: tuple[Any, Any, Any],
+) -> tuple[list[str], list[ExtractorRecord]]:
+    """Build the artifacts + extractors lists for the combined pack.
+
+    The combined manifest's artifacts/extractors must reflect every pack that
+    supplied an embedded fact, not just the base pack — otherwise
+    to_ref()/content_hash() would omit the source pack's artifacts for a
+    cross-pack self-contained snapshot (Codex review). A pack "contributed"
+    when one of its facts is the object we actually embedded.
+
+    An *inline*-collected contributor (e.g. ``--sources <raw tree>``) is never
+    written to disk, so its manifest.artifacts is empty and the loop below
+    adds no digest for its source_abi/source_graph. Since content_hash() trusts
+    a non-empty manifest.artifacts, a mixed ``--build-info <pack> --sources
+    <tree>`` would then hash only the build pack's digest and ignore the source
+    facts — two different trees with the same build pack collide (Codex P2). Add
+    the in-memory payload digest for every chosen fact; a fact that *was*
+    written to disk hashes identically (_payload_sha256 mirrors _write_json), so
+    it dedups against the on-disk digest above rather than double-counting.
+    """
+    chosen_ids = {id(x) for x in chosen if x is not None}
+    artifacts: list[str] = []
+    extractors: list[ExtractorRecord] = []
+    seen_extractors: set[tuple[str, str, str]] = set()
+
+    for p in (bi_pack, src_pack, embedded):
+        if p is None:
+            continue
+        _accumulate_pack_provenance(p, chosen_ids, artifacts, extractors, seen_extractors)
+
+    _append_chosen_payload_digests(chosen, artifacts)
+
+    return artifacts, extractors
+
+
 def _combine_packs(
     bi_pack: BuildSourcePack | None,
     src_pack: BuildSourcePack | None,
@@ -57,15 +252,9 @@ def _combine_packs(
     flags point at different packs (Codex review). Returns ``None`` when no pack
     contributes any facts.
     """
-    def _first(attr: str, *packs: BuildSourcePack | None) -> Any:
-        for cand in packs:
-            if cand is not None and getattr(cand, attr) is not None:
-                return getattr(cand, attr)
-        return None
-
-    build_evidence = _first("build_evidence", bi_pack, src_pack, embedded)
-    source_abi = _first("source_abi", src_pack, bi_pack, embedded)
-    source_graph = _first("source_graph", src_pack, bi_pack, embedded)
+    build_evidence = _first_attr("build_evidence", bi_pack, src_pack, embedded)
+    source_abi = _first_attr("source_abi", src_pack, bi_pack, embedded)
+    source_graph = _first_attr("source_graph", src_pack, bi_pack, embedded)
 
     base = bi_pack or src_pack or embedded
     if base is None:
@@ -82,106 +271,14 @@ def _combine_packs(
         DataLayer.L4_SOURCE_ABI.value: source_abi is not None,
         DataLayer.L5_SOURCE_GRAPH.value: source_graph is not None,
     }
-    managed = set(supplier)
 
-    coverage: list[LayerCoverage] = []
-    # Non-managed rows (L0/L1/L2/…) come from the base manifest.
-    for c in base.manifest.coverage:
-        if _layer_value(c.layer) not in managed:
-            coverage.append(c)
-    # Always emit one row per managed layer (ADR-028 D7 shows every layer). When
-    # we carry the facts, reuse the supplying pack's row; otherwise mark the
-    # layer not_collected so the report never advertises a check with no facts
-    # behind it (Codex review) — and never drops the row entirely either.
-    for layer, packs in supplier.items():
-        row: LayerCoverage | None = None
-        if present[layer]:
-            for cand in packs:
-                if cand is None:
-                    continue
-                row = next(
-                    (c for c in cand.manifest.coverage if _layer_value(c.layer) == layer),
-                    None,
-                )
-                if row is not None:
-                    break
-            if row is None:
-                row = LayerCoverage(layer=layer, status=CoverageStatus.PRESENT)
-        else:
-            # No facts for this layer — but preserve a *diagnostic* coverage row
-            # (e.g. the A3 `partial` L3 from a failed/blocked build query) that an
-            # input pack reported, rather than overwriting it with not_collected
-            # and dropping the only explanation (Codex).
-            row = None
-            for cand in (bi_pack, src_pack, embedded):
-                if cand is None:
-                    continue
-                # Only a `partial` *diagnostic* row (e.g. the A3 build-query
-                # explanation) is preserved here; a `present` row claimed by a
-                # loaded pack whose facts we did NOT embed must still downgrade to
-                # not_collected so the report never advertises facts it lacks.
-                hit = next(
-                    (c for c in cand.manifest.coverage
-                     if _layer_value(c.layer) == layer
-                     and c.status == CoverageStatus.PARTIAL),
-                    None,
-                )
-                if hit is not None:
-                    row = hit
-                    break
-            if row is None:
-                row = LayerCoverage(layer=layer, status=CoverageStatus.NOT_COLLECTED)
-        coverage.append(row)
-
-    # Provenance: the combined manifest's artifacts/extractors must reflect every
-    # pack that supplied an embedded fact, not just the base pack — otherwise
-    # to_ref()/content_hash() would omit the source pack's artifacts for a
-    # cross-pack self-contained snapshot (Codex review). A pack "contributed"
-    # when one of its facts is the object we actually embedded.
     chosen = (build_evidence, source_abi, source_graph)
-    chosen_ids = {id(x) for x in chosen if x is not None}
-    artifacts: list[str] = []
-    extractors: list[ExtractorRecord] = []
-    seen_extractors: set[tuple[str, str, str]] = set()
-    for p in (bi_pack, src_pack, embedded):
-        if p is None:
-            continue
-        contributed = bool(
-            chosen_ids & {id(p.build_evidence), id(p.source_abi), id(p.source_graph)}
-        )
-        # A diagnostic-only pack (e.g. an A3 build-query failure with no facts)
-        # contributes no payload but must still carry its build_query diagnostic
-        # forward — otherwise the combined pack is a silent all-not_collected
-        # surface and the only explanation is lost (Codex).
-        has_diag = any(e.name == "build_query" for e in p.manifest.extractors)
-        if not (contributed or has_diag):
-            continue
-        if contributed:
-            for a in p.manifest.artifacts:
-                if a not in artifacts:
-                    artifacts.append(a)
-        for e in p.manifest.extractors:
-            if not contributed and e.name != "build_query":
-                continue
-            key = (e.name, e.version, e.detail)
-            if key not in seen_extractors:
-                seen_extractors.add(key)
-                extractors.append(e)
-    # An *inline*-collected contributor (e.g. `--sources <raw tree>`) is never
-    # written to disk, so its manifest.artifacts is empty and the loop above
-    # adds no digest for its source_abi/source_graph. Since content_hash() trusts
-    # a non-empty manifest.artifacts, a mixed `--build-info <pack> --sources
-    # <tree>` would then hash only the build pack's digest and ignore the source
-    # facts — two different trees with the same build pack collide (Codex P2). Add
-    # the in-memory payload digest for every chosen fact; a fact that *was*
-    # written to disk hashes identically (_payload_sha256 mirrors _write_json), so
-    # it dedups against the on-disk digest above rather than double-counting.
-    for payload in chosen:
-        if payload is None:
-            continue
-        digest = "sha256:" + _payload_sha256(payload.to_dict())  # type: ignore[attr-defined]
-        if digest not in artifacts:
-            artifacts.append(digest)
+    coverage = _build_combined_coverage(
+        base, supplier, present, bi_pack, src_pack, embedded
+    )
+    artifacts, extractors = _build_combined_provenance(
+        bi_pack, src_pack, embedded, chosen
+    )
 
     return BuildSourcePack(
         root=Path(""),

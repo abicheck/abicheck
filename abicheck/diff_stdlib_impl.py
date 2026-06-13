@@ -148,6 +148,101 @@ def _capture_is_complete(bm: BuildMode) -> bool:
     return True
 
 
+def _collect_mangled_symbols(snap: AbiSnapshot) -> list[str]:
+    """Return all mangled symbol names from a snapshot's functions and variables."""
+    mangled = [f.mangled for f in snap.functions if getattr(f, "mangled", None)]
+    mangled += [v.mangled for v in snap.variables if getattr(v, "mangled", None)]
+    return mangled
+
+
+def _resolve_bm_from_signals(
+    captured: BuildMode | None,
+    mangled: list[str],
+) -> BuildMode:
+    """Return a :class:`BuildMode` enriched from mangled-symbol signals.
+
+    When ``captured`` is ``None``, derives a fresh :class:`BuildMode` via
+    :func:`build_mode_from_signals`. When ``captured`` is present (but partial),
+    makes a copy and folds in the prefix-anchored stdlib signal, preserving all
+    other captured fields (compiler, language std, etc.).
+    """
+    import dataclasses
+
+    if captured is None:
+        return build_mode_from_signals(mangled_symbols=mangled)
+    bm = dataclasses.replace(captured)
+    # Fold in the prefix-anchored signal detection that build_mode_from_signals
+    # provides (``_ZNSt3__1`` prefixes, ``B5cxx11`` tags) before the broader
+    # fallbacks below.
+    sig = build_mode_from_signals(mangled_symbols=mangled)
+    if sig.stdlib is not StdlibFamily.UNKNOWN:
+        bm.stdlib = sig.stdlib
+        if bm.libcpp_abi_version is None:
+            bm.libcpp_abi_version = sig.libcpp_abi_version
+    return bm
+
+
+def _detect_msvc_stl(bm: BuildMode, mangled: list[str]) -> None:
+    """Set ``bm.stdlib`` to ``MSVC_STL`` when COFF-decorated symbols reveal it.
+
+    MSVC STL: COFF-decorated C++ symbols (``?...@@``) are non-Itanium, so
+    the shared ``_Z``-only detector skips them entirely. MSVC encodes the
+    ``std`` namespace as the *component* ``@std@@`` — the leading ``@`` is
+    the name-separator, so a user namespace like ``mystd@@`` (no leading
+    ``@`` before ``std``) does NOT match (Codex review #345). Mutates ``bm``
+    in place; callers are responsible for passing a working copy.
+    """
+    if bm.stdlib is StdlibFamily.UNKNOWN and any(
+        s.startswith("?") and "@std@@" in s for s in mangled
+    ):
+        bm.stdlib = StdlibFamily.MSVC_STL
+
+
+def _enrich_from_demangled(bm: BuildMode, mangled: list[str]) -> None:
+    """Enrich ``bm`` by demangling Itanium symbols and reading namespace tokens.
+
+    Stdlib evidence carried *inside* ordinary user-API manglings (e.g.
+    ``void api(std::vector<int>)``) isn't recognized by the shared
+    prefix-anchored detector. A substring match on the mangled name can't
+    separate the Itanium ``St`` std substitution from a user identifier
+    that merely contains those bytes (a user type mangled ``6St3__1`` is
+    NOT libc++), so we *demangle* and read the parsed namespace:
+
+    * libc++    → a versioned namespace ``std::__1`` / ``std::__2`` /
+      Android ``std::__ndk1`` (the ABI version comes from the digit);
+    * libstdc++ → a real ``std::`` token without that versioned namespace;
+    * a user type → no ``std::`` token at all.
+
+    Uses the *batched* demangler already used across the diff core so that,
+    without the in-process ``cxxfilt`` module, a large C++ library is not
+    demangled one ``c++filt`` subprocess per symbol; degrades to staying
+    quiet when no demangler is available (Codex reviews on #345). Mutates
+    ``bm`` in place; callers are responsible for passing a working copy.
+    """
+    from .demangle import demangle_batch
+
+    cpp = [s for s in mangled if s.startswith("_Z")]
+    demangled = demangle_batch(cpp)
+    for sym in cpp:
+        d = demangled.get(sym)
+        if not d:
+            continue
+        m = _LIBCXX_DEMANGLED_NS.search(d)
+        if m:
+            bm.stdlib = StdlibFamily.LIBCXX
+            # Numeric ABI version (std::__1 / __2); Android ``__ndkN`` has no
+            # standard libcpp_abi_version, so leave it unset there.
+            if m.group(1) is None and bm.libcpp_abi_version is None:
+                bm.libcpp_abi_version = int(m.group(2))
+            break
+        # Only infer libstdc++ from a bare std:: token when the family is not
+        # already known — never let it override a resolved libc++ capture
+        # whose version we were merely completing.
+        if bm.stdlib is StdlibFamily.UNKNOWN and _STD_NAMESPACE_TOKEN.search(d):
+            bm.stdlib = StdlibFamily.LIBSTDCXX
+            break
+
+
 def _effective_build_mode(snap: AbiSnapshot) -> BuildMode | None:
     """Return the snapshot's :class:`BuildMode`, deriving it on the fly when the
     captured field is absent.
@@ -170,45 +265,19 @@ def _effective_build_mode(snap: AbiSnapshot) -> BuildMode | None:
     in the exported manglings). Enrichment works on a copy so a shared captured
     ``BuildMode`` is never mutated in place.
     """
-    import dataclasses
-
     captured = snap.build_mode
     # A fully-resolved capture wins outright — symbols can't improve on it. A
     # libc++ capture missing its ABI version is still partial (the version is
     # recoverable from the symbols), so it does NOT count as resolved here.
     if captured is not None and _capture_is_complete(captured):
         return captured
-    mangled = [f.mangled for f in snap.functions if getattr(f, "mangled", None)]
-    mangled += [v.mangled for v in snap.variables if getattr(v, "mangled", None)]
+    mangled = _collect_mangled_symbols(snap)
     if not mangled:
         # Nothing to reason from: hand back the partial capture (still UNKNOWN)
         # or None. Either way the detector treats UNKNOWN as "no evidence".
         return captured
-    # No capture, or a capture whose stdlib is still UNKNOWN: recover the family
-    # from the mangled symbols. Preserve any other captured fields (compiler,
-    # language std) by enriching a copy of the partial capture.
-    if captured is None:
-        bm = build_mode_from_signals(mangled_symbols=mangled)
-    else:
-        bm = dataclasses.replace(captured)
-        # Fold in the prefix-anchored signal detection that build_mode_from_signals
-        # provides (``_ZNSt3__1`` prefixes, ``B5cxx11`` tags) before the broader
-        # fallbacks below.
-        sig = build_mode_from_signals(mangled_symbols=mangled)
-        if sig.stdlib is not StdlibFamily.UNKNOWN:
-            bm.stdlib = sig.stdlib
-            if bm.libcpp_abi_version is None:
-                bm.libcpp_abi_version = sig.libcpp_abi_version
-    if bm.stdlib is StdlibFamily.UNKNOWN and any(
-        # MSVC STL: COFF-decorated C++ symbols (``?...@@``) are non-Itanium, so
-        # the shared ``_Z``-only detector skips them entirely. MSVC encodes the
-        # ``std`` namespace as the *component* ``@std@@`` — the leading ``@`` is
-        # the name-separator, so a user namespace like ``mystd@@`` (no leading
-        # ``@`` before ``std``) does NOT match (Codex review #345).
-        s.startswith("?") and "@std@@" in s
-        for s in mangled
-    ):
-        bm.stdlib = StdlibFamily.MSVC_STL
+    bm = _resolve_bm_from_signals(captured, mangled)
+    _detect_msvc_stl(bm, mangled)
     # Run the demangle pass when the family is unknown, OR when it is libc++ but
     # the ABI version is still missing (a partial capture we can complete from the
     # ``std::__N`` namespace digit) — Codex review #345.
@@ -216,42 +285,7 @@ def _effective_build_mode(snap: AbiSnapshot) -> BuildMode | None:
         bm.stdlib is StdlibFamily.LIBCXX and bm.libcpp_abi_version is None
     )
     if bm.stdlib is StdlibFamily.UNKNOWN or _libcxx_needs_version:
-        # Stdlib evidence carried *inside* ordinary user-API manglings (e.g.
-        # ``void api(std::vector<int>)``) isn't recognized by the shared
-        # prefix-anchored detector. A substring match on the mangled name can't
-        # separate the Itanium ``St`` std substitution from a user identifier
-        # that merely contains those bytes (a user type mangled ``6St3__1`` is
-        # NOT libc++), so we *demangle* and read the parsed namespace:
-        #   * libc++   → a versioned namespace ``std::__1`` / ``std::__2`` /
-        #     Android ``std::__ndk1`` (the ABI version comes from the digit);
-        #   * libstdc++ → a real ``std::`` token without that versioned namespace;
-        #   * a user type → no ``std::`` token at all.
-        # Uses the *batched* demangler already used across the diff core so that,
-        # without the in-process ``cxxfilt`` module, a large C++ library is not
-        # demangled one ``c++filt`` subprocess per symbol; degrades to staying
-        # quiet when no demangler is available (Codex reviews on #345).
-        from .demangle import demangle_batch
-
-        cpp = [s for s in mangled if s.startswith("_Z")]
-        demangled = demangle_batch(cpp)
-        for sym in cpp:
-            d = demangled.get(sym)
-            if not d:
-                continue
-            m = _LIBCXX_DEMANGLED_NS.search(d)
-            if m:
-                bm.stdlib = StdlibFamily.LIBCXX
-                # Numeric ABI version (std::__1 / __2); Android ``__ndkN`` has no
-                # standard libcpp_abi_version, so leave it unset there.
-                if m.group(1) is None and bm.libcpp_abi_version is None:
-                    bm.libcpp_abi_version = int(m.group(2))
-                break
-            # Only infer libstdc++ from a bare std:: token when the family is not
-            # already known — never let it override a resolved libc++ capture
-            # whose version we were merely completing.
-            if bm.stdlib is StdlibFamily.UNKNOWN and _STD_NAMESPACE_TOKEN.search(d):
-                bm.stdlib = StdlibFamily.LIBSTDCXX
-                break
+        _enrich_from_demangled(bm, mangled)
     return bm
 
 

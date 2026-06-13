@@ -104,6 +104,134 @@ def _skip_template_args(s: str, i: int) -> int | None:
     return None
 
 
+def _itanium_strip_prefix(mangled: str) -> tuple[str, bool] | None:
+    """Strip ``_Z`` and optional nested-name prefix from a mangled symbol.
+
+    Returns ``(body, is_nested)`` where *body* is the string starting at the
+    first component and *is_nested* indicates whether a ``N`` nested-name
+    wrapper was opened (and must be closed by ``E``). Returns ``None`` when
+    the symbol does not carry the ``_Z`` Itanium prefix.
+    """
+    if not mangled.startswith("_Z"):
+        return None
+    s = mangled[2:]
+    nested = s.startswith("N")
+    if nested:
+        s = s[1:]
+        # Skip CV-qualifiers (r/V/K) and ref-qualifiers (R/O) on the implicit
+        # object parameter, e.g. NK… (const), NR… (lvalue &), NO… (rvalue &&).
+        while s[:1] in ("r", "V", "K", "R", "O"):
+            s = s[1:]
+    return s, nested
+
+
+def _parse_source_name_component(s: str, i: int) -> tuple[str | None, int]:
+    """Parse a length-prefixed source-name component (with optional template args
+    and GNU ABI tags) starting at ``s[i]``.
+
+    Returns ``(name, next_index)`` where *name* includes any directly-attached
+    ``I…E`` template-argument list and ``B<tag>`` GNU ABI tags, or
+    ``(None, i)`` on any parse failure.
+    """
+    name, i = _read_length_prefixed_name(s, i)
+    if name is None:
+        return None, i
+    n = len(s)
+    # A directly-attached template-argument list belongs to this
+    # component; keep it raw so Box<int> and Box<float> stay distinct.
+    if i < n and s[i] == "I":
+        end = _skip_template_args(s, i)
+        if end is None:
+            return None, i
+        name = name + s[i:end]
+        i = end
+    # GNU ABI tags (`B<source-name>`, e.g. the libstdc++ `cxx11` tag on
+    # std::string returns) are part of the unqualified-name identity;
+    # keep them so a tagged name groups with itself across overloads.
+    while i < n and s[i] == "B":
+        tag, j = _read_length_prefixed_name(s, i + 1)
+        if tag is None:
+            break
+        name = f"{name}B{tag}"
+        i = j
+    return name, i
+
+
+def _parse_ctor_dtor_component(s: str, i: int) -> tuple[str | None, int]:
+    """Parse a constructor (``C1``/``C2``/…) or destructor (``D0``/``D1``/…) at ``s[i]``.
+
+    Returns ``("{ctor}", i+2)``, ``("{dtor}", i+2)``, or ``(None, i)`` if
+    ``s[i:]`` does not start a ctor/dtor encoding.
+    """
+    c = s[i] if i < len(s) else ""
+    next_char = s[i + 1] if i + 1 < len(s) else ""
+    if c == "C" and next_char in "12345":
+        return "{ctor}", i + 2
+    if c == "D" and next_char in "012345":
+        return "{dtor}", i + 2
+    return None, i
+
+
+def _parse_operator_component(s: str, i: int) -> tuple[str | None, int]:
+    """Parse an Itanium operator-function code at ``s[i]``.
+
+    Returns ``("{op:XX}", i+2)`` for a known 2-char operator code, or
+    ``(None, i)`` if ``s[i:i+2]`` is not in ``_ITANIUM_OPERATORS``.
+    """
+    code = s[i : i + 2]
+    if code in _ITANIUM_OPERATORS:
+        # Keep the code so operator overloads group (e.g. operator[](int)/(long))
+        # while distinct operators stay distinct. Conversion operators (`cv`) are
+        # excluded — they carry a target type and are not overloads of each other.
+        return f"{{op:{code}}}", i + 2
+    return None, i
+
+
+def _parse_non_source_name_component(s: str, i: int) -> tuple[str | None, int]:
+    """Parse a constructor, destructor, or operator component at ``s[i]``.
+
+    Tries ctor/dtor first, then operator codes. Returns ``(label, next_index)``
+    or ``(None, i)`` when none of those forms match (e.g. conversion operator,
+    substitution, vendor encoding — caller should return ``None``).
+    """
+    label, new_i = _parse_ctor_dtor_component(s, i)
+    if label is None:
+        label, new_i = _parse_operator_component(s, i)
+    return label, new_i
+
+
+def _step_next_component(
+    s: str, i: int, nested: bool
+) -> tuple[str | None, int, bool] | None:
+    """Advance one component in the Itanium nested-name body ``s`` at position ``i``.
+
+    Returns ``(label, next_i, done)`` on success:
+
+    - *label* is the parsed component string, or ``None`` when the position
+      holds the nested-name ``E`` terminator (no component to append, just stop).
+    - *next_i* is the index to continue from.
+    - *done* is ``True`` when the caller should stop iterating (``E`` reached
+      for a nested name, or a free-function's single component was consumed).
+
+    Returns ``None`` (not a 3-tuple) when the component cannot be parsed at all
+    (conversion operator, substitution, vendor encoding, truncated source name)
+    so the caller propagates failure by returning ``None`` from its own scope.
+    """
+    c = s[i]
+    if nested and c == "E":
+        # Normal terminator of the ``N…E`` nested-name wrapper; no component.
+        return None, i + 1, True
+    if c in _ASCII_DIGITS:
+        name, new_i = _parse_source_name_component(s, i)
+        if name is None:
+            return None  # malformed source name — propagate failure
+        return name, new_i, not nested
+    label, new_i = _parse_non_source_name_component(s, i)
+    if label is None:
+        return None  # conversion operator / substitution / vendor — not modelled
+    return label, new_i, not nested
+
+
 def itanium_scope_components(mangled: str) -> list[str] | None:
     """Scope components of an Itanium-mangled C++ symbol, parsed structurally.
 
@@ -123,63 +251,22 @@ def itanium_scope_components(mangled: str) -> list[str] | None:
     Returns ``None`` for forms it does not model (constructors/operators,
     substitutions, non-Itanium or unmangled names) so callers fall back.
     """
-    if not mangled.startswith("_Z"):
+    prefix = _itanium_strip_prefix(mangled)
+    if prefix is None:
         return None
-    s = mangled[2:]
-    nested = s.startswith("N")
-    if nested:
-        s = s[1:]
-        # Skip CV-qualifiers (r/V/K) and ref-qualifiers (R/O) on the implicit
-        # object parameter, e.g. NK… (const), NR… (lvalue &), NO… (rvalue &&).
-        while s[:1] in ("r", "V", "K", "R", "O"):
-            s = s[1:]
+    s, nested = prefix
     components: list[str] = []
     i = 0
     n = len(s)
     while i < n:
-        c = s[i]
-        if nested and c == "E":
+        step = _step_next_component(s, i, nested)
+        if step is None:
+            return None  # unmodelled or malformed component
+        label, i, done = step
+        if label is not None:
+            components.append(label)
+        if done:
             break
-        if c in _ASCII_DIGITS:
-            name, i = _read_length_prefixed_name(s, i)
-            if name is None:
-                return None
-            # A directly-attached template-argument list belongs to this
-            # component; keep it raw so Box<int> and Box<float> stay distinct.
-            if i < n and s[i] == "I":
-                end = _skip_template_args(s, i)
-                if end is None:
-                    return None
-                name = name + s[i:end]
-                i = end
-            # GNU ABI tags (`B<source-name>`, e.g. the libstdc++ `cxx11` tag on
-            # std::string returns) are part of the unqualified-name identity;
-            # keep them so a tagged name groups with itself across overloads.
-            while i < n and s[i] == "B":
-                tag, j = _read_length_prefixed_name(s, i + 1)
-                if tag is None:
-                    break
-                name = f"{name}B{tag}"
-                i = j
-            components.append(name)
-        elif c == "C" and i + 1 < n and s[i + 1] in "12345":
-            components.append("{ctor}")  # constructor (C1/C2/C3/…)
-            i += 2
-        elif c == "D" and i + 1 < n and s[i + 1] in "012345":
-            components.append("{dtor}")  # destructor (D0/D1/D2/…)
-            i += 2
-        elif s[i : i + 2] in _ITANIUM_OPERATORS:
-            # Operator function: a fixed 2-char code (`ix`=[], `cl`=(), `pl`=+ …)
-            # rather than a length-prefixed name. Keep the code so operator
-            # overloads group (e.g. operator[](int)/(long)) while distinct
-            # operators stay distinct. Conversion operators (`cv`) are excluded —
-            # they carry a target type and are not overloads of each other.
-            components.append(f"{{op:{s[i:i + 2]}}}")
-            i += 2
-        else:
-            return None  # conversion operator / substitution / vendor — not modelled
-        if not nested:
-            break  # free function: one component, the rest is the parameter encoding
     return components or None
 
 

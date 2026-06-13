@@ -693,26 +693,8 @@ def _scope_dict(result: DiffResult) -> dict[str, object] | None:
     }
 
 
-def to_json(
-    result: DiffResult,
-    indent: int = 2,
-    *,
-    show_only: str | None = None,
-    report_mode: str = "full",
-    show_impact: bool = False,
-    stat: bool = False,
-    severity_config: SeverityConfig | None = None,
-) -> str:
-    if stat:
-        return to_stat_json(result, indent=indent)
-
-    if report_mode == "leaf":
-        return _to_json_leaf(result, indent=indent, show_only=show_only)
-
-    changes = list(result.changes)
-    if show_only:
-        changes = apply_show_only(changes, show_only, policy=result.policy)
-
+def _build_json_base(result: DiffResult) -> dict[str, object]:
+    """Build the opening header + summary block of the JSON report dict."""
     summary = build_summary(result)
     d: dict[str, object] = {
         "report_schema_version": REPORT_SCHEMA_VERSION,
@@ -733,9 +715,15 @@ def to_json(
         "binary_compatibility_pct": round(summary.binary_compatibility_pct, 1),
         "affected_pct": round(summary.affected_pct, 1),
     }
-    # ABI surface breakdown of the breaking set: how much of the breaking count
-    # is RTTI/internal-namespace churn vs genuine public-API breaks. Additive,
-    # machine-facing; only present when there are breaking changes.
+    return d
+
+
+def _add_abi_surface_breakdown(d: dict[str, object], result: DiffResult) -> None:
+    """Conditionally add ABI surface breakdown of the breaking set.
+
+    Only present when there are RTTI/internal-namespace changes — additive,
+    machine-facing.
+    """
     _bd = surface_breakdown(result.breaking)
     if _bd.rtti or _bd.internal:
         d["abi_surface_breakdown"] = {
@@ -744,9 +732,13 @@ def to_json(
             "rtti_churn": _bd.rtti,
             "internal_churn": _bd.internal,
         }
+
+
+def _add_evidence_fields(d: dict[str, object], result: DiffResult) -> None:
+    """Add release recommendation, optional evidence coverage/metrics, and policy."""
     # Release recommendation (semver bump + soname action) — additive, machine-facing.
     d["release_recommendation"] = recommend_release(result).to_dict()
-    # Evidence coverage (ADR-028 D7) — L0–L5 rows when an BuildSourcePack was
+    # Evidence coverage (ADR-028 D7) — L0–L5 rows when a BuildSourcePack was
     # supplied; lets consumers tell artifact-proven from build-context-only
     # findings. Additive, present only when evidence was involved.
     if getattr(result, "layer_coverage", None):
@@ -755,54 +747,34 @@ def to_json(
     # build-info/source facts were involved. Additive; lets CI tune mode choice.
     if getattr(result, "evidence_metrics", None):
         d["evidence_metrics"] = result.evidence_metrics
-    effective_policy = result.policy or "strict_abi"
-    d["policy"] = effective_policy
-    eff_sets = result._effective_kind_sets()
 
-    if show_only:
-        d["show_only_filter"] = show_only
-        d["filtered_summary"] = {
-            "breaking": sum(
-                1
-                for c in changes
-                if result._effective_verdict_for_change(c) == Verdict.BREAKING
-            ),
-            "source_breaks": sum(
-                1
-                for c in changes
-                if result._effective_verdict_for_change(c) == Verdict.API_BREAK
-            ),
-            "risk_changes": sum(
-                1
-                for c in changes
-                if result._effective_verdict_for_change(c)
-                == Verdict.COMPATIBLE_WITH_RISK
-            ),
-            "total_changes": len(changes),
-        }
 
-    # Severity-categorized summary when severity config is provided
-    if severity_config is not None:
-        d["severity"] = _build_severity_json(
-            changes,
-            severity_config,
-            all_changes=list(result.changes),
-            policy=result.policy,
-            kind_sets=eff_sets,
-            policy_file=result.policy_file,
-        )
+def _add_show_only_filter(
+    d: dict[str, object],
+    result: DiffResult,
+    changes: list[Change],
+    show_only: str,
+) -> None:
+    """Add show_only_filter + filtered_summary when a show_only filter is active."""
+    d["show_only_filter"] = show_only
+    d["filtered_summary"] = {
+        "breaking": sum(
+            1 for c in changes if result._effective_verdict_for_change(c) == Verdict.BREAKING
+        ),
+        "source_breaks": sum(
+            1 for c in changes if result._effective_verdict_for_change(c) == Verdict.API_BREAK
+        ),
+        "risk_changes": sum(
+            1
+            for c in changes
+            if result._effective_verdict_for_change(c) == Verdict.COMPATIBLE_WITH_RISK
+        ),
+        "total_changes": len(changes),
+    }
 
-    d["changes"] = [
-        _change_to_dict(
-            c, policy=effective_policy, kind_sets=eff_sets, policy_file=result.policy_file,
-        )
-        for c in changes
-    ]
-    if result.redundant_count > 0:
-        d["redundant_count"] = result.redundant_count
-    # ADR-027 A4 — pattern-aware modulation ledger (disclosed, reversible).
-    if result.pattern_modulations:
-        d["pattern_modulations"] = result.pattern_modulations
+
+def _add_suppression(d: dict[str, object], result: DiffResult) -> None:
+    """Add suppression block (file flag, count, suppressed change list)."""
     d["suppression"] = {
         "file_provided": result.suppression_file_provided,
         "suppressed_count": result.suppressed_count,
@@ -815,7 +787,10 @@ def to_json(
             for c in result.suppressed_changes
         ],
     }
-    _add_surface_scope(d, result)
+
+
+def _add_detectors(d: dict[str, object], result: DiffResult) -> None:
+    """Add detector metadata — only detectors with findings or a coverage gap."""
     d["detectors"] = [
         {
             "name": det.name,
@@ -826,13 +801,20 @@ def to_json(
         for det in result.detector_results
         if det.changes_count > 0 or det.coverage_gap is not None
     ]
+
+
+def _add_confidence_evidence(d: dict[str, object], result: DiffResult) -> None:
+    """Add confidence level, evidence tier/tiers, and optional coverage warnings."""
     # Confidence & evidence metadata — helps users assess verdict trust level
     d["confidence"] = result.confidence.value
     d["evidence_tier"] = result.evidence_tier.value
     d["evidence_tiers"] = list(result.evidence_tiers)
     if result.coverage_warnings:
         d["coverage_warnings"] = list(result.coverage_warnings)
-    # Policy file overrides (custom re-classifications)
+
+
+def _add_policy_overrides(d: dict[str, object], result: DiffResult) -> None:
+    """Add policy file overrides (custom re-classifications) when present."""
     if result.policy_file and result.policy_file.overrides:
         d["policy_overrides"] = {
             kind.value: verdict.value
@@ -840,11 +822,89 @@ def to_json(
         }
         if result.policy_file.source_path:
             d["policy_file"] = str(result.policy_file.source_path)
+
+
+def _add_changes_block(
+    d: dict[str, object],
+    result: DiffResult,
+    changes: list[Change],
+    effective_policy: str,
+    eff_sets: KindSets | None,
+) -> None:
+    """Add changes list and optional redundant-count / pattern-modulations fields."""
+    d["changes"] = [
+        _change_to_dict(c, policy=effective_policy, kind_sets=eff_sets, policy_file=result.policy_file)
+        for c in changes
+    ]
+    if result.redundant_count > 0:
+        d["redundant_count"] = result.redundant_count
+    # ADR-027 A4 — pattern-aware modulation ledger (disclosed, reversible).
+    if result.pattern_modulations:
+        d["pattern_modulations"] = result.pattern_modulations
+
+
+def _add_trailing_fields(
+    d: dict[str, object],
+    result: DiffResult,
+    show_impact: bool,
+    show_only: str | None,
+) -> None:
+    """Add show_only_applied flag and public-surface scope block (both optional)."""
     if show_impact:
         d["show_only_applied"] = show_only is not None
     scope = _scope_dict(result)
     if scope is not None:
         d["scope"] = scope
+
+
+def to_json(
+    result: DiffResult,
+    indent: int = 2,
+    *,
+    show_only: str | None = None,
+    report_mode: str = "full",
+    show_impact: bool = False,
+    stat: bool = False,
+    severity_config: SeverityConfig | None = None,
+) -> str:
+    if stat:
+        return to_stat_json(result, indent=indent)
+
+    if report_mode == "leaf":
+        return _to_json_leaf(result, indent=indent, show_only=show_only)
+
+    changes = list(result.changes)
+    if show_only:
+        changes = apply_show_only(changes, show_only, policy=result.policy)
+
+    d = _build_json_base(result)
+    _add_abi_surface_breakdown(d, result)
+    _add_evidence_fields(d, result)
+    effective_policy = result.policy or "strict_abi"
+    d["policy"] = effective_policy
+    eff_sets = result._effective_kind_sets()
+
+    if show_only:
+        _add_show_only_filter(d, result, changes, show_only)
+
+    # Severity-categorized summary when severity config is provided
+    if severity_config is not None:
+        d["severity"] = _build_severity_json(
+            changes,
+            severity_config,
+            all_changes=list(result.changes),
+            policy=result.policy,
+            kind_sets=eff_sets,
+            policy_file=result.policy_file,
+        )
+
+    _add_changes_block(d, result, changes, effective_policy, eff_sets)
+    _add_suppression(d, result)
+    _add_surface_scope(d, result)
+    _add_detectors(d, result)
+    _add_confidence_evidence(d, result)
+    _add_policy_overrides(d, result)
+    _add_trailing_fields(d, result, show_impact, show_only)
     return json.dumps(d, indent=indent)
 
 

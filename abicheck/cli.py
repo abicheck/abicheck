@@ -27,6 +27,11 @@ import click
 from .checker import DiffResult, LibraryMetadata, compare
 from .cli_audit import echo_filtered_surface, echo_pattern_modulations
 from .cli_datasources import print_data_sources as _print_data_sources
+from .cli_dump_helpers import (
+    perform_elf_dump,
+    resolve_dump_compile_db,
+    resolve_dump_debug_format,
+)
 from .cli_options import (
     adr027_compare_options,
     build_source_compare_options,
@@ -749,22 +754,8 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         dump_source_only(sources, build_info, version, output, build_config, allow_build_query, git_tag, build_id, no_git, collect_mode)
         return
 
-    # Reconcile the --debug-format selector with the legacy --btf/--ctf/--dwarf
-    # flags. The selector supersedes the legacy flags whenever it is given:
-    # an explicit "auto" returns to auto-detection (None) even if a legacy flag
-    # is also present; only when the selector is absent do the legacy flags apply.
-    if debug_format_opt is not None:
-        effective_debug_format = None if debug_format_opt.lower() == "auto" else debug_format_opt
-    else:
-        effective_debug_format = debug_format
-
-    # Resolve -p / --compile-db aliases
-    effective_compile_db = compile_db_path or compile_db_path_alt
-    if effective_compile_db and not headers:
-        raise click.UsageError(
-            "Compilation database (-p / --compile-db) requires -H/--header. "
-            "Without headers, CastXML has nothing to parse."
-        )
+    effective_debug_format = resolve_dump_debug_format(debug_format_opt, debug_format)
+    effective_compile_db = resolve_dump_compile_db(compile_db_path, compile_db_path_alt, headers)
 
     # --show-data-sources: diagnostic output and exit
     if show_data_sources:
@@ -806,39 +797,39 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         if artifact:
             click.echo(f"Debug info: {artifact.source}", err=True)
 
-    compiler = "cc" if lang == "c" else "c++"
-    resolved_headers = _expand_header_inputs(list(headers)) if headers else []
-    try:
-        snap = dump(
-            so_path=so_path,
-            headers=resolved_headers,
-            extra_includes=list(includes),
-            version=version,
-            compiler=compiler,
-            gcc_path=gcc_path,
-            gcc_prefix=gcc_prefix,
-            gcc_options=effective_gcc_options,
-            sysroot=sysroot,
-            nostdinc=nostdinc,
-            lang=lang if lang == "c" else None,
-            dwarf_only=dwarf_only,
-            debug_format=effective_debug_format,
-            public_headers=list(public_headers),
-            public_header_dirs=list(public_header_dirs),
-        )
-    except (AbicheckError, RuntimeError, OSError, ValueError) as exc:
-        raise click.ClickException(str(exc)) from exc
-
-    # Record that the header AST was parsed with the real build context (ADR-029),
-    # so a later compare can suppress header-parse-context drift for this side.
-    if effective_compile_db and resolved_headers:
-        snap.parsed_with_build_context = True
-
-    if follow_deps:
-        _populate_dependency_info(snap, so_path, list(search_paths), sysroot, ld_library_path)
-
-    _stamp_provenance(snap, git_tag=git_tag, build_id=build_id, no_git=no_git)
-    _write_snapshot_output(snap, output, build_info, sources, build_config, allow_build_query, collect_mode)
+    perform_elf_dump(
+        so_path=so_path,
+        headers=headers,
+        includes=includes,
+        version=version,
+        lang=lang,
+        gcc_path=gcc_path,
+        gcc_prefix=gcc_prefix,
+        effective_gcc_options=effective_gcc_options,
+        sysroot=sysroot,
+        nostdinc=nostdinc,
+        dwarf_only=dwarf_only,
+        effective_debug_format=effective_debug_format,
+        public_headers=public_headers,
+        public_header_dirs=public_header_dirs,
+        effective_compile_db=effective_compile_db,
+        follow_deps=follow_deps,
+        search_paths=search_paths,
+        ld_library_path=ld_library_path,
+        git_tag=git_tag,
+        build_id=build_id,
+        no_git=no_git,
+        output=output,
+        build_info=build_info,
+        sources=sources,
+        build_config=build_config,
+        allow_build_query=allow_build_query,
+        collect_mode=collect_mode,
+        expand_header_inputs=_expand_header_inputs,
+        populate_dependency_info=_populate_dependency_info,
+        stamp_provenance=_stamp_provenance,
+        write_snapshot_output=_write_snapshot_output,
+    )
 
 
 def _handle_non_elf_dump(

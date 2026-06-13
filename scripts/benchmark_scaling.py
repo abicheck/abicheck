@@ -1109,6 +1109,129 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return p.parse_args(argv)
 
 
+def _load_baseline(baseline_path: Path, regress_tolerance: float) -> dict[tuple[str, int], float]:
+    """Load baseline scaling JSON and return its (scenario, size) -> seconds mapping.
+
+    Prints a summary line on success and a warning on failure; returns an empty
+    dict when the file cannot be read or parsed.
+    """
+    try:
+        points = _baseline_points(json.loads(baseline_path.read_text()))
+        print(
+            f"Comparing against baseline {baseline_path} "
+            f"({len(points)} points, tolerance "
+            f"{regress_tolerance * 100:.0f}%)"
+        )
+        return points
+    except (OSError, ValueError) as e:
+        print(f"WARNING: could not load baseline {baseline_path}: {e}")
+        return {}
+
+
+def _check_seconds_gate(
+    scenario: str,
+    points: list[Point],
+    max_seconds: float,
+) -> list[str]:
+    """Return a failure message if any point exceeds *max_seconds*."""
+    worst = max(points, key=lambda p: p.seconds)
+    if worst.seconds > max_seconds:
+        return [
+            f"{scenario}: {worst.seconds:.2f}s at size={worst.size} "
+            f"exceeds --max-seconds={max_seconds}"
+        ]
+    return []
+
+
+def _check_exponent_gate(
+    scenario: str,
+    tail: float | None,
+    max_exponent: float,
+) -> list[str]:
+    """Return a failure message if *tail* exponent exceeds *max_exponent*."""
+    if tail is not None and tail > max_exponent:
+        return [
+            f"{scenario}: tail scaling exponent {tail:.2f} "
+            f"exceeds --max-exponent={max_exponent}"
+        ]
+    return []
+
+
+def _check_memory_gate(
+    scenario: str,
+    points: list[Point],
+    max_memory_mb: float,
+) -> list[str]:
+    """Return a failure message if peak memory of any point exceeds *max_memory_mb*."""
+    mem_points = [p for p in points if p.peak_mb is not None]
+    if not mem_points:
+        return []
+    worst_mem = max(mem_points, key=lambda p: p.peak_mb or 0.0)
+    if worst_mem.peak_mb is not None and worst_mem.peak_mb > max_memory_mb:
+        return [
+            f"{scenario}: peak {worst_mem.peak_mb:.1f} MiB at "
+            f"size={worst_mem.size} exceeds "
+            f"--max-memory-mb={max_memory_mb}"
+        ]
+    return []
+
+
+def _run_scenario(
+    scenario: str,
+    args: argparse.Namespace,
+    track_memory: bool,
+    baseline_points: dict[tuple[str, int], float],
+    report: dict[str, object],
+) -> list[str]:
+    """Run a single scenario and return any gate-failure messages.
+
+    Returns an empty list when the scenario is skipped or all gates pass.
+    Updates *report* in-place with the scenario's results.
+    """
+    spec = SCENARIOS[scenario]
+    if spec.needs_demangler and not _has_demangler():
+        print(f"\nScenario: {scenario}  SKIP (no c++filt/cxxfilt demangler available)")
+        return []
+
+    sizes = args.sizes if args.sizes is not None else list(spec.sizes)
+    points = measure(scenario, sizes, args.repeat, track_memory=track_memory)
+    if not points:
+        print(
+            f"\nScenario: {scenario}  SKIP (all requested sizes exceed its cap "
+            f"of {SCENARIOS[scenario].max_size})"
+        )
+        return []
+
+    exponent = scaling_exponent(points)
+    tail = tail_exponent(points)
+    _print_table(scenario, points, exponent, tail)
+    report["scenarios"][scenario] = {  # type: ignore[index]
+        "points": [asdict(p) for p in points],
+        "exponent": exponent,
+        "tail_exponent": tail,
+    }
+
+    failures: list[str] = []
+    if args.max_seconds is not None:
+        failures.extend(_check_seconds_gate(scenario, points, args.max_seconds))
+    if args.max_exponent is not None:
+        failures.extend(_check_exponent_gate(scenario, tail, args.max_exponent))
+    if args.max_memory_mb is not None:
+        failures.extend(_check_memory_gate(scenario, points, args.max_memory_mb))
+    if baseline_points:
+        failures.extend(
+            check_regressions(points, scenario, baseline_points, args.regress_tolerance)
+        )
+    return failures
+
+
+def _write_json_out(json_out: Path, report: dict[str, object]) -> None:
+    """Persist *report* as indented JSON to *json_out*, creating parent dirs."""
+    json_out.parent.mkdir(parents=True, exist_ok=True)
+    json_out.write_text(json.dumps(report, indent=2))
+    print(f"\nWrote {json_out}")
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
 
@@ -1126,80 +1249,15 @@ def main(argv: list[str] | None = None) -> int:
 
     baseline_points: dict[tuple[str, int], float] = {}
     if args.baseline is not None:
-        try:
-            baseline_points = _baseline_points(json.loads(args.baseline.read_text()))
-            print(
-                f"Comparing against baseline {args.baseline} "
-                f"({len(baseline_points)} points, tolerance "
-                f"{args.regress_tolerance * 100:.0f}%)"
-            )
-        except (OSError, ValueError) as e:
-            print(f"WARNING: could not load baseline {args.baseline}: {e}")
+        baseline_points = _load_baseline(args.baseline, args.regress_tolerance)
 
     for scenario in scenarios:
-        spec = SCENARIOS[scenario]
-        if spec.needs_demangler and not _has_demangler():
-            print(
-                f"\nScenario: {scenario}  SKIP (no c++filt/cxxfilt demangler available)"
-            )
-            continue
-        sizes = args.sizes if args.sizes is not None else list(spec.sizes)
-        points = measure(scenario, sizes, args.repeat, track_memory=track_memory)
-        if not points:
-            print(
-                f"\nScenario: {scenario}  SKIP (all requested sizes exceed its cap "
-                f"of {SCENARIOS[scenario].max_size})"
-            )
-            continue
-        exponent = scaling_exponent(points)
-        tail = tail_exponent(points)
-        _print_table(scenario, points, exponent, tail)
-        report["scenarios"][scenario] = {  # type: ignore[index]
-            "points": [asdict(p) for p in points],
-            "exponent": exponent,
-            "tail_exponent": tail,
-        }
-
-        if args.max_seconds is not None:
-            worst = max(points, key=lambda p: p.seconds)
-            if worst.seconds > args.max_seconds:
-                failures.append(
-                    f"{scenario}: {worst.seconds:.2f}s at size={worst.size} "
-                    f"exceeds --max-seconds={args.max_seconds}"
-                )
-        if (
-            args.max_exponent is not None
-            and tail is not None
-            and tail > args.max_exponent
-        ):
-            failures.append(
-                f"{scenario}: tail scaling exponent {tail:.2f} "
-                f"exceeds --max-exponent={args.max_exponent}"
-            )
-        if args.max_memory_mb is not None:
-            mem_points = [p for p in points if p.peak_mb is not None]
-            if mem_points:
-                worst_mem = max(mem_points, key=lambda p: p.peak_mb or 0.0)
-                if (
-                    worst_mem.peak_mb is not None
-                    and worst_mem.peak_mb > args.max_memory_mb
-                ):
-                    failures.append(
-                        f"{scenario}: peak {worst_mem.peak_mb:.1f} MiB at "
-                        f"size={worst_mem.size} exceeds "
-                        f"--max-memory-mb={args.max_memory_mb}"
-                    )
-        if baseline_points:
-            failures.extend(
-                check_regressions(
-                    points, scenario, baseline_points, args.regress_tolerance
-                )
-            )
+        failures.extend(
+            _run_scenario(scenario, args, track_memory, baseline_points, report)
+        )
 
     if args.json_out:
-        args.json_out.parent.mkdir(parents=True, exist_ok=True)
-        args.json_out.write_text(json.dumps(report, indent=2))
-        print(f"\nWrote {args.json_out}")
+        _write_json_out(args.json_out, report)
 
     if failures:
         print("\nPERFORMANCE GATE FAILED:")

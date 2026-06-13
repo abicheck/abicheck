@@ -816,6 +816,128 @@ def _default_member_access(record: dict[str, Any]) -> str:
     return "private" if record.get("tagUsed") == "class" else "public"
 
 
+def _is_template_node(kind: str | None, name: str) -> bool:
+    """Return ``True`` when this AST node is a named template declaration.
+
+    Template bodies are fingerprinted whole; callers must skip descent into
+    the templated pattern to avoid re-emitting the inner FunctionDecl/Record.
+    """
+    return kind in _TEMPLATE_NODE_KINDS and bool(name)
+
+
+def _is_function_node(kind: str | None, name: str, accessible: bool) -> bool:
+    """Return ``True`` for a named, accessible function/method node."""
+    return kind in _FUNCTION_NODE_KINDS and bool(name) and accessible
+
+
+def _is_constexpr_var_node(kind: str | None, name: str, node: dict[str, Any], accessible: bool) -> bool:
+    """Return ``True`` for a named, accessible ``constexpr`` variable node."""
+    return kind == "VarDecl" and bool(name) and bool(node.get("constexpr")) and accessible
+
+
+def _is_type_node(kind: str | None, name: str, accessible: bool) -> bool:
+    """Return ``True`` for a named, accessible record or enum declaration."""
+    return kind in ("CXXRecordDecl", "EnumDecl") and bool(name) and accessible
+
+
+def _is_typedef_node(kind: str | None, name: str, accessible: bool) -> bool:
+    """Return ``True`` for a named, accessible typedef or type-alias declaration."""
+    return kind in ("TypedefDecl", "TypeAliasDecl") and bool(name) and accessible
+
+
+def _emit_node(
+    node: dict[str, Any],
+    ctx: _ClassifyContext,
+    tu: SourceAbiTu,
+    scope: list[str],
+    file: str,
+    kind: str | None,
+    name: str,
+    accessible: bool,
+) -> bool:
+    """Dispatch a single AST node to the appropriate emit helper.
+
+    Returns ``True`` when the node is a template kind (caller must skip
+    descent into the templated pattern to avoid duplicate emissions).
+    """
+    if _is_template_node(kind, name):
+        # The template's body is captured whole in its fingerprint; do not
+        # descend into the templated pattern, or its inner FunctionDecl/Record
+        # would be re-emitted as a duplicate non-template entity.
+        if accessible:
+            _emit_template(node, ctx, tu, scope, file)
+        return True
+    if _is_function_node(kind, name, accessible):
+        _emit_function(node, ctx, tu, scope, file)
+    elif _is_constexpr_var_node(kind, name, node, accessible):
+        _emit_constexpr(node, ctx, tu, scope, file)
+    elif _is_type_node(kind, name, accessible):
+        _emit_type(node, ctx, tu, scope, file)
+    elif _is_typedef_node(kind, name, accessible):
+        _emit_typedef(node, ctx, tu, scope, file)
+    return False
+
+
+def _child_scope(scope: list[str], kind: str | None, name: str) -> list[str]:
+    """Extend the scope stack when descending into a namespace or record."""
+    if kind in _SCOPE_NODE_KINDS and name:
+        return [*scope, name]
+    return scope
+
+
+def _initial_running_access(accessible: bool, kind: str | None, node: dict[str, Any], access: str) -> str:
+    """Compute the initial ``running_access`` for iterating a node's children.
+
+    - Non-accessible subtree: preserve the inherited access so the whole subtree
+      stays hidden wholesale.
+    - ``CXXRecordDecl``: open with the tag's default (``class`` → private,
+      ``struct``/``union`` → public).
+    - Everything else (namespace, linkage spec, TU): no restriction → ``"public"``.
+    """
+    if not accessible:
+        return access
+    if kind == "CXXRecordDecl":
+        return _default_member_access(node)
+    return "public"
+
+
+def _walk_children(
+    node: dict[str, Any],
+    ctx: _ClassifyContext,
+    tu: SourceAbiTu,
+    *,
+    child_scope: list[str],
+    file: str,
+    accessible: bool,
+    running_access: str,
+) -> str:
+    """Iterate a node's ``inner`` list, threading the sticky ``file`` forward.
+
+    Handles ``AccessSpecDecl`` sections that switch the running C++ access for
+    subsequent siblings. Returns the last file seen in any child's subtree.
+    """
+    for child in node.get("inner", []):
+        if not isinstance(child, dict):
+            continue
+        if accessible and child.get("kind") == "AccessSpecDecl":
+            # `public:` / `private:` / `protected:` switches the running access
+            # for subsequent siblings in this record body.
+            running_access = child.get("access", running_access)
+            continue
+        # Thread the last file seen in each child's subtree forward so the next
+        # sibling inherits it (clang's sticky loc.file). Honor an explicit
+        # per-decl `access` when clang emits one, else the running section access.
+        file = _walk(
+            child,
+            ctx,
+            tu,
+            scope=child_scope,
+            current_file=file,
+            access=child.get("access", running_access),
+        )
+    return file
+
+
 def _walk(
     node: dict[str, Any],
     ctx: _ClassifyContext,
@@ -847,56 +969,19 @@ def _walk(
     name = node.get("name", "") or ""
     accessible = _is_accessible(access)
 
-    if kind in _FUNCTION_NODE_KINDS and name and accessible:
-        _emit_function(node, ctx, tu, scope, file)
-    elif kind in _TEMPLATE_NODE_KINDS and name:
-        # The template's body is captured whole in its fingerprint; do not
-        # descend into the templated pattern, or its inner FunctionDecl/Record
-        # would be re-emitted as a duplicate non-template entity.
-        if accessible:
-            _emit_template(node, ctx, tu, scope, file)
+    is_template = _emit_node(node, ctx, tu, scope, file, kind, name, accessible)
+    if is_template:
         return file
-    elif kind == "VarDecl" and name and node.get("constexpr") and accessible:
-        _emit_constexpr(node, ctx, tu, scope, file)
-    elif kind in ("CXXRecordDecl", "EnumDecl") and name and accessible:
-        _emit_type(node, ctx, tu, scope, file)
-    elif kind in ("TypedefDecl", "TypeAliasDecl") and name and accessible:
-        _emit_typedef(node, ctx, tu, scope, file)
 
-    # Descend, extending the scope name stack for namespaces/records so members
-    # get a fully-qualified name.
-    child_scope = scope
-    if kind in _SCOPE_NODE_KINDS and name:
-        child_scope = [*scope, name]
-    # Access applying to this node's children: a private/protected subtree stays
-    # hidden wholesale; a record opens with its tag default; any other context
-    # (namespace, linkage spec, TU) imposes no restriction.
-    if not accessible:
-        running_access = access
-    elif kind == "CXXRecordDecl":
-        running_access = _default_member_access(node)
-    else:
-        running_access = "public"
-    for child in node.get("inner", []):
-        if not isinstance(child, dict):
-            continue
-        if accessible and child.get("kind") == "AccessSpecDecl":
-            # `public:` / `private:` / `protected:` switches the running access
-            # for subsequent siblings in this record body.
-            running_access = child.get("access", running_access)
-            continue
-        # Thread the last file seen in each child's subtree forward so the next
-        # sibling inherits it (clang's sticky loc.file). Honor an explicit
-        # per-decl `access` when clang emits one, else the running section access.
-        file = _walk(
-            child,
-            ctx,
-            tu,
-            scope=child_scope,
-            current_file=file,
-            access=child.get("access", running_access),
-        )
-    return file
+    return _walk_children(
+        node,
+        ctx,
+        tu,
+        child_scope=_child_scope(scope, kind, name),
+        file=file,
+        accessible=accessible,
+        running_access=_initial_running_access(accessible, kind, node, access),
+    )
 
 
 def _location(file: str, line: int, origin_label: str) -> SourceLocation:

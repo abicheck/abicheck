@@ -170,6 +170,170 @@ def _parse_require_evidence(raw: Any, path: Path) -> dict[str, bool]:
     return out
 
 
+def _parse_base_policy(raw: dict[str, Any]) -> str:
+    """Extract and validate the ``base_policy`` field from a raw YAML mapping."""
+    base_policy = raw.get("base_policy", "strict_abi")
+    if not isinstance(base_policy, str):
+        raise PolicyError(
+            "'base_policy' must be a string, got " + type(base_policy).__name__
+        )
+    if base_policy not in _VALID_BASE_POLICIES:
+        raise PolicyError(
+            f"Unknown base_policy {base_policy!r}. "
+            f"Valid values: {sorted(_VALID_BASE_POLICIES)}"
+        )
+    return base_policy
+
+
+def _parse_overrides(overrides_raw: Any, path: Path) -> dict[ChangeKind, Verdict]:
+    """Validate and parse the ``overrides`` block into a ChangeKind -> Verdict mapping."""
+    if not isinstance(overrides_raw, dict):
+        raise PolicyError("'overrides' must be a YAML mapping of kind -> severity")
+
+    slug_to_kind = {k.value: k for k in ChangeKind}
+    overrides: dict[ChangeKind, Verdict] = {}
+    unknown_kinds: list[str] = []
+    unknown_severities: list[str] = []
+
+    for slug, severity in overrides_raw.items():
+        kind = slug_to_kind.get(str(slug))
+        if kind is None:
+            unknown_kinds.append(str(slug))
+            continue
+        verdict = _SEVERITY_MAP.get(str(severity).lower())
+        if verdict is None:
+            unknown_severities.append(f"{slug}: {severity!r}")
+            continue
+        overrides[kind] = verdict
+
+    if unknown_kinds:
+        log.warning(
+            "policy file %s: unknown ChangeKind slugs (skipped): %s",
+            path,
+            ", ".join(sorted(unknown_kinds)),
+        )
+    if unknown_severities:
+        raise PolicyError(
+            f"Invalid severity values in {path}: {unknown_severities}. "
+            "Valid values: break, warn, risk, ignore"
+        )
+    return overrides
+
+
+def _parse_frozen_namespaces(frozen_raw: Any) -> list[str]:
+    """Validate and parse the ``frozen_namespaces`` list of glob patterns."""
+    if not isinstance(frozen_raw, list):
+        raise PolicyError(
+            "'frozen_namespaces' must be a YAML list of glob patterns, got "
+            + type(frozen_raw).__name__
+        )
+    result: list[str] = []
+    for i, pat in enumerate(frozen_raw):
+        if not isinstance(pat, str):
+            raise PolicyError(
+                f"frozen_namespaces[{i}]: expected string, got {type(pat).__name__}"
+            )
+        result.append(pat)
+    return result
+
+
+# Severity ordering used for frozen-namespace floor comparisons.
+_VERDICT_ORDER: list[Verdict] = [
+    Verdict.NO_CHANGE,
+    Verdict.COMPATIBLE,
+    Verdict.COMPATIBLE_WITH_RISK,
+    Verdict.API_BREAK,
+    Verdict.BREAKING,
+]
+
+
+def _raw_verdict_for_kind(
+    kind: Any,
+    breaking: frozenset[Any],
+    api_break: frozenset[Any],
+    compatible: frozenset[Any],
+    risk: frozenset[Any],
+) -> Verdict:
+    """Return the raw base-policy verdict for *kind* given the four policy sets.
+
+    Mirrors the frozen-namespace floor logic in :meth:`PolicyFile.compute_verdict`:
+    an unrecognised kind is treated as BREAKING (fail-safe default).
+    """
+    if kind in breaking:
+        return Verdict.BREAKING
+    if kind in api_break:
+        return Verdict.API_BREAK
+    if kind in risk:
+        return Verdict.COMPATIBLE_WITH_RISK
+    if kind in compatible:
+        return Verdict.COMPATIBLE
+    return Verdict.BREAKING
+
+
+def _resolve_change_verdict(
+    change: Any,
+    base_policy: str,
+    overrides: dict[Any, Verdict],
+    breaking: frozenset[Any],
+    api_break: frozenset[Any],
+    compatible: frozenset[Any],
+    risk: frozenset[Any],
+) -> Verdict:
+    """Resolve the effective verdict for a single *change* object.
+
+    Priority order (highest first):
+    1. ``change.effective_verdict`` — ADR-025 / ADR-033 D7 modulation (frozen-
+       namespace floor still applied).
+    2. ``overrides[kind]`` — per-kind policy override (frozen-namespace floor
+       still applied; downgrades on frozen symbols are silently rejected).
+    3. Base policy verdict.
+    """
+    kind = change.kind
+    fnv = getattr(change, "frozen_namespace_violation", None)
+    frozen = isinstance(fnv, str) and bool(fnv)
+
+    eff = getattr(change, "effective_verdict", None)
+    if isinstance(eff, Verdict):
+        raw = _raw_verdict_for_kind(kind, breaking, api_break, compatible, risk)
+        if frozen and _VERDICT_ORDER.index(eff) < _VERDICT_ORDER.index(raw):
+            return raw
+        return eff
+
+    base_v = compute_verdict([change], policy=base_policy)
+    if kind in overrides:
+        override_v = overrides[kind]
+        if frozen and _VERDICT_ORDER.index(override_v) < _VERDICT_ORDER.index(base_v):
+            return base_v
+        return override_v
+    return base_v
+
+
+def _parse_evidence_policy(
+    ev_raw: Any, path: Path
+) -> tuple[str | None, str | None, str | None, dict[str, bool]]:
+    """Validate and parse the ``evidence_policy`` block (ADR-033 D7).
+
+    Returns a 4-tuple of
+    ``(source_only_findings, build_context_drift, graph_risk_findings, require_evidence)``.
+    """
+    if not isinstance(ev_raw, dict):
+        raise PolicyError(
+            "'evidence_policy' must be a YAML mapping, got "
+            + type(ev_raw).__name__
+        )
+    source_only = _parse_evidence_action(
+        ev_raw, "source_only_findings", _SOURCE_ONLY_ACTIONS, path
+    )
+    build_drift = _parse_evidence_action(
+        ev_raw, "build_context_drift", _BUILD_DRIFT_ACTIONS, path
+    )
+    graph_risk = _parse_evidence_action(
+        ev_raw, "graph_risk_findings", _GRAPH_RISK_ACTIONS, path
+    )
+    require_evidence = _parse_require_evidence(ev_raw.get("require_evidence"), path)
+    return source_only, build_drift, graph_risk, require_evidence
+
+
 @dataclass
 class PolicyFile:
     """Parsed custom policy file.
@@ -241,83 +405,12 @@ class PolicyFile:
                 f"Policy file must be a YAML mapping, got {type(raw).__name__}"
             )
 
-        base_policy = raw.get("base_policy", "strict_abi")
-        if not isinstance(base_policy, str):
-            raise PolicyError(
-                "'base_policy' must be a string, got " + type(base_policy).__name__
-            )
-        if base_policy not in _VALID_BASE_POLICIES:
-            raise PolicyError(
-                f"Unknown base_policy {base_policy!r}. "
-                f"Valid values: {sorted(_VALID_BASE_POLICIES)}"
-            )
-
-        overrides_raw = raw.get("overrides", {})
-        if not isinstance(overrides_raw, dict):
-            raise PolicyError("'overrides' must be a YAML mapping of kind -> severity")
-
-        overrides: dict[ChangeKind, Verdict] = {}
-        unknown_kinds: list[str] = []
-        unknown_severities: list[str] = []
-
-        slug_to_kind = {k.value: k for k in ChangeKind}
-
-        for slug, severity in overrides_raw.items():
-            kind = slug_to_kind.get(str(slug))
-            if kind is None:
-                unknown_kinds.append(str(slug))
-                continue
-            verdict = _SEVERITY_MAP.get(str(severity).lower())
-            if verdict is None:
-                unknown_severities.append(f"{slug}: {severity!r}")
-                continue
-            overrides[kind] = verdict
-
-        if unknown_kinds:
-            log.warning(
-                "policy file %s: unknown ChangeKind slugs (skipped): %s",
-                path,
-                ", ".join(sorted(unknown_kinds)),
-            )
-        if unknown_severities:
-            raise PolicyError(
-                f"Invalid severity values in {path}: {unknown_severities}. "
-                "Valid values: break, warn, risk, ignore"
-            )
-
-        # frozen_namespaces: optional list of glob patterns identifying
-        # contractually-frozen namespaces (e.g. a versioned detail::r1).
-        frozen_raw = raw.get("frozen_namespaces", [])
-        if not isinstance(frozen_raw, list):
-            raise PolicyError(
-                "'frozen_namespaces' must be a YAML list of glob patterns, got "
-                + type(frozen_raw).__name__
-            )
-        frozen_namespaces: list[str] = []
-        for i, pat in enumerate(frozen_raw):
-            if not isinstance(pat, str):
-                raise PolicyError(
-                    f"frozen_namespaces[{i}]: expected string, got {type(pat).__name__}"
-                )
-            frozen_namespaces.append(pat)
-
-        # evidence_policy: optional ADR-033 D7 block of category-level controls.
-        ev_raw = raw.get("evidence_policy", {})
-        if not isinstance(ev_raw, dict):
-            raise PolicyError(
-                "'evidence_policy' must be a YAML mapping, got "
-                + type(ev_raw).__name__
-            )
-        source_only = _parse_evidence_action(
-            ev_raw, "source_only_findings", _SOURCE_ONLY_ACTIONS, path
+        base_policy = _parse_base_policy(raw)
+        overrides = _parse_overrides(raw.get("overrides", {}), path)
+        frozen_namespaces = _parse_frozen_namespaces(raw.get("frozen_namespaces", []))
+        source_only, build_drift, graph_risk, require_evidence = _parse_evidence_policy(
+            raw.get("evidence_policy", {}), path
         )
-        build_drift = _parse_evidence_action(
-            ev_raw, "build_context_drift", _BUILD_DRIFT_ACTIONS, path
-        )
-        graph_risk = _parse_evidence_action(
-            ev_raw, "graph_risk_findings", _GRAPH_RISK_ACTIONS, path
-        )
-        require_evidence = _parse_require_evidence(ev_raw.get("require_evidence"), path)
 
         return cls(
             base_policy=base_policy,
@@ -363,73 +456,20 @@ class PolicyFile:
         if not changes:
             return Verdict.NO_CHANGE
 
-        # Start from base policy verdict
-        verdicts: list[Verdict] = []
-        order = [
-            Verdict.NO_CHANGE,
-            Verdict.COMPATIBLE,
-            Verdict.COMPATIBLE_WITH_RISK,
-            Verdict.API_BREAK,
-            Verdict.BREAKING,
-        ]
-        # Raw per-kind category (no effective_verdict) for the frozen-namespace
+        # Raw per-kind category sets (no effective_verdict) for the frozen-namespace
         # severity floor: a finding on a contractually frozen symbol must never be
         # downgraded below this, whether by an override or a modulation.
         _b, _a, _c, _r = policy_kind_sets(self.base_policy)
 
-        def _raw(kind: Any) -> Verdict:
-            if kind in _b:
-                return Verdict.BREAKING
-            if kind in _a:
-                return Verdict.API_BREAK
-            if kind in _r:
-                return Verdict.COMPATIBLE_WITH_RISK
-            if kind in _c:
-                return Verdict.COMPATIBLE
-            return Verdict.BREAKING
+        verdicts = [
+            _resolve_change_verdict(
+                change, self.base_policy, self.overrides, _b, _a, _c, _r
+            )
+            for change in changes
+        ]
 
-        for change in changes:
-            kind = change.kind
-            fnv = getattr(change, "frozen_namespace_violation", None)
-            frozen = isinstance(fnv, str) and bool(fnv)
-            # A per-finding ``effective_verdict`` (ADR-025 pattern modulation /
-            # ADR-033 D7 evidence policy) is the highest-precedence category and
-            # wins over a per-kind override here too — matching effective_category,
-            # which every other classification site routes through, so the verdict
-            # and the per-finding JSON severity stay consistent (Codex review). The
-            # frozen-namespace floor still applies: a demotion below the raw
-            # category is rejected for a frozen-namespace violation (Codex review).
-            eff = getattr(change, "effective_verdict", None)
-            if isinstance(eff, Verdict):
-                raw = _raw(kind)
-                if frozen and order.index(eff) < order.index(raw):
-                    verdicts.append(raw)
-                else:
-                    verdicts.append(eff)
-                continue
-            base_v = compute_verdict([change], policy=self.base_policy)
-            if kind in self.overrides:
-                override_v = self.overrides[kind]
-                # A change that violates a frozen-namespace contract MUST
-                # NOT be downgraded by a policy override. The user's
-                # `overrides` block can still upgrade severity (e.g. mark
-                # something more severe than the base classification), but
-                # downgrades on tagged changes are silently rejected so
-                # users cannot accidentally mask a documented invariant.
-                # ``isinstance(..., str)`` guards against MagicMock-style
-                # test doubles where any attribute access returns a truthy
-                # mock; only a real glob-pattern string counts as a tag.
-                if frozen and (
-                    order.index(override_v) < order.index(base_v)
-                ):
-                    verdicts.append(base_v)
-                else:
-                    verdicts.append(override_v)
-            else:
-                verdicts.append(base_v)
-
-        # Worst verdict wins (reuse the `order` list from above).
-        return max(verdicts, key=lambda v: order.index(v) if v in order else 0)
+        # Worst verdict wins.
+        return max(verdicts, key=lambda v: _VERDICT_ORDER.index(v) if v in _VERDICT_ORDER else 0)
 
     def describe(self) -> str:
         """Return a human-readable summary of this policy."""

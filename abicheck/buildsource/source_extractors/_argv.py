@@ -187,6 +187,112 @@ def is_msvc_mode(cc_bin: str) -> bool:
     return basename(cc_bin).lower() in MSVC_BINARIES
 
 
+def _carry_abi_relevant_flags(
+    abi_relevant_flags: list[str], seen: set[str], out: list[str]
+) -> None:
+    """Append ``abi_relevant_flags`` not already in ``seen`` to ``out``.
+
+    Skips flags whose prefix matches a structured toolchain option (sysroot,
+    target, isysroot) because those are already emitted from the structured
+    fields and the split spelling would dangle if re-appended.
+    """
+    for flag in abi_relevant_flags:
+        if flag.startswith(STRUCTURED_TOOLCHAIN_FLAG_PREFIXES):
+            continue
+        if flag not in seen:
+            out.append(flag)
+            seen.add(flag)
+
+
+def _match_gnu_include_search(tok: str, argv: list[str], i: int, out: list[str]) -> int:
+    """Try to match a GNU include-search token (``-iquote``/``-idirafter``).
+
+    Returns the new ``i`` after consumption, or the original ``i`` if no match.
+    Both the separate (``-iquote dir``) and joined (``-iquotedir``) spellings are
+    handled. Returns the original index when the token does not match either form.
+    """
+    if tok in _GNU_INCLUDE_SEARCH_OPTS and i + 1 < len(argv):
+        out += [tok, argv[i + 1]]  # -iquote / -idirafter <dir> (separate)
+        return i + 2
+    if tok not in _GNU_INCLUDE_SEARCH_OPTS and any(
+        tok.startswith(opt) and len(tok) > len(opt) for opt in _GNU_INCLUDE_SEARCH_OPTS
+    ):
+        out.append(tok)  # -iquotedir / -idirafter/dir (joined)
+        return i + 1
+    return i
+
+
+def _match_gnu_forced_include(tok: str, argv: list[str], i: int, out: list[str]) -> int:
+    """Try to match a GNU forced-include token (``-include``/``-imacros``/``-include-pch``).
+
+    Returns the new ``i`` after consumption, or the original ``i`` if no match.
+    The separate-operand spelling (all three options) and the joined spelling
+    (``-include``/``-imacros`` only, never ``-include-pch``) are both handled.
+    """
+    if tok in _GNU_SEPARATE_INCLUDE_OPTS and i + 1 < len(argv):
+        out += [tok, argv[i + 1]]  # -include / -imacros / -include-pch <file>
+        return i + 2
+    if tok not in _GNU_SEPARATE_INCLUDE_OPTS and any(
+        tok.startswith(opt) and len(tok) > len(opt) for opt in _GNU_FORCED_INCLUDE_OPTS
+    ):
+        out.append(tok)  # -includefile / -imacrosfile (joined)
+        return i + 1
+    return i
+
+
+def _match_msvc_include_search(tok: str, argv: list[str], i: int, out: list[str]) -> int:
+    """Try to match an MSVC ``/I`` include-search token (MSVC mode only).
+
+    Returns the new ``i`` after consumption, or the original ``i`` if no match.
+    Both the separate (``/I dir``) and joined (``/Idir``) spellings are handled.
+    """
+    if tok == "/I" and i + 1 < len(argv):
+        out += [tok, argv[i + 1]]  # MSVC /I dir (separate operand)
+        return i + 2
+    if len(tok) > 2 and tok.startswith("/I"):
+        out.append(tok)  # MSVC /Idir (joined)
+        return i + 1
+    return i
+
+
+def _match_msvc_forced_include(tok: str, argv: list[str], i: int, out: list[str]) -> int:
+    """Try to match an MSVC ``/FI`` forced-include token (MSVC mode only).
+
+    Returns the new ``i`` after consumption, or the original ``i`` if no match.
+    Both the separate (``/FI file``) and joined (``/FIfile``, ``-FIfile``)
+    spellings are handled.
+    """
+    if tok in _MSVC_FORCED_INCLUDE_OPTS and i + 1 < len(argv):
+        out += [tok, argv[i + 1]]  # /FI file (separate operand)
+        return i + 2
+    if len(tok) > 3 and (tok.startswith("/FI") or tok.startswith("-FI")):
+        out.append(tok)  # /FIfile (joined)
+        return i + 1
+    return i
+
+
+def _scan_argv_for_extra_flags(
+    argv: list[str], cc_id: str, out: list[str]
+) -> None:
+    """Walk ``argv`` and append forced-include / include-search tokens to ``out``.
+
+    Handles GNU and (when ``cc_id == "msvc"``) MSVC option families.  Each
+    option family is tried in priority order; the first match consumes the
+    token(s) and advances the index.
+    """
+    i = 0
+    while i < len(argv):
+        tok = argv[i]
+        new_i = _match_gnu_forced_include(tok, argv, i, out)
+        if new_i == i:
+            new_i = _match_gnu_include_search(tok, argv, i, out)
+        if new_i == i and cc_id == "msvc":
+            new_i = _match_msvc_include_search(tok, argv, i, out)
+        if new_i == i and cc_id == "msvc":
+            new_i = _match_msvc_forced_include(tok, argv, i, out)
+        i = new_i if new_i != i else i + 1
+
+
 def replay_extra_flags(
     compile_unit: CompileUnit, already: list[str], cc_id: str
 ) -> list[str]:
@@ -203,50 +309,6 @@ def replay_extra_flags(
     """
     seen = set(already)
     out: list[str] = []
-    for flag in compile_unit.abi_relevant_flags:
-        if flag.startswith(STRUCTURED_TOOLCHAIN_FLAG_PREFIXES):
-            continue
-        if flag not in seen:
-            out.append(flag)
-            seen.add(flag)
-    argv = compile_unit.argv
-    i = 0
-    while i < len(argv):
-        tok = argv[i]
-        if tok in _GNU_SEPARATE_INCLUDE_OPTS and i + 1 < len(argv):
-            out += [tok, argv[i + 1]]  # -include / -imacros / -include-pch <file>
-            i += 2
-        elif tok in _GNU_INCLUDE_SEARCH_OPTS and i + 1 < len(argv):
-            out += [tok, argv[i + 1]]  # -iquote / -idirafter <dir> (separate)
-            i += 2
-        elif tok not in _GNU_INCLUDE_SEARCH_OPTS and any(
-            tok.startswith(opt) and len(tok) > len(opt)
-            for opt in _GNU_INCLUDE_SEARCH_OPTS
-        ):
-            out.append(tok)  # -iquote/dir / -idirafter/dir (joined)
-            i += 1
-        elif cc_id == "msvc" and tok == "/I" and i + 1 < len(argv):
-            out += [tok, argv[i + 1]]  # MSVC /I dir (separate operand)
-            i += 2
-        elif cc_id == "msvc" and len(tok) > 2 and tok.startswith("/I"):
-            out.append(tok)  # MSVC /Idir (joined)
-            i += 1
-        elif tok not in _GNU_SEPARATE_INCLUDE_OPTS and any(
-            tok.startswith(opt) and len(tok) > len(opt)
-            for opt in _GNU_FORCED_INCLUDE_OPTS
-        ):
-            out.append(tok)  # -includefile / -imacrosfile (joined)
-            i += 1
-        elif cc_id == "msvc" and tok in _MSVC_FORCED_INCLUDE_OPTS and i + 1 < len(argv):
-            out += [tok, argv[i + 1]]  # /FI file (separate operand)
-            i += 2
-        elif (
-            cc_id == "msvc"
-            and len(tok) > 3
-            and (tok.startswith("/FI") or tok.startswith("-FI"))
-        ):
-            out.append(tok)  # /FIfile (joined)
-            i += 1
-        else:
-            i += 1
+    _carry_abi_relevant_flags(compile_unit.abi_relevant_flags, seen, out)
+    _scan_argv_for_extra_flags(compile_unit.argv, cc_id, out)
     return out

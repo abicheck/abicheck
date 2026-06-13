@@ -209,35 +209,56 @@ def _parse(f: IO[bytes], so_path: Path) -> ElfMetadata:
     meta = ElfMetadata()
     elf = ELFFile(f)
 
-    # Pointer width: ELFCLASS32 → 4 bytes, ELFCLASS64 → 8 bytes. Used to decode
-    # vtable/typeinfo object sizes in diff_elf_layout.py.
+    meta.pointer_size = _read_pointer_size(elf, so_path)
+    has_relro_segment, is_et_dyn = _parse_segments(elf, meta, so_path)
+
+    ver_sym_section, dynsym_section, ver_index_map = _parse_all_sections(elf, meta, so_path)
+
+    # Correlate per-symbol version entries using sections captured above.
+    _correlate_symbol_versions(ver_sym_section, dynsym_section, meta, ver_index_map, so_path)
+
+    _postprocess_metadata(meta, ver_index_map, ver_sym_section, dynsym_section, so_path)
+
+    # Finalize derived hardening properties now that segments, dynamic flags,
+    # and the symbol table have all been parsed.
+    _finalize_hardening(meta, has_relro_segment=has_relro_segment, is_et_dyn=is_et_dyn)
+
+    return meta
+
+
+def _read_pointer_size(elf: ELFFile, so_path: Path) -> int:
+    """Return pointer width in bytes from ELF class (32-bit → 4, 64-bit → 8).
+
+    Used to decode vtable/typeinfo object sizes in diff_elf_layout.py.
+    Falls back to 8 (64-bit default) on parse error.
+    """
     try:
-        meta.pointer_size = 4 if elf.elfclass == 32 else 8
+        return 4 if elf.elfclass == 32 else 8
     except Exception as exc:  # noqa: BLE001
         log.warning("parse_elf_metadata: failed to read ELF class from %s: %s", so_path, exc)
+        return 8
 
-    # Extract PT_INTERP (ELF interpreter path) and the segment-level hardening
-    # surface (PT_GNU_STACK, PT_GNU_RELRO, W^X loadable segments).
-    _PF_X = 0x1
-    _PF_W = 0x2
+
+_PF_X = 0x1
+_PF_W = 0x2
+
+
+def _parse_segments(
+    elf: ELFFile, meta: ElfMetadata, so_path: Path
+) -> tuple[bool, bool]:
+    """Iterate program headers; populate interpreter and segment-level hardening fields.
+
+    Returns ``(has_relro_segment, is_et_dyn)``.
+
+    * ``has_relro_segment`` — a PT_GNU_RELRO segment was found.
+    * ``is_et_dyn``         — the ELF type is ET_DYN (needed to gate PIE detection).
+    """
     has_relro_segment = False
     try:
         for seg in elf.iter_segments():
-            p_type = seg.header.p_type
-            if p_type == "PT_INTERP":
-                # PT_INTERP contains a null-terminated path string.
-                meta.interpreter = seg.get_interp_name()
-            elif p_type == "PT_GNU_STACK":
-                # PF_X = executable. Executable stack is a security risk.
-                if seg.header.p_flags & _PF_X:
-                    meta.has_executable_stack = True
-            elif p_type == "PT_GNU_RELRO":
+            _process_segment(seg, meta, so_path)
+            if seg.header.p_type == "PT_GNU_RELRO":
                 has_relro_segment = True
-            elif p_type == "PT_LOAD":
-                # A loadable segment that is both writable and executable
-                # violates W^X (memory should never be both at once).
-                if (seg.header.p_flags & _PF_W) and (seg.header.p_flags & _PF_X):
-                    meta.has_writable_executable_segment = True
     except Exception as exc:  # noqa: BLE001
         log.warning("parse_elf_metadata: failed to read program headers from %s: %s", so_path, exc)
 
@@ -250,37 +271,63 @@ def _parse(f: IO[bytes], so_path: Path) -> ElfMetadata:
     except Exception as exc:  # noqa: BLE001
         log.warning("parse_elf_metadata: failed to read e_type from %s: %s", so_path, exc)
 
+    return has_relro_segment, is_et_dyn
+
+
+def _process_segment(seg: object, meta: ElfMetadata, so_path: Path) -> None:
+    """Apply a single ELF program-header segment to *meta*."""
+    p_type = seg.header.p_type
+    if p_type == "PT_INTERP":
+        # PT_INTERP contains a null-terminated path string.
+        meta.interpreter = seg.get_interp_name()
+    elif p_type == "PT_GNU_STACK":
+        # PF_X = executable. Executable stack is a security risk.
+        if seg.header.p_flags & _PF_X:
+            meta.has_executable_stack = True
+    elif p_type == "PT_LOAD":
+        # A loadable segment that is both writable and executable
+        # violates W^X (memory should never be both at once).
+        if (seg.header.p_flags & _PF_W) and (seg.header.p_flags & _PF_X):
+            meta.has_writable_executable_segment = True
+
+
+# Type alias for version index maps shared across section helpers.
+_VerIndexMap = dict[int, tuple[str, str, bool]]
+
+
+def _parse_all_sections(
+    elf: ELFFile, meta: ElfMetadata, so_path: Path
+) -> tuple[GNUVerSymSection | None, SymbolTableSection | None, _VerIndexMap]:
+    """Iterate all ELF sections; parse each into *meta* and return captured refs.
+
+    Returns ``(ver_sym_section, dynsym_section, ver_index_map)`` for the
+    subsequent version-correlation pass.
+
+    * ``ver_sym_section`` — the ``.gnu.version`` section (one entry per .dynsym symbol).
+    * ``dynsym_section``  — the ``.dynsym`` section (exported/imported symbols).
+    * ``ver_index_map``   — merged verdef + verneed index maps; verdef takes priority.
+
+    Relocatable objects (``.o``) carry no ``.dynsym`` — their symbol surface lives
+    in ``.symtab``.  When ``.dynsym`` is absent and ``.symtab`` is present the
+    fallback parsing fills ``meta.symbols``/``meta.imports`` via the same
+    ``_parse_dynsym`` path used for shared libraries.
+    """
     # Build separate version-index maps from .gnu.version_d and .gnu.version_r.
     # Verdef and verneed indices are normally non-overlapping, but separating
     # them prevents mis-attribution if a malformed ELF reuses an index.
-    verdef_index_map: dict[int, tuple[str, str, bool]] = {}   # idx → ("", ver, True)
-    verneed_index_map: dict[int, tuple[str, str, bool]] = {}  # idx → (lib, ver, False)
+    verdef_index_map: _VerIndexMap = {}   # idx → ("", ver, True)
+    verneed_index_map: _VerIndexMap = {}  # idx → (lib, ver, False)
 
-    # Capture .gnu.version and .dynsym sections during the main loop so that
-    # _correlate_symbol_versions does not need to re-iterate all sections.
     ver_sym_section: GNUVerSymSection | None = None
     dynsym_section: SymbolTableSection | None = None
     symtab_section: SymbolTableSection | None = None
 
     for section in elf.iter_sections():
         try:
-            if isinstance(section, DynamicSection):
-                _parse_dynamic(section, meta)
-            elif isinstance(section, GNUVerDefSection):
-                _parse_version_def(section, meta)
-                _build_verdef_index(section, verdef_index_map)
-            elif isinstance(section, GNUVerNeedSection):
-                _parse_version_need(section, meta)
-                _build_verneed_index(section, verneed_index_map)
-            elif isinstance(section, GNUVerSymSection):
-                ver_sym_section = section
-            elif isinstance(section, SymbolTableSection) and section.name == ".dynsym":
-                _parse_dynsym(section, meta)
-                dynsym_section = section
-            elif isinstance(section, SymbolTableSection) and section.name == ".symtab":
-                # Captured but not parsed yet — only used as a fallback for
-                # relocatable objects (.o) that have no .dynsym (see below).
-                symtab_section = section
+            dynsym_section, symtab_section, ver_sym_section = _process_section(
+                section, meta, verdef_index_map, verneed_index_map,
+                dynsym_section, symtab_section, ver_sym_section,
+            )
         except Exception as exc:  # noqa: BLE001
             # Partial-success: log malformed section, keep results from other sections.
             log.warning("parse_elf_metadata: skipping malformed section %r in %s: %s",
@@ -299,18 +346,39 @@ def _parse(f: IO[bytes], so_path: Path) -> ElfMetadata:
                         so_path, exc)
 
     # Merge: verdef entries take priority over verneed on index collision.
-    ver_index_map: dict[int, tuple[str, str, bool]] = {**verneed_index_map, **verdef_index_map}
+    ver_index_map: _VerIndexMap = {**verneed_index_map, **verdef_index_map}
 
-    # Correlate per-symbol version entries using sections captured above.
-    _correlate_symbol_versions(ver_sym_section, dynsym_section, meta, ver_index_map, so_path)
+    return ver_sym_section, dynsym_section, ver_index_map
 
-    _postprocess_metadata(meta, ver_index_map, ver_sym_section, dynsym_section, so_path)
 
-    # Finalize derived hardening properties now that segments, dynamic flags,
-    # and the symbol table have all been parsed.
-    _finalize_hardening(meta, has_relro_segment=has_relro_segment, is_et_dyn=is_et_dyn)
-
-    return meta
+def _process_section(
+    section: object,
+    meta: ElfMetadata,
+    verdef_index_map: _VerIndexMap,
+    verneed_index_map: _VerIndexMap,
+    dynsym_section: SymbolTableSection | None,
+    symtab_section: SymbolTableSection | None,
+    ver_sym_section: GNUVerSymSection | None,
+) -> tuple[SymbolTableSection | None, SymbolTableSection | None, GNUVerSymSection | None]:
+    """Dispatch one ELF section to the appropriate parser; return updated refs."""
+    if isinstance(section, DynamicSection):
+        _parse_dynamic(section, meta)
+    elif isinstance(section, GNUVerDefSection):
+        _parse_version_def(section, meta)
+        _build_verdef_index(section, verdef_index_map)
+    elif isinstance(section, GNUVerNeedSection):
+        _parse_version_need(section, meta)
+        _build_verneed_index(section, verneed_index_map)
+    elif isinstance(section, GNUVerSymSection):
+        ver_sym_section = section
+    elif isinstance(section, SymbolTableSection) and section.name == ".dynsym":
+        _parse_dynsym(section, meta)
+        dynsym_section = section
+    elif isinstance(section, SymbolTableSection) and section.name == ".symtab":
+        # Captured but not parsed yet — only used as a fallback for
+        # relocatable objects (.o) that have no .dynsym (see below).
+        symtab_section = section
+    return dynsym_section, symtab_section, ver_sym_section
 
 
 # Fortified libc wrappers are named ``__<func>_chk`` (e.g. __memcpy_chk,

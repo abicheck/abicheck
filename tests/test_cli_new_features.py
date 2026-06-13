@@ -57,7 +57,7 @@ class TestDumpVerbose:
         header.write_text("int foo();\n", encoding="utf-8")
         out = tmp_path / "snap.json"
 
-        monkeypatch.setattr("abicheck.cli.dump",
+        monkeypatch.setattr("abicheck.cli_dump_helpers.dump",
                             lambda **_: AbiSnapshot(library="libfoo.so", version="1.0"))
 
         runner = CliRunner()
@@ -165,7 +165,7 @@ class TestDumpLang:
             captured.update(kwargs)
             return AbiSnapshot(library="libfoo.so", version="1.0")
 
-        monkeypatch.setattr("abicheck.cli.dump", fake_dump)
+        monkeypatch.setattr("abicheck.cli_dump_helpers.dump", fake_dump)
 
         runner = CliRunner()
         result = runner.invoke(main, [
@@ -186,7 +186,7 @@ class TestDumpLang:
             captured.update(kwargs)
             return AbiSnapshot(library="libfoo.so", version="1.0")
 
-        monkeypatch.setattr("abicheck.cli.dump", fake_dump)
+        monkeypatch.setattr("abicheck.cli_dump_helpers.dump", fake_dump)
 
         runner = CliRunner()
         result = runner.invoke(main, [
@@ -210,7 +210,7 @@ class TestDumpCrossCompilation:
             captured.update(kwargs)
             return AbiSnapshot(library="libfoo.so", version="1.0")
 
-        monkeypatch.setattr("abicheck.cli.dump", fake_dump)
+        monkeypatch.setattr("abicheck.cli_dump_helpers.dump", fake_dump)
 
         runner = CliRunner()
         result = runner.invoke(main, [
@@ -231,7 +231,7 @@ class TestDumpCrossCompilation:
             captured.update(kwargs)
             return AbiSnapshot(library="libfoo.so", version="1.0")
 
-        monkeypatch.setattr("abicheck.cli.dump", fake_dump)
+        monkeypatch.setattr("abicheck.cli_dump_helpers.dump", fake_dump)
 
         runner = CliRunner()
         result = runner.invoke(main, [
@@ -252,7 +252,7 @@ class TestDumpCrossCompilation:
             captured.update(kwargs)
             return AbiSnapshot(library="libfoo.so", version="1.0")
 
-        monkeypatch.setattr("abicheck.cli.dump", fake_dump)
+        monkeypatch.setattr("abicheck.cli_dump_helpers.dump", fake_dump)
 
         runner = CliRunner()
         result = runner.invoke(main, [
@@ -275,7 +275,7 @@ class TestDumpCrossCompilation:
             captured.update(kwargs)
             return AbiSnapshot(library="libfoo.so", version="1.0")
 
-        monkeypatch.setattr("abicheck.cli.dump", fake_dump)
+        monkeypatch.setattr("abicheck.cli_dump_helpers.dump", fake_dump)
 
         runner = CliRunner()
         result = runner.invoke(main, [
@@ -296,7 +296,7 @@ class TestDumpCrossCompilation:
             captured.update(kwargs)
             return AbiSnapshot(library="libfoo.so", version="1.0")
 
-        monkeypatch.setattr("abicheck.cli.dump", fake_dump)
+        monkeypatch.setattr("abicheck.cli_dump_helpers.dump", fake_dump)
 
         runner = CliRunner()
         result = runner.invoke(main, [
@@ -316,7 +316,7 @@ class TestDumpCrossCompilation:
             captured.update(kwargs)
             return AbiSnapshot(library="libfoo.so", version="1.0")
 
-        monkeypatch.setattr("abicheck.cli.dump", fake_dump)
+        monkeypatch.setattr("abicheck.cli_dump_helpers.dump", fake_dump)
 
         runner = CliRunner()
         result = runner.invoke(main, [
