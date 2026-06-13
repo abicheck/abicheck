@@ -1197,7 +1197,7 @@ def _strip_diff_results_and_adjust_verdict(
               help="Declare a co-versioned library cohort by name prefix (e.g. "
                    "'libfoo_'). Repeatable. Enables the BUNDLE_SONAME_SKEW check, "
                    "which flags when some members of the cohort bump their major SONAME "
-                   "while siblings lag, and enables bundle-level cross-library analysis.")
+                   "while siblings lag.")
 @click.option("--no-bundle-analysis", "no_bundle_analysis", is_flag=True, default=False,
               help="Skip bundle-level cross-library analysis (debug/parity escape hatch). "
                    "Bundle findings catch intra-bundle symbol removals, signature drift "
@@ -1403,8 +1403,7 @@ def compare_release_cmd(
         )
 
         bundle_result: BundleDiffResult | None = None
-        bundle_requested = manifest_path is not None or bool(bundle_cohorts)
-        if not no_bundle_analysis and bundle_requested:
+        if not no_bundle_analysis:
             bundle_result, worst_verdict = _collect_bundle_result(
                 library_results, old_map, new_map, worst_verdict,
                 manifest_path=manifest_path,
