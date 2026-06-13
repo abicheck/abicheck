@@ -15,6 +15,7 @@ def drive(name, repo, tag, so, src_subdir_for_cmake=".", cmake_extra=None):
     root = f"/tmp/scan/src/{name}"
     rec = {"lib": name, "tag": tag}
     if not os.path.isdir(root):
+        os.makedirs(os.path.dirname(root), exist_ok=True)  # git clone needs the parent
         ct, p = t(["git", "clone", "--depth", "1", "--branch", tag, repo, root])
         rec["clone_s"] = ct
         if p.returncode:

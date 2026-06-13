@@ -23,8 +23,9 @@ LIBS = [
     ("c-ares",        ["c-ares"],         "1.34.3", "1.34.6"),
     ("libssh2",       ["libssh2"],        "1.10.0", "1.11.1"),
     ("snappy",        ["snappy"],         "1.1.10", "1.2.2"),
-    ("libwebp",       ["libwebp"],        "1.3.2", "1.6.0"),
-    ("libxml2",       ["libxml2"],        "2.15.0", "2.15.3"),
+    # libwebp runtime .so ships in the libwebp-base split package (see FINDINGS P01);
+    # matches the recorded data/results.json row.
+    ("libwebp",       ["libwebp-base"],   "1.4.0", "1.6.0"),
     ("libuv",         ["libuv"],          "1.49.2", "1.52.1"),
 ]
 
