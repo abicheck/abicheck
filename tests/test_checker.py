@@ -563,6 +563,33 @@ class TestEnumAliasOneToOneGuard:
         assert len(removed) == 0
 
 
+class TestEnumWhollyRemoved:
+    """A wholly-removed enum lives in snap.enums, not snap.types — _diff_enums
+    must emit TYPE_REMOVED for it (the TYPE_REMOVED loop in _diff_types only
+    iterates snap.types and would miss it; case78 regression)."""
+
+    def test_removed_enum_emits_type_removed(self):
+        old = _snap("1.0")
+        old.enums = [EnumType(
+            name="attach_mode_t",
+            members=[EnumMember(name="automatic", value=0), EnumMember(name="manual", value=1)],
+        )]
+        new = _snap("2.0")
+        new.enums = []
+        changes = _diff_enums(old, new)
+        removed = [c for c in changes if c.kind == ChangeKind.TYPE_REMOVED]
+        assert len(removed) == 1
+        assert removed[0].symbol == "attach_mode_t"
+
+    def test_present_enum_emits_no_type_removed(self):
+        old = _snap("1.0")
+        old.enums = [EnumType(name="E", members=[EnumMember(name="A", value=0)])]
+        new = _snap("2.0")
+        new.enums = [EnumType(name="E", members=[EnumMember(name="A", value=0)])]
+        changes = _diff_enums(old, new)
+        assert not [c for c in changes if c.kind == ChangeKind.TYPE_REMOVED]
+
+
 class TestEnumRenamesOneToOneGuard:
     """_diff_enum_renames must not produce false renames for aliases."""
 
