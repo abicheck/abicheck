@@ -564,9 +564,10 @@ def test_driver_mode_operand_does_not_make_unix_paths_msvc() -> None:
 def test_clang_driver_mode_keeps_absolute_posix_source() -> None:
     from abicheck.buildsource.adapters.base import source_from_argv
 
-    assert source_from_argv([
-        "clang", "--driver-mode=cl", "-c", "/work/src/foo.cc", "/Fofoo.obj",
-    ]) == "/work/src/foo.cc"
+    for source in ("/work/src/foo.cc", "/data/foo.cc", "/include/foo.cc"):
+        assert source_from_argv([
+            "clang", "--driver-mode=cl", "-c", source, "/Fofoo.obj",
+        ]) == source
 
 
 def test_clang_driver_mode_skips_combined_msvc_source_like_options() -> None:
@@ -574,6 +575,9 @@ def test_clang_driver_mode_skips_combined_msvc_source_like_options() -> None:
 
     assert source_from_argv([
         "clang", "--driver-mode=cl", "-c", "/FI/work/src/config.hpp", "foo.cc",
+    ]) == "foo.cc"
+    assert source_from_argv([
+        "clang", "--driver-mode=cl", "-c", "/Iinclude", "/DNAME=foo.cc", "foo.cc",
     ]) == "foo.cc"
 
 

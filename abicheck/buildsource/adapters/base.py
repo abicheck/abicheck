@@ -218,8 +218,6 @@ def source_from_argv(argv: list[str]) -> str:
 _MSVC_DRIVERS: frozenset[str] = frozenset({"cl", "cl.exe", "clang-cl", "clang-cl.exe"})
 
 _MSVC_COMBINED_OPTION_PREFIXES: tuple[str, ...] = (
-    "/d",
-    "/i",
     "/fi",
     "/fu",
     "/fo",
@@ -283,6 +281,8 @@ def _is_source_token(arg: str, msvc: bool) -> bool:
 def _is_msvc_option_token(arg: str) -> bool:
     lower = arg.lower()
     if lower in {"/c", "/tp", "/tc", "/nologo", "/showincludes", "/wx", "/gr", "/gs"}:
+        return True
+    if arg.startswith(("/D", "/I")):
         return True
     if any(lower.startswith(prefix) for prefix in _MSVC_COMBINED_OPTION_PREFIXES):
         return True
