@@ -166,13 +166,13 @@ def _public_by_value_type_closure(snap: AbiSnapshot) -> set[str]:
         target = snap.typedefs.get(name)
         if target:
             _add_type(queue, target)
-        rec = record_by_name.get(name)
-        if rec is None:
+        record = record_by_name.get(name)
+        if record is None:
             continue
-        public_by_value.add(rec.name)
-        for fld in rec.fields:
+        public_by_value.add(record.name)
+        for fld in record.fields:
             _add_type(queue, fld.type)
-        for base in (*rec.bases, *rec.virtual_bases):
+        for base in (*record.bases, *record.virtual_bases):
             _add_type(queue, base)
     return public_by_value
 
