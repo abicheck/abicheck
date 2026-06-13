@@ -522,6 +522,9 @@ def test_runtime_mode_flags_normalize_to_canonical_keys():
     (["cl", "/c", "/Tpfoo.c"], "foo.c", "CXX"),
     (["cl", "/c", "/TC", "foo.cpp"], "foo.cpp", "C"),
     (["cl", "/c", "/Tcfoo.cpp"], "foo.cpp", "C"),
+    # clang in CL-driver mode honors the same /TP and /TC language forcing.
+    (["clang", "--driver-mode=cl", "-c", "/TP", "foo.c"], "foo.c", "CXX"),
+    (["clang", "--driver-mode", "cl", "-c", "/TC", "foo.cpp"], "foo.cpp", "C"),
     # Unknown -x language leaves the extension-derived language intact.
     (["clang", "-x", "assembler", "-c", "foo.cpp"], "foo.cpp", "CXX"),
     # Forced Objective-C/Objective-C++ keep their own tokens (match .m/.mm

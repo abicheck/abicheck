@@ -223,16 +223,27 @@ def _is_msvc_command(argv: list[str]) -> bool:
 
     Detected either by the ``/c`` compile marker (GNU uses ``-c``) or by a
     ``cl``/``clang-cl`` driver basename anywhere in the leading tokens (the
-    driver may be a full path, e.g. ``C:\\VS\\bin\\cl.exe``).
+    driver may be a full path, e.g. ``C:\\VS\\bin\\cl.exe``), or by clang's
+    explicit ``--driver-mode=cl`` spelling.
     """
     if "/c" in argv:
         return True
-    for arg in argv:
+    i = 0
+    while i < len(argv):
+        arg = argv[i]
         if arg in ("&&", ";"):
             break
+        if arg == "--driver-mode" and i + 1 < len(argv):
+            if argv[i + 1].lower() == "cl":
+                return True
+            i += 2
+            continue
+        if arg.lower() == "--driver-mode=cl":
+            return True
         base = arg.replace("\\", "/").rsplit("/", 1)[-1].lower()
         if base in _MSVC_DRIVERS:
             return True
+        i += 1
     return False
 
 
