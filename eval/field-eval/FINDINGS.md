@@ -184,3 +184,41 @@ Installed castxml 0.6.3 (apt) to test whether L2 header AST + L4 decl/type yield
 - `collect`, `compare-release`, `surface-report`, `stack-check`, `appcompat` command coverage.
 - Parallel-TU L4 timing experiment (validate P06 fix headroom).
 - More C++ libs once a castxml/libstdc++-compatible combo or clang decl extractor is sorted (P15).
+
+## Iteration 5 — LLVM FULL --sources scan (build options + source graph + L4 reality)
+
+llvm-project @ llvmorg-18.1.8, source-level (the full L3/L4/L5 `--sources` flow).
+
+| stage | time | result |
+|---|---|---|
+| clone (blobless `--depth 1`) | 153s | 2.1 GB checkout |
+| cmake configure (Ninja, X86) | 19s | **2,719 compile units**, command-string DB |
+| **L3 build data** | **4.4s** | 2,719 compile_units, **build_options=6**, snap 8.4MB |
+| **L5 source graph (from L3, no L4)** | **3.57s** | **5,442 nodes** (2719 compile_unit + 2716 source + 7 build_option), **13,547 edges** (COMPILE_UNIT_BUILDS_SOURCE 2719, COMPILE_UNIT_USES_OPTION 10828) |
+| L4 source replay (sample) | ~4s/parsing-TU | 3/4 lib TUs **fail** (missing tablegen `.inc`) |
+
+**Headline:** building **build options + the full source graph on LLVM takes ~8s** (4.4 + 3.6),
+*not* hours. The hours-long part is exclusively L4 source-ABI replay.
+
+### Problems found
+- **P17 [DISCOVERY/high] confirmed at scale** Command-string compile DBs (CMake+Ninja default,
+  what LLVM and zstd produce) yield almost no build options: **6 from 2,719 TUs** for LLVM, 0 for
+  zstd. The adapter normalizes flags well from `arguments[]`-form DBs (meson, snappy) but barely
+  parses the `command` string form. Since CMake+Ninja is the most common real setup, build-option
+  capture is effectively broken for most projects. *Fix:* shlex-split and normalize `command`.
+- **P18 [USABILITY/med]** The CLI couples L5→L4 (`--collect-mode` source-*/graph-* all run L4),
+  but the L3-derived source graph (compile_unit/source/**build_option** nodes + edges) needs **no
+  source parsing** and builds in 3.6s on LLVM. There's no CLI mode for "L3 + L5 graph, skip L4",
+  so a user wanting the build-options graph on a monorepo is forced into the hours-long L4 path
+  (or must call `collect_inline_pack(layers=("L3","L5"))` directly, as I did). *Fix:* add a
+  `graph-build` collect-mode (L3+L5, no L4).
+- **P19 [DISCOVERY/high]** L4 source replay requires **generated headers to exist**. LLVM TUs
+  `#include "llvm/IR/Attributes.inc"` (tablegen output); a configure-only tree fails every such
+  TU with `fatal error: ...Attributes.inc: No such file or directory`. So L4 is gated on a real
+  (partial) build, not just `cmake` configure — and abicheck surfaces it as a generic parse
+  failure, not "generated header missing; build the target first."
+- **P13 quantified** Full L4 on LLVM ≈ **50 min (serial, optimistic) to ~3 h** (2,719 TUs ×
+  ~4s/parsing-TU, header-heavy). Only feasible scoped (changed-TU) + parallel + on a built tree.
+
+### Timings (iteration 5)
+- clone 153s · configure 19s · L3 4.4s · L5-graph-from-L3 3.6s · L4 ~4s/TU (needs built tree)
