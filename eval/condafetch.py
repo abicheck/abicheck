@@ -9,7 +9,7 @@ import json, os, sys, time, zipfile, tarfile, subprocess, urllib.request, shutil
 
 API = "https://api.anaconda.org/package/conda-forge/{}"
 CDN = "https://conda.anaconda.org/conda-forge/linux-64/{}"
-CACHE = "/tmp/scan/pkgs"
+CACHE = os.environ.get("ABICHECK_EVAL_CACHE", "/tmp/abicheck-eval/pkgs")
 os.makedirs(CACHE, exist_ok=True)  # urlretrieve won't create parents
 
 def _ensure_within(root, path):

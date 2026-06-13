@@ -1,9 +1,15 @@
 # abicheck field-evaluation — cumulative findings log
 
+> **This file is the qualitative problem log + analysis (the narrative).**
+> For **live, authoritative numbers** (verdicts, timings, surface sizes) see the
+> generated [`REPORT.md`](REPORT.md), reproduced from [`manifest.yaml`](manifest.yaml)
+> via `python eval/runner.py`. The per-iteration tables below are *illustrative
+> historical snapshots* from the exploration and are not kept in sync — trust
+> `REPORT.md` / `results/latest.json` for current figures.
+
 Format: each problem has an ID, category (DISCOVERY / USABILITY / PERF / CORRECTNESS),
-severity, what happened, repro, and a suggested fix. Timings tracked in `timing.jsonl`
-and the per-iteration tables below. Environment: 4c/15GB Linux, abicheck 0.3.0,
-gcc 13.3 / clang 18.1, castxml ABSENT.
+severity, what happened, repro, and a suggested fix. Environment: 4c/15GB Linux,
+abicheck 0.3.0, gcc 13.3 / clang 18.1.
 
 ---
 
