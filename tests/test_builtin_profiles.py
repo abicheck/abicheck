@@ -91,3 +91,13 @@ def test_rust_c_ffi_keeps_c_layout_break_strict() -> None:
     pf = PolicyFile.load(builtin_policy_path("rust_c_ffi"))
     verdict = pf.compute_verdict([_change(ChangeKind.TYPE_SIZE_CHANGED)])
     assert verdict == Verdict.BREAKING
+
+
+def test_rust_c_ffi_keeps_exported_symbol_renames_strict() -> None:
+    """Renaming a #[no_mangle]/#[export_name] symbol breaks old C consumers."""
+    pf = PolicyFile.load(builtin_policy_path("rust_c_ffi"))
+
+    assert ChangeKind.SYMBOL_RENAMED_BATCH not in pf.overrides
+    assert ChangeKind.FUNC_LIKELY_RENAMED not in pf.overrides
+    assert pf.compute_verdict([_change(ChangeKind.SYMBOL_RENAMED_BATCH)]) == Verdict.BREAKING
+    assert pf.compute_verdict([_change(ChangeKind.FUNC_LIKELY_RENAMED)]) == Verdict.BREAKING

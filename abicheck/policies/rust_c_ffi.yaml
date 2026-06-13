@@ -16,7 +16,8 @@
 #
 # Kept strict (NOT overridden) because they are real for a repr(C)/extern "C"
 # surface: func_removed, func_params_changed, func_return_changed,
-# type_size_changed, struct_field_offset_changed, var_removed, var_type_changed.
+# func_likely_renamed, symbol_renamed_batch, type_size_changed,
+# struct_field_offset_changed, var_removed, var_type_changed.
 base_policy: strict_abi
 
 overrides:
@@ -32,5 +33,3 @@ overrides:
   abi_tag_changed: risk
   char8t_migration: risk
   func_noexcept_removed: risk
-  symbol_renamed_batch: risk
-  func_likely_renamed: risk
