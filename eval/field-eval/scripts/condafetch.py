@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Minimal conda-forge package fetcher: list versions, download, extract .so/headers.
 
-No conda needed. Uses anaconda.org API + direct CDN download. Handles .conda (zip of
-zstd tarballs) and legacy .tar.bz2.
+No conda needed. Uses anaconda.org API + direct CDN download. Handles .conda
+(zip of zstd tarballs; requires external zstd for GNU tar) and legacy .tar.bz2.
 """
 from __future__ import annotations
 import json, os, sys, time, zipfile, tarfile, subprocess, urllib.request, shutil
@@ -32,6 +32,13 @@ def _safe_extract_tar(tf, outdir):
     for member in tf.getmembers():
         _validate_tar_member(member, outdir)
     tf.extractall(outdir)
+
+def _require_zstd():
+    if shutil.which("zstd") is None:
+        raise RuntimeError(
+            "extracting .conda archives requires the external 'zstd' executable; "
+            "install zstd or provide a legacy .tar.bz2 package"
+        )
 
 def _get(url, dest):
     t0 = time.time()
@@ -72,8 +79,11 @@ def extract(archive, outdir):
     shutil.rmtree(outdir, ignore_errors=True)  # no stale files from a prior build/extract
     os.makedirs(outdir, exist_ok=True)
     if archive.endswith(".conda"):
+        _require_zstd()
         with zipfile.ZipFile(archive) as z:
             inner = [n for n in z.namelist() if n.startswith("pkg-") and n.endswith(".tar.zst")]
+            if not inner:
+                raise RuntimeError(f"no pkg-*.tar.zst payload in {archive}")
             tmp = outdir + "/_inner.tar.zst"
             with z.open(inner[0]) as src, open(tmp, "wb") as dst:
                 shutil.copyfileobj(src, dst)

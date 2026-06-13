@@ -1,6 +1,6 @@
 # abicheck end-to-end evaluation — conda-forge libraries
 
-Environment: 4 cores / 15 GB / Linux. gcc/g++ + **clang 18** present; **castxml absent**.
+Environment: 4 cores / 15 GB / Linux. gcc/g++ + **clang 18** present; GNU tar + **zstd** present; **castxml absent**.
 abicheck 0.3.0 (editable install). All timings wall-clock on this box.
 
 ## 1. The flow I exercised
