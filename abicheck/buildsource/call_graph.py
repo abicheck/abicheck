@@ -37,13 +37,18 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess  # noqa: S404 - call-graph extraction shells out to clang (never shell=True)
+from collections.abc import Mapping
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from ..build_context import _extract_flags
+from .adapters.base import source_from_argv
 from .source_graph import CONF_HIGH, CONF_REDUCED, CONF_UNKNOWN, GraphEdge, GraphNode
 
 if TYPE_CHECKING:
     from .build_evidence import BuildEvidence
+    from .build_evidence import CompileUnit as BuildEvidenceCompileUnit
     from .source_graph import SourceGraphSummary
 
 # ── call-edge labels (ADR-031 D4) ───────────────────────────────────────────
@@ -66,6 +71,28 @@ _FUNCTION_DECL_KINDS = frozenset({
 _CALL_EXPR_KINDS = frozenset({"CallExpr", "CXXMemberCallExpr", "CXXOperatorCallExpr"})
 #: referenced-decl kinds that mean "called through a pointer/variable".
 _POINTER_DECL_KINDS = frozenset({"VarDecl", "ParmVarDecl", "FieldDecl", "NonTypeTemplateParmDecl"})
+
+#: ABI/API-affecting flags safe to replay into clang for AST parsing.  This is
+#: intentionally narrower than the original compile command: flags such as
+#: ``-Xclang -load`` and ``-fplugin=`` can execute arbitrary shared libraries
+#: during compiler option processing, so live call-graph extraction rebuilds a
+#: parse-only command from normalized build evidence instead of appending raw
+#: compile database argv.
+_SAFE_REPLAY_FLAG_PREFIXES: tuple[str, ...] = (
+    "-fvisibility", "-fvisibility-inlines-hidden",
+    "-fpack-struct", "/Zp", "-fshort-enums", "-fshort-wchar",
+    "-fabi-version", "-fno-rtti", "-frtti", "-fno-exceptions", "-fexceptions",
+    "-flto", "-fno-lto", "-fwhole-program-vtables",
+    "-mabi=", "-m32", "-m64", "/arch:",
+)
+
+_LANGUAGE_TO_CLANG_X: dict[str, str] = {
+    "C": "c",
+    "CXX": "c++",
+    "OBJC": "objective-c",
+    "OBJCXX": "objective-c++",
+    "CUDA": "cuda",
+}
 
 
 @dataclass(frozen=True)
@@ -196,6 +223,95 @@ def augment_graph_with_calls(graph: SourceGraphSummary, edges: list[CallEdge]) -
     return added
 
 
+def _append_once(out: list[str], seen: set[tuple[str, ...]], *tokens: str) -> None:
+    """Append *tokens* if the exact token tuple has not already been emitted."""
+    if not all(tokens):
+        return
+    key = tuple(tokens)
+    if key in seen:
+        return
+    seen.add(key)
+    out.extend(tokens)
+
+
+def _safe_replay_flags_from_context(
+    *,
+    language: str = "",
+    standard: str = "",
+    target_triple: str = "",
+    sysroot: str | None = None,
+    defines: Mapping[str, str | None] | None = None,
+    undefines: list[str] | set[str] | None = None,
+    include_paths: list[str] | None = None,
+    system_include_paths: list[str] | None = None,
+    abi_relevant_flags: list[str] | None = None,
+) -> list[str]:
+    """Build the allowlisted clang flags needed for parse-only AST replay.
+
+    The inputs are normalized build-evidence fields, not the raw compile argv.
+    Only preprocessor, include, language/target, and ABI-affecting parse flags
+    are replayed.  Option families capable of loading code or causing compiler
+    side effects are deliberately not represented here.
+    """
+    out: list[str] = []
+    seen: set[tuple[str, ...]] = set()
+    clang_language = _LANGUAGE_TO_CLANG_X.get(language)
+    if clang_language:
+        _append_once(out, seen, "-x", clang_language)
+    if standard:
+        _append_once(out, seen, f"-std={standard}")
+    if target_triple:
+        _append_once(out, seen, f"--target={target_triple}")
+    if sysroot:
+        _append_once(out, seen, f"--sysroot={sysroot}")
+    for name, value in sorted((defines or {}).items()):
+        define = f"-D{name}={value}" if value not in (None, "") else f"-D{name}"
+        _append_once(out, seen, define)
+    for name in sorted(undefines or []):
+        _append_once(out, seen, f"-U{name}")
+    for inc in include_paths or []:
+        _append_once(out, seen, "-I", inc)
+    for inc in system_include_paths or []:
+        _append_once(out, seen, "-isystem", inc)
+    for flag in abi_relevant_flags or []:
+        if flag.startswith(_SAFE_REPLAY_FLAG_PREFIXES):
+            _append_once(out, seen, flag)
+    return out
+
+
+def _safe_clang_args_from_argv(argv: list[str], cwd: str | None = None) -> list[str]:
+    """Return a safe parse-only argv reconstructed from a compile argv."""
+    ctx = _extract_flags(argv, Path(cwd or "."))
+    source = source_from_argv(argv)
+    flags = _safe_replay_flags_from_context(
+        standard=ctx.language_standard or "",
+        target_triple=ctx.target_triple or "",
+        sysroot=str(ctx.sysroot) if ctx.sysroot else None,
+        defines=ctx.defines,
+        undefines=ctx.undefines,
+        include_paths=[str(p) for p in ctx.include_paths],
+        system_include_paths=[str(p) for p in ctx.system_includes],
+        abi_relevant_flags=ctx.extra_flags,
+    )
+    return [*flags, "--", source] if source else flags
+
+
+def _safe_clang_args_from_compile_unit(cu: BuildEvidenceCompileUnit) -> list[str]:
+    """Return safe clang AST-replay args for one normalized compile unit."""
+    flags = _safe_replay_flags_from_context(
+        language=cu.language,
+        standard=cu.standard,
+        target_triple=cu.target_triple,
+        sysroot=cu.sysroot,
+        defines=cu.defines,
+        undefines=cu.undefines,
+        include_paths=cu.include_paths,
+        system_include_paths=cu.system_include_paths,
+        abi_relevant_flags=cu.abi_relevant_flags,
+    )
+    return [*flags, "--", cu.source]
+
+
 # ── live clang extraction (integration only) ────────────────────────────────
 
 
@@ -216,7 +332,11 @@ class ClangCallGraphExtractor:
         return shutil.which(self.clang_bin) is not None
 
     def extract_from_args(self, argv: list[str], cwd: str | None = None) -> list[CallEdge]:
-        """Run ``clang -Xclang -ast-dump=json -fsyntax-only`` for one TU's argv."""
+        """Run clang AST extraction for one TU after allowlisting argv flags."""
+        return self._extract_from_safe_args(_safe_clang_args_from_argv(argv, cwd), cwd=cwd)
+
+    def _extract_from_safe_args(self, argv: list[str], cwd: str | None = None) -> list[CallEdge]:
+        """Run ``clang -Xclang -ast-dump=json -fsyntax-only`` with pre-sanitized args."""
         if not self.available():
             self.diagnostics.append(f"{self.clang_bin} not found in PATH")
             return []
@@ -247,8 +367,8 @@ class ClangCallGraphExtractor:
         for cu in build.compile_units:
             if not cu.source:
                 continue
-            argv = list(cu.argv) if cu.argv else [cu.source]
-            for e in self.extract_from_args(argv, cwd=cu.directory or None):
+            argv = _safe_clang_args_from_compile_unit(cu)
+            for e in self._extract_from_safe_args(argv, cwd=cu.directory or None):
                 key = (e.caller, e.callee, e.call_kind)
                 if key not in seen:
                     seen.add(key)
