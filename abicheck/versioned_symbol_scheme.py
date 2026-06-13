@@ -55,13 +55,32 @@ def _normalize(name: str) -> str:
     return _DIGITS.sub("#", name)
 
 
+def _is_version_scheme_candidate(name: str) -> bool:
+    """Return true when digits in *name* may encode a source-level version.
+
+    Itanium C++ ABI names begin with ``_Z`` and contain structural digits such
+    as identifier lengths (``_Z4sym1``). Collapsing those digits can make
+    unrelated C++ symbols look like a versioned C naming convention, so leave
+    mangled C++ names to the normal per-symbol detectors.
+    """
+    return bool(name) and not name.startswith("_Z")
+
+
 def detect_versioned_symbol_scheme(changes: list[Change]) -> Change | None:
     """Return one advisory ``Change`` if the removed/added churn is a versioned
     scheme, else ``None``. Pure — no snapshot/IO, unit-testable."""
     from .checker_types import Change
 
-    removed = [c.symbol for c in changes if c.kind in _REMOVED_KINDS]
-    added = [c.symbol for c in changes if c.kind is ChangeKind.FUNC_ADDED]
+    removed = [
+        c.symbol
+        for c in changes
+        if c.kind in _REMOVED_KINDS and _is_version_scheme_candidate(c.symbol)
+    ]
+    added = [
+        c.symbol
+        for c in changes
+        if c.kind is ChangeKind.FUNC_ADDED and _is_version_scheme_candidate(c.symbol)
+    ]
     if len(removed) < _MIN_PAIRS or not added:
         return None
 

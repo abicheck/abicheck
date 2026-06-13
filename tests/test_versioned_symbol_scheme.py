@@ -131,3 +131,15 @@ def test_recogniser_ignores_digitless_renames():
         _ch("func_removed", "epsilon"), _ch("func_added", "zeta"),
     ]
     assert detect_versioned_symbol_scheme(changes) is None
+
+
+def test_recogniser_ignores_itanium_mangling_digits():
+    # The digits in Itanium C++ ABI names are structural length/name data, not a
+    # source-level versioning convention like ICU's `u_name_75` suffix.
+    from abicheck.versioned_symbol_scheme import detect_versioned_symbol_scheme
+    changes = [
+        _ch("func_removed", "_Z4sym1"), _ch("func_added", "_Z4sym3"),
+        _ch("func_removed", "_Z4sym2"), _ch("func_added", "_Z4sym4"),
+        _ch("func_removed", "_Z4sym5"), _ch("func_added", "_Z4sym6"),
+    ]
+    assert detect_versioned_symbol_scheme(changes) is None
