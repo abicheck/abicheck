@@ -75,6 +75,7 @@ def test_depfile_args_strips_clang_plugin_loading_options() -> None:
         "-Xclang", "-load", "-Xclang", "./evil.so",
         "-fplugin=./plugin.so", "-fpass-plugin=./pass.so",
         "-mllvm", "-load=./legacy-pass.so",
+        "-mllvm=-load=./joined-pass.so",
     ]) == ["foo.cpp", "-I", "include"]
     assert depfile_args_from_argv([
         "clang++", "-cc1", "-load", "./evil.so", "foo.cpp", "-DABI=1",

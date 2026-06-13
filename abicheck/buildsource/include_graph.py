@@ -68,6 +68,7 @@ _DEPFILE_UNSAFE_PREFIXES = (
     "-add-plugin=",
     "-fplugin=",
     "-fpass-plugin=",
+    "-mllvm=",
 )
 
 
