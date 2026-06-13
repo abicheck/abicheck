@@ -37,8 +37,76 @@ from .source_graph import (
 )
 
 if TYPE_CHECKING:
-    from .build_evidence import BuildEvidence
+    from .build_evidence import BuildEvidence, CompileUnit
     from .source_graph import SourceGraphSummary
+
+
+_CXX_LANGS = frozenset({"cxx", "c++", "cpp"})
+_CXX_SUFFIXES = (".cc", ".cpp", ".cxx", ".c++", ".hpp", ".hh", ".hxx", ".h++")
+
+
+def _reject_response_file_operand(value: str, *, field: str, cu_id: str) -> None:
+    """Reject values that clang would treat as response-file expansions.
+
+    ``subprocess.run(..., shell=False)`` prevents shell injection, but clang
+    still interprets argv tokens beginning with ``@`` as response files before
+    normal option parsing.  The include graph extractor intentionally replays
+    only structured build-evidence fields, so refusing these rare path/value
+    spellings is safer than letting untrusted build metadata smuggle arbitrary
+    frontend flags back into the command line.
+    """
+    if value.startswith("@"):
+        raise ValueError(f"{field} for {cu_id} starts with '@'")
+
+
+def _append_checked(cmd: list[str], option: str, value: str, *, field: str, cu_id: str) -> None:
+    _reject_response_file_operand(value, field=field, cu_id=cu_id)
+    cmd.extend([option, value])
+
+
+def build_clang_dep_command(cu: CompileUnit, *, clang_bin: str = "clang++") -> list[str]:
+    """Build a sanitized ``clang -MM`` argv for a compile unit.
+
+    Compile databases are untrusted evidence in PR/artifact workflows.  Do not
+    replay ``CompileUnit.argv`` here: compiler flags such as ``-fplugin`` or
+    ``-Xclang -load`` can execute code during dependency generation.  Instead,
+    reconstruct the dependency command from normalized, non-executing context
+    fields captured by the build adapters and pass the source after ``--`` so
+    source paths cannot be parsed as options.
+    """
+    if not cu.source:
+        raise ValueError(f"compile unit {cu.id} has no source")
+    _reject_response_file_operand(cu.source, field="source", cu_id=cu.id)
+
+    cmd = [clang_bin, "-MM"]
+    lang = "c++" if (
+        cu.language.lower() in _CXX_LANGS or cu.source.lower().endswith(_CXX_SUFFIXES)
+    ) else "c"
+    cmd += ["-x", lang]
+    if cu.standard:
+        cmd.append(f"-std={cu.standard}")
+    for key, value in sorted(cu.defines.items()):
+        if key.startswith("@"):
+            raise ValueError(f"define name for {cu.id} starts with '@'")
+        if value and value.startswith("@"):
+            raise ValueError(f"define value for {cu.id} starts with '@'")
+        cmd.append(f"-D{key}={value}" if value else f"-D{key}")
+    for undef in cu.undefines:
+        if undef.startswith("@"):
+            raise ValueError(f"undefine name for {cu.id} starts with '@'")
+        cmd.append(f"-U{undef}")
+    for inc in cu.include_paths:
+        _append_checked(cmd, "-I", inc, field="include path", cu_id=cu.id)
+    for inc in cu.system_include_paths:
+        _append_checked(cmd, "-isystem", inc, field="system include path", cu_id=cu.id)
+    if cu.sysroot:
+        _reject_response_file_operand(cu.sysroot, field="sysroot", cu_id=cu.id)
+        cmd.append(f"--sysroot={cu.sysroot}")
+    if cu.target_triple:
+        _reject_response_file_operand(cu.target_triple, field="target triple", cu_id=cu.id)
+        cmd.append(f"--target={cu.target_triple}")
+    cmd += ["--", cu.source]
+    return cmd
 
 
 def parse_depfile(text: str) -> list[str]:
@@ -129,8 +197,11 @@ class ClangIncludeExtractor:
         for cu in build.compile_units:
             if not cu.source:
                 continue
-            argv = list(cu.argv) if cu.argv else [cu.source]
-            cmd = [self.clang_bin, "-MM", *argv]
+            try:
+                cmd = build_clang_dep_command(cu, clang_bin=self.clang_bin)
+            except ValueError as exc:
+                self.diagnostics.append(f"clang -MM skipped for {cu.id}: {exc}")
+                continue
             try:
                 proc = subprocess.run(  # noqa: S603 - fixed argv, never shell=True
                     cmd, cwd=cu.directory or None, capture_output=True,

@@ -21,6 +21,7 @@ from abicheck.evidence.build_evidence import BuildEvidence, CompileUnit
 from abicheck.evidence.include_graph import (
     ClangIncludeExtractor,
     augment_graph_with_includes,
+    build_clang_dep_command,
     parse_depfile,
 )
 from abicheck.evidence.source_graph import GraphNode, SourceGraphSummary
@@ -89,13 +90,55 @@ def test_extractor_parses_mocked_clang(monkeypatch) -> None:
         stdout = "foo.o: foo.cpp inc/foo.h"
         stderr = ""
 
-    monkeypatch.setattr(ig.subprocess, "run", lambda *_a, **_k: _Proc())
+    seen = {}
+
+    def _run(cmd, **_kwargs):
+        seen["cmd"] = cmd
+        return _Proc()
+
+    monkeypatch.setattr(ig.subprocess, "run", _run)
     build = BuildEvidence(compile_units=[
-        CompileUnit(id="cu://foo", source="foo.cpp", argv=["foo.cpp"]),
+        CompileUnit(id="cu://foo", source="foo.cpp", argv=[
+            "/usr/bin/c++", "-fplugin=/tmp/evil.so", "foo.cpp",
+        ]),
         CompileUnit(id="cu://nosrc", source=""),  # skipped
     ])
     includes = ClangIncludeExtractor().extract_from_build(build)
     assert includes == {"cu://foo": ["foo.cpp", "inc/foo.h"]}
+    assert seen["cmd"] == ["clang++", "-MM", "-x", "c++", "--", "foo.cpp"]
+    assert "-fplugin=/tmp/evil.so" not in seen["cmd"]
+
+
+def test_build_clang_dep_command_uses_normalized_context_only() -> None:
+    cu = CompileUnit(
+        id="cu://foo",
+        source="foo.cpp",
+        argv=["/usr/bin/c++", "-Xclang", "-load", "-Xclang", "/tmp/evil.so", "foo.cpp"],
+        language="CXX",
+        standard="c++20",
+        defines={"FEATURE": "1"},
+        undefines=["OLD"],
+        include_paths=["inc"],
+        system_include_paths=["sys"],
+        sysroot="/sdk",
+        target_triple="x86_64-linux-gnu",
+    )
+
+    assert build_clang_dep_command(cu, clang_bin="clang++") == [
+        "clang++", "-MM", "-x", "c++", "-std=c++20", "-DFEATURE=1", "-UOLD",
+        "-I", "inc", "-isystem", "sys", "--sysroot=/sdk",
+        "--target=x86_64-linux-gnu", "--", "foo.cpp",
+    ]
+
+
+def test_build_clang_dep_command_rejects_response_file_source() -> None:
+    cu = CompileUnit(id="cu://rsp", source="@args.rsp")
+    try:
+        build_clang_dep_command(cu)
+    except ValueError as exc:
+        assert "starts with '@'" in str(exc)
+    else:  # pragma: no cover - assertion guard
+        raise AssertionError("expected response-file source to be rejected")
 
 
 def test_extractor_handles_subprocess_error(monkeypatch) -> None:
