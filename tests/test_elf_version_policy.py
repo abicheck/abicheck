@@ -10,7 +10,7 @@ Covers:
 """
 from __future__ import annotations
 
-from abicheck.checker_policy import ChangeKind
+from abicheck.checker_policy import ChangeKind, Verdict
 from abicheck.checker_types import (
     SYMBOL_VERSION_ALIAS_NOT_RETAINED_MARKER,
     Change,
@@ -308,6 +308,22 @@ class TestSonameBumpRecommended:
         assert len(result) == 1
         assert result[0].kind == ChangeKind.SONAME_BUMP_RECOMMENDED
         assert "2 binary-incompatible" in result[0].description
+
+    def test_effective_breaking_change_requires_soname_bump(self):
+        """Per-finding BREAKING verdicts count as binary-incompatible."""
+        old_elf = ElfMetadata(soname="libfoo.so.1")
+        new_elf = ElfMetadata(soname="libfoo.so.1")
+        change = Change(
+            kind=ChangeKind.STDLIB_IMPLEMENTATION_CHANGED,
+            symbol="__stdlib_implementation",
+            description="stdlib implementation changed",
+            effective_verdict=Verdict.BREAKING,
+        )
+
+        result = check_soname_bump_policy([change], old_elf, new_elf)
+        assert len(result) == 1
+        assert result[0].kind == ChangeKind.SONAME_BUMP_RECOMMENDED
+        assert "1 binary-incompatible" in result[0].description
 
 
 # ===========================================================================

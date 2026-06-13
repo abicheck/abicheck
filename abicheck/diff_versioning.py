@@ -160,10 +160,22 @@ def check_soname_bump_policy(
       - Breaking changes detected but SONAME not bumped → SONAME_BUMP_RECOMMENDED
       - No breaking changes but SONAME bumped → SONAME_BUMP_UNNECESSARY
     """
-    from .checker_policy import BREAKING_KINDS
+    from .checker_policy import (
+        API_BREAK_KINDS,
+        BREAKING_KINDS,
+        COMPATIBLE_KINDS,
+        RISK_KINDS,
+        Verdict,
+        effective_category,
+    )
 
-    breaking_kinds = BREAKING_KINDS
-    has_breaking = any(c.kind in breaking_kinds for c in changes)
+    kind_sets = (
+        frozenset(BREAKING_KINDS),
+        frozenset(API_BREAK_KINDS),
+        frozenset(COMPATIBLE_KINDS),
+        frozenset(RISK_KINDS),
+    )
+    has_breaking = any(effective_category(c, *kind_sets) is Verdict.BREAKING for c in changes)
 
     # A SONAME is considered "bumped" only when both old and new have a
     # non-empty SONAME and they differ.  If the new SONAME is empty the
@@ -174,7 +186,9 @@ def check_soname_bump_policy(
     result: list[Change] = []
 
     if has_breaking and not soname_bumped and old_elf.soname:
-        breaking_count = sum(1 for c in changes if c.kind in breaking_kinds)
+        breaking_count = sum(
+            1 for c in changes if effective_category(c, *kind_sets) is Verdict.BREAKING
+        )
         if new_elf.soname:
             detail = (
                 f"SONAME remains {old_elf.soname!r}"
