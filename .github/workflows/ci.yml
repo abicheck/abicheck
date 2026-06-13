@@ -23,7 +23,7 @@ jobs:
       - name: Install mypy (for baseline-drift check)
         run: |
           python -m pip install --upgrade pip
-          pip install mypy
+          pip install "mypy==1.19.1"  # pin so the drift gate is reproducible (field-eval CI gap)
       - name: AI-readiness checks (file size, CLAUDE.md coverage, ChangeKind invariants, mypy drift, import cycles)
         run: python scripts/check_ai_readiness.py
       - name: Install package (for FP-rate gate)
@@ -43,7 +43,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev,mcp]" mypy
+          pip install -e ".[dev,mcp]"  # mypy is pinned in [dev]; no separate unpinned install
       - name: Lint (ruff)
         run: ruff check abicheck tests
       - name: Type check (mypy)

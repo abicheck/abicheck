@@ -59,7 +59,10 @@ dev = [
     "filelock>=3.0",
     "hypothesis>=6.0",
     "ruff>=0.3",
-    "mypy>=1.0",
+    # Pinned exact: an unpinned mypy (`mypy>=1.0` + `pip install mypy` in CI) made the
+    # type gate non-reproducible — 2 errors slipped onto a branch and only surfaced on a
+    # newer mypy (field-eval CI gap). Bump deliberately when adopting a new mypy.
+    "mypy==1.19.1",
     "types-PyYAML",
     "jsonschema>=4.0",
 ]
