@@ -1,0 +1,28 @@
+[
+  {
+    "lib": "zstd",
+    "tag": "v1.5.7",
+    "clone_s": 0.63,
+    "cmake_configure_s": 2.78,
+    "tus": 92,
+    "L3_s": 0.54,
+    "L3L4L5_s": 74.36,
+    "source_graph_s": 73.82,
+    "graph_nodes": 141,
+    "graph_edges": 92,
+    "snap_kb": 884
+  },
+  {
+    "lib": "snappy",
+    "tag": "1.2.2",
+    "clone_s": 0.54,
+    "cmake_configure_s": 4.09,
+    "tus": 4,
+    "L3_s": 0.33,
+    "L3L4L5_s": 9.33,
+    "source_graph_s": 9.0,
+    "graph_nodes": 11,
+    "graph_edges": 16,
+    "snap_kb": 112
+  }
+]

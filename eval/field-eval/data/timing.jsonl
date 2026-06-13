@@ -1,0 +1,15 @@
+{"label": "dump:zlib-1.2.13", "cmd": "abicheck dump pkgs/ex_libzlib_1.2.13/lib/libz.so.1.2.13 -o snap/zlib_old.abi.json", "wall_s": 0.35, "rc": 0, "peak_rss_mb": 35.4}
+{"label": "dump:zlib-1.3.1", "cmd": "abicheck dump pkgs/ex_libzlib_1.3.1/lib/libz.so.1.3.1 -o snap/zlib_new.abi.json", "wall_s": 0.333, "rc": 0, "peak_rss_mb": 34.5}
+{"label": "compare:zlib", "cmd": "abicheck compare snap/zlib_old.abi.json snap/zlib_new.abi.json", "wall_s": 0.362, "rc": 0, "peak_rss_mb": 35.9}
+{"label": "L3:zlib", "cmd": "abicheck dump pkgs/ex_libzlib_1.3.1/lib/libz.so.1.3.1 --sources src/zlib --build-info src/zlib/build --collect-mode build --show-data-sources -o snap/zlib.L3.json", "wall_s": 0.307, "rc": 0, "peak_rss_mb": 33.1}
+{"label": "L3L4L5:zlib", "cmd": "abicheck dump pkgs/ex_libzlib_1.3.1/lib/libz.so.1.3.1 --sources src/zlib --build-info src/zlib/build --collect-mode source-target --show-data-sources -o snap/zlib.L345.json", "wall_s": 0.293, "rc": 0, "peak_rss_mb": 33.3}
+{"label": "L3:zlib", "cmd": "abicheck dump pkgs/ex_libzlib_1.3.1/lib/libz.so.1.3.1 --sources src/zlib --build-info src/zlib/build --collect-mode build -o snap/zlib.L3.json", "wall_s": 0.361, "rc": 0, "peak_rss_mb": 35.8}
+{"label": "L3L4L5:zlib", "cmd": "abicheck dump pkgs/ex_libzlib_1.3.1/lib/libz.so.1.3.1 --sources src/zlib --build-info src/zlib/build --collect-mode source-target -o snap/zlib.L345.json", "wall_s": 10.2, "rc": 0, "peak_rss_mb": 139.6}
+{"label": "L4+H:zlib", "cmd": "abicheck dump pkgs/ex_libzlib_1.3.1/lib/libz.so.1.3.1 -H src/zlib/zlib.h -H src/zlib/build/zconf.h --sources src/zlib --build-info src/zlib/build --collect-mode source-target -o snap/zlib.L345H.json", "wall_s": 0.31, "rc": 1, "peak_rss_mb": 33.5}
+{"label": "auto-noquery:zlib", "cmd": "abicheck dump pkgs/ex_libzlib_1.3.1/lib/libz.so.1.3.1 --sources src/zlib_q --collect-mode build -o snap/zlib.autoNo.json", "wall_s": 0.31, "rc": 0, "peak_rss_mb": 34.5}
+{"label": "auto-query:zlib", "cmd": "abicheck dump pkgs/ex_libzlib_1.3.1/lib/libz.so.1.3.1 --sources src/zlib_q --allow-build-query --collect-mode build -o snap/zlib.autoYes.json", "wall_s": 1.258, "rc": 0, "peak_rss_mb": 35.0}
+{"label": "L4+phdr:zlib", "cmd": "abicheck dump pkgs/ex_libzlib_1.3.1/lib/libz.so.1.3.1 --public-header-dir src/zlib --sources src/zlib --build-info src/zlib/build --collect-mode source-target -o snap/zlib.L4ph.json", "wall_s": 9.106, "rc": 0, "peak_rss_mb": 139.6}
+{"label": "L3-meson:freetype", "cmd": "abicheck dump --sources src/ft --collect-mode build -o snap/ft.L3.json", "wall_s": 0.316, "rc": 0, "peak_rss_mb": 33.7}
+{"label": "L345-meson:freetype", "cmd": "abicheck dump --sources src/ft --collect-mode source-target -o snap/ft.L345.json", "wall_s": 31.947, "rc": 0, "peak_rss_mb": 392.0}
+{"label": "L3-autotools-nobear:ffi", "cmd": "abicheck dump --sources src/libffi-3.4.6 --collect-mode build -o snap/ffi.nobear.json", "wall_s": 0.273, "rc": 0, "peak_rss_mb": 32.8}
+{"label": "L3-autotools-bear:ffi", "cmd": "abicheck dump --sources src/libffi-3.4.6 --collect-mode build -o snap/ffi.bear.json", "wall_s": 0.303, "rc": 0, "peak_rss_mb": 33.5}
