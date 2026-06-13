@@ -1,0 +1,1974 @@
+{
+  "description": "Formal detector specification matrix (generated).",
+  "count": 246,
+  "detectors": [
+    {
+      "kind": "abi_relevant_build_flag_changed",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "abi_relevant_build_flag_changed"
+    },
+    {
+      "kind": "abi_surface_explosion",
+      "category": "quality",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "abi_surface_explosion"
+    },
+    {
+      "kind": "abi_tag_changed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L0",
+      "doc_slug": "abi_tag_changed"
+    },
+    {
+      "kind": "anon_field_changed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "unspecified",
+      "doc_slug": "anon_field_changed"
+    },
+    {
+      "kind": "api_depends_on_consumer_env",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "api_depends_on_consumer_env"
+    },
+    {
+      "kind": "atomic_qualifier_changed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L1",
+      "doc_slug": "atomic_qualifier_changed"
+    },
+    {
+      "kind": "base_class_offset_changed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L1",
+      "doc_slug": "base_class_offset_changed"
+    },
+    {
+      "kind": "base_class_position_changed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "unspecified",
+      "doc_slug": "base_class_position_changed"
+    },
+    {
+      "kind": "base_class_virtual_changed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "unspecified",
+      "doc_slug": "base_class_virtual_changed"
+    },
+    {
+      "kind": "behavioural_default_changed",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "behavioural_default_changed"
+    },
+    {
+      "kind": "bit_int_width_changed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L1",
+      "doc_slug": "bit_int_width_changed"
+    },
+    {
+      "kind": "build_context_changed",
+      "category": "quality",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "build_context_changed"
+    },
+    {
+      "kind": "build_option_reaches_public_symbol",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "build_option_reaches_public_symbol"
+    },
+    {
+      "kind": "bundle_intra_dep_removed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L0",
+      "doc_slug": "bundle_intra_dep_removed"
+    },
+    {
+      "kind": "bundle_intra_dep_resolved_to_different_version",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "bundle_intra_dep_resolved_to_different_version"
+    },
+    {
+      "kind": "bundle_intra_dep_signature_changed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L0",
+      "doc_slug": "bundle_intra_dep_signature_changed"
+    },
+    {
+      "kind": "bundle_intra_type_changed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "unspecified",
+      "doc_slug": "bundle_intra_type_changed"
+    },
+    {
+      "kind": "bundle_library_added",
+      "category": "addition",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "bundle_library_added"
+    },
+    {
+      "kind": "bundle_library_removed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "unspecified",
+      "doc_slug": "bundle_library_removed"
+    },
+    {
+      "kind": "bundle_manifest_instantiation_added",
+      "category": "addition",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "bundle_manifest_instantiation_added"
+    },
+    {
+      "kind": "bundle_manifest_instantiation_removed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L0",
+      "doc_slug": "bundle_manifest_instantiation_removed"
+    },
+    {
+      "kind": "bundle_provider_changed",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "L0",
+      "doc_slug": "bundle_provider_changed"
+    },
+    {
+      "kind": "bundle_soname_skew",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L0",
+      "doc_slug": "bundle_soname_skew"
+    },
+    {
+      "kind": "call_graph_public_entry_reachability_changed",
+      "category": "quality",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "call_graph_public_entry_reachability_changed"
+    },
+    {
+      "kind": "calling_convention_changed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L1",
+      "doc_slug": "calling_convention_changed"
+    },
+    {
+      "kind": "char8t_migration",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L1",
+      "doc_slug": "char8t_migration"
+    },
+    {
+      "kind": "common_symbol_risk",
+      "category": "quality",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "common_symbol_risk"
+    },
+    {
+      "kind": "compat_version_changed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "unspecified",
+      "doc_slug": "compat_version_changed"
+    },
+    {
+      "kind": "constant_added",
+      "category": "addition",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "constant_added"
+    },
+    {
+      "kind": "constant_changed",
+      "category": "api_break",
+      "default_verdict": "API_BREAK",
+      "severity": "warning",
+      "min_evidence": "L2",
+      "doc_slug": "constant_changed"
+    },
+    {
+      "kind": "constant_removed",
+      "category": "api_break",
+      "default_verdict": "API_BREAK",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "constant_removed"
+    },
+    {
+      "kind": "constexpr_value_changed",
+      "category": "api_break",
+      "default_verdict": "API_BREAK",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "constexpr_value_changed"
+    },
+    {
+      "kind": "cpo_kind_changed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L2",
+      "doc_slug": "cpo_kind_changed"
+    },
+    {
+      "kind": "cpu_dispatch_isa_dropped",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "L0",
+      "doc_slug": "cpu_dispatch_isa_dropped"
+    },
+    {
+      "kind": "ctor_explicit_added",
+      "category": "api_break",
+      "default_verdict": "API_BREAK",
+      "severity": "warning",
+      "min_evidence": "L2",
+      "doc_slug": "ctor_explicit_added"
+    },
+    {
+      "kind": "ctor_explicit_removed",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "ctor_explicit_removed"
+    },
+    {
+      "kind": "cxx_standard_floor_raised",
+      "category": "api_break",
+      "default_verdict": "API_BREAK",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "cxx_standard_floor_raised"
+    },
+    {
+      "kind": "default_argument_changed",
+      "category": "api_break",
+      "default_verdict": "API_BREAK",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "default_argument_changed"
+    },
+    {
+      "kind": "default_template_arg_changed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L2",
+      "doc_slug": "default_template_arg_changed"
+    },
+    {
+      "kind": "dwarf_info_missing",
+      "category": "quality",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "dwarf_info_missing"
+    },
+    {
+      "kind": "enum_last_member_value_changed",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "enum_last_member_value_changed"
+    },
+    {
+      "kind": "enum_member_added",
+      "category": "addition",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "L1",
+      "doc_slug": "enum_member_added"
+    },
+    {
+      "kind": "enum_member_removed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L1",
+      "doc_slug": "enum_member_removed"
+    },
+    {
+      "kind": "enum_member_renamed",
+      "category": "api_break",
+      "default_verdict": "API_BREAK",
+      "severity": "warning",
+      "min_evidence": "L1",
+      "doc_slug": "enum_member_renamed"
+    },
+    {
+      "kind": "enum_member_value_changed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L1",
+      "doc_slug": "enum_member_value_changed"
+    },
+    {
+      "kind": "enum_underlying_size_changed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L1",
+      "doc_slug": "enum_underlying_size_changed"
+    },
+    {
+      "kind": "evidence_required_missing",
+      "category": "api_break",
+      "default_verdict": "API_BREAK",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "evidence_required_missing"
+    },
+    {
+      "kind": "exceptions_mode_changed",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "L3",
+      "doc_slug": "exceptions_mode_changed"
+    },
+    {
+      "kind": "executable_stack",
+      "category": "quality",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "executable_stack"
+    },
+    {
+      "kind": "executable_stack_removed",
+      "category": "quality",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "L0",
+      "doc_slug": "executable_stack_removed"
+    },
+    {
+      "kind": "experimental_graduated",
+      "category": "addition",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "L0",
+      "doc_slug": "experimental_graduated"
+    },
+    {
+      "kind": "experimental_removed_without_replacement",
+      "category": "api_break",
+      "default_verdict": "API_BREAK",
+      "severity": "warning",
+      "min_evidence": "L0",
+      "doc_slug": "experimental_removed_without_replacement"
+    },
+    {
+      "kind": "field_access_changed",
+      "category": "api_break",
+      "default_verdict": "API_BREAK",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "field_access_changed"
+    },
+    {
+      "kind": "field_became_const",
+      "category": "quality",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "field_became_const"
+    },
+    {
+      "kind": "field_became_mutable",
+      "category": "quality",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "field_became_mutable"
+    },
+    {
+      "kind": "field_became_volatile",
+      "category": "quality",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "field_became_volatile"
+    },
+    {
+      "kind": "field_bitfield_changed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L1",
+      "doc_slug": "field_bitfield_changed"
+    },
+    {
+      "kind": "field_lost_const",
+      "category": "quality",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "field_lost_const"
+    },
+    {
+      "kind": "field_lost_mutable",
+      "category": "quality",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "field_lost_mutable"
+    },
+    {
+      "kind": "field_lost_volatile",
+      "category": "quality",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "field_lost_volatile"
+    },
+    {
+      "kind": "field_renamed",
+      "category": "api_break",
+      "default_verdict": "API_BREAK",
+      "severity": "warning",
+      "min_evidence": "L1",
+      "doc_slug": "field_renamed"
+    },
+    {
+      "kind": "flexible_array_member_changed",
+      "category": "quality",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "L1",
+      "doc_slug": "flexible_array_member_changed"
+    },
+    {
+      "kind": "fortify_source_weakened",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "fortify_source_weakened"
+    },
+    {
+      "kind": "frame_register_changed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "unspecified",
+      "doc_slug": "frame_register_changed"
+    },
+    {
+      "kind": "func_added",
+      "category": "addition",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "L0",
+      "doc_slug": "func_added"
+    },
+    {
+      "kind": "func_became_inline",
+      "category": "api_break",
+      "default_verdict": "API_BREAK",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "func_became_inline"
+    },
+    {
+      "kind": "func_cv_changed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L1",
+      "doc_slug": "func_cv_changed"
+    },
+    {
+      "kind": "func_deleted",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "unspecified",
+      "doc_slug": "func_deleted"
+    },
+    {
+      "kind": "func_deleted_dwarf",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "unspecified",
+      "doc_slug": "func_deleted_dwarf"
+    },
+    {
+      "kind": "func_deleted_elf_fallback",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "unspecified",
+      "doc_slug": "func_deleted_elf_fallback"
+    },
+    {
+      "kind": "func_language_linkage_changed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L0",
+      "doc_slug": "func_language_linkage_changed"
+    },
+    {
+      "kind": "func_likely_renamed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "unspecified",
+      "doc_slug": "func_likely_renamed"
+    },
+    {
+      "kind": "func_lost_inline",
+      "category": "quality",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "func_lost_inline"
+    },
+    {
+      "kind": "func_noexcept_added",
+      "category": "quality",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "func_noexcept_added"
+    },
+    {
+      "kind": "func_noexcept_removed",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "func_noexcept_removed"
+    },
+    {
+      "kind": "func_params_changed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L1",
+      "doc_slug": "func_params_changed"
+    },
+    {
+      "kind": "func_pure_virtual_added",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L1",
+      "doc_slug": "func_pure_virtual_added"
+    },
+    {
+      "kind": "func_ref_qual_changed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "unspecified",
+      "doc_slug": "func_ref_qual_changed"
+    },
+    {
+      "kind": "func_removed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L0",
+      "doc_slug": "func_removed"
+    },
+    {
+      "kind": "func_removed_elf_only",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L0",
+      "doc_slug": "func_removed_elf_only"
+    },
+    {
+      "kind": "func_return_changed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L1",
+      "doc_slug": "func_return_changed"
+    },
+    {
+      "kind": "func_static_changed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L1",
+      "doc_slug": "func_static_changed"
+    },
+    {
+      "kind": "func_virtual_added",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L1",
+      "doc_slug": "func_virtual_added"
+    },
+    {
+      "kind": "func_virtual_became_pure",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "unspecified",
+      "doc_slug": "func_virtual_became_pure"
+    },
+    {
+      "kind": "func_virtual_removed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "unspecified",
+      "doc_slug": "func_virtual_removed"
+    },
+    {
+      "kind": "func_visibility_changed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L0",
+      "doc_slug": "func_visibility_changed"
+    },
+    {
+      "kind": "func_visibility_protected_changed",
+      "category": "quality",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "func_visibility_protected_changed"
+    },
+    {
+      "kind": "generated_file_dependency_unstable",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "generated_file_dependency_unstable"
+    },
+    {
+      "kind": "generated_header_changed",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "generated_header_changed"
+    },
+    {
+      "kind": "generated_header_reaches_public_api",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "generated_header_reaches_public_api"
+    },
+    {
+      "kind": "glibcxx_dual_abi_flip_detected",
+      "category": "quality",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "L0",
+      "doc_slug": "glibcxx_dual_abi_flip_detected"
+    },
+    {
+      "kind": "handle_type_changed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "unspecified",
+      "doc_slug": "handle_type_changed"
+    },
+    {
+      "kind": "header_parse_context_drift",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "header_parse_context_drift"
+    },
+    {
+      "kind": "hidden_friend_added",
+      "category": "addition",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "hidden_friend_added"
+    },
+    {
+      "kind": "hidden_friend_removed",
+      "category": "api_break",
+      "default_verdict": "API_BREAK",
+      "severity": "warning",
+      "min_evidence": "L2",
+      "doc_slug": "hidden_friend_removed"
+    },
+    {
+      "kind": "ifunc_introduced",
+      "category": "quality",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "ifunc_introduced"
+    },
+    {
+      "kind": "ifunc_removed",
+      "category": "quality",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "ifunc_removed"
+    },
+    {
+      "kind": "include_graph_public_header_drift",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "include_graph_public_header_drift"
+    },
+    {
+      "kind": "inline_body_changed",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "inline_body_changed"
+    },
+    {
+      "kind": "inline_body_references_renamed_member",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L2",
+      "doc_slug": "inline_body_references_renamed_member"
+    },
+    {
+      "kind": "inline_namespace_moved",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L0",
+      "doc_slug": "inline_namespace_moved"
+    },
+    {
+      "kind": "inline_namespace_version_bumped",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L0",
+      "doc_slug": "inline_namespace_version_bumped"
+    },
+    {
+      "kind": "instantiation_missing_from_binary",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L2",
+      "doc_slug": "instantiation_missing_from_binary"
+    },
+    {
+      "kind": "integer_model_changed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L1",
+      "doc_slug": "integer_model_changed"
+    },
+    {
+      "kind": "internal_template_leaks_via_public_api",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L2",
+      "doc_slug": "internal_template_leaks_via_public_api"
+    },
+    {
+      "kind": "internal_type_leaks_via_public_api",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L2",
+      "doc_slug": "internal_type_leaks_via_public_api"
+    },
+    {
+      "kind": "layer_coverage_asymmetric",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "layer_coverage_asymmetric"
+    },
+    {
+      "kind": "layout_unverifiable",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "layout_unverifiable"
+    },
+    {
+      "kind": "libcpp_abi_version_changed",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "libcpp_abi_version_changed"
+    },
+    {
+      "kind": "link_export_policy_changed",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "link_export_policy_changed"
+    },
+    {
+      "kind": "macho_cpu_type_changed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L0",
+      "doc_slug": "macho_cpu_type_changed"
+    },
+    {
+      "kind": "mandatory_template_param_added",
+      "category": "api_break",
+      "default_verdict": "API_BREAK",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "mandatory_template_param_added"
+    },
+    {
+      "kind": "method_access_changed",
+      "category": "api_break",
+      "default_verdict": "API_BREAK",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "method_access_changed"
+    },
+    {
+      "kind": "needed_added",
+      "category": "quality",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "L0",
+      "doc_slug": "needed_added"
+    },
+    {
+      "kind": "needed_removed",
+      "category": "quality",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "L0",
+      "doc_slug": "needed_removed"
+    },
+    {
+      "kind": "odr_source_conflict",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "odr_source_conflict"
+    },
+    {
+      "kind": "opaque_invariant_broken",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "unspecified",
+      "doc_slug": "opaque_invariant_broken"
+    },
+    {
+      "kind": "overload_added",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "overload_added"
+    },
+    {
+      "kind": "overload_set_rerouted",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "overload_set_rerouted"
+    },
+    {
+      "kind": "param_became_va_list",
+      "category": "quality",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "param_became_va_list"
+    },
+    {
+      "kind": "param_default_value_changed",
+      "category": "quality",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "L2",
+      "doc_slug": "param_default_value_changed"
+    },
+    {
+      "kind": "param_default_value_removed",
+      "category": "api_break",
+      "default_verdict": "API_BREAK",
+      "severity": "warning",
+      "min_evidence": "L2",
+      "doc_slug": "param_default_value_removed"
+    },
+    {
+      "kind": "param_lost_va_list",
+      "category": "quality",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "param_lost_va_list"
+    },
+    {
+      "kind": "param_pointer_level_changed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L1",
+      "doc_slug": "param_pointer_level_changed"
+    },
+    {
+      "kind": "param_renamed",
+      "category": "api_break",
+      "default_verdict": "API_BREAK",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "param_renamed"
+    },
+    {
+      "kind": "param_restrict_changed",
+      "category": "quality",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "param_restrict_changed"
+    },
+    {
+      "kind": "pe_forwarder_changed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L0",
+      "doc_slug": "pe_forwarder_changed"
+    },
+    {
+      "kind": "pe_machine_changed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L0",
+      "doc_slug": "pe_machine_changed"
+    },
+    {
+      "kind": "pie_disabled",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "pie_disabled"
+    },
+    {
+      "kind": "polymorphic_type_non_virtual_dtor",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "polymorphic_type_non_virtual_dtor"
+    },
+    {
+      "kind": "protected_visibility_changed",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "protected_visibility_changed"
+    },
+    {
+      "kind": "public_api_exposes_stl_by_value",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "public_api_exposes_stl_by_value"
+    },
+    {
+      "kind": "public_macro_value_changed",
+      "category": "api_break",
+      "default_verdict": "API_BREAK",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "public_macro_value_changed"
+    },
+    {
+      "kind": "public_reachability_changed",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "public_reachability_changed"
+    },
+    {
+      "kind": "public_surface_grew",
+      "category": "quality",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "public_surface_grew"
+    },
+    {
+      "kind": "public_surface_shrank",
+      "category": "quality",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "public_surface_shrank"
+    },
+    {
+      "kind": "public_typedef_target_changed",
+      "category": "api_break",
+      "default_verdict": "API_BREAK",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "public_typedef_target_changed"
+    },
+    {
+      "kind": "relro_weakened",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "L0",
+      "doc_slug": "relro_weakened"
+    },
+    {
+      "kind": "removed_const_overload",
+      "category": "api_break",
+      "default_verdict": "API_BREAK",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "removed_const_overload"
+    },
+    {
+      "kind": "return_pointer_level_changed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "unspecified",
+      "doc_slug": "return_pointer_level_changed"
+    },
+    {
+      "kind": "rpath_changed",
+      "category": "quality",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "rpath_changed"
+    },
+    {
+      "kind": "rtti_inheritance_changed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L0",
+      "doc_slug": "rtti_inheritance_changed"
+    },
+    {
+      "kind": "rtti_mode_changed",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "L3",
+      "doc_slug": "rtti_mode_changed"
+    },
+    {
+      "kind": "runpath_changed",
+      "category": "quality",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "L0",
+      "doc_slug": "runpath_changed"
+    },
+    {
+      "kind": "serialization_tag_changed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L2",
+      "doc_slug": "serialization_tag_changed"
+    },
+    {
+      "kind": "soname_bump_recommended",
+      "category": "quality",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "soname_bump_recommended"
+    },
+    {
+      "kind": "soname_bump_unnecessary",
+      "category": "quality",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "soname_bump_unnecessary"
+    },
+    {
+      "kind": "soname_changed",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "soname_changed"
+    },
+    {
+      "kind": "soname_missing",
+      "category": "quality",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "L0",
+      "doc_slug": "soname_missing"
+    },
+    {
+      "kind": "source_binary_provenance_mismatch",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "source_binary_provenance_mismatch"
+    },
+    {
+      "kind": "source_decl_binary_symbol_mismatch",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "source_decl_binary_symbol_mismatch"
+    },
+    {
+      "kind": "source_level_kind_changed",
+      "category": "api_break",
+      "default_verdict": "API_BREAK",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "source_level_kind_changed"
+    },
+    {
+      "kind": "source_to_binary_mapping_changed",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "source_to_binary_mapping_changed"
+    },
+    {
+      "kind": "stack_canary_removed",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "L0",
+      "doc_slug": "stack_canary_removed"
+    },
+    {
+      "kind": "standard_layout_lost",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "standard_layout_lost"
+    },
+    {
+      "kind": "std_reexport_removed",
+      "category": "api_break",
+      "default_verdict": "API_BREAK",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "std_reexport_removed"
+    },
+    {
+      "kind": "stdlib_implementation_changed",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "stdlib_implementation_changed"
+    },
+    {
+      "kind": "struct_alignment_changed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "unspecified",
+      "doc_slug": "struct_alignment_changed"
+    },
+    {
+      "kind": "struct_field_offset_changed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "unspecified",
+      "doc_slug": "struct_field_offset_changed"
+    },
+    {
+      "kind": "struct_field_removed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "unspecified",
+      "doc_slug": "struct_field_removed"
+    },
+    {
+      "kind": "struct_field_type_changed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "unspecified",
+      "doc_slug": "struct_field_type_changed"
+    },
+    {
+      "kind": "struct_packing_changed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L1",
+      "doc_slug": "struct_packing_changed"
+    },
+    {
+      "kind": "struct_return_convention_changed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L1",
+      "doc_slug": "struct_return_convention_changed"
+    },
+    {
+      "kind": "struct_size_changed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L1",
+      "doc_slug": "struct_size_changed"
+    },
+    {
+      "kind": "sycl_backend_driver_req_changed",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "sycl_backend_driver_req_changed"
+    },
+    {
+      "kind": "sycl_implementation_changed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "unspecified",
+      "doc_slug": "sycl_implementation_changed"
+    },
+    {
+      "kind": "sycl_overload_set_removed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L0",
+      "doc_slug": "sycl_overload_set_removed"
+    },
+    {
+      "kind": "sycl_pi_entrypoint_added",
+      "category": "addition",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "sycl_pi_entrypoint_added"
+    },
+    {
+      "kind": "sycl_pi_entrypoint_removed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "unspecified",
+      "doc_slug": "sycl_pi_entrypoint_removed"
+    },
+    {
+      "kind": "sycl_pi_version_changed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "unspecified",
+      "doc_slug": "sycl_pi_version_changed"
+    },
+    {
+      "kind": "sycl_plugin_added",
+      "category": "addition",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "sycl_plugin_added"
+    },
+    {
+      "kind": "sycl_plugin_removed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "unspecified",
+      "doc_slug": "sycl_plugin_removed"
+    },
+    {
+      "kind": "sycl_plugin_search_path_changed",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "sycl_plugin_search_path_changed"
+    },
+    {
+      "kind": "sycl_runtime_version_changed",
+      "category": "quality",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "sycl_runtime_version_changed"
+    },
+    {
+      "kind": "symbol_binding_changed",
+      "category": "quality",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "symbol_binding_changed"
+    },
+    {
+      "kind": "symbol_binding_strengthened",
+      "category": "quality",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "L0",
+      "doc_slug": "symbol_binding_strengthened"
+    },
+    {
+      "kind": "symbol_elf_visibility_changed",
+      "category": "quality",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "symbol_elf_visibility_changed"
+    },
+    {
+      "kind": "symbol_leaked_from_dependency_changed",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "symbol_leaked_from_dependency_changed"
+    },
+    {
+      "kind": "symbol_moved_version_node",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "symbol_moved_version_node"
+    },
+    {
+      "kind": "symbol_renamed_batch",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "unspecified",
+      "doc_slug": "symbol_renamed_batch"
+    },
+    {
+      "kind": "symbol_size_changed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L0",
+      "doc_slug": "symbol_size_changed"
+    },
+    {
+      "kind": "symbol_size_changed_const_object",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "unspecified",
+      "doc_slug": "symbol_size_changed_const_object"
+    },
+    {
+      "kind": "symbol_size_changed_internal",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "unspecified",
+      "doc_slug": "symbol_size_changed_internal"
+    },
+    {
+      "kind": "symbol_type_changed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "unspecified",
+      "doc_slug": "symbol_type_changed"
+    },
+    {
+      "kind": "symbol_version_alias_changed",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "symbol_version_alias_changed"
+    },
+    {
+      "kind": "symbol_version_defined_added",
+      "category": "quality",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "symbol_version_defined_added"
+    },
+    {
+      "kind": "symbol_version_defined_removed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L0",
+      "doc_slug": "symbol_version_defined_removed"
+    },
+    {
+      "kind": "symbol_version_node_removed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L0",
+      "doc_slug": "symbol_version_node_removed"
+    },
+    {
+      "kind": "symbol_version_required_added",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "symbol_version_required_added"
+    },
+    {
+      "kind": "symbol_version_required_added_compat",
+      "category": "quality",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "symbol_version_required_added_compat"
+    },
+    {
+      "kind": "symbol_version_required_removed",
+      "category": "quality",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "symbol_version_required_removed"
+    },
+    {
+      "kind": "tag_type_renamed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L0",
+      "doc_slug": "tag_type_renamed"
+    },
+    {
+      "kind": "tail_padding_reuse_changed",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "tail_padding_reuse_changed"
+    },
+    {
+      "kind": "template_body_changed",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "template_body_changed"
+    },
+    {
+      "kind": "template_param_type_changed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "unspecified",
+      "doc_slug": "template_param_type_changed"
+    },
+    {
+      "kind": "template_return_type_changed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "unspecified",
+      "doc_slug": "template_return_type_changed"
+    },
+    {
+      "kind": "threadsafe_statics_mode_changed",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "L3",
+      "doc_slug": "threadsafe_statics_mode_changed"
+    },
+    {
+      "kind": "tls_model_changed",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "L3",
+      "doc_slug": "tls_model_changed"
+    },
+    {
+      "kind": "tls_var_size_changed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L1",
+      "doc_slug": "tls_var_size_changed"
+    },
+    {
+      "kind": "toolchain_flag_drift",
+      "category": "quality",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "L1",
+      "doc_slug": "toolchain_flag_drift"
+    },
+    {
+      "kind": "toolchain_version_changed",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "toolchain_version_changed"
+    },
+    {
+      "kind": "trivially_copyable_lost",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "unspecified",
+      "doc_slug": "trivially_copyable_lost"
+    },
+    {
+      "kind": "type_added",
+      "category": "addition",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "type_added"
+    },
+    {
+      "kind": "type_alignment_changed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "unspecified",
+      "doc_slug": "type_alignment_changed"
+    },
+    {
+      "kind": "type_base_changed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L1",
+      "doc_slug": "type_base_changed"
+    },
+    {
+      "kind": "type_became_final",
+      "category": "api_break",
+      "default_verdict": "API_BREAK",
+      "severity": "warning",
+      "min_evidence": "L2",
+      "doc_slug": "type_became_final"
+    },
+    {
+      "kind": "type_became_opaque",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L1",
+      "doc_slug": "type_became_opaque"
+    },
+    {
+      "kind": "type_field_added",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L1",
+      "doc_slug": "type_field_added"
+    },
+    {
+      "kind": "type_field_added_compatible",
+      "category": "addition",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "type_field_added_compatible"
+    },
+    {
+      "kind": "type_field_offset_changed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L1",
+      "doc_slug": "type_field_offset_changed"
+    },
+    {
+      "kind": "type_field_removed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "unspecified",
+      "doc_slug": "type_field_removed"
+    },
+    {
+      "kind": "type_field_type_changed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "unspecified",
+      "doc_slug": "type_field_type_changed"
+    },
+    {
+      "kind": "type_kind_changed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L1",
+      "doc_slug": "type_kind_changed"
+    },
+    {
+      "kind": "type_lost_final",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "type_lost_final"
+    },
+    {
+      "kind": "type_removed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L1",
+      "doc_slug": "type_removed"
+    },
+    {
+      "kind": "type_size_changed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L1",
+      "doc_slug": "type_size_changed"
+    },
+    {
+      "kind": "type_visibility_changed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "unspecified",
+      "doc_slug": "type_visibility_changed"
+    },
+    {
+      "kind": "type_vtable_changed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L1",
+      "doc_slug": "type_vtable_changed"
+    },
+    {
+      "kind": "typedef_base_changed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L1",
+      "doc_slug": "typedef_base_changed"
+    },
+    {
+      "kind": "typedef_removed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L1",
+      "doc_slug": "typedef_removed"
+    },
+    {
+      "kind": "typedef_version_sentinel",
+      "category": "quality",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "typedef_version_sentinel"
+    },
+    {
+      "kind": "undocumented_export_ratio_increased",
+      "category": "quality",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "undocumented_export_ratio_increased"
+    },
+    {
+      "kind": "uninstantiated_template_removed",
+      "category": "api_break",
+      "default_verdict": "API_BREAK",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "uninstantiated_template_removed"
+    },
+    {
+      "kind": "union_field_added",
+      "category": "addition",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "union_field_added"
+    },
+    {
+      "kind": "union_field_removed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L1",
+      "doc_slug": "union_field_removed"
+    },
+    {
+      "kind": "union_field_type_changed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "unspecified",
+      "doc_slug": "union_field_type_changed"
+    },
+    {
+      "kind": "unspecified_return_now_named",
+      "category": "api_break",
+      "default_verdict": "API_BREAK",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "unspecified_return_now_named"
+    },
+    {
+      "kind": "used_reserved_field",
+      "category": "quality",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "L1",
+      "doc_slug": "used_reserved_field"
+    },
+    {
+      "kind": "value_abi_trait_changed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L1",
+      "doc_slug": "value_abi_trait_changed"
+    },
+    {
+      "kind": "var_access_changed",
+      "category": "api_break",
+      "default_verdict": "API_BREAK",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "var_access_changed"
+    },
+    {
+      "kind": "var_access_widened",
+      "category": "quality",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "var_access_widened"
+    },
+    {
+      "kind": "var_added",
+      "category": "addition",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "L0",
+      "doc_slug": "var_added"
+    },
+    {
+      "kind": "var_became_const",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L1",
+      "doc_slug": "var_became_const"
+    },
+    {
+      "kind": "var_lost_const",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "unspecified",
+      "doc_slug": "var_lost_const"
+    },
+    {
+      "kind": "var_removed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L0",
+      "doc_slug": "var_removed"
+    },
+    {
+      "kind": "var_type_changed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L1",
+      "doc_slug": "var_type_changed"
+    },
+    {
+      "kind": "var_value_changed",
+      "category": "quality",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "var_value_changed"
+    },
+    {
+      "kind": "vector_abi_changed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "unspecified",
+      "doc_slug": "vector_abi_changed"
+    },
+    {
+      "kind": "version_script_missing",
+      "category": "quality",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "version_script_missing"
+    },
+    {
+      "kind": "versioned_symbol_scheme_detected",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "L0",
+      "doc_slug": "versioned_symbol_scheme_detected"
+    },
+    {
+      "kind": "virtual_method_added",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "unspecified",
+      "doc_slug": "virtual_method_added"
+    },
+    {
+      "kind": "visibility_leak",
+      "category": "quality",
+      "default_verdict": "COMPATIBLE",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "visibility_leak"
+    },
+    {
+      "kind": "vptr_introduced",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "unspecified",
+      "doc_slug": "vptr_introduced"
+    },
+    {
+      "kind": "vtable_slot_count_changed",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
+      "min_evidence": "L0",
+      "doc_slug": "vtable_slot_count_changed"
+    },
+    {
+      "kind": "vtable_symbol_identity_changed",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "vtable_symbol_identity_changed"
+    },
+    {
+      "kind": "writable_executable_segment",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "unspecified",
+      "doc_slug": "writable_executable_segment"
+    }
+  ]
+}

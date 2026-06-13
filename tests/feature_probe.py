@@ -32,6 +32,7 @@ hard-coding version numbers.
 """
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import sys
@@ -54,7 +55,25 @@ _FEATURE_PROBES: dict[str, tuple[bool, str, tuple[str, ...]]] = {
 }
 
 
+def _env_compiler(var: str) -> str | None:
+    """Compiler named by env var *var* (CC/CXX) if on PATH, else None.
+
+    The clang examples-validation lane selects its toolchain via ``CC``/``CXX``;
+    the probe must honor the *same* compiler before falling back to the native
+    order, otherwise a clang-buildable feature (e.g. ``_BitInt`` on the runner's
+    Clang) is judged unsupported because GCC is tried first and lacks it — which
+    would silently skip the case and report a false green on the clang lane.
+    """
+    cc = os.environ.get(var)
+    if cc and shutil.which(cc):
+        return cc
+    return None
+
+
 def _c_compiler() -> str | None:
+    env = _env_compiler("CC")
+    if env:
+        return env
     for cc in ("gcc", "clang", "cc"):
         if shutil.which(cc):
             return cc
@@ -62,6 +81,9 @@ def _c_compiler() -> str | None:
 
 
 def _cxx_compiler() -> str | None:
+    env = _env_compiler("CXX")
+    if env:
+        return env
     for cxx in ("g++", "clang++", "c++"):
         if shutil.which(cxx):
             return cxx

@@ -661,10 +661,22 @@ def _diff_enums(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     new_map: dict[str, EnumType] = {
         e.name: e for e in new.enums if not _is_non_abi_surface_type(e.name, exclude_stdlib_namespaces=excl)
     }
+    # A wholly-removed enum is stored in snap.enums, NOT snap.types, so the
+    # TYPE_REMOVED loop in _diff_types() never sees it — the old "TYPE_REMOVED
+    # covers this" comment was wrong and the removal went silently undetected
+    # (case78). Emit it here, guarded by the same stripped-binary suppression
+    # _diff_types uses so a stripped new side can't manufacture phantom removals.
+    suppress_removed = _removals_are_unconfirmed(old, new)
 
     for name, e_old in old_map.items():
         if name not in new_map:
-            continue  # TYPE_REMOVED covers this
+            if not suppress_removed:
+                changes.append(Change(
+                    kind=ChangeKind.TYPE_REMOVED,
+                    symbol=name,
+                    description=f"Enum removed: {name}",
+                ))
+            continue
         e_new = new_map[name]
         old_members = {m.name: m.value for m in e_old.members}
         new_members = {m.name: m.value for m in e_new.members}

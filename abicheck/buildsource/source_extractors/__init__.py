@@ -55,21 +55,37 @@ from .clang import (
     macros_from_preprocessor,
     source_abi_from_clang_ast,
 )
+from .resolver import (
+    ALL_CAPABILITIES,
+    AUTO_PREFERENCE,
+    PROFILES,
+    SourceExtractorChoice,
+    SourceExtractorProfile,
+    resolve_source_extractor,
+    select_source_backend,
+)
 
 __all__ = [
+    "ALL_CAPABILITIES",
     "ANDROID_EXTRACTOR_VERSION",
+    "AUTO_PREFERENCE",
     "CASTXML_EXTRACTOR_VERSION",
     "CLANG_EXTRACTOR_VERSION",
+    "PROFILES",
     "AndroidHeaderAbiAdapter",
     "CastxmlSourceExtractor",
     "ClangSourceExtractor",
     "SourceAbiExtractor",
     "SourceExtractionError",
+    "SourceExtractorChoice",
+    "SourceExtractorProfile",
     "assemble_source_tu",
     "build_castxml_command",
     "build_clang_command",
     "build_clang_macro_command",
     "macros_from_preprocessor",
     "parse_android_dump",
+    "resolve_source_extractor",
+    "select_source_backend",
     "source_abi_from_clang_ast",
 ]

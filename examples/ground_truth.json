@@ -207,6 +207,10 @@
       "api_break": false,
       "bad_practice": true,
       "description": "Public surface and every exported symbol are identical between v1 and v2; only the ABI-affecting compiler flag set differs (v2 adds -fshort-enums). The toolchain-flag drift detector parses DW_AT_producer and reports the mismatch as a compatible, informational quality signal \u2014 a leading indicator that the two builds were made under different ABI assumptions, before that drift turns into a real layout break on a library that exposes enums/packed structs/a different data model.",
+      "known_gap": "Clang: the toolchain-flag drift signal reads the compiler flag set from DW_AT_producer, but clang does not embed command-line flags there by default (it needs -grecord-command-line), so -fshort-enums is invisible and the tool returns NO_CHANGE. GCC records the switches in DW_AT_producer by default, so the drift is detected. Producer-specific; detection requires GCC or a clang build with -grecord-command-line.",
+      "known_gap_toolchains": [
+        "clang"
+      ],
       "expected_kinds": [
         "toolchain_flag_drift"
       ]
@@ -1619,7 +1623,10 @@
       "expected_kinds": [
         "calling_convention_changed"
       ],
-      "known_gap": "GCC does not emit DW_AT_calling_convention for __attribute__((ms_abi)); detection requires Clang"
+      "known_gap": "GCC does not emit DW_AT_calling_convention for __attribute__((ms_abi)); detection requires Clang",
+      "known_gap_toolchains": [
+        "gcc"
+      ]
     },
     "case65_symbol_version_removed": {
       "expected": "BREAKING",
@@ -2272,6 +2279,106 @@
       "expected_kinds": [
         "experimental_graduated",
         "func_added"
+      ]
+    },
+    "case100_experimental_removed_without_replacement": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "min_evidence": "L0",
+      "platforms": [
+        "linux",
+        "macos"
+      ],
+      "abi_break": true,
+      "api_break": true,
+      "bad_practice": false,
+      "description": "A declaration only ever lived under lib::experimental:: in v1 and is removed from v2 with no stable-namespace replacement. The dedicated EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT finding tells reviewers there is no migration target; the underlying mangled symbol disappearance is also reported as a plain func_removed.",
+      "expected_kinds": [
+        "experimental_removed_without_replacement",
+        "func_removed"
+      ]
+    },
+    "case101_inline_namespace_version_bumped": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "min_evidence": "L0",
+      "platforms": [
+        "linux",
+        "macos"
+      ],
+      "abi_break": true,
+      "api_break": false,
+      "bad_practice": false,
+      "description": "Library uses a versioned inline namespace `_V1` in v1 and bumps to `_V2` in v2. Declarations look identical to consumers so source keeps compiling, but every freshly built TU emits mangled symbols carrying the new version segment \u2014 old and new TUs of the same program ODR-violate. Specialisation of the existing inline_namespace_moved that fires from declared-name evidence so it works on header-only inputs and single-symbol bumps.",
+      "expected_kinds": [
+        "inline_namespace_version_bumped"
+      ]
+    },
+    "case102_frozen_runtime_signature_changed": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "min_evidence": "L1",
+      "platforms": [
+        "linux",
+        "macos"
+      ],
+      "abi_break": true,
+      "api_break": true,
+      "bad_practice": false,
+      "description": "An extern \"C\" runtime entry inside a contractually-frozen namespace (mirrors oneTBB's `detail::r1`) has its parameter and return types widened in place. The exported symbol name is unchanged but callers built against v1 pass int into what is now a long slot. Detected by the existing FUNC_PARAMS_CHANGED / FUNC_RETURN_CHANGED detectors; the new `frozen_namespaces:` policy field additionally tags the finding via Change.frozen_namespace_violation and refuses any `overrides:` entry that would downgrade it. See policy.yaml in the case directory.",
+      "expected_kinds": [
+        "func_params_changed",
+        "func_return_changed"
+      ]
+    },
+    "case103_toolchain_flag_drift": {
+      "expected": "COMPATIBLE",
+      "category": "quality",
+      "min_evidence": "L1",
+      "platforms": [
+        "linux"
+      ],
+      "abi_break": false,
+      "api_break": false,
+      "bad_practice": true,
+      "description": "Public surface and every exported symbol are identical between v1 and v2; only the ABI-affecting compiler flag set differs (v2 adds -fshort-enums). The toolchain-flag drift detector parses DW_AT_producer and reports the mismatch as a compatible, informational quality signal \u2014 a leading indicator that the two builds were made under different ABI assumptions, before that drift turns into a real layout break on a library that exposes enums/packed structs/a different data model.",
+      "known_gap": "Clang: the toolchain-flag drift signal reads the compiler flag set from DW_AT_producer, but clang does not embed command-line flags there by default (it needs -grecord-command-line), so -fshort-enums is invisible and the tool returns NO_CHANGE. GCC records the switches in DW_AT_producer by default, so the drift is detected. Producer-specific; detection requires GCC or a clang build with -grecord-command-line.",
+      "known_gap_toolchains": [
+        "clang"
+      ],
+      "expected_kinds": [
+        "toolchain_flag_drift"
+      ]
+    },
+    "case104_glibcxx_dual_abi_flip": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "min_evidence": "L0",
+      "platforms": [
+        "linux"
+      ],
+      "abi_break": true,
+      "api_break": false,
+      "bad_practice": true,
+      "description": "Identical C++ source built once with _GLIBCXX_USE_CXX11_ABI=0 (v1) and once with =1 (v2). GNU libstdc++ ships two incompatible std::string/std::list ABIs selected by this macro, so every std::string-bearing exported symbol gets a different mangled name (std::__cxx11::basic_string vs the legacy std::basic_string). abicheck recognises the mass-churn signature and collapses it into a single glibcxx_dual_abi_flip_detected diagnostic alongside the underlying func_removed/func_added evidence; verdict is BREAKING. GNU libstdc++ only.",
+      "expected_kinds": [
+        "glibcxx_dual_abi_flip_detected",
+        "func_removed"
+      ]
+    },
+    "case112_lp64_ilp64": {
+      "expected": "BREAKING",
+      "category": "breaking",
+      "min_evidence": "L1",
+      "platforms": [
+        "linux"
+      ],
+      "abi_break": true,
+      "api_break": false,
+      "bad_practice": false,
+      "description": "A BLAS/LAPACK-style integer interface (as shipped by e.g. oneMKL) switched LP64 (INT=int, 32-bit) to ILP64 (INT=long, 64-bit). A large fraction of public integer parameters/returns flip width together and the integer typedef resizes, the signature of an LP64/ILP64 model switch.",
+      "expected_kinds": [
+        "integer_model_changed"
       ]
     },
     "case140_empty_base_optimization_lost": {

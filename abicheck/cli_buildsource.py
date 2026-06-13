@@ -62,10 +62,6 @@ from .cli import main
 
 if TYPE_CHECKING:
     from .buildsource.source_abi import SourceAbiSurface
-    from .buildsource.source_extractors import (
-        CastxmlSourceExtractor,
-        ClangSourceExtractor,
-    )
     from .buildsource.source_graph import SourceGraphSummary
     from .checker_types import Change, DiffResult
     from .model import AbiSnapshot
@@ -103,11 +99,13 @@ if TYPE_CHECKING:
               help="Collect L4 source ABI replay (parses sources/headers). REQUIRES clang "
                    "(or castxml/an Android dump); without the tool this fails gracefully and "
                    "source-only checks stay disabled.")
-@click.option("--source-abi-extractor", "source_abi_extractor", default="clang", show_default=True,
-              type=click.Choice(["clang", "castxml", "android"], case_sensitive=False),
-              help="L4 backend: clang (inline/template/constexpr bodies + default args), "
+@click.option("--source-abi-extractor", "source_abi_extractor", default="auto", show_default=True,
+              type=click.Choice(["auto", "clang", "castxml", "android"], case_sensitive=False),
+              help="L4 backend: auto (pick the most capable available — clang, else castxml), "
+                   "clang (inline/template/constexpr bodies + default args), "
                    "castxml (declarations/types/const values only), or android (reuse a "
-                   "pre-captured header-abi .lsdump/.sdump).")
+                   "pre-captured header-abi .lsdump/.sdump). A requested clang that is not on "
+                   "PATH falls back to castxml rather than disabling source-only checks.")
 @click.option("--source-abi-scope", "source_abi_scope", default="target", show_default=True,
               type=click.Choice(list(REPLAY_SCOPES), case_sensitive=False),
               help="Which translation units to replay (ADR-030 D7): off | headers-only | "
@@ -954,15 +952,32 @@ def _collect_source_abi(
             exported=exported, library=library, roots=roots,
         )
 
-    impl: ClangSourceExtractor | CastxmlSourceExtractor
-    if extractor == "clang":
-        from .buildsource.source_extractors import ClangSourceExtractor
-        impl = ClangSourceExtractor(clang_bin=clang_bin)
-        tool_name = clang_bin
-    else:
-        from .buildsource.source_extractors import CastxmlSourceExtractor
-        impl = CastxmlSourceExtractor()
-        tool_name = "castxml"
+    from .buildsource.source_extractors import select_source_backend
+
+    # Evaluate the available front-ends and pick a path (ADR-030 D3): "auto"
+    # picks the most capable available backend; an explicitly-requested clang
+    # that is absent falls back to castxml instead of disabling source checks.
+    choice, impl = select_source_backend(extractor, clang_bin=clang_bin)
+    if impl is None or choice.selected is None:
+        detail = "; ".join(f"{n}: {why}" for n, why in choice.skipped) or choice.reason
+        extractors.append(ExtractorRecord(
+            name=f"source_abi:{extractor}", status="failed",
+            detail=f"no usable source-ABI backend ({detail}); source-only checks disabled",
+        ))
+        return (
+            SourceAbiSurface(library=library, target_id=target_id),
+            "unavailable: no source-ABI front-end on PATH (clang/castxml) — "
+            "source-only checks disabled. Install clang or castxml.",
+        )
+
+    extractor = choice.selected
+    tool_name = clang_bin if choice.selected == "clang" else "castxml"
+    # Surface the decision and the chosen backend's capability gaps so a
+    # construct it cannot observe (e.g. concept tightening or constructor
+    # mangling under castxml) is logged rather than silently invisible.
+    merged.diagnostics.append(f"source_abi: {choice.reason}")
+    if choice.capability_gaps:
+        merged.diagnostics.append(f"source_abi: {choice.gap_note()}")
 
     if not merged.compile_units:
         extractors.append(ExtractorRecord(

@@ -9,7 +9,9 @@ on:
       - "tests/validate_examples.py"
       - "tests/test_example_autodiscovery.py"
       - "tests/check_validate_results.py"
+      - "tests/check_stripped_fp.py"
       - "tests/summarize_validate_results.py"
+      - ".github/workflows/examples-validation.yml"
   pull_request:
     branches: [main]
     paths:
@@ -17,11 +19,102 @@ on:
       - "abicheck/**"
       - "tests/validate_examples.py"
       - "tests/test_example_autodiscovery.py"
+      - "tests/check_validate_results.py"
+      - "tests/check_stripped_fp.py"
+      - ".github/workflows/examples-validation.yml"
   workflow_dispatch:
 
 jobs:
+  # Blocking core matrix: the full debug-headers catalog under both producers.
+  # GCC is the historical lane; Clang is promoted to a first-class validator so
+  # producer-sensitive cases (e.g. case64 ms_abi calling convention, which GCC
+  # cannot emit DW_AT_calling_convention for) are gated, not just benchmarked.
   validate-examples:
-    name: Validate all examples
+    name: Validate examples (${{ matrix.toolchain }}, debug-headers)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        toolchain: [gcc, clang]
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Create results dir
+        run: mkdir -p results
+
+      - name: Install system deps
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y castxml gcc g++ clang cmake
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+          cache: "pip"
+
+      - name: Install test deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Select toolchain
+        run: |
+          if [ "${{ matrix.toolchain }}" = "clang" ]; then
+            echo "CC=clang" >> "$GITHUB_ENV"
+            echo "CXX=clang++" >> "$GITHUB_ENV"
+          else
+            echo "CC=gcc" >> "$GITHUB_ENV"
+            echo "CXX=g++" >> "$GITHUB_ENV"
+          fi
+
+      - name: Validate ground_truth.json
+        run: |
+          test -f examples/ground_truth.json || { echo "::error::ground_truth.json missing"; exit 1; }
+          python -c "import json; d=json.load(open('examples/ground_truth.json')); print('ground_truth.json OK:', len(d['verdicts']), 'cases')"
+
+      - name: Run example cases (pytest autodiscovery)
+        run: |
+          PYTHONPATH=. pytest tests/test_example_autodiscovery.py -v --tb=short -m integration \
+            --junit-xml=results/examples-autodiscovery-${{ matrix.toolchain }}.xml
+
+      - name: Cross-check via validate_examples.py (full catalog)
+        if: always()
+        run: |
+          PYTHONPATH=. python tests/validate_examples.py --toolchain ${{ matrix.toolchain }} --json \
+            > results/validate_examples-${{ matrix.toolchain }}.json
+          cp results/validate_examples-${{ matrix.toolchain }}.json results/validate_examples.json
+          python tests/check_validate_results.py
+
+      - name: Runtime smoke examples
+        if: ${{ always() && matrix.toolchain == 'gcc' }}
+        run: |
+          PYTHONPATH=. python validation/scripts/run_example_runtime_smoke.py --json > results/example-runtime-smoke.json
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: examples-validation-results-${{ matrix.toolchain }}
+          path: results/
+          retention-days: 14
+
+      - name: Job summary
+        if: always()
+        run: |
+          echo "## Examples Validation Summary (${{ matrix.toolchain }})" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          test -f results/validate_examples.json && python tests/summarize_validate_results.py >> $GITHUB_STEP_SUMMARY || true
+
+  # Non-default artifact modes (release / stripped full-catalog / build-source
+  # smoke). All three change the available evidence — release/stripped binaries
+  # drop the DWARF a layout/calling-convention break needs — so verdicts are
+  # reported-only (a downgrade like case129 is expected evidence loss). The
+  # blockable invariant across all three is the false-positive guard: a case the
+  # debug ground truth calls COMPATIBLE/NO_CHANGE must never become BREAKING.
+  artifact-modes:
+    name: Artifact modes (release / stripped full-catalog / build-source)
     runs-on: ubuntu-latest
 
     steps:
@@ -33,9 +126,9 @@ jobs:
       - name: Install system deps
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y castxml gcc g++ cmake
+          sudo apt-get install -y castxml gcc g++ clang cmake binutils
 
-      - name: Set up Python 3.13
+      - name: Set up Python
         uses: actions/setup-python@v6
         with:
           python-version: "3.14"
@@ -46,51 +139,62 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
 
-      - name: Validate ground_truth.json
-        run: |
-          test -f examples/ground_truth.json || { echo "::error::ground_truth.json missing"; exit 1; }
-          python -c "import json; d=json.load(open('examples/ground_truth.json')); print('ground_truth.json OK:', len(d['verdicts']), 'cases')"
-
-      - name: Run example cases (pytest autodiscovery)
-        run: |
-          PYTHONPATH=. pytest tests/test_example_autodiscovery.py -v --tb=short -m integration \
-            --junit-xml=results/examples-autodiscovery.xml
-
-      - name: Cross-check via validate_examples.py
+      # Non-default artifact modes change the available evidence: a release or
+      # stripped binary drops the DWARF a layout/calling-convention break needs,
+      # so a verdict downgrade (e.g. case129 BREAKING→COMPATIBLE) is expected
+      # evidence loss, NOT a failure. The verdict run is therefore reported-only;
+      # the blockable invariant across all three modes is the false-positive
+      # guard — a reduced/changed-evidence run must never manufacture a spurious
+      # BREAKING on a case the debug ground truth calls compatible.
+      - name: Release-headers (reported-only + FP guard)
         if: always()
         run: |
-          PYTHONPATH=. python tests/validate_examples.py --json > results/validate_examples.json
-          python tests/check_validate_results.py
+          set +e
+          PYTHONPATH=. python tests/validate_examples.py --artifact-variant release-headers --json \
+            > results/validate_examples-release-headers.json
+          echo "release-headers run rc=$?"
+          set -e
+          python tests/check_stripped_fp.py results/validate_examples-release-headers.json release-headers
 
-      - name: Runtime smoke examples
+      - name: Stripped-headers FULL catalog (reported-only + FP guard)
         if: always()
         run: |
-          PYTHONPATH=. python validation/scripts/run_example_runtime_smoke.py --json > results/example-runtime-smoke.json
+          set +e
+          PYTHONPATH=. python tests/validate_examples.py --artifact-variant stripped-headers --json \
+            > results/validate_examples-stripped-headers.json
+          echo "stripped-headers run rc=$?"
+          set -e
+          python tests/check_stripped_fp.py results/validate_examples-stripped-headers.json stripped-headers
 
-      - name: Artifact mode matrix (informational)
+      # build-source runs castxml source-replay per case (expensive), so this
+      # stays a representative smoke rather than the full catalog. Still
+      # reported-only + FP-guarded like the other reduced-evidence modes.
+      - name: Build-source smoke (reported-only + FP guard)
         if: always()
         run: |
           MODE_SMOKE_CASES="case01 case04 case129 case130 case131 case132 case133"
           set +e
-          PYTHONPATH=. python tests/validate_examples.py $MODE_SMOKE_CASES --artifact-variant release-headers --json > results/validate_examples-release-headers.json
-          echo "release-headers rc=$?"
-          PYTHONPATH=. python tests/validate_examples.py $MODE_SMOKE_CASES --artifact-variant stripped-headers --json > results/validate_examples-stripped-headers.json
-          echo "stripped-headers rc=$?"
-          PYTHONPATH=. python tests/validate_examples.py $MODE_SMOKE_CASES --artifact-variant build-source --json > results/validate_examples-build-source.json
-          echo "build-source rc=$?"
+          PYTHONPATH=. python tests/validate_examples.py $MODE_SMOKE_CASES --artifact-variant build-source --json \
+            > results/validate_examples-build-source.json
+          echo "build-source run rc=$?"
           set -e
+          python tests/check_stripped_fp.py results/validate_examples-build-source.json build-source
 
-      - name: Upload results
+      - name: Upload artifact-mode results
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: examples-validation-results
+          name: examples-validation-artifact-modes
           path: results/
           retention-days: 14
 
       - name: Job summary
         if: always()
         run: |
-          echo "## Examples Validation Summary" >> $GITHUB_STEP_SUMMARY
+          echo "## Artifact-mode Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          test -f results/validate_examples.json && python tests/summarize_validate_results.py >> $GITHUB_STEP_SUMMARY || true
+          for mode in release-headers stripped-headers build-source; do
+            f="results/validate_examples-$mode.json"
+            test -f "$f" && echo "### $mode" >> $GITHUB_STEP_SUMMARY && \
+              python -c "import json;d=json.load(open('$f'));print('summary:',json.dumps(d['summary']))" >> $GITHUB_STEP_SUMMARY || true
+          done

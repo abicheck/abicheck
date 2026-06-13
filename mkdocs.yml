@@ -73,6 +73,7 @@ nav:
   # Lookup tables — precise, exhaustive, no narrative.
   - Reference:
     - Change Kinds: reference/change-kinds.md
+    - Detector Spec Matrix: reference/detector-spec.md
     - Exit Codes: reference/exit-codes.md
     - Platforms: reference/platforms.md
     - Tool Comparison: reference/tool-comparison.md

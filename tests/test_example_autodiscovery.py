@@ -88,6 +88,16 @@ KNOWN_GAPS: dict[str, str] = {
     for k, v in _gt_data["verdicts"].items()
     if "known_gap" in v
 }
+# known_gap_toolchains: case_name → toolchain families the gap applies to.
+# When set, the gap only xfails under those producers; on any other producer a
+# verdict mismatch is a real FAIL (so e.g. case64's GCC-only gap does not mask a
+# clang regression on the calling-convention break — the reason the clang lane
+# exists). Absent ⇒ applies to all producers (back-compat).
+KNOWN_GAP_TOOLCHAINS: dict[str, list[str]] = {
+    k: list(v["known_gap_toolchains"])
+    for k, v in _gt_data["verdicts"].items()
+    if v.get("known_gap_toolchains")
+}
 # requires_feature: case_name → compiler feature that must be available, else
 # the case is skipped (the fixture cannot even compile on toolchains lacking
 # it — e.g. C23 _BitInt needs GCC 14+, so GCC 13 on ubuntu-latest skips it).
@@ -212,8 +222,23 @@ def _find_sources(
     pytest.skip(f"{case_dir.name}: no recognised source layout")
 
 
+def _env_compiler(var: str) -> str | None:
+    """Return the compiler named by env var *var* (CC/CXX) if it is on PATH.
+
+    Lets the Clang examples-validation lane steer this harness via ``CC``/``CXX``
+    without changing the platform-native fallback order for default runs.
+    """
+    cc = os.environ.get(var)
+    if cc and shutil.which(cc):
+        return cc
+    return None
+
+
 def _find_compiler() -> str | None:
     """Find a C compiler available on this platform."""
+    env = _env_compiler("CC")
+    if env:
+        return env
     if sys.platform == "win32":
         # Prefer cl.exe on Windows, fall back to gcc (MinGW)
         for cc in ("cl", "gcc", "clang"):
@@ -232,6 +257,9 @@ def _find_compiler() -> str | None:
 
 def _find_cxx_compiler() -> str | None:
     """Find a C++ compiler available on this platform."""
+    env = _env_compiler("CXX")
+    if env:
+        return env
     if sys.platform == "win32":
         for cxx in ("cl", "g++", "clang++"):
             if shutil.which(cxx):
@@ -481,14 +509,39 @@ def _dump_and_compare(
     return result.verdict.value.upper(), result.changes
 
 
+def _toolchain_family(is_cpp: bool) -> str:
+    """Producer family ("gcc"|"clang"|"") of the compiler used for *is_cpp*.
+
+    Resolved per source language via the same selectors `_compile_shared` uses
+    (CXX/`_find_cxx_compiler` for C++, CC/`_find_compiler` for C), so a mixed
+    `CC=gcc CXX=clang++` run scopes a C fixture's known_gap to gcc, not clang.
+    """
+    comp = _find_cxx_compiler() if is_cpp else _find_compiler()
+    name = Path(comp or "").name
+    if "clang" in name:
+        return "clang"
+    if "gcc" in name or "g++" in name:
+        return "gcc"
+    return ""
+
+
+def _gap_applies(case_name: str, is_cpp: bool) -> bool:
+    """Whether *case_name*'s known_gap applies under the case's actual compiler."""
+    scope = KNOWN_GAP_TOOLCHAINS.get(case_name)
+    if not scope:
+        return True  # unscoped gap applies everywhere (back-compat)
+    return _toolchain_family(is_cpp) in scope
+
+
 def _assert_verdict(
     case_name: str,
     expected_verdict: str,
     got: str,
     changes: list,
+    is_cpp: bool,
 ) -> None:
     """Assert that the verdict matches, handling known gaps as xfail."""
-    if case_name in KNOWN_GAPS:
+    if case_name in KNOWN_GAPS and _gap_applies(case_name, is_cpp):
         if _normalize_verdict(got) != _normalize_verdict(expected_verdict):
             pytest.xfail(KNOWN_GAPS[case_name])
 
@@ -522,8 +575,9 @@ def test_example_pipeline(
 
     if case_name in BUILD_INFO_CASES:
         pytest.skip(
-            f"{case_name}: L3 build-info case — validated by validate_examples.py "
-            "(the Python compare() API used here does not run the build-evidence diff)"
+            f"{case_name}: L3 build-info case — exercised by "
+            "test_example_build_evidence (the Python compare() API used here "
+            "does not run the build-evidence diff; the CLI path does)"
         )
 
     if not shutil.which("castxml"):
@@ -559,4 +613,64 @@ def test_example_pipeline(
         scope_to_public_surface=SCOPE_PUBLIC_HEADERS.get(case_name, False),
     )
 
-    _assert_verdict(case_name, expected_verdict, got, changes)
+    _assert_verdict(case_name, expected_verdict, got, changes,
+                    is_cpp=v1_src.suffix in (".cpp",))
+
+
+# ---------------------------------------------------------------------------
+# L3 build-evidence cases (case130–case133): the Python compare() API used by
+# test_example_pipeline does not run the build-evidence diff, so those cases are
+# skipped there. Rather than leave them validated only by the separate
+# validate_examples.py harness (the split the recommendations call out), drive
+# the same CLI build-evidence path here via validate_examples.run_case so the L3
+# signal is a first-class part of this integration suite.
+# ---------------------------------------------------------------------------
+def _load_validate_examples():
+    """Import the sibling validate_examples.py module by path (robust to sys.path)."""
+    import importlib.util
+
+    path = Path(__file__).parent / "validate_examples.py"
+    spec = importlib.util.spec_from_file_location("validate_examples", path)
+    assert spec and spec.loader, f"cannot load {path}"
+    mod = importlib.util.module_from_spec(spec)
+    # validate_examples imports the sibling feature_probe by bare name.
+    sys.path.insert(0, str(path.parent))
+    try:
+        spec.loader.exec_module(mod)
+    finally:
+        sys.path.remove(str(path.parent))
+    return mod
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("case_name", sorted(BUILD_INFO_CASES))
+def test_example_build_evidence(case_name: str, tmp_path: Path) -> None:
+    """Compile + dump(--build-info) + compare for each L3 build-evidence case.
+
+    Closes the harness asymmetry the recommendations flag: case130–case133 used
+    to pass only in validate_examples.py and skip here. This exercises the CLI
+    build-evidence diff (the only path that runs it) inside the integration
+    suite, asserting the ground-truth verdict (or a documented known-gap xfail).
+    """
+    entry = _gt_data["verdicts"][case_name]
+
+    case_platforms = entry.get("platforms", ["linux", "macos", "windows"])
+    if CURRENT_PLATFORM not in case_platforms:
+        pytest.skip(f"{case_name} not supported on {CURRENT_PLATFORM}")
+    if not shutil.which("castxml"):
+        pytest.skip("castxml not found in PATH")
+
+    ve = _load_validate_examples()
+    result = ve.run_case(case_name, entry, tmp_path)
+
+    if result.status == "SKIP":
+        pytest.skip(f"{case_name}: {result.message}")
+    if result.status == "XFAIL":
+        pytest.xfail(result.message or KNOWN_GAPS.get(case_name, "known gap"))
+    assert result.status == "PASS", (
+        f"{case_name}: build-evidence validation {result.status} — "
+        f"expected={result.expected!r} got={result.got!r} ({result.message})"
+    )
+    # A PASS on a runtime-model-flip case is itself proof the build-evidence
+    # diff fired: without the L3 build context the per-binary symbol/type sets
+    # are identical and the verdict would be NO_CHANGE, not {result.expected!r}.
