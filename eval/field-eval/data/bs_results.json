@@ -1,5 +1,18 @@
 [
   {
+    "lib": "zlib",
+    "tag": "v1.3.1",
+    "clone_s": 0.48,
+    "cmake_configure_s": 1.0,
+    "tus": 34,
+    "L3_s": 0.36,
+    "L3L4L5_s": 10.2,
+    "source_graph_s": 9.84,
+    "graph_nodes": 51,
+    "graph_edges": 34,
+    "snap_kb": 161
+  },
+  {
     "lib": "zstd",
     "tag": "v1.5.7",
     "clone_s": 0.63,

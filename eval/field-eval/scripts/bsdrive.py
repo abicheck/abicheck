@@ -77,6 +77,8 @@ def drive(name, repo, tag, so, conda, src_subdir_for_cmake=".", cmake_extra=None
 
 # (name, repo, tag, so_path, (conda_pkg, conda_ver), cmake_subdir, cmake_extra)
 JOBS = [
+    ("zlib", "https://github.com/madler/zlib.git", "v1.3.1",
+     "/tmp/scan/pkgs/ex_libzlib_1.3.1/lib/libz.so.1.3.1", ("libzlib", "1.3.1"), ".", None),
     ("zstd", "https://github.com/facebook/zstd.git", "v1.5.7",
      "/tmp/scan/pkgs/ex_zstd_1.5.7/lib/libzstd.so.1.5.7", ("zstd", "1.5.7"),
      "build/cmake", None),
