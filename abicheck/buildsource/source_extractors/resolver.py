@@ -208,9 +208,15 @@ def resolve_source_extractor(
         chain = pref
         lead = "auto"
     elif requested in PROFILES:
-        # Requested backend first; the rest of the chain (more→less capable,
-        # minus the request) is the fallback tail when fallback is enabled.
-        chain = [requested] + ([p for p in pref if p != requested] if fallback else [])
+        # Requested backend first. The fallback tail is restricted to *less
+        # capable* backends (lower rank): a clang request may degrade to
+        # castxml, but a castxml request must never silently upgrade to clang —
+        # that would hide a missing castxml dependency and change extractor
+        # semantics for a castxml-specific run. So castxml-absent yields
+        # selected=None (unavailable) rather than clang.
+        req_rank = PROFILES[requested].rank
+        tail = [p for p in pref if p != requested and PROFILES[p].rank < req_rank] if fallback else []
+        chain = [requested] + tail
         lead = requested
     else:
         # Unknown name: treat as auto but record it.

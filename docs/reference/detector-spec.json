@@ -7,7 +7,7 @@
       "category": "risk",
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "abi_relevant_build_flag_changed"
     },
     {
@@ -15,7 +15,7 @@
       "category": "quality",
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "abi_surface_explosion"
     },
     {
@@ -31,7 +31,7 @@
       "category": "breaking",
       "default_verdict": "BREAKING",
       "severity": "error",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "anon_field_changed"
     },
     {
@@ -39,7 +39,7 @@
       "category": "risk",
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "api_depends_on_consumer_env"
     },
     {
@@ -55,7 +55,7 @@
       "category": "breaking",
       "default_verdict": "BREAKING",
       "severity": "error",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "base_class_offset_changed"
     },
     {
@@ -63,7 +63,7 @@
       "category": "breaking",
       "default_verdict": "BREAKING",
       "severity": "error",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "base_class_position_changed"
     },
     {
@@ -71,7 +71,7 @@
       "category": "breaking",
       "default_verdict": "BREAKING",
       "severity": "error",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "base_class_virtual_changed"
     },
     {
@@ -79,7 +79,7 @@
       "category": "risk",
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "behavioural_default_changed"
     },
     {
@@ -95,7 +95,7 @@
       "category": "quality",
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "build_context_changed"
     },
     {
@@ -103,7 +103,7 @@
       "category": "risk",
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "build_option_reaches_public_symbol"
     },
     {
@@ -119,7 +119,7 @@
       "category": "risk",
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "bundle_intra_dep_resolved_to_different_version"
     },
     {
@@ -135,7 +135,7 @@
       "category": "breaking",
       "default_verdict": "BREAKING",
       "severity": "error",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "bundle_intra_type_changed"
     },
     {
@@ -143,7 +143,7 @@
       "category": "addition",
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "bundle_library_added"
     },
     {
@@ -151,7 +151,7 @@
       "category": "breaking",
       "default_verdict": "BREAKING",
       "severity": "error",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "bundle_library_removed"
     },
     {
@@ -159,7 +159,7 @@
       "category": "addition",
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "bundle_manifest_instantiation_added"
     },
     {
@@ -191,7 +191,7 @@
       "category": "quality",
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "call_graph_public_entry_reachability_changed"
     },
     {
@@ -215,7 +215,7 @@
       "category": "quality",
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "common_symbol_risk"
     },
     {
@@ -223,7 +223,7 @@
       "category": "breaking",
       "default_verdict": "BREAKING",
       "severity": "error",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "compat_version_changed"
     },
     {
@@ -231,7 +231,7 @@
       "category": "addition",
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "constant_added"
     },
     {
@@ -247,7 +247,7 @@
       "category": "api_break",
       "default_verdict": "API_BREAK",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "constant_removed"
     },
     {
@@ -255,7 +255,7 @@
       "category": "api_break",
       "default_verdict": "API_BREAK",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "constexpr_value_changed"
     },
     {
@@ -287,7 +287,7 @@
       "category": "risk",
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "ctor_explicit_removed"
     },
     {
@@ -295,7 +295,7 @@
       "category": "api_break",
       "default_verdict": "API_BREAK",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "cxx_standard_floor_raised"
     },
     {
@@ -303,7 +303,7 @@
       "category": "api_break",
       "default_verdict": "API_BREAK",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "default_argument_changed"
     },
     {
@@ -319,7 +319,7 @@
       "category": "quality",
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "dwarf_info_missing"
     },
     {
@@ -327,7 +327,7 @@
       "category": "risk",
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "enum_last_member_value_changed"
     },
     {
@@ -375,7 +375,7 @@
       "category": "api_break",
       "default_verdict": "API_BREAK",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "evidence_required_missing"
     },
     {
@@ -391,7 +391,7 @@
       "category": "quality",
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "executable_stack"
     },
     {
@@ -423,7 +423,7 @@
       "category": "api_break",
       "default_verdict": "API_BREAK",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "field_access_changed"
     },
     {
@@ -431,7 +431,7 @@
       "category": "quality",
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "field_became_const"
     },
     {
@@ -439,7 +439,7 @@
       "category": "quality",
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "field_became_mutable"
     },
     {
@@ -447,7 +447,7 @@
       "category": "quality",
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "field_became_volatile"
     },
     {
@@ -463,7 +463,7 @@
       "category": "quality",
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "field_lost_const"
     },
     {
@@ -471,7 +471,7 @@
       "category": "quality",
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "field_lost_mutable"
     },
     {
@@ -479,7 +479,7 @@
       "category": "quality",
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "field_lost_volatile"
     },
     {
@@ -503,7 +503,7 @@
       "category": "risk",
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "fortify_source_weakened"
     },
     {
@@ -511,7 +511,7 @@
       "category": "breaking",
       "default_verdict": "BREAKING",
       "severity": "error",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "frame_register_changed"
     },
     {
@@ -527,7 +527,7 @@
       "category": "api_break",
       "default_verdict": "API_BREAK",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "func_became_inline"
     },
     {
@@ -543,7 +543,7 @@
       "category": "breaking",
       "default_verdict": "BREAKING",
       "severity": "error",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "func_deleted"
     },
     {
@@ -551,7 +551,7 @@
       "category": "breaking",
       "default_verdict": "BREAKING",
       "severity": "error",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "func_deleted_dwarf"
     },
     {
@@ -559,7 +559,7 @@
       "category": "breaking",
       "default_verdict": "BREAKING",
       "severity": "error",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "func_deleted_elf_fallback"
     },
     {
@@ -575,7 +575,7 @@
       "category": "breaking",
       "default_verdict": "BREAKING",
       "severity": "error",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "func_likely_renamed"
     },
     {
@@ -583,7 +583,7 @@
       "category": "quality",
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "func_lost_inline"
     },
     {
@@ -591,7 +591,7 @@
       "category": "quality",
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "func_noexcept_added"
     },
     {
@@ -599,7 +599,7 @@
       "category": "risk",
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "func_noexcept_removed"
     },
     {
@@ -623,7 +623,7 @@
       "category": "breaking",
       "default_verdict": "BREAKING",
       "severity": "error",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "func_ref_qual_changed"
     },
     {
@@ -671,7 +671,7 @@
       "category": "breaking",
       "default_verdict": "BREAKING",
       "severity": "error",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "func_virtual_became_pure"
     },
     {
@@ -679,7 +679,7 @@
       "category": "breaking",
       "default_verdict": "BREAKING",
       "severity": "error",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "func_virtual_removed"
     },
     {
@@ -695,7 +695,7 @@
       "category": "quality",
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "func_visibility_protected_changed"
     },
     {
@@ -703,7 +703,7 @@
       "category": "risk",
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "generated_file_dependency_unstable"
     },
     {
@@ -711,7 +711,7 @@
       "category": "risk",
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "generated_header_changed"
     },
     {
@@ -719,7 +719,7 @@
       "category": "risk",
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "generated_header_reaches_public_api"
     },
     {
@@ -735,7 +735,7 @@
       "category": "breaking",
       "default_verdict": "BREAKING",
       "severity": "error",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "handle_type_changed"
     },
     {
@@ -743,7 +743,7 @@
       "category": "risk",
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "header_parse_context_drift"
     },
     {
@@ -751,7 +751,7 @@
       "category": "addition",
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "hidden_friend_added"
     },
     {
@@ -767,7 +767,7 @@
       "category": "quality",
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "ifunc_introduced"
     },
     {
@@ -775,7 +775,7 @@
       "category": "quality",
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "ifunc_removed"
     },
     {
@@ -783,7 +783,7 @@
       "category": "risk",
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "include_graph_public_header_drift"
     },
     {
@@ -791,7 +791,7 @@
       "category": "risk",
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "inline_body_changed"
     },
     {
@@ -855,7 +855,7 @@
       "category": "risk",
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "layer_coverage_asymmetric"
     },
     {
@@ -863,7 +863,7 @@
       "category": "risk",
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "layout_unverifiable"
     },
     {
@@ -871,7 +871,7 @@
       "category": "risk",
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "libcpp_abi_version_changed"
     },
     {
@@ -879,7 +879,7 @@
       "category": "risk",
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "link_export_policy_changed"
     },
     {
@@ -895,7 +895,7 @@
       "category": "api_break",
       "default_verdict": "API_BREAK",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "mandatory_template_param_added"
     },
     {
@@ -903,7 +903,7 @@
       "category": "api_break",
       "default_verdict": "API_BREAK",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "method_access_changed"
     },
     {
@@ -927,7 +927,7 @@
       "category": "risk",
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "odr_source_conflict"
     },
     {
@@ -935,7 +935,7 @@
       "category": "breaking",
       "default_verdict": "BREAKING",
       "severity": "error",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "opaque_invariant_broken"
     },
     {
@@ -943,7 +943,7 @@
       "category": "risk",
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "overload_added"
     },
     {
@@ -951,7 +951,7 @@
       "category": "risk",
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "overload_set_rerouted"
     },
     {
@@ -959,7 +959,7 @@
       "category": "quality",
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "param_became_va_list"
     },
     {
@@ -983,7 +983,7 @@
       "category": "quality",
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "param_lost_va_list"
     },
     {
@@ -999,7 +999,7 @@
       "category": "api_break",
       "default_verdict": "API_BREAK",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "param_renamed"
     },
     {
@@ -1007,7 +1007,7 @@
       "category": "quality",
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "param_restrict_changed"
     },
     {
@@ -1031,7 +1031,7 @@
       "category": "risk",
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "pie_disabled"
     },
     {
@@ -1039,7 +1039,7 @@
       "category": "risk",
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "polymorphic_type_non_virtual_dtor"
     },
     {
@@ -1047,7 +1047,7 @@
       "category": "risk",
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "protected_visibility_changed"
     },
     {
@@ -1055,7 +1055,7 @@
       "category": "risk",
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "public_api_exposes_stl_by_value"
     },
     {
@@ -1063,7 +1063,7 @@
       "category": "api_break",
       "default_verdict": "API_BREAK",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "public_macro_value_changed"
     },
     {
@@ -1071,7 +1071,7 @@
       "category": "risk",
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "public_reachability_changed"
     },
     {
@@ -1079,7 +1079,7 @@
       "category": "quality",
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "public_surface_grew"
     },
     {
@@ -1087,7 +1087,7 @@
       "category": "quality",
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "public_surface_shrank"
     },
     {
@@ -1095,7 +1095,7 @@
       "category": "api_break",
       "default_verdict": "API_BREAK",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "public_typedef_target_changed"
     },
     {
@@ -1111,7 +1111,7 @@
       "category": "api_break",
       "default_verdict": "API_BREAK",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "removed_const_overload"
     },
     {
@@ -1119,7 +1119,7 @@
       "category": "breaking",
       "default_verdict": "BREAKING",
       "severity": "error",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "return_pointer_level_changed"
     },
     {
@@ -1127,7 +1127,7 @@
       "category": "quality",
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "rpath_changed"
     },
     {
@@ -1135,7 +1135,7 @@
       "category": "breaking",
       "default_verdict": "BREAKING",
       "severity": "error",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "rtti_inheritance_changed"
     },
     {
@@ -1167,7 +1167,7 @@
       "category": "quality",
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "soname_bump_recommended"
     },
     {
@@ -1175,7 +1175,7 @@
       "category": "quality",
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "soname_bump_unnecessary"
     },
     {
@@ -1183,7 +1183,7 @@
       "category": "risk",
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "soname_changed"
     },
     {
@@ -1199,7 +1199,7 @@
       "category": "risk",
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "source_binary_provenance_mismatch"
     },
     {
@@ -1207,7 +1207,7 @@
       "category": "risk",
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "source_decl_binary_symbol_mismatch"
     },
     {
@@ -1215,7 +1215,7 @@
       "category": "api_break",
       "default_verdict": "API_BREAK",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "source_level_kind_changed"
     },
     {
@@ -1223,7 +1223,7 @@
       "category": "risk",
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "source_to_binary_mapping_changed"
     },
     {
@@ -1239,7 +1239,7 @@
       "category": "risk",
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "standard_layout_lost"
     },
     {
@@ -1247,7 +1247,7 @@
       "category": "api_break",
       "default_verdict": "API_BREAK",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "std_reexport_removed"
     },
     {
@@ -1255,7 +1255,7 @@
       "category": "risk",
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "stdlib_implementation_changed"
     },
     {
@@ -1263,7 +1263,7 @@
       "category": "breaking",
       "default_verdict": "BREAKING",
       "severity": "error",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "struct_alignment_changed"
     },
     {
@@ -1271,7 +1271,7 @@
       "category": "breaking",
       "default_verdict": "BREAKING",
       "severity": "error",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "struct_field_offset_changed"
     },
     {
@@ -1279,7 +1279,7 @@
       "category": "breaking",
       "default_verdict": "BREAKING",
       "severity": "error",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "struct_field_removed"
     },
     {
@@ -1287,7 +1287,7 @@
       "category": "breaking",
       "default_verdict": "BREAKING",
       "severity": "error",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "struct_field_type_changed"
     },
     {
@@ -1319,7 +1319,7 @@
       "category": "risk",
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "sycl_backend_driver_req_changed"
     },
     {
@@ -1327,7 +1327,7 @@
       "category": "breaking",
       "default_verdict": "BREAKING",
       "severity": "error",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "sycl_implementation_changed"
     },
     {
@@ -1343,7 +1343,7 @@
       "category": "addition",
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "sycl_pi_entrypoint_added"
     },
     {
@@ -1351,7 +1351,7 @@
       "category": "breaking",
       "default_verdict": "BREAKING",
       "severity": "error",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "sycl_pi_entrypoint_removed"
     },
     {
@@ -1359,7 +1359,7 @@
       "category": "breaking",
       "default_verdict": "BREAKING",
       "severity": "error",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "sycl_pi_version_changed"
     },
     {
@@ -1367,7 +1367,7 @@
       "category": "addition",
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "sycl_plugin_added"
     },
     {
@@ -1375,7 +1375,7 @@
       "category": "breaking",
       "default_verdict": "BREAKING",
       "severity": "error",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "sycl_plugin_removed"
     },
     {
@@ -1383,7 +1383,7 @@
       "category": "risk",
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "sycl_plugin_search_path_changed"
     },
     {
@@ -1391,7 +1391,7 @@
       "category": "quality",
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "sycl_runtime_version_changed"
     },
     {
@@ -1399,7 +1399,7 @@
       "category": "quality",
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "symbol_binding_changed"
     },
     {
@@ -1415,7 +1415,7 @@
       "category": "quality",
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "symbol_elf_visibility_changed"
     },
     {
@@ -1423,7 +1423,7 @@
       "category": "risk",
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "symbol_leaked_from_dependency_changed"
     },
     {
@@ -1431,7 +1431,7 @@
       "category": "risk",
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "symbol_moved_version_node"
     },
     {
@@ -1439,7 +1439,7 @@
       "category": "breaking",
       "default_verdict": "BREAKING",
       "severity": "error",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "symbol_renamed_batch"
     },
     {
@@ -1455,7 +1455,7 @@
       "category": "breaking",
       "default_verdict": "BREAKING",
       "severity": "error",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "symbol_size_changed_const_object"
     },
     {
@@ -1463,7 +1463,7 @@
       "category": "breaking",
       "default_verdict": "BREAKING",
       "severity": "error",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "symbol_size_changed_internal"
     },
     {
@@ -1471,7 +1471,7 @@
       "category": "breaking",
       "default_verdict": "BREAKING",
       "severity": "error",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "symbol_type_changed"
     },
     {
@@ -1479,7 +1479,7 @@
       "category": "risk",
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "symbol_version_alias_changed"
     },
     {
@@ -1487,7 +1487,7 @@
       "category": "quality",
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "symbol_version_defined_added"
     },
     {
@@ -1511,7 +1511,7 @@
       "category": "risk",
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "symbol_version_required_added"
     },
     {
@@ -1519,7 +1519,7 @@
       "category": "quality",
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "symbol_version_required_added_compat"
     },
     {
@@ -1527,7 +1527,7 @@
       "category": "quality",
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "symbol_version_required_removed"
     },
     {
@@ -1543,7 +1543,7 @@
       "category": "risk",
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "tail_padding_reuse_changed"
     },
     {
@@ -1551,7 +1551,7 @@
       "category": "risk",
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "template_body_changed"
     },
     {
@@ -1559,7 +1559,7 @@
       "category": "breaking",
       "default_verdict": "BREAKING",
       "severity": "error",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "template_param_type_changed"
     },
     {
@@ -1567,7 +1567,7 @@
       "category": "breaking",
       "default_verdict": "BREAKING",
       "severity": "error",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "template_return_type_changed"
     },
     {
@@ -1607,7 +1607,7 @@
       "category": "risk",
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "toolchain_version_changed"
     },
     {
@@ -1615,7 +1615,7 @@
       "category": "breaking",
       "default_verdict": "BREAKING",
       "severity": "error",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "trivially_copyable_lost"
     },
     {
@@ -1623,7 +1623,7 @@
       "category": "addition",
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "type_added"
     },
     {
@@ -1631,7 +1631,7 @@
       "category": "breaking",
       "default_verdict": "BREAKING",
       "severity": "error",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "type_alignment_changed"
     },
     {
@@ -1671,7 +1671,7 @@
       "category": "addition",
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "type_field_added_compatible"
     },
     {
@@ -1687,7 +1687,7 @@
       "category": "breaking",
       "default_verdict": "BREAKING",
       "severity": "error",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "type_field_removed"
     },
     {
@@ -1695,7 +1695,7 @@
       "category": "breaking",
       "default_verdict": "BREAKING",
       "severity": "error",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "type_field_type_changed"
     },
     {
@@ -1711,7 +1711,7 @@
       "category": "risk",
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "type_lost_final"
     },
     {
@@ -1735,7 +1735,7 @@
       "category": "breaking",
       "default_verdict": "BREAKING",
       "severity": "error",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "type_visibility_changed"
     },
     {
@@ -1767,7 +1767,7 @@
       "category": "quality",
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "typedef_version_sentinel"
     },
     {
@@ -1775,7 +1775,7 @@
       "category": "quality",
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "undocumented_export_ratio_increased"
     },
     {
@@ -1783,7 +1783,7 @@
       "category": "api_break",
       "default_verdict": "API_BREAK",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "uninstantiated_template_removed"
     },
     {
@@ -1791,7 +1791,7 @@
       "category": "addition",
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "union_field_added"
     },
     {
@@ -1807,7 +1807,7 @@
       "category": "breaking",
       "default_verdict": "BREAKING",
       "severity": "error",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "union_field_type_changed"
     },
     {
@@ -1815,7 +1815,7 @@
       "category": "api_break",
       "default_verdict": "API_BREAK",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "unspecified_return_now_named"
     },
     {
@@ -1839,7 +1839,7 @@
       "category": "api_break",
       "default_verdict": "API_BREAK",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "var_access_changed"
     },
     {
@@ -1847,7 +1847,7 @@
       "category": "quality",
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "var_access_widened"
     },
     {
@@ -1871,7 +1871,7 @@
       "category": "breaking",
       "default_verdict": "BREAKING",
       "severity": "error",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "var_lost_const"
     },
     {
@@ -1895,7 +1895,7 @@
       "category": "quality",
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "var_value_changed"
     },
     {
@@ -1903,7 +1903,7 @@
       "category": "breaking",
       "default_verdict": "BREAKING",
       "severity": "error",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "vector_abi_changed"
     },
     {
@@ -1911,7 +1911,7 @@
       "category": "quality",
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "version_script_missing"
     },
     {
@@ -1919,7 +1919,7 @@
       "category": "breaking",
       "default_verdict": "BREAKING",
       "severity": "error",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "virtual_method_added"
     },
     {
@@ -1927,7 +1927,7 @@
       "category": "quality",
       "default_verdict": "COMPATIBLE",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "visibility_leak"
     },
     {
@@ -1935,7 +1935,7 @@
       "category": "breaking",
       "default_verdict": "BREAKING",
       "severity": "error",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "vptr_introduced"
     },
     {
@@ -1943,7 +1943,7 @@
       "category": "breaking",
       "default_verdict": "BREAKING",
       "severity": "error",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "vtable_slot_count_changed"
     },
     {
@@ -1951,7 +1951,7 @@
       "category": "risk",
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "vtable_symbol_identity_changed"
     },
     {
@@ -1959,7 +1959,7 @@
       "category": "risk",
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
-      "min_evidence": "?",
+      "min_evidence": "unspecified",
       "doc_slug": "writable_executable_segment"
     }
   ]

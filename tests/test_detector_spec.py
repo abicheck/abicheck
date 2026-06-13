@@ -48,3 +48,25 @@ def test_generated_files_in_sync():
     assert gen.main(["--check"]) == 0, (
         "detector spec is stale — run: python scripts/gen_detector_spec.py"
     )
+
+
+# Baseline number of kinds with no declared evidence tier (EVIDENCE_TIER_BY_KIND
+# is intentionally partial). The guard fails if a NEWLY-added ChangeKind ships
+# without a tier (count rises) — forcing a conscious choice: add a tier in
+# scripts/evidence_tiers.py, or bump this baseline deliberately. Lowering the
+# count (mapping more kinds) is always welcome; tighten the baseline then.
+UNSPECIFIED_TIER_BASELINE = 153
+
+
+def test_unspecified_evidence_tier_count_does_not_grow():
+    gen = _load_gen()
+    unspecified = sorted(
+        r["kind"] for r in gen.build_spec()
+        if r["min_evidence"] == gen.UNSPECIFIED_TIER
+    )
+    assert len(unspecified) <= UNSPECIFIED_TIER_BASELINE, (
+        f"{len(unspecified)} kinds lack an evidence tier (baseline "
+        f"{UNSPECIFIED_TIER_BASELINE}). A new ChangeKind shipped without a tier — "
+        f"add one in scripts/evidence_tiers.py or bump the baseline. New/extra: "
+        f"{unspecified}"
+    )
