@@ -112,6 +112,15 @@ The **authority rule (ADR-028 D3) is preserved**: whatever S-method produced a
 fact, an L3–L5 fact never alone decides a shipped `BREAKING` verdict — it
 explains, localizes, and adds confidence.
 
+**S-methods are independent, cost-ordered passes — not a feed-forward pipeline.**
+S5/S6 (and the S4/S5 graph edges) are their own clang/castxml passes over the
+TUs; they do **not** consume S3/S4 output. The cheap methods (S0 diff, S3
+patterns) only produce the **POI list that selects which TUs** the expensive
+S4/S5 pass parses. Consequence: whenever **sources + a compiler** are available,
+S5 runs (POI-targeted) and the L5 edges it needs exist; the only reasons S5/L5
+do not run are a **missing toolchain** or an explicit **budget/scope** exclusion
+— never "S3/S4 data was missing".
+
 ### D2. Add an always-on PR pre-scan tier (extends L2/L5)
 
 A new cheap tier runs on every PR over **changed + public** files. It has two
@@ -143,13 +152,15 @@ same scan for the same inputs:
 - The user picks the level on either axis (`--source-method sN` or `--depth`,
   D1). Each `--mode` (`pr`/`pr-deep`/`baseline`) is a **fixed preset** of (L,S),
   not risk-varying.
-- A **numeric risk score** (from a `risk_rules` config block: public header `+50`,
-  export map `+50`, ABI-affecting flag `+40`, exported-symbol definition `+30`,
-  reachable-from-public `+25`, template-instantiation change `+35`,
-  docs/tests-only `-100`) drives **two opt-in** things only: the `auto` level
+- A **numeric risk score** drives **two opt-in** things only: the `auto` level
   (`--source-method auto`, local/dev convenience), and POI focusing within the
   chosen level (D7, deterministic for a fixed diff). Risk **never** silently
-  changes the level of a CI run that pinned one.
+  changes the level of a CI run that pinned one. The score's path-glob **weights
+  are an illustrative, tunable default profile shipped as the `risk_rules` config
+  block — not a normative contract**; the spec fixes only the *ordering* of
+  signals (public header > export map > ABI flag > internal source > docs/tests).
+  Because the score only feeds opt-in `auto` + POI selection, the exact numbers
+  never affect a pinned/deterministic gate.
 - A **time budget** is optional and, on overflow, **fails** (nonzero exit) — it
   never silently shrinks scope. For gating CI, pin a level; do not use a budget.
 - Add a **`scan`** subcommand (`abicheck/cli_scan.py`, registered per the
@@ -181,12 +192,28 @@ The §6.8 provider-agreement matrix maps directly onto the existing
 `source_index`, `binary_exports`, `debug_info`, `build_config`) corroborate the
 entity, driving the confidence tag.
 
+**Coverage honesty.** A cross-check whose required layer was not collected (e.g.
+behavioral-risk needs the L5 edges from an S4/S5 pass, but the host lacked a
+compiler or budget excluded it) is reported as a **soft advisory** (`info`) that
+names the layer/method to enable (e.g. "run `--source-method s5`/`--depth
+graph`"). It is **never counted as clean** and does **not** affect the exit code.
+With sources + a compiler present this case does not arise — the check runs for
+real.
+
 `public_not_exported` is intentionally narrower than "every public declaration":
 inline functions, uninstantiated templates, constexprs, type-only declarations,
 and hidden-visibility APIs are public source surface but do not promise a dynamic
 symbol. The check only compares declarations with an export obligation (for
 example exported functions/data, visibility annotations, version-script entries,
 or explicit instantiations) against binary exports.
+
+`exported_not_public` (the reverse: a symbol is exported but no public header
+declares it) runs **only over symbols that pass the existing
+`dumper._is_abi_relevant_symbol()` filter** (which already drops compiler-emitted
+internals, transitive stdlib symbols, and private `__`-prefixed C symbols) and
+respects public-surface scoping (ADR-024). Default severity `warning`,
+suppressible through the existing suppression system — so it does not light up
+healthy libraries with intentional internal exports.
 
 ### D5. Build-integrated extraction: dump/facts artifact protocol + providers
 

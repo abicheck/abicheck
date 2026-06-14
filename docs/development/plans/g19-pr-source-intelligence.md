@@ -290,7 +290,12 @@ For reproducible gating, the scan scope is fixed by the level you pick, not by t
 machine or the clock:
 
 - **Default per `--mode` is a fixed preset**, not risk-varying: `pr` = S1 + S3
-  always-on + targeted S5; `baseline` = S6. Same commit pair → identical scan.
+  always-on + targeted S5; `baseline` = S6. **Same commit pair + same toolchain →
+  identical scan.** Determinism is toolchain-relative: S5/S6 need a compiler (and
+  castxml/clang), so a missing tool is a **reported skip**, never a silent
+  downgrade. For reproducible gates, pin the toolchain (fixed CI image) as well as
+  the level — otherwise a host without the compiler reaches a shallower depth (and
+  the report says so).
 - **`auto`** (risk-driven escalation, D3) is **opt-in** (`--source-method auto`),
   for local/dev only — never the silent CI default.
 - **`--budget`** is optional and, on overflow, **fails** (nonzero exit); it never
