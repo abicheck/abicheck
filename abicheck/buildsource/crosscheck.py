@@ -198,55 +198,64 @@ def _check_exported_not_public(
 ) -> _CheckOutput:
     """Exported symbols with no *public* declaration, RISK.
 
-    Reuses the ADR-024/ADR-015 provenance classification on every declaration. A
-    symbol is "undocumented" when the binary exports it but no public header
-    declares it — which is **not** only the ``EXPORT_ONLY`` case (no header at
-    all): a symbol declared solely in a *private* or *non-installed generated*
-    header is exported accidental ABI surface too. So we flag any exported decl
-    whose origin is not ``PUBLIC_HEADER`` (Codex review):
+    Driven from the **binary export table**, not the declaration list: in a
+    header-backed dump castxml only creates ``Function``/``Variable`` entries for
+    declarations it parsed, so a symbol that exists *only* in the export table
+    (the canonical accidental-ABI case) has no decl object to iterate — the check
+    must start from ``exported`` and ask which exports no public header declares
+    (Codex review).
 
-    - ``EXPORT_ONLY`` is exported by construction (no header), so it always
-      counts;
-    - a ``PRIVATE_HEADER`` / ``GENERATED`` decl counts only when the binary
-      actually exports its symbol (it may be an unexported internal otherwise).
+    A public header "declares" an export when a ``PUBLIC_HEADER`` decl maps to
+    that symbol. Itanium constructor/destructor exports (``…C1Ev``/``…D1Ev``) are
+    skipped: castxml routinely leaves members unmangled, so they would not match
+    a public class's decls and would false-positive; the class itself, if it
+    leaks, is caught by ``private_header_leak``.
 
     Provenance only runs when a public-header set was supplied, so the check
-    skips cleanly on an ELF-only / no-header snapshot.
+    skips cleanly on an ELF-only / no-header snapshot; it also needs an export
+    table to compare against.
     """
     providers = [PROVIDER_BINARY_EXPORTS, PROVIDER_PUBLIC_HEADER_AST]
     if not _origin_resolvable(snapshot):
         return _CheckOutput([], "skipped", _NO_PROVENANCE, providers)
-
     exported = _exported_symbol_names(snapshot)
+    if exported is None:
+        return _CheckOutput(
+            [], "skipped", "no binary export table on the snapshot", providers
+        )
+
+    # Symbols a public header declares (so an export of them is documented), and
+    # a decl lookup for enriching the message when one exists in a non-public
+    # header.
+    public_syms: set[str] = set()
+    decl_by_sym: dict[str, Function | Variable] = {}
+    all_decls: list[Function | Variable] = [*snapshot.functions, *snapshot.variables]
+    for d in all_decls:
+        for sym in _candidate_symbols(d):
+            decl_by_sym.setdefault(sym, d)
+            if d.origin == ScopeOrigin.PUBLIC_HEADER:
+                public_syms.add(sym)
+
     findings: list[Change] = []
-    for fn in snapshot.functions:
-        if _is_undocumented_export(fn, exported):
-            findings.append(
-                _change(
-                    ChangeKind.EXPORTED_NOT_PUBLIC,
-                    fn.mangled or fn.name,
-                    f"Function {fn.name!r} (symbol {fn.mangled or fn.name!r}) is "
-                    "exported by the binary but declared in no public header. It is "
-                    "accidental ABI surface — hide it (visibility/version script) or "
-                    "document it.",
-                    new_value=fn.mangled or fn.name,
-                    confidence=Confidence.HIGH,
-                )
+    for sym in sorted(exported):
+        if sym in public_syms or _is_cxx_structor(sym):
+            continue
+        decl: Function | Variable | None = decl_by_sym.get(sym)
+        where = ""
+        if decl is not None:
+            kind = "function" if isinstance(decl, Function) else "variable"
+            where = f" (declared as {kind} {decl.name!r} in a non-public header)"
+        findings.append(
+            _change(
+                ChangeKind.EXPORTED_NOT_PUBLIC,
+                sym,
+                f"Symbol {sym!r} is exported by the binary but declared in no "
+                f"public header{where}. It is accidental ABI surface — hide it "
+                "(visibility/version script) or document it.",
+                new_value=sym,
+                confidence=Confidence.HIGH,
             )
-    for var in snapshot.variables:
-        if _is_undocumented_export(var, exported):
-            findings.append(
-                _change(
-                    ChangeKind.EXPORTED_NOT_PUBLIC,
-                    var.mangled or var.name,
-                    f"Variable {var.name!r} (symbol {var.mangled or var.name!r}) is "
-                    "exported by the binary but declared in no public header. It is "
-                    "accidental ABI surface — hide it or document it.",
-                    new_value=var.mangled or var.name,
-                    confidence=Confidence.HIGH,
-                )
-            )
-    findings.sort(key=lambda c: c.symbol)
+        )
     detail = (
         f"binary exports ↔ public headers: {len(findings)} exported symbol(s) "
         "with no public declaration"
@@ -497,34 +506,53 @@ def _origin_resolvable(snapshot: AbiSnapshot) -> bool:
     return False
 
 
-#: Origin that puts a declaration on the *public* surface. Only ``PUBLIC_HEADER``
-#: qualifies — provenance classifies a public generated header as ``PUBLIC_HEADER``
-#: first, so a bare ``GENERATED`` origin means a generated-but-non-public header
-#: (Codex review), which is undocumented/private surface, not public.
-_PUBLIC_ORIGIN = ScopeOrigin.PUBLIC_HEADER
+#: Mangling sigils: Itanium C++ (``_Z…``) and MSVC (``?…``). A non-extern-C
+#: declaration whose ``mangled`` lacks one of these is a castxml fallback to the
+#: display name (notably for constructors/destructors), not a comparable symbol.
+_MANGLE_SIGILS = ("_Z", "?")
 
-#: Non-public origins whose symbol, *if the binary exports it*, is accidental ABI
-#: surface (``exported_not_public``). ``EXPORT_ONLY`` is handled separately
-#: because it is exported by construction with no header at all.
-_NON_PUBLIC_DECL_ORIGINS = frozenset(
-    {ScopeOrigin.PRIVATE_HEADER, ScopeOrigin.GENERATED}
-)
+#: Itanium constructor (``C1``/``C2``/``C3``) and destructor (``D0``/``D1``/``D2``)
+#: encodings — used to skip structor exports castxml cannot reliably mangle.
+_STRUCTOR_RE = re.compile(r"_ZN.*?[CD][0-4]E")
 
 
-def _is_undocumented_export(
-    decl: Function | Variable, exported: set[str] | None
-) -> bool:
-    """Whether *decl* is an exported symbol that no public header declares.
+def _bare_name_exports(decl: Function | Variable) -> bool:
+    """Whether *decl* legitimately exports under its bare (un-mangled) name.
 
-    ``EXPORT_ONLY`` decls are exported with no header at all → always count. A
-    ``PRIVATE_HEADER`` / ``GENERATED`` decl counts only when the binary actually
-    exports its symbol (otherwise it is an unexported internal, not ABI surface).
+    Data (variables) and ``extern "C"`` functions do; a C++ function must carry a
+    real mangled symbol.
     """
-    if decl.origin == ScopeOrigin.EXPORT_ONLY:
-        return True
-    if decl.origin in _NON_PUBLIC_DECL_ORIGINS:
-        return exported is not None and bool(decl.mangled) and decl.mangled in exported
-    return False
+    return isinstance(decl, Variable) or getattr(decl, "is_extern_c", False)
+
+
+def _looks_mangled(decl: Function | Variable) -> bool:
+    """Whether *decl* carries a real export symbol (not a castxml display-name fallback).
+
+    castxml leaves some C++ members (notably ctors/dtors) unmangled and falls
+    back to the bare display name, so ``mangled`` then equals a source spelling
+    rather than ``_ZN…``/``?…``. Bare-name exporters (data, ``extern "C"``) are
+    fine with any non-empty name (Codex review).
+    """
+    if _bare_name_exports(decl):
+        return bool(decl.mangled)
+    return decl.mangled.startswith(_MANGLE_SIGILS)
+
+
+def _is_cxx_structor(symbol: str) -> bool:
+    """Whether *symbol* is an Itanium constructor/destructor mangling."""
+    return symbol.startswith("_ZN") and bool(_STRUCTOR_RE.match(symbol))
+
+
+def _candidate_symbols(decl: Function | Variable) -> tuple[str, ...]:
+    """Export symbols *decl* could provide, for matching against the export table.
+
+    A C++ function provides its mangled name; a bare-name exporter (data /
+    ``extern "C"``) whose extractor left the mangled name as the display name
+    provides that name.
+    """
+    if _bare_name_exports(decl):
+        return tuple({s for s in (decl.mangled, decl.name) if s})
+    return (decl.mangled,) if decl.mangled.startswith(_MANGLE_SIGILS) else ()
 
 
 def _exported_symbol_names(snapshot: AbiSnapshot) -> set[str] | None:
@@ -581,6 +609,11 @@ def _has_export_obligation(fn: Function) -> bool:
         return False
     if not fn.mangled:
         return False
+    # A C++ member whose ``mangled`` is just the display name is a castxml
+    # fallback (notably ctors/dtors); comparing that bare name against the
+    # binary's real ``_ZN…`` symbols would false-positive (Codex review).
+    if not _looks_mangled(fn):
+        return False
     # Template instantiations are spelled with angle brackets; an uninstantiated
     # template emits no symbol, so skip anything template-shaped to stay low-FP.
     if _looks_templated(fn.name):
@@ -601,6 +634,8 @@ def _var_has_export_obligation(var: Variable) -> bool:
     if var.origin != ScopeOrigin.PUBLIC_HEADER:
         return False
     if not var.mangled:
+        return False
+    if not _looks_mangled(var):
         return False
     if var.is_const and var.value is not None:
         return False

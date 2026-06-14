@@ -172,6 +172,43 @@ def test_exported_not_public_flags_exported_private_header_symbol():
     ]
 
 
+def test_exported_not_public_flags_export_with_no_decl_object():
+    # In a header-backed dump castxml only emits decls it parsed; a symbol that
+    # lives ONLY in the export table has no Function object, so the check must be
+    # driven by the export table itself (Codex review).
+    snap = _snap(elf=_elf("_Z3fooi", "_Z6secretv"))
+    snap.functions = [
+        Function(
+            name="foo",
+            mangled="_Z3fooi",
+            return_type="void",
+            origin=ScopeOrigin.PUBLIC_HEADER,
+        ),
+        # No object exists for _Z6secretv — it is only in the export table.
+    ]
+    res = run_crosschecks(snap)
+    assert [c.symbol for c in _findings_of(res, ChangeKind.EXPORTED_NOT_PUBLIC)] == [
+        "_Z6secretv"
+    ]
+
+
+def test_exported_not_public_skips_constructor_exports():
+    # castxml leaves ctors/dtors unmangled, so an exported _ZN6WidgetC1Ev would
+    # never match the class's decls; skip structor exports to avoid a false
+    # positive (Codex review).
+    snap = _snap(elf=_elf("_ZN6WidgetC1Ev", "_ZN6WidgetD1Ev"))
+    snap.functions = [
+        Function(
+            name="Widget::Widget",
+            mangled="Widget",
+            return_type="",
+            origin=ScopeOrigin.PUBLIC_HEADER,
+        ),
+    ]
+    res = run_crosschecks(snap)
+    assert _findings_of(res, ChangeKind.EXPORTED_NOT_PUBLIC) == []
+
+
 def test_exported_not_public_clean_when_everything_declared():
     snap = _snap(elf=_elf("_Z3fooi"))
     snap.functions = [
@@ -263,6 +300,24 @@ def test_public_not_exported_flags_non_public_visibility(vis):
     assert [c.symbol for c in _findings_of(res, ChangeKind.PUBLIC_NOT_EXPORTED)] == [
         "_Z3barv"
     ]
+
+
+def test_public_not_exported_skips_member_with_mangle_fallback():
+    # castxml can leave a C++ ctor unmangled (mangled == display name); comparing
+    # that bare name against the binary's real _ZN6WidgetC1Ev would false-positive,
+    # so a non-extern-C decl without a real mangled symbol has no obligation
+    # (Codex review).
+    snap = _snap(elf=_elf("_ZN6WidgetC1Ev"))
+    snap.functions = [
+        Function(
+            name="Widget::Widget",
+            mangled="Widget",  # castxml fallback, not a real symbol
+            return_type="",
+            origin=ScopeOrigin.PUBLIC_HEADER,
+        ),
+    ]
+    res = run_crosschecks(snap)
+    assert _findings_of(res, ChangeKind.PUBLIC_NOT_EXPORTED) == []
 
 
 def test_public_not_exported_ignores_non_default_version_alias():
@@ -611,15 +666,16 @@ def test_every_check_has_a_coverage_row():
 
 
 def test_max_per_check_caps_findings_and_marks_partial():
-    snap = _snap(elf=_elf())
+    # One documented export makes provenance resolvable; five undocumented
+    # exports in the table are capped to 2 → partial.
+    snap = _snap(elf=_elf("_Z3fooi", *(f"_Z2s{i}v" for i in range(5))))
     snap.functions = [
         Function(
-            name=f"s{i}",
-            mangled=f"_Z2s{i}v",
+            name="foo",
+            mangled="_Z3fooi",
             return_type="void",
-            origin=ScopeOrigin.EXPORT_ONLY,
-        )
-        for i in range(5)
+            origin=ScopeOrigin.PUBLIC_HEADER,
+        ),
     ]
     res = run_crosschecks(snap, CrosscheckConfig(max_per_check=2))
     assert len(_findings_of(res, ChangeKind.EXPORTED_NOT_PUBLIC)) == 2
