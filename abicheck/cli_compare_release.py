@@ -1650,10 +1650,17 @@ def _exit_compare_release(
         if code != 0:
             sys.exit(code)
         return
-    if worst_verdict in ("BREAKING", "ERROR"):
+    # ERROR is a compare-release-specific operational-failure sentinel (not a
+    # Verdict); it floors at 4. Otherwise the verdict→code mapping is the shared
+    # canonical one, so compare and compare-release never disagree (C7).
+    if worst_verdict == "ERROR":
         sys.exit(4)
-    if worst_verdict == "API_BREAK":
-        sys.exit(2)
+    from .checker_policy import Verdict
+    from .severity import legacy_exit_code
+
+    code = legacy_exit_code(Verdict[worst_verdict]) if worst_verdict in Verdict.__members__ else 0
+    if code != 0:
+        sys.exit(code)
     if fail_on_removed and removed_keys:
         sys.exit(8)
 

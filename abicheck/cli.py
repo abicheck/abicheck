@@ -1364,7 +1364,7 @@ def _exit_with_severity_or_verdict(
     result: DiffResult, sev_config: SeverityConfig | None, severity_explicitly_set: bool,
 ) -> None:
     """Exit with appropriate code based on severity config or legacy verdict."""
-    from .severity import compute_exit_code
+    from .severity import compute_exit_code, legacy_exit_code
     if severity_explicitly_set:
         assert sev_config is not None
         eff_sets = result._effective_kind_sets()
@@ -1378,10 +1378,9 @@ def _exit_with_severity_or_verdict(
         if exit_code != 0:
             sys.exit(exit_code)
     else:
-        if result.verdict.value == "BREAKING":
-            sys.exit(4)
-        elif result.verdict.value == "API_BREAK":
-            sys.exit(2)
+        code = legacy_exit_code(result.verdict)
+        if code != 0:
+            sys.exit(code)
 
 
 def _log_one_side_debug(

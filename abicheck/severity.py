@@ -478,6 +478,31 @@ _CATEGORY_EXIT_CODES: dict[IssueCategory, int] = {
 }
 
 
+# Legacy (non-severity-aware) verdict → process exit code. Canonical mapping
+# shared by every flow that exits on a single verdict (`compare`,
+# `compare-release` per-library/global). Kept next to the severity-aware
+# `compute_exit_code` so both schemes live in one place (C7). Documented
+# contract (see /CLAUDE.md "Exit codes"): BREAKING→4, API_BREAK→2, compatible→0.
+_LEGACY_VERDICT_EXIT_CODE: dict[Verdict, int] = {
+    Verdict.BREAKING: 4,
+    Verdict.API_BREAK: 2,
+    Verdict.COMPATIBLE_WITH_RISK: 0,
+    Verdict.COMPATIBLE: 0,
+    Verdict.NO_CHANGE: 0,
+}
+
+
+def legacy_exit_code(verdict: Verdict) -> int:
+    """Map a single overall *verdict* to the legacy process exit code.
+
+    The one place the verdict→exit-code contract is encoded for the
+    non-severity-aware flows, so `compare` and `compare-release` cannot drift
+    apart. Flow-specific floors (operational ERROR→4, removed-library→8) are
+    applied by the caller on top of this base.
+    """
+    return _LEGACY_VERDICT_EXIT_CODE.get(verdict, 0)
+
+
 def compute_exit_code(
     changes: Sequence[HasKind],
     config: SeverityConfig,

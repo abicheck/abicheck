@@ -259,58 +259,114 @@ post-filter ordering the synthetic detectors need.
 
 ---
 
-### C6 — A `Change` factory for consistent findings
+### C6 — A `Change` factory for consistent findings *(scheduled as its own PR)*
+
+> **Tracking decision:** C6 is the widest-blast-radius candidate (~358 call
+> sites) and is intentionally carved out into a **separate, self-contained PR**,
+> done *after* the C1–C2 work in #395 merges. This section is the spec for that
+> PR — detailed enough to start cold.
 
 **Problem.** `Change(kind=ChangeKind.XXX, description=f"…", old_value=…, new_value=…)`
-is hand-rolled at ~358 sites across the `diff_*` modules, each inventing its own
-description wording; reporters then partly parse those free-text descriptions.
-The `impact` text already lives in `change_registry.py`, but per-finding
-descriptions do not — so phrasing is inconsistent and untestable.
+is hand-rolled across the `diff_*` modules, each call site inventing its own
+description wording. Reporters then partly parse those free-text descriptions.
+The `impact` text already lives in `change_registry.py` (one entry per
+ChangeKind), but the per-finding *description* does not — so phrasing is
+inconsistent, untestable, and the description is the only place some detail
+(old→new) is encoded for machine consumers.
 
-**Goal.** Uniform, localisable descriptions owned next to each kind's
-verdict/impact; reporters stop string-scraping.
+**Goal.** Uniform, templated descriptions owned next to each kind's
+verdict/impact in `change_registry`; detectors pass structured fields, not prose;
+machine consumers read fields, not scraped text.
+
+**Inventory / where to start.**
+- Enumerate the sites: `rg -n "Change\(" abicheck/diff_*.py abicheck/checker.py`
+  (was ~358 at time of writing — re-count first; treat the number as
+  approximate). Group by ChangeKind to see which kinds dominate.
+- Classify each kind's description into **regular** (a fixed template +
+  symbol/old/new substitution, e.g. `func_return_changed`:
+  `"Return type changed: {symbol}; old={old}, new={new}"`) vs **bespoke**
+  (embeds computed offsets, demangled signatures, vtable slot indices, counts —
+  e.g. `type_field_offset_changed`, vtable/RTTI size findings). Expect a long
+  tail of regular kinds and a small bespoke minority.
 
 **Approach.**
-1. Add description templates to `change_registry.py` entries.
-2. Add `make_change(kind, symbol, old, new, **extra)` that formats from the
-   template, with a `description=` override for irregular findings.
-3. Migrate the regular call sites; leave the bespoke minority (computed offsets,
-   signatures) using the override.
+1. Add an optional `description_template: str | None` field to each
+   `change_registry` entry (alongside `impact`). Use `str.format`-style named
+   placeholders drawn from a fixed vocabulary: `{symbol} {old} {new} {detail}`.
+2. Add `change_registry.make_change(kind, *, symbol, old=None, new=None,
+   detail=None, description=None, **change_kwargs) -> Change`: formats from the
+   template when present, else requires an explicit `description=`. It stamps
+   `kind` and forwards the remaining `Change` fields (`old_value`, `new_value`,
+   `caused_by_type`, …). Keep it a thin wrapper over the `Change` dataclass.
+3. Migrate the **regular** kinds to `make_change(...)`, deleting their f-strings.
+4. Leave **bespoke** kinds calling `make_change(..., description=<computed>)` —
+   do **not** force-fit a template; the override path is first-class.
+5. Add a registry-completeness test: every ChangeKind that any detector emits
+   either has a `description_template` or is on an explicit `BESPOKE_DESCRIPTION`
+   allowlist (so a new kind can't silently regress to an ad-hoc f-string).
+
+**Sequencing within the PR.** Land the factory + templates + a handful of
+migrated kinds first (small, reviewable), then migrate the rest in a second
+commit. Mechanical, so keep commits per-module to ease review.
 
 **Edge cases / risks.**
-- ~358 call sites — highest churn-to-benefit ratio of the catalogue.
-- Not every description collapses to a template; do not force-fit.
+- ~358 call sites — highest churn-to-benefit ratio; that is exactly why it is a
+  standalone PR, not bundled with semantic refactors.
+- Descriptions are user-visible **and** some are golden-snapshotted: run the
+  `golden` lane; any wording change is intentional and regenerated deliberately.
+- Some descriptions are parsed downstream (e.g. PR comment / appcompat). Audit
+  for `.description` string parsing before changing wording; prefer adding a
+  structured field over changing the prose those consumers read.
+- Depends on C2 only loosely: C2's model already centralises *classification*;
+  C6 centralises *description text*. They are independent but both reduce
+  reporter string-scraping, so do C6 after C2 to land on the model.
 
-**Risk:** mechanical but wide. **Do last**, after C2 makes the model the single
-description consumer.
+**Risk:** mechanical but wide. Standalone PR, golden-gated.
 
 ---
 
-### C7 — Push business logic out of the CLI into the service layer
+### C7 — Push business logic out of the CLI into the service layer *(exit-code unification done; command-body extraction is a sized follow-up)*
 
-**Problem.** `cli.py`'s `compare_cmd` (~200 lines of a 1993-line file already at
-the size cap) does result post-processing, GitHub-annotation emission and
-exit-code mapping inline — that is business logic, not presentation.
-`service.py` is already a clean library layer (`run_compare`, `render_output`,
-`load_suppression_and_policy`) but the commands don't fully delegate to it. The
-same leak appears in `cli_compare_release`, `cli_appcompat` and `cli_stack`.
+**Problem.** `cli.py`'s `compare_cmd` (~200 lines of a file at the size cap) does
+result post-processing, GitHub-annotation emission and exit-code mapping inline —
+business logic, not presentation. The same leak appears in
+`cli_compare_release`, `cli_appcompat` and `cli_stack`. Most contractually
+dangerous: the **verdict→exit-code mapping was duplicated inline** in `compare`
+(`cli._exit_with_severity_or_verdict`) and `compare-release`
+(`cli_compare_release._exit_compare_release`), so the two flows could drift.
 
-**Goal.** CLI command bodies become thin: parse args → call a service function
-→ map the result to an exit code. Business logic is testable without invoking
-Click, and `cli.py` drops below the size cap.
+**Done (this PR).** The exit-code contract is unified:
+- `severity.legacy_exit_code(verdict)` is the single home for the
+  non-severity-aware mapping (BREAKING→4, API_BREAK→2, compatible→0), sitting
+  next to the existing severity-aware `compute_exit_code`.
+- Both `compare` and `compare-release` route their legacy branch through it;
+  flow-specific floors (`compare-release`'s operational `ERROR`→4 and
+  removed-library→8) are applied on top, documented at the call site.
+- `tests/test_exit_code_integrity.py` locks the contract and asserts the two
+  flows produce identical codes per verdict, and that the `compat` scheme
+  (BREAKING→1, API_BREAK→2, 3–11 errors) is *deliberately distinct* and not
+  accidentally unified.
 
-**Approach.**
-1. Move post-processing + annotation + verdict→exit-code logic into `service.py`
-   (e.g. `run_compare_to_report()` returning a structured result + exit code).
-2. Reduce `compare_cmd` to arg-parse + service call + `sys.exit`.
-3. Repeat for the other affected commands; extract shared option stacks into
-   `cli_options.py` where they duplicate (`--suppress`, `--policy`, severity).
+**Remaining (follow-up, can be its own PR).** Extract the rest of the
+command-body business logic into `service.py`:
+1. A `service.run_compare_to_report(...)` (or similar) returning a structured
+   result + the resolved exit code, so post-processing, annotation emission and
+   exit decisions live in the library layer.
+2. Reduce `compare_cmd` / `compare_release_cmd` / `appcompat_cmd` /
+   `stack_check_cmd` to arg-parse → service call → `sys.exit`.
+3. Extract shared Click option stacks into `cli_options.py` where they duplicate
+   (`--suppress`, `--policy`, severity flags).
+This is what finally drops `cli.py` below the size cap.
 
 **Edge cases / risks.**
-- Exit-code semantics are contractual (documented in `/CLAUDE.md`); preserve the
-  legacy vs severity-aware mappings exactly. Cover with CLI exit-code tests.
+- Exit-code semantics are contractual (documented in `/CLAUDE.md`); the
+  unification preserved the legacy and severity-aware mappings exactly (covered
+  by the new integrity tests). The follow-up extraction must keep them.
+- GitHub-annotation emission has side effects (writes workflow commands); keep it
+  behind the same flag and test with output capture.
 
-**Risk:** medium; behaviour-preserving but exit codes are user-facing.
+**Risk:** exit-code unification — low (behaviour-preserving, tested). Command-body
+extraction — medium (wide, exit-code- and annotation-sensitive).
 
 ---
 
@@ -424,7 +480,7 @@ C4  detector auto-discovery        ✅ done (PR #395)
 C9  relocate confidence            ✅ done (PR #395)
 C1  name classification            ✅ done (PR #395)
 C2  report view-model              ✅ inc 1–2 done (model+ADR-036; maps unified; integrity tests)
-C7  CLI → service                  (exit-code-sensitive)
+C7  CLI → service                  ◐ exit-code unified + integrity tests (body-extraction follow-up)
 C3  binary-format registry         (parallelisable; needs integration lane)
 C10 split model.py                 ◐ stage-1 done (name predicates moved)
 C8  ABICC compat adapter           (parity-sensitive)
@@ -447,8 +503,8 @@ parity is contractual and benefits from a stabilised shared layer underneath it.
 | C3 | Binary-format handler registry | Proposed | — |
 | C4 | Detector auto-discovery | Done | #395 |
 | C5 | Synthetic detectors → registry | Deferred (not a clean win) | — |
-| C6 | `Change` factory | Proposed | — |
-| C7 | CLI → service layer | Proposed | — |
+| C6 | `Change` factory | Spec'd for own PR | — |
+| C7 | CLI → service (exit-code unify + cross-flow integrity tests done; command-body extraction follow-up) | Partial | #395 |
 | C8 | ABICC compat adapter | Proposed | — |
 | C9 | Relocate confidence computation | Done | #395 |
 | C10 | Split `model.py` (stage-1: name predicates) | Stage-1 done | #395 |
