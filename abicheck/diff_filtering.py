@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import re
+from collections import deque
 
 from .checker_policy import ChangeKind
 from .checker_types import SYMBOL_VERSION_ALIAS_NOT_RETAINED_MARKER, Change
@@ -237,6 +238,71 @@ def _resolve_ancestor_functions(
                 type_to_mangled[tname].add(mname)
 
 
+class _SubstringMatcher:
+    """Aho-Corasick multi-substring matcher over a fixed needle set.
+
+    :meth:`find` returns every needle that occurs as a substring of the queried
+    haystack — the exact semantics of ``{n for n in needles if n in haystack}``,
+    but in O(len(haystack)) per query after an O(Σ len(needle)) build, instead
+    of O(needles × len(haystack)). Used by the affected-symbol enrichment to
+    relate many changed type names to the functions/fields that reference them
+    without the former quadratic ``any(tname in ft ...)`` cross-product.
+    """
+
+    __slots__ = ("_goto", "_fail", "_out")
+
+    def __init__(self, needles: set[str]) -> None:
+        goto: list[dict[str, int]] = [{}]
+        out: list[set[str]] = [set()]
+        for needle in needles:
+            if not needle:
+                continue
+            node = 0
+            for ch in needle:
+                nxt = goto[node].get(ch)
+                if nxt is None:
+                    nxt = len(goto)
+                    goto.append({})
+                    out.append(set())
+                    goto[node][ch] = nxt
+                node = nxt
+            out[node].add(needle)
+        # Failure links via BFS; merge each node's output with its fail target's
+        # so a single query walk collects all substrings ending at a position.
+        fail = [0] * len(goto)
+        queue: deque[int] = deque()
+        for child in goto[0].values():
+            queue.append(child)  # depth-1 nodes fail to root (already 0)
+        while queue:
+            node = queue.popleft()
+            for ch, nxt in goto[node].items():
+                queue.append(nxt)
+                f = fail[node]
+                while f and ch not in goto[f]:
+                    f = fail[f]
+                fail[nxt] = goto[f].get(ch, 0) if f or ch in goto[0] else 0
+                if out[fail[nxt]]:
+                    out[nxt] |= out[fail[nxt]]
+        self._goto = goto
+        self._fail = fail
+        self._out = out
+
+    def find(self, haystack: str) -> set[str]:
+        """Return all needles that are substrings of *haystack*."""
+        if not haystack:
+            return set()
+        goto, fail, out = self._goto, self._fail, self._out
+        node = 0
+        result: set[str] = set()
+        for ch in haystack:
+            while node and ch not in goto[node]:
+                node = fail[node]
+            node = goto[node].get(ch, 0)
+            if out[node]:
+                result |= out[node]
+        return result
+
+
 def _collect_function_type_refs(func: Function) -> set[str]:
     """Return the set of type strings referenced in *func*'s signature."""
     out: set[str] = set()
@@ -251,30 +317,44 @@ def _collect_function_type_refs(func: Function) -> set[str]:
 def _build_type_to_funcs(
     affected_types: set[str],
     old_pub: dict[str, Function],
+    matcher: _SubstringMatcher | None = None,
 ) -> tuple[dict[str, set[str]], dict[str, set[str]]]:
-    """Build type→(demangled, mangled) function name sets from public functions."""
+    """Build type→(demangled, mangled) function name sets from public functions.
+
+    The naive form scanned every affected type against every function's type
+    refs — ``any(tname in ft ...)`` nested in two loops — which is
+    O(types × functions × refs) and goes quadratic when a header refactor or a
+    versioned upgrade churns many distinct types (typedef/union/vtable churn was
+    ≈O(n²), ~7–9 s at n=4000). Replace the inner type loop with a single
+    Aho-Corasick pass per ref (:class:`_SubstringMatcher`): the set of affected
+    types occurring as a substring of a ref is found in O(len(ref)) regardless
+    of how many types are tracked, with **identical** substring semantics.
+    """
     type_to_funcs: dict[str, set[str]] = {t: set() for t in affected_types}
     type_to_mangled: dict[str, set[str]] = {t: set() for t in affected_types}
+    ac = matcher if matcher is not None else _SubstringMatcher(affected_types)
     for _mangled, func in old_pub.items():
-        func_types_used = _collect_function_type_refs(func)
-        for tname in affected_types:
-            if any(tname in ft for ft in func_types_used):
-                type_to_funcs[tname].add(func.name)
-                type_to_mangled[tname].add(func.mangled)
+        matched: set[str] = set()
+        for ft in _collect_function_type_refs(func):
+            matched |= ac.find(ft)
+        for tname in matched:
+            type_to_funcs[tname].add(func.name)
+            type_to_mangled[tname].add(func.mangled)
     return type_to_funcs, type_to_mangled
 
 
 def _build_type_embed_index(
     affected_types: set[str],
     old: AbiSnapshot,
+    matcher: _SubstringMatcher | None = None,
 ) -> dict[str, set[str]]:
     """Build a child_type→{parent_type} embedding index from old snapshot fields."""
     type_embeds: dict[str, set[str]] = {}
+    ac = matcher if matcher is not None else _SubstringMatcher(affected_types)
     for t in old.types:
         for fld in t.fields:
-            for tname in affected_types:
-                if tname in fld.type:
-                    type_embeds.setdefault(tname, set()).add(t.name)
+            for tname in ac.find(fld.type):
+                type_embeds.setdefault(tname, set()).add(t.name)
     return type_embeds
 
 
@@ -311,13 +391,18 @@ def _enrich_affected_symbols(
 
     old_pub = _public_functions(old)
 
+    # One Aho-Corasick matcher over the affected type names, shared by both
+    # index builders below — built once so neither pays the former
+    # O(types × functions) / O(types × fields) substring cross-product.
+    matcher = _SubstringMatcher(affected_types)
+
     # Build type→functions mapping from old snapshot (FIX-A Part 3).
     # Store both demangled names (for display) and mangled names (for appcompat matching).
-    type_to_funcs, type_to_mangled = _build_type_to_funcs(affected_types, old_pub)
+    type_to_funcs, type_to_mangled = _build_type_to_funcs(affected_types, old_pub, matcher)
 
     # Also check if types are embedded in struct fields used by functions
     # (e.g., Container has a Leaf field → functions taking Container* are affected by Leaf changes)
-    type_embeds = _build_type_embed_index(affected_types, old)
+    type_embeds = _build_type_embed_index(affected_types, old, matcher)
 
     # Compute transitive closure: if Leaf is in Container is in Wrapper,
     # functions using Wrapper are also affected by Leaf changes.
@@ -797,6 +882,72 @@ def _has_public_pointer_factory(
     return False
 
 
+def _opaque_usage_index(
+    candidates: set[str],
+    snap: AbiSnapshot,
+    bare_re_cache: dict[str, re.Pattern[str]],
+    factory_re_cache: dict[str, re.Pattern[str]],
+) -> tuple[set[str], set[str]]:
+    """Single pass over the public surface → ``(used_by_value, has_pointer_factory)``.
+
+    ``_filter_opaque_size_changes`` previously called ``_is_pointer_only_type`` and
+    ``_has_public_pointer_factory`` *per candidate*, each rescanning every public
+    function/variable with a word-boundary regex — O(candidates × functions) with
+    a regex per pair (``type_churn`` n=4000: ~3.2 M regex searches). This walks the
+    surface once and uses an Aho-Corasick prefilter (:class:`_SubstringMatcher`)
+    to narrow each type string to the candidates that actually occur in it; the
+    *decision* is still made by the same ``_type_used_by_value`` / factory regex
+    oracle, so the result is identical — the prefilter only drops pairs that could
+    never match.
+    """
+    used_by_value: set[str] = set()
+    has_factory: set[str] = set()
+    if not candidates:
+        return used_by_value, has_factory
+    ac = _SubstringMatcher(candidates)
+
+    def _bare(c: str) -> re.Pattern[str]:
+        r = bare_re_cache.get(c)
+        if r is None:
+            r = re.compile(r"\b" + re.escape(c) + r"\b")
+            bare_re_cache[c] = r
+        return r
+
+    def _factory(c: str) -> re.Pattern[str]:
+        r = factory_re_cache.get(c)
+        if r is None:
+            r = re.compile(r"\b" + re.escape(c) + r"\s*\*")
+            factory_re_cache[c] = r
+        return r
+
+    def _scan_by_value(text: str | None) -> None:
+        if not text:
+            return
+        for c in ac.find(text):
+            if c not in used_by_value and _type_used_by_value(text, _bare(c)):
+                used_by_value.add(c)
+
+    for f in snap.functions:
+        if f.visibility not in _PUBLIC_VIS:
+            continue
+        rt = f.return_type or ""
+        # Pointer factory: a public function returning ``T*`` (never ``T&``).
+        if rt and "&" not in rt:
+            for c in ac.find(rt):
+                if c not in has_factory and _factory(c).search(rt):
+                    has_factory.add(c)
+        _scan_by_value(f.return_type)
+        for p in f.params:
+            _scan_by_value(p.type)
+
+    for v in snap.variables:
+        if v.visibility not in _PUBLIC_VIS:
+            continue
+        _scan_by_value(v.type)
+
+    return used_by_value, has_factory
+
+
 def _filter_opaque_size_changes(
     changes: list[Change], old: AbiSnapshot, new: AbiSnapshot
 ) -> tuple[list[Change], list[Change]]:
@@ -835,29 +986,36 @@ def _filter_opaque_size_changes(
         ChangeKind.STRUCT_ALIGNMENT_CHANGED,
     }
 
-    opaque_types: set[str] = set()
-    # Shared regex caches so patterns are compiled once across all candidate types.
+    # Candidate types: a size change whose change set is a *compatible append*
+    # only (the narrow case62 rule). Resolve this cheaply first so the usage
+    # index below is built over the small candidate set, not every changed type.
+    candidates = {
+        t
+        for t in size_change_types
+        if ChangeKind.TYPE_FIELD_ADDED_COMPATIBLE in by_type[t]
+        and not (by_type[t] & forbidden)
+    }
+
+    # One pass per snapshot instead of a per-candidate full rescan: opaque ⟺
+    # the type is never used by value in either snapshot *and* has a pointer
+    # factory (T*) in both (the case07 regression guard). Shared regex caches so
+    # each candidate's patterns compile once across both snapshots.
     _bare_re_cache: dict[str, re.Pattern[str]] = {}
     _factory_re_cache: dict[str, re.Pattern[str]] = {}
-    for t in size_change_types:
-        kinds = by_type[t]
-        if ChangeKind.TYPE_FIELD_ADDED_COMPATIBLE not in kinds:
-            continue
-        if kinds & forbidden:
-            continue
-        if not (
-            _is_pointer_only_type(t, old, _bare_re_cache)
-            and _is_pointer_only_type(t, new, _bare_re_cache)
-        ):
-            continue
-        # Narrow guard to avoid case07-style regressions:
-        # opaque handles are typically created by factory APIs returning T*.
-        if not (
-            _has_public_pointer_factory(t, old, _factory_re_cache)
-            and _has_public_pointer_factory(t, new, _factory_re_cache)
-        ):
-            continue
-        opaque_types.add(t)
+    old_byval, old_factory = _opaque_usage_index(
+        candidates, old, _bare_re_cache, _factory_re_cache
+    )
+    new_byval, new_factory = _opaque_usage_index(
+        candidates, new, _bare_re_cache, _factory_re_cache
+    )
+    opaque_types: set[str] = {
+        t
+        for t in candidates
+        if t not in old_byval
+        and t not in new_byval
+        and t in old_factory
+        and t in new_factory
+    }
 
     if not opaque_types:
         return changes, []

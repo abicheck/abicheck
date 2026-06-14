@@ -103,6 +103,9 @@ class ConsumerEntry:
     library: str  # e.g. "libalgo.so"
     version: str  # gnu.version_r required version, "" if unversioned
     weak: bool  # True when the import is weak (unresolved is OK)
+    # Verneed provider soname for this symbol's required version ("" if unknown
+    # or unversioned). Disambiguates colliding version labels across providers.
+    version_soname: str = ""
 
 
 @dataclass
@@ -600,6 +603,7 @@ def _compute_resolution_graph(
                     library=name,
                     version=imp.version,
                     weak=str(imp.binding) in ("SymbolBinding.WEAK", "weak"),
+                    version_soname=imp.version_soname,
                 ),
             )
 
@@ -762,8 +766,13 @@ def _detect_intra_dep_removed(
     """Find imports in the new bundle that no sibling provides.
 
     Excludes imports satisfied by system libraries (``libc``, ``libstdc++``,
-    etc.) since they are out of bundle scope by design. Excludes weak
-    imports (linker treats unresolved weak as 0/NULL at runtime).
+    etc.) since they are out of bundle scope by design. Classification uses
+    provider/version evidence first (:func:`_import_is_external`: a symbol
+    bound to a ``GLIBC_``/``CXXABI_``/… version namespace, or required from a
+    soname that does not resolve inside the bundle, is external) and the
+    symbol-name allow-list (``DEFAULT_SYSTEM_SYMBOLS`` / ``_looks_system_*``)
+    as a fallback. Excludes weak imports (linker treats unresolved weak as
+    0/NULL at runtime).
     A consumer's import is treated as system-provided when every DT_NEEDED
     edge it carries that resolves *outside* the bundle is in the
     ``system_providers`` allow-list (built-in plus user-extended via
@@ -781,6 +790,16 @@ def _detect_intra_dep_removed(
                 continue
             consumer_meta = new.metadata.get(consumer.library)
             if consumer_meta is None:
+                continue
+            # Version/provider evidence (field-derived oneDAL fix): an import
+            # bound to a system version namespace (``syscall@GLIBC_2.2.5``,
+            # ``stdout@GLIBC_2.2.5``, ``_ZdlPvm@CXXABI_1.3``) — or required
+            # from a library whose soname does not resolve inside the bundle —
+            # is external by construction. It can never be a *dropped
+            # intra-bundle* dependency, so skip it regardless of symbol-name
+            # shape. An unversioned (or bundle-versioned) sibling import is
+            # NOT skipped here and still produces the finding.
+            if _import_is_external(consumer, consumer_meta, new):
                 continue
             # Note: an earlier version of this code short-circuited here
             # when consumer had no intra-bundle DT_NEEDED edges. That
@@ -1496,6 +1515,89 @@ def _looks_system_symbol(name: str) -> bool:
     if name.startswith("_ZNK") and "St" in name[:8]:
         return True
     return False
+
+
+# Symbol-version namespaces owned by the C/C++ runtime and toolchain. A symbol
+# imported with one of these required versions is satisfied by libc /
+# libstdc++ / libgcc / libgomp — never by a sibling inside the analysed
+# bundle — so it must not be reported as a dropped intra-bundle dependency.
+# This is the version-evidence half of the field-derived oneDAL fix
+# (``syscall@GLIBC_*``, ``stdout@GLIBC_*``, ``_ZdlPvm@CXXABI_*``).
+_SYSTEM_VERSION_PREFIXES: tuple[str, ...] = (
+    "GLIBC_",
+    "GLIBCXX_",
+    "CXXABI_",
+    "GCC_",
+    "LIBGCC_",
+    "LIBC_",
+    "GOMP_",
+    "OMP_",
+    "GFORTRAN_",
+    "GLIBCABI_",
+)
+
+
+def _looks_system_version(version: str) -> bool:
+    """True when a required symbol version is a C/C++ runtime/toolchain namespace."""
+    return any(version.startswith(prefix) for prefix in _SYSTEM_VERSION_PREFIXES)
+
+
+def _import_is_external(
+    consumer: ConsumerEntry,
+    consumer_meta: ElfMetadata,
+    snapshot: BundleSnapshot,
+) -> bool:
+    """Classify an import as external using version + provider evidence.
+
+    An import is external — and therefore can never be a *dropped
+    intra-bundle* dependency — when its required symbol version is satisfied by
+    a library outside the analysed bundle.
+
+    The precise signal is the **per-symbol verneed provider**
+    (``ConsumerEntry.version_soname``): GNU version labels are scoped per
+    verneed provider, not globally unique, so two providers can both advertise
+    e.g. ``FOO_1.0``. When that soname is known we resolve this exact import —
+    external iff its provider soname does not resolve inside the bundle —
+    without guessing from the bare label.
+
+    ``is_intra_bundle_provider`` matches by exact soname *and* filename stem, so
+    a SONAME-major bump (``libcore.so.1`` → ``libcore.so.2``) where a sibling
+    still NEEDs the old soname is still recognised as intra-bundle, and a
+    release that itself vendors a runtime DSO (``libgomp.so.1``) keeps a dropped
+    ``GOMP_4.0`` export visible.
+
+    When the per-symbol verneed soname is unavailable (e.g. a JSON snapshot
+    that predates the field, or a stripped verneed), fall back to the
+    label-level scan over ``versions_required`` — provider evidence still wins
+    over the ``_looks_system_version`` toolchain-namespace heuristic.
+
+    Unversioned imports (``version == ""``) return ``False`` so an unversioned
+    internal sibling import still produces a finding. This is the field-derived
+    oneDAL fix: classify by provider/version evidence, not only by symbol-name
+    allow-lists.
+    """
+    version = consumer.version
+    if not version:
+        return False
+    # Preferred path: the exact verneed provider for *this* symbol is known.
+    # No label-collision ambiguity — resolve this import directly.
+    if consumer.version_soname:
+        return not snapshot.is_intra_bundle_provider(consumer.version_soname)
+    # Fallback: per-symbol verneed soname not captured. Scan the label across
+    # all verneed providers. If any soname carrying this label resolves inside
+    # the bundle, treat the import as intra (keep the finding); only when every
+    # provider of the label is external is it external. Provider evidence wins
+    # over the system-namespace shortcut so a vendored runtime stays visible.
+    external_match = False
+    for soname, versions in consumer_meta.versions_required.items():
+        if version not in versions:
+            continue
+        if snapshot.is_intra_bundle_provider(soname):
+            return False  # required from a bundle sibling — keep the finding
+        external_match = True
+    if external_match:
+        return True
+    return _looks_system_version(version)
 
 
 _ELF_MAGIC = b"\x7fELF"

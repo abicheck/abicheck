@@ -555,3 +555,95 @@ use_cases:
       toolchain). Capture a pre-recorded `bazel aquery --output=jsonproto` from a
       small Bazel C++ project, add it as a non-executing fixture + test asserting
       non-empty BuildEvidence, then flip to partial/complete.
+
+  # ── PR-tier source intelligence & cross-source validation (ADR-035 / G19) ──
+  - id: UC-WORKFLOW-pr-source-tier
+    axis: workflow
+    name: Always-on compiler-free PR pre-scan + deterministic level selection
+    status: partial
+    gap: G19
+    plan: docs/development/plans/g19-pr-source-intelligence.md
+    evidence:
+      modules:
+        - abicheck/buildsource/pattern_scan.py
+      tests:
+        - tests/test_pattern_scan.py
+    next_steps: >
+      ADR-035 D2/D3. DONE: the compiler-free lexical pattern pre-scan
+      (`buildsource/pattern_scan.py`) — a stdlib-regex scan over changed+public
+      files for the D2 ABI-risk construct list, emitting advisory facts +
+      per-kind escalation triggers, with no compile DB and no compiler. REMAINS:
+      the preprocessor macro/include capture (S2), conditional on a compile DB +
+      `clang -E` (reported skipped otherwise); and the deterministic `scan`
+      orchestrator — a fixed `--mode` preset or an explicit
+      `--source-method`/`--depth`. A numeric risk score changes depth ONLY under
+      `--source-method auto` (opt-in) and for POI focusing; `--budget` is a
+      failure guard on the chosen level (errors on overflow, never shrinks scope).
+      A single `scan` orchestrator reports per-tier coverage so partial results
+      are first-class. Reuses the existing collect-mode/replay-scope and
+      evidence-policy machinery; emits RISK/API_BREAK only (authority rule).
+
+  - id: UC-CHANGE-crosscheck-hygiene
+    axis: change_class
+    name: Cross-source validation findings (intra-version ABI hygiene)
+    status: planned
+    gap: G19
+    plan: docs/development/plans/g19-pr-source-intelligence.md
+    next_steps: >
+      ADR-035 D4. New correctly-partitioned ChangeKinds that diff a single
+      snapshot's evidence sources against each other — exported_not_public,
+      public_not_exported, header_build_context_mismatch, private_header_leak,
+      odr_type_variant, public_to_internal_dependency. RISK/API_BREAK tier only;
+      each must earn FP-rate-gate corpus cases before it is allowed to gate.
+
+  - id: UC-WORKFLOW-single-release-audit
+    axis: workflow
+    name: Single-release ABI-hygiene audit (no baseline compare)
+    status: planned
+    gap: G19
+    plan: docs/development/plans/g19-pr-source-intelligence.md
+    next_steps: >
+      ADR-035 D8. Run the D2 pattern facts + D4 cross-checks intra-version, with
+      no baseline, as a `scan --audit` / surface-report lint (accidental ABI
+      surface, private-header leaks, header/build-context mismatch, ODR variants,
+      visibility/versioning hygiene). Extends the G11 single-binary audit;
+      delivers value from one artifact, so it justifies a deeper one-time scan.
+
+  - id: UC-WORKFLOW-evidence-directed-scope
+    axis: workflow
+    name: Evidence-directed scan focusing (binary/header facts steer source scan)
+    status: planned
+    gap: G19
+    plan: docs/development/plans/g19-pr-source-intelligence.md
+    next_steps: >
+      ADR-035 D7. Compute a points-of-interest work-list from L0/L1/L2 deltas +
+      risk score (reverse of the explain-finding localization walk) and hand it to
+      source_replay scope selection and the cross-check engine, so L4/L5 cost is
+      paid only on entities the cheap binary/header evidence already flagged.
+
+  - id: UC-TC-build-emitted-facts
+    axis: toolchain
+    name: Build-emitted source facts (artifact protocol + Clang plugin/wrapper)
+    status: planned
+    gap: G19
+    plan: docs/development/plans/g19-pr-source-intelligence.md
+    next_steps: >
+      ADR-035 D5. Define an `abicheck_inputs/` dump/facts artifact protocol the
+      product build drops next to its binary (normalized source_facts/*.jsonl
+      canonical; raw AST debug-only), ingestible via existing `merge`; plus a
+      Clang plugin and `abicheck-cc` compiler wrapper as ADR-032 extractor
+      providers. Lets vendor/closed builds contribute exact-build-context facts
+      without shipping sources; replay stays the portable default.
+
+  - id: UC-REPORTING-scan-coverage-estimate
+    axis: reporting
+    name: Scan coverage/confidence report + per-project cost estimate
+    status: planned
+    gap: G19
+    plan: docs/development/plans/g19-pr-source-intelligence.md
+    next_steps: >
+      ADR-035 D9/D10. A typed ScanResult carrying per-tier LayerCoverage, the
+      provider-agreement/confidence matrix, and estimate-vs-actual cost — rendered
+      by reporter/PR-comment/SARIF/MCP. `scan --estimate` (service.estimate_scan)
+      probes the project (TU count, header fan-out, cache state) and prints the
+      projected per-level cost so a maintainer/CI picks a depth on measured cost.

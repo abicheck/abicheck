@@ -12,14 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""A render-ready view of a comparison result (C2 — ADR-035).
+"""A render-ready view of a comparison result (C2 — ADR-036).
 
 Output formats used to each re-apply the ``show_only`` filter and re-derive the
 verdict-axis buckets (breaking / source-break / risk / compatible) on their own.
 :class:`ReportModel` computes those *once* from a :class:`DiffResult` so renderers
 become thin projections over a single, canonical classification.
 
-Canonical severity (ADR-035): the **verdict axis** — each finding's
+Canonical severity (ADR-036): the **verdict axis** — each finding's
 ``result._effective_verdict_for_change(c)`` (policy-file overrides + ADR-027 A4
 per-finding modulation respected). This is the same partition that drives the
 overall verdict and the process exit code, so the report can never disagree with
@@ -46,7 +46,7 @@ if TYPE_CHECKING:
     from .checker_types import Change, DiffResult
 
 
-# Canonical verdict → presentation-vocabulary maps (ADR-035). Each output
+# Canonical verdict → presentation-vocabulary maps (ADR-036). Each output
 # channel used to re-encode this mapping privately (reporter, sarif, pr_comment),
 # so they agreed only by luck and could drift. They now all source it here.
 
@@ -95,7 +95,7 @@ class ReportModel:
         result: DiffResult,
     ) -> tuple[list[Change], list[Change], list[Change], list[Change]]:
         """Split *changes* into (breaking, source_breaks, risk, compatible) by the
-        effective per-finding verdict (canonical severity, ADR-035)."""
+        effective per-finding verdict (canonical severity, ADR-036)."""
         ev = result._effective_verdict_for_change
         breaking = [c for c in changes if ev(c) == Verdict.BREAKING]
         source_breaks = [c for c in changes if ev(c) == Verdict.API_BREAK]
@@ -114,7 +114,7 @@ class ReportModel:
         the PR comment. SARIF keeps a finer per-kind level (see
         :data:`VERDICT_TO_SARIF_LEVEL`, used only on the A4 override path); the
         cross-channel invariant is the *breaking boundary* and override
-        propagation, not identical vocabulary — see ADR-035 and
+        propagation, not identical vocabulary — see ADR-036 and
         ``tests/test_report_integrity.py``.
         """
         return VERDICT_TO_SEVERITY_LABEL.get(

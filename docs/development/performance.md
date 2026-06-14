@@ -32,14 +32,15 @@ the work is organised.
 | 5 | Type-spelling fallback (`diff_type_spellings`) | Rebuilt a `set(...)` inside a comprehension → O(n²). | Hoist the set once. | folded into `add_remove` win |
 | 6 | Affected-symbol enrichment / ancestor closure (`diff_filtering`) | Transitive ancestor function **lists** accumulated duplicates, then re-sorted per change → effectively cubic on nested type graphs. | Use sets (dedup on union); sort once. | `nested_types` n=200: **>60 s → 0.16 s** |
 | 7 | ELF-only rename matching (`binary_fingerprint`, `diff_symbols._plausible_rename`) | O(removed × added) name-similarity scan; the name predicate re-demangled both names per pair. | Scan only the size-tolerance window via the existing size index; cache the per-name parse; cap the heuristic pass for mass-rename inputs. | `rename_churn` n=1000: **13.2 s → 2.1 s**, larger inputs bounded |
+| 8 | Affected-symbol enrichment type↔function/field mapping (`diff_filtering._build_type_to_funcs`, `_build_type_embed_index`) | `any(tname in ft ...)` nested inside the type loop and the function/field loop → O(types × functions × refs); quadratic when many distinct types churn (a header refactor or versioned upgrade). The original perf sweep only sampled these scenarios at n=500, so the exponent was never computed and the table mislabelled them "linear". | One Aho-Corasick `_SubstringMatcher` over the affected type names, built once and shared; each ref/field is matched in O(len) with **identical** substring semantics. | `typedef_churn` n=4000: **6.3 s → 0.73 s**; `union_churn` **9.1 s → 1.10 s**; `vtable_churn` **7.8 s → 1.03 s**; `enum_churn` **≈1.8 → 1.0**; `opaque_filter` **≈1.7 → 1.2** (all now linear) |
+| 9 | Opaque-handle pointer-only / factory check (`diff_filtering._is_pointer_only_type`, `_has_public_pointer_factory` via `_filter_opaque_size_changes`) | Each opaque candidate rescanned every public function/variable with a word-boundary regex → O(candidates × functions), a regex per pair (`type_churn` n=4000: ~3.2 M searches). | One indexed pass per snapshot (`_opaque_usage_index`): an Aho-Corasick prefilter narrows each type string to the candidates present, then the **same** regex oracle decides — so the verdict is unchanged (verified by a fuzz test vs the per-candidate functions). | `type_churn` n=4000: **1.13 s → 0.38 s** (≈1.6 → linear) |
 
-The one remaining super-linear path is the **opaque-handle size filter**
-(`diff_filtering._filter_opaque_size_changes`), O(candidates × functions). It is
-left as-is: it only triggers on the narrow "compatible struct growth of a
-pointer-only handle" pattern, so the candidate count is small for real
-libraries, and `type_churn` (which forces *every* struct into that pattern) is
-already down from 8.8 s to 1.4 s at 4000 functions as a side effect of the other
-fixes.
+With fixes #8 and #9 the compare pipeline has **no remaining quadratic path** at
+the tracked sizes — every scenario is linear (tail exponent ≈1.0–1.3) except the
+inherently deep `nested_types` chain. The opaque-handle pointer-only check
+(`_is_pointer_only_type`) used to be O(candidates × functions) with a
+word-boundary regex per pair (`type_churn` n=4000: ~3.2 M regex searches, ≈1.6);
+fix #9 replaced the per-candidate rescan with one indexed pass.
 
 ## How to reproduce
 
@@ -73,7 +74,10 @@ reporting stages — see [Coverage beyond `compare()`](#coverage-beyond-compare)
 | `pe_churn` | `compare()` | PE/COFF export diffing (`diff_platform` PE arm) |
 | `macho_churn` | `compare()` | Mach-O export diffing (`diff_platform` Mach-O arm) |
 | `var_churn` | `compare()` | Public-surface classification |
-| `rename_churn` | `compare()` | ELF-only fingerprint rename matching |
+| `rename_churn` | `compare()` | ELF-only fingerprint rename matching — the *reject* path (disjoint names, no match emitted) |
+| `fuzzy_rename_churn` | `compare()` | ELF-only fingerprint rename matching — the *accept* path (every symbol genuinely renamed → one `func_likely_renamed` per pair). The ICU/LLVM cost driver (P11: rename detection, not symbol count) |
+| `version_node_churn` | `compare()` | Version-node migration fan-out — every export moves `LIB_1.0 → LIB_2.0` → `n` `symbol_moved_version_node` findings (the LLVM 17→18 36,991-finding shape) |
+| `versioned_rename_churn` | `compare()` (collapse on) | Versioned-symbol-scheme detection **and** collapse over `2×n` churn (ICU/OpenSSL `u_*_NN`) |
 | `nested_types` | `compare()` | Transitive type-ancestor closure |
 | `opaque_filter` | `compare()` | Opaque-handle size filter (the known O(candidates × functions) residual) |
 | `suppression_audit` | `SuppressionList.audit()` | Rule-vs-finding matching (O(rules × findings)) |
@@ -94,6 +98,17 @@ growth is counted rather than hidden behind a warm cache. A flat per-item time
 alongside a rising `peak_mb` flags an intermediate O(n²) *space* blow-up that a
 wall-clock-only gate would miss. Disable with `--no-memory` (timing only); gate
 with `--max-memory-mb <budget>`.
+
+Alongside it, each point records the **process peak RSS** (`rss_mb`, via
+`resource.getrusage`). Unlike `peak_mb`, which only sees Python-heap
+allocations, RSS also counts **native** memory — pyelftools parse buffers and
+`c++filt` subprocess pages — which is what dominates real libraries (the field
+eval observed ~330 MiB RSS at LLVM scale, invisible to `tracemalloc`).
+`ru_maxrss` is a *process* high-water mark, so it is monotonic across sizes and
+the **largest/last** value is the true peak (it overstates a single call's own
+footprint, since inputs are built in-process); gate the peak with
+`--max-rss-mb <budget>`. RSS is unavailable on Windows (`resource` is
+Unix-only), where the column is simply absent.
 
 ### Coverage beyond `compare()`
 
@@ -128,11 +143,15 @@ reporting stages (see [Coverage beyond `compare()`](#coverage-beyond-compare)).
 | `var_churn`    | 0.06 s @ n=4000 | ~1.0 (linear) |
 | `elf_namespace`| 0.33 s @ n=4000 | ~1.1 (linear) |
 | `pe_churn` / `macho_churn` | <0.05 s @ n=500 | ~1.0 (linear) |
-| `typedef_churn` / `union_churn` / `wide_struct` / `vtable_churn` | 0.1–0.2 s @ n=500 | ~1.0 (linear) |
-| `type_churn`   | 1.39 s @ n=4000 | ~1.7 (opaque filter residual) |
-| `enum_churn`   | 1.76 s @ n=2000 | ~1.7 (enum diff residual) |
-| `opaque_filter`| 1.97 s @ n=1000 (capped) | ~1.7 (the known O(candidates × functions) residual, now isolated) |
+| `wide_struct` | 0.1–0.2 s @ n=500 | ~1.0 (linear) |
+| `typedef_churn` / `union_churn` / `vtable_churn` | 0.7–1.1 s @ n=4000 | ~1.0 (linear, after fix #8) |
+| `enum_churn`   | 1.0 s @ n=4000 | ~1.0 (linear, after fix #8 — was ≈1.8) |
+| `type_churn`   | 0.38 s @ n=4000 | ~1.0 (linear, after fix #9 — was ≈1.6) |
+| `opaque_filter`| 0.45 s @ n=1000 | ~1.2 (linear at tracked sizes after fix #8) |
 | `rename_churn` | 2.1 s @ n=1000, capped above | bounded |
+| `fuzzy_rename_churn` | 0.39 s @ n=4000 | ~1.0 (linear) |
+| `version_node_churn` | 0.86 s @ n=10000 (10 k moves) | ~1.0 (linear) |
+| `versioned_rename_churn` | 0.87 s @ n=8000 (16 k changes) | ~1.1–1.2 (mild) |
 | `nested_types` | 0.70 s @ n=400 | inherent for deep chains |
 | `suppression_audit` | 0.09 s @ n=2000 (fixed 40-rule set) | ~1.0 (linear in findings) |
 | `severity` | <0.01 s @ n=1000 | ~1.0 (linear) |
@@ -142,8 +161,8 @@ reporting stages (see [Coverage beyond `compare()`](#coverage-beyond-compare)).
 ## CI integration
 
 [`.github/workflows/performance.yml`](https://github.com/napetrov/abicheck/blob/main/.github/workflows/performance.yml)
-runs the scaling benchmark and the `slow` performance tests. It is deliberately
-**flexible and non-gating**:
+runs the scaling benchmark and the `slow` performance tests. Now that every
+`compare()` scenario is linear, the lane is **gating**:
 
 - Triggers: weekly schedule, manual `workflow_dispatch` (with size / budget
   inputs), and **automatically on any PR that changes the detector core**
@@ -152,15 +171,18 @@ runs the scaling benchmark and the `slow` performance tests. It is deliberately
   test). Adding the **`performance`** label
   re-triggers the lane; for a PR that does not touch the detector core, run it
   on demand with `workflow_dispatch`.
-- `continue-on-error: true` — it never blocks a merge.
+- **Armed budgets:** the scaling step runs with `--max-exponent 1.4` (the tail,
+  largest-two-size slope) and `--max-rss-mb 2048`; the `regression` job blocks on
+  a >50 % PR-vs-base slowdown (`--regress-tolerance 0.5`). `continue-on-error` is
+  dropped on both, so a catastrophic regression fails the lane. The thresholds
+  are CLI flags so the budget lives in the workflow, not the script — **loosen a
+  threshold rather than re-adding `continue-on-error`** if normal drift ever
+  flakes a lane.
+- The `--max-exponent` gate is **per-scenario opt-out**: `nested_types` is an
+  inherently super-linear embedding chain, so it carries `gate_exponent=False`
+  and is exempted (its tail slope is still printed for visibility, just not
+  gated). Every other scenario is gated.
 - Publishes the scaling table to the job summary and uploads the JSON.
-
-**Turning gating on:** now that the catastrophic paths are fixed, a budget can be
-enforced by adding `--max-seconds <budget>` and/or `--max-exponent <slope>` to
-the benchmark step and removing `continue-on-error`. The thresholds are CLI
-flags so the budget lives in the workflow, not the script. The harness exits
-non-zero when a comparison exceeds the budget or the tail (largest-two-size)
-scaling exponent exceeds the allowed slope.
 
 `slow` regression guards also live in
 [`tests/test_performance.py`](https://github.com/napetrov/abicheck/blob/main/tests/test_performance.py)
@@ -181,31 +203,37 @@ peak-memory tracking and PR-vs-base drift detection. Current status:
 | `compare()` post-processing | ✅ covered | Original PR #331 scenarios. |
 | Suppression audit | ✅ covered | `suppression_audit` scenario + `slow` test. O(rules × findings); linear in findings for a fixed ruleset. |
 | HTML / SARIF / JUnit reporting | ✅ covered | `report_html` / `report_sarif` / `report_junit` scenarios + `slow` tests; all linear. (`to_markdown`/`to_json` already guarded.) |
-| Enum / typedef / union / wide-struct / vtable diffing | ✅ covered | `enum_churn`, `typedef_churn`, `union_churn`, `wide_struct`, `vtable_churn`. (`enum_churn` is mildly super-linear ≈1.7; the rest are linear.) |
+| Enum / typedef / union / wide-struct / vtable diffing | ✅ covered | `enum_churn`, `typedef_churn`, `union_churn`, `wide_struct`, `vtable_churn`. Sweeping `typedef`/`union`/`vtable`/`enum` across sizes (the original table only sampled n=500, so no exponent was ever computed) exposed a genuine **≈O(n²)** in the affected-symbol enrichment — see fix #8; all four are linear after it, and `opaque_filter` dropped from ≈1.7 to ≈1.2 as a side effect (its cost was the enrichment, not `_filter_opaque_size_changes`). |
 | PE/COFF & Mach-O diff arms | ✅ covered | `pe_churn` / `macho_churn` build `pe=`/`macho=` snapshots so `diff_platform`'s PE/Mach-O detectors run. |
-| Opaque-handle size filter | ✅ covered | `opaque_filter` isolates the known O(candidates × functions) residual #331 left in place (tail exponent ≈1.7) — now tracked directly rather than incidentally via `type_churn`. |
+| Opaque-handle pointer-only check | ✅ covered | Was the O(candidates × functions) residual (`_is_pointer_only_type`, regex per pair, surfaced by `type_churn` ≈1.6); fix #9 linearized it via `_opaque_usage_index` (one indexed pass). Both `type_churn` and `opaque_filter` are now linear. |
+| **Versioned-symbol-scheme collapse (ICU/OpenSSL)** | ✅ covered | `versioned_rename_churn` reproduces the field-eval P08 ICU 75→78 shape (16 k removed/added churn findings + the scheme-collapse pass). Profiling it surfaced a per-finding name re-tokenization in the namespace detectors (`diff_namespaces._segments`), now fast-pathed for plain names. ~1.1–1.2 tail exponent; the residual is the post-processing detector fan-out, not the scheme recogniser. |
 | Severity categorization | ✅ covered | `severity` scenario over `categorize_changes`; linear. |
-| Peak memory (all scenarios) | ✅ covered | `tracemalloc` `peak_mb` column + `--max-memory-mb` gate (cold-cache pass). |
-| **Historical / PR-vs-base regression** | ✅ covered | `--baseline`/`--regress-tolerance` + the `regression` workflow job measure the base branch and PR head on the same runner and flag scenarios that got slower by more than the tolerance — catching *gradual* drift the per-run exponent misses. See [Baseline regression](#baseline-regression). |
-| **Dump / snapshot creation (DWARF/PE/PDB)** | ⚠️ partial | The synthetic harness can't run the real parsers. The ELF **symbol-table** parse is now guarded by `tests/test_perf_dump_scaling.py` (`integration`, gcc-only) and the `serialize` scenario proxies the snapshot-pipeline cost, but **DWARF/PE/PDB parsing proper is still unbenchmarked** — that needs a committed large real binary or a synthetic DWARF/ELF generator. |
+| **Fuzzy rename matching (accept path)** | ✅ covered | `fuzzy_rename_churn` — every symbol genuinely renamed → one `func_likely_renamed` per pair, the cost driver P11-refined identified (ICU 2134 renames = 94.5 s; rename detection, *not* symbol count, dominates). The pre-existing `rename_churn` only exercised the *reject* path (disjoint names, zero matches). Linear at ICU scale (≤8 k). |
+| **Version-node migration fan-out (LLVM bump)** | ✅ covered | `version_node_churn` — every export moves `LIB_1.0 → LIB_2.0`, reproducing the LLVM 17→18 36,991-`symbol_moved_version_node` shape and the post-processing fan-out over it. Linear to 50 k. |
+| Peak memory (all scenarios) | ✅ covered | `tracemalloc` `peak_mb` column + `--max-memory-mb` gate (cold-cache pass), **plus** process `rss_mb` (`resource.getrusage`) + `--max-rss-mb` gate — RSS catches native (pyelftools / `c++filt`) allocations `tracemalloc` cannot see (the ~330 MiB LLVM-scale figure). |
+| **Historical / PR-vs-base regression** | ✅ covered (now gating) | `--baseline`/`--regress-tolerance` + the `regression` workflow job measure the base branch and PR head on the same runner and flag scenarios that got slower by more than the tolerance — catching *gradual* drift the per-run exponent misses. `continue-on-error` is dropped, so it now blocks. See [Baseline regression](#baseline-regression). |
+| **Dump / snapshot creation (DWARF/PE/PDB)** | ⚠️ partial | The synthetic harness can't run the real parsers. The ELF **symbol-table** parse **and** the **DWARF** debug-info parse (`-g` build) are now guarded by `tests/test_perf_dump_scaling.py` (`integration`, gcc-only) — DWARF being the dominant real-library dump cost (ICU 18.6 MB snapshot, openblas 23 MB / 9.5 s). The `serialize` scenario proxies the rest of the pipeline. **PE/COFF + PDB parsing remains unbenchmarked** — those need a committed binary or a synthetic byte-stream generator (no Linux-only toolchain produces them). |
 | Appcompat HTML / stack analysis / appcompat filtering | ⚠️ not benchmarked | `stack_checker` runs one `compare()` per dependency (inherent). Appcompat filtering uses set-membership lookups (`appcompat.py` — O(1) per change, **likely already fine**) and `appcompat_html.py` is linear by inspection; neither is timed. |
 | Bundle / multi-library & environment-matrix compare | ⚠️ not benchmarked | O(libraries) compares; per-library cost is covered, cross-library orchestration is not. |
 
 ### Recommended next steps (in priority order)
 
-1. **Wire a budget gate on the linear scenarios** now that they're stable —
-   e.g. `--max-exponent 1.4` on the linear scenarios and a `--max-memory-mb`
-   ceiling — while leaving the known super-linear scenarios (`type_churn`,
-   `enum_churn`, `opaque_filter`, `nested_types`) non-gating. Likewise, drop
-   `continue-on-error` from the `regression` job once its tolerance has proven
-   stable across a few PRs.
-2. **Extend the dump/parse guard to DWARF/PE/PDB** — the ELF symbol-table parse
-   is now covered (`tests/test_perf_dump_scaling.py`), but the DWARF/castxml and
-   PE/PDB parsers need a committed large real binary or a synthetic byte-stream
-   generator behind the `integration` marker.
-3. **Optimise the super-linear residuals** — `opaque_filter`
-   (`_filter_opaque_size_changes`, O(candidates × functions)) and `enum_churn`
-   are tracked at ≈1.7 but not yet linearised.
+1. ~~**Wire a budget gate**~~ — done: the lane now runs `--max-exponent 1.4`
+   (`nested_types` exempt via `gate_exponent=False`) and `--max-rss-mb 2048`, and
+   `continue-on-error` is dropped on both the scaling and `regression` jobs. The
+   `--regress-tolerance 0.5` PR-vs-base check also blocks now; loosen a threshold
+   rather than re-adding `continue-on-error` if runner variance flakes a lane.
+2. **Extend the dump/parse guard to PE/PDB** — the ELF symbol-table *and* DWARF
+   parses are now covered (`tests/test_perf_dump_scaling.py`, `integration`,
+   gcc + `-g`); the PE/COFF and PDB parsers still need a committed binary or a
+   synthetic byte-stream generator behind the `integration` marker (no Linux-only
+   toolchain emits them).
+3. **Benchmark the cross-library orchestration** — bundle / environment-matrix
+   compares are O(libraries) over an already-covered per-library cost, but the
+   orchestration layer (and appcompat/stack fan-out) is still untimed.
+4. ~~**Optimise the super-linear residuals**~~ — done: fix #8 linearized the
+   enrichment (typedef/union/vtable/enum/opaque), fix #9 the opaque pointer-only
+   check (`type_churn`). No quadratic `compare()` path remains at tracked sizes.
 
 ## Baseline regression
 
@@ -225,5 +253,49 @@ has no baseline and is skipped), and baseline times below a 50 ms noise floor ar
 ignored. The [`regression`](https://github.com/napetrov/abicheck/blob/main/.github/workflows/performance.yml)
 workflow job automates this on PRs: it installs the base branch and the PR head
 into separate venvs on the same runner, runs both, and prints the regressions to
-the job summary. It is `continue-on-error` (informational) until the tolerance is
-proven stable.
+the job summary. It now **gates** (a >50 % slowdown fails the job) — loosen
+`--regress-tolerance` rather than re-adding `continue-on-error` if runner variance
+proves noisy.
+
+## L4 source-replay (dump-side) performance
+
+The scaling harness above is pure-Python and times the *compare* pipeline. The
+**dump-side L4 source ABI replay** (clang per-TU AST extraction) is a separate
+cost, timed by [`eval/scaling.py`](https://github.com/napetrov/abicheck/blob/main/eval/scaling.py)
+on real source trees (it needs clang + a built tree, so it is manual, not in CI).
+
+Knobs and the reasoning behind them (`abicheck/buildsource/source_replay.py`):
+
+- **`ABICHECK_L4_JOBS`** — worker count for the per-TU extract pool. Auto =
+  `min(TUs, cpu_count, 8)`. An explicit override is now **clamped** to
+  `max(8, 2×cpu_count)` (logged when it fires) so a stray `=64` can't
+  oversubscribe a host into thrash (`eval/SCALING.md` already saw jobs=8 on 4
+  CPUs *regress*). Set `=1` to force serial (determinism).
+- **`ABICHECK_L4_EXECUTOR`** (`thread` default / `process`) — after clang
+  returns, the extractor parses clang's large JSON AST dump and builds
+  structural fingerprints: pure-Python, **GIL-bound** work. A thread pool
+  parallelizes only the clang *subprocess wait*, so that post-processing
+  serializes on the GIL — part of the ~60–83 % "serial fraction" in
+  `eval/SCALING.md`. `process` runs the extract phase in a `ProcessPoolExecutor`,
+  parallelizing the AST work too (at the cost of pickling each `SourceAbiTu` and
+  per-process spawn). It is opt-in pending a measured win — compare the curves
+  with `python eval/scaling.py --jobs 1,2,4 --executor process` vs `thread`. The
+  driver falls back to serial if a process pool can't start (sandbox, spawn
+  import error), so it never aborts L4.
+- **`ABICHECK_L4_CACHE_DIR`** — persists the per-TU cache (`SourceAbiCache`,
+  content-addressed + per-included-file dependency-hash invalidation) across
+  `dump --sources` runs. Previously the inline path passed **no** cache, so every
+  dump re-extracted every TU; wiring this dir makes a cold run (`eval` E4: zstd
+  48.6 s) reuse the warm cache (3.4 s). Point it at a CI cache directory restored
+  via `actions/cache` to start every CI run warm. The cache validation phase is
+  serial, so the dependency digest is **memoized per replay pass** — a public
+  header included by N TUs is hashed once, not N times.
+
+### Why not precompiled headers (PCH) / modules?
+
+A natural idea to cut the repeated per-TU header parse is a PCH over the public
+headers. It does **not** apply here: `clang -Xclang -ast-dump=json` does *not*
+re-emit declarations that came from a PCH, so loading one would silently drop the
+very header surface L4 exists to capture — a correctness bug, not a speedup. The
+right levers for repeated-parse cost are therefore the per-TU **cache** and the
+replay **scope** (`changed`/`target`), both already in place.

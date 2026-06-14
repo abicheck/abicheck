@@ -206,9 +206,16 @@ def _configure_tree(entry: dict) -> tuple[Path, Path]:
     return tree, build
 
 
-def _time_dump(tree: Path, build: Path, jobs: int, out: Path) -> float:
-    """One timed ``dump --sources`` at the given ``ABICHECK_L4_JOBS``; seconds."""
-    env = dict(os.environ, ABICHECK_L4_JOBS=str(jobs))
+def _time_dump(
+    tree: Path, build: Path, jobs: int, out: Path, executor: str = "thread"
+) -> float:
+    """One timed ``dump --sources`` at the given ``ABICHECK_L4_JOBS``; seconds.
+
+    ``executor`` selects the L4 extract pool (``thread`` default, ``process`` to
+    parallelize the GIL-bound AST post-processing too — see
+    ``ABICHECK_L4_EXECUTOR``); compare the two curves to size the GIL win.
+    """
+    env = dict(os.environ, ABICHECK_L4_JOBS=str(jobs), ABICHECK_L4_EXECUTOR=executor)
     t0 = time.perf_counter()
     proc = subprocess.run(
         [
@@ -241,7 +248,9 @@ def _tu_count(build: Path) -> int:
         return 0
 
 
-def measure_tree(entry: dict, jobs_list: list[int], reps: int) -> dict:
+def measure_tree(
+    entry: dict, jobs_list: list[int], reps: int, executor: str = "thread"
+) -> dict:
     """Configure one tree and time the dump at each job level (median of reps)."""
     label = entry["label"]
     try:
@@ -253,9 +262,12 @@ def measure_tree(entry: dict, jobs_list: list[int], reps: int) -> dict:
     samples: dict[int, float] = {}
     try:
         for jobs in jobs_list:
-            times = [_time_dump(tree, build, jobs, out) for _ in range(reps)]
+            times = [_time_dump(tree, build, jobs, out, executor) for _ in range(reps)]
             samples[jobs] = statistics.median(times)
-            print(f"  {label:10} jobs={jobs} {samples[jobs]:.1f}s", file=sys.stderr)
+            print(
+                f"  {label:10} jobs={jobs} executor={executor} {samples[jobs]:.1f}s",
+                file=sys.stderr,
+            )
     except (RuntimeError, subprocess.TimeoutExpired) as exc:
         return {"label": label, "error": f"dump failed: {str(exc)[:120]}"}
     return {
@@ -267,7 +279,9 @@ def measure_tree(entry: dict, jobs_list: list[int], reps: int) -> dict:
     }
 
 
-def run(trees: list[dict], jobs_list: list[int], reps: int) -> dict:
+def run(
+    trees: list[dict], jobs_list: list[int], reps: int, executor: str = "thread"
+) -> dict:
     missing = [t for t in runner._SOURCE_REQUIRED if not runner._have(t)]
     tree_rows: list[dict]
     if missing:
@@ -277,7 +291,7 @@ def run(trees: list[dict], jobs_list: list[int], reps: int) -> dict:
             for t in trees
         ]
     else:
-        tree_rows = [measure_tree(t, jobs_list, reps) for t in trees]
+        tree_rows = [measure_tree(t, jobs_list, reps, executor) for t in trees]
     return {
         "result_schema": SCALING_SCHEMA,
         "generated_utc": _dt.datetime.now(_dt.timezone.utc).isoformat(
@@ -291,6 +305,7 @@ def run(trees: list[dict], jobs_list: list[int], reps: int) -> dict:
         },
         "jobs": jobs_list,
         "reps": reps,
+        "executor": executor,
         "trees": tree_rows,
     }
 
@@ -318,6 +333,13 @@ def main() -> None:
     )
     ap.add_argument("--only", help="comma-separated tree labels")
     ap.add_argument(
+        "--executor",
+        choices=("thread", "process"),
+        default="thread",
+        help="L4 extract pool: 'process' also parallelizes the GIL-bound AST "
+        "post-processing (ABICHECK_L4_EXECUTOR); compare the two curves",
+    )
+    ap.add_argument(
         "--report-only",
         action="store_true",
         help="re-render SCALING.md from the latest results",
@@ -334,7 +356,7 @@ def main() -> None:
             ap.error("--jobs must include the serial baseline 1")
         only = set(args.only.split(",")) if args.only else None
         trees = [t for t in DEFAULT_TREES if not (only and t["label"] not in only)]
-        payload = run(trees, jobs_list, args.reps)
+        payload = run(trees, jobs_list, args.reps, args.executor)
         out = _write_results(payload)
         print(f"results → {out}", file=sys.stderr)
     (_EVAL_DIR / "SCALING.md").write_text(render_scaling(payload), encoding="utf-8")

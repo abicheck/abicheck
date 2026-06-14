@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Cross-channel report-integrity tests (C2 / ADR-035).
+"""Cross-channel report-integrity tests (C2 / ADR-036).
 
 These lock the invariant the user asked for: *a change classifies consistently
 regardless of output channel*. All native channels (JSON, SARIF, JUnit, text)

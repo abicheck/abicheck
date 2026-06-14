@@ -52,7 +52,7 @@ def _tool_version() -> str:
         return "unknown"
 
 
-# Canonical verdict→SARIF-level map lives in report_model (ADR-035), imported
+# Canonical verdict→SARIF-level map lives in report_model (ADR-036), imported
 # above under its historical private name so call sites are unchanged.
 
 

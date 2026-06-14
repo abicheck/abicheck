@@ -197,6 +197,7 @@ def _elf_from_dict(e: dict[str, Any]) -> Any:
             sym_type=SymbolType(i.get("sym_type", "notype")),
             version=i.get("version", ""),
             is_default=i.get("is_default", True),
+            version_soname=i.get("version_soname", ""),
         )
         for i in e.get("imports", [])
     ]

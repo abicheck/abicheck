@@ -83,6 +83,11 @@ class ElfImport:
     sym_type: SymbolType = SymbolType.NOTYPE
     version: str = ""       # required version tag (from .gnu.version + .gnu.version_r)
     is_default: bool = True  # @@default vs @specific
+    # Soname of the library that .gnu.version_r names as the provider of this
+    # symbol's required version. GNU version labels are scoped per verneed
+    # provider (not globally unique), so this disambiguates which DSO satisfies
+    # the import when two providers share a label. "" when unversioned.
+    version_soname: str = ""
 
 
 @dataclass
@@ -893,6 +898,9 @@ def _apply_version_to_symbol(
         if import_idx < len(meta.imports):
             meta.imports[import_idx].version = ver_name
             meta.imports[import_idx].is_default = not is_hidden
+            # Record the verneed provider soname so consumers can resolve which
+            # DSO satisfies this import even when a version label collides.
+            meta.imports[import_idx].version_soname = _lib_name
         import_idx += 1
     elif _is_export_sym(sym):
         if export_idx < len(meta.symbols):

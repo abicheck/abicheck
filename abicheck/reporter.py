@@ -39,7 +39,7 @@ from .checker_policy import (
     policy_kind_sets as _policy_kind_sets,
 )
 
-# Canonical verdict→label map now lives in report_model (ADR-035); kept under the
+# Canonical verdict→label map now lives in report_model (ADR-036); kept under the
 # historical private name so existing call sites are unchanged.
 from .report_model import VERDICT_TO_SEVERITY_LABEL as _VERDICT_TO_SEVERITY_LABEL
 from .report_summary import build_summary, surface_breakdown
@@ -1346,7 +1346,7 @@ def _classify_changes_by_kind(
     ``effective_verdict`` overrides (ADR-027), so a demoted opaque/PIMPL layout
     change lands in the compatible bucket of the text report too.
 
-    Thin wrapper over :meth:`ReportModel.classify` (C2/ADR-035) — the single
+    Thin wrapper over :meth:`ReportModel.classify` (C2/ADR-036) — the single
     canonical verdict-axis bucketer shared with the report view-model."""
     from .report_model import ReportModel
 
@@ -1414,7 +1414,7 @@ def to_markdown(
     if show_only:
         changes = apply_show_only(changes, show_only, policy=result.policy)
 
-    # Build the render-ready view once (C2/ADR-035): canonical verdict-axis
+    # Build the render-ready view once (C2/ADR-036): canonical verdict-axis
     # classification + summary in one place, shared across formats.
     from .report_model import ReportModel
 

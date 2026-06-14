@@ -1,4 +1,4 @@
-# ADR-035: Report view-model and canonical report severity
+# ADR-036: Report view-model and canonical report severity
 
 ## Status
 

@@ -1,18 +1,19 @@
 name: Performance
 
-# Flexible, non-gating performance tracking for the comparison pipeline.
+# Performance tracking for the comparison pipeline.
 #
 # The post-processing bottlenecks that made `compare` blow up on large real
 # libraries (e.g. libonedal_core.so, ~10,550 functions) are fixed — see
 # docs/development/performance.md. This workflow guards against regressions: it
 # runs the synthetic scaling benchmark and the `slow` perf tests, uploads the
-# numbers, and writes them to the job summary. It is intentionally non-gating
-# (continue-on-error) so it never blocks a merge while a budget is being tuned.
+# numbers, and writes them to the job summary.
 #
-# How to turn gating on: add `--max-seconds <budget>` and/or
-# `--max-exponent <slope>` to the scaling step below and drop
-# `continue-on-error`. The thresholds are deliberately CLI flags so the budget
-# lives in this workflow, not hard-coded in the script.
+# Now that every compare() scenario is linear, the lane is GATING: the scaling
+# step enforces `--max-exponent 1.4` (tail slope) and `--max-rss-mb 2048`, and
+# the regression job blocks on a >50% PR-vs-base slowdown. The thresholds are
+# deliberately CLI flags so the budget lives in this workflow, not the script —
+# loosen a threshold rather than re-adding `continue-on-error` if normal drift
+# ever flakes the lane.
 
 on:
   workflow_dispatch:
@@ -37,6 +38,8 @@ on:
       - "abicheck/post_processing.py"
       - "abicheck/demangle.py"
       - "abicheck/binary_fingerprint.py"
+      - "abicheck/diff_namespaces.py"
+      - "abicheck/versioned_symbol_scheme.py"
       - "abicheck/surface.py"
       - "abicheck/suppression.py"
       - "abicheck/html_report.py"
@@ -55,17 +58,21 @@ permissions:
   contents: read
 
 # The PR lane runs whenever a PR changes the detector core (the `paths` filter
-# above), plus on the weekly schedule and on manual dispatch. It is
-# `continue-on-error`, so auto-running on those PRs measures without blocking.
-# Adding the `performance` label re-triggers the lane on a PR (the `labeled`
-# event); for an arbitrary PR that does not touch the detector core, use
-# `workflow_dispatch` to run it on demand.
+# above), plus on the weekly schedule and on manual dispatch. It now gates on the
+# `--max-exponent` / `--max-rss-mb` budgets, so a catastrophic scaling regression
+# on such a PR blocks until the threshold is met or loosened. Adding the
+# `performance` label re-triggers the lane on a PR (the `labeled` event); for an
+# arbitrary PR that does not touch the detector core, use `workflow_dispatch`.
 jobs:
   scaling:
     name: Comparison scaling benchmark
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    continue-on-error: true
+    # Gating: every compare() scenario is linear (fixes #8/#9), so a generous
+    # --max-exponent 1.4 tail-slope budget (nested_types is exempt in-script) and
+    # a --max-rss-mb ceiling now block a catastrophic regression. continue-on-error
+    # is intentionally dropped so the gate has teeth; loosen the thresholds rather
+    # than re-adding it if normal drift ever flakes the lane.
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
@@ -95,6 +102,8 @@ jobs:
           python scripts/benchmark_scaling.py \
             --sizes $SIZES \
             --repeat 2 \
+            --max-exponent 1.4 \
+            --max-rss-mb 2048 \
             --json-out reports/perf/scaling.json \
             $GATE | tee reports/perf/scaling.txt
 
@@ -125,14 +134,14 @@ jobs:
   # This catches *gradual* drift that the per-run scaling exponent misses. Only
   # runs on PRs (there is no baseline branch for schedule/dispatch). Base and
   # head are installed into separate venvs so the same package name can coexist;
-  # the comparison is over the scenarios present on *both* branches. Non-gating
-  # (continue-on-error) until a stable tolerance is established.
+  # the comparison is over the scenarios present on *both* branches. Gating: the
+  # step fails (and blocks) on a >50% slowdown — loosen --regress-tolerance rather
+  # than re-adding continue-on-error if runner variance proves too noisy.
   regression:
     name: Baseline regression (PR vs base)
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 25
-    continue-on-error: true
     steps:
       - name: Checkout base
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
@@ -167,8 +176,8 @@ jobs:
         run: |
           # pipefail so the benchmark's nonzero exit on a detected regression is
           # not masked by `tee` (the default Actions shell is `bash -e`, no
-          # pipefail). The step then goes red on a regression; it still does not
-          # block the merge while `continue-on-error` is set above.
+          # pipefail). The step then goes red on a regression, and — now that
+          # continue-on-error is dropped on this job — that blocks the merge.
           set -euo pipefail
           python -m venv head_env
           ./head_env/bin/pip install -q --upgrade pip

@@ -229,6 +229,30 @@ class TestSnapshotRoundtrip:
         assert w_rest.bases == w_orig.bases
         assert w_rest.virtual_bases == w_orig.virtual_bases
 
+    def test_elf_import_version_soname_preserved(self) -> None:
+        """ElfImport.version_soname survives the JSON roundtrip.
+
+        The per-symbol verneed provider drives bundle external-import
+        classification; a snapshot/cache round-trip that dropped it would let
+        colliding version labels fall back to the label-level scan and
+        misclassify external imports (regression guard for PR #400).
+        """
+        from abicheck.elf_metadata import ElfImport, ElfMetadata
+
+        orig = _minimal_snap()
+        orig.elf = ElfMetadata(
+            soname="libalgo.so.1",
+            imports=[
+                ElfImport(name="core_op", version="FOO_1.0", version_soname="libcore.so.1"),
+                ElfImport(name="syscall", version="GLIBC_2.2.5", version_soname="libc.so.6"),
+            ],
+        )
+        restored = _roundtrip(orig)
+        assert restored.elf is not None
+        by_name = {imp.name: imp for imp in restored.elf.imports}
+        assert by_name["core_op"].version_soname == "libcore.so.1"
+        assert by_name["syscall"].version_soname == "libc.so.6"
+
 
 # ---------------------------------------------------------------------------
 # 2. compare(snap, snap) == NO_CHANGE
