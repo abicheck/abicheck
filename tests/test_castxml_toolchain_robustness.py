@@ -232,11 +232,13 @@ def _write_min_xml(cmd: list[str]) -> None:
 
 
 class TestLangCFallsBackToCpp:
-    """G16/A3: an explicit ``--lang c`` on a header that actually carries C++
-    constructs (the classic ``extern "C"`` shim, a stray class/namespace) must
-    degrade to a C++ retry rather than hard-fail. Fully mocked — no castxml."""
+    """G16/A3: an explicit ``--lang c`` on a header that *genuinely requires* C++
+    (a stray class/namespace/template) degrades to a C++ retry rather than
+    hard-fail. A valid C header — including a guarded ``extern "C"`` shim — that
+    fails in C mode is a real error and must NOT be masked by a C++ retry (Codex
+    review). Fully mocked — no castxml."""
 
-    def test_extern_c_header_retries_in_cpp_and_succeeds(
+    def test_cpp_only_header_retries_in_cpp_and_succeeds(
         self, tmp_path: Path, caplog: pytest.LogCaptureFixture
     ) -> None:
         modes: list[bool] = []
@@ -249,12 +251,9 @@ class TestLangCFallsBackToCpp:
             _write_min_xml(cmd)
             return _completed(returncode=0)
 
-        header = tmp_path / "zlib.h"
-        header.write_text(
-            '#ifdef __cplusplus\nextern "C" {\n#endif\nint f(void);\n'
-            "#ifdef __cplusplus\n}\n#endif\n",
-            encoding="utf-8",
-        )
+        # A genuine C++-only construct (namespace) that cannot parse as C.
+        header = tmp_path / "api.h"
+        header.write_text("namespace ns { int f(int); }\n", encoding="utf-8")
         with (
             patch("abicheck.dumper._castxml_available", return_value=True),
             patch("abicheck.dumper.subprocess.run", side_effect=fake_run),
@@ -268,14 +267,43 @@ class TestLangCFallsBackToCpp:
         assert modes == [True, False]
         assert any("retrying in C++" in r.message for r in caplog.records)
 
+    def test_guarded_extern_c_failure_is_not_masked(self, tmp_path: Path) -> None:
+        # A valid C header whose only "C++" token is a guarded extern "C": a
+        # C-mode failure here is real (e.g. a missing include under
+        # #ifndef __cplusplus). It must surface, NOT be retried as C++ — which
+        # would skip the C-only branch and fabricate a snapshot (Codex review).
+        modes: list[bool] = []
+
+        def fake_run(cmd, **kwargs):  # noqa: ANN001
+            modes.append(_in_c_mode(cmd))
+            return _completed(returncode=1, stderr="fatal error: 'cfg.h' file not found")
+
+        header = tmp_path / "zlib.h"
+        header.write_text(
+            "#ifndef __cplusplus\n#include \"cfg.h\"\n#endif\n"
+            '#ifdef __cplusplus\nextern "C" {\n#endif\nint f(void);\n'
+            "#ifdef __cplusplus\n}\n#endif\n",
+            encoding="utf-8",
+        )
+        with (
+            patch("abicheck.dumper._castxml_available", return_value=True),
+            patch("abicheck.dumper.subprocess.run", side_effect=fake_run),
+            patch("abicheck.dumper._cache_path", return_value=tmp_path / "cache.xml"),
+            pytest.raises(SnapshotError),
+        ):
+            _castxml_dump([header], [], compiler="cc", lang="c")
+
+        assert modes == [True]  # only C mode ran; no C++ retry
+
     def test_both_modes_fail_surfaces_requested_c_error(self, tmp_path: Path) -> None:
         def fake_run(cmd, **kwargs):  # noqa: ANN001
             if "--version" in cmd:
                 return _completed(stdout="castxml version 0.6.8\nclang version 18.1.8\n")
             return _completed(returncode=1, stderr="error: expected ';'")
 
+        # A genuine C++-only construct triggers the retry; both modes fail here.
         header = tmp_path / "api.h"
-        header.write_text('extern "C" { void g(void); }\n', encoding="utf-8")
+        header.write_text("class Widget { int x; };\n", encoding="utf-8")
         with (
             patch("abicheck.dumper._castxml_available", return_value=True),
             patch("abicheck.dumper.subprocess.run", side_effect=fake_run),

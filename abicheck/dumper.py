@@ -185,14 +185,23 @@ def _cache_path(key: str) -> Path:
 # C++ file extensions that unambiguously indicate C++ content.
 _CPP_EXTENSIONS = frozenset({".hpp", ".hxx", ".hh", ".h++", ".tpp"})
 
-# Structural C++ patterns — match actual declarations, not keywords in comments.
-# These are compiled regexes applied line-by-line to non-comment lines.
-_CPP_PATTERNS = [
+# ``extern "C"`` is special: it appears in *valid C* headers (guarded by
+# ``#ifdef __cplusplus``), so its presence means "castxml parses in C++ mode" but
+# does NOT mean the header *requires* C++. It is kept out of _CPP_ONLY_PATTERNS so
+# the C→C++ retry (G16/A3) is never triggered by it — a guarded ``extern "C"``
+# header that fails in C mode failed for a real reason, and retrying as C++ would
+# skip the ``#ifndef __cplusplus`` branches and mask that error (Codex review).
+_EXTERN_C_PATTERN = re.compile(rb'^\s*extern\s+"C"')
+
+# Genuinely C++-only constructs: a *valid C* header cannot contain these, so they
+# are a reliable signal that ``--lang c`` was mis-specified and a C++ retry is the
+# right degrade. Match actual declarations, not keywords in comments (applied
+# line-by-line to non-comment lines).
+_CPP_ONLY_PATTERNS = [
     re.compile(rb"^\s*class\s+\w+\s*[:{]"),          # class Foo { / class Foo :
     re.compile(rb"^\s*namespace\s+\w+"),               # namespace ns
     re.compile(rb"^\s*template\s*<"),                  # template<...>
     re.compile(rb"^\s*using\s+\w+\s*="),               # using alias = ...
-    re.compile(rb'^\s*extern\s+"C"'),                  # extern "C" — castxml always uses C++ mode
     re.compile(rb"^\s*public\s*:"),                     # public:
     re.compile(rb"^\s*private\s*:"),                    # private:
     re.compile(rb"^\s*protected\s*:"),                  # protected:
@@ -210,6 +219,11 @@ _CPP_PATTERNS = [
     re.compile(rb"\bnoexcept\b"),                       # C++ noexcept
     re.compile(rb"\boverride\b"),                           # C++ override specifier
 ]
+
+# Full set used for auto language-mode detection (lang unspecified) and the
+# failure hint: here ``extern "C"`` *does* count, because castxml always parses in
+# a C++-ish mode, so an aggregate including an extern "C" header is built as .hpp.
+_CPP_PATTERNS = [_EXTERN_C_PATTERN, *_CPP_ONLY_PATTERNS]
 
 
 # Structural C++20 patterns — concepts and requires-expressions. When any
@@ -247,15 +261,20 @@ def _detect_cpp20_headers(header_paths: list[Path]) -> bool:
     return False
 
 
-def _detect_cpp_headers(header_paths: list[Path]) -> bool:
+def _detect_cpp_headers(
+    header_paths: list[Path], patterns: list[re.Pattern[bytes]] = _CPP_PATTERNS
+) -> bool:
     """Auto-detect whether headers require C++ compilation mode (FIX-A).
 
     Returns True if any header has a C++ extension or contains structural
     C++ syntax (class/namespace/template declarations on non-comment lines).
 
-    Note: ``extern "C"`` (even inside ``#ifdef __cplusplus`` guards) is treated
-    as a C++ indicator because castxml always parses in C++ mode — passing
-    ``-x c`` would conflict with ``__cplusplus`` being defined internally.
+    With the default *patterns* (``_CPP_PATTERNS``) ``extern "C"`` counts as a
+    C++ indicator, because castxml always parses in a C++-ish mode and the
+    aggregate header must then be built as ``.hpp``. Pass ``_CPP_ONLY_PATTERNS``
+    to require a *genuinely C++-only* construct (excluding ``extern "C"``) — used
+    by the C→C++ retry so a valid C header is never re-parsed as C++ and have its
+    real C-mode error masked (Codex review).
     """
     for p in header_paths:
         if p.suffix.lower() in _CPP_EXTENSIONS:
@@ -269,7 +288,7 @@ def _detect_cpp_headers(header_paths: list[Path]) -> bool:
         for line in content.split(b"\n"):
             # Skip C++ line comments
             stripped = line.split(b"//")[0]
-            if any(pat.search(stripped) for pat in _CPP_PATTERNS):
+            if any(pat.search(stripped) for pat in patterns):
                 return True
     return False
 
@@ -583,25 +602,26 @@ def _castxml_dump(
                 force_cpp=force_cpp,
             )
         except SnapshotError as primary:
-            # G16/A3: an explicit ``--lang c`` on a header that actually carries
-            # C++ constructs (the classic ``extern "C"`` shim guarded by
-            # ``#ifdef __cplusplus``, or a stray class/namespace) should degrade
-            # to a C++ retry rather than hard-fail. Skip the retry when we are
-            # already in C++ mode, when the failure is a frontend-too-old
-            # signature (a mode switch won't help), or when the header has no C++
-            # constructs at all (then C mode was the right call and re-parsing as
-            # C++ would only mask the real error).
+            # G16/A3: an explicit ``--lang c`` on a header that actually requires
+            # C++ (a stray class/namespace/template) should degrade to a C++ retry
+            # rather than hard-fail. Skip the retry when we are already in C++
+            # mode, when the failure is a frontend-too-old signature (a mode switch
+            # won't help), or when the header has no *genuinely C++-only* construct
+            # (``_CPP_ONLY_PATTERNS`` excludes ``extern "C"``: a guarded
+            # ``extern "C"`` header is valid C, so a C-mode failure there is real
+            # and must NOT be masked by re-parsing as C++, which would skip the
+            # ``#ifndef __cplusplus`` branches — Codex review).
             if (
                 force_cpp
                 or _is_toolchain_version_failure(str(primary))
-                or not _detect_cpp_headers(headers)
+                or not _detect_cpp_headers(headers, _CPP_ONLY_PATTERNS)
             ):
                 raise
             log.warning(
                 "castxml failed to parse the header(s) under --lang c; the header "
-                "contains C++ constructs (e.g. extern \"C\" / class / namespace), "
-                "so retrying in C++ mode. Pass --lang c++ to select this directly "
-                "and silence this warning."
+                "contains C++-only constructs (class / namespace / template), so "
+                "retrying in C++ mode. Pass --lang c++ to select this directly and "
+                "silence this warning."
             )
             try:
                 root = _run_castxml_attempt(

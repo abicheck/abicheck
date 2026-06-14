@@ -27,11 +27,13 @@ on:
   schedule:
     # Weekly, Monday 05:31 UTC — offset from the other scheduled lanes.
     - cron: "31 5 * * 1"
+  # No `paths` filter: a paths filter gates the whole pull_request trigger
+  # (including `labeled`), which would stop the `eval` label from opting in a PR
+  # that changes checker code under abicheck/** but not eval/**. Instead, every
+  # PR event reaches the workflow and the per-job `if` below runs the suite only
+  # when the PR carries the `eval` label (jobs skip cheaply otherwise).
   pull_request:
     types: [opened, reopened, synchronize, labeled]
-    paths:
-      - "eval/**"
-      - ".github/workflows/eval-suite.yml"
 
 permissions:
   contents: read
@@ -39,10 +41,13 @@ permissions:
 jobs:
   binary-tier:
     name: Binary tier (L0/L1) regression guard
-    # A manual `tier: source` dispatch is source-only — skip the binary gate so
-    # it can't fail on unrelated binary drift. schedule/PR events carry no input,
-    # so the empty string != 'source' and the gate still runs.
-    if: ${{ github.event.inputs.tier != 'source' }}
+    # Run on schedule/dispatch always; on a PR only when it carries the `eval`
+    # label (the opt-in into the network-gated suite). A manual `tier: source`
+    # dispatch is source-only, so skip the binary gate then.
+    if: >-
+      (github.event_name != 'pull_request' ||
+       contains(github.event.pull_request.labels.*.name, 'eval'))
+      && github.event.inputs.tier != 'source'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -84,7 +89,11 @@ jobs:
     name: Source tier (L3/L4/L5) coverage
     # Exploratory: clones+configures upstreams and records coverage. The binary
     # tier is the gate; this is informational, so never block a merge on it.
-    if: ${{ github.event.inputs.tier != 'binary' }}
+    # Same PR-label opt-in as the binary job; skipped for a `tier: binary` dispatch.
+    if: >-
+      (github.event_name != 'pull_request' ||
+       contains(github.event.pull_request.labels.*.name, 'eval'))
+      && github.event.inputs.tier != 'binary'
     runs-on: ubuntu-latest
     timeout-minutes: 40
     continue-on-error: true
@@ -107,7 +116,11 @@ jobs:
 
       - name: Run source tier (coverage only, non-gating)
         run: |
-          python eval/runner.py --tier source
+          ONLY=""
+          if [ -n "${{ github.event.inputs.only }}" ]; then
+            ONLY="--only ${{ github.event.inputs.only }}"
+          fi
+          python eval/runner.py --tier source $ONLY
 
       - name: Write coverage to job summary
         if: always()
