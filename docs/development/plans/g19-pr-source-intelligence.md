@@ -228,7 +228,7 @@ graduated techniques, not one AST step; each S-method runs and lands in an L-lay
 |---|---|---|---|---|---|---|
 | classify (D0/D3) | S0 | git diff → risk tags/score | no | — (drives focus) | always | changed |
 | pre-scan patterns (D2) | S3 | regex/Tree-sitter over changed+public | no | pre-scan → L2/L5 | always | changed+public |
-| L2 headers | — | castxml / DWARF (existing) | no | L2 | always | public surface |
+| L2 headers | — | castxml (headers) / DWARF (binary) | castxml for header-AST | L2 | when castxml present (else skipped, reported); DWARF L2 if debug info | public surface |
 | L3 build | S1 | parse `compile_commands.json` / CMake / Ninja / Bazel | no | L3 | always (cheap) | whole build |
 | preprocessor (D2) | S2 | `clang -E` macros / `-MM` includes | (cpp) | L3→L5 | when DB present | changed+public |
 | L5 graph (structural) | S2 fold | fold L3 → target/file/option nodes | no | L5 | when L3 ran | whole build |
