@@ -795,11 +795,7 @@ def _detect_intra_dep_removed(
             # intra-bundle* dependency, so skip it regardless of symbol-name
             # shape. An unversioned (or bundle-versioned) sibling import is
             # NOT skipped here and still produces the finding.
-            if _import_is_external(
-                consumer,
-                consumer_meta,
-                new.resolution.intra_needed.get(consumer.library, ()),
-            ):
+            if _import_is_external(consumer, consumer_meta, new):
                 continue
             # Note: an earlier version of this code short-circuited here
             # when consumer had no intra-bundle DT_NEEDED edges. That
@@ -1545,7 +1541,7 @@ def _looks_system_version(version: str) -> bool:
 def _import_is_external(
     consumer: ConsumerEntry,
     consumer_meta: ElfMetadata,
-    intra_needed: Iterable[str],
+    snapshot: BundleSnapshot,
 ) -> bool:
     """Classify an import as external using version + provider evidence.
 
@@ -1575,13 +1571,18 @@ def _import_is_external(
     # *and not also* from an intra-bundle sibling. If any intra sibling
     # advertises the label, the provider evidence is ambiguous (the import may
     # be the dropped sibling symbol) so we keep the finding.
-    intra = set(intra_needed)
+    #
+    # ``is_intra_bundle_provider`` matches by exact soname *and* filename stem,
+    # so a SONAME-major bump (``libcore.so.1`` → ``libcore.so.2``) where a
+    # sibling still NEEDs the old soname is still recognised as intra-bundle —
+    # otherwise dropping ``core_op@LIBCORE_1.0`` across the bump would be hidden
+    # even though the release fails to load.
     external_match = False
     for soname, versions in consumer_meta.versions_required.items():
         if version not in versions:
             continue
-        if soname in intra:
-            return False  # ambiguous: an intra sibling also requires this label
+        if snapshot.is_intra_bundle_provider(soname):
+            return False  # required from a bundle sibling — keep the finding
         external_match = True
     return external_match
 

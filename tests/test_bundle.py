@@ -390,6 +390,35 @@ class TestIntraDepRemoved:
         assert len(intra_removed) == 1
         assert intra_removed[0].symbol == "core_op"
 
+    def test_versioned_import_after_soname_bump_still_fires(self) -> None:
+        # SONAME-major transition (an explicit oneDAL datapoint): the provider
+        # bumped its SONAME libcore.so.1 -> libcore.so.2 and dropped core_op,
+        # while a surviving sibling still NEEDs the OLD soname and imports
+        # core_op@LIBCORE_1.0. The old soname no longer resolves *exactly*, but
+        # the bundle still contains libcore.so (filename-stem match), so the
+        # versioned import must NOT be treated as external — the release will
+        # fail to load and bundle_intra_dep_removed must fire.
+        new = _snapshot(
+            {
+                "libcore.so": _meta(soname="libcore.so.2", exports=["other_op"]),
+                "libalgo.so": _meta(
+                    soname="libalgo.so.1",
+                    needed=["libcore.so.1"],  # old soname — no exact resolve
+                    imports=["core_op"],
+                    import_versions={"core_op": "LIBCORE_1.0"},
+                    versions_required={"libcore.so.1": ["LIBCORE_1.0"]},
+                ),
+            }
+        )
+        result = compare_bundle(new, new, per_library_results=[])
+        intra_removed = [
+            f
+            for f in result.bundle_findings
+            if f.kind == ChangeKind.BUNDLE_INTRA_DEP_REMOVED
+        ]
+        assert len(intra_removed) == 1
+        assert intra_removed[0].symbol == "core_op"
+
 
 # ---------------------------------------------------------------------------
 # bundle_intra_dep_signature_changed
