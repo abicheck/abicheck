@@ -36,6 +36,7 @@ Everything here is best-effort (ADR-028 D3): a missing tool or unreadable input
 degrades L3/L4/L5 to partial/not-collected coverage and never aborts the dump —
 the artifact tiers (L0/L1/L2) stay authoritative.
 """
+
 from __future__ import annotations
 
 import datetime as _dt
@@ -165,6 +166,7 @@ def collect_inline_pack(
     scope: str = "target",
     layers: tuple[str, ...] = ("L3", "L4", "L5"),
     build_cache_dir: Path | None = None,
+    source_abi_cache_dir: Path | None = None,
     exported_symbols: tuple[str, ...] = (),
 ) -> BuildSourcePack | None:
     """Collect an in-memory pack from raw source-tree / build-info inputs.
@@ -198,8 +200,13 @@ def collect_inline_pack(
         compile_db = None  # already seeded from a build-info pack
     else:
         compile_db = _resolve_compile_db(
-            build_info, sources, cfg, allow_build_query,
-            build_config_trusted_for_query, merged, extractors
+            build_info,
+            sources,
+            cfg,
+            allow_build_query,
+            build_config_trusted_for_query,
+            merged,
+            extractors,
         )
     if compile_db is not None:
         _run_compile_db(compile_db, cfg.system, merged, extractors, build_cache_dir)
@@ -218,16 +225,30 @@ def collect_inline_pack(
         # 'source-changed' mode is meant to turn on. The changed-only narrowing
         # applies when a caller threads an explicit changed-path set (PR replay).
         replay_scope = "target" if scope == "changed" else scope
+        # L4 per-TU cache dir: explicit arg wins, else the ABICHECK_L4_CACHE_DIR
+        # env (the CI-friendly knob — point it at a restored cache directory).
+        l4_cache_dir = source_abi_cache_dir
+        if l4_cache_dir is None:
+            env_dir = os.environ.get("ABICHECK_L4_CACHE_DIR")
+            l4_cache_dir = Path(env_dir) if env_dir else None
         surface = _run_inline_source_abi(
-            sources, merged, extractors,
-            extractor=extractor, scope=replay_scope, clang_bin=clang_bin,
+            sources,
+            merged,
+            extractors,
+            extractor=extractor,
+            scope=replay_scope,
+            clang_bin=clang_bin,
             exported_symbols=exported_symbols,
+            source_abi_cache_dir=l4_cache_dir,
         )
     graph = _build_inline_graph(merged, surface) if "L5" in layers else None
 
     has_build = bool(
-        merged.compile_units or merged.targets or merged.toolchains
-        or merged.link_units or merged.build_options
+        merged.compile_units
+        or merged.targets
+        or merged.toolchains
+        or merged.link_units
+        or merged.build_options
     )
     # A3: a failed/blocked build query produces no facts but is still worth
     # surfacing — keep the (near-empty) pack so its `partial` L3 coverage row and
@@ -295,25 +316,31 @@ def _resolve_compile_db(
     # is set *and* the config came from an explicit operator-supplied path.
     if cfg.query:
         if not build_config_trusted_for_query:
-            extractors.append(ExtractorRecord(
-                name="build_query", status="skipped",
-                detail=(
-                    "build.query ignored from auto-discovered .abicheck.yml; "
-                    "pass a trusted config with --build-config to permit queries"
-                ),
-            ))
+            extractors.append(
+                ExtractorRecord(
+                    name="build_query",
+                    status="skipped",
+                    detail=(
+                        "build.query ignored from auto-discovered .abicheck.yml; "
+                        "pass a trusted config with --build-config to permit queries"
+                    ),
+                )
+            )
         elif allow_build_query:
             queried = _run_build_query(cfg, sources, merged, extractors)
             if queried is not None:
                 return queried
         else:
-            extractors.append(ExtractorRecord(
-                name="build_query", status="skipped",
-                detail=(
-                    "build.query configured but --allow-build-query not set; "
-                    "only existing build outputs were inspected (ADR-032 D5)"
-                ),
-            ))
+            extractors.append(
+                ExtractorRecord(
+                    name="build_query",
+                    status="skipped",
+                    detail=(
+                        "build.query configured but --allow-build-query not set; "
+                        "only existing build outputs were inspected (ADR-032 D5)"
+                    ),
+                )
+            )
 
     if cfg.compile_db and sources is not None:
         for match in sorted(sources.glob(cfg.compile_db)):
@@ -329,7 +356,9 @@ def _compile_db_at(path: Path) -> Path | None:
         return path if path.name == _COMPILE_DB_NAME else path
     if path.is_dir():
         for hint in _COMPILE_DB_HINTS:
-            candidate = (path / hint / _COMPILE_DB_NAME) if hint else (path / _COMPILE_DB_NAME)
+            candidate = (
+                (path / hint / _COMPILE_DB_NAME) if hint else (path / _COMPILE_DB_NAME)
+            )
             if candidate.is_file():
                 return candidate
     return None
@@ -341,7 +370,8 @@ def _autodiscover_compile_db(source_tree: Path | None) -> Path | None:
         return None
     for hint in _COMPILE_DB_HINTS:
         candidate = (
-            (source_tree / hint / _COMPILE_DB_NAME) if hint
+            (source_tree / hint / _COMPILE_DB_NAME)
+            if hint
             else (source_tree / _COMPILE_DB_NAME)
         )
         if candidate.is_file():
@@ -368,34 +398,45 @@ def _run_compile_db(
     key = None
     if cache_dir is not None:
         from .build_cache import BuildEvidenceCache, compute_build_cache_key
+
         cache = BuildEvidenceCache(cache_dir)
         key = compute_build_cache_key(compile_db, hint)
         cached = cache.get(key)
         if cached is not None:
             merged.merge(cached)
-            extractors.append(ExtractorRecord(
-                name="compile_commands", status="ok",
-                inputs=[DEFAULT_REDACTION.path(str(compile_db))],
-                detail=f"{len(cached.compile_units)} compile units (cached)",
-            ))
+            extractors.append(
+                ExtractorRecord(
+                    name="compile_commands",
+                    status="ok",
+                    inputs=[DEFAULT_REDACTION.path(str(compile_db))],
+                    detail=f"{len(cached.compile_units)} compile units (cached)",
+                )
+            )
             return
     try:
         ev = CompileDbAdapter(compile_db, build_system=hint).collect()
     except (OSError, ValueError) as exc:
-        extractors.append(ExtractorRecord(
-            name="compile_commands", status="failed",
-            inputs=[DEFAULT_REDACTION.path(str(compile_db))], detail=str(exc),
-        ))
+        extractors.append(
+            ExtractorRecord(
+                name="compile_commands",
+                status="failed",
+                inputs=[DEFAULT_REDACTION.path(str(compile_db))],
+                detail=str(exc),
+            )
+        )
         merged.diagnostics.append(f"compile_commands: {exc}")
         return
     if cache is not None and key is not None:
         cache.put(key, ev)
     merged.merge(ev)
-    extractors.append(ExtractorRecord(
-        name="compile_commands", status="ok",
-        inputs=[DEFAULT_REDACTION.path(str(compile_db))],
-        detail=f"{len(ev.compile_units)} compile units",
-    ))
+    extractors.append(
+        ExtractorRecord(
+            name="compile_commands",
+            status="ok",
+            inputs=[DEFAULT_REDACTION.path(str(compile_db))],
+            detail=f"{len(ev.compile_units)} compile units",
+        )
+    )
 
 
 def _run_build_query(
@@ -417,33 +458,44 @@ def _run_build_query(
     try:
         argv = shlex.split(cfg.query)
     except ValueError as exc:
-        extractors.append(ExtractorRecord(
-            name="build_query", status="failed",
-            detail=f"could not parse build.query command: {exc}",
-        ))
+        extractors.append(
+            ExtractorRecord(
+                name="build_query",
+                status="failed",
+                detail=f"could not parse build.query command: {exc}",
+            )
+        )
         return None
     if not argv:
         return None
     try:
         proc = subprocess.run(  # noqa: S603 - operator-configured, shell=False, opt-in
-            argv, cwd=str(cwd) if cwd else None, capture_output=True,
-            text=True, timeout=_QUERY_TIMEOUT_S, check=False,
+            argv,
+            cwd=str(cwd) if cwd else None,
+            capture_output=True,
+            text=True,
+            timeout=_QUERY_TIMEOUT_S,
+            check=False,
         )
     except (OSError, subprocess.SubprocessError) as exc:
-        extractors.append(ExtractorRecord(
-            name="build_query", status="failed",
-            detail=f"build.query failed to run ({argv[0]}): {exc}",
-        ))
+        extractors.append(
+            ExtractorRecord(
+                name="build_query",
+                status="failed",
+                detail=f"build.query failed to run ({argv[0]}): {exc}",
+            )
+        )
         merged.diagnostics.append(f"build_query: {exc}")
         return None
     if proc.returncode != 0:
-        extractors.append(ExtractorRecord(
-            name="build_query", status="failed",
-            detail=f"build.query exited {proc.returncode}: {(proc.stderr or '').strip()[:200]}",
-        ))
-        merged.diagnostics.append(
-            f"build_query: command exited {proc.returncode}"
+        extractors.append(
+            ExtractorRecord(
+                name="build_query",
+                status="failed",
+                detail=f"build.query exited {proc.returncode}: {(proc.stderr or '').strip()[:200]}",
+            )
         )
+        merged.diagnostics.append(f"build_query: command exited {proc.returncode}")
         return None
     # The query is expected to have written/refreshed the configured compile DB.
     db: Path | None = None
@@ -454,15 +506,17 @@ def _run_build_query(
                 break
     if db is None:
         db = _autodiscover_compile_db(sources)
-    extractors.append(ExtractorRecord(
-        name="build_query",
-        status="ok" if db is not None else "partial",
-        detail=(
-            f"ran `{argv[0]} …`; compile DB at {DEFAULT_REDACTION.path(str(db))}"
-            if db is not None
-            else f"ran `{argv[0]} …` but no compile DB was produced"
-        ),
-    ))
+    extractors.append(
+        ExtractorRecord(
+            name="build_query",
+            status="ok" if db is not None else "partial",
+            detail=(
+                f"ran `{argv[0]} …`; compile DB at {DEFAULT_REDACTION.path(str(db))}"
+                if db is not None
+                else f"ran `{argv[0]} …` but no compile DB was produced"
+            ),
+        )
+    )
     return db
 
 
@@ -525,9 +579,11 @@ def _check_build_info_source_mismatch(
             return None
         posix = str(src).replace("\\", "/")
         name = PurePosixPath(posix).name
-        directory = str(getattr(cu, "directory", "") or "").replace("\\", "/").rstrip("/")
+        directory = (
+            str(getattr(cu, "directory", "") or "").replace("\\", "/").rstrip("/")
+        )
         if directory and posix.startswith(directory + "/"):
-            return posix[len(directory) + 1:] in tree_rel
+            return posix[len(directory) + 1 :] in tree_rel
         # A genuinely relative source (not rooted at "/", a drive "X:", or a
         # redacted home "~") can be matched against the tree's relative paths.
         rooted = (
@@ -573,6 +629,7 @@ def _run_inline_source_abi(
     scope: str,
     clang_bin: str,
     exported_symbols: tuple[str, ...] = (),
+    source_abi_cache_dir: Path | None = None,
 ) -> SourceAbiSurface | None:
     """Run L4 replay over a source tree; ``None`` when no source tree is given.
 
@@ -583,52 +640,84 @@ def _run_inline_source_abi(
     if sources is None:
         return None
     from .source_abi import SourceAbiSurface
-    from .source_replay import public_header_roots_for, run_source_replay
+    from .source_replay import (
+        SourceAbiCache,
+        public_header_roots_for,
+        run_source_replay,
+    )
 
     if not merged.compile_units:
         # No L3 to replay against: source ABI replay needs compile commands to
         # know how each TU is parsed. Record why, but do not synthesize an empty
         # L4 surface — otherwise a bare tree with no build info would embed an
         # all-empty pack. With no other facts the caller drops the pack entirely.
-        extractors.append(ExtractorRecord(
-            name=f"source_abi:{extractor}", status="skipped",
-            detail=(
-                "no compile units (L3) to replay; pass --build-info or add a "
-                "compile_commands.json to the source tree"
-            ),
-        ))
+        extractors.append(
+            ExtractorRecord(
+                name=f"source_abi:{extractor}",
+                status="skipped",
+                detail=(
+                    "no compile units (L3) to replay; pass --build-info or add a "
+                    "compile_commands.json to the source tree"
+                ),
+            )
+        )
         return None
 
     impl, tool_name = _make_source_extractor(extractor, clang_bin)
     if not impl.available():
-        extractors.append(ExtractorRecord(
-            name=f"source_abi:{extractor}", status="failed",
-            detail=f"{tool_name} not found in PATH; source-only checks disabled",
-        ))
+        extractors.append(
+            ExtractorRecord(
+                name=f"source_abi:{extractor}",
+                status="failed",
+                detail=f"{tool_name} not found in PATH; source-only checks disabled",
+            )
+        )
         return SourceAbiSurface()
 
     roots = public_header_roots_for(merged)
+    # D8 per-TU cache: re-extracting every TU on every `dump --sources` is the
+    # cold-start cost (eval E4: zstd 48.6 s cold → 3.4 s warm). Wire the cache
+    # when a dir is given (CLI/env), so a persisted dir restored across CI runs
+    # makes each run start warm. Absent a dir, behaviour is unchanged (no cache).
+    cache = SourceAbiCache(source_abi_cache_dir) if source_abi_cache_dir else None
     surface, diagnostics = run_source_replay(
-        merged, impl, scope=scope, public_header_roots=roots,
+        merged,
+        impl,
+        scope=scope,
+        public_header_roots=roots,
         exported_symbols=exported_symbols,
+        cache=cache,
     )
+    if cache is not None:
+        rate = cache.hit_rate
+        if rate is not None:
+            merged.diagnostics.append(
+                f"source_abi: L4 cache hit rate {rate:.0%} "
+                f"({cache.hits}/{cache.hits + cache.misses})"
+            )
     for diag in diagnostics:
         merged.diagnostics.append(f"source_abi: {diag}")
     parsed = int(surface.coverage.get("compile_units_parsed", 0) or 0)
     selected = int(surface.coverage.get("compile_units_selected", 0) or 0)
-    extractors.append(ExtractorRecord(
-        name=f"source_abi:{extractor}",
-        status="ok" if parsed else "partial",
-        detail=f"scope={scope}, {parsed}/{selected} TUs parsed, {len(diagnostics)} failures",
-    ))
+    extractors.append(
+        ExtractorRecord(
+            name=f"source_abi:{extractor}",
+            status="ok" if parsed else "partial",
+            detail=f"scope={scope}, {parsed}/{selected} TUs parsed, {len(diagnostics)} failures",
+        )
+    )
     return surface
 
 
-def _make_source_extractor(extractor: str, clang_bin: str) -> tuple[SourceAbiExtractor, str]:
+def _make_source_extractor(
+    extractor: str, clang_bin: str
+) -> tuple[SourceAbiExtractor, str]:
     if extractor == "castxml":
         from .source_extractors import CastxmlSourceExtractor
+
         return CastxmlSourceExtractor(), "castxml"
     from .source_extractors import ClangSourceExtractor
+
     return ClangSourceExtractor(clang_bin=clang_bin), clang_bin
 
 
@@ -670,7 +759,9 @@ def build_inline_coverage(
         l3 = LayerCoverage(
             layer=DataLayer.L3_BUILD.value,
             status=CoverageStatus.PRESENT,
-            confidence=LayerConfidence.HIGH if merged.targets else LayerConfidence.REDUCED,
+            confidence=LayerConfidence.HIGH
+            if merged.targets
+            else LayerConfidence.REDUCED,
             detail=(
                 f"{'+'.join(systems)}, {len(merged.compile_units)} compile units, "
                 f"{len(merged.targets)} targets"
@@ -682,8 +773,11 @@ def build_inline_coverage(
         # `partial` row with the reason instead of a silent `not_collected`, so
         # the coverage/capability report tells the user exactly what to fix.
         bq = next(
-            (e for e in extractors
-             if e.name == "build_query" and e.status in _BUILD_QUERY_DIAG_STATUSES),
+            (
+                e
+                for e in extractors
+                if e.name == "build_query" and e.status in _BUILD_QUERY_DIAG_STATUSES
+            ),
             None,
         )
         if bq is not None:
@@ -700,24 +794,34 @@ def build_inline_coverage(
 
     if surface is not None:
         any_entities = bool(
-            surface.reachable_declarations or surface.reachable_types
-            or surface.reachable_macros or surface.reachable_templates
+            surface.reachable_declarations
+            or surface.reachable_types
+            or surface.reachable_macros
+            or surface.reachable_templates
             or surface.reachable_inline_bodies
         )
         l4 = LayerCoverage(
             layer=DataLayer.L4_SOURCE_ABI.value,
             status=CoverageStatus.PRESENT if any_entities else CoverageStatus.PARTIAL,
-            confidence=LayerConfidence.HIGH if any_entities else LayerConfidence.REDUCED,
+            confidence=LayerConfidence.HIGH
+            if any_entities
+            else LayerConfidence.REDUCED,
         )
     else:
-        l4 = LayerCoverage(layer=DataLayer.L4_SOURCE_ABI.value, status=CoverageStatus.NOT_COLLECTED)
+        l4 = LayerCoverage(
+            layer=DataLayer.L4_SOURCE_ABI.value, status=CoverageStatus.NOT_COLLECTED
+        )
 
     if graph is not None:
         l5 = LayerCoverage(
             layer=DataLayer.L5_SOURCE_GRAPH.value,
             status=CoverageStatus.PRESENT if graph.edges else CoverageStatus.PARTIAL,
-            confidence=LayerConfidence.REDUCED if graph.edges else LayerConfidence.UNKNOWN,
+            confidence=LayerConfidence.REDUCED
+            if graph.edges
+            else LayerConfidence.UNKNOWN,
         )
     else:
-        l5 = LayerCoverage(layer=DataLayer.L5_SOURCE_GRAPH.value, status=CoverageStatus.NOT_COLLECTED)
+        l5 = LayerCoverage(
+            layer=DataLayer.L5_SOURCE_GRAPH.value, status=CoverageStatus.NOT_COLLECTED
+        )
     return [l3, l4, l5]

@@ -1455,7 +1455,7 @@ def test_inline_source_changed_falls_back_to_target_scope(tmp_path, monkeypatch)
     captured = {}
 
     def _spy(sources, merged, extractors, *, extractor, scope, clang_bin,
-             exported_symbols=()):
+             exported_symbols=(), source_abi_cache_dir=None):
         captured["scope"] = scope
         return None
 

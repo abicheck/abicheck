@@ -253,5 +253,49 @@ has no baseline and is skipped), and baseline times below a 50 ms noise floor ar
 ignored. The [`regression`](https://github.com/napetrov/abicheck/blob/main/.github/workflows/performance.yml)
 workflow job automates this on PRs: it installs the base branch and the PR head
 into separate venvs on the same runner, runs both, and prints the regressions to
-the job summary. It is `continue-on-error` (informational) until the tolerance is
-proven stable.
+the job summary. It now **gates** (a >50 % slowdown fails the job) — loosen
+`--regress-tolerance` rather than re-adding `continue-on-error` if runner variance
+proves noisy.
+
+## L4 source-replay (dump-side) performance
+
+The scaling harness above is pure-Python and times the *compare* pipeline. The
+**dump-side L4 source ABI replay** (clang per-TU AST extraction) is a separate
+cost, timed by [`eval/scaling.py`](https://github.com/napetrov/abicheck/blob/main/eval/scaling.py)
+on real source trees (it needs clang + a built tree, so it is manual, not in CI).
+
+Knobs and the reasoning behind them (`abicheck/buildsource/source_replay.py`):
+
+- **`ABICHECK_L4_JOBS`** — worker count for the per-TU extract pool. Auto =
+  `min(TUs, cpu_count, 8)`. An explicit override is now **clamped** to
+  `max(8, 2×cpu_count)` (logged when it fires) so a stray `=64` can't
+  oversubscribe a host into thrash (`eval/SCALING.md` already saw jobs=8 on 4
+  CPUs *regress*). Set `=1` to force serial (determinism).
+- **`ABICHECK_L4_EXECUTOR`** (`thread` default / `process`) — after clang
+  returns, the extractor parses clang's large JSON AST dump and builds
+  structural fingerprints: pure-Python, **GIL-bound** work. A thread pool
+  parallelizes only the clang *subprocess wait*, so that post-processing
+  serializes on the GIL — part of the ~60–83 % "serial fraction" in
+  `eval/SCALING.md`. `process` runs the extract phase in a `ProcessPoolExecutor`,
+  parallelizing the AST work too (at the cost of pickling each `SourceAbiTu` and
+  per-process spawn). It is opt-in pending a measured win — compare the curves
+  with `python eval/scaling.py --jobs 1,2,4 --executor process` vs `thread`. The
+  driver falls back to serial if a process pool can't start (sandbox, spawn
+  import error), so it never aborts L4.
+- **`ABICHECK_L4_CACHE_DIR`** — persists the per-TU cache (`SourceAbiCache`,
+  content-addressed + per-included-file dependency-hash invalidation) across
+  `dump --sources` runs. Previously the inline path passed **no** cache, so every
+  dump re-extracted every TU; wiring this dir makes a cold run (`eval` E4: zstd
+  48.6 s) reuse the warm cache (3.4 s). Point it at a CI cache directory restored
+  via `actions/cache` to start every CI run warm. The cache validation phase is
+  serial, so the dependency digest is **memoized per replay pass** — a public
+  header included by N TUs is hashed once, not N times.
+
+### Why not precompiled headers (PCH) / modules?
+
+A natural idea to cut the repeated per-TU header parse is a PCH over the public
+headers. It does **not** apply here: `clang -Xclang -ast-dump=json` does *not*
+re-emit declarations that came from a PCH, so loading one would silently drop the
+very header surface L4 exists to capture — a correctness bug, not a speedup. The
+right levers for repeated-parse cost are therefore the per-TU **cache** and the
+replay **scope** (`changed`/`target`), both already in place.
