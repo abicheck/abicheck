@@ -168,6 +168,27 @@ work is the live C++ validation campaign tracked under §C/§E.
 - **Acceptance (met).** Scaling curve (jobs=1/2/4/8) on 2 trees in `eval/SCALING.md`
   (`python eval/scaling.py --jobs 1,2,4,8`).
 
+### C2. Attack the L4 serial fraction (follow-up to C1) — **shipped**
+The Amdahl wall in C1 (~60–83% serial) is partly an artifact, not inherent:
+- **GIL-bound AST post-processing.** After clang returns, the extractor parses
+  clang's JSON AST and builds fingerprints — pure-Python, GIL-bound. The
+  thread-pool extract phase parallelized only the clang *subprocess wait*. Added
+  an opt-in `ProcessPoolExecutor` path (`ABICHECK_L4_EXECUTOR=process`, serial
+  fallback) that parallelizes the AST work too; `eval/scaling.py --executor
+  process` measures the win vs threads.
+- **Per-TU cache not wired into `dump --sources`.** `collect_inline_pack` passed
+  no cache, so every inline dump re-extracted every TU. Wired `SourceAbiCache`
+  through via `ABICHECK_L4_CACHE_DIR` (persist/restore across CI runs → cold 48.6s
+  → warm 3.4s on zstd). The serial dep-validation now memoizes the per-included-
+  file digest per pass (a shared header hashed once, not per-TU).
+- **Oversubscription guard.** `ABICHECK_L4_JOBS` override is clamped to
+  `max(8, 2×cpu)` (logged) so a stray `=64` can't thrash — C1 already saw jobs=8
+  on 4 CPUs regress.
+- **PCH/modules considered, rejected:** `clang -ast-dump=json` does not re-emit
+  PCH'd decls, so a PCH would drop the header surface L4 captures — wrong tool;
+  the cache + replay scope are the repeated-parse levers. See
+  `docs/development/performance.md` § L4.
+
 ---
 
 ## D. eval-suite infrastructure (NEW) — **shipped**

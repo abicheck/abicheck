@@ -42,9 +42,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 from collections.abc import Iterable, Mapping, Sequence
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
+from functools import partial
 from pathlib import Path
 
 from .build_evidence import BuildEvidence, CompileUnit, Target
@@ -56,6 +58,8 @@ from .source_extractors._argv import (
 )
 from .source_extractors.base import SourceAbiExtractor, SourceExtractionError
 from .source_link import link_source_abi
+
+_log = logging.getLogger(__name__)
 
 #: The ADR-030 D7 replay scopes, in increasing breadth. ``off`` parses nothing;
 #: ``full`` parses every compile unit in the build evidence.
@@ -116,19 +120,56 @@ def collection_for_ci_mode(mode: str) -> tuple[str, tuple[str, ...]]:
 
 #: Filenames / suffixes that mark a build-system file. A change here is build
 #: context, so it triggers at least Phase-1 ``build`` collection (ADR-033 D3.3).
-_BUILD_FILE_NAMES = frozenset({
-    "cmakelists.txt", "makefile", "gnumakefile", "build", "build.bazel",
-    "workspace", "workspace.bazel", "meson.build", "meson_options.txt",
-    "configure", "configure.ac", "configure.in", "sconstruct", "sconscript",
-    "cargo.toml", "setup.py", "pyproject.toml",
-})
+_BUILD_FILE_NAMES = frozenset(
+    {
+        "cmakelists.txt",
+        "makefile",
+        "gnumakefile",
+        "build",
+        "build.bazel",
+        "workspace",
+        "workspace.bazel",
+        "meson.build",
+        "meson_options.txt",
+        "configure",
+        "configure.ac",
+        "configure.in",
+        "sconstruct",
+        "sconscript",
+        "cargo.toml",
+        "setup.py",
+        "pyproject.toml",
+    }
+)
 _BUILD_FILE_SUFFIXES = (
-    ".cmake", ".mk", ".mak", ".bazel", ".bzl", ".ninja", ".pri", ".pro",
+    ".cmake",
+    ".mk",
+    ".mak",
+    ".bazel",
+    ".bzl",
+    ".ninja",
+    ".pri",
+    ".pro",
 )
 #: Source / header suffixes that warrant a source ABI replay (L4) on change.
 _SOURCE_FILE_SUFFIXES = (
-    ".c", ".cc", ".cpp", ".cxx", ".c++", ".h", ".hh", ".hpp", ".hxx", ".h++",
-    ".inl", ".ipp", ".tcc", ".cu", ".cuh", ".m", ".mm",
+    ".c",
+    ".cc",
+    ".cpp",
+    ".cxx",
+    ".c++",
+    ".h",
+    ".hh",
+    ".hpp",
+    ".hxx",
+    ".h++",
+    ".inl",
+    ".ipp",
+    ".tcc",
+    ".cu",
+    ".cuh",
+    ".m",
+    ".mm",
 )
 
 
@@ -612,8 +653,18 @@ class SourceAbiCache:
     def _path(self, key: str) -> Path:
         return self.cache_dir / f"{key}.json"
 
-    def get(self, key: str | None) -> SourceAbiTu | None:
-        tu = self._get(key)
+    def get(
+        self, key: str | None, memo: dict[str, str | None] | None = None
+    ) -> SourceAbiTu | None:
+        """Look up a cached TU, re-validating its recorded dependencies.
+
+        ``memo`` (optional) is a per-pass path→digest cache shared across all
+        lookups in one ``run_source_replay`` invocation so a header included by
+        many TUs is hashed once. It must **not** outlive a pass — a file may
+        change between passes — so direct callers that omit it get the safe
+        always-rehash behaviour.
+        """
+        tu = self._get(key, memo)
         # A None key is "uncacheable" (not a lookup); only count real lookups so
         # the hit rate reflects cacheable TUs.
         if key:
@@ -623,7 +674,9 @@ class SourceAbiCache:
                 self.misses += 1
         return tu
 
-    def _get(self, key: str | None) -> SourceAbiTu | None:
+    def _get(
+        self, key: str | None, memo: dict[str, str | None] | None = None
+    ) -> SourceAbiTu | None:
         if not key:
             return None
         path = self._path(key)
@@ -644,7 +697,7 @@ class SourceAbiCache:
         # Re-validate every recorded dependency: a changed/missing included file
         # invalidates the dump even though the preliminary key still matches.
         for dep_path, dep_hash in deps.items():
-            if _dep_digest(dep_path) != dep_hash:
+            if _dep_digest(dep_path, memo) != dep_hash:
                 return None
         tu_data = entry.get("tu")
         if not isinstance(tu_data, dict):
@@ -655,12 +708,17 @@ class SourceAbiCache:
             # A structurally bad payload is a miss, not a crash that aborts replay.
             return None
 
-    def put(self, key: str | None, tu: SourceAbiTu) -> None:
+    def put(
+        self,
+        key: str | None,
+        tu: SourceAbiTu,
+        memo: dict[str, str | None] | None = None,
+    ) -> None:
         if not key:
             return
         deps: dict[str, str] = {}
         for dep_path in tu.read_files:
-            digest = _dep_digest(dep_path)
+            digest = _dep_digest(dep_path, memo)
             if digest is not None:
                 deps[dep_path] = digest
         entry = {"tu": tu.to_dict(), "deps": deps}
@@ -673,18 +731,28 @@ class SourceAbiCache:
         tmp.replace(self._path(key))
 
 
-def _dep_digest(path: str) -> str | None:
+def _dep_digest(path: str, memo: dict[str, str | None] | None = None) -> str | None:
     """Content digest of a dependency file, or ``None`` if it cannot be read.
 
     A ``None`` (missing/unreadable) dependency makes the entry miss on lookup —
-    preferring a false miss over a false hit (ADR-033 D5)."""
+    preferring a false miss over a false hit (ADR-033 D5).
+
+    ``memo`` (optional) caches the digest per path **for the duration of one
+    replay pass**: a public header included by N TUs is otherwise re-hashed N
+    times in the serial cache-validation phase. Files do not change mid-pass, so
+    hashing each once is correct; the memo is created per ``run_source_replay``
+    call and discarded after, so a long-lived process still re-reads on the next
+    run (a file may change between runs)."""
+    if memo is not None and path in memo:
+        return memo[path]
     try:
         fp = Path(os.path.expanduser(path)) if path else None
-        if fp is None or not fp.is_file():
-            return None
-        return _digest_file(fp)
+        digest = _digest_file(fp) if (fp is not None and fp.is_file()) else None
     except OSError:
-        return None
+        digest = None
+    if memo is not None:
+        memo[path] = digest
+    return digest
 
 
 # -- replay driver -----------------------------------------------------------
@@ -727,6 +795,10 @@ def run_source_replay(
         target_id=target_id,
         include_map=include_map,
     )
+    # Fresh per-pass dep-digest memo so a shared header is hashed once across all
+    # TUs' cache validation (scoped to this call — a file may change before the
+    # next pass, so it must not leak out to a later lookup).
+    digest_memo: dict[str, str | None] = {}
     # P06: the per-TU extractor (clang/castxml subprocess) is the L4 bottleneck and
     # is embarrassingly parallel. We fan ONLY extractor.extract() out across a
     # thread pool; cache get/put stay single-threaded and results are reassembled
@@ -748,30 +820,44 @@ def run_source_replay(
             else None
         )
         keys.append(key)
-        cached = cache.get(key) if cache is not None else None
+        cached = cache.get(key, digest_memo) if cache is not None else None
         if cached is not None:
             results[i] = cached
         else:
             misses.append(i)
 
-    # Phase 2 (parallel): extract the cache misses. Stateless per TU.
+    # Phase 2 (parallel): extract the cache misses. Stateless per TU, so the
+    # worker is a module-level function (picklable for the process pool) fed the
+    # actual unit rather than an index into a closed-over list.
     diags: dict[int, str] = {}
 
-    def _extract(i: int) -> tuple[int, SourceAbiTu | None, str | None]:
-        cu = units[i]
-        try:
-            return i, extractor.extract(
-                cu, public_header_roots=roots, target_id=target_id), None
-        except SourceExtractionError as exc:
-            return i, None, f"{cu.source or cu.id}: {exc}"
-
     jobs = _l4_jobs(len(misses))
+    miss_units = [units[i] for i in misses]
+    worker = partial(_extract_one, extractor, list(roots or []), target_id)
     if jobs > 1 and len(misses) > 1:
-        with ThreadPoolExecutor(max_workers=jobs) as pool:
-            extracted = list(pool.map(_extract, misses))
+        # Process pool parallelizes the GIL-bound AST post-processing too, not
+        # just the clang subprocess wait (opt-in; see _l4_use_process_pool).
+        executor_cls = (
+            ProcessPoolExecutor if _l4_use_process_pool() else ThreadPoolExecutor
+        )
+        try:
+            with executor_cls(max_workers=jobs) as pool:
+                extracted = list(pool.map(worker, miss_units))
+        except Exception as exc:  # noqa: BLE001
+            # A process pool can fail to start (spawn import error, sandbox with
+            # no /dev/shm, …) where threads would not. Degrade to a serial pass
+            # rather than aborting L4 — the artifact tiers stay authoritative.
+            if executor_cls is ProcessPoolExecutor:
+                _log.warning(
+                    "L4 process pool failed (%s); falling back to serial extraction",
+                    exc,
+                )
+                extracted = [worker(u) for u in miss_units]
+            else:
+                raise
     else:
-        extracted = [_extract(i) for i in misses]
-    for i, tu, err in extracted:
+        extracted = [worker(u) for u in miss_units]
+    for i, (tu, err) in zip(misses, extracted):
         if err is None:
             results[i] = tu
         else:
@@ -785,7 +871,7 @@ def run_source_replay(
         tu = results[i]
         if tu is not None:
             if cache is not None and i in miss_set and keys[i] is not None:
-                cache.put(keys[i], tu)
+                cache.put(keys[i], tu, digest_memo)
             tus.append(tu)
         elif i in diags:
             diagnostics.append(diags[i])
@@ -805,20 +891,82 @@ def run_source_replay(
     return surface, diagnostics
 
 
+#: Hard ceiling on the L4 worker count. Each worker drives a heavyweight clang
+#: process (one TU, single-threaded); past ~2× the CPU count the processes only
+#: contend for cores and the L3/L5/serialization serial fraction dominates anyway
+#: (eval/SCALING.md saw jobs=8 on 4 CPUs *regress*). The explicit
+#: ``ABICHECK_L4_JOBS`` override is clamped to this so a stray ``=64`` can't
+#: thrash the host — a warning is logged when it is.
+def _l4_jobs_ceiling() -> int:
+    return max(8, 2 * (os.cpu_count() or 1))
+
+
 def _l4_jobs(n_units: int) -> int:
     """Worker count for parallel L4 extraction (P06).
 
     ``ABICHECK_L4_JOBS`` overrides (set ``1`` to force serial — used by tests to
     prove determinism). Otherwise auto: one worker per cache-miss TU, capped at
-    the CPU count and 8 (clang is heavy; more workers mostly add contention).
+    the CPU count and 8 (clang is heavy; more workers mostly add contention). An
+    explicit override is still clamped to ``_l4_jobs_ceiling()`` to avoid
+    oversubscription thrash (a host can't usefully run 64 concurrent clang
+    processes); the clamp is logged so the requested value is not silently lost.
     """
     env = os.environ.get("ABICHECK_L4_JOBS")
     if env:
         try:
-            return max(1, int(env))
+            requested = max(1, int(env))
         except ValueError:
             return 1
+        ceiling = _l4_jobs_ceiling()
+        if requested > ceiling:
+            _log.warning(
+                "ABICHECK_L4_JOBS=%d exceeds the oversubscription ceiling (%d "
+                "for %d CPUs); clamping to %d",
+                requested,
+                ceiling,
+                os.cpu_count() or 1,
+                ceiling,
+            )
+            return ceiling
+        return requested
     return max(1, min(n_units, os.cpu_count() or 1, 8))
+
+
+def _l4_use_process_pool() -> bool:
+    """Whether to run the L4 extract phase in a process pool rather than threads.
+
+    After clang returns, the extractor parses clang's (large) JSON AST dump and
+    builds structural fingerprints — pure-Python, **GIL-bound** work. A thread
+    pool therefore parallelizes only the clang subprocess wait, not that
+    post-processing, so the AST work serializes on the GIL (part of the Amdahl
+    serial fraction in eval/SCALING.md). A *process* pool parallelizes both, at
+    the cost of pickling each ``SourceAbiTu`` back and per-process spawn.
+
+    Opt-in via ``ABICHECK_L4_EXECUTOR=process`` (default ``thread``) so the
+    measured win can be validated (``eval/scaling.py``) before it becomes the
+    default; an unrecognized value falls back to threads.
+    """
+    return os.environ.get("ABICHECK_L4_EXECUTOR", "thread").strip().lower() == "process"
+
+
+def _extract_one(
+    extractor: SourceAbiExtractor,
+    roots: list[str],
+    target_id: str,
+    cu: CompileUnit,
+) -> tuple[SourceAbiTu | None, str | None]:
+    """Extract one compile unit; returns ``(tu, None)`` or ``(None, diagnostic)``.
+
+    Module-level (not a closure) so it pickles for ``ProcessPoolExecutor``. The
+    per-TU work is stateless, so it is safe to run in any worker/process.
+    """
+    try:
+        return (
+            extractor.extract(cu, public_header_roots=roots, target_id=target_id),
+            None,
+        )
+    except SourceExtractionError as exc:
+        return None, f"{cu.source or cu.id}: {exc}"
 
 
 def _extractor_version(extractor: SourceAbiExtractor) -> str:

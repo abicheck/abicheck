@@ -21,8 +21,10 @@ blow-up that does not show up in wall-clock time is still caught.
 
 It is intentionally **flexible**: by default it only measures and prints, so it
 is safe to run unconditionally in CI as an informational job. Pass
-``--max-seconds``, ``--max-exponent``, and/or ``--max-memory-mb`` to turn it
-into a gate once the known bottlenecks are addressed and a stable budget exists.
+``--max-seconds``, ``--max-exponent``, ``--max-memory-mb``, and/or
+``--max-rss-mb`` to turn it into a gate once the known bottlenecks are addressed
+and a stable budget exists. ``--max-exponent`` skips scenarios marked
+``gate_exponent=False`` (inherently super-linear, e.g. ``nested_types``).
 Pass ``--baseline <scaling.json>`` (e.g. produced from the base branch) with
 ``--regress-tolerance`` to flag scenarios that got slower than the baseline —
 this catches *gradual* drift that the per-run scaling exponent misses.
@@ -83,6 +85,14 @@ import shutil
 import sys
 import time
 import tracemalloc
+
+try:
+    # Unix-only (Linux/macOS CI lanes); absent on Windows. Used for peak RSS,
+    # which — unlike tracemalloc — also counts native allocations (pyelftools
+    # buffers, c++filt subprocess pages) that dominate real-library memory.
+    import resource
+except ImportError:  # pragma: no cover - Windows
+    resource = None  # type: ignore[assignment]
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -303,6 +313,63 @@ def _build_rename_churn(n_funcs: int) -> tuple[AbiSnapshot, AbiSnapshot]:
     return old, new
 
 
+def _build_fuzzy_rename_churn(n_funcs: int) -> tuple[AbiSnapshot, AbiSnapshot]:
+    """Stripped (ELF-only) library where every symbol is *genuinely* renamed.
+
+    Field eval P11-refined: compare cost on real libraries is driven by the
+    **rename matcher**, not the raw symbol count (ICU: 8k exports, 2134 renames
+    = 94.5 s; LLVM: 31k exports, 93 renames = 22 s — *fewer* exports, 4× slower).
+    The cost is the size-keyed matcher (``binary_fingerprint.match_renamed_functions``)
+    plus the ``_plausible_rename`` name predicate it runs over every size-eligible
+    pair.
+
+    The existing ``rename_churn`` scenario exercises only the *reject* path: its
+    old/new names are disjoint (``_Z3oldv`` vs ``_Z3newv``), so the predicate
+    rejects every pair and **no** ``FUNC_LIKELY_RENAMED`` is emitted. This
+    scenario is the complement — every old symbol has exactly one plausible
+    partner (shared stem, ``_v1`` → ``_v2``) at an identical size, so the
+    size-only matcher (Pass 2, which always runs the name predicate and is *not*
+    capped by ``_FUZZY_MAX_PAIRS``) matches each pair and emits a rename. That
+    exercises the accept-and-emit path — the one that detonated on ICU — at ICU
+    scale (``max_size`` reaches 8 k). Sizes are unique per pair so each lands in
+    its own size bucket: the match stays unambiguous and the path stays linear,
+    so a regression that reintroduces per-symbol demangling or a per-pair
+    quadratic shows up as a rising exponent.
+
+    Plain C names (no ``_Z`` mangling) are used deliberately: the real ICU/
+    OpenSSL exports are C symbols, so the predicate's string work
+    (``_unqualified_name_of`` / ``_param_signature_of`` / ``_shared_affix_len``),
+    not a demangler fork, is what scales.
+    """
+
+    def elf(suffix: str) -> ElfMetadata:
+        return ElfMetadata(
+            soname="libscale.so",
+            symbols=[
+                ElfSymbol(
+                    # Shared per-pair stem keeps old_i ↔ new_i a plausible rename
+                    # (long shared prefix), while the unique index keeps distinct
+                    # pairs apart. The trailing ``_v1``/``_v2`` is the only change.
+                    name=f"api_proc_{_alpha_index(i)}_{suffix}",
+                    binding=SymbolBinding.GLOBAL,
+                    sym_type=SymbolType.FUNC,
+                    # Unique, non-tiny size per pair (above ``_MIN_SYMBOL_SIZE``):
+                    # old_i and new_i share it, so the size index pairs them 1:1.
+                    size=16 + i * 16,
+                )
+                for i in range(n_funcs)
+            ],
+        )
+
+    old = AbiSnapshot(
+        library="libscale.so", version="1.0", elf=elf("v1"), elf_only_mode=True
+    )
+    new = AbiSnapshot(
+        library="libscale.so", version="2.0", elf=elf("v2"), elf_only_mode=True
+    )
+    return old, new
+
+
 def _alpha_index(i: int) -> str:
     """Encode ``i`` as a digit-free base-26 stem (``a``, ``b`` ... ``z``, ``aa`` ...).
 
@@ -358,6 +425,48 @@ def _build_versioned_rename_churn(n_funcs: int) -> tuple[AbiSnapshot, AbiSnapsho
 
     old = AbiSnapshot(library="libversioned.so", version="1.0", functions=funcs("75"))
     new = AbiSnapshot(library="libversioned.so", version="2.0", functions=funcs("78"))
+    return old, new
+
+
+def _build_version_node_churn(n_funcs: int) -> tuple[AbiSnapshot, AbiSnapshot]:
+    """Every exported symbol migrates to a new version node — the LLVM-bump shape.
+
+    Field eval iteration 3: ``libLLVM`` 17→18 emitted **36 991**
+    ``symbol_moved_version_node`` risk findings on a routine major bump, because
+    every export moves from the ``LLVM_17`` node to ``LLVM_18``. No scenario
+    exercised the version-node diff (``diff_versioning.detect_version_node_changes``)
+    or — more importantly — the post-processing fan-out (surface scoping,
+    ``demote_internal_version_node_findings``, severity, reporting) over a finding
+    set that large.
+
+    Both sides export the *same* symbol names (so there is no add/remove churn and
+    the fingerprint rename path stays idle), but every symbol's version tag bumps
+    from ``LIB_1.0`` to ``LIB_2.0``, yielding ``n_funcs`` moves plus one
+    node-removed finding. ``max_size`` reaches 50 k to cover the LLVM scale.
+    """
+
+    def elf(node: str) -> ElfMetadata:
+        return ElfMetadata(
+            soname="libscale.so",
+            versions_defined=[node],
+            symbols=[
+                ElfSymbol(
+                    name=f"sym_{i}",
+                    binding=SymbolBinding.GLOBAL,
+                    sym_type=SymbolType.FUNC,
+                    size=64,
+                    version=node,
+                )
+                for i in range(n_funcs)
+            ],
+        )
+
+    old = AbiSnapshot(
+        library="libscale.so", version="1.0", elf=elf("LIB_1.0"), elf_only_mode=True
+    )
+    new = AbiSnapshot(
+        library="libscale.so", version="2.0", elf=elf("LIB_2.0"), elf_only_mode=True
+    )
     return old, new
 
 
@@ -880,6 +989,10 @@ class Scenario:
     max_size: int = 1_000_000
     # True if the scenario only does meaningful work with a demangler present.
     needs_demangler: bool = False
+    # Whether the ``--max-exponent`` gate applies. A few scenarios are
+    # *inherently* super-linear (a deep embedding chain) and must be exempt so a
+    # blanket exponent budget can gate everything else without flagging them.
+    gate_exponent: bool = True
 
 
 SCENARIOS: dict[str, Scenario] = {
@@ -894,6 +1007,15 @@ SCENARIOS: dict[str, Scenario] = {
     "pe_churn": Scenario(_build_pe_churn),
     "macho_churn": Scenario(_build_macho_churn),
     "var_churn": Scenario(_build_var_churn),
+    # Genuine size-only rename matches (the ICU/LLVM cost driver) — distinct from
+    # rename_churn, which exercises only the reject path. Reaches ICU scale (8 k).
+    "fuzzy_rename_churn": Scenario(
+        _build_fuzzy_rename_churn, sizes=(1000, 2000, 4000), max_size=8000
+    ),
+    # Version-node migration fan-out (the LLVM 17→18 shape, 37 k moved findings).
+    "version_node_churn": Scenario(
+        _build_version_node_churn, sizes=(2000, 5000, 10000), max_size=50000
+    ),
     "suppression_audit": Scenario(_build_suppression_audit, run=_run_suppression_audit),
     "severity": Scenario(_build_severity, run=_run_severity),
     "serialize": Scenario(_build_serialize, run=_run_serialize),
@@ -916,7 +1038,9 @@ SCENARIOS: dict[str, Scenario] = {
         sizes=(500, 1000, 2000),
         max_size=8000,
     ),
-    "nested_types": Scenario(_build_nested_types, sizes=(100, 200, 400), max_size=500),
+    "nested_types": Scenario(
+        _build_nested_types, sizes=(100, 200, 400), max_size=500, gate_exponent=False
+    ),
 }
 
 
@@ -931,6 +1055,15 @@ class Point:
     # rising ``peak_mb`` flags an intermediate O(n^2) *space* blow-up that a
     # wall-clock-only gate misses.
     peak_mb: float | None = None
+    # Process peak RSS (MiB) observed *after* this size's run, via
+    # ``resource.getrusage`` (``None`` on Windows / when unavailable). Unlike
+    # ``peak_mb`` (Python heap only), RSS also counts native allocations —
+    # pyelftools buffers, demangler subprocess pages — which dominate real
+    # libraries (the field eval saw ~330 MiB at LLVM scale). ``ru_maxrss`` is a
+    # *process* high-water mark and therefore monotonic across sizes, so the
+    # final/largest value is the figure to gate; it overstates a single call's
+    # own footprint (inputs are built in-process too).
+    rss_mb: float | None = None
 
 
 def _has_demangler() -> bool:
@@ -1007,9 +1140,40 @@ def measure(
             tracemalloc.stop()
             peak_mb = round(peak / (1024 * 1024), 3)
         points.append(
-            Point(size=n, seconds=round(best, 4), changes=changes, peak_mb=peak_mb)
+            Point(
+                size=n,
+                seconds=round(best, 4),
+                changes=changes,
+                peak_mb=peak_mb,
+                rss_mb=_peak_rss_mb(),
+            )
         )
     return points
+
+
+def _peak_rss_mb() -> float | None:
+    """Process peak RSS in MiB via ``resource``; ``None`` when unavailable.
+
+    Sums the high-water RSS of *this* process (``RUSAGE_SELF``) and its terminated
+    children (``RUSAGE_CHILDREN``), so the native memory of the demangler
+    subprocess (``c++filt``, spawned by the namespace/rename scenarios) counts
+    toward the gate — ``RUSAGE_SELF`` alone would miss it, letting a child blow
+    the budget undetected (Codex review, #396). Summing the two peaks is a
+    conservative over-estimate (the high-water marks need not coincide), which is
+    the safe direction for a ceiling gate.
+
+    ``ru_maxrss`` is in KiB on Linux, bytes on macOS/BSD — normalize both to MiB.
+    It never decreases, so callers should treat the largest/last value as the
+    process peak.
+    """
+    if resource is None:
+        return None
+    self_rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    child_rss = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss
+    # Linux: KiB; macOS/BSD: bytes. A >1 GiB Linux process would read as <1 if
+    # the raw value were bytes, so the platform check is the reliable split.
+    divisor = 1024 if sys.platform == "darwin" else 1
+    return round((self_rss + child_rss) / 1024 / divisor, 1)
 
 
 def scaling_exponent(points: list[Point]) -> float | None:
@@ -1113,15 +1277,20 @@ def _print_table(
 ) -> None:
     print(f"\nScenario: {scenario}")
     has_mem = any(p.peak_mb is not None for p in points)
+    has_rss = any(p.rss_mb is not None for p in points)
     header = f"  {'size':>8} {'changes':>9} {'seconds':>10} {'us/change':>11}"
     if has_mem:
         header += f" {'peak_mb':>9}"
+    if has_rss:
+        header += f" {'rss_mb':>9}"
     print(header)
     for p in points:
         per = (p.seconds / p.changes * 1e6) if p.changes else float("nan")
         row = f"  {p.size:>8} {p.changes:>9} {p.seconds:>10.3f} {per:>11.1f}"
         if has_mem:
             row += f" {(p.peak_mb if p.peak_mb is not None else float('nan')):>9.2f}"
+        if has_rss:
+            row += f" {(p.rss_mb if p.rss_mb is not None else float('nan')):>9.1f}"
         print(row)
     if exponent is not None:
         print(
@@ -1180,6 +1349,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="GATE: fail if any single run's peak tracked heap exceeds this many MiB",
     )
     p.add_argument(
+        "--max-rss-mb",
+        type=float,
+        default=None,
+        help="GATE: fail if the process peak RSS (resource.getrusage) exceeds this "
+        "many MiB — catches native allocations tracemalloc misses",
+    )
+    p.add_argument(
         "--no-memory",
         action="store_true",
         help="Skip the peak-memory (tracemalloc) pass — timing only",
@@ -1200,7 +1376,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return p.parse_args(argv)
 
 
-def _load_baseline(baseline_path: Path, regress_tolerance: float) -> dict[tuple[str, int], float]:
+def _load_baseline(
+    baseline_path: Path, regress_tolerance: float
+) -> dict[tuple[str, int], float]:
     """Load baseline scaling JSON and return its (scenario, size) -> seconds mapping.
 
     Prints a summary line on success and a warning on failure; returns an empty
@@ -1238,8 +1416,26 @@ def _check_exponent_gate(
     scenario: str,
     tail: float | None,
     max_exponent: float,
+    *,
+    peak_seconds: float = math.inf,
+    floor_seconds: float = 0.2,
 ) -> list[str]:
-    """Return a failure message if *tail* exponent exceeds *max_exponent*."""
+    """Return a failure message if *tail* exponent exceeds *max_exponent*.
+
+    Sub-``floor_seconds`` timings are dominated by fixed/overhead noise, so an
+    exponent computed from them is meaningless and would flag spuriously (e.g.
+    ``var_churn`` peaks at ~50 ms and its 15 µs→25 µs/change jitter reads as a
+    1.7 slope). The floor is higher than the baseline-regression noise floor
+    (50 ms) on purpose: a slope across two sizes amplifies jitter more than a
+    single-point comparison does. Every genuinely expensive O(n²)-*risk*
+    scenario (type/enum/typedef/union/vtable/opaque, fuzzy/version-node/versioned
+    rename) clears 200 ms at the tracked sizes, so they stay gated, while the
+    cheap-and-linear ones (severity, reporting, serialize, PE/Mach-O, var_churn)
+    are correctly skipped — a regression that makes one of *them* quadratic would
+    blow past 200 ms long before the largest tracked size and re-arm the gate.
+    """
+    if peak_seconds < floor_seconds:
+        return []
     if tail is not None and tail > max_exponent:
         return [
             f"{scenario}: tail scaling exponent {tail:.2f} "
@@ -1263,6 +1459,28 @@ def _check_memory_gate(
             f"{scenario}: peak {worst_mem.peak_mb:.1f} MiB at "
             f"size={worst_mem.size} exceeds "
             f"--max-memory-mb={max_memory_mb}"
+        ]
+    return []
+
+
+def _check_rss_gate(
+    scenario: str,
+    points: list[Point],
+    max_rss_mb: float,
+) -> list[str]:
+    """Return a failure message if process peak RSS exceeds *max_rss_mb*.
+
+    ``rss_mb`` is a monotonic process high-water mark, so the largest point's
+    value is the true peak.
+    """
+    rss_points = [p for p in points if p.rss_mb is not None]
+    if not rss_points:
+        return []
+    worst = max(rss_points, key=lambda p: p.rss_mb or 0.0)
+    if worst.rss_mb is not None and worst.rss_mb > max_rss_mb:
+        return [
+            f"{scenario}: process peak RSS {worst.rss_mb:.1f} MiB "
+            f"exceeds --max-rss-mb={max_rss_mb}"
         ]
     return []
 
@@ -1305,10 +1523,24 @@ def _run_scenario(
     failures: list[str] = []
     if args.max_seconds is not None:
         failures.extend(_check_seconds_gate(scenario, points, args.max_seconds))
-    if args.max_exponent is not None:
-        failures.extend(_check_exponent_gate(scenario, tail, args.max_exponent))
+    if args.max_exponent is not None and spec.gate_exponent:
+        peak_seconds = max((p.seconds for p in points), default=0.0)
+        failures.extend(
+            _check_exponent_gate(
+                scenario, tail, args.max_exponent, peak_seconds=peak_seconds
+            )
+        )
+    elif args.max_exponent is not None and not spec.gate_exponent:
+        print(
+            f"  (exponent gate exempt: {scenario} is inherently super-linear; "
+            f"tail={tail:.2f} reported, not gated)"
+            if tail is not None
+            else f"  (exponent gate exempt: {scenario} is inherently super-linear)"
+        )
     if args.max_memory_mb is not None:
         failures.extend(_check_memory_gate(scenario, points, args.max_memory_mb))
+    if args.max_rss_mb is not None:
+        failures.extend(_check_rss_gate(scenario, points, args.max_rss_mb))
     if baseline_points:
         failures.extend(
             check_regressions(points, scenario, baseline_points, args.regress_tolerance)
@@ -1329,7 +1561,7 @@ def main(argv: list[str] | None = None) -> int:
     scenarios = list(SCENARIOS) if args.scenario == "all" else [args.scenario]
     track_memory = not args.no_memory
     report: dict[str, object] = {
-        "schema": "abicheck-scaling/1.1",
+        "schema": "abicheck-scaling/1.2",
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "sizes": args.sizes,
         "repeat": args.repeat,
