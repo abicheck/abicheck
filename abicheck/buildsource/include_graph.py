@@ -46,6 +46,11 @@ if TYPE_CHECKING:
 #: output, and any existing dependency-generation options.
 _DEPFILE_DROP_WITH_VALUE = frozenset({"-o", "--output", "-MF", "-MT", "-MQ", "-MJ"})
 _DEPFILE_DROP_FLAG = frozenset({"-c", "-MD", "-MMD", "-MM", "-M", "-MG", "-MP", "-pipe"})
+# Clang driver/cc1 escape hatches that can load arbitrary native code (for
+# example ``-Xclang -load -Xclang ./evil.so`` or ``-cc1 -load ./evil.so``).
+# Compile databases may come from untrusted PR artifacts, so the depfile replay
+# must preserve only compile-context flags and must never forward plugin/pass
+# loading controls to clang.
 _DEPFILE_UNSAFE_WITH_VALUE = frozenset({
     "-Xclang",
     "-load",

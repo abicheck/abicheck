@@ -79,6 +79,9 @@ def test_depfile_args_preserves_safe_include_context_flags() -> None:
 
 
 def test_depfile_args_strips_clang_plugin_loading_options() -> None:
+    # compile_commands.json is untrusted input for source-ABI replay.  The
+    # depfile pass must not forward Clang escape hatches that load plugins or
+    # LLVM passes while preserving the source and ordinary preprocessor context.
     assert depfile_args_from_argv([
         "clang++", "-c", "foo.cpp", "-I", "include",
         "-Xclang", "-load", "-Xclang", "./evil.so",
