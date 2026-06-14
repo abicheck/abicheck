@@ -199,6 +199,31 @@ graph`"). It is **never counted as clean** and does **not** affect the exit code
 With sources + a compiler present this case does not arise — the check runs for
 real.
 
+**Source-evidence integrity.** "L4 ran" is not the same as "L4 linked to the
+exported ABI surface." If replay selects or parses TUs but produces zero public
+declarations, zero reachable source entities, or zero
+`source_decl_to_binary_symbol` matches while L0 exports are present, the result
+is **degraded/unlinked source evidence**, not successful L4 coverage. The report
+must say which boundary failed:
+
+- compile-unit selection: selected TUs, target/library mapping, changed-path
+  input, include graph present/full/partial;
+- extractor execution: parsed TUs, failed TUs, first failure samples;
+- public-surface classification: public roots used, public-classified decls,
+  private/system/unknown decl counts;
+- entity keys: mangled decl count, qualified-name count, template/inline-only
+  count;
+- binary link: exported symbol count, matched symbols, unmatched exports, sample
+  nearest decl candidates.
+
+The oneDAL field run hit this failure shape: thousands of exports, thousands of
+selected/parsed TUs in one pack, but zero public declarations / zero matched
+symbols / all exports unmatched; a rerun shape selected thousands of TUs but
+failed every extractor invocation. ADR-035 therefore requires the integrity gate
+and counters above before L4/L5 coverage can be trusted as a focusing or
+cross-check input. The current artifacts identify the failed boundary class
+(unlinked/degraded source evidence), not a single proven root cause.
+
 `public_not_exported` is intentionally narrower than "every public declaration":
 inline functions, uninstantiated templates, constexprs, type-only declarations,
 and hidden-visibility APIs are public source surface but do not promise a dynamic
@@ -284,6 +309,16 @@ binary/header evidence already flagged.
 unconditionally — the risk score only *adds* further candidates, it can never
 *remove* a changed TU. So a mis-weighted `risk_rules` profile (D3) can broaden
 the scan but cannot drop an obviously-relevant changed translation unit.
+
+`scan --estimate` must expose selection cost separately from parse cost. For a
+release pair without PR metadata, changed paths come from source tags/trees when
+available; otherwise `source-changed` must report that it has no changed-path
+seed and is falling back to a broader scope. At minimum the estimate/result
+records changed-path count, public-header changed-path count, include-graph
+availability, selected TU count, cache hit/miss count, and parsed/skipped count.
+The oneDAL run showed why this matters: `source-changed` still took minutes, so
+the selector either lacked a real changed-path set, selected too broadly, or
+fell back because graph/root data was incomplete.
 
 ### D8. Single-release audit mode (no baseline required)
 
