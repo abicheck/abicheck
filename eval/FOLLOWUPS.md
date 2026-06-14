@@ -153,16 +153,20 @@ work is the live C++ validation campaign tracked under §C/§E.
 
 ## C. Performance validation
 
-### C1. P06 parallel-L4 scaling (validate) — follow-up to shipped work
+### C1. P06 parallel-L4 scaling (validate) — **shipped**
 - **Context.** Parallel L4 shipped (deterministic). Measured freetype 42-TU only:
   25.8s → 19.1s (1.35×) — modest because L3/L5/serialization are serial and the
   TU count is small.
-- **Pointers.** `abicheck/buildsource/source_replay.py` `run_source_replay`
-  (phased parallel loop), `_l4_jobs`; `ABICHECK_L4_JOBS` env.
-- **Approach.** Benchmark on larger TU counts (zstd 92; LLVM scoped to N changed
-  TUs) to confirm the L4 fraction approaches N×; record in `eval/REPORT.md` source tier.
-- **Acceptance.** A scaling curve (jobs=1/2/4/8) on ≥2 trees in the eval report.
-- **Effort·Risk.** S · low (measurement only).
+- **Shipped.** `eval/scaling.py` times `dump --sources` at several
+  `ABICHECK_L4_JOBS` levels on real trees (freetype 42 TU, zstd 76 TU) and
+  renders `eval/SCALING.md`. The curve (jobs 1/2/4/8 on a 4-CPU host) confirms the
+  L4 clang extraction parallelizes but is a *minority* of whole-dump time, so the
+  end-to-end speedup is **Amdahl-bounded** (~60–83% serial), peaks by ~2 jobs, and
+  regresses under oversubscription. Pure helpers (`speedup_rows`,
+  `amdahl_serial_fraction`, `render_scaling`) unit-tested in
+  `tests/test_eval_scaling.py`.
+- **Acceptance (met).** Scaling curve (jobs=1/2/4/8) on 2 trees in `eval/SCALING.md`
+  (`python eval/scaling.py --jobs 1,2,4,8`).
 
 ---
 
@@ -216,32 +220,47 @@ The entire eval was **Linux/ELF**. These are untested paths, not known bugs.
 - **Acceptance.** ≥5 PE and ≥5 Mach-O pairs scanned with sane verdicts.
 - **Effort·Risk.** M · medium (PDB/dSYM availability).
 
-### E2. Bazel adapter, live (P21)
-- **Pointers.** `abicheck/buildsource/adapters/bazel.py` (cquery/aquery jsonproto);
-  oneDAL (`uxlfoundation/oneDAL`) or protobuf (Bazel builds).
-- **Approach.** Capture a real `bazel aquery --output=jsonproto` from a small
-  Bazel C++ project, feed via `--build-info`; verify L3 compile/link units.
-- **Acceptance.** Non-empty L3 from a real aquery export.
-- **Effort·Risk.** M · medium (Bazel toolchain heavy).
+### E2. Bazel adapter, live (P21) — **shipped**
+- **Pointers.** `abicheck/buildsource/adapters/bazel.py` (cquery/aquery jsonproto).
+- **Shipped.** Captured a real `bazel aquery --output=jsonproto` from a minimal
+  `cc_library` (CppCompile/CppLink/CppArchive actions) and pinned it as a fixture
+  (`tests/fixtures/bazel/cc_library_aquery.jsonproto.json`). Tests assert the
+  adapter and `collect --bazel-aquery` produce non-empty L3 (compile + link units)
+  from the genuine export — guarding against the hand-built fixtures drifting from
+  what bazel actually emits.
+- **Acceptance (met).** Non-empty L3 (1 compile unit, 2 link units) from a real
+  aquery export. *Env note:* bazel's embedded JDK truststore rejected the proxy;
+  the live capture needed `--host_jvm_args=-Djavax.net.ssl.trustStore=/etc/ssl/certs/java/cacerts`.
 
-### E3. Cross-compiler toolchain capture (P07)
+### E3. Cross-compiler toolchain capture (P07) — **shipped**
 - **Pointers.** `abicheck/buildsource/compiler_record.py`
-  (`.GCC.command.line` / `DW_AT_producer`); `adapters/cmake_file_api.py` (targets/
-  toolchains). The DWARF-bearing conda libs from the eval (libuv, openblas, bzip2)
-  are ready inputs.
-- **Approach.** Compare a gcc-built vs clang-built same library; confirm toolchain
-  identity is captured and drift surfaces.
-- **Acceptance.** Toolchain/producer recorded; gcc↔clang drift visible.
-- **Effort·Risk.** S–M · low.
+  (`.GCC.command.line` / `DW_AT_producer`); `build_diff._diff_toolchains`.
+- **Shipped.** Built the same lib with gcc vs clang, confirmed each producer is
+  recovered, and surfaced the swap as `TOOLCHAIN_VERSION_CHANGED`
+  (`GNU 13.3.0 -> Clang 18.1.3`) through `collect --read-compiler-record` +
+  `compare`. The validation flushed out a latent bug: `_diff_toolchains` only
+  compared the *intersection* of language keys, and clang's producer carries no
+  language token, so a gcc↔clang swap was silently missed — fixed with an
+  identity-level fallback (fires on a compiler-id swap or a both-versions-known
+  version change; target & missing-version are treated as unknown to avoid
+  mixed-evidence false positives). Tests:
+  `tests/test_compiler_record_cross_toolchain.py` (live, Linux/ELF) + unit tests
+  in `tests/test_build_source_pack.py`.
+- **Acceptance (met).** Toolchain/producer recorded; gcc↔clang drift visible.
 
-### E4. L4 on a monorepo, live (P13, now feasible)
+### E4. L4 on a monorepo, live (P13) — **mechanism validated; LLVM-scale gated**
 - **Context.** Bounded out earlier (hours). Now feasible with `source-changed`
   scope + P06 parallel + the per-TU cache.
-- **Pointers.** `--collect-mode source-changed`, `run_source_replay(changed_paths=…)`,
-  `SourceAbiCache` (`--build-cache-dir`). LLVM checkout flow in git history
-  (`eval/field-eval/scripts` clone+configure).
-- **Approach.** Configure LLVM, replay only a small changed-TU set, measure.
-- **Acceptance.** Scoped L4 on LLVM completes in minutes with cached re-runs near-free.
+- **Shipped (mechanism, live on zstd).** `collect --source-abi --source-abi-scope
+  changed --changed-path <f> --source-abi-cache <dir>` replays only the TUs that
+  touch the changed path and caches per-TU dumps: full target replay 76/76 TUs =
+  48.6s → changed-scope 2/2 TUs = 4.7s → warm-cache re-run = 3.4s. Scoped L4 +
+  near-free cached re-runs work end-to-end.
+- **Residual (gated).** The LLVM-scale run still needs a *built* tree for the
+  generated headers (P19); a configure-only LLVM checkout fails L4 on TUs that
+  pull tablegen'd headers, and a partial build is hours / tens-of-GB — out of
+  reach in the eval container. The enabling machinery is validated; the
+  LLVM-specific run stays documented-as-gated.
 - **Effort·Risk.** M · medium (needs built tree for generated headers, P19).
 
 ---
@@ -256,28 +275,35 @@ The entire eval was **Linux/ELF**. These are untested paths, not known bugs.
 - **Acceptance.** ≥1 each of Rust/Go/Qt/Boost in the manifest with `expect` verdicts.
 - **Effort·Risk.** S per lib · low.
 
-### F2. Grow the FP-rate corpus with eval cases
+### F2. Grow the FP-rate corpus with eval cases — **shipped**
 - **Context.** The versioned-scheme and multi-`.so`-bundle (P20) shapes aren't in
   the FP gate.
-- **Pointers.** `scripts/check_fp_rate.py` + `tests/test_fp_rate_gate.py`
-  (baselines 0/0); `examples/case141` is a ready versioned-scheme fixture.
-- **Acceptance.** Versioned-scheme + bundle pairs in the corpus, baselines stay 0/0.
-- **Effort·Risk.** S · low.
+- **Shipped.** Added three labelled cases to `scripts/check_fp_rate.py`:
+  versioned-scheme churn on internal/ELF-only symbols (must scope non-breaking,
+  FP guard), a multi-`.so`-bundle sibling-soname shape (hidden churn, FP guard),
+  and versioned-scheme churn on the *public* surface (must stay breaking, FN
+  guard). Corpus 13→16 cases; baselines stay **0/0** (verified by the gate and
+  `tests/test_fp_rate_gate.py`).
+- **Acceptance (met).** Versioned-scheme + bundle pairs in the corpus, baselines stay 0/0.
 
 ---
 
-## G. G15 versioned-scheme leftovers — gap **G15** (`partial`)
+## G. G15 versioned-scheme leftovers — gap **G15** — **shipped**
 - **Context.** Detector + collapse shipped for the C suffix scheme and the C++
   inline-namespace stamp (ICU 16428→657). Remaining per the registry `next_steps`.
 - **Pointers.** `abicheck/versioned_symbol_scheme.py` (`_NS_VER`, `_dominant_ns_token`,
-  `_scheme_key`); usecase `UC-CHANGE-inline-ns-version`.
-- **Remaining.** (1) token vocabulary: libc++ `__1`/`__2`, Abseil `lts_<date>`,
-  libstdc++ versioned namespaces (partially handled; add tests/fixtures);
-  (2) cross-check the detected token against the SONAME and still surface the bump
-  as the relink signal; (3) report the collapse count in the verdict summary.
-- **Acceptance.** libc++/Abseil pairs collapse; SONAME bump still reported; summary
-  shows "N version-renames collapsed".
-- **Effort·Risk.** M · low.
+  `_scheme_key`); `post_processing.DetectVersionedSymbolScheme`.
+- **Shipped.** (1) **Token vocabulary** — the `_NS_VER` regex already covered
+  libc++ `__1`/`__2`, Abseil `lts_<date>`, and libstdc++ `__7`/`__8`; pinned with
+  demangle-map tests (verified live against real mangled names from gcc-built
+  fixtures). (2) **SONAME cross-check** — when a scheme is detected, the advisory
+  now compares both sides' SONAME and, on a bump, appends a relink signal
+  (`... dependents must relink ...`) so the collapse never hides it. (3)
+  **Collapse count** — under the opt-in preset, the advisory records
+  `caused_count` and its description reads `[N version-renames collapsed as
+  compatible]` for the summary.
+- **Acceptance (met).** libc++/Abseil/libstdc++ pairs collapse; SONAME bump still
+  reported; summary shows "N version-renames collapsed".
 
 ---
 
@@ -294,5 +320,12 @@ The entire eval was **Linux/ELF**. These are untested paths, not known bugs.
 3. ~~**B1, B2, A3**~~ — **shipped** (cheap, high-friction-removal UX/discovery fixes:
    `--show-data-sources` preview-only messaging, broadened build-flag vocabulary,
    `--lang c` → C++ auto-retry).
-4. **E1 (PE/Mach-O)** — close the platform-coverage hole.
-5. **C1, E2–E4, F, G** — depth & breadth as capacity allows.
+4. ~~**C1 (L4 scaling) + E2 (Bazel) + E3 (cross-compiler) + E4 (changed-scope
+   mechanism) + F2 (FP corpus) + G (G15 leftovers)**~~ — **shipped**: scaling curve
+   in `eval/SCALING.md`; real-aquery Bazel fixture; live gcc↔clang drift (+ a
+   `_diff_toolchains` fix); changed-scope/cache L4 validated on zstd (LLVM-scale
+   gated on a built tree); FP corpus grown to 16 cases (0/0); G15 token
+   vocabulary + SONAME relink signal + collapse count.
+5. **E1 (PE/Mach-O)** — close the platform-coverage hole (the remaining
+   highest-value gap).
+6. **E4 LLVM-scale, F1 (new ecosystems)** — depth & breadth as capacity allows.
