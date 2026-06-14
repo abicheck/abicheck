@@ -53,14 +53,22 @@ concentrates:
 1. **No cheap, always-on PR tier.** Every existing evidence layer (L3–L5) needs
    a compile DB or a compiler. There is nothing that runs in `<5%` of build
    cost on *every* PR with no toolchain (the proposal's `S0`/`S2`-macro/`S3`).
-2. **No cross-source validation engine.** abicheck holds binary exports, header
-   AST, build flags, and source facts in one snapshot but never diffs them
-   *against each other within a single version* (exported-but-not-public,
-   header built with different macros than the shipped TU, private-header leaks,
-   ODR type variants).
+2. **No cross-source validation or evidence-directed focusing.** abicheck holds
+   binary exports, header AST, build flags, and source facts in one snapshot but
+   (a) never diffs them *against each other within a single version*
+   (exported-but-not-public, header built with different macros than the shipped
+   TU, private-header leaks, ODR type variants), and (b) never feeds the cheap
+   evidence *forward* to **target** the expensive source scan. The
+   information-sharing is one-directional today; binary/header deltas should
+   point the source scan at specific entities/TUs, not just be checked against
+   them. The cross-source checks are also valuable on a **single release** (no
+   baseline compare) — a whole class of "bad ABI hygiene" lint that justifies a
+   broader scan on its own.
 3. **No build-integrated extraction or single `scan` UX.** Capability is spread
    across `dump`/`compare`/`collect`/`compare-graph`; there is no risk → budget
-   → escalation orchestrator, and no way to ingest facts emitted *by the
+   → escalation orchestrator, no per-project cost estimate to pick a depth, no
+   stable programmatic API for the level ladder, and no way to ingest facts
+   emitted *by the
    product build* instead of re-running a frontend.
 
 ---
@@ -177,6 +185,135 @@ error }` blocks. All additive and defaulted-off where they imply new cost; they
 map onto the existing collect-mode / evidence-policy machinery rather than
 replacing it.
 
+### D7. Evidence-directed focusing: cheap facts steer the expensive scan
+
+Cross-source links are used in **two directions**, not one. D4 reads them to
+emit findings; D7 reads the *same* links *before* the expensive scan to shrink
+its scope to a **points-of-interest (POI) set**. The cheap, already-computed
+L0/L1/L2 facts (and the L0↔L2 deltas vs. baseline) decide *what* L4/L5 looks at:
+
+- exported symbol changed but the header did not → resolve its source
+  declaration and replay **only** that TU/entity;
+- header type whose layout is macro-conditional → capture macro values **only**
+  for the TUs that materialize it;
+- new/removed export with no public declaration → point the scan at the source
+  decl that emits the symbol;
+- demangled exported template symbol → seed which instantiations/TUs to replay.
+
+Mechanically this is the **reverse** of the existing `explain-finding`
+localization walk (export → decl → header → build option): instead of explaining
+a finding after the fact, the POI set is computed up front and handed to
+`source_replay` scope selection and the cross-check engine as a work-list. Net
+effect: a large project pays L4/L5 cost only on the handful of entities the
+binary/header evidence already flagged.
+
+### D8. Single-release audit mode (no baseline required)
+
+The D2 pattern facts and the D4 cross-checks are **intra-version** — they need
+exactly one build, not a compare. Expose them as a first-class **audit** that
+runs without a baseline and emits a catalog of single-release "bad ABI hygiene"
+findings: accidental ABI surface (`exported_not_public`), non-self-contained or
+private-header-leaking public headers, `header_build_context_mismatch`, ODR type
+variants across TUs, inconsistent/missing symbol visibility, unversioned exported
+symbols where a version script exists, and RTTI/typeinfo emitted for internal
+types. This is wired into the existing single-binary surface tooling
+(`surface-report`, the G11 single-binary audit) and reported as a lint with its
+own severity mapping. Because it delivers value from a single artifact, it
+justifies running a **deeper** one-time scan than a two-build PR diff would.
+
+### D9. Asymmetric defaults: full at baseline, scoped on PR
+
+The default depth differs by *when* the scan runs:
+
+- **Baseline / release publish** → **full**: full dump + full source analysis
+  (`--source-abi-scope full`), all cross-checks, single-release audit, and raw
+  facts archived for cache warmup. Computed once, amortized, authoritative, and
+  cached in the baseline registry (ADR-022).
+- **PR / CI** → **scoped**: always-on tier (D2) every time; L3/L4/L5 escalated
+  only by risk score (D3) and the POI set (D7), within a budget, partial-ok.
+
+The asymmetry is the point: the baseline is produced once so it can afford full
+depth and gives the PR a rich, cached fact set to diff and focus against; the PR
+runs on every push so it must stay cheap. Project size shifts the PR default (see
+*Sizing guidance*) — small projects can simply run full on PRs too.
+
+### D10. Programmatic API: where each level plugs in
+
+The level ladder is exposed as a typed Python API so the CLI, the MCP server,
+and CI wrappers all drive the same engine. Layering, top-down:
+
+| Layer | Where | Responsibility |
+|---|---|---|
+| CLI | `cli_scan.py`, existing `cli*.py` | argv → `ScanRequest`; render report/exit code |
+| MCP | `mcp_server.py` | expose `scan`/`audit`/`estimate` as agent tools |
+| Service | `service.py` (extend) | `run_scan(ScanRequest) -> ScanResult`; orchestrates classify → POI → escalate → collect → cross-check → report |
+| Levels | `buildsource/` providers | one provider per level, uniform protocol |
+| Facts | `buildsource/model.py`, `source_abi.py`, `build_evidence.py` | normalized fact schema (canonical I/O of every provider) |
+
+- **Provider protocol** — each level (the D2 pattern/preprocessor pre-scan, L3
+  build, L4 replay, L5 graph, the D4 cross-checks) implements a small uniform
+  interface modelled on the existing ADR-032 `DataExtractor`:
+  `capabilities()`, `estimate(ctx) -> CostEstimate`, `run(ctx, poi) -> Facts`,
+  consuming a shared `ScanContext` (paths, compile DB, changed files, budget,
+  cache) and the POI set, and returning **normalized facts only** (never raw
+  AST as primary output). This is what makes levels independently runnable
+  (ADR-033 D1) and lets external/build-emitted providers (D5) drop in via the
+  ADR-032 manifest.
+- **Request/result objects** — `ScanRequest` (binary, headers, compile DB,
+  mode, budget, risk rules, level overrides) and `ScanResult` (findings,
+  per-level `LayerCoverage`, `CostEstimate` vs. actual, confidence/provider
+  matrix). `ScanResult` is what the reporter, PR comment, SARIF, and MCP all
+  consume — one object, many renderings.
+- **`estimate` is a first-class entry point**, not a side effect: a dry-run that
+  probes the project (TU count from compile DB, header fan-out, cache state) and
+  returns the projected cost of each level for *this* project so a maintainer
+  (or CI) can choose a budget/depth. Implemented as `service.estimate_scan()`,
+  surfaced as `abicheck scan --estimate` and an MCP tool.
+
+---
+
+## Sizing guidance (defaults by project scale)
+
+Cost anchors are from §11 of the proposal (full `-fsyntax-only` ≈ 20–80% of a
+clean build; pattern/compile-DB scans `<1–5%`). These are starting defaults;
+`scan --estimate` (D10) gives the real per-project number.
+
+| Project scale | PR default | Baseline default |
+|---|---|---|
+| **Small** (≲50 TUs, builds in seconds) | full source analysis every PR is fine | full |
+| **Medium** (~50–500 TUs) | always-on tier + risk/POI-targeted L4; budget cap | full (nightly or on release) |
+| **Large** (≳500 TUs, or template/header-heavy) | always-on tier + cross-checks + POI-targeted L4 within budget; lean on cache | full on release only; warm cache from it |
+| **Header-only / template-heavy** | AST cost is header-dominated — prefer full L4 if small, else POI-targeted | full |
+
+Rule of thumb: if `scan --estimate` puts full L4 under the PR time budget, run it;
+otherwise run the always-on tier always and let risk score + POI escalate.
+
+---
+
+## Maintainer UX / adoption path
+
+Designed as a progressive ramp — value at step 1 with zero build integration,
+deeper signal as the maintainer opts in:
+
+1. **Zero-config** — `abicheck scan --binary libfoo.so --headers include/` runs
+   L0–L2 + the always-on tier and the single-release audit (D8). No compile DB,
+   no compiler, immediate hygiene findings.
+2. **Add a compile DB** — `--compile-db build/compile_commands.json` unlocks L3
+   and POI-targeted L4/L5 (D7). Still one command.
+3. **Pick a depth** — `abicheck scan --estimate` prints projected per-level cost
+   for *this* repo; the maintainer sets `source.budgets` / mode in `.abicheck.yml`
+   accordingly (D6, D10).
+4. **CI** — the GitHub Action (ADR-017) gains `mode:` + budget; PRs get a sticky
+   comment (`pr-comment`) showing findings **plus** the coverage/confidence block
+   so a partial scan is legible, never a bare "failed".
+5. **Baselines** — `baseline push` stores a full-depth baseline (D9); PRs pull and
+   diff against it, getting both the cached facts and the focusing seed for free.
+6. **Standalone audit** — `abicheck scan --audit` (or `surface-report`) as a lint
+   on a tag/release or pre-merge, independent of any baseline.
+7. **Promote to gating** — findings start advisory; once the FP-rate gate is
+   trusted for a check, the maintainer raises it to error via `crosschecks:` /
+   severity config. Adoption never starts by blocking merges.
+
 ---
 
 ## Consequences
@@ -190,6 +327,13 @@ replacing it.
   explanations — at low cost, since the inputs already sit in the snapshot.
 - Flow 2 (D5) lets vendor/closed-source consumers contribute exact-build-context
   facts without shipping sources or letting abicheck rebuild the project.
+- Evidence-directed focusing (D7) makes deep analysis affordable on large
+  projects by spending L4/L5 cost only on binary/header-flagged entities.
+- The single-release audit (D8) delivers value from one artifact — adoption
+  needs no baseline and no second build.
+- One typed `ScanRequest`/`ScanResult` API (D10) means CLI, MCP server, and CI
+  wrappers share one engine, and `--estimate` lets each project pick a depth on
+  measured cost instead of guesswork.
 
 **Negative / costs**
 
@@ -219,7 +363,13 @@ replacing it.
   model and action ceiling.
 - **ADR-033** — D2/D3 extend the CI ladder, replay scopes, caches, and coverage
   reporting; D5 realizes its "Phase 6: instrumented compiler/build plugins".
-- **ADR-025** — D3 generalizes PR-diff-as-trigger into a scored escalation.
+- **ADR-025** — D3 generalizes PR-diff-as-trigger into a scored escalation; D7
+  reverses its localization walk to *target* the scan up front.
+- **ADR-022** — D9 stores the full-depth baseline; PRs pull facts + focusing seed.
+- **ADR-017** — D2/D3/D9 surface through the Action's `mode`/budget; UX step 4.
+- **ADR-024 / `surface-report` / G11** — D8 single-release audit extends the
+  single-binary surface tooling.
+- **ADR-021b (MCP)** — D10 exposes `scan`/`audit`/`estimate` as agent tools.
 
 See the phased work breakdown in
 [plans/g19-pr-source-intelligence.md](../plans/g19-pr-source-intelligence.md).

@@ -24,13 +24,23 @@ authority rule (L0–L2 stay authoritative for `BREAKING`).
 - **G19.2** Cross-source validation: at least `exported_not_public`,
   `public_not_exported`, `header_build_context_mismatch`, `private_header_leak`
   surfaced as correctly-partitioned `RISK`/`API_BREAK` `ChangeKind`s with
-  provider-corroborated confidence.
+  provider-corroborated confidence (ADR-035 D4).
 - **G19.3** Risk-scored escalation + `scan` command: a numeric score selects
   evidence depth within a budget; one coverage/confidence-annotated report;
-  partial results are first-class.
+  partial results are first-class (ADR-035 D3).
 - **G19.4** Build-integrated extraction: a documented dump/facts artifact
   protocol (Flow 2) ingestible via `merge`, plus a Clang-plugin and
-  compiler-wrapper provider under the ADR-032 model, normalized facts canonical.
+  compiler-wrapper provider under the ADR-032 model, normalized facts canonical
+  (ADR-035 D5).
+- **G19.5** Evidence-directed focusing: a POI set computed from L0/L1/L2 deltas +
+  risk score drives `source_replay` scope and the cross-check work-list, so L4/L5
+  cost falls only on flagged entities (ADR-035 D7).
+- **G19.6** Single-release audit: `scan --audit` / `surface-report` emit the
+  intra-version hygiene catalog with no baseline (ADR-035 D8).
+- **G19.7** Programmatic API + estimate: typed `ScanRequest`/`ScanResult` in
+  `service.py`, a uniform per-level provider protocol, and `scan --estimate` /
+  `service.estimate_scan()` returning per-level projected cost for the project
+  (ADR-035 D9/D10); MCP tools for `scan`/`audit`/`estimate`.
 - **Acceptance gate:** every new `ChangeKind` passes the import-time partition
   assertion, the AI-readiness `changekind-*` checks, and earns FP-rate-gate
   corpus cases before it is allowed to gate.
@@ -55,6 +65,18 @@ authority rule (L0–L2 stay authoritative for `BREAKING`).
 - New `abicheck/cli_scan.py` (sibling-module registration per `/CLAUDE.md`):
   classify → always-on tier → escalate within budget → single coverage report.
 
+### Phase 3b — Evidence-directed focusing + API/estimate (G19.5, G19.7)
+- POI builder: from L0/L1/L2 deltas + risk score, produce a work-list consumed by
+  `source_replay` scope selection and `crosscheck.py` (reverse of the
+  `explain-finding` localization walk).
+- Typed `ScanRequest`/`ScanResult` + uniform per-level provider protocol
+  (`capabilities`/`estimate`/`run(ctx, poi)`) in `service.py`; `estimate_scan()`
+  and `scan --estimate`.
+
+### Phase 3c — Single-release audit (G19.6)
+- `scan --audit` (and `surface-report` reuse): run D2 + D4 intra-version, emit the
+  hygiene catalog with no baseline; severity-mapped lint + exit code.
+
 ### Phase 4 — Build-integrated extraction (G19.4)
 - Define the `abicheck_inputs/` dump/facts artifact protocol; ingest via existing
   `merge`. Normalized `source_facts/*.jsonl` preferred; raw AST debug-only.
@@ -64,11 +86,18 @@ authority rule (L0–L2 stay authoritative for `BREAKING`).
 ## Files & surfaces
 
 - New: `buildsource/pattern_scan.py`, `buildsource/crosscheck.py`,
-  `cli_scan.py`; new `ChangeKind`s in `checker_policy.py`.
-- Extend: `buildsource/include_graph.py`, `buildsource/source_replay.py`,
-  `buildsource/inline.py` (config), `reporter.py` (coverage/confidence block),
+  `buildsource/poi.py` (evidence-directed work-list), `cli_scan.py`; new
+  `ChangeKind`s in `checker_policy.py`.
+- Extend: `service.py` (`ScanRequest`/`ScanResult`/`run_scan`/`estimate_scan` +
+  provider protocol), `buildsource/include_graph.py`,
+  `buildsource/source_replay.py` (consume POI), `buildsource/inline.py` (config),
+  `cli_surface.py` (audit reuse), `mcp_server.py` (`scan`/`audit`/`estimate`
+  tools), `reporter.py` (coverage/confidence/estimate block),
   `pyproject.toml` (`disallow_untyped_decorators` for `cli_scan`),
   `IMPORT_CYCLE_ALLOWLIST` if `scan` registration flags a cycle.
+- Tracking: new `usecase-registry.yaml` entries (see *Use-case tracking* below),
+  their `examples/case*/` + `ground_truth.json` rows, and a scorecard row in
+  `docs/development/usecase-coverage-evaluation.md`.
 
 ## Tests
 
@@ -90,6 +119,22 @@ authority rule (L0–L2 stay authoritative for `BREAKING`).
 - Phase 1–2: M each, high value/cost. Phase 3: M. Phase 4: L (plugin maintenance
   + protocol design). Recommended order is 1 → 2 → 3 → 4; Phase 4's plugin is an
   optimization and can trail.
+
+## Use-case tracking
+
+Six new `planned` entries are registered in `usecase-registry.yaml` under gap
+**G19** (with a G19 row added to `usecase-coverage-evaluation.md`). They flip to
+`partial`/`complete` as each phase lands, citing the new modules/tests/examples
+as evidence:
+
+| Use case | Axis | ADR | Phase |
+|---|---|---|---|
+| `UC-WORKFLOW-pr-source-tier` | workflow | D2/D3 | 1, 3 |
+| `UC-CHANGE-crosscheck-hygiene` | change_class | D4 | 2 |
+| `UC-WORKFLOW-single-release-audit` | workflow | D8 | 3c |
+| `UC-WORKFLOW-evidence-directed-scope` | workflow | D7 | 3b |
+| `UC-TC-build-emitted-facts` | toolchain | D5 | 4 |
+| `UC-REPORTING-scan-coverage-estimate` | reporting | D9/D10 | 3, 3b |
 
 ## Out of scope
 
