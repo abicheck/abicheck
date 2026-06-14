@@ -560,14 +560,22 @@ use_cases:
   - id: UC-WORKFLOW-pr-source-tier
     axis: workflow
     name: Always-on compiler-free PR pre-scan + deterministic level selection
-    status: planned
+    status: partial
     gap: G19
     plan: docs/development/plans/g19-pr-source-intelligence.md
+    evidence:
+      modules:
+        - abicheck/buildsource/pattern_scan.py
+      tests:
+        - tests/test_pattern_scan.py
     next_steps: >
-      ADR-035 D2/D3. Add a pre-scan that runs on every PR over changed+public
-      files: the lexical pattern scan needs no compile DB and no compiler; the
-      preprocessor macro/include capture (S2) is conditional on a compile DB +
-      `clang -E` (reported skipped otherwise). The level is deterministic: a fixed `--mode` preset or an explicit
+      ADR-035 D2/D3. DONE: the compiler-free lexical pattern pre-scan
+      (`buildsource/pattern_scan.py`) — a stdlib-regex scan over changed+public
+      files for the D2 ABI-risk construct list, emitting advisory facts +
+      per-kind escalation triggers, with no compile DB and no compiler. REMAINS:
+      the preprocessor macro/include capture (S2), conditional on a compile DB +
+      `clang -E` (reported skipped otherwise); and the deterministic `scan`
+      orchestrator — a fixed `--mode` preset or an explicit
       `--source-method`/`--depth`. A numeric risk score changes depth ONLY under
       `--source-method auto` (opt-in) and for POI focusing; `--budget` is a
       failure guard on the chosen level (errors on overflow, never shrinks scope).
