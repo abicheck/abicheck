@@ -539,20 +539,31 @@ def _looks_mangled(decl: Function | Variable) -> bool:
 
 
 def _is_cxx_structor(symbol: str) -> bool:
-    """Whether *symbol* is an Itanium constructor/destructor mangling."""
-    return symbol.startswith("_ZN") and bool(_STRUCTOR_RE.match(symbol))
+    """Whether *symbol* is a C++ constructor/destructor mangling.
+
+    Covers both Itanium (``_ZN…C1Ev`` / ``…D1Ev``) and MSVC (``??0…`` ctor /
+    ``??1…`` dtor) spellings, since castxml leaves members unmangled on the
+    header side under both ABIs and the structor would not match a public class's
+    decls — flagging it would false-positive (Codex review).
+    """
+    if symbol.startswith("_ZN") and _STRUCTOR_RE.match(symbol):
+        return True
+    return symbol.startswith(("??0", "??1"))
 
 
 def _candidate_symbols(decl: Function | Variable) -> tuple[str, ...]:
     """Export symbols *decl* could provide, for matching against the export table.
 
-    A C++ function provides its mangled name; a bare-name exporter (data /
-    ``extern "C"``) whose extractor left the mangled name as the display name
-    provides that name.
+    Keyed on whether ``mangled`` is a *real* mangling (``_Z…`` / ``?…``): a C++
+    function or namespace/global variable exports under its mangled name only, so
+    its bare source spelling must **not** be added (an unrelated accidental export
+    sharing that spelling would otherwise look documented — Codex review). An
+    un-mangled decl (C / ``extern "C"`` / C data, where the extractor left the
+    bare name) exports under that bare name.
     """
-    if _bare_name_exports(decl):
-        return tuple({s for s in (decl.mangled, decl.name) if s})
-    return (decl.mangled,) if decl.mangled.startswith(_MANGLE_SIGILS) else ()
+    if decl.mangled.startswith(_MANGLE_SIGILS):
+        return (decl.mangled,)
+    return tuple({s for s in (decl.mangled, decl.name) if s})
 
 
 def _exported_symbol_names(snapshot: AbiSnapshot) -> set[str] | None:

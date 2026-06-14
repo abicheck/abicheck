@@ -209,6 +209,42 @@ def test_exported_not_public_skips_constructor_exports():
     assert _findings_of(res, ChangeKind.EXPORTED_NOT_PUBLIC) == []
 
 
+def test_exported_not_public_cxx_variable_does_not_document_bare_name():
+    # A public C++ global `g` exports as `_Z1g`, not `g`. An unrelated accidental
+    # export literally named `g` must NOT be treated as documented by the public
+    # variable (Codex review).
+    snap = _snap(elf=_elf("_Z1g", "g"))
+    snap.variables = [
+        Variable(
+            name="g",
+            mangled="_Z1g",
+            type="int",
+            origin=ScopeOrigin.PUBLIC_HEADER,
+        ),
+    ]
+    res = run_crosschecks(snap)
+    assert [c.symbol for c in _findings_of(res, ChangeKind.EXPORTED_NOT_PUBLIC)] == [
+        "g"
+    ]
+
+
+def test_exported_not_public_skips_msvc_constructor_exports():
+    # MSVC decorates ctors as ??0.. / dtors as ??1.. while castxml leaves the
+    # header-side member unmangled; skip them to avoid a false positive (Codex
+    # review).
+    snap = _snap(pe=PeMetadata(exports=[PeExport(name="??0Widget@@QEAA@XZ")]))
+    snap.functions = [
+        Function(
+            name="Widget::Widget",
+            mangled="Widget",
+            return_type="",
+            origin=ScopeOrigin.PUBLIC_HEADER,
+        ),
+    ]
+    res = run_crosschecks(snap)
+    assert _findings_of(res, ChangeKind.EXPORTED_NOT_PUBLIC) == []
+
+
 def test_exported_not_public_clean_when_everything_declared():
     snap = _snap(elf=_elf("_Z3fooi"))
     snap.functions = [
