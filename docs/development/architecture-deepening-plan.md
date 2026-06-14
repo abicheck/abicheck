@@ -215,14 +215,27 @@ order-stable, and a soft detector-count floor.
 
 ---
 
-### C5 — Fold synthetic detectors onto the registry
+### C5 — Fold synthetic detectors onto the registry *(deferred — not a clean win)*
 
-**Problem.** There are two detection orchestrators. Alongside the registry
-detectors, `post_processing.AddSyntheticDetectorFindings` hard-codes lazy
-imports and direct calls to `detect_serialization_tag_changes`,
-`detect_missing_instantiations` and `detect_sycl_overload_set_removal`. These
-are invisible to `registry.detector_names`, so nothing that introspects "all
-detectors" (docs, coverage gates) sees them.
+**Re-grilled and deferred.** Closer inspection showed the sketch
+mis-characterised the target. The post-processing step is `DetectCppPatterns`,
+which runs **seven** coupled sub-detectors, not three. Several
+(`detect_sycl_overload_set_removal`, `detect_cpu_dispatch_isa_dropped`) return
+`(findings, suppressed_keys)` tuples and drive **grouped-child suppression**
+that mutates `ctx.kept` / `ctx.suppressed` *by reference*; one
+(`detect_inline_body_renamed_member`) needs the in-flight `changes` list. They
+fundamentally require **post-filter context**, which the registry's
+`(old, new) -> list[Change]` contract does not carry. Splitting them onto a
+registry phase buys marginal discoverability (`detector_names` listing them) at
+the cost of either a second, ctx-aware detector contract or breaking up a
+cohesive step. Net negative — left as-is. If discoverability is wanted later, a
+cheaper move is to expose a read-only `synthetic_detector_names` list from
+`post_processing` for docs/coverage tools, without touching the registry
+contract.
+
+**Original problem (for reference).** There are two detection orchestrators. The
+synthetic detectors are invisible to `registry.detector_names`, so nothing that
+introspects "all detectors" sees them.
 
 **Goal.** One discovery point for "what detectors exist", without losing the
 post-filter ordering the synthetic detectors need.
@@ -384,6 +397,23 @@ follow-up (unifying the stdlib-/runtime-RTTI skip sets) a natural home.
 
 ---
 
+## Environment / verifiability constraints
+
+Some candidates change behaviour that can only be safely verified with external
+tools or output snapshots. Status in the current dev environment:
+
+| Lane | Tool | Present? | Blocks |
+|------|------|----------|--------|
+| `integration` | castxml + gcc | castxml **missing** | C3 (dump path) |
+| `abicc` | abi-compliance-checker | **missing** | C8 (parity) |
+| `libabigail` | abidiff | **missing** | parity cross-checks |
+| `golden` | snapshot files | present | C2 (output) |
+
+Implication: **C3 and C8 must not be merged from an environment that cannot run
+their lanes** — they are deferred to a context with castxml / ABICC, or to CI
+with those lanes green. C2/C7 change user-visible output / exit codes and need
+explicit sign-off plus the golden lane before merge.
+
 ## Sequencing
 
 Ordered by risk-adjusted payoff. Cheap, isolated wins first; output- and
@@ -398,7 +428,7 @@ C7  CLI → service                  (exit-code-sensitive)
 C3  binary-format registry         (parallelisable; needs integration lane)
 C10 split model.py                 (staged; absorbs C1 follow-up)
 C8  ABICC compat adapter           (parity-sensitive)
-C5  synthetic detectors → registry (depends on C4)
+C5  synthetic detectors → registry ⛔ deferred (entangled; net-negative)
 C6  Change factory                 (widest churn; depends on C2)
 ```
 
@@ -416,7 +446,7 @@ parity is contractual and benefits from a stabilised shared layer underneath it.
 | C2 | Report view-model | Proposed | — |
 | C3 | Binary-format handler registry | Proposed | — |
 | C4 | Detector auto-discovery | Done | #395 |
-| C5 | Synthetic detectors → registry | Proposed | — |
+| C5 | Synthetic detectors → registry | Deferred (not a clean win) | — |
 | C6 | `Change` factory | Proposed | — |
 | C7 | CLI → service layer | Proposed | — |
 | C8 | ABICC compat adapter | Proposed | — |
