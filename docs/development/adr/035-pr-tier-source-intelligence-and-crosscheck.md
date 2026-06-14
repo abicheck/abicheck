@@ -137,9 +137,9 @@ parts with different requirements:
 - **Preprocessor pre-scan** (extends `buildsource/include_graph.py`): the
   conditional part — runs **only when a compile DB and a preprocessor (`clang
   -E`) are available** (reported as skipped otherwise). Captures per-TU macro
-  values for ABI-affecting macros
-  and detect *public-header-includes-private/generated-header* leaks and
-  per-TU macro-value divergence for the same public type.
+  values for ABI-affecting macros, detects
+  *public-header-includes-private/generated-header* leaks, and flags per-TU
+  macro-value divergence for the same public type.
 
 These feed D3 (escalation) and D4 (cross-checks). Output is normalized facts in
 the existing `buildsource` schema, with coverage reported (ADR-033 D6/D9).
@@ -339,11 +339,12 @@ and CI wrappers all drive the same engine. Layering, top-down:
   AST as primary output). This is what makes levels independently runnable
   (ADR-033 D1) and lets external/build-emitted providers (D5) drop in via the
   ADR-032 manifest.
-- **Request/result objects** — `ScanRequest` (binary, headers, compile DB,
-  mode, budget, risk rules, level overrides) and `ScanResult` (findings,
-  per-level `LayerCoverage`, `CostEstimate` vs. actual, confidence/provider
-  matrix). `ScanResult` is what the reporter, PR comment, SARIF, and MCP all
-  consume — one object, many renderings.
+- **Request/result objects** — `ScanRequest` (binaries, headers, compile DB,
+  baseline, `mode`, `source_method`/`depth`, budget, risk rules) and `ScanResult`
+  (`findings: list[Change]`, per-layer `LayerResult`/coverage, `CostEstimate`
+  projected cost compared against each layer's actual `elapsed_s`,
+  confidence/provider matrix). `ScanResult` is what the reporter, PR comment,
+  SARIF, and MCP all consume — one object, many renderings.
 - **`estimate` is a first-class entry point**, not a side effect: a dry-run that
   probes the project (TU count from compile DB, header fan-out, cache state) and
   returns the projected cost of each level for *this* project so a maintainer
