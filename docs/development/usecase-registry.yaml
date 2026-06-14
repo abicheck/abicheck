@@ -564,9 +564,10 @@ use_cases:
     gap: G19
     plan: docs/development/plans/g19-pr-source-intelligence.md
     next_steps: >
-      ADR-035 D2/D3. Add a compiler-free pattern/preprocessor pre-scan that runs
-      on every PR over changed+public files (no compile DB, no compiler). The
-      level is deterministic: a fixed `--mode` preset or an explicit
+      ADR-035 D2/D3. Add a pre-scan that runs on every PR over changed+public
+      files: the lexical pattern scan needs no compile DB and no compiler; the
+      preprocessor macro/include capture (S2) is conditional on a compile DB +
+      `clang -E` (reported skipped otherwise). The level is deterministic: a fixed `--mode` preset or an explicit
       `--source-method`/`--depth`. A numeric risk score changes depth ONLY under
       `--source-method auto` (opt-in) and for POI focusing; `--budget` is a
       failure guard on the chosen level (errors on overflow, never shrinks scope).

@@ -158,7 +158,8 @@ not the basic flow.
   --binary PATH        library/artifact to scan (repeatable for bundles)
   --headers PATH       public header file or dir (repeatable)
   --sources PATH       source tree (compile DB auto-discovered within it)
-  --baseline PATH      previous build's dump (or built lib) to diff against
+  --baseline PATH|REF  previous build's dump/lib (path), OR a baseline-registry
+                       ref like libfoo@1.5 (ADR-022) — one flag, union value
 ```
 
 **Optional — inputs**
@@ -167,8 +168,6 @@ not the basic flow.
   --public-header[-dir] PATH  provenance roots (ADR-015), passthrough to dump
   --compile-db PATH           explicit compile_commands.json (only if not under --sources)
   --build-info PATH           build dir / pack dir instead of a raw source tree
-  --baseline REGISTRY-REF     a baseline-registry name (ADR-022), e.g. libfoo@1.5,
-                              instead of a file — for teams using the registry
   --inputs DIR                ingest a Flow-2 abicheck_inputs/ pack (D5)
 ```
 
@@ -190,7 +189,9 @@ not the basic flow.
   --budget DURATION (e.g. 15m)         optional guard; FAILS on overflow, never
                                        silently shrinks scope (avoid for gating CI)
   --max-tus N                          targeted-AST TU cap
-  --partial-ok / --no-partial-ok       default on; partial result is success
+  --partial-ok / --no-partial-ok       default on; a partial scan (missing tool,
+                                       skipped layer) is success. Does NOT cover
+                                       --budget overflow, which always fails.
   --estimate                           dry-run: print per-layer cost, scan nothing
   --audit                              single-build hygiene lint, no baseline (D8)
 ```
