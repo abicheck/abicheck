@@ -229,49 +229,55 @@ def test_likely_renamed_versioned_pairs_collapse():
     assert adv is not None and len(matched) == 4
 
 
-# --- G15 token vocabulary: real mangled names (libc++, Abseil, libstdc++) -----
-# These use the *real* in-repo demangler (no monkeypatch) on names emitted by a
-# compiler, so they pin that the inline-namespace recogniser handles each
-# ecosystem's versioned-namespace stamp, not just ICU's icu_NN.
+# --- G15 token vocabulary: libc++, Abseil, libstdc++ --------------------------
+# The recogniser operates on the *demangled* name, so these pin the token logic
+# against each ecosystem's versioned-namespace stamp via a controlled demangle
+# map (mirroring test_cpp_inline_namespace_scheme_detected). A real demangler is
+# deliberately not used: some platforms' demanglers omit the libc++ inline
+# namespace (macOS llvm demangles _ZNSt3__1...E to `std::...`, dropping __1), so
+# a real-name test would be demangler-dependent rather than testing our logic.
 
 
-def _cpp_pairs(old_syms, new_syms):
+def _scheme_from_demangle_map(monkeypatch, dem, removed, added):
+    import abicheck.versioned_symbol_scheme as vs
+    monkeypatch.setattr(vs, "demangle", lambda s: dem.get(s))
+    monkeypatch.setattr(vs, "demangle_batch", lambda names: {})
     from abicheck.checker_types import Change, ChangeKind
-    rows = [Change(kind=ChangeKind.FUNC_REMOVED, symbol=s, description="") for s in old_syms]
-    rows += [Change(kind=ChangeKind.FUNC_ADDED, symbol=s, description="") for s in new_syms]
-    return rows
+    rows = [Change(kind=ChangeKind.FUNC_REMOVED, symbol=s, description="") for s in removed]
+    rows += [Change(kind=ChangeKind.FUNC_ADDED, symbol=s, description="") for s in added]
+    return vs.analyze_versioned_scheme(rows)
 
 
-def test_libcxx_inline_namespace_scheme_collapses():
-    # libc++ stamps every symbol with std::__1:: (bumped to std::__2:: on an ABI
-    # rev): _ZNSt3__1...  ->  _ZNSt3__2...
-    from abicheck.versioned_symbol_scheme import analyze_versioned_scheme
-    old = ["_ZNSt3__14betaEl", "_ZNSt3__15alphaEi", "_ZNSt3__15gammaEi"]
-    new = ["_ZNSt3__24betaEl", "_ZNSt3__25alphaEi", "_ZNSt3__25gammaEi"]
-    adv, matched = analyze_versioned_scheme(_cpp_pairs(old, new))
+def _ns_scheme(monkeypatch, ns_old, ns_new):
+    """Build a 3-symbol removed/added scheme under inline namespaces ns_old→ns_new."""
+    dem, rem, add = {}, [], []
+    for leaf in ("alpha", "beta", "gamma"):
+        om, nm = f"_Zold_{leaf}", f"_Znew_{leaf}"
+        dem[om] = f"{ns_old}::{leaf}()"
+        dem[nm] = f"{ns_new}::{leaf}()"
+        rem.append(om)
+        add.append(nm)
+    return _scheme_from_demangle_map(monkeypatch, dem, rem, add)
+
+
+def test_libcxx_inline_namespace_scheme_collapses(monkeypatch):
+    # libc++ stamps every symbol with std::__1:: (bumped to std::__2:: on an ABI rev).
+    adv, matched = _ns_scheme(monkeypatch, "std::__1", "std::__2")
     assert adv is not None
     assert len(matched) == 6  # 3 removed + 3 added
 
 
-def test_abseil_lts_namespace_scheme_collapses():
+def test_abseil_lts_namespace_scheme_collapses(monkeypatch):
     # Abseil's inline namespace is lts_<date> (absl::lts_20240722:: -> lts_20250127::).
-    from abicheck.versioned_symbol_scheme import analyze_versioned_scheme
-    old = ["_ZN4absl12lts_202407223MapEi", "_ZN4absl12lts_202407226ReduceEl",
-           "_ZN4absl12lts_202407227ComputeEi"]
-    new = ["_ZN4absl12lts_202501273MapEi", "_ZN4absl12lts_202501276ReduceEl",
-           "_ZN4absl12lts_202501277ComputeEi"]
-    adv, matched = analyze_versioned_scheme(_cpp_pairs(old, new))
+    adv, matched = _ns_scheme(monkeypatch, "absl::lts_20240722", "absl::lts_20250127")
     assert adv is not None
     assert len(matched) == 6
 
 
-def test_libstdcxx_versioned_namespace_scheme_collapses():
+def test_libstdcxx_versioned_namespace_scheme_collapses(monkeypatch):
     # libstdc++ built --enable-symvers=gnu-versioned-namespace uses std::__7::,
     # bumped to std::__8:: across a release.
-    from abicheck.versioned_symbol_scheme import analyze_versioned_scheme
-    old = ["_ZNSt3__74betaEl", "_ZNSt3__75alphaEi", "_ZNSt3__75gammaEi"]
-    new = ["_ZNSt3__84betaEl", "_ZNSt3__85alphaEi", "_ZNSt3__85gammaEi"]
-    adv, matched = analyze_versioned_scheme(_cpp_pairs(old, new))
+    adv, matched = _ns_scheme(monkeypatch, "std::__7", "std::__8")
     assert adv is not None
     assert len(matched) == 6
 
