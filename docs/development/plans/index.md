@@ -23,6 +23,12 @@ scope**.
 | **G17** | [Real-world validation corpus](g17-real-world-corpus.md) | `UC-WORKFLOW-real-world-corpus` | M |
 | **G18** | [Bazel build-evidence](g18-bazel-build-evidence.md) | `UC-TC-bazel-build-evidence` | M |
 
+Initiative plans (cross-cutting, not tied to a single registry gap):
+
+| Plan | ADR | Effort |
+|---|---|---|
+| **G19** | [PR-tier source intelligence & cross-source validation](g19-pr-source-intelligence.md) | [ADR-035](../adr/035-pr-tier-source-intelligence-and-crosscheck.md) · XL (phased) |
+
 Completed or decided plans are retained for implementation history:
 
 | Gap | State | Reference |

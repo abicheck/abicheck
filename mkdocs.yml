@@ -147,6 +147,7 @@ nav:
       - "G16: Header-scope toolchain robustness": development/plans/g16-header-scope-toolchain-robustness.md
       - "G17: Real-world validation corpus": development/plans/g17-real-world-corpus.md
       - "G18: Bazel build-evidence": development/plans/g18-bazel-build-evidence.md
+      - "G19: PR-tier source intelligence": development/plans/g19-pr-source-intelligence.md
     - ADR:
       - Overview: development/adr/index.md
       - "001: Technology Stack": development/adr/001-technology-stack.md
@@ -185,6 +186,7 @@ nav:
       - "032: Evidence Extractor Plugins": development/adr/032-evidence-extractor-plugin-interface.md
       - "033: Evidence CI Rollout": development/adr/033-ci-rollout-performance-and-validation.md
       - "034: Managed-Runtime & Non-C Frontends": development/adr/034-managed-runtime-and-non-c-abi-frontends.md
+      - "035: PR-Tier Source Intelligence & Cross-Check": development/adr/035-pr-tier-source-intelligence-and-crosscheck.md
       - Gap Analysis: development/adr/adr-gap-analysis.md
 
 # Agent instructions are repo-internal context, not published documentation.
