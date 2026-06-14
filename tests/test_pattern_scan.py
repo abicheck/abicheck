@@ -117,6 +117,10 @@ def _kinds(text: str) -> set[PatternKind]:
             "struct Derived : Base { void f() & noexcept override; };",
             PatternKind.VIRTUAL_METHOD,
         ),
+        (
+            "struct Derived : Base { auto f() -> int override; };",
+            PatternKind.VIRTUAL_METHOD,
+        ),
         ("void* operator new(size_t n);", PatternKind.OPERATOR_NEW_DELETE),
         ("void operator delete(void* p) noexcept;", PatternKind.OPERATOR_NEW_DELETE),
         ("template class Vector<int>;", PatternKind.EXPLICIT_TEMPLATE_INSTANTIATION),
@@ -312,6 +316,12 @@ def test_raw_string_embedded_quote_does_not_hide_later_construct() -> None:
 
 def test_raw_string_contents_not_flagged() -> None:
     assert _kinds('const char* s = R"(#pragma pack(1) virtual void f();)";') == set()
+
+
+def test_raw_string_contents_not_flagged_by_string_preserving_rules() -> None:
+    src = r'''const char* s = R"abi(_Pragma("pack(push, 1)") extern "C")abi";'''
+    assert PatternKind.PRAGMA_PACK not in _kinds(src)
+    assert PatternKind.EXTERN_C not in _kinds(src)
 
 
 # ── Escalation triggers + categories ─────────────────────────────────────────

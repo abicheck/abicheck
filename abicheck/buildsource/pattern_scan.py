@@ -269,6 +269,7 @@ _RULES: tuple[_Rule, ...] = (
             r"[^\n;{}()]*\([^;\n{}]*\)\s*"
             r"(?:const\s*)?(?:volatile\s*)?(?:&{1,2}\s*)?"
             r"(?:noexcept(?:\s*\([^)]*\))?\s*)?"
+            r"(?:->\s*[^;\n{}]*?\s*)?"
             r"(?:\b(?:override|final)\b\s*){1,2}(?=[=;{])"
         ),
         True,
@@ -526,10 +527,9 @@ def _blank_comments_and_strings(text: str, blank_strings: bool = True) -> str:
                 raw_end = _raw_string_end(text, i)
                 if raw_end >= 0:
                     raw = text[i : raw_end + 1]
-                    if blank_strings:
-                        out.append("".join("\n" if c == "\n" else " " for c in raw))
-                    else:
-                        out.append(raw)
+                    # Raw-string bodies are never code, even on the
+                    # string-preserving path used by `_Pragma`/`extern "C"`.
+                    out.append("".join("\n" if c == "\n" else " " for c in raw))
                     i = raw_end + 1
                 else:
                     out.append('"')
