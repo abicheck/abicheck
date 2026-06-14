@@ -13,6 +13,7 @@
 # limitations under the License.
 
 """ABI data model — shared across dumper, checker and reporter."""
+
 from __future__ import annotations
 
 import logging as _logging
@@ -20,6 +21,23 @@ import re as _re
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING
+
+# Re-export the name-classification predicates (moved to name_classification in
+# C10) under their historical names. Redundant ``as`` aliases are the explicit
+# re-export idiom mypy recognises, so ``from .model import is_non_abi_surface_type``
+# keeps type-checking cleanly for the ~9 detector modules that use it.
+from .name_classification import (
+    is_abi_surface_type_name as is_abi_surface_type_name,
+)
+from .name_classification import (
+    is_compiler_internal_type as is_compiler_internal_type,
+)
+from .name_classification import (
+    is_cxx_runtime_library as is_cxx_runtime_library,
+)
+from .name_classification import (
+    is_non_abi_surface_type as is_non_abi_surface_type,
+)
 
 if TYPE_CHECKING:
     from .build_mode import BuildMode
@@ -35,99 +53,13 @@ if TYPE_CHECKING:
 _model_log = _logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Compiler internal type filtering (FIX-D) — single source of truth
+# Name classification (FIX-D) — single source of truth.
+# The pure name → bool predicates now live in name_classification (C10) so the
+# symbol-name and type-name classifiers share one home; they are re-exported
+# from this module (see the imports at the top) under their historical names
+# because ~9 detector modules import them ``from .model``. The snapshot-aware
+# wrapper below (stdlib_namespaces_excluded) stays in model.
 # ---------------------------------------------------------------------------
-
-COMPILER_INTERNAL_TYPES: frozenset[str] = frozenset({
-    "__va_list_tag", "__builtin_va_list", "__gnuc_va_list",
-    "__int128", "__int128_t", "__uint128_t",
-    "__NSConstantString_tag", "__NSConstantString",
-})
-
-_TYPEDEF_ALIAS_RE = _re.compile(r"^typedef\s+(.+?)\s+([A-Za-z_][\w:]*)$")
-
-
-def is_compiler_internal_type(name: str) -> bool:
-    """Return True if *name* is a compiler internal type that should be excluded."""
-    if not name:
-        return False
-    stripped = name.strip()
-    if stripped in COMPILER_INTERNAL_TYPES:
-        return True
-    m = _TYPEDEF_ALIAS_RE.match(stripped)
-    if not m:
-        return False
-    aliased, alias = m.groups()
-    return aliased.strip() in COMPILER_INTERNAL_TYPES and alias in COMPILER_INTERNAL_TYPES
-
-
-# Standard-library / runtime namespaces whose *type layout* is owned by the
-# toolchain (libstdc++ / libc++ / Itanium C++ ABI), not by the library under
-# inspection.  These types leak into DWARF when a library inlines STL usage; the
-# layout the compiler happens to emit (and which static-member DIEs it keeps)
-# varies by compiler/LTO, so diffing them produces toolchain-artifact false
-# positives rather than real ABI changes (validation/REPORT.md FP-1).
-_STDLIB_TYPE_NAMESPACE_PREFIXES: tuple[str, ...] = (
-    "std::", "__gnu_cxx::", "__gnu_debug::", "__cxxabiv1::", "__cxx11::",
-)
-
-# Substrings that mark an anonymous / local type with no stable cross-version
-# ABI identity — lambdas and unnamed struct/union/enum (validation/REPORT.md
-# FP-2). gcc renders these as "<lambda...>", "{lambda...}", "(anonymous ...)";
-# clang/llvm uses "(unnamed ...)".
-_ANONYMOUS_TYPE_MARKERS: tuple[str, ...] = (
-    "<lambda", "{lambda", "(anonymous", "(unnamed", "<unnamed",
-)
-
-
-def is_non_abi_surface_type(name: str, *, exclude_stdlib_namespaces: bool = True) -> bool:
-    """Return True if *name* is a type that is never the inspected library's own
-    ABI surface and must be excluded from type diffing.
-
-    Superset of :func:`is_compiler_internal_type`, additionally covering
-    standard-library / runtime namespaces and anonymous (lambda / unnamed)
-    types.  Single source of truth so the DWARF extractor and the type differ
-    agree on what counts as surface.
-
-    *exclude_stdlib_namespaces* must be set to ``False`` when the inspected DSO
-    is itself the C++ runtime (libstdc++ / libc++): there ``std::`` /
-    ``__gnu_cxx::`` records ARE the library's own ABI surface, so suppressing
-    them would hide real breaks (see :func:`is_cxx_runtime_library`).
-    """
-    if not name:
-        return False
-    if is_compiler_internal_type(name):
-        return True
-    if exclude_stdlib_namespaces and name.startswith(_STDLIB_TYPE_NAMESPACE_PREFIXES):
-        return True
-    return any(marker in name for marker in _ANONYMOUS_TYPE_MARKERS)
-
-
-# Core stems of the C++ runtime / standard-library DSOs (without the ``lib``
-# prefix).  When abicheck is pointed at one of *these* libraries, std::/
-# __gnu_cxx:: types are the surface under test and must NOT be filtered out
-# (Codex review on PR #273).  Order matters: longer stems first so the
-# startswith check is unambiguous.
-_CXX_RUNTIME_CORE_STEMS: tuple[str, ...] = (
-    "stdc++", "c++abi", "supc++", "c++",
-)
-
-
-def is_cxx_runtime_library(library: str | None) -> bool:
-    """Return True if *library* names a C++ runtime / standard-library DSO that
-    owns the ``std::`` namespace.
-
-    Accepts both SONAMEs (``libstdc++.so.6``, ``/usr/lib/libc++.so.1``) and the
-    short names that ``abicheck compat dump`` writes from the ABICC ``-lib``
-    flag (``stdc++``, ``c++``): the optional ``lib`` prefix is stripped before
-    matching the core stems.
-    """
-    if not library:
-        return False
-    base = library.rsplit("/", 1)[-1]
-    if base.startswith("lib"):
-        base = base[3:]
-    return base.startswith(_CXX_RUNTIME_CORE_STEMS)
 
 
 def stdlib_namespaces_excluded(old: AbiSnapshot, new: AbiSnapshot) -> bool:
@@ -159,15 +91,6 @@ def stdlib_namespaces_excluded(old: AbiSnapshot, new: AbiSnapshot) -> bool:
         or is_cxx_runtime_library(getattr(new_elf, "soname", ""))
     )
 
-
-def is_abi_surface_type_name(name: str, *, exclude_stdlib: bool) -> bool:
-    """Return True if a type *name* belongs to the inspected library's ABI
-    surface (i.e. is NOT filtered as std::/anonymous/compiler-internal).
-
-    Convenience inverse of :func:`is_non_abi_surface_type` for use in the
-    ``{t.name: t for t in snap.types if is_abi_surface_type_name(...)}`` idiom
-    shared across detector modules."""
-    return not is_non_abi_surface_type(name, exclude_stdlib_namespaces=exclude_stdlib)
 
 # ---------------------------------------------------------------------------
 # Type name canonicalization — normalise type names for reliable matching.
@@ -322,17 +245,18 @@ def cv_qualifiers_only_differ(old_type: str, new_type: str) -> bool:
 
 
 class Visibility(str, Enum):
-    PUBLIC = "public"       # default visibility / exported
-    HIDDEN = "hidden"       # __attribute__((visibility("hidden")))
-    ELF_ONLY = "elf_only"   # present in ELF symbol table, not in headers
+    PUBLIC = "public"  # default visibility / exported
+    HIDDEN = "hidden"  # __attribute__((visibility("hidden")))
+    ELF_ONLY = "elf_only"  # present in ELF symbol table, not in headers
 
 
 class ElfVisibility(str, Enum):
     """ELF st_other visibility from .dynsym — separate from API-level Visibility."""
-    DEFAULT = "default"       # STV_DEFAULT
-    PROTECTED = "protected"   # STV_PROTECTED
-    HIDDEN = "hidden"         # STV_HIDDEN
-    INTERNAL = "internal"     # STV_INTERNAL
+
+    DEFAULT = "default"  # STV_DEFAULT
+    PROTECTED = "protected"  # STV_PROTECTED
+    HIDDEN = "hidden"  # STV_HIDDEN
+    INTERNAL = "internal"  # STV_INTERNAL
 
 
 class AccessLevel(str, Enum):
@@ -359,12 +283,12 @@ class ScopeOrigin(str, Enum):
     is unchanged.
     """
 
-    PUBLIC_HEADER = "public_header"    # defined in a provided public header
+    PUBLIC_HEADER = "public_header"  # defined in a provided public header
     PRIVATE_HEADER = "private_header"  # project header outside the public set
-    SYSTEM_HEADER = "system_header"    # toolchain/system header (/usr/include, ...)
-    GENERATED = "generated"            # machine-generated header (moc_*, *.pb.h, generated/ ...)
-    EXPORT_ONLY = "export_only"        # exported by the binary but absent from any header
-    UNKNOWN = "unknown"                # no public set, or no source location
+    SYSTEM_HEADER = "system_header"  # toolchain/system header (/usr/include, ...)
+    GENERATED = "generated"  # machine-generated header (moc_*, *.pb.h, generated/ ...)
+    EXPORT_ONLY = "export_only"  # exported by the binary but absent from any header
+    UNKNOWN = "unknown"  # no public set, or no source location
 
 
 @dataclass
@@ -373,15 +297,15 @@ class Param:
     type: str
     kind: ParamKind = ParamKind.VALUE
     default: str | None = None  # has default value (value not preserved)
-    pointer_depth: int = 0      # nesting: T=0, T*=1, T**=2
-    is_restrict: bool = False   # restrict-qualified pointer parameter
-    is_va_list: bool = False    # parameter is va_list (variadic argument list)
+    pointer_depth: int = 0  # nesting: T=0, T*=1, T**=2
+    is_restrict: bool = False  # restrict-qualified pointer parameter
+    is_va_list: bool = False  # parameter is va_list (variadic argument list)
 
 
 @dataclass
 class Function:
-    name: str                        # demangled
-    mangled: str                     # mangled symbol name
+    name: str  # demangled
+    mangled: str  # mangled symbol name
     return_type: str
     params: list[Param] = field(default_factory=list)
     visibility: Visibility = Visibility.PUBLIC
@@ -391,16 +315,16 @@ class Function:
     vtable_index: int | None = None
     source_location: str | None = None  # "header.h:42"
     is_static: bool = False
-    is_const: bool = False        # const qualifier on this
-    is_volatile: bool = False     # volatile qualifier on this
+    is_const: bool = False  # const qualifier on this
+    is_volatile: bool = False  # volatile qualifier on this
     is_pure_virtual: bool = False
-    is_deleted: bool = False      # = delete; previously callable → BREAKING
+    is_deleted: bool = False  # = delete; previously callable → BREAKING
     deleted_from_dwarf: bool = False  # True when is_deleted was set via DW_AT_deleted
-    is_inline: bool = False       # inline keyword / attribute in header
+    is_inline: bool = False  # inline keyword / attribute in header
     access: AccessLevel = AccessLevel.PUBLIC  # public/protected/private
     return_pointer_depth: int = 0  # T=0, T*=1, T**=2
     elf_visibility: ElfVisibility | None = None  # ELF st_other (populated from .dynsym)
-    ref_qualifier: str = ""       # "" (none), "&" (lvalue), "&&" (rvalue)
+    ref_qualifier: str = ""  # "" (none), "&" (lvalue), "&&" (rvalue)
     # explicit specifier on constructors / conversion operators (DW_AT_explicit /
     # castxml @explicit). Tri-state to keep "unknown" distinct from "implicit":
     # - True  → source has `explicit` (or `explicit(true)`)
@@ -433,8 +357,8 @@ class Variable:
     type: str
     visibility: Visibility = Visibility.PUBLIC
     source_location: str | None = None
-    is_const: bool = False         # const-qualified type (write → SIGSEGV)
-    value: str | None = None       # initial value (compile-time constant, if known)
+    is_const: bool = False  # const-qualified type (write → SIGSEGV)
+    value: str | None = None  # initial value (compile-time constant, if known)
     access: AccessLevel = AccessLevel.PUBLIC  # public/protected/private
     elf_visibility: ElfVisibility | None = None  # ELF st_other (populated from .dynsym)
     # Provenance (ADR-015, schema v6) — see Function.source_header.
@@ -458,17 +382,20 @@ class TypeField:
 @dataclass
 class RecordType:
     """struct / class / union."""
+
     name: str
     kind: str  # "struct" | "class" | "union"
     size_bits: int | None = None
     alignment_bits: int | None = None
     fields: list[TypeField] = field(default_factory=list)
-    bases: list[str] = field(default_factory=list)       # base class names
+    bases: list[str] = field(default_factory=list)  # base class names
     virtual_bases: list[str] = field(default_factory=list)
-    vtable: list[str] = field(default_factory=list)      # ordered vtable entries (mangled)
+    vtable: list[str] = field(default_factory=list)  # ordered vtable entries (mangled)
     source_location: str | None = None
     is_union: bool = False
-    is_opaque: bool = False       # incomplete type (forward-decl only; was complete → BREAKING)
+    is_opaque: bool = (
+        False  # incomplete type (forward-decl only; was complete → BREAKING)
+    )
     # `final` class-key specifier. Tri-state to keep "unknown" distinct from
     # "not final":
     # - True  → declared `class C final { ... }` (castxml `final` attribute).
@@ -531,6 +458,7 @@ class DependencyInfo:
 
     Populated when a snapshot is created with ``--follow-deps``.
     """
+
     nodes: list[dict[str, object]] = field(default_factory=list)
     edges: list[dict[str, str]] = field(default_factory=list)
     unresolved: list[dict[str, str]] = field(default_factory=list)
@@ -541,27 +469,38 @@ class DependencyInfo:
 @dataclass
 class AbiSnapshot:
     """Complete ABI snapshot of one version of a library."""
-    library: str                   # e.g. "libfoo.so.1"
-    version: str                   # e.g. "1.2.3"
+
+    library: str  # e.g. "libfoo.so.1"
+    version: str  # e.g. "1.2.3"
     functions: list[Function] = field(default_factory=list)
     variables: list[Variable] = field(default_factory=list)
     types: list[RecordType] = field(default_factory=list)
-    elf: ElfMetadata | None = field(default=None)    # ELF dynamic/symbol metadata (Sprint 2)
-    pe: PeMetadata | None = field(default=None)      # PE/COFF metadata (Windows DLL)
+    elf: ElfMetadata | None = field(
+        default=None
+    )  # ELF dynamic/symbol metadata (Sprint 2)
+    pe: PeMetadata | None = field(default=None)  # PE/COFF metadata (Windows DLL)
     macho: MachoMetadata | None = field(default=None)  # Mach-O metadata (macOS dylib)
-    dwarf: DwarfMetadata | None = field(default=None)           # DWARF layout metadata (Sprint 3)
+    dwarf: DwarfMetadata | None = field(
+        default=None
+    )  # DWARF layout metadata (Sprint 3)
     dwarf_advanced: AdvancedDwarfMetadata | None = field(default=None)  # Sprint 4
-    sycl: SyclMetadata | None = field(default=None)  # SYCL PI plugin metadata (ADR-020b)
+    sycl: SyclMetadata | None = field(
+        default=None
+    )  # SYCL PI plugin metadata (ADR-020b)
     enums: list[EnumType] = field(default_factory=list)
-    typedefs: dict[str, str] = field(default_factory=dict)  # alias -> underlying type name
-    constants: dict[str, str] = field(default_factory=dict)  # #define / constexpr name -> value string
+    typedefs: dict[str, str] = field(
+        default_factory=dict
+    )  # alias -> underlying type name
+    constants: dict[str, str] = field(
+        default_factory=dict
+    )  # #define / constexpr name -> value string
     elf_only_mode: bool = False  # True when dumped without headers (all functions are ELF_ONLY provenance)
     from_headers: bool = False  # True when the ABI surface was parsed from public headers (castxml/AST), as opposed to DWARF debug info or the symbol table. Drives the HEADER_AWARE evidence tier — DWARF-derived declarations populate the same functions/types lists but must NOT be mistaken for header-level evidence.
 
     # Phase 3: binary format platform — detected from ELF/PE/MachO metadata.
     # None = unknown / not yet detected.
     # Populated by detect_platform() in pipeline or by the dumper.
-    platform: str | None = None   # "elf" | "pe" | "macho" | None
+    platform: str | None = None  # "elf" | "pe" | "macho" | None
 
     # Phase 4: language profile — detected from symbol mangling / extern "C" annotations.
     # None = unknown / mixed / not yet detected.
@@ -584,10 +523,10 @@ class AbiSnapshot:
     dependency_info: DependencyInfo | None = field(default=None)
 
     # Provenance metadata (schema v4) — tracks where/when a snapshot was created
-    git_commit: str | None = None   # SHA from git rev-parse HEAD at dump time
-    git_tag: str | None = None      # e.g. "v2.0.0", set via --git-tag or auto-detected
-    created_at: str | None = None   # ISO 8601 timestamp, auto-set at dump time
-    build_id: str | None = None     # opaque CI identifier (run ID, build number, etc.)
+    git_commit: str | None = None  # SHA from git rev-parse HEAD at dump time
+    git_tag: str | None = None  # e.g. "v2.0.0", set via --git-tag or auto-detected
+    created_at: str | None = None  # ISO 8601 timestamp, auto-set at dump time
+    build_id: str | None = None  # opaque CI identifier (run ID, build number, etc.)
     # Build-mode capture (schema v5) — normalized compiler / stdlib / std
     # mode derived from DWARF DW_AT_producer, ELF .comment, and mangled
     # symbol heuristics. Used to attribute layout/mangling differences
@@ -636,9 +575,15 @@ class AbiSnapshot:
     from_headers_inferred: bool = field(default=False, repr=False, compare=False)
 
     # Indexes (built lazily)
-    _func_by_mangled: dict[str, Function] | None = field(default=None, repr=False, compare=False)
-    _var_by_mangled: dict[str, Variable] | None = field(default=None, repr=False, compare=False)
-    _type_by_name: dict[str, RecordType] | None = field(default=None, repr=False, compare=False)
+    _func_by_mangled: dict[str, Function] | None = field(
+        default=None, repr=False, compare=False
+    )
+    _var_by_mangled: dict[str, Variable] | None = field(
+        default=None, repr=False, compare=False
+    )
+    _type_by_name: dict[str, RecordType] | None = field(
+        default=None, repr=False, compare=False
+    )
 
     def index(self) -> None:
         """Build lookup indexes. Uses first-wins for duplicate mangled names."""
@@ -652,7 +597,8 @@ class AbiSnapshot:
         if dup_funcs:
             _model_log.warning(
                 "Duplicate mangled symbols skipped (first-wins) in %s@%s: %s",
-                self.library, self.version,
+                self.library,
+                self.version,
                 ", ".join(f"{k} (×{v + 1})" for k, v in dup_funcs.items()),
             )
         self._func_by_mangled = func_map
@@ -667,7 +613,8 @@ class AbiSnapshot:
         if dup_vars:
             _model_log.warning(
                 "Duplicate mangled variables skipped (first-wins) in %s@%s: %s",
-                self.library, self.version,
+                self.library,
+                self.version,
                 ", ".join(f"{k} (×{v + 1})" for k, v in dup_vars.items()),
             )
         self._var_by_mangled = var_map
@@ -682,7 +629,8 @@ class AbiSnapshot:
         if dup_types:
             _model_log.warning(
                 "Duplicate type names skipped (first-wins) in %s@%s: %s",
-                self.library, self.version,
+                self.library,
+                self.version,
                 ", ".join(f"{k} (×{v + 1})" for k, v in dup_types.items()),
             )
         self._type_by_name = type_map

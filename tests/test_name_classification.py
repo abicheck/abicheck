@@ -21,7 +21,11 @@ from abicheck.name_classification import (
     LOCAL_RTTI_PREFIXES,
     RTTI_DATA_PREFIXES,
     has_internal_namespace_component,
+    is_abi_surface_type_name,
+    is_compiler_internal_type,
+    is_cxx_runtime_library,
     is_local_rtti_symbol,
+    is_non_abi_surface_type,
     is_rtti_symbol,
     symbol_origin,
 )
@@ -88,3 +92,47 @@ def test_report_summary_reexport_is_same_callable() -> None:
     from abicheck.report_summary import classify_symbol_origin
 
     assert classify_symbol_origin is symbol_origin
+
+
+# --- type-name classification (moved from model.py in C10) -------------------
+
+
+def test_is_compiler_internal_type() -> None:
+    assert is_compiler_internal_type("__va_list_tag")
+    assert is_compiler_internal_type("__int128")
+    assert not is_compiler_internal_type("MyStruct")
+    assert not is_compiler_internal_type("")
+
+
+def test_is_non_abi_surface_type_stdlib_and_anonymous() -> None:
+    assert is_non_abi_surface_type("std::vector<int>")
+    assert is_non_abi_surface_type("__gnu_cxx::__normal_iterator")
+    assert is_non_abi_surface_type("Foo::(anonymous struct)")
+    assert is_non_abi_surface_type("Outer::{lambda(int)#1}")
+    assert not is_non_abi_surface_type("mylib::PublicType")
+    # When the inspected DSO IS the runtime, std:: is its own surface.
+    assert not is_non_abi_surface_type("std::string", exclude_stdlib_namespaces=False)
+
+
+def test_is_abi_surface_type_name_is_inverse() -> None:
+    assert is_abi_surface_type_name("mylib::PublicType", exclude_stdlib=True)
+    assert not is_abi_surface_type_name("std::vector<int>", exclude_stdlib=True)
+
+
+def test_is_cxx_runtime_library() -> None:
+    assert is_cxx_runtime_library("libstdc++.so.6")
+    assert is_cxx_runtime_library("/usr/lib/libc++.so.1")
+    assert is_cxx_runtime_library("stdc++")  # short ABICC -lib form
+    assert not is_cxx_runtime_library("libmylib.so.1")
+    assert not is_cxx_runtime_library(None)
+
+
+def test_model_reexports_are_the_same_objects() -> None:
+    # Back-compat: ~9 detector modules import these from model. The re-export
+    # must be the very same object as the canonical definition.
+    from abicheck import model
+
+    assert model.is_non_abi_surface_type is is_non_abi_surface_type
+    assert model.is_compiler_internal_type is is_compiler_internal_type
+    assert model.is_abi_surface_type_name is is_abi_surface_type_name
+    assert model.is_cxx_runtime_library is is_cxx_runtime_library

@@ -426,7 +426,7 @@ C1  name classification            ✅ done (PR #395)
 C2  report view-model              (big locality win; output-change risk)
 C7  CLI → service                  (exit-code-sensitive)
 C3  binary-format registry         (parallelisable; needs integration lane)
-C10 split model.py                 (staged; absorbs C1 follow-up)
+C10 split model.py                 ◐ stage-1 done (name predicates moved)
 C8  ABICC compat adapter           (parity-sensitive)
 C5  synthetic detectors → registry ⛔ deferred (entangled; net-negative)
 C6  Change factory                 (widest churn; depends on C2)
@@ -451,4 +451,4 @@ parity is contractual and benefits from a stabilised shared layer underneath it.
 | C7 | CLI → service layer | Proposed | — |
 | C8 | ABICC compat adapter | Proposed | — |
 | C9 | Relocate confidence computation | Done | #395 |
-| C10 | Split `model.py` | Proposed | — |
+| C10 | Split `model.py` (stage-1: name predicates) | Stage-1 done | #395 |
