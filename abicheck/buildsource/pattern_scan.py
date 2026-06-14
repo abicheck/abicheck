@@ -118,6 +118,14 @@ class _Rule:
     scan_strings: bool = False
 
 
+#: Matches the body *inside* a ``__attribute__((...))`` list up to (but not
+#: across) its closing ``))``: a run of non-paren chars or single-level nested
+#: paren groups (e.g. the ``(8)`` in ``aligned(8)``). Lazy, so it stops at the
+#: searched keyword. Because it can never consume an unbalanced ``)`` it cannot
+#: leak past the attribute into following code — so ``__attribute__((aligned(8)))
+#: int packed;`` does *not* match the packed rule.
+_ATTR_INNER = r"(?:[^()]|\([^()]*\))*?"
+
 #: Layout-, vtable-, template-, and mangling-affecting constructs warrant
 #: escalation to the expensive semantic scan (S5); pure annotations
 #: (visibility/linkage/calling-convention/allocation) are advisory only.
@@ -140,12 +148,13 @@ _RULES: tuple[_Rule, ...] = (
         PatternKind.ATTRIBUTE_PACKED,
         PatternCategory.LAYOUT,
         # Match `packed`/`__packed__` anywhere in the attribute list — including
-        # after nested args, e.g. `__attribute__((aligned(8), packed))` — by
-        # scanning to the next statement boundary rather than the first `)`. Also
-        # covers the C++11 `[[gnu::packed]]` spelling.
+        # after nested args, e.g. `__attribute__((aligned(8), packed))` — but
+        # only *within* the attribute parentheses (`_ATTR_INNER`), so a later
+        # identifier named `packed` is not mistaken for the attribute. Also
+        # covers the C++11 `[[gnu::packed]]` spelling (`[^]]*` stays inside `[[]]`).
         re.compile(
-            r"__attribute__\s*\(\s*\([^;{]*\b(?:__)?packed(?:__)?\b"
-            r"|\[\[[^;{]*\bpacked\b"
+            r"__attribute__\s*\(\s*\(" + _ATTR_INNER + r"\b(?:__)?packed(?:__)?\b"
+            r"|\[\[[^]]*\bpacked\b"
         ),
         True,
         "packed attribute changes record layout",
@@ -155,9 +164,10 @@ _RULES: tuple[_Rule, ...] = (
         PatternCategory.VISIBILITY,
         # Match `visibility` anywhere in the attribute list (including after a
         # nested arg, e.g. `__attribute__((aligned(8), visibility("hidden")))`)
-        # by scanning to the statement boundary, not the first `)`.
+        # but only within the attribute parentheses (`_ATTR_INNER`), so a later
+        # identifier named `visibility` is not mistaken for the attribute.
         re.compile(
-            r"__attribute__\s*\(\s*\([^;{]*\bvisibility\b"
+            r"__attribute__\s*\(\s*\(" + _ATTR_INNER + r"\bvisibility\b"
             r"|\[\[\s*gnu::visibility"
         ),
         False,

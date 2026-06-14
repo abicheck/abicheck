@@ -112,6 +112,31 @@ def test_extern_cpp_not_flagged_as_extern_c() -> None:
 
 
 @pytest.mark.parametrize(
+    "src",
+    [
+        "__attribute__((aligned(8))) int packed;",  # identifier named packed
+        "[[nodiscard]] bool packed();",  # method named packed, non-packing attr
+        "int packed = 1;",  # plain identifier
+    ],
+)
+def test_identifier_named_packed_not_flagged(src: str) -> None:
+    # The packed rule must stay inside the attribute parens, not match a later
+    # identifier that merely happens to be spelled `packed`.
+    assert PatternKind.ATTRIBUTE_PACKED not in _kinds(src)
+
+
+@pytest.mark.parametrize(
+    "src",
+    [
+        "__attribute__((aligned(8))) int visibility;",
+        "[[nodiscard]] int visibility();",
+    ],
+)
+def test_identifier_named_visibility_not_flagged(src: str) -> None:
+    assert PatternKind.ATTRIBUTE_VISIBILITY not in _kinds(src)
+
+
+@pytest.mark.parametrize(
     "definition",
     [
         "template <typename T> class Foo {};",
