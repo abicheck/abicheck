@@ -258,6 +258,47 @@ def _cross_stdlib_embedded_layout_diverges() -> tuple[AbiSnapshot, AbiSnapshot]:
     return old, new
 
 
+# --- versioned-symbol-scheme + multi-.so-bundle shapes (field-eval F2) --------
+# The eval surfaced two real-world shapes the gate didn't cover: the
+# versioned-symbol scheme (ICU `u_*_75`->`_78`, P08) and multi-.so bundles whose
+# sibling libraries carry a SONAME version (P20). Each is added as a labelled
+# pair so the public-surface scoping stays honest on them — baselines stay 0/0.
+
+
+def _versioned_scheme_internal_churn() -> tuple[AbiSnapshot, AbiSnapshot]:
+    # A version bump renames the *internal* (ELF-only) helpers `u_*_75`->`u_*_78`
+    # while the public api is stable. The churn is not on the exported surface, so
+    # scoping must keep it non-breaking — a breaking verdict here would be a false
+    # positive on every routine versioned-scheme upgrade.
+    old = _snap("1", functions=[_fn("public_api")]
+                + [_fn(f"u_{b}_75", vis=Visibility.ELF_ONLY) for b in ("a", "b", "c", "d")])
+    new = _snap("2", functions=[_fn("public_api")]
+                + [_fn(f"u_{b}_78", vis=Visibility.ELF_ONLY) for b in ("a", "b", "c", "d")])
+    return old, new
+
+
+def _bundle_sibling_soname_churn() -> tuple[AbiSnapshot, AbiSnapshot]:
+    # A multi-.so bundle (P20): the public library's api is stable, but symbols
+    # from a private sibling library carrying its SONAME version (`_1_5_5` ->
+    # `_1_5_7`) churn. Pairing across the bundle must not turn sibling-internal
+    # (hidden) churn into a public break.
+    old = _snap("1", functions=[_fn("zstd_compress")]
+                + [_fn(f"pool_{b}_1_5_5", vis=Visibility.HIDDEN) for b in ("a", "b", "c")])
+    new = _snap("2", functions=[_fn("zstd_compress")]
+                + [_fn(f"pool_{b}_1_5_7", vis=Visibility.HIDDEN) for b in ("a", "b", "c")])
+    return old, new
+
+
+def _versioned_scheme_public_churn() -> tuple[AbiSnapshot, AbiSnapshot]:
+    # The same `_75`->`_78` bump on the *public* surface genuinely removes every
+    # exported symbol (renamed). Scoping must keep it breaking: the
+    # versioned-scheme advisory/collapse is opt-in and must never silently hide a
+    # real public removal under scoping.
+    old = _snap("1", functions=[_fn(f"u_{b}_75") for b in ("a", "b", "c", "d")])
+    new = _snap("2", functions=[_fn(f"u_{b}_78") for b in ("a", "b", "c", "d")])
+    return old, new
+
+
 # NOTE on corpus scope: every case here is one the *current* implementation
 # already gets right, so a correct build keeps a clean 0/0 sheet (the gate's
 # core invariant). Two tempting cases were deliberately left out because their
@@ -275,6 +316,9 @@ CORPUS: list[Case] = [
     Case("hidden_function_signature_changed", True, _hidden_function_signature_changed),
     Case("private_header_type_change", True, _private_header_type_change),
     Case("same_stdlib_internal_stl_churn", True, _same_stdlib_internal_stl_churn),
+    # field-eval F2: versioned-symbol scheme (P08) + multi-.so bundle (P20).
+    Case("versioned_scheme_internal_churn", True, _versioned_scheme_internal_churn),
+    Case("bundle_sibling_soname_churn", True, _bundle_sibling_soname_churn),
     # Cross-implementation stdlib: one real-break + one internal-noise guard.
     # The full breadth (libc++ ABI version, MSVC↔libstdc++, pointer-held-is-safe,
     # the symbol-only fallback and false-positive guards) lives in the detector's
@@ -288,6 +332,7 @@ CORPUS: list[Case] = [
     Case("public_return_type_changed", False, _public_return_type_changed),
     Case("public_variable_removed", False, _public_variable_removed),
     Case("leaked_internal_via_public_api", False, _leaked_internal_via_public_api),
+    Case("versioned_scheme_public_churn", False, _versioned_scheme_public_churn),
 ]
 
 

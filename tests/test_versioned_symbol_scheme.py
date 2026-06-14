@@ -227,3 +227,92 @@ def test_likely_renamed_versioned_pairs_collapse():
             for b in ("a", "b", "c", "d")]
     adv, matched = analyze_versioned_scheme(rows)
     assert adv is not None and len(matched) == 4
+
+
+# --- G15 token vocabulary: real mangled names (libc++, Abseil, libstdc++) -----
+# These use the *real* in-repo demangler (no monkeypatch) on names emitted by a
+# compiler, so they pin that the inline-namespace recogniser handles each
+# ecosystem's versioned-namespace stamp, not just ICU's icu_NN.
+
+
+def _cpp_pairs(old_syms, new_syms):
+    from abicheck.checker_types import Change, ChangeKind
+    rows = [Change(kind=ChangeKind.FUNC_REMOVED, symbol=s, description="") for s in old_syms]
+    rows += [Change(kind=ChangeKind.FUNC_ADDED, symbol=s, description="") for s in new_syms]
+    return rows
+
+
+def test_libcxx_inline_namespace_scheme_collapses():
+    # libc++ stamps every symbol with std::__1:: (bumped to std::__2:: on an ABI
+    # rev): _ZNSt3__1...  ->  _ZNSt3__2...
+    from abicheck.versioned_symbol_scheme import analyze_versioned_scheme
+    old = ["_ZNSt3__14betaEl", "_ZNSt3__15alphaEi", "_ZNSt3__15gammaEi"]
+    new = ["_ZNSt3__24betaEl", "_ZNSt3__25alphaEi", "_ZNSt3__25gammaEi"]
+    adv, matched = analyze_versioned_scheme(_cpp_pairs(old, new))
+    assert adv is not None
+    assert len(matched) == 6  # 3 removed + 3 added
+
+
+def test_abseil_lts_namespace_scheme_collapses():
+    # Abseil's inline namespace is lts_<date> (absl::lts_20240722:: -> lts_20250127::).
+    from abicheck.versioned_symbol_scheme import analyze_versioned_scheme
+    old = ["_ZN4absl12lts_202407223MapEi", "_ZN4absl12lts_202407226ReduceEl",
+           "_ZN4absl12lts_202407227ComputeEi"]
+    new = ["_ZN4absl12lts_202501273MapEi", "_ZN4absl12lts_202501276ReduceEl",
+           "_ZN4absl12lts_202501277ComputeEi"]
+    adv, matched = analyze_versioned_scheme(_cpp_pairs(old, new))
+    assert adv is not None
+    assert len(matched) == 6
+
+
+def test_libstdcxx_versioned_namespace_scheme_collapses():
+    # libstdc++ built --enable-symvers=gnu-versioned-namespace uses std::__7::,
+    # bumped to std::__8:: across a release.
+    from abicheck.versioned_symbol_scheme import analyze_versioned_scheme
+    old = ["_ZNSt3__74betaEl", "_ZNSt3__75alphaEi", "_ZNSt3__75gammaEi"]
+    new = ["_ZNSt3__84betaEl", "_ZNSt3__85alphaEi", "_ZNSt3__85gammaEi"]
+    adv, matched = analyze_versioned_scheme(_cpp_pairs(old, new))
+    assert adv is not None
+    assert len(matched) == 6
+
+
+# --- G15: SONAME cross-check + collapse-count reporting ------------------------
+
+
+def _versioned_advisory(result):
+    for c in result.changes:
+        if (c.kind.value if hasattr(c.kind, "value") else c.kind) == "versioned_symbol_scheme_detected":
+            return c
+    return None
+
+
+def test_collapse_reports_version_rename_count_in_summary():
+    # G15 (3): when the preset collapses the rename pairs, the advisory carries
+    # the collapse count so the summary can show "N version-renames collapsed".
+    old, new = _snap("75.1", "75"), _snap("78.3", "78")
+    collapsed = compare(old, new, collapse_versioned_symbols=True)
+    adv = _versioned_advisory(collapsed)
+    assert adv is not None
+    assert adv.caused_count == len(_BASES)
+    assert "version-renames collapsed" in adv.description
+
+
+def test_soname_bump_surfaces_relink_signal_even_when_collapsed():
+    # G15 (2): a versioned scheme normally bumps the SONAME too. The collapse must
+    # not hide that dependents have to relink against the new shared object.
+    old = AbiSnapshot(library="libicuuc.so.75", version="75.1")
+    old.functions = [_fn(f"u_{b}_75", pt) for b, pt in _BASES.items()]
+    new = AbiSnapshot(library="libicuuc.so.78", version="78.3")
+    new.functions = [_fn(f"u_{b}_78", pt) for b, pt in _BASES.items()]
+    adv = _versioned_advisory(compare(old, new, collapse_versioned_symbols=True))
+    assert adv is not None
+    assert "SONAME" in adv.description and "relink" in adv.description
+    assert "libicuuc.so.75 -> libicuuc.so.78" in adv.description
+
+
+def test_no_soname_note_when_soname_unchanged():
+    # Same SONAME on both sides → no spurious relink note.
+    old, new = _snap("75.1", "75"), _snap("78.3", "78")  # both library="libicuuc.so"
+    adv = _versioned_advisory(compare(old, new, collapse_versioned_symbols=True))
+    assert adv is not None
+    assert "relink" not in adv.description

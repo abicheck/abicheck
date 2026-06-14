@@ -769,6 +769,17 @@ class DemoteUnreachableInternalChurn:
         return changes
 
 
+def _scheme_soname(snap: AbiSnapshot) -> str:
+    """Best-effort SONAME for the versioned-scheme cross-check.
+
+    Prefers the recorded ELF ``DT_SONAME``; falls back to the snapshot's library
+    name (often the soname itself, e.g. ``libicui18n.so.75``) so the relink check
+    still works on snapshots dumped without ELF metadata.
+    """
+    elf = getattr(snap, "elf", None)
+    return (getattr(elf, "soname", "") or snap.library or "").strip()
+
+
 class DetectVersionedSymbolScheme:
     """Emit one advisory ``versioned_symbol_scheme_detected`` finding when most
     removed symbols reappear as added symbols differing only by a version token
@@ -794,11 +805,34 @@ class DetectVersionedSymbolScheme:
         advisory, matched = analyze_versioned_scheme(changes)
         if advisory is None:
             return changes
+        # G15: cross-check the version token against the SONAME. A versioned
+        # scheme normally bumps the SONAME too (libicui18n.so.75 -> .78); the
+        # rename churn is cosmetic, but a new SONAME still means dependents must
+        # **relink** against the new shared object. Surface that relink signal on
+        # the advisory so the collapse never hides it.
+        old_so, new_so = _scheme_soname(ctx.old), _scheme_soname(ctx.new)
+        if old_so and new_so and old_so != new_so:
+            advisory.description += (
+                f" The SONAME also changed ({old_so} -> {new_so}): a new shared-object "
+                "version, so dependents must relink against the new library even though "
+                "the symbol churn is a version-rename."
+            )
         if ctx.suppression is not None and ctx.suppression.is_suppressed(advisory):
             ctx.suppressed.append(advisory)
         else:
             changes.append(advisory)
         if ctx.collapse_versioned_symbols and matched:
+            # G15: report the collapse count in the summary. caused_count is the
+            # number of old-side version-rename pairs reclassified as compatible;
+            # the reporter renders it ("N version-renames collapsed").
+            old_side_kinds = (
+                ChangeKind.FUNC_REMOVED, ChangeKind.FUNC_REMOVED_ELF_ONLY,
+                ChangeKind.VAR_REMOVED, ChangeKind.FUNC_LIKELY_RENAMED,
+            )
+            advisory.caused_count = sum(1 for c in matched if c.kind in old_side_kinds)
+            advisory.description += (
+                f" [{advisory.caused_count} version-renames collapsed as compatible]"
+            )
             matched_ids = {id(c) for c in matched}
             ctx.suppressed.extend(matched)
             kept = [c for c in changes if id(c) not in matched_ids]
