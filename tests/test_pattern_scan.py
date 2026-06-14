@@ -186,11 +186,13 @@ def test_template_definition_not_flagged_as_instantiation(definition: str) -> No
     [
         "obj.template foo<int>();",
         "ptr->template bar<int>();",
+        "typename Alloc::template rebind<U>::other a;",
+        "Alloc::template rebind<U> r;",
     ],
 )
 def test_dependent_template_disambiguator_not_flagged(disambiguator: str) -> None:
-    # `x.template f<...>()` / `p->template ...` is a member-access disambiguator,
-    # not an explicit instantiation.
+    # `x.template f<...>()`, `p->template ...`, and `Alloc::template rebind<...>`
+    # are dependent-name disambiguators, not explicit instantiations.
     assert PatternKind.EXPLICIT_TEMPLATE_INSTANTIATION not in _kinds(disambiguator)
 
 
