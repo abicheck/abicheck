@@ -38,6 +38,8 @@ def _meta(
     exports: list[str] | None = None,
     imports: list[str] | None = None,
     export_versions: dict[str, str] | None = None,
+    import_versions: dict[str, str] | None = None,
+    versions_required: dict[str, list[str]] | None = None,
 ) -> ElfMetadata:
     """Construct a minimal ElfMetadata for testing."""
     syms = []
@@ -51,12 +53,13 @@ def _meta(
         )
     imps = []
     for name in imports or []:
-        imps.append(ElfImport(name=name))
+        imps.append(ElfImport(name=name, version=(import_versions or {}).get(name, "")))
     return ElfMetadata(
         soname=soname or "",
         needed=needed or [],
         symbols=syms,
         imports=imps,
+        versions_required=versions_required or {},
     )
 
 
@@ -244,6 +247,115 @@ class TestIntraDepRemoved:
         assert len(intra_removed) == 1
         assert intra_removed[0].symbol == "onedal_internal_op"
         assert intra_removed[0].consumer_library == "libalgo.so"
+
+    @pytest.mark.parametrize(
+        ("symbol", "version"),
+        [
+            ("syscall", "GLIBC_2.2.5"),
+            ("stdout", "GLIBC_2.2.5"),
+            ("_ZdlPvm", "CXXABI_1.3"),  # operator delete(void*, unsigned long)
+            ("_ZSt9terminatev", "GLIBCXX_3.4"),
+            ("GOMP_parallel", "GOMP_4.0"),
+            ("omp_get_thread_num", "OMP_1.0"),
+        ],
+    )
+    def test_versioned_system_import_is_not_intra_dep(
+        self, symbol: str, version: str
+    ) -> None:
+        # Field-derived oneDAL fix: an import bound to a C/C++ runtime or
+        # toolchain version namespace is external by construction and must not
+        # produce bundle_intra_dep_removed — even when its symbol name is not
+        # on the static DEFAULT_SYSTEM_SYMBOLS allow-list (syscall/stdout are
+        # not, _ZdlPvm is not std::-mangled).
+        new = _snapshot(
+            {
+                "libcore.so": _meta(soname="libcore.so.1", exports=["dummy"]),
+                "libalgo.so": _meta(
+                    soname="libalgo.so.1",
+                    needed=["libcore.so.1"],
+                    imports=[symbol],
+                    import_versions={symbol: version},
+                ),
+            }
+        )
+        result = compare_bundle(new, new, per_library_results=[])
+        assert not any(
+            f.kind == ChangeKind.BUNDLE_INTRA_DEP_REMOVED
+            for f in result.bundle_findings
+        )
+
+    def test_unversioned_internal_sibling_import_still_fires(self) -> None:
+        # The flip side of the version filter: an *unversioned* import that no
+        # sibling provides is still a dropped intra-bundle dependency.
+        new = _snapshot(
+            {
+                "libcore.so": _meta(soname="libcore.so.1", exports=["dummy"]),
+                "libalgo.so": _meta(
+                    soname="libalgo.so.1",
+                    needed=["libcore.so.1"],
+                    imports=["onedal_internal_op"],  # version="" → internal
+                ),
+            }
+        )
+        result = compare_bundle(new, new, per_library_results=[])
+        intra_removed = [
+            f
+            for f in result.bundle_findings
+            if f.kind == ChangeKind.BUNDLE_INTRA_DEP_REMOVED
+        ]
+        assert len(intra_removed) == 1
+        assert intra_removed[0].symbol == "onedal_internal_op"
+
+    def test_version_required_from_external_soname_is_skipped(self) -> None:
+        # Provider evidence half of the fix: a versioned import whose version
+        # is declared (.gnu.version_r) against a soname that does NOT resolve
+        # inside the bundle is external — even when the version namespace is
+        # not a well-known toolchain prefix (here a third-party "FOO_" tag).
+        new = _snapshot(
+            {
+                "libcore.so": _meta(soname="libcore.so.1", exports=["dummy"]),
+                "libalgo.so": _meta(
+                    soname="libalgo.so.1",
+                    needed=["libcore.so.1", "libthirdparty.so.2"],
+                    imports=["tp_init"],
+                    import_versions={"tp_init": "FOO_1.0"},
+                    # version required from an external (non-bundle) soname
+                    versions_required={"libthirdparty.so.2": ["FOO_1.0"]},
+                ),
+            }
+        )
+        result = compare_bundle(new, new, per_library_results=[])
+        assert not any(
+            f.kind == ChangeKind.BUNDLE_INTRA_DEP_REMOVED
+            for f in result.bundle_findings
+        )
+
+    def test_version_required_from_intra_sibling_still_fires(self) -> None:
+        # Contrast with the previous test: when the required version resolves
+        # against an *intra-bundle* sibling soname but that sibling no longer
+        # exports the symbol, it IS a dropped intra-bundle dependency.
+        new = _snapshot(
+            {
+                "libcore.so": _meta(
+                    soname="libcore.so.1", exports=["dummy"]
+                ),  # provider for core_op gone
+                "libalgo.so": _meta(
+                    soname="libalgo.so.1",
+                    needed=["libcore.so.1"],
+                    imports=["core_op"],
+                    import_versions={"core_op": "LIBCORE_1.0"},
+                    versions_required={"libcore.so.1": ["LIBCORE_1.0"]},
+                ),
+            }
+        )
+        result = compare_bundle(new, new, per_library_results=[])
+        intra_removed = [
+            f
+            for f in result.bundle_findings
+            if f.kind == ChangeKind.BUNDLE_INTRA_DEP_REMOVED
+        ]
+        assert len(intra_removed) == 1
+        assert intra_removed[0].symbol == "core_op"
 
 
 # ---------------------------------------------------------------------------
@@ -1453,7 +1565,9 @@ class TestCompareReleaseBundleE2E:
     parsing path.
     """
 
-    def test_compare_release_emits_bundle_findings_by_default(self, tmp_path: Path) -> None:
+    def test_compare_release_emits_bundle_findings_by_default(
+        self, tmp_path: Path
+    ) -> None:
         # libcore drops core_mul between old and new; libalgo still
         # imports it. Bundle layer must catch this; the CLI must surface
         # the bundle_verdict and bundle_findings in JSON output.

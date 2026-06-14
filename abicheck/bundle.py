@@ -762,8 +762,13 @@ def _detect_intra_dep_removed(
     """Find imports in the new bundle that no sibling provides.
 
     Excludes imports satisfied by system libraries (``libc``, ``libstdc++``,
-    etc.) since they are out of bundle scope by design. Excludes weak
-    imports (linker treats unresolved weak as 0/NULL at runtime).
+    etc.) since they are out of bundle scope by design. Classification uses
+    provider/version evidence first (:func:`_import_is_external`: a symbol
+    bound to a ``GLIBC_``/``CXXABI_``/… version namespace, or required from a
+    soname that does not resolve inside the bundle, is external) and the
+    symbol-name allow-list (``DEFAULT_SYSTEM_SYMBOLS`` / ``_looks_system_*``)
+    as a fallback. Excludes weak imports (linker treats unresolved weak as
+    0/NULL at runtime).
     A consumer's import is treated as system-provided when every DT_NEEDED
     edge it carries that resolves *outside* the bundle is in the
     ``system_providers`` allow-list (built-in plus user-extended via
@@ -781,6 +786,20 @@ def _detect_intra_dep_removed(
                 continue
             consumer_meta = new.metadata.get(consumer.library)
             if consumer_meta is None:
+                continue
+            # Version/provider evidence (field-derived oneDAL fix): an import
+            # bound to a system version namespace (``syscall@GLIBC_2.2.5``,
+            # ``stdout@GLIBC_2.2.5``, ``_ZdlPvm@CXXABI_1.3``) — or required
+            # from a library whose soname does not resolve inside the bundle —
+            # is external by construction. It can never be a *dropped
+            # intra-bundle* dependency, so skip it regardless of symbol-name
+            # shape. An unversioned (or bundle-versioned) sibling import is
+            # NOT skipped here and still produces the finding.
+            if _import_is_external(
+                consumer,
+                consumer_meta,
+                new.resolution.intra_needed.get(consumer.library, ()),
+            ):
                 continue
             # Note: an earlier version of this code short-circuited here
             # when consumer had no intra-bundle DT_NEEDED edges. That
@@ -1495,6 +1514,66 @@ def _looks_system_symbol(name: str) -> bool:
         return True  # std:: mangled
     if name.startswith("_ZNK") and "St" in name[:8]:
         return True
+    return False
+
+
+# Symbol-version namespaces owned by the C/C++ runtime and toolchain. A symbol
+# imported with one of these required versions is satisfied by libc /
+# libstdc++ / libgcc / libgomp — never by a sibling inside the analysed
+# bundle — so it must not be reported as a dropped intra-bundle dependency.
+# This is the version-evidence half of the field-derived oneDAL fix
+# (``syscall@GLIBC_*``, ``stdout@GLIBC_*``, ``_ZdlPvm@CXXABI_*``).
+_SYSTEM_VERSION_PREFIXES: tuple[str, ...] = (
+    "GLIBC_",
+    "GLIBCXX_",
+    "CXXABI_",
+    "GCC_",
+    "LIBGCC_",
+    "LIBC_",
+    "GOMP_",
+    "OMP_",
+    "GFORTRAN_",
+    "GLIBCABI_",
+)
+
+
+def _looks_system_version(version: str) -> bool:
+    """True when a required symbol version is a C/C++ runtime/toolchain namespace."""
+    return any(version.startswith(prefix) for prefix in _SYSTEM_VERSION_PREFIXES)
+
+
+def _import_is_external(
+    consumer: ConsumerEntry,
+    consumer_meta: ElfMetadata,
+    intra_needed: Iterable[str],
+) -> bool:
+    """Classify an import as external using version + provider evidence.
+
+    An import is external — and therefore can never be a *dropped
+    intra-bundle* dependency — when either:
+
+    1. its required symbol version is a system/toolchain namespace
+       (``GLIBC_``, ``GLIBCXX_``, ``CXXABI_``, ``GCC_``, …), or
+    2. that required version is declared (via ``.gnu.version_r``) against a
+       DT_NEEDED soname that does **not** resolve inside the bundle.
+
+    Unversioned imports (``version == ""``) return ``False`` so an
+    unversioned internal sibling import still produces a finding. This is the
+    field-derived oneDAL fix: classify by provider/version evidence, not only
+    by symbol-name allow-lists.
+    """
+    version = consumer.version
+    if not version:
+        return False
+    if _looks_system_version(version):
+        return True
+    # Provider evidence: which library does .gnu.version_r say this version
+    # comes from? If that soname is not an intra-bundle sibling, the import is
+    # resolved from outside the bundle.
+    intra = set(intra_needed)
+    for soname, versions in consumer_meta.versions_required.items():
+        if version in versions and soname not in intra:
+            return True
     return False
 
 
