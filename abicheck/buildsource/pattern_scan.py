@@ -147,6 +147,17 @@ _RULES: tuple[_Rule, ...] = (
         "explicit struct packing changes record layout",
     ),
     _Rule(
+        PatternKind.PRAGMA_PACK,
+        PatternCategory.LAYOUT,
+        # Macro-friendly pragma spelling, e.g. `_Pragma("pack(push, 1)")`.
+        # This intentionally runs on string-preserved text because the pragma
+        # payload is syntactically a string literal.
+        re.compile(r'_Pragma\s*\(\s*"(?:[^"\\]|\\.)*\bpack\b'),
+        True,
+        "explicit struct packing changes record layout",
+        scan_strings=True,
+    ),
+    _Rule(
         PatternKind.ALIGNAS,
         PatternCategory.LAYOUT,
         re.compile(r"\b(?:alignas|_Alignas)\s*\("),
@@ -239,6 +250,22 @@ _RULES: tuple[_Rule, ...] = (
         PatternKind.VIRTUAL_METHOD,
         PatternCategory.VTABLE,
         re.compile(r"\bvirtual\b"),
+        True,
+        "virtual member affects vtable layout and dispatch",
+    ),
+    _Rule(
+        PatternKind.VIRTUAL_METHOD,
+        PatternCategory.VTABLE,
+        # C++11 override-only declarations are virtual even without the
+        # `virtual` keyword. The delimiter guard avoids double-counting the
+        # common `virtual void f() override;` spelling and handles one-line
+        # class bodies (`struct D { void f() override; };`).
+        re.compile(
+            r"(?m)(?:^|[;{}])\s*(?![^\n;{}]*\bvirtual\b)"
+            r"[^\n;{}()]*\([^;\n{}]*\)\s*"
+            r"(?:const\s*)?(?:noexcept(?:\s*\([^)]*\))?\s*)?(?:&{1,2}\s*)?"
+            r"\boverride\b"
+        ),
         True,
         "virtual member affects vtable layout and dispatch",
     ),

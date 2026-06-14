@@ -49,6 +49,7 @@ def _kinds(text: str) -> set[PatternKind]:
     [
         ("#pragma pack(1)", PatternKind.PRAGMA_PACK),
         ("#  pragma   pack ( push, 1 )", PatternKind.PRAGMA_PACK),
+        ('_Pragma("pack(push, 1)")', PatternKind.PRAGMA_PACK),
         ("struct alignas(16) S { int x; };", PatternKind.ALIGNAS),
         ("_Alignas(8) char buf[8];", PatternKind.ALIGNAS),
         (
@@ -109,6 +110,7 @@ def _kinds(text: str) -> set[PatternKind]:
         ),
         ("inline namespace v1 { struct S {}; }", PatternKind.INLINE_NAMESPACE),
         ("struct Base { virtual void f(); };", PatternKind.VIRTUAL_METHOD),
+        ("struct Derived : Base { void f() override; };", PatternKind.VIRTUAL_METHOD),
         ("void* operator new(size_t n);", PatternKind.OPERATOR_NEW_DELETE),
         ("void operator delete(void* p) noexcept;", PatternKind.OPERATOR_NEW_DELETE),
         ("template class Vector<int>;", PatternKind.EXPLICIT_TEMPLATE_INSTANTIATION),
@@ -291,6 +293,10 @@ def test_line_continuation_in_line_comment_stays_commented() -> None:
 def test_line_comment_without_continuation_resumes_code() -> None:
     # Without the trailing backslash, the next line is real code again.
     assert PatternKind.VIRTUAL_METHOD in _kinds("// note\nvirtual void f();")
+
+
+def test_plain_override_identifier_not_flagged_as_virtual_method() -> None:
+    assert PatternKind.VIRTUAL_METHOD not in _kinds("int override = 0;")
 
 
 # ── Escalation triggers + categories ─────────────────────────────────────────
