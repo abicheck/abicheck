@@ -51,11 +51,14 @@ authority rule (L0–L2 stay authoritative for `BREAKING`).
 ## Design (phases)
 
 ### Phase 1 — Compiler-free PR pre-scan (G19.1)
-- New `abicheck/buildsource/pattern_scan.py`: stdlib-regex scanner over changed +
-  public files for the ADR-035 D2 construct list; emits normalized advisory
-  facts + escalation triggers. Tree-sitter is a pluggable later backend.
-- Extend `buildsource/include_graph.py`: per-TU ABI-macro-value capture and
-  private/generated-header-leak detection when a compile DB is present.
+- **DONE** — New `abicheck/buildsource/pattern_scan.py`: stdlib-regex scanner over
+  changed + public files for the ADR-035 D2 construct list; emits normalized
+  advisory facts + per-kind escalation triggers (`PatternFact`/
+  `PatternScanResult`/`EscalationTrigger`), with mandatory coverage reporting and
+  no compile DB / compiler. Tree-sitter is a pluggable later backend.
+  Tests: `tests/test_pattern_scan.py`.
+- **TODO** — Extend `buildsource/include_graph.py`: per-TU ABI-macro-value capture
+  and private/generated-header-leak detection when a compile DB is present.
 
 ### Phase 2 — Cross-source validation engine (G19.2)
 - New `abicheck/buildsource/crosscheck.py` consuming one merged snapshot.
