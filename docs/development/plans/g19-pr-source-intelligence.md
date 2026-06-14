@@ -198,10 +198,13 @@ not the basic flow.
   -o, --output PATH        write the merged snapshot/result
 ```
 
-Behaviour: `scan` resolves inputs → `dump`s L0–L2 → runs the always-on tier →
-computes a risk score + POI set → escalates L3/L4/L5 within budget → (if
-`--baseline`) `compare`s → emits one `ScanResult`. `--estimate` stops after the
-cost probe; `--audit` runs intra-version (ignores `--baseline`).
+Behaviour (deterministic by default): `scan` resolves inputs → `dump`s L0–L2 →
+runs the always-on tier → runs the **pinned** level (from `--mode`'s preset or an
+explicit `--source-method`/`--depth`), POI-focused (D7) → (if `--baseline`)
+`compare`s → emits one `ScanResult`. Risk scoring escalates the level **only** when
+`--source-method auto` is set (opt-in); a `--budget`, if set, is a failure guard
+that errors on overflow and never shrinks the pinned scope. `--estimate` stops
+after the cost probe; `--audit` runs intra-version (ignores `--baseline`).
 
 Convenience subcommands (thin wrappers, same engine):
 `abicheck scan estimate …` ≡ `--estimate`; `abicheck scan audit …` ≡ `--audit`.
@@ -292,8 +295,10 @@ class ScanRequest:
     sources: Path | None = None
     inputs_pack: Path | None = None
     baseline: str | Path | None = None
-    mode: ScanMode = ScanMode.PR            # PR | PR_DEEP | BASELINE | AUDIT
-    depth_cap: EvidenceDepth | None = None    # L-axis cap (see DataLayer); None = auto
+    mode: ScanMode = ScanMode.PR            # PR | PR_DEEP | BASELINE | AUDIT (fixed preset)
+    # Pick the level on either axis (1:1); SourceMethod.AUTO = opt-in risk-driven.
+    source_method: SourceMethod | None = None   # S0..S6 | AUTO; None = use mode preset
+    depth: EvidenceLayer | None = None          # same target on the L-axis; None = use mode preset
     changed_paths: list[str] = field(default_factory=list)
     budget: Budget = Budget()               # total_timeout, max_tus, partial_ok
     risk_rules: RiskRules | None = None
@@ -301,7 +306,8 @@ class ScanRequest:
 
 @dataclass(frozen=True)
 class CostEstimate:
-    layer: EvidenceLayer               # L-axis: L2_HEADER..L5_SOURCE_GRAPH
+    method: SourceMethod               # S-axis: S0..S6
+    layer: EvidenceLayer               # L-axis it populates: L2_HEADER..L5_SOURCE_GRAPH
     tus: int
     est_seconds: float
     cache_hit_rate: float
@@ -309,7 +315,8 @@ class CostEstimate:
 
 @dataclass(frozen=True)
 class LayerResult:
-    layer: EvidenceLayer
+    method: SourceMethod               # which S-method ran
+    layer: EvidenceLayer               # which L-layer it populated
     coverage: LayerCoverage            # reuse buildsource.model
     facts: int
     elapsed_s: float
@@ -334,17 +341,18 @@ def run_audit(req: ScanRequest) -> ScanResult: ...               # mode=AUDIT
 
 ### Per-layer provider protocol — `abicheck/buildsource/`
 
-`EvidenceLayer` / `EvidenceDepth` are L-axis enums aligned to the existing
-`buildsource.model.DataLayer` (L3_BUILD/L4_SOURCE_ABI/L5_SOURCE_GRAPH), plus an
-`L2_HEADER` member for the always-on pre-scan tier — **no `S0..S6` type**, per
-ADR-035 D1. Every provider (`pattern_scan`, `preprocessor`, L3 build, L4 replay,
-L5 graph, `crosscheck`) implements one interface, modelled on the ADR-032
-`DataExtractor`, so layers are independently runnable (ADR-033 D1) and
-external/build-emitted providers (D5) drop in unchanged:
+Two enums, one per axis (ADR-035 D1): `EvidenceLayer` is the L-axis (aligned to
+`buildsource.model.DataLayer` — L2_HEADER/L3_BUILD/L4_SOURCE_ABI/L5_SOURCE_GRAPH,
+the authority axis), and **`SourceMethod` is the S-axis** (`S0..S6` + `AUTO`) — a
+*distinct* enum, not banned and not collapsed onto `EvidenceLayer` (the S→L map is
+lossy: S1≠S2 both touch L3, S3 has no L). A provider declares both the method it
+implements and the layer it populates, so a request that pins `source_method=S2`
+runs the right provider:
 
 ```python
 class LayerProvider(Protocol):
-    layer: EvidenceLayer
+    method: SourceMethod                 # S-axis: which source-analysis method
+    layer: EvidenceLayer                 # L-axis: which evidence layer it populates
     def capabilities(self) -> ProviderCapabilities: ...
     def estimate(self, ctx: ScanContext) -> CostEstimate: ...
     def run(self, ctx: ScanContext, poi: PointsOfInterest) -> LayerFacts: ...
