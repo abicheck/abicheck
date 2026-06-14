@@ -112,20 +112,23 @@ The **authority rule (ADR-028 D3) is preserved**: whatever S-method produced a
 fact, an L3–L5 fact never alone decides a shipped `BREAKING` verdict — it
 explains, localizes, and adds confidence.
 
-### D2. Add an always-on, compiler-free PR pre-scan tier (extends L2/L5)
+### D2. Add an always-on PR pre-scan tier (extends L2/L5)
 
-A new cheap tier runs on every PR over **changed + public** files, needing no
-compile DB and no compiler:
+A new cheap tier runs on every PR over **changed + public** files. It has two
+parts with different requirements:
 
-- **Pattern pre-scan** (new `buildsource/pattern_scan.py`): regex/lexical scan
+- **Pattern pre-scan** (new `buildsource/pattern_scan.py`): the **compiler-free**
+  part — needs no compile DB and no compiler. A regex/lexical scan
   for ABI-risk constructs — `#pragma pack`, `alignas`, `__attribute__((packed|
   visibility))`, `__declspec(dllexport|dllimport)`, `extern "C"`, calling-
   convention macros, explicit / `extern` template instantiation, `inline
   namespace`, public virtual methods, `operator new`/`delete`. Emits advisory
   facts and escalation triggers, never a final verdict. Starts as a stdlib
   regex scanner (no new dependency); Tree-sitter is an optional later backend.
-- **Preprocessor pre-scan** (extends `buildsource/include_graph.py`): when a
-  compile DB is present, capture per-TU macro values for ABI-affecting macros
+- **Preprocessor pre-scan** (extends `buildsource/include_graph.py`): the
+  conditional part — runs **only when a compile DB and a preprocessor (`clang
+  -E`) are available** (reported as skipped otherwise). Captures per-TU macro
+  values for ABI-affecting macros
   and detect *public-header-includes-private/generated-header* leaks and
   per-TU macro-value divergence for the same public type.
 
@@ -283,7 +286,7 @@ and CI wrappers all drive the same engine. Layering, top-down:
 |---|---|---|
 | CLI | `cli_scan.py`, existing `cli*.py` | argv → `ScanRequest`; render report/exit code |
 | MCP | `mcp_server.py` | expose `scan`/`audit`/`estimate` as agent tools |
-| Service | `service.py` (extend) | `run_scan(ScanRequest) -> ScanResult`; orchestrates classify → POI → escalate → collect → cross-check → report |
+| Service | `service.py` (extend) | `run_scan(ScanRequest) -> ScanResult`; orchestrates classify → POI → run pinned level (auto-escalate only if opted in) → collect → cross-check → report |
 | Levels | `buildsource/` providers | one provider per level, uniform protocol |
 | Facts | `buildsource/model.py`, `source_abi.py`, `build_evidence.py` | normalized fact schema (canonical I/O of every provider) |
 
@@ -317,13 +320,15 @@ clean build; pattern/compile-DB scans `<1–5%`). These are starting defaults;
 
 | Project scale | PR default | Baseline default |
 |---|---|---|
-| **Small** (≲50 TUs, builds in seconds) | full source analysis every PR is fine | full |
-| **Medium** (~50–500 TUs) | always-on tier + risk/POI-targeted L4; budget cap | full (nightly or on release) |
-| **Large** (≳500 TUs, or template/header-heavy) | always-on tier + cross-checks + POI-targeted L4 within budget; lean on cache | full on release only; warm cache from it |
-| **Header-only / template-heavy** | AST cost is header-dominated — prefer full L4 if small, else POI-targeted | full |
+| **Small** (≲50 TUs, builds in seconds) | pin full source (S6) every PR | full |
+| **Medium** (~50–500 TUs) | always-on tier + pin POI-targeted S5 | full (nightly or on release) |
+| **Large** (≳500 TUs, or template/header-heavy) | always-on tier + cross-checks + pin POI-targeted S5; lean on cache | full on release only; warm cache from it |
+| **Header-only / template-heavy** | AST cost is header-dominated — pin full S6 if small, else POI-targeted S5 | full |
 
-Rule of thumb: if `scan --estimate` puts full L4 under the PR time budget, run it;
-otherwise run the always-on tier always and let risk score + POI escalate.
+These are **pinned per-mode defaults** (deterministic), not risk-varying. Rule of
+thumb: if `scan --estimate` puts full L4/S6 under your time budget, pin it;
+otherwise pin a cheaper level (S5/S3). `--source-method auto` lets risk + POI pick
+the level for local/dev, but pin an explicit level for reproducible CI gates.
 
 ---
 
@@ -359,8 +364,10 @@ deeper signal as the maintainer opts in:
 
 **Positive**
 
-- A real always-on PR signal (D2/D3) catches ABI-affecting flag/macro changes,
-  private-header leaks, and risky source patterns without a build or a compiler.
+- A real always-on PR signal (D2/D3): risky source patterns are caught with no
+  compiler at all (pattern pre-scan); ABI-affecting flag/macro changes and
+  private-header leaks are caught from the compile DB + preprocessor when those
+  are available — all without a full build.
 - The cross-check engine (D4) turns abicheck from single-source-of-truth into a
   multi-evidence system with corroboration-based confidence and better
   explanations — at low cost, since the inputs already sit in the snapshot.
