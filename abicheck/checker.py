@@ -382,6 +382,8 @@ def _apply_soname_policy(
     suppression: SuppressionList | None,
     old: AbiSnapshot,
     new: AbiSnapshot,
+    *,
+    versioned_scheme_soname_relink_required: bool = False,
 ) -> list[Change]:
     """Apply ELF version-node demotion and SONAME bump-policy check.
 
@@ -406,6 +408,11 @@ def _apply_soname_policy(
     soname_changes = check_soname_bump_policy(
         kept + verdict_redundant, _old_elf, _new_elf
     )
+    if versioned_scheme_soname_relink_required:
+        soname_changes = [
+            c for c in soname_changes
+            if c.kind is not ChangeKind.SONAME_BUMP_UNNECESSARY
+        ]
     soname_changes = _filter_soname_changes(soname_changes, suppression, suppressed)
     if soname_changes:
         kept.extend(soname_changes)
@@ -508,7 +515,17 @@ def compare(
 
     # Post-detector: SONAME bump policy check.  Runs after post-processing so
     # rename collapsing and other dedup is already settled before reading `kept`.
-    kept = _apply_soname_policy(kept, verdict_redundant, suppressed, suppression, old, new)
+    kept = _apply_soname_policy(
+        kept,
+        verdict_redundant,
+        suppressed,
+        suppression,
+        old,
+        new,
+        versioned_scheme_soname_relink_required=(
+            pp_ctx.versioned_scheme_soname_relink_required
+        ),
+    )
 
     all_unsuppressed = kept + verdict_redundant
     verdict = _compute_verdict_for(all_unsuppressed, policy, policy_file)

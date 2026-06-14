@@ -33,6 +33,7 @@ from __future__ import annotations
 import collections
 
 from abicheck.checker import Verdict, compare
+from abicheck.checker_policy import ChangeKind
 from abicheck.model import AbiSnapshot, Function, Param, Visibility
 
 # A handful of distinct C entry points, each carrying the library major version
@@ -317,10 +318,13 @@ def test_soname_bump_surfaces_relink_signal_even_when_collapsed():
     # signal is keyed off the *observed* ELF DT_SONAME, not the library name.
     old = _snap_with_soname("75.1", "75", soname="libicui18n.so.75")
     new = _snap_with_soname("78.3", "78", soname="libicui18n.so.78")
-    adv = _versioned_advisory(compare(old, new, collapse_versioned_symbols=True))
+    result = compare(old, new, collapse_versioned_symbols=True)
+    adv = _versioned_advisory(result)
+    kinds = {c.kind for c in result.changes}
     assert adv is not None
     assert "SONAME" in adv.description and "relink" in adv.description
     assert "libicui18n.so.75 -> libicui18n.so.78" in adv.description
+    assert ChangeKind.SONAME_BUMP_UNNECESSARY not in kinds
 
 
 def test_no_soname_note_when_soname_unchanged():

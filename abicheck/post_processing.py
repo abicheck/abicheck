@@ -75,6 +75,10 @@ class PipelineContext:
     kept: list[Change] = field(default_factory=list)
     # ADR-024: findings filtered out as not-public (full audit trail).
     out_of_surface: list[Change] = field(default_factory=list)
+    # Set when collapsed version-rename churn was paired with an observed
+    # SONAME change. The late SONAME policy should not call that bump
+    # unnecessary after this step has moved the matched removals out of kept.
+    versioned_scheme_soname_relink_required: bool = False
 
 
 class PipelineStep(Protocol):
@@ -814,6 +818,7 @@ class DetectVersionedSymbolScheme:
         # the advisory so the collapse never hides it.
         old_so, new_so = _scheme_soname(ctx.old), _scheme_soname(ctx.new)
         if old_so and new_so and old_so != new_so:
+            ctx.versioned_scheme_soname_relink_required = True
             advisory.description += (
                 f" The SONAME also changed ({old_so} -> {new_so}): a new shared-object "
                 "version, so dependents must relink against the new library even though "

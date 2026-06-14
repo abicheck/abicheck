@@ -294,7 +294,8 @@ def _diff_toolchains(old: BuildEvidence, new: BuildEvidence) -> list[Change]:
     old_fp = _toolchain_fingerprints(old)
     new_fp = _toolchain_fingerprints(new)
     changes: list[Change] = []
-    for lang in sorted(set(old_fp) & set(new_fp)):
+    shared_keys = set(old_fp) & set(new_fp)
+    for lang in sorted(shared_keys):
         if old_fp[lang] != new_fp[lang]:
             changes.append(
                 Change(
@@ -317,7 +318,7 @@ def _diff_toolchains(old: BuildEvidence, new: BuildEvidence) -> list[Change]:
     # authoritative and a record present on only one side is missing evidence,
     # not a swap (Codex P2). When no key is shared and the compiler *identities*
     # differ, surface the change once.
-    if not changes and not (set(old_fp) & set(new_fp)):
+    if not changes and not shared_keys:
         old_c = _toolchain_compiler_versions(old)
         new_c = _toolchain_compiler_versions(new)
         # A compiler-id swap (gcc↔clang) is unambiguous drift. A version change
