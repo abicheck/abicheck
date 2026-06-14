@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import re
+from collections import deque
 
 from .checker_policy import ChangeKind, Confidence, EvidenceTier
 from .checker_types import SYMBOL_VERSION_ALIAS_NOT_RETAINED_MARKER, Change
@@ -238,6 +239,71 @@ def _resolve_ancestor_functions(
                 type_to_mangled[tname].add(mname)
 
 
+class _SubstringMatcher:
+    """Aho-Corasick multi-substring matcher over a fixed needle set.
+
+    :meth:`find` returns every needle that occurs as a substring of the queried
+    haystack — the exact semantics of ``{n for n in needles if n in haystack}``,
+    but in O(len(haystack)) per query after an O(Σ len(needle)) build, instead
+    of O(needles × len(haystack)). Used by the affected-symbol enrichment to
+    relate many changed type names to the functions/fields that reference them
+    without the former quadratic ``any(tname in ft ...)`` cross-product.
+    """
+
+    __slots__ = ("_goto", "_fail", "_out")
+
+    def __init__(self, needles: set[str]) -> None:
+        goto: list[dict[str, int]] = [{}]
+        out: list[set[str]] = [set()]
+        for needle in needles:
+            if not needle:
+                continue
+            node = 0
+            for ch in needle:
+                nxt = goto[node].get(ch)
+                if nxt is None:
+                    nxt = len(goto)
+                    goto.append({})
+                    out.append(set())
+                    goto[node][ch] = nxt
+                node = nxt
+            out[node].add(needle)
+        # Failure links via BFS; merge each node's output with its fail target's
+        # so a single query walk collects all substrings ending at a position.
+        fail = [0] * len(goto)
+        queue: deque[int] = deque()
+        for child in goto[0].values():
+            queue.append(child)  # depth-1 nodes fail to root (already 0)
+        while queue:
+            node = queue.popleft()
+            for ch, nxt in goto[node].items():
+                queue.append(nxt)
+                f = fail[node]
+                while f and ch not in goto[f]:
+                    f = fail[f]
+                fail[nxt] = goto[f].get(ch, 0) if f or ch in goto[0] else 0
+                if out[fail[nxt]]:
+                    out[nxt] |= out[fail[nxt]]
+        self._goto = goto
+        self._fail = fail
+        self._out = out
+
+    def find(self, haystack: str) -> set[str]:
+        """Return all needles that are substrings of *haystack*."""
+        if not haystack:
+            return set()
+        goto, fail, out = self._goto, self._fail, self._out
+        node = 0
+        result: set[str] = set()
+        for ch in haystack:
+            while node and ch not in goto[node]:
+                node = fail[node]
+            node = goto[node].get(ch, 0)
+            if out[node]:
+                result |= out[node]
+        return result
+
+
 def _collect_function_type_refs(func: Function) -> set[str]:
     """Return the set of type strings referenced in *func*'s signature."""
     out: set[str] = set()
@@ -252,30 +318,44 @@ def _collect_function_type_refs(func: Function) -> set[str]:
 def _build_type_to_funcs(
     affected_types: set[str],
     old_pub: dict[str, Function],
+    matcher: _SubstringMatcher | None = None,
 ) -> tuple[dict[str, set[str]], dict[str, set[str]]]:
-    """Build type→(demangled, mangled) function name sets from public functions."""
+    """Build type→(demangled, mangled) function name sets from public functions.
+
+    The naive form scanned every affected type against every function's type
+    refs — ``any(tname in ft ...)`` nested in two loops — which is
+    O(types × functions × refs) and goes quadratic when a header refactor or a
+    versioned upgrade churns many distinct types (typedef/union/vtable churn was
+    ≈O(n²), ~7–9 s at n=4000). Replace the inner type loop with a single
+    Aho-Corasick pass per ref (:class:`_SubstringMatcher`): the set of affected
+    types occurring as a substring of a ref is found in O(len(ref)) regardless
+    of how many types are tracked, with **identical** substring semantics.
+    """
     type_to_funcs: dict[str, set[str]] = {t: set() for t in affected_types}
     type_to_mangled: dict[str, set[str]] = {t: set() for t in affected_types}
+    ac = matcher if matcher is not None else _SubstringMatcher(affected_types)
     for _mangled, func in old_pub.items():
-        func_types_used = _collect_function_type_refs(func)
-        for tname in affected_types:
-            if any(tname in ft for ft in func_types_used):
-                type_to_funcs[tname].add(func.name)
-                type_to_mangled[tname].add(func.mangled)
+        matched: set[str] = set()
+        for ft in _collect_function_type_refs(func):
+            matched |= ac.find(ft)
+        for tname in matched:
+            type_to_funcs[tname].add(func.name)
+            type_to_mangled[tname].add(func.mangled)
     return type_to_funcs, type_to_mangled
 
 
 def _build_type_embed_index(
     affected_types: set[str],
     old: AbiSnapshot,
+    matcher: _SubstringMatcher | None = None,
 ) -> dict[str, set[str]]:
     """Build a child_type→{parent_type} embedding index from old snapshot fields."""
     type_embeds: dict[str, set[str]] = {}
+    ac = matcher if matcher is not None else _SubstringMatcher(affected_types)
     for t in old.types:
         for fld in t.fields:
-            for tname in affected_types:
-                if tname in fld.type:
-                    type_embeds.setdefault(tname, set()).add(t.name)
+            for tname in ac.find(fld.type):
+                type_embeds.setdefault(tname, set()).add(t.name)
     return type_embeds
 
 
@@ -312,13 +392,18 @@ def _enrich_affected_symbols(
 
     old_pub = _public_functions(old)
 
+    # One Aho-Corasick matcher over the affected type names, shared by both
+    # index builders below — built once so neither pays the former
+    # O(types × functions) / O(types × fields) substring cross-product.
+    matcher = _SubstringMatcher(affected_types)
+
     # Build type→functions mapping from old snapshot (FIX-A Part 3).
     # Store both demangled names (for display) and mangled names (for appcompat matching).
-    type_to_funcs, type_to_mangled = _build_type_to_funcs(affected_types, old_pub)
+    type_to_funcs, type_to_mangled = _build_type_to_funcs(affected_types, old_pub, matcher)
 
     # Also check if types are embedded in struct fields used by functions
     # (e.g., Container has a Leaf field → functions taking Container* are affected by Leaf changes)
-    type_embeds = _build_type_embed_index(affected_types, old)
+    type_embeds = _build_type_embed_index(affected_types, old, matcher)
 
     # Compute transitive closure: if Leaf is in Container is in Wrapper,
     # functions using Wrapper are also affected by Leaf changes.

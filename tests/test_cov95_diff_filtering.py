@@ -681,3 +681,63 @@ def test_compute_confidence_disabled_detector_warns():
 def test_alias_marker_constant_present():
     assert isinstance(SYMBOL_VERSION_ALIAS_NOT_RETAINED_MARKER, str)
     assert SYMBOL_VERSION_ALIAS_NOT_RETAINED_MARKER
+
+
+# ── Aho-Corasick substring matcher (affected-symbol enrichment de-quadratication) ──
+
+
+def test_substring_matcher_matches_naive_semantics():
+    """`_SubstringMatcher.find` must equal the naive ``{n for n in needles if n in hay}``.
+
+    The matcher replaced an O(types × functions) ``any(tname in ft ...)`` scan in
+    the affected-symbol enrichment; the win is only valid if the substring
+    semantics are byte-for-byte identical (including cross-token matches like
+    ``Type_5`` inside ``Type_50``).
+    """
+    import random
+
+    from abicheck.diff_filtering import _SubstringMatcher
+
+    rng = random.Random(1234)
+    alphabet = "abc_:0123"
+    for _ in range(1500):
+        needles = {
+            "".join(rng.choice(alphabet) for _ in range(rng.randint(1, 5)))
+            for _ in range(rng.randint(0, 8))
+        }
+        needles.discard("")
+        hay = "".join(rng.choice(alphabet) for _ in range(rng.randint(0, 12)))
+        naive = {n for n in needles if n in hay}
+        assert _SubstringMatcher(needles).find(hay) == naive
+
+
+def test_substring_matcher_preserves_partial_and_qualified_matches():
+    from abicheck.diff_filtering import _SubstringMatcher
+
+    m = _SubstringMatcher({"Type_5", "ns::Foo", "alias_5", "U_50"})
+    assert m.find("alias_5 *") == {"alias_5"}
+    assert m.find("ns::Foo<Bar> &") == {"ns::Foo"}
+    # Cross-token substring is preserved exactly as the old `in` test did.
+    assert m.find("Type_50") == {"Type_5"}
+    assert m.find("") == set()
+    assert m.find("unrelated") == set()
+
+
+def test_build_type_to_funcs_relates_types_to_referencing_functions():
+    """End-to-end: a function taking ``Widget *`` is attributed to ``Widget``."""
+    from abicheck.diff_filtering import _build_type_to_funcs
+    from abicheck.model import Function, Param
+
+    funcs = {
+        "_Z3useP6Widget": Function(
+            name="use",
+            mangled="_Z3useP6Widget",
+            return_type="int",
+            params=[Param(name="w", type="Widget *")],
+        ),
+        "_Z4noopv": Function(name="noop", mangled="_Z4noopv", return_type="void"),
+    }
+    to_funcs, to_mangled = _build_type_to_funcs({"Widget", "Unused"}, funcs)
+    assert to_funcs["Widget"] == {"use"}
+    assert to_mangled["Widget"] == {"_Z3useP6Widget"}
+    assert to_funcs["Unused"] == set()

@@ -32,6 +32,7 @@ the work is organised.
 | 5 | Type-spelling fallback (`diff_type_spellings`) | Rebuilt a `set(...)` inside a comprehension → O(n²). | Hoist the set once. | folded into `add_remove` win |
 | 6 | Affected-symbol enrichment / ancestor closure (`diff_filtering`) | Transitive ancestor function **lists** accumulated duplicates, then re-sorted per change → effectively cubic on nested type graphs. | Use sets (dedup on union); sort once. | `nested_types` n=200: **>60 s → 0.16 s** |
 | 7 | ELF-only rename matching (`binary_fingerprint`, `diff_symbols._plausible_rename`) | O(removed × added) name-similarity scan; the name predicate re-demangled both names per pair. | Scan only the size-tolerance window via the existing size index; cache the per-name parse; cap the heuristic pass for mass-rename inputs. | `rename_churn` n=1000: **13.2 s → 2.1 s**, larger inputs bounded |
+| 8 | Affected-symbol enrichment type↔function/field mapping (`diff_filtering._build_type_to_funcs`, `_build_type_embed_index`) | `any(tname in ft ...)` nested inside the type loop and the function/field loop → O(types × functions × refs); quadratic when many distinct types churn (a header refactor or versioned upgrade). The original perf sweep only sampled these scenarios at n=500, so the exponent was never computed and the table mislabelled them "linear". | One Aho-Corasick `_SubstringMatcher` over the affected type names, built once and shared; each ref/field is matched in O(len) with **identical** substring semantics. | `typedef_churn` n=4000: **6.3 s → 0.73 s**; `union_churn` **9.1 s → 1.10 s**; `vtable_churn` **7.8 s → 1.03 s** (all now linear) |
 
 The one remaining super-linear path is the **opaque-handle size filter**
 (`diff_filtering._filter_opaque_size_changes`), O(candidates × functions). It is
@@ -129,7 +130,8 @@ reporting stages (see [Coverage beyond `compare()`](#coverage-beyond-compare)).
 | `var_churn`    | 0.06 s @ n=4000 | ~1.0 (linear) |
 | `elf_namespace`| 0.33 s @ n=4000 | ~1.1 (linear) |
 | `pe_churn` / `macho_churn` | <0.05 s @ n=500 | ~1.0 (linear) |
-| `typedef_churn` / `union_churn` / `wide_struct` / `vtable_churn` | 0.1–0.2 s @ n=500 | ~1.0 (linear) |
+| `wide_struct` | 0.1–0.2 s @ n=500 | ~1.0 (linear) |
+| `typedef_churn` / `union_churn` / `vtable_churn` | 0.7–1.1 s @ n=4000 | ~1.0 (linear, after fix #8) |
 | `type_churn`   | 1.39 s @ n=4000 | ~1.7 (opaque filter residual) |
 | `enum_churn`   | 1.76 s @ n=2000 | ~1.7 (enum diff residual) |
 | `opaque_filter`| 1.97 s @ n=1000 (capped) | ~1.7 (the known O(candidates × functions) residual, now isolated) |
@@ -183,7 +185,7 @@ peak-memory tracking and PR-vs-base drift detection. Current status:
 | `compare()` post-processing | ✅ covered | Original PR #331 scenarios. |
 | Suppression audit | ✅ covered | `suppression_audit` scenario + `slow` test. O(rules × findings); linear in findings for a fixed ruleset. |
 | HTML / SARIF / JUnit reporting | ✅ covered | `report_html` / `report_sarif` / `report_junit` scenarios + `slow` tests; all linear. (`to_markdown`/`to_json` already guarded.) |
-| Enum / typedef / union / wide-struct / vtable diffing | ✅ covered | `enum_churn`, `typedef_churn`, `union_churn`, `wide_struct`, `vtable_churn`. (`enum_churn` is mildly super-linear ≈1.7; the rest are linear.) |
+| Enum / typedef / union / wide-struct / vtable diffing | ✅ covered | `enum_churn`, `typedef_churn`, `union_churn`, `wide_struct`, `vtable_churn`. Sweeping `typedef`/`union`/`vtable` across sizes (the original table only sampled n=500, so no exponent was ever computed) exposed a genuine **≈O(n²)** in the affected-symbol enrichment — see fix #8; they are linear after it. (`enum_churn` remains mildly super-linear ≈1.7.) |
 | PE/COFF & Mach-O diff arms | ✅ covered | `pe_churn` / `macho_churn` build `pe=`/`macho=` snapshots so `diff_platform`'s PE/Mach-O detectors run. |
 | Opaque-handle size filter | ✅ covered | `opaque_filter` isolates the known O(candidates × functions) residual #331 left in place (tail exponent ≈1.7) — now tracked directly rather than incidentally via `type_churn`. |
 | **Versioned-symbol-scheme collapse (ICU/OpenSSL)** | ✅ covered | `versioned_rename_churn` reproduces the field-eval P08 ICU 75→78 shape (16 k removed/added churn findings + the scheme-collapse pass). Profiling it surfaced a per-finding name re-tokenization in the namespace detectors (`diff_namespaces._segments`), now fast-pathed for plain names. ~1.1–1.2 tail exponent; the residual is the post-processing detector fan-out, not the scheme recogniser. |
