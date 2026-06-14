@@ -1,6 +1,6 @@
 {
   "description": "Formal detector specification matrix (generated).",
-  "count": 246,
+  "count": 250,
   "detectors": [
     {
       "kind": "abi_relevant_build_flag_changed",
@@ -419,6 +419,14 @@
       "doc_slug": "experimental_removed_without_replacement"
     },
     {
+      "kind": "exported_not_public",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "L2",
+      "doc_slug": "exported_not_public"
+    },
+    {
       "kind": "field_access_changed",
       "category": "api_break",
       "default_verdict": "API_BREAK",
@@ -739,6 +747,14 @@
       "doc_slug": "handle_type_changed"
     },
     {
+      "kind": "header_build_context_mismatch",
+      "category": "api_break",
+      "default_verdict": "API_BREAK",
+      "severity": "warning",
+      "min_evidence": "L3",
+      "doc_slug": "header_build_context_mismatch"
+    },
+    {
       "kind": "header_parse_context_drift",
       "category": "risk",
       "default_verdict": "COMPATIBLE_WITH_RISK",
@@ -1043,6 +1059,14 @@
       "doc_slug": "polymorphic_type_non_virtual_dtor"
     },
     {
+      "kind": "private_header_leak",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "L2",
+      "doc_slug": "private_header_leak"
+    },
+    {
       "kind": "protected_visibility_changed",
       "category": "risk",
       "default_verdict": "COMPATIBLE_WITH_RISK",
@@ -1065,6 +1089,14 @@
       "severity": "warning",
       "min_evidence": "unspecified",
       "doc_slug": "public_macro_value_changed"
+    },
+    {
+      "kind": "public_not_exported",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "L2",
+      "doc_slug": "public_not_exported"
     },
     {
       "kind": "public_reachability_changed",

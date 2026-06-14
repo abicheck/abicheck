@@ -165,6 +165,11 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     "constant_changed": "L2",
     "param_default_value_changed": "L2",
     "param_default_value_removed": "L2",
+    # ── L2: ADR-035 D4 cross-source validation that needs binary exports ↔
+    # header decls ↔ header provenance (no compile DB) ──
+    "exported_not_public": "L2",
+    "public_not_exported": "L2",
+    "private_header_leak": "L2",
     # ── L3: build-system context (compile DB) uniquely required ──
     # The dedicated L3 build-evidence kinds (abi_relevant_build_flag_changed,
     # toolchain_version_changed, link_export_policy_changed, …) are produced by
@@ -175,6 +180,9 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     "rtti_mode_changed": "L3",
     "tls_model_changed": "L3",
     "threadsafe_statics_mode_changed": "L3",
+    # ADR-035 D4 cross-source check that compares L2 header context against the
+    # L3 build flags — only visible once the build evidence is present.
+    "header_build_context_mismatch": "L3",
 }
 
 # Cases with no ``expected_kinds`` (NO_CHANGE baselines, scoped-internal cases,

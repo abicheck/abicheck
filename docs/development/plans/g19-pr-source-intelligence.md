@@ -61,9 +61,17 @@ authority rule (L0–L2 stay authoritative for `BREAKING`).
   and private/generated-header-leak detection when a compile DB is present.
 
 ### Phase 2 — Cross-source validation engine (G19.2)
-- New `abicheck/buildsource/crosscheck.py` consuming one merged snapshot.
-- Add the ADR-035 D4 `ChangeKind`s (RISK/API_BREAK only) following the four-step
-  procedure in `/CLAUDE.md`; record corroborating providers → `LayerConfidence`.
+- **DONE** — New `abicheck/buildsource/crosscheck.py` (`run_crosschecks`) consumes
+  one merged snapshot and diffs its evidence sources against each other
+  intra-version. Adds the four ADR-035 D4 `ChangeKind`s — `exported_not_public`
+  (RISK), `public_not_exported` (RISK), `header_build_context_mismatch`
+  (API_BREAK), `private_header_leak` (RISK) — partitioned per the four-step
+  procedure, with per-check coverage rows and the §6.8 provider-agreement matrix.
+  Every check skips (never false-positives) when its evidence is absent and is
+  never BREAKING (authority rule). Tests: `tests/test_crosscheck.py`.
+- **TODO** — `odr_type_variant` and `public_to_internal_dependency` checks;
+  wiring into the Phase-3 `scan`/`audit` orchestrator + `crosschecks:` severity
+  config; FP-rate-gate corpus cases before any check is promoted to gate.
 
 ### Phase 3 — Deterministic `scan` orchestrator (G19.3)
 - New `abicheck/cli_scan.py` (sibling-module registration per `/CLAUDE.md`):

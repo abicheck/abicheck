@@ -2,7 +2,7 @@
 
 # Detector specification matrix
 
-One row per `ChangeKind` (246 total). Columns fuse the verdict partition (`checker_policy`), default policy (`policy_for`), and the weakest evidence layer at which the kind becomes detectable (`scripts/evidence_tiers`).
+One row per `ChangeKind` (250 total). Columns fuse the verdict partition (`checker_policy`), default policy (`policy_for`), and the weakest evidence layer at which the kind becomes detectable (`scripts/evidence_tiers`).
 
 | ChangeKind | Category | Default verdict | Severity | Min evidence | Doc slug |
 |---|---|---|---|---|---|
@@ -58,6 +58,7 @@ One row per `ChangeKind` (246 total). Columns fuse the verdict partition (`check
 | `executable_stack_removed` | quality | `COMPATIBLE` | `warning` | L0 | `executable_stack_removed` |
 | `experimental_graduated` | addition | `COMPATIBLE` | `warning` | L0 | `experimental_graduated` |
 | `experimental_removed_without_replacement` | api_break | `API_BREAK` | `warning` | L0 | `experimental_removed_without_replacement` |
+| `exported_not_public` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L2 | `exported_not_public` |
 | `field_access_changed` | api_break | `API_BREAK` | `warning` | unspecified | `field_access_changed` |
 | `field_became_const` | quality | `COMPATIBLE` | `warning` | unspecified | `field_became_const` |
 | `field_became_mutable` | quality | `COMPATIBLE` | `warning` | unspecified | `field_became_mutable` |
@@ -98,6 +99,7 @@ One row per `ChangeKind` (246 total). Columns fuse the verdict partition (`check
 | `generated_header_reaches_public_api` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `generated_header_reaches_public_api` |
 | `glibcxx_dual_abi_flip_detected` | quality | `COMPATIBLE` | `warning` | L0 | `glibcxx_dual_abi_flip_detected` |
 | `handle_type_changed` | breaking | `BREAKING` | `error` | unspecified | `handle_type_changed` |
+| `header_build_context_mismatch` | api_break | `API_BREAK` | `warning` | L3 | `header_build_context_mismatch` |
 | `header_parse_context_drift` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `header_parse_context_drift` |
 | `hidden_friend_added` | addition | `COMPATIBLE` | `warning` | unspecified | `hidden_friend_added` |
 | `hidden_friend_removed` | api_break | `API_BREAK` | `warning` | L2 | `hidden_friend_removed` |
@@ -136,9 +138,11 @@ One row per `ChangeKind` (246 total). Columns fuse the verdict partition (`check
 | `pe_machine_changed` | breaking | `BREAKING` | `error` | L0 | `pe_machine_changed` |
 | `pie_disabled` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `pie_disabled` |
 | `polymorphic_type_non_virtual_dtor` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `polymorphic_type_non_virtual_dtor` |
+| `private_header_leak` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L2 | `private_header_leak` |
 | `protected_visibility_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `protected_visibility_changed` |
 | `public_api_exposes_stl_by_value` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `public_api_exposes_stl_by_value` |
 | `public_macro_value_changed` | api_break | `API_BREAK` | `warning` | unspecified | `public_macro_value_changed` |
+| `public_not_exported` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L2 | `public_not_exported` |
 | `public_reachability_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `public_reachability_changed` |
 | `public_surface_grew` | quality | `COMPATIBLE` | `warning` | unspecified | `public_surface_grew` |
 | `public_surface_shrank` | quality | `COMPATIBLE` | `warning` | unspecified | `public_surface_shrank` |

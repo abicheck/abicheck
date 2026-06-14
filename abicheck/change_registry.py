@@ -1166,6 +1166,47 @@ REGISTRY = ChangeKindRegistry([
               "produces an exported public symbol (per the build/source graph). "
               "It localizes a flag-drift risk to the public surface it can affect; "
               "a risk to review, never on its own an artifact-proven ABI break."),
+    # ── Cross-source validation (ADR-035 D4 / G19.2) ────────────────────────
+    # Produced by the intra-version cross-source engine (buildsource/crosscheck.py),
+    # which diffs ONE merged snapshot's evidence sources against each other rather
+    # than comparing two versions. Per ADR-035 D1/D4 they are never BREAKING on
+    # their own: an artifact diff still proves a shipped break. They default to
+    # RISK (deployment/hygiene risk) or API_BREAK (source-context risk) and stay
+    # advisory/suppressible until a check earns its FP-rate-gate corpus.
+    _E("exported_not_public", _R,
+       impact="A symbol is exported by the binary but no public header declares it "
+              "(EXPORT_ONLY provenance). It is reachable ABI surface that consumers "
+              "can link against yet was never promised by the API, so it is easy to "
+              "change or remove by accident — and equally a sign of a missing "
+              "visibility annotation. Hide it (`-fvisibility=hidden` / a version "
+              "script) or document it; respects the ABI-relevant-symbol filter and "
+              "public-surface scoping so intentional internal exports can be "
+              "suppressed."),
+    _E("public_not_exported", _R,
+       impact="A public header declares an entity that promises an external symbol "
+              "(an exported, non-inline, non-template, default-visibility function or "
+              "variable) but the binary does not export it. Consumers that compile "
+              "against the header get an undefined-symbol link error. Narrowly scoped "
+              "to declarations with a real export obligation — inline/templated/"
+              "constexpr/hidden-visibility decls are public source surface that "
+              "legitimately emit no dynamic symbol and are excluded."),
+    _E("header_build_context_mismatch", _A,
+       impact="The public headers were parsed without the build's ABI-relevant "
+              "context (the L3 build evidence records ABI-affecting flags/macros, but "
+              "the header AST was captured context-free). The declared API surface may "
+              "therefore not match what the shipped translation units actually "
+              "compile to (e.g. a macro-conditional field or a packing pragma is "
+              "evaluated differently). Re-dump the headers with the build's "
+              "compile_commands.json so the L2 surface reflects the real build."),
+    _E("private_header_leak", _R,
+       impact="A public header exposes (and so transitively pulls in) a type declared "
+              "only in a private / non-installed header — detected from declaration "
+              "provenance (origin) and, when present, the L5 include graph. Downstream "
+              "consumers that include the public header reference a declaration that is "
+              "not shipped, so their build breaks once the private header is absent "
+              "from the install tree — a packaging-hygiene risk. Make the public header "
+              "self-contained or install the leaked header."),
+
     # ── Cross-implementation standard-library compatibility (D-stdlib) ───────
     # Produced by the build-mode diff (diff_stdlib_impl.py). Compatibility
     # between *different* C++ standard-library implementations is a third axis

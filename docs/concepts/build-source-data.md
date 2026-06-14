@@ -504,6 +504,28 @@ These **explain and prioritize** impact; like the L4 findings they are never
 boundary, and per ADR-028 D3 they never override or suppress an artifact-proven
 ABI break.
 
+## Cross-source validation findings (intra-version hygiene)
+
+The checks above all compare *two versions*. abicheck also runs an
+**intra-version** cross-source validation pass (ADR-035 D4) that diffs **one**
+merged snapshot's evidence sources against *each other* — binary exports vs.
+header declarations vs. build flags vs. header provenance — to surface "bad ABI
+hygiene" that is visible from a single build, no baseline required:
+
+| ChangeKind | verdict | meaning |
+|---|---|---|
+| `exported_not_public` | risk | A symbol is exported by the binary but declared in no public header (accidental ABI surface) — hide it or document it |
+| `public_not_exported` | risk | A public header declares an entity with an export obligation (a non-inline, non-template, default-visibility function/extern variable) that the binary does not export — consumers get an undefined-symbol link error |
+| `header_build_context_mismatch` | api_break | The build records ABI-relevant flags/macros but the headers were parsed context-free, so the declared API surface may not match the shipped translation units — re-dump headers with the build's `compile_commands.json` |
+| `private_header_leak` | risk | A public API exposes a type declared only in a private (non-installed) header, so consumers pull in an unshipped declaration — make the header self-contained or install the leaked header |
+
+Each finding records which evidence sources (`binary_exports`,
+`public_header_ast`, `build_config`, `source_index`) corroborate it, driving its
+confidence tag. A check whose required evidence is absent (e.g. no public-header
+provenance) is reported as a *skipped* coverage row — never counted as clean and
+never emitting a false positive. Like the L4/L5 findings these are advisory and
+never `breaking` on their own.
+
 ## Evidence coverage
 
 Every compare run that involves a pack prints an **evidence-coverage table** so

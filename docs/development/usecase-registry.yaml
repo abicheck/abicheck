@@ -29,7 +29,7 @@ use_cases:
   # ── change_class ──────────────────────────────────────────────────────────
   - id: UC-CHANGE-taxonomy
     axis: change_class
-    name: ABI/API change taxonomy (246 ChangeKinds, 5-tier policy)
+    name: ABI/API change taxonomy (250 ChangeKinds, 5-tier policy)
     status: complete
     evidence:
       modules: [abicheck/change_registry.py, abicheck/checker_policy.py]
@@ -586,15 +586,26 @@ use_cases:
   - id: UC-CHANGE-crosscheck-hygiene
     axis: change_class
     name: Cross-source validation findings (intra-version ABI hygiene)
-    status: planned
+    status: partial
     gap: G19
     plan: docs/development/plans/g19-pr-source-intelligence.md
+    evidence:
+      modules:
+        - abicheck/buildsource/crosscheck.py
+      tests:
+        - tests/test_crosscheck.py
     next_steps: >
-      ADR-035 D4. New correctly-partitioned ChangeKinds that diff a single
-      snapshot's evidence sources against each other — exported_not_public,
-      public_not_exported, header_build_context_mismatch, private_header_leak,
-      odr_type_variant, public_to_internal_dependency. RISK/API_BREAK tier only;
-      each must earn FP-rate-gate corpus cases before it is allowed to gate.
+      ADR-035 D4. DONE: the intra-version cross-source engine
+      (`buildsource/crosscheck.py`, `run_crosschecks`) and its four
+      correctly-partitioned ChangeKinds — exported_not_public (RISK),
+      public_not_exported (RISK), header_build_context_mismatch (API_BREAK),
+      private_header_leak (RISK) — which diff ONE merged snapshot's evidence
+      sources against each other, with per-check coverage rows and the §6.8
+      provider-agreement matrix; each skips (never false-positives) when its
+      evidence is absent and is never BREAKING (authority rule). REMAINS:
+      odr_type_variant and public_to_internal_dependency; wiring the engine into
+      the Phase-3 `scan`/`audit` orchestrator and the `crosschecks:` severity
+      config; and FP-rate-gate corpus cases before any check is promoted to gate.
 
   - id: UC-WORKFLOW-single-release-audit
     axis: workflow

@@ -578,6 +578,19 @@ class ChangeKind(str, Enum):
     CALL_GRAPH_PUBLIC_ENTRY_REACHABILITY_CHANGED = "call_graph_public_entry_reachability_changed"  # impl reachable from an exported entry changed → COMPATIBLE (quality)
     INCLUDE_GRAPH_PUBLIC_HEADER_DRIFT = "include_graph_public_header_drift"  # the include closure of a public header changed → RISK
     BUILD_OPTION_REACHES_PUBLIC_SYMBOL = "build_option_reaches_public_symbol"  # a changed ABI-relevant option reaches a public symbol → RISK
+
+    # ── Cross-source validation (ADR-035 D4 / G19.2) ────────────────────────
+    # Emitted by the intra-version cross-source engine (buildsource/crosscheck.py)
+    # which diffs ONE merged snapshot's evidence sources against each other
+    # (binary exports ↔ header decls ↔ build flags ↔ include graph) — no baseline
+    # compare. Per ADR-035 D1/D4 these are "bad ABI hygiene" findings, never
+    # BREAKING on their own: they default to RISK or API_BREAK and are advisory
+    # (suppressible) until a check earns its FP-rate-gate corpus and is promoted.
+    EXPORTED_NOT_PUBLIC = "exported_not_public"  # symbol exported by the binary but declared in no public header → RISK
+    PUBLIC_NOT_EXPORTED = "public_not_exported"  # public header declares an export obligation the binary does not provide → RISK
+    HEADER_BUILD_CONTEXT_MISMATCH = "header_build_context_mismatch"  # headers parsed without the build's ABI-relevant context → API_BREAK
+    PRIVATE_HEADER_LEAK = "private_header_leak"  # a public header pulls in a private/non-installed header → RISK
+
     # ── Cross-implementation standard-library compatibility (D-stdlib) ───────
     # Emitted by the build-mode diff (diff_stdlib_impl.py) when the two
     # snapshots were produced against *different standard-library

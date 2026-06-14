@@ -104,6 +104,11 @@ ASSERTED_CHANGE_KINDS: set[ChangeKind] = {
     ChangeKind.CALL_GRAPH_PUBLIC_ENTRY_REACHABILITY_CHANGED,
     ChangeKind.INCLUDE_GRAPH_PUBLIC_HEADER_DRIFT,
     ChangeKind.BUILD_OPTION_REACHES_PUBLIC_SYMBOL,
+    # Intra-version cross-source validation (tests/test_crosscheck.py).
+    ChangeKind.EXPORTED_NOT_PUBLIC,
+    ChangeKind.PUBLIC_NOT_EXPORTED,
+    ChangeKind.HEADER_BUILD_CONTEXT_MISMATCH,
+    ChangeKind.PRIVATE_HEADER_LEAK,
     # Cross-implementation stdlib compatibility (tests/test_diff_stdlib_impl.py).
     ChangeKind.STDLIB_IMPLEMENTATION_CHANGED,
     ChangeKind.LIBCPP_ABI_VERSION_CHANGED,
