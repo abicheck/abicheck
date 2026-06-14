@@ -53,9 +53,11 @@ Scenarios
                  token that bumps (``u_strlen_75`` -> ``u_strlen_78``), so the
                  churn set is ``2 x n`` removed/added findings and the
                  versioned-symbol-scheme recogniser (``versioned_symbol_scheme``
-                 / ``post_processing``) must normalize and group all of it.
-                 Reproduces the field-eval P08 ICU 75->78 case (16 k changes)
-                 that no other scenario reaches.
+                 / ``post_processing``) must normalize and group all of it. Runs
+                 with ``collapse_versioned_symbols=True`` so both detection *and*
+                 the opt-in suppression/reclassification (collapse) branch are
+                 timed. Reproduces the field-eval P08 ICU 75->78 case (16 k
+                 changes) that no other scenario reaches.
 ``suppression_audit`` A fixed suppression ruleset audited against a growing
                  finding set — guards the O(rules x findings) audit loop.
 ``report_html`` / ``report_sarif``  Render a large ``DiffResult`` through the
@@ -810,6 +812,21 @@ def _run_compare(prepared: tuple[AbiSnapshot, AbiSnapshot]) -> int:
     return len(compare(old, new).changes)
 
 
+def _run_compare_collapse(prepared: tuple[AbiSnapshot, AbiSnapshot]) -> int:
+    """Time ``compare`` with the opt-in versioned-symbol collapse enabled.
+
+    The default ``_run_compare`` leaves ``collapse_versioned_symbols=False``, so
+    the scheme recogniser only emits its advisory. Passing ``True`` additionally
+    exercises the suppression/reclassification branch of
+    ``DetectVersionedSymbolScheme`` — the path that folds the ``2 × n`` churn
+    findings into a single collapsed advisory — so the ``versioned_rename_churn``
+    scenario times detection *and* collapse over the whole churn set, not just
+    detection.
+    """
+    old, new = prepared
+    return len(compare(old, new, collapse_versioned_symbols=True).changes)
+
+
 def _run_suppression_audit(prepared: tuple[list[Change], SuppressionList]) -> int:
     """Time ``SuppressionList.audit``; return the number of findings audited."""
     changes, supp = prepared
@@ -894,7 +911,10 @@ SCENARIOS: dict[str, Scenario] = {
     # the whole surface. Default sweep stays bounded; max_size reaches the real
     # ICU scale (~8k funcs / 16k changes) for a manual reproduction.
     "versioned_rename_churn": Scenario(
-        _build_versioned_rename_churn, sizes=(500, 1000, 2000), max_size=8000
+        _build_versioned_rename_churn,
+        run=_run_compare_collapse,
+        sizes=(500, 1000, 2000),
+        max_size=8000,
     ),
     "nested_types": Scenario(_build_nested_types, sizes=(100, 200, 400), max_size=500),
 }

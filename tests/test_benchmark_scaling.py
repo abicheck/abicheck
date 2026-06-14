@@ -86,11 +86,19 @@ def test_versioned_rename_churn_exercises_scheme_collapse() -> None:
     from abicheck.checker import ChangeKind, compare
 
     old, new = bench._build_versioned_rename_churn(200)
+    # Detection (default): 2×n churn + the advisory.
     result = compare(old, new)
     kinds = [c.kind for c in result.changes]
     assert kinds.count(ChangeKind.FUNC_REMOVED) == 200
     assert kinds.count(ChangeKind.FUNC_ADDED) == 200
     assert ChangeKind.VERSIONED_SYMBOL_SCHEME_DETECTED in kinds
+
+    # The scenario's registered run enables collapse, so the suppression /
+    # reclassification branch must actually fire (churn folded away). Guard it
+    # here so the benchmark can't silently revert to measuring detection only.
+    assert bench.SCENARIOS["versioned_rename_churn"].run is bench._run_compare_collapse
+    collapsed = compare(old, new, collapse_versioned_symbols=True)
+    assert len(collapsed.changes) < len(result.changes)
 
 
 def test_segments_fast_path_matches_full_scan() -> None:
