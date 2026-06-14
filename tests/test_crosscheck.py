@@ -220,6 +220,51 @@ def test_public_not_exported_excludes_non_exporting_decls(mutate):
     assert _findings_of(res, ChangeKind.PUBLIC_NOT_EXPORTED) == []
 
 
+def test_public_not_exported_ignores_non_default_version_alias():
+    # `foo` exists only as a non-default version alias (foo@LIB_1); an unversioned
+    # consumer needs a default foo@@... export, so the header decl is unsatisfied
+    # and must still be flagged (Codex review).
+    snap = _snap(
+        elf=ElfMetadata(
+            symbols=[ElfSymbol(name="foo", version="LIB_1", is_default=False)]
+        )
+    )
+    snap.functions = [
+        Function(
+            name="foo",
+            mangled="foo",
+            return_type="void",
+            is_extern_c=True,
+            origin=ScopeOrigin.PUBLIC_HEADER,
+        ),
+    ]
+    res = run_crosschecks(snap)
+    assert [c.symbol for c in _findings_of(res, ChangeKind.PUBLIC_NOT_EXPORTED)] == [
+        "foo"
+    ]
+    # A default-versioned export of the same name DOES satisfy the obligation.
+    snap.elf.symbols = [ElfSymbol(name="foo", version="LIB_1", is_default=True)]
+    res2 = run_crosschecks(snap)
+    assert _findings_of(res2, ChangeKind.PUBLIC_NOT_EXPORTED) == []
+
+
+@pytest.mark.parametrize("op_name", ["operator<", "operator<<", "operator<=>"])
+def test_public_not_exported_flags_missing_operator(op_name):
+    # Operators legitimately contain '<' but are not templates — a missing
+    # exported operator must still be reported (Codex review).
+    snap = _snap(elf=_elf("_Z3fooi"))
+    snap.functions = [
+        Function(
+            name=op_name,
+            mangled="_ZltRK1AS1_",
+            return_type="bool",
+            origin=ScopeOrigin.PUBLIC_HEADER,
+        ),
+    ]
+    res = run_crosschecks(snap)
+    assert len(_findings_of(res, ChangeKind.PUBLIC_NOT_EXPORTED)) == 1
+
+
 def test_public_not_exported_skips_header_constants():
     # A const header constant with a baked-in value emits no symbol.
     snap = _snap(elf=_elf())
@@ -373,6 +418,37 @@ def test_private_header_leak_skips_pimpl_with_public_forward_decl():
     ]
     res = run_crosschecks(snap)
     assert _findings_of(res, ChangeKind.PRIVATE_HEADER_LEAK) == []
+
+
+def test_private_header_leak_basename_collision_with_public_type():
+    # Public `Impl` and private `detail::Impl` share the bare token `Impl`. A
+    # public `Impl *` signature uses the public type and must not leak; only an
+    # explicit `detail::Impl` reference is a genuine private leak (Codex review).
+    snap = _snap(elf=_elf("_Z4makev", "_Z6make2v"))
+    snap.functions = [
+        Function(
+            name="make",
+            mangled="_Z4makev",
+            return_type="Impl *",
+            origin=ScopeOrigin.PUBLIC_HEADER,
+        ),
+        Function(
+            name="make2",
+            mangled="_Z6make2v",
+            return_type="detail::Impl *",
+            origin=ScopeOrigin.PUBLIC_HEADER,
+        ),
+    ]
+    snap.types = [
+        RecordType(name="Impl", kind="struct", origin=ScopeOrigin.PUBLIC_HEADER),
+        RecordType(
+            name="detail::Impl", kind="struct", origin=ScopeOrigin.PRIVATE_HEADER
+        ),
+    ]
+    res = run_crosschecks(snap)
+    hits = _findings_of(res, ChangeKind.PRIVATE_HEADER_LEAK)
+    assert [c.symbol for c in hits] == ["_Z6make2v"]
+    assert hits[0].caused_by_type == "detail::Impl"
 
 
 def test_private_header_leak_matches_namespaced_param_type():

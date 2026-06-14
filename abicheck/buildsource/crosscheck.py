@@ -497,6 +497,12 @@ def _origin_resolvable(snapshot: AbiSnapshot) -> bool:
 def _exported_symbol_names(snapshot: AbiSnapshot) -> set[str] | None:
     """The binary's exported symbol names, or ``None`` if no export table exists.
 
+    Only **default/unversioned** ELF exports count toward the obligation set: a
+    symbol that exists *only* as a non-default version alias (``foo@LIB_1``,
+    ``is_default == False``) does not satisfy an unversioned consumer link
+    (which needs ``foo@@…``), so including it would mask the exact
+    missing-export case this set feeds (Codex review).
+
     Mach-O names are normalized the same way the dumper normalizes
     ``Function.mangled`` (strip the platform's single leading underscore:
     ``_foo`` → ``foo``, ``__Z...`` → ``_Z...``) so the comparison set matches the
@@ -504,7 +510,7 @@ def _exported_symbol_names(snapshot: AbiSnapshot) -> set[str] | None:
     missing (Codex review).
     """
     if snapshot.elf is not None:
-        return {s.name for s in snapshot.elf.symbols if s.name}
+        return {s.name for s in snapshot.elf.symbols if s.name and s.is_default}
     if snapshot.pe is not None:
         return {e.name for e in snapshot.pe.exports if e.name}
     if snapshot.macho is not None:
@@ -540,7 +546,7 @@ def _has_export_obligation(fn: Function) -> bool:
         return False
     # Template instantiations are spelled with angle brackets; an uninstantiated
     # template emits no symbol, so skip anything template-shaped to stay low-FP.
-    if "<" in fn.name:
+    if _looks_templated(fn.name):
         return False
     return True
 
@@ -561,9 +567,25 @@ def _var_has_export_obligation(var: Variable) -> bool:
         return False
     if var.is_const and var.value is not None:
         return False
-    if "<" in var.name:
+    if _looks_templated(var.name):
         return False
     return True
+
+
+def _looks_templated(name: str) -> bool:
+    """Whether *name* is a template instantiation spelling (``Foo<int>``), not an operator.
+
+    A bare ``<`` is not enough: ``operator<``, ``operator<<``, and ``operator<=>``
+    legitimately contain one but are ordinary (non-template) functions with a real
+    exported symbol, so testing ``"<" in name`` would wrongly skip a genuinely
+    missing exported operator (Codex review). A template's ``<`` opens an argument
+    list immediately after the template name, so the token right before the first
+    ``<`` is the template's name — never ``operator``.
+    """
+    idx = name.find("<")
+    if idx == -1:
+        return False
+    return not name[:idx].rstrip().endswith("operator")
 
 
 def _abi_relevant_build_flags(snapshot: AbiSnapshot) -> list[str] | None:
@@ -670,23 +692,37 @@ def _private_type_names(snapshot: AbiSnapshot) -> dict[str, str]:
     — the common opaque-handle/PIMPL pattern forward-declares ``class Impl;`` in a
     public header and defines it privately, so a public API taking ``Impl *`` is
     not a leak (Codex review).
+
+    Public-type *tokens* (canonical names **and** their trailing segments) are
+    collected first, and any private canonical name or trailing-segment alias that
+    collides with one is skipped. That stops a public ``Impl`` and a private
+    ``detail::Impl`` from registering the bare token ``Impl`` as a leak candidate,
+    which would mis-flag a public ``Impl *`` signature (Codex review).
     """
-    public_names: set[str] = set()
+    public_tokens: set[str] = set()
     for rec in snapshot.types:
         if rec.origin in _PUBLIC_TYPE_ORIGINS and rec.name:
-            public_names.add(rec.name)
+            public_tokens.add(rec.name)
+            if "::" in rec.name:
+                public_tokens.add(rec.name.rsplit("::", 1)[1])
     for en in snapshot.enums:
         if en.origin in _PUBLIC_TYPE_ORIGINS and en.name:
-            public_names.add(en.name)
+            public_tokens.add(en.name)
+            if "::" in en.name:
+                public_tokens.add(en.name.rsplit("::", 1)[1])
 
     names: dict[str, str] = {}
 
     def _register(name: str) -> None:
-        if name in public_names:
+        if name in public_tokens:
             return
         names[name] = name
         if "::" in name:
-            names.setdefault(name.rsplit("::", 1)[1], name)
+            segment = name.rsplit("::", 1)[1]
+            # Skip a trailing-segment alias that collides with a public type's
+            # name/segment — the public type owns that bare spelling.
+            if segment not in public_tokens:
+                names.setdefault(segment, name)
 
     for rec in snapshot.types:
         if rec.origin == ScopeOrigin.PRIVATE_HEADER and rec.name:
