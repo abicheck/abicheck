@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import sys
 
 import pytest
 
@@ -40,6 +41,23 @@ _GCC = shutil.which("gcc")
 _CLANG = shutil.which("clang")
 
 
+def _is_real_gnu_gcc(cc: str | None) -> bool:
+    """True only for a genuine GNU gcc (not the Apple-clang `/usr/bin/gcc` shim).
+
+    `extract_compiler_record` reads ELF + `.GCC.command.line`; on macOS `gcc` is a
+    clang driver emitting Mach-O, and on Windows it would emit PE — neither is
+    ELF. Gate on a real GNU gcc so the integration lane skips cleanly off-Linux
+    rather than failing on an empty/non-ELF artifact.
+    """
+    if not cc:
+        return False
+    try:
+        out = subprocess.run([cc, "--version"], capture_output=True, text=True, timeout=20).stdout
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return "Free Software Foundation" in out or "(GCC)" in out
+
+
 def _build(cc: str, src, out, record_flag: str) -> None:
     subprocess.run(
         [cc, "-shared", "-fPIC", "-g", record_flag, str(src), "-o", str(out)],
@@ -47,7 +65,10 @@ def _build(cc: str, src, out, record_flag: str) -> None:
     )
 
 
-@pytest.mark.skipif(not (_GCC and _CLANG), reason="needs both gcc and clang")
+@pytest.mark.skipif(
+    not (sys.platform.startswith("linux") and _CLANG and _is_real_gnu_gcc(_GCC)),
+    reason="needs ELF host with a real GNU gcc + clang (compiler-record is ELF-only)",
+)
 def test_gcc_vs_clang_toolchain_drift_is_captured_and_surfaced(tmp_path):
     src = tmp_path / "foo.c"
     src.write_text("int abicheck_add(int a, int b) { return a + b; }\n")

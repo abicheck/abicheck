@@ -471,6 +471,19 @@ def test_diff_no_toolchain_drift_when_identity_matches_despite_missing_language(
     assert not any(c.kind is ChangeKind.TOOLCHAIN_VERSION_CHANGED for c in changes)
 
 
+def test_diff_no_toolchain_drift_for_target_asymmetry_same_compiler():
+    # Mixed evidence: CMake File API records a target_triple, DWARF producer
+    # leaves it empty. Same compiler+version must NOT report drift just because
+    # one side lacks target metadata (Codex P2: target asymmetry false positive).
+    old = BuildEvidence(toolchains=[
+        Toolchain(id="t-cmake", compiler_id="Clang", version="18.1.3",
+                  language="", target_triple="x86_64-linux-gnu")])
+    new = BuildEvidence(toolchains=[
+        Toolchain(id="t-dwarf", compiler_id="Clang", version="18.1.3", language="")])
+    changes = diff_build_evidence(old, new)
+    assert not any(c.kind is ChangeKind.TOOLCHAIN_VERSION_CHANGED for c in changes)
+
+
 def test_diff_emits_toolchain_change_for_sysroot_option():
     old = BuildEvidence(build_options=[BuildOption("sysroot", "/a", abi_relevant=True)])
     new = BuildEvidence(build_options=[BuildOption("sysroot", "/b", abi_relevant=True)])

@@ -261,11 +261,17 @@ def _toolchain_fingerprints(ev: BuildEvidence) -> dict[str, str]:
 
 
 def _toolchain_identities(ev: BuildEvidence) -> set[str]:
-    """Language-agnostic identity fingerprints: ``"compiler_id version target"``."""
-    return {
-        f"{tc.compiler_id} {tc.version} {tc.target_triple}".strip()
-        for tc in ev.toolchains
-    }
+    """Language-agnostic compiler identities: ``"compiler_id version"``.
+
+    Deliberately excludes ``target_triple``: the fallback below compares evidence
+    from heterogeneous sources (e.g. a CMake File API side that records a target
+    triple vs a DWARF-producer side where ``parse_producer`` leaves it empty), so
+    keying on the target would flag the *same* compiler as drift purely because
+    one side lacks target metadata. The fallback therefore fires only on real
+    compiler id/version drift; target/sysroot changes route through the
+    build-option path (``_TOOLCHAIN_OPTION_KEYS``) instead.
+    """
+    return {f"{tc.compiler_id} {tc.version}".strip() for tc in ev.toolchains}
 
 
 def _diff_toolchains(old: BuildEvidence, new: BuildEvidence) -> list[Change]:
