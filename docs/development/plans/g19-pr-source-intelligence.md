@@ -146,7 +146,12 @@ Inputs
 
 Scope / escalation
   --mode [pr|pr-deep|baseline|audit]      default pr (D9 asymmetry)
-  --source-scan-level [S0..S6|auto]       cap/force depth (auto = risk-driven)
+  --depth [auto|headers|build|source|graph|full]
+                                          cap evidence depth on the L-axis
+                                          (headers=L2, build=L3, source=L4,
+                                          graph=L5, full=L4 full-scope);
+                                          auto = risk-driven. No S0..S6 selector
+                                          per ADR-035 D1.
   --changed-path PATH                     repeatable; seeds risk score + POI (D7)
   --since GITREF                          derive changed paths from a git range
   --budget DURATION   (e.g. 15m)          wall-clock ceiling
@@ -183,7 +188,7 @@ class ScanRequest:
     inputs_pack: Path | None = None
     baseline: str | Path | None = None
     mode: ScanMode = ScanMode.PR            # PR | PR_DEEP | BASELINE | AUDIT
-    level_cap: SourceScanLevel | None = None  # S0..S6; None = auto
+    depth_cap: EvidenceDepth | None = None    # L-axis cap (see DataLayer); None = auto
     changed_paths: list[str] = field(default_factory=list)
     budget: Budget = Budget()               # total_timeout, max_tus, partial_ok
     risk_rules: RiskRules | None = None
@@ -191,15 +196,15 @@ class ScanRequest:
 
 @dataclass(frozen=True)
 class CostEstimate:
-    level: SourceScanLevel
+    layer: EvidenceLayer               # L-axis: L2_HEADER..L5_SOURCE_GRAPH
     tus: int
     est_seconds: float
     cache_hit_rate: float
     note: str
 
 @dataclass(frozen=True)
-class LevelResult:
-    level: SourceScanLevel
+class LayerResult:
+    layer: EvidenceLayer
     coverage: LayerCoverage            # reuse buildsource.model
     facts: int
     elapsed_s: float
@@ -209,7 +214,7 @@ class LevelResult:
 class ScanResult:
     diff: DiffResult | None            # None in --audit (no baseline)
     findings: list[DiffResult]         # incl. new crosscheck ChangeKinds (D4)
-    levels: list[LevelResult]          # per-tier coverage (D3/D10)
+    layers: list[LayerResult]          # per-layer coverage (D3/D10)
     confidence: dict[str, str]         # provider-agreement matrix (§6.8)
     estimate: list[CostEstimate]       # projected vs. actual
     verdict: Verdict
@@ -220,16 +225,19 @@ def estimate_scan(req: ScanRequest) -> list[CostEstimate]: ...   # no scanning
 def run_audit(req: ScanRequest) -> ScanResult: ...               # mode=AUDIT
 ```
 
-### Per-level provider protocol — `abicheck/buildsource/`
+### Per-layer provider protocol — `abicheck/buildsource/`
 
-Every level (`pattern_scan`, `preprocessor`, L3 build, L4 replay, L5 graph,
-`crosscheck`) implements one interface, modelled on the ADR-032 `DataExtractor`,
-so levels are independently runnable (ADR-033 D1) and external/build-emitted
-providers (D5) drop in unchanged:
+`EvidenceLayer` / `EvidenceDepth` are L-axis enums aligned to the existing
+`buildsource.model.DataLayer` (L3_BUILD/L4_SOURCE_ABI/L5_SOURCE_GRAPH), plus an
+`L2_HEADER` member for the always-on pre-scan tier — **no `S0..S6` type**, per
+ADR-035 D1. Every provider (`pattern_scan`, `preprocessor`, L3 build, L4 replay,
+L5 graph, `crosscheck`) implements one interface, modelled on the ADR-032
+`DataExtractor`, so layers are independently runnable (ADR-033 D1) and
+external/build-emitted providers (D5) drop in unchanged:
 
 ```python
-class SourceLevelProvider(Protocol):
-    level: SourceScanLevel
+class LayerProvider(Protocol):
+    layer: EvidenceLayer
     def capabilities(self) -> ProviderCapabilities: ...
     def estimate(self, ctx: ScanContext) -> CostEstimate: ...
     def run(self, ctx: ScanContext, poi: PointsOfInterest) -> LevelFacts: ...
@@ -259,8 +267,8 @@ schema as the Python API — one contract, three front-ends (CLI, MCP, library).
 ```yaml
 source:
   budgets: { total_timeout: 15m, max_targeted_tus: 80, partial_ok: true }
-  levels:  { S0: always, S1: always, S2: always, S3: always,
-             S4: triggered, S5: triggered, S6: budgeted }
+  layers:  { headers: always, build: always,     # L2 pre-scan, L3 build
+             source: triggered, graph: budgeted } # L4 replay, L5 graph
 risk_rules:
   public_headers: { paths: ["include/**","public/**"], weight: 50 }
   build_abi_flags:{ paths: ["CMakeLists.txt","cmake/**","BUILD"], weight: 40 }
