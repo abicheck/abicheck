@@ -23,12 +23,11 @@ from abicheck.checker_types import (
     SYMBOL_VERSION_ALIAS_NOT_RETAINED_MARKER,
     Change,
 )
+from abicheck.confidence import _compute_confidence, _determine_confidence_level
 from abicheck.detectors import DetectorResult
 from abicheck.diff_filtering import (
     _build_location_index,
-    _compute_confidence,
     _dedup_enum_same_kind,
-    _determine_confidence_level,
     _downgrade_opaque_struct_changes,
     _downgrade_opaque_type_changes,
     _enrich_affected_symbols,

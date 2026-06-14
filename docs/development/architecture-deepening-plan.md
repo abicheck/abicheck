@@ -331,21 +331,26 @@ layer.
 
 ---
 
-### C9 — Relocate confidence computation to the orchestrator
+### C9 — Relocate confidence computation *(implemented — PR #395)*
 
-**Problem.** `_compute_confidence()` lives in `diff_filtering.py` but is pure
-orchestration: it consumes `detector_results` (the registry's output) and is
-called from `checker.compare()`. Understanding the orchestration flow needs a
-cross-file hop into a filtering module.
+**Problem.** `_compute_confidence()` and its three helpers lived in
+`diff_filtering.py` but are pure orchestration: they consume `detector_results`
+(the registry's output) and the snapshots' available metadata, and are called
+from `checker.compare()`. Following the orchestration flow meant a cross-file
+hop into a *filtering* module.
 
-**Goal.** The orchestration flow reads top-to-bottom in `checker.py` /
-`detector_registry.py`; `diff_filtering.py` is left to actual filtering.
+**What was implemented.** Moved the four functions
+(`_detect_evidence_tiers`, `_determine_evidence_tier`,
+`_determine_confidence_level`, and the public `compute_confidence`) into a new
+dedicated `abicheck/confidence.py`. A new module (rather than folding into
+`checker.py`) avoids a `checker ↔ diff_filtering` import cycle: `confidence.py`
+depends only on `checker_policy`, `detectors` and `model`, so it sits at the
+bottom of the graph. `checker` and the two test modules now import from
+`confidence`; the historical name `_compute_confidence` is kept as an alias.
+`diff_filtering.py` is left to actual filtering and shrank by ~190 lines.
 
-**Approach.** Move `_compute_confidence()` (and its helpers) to `checker.py` or
-`detector_registry.py`; update the single call site and any tests that import it
-directly.
-
-**Risk:** low. Locality-only, behaviour-preserving.
+**Risk:** low; behaviour-preserving (verified: full fast lane + no new import
+cycle).
 
 ---
 
@@ -386,7 +391,7 @@ parity-changing work last.
 
 ```
 C4  detector auto-discovery        ✅ done (PR #395)
-C9  relocate confidence            (low risk, locality)
+C9  relocate confidence            ✅ done (PR #395)
 C1  name classification            ✅ done (PR #395)
 C2  report view-model              (big locality win; output-change risk)
 C7  CLI → service                  (exit-code-sensitive)
@@ -415,5 +420,5 @@ parity is contractual and benefits from a stabilised shared layer underneath it.
 | C6 | `Change` factory | Proposed | — |
 | C7 | CLI → service layer | Proposed | — |
 | C8 | ABICC compat adapter | Proposed | — |
-| C9 | Relocate confidence computation | Proposed | — |
+| C9 | Relocate confidence computation | Done | #395 |
 | C10 | Split `model.py` | Proposed | — |

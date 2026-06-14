@@ -18,8 +18,8 @@ import pytest
 
 from abicheck.checker import _ROOT_TYPE_CHANGE_KINDS, Change, DiffResult, compare
 from abicheck.checker_policy import ChangeKind, Verdict
+from abicheck.confidence import _compute_confidence
 from abicheck.diff_filtering import (
-    _compute_confidence,
     _enrich_affected_symbols,
     _enrich_source_locations,
 )

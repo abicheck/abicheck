@@ -49,13 +49,13 @@ from .checker_types import (  # noqa: F401
     DiffResult,
     LibraryMetadata,
 )
+from .confidence import _compute_confidence
 from .detector_registry import registry as _detector_registry
 from .diff_elf_layout import (  # noqa: F401 — triggers detector registration
     _diff_elf_layout,
 )
 from .diff_filtering import (  # noqa: F401
     _ROOT_TYPE_CHANGE_KINDS,
-    _compute_confidence,
     _deduplicate_ast_dwarf,
     _deduplicate_cross_detector,
     _downgrade_opaque_struct_changes,
