@@ -147,6 +147,31 @@ def test_exported_not_public_flags_elf_only_visibility_symbol():
     ]
 
 
+def test_exported_not_public_flags_exported_private_header_symbol():
+    # A symbol declared only in a private header (origin PRIVATE_HEADER, not
+    # EXPORT_ONLY) but actually exported is undocumented ABI surface too (Codex
+    # review). An un-exported private decl must NOT be flagged.
+    snap = _snap(elf=_elf("_Z8exportedv"))
+    snap.functions = [
+        Function(
+            name="exported",
+            mangled="_Z8exportedv",
+            return_type="void",
+            origin=ScopeOrigin.PRIVATE_HEADER,
+        ),
+        Function(
+            name="internal",
+            mangled="_Z8internalv",
+            return_type="void",
+            origin=ScopeOrigin.PRIVATE_HEADER,
+        ),
+    ]
+    res = run_crosschecks(snap)
+    assert [c.symbol for c in _findings_of(res, ChangeKind.EXPORTED_NOT_PUBLIC)] == [
+        "_Z8exportedv"
+    ]
+
+
 def test_exported_not_public_clean_when_everything_declared():
     snap = _snap(elf=_elf("_Z3fooi"))
     snap.functions = [
@@ -199,7 +224,6 @@ def test_public_not_exported_flags_missing_symbol():
         lambda f: setattr(f, "is_pure_virtual", True),
         lambda f: setattr(f, "is_deleted", True),
         lambda f: setattr(f, "is_static", True),
-        lambda f: setattr(f, "visibility", Visibility.HIDDEN),
         lambda f: setattr(f, "access", AccessLevel.PRIVATE),
         lambda f: setattr(f, "mangled", ""),
         lambda f: setattr(f, "name", "vec<int>"),
@@ -218,6 +242,27 @@ def test_public_not_exported_excludes_non_exporting_decls(mutate):
     snap.functions = [fn]
     res = run_crosschecks(snap)
     assert _findings_of(res, ChangeKind.PUBLIC_NOT_EXPORTED) == []
+
+
+@pytest.mark.parametrize("vis", [Visibility.HIDDEN, Visibility.ELF_ONLY])
+def test_public_not_exported_flags_non_public_visibility(vis):
+    # castxml derives visibility from the export table, so a public-header decl
+    # that the binary fails to export is HIDDEN/ELF_ONLY here — it must still be
+    # flagged, not skipped on visibility (Codex review).
+    snap = _snap(elf=_elf("_Z3fooi"))
+    snap.functions = [
+        Function(
+            name="bar",
+            mangled="_Z3barv",
+            return_type="void",
+            visibility=vis,
+            origin=ScopeOrigin.PUBLIC_HEADER,
+        ),
+    ]
+    res = run_crosschecks(snap)
+    assert [c.symbol for c in _findings_of(res, ChangeKind.PUBLIC_NOT_EXPORTED)] == [
+        "_Z3barv"
+    ]
 
 
 def test_public_not_exported_ignores_non_default_version_alias():
@@ -397,6 +442,27 @@ def test_private_header_leak_flags_public_api_exposing_private_type():
     assert len(hits) == 1
     assert hits[0].caused_by_type == "Impl"
     assert hits[0].confidence == Confidence.MEDIUM
+
+
+def test_private_header_leak_flags_non_public_generated_type():
+    # A type from a non-public generated header (origin GENERATED) is private,
+    # not public — exposing it in a public API leaks an un-installed header
+    # (Codex review).
+    snap = _snap(elf=_elf("_Z3usev"))
+    snap.functions = [
+        Function(
+            name="use",
+            mangled="_Z3usev",
+            return_type="InternalConfig *",
+            origin=ScopeOrigin.PUBLIC_HEADER,
+        ),
+    ]
+    snap.types = [
+        RecordType(name="InternalConfig", kind="struct", origin=ScopeOrigin.GENERATED),
+    ]
+    res = run_crosschecks(snap)
+    hits = _findings_of(res, ChangeKind.PRIVATE_HEADER_LEAK)
+    assert [c.caused_by_type for c in hits] == ["InternalConfig"]
 
 
 def test_private_header_leak_skips_pimpl_with_public_forward_decl():

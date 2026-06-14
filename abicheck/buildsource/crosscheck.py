@@ -61,7 +61,6 @@ from ..model import (
     Function,
     ScopeOrigin,
     Variable,
-    Visibility,
 )
 
 #: Cross-check fact-schema version. Independent of every other buildsource
@@ -197,27 +196,31 @@ def run_crosschecks(
 def _check_exported_not_public(
     snapshot: AbiSnapshot, cfg: CrosscheckConfig
 ) -> _CheckOutput:
-    """Exported-but-undeclared symbols (EXPORT_ONLY provenance), RISK.
+    """Exported symbols with no *public* declaration, RISK.
 
-    Reuses the ADR-024/ADR-015 provenance classification already on every
-    declaration: a function/variable whose ``origin`` is ``EXPORT_ONLY`` is, by
-    construction, present in the binary's export table but in no public header.
-    The classification only runs when a public-header set was supplied, so the
-    check skips cleanly on an ELF-only / no-header snapshot.
+    Reuses the ADR-024/ADR-015 provenance classification on every declaration. A
+    symbol is "undocumented" when the binary exports it but no public header
+    declares it — which is **not** only the ``EXPORT_ONLY`` case (no header at
+    all): a symbol declared solely in a *private* or *non-installed generated*
+    header is exported accidental ABI surface too. So we flag any exported decl
+    whose origin is not ``PUBLIC_HEADER`` (Codex review):
 
-    Gating on ``origin == EXPORT_ONLY`` alone (not visibility) is deliberate: the
-    provenance pass only sets that origin for ``Visibility.ELF_ONLY`` symbols
-    (``provenance.tag_provenance``), so a real exported-but-undocumented symbol
-    carries ELF_ONLY visibility — requiring ``PUBLIC`` here would miss every one
-    of them (Codex review).
+    - ``EXPORT_ONLY`` is exported by construction (no header), so it always
+      counts;
+    - a ``PRIVATE_HEADER`` / ``GENERATED`` decl counts only when the binary
+      actually exports its symbol (it may be an unexported internal otherwise).
+
+    Provenance only runs when a public-header set was supplied, so the check
+    skips cleanly on an ELF-only / no-header snapshot.
     """
     providers = [PROVIDER_BINARY_EXPORTS, PROVIDER_PUBLIC_HEADER_AST]
     if not _origin_resolvable(snapshot):
         return _CheckOutput([], "skipped", _NO_PROVENANCE, providers)
 
+    exported = _exported_symbol_names(snapshot)
     findings: list[Change] = []
     for fn in snapshot.functions:
-        if fn.origin == ScopeOrigin.EXPORT_ONLY:
+        if _is_undocumented_export(fn, exported):
             findings.append(
                 _change(
                     ChangeKind.EXPORTED_NOT_PUBLIC,
@@ -231,7 +234,7 @@ def _check_exported_not_public(
                 )
             )
     for var in snapshot.variables:
-        if var.origin == ScopeOrigin.EXPORT_ONLY:
+        if _is_undocumented_export(var, exported):
             findings.append(
                 _change(
                     ChangeKind.EXPORTED_NOT_PUBLIC,
@@ -494,6 +497,36 @@ def _origin_resolvable(snapshot: AbiSnapshot) -> bool:
     return False
 
 
+#: Origin that puts a declaration on the *public* surface. Only ``PUBLIC_HEADER``
+#: qualifies — provenance classifies a public generated header as ``PUBLIC_HEADER``
+#: first, so a bare ``GENERATED`` origin means a generated-but-non-public header
+#: (Codex review), which is undocumented/private surface, not public.
+_PUBLIC_ORIGIN = ScopeOrigin.PUBLIC_HEADER
+
+#: Non-public origins whose symbol, *if the binary exports it*, is accidental ABI
+#: surface (``exported_not_public``). ``EXPORT_ONLY`` is handled separately
+#: because it is exported by construction with no header at all.
+_NON_PUBLIC_DECL_ORIGINS = frozenset(
+    {ScopeOrigin.PRIVATE_HEADER, ScopeOrigin.GENERATED}
+)
+
+
+def _is_undocumented_export(
+    decl: Function | Variable, exported: set[str] | None
+) -> bool:
+    """Whether *decl* is an exported symbol that no public header declares.
+
+    ``EXPORT_ONLY`` decls are exported with no header at all → always count. A
+    ``PRIVATE_HEADER`` / ``GENERATED`` decl counts only when the binary actually
+    exports its symbol (otherwise it is an unexported internal, not ABI surface).
+    """
+    if decl.origin == ScopeOrigin.EXPORT_ONLY:
+        return True
+    if decl.origin in _NON_PUBLIC_DECL_ORIGINS:
+        return exported is not None and bool(decl.mangled) and decl.mangled in exported
+    return False
+
+
 def _exported_symbol_names(snapshot: AbiSnapshot) -> set[str] | None:
     """The binary's exported symbol names, or ``None`` if no export table exists.
 
@@ -526,11 +559,15 @@ def _has_export_obligation(fn: Function) -> bool:
     """Whether *fn* promises a dynamic symbol (so absence from exports is a risk).
 
     Conservative on purpose (ADR-035 D4): exclude everything that legitimately
-    emits no exported symbol — inline, pure-virtual, deleted, hidden-visibility,
-    non-public access, mangle-less, and template-shaped declarations.
+    emits no exported symbol — inline, pure-virtual, deleted, static, non-public
+    access, mangle-less, and template-shaped declarations.
+
+    Deliberately **not** gated on ``visibility``: castxml derives
+    ``Visibility.PUBLIC`` from the export table, so the very decl this check looks
+    for (declared public, *not* exported) is ``HIDDEN``/``ELF_ONLY`` here —
+    gating on PUBLIC would skip every real case (Codex review). The obligation
+    rests on the public-header source declaration instead.
     """
-    if fn.visibility != Visibility.PUBLIC:
-        return False
     if fn.access != AccessLevel.PUBLIC:
         return False
     if fn.origin != ScopeOrigin.PUBLIC_HEADER:
@@ -555,10 +592,10 @@ def _var_has_export_obligation(var: Variable) -> bool:
     """Whether *var* is genuine extern data that must export a symbol.
 
     Header constants (a ``const``/``constexpr`` variable carrying a compile-time
-    ``value``) are inlined and emit no symbol, so they are excluded.
+    ``value``) are inlined and emit no symbol, so they are excluded. Not gated on
+    ``visibility`` — same export-table-derived-visibility reason as
+    :func:`_has_export_obligation` (Codex review).
     """
-    if var.visibility != Visibility.PUBLIC:
-        return False
     if var.access != AccessLevel.PUBLIC:
         return False
     if var.origin != ScopeOrigin.PUBLIC_HEADER:
@@ -676,22 +713,31 @@ def _referenced_private_types(
     return sorted(hit)
 
 
-#: Origins that put a type *on* the public surface, so a same-named private
-#: definition is the legitimate opaque-handle/PIMPL pattern, not a leak.
-_PUBLIC_TYPE_ORIGINS = frozenset({ScopeOrigin.PUBLIC_HEADER, ScopeOrigin.GENERATED})
+#: Origins that put a type *on* the public surface, so a same-named definition
+#: elsewhere is not a leak. Only ``PUBLIC_HEADER`` qualifies — provenance maps a
+#: public generated header to ``PUBLIC_HEADER`` first, so a bare ``GENERATED``
+#: origin is a non-public generated header (Codex review).
+_PUBLIC_TYPE_ORIGINS = frozenset({ScopeOrigin.PUBLIC_HEADER})
+
+#: Origins whose type, if exposed by a public API, is a private-header leak: a
+#: project-private header or a *non-public* generated header (e.g.
+#: ``build/generated/internal_config.h``). System headers are excluded (they are
+#: third-party, not the library's own un-shipped surface).
+_PRIVATE_TYPE_ORIGINS = frozenset({ScopeOrigin.PRIVATE_HEADER, ScopeOrigin.GENERATED})
 
 
 def _private_type_names(snapshot: AbiSnapshot) -> dict[str, str]:
-    """Map matchable token → canonical name for records/enums *only* in private headers.
+    """Map matchable token → canonical name for records/enums only in private headers.
 
     Each private type contributes its canonical name and (when namespaced) its
     trailing segment, both pointing at the canonical name so a match on either
-    spelling collapses to one finding.
+    spelling collapses to one finding. "Private" here is a project-private or
+    non-public generated header (``_PRIVATE_TYPE_ORIGINS``).
 
-    A type that *also* has a public-header (or generated) declaration is excluded
-    — the common opaque-handle/PIMPL pattern forward-declares ``class Impl;`` in a
-    public header and defines it privately, so a public API taking ``Impl *`` is
-    not a leak (Codex review).
+    A type that *also* has a public-header declaration is excluded — the common
+    opaque-handle/PIMPL pattern forward-declares ``class Impl;`` in a public
+    header and defines it privately, so a public API taking ``Impl *`` is not a
+    leak (Codex review).
 
     Public-type *tokens* (canonical names **and** their trailing segments) are
     collected first, and any private canonical name or trailing-segment alias that
@@ -699,17 +745,18 @@ def _private_type_names(snapshot: AbiSnapshot) -> dict[str, str]:
     ``detail::Impl`` from registering the bare token ``Impl`` as a leak candidate,
     which would mis-flag a public ``Impl *`` signature (Codex review).
     """
+    # (name, origin) for every record and enum, so both type kinds are scanned
+    # with one pass and no `object`-typed merged iteration.
+    type_decls = [(rec.name, rec.origin) for rec in snapshot.types] + [
+        (en.name, en.origin) for en in snapshot.enums
+    ]
+
     public_tokens: set[str] = set()
-    for rec in snapshot.types:
-        if rec.origin in _PUBLIC_TYPE_ORIGINS and rec.name:
-            public_tokens.add(rec.name)
-            if "::" in rec.name:
-                public_tokens.add(rec.name.rsplit("::", 1)[1])
-    for en in snapshot.enums:
-        if en.origin in _PUBLIC_TYPE_ORIGINS and en.name:
-            public_tokens.add(en.name)
-            if "::" in en.name:
-                public_tokens.add(en.name.rsplit("::", 1)[1])
+    for name, origin in type_decls:
+        if origin in _PUBLIC_TYPE_ORIGINS and name:
+            public_tokens.add(name)
+            if "::" in name:
+                public_tokens.add(name.rsplit("::", 1)[1])
 
     names: dict[str, str] = {}
 
@@ -724,12 +771,9 @@ def _private_type_names(snapshot: AbiSnapshot) -> dict[str, str]:
             if segment not in public_tokens:
                 names.setdefault(segment, name)
 
-    for rec in snapshot.types:
-        if rec.origin == ScopeOrigin.PRIVATE_HEADER and rec.name:
-            _register(rec.name)
-    for en in snapshot.enums:
-        if en.origin == ScopeOrigin.PRIVATE_HEADER and en.name:
-            _register(en.name)
+    for name, origin in type_decls:
+        if origin in _PRIVATE_TYPE_ORIGINS and name:
+            _register(name)
     return names
 
 
