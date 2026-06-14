@@ -232,6 +232,46 @@ confidence per evidence source. A reader always sees exactly which source-analys
 depth (S0…S6) was reached and into which L-layer it landed; never a bare
 "source scan ran".
 
+### Two CLI knobs: `--depth` (L) and `--max-source-method` (S)
+
+The S-axis is controllable, but as a **cost cap**, not a parallel selector
+(ADR-035 D1: L stays the authority/primary axis):
+
+```text
+  --depth [auto|headers|build|source|full|graph]   WHAT evidence (L-axis ceiling)
+  --max-source-method [auto|s0|s1|s2|s3|s4|s5|s6]   HOW expensive source analysis
+                                                    may get (S-axis cost cap)
+```
+
+Both default `auto`. They compose by `min()`: each L-layer needs a minimum
+S-method, the engine runs the **cheapest S that yields the requested L**, and
+never exceeds the S-cap or `--budget`. Effective work =
+`min(what --depth needs, --max-source-method, --budget)`.
+
+Minimum S per L-layer:
+
+| Want (L) | Needs (min S) |
+|---|---|
+| L2 headers | — (castxml, not S-scaled) |
+| L3 build | S1 |
+| L5 structural | S2 |
+| L5 semantic edges | S4 |
+| L4 source | S5 (scoped) / S6 (full) |
+
+**Conflict rule:** if `--depth` requests a layer whose minimum S exceeds the cap,
+that layer is reported `skipped (source-method cap sN < required sM)` — never an
+error. The S-cap wins on cost; `--depth` is best-effort within it. Examples:
+
+```bash
+abicheck scan ... --max-source-method s2          # build+preprocessor, no AST; L4 skipped (cap)
+abicheck scan ... --depth source --max-source-method s3  # L4 not materialized; report says why
+abicheck scan ... --depth full --max-source-method s6    # forensic deep
+```
+
+99% of users set neither — `auto` + risk score + `--budget` pick. The S-cap is for
+guards like "this CI job must never invoke the compiler/AST". `.abicheck.yml`
+mirror: `source.max_method: s5`.
+
 ### Python API — `abicheck/service.py`
 
 ```python
