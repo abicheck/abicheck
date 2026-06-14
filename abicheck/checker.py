@@ -478,7 +478,11 @@ def compare(
             file (i.e. the file's own ``base_policy`` field takes precedence).
     """
 
-    # Run all registered detectors via the self-registering registry.
+    # Discover any diff_* detector modules not already imported above, then run
+    # all registered detectors via the self-registering registry. ensure_loaded
+    # is a no-op for the modules checker already imports (they fix the canonical
+    # registration order); it only catches newly-added modules.
+    _detector_registry.ensure_loaded()
     changes, detector_results = _detector_registry.run_all(old, new)
 
     # Merge externally-computed findings (e.g. build-configuration / probe-matrix

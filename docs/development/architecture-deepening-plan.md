@@ -176,31 +176,42 @@ Adding a future binary format becomes a new handler file, not edits to `dump()`.
 
 ---
 
-### C4 — Detector auto-discovery (drop the import manifest) *(recommended next)*
+### C4 — Detector auto-discovery (drop the import manifest) *(implemented — PR #395)*
 
 **Problem.** The detector registry's "no manual list" promise is undercut by
-**15 side-effect imports** in `checker.py`, each tagged
+side-effect imports in `checker.py` tagged
 `# noqa: F401 — triggers detector registration`. A new `diff_*` module that
 forgets to get added to that block contributes *zero* detectors, with no error.
 
 **Goal.** Adding a detector module requires no `checker.py` edit; a forgotten
-module fails a gate instead of silently doing nothing.
+module is impossible to skip silently.
 
-**Approach.**
-1. Add `registry.ensure_loaded()`: `pkgutil.iter_modules` over the `abicheck`
-   package for the `diff_` prefix, **sorted** for determinism,
-   `importlib.import_module` each.
-2. Call it at the top of `compare()`; delete the 15 `# noqa: F401` imports.
-3. Add a `check_ai_readiness.py` check: discovered detector count ≥ a baseline,
-   so a silently-skipped module fails CI.
+**What was implemented (order-preserving variant).** Investigation surfaced two
+facts the original sketch missed:
 
-**Edge cases / risks.**
-- Registration order matters (the registry sorts on it) — the walk must be
-  deterministic; sort module names before importing.
-- Keep the side effect explicit via `ensure_loaded()` rather than import-time
-  magic.
+1. Most of `checker`'s `diff_*` imports are **not** pure side-effects — they also
+   pull real symbols (`diff_filtering` helpers, `diff_platform`/`diff_types`
+   functions, …), so the block cannot simply be deleted.
+2. **Registration order feeds post-processing dedup.** An empirical check
+   confirmed importing *all* `diff_*` modules registers exactly the current 49
+   detectors (no additions), but reordering them could change dedup outcomes.
 
-**Risk:** low, fully reversible. **Do this first.**
+So C4 was implemented as a **safety net that preserves order**:
+`registry.ensure_loaded()` walks `pkgutil.iter_modules(abicheck.__path__)` for
+the `diff_` prefix (sorted) and imports each. It is called at the top of
+`compare()`. Because `checker`'s explicit imports already ran at module load
+(fixing the canonical order), `ensure_loaded()` is a **no-op for the existing
+set** — the modules are cached, so re-import does not re-register. A *new*
+`diff_*` module is discovered automatically and appended after the existing
+detectors, deterministically — **no `checker` edit required**, and zero
+behaviour change today.
+
+Verification gate is a test (`tests/test_detector_discovery.py`) rather than a
+readiness check: it asserts every `diff_*` module is imported after
+`ensure_loaded()` (the silent-skip footgun), that the call is idempotent and
+order-stable, and a soft detector-count floor.
+
+**Risk:** low; behaviour-preserving (verified: registered set + order unchanged).
 
 ---
 
@@ -374,7 +385,7 @@ Ordered by risk-adjusted payoff. Cheap, isolated wins first; output- and
 parity-changing work last.
 
 ```
-C4  detector auto-discovery        (low risk, quick)
+C4  detector auto-discovery        ✅ done (PR #395)
 C9  relocate confidence            (low risk, locality)
 C1  name classification            ✅ done (PR #395)
 C2  report view-model              (big locality win; output-change risk)
@@ -399,7 +410,7 @@ parity is contractual and benefits from a stabilised shared layer underneath it.
 | C1 | Name classification module | Done | #395 |
 | C2 | Report view-model | Proposed | — |
 | C3 | Binary-format handler registry | Proposed | — |
-| C4 | Detector auto-discovery | Proposed | — |
+| C4 | Detector auto-discovery | Done | #395 |
 | C5 | Synthetic detectors → registry | Proposed | — |
 | C6 | `Change` factory | Proposed | — |
 | C7 | CLI → service layer | Proposed | — |

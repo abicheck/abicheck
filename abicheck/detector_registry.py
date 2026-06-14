@@ -44,6 +44,8 @@ Usage in checker::
 """
 from __future__ import annotations
 
+import importlib
+import pkgutil
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
@@ -86,6 +88,33 @@ class DetectorRegistry:
         self._detectors: list[_DetectorEntry] = []
         self._names: set[str] = set()
         self._counter: int = 0
+        self._discovered: bool = False
+
+    def ensure_loaded(self) -> None:
+        """Import every ``abicheck.diff_*`` module so its detectors register.
+
+        Safety net against the historical footgun where a new ``diff_*`` module
+        had to be added by hand to ``checker``'s side-effect import block — a
+        module that was forgotten contributed zero detectors with no error.
+
+        This runs *after* ``checker`` has already imported the modules it needs
+        for real symbols (which fixes the canonical registration order), so for
+        the existing detector set it is a no-op: the modules are already in
+        ``sys.modules`` and importing them again does not re-register. A *new*
+        ``diff_*`` module is discovered here automatically, appended after the
+        existing detectors in a deterministic (sorted-by-name) order — no
+        ``checker`` edit required. Idempotent and cheap after the first call.
+        """
+        if self._discovered:
+            return
+        self._discovered = True
+        import abicheck
+
+        for info in sorted(
+            pkgutil.iter_modules(abicheck.__path__), key=lambda m: m.name
+        ):
+            if info.name.startswith("diff_"):
+                importlib.import_module(f"abicheck.{info.name}")
 
     def detector(
         self,
