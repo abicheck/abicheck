@@ -139,7 +139,14 @@ _RULES: tuple[_Rule, ...] = (
     _Rule(
         PatternKind.ATTRIBUTE_PACKED,
         PatternCategory.LAYOUT,
-        re.compile(r"__attribute__\s*\(\s*\([^)]*\bpacked\b"),
+        # Match `packed`/`__packed__` anywhere in the attribute list — including
+        # after nested args, e.g. `__attribute__((aligned(8), packed))` — by
+        # scanning to the next statement boundary rather than the first `)`. Also
+        # covers the C++11 `[[gnu::packed]]` spelling.
+        re.compile(
+            r"__attribute__\s*\(\s*\([^;{]*\b(?:__)?packed(?:__)?\b"
+            r"|\[\[[^;{]*\bpacked\b"
+        ),
         True,
         "packed attribute changes record layout",
     ),
@@ -210,12 +217,16 @@ _RULES: tuple[_Rule, ...] = (
     ),
 )
 
-#: Matches both explicit instantiation (``template class Foo<int>;``) and a
-#: forward ``extern template`` declaration in one pass; the optional ``extern``
-#: group selects the kind so the two never double-count the same span.
-_TEMPLATE_RE = re.compile(
-    r"\b(?P<extern>extern\s+)?template\s+(?P<what>class|struct|union)\b"
-)
+#: Matches an explicit instantiation (``template class Foo<int>;``,
+#: ``template void api<int>();``) or a forward ``extern template`` declaration
+#: in one pass. The distinguisher from a template *definition* is that the
+#: ``template`` keyword is followed by a declaration token, not ``<`` (which
+#: starts the parameter list of ``template <...>`` / ``template<...>``); the
+#: ``(?<![.>])`` guard rejects the dependent-name disambiguator ``x.template
+#: foo<...>()`` / ``p->template ...``. The optional ``extern`` group selects the
+#: kind so the two never double-count the same span. This covers both class and
+#: function template instantiations (ADR-035 D2).
+_TEMPLATE_RE = re.compile(r"\b(?P<extern>extern\s+)?(?<![.>])template\s+(?!<)")
 
 
 @dataclass(frozen=True)

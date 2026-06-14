@@ -56,6 +56,20 @@ def _kinds(text: str) -> set[PatternKind]:
             PatternKind.ATTRIBUTE_PACKED,
         ),
         (
+            "struct __attribute__((aligned(8), packed)) S { char a; int b; };",
+            PatternKind.ATTRIBUTE_PACKED,
+        ),
+        (
+            "struct __attribute__((__packed__)) S { char a; int b; };",
+            PatternKind.ATTRIBUTE_PACKED,
+        ),
+        ("struct [[gnu::packed]] S { char a; int b; };", PatternKind.ATTRIBUTE_PACKED),
+        (
+            "template void api<int>();",
+            PatternKind.EXPLICIT_TEMPLATE_INSTANTIATION,
+        ),
+        ("extern template int api<int>();", PatternKind.EXTERN_TEMPLATE),
+        (
             'void f() __attribute__((visibility("hidden")));',
             PatternKind.ATTRIBUTE_VISIBILITY,
         ),
@@ -91,6 +105,41 @@ def test_extern_template_not_double_counted_as_explicit() -> None:
 
 def test_extern_cpp_not_flagged_as_extern_c() -> None:
     assert PatternKind.EXTERN_C not in _kinds('extern "C++" void f();')
+
+
+@pytest.mark.parametrize(
+    "definition",
+    [
+        "template <typename T> class Foo {};",
+        "template<typename T> void f(T x);",
+        "template <class T, class U> struct Pair {};",
+    ],
+)
+def test_template_definition_not_flagged_as_instantiation(definition: str) -> None:
+    # A template *definition* (keyword followed by `<`) is not an instantiation.
+    kinds = _kinds(definition)
+    assert PatternKind.EXPLICIT_TEMPLATE_INSTANTIATION not in kinds
+    assert PatternKind.EXTERN_TEMPLATE not in kinds
+
+
+@pytest.mark.parametrize(
+    "disambiguator",
+    [
+        "obj.template foo<int>();",
+        "ptr->template bar<int>();",
+    ],
+)
+def test_dependent_template_disambiguator_not_flagged(disambiguator: str) -> None:
+    # `x.template f<...>()` / `p->template ...` is a member-access disambiguator,
+    # not an explicit instantiation.
+    assert PatternKind.EXPLICIT_TEMPLATE_INSTANTIATION not in _kinds(disambiguator)
+
+
+def test_function_template_instantiation_escalates() -> None:
+    res = PatternScanResult(
+        facts=scan_text("template void api<int>();", path="h.h"), files_scanned=1
+    )
+    assert res.should_escalate is True
 
 
 # ── Comment / string-literal blanking avoids false positives ─────────────────
