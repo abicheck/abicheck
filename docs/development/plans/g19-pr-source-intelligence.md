@@ -169,15 +169,19 @@ not the basic flow.
 **Optional — scope / escalation (defaults are fine for small/medium repos)**
 
 ```text
-  --mode [pr|pr-deep|baseline|audit]   default pr (D9 asymmetry)
-  --depth [auto|headers|build|source|full|graph]
-                                       ceiling on how deep to go; default auto
-                                       (risk picks). headers=L2, build=L3,
-                                       source=L4, full=L4 full-scope, graph=L5.
+  --mode [pr|pr-deep|baseline|audit]   fixed preset of (L,S); default pr (D9)
+  --source-method [s0|s1|s2|s3|s4|s5|s6|auto]
+                                       exact source-analysis level to reach;
+                                       deterministic. auto = risk-driven (opt-in,
+                                       local/dev). See the level table below.
+  --depth [headers|build|source|full|graph]
+                                       same target expressed on the L-axis
+                                       (1:1 with --source-method); pick one.
   --since GITREF                       focus the scan on files changed vs a git
                                        ref (e.g. origin/main); else scans broadly
   --changed-path PATH                  same focusing, listed by hand (repeatable)
-  --budget DURATION (e.g. 15m)         CI time ceiling; report what got covered
+  --budget DURATION (e.g. 15m)         optional guard; FAILS on overflow, never
+                                       silently shrinks scope (avoid for gating CI)
   --max-tus N                          targeted-AST TU cap
   --partial-ok / --no-partial-ok       default on; partial result is success
   --estimate                           dry-run: print per-layer cost, scan nothing
@@ -232,45 +236,50 @@ confidence per evidence source. A reader always sees exactly which source-analys
 depth (S0…S6) was reached and into which L-layer it landed; never a bare
 "source scan ran".
 
-### Two CLI knobs: `--depth` (L) and `--max-source-method` (S)
+### Selecting the level: `--source-method` (S) and/or `--depth` (L)
 
-The S-axis is controllable, but as a **cost cap**, not a parallel selector
-(ADR-035 D1: L stays the authority/primary axis):
+The level is an **explicit, exact target you choose** — not a ceiling, not
+auto-picked. Pick whichever axis you think in; they describe the same run:
 
 ```text
-  --depth [auto|headers|build|source|full|graph]   WHAT evidence (L-axis ceiling)
-  --max-source-method [auto|s0|s1|s2|s3|s4|s5|s6]   HOW expensive source analysis
-                                                    may get (S-axis cost cap)
+  --source-method [s0|s1|s2|s3|s4|s5|s6]   run source analysis AT this method
+  --depth [headers|build|source|full|graph]   express the target as an L ceiling
 ```
 
-Both default `auto`. They compose by `min()`: each L-layer needs a minimum
-S-method, the engine runs the **cheapest S that yields the requested L**, and
-never exceeds the S-cap or `--budget`. Effective work =
-`min(what --depth needs, --max-source-method, --budget)`.
+`--source-method sN` means *reach level N* for the in-scope files — deterministic:
+same inputs → same scan, every CI run. It is not a "max that may do less"; it
+always reaches N (the only way it falls short is a genuinely missing tool, e.g. no
+clang, which is **reported**, not silently downgraded). The two knobs map 1:1, so
+you never need both:
 
-Minimum S per L-layer:
+| `--source-method` | equivalent `--depth` | populates (L) |
+|---|---|---|
+| s0 | (classify only) | — |
+| s1 | build | L3 |
+| s2 | build (+macros/includes) | L3, L5 structural |
+| s3 | (pre-scan) | pre-scan facts |
+| s4 | graph | L5 semantic edges |
+| s5 | source | L4 (scoped) + L5 edges |
+| s6 | full | L4 full-scope |
 
-| Want (L) | Needs (min S) |
-|---|---|
-| L2 headers | — (castxml, not S-scaled) |
-| L3 build | S1 |
-| L5 structural | S2 |
-| L5 semantic edges | S4 |
-| L4 source | S5 (scoped) / S6 (full) |
+If both are given and disagree, the engine takes the **higher** (more evidence),
+deterministically — never the lower. There is no `min()`/cap behaviour.
 
-**Conflict rule:** if `--depth` requests a layer whose minimum S exceeds the cap,
-that layer is reported `skipped (source-method cap sN < required sM)` — never an
-error. The S-cap wins on cost; `--depth` is best-effort within it. Examples:
+### Determinism for CI (no time-bound, no auto by default)
 
-```bash
-abicheck scan ... --max-source-method s2          # build+preprocessor, no AST; L4 skipped (cap)
-abicheck scan ... --depth source --max-source-method s3  # L4 not materialized; report says why
-abicheck scan ... --depth full --max-source-method s6    # forensic deep
-```
+For reproducible gating, the scan scope is fixed by the level you pick, not by the
+machine or the clock:
 
-99% of users set neither — `auto` + risk score + `--budget` pick. The S-cap is for
-guards like "this CI job must never invoke the compiler/AST". `.abicheck.yml`
-mirror: `source.max_method: s5`.
+- **Default per `--mode` is a fixed preset**, not risk-varying: `pr` = S1 + S3
+  always-on + targeted S5; `baseline` = S6. Same commit pair → identical scan.
+- **`auto`** (risk-driven escalation, D3) is **opt-in** (`--source-method auto`),
+  for local/dev only — never the silent CI default.
+- **`--budget`** is optional and, on overflow, **fails** (nonzero exit); it never
+  silently shrinks scope. For gating CI, **pin a level — do not use a time bound.**
+- POI focusing (D7) only selects *which* in-scope TUs get the chosen method; for a
+  fixed diff it is deterministic, so it does not affect CI consistency.
+
+`.abicheck.yml` mirror: `source.method: s5` (exact level; `auto` only if opted in).
 
 ### Python API — `abicheck/service.py`
 

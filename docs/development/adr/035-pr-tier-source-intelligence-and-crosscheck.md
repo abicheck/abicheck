@@ -90,12 +90,13 @@ must not be conflated:
   axis — they are the **pipeline of methods that produce the L3–L5 evidence**,
   and the granularity at which coverage is reported.
 
-So the S-scale is kept as a real, named concept (source analysis is genuinely six
-graduated methods, not one "parse the AST" step), but it is *orthogonal* to L: an
-S-method runs and its output lands in an L-layer. The earlier worry — exposing
-`S0..S6` as a parallel CLI/config selector that forks the evidence model — is
-avoided by keeping the **user knob and authority on the L-axis** while S describes
-the internal provider ladder and the reporting breakdown. Mapping:
+So the S-scale is a real, named concept (source analysis is genuinely six
+graduated methods, not one "parse the AST" step), *orthogonal* to L: an S-method
+runs and its output lands in an L-layer. **Both axes are user-selectable** —
+`--source-method sN` pins the source-analysis method, `--depth` sets the L-layer
+ceiling; users pick whichever axis they think in. S being selectable does not
+fork the *evidence/authority* model: authority stays on the L-axis (an L3–L5 fact
+never alone gates `BREAKING`, whatever S produced it). Mapping:
 
 | S-method | What it does | Tool | Produces (L) | Cost |
 |---|---|---|---|---|
@@ -131,20 +132,28 @@ compile DB and no compiler:
 These feed D3 (escalation) and D4 (cross-checks). Output is normalized facts in
 the existing `buildsource` schema, with coverage reported (ADR-033 D6/D9).
 
-### D3. Risk-scored escalation and budgeted orchestration via a `scan` command
+### D3. Explicit deterministic level; risk-scored `auto` and budget are opt-in
 
-- Promote `recommend_collect_mode()` to compute a **numeric risk score** from a
-  `risk_rules` config block (path globs → weights: public header `+50`, export
-  map `+50`, ABI-affecting flag `+40`, exported-symbol definition `+30`,
+The level is **chosen explicitly and is deterministic** so a CI gate produces the
+same scan for the same inputs:
+
+- The user picks the level on either axis (`--source-method sN` or `--depth`,
+  D1). Each `--mode` (`pr`/`pr-deep`/`baseline`) is a **fixed preset** of (L,S),
+  not risk-varying.
+- A **numeric risk score** (from a `risk_rules` config block: public header `+50`,
+  export map `+50`, ABI-affecting flag `+40`, exported-symbol definition `+30`,
   reachable-from-public `+25`, template-instantiation change `+35`,
-  docs/tests-only `-100`). Score selects the evidence depth (thresholds map to
-  the existing `off`/`build`/`source-changed`/`source-target`/`graph-*` modes).
+  docs/tests-only `-100`) drives **two opt-in** things only: the `auto` level
+  (`--source-method auto`, local/dev convenience), and POI focusing within the
+  chosen level (D7, deterministic for a fixed diff). Risk **never** silently
+  changes the level of a CI run that pinned one.
+- A **time budget** is optional and, on overflow, **fails** (nonzero exit) — it
+  never silently shrinks scope. For gating CI, pin a level; do not use a budget.
 - Add a **`scan`** subcommand (`abicheck/cli_scan.py`, registered per the
-  CLAUDE.md sibling-module pattern) that orchestrates: classify → always-on
-  tier (D2) → escalate L3/L4/L5 by score within a **time/TU budget** → emit one
-  coverage- and confidence-annotated report. Partial results are first-class:
-  the report states exactly which tiers ran and at what cache-hit rate, never a
-  bare "source scan failed". `scan` is a convenience front-end over existing
+  CLAUDE.md sibling-module pattern) that orchestrates: classify → always-on tier
+  (D2) → run the chosen L/S level (POI-focused) → emit one coverage- and
+  confidence-annotated report stating exactly which S-method/L-layer ran, never a
+  bare "source scan failed". `scan` is a front-end over existing
   `dump`/`compare`/`collect`; it adds no new authority.
 
 ### D4. Cross-source validation engine (new findings, RISK/API_BREAK tier)
@@ -256,8 +265,9 @@ The default depth differs by *when* the scan runs:
   (`--source-abi-scope full`), all cross-checks, single-release audit, and raw
   facts archived for cache warmup. Computed once, amortized, authoritative, and
   cached in the baseline registry (ADR-022).
-- **PR / CI** → **scoped**: always-on tier (D2) every time; L3/L4/L5 escalated
-  only by risk score (D3) and the POI set (D7), within a budget, partial-ok.
+- **PR / CI** → **scoped**: always-on tier (D2) every time, plus a **fixed,
+  pinned** L/S level (the `pr` preset, or whatever the user pins), POI-focused
+  (D7). Deterministic — same inputs, same scan. `auto`/budget stay opt-in (D3).
 
 The asymmetry is the point: the baseline is produced once so it can afford full
 depth and gives the PR a rich, cached fact set to diff and focus against; the PR
