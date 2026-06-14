@@ -266,6 +266,17 @@ def test_code_after_block_comment_still_scanned() -> None:
     assert PatternKind.VIRTUAL_METHOD in _kinds(src)
 
 
+def test_line_continuation_in_line_comment_stays_commented() -> None:
+    # A `//` comment ending in a backslash splices the next line into the
+    # comment (C/C++ line continuation), so the `virtual` is commented out.
+    assert PatternKind.VIRTUAL_METHOD not in _kinds("// note \\\nvirtual void f();")
+
+
+def test_line_comment_without_continuation_resumes_code() -> None:
+    # Without the trailing backslash, the next line is real code again.
+    assert PatternKind.VIRTUAL_METHOD in _kinds("// note\nvirtual void f();")
+
+
 # ── Escalation triggers + categories ─────────────────────────────────────────
 
 

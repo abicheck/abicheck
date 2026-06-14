@@ -461,8 +461,15 @@ def _blank_comments_and_strings(text: str, blank_strings: bool = True) -> str:
                 i += 1
         elif state == "line_comment":
             if ch == "\n":
+                # A backslash immediately before the newline (optionally across
+                # a CRLF `\r`) splices the next physical line into the `//`
+                # comment via C/C++ line continuation, so stay in the comment.
+                prev = text[i - 1] if i > 0 else ""
+                prev2 = text[i - 2] if i > 1 else ""
+                spliced = prev == "\\" or (prev == "\r" and prev2 == "\\")
                 out.append("\n")
-                state = "code"
+                if not spliced:
+                    state = "code"
             else:
                 out.append(" ")
             i += 1
