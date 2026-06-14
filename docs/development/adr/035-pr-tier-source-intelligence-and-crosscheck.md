@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-14
 **Status:** Proposed
-**Decision maker:** (pending review)
+**Decision maker:** Nikolay Petrov
 
 ---
 
@@ -68,8 +68,7 @@ concentrates:
    across `dump`/`compare`/`collect`/`compare-graph`; there is no risk → budget
    → escalation orchestrator, no per-project cost estimate to pick a depth, no
    stable programmatic API for the level ladder, and no way to ingest facts
-   emitted *by the
-   product build* instead of re-running a frontend.
+   *emitted by the product build* instead of re-running a frontend.
 
 ---
 
