@@ -484,6 +484,18 @@ def test_diff_no_toolchain_drift_for_target_asymmetry_same_compiler():
     assert not any(c.kind is ChangeKind.TOOLCHAIN_VERSION_CHANGED for c in changes)
 
 
+def test_diff_no_toolchain_drift_for_version_asymmetry_same_compiler():
+    # One side identifies the compiler but exposes no parseable version (valid:
+    # Toolchain.version may be ""), the other has it. Same compiler must NOT
+    # report drift purely because version metadata is missing (Codex P2).
+    old = BuildEvidence(toolchains=[
+        Toolchain(id="t-cmake", compiler_id="GNU", version="", language="")])
+    new = BuildEvidence(toolchains=[
+        Toolchain(id="t-dwarf", compiler_id="GNU", version="13.3.0", language="")])
+    changes = diff_build_evidence(old, new)
+    assert not any(c.kind is ChangeKind.TOOLCHAIN_VERSION_CHANGED for c in changes)
+
+
 def test_diff_emits_toolchain_change_for_sysroot_option():
     old = BuildEvidence(build_options=[BuildOption("sysroot", "/a", abi_relevant=True)])
     new = BuildEvidence(build_options=[BuildOption("sysroot", "/b", abi_relevant=True)])

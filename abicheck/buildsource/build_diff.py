@@ -260,18 +260,29 @@ def _toolchain_fingerprints(ev: BuildEvidence) -> dict[str, str]:
     return out
 
 
-def _toolchain_identities(ev: BuildEvidence) -> set[str]:
-    """Language-agnostic compiler identities: ``"compiler_id version"``.
+def _toolchain_compiler_versions(ev: BuildEvidence) -> dict[str, set[str]]:
+    """Map ``compiler_id`` → set of its *known* (non-empty) version strings.
 
-    Deliberately excludes ``target_triple``: the fallback below compares evidence
-    from heterogeneous sources (e.g. a CMake File API side that records a target
-    triple vs a DWARF-producer side where ``parse_producer`` leaves it empty), so
-    keying on the target would flag the *same* compiler as drift purely because
-    one side lacks target metadata. The fallback therefore fires only on real
-    compiler id/version drift; target/sysroot changes route through the
-    build-option path (``_TOOLCHAIN_OPTION_KEYS``) instead.
+    Deliberately excludes ``target_triple`` and treats a missing version as
+    *unknown*, not as a distinct value: the fallback below compares evidence from
+    heterogeneous sources (a CMake File API side that records target/version vs a
+    DWARF-producer side where ``parse_producer`` may leave either empty), so
+    keying on those would flag the *same* compiler as drift purely because one
+    side lacks metadata. The fallback therefore fires only on a real compiler-id
+    swap or a both-versions-known version change; target/sysroot changes route
+    through the build-option path (``_TOOLCHAIN_OPTION_KEYS``) instead.
     """
-    return {f"{tc.compiler_id} {tc.version}".strip() for tc in ev.toolchains}
+    out: dict[str, set[str]] = {}
+    for tc in ev.toolchains:
+        out.setdefault(tc.compiler_id, set())
+        if tc.version:
+            out[tc.compiler_id].add(tc.version)
+    return out
+
+
+def _toolchain_identity_display(ev: BuildEvidence) -> str:
+    """Human-readable ``"compiler_id version"`` list for a finding's old/new."""
+    return ", ".join(sorted(f"{tc.compiler_id} {tc.version}".strip() for tc in ev.toolchains))
 
 
 def _diff_toolchains(old: BuildEvidence, new: BuildEvidence) -> list[Change]:
@@ -299,19 +310,25 @@ def _diff_toolchains(old: BuildEvidence, new: BuildEvidence) -> list[Change]:
     # gcc↔clang swap. When no per-language drift fired but the compiler
     # *identities* differ, surface the change once.
     if not changes:
-        old_id = _toolchain_identities(old)
-        new_id = _toolchain_identities(new)
-        if old_id and new_id and old_id != new_id:
+        old_c = _toolchain_compiler_versions(old)
+        new_c = _toolchain_compiler_versions(new)
+        # A compiler-id swap (gcc↔clang) is unambiguous drift. A version change
+        # counts only when *both* sides expose a version for a shared compiler —
+        # a missing version is unknown, not a change (Codex P2).
+        compiler_swap = bool(old_c) and bool(new_c) and set(old_c) != set(new_c)
+        version_drift = any(
+            old_c[cid] and new_c[cid] and old_c[cid] != new_c[cid]
+            for cid in set(old_c) & set(new_c)
+        )
+        if compiler_swap or version_drift:
+            old_disp, new_disp = _toolchain_identity_display(old), _toolchain_identity_display(new)
             changes.append(
                 Change(
                     kind=ChangeKind.TOOLCHAIN_VERSION_CHANGED,
                     symbol="toolchain",
-                    description=(
-                        "Toolchain identity changed: "
-                        f"{', '.join(sorted(old_id))!r} -> {', '.join(sorted(new_id))!r}"
-                    ),
-                    old_value=", ".join(sorted(old_id)),
-                    new_value=", ".join(sorted(new_id)),
+                    description=f"Toolchain identity changed: {old_disp!r} -> {new_disp!r}",
+                    old_value=old_disp,
+                    new_value=new_disp,
                 )
             )
     return changes
