@@ -1154,17 +1154,26 @@ def measure(
 def _peak_rss_mb() -> float | None:
     """Process peak RSS in MiB via ``resource``; ``None`` when unavailable.
 
-    ``ru_maxrss`` is the high-water mark of the whole process. Linux reports it
-    in KiB, macOS/BSD in bytes — normalize both to MiB. It never decreases, so
-    callers should treat the largest/last value as the process peak.
+    Sums the high-water RSS of *this* process (``RUSAGE_SELF``) and its terminated
+    children (``RUSAGE_CHILDREN``), so the native memory of the demangler
+    subprocess (``c++filt``, spawned by the namespace/rename scenarios) counts
+    toward the gate — ``RUSAGE_SELF`` alone would miss it, letting a child blow
+    the budget undetected (Codex review, #396). Summing the two peaks is a
+    conservative over-estimate (the high-water marks need not coincide), which is
+    the safe direction for a ceiling gate.
+
+    ``ru_maxrss`` is in KiB on Linux, bytes on macOS/BSD — normalize both to MiB.
+    It never decreases, so callers should treat the largest/last value as the
+    process peak.
     """
     if resource is None:
         return None
-    maxrss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    self_rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    child_rss = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss
     # Linux: KiB; macOS/BSD: bytes. A >1 GiB Linux process would read as <1 if
     # the raw value were bytes, so the platform check is the reliable split.
     divisor = 1024 if sys.platform == "darwin" else 1
-    return round(maxrss / 1024 / divisor, 1)
+    return round((self_rss + child_rss) / 1024 / divisor, 1)
 
 
 def scaling_exponent(points: list[Point]) -> float | None:
