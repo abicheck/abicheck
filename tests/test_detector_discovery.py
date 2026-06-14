@@ -16,9 +16,10 @@ from __future__ import annotations
 
 import pkgutil
 import sys
+import threading
 
 import abicheck
-from abicheck.detector_registry import registry
+from abicheck.detector_registry import DetectorRegistry, registry
 
 
 def _all_diff_module_names() -> set[str]:
@@ -59,3 +60,28 @@ def test_detector_names_are_unique() -> None:
     registry.ensure_loaded()
     names = registry.detector_names
     assert len(names) == len(set(names))
+
+
+def test_ensure_loaded_concurrent_calls_are_safe() -> None:
+    # A fresh registry instance whose discovery has not run yet. Hammer
+    # ensure_loaded() from several threads at once; the lock must serialize the
+    # one-time discovery without error or double-work corruption.
+    fresh = DetectorRegistry()
+    barrier = threading.Barrier(8)
+    errors: list[BaseException] = []
+
+    def worker() -> None:
+        try:
+            barrier.wait()
+            fresh.ensure_loaded()
+        except BaseException as exc:  # noqa: BLE001 — record any thread failure
+            errors.append(exc)
+
+    threads = [threading.Thread(target=worker) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert not errors
+    assert fresh._discovered is True

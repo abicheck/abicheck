@@ -46,6 +46,7 @@ from __future__ import annotations
 
 import importlib
 import pkgutil
+import threading
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
@@ -89,6 +90,7 @@ class DetectorRegistry:
         self._names: set[str] = set()
         self._counter: int = 0
         self._discovered: bool = False
+        self._discovery_lock = threading.Lock()
 
     def ensure_loaded(self) -> None:
         """Import every ``abicheck.diff_*`` module so its detectors register.
@@ -104,19 +106,28 @@ class DetectorRegistry:
         ``diff_*`` module is discovered here automatically, appended after the
         existing detectors in a deterministic (sorted-by-name) order — no
         ``checker`` edit required. Idempotent and cheap after the first call.
+
+        Thread-safe: concurrent callers (e.g. the MCP server handling parallel
+        compare requests) take a lock so discovery runs exactly once. The fast
+        path (already discovered) is lock-free.
         """
         if self._discovered:
             return
-        import abicheck
+        with self._discovery_lock:
+            # Re-check under the lock: another thread may have finished while we
+            # were blocked.
+            if self._discovered:
+                return
+            import abicheck
 
-        for info in sorted(
-            pkgutil.iter_modules(abicheck.__path__), key=lambda m: m.name
-        ):
-            if info.name.startswith("diff_"):
-                importlib.import_module(f"abicheck.{info.name}")
-        # Set only after a full successful pass, so a mid-loop import error does
-        # not leave discovery permanently half-done on a retry.
-        self._discovered = True
+            for info in sorted(
+                pkgutil.iter_modules(abicheck.__path__), key=lambda m: m.name
+            ):
+                if info.name.startswith("diff_"):
+                    importlib.import_module(f"abicheck.{info.name}")
+            # Set only after a full successful pass, so a mid-loop import error
+            # does not leave discovery permanently half-done on a retry.
+            self._discovered = True
 
     def detector(
         self,
