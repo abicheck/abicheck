@@ -1,7 +1,8 @@
 # G19 — PR-Tier Source Intelligence & Cross-Source Validation
 
 **ADR:** [ADR-035](../adr/035-pr-tier-source-intelligence-and-crosscheck.md)
-**Type:** Initiative plan (not a `usecase-registry.yaml` gap; multi-phase)
+**Type:** Initiative plan (multi-phase); tracked by six `planned`
+`usecase-registry.yaml` entries under gap G19 (see *Use-case tracking*)
 **Effort:** XL (phased) · **Risk:** medium — new `ChangeKind`s and an optional
 compiler-version-sensitive plugin; mitigated by keeping everything advisory and
 behind the portable replay path.
@@ -146,12 +147,12 @@ Inputs
 
 Scope / escalation
   --mode [pr|pr-deep|baseline|audit]      default pr (D9 asymmetry)
-  --depth [auto|headers|build|source|graph|full]
-                                          cap evidence depth on the L-axis
-                                          (headers=L2, build=L3, source=L4,
-                                          graph=L5, full=L4 full-scope);
-                                          auto = risk-driven. No S0..S6 selector
-                                          per ADR-035 D1.
+  --depth [auto|headers|build|source|full|graph]
+                                          cap evidence depth on the L-axis, in
+                                          increasing depth: headers=L2, build=L3,
+                                          source=L4 scoped, full=L4 full-scope,
+                                          graph=L5. auto = risk-driven. No S0..S6
+                                          selector per ADR-035 D1.
   --changed-path PATH                     repeatable; seeds risk score + POI (D7)
   --since GITREF                          derive changed paths from a git range
   --budget DURATION   (e.g. 15m)          wall-clock ceiling
@@ -212,8 +213,10 @@ class LayerResult:
 
 @dataclass(frozen=True)
 class ScanResult:
-    diff: DiffResult | None            # None in --audit (no baseline)
-    findings: list[DiffResult]         # incl. new crosscheck ChangeKinds (D4)
+    diff: DiffResult | None            # whole comparison; None in --audit (no baseline)
+    findings: list[Change]             # individual Change objects, incl. new
+                                       # crosscheck ChangeKinds (D4); == diff.changes
+                                       # when a baseline is given
     layers: list[LayerResult]          # per-layer coverage (D3/D10)
     confidence: dict[str, str]         # provider-agreement matrix (§6.8)
     estimate: list[CostEstimate]       # projected vs. actual
@@ -240,7 +243,7 @@ class LayerProvider(Protocol):
     layer: EvidenceLayer
     def capabilities(self) -> ProviderCapabilities: ...
     def estimate(self, ctx: ScanContext) -> CostEstimate: ...
-    def run(self, ctx: ScanContext, poi: PointsOfInterest) -> LevelFacts: ...
+    def run(self, ctx: ScanContext, poi: PointsOfInterest) -> LayerFacts: ...
 
 @dataclass(frozen=True)
 class ScanContext:                      # shared, read-only inputs to every level

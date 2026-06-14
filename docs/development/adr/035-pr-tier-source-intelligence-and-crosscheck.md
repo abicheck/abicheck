@@ -180,8 +180,9 @@ replay + LibTooling/CastXML stays the supported portable path.
 ### D6. Additive `.abicheck.yml` schema for levels, budgets, and cross-checks
 
 Extend the config loaded by `buildsource/inline.py` with optional `source:
-{ budgets, levels }`, `risk_rules`, and `crosschecks: { <check>: info|warning|
-error }` blocks. All additive and defaulted-off where they imply new cost; they
+{ budgets, layers }` (`layers` matching the existing collect API key — not a
+new `levels` spelling), `risk_rules`, and `crosschecks: { <check>:
+info|warning|error }` blocks. All additive and defaulted-off where they imply new cost; they
 map onto the existing collect-mode / evidence-policy machinery rather than
 replacing it.
 
