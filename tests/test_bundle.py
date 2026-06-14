@@ -39,6 +39,7 @@ def _meta(
     imports: list[str] | None = None,
     export_versions: dict[str, str] | None = None,
     import_versions: dict[str, str] | None = None,
+    import_version_sonames: dict[str, str] | None = None,
     versions_required: dict[str, list[str]] | None = None,
 ) -> ElfMetadata:
     """Construct a minimal ElfMetadata for testing."""
@@ -53,7 +54,13 @@ def _meta(
         )
     imps = []
     for name in imports or []:
-        imps.append(ElfImport(name=name, version=(import_versions or {}).get(name, "")))
+        imps.append(
+            ElfImport(
+                name=name,
+                version=(import_versions or {}).get(name, ""),
+                version_soname=(import_version_sonames or {}).get(name, ""),
+            )
+        )
     return ElfMetadata(
         soname=soname or "",
         needed=needed or [],
@@ -468,6 +475,41 @@ class TestIntraDepRemoved:
             f.kind == ChangeKind.BUNDLE_INTRA_DEP_REMOVED
             for f in result.bundle_findings
         )
+
+    def test_colliding_version_label_disambiguated_per_symbol(self) -> None:
+        # One consumer needs two providers that BOTH advertise FOO_1.0: a
+        # bundled libcore.so.1 and an external libthirdparty.so.2. Per-symbol
+        # verneed provider (ElfImport.version_soname) must resolve each import
+        # independently: the bundled core_op (dropped) fires, while the genuinely
+        # external tp_init must NOT be reported as bundle_intra_dep_removed.
+        new = _snapshot(
+            {
+                "libcore.so": _meta(
+                    soname="libcore.so.1", exports=["dummy"]
+                ),  # core_op dropped
+                "libalgo.so": _meta(
+                    soname="libalgo.so.1",
+                    needed=["libcore.so.1", "libthirdparty.so.2"],
+                    imports=["core_op", "tp_init"],
+                    import_versions={"core_op": "FOO_1.0", "tp_init": "FOO_1.0"},
+                    import_version_sonames={
+                        "core_op": "libcore.so.1",  # bundled sibling
+                        "tp_init": "libthirdparty.so.2",  # external
+                    },
+                    versions_required={
+                        "libcore.so.1": ["FOO_1.0"],
+                        "libthirdparty.so.2": ["FOO_1.0"],
+                    },
+                ),
+            }
+        )
+        result = compare_bundle(new, new, per_library_results=[])
+        intra_removed = {
+            f.symbol
+            for f in result.bundle_findings
+            if f.kind == ChangeKind.BUNDLE_INTRA_DEP_REMOVED
+        }
+        assert intra_removed == {"core_op"}  # tp_init correctly excluded
 
 
 # ---------------------------------------------------------------------------
