@@ -73,6 +73,46 @@ def test_every_scenario_builds_and_runs(scenario: str) -> None:
     assert count >= 0
 
 
+def test_versioned_rename_churn_exercises_scheme_collapse() -> None:
+    """The ICU/OpenSSL scenario must actually hit the versioned-scheme path.
+
+    A scenario that merely "builds and runs" is a weak guard — assert the shape
+    it is meant to stress: ``~2 × n`` removed/added churn findings *and* the
+    single ``versioned_symbol_scheme_detected`` collapse finding that no other
+    scenario produces. If a refactor stops the scheme recogniser firing on this
+    input, this fails rather than the benchmark silently measuring a cheaper
+    path.
+    """
+    from abicheck.checker import ChangeKind, compare
+
+    old, new = bench._build_versioned_rename_churn(200)
+    # Detection (default): 2×n churn + the advisory.
+    result = compare(old, new)
+    kinds = [c.kind for c in result.changes]
+    assert kinds.count(ChangeKind.FUNC_REMOVED) == 200
+    assert kinds.count(ChangeKind.FUNC_ADDED) == 200
+    assert ChangeKind.VERSIONED_SYMBOL_SCHEME_DETECTED in kinds
+
+    # The scenario's registered run enables collapse, so the suppression /
+    # reclassification branch must actually fire (churn folded away). Guard it
+    # here so the benchmark can't silently revert to measuring detection only.
+    assert bench.SCENARIOS["versioned_rename_churn"].run is bench._run_compare_collapse
+    collapsed = compare(old, new, collapse_versioned_symbols=True)
+    assert len(collapsed.changes) < len(result.changes)
+
+
+def test_segments_fast_path_matches_full_scan() -> None:
+    """The ``_segments`` plain-name fast path must equal the char-scan result."""
+    from abicheck.diff_namespaces import _segments
+
+    # Plain names (fast path) and names that need the scan (``::`` / templates).
+    assert _segments("u_strlen_75") == ["u_strlen_75"]
+    assert _segments("") == []
+    assert _segments("ns::experimental::sort<int>") == ["ns", "experimental", "sort"]
+    assert _segments("sort<int>") == ["sort"]
+    assert _segments("foo<bar>::baz") == ["foo", "baz"]
+
+
 def test_measure_records_peak_memory() -> None:
     pts = bench.measure("add_remove", [50], repeat=1, track_memory=True)
     assert len(pts) == 1

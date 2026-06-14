@@ -49,6 +49,15 @@ Scenarios
                  no qualified ``name``, forcing the namespace detectors to
                  demangle. Mirrors comparing stripped real libraries. Requires a
                  demangler (``c++filt`` / ``cxxfilt``); skipped if unavailable.
+``versioned_rename_churn`` ICU/OpenSSL shape — every symbol carries a version
+                 token that bumps (``u_strlen_75`` -> ``u_strlen_78``), so the
+                 churn set is ``2 x n`` removed/added findings and the
+                 versioned-symbol-scheme recogniser (``versioned_symbol_scheme``
+                 / ``post_processing``) must normalize and group all of it. Runs
+                 with ``collapse_versioned_symbols=True`` so both detection *and*
+                 the opt-in suppression/reclassification (collapse) branch are
+                 timed. Reproduces the field-eval P08 ICU 75->78 case (16 k
+                 changes) that no other scenario reaches.
 ``suppression_audit`` A fixed suppression ruleset audited against a growing
                  finding set — guards the O(rules x findings) audit loop.
 ``report_html`` / ``report_sarif``  Render a large ``DiffResult`` through the
@@ -291,6 +300,64 @@ def _build_rename_churn(n_funcs: int) -> tuple[AbiSnapshot, AbiSnapshot]:
     new = AbiSnapshot(
         library="libscale.so", version="2.0", elf=elf("new"), elf_only_mode=True
     )
+    return old, new
+
+
+def _alpha_index(i: int) -> str:
+    """Encode ``i`` as a digit-free base-26 stem (``a``, ``b`` ... ``z``, ``aa`` ...).
+
+    The versioned-scheme normaliser collapses *every* digit run to a
+    placeholder, so a numeric index in the symbol stem would make all symbols
+    share one normalized key. A letters-only stem keeps each symbol distinct
+    under normalization, leaving the trailing ``_<version>`` token as the only
+    digit run — exactly the ICU ``u_strlen_75`` shape.
+    """
+    s = ""
+    i += 1
+    while i:
+        i, r = divmod(i - 1, 26)
+        s = chr(97 + r) + s
+    return s
+
+
+def _build_versioned_rename_churn(n_funcs: int) -> tuple[AbiSnapshot, AbiSnapshot]:
+    """ICU/OpenSSL shape: every symbol carries a version token that bumps.
+
+    Field eval P08: a routine ICU 75->78 upgrade read as **16 022 changes**
+    (5395 removed + 5493 added + 2539 ``func_likely_renamed``) and a 94.5 s
+    compare on ``libicui18n`` (8k funcs), because every export embeds the major
+    version (``u_strlen_75`` -> ``u_strlen_78``). That detonates the
+    **versioned-symbol-scheme** recogniser (``versioned_symbol_scheme``,
+    ``post_processing.DetectVersionedSymbolScheme``) — it normalizes every
+    removed/added name through its digit run and groups the collapse, an
+    O(findings) pass over the *entire* churn set that no other scenario
+    exercises — plus the surface-scoping / severity / reporting stack over a
+    finding set roughly ``2 x n_funcs`` large.
+
+    Modelled DWARF-aware (named functions with signatures), the way the real
+    ICU scan was: every old function is removed and a version-bumped twin added.
+    (The ELF-only fingerprint rename path is deliberately *not* used — its
+    mass-rename safety cap short-circuits on a churn this dense, which would hide
+    the scheme/post-processing cost this scenario targets. The complementary
+    DWARF *type*-diff cost of a real ICU upgrade is tracked by ``type_churn`` /
+    ``wide_struct``; here the signatures are trivial so the symbol-churn and
+    collapse paths are isolated.)
+    """
+
+    def funcs(version: str) -> list[Function]:
+        return [
+            Function(
+                name=f"u_proc{_alpha_index(i)}_{version}",
+                mangled=f"u_proc{_alpha_index(i)}_{version}",
+                return_type="int",
+                params=[Param(name="p", type="void *")],
+                visibility=Visibility.PUBLIC,
+            )
+            for i in range(n_funcs)
+        ]
+
+    old = AbiSnapshot(library="libversioned.so", version="1.0", functions=funcs("75"))
+    new = AbiSnapshot(library="libversioned.so", version="2.0", functions=funcs("78"))
     return old, new
 
 
@@ -745,6 +812,21 @@ def _run_compare(prepared: tuple[AbiSnapshot, AbiSnapshot]) -> int:
     return len(compare(old, new).changes)
 
 
+def _run_compare_collapse(prepared: tuple[AbiSnapshot, AbiSnapshot]) -> int:
+    """Time ``compare`` with the opt-in versioned-symbol collapse enabled.
+
+    The default ``_run_compare`` leaves ``collapse_versioned_symbols=False``, so
+    the scheme recogniser only emits its advisory. Passing ``True`` additionally
+    exercises the suppression/reclassification branch of
+    ``DetectVersionedSymbolScheme`` — the path that folds the ``2 × n`` churn
+    findings into a single collapsed advisory — so the ``versioned_rename_churn``
+    scenario times detection *and* collapse over the whole churn set, not just
+    detection.
+    """
+    old, new = prepared
+    return len(compare(old, new, collapse_versioned_symbols=True).changes)
+
+
 def _run_suppression_audit(prepared: tuple[list[Change], SuppressionList]) -> int:
     """Time ``SuppressionList.audit``; return the number of findings audited."""
     changes, supp = prepared
@@ -824,6 +906,15 @@ SCENARIOS: dict[str, Scenario] = {
     ),
     "rename_churn": Scenario(
         _build_rename_churn, sizes=(250, 500, 1000), max_size=1200
+    ),
+    # ICU/OpenSSL versioned-symbol churn: scheme-collapse + post-processing over
+    # the whole surface. Default sweep stays bounded; max_size reaches the real
+    # ICU scale (~8k funcs / 16k changes) for a manual reproduction.
+    "versioned_rename_churn": Scenario(
+        _build_versioned_rename_churn,
+        run=_run_compare_collapse,
+        sizes=(500, 1000, 2000),
+        max_size=8000,
     ),
     "nested_types": Scenario(_build_nested_types, sizes=(100, 200, 400), max_size=500),
 }

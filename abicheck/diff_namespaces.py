@@ -74,6 +74,17 @@ def _segments(qualified: str) -> list[str]:
     """
     if not qualified:
         return []
+    # Fast path: a name with neither a ``::`` separator nor a template ``<`` is
+    # its own single segment — the overwhelmingly common case (every plain C
+    # symbol, and most C++ leaf names). Skipping the char-scan matters because
+    # the post-processing namespace detectors call this once per finding on both
+    # sides, so a versioned-symbol library (ICU/OpenSSL — thousands of plain
+    # ``u_strlen_75``-style churn findings) would otherwise pay the full scan
+    # tens of thousands of times for no segmentation. Template stripping and
+    # ``::`` splitting still go through the scan below, so semantics are
+    # unchanged for any name that actually needs them.
+    if "::" not in qualified and "<" not in qualified:
+        return [qualified]
     out: list[str] = []
     depth = 0
     buf: list[str] = []

@@ -37,6 +37,8 @@ on:
       - "abicheck/post_processing.py"
       - "abicheck/demangle.py"
       - "abicheck/binary_fingerprint.py"
+      - "abicheck/diff_namespaces.py"
+      - "abicheck/versioned_symbol_scheme.py"
       - "abicheck/surface.py"
       - "abicheck/suppression.py"
       - "abicheck/html_report.py"
