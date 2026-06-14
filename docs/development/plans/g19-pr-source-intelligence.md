@@ -325,7 +325,7 @@ class ScanRequest:
 @dataclass(frozen=True)
 class CostEstimate:
     method: SourceMethod | None        # S-axis: S0..S6; None for intrinsic L0-L2
-    layer: EvidenceLayer               # L-axis it populates: L2_HEADER..L5_SOURCE_GRAPH
+    layer: EvidenceLayer               # L-axis it populates: L0_BINARY..L5_SOURCE_GRAPH
     tus: int
     est_seconds: float
     cache_hit_rate: float
@@ -359,14 +359,17 @@ def run_audit(req: ScanRequest) -> ScanResult: ...               # mode=AUDIT
 
 ### Per-layer provider protocol — `abicheck/buildsource/`
 
-Two enums, one per axis (ADR-035 D1): `EvidenceLayer` is the L-axis (aligned to
-`buildsource.model.DataLayer` — L2_HEADER/L3_BUILD/L4_SOURCE_ABI/L5_SOURCE_GRAPH,
-the authority axis), and **`SourceMethod` is the S-axis** (`S0..S6` + `AUTO`) — a
-*distinct* enum, not banned and not collapsed onto `EvidenceLayer` (the S→L map is
-lossy: S1≠S2 both touch L3, S3 has no L). A provider declares both the method it
-implements and the layer it populates, so a request that pins `source_method=S2`
-runs the right provider. Intrinsic artifact/header providers set `method = None`
-because L0/L1/L2 evidence is not produced by an S-method:
+Two enums, one per axis (ADR-035 D1): `EvidenceLayer` is the L-axis and includes
+all reportable layers (`L0_BINARY`, `L1_DEBUG`, `L2_HEADER`, `L3_BUILD`,
+`L4_SOURCE_ABI`, `L5_SOURCE_GRAPH`). Its L3-L5 values align with
+`buildsource.model.DataLayer`, while L0/L1/L2 are intrinsic artifact/header rows
+needed for mandatory coverage reporting. **`SourceMethod` is the S-axis**
+(`S0..S6` + `AUTO`) — a *distinct* enum, not banned and not collapsed onto
+`EvidenceLayer` (the S→L map is lossy: S1≠S2 both touch L3, S3 has no L). A
+provider declares both the method it implements and the layer it populates, so a
+request that pins `source_method=S2` runs the right provider. Intrinsic
+artifact/header providers set `method = None` because L0/L1/L2 evidence is not
+produced by an S-method:
 
 ```python
 class LayerProvider(Protocol):

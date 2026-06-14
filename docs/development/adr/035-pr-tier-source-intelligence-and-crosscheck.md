@@ -170,7 +170,7 @@ per D1). Initial set, cheapest first:
 | Check | Inputs | Tier |
 |---|---|---|
 | `exported_not_public` | binary exports ↔ L2 header decls | RISK |
-| `public_not_exported` | L2 header decls ↔ binary exports | RISK |
+| `public_not_exported` | L2 header decls that promise an external symbol ↔ binary exports | RISK |
 | `header_build_context_mismatch` | L2 header macros/flags ↔ L3 build flags | API_BREAK |
 | `private_header_leak` | L5 include graph ↔ install manifest | RISK |
 | `odr_type_variant` | L4 per-TU layouts of one type | API_BREAK |
@@ -180,6 +180,13 @@ The §6.8 provider-agreement matrix maps directly onto the existing
 `LayerConfidence`; each finding records which providers (`public_header_ast`,
 `source_index`, `binary_exports`, `debug_info`, `build_config`) corroborate the
 entity, driving the confidence tag.
+
+`public_not_exported` is intentionally narrower than "every public declaration":
+inline functions, uninstantiated templates, constexprs, type-only declarations,
+and hidden-visibility APIs are public source surface but do not promise a dynamic
+symbol. The check only compares declarations with an export obligation (for
+example exported functions/data, visibility annotations, version-script entries,
+or explicit instantiations) against binary exports.
 
 ### D5. Build-integrated extraction: dump/facts artifact protocol + providers
 
