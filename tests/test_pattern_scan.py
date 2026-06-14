@@ -222,6 +222,22 @@ def test_digit_separator_does_not_hide_later_constructs(
     assert kind in _kinds(src)
 
 
+@pytest.mark.parametrize(
+    "src",
+    [
+        "auto c = u8'a';\nstruct B { virtual void f(); };",
+        "auto c = u'0';\n#pragma pack(1)",
+        "auto c = U'9';\nstruct B { virtual void g(); };",
+        "auto c = L'7';\n#pragma pack(1)",
+    ],
+)
+def test_prefixed_char_literal_not_treated_as_digit_separator(src: str) -> None:
+    # `u8'a'`/`u'0'`/`U'9'`/`L'7'` are prefixed char literals, not digit
+    # separators — the closing quote must not blank the rest of the file.
+    kinds = _kinds(src)
+    assert kinds & {PatternKind.VIRTUAL_METHOD, PatternKind.PRAGMA_PACK}
+
+
 def test_real_char_literal_still_blanks_its_contents() -> None:
     # A genuine char literal must still hide an ABI keyword spelled inside it.
     assert PatternKind.PRAGMA_PACK not in _kinds('const char* s = "#pragma pack";')
