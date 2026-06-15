@@ -78,15 +78,19 @@ cross-source / single-release findings rather than a two-version diff.
 ### Cheap gate — no compiler, no sources
 
 When you only have the two binaries (or want a fast pre-check), pin a cheap
-level. `--depth build` (`s1`) adds build-flag/toolchain drift from a compile DB;
-`--depth headers` (`s0`) stays on the always-on pattern scan and the artifact
-tiers only:
+level. `--depth build` (`s1`) adds build-flag/toolchain drift, but only when you
+also give it a build input to read — a compile DB or build dir via
+`--build-info`/`--compile-db` (or a `--sources` tree); without one, L3 is
+reported `not_collected` and no drift is checked. `--depth headers` (`s0`) stays
+on the always-on pattern scan and the artifact tiers only:
 
 ```bash
 # build-flag drift only, flat ~0.3–0.5s regardless of project size
-abicheck scan --binary new/libfoo.so --baseline old/libfoo.abi.json --depth build
+# (the compile DB is what supplies L3 — without it the scan is artifact-only)
+abicheck scan --binary new/libfoo.so --baseline old/libfoo.abi.json \
+  --build-info build/compile_commands.json --depth build
 
-# artifact + always-on lexical scan only (no L3/L4/L5)
+# artifact + always-on lexical scan only (no L3/L4/L5; no build input needed)
 abicheck scan --binary new/libfoo.so --baseline old/libfoo.abi.json --depth headers
 ```
 
@@ -102,13 +106,29 @@ abicheck scan --binary libfoo.so --sources . --mode pr --estimate
 
 ### Release baseline — full `s6`
 
-Generate the amortized, full-depth snapshot of a release (replays every TU, folds
-the full graph). Run it once per release and reuse it as the `--baseline` for PR
-scans:
+The reusable `--baseline` that PR scans compare against is a **`dump`-produced
+snapshot**, not a scan report. `scan -o` writes the rendered scan report (text or
+JSON), so it cannot be fed back as a `--baseline`; produce the baseline with
+`abicheck dump` instead. Pass `--sources` to embed the full-depth L3/L4/L5 facts
+so the later PR compare carries them:
+
+```bash
+# Produce the reusable baseline snapshot once per release:
+abicheck dump build/libfoo.so --headers include/ \
+  --sources . --version 1.0 -o artifacts/libfoo-1.0.abi.json
+
+# PR scans then compare against it:
+abicheck scan --binary build/libfoo.so --headers include/ \
+  --sources . --since origin/main --baseline artifacts/libfoo-1.0.abi.json
+```
+
+To get a full-depth scan *report* of a release (replays every TU, folds the full
+graph) for human review — as opposed to the reusable baseline above — run
+`scan --mode baseline` and send its report to `-o`:
 
 ```bash
 abicheck scan --binary build/libfoo.so --headers include/ \
-  --sources . --mode baseline -o artifacts/libfoo-1.0.abi.json
+  --sources . --mode baseline -o artifacts/libfoo-1.0-scan.json
 ```
 
 ### Let risk pick the depth — `--source-method auto` (local/dev only)
