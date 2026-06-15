@@ -48,8 +48,7 @@ from .adapters.base import source_from_argv
 from .source_graph import CONF_HIGH, CONF_REDUCED, CONF_UNKNOWN, GraphEdge, GraphNode
 
 if TYPE_CHECKING:
-    from .build_evidence import BuildEvidence
-    from .build_evidence import CompileUnit as BuildEvidenceCompileUnit
+    from .build_evidence import BuildEvidence, CompileUnit as BuildEvidenceCompileUnit
     from .source_graph import SourceGraphSummary
 
 # ── call-edge labels (ADR-031 D4) ───────────────────────────────────────────

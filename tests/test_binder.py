@@ -28,8 +28,6 @@ from abicheck.elf_metadata import (
     ElfImport,
     ElfMetadata,
     ElfSymbol,
-)
-from abicheck.elf_metadata import (
     SymbolBinding as ElfSymbolBinding,
 )
 from abicheck.resolver import DependencyGraph, ResolvedDSO

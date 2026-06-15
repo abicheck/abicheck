@@ -38,8 +38,7 @@ from pathlib import Path
 
 import pytest
 
-from tests._libabigail import decode_exit_code
-from tests._libabigail import require_tool as _require_tool
+from tests._libabigail import decode_exit_code, require_tool as _require_tool
 
 pytestmark = pytest.mark.libabigail
 

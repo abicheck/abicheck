@@ -2,6 +2,13 @@
 select = ["E", "F", "W", "I", "UP"]
 ignore = ["E501"]  # line length
 
+[lint.isort]
+# Keep redundant-alias re-exports (`from .leaf import (a as a, b as b)`) in a
+# single parenthesized statement instead of exploding each into its own import.
+# The `as` form marks explicit re-exports for mypy (no_implicit_reexport); without
+# this, isort splits them and balloons the size-split leaf re-export blocks.
+combine-as-imports = true
+
 [lint.per-file-ignores]
 "tests/*" = ["S101"]  # allow assert in tests
 "tests/test_platform_coverage_gaps.py" = ["E402"]  # sectioned imports by module

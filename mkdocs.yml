@@ -125,6 +125,9 @@ nav:
       - Backlog: development/backlog.md
       - Use-Case Coverage Evaluation: development/usecase-coverage-evaluation.md
       - User Scenarios & Flows: development/user-scenarios.md
+      - Architecture Deepening Plan: development/architecture-deepening-plan.md
+      - Data-Source Process Remediation Plan: development/data-source-process-remediation-plan.md
+      - Data-Source Remeasurement Status: development/data-source-remeasurement-status-2026-06-11.md
     - Parity & Reports:
       - ABICC Parity Status: development/abicc-parity-status.md
       - ABICC Test Coverage Comparison: development/abicc-test-coverage-comparison.md

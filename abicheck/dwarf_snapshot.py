@@ -36,13 +36,15 @@ from typing import TYPE_CHECKING, Any
 from elftools.common.exceptions import ELFError
 from elftools.elf.elffile import ELFFile
 
-from .dwarf_utils import attr_bool as _attr_bool
-from .dwarf_utils import attr_int as _attr_int
-from .dwarf_utils import attr_str as _attr_str
-from .dwarf_utils import decode_member_location as _decode_member_location
-from .dwarf_utils import has_real_dwarf_info
-from .dwarf_utils import resolve_die_ref as _resolve_ref
-from .dwarf_utils import resolve_type_die as _resolve_type_die
+from .dwarf_utils import (
+    attr_bool as _attr_bool,
+    attr_int as _attr_int,
+    attr_str as _attr_str,
+    decode_member_location as _decode_member_location,
+    has_real_dwarf_info,
+    resolve_die_ref as _resolve_ref,
+    resolve_type_die as _resolve_type_die,
+)
 from .elf_symbol_filter import is_abi_relevant_elf_symbol
 from .model import (
     AbiSnapshot,
@@ -56,10 +58,8 @@ from .model import (
     TypeField,
     Variable,
     Visibility,
-    is_cxx_runtime_library,
-)
-from .model import (
     is_compiler_internal_type as _is_compiler_internal,
+    is_cxx_runtime_library,
 )
 
 if TYPE_CHECKING:

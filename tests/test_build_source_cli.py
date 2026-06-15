@@ -59,9 +59,15 @@ def test_collect_evidence_redacts_manifest_paths(tmp_path, monkeypatch):
     # Pretend tmp_path is under the user's home so redaction rewrites it.
     monkeypatch.setenv("HOME", str(tmp_path))
     from abicheck.buildsource.redaction import RedactionPolicy
+    policy = RedactionPolicy(home_replacements={str(tmp_path): "~"})
+    # The `collect` command redacts the binary/input paths in
+    # abicheck.cli_buildsource, but the extractor-manifest rows are built by
+    # helpers that moved to abicheck.cli_buildsource_helpers and read that
+    # module's DEFAULT_REDACTION binding. Patch both so every manifest path is
+    # redacted before write.
+    monkeypatch.setattr("abicheck.cli_buildsource.DEFAULT_REDACTION", policy)
     monkeypatch.setattr(
-        "abicheck.cli_buildsource.DEFAULT_REDACTION",
-        RedactionPolicy(home_replacements={str(tmp_path): "~"}),
+        "abicheck.cli_buildsource_helpers.DEFAULT_REDACTION", policy
     )
     cdb = _write_cdb(tmp_path, "c++20")
     out = tmp_path / "e"

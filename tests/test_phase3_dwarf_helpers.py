@@ -3,8 +3,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from abicheck import dwarf_advanced as da
-from abicheck import dwarf_metadata as dm
+from abicheck import dwarf_advanced as da, dwarf_metadata as dm
 
 
 class _Attr:

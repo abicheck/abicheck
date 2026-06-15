@@ -44,10 +44,12 @@ from pathlib import Path
 from elftools.common.exceptions import ELFError
 from elftools.elf.elffile import ELFFile
 
-from .dwarf_advanced import AdvancedDwarfMetadata, _normalize_arch
-from .dwarf_advanced import _process_cu_impl as _adv_process_cu
-from .dwarf_metadata import DwarfMetadata
-from .dwarf_metadata import _process_cu_impl as _meta_process_cu
+from .dwarf_advanced import (
+    AdvancedDwarfMetadata,
+    _normalize_arch,
+    _process_cu_impl as _adv_process_cu,
+)
+from .dwarf_metadata import DwarfMetadata, _process_cu_impl as _meta_process_cu
 from .dwarf_utils import has_real_dwarf_info
 
 log = logging.getLogger(__name__)

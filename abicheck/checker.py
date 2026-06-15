@@ -27,17 +27,9 @@ from . import (
 )
 from .checker_policy import (
     API_BREAK_KINDS as _API_BREAK_KINDS,
-)
-from .checker_policy import (
     BREAKING_KINDS as _BREAKING_KINDS,
-)
-from .checker_policy import (
     COMPATIBLE_KINDS as _COMPATIBLE_KINDS,
-)
-from .checker_policy import (
     RISK_KINDS as _RISK_KINDS,
-)
-from .checker_policy import (
     ChangeKind,
     EvidenceTier,
     Verdict,

@@ -7,8 +7,7 @@ Covers:
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
-from dataclasses import field as dc_field
+from dataclasses import dataclass, field as dc_field
 from pathlib import Path
 
 from abicheck.checker import ChangeKind, compare

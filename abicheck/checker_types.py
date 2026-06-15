@@ -28,8 +28,6 @@ from .checker_policy import (
     Confidence,
     EvidenceTier,
     Verdict,
-)
-from .checker_policy import (
     policy_kind_sets as _policy_kind_sets,
 )
 from .detectors import DetectorResult
