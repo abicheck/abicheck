@@ -726,7 +726,7 @@ def _collect_call_graph(
     ))
 
 def _include_map_for_replay(
-    merged: BuildEvidence, clang_bin: str
+    merged: BuildEvidence, clang_bin: str, scope: str
 ) -> dict[str, list[str]] | None:
     """Per-TU include graph ``{compile_unit_id: [included_path]}`` for replay scoping.
 
@@ -741,7 +741,10 @@ def _include_map_for_replay(
     )
 
     recorded = include_map_from_recorded_inputs(merged)
-    if recorded:
+    # Bazel-recorded action inputs are an over-approximation, not textual
+    # includes. They are useful for changed-path fanout, but not exact enough
+    # for headers-only set-cover selection.
+    if recorded and scope != "headers-only":
         return recorded
     extractor = ClangIncludeExtractor(
         clang_bin=clang_bin if clang_bin != "clang" else "clang++"
@@ -1045,7 +1048,7 @@ def _collect_source_abi(
     # it. The extractor degrades to {} when clang is absent → heuristic fallback,
     # so this never blocks collection. `target`/`full` ignore the include map.
     include_map = (
-        _include_map_for_replay(merged, clang_bin)
+        _include_map_for_replay(merged, clang_bin, scope)
         if _source_abi_scope_needs_include_map(scope, changed_paths)
         else None
     )

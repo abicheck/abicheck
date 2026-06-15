@@ -809,7 +809,7 @@ def test_collect_evidence_source_abi_success(tmp_path, monkeypatch):
 def test_include_map_for_replay_helper(monkeypatch):
     """_include_map_for_replay returns the depfile map, or None when clang is absent."""
     import abicheck.buildsource.include_graph as ig
-    from abicheck.buildsource.build_evidence import BuildEvidence
+    from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
     from abicheck.cli_buildsource import _include_map_for_replay
 
     class _Avail:
@@ -825,7 +825,17 @@ def test_include_map_for_replay_helper(monkeypatch):
             return {"cu://a": ["include/foo.h"]}
 
     monkeypatch.setattr(ig, "ClangIncludeExtractor", _Avail)
-    assert _include_map_for_replay(BuildEvidence(), "clang") == {
+    assert _include_map_for_replay(BuildEvidence(), "clang", "headers-only") == {
+        "cu://a": ["include/foo.h"]
+    }
+
+    recorded = BuildEvidence(compile_units=[
+        CompileUnit(id="cu://recorded", source="foo.cc", input_files=["foo.cc", "foo.h"]),
+    ])
+    assert _include_map_for_replay(recorded, "clang", "changed") == {
+        "cu://recorded": ["foo.cc", "foo.h"]
+    }
+    assert _include_map_for_replay(recorded, "clang", "headers-only") == {
         "cu://a": ["include/foo.h"]
     }
 
@@ -834,7 +844,7 @@ def test_include_map_for_replay_helper(monkeypatch):
             return False
 
     monkeypatch.setattr(ig, "ClangIncludeExtractor", _Unavail)
-    assert _include_map_for_replay(BuildEvidence(), "clang") is None
+    assert _include_map_for_replay(BuildEvidence(), "clang", "headers-only") is None
 
 
 def test_collect_evidence_source_abi_uses_include_graph(tmp_path, monkeypatch):
@@ -845,7 +855,7 @@ def test_collect_evidence_source_abi_uses_include_graph(tmp_path, monkeypatch):
     monkeypatch.setattr(se, "ClangSourceExtractor", _fake_clang_extractor())
     monkeypatch.setattr(
         ce, "_include_map_for_replay",
-        lambda merged, clang_bin: {"cu://x": ["include/foo.h"]},
+        lambda merged, clang_bin, scope: {"cu://x": ["include/foo.h"]},
     )
     cdb = _write_cdb(tmp_path, "c++17")
     out = tmp_path / "ev"
@@ -869,7 +879,7 @@ def test_collect_evidence_source_abi_changed_source_skips_include_graph(
 
     monkeypatch.setattr(se, "ClangSourceExtractor", _fake_clang_extractor())
 
-    def _boom(merged, clang_bin):
+    def _boom(merged, clang_bin, scope):
         raise AssertionError("include graph should not run for source-only changes")
 
     monkeypatch.setattr(ce, "_include_map_for_replay", _boom)
@@ -898,7 +908,7 @@ def test_collect_evidence_source_abi_changed_header_uses_include_graph(
     monkeypatch.setattr(
         ce,
         "_include_map_for_replay",
-        lambda merged, clang_bin: {"cu://src/foo.cpp#cfg": ["include/foo.h"]},
+        lambda merged, clang_bin, scope: {"cu://src/foo.cpp#cfg": ["include/foo.h"]},
     )
     cdb = _write_cdb(tmp_path, "c++17")
     out = tmp_path / "ev"
@@ -928,7 +938,7 @@ def test_collect_evidence_source_abi_changed_non_source_paths_use_include_graph(
         monkeypatch.setattr(
             ce,
             "_include_map_for_replay",
-            lambda merged, clang_bin, p=changed_path: {merged.compile_units[0].id: [p]},
+            lambda merged, clang_bin, scope, p=changed_path: {merged.compile_units[0].id: [p]},
         )
         result = CliRunner().invoke(main, [
             "collect", "--compile-db", str(cdb),

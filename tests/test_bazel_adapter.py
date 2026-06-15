@@ -61,6 +61,7 @@ AQUERY = json.dumps({
         {"id": "2", "pathFragmentId": "11"},   # foo/foo.o
         {"id": "3", "pathFragmentId": "12"},   # foo/libfoo.so
         {"id": "4", "pathFragmentId": "13"},   # foo/foo.h
+        {"id": "5", "pathFragmentId": "14"},   # foo/Core (extensionless header)
     ],
     "actions": [
         {
@@ -82,7 +83,7 @@ AQUERY = json.dumps({
     "targets": [{"id": "100", "label": "//foo:foo"}],
     "depSetOfFiles": [
         {"id": "200", "directArtifactIds": ["1"]},
-        {"id": "202", "directArtifactIds": ["4"]},
+        {"id": "202", "directArtifactIds": ["4", "5"]},
         {"id": "203", "transitiveDepSetIds": ["200", "202"]},
         {"id": "201", "directArtifactIds": ["2"]},
     ],
@@ -91,6 +92,7 @@ AQUERY = json.dumps({
         {"id": "11", "label": "foo.o", "parentId": "20"},
         {"id": "10", "label": "foo.cc", "parentId": "20"},
         {"id": "13", "label": "foo.h", "parentId": "20"},
+        {"id": "14", "label": "Core", "parentId": "20"},
         {"id": "20", "label": "foo"},
     ],
 })
@@ -209,7 +211,7 @@ def test_bazel_aquery_builds_compile_and_link_units():
     assert cu.language == "CXX"
     assert cu.standard == "c++17"
     assert cu.target_id == "target:////foo:foo"
-    assert set(cu.input_files) == {"foo/foo.cc", "foo/foo.h"}
+    assert set(cu.input_files) == {"foo/foo.cc", "foo/foo.h", "foo/Core"}
 
     assert len(ev.link_units) == 1
     lu = ev.link_units[0]

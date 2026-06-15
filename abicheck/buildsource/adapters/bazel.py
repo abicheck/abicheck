@@ -452,11 +452,14 @@ def _is_link_input(path: str) -> bool:
 
 def _is_compile_input(path: str) -> bool:
     low = path.lower()
-    return low.endswith((
+    if low.endswith((
         ".c", ".cc", ".cpp", ".cxx", ".c++", ".cu",
         ".h", ".hh", ".hpp", ".hxx", ".h++", ".cuh",
         ".inc", ".inl", ".ipp", ".tcc",
-    ))
+    )):
+        return True
+    name = low.rsplit("/", 1)[-1]
+    return bool(name) and "." not in name
 
 
 def _link_kind(output: str) -> str:
