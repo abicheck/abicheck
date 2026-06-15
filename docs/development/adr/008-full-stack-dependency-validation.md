@@ -1,7 +1,7 @@
 # ADR-008: Full-Stack Dependency Validation
 
 **Date:** 2026-03-17
-**Status:** Accepted
+**Status:** Accepted — implemented
 **Decision maker:** Nikolay Petrov
 
 ---

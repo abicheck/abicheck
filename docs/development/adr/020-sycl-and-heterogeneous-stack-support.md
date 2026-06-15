@@ -1,7 +1,7 @@
 # ADR-020b: SYCL and Heterogeneous Computing Stack Support
 
 **Date:** 2026-03-22
-**Status:** Accepted
+**Status:** Accepted — implemented
 **Decision maker:** Nikolay Petrov
 
 ---

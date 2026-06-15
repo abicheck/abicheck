@@ -1,7 +1,7 @@
 # ADR-024: Public ABI Surface Resolution and False-Positive Traceability
 
 **Date:** 2026-05-30 (accepted 2026-05-31)
-**Status:** Accepted
+**Status:** Accepted — implemented
 **Decision maker:** Nikolay Petrov
 
 ---

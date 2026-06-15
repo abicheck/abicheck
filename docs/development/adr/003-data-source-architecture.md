@@ -1,7 +1,7 @@
 # ADR-003: Data Source Architecture — Checks, Instruments, and Binary Types
 
 **Date:** 2026-03-17
-**Status:** Accepted
+**Status:** Accepted — implemented
 **Decision maker:** Nikolay Petrov
 
 ---

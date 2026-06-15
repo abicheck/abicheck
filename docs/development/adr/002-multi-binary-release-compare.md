@@ -1,7 +1,7 @@
 # ADR-002: Multi-binary / release compare UX and architecture
 
 **Date:** 2026-03-16  
-**Status:** Accepted
+**Status:** Accepted — implemented
 **Decision maker:** Nikolay Petrov
 
 ---

@@ -1,7 +1,7 @@
 # ADR-020a: Build-Context Aware Header Extraction
 
 **Date:** 2026-03-23
-**Status:** Accepted
+**Status:** Accepted — implemented
 **Decision maker:** Nikolay Petrov
 
 ---

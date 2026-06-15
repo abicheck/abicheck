@@ -1,7 +1,7 @@
 # ADR-019: Testing Strategy and Parity Validation
 
 **Date:** 2026-03-18
-**Status:** Accepted
+**Status:** Accepted — implemented
 **Decision maker:** Nikolay Petrov
 
 ---

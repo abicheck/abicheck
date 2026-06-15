@@ -2,42 +2,42 @@
 
 | # | Title | Status |
 |---|-------|--------|
-| [001](001-technology-stack.md) | Technology Stack — Python + pyelftools + castxml | Accepted |
-| [002](002-multi-binary-release-compare.md) | Multi-binary / release compare UX and architecture | Accepted |
-| [003](003-data-source-architecture.md) | Data Source Architecture — checks, instruments, and binary types (+ exploratory binary fingerprint extension) | Accepted |
-| [004](004-report-filtering-and-deduplication.md) | Report Filtering, Deduplication, and Leaf-Change Mode | Accepted |
-| [005](005-application-compat-check.md) | Application Compatibility Checking | Accepted |
-| [006](006-package-level-comparison.md) | Package-Level Comparison | Accepted |
-| [007](007-btf-ctf-debug-formats.md) | BTF and CTF Debug Format Support | Accepted |
-| [008](008-full-stack-dependency-validation.md) | Full-Stack Dependency Validation | Accepted |
-| [009](009-verdict-system-and-exit-codes.md) | Verdict System and Exit Code Contract | Accepted |
-| [010](010-policy-profile-system.md) | Policy Profile System | Accepted |
-| [011](011-change-classification-taxonomy.md) | ABI Change Classification Taxonomy | Accepted |
-| [012](012-abicc-compatibility-layer.md) | ABICC Drop-In Compatibility Layer | Accepted |
-| [013](013-suppression-system.md) | Suppression System Design | Accepted |
-| [014](014-output-format-strategy.md) | Output Format Strategy | Accepted |
-| [015](015-snapshot-serialization.md) | Snapshot Serialization and Schema Versioning | Accepted |
-| [016](016-visibility-model.md) | Three-Tier Visibility Model | Accepted |
-| [017](017-github-action.md) | GitHub Action Design | Accepted |
-| [018](018-cross-platform-support.md) | Cross-Platform Binary Format Support | Accepted |
-| [019](019-testing-strategy.md) | Testing Strategy and Parity Validation | Accepted |
-| [020a](020-build-context-capture.md) | Build-Context Aware Header Extraction | Accepted |
-| [020b](020-sycl-and-heterogeneous-stack-support.md) | SYCL and Heterogeneous Computing Stack Support | Accepted |
-| [021a](021-debug-artifact-resolution.md) | Debug Artifact Resolution Subsystem | Accepted |
-| [021b](021-mcp-security-model.md) | MCP Security Model | Accepted |
-| [022](022-baseline-registry.md) | Baseline Registry and Snapshot Distribution | Accepted |
-| [023](023-bundle-aware-multi-binary-analysis.md) | Bundle-Aware Multi-Binary ABI Analysis | Accepted |
-| [024](024-public-abi-surface-resolution.md) | Public ABI Surface Resolution and False-Positive Traceability | Accepted |
+| [001](001-technology-stack.md) | Technology Stack — Python + pyelftools + castxml | Accepted — implemented |
+| [002](002-multi-binary-release-compare.md) | Multi-binary / release compare UX and architecture | Accepted — implemented |
+| [003](003-data-source-architecture.md) | Data Source Architecture — checks, instruments, and binary types (+ exploratory binary fingerprint extension) | Accepted — implemented |
+| [004](004-report-filtering-and-deduplication.md) | Report Filtering, Deduplication, and Leaf-Change Mode | Accepted — implemented |
+| [005](005-application-compat-check.md) | Application Compatibility Checking | Accepted — implemented |
+| [006](006-package-level-comparison.md) | Package-Level Comparison | Accepted — implemented |
+| [007](007-btf-ctf-debug-formats.md) | BTF and CTF Debug Format Support | Accepted — implemented |
+| [008](008-full-stack-dependency-validation.md) | Full-Stack Dependency Validation | Accepted — implemented |
+| [009](009-verdict-system-and-exit-codes.md) | Verdict System and Exit Code Contract | Accepted — implemented |
+| [010](010-policy-profile-system.md) | Policy Profile System | Accepted — implemented |
+| [011](011-change-classification-taxonomy.md) | ABI Change Classification Taxonomy | Accepted — implemented |
+| [012](012-abicc-compatibility-layer.md) | ABICC Drop-In Compatibility Layer | Accepted — implemented |
+| [013](013-suppression-system.md) | Suppression System Design | Accepted — implemented |
+| [014](014-output-format-strategy.md) | Output Format Strategy | Accepted — implemented |
+| [015](015-snapshot-serialization.md) | Snapshot Serialization and Schema Versioning | Accepted — implemented |
+| [016](016-visibility-model.md) | Three-Tier Visibility Model | Accepted — implemented |
+| [017](017-github-action.md) | GitHub Action Design | Accepted — implemented |
+| [018](018-cross-platform-support.md) | Cross-Platform Binary Format Support | Accepted — implemented |
+| [019](019-testing-strategy.md) | Testing Strategy and Parity Validation | Accepted — implemented |
+| [020a](020-build-context-capture.md) | Build-Context Aware Header Extraction | Accepted — implemented |
+| [020b](020-sycl-and-heterogeneous-stack-support.md) | SYCL and Heterogeneous Computing Stack Support | Accepted — implemented |
+| [021a](021-debug-artifact-resolution.md) | Debug Artifact Resolution Subsystem | Accepted — implemented |
+| [021b](021-mcp-security-model.md) | MCP Security Model | Accepted — implemented |
+| [022](022-baseline-registry.md) | Baseline Registry and Snapshot Distribution | Accepted — implemented |
+| [023](023-bundle-aware-multi-binary-analysis.md) | Bundle-Aware Multi-Binary ABI Analysis | Accepted — implemented |
+| [024](024-public-abi-surface-resolution.md) | Public ABI Surface Resolution and False-Positive Traceability | Accepted — implemented |
 | [025](025-pr-diff-source-evaluation.md) | PR-Diff-Aware ABI Evaluation (Source Diff as Trigger and Localizer) | Proposed |
 | [026](026-source-only-undetectable-changes.md) | Source-Only Changes and the Evidence-Tier Boundary | Accepted |
 | [027](027-api-surface-intelligence.md) | API Surface Intelligence — Structure Metrics, Idiom Detection, Cross-Library Reasoning, Pattern-Aware Verdicts | Accepted |
-| [028](028-source-build-evidence-pack.md) | Optional Source and Build Evidence Pack Architecture | Proposed |
-| [029](029-build-graph-toolchain-context-capture.md) | Build Graph and Toolchain Context Capture | Proposed |
-| [030](030-source-abi-replay-and-linked-source-surface.md) | Source ABI Replay and Linked Source Surface | Proposed |
-| [031](031-source-implementation-graph-augmentation.md) | Source and Implementation Graph Augmentation | Proposed |
-| [032](032-evidence-extractor-plugin-interface.md) | Evidence Extractor Plugin Interface and Security Model | Proposed |
-| [033](033-ci-rollout-performance-and-validation.md) | CI Rollout, Performance, Caching, and Validation Strategy | Proposed |
+| [028](028-source-build-evidence-pack.md) | Optional Source and Build Evidence Pack Architecture | Accepted — implemented |
+| [029](029-build-graph-toolchain-context-capture.md) | Build Graph and Toolchain Context Capture | Accepted — implemented |
+| [030](030-source-abi-replay-and-linked-source-surface.md) | Source ABI Replay and Linked Source Surface | Accepted — implemented |
+| [031](031-source-implementation-graph-augmentation.md) | Source and Implementation Graph Augmentation | Accepted — implemented |
+| [032](032-evidence-extractor-plugin-interface.md) | Evidence Extractor Plugin Interface and Security Model | Accepted — implemented |
+| [033](033-ci-rollout-performance-and-validation.md) | CI Rollout, Performance, Caching, and Validation Strategy | Accepted — implemented |
 | [034](034-managed-runtime-and-non-c-abi-frontends.md) | Managed-Runtime and Non-C ABI Frontends | Proposed |
-| [035](035-pr-tier-source-intelligence-and-crosscheck.md) | PR-Tier Source Intelligence and Cross-Source Validation | Proposed |
+| [035](035-pr-tier-source-intelligence-and-crosscheck.md) | PR-Tier Source Intelligence and Cross-Source Validation | Proposed — partially implemented (G19) |
 | [036](036-report-view-model.md) | Report view-model and canonical report severity | Accepted |
 | [Gap Analysis](adr-gap-analysis.md) | Decisions Needing Formal ADRs | Reference |

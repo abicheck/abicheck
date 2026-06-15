@@ -1,7 +1,7 @@
 # ADR-018: Cross-Platform Binary Format Support
 
 **Date:** 2026-03-18
-**Status:** Accepted
+**Status:** Accepted — implemented
 **Decision maker:** Nikolay Petrov
 
 ---
