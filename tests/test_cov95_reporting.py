@@ -758,13 +758,14 @@ class TestInternalLeakReachability:
         assert _record_field_is_value_embedded(rec, "ptr") is False
         assert _record_field_is_value_embedded(rec, "missing") is None
 
-    def test_path_value_embedding_missing_record(self) -> None:
-        # Containing type not in the type map → can't confirm value embedding.
+    def test_path_value_embedding_from_markers(self) -> None:
+        # Per-hop model: a field edge with no `indirect:` marker is by-value, so
+        # the path is value-propagating; an `indirect:` marker flips it.
         from abicheck.internal_leak import _path_is_value_propagating
 
-        snap = _snap()  # empty type map
-        path = ["Public", "field:impl_", "ns::detail::Impl"]
-        assert _path_is_value_propagating(path, snap) is False
+        snap = _snap()  # type map unused now (markers are precomputed)
+        assert _path_is_value_propagating(["Public", "field:impl_", "ns::detail::Impl"], snap) is True
+        assert _path_is_value_propagating(["Public", "field:impl_", "indirect:edge", "ns::detail::Impl"], snap) is False
 
     def test_pointer_only_layout_leak_is_suppressed(self) -> None:
         # P2 (UXL field run): an internal type reachable *only* through a pointer

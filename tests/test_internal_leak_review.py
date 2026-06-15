@@ -322,11 +322,10 @@ class TestPointerMediatedLayoutLeakSuppressed:
             ],
         )
 
-    def test_nested_value_below_pointer_keeps_finding(self) -> None:
-        # Conservative scope: the changed type sits by value inside a proxy that
-        # is held through a unique_ptr — a *nested* shape, not the direct
-        # pointer-to-leaf case. We keep the finding (safe direction); precise
-        # demotion of this shape is the per-hop path-model follow-up.
+    def test_nested_value_below_pointer_is_suppressed(self) -> None:
+        # Per-hop path model: the changed type sits by value inside a proxy held
+        # through a unique_ptr. The edge into the proxy is marked indirect, so the
+        # whole sub-path is behind a pointer — a layout-only change is demoted.
         old = self._snap(serializer_field_type="int")
         new = self._snap(serializer_field_type="std::atomic<int>")
         changes = [Change(
@@ -335,9 +334,42 @@ class TestPointerMediatedLayoutLeakSuppressed:
             description="count: int -> std::atomic<int>",
         )]
         leaks = detect_internal_leaks(changes, old, new)
-        assert len(leaks) == 1, (
-            "a nested-behind-pointer layout change is not the direct pointer-to-"
-            f"leaf shape, so the finding is kept (got: {leaks})"
+        assert leaks == [], (
+            "a layout change to a type embedded by value below a unique_ptr does "
+            f"not reach the public holder — must be demoted (got: {leaks})"
+        )
+
+    def test_decomposed_unique_ptr_is_suppressed(self) -> None:
+        # The real oneTBB shape: libstdc++ decomposes unique_ptr<Proxy> into
+        # _Tuple_impl<0, Proxy*, Deleter> / _Head_base<0, Proxy*, false>; the
+        # pointer is a NESTED template arg. Per-hop indirection attributes it to
+        # Proxy, so the Serializer embedded by value in Proxy is behind a pointer.
+        def _snap(count_type: str) -> AbiSnapshot:
+            return AbiSnapshot(
+                library="libtbb.so", version="1.0",
+                functions=[Function(
+                    name="make", mangled="make", return_type="Public*",
+                    params=[], visibility=Visibility.PUBLIC,
+                )],
+                types=[
+                    RecordType(name="Public", kind="class", fields=[
+                        TypeField(name="t", type="std::_Tuple_impl<0, ns::detail::Proxy*, ns::detail::Deleter>"),
+                    ]),
+                    RecordType(name="ns::detail::Proxy", kind="class", fields=[
+                        TypeField(name="ser", type="ns::detail::Serializer"),
+                    ]),
+                    RecordType(name="ns::detail::Serializer", kind="class",
+                               fields=[TypeField(name="count", type=count_type)]),
+                ],
+            )
+        leaks = detect_internal_leaks(
+            [Change(kind=ChangeKind.TYPE_FIELD_TYPE_CHANGED,
+                    symbol="ns::detail::Serializer", description="count")],
+            _snap("int"), _snap("std::atomic<int>"),
+        )
+        assert leaks == [], (
+            "a decomposed-unique_ptr (nested pointer template arg) path is behind "
+            f"a pointer — the layout change must be demoted (got: {leaks})"
         )
 
     def test_vtable_change_behind_pointer_still_fires(self) -> None:
