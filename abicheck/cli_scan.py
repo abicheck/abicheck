@@ -58,6 +58,8 @@ import click
 
 from .buildsource.crosscheck import ALL_CHECKS, CrosscheckConfig, run_crosschecks
 from .buildsource.pattern_scan import scan_files
+from .buildsource.poi import build_points_of_interest
+from .buildsource.preprocessor_scan import run_preprocessor_scan
 from .buildsource.risk import RiskRules, RiskScore, score_changed_paths
 from .buildsource.scan_levels import (
     EvidenceDepth,
@@ -190,8 +192,11 @@ class ScanOutcome:
     changed_path_source: str
     coverage: list[dict[str, Any]] = field(default_factory=list)
     pattern: dict[str, Any] = field(default_factory=dict)
+    preprocessor: dict[str, Any] = field(default_factory=dict)
     crosscheck: dict[str, Any] = field(default_factory=dict)
     crosscheck_severities: dict[str, str] = field(default_factory=dict)
+    poi: dict[str, Any] = field(default_factory=dict)
+    audit: bool = False
     diff_summary: dict[str, Any] | None = None
     verdict: str = "COMPATIBLE"
     exit_code: int = 0
@@ -214,8 +219,10 @@ class ScanOutcome:
             },
             "coverage": list(self.coverage),
             "pattern_scan": self.pattern,
+            "preprocessor_scan": self.preprocessor,
             "crosscheck": self.crosscheck,
             "crosscheck_severities": dict(self.crosscheck_severities),
+            "poi": self.poi,
             "diff": self.diff_summary,
             "verdict": self.verdict,
             "exit_code": self.exit_code,
@@ -294,6 +301,15 @@ def _render_text(out: ScanOutcome) -> str:
         f"  changed paths: {out.changed_path_count} ({out.changed_path_source})"
     )
 
+    poi_counts = out.poi.get("counts_by_reason") or {}
+    if poi_counts:
+        focus = ", ".join(f"{k}×{v}" for k, v in sorted(poi_counts.items()))
+        lines.append(
+            f"  focus (POI): {out.poi.get('total', 0)} point(s) "
+            f"[{focus}] → {len(out.poi.get('changed_paths') or [])} path(s), "
+            f"{len(out.poi.get('symbols') or [])} symbol(s)"
+        )
+
     lines.append("")
     lines.append("Coverage")
     for row in out.coverage:
@@ -303,7 +319,11 @@ def _render_text(out: ScanOutcome) -> str:
 
     if out.crosscheck.get("counts_by_check"):
         lines.append("")
-        lines.append("Cross-source findings (advisory)")
+        lines.append(
+            "ABI-hygiene catalog (intra-version, advisory)"
+            if out.audit
+            else "Cross-source findings (advisory)"
+        )
         for kind, n in sorted(out.crosscheck["counts_by_check"].items()):
             sev = out.crosscheck_severities.get(kind, "warning")
             lines.append(f"  [{sev}] {kind}: {n}")
@@ -314,6 +334,21 @@ def _render_text(out: ScanOutcome) -> str:
         lines.append("Pattern pre-scan facts (advisory)")
         for kind, n in sorted(pat_counts.items()):
             lines.append(f"  {kind}: {n}")
+
+    pp_div = out.preprocessor.get("divergences") or []
+    pp_leaks = out.preprocessor.get("leaks") or []
+    if pp_div or pp_leaks:
+        lines.append("")
+        lines.append("Preprocessor pre-scan facts (S2, advisory)")
+        for d in pp_div:
+            lines.append(
+                f"  macro divergence: {d['macro']} ({d['n_values']} values across TUs)"
+            )
+        for leak in pp_leaks:
+            lines.append(
+                f"  {leak['leak_class']}-header leak: "
+                f"{leak['public_header']} → {leak['leaked_header']}"
+            )
 
     if out.diff_summary is not None:
         lines.append("")
@@ -526,6 +561,13 @@ def _audit_exit_code(
     help="Single-build hygiene lint, no baseline (intra-version).",
 )
 @click.option(
+    "--estimate",
+    "estimate",
+    is_flag=True,
+    default=False,
+    help="Dry-run: print projected per-layer cost for this project; scan nothing.",
+)
+@click.option(
     "--crosscheck",
     "crosschecks",
     multiple=True,
@@ -572,6 +614,7 @@ def scan_cmd(
     changed_paths_opt: tuple[str, ...],
     budget: str | None,
     audit: bool,
+    estimate: bool,
     crosschecks: tuple[str, ...],
     risk_rules_path: Path | None,
     lang: str,
@@ -643,14 +686,11 @@ def scan_cmd(
 
     scan_mode = ScanMode.AUDIT if audit else ScanMode(mode)
     sm = SourceMethod(source_method) if source_method else None
-    # S2 (preprocessor macro/include capture) has no collection backend yet
-    # (ADR-035 G19 Phase 3b). Reject it rather than silently running the L3-only
-    # `build` mode while reporting `s2`, which would overstate coverage (Codex).
-    if sm is SourceMethod.S2:
-        raise click.UsageError(
-            "--source-method s2 (preprocessor macro/include capture) is not yet "
-            "implemented; use s1 for build context or s5 for source-ABI replay."
-        )
+    # S2 (preprocessor macro/include capture) is collected by the conditional S2
+    # tier (`preprocessor_scan.run_preprocessor_scan`) over the L3 build evidence;
+    # it maps to the L3 `build` collect mode and the always-on tier runs the
+    # preprocessor pass when a compile DB + `clang -E` are available (else the
+    # coverage row reports it skipped — ADR-035 D2 coverage honesty).
     dp = EvidenceDepth(depth) if depth else None
     is_auto = sm is SourceMethod.AUTO
     # auto uses the risk score ONLY when a valid diff seed was produced. A seeded
@@ -669,11 +709,59 @@ def scan_cmd(
     # --source-method reports its own depth, not the mode preset (Codex review).
     collect_mode = level_to_collect_mode(resolved, eff_depth_enum)
     eff_depth = eff_depth_enum.value
+    effective_build_info = compile_db or build_info
+
+    # --- --estimate: dry-run cost probe, scan nothing (ADR-035 D10) -----------
+    if estimate:
+        _emit_estimate(
+            binary=binary,
+            headers=list(headers),
+            includes=list(includes),
+            sources=sources,
+            build_info=effective_build_info,
+            mode=scan_mode.value,
+            source_method=source_method,
+            depth=depth,
+            changed=changed,
+            seeded=seeded,
+            budget_s=budget_s,
+            lang=lang,
+            fmt=fmt,
+            output=output,
+        )
+        return
+
+    # --- always-on tier: compiler-free pattern pre-scan (S3) ------------------
+    # Runs *before* the snapshot build so its escalation triggers feed the D7
+    # points-of-interest work-list that focuses the (expensive) source replay.
+    # Scope: a *seeded* diff (even an empty one) confines the scan to the changed
+    # set — an empty seed (no-op PR) scans nothing, preserving the empty-diff
+    # scope; only a genuinely *unseeded* run (no --since/--changed-path) falls
+    # back to the whole-tree scan (Codex review).
+    pattern_roots: list[Path] = [*headers]
+    if sources is not None:
+        pattern_roots.append(sources)
+    pattern = scan_files(pattern_roots, changed if seeded else None)
+
+    # --- D7 points-of-interest: cheap facts steer the expensive scan ----------
+    # Floor = the directly-changed paths (always included); the pattern triggers
+    # and risk score only *add* candidates, never drop a changed TU (ADR-035 D7).
+    poi = build_points_of_interest(
+        changed_paths=changed,
+        risk=risk,
+        pattern_triggers=pattern.escalation_triggers,
+    )
 
     # --- build the candidate snapshot (L0-L2 + inline L3-L5 at the level) ------
     # An explicit --compile-db (a file) wins over --build-info (dir/pack) as the
-    # L3 source; both feed embed_build_source's build_info input.
-    effective_build_info = compile_db or build_info
+    # L3 source; both feed embed_build_source's build_info input. The POI path set
+    # focuses the replay — but ONLY when a real diff seed was supplied
+    # (``seeded``). Without --since/--changed-path the scan is broad by contract
+    # (the report says so), so passing pattern-trigger POIs as the changed set
+    # would wrongly narrow PR-mode replay to a single pattern-flagged TU and skip
+    # source-only checks elsewhere (Codex review). When seeded, the POI set (floor
+    # + pattern/risk additions) is the focusing work-list.
+    replay_seed = tuple(poi.changed_paths()) if seeded else ()
     new_snap = _build_new_snapshot(
         binary,
         list(headers),
@@ -682,16 +770,24 @@ def scan_cmd(
         collect_mode,
         lang,
         allow_build_query,
-        changed_paths=tuple(changed),
+        changed_paths=replay_seed,
         build_info=effective_build_info,
         build_config=build_config,
     )
 
-    # --- always-on tier: compiler-free pattern pre-scan (S3) ------------------
-    pattern_roots: list[Path] = [*headers]
-    if sources is not None:
-        pattern_roots.append(sources)
-    pattern = scan_files(pattern_roots, changed or None)
+    # --- conditional tier: S2 preprocessor pre-scan (D2) ----------------------
+    # Runs only when L3 build evidence + a preprocessor (`clang -E`) are present;
+    # otherwise the coverage row honestly reports it skipped (never clean). Emits
+    # advisory macro-divergence + private/generated-header-leak facts. Headers are
+    # expanded to the individual public header *files* (``-H include/`` accepts a
+    # directory) so the per-header leak pass preprocesses each header, not the
+    # directory as one bogus TU (Codex review).
+    pp_build = (
+        new_snap.build_source.build_evidence
+        if new_snap.build_source is not None
+        else None
+    )
+    preproc = run_preprocessor_scan(pp_build, _expand_public_headers(list(headers)))
 
     # --- always-on tier: intra-version cross-source checks (D4) ---------------
     cc = run_crosschecks(new_snap, CrosscheckConfig(enabled=frozenset(enabled_checks)))
@@ -751,12 +847,16 @@ def scan_cmd(
         coverage=[
             *_intrinsic_coverage(new_snap),
             pattern.coverage().to_dict(),
+            preproc.coverage().to_dict(),
             *_pack_coverage(new_snap),
             *cc.coverage,
         ],
         pattern=pattern.to_dict(),
+        preprocessor=preproc.to_dict(),
         crosscheck=cc.to_dict(),
         crosscheck_severities=severities,
+        poi=poi.to_dict(),
+        audit=scan_mode is ScanMode.AUDIT,
         diff_summary=diff_summary,
         verdict=verdict,
         exit_code=exit_code,
@@ -777,6 +877,96 @@ def scan_cmd(
 
     if exit_code != 0:
         sys.exit(exit_code)
+
+
+def _expand_public_headers(headers: list[Path]) -> list[str]:
+    """Expand ``-H`` inputs (files or directories) to individual header files.
+
+    ``-H/--headers`` accepts a directory (the snapshot build expands it the same
+    way); the S2 leak pass needs the individual header *files* so clang
+    preprocesses each one, not a directory as a single bogus TU. Falls back to the
+    raw paths if expansion fails (e.g. an empty dir) so the pass still runs.
+    """
+    from .service import expand_header_inputs
+
+    try:
+        return [str(p) for p in expand_header_inputs(headers)]
+    except Exception:  # noqa: BLE001 - expansion is best-effort for the advisory tier
+        return [str(h) for h in headers]
+
+
+def _emit_estimate(
+    *,
+    binary: Path,
+    headers: list[Path],
+    includes: list[Path],
+    sources: Path | None,
+    build_info: Path | None,
+    mode: str,
+    source_method: str | None,
+    depth: str | None,
+    changed: list[str],
+    seeded: bool,
+    budget_s: float | None,
+    lang: str,
+    fmt: str,
+    output: Path | None,
+) -> None:
+    """Render the ADR-035 D10 dry-run cost estimate (``scan --estimate``).
+
+    A thin front-end over :func:`service.estimate_scan`: builds a
+    :class:`service.ScanRequest`, probes the project (TU count, header fan-out)
+    and prints the projected per-layer cost — scanning nothing, running no
+    compiler. Always exits 0 (it is a probe, not a gate).
+    """
+    from .service import Budget, ScanRequest, estimate_scan
+
+    req = ScanRequest(
+        binaries=[binary],
+        headers=headers,
+        includes=includes,
+        sources=sources,
+        build_info=build_info,
+        mode=mode,
+        source_method=source_method,
+        depth=depth,
+        changed_paths=list(changed),
+        seeded=seeded,
+        budget=Budget(total_timeout=budget_s),
+        lang=lang,
+    )
+    estimates = estimate_scan(req)
+    total = sum(e.est_seconds for e in estimates)
+
+    if fmt == "json":
+        text = json.dumps(
+            {
+                "mode": mode,
+                "estimate": [e.to_dict() for e in estimates],
+                "total_est_seconds": round(total, 3),
+            },
+            indent=2,
+        )
+    else:
+        lines = [
+            f"abicheck scan --estimate — {mode} mode (dry run; nothing scanned)",
+            "",
+        ]
+        lines.append(f"  {'layer':<16} {'method':<8} {'TUs':>6}  {'est_s':>8}  note")
+        for e in estimates:
+            lines.append(
+                f"  {e.layer:<16} {(e.method or '-'):<8} {e.tus:>6}  "
+                f"{e.est_seconds:>8.2f}  {e.note}"
+            )
+        lines.append("")
+        lines.append(f"  projected total: {total:.2f}s")
+        text = "\n".join(lines)
+
+    if output:
+        _safe_write_output(output, text)
+        click.echo(f"Estimate written to {output}", err=True)
+    else:
+        click.echo(text)
 
 
 def _load_risk_rules(path: Path | None) -> RiskRules:

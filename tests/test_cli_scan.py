@@ -536,8 +536,10 @@ def test_malformed_risk_rules_yaml_is_click_error(
     assert "cannot read --risk-rules" in res.output
 
 
-def test_source_method_s2_is_rejected_as_unimplemented(runner, new_snap_compatible):
-    # S2 has no collection backend yet — reject rather than overstate (Codex).
+def test_source_method_s2_runs_preprocessor_tier(runner, new_snap_compatible):
+    # S2 is now the conditional preprocessor pre-scan (ADR-035 D2). With no L3
+    # build evidence (snapshot-only input) it runs but reports the preprocessor
+    # tier as skipped — honest coverage, not a hard reject and not a clean pass.
     res = runner.invoke(
         main,
         [
@@ -547,10 +549,15 @@ def test_source_method_s2_is_rejected_as_unimplemented(runner, new_snap_compatib
             "--source-method",
             "s2",
             "--audit",
+            "--format",
+            "json",
         ],
     )
-    assert res.exit_code != 0
-    assert "s2" in res.output and "not yet implemented" in res.output
+    assert res.exit_code == 0
+    payload = json.loads(res.output)
+    assert payload["preprocessor_scan"]["ran"] is False
+    rows = {row["layer"]: row for row in payload["coverage"]}
+    assert rows["preprocessor_scan"]["status"] == "not_collected"
 
 
 def test_auto_seeded_empty_diff_uses_s0(runner, new_snap_compatible):

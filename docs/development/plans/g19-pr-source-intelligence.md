@@ -57,8 +57,15 @@ authority rule (L0–L2 stay authoritative for `BREAKING`).
   `PatternScanResult`/`EscalationTrigger`), with mandatory coverage reporting and
   no compile DB / compiler. Tree-sitter is a pluggable later backend.
   Tests: `tests/test_pattern_scan.py`.
-- **TODO** — Extend `buildsource/include_graph.py`: per-TU ABI-macro-value capture
-  and private/generated-header-leak detection when a compile DB is present.
+- **DONE** — New `abicheck/buildsource/preprocessor_scan.py` (S2 conditional
+  tier): `run_preprocessor_scan` runs over the collected L3 build evidence **only**
+  when a compile DB + `clang -E` are present (else an honest skipped coverage row).
+  Captures per-TU ABI-macro values (`clang -E -dM`) → `find_macro_divergence`, and
+  public-header resolved includes (`clang -M`) → `find_private_header_leaks`
+  (`classify_include`: public/private/generated/system). Pure analysis core is
+  unit-tested; the live `ClangPreprocessorExtractor` is integration-only and
+  degrades gracefully. Wired into `scan` as an always-on conditional tier with its
+  own coverage row + advisory facts. Tests: `tests/test_preprocessor_scan.py`.
 
 ### Phase 2 — Cross-source validation engine (G19.2)
 - **DONE** — New `abicheck/buildsource/crosscheck.py` (`run_crosschecks`) consumes
@@ -96,24 +103,37 @@ authority rule (L0–L2 stay authoritative for `BREAKING`).
   `embed_build_source` → `collect_inline_pack` → `run_source_replay` so a
   `source-changed` collection narrows to the affected TUs (D7 focusing for the
   supplied changed set) instead of replaying the whole target.
-- **TODO (Phase 3b/3c)** — the *automatic* POI work-list (`buildsource/poi.py`)
-  computed from L0/L1/L2 deltas (vs. the explicit changed-path set already
-  threaded), the typed `ScanRequest`/`ScanResult` + provider protocol +
-  `--estimate` in `service.py`, MCP `scan`/`audit`/`estimate` tools, and the
-  `surface-report`-reuse single-release audit catalog. `scan --audit` already
-  runs the D2+D4 intra-version pass.
+- **DONE (Phase 3b/3c)** — the POI work-list, the typed scan API + `--estimate`,
+  MCP `audit`/`estimate` tools, and the single-release audit catalog (below).
 
 ### Phase 3b — Evidence-directed focusing + API/estimate (G19.5, G19.7)
-- POI builder: from L0/L1/L2 deltas + risk score, produce a work-list consumed by
-  `source_replay` scope selection and `crosscheck.py` (reverse of the
-  `explain-finding` localization walk).
-- Typed `ScanRequest`/`ScanResult` + uniform per-level provider protocol
-  (`capabilities`/`estimate`/`run(ctx, poi)`) in `service.py`; `estimate_scan()`
-  and `scan --estimate`.
+- **DONE** — POI builder (`buildsource/poi.py`, `build_points_of_interest`): from
+  the changed-path **floor** + pattern-scan escalation triggers + L0/L1/L2 export
+  deltas + risk score, produces a `PointsOfInterest` work-list (reverse of the
+  `explain-finding` localization walk). The floor is unconditional — risk/deltas
+  only *add* candidates, never drop a changed TU (ADR-035 D7). `scan` runs the
+  pattern pre-scan first and feeds `poi.changed_paths()` into the source-replay
+  scope. Tests: `tests/test_poi.py`.
+- **DONE** — typed `ScanRequest`/`CostEstimate`/`LayerResult`/`Budget` +
+  `estimate_scan()` in `service.py` (the one contract the CLI + MCP drive);
+  `scan --estimate` (`cli_scan._emit_estimate`) is a dry-run cost probe (TU count
+  from the compile DB / source tree, header fan-out) that scans nothing. MCP
+  `abi_estimate` / `abi_audit` tools wrap the same engine. Tests:
+  `tests/test_scan_estimate.py`.
+- **TODO** — the uniform per-level provider protocol
+  (`capabilities`/`estimate`/`run(ctx, poi)`) and the full `ScanResult`/`run_scan`
+  refactor that moves the `cli_scan` orchestration body into `service.py`.
 
 ### Phase 3c — Single-release audit (G19.6)
-- `scan --audit` (and `surface-report` reuse): run D2 + D4 intra-version, emit the
-  hygiene catalog with no baseline; severity-mapped lint + exit code.
+- **DONE** — `scan --audit` runs D2 + D4 intra-version (no baseline) and renders
+  the hygiene catalog (the cross-source findings grouped by severity + advisory
+  pattern facts), severity-mapped via `--crosscheck KEY=LEVEL` with the
+  `_audit_exit_code` mapping (RISK advisory; API_BREAK → exit 2; promoted checks
+  gate). MCP `abi_audit` exposes the same catalog. Tests:
+  `tests/test_scan_estimate.py`.
+- **TODO** — `surface-report` reuse + the deeper one-time audit checks (ODR
+  variants, visibility/versioning hygiene, RTTI-for-internal-types) once their
+  ChangeKinds land (Phase 2 tail).
 
 ### Phase 4 — Build-integrated extraction (G19.4)
 - **DONE** — `abicheck/buildsource/inputs_pack.py` defines the Flow-2

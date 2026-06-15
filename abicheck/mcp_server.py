@@ -862,6 +862,147 @@ def abi_explain_change(
     return json.dumps(result)
 
 
+@mcp.tool()
+def abi_audit(
+    library_path: str,
+    headers: list[str] | None = None,
+    include_dirs: list[str] | None = None,
+    language: str = "c++",
+) -> str:
+    """Single-release ABI-hygiene audit — no baseline (ADR-035 D8).
+
+    Runs the intra-version cross-source validation engine plus the compiler-free
+    lexical pattern pre-scan over ONE build and returns a "bad ABI hygiene"
+    catalog: accidental ABI surface (exported_not_public), public-not-exported
+    declarations, header/build-context mismatch, and private-header leaks, plus
+    advisory pattern facts. These findings are never BREAKING on their own
+    (authority rule) — they default to RISK/API_BREAK and are advisory.
+
+    Args:
+        library_path: Path to .so/.dll/.dylib or a JSON snapshot.
+        headers: Public header files (classifies declarations + drives the
+            pattern pre-scan). Strongly recommended — most checks skip cleanly
+            without public-header provenance.
+        include_dirs: Extra include directories for the C/C++ parser.
+        language: Language mode — "c++" (default) or "c".
+    """
+    t0 = _time.monotonic()
+    try:
+        from .buildsource.crosscheck import run_crosschecks
+        from .buildsource.pattern_scan import scan_files
+        from .checker_policy import API_BREAK_KINDS
+
+        lib = _safe_read_path(library_path, label="library_path")
+        if not lib.exists():
+            return json.dumps({"status": "error", "error": "Library file not found"})
+        _check_file_size(lib, label="library_path")
+        hdr_paths = [_safe_read_path(h, label="header") for h in (headers or [])]
+        inc_paths = [_safe_read_path(d, label="include_dir") for d in (include_dirs or [])]
+
+        with _futures.ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(_resolve_input, lib, hdr_paths, inc_paths, "", language)
+            try:
+                snap = future.result(timeout=MCP_TIMEOUT)
+            except _futures.TimeoutError:
+                elapsed = _time.monotonic() - t0
+                _audit_log("abi_audit", {"library": lib.name}, elapsed, "timeout")
+                return json.dumps({"status": "error", "error": f"abi_audit timed out after {MCP_TIMEOUT}s"})
+
+        cc = run_crosschecks(snap)
+        pattern = scan_files([*hdr_paths], None)
+        has_api_break = any(c.kind in API_BREAK_KINDS for c in cc.findings)
+        exit_code = 2 if has_api_break else 0
+        elapsed = _time.monotonic() - t0
+        _audit_log("abi_audit", {"library": lib.name}, elapsed, "ok")
+        return json.dumps({
+            "status": "ok",
+            "verdict": "API_BREAK" if has_api_break else "COMPATIBLE",
+            "exit_code": exit_code,
+            "catalog": cc.to_dict(),
+            "pattern_scan": pattern.to_dict(),
+        })
+    except Exception as exc:
+        elapsed = _time.monotonic() - t0
+        _audit_log("abi_audit", {"library": Path(library_path).name}, elapsed, "error")
+        _logger.exception("abi_audit failed")
+        return json.dumps({"status": "error", "error": _sanitize_error(exc, context="abi_audit")})
+
+
+@mcp.tool()
+def abi_estimate(
+    binary_path: str,
+    headers: list[str] | None = None,
+    include_dirs: list[str] | None = None,
+    sources: str | None = None,
+    compile_db: str | None = None,
+    mode: str = "pr",
+    source_method: str | None = None,
+    depth: str | None = None,
+    changed_paths: list[str] | None = None,
+) -> str:
+    """Dry-run scan cost estimate for a project (ADR-035 D10).
+
+    Probes the project (TU count from the compile DB or source tree, public-header
+    fan-out) and returns the projected per-layer cost of the chosen level WITHOUT
+    running any compiler or parsing any binary — so a maintainer/agent can pick a
+    depth/budget on measured cost. Scans nothing.
+
+    Args:
+        binary_path: Library/artifact the scan would target (existence checked).
+        headers: Public header files (for the L2 header-AST fan-out estimate).
+        include_dirs: Extra include directories.
+        sources: Source tree (compile DB auto-discovered within it).
+        compile_db: Explicit compile_commands.json (else discovered in sources).
+        mode: Fixed (L,S) preset — "pr" (default), "pr-deep", "baseline", "audit".
+        source_method: Precise S-axis level (s0..s6 or auto); None = mode preset.
+        depth: Coarse L-axis selector (headers|build|source|full|graph).
+        changed_paths: Changed-path set for the focused (D7) replay-scope estimate.
+    """
+    t0 = _time.monotonic()
+    try:
+        from .service import Budget, ScanRequest, estimate_scan
+
+        bin_path = _safe_read_path(binary_path, label="binary_path")
+        if not bin_path.exists():
+            return json.dumps({"status": "error", "error": "Binary file not found"})
+        hdr_paths = [_safe_read_path(h, label="header") for h in (headers or [])]
+        inc_paths = [_safe_read_path(d, label="include_dir") for d in (include_dirs or [])]
+        src_path = _safe_read_path(sources, label="sources") if sources else None
+        cdb_path = _safe_read_path(compile_db, label="compile_db") if compile_db else None
+
+        req = ScanRequest(
+            binaries=[bin_path],
+            headers=hdr_paths,
+            includes=inc_paths,
+            sources=src_path,
+            compile_db=cdb_path,
+            mode=mode,
+            source_method=source_method,
+            depth=depth,
+            changed_paths=list(changed_paths or []),
+            # Distinguish an *explicit* empty diff ([], a seeded no-op PR → s0
+            # floor) from an omitted arg (None, unseeded → mode preset), matching
+            # the CLI's seeded handling (Codex review).
+            seeded=changed_paths is not None,
+            budget=Budget(),
+        )
+        estimates = estimate_scan(req)
+        total = sum(e.est_seconds for e in estimates)
+        elapsed = _time.monotonic() - t0
+        _audit_log("abi_estimate", {"binary": bin_path.name}, elapsed, "ok")
+        return json.dumps({
+            "status": "ok",
+            "mode": mode,
+            "estimate": [e.to_dict() for e in estimates],
+            "total_est_seconds": round(total, 3),
+        })
+    except Exception as exc:
+        elapsed = _time.monotonic() - t0
+        _audit_log("abi_estimate", {"binary": Path(binary_path).name}, elapsed, "error")
+        _logger.exception("abi_estimate failed")
+        return json.dumps({"status": "error", "error": _sanitize_error(exc, context="abi_estimate")})
+
+
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
