@@ -341,9 +341,13 @@ def _build_new_snapshot(
     allow_build_query: bool,
 ) -> Any:
     """Dump the candidate's L0-L2 surface and embed L3-L5 inline at *collect_mode*."""
+    from .errors import AbicheckError
     from .service import resolve_input
 
-    snap = resolve_input(binary, headers, includes, version="", lang=lang)
+    try:
+        snap = resolve_input(binary, headers, includes, version="", lang=lang)
+    except AbicheckError as exc:
+        raise click.ClickException(f"Failed to load --binary {binary}: {exc}") from exc
     if sources is not None and collect_mode != "off":
         from .cli_buildsource import embed_build_source
 
@@ -718,9 +722,15 @@ def _run_baseline_compare(
     (ADR-035 D1 authority rule).
     """
     from .checker import compare
+    from .errors import AbicheckError
     from .service import resolve_input
 
-    old_snap = resolve_input(baseline, [], [], version="", lang=lang)
+    try:
+        old_snap = resolve_input(baseline, [], [], version="", lang=lang)
+    except AbicheckError as exc:
+        raise click.ClickException(
+            f"Failed to load --baseline {baseline}: {exc}"
+        ) from exc
     diff = compare(
         old_snap,
         new_snap,

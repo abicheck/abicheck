@@ -407,3 +407,25 @@ def test_invalid_budget_string_is_bad_parameter(runner, new_snap_compatible):
     )
     assert res.exit_code != 0
     assert "budget" in res.output.lower()
+
+
+def test_malformed_binary_input_is_click_error(runner, tmp_path):
+    # Unrecognized input must surface as a clean CLI error, not a traceback.
+    bad = tmp_path / "bad.abi.json"
+    bad.write_text("{ not valid json", encoding="utf-8")
+    res = runner.invoke(main, ["scan", "--binary", str(bad), "--audit"])
+    assert res.exit_code != 0
+    assert res.exception is None or isinstance(res.exception, SystemExit)
+    assert "Failed to load --binary" in res.output
+
+
+def test_malformed_baseline_input_is_click_error(runner, tmp_path, new_snap_compatible):
+    bad = tmp_path / "bad_base.abi.json"
+    bad.write_text("{ not valid json", encoding="utf-8")
+    res = runner.invoke(
+        main,
+        ["scan", "--binary", str(new_snap_compatible), "--baseline", str(bad)],
+    )
+    assert res.exit_code != 0
+    assert res.exception is None or isinstance(res.exception, SystemExit)
+    assert "Failed to load --baseline" in res.output
