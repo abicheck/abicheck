@@ -173,8 +173,10 @@ between `s4` and `s5` (i.e. reaching L4)**:
 
 - **Cheap tier (`s0`–`s4`):** one price, dominated by the binary dump + lexical
   scan, *not* the source layer. `s0` ≈ `s3`; `s1` adds L3; **`s4` adds the L5
-  reachability graph without paying for L4** — the best cheap level when you want
-  impact/call structure.
+  *structural* graph without paying for L4** — target → source → header →
+  build-option nodes (`graph-build`), the best cheap level for build-structure
+  reachability. Note `s4` does **not** fold call edges (`DECL_CALLS_DECL`): those
+  need the L4 pass, so for call-impact reachability use `pr-deep`/`s5`/`s6`.
 - **Expensive tier (`s5`, `s6`, and the modes that use them):** clang per-TU AST
   replay (L4). The cliff height tracks **C++ template/STL instantiation depth**,
   not `.so`/TU count — a heavy-C++ library can be ~7× slower at `s5` than `s4`,
