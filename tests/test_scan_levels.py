@@ -60,7 +60,12 @@ def test_resolve_level_explicit_depth_is_verbatim():
     method, depth = resolve_level(mode=ScanMode.PR, depth=EvidenceDepth.GRAPH)
     assert method is SourceMethod.S4
     assert depth is EvidenceDepth.GRAPH
-    assert level_to_collect_mode(method, depth) == "graph-summary"
+    # S4 is graph-only — graph-build (L3+L5), NOT the L4-replaying graph-summary.
+    assert level_to_collect_mode(method, depth) == "graph-build"
+
+
+def test_s4_graph_only_avoids_l4_replay():
+    assert method_to_collect_mode(SourceMethod.S4) == "graph-build"
 
 
 @pytest.mark.parametrize(

@@ -136,7 +136,8 @@ _DEFAULT_RULES: tuple[RiskRule, ...] = (
             "doc/**",
             "*.md",
             "*.rst",
-            "*.txt",
+            # NB: no bare ``*.txt`` — it false-matches ``CMakeLists.txt`` and would
+            # de-escalate a real top-level build change. Docs use .md/.rst here.
             "test/**",
             "tests/**",
             "*_test.*",
@@ -159,12 +160,14 @@ _AUTO_THRESHOLDS: tuple[tuple[int, str], ...] = (
 _AUTO_FLOOR_METHOD = "s0"
 
 #: A positive signal at or above this weight is a *strong* ABI signal (public
-#: header / export map / build flag in the default profile) that wins over a
-#: co-matched de-escalation rule. Below it, a de-escalation match (docs/tests)
-#: floors the generic ``internal_source`` catch-all so a test-only change does
-#: not escalate (Codex review). Tied to the build-flag tier of the default
-#: profile; tunable along with the rest of ``risk_rules``.
-_STRONG_SIGNAL_WEIGHT = 40
+#: header / export map in the default profile) that wins over a co-matched
+#: de-escalation rule. Below it — notably the ``build_abi_flags`` tier (40) — a
+#: de-escalation match (docs/tests) floors the positive, so a *test* build file
+#: (``tests/CMakeLists.txt``, ``tests/BUILD``, ``tests/foo.cmake``) stays on the
+#: docs/test floor instead of escalating like a top-level build change (Codex
+#: review). Set just above the build-flag tier; tunable with the rest of
+#: ``risk_rules``.
+_STRONG_SIGNAL_WEIGHT = 45
 
 
 @dataclass(frozen=True)

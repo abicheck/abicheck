@@ -107,7 +107,7 @@ _METHOD_TO_COLLECT_MODE: dict[SourceMethod, str] = {
     SourceMethod.S1: "build",
     SourceMethod.S2: "build",  # unreachable: CLI rejects s2 (no S2 backend yet)
     SourceMethod.S3: "off",
-    SourceMethod.S4: "graph-summary",
+    SourceMethod.S4: "graph-build",  # L3+L5 graph only — no costly L4 replay
     SourceMethod.S5: "source-changed",
     SourceMethod.S6: "graph-full",
 }
@@ -236,11 +236,12 @@ def resolve_level(
 def level_to_collect_mode(method: SourceMethod, depth: EvidenceDepth) -> str:
     """The ADR-033 D2 CI evidence mode for a resolved (method, depth) level.
 
-    Depth-aware so a graph-depth level engages the L5 semantic-graph collection
-    even when the method's own default mode would not: ``pr-deep`` ((S5, GRAPH))
-    resolves to ``graph-summary`` (L3+L4+L5 with the graph built) instead of
-    ``pr``'s ``source-changed``, so the deeper preset actually collects more
-    (Codex review). All other levels use the method's default mode.
+    Depth-aware for the S5 graph case only: ``pr-deep`` ((S5, GRAPH)) resolves to
+    ``graph-summary`` (L3+L4+L5 with the graph built) instead of ``pr``'s
+    ``source-changed``, so the deeper preset actually collects more (Codex
+    review). S4 (``--depth graph``) keeps its own ``graph-build`` mode (L3+L5, no
+    costly L4 replay) — it is graph-only, not source-ABI (Codex review). All other
+    levels use the method's default mode.
     """
     base = method_to_collect_mode(method)
     if depth is EvidenceDepth.GRAPH and base == "source-changed":

@@ -80,6 +80,22 @@ def test_cpp_test_only_change_stays_on_docs_floor():
     assert score.recommended_method == "s0"
 
 
+def test_test_build_files_stay_on_docs_floor():
+    # A build file under tests/ matches build_abi_flags AND docs_tests; the test
+    # floor must win so auto does not escalate a test-only change (Codex review).
+    for path in ("tests/CMakeLists.txt", "tests/BUILD", "tests/foo.cmake"):
+        score = score_changed_paths([path])
+        assert score.total < 0, path
+        assert score.recommended_method == "s0", path
+
+
+def test_top_level_build_change_still_escalates():
+    # A real (non-test) build change has no docs co-match → still escalates.
+    score = score_changed_paths(["CMakeLists.txt"])
+    assert score.total == 40
+    assert score.recommended_method == "s5"
+
+
 def test_strong_signal_beats_co_matched_docs_rule():
     # A public header that also trips the *_test.* pattern is still public API —
     # the strong signal wins over the de-escalation floor.
