@@ -71,6 +71,16 @@ accidental exports, private-header leaks, and unversioned symbols:
 abicheck scan --binary libfoo.so --headers include/ --audit
 ```
 
+Worked example cases for each audit finding:
+[case143](../examples/case143_audit_accidental_export.md) (`exported_not_public`),
+[case144](../examples/case144_audit_private_header_leak.md) (`private_header_leak`),
+[case145](../examples/case145_audit_unversioned_export.md) (`unversioned_exported_symbol`),
+[case146](../examples/case146_audit_rtti_for_internal.md) (`rtti_for_internal_type`).
+[case150](../examples/case150_xcheck_export_public_pair.md) shows the
+bidirectional `exported_not_public` ↔ `public_not_exported` pair, and
+[case151](../examples/case151_xcheck_provider_matrix.md) shows confidence growing
+with the number of corroborating sources (the provider-agreement matrix).
+
 Some audit checks need more evidence than the artifact tiers provide:
 `header_build_context_mismatch` compares the headers' parse context against the
 real build flags, so it only fires when you also pass an L3 build input
@@ -83,7 +93,13 @@ abicheck scan --binary libfoo.so --headers include/ \
 ```
 
 This is `(s5, source)` run intra-version; it reports the eight ADR-035
-cross-source / single-release findings rather than a two-version diff.
+cross-source / single-release findings rather than a two-version diff. The
+flagship cross-source cases —
+[case148](../examples/case148_xcheck_header_build_mismatch.md)
+(`header_build_context_mismatch`, L2 macros ↔ L3 flags) and
+[case149](../examples/case149_xcheck_odr_variant.md) (`odr_type_variant`, L4
+layout ↔ layout) — are findings that are invisible or ambiguous to any single
+source and resolve only by crosschecking two.
 
 ### Cheap gate — no compiler, no sources
 
@@ -171,6 +187,9 @@ An `[off]` line is the precise input to add (here: install clang and pass
 `--sources`). See
 [Build Info & Sources § Evidence coverage](../concepts/build-source-data.md#evidence-coverage)
 for the full coverage and capability report.
+[case147](../examples/case147_scan_depth_ladder.md) is the legibility anchor:
+the *same* input scanned at S3 (pattern only), then deeper, with the coverage
+block showing exactly what each depth proved and what it could not.
 
 ## Cost guide (rules of thumb)
 

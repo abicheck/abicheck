@@ -56,6 +56,13 @@ The L-axis is explained in full, with the detectability matrix, in
 [Evidence & Detectability](evidence-and-detectability.md); the build/source
 layers (L3/L4/L5) in [Build Info & Sources](build-source-data.md).
 
+Combining two layers can also resolve a finding that is invisible or ambiguous
+to either alone: [case148](../examples/case148_xcheck_header_build_mismatch.md)
+crosschecks L2 header macros against L3 build flags;
+[case149](../examples/case149_xcheck_odr_variant.md) crosschecks two L4 per-TU
+layouts; [case150](../examples/case150_xcheck_export_public_pair.md) crosschecks
+the L0 export table against L2 declarations in both directions.
+
 ---
 
 ## 2. The S-axis — source-analysis methods (the *how*)
@@ -205,6 +212,10 @@ This is the same evidence-coverage / capability report described in
 [Build Info & Sources § Evidence coverage](build-source-data.md#evidence-coverage).
 The rule is: **honest about what it had** — the verdict is only ever as strong as
 the evidence behind it.
+[case147](../examples/case147_scan_depth_ladder.md) is the worked illustration:
+the *same* input scanned at S3 (pattern only, no compiler) and at a deeper level,
+with the coverage block showing exactly what each depth proved — never a bare
+"scan failed".
 
 ---
 
