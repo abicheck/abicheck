@@ -1,0 +1,33 @@
+# case147 — Depth ladder: the same input answered at three depths
+
+**Verdict:** 🟡 COMPATIBLE_WITH_RISK · **Cross-check:** `private_header_leak` ·
+**Mode:** single-release audit · **Evidence tier:** L2 (→ L5 corroboration)
+
+## What it demonstrates
+
+The *legibility anchor* for ADR-035's honest-coverage promise: identical input
+scanned at increasing depth, with the report stating **exactly what each depth
+proved and what it could not** — never a bare "scan failed".
+
+`connect()` takes `detail::SessionState&`, a private-header type.
+
+| Depth | Method | What it proves | What it cannot |
+|-------|--------|----------------|----------------|
+| **S3** | lexical pattern pre-scan (no compiler) | flags a risky construct: a public signature mentions a `detail::` name | cannot confirm the type is actually private — only a textual hint |
+| **S2** | preprocessor (if a compile DB is present) | resolves the `#include` graph | does not parse the AST |
+| **S5** | source replay + L5 source graph | **confirms** `detail::SessionState` originates in a private header and is reached from a public decl → `PRIVATE_HEADER_LEAK`, corroborated by the `source_index` provider | (the deepest answer) |
+
+The committed `snapshot.abi.json` carries the L2 header provenance **and** the L5
+source graph, so the cross-check fires with the `source_index` corroboration the
+S5 pass would add — the endpoint of the ladder.
+
+## Reproduce the ladder
+
+```bash
+abicheck scan --audit libdemo.so -H include/ --depth s3   # pattern only
+abicheck scan --audit libdemo.so -H include/ --sources .  # S5 replay + graph
+```
+
+## Fix
+
+Same as a private-header leak: opaque-handle the type, or install its header.

@@ -1,0 +1,82 @@
+{
+  "build_id": null,
+  "build_mode": null,
+  "build_source": {
+    "manifest": {
+      "abicheck_version": "",
+      "artifacts": [],
+      "build_source_pack_version": 1,
+      "coverage": [],
+      "created_at": "",
+      "extractors": [],
+      "inputs": {},
+      "redaction": {},
+      "source_root": {
+        "path_redacted": true,
+        "repo_hash": ""
+      }
+    },
+    "source_abi": {
+      "coverage": {},
+      "library": "",
+      "mappings": {
+        "public_header_to_target": {},
+        "source_decl_to_binary_symbol": {},
+        "source_type_to_debug_type": {}
+      },
+      "odr_conflicts": [
+        {
+          "header": "include/geometry/vec3.h",
+          "new_type_hash": "sha256:bbb",
+          "old_type_hash": "sha256:aaa",
+          "qualified_name": "geometry::Vec3"
+        }
+      ],
+      "reachable_source_surface": {
+        "declarations": [],
+        "inline_bodies": [],
+        "macros": [],
+        "templates": [],
+        "types": []
+      },
+      "roots": {
+        "exported_symbols": [],
+        "forced_public": [],
+        "public_header_declarations": []
+      },
+      "schema_version": 1,
+      "target_id": "",
+      "unmatched": {
+        "decls_without_symbol": [],
+        "symbols_without_decl": []
+      }
+    }
+  },
+  "build_source_pack": null,
+  "constants": {},
+  "created_at": null,
+  "dependency_info": null,
+  "dwarf": null,
+  "dwarf_advanced": null,
+  "elf": null,
+  "elf_only_mode": false,
+  "enums": [],
+  "from_headers": true,
+  "functions": [],
+  "git_commit": null,
+  "git_tag": null,
+  "language_profile": null,
+  "library": "libdemo.so",
+  "macho": null,
+  "parsed_with_build_context": false,
+  "pe": null,
+  "platform": null,
+  "schema_version": 8,
+  "scope_fallback": null,
+  "source_path": null,
+  "sycl": null,
+  "typedefs": {},
+  "types": [],
+  "variables": [],
+  "version": "1.0"
+}

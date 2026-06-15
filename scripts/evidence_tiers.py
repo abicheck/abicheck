@@ -15,6 +15,7 @@ debug symbols     L1 — DWARF / PDB / BTF / CTF            a ``-g`` build, no h
 headers           L2 — public-header AST (castxml)        ``-H include/``
 build data        L3 — compile DB / flags / target graph  ``-p build/``
 sources           L4 — per-TU source ABI replay           an BuildSourcePack (ADR-030)
+source graph      L5 — decl-dependency / call edges       the L5 graph in the pack (ADR-031)
 ================  =====================================  =========================
 
 This module is the **single source of truth** for *which evidence layer each
@@ -40,7 +41,7 @@ from __future__ import annotations
 from typing import Any
 
 # Ordered tiers, weakest evidence first. The index is the comparison key.
-TIER_ORDER: list[str] = ["L0", "L1", "L2", "L3", "L4"]
+TIER_ORDER: list[str] = ["L0", "L1", "L2", "L3", "L4", "L5"]
 
 TIER_LABELS: dict[str, str] = {
     "L0": "binary only (exported symbols / linker metadata)",
@@ -48,6 +49,7 @@ TIER_LABELS: dict[str, str] = {
     "L2": "binary + debug + public headers (castxml AST)",
     "L3": "+ build context (compile DB / flags)",
     "L4": "+ source ABI replay (BuildSourcePack)",
+    "L5": "+ source graph (decl-dependency / call edges)",
 }
 
 
@@ -244,15 +246,24 @@ KINDLESS_CASE_TIER: dict[str, str] = {
 
 
 def compute_min_evidence(case_name: str, info: dict[str, Any]) -> str:
-    """Return the minimum evidence layer (``L0``..``L4``) for one case.
+    """Return the minimum evidence layer (``L0``..``L5``) for one case.
 
     The value is the strongest layer among the case's expected kinds, or the
     explicit :data:`KINDLESS_CASE_TIER` entry when the case declares no kinds.
     Raises ``KeyError`` if a kind or kind-less case is unmapped, so a new case
     cannot be added silently without an evidence-tier decision.
+
+    ADR-035 (G20) cross-check / single-release-audit cases declare their finding
+    under ``expected_crosscheck_kinds`` (the ``run_crosschecks`` output) rather
+    than ``expected_kinds`` (the ``compare`` diff). Those eight kinds are already
+    mapped in :data:`EVIDENCE_TIER_BY_KIND`, so the tier is *derived* the same
+    way — a crosscheck case never needs a hand-set :data:`KINDLESS_CASE_TIER`
+    entry.
     """
-    kinds = list(info.get("expected_kinds", [])) + list(
-        info.get("expected_bundle_kinds", [])
+    kinds = (
+        list(info.get("expected_kinds", []))
+        + list(info.get("expected_bundle_kinds", []))
+        + list(info.get("expected_crosscheck_kinds", []))
     )
     if not kinds:
         if case_name not in KINDLESS_CASE_TIER:

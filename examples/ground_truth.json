@@ -1,6 +1,6 @@
 {
-  "version": "3",
-  "description": "Ground-truth expected verdicts and change kinds for all abicheck example cases. Single source of truth \u2014 kept in sync with tests/test_example_autodiscovery.py::EXPECTED. expected_kinds lists the ChangeKind values that MUST appear in the diff result (subset check). expected_absent_kinds lists kinds that MUST NOT appear (false positive guard). min_evidence is the minimum evidence layer (L0 binary / L1 +debug / L2 +headers / L3 +build / L4 +source) at which abicheck reaches the correct verdict \u2014 derived by scripts/evidence_tiers.py and validated by tests/test_evidence_tiers.py.",
+  "version": "4",
+  "description": "Ground-truth expected verdicts and change kinds for all abicheck example cases. Single source of truth \u2014 kept in sync with tests/test_example_autodiscovery.py::EXPECTED. expected_kinds lists the ChangeKind values that MUST appear in the diff result (subset check). expected_absent_kinds lists kinds that MUST NOT appear (false positive guard). min_evidence is the minimum evidence layer (L0 binary / L1 +debug / L2 +headers / L3 +build / L4 +source / L5 +source-graph) at which abicheck reaches the correct verdict \u2014 derived by scripts/evidence_tiers.py and validated by tests/test_evidence_tiers.py. Schema v4 (ADR-035 / G20) adds optional fields for the single-release audit and intra-version cross-source corpus: mode (\"compare\" default | \"audit\" = single build, no v2/baseline); expected_crosscheck_kinds (subset-checked against run_crosschecks(snapshot).findings[].kind, distinct from the compare-diff expected_kinds); expected_providers (per check name \u2192 the provider-agreement list ScanResult records); expected_scan (scan-plan counters a focusing case asserts); fixtures (non-v1/v2 fixture files the case ships, e.g. snapshot.abi.json / abicheck_inputs/ / compile_commands.json). All v4 fields are optional and defaulted \u2014 existing rows are untouched.",
   "cross_references": {
     "verdict_classification": "abicheck/checker_policy.py \u2014 BREAKING_KINDS, API_BREAK_KINDS, RISK_KINDS, COMPATIBLE_KINDS (= ADDITION_KINDS \u222a QUALITY_KINDS)",
     "category_mapping": "breaking \u2192 BREAKING_KINDS | api_break \u2192 API_BREAK_KINDS | risk \u2192 RISK_KINDS | addition \u2192 ADDITION_KINDS | quality \u2192 QUALITY_KINDS | no_change \u2192 (empty)",
@@ -8,6 +8,9 @@
     "test_autodiscovery": "tests/test_example_autodiscovery.py \u2014 reads EXPECTED from this file",
     "test_evidence_tiers": "tests/test_evidence_tiers.py \u2014 keeps min_evidence in sync with scripts/evidence_tiers.py",
     "test_manual": "tests/test_abi_examples.py \u2014 hardcoded expectations for cases 01-18 (must stay in sync)",
+    "test_crosscheck_catalog": "tests/test_g20_catalog.py \u2014 loads each G20 case's committed snapshot fixture and asserts expected_crosscheck_kinds / expected_providers via run_crosschecks (compiler-free, fast lane)",
+    "crosscheck_engine": "abicheck/buildsource/crosscheck.py \u2014 run_crosschecks() produces the eight ADR-035 D4/D8 cross-source / audit ChangeKinds the G20 corpus demonstrates",
+    "g20_fixture_writer": "scripts/gen_g20_fixtures.py \u2014 single source of truth for the committed snapshot fixtures (snapshot.abi.json) of cases 143-151",
     "examples_readme": "examples/README.md \u2014 case index table (must stay in sync)"
   },
   "verdicts": {
@@ -2412,6 +2415,243 @@
         "vtable_slot_count_changed"
       ],
       "description": "A virtual method is inserted in the middle of a polymorphic class, growing the _ZTV vtable object by one pointer. abicheck detects the slot-count change from the ELF symbol size alone \u2014 no DWARF, no headers (VTABLE_SLOT_COUNT_CHANGED, evidence tier L0)."
+    },
+    "case143_audit_accidental_export": {
+      "expected": "COMPATIBLE_WITH_RISK",
+      "category": "risk",
+      "mode": "audit",
+      "min_evidence": "L2",
+      "platforms": [
+        "linux"
+      ],
+      "abi_break": false,
+      "api_break": false,
+      "bad_practice": true,
+      "expected_kinds": [],
+      "expected_crosscheck_kinds": [
+        "exported_not_public"
+      ],
+      "expected_providers": {
+        "exported_not_public": [
+          "binary_exports",
+          "public_header_ast"
+        ]
+      },
+      "fixtures": [
+        "snapshot.abi.json"
+      ],
+      "description": "Single-release audit (no baseline): a function defined with default visibility but never declared in a public header is an accidental export. Crosschecking the binary export table against the public-header AST flags it (EXPORTED_NOT_PUBLIC); neither source alone sees it."
+    },
+    "case144_audit_private_header_leak": {
+      "expected": "COMPATIBLE_WITH_RISK",
+      "category": "risk",
+      "mode": "audit",
+      "min_evidence": "L2",
+      "platforms": [
+        "linux"
+      ],
+      "abi_break": false,
+      "api_break": false,
+      "bad_practice": true,
+      "expected_kinds": [],
+      "expected_crosscheck_kinds": [
+        "private_header_leak"
+      ],
+      "expected_providers": {
+        "private_header_leak": [
+          "public_header_ast"
+        ]
+      },
+      "fixtures": [
+        "snapshot.abi.json"
+      ],
+      "description": "Single-release audit: a public API returns detail::WidgetImpl*, a type defined only in a private (non-installed) header. The public-header AST cross-check flags the un-installed-type leak (PRIVATE_HEADER_LEAK)."
+    },
+    "case145_audit_unversioned_export": {
+      "expected": "COMPATIBLE_WITH_RISK",
+      "category": "risk",
+      "mode": "audit",
+      "min_evidence": "L0",
+      "platforms": [
+        "linux"
+      ],
+      "abi_break": false,
+      "api_break": false,
+      "bad_practice": true,
+      "expected_kinds": [],
+      "expected_crosscheck_kinds": [
+        "unversioned_exported_symbol"
+      ],
+      "expected_providers": {
+        "unversioned_exported_symbol": [
+          "binary_exports"
+        ]
+      },
+      "fixtures": [
+        "snapshot.abi.json"
+      ],
+      "description": "Single-release audit, pure L0: the library defines a symbol-versioning scheme (DEMO_1.0) but a new export ships with no version node. It cannot be evolved compatibly later (UNVERSIONED_EXPORTED_SYMBOL) - read from the export table vs .gnu.version_d alone."
+    },
+    "case146_audit_rtti_for_internal": {
+      "expected": "COMPATIBLE_WITH_RISK",
+      "category": "risk",
+      "mode": "audit",
+      "min_evidence": "L2",
+      "platforms": [
+        "linux"
+      ],
+      "abi_break": false,
+      "api_break": false,
+      "bad_practice": true,
+      "expected_kinds": [],
+      "expected_crosscheck_kinds": [
+        "rtti_for_internal_type"
+      ],
+      "expected_providers": {
+        "rtti_for_internal_type": [
+          "binary_exports",
+          "public_header_ast"
+        ]
+      },
+      "fixtures": [
+        "snapshot.abi.json"
+      ],
+      "description": "Single-release audit: _ZTI/_ZTV (typeinfo + vtable) are exported for InternalNode, a type declared only in a private header. Consumers cannot name the type yet its RTTI is on the ABI surface (RTTI_FOR_INTERNAL_TYPE) - export table cross-checked against header provenance."
+    },
+    "case147_scan_depth_ladder": {
+      "expected": "COMPATIBLE_WITH_RISK",
+      "category": "risk",
+      "mode": "audit",
+      "min_evidence": "L2",
+      "platforms": [
+        "linux"
+      ],
+      "abi_break": false,
+      "api_break": false,
+      "bad_practice": true,
+      "expected_kinds": [],
+      "expected_crosscheck_kinds": [
+        "private_header_leak"
+      ],
+      "expected_providers": {
+        "private_header_leak": [
+          "public_header_ast",
+          "source_index"
+        ]
+      },
+      "fixtures": [
+        "snapshot.abi.json"
+      ],
+      "description": "Depth-ladder legibility case: the same input answered at increasing depth. An S3 lexical pattern scan flags a risky construct; the S5 source graph + replay confirm a genuine PRIVATE_HEADER_LEAK and add the source_index provider. The README's honest-coverage block shows exactly what each depth proved."
+    },
+    "case148_xcheck_header_build_mismatch": {
+      "expected": "API_BREAK",
+      "category": "api_break",
+      "mode": "audit",
+      "min_evidence": "L3",
+      "platforms": [
+        "linux"
+      ],
+      "abi_break": false,
+      "api_break": true,
+      "bad_practice": false,
+      "expected_kinds": [],
+      "expected_crosscheck_kinds": [
+        "header_build_context_mismatch"
+      ],
+      "expected_providers": {
+        "header_build_context_mismatch": [
+          "build_config",
+          "public_header_ast"
+        ]
+      },
+      "fixtures": [
+        "snapshot.abi.json"
+      ],
+      "description": "Cross-source corroboration (flagship): the headers were parsed without the build's ABI-relevant flags (glibcxx_use_cxx11_abi, -DBIG_BUFFERS), so the recorded layout cannot be trusted. Only L2 macros cross-checked against L3 build flags expose the divergence (HEADER_BUILD_CONTEXT_MISMATCH); binary-only is blind."
+    },
+    "case149_xcheck_odr_variant": {
+      "expected": "API_BREAK",
+      "category": "api_break",
+      "mode": "audit",
+      "min_evidence": "L4",
+      "platforms": [
+        "linux"
+      ],
+      "abi_break": false,
+      "api_break": true,
+      "bad_practice": false,
+      "expected_kinds": [],
+      "expected_crosscheck_kinds": [
+        "odr_type_variant"
+      ],
+      "expected_providers": {
+        "odr_type_variant": [
+          "source_index"
+        ]
+      },
+      "fixtures": [
+        "snapshot.abi.json"
+      ],
+      "description": "Cross-source corroboration: two translation units materialize one public type (geometry::Vec3) with different layouts. Only the L4 per-TU source-ABI surface cross-checking layout against layout records the ODR conflict (ODR_TYPE_VARIANT); no single artifact layer sees it."
+    },
+    "case150_xcheck_export_public_pair": {
+      "expected": "COMPATIBLE_WITH_RISK",
+      "category": "risk",
+      "mode": "audit",
+      "min_evidence": "L2",
+      "platforms": [
+        "linux"
+      ],
+      "abi_break": false,
+      "api_break": false,
+      "bad_practice": true,
+      "expected_kinds": [],
+      "expected_crosscheck_kinds": [
+        "exported_not_public",
+        "public_not_exported"
+      ],
+      "expected_providers": {
+        "exported_not_public": [
+          "binary_exports",
+          "public_header_ast"
+        ],
+        "public_not_exported": [
+          "public_header_ast",
+          "binary_exports"
+        ]
+      },
+      "fixtures": [
+        "snapshot.abi.json"
+      ],
+      "description": "Bidirectional L0-exports vs L2-decls cross-check: one symbol is exported with no public declaration (EXPORTED_NOT_PUBLIC) and one public-header declaration is never exported because a static definition slipped in (PUBLIC_NOT_EXPORTED). The combination of the two sources reveals both halves of the contract mismatch."
+    },
+    "case151_xcheck_provider_matrix": {
+      "expected": "COMPATIBLE_WITH_RISK",
+      "category": "risk",
+      "mode": "audit",
+      "min_evidence": "L2",
+      "platforms": [
+        "linux"
+      ],
+      "abi_break": false,
+      "api_break": false,
+      "bad_practice": true,
+      "expected_kinds": [],
+      "expected_crosscheck_kinds": [
+        "private_header_leak"
+      ],
+      "expected_providers": {
+        "private_header_leak": [
+          "public_header_ast",
+          "source_index"
+        ]
+      },
+      "fixtures": [
+        "snapshot.abi.json",
+        "thin.abi.json"
+      ],
+      "description": "Provider-agreement matrix: the same PRIVATE_HEADER_LEAK finding corroborated by two providers in the rich fixture (public_header_ast + source_index, with an L5 source graph present) vs one provider in the thin fixture (public_header_ast only). Demonstrates that better corroboration comes from the combination of sources - the provider list ScanResult records grows with the evidence."
     }
   }
 }

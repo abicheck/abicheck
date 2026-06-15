@@ -1,8 +1,9 @@
 # CLAUDE.md — `examples/`
 
-The ABI-scenario catalog: 140 cases numbered contiguously (`01–139` +
-`26b`), including 5 multi-library bundle cases. Each case is a minimal,
-compilable C/C++ example demonstrating a specific ABI/API pitfall.
+The ABI-scenario catalog: 152 cases numbered contiguously (`01–151` +
+`26b`), including 5 multi-library bundle cases and the 9 G20 audit /
+cross-source cases (`143–151`). Each case is a minimal, compilable C/C++
+example demonstrating a specific ABI/API pitfall.
 
 Read `README.md` in this directory first — it indexes every case and
 explains the verdict taxonomy.
@@ -23,6 +24,34 @@ deviate by design: BTF fixtures (e.g. `case121`) ship `v1.btf`/`v2.btf` +
 a generator and no `app.*`; the 5 multi-library bundle cases
 (`case84/90/91/92/93`) use a `gen_bundle.sh`-style generator to produce the
 per-library binaries instead of a single `v1`/`v2` source pair.
+
+### G20 audit / cross-source cases (143–151)
+
+The ADR-035 G20 corpus demonstrates the **single-release audit** (one artifact,
+no baseline) and **intra-version cross-source** machinery, which does not fit
+the `v1`/`v2` binary-diff shape. Each ships a committed snapshot fixture instead
+of a compilable pair:
+
+```
+caseNN_<name>/
+├── snapshot.abi.json   # committed AbiSnapshot — the fast-lane fixture
+├── thin.abi.json       # (case151 only) a second, lower-evidence variant
+└── README.md           # "sources combined" narrative + reproduce commands
+```
+
+`scripts/gen_g20_fixtures.py` is the single source of truth for the snapshot
+content (hand-built `AbiSnapshot`s serialized to JSON); `tests/test_g20_catalog.py`
+loads each fixture and asserts the case's `expected_crosscheck_kinds` /
+`expected_providers` (from `ground_truth.json`) via `run_crosschecks` — **no
+compiler / castxml**, so the corpus runs in the default fast lane. The
+`ground_truth.json` v4 fields (`mode: audit`, `expected_crosscheck_kinds`,
+`expected_providers`, `fixtures`) carry these expectations; `min_evidence` is
+derived from the cross-check kinds, not hand-set.
+
+Other build-emitted fixture types these cases may carry (ingested compiler-free
+via the `merge` path): `abicheck_inputs/` (Flow-2 build-dropped facts pack),
+`compile_commands.json` (L3 build context), `install_manifest.txt` (installed
+public-header set), and `.abicheck.yml` (risk/cross-check config).
 
 ## Ground truth
 

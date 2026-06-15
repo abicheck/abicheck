@@ -1,7 +1,7 @@
 # ABI Scenario Catalog
 
 <!-- BEGIN GENERATED: catalog-headline (keep counts in sync with examples/ground_truth.json) -->
-This directory contains **143 cases** (138 single-library + 5 multi-library bundle cases, the latter tracked under [ADR-023](../docs/development/adr/023-bundle-aware-multi-binary-analysis.md)) demonstrating real-world ABI/API break scenarios. Each case is a minimal, compilable C/C++ example with:
+This directory contains **152 cases** (147 single-library + 5 multi-library bundle cases, the latter tracked under [ADR-023](../docs/development/adr/023-bundle-aware-multi-binary-analysis.md)) demonstrating real-world ABI/API break scenarios. Each case is a minimal, compilable C/C++ example with:
 <!-- END GENERATED: catalog-headline -->
 
 - Paired `v1/` and `v2/` source + headers.
@@ -21,8 +21,8 @@ The catalog drives abicheck's benchmark and serves as an encyclopedia of ABI pit
 | Verdict | Count | `checker_policy.py` set | Icon |
 |---------|-------|-------------------------|------|
 | BREAKING | 92 | `BREAKING_KINDS` | 🔴 |
-| API_BREAK | 8 | `API_BREAK_KINDS` | 🟠 |
-| COMPATIBLE_WITH_RISK | 9 | `RISK_KINDS` | 🟡 |
+| API_BREAK | 10 | `API_BREAK_KINDS` | 🟠 |
+| COMPATIBLE_WITH_RISK | 16 | `RISK_KINDS` | 🟡 |
 | COMPATIBLE (addition) | 10 | `ADDITION_KINDS` | 🟢 |
 | COMPATIBLE (quality) | 13 | `QUALITY_KINDS` | 🟡 |
 | NO_CHANGE | 6 | — | ✅ |
@@ -256,6 +256,15 @@ Expected non-pass buckets are already represented in `ground_truth.json`:
 | [140](case140_empty_base_optimization_lost/README.md) | Empty Base Optimization Lost (base subobject moved) | Breaking | 🔴 BREAKING |
 | [141](case141_versioned_symbol_scheme/README.md) | Versioned-Symbol Scheme (library-wide rename) | Breaking | 🔴 BREAKING (bad practice) |
 | [142](case142_vtable_slot_count_binary_only/README.md) | Vtable Slot Count Changed (detected from a stripped binary) | Breaking | 🔴 BREAKING |
+| [143](case143_audit_accidental_export/README.md) | Accidental export (single-release audit) | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
+| [144](case144_audit_private_header_leak/README.md) | Private header leak (single-release audit) | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
+| [145](case145_audit_unversioned_export/README.md) | Unversioned export under a versioning scheme (audit, pure L0) | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
+| [146](case146_audit_rtti_for_internal/README.md) | RTTI exported for an internal type (single-release audit) | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
+| [147](case147_scan_depth_ladder/README.md) | Depth ladder: the same input answered at three depths | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
+| [148](case148_xcheck_header_build_mismatch/README.md) | Header build-context mismatch (cross-source flagship) | API Break | 🟠 API_BREAK |
+| [149](case149_xcheck_odr_variant/README.md) | ODR type variant (cross-source, L4 layout ↔ layout) | API Break | 🟠 API_BREAK |
+| [150](case150_xcheck_export_public_pair/README.md) | Bidirectional export ↔ declaration pair | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
+| [151](case151_xcheck_provider_matrix/README.md) | Provider-agreement matrix (corroboration grows with evidence) | Risk | 🟡 COMPATIBLE_WITH_RISK (bad practice) |
 <!-- END GENERATED: case-index -->
 
 ---

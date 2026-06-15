@@ -1,0 +1,36 @@
+# case149 — ODR type variant (cross-source, L4 layout ↔ layout)
+
+**Verdict:** 🟠 API_BREAK · **Cross-check:** `odr_type_variant` ·
+**Mode:** single-release audit · **Evidence tier:** L4
+
+## What it demonstrates
+
+Two translation units materialize **one** public type — `geometry::Vec3` — with
+**different layouts** (e.g. one TU sees an extra member behind a macro the other
+does not). This is an ODR violation: the linker picks one definition and the
+other TU's call sites read the wrong bytes. No artifact layer can see it, because
+the shipped binary contains exactly one (arbitrary) layout.
+
+## Why no single source sees it
+
+| Source | What it sees alone |
+|--------|--------------------|
+| Binary (L0/L1) | one `geometry::Vec3` layout — looks self-consistent |
+| Header AST (L2) | one declaration — looks self-consistent |
+| Per-TU source-ABI replay (L4) | TU-A's `Vec3` hash ≠ TU-B's `Vec3` hash |
+| **Combination** | the L4 surface records the per-TU conflict → `ODR_TYPE_VARIANT` (API_BREAK) |
+
+The cross-check reads the L4 source-replay surface's recorded ODR conflicts; the
+`source_index` provider supplies them.
+
+## Reproduce
+
+```bash
+abicheck scan --audit libdemo.so --sources .   # replays each TU, links the surface
+```
+
+## Fix
+
+Make the type's definition identical in every TU: guard the divergent member with
+the *same* macro everywhere (and compile every TU with that macro consistently),
+or move the type to a single header all TUs include unconditionally.

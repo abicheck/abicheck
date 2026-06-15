@@ -1,0 +1,140 @@
+{
+  "build_id": null,
+  "build_mode": null,
+  "build_source": {
+    "manifest": {
+      "abicheck_version": "",
+      "artifacts": [],
+      "build_source_pack_version": 1,
+      "coverage": [],
+      "created_at": "",
+      "extractors": [],
+      "inputs": {},
+      "redaction": {},
+      "source_root": {
+        "path_redacted": true,
+        "repo_hash": ""
+      }
+    },
+    "source_graph": {
+      "coverage": {},
+      "edges": [],
+      "external_graph_refs": [],
+      "graph_id": "sha256:3349795dc1d790827ff4bae71049f32f505ee5d49db4fd32a1a83bb5d15fb1de",
+      "indexes": {
+        "by_binary_symbol": {},
+        "by_file": {},
+        "by_source_decl": {},
+        "by_target": {}
+      },
+      "nodes": [],
+      "schema_version": 1
+    }
+  },
+  "build_source_pack": null,
+  "constants": {},
+  "created_at": null,
+  "dependency_info": null,
+  "dwarf": null,
+  "dwarf_advanced": null,
+  "elf": {
+    "bind_now": false,
+    "has_executable_stack": false,
+    "has_fortify_source": false,
+    "has_stack_canary": false,
+    "has_writable_executable_segment": false,
+    "imports": [],
+    "interpreter": "",
+    "is_pie": false,
+    "needed": [],
+    "pointer_size": 8,
+    "relro": "none",
+    "rpath": "",
+    "runpath": "",
+    "soname": "",
+    "symbols": [
+      {
+        "binding": "global",
+        "is_default": true,
+        "name": "_Z11make_widgetv",
+        "origin_lib": null,
+        "size": 0,
+        "sym_type": "func",
+        "version": "",
+        "visibility": "default"
+      }
+    ],
+    "versions_defined": [],
+    "versions_required": {}
+  },
+  "elf_only_mode": false,
+  "enums": [],
+  "from_headers": true,
+  "functions": [
+    {
+      "access": "public",
+      "deleted_from_dwarf": false,
+      "elf_visibility": null,
+      "is_const": false,
+      "is_deleted": false,
+      "is_explicit": null,
+      "is_extern_c": false,
+      "is_hidden_friend": null,
+      "is_inline": false,
+      "is_noexcept": false,
+      "is_pure_virtual": false,
+      "is_static": false,
+      "is_virtual": false,
+      "is_volatile": false,
+      "mangled": "_Z11make_widgetv",
+      "name": "make_widget",
+      "origin": "public_header",
+      "params": [],
+      "ref_qualifier": "",
+      "return_pointer_depth": 0,
+      "return_type": "detail::WidgetImpl *",
+      "source_header": null,
+      "source_location": null,
+      "visibility": "public",
+      "vtable_index": null
+    }
+  ],
+  "git_commit": null,
+  "git_tag": null,
+  "language_profile": null,
+  "library": "libdemo.so",
+  "macho": null,
+  "parsed_with_build_context": false,
+  "pe": null,
+  "platform": null,
+  "schema_version": 8,
+  "scope_fallback": null,
+  "source_path": null,
+  "sycl": null,
+  "typedefs": {},
+  "types": [
+    {
+      "alignment_bits": null,
+      "base_offsets": {},
+      "bases": [],
+      "data_size_bits": null,
+      "fields": [],
+      "is_final": null,
+      "is_opaque": false,
+      "is_standard_layout": null,
+      "is_trivially_copyable": null,
+      "is_union": false,
+      "kind": "struct",
+      "name": "detail::WidgetImpl",
+      "origin": "private_header",
+      "size_bits": null,
+      "source_header": null,
+      "source_location": null,
+      "virtual_bases": [],
+      "vptr_offset_bits": null,
+      "vtable": []
+    }
+  ],
+  "variables": [],
+  "version": "1.0"
+}
