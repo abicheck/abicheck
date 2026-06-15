@@ -610,6 +610,32 @@ def test_out_of_tree_compile_db_is_accepted(runner, tmp_path, new_snap_compatibl
     assert "collect-mode=build" in res.output
 
 
+def test_malformed_build_config_yaml_is_click_error(
+    runner, tmp_path, new_snap_compatible
+):
+    # Invalid --build-config YAML must surface as a clean CLI error, not a
+    # traceback through embed_build_source/load_build_config (Codex review).
+    src = tmp_path / "src"
+    src.mkdir()
+    bad = tmp_path / "abicheck.yml"
+    bad.write_text("build: { system: [unclosed", encoding="utf-8")
+    res = runner.invoke(
+        main,
+        [
+            "scan",
+            "--binary",
+            str(new_snap_compatible),
+            "--sources",
+            str(src),
+            "--build-config",
+            str(bad),
+        ],
+    )
+    assert res.exit_code != 0
+    assert res.exception is None or isinstance(res.exception, SystemExit)
+    assert "build config" in res.output
+
+
 def test_multiple_binaries_rejected(runner, baseline_snap, new_snap_compatible):
     res = runner.invoke(
         main,

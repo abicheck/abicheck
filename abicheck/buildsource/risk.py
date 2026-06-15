@@ -159,16 +159,6 @@ _AUTO_THRESHOLDS: tuple[tuple[int, str], ...] = (
 #: tier runs (docs-only / no relevant change).
 _AUTO_FLOOR_METHOD = "s0"
 
-#: A positive signal at or above this weight is a *strong* ABI signal (public
-#: header / export map in the default profile) that wins over a co-matched
-#: de-escalation rule. Below it — notably the ``build_abi_flags`` tier (40) — a
-#: de-escalation match (docs/tests) floors the positive, so a *test* build file
-#: (``tests/CMakeLists.txt``, ``tests/BUILD``, ``tests/foo.cmake``) stays on the
-#: docs/test floor instead of escalating like a top-level build change (Codex
-#: review). Set just above the build-flag tier; tunable with the rest of
-#: ``risk_rules``.
-_STRONG_SIGNAL_WEIGHT = 45
-
 
 @dataclass(frozen=True)
 class RiskRules:
@@ -224,33 +214,31 @@ class RiskRules:
     def best_weight(self, path: str) -> tuple[int, str | None]:
         """The deciding rule weight/name for *path*, or ``(0, None)``.
 
-        The strongest positive signal wins, **except** a de-escalation rule
-        (negative weight, e.g. ``docs_tests``) floors a *weak/generic* positive
-        match: a C/C++ test file matches both the generic ``internal_source``
-        suffix globs and the ``docs_tests`` rule, and the test/docs floor must win
-        so ``--source-method auto`` does not escalate a test-only change
-        (Codex review). A *strong* ABI signal at or above
-        :data:`_STRONG_SIGNAL_WEIGHT` (public header / export map / build flag)
-        still wins over a co-matched de-escalation rule. Ties among positives
-        break toward the earlier rule in profile order (deterministic).
+        A **de-escalation rule (negative weight) vetoes any positive match**: a
+        path under a test/doc root (or matching a docs/test pattern) is never
+        escalated, however it might also match a generic ``internal_source`` /
+        ``public_headers`` / ``build_abi_flags`` glob (Codex review — test
+        sources, test build files, and ``tests/include`` fixtures all co-match a
+        positive glob). Among positives the strongest wins; among negatives the
+        most-negative wins. This keeps ``--source-method auto`` from escalating
+        test/doc-only changes while a real (non-test) header/build/source change,
+        which matches no negative rule, still escalates.
         """
         pos: tuple[int, str] | None = None  # strongest non-negative match
         neg: tuple[int, str] | None = None  # most-negative (de-escalation) match
         for rule in self.rules:
             if not rule.matches(path):
                 continue
-            if rule.weight >= 0:
-                if pos is None or rule.weight > pos[0]:
-                    pos = (rule.weight, rule.name)
-            elif neg is None or rule.weight < neg[0]:
-                neg = (rule.weight, rule.name)
-        if pos is None:
-            return neg if neg is not None else (0, None)
-        if neg is None:
+            if rule.weight < 0:
+                if neg is None or rule.weight < neg[0]:
+                    neg = (rule.weight, rule.name)
+            elif pos is None or rule.weight > pos[0]:
+                pos = (rule.weight, rule.name)
+        if neg is not None:
+            return neg
+        if pos is not None:
             return pos
-        # Both matched: a strong ABI signal dominates; otherwise the de-escalation
-        # floor wins over the weak/generic positive.
-        return pos if pos[0] >= _STRONG_SIGNAL_WEIGHT else neg
+        return (0, None)
 
     def to_dict(self) -> dict[str, Any]:
         return {

@@ -129,11 +129,14 @@ def load_build_config(path: Path) -> BuildConfig:
     """Load a ``.abicheck.yml`` build config; tolerant of a missing/empty file."""
     if not path.is_file():
         return BuildConfig()
-    try:
-        import yaml
+    import yaml  # hard dep; imported out of the try so the except can name it
 
+    try:
         raw = yaml.safe_load(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError, ImportError) as exc:  # pragma: no cover - defensive
+    except (OSError, ValueError, yaml.YAMLError) as exc:
+        # yaml.YAMLError (e.g. ParserError) is not a ValueError; catch it so a
+        # malformed .abicheck.yml surfaces as a wrapped error (→ ClickException in
+        # embed_build_source) instead of a raw traceback (Codex review).
         raise ValueError(f"cannot read build config {path}: {exc}") from exc
     if not isinstance(raw, dict):
         return BuildConfig()

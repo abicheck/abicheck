@@ -96,10 +96,24 @@ def test_top_level_build_change_still_escalates():
     assert score.recommended_method == "s5"
 
 
-def test_strong_signal_beats_co_matched_docs_rule():
-    # A public header that also trips the *_test.* pattern is still public API —
-    # the strong signal wins over the de-escalation floor.
-    score = score_changed_paths(["include/widget_test.h"])
+def test_test_located_paths_never_escalate():
+    # A de-escalation (test/doc) match vetoes any co-matched positive signal, so
+    # test sources / build files / include fixtures all stay on the s0 floor
+    # (Codex review — the recurring test-path class).
+    for path in (
+        "tests/include/foo.h",  # co-matches */include/** (public_headers)
+        "tests/CMakeLists.txt",  # co-matches build_abi_flags
+        "tests/foo_test.cpp",  # co-matches internal_source
+        "include/widget_test.h",  # co-matches *_test.* under a public dir
+    ):
+        score = score_changed_paths([path])
+        assert score.total < 0, path
+        assert score.recommended_method == "s0", path
+
+
+def test_real_public_header_still_escalates():
+    # No negative co-match → public-header signal wins.
+    score = score_changed_paths(["include/widget.h"])
     assert score.total == 50
     assert score.recommended_method == "s5"
 
