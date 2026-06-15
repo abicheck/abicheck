@@ -80,7 +80,15 @@ fi
 if [[ "$MODE" == "dump" ]]; then
   # ── Dump mode ───────────────────────────────────────────────────────────
   CMD+=(dump)
-  CMD+=("${INPUT_NEW_LIBRARY:?new-library is required}")
+  # The library is an optional positional: a source-only dump
+  # (`abicheck dump --sources ./src -o out.json`) needs no binary. Require
+  # either a binary OR a source/build-evidence input.
+  if [[ -n "${INPUT_NEW_LIBRARY:-}" ]]; then
+    CMD+=("${INPUT_NEW_LIBRARY}")
+  elif [[ -z "${INPUT_SOURCES:-}${INPUT_BUILD_INFO:-}${INPUT_COMPILE_DB:-}" ]]; then
+    echo "::error::dump mode requires new-library, or one of sources/build-info/compile-db for a source-only dump."
+    exit 1
+  fi
 
   add_flag "-H" "${INPUT_HEADER:-}"
   add_flag "-H" "${INPUT_NEW_HEADER:-}"
