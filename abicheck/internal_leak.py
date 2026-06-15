@@ -176,40 +176,68 @@ def _strip_decorators(typename: str) -> str:
     return re.sub(r"\s+", " ", s)
 
 
-def _candidate_type_names(typename: str) -> list[str]:
-    """Yield candidate type names to look up for *typename*.
+def _candidate_type_names_indirect(typename: str) -> list[tuple[str, bool]]:
+    """Yield ``(candidate_type_name, reached_through_pointer)`` pairs for *typename*.
 
-    For ``std::unique_ptr<acme::lib::detail::impl>`` we want to surface
-    both the outer template and the inner type, because the inner
-    ``detail::impl`` is what users will see leaking.
+    The per-hop path model: indirection is computed **per template argument**, so
+    the pointer in ``std::_Tuple_impl<0, proxy*, deleter>`` is attributed to
+    ``proxy`` (the pointee) and not to ``deleter`` — and a by-value argument in
+    ``std::pair<ns::detail::Impl, int*>`` (``Impl``) is correctly *not* indirect
+    even though the spelling contains a ``*``. A smart-pointer wrapper
+    (``unique_ptr``/``shared_ptr``/``weak_ptr``) makes its argument the pointee.
+
+    For ``std::unique_ptr<acme::lib::detail::impl>`` we surface both the outer
+    template and the inner ``detail::impl`` (what users see leaking); the inner
+    one carries ``reached_through_pointer=True``.
     """
-    out: list[str] = []
+    out: list[tuple[str, bool]] = []
     base = _strip_decorators(typename)
-    if base:
-        out.append(base)
-        # Also yield template arguments, splitting on commas at the top level.
-        # Cheap parser: find outermost balanced <...> and split its contents.
-        depth = 0
-        start = -1
-        for i, ch in enumerate(base):
-            if ch == "<":
-                if depth == 0:
-                    start = i + 1
-                depth += 1
-            elif ch == ">":
-                depth -= 1
-                if depth == 0 and start >= 0:
-                    inner = base[start:i]
-                    # Split commas only at top level inside `inner`.
-                    parts = _split_top_level_commas(inner)
-                    for p in parts:
-                        sub = _strip_decorators(p)
-                        if sub:
-                            out.append(sub)
-                            # Recurse one level for nested templates.
-                            out.extend(_candidate_type_names(sub))
-                    start = -1
+    if not base:
+        return out
+    # Base candidate: indirect iff the whole spelling is a top-level pointer/ref
+    # (collapse template args so a pointer buried in an argument doesn't count).
+    top = _strip_template_args(typename)
+    top_ptr = "*" in top or "&" in top
+    out.append((base, top_ptr))
+    # Smart-pointer wrapper is decided on the OUTER type only (template args
+    # already collapsed in `top`), so a nested ``pimpl<Other>`` / ``unique_ptr``
+    # in an unrelated argument of a by-value template does not mark its siblings
+    # indirect (Codex review).
+    outer = _strip_decorators(top)
+    outer_leaf = outer.rsplit("::", 1)[-1].lower()
+    smart = (
+        any(m in outer for m in ("unique_ptr", "uniq_ptr", "shared_ptr", "weak_ptr"))
+        or outer_leaf == "pimpl"  # oneDAL pimpl<T> alias
+    )
+    # Walk the outermost <...> of the ORIGINAL spelling (keeps inner */&).
+    depth = 0
+    start = -1
+    for i, ch in enumerate(typename):
+        if ch == "<":
+            if depth == 0:
+                start = i + 1
+            depth += 1
+        elif ch == ">":
+            depth -= 1
+            if depth == 0 and start >= 0:
+                for p in _split_top_level_commas(typename[start:i]):
+                    p_top = _strip_template_args(p)
+                    # A top-level pointer/ref on the enclosing template
+                    # (``pair<Impl, int>*``) puts every argument behind it.
+                    arg_ptr = top_ptr or smart or "*" in p_top or "&" in p_top
+                    sub = _strip_decorators(p)
+                    if sub:
+                        out.append((sub, arg_ptr))
+                        for c2, ind2 in _candidate_type_names_indirect(sub):
+                            out.append((c2, ind2 or arg_ptr))
+                start = -1
     return out
+
+
+def _candidate_type_names(typename: str) -> list[str]:
+    """Names only (drops the per-hop pointer flag); back-compat for callers that
+    just need reachability, not indirection."""
+    return [name for name, _ in _candidate_type_names_indirect(typename)]
 
 
 def _split_top_level_commas(s: str) -> list[str]:
@@ -319,12 +347,25 @@ def _seed_queue_from_functions(
     from .diff_symbols import _public_functions
 
     for func in _public_functions(snap).values():
-        seed_types = [func.return_type] + [p.type for p in func.params]
-        for t in seed_types:
+        # (type-spelling, reached-through-pointer?) for the return + each param.
+        # A type reached only through a pointer/reference in a public signature
+        # (the opaque-handle pattern ``void use(ns::detail::Impl*)``) does not
+        # embed its layout — record the indirection so a layout-only change is
+        # demoted, mirroring the pointer-field case (Codex review). The seed path
+        # otherwise drops the ``*`` (``_candidate_type_names`` strips decorators).
+        seeds = [(func.return_type, (func.return_pointer_depth or 0) > 0)]
+        seeds += [(p.type, (p.pointer_depth or 0) > 0) for p in func.params]
+        for t, top_ptr in seeds:
             if not t:
                 continue
-            for cand in _candidate_type_names(t):
-                queue.append((cand, [f"fn:{func.name}"]))
+            # Mark each candidate per template argument: a pointer buried in the
+            # signature type (``std::pair<int, ns::detail::Impl*> get()``) reaches
+            # that argument only through the pointer (Codex review).
+            for cand, arg_ptr in _candidate_type_names_indirect(t):
+                step = [f"fn:{func.name}"]
+                if top_ptr or arg_ptr:
+                    step.append("indirect:signature")
+                queue.append((cand, step))
 
 
 def _seed_queue_from_variables(
@@ -336,8 +377,11 @@ def _seed_queue_from_variables(
 
     for var in _public_variables(snap).values():
         if var.type:
-            for cand in _candidate_type_names(var.type):
-                queue.append((cand, [f"var:{var.name}"]))
+            for cand, arg_ptr in _candidate_type_names_indirect(var.type):
+                step = [f"var:{var.name}"]
+                if arg_ptr:
+                    step.append("indirect:signature")
+                queue.append((cand, step))
 
 
 def _seed_queue_from_public_types(
@@ -381,15 +425,29 @@ def _enqueue_record_children(
     regardless of whether they are pointers/references — identity/vtable
     changes propagate via those too; the reporter can downgrade if needed.
     """
+    # Inheritance embeds the base subobject by value, but a pointer *template
+    # argument* of the base (e.g. inheriting ``_Head_base<0, Proxy*, false>``,
+    # libstdc++'s decomposed unique_ptr) reaches that argument through a pointer —
+    # mark it per-hop, like fields.
     for base in rec.bases:
-        for cand in _candidate_type_names(base):
-            queue.append((cand, new_path + [f"base:{base}"]))
+        for cand, via_ptr in _candidate_type_names_indirect(base):
+            step = [f"base:{base}"]
+            if via_ptr:
+                step.append("indirect:edge")
+            queue.append((cand, new_path + step))
     for vb in rec.virtual_bases:
-        for cand in _candidate_type_names(vb):
-            queue.append((cand, new_path + [f"vbase:{vb}"]))
+        for cand, via_ptr in _candidate_type_names_indirect(vb):
+            step = [f"vbase:{vb}"]
+            if via_ptr:
+                step.append("indirect:edge")
+            queue.append((cand, new_path + step))
+    # Fields: mark the edge indirect per template argument (accurate per-hop).
     for fld in rec.fields:
-        for cand in _candidate_type_names(fld.type):
-            queue.append((cand, new_path + [f"field:{fld.name}"]))
+        for cand, via_ptr in _candidate_type_names_indirect(fld.type):
+            step = [f"field:{fld.name}"]
+            if via_ptr:
+                step.append("indirect:edge")
+            queue.append((cand, new_path + step))
 
 
 def _enqueue_typedef_targets(
@@ -402,9 +460,12 @@ def _enqueue_typedef_targets(
     target = typedefs.get(typename)
     if not target:
         return
-    for cand in _candidate_type_names(target):
+    for cand, via_ptr in _candidate_type_names_indirect(target):
         if cand and cand != typename:
-            queue.append((cand, path + [f"typedef:{typename}"]))
+            step = [f"typedef:{typename}"]
+            if via_ptr:
+                step.append("indirect:edge")
+            queue.append((cand, path + step))
 
 
 def _bfs_collect_paths(
@@ -415,7 +476,7 @@ def _bfs_collect_paths(
 ) -> dict[str, list[list[str]]]:
     """Drive the BFS walk; return raw (un-deduped) internal-type paths."""
     paths: dict[str, list[list[str]]] = collections.defaultdict(list)
-    visited: set[tuple[str, str]] = set()
+    visited: set[tuple[str, str, bool]] = set()
 
     while queue:
         typename, path = queue.popleft()
@@ -424,13 +485,14 @@ def _bfs_collect_paths(
         # DWARF can record base-class names un-qualified; resolve against
         # the type map before we record / enqueue children.
         typename = _resolve_type_name(typename, type_map)
-        # Cycle protection: visit each (entry_point, typename) pair at
-        # most once. We deliberately scope by entry point so that two
-        # public roots reaching the same intermediate type each get
-        # their children walked — otherwise the second root's path is
-        # never extended past the shared intermediate, which would lose
-        # by-value severity information for nested internal types.
-        key: tuple[str, str] = (path[0] if path else "", typename)
+        # Cycle protection: visit each (entry_point, typename, behind_pointer)
+        # triple at most once. The entry-point scope lets two public roots each
+        # walk a shared intermediate; the behind-pointer bit additionally lets the
+        # SAME intermediate be walked once via a pointer and once by value, so a
+        # by-value alternative path to a nested child is never dropped by dedup
+        # (Codex review / per-hop path model).
+        behind_ptr = any(s.startswith("indirect:") for s in path)
+        key: tuple[str, str, bool] = (path[0] if path else "", typename, behind_ptr)
         if key in visited:
             # Still record the leak if this typename is internal — paths
             # vary by entry point, but the *first* recorded one is enough
@@ -512,8 +574,12 @@ def compute_leak_paths(
 
 
 def _format_path(path: list[str]) -> str:
-    """Render a leak path as a single arrow-delimited string."""
-    return " → ".join(path)
+    """Render a leak path as a single arrow-delimited string.
+
+    Synthetic ``indirect:`` markers (seed-time pointer evidence) are internal and
+    not shown.
+    """
+    return " → ".join(s for s in path if not s.startswith("indirect:"))
 
 
 def _field_is_indirect(fld_type: str) -> bool:
@@ -522,14 +588,73 @@ def _field_is_indirect(fld_type: str) -> bool:
     Indirect fields don't embed by value, so layout changes don't
     directly propagate through them.
     """
-    if "*" in fld_type or "&" in fld_type:
+    # Only a TOP-LEVEL pointer / reference / smart-pointer wrapper counts —
+    # collapse template args first so a pointer buried in an unrelated argument
+    # (e.g. ``std::pair<ns::detail::Impl, int*>``, whose ``Impl`` is a by-value
+    # member) is NOT mistaken for indirection (Codex review). Per the maintainer
+    # decision, suppression only fires on the unambiguous pimpl shape; any nested
+    # / mixed spelling keeps the finding.
+    no_targs = _strip_template_args(fld_type)  # collapse <...> (drops nested *)
+    if "*" in no_targs or "&" in no_targs:  # top-level pointer / reference only
         return True
-    stripped = _strip_decorators(fld_type)
-    return (
-        "unique_ptr" in stripped
-        or "shared_ptr" in stripped
-        or "weak_ptr" in stripped
-        or "pimpl" in stripped.lower()
+    outer = _strip_decorators(no_targs)
+    if (
+        "unique_ptr" in outer
+        or "uniq_ptr" in outer  # libstdc++ internals: std::__uniq_ptr_impl
+        or "shared_ptr" in outer
+        or "weak_ptr" in outer
+    ):
+        return True
+    # ``pimpl`` only as an alias-*template* usage (``pimpl<T>`` = the oneDAL
+    # smart-pointer alias, case80) — NOT a by-value struct literally named
+    # ``Pimpl``, which embeds its layout and must stay a leak.
+    return "pimpl<" in _strip_decorators(fld_type).lower()
+
+
+def _typedef_target_is_indirect(
+    name: str, typedefs: dict[str, str], _seen: frozenset[str] = frozenset()
+) -> bool:
+    """Return True if alias *name* resolves (transitively) to a pointer / smart
+    pointer — e.g. ``using Handle = ns::detail::Impl*;`` (Codex review). Without
+    this, a pointer-typedef field reads as by-value and surfaces a spurious leak.
+    """
+    if name in _seen:
+        return False
+    target = typedefs.get(name)
+    if not target:
+        return False
+    if _field_is_indirect(target):
+        return True
+    return _typedef_target_is_indirect(
+        _strip_decorators(target), typedefs, _seen | {name}
+    )
+
+
+def _typenode_is_indirection_wrapper(name: str) -> bool:
+    """Return True if a *type node* on a leak path is itself a pointer/reference
+    or a smart-pointer wrapper type.
+
+    Stricter than :func:`_field_is_indirect`: it must NOT fire on a regular
+    record/function name that merely *contains* a wrapper-ish substring. A
+    public type named ``PimplHandle`` that embeds an internal type **by value**
+    is a real layout leak, not an indirection (Codex review) — so the loose
+    ``pimpl``/``unique_ptr`` substring match used for *field declared types* is
+    not applied to path labels. Only a raw ``*``/``&`` or a qualified
+    ``std::``/libstdc++ smart-pointer spelling counts.
+    """
+    # Top-level only (collapse template args): a wrapper node like
+    # ``std::__uniq_ptr_impl<...>`` is indirection, but ``std::array<int*, 4>``
+    # (a pointer in an unrelated arg) is not (Codex review).
+    no_targs = _strip_template_args(name)
+    if "*" in no_targs or "&" in no_targs:
+        return True
+    outer = _strip_decorators(no_targs)
+    return any(
+        marker in outer
+        for marker in (
+            "std::unique_ptr", "std::shared_ptr", "std::weak_ptr",
+            "__uniq_ptr", "__shared_ptr", "__weak_ptr",
+        )
     )
 
 
@@ -545,31 +670,33 @@ def _record_field_is_value_embedded(rec: RecordType, field_name: str) -> bool | 
     return None
 
 
-def _path_describes_value_embedding(
-    path: list[str], snap: AbiSnapshot,
-) -> bool:
-    """Return True if any ``field:`` step on *path* is an embedded-by-value
-    field of the internal type (not a pointer / reference / smart pointer).
+def _path_has_indirection(path: list[str], snap: AbiSnapshot | None = None) -> bool:
+    """Return True if *path* crosses a pointer / reference / smart-pointer hop.
 
-    Used to decide the severity hint in the leak's description.
+    Per-hop path model: indirection is recorded **at enqueue time** as an
+    ``indirect:`` marker on the edge that crosses a pointer (computed per
+    template argument by :func:`_candidate_type_names_indirect`, plus the seed
+    ``indirect:signature`` for pointer params/returns). A leaf reached through any
+    such edge sits behind a pointer, so a *layout* change to it does not propagate
+    to the public holder — including the oneTBB ``thread_request_serializer`` case
+    where libstdc++ decomposes the ``unique_ptr`` into ``_Tuple_impl``/
+    ``_Head_base`` (the ``proxy*`` argument marks the edge). A pointer buried in
+    an unrelated template argument (``pair<Impl, int*>``) does **not** mark the
+    ``Impl`` edge, so by-value members still propagate.
+
+    *snap* is unused now (the marker is precomputed); kept for call-site compat.
     """
-    type_map, _ = _build_type_map(snap)
-    # Walk in pairs: when we see "field:<name>", the *previous* element is
-    # the type containing the field; the field type is the *next* element
-    # (or rather the next typename in the chain — fields don't show their
-    # type literally, but the chain alternates "type → field:X → next-type").
-    for i, step in enumerate(path):
-        if not step.startswith("field:") or i == 0:
-            continue
-        containing_type = path[i - 1]
-        field_name = step[len("field:"):]
-        rec = type_map.get(containing_type)
-        if rec is None:
-            continue
-        result = _record_field_is_value_embedded(rec, field_name)
-        if result is not None:
-            return result
-    return False
+    return any(s.startswith("indirect:") for s in path)
+
+
+def _path_is_value_propagating(path: list[str], snap: AbiSnapshot | None = None) -> bool:
+    """Return True if a layout change on the leaf propagates *by value* to the
+    public root along *path* — a value-embedding / inheritance chain with no
+    pointer edge. Drives the leak's severity-hint wording.
+    """
+    if _path_has_indirection(path):
+        return False
+    return any(s.startswith(("field:", "base:", "vbase:")) for s in path)
 
 
 def _collect_internal_changes(
@@ -604,16 +731,30 @@ def _merge_leak_paths(
     return old_list + new_unique
 
 
+# Change kinds that alter a type's *identity* or *vtable* rather than only its
+# in-memory layout. These still break consumers when the internal type is reached
+# only through a pointer/reference — vtable dispatch, RTTI, and base-subobject
+# offsets propagate through indirection — so they keep firing regardless of the
+# value-embedding analysis. Every other triggering kind is a pure layout change
+# (size/offset/padding/field add-remove), which does NOT reach the public holder
+# through a pointer and is suppressed for pointer-only leaks (UXL field run P2).
+_IDENTITY_VTABLE_KINDS: frozenset[ChangeKind] = frozenset({
+    ChangeKind.TYPE_VTABLE_CHANGED,
+    ChangeKind.VPTR_INTRODUCED,
+    ChangeKind.TYPE_BASE_CHANGED,
+    ChangeKind.BASE_CLASS_OFFSET_CHANGED,
+    ChangeKind.TYPE_REMOVED,
+})
+
+
 def _build_leak_change(
     tname: str,
     triggers: list[Change],
     paths: list[list[str]],
     sample_snap: AbiSnapshot,
+    embedded_by_value: bool,
 ) -> Change:
     """Build a single ``INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API`` Change entry."""
-    embedded_by_value = any(
-        _path_describes_value_embedding(p, sample_snap) for p in paths
-    )
     kinds_seen = sorted({c.kind.value for c in triggers})
     path_strs = [_format_path(p) for p in paths[:3]]
     more = "" if len(paths) <= 3 else f" (+{len(paths) - 3} more paths)"
@@ -668,15 +809,42 @@ def detect_internal_leaks(
 
     out: list[Change] = []
     for tname, triggers in internal_changes.items():
+        old_pl = old_paths.get(tname, [])
+        new_pl = new_paths.get(tname, [])
         paths = _merge_leak_paths(tname, old_paths, new_paths)
         if not paths:
             # Internal type changed but not reachable from public API in
             # either snapshot — this is the "truly private" case; skip.
             continue
-        # Pick the snapshot whose path list to use for the value-embedding
-        # heuristic. Prefer old (where the public API was already shipped).
-        sample_snap = old if old_paths.get(tname) else new
-        out.append(_build_leak_change(tname, triggers, paths, sample_snap))
+        # Evaluate every path against the snapshot it was discovered in: the
+        # *same* ``field:<name>`` chain can be a pointer in old but an embedded
+        # value in new (a pimpl that switched to by-value), and ``_merge_leak_
+        # paths`` dedups the identical chain — so checking only the preferred
+        # sample snapshot would mis-read the indirection (Codex review). A side
+        # with no paths contributes nothing.
+        side_paths = [(p, old) for p in old_pl] + [(p, new) for p in new_pl]
+        identity_or_vtable = any(
+            c.kind in _IDENTITY_VTABLE_KINDS for c in triggers
+        )
+        # P2 (UXL field run): an internal type reached **only** behind a pointer
+        # (per-hop ``indirect:`` markers recorded at enqueue) whose change is pure
+        # layout is not consumer-visible — the public holder embeds only the
+        # pointer, not the changed layout. Suppress when every path on *both*
+        # snapshots is behind a pointer and the change is not identity/vtable
+        # (vtable dispatch / RTTI / base-subobject still propagate through a
+        # pointer). Any value/inheritance path — in either snapshot — keeps the
+        # finding (a by-value member, or a just-embedded type, carries the layout).
+        value_prop = any(_path_is_value_propagating(p, s) for p, s in side_paths)
+        all_indirect = bool(side_paths) and all(
+            _path_has_indirection(p) for p, _ in side_paths
+        )
+        if all_indirect and not identity_or_vtable:
+            continue
+        out.append(
+            _build_leak_change(
+                tname, triggers, paths, old if old_pl else new, value_prop
+            )
+        )
 
     return out
 

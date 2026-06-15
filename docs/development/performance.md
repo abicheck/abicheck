@@ -257,6 +257,50 @@ the job summary. It now **gates** (a >50 % slowdown fails the job) — loosen
 `--regress-tolerance` rather than re-adding `continue-on-error` if runner variance
 proves noisy.
 
+### Scan level cost model: one cliff at L4
+
+A real `scan`-level sweep on two UXL libraries (oneTBB v2021.12→.13, C++;
+UMF v0.10→v0.11, C; raw data in `validation/data/uxl_scan_results_2026-06.json`)
+shows the cost has **one cliff, at the L4 AST-replay boundary**, and the cheap
+tier below it is dominated by the binary dump + always-on pattern scan, *not* by
+the source layer:
+
+| Level | Reaches | oneTBB (C++, 40 TUs) | UMF (C, 50 TUs) |
+|-------|---------|---------------------:|----------------:|
+| `s0` diff classifier | — (L0/L1 + pattern) | ~29 s | ~17 s |
+| `s1` compile-DB | +L3 | ~29 s | ~17 s |
+| `s3` lexical | (pattern only) | ~29 s | ~17 s |
+| `s4` symbol/graph index | +L3 +L5 | ~29 s | ~17 s |
+| `s5` targeted AST | +L4 (changed TUs) +L5 | **~222 s** | ~22 s |
+| `s6` full AST | +L4 (all TUs) | ~215 s | ~21 s |
+
+**Rules of thumb:**
+
+- **The cliff height is a C++ phenomenon.** L4 cost = clang per-TU AST replay; it
+  scales with C++ template/STL instantiation depth, not `.so` or TU count. Heavy
+  C++ (oneTBB) jumps **~7×** (29→222 s); plain C (UMF) barely moves (**~1.3×**,
+  17→21 s). Budget L4 by *how templated* the source is.
+- **The cheap tier (s0–s4) is one price.** All four cost the same — the floor is
+  the DWARF dump + lexical scan of the tree. Pick by *coverage you need*, not
+  cost: `s0`≈`s3` (L0/L1 + pattern only), `s1` adds L3, `s4` adds the L5
+  reachability graph **without** paying for L4. `s4` is the structure sweet spot.
+- **`s5` is only cheaper than `s6` with a diff seed.** Without `--since`/
+  `--changed-path` the changed-TU set is empty and `s5` replays every TU — same
+  cost as `s6`. With a one-file seed, oneTBB `s5` dropped from 222 s to **11.5 s
+  (~19×)** for the identical verdict. This scoping applies **only** to the
+  `source-changed` collect mode — i.e. `s5` and `--mode pr`. The other AST modes
+  replay **full** scope regardless of any seed: `--mode pr-deep` resolves to
+  `graph-full`, and `--mode baseline`/`s6` to full
+  (`source_replay.CI_MODE_TO_SCOPE`: `source-changed`→`changed`, `graph-full`→`full`),
+  so pinning those in CI will not produce the scoped speedup.
+- **`audit` costs the same as the baseline modes** — the wall-clock is L4/L5
+  *collection* of the new side, not the baseline diff.
+
+The verdict was identical across all levels on both libraries: the authoritative
+L0/L1 binary diff sets the gate; L3–L5 add coverage/localization, not a different
+pass/fail. **For a CI gate, the cheap tier suffices; spend on L4 only when you
+want source-body semantics or PR localization for humans.**
+
 ## L4 source-replay (dump-side) performance
 
 The scaling harness above is pure-Python and times the *compare* pipeline. The

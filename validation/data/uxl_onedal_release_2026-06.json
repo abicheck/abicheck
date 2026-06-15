@@ -1,0 +1,47 @@
+{
+  "schema": "uxl_onedal_release.v1",
+  "library": "oneDAL libonedal_core.so",
+  "source": "pip daal wheels (manylinux x86_64)",
+  "note": "release .so are stripped (no DWARF) -> symbols-only L0/L1; L2/L4/internal-leak not exercised",
+  "comparisons": [
+    {
+      "pair": "major 2024.7.0->2025.0.0",
+      "old": "2024.7.0",
+      "new": "2025.0.0",
+      "soname": "libonedal_core.so.2 -> .so.3",
+      "verdict": "BREAKING",
+      "elapsed_s": 63.6,
+      "n_changes": 39523,
+      "by_severity": {
+        "breaking": 20524,
+        "compatible": 18969,
+        "risk": 30
+      },
+      "top_kinds": {
+        "func_removed_elf_only": 17503,
+        "func_added": 15331,
+        "var_removed": 3014,
+        "symbol_binding_strengthened": 2029,
+        "var_added": 1606,
+        "overload_added": 14,
+        "symbol_leaked_from_dependency_changed": 13,
+        "func_likely_renamed": 7
+      }
+    },
+    {
+      "pair": "minor 2025.0.0->2025.0.1",
+      "old": "2025.0.0",
+      "new": "2025.0.1",
+      "soname": "libonedal_core.so.3 (unchanged)",
+      "verdict": "COMPATIBLE",
+      "elapsed_s": 50.0,
+      "n_changes": 1,
+      "by_severity": {
+        "compatible": 1
+      },
+      "top_kinds": {
+        "visibility_leak": 1
+      }
+    }
+  ]
+}

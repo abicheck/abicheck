@@ -1,0 +1,882 @@
+{
+  "schema": "uxl_scan_levels.v1",
+  "generated_utc": "2026-06-15T08:06:39.329893Z",
+  "abicheck_version": "0.3.0",
+  "host": {
+    "vcpu": 4,
+    "mem_gib": 15,
+    "gcc": "13.3",
+    "clang": "18",
+    "castxml": false
+  },
+  "subjects": [
+    {
+      "project": "oneTBB",
+      "repo": "https://github.com/uxlfoundation/oneTBB",
+      "old": "v2021.12.0",
+      "new": "v2021.13.0",
+      "soname": "libtbb.so.12",
+      "lang": "c++",
+      "compile_units": 40,
+      "runs": [
+        {
+          "label": "s0",
+          "args": [
+            "--source-method",
+            "s0"
+          ],
+          "exit_code": 4,
+          "elapsed_s": 29.3,
+          "stderr_tail": [
+            "WARNING: '/tmp/uxl/build-new/gnu_13.3_cxx11_64_relwithdebinfo/libtbb.so.12.13' \u2014 no headers provided. Will use DWARF debug info if available, else symbols-only mode.",
+            "/home/user/abicheck/abicheck/dumper.py:793: UserWarning: No headers provided \u2014 using DWARF debug info as primary data source. #define constants and default parameter values will be unavailable.",
+            "  snapshot = _dump_elf(",
+            "Report written to /tmp/uxl/out/s0.json"
+          ],
+          "verdict": "BREAKING",
+          "level": {
+            "source_method": "s0",
+            "depth": "headers",
+            "collect_mode": "off",
+            "auto": false
+          },
+          "diff": {
+            "breaking": 2,
+            "api_break": 0,
+            "risk": 0,
+            "compatible": 3
+          },
+          "risk": {
+            "total": 0,
+            "n_paths": 0,
+            "matched": {},
+            "recommended_method": "s0"
+          },
+          "coverage": {
+            "L0_binary": "present",
+            "L1_debug": "present",
+            "L2_header": "skipped",
+            "pattern_scan": "present",
+            "L3_build": "not_collected",
+            "L4_source_abi": "not_collected",
+            "L5_source_graph": "not_collected",
+            "crosscheck:exported_not_public": "skipped",
+            "crosscheck:public_not_exported": "skipped",
+            "crosscheck:header_build_context_mismatch": "skipped",
+            "crosscheck:private_header_leak": "skipped"
+          },
+          "n_findings": 5
+        },
+        {
+          "label": "s1",
+          "args": [
+            "--source-method",
+            "s1"
+          ],
+          "exit_code": 4,
+          "elapsed_s": 28.94,
+          "stderr_tail": [
+            "  [on]  Build-flag & toolchain drift (visibility, std, ABI flags) \u2014 from build-system data (compile DB / CMake / Ninja / Bazel)",
+            "  [off] Macros, default args, inline/template/constexpr bodies \u2014 no source replay evidence: source-only API changes are not detected",
+            "  [off] Impact / call / reachability graph \u2014 no graph evidence: cross-symbol impact is not analyzed",
+            "Report written to /tmp/uxl/out/s1.json"
+          ],
+          "verdict": "BREAKING",
+          "level": {
+            "source_method": "s1",
+            "depth": "build",
+            "collect_mode": "build",
+            "auto": false
+          },
+          "diff": {
+            "breaking": 2,
+            "api_break": 0,
+            "risk": 0,
+            "compatible": 3
+          },
+          "risk": {
+            "total": 0,
+            "n_paths": 0,
+            "matched": {},
+            "recommended_method": "s0"
+          },
+          "coverage": {
+            "L0_binary": "present",
+            "L1_debug": "present",
+            "L2_header": "skipped",
+            "pattern_scan": "present",
+            "L3_build": "present",
+            "L4_source_abi": "not_collected",
+            "L5_source_graph": "not_collected",
+            "crosscheck:exported_not_public": "skipped",
+            "crosscheck:public_not_exported": "skipped",
+            "crosscheck:header_build_context_mismatch": "skipped",
+            "crosscheck:private_header_leak": "skipped"
+          },
+          "n_findings": 5
+        },
+        {
+          "label": "s3",
+          "args": [
+            "--source-method",
+            "s3"
+          ],
+          "exit_code": 4,
+          "elapsed_s": 29.08,
+          "stderr_tail": [
+            "WARNING: '/tmp/uxl/build-new/gnu_13.3_cxx11_64_relwithdebinfo/libtbb.so.12.13' \u2014 no headers provided. Will use DWARF debug info if available, else symbols-only mode.",
+            "/home/user/abicheck/abicheck/dumper.py:793: UserWarning: No headers provided \u2014 using DWARF debug info as primary data source. #define constants and default parameter values will be unavailable.",
+            "  snapshot = _dump_elf(",
+            "Report written to /tmp/uxl/out/s3.json"
+          ],
+          "verdict": "BREAKING",
+          "level": {
+            "source_method": "s3",
+            "depth": "headers",
+            "collect_mode": "off",
+            "auto": false
+          },
+          "diff": {
+            "breaking": 2,
+            "api_break": 0,
+            "risk": 0,
+            "compatible": 3
+          },
+          "risk": {
+            "total": 0,
+            "n_paths": 0,
+            "matched": {},
+            "recommended_method": "s0"
+          },
+          "coverage": {
+            "L0_binary": "present",
+            "L1_debug": "present",
+            "L2_header": "skipped",
+            "pattern_scan": "present",
+            "L3_build": "not_collected",
+            "L4_source_abi": "not_collected",
+            "L5_source_graph": "not_collected",
+            "crosscheck:exported_not_public": "skipped",
+            "crosscheck:public_not_exported": "skipped",
+            "crosscheck:header_build_context_mismatch": "skipped",
+            "crosscheck:private_header_leak": "skipped"
+          },
+          "n_findings": 5
+        },
+        {
+          "label": "s4",
+          "args": [
+            "--source-method",
+            "s4"
+          ],
+          "exit_code": 4,
+          "elapsed_s": 29.19,
+          "stderr_tail": [
+            "  [on]  Build-flag & toolchain drift (visibility, std, ABI flags) \u2014 from build-system data (compile DB / CMake / Ninja / Bazel)",
+            "  [off] Macros, default args, inline/template/constexpr bodies \u2014 no source replay evidence: source-only API changes are not detected",
+            "  [on]  Impact / call / reachability graph \u2014 from the source graph summary",
+            "Report written to /tmp/uxl/out/s4.json"
+          ],
+          "verdict": "BREAKING",
+          "level": {
+            "source_method": "s4",
+            "depth": "graph",
+            "collect_mode": "graph-build",
+            "auto": false
+          },
+          "diff": {
+            "breaking": 2,
+            "api_break": 0,
+            "risk": 0,
+            "compatible": 3
+          },
+          "risk": {
+            "total": 0,
+            "n_paths": 0,
+            "matched": {},
+            "recommended_method": "s0"
+          },
+          "coverage": {
+            "L0_binary": "present",
+            "L1_debug": "present",
+            "L2_header": "skipped",
+            "pattern_scan": "present",
+            "L3_build": "present",
+            "L4_source_abi": "not_collected",
+            "L5_source_graph": "present",
+            "crosscheck:exported_not_public": "skipped",
+            "crosscheck:public_not_exported": "skipped",
+            "crosscheck:header_build_context_mismatch": "skipped",
+            "crosscheck:private_header_leak": "skipped"
+          },
+          "n_findings": 5
+        },
+        {
+          "label": "s5",
+          "args": [
+            "--source-method",
+            "s5"
+          ],
+          "exit_code": 4,
+          "elapsed_s": 222.16,
+          "stderr_tail": [
+            "  [on]  Build-flag & toolchain drift (visibility, std, ABI flags) \u2014 from build-system data (compile DB / CMake / Ninja / Bazel)",
+            "  [off] Macros, default args, inline/template/constexpr bodies \u2014 no source replay evidence: source-only API changes are not detected",
+            "  [on]  Impact / call / reachability graph \u2014 from the source graph summary",
+            "Report written to /tmp/uxl/out/s5.json"
+          ],
+          "verdict": "BREAKING",
+          "level": {
+            "source_method": "s5",
+            "depth": "source",
+            "collect_mode": "source-changed",
+            "auto": false
+          },
+          "diff": {
+            "breaking": 2,
+            "api_break": 0,
+            "risk": 0,
+            "compatible": 3
+          },
+          "risk": {
+            "total": 0,
+            "n_paths": 0,
+            "matched": {},
+            "recommended_method": "s0"
+          },
+          "coverage": {
+            "L0_binary": "present",
+            "L1_debug": "present",
+            "L2_header": "skipped",
+            "pattern_scan": "present",
+            "L3_build": "present",
+            "L4_source_abi": "partial",
+            "L5_source_graph": "present",
+            "crosscheck:exported_not_public": "skipped",
+            "crosscheck:public_not_exported": "skipped",
+            "crosscheck:header_build_context_mismatch": "skipped",
+            "crosscheck:private_header_leak": "skipped"
+          },
+          "n_findings": 5
+        },
+        {
+          "label": "s6",
+          "args": [
+            "--source-method",
+            "s6"
+          ],
+          "exit_code": 4,
+          "elapsed_s": 215.11,
+          "stderr_tail": [
+            "  [on]  Build-flag & toolchain drift (visibility, std, ABI flags) \u2014 from build-system data (compile DB / CMake / Ninja / Bazel)",
+            "  [off] Macros, default args, inline/template/constexpr bodies \u2014 no source replay evidence: source-only API changes are not detected",
+            "  [on]  Impact / call / reachability graph \u2014 from the source graph summary",
+            "Report written to /tmp/uxl/out/s6.json"
+          ],
+          "verdict": "BREAKING",
+          "level": {
+            "source_method": "s6",
+            "depth": "full",
+            "collect_mode": "graph-full",
+            "auto": false
+          },
+          "diff": {
+            "breaking": 2,
+            "api_break": 0,
+            "risk": 0,
+            "compatible": 3
+          },
+          "risk": {
+            "total": 0,
+            "n_paths": 0,
+            "matched": {},
+            "recommended_method": "s0"
+          },
+          "coverage": {
+            "L0_binary": "present",
+            "L1_debug": "present",
+            "L2_header": "skipped",
+            "pattern_scan": "present",
+            "L3_build": "present",
+            "L4_source_abi": "partial",
+            "L5_source_graph": "present",
+            "crosscheck:exported_not_public": "skipped",
+            "crosscheck:public_not_exported": "skipped",
+            "crosscheck:header_build_context_mismatch": "skipped",
+            "crosscheck:private_header_leak": "skipped"
+          },
+          "n_findings": 5
+        },
+        {
+          "label": "mode:pr",
+          "args": [
+            "--mode",
+            "pr"
+          ],
+          "exit_code": 4,
+          "elapsed_s": 211.25,
+          "stderr_tail": [
+            "  [on]  Build-flag & toolchain drift (visibility, std, ABI flags) \u2014 from build-system data (compile DB / CMake / Ninja / Bazel)",
+            "  [off] Macros, default args, inline/template/constexpr bodies \u2014 no source replay evidence: source-only API changes are not detected",
+            "  [on]  Impact / call / reachability graph \u2014 from the source graph summary",
+            "Report written to /tmp/uxl/out/mode_pr.json"
+          ],
+          "verdict": "BREAKING",
+          "level": {
+            "source_method": "s5",
+            "depth": "source",
+            "collect_mode": "source-changed",
+            "auto": false
+          },
+          "diff": {
+            "breaking": 2,
+            "api_break": 0,
+            "risk": 0,
+            "compatible": 3
+          },
+          "risk": {
+            "total": 0,
+            "n_paths": 0,
+            "matched": {},
+            "recommended_method": "s0"
+          },
+          "coverage": {
+            "L0_binary": "present",
+            "L1_debug": "present",
+            "L2_header": "skipped",
+            "pattern_scan": "present",
+            "L3_build": "present",
+            "L4_source_abi": "partial",
+            "L5_source_graph": "present",
+            "crosscheck:exported_not_public": "skipped",
+            "crosscheck:public_not_exported": "skipped",
+            "crosscheck:header_build_context_mismatch": "skipped",
+            "crosscheck:private_header_leak": "skipped"
+          },
+          "n_findings": 5
+        },
+        {
+          "label": "mode:pr-deep",
+          "args": [
+            "--mode",
+            "pr-deep"
+          ],
+          "exit_code": 4,
+          "elapsed_s": 216.11,
+          "stderr_tail": [
+            "  [on]  Build-flag & toolchain drift (visibility, std, ABI flags) \u2014 from build-system data (compile DB / CMake / Ninja / Bazel)",
+            "  [off] Macros, default args, inline/template/constexpr bodies \u2014 no source replay evidence: source-only API changes are not detected",
+            "  [on]  Impact / call / reachability graph \u2014 from the source graph summary",
+            "Report written to /tmp/uxl/out/mode_pr-deep.json"
+          ],
+          "verdict": "BREAKING",
+          "level": {
+            "source_method": "s5",
+            "depth": "graph",
+            "collect_mode": "graph-full",
+            "auto": false
+          },
+          "diff": {
+            "breaking": 2,
+            "api_break": 0,
+            "risk": 0,
+            "compatible": 3
+          },
+          "risk": {
+            "total": 0,
+            "n_paths": 0,
+            "matched": {},
+            "recommended_method": "s0"
+          },
+          "coverage": {
+            "L0_binary": "present",
+            "L1_debug": "present",
+            "L2_header": "skipped",
+            "pattern_scan": "present",
+            "L3_build": "present",
+            "L4_source_abi": "partial",
+            "L5_source_graph": "present",
+            "crosscheck:exported_not_public": "skipped",
+            "crosscheck:public_not_exported": "skipped",
+            "crosscheck:header_build_context_mismatch": "skipped",
+            "crosscheck:private_header_leak": "skipped"
+          },
+          "n_findings": 5
+        },
+        {
+          "label": "mode:baseline",
+          "args": [
+            "--mode",
+            "baseline"
+          ],
+          "exit_code": 4,
+          "elapsed_s": 211.8,
+          "stderr_tail": [
+            "  [on]  Build-flag & toolchain drift (visibility, std, ABI flags) \u2014 from build-system data (compile DB / CMake / Ninja / Bazel)",
+            "  [off] Macros, default args, inline/template/constexpr bodies \u2014 no source replay evidence: source-only API changes are not detected",
+            "  [on]  Impact / call / reachability graph \u2014 from the source graph summary",
+            "Report written to /tmp/uxl/out/mode_baseline.json"
+          ],
+          "verdict": "BREAKING",
+          "level": {
+            "source_method": "s6",
+            "depth": "full",
+            "collect_mode": "graph-full",
+            "auto": false
+          },
+          "diff": {
+            "breaking": 2,
+            "api_break": 0,
+            "risk": 0,
+            "compatible": 3
+          },
+          "risk": {
+            "total": 0,
+            "n_paths": 0,
+            "matched": {},
+            "recommended_method": "s0"
+          },
+          "coverage": {
+            "L0_binary": "present",
+            "L1_debug": "present",
+            "L2_header": "skipped",
+            "pattern_scan": "present",
+            "L3_build": "present",
+            "L4_source_abi": "partial",
+            "L5_source_graph": "present",
+            "crosscheck:exported_not_public": "skipped",
+            "crosscheck:public_not_exported": "skipped",
+            "crosscheck:header_build_context_mismatch": "skipped",
+            "crosscheck:private_header_leak": "skipped"
+          },
+          "n_findings": 5
+        },
+        {
+          "label": "mode:audit",
+          "args": [
+            "--audit"
+          ],
+          "exit_code": 0,
+          "elapsed_s": 211.83,
+          "stderr_tail": [
+            "WARNING: '/tmp/uxl/build-new/gnu_13.3_cxx11_64_relwithdebinfo/libtbb.so.12.13' \u2014 no headers provided. Will use DWARF debug info if available, else symbols-only mode.",
+            "/home/user/abicheck/abicheck/dumper.py:793: UserWarning: No headers provided \u2014 using DWARF debug info as primary data source. #define constants and default parameter values will be unavailable.",
+            "  snapshot = _dump_elf(",
+            "Report written to /tmp/uxl/out/mode_audit.json"
+          ],
+          "verdict": "COMPATIBLE",
+          "level": {
+            "source_method": "s5",
+            "depth": "source",
+            "collect_mode": "source-changed",
+            "auto": false
+          },
+          "diff": null,
+          "risk": {
+            "total": 0,
+            "n_paths": 0,
+            "matched": {},
+            "recommended_method": "s0"
+          },
+          "coverage": {
+            "L0_binary": "present",
+            "L1_debug": "present",
+            "L2_header": "skipped",
+            "pattern_scan": "present",
+            "L3_build": "present",
+            "L4_source_abi": "partial",
+            "L5_source_graph": "present",
+            "crosscheck:exported_not_public": "skipped",
+            "crosscheck:public_not_exported": "skipped",
+            "crosscheck:header_build_context_mismatch": "skipped",
+            "crosscheck:private_header_leak": "skipped"
+          },
+          "n_findings": 0
+        },
+        {
+          "label": "s5+seed(1 changed-path)",
+          "args": [
+            "--source-method",
+            "s5",
+            "--changed-path",
+            "src/tbb/version.cpp"
+          ],
+          "exit_code": 4,
+          "elapsed_s": 11.54,
+          "verdict": "BREAKING",
+          "level": {
+            "source_method": "s5",
+            "depth": "source",
+            "collect_mode": "source-changed",
+            "auto": false
+          },
+          "diff": {
+            "breaking": 2,
+            "api_break": 0,
+            "risk": 0,
+            "compatible": 3
+          },
+          "changed_paths": {
+            "count": 1,
+            "source": "--changed-path"
+          },
+          "coverage": {
+            "L0_binary": "present",
+            "L1_debug": "present",
+            "L2_header": "skipped",
+            "pattern_scan": "present",
+            "L3_build": "present",
+            "L4_source_abi": "partial",
+            "L5_source_graph": "present",
+            "crosscheck:exported_not_public": "skipped",
+            "crosscheck:public_not_exported": "skipped",
+            "crosscheck:header_build_context_mismatch": "skipped",
+            "crosscheck:private_header_leak": "skipped"
+          }
+        }
+      ]
+    },
+    {
+      "project": "UMF",
+      "repo": "https://github.com/oneapi-src/unified-memory-framework",
+      "old": "v0.10.0",
+      "new": "v0.11.0",
+      "soname": "libumf.so.0",
+      "lang": "c",
+      "compile_units": 50,
+      "runs": [
+        {
+          "label": "s0",
+          "args": [
+            "--source-method",
+            "s0"
+          ],
+          "exit_code": 4,
+          "elapsed_s": 16.91,
+          "stderr_tail": [
+            "WARNING: '/tmp/uxl/umf-build-new/lib/libumf.so.0.11.0' \u2014 no headers provided. Will use DWARF debug info if available, else symbols-only mode.",
+            "/home/user/abicheck/abicheck/dumper.py:793: UserWarning: No headers provided \u2014 using DWARF debug info as primary data source. #define constants and default parameter values will be unavailable.",
+            "  snapshot = _dump_elf(",
+            "Report written to /tmp/uxl/out-umf/s0.json"
+          ],
+          "verdict": "BREAKING",
+          "level": {
+            "source_method": "s0",
+            "depth": "headers",
+            "collect_mode": "off",
+            "auto": false
+          },
+          "diff": {
+            "breaking": 17,
+            "api_break": 0,
+            "risk": 104,
+            "compatible": 32
+          },
+          "risk": {
+            "total": 0,
+            "n_paths": 0,
+            "matched": {},
+            "recommended_method": "s0"
+          },
+          "coverage": {
+            "L0_binary": "present",
+            "L1_debug": "present",
+            "L2_header": "skipped",
+            "pattern_scan": "present",
+            "L3_build": "not_collected",
+            "L4_source_abi": "not_collected",
+            "L5_source_graph": "not_collected",
+            "crosscheck:exported_not_public": "skipped",
+            "crosscheck:public_not_exported": "skipped",
+            "crosscheck:header_build_context_mismatch": "skipped",
+            "crosscheck:private_header_leak": "skipped"
+          },
+          "n_findings": 153
+        },
+        {
+          "label": "s1",
+          "args": [
+            "--source-method",
+            "s1"
+          ],
+          "exit_code": 4,
+          "elapsed_s": 16.87,
+          "stderr_tail": [
+            "  [on]  Build-flag & toolchain drift (visibility, std, ABI flags) \u2014 from build-system data (compile DB / CMake / Ninja / Bazel)",
+            "  [off] Macros, default args, inline/template/constexpr bodies \u2014 no source replay evidence: source-only API changes are not detected",
+            "  [off] Impact / call / reachability graph \u2014 no graph evidence: cross-symbol impact is not analyzed",
+            "Report written to /tmp/uxl/out-umf/s1.json"
+          ],
+          "verdict": "BREAKING",
+          "level": {
+            "source_method": "s1",
+            "depth": "build",
+            "collect_mode": "build",
+            "auto": false
+          },
+          "diff": {
+            "breaking": 17,
+            "api_break": 0,
+            "risk": 104,
+            "compatible": 32
+          },
+          "risk": {
+            "total": 0,
+            "n_paths": 0,
+            "matched": {},
+            "recommended_method": "s0"
+          },
+          "coverage": {
+            "L0_binary": "present",
+            "L1_debug": "present",
+            "L2_header": "skipped",
+            "pattern_scan": "present",
+            "L3_build": "present",
+            "L4_source_abi": "not_collected",
+            "L5_source_graph": "not_collected",
+            "crosscheck:exported_not_public": "skipped",
+            "crosscheck:public_not_exported": "skipped",
+            "crosscheck:header_build_context_mismatch": "skipped",
+            "crosscheck:private_header_leak": "skipped"
+          },
+          "n_findings": 153
+        },
+        {
+          "label": "s3",
+          "args": [
+            "--source-method",
+            "s3"
+          ],
+          "exit_code": 4,
+          "elapsed_s": 16.91,
+          "stderr_tail": [
+            "WARNING: '/tmp/uxl/umf-build-new/lib/libumf.so.0.11.0' \u2014 no headers provided. Will use DWARF debug info if available, else symbols-only mode.",
+            "/home/user/abicheck/abicheck/dumper.py:793: UserWarning: No headers provided \u2014 using DWARF debug info as primary data source. #define constants and default parameter values will be unavailable.",
+            "  snapshot = _dump_elf(",
+            "Report written to /tmp/uxl/out-umf/s3.json"
+          ],
+          "verdict": "BREAKING",
+          "level": {
+            "source_method": "s3",
+            "depth": "headers",
+            "collect_mode": "off",
+            "auto": false
+          },
+          "diff": {
+            "breaking": 17,
+            "api_break": 0,
+            "risk": 104,
+            "compatible": 32
+          },
+          "risk": {
+            "total": 0,
+            "n_paths": 0,
+            "matched": {},
+            "recommended_method": "s0"
+          },
+          "coverage": {
+            "L0_binary": "present",
+            "L1_debug": "present",
+            "L2_header": "skipped",
+            "pattern_scan": "present",
+            "L3_build": "not_collected",
+            "L4_source_abi": "not_collected",
+            "L5_source_graph": "not_collected",
+            "crosscheck:exported_not_public": "skipped",
+            "crosscheck:public_not_exported": "skipped",
+            "crosscheck:header_build_context_mismatch": "skipped",
+            "crosscheck:private_header_leak": "skipped"
+          },
+          "n_findings": 153
+        },
+        {
+          "label": "s4",
+          "args": [
+            "--source-method",
+            "s4"
+          ],
+          "exit_code": 4,
+          "elapsed_s": 16.95,
+          "stderr_tail": [
+            "  [on]  Build-flag & toolchain drift (visibility, std, ABI flags) \u2014 from build-system data (compile DB / CMake / Ninja / Bazel)",
+            "  [off] Macros, default args, inline/template/constexpr bodies \u2014 no source replay evidence: source-only API changes are not detected",
+            "  [on]  Impact / call / reachability graph \u2014 from the source graph summary",
+            "Report written to /tmp/uxl/out-umf/s4.json"
+          ],
+          "verdict": "BREAKING",
+          "level": {
+            "source_method": "s4",
+            "depth": "graph",
+            "collect_mode": "graph-build",
+            "auto": false
+          },
+          "diff": {
+            "breaking": 17,
+            "api_break": 0,
+            "risk": 104,
+            "compatible": 32
+          },
+          "risk": {
+            "total": 0,
+            "n_paths": 0,
+            "matched": {},
+            "recommended_method": "s0"
+          },
+          "coverage": {
+            "L0_binary": "present",
+            "L1_debug": "present",
+            "L2_header": "skipped",
+            "pattern_scan": "present",
+            "L3_build": "present",
+            "L4_source_abi": "not_collected",
+            "L5_source_graph": "present",
+            "crosscheck:exported_not_public": "skipped",
+            "crosscheck:public_not_exported": "skipped",
+            "crosscheck:header_build_context_mismatch": "skipped",
+            "crosscheck:private_header_leak": "skipped"
+          },
+          "n_findings": 153
+        },
+        {
+          "label": "s5",
+          "args": [
+            "--source-method",
+            "s5"
+          ],
+          "exit_code": 4,
+          "elapsed_s": 21.64,
+          "stderr_tail": [
+            "  [on]  Build-flag & toolchain drift (visibility, std, ABI flags) \u2014 from build-system data (compile DB / CMake / Ninja / Bazel)",
+            "  [off] Macros, default args, inline/template/constexpr bodies \u2014 no source replay evidence: source-only API changes are not detected",
+            "  [on]  Impact / call / reachability graph \u2014 from the source graph summary",
+            "Report written to /tmp/uxl/out-umf/s5.json"
+          ],
+          "verdict": "BREAKING",
+          "level": {
+            "source_method": "s5",
+            "depth": "source",
+            "collect_mode": "source-changed",
+            "auto": false
+          },
+          "diff": {
+            "breaking": 17,
+            "api_break": 0,
+            "risk": 104,
+            "compatible": 32
+          },
+          "risk": {
+            "total": 0,
+            "n_paths": 0,
+            "matched": {},
+            "recommended_method": "s0"
+          },
+          "coverage": {
+            "L0_binary": "present",
+            "L1_debug": "present",
+            "L2_header": "skipped",
+            "pattern_scan": "present",
+            "L3_build": "present",
+            "L4_source_abi": "partial",
+            "L5_source_graph": "present",
+            "crosscheck:exported_not_public": "skipped",
+            "crosscheck:public_not_exported": "skipped",
+            "crosscheck:header_build_context_mismatch": "skipped",
+            "crosscheck:private_header_leak": "skipped"
+          },
+          "n_findings": 153
+        },
+        {
+          "label": "s6",
+          "args": [
+            "--source-method",
+            "s6"
+          ],
+          "exit_code": 4,
+          "elapsed_s": 21.42,
+          "stderr_tail": [
+            "  [on]  Build-flag & toolchain drift (visibility, std, ABI flags) \u2014 from build-system data (compile DB / CMake / Ninja / Bazel)",
+            "  [off] Macros, default args, inline/template/constexpr bodies \u2014 no source replay evidence: source-only API changes are not detected",
+            "  [on]  Impact / call / reachability graph \u2014 from the source graph summary",
+            "Report written to /tmp/uxl/out-umf/s6.json"
+          ],
+          "verdict": "BREAKING",
+          "level": {
+            "source_method": "s6",
+            "depth": "full",
+            "collect_mode": "graph-full",
+            "auto": false
+          },
+          "diff": {
+            "breaking": 17,
+            "api_break": 0,
+            "risk": 104,
+            "compatible": 32
+          },
+          "risk": {
+            "total": 0,
+            "n_paths": 0,
+            "matched": {},
+            "recommended_method": "s0"
+          },
+          "coverage": {
+            "L0_binary": "present",
+            "L1_debug": "present",
+            "L2_header": "skipped",
+            "pattern_scan": "present",
+            "L3_build": "present",
+            "L4_source_abi": "partial",
+            "L5_source_graph": "present",
+            "crosscheck:exported_not_public": "skipped",
+            "crosscheck:public_not_exported": "skipped",
+            "crosscheck:header_build_context_mismatch": "skipped",
+            "crosscheck:private_header_leak": "skipped"
+          },
+          "n_findings": 153
+        },
+        {
+          "label": "mode:audit",
+          "args": [
+            "--audit"
+          ],
+          "exit_code": 0,
+          "elapsed_s": 21.76,
+          "stderr_tail": [
+            "WARNING: '/tmp/uxl/umf-build-new/lib/libumf.so.0.11.0' \u2014 no headers provided. Will use DWARF debug info if available, else symbols-only mode.",
+            "/home/user/abicheck/abicheck/dumper.py:793: UserWarning: No headers provided \u2014 using DWARF debug info as primary data source. #define constants and default parameter values will be unavailable.",
+            "  snapshot = _dump_elf(",
+            "Report written to /tmp/uxl/out-umf/mode_audit.json"
+          ],
+          "verdict": "COMPATIBLE",
+          "level": {
+            "source_method": "s5",
+            "depth": "source",
+            "collect_mode": "source-changed",
+            "auto": false
+          },
+          "diff": null,
+          "risk": {
+            "total": 0,
+            "n_paths": 0,
+            "matched": {},
+            "recommended_method": "s0"
+          },
+          "coverage": {
+            "L0_binary": "present",
+            "L1_debug": "present",
+            "L2_header": "skipped",
+            "pattern_scan": "present",
+            "L3_build": "present",
+            "L4_source_abi": "partial",
+            "L5_source_graph": "present",
+            "crosscheck:exported_not_public": "skipped",
+            "crosscheck:public_not_exported": "skipped",
+            "crosscheck:header_build_context_mismatch": "skipped",
+            "crosscheck:private_header_leak": "skipped"
+          },
+          "n_findings": 0
+        }
+      ]
+    }
+  ],
+  "note": "oneTBB runs include s0 and the \u00a73.3 seeded control (label 's5+seed(1 changed-path)'). s2 (preprocessor) is not in this run's matrix; it is implemented on current main (--source-method s2 runs, depth=build) but clang -E failed on the oneTBB build so it produced no preprocessor facts (see the report's status note)."
+}

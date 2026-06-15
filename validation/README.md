@@ -3,9 +3,16 @@
 Evidence-based validation of abicheck against real upstream C/C++ shared
 libraries (not synthetic fixtures), used to drive planning and improvement.
 
-- `realworld-tracker-parity-2026-06.md` — **latest** run: abicheck scored live
-  against the ABICC abi-laboratory oracle across 60 libraries / 185 comparable
-  pairs (94.1 % agreement, 0 confirmed defects). Start here for the parity results.
+- `uxl-scan-levels-timing-2026-06.md` — **UXL `scan`-level findings & follow-ups:**
+  a `scan` stack run across source-scan levels on oneTBB (C++) and UMF (C),
+  reduced to actionable datapoints + a problems/testing list (P1 castxml-only L2,
+  P2 pointer-reachability over-detection, …). The distilled **timing guide** lives
+  in [`docs/user-guide/scan-levels.md`](../docs/user-guide/scan-levels.md) and
+  [`docs/development/performance.md`](../docs/development/performance.md#scan-level-cost-model-one-cliff-at-l4).
+  Raw per-level data: `data/uxl_scan_results_2026-06.json`.
+- `realworld-tracker-parity-2026-06.md` — **latest parity** run: abicheck scored
+  live against the ABICC abi-laboratory oracle across 60 libraries / 185
+  comparable pairs (94.1 % agreement, 0 confirmed defects).
 - `REPORT.md` — earlier curated-matrix validation report (false-positive catalog)
 - `DESIGN_ANALYSIS.md` — code-level root cause + architectural fix per false
   positive. FP-1/FP-2 are fixed in `abicheck/model.py` + `abicheck/diff_types.py`;
