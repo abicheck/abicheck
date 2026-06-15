@@ -888,7 +888,7 @@ class TestMcpResolveInputText:
         path.write_text("plain text that is neither json nor perl", encoding="utf-8")
         with patch.object(_ms, "_detect_binary_format", return_value=None):
             with patch("abicheck.binary_utils.detect_archive", return_value=False):
-                with pytest.raises(AbicheckError, match="Cannot detect input format"):
+                with pytest.raises(AbicheckError, match="Cannot detect format"):
                     _resolve_input(path, [], [], "v", "c++")
 
 

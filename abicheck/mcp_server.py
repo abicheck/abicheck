@@ -64,9 +64,9 @@ from .checker_policy import (
     policy_kind_sets,
 )
 from .errors import AbicheckError
-from .model import AbiSnapshot, Visibility
+from .model import AbiSnapshot
 from .reporter import to_json, to_markdown
-from .serialization import load_snapshot, snapshot_to_json
+from .serialization import snapshot_to_json
 
 _logger = logging.getLogger("abicheck.mcp")
 
@@ -253,7 +253,6 @@ def _safe_write_path(raw: str, *, label: str = "output_path") -> Path:
 def _sanitize_error(exc: Exception, *, context: str = "operation") -> str:
     """Return a safe error message that does not leak filesystem paths or internals."""
     # Known domain errors: safe to surface as-is
-    from .errors import AbicheckError
     if isinstance(exc, AbicheckError):
         return str(exc)
     if isinstance(exc, (ValueError, KeyError)):
@@ -303,109 +302,25 @@ def _resolve_input(
 ) -> AbiSnapshot:
     """Auto-detect input type and return an AbiSnapshot.
 
-    Mirrors cli._resolve_input but without Click exceptions.
+    Thin wrapper over :func:`abicheck.service.resolve_input` — the single source
+    of truth for format detection, raw BTF/CTF blobs, and native (ELF/PE/Mach-O)
+    dumping. The MCP surface is framework-free, so the service's
+    ``SnapshotError`` / ``ValidationError`` (both ``AbicheckError`` subclasses)
+    propagate unchanged for the tool handlers to convert into structured error
+    payloads.
+
+    ``follow_linker_scripts=False``: the MCP tools enforce ``MCP_MAX_FILE_SIZE``
+    via :func:`_check_file_size` on the *caller-supplied* path before resolving.
+    Following a GNU ld linker script would parse an ``INPUT()``/``GROUP()``
+    target that never went through that guard, so a tiny script pointing at a
+    huge library could defeat the resource limit. Disabling the follow keeps the
+    size check authoritative (and matches the MCP server's pre-unification
+    behaviour, which never followed linker scripts).
     """
-    binary_fmt = _detect_binary_format(path)
+    from . import service
 
-    if binary_fmt == "elf":
-        from .dumper import dump
-        _SUPPORTED_LANGS = ("c", "c++")
-        if lang not in _SUPPORTED_LANGS:
-            raise ValueError(
-                f"Unsupported lang {lang!r}. Must be one of: {', '.join(_SUPPORTED_LANGS)}"
-            )
-        compiler = "cc" if lang == "c" else "c++"
-        return dump(
-            so_path=path,
-            headers=headers,
-            extra_includes=includes,
-            version=version,
-            compiler=compiler,
-            lang=lang if lang == "c" else None,
-        )
-
-    if binary_fmt == "pe":
-        from .model import Function
-        from .pe_metadata import parse_pe_metadata
-        pe_meta = parse_pe_metadata(path)
-        if not pe_meta.machine:
-            raise AbicheckError(
-                f"Failed to extract PE metadata from '{path.name}'. "
-                "The file may be corrupt or not a valid PE binary."
-            )
-        if not pe_meta.exports:
-            raise AbicheckError(
-                f"PE file '{path.name}' has no exports (named or ordinal). "
-                "Verify the file is a valid DLL."
-            )
-        funcs = [
-            Function(
-                name=(exp.name or f"ordinal:{exp.ordinal}"),
-                mangled=(exp.name or f"ordinal:{exp.ordinal}"),
-                return_type="?",
-                visibility=Visibility.PUBLIC,
-                is_extern_c=not (exp.name or "").startswith("?"),
-            )
-            for exp in pe_meta.exports
-        ]
-        return AbiSnapshot(
-            library=path.name, version=version,
-            functions=funcs, pe=pe_meta, platform="pe",
-        )
-
-    if binary_fmt == "macho":
-        from .macho_metadata import parse_macho_metadata
-        from .model import Function
-        macho_meta = parse_macho_metadata(path)
-        if not macho_meta.exports and not macho_meta.install_name and not macho_meta.dependent_libs:
-            raise AbicheckError(
-                f"Mach-O file '{path.name}' has no exports or load-command metadata. "
-                "Verify the file is a valid dynamic library."
-            )
-        funcs = [
-            Function(
-                name=exp.name, mangled=exp.name, return_type="?",
-                visibility=Visibility.PUBLIC,
-                is_extern_c=not exp.name.startswith("_Z"),
-            )
-            for exp in macho_meta.exports if exp.name
-        ]
-        return AbiSnapshot(
-            library=path.name, version=version,
-            functions=funcs, macho=macho_meta, platform="macho",
-        )
-
-    # Text-based: JSON snapshot or Perl dump
-    try:
-        with open(path, "rb") as f:
-            head = f.read(256).decode("utf-8", errors="replace").lstrip()
-    except OSError as exc:
-        _logger.debug("Failed reading input in _resolve_input: %s", exc, exc_info=True)
-        raise AbicheckError("Cannot read input file") from exc
-
-    from .compat.abicc_dump_import import import_abicc_perl_dump, looks_like_perl_dump
-    if looks_like_perl_dump(head):
-        return import_abicc_perl_dump(path)
-
-    if head.startswith("{"):
-        return load_snapshot(path)
-
-    # Static / import library archives (.a / .lib) are member containers, not a
-    # single linkable image — a deliberate non-goal (see
-    # docs/concepts/limitations.md). Reject with actionable guidance, matching
-    # the CLI/service/dumper paths.
-    from .binary_utils import detect_archive
-    if detect_archive(path):
-        raise AbicheckError(
-            f"'{path}' is a static/import library archive (.a/.lib), which abicheck "
-            "does not analyse — it compares single linkable images (shared libraries "
-            "and objects). Extract the members (e.g. `ar x lib.a`) and compare the "
-            "resulting object files or the shared library built from them instead."
-        )
-
-    raise AbicheckError(
-        "Cannot detect input format. "
-        "Expected: ELF (.so), PE (.dll), Mach-O (.dylib), JSON snapshot, or ABICC Perl dump."
+    return service.resolve_input(
+        path, headers, includes, version, lang, follow_linker_scripts=False
     )
 
 

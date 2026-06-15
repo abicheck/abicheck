@@ -88,7 +88,7 @@ class TestResolveInputErrors:
         f.write_text("$VAR1 = {\n  broken\n};", encoding="utf-8")
 
         monkeypatch.setattr(
-            "abicheck.cli.import_abicc_perl_dump",
+            "abicheck.compat.abicc_dump_import.import_abicc_perl_dump",
             lambda _p: (_ for _ in ()).throw(ValueError("parse error")),
         )
         with pytest.raises(click.ClickException, match="Failed to import ABICC Perl dump"):
@@ -113,7 +113,7 @@ class TestResolveInputErrors:
         f.write_text("{invalid json", encoding="utf-8")
 
         monkeypatch.setattr(
-            "abicheck.cli.load_snapshot",
+            "abicheck.service.load_snapshot",
             lambda _p: (_ for _ in ()).throw(ValueError("bad json")),
         )
         with pytest.raises(click.ClickException, match="Failed to load JSON snapshot"):
@@ -255,7 +255,7 @@ class TestCompareApiBreakExitCode:
         new_p.write_text("{}", encoding="utf-8")
 
         snap = AbiSnapshot(library="lib.so", version="1.0")
-        monkeypatch.setattr("abicheck.cli.load_snapshot", lambda _: snap)
+        monkeypatch.setattr("abicheck.service.load_snapshot", lambda _: snap)
         monkeypatch.setattr(
             "abicheck.cli.compare",
             lambda *_a, **_kw: DiffResult(
