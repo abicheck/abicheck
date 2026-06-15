@@ -584,9 +584,10 @@ use_cases:
       overflow, never shrinks scope). The numeric risk score (`buildsource/risk.py`,
       tunable `risk_rules`) changes depth ONLY under `--source-method auto`
       (opt-in). Reuses the existing collect-mode/replay-scope machinery; emits
-      RISK/API_BREAK only (authority rule). REMAINS: the preprocessor macro/include
-      capture (S2), conditional on a compile DB + `clang -E`; and the D7 POI
-      work-list that focuses the expensive scan (Phase 3b).
+      RISK/API_BREAK only (authority rule). The D7 POI work-list
+      (`buildsource/poi.py`) now focuses the expensive scan (Phase 3b, done).
+      REMAINS: the preprocessor macro/include capture (S2), conditional on a
+      compile DB + `clang -E`.
 
   - id: UC-CHANGE-crosscheck-hygiene
     axis: change_class
@@ -615,27 +616,50 @@ use_cases:
   - id: UC-WORKFLOW-single-release-audit
     axis: workflow
     name: Single-release ABI-hygiene audit (no baseline compare)
-    status: planned
+    status: partial
     gap: G19
     plan: docs/development/plans/g19-pr-source-intelligence.md
+    evidence:
+      modules:
+        - abicheck/cli_scan.py
+        - abicheck/buildsource/crosscheck.py
+        - abicheck/mcp_server.py
+      tests:
+        - tests/test_scan_estimate.py
+        - tests/test_crosscheck.py
     next_steps: >
-      ADR-035 D8. Run the D2 pattern facts + D4 cross-checks intra-version, with
-      no baseline, as a `scan --audit` / surface-report lint (accidental ABI
-      surface, private-header leaks, header/build-context mismatch, ODR variants,
-      visibility/versioning hygiene). Extends the G11 single-binary audit;
-      delivers value from one artifact, so it justifies a deeper one-time scan.
+      ADR-035 D8. DONE: `scan --audit` runs the D2 pattern facts + D4 cross-checks
+      intra-version with no baseline and renders the hygiene catalog (accidental
+      ABI surface, public-not-exported, header/build-context mismatch,
+      private-header leaks + advisory pattern facts), severity-mapped via
+      `--crosscheck KEY=LEVEL` (`_audit_exit_code`: RISK advisory, API_BREAK →
+      exit 2, promoted checks gate); the MCP `abi_audit` tool exposes the same
+      catalog. REMAINS: `surface-report` reuse and the deeper one-time checks
+      (ODR variants, visibility/versioning hygiene, RTTI-for-internal-types) once
+      their ChangeKinds land (Phase 2 tail).
 
   - id: UC-WORKFLOW-evidence-directed-scope
     axis: workflow
     name: Evidence-directed scan focusing (binary/header facts steer source scan)
-    status: planned
+    status: partial
     gap: G19
     plan: docs/development/plans/g19-pr-source-intelligence.md
+    evidence:
+      modules:
+        - abicheck/buildsource/poi.py
+        - abicheck/cli_scan.py
+      tests:
+        - tests/test_poi.py
     next_steps: >
-      ADR-035 D7. Compute a points-of-interest work-list from L0/L1/L2 deltas +
-      risk score (reverse of the explain-finding localization walk) and hand it to
-      source_replay scope selection and the cross-check engine, so L4/L5 cost is
-      paid only on entities the cheap binary/header evidence already flagged.
+      ADR-035 D7. DONE: `buildsource/poi.py` (`build_points_of_interest`) computes
+      a points-of-interest work-list from the changed-path floor + pattern-scan
+      escalation triggers + L0/L1/L2 export deltas + risk score (reverse of the
+      explain-finding localization walk); the floor is unconditional (risk/deltas
+      only add, never drop a changed TU). `scan` runs the pattern pre-scan first
+      and feeds `poi.changed_paths()` into the source-replay scope. REMAINS:
+      handing the symbol POIs (not just paths) into `crosscheck` as a work-list,
+      and the automatic baseline-delta POI inside the `scan --baseline` path
+      (the builder already supports it; CLI wiring loads the baseline later).
 
   - id: UC-TC-build-emitted-facts
     axis: toolchain
@@ -673,14 +697,20 @@ use_cases:
     evidence:
       modules:
         - abicheck/cli_scan.py
+        - abicheck/service.py
+        - abicheck/mcp_server.py
       tests:
         - tests/test_cli_scan.py
+        - tests/test_scan_estimate.py
     next_steps: >
       ADR-035 D9/D10. DONE: `scan` emits one report (text/JSON) carrying the
       per-tier coverage table (intrinsic L0-L2 + pattern-scan S3 + L3/L4/L5 pack
-      coverage + per-crosscheck rows), the resolved level, and the risk score, so
-      a partial scan is legible (never a bare "source scan failed"). REMAINS: the
-      typed `ScanResult`/`CostEstimate` API + provider-agreement/confidence matrix
-      rendered by reporter/PR-comment/SARIF/MCP; and `scan --estimate`
-      (`service.estimate_scan`) probing the project (TU count, header fan-out,
-      cache state) for projected per-level cost (Phase 3b).
+      coverage + per-crosscheck rows + the POI focus summary), the resolved level,
+      and the risk score, so a partial scan is legible (never a bare "source scan
+      failed"). DONE: the typed `ScanRequest`/`CostEstimate`/`LayerResult`/`Budget`
+      API + `service.estimate_scan()` (probes TU count from the compile DB /
+      source tree + header fan-out), surfaced as `scan --estimate` and the MCP
+      `abi_estimate` tool — a dry-run that scans nothing. REMAINS: the full
+      `ScanResult`/`run_scan` refactor (move the `cli_scan` orchestration body into
+      `service.py`) and the provider-agreement/confidence matrix rendered by
+      reporter/PR-comment/SARIF.

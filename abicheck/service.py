@@ -21,13 +21,15 @@ Provides framework-agnostic functions for the core abicheck operations:
 - :func:`run_compare` — Compare two ABI snapshots and return classified changes
 - :func:`render_output` — Render a DiffResult to the specified output format
 """
+
 from __future__ import annotations
 
 import hashlib
 import logging
 import warnings
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from .checker import compare
 from .checker_types import DiffResult, LibraryMetadata
@@ -49,10 +51,18 @@ _logger = logging.getLogger(__name__)
 _SNIFF_BYTES = 256
 
 # Header file extensions recognised during directory expansion
-_HEADER_EXTS = frozenset({
-    ".h", ".hh", ".hpp", ".hxx", ".h++",
-    ".ipp", ".tpp", ".inc",
-})
+_HEADER_EXTS = frozenset(
+    {
+        ".h",
+        ".hh",
+        ".hpp",
+        ".hxx",
+        ".h++",
+        ".ipp",
+        ".tpp",
+        ".inc",
+    }
+)
 
 
 # ── Input resolution ────────────────────────────────────────────────────────
@@ -64,6 +74,7 @@ def detect_binary_format(path: Path) -> str | None:
     Returns ``'elf'``, ``'pe'``, ``'macho'``, or *None* for non-binary / unknown.
     """
     from .binary_utils import detect_binary_format as _detect
+
     return _detect(path)
 
 
@@ -101,7 +112,8 @@ def expand_header_inputs(inputs: list[Path]) -> list[Path]:
             continue
         if p.is_dir():
             found = [
-                f for f in p.rglob("*")
+                f
+                for f in p.rglob("*")
                 if f.is_file() and f.suffix.lower() in _HEADER_EXTS
             ]
             if not found:
@@ -161,15 +173,17 @@ def _resolve_raw_typeinfo(path: Path, version: str) -> AbiSnapshot | None:
             if not btf.has_btf or btf.type_count <= 0:
                 _logger.warning("raw BTF blob %s has no type records; ignoring", path)
                 return None
-            return AbiSnapshot(library=path.name, version=version,
-                               dwarf=btf.to_dwarf_metadata())
+            return AbiSnapshot(
+                library=path.name, version=version, dwarf=btf.to_dwarf_metadata()
+            )
         if magic_le == CTF_MAGIC:
             ctf = parse_ctf_from_bytes(data)
             if not ctf.has_ctf or ctf.type_count <= 0:
                 _logger.warning("raw CTF blob %s has no type records; ignoring", path)
                 return None
-            return AbiSnapshot(library=path.name, version=version,
-                               dwarf=ctf.to_dwarf_metadata())
+            return AbiSnapshot(
+                library=path.name, version=version, dwarf=ctf.to_dwarf_metadata()
+            )
     except (ValueError, OSError) as exc:
         _logger.warning("failed to parse raw type-info blob %s: %s", path, exc)
         return None
@@ -207,18 +221,31 @@ def resolve_input(
     # Fast path: caller already knows it's ELF
     if is_elf is True:
         return run_dump(
-            path, "elf", _headers, _includes, version, lang,
+            path,
+            "elf",
+            _headers,
+            _includes,
+            version,
+            lang,
             dwarf_only=dwarf_only,
-            debug_roots=debug_roots, enable_debuginfod=enable_debuginfod,
+            debug_roots=debug_roots,
+            enable_debuginfod=enable_debuginfod,
         )
 
     # Detect binary format from magic bytes
     binary_fmt = detect_binary_format(path) if is_elf is None else None
     if binary_fmt is not None:
         return run_dump(
-            path, binary_fmt, _headers, _includes, version, lang,
-            pdb_path=pdb_path, dwarf_only=dwarf_only,
-            debug_roots=debug_roots, enable_debuginfod=enable_debuginfod,
+            path,
+            binary_fmt,
+            _headers,
+            _includes,
+            version,
+            lang,
+            pdb_path=pdb_path,
+            dwarf_only=dwarf_only,
+            debug_roots=debug_roots,
+            enable_debuginfod=enable_debuginfod,
         )
 
     # Raw kernel type-info blobs (a bare `.BTF` / CTF section extracted with
@@ -234,22 +261,34 @@ def resolve_input(
 
     if fmt == "perl":
         from .compat.abicc_dump_import import import_abicc_perl_dump
+
         try:
             return import_abicc_perl_dump(path)
-        except (ValueError, KeyError, UnicodeDecodeError, OSError, AbicheckError) as exc:
-            raise SnapshotError(f"Failed to import ABICC Perl dump '{path}': {exc}") from exc
+        except (
+            ValueError,
+            KeyError,
+            UnicodeDecodeError,
+            OSError,
+            AbicheckError,
+        ) as exc:
+            raise SnapshotError(
+                f"Failed to import ABICC Perl dump '{path}': {exc}"
+            ) from exc
 
     if fmt == "json":
         try:
             return load_snapshot(path)
         except (ValueError, KeyError, UnicodeDecodeError, OSError) as exc:
-            raise SnapshotError(f"Failed to load JSON snapshot '{path}': {exc}") from exc
+            raise SnapshotError(
+                f"Failed to load JSON snapshot '{path}': {exc}"
+            ) from exc
 
     # Static / import libraries (`.a`, `.lib`) are member archives, not single
     # linkable images. abicheck does not analyse archives (by design — see
     # docs/concepts/limitations.md); fail with actionable guidance rather than a
     # generic "unknown format" error.
     from .binary_utils import detect_archive
+
     if detect_archive(path):
         raise ValidationError(
             f"'{path}' is a static/import library archive (.a/.lib), which abicheck "
@@ -291,7 +330,11 @@ def run_dump(
 
     if binary_fmt == "elf":
         snap = _dump_elf(
-            path, _headers, _includes, version, lang,
+            path,
+            _headers,
+            _includes,
+            version,
+            lang,
             dwarf_only=dwarf_only,
             debug_roots=debug_roots,
             enable_debuginfod=enable_debuginfod,
@@ -300,14 +343,20 @@ def run_dump(
         return snap
     if binary_fmt == "pe":
         return _dump_pe(
-            path, version,
-            headers=_headers, includes=_includes, lang=lang,
+            path,
+            version,
+            headers=_headers,
+            includes=_includes,
+            lang=lang,
             pdb_path=pdb_path,
         )
     if binary_fmt == "macho":
         return _dump_macho(
-            path, version,
-            headers=_headers, includes=_includes, lang=lang,
+            path,
+            version,
+            headers=_headers,
+            includes=_includes,
+            lang=lang,
         )
     raise ValidationError(f"Unsupported binary format: {binary_fmt}")
 
@@ -361,7 +410,9 @@ def _dump_elf(
     if resolved_headers and not dwarf_only:
         for inc in includes:
             if not inc.exists() or not inc.is_dir():
-                raise ValidationError(f"Include directory not found or not a directory: {inc}")
+                raise ValidationError(
+                    f"Include directory not found or not a directory: {inc}"
+                )
     elif includes and not dwarf_only:
         _logger.warning("Include paths are ignored without headers.")
 
@@ -426,9 +477,13 @@ def _try_header_scoped_dump(
     lang_arg = lang if lang.lower() == "c" else None
     try:
         if fmt == "pe":
-            snap = _dumper_pe(path, resolved_headers, includes, version, compiler, lang=lang_arg)
+            snap = _dumper_pe(
+                path, resolved_headers, includes, version, compiler, lang=lang_arg
+            )
         else:
-            snap = _dumper_macho(path, resolved_headers, includes, version, compiler, lang=lang_arg)
+            snap = _dumper_macho(
+                path, resolved_headers, includes, version, compiler, lang=lang_arg
+            )
     except Exception as exc:  # noqa: BLE001 — castxml missing / parse failure → fall back
         warnings.warn(
             f"Header-based ABI scoping unavailable for '{path.name}' "
@@ -517,7 +572,12 @@ def _dump_pe(
     scope_fallback: str | None = None
     if headers:
         scoped, scope_fallback = _try_header_scoped_dump(
-            "pe", path, headers, includes or [], version, lang,
+            "pe",
+            path,
+            headers,
+            includes or [],
+            version,
+            lang,
         )
         if scoped is not None:
             # Preserve any PDB debug info alongside the header-scoped surface.
@@ -547,11 +607,16 @@ def _dump_pe(
     pdb_enums: list[EnumType] = []
     if headers and dwarf_meta is not None:
         from .pdb_model import model_types_from_dwarf_metadata
+
         pdb_types, pdb_enums = model_types_from_dwarf_metadata(dwarf_meta)
 
     return AbiSnapshot(
-        library=path.name, version=version,
-        functions=funcs, types=pdb_types, enums=pdb_enums, pe=pe_meta,
+        library=path.name,
+        version=version,
+        functions=funcs,
+        types=pdb_types,
+        enums=pdb_enums,
+        pe=pe_meta,
         dwarf=dwarf_meta,
         dwarf_advanced=dwarf_adv,
         platform="pe",
@@ -579,7 +644,11 @@ def _dump_macho(
     except (RuntimeError, OSError, ValueError) as exc:
         raise SnapshotError(f"Failed to parse Mach-O '{path}': {exc}") from exc
 
-    if not macho_meta.exports and not macho_meta.install_name and not macho_meta.dependent_libs:
+    if (
+        not macho_meta.exports
+        and not macho_meta.install_name
+        and not macho_meta.dependent_libs
+    ):
         raise SnapshotError(
             f"Mach-O file '{path}' has no exports or load-command metadata. "
             "Verify the file is a valid dynamic library."
@@ -588,22 +657,32 @@ def _dump_macho(
     scope_fallback: str | None = None
     if headers:
         scoped, scope_fallback = _try_header_scoped_dump(
-            "macho", path, headers, includes or [], version, lang,
+            "macho",
+            path,
+            headers,
+            includes or [],
+            version,
+            lang,
         )
         if scoped is not None:
             return scoped
 
     funcs = [
         Function(
-            name=exp.name, mangled=exp.name, return_type="?",
+            name=exp.name,
+            mangled=exp.name,
+            return_type="?",
             visibility=Visibility.PUBLIC,
             is_extern_c=not exp.name.startswith("_Z"),
         )
-        for exp in macho_meta.exports if exp.name
+        for exp in macho_meta.exports
+        if exp.name
     ]
     return AbiSnapshot(
-        library=path.name, version=version,
-        functions=funcs, macho=macho_meta,
+        library=path.name,
+        version=version,
+        functions=funcs,
+        macho=macho_meta,
         platform="macho",
         scope_fallback=scope_fallback,
     )
@@ -712,14 +791,22 @@ def run_compare(
     new_fmt = detect_binary_format(new_input)
 
     old = resolve_input(
-        old_input, _old_headers, _old_includes, old_version, lang,
+        old_input,
+        _old_headers,
+        _old_includes,
+        old_version,
+        lang,
         is_elf=True if old_fmt == "elf" else None,
         pdb_path=old_pdb_path,
         debug_roots=old_debug_roots,
         enable_debuginfod=enable_debuginfod,
     )
     new = resolve_input(
-        new_input, _new_headers, _new_includes, new_version, lang,
+        new_input,
+        _new_headers,
+        _new_includes,
+        new_version,
+        lang,
         is_elf=True if new_fmt == "elf" else None,
         pdb_path=new_pdb_path,
         debug_roots=new_debug_roots,
@@ -728,7 +815,11 @@ def run_compare(
 
     suppression, pf = load_suppression_and_policy(suppress, policy, policy_file_path)
     result = compare(
-        old, new, suppression=suppression, policy=policy, policy_file=pf,
+        old,
+        new,
+        suppression=suppression,
+        policy=policy,
+        policy_file=pf,
         scope_to_public_surface=scope_to_public_surface,
         force_public_symbols=force_public_symbols,
     )
@@ -774,17 +865,24 @@ def render_output(
 
     if fmt == "json":
         return _render_json_output(
-            result, old, new, follow_deps=follow_deps,
-            show_only=show_only, report_mode=report_mode,
-            show_impact=show_impact, severity_config=severity_config,
+            result,
+            old,
+            new,
+            follow_deps=follow_deps,
+            show_only=show_only,
+            report_mode=report_mode,
+            show_impact=show_impact,
+            severity_config=severity_config,
         )
 
     if fmt == "sarif":
         from .sarif import to_sarif_str
+
         return to_sarif_str(result, show_only=show_only)
 
     if fmt == "html":
         from .html_report import generate_html_report
+
         return generate_html_report(
             result,
             lib_name=old.library,
@@ -797,33 +895,44 @@ def render_output(
 
     if fmt == "junit":
         from .junit_report import to_junit_xml
+
         return to_junit_xml(
-            result, old,
-            show_only=show_only, severity_config=severity_config,
+            result,
+            old,
+            show_only=show_only,
+            severity_config=severity_config,
         )
 
     if fmt == "review":
         from .reporter import to_review_digest
+
         txt = to_review_digest(result)
         if demangle:
             from .demangle import demangle_text
+
             txt = demangle_text(txt)
         return txt
 
     _SUPPORTED_FORMATS = {"json", "sarif", "html", "junit", "markdown", "md", "review"}
     if fmt not in _SUPPORTED_FORMATS:
-        raise ValidationError(f"Unsupported output format: {fmt!r} (expected one of {sorted(_SUPPORTED_FORMATS)})")
+        raise ValidationError(
+            f"Unsupported output format: {fmt!r} (expected one of {sorted(_SUPPORTED_FORMATS)})"
+        )
 
     # Default: markdown
     md = to_markdown(
-        result, show_only=show_only, report_mode=report_mode,
-        show_impact=show_impact, severity_config=severity_config,
+        result,
+        show_only=show_only,
+        report_mode=report_mode,
+        show_impact=show_impact,
+        severity_config=severity_config,
         show_recommendation=show_recommendation,
     )
     if follow_deps and (old.dependency_info or (new and new.dependency_info)):
         md += _render_deps_section_md(old, new)
     if demangle:
         from .demangle import demangle_text
+
         md = demangle_text(md)
     return md
 
@@ -841,12 +950,16 @@ def _render_json_output(
 ) -> str:
     """Render comparison result as JSON, optionally including dependency info."""
     base = to_json(
-        result, show_only=show_only, report_mode=report_mode,
-        show_impact=show_impact, severity_config=severity_config,
+        result,
+        show_only=show_only,
+        report_mode=report_mode,
+        show_impact=show_impact,
+        severity_config=severity_config,
     )
     if follow_deps and (old.dependency_info or (new and new.dependency_info)):
         import json
         from dataclasses import asdict
+
         d = json.loads(base)
         if old.dependency_info:
             d["old_dependency_info"] = asdict(old.dependency_info)
@@ -854,6 +967,280 @@ def _render_json_output(
             d["new_dependency_info"] = asdict(new.dependency_info)
         return json.dumps(d, indent=2)
     return base
+
+
+# ── Scan service: typed request/result + per-project cost estimate ───────────
+#
+# ADR-035 D10 / G19.7 (Phase 3b). One typed contract — :class:`ScanRequest` →
+# :class:`ScanResult` / ``[CostEstimate]`` — that the CLI (`cli_scan.py`), the MCP
+# server, and CI wrappers all drive, so there is one engine and many renderings.
+# ``estimate_scan`` is a first-class **dry-run** (ADR-035 D10): it probes the
+# project (TU count, header fan-out, cache state) and returns the projected cost
+# of each L-layer for *this* project so a maintainer can pick a depth on measured
+# cost instead of guesswork — it scans nothing and runs no compiler.
+
+
+def _scan_imports() -> tuple[Any, ...]:
+    """Lazily import the buildsource level/risk vocabulary (keeps import cheap)."""
+    from .buildsource.risk import RiskRules, score_changed_paths
+    from .buildsource.scan_levels import (
+        EvidenceDepth,
+        ScanMode,
+        SourceMethod,
+        level_to_collect_mode,
+        resolve_level,
+    )
+
+    return (
+        RiskRules,
+        score_changed_paths,
+        EvidenceDepth,
+        ScanMode,
+        SourceMethod,
+        level_to_collect_mode,
+        resolve_level,
+    )
+
+
+@dataclass(frozen=True)
+class Budget:
+    """Optional scan budget — a failure guard, never a scope-shrinker (ADR-035 D3)."""
+
+    total_timeout: float | None = None  # seconds; overflow FAILS (never shrinks)
+    max_tus: int | None = None  # targeted-AST TU cap
+    partial_ok: bool = True  # a partial scan (missing tool/layer) is success
+
+
+@dataclass(frozen=True)
+class ScanRequest:
+    """Typed input to the scan engine (ADR-035 D10). All additive over dump/compare."""
+
+    binaries: list[Path] = field(default_factory=list)
+    headers: list[Path] = field(default_factory=list)
+    includes: list[Path] = field(default_factory=list)
+    sources: Path | None = None
+    compile_db: Path | None = None
+    build_info: Path | None = None
+    baseline: str | Path | None = None
+    mode: str = "pr"  # ScanMode value (fixed preset)
+    source_method: str | None = None  # SourceMethod value; None = mode preset
+    depth: str | None = None  # EvidenceDepth value (coarse L-axis)
+    changed_paths: list[str] = field(default_factory=list)
+    budget: Budget = field(default_factory=Budget)
+    lang: str = "c++"
+
+
+@dataclass(frozen=True)
+class CostEstimate:
+    """Projected cost of one L-layer for *this* project (ADR-035 D10 dry-run)."""
+
+    method: str | None  # S-axis (s0..s6) producing it; None for intrinsic L0-L2
+    layer: str  # L-axis it populates (L0_binary..L5_source_graph)
+    tus: int  # translation units this layer would touch
+    est_seconds: float  # projected wall-clock for *this* project
+    cache_hit_rate: float  # 0..1 fraction expected to hit the per-TU cache
+    note: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "method": self.method,
+            "layer": self.layer,
+            "tus": self.tus,
+            "est_seconds": round(self.est_seconds, 3),
+            "cache_hit_rate": round(self.cache_hit_rate, 3),
+            "note": self.note,
+        }
+
+
+@dataclass(frozen=True)
+class LayerResult:
+    """Per-layer coverage of an *executed* scan (ADR-035 D10; reuses LayerCoverage)."""
+
+    method: str | None
+    layer: str
+    status: str  # "present" | "partial" | "skipped" | "not_collected"
+    facts: int = 0
+    elapsed_s: float = 0.0
+    skipped_reason: str | None = None
+    detail: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "method": self.method,
+            "layer": self.layer,
+            "status": self.status,
+            "facts": self.facts,
+            "elapsed_s": round(self.elapsed_s, 3),
+            "skipped_reason": self.skipped_reason,
+            "detail": self.detail,
+        }
+
+
+#: Per-TU / per-file cost anchors (seconds) for the dry-run estimate. These are
+#: deliberately coarse starting defaults (§11 of the ADR-035 proposal: a full
+#: ``-fsyntax-only`` pass dominates; pattern/compile-DB scans are <1-5%). The real
+#: per-project number comes from the actual run; the estimate only ranks layers so
+#: a maintainer can pick a depth.
+_COST_PER_HEADER_PARSE = 0.08  # L2 castxml per public header
+_COST_PER_TU_BUILD = 0.002  # L3 compile-DB entry parse
+_COST_PER_TU_REPLAY = 0.45  # L4 per-TU semantic AST replay
+_COST_PER_TU_GRAPH = 0.02  # L5 per-TU graph fold/edge
+
+
+def _count_compile_db_tus(compile_db: Path) -> int:
+    """Count unique translation units in a ``compile_commands.json`` (0 on error)."""
+    import json as _json
+
+    try:
+        raw = _json.loads(compile_db.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return 0
+    if not isinstance(raw, list):
+        return 0
+    files = {str(e.get("file")) for e in raw if isinstance(e, dict) and e.get("file")}
+    return len(files)
+
+
+#: Source-file extensions counted as translation units when no compile DB exists.
+_SOURCE_TU_EXTS = frozenset({".c", ".cc", ".cpp", ".cxx", ".c++", ".m", ".mm"})
+
+
+def _count_source_tus(sources: Path) -> int:
+    """Count source translation units under a tree (compile-DB-free fallback)."""
+    if sources.is_file():
+        return 1 if sources.suffix.lower() in _SOURCE_TU_EXTS else 0
+    n = 0
+    for p in sources.rglob("*"):
+        if p.is_file() and p.suffix.lower() in _SOURCE_TU_EXTS:
+            n += 1
+    return n
+
+
+def _discover_compile_db(sources: Path | None, explicit: Path | None) -> Path | None:
+    """The compile DB to estimate against: explicit wins, else discover in *sources*."""
+    if explicit is not None and explicit.exists():
+        return explicit
+    if sources is not None and sources.is_dir():
+        for cand in (
+            sources / "compile_commands.json",
+            sources / "build" / "compile_commands.json",
+        ):
+            if cand.exists():
+                return cand
+    return None
+
+
+def estimate_scan(req: ScanRequest) -> list[CostEstimate]:
+    """Dry-run: projected per-layer cost of *req* for this project (ADR-035 D10).
+
+    Probes the project (TU count from the compile DB or source tree, public-header
+    fan-out, the resolved level's collect mode) and returns one
+    :class:`CostEstimate` per L-layer the chosen level would touch — **without
+    running any compiler or parsing any binary**. The numbers are coarse anchors
+    (see ``_COST_PER_*``); the estimate's job is to *rank* layers so a maintainer
+    can pick a depth/budget, not to be a precise wall-clock prediction.
+    """
+    (
+        RiskRules,
+        score_changed_paths,
+        EvidenceDepth,
+        ScanMode,
+        SourceMethod,
+        level_to_collect_mode,
+        resolve_level,
+    ) = _scan_imports()
+
+    mode = ScanMode(req.mode)
+    sm = SourceMethod(req.source_method) if req.source_method else None
+    dp = EvidenceDepth(req.depth) if req.depth else None
+    auto_method = None
+    if sm is SourceMethod.AUTO and req.changed_paths:
+        auto_method = score_changed_paths(
+            list(req.changed_paths), RiskRules.default()
+        ).recommended_method
+    resolved, eff_depth = resolve_level(
+        mode=mode, source_method=sm, depth=dp, auto_method=auto_method
+    )
+    collect_mode = level_to_collect_mode(resolved, eff_depth)
+
+    compile_db = _discover_compile_db(req.sources, req.compile_db or req.build_info)
+    if compile_db is not None:
+        total_tus = _count_compile_db_tus(compile_db)
+        tu_note = f"compile DB: {compile_db.name}"
+    elif req.sources is not None:
+        total_tus = _count_source_tus(req.sources)
+        tu_note = "counted source files (no compile DB)"
+    else:
+        total_tus = 0
+        tu_note = "no source tree / compile DB"
+
+    n_headers = len(expand_header_inputs(list(req.headers))) if req.headers else 0
+    # The L4 replay scope: a changed-only collection touches at most the changed
+    # TUs (POI-focused, D7); a full/target scope touches every TU. The budget's
+    # max_tus is a documented cap (never shrinks scope silently — it FAILS — but
+    # the estimate honestly reflects the cap as the upper bound it would hit).
+    changed_tus = len([p for p in req.changed_paths if p]) or total_tus
+    if collect_mode in ("source-changed", "graph-build"):
+        replay_tus = min(changed_tus, total_tus) if total_tus else changed_tus
+    else:
+        replay_tus = total_tus
+    if req.budget.max_tus:
+        replay_tus = min(replay_tus, req.budget.max_tus)
+
+    estimates: list[CostEstimate] = [
+        CostEstimate(
+            None,
+            "L0_binary",
+            len(req.binaries),
+            0.1 * max(1, len(req.binaries)),
+            0.0,
+            "binary export table parse",
+        ),
+        CostEstimate(None, "L1_debug", 0, 0.05, 0.0, "debug info (if present)"),
+        CostEstimate(
+            None,
+            "L2_header",
+            n_headers,
+            _COST_PER_HEADER_PARSE * n_headers,
+            0.0,
+            "public-header AST (needs castxml)" if n_headers else "no headers supplied",
+        ),
+    ]
+
+    if collect_mode in ("build", "graph-build", "source-changed", "graph-full"):
+        estimates.append(
+            CostEstimate(
+                "s1",
+                "L3_build",
+                total_tus,
+                _COST_PER_TU_BUILD * total_tus,
+                0.0,
+                tu_note,
+            )
+        )
+    if collect_mode in ("source-changed", "graph-full"):
+        estimates.append(
+            CostEstimate(
+                resolved.value,
+                "L4_source_abi",
+                replay_tus,
+                _COST_PER_TU_REPLAY * replay_tus,
+                0.0,
+                f"{collect_mode} replay scope ({replay_tus} of {total_tus} TU(s))",
+            )
+        )
+    if collect_mode in ("graph-build", "graph-full"):
+        estimates.append(
+            CostEstimate(
+                resolved.value,
+                "L5_source_graph",
+                total_tus,
+                _COST_PER_TU_GRAPH * total_tus,
+                0.0,
+                "source graph fold/edges",
+            )
+        )
+    return estimates
 
 
 def _render_deps_section_md(old: AbiSnapshot, new: AbiSnapshot | None) -> str:
@@ -886,13 +1273,15 @@ def _render_deps_section_md(old: AbiSnapshot, new: AbiSnapshot | None) -> str:
         if info.unresolved:
             lines.append("**Unresolved libraries**:")
             for u in info.unresolved:
-                lines.append(f"  - `{u.get('soname', '?')}` needed by `{u.get('consumer', '?')}`")
+                lines.append(
+                    f"  - `{u.get('soname', '?')}` needed by `{u.get('consumer', '?')}`"
+                )
             lines.append("")
 
         if info.missing_symbols:
             lines.append(f"**Missing symbols**: {len(info.missing_symbols)}")
             for ms in info.missing_symbols[:10]:
-                ver = f"@{ms['version']}" if ms.get('version') else ""
+                ver = f"@{ms['version']}" if ms.get("version") else ""
                 lines.append(f"  - `{ms['symbol']}{ver}`")
             if len(info.missing_symbols) > 10:
                 lines.append(f"  - ... +{len(info.missing_symbols) - 10} more")
