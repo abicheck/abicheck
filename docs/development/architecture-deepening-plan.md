@@ -546,7 +546,7 @@ C9  relocate confidence            ✅ done (PR #395)
 C1  name classification            ✅ done (PR #395)
 C2  report view-model              ✅ inc 1–2 done (model+ADR-036; maps unified; integrity tests)
 C7  CLI → service                  ◐ exit-code unified + shared loader moved to cli_params leaf (body-extraction follow-up)
-C3  binary-format registry         (parallelisable; needs integration lane)
+C3  binary-format registry         ✅ done (#407; handler registry drives _detect_format + dump dispatch)
 C10 split model.py                 ◐ stage-2 done (name predicates + type-name canonicalization moved)
 C8  ABICC compat adapter           (parity-sensitive)
 C5  synthetic detectors → registry ⛔ deferred (entangled; net-negative)
@@ -565,7 +565,7 @@ parity is contractual and benefits from a stabilised shared layer underneath it.
 |----|-------|--------|----|
 | C1 | Name classification module | Done | #395 |
 | C2 | Report view-model + canonical severity + cross-channel integrity tests (ADR-036) | Increment 1–2 done | #395 |
-| C3 | Binary-format handler registry | Proposed | — |
+| C3 | Binary-format handler registry (`_FormatHandler` registry: magic recognition + dump() dispatch in one declarative table; signature-equivalence guard test) | Done | #407 |
 | C4 | Detector auto-discovery | Done | #395 |
 | C5 | Synthetic detectors → registry | Deferred (not a clean win) | — |
 | C6 | `Change` factory | Increment 1 done (factory + `description_template` registry field; all ~200 `diff_*` constructor sites route via `make_change`; 167 regular kinds templated; bespoke long tail remains) | — |
@@ -574,4 +574,6 @@ parity is contractual and benefits from a stabilised shared layer underneath it.
 | C9 | Relocate confidence computation | Done | #395 |
 | C10 | Split `model.py` (stage-1: name predicates; stage-2: type-name canonicalization + cv-qualifier helpers moved to `name_classification`, re-exported) | Stage-2 done | #395 / #407 |
 | N-D | Unify stdlib/runtime RTTI prefix tables — canonical `STDLIB_RTTI_PREFIXES` (union superset) in `name_classification`; `elf_symbol_filter` + `diff_elf_layout` share it; guard test pins membership; behaviour-preserving (only effective delta: skipping toolchain-owned `std::__cxx11` vtable/typeinfo, verified identical parity+golden failure set vs HEAD) | Done | #407 |
-| N-A | HTML page seam (`html_template`) — shared document chrome + footer for the three native renderers, byte-identical golden-locked | Done | — |
+| N-A | HTML page seam (`html_template`) — shared document chrome + footer for the three native renderers, byte-identical golden-locked | Done | #407 |
+| N-D | Unify stdlib/runtime RTTI prefix tables into one canonical `STDLIB_RTTI_PREFIXES` (verified: identical parity-corpus failure set; only effective delta is suppressing std::__cxx11 RTTI in L0 layout, which is toolchain-owned) | Done | #407 |
+| N-E | Structured `Change` value fields | Not needed — already satisfied: `make_change` routes `old=`/`new=` into `old_value`/`new_value` (offsets included) and reporters read those fields; zero prose-scraping found | — |
