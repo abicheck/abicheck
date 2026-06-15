@@ -691,6 +691,49 @@ def _path_is_value_propagating(path: list[str], snap: AbiSnapshot) -> bool:
     return False
 
 
+def _path_is_direct_pointer_to_leaf(path: list[str], snap: AbiSnapshot) -> bool:
+    """Return True only for the **direct** pointer-to-leaf shape: the leaf is
+    reached immediately behind a top-level pointer / smart-pointer / pointer
+    typedef (a public field, or an opaque-handle pointer param/return) with **no**
+    record-member descent afterwards.
+
+    This is the only shape where a layout change provably does not reach the
+    public holder. Nested-behind-pointer shapes — a proxy embedded by value
+    below a ``unique_ptr``, libstdc++'s decomposed ``unique_ptr``
+    (``_Tuple_impl``/``_Head_base`` with the pointer as a *nested* template arg),
+    or a child whose by-value alternative path the BFS dedup dropped (Codex
+    review) — are deliberately **not** suppressed, biasing to keep the finding
+    (the safe direction). The precise nested case is handled by the per-hop
+    path-model follow-up.
+    """
+    type_map, _ = _build_type_map(snap)
+    last_ind = -1
+    for i, step in enumerate(path):
+        if step.startswith("indirect:"):
+            last_ind = i
+        elif step.startswith("field:") and i > 0:
+            rec = type_map.get(path[i - 1])
+            if rec is not None and (
+                _record_field_is_value_embedded(rec, step[len("field:"):]) is False
+            ):
+                last_ind = i
+        elif step.startswith("typedef:"):
+            if _typedef_target_is_indirect(
+                step[len("typedef:"):], getattr(snap, "typedefs", {}) or {}
+            ):
+                last_ind = i
+        elif step.startswith(("base:", "vbase:")):
+            continue
+        elif _typenode_is_indirection_wrapper(step):
+            last_ind = i
+    if last_ind < 0:
+        return False
+    # Nothing may descend into another record's layout after the pointer hop.
+    return not any(
+        s.startswith(("field:", "base:", "vbase:")) for s in path[last_ind + 1:]
+    )
+
+
 def _collect_internal_changes(
     changes: list[Change],
     internal_set: tuple[str, ...],
@@ -818,22 +861,20 @@ def detect_internal_leaks(
         identity_or_vtable = any(
             c.kind in _IDENTITY_VTABLE_KINDS for c in triggers
         )
-        # P2 (UXL field run): an internal type reachable *only* through a pointer
-        # whose change is pure layout (size/offset/padding/field add-remove) is
-        # not consumer-visible — the public holder embeds only the pointer, not
-        # the changed layout (oneTBB ``thread_request_serializer`` behind a
-        # ``unique_ptr``). Skip the leak so surface scoping demotes it as
-        # private-internal churn. Suppress **only** when every path on *both*
-        # snapshots has positive pointer evidence: identity/vtable changes
-        # propagate through a pointer (vtable dispatch / RTTI / base-subobject),
-        # and any value/inheritance-embedded path — in either old or new — keeps
-        # the finding (a just-embedded internal type now carries its layout into
-        # the public type).
+        # P2 (UXL field run): an internal type reached *directly* behind a
+        # top-level pointer (a pimpl field, pointer typedef, or opaque-handle
+        # pointer param/return) whose change is pure layout is not consumer-
+        # visible — the public holder embeds only the pointer. Suppress **only**
+        # when every path on *both* snapshots is that direct shape and the change
+        # is not identity/vtable (which propagate through a pointer). Any value/
+        # inheritance path, or any *nested*-behind-pointer shape, keeps the
+        # finding (safe direction); the precise nested case is the per-hop
+        # path-model follow-up.
         value_prop = any(_path_is_value_propagating(p, s) for p, s in side_paths)
-        all_indirect = bool(side_paths) and all(
-            _path_has_indirection(p, s) for p, s in side_paths
+        all_direct_pointer = bool(side_paths) and all(
+            _path_is_direct_pointer_to_leaf(p, s) for p, s in side_paths
         )
-        if all_indirect and not identity_or_vtable:
+        if all_direct_pointer and not identity_or_vtable:
             continue
         out.append(
             _build_leak_change(

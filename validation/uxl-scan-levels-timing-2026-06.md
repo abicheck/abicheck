@@ -1,91 +1,56 @@
 # UXL `scan`-level run — findings & follow-ups (2026-06)
 
 Real `abicheck scan` 0.3.0 stack run across source-scan levels on two UXL
-Foundation libraries, on a **clang-only** host (no castxml). Full per-level
-timings/verdicts: `data/uxl_scan_results_2026-06.json`. Timing *guidance*
-distilled from this run lives in
+Foundation libraries (clang-only host, no castxml), plus two oneDAL release
+binaries. Timing **guidance** lives in
 [`docs/user-guide/scan-levels.md`](../docs/user-guide/scan-levels.md) and
-[`docs/development/performance.md`](../docs/development/performance.md#scan-level-cost-model--one-cliff-at-l4-s4s5)
-— this file keeps only the actionable findings.
+[`docs/development/performance.md`](../docs/development/performance.md#scan-level-cost-model-one-cliff-at-l4);
+raw per-run data in `data/uxl_scan_results_2026-06.json` and
+`data/uxl_onedal_release_2026-06.json`. This file keeps only the final
+conclusions + the open-problem tracker.
 
 **Subjects:** oneTBB v2021.12.0→v2021.13.0 (C++, `libtbb.so.12`, 40 TUs);
-UMF v0.10.0→v0.11.0 (C, `libumf.so.0`, 50 TUs). Both built `RelWithDebInfo`
-with `compile_commands.json`.
+UMF v0.10.0→v0.11.0 (C, `libumf.so.0`, 50 TUs); oneDAL `libonedal_core` 2024.7.0
+→ 2025.0.0 (`.so.2`→`.so.3`) and 2025.0.0 → 2025.0.1 (release `.so`, stripped).
 
-## Datapoints worth keeping
+## Conclusions
 
-- **One cost cliff, at L4 (s4→s5); height is a C++ phenomenon** — oneTBB ~29 s
-  (s0–s4) → ~222 s (s5/s6), a ~7× jump; UMF ~17 s → ~21 s, ~1.3×. (→ docs above.)
-- **Seed-gated L4 scoping works** — oneTBB `s5` with one `--changed-path` =
-  **11.5 s** vs 222 s unseeded, identical verdict.
-- **Quality wins (true positives, no FP avalanche):**
-  - oneTBB: the old ~90 % DWARF-only false-positive flood (`REPORT.md`) is gone.
-    Surface scoping correctly *filtered* internal `tbb::detail::r1::cpu_features_type`
-    and *kept* the reachable `thread_request_serializer` (2 breaking / 3 compatible).
-  - UMF: genuine v0.10→v0.11 ABI break caught cleanly — 17 real breaks on public
-    `umf_*` structs/functions, 104 `symbol_moved_version_node` risks, 0 FPs.
-- **Verdict is depth-invariant** — identical at every level on both libs; the
-  L0/L1 binary diff sets the gate, L3–L5 only localize.
+- **Timing: one cost cliff at the L4 AST boundary (s4→s5); its height tracks C++
+  template depth** — oneTBB ~29 s → ~222 s (~7×), UMF ~17 s → ~21 s (~1.3×). The
+  cheap tier (s0–s4) is one price; `s5`/`--mode pr` only beats `s6` **with** a
+  `--since`/`--changed-path` seed (222 s → 11.5 s, identical verdict). Verdict is
+  depth-invariant — L0/L1 sets the gate, L3–L5 only localize.
+- **Quality (true positives, no FP avalanche):** oneTBB's old ~90 % DWARF-only
+  false-positive flood is gone (surface scoping filters internal
+  `tbb::detail::r1::cpu_features_type`); UMF's real v0.10→v0.11 ABI break is caught
+  cleanly (17 real breaks, 0 FPs); oneDAL scales linearly (~50–64 s on 125–149 MB
+  / 10–25k symbols) with the correct major=BREAKING / minor=COMPATIBLE verdicts
+  and **zero false breaks** on the minor bump.
 
-## oneDAL release binaries (symbols-only scale + FP check)
+## Open problems & current status
 
-Two real `libonedal_core.so` releases (pip `daal` wheels; **stripped**, so
-L0/L1 symbols-only — no DWARF/L2/L4, internal-leak/P2 not exercised). Raw:
-`data/uxl_onedal_release_2026-06.json`.
+(after rebase onto finalized ADR-035 — D4/D8 cross-checks, D7 POI, D10 providers,
+`scan --estimate`.)
 
-| Pair | SONAME | Verdict | Time | Findings |
-|---|---|---|---:|---|
-| 2024.7.0 → 2025.0.0 (major) | `.so.2 → .so.3` | **BREAKING** | 63.6 s | 39,523 — 20,524 breaking (17.5k `func_removed_elf_only`, 3.0k `var_removed`, 2.0k `symbol_binding_strengthened`), 18,969 compatible additions, 30 risk |
-| 2025.0.0 → 2025.0.1 (minor) | `.so.3` (same) | **COMPATIBLE** | 50.0 s | **1** — a compatible `visibility_leak`; **zero false breaks** |
+| # | Sev | Status | Problem & current state |
+|---|-----|--------|-------------------------|
+| **P1** | High | ⏳ open | **L2 header AST is castxml-only** — `scan -H` / `dump --headers` hard-fail on a clang-only host, so header-aware scoping + the castxml-gated cross-checks are unavailable. Documented in **ADR-003 → "Extension: clang as an alternative L2 frontend"**; sizeable new parser → own PR. *(New D8 `unversioned_exported_symbol` does run header-free; `rtti_for_internal_type`/`odr_type_variant`/`public_to_internal_dependency` need headers/L4/L5.)* |
+| **P2** | Med | ◑ partial (this PR) | `internal_type_leaks_via_public_api` over-reported a pure-layout change to an internal type reached only through a pointer. **Fixed for the direct shapes** — a top-level pointer/smart-pointer field, pointer typedef, or opaque-handle pointer param/return is now suppressed (identity/vtable still fire; by-value/inheritance keeps the finding). **Known gap:** the oneTBB `thread_request_serializer` case reaches the type through libstdc++'s *decomposed* `unique_ptr` (`_Tuple_impl`/`_Head_base`, pointer as a nested template arg) — the conservative scope keeps that finding (safe). Full fix = the per-hop path-model rework (separate PR). |
+| **P3** | Med | ◔ ADR-035 scope | Seedless `--mode pr`/`s5` replays every TU (== `s6` cost). **Now visible** via `scan --estimate` (prints `replay scope (N of N TU(s))` + projected total up front); no auto-warn/auto-seed yet. Owned by the ADR-035 orchestrator workstream. |
+| **P4** | Low | ⏳ open | `s0` ≡ `s3` coverage (L0/L1 + always-on pattern). Documented in scan-levels.md; level-set reevaluation deferred until ADR-035 work settles (per maintainer). |
+| **P5** | Low | ⏳ open | `L4_source_abi` coverage row prints `partial` with an empty detail string. `scan --estimate` now reports TU counts; the live coverage row should too. |
+| **P6** | Low | ⏳ open | `dump` with no headers emits a `UserWarning` to stderr every run — demote to info / gate behind `-v`. |
 
-- **Scales cleanly:** ~50–64 s on a **125–149 MB** library with **10–25k**
-  exported functions; linear, no blow-up (validates the `performance.md`
-  detector fixes on the headline oneDAL target).
-- **Correct verdicts:** the major `.so.2→.so.3` bump is BREAKING; the
-  same-SONAME minor bump is COMPATIBLE with **no false positives** — the
-  symbols-only "compare two releases" path remains abicheck's strongest mode.
-- Because releases ship stripped, the C++ `detail::`-namespace internal-leak
-  path (the P2 fix) is **not** reached here; exercising it on oneDAL needs a
-  debug/header build (ties to P1).
-
-## Problems to address
-
-| # | Type | Sev | Status | Problem | Action |
-|---|------|-----|--------|---------|--------|
-| **P2** | quality | Med | ◑ **partial (this PR)** | `internal_type_leaks_via_public_api` on oneTBB `thread_request_serializer` reported a size/offset-propagating **layout break**, but its reachability path runs through a `std::unique_ptr` (pointer indirection) — a layout change behind a pointer does **not** change the holder's size/offset. | `internal_leak.py` suppresses the leak when an internal type is reachable **only** through a *top-level* pointer/smart-pointer (field, pointer typedef, or pointer param/return) and the change is pure layout; identity/vtable changes still fire. Regression tests in `test_internal_leak_review.py`. **Known gap:** the oneTBB case reaches the type through libstdc++'s decomposed `unique_ptr` (`_Tuple_impl`/`_Head_base` with the pointer as a nested template arg), which the conservative top-level scope does not treat as indirection — so it still over-reports (see status re-measurement). Full fix needs per-hop path-model indirection. |
-| **P1** | bug/feature | High | ⏳ follow-up | L2 header AST is **castxml-only**; clang is installed but unused, so `scan -H` / `dump --headers` hard-fail on a clang-only host — which **cascades into all four D4 cross-source checks skipping**. | Add a **clang L2 backend** (the `--source-abi-extractor clang` path already exists for L4). Documented in **ADR-003 → "Extension: clang as an alternative L2 frontend"**; sizeable new parser (parallels `dumper_castxml.py`) → own PR. |
-| **P3** | UX | Med | ⏳ **ADR-035 scope** | `--mode pr`/`s5` with no `--since`/`--changed-path` silently replays every TU (== `s6` cost) under a "pr" label. | Default `--since` to merge-base in a git checkout, or warn on an empty changed-set under a `pr`-family mode. Owned by the ADR-035 `scan`-orchestrator workstream (cli_scan.py). |
-| **P4** | redundancy | Low | ⏳ follow-up | `s0` and `s3` produce **identical coverage** (L0/L1 + always-on pattern; pinned `s3` adds nothing over the always-on tier). | Documented in scan-levels.md. Level-set reevaluation deferred until ADR-035 is fully implemented (per maintainer). |
-| **P5** | UX | Low | ⏳ follow-up | `L4_source_abi` coverage row prints `partial` with an **empty detail string** (no TU count). | Populate the L4 row with replayed/total TU counts. |
-| **P6** | noise | Low | ⏳ follow-up | `dump` with no headers emits a `UserWarning` to stderr on every run. | Demote to a single info-level line or gate behind `-v`. |
-
-## Status re-measurement (2026-06-15, ADR-035 finalized)
-
-Re-ran the open items against `main` after ADR-035 was finalized (D4/D8
-cross-checks, D7 POI, D10 providers, `scan --estimate`) plus this PR's P2 work.
-
-| Item | Was | Now |
-|---|---|---|
-| **s2 (preprocessor)** | rejected / unimplemented | **Implemented** — `--source-method s2` runs (`depth=build`). On the oneTBB build `clang -E` failed all 40 invocations (`preprocessor_scan: not_collected`) — the `-E` pass needs the TU's full flag set; no preprocessor facts produced here. |
-| **P3 (seedless `pr` = full cost)** | silent full-scope replay | **Now visible** via the new `scan --estimate`: it prints `L4 … source-changed replay scope (39 of 39 TU(s))` and a projected total up front. Still no auto-warn/auto-seed (ADR-035 orchestrator scope). Note: estimate under-projects heavy C++ (36 s projected vs ~210 s actual). |
-| **U2 (D4 cross-checks skip w/o headers)** | all four skip | Mostly still skip on a clang-only host, **but a new D8 check `unversioned_exported_symbol` runs header-free** (L0/L1 only). The new `odr_type_variant` (needs L4) / `public_to_internal_dependency` (needs L5) / `rtti_for_internal_type` (needs headers) skip without their evidence. |
-| **P2 (internal-leak FP)** | oneTBB `thread_request_serializer` flagged BREAKING | Reword + tightened downgrade landed; simple pimpl, opaque-handle pointer params, pointer typedefs, by-value `Pimpl`-named records, and mixed `pair<Impl,int*>` are all classified correctly. **The oneTBB case itself still over-reports**: libstdc++ decomposes the `unique_ptr` into `std::_Tuple_impl<0, proxy*, …>` / `_Head_base<0, proxy*, false>`, where the pointer is a *nested template argument*. The maintainer-chosen conservative scope (top-level pointers only) deliberately treats nested-template pointers as non-indirection (to avoid the `pair` false-negative), so this deep-decomposition path is not suppressed. Eliminating it needs the per-hop path-model rework (annotate each edge's indirection at enqueue time) — tracked as a follow-up. |
-| **P1 (clang L2 backend)** | open | open; documented in ADR-003 "Extension: clang as an alternative L2 frontend". |
-
-**Net:** ADR-035 finalization adds real coverage (s2 wired, header-free D8 check,
-up-front cost estimate). The P2 false-positive is fixed for the common
-unambiguous shapes; the specific oneTBB deep-`unique_ptr` case remains a known
-over-report under the conservative scope (safe direction), pending the path-model
-rework.
+Other note: **s2** (preprocessor) is now implemented (`--source-method s2` runs,
+`depth=build`); on the oneTBB build `clang -E` failed every invocation (the `-E`
+pass needs the TU's full flag set), so no preprocessor facts were produced there.
 
 ## Testing follow-ups
 
-- **P2 (done):** `test_internal_leak_review.py::TestPointerMediatedLayoutLeakSuppressed`
-  — internal type held by `unique_ptr` in a public type → layout change is **not**
-  a leak; the same shape with a vtable change still fires.
-- **P1:** once a clang L2 backend exists, an integration test that runs
-  `scan -H`/`dump --headers` with **clang only on PATH** (no castxml) and asserts
-  the D4 crosschecks run instead of skipping.
+- **P2 (done):** `test_internal_leak_review.py` — direct pointer field / pointer
+  typedef / opaque-handle pointer param suppressed; by-value, `pair<Impl,int*>`,
+  `Pimpl`-named records, and nested-behind-pointer shapes still fire.
+- **P1:** once a clang L2 backend exists, an integration test running `scan -H`
+  with **clang only on PATH** that asserts the cross-checks run, not skip.
 - **Level→coverage guard:** assert the `(method, depth)→collected layers` mapping
-  (e.g. `s4` ⇒ L3+L5 no L4; `s0`≡`s3` coverage) so the cheap-tier semantics
-  documented in scan-levels.md can't silently drift.
+  (`s4` ⇒ L3+L5 no L4; `s0`≡`s3`) so the documented cheap-tier semantics can't drift.
