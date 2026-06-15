@@ -465,3 +465,33 @@ class TestPointerMediatedLayoutLeakSuppressed:
             "a layout change behind a pointer typedef must be demoted, not leaked "
             f"(got: {leaks})"
         )
+
+    def test_by_value_template_arg_with_unrelated_pointer_still_fires(self) -> None:
+        # Codex review: a field type that mixes a by-value internal template arg
+        # with an unrelated pointer (std::pair<ns::detail::Impl, int*>) embeds
+        # Impl BY VALUE — the nested `int*` must not mark the whole field as
+        # indirection, so a layout change to Impl still leaks.
+        def _snap(size: int) -> AbiSnapshot:
+            return AbiSnapshot(
+                library="lib.so", version="1.0",
+                functions=[Function(
+                    name="make", mangled="make", return_type="Public*",
+                    params=[], visibility=Visibility.PUBLIC,
+                )],
+                types=[
+                    RecordType(name="Public", kind="class", fields=[
+                        TypeField(name="p", type="std::pair<ns::detail::Impl, int*>"),
+                    ]),
+                    RecordType(name="ns::detail::Impl", kind="struct", size_bits=size),
+                ],
+            )
+        leaks = detect_internal_leaks(
+            [Change(kind=ChangeKind.TYPE_SIZE_CHANGED,
+                    symbol="ns::detail::Impl", description="size")],
+            _snap(32), _snap(64),
+        )
+        assert len(leaks) == 1, (
+            "a by-value template arg must leak; an unrelated nested pointer must "
+            f"not be read as indirection (got: {leaks})"
+        )
+        assert "embedded-by-value" in leaks[0].description

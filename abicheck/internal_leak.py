@@ -522,20 +522,27 @@ def _field_is_indirect(fld_type: str) -> bool:
     Indirect fields don't embed by value, so layout changes don't
     directly propagate through them.
     """
-    if "*" in fld_type or "&" in fld_type:
+    # Only a TOP-LEVEL pointer / reference / smart-pointer wrapper counts —
+    # collapse template args first so a pointer buried in an unrelated argument
+    # (e.g. ``std::pair<ns::detail::Impl, int*>``, whose ``Impl`` is a by-value
+    # member) is NOT mistaken for indirection (Codex review). Per the maintainer
+    # decision, suppression only fires on the unambiguous pimpl shape; any nested
+    # / mixed spelling keeps the finding.
+    no_targs = _strip_template_args(fld_type)  # collapse <...> (drops nested *)
+    if "*" in no_targs or "&" in no_targs:  # top-level pointer / reference only
         return True
-    stripped = _strip_decorators(fld_type)
-    return (
-        "unique_ptr" in stripped
-        or "uniq_ptr" in stripped  # libstdc++ internals: std::__uniq_ptr_impl
-        or "shared_ptr" in stripped
-        or "weak_ptr" in stripped
-        # ``pimpl`` only as an alias-*template* usage (``pimpl<T>`` = the oneDAL
-        # smart-pointer alias, case80) — NOT a record/field whose own type is a
-        # by-value struct literally named ``Pimpl`` (Codex review), which embeds
-        # its layout and must stay a leak.
-        or "pimpl<" in stripped.lower()
-    )
+    outer = _strip_decorators(no_targs)
+    if (
+        "unique_ptr" in outer
+        or "uniq_ptr" in outer  # libstdc++ internals: std::__uniq_ptr_impl
+        or "shared_ptr" in outer
+        or "weak_ptr" in outer
+    ):
+        return True
+    # ``pimpl`` only as an alias-*template* usage (``pimpl<T>`` = the oneDAL
+    # smart-pointer alias, case80) — NOT a by-value struct literally named
+    # ``Pimpl``, which embeds its layout and must stay a leak.
+    return "pimpl<" in _strip_decorators(fld_type).lower()
 
 
 def _typedef_target_is_indirect(
@@ -569,11 +576,15 @@ def _typenode_is_indirection_wrapper(name: str) -> bool:
     not applied to path labels. Only a raw ``*``/``&`` or a qualified
     ``std::``/libstdc++ smart-pointer spelling counts.
     """
-    if "*" in name or "&" in name:
+    # Top-level only (collapse template args): a wrapper node like
+    # ``std::__uniq_ptr_impl<...>`` is indirection, but ``std::array<int*, 4>``
+    # (a pointer in an unrelated arg) is not (Codex review).
+    no_targs = _strip_template_args(name)
+    if "*" in no_targs or "&" in no_targs:
         return True
-    stripped = _strip_decorators(name)
+    outer = _strip_decorators(no_targs)
     return any(
-        marker in stripped
+        marker in outer
         for marker in (
             "std::unique_ptr", "std::shared_ptr", "std::weak_ptr",
             "__uniq_ptr", "__shared_ptr", "__weak_ptr",
