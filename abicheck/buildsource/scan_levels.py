@@ -99,12 +99,13 @@ _DEPTH_TO_METHOD: dict[EvidenceDepth, SourceMethod | None] = {
 #: Resolved S-method → the ADR-033 D2 CI evidence mode that drives inline
 #: collection (``collect_inline_pack`` / ``embed_build_source``). The lexical
 #: S0/S3 tiers collect no inline pack (the always-on pattern scan covers S3); the
-#: semantic tiers select the matching replay scope. ``S2`` is approximated by the
-#: ``build`` mode (compile-DB context) until a dedicated preprocessor pass lands.
+#: semantic tiers select the matching replay scope. ``S2`` has no collection
+#: backend yet (Phase 3b) and the ``scan`` CLI rejects it before this map is
+#: consulted — the placeholder entry keeps the map total for the enum.
 _METHOD_TO_COLLECT_MODE: dict[SourceMethod, str] = {
     SourceMethod.S0: "off",
     SourceMethod.S1: "build",
-    SourceMethod.S2: "build",
+    SourceMethod.S2: "build",  # unreachable: CLI rejects s2 (no S2 backend yet)
     SourceMethod.S3: "off",
     SourceMethod.S4: "graph-summary",
     SourceMethod.S5: "source-changed",

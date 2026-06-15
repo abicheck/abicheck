@@ -630,6 +630,14 @@ def scan_cmd(
 
     scan_mode = ScanMode.AUDIT if audit else ScanMode(mode)
     sm = SourceMethod(source_method) if source_method else None
+    # S2 (preprocessor macro/include capture) has no collection backend yet
+    # (ADR-035 G19 Phase 3b). Reject it rather than silently running the L3-only
+    # `build` mode while reporting `s2`, which would overstate coverage (Codex).
+    if sm is SourceMethod.S2:
+        raise click.UsageError(
+            "--source-method s2 (preprocessor macro/include capture) is not yet "
+            "implemented; use s1 for build context or s5 for source-ABI replay."
+        )
     dp = EvidenceDepth(depth) if depth else None
     is_auto = sm is SourceMethod.AUTO
     # auto escalates from the risk score ONLY when the diff seed actually produced

@@ -536,6 +536,23 @@ def test_malformed_risk_rules_yaml_is_click_error(
     assert "cannot read --risk-rules" in res.output
 
 
+def test_source_method_s2_is_rejected_as_unimplemented(runner, new_snap_compatible):
+    # S2 has no collection backend yet — reject rather than overstate (Codex).
+    res = runner.invoke(
+        main,
+        [
+            "scan",
+            "--binary",
+            str(new_snap_compatible),
+            "--source-method",
+            "s2",
+            "--audit",
+        ],
+    )
+    assert res.exit_code != 0
+    assert "s2" in res.output and "not yet implemented" in res.output
+
+
 def test_auto_without_diff_seed_falls_back_to_preset(runner, new_snap_compatible):
     # auto + no --changed-path/--since seed must NOT collapse to s0/off — it falls
     # back to the mode preset so source evidence isn't silently skipped (Codex).
