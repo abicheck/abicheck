@@ -3,9 +3,17 @@
 Evidence-based validation of abicheck against real upstream C/C++ shared
 libraries (not synthetic fixtures), used to drive planning and improvement.
 
-- `realworld-tracker-parity-2026-06.md` — **latest** run: abicheck scored live
-  against the ABICC abi-laboratory oracle across 60 libraries / 185 comparable
-  pairs (94.1 % agreement, 0 confirmed defects). Start here for the parity results.
+- `uxl-scan-levels-timing-2026-06.md` — **UXL `scan` level sweep:** the full
+  `abicheck scan` stack run against oneTBB (C++) and UMF (C) across every
+  source-scan level (`s0…s6`, `--mode` presets), with per-level **timing** and a
+  **usability** punch-list. Headline: one cost cliff at the L4 AST boundary
+  whose height is a C++ phenomenon (~7× on oneTBB, ~1.3× on UMF), seed-gated
+  PR scoping (222 s → 11.5 s with a one-file diff seed), and castxml-only L2
+  blocking the cross-source checks on a clang-only host. Raw data:
+  `data/uxl_scan_results_2026-06.json`.
+- `realworld-tracker-parity-2026-06.md` — **latest parity** run: abicheck scored
+  live against the ABICC abi-laboratory oracle across 60 libraries / 185
+  comparable pairs (94.1 % agreement, 0 confirmed defects).
 - `REPORT.md` — earlier curated-matrix validation report (false-positive catalog)
 - `DESIGN_ANALYSIS.md` — code-level root cause + architectural fix per false
   positive. FP-1/FP-2 are fixed in `abicheck/model.py` + `abicheck/diff_types.py`;
