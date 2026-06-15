@@ -24,9 +24,9 @@ automatically, then runs ABI comparison and reports results.
 
 | Input | Required | Description |
 |-------|----------|-------------|
-| `mode` | no | `compare` (default), `compare-release`, `dump`, `appcompat`, `deps`, or `stack-check` |
+| `mode` | no | `compare` (default), `compare-release`, `dump`, `scan`, `merge`, `appcompat`, `deps`, or `stack-check` |
 | `old-library` | yes (compare, compare-release) | Path to old library, JSON snapshot, ABICC dump, directory, or package |
-| `new-library` | yes | Path to new library, binary, directory, or package |
+| `new-library` | yes (compare, dump, scan, …) | Path to new library, binary, directory, or package. In `scan` mode this is the scanned binary or `.abi.json` snapshot. |
 
 ### Header inputs
 
@@ -46,24 +46,12 @@ automatically, then runs ABI comparison and reports results.
     embedded, or `debug-info1`/`debug-info2` packages in `compare-release`
     mode), and **L2** (`header`/`include`).
 
-    **L3** build context (`-p build/`) can be folded in by pre-dumping a
-    snapshot with the CLI — the build flags are applied at dump time, so the
-    resulting snapshot is parsed with the correct ABI-affecting options — and
-    passing that JSON as `old-library`/`new-library`:
-
-    ```bash
-    abicheck dump build/libfoo.so -H include/ -p build/ -o abi-baseline.json
-    ```
-
-    Embedded **build-info / source data** (`dump --build-info`/`--sources`) and
-    **L4** source ABI replay are driven from the **CLI** today. Because
-    `dump --build-info`/`--sources` embed the facts inline in the snapshot, a
-    snapshot dumped that way *does* carry its L3/L4 findings into any later
-    `compare` — including one run from this Action on two such snapshots. What
-    the Action does not yet expose are dedicated inputs to *collect* build/source
-    data inline; to produce the embedded snapshots, run `abicheck collect` + `dump
-    --build-info/--sources` (or `compare … --old-build-info … --new-build-info …`)
-    as plain CLI steps in your workflow. See [Build Info & Sources](../concepts/build-source-data.md).
+    The deeper layers — **L3** build context, **L4** source-ABI replay, and
+    **L5** source graphs — are now first-class Action inputs. Use the
+    `sources`/`build-info`/`compile-db` inputs in `scan` or `dump` mode and
+    abicheck collects them inline; no separate CLI steps are required. See
+    [Source scans](#source-scans-build-source-evidence) below and the
+    [Build Info & Sources](../concepts/build-source-data.md) concept guide.
 
 ### Application compatibility inputs (appcompat mode)
 
@@ -101,6 +89,41 @@ automatically, then runs ABI comparison and reports results.
 | `candidate` | — | Sysroot for candidate environment (required for `stack-check` mode) |
 | `search-path` | — | Additional library search directories (space-separated) |
 | `ld-library-path` | — | Simulated `LD_LIBRARY_PATH` (colon-separated) |
+
+### Source-scan and build-source evidence (scan / dump / merge modes)
+
+These inputs drive [source intelligence](../concepts/build-source-data.md) —
+L3 build context, L4 source-ABI replay, and L5 source graphs — through the
+`scan` orchestrator, or fold the same evidence into a `dump` snapshot. L4/L5
+need `clang` (installed automatically by `install-deps: true`); without it the
+scan degrades gracefully and L0–L2 stay authoritative.
+
+| Input | Modes | Description |
+|-------|-------|-------------|
+| `sources` | scan, dump | Source checkout/tree. The compile DB is auto-discovered within it; drives L4 replay and L5 graph collection. |
+| `build-info` | scan, dump | Out-of-tree L3 context: a build dir, a `compile_commands.json`, or a collected evidence pack. |
+| `compile-db` | scan (dump folds into `build-info`) | Explicit `compile_commands.json` path. |
+| `build-config` | scan, dump | Trusted `.abicheck.yml`; enables `build.query` together with `allow-build-query`. |
+| `allow-build-query` | scan, dump | Permit a trusted `build.query` subprocess to emit a compile DB (default `false`; only existing build outputs are read otherwise). |
+| `collect-mode` | dump | How much evidence dump collects: `off`, `build`, `graph-build`, `source-changed`, `source-target`, `graph-summary`, `graph-full`. (scan derives this from the level inputs below.) |
+| `baseline` | scan | Previous build's dump/library to compare against (or use `abi-baseline` to auto-fetch one). |
+| `scan-mode` | scan | Fixed `(L,S)` preset: `pr` (default), `pr-deep`, `baseline`, `audit`. |
+| `source-method` | scan | Precise S-axis: `s0`…`s6`, or `auto` (risk-driven, opt-in). |
+| `depth` | scan | Coarse L-axis: `headers`, `build`, `source`, `full`, `graph`. `source-method` wins if both set. |
+| `since` | scan | Focus the scan on files changed vs a git ref (e.g. `origin/main`). |
+| `changed-path` | scan | Changed path(s) to focus on (space-separated; alternative to `since`). |
+| `budget` | scan | Time guard (e.g. `15m`). The step **fails** on overflow (`verdict: BUDGET_OVERFLOW`) — a budget never silently shrinks scope. |
+| `audit` | scan | Single-build hygiene lint, no baseline (intra-version cross-source checks). |
+| `estimate` | scan | Dry-run: print projected per-layer cost and scan nothing (always exits 0). |
+| `crosscheck` | scan | Per-check severity overrides `KEY=LEVEL` (`off`/`info`/`warning`/`error`), space-separated. Promote a check to `=error` to gate CI on it. |
+| `risk-rules` | scan | Path to a YAML file overriding the `risk_rules` profile. |
+| `merge-inputs` | merge | Space-separated `.abi.json` dumps and/or a Flow-2 `abicheck_inputs/` pack directory to combine. |
+| `on-conflict` | merge | `warn` (default, first-wins + diagnostic) or `error` (exit non-zero) when two inputs supply the same layer with differing facts. |
+
+!!! note "format in scan mode"
+    `scan` supports `format: text` (default) or `json`; other values fall back
+    to `text` with a warning. `merge` writes a `.abi.json` baseline to
+    `output-file` (default `merged-baseline.json`).
 
 ### Output and policy
 
@@ -155,8 +178,8 @@ extra-args: '--strict-suppressions --require-justification'
 
 | Output | Description |
 |--------|-------------|
-| `verdict` | **compare:** `COMPATIBLE`, `SEVERITY_ERROR`, `API_BREAK`, `BREAKING`, or `ERROR`. **compare-release:** `COMPATIBLE`, `API_BREAK`, `BREAKING`, `REMOVED_LIBRARY`, or `ERROR`. **appcompat:** `COMPATIBLE`, `API_BREAK`, `BREAKING`, or `ERROR`. **dump:** `COMPATIBLE` or `ERROR`. **stack-check:** `PASS`, `WARN`, `FAIL`, or `ERROR`. **deps:** `PASS`, `FAIL`, or `ERROR`. |
-| `exit-code` | **compare:** `0` (compatible), `1` (severity error), `2` (API break), `4` (ABI break). **compare-release:** `0` (compatible), `2` (API break), `4` (ABI break), `8` (library removed). **appcompat:** `0` (compatible), `2` (API break), `4` (ABI break). **stack-check:** `0` (pass), `1` (warn), `4` (fail). **deps:** `0` (ok), `1` (missing). |
+| `verdict` | **compare:** `COMPATIBLE`, `SEVERITY_ERROR`, `API_BREAK`, `BREAKING`, or `ERROR`. **compare-release:** `COMPATIBLE`, `API_BREAK`, `BREAKING`, `REMOVED_LIBRARY`, or `ERROR`. **appcompat:** `COMPATIBLE`, `API_BREAK`, `BREAKING`, or `ERROR`. **dump:** `COMPATIBLE` or `ERROR`. **scan:** `COMPATIBLE`, `API_BREAK`, `BREAKING`, `BUDGET_OVERFLOW`, or `ERROR`. **merge:** `COMPATIBLE` or `ERROR`. **stack-check:** `PASS`, `WARN`, `FAIL`, or `ERROR`. **deps:** `PASS`, `FAIL`, or `ERROR`. |
+| `exit-code` | **compare:** `0` (compatible), `1` (severity error), `2` (API break), `4` (ABI break). **compare-release:** `0` (compatible), `2` (API break), `4` (ABI break), `8` (library removed). **appcompat:** `0` (compatible), `2` (API break), `4` (ABI break). **scan:** `0` (compatible/advisory), `2` (API break), `4` (ABI break), `5` (budget overflow). **merge:** `0` (ok). **stack-check:** `0` (pass), `1` (warn), `4` (fail). **deps:** `0` (ok), `1` (missing). |
 | `report-path` | Path to the generated report file (empty when no output file was produced) |
 
 ## Usage examples
@@ -235,6 +258,195 @@ jobs:
           new-library: build/libfoo.so
           new-header: include/foo.h
 ```
+
+## Source scans (build & source evidence)
+
+`mode: scan` is the **one-step entry point** for source intelligence. It
+classifies the PR's changed paths, always runs the compiler-free pattern and
+intra-version cross-source checks, then runs the pinned evidence level
+(L3 build context / L4 source-ABI replay / L5 source graph) and — when a
+`baseline` is given — compares against it. It emits a single
+coverage-annotated report saying, per layer, what ran versus what was skipped.
+
+The common case needs four inputs — the built binary, its public headers, the
+source tree, and a baseline:
+
+```yaml
+permissions:
+  contents: read
+jobs:
+  abi-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # needed for `since: origin/...` change focusing
+
+      - name: Build
+        run: cmake -B build -S . && cmake --build build
+
+      - name: Source-intelligence scan
+        uses: napetrov/abicheck@v0.3.0
+        with:
+          mode: scan
+          new-library: build/libfoo.so
+          new-header: include/
+          sources: .
+          baseline: abi-baseline.json   # committed, or use abi-baseline: latest-release
+          since: origin/${{ github.base_ref }}   # focus on changed files
+          fail-on-api-break: true       # gate on source/API breaks too
+```
+
+`clang` is installed automatically (for L4/L5). On a `pull_request` run,
+`since: origin/${{ github.base_ref }}` focuses the (expensive) source replay on
+the files the PR touched — pair it with `fetch-depth: 0` in `checkout` so the
+base ref is available.
+
+### Pin the scan depth
+
+By default `scan` runs the `pr` preset. Pin a precise level for reproducible CI
+with `source-method` (S-axis) or the coarser `depth` (L-axis):
+
+```yaml
+      - uses: napetrov/abicheck@v0.3.0
+        with:
+          mode: scan
+          new-library: build/libfoo.so
+          new-header: include/
+          sources: .
+          baseline: abi-baseline.json
+          source-method: s5     # full source-ABI replay (deterministic)
+          budget: 15m           # fail (BUDGET_OVERFLOW) rather than overrun
+```
+
+| Want… | Set |
+|-------|-----|
+| Cheap build-flag drift only (L3) | `depth: build` |
+| Source semantics on changed TUs | `source-method: s4` + `since:` |
+| Full source-ABI replay | `source-method: s5` |
+| Source graph / localization (L5) | `depth: graph` or `scan-mode: pr-deep` |
+| Risk-driven (dev/local, opt-in) | `source-method: auto` + `since:` |
+
+### Single-release audit (no baseline)
+
+Run the intra-version hygiene checks against one build — no old version needed.
+Useful as a standing lint on the default branch:
+
+```yaml
+      - uses: napetrov/abicheck@v0.3.0
+        with:
+          mode: scan
+          new-library: build/libfoo.so
+          new-header: include/
+          sources: .
+          audit: 'true'
+```
+
+### Estimate cost before committing to a depth
+
+`estimate: 'true'` is a dry run — it prints the projected per-layer cost (TU
+count, seconds) and scans nothing, always exiting 0. Handy when sizing a budget
+for a large repo:
+
+```yaml
+      - uses: napetrov/abicheck@v0.3.0
+        with:
+          mode: scan
+          new-library: build/libfoo.so
+          new-header: include/
+          sources: .
+          source-method: s5
+          estimate: 'true'
+```
+
+### Gate CI on a specific cross-source check
+
+Cross-source findings are advisory by default. Promote one to `error` to make a
+finding fail the step (exit 2):
+
+```yaml
+      - uses: napetrov/abicheck@v0.3.0
+        with:
+          mode: scan
+          new-library: build/libfoo.so
+          new-header: include/
+          sources: .
+          baseline: abi-baseline.json
+          crosscheck: 'private_header_leak=error odr_type_variant=error'
+```
+
+## Passing sources into a baseline (build/source evidence)
+
+There are three ways to feed L3/L4/L5 evidence into the comparison. Pick by
+where your build produces facts.
+
+### A. Inline at dump time (simplest)
+
+`dump` with `sources`/`build-info` embeds the build/source facts **inline** in
+the snapshot, so any later `compare` (including one run from this Action on two
+such snapshots) carries the L3/L4/L5 findings — no out-of-band directories:
+
+```yaml
+      - name: Dump baseline with build + source evidence
+        uses: napetrov/abicheck@v0.3.0
+        with:
+          mode: dump
+          new-library: build/libfoo.so
+          header: include/
+          sources: .
+          collect-mode: source-target   # full L3+L4+L5 for a baseline
+          output-file: abi-baseline.json
+```
+
+Compare two such snapshots later with the default `compare` mode — the embedded
+evidence diffs automatically.
+
+### B. Combine independently-produced dumps with `merge`
+
+When the binary side and source side are produced in parallel (e.g. on
+different runners), `mode: merge` folds them into one self-contained baseline:
+
+```yaml
+      # one job produces the artifact-side dump (L0/L1/L2)…
+      - uses: napetrov/abicheck@v0.3.0
+        with:
+          mode: dump
+          new-library: build/libfoo.so
+          header: include/
+          output-file: libfoo.bin.json
+
+      # …another produces the source-side dump (L3/L4/L5)…
+      - uses: napetrov/abicheck@v0.3.0
+        with:
+          mode: dump
+          sources: ./libfoo-src/
+          output-file: libfoo.src.json
+
+      # …then merge them into one baseline:
+      - uses: napetrov/abicheck@v0.3.0
+        with:
+          mode: merge
+          merge-inputs: 'libfoo.bin.json libfoo.src.json'
+          on-conflict: error            # good for baseline generation
+          output-file: libfoo.baseline.json
+```
+
+### C. Build-emitted facts (Flow-2 `abicheck_inputs/` pack)
+
+A product build that emits a self-describing `abicheck_inputs/` pack (via
+`abicheck-cc` — see [Build Info & Sources](../concepts/build-source-data.md))
+needs no source replay in CI. `mode: merge` ingests the pack directly:
+
+```yaml
+      - uses: napetrov/abicheck@v0.3.0
+        with:
+          mode: merge
+          merge-inputs: 'libfoo.bin.json ./abicheck_inputs/'
+          output-file: libfoo.baseline.json
+```
+
+The resulting `libfoo.baseline.json` is a normal snapshot — pass it as
+`old-library`/`baseline` to any later `compare` or `scan`.
 
 ### Use GitHub Actions cache for baseline
 
