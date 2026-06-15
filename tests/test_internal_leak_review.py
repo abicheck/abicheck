@@ -322,11 +322,10 @@ class TestPointerMediatedLayoutLeakSuppressed:
             ],
         )
 
-    def test_nested_value_below_pointer_keeps_finding(self) -> None:
-        # Conservative scope: the changed type sits by value inside a proxy that
-        # is held through a unique_ptr — a *nested* shape, not the direct
-        # pointer-to-leaf case. We keep the finding (safe direction); precise
-        # demotion of this shape is the per-hop path-model follow-up.
+    def test_nested_value_below_pointer_is_suppressed(self) -> None:
+        # Per-hop path model: the changed type sits by value inside a proxy held
+        # through a unique_ptr. The edge into the proxy is marked indirect, so the
+        # whole sub-path is behind a pointer — a layout-only change is demoted.
         old = self._snap(serializer_field_type="int")
         new = self._snap(serializer_field_type="std::atomic<int>")
         changes = [Change(
@@ -335,9 +334,42 @@ class TestPointerMediatedLayoutLeakSuppressed:
             description="count: int -> std::atomic<int>",
         )]
         leaks = detect_internal_leaks(changes, old, new)
-        assert len(leaks) == 1, (
-            "a nested-behind-pointer layout change is not the direct pointer-to-"
-            f"leaf shape, so the finding is kept (got: {leaks})"
+        assert leaks == [], (
+            "a layout change to a type embedded by value below a unique_ptr does "
+            f"not reach the public holder — must be demoted (got: {leaks})"
+        )
+
+    def test_decomposed_unique_ptr_is_suppressed(self) -> None:
+        # The real oneTBB shape: libstdc++ decomposes unique_ptr<Proxy> into
+        # _Tuple_impl<0, Proxy*, Deleter> / _Head_base<0, Proxy*, false>; the
+        # pointer is a NESTED template arg. Per-hop indirection attributes it to
+        # Proxy, so the Serializer embedded by value in Proxy is behind a pointer.
+        def _snap(count_type: str) -> AbiSnapshot:
+            return AbiSnapshot(
+                library="libtbb.so", version="1.0",
+                functions=[Function(
+                    name="make", mangled="make", return_type="Public*",
+                    params=[], visibility=Visibility.PUBLIC,
+                )],
+                types=[
+                    RecordType(name="Public", kind="class", fields=[
+                        TypeField(name="t", type="std::_Tuple_impl<0, ns::detail::Proxy*, ns::detail::Deleter>"),
+                    ]),
+                    RecordType(name="ns::detail::Proxy", kind="class", fields=[
+                        TypeField(name="ser", type="ns::detail::Serializer"),
+                    ]),
+                    RecordType(name="ns::detail::Serializer", kind="class",
+                               fields=[TypeField(name="count", type=count_type)]),
+                ],
+            )
+        leaks = detect_internal_leaks(
+            [Change(kind=ChangeKind.TYPE_FIELD_TYPE_CHANGED,
+                    symbol="ns::detail::Serializer", description="count")],
+            _snap("int"), _snap("std::atomic<int>"),
+        )
+        assert leaks == [], (
+            "a decomposed-unique_ptr (nested pointer template arg) path is behind "
+            f"a pointer — the layout change must be demoted (got: {leaks})"
         )
 
     def test_vtable_change_behind_pointer_still_fires(self) -> None:
@@ -507,6 +539,34 @@ class TestPointerMediatedLayoutLeakSuppressed:
         )
         assert "embedded-by-value" in leaks[0].description
 
+    def test_top_level_pointer_to_template_suppresses_args(self) -> None:
+        # Codex review: a top-level pointer on the enclosing template
+        # (`std::pair<ns::detail::Impl, int>*`) puts the by-value `Impl` behind a
+        # pointer too — a layout change to Impl must be demoted.
+        def _snap(size: int) -> AbiSnapshot:
+            return AbiSnapshot(
+                library="lib.so", version="1.0",
+                functions=[Function(
+                    name="make", mangled="make", return_type="Public*",
+                    params=[], visibility=Visibility.PUBLIC,
+                )],
+                types=[
+                    RecordType(name="Public", kind="class", fields=[
+                        TypeField(name="p", type="std::pair<ns::detail::Impl, int>*"),
+                    ]),
+                    RecordType(name="ns::detail::Impl", kind="struct", size_bits=size),
+                ],
+            )
+        leaks = detect_internal_leaks(
+            [Change(kind=ChangeKind.TYPE_SIZE_CHANGED,
+                    symbol="ns::detail::Impl", description="size")],
+            _snap(32), _snap(64),
+        )
+        assert leaks == [], (
+            "a by-value template arg behind a top-level pointer must be demoted "
+            f"(got: {leaks})"
+        )
+
     def test_opaque_handle_pointer_param_is_suppressed(self) -> None:
         # Codex review: an internal type reached only through a pointer PARAM in a
         # public signature (`void use(ns::detail::Impl*)`) does not embed its
@@ -528,6 +588,52 @@ class TestPointerMediatedLayoutLeakSuppressed:
         )
         assert leaks == [], (
             f"opaque-handle pointer param must not leak a layout change (got: {leaks})"
+        )
+
+    def test_pimpl_alias_template_field_is_suppressed(self) -> None:
+        # oneDAL pimpl<T> alias = a smart-pointer; a layout change to the pointee
+        # must be demoted even though `pimpl` is not std::*_ptr.
+        def _snap(size: int) -> AbiSnapshot:
+            return AbiSnapshot(
+                library="lib.so", version="1.0",
+                functions=[Function(
+                    name="make", mangled="make", return_type="Public*",
+                    params=[], visibility=Visibility.PUBLIC,
+                )],
+                types=[
+                    RecordType(name="Public", kind="class", fields=[
+                        TypeField(name="impl_", type="oneapi::dal::detail::pimpl<ns::detail::Impl>"),
+                    ]),
+                    RecordType(name="ns::detail::Impl", kind="struct", size_bits=size),
+                ],
+            )
+        leaks = detect_internal_leaks(
+            [Change(kind=ChangeKind.TYPE_SIZE_CHANGED,
+                    symbol="ns::detail::Impl", description="size")],
+            _snap(32), _snap(64),
+        )
+        assert leaks == [], f"pimpl<T> alias is a pointer wrapper (got: {leaks})"
+
+    def test_signature_pointer_in_template_arg_is_suppressed(self) -> None:
+        # `std::pair<int, ns::detail::Impl*> get()` reaches Impl only through the
+        # pointer stored in the pair — the seed must mark that edge indirect.
+        def _snap(size: int) -> AbiSnapshot:
+            return AbiSnapshot(
+                library="lib.so", version="1.0",
+                functions=[Function(
+                    name="get", mangled="get",
+                    return_type="std::pair<int, ns::detail::Impl*>",
+                    return_pointer_depth=0, params=[], visibility=Visibility.PUBLIC,
+                )],
+                types=[RecordType(name="ns::detail::Impl", kind="struct", size_bits=size)],
+            )
+        leaks = detect_internal_leaks(
+            [Change(kind=ChangeKind.TYPE_SIZE_CHANGED,
+                    symbol="ns::detail::Impl", description="size")],
+            _snap(32), _snap(64),
+        )
+        assert leaks == [], (
+            f"a pointer template arg in a signature must be demoted (got: {leaks})"
         )
 
     def test_by_value_return_signature_still_fires(self) -> None:
