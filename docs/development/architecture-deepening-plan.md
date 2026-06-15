@@ -479,6 +479,45 @@ follow-up (unifying the stdlib-/runtime-RTTI skip sets) a natural home.
 
 ---
 
+### N-A — One HTML page seam for the three native renderers *(implemented)*
+
+**Problem.** There was no HTML-page abstraction. `appcompat_html.py` and
+`stack_html.py` reached into `html_report.py` for styling
+(`from .html_report import _CSS, _VERDICT_STYLE, _changes_table`) but each
+re-emitted the same `<!DOCTYPE html> … </html>` skeleton and the same
+`<footer>…napetrov/abicheck…</footer>` by hand. A stylesheet, layout or
+accessibility fix had to be made in up to three places, and the shared `_CSS`
+constant lived inside a 950-line renderer rather than at a seam. This is
+distinct from **C2**: C2 unifies *what data/severity* each renderer sees
+(`ReportModel`); N-A unifies *how the HTML renderers emit page chrome*.
+
+**Goal.** One module owns the page chrome; each renderer supplies only its
+domain content as the document *body*.
+
+**What was implemented.** New `abicheck/html_template.py` owns `_CSS`,
+`_VERDICT_STYLE`, `render_document(*, title, body, css=_CSS)` (the
+DOCTYPE/head/stylesheet/body frame) and `render_footer(subtitle)`. All three
+native renderers — `html_report.generate_html_report`,
+`appcompat_html.appcompat_to_html`, `stack_html.stack_to_html` — build their
+body and call the shared seam. `_CSS`/`_VERDICT_STYLE`/`render_*` are
+re-exported from `html_report` so the satellites' historical import paths keep
+working. The ABICC-clone format (`_COMPAT_CSS`) is deliberately **left
+separate** — it mirrors abi-compliance-checker's own markup, a different chrome.
+
+**Verification (behaviour-preserving).** A characterization golden test
+(`tests/test_html_template_golden.py`, marker `golden`, with references in
+`tests/golden/html_template/`) locks the **byte-for-byte** output of all three
+renderers; the references were captured from pre-refactor code and pass
+unchanged after the extraction. Full fast lane + golden lane + `ruff`/`mypy`/
+AI-readiness all green.
+
+**Risk:** low; output verified byte-identical. Follow-up (N-A inc. 2): the
+three modules still each hand-roll `<table class='changes'>` markup — a shared
+`render_change_table(changes, grouping)` is the next deepening, gated the same
+way.
+
+---
+
 ## Environment / verifiability constraints
 
 Some candidates change behaviour that can only be safely verified with external
@@ -534,3 +573,4 @@ parity is contractual and benefits from a stabilised shared layer underneath it.
 | C8 | ABICC compat adapter | Proposed | — |
 | C9 | Relocate confidence computation | Done | #395 |
 | C10 | Split `model.py` (stage-1: name predicates) | Stage-1 done | #395 |
+| N-A | HTML page seam (`html_template`) — shared document chrome + footer for the three native renderers, byte-identical golden-locked | Done | — |
