@@ -379,3 +379,32 @@ class TestPointerMediatedLayoutLeakSuppressed:
             f"public holder — the leak must still fire (got: {leaks})"
         )
         assert "embedded-by-value" in leaks[0].description
+
+    def test_pimpl_named_public_type_by_value_still_fires(self) -> None:
+        # Codex review: a public type/function name containing "pimpl" must NOT be
+        # treated as indirection. `PimplHandle` embeds the internal type BY VALUE,
+        # so a layout change propagates and the leak must fire.
+        def _snap(impl_size: int) -> AbiSnapshot:
+            return AbiSnapshot(
+                library="lib.so", version="1.0",
+                functions=[Function(
+                    name="make_pimpl", mangled="make_pimpl", return_type="PimplHandle*",
+                    params=[], visibility=Visibility.PUBLIC,
+                )],
+                types=[
+                    RecordType(name="PimplHandle", kind="class", fields=[
+                        TypeField(name="state", type="ns::detail::Impl"),  # by value
+                    ]),
+                    RecordType(name="ns::detail::Impl", kind="struct", size_bits=impl_size),
+                ],
+            )
+        leaks = detect_internal_leaks(
+            [Change(kind=ChangeKind.TYPE_SIZE_CHANGED,
+                    symbol="ns::detail::Impl", description="size")],
+            _snap(32), _snap(64),
+        )
+        assert len(leaks) == 1, (
+            "a 'Pimpl'-named public type embedding an internal type by value is a "
+            f"real layout leak — name must not be read as indirection (got: {leaks})"
+        )
+        assert "embedded-by-value" in leaks[0].description

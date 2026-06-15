@@ -534,6 +534,30 @@ def _field_is_indirect(fld_type: str) -> bool:
     )
 
 
+def _typenode_is_indirection_wrapper(name: str) -> bool:
+    """Return True if a *type node* on a leak path is itself a pointer/reference
+    or a smart-pointer wrapper type.
+
+    Stricter than :func:`_field_is_indirect`: it must NOT fire on a regular
+    record/function name that merely *contains* a wrapper-ish substring. A
+    public type named ``PimplHandle`` that embeds an internal type **by value**
+    is a real layout leak, not an indirection (Codex review) — so the loose
+    ``pimpl``/``unique_ptr`` substring match used for *field declared types* is
+    not applied to path labels. Only a raw ``*``/``&`` or a qualified
+    ``std::``/libstdc++ smart-pointer spelling counts.
+    """
+    if "*" in name or "&" in name:
+        return True
+    stripped = _strip_decorators(name)
+    return any(
+        marker in stripped
+        for marker in (
+            "std::unique_ptr", "std::shared_ptr", "std::weak_ptr",
+            "__uniq_ptr", "__shared_ptr", "__weak_ptr",
+        )
+    )
+
+
 def _record_field_is_value_embedded(rec: RecordType, field_name: str) -> bool | None:
     """Check whether *field_name* in *rec* is embedded by value.
 
@@ -576,7 +600,10 @@ def _path_has_indirection(path: list[str], snap: AbiSnapshot) -> bool:
             continue
         if step.startswith(("base:", "vbase:", "typedef:")):
             continue
-        if _field_is_indirect(step):
+        # A plain type node: only a genuine pointer/smart-pointer wrapper spelling
+        # is indirection evidence — not a record/function name that happens to
+        # contain "pimpl"/"ptr" (Codex review).
+        if _typenode_is_indirection_wrapper(step):
             return True
     return False
 
