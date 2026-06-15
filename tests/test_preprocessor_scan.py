@@ -209,6 +209,62 @@ def test_run_skips_when_clang_absent(monkeypatch) -> None:
     assert "not found" in result.skipped_reason
 
 
+def test_coverage_downgraded_when_all_clang_runs_fail(monkeypatch) -> None:
+    # clang present but every invocation fails → nothing inspected; the coverage
+    # row must NOT read as a clean PRESENT scan (Codex review).
+    from abicheck.buildsource import build_evidence as be
+    from abicheck.buildsource import preprocessor_scan as ps
+
+    build = be.BuildEvidence(
+        compile_units=[
+            be.CompileUnit(
+                id="cu://a", source="a.cpp", language="CXX", argv=["c++", "a.cpp"]
+            )
+        ]
+    )
+    monkeypatch.setattr(ps.ClangPreprocessorExtractor, "available", lambda self: True)
+
+    def _fail_run(self, cmd, cwd, unit):
+        self.runs_attempted += 1
+        self.diagnostics.append(f"clang -E nonzero exit for {unit}: boom")
+        return None
+
+    monkeypatch.setattr(ps.ClangPreprocessorExtractor, "_run", _fail_run)
+    result = ps.run_preprocessor_scan(build, ["include/foo.h"])
+    assert result.ran is True
+    assert result.all_failed is True
+    assert result.attempted > 0 and result.succeeded == 0
+    assert result.coverage().status.value == "not_collected"
+
+
+def test_coverage_partial_when_some_clang_runs_fail(monkeypatch) -> None:
+    from abicheck.buildsource import build_evidence as be
+    from abicheck.buildsource import preprocessor_scan as ps
+
+    build = be.BuildEvidence(
+        compile_units=[
+            be.CompileUnit(
+                id="cu://a", source="a.cpp", language="CXX", argv=["c++", "a.cpp"]
+            )
+        ]
+    )
+    monkeypatch.setattr(ps.ClangPreprocessorExtractor, "available", lambda self: True)
+    calls = {"n": 0}
+
+    def _mixed_run(self, cmd, cwd, unit):
+        self.runs_attempted += 1
+        calls["n"] += 1
+        if calls["n"] == 1:  # macro capture succeeds
+            self.runs_ok += 1
+            return "#define NDEBUG 1\n"
+        self.diagnostics.append("header run failed")  # header capture fails
+        return None
+
+    monkeypatch.setattr(ps.ClangPreprocessorExtractor, "_run", _mixed_run)
+    result = ps.run_preprocessor_scan(build, ["include/foo.h"])
+    assert result.coverage().status.value == "partial"
+
+
 def test_run_passes_compile_unit_directory_as_cwd(monkeypatch) -> None:
     # Relative -I flags from a CMake/Ninja compile DB only resolve when the
     # depfile pass runs from the CU's directory — that dir must reach the live

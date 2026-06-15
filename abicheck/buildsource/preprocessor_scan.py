@@ -264,12 +264,20 @@ class PreprocessorScanResult:
     skipped_reason: str = ""
     tus_scanned: int = 0
     headers_scanned: int = 0
+    attempted: int = 0  # total clang -E invocations attempted
+    succeeded: int = 0  # invocations that returned usable output
+    diagnostics: list[str] = field(default_factory=list)
     abi_macros: dict[str, dict[str, str]] = field(
         default_factory=dict
     )  # tu → {macro: value}
     divergences: list[MacroDivergence] = field(default_factory=list)
     leaks: list[HeaderLeak] = field(default_factory=list)
     version: int = PREPROCESSOR_SCAN_VERSION
+
+    @property
+    def all_failed(self) -> bool:
+        """True when clang ran but **every** invocation failed (not clean)."""
+        return self.ran and self.attempted > 0 and self.succeeded == 0
 
     def coverage(self) -> LayerCoverage:
         """The mandatory ADR-033 coverage row for the S2 tier (D2 honesty)."""
@@ -280,14 +288,36 @@ class PreprocessorScanResult:
                 confidence=LayerConfidence.UNKNOWN,
                 detail=self.skipped_reason or "S2 preprocessor pre-scan did not run",
             )
+        # clang is present but every invocation failed (bad flags, missing
+        # generated headers, …): nothing was actually inspected, so this is NOT
+        # a clean scan — report not_collected with a diagnostic sample so a reader
+        # is never misled by a PRESENT/0-findings row (Codex review).
+        if self.all_failed:
+            sample = (
+                self.diagnostics[0] if self.diagnostics else "all clang -E runs failed"
+            )
+            return LayerCoverage(
+                layer="preprocessor_scan",
+                status=CoverageStatus.NOT_COLLECTED,
+                confidence=LayerConfidence.UNKNOWN,
+                detail=(
+                    f"clang -E ran but every invocation failed "
+                    f"({self.attempted} attempt(s)): {sample}"
+                ),
+            )
+        status = CoverageStatus.PRESENT
+        if self.attempted and self.succeeded < self.attempted:
+            status = CoverageStatus.PARTIAL
         detail = (
             f"preprocessor scan (S2), {self.tus_scanned} TU(s), "
             f"{self.headers_scanned} public header(s), "
             f"{len(self.divergences)} macro divergence(s), {len(self.leaks)} leak(s)"
         )
+        if status is CoverageStatus.PARTIAL:
+            detail += f"; {self.attempted - self.succeeded} clang run(s) failed"
         return LayerCoverage(
             layer="preprocessor_scan",
-            status=CoverageStatus.PRESENT,
+            status=status,
             confidence=LayerConfidence.HIGH,
             detail=detail,
         )
@@ -299,6 +329,9 @@ class PreprocessorScanResult:
             "skipped_reason": self.skipped_reason,
             "tus_scanned": self.tus_scanned,
             "headers_scanned": self.headers_scanned,
+            "attempted": self.attempted,
+            "succeeded": self.succeeded,
+            "all_failed": self.all_failed,
             "divergences": [d.to_dict() for d in self.divergences],
             "leaks": [leak.to_dict() for leak in self.leaks],
         }
@@ -377,6 +410,8 @@ class ClangPreprocessorExtractor:
 
     clang_bin: str = "clang++"
     diagnostics: list[str] = field(default_factory=list)
+    runs_attempted: int = 0
+    runs_ok: int = 0
 
     def available(self) -> bool:
         return shutil.which(self.clang_bin) is not None
@@ -410,6 +445,7 @@ class ClangPreprocessorExtractor:
         return out
 
     def _run(self, cmd: list[str], cwd: str | None, unit: str) -> str | None:
+        self.runs_attempted += 1
         try:
             proc = subprocess.run(  # noqa: S603 - fixed argv, never shell=True
                 cmd,
@@ -428,6 +464,7 @@ class ClangPreprocessorExtractor:
                 f"{proc.stderr.strip()[:200] or 'no output'}"
             )
             return None
+        self.runs_ok += 1
         return proc.stdout
 
     def capture_header_includes(
@@ -539,6 +576,12 @@ def run_preprocessor_scan(
         result.headers_scanned = len(header_includes)
         result.leaks = find_private_header_leaks(header_includes, frozenset(headers))
 
+    # Surface the live clang invocation tally so coverage can downgrade to
+    # not_collected/partial when runs failed — a present-but-empty row would
+    # otherwise read as a clean scan (Codex review).
+    result.attempted = extractor.runs_attempted
+    result.succeeded = extractor.runs_ok
+    result.diagnostics = list(extractor.diagnostics)
     result.ran = True
     return result
 

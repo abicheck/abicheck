@@ -1108,6 +1108,7 @@ def abi_estimate(
             source_method=source_method,
             depth=depth,
             changed_paths=list(changed_paths or []),
+            seeded=bool(changed_paths),
             budget=Budget(),
         )
         estimates = estimate_scan(req)

@@ -218,6 +218,55 @@ def test_estimate_counts_collect_pack_tus(snap_path: Path, tmp_path: Path) -> No
     assert l3.tus == 4
 
 
+def test_estimate_auto_seeded_empty_diff_resolves_to_s0(
+    snap_path: Path, tmp_path: Path
+) -> None:
+    # A seeded-but-empty diff under --source-method auto must resolve to the s0
+    # floor (no L3/L4), mirroring the real scan — not fall back to the PR preset
+    # (Codex review).
+    cdb = tmp_path / "compile_commands.json"
+    cdb.write_text(
+        json.dumps([{"file": "a.cpp", "command": "c++", "directory": "."}]),
+        encoding="utf-8",
+    )
+    req = ScanRequest(
+        binaries=[snap_path],
+        compile_db=cdb,
+        source_method="auto",
+        changed_paths=[],
+        seeded=True,
+    )
+    layers = {e.layer for e in estimate_scan(req)}
+    # s0 = off → only intrinsic L0-L2, no source layers.
+    assert "L3_build" not in layers
+    assert "L4_source_abi" not in layers
+
+
+def test_estimate_inline_header_change_fans_out(
+    snap_path: Path, tmp_path: Path
+) -> None:
+    # A changed .inl/.tcc inline header fans out to all TUs in the real replay
+    # selector, so the estimate must charge total_tus (Codex review).
+    cdb = tmp_path / "compile_commands.json"
+    cdb.write_text(
+        json.dumps(
+            [
+                {"file": f"f{i}.cpp", "command": "c++", "directory": "."}
+                for i in range(6)
+            ]
+        ),
+        encoding="utf-8",
+    )
+    req = ScanRequest(
+        binaries=[snap_path],
+        compile_db=cdb,
+        mode="pr",
+        changed_paths=["include/foo.inl"],
+    )
+    l4 = next(e for e in estimate_scan(req) if e.layer == "L4_source_abi")
+    assert l4.tus == 6
+
+
 def test_estimate_budget_max_tus_caps_replay(snap_path: Path, tmp_path: Path) -> None:
     cdb = tmp_path / "compile_commands.json"
     cdb.write_text(

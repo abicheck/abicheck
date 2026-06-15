@@ -723,6 +723,7 @@ def scan_cmd(
             source_method=source_method,
             depth=depth,
             changed=changed,
+            seeded=seeded,
             budget_s=budget_s,
             lang=lang,
             fmt=fmt,
@@ -905,6 +906,7 @@ def _emit_estimate(
     source_method: str | None,
     depth: str | None,
     changed: list[str],
+    seeded: bool,
     budget_s: float | None,
     lang: str,
     fmt: str,
@@ -929,6 +931,7 @@ def _emit_estimate(
         source_method=source_method,
         depth=depth,
         changed_paths=list(changed),
+        seeded=seeded,
         budget=Budget(total_timeout=budget_s),
         lang=lang,
     )

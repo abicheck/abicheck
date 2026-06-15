@@ -1026,6 +1026,7 @@ class ScanRequest:
     source_method: str | None = None  # SourceMethod value; None = mode preset
     depth: str | None = None  # EvidenceDepth value (coarse L-axis)
     changed_paths: list[str] = field(default_factory=list)
+    seeded: bool = False  # a real diff seed was produced (even if changed_paths is [])
     budget: Budget = field(default_factory=Budget)
     lang: str = "c++"
 
@@ -1111,8 +1112,17 @@ def _is_source_tu_path(path: str) -> bool:
 
 
 def _is_header_path(path: str) -> bool:
-    """Whether a changed path is a header (a change that fans out to many TUs)."""
-    return Path(path).suffix.lower() in _HEADER_EXTS
+    """Whether a changed path is a header (a change that fans out to many TUs).
+
+    Delegates to the L4 replay selector's own header predicate so the estimate
+    agrees with what the real scan does — notably inline/template headers
+    (``.inl``/``.tcc``/``.ipp``) which the selector treats as headers (fan out to
+    all TUs without an include graph) but ``service._HEADER_EXTS`` omits (Codex
+    review).
+    """
+    from .buildsource.source_replay import _looks_like_header
+
+    return _looks_like_header(path)
 
 
 def _count_source_tus(sources: Path) -> int:
@@ -1208,7 +1218,12 @@ def estimate_scan(req: ScanRequest) -> list[CostEstimate]:
     sm = SourceMethod(req.source_method) if req.source_method else None
     dp = EvidenceDepth(req.depth) if req.depth else None
     auto_method = None
-    if sm is SourceMethod.AUTO and req.changed_paths:
+    # AUTO resolves from the risk score whenever a real diff seed was produced —
+    # including a *seeded but empty* diff (a no-op PR), which scores 0 → s0/off,
+    # mirroring what the real scan does. Treating a seeded empty diff as unseeded
+    # would fall back to the mode preset and over-estimate a no-op PR (Codex
+    # review). A non-empty changed set is itself proof of a seed.
+    if sm is SourceMethod.AUTO and (req.seeded or req.changed_paths):
         auto_method = score_changed_paths(
             list(req.changed_paths), RiskRules.default()
         ).recommended_method
