@@ -12,10 +12,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Dumper — headers + .so → AbiSnapshot via castxml."""
+"""Dumper — headers + .so → AbiSnapshot via a pluggable L2 header backend.
+
+The header AST (L2) is produced by one of two interchangeable frontends behind
+``_header_ast_parser``: **castxml** (the default / schema reference, parsed by
+``dumper_castxml._CastxmlParser``) or **clang** (``clang -ast-dump=json``, parsed
+by ``dumper_clang._ClangAstParser``) for hosts where castxml is absent. Select
+with ``header_backend=`` (``auto``/``castxml``/``clang``) or the
+``ABICHECK_HEADER_BACKEND`` env var. See ADR-003.
+"""
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import os
 import re
@@ -45,6 +54,7 @@ from .dumper_castxml import (
     _parse_vtable_index as _parse_vtable_index,
     _vt_sort_key as _vt_sort_key,
 )
+from .dumper_clang import _ClangAstParser as _ClangAstParser
 from .elf_symbol_filter import is_abi_relevant_elf_symbol
 from .errors import SnapshotError, ValidationError
 from .model import (
@@ -62,6 +72,223 @@ log = logging.getLogger(__name__)
 
 def _castxml_available() -> bool:
     return shutil.which("castxml") is not None
+
+
+def _clang_available(clang_bin: str = "clang") -> bool:
+    return shutil.which(clang_bin) is not None
+
+
+#: Header-AST backend identifiers (the L2 producers). castxml is the default and
+#: the schema reference; clang is the alternative for hosts where castxml is
+#: absent or its bundled frontend chokes (ADR-003, "clang as an alternative L2
+#: frontend"). ``auto`` prefers castxml, then clang.
+HEADER_BACKENDS = ("auto", "castxml", "clang")
+
+
+def _resolve_header_backend(backend: str | None) -> str:
+    """Resolve an L2 header-AST backend request to a concrete ``castxml``/``clang``.
+
+    Precedence: an explicit ``castxml``/``clang`` is honored verbatim (and the
+    caller gets a clear error later if that tool is missing). ``auto``/``None``
+    consults the ``ABICHECK_HEADER_BACKEND`` env var first — so a clang-only CI
+    image can flip the global default without touching every call site — then
+    prefers castxml (the schema reference), falling back to clang when only clang
+    is on PATH. When neither tool is present it returns ``castxml`` so the
+    existing "install castxml" error message is surfaced unchanged.
+    """
+    choice = (backend or "auto").lower()
+    if choice in ("castxml", "clang"):
+        return choice
+    if choice != "auto":
+        raise ValidationError(
+            f"Unknown header backend {backend!r}; expected one of {HEADER_BACKENDS}."
+        )
+    env = os.environ.get("ABICHECK_HEADER_BACKEND", "").strip().lower()
+    if env in ("castxml", "clang"):
+        return env
+    if _castxml_available():
+        return "castxml"
+    if _clang_available():
+        return "clang"
+    return "castxml"
+
+
+def _build_clang_header_command(
+    cc_bin: str, cc_id: str,
+    extra_includes: list[Path], agg_path: Path,
+    *,
+    sysroot: Path | None = None,
+    nostdinc: bool = False,
+    gcc_options: str | None = None,
+    force_cpp: bool = False,
+    force_cpp20: bool = False,
+) -> list[str]:
+    """Build the ``clang -ast-dump=json`` command for the aggregate header.
+
+    Mirrors :func:`_build_castxml_command`'s flag handling (includes, sysroot,
+    ``-nostdinc``, pass-through options, C-vs-C++ language mode and the C++20
+    bump) so the clang backend parses the same TU under the same context — it is
+    just a different frontend over the identical inputs. ``-fsyntax-only`` (no
+    codegen) with ``-ferror-limit=0`` keeps parsing past recoverable errors so a
+    single bad decl does not blank the whole dump.
+    """
+    cmd = [cc_bin]
+    for inc in extra_includes:
+        cmd += ["-I", str(inc)]
+    if sysroot:
+        cmd += [f"--sysroot={sysroot.as_posix()}"]
+    if nostdinc:
+        cmd += ["-nostdinc"]
+    if gcc_options:
+        cmd += shlex.split(gcc_options, posix=os.name != "nt")
+    explicit_std = bool(gcc_options and ("-std=" in gcc_options or "/std:" in gcc_options))
+    if not force_cpp:
+        if not explicit_std:
+            cmd += ["-x", "c", "-std=gnu11"]
+    elif force_cpp20 and not explicit_std:
+        cmd += ["-x", "c++", "-std=gnu++20"]
+    cmd += [
+        "-fsyntax-only",
+        "-ferror-limit=0",
+        "-Xclang",
+        "-ast-dump=json",
+        str(agg_path),
+    ]
+    return cmd
+
+
+def _clang_header_dump(
+    headers: list[Path],
+    extra_includes: list[Path],
+    compiler: str = "c++",
+    *,
+    gcc_path: str | None = None,
+    gcc_prefix: str | None = None,
+    gcc_options: str | None = None,
+    sysroot: Path | None = None,
+    nostdinc: bool = False,
+    lang: str | None = None,
+) -> dict[str, Any]:
+    """Run clang over *headers* and return the parsed ``-ast-dump=json`` root.
+
+    The clang-frontend counterpart of :func:`_castxml_dump`: it aggregates the
+    headers into one ``#include`` TU, runs ``clang -ast-dump=json``, and returns
+    the JSON dict that :class:`abicheck.dumper_clang._ClangAstParser` consumes.
+    Results are disk-cached (keyed on header mtimes + toolchain + backend) like
+    the castxml path. Raises :class:`SnapshotError` when clang is missing, times
+    out, or emits no usable AST.
+    """
+    clang_bin = gcc_path or (f"{gcc_prefix}clang++" if gcc_prefix else None)
+    if not clang_bin:
+        clang_bin = "clang++" if compiler in ("c++", "g++", "clang++") else "clang"
+    if not _clang_available(clang_bin):
+        raise SnapshotError(
+            f"{clang_bin} not found in PATH. The clang header backend needs clang/clang++ "
+            "installed (apt install clang, brew install llvm, or conda install -c conda-forge "
+            "clang). Or use the castxml backend (--header-backend castxml)."
+        )
+
+    key = _cache_key(
+        headers, extra_includes, clang_bin,
+        gcc_path=gcc_path, gcc_prefix=gcc_prefix, gcc_options=gcc_options,
+        sysroot=sysroot, nostdinc=nostdinc, lang=lang, backend="clang",
+    )
+    cached = _cache_path(key, backend="clang")
+    if cached.exists():
+        try:
+            return cast("dict[str, Any]", json.loads(cached.read_text(encoding="utf-8")))
+        except (ValueError, OSError):
+            cached.unlink(missing_ok=True)
+
+    force_cpp = bool(lang and lang.upper() in ("C++", "CPP"))
+    if not lang:
+        force_cpp = _detect_cpp_headers(headers)
+    force_cpp20 = force_cpp and _detect_cpp20_headers(headers)
+    cc_id = "msvc" if Path(clang_bin).name.lower() in ("cl", "cl.exe") else "gnu"
+
+    agg_ext = ".hpp" if force_cpp else ".h"
+    with tempfile.NamedTemporaryFile(suffix=agg_ext, mode="w", delete=False) as agg:
+        for h in headers:
+            agg.write(f'#include "{h.resolve()}"\n')
+        agg_path = Path(agg.name)
+
+    cmd = _build_clang_header_command(
+        clang_bin, cc_id, extra_includes, agg_path,
+        sysroot=sysroot, nostdinc=nostdinc, gcc_options=gcc_options,
+        force_cpp=force_cpp, force_cpp20=force_cpp20,
+    )
+    try:
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=120, check=False)
+        except subprocess.TimeoutExpired as exc:
+            raise SnapshotError(
+                "clang timed out after 120 seconds parsing the header(s). The header "
+                "may contain syntax that causes the frontend to hang."
+            ) from exc
+        if not result.stdout.strip():
+            raise SnapshotError(
+                f"clang produced no AST for the header(s) (exit {result.returncode}): "
+                f"{result.stderr[:1000].strip()}"
+            )
+        try:
+            root = json.loads(result.stdout)
+        except ValueError as exc:
+            raise SnapshotError(f"clang AST output was not valid JSON: {exc}") from exc
+        try:
+            cached.write_text(json.dumps(root), encoding="utf-8")
+        except OSError:
+            pass
+        return cast("dict[str, Any]", root)
+    finally:
+        agg_path.unlink(missing_ok=True)
+
+
+def _header_ast_parser(
+    headers: list[Path],
+    extra_includes: list[Path],
+    *,
+    backend: str,
+    compiler: str,
+    gcc_path: str | None,
+    gcc_prefix: str | None,
+    gcc_options: str | None,
+    sysroot: Path | None,
+    nostdinc: bool,
+    lang: str | None,
+    exported_dynamic: set[str],
+    exported_static: set[str],
+    public_header_paths: list[str],
+    public_dir_paths: list[str],
+) -> _CastxmlParser | _ClangAstParser:
+    """Run the resolved L2 backend and return its parser (castxml or clang).
+
+    Both parsers expose the identical ``parse_functions``/``parse_variables``/
+    ``parse_types``/``parse_enums``/``parse_typedefs``/``parse_constants``
+    surface, so the format-specific ``_dump_*`` builders consume either one
+    uniformly — the only difference is which frontend produced the AST.
+    """
+    resolved = _resolve_header_backend(backend)
+    if resolved == "clang":
+        ast_root = _clang_header_dump(
+            headers, extra_includes, compiler=compiler,
+            gcc_path=gcc_path, gcc_prefix=gcc_prefix, gcc_options=gcc_options,
+            sysroot=sysroot, nostdinc=nostdinc, lang=lang,
+        )
+        return _ClangAstParser(
+            ast_root, exported_dynamic, exported_static,
+            public_header_paths=public_header_paths,
+            public_dir_paths=public_dir_paths,
+        )
+    xml_root = _castxml_dump(
+        headers, extra_includes, compiler=compiler,
+        gcc_path=gcc_path, gcc_prefix=gcc_prefix, gcc_options=gcc_options,
+        sysroot=sysroot, nostdinc=nostdinc, lang=lang,
+    )
+    return _CastxmlParser(
+        xml_root, exported_dynamic, exported_static,
+        public_header_paths=public_header_paths,
+        public_dir_paths=public_dir_paths,
+    )
 
 
 _HIDDEN_VIS = frozenset({"STV_HIDDEN", "STV_INTERNAL"})
@@ -135,8 +362,12 @@ def _cache_key(
     sysroot: Path | None = None,
     nostdinc: bool = False,
     lang: str | None = None,
+    backend: str = "castxml",
 ) -> str:
     h = hashlib.sha256()
+    # The header-AST backend is part of the key: a castxml-XML cache entry and a
+    # clang-JSON one are different artifacts that must never collide.
+    h.update(f"backend={backend}".encode())
     for p in sorted(str(x.resolve()) for x in headers):
         h.update(p.encode())
         try:
@@ -166,18 +397,21 @@ def _cache_key(
     return h.hexdigest()
 
 
-def _cache_path(key: str) -> Path:
+def _cache_path(key: str, backend: str = "castxml") -> Path:
+    # One sub-directory + file extension per backend so the castxml-XML and
+    # clang-JSON caches live side by side without clashing.
+    ext = "json" if backend == "clang" else "xml"
     if sys.platform == "win32":
-        # Use %LOCALAPPDATA%/abi_check/castxml on Windows
+        # Use %LOCALAPPDATA%/abi_check/<backend> on Windows
         local = os.environ.get("LOCALAPPDATA")
         if local:
-            cache_dir = Path(local) / "abi_check" / "castxml"
+            cache_dir = Path(local) / "abi_check" / backend
         else:
-            cache_dir = Path.home() / "AppData" / "Local" / "abi_check" / "castxml"
+            cache_dir = Path.home() / "AppData" / "Local" / "abi_check" / backend
     else:
-        cache_dir = Path.home() / ".cache" / "abi_check" / "castxml"
+        cache_dir = Path.home() / ".cache" / "abi_check" / backend
     cache_dir.mkdir(parents=True, exist_ok=True)
-    return cache_dir / f"{key}.xml"
+    return cache_dir / f"{key}.{ext}"
 
 
 # C++ file extensions that unambiguously indicate C++ content.
@@ -758,6 +992,7 @@ def dump(
     debug_format: str | None = None,
     public_headers: list[Path] | None = None,
     public_header_dirs: list[Path] | None = None,
+    header_backend: str = "auto",
 ) -> AbiSnapshot:
     """Create an AbiSnapshot from a shared library + headers.
 
@@ -823,6 +1058,7 @@ def dump(
         gcc_path=gcc_path, gcc_prefix=gcc_prefix, gcc_options=gcc_options,
         sysroot=sysroot, nostdinc=nostdinc, lang=lang,
         public_headers=public_headers, public_header_dirs=public_header_dirs,
+        header_backend=header_backend,
         **extra,
     )
 
@@ -1171,8 +1407,9 @@ def _dump_elf(
     debug_format: str | None = None,
     public_headers: list[Path] | None = None,
     public_header_dirs: list[Path] | None = None,
+    header_backend: str = "auto",
 ) -> AbiSnapshot:
-    """ELF-specific dump: pyelftools + debug info (DWARF/BTF/CTF) + castxml."""
+    """ELF-specific dump: pyelftools + debug info (DWARF/BTF/CTF) + header AST."""
     exported_dynamic, exported_static = _pyelftools_exported_symbols(so_path)
 
     from .elf_metadata import parse_elf_metadata
@@ -1204,13 +1441,11 @@ def _dump_elf(
             dwarf_only_types, profile_hint,
         )
 
-    xml_root = _castxml_dump(
-        headers, extra_includes, compiler=compiler,
+    parser = _header_ast_parser(
+        headers, extra_includes, backend=header_backend, compiler=compiler,
         gcc_path=gcc_path, gcc_prefix=gcc_prefix, gcc_options=gcc_options,
         sysroot=sysroot, nostdinc=nostdinc, lang=lang,
-    )
-    parser = _CastxmlParser(
-        xml_root, exported_dynamic, exported_static,
+        exported_dynamic=exported_dynamic, exported_static=exported_static,
         public_header_paths=[str(h) for h in headers] + [str(h) for h in (public_headers or [])],
         public_dir_paths=[str(d) for d in (public_header_dirs or [])],
     )
@@ -1254,8 +1489,9 @@ def _dump_macho(
     dwarf_only: bool = False,
     public_headers: list[Path] | None = None,
     public_header_dirs: list[Path] | None = None,
+    header_backend: str = "auto",
 ) -> AbiSnapshot:
-    """Mach-O dump: export table from macholib + castxml header analysis."""
+    """Mach-O dump: export table from macholib + header-AST analysis."""
     if dwarf_only:
         warnings.warn(
             "dwarf_only=True is not supported for Mach-O; "
@@ -1328,21 +1564,19 @@ def _dump_macho(
             language_profile=profile_hint,
         )
 
-    xml_root = _castxml_dump(
-        headers, extra_includes, compiler=compiler,
-        gcc_path=gcc_path, gcc_prefix=gcc_prefix, gcc_options=gcc_options,
-        sysroot=sysroot, nostdinc=nostdinc, lang=lang,
-    )
     # On macOS, C symbols have a leading underscore in the export table
-    # (Mach-O convention). Strip it for matching against castxml names.
+    # (Mach-O convention). Strip it for matching against the header-AST names.
     exported_no_underscore: set[str] = set()
     for sym in exported_dynamic:
         if sym.startswith("_"):
             exported_no_underscore.add(sym[1:])
         else:
             exported_no_underscore.add(sym)
-    parser = _CastxmlParser(
-        xml_root, exported_no_underscore, exported_no_underscore,
+    parser = _header_ast_parser(
+        headers, extra_includes, backend=header_backend, compiler=compiler,
+        gcc_path=gcc_path, gcc_prefix=gcc_prefix, gcc_options=gcc_options,
+        sysroot=sysroot, nostdinc=nostdinc, lang=lang,
+        exported_dynamic=exported_no_underscore, exported_static=exported_no_underscore,
         public_header_paths=[str(h) for h in headers] + [str(h) for h in (public_headers or [])],
         public_dir_paths=[str(d) for d in (public_header_dirs or [])],
     )
@@ -1381,8 +1615,9 @@ def _dump_pe(
     lang: str | None = None,
     public_headers: list[Path] | None = None,
     public_header_dirs: list[Path] | None = None,
+    header_backend: str = "auto",
 ) -> AbiSnapshot:
-    """PE dump: export table from pefile + castxml header analysis."""
+    """PE dump: export table from pefile + header-AST analysis."""
     from .pe_metadata import parse_pe_metadata
 
     pe_meta = parse_pe_metadata(dll_path)
@@ -1419,13 +1654,11 @@ def _dump_pe(
             language_profile=profile_hint,
         )
 
-    xml_root = _castxml_dump(
-        headers, extra_includes, compiler=compiler,
+    parser = _header_ast_parser(
+        headers, extra_includes, backend=header_backend, compiler=compiler,
         gcc_path=gcc_path, gcc_prefix=gcc_prefix, gcc_options=gcc_options,
         sysroot=sysroot, nostdinc=nostdinc, lang=lang,
-    )
-    parser = _CastxmlParser(
-        xml_root, exported_dynamic, exported_static,
+        exported_dynamic=exported_dynamic, exported_static=exported_static,
         public_header_paths=[str(h) for h in headers] + [str(h) for h in (public_headers or [])],
         public_dir_paths=[str(d) for d in (public_header_dirs or [])],
     )

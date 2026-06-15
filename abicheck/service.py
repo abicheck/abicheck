@@ -152,6 +152,7 @@ def resolve_input(
     public_headers: list[Path] | None = None,
     public_header_dirs: list[Path] | None = None,
     follow_linker_scripts: bool = True,
+    header_backend: str = "auto",
     notify: Callable[[str], None] | None = None,
 ) -> AbiSnapshot:
     """Auto-detect input type and return an ABI snapshot.
@@ -204,6 +205,7 @@ def resolve_input(
             debug_format=debug_format,
             public_headers=public_headers,
             public_header_dirs=public_header_dirs,
+            header_backend=header_backend,
             notify=notify,
         )
 
@@ -224,6 +226,7 @@ def resolve_input(
             debug_format=debug_format,
             public_headers=public_headers,
             public_header_dirs=public_header_dirs,
+            header_backend=header_backend,
             notify=notify,
         )
 
@@ -288,6 +291,7 @@ def resolve_input(
                     public_headers=public_headers,
                     public_header_dirs=public_header_dirs,
                     follow_linker_scripts=follow_linker_scripts,
+                    header_backend=header_backend,
                     notify=notify,
                 )
             raise ValidationError(
@@ -334,6 +338,7 @@ def run_dump(
     debug_format: str | None = None,
     public_headers: list[Path] | None = None,
     public_header_dirs: list[Path] | None = None,
+    header_backend: str = "auto",
     notify: Callable[[str], None] | None = None,
 ) -> AbiSnapshot:
     """Extract an ABI snapshot from a native binary (ELF, PE, or Mach-O).
@@ -362,6 +367,7 @@ def run_dump(
             debug_roots=debug_roots,
             enable_debuginfod=enable_debuginfod,
             debug_format=debug_format,
+            header_backend=header_backend,
             notify=notify,
         )
         _try_attach_sycl_metadata(snap, path)
@@ -448,6 +454,7 @@ def _dump_elf(
     debug_roots: list[Path] | None = None,
     enable_debuginfod: bool = False,
     debug_format: str | None = None,
+    header_backend: str = "auto",
     notify: Callable[[str], None] | None = None,
 ) -> AbiSnapshot:
     """Dump an ELF binary to an ABI snapshot."""
@@ -480,6 +487,7 @@ def _dump_elf(
             lang=lang if lang == "c" else None,
             dwarf_only=dwarf_only,
             debug_format=debug_format,
+            header_backend=header_backend,
         )
     except (AbicheckError, RuntimeError, OSError, ValueError) as exc:
         raise SnapshotError(f"Failed to dump '{path}': {exc}") from exc

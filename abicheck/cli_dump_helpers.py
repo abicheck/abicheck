@@ -137,6 +137,7 @@ def perform_elf_dump(
     write_snapshot_output: _WriteSnapshotOutput,
     build_query: str | None = None,
     build_compile_db: str | None = None,
+    header_backend: str = "auto",
 ) -> None:
     """Run the ELF dump pipeline and write output.
 
@@ -163,6 +164,7 @@ def perform_elf_dump(
             debug_format=effective_debug_format,
             public_headers=list(public_headers),
             public_header_dirs=list(public_header_dirs),
+            header_backend=header_backend,
         )
     except (AbicheckError, RuntimeError, OSError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc

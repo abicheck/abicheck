@@ -288,11 +288,11 @@ pairs when a `FUNC_LIKELY_RENAMED` exists for the same symbol pair.
 
 ---
 
-## Extension: clang as an alternative L2 frontend (planned)
+## Extension: clang as an alternative L2 frontend (implemented)
 
 **Date:** 2026-06-15
-**Status:** Planned — surfaced by the UXL field run
-(`validation/uxl-scan-levels-timing-2026-06.md`, P1)
+**Status:** Implemented — first slice landed. Surfaced by the UXL field run
+(`validation/uxl-scan-levels-timing-2026-06.md`, P1).
 
 ### Context
 
@@ -337,10 +337,40 @@ schema (which drifts across clang releases) is unsupported.
 - A new `AbiSnapshot` field or detector — this is a new *producer* of existing
   fields only.
 
+### What landed (first slice)
+
+A `clang -ast-dump=json` → `AbiSnapshot` parser, `abicheck/dumper_clang.py`
+(`_ClangAstParser`), a sibling to `dumper_castxml._CastxmlParser` that exposes
+the identical `parse_functions`/`parse_variables`/`parse_types`/`parse_enums`/
+`parse_typedefs`/`parse_constants` surface. It is selected by a backend knob:
+
+- `dumper.dump(..., header_backend=...)` and `service.run_dump`/`resolve_input`
+  thread a `header_backend` of `auto` | `castxml` | `clang`;
+- the CLI exposes `--header-backend` on `dump` and `compare`;
+- the `ABICHECK_HEADER_BACKEND` env var sets the global default (so a
+  clang-only CI image flips the default with no flag), consulted by
+  `dumper._resolve_header_backend`;
+- `auto` prefers castxml (the schema reference), then falls back to clang when
+  only clang is on `PATH` — closing the P1 hard-fail on clang-only hosts.
+
+`dumper._header_ast_parser` is the single factory both frontends sit behind, so
+the per-format `_dump_elf`/`_dump_macho`/`_dump_pe` builders consume either
+parser uniformly. The clang JSON cache lives beside the castxml XML cache
+(`~/.cache/abi_check/clang/*.json`), keyed on the backend so the two never
+collide.
+
+**Coverage trade-off.** clang's JSON AST is syntactic — it does not compute
+record layout — so a clang-derived `RecordType` carries field names/types,
+bases, and access but **not** `size_bits`/`offset_bits`/vtable slots (left
+`None`/empty; the layout detectors skip an unknown-vs-unknown comparison and
+DWARF (L1) stays the layout authority). Everything the source-API and
+public-surface-scoping detectors need — signatures, `noexcept`/`const`/
+`explicit`, enum values, typedef targets, public constant values — is produced,
+which is exactly what the D4 cross-source checks consume.
+
 ### Next steps
 
-Own PR/ADR. First slice: a `clang -ast-dump=json` → `AbiSnapshot.types`
-parser (sibling to `dumper_castxml.py`) behind a backend selector, plus an
-integration test that runs `scan -H` / `dump --headers` with **clang only on
-PATH** and asserts the D4 cross-source checks run instead of skipping. Gate on
-a clang↔castxml snapshot-equivalence check over the example suite.
+Deepen layout parity (a `-fdump-record-layouts` pass to recover
+`size_bits`/`offset_bits`/vtable order) and grow the clang↔castxml
+snapshot-equivalence check (`test_clang_header_backend_integration.py`) into a
+gate over the full example suite.

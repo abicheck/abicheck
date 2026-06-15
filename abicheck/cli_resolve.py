@@ -249,6 +249,7 @@ def _resolve_input(
     pdb_path: Path | None = None,
     dwarf_only: bool = False,
     debug_format: str | None = None,
+    header_backend: str = "auto",
 ) -> AbiSnapshot:
     """Auto-detect input type and return an AbiSnapshot.
 
@@ -286,6 +287,7 @@ def _resolve_input(
             pdb_path=pdb_path,
             dwarf_only=dwarf_only,
             debug_format=debug_format,
+            header_backend=header_backend,
             notify=_click_notify,
         )
     except ValidationError as exc:
@@ -383,6 +385,7 @@ def _resolve_compare_snapshots(
     follow_deps: bool,
     search_paths: tuple[Path, ...],
     ld_library_path: str,
+    header_backend: str = "auto",
 ) -> tuple[AbiSnapshot, AbiSnapshot]:
     """Load both ABI snapshots and (optionally) populate ELF dependency info."""
     old = _resolve_input(
@@ -395,6 +398,7 @@ def _resolve_compare_snapshots(
         pdb_path=old_pdb_path if old_pdb_path else pdb_path,
         dwarf_only=dwarf_only,
         debug_format=debug_format,
+        header_backend=header_backend,
     )
     new = _resolve_input(
         new_input,
@@ -406,6 +410,7 @@ def _resolve_compare_snapshots(
         pdb_path=new_pdb_path if new_pdb_path else pdb_path,
         dwarf_only=dwarf_only,
         debug_format=debug_format,
+        header_backend=header_backend,
     )
     if follow_deps:
         if old_fmt == "elf":
