@@ -30,8 +30,12 @@ from abicheck.buildsource.crosscheck import (
     ALL_CHECKS,
     CHECK_EXPORTED_NOT_PUBLIC,
     CHECK_HEADER_BUILD_CONTEXT_MISMATCH,
+    CHECK_ODR_TYPE_VARIANT,
     CHECK_PRIVATE_HEADER_LEAK,
     CHECK_PUBLIC_NOT_EXPORTED,
+    CHECK_PUBLIC_TO_INTERNAL_DEPENDENCY,
+    CHECK_RTTI_FOR_INTERNAL_TYPE,
+    CHECK_UNVERSIONED_EXPORTED_SYMBOL,
     CROSSCHECK_VERSION,
     PROVIDER_BINARY_EXPORTS,
     PROVIDER_PUBLIC_HEADER_AST,
@@ -40,7 +44,8 @@ from abicheck.buildsource.crosscheck import (
     run_crosschecks,
 )
 from abicheck.buildsource.pack import BuildSourcePack
-from abicheck.buildsource.source_graph import SourceGraphSummary
+from abicheck.buildsource.source_abi import SourceAbiSurface
+from abicheck.buildsource.source_graph import GraphEdge, GraphNode, SourceGraphSummary
 from abicheck.checker_policy import ChangeKind, Confidence, Verdict
 from abicheck.elf_metadata import ElfMetadata, ElfSymbol
 from abicheck.macho_metadata import MachoExport, MachoMetadata
@@ -703,6 +708,597 @@ def test_private_header_leak_adds_source_index_provider_with_graph():
 
 
 # --------------------------------------------------------------------------- #
+# odr_type_variant
+# --------------------------------------------------------------------------- #
+
+
+def _pack_with_surface(*conflicts: dict) -> BuildSourcePack:
+    surface = SourceAbiSurface(odr_conflicts=list(conflicts))
+    return BuildSourcePack(root="", source_abi=surface)
+
+
+def test_odr_type_variant_flags_recorded_conflict():
+    snap = _snap(
+        build_source=_pack_with_surface(
+            {
+                "qualified_name": "ns::Widget",
+                "header": "widget.h",
+                "old_type_hash": "aaa",
+                "new_type_hash": "bbb",
+            }
+        )
+    )
+    res = run_crosschecks(snap)
+    hits = _findings_of(res, ChangeKind.ODR_TYPE_VARIANT)
+    assert [c.symbol for c in hits] == ["ns::Widget"]
+    assert hits[0].caused_by_type == "ns::Widget"
+    assert hits[0].source_location == "widget.h"
+    assert "widget.h" in hits[0].description
+    # API_BREAK partition, per ADR-035 D4.
+    assert ChangeKind.ODR_TYPE_VARIANT in _api_break_kinds()
+    assert res.providers[CHECK_ODR_TYPE_VARIANT] == [PROVIDER_SOURCE_INDEX]
+
+
+def test_odr_type_variant_clean_surface_present_no_findings():
+    # A surface with real L4 facts (a parsed/reachable type) but no ODR conflict
+    # is genuinely clean → present, 0 findings.
+    from abicheck.buildsource.source_abi import SourceEntity
+
+    surface = SourceAbiSurface(
+        reachable_types=[SourceEntity(id="t1", kind="record", qualified_name="Widget")]
+    )
+    snap = _snap(build_source=BuildSourcePack(root="", source_abi=surface))
+    res = run_crosschecks(snap)
+    assert _findings_of(res, ChangeKind.ODR_TYPE_VARIANT) == []
+    assert _coverage(res, CHECK_ODR_TYPE_VARIANT)["status"] == "present"
+
+
+def test_odr_type_variant_skipped_without_l4_surface():
+    snap = _snap()
+    res = run_crosschecks(snap)
+    assert _coverage(res, CHECK_ODR_TYPE_VARIANT)["status"] == "skipped"
+    assert _findings_of(res, ChangeKind.ODR_TYPE_VARIANT) == []
+
+
+def test_odr_type_variant_skipped_on_empty_surface_no_facts():
+    # L4 replay ran but parsed zero TUs (empty surface) — must skip, not read as a
+    # clean ODR audit (Codex review / ADR-035 D4 coverage honesty).
+    snap = _snap(build_source=_pack_with_surface())  # SourceAbiSurface(), no facts
+    res = run_crosschecks(snap)
+    row = _coverage(res, CHECK_ODR_TYPE_VARIANT)
+    assert row["status"] == "skipped"
+    assert "empty" in row["detail"]
+    assert _findings_of(res, ChangeKind.ODR_TYPE_VARIANT) == []
+
+
+def test_odr_type_variant_handles_anonymous_and_missing_header():
+    snap = _snap(build_source=_pack_with_surface({"old_type_hash": "x"}))
+    res = run_crosschecks(snap)
+    hits = _findings_of(res, ChangeKind.ODR_TYPE_VARIANT)
+    assert [c.symbol for c in hits] == ["<anonymous>"]
+    assert hits[0].source_location is None
+
+
+# --------------------------------------------------------------------------- #
+# public_to_internal_dependency
+# --------------------------------------------------------------------------- #
+
+
+def _graph(nodes, edges) -> SourceGraphSummary:
+    return SourceGraphSummary(nodes=list(nodes), edges=list(edges))
+
+
+def _decl(node_id: str, label: str, visibility: str) -> GraphNode:
+    return GraphNode(
+        id=node_id, kind="source_decl", label=label, attrs={"visibility": visibility}
+    )
+
+
+def test_public_to_internal_dependency_flags_public_reaching_internal():
+    g = _graph(
+        [
+            _decl("decl://pub", "pubFn", "public_header"),
+            _decl("decl://int", "internalImpl", "source"),
+        ],
+        [GraphEdge(src="decl://pub", dst="decl://int", kind="DECL_CALLS_DECL")],
+    )
+    snap = _snap(build_source=BuildSourcePack(root="", source_graph=g))
+    res = run_crosschecks(snap)
+    hits = _findings_of(res, ChangeKind.PUBLIC_TO_INTERNAL_DEPENDENCY)
+    assert [(c.symbol, c.new_value) for c in hits] == [("pubFn", "internalImpl")]
+    assert hits[0].confidence == Confidence.MEDIUM
+    assert res.providers[CHECK_PUBLIC_TO_INTERNAL_DEPENDENCY] == [PROVIDER_SOURCE_INDEX]
+    # RISK partition (never BREAKING / API_BREAK).
+    assert ChangeKind.PUBLIC_TO_INTERNAL_DEPENDENCY not in _api_break_kinds()
+
+
+def test_public_to_internal_dependency_exported_decl_counts_as_public():
+    # A decl mapped to an exported symbol is public even without public_header
+    # visibility; the internal type it embeds is still flagged.
+    g = _graph(
+        [
+            _decl("decl://api", "apiFn", "unknown"),
+            _decl("type://impl", "ImplType", "private_header"),
+            GraphNode(
+                id="binary_symbol://_Z6apiFnv", kind="binary_symbol", label="_Z6apiFnv"
+            ),
+        ],
+        [
+            GraphEdge(
+                src="decl://api",
+                dst="binary_symbol://_Z6apiFnv",
+                kind="SOURCE_DECL_MAPS_TO_SYMBOL",
+            ),
+            GraphEdge(src="decl://api", dst="type://impl", kind="DECL_HAS_TYPE"),
+        ],
+    )
+    # The type node must be classifiable, so give it a decl node kind.
+    g.nodes[1] = GraphNode(
+        id="type://impl",
+        kind="record_type",
+        label="ImplType",
+        attrs={"visibility": "private_header"},
+    )
+    snap = _snap(build_source=BuildSourcePack(root="", source_graph=g))
+    res = run_crosschecks(snap)
+    hits = _findings_of(res, ChangeKind.PUBLIC_TO_INTERNAL_DEPENDENCY)
+    assert [(c.symbol, c.new_value) for c in hits] == [("apiFn", "ImplType")]
+
+
+def test_public_to_internal_dependency_elevates_changed_file():
+    g = _graph(
+        [
+            _decl("decl://pub", "pubFn", "public_header"),
+            _decl("decl://int", "internalImpl", "source"),
+            GraphNode(id="header://src/impl.cc", kind="header", label="src/impl.cc"),
+        ],
+        [
+            GraphEdge(src="decl://pub", dst="decl://int", kind="DECL_REFERENCES_DECL"),
+            GraphEdge(
+                src="header://src/impl.cc", dst="decl://int", kind="SOURCE_DECLARES"
+            ),
+        ],
+    )
+    snap = _snap(build_source=BuildSourcePack(root="", source_graph=g))
+    res = run_crosschecks(
+        snap, CrosscheckConfig(changed_paths=frozenset({"src/impl.cc"}))
+    )
+    hits = _findings_of(res, ChangeKind.PUBLIC_TO_INTERNAL_DEPENDENCY)
+    assert len(hits) == 1
+    assert hits[0].confidence == Confidence.HIGH
+    assert hits[0].source_location == "src/impl.cc"
+    assert "changed file" in hits[0].description
+
+
+def test_public_to_internal_dependency_changed_file_path_normalization():
+    # Graph labels are often absolute build paths while `scan` passes repo-relative
+    # changed paths from `git diff`; the elevation must match on a path-suffix, not
+    # exact string equality (Codex review).
+    g = _graph(
+        [
+            _decl("decl://pub", "pubFn", "public_header"),
+            _decl("decl://int", "internalImpl", "source"),
+            GraphNode(
+                id="header:///work/build/src/impl.cc",
+                kind="header",
+                label="/work/build/src/impl.cc",
+            ),
+        ],
+        [
+            GraphEdge(src="decl://pub", dst="decl://int", kind="DECL_CALLS_DECL"),
+            GraphEdge(
+                src="header:///work/build/src/impl.cc",
+                dst="decl://int",
+                kind="SOURCE_DECLARES",
+            ),
+        ],
+    )
+    snap = _snap(build_source=BuildSourcePack(root="", source_graph=g))
+    res = run_crosschecks(
+        snap, CrosscheckConfig(changed_paths=frozenset({"src/impl.cc"}))
+    )
+    hits = _findings_of(res, ChangeKind.PUBLIC_TO_INTERNAL_DEPENDENCY)
+    assert len(hits) == 1
+    assert hits[0].confidence == Confidence.HIGH  # elevated despite differing spelling
+
+
+def test_public_to_internal_dependency_flags_callgraph_only_impl_callee():
+    # The built-in call-graph extractor creates callee source_decl nodes with NO
+    # visibility attr for functions only present in implementation code. A public
+    # exported caller reaching such an unannotated callee is the check's main
+    # source-file case — flagged when the project declares it (a SOURCE_DECLARES
+    # edge from a project file provides the provenance; Codex review).
+    g = _graph(
+        [
+            _decl("decl://pub", "pubFn", "public_header"),
+            # No visibility attr — exactly what augment_graph_with_calls emits.
+            GraphNode(id="decl://impl", kind="source_decl", label="implHelper"),
+            GraphNode(id="header://src/impl.cc", kind="source", label="src/impl.cc"),
+        ],
+        [
+            GraphEdge(src="decl://pub", dst="decl://impl", kind="DECL_CALLS_DECL"),
+            GraphEdge(
+                src="header://src/impl.cc", dst="decl://impl", kind="SOURCE_DECLARES"
+            ),
+        ],
+    )
+    snap = _snap(build_source=BuildSourcePack(root="", source_graph=g))
+    res = run_crosschecks(snap)
+    hits = _findings_of(res, ChangeKind.PUBLIC_TO_INTERNAL_DEPENDENCY)
+    assert [(c.symbol, c.new_value) for c in hits] == [("pubFn", "implHelper")]
+
+
+def test_public_to_internal_dependency_skips_thirdparty_callee():
+    # A public function calling a bare third-party / system C API (malloc,
+    # pthread_*, SSL_new) gets an unannotated call-graph node with NO project
+    # provenance (no SOURCE_DECLARES edge). It must NOT be flagged as a
+    # project-internal dependency (Codex review).
+    g = _graph(
+        [
+            _decl("decl://pub", "pubFn", "public_header"),
+            GraphNode(id="decl://malloc", kind="source_decl", label="malloc"),
+            GraphNode(id="decl://ssl", kind="source_decl", label="SSL_new"),
+        ],
+        [
+            GraphEdge(src="decl://pub", dst="decl://malloc", kind="DECL_CALLS_DECL"),
+            GraphEdge(src="decl://pub", dst="decl://ssl", kind="DECL_CALLS_DECL"),
+        ],
+    )
+    snap = _snap(build_source=BuildSourcePack(root="", source_graph=g))
+    res = run_crosschecks(snap)
+    assert _findings_of(res, ChangeKind.PUBLIC_TO_INTERNAL_DEPENDENCY) == []
+    assert _coverage(res, CHECK_PUBLIC_TO_INTERNAL_DEPENDENCY)["status"] == "present"
+
+
+def test_public_to_internal_dependency_skips_stdlib_callee():
+    # A public API calling a std:: / compiler helper (also unannotated in the
+    # call graph) must NOT light up — otherwise the check floods on stdlib use.
+    g = _graph(
+        [
+            _decl("decl://pub", "pubFn", "public_header"),
+            GraphNode(
+                id="decl://std",
+                kind="source_decl",
+                label="_ZNSt6vectorIiE9push_backEi",
+            ),
+            GraphNode(id="decl://gnu", kind="source_decl", label="__gnu_cxx::__ops"),
+        ],
+        [
+            GraphEdge(src="decl://pub", dst="decl://std", kind="DECL_CALLS_DECL"),
+            GraphEdge(src="decl://pub", dst="decl://gnu", kind="DECL_REFERENCES_DECL"),
+        ],
+    )
+    snap = _snap(build_source=BuildSourcePack(root="", source_graph=g))
+    res = run_crosschecks(snap)
+    assert _findings_of(res, ChangeKind.PUBLIC_TO_INTERNAL_DEPENDENCY) == []
+    assert _coverage(res, CHECK_PUBLIC_TO_INTERNAL_DEPENDENCY)["status"] == "present"
+
+
+def test_public_to_internal_dependency_callgraph_only_graph_no_public_caller():
+    # In a pure call-graph graph (no L4/export annotation) the caller is also
+    # unannotated, so it is not "public" — no finding, no false positive.
+    g = _graph(
+        [
+            GraphNode(id="decl://a", kind="source_decl", label="aFn"),
+            GraphNode(id="decl://b", kind="source_decl", label="bFn"),
+        ],
+        [GraphEdge(src="decl://a", dst="decl://b", kind="DECL_CALLS_DECL")],
+    )
+    snap = _snap(build_source=BuildSourcePack(root="", source_graph=g))
+    res = run_crosschecks(snap)
+    assert _findings_of(res, ChangeKind.PUBLIC_TO_INTERNAL_DEPENDENCY) == []
+
+
+def test_public_to_internal_dependency_exported_caller_callgraph_callee():
+    # The reviewer's exact shape via the real export path: caller mapped to an
+    # exported symbol (public) → project-declared impl callee (internal).
+    g = _graph(
+        [
+            GraphNode(id="decl://api", kind="source_decl", label="apiFn"),
+            GraphNode(id="decl://impl", kind="source_decl", label="implHelper"),
+            GraphNode(id="header://src/impl.cc", kind="source", label="src/impl.cc"),
+            GraphNode(
+                id="binary_symbol://_Z5apiFnv",
+                kind="binary_symbol",
+                label="_Z5apiFnv",
+            ),
+        ],
+        [
+            GraphEdge(
+                src="decl://api",
+                dst="binary_symbol://_Z5apiFnv",
+                kind="SOURCE_DECL_MAPS_TO_SYMBOL",
+            ),
+            GraphEdge(src="decl://api", dst="decl://impl", kind="DECL_CALLS_DECL"),
+            GraphEdge(
+                src="header://src/impl.cc", dst="decl://impl", kind="SOURCE_DECLARES"
+            ),
+        ],
+    )
+    snap = _snap(build_source=BuildSourcePack(root="", source_graph=g))
+    res = run_crosschecks(snap)
+    hits = _findings_of(res, ChangeKind.PUBLIC_TO_INTERNAL_DEPENDENCY)
+    assert [(c.symbol, c.new_value) for c in hits] == [("apiFn", "implHelper")]
+
+
+def test_public_to_internal_dependency_flags_defined_in_project_callee():
+    # The built-in call graph marks a callee whose body is in a project source
+    # file `defined_in_project` (source-location provenance) — no SOURCE_DECLARES
+    # edge needed. A public caller reaching it is flagged (Codex review).
+    g = _graph(
+        [
+            _decl("decl://pub", "pubFn", "public_header"),
+            GraphNode(
+                id="decl://impl",
+                kind="source_decl",
+                label="implHelper",
+                attrs={"defined_in_project": True},
+            ),
+        ],
+        [GraphEdge(src="decl://pub", dst="decl://impl", kind="DECL_CALLS_DECL")],
+    )
+    snap = _snap(build_source=BuildSourcePack(root="", source_graph=g))
+    res = run_crosschecks(snap)
+    hits = _findings_of(res, ChangeKind.PUBLIC_TO_INTERNAL_DEPENDENCY)
+    assert [(c.symbol, c.new_value) for c in hits] == [("pubFn", "implHelper")]
+
+
+def test_public_to_internal_dependency_skips_generated_public_target():
+    # `visibility="generated"` in the L5 graph means a generated header under the
+    # public roots — a public, consumer-visible entity (source_link._is_public
+    # treats it as public). A public API referencing it (e.g. an installed
+    # generated config.h type) must NOT be flagged (Codex review).
+    g = _graph(
+        [
+            _decl("decl://pub", "pubFn", "public_header"),
+            GraphNode(
+                id="type://cfg",
+                kind="record_type",
+                label="GeneratedConfig",
+                attrs={"visibility": "generated"},
+            ),
+        ],
+        [GraphEdge(src="decl://pub", dst="type://cfg", kind="DECL_HAS_TYPE")],
+    )
+    snap = _snap(build_source=BuildSourcePack(root="", source_graph=g))
+    res = run_crosschecks(snap)
+    assert _findings_of(res, ChangeKind.PUBLIC_TO_INTERNAL_DEPENDENCY) == []
+    assert _coverage(res, CHECK_PUBLIC_TO_INTERNAL_DEPENDENCY)["status"] == "present"
+
+
+def test_public_to_internal_dependency_clean_when_target_is_public():
+    g = _graph(
+        [
+            _decl("decl://pub", "pubFn", "public_header"),
+            _decl("decl://pub2", "otherPub", "public_header"),
+        ],
+        [GraphEdge(src="decl://pub", dst="decl://pub2", kind="DECL_CALLS_DECL")],
+    )
+    snap = _snap(build_source=BuildSourcePack(root="", source_graph=g))
+    res = run_crosschecks(snap)
+    assert _findings_of(res, ChangeKind.PUBLIC_TO_INTERNAL_DEPENDENCY) == []
+    assert _coverage(res, CHECK_PUBLIC_TO_INTERNAL_DEPENDENCY)["status"] == "present"
+
+
+def test_public_to_internal_dependency_skipped_without_graph():
+    snap = _snap()
+    res = run_crosschecks(snap)
+    assert _coverage(res, CHECK_PUBLIC_TO_INTERNAL_DEPENDENCY)["status"] == "skipped"
+
+
+def test_public_to_internal_dependency_soft_advisory_on_structural_only_graph():
+    # A structural-only graph (no decl-dependency edges) cannot run the check; it
+    # must skip with an advisory naming the method to enable, never read clean.
+    g = _graph([GraphNode(id="target://x", kind="target", label="x")], [])
+    snap = _snap(build_source=BuildSourcePack(root="", source_graph=g))
+    res = run_crosschecks(snap)
+    row = _coverage(res, CHECK_PUBLIC_TO_INTERNAL_DEPENDENCY)
+    assert row["status"] == "skipped"
+    assert "call edges" in row["detail"]
+    assert _findings_of(res, ChangeKind.PUBLIC_TO_INTERNAL_DEPENDENCY) == []
+
+
+# --------------------------------------------------------------------------- #
+# unversioned_exported_symbol (ADR-035 D8 audit)
+# --------------------------------------------------------------------------- #
+
+
+def _velf(symbols, versions_defined=()) -> ElfMetadata:
+    return ElfMetadata(
+        symbols=[
+            ElfSymbol(name=n, version=v, visibility=vis) for (n, v, vis) in symbols
+        ],
+        versions_defined=list(versions_defined),
+    )
+
+
+def test_unversioned_exported_symbol_flags_unversioned_under_scheme():
+    snap = _snap(
+        elf=_velf(
+            [("_Z3apiv", "FOO_1.0", "default"), ("_Z6legacyv", "", "default")],
+            versions_defined=["FOO_1.0"],
+        )
+    )
+    res = run_crosschecks(snap)
+    hits = _findings_of(res, ChangeKind.UNVERSIONED_EXPORTED_SYMBOL)
+    assert [c.symbol for c in hits] == ["_Z6legacyv"]
+    assert ChangeKind.UNVERSIONED_EXPORTED_SYMBOL not in _api_break_kinds()
+    assert res.providers[CHECK_UNVERSIONED_EXPORTED_SYMBOL] == [PROVIDER_BINARY_EXPORTS]
+
+
+def test_unversioned_exported_symbol_silent_without_scheme():
+    snap = _snap(elf=_velf([("_Z3apiv", "", "default")], versions_defined=[]))
+    res = run_crosschecks(snap)
+    assert _findings_of(res, ChangeKind.UNVERSIONED_EXPORTED_SYMBOL) == []
+    assert _coverage(res, CHECK_UNVERSIONED_EXPORTED_SYMBOL)["status"] == "present"
+
+
+def test_unversioned_exported_symbol_skips_hidden_and_structors():
+    snap = _snap(
+        elf=_velf(
+            [
+                ("_Z3apiv", "FOO_1.0", "default"),
+                ("_Z6hiddenv", "", "hidden"),  # not exported-visible
+                ("_ZN6WidgetC1Ev", "", "default"),  # ctor artifact
+            ],
+            versions_defined=["FOO_1.0"],
+        )
+    )
+    res = run_crosschecks(snap)
+    assert _findings_of(res, ChangeKind.UNVERSIONED_EXPORTED_SYMBOL) == []
+
+
+def test_unversioned_exported_symbol_skipped_on_non_elf():
+    snap = _snap(elf=None)
+    res = run_crosschecks(snap)
+    assert _coverage(res, CHECK_UNVERSIONED_EXPORTED_SYMBOL)["status"] == "skipped"
+
+
+# --------------------------------------------------------------------------- #
+# rtti_for_internal_type (ADR-035 D8 audit)
+# --------------------------------------------------------------------------- #
+
+
+def test_rtti_for_internal_type_flags_typeinfo_of_private_type():
+    snap = _snap(elf=_elf("_ZTI8Internal", "_ZTV8Internal", "_ZTI6Widget"))
+    snap.functions = [
+        Function(
+            name="api",
+            mangled="_Z3apiv",
+            return_type="void",
+            origin=ScopeOrigin.PUBLIC_HEADER,
+        ),
+    ]
+    snap.types = [
+        RecordType(name="Internal", kind="class", origin=ScopeOrigin.PRIVATE_HEADER),
+        RecordType(name="Widget", kind="class", origin=ScopeOrigin.PUBLIC_HEADER),
+    ]
+    res = run_crosschecks(snap)
+    hits = _findings_of(res, ChangeKind.RTTI_FOR_INTERNAL_TYPE)
+    assert sorted(c.symbol for c in hits) == ["_ZTI8Internal", "_ZTV8Internal"]
+    assert all(c.caused_by_type == "Internal" for c in hits)
+
+
+def test_rtti_for_internal_type_clean_for_public_type():
+    snap = _snap(elf=_elf("_ZTI6Widget", "_ZTV6Widget"))
+    snap.functions = [
+        Function(
+            name="api",
+            mangled="_Z3apiv",
+            return_type="void",
+            origin=ScopeOrigin.PUBLIC_HEADER,
+        ),
+    ]
+    snap.types = [
+        RecordType(name="Widget", kind="class", origin=ScopeOrigin.PUBLIC_HEADER),
+    ]
+    res = run_crosschecks(snap)
+    assert _findings_of(res, ChangeKind.RTTI_FOR_INTERNAL_TYPE) == []
+
+
+def test_rtti_for_internal_type_handles_nested_name():
+    snap = _snap(elf=_elf("_ZTIN2ns8InternalE"))
+    snap.functions = [
+        Function(
+            name="api",
+            mangled="_Z3apiv",
+            return_type="void",
+            origin=ScopeOrigin.PUBLIC_HEADER,
+        ),
+    ]
+    snap.types = [
+        RecordType(
+            name="ns::Internal", kind="class", origin=ScopeOrigin.PRIVATE_HEADER
+        ),
+    ]
+    res = run_crosschecks(snap)
+    hits = _findings_of(res, ChangeKind.RTTI_FOR_INTERNAL_TYPE)
+    assert [c.caused_by_type for c in hits] == ["ns::Internal"]
+
+
+def test_rtti_for_internal_type_matches_private_template_instantiation():
+    # RTTI for a private class template `detail::Box<int>` mangles as
+    # `_ZTIN6detail3BoxIiEE`; the symbol parser reduces to `detail::Box`/`Box`
+    # (no template args), so the private type's base spelling must resolve back to
+    # the instantiation (Codex review).
+    snap = _snap(elf=_elf("_ZTIN6detail3BoxIiEE"))
+    snap.functions = [
+        Function(
+            name="api",
+            mangled="_Z3apiv",
+            return_type="void",
+            origin=ScopeOrigin.PUBLIC_HEADER,
+        ),
+    ]
+    snap.types = [
+        RecordType(
+            name="detail::Box<int>", kind="class", origin=ScopeOrigin.PRIVATE_HEADER
+        ),
+    ]
+    res = run_crosschecks(snap)
+    hits = _findings_of(res, ChangeKind.RTTI_FOR_INTERNAL_TYPE)
+    assert [c.caused_by_type for c in hits] == ["detail::Box<int>"]
+
+
+def test_rtti_for_internal_type_template_base_collision_with_public_skips():
+    # A public `api::Box<int>` and a private `detail::Box<long>` share the leaf
+    # base `Box`. RTTI for the PUBLIC template must NOT be flagged (the leaf base
+    # alias is suppressed by the public-collision guard).
+    snap = _snap(elf=_elf("_ZTIN3api3BoxIiEE"))
+    snap.functions = [
+        Function(
+            name="api",
+            mangled="_Z3apiv",
+            return_type="void",
+            origin=ScopeOrigin.PUBLIC_HEADER,
+        ),
+    ]
+    snap.types = [
+        RecordType(
+            name="api::Box<int>", kind="class", origin=ScopeOrigin.PUBLIC_HEADER
+        ),
+        RecordType(
+            name="detail::Box<long>", kind="class", origin=ScopeOrigin.PRIVATE_HEADER
+        ),
+    ]
+    res = run_crosschecks(snap)
+    assert _findings_of(res, ChangeKind.RTTI_FOR_INTERNAL_TYPE) == []
+
+
+def test_rtti_for_internal_type_matches_qualified_over_leaf_collision():
+    # A public api::Internal and a private detail::Internal share the leaf token
+    # "Internal" (so _private_type_names suppresses the bare alias). RTTI for the
+    # private detail::Internal must still be matched on its qualified name from the
+    # nested mangling (Codex review).
+    snap = _snap(elf=_elf("_ZTIN6detail8InternalE", "_Z3apiv"))
+    snap.functions = [
+        Function(
+            name="api",
+            mangled="_Z3apiv",
+            return_type="void",
+            origin=ScopeOrigin.PUBLIC_HEADER,
+        ),
+    ]
+    snap.types = [
+        RecordType(
+            name="api::Internal", kind="class", origin=ScopeOrigin.PUBLIC_HEADER
+        ),
+        RecordType(
+            name="detail::Internal", kind="class", origin=ScopeOrigin.PRIVATE_HEADER
+        ),
+    ]
+    res = run_crosschecks(snap)
+    hits = _findings_of(res, ChangeKind.RTTI_FOR_INTERNAL_TYPE)
+    assert [c.caused_by_type for c in hits] == ["detail::Internal"]
+
+
+def test_rtti_for_internal_type_skipped_without_provenance():
+    snap = _snap(from_headers=False, elf=_elf("_ZTI8Internal"))
+    res = run_crosschecks(snap)
+    assert _coverage(res, CHECK_RTTI_FOR_INTERNAL_TYPE)["status"] == "skipped"
+
+
+# --------------------------------------------------------------------------- #
 # coverage honesty / engine plumbing
 # --------------------------------------------------------------------------- #
 
@@ -788,8 +1384,12 @@ def test_crosscheck_kinds_are_risk_or_api_break_never_breaking():
         ChangeKind.PUBLIC_NOT_EXPORTED,
         ChangeKind.HEADER_BUILD_CONTEXT_MISMATCH,
         ChangeKind.PRIVATE_HEADER_LEAK,
+        ChangeKind.ODR_TYPE_VARIANT,
+        ChangeKind.PUBLIC_TO_INTERNAL_DEPENDENCY,
     }
     assert not (crosscheck_kinds & BREAKING_KINDS)
-    # And HEADER_BUILD_CONTEXT_MISMATCH is the lone API_BREAK of the four.
+    # The two API_BREAK cross-checks; the rest are RISK.
     assert ChangeKind.HEADER_BUILD_CONTEXT_MISMATCH in _api_break_kinds()
+    assert ChangeKind.ODR_TYPE_VARIANT in _api_break_kinds()
+    assert ChangeKind.PUBLIC_TO_INTERNAL_DEPENDENCY not in _api_break_kinds()
     assert Verdict.BREAKING is not None  # sanity: import wired

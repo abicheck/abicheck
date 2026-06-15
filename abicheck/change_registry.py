@@ -1385,6 +1385,45 @@ REGISTRY = ChangeKindRegistry([
               "not shipped, so their build breaks once the private header is absent "
               "from the install tree — a packaging-hygiene risk. Make the public header "
               "self-contained or install the leaked header."),
+    _E("odr_type_variant", _A,
+       impact="One type has divergent definitions across translation units (the L4 "
+              "source-replay surface recorded an ODR conflict: the same qualified name "
+              "resolves to different per-TU layouts). Linking code that mixes the "
+              "definitions is undefined behavior — a consumer compiled against one "
+              "layout silently reads a struct laid out the other way. A source/API "
+              "break surfaced from one merged snapshot's L4 evidence; never on its own "
+              "an artifact-proven shipped-ABI break. Reconcile the conflicting "
+              "definitions (usually a macro/flag that changes the type per TU)."),
+    _E("public_to_internal_dependency", _R,
+       impact="A public/exported declaration reaches an internal (non-public-header) "
+              "entity through the L5 source graph — a public API calls, references, or "
+              "embeds a type that lives only in a private header or source file. The "
+              "public surface depends on a declaration consumers cannot see, so a "
+              "change to that internal entity is an undeclared behavioral risk to the "
+              "API. Elevated when the internal entity is among the revision's changed "
+              "files. Explains and localizes risk from the source graph; never on its "
+              "own an artifact-proven ABI break."),
+    # ── Single-release hygiene audit (ADR-035 D8 / G19.6) ───────────────────
+    # Intra-version "bad ABI hygiene" the same cross-source engine surfaces from
+    # ONE build (no baseline), exposed through `scan --audit` / `surface-report
+    # --audit`. RISK, advisory until promoted; never BREAKING on their own.
+    _E("unversioned_exported_symbol", _R,
+       impact="The library defines a symbol-versioning scheme (a version script /"
+              " .gnu.version_d table) yet exports this symbol without a version node. "
+              "Unversioned exports cannot be evolved compatibly later — consumers bind "
+              "to the bare name with no version guarantee, so a future versioned "
+              "release silently changes what they resolve to. Add the symbol to the "
+              "version script (or hide it if it is not public API). A single-release "
+              "hygiene risk, never on its own an artifact-proven ABI break."),
+    _E("rtti_for_internal_type", _R,
+       impact="The binary exports RTTI (typeinfo/vtable, `_ZTI`/`_ZTV`/`_ZTS`) for a "
+              "polymorphic type that is declared only in a private / non-installed "
+              "header. The type's run-time type information leaks onto the ABI surface "
+              "even though consumers cannot name the type, which both bloats the export "
+              "set and risks cross-module RTTI/`dynamic_cast` coupling to an internal "
+              "class. Hide the internal type (anonymous namespace / "
+              "`-fvisibility=hidden`) or stop exporting its typeinfo. A single-release "
+              "hygiene risk, never on its own an artifact-proven ABI break."),
 
     # ── Cross-implementation standard-library compatibility (D-stdlib) ───────
     # Produced by the build-mode diff (diff_stdlib_impl.py). Compatibility

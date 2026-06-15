@@ -34,6 +34,7 @@ import click
 from .cli import _write_or_echo, main
 
 if TYPE_CHECKING:
+    from .checker_types import Change
     from .idioms import AntiPattern, IdiomTag
 
 
@@ -87,6 +88,15 @@ if TYPE_CHECKING:
     "polymorphic types with no virtual destructor).",
 )
 @click.option(
+    "--audit/--no-audit",
+    default=False,
+    show_default=True,
+    help="Run the ADR-035 D8 single-release hygiene audit (intra-version "
+    "cross-source checks: accidental ABI surface, private-header leaks, "
+    "unversioned exports, RTTI for internal types, …) and list the findings. "
+    "No baseline needed; advisory only.",
+)
+@click.option(
     "-o",
     "--output",
     type=click.Path(path_type=Path),
@@ -101,6 +111,7 @@ def surface_report_cmd(
     top: int,
     idioms: bool,
     anti_patterns: bool,
+    audit: bool,
     output: Path | None,
 ) -> None:
     """Report structural metrics for a library's public ABI surface.
@@ -110,6 +121,7 @@ def surface_report_cmd(
     \b
     Example:
       abicheck surface-report libfoo.so -H include/ --format json -o surface.json
+      abicheck surface-report libfoo.so -H include/ --audit   # hygiene lint
     """
     from .service import expand_header_inputs, resolve_input
     from .surface_graph import compute_surface_metrics
@@ -125,6 +137,12 @@ def surface_report_cmd(
         raise click.ClickException(f"Cannot read '{library}': {exc}") from exc
 
     metrics = compute_surface_metrics(snap, top_n=top)
+
+    audit_findings: list[Change] = []
+    if audit:
+        from .buildsource.crosscheck import run_crosschecks
+
+        audit_findings = run_crosschecks(snap).findings
 
     idiom_tags: dict[str, list[IdiomTag]] = {}
     anti_list: list[AntiPattern] = []
@@ -168,6 +186,15 @@ def surface_report_cmd(
                 }
                 for a in anti_list
             ]
+        if audit:
+            payload["audit"] = [
+                {
+                    "kind": c.kind.value,
+                    "symbol": c.symbol,
+                    "description": c.description,
+                }
+                for c in audit_findings
+            ]
         _write_or_echo(output, json.dumps(payload, indent=2))
         return
 
@@ -177,6 +204,7 @@ def surface_report_cmd(
             metrics,
             idiom_tags if idioms else None,
             anti_list if anti_patterns else None,
+            audit_findings if audit else None,
         ),
     )
 
@@ -185,6 +213,7 @@ def _render_text(
     metrics: object,
     idiom_tags: dict[str, list[IdiomTag]] | None = None,
     anti_list: list[AntiPattern] | None = None,
+    audit_findings: list[Change] | None = None,
 ) -> str:
     from .surface_graph import SurfaceMetrics
 
@@ -224,4 +253,8 @@ def _render_text(
         lines.append("  anti-patterns detected:")
         for a in anti_list:
             lines.append(f"    {a.kind.value:<34} {a.symbol}")
+    if audit_findings is not None:
+        lines.append(f"  single-release audit (D8): {len(audit_findings)} finding(s)")
+        for c in audit_findings:
+            lines.append(f"    {c.kind.value:<32} {c.symbol}")
     return "\n".join(lines) + "\n"

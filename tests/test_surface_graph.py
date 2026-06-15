@@ -506,6 +506,39 @@ def test_metrics_json_round_trips_through_snapshot(tmp_path) -> None:
     assert any(hc["header"] == "foo/api.h" for hc in data["header_coverage"])
 
 
+def test_surface_report_audit_lists_hygiene_findings(tmp_path) -> None:
+    # `surface-report --audit` runs the ADR-035 D8 single-release hygiene audit
+    # (cross-source checks) and lists the findings — exported_not_public fires for
+    # the EXPORT_ONLY symbol once an export table is present.
+    import json as _json
+
+    from click.testing import CliRunner
+
+    from abicheck.cli import main
+    from abicheck.elf_metadata import ElfMetadata, ElfSymbol
+    from abicheck.serialization import save_snapshot
+
+    snap = _snap()
+    snap.elf = ElfMetadata(
+        symbols=[ElfSymbol(name="foo_open"), ElfSymbol(name="foo_undocumented")]
+    )
+    snap_path = tmp_path / "libfoo.abi.json"
+    save_snapshot(snap, snap_path)
+
+    result = CliRunner().invoke(
+        main, ["surface-report", str(snap_path), "--audit", "--format", "json"]
+    )
+    assert result.exit_code == 0, result.output
+    data = _json.loads(result.output)
+    assert "audit" in data
+    kinds = {f["kind"] for f in data["audit"]}
+    assert "exported_not_public" in kinds
+
+    text = CliRunner().invoke(main, ["surface-report", str(snap_path), "--audit"])
+    assert text.exit_code == 0, text.output
+    assert "single-release audit" in text.output
+
+
 def _bare_snap() -> AbiSnapshot:
     # A void/no-param public function and no types/headers — exercises the
     # empty-seed, empty-coverage, and DWARF/ELF-tier branches.

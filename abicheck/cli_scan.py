@@ -708,7 +708,6 @@ def scan_cmd(
     # so a deeper preset (pr-deep = graph) is distinct from pr, and an explicit
     # --source-method reports its own depth, not the mode preset (Codex review).
     collect_mode = level_to_collect_mode(resolved, eff_depth_enum)
-    eff_depth = eff_depth_enum.value
     effective_build_info = compile_db or build_info
 
     # --- --estimate: dry-run cost probe, scan nothing (ADR-035 D10) -----------
@@ -731,6 +730,112 @@ def scan_cmd(
         )
         return
 
+    # --- run the engine core (the shared orchestration; ADR-035 D10) ----------
+    # The classify→tier→level→compare body lives in ``run_scan_core`` so the CLI,
+    # ``service.run_scan``, and the MCP tool drive one engine. The CLI only parses
+    # argv, renders, and maps the budget-overflow signal onto an exit code.
+    try:
+        core = run_scan_core(
+            start=start,
+            binary=binary,
+            headers=list(headers),
+            includes=list(includes),
+            sources=sources,
+            effective_build_info=effective_build_info,
+            build_config=build_config,
+            baseline=baseline,
+            lang=lang,
+            allow_build_query=allow_build_query,
+            scan_mode=scan_mode,
+            resolved=resolved,
+            eff_depth_enum=eff_depth_enum,
+            collect_mode=collect_mode,
+            changed=changed,
+            changed_src=changed_src,
+            seeded=seeded,
+            risk=risk,
+            is_auto=is_auto,
+            enabled_checks=enabled_checks,
+            severities=severities,
+            budget=budget,
+            budget_s=budget_s,
+        )
+    except _BudgetOverflow as bo:
+        click.echo(bo.message, err=True)
+        sys.exit(_EXIT_BUDGET_OVERFLOW)
+
+    outcome = core.outcome
+    text = (
+        json.dumps(outcome.to_dict(), indent=2)
+        if fmt == "json"
+        else _render_text(outcome)
+    )
+    if output:
+        _safe_write_output(output, text)
+        click.echo(f"Report written to {output}", err=True)
+    else:
+        click.echo(text)
+
+    if outcome.exit_code != 0:
+        sys.exit(outcome.exit_code)
+
+
+class _BudgetOverflow(Exception):
+    """Raised by ``run_scan_core`` when the scan exceeds ``--budget`` (ADR-035 D3).
+
+    A scan-engine signal (not a click concern): the budget is a *failure guard*
+    that never shrinks scope, so the core raises and the CLI maps it onto exit 5.
+    """
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+        self.message = message
+
+
+@dataclass
+class ScanCoreResult:
+    """The engine core's typed output — the rendered :class:`ScanOutcome` plus the
+    raw cross-source findings and the candidate snapshot, so ``service.run_scan``
+    can build a typed ``ScanResult`` without re-running anything."""
+
+    outcome: ScanOutcome
+    findings: list[Any]
+    snapshot: Any
+
+
+def run_scan_core(
+    *,
+    start: float,
+    binary: Path,
+    headers: list[Path],
+    includes: list[Path],
+    sources: Path | None,
+    effective_build_info: Path | None,
+    build_config: Path | None,
+    baseline: Path | None,
+    lang: str,
+    allow_build_query: bool,
+    scan_mode: ScanMode,
+    resolved: SourceMethod,
+    eff_depth_enum: EvidenceDepth,
+    collect_mode: str,
+    changed: list[str],
+    changed_src: str,
+    seeded: bool,
+    risk: RiskScore,
+    is_auto: bool,
+    enabled_checks: frozenset[str],
+    severities: dict[str, str],
+    budget: str | None,
+    budget_s: float | None,
+) -> ScanCoreResult:
+    """The shared scan orchestration (classify → always-on tier → level → compare).
+
+    Pure of click/argv: it takes already-resolved inputs, runs the engine, and
+    returns a :class:`ScanCoreResult`. Raises :class:`_BudgetOverflow` on budget
+    overflow (the CLI maps it to exit 5). This is the one body the CLI,
+    ``service.run_scan``, and the MCP scan tool share (ADR-035 D10).
+    """
     # --- always-on tier: compiler-free pattern pre-scan (S3) ------------------
     # Runs *before* the snapshot build so its escalation triggers feed the D7
     # points-of-interest work-list that focuses the (expensive) source replay.
@@ -790,7 +895,17 @@ def scan_cmd(
     preproc = run_preprocessor_scan(pp_build, _expand_public_headers(list(headers)))
 
     # --- always-on tier: intra-version cross-source checks (D4) ---------------
-    cc = run_crosschecks(new_snap, CrosscheckConfig(enabled=frozenset(enabled_checks)))
+    # The resolved changed-path set is handed to the engine so
+    # ``public_to_internal_dependency`` can elevate a finding whose internal
+    # target was touched this revision (ADR-035 D4 "L5 reachability ↔ PR
+    # changed files").
+    cc = run_crosschecks(
+        new_snap,
+        CrosscheckConfig(
+            enabled=frozenset(enabled_checks),
+            changed_paths=frozenset(changed),
+        ),
+    )
 
     # --- pinned-level baseline comparison (if any) ----------------------------
     diff_summary: dict[str, Any] | None = None
@@ -826,19 +941,17 @@ def scan_cmd(
 
     # --- budget guard: overflow FAILS, never shrinks scope (ADR-035 D3) -------
     if budget_s is not None and elapsed > budget_s:
-        click.echo(
+        raise _BudgetOverflow(
             f"error: --budget {budget} exceeded "
             f"({elapsed:.1f}s > {budget_s:.0f}s). "
             "Pin a shallower level or raise the budget; a budget never silently "
-            "shrinks the pinned scope.",
-            err=True,
+            "shrinks the pinned scope."
         )
-        sys.exit(_EXIT_BUDGET_OVERFLOW)
 
     outcome = ScanOutcome(
         mode=scan_mode.value,
         resolved_method=resolved.value,
-        depth=eff_depth,
+        depth=eff_depth_enum.value,
         collect_mode=collect_mode,
         risk=risk,
         auto=is_auto,
@@ -863,20 +976,9 @@ def scan_cmd(
         elapsed_s=elapsed,
         budget_s=budget_s,
     )
-
-    text = (
-        json.dumps(outcome.to_dict(), indent=2)
-        if fmt == "json"
-        else _render_text(outcome)
+    return ScanCoreResult(
+        outcome=outcome, findings=list(cc.findings), snapshot=new_snap
     )
-    if output:
-        _safe_write_output(output, text)
-        click.echo(f"Report written to {output}", err=True)
-    else:
-        click.echo(text)
-
-    if exit_code != 0:
-        sys.exit(exit_code)
 
 
 def _expand_public_headers(headers: list[Path]) -> list[str]:

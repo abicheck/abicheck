@@ -19,6 +19,7 @@ The gate logic lives in ``scripts/check_fp_rate.py`` so it is runnable
 standalone in CI; this mirrors it into the pytest suite (per-case for readable
 failures) so a regression is caught in the ordinary unit-test lane too.
 """
+
 from __future__ import annotations
 
 import importlib.util
@@ -55,17 +56,53 @@ def test_scoping_case_matches_ground_truth(case):
         )
 
 
+@pytest.mark.parametrize("case", fp_gate.CROSSCHECK_CORPUS, ids=lambda c: c.name)
+def test_crosscheck_case_matches_ground_truth(case):
+    """ADR-035 D4 promotion gate: each cross-check fires on a real hygiene issue
+    and stays silent on a clean snapshot (both polarities, baseline 0/0)."""
+    from abicheck.buildsource.crosscheck import run_crosschecks
+
+    result = run_crosschecks(case.build())
+    fired = any(c.kind == case.kind for c in result.findings)
+    if case.should_fire:
+        assert fired, (
+            f"FALSE NEGATIVE: cross-check {case.kind.value!r} missed hygiene "
+            f"case {case.name!r}"
+        )
+    else:
+        assert not fired, (
+            f"FALSE POSITIVE: cross-check {case.kind.value!r} flagged clean "
+            f"case {case.name!r}"
+        )
+
+
 def test_fp_rate_within_baseline():
     outcome = fp_gate.evaluate()
     assert len(outcome.false_positives) <= fp_gate.FP_BASELINE, outcome.false_positives
     assert len(outcome.false_negatives) <= fp_gate.FN_BASELINE, outcome.false_negatives
 
 
+def test_crosscheck_rate_within_baseline():
+    outcome = fp_gate.evaluate_crosschecks()
+    assert len(outcome.false_positives) <= fp_gate.CC_FP_BASELINE, (
+        outcome.false_positives
+    )
+    assert len(outcome.false_negatives) <= fp_gate.CC_FN_BASELINE, (
+        outcome.false_negatives
+    )
+
+
 def test_metrics_report_delta_vs_baseline():
     """ADR-033 D9: the gate exposes false_positive_delta_vs_baseline (0 = clean)."""
     m = fp_gate.metrics()
-    assert m["false_positive_delta_vs_baseline"] == m["false_positives"] - fp_gate.FP_BASELINE
-    assert m["false_negative_delta_vs_baseline"] == m["false_negatives"] - fp_gate.FN_BASELINE
+    assert (
+        m["false_positive_delta_vs_baseline"]
+        == m["false_positives"] - fp_gate.FP_BASELINE
+    )
+    assert (
+        m["false_negative_delta_vs_baseline"]
+        == m["false_negatives"] - fp_gate.FN_BASELINE
+    )
     # Corpus is built for a clean sheet, so the deltas are zero.
     assert m["false_positive_delta_vs_baseline"] == 0
     assert m["false_negative_delta_vs_baseline"] == 0
@@ -74,6 +111,7 @@ def test_metrics_report_delta_vs_baseline():
 def test_json_mode_emits_metrics(capsys):
     """`--json` prints the D9 metric keys for CI consumption."""
     import json
+
     rc = fp_gate.main(["--json"])
     out = json.loads(capsys.readouterr().out)
     assert rc == 0

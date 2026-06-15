@@ -109,6 +109,10 @@ ASSERTED_CHANGE_KINDS: set[ChangeKind] = {
     ChangeKind.PUBLIC_NOT_EXPORTED,
     ChangeKind.HEADER_BUILD_CONTEXT_MISMATCH,
     ChangeKind.PRIVATE_HEADER_LEAK,
+    ChangeKind.ODR_TYPE_VARIANT,
+    ChangeKind.PUBLIC_TO_INTERNAL_DEPENDENCY,
+    ChangeKind.UNVERSIONED_EXPORTED_SYMBOL,
+    ChangeKind.RTTI_FOR_INTERNAL_TYPE,
     # Cross-implementation stdlib compatibility (tests/test_diff_stdlib_impl.py).
     ChangeKind.STDLIB_IMPLEMENTATION_CHANGED,
     ChangeKind.LIBCPP_ABI_VERSION_CHANGED,

@@ -29,7 +29,7 @@ use_cases:
   # ── change_class ──────────────────────────────────────────────────────────
   - id: UC-CHANGE-taxonomy
     axis: change_class
-    name: ABI/API change taxonomy (250 ChangeKinds, 5-tier policy)
+    name: ABI/API change taxonomy (254 ChangeKinds, 5-tier policy)
     status: complete
     evidence:
       modules: [abicheck/change_registry.py, abicheck/checker_policy.py]
@@ -560,7 +560,7 @@ use_cases:
   - id: UC-WORKFLOW-pr-source-tier
     axis: workflow
     name: Always-on compiler-free PR pre-scan + deterministic level selection
-    status: partial
+    status: complete
     gap: G19
     plan: docs/development/plans/g19-pr-source-intelligence.md
     evidence:
@@ -596,7 +596,7 @@ use_cases:
   - id: UC-CHANGE-crosscheck-hygiene
     axis: change_class
     name: Cross-source validation findings (intra-version ABI hygiene)
-    status: partial
+    status: complete
     gap: G19
     plan: docs/development/plans/g19-pr-source-intelligence.md
     evidence:
@@ -620,7 +620,7 @@ use_cases:
   - id: UC-WORKFLOW-single-release-audit
     axis: workflow
     name: Single-release ABI-hygiene audit (no baseline compare)
-    status: partial
+    status: complete
     gap: G19
     plan: docs/development/plans/g19-pr-source-intelligence.md
     evidence:
@@ -645,7 +645,7 @@ use_cases:
   - id: UC-WORKFLOW-evidence-directed-scope
     axis: workflow
     name: Evidence-directed scan focusing (binary/header facts steer source scan)
-    status: partial
+    status: complete
     gap: G19
     plan: docs/development/plans/g19-pr-source-intelligence.md
     evidence:
@@ -695,7 +695,7 @@ use_cases:
   - id: UC-REPORTING-scan-coverage-estimate
     axis: reporting
     name: Scan coverage/confidence report + per-project cost estimate
-    status: partial
+    status: complete
     gap: G19
     plan: docs/development/plans/g19-pr-source-intelligence.md
     evidence:
