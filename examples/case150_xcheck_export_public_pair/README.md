@@ -1,0 +1,31 @@
+# case150 — Bidirectional export ↔ declaration pair
+
+**Verdict:** 🟡 COMPATIBLE_WITH_RISK · **Cross-checks:** `exported_not_public` +
+`public_not_exported` · **Mode:** single-release audit · **Evidence tier:** L2
+
+## What it demonstrates
+
+The L0-exports ↔ L2-decls contract has **two** failure directions, and this case
+trips both at once:
+
+| Direction | Symptom | Cross-check |
+|-----------|---------|-------------|
+| exported, undeclared | `internal()` is in the export table but no public header declares it | `EXPORTED_NOT_PUBLIC` |
+| declared, unexported | `public_api()` is declared in `include/demo/api.h` but a `static` definition kept it out of the export table | `PUBLIC_NOT_EXPORTED` |
+
+Each direction needs both sources: the binary export set *and* the public-header
+declaration set. The bidirectional pair shows the cross-check is symmetric — it
+catches the API promising more than the ABI delivers **and** the ABI shipping
+more than the API documents.
+
+## Reproduce
+
+```bash
+abicheck scan --binary libdemo.so -H include/ --audit
+```
+
+## Fix
+
+- `internal()`: hide it (version-script `local:` / hidden visibility) or declare it.
+- `public_api()`: remove the stray `static`, or drop the declaration from the
+  public header if it was never meant to ship.

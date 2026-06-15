@@ -1,0 +1,76 @@
+{
+  "build_id": null,
+  "build_mode": null,
+  "build_source": {
+    "build_evidence": {
+      "build_options": [
+        {
+          "abi_relevant": true,
+          "key": "glibcxx_use_cxx11_abi",
+          "raw": "",
+          "scope": "global",
+          "value": "1"
+        },
+        {
+          "abi_relevant": true,
+          "key": "define:BIG_BUFFERS",
+          "raw": "",
+          "scope": "global",
+          "value": "1"
+        }
+      ],
+      "build_root": "",
+      "compile_units": [],
+      "diagnostics": [],
+      "generated_files": [],
+      "generators": [],
+      "link_units": [],
+      "raw_artifacts": [],
+      "schema_version": 1,
+      "source_root": "",
+      "targets": [],
+      "toolchains": []
+    },
+    "manifest": {
+      "abicheck_version": "",
+      "artifacts": [],
+      "build_source_pack_version": 1,
+      "coverage": [],
+      "created_at": "",
+      "extractors": [],
+      "inputs": {},
+      "redaction": {},
+      "source_root": {
+        "path_redacted": true,
+        "repo_hash": ""
+      }
+    }
+  },
+  "build_source_pack": null,
+  "constants": {},
+  "created_at": null,
+  "dependency_info": null,
+  "dwarf": null,
+  "dwarf_advanced": null,
+  "elf": null,
+  "elf_only_mode": false,
+  "enums": [],
+  "from_headers": true,
+  "functions": [],
+  "git_commit": null,
+  "git_tag": null,
+  "language_profile": null,
+  "library": "libdemo.so",
+  "macho": null,
+  "parsed_with_build_context": false,
+  "pe": null,
+  "platform": null,
+  "schema_version": 8,
+  "scope_fallback": null,
+  "source_path": null,
+  "sycl": null,
+  "typedefs": {},
+  "types": [],
+  "variables": [],
+  "version": "1.0"
+}

@@ -702,7 +702,21 @@ def test_private_header_leak_adds_source_index_provider_with_graph():
     snap.types = [
         RecordType(name="Impl", kind="struct", origin=ScopeOrigin.PRIVATE_HEADER),
     ]
+    # An empty graph object alone must NOT claim source_index corroboration —
+    # the provider is recorded only when the graph actually indexed nodes.
     snap.build_source = BuildSourcePack(root="", source_graph=SourceGraphSummary())
+    empty = run_crosschecks(snap)
+    assert PROVIDER_SOURCE_INDEX not in empty.providers[CHECK_PRIVATE_HEADER_LEAK]
+
+    snap.build_source = BuildSourcePack(
+        root="",
+        source_graph=SourceGraphSummary(
+            nodes=[
+                GraphNode(id="decl://use", kind="source_decl", label="use"),
+                GraphNode(id="type://Impl", kind="record_type", label="Impl"),
+            ]
+        ),
+    )
     res = run_crosschecks(snap)
     assert PROVIDER_SOURCE_INDEX in res.providers[CHECK_PRIVATE_HEADER_LEAK]
 

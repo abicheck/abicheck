@@ -3,7 +3,7 @@
 
 Backward-compatible at the symbol level but with behavioral risk.
 
-_9 case(s)._ [← back to all examples](../index.md)
+_16 case(s)._ [← back to all examples](../index.md)
 
 | Case | Title | Verdict | Category |
 |------|-------|---------|----------|
@@ -13,6 +13,13 @@ _9 case(s)._ [← back to all examples](../index.md)
 | [case133_tls_model_flip](../case133_tls_model_flip.md) | TLS Model Flip (`-ftls-model`) | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case134_relro_weakened](../case134_relro_weakened.md) | RELRO Weakened | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case135_stack_canary_removed](../case135_stack_canary_removed.md) | Stack Canary Removed | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case143_audit_accidental_export](../case143_audit_accidental_export.md) | Accidental export (single-release audit) | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case144_audit_private_header_leak](../case144_audit_private_header_leak.md) | Private header leak (single-release audit) | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case145_audit_unversioned_export](../case145_audit_unversioned_export.md) | Unversioned export under a versioning scheme (audit, pure L0) | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case146_audit_rtti_for_internal](../case146_audit_rtti_for_internal.md) | RTTI exported for an internal type (single-release audit) | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case147_scan_depth_ladder](../case147_scan_depth_ladder.md) | Depth ladder: the same input answered at three depths | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case150_xcheck_export_public_pair](../case150_xcheck_export_public_pair.md) | Bidirectional export ↔ declaration pair | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case151_xcheck_provider_matrix](../case151_xcheck_provider_matrix.md) | Provider-agreement matrix (corroboration grows with evidence) | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case15_noexcept_change](../case15_noexcept_change.md) | `noexcept` Changed | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case50_soname_inconsistent](../case50_soname_inconsistent.md) | SONAME Inconsistent (Wrong Major Version) | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case83_cpu_dispatch_isa_dropped](../case83_cpu_dispatch_isa_dropped.md) | CPU-dispatch ISA family dropped | 🟡 COMPATIBLE_WITH_RISK | Risk |

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Evidence-tier model for the abicheck example catalog.
 
-abicheck reasons over *five sources of information* about a library, layered
+abicheck reasons over *six sources of information* about a library, layered
 from the least to the most that a release engineer can hand it. Each source is
-labelled with the same ``L0``–``L4`` evidence-layer codes used across the
+labelled with the same ``L0``–``L5`` evidence-layer codes used across the
 docs (see ``docs/concepts/evidence-and-detectability.md`` and
 ``docs/concepts/evidence-pack.md``):
 
@@ -15,6 +15,7 @@ debug symbols     L1 — DWARF / PDB / BTF / CTF            a ``-g`` build, no h
 headers           L2 — public-header AST (castxml)        ``-H include/``
 build data        L3 — compile DB / flags / target graph  ``-p build/``
 sources           L4 — per-TU source ABI replay           an BuildSourcePack (ADR-030)
+source graph      L5 — decl-dependency / call edges       the L5 graph in the pack (ADR-031)
 ================  =====================================  =========================
 
 This module is the **single source of truth** for *which evidence layer each
@@ -40,7 +41,7 @@ from __future__ import annotations
 from typing import Any
 
 # Ordered tiers, weakest evidence first. The index is the comparison key.
-TIER_ORDER: list[str] = ["L0", "L1", "L2", "L3", "L4"]
+TIER_ORDER: list[str] = ["L0", "L1", "L2", "L3", "L4", "L5"]
 
 TIER_LABELS: dict[str, str] = {
     "L0": "binary only (exported symbols / linker metadata)",
@@ -48,6 +49,7 @@ TIER_LABELS: dict[str, str] = {
     "L2": "binary + debug + public headers (castxml AST)",
     "L3": "+ build context (compile DB / flags)",
     "L4": "+ source ABI replay (BuildSourcePack)",
+    "L5": "+ source graph (decl-dependency / call edges)",
 }
 
 
@@ -185,11 +187,12 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     "header_build_context_mismatch": "L3",
     # ── L4: ADR-035 D4 cross-source checks that read the source-replay surface /
     # source graph carried in a BuildSourcePack (no artifact layer sees them) ──
-    # odr_type_variant reads the L4 surface's recorded per-TU ODR conflicts;
-    # public_to_internal_dependency reads the L5 source graph's decl-dependency
-    # edges (which ride in the same BuildSourcePack the L4 replay produces).
+    # odr_type_variant reads the L4 surface's recorded per-TU ODR conflicts.
     "odr_type_variant": "L4",
-    "public_to_internal_dependency": "L4",
+    # ── L5: needs the L5 source graph's decl-dependency edges (the check skips
+    # cleanly when no call-graph pass populated the graph), so its minimum
+    # evidence is the graph tier, not the L4 replay surface that carries it. ──
+    "public_to_internal_dependency": "L5",
     # ── ADR-035 D8 single-release hygiene audit ──
     # unversioned_exported_symbol is pure ELF (export table vs .gnu.version_d);
     # rtti_for_internal_type needs header provenance to know a type is internal.
@@ -244,15 +247,24 @@ KINDLESS_CASE_TIER: dict[str, str] = {
 
 
 def compute_min_evidence(case_name: str, info: dict[str, Any]) -> str:
-    """Return the minimum evidence layer (``L0``..``L4``) for one case.
+    """Return the minimum evidence layer (``L0``..``L5``) for one case.
 
     The value is the strongest layer among the case's expected kinds, or the
     explicit :data:`KINDLESS_CASE_TIER` entry when the case declares no kinds.
     Raises ``KeyError`` if a kind or kind-less case is unmapped, so a new case
     cannot be added silently without an evidence-tier decision.
+
+    ADR-035 (G20) cross-check / single-release-audit cases declare their finding
+    under ``expected_crosscheck_kinds`` (the ``run_crosschecks`` output) rather
+    than ``expected_kinds`` (the ``compare`` diff). Those eight kinds are already
+    mapped in :data:`EVIDENCE_TIER_BY_KIND`, so the tier is *derived* the same
+    way — a crosscheck case never needs a hand-set :data:`KINDLESS_CASE_TIER`
+    entry.
     """
-    kinds = list(info.get("expected_kinds", [])) + list(
-        info.get("expected_bundle_kinds", [])
+    kinds = (
+        list(info.get("expected_kinds", []))
+        + list(info.get("expected_bundle_kinds", []))
+        + list(info.get("expected_crosscheck_kinds", []))
     )
     if not kinds:
         if case_name not in KINDLESS_CASE_TIER:

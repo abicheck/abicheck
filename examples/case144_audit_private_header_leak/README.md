@@ -1,0 +1,30 @@
+# case144 — Private header leak (single-release audit)
+
+**Verdict:** 🟡 COMPATIBLE_WITH_RISK · **Cross-check:** `private_header_leak` ·
+**Mode:** single-release audit · **Evidence tier:** L2
+
+## What it demonstrates
+
+A public API returns `detail::WidgetImpl*`, a type **defined only in a private,
+non-installed header**. Consumers cannot legally name the type, but it is on the
+public ABI surface — a latent break the day the private header changes.
+
+## Why no single source sees it
+
+| Source | What it sees alone |
+|--------|--------------------|
+| Binary export table (L0) | `make_widget` is exported — looks fine |
+| Public-header AST (L2) | `make_widget` returns `detail::WidgetImpl*`; `detail::WidgetImpl` originates in a **private** header |
+| **Combination** | a public signature references a private-header type → `PRIVATE_HEADER_LEAK` |
+
+## Reproduce
+
+```bash
+abicheck scan --binary libdemo.so -H include/ --audit
+```
+
+## Fix
+
+Either install the header that defines `detail::WidgetImpl` (promote it to public
+API) or hide the type behind an opaque handle / PIMPL forward declaration so the
+public signature no longer exposes the internal layout.
