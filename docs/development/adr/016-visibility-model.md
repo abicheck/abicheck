@@ -1,7 +1,7 @@
 # ADR-016: Three-Tier Visibility Model
 
 **Date:** 2026-03-18
-**Status:** Accepted
+**Status:** Accepted — implemented
 **Decision maker:** Nikolay Petrov
 
 ---

@@ -1,7 +1,7 @@
 # ADR-015: Snapshot Serialization and Schema Versioning
 
 **Date:** 2026-03-18
-**Status:** Accepted
+**Status:** Accepted — implemented
 **Decision maker:** Nikolay Petrov
 
 ---

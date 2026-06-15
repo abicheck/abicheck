@@ -1,7 +1,7 @@
 # ADR-005: Application Compatibility Checking
 
 **Date:** 2026-03-17
-**Status:** Accepted
+**Status:** Accepted — implemented
 **Decision maker:** Nikolay Petrov
 
 ---

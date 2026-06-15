@@ -1,7 +1,7 @@
 # ADR-013: Suppression System Design
 
 **Date:** 2026-03-18
-**Status:** Accepted
+**Status:** Accepted — implemented
 **Decision maker:** Nikolay Petrov
 
 ---

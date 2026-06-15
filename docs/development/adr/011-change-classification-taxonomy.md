@@ -1,7 +1,7 @@
 # ADR-011: ABI Change Classification Taxonomy
 
 **Date:** 2026-03-18
-**Status:** Accepted
+**Status:** Accepted — implemented
 **Decision maker:** Nikolay Petrov
 
 ---

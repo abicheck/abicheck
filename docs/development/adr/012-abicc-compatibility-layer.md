@@ -1,7 +1,7 @@
 # ADR-012: ABICC Drop-In Compatibility Layer
 
 **Date:** 2026-03-18
-**Status:** Accepted
+**Status:** Accepted — implemented
 **Decision maker:** Nikolay Petrov
 
 ---

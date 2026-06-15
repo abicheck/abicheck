@@ -1,7 +1,7 @@
 # ADR-021b: MCP Security Model
 
 **Date:** 2026-03-24
-**Status:** Accepted
+**Status:** Accepted — implemented
 **Decision maker:** Nikolay Petrov
 
 ---

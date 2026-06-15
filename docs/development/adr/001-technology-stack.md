@@ -1,7 +1,7 @@
 # ADR-001: Technology Stack — Python + pyelftools + castxml
 
 **Date:** 2026-03-07  
-**Status:** Accepted  
+**Status:** Accepted — implemented
 **Decision maker:** Nikolay Petrov
 
 ---

@@ -1,7 +1,7 @@
 # ADR-009: Verdict System and Exit Code Contract
 
 **Date:** 2026-03-18
-**Status:** Accepted
+**Status:** Accepted — implemented
 **Decision maker:** Nikolay Petrov
 
 ---

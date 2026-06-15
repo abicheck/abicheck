@@ -1,7 +1,7 @@
 # ADR-023: Bundle-aware multi-binary ABI analysis
 
 **Date:** 2026-05-20
-**Status:** Accepted
+**Status:** Accepted — implemented
 **Decision maker:** Nikolay Petrov
 
 ---

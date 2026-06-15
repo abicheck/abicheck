@@ -1,7 +1,7 @@
 # ADR-022: Baseline Registry and Snapshot Distribution
 
 **Date:** 2026-03-23
-**Status:** Accepted
+**Status:** Accepted — implemented
 **Decision maker:** Nikolay Petrov
 
 ---
