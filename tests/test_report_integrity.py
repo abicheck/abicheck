@@ -76,6 +76,20 @@ def test_canonical_maps_cover_every_reportable_verdict(verdict: Verdict) -> None
     assert verdict in VERDICT_TO_SARIF_LEVEL
 
 
+def test_presentation_table_is_exactly_the_reportable_verdicts() -> None:
+    # NO_CHANGE is intentionally excluded: a per-finding verdict is never
+    # NO_CHANGE (that is an overall-result state). Pin the table's key set so the
+    # asymmetry with severity.legacy_exit_code (which DOES map NO_CHANGE) stays a
+    # conscious decision, not an accidental omission.
+    assert set(VERDICT_PRESENTATION) == {
+        Verdict.BREAKING,
+        Verdict.API_BREAK,
+        Verdict.COMPATIBLE_WITH_RISK,
+        Verdict.COMPATIBLE,
+    }
+    assert Verdict.NO_CHANGE not in VERDICT_PRESENTATION
+
+
 def test_single_table_is_the_source_of_truth() -> None:
     # The back-compat projections must be derived from VERDICT_PRESENTATION, not
     # a second hand-maintained copy.

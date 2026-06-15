@@ -29,7 +29,7 @@ import pytest
 from abicheck.checker import compare
 from abicheck.checker_policy import Verdict
 from abicheck.model import AbiSnapshot, Function, Visibility
-from abicheck.severity import legacy_exit_code
+from abicheck.severity import _LEGACY_VERDICT_EXIT_CODE, legacy_exit_code
 
 
 def _fn(name: str) -> Function:
@@ -96,9 +96,18 @@ def test_compare_and_release_agree_for_each_verdict() -> None:
 
 
 def test_compat_scheme_is_distinct() -> None:
-    # compat intentionally maps BREAKING→1, API_BREAK→2 (not 4/2). Guard that the
-    # two schemes are NOT accidentally unified.
-    from abicheck.compat._errors import _classify_compat_error_exit_code  # noqa: F401
+    # The compat flow uses a deliberately different, wider exit-code scheme
+    # (3–11 for operational errors). Exercise its classifier and assert the codes
+    # it emits fall OUTSIDE the legacy compare range {0, 2, 4}, so the two schemes
+    # can never be accidentally unified.
+    from abicheck.compat._errors import _classify_compat_error_exit_code
 
-    # legacy compare maps BREAKING→4; compat maps BREAKING→1 (documented).
+    legacy_codes = set(_LEGACY_VERDICT_EXIT_CODE.values())  # {0, 2, 4}
+    # 11 (interrupted) is emitted by compat but never by the legacy verdict
+    # mapping — proof the schemes are distinct. (Some numeric codes, e.g. 4,
+    # overlap by coincidence with different meanings; 11 cannot.)
+    interrupted = _classify_compat_error_exit_code(KeyboardInterrupt())
+    assert interrupted == 11
+    assert interrupted not in legacy_codes
+    # And the legacy mapping itself is unchanged.
     assert legacy_exit_code(Verdict.BREAKING) == 4

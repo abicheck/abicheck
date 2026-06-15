@@ -86,6 +86,12 @@ VERDICT_PRESENTATION: dict[Verdict, VerdictPresentation] = {
     Verdict.COMPATIBLE_WITH_RISK: VerdictPresentation("risk", "warning", False),
     Verdict.COMPATIBLE: VerdictPresentation("compatible", "note", False),
 }
+# Verdict.NO_CHANGE is intentionally absent: per-finding classification
+# (``_effective_verdict_for_change``) only ever returns the four reportable
+# verdicts above — a *finding* is never NO_CHANGE (that is an overall-result
+# state, handled by the exit-code path in ``severity.legacy_exit_code``). A
+# lookup miss falls back to UNKNOWN_SEVERITY_LABEL / non-breaking, which is the
+# safe default.
 
 # Fallback label for a verdict not in the table (defensive; should not occur).
 UNKNOWN_SEVERITY_LABEL = "unknown"
