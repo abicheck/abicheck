@@ -152,6 +152,52 @@ def test_estimate_focused_replay_smaller_than_full(
     assert focused.tus < full.tus
 
 
+def test_estimate_resolves_build_info_directory(
+    snap_path: Path, tmp_path: Path
+) -> None:
+    # --build-info given as a build *directory* must resolve to its compile DB,
+    # not report 0 TUs from an unreadable directory (Codex review).
+    build = tmp_path / "build"
+    build.mkdir()
+    (build / "compile_commands.json").write_text(
+        json.dumps(
+            [
+                {"file": f"f{i}.cpp", "command": "c++", "directory": "."}
+                for i in range(7)
+            ]
+        ),
+        encoding="utf-8",
+    )
+    req = ScanRequest(binaries=[snap_path], build_info=build, mode="baseline")
+    l3 = next(e for e in estimate_scan(req) if e.layer == "L3_build")
+    assert l3.tus == 7
+
+
+def test_estimate_header_change_fans_out_to_all_tus(
+    snap_path: Path, tmp_path: Path
+) -> None:
+    # A changed header with no include graph fails open to all TUs in the real
+    # scan, so the estimate must charge total_tus, not 1 (Codex review).
+    cdb = tmp_path / "compile_commands.json"
+    cdb.write_text(
+        json.dumps(
+            [
+                {"file": f"f{i}.cpp", "command": "c++", "directory": "."}
+                for i in range(8)
+            ]
+        ),
+        encoding="utf-8",
+    )
+    req = ScanRequest(
+        binaries=[snap_path],
+        compile_db=cdb,
+        mode="pr",
+        changed_paths=["include/foo.h"],
+    )
+    l4 = next(e for e in estimate_scan(req) if e.layer == "L4_source_abi")
+    assert l4.tus == 8
+
+
 def test_estimate_budget_max_tus_caps_replay(snap_path: Path, tmp_path: Path) -> None:
     cdb = tmp_path / "compile_commands.json"
     cdb.write_text(

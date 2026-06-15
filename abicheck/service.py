@@ -1105,6 +1105,16 @@ def _count_compile_db_tus(compile_db: Path) -> int:
 _SOURCE_TU_EXTS = frozenset({".c", ".cc", ".cpp", ".cxx", ".c++", ".m", ".mm"})
 
 
+def _is_source_tu_path(path: str) -> bool:
+    """Whether a changed path is a compilable translation unit (a ``.cpp`` etc.)."""
+    return Path(path).suffix.lower() in _SOURCE_TU_EXTS
+
+
+def _is_header_path(path: str) -> bool:
+    """Whether a changed path is a header (a change that fans out to many TUs)."""
+    return Path(path).suffix.lower() in _HEADER_EXTS
+
+
 def _count_source_tus(sources: Path) -> int:
     """Count source translation units under a tree (compile-DB-free fallback)."""
     if sources.is_file():
@@ -1116,17 +1126,38 @@ def _count_source_tus(sources: Path) -> int:
     return n
 
 
+def _compile_db_in(root: Path) -> Path | None:
+    """The ``compile_commands.json`` inside a build/source *directory*, if any."""
+    for cand in (
+        root / "compile_commands.json",
+        root / "build" / "compile_commands.json",
+    ):
+        if cand.is_file():
+            return cand
+    return None
+
+
 def _discover_compile_db(sources: Path | None, explicit: Path | None) -> Path | None:
-    """The compile DB to estimate against: explicit wins, else discover in *sources*."""
+    """The compile DB to estimate against: explicit wins, else discover in *sources*.
+
+    An explicit ``--compile-db``/``--build-info`` that points at a *directory*
+    (a supported scan input, e.g. ``build/`` holding a ``compile_commands.json``)
+    is resolved to the contained DB — otherwise the directory itself flows into
+    :func:`_count_compile_db_tus`, which fails the read and reports 0 TUs, making
+    L3/L4/L5 near-free even though the real scan replays the directory's DB
+    (Codex review).
+    """
     if explicit is not None and explicit.exists():
-        return explicit
+        if explicit.is_dir():
+            found = _compile_db_in(explicit)
+            if found is not None:
+                return found
+            # A build dir with no DB at the well-known spots: fall through to the
+            # source-tree discovery rather than returning the unreadable dir.
+        else:
+            return explicit
     if sources is not None and sources.is_dir():
-        for cand in (
-            sources / "compile_commands.json",
-            sources / "build" / "compile_commands.json",
-        ):
-            if cand.exists():
-                return cand
+        return _compile_db_in(sources)
     return None
 
 
@@ -1176,13 +1207,30 @@ def estimate_scan(req: ScanRequest) -> list[CostEstimate]:
 
     n_headers = len(expand_header_inputs(list(req.headers))) if req.headers else 0
     # The L4 replay scope: a changed-only collection touches at most the changed
-    # TUs (POI-focused, D7); a full/target scope touches every TU. The budget's
-    # max_tus is a documented cap (never shrinks scope silently — it FAILS — but
-    # the estimate honestly reflects the cap as the upper bound it would hit).
-    changed_tus = len([p for p in req.changed_paths if p]) or total_tus
-    if collect_mode in ("source-changed", "graph-build"):
-        replay_tus = min(changed_tus, total_tus) if total_tus else changed_tus
+    # *source* TUs (POI-focused, D7); a full/target scope touches every TU. The
+    # budget's max_tus is a documented cap (never shrinks scope silently — it
+    # FAILS — but the estimate honestly reflects the cap as the upper bound).
+    #
+    # A changed *header* fans out: without an include graph (the common
+    # compile-DB-only path) ``source_replay.select_compile_units(scope='changed')``
+    # fails open to **all** TUs so header ABI changes are never silently missed,
+    # so the estimate must charge ``total_tus`` for a header change rather than
+    # the single header path — else it understates L4 cost and a user picks too
+    # small a budget (Codex review). An empty/seedless diff is likewise broad.
+    changed = [p for p in req.changed_paths if p]
+    source_changed = [p for p in changed if _is_source_tu_path(p)]
+    header_changed = any(_is_header_path(p) for p in changed)
+    if collect_mode == "source-changed":
+        if not changed or header_changed:
+            replay_tus = total_tus
+        else:
+            replay_tus = (
+                min(len(source_changed), total_tus)
+                if total_tus
+                else len(source_changed)
+            )
     else:
+        # graph-full / baseline → full scope; graph-build emits no L4 row.
         replay_tus = total_tus
     if req.budget.max_tus:
         replay_tus = min(replay_tus, req.budget.max_tus)
