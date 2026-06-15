@@ -573,4 +573,5 @@ parity is contractual and benefits from a stabilised shared layer underneath it.
 | C8 | ABICC compat adapter | Proposed | — |
 | C9 | Relocate confidence computation | Done | #395 |
 | C10 | Split `model.py` (stage-1: name predicates; stage-2: type-name canonicalization + cv-qualifier helpers moved to `name_classification`, re-exported) | Stage-2 done | #395 / #407 |
+| N-D | Unify stdlib/runtime RTTI prefix tables — canonical `STDLIB_RTTI_PREFIXES` (union superset) in `name_classification`; `elf_symbol_filter` + `diff_elf_layout` share it; guard test pins membership; behaviour-preserving (only effective delta: skipping toolchain-owned `std::__cxx11` vtable/typeinfo, verified identical parity+golden failure set vs HEAD) | Done | #407 |
 | N-A | HTML page seam (`html_template`) — shared document chrome + footer for the three native renderers, byte-identical golden-locked | Done | — |

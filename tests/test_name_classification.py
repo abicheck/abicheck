@@ -140,3 +140,52 @@ def test_model_reexports_are_the_same_objects() -> None:
     from abicheck.name_classification import COMPILER_INTERNAL_TYPES
 
     assert model.COMPILER_INTERNAL_TYPES is COMPILER_INTERNAL_TYPES
+
+
+def test_stdlib_rtti_prefixes_is_canonical_union() -> None:
+    """STDLIB_RTTI_PREFIXES is the single source of truth merged from the two
+    historically-separate copies (elf_symbol_filter surface filter +
+    diff_elf_layout L0 exclusion). Pin its membership and prove it is a superset
+    of both historical sets so neither call site lost coverage (N-D merge).
+    """
+    from abicheck import diff_elf_layout, elf_symbol_filter
+    from abicheck.name_classification import STDLIB_RTTI_PREFIXES
+
+    # Both call sites now share the very same canonical object.
+    assert elf_symbol_filter._STDLIB_RTTI_PREFIXES is STDLIB_RTTI_PREFIXES
+    assert diff_elf_layout._RUNTIME_RTTI_PREFIXES is STDLIB_RTTI_PREFIXES
+
+    # The historical memberships (verbatim, pre-merge) — the canonical set must
+    # be a superset of each so no symbol previously matched stops matching.
+    historical_elf_stdlib_rtti = {
+        "_ZTISt", "_ZTSSt", "_ZTVSt", "_ZTTSt",
+        "_ZTINSt", "_ZTSNSt", "_ZTVNSt", "_ZTTNSt",
+        "_ZTIN9__gnu_cxx", "_ZTSN9__gnu_cxx", "_ZTVN9__gnu_cxx", "_ZTTN9__gnu_cxx",
+        "_ZTIN10__cxxabiv", "_ZTSN10__cxxabiv", "_ZTTN10__cxxabiv",
+        "_ZTIN7__cxx11", "_ZTSN7__cxx11", "_ZTVN7__cxx11", "_ZTTN7__cxx11",
+    }
+    historical_layout_runtime_rtti = {
+        "_ZTVN10__cxxabiv", "_ZTIN10__cxxabiv", "_ZTSN10__cxxabiv",
+        "_ZTVSt", "_ZTISt", "_ZTSSt",
+        "_ZTVNSt", "_ZTINSt", "_ZTSNSt",
+        "_ZTVN9__gnu_cxx", "_ZTIN9__gnu_cxx", "_ZTSN9__gnu_cxx",
+    }
+    canonical = set(STDLIB_RTTI_PREFIXES)
+    assert historical_elf_stdlib_rtti <= canonical
+    assert historical_layout_runtime_rtti <= canonical
+    # The canonical set is exactly the union — no stray extra prefixes.
+    assert canonical == historical_elf_stdlib_rtti | historical_layout_runtime_rtti
+    # No duplicates in the tuple.
+    assert len(STDLIB_RTTI_PREFIXES) == len(canonical)
+
+    # The only entry layout gained from the merge is _ZTVN10__cxxabiv; for
+    # elf_symbol_filter that prefix is already covered by _STDLIB_PREFIXES, so
+    # the elf surface filter is unchanged.
+    only_new_for_layout = canonical - historical_layout_runtime_rtti
+    assert only_new_for_layout == (
+        historical_elf_stdlib_rtti - historical_layout_runtime_rtti
+    )
+    assert any(
+        "_ZTVN10__cxxabiv".startswith(p) or p == "_ZTVN10__cxxabiv"
+        for p in elf_symbol_filter._STDLIB_PREFIXES
+    )

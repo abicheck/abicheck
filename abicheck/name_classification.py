@@ -52,6 +52,7 @@ __all__ = [
     "ITANIUM_RTTI_PREFIXES",
     "RTTI_DATA_PREFIXES",
     "LOCAL_RTTI_PREFIXES",
+    "STDLIB_RTTI_PREFIXES",
     "INTERNAL_NAMESPACE_COMPONENTS",
     "is_rtti_symbol",
     "is_local_rtti_symbol",
@@ -103,6 +104,33 @@ INTERNAL_NAMESPACE_COMPONENTS: tuple[str, ...] = (
     "4impl",
     "8__detail",
     "5_impl",
+)
+
+
+# RTTI mangling prefixes owned by the C++ standard library / Itanium runtime
+# (libstdc++ / libc++ / libcxxabi), NOT by the library under test. These encode
+# the runtime namespaces ``std::`` (``St`` / ``NSt``), ``__gnu_cxx`` (``N9__gnu_cxx``),
+# ``__cxxabiv1`` (``N10__cxxabiv``) and ``std::__cxx11`` (``N7__cxx11``) in the
+# typeinfo (``_ZTI``), typeinfo-name (``_ZTS``), vtable (``_ZTV``) and VTT
+# (``_ZTT``) forms. A library's own type RTTI never starts with one of these
+# fixed runtime-namespace prefixes, so a symbol matching here is always
+# toolchain-owned.
+#
+# This is the single source of truth merged from two historically-separate
+# copies that had drifted (C1 follow-up / C10 sub-task): the surface-filter set
+# in ``elf_symbol_filter`` and the L0-layout exclusion set in ``diff_elf_layout``.
+# It is the *union* of both — a superset — and both call sites now share it.
+STDLIB_RTTI_PREFIXES: tuple[str, ...] = (
+    # std:: (libstdc++ / libc++)
+    "_ZTISt", "_ZTSSt", "_ZTVSt", "_ZTTSt",
+    # nested std:: names
+    "_ZTINSt", "_ZTSNSt", "_ZTVNSt", "_ZTTNSt",
+    # __gnu_cxx::
+    "_ZTIN9__gnu_cxx", "_ZTSN9__gnu_cxx", "_ZTVN9__gnu_cxx", "_ZTTN9__gnu_cxx",
+    # __cxxabiv1:: (Itanium runtime)
+    "_ZTIN10__cxxabiv", "_ZTSN10__cxxabiv", "_ZTVN10__cxxabiv", "_ZTTN10__cxxabiv",
+    # std::__cxx11::
+    "_ZTIN7__cxx11", "_ZTSN7__cxx11", "_ZTVN7__cxx11", "_ZTTN7__cxx11",
 )
 
 

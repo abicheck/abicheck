@@ -59,24 +59,7 @@ from .demangle import demangle
 from .detector_registry import registry
 from .diff_helpers import make_change
 from .model import AbiSnapshot, stdlib_namespaces_excluded
-
-# Runtime/standard-library RTTI we never want to flag — these belong to
-# libstdc++ / libc++ / the Itanium runtime, not to the library under test.
-# Matched against the full mangled symbol name.
-_RUNTIME_RTTI_PREFIXES: tuple[str, ...] = (
-    "_ZTVN10__cxxabiv",
-    "_ZTIN10__cxxabiv",
-    "_ZTSN10__cxxabiv",
-    "_ZTVSt",
-    "_ZTISt",
-    "_ZTSSt",
-    "_ZTVNSt",
-    "_ZTINSt",
-    "_ZTSNSt",
-    "_ZTVN9__gnu_cxx",
-    "_ZTIN9__gnu_cxx",
-    "_ZTSN9__gnu_cxx",
-)
+from .name_classification import STDLIB_RTTI_PREFIXES as _RUNTIME_RTTI_PREFIXES
 
 
 def _type_key(name: str, prefix: str) -> str:
