@@ -35,6 +35,10 @@ from abicheck.buildsource.source_extractors import (
     build_clang_macro_command,
     source_abi_from_clang_ast,
 )
+from abicheck.buildsource.source_extractors.clang import (
+    _equivalent_public_roots_for_unit,
+    _path_suffixes,
+)
 from abicheck.buildsource.source_link import link_source_abi
 
 
@@ -80,6 +84,492 @@ def test_build_command_c_language() -> None:
     cmd = build_clang_command(_cu(language="C", standard="c11"), Path("a.c"))
     assert cmd[cmd.index("-x") + 1] == "c"
     assert "-std=c11" in cmd
+
+
+def test_public_package_root_maps_to_equivalent_build_include_dir(tmp_path: Path) -> None:
+    package_include = tmp_path / "pkg" / "opt" / "dal" / "include"
+    build_include = tmp_path / "src" / "__release" / "daal" / "latest" / "include"
+    system_build_include = tmp_path / "src" / "__release" / "sys" / "include"
+    (package_include / "oneapi").mkdir(parents=True)
+    (build_include / "oneapi").mkdir(parents=True)
+    (system_build_include / "oneapi").mkdir(parents=True)
+    (package_include / "oneapi" / "dal.hpp").write_text("// package header\n")
+    (package_include / "oneapi" / "version.hpp").write_text("// package header\n")
+    (build_include / "oneapi" / "dal.hpp").write_text("// build header\n")
+    (build_include / "oneapi" / "version.hpp").write_text("// build header\n")
+    (system_build_include / "oneapi" / "dal.hpp").write_text("// system build header\n")
+    (system_build_include / "oneapi" / "version.hpp").write_text("// system build header\n")
+
+    roots = _equivalent_public_roots_for_unit(
+        [str(package_include)],
+        _cu(
+            include_paths=[str(build_include), str(tmp_path / "other" / "include")],
+            system_include_paths=[str(system_build_include)],
+        ),
+    )
+
+    assert roots == [str(package_include), str(build_include), str(system_build_include)]
+
+
+def test_public_package_root_maps_relative_include_against_compile_directory(
+    tmp_path: Path,
+) -> None:
+    package_include = tmp_path / "pkg" / "include"
+    build_dir = tmp_path / "build"
+    build_include = build_dir / "include"
+    (package_include / "api").mkdir(parents=True)
+    (build_include / "api").mkdir(parents=True)
+    (package_include / "api" / "one.h").write_text("// package header\n")
+    (package_include / "api" / "two.h").write_text("// package header\n")
+    (build_include / "api" / "one.h").write_text("// build header\n")
+    (build_include / "api" / "two.h").write_text("// build header\n")
+
+    roots = _equivalent_public_roots_for_unit(
+        [str(package_include)],
+        _cu(directory=str(build_dir), include_paths=["include"]),
+    )
+
+    assert roots == [str(package_include), "include/"]
+
+    cache_roots = _equivalent_public_roots_for_unit(
+        [str(package_include)],
+        _cu(directory=str(build_dir), include_paths=["include"]),
+        for_cache=True,
+    )
+    assert cache_roots == [
+        str(package_include),
+        str(build_include / "api" / "one.h"),
+        str(build_include / "api" / "two.h"),
+    ]
+
+
+def test_relative_mirror_directory_root_classifies_clang_relative_locations() -> None:
+    tu = source_abi_from_clang_ast(
+        {
+            "kind": "TranslationUnitDecl",
+            "inner": [
+                {
+                    "kind": "FunctionDecl",
+                    "name": "api_fn",
+                    "loc": {"file": "include/api/one.h", "line": 1},
+                    "type": {"qualType": "void ()"},
+                }
+            ],
+        },
+        _cu(directory="/build", include_paths=["include"]),
+        ["include/"],
+        "target://lib",
+    )
+
+    assert [fn.qualified_name for fn in tu.functions] == ["api_fn"]
+
+
+def test_public_package_root_weak_match_does_not_promote_directory(tmp_path: Path) -> None:
+    package_include = tmp_path / "pkg" / "include"
+    build_include = tmp_path / "build" / "include"
+    (package_include / "api").mkdir(parents=True)
+    (build_include / "api").mkdir(parents=True)
+    (package_include / "api" / "version.h").write_text("// package header\n")
+    (package_include / "api" / "feature.h").write_text("// package header\n")
+    (build_include / "api" / "version.h").write_text("// coincidental build header\n")
+    (build_include / "api" / "private.h").write_text("// private sibling\n")
+
+    roots = _equivalent_public_roots_for_unit(
+        [str(package_include)],
+        _cu(include_paths=[str(build_include)]),
+    )
+
+    assert roots == [str(package_include)]
+
+
+def test_public_package_root_probes_argv_only_include_dirs(tmp_path: Path) -> None:
+    package_include = tmp_path / "pkg" / "include"
+    build_dir = tmp_path / "build"
+    build_include = build_dir / "quote"
+    (package_include / "api").mkdir(parents=True)
+    (build_include / "api").mkdir(parents=True)
+    (package_include / "api" / "one.h").write_text("// package header\n")
+    (package_include / "api" / "two.h").write_text("// package header\n")
+    (build_include / "api" / "one.h").write_text("// build header\n")
+    (build_include / "api" / "two.h").write_text("// build header\n")
+
+    roots = _equivalent_public_roots_for_unit(
+        [str(package_include)],
+        _cu(directory=str(build_dir), argv=["clang++", "-iquote", "quote", "-c", "x.cpp"]),
+    )
+
+    assert roots == [str(package_include), "quote/"]
+
+
+def test_clang_cache_roots_include_absolute_mirror_probes(tmp_path: Path) -> None:
+    package_include = tmp_path / "pkg" / "include"
+    build_dir = tmp_path / "build"
+    build_include = build_dir / "include"
+    (package_include / "api").mkdir(parents=True)
+    (build_include / "api").mkdir(parents=True)
+    (package_include / "api" / "one.h").write_text("// package header\n")
+    (package_include / "api" / "two.h").write_text("// package header\n")
+    (build_include / "api" / "one.h").write_text("// build header\n")
+    (build_include / "api" / "two.h").write_text("// build header\n")
+
+    roots = ClangSourceExtractor().effective_public_header_roots_for_cache(
+        _cu(directory=str(build_dir), include_paths=["include"]),
+        [str(package_include)],
+    )
+
+    assert roots == [
+        str(package_include),
+        str(build_include / "api" / "one.h"),
+        str(build_include / "api" / "two.h"),
+    ]
+
+
+def test_clang_compiler_override_probes_msvc_argv_include_dirs(tmp_path: Path) -> None:
+    package_include = tmp_path / "pkg" / "include"
+    build_include = tmp_path / "build" / "include"
+    (package_include / "api").mkdir(parents=True)
+    (build_include / "api").mkdir(parents=True)
+    (package_include / "api" / "one.h").write_text("// package header\n")
+    (package_include / "api" / "two.h").write_text("// package header\n")
+    (build_include / "api" / "one.h").write_text("// build header\n")
+    (build_include / "api" / "two.h").write_text("// build header\n")
+
+    roots = (
+        ClangSourceExtractor(compiler_binary="clang-cl")
+        .effective_public_header_roots_for_cache(
+            _cu(argv=["ccache", "wrapped-cxx", "/I", str(build_include), "/c", "x.cpp"]),
+            [str(package_include)],
+        )
+    )
+
+    assert roots == [
+        str(package_include),
+        str(build_include / "api" / "one.h"),
+        str(build_include / "api" / "two.h"),
+    ]
+
+
+def test_public_package_root_samples_extensionless_headers(tmp_path: Path) -> None:
+    package_include = tmp_path / "pkg" / "include"
+    build_include = tmp_path / "build" / "include"
+    (package_include / "Eigen").mkdir(parents=True)
+    (build_include / "Eigen").mkdir(parents=True)
+    (package_include / "Eigen" / "Core").write_text("// package header\n")
+    (package_include / "Eigen" / "Dense").write_text("// package header\n")
+    (build_include / "Eigen" / "Core").write_text("// build header\n")
+    (build_include / "Eigen" / "Dense").write_text("// build header\n")
+
+    roots = _equivalent_public_roots_for_unit(
+        [str(package_include)],
+        _cu(include_paths=[str(build_include)]),
+    )
+
+    assert roots == [str(package_include), str(build_include)]
+
+
+def test_public_package_root_samples_lowercase_extensionless_headers(tmp_path: Path) -> None:
+    package_include = tmp_path / "pkg" / "include"
+    build_include = tmp_path / "build" / "include"
+    (package_include / "boost").mkdir(parents=True)
+    (build_include / "boost").mkdir(parents=True)
+    (package_include / "boost" / "config").write_text("// package header\n")
+    (package_include / "boost" / "version").write_text("// package header\n")
+    (build_include / "boost" / "config").write_text("// build header\n")
+    (build_include / "boost" / "version").write_text("// build header\n")
+
+    roots = _equivalent_public_roots_for_unit(
+        [str(package_include)],
+        _cu(include_paths=[str(build_include)]),
+    )
+
+    assert roots == [str(package_include), str(build_include)]
+
+
+def test_public_package_subdir_root_maps_to_equivalent_build_subdir(
+    tmp_path: Path,
+) -> None:
+    package_include = tmp_path / "pkg" / "include"
+    build_include = tmp_path / "build" / "include"
+    (package_include / "api").mkdir(parents=True)
+    (build_include / "api").mkdir(parents=True)
+    (package_include / "api" / "one.h").write_text("// package header\n")
+    (package_include / "api" / "two.h").write_text("// package header\n")
+    (build_include / "api" / "one.h").write_text("// build header\n")
+    (build_include / "api" / "two.h").write_text("// build header\n")
+
+    roots = _equivalent_public_roots_for_unit(
+        [str(package_include / "api")],
+        _cu(include_paths=[str(build_include)]),
+    )
+
+    assert roots == [str(package_include / "api"), str(build_include / "api")]
+
+
+def test_public_root_suffix_candidates_are_relative() -> None:
+    suffixes = _path_suffixes(Path("/pkg/include/api"), 6)
+
+    assert suffixes[0] == Path("pkg/include/api")
+    assert all(not suffix.is_absolute() for suffix in suffixes)
+
+
+def test_public_subdir_root_prefers_prefixed_mirror_over_parent(
+    tmp_path: Path,
+) -> None:
+    package_include = tmp_path / "pkg" / "include"
+    build_include = tmp_path / "build" / "include"
+    (package_include / "api").mkdir(parents=True)
+    (build_include / "api").mkdir(parents=True)
+    (package_include / "api" / "one.h").write_text("// package header\n")
+    (package_include / "api" / "two.h").write_text("// package header\n")
+    (build_include / "api" / "one.h").write_text("// real mirror\n")
+    (build_include / "api" / "two.h").write_text("// real mirror\n")
+    (build_include / "one.h").write_text("// coincidental top-level header\n")
+    (build_include / "two.h").write_text("// coincidental top-level header\n")
+
+    roots = _equivalent_public_roots_for_unit(
+        [str(package_include / "api")],
+        _cu(include_paths=[str(build_include)]),
+    )
+
+    assert roots == [str(package_include / "api"), str(build_include / "api")]
+
+
+def test_multiple_public_subdir_roots_map_to_same_build_include(
+    tmp_path: Path,
+) -> None:
+    package_include = tmp_path / "pkg" / "include"
+    build_include = tmp_path / "build" / "include"
+    for dirname in ("api", "other"):
+        (package_include / dirname).mkdir(parents=True)
+        (build_include / dirname).mkdir(parents=True)
+        (package_include / dirname / "one.h").write_text("// package header\n")
+        (package_include / dirname / "two.h").write_text("// package header\n")
+        (build_include / dirname / "one.h").write_text("// build header\n")
+        (build_include / dirname / "two.h").write_text("// build header\n")
+
+    roots = _equivalent_public_roots_for_unit(
+        [str(package_include / "api"), str(package_include / "other")],
+        _cu(include_paths=[str(build_include)]),
+    )
+
+    assert roots == [
+        str(package_include / "api"),
+        str(package_include / "other"),
+        str(build_include / "api"),
+        str(build_include / "other"),
+    ]
+
+
+def test_nested_public_subdir_root_preserves_prefix_in_build_include(
+    tmp_path: Path,
+) -> None:
+    package_include = tmp_path / "pkg" / "include"
+    build_include = tmp_path / "build" / "include"
+    (package_include / "oneapi" / "dal").mkdir(parents=True)
+    (build_include / "oneapi" / "dal").mkdir(parents=True)
+    (package_include / "oneapi" / "dal" / "one.hpp").write_text("// package header\n")
+    (package_include / "oneapi" / "dal" / "two.hpp").write_text("// package header\n")
+    (build_include / "oneapi" / "dal" / "one.hpp").write_text("// build header\n")
+    (build_include / "oneapi" / "dal" / "two.hpp").write_text("// build header\n")
+
+    roots = _equivalent_public_roots_for_unit(
+        [str(package_include / "oneapi" / "dal")],
+        _cu(include_paths=[str(build_include)]),
+    )
+
+    assert roots == [
+        str(package_include / "oneapi" / "dal"),
+        str(build_include / "oneapi" / "dal"),
+    ]
+
+
+def test_installed_include_namespace_prefix_can_map_to_build_include(
+    tmp_path: Path,
+) -> None:
+    package_include = tmp_path / "pkg" / "include"
+    build_include = tmp_path / "src" / "cpp" / "daal" / "include"
+    (package_include / "dal" / "services").mkdir(parents=True)
+    (build_include / "services").mkdir(parents=True)
+    (package_include / "dal" / "services" / "base.h").write_text("// package header\n")
+    (package_include / "dal" / "services" / "status.h").write_text("// package header\n")
+    (build_include / "services" / "base.h").write_text("// build header\n")
+    (build_include / "services" / "status.h").write_text("// build header\n")
+
+    roots = _equivalent_public_roots_for_unit(
+        [str(package_include)],
+        _cu(include_paths=[str(build_include)]),
+    )
+
+    assert roots == [str(package_include), str(build_include)]
+
+    cache_roots = _equivalent_public_roots_for_unit(
+        [str(package_include)],
+        _cu(include_paths=[str(build_include)]),
+        for_cache=True,
+    )
+
+    assert cache_roots == [
+        str(package_include),
+        str(build_include / "services" / "base.h"),
+        str(build_include / "services" / "status.h"),
+    ]
+
+
+def test_single_header_public_dir_maps_to_mirrored_parent_dir(tmp_path: Path) -> None:
+    package_include = tmp_path / "pkg" / "include"
+    build_include = tmp_path / "build" / "include"
+    (package_include / "api").mkdir(parents=True)
+    (build_include / "api").mkdir(parents=True)
+    (package_include / "api" / "only.h").write_text("// package header\n")
+    (build_include / "api" / "only.h").write_text("// build header\n")
+
+    roots = _equivalent_public_roots_for_unit(
+        [str(package_include)],
+        _cu(include_paths=[str(build_include)]),
+    )
+
+    assert roots == [str(package_include), str(build_include / "api" / "only.h")]
+
+
+def test_single_header_public_subdir_maps_to_mirrored_subdir(tmp_path: Path) -> None:
+    package_include = tmp_path / "pkg" / "include"
+    build_include = tmp_path / "build" / "include"
+    (package_include / "oneapi" / "dal").mkdir(parents=True)
+    (build_include / "oneapi" / "dal").mkdir(parents=True)
+    (package_include / "oneapi" / "dal" / "only.hpp").write_text("// package header\n")
+    (build_include / "oneapi" / "dal" / "only.hpp").write_text("// build header\n")
+
+    roots = _equivalent_public_roots_for_unit(
+        [str(package_include / "oneapi" / "dal")],
+        _cu(include_paths=[str(build_include)]),
+    )
+
+    assert roots == [
+        str(package_include / "oneapi" / "dal"),
+        str(build_include / "oneapi" / "dal" / "only.hpp"),
+    ]
+
+
+def test_exact_file_roots_do_not_match_unrelated_same_basename(tmp_path: Path) -> None:
+    tu = source_abi_from_clang_ast(
+        {
+            "kind": "TranslationUnitDecl",
+            "inner": [
+                {
+                    "kind": "FunctionDecl",
+                    "name": "public_fn",
+                    "loc": {"file": str(tmp_path / "build" / "api" / "version.h"), "line": 1},
+                    "type": {"qualType": "void ()"},
+                },
+                {
+                    "kind": "FunctionDecl",
+                    "name": "private_fn",
+                    "loc": {"file": str(tmp_path / "build" / "private" / "version.h"), "line": 1},
+                    "type": {"qualType": "void ()"},
+                },
+            ],
+        },
+        _cu(),
+        [str(tmp_path / "build" / "api" / "version.h")],
+        "target://lib",
+    )
+
+    assert [fn.qualified_name for fn in tu.functions] == ["public_fn"]
+
+
+def test_public_file_root_uses_strongest_mirror_suffix(tmp_path: Path) -> None:
+    package_header = tmp_path / "pkg" / "include" / "api" / "version.h"
+    build_include = tmp_path / "build" / "include"
+    package_header.parent.mkdir(parents=True)
+    (build_include / "api").mkdir(parents=True)
+    package_header.write_text("// package header\n")
+    (build_include / "api" / "version.h").write_text("// public mirror\n")
+    (build_include / "version.h").write_text("// unrelated private header\n")
+
+    roots = _equivalent_public_roots_for_unit(
+        [str(package_header)],
+        _cu(include_paths=[str(build_include)]),
+    )
+
+    assert roots == [str(package_header), str(build_include / "api" / "version.h")]
+
+
+def test_public_package_root_does_not_promote_dot_include_root(tmp_path: Path) -> None:
+    package_include = tmp_path / "pkg" / "include"
+    build_dir = tmp_path / "build"
+    (package_include / "api").mkdir(parents=True)
+    (build_dir / "api").mkdir(parents=True)
+    (package_include / "api" / "one.h").write_text("// package header\n")
+    (package_include / "api" / "two.h").write_text("// package header\n")
+    (build_dir / "api" / "one.h").write_text("// build header\n")
+    (build_dir / "api" / "two.h").write_text("// build header\n")
+
+    roots = _equivalent_public_roots_for_unit(
+        [str(package_include)],
+        _cu(directory=str(build_dir), include_paths=["."]),
+    )
+
+    assert roots == [
+        str(package_include),
+        str(Path("api") / "one.h"),
+        str(Path("api") / "two.h"),
+    ]
+
+
+def test_public_package_root_samples_template_include_fragments(tmp_path: Path) -> None:
+    package_include = tmp_path / "pkg" / "include"
+    build_include = tmp_path / "build" / "include"
+    (package_include / "api").mkdir(parents=True)
+    (build_include / "api").mkdir(parents=True)
+    (package_include / "api" / "detail.inc").write_text("// package fragment\n")
+    (package_include / "api" / "body.tcc").write_text("// package fragment\n")
+    (build_include / "api" / "detail.inc").write_text("// build fragment\n")
+    (build_include / "api" / "body.tcc").write_text("// build fragment\n")
+
+    roots = _equivalent_public_roots_for_unit(
+        [str(package_include)],
+        _cu(include_paths=[str(build_include)]),
+    )
+
+    assert roots == [str(package_include), str(build_include)]
+
+
+def test_public_package_file_root_maps_to_equivalent_build_file_only(tmp_path: Path) -> None:
+    package_include = tmp_path / "pkg" / "include"
+    build_include = tmp_path / "build" / "include"
+    package_include.mkdir(parents=True)
+    build_include.mkdir(parents=True)
+    (package_include / "foo.h").write_text("// public package header\n")
+    (build_include / "foo.h").write_text("// public build header\n")
+    (build_include / "detail_impl.h").write_text("// private sibling\n")
+
+    roots = _equivalent_public_roots_for_unit(
+        [str(package_include / "foo.h")],
+        _cu(include_paths=[str(build_include)]),
+    )
+
+    assert roots == [str(package_include / "foo.h"), str(build_include / "foo.h")]
+
+
+def test_public_package_nested_file_root_maps_to_equivalent_build_file(
+    tmp_path: Path,
+) -> None:
+    package_include = tmp_path / "pkg" / "include"
+    build_include = tmp_path / "build" / "include"
+    (package_include / "api").mkdir(parents=True)
+    (build_include / "api").mkdir(parents=True)
+    (package_include / "api" / "foo.h").write_text("// public package header\n")
+    (build_include / "api" / "foo.h").write_text("// public build header\n")
+
+    roots = _equivalent_public_roots_for_unit(
+        [str(package_include / "api" / "foo.h")],
+        _cu(include_paths=[str(build_include)]),
+    )
+
+    assert roots == [
+        str(package_include / "api" / "foo.h"),
+        str(build_include / "api" / "foo.h"),
+    ]
 
 
 def test_build_command_msvc_driver_mode() -> None:

@@ -809,16 +809,15 @@ def run_source_replay(
     results: list[SourceAbiTu | None] = [None] * len(units)
     misses: list[int] = []
     for i, cu in enumerate(units):
-        key = (
-            compute_tu_cache_key(
+        key = None
+        if cache is not None:
+            key_roots = _cache_public_header_roots(extractor, cu, roots)
+            key = compute_tu_cache_key(
                 extractor_name=getattr(extractor, "name", "source"),
                 extractor_version=_extractor_version(extractor),
                 compile_unit=cu,
-                public_header_roots=roots,
+                public_header_roots=key_roots,
             )
-            if cache is not None
-            else None
-        )
         keys.append(key)
         cached = cache.get(key, digest_memo) if cache is not None else None
         if cached is not None:
@@ -972,3 +971,15 @@ def _extract_one(
 def _extractor_version(extractor: SourceAbiExtractor) -> str:
     """Pull a version string off an extractor for the cache key, if it exposes one."""
     return str(getattr(extractor, "version", "") or "")
+
+
+def _cache_public_header_roots(
+    extractor: SourceAbiExtractor,
+    compile_unit: CompileUnit,
+    public_header_roots: list[str],
+) -> list[str]:
+    """Let extractors fold probe-dependent public-root expansion into D8 keys."""
+    hook = getattr(extractor, "effective_public_header_roots_for_cache", None)
+    if not callable(hook):
+        return public_header_roots
+    return list(hook(compile_unit, public_header_roots))
