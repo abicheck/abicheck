@@ -1088,6 +1088,7 @@ def embed_build_source(
     collect_mode: str = "source-target",
     build_query: str | None = None,
     build_compile_db: str | None = None,
+    changed_paths: tuple[str, ...] = (),
 ) -> None:
     """Embed build-info / source facts inline in *snap* (single-artifact UX).
 
@@ -1168,6 +1169,7 @@ def embed_build_source(
             scope=scope,
             layers=layers,
             exported_symbols=exported,
+            changed_paths=changed_paths,
         )
         # P09: don't fail *silently* when a source/build tree yields no compile DB.
         # Autotools `configure` (and a bare checkout) emit no compile_commands.json,

@@ -601,9 +601,16 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
         frozenset({"cli", "cli_plugin"}),
         frozenset({"cli", "cli_pr_comment"}),
         frozenset({"cli", "cli_probe"}),
+        frozenset({"cli", "cli_scan"}),
         frozenset({"cli", "cli_stack"}),
         frozenset({"cli", "cli_suggest"}),
         frozenset({"cli", "cli_surface"}),
+        # `scan` (cli_scan) reuses `embed_build_source` from cli_buildsource to
+        # collect L3/L4/L5 inline; cli_buildsource imports `main`/helpers from cli;
+        # cli imports cli_scan at its tail to register the command. All three edges
+        # are the by-design sibling-registration / helper-reuse pattern, not a
+        # true initialization cycle (the reuse import is function-local).
+        frozenset({"cli", "cli_scan", "cli_buildsource"}),
         # TYPE_CHECKING-only typing cycle (no runtime import): AbiSnapshot
         # annotates an embedded BuildSourcePack; pack annotates SourceGraphSummary;
         # source_graph annotates Change from checker_types; checker_types annotates

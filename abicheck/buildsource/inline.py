@@ -129,11 +129,14 @@ def load_build_config(path: Path) -> BuildConfig:
     """Load a ``.abicheck.yml`` build config; tolerant of a missing/empty file."""
     if not path.is_file():
         return BuildConfig()
-    try:
-        import yaml
+    import yaml  # hard dep; imported out of the try so the except can name it
 
+    try:
         raw = yaml.safe_load(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError, ImportError) as exc:  # pragma: no cover - defensive
+    except (OSError, ValueError, yaml.YAMLError) as exc:
+        # yaml.YAMLError (e.g. ParserError) is not a ValueError; catch it so a
+        # malformed .abicheck.yml surfaces as a wrapped error (→ ClickException in
+        # embed_build_source) instead of a raw traceback (Codex review).
         raise ValueError(f"cannot read build config {path}: {exc}") from exc
     if not isinstance(raw, dict):
         return BuildConfig()
@@ -168,6 +171,7 @@ def collect_inline_pack(
     build_cache_dir: Path | None = None,
     source_abi_cache_dir: Path | None = None,
     exported_symbols: tuple[str, ...] = (),
+    changed_paths: tuple[str, ...] = (),
 ) -> BuildSourcePack | None:
     """Collect an in-memory pack from raw source-tree / build-info inputs.
 
@@ -219,12 +223,13 @@ def collect_inline_pack(
 
     surface = None
     if "L4" in layers:
-        # Inline dump has no PR diff, so a 'changed' scope would select zero TUs
-        # and embed an empty L4 surface (Codex review). Fall back to 'target' —
-        # the non-empty choice that still enables the source-only checks the
-        # 'source-changed' mode is meant to turn on. The changed-only narrowing
-        # applies when a caller threads an explicit changed-path set (PR replay).
-        replay_scope = "target" if scope == "changed" else scope
+        # A 'changed' scope with no PR diff would select zero TUs and embed an
+        # empty L4 surface (Codex review), so fall back to 'target' — the
+        # non-empty choice that still enables the source-only checks. But when the
+        # caller *did* thread an explicit changed-path set (PR replay, ADR-035 D7
+        # POI focusing), honour 'changed' so the scan narrows to the affected TUs
+        # instead of replaying the whole target.
+        replay_scope = "target" if (scope == "changed" and not changed_paths) else scope
         # L4 per-TU cache dir: explicit arg wins, else the ABICHECK_L4_CACHE_DIR
         # env (the CI-friendly knob — point it at a restored cache directory).
         l4_cache_dir = source_abi_cache_dir
@@ -240,6 +245,7 @@ def collect_inline_pack(
             clang_bin=clang_bin,
             exported_symbols=exported_symbols,
             source_abi_cache_dir=l4_cache_dir,
+            changed_paths=changed_paths,
         )
     graph = _build_inline_graph(merged, surface) if "L5" in layers else None
 
@@ -630,6 +636,7 @@ def _run_inline_source_abi(
     clang_bin: str,
     exported_symbols: tuple[str, ...] = (),
     source_abi_cache_dir: Path | None = None,
+    changed_paths: tuple[str, ...] = (),
 ) -> SourceAbiSurface | None:
     """Run L4 replay over a source tree; ``None`` when no source tree is given.
 
@@ -684,6 +691,7 @@ def _run_inline_source_abi(
         merged,
         impl,
         scope=scope,
+        changed_paths=changed_paths,
         public_header_roots=roots,
         exported_symbols=exported_symbols,
         cache=cache,

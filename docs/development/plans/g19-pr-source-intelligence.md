@@ -74,13 +74,34 @@ authority rule (L0–L2 stay authoritative for `BREAKING`).
   config; FP-rate-gate corpus cases before any check is promoted to gate.
 
 ### Phase 3 — Deterministic `scan` orchestrator (G19.3)
-- New `abicheck/cli_scan.py` (sibling-module registration per `/CLAUDE.md`):
-  classify → always-on tier → run the **pinned** level (`--mode` preset or
-  explicit `--source-method`/`--depth`), POI-focused → single coverage report.
-- Promote `source_replay.recommend_collect_mode()` to a scored function driven by
-  a `risk_rules` config block — used **only** for `--source-method auto` (opt-in)
-  and POI focusing, never to silently change a pinned CI run. `--budget` is a
-  failure guard on the chosen level, not an escalation driver.
+- **DONE** — New `abicheck/cli_scan.py` (sibling-module registration per
+  `/CLAUDE.md`): `scan` classifies the changed paths → runs the always-on tier
+  (compiler-free `pattern_scan` S3 + intra-version `crosscheck` D4) → runs the
+  **pinned** level (`--mode` preset or explicit `--source-method`/`--depth`,
+  resolved by `buildsource/scan_levels.py`) by collecting L3/L4/L5 inline at the
+  matching ADR-033 D2 evidence mode → (if `--baseline`) `compare`s, folding the
+  cross-source findings in as `extra_changes` → emits one coverage-annotated
+  report (text/JSON) stating, per L-layer/S-method, collected vs. skipped. Modes
+  `pr`/`pr-deep`/`baseline`/`audit`; `--audit` runs intra-version (no baseline).
+  `--budget` is a failure guard (exit 5 on overflow, never shrinks scope).
+- **DONE** — `buildsource/risk.py` is the scored generalization of
+  `source_replay.recommend_collect_mode()`: a tunable `risk_rules` profile
+  (`--risk-rules` YAML) scores the changed paths (strongest-signal-present, D3
+  ordering) → an S-method, used **only** for `--source-method auto` (opt-in),
+  never to change a pinned/deterministic CI run.
+  Tests: `tests/test_risk.py`, `tests/test_scan_levels.py`, `tests/test_cli_scan.py`.
+- **DONE** — the baseline compare folds embedded L3/L4/L5 evidence in via
+  `prepare_embedded_build_source` (the same path `compare` uses), and an
+  explicit `--changed-path`/`--since` set is threaded through
+  `embed_build_source` → `collect_inline_pack` → `run_source_replay` so a
+  `source-changed` collection narrows to the affected TUs (D7 focusing for the
+  supplied changed set) instead of replaying the whole target.
+- **TODO (Phase 3b/3c)** — the *automatic* POI work-list (`buildsource/poi.py`)
+  computed from L0/L1/L2 deltas (vs. the explicit changed-path set already
+  threaded), the typed `ScanRequest`/`ScanResult` + provider protocol +
+  `--estimate` in `service.py`, MCP `scan`/`audit`/`estimate` tools, and the
+  `surface-report`-reuse single-release audit catalog. `scan --audit` already
+  runs the D2+D4 intra-version pass.
 
 ### Phase 3b — Evidence-directed focusing + API/estimate (G19.5, G19.7)
 - POI builder: from L0/L1/L2 deltas + risk score, produce a work-list consumed by
