@@ -28,11 +28,39 @@ from abicheck.buildsource.scan_levels import (
     ScanMode,
     SourceMethod,
     depth_to_method,
+    level_to_collect_mode,
     method_to_collect_mode,
     method_to_depth,
     mode_preset,
+    resolve_level,
     resolve_source_method,
 )
+
+
+def test_pr_and_pr_deep_resolve_to_distinct_levels():
+    # pr-deep must not collapse to the same level as pr (Codex review).
+    pr_method, pr_depth = resolve_level(mode=ScanMode.PR)
+    deep_method, deep_depth = resolve_level(mode=ScanMode.PR_DEEP)
+    assert (pr_method, pr_depth) == (SourceMethod.S5, EvidenceDepth.SOURCE)
+    assert (deep_method, deep_depth) == (SourceMethod.S5, EvidenceDepth.GRAPH)
+    pr_mode = level_to_collect_mode(pr_method, pr_depth)
+    deep_mode = level_to_collect_mode(deep_method, deep_depth)
+    assert pr_mode == "source-changed"
+    assert deep_mode == "graph-summary"
+    assert pr_mode != deep_mode
+
+
+def test_resolve_level_explicit_source_method_reports_its_depth():
+    method, depth = resolve_level(mode=ScanMode.PR, source_method=SourceMethod.S6)
+    assert method is SourceMethod.S6
+    assert depth is EvidenceDepth.FULL
+
+
+def test_resolve_level_explicit_depth_is_verbatim():
+    method, depth = resolve_level(mode=ScanMode.PR, depth=EvidenceDepth.GRAPH)
+    assert method is SourceMethod.S4
+    assert depth is EvidenceDepth.GRAPH
+    assert level_to_collect_mode(method, depth) == "graph-summary"
 
 
 @pytest.mark.parametrize(

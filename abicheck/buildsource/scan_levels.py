@@ -197,3 +197,51 @@ def resolve_source_method(
         resolved = depth_to_method(depth)
         return resolved if resolved is not None else SourceMethod.S0
     return mode_preset(mode)[0]
+
+
+def resolve_level(
+    *,
+    mode: ScanMode,
+    source_method: SourceMethod | None = None,
+    depth: EvidenceDepth | None = None,
+    auto_method: str | None = None,
+) -> tuple[SourceMethod, EvidenceDepth]:
+    """Resolve both the deterministic S-method **and** its effective L-depth.
+
+    Returning the depth (not just the method) keeps ``--mode`` presets that pin a
+    *deeper* depth than their method implies — notably ``pr-deep`` = ``(S5,
+    GRAPH)`` vs ``pr`` = ``(S5, SOURCE)`` — distinct: collapsing to the method
+    alone made the two modes identical (Codex review). Depth precedence mirrors
+    :func:`resolve_source_method`:
+
+    - an explicit/``auto`` ``--source-method`` reports the *resolved method's*
+      representative depth (so ``s6`` reads ``full``, not the mode preset);
+    - an explicit ``--depth`` is taken verbatim;
+    - otherwise the ``--mode`` preset's depth is preserved (``pr-deep`` keeps
+      ``GRAPH``).
+    """
+    method = resolve_source_method(
+        mode=mode, source_method=source_method, depth=depth, auto_method=auto_method
+    )
+    if source_method is not None:
+        eff_depth = method_to_depth(method)
+    elif depth is not None:
+        eff_depth = depth
+    else:
+        eff_depth = mode_preset(mode)[1]
+    return method, eff_depth
+
+
+def level_to_collect_mode(method: SourceMethod, depth: EvidenceDepth) -> str:
+    """The ADR-033 D2 CI evidence mode for a resolved (method, depth) level.
+
+    Depth-aware so a graph-depth level engages the L5 semantic-graph collection
+    even when the method's own default mode would not: ``pr-deep`` ((S5, GRAPH))
+    resolves to ``graph-summary`` (L3+L4+L5 with the graph built) instead of
+    ``pr``'s ``source-changed``, so the deeper preset actually collects more
+    (Codex review). All other levels use the method's default mode.
+    """
+    base = method_to_collect_mode(method)
+    if depth is EvidenceDepth.GRAPH and base == "source-changed":
+        return "graph-summary"
+    return base

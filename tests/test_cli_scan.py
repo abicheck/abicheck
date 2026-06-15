@@ -231,6 +231,27 @@ def test_source_method_pin_overrides_mode_in_report(runner, new_snap_compatible)
     assert "depth=build" in res.output
 
 
+def test_pr_deep_is_distinct_from_pr(runner, new_snap_compatible):
+    # No --audit here: --audit would force the AUDIT preset and mask --mode.
+    res = runner.invoke(
+        main,
+        [
+            "scan",
+            "--binary",
+            str(new_snap_compatible),
+            "--mode",
+            "pr-deep",
+            "--format",
+            "json",
+        ],
+    )
+    assert res.exit_code == 0, res.output
+    payload = json.loads(res.output)
+    # pr-deep keeps GRAPH depth and a distinct graph collect-mode (Codex review).
+    assert payload["level"]["depth"] == "graph"
+    assert payload["level"]["collect_mode"] == "graph-summary"
+
+
 def test_reported_depth_matches_resolved_source_method(runner, new_snap_compatible):
     res = runner.invoke(
         main,

@@ -63,9 +63,8 @@ from .buildsource.scan_levels import (
     EvidenceDepth,
     ScanMode,
     SourceMethod,
-    method_to_collect_mode,
-    method_to_depth,
-    resolve_source_method,
+    level_to_collect_mode,
+    resolve_level,
 )
 from .checker_policy import API_BREAK_KINDS, BREAKING_KINDS
 from .cli import _safe_write_output, _setup_verbosity, main
@@ -597,17 +596,17 @@ def scan_cmd(
     dp = EvidenceDepth(depth) if depth else None
     is_auto = sm is SourceMethod.AUTO
     auto_method = risk.recommended_method if is_auto else None
-    resolved = resolve_source_method(
+    resolved, eff_depth_enum = resolve_level(
         mode=scan_mode,
         source_method=sm,
         depth=dp,
         auto_method=auto_method,
     )
-    collect_mode = method_to_collect_mode(resolved)
-    # Report the depth the *resolved* method actually reaches, not the requested
-    # mode/depth — an explicit --source-method (or auto) can resolve away from the
-    # mode preset, and the report must not overstate the scan depth (Codex review).
-    eff_depth = method_to_depth(resolved).value
+    # collect_mode and reported depth come from the resolved (method, depth) level,
+    # so a deeper preset (pr-deep = graph) is distinct from pr, and an explicit
+    # --source-method reports its own depth, not the mode preset (Codex review).
+    collect_mode = level_to_collect_mode(resolved, eff_depth_enum)
+    eff_depth = eff_depth_enum.value
 
     # --- build the candidate snapshot (L0-L2 + inline L3-L5 at the level) ------
     new_snap = _build_new_snapshot(
@@ -639,6 +638,8 @@ def scan_cmd(
             cc.findings,
             lang,
             collect_mode,
+            list(headers),
+            list(includes),
         )
         # A cross-check the maintainer promoted to `error` (D6) gates the exit
         # even when the baseline diff itself is clean.
@@ -734,6 +735,8 @@ def _run_baseline_compare(
     extra_changes: list[Any],
     lang: str,
     collect_mode: str,
+    headers: list[Path],
+    includes: list[Path],
 ) -> tuple[str, int, dict[str, Any]]:
     """Compare *new_snap* against *baseline*, folding cross-source findings in.
 
@@ -741,6 +744,12 @@ def _run_baseline_compare(
     diff and the verdict reflects them — but, being partitioned into
     ``RISK``/``API_BREAK`` only, they can never push the verdict to ``BREAKING``
     (ADR-035 D1 authority rule).
+
+    *headers*/*includes* are the same scan header inputs used to build the
+    candidate, threaded into the baseline parse so a native ``--baseline``
+    library is header-scoped symmetrically — else the old side stays
+    symbol/DWARF-only and the compare drops old type evidence or invents spurious
+    API diffs (Codex review). They are inert for a JSON-snapshot baseline.
 
     The embedded L3/L4/L5 build/source packs on either snapshot are diffed via
     :func:`prepare_embedded_build_source` — the same path ``abicheck compare``
@@ -754,7 +763,7 @@ def _run_baseline_compare(
     from .service import resolve_input
 
     try:
-        old_snap = resolve_input(baseline, [], [], version="", lang=lang)
+        old_snap = resolve_input(baseline, headers, includes, version="", lang=lang)
     except AbicheckError as exc:
         raise click.ClickException(
             f"Failed to load --baseline {baseline}: {exc}"
