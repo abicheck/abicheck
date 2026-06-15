@@ -536,6 +536,28 @@ def test_malformed_risk_rules_yaml_is_click_error(
     assert "cannot read --risk-rules" in res.output
 
 
+def test_out_of_tree_compile_db_is_accepted(runner, tmp_path, new_snap_compatible):
+    # An explicit --compile-db (out-of-tree, no --sources) must be threaded into
+    # evidence collection, not ignored (Codex review). Empty DB → no compiler
+    # needed; the run must still succeed and route through the build collection.
+    cc = tmp_path / "compile_commands.json"
+    cc.write_text("[]", encoding="utf-8")
+    res = runner.invoke(
+        main,
+        [
+            "scan",
+            "--binary",
+            str(new_snap_compatible),
+            "--compile-db",
+            str(cc),
+            "--source-method",
+            "s1",
+        ],
+    )
+    assert res.exit_code == 0, res.output
+    assert "collect-mode=build" in res.output
+
+
 def test_multiple_binaries_rejected(runner, baseline_snap, new_snap_compatible):
     res = runner.invoke(
         main,

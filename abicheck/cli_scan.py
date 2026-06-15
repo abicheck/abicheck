@@ -339,6 +339,8 @@ def _build_new_snapshot(
     lang: str,
     allow_build_query: bool,
     changed_paths: tuple[str, ...] = (),
+    build_info: Path | None = None,
+    build_config: Path | None = None,
 ) -> Any:
     """Dump the candidate's L0-L2 surface and embed L3-L5 inline at *collect_mode*.
 
@@ -346,6 +348,12 @@ def _build_new_snapshot(
     threaded into the inline source replay so a ``source-changed`` collection
     actually narrows to the affected TUs — the ADR-035 D7 POI-focused cost model —
     instead of falling back to a full ``target`` replay.
+
+    ``build_info`` (an out-of-tree compile DB / build dir / pack) and
+    ``build_config`` (a trusted ``.abicheck.yml`` enabling ``build.query``) are
+    threaded through so a pinned s5/s6 scan can collect L3/L4 even when the build
+    context lives outside ``--sources`` — otherwise it silently degrades to
+    partial coverage (Codex review).
     """
     from .errors import AbicheckError
     from .service import resolve_input
@@ -354,13 +362,16 @@ def _build_new_snapshot(
         snap = resolve_input(binary, headers, includes, version="", lang=lang)
     except AbicheckError as exc:
         raise click.ClickException(f"Failed to load --binary {binary}: {exc}") from exc
-    if sources is not None and collect_mode != "off":
+    # Collect evidence when there is something to collect from — a source tree OR
+    # an out-of-tree build-info input — at a non-"off" level.
+    if (sources is not None or build_info is not None) and collect_mode != "off":
         from .cli_buildsource import embed_build_source
 
         embed_build_source(
             snap,
-            build_info=None,
+            build_info=build_info,
             sources=sources,
+            build_config=build_config,
             allow_build_query=allow_build_query,
             collect_mode=collect_mode,
             changed_paths=changed_paths,
@@ -435,6 +446,27 @@ def _audit_exit_code(
     type=click.Path(exists=True, file_okay=False, path_type=Path),
     default=None,
     help="Source tree (compile DB auto-discovered within it).",
+)
+@click.option(
+    "--build-info",
+    "build_info",
+    type=click.Path(exists=True, path_type=Path),
+    default=None,
+    help="Out-of-tree build dir / compile_commands.json / pack supplying L3.",
+)
+@click.option(
+    "--compile-db",
+    "compile_db",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default=None,
+    help="Explicit compile_commands.json (use when not under --sources).",
+)
+@click.option(
+    "--build-config",
+    "build_config",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    default=None,
+    help="Trusted .abicheck.yml (enables build.query with --allow-build-query).",
 )
 @click.option(
     "--baseline",
@@ -525,6 +557,9 @@ def scan_cmd(
     headers: tuple[Path, ...],
     includes: tuple[Path, ...],
     sources: Path | None,
+    build_info: Path | None,
+    compile_db: Path | None,
+    build_config: Path | None,
     baseline: Path | None,
     mode: str,
     source_method: str | None,
@@ -609,6 +644,9 @@ def scan_cmd(
     eff_depth = eff_depth_enum.value
 
     # --- build the candidate snapshot (L0-L2 + inline L3-L5 at the level) ------
+    # An explicit --compile-db (a file) wins over --build-info (dir/pack) as the
+    # L3 source; both feed embed_build_source's build_info input.
+    effective_build_info = compile_db or build_info
     new_snap = _build_new_snapshot(
         binary,
         list(headers),
@@ -618,6 +656,8 @@ def scan_cmd(
         lang,
         allow_build_query,
         changed_paths=tuple(changed),
+        build_info=effective_build_info,
+        build_config=build_config,
     )
 
     # --- always-on tier: compiler-free pattern pre-scan (S3) ------------------
