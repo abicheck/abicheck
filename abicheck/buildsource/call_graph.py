@@ -291,6 +291,23 @@ def _file_in_project(caller_file: str, project_files: frozenset[str]) -> bool:
     return False
 
 
+def project_source_files(build: BuildEvidence) -> frozenset[str]:
+    """Project-internal source files for ``defined_in_project`` provenance.
+
+    Compile-unit sources **plus the targets' private headers** — a function whose
+    body is in a project ``.cc`` *or* a project private header is internal
+    implementation. Public headers are deliberately excluded: an inline function
+    in a public header is consumer-visible public surface, so marking it
+    ``defined_in_project`` (→ internal) would false-positive
+    ``public_to_internal_dependency``. Third-party/system headers (Boost, libc++)
+    are never in either list, so they stay external (Codex review).
+    """
+    files: set[str] = {cu.source for cu in build.compile_units if cu.source}
+    for tgt in build.targets:
+        files.update(h for h in tgt.private_headers if h)
+    return frozenset(files)
+
+
 def augment_graph_with_calls(
     graph: SourceGraphSummary,
     edges: list[CallEdge],

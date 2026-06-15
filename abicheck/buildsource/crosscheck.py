@@ -529,9 +529,13 @@ def _surface_has_l4_facts(surface: Any) -> bool:
         for k in ("source_decl_to_binary_symbol", "source_type_to_debug_type")
     ):
         return True
+    # Only *parsed-TU* coverage counts. ``exported_symbols``/``matched_symbols``
+    # are recorded from the binary export table even when replay parsed zero TUs,
+    # so counting them would re-mask an all-failed/zero-TU L4 run as a clean ODR
+    # audit (Codex review). Require a real parsed-compile-unit count.
     coverage = surface.coverage or {}
     return any(
-        coverage.get(k) for k in ("parsed_tus", "exported_symbols", "matched_symbols")
+        coverage.get(k) for k in ("parsed_tus", "compile_units_parsed", "parsed")
     )
 
 

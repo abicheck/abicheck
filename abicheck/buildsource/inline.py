@@ -875,7 +875,9 @@ def _fold_call_graph(
     # can flag a public→impl-helper dependency the built-in call graph produced
     # without L4 ``SOURCE_DECLARES`` evidence, while still excluding third-party
     # header-inline callees (ADR-035 D4 / Codex review).
-    project_files = frozenset(cu.source for cu in merged.compile_units if cu.source)
+    from .call_graph import project_source_files
+
+    project_files = project_source_files(merged)
     added = augment_graph_with_calls(graph, edges, project_files or None)
     for diag in extractor.diagnostics:
         merged.diagnostics.append(f"call_graph: {diag}")

@@ -1417,3 +1417,21 @@ def test_public_to_internal_dependency_elevates_via_callgraph_def_file():
     assert len(hits) == 1
     assert hits[0].confidence == Confidence.HIGH
     assert hits[0].source_location == "/work/src/impl.cc"
+
+
+def test_odr_type_variant_skipped_when_only_export_table_coverage():
+    # Replay parsed 0 TUs but link_source_abi still records export-table coverage;
+    # that must NOT read as a clean ODR audit (Codex review).
+    surface = SourceAbiSurface(coverage={"exported_symbols": 12, "matched_symbols": 0})
+    snap = _snap(build_source=BuildSourcePack(root="", source_abi=surface))
+    res = run_crosschecks(snap)
+    row = _coverage(res, CHECK_ODR_TYPE_VARIANT)
+    assert row["status"] == "skipped"
+    assert _findings_of(res, ChangeKind.ODR_TYPE_VARIANT) == []
+
+
+def test_odr_type_variant_present_with_parsed_tu_coverage():
+    surface = SourceAbiSurface(coverage={"compile_units_parsed": 3})
+    snap = _snap(build_source=BuildSourcePack(root="", source_abi=surface))
+    res = run_crosschecks(snap)
+    assert _coverage(res, CHECK_ODR_TYPE_VARIANT)["status"] == "present"

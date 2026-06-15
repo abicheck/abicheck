@@ -729,3 +729,24 @@ def test_parse_fills_callee_file_from_sibling_functiondecl() -> None:
     edges = parse_clang_ast_calls(ast_tree)
     edge = next(e for e in edges if e.callee == "_Zhelper")
     assert edge.callee_file == "/work/src/util.cc"
+
+
+def test_project_source_files_includes_private_headers_not_public() -> None:
+    from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit, Target
+    from abicheck.buildsource.call_graph import project_source_files
+
+    build = BuildEvidence(
+        compile_units=[CompileUnit(id="cu://a", source="src/a.cc")],
+        targets=[
+            Target(
+                id="t",
+                name="t",
+                public_headers=["include/api.h"],
+                private_headers=["src/detail.h"],
+            )
+        ],
+    )
+    pf = project_source_files(build)
+    assert "src/a.cc" in pf
+    assert "src/detail.h" in pf  # private header → internal provenance
+    assert "include/api.h" not in pf  # public header excluded (public surface)

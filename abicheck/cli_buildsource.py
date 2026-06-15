@@ -715,11 +715,14 @@ def _collect_call_graph(
         ))
         return
     edges = extractor.extract_from_build(merged)
-    # Pass the project's compile-unit sources so call-graph decls earn the
-    # ``defined_in_project`` marker (source-location provenance) — the cross-source
-    # ``public_to_internal_dependency`` check needs it to flag an impl callee in a
-    # collected pack, just like the inline scan path (Codex review).
-    project_files = frozenset(cu.source for cu in merged.compile_units if cu.source)
+    # Pass the project's source files (compile-unit sources + private headers) so
+    # call-graph decls earn the ``defined_in_project`` marker (source-location
+    # provenance) — the cross-source ``public_to_internal_dependency`` check needs
+    # it to flag an impl callee (in a `.cc` or a private header) in a collected
+    # pack, just like the inline scan path (Codex review).
+    from .buildsource.call_graph import project_source_files
+
+    project_files = project_source_files(merged)
     added = augment_graph_with_calls(graph, edges, project_files or None)
     graph.finalize()
     for diag in extractor.diagnostics:
