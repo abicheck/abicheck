@@ -1,7 +1,11 @@
 # ADR-035: PR-Tier Source Intelligence and Cross-Source Validation
 
 **Date:** 2026-06-14
-**Status:** Proposed
+**Status:** Proposed — partially implemented (D1–D5 shipped; tracked as G19 in
+`docs/development/usecase-registry.yaml`). D5 (build-emitted source-facts
+protocol) is `complete`; D1/D3 (deterministic level + risk-scored `auto`),
+D2 (compiler-free pattern pre-scan), D4 (cross-source validation engine), and
+D9/D10 (scan coverage report) are `partial`. D6–D8 remain planned.
 **Decision maker:** Nikolay Petrov
 
 ---

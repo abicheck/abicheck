@@ -31,13 +31,13 @@
 | [025](025-pr-diff-source-evaluation.md) | PR-Diff-Aware ABI Evaluation (Source Diff as Trigger and Localizer) | Proposed |
 | [026](026-source-only-undetectable-changes.md) | Source-Only Changes and the Evidence-Tier Boundary | Accepted |
 | [027](027-api-surface-intelligence.md) | API Surface Intelligence — Structure Metrics, Idiom Detection, Cross-Library Reasoning, Pattern-Aware Verdicts | Accepted |
-| [028](028-source-build-evidence-pack.md) | Optional Source and Build Evidence Pack Architecture | Proposed |
-| [029](029-build-graph-toolchain-context-capture.md) | Build Graph and Toolchain Context Capture | Proposed |
-| [030](030-source-abi-replay-and-linked-source-surface.md) | Source ABI Replay and Linked Source Surface | Proposed |
-| [031](031-source-implementation-graph-augmentation.md) | Source and Implementation Graph Augmentation | Proposed |
-| [032](032-evidence-extractor-plugin-interface.md) | Evidence Extractor Plugin Interface and Security Model | Proposed |
-| [033](033-ci-rollout-performance-and-validation.md) | CI Rollout, Performance, Caching, and Validation Strategy | Proposed |
+| [028](028-source-build-evidence-pack.md) | Optional Source and Build Evidence Pack Architecture | Accepted — implemented |
+| [029](029-build-graph-toolchain-context-capture.md) | Build Graph and Toolchain Context Capture | Accepted — implemented |
+| [030](030-source-abi-replay-and-linked-source-surface.md) | Source ABI Replay and Linked Source Surface | Accepted — implemented |
+| [031](031-source-implementation-graph-augmentation.md) | Source and Implementation Graph Augmentation | Accepted — implemented |
+| [032](032-evidence-extractor-plugin-interface.md) | Evidence Extractor Plugin Interface and Security Model | Accepted — implemented |
+| [033](033-ci-rollout-performance-and-validation.md) | CI Rollout, Performance, Caching, and Validation Strategy | Accepted — implemented |
 | [034](034-managed-runtime-and-non-c-abi-frontends.md) | Managed-Runtime and Non-C ABI Frontends | Proposed |
-| [035](035-pr-tier-source-intelligence-and-crosscheck.md) | PR-Tier Source Intelligence and Cross-Source Validation | Proposed |
+| [035](035-pr-tier-source-intelligence-and-crosscheck.md) | PR-Tier Source Intelligence and Cross-Source Validation | Proposed — partially implemented (G19) |
 | [036](036-report-view-model.md) | Report view-model and canonical report severity | Accepted |
 | [Gap Analysis](adr-gap-analysis.md) | Decisions Needing Formal ADRs | Reference |
