@@ -3,17 +3,13 @@
 Evidence-based validation of abicheck against real upstream C/C++ shared
 libraries (not synthetic fixtures), used to drive planning and improvement.
 
-- `uxl-scan-levels-timing-2026-06.md` — **UXL `scan` level sweep:** the full
-  `abicheck scan` stack run against oneTBB (C++) and UMF (C) across the
-  source-scan levels `s0, s1, s3–s6` (`s2` is rejected by `cli_scan.py` as
-  unimplemented). The `--mode` presets `pr`/`pr-deep`/`baseline`/`audit` were run
-  on oneTBB; on UMF only `audit` was run (the mode presets resolve to the same
-  s5/s6 levels already swept there). Includes per-level **timing** and a
-  **usability** punch-list. Headline: one cost cliff at the L4 AST boundary
-  whose height is a C++ phenomenon (~7× on oneTBB, ~1.3× on UMF), seed-gated
-  PR scoping (222 s → 11.5 s with a one-file diff seed), and castxml-only L2
-  blocking the cross-source checks on a clang-only host. Raw data:
-  `data/uxl_scan_results_2026-06.json`.
+- `uxl-scan-levels-timing-2026-06.md` — **UXL `scan`-level findings & follow-ups:**
+  a `scan` stack run across source-scan levels on oneTBB (C++) and UMF (C),
+  reduced to actionable datapoints + a problems/testing list (P1 castxml-only L2,
+  P2 pointer-reachability over-detection, …). The distilled **timing guide** lives
+  in [`docs/user-guide/scan-levels.md`](../docs/user-guide/scan-levels.md) and
+  [`docs/development/performance.md`](../docs/development/performance.md#scan-level-cost-model-one-cliff-at-l4).
+  Raw per-level data: `data/uxl_scan_results_2026-06.json`.
 - `realworld-tracker-parity-2026-06.md` — **latest parity** run: abicheck scored
   live against the ABICC abi-laboratory oracle across 60 libraries / 185
   comparable pairs (94.1 % agreement, 0 confirmed defects).
