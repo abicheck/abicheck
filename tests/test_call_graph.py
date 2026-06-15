@@ -682,3 +682,18 @@ def test_augment_thirdparty_header_caller_not_project() -> None:
     augment_graph_with_calls(g, edges, frozenset({"src/impl.cc"}))
     by_id = {n.id: n for n in g.nodes}
     assert not by_id["decl://_Zboost"].attrs.get("defined_in_project")
+
+
+def test_augment_marks_leaf_callee_from_callee_file() -> None:
+    # A leaf helper appears only as a callee (no outgoing calls); its declaration
+    # file (callee_file) earns it project provenance (Codex review).
+    g = SourceGraphSummary()
+    edges = [
+        CallEdge(
+            "_Zpub", "_Zleaf", caller_file="/work/src/api.cc",
+            callee_file="/work/src/util.cc",
+        ),
+    ]
+    augment_graph_with_calls(g, edges, frozenset({"src/api.cc", "src/util.cc"}))
+    by_id = {n.id: n for n in g.nodes}
+    assert by_id["decl://_Zleaf"].attrs.get("defined_in_project") is True

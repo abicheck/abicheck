@@ -129,6 +129,10 @@ class CallEdge:
     #: function whose body lives in a project compile-unit source, not a
     #: third-party/system header (ADR-035 D4 / Codex review).
     caller_file: str = ""
+    #: Source file the *callee*'s declaration sits in (from its referencedDecl
+    #: loc, when clang emits one). Lets a leaf project helper seen only as a
+    #: callee still earn ``defined_in_project`` (Codex review).
+    callee_file: str = ""
 
     def confidence(self) -> str:
         """Map the resolution onto a graph confidence label (ADR-031 D9)."""
@@ -221,12 +225,19 @@ def parse_clang_ast_calls(ast: dict[str, Any]) -> list[CallEdge]:
                 # Entering a new enclosing function: its body lives in cur_file.
                 caller, caller_file = ident, cur_file
         if kind in _CALL_EXPR_KINDS and caller:
-            callee, call_kind, resolution = _classify_call(
-                node, _find_referenced_decl(node)
-            )
+            ref = _find_referenced_decl(node)
+            callee, call_kind, resolution = _classify_call(node, ref)
             if callee and callee != caller:
+                # The callee's *declaration* file (from its referencedDecl loc)
+                # lets a leaf project helper — one seen only as a callee, never a
+                # caller — still earn project provenance (Codex review). Best
+                # effort: clang often omits a file on a reference node, in which
+                # case it stays "" and only caller-side provenance applies.
+                callee_file = _file_of(ref) if isinstance(ref, dict) else ""
                 edges.append(
-                    CallEdge(caller, callee, call_kind, resolution, caller_file)
+                    CallEdge(
+                        caller, callee, call_kind, resolution, caller_file, callee_file
+                    )
                 )
         for child in node.get("inner", []) or []:
             visit(child, caller, caller_file, cur_file)
@@ -288,6 +299,10 @@ def augment_graph_with_calls(
         for e in edges:
             if _file_in_project(e.caller_file, project_files):
                 defined_in_project.add(e.caller)
+            # A leaf helper appears only as a callee; mark it too when its
+            # declaration file is a project source (Codex review).
+            if _file_in_project(e.callee_file, project_files):
+                defined_in_project.add(e.callee)
 
     added = 0
     for e in edges:
