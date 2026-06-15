@@ -1,5 +1,8 @@
 name: Test GitHub Action
 
+permissions:
+  contents: read
+
 on:
   pull_request:
     paths:
