@@ -57,8 +57,15 @@ authority rule (L0–L2 stay authoritative for `BREAKING`).
   `PatternScanResult`/`EscalationTrigger`), with mandatory coverage reporting and
   no compile DB / compiler. Tree-sitter is a pluggable later backend.
   Tests: `tests/test_pattern_scan.py`.
-- **TODO** — Extend `buildsource/include_graph.py`: per-TU ABI-macro-value capture
-  and private/generated-header-leak detection when a compile DB is present.
+- **DONE** — New `abicheck/buildsource/preprocessor_scan.py` (S2 conditional
+  tier): `run_preprocessor_scan` runs over the collected L3 build evidence **only**
+  when a compile DB + `clang -E` are present (else an honest skipped coverage row).
+  Captures per-TU ABI-macro values (`clang -E -dM`) → `find_macro_divergence`, and
+  public-header resolved includes (`clang -M`) → `find_private_header_leaks`
+  (`classify_include`: public/private/generated/system). Pure analysis core is
+  unit-tested; the live `ClangPreprocessorExtractor` is integration-only and
+  degrades gracefully. Wired into `scan` as an always-on conditional tier with its
+  own coverage row + advisory facts. Tests: `tests/test_preprocessor_scan.py`.
 
 ### Phase 2 — Cross-source validation engine (G19.2)
 - **DONE** — New `abicheck/buildsource/crosscheck.py` (`run_crosschecks`) consumes

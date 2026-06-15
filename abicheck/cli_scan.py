@@ -59,6 +59,7 @@ import click
 from .buildsource.crosscheck import ALL_CHECKS, CrosscheckConfig, run_crosschecks
 from .buildsource.pattern_scan import scan_files
 from .buildsource.poi import build_points_of_interest
+from .buildsource.preprocessor_scan import run_preprocessor_scan
 from .buildsource.risk import RiskRules, RiskScore, score_changed_paths
 from .buildsource.scan_levels import (
     EvidenceDepth,
@@ -191,6 +192,7 @@ class ScanOutcome:
     changed_path_source: str
     coverage: list[dict[str, Any]] = field(default_factory=list)
     pattern: dict[str, Any] = field(default_factory=dict)
+    preprocessor: dict[str, Any] = field(default_factory=dict)
     crosscheck: dict[str, Any] = field(default_factory=dict)
     crosscheck_severities: dict[str, str] = field(default_factory=dict)
     poi: dict[str, Any] = field(default_factory=dict)
@@ -217,6 +219,7 @@ class ScanOutcome:
             },
             "coverage": list(self.coverage),
             "pattern_scan": self.pattern,
+            "preprocessor_scan": self.preprocessor,
             "crosscheck": self.crosscheck,
             "crosscheck_severities": dict(self.crosscheck_severities),
             "poi": self.poi,
@@ -331,6 +334,21 @@ def _render_text(out: ScanOutcome) -> str:
         lines.append("Pattern pre-scan facts (advisory)")
         for kind, n in sorted(pat_counts.items()):
             lines.append(f"  {kind}: {n}")
+
+    pp_div = out.preprocessor.get("divergences") or []
+    pp_leaks = out.preprocessor.get("leaks") or []
+    if pp_div or pp_leaks:
+        lines.append("")
+        lines.append("Preprocessor pre-scan facts (S2, advisory)")
+        for d in pp_div:
+            lines.append(
+                f"  macro divergence: {d['macro']} ({d['n_values']} values across TUs)"
+            )
+        for leak in pp_leaks:
+            lines.append(
+                f"  {leak['leak_class']}-header leak: "
+                f"{leak['public_header']} → {leak['leaked_header']}"
+            )
 
     if out.diff_summary is not None:
         lines.append("")
@@ -668,14 +686,11 @@ def scan_cmd(
 
     scan_mode = ScanMode.AUDIT if audit else ScanMode(mode)
     sm = SourceMethod(source_method) if source_method else None
-    # S2 (preprocessor macro/include capture) has no collection backend yet
-    # (ADR-035 G19 Phase 3b). Reject it rather than silently running the L3-only
-    # `build` mode while reporting `s2`, which would overstate coverage (Codex).
-    if sm is SourceMethod.S2:
-        raise click.UsageError(
-            "--source-method s2 (preprocessor macro/include capture) is not yet "
-            "implemented; use s1 for build context or s5 for source-ABI replay."
-        )
+    # S2 (preprocessor macro/include capture) is collected by the conditional S2
+    # tier (`preprocessor_scan.run_preprocessor_scan`) over the L3 build evidence;
+    # it maps to the L3 `build` collect mode and the always-on tier runs the
+    # preprocessor pass when a compile DB + `clang -E` are available (else the
+    # coverage row reports it skipped — ADR-035 D2 coverage honesty).
     dp = EvidenceDepth(depth) if depth else None
     is_auto = sm is SourceMethod.AUTO
     # auto uses the risk score ONLY when a valid diff seed was produced. A seeded
@@ -750,6 +765,17 @@ def scan_cmd(
         build_config=build_config,
     )
 
+    # --- conditional tier: S2 preprocessor pre-scan (D2) ----------------------
+    # Runs only when L3 build evidence + a preprocessor (`clang -E`) are present;
+    # otherwise the coverage row honestly reports it skipped (never clean). Emits
+    # advisory macro-divergence + private/generated-header-leak facts.
+    pp_build = (
+        new_snap.build_source.build_evidence
+        if new_snap.build_source is not None
+        else None
+    )
+    preproc = run_preprocessor_scan(pp_build, [str(h) for h in headers])
+
     # --- always-on tier: intra-version cross-source checks (D4) ---------------
     cc = run_crosschecks(new_snap, CrosscheckConfig(enabled=frozenset(enabled_checks)))
 
@@ -808,10 +834,12 @@ def scan_cmd(
         coverage=[
             *_intrinsic_coverage(new_snap),
             pattern.coverage().to_dict(),
+            preproc.coverage().to_dict(),
             *_pack_coverage(new_snap),
             *cc.coverage,
         ],
         pattern=pattern.to_dict(),
+        preprocessor=preproc.to_dict(),
         crosscheck=cc.to_dict(),
         crosscheck_severities=severities,
         poi=poi.to_dict(),

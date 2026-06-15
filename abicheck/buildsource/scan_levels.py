@@ -105,7 +105,8 @@ _DEPTH_TO_METHOD: dict[EvidenceDepth, SourceMethod | None] = {
 _METHOD_TO_COLLECT_MODE: dict[SourceMethod, str] = {
     SourceMethod.S0: "off",
     SourceMethod.S1: "build",
-    SourceMethod.S2: "build",  # unreachable: CLI rejects s2 (no S2 backend yet)
+    SourceMethod.S2: "build",  # L3 build context; the S2 preprocessor pre-scan
+    # (preprocessor_scan.run_preprocessor_scan) then runs over that L3 evidence
     SourceMethod.S3: "off",
     SourceMethod.S4: "graph-build",  # L3+L5 graph only — no costly L4 replay
     SourceMethod.S5: "source-changed",
