@@ -158,6 +158,14 @@ _AUTO_THRESHOLDS: tuple[tuple[int, str], ...] = (
 #: tier runs (docs-only / no relevant change).
 _AUTO_FLOOR_METHOD = "s0"
 
+#: A positive signal at or above this weight is a *strong* ABI signal (public
+#: header / export map / build flag in the default profile) that wins over a
+#: co-matched de-escalation rule. Below it, a de-escalation match (docs/tests)
+#: floors the generic ``internal_source`` catch-all so a test-only change does
+#: not escalate (Codex review). Tied to the build-flag tier of the default
+#: profile; tunable along with the rest of ``risk_rules``.
+_STRONG_SIGNAL_WEIGHT = 40
+
 
 @dataclass(frozen=True)
 class RiskRules:
@@ -211,19 +219,35 @@ class RiskRules:
         return cls(tuple(rules))
 
     def best_weight(self, path: str) -> tuple[int, str | None]:
-        """The strongest (max-weight) rule matching *path*, or ``(0, None)``.
+        """The deciding rule weight/name for *path*, or ``(0, None)``.
 
-        Ties break toward the *earlier* rule in profile order so the signal
-        ordering is deterministic.
+        The strongest positive signal wins, **except** a de-escalation rule
+        (negative weight, e.g. ``docs_tests``) floors a *weak/generic* positive
+        match: a C/C++ test file matches both the generic ``internal_source``
+        suffix globs and the ``docs_tests`` rule, and the test/docs floor must win
+        so ``--source-method auto`` does not escalate a test-only change
+        (Codex review). A *strong* ABI signal at or above
+        :data:`_STRONG_SIGNAL_WEIGHT` (public header / export map / build flag)
+        still wins over a co-matched de-escalation rule. Ties among positives
+        break toward the earlier rule in profile order (deterministic).
         """
-        best: tuple[int, str | None] = (0, None)
-        chosen = False
+        pos: tuple[int, str] | None = None  # strongest non-negative match
+        neg: tuple[int, str] | None = None  # most-negative (de-escalation) match
         for rule in self.rules:
-            if rule.matches(path):
-                if not chosen or rule.weight > best[0]:
-                    best = (rule.weight, rule.name)
-                    chosen = True
-        return best
+            if not rule.matches(path):
+                continue
+            if rule.weight >= 0:
+                if pos is None or rule.weight > pos[0]:
+                    pos = (rule.weight, rule.name)
+            elif neg is None or rule.weight < neg[0]:
+                neg = (rule.weight, rule.name)
+        if pos is None:
+            return neg if neg is not None else (0, None)
+        if neg is None:
+            return pos
+        # Both matched: a strong ABI signal dominates; otherwise the de-escalation
+        # floor wins over the weak/generic positive.
+        return pos if pos[0] >= _STRONG_SIGNAL_WEIGHT else neg
 
     def to_dict(self) -> dict[str, Any]:
         return {

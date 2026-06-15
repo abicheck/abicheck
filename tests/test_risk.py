@@ -71,6 +71,23 @@ def test_internal_source_only_uses_lexical_method():
     assert score.recommended_method == "s3"
 
 
+def test_cpp_test_only_change_stays_on_docs_floor():
+    # A C/C++ test file matches the generic internal_source suffix glob AND the
+    # docs_tests rule; the test/docs floor must win so auto stays at s0 (Codex).
+    score = score_changed_paths(["tests/foo_test.cpp", "test/bar_test.cc"])
+    assert score.total < 0
+    assert score.matched.get("docs_tests")
+    assert score.recommended_method == "s0"
+
+
+def test_strong_signal_beats_co_matched_docs_rule():
+    # A public header that also trips the *_test.* pattern is still public API —
+    # the strong signal wins over the de-escalation floor.
+    score = score_changed_paths(["include/widget_test.h"])
+    assert score.total == 50
+    assert score.recommended_method == "s5"
+
+
 def test_build_flag_change_escalates_to_semantic():
     score = score_changed_paths(["cmake/flags.cmake"])
     assert score.total == 40
