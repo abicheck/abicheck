@@ -35,6 +35,20 @@ from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 from .checker_policy import HasKind
+
+# Page chrome (DOCTYPE/head/stylesheet/body frame, verdict palette, footer) now
+# lives in one shared seam (``html_template``). ``_VERDICT_STYLE`` /
+# ``render_document`` / ``render_footer`` are used below; ``_CSS`` is re-exported
+# via redundant alias (it was previously defined in this module) so any code that
+# imported it from here keeps working.
+from .html_template import (
+    _CSS as _CSS,
+)
+from .html_template import (
+    _VERDICT_STYLE,
+    render_document,
+    render_footer,
+)
 from .report_classifications import (
     ADDED_KINDS,
     CATEGORY_PREFIXES,
@@ -50,18 +64,6 @@ from .report_summary import compatibility_metrics
 if TYPE_CHECKING:
     from .checker import DiffResult
 
-# ---------------------------------------------------------------------------
-# Verdict styling — matches ABICC's visual palette
-# ---------------------------------------------------------------------------
-
-_VERDICT_STYLE: dict[str, tuple[str, str]] = {
-    "BREAKING": ("#b71c1c", "#ffcdd2"),
-    "COMPATIBLE_WITH_RISK": ("#e65100", "#fff3e0"),  # orange — deployment caution
-    "COMPATIBLE": ("#1b5e20", "#c8e6c9"),
-    "NO_CHANGE": ("#0d47a1", "#bbdefb"),
-    "API_BREAK": ("#e65100", "#ffe0b2"),
-}
-
 
 def _change_bucket(change: object) -> str:
     """Classify a change into 'removed', 'added', or 'changed'."""
@@ -72,79 +74,6 @@ def _change_bucket(change: object) -> str:
         return "added"
     return "changed"
 
-
-# ---------------------------------------------------------------------------
-# CSS — ABICC visual style, no external deps
-# ---------------------------------------------------------------------------
-
-_CSS = """\
-*, *::before, *::after { box-sizing: border-box; }
-body { font-family: Arial, sans-serif; margin: 0; padding: 0; background: #f5f5f5; color: #212121; }
-
-/* ---- header ---- */
-.header { padding: 20px 32px; background: #263238; color: #fff; }
-.header h1 { margin: 0 0 4px; font-size: 1.4em; letter-spacing: .02em; }
-.header .meta { font-size: 0.88em; color: #b0bec5; }
-
-/* ---- verdict banner ---- */
-.verdict-box { margin: 20px 32px 0; padding: 14px 22px; border-radius: 6px; }
-.verdict-box h2 { margin: 0 0 6px; font-size: 1.2em; }
-.bc-metric { font-size: 1em; margin-top: 4px; }
-.bc-metric strong { font-size: 1.1em; }
-
-/* ---- nav bar ---- */
-.nav { margin: 14px 32px 0; display: flex; gap: 8px; flex-wrap: wrap; }
-.nav a { display: inline-block; padding: 5px 12px; border-radius: 4px;
-          background: #eceff1; color: #37474f; font-size: 0.85em;
-          text-decoration: none; border: 1px solid #cfd8dc; }
-.nav a:hover { background: #cfd8dc; }
-.nav a.breaking { background: #ffcdd2; border-color: #e57373; color: #b71c1c; }
-.nav a.added    { background: #c8e6c9; border-color: #81c784; color: #1b5e20; }
-
-/* ---- summary table ---- */
-.summary-section { margin: 20px 32px 0; background: #fff; border-radius: 6px;
-                   box-shadow: 0 1px 3px rgba(0,0,0,.1); overflow: hidden; }
-.summary-section h3 { margin: 0; padding: 10px 16px; background: #eceff1;
-                      font-size: .95em; border-bottom: 1px solid #cfd8dc; }
-.summary-table { width: 100%; border-collapse: collapse; font-size: 0.88em; }
-.summary-table th { background: #f5f5f5; padding: 7px 12px; text-align: left;
-                    border-bottom: 2px solid #e0e0e0; }
-.summary-table td { padding: 6px 12px; border-bottom: 1px solid #eeeeee; }
-.summary-table tr:last-child td { border-bottom: none; }
-.num { font-weight: bold; font-family: monospace; }
-.num-red  { color: #b71c1c; }
-.num-green { color: #1b5e20; }
-.num-blue  { color: #1565c0; }
-
-/* ---- change sections ---- */
-.section { margin: 16px 32px 0; background: #fff; border-radius: 6px;
-           box-shadow: 0 1px 3px rgba(0,0,0,.1); overflow: hidden; }
-.section h3 { margin: 0; padding: 10px 16px; font-size: .95em;
-              border-bottom: 1px solid #cfd8dc; }
-.section-removed h3 { background: #ffebee; color: #b71c1c; }
-.section-changed h3 { background: #fff8e1; color: #e65100; }
-.section-added   h3 { background: #e8f5e9; color: #1b5e20; }
-.section-suppressed h3 { background: #f3e5f5; color: #6a1b9a; }
-
-/* ---- changes table ---- */
-table.changes { width: 100%; border-collapse: collapse; font-size: 0.87em; }
-table.changes th { background: #fafafa; padding: 7px 12px; text-align: left;
-                   border-bottom: 2px solid #e0e0e0; white-space: nowrap; }
-table.changes td { padding: 7px 12px; border-bottom: 1px solid #eeeeee; vertical-align: top; }
-table.changes tr:last-child td { border-bottom: none; }
-.kind-badge { font-family: monospace; font-size: 0.82em; color: #37474f;
-              background: #eceff1; padding: 2px 6px; border-radius: 3px;
-              white-space: nowrap; }
-.sym { font-family: monospace; font-size: 0.85em; }
-.sym abbr { text-decoration: underline dotted #9e9e9e; cursor: help; }
-.empty { padding: 14px 16px; color: #9e9e9e; font-style: italic; font-size: 0.88em; }
-.cat-badge { font-size: 0.78em; background: #e3f2fd; color: #1565c0;
-             padding: 1px 5px; border-radius: 3px; white-space: nowrap; }
-
-/* ---- footer ---- */
-footer { margin: 20px 32px 32px; padding: 12px 16px; font-size: 0.8em;
-         color: #9e9e9e; border-top: 1px solid #e0e0e0; }
-"""
 
 # ---------------------------------------------------------------------------
 # HTML generation helpers
@@ -834,16 +763,7 @@ def generate_html_report(
     if show_impact:
         impact_html = _build_impact_html(result, displayed_changes=display_changes)
 
-    return f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{h(title) if title else f"ABI Report: {lib_display} {old_display} → {new_display}"}</title>
-  <style>{_CSS}</style>
-</head>
-<body>
-
+    body = f"""
 <div class="header">
   <h1>{h(title) if title else f"ABI Compatibility Report — {lib_display}"}</h1>
   <div class="meta">
@@ -877,14 +797,12 @@ def generate_html_report(
 {sections_html}
 {impact_html}
 
-<footer>
-  Generated by <strong>abicheck</strong> · ABICC-compatible report format ·
-  <a href="https://github.com/napetrov/abicheck" style="color:#9e9e9e;">napetrov/abicheck</a>
-</footer>
-
-</body>
-</html>
+{render_footer("ABICC-compatible report format")}
 """
+    return render_document(
+        title=h(title) if title else f"ABI Report: {lib_display} {old_display} → {new_display}",
+        body=body,
+    )
 
 
 def _verdict_icon(verdict: str) -> str:

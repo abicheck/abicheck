@@ -25,6 +25,8 @@ import subprocess
 import sys
 import tempfile
 import warnings
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 from xml.etree.ElementTree import (
@@ -700,6 +702,36 @@ def _run_castxml_attempt(
 # castxml parser + helpers moved to dumper_castxml (see top-of-file imports)
 
 
+@dataclass(frozen=True)
+class _FormatHandler:
+    """One binary format: how to recognise it and how to dump it (C3).
+
+    The registry collapses the per-format magic-byte knowledge and the
+    ``dump()`` dispatch into a single declarative entry — adding a new binary
+    format is a new ``_FormatHandler`` in ``_FORMAT_HANDLERS`` rather than edits
+    scattered across ``_detect_format`` and ``dump``'s if/elif chain.
+
+    ``accepts_dwarf_only`` / ``accepts_debug_format`` record which optional
+    kwargs the format's builder takes, so ``dump()`` forwards exactly the same
+    arguments each ``_dump_*`` accepted before (ELF: both; Mach-O: dwarf_only
+    only; PE: neither).
+    """
+
+    name: str
+    builder: Callable[..., AbiSnapshot]
+    magics: tuple[bytes, ...] = ()
+    magic_prefix: bytes | None = None
+    accepts_dwarf_only: bool = False
+    accepts_debug_format: bool = False
+
+    def matches_magic(self, magic: bytes) -> bool:
+        if magic in self.magics:
+            return True
+        if self.magic_prefix is not None and magic[: len(self.magic_prefix)] == self.magic_prefix:
+            return True
+        return False
+
+
 def _detect_format(path: Path) -> str:
     """Detect binary format from magic bytes. Returns 'elf', 'macho', 'pe', or 'unknown'."""
     try:
@@ -707,18 +739,9 @@ def _detect_format(path: Path) -> str:
             magic = f.read(4)
     except OSError:
         return "unknown"
-    if magic == b"\x7fELF":
-        return "elf"
-    _macho_magics = {
-        b"\xfe\xed\xfa\xce", b"\xce\xfa\xed\xfe",
-        b"\xfe\xed\xfa\xcf", b"\xcf\xfa\xed\xfe",
-        b"\xca\xfe\xba\xbe", b"\xbe\xba\xfe\xca",
-        b"\xca\xfe\xba\xbf", b"\xbf\xba\xfe\xca",
-    }
-    if magic in _macho_magics:
-        return "macho"
-    if magic[:2] == b"MZ":
-        return "pe"
+    for handler in _FORMAT_HANDLERS:
+        if handler.matches_magic(magic):
+            return handler.name
     return "unknown"
 
 
@@ -774,31 +797,8 @@ def dump(
     """
     fmt = _detect_format(so_path)
 
-    if fmt == "macho":
-        snapshot = _dump_macho(
-            so_path, headers, extra_includes or [], version, compiler,
-            gcc_path=gcc_path, gcc_prefix=gcc_prefix, gcc_options=gcc_options,
-            sysroot=sysroot, nostdinc=nostdinc, lang=lang,
-            dwarf_only=dwarf_only,
-            public_headers=public_headers, public_header_dirs=public_header_dirs,
-        )
-    elif fmt == "pe":
-        snapshot = _dump_pe(
-            so_path, headers, extra_includes or [], version, compiler,
-            gcc_path=gcc_path, gcc_prefix=gcc_prefix, gcc_options=gcc_options,
-            sysroot=sysroot, nostdinc=nostdinc, lang=lang,
-            public_headers=public_headers, public_header_dirs=public_header_dirs,
-        )
-    elif fmt == "elf":
-        snapshot = _dump_elf(
-            so_path, headers, extra_includes or [], version, compiler,
-            gcc_path=gcc_path, gcc_prefix=gcc_prefix, gcc_options=gcc_options,
-            sysroot=sysroot, nostdinc=nostdinc, lang=lang,
-            dwarf_only=dwarf_only,
-            debug_format=debug_format,
-            public_headers=public_headers, public_header_dirs=public_header_dirs,
-        )
-    else:
+    handler = _HANDLERS_BY_NAME.get(fmt)
+    if handler is None:
         from .binary_utils import detect_archive
         if detect_archive(so_path):
             raise ValidationError(
@@ -813,6 +813,22 @@ def dump(
             f"expected ELF, Mach-O, or PE but detected {fmt!r}. "
             f"Ensure the file is a valid shared library."
         )
+
+    # Forward only the optional kwargs each format's builder accepts — preserves
+    # the exact per-format call the if/elif chain made (ELF: dwarf_only +
+    # debug_format; Mach-O: dwarf_only; PE: neither).
+    extra: dict[str, Any] = {}
+    if handler.accepts_dwarf_only:
+        extra["dwarf_only"] = dwarf_only
+    if handler.accepts_debug_format:
+        extra["debug_format"] = debug_format
+    snapshot = handler.builder(
+        so_path, headers, extra_includes or [], version, compiler,
+        gcc_path=gcc_path, gcc_prefix=gcc_prefix, gcc_options=gcc_options,
+        sysroot=sysroot, nostdinc=nostdinc, lang=lang,
+        public_headers=public_headers, public_header_dirs=public_header_dirs,
+        **extra,
+    )
 
     # Note: from_headers (the HEADER_AWARE evidence-tier signal) is set by the
     # format-specific builders (_dump_elf / _dump_pe / _dump_macho) at the point
@@ -1435,3 +1451,39 @@ def _dump_pe(
         platform="pe",
         language_profile=profile_hint,
     )
+
+
+# ---------------------------------------------------------------------------
+# Binary-format handler registry (C3). Single source of truth for magic-byte
+# recognition (drives _detect_format) and dump() dispatch. Defined after the
+# _dump_* builders it references; resolved at call time. Add a format by adding
+# an entry here — no edits to _detect_format or dump().
+# ---------------------------------------------------------------------------
+
+_FORMAT_HANDLERS: tuple[_FormatHandler, ...] = (
+    _FormatHandler(
+        name="elf",
+        builder=_dump_elf,
+        magics=(b"\x7fELF",),
+        accepts_dwarf_only=True,
+        accepts_debug_format=True,
+    ),
+    _FormatHandler(
+        name="macho",
+        builder=_dump_macho,
+        magics=(
+            b"\xfe\xed\xfa\xce", b"\xce\xfa\xed\xfe",
+            b"\xfe\xed\xfa\xcf", b"\xcf\xfa\xed\xfe",
+            b"\xca\xfe\xba\xbe", b"\xbe\xba\xfe\xca",
+            b"\xca\xfe\xba\xbf", b"\xbf\xba\xfe\xca",
+        ),
+        accepts_dwarf_only=True,
+    ),
+    _FormatHandler(
+        name="pe",
+        builder=_dump_pe,
+        magic_prefix=b"MZ",
+    ),
+)
+
+_HANDLERS_BY_NAME: dict[str, _FormatHandler] = {h.name: h for h in _FORMAT_HANDLERS}

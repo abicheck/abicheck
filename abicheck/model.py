@@ -17,7 +17,6 @@
 from __future__ import annotations
 
 import logging as _logging
-import re as _re
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING
@@ -28,6 +27,12 @@ from typing import TYPE_CHECKING
 # keeps type-checking cleanly for the ~9 detector modules that use it.
 from .name_classification import (
     COMPILER_INTERNAL_TYPES as COMPILER_INTERNAL_TYPES,
+)
+from .name_classification import (
+    canonicalize_type_name as canonicalize_type_name,
+)
+from .name_classification import (
+    cv_qualifiers_only_differ as cv_qualifiers_only_differ,
 )
 from .name_classification import (
     is_abi_surface_type_name as is_abi_surface_type_name,
@@ -95,156 +100,11 @@ def stdlib_namespaces_excluded(old: AbiSnapshot, new: AbiSnapshot) -> bool:
     )
 
 
-# ---------------------------------------------------------------------------
-# Type name canonicalization — normalise type names for reliable matching.
-# ---------------------------------------------------------------------------
-
-
-# Patterns for type-name canonicalization.
-_STRUCT_PREFIX_RE = _re.compile(r"^\s*(struct|class|union|enum)\s+")
-# Match leading "const" followed by a base type (words, ::, spaces) and optional
-# pointer/reference suffix.  The base-type group accepts scope operators (::)
-# so that namespace-qualified types like "const ns::Type &" are handled.
-_LEADING_CONST_RE = _re.compile(r"^const\s+([\w\s:]+?)(\s*[*&].*)?$")
-_MULTI_SPACE_RE = _re.compile(r"\s{2,}")
-
-
-def canonicalize_type_name(name: str) -> str:
-    """Normalise a C/C++ type name for comparison.
-
-    Transformations (in order):
-    0. Strip leading/trailing whitespace and collapse internal whitespace.
-    1. Strip leading ``struct ``/``class ``/``union ``/``enum `` elaborated-type-specifier.
-    2. Normalise leading ``const T`` → ``T const`` (east-const canonical form),
-       but only when the base type contains no angle brackets (templates).
-    3. Final whitespace cleanup.
-
-    This prevents false positives from dumpers that emit different
-    elaborated-type-specifier forms for the same type.
-
-    >>> canonicalize_type_name("struct Foo")
-    'Foo'
-    >>> canonicalize_type_name("const int *")
-    'int const *'
-    >>> canonicalize_type_name("  class   Bar  ")
-    'Bar'
-    >>> canonicalize_type_name("const unsigned long long")
-    'unsigned long long const'
-    >>> canonicalize_type_name("const ns::Type &")
-    'ns::Type const &'
-    """
-    # 0. Normalise whitespace early so anchored regexes work consistently.
-    result = _MULTI_SPACE_RE.sub(" ", name.strip())
-    # 1. Strip elaborated type specifier prefix (handles leading whitespace).
-    result = _STRUCT_PREFIX_RE.sub("", result)
-    # 2. East-const normalisation: move leading "const" after the full base
-    #    type (all words/:: before any pointer/reference sigil).  Only applies
-    #    when the base portion contains no angle brackets (templates).
-    m = _LEADING_CONST_RE.match(result)
-    if m:
-        base = m.group(1).strip()
-        suffix = m.group(2) or ""
-        if "<" not in base:
-            # Strip elaborated prefix from the base too, handling
-            # "const struct Foo" → base="struct Foo" → "Foo"
-            base = _STRUCT_PREFIX_RE.sub("", base)
-            result = base + " const" + suffix
-    # 3. Final cleanup.
-    result = _MULTI_SPACE_RE.sub(" ", result)
-    return result.strip()
-
-
-# Matches whole-word ``const`` / ``volatile`` qualifier tokens. Word boundaries
-# keep identifiers such as ``std::integral_constant`` or ``ConstIterator``
-# untouched — only the standalone cv keywords are stripped.
-_CV_TOKEN_RE = _re.compile(r"\b(?:const|volatile)\b")
-
-
-def _strip_cv_qualifiers(name: str) -> str:
-    """Return *name* with all ``const`` / ``volatile`` tokens removed.
-
-    Whitespace introduced by the removal is collapsed, and spaces adjacent to
-    pointer/reference sigils are normalised so that ``const char *`` and
-    ``char *`` reduce to the same string.
-    """
-    stripped = _CV_TOKEN_RE.sub(" ", name)
-    stripped = _MULTI_SPACE_RE.sub(" ", stripped)
-    # Normalise spacing around pointer/reference sigils so "char  *" == "char *".
-    stripped = _re.sub(r"\s*([*&])\s*", r" \1", stripped)
-    return _MULTI_SPACE_RE.sub(" ", stripped).strip()
-
-
-def _has_top_level_ptr_or_ref(type_name: str) -> bool:
-    """Return True if *type_name* has a ``*`` or ``&`` at top level (depth 0).
-
-    Sigils nested inside template arguments, function-parameter lists, or array
-    subscripts (e.g. ``Box<int *>``, ``std::function<void(int&)>``) are NOT
-    top-level declarators — the type itself is passed/stored by value. Only a
-    depth-0 ``*``/``&`` means the value is a pointer/reference.
-    """
-    angle = paren = bracket = 0
-    for ch in type_name:
-        if ch == "<":
-            angle += 1
-        elif ch == ">":
-            angle = max(0, angle - 1)
-        elif ch == "(":
-            paren += 1
-        elif ch == ")":
-            paren = max(0, paren - 1)
-        elif ch == "[":
-            bracket += 1
-        elif ch == "]":
-            bracket = max(0, bracket - 1)
-        elif ch in "*&" and angle == 0 and paren == 0 and bracket == 0:
-            return True
-    return False
-
-
-def cv_qualifiers_only_differ(old_type: str, new_type: str) -> bool:
-    """Return True when two *pointer/reference* spellings differ only by ``const`` / ``volatile``.
-
-    ``const`` / ``volatile`` qualifiers on (or behind) a pointer or reference
-    never change the parameter's calling convention, the pointer's width, or a
-    struct field's size/offset. Adding ``const`` to a pointed-to type
-    (``char *`` → ``const char *``), or to the pointer value itself
-    (``int *`` → ``int * const``), leaves the binary ABI identical — it is at
-    most a source/API-signature difference, not a binary break (ISSUE-29/52,
-    ISSUE-30/35/65).
-
-    The check is deliberately restricted to types whose *top-level* declarator
-    is a pointer (``*``) or reference (``&``). A *by-value* cv change such as
-    ``int`` → ``const int`` — or one on a template type like
-    ``Box<int *>`` → ``const Box<int *>``, where the only sigil is nested inside
-    a template argument — is intentionally **not** neutralised here: although it
-    too is binary-layout-neutral, abicheck treats top-level field/variable
-    const/volatile as a source-level contract change (see the ``field_qualifiers``
-    detector and the ``case30_field_qualifiers`` example), reported through its
-    own dedicated change kinds.
-
-    Returns ``False`` when the canonical forms are already identical (no
-    difference), when stripping cv-qualifiers still leaves a genuine type
-    difference (a real ABI-relevant change), or when either spelling is not a
-    top-level pointer/reference type.
-
-    >>> cv_qualifiers_only_differ("char *", "const char *")
-    True
-    >>> cv_qualifiers_only_differ("int", "const int")
-    False
-    >>> cv_qualifiers_only_differ("Box<int *>", "const Box<int *>")
-    False
-    >>> cv_qualifiers_only_differ("int *", "long *")
-    False
-    >>> cv_qualifiers_only_differ("Foo *", "Foo *")
-    False
-    """
-    co = canonicalize_type_name(old_type)
-    cn = canonicalize_type_name(new_type)
-    if not (_has_top_level_ptr_or_ref(co) and _has_top_level_ptr_or_ref(cn)):
-        return False
-    if co == cn:
-        return False
-    return _strip_cv_qualifiers(co) == _strip_cv_qualifiers(cn)
+# Type-name canonicalization and cv-qualifier helpers
+# (``canonicalize_type_name`` / ``cv_qualifiers_only_differ``) now live in the
+# dependency-free ``name_classification`` leaf (C10 stage-2). They are imported
+# and re-exported above so the historical ``from .model import …`` path keeps
+# working.
 
 
 class Visibility(str, Enum):

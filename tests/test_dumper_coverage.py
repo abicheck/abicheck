@@ -704,3 +704,39 @@ class TestFromHeadersProvenance:
                           return_value=(AbiSnapshot(library="lib", version="1.0", elf_only_mode=True), [])):
             snap = dumper._dump_elf(so, [tmp_path / "h.h"], [], "1.0", "c++", dwarf_only=True)
         assert snap.from_headers is False
+
+
+class TestFormatHandlerRegistry:
+    """C3: the binary-format handler registry is the single source of truth for
+    magic recognition + dump() dispatch."""
+
+    def test_registry_covers_the_three_formats(self):
+        from abicheck import dumper
+
+        assert set(dumper._HANDLERS_BY_NAME) == {"elf", "macho", "pe"}
+        # _detect_format is driven by the registry's magics.
+        elf = dumper._HANDLERS_BY_NAME["elf"]
+        assert elf.matches_magic(b"\x7fELF")
+        assert dumper._HANDLERS_BY_NAME["pe"].matches_magic(b"MZ\x90\x00")
+        assert dumper._HANDLERS_BY_NAME["macho"].matches_magic(b"\xfe\xed\xfa\xce")
+        assert not elf.matches_magic(b"MZ\x90\x00")
+
+    def test_accepts_flags_match_builder_signatures(self):
+        """Each handler declares exactly the optional kwargs its builder accepts,
+        so dump() forwards the same arguments the old if/elif chain did."""
+        import inspect
+
+        from abicheck import dumper
+
+        for handler in dumper._FORMAT_HANDLERS:
+            params = set(inspect.signature(handler.builder).parameters)
+            assert handler.accepts_dwarf_only == ("dwarf_only" in params), handler.name
+            assert handler.accepts_debug_format == ("debug_format" in params), handler.name
+
+    def test_per_format_kwarg_acceptance(self):
+        from abicheck import dumper
+
+        h = dumper._HANDLERS_BY_NAME
+        assert h["elf"].accepts_dwarf_only and h["elf"].accepts_debug_format
+        assert h["macho"].accepts_dwarf_only and not h["macho"].accepts_debug_format
+        assert not h["pe"].accepts_dwarf_only and not h["pe"].accepts_debug_format

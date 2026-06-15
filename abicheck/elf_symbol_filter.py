@@ -19,6 +19,11 @@ from __future__ import annotations
 from collections.abc import Collection
 from typing import Any
 
+# Canonical stdlib/runtime RTTI prefixes (single source of truth in the
+# dependency-free name_classification leaf). Imported under the historical local
+# name; combined below with _STDLIB_PREFIXES to drop transitive runtime symbols.
+from .name_classification import STDLIB_RTTI_PREFIXES as _STDLIB_RTTI_PREFIXES
+
 # ELF symbol types (STT_*) that represent a callable function surface and a
 # data/variable surface respectively. ``STT_NOTYPE`` is deliberately accepted by
 # *both*: assembly stubs, IFUNC resolvers and stripped dynamic entries are
@@ -74,28 +79,6 @@ _STDLIB_PREFIXES = (
     "_ZdaPv",             # operator delete[](void*)
     "_ZTVN10__cxxabiv",   # vtables for RTTI (typeinfo infrastructure)
     "_ZSt",               # std:: global symbols (e.g. _ZSt4cout)
-)
-
-_STDLIB_RTTI_PREFIXES = (
-    "_ZTISt",             # typeinfo for std::* / std::exception, etc.
-    "_ZTSSt",             # typeinfo name for std::* / std::exception, etc.
-    "_ZTVSt",             # vtable for std::* / std::exception, etc.
-    "_ZTTSt",             # VTT for std::* / std::exception, etc.
-    "_ZTINSt",            # typeinfo for nested std::* names
-    "_ZTSNSt",            # typeinfo name for nested std::* names
-    "_ZTVNSt",            # vtable for nested std::* names
-    "_ZTTNSt",            # VTT for nested std::* names
-    "_ZTIN9__gnu_cxx",
-    "_ZTSN9__gnu_cxx",
-    "_ZTVN9__gnu_cxx",
-    "_ZTTN9__gnu_cxx",
-    "_ZTIN10__cxxabiv",
-    "_ZTSN10__cxxabiv",
-    "_ZTTN10__cxxabiv",
-    "_ZTIN7__cxx11",
-    "_ZTSN7__cxx11",
-    "_ZTVN7__cxx11",
-    "_ZTTN7__cxx11",
 )
 
 def is_abi_relevant_elf_symbol(

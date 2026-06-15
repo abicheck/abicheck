@@ -30,13 +30,12 @@ import click
 from .checker import Verdict
 from .cli import (
     _expand_header_inputs,
-    _load_suppression_and_policy,
     _resolve_per_side_options,
     _safe_write_output,
     _setup_verbosity,
     main,
 )
-from .cli_params import POLICY_FILE_PARAM
+from .cli_params import POLICY_FILE_PARAM, _load_suppression_and_policy
 
 if TYPE_CHECKING:
     from .appcompat import AppRequirements
