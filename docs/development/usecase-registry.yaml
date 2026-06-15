@@ -718,3 +718,56 @@ use_cases:
       `ScanResult`/`run_scan` refactor (move the `cli_scan` orchestration body into
       `service.py`) and the provider-agreement/confidence matrix rendered by
       reporter/PR-comment/SARIF.
+
+  # ── Source-scan & cross-source example corpus (ADR-035 / G20) ──────────────
+  - id: UC-WORKFLOW-audit-example-corpus
+    axis: workflow
+    name: Single-release audit example corpus (no baseline)
+    status: planned
+    gap: G20
+    plan: docs/development/plans/g20-source-scan-example-catalog.md
+    next_steps: >
+      ADR-035 D8 (G20.1). PLANNED: at least four `examples/caseNN` cases that
+      reach a verdict from one artifact with no baseline — `exported_not_public`,
+      `private_header_leak`, `unversioned_exported_symbol`,
+      `rtti_for_internal_type` — plus an S3->S5 depth-ladder case showing the same
+      input answered at three depths with an honest coverage block. Depends on the
+      Phase 0 `ground_truth.json` v4 schema (`mode: audit`,
+      `expected_crosscheck_kinds`, `fixtures`) and the Flow-2 `abicheck_inputs/`
+      fixture path so most cases run compiler-free. See plan Phase 1.
+
+  - id: UC-CHANGE-crosscheck-example-corpus
+    axis: change_class
+    name: Cross-source corroboration example corpus (combination beats one source)
+    status: planned
+    gap: G20
+    plan: docs/development/plans/g20-source-scan-example-catalog.md
+    next_steps: >
+      ADR-035 D4 (G20.2). PLANNED: at least three `examples/caseNN` cases whose
+      finding is invisible/ambiguous to any single source and resolves only by
+      crosschecking two — `header_build_context_mismatch` (L2 macros vs L3 flags),
+      `odr_type_variant` (L4 layout vs layout), and the bidirectional
+      `exported_not_public`/`public_not_exported` pair (L0 exports vs L2 decls) —
+      plus a provider-agreement-matrix case (§6.8) asserting the recorded
+      provider list differs for 3-provider vs 1-provider corroboration (deriving a
+      confidence tag from provider count is a separate reporting enhancement, not
+      part of this corpus). Each positive ships a clean negative counterpart to
+      hold the FP-rate gate at 0/0.
+      See plan Phase 2.
+
+  - id: UC-WORKFLOW-focusing-example-corpus
+    axis: workflow
+    name: Evidence-directed focusing scenarios (sources steer sources)
+    status: planned
+    gap: G20
+    plan: docs/development/plans/g20-source-scan-example-catalog.md
+    next_steps: >
+      ADR-035 D7 (G20.3). PLANNED: test-only scenario suites
+      (`tests/test_poi_scenarios.py`, `tests/test_source_evidence_integrity.py`)
+      asserting on the scan plan / `ScanResult` counters, not just the verdict —
+      an export delta targeting one TU's replay, macro-conditional layout scoping
+      macro capture, the D7 changed-path floor (a mis-weighted `risk_rules` cannot
+      drop a changed TU), and the D4 unlinked-source-evidence integrity guard (the
+      oneDAL failure shape: many exports, TUs parsed, zero matched symbols reported
+      as degraded, never clean). Depends on the Phase 0 scan-plan assertion
+      surface. See plan Phase 3.

@@ -149,6 +149,7 @@ nav:
       - "G17: Real-world validation corpus": development/plans/g17-real-world-corpus.md
       - "G18: Bazel build-evidence": development/plans/g18-bazel-build-evidence.md
       - "G19: PR-tier source intelligence": development/plans/g19-pr-source-intelligence.md
+      - "G20: Source-scan example catalog": development/plans/g20-source-scan-example-catalog.md
     - ADR:
       - Overview: development/adr/index.md
       - "001: Technology Stack": development/adr/001-technology-stack.md
