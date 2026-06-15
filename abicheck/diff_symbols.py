@@ -1204,10 +1204,8 @@ def _emit_batch_rename(rename_pairs: list[tuple[str, str]]) -> list[Change]:
     return [make_change(
         ChangeKind.SYMBOL_RENAMED_BATCH,
         symbol=f"batch_rename:{prefix}*",
-        description=(
-            f"Batch symbol rename detected (namespace refactoring): "
-            f"prefix '{prefix}' added to {len(rename_pairs)} symbols ({pair_desc})"
-        ),
+        name=prefix,
+        detail=f"{len(rename_pairs)} symbols ({pair_desc})",
         old_value=", ".join(o for o, _ in rename_pairs),
         new_value=", ".join(n for _, n in rename_pairs),
     )]
@@ -1972,12 +1970,10 @@ def _diff_fingerprint_renames(old: AbiSnapshot, new: AbiSnapshot) -> list[Change
         changes.append(make_change(
             ChangeKind.FUNC_LIKELY_RENAMED,
             symbol=c.old_name,
-            description=(
-                f"Function likely renamed: {c.old_name} → {c.new_name} "
-                f"(size={c.old_fingerprint.size}B, confidence={conf_pct}%)"
-            ),
-            old_value=c.old_name,
-            new_value=c.new_name,
+            name=str(conf_pct),
+            detail=str(c.old_fingerprint.size),
+            old=c.old_name,
+            new=c.new_name,
         ))
 
     if candidates:

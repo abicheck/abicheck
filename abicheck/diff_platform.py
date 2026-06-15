@@ -184,13 +184,9 @@ def _diff_pe(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
             changes.append(make_change(
                 ChangeKind.PE_FORWARDER_CHANGED,
                 symbol=label,
-                old_value=oe.forwarder or "(direct export)",
-                new_value=ne.forwarder or "(direct export)",
-                description=(
-                    f"export '{label}' forwarder changed: "
-                    f"{oe.forwarder or '(direct export)'} → "
-                    f"{ne.forwarder or '(direct export)'}"
-                ),
+                name=label,
+                old=oe.forwarder or "(direct export)",
+                new=ne.forwarder or "(direct export)",
             ))
 
     # Architecture drift — a DLL that changes machine type is a different binary
@@ -303,14 +299,9 @@ def _diff_macho(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         changes.append(make_change(
             ChangeKind.MACHO_CPU_TYPE_CHANGED,
             symbol="MACHO_HEADER",
-            old_value=", ".join(sorted(old_arches)),
-            new_value=", ".join(sorted(new_arches)),
-            description=(
-                "Mach-O architecture slice removed: "
-                f"{', '.join(sorted(removed_arches))} no longer present "
-                f"({', '.join(sorted(old_arches))} → {', '.join(sorted(new_arches))}); "
-                "existing clients of the dropped arch can no longer load the dylib"
-            ),
+            detail=", ".join(sorted(removed_arches)),
+            old=", ".join(sorted(old_arches)),
+            new=", ".join(sorted(new_arches)),
         ))
 
     # Compatibility version change (LC_ID_DYLIB compat_version — binary contract)
@@ -425,11 +416,8 @@ def _diff_visibility_leak(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     return [make_change(
         ChangeKind.VISIBILITY_LEAK,
         symbol="<visibility>",
-        description=(
-            f"Old library exports {len(leaked)} internal-looking symbol(s) without "
-            f"-fvisibility=hidden (bad practice — accidental ABI surface enlargement): "
-            f"{names}{suffix}"
-        ),
+        name=f"{names}{suffix}",
+        detail=str(len(leaked)),
         old_value=str(len(leaked)),
     )]
 
@@ -522,10 +510,7 @@ def _diff_elf_dynamic_section(old_elf: Any, new_elf: Any) -> list[Change]:
         changes.append(make_change(
             ChangeKind.SONAME_MISSING,
             symbol="DT_SONAME",
-            description=(
-                f"Old library has no SONAME (bad practice — packaging/ldconfig will fail); "
-                f"new library correctly defines SONAME {new_elf.soname!r}"
-            ),
+            new=repr(new_elf.soname),
             old_value="",
             new_value=new_elf.soname,
         ))
@@ -534,7 +519,8 @@ def _diff_elf_dynamic_section(old_elf: Any, new_elf: Any) -> list[Change]:
         changes.append(make_change(
             ChangeKind.RPATH_CHANGED,
             symbol="DT_RPATH",
-            description=f"RPATH changed: {old_elf.rpath!r} → {new_elf.rpath!r}",
+            old=repr(old_elf.rpath),
+            new=repr(new_elf.rpath),
             old_value=old_elf.rpath,
             new_value=new_elf.rpath,
         ))
@@ -542,7 +528,8 @@ def _diff_elf_dynamic_section(old_elf: Any, new_elf: Any) -> list[Change]:
         changes.append(make_change(
             ChangeKind.RUNPATH_CHANGED,
             symbol="DT_RUNPATH",
-            description=f"RUNPATH changed: {old_elf.runpath!r} → {new_elf.runpath!r}",
+            old=repr(old_elf.runpath),
+            new=repr(new_elf.runpath),
             old_value=old_elf.runpath,
             new_value=new_elf.runpath,
         ))
@@ -557,7 +544,6 @@ def _diff_elf_dynamic_section(old_elf: Any, new_elf: Any) -> list[Change]:
         changes.append(make_change(
             ChangeKind.EXECUTABLE_STACK,
             symbol="PT_GNU_STACK",
-            description="Executable stack detected: library linked with -Wl,-z,execstack — NX protection disabled (security risk)",
             old_value="RW",
             new_value="RWE",
         ))
@@ -567,7 +553,6 @@ def _diff_elf_dynamic_section(old_elf: Any, new_elf: Any) -> list[Change]:
         changes.append(make_change(
             ChangeKind.EXECUTABLE_STACK_REMOVED,
             symbol="PT_GNU_STACK",
-            description="Executable stack removed: library now uses a non-executable stack — NX protection restored (good practice)",
             old_value="RWE",
             new_value="RW",
         ))
@@ -604,7 +589,6 @@ def _diff_security_hardening(old_elf: Any, new_elf: Any) -> list[Change]:
         changes.append(make_change(
             ChangeKind.PIE_DISABLED,
             symbol="DF_1_PIE",
-            description="PIE disabled: executable is no longer position-independent (ASLR defeated)",
             old_value="PIE",
             new_value="no-PIE",
         ))
@@ -613,7 +597,6 @@ def _diff_security_hardening(old_elf: Any, new_elf: Any) -> list[Change]:
         changes.append(make_change(
             ChangeKind.STACK_CANARY_REMOVED,
             symbol="__stack_chk_fail",
-            description="Stack canary removed: -fstack-protector no longer referenced",
             old_value="canary",
             new_value="none",
         ))
@@ -622,7 +605,6 @@ def _diff_security_hardening(old_elf: Any, new_elf: Any) -> list[Change]:
         changes.append(make_change(
             ChangeKind.FORTIFY_SOURCE_WEAKENED,
             symbol="_FORTIFY_SOURCE",
-            description="FORTIFY_SOURCE weakened: fortified libc wrappers (*_chk) no longer referenced",
             old_value="fortified",
             new_value="none",
         ))
@@ -631,7 +613,6 @@ def _diff_security_hardening(old_elf: Any, new_elf: Any) -> list[Change]:
         changes.append(make_change(
             ChangeKind.WRITABLE_EXECUTABLE_SEGMENT,
             symbol="PT_LOAD",
-            description="Writable + executable segment introduced (W^X violation)",
             old_value="W^X",
             new_value="W+X",
         ))
@@ -731,10 +712,8 @@ def _diff_elf_symbol_versioning(old_elf: Any, new_elf: Any) -> list[Change]:
                 changes.append(make_change(
                     ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED_COMPAT,
                     symbol=ver,
-                    description=(
-                        f"New symbol version requirement: {ver} (from {lib})"
-                        f" — not newer than previous max, backward-compatible"
-                    ),
+                    name=ver,
+                    detail=lib,
                     new_value=f"{lib}:{ver}",
                 ))
             else:
@@ -942,13 +921,9 @@ def _check_func_visibility_protected(sym_name: str, s_old: Any, s_new: Any) -> l
     return [make_change(
         ChangeKind.FUNC_VISIBILITY_PROTECTED_CHANGED,
         symbol=sym_name,
-        description=(
-            f"ELF symbol visibility changed: {sym_name} "
-            f"({old_vis} → {new_vis}); symbol still exported, "
-            f"interposition semantics changed"
-        ),
-        old_value=old_vis,
-        new_value=new_vis,
+        name=sym_name,
+        old=old_vis,
+        new=new_vis,
     )]
 
 
@@ -992,12 +967,9 @@ def _diff_tls_symbols(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
             changes.append(make_change(
                 ChangeKind.TLS_VAR_SIZE_CHANGED,
                 symbol=sym_name,
-                description=(
-                    f"TLS variable size changed: {sym_name} "
-                    f"({s_old.size} → {s_new.size} bytes)"
-                ),
-                old_value=str(s_old.size),
-                new_value=str(s_new.size),
+                name=sym_name,
+                old=str(s_old.size),
+                new=str(s_new.size),
             ))
 
     return changes
@@ -1035,12 +1007,9 @@ def _diff_protected_visibility(old: AbiSnapshot, new: AbiSnapshot) -> list[Chang
         changes.append(make_change(
             ChangeKind.PROTECTED_VISIBILITY_CHANGED,
             symbol=sym_name,
-            description=(
-                f"Data symbol visibility changed: {sym_name} "
-                f"({old_vis} → {new_vis}); may break copy relocations"
-            ),
-            old_value=old_vis,
-            new_value=new_vis,
+            name=sym_name,
+            old=old_vis,
+            new=new_vis,
         ))
 
     return changes
@@ -1135,11 +1104,8 @@ def _diff_glibcxx_dual_abi(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         changes.append(make_change(
             ChangeKind.GLIBCXX_DUAL_ABI_FLIP_DETECTED,
             symbol="__glibcxx_dual_abi",
-            description=(
-                f"libstdc++ dual ABI flip detected ({direction}): "
-                f"{marker_churn} of {total_churn} churned symbols contain "
-                f"CXX11 ABI markers; likely caused by _GLIBCXX_USE_CXX11_ABI toggle"
-            ),
+            name=f"{marker_churn} of {total_churn}",
+            detail=direction,
             old_value=f"{removed_with_marker} removed with marker",
             new_value=f"{added_with_marker} added with marker",
         ))
@@ -1212,11 +1178,7 @@ def _diff_inline_namespace(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         changes.append(make_change(
             ChangeKind.INLINE_NAMESPACE_MOVED,
             symbol="__inline_namespace_move",
-            description=(
-                f"Inline namespace move detected: {matched_count} symbols "
-                f"appear to have moved between inline namespace versions "
-                f"(e.g. ::v1:: → ::v2::); mangled names changed"
-            ),
+            detail=str(matched_count),
             old_value=f"{matched_count} symbols in old namespace",
             new_value=f"{matched_count} symbols in new namespace",
         ))
@@ -1362,13 +1324,10 @@ def _diff_abi_surface(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         changes.append(make_change(
             ChangeKind.ABI_SURFACE_EXPLOSION,
             symbol="__abi_surface",
-            description=(
-                f"ABI surface {direction} dramatically: "
-                f"{old_count} → {new_count} exported symbols "
-                f"({ratio:.1f}x); check -fvisibility=hidden and version scripts"
-            ),
-            old_value=str(old_count),
-            new_value=str(new_count),
+            name=f"{ratio:.1f}x",
+            detail=direction,
+            old=str(old_count),
+            new=str(new_count),
         ))
 
     return changes
@@ -1412,10 +1371,6 @@ def _diff_dwarf(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         return [make_change(
             ChangeKind.DWARF_INFO_MISSING,
             symbol="<dwarf>",
-            description=(
-                "New binary has no DWARF debug info — struct/enum layout "
-                "comparison was skipped. Recompile with -g to enable."
-            ),
         )]
 
     def _allow_name(name: str, allowed: set[str]) -> bool:
@@ -1558,12 +1513,9 @@ def _diff_struct_layouts(o: object, n: object) -> list[Change]:
             changes.append(make_change(
                 ChangeKind.STRUCT_SIZE_CHANGED,
                 symbol=name,
-                description=(
-                    f"Struct size changed: {name} "
-                    f"({old_s.byte_size} → {new_s.byte_size} bytes)"
-                ),
-                old_value=str(old_s.byte_size),
-                new_value=str(new_s.byte_size),
+                name=name,
+                old=str(old_s.byte_size),
+                new=str(new_s.byte_size),
             ))
 
         # 2. Alignment (only when explicitly present in DWARF 5)
@@ -1571,12 +1523,9 @@ def _diff_struct_layouts(o: object, n: object) -> list[Change]:
             changes.append(make_change(
                 ChangeKind.STRUCT_ALIGNMENT_CHANGED,
                 symbol=name,
-                description=(
-                    f"Struct alignment changed: {name} "
-                    f"({old_s.alignment} → {new_s.alignment})"
-                ),
-                old_value=str(old_s.alignment),
-                new_value=str(new_s.alignment),
+                name=name,
+                old=str(old_s.alignment),
+                new=str(new_s.alignment),
             ))
 
         # Build field maps
@@ -1626,12 +1575,10 @@ def _diff_struct_layouts(o: object, n: object) -> list[Change]:
                 changes.append(make_change(
                     ChangeKind.STRUCT_FIELD_OFFSET_CHANGED,
                     symbol=f"{name}::{fname}",
-                    description=(
-                        f"Field offset changed: {name}::{fname} "
-                        f"(+{old_f.byte_offset} → +{new_f.byte_offset})"
-                    ),
-                    old_value=str(old_f.byte_offset),
-                    new_value=str(new_f.byte_offset),
+                    name=name,
+                    detail=fname,
+                    old=str(old_f.byte_offset),
+                    new=str(new_f.byte_offset),
                 ))
 
             # Field type drift:
@@ -1656,11 +1603,10 @@ def _diff_struct_layouts(o: object, n: object) -> list[Change]:
                 changes.append(make_change(
                     ChangeKind.STRUCT_FIELD_TYPE_CHANGED,
                     symbol=f"{name}::{fname}",
-                    description=(
-                        f"Field type changed: {name}::{fname} "
-                        f"{old_f.type_name}({old_f.byte_size}B) → "
-                        f"{new_f.type_name}({new_f.byte_size}B)"
-                    ),
+                    name=name,
+                    detail=fname,
+                    old=f"{old_f.type_name}({old_f.byte_size}B)",
+                    new=f"{new_f.type_name}({new_f.byte_size}B)",
                     old_value=old_f.type_name,
                     new_value=new_f.type_name,
                 ))
@@ -1686,12 +1632,9 @@ def _diff_enum_layouts(o: object, n: object) -> list[Change]:
             changes.append(make_change(
                 ChangeKind.ENUM_UNDERLYING_SIZE_CHANGED,
                 symbol=name,
-                description=(
-                    f"Enum underlying type size changed: {name} "
-                    f"({old_e.underlying_byte_size} → {new_e.underlying_byte_size} bytes)"
-                ),
-                old_value=str(old_e.underlying_byte_size),
-                new_value=str(new_e.underlying_byte_size),
+                name=name,
+                old=str(old_e.underlying_byte_size),
+                new=str(new_e.underlying_byte_size),
             ))
 
         # 2. Removed members — skip rename-only removals here.
@@ -1824,11 +1767,7 @@ def _diff_elf_deleted_fallback(old: AbiSnapshot, new: AbiSnapshot) -> list[Chang
         changes.append(make_change(
             ChangeKind.FUNC_DELETED_ELF_FALLBACK,
             symbol=mangled,
-            description=(
-                f"Symbol disappeared from ELF .dynsym without explicit deletion marker: "
-                f"{f_old.name} — was exported in old library, absent in new library's "
-                f"dynamic symbol table while header still declares it"
-            ),
+            name=f_old.name,
             old_value="exported",
             new_value="absent_from_dynsym",
         ))

@@ -250,10 +250,7 @@ def _diff_overload_additions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]
         changes.append(make_change(
             ChangeKind.OVERLOAD_ADDED,
             symbol=original.mangled,
-            description=(
-                f"Overload added to previously non-overloaded function: {key} "
-                f"— `&{key}` becomes ambiguous and overload resolution may change"
-            ),
+            name=key,
             old_value="1 overload",
             new_value=f"{len(news)} overloads",
         ))
@@ -615,7 +612,8 @@ def _diff_type_bases(name: str, t_old: RecordType, t_new: RecordType) -> list[Ch
         changes.append(make_change(
             ChangeKind.BASE_CLASS_VIRTUAL_CHANGED,
             symbol=name,
-            description=f"Base class virtual inheritance changed: {name} — {'; '.join(desc_parts)}",
+            name=name,
+            detail="; ".join(desc_parts),
             old_value=str(sorted(t_old.virtual_bases)),
             new_value=str(sorted(t_new.virtual_bases)),
         ))
@@ -970,10 +968,7 @@ def _diff_typedefs(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                 changes.append(make_change(
                     ChangeKind.TYPEDEF_VERSION_SENTINEL,
                     symbol=alias,
-                    description=(
-                        f"Version-stamped typedef removed (compile-time sentinel, "
-                        f"not an ABI break): {alias}"
-                    ),
+                    name=alias,
                     old_value=old_type,
                 ))
                 continue
