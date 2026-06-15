@@ -759,14 +759,19 @@ class TestInternalLeakReachability:
         assert _record_field_is_value_embedded(rec, "missing") is None
 
     def test_path_value_embedding_missing_record(self) -> None:
-        # Line 536: containing type not in the type map → continue, returns False.
-        from abicheck.internal_leak import _path_describes_value_embedding
+        # Containing type not in the type map → can't confirm value embedding.
+        from abicheck.internal_leak import _path_is_value_propagating
 
         snap = _snap()  # empty type map
         path = ["Public", "field:impl_", "ns::detail::Impl"]
-        assert _path_describes_value_embedding(path, snap) is False
+        assert _path_is_value_propagating(path, snap) is False
 
-    def test_indirect_field_severity_hint(self) -> None:
+    def test_pointer_only_layout_leak_is_suppressed(self) -> None:
+        # P2 (UXL field run): an internal type reachable *only* through a pointer
+        # whose change is pure layout (size) does not propagate to the public
+        # holder — the leak must NOT fire (surface scoping demotes it as private
+        # internal churn). Identity/vtable changes behind a pointer still fire
+        # (test_pointer_field_severity_hint in test_internal_leak.py).
         from abicheck.internal_leak import detect_internal_leaks
 
         old = _snap(
@@ -793,8 +798,7 @@ class TestInternalLeakReachability:
         )
         changes = [_change(ChangeKind.TYPE_SIZE_CHANGED, "ns::detail::Impl", "size")]
         leaks = detect_internal_leaks(changes, old, new)
-        assert len(leaks) == 1
-        assert "pointer / template" in leaks[0].description
+        assert leaks == []
 
 
 # ===========================================================================

@@ -29,20 +29,20 @@ with `compile_commands.json`.
 
 ## Problems to address
 
-| # | Type | Sev | Problem | Suggested action |
-|---|------|-----|---------|------------------|
-| **P1** | bug/feature | High | L2 header AST is **castxml-only**; clang is installed but unused, so `scan -H` / `dump --headers` hard-fail on a clang-only host — which **cascades into all four D4 cross-source checks skipping** (`exported_not_public`, `public_not_exported`, `header_build_context_mismatch`, `private_header_leak`). | Add a **clang L2 backend** (the `--source-abi-extractor clang` path already exists for L4). Track + test on a clang-only host. |
-| **P2** | quality | Med | `internal_type_leaks_via_public_api` on oneTBB `thread_request_serializer` reports a size/offset-propagating **layout break**, but its reachability path runs through a `std::unique_ptr` member (pointer indirection) — a field change behind a pointer does **not** change the holder's size/offset. Either over-aggressive or mis-described. | Path classifier should distinguish **by-value/inheritance** embedding from **behind-pointer** reachability; fix the rationale text. **Add regression fixture:** internal type held by `unique_ptr` in a public type → not a size-propagating BREAKING. |
-| **P3** | UX | Med | `--mode pr`/`s5` with no `--since`/`--changed-path` silently replays every TU (== `s6` cost) under a "pr" label. | Default `--since` to the repo's merge-base when in a git checkout, **or** warn when a `pr`-family mode runs with an empty changed-set. |
-| **P4** | redundancy | Low | `s0` and `s3` produce **identical coverage** (L0/L1 + always-on pattern; pinned `s3` adds nothing over the always-on tier). Cheap tier has no cost differentiation. | Document level selection (done — scan-levels.md) and consider collapsing/aliasing `s3`, or give pinned `s3` a distinct deliverable. |
-| **P5** | UX | Low | `L4_source_abi` coverage row prints `partial` with an **empty detail string** (no TU count / hit-miss), unlike the L3 row ("40 compile units"). | Populate the L4 row with replayed/total TU counts. |
-| **P6** | noise | Low | `dump` with no headers emits a `UserWarning` to stderr on every run. | Demote to a single info-level line or gate behind `-v`. |
+| # | Type | Sev | Status | Problem | Action |
+|---|------|-----|--------|---------|--------|
+| **P2** | quality | Med | ✅ **fixed (this PR)** | `internal_type_leaks_via_public_api` on oneTBB `thread_request_serializer` reported a size/offset-propagating **layout break**, but its reachability path runs through a `std::unique_ptr` (pointer indirection) — a layout change behind a pointer does **not** change the holder's size/offset. | `internal_leak.py` now suppresses the leak when an internal type is reachable **only** through a pointer and the change is pure layout; identity/vtable changes still fire through a pointer. Regression tests in `test_internal_leak_review.py`. |
+| **P1** | bug/feature | High | ⏳ follow-up | L2 header AST is **castxml-only**; clang is installed but unused, so `scan -H` / `dump --headers` hard-fail on a clang-only host — which **cascades into all four D4 cross-source checks skipping**. | Add a **clang L2 backend** (the `--source-abi-extractor clang` path already exists for L4). Sizeable new parser (parallels `dumper_castxml.py`) — own PR/ADR. |
+| **P3** | UX | Med | ⏳ **ADR-035 scope** | `--mode pr`/`s5` with no `--since`/`--changed-path` silently replays every TU (== `s6` cost) under a "pr" label. | Default `--since` to merge-base in a git checkout, or warn on an empty changed-set under a `pr`-family mode. Owned by the ADR-035 `scan`-orchestrator workstream (cli_scan.py). |
+| **P4** | redundancy | Low | ⏳ follow-up | `s0` and `s3` produce **identical coverage** (L0/L1 + always-on pattern; pinned `s3` adds nothing over the always-on tier). | Documented in scan-levels.md. Level-set reevaluation deferred until ADR-035 is fully implemented (per maintainer). |
+| **P5** | UX | Low | ⏳ follow-up | `L4_source_abi` coverage row prints `partial` with an **empty detail string** (no TU count). | Populate the L4 row with replayed/total TU counts. |
+| **P6** | noise | Low | ⏳ follow-up | `dump` with no headers emits a `UserWarning` to stderr on every run. | Demote to a single info-level line or gate behind `-v`. |
 
 ## Testing follow-ups
 
-- **P2 regression:** fixture pair where a public type holds an internal type via
-  `std::unique_ptr`; assert it is **not** classified as size/offset-propagating
-  BREAKING (guards the reachability-path classifier).
+- **P2 (done):** `test_internal_leak_review.py::TestPointerMediatedLayoutLeakSuppressed`
+  — internal type held by `unique_ptr` in a public type → layout change is **not**
+  a leak; the same shape with a vtable change still fires.
 - **P1:** once a clang L2 backend exists, an integration test that runs
   `scan -H`/`dump --headers` with **clang only on PATH** (no castxml) and asserts
   the D4 crosschecks run instead of skipping.

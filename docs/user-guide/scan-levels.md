@@ -18,7 +18,7 @@ Two orthogonal knobs select how deep it goes (`abicheck/buildsource/scan_levels.
 |-------|-----------|------------------|
 | `s0` | diff classifier (risk tags) | L0/L1 binary + DWARF + always-on pattern scan |
 | `s1` | compile-DB / build-flag scan | + **L3** build context |
-| `s2` | preprocessor (macros/includes) | *not yet implemented — the CLI rejects it* |
+| `s2` | preprocessor (macros/includes) | conditional S2 tier over L3 (`clang -E` macro/include capture) |
 | `s3` | lexical pattern scan | pattern facts only (same always-on scan) |
 | `s4` | symbol / reference index | + L3 + **L5** source graph (no L4) |
 | `s5` | targeted semantic AST (changed TUs) | + **L4** source-ABI replay + L5 edges |

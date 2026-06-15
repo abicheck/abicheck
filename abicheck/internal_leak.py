@@ -527,6 +527,7 @@ def _field_is_indirect(fld_type: str) -> bool:
     stripped = _strip_decorators(fld_type)
     return (
         "unique_ptr" in stripped
+        or "uniq_ptr" in stripped  # libstdc++ internals: std::__uniq_ptr_impl
         or "shared_ptr" in stripped
         or "weak_ptr" in stripped
         or "pimpl" in stripped.lower()
@@ -545,30 +546,58 @@ def _record_field_is_value_embedded(rec: RecordType, field_name: str) -> bool | 
     return None
 
 
-def _path_describes_value_embedding(
-    path: list[str], snap: AbiSnapshot,
-) -> bool:
-    """Return True if any ``field:`` step on *path* is an embedded-by-value
-    field of the internal type (not a pointer / reference / smart pointer).
+def _path_has_indirection(path: list[str], snap: AbiSnapshot) -> bool:
+    """Return True if *path* crosses a pointer / reference / smart-pointer hop.
 
-    Used to decide the severity hint in the leak's description.
+    A leaf reached through any indirection — an indirect ``field:`` hop, or an
+    indirection wrapper type node such as ``std::unique_ptr<...>`` /
+    ``std::__uniq_ptr_impl<...>`` / ``std::_Head_base<0, X*, false>`` — does not
+    embed its layout in the public holder, so a *layout* change to it does not
+    propagate (UXL field run P2: oneTBB ``thread_request_serializer`` is embedded
+    by value inside a proxy that is itself held through a ``unique_ptr``; the
+    pointer above the by-value hop is what matters).
+
+    This requires **positive** evidence of indirection. Function-return /
+    parameter reachability seeds a path without a ``field:`` hop and with the
+    pointer decorators already stripped from the type name, so we cannot tell a
+    by-value return from a pointer return — those paths report ``False`` (not
+    suppressed), erring toward keeping the finding.
     """
     type_map, _ = _build_type_map(snap)
-    # Walk in pairs: when we see "field:<name>", the *previous* element is
-    # the type containing the field; the field type is the *next* element
-    # (or rather the next typename in the chain — fields don't show their
-    # type literally, but the chain alternates "type → field:X → next-type").
     for i, step in enumerate(path):
-        if not step.startswith("field:") or i == 0:
+        if step.startswith("field:"):
+            if i == 0:
+                continue
+            rec = type_map.get(path[i - 1])
+            if rec is not None and (
+                _record_field_is_value_embedded(rec, step[len("field:"):]) is False
+            ):
+                return True
             continue
-        containing_type = path[i - 1]
-        field_name = step[len("field:"):]
-        rec = type_map.get(containing_type)
-        if rec is None:
+        if step.startswith(("base:", "vbase:", "typedef:")):
             continue
-        result = _record_field_is_value_embedded(rec, field_name)
-        if result is not None:
-            return result
+        if _field_is_indirect(step):
+            return True
+    return False
+
+
+def _path_is_value_propagating(path: list[str], snap: AbiSnapshot) -> bool:
+    """Return True if a layout change on the leaf propagates *by value* to the
+    public root along *path* — a pure value-embedding / inheritance chain with no
+    indirection. Drives the leak's severity-hint wording.
+    """
+    if _path_has_indirection(path, snap):
+        return False
+    type_map, _ = _build_type_map(snap)
+    for i, step in enumerate(path):
+        if step.startswith(("base:", "vbase:")):
+            return True  # inheritance embeds the base subobject by value
+        if step.startswith("field:") and i > 0:
+            rec = type_map.get(path[i - 1])
+            if rec is not None and (
+                _record_field_is_value_embedded(rec, step[len("field:"):]) is True
+            ):
+                return True
     return False
 
 
@@ -604,16 +633,30 @@ def _merge_leak_paths(
     return old_list + new_unique
 
 
+# Change kinds that alter a type's *identity* or *vtable* rather than only its
+# in-memory layout. These still break consumers when the internal type is reached
+# only through a pointer/reference — vtable dispatch, RTTI, and base-subobject
+# offsets propagate through indirection — so they keep firing regardless of the
+# value-embedding analysis. Every other triggering kind is a pure layout change
+# (size/offset/padding/field add-remove), which does NOT reach the public holder
+# through a pointer and is suppressed for pointer-only leaks (UXL field run P2).
+_IDENTITY_VTABLE_KINDS: frozenset[ChangeKind] = frozenset({
+    ChangeKind.TYPE_VTABLE_CHANGED,
+    ChangeKind.VPTR_INTRODUCED,
+    ChangeKind.TYPE_BASE_CHANGED,
+    ChangeKind.BASE_CLASS_OFFSET_CHANGED,
+    ChangeKind.TYPE_REMOVED,
+})
+
+
 def _build_leak_change(
     tname: str,
     triggers: list[Change],
     paths: list[list[str]],
     sample_snap: AbiSnapshot,
+    embedded_by_value: bool,
 ) -> Change:
     """Build a single ``INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API`` Change entry."""
-    embedded_by_value = any(
-        _path_describes_value_embedding(p, sample_snap) for p in paths
-    )
     kinds_seen = sorted({c.kind.value for c in triggers})
     path_strs = [_format_path(p) for p in paths[:3]]
     more = "" if len(paths) <= 3 else f" (+{len(paths) - 3} more paths)"
@@ -676,7 +719,26 @@ def detect_internal_leaks(
         # Pick the snapshot whose path list to use for the value-embedding
         # heuristic. Prefer old (where the public API was already shipped).
         sample_snap = old if old_paths.get(tname) else new
-        out.append(_build_leak_change(tname, triggers, paths, sample_snap))
+        identity_or_vtable = any(
+            c.kind in _IDENTITY_VTABLE_KINDS for c in triggers
+        )
+        # P2 (UXL field run): an internal type reachable *only* through a pointer
+        # whose change is pure layout (size/offset/padding/field add-remove) is
+        # not consumer-visible — the public holder embeds only the pointer, not
+        # the changed layout (oneTBB ``thread_request_serializer`` behind a
+        # ``unique_ptr``). Skip the leak so surface scoping demotes it as
+        # private-internal churn. Identity/vtable changes still propagate through
+        # a pointer (vtable dispatch / RTTI / base-subobject), so they keep
+        # firing; and ``_path_has_indirection`` only suppresses when *every* path
+        # has positive pointer evidence, so by-value embedding/inheritance and
+        # ambiguous return-type paths are never silently dropped.
+        all_indirect = all(_path_has_indirection(p, sample_snap) for p in paths)
+        if all_indirect and not identity_or_vtable:
+            continue
+        value_prop = any(_path_is_value_propagating(p, sample_snap) for p in paths)
+        out.append(
+            _build_leak_change(tname, triggers, paths, sample_snap, value_prop)
+        )
 
     return out
 

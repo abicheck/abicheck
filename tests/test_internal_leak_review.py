@@ -36,7 +36,7 @@ from abicheck.internal_leak import (
     compute_leak_paths,
     detect_internal_leaks,
 )
-from abicheck.model import AbiSnapshot, Function, RecordType, Visibility
+from abicheck.model import AbiSnapshot, Function, RecordType, TypeField, Visibility
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -273,3 +273,73 @@ class TestDwarfFallbackGenuineLeakDetected:
         assert leaks[0].symbol == "ns::detail::Impl"
         # The path description must mention the public handle type.
         assert "ns::PublicHandle" in leaks[0].description
+
+
+# ---------------------------------------------------------------------------
+# P2 (UXL field run): pointer-mediated internal layout leak is suppressed
+# ---------------------------------------------------------------------------
+
+
+class TestPointerMediatedLayoutLeakSuppressed:
+    """oneTBB ``thread_request_serializer`` shape: a public type holds a
+    ``unique_ptr`` to an internal proxy, the proxy embeds an internal type by
+    value, and that internal type's *layout* changes. The change sits behind a
+    pointer, so it does not propagate to the public holder — the leak must be
+    suppressed. An identity/vtable change on the same type still fires.
+    """
+
+    def _snap(self, *, serializer_field_type: str, serializer_vtable=None) -> AbiSnapshot:
+        return AbiSnapshot(
+            library="libtbb.so",
+            version="1.0",
+            functions=[
+                Function(
+                    name="make", mangled="make", return_type="Public*",
+                    params=[], visibility=Visibility.PUBLIC,
+                )
+            ],
+            types=[
+                RecordType(name="Public", kind="class", fields=[
+                    # held through a smart pointer -> indirection
+                    TypeField(name="impl_", type="std::unique_ptr<ns::detail::Proxy>"),
+                ]),
+                RecordType(name="ns::detail::Proxy", kind="class", fields=[
+                    # embedded by value below the pointer
+                    TypeField(name="ser", type="ns::detail::Serializer"),
+                ]),
+                RecordType(
+                    name="ns::detail::Serializer", kind="class",
+                    fields=[TypeField(name="count", type=serializer_field_type)],
+                    vtable=serializer_vtable,
+                ),
+            ],
+        )
+
+    def test_layout_change_behind_pointer_is_suppressed(self) -> None:
+        old = self._snap(serializer_field_type="int")
+        new = self._snap(serializer_field_type="std::atomic<int>")
+        changes = [Change(
+            kind=ChangeKind.TYPE_FIELD_TYPE_CHANGED,
+            symbol="ns::detail::Serializer",
+            description="count: int -> std::atomic<int>",
+        )]
+        leaks = detect_internal_leaks(changes, old, new)
+        assert leaks == [], (
+            "a layout-only change to an internal type reached only through a "
+            f"unique_ptr must not raise a public-leak finding (got: {leaks})"
+        )
+
+    def test_vtable_change_behind_pointer_still_fires(self) -> None:
+        old = self._snap(serializer_field_type="int")
+        new = self._snap(serializer_field_type="int", serializer_vtable=["f1", "f2"])
+        changes = [Change(
+            kind=ChangeKind.TYPE_VTABLE_CHANGED,
+            symbol="ns::detail::Serializer",
+            description="vtable changed",
+        )]
+        leaks = detect_internal_leaks(changes, old, new)
+        assert len(leaks) == 1, (
+            "a vtable change propagates through a pointer (virtual dispatch) and "
+            "must still be flagged"
+        )
+        assert "pointer / template" in leaks[0].description
