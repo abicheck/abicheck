@@ -4,7 +4,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from abicheck.stack_checker import StackCheckResult, StackVerdict
-from abicheck.stack_html import stack_to_html
+from abicheck.stack_html import stack_to_html, write_stack_html
 
 
 def _node(soname: str, depth: int = 0, path: str = "", reason: str = "") -> object:
@@ -256,3 +256,95 @@ def test_html_escapes_xss_in_missing_symbol() -> None:
 def test_html_medium_risk_score() -> None:
     out = stack_to_html(_stack_result(risk_score="medium"))
     assert "MEDIUM" in out
+
+
+def _result_with_graph(graph: object) -> StackCheckResult:
+    return StackCheckResult(
+        root_binary="/bin/myapp",
+        baseline_env="/baseline", candidate_env="/candidate",
+        loadability=StackVerdict.PASS, abi_risk=StackVerdict.PASS,
+        baseline_graph=_graph(), candidate_graph=graph,
+        bindings_baseline=[], bindings_candidate=[],
+        missing_symbols=[], stack_changes=[], risk_score="low",
+    )
+
+
+def test_html_truncates_missing_symbols_over_50() -> None:
+    # Only the first 50 missing symbols are tabulated; the rest collapse into a
+    # single "+N more" row so a huge break doesn't render a multi-thousand-row
+    # table.
+    missing = [_binding("/bin/app", f"sym{i}", "missing") for i in range(63)]
+    out = stack_to_html(_stack_result(missing_symbols=missing))
+    assert "+13 more" in out
+    assert "sym0" in out
+    assert "sym62" not in out  # beyond the 50-row cap
+
+
+def test_html_tree_empty_when_no_root_node() -> None:
+    # A graph with nodes but no depth-0 root can't be rendered as a tree; the
+    # renderer must fall back to a placeholder, not crash.
+    graph = SimpleNamespace(
+        root="/bin/app",
+        nodes={"/lib/orphan.so": _node("orphan.so", depth=1)},
+        node_count=1, edges=[], unresolved=[],
+    )
+    out = stack_to_html(_result_with_graph(graph))
+    assert "(empty graph)" in out
+
+
+def test_html_tree_breaks_cycles() -> None:
+    # A -> B -> A. The renderer must detect the back-edge and stop, not recurse
+    # forever.
+    a, b = "/bin/app", "/lib/libb.so"
+    graph = SimpleNamespace(
+        root=a,
+        nodes={a: _node("app", 0, a), b: _node("libb.so", 1, b)},
+        node_count=2, edges=[(a, b), (b, a)], unresolved=[],
+    )
+    out = stack_to_html(_result_with_graph(graph))
+    assert "(cycle)" in out
+
+
+def test_html_tree_dedupes_diamond_dependency() -> None:
+    # A -> B -> D and A -> C -> D. D is reachable two ways but must be expanded
+    # once; the second visit is marked "(already shown)" rather than duplicated.
+    a, b, c, d = "/bin/app", "/lib/b.so", "/lib/c.so", "/lib/d.so"
+    graph = SimpleNamespace(
+        root=a,
+        nodes={
+            a: _node("app", 0, a),
+            b: _node("b.so", 1, b),
+            c: _node("c.so", 1, c),
+            d: _node("d.so", 2, d),
+        },
+        node_count=4,
+        edges=[(a, b), (a, c), (b, d), (c, d)],
+        unresolved=[],
+    )
+    out = stack_to_html(_result_with_graph(graph))
+    assert "(already shown)" in out
+    assert out.count("d.so") == 2  # one real row + one "already shown" row
+
+
+def test_html_tree_skips_dangling_edge_target() -> None:
+    # An edge can point at a key with no node entry (a half-resolved graph); the
+    # renderer must skip it silently instead of dereferencing None.
+    a = "/bin/app"
+    graph = SimpleNamespace(
+        root=a,
+        nodes={a: _node("app", 0, a)},
+        node_count=1,
+        edges=[(a, "/lib/ghost.so")],
+        unresolved=[],
+    )
+    out = stack_to_html(_result_with_graph(graph))
+    assert "app" in out
+    assert "ghost.so" not in out
+
+
+def test_write_stack_html_writes_file(tmp_path) -> None:
+    out_path = tmp_path / "stack.html"
+    write_stack_html(_stack_result(), out_path)
+    written = out_path.read_text(encoding="utf-8")
+    assert written.startswith("<!DOCTYPE html>")
+    assert "/bin/myapp" in written

@@ -848,6 +848,24 @@ class TestBitIntWidthChanged:
         r = compare(_snap(functions=old), _snap(functions=new))
         assert not _has_kind(r, ChangeKind.BIT_INT_WIDTH_CHANGED)
 
+    def test_migration_from_bit_int(self):
+        # Dropping _BitInt(N) back to a builtin still changes storage/calling
+        # convention, so the migration-away direction must fire too.
+        old = [_spell_func("g", "void", ["_BitInt(24)"])]
+        new = [_spell_func("g", "void", ["int"])]
+        r = compare(_snap(functions=old), _snap(functions=new))
+        c = _changes_of_kind(r, ChangeKind.BIT_INT_WIDTH_CHANGED)
+        assert c and "was _BitInt(24)" in c[0].description
+
+    def test_same_width_signedness_flip_is_not_a_width_change(self):
+        # Same width N, different spelling (signed vs unsigned). The width did
+        # not change, so this detector must stay silent — signedness is a
+        # separate concern, not a _BitInt width change.
+        old = [_spell_func("g", "void", ["_BitInt(32)"])]
+        new = [_spell_func("g", "void", ["unsigned _BitInt(32)"])]
+        r = compare(_snap(functions=old), _snap(functions=new))
+        assert not _has_kind(r, ChangeKind.BIT_INT_WIDTH_CHANGED)
+
 
 class TestAtomicQualifierChanged:
     def test_atomic_added(self):
