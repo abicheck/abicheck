@@ -408,3 +408,60 @@ class TestPointerMediatedLayoutLeakSuppressed:
             f"real layout leak — name must not be read as indirection (got: {leaks})"
         )
         assert "embedded-by-value" in leaks[0].description
+
+    def test_value_embedded_pimpl_named_internal_type_still_fires(self) -> None:
+        # Codex review: a by-value FIELD whose type is a record literally named
+        # `Pimpl` (no `<...>`) embeds its layout — must fire, not be read as a
+        # smart-pointer alias.
+        def _snap(size: int) -> AbiSnapshot:
+            return AbiSnapshot(
+                library="lib.so", version="1.0",
+                functions=[Function(
+                    name="make", mangled="make", return_type="Public*",
+                    params=[], visibility=Visibility.PUBLIC,
+                )],
+                types=[
+                    RecordType(name="Public", kind="class", fields=[
+                        TypeField(name="state", type="ns::detail::Pimpl"),
+                    ]),
+                    RecordType(name="ns::detail::Pimpl", kind="struct", size_bits=size),
+                ],
+            )
+        leaks = detect_internal_leaks(
+            [Change(kind=ChangeKind.TYPE_SIZE_CHANGED,
+                    symbol="ns::detail::Pimpl", description="size")],
+            _snap(32), _snap(64),
+        )
+        assert len(leaks) == 1, (
+            f"a by-value field of a record named 'Pimpl' must still leak (got: {leaks})"
+        )
+        assert "embedded-by-value" in leaks[0].description
+
+    def test_pointer_typedef_field_is_suppressed(self) -> None:
+        # Codex review: a field declared through a pointer alias
+        # (`using Handle = ns::detail::Impl*;`) is indirection — the typedef step
+        # must be resolved, so a layout-only change is demoted (suppressed).
+        def _snap(size: int) -> AbiSnapshot:
+            return AbiSnapshot(
+                library="lib.so", version="1.0",
+                functions=[Function(
+                    name="make", mangled="make", return_type="Public*",
+                    params=[], visibility=Visibility.PUBLIC,
+                )],
+                types=[
+                    RecordType(name="Public", kind="class", fields=[
+                        TypeField(name="impl", type="Handle"),
+                    ]),
+                    RecordType(name="ns::detail::Impl", kind="struct", size_bits=size),
+                ],
+                typedefs={"Handle": "ns::detail::Impl*"},
+            )
+        leaks = detect_internal_leaks(
+            [Change(kind=ChangeKind.TYPE_SIZE_CHANGED,
+                    symbol="ns::detail::Impl", description="size")],
+            _snap(32), _snap(64),
+        )
+        assert leaks == [], (
+            "a layout change behind a pointer typedef must be demoted, not leaked "
+            f"(got: {leaks})"
+        )

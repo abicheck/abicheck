@@ -530,7 +530,30 @@ def _field_is_indirect(fld_type: str) -> bool:
         or "uniq_ptr" in stripped  # libstdc++ internals: std::__uniq_ptr_impl
         or "shared_ptr" in stripped
         or "weak_ptr" in stripped
-        or "pimpl" in stripped.lower()
+        # ``pimpl`` only as an alias-*template* usage (``pimpl<T>`` = the oneDAL
+        # smart-pointer alias, case80) — NOT a record/field whose own type is a
+        # by-value struct literally named ``Pimpl`` (Codex review), which embeds
+        # its layout and must stay a leak.
+        or "pimpl<" in stripped.lower()
+    )
+
+
+def _typedef_target_is_indirect(
+    name: str, typedefs: dict[str, str], _seen: frozenset[str] = frozenset()
+) -> bool:
+    """Return True if alias *name* resolves (transitively) to a pointer / smart
+    pointer — e.g. ``using Handle = ns::detail::Impl*;`` (Codex review). Without
+    this, a pointer-typedef field reads as by-value and surfaces a spurious leak.
+    """
+    if name in _seen:
+        return False
+    target = typedefs.get(name)
+    if not target:
+        return False
+    if _field_is_indirect(target):
+        return True
+    return _typedef_target_is_indirect(
+        _strip_decorators(target), typedefs, _seen | {name}
     )
 
 
@@ -598,7 +621,15 @@ def _path_has_indirection(path: list[str], snap: AbiSnapshot) -> bool:
             ):
                 return True
             continue
-        if step.startswith(("base:", "vbase:", "typedef:")):
+        if step.startswith("typedef:"):
+            # A pointer alias (``using Handle = Impl*;``) is indirection even
+            # though the field's declared type is the bare alias name.
+            if _typedef_target_is_indirect(
+                step[len("typedef:"):], getattr(snap, "typedefs", {}) or {}
+            ):
+                return True
+            continue
+        if step.startswith(("base:", "vbase:")):
             continue
         # A plain type node: only a genuine pointer/smart-pointer wrapper spelling
         # is indirection evidence — not a record/function name that happens to
