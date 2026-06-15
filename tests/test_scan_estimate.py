@@ -198,6 +198,26 @@ def test_estimate_header_change_fans_out_to_all_tus(
     assert l4.tus == 8
 
 
+def test_estimate_counts_collect_pack_tus(snap_path: Path, tmp_path: Path) -> None:
+    # A --build-info pointed at an `abicheck collect` pack dir must count the
+    # pack's build_evidence compile units, not report 0 (Codex review).
+    from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
+    from abicheck.buildsource.pack import BuildSourcePack
+
+    pack_dir = tmp_path / "pack"
+    be = BuildEvidence(
+        compile_units=[
+            CompileUnit(id=f"cu://f{i}", source=f"f{i}.cpp", language="CXX")
+            for i in range(4)
+        ]
+    )
+    BuildSourcePack(root=pack_dir, build_evidence=be).write()
+
+    req = ScanRequest(binaries=[snap_path], build_info=pack_dir, mode="baseline")
+    l3 = next(e for e in estimate_scan(req) if e.layer == "L3_build")
+    assert l3.tus == 4
+
+
 def test_estimate_budget_max_tus_caps_replay(snap_path: Path, tmp_path: Path) -> None:
     cdb = tmp_path / "compile_commands.json"
     cdb.write_text(
@@ -304,6 +324,33 @@ def test_replay_seed_used_when_changed_path_given(
     )
     assert res.exit_code == 0
     assert "src/a.cpp" in (captured["changed_paths"] or ())
+
+
+def test_seeded_empty_diff_scans_nothing(
+    runner: CliRunner, snap_path: Path, header: Path
+) -> None:
+    # --since HEAD is a *seeded* but empty diff (no-op PR). The pattern pre-scan
+    # must honour the empty scope (scan nothing) rather than fall back to a
+    # whole-tree scan that would surface unrelated pattern triggers (Codex).
+    res = runner.invoke(
+        main,
+        [
+            "scan",
+            "--binary",
+            str(snap_path),
+            "-H",
+            str(header),
+            "--since",
+            "HEAD",
+            "--format",
+            "json",
+        ],
+    )
+    assert res.exit_code == 0
+    payload = json.loads(res.output)
+    assert payload["pattern_scan"]["files_scanned"] == 0
+    # No pattern triggers → no pattern-trigger POIs from a no-op PR.
+    assert payload["poi"]["counts_by_reason"].get("pattern_trigger", 0) == 0
 
 
 def test_cli_audit_emits_hygiene_catalog(

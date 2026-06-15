@@ -1161,6 +1161,29 @@ def _discover_compile_db(sources: Path | None, explicit: Path | None) -> Path | 
     return None
 
 
+def _count_pack_tus(path: Path) -> int | None:
+    """TU count of an ``abicheck collect`` pack dir, or ``None`` if not a pack.
+
+    The real scan loads a pack dir (``is_pack_dir``) and uses its embedded
+    ``build_evidence``; the estimate mirrors that so a pack-only ``--build-info``
+    does not report 0 TUs (Codex review). Best-effort: any load failure → ``None``
+    so the caller falls back to compile-DB / source-tree counting.
+    """
+    if not path.is_dir():
+        return None
+    try:
+        from .buildsource.inline import is_pack_dir
+        from .buildsource.pack import BuildSourcePack
+
+        if not is_pack_dir(path):
+            return None
+        pack = BuildSourcePack.load(path)
+    except Exception:  # noqa: BLE001 - estimate is advisory; never raise on a bad pack
+        return None
+    be = pack.build_evidence
+    return len(be.compile_units) if be is not None else 0
+
+
 def estimate_scan(req: ScanRequest) -> list[CostEstimate]:
     """Dry-run: projected per-layer cost of *req* for this project (ADR-035 D10).
 
@@ -1194,8 +1217,16 @@ def estimate_scan(req: ScanRequest) -> list[CostEstimate]:
     )
     collect_mode = level_to_collect_mode(resolved, eff_depth)
 
+    # A --build-info that is an `abicheck collect` pack dir is loaded by the real
+    # scan and supplies its own L3 compile units, so the estimate must count them
+    # too — else a pack-only input reports 0 TUs and undersizes the budget (Codex
+    # review). A raw compile DB / source tree is counted otherwise.
+    pack_tus = _count_pack_tus(req.build_info) if req.build_info is not None else None
     compile_db = _discover_compile_db(req.sources, req.compile_db or req.build_info)
-    if compile_db is not None:
+    if pack_tus is not None:
+        total_tus = pack_tus
+        tu_note = "abicheck collect pack (build_evidence)"
+    elif compile_db is not None:
         total_tus = _count_compile_db_tus(compile_db)
         tu_note = f"compile DB: {compile_db.name}"
     elif req.sources is not None:

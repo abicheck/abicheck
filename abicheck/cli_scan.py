@@ -733,10 +733,14 @@ def scan_cmd(
     # --- always-on tier: compiler-free pattern pre-scan (S3) ------------------
     # Runs *before* the snapshot build so its escalation triggers feed the D7
     # points-of-interest work-list that focuses the (expensive) source replay.
+    # Scope: a *seeded* diff (even an empty one) confines the scan to the changed
+    # set — an empty seed (no-op PR) scans nothing, preserving the empty-diff
+    # scope; only a genuinely *unseeded* run (no --since/--changed-path) falls
+    # back to the whole-tree scan (Codex review).
     pattern_roots: list[Path] = [*headers]
     if sources is not None:
         pattern_roots.append(sources)
-    pattern = scan_files(pattern_roots, changed or None)
+    pattern = scan_files(pattern_roots, changed if seeded else None)
 
     # --- D7 points-of-interest: cheap facts steer the expensive scan ----------
     # Floor = the directly-changed paths (always included); the pattern triggers

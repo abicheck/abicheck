@@ -158,6 +158,43 @@ def test_run_skips_without_build_evidence() -> None:
     assert result.coverage().status.value == "not_collected"
 
 
+def test_classify_basename_match_only_for_basename_only_public_input() -> None:
+    # A public include/config.h must NOT shadow a generated build/config.h by
+    # basename — else the leak this pass exists to report is missed (Codex).
+    assert (
+        classify_include("build/config.h", frozenset({"include/config.h"}))
+        is IncludeClass.GENERATED
+    )
+    # But a basename-only public input (no path) still matches by basename.
+    assert (
+        classify_include("build/config.h", frozenset({"config.h"}))
+        is IncludeClass.PUBLIC
+    )
+
+
+def test_capture_header_includes_makes_header_absolute(monkeypatch) -> None:
+    # The -I context is relative to the build dir (cwd), so the header path must
+    # be absolute or clang looks for it under the build dir (Codex review).
+    from abicheck.buildsource import preprocessor_scan as ps
+
+    captured: dict[str, object] = {}
+
+    def _fake_run(self, cmd, cwd, unit):
+        captured["cmd"] = cmd
+        captured["cwd"] = cwd
+        return "foo.o: include/foo.h src/detail/impl.h\n"
+
+    monkeypatch.setattr(ps.ClangPreprocessorExtractor, "_run", _fake_run)
+    ex = ps.ClangPreprocessorExtractor()
+    out = ex.capture_header_includes(["include/foo.h"], ["-Iinc"], cwd="/work/build")
+    assert out  # parsed includes returned
+    header_arg = captured["cmd"][-1]  # type: ignore[index]
+    import os as _os
+
+    assert _os.path.isabs(header_arg)
+    assert captured["cwd"] == "/work/build"
+
+
 def test_run_skips_when_clang_absent(monkeypatch) -> None:
     from abicheck.buildsource import build_evidence as be
     from abicheck.buildsource import preprocessor_scan as ps

@@ -43,6 +43,7 @@ is absent — exactly like :mod:`include_graph` and the L4 extractors.
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import subprocess  # noqa: S404 - preprocessor scan shells out to clang (never shell=True)
@@ -192,7 +193,15 @@ def classify_include(
 
 
 def _matches_public(norm: str, base: str, public_headers: frozenset[str]) -> bool:
-    """Whether *norm*/*base* is one of the known public headers (tail match)."""
+    """Whether *norm*/*base* is one of the known public headers (tail match).
+
+    A **basename-only** match is used *only* when the public-header input is
+    itself basename-only (no path component). Otherwise a public ``include/config.h``
+    would shadow an unrelated ``build/config.h`` / ``src/detail/config.h`` by
+    basename and hide exactly the generated/private-header leak this pass exists
+    to report (Codex review) — so a public input with a path requires a path
+    (tail) match.
+    """
     if not public_headers:
         return False
     for ph in public_headers:
@@ -201,7 +210,7 @@ def _matches_public(norm: str, base: str, public_headers: frozenset[str]) -> boo
             continue
         if norm == p or norm.endswith("/" + p) or p.endswith("/" + norm):
             return True
-        if PurePosixPath(p).name.lower() == base:
+        if "/" not in p and p.lower() == base:
             return True
     return False
 
@@ -450,12 +459,17 @@ class ClangPreprocessorExtractor:
         for hdr in public_headers:
             if not hdr:
                 continue
+            # The include context (-I flags) is relative to the build dir (run_cwd),
+            # but the header path is relative to the process cwd the user invoked
+            # from — so make it absolute before changing cwd, else clang looks for
+            # it under the build dir and finds nothing (Codex review).
+            header_arg = os.path.abspath(unredact_home(hdr))
             cmd = [
                 self.clang_bin,
                 "-M",
                 *_lang_flag(language),
                 *(unredact_home(a) for a in context_argv),
-                hdr,
+                header_arg,
             ]
             text = self._run(cmd, run_cwd, hdr)
             if text and text.strip():
