@@ -29,6 +29,7 @@ from abicheck.buildsource.scan_levels import (
     SourceMethod,
     depth_to_method,
     method_to_collect_mode,
+    method_to_depth,
     mode_preset,
     resolve_source_method,
 )
@@ -107,6 +108,25 @@ def test_method_to_collect_mode_maps_every_concrete_method():
 def test_method_to_collect_mode_rejects_auto():
     with pytest.raises(ValueError):
         method_to_collect_mode(SourceMethod.AUTO)
+
+
+def test_method_to_depth_reports_resolved_depth_not_request():
+    # An explicit S-method must report ITS depth, not the mode preset (Codex).
+    assert method_to_depth(SourceMethod.S1) is EvidenceDepth.BUILD
+    assert method_to_depth(SourceMethod.S6) is EvidenceDepth.FULL
+    assert method_to_depth(SourceMethod.S0) is EvidenceDepth.HEADERS
+
+
+def test_method_to_depth_maps_every_concrete_method():
+    for method in SourceMethod:
+        if method is SourceMethod.AUTO:
+            continue
+        assert isinstance(method_to_depth(method), EvidenceDepth)
+
+
+def test_method_to_depth_rejects_auto():
+    with pytest.raises(ValueError):
+        method_to_depth(SourceMethod.AUTO)
 
 
 def test_lexical_methods_collect_no_inline_pack():

@@ -227,6 +227,29 @@ def test_source_method_pin_overrides_mode_in_report(runner, new_snap_compatible)
     assert res.exit_code == 0, res.output
     assert "source-method=s1" in res.output
     assert "collect-mode=build" in res.output
+    # Reported depth tracks the resolved method, not the requested mode (Codex).
+    assert "depth=build" in res.output
+
+
+def test_reported_depth_matches_resolved_source_method(runner, new_snap_compatible):
+    res = runner.invoke(
+        main,
+        [
+            "scan",
+            "--binary",
+            str(new_snap_compatible),
+            "--source-method",
+            "s6",
+            "--format",
+            "json",
+            "--audit",
+        ],
+    )
+    assert res.exit_code == 0, res.output
+    payload = json.loads(res.output)
+    # s6 reaches full depth — must not be reported as the pr-preset 'source'.
+    assert payload["level"]["source_method"] == "s6"
+    assert payload["level"]["depth"] == "full"
 
 
 def test_auto_method_uses_changed_path_risk(runner, new_snap_compatible):

@@ -112,6 +112,23 @@ _METHOD_TO_COLLECT_MODE: dict[SourceMethod, str] = {
 }
 
 
+#: Resolved S-method → the representative L-depth it reaches, for **honest
+#: reporting** (Codex review): the report must state the depth of what actually
+#: ran, not the requested mode/depth. Inverse of ``_DEPTH_TO_METHOD`` with the
+#: depth-less methods (S0 diff / S2 preprocessor / S3 lexical) mapped to their
+#: nearest reportable L: S0/S3 reach only L0-L2 (``headers``), S2 lands L3
+#: (``build``).
+_METHOD_TO_DEPTH: dict[SourceMethod, EvidenceDepth] = {
+    SourceMethod.S0: EvidenceDepth.HEADERS,
+    SourceMethod.S1: EvidenceDepth.BUILD,
+    SourceMethod.S2: EvidenceDepth.BUILD,
+    SourceMethod.S3: EvidenceDepth.HEADERS,
+    SourceMethod.S4: EvidenceDepth.GRAPH,
+    SourceMethod.S5: EvidenceDepth.SOURCE,
+    SourceMethod.S6: EvidenceDepth.FULL,
+}
+
+
 def mode_preset(mode: ScanMode) -> tuple[SourceMethod, EvidenceDepth]:
     """The fixed (source_method, depth) preset for *mode* (deterministic)."""
     return _MODE_PRESET[mode]
@@ -120,6 +137,17 @@ def mode_preset(mode: ScanMode) -> tuple[SourceMethod, EvidenceDepth]:
 def depth_to_method(depth: EvidenceDepth) -> SourceMethod | None:
     """The representative S-method for a coarse ``--depth`` (lossy; may be None)."""
     return _DEPTH_TO_METHOD[depth]
+
+
+def method_to_depth(method: SourceMethod) -> EvidenceDepth:
+    """The representative L-depth a *resolved* S-method reaches (for reporting).
+
+    ``AUTO`` must be resolved to a concrete method first (via
+    :func:`resolve_source_method`); passing it here is a programming error.
+    """
+    if method is SourceMethod.AUTO:
+        raise ValueError("method_to_depth requires a resolved S-method, not AUTO")
+    return _METHOD_TO_DEPTH[method]
 
 
 def method_to_collect_mode(method: SourceMethod) -> str:

@@ -64,7 +64,7 @@ from .buildsource.scan_levels import (
     ScanMode,
     SourceMethod,
     method_to_collect_mode,
-    mode_preset,
+    method_to_depth,
     resolve_source_method,
 )
 from .checker_policy import API_BREAK_KINDS, BREAKING_KINDS
@@ -604,7 +604,10 @@ def scan_cmd(
         auto_method=auto_method,
     )
     collect_mode = method_to_collect_mode(resolved)
-    eff_depth = (dp or mode_preset(scan_mode)[1]).value
+    # Report the depth the *resolved* method actually reaches, not the requested
+    # mode/depth — an explicit --source-method (or auto) can resolve away from the
+    # mode preset, and the report must not overstate the scan depth (Codex review).
+    eff_depth = method_to_depth(resolved).value
 
     # --- build the candidate snapshot (L0-L2 + inline L3-L5 at the level) ------
     new_snap = _build_new_snapshot(
