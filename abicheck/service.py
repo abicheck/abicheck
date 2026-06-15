@@ -39,6 +39,8 @@ from .reporter import to_json, to_markdown, to_stat, to_stat_json
 from .serialization import load_snapshot
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from .dwarf_advanced import AdvancedDwarfMetadata
     from .dwarf_metadata import DwarfMetadata
     from .policy_file import PolicyFile
@@ -202,14 +204,39 @@ def resolve_input(
     dwarf_only: bool = False,
     debug_roots: list[Path] | None = None,
     enable_debuginfod: bool = False,
+    debug_format: str | None = None,
+    public_headers: list[Path] | None = None,
+    public_header_dirs: list[Path] | None = None,
+    follow_linker_scripts: bool = True,
+    notify: Callable[[str], None] | None = None,
 ) -> AbiSnapshot:
     """Auto-detect input type and return an ABI snapshot.
+
+    This is the single source of truth for turning a path into an
+    :class:`AbiSnapshot`; the CLI (:func:`abicheck.cli_resolve._resolve_input`)
+    and the MCP server are thin wrappers that translate the framework-free
+    errors raised here into their own contracts.
 
     Detection order:
 
     1. Native binary (ELF / PE / Mach-O, detected by magic bytes)
-    2. ABICC Perl dump (``$VAR1`` prefix) → :func:`import_abicc_perl_dump`
-    3. JSON snapshot (``{`` prefix) → :func:`load_snapshot`
+    2. Raw BTF/CTF type-info blob
+    3. ABICC Perl dump (``$VAR1`` prefix) → :func:`import_abicc_perl_dump`
+    4. JSON snapshot (``{`` prefix) → :func:`load_snapshot`
+    5. GNU ld linker script (``INPUT()``/``GROUP()``) → follow to its target
+
+    Args:
+        debug_format: Force the ELF debug format ("dwarf", "btf", "ctf") or
+            *None* for auto-detection.
+        public_headers / public_header_dirs: Public-header sets used to tag
+            declaration provenance on PE/Mach-O snapshots (ADR-024 Phase 1).
+        follow_linker_scripts: When True (default), a GNU ld linker script is
+            followed to the shared library named in its ``INPUT()``/``GROUP()``
+            directive.
+        notify: Optional callback for user-facing progress notes (e.g. "following
+            a linker script", "no headers provided"). When *None*, such notes go
+            to the module logger. The CLI passes a ``click.echo(..., err=True)``
+            wrapper so its stderr output is unchanged.
 
     Raises:
         SnapshotError: If the snapshot cannot be loaded from the input.
@@ -230,6 +257,10 @@ def resolve_input(
             dwarf_only=dwarf_only,
             debug_roots=debug_roots,
             enable_debuginfod=enable_debuginfod,
+            debug_format=debug_format,
+            public_headers=public_headers,
+            public_header_dirs=public_header_dirs,
+            notify=notify,
         )
 
     # Detect binary format from magic bytes
@@ -246,6 +277,10 @@ def resolve_input(
             dwarf_only=dwarf_only,
             debug_roots=debug_roots,
             enable_debuginfod=enable_debuginfod,
+            debug_format=debug_format,
+            public_headers=public_headers,
+            public_header_dirs=public_header_dirs,
+            notify=notify,
         )
 
     # Raw kernel type-info blobs (a bare `.BTF` / CTF section extracted with
@@ -283,6 +318,40 @@ def resolve_input(
                 f"Failed to load JSON snapshot '{path}': {exc}"
             ) from exc
 
+    # GNU ld linker script (e.g. the ``libfoo.so`` dev symlink is the text
+    # ``INPUT(libfoo.so.1)``): follow it to the real shared library.
+    if follow_linker_scripts:
+        from .binary_utils import resolve_linker_script
+
+        target, is_ld_script = resolve_linker_script(path)
+        if is_ld_script:
+            if target is not None and target.resolve() != path.resolve():
+                _emit(
+                    notify,
+                    f"Note: '{path}' is a GNU ld linker script; following its "
+                    f"INPUT()/GROUP() directive to '{target}'.",
+                )
+                return resolve_input(
+                    target,
+                    _headers,
+                    _includes,
+                    version,
+                    lang,
+                    dwarf_only=dwarf_only,
+                    debug_roots=debug_roots,
+                    enable_debuginfod=enable_debuginfod,
+                    debug_format=debug_format,
+                    public_headers=public_headers,
+                    public_header_dirs=public_header_dirs,
+                    follow_linker_scripts=follow_linker_scripts,
+                    notify=notify,
+                )
+            raise ValidationError(
+                f"'{path}' is a GNU ld linker script (INPUT/GROUP), not a binary, "
+                "and its target could not be located next to it. Pass the actual "
+                "shared library named in its INPUT(...) directive directly."
+            )
+
     # Static / import libraries (`.a`, `.lib`) are member archives, not single
     # linkable images. abicheck does not analyse archives (by design — see
     # docs/concepts/limitations.md); fail with actionable guidance rather than a
@@ -318,8 +387,18 @@ def run_dump(
     dwarf_only: bool = False,
     debug_roots: list[Path] | None = None,
     enable_debuginfod: bool = False,
+    debug_format: str | None = None,
+    public_headers: list[Path] | None = None,
+    public_header_dirs: list[Path] | None = None,
+    notify: Callable[[str], None] | None = None,
 ) -> AbiSnapshot:
     """Extract an ABI snapshot from a native binary (ELF, PE, or Mach-O).
+
+    ``public_headers`` / ``public_header_dirs`` tag declaration provenance on
+    PE/Mach-O snapshots (ADR-024 Phase 1); they are a no-op for ELF (whose
+    provenance is applied inside :func:`dumper.dump`) and when no header set is
+    supplied. ``debug_format`` forces the ELF debug format. ``notify`` receives
+    user-facing progress notes (see :func:`resolve_input`).
 
     Raises:
         SnapshotError: If the binary cannot be parsed.
@@ -338,11 +417,13 @@ def run_dump(
             dwarf_only=dwarf_only,
             debug_roots=debug_roots,
             enable_debuginfod=enable_debuginfod,
+            debug_format=debug_format,
+            notify=notify,
         )
         _try_attach_sycl_metadata(snap, path)
         return snap
     if binary_fmt == "pe":
-        return _dump_pe(
+        snap = _dump_pe(
             path,
             version,
             headers=_headers,
@@ -350,15 +431,41 @@ def run_dump(
             lang=lang,
             pdb_path=pdb_path,
         )
+        return _apply_native_provenance(snap, public_headers, public_header_dirs)
     if binary_fmt == "macho":
-        return _dump_macho(
+        snap = _dump_macho(
             path,
             version,
             headers=_headers,
             includes=_includes,
             lang=lang,
         )
+        return _apply_native_provenance(snap, public_headers, public_header_dirs)
     raise ValidationError(f"Unsupported binary format: {binary_fmt}")
+
+
+def _apply_native_provenance(
+    snap: AbiSnapshot,
+    public_headers: list[Path] | None,
+    public_header_dirs: list[Path] | None,
+) -> AbiSnapshot:
+    """Tag declaration provenance on a PE/Mach-O snapshot (ADR-024 Phase 1).
+
+    Mirrors the ELF path (``dumper.create_snapshot``), which always runs
+    ``apply_provenance``. A no-op when no public-header set is supplied — every
+    origin stays ``UNKNOWN`` and behaviour is unchanged.
+    """
+    from .provenance import apply_provenance
+
+    return apply_provenance(snap, public_headers, public_header_dirs)
+
+
+def _emit(notify: Callable[[str], None] | None, message: str) -> None:
+    """Send a user-facing progress note to *notify*, or the logger if unset."""
+    if notify is not None:
+        notify(message)
+    else:
+        _logger.warning(message)
 
 
 def _try_attach_sycl_metadata(snap: AbiSnapshot, lib_path: Path) -> None:
@@ -396,16 +503,18 @@ def _dump_elf(
     dwarf_only: bool = False,
     debug_roots: list[Path] | None = None,
     enable_debuginfod: bool = False,
+    debug_format: str | None = None,
+    notify: Callable[[str], None] | None = None,
 ) -> AbiSnapshot:
     """Dump an ELF binary to an ABI snapshot."""
     from .dumper import dump
 
     resolved_headers = expand_header_inputs(headers) if headers else []
     if not resolved_headers and not dwarf_only:
-        _logger.warning(
-            "'%s' — no headers provided. "
+        _emit(
+            notify,
+            f"Warning: '{path}' — no headers provided. "
             "Will use DWARF debug info if available, else symbols-only mode.",
-            path,
         )
     if resolved_headers and not dwarf_only:
         for inc in includes:
@@ -414,7 +523,7 @@ def _dump_elf(
                     f"Include directory not found or not a directory: {inc}"
                 )
     elif includes and not dwarf_only:
-        _logger.warning("Include paths are ignored without headers.")
+        _emit(notify, "Warning: --include paths are ignored without headers.")
 
     compiler = "cc" if lang == "c" else "c++"
     try:
@@ -426,6 +535,7 @@ def _dump_elf(
             compiler=compiler,
             lang=lang if lang == "c" else None,
             dwarf_only=dwarf_only,
+            debug_format=debug_format,
         )
     except (AbicheckError, RuntimeError, OSError, ValueError) as exc:
         raise SnapshotError(f"Failed to dump '{path}': {exc}") from exc

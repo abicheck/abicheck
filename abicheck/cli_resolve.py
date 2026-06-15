@@ -35,15 +35,23 @@ from typing import TYPE_CHECKING
 
 import click
 
-from .compat.abicc_dump_import import import_abicc_perl_dump, looks_like_perl_dump
-from .dumper import dump
-from .errors import AbicheckError
-from .serialization import load_snapshot
+from .compat.abicc_dump_import import looks_like_perl_dump
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from .model import AbiSnapshot
+
+
+def _click_notify(message: str) -> None:
+    """Emit a service-layer progress note to stderr via click.
+
+    Passed as the ``notify`` callback to :func:`abicheck.service.resolve_input` /
+    :func:`abicheck.service.run_dump` so their user-facing notes (linker-script
+    following, "no headers provided", "--include ignored") reach the CLI's stderr
+    exactly as they did when this logic lived in the CLI.
+    """
+    click.echo(message, err=True)
 
 _HEADER_EXTS = {".h", ".hh", ".hpp", ".hxx", ".ipp", ".tpp", ".inc"}
 
@@ -163,51 +171,6 @@ def _normalize_binary_input(path: Path) -> tuple[Path, str | None]:
     return path, fmt
 
 
-def _dump_elf(
-    path: Path,
-    headers: list[Path],
-    includes: list[Path],
-    version: str,
-    lang: str,
-    *,
-    dwarf_only: bool = False,
-    debug_format: str | None = None,
-) -> AbiSnapshot:
-    """Dump ABI snapshot from an ELF binary."""
-    resolved_headers = _expand_header_inputs(headers) if headers else []
-    if not resolved_headers and not dwarf_only:
-        click.echo(
-            f"Warning: '{path}' — no headers provided. "
-            "Will use DWARF debug info if available, else symbols-only mode.",
-            err=True,
-        )
-    if resolved_headers and not dwarf_only:
-        for inc in includes:
-            if not inc.exists() or not inc.is_dir():
-                raise click.ClickException(
-                    f"Include directory not found or not a directory: {inc}"
-                )
-    elif includes and not dwarf_only:
-        click.echo(
-            "Warning: --include paths are ignored without headers.",
-            err=True,
-        )
-    compiler = "cc" if lang == "c" else "c++"
-    try:
-        return dump(
-            so_path=path,
-            headers=resolved_headers,
-            extra_includes=includes,
-            version=version,
-            compiler=compiler,
-            lang=lang if lang == "c" else None,
-            dwarf_only=dwarf_only,
-            debug_format=debug_format,
-        )
-    except (AbicheckError, RuntimeError, OSError, ValueError) as exc:
-        raise click.ClickException(f"Failed to dump '{path}': {exc}") from exc
-
-
 def _apply_native_provenance(
     snap: AbiSnapshot,
     public_headers: list[Path] | None,
@@ -238,68 +201,41 @@ def _dump_native_binary(
     public_headers: list[Path] | None = None,
     public_header_dirs: list[Path] | None = None,
 ) -> AbiSnapshot:
-    """Dump ABI snapshot from a native binary (ELF, PE, or Mach-O).
+    """Dump an ABI snapshot from a native binary (ELF, PE, or Mach-O).
 
-    For ELF, headers are required for full AST analysis unless dwarf_only
-    is set or DWARF debug info is available (ADR-003 fallback chain).
-    For PE/Mach-O, headers are optional: when supplied they scope the ABI
-    surface to declarations in those public headers (best-effort, via castxml),
-    otherwise the export table provides the symbol surface.
+    Thin CLI wrapper over :func:`abicheck.service.run_dump` — the single source
+    of truth for native dumping. It supplies a ``click.echo`` notifier so the
+    "no headers" / "--include ignored" notes still reach stderr, and translates
+    the framework-free errors into the CLI's ``click`` exceptions, preserving
+    exit codes: ``ValidationError`` (unusable input / bad arguments) →
+    :class:`click.UsageError` (exit 64); ``SnapshotError`` (operational failure)
+    → :class:`click.ClickException` (exit 1).
 
     ``public_headers`` / ``public_header_dirs`` classify declaration provenance
-    (ADR-024 Phase 1). For PE they also let the PDB-derived types carry a
-    ``ScopeOrigin``; an empty set keeps every origin ``UNKNOWN`` (no-op).
+    (ADR-024 Phase 1) on PE/Mach-O snapshots; a no-op for ELF and when empty.
     """
-    if binary_fmt == "elf":
-        return _dump_elf(
+    from . import service
+    from .errors import SnapshotError, ValidationError
+
+    try:
+        return service.run_dump(
             path,
+            binary_fmt,
             headers,
             includes,
             version,
             lang,
+            pdb_path=pdb_path,
             dwarf_only=dwarf_only,
             debug_format=debug_format,
+            public_headers=public_headers,
+            public_header_dirs=public_header_dirs,
+            notify=_click_notify,
         )
-
-    if binary_fmt == "pe":
-        from .service import _dump_pe
-
-        try:
-            snap = _dump_pe(
-                path,
-                version,
-                headers=headers,
-                includes=includes,
-                lang=lang,
-                pdb_path=pdb_path,
-            )
-        except AbicheckError as exc:
-            raise click.ClickException(str(exc)) from exc
-        return _apply_native_provenance(snap, public_headers, public_header_dirs)
-
-    if binary_fmt == "macho":
-        from .service import _dump_macho
-
-        try:
-            snap = _dump_macho(
-                path,
-                version,
-                headers=headers,
-                includes=includes,
-                lang=lang,
-            )
-        except AbicheckError as exc:
-            raise click.ClickException(str(exc)) from exc
-        return _apply_native_provenance(snap, public_headers, public_header_dirs)
-
-    fmt_labels = {
-        "elf": "ELF",
-        "pe": "PE (Windows DLL)",
-        "macho": "Mach-O (macOS dylib)",
-    }
-    raise click.ClickException(
-        f"Unsupported binary format: {fmt_labels.get(binary_fmt, binary_fmt)}"
-    )
+    except ValidationError as exc:
+        raise click.UsageError(str(exc)) from exc
+    except SnapshotError as exc:
+        raise click.ClickException(str(exc)) from exc
 
 
 def _resolve_input(
@@ -316,10 +252,14 @@ def _resolve_input(
 ) -> AbiSnapshot:
     """Auto-detect input type and return an AbiSnapshot.
 
-    Detection order:
-    1. Native binary (ELF / PE / Mach-O, detected by magic bytes)
-    2. ABICC Perl dump (``$VAR1`` prefix) → :func:`import_abicc_perl_dump`
-    3. JSON snapshot (``{`` prefix) → :func:`load_snapshot`
+    Thin CLI wrapper over :func:`abicheck.service.resolve_input` — the single
+    source of truth for format detection, linker-script following, and native
+    dumping. It supplies a ``click.echo`` notifier so progress notes reach
+    stderr unchanged, and maps the framework-free errors to ``click`` exceptions
+    so exit codes are preserved: ``ValidationError`` (unrecognised / unusable
+    input) → :class:`click.UsageError` (exit 64); ``SnapshotError`` (operational
+    failure loading or building the snapshot) → :class:`click.ClickException`
+    (exit 1).
 
     Args:
         path: Path to the input file.
@@ -327,115 +267,31 @@ def _resolve_input(
         includes: Extra include directories (used for ELF inputs).
         version: Version label to embed in the resulting snapshot.
         lang: Language mode for castxml (``c++`` or ``c``).
-        is_elf: Pre-computed ELF detection result; if *None*, detection is
-            performed here (avoids a second ``open()`` when the caller already
-            knows the result).
+        is_elf: Pre-computed ELF detection result; if *None*, the service layer
+            detects the format from magic bytes.
         dwarf_only: If True, force DWARF-only mode (ADR-003).
         debug_format: Force debug format ("dwarf", "btf", "ctf") or None for auto.
     """
-    # Fast path: caller already knows it's ELF
-    if is_elf is True:
-        return _dump_native_binary(
-            path,
-            "elf",
-            headers,
-            includes,
-            version,
-            lang,
-            dwarf_only=dwarf_only,
-            debug_format=debug_format,
-        )
+    from . import service
+    from .errors import SnapshotError, ValidationError
 
-    # Detect binary format from magic bytes
-    binary_fmt = _detect_binary_format(path) if is_elf is None else None
-    if binary_fmt is not None:
-        return _dump_native_binary(
+    try:
+        return service.resolve_input(
             path,
-            binary_fmt,
             headers,
             includes,
             version,
             lang,
+            is_elf=is_elf,
             pdb_path=pdb_path,
             dwarf_only=dwarf_only,
             debug_format=debug_format,
+            notify=_click_notify,
         )
-
-    # Raw kernel type-info blob (a bare BTF/CTF section, e.g. from
-    # `bpftool btf dump file <elf> format raw`): parse directly.
-    from .service import _resolve_raw_typeinfo
-
-    raw_typeinfo = _resolve_raw_typeinfo(path, version)
-    if raw_typeinfo is not None:
-        return raw_typeinfo
-
-    # Text-based formats: detect by sniffing only a small header chunk
-    fmt = _sniff_text_format(path)
-
-    if fmt == "perl":
-        try:
-            return import_abicc_perl_dump(path)
-        except (
-            ValueError,
-            KeyError,
-            UnicodeDecodeError,
-            OSError,
-            AbicheckError,
-        ) as exc:
-            raise click.ClickException(
-                f"Failed to import ABICC Perl dump '{path}': {exc}"
-            ) from exc
-
-    if fmt == "json":
-        try:
-            return load_snapshot(path)
-        except (ValueError, KeyError, UnicodeDecodeError, OSError) as exc:
-            raise click.ClickException(
-                f"Failed to load JSON snapshot '{path}': {exc}"
-            ) from exc
-
-    # GNU ld linker script (e.g. the ``libfoo.so`` dev symlink is the text
-    # ``INPUT(libfoo.so.1)``): follow it to the real shared library.
-    target, is_ld_script = _resolve_linker_script(path)
-    if is_ld_script:
-        if target is not None and target.resolve() != path.resolve():
-            click.echo(
-                f"Note: '{path}' is a GNU ld linker script; following its "
-                f"INPUT()/GROUP() directive to '{target}'.",
-                err=True,
-            )
-            return _resolve_input(
-                target,
-                headers,
-                includes,
-                version,
-                lang,
-                dwarf_only=dwarf_only,
-                debug_format=debug_format,
-            )
-        raise click.UsageError(
-            f"'{path}' is a GNU ld linker script (INPUT/GROUP), not a binary, "
-            "and its target could not be located next to it. Pass the actual "
-            "shared library named in its INPUT(...) directive directly."
-        )
-
-    # Static / import library archives (.a / .lib) are member containers, not a
-    # single linkable image — a deliberate non-goal (see
-    # docs/concepts/limitations.md). Reject with actionable guidance.
-    from .binary_utils import detect_archive
-
-    if detect_archive(path):
-        raise click.UsageError(
-            f"'{path}' is a static/import library archive (.a/.lib), which abicheck "
-            "does not analyse — it compares single linkable images (shared libraries "
-            "and objects). Extract the members (e.g. `ar x lib.a`) and compare the "
-            "resulting object files or the shared library built from them instead."
-        )
-
-    raise click.UsageError(
-        f"Cannot detect format of '{path}'. "
-        "Expected: ELF (.so), PE (.dll), Mach-O (.dylib), JSON snapshot, or ABICC Perl dump."
-    )
+    except ValidationError as exc:
+        raise click.UsageError(str(exc)) from exc
+    except SnapshotError as exc:
+        raise click.ClickException(str(exc)) from exc
 
 
 def _populate_dependency_info(

@@ -128,7 +128,7 @@ class TestCompareLang:
             captured_calls.append(kwargs)
             return AbiSnapshot(library="libfoo.so", version="1.0")
 
-        monkeypatch.setattr("abicheck.cli_resolve.dump", fake_dump)
+        monkeypatch.setattr("abicheck.dumper.dump", fake_dump)
 
         runner = CliRunner()
         result = runner.invoke(main, [

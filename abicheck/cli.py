@@ -41,7 +41,6 @@ from .cli_params import POLICY_FILE_PARAM, _load_suppression_and_policy
 from .cli_resolve import (
     _apply_native_provenance,
     _detect_binary_format,
-    _dump_elf,
     _dump_native_binary,
     _expand_header_inputs,
     _is_supported_compare_input,
@@ -74,7 +73,6 @@ from .model import AbiSnapshot
 __all__ = [
     "_apply_native_provenance",
     "_detect_binary_format",
-    "_dump_elf",
     "_dump_native_binary",
     "_expand_header_inputs",
     "_is_supported_compare_input",
