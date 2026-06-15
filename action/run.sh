@@ -43,30 +43,34 @@ if [[ -n "$ABI_BASELINE" && ( "$MODE" == "compare" || "$MODE" == "scan" ) ]]; th
   BASELINE_DIR=$(mktemp -d)
   # Clean up temp dir on exit (combined with STDERR_FILE cleanup later)
   _BASELINE_CLEANUP="$BASELINE_DIR"
-  if [[ "$ABI_BASELINE" == "latest-release" ]]; then
-    echo "::group::Fetch ABI baseline from latest release"
-    if ! gh release download --pattern '*.abicheck.json' -D "$BASELINE_DIR"; then
-      echo "::error::No ABI baseline found in latest release. Run 'abicheck dump --output-name auto' in your release workflow and upload the *.abicheck.json file as a release asset."
-      exit 1
-    fi
-    echo "::endgroup::"
-  elif [[ -f "$ABI_BASELINE" ]]; then
-    # Direct file path — use as-is
-    cp "$ABI_BASELINE" "$BASELINE_DIR/"
+  if [[ -f "$ABI_BASELINE" ]]; then
+    # Direct file path — use it as-is (any name, e.g. abi-baseline.json), no
+    # download and no *.abicheck.json pattern match (which would reject a
+    # normal .json name; the input doc promises a path is used directly).
+    BASELINE_FILE="$ABI_BASELINE"
   else
-    # Treat as a tag name
-    echo "::group::Fetch ABI baseline from release $ABI_BASELINE"
-    if ! gh release download "$ABI_BASELINE" --pattern '*.abicheck.json' -D "$BASELINE_DIR"; then
-      echo "::error::No ABI baseline found in release '$ABI_BASELINE'. Ensure the release has a *.abicheck.json asset."
+    if [[ "$ABI_BASELINE" == "latest-release" ]]; then
+      echo "::group::Fetch ABI baseline from latest release"
+      if ! gh release download --pattern '*.abicheck.json' -D "$BASELINE_DIR"; then
+        echo "::error::No ABI baseline found in latest release. Run 'abicheck dump --output-name auto' in your release workflow and upload the *.abicheck.json file as a release asset."
+        exit 1
+      fi
+      echo "::endgroup::"
+    else
+      # Treat as a tag name
+      echo "::group::Fetch ABI baseline from release $ABI_BASELINE"
+      if ! gh release download "$ABI_BASELINE" --pattern '*.abicheck.json' -D "$BASELINE_DIR"; then
+        echo "::error::No ABI baseline found in release '$ABI_BASELINE'. Ensure the release has a *.abicheck.json asset."
+        exit 1
+      fi
+      echo "::endgroup::"
+    fi
+    # Pick the first .abicheck.json found in the download dir.
+    BASELINE_FILE=$(find "$BASELINE_DIR" -name '*.abicheck.json' | head -1)
+    if [[ -z "$BASELINE_FILE" ]]; then
+      echo "::error::No *.abicheck.json file found after download."
       exit 1
     fi
-    echo "::endgroup::"
-  fi
-  # Pick the first .abicheck.json found
-  BASELINE_FILE=$(find "$BASELINE_DIR" -name '*.abicheck.json' | head -1)
-  if [[ -z "$BASELINE_FILE" ]]; then
-    echo "::error::No *.abicheck.json file found after download."
-    exit 1
   fi
   echo "Using ABI baseline: $BASELINE_FILE"
   # compare consumes the baseline as old-library; scan consumes it as --baseline.
@@ -977,8 +981,13 @@ elif [[ "$MODE" == "scan" ]]; then
     FINAL_EXIT=1
   fi
 
-  if [[ "$VERDICT" == "API_BREAK" && "${INPUT_FAIL_ON_API_BREAK:-false}" == "true" ]]; then
-    echo "::error::API/source break detected by scan. Set fail-on-api-break: false to ignore."
+  # API_BREAK gates when fail-on-api-break is set, OR when the user explicitly
+  # promoted a cross-check to =error (an opt-in CI gate the scan CLI maps to
+  # exit 2). The promotion alone must fail the step, as the docs promise, even
+  # with the default fail-on-api-break: false.
+  if [[ "$VERDICT" == "API_BREAK" ]] \
+     && { [[ "${INPUT_FAIL_ON_API_BREAK:-false}" == "true" ]] || [[ "${INPUT_CROSSCHECK:-}" == *"=error"* ]]; }; then
+    echo "::error::API/source break detected by scan (or a promoted --crosscheck=error gate). Set fail-on-api-break: false and drop any crosscheck=error to ignore."
     FINAL_EXIT=1
   fi
 
