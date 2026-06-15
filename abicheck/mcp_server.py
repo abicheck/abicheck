@@ -74,7 +74,6 @@ _logger = logging.getLogger("abicheck.mcp")
 # Configuration (environment variables or CLI flags)
 # ---------------------------------------------------------------------------
 
-
 def _env_int(name: str, default: str) -> int:
     """Parse an integer environment variable with a clear error on bad input."""
     raw = _os.environ.get(name, default)
@@ -186,7 +185,9 @@ def _safe_write_path(raw: str, *, label: str = "output_path") -> Path:
         raise ValueError(f"Invalid {label}: {exc!s}") from exc
 
     if p.suffix.lower() not in _ALLOWED_OUTPUT_SUFFIXES:
-        raise ValueError(f"{label} must have a .json extension, got: {p.suffix!r}")
+        raise ValueError(
+            f"{label} must have a .json extension, got: {p.suffix!r}"
+        )
 
     # Block writes to sensitive system locations.
     # Use resolved Path objects to handle symlinks (/etc -> /private/etc on macOS)
@@ -194,14 +195,9 @@ def _safe_write_path(raw: str, *, label: str = "output_path") -> Path:
     _os = platform.system()
     if _os in ("Linux", "Darwin"):
         sensitive_system_dirs = [
-            Path("/etc"),
-            Path("/bin"),
-            Path("/sbin"),
-            Path("/usr/bin"),
-            Path("/usr/sbin"),
-            Path("/boot"),
-            Path("/sys"),
-            Path("/proc"),
+            Path("/etc"), Path("/bin"), Path("/sbin"),
+            Path("/usr/bin"), Path("/usr/sbin"),
+            Path("/boot"), Path("/sys"), Path("/proc"),
             Path("/dev"),
         ]
         for sys_dir in sensitive_system_dirs:
@@ -234,19 +230,19 @@ def _safe_write_path(raw: str, *, label: str = "output_path") -> Path:
             "//127.0.0.1/c$/windows/",
         )
         if norm.startswith(sensitive_prefixes):
-            raise ValueError(f"{label} points to a sensitive system path")
+            raise ValueError(
+                f"{label} points to a sensitive system path"
+            )
 
     # Block writes to SSH/credential directories.
     # Resolve both sides to handle symlinks (e.g. ~/.ssh → /private/home/user/.ssh).
     home = Path.home().resolve()
-    for sensitive_dir in [
-        (home / ".ssh").resolve(),
-        (home / ".aws").resolve(),
-        (home / ".gnupg").resolve(),
-    ]:
+    for sensitive_dir in [(home / ".ssh").resolve(), (home / ".aws").resolve(), (home / ".gnupg").resolve()]:
         try:
             p.relative_to(sensitive_dir)
-            raise ValueError(f"{label} points to a sensitive credential directory")
+            raise ValueError(
+                f"{label} points to a sensitive credential directory"
+            )
         except ValueError as e:
             if "credential" in str(e):
                 raise
@@ -258,7 +254,6 @@ def _sanitize_error(exc: Exception, *, context: str = "operation") -> str:
     """Return a safe error message that does not leak filesystem paths or internals."""
     # Known domain errors: safe to surface as-is
     from .errors import AbicheckError
-
     if isinstance(exc, AbicheckError):
         return str(exc)
     if isinstance(exc, (ValueError, KeyError)):
@@ -293,11 +288,9 @@ except Exception as _exc:  # noqa: BLE001
 # Helpers — reuse CLI logic without Click dependency
 # ---------------------------------------------------------------------------
 
-
 def _detect_binary_format(path: Path) -> str | None:
     """Detect binary format from magic bytes — single file open."""
     from .binary_utils import detect_binary_format
-
     return detect_binary_format(path)
 
 
@@ -316,7 +309,6 @@ def _resolve_input(
 
     if binary_fmt == "elf":
         from .dumper import dump
-
         _SUPPORTED_LANGS = ("c", "c++")
         if lang not in _SUPPORTED_LANGS:
             raise ValueError(
@@ -335,7 +327,6 @@ def _resolve_input(
     if binary_fmt == "pe":
         from .model import Function
         from .pe_metadata import parse_pe_metadata
-
         pe_meta = parse_pe_metadata(path)
         if not pe_meta.machine:
             raise AbicheckError(
@@ -358,44 +349,30 @@ def _resolve_input(
             for exp in pe_meta.exports
         ]
         return AbiSnapshot(
-            library=path.name,
-            version=version,
-            functions=funcs,
-            pe=pe_meta,
-            platform="pe",
+            library=path.name, version=version,
+            functions=funcs, pe=pe_meta, platform="pe",
         )
 
     if binary_fmt == "macho":
         from .macho_metadata import parse_macho_metadata
         from .model import Function
-
         macho_meta = parse_macho_metadata(path)
-        if (
-            not macho_meta.exports
-            and not macho_meta.install_name
-            and not macho_meta.dependent_libs
-        ):
+        if not macho_meta.exports and not macho_meta.install_name and not macho_meta.dependent_libs:
             raise AbicheckError(
                 f"Mach-O file '{path.name}' has no exports or load-command metadata. "
                 "Verify the file is a valid dynamic library."
             )
         funcs = [
             Function(
-                name=exp.name,
-                mangled=exp.name,
-                return_type="?",
+                name=exp.name, mangled=exp.name, return_type="?",
                 visibility=Visibility.PUBLIC,
                 is_extern_c=not exp.name.startswith("_Z"),
             )
-            for exp in macho_meta.exports
-            if exp.name
+            for exp in macho_meta.exports if exp.name
         ]
         return AbiSnapshot(
-            library=path.name,
-            version=version,
-            functions=funcs,
-            macho=macho_meta,
-            platform="macho",
+            library=path.name, version=version,
+            functions=funcs, macho=macho_meta, platform="macho",
         )
 
     # Text-based: JSON snapshot or Perl dump
@@ -407,7 +384,6 @@ def _resolve_input(
         raise AbicheckError("Cannot read input file") from exc
 
     from .compat.abicc_dump_import import import_abicc_perl_dump, looks_like_perl_dump
-
     if looks_like_perl_dump(head):
         return import_abicc_perl_dump(path)
 
@@ -419,7 +395,6 @@ def _resolve_input(
     # docs/concepts/limitations.md). Reject with actionable guidance, matching
     # the CLI/service/dumper paths.
     from .binary_utils import detect_archive
-
     if detect_archive(path):
         raise AbicheckError(
             f"'{path}' is a static/import library archive (.a/.lib), which abicheck "
@@ -468,25 +443,16 @@ def _render_output(
     if stat:
         if fmt == "json":
             from .reporter import to_stat_json
-
             return to_stat_json(result)
         from .reporter import to_stat
-
         return to_stat(result)
     if fmt == "json":
-        return to_json(
-            result,
-            show_only=show_only,
-            report_mode=report_mode,
-            show_impact=show_impact,
-        )
+        return to_json(result, show_only=show_only, report_mode=report_mode, show_impact=show_impact)
     if fmt == "sarif":
         from .sarif import to_sarif_str
-
         return to_sarif_str(result, show_only=show_only)
     if fmt == "html":
         from .html_report import generate_html_report
-
         return generate_html_report(
             result,
             lib_name=old.library,
@@ -496,9 +462,8 @@ def _render_output(
             show_only=show_only,
             show_impact=show_impact,
         )
-    return to_markdown(
-        result, show_only=show_only, report_mode=report_mode, show_impact=show_impact
-    )
+    return to_markdown(result, show_only=show_only, report_mode=report_mode, show_impact=show_impact)
+
 
 
 def _impact_category(kind: ChangeKind, policy: str = "strict_abi") -> str:
@@ -518,16 +483,13 @@ def _impact_category(kind: ChangeKind, policy: str = "strict_abi") -> str:
         return "risk"
     if kind in compatible:
         return "compatible"
-    _logger.warning(
-        "_impact_category: unknown ChangeKind %r, defaulting to breaking", kind
-    )
+    _logger.warning("_impact_category: unknown ChangeKind %r, defaulting to breaking", kind)
     return "breaking"  # fail-safe for unknown kinds
 
 
 # ---------------------------------------------------------------------------
 # MCP Tools
 # ---------------------------------------------------------------------------
-
 
 @mcp.tool()
 def abi_dump(
@@ -562,27 +524,18 @@ def abi_dump(
 
         _check_file_size(lib, label="library_path")
         hdr_paths = [_safe_read_path(h, label="header") for h in (headers or [])]
-        inc_paths = [
-            _safe_read_path(d, label="include_dir") for d in (include_dirs or [])
-        ]
+        inc_paths = [_safe_read_path(d, label="include_dir") for d in (include_dirs or [])]
 
         # Run the expensive resolve+serialize in a thread with a real timeout
         # so we don't block the MCP stdio server indefinitely.
         with _futures.ThreadPoolExecutor(max_workers=1) as pool:
-            future = pool.submit(
-                _resolve_input, lib, hdr_paths, inc_paths, version, language
-            )
+            future = pool.submit(_resolve_input, lib, hdr_paths, inc_paths, version, language)
             try:
                 snap = future.result(timeout=MCP_TIMEOUT)
             except _futures.TimeoutError:
                 elapsed = _time.monotonic() - t0
                 _audit_log("abi_dump", {"library": lib.name}, elapsed, "timeout")
-                return json.dumps(
-                    {
-                        "status": "error",
-                        "error": f"abi_dump timed out after {MCP_TIMEOUT}s",
-                    }
-                )
+                return json.dumps({"status": "error", "error": f"abi_dump timed out after {MCP_TIMEOUT}s"})
         snap_json = snapshot_to_json(snap)
 
         elapsed = _time.monotonic() - t0
@@ -591,29 +544,23 @@ def abi_dump(
             out = _safe_write_path(output_path, label="output_path")
             out.write_text(snap_json, encoding="utf-8")
             _audit_log("abi_dump", {"library": lib.name}, elapsed, "ok")
-            return json.dumps(
-                {
-                    "status": "ok",
-                    "output_path": str(out),
-                    "summary": _snapshot_summary(snap),
-                }
-            )
+            return json.dumps({
+                "status": "ok",
+                "output_path": str(out),
+                "summary": _snapshot_summary(snap),
+            })
 
         _audit_log("abi_dump", {"library": lib.name}, elapsed, "ok")
-        return json.dumps(
-            {
-                "status": "ok",
-                "summary": _snapshot_summary(snap),
-                "snapshot": json.loads(snap_json),
-            }
-        )
+        return json.dumps({
+            "status": "ok",
+            "summary": _snapshot_summary(snap),
+            "snapshot": json.loads(snap_json),
+        })
     except Exception as exc:
         elapsed = _time.monotonic() - t0
         _audit_log("abi_dump", {"library": Path(library_path).name}, elapsed, "error")
         _logger.exception("abi_dump failed")
-        return json.dumps(
-            {"status": "error", "error": _sanitize_error(exc, context="abi_dump")}
-        )
+        return json.dumps({"status": "error", "error": _sanitize_error(exc, context="abi_dump")})
 
 
 @mcp.tool()
@@ -672,56 +619,36 @@ def abi_compare(
         new_path = _safe_read_path(new_input, label="new_input")
         for p, label in [(old_path, "old_input"), (new_path, "new_input")]:
             if not p.exists():
-                return json.dumps(
-                    {"status": "error", "error": f"File not found for {label}"}
-                )
+                return json.dumps({"status": "error", "error": f"File not found for {label}"})
         _check_file_size(old_path, label="old_input")
         _check_file_size(new_path, label="new_input")
 
         # Validate policy name only when no policy_file override is provided.
         # policy_file takes precedence over the base policy name.
         if policy_file is None and policy not in VALID_BASE_POLICIES:
-            return json.dumps(
-                {
-                    "status": "error",
-                    "error": f"Unknown policy: {policy!r}. "
-                    f"Valid policies: {', '.join(sorted(VALID_BASE_POLICIES))}",
-                }
-            )
+            return json.dumps({
+                "status": "error",
+                "error": f"Unknown policy: {policy!r}. "
+                f"Valid policies: {', '.join(sorted(VALID_BASE_POLICIES))}"
+            })
 
         # Resolve per-side headers
         shared = [_safe_read_path(h, label="header") for h in (headers or [])]
-        old_h = (
-            [_safe_read_path(h, label="old_header") for h in old_headers]
-            if old_headers is not None
-            else shared
-        )
-        new_h = (
-            [_safe_read_path(h, label="new_header") for h in new_headers]
-            if new_headers is not None
-            else shared
-        )
+        old_h = [_safe_read_path(h, label="old_header") for h in old_headers] if old_headers is not None else shared
+        new_h = [_safe_read_path(h, label="new_header") for h in new_headers] if new_headers is not None else shared
         inc = [_safe_read_path(d, label="include_dir") for d in (include_dirs or [])]
 
         # Validate output_format early (before expensive work)
         if output_format not in _VALID_FORMATS:
-            return json.dumps(
-                {
-                    "status": "error",
-                    "error": f"Unknown output format {output_format!r}. Valid: {sorted(_VALID_FORMATS)}",
-                }
-            )
+            return json.dumps({"status": "error", "error": f"Unknown output format {output_format!r}. Valid: {sorted(_VALID_FORMATS)}"})
 
         # Validate show_only tokens early
         if show_only:
             from .reporter import ShowOnlyFilter
-
             try:
                 ShowOnlyFilter.parse(show_only)
             except ValueError as exc:
-                return json.dumps(
-                    {"status": "error", "error": f"Invalid show_only: {exc}"}
-                )
+                return json.dumps({"status": "error", "error": f"Invalid show_only: {exc}"})
 
         # Resolve inputs, load suppression/policy, and compare — all under
         # a real timeout so we don't block the MCP stdio server.
@@ -731,28 +658,16 @@ def abi_compare(
             suppression = None
             if suppression_file:
                 from .suppression import SuppressionList
-
                 suppression = SuppressionList.load(
                     _safe_read_path(suppression_file, label="suppression_file"),
                 )
             pf = None
             if policy_file:
                 from .policy_file import PolicyFile
-
                 pf = PolicyFile.load(
                     _safe_read_path(policy_file, label="policy_file"),
                 )
-            return (
-                old_snap,
-                new_snap,
-                compare(
-                    old_snap,
-                    new_snap,
-                    suppression=suppression,
-                    policy=policy,
-                    policy_file=pf,
-                ),
-            )
+            return old_snap, new_snap, compare(old_snap, new_snap, suppression=suppression, policy=policy, policy_file=pf)
 
         with _futures.ThreadPoolExecutor(max_workers=1) as pool:
             future = pool.submit(_do_compare)
@@ -760,18 +675,8 @@ def abi_compare(
                 old_snap, new_snap, result = future.result(timeout=MCP_TIMEOUT)
             except _futures.TimeoutError:
                 elapsed = _time.monotonic() - t0
-                _audit_log(
-                    "abi_compare",
-                    {"old": old_path.name, "new": new_path.name},
-                    elapsed,
-                    "timeout",
-                )
-                return json.dumps(
-                    {
-                        "status": "error",
-                        "error": f"abi_compare timed out after {MCP_TIMEOUT}s",
-                    }
-                )
+                _audit_log("abi_compare", {"old": old_path.name, "new": new_path.name}, elapsed, "timeout")
+                return json.dumps({"status": "error", "error": f"abi_compare timed out after {MCP_TIMEOUT}s"})
 
         # Use the active policy from the result (may differ from input when
         # policy_file overrides the base policy).
@@ -813,14 +718,9 @@ def abi_compare(
 
         # Include rendered report
         rendered = _render_output(
-            output_format,
-            result,
-            old_snap,
-            new_snap,
-            show_only=show_only,
-            report_mode=report_mode,
-            show_impact=show_impact,
-            stat=stat,
+            output_format, result, old_snap, new_snap,
+            show_only=show_only, report_mode=report_mode,
+            show_impact=show_impact, stat=stat,
         )
         # When format is json, embed as nested object (not double-encoded string)
         if output_format == "json":
@@ -832,9 +732,7 @@ def abi_compare(
         _audit_log(
             "abi_compare",
             {"old": old_path.name, "new": new_path.name},
-            elapsed,
-            "ok",
-            verdict=result.verdict.value,
+            elapsed, "ok", verdict=result.verdict.value,
         )
         return json.dumps(response)
     except Exception as exc:
@@ -842,13 +740,10 @@ def abi_compare(
         _audit_log(
             "abi_compare",
             {"old": Path(old_input).name, "new": Path(new_input).name},
-            elapsed,
-            "error",
+            elapsed, "error",
         )
         _logger.exception("abi_compare failed")
-        return json.dumps(
-            {"status": "error", "error": _sanitize_error(exc, context="abi_compare")}
-        )
+        return json.dumps({"status": "error", "error": _sanitize_error(exc, context="abi_compare")})
 
 
 @mcp.tool()
@@ -875,27 +770,23 @@ def abi_list_changes(
     elif impact == "compatible":
         filter_set = COMPATIBLE_KINDS
     elif impact is not None:
-        return json.dumps(
-            {
-                "status": "error",
-                "error": f"Unknown impact filter: {impact!r}. "
-                "Use one of: breaking, api_break, risk, compatible",
-            }
-        )
+        return json.dumps({
+            "status": "error",
+            "error": f"Unknown impact filter: {impact!r}. "
+            "Use one of: breaking, api_break, risk, compatible"
+        })
 
     results = []
     for kind in sorted(ChangeKind, key=lambda k: k.value):
         if filter_set is not None and kind not in filter_set:
             continue
         entry = policy_for(kind)
-        results.append(
-            {
-                "kind": kind.value,
-                "impact": _impact_category(kind),
-                "default_verdict": entry.default_verdict.value,
-                "description": impact_for(kind),
-            }
-        )
+        results.append({
+            "kind": kind.value,
+            "impact": _impact_category(kind),
+            "default_verdict": entry.default_verdict.value,
+            "description": impact_for(kind),
+        })
 
     return json.dumps({"count": len(results), "change_kinds": results})
 
@@ -924,13 +815,11 @@ def abi_explain_change(
                 kind = k
                 break
         else:
-            return json.dumps(
-                {
-                    "status": "error",
-                    "error": f"Unknown change kind: {change_kind!r}. "
-                    "Use abi_list_changes to see all available kinds.",
-                }
-            )
+            return json.dumps({
+                "status": "error",
+                "error": f"Unknown change kind: {change_kind!r}. "
+                "Use abi_list_changes to see all available kinds."
+            })
 
     entry = policy_for(kind)
     impact_text = impact_for(kind)
@@ -1008,25 +897,16 @@ def abi_audit(
             return json.dumps({"status": "error", "error": "Library file not found"})
         _check_file_size(lib, label="library_path")
         hdr_paths = [_safe_read_path(h, label="header") for h in (headers or [])]
-        inc_paths = [
-            _safe_read_path(d, label="include_dir") for d in (include_dirs or [])
-        ]
+        inc_paths = [_safe_read_path(d, label="include_dir") for d in (include_dirs or [])]
 
         with _futures.ThreadPoolExecutor(max_workers=1) as pool:
-            future = pool.submit(
-                _resolve_input, lib, hdr_paths, inc_paths, "", language
-            )
+            future = pool.submit(_resolve_input, lib, hdr_paths, inc_paths, "", language)
             try:
                 snap = future.result(timeout=MCP_TIMEOUT)
             except _futures.TimeoutError:
                 elapsed = _time.monotonic() - t0
                 _audit_log("abi_audit", {"library": lib.name}, elapsed, "timeout")
-                return json.dumps(
-                    {
-                        "status": "error",
-                        "error": f"abi_audit timed out after {MCP_TIMEOUT}s",
-                    }
-                )
+                return json.dumps({"status": "error", "error": f"abi_audit timed out after {MCP_TIMEOUT}s"})
 
         cc = run_crosschecks(snap)
         pattern = scan_files([*hdr_paths], None)
@@ -1034,22 +914,18 @@ def abi_audit(
         exit_code = 2 if has_api_break else 0
         elapsed = _time.monotonic() - t0
         _audit_log("abi_audit", {"library": lib.name}, elapsed, "ok")
-        return json.dumps(
-            {
-                "status": "ok",
-                "verdict": "API_BREAK" if has_api_break else "COMPATIBLE",
-                "exit_code": exit_code,
-                "catalog": cc.to_dict(),
-                "pattern_scan": pattern.to_dict(),
-            }
-        )
+        return json.dumps({
+            "status": "ok",
+            "verdict": "API_BREAK" if has_api_break else "COMPATIBLE",
+            "exit_code": exit_code,
+            "catalog": cc.to_dict(),
+            "pattern_scan": pattern.to_dict(),
+        })
     except Exception as exc:
         elapsed = _time.monotonic() - t0
         _audit_log("abi_audit", {"library": Path(library_path).name}, elapsed, "error")
         _logger.exception("abi_audit failed")
-        return json.dumps(
-            {"status": "error", "error": _sanitize_error(exc, context="abi_audit")}
-        )
+        return json.dumps({"status": "error", "error": _sanitize_error(exc, context="abi_audit")})
 
 
 @mcp.tool()
@@ -1090,13 +966,9 @@ def abi_estimate(
         if not bin_path.exists():
             return json.dumps({"status": "error", "error": "Binary file not found"})
         hdr_paths = [_safe_read_path(h, label="header") for h in (headers or [])]
-        inc_paths = [
-            _safe_read_path(d, label="include_dir") for d in (include_dirs or [])
-        ]
+        inc_paths = [_safe_read_path(d, label="include_dir") for d in (include_dirs or [])]
         src_path = _safe_read_path(sources, label="sources") if sources else None
-        cdb_path = (
-            _safe_read_path(compile_db, label="compile_db") if compile_db else None
-        )
+        cdb_path = _safe_read_path(compile_db, label="compile_db") if compile_db else None
 
         req = ScanRequest(
             binaries=[bin_path],
@@ -1115,53 +987,35 @@ def abi_estimate(
         total = sum(e.est_seconds for e in estimates)
         elapsed = _time.monotonic() - t0
         _audit_log("abi_estimate", {"binary": bin_path.name}, elapsed, "ok")
-        return json.dumps(
-            {
-                "status": "ok",
-                "mode": mode,
-                "estimate": [e.to_dict() for e in estimates],
-                "total_est_seconds": round(total, 3),
-            }
-        )
+        return json.dumps({
+            "status": "ok",
+            "mode": mode,
+            "estimate": [e.to_dict() for e in estimates],
+            "total_est_seconds": round(total, 3),
+        })
     except Exception as exc:
         elapsed = _time.monotonic() - t0
         _audit_log("abi_estimate", {"binary": Path(binary_path).name}, elapsed, "error")
         _logger.exception("abi_estimate failed")
-        return json.dumps(
-            {"status": "error", "error": _sanitize_error(exc, context="abi_estimate")}
-        )
+        return json.dumps({"status": "error", "error": _sanitize_error(exc, context="abi_estimate")})
 
 
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
-
 def main() -> None:
     """Run the abicheck MCP server (stdio transport)."""
     global MCP_TIMEOUT, MCP_MAX_FILE_SIZE, _structured_logging  # noqa: PLW0603
 
     import argparse
-
     parser = argparse.ArgumentParser(description="abicheck MCP server")
-    parser.add_argument(
-        "--timeout",
-        type=int,
-        default=MCP_TIMEOUT,
-        help=f"Timeout in seconds for tool calls (default: {MCP_TIMEOUT})",
-    )
-    parser.add_argument(
-        "--max-file-size",
-        type=int,
-        default=MCP_MAX_FILE_SIZE,
-        help=f"Max input file size in bytes (default: {MCP_MAX_FILE_SIZE})",
-    )
-    parser.add_argument(
-        "--log-format",
-        choices=["text", "json"],
-        default="text",
-        help="Log format: text (default) or json (structured)",
-    )
+    parser.add_argument("--timeout", type=int, default=MCP_TIMEOUT,
+                        help=f"Timeout in seconds for tool calls (default: {MCP_TIMEOUT})")
+    parser.add_argument("--max-file-size", type=int, default=MCP_MAX_FILE_SIZE,
+                        help=f"Max input file size in bytes (default: {MCP_MAX_FILE_SIZE})")
+    parser.add_argument("--log-format", choices=["text", "json"], default="text",
+                        help="Log format: text (default) or json (structured)")
     args = parser.parse_args()
 
     if args.timeout <= 0:
