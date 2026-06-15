@@ -20,14 +20,35 @@
       "coverage": {},
       "edges": [],
       "external_graph_refs": [],
-      "graph_id": "sha256:3349795dc1d790827ff4bae71049f32f505ee5d49db4fd32a1a83bb5d15fb1de",
+      "graph_id": "sha256:09dc3a044653ebeae24c62591613a972d7081df8f75eafcc186530696ce41658",
       "indexes": {
         "by_binary_symbol": {},
         "by_file": {},
         "by_source_decl": {},
         "by_target": {}
       },
-      "nodes": [],
+      "nodes": [
+        {
+          "attrs": {
+            "visibility": "public_header"
+          },
+          "confidence": "unknown",
+          "id": "decl://connect",
+          "kind": "source_decl",
+          "label": "connect",
+          "provenance": ""
+        },
+        {
+          "attrs": {
+            "visibility": "private_header"
+          },
+          "confidence": "unknown",
+          "id": "type://detail::SessionState",
+          "kind": "record_type",
+          "label": "detail::SessionState",
+          "provenance": ""
+        }
+      ],
       "schema_version": 1
     }
   },

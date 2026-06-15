@@ -41,7 +41,10 @@ if str(ROOT) not in sys.path:
 from abicheck.buildsource.build_evidence import BuildEvidence, BuildOption  # noqa: E402
 from abicheck.buildsource.pack import BuildSourcePack  # noqa: E402
 from abicheck.buildsource.source_abi import SourceAbiSurface  # noqa: E402
-from abicheck.buildsource.source_graph import SourceGraphSummary  # noqa: E402
+from abicheck.buildsource.source_graph import (  # noqa: E402
+    GraphNode,
+    SourceGraphSummary,
+)
 from abicheck.elf_metadata import ElfMetadata, ElfSymbol  # noqa: E402
 from abicheck.model import (  # noqa: E402
     AbiSnapshot,
@@ -168,7 +171,29 @@ def case147_scan_depth_ladder() -> AbiSnapshot:
             origin=ScopeOrigin.PRIVATE_HEADER,
         ),
     ]
-    snap.build_source = BuildSourcePack(root="", source_graph=SourceGraphSummary())
+    # A populated L5 graph (the public decl + the private type the S5 replay
+    # indexed) so the source_index corroboration rests on real graph facts, not
+    # an empty graph. No decl→decl edge, so this stays a private_header_leak and
+    # does not trip public_to_internal_dependency.
+    snap.build_source = BuildSourcePack(
+        root="",
+        source_graph=SourceGraphSummary(
+            nodes=[
+                GraphNode(
+                    id="decl://connect",
+                    kind="source_decl",
+                    label="connect",
+                    attrs={"visibility": "public_header"},
+                ),
+                GraphNode(
+                    id="type://detail::SessionState",
+                    kind="record_type",
+                    label="detail::SessionState",
+                    attrs={"visibility": "private_header"},
+                ),
+            ]
+        ),
+    )
     return snap
 
 
@@ -228,11 +253,30 @@ def case150_xcheck_export_public_pair() -> AbiSnapshot:
 
 # ── case151: provider-agreement matrix (rich ↔ thin corroboration) ───────────
 def case151_xcheck_provider_matrix() -> AbiSnapshot:
-    # Rich variant: header-AST provenance PLUS an L5 source graph, so the
-    # private_header_leak finding is corroborated by two providers
-    # (public_header_ast + source_index).
+    # Rich variant: header-AST provenance PLUS an L5 source graph that actually
+    # indexes the public decl and the private type, so the private_header_leak
+    # finding is corroborated by two providers (public_header_ast + source_index)
+    # backed by real graph facts rather than an empty graph.
     snap = case144_audit_private_header_leak()
-    snap.build_source = BuildSourcePack(root="", source_graph=SourceGraphSummary())
+    snap.build_source = BuildSourcePack(
+        root="",
+        source_graph=SourceGraphSummary(
+            nodes=[
+                GraphNode(
+                    id="decl://make_widget",
+                    kind="source_decl",
+                    label="make_widget",
+                    attrs={"visibility": "public_header"},
+                ),
+                GraphNode(
+                    id="type://detail::WidgetImpl",
+                    kind="record_type",
+                    label="detail::WidgetImpl",
+                    attrs={"visibility": "private_header"},
+                ),
+            ]
+        ),
+    )
     return snap
 
 
