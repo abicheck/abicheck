@@ -1098,7 +1098,21 @@ def _count_compile_db_tus(compile_db: Path) -> int:
         return 0
     if not isinstance(raw, list):
         return 0
-    files = {str(e.get("file")) for e in raw if isinstance(e, dict) and e.get("file")}
+    # Deduplicate on the *resolved* path (file joined with its entry directory):
+    # a compile DB commonly stores relative `file` names under different
+    # `directory` entries, so two distinct TUs (/proj/a/main.cpp, /proj/b/main.cpp)
+    # both read as a bare `main.cpp` and would collapse to one — undercounting the
+    # TUs the real scan (which normalizes via load_compile_db) replays (Codex).
+    import os.path as _osp
+
+    files: set[str] = set()
+    for e in raw:
+        if not (isinstance(e, dict) and e.get("file")):
+            continue
+        f = str(e["file"])
+        directory = str(e.get("directory") or "")
+        resolved = _osp.normpath(_osp.join(directory, f)) if directory else _osp.normpath(f)
+        files.add(resolved)
     return len(files)
 
 

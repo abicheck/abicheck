@@ -267,6 +267,26 @@ def test_estimate_inline_header_change_fans_out(
     assert l4.tus == 6
 
 
+def test_estimate_compile_db_dedup_by_resolved_path(
+    snap_path: Path, tmp_path: Path
+) -> None:
+    # Two TUs with the same relative `file` under different `directory` entries are
+    # distinct and must not collapse on the bare basename (Codex review).
+    cdb = tmp_path / "compile_commands.json"
+    cdb.write_text(
+        json.dumps(
+            [
+                {"file": "main.cpp", "command": "c++", "directory": "/proj/a"},
+                {"file": "main.cpp", "command": "c++", "directory": "/proj/b"},
+            ]
+        ),
+        encoding="utf-8",
+    )
+    req = ScanRequest(binaries=[snap_path], compile_db=cdb, mode="baseline")
+    l3 = next(e for e in estimate_scan(req) if e.layer == "L3_build")
+    assert l3.tus == 2
+
+
 def test_estimate_budget_max_tus_caps_replay(snap_path: Path, tmp_path: Path) -> None:
     cdb = tmp_path / "compile_commands.json"
     cdb.write_text(

@@ -980,7 +980,10 @@ def abi_estimate(
             source_method=source_method,
             depth=depth,
             changed_paths=list(changed_paths or []),
-            seeded=bool(changed_paths),
+            # Distinguish an *explicit* empty diff ([], a seeded no-op PR → s0
+            # floor) from an omitted arg (None, unseeded → mode preset), matching
+            # the CLI's seeded handling (Codex review).
+            seeded=changed_paths is not None,
             budget=Budget(),
         )
         estimates = estimate_scan(req)
