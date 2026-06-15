@@ -199,10 +199,10 @@ def _candidate_type_names_indirect(typename: str) -> list[tuple[str, bool]]:
     top = _strip_template_args(typename)
     top_ptr = "*" in top or "&" in top
     out.append((base, top_ptr))
+    outer = _strip_decorators(top)
     smart = any(
-        m in _strip_decorators(top)
-        for m in ("unique_ptr", "uniq_ptr", "shared_ptr", "weak_ptr")
-    )
+        m in outer for m in ("unique_ptr", "uniq_ptr", "shared_ptr", "weak_ptr")
+    ) or ("pimpl<" in _strip_decorators(typename).lower())  # oneDAL pimpl<T> alias
     # Walk the outermost <...> of the ORIGINAL spelling (keeps inner */&).
     depth = 0
     start = -1
@@ -349,14 +349,17 @@ def _seed_queue_from_functions(
         # otherwise drops the ``*`` (``_candidate_type_names`` strips decorators).
         seeds = [(func.return_type, (func.return_pointer_depth or 0) > 0)]
         seeds += [(p.type, (p.pointer_depth or 0) > 0) for p in func.params]
-        for t, via_ptr in seeds:
+        for t, top_ptr in seeds:
             if not t:
                 continue
-            base = [f"fn:{func.name}"]
-            if via_ptr or _field_is_indirect(t):
-                base.append("indirect:signature")
-            for cand in _candidate_type_names(t):
-                queue.append((cand, list(base)))
+            # Mark each candidate per template argument: a pointer buried in the
+            # signature type (``std::pair<int, ns::detail::Impl*> get()``) reaches
+            # that argument only through the pointer (Codex review).
+            for cand, arg_ptr in _candidate_type_names_indirect(t):
+                step = [f"fn:{func.name}"]
+                if top_ptr or arg_ptr:
+                    step.append("indirect:signature")
+                queue.append((cand, step))
 
 
 def _seed_queue_from_variables(
@@ -368,11 +371,11 @@ def _seed_queue_from_variables(
 
     for var in _public_variables(snap).values():
         if var.type:
-            base = [f"var:{var.name}"]
-            if _field_is_indirect(var.type):
-                base.append("indirect:signature")
-            for cand in _candidate_type_names(var.type):
-                queue.append((cand, list(base)))
+            for cand, arg_ptr in _candidate_type_names_indirect(var.type):
+                step = [f"var:{var.name}"]
+                if arg_ptr:
+                    step.append("indirect:signature")
+                queue.append((cand, step))
 
 
 def _seed_queue_from_public_types(

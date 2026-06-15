@@ -590,6 +590,52 @@ class TestPointerMediatedLayoutLeakSuppressed:
             f"opaque-handle pointer param must not leak a layout change (got: {leaks})"
         )
 
+    def test_pimpl_alias_template_field_is_suppressed(self) -> None:
+        # oneDAL pimpl<T> alias = a smart-pointer; a layout change to the pointee
+        # must be demoted even though `pimpl` is not std::*_ptr.
+        def _snap(size: int) -> AbiSnapshot:
+            return AbiSnapshot(
+                library="lib.so", version="1.0",
+                functions=[Function(
+                    name="make", mangled="make", return_type="Public*",
+                    params=[], visibility=Visibility.PUBLIC,
+                )],
+                types=[
+                    RecordType(name="Public", kind="class", fields=[
+                        TypeField(name="impl_", type="oneapi::dal::detail::pimpl<ns::detail::Impl>"),
+                    ]),
+                    RecordType(name="ns::detail::Impl", kind="struct", size_bits=size),
+                ],
+            )
+        leaks = detect_internal_leaks(
+            [Change(kind=ChangeKind.TYPE_SIZE_CHANGED,
+                    symbol="ns::detail::Impl", description="size")],
+            _snap(32), _snap(64),
+        )
+        assert leaks == [], f"pimpl<T> alias is a pointer wrapper (got: {leaks})"
+
+    def test_signature_pointer_in_template_arg_is_suppressed(self) -> None:
+        # `std::pair<int, ns::detail::Impl*> get()` reaches Impl only through the
+        # pointer stored in the pair — the seed must mark that edge indirect.
+        def _snap(size: int) -> AbiSnapshot:
+            return AbiSnapshot(
+                library="lib.so", version="1.0",
+                functions=[Function(
+                    name="get", mangled="get",
+                    return_type="std::pair<int, ns::detail::Impl*>",
+                    return_pointer_depth=0, params=[], visibility=Visibility.PUBLIC,
+                )],
+                types=[RecordType(name="ns::detail::Impl", kind="struct", size_bits=size)],
+            )
+        leaks = detect_internal_leaks(
+            [Change(kind=ChangeKind.TYPE_SIZE_CHANGED,
+                    symbol="ns::detail::Impl", description="size")],
+            _snap(32), _snap(64),
+        )
+        assert leaks == [], (
+            f"a pointer template arg in a signature must be demoted (got: {leaks})"
+        )
+
     def test_by_value_return_signature_still_fires(self) -> None:
         # A by-value return embeds the type in the calling convention — must leak.
         def _snap(size: int) -> AbiSnapshot:
