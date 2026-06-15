@@ -13,6 +13,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from abicheck.buildsource.build_evidence import BuildEvidence
 from abicheck.buildsource.model import (
     CoverageStatus,
@@ -68,18 +70,21 @@ def _row(pack: BuildSourcePack, layer: str) -> LayerCoverage | None:
     return next((c for c in pack.manifest.coverage if c.layer == layer), None)
 
 
-def test_only_build_info_returns_it_unchanged() -> None:
-    bi = _build_info_pack()
-    assert _combine_diagnostic_packs(bi, None) is bi
-
-
-def test_only_sources_returns_it_unchanged() -> None:
-    src = _sources_pack()
-    assert _combine_diagnostic_packs(None, src) is src
-
-
-def test_both_none_returns_none() -> None:
-    assert _combine_diagnostic_packs(None, None) is None
+@pytest.mark.parametrize(
+    ("make_bi", "make_src", "expect"),
+    [
+        pytest.param(_build_info_pack, None, "bi", id="only-build-info"),
+        pytest.param(None, _sources_pack, "src", id="only-sources"),
+        pytest.param(None, None, None, id="both-none"),
+    ],
+)
+def test_single_side_or_none_passthrough(make_bi, make_src, expect) -> None:
+    # With only one side (or neither), the merge degrades to a passthrough:
+    # the lone pack is returned unchanged, and two absent inputs yield None.
+    bi = make_bi() if make_bi else None
+    src = make_src() if make_src else None
+    result = _combine_diagnostic_packs(bi, src)
+    assert result is {"bi": bi, "src": src, None: None}[expect]
 
 
 def test_combines_build_info_l3_with_sources_l4_l5() -> None:
