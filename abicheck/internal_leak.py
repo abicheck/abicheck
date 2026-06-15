@@ -199,10 +199,16 @@ def _candidate_type_names_indirect(typename: str) -> list[tuple[str, bool]]:
     top = _strip_template_args(typename)
     top_ptr = "*" in top or "&" in top
     out.append((base, top_ptr))
+    # Smart-pointer wrapper is decided on the OUTER type only (template args
+    # already collapsed in `top`), so a nested ``pimpl<Other>`` / ``unique_ptr``
+    # in an unrelated argument of a by-value template does not mark its siblings
+    # indirect (Codex review).
     outer = _strip_decorators(top)
-    smart = any(
-        m in outer for m in ("unique_ptr", "uniq_ptr", "shared_ptr", "weak_ptr")
-    ) or ("pimpl<" in _strip_decorators(typename).lower())  # oneDAL pimpl<T> alias
+    outer_leaf = outer.rsplit("::", 1)[-1].lower()
+    smart = (
+        any(m in outer for m in ("unique_ptr", "uniq_ptr", "shared_ptr", "weak_ptr"))
+        or outer_leaf == "pimpl"  # oneDAL pimpl<T> alias
+    )
     # Walk the outermost <...> of the ORIGINAL spelling (keeps inner */&).
     depth = 0
     start = -1

@@ -878,5 +878,5 @@
       ]
     }
   ],
-  "note": "oneTBB runs include s0 and the \u00a73.3 seeded control (label 's5+seed(1 changed-path)'). s2 is omitted: cli_scan.py rejects it as unimplemented."
+  "note": "oneTBB runs include s0 and the \u00a73.3 seeded control (label 's5+seed(1 changed-path)'). s2 (preprocessor) is not in this run's matrix; it is implemented on current main (--source-method s2 runs, depth=build) but clang -E failed on the oneTBB build so it produced no preprocessor facts (see the report's status note)."
 }

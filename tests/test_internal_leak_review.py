@@ -614,6 +614,34 @@ class TestPointerMediatedLayoutLeakSuppressed:
         )
         assert leaks == [], f"pimpl<T> alias is a pointer wrapper (got: {leaks})"
 
+    def test_pimpl_sibling_arg_does_not_suppress_by_value_arg(self) -> None:
+        # Codex review: a nested pimpl<Other> in an unrelated arg must NOT mark the
+        # by-value Impl sibling indirect — pair embeds Impl by value, so a layout
+        # change to Impl still leaks.
+        def _snap(size: int) -> AbiSnapshot:
+            return AbiSnapshot(
+                library="lib.so", version="1.0",
+                functions=[Function(
+                    name="make", mangled="make", return_type="Public*",
+                    params=[], visibility=Visibility.PUBLIC,
+                )],
+                types=[
+                    RecordType(name="Public", kind="class", fields=[
+                        TypeField(name="p", type="std::pair<ns::detail::Impl, oneapi::dal::detail::pimpl<ns::detail::Other>>"),
+                    ]),
+                    RecordType(name="ns::detail::Impl", kind="struct", size_bits=size),
+                ],
+            )
+        leaks = detect_internal_leaks(
+            [Change(kind=ChangeKind.TYPE_SIZE_CHANGED,
+                    symbol="ns::detail::Impl", description="size")],
+            _snap(32), _snap(64),
+        )
+        assert len(leaks) == 1, (
+            "a by-value arg must still leak even when a sibling arg is a pimpl "
+            f"(got: {leaks})"
+        )
+
     def test_signature_pointer_in_template_arg_is_suppressed(self) -> None:
         # `std::pair<int, ns::detail::Impl*> get()` reaches Impl only through the
         # pointer stored in the pair — the seed must mark that edge indirect.
