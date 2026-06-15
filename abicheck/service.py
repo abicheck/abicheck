@@ -51,20 +51,6 @@ _logger = logging.getLogger(__name__)
 # Magic-byte length for format detection
 _SNIFF_BYTES = 256
 
-# Header file extensions recognised during directory expansion
-_HEADER_EXTS = frozenset(
-    {
-        ".h",
-        ".hh",
-        ".hpp",
-        ".hxx",
-        ".h++",
-        ".ipp",
-        ".tpp",
-        ".inc",
-    }
-)
-
 
 # ── Input resolution ────────────────────────────────────────────────────────
 
@@ -94,47 +80,6 @@ def sniff_text_format(path: Path) -> str:
     if head.startswith("{"):
         return "json"
     return "unknown"
-
-
-def expand_header_inputs(inputs: list[Path]) -> list[Path]:
-    """Expand header inputs where each item can be a file or a directory.
-
-    Directories are scanned recursively for known header extensions.
-
-    Raises:
-        ValidationError: If a path does not exist or a header directory is empty.
-    """
-    out: list[Path] = []
-    for p in inputs:
-        if not p.exists():
-            raise ValidationError(f"Header file not found or not a file: {p}")
-        if p.is_file():
-            out.append(p)
-            continue
-        if p.is_dir():
-            found = [
-                f
-                for f in p.rglob("*")
-                if f.is_file() and f.suffix.lower() in _HEADER_EXTS
-            ]
-            if not found:
-                raise ValidationError(
-                    f"Header directory contains no supported header files: {p}"
-                )
-            out.extend(sorted(found))
-            continue
-        raise ValidationError(f"Header path is neither file nor directory: {p}")
-
-    # Deduplicate while preserving deterministic order
-    seen: set[str] = set()
-    deduped: list[Path] = []
-    for h in out:
-        k = str(h.resolve())
-        if k in seen:
-            continue
-        seen.add(k)
-        deduped.append(h)
-    return deduped
 
 
 def _resolve_raw_typeinfo(path: Path, version: str) -> AbiSnapshot | None:
@@ -1085,6 +1030,7 @@ def _render_json_output(
 # import ScanRequest`` etc. — is unchanged. ``service_scan`` is a leaf: it does
 # not import this module at load time.
 from .service_scan import (  # noqa: E402,F401
+    _HEADER_EXTS,
     Budget,
     CostEstimate,
     LayerResult,
@@ -1101,6 +1047,7 @@ from .service_scan import (  # noqa: E402,F401
     _scan_imports,
     _scan_subprocess_worker,
     estimate_scan,
+    expand_header_inputs,
     run_audit,
     run_scan,
     run_scan_subprocess,
