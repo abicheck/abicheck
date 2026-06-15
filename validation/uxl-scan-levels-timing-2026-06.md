@@ -6,14 +6,21 @@
 **Toolchain on the box:** gcc/g++ 13.3, clang 18, cmake 3.28, ninja — **no castxml**, 4 vCPU / 15 GiB.
 
 **Purpose.** Run the *full stack of checks* (`abicheck scan`, the ADR-035 D3
-orchestrator) against real UXL Foundation projects, sweeping every
-**source-scan level** (`--source-method s0…s6` and the `--mode` presets), and
-record (a) wall-clock **timing per level** and (b) **usability** observations —
-what works out of the box, what silently degrades, and where the cost lives.
+orchestrator) against real UXL Foundation projects, sweeping the
+**source-scan levels** (`--source-method s0,s1,s3,s4,s5,s6` and the `--mode`
+presets), and record (a) wall-clock **timing per level** and (b) **usability**
+observations — what works out of the box, what silently degrades, and where the
+cost lives.
+
+> **s2 is not swept.** `abicheck/cli_scan.py` rejects `--source-method s2`
+> (preprocessor macro/include capture) as not-yet-implemented (ADR-035 G19
+> Phase 3b), so it has no row in any table below and no record in the committed
+> JSON. Every other S-method (s0, s1, s3, s4, s5, s6) was run on both projects.
 
 All binaries are built from upstream release tags in this environment (not
 synthetic fixtures); reproduce them from the commands in §6. Raw machine results
-are committed under `validation/data/uxl_scan_results_*.json`.
+for every row in §3 — including the oneTBB `s0` run and the §3.3 seeded control
+— are committed under `validation/data/uxl_scan_results_2026-06.json`.
 
 ---
 
@@ -56,7 +63,7 @@ the **S-method** (`s0…s6`, *how* source evidence is gathered) and the **L-dept
 
 | Level | Resolved | exit | **wall-clock** | verdict | diff (brk/api/risk/compat) | L3 | L4 | L5 |
 |---|---|---|---:|---|---|---|---|---|
-| `--source-method s0` | s0 / headers | 4 | **29.0 s** | BREAKING | 2 / 0 / 0 / 3 | off | off | off |
+| `--source-method s0` | s0 / headers | 4 | **29.3 s** | BREAKING | 2 / 0 / 0 / 3 | off | off | off |
 | `--source-method s1` | s1 / build | 4 | **28.9 s** | BREAKING | 2 / 0 / 0 / 3 | ✓ | — | — |
 | `--source-method s3` | s3 / headers | 4 | **29.1 s** | BREAKING | 2 / 0 / 0 / 3 | — | — | — |
 | `--source-method s4` | s4 / graph | 4 | **29.2 s** | BREAKING | 2 / 0 / 0 / 3 | ✓ | — | ✓ |

@@ -1,6 +1,6 @@
 {
   "schema": "uxl_scan_levels.v1",
-  "generated_utc": "2026-06-15T08:01:21.506693Z",
+  "generated_utc": "2026-06-15T08:06:39.329893Z",
   "abicheck_version": "0.3.0",
   "host": {
     "vcpu": 4,
@@ -19,6 +19,54 @@
       "lang": "c++",
       "compile_units": 40,
       "runs": [
+        {
+          "label": "s0",
+          "args": [
+            "--source-method",
+            "s0"
+          ],
+          "exit_code": 4,
+          "elapsed_s": 29.3,
+          "stderr_tail": [
+            "WARNING: '/tmp/uxl/build-new/gnu_13.3_cxx11_64_relwithdebinfo/libtbb.so.12.13' \u2014 no headers provided. Will use DWARF debug info if available, else symbols-only mode.",
+            "/home/user/abicheck/abicheck/dumper.py:793: UserWarning: No headers provided \u2014 using DWARF debug info as primary data source. #define constants and default parameter values will be unavailable.",
+            "  snapshot = _dump_elf(",
+            "Report written to /tmp/uxl/out/s0.json"
+          ],
+          "verdict": "BREAKING",
+          "level": {
+            "source_method": "s0",
+            "depth": "headers",
+            "collect_mode": "off",
+            "auto": false
+          },
+          "diff": {
+            "breaking": 2,
+            "api_break": 0,
+            "risk": 0,
+            "compatible": 3
+          },
+          "risk": {
+            "total": 0,
+            "n_paths": 0,
+            "matched": {},
+            "recommended_method": "s0"
+          },
+          "coverage": {
+            "L0_binary": "present",
+            "L1_debug": "present",
+            "L2_header": "skipped",
+            "pattern_scan": "present",
+            "L3_build": "not_collected",
+            "L4_source_abi": "not_collected",
+            "L5_source_graph": "not_collected",
+            "crosscheck:exported_not_public": "skipped",
+            "crosscheck:public_not_exported": "skipped",
+            "crosscheck:header_build_context_mismatch": "skipped",
+            "crosscheck:private_header_leak": "skipped"
+          },
+          "n_findings": 5
+        },
         {
           "label": "s1",
           "args": [
@@ -444,49 +492,49 @@
             "crosscheck:private_header_leak": "skipped"
           },
           "n_findings": 0
+        },
+        {
+          "label": "s5+seed(1 changed-path)",
+          "args": [
+            "--source-method",
+            "s5",
+            "--changed-path",
+            "src/tbb/version.cpp"
+          ],
+          "exit_code": 4,
+          "elapsed_s": 11.54,
+          "verdict": "BREAKING",
+          "level": {
+            "source_method": "s5",
+            "depth": "source",
+            "collect_mode": "source-changed",
+            "auto": false
+          },
+          "diff": {
+            "breaking": 2,
+            "api_break": 0,
+            "risk": 0,
+            "compatible": 3
+          },
+          "changed_paths": {
+            "count": 1,
+            "source": "--changed-path"
+          },
+          "coverage": {
+            "L0_binary": "present",
+            "L1_debug": "present",
+            "L2_header": "skipped",
+            "pattern_scan": "present",
+            "L3_build": "present",
+            "L4_source_abi": "partial",
+            "L5_source_graph": "present",
+            "crosscheck:exported_not_public": "skipped",
+            "crosscheck:public_not_exported": "skipped",
+            "crosscheck:header_build_context_mismatch": "skipped",
+            "crosscheck:private_header_leak": "skipped"
+          }
         }
-      ],
-      "poi_control": {
-        "label": "s5+seed(1 changed-path)",
-        "args": [
-          "--source-method",
-          "s5",
-          "--changed-path",
-          "src/tbb/version.cpp"
-        ],
-        "exit_code": 4,
-        "elapsed_s": 11.54,
-        "verdict": "BREAKING",
-        "level": {
-          "source_method": "s5",
-          "depth": "source",
-          "collect_mode": "source-changed",
-          "auto": false
-        },
-        "diff": {
-          "breaking": 2,
-          "api_break": 0,
-          "risk": 0,
-          "compatible": 3
-        },
-        "changed_paths": {
-          "count": 1,
-          "source": "--changed-path"
-        },
-        "coverage": {
-          "L0_binary": "present",
-          "L1_debug": "present",
-          "L2_header": "skipped",
-          "pattern_scan": "present",
-          "L3_build": "present",
-          "L4_source_abi": "partial",
-          "L5_source_graph": "present",
-          "crosscheck:exported_not_public": "skipped",
-          "crosscheck:public_not_exported": "skipped",
-          "crosscheck:header_build_context_mismatch": "skipped",
-          "crosscheck:private_header_leak": "skipped"
-        }
-      }
+      ]
     },
     {
       "project": "UMF",
@@ -829,5 +877,6 @@
         }
       ]
     }
-  ]
+  ],
+  "note": "oneTBB runs include s0 and the \u00a73.3 seeded control (label 's5+seed(1 changed-path)'). s2 is omitted: cli_scan.py rejects it as unimplemented."
 }
