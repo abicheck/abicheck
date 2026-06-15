@@ -287,8 +287,12 @@ the source layer:
 - **`s5` is only cheaper than `s6` with a diff seed.** Without `--since`/
   `--changed-path` the changed-TU set is empty and `s5` replays every TU — same
   cost as `s6`. With a one-file seed, oneTBB `s5` dropped from 222 s to **11.5 s
-  (~19×)** for the identical verdict. The same applies to `--mode pr`/`pr-deep`
-  (both S5) and `--mode baseline` (S6): the PR-tier speedup is **seed-gated**.
+  (~19×)** for the identical verdict. This scoping applies **only** to the
+  `source-changed` collect mode — i.e. `s5` and `--mode pr`. The other AST modes
+  replay **full** scope regardless of any seed: `--mode pr-deep` resolves to
+  `graph-full`, and `--mode baseline`/`s6` to full
+  (`source_replay.CI_MODE_TO_SCOPE`: `source-changed`→`changed`, `graph-full`→`full`),
+  so pinning those in CI will not produce the scoped speedup.
 - **`audit` costs the same as the baseline modes** — the wall-clock is L4/L5
   *collection* of the new side, not the baseline diff.
 
