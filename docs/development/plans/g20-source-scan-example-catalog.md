@@ -78,8 +78,10 @@ fast lane) modelled on `tests/test_pattern_audit_scenarios.py` and the
   crosschecking two: `header_build_context_mismatch` (L2 macros ↔ L3 flags),
   `odr_type_variant` (L4 layout ↔ layout), and the `exported_not_public` /
   `public_not_exported` bidirectional pair (L0 exports ↔ L2 decls). One case
-  asserts the §6.8 provider-agreement matrix drives the **confidence tag**
-  differently for 3-provider vs 1-provider corroboration.
+  asserts the §6.8 **provider-agreement matrix** is populated and differs
+  (3-provider vs 1-provider corroboration) — the available corroboration signal;
+  deriving a per-finding confidence *tag* from provider count is a separate
+  reporting enhancement, not part of this corpus (see Phase 2).
 - **G20.3 — Evidence-directed focusing corpus (D7).** Test scenarios asserting on
   the **POI set / `ScanResult` counters** (not just verdict): export delta
   targeting one TU's replay, macro-conditional layout scoping macro capture, the
@@ -148,13 +150,35 @@ cases that genuinely need a second frontend pass.
 
 ### 3.3 Scan-plan assertion surface
 
-Bucket 3 asserts on `ScanResult`/`LayerResult`/`CostEstimate` counters already
-defined in `service.py` (`LayerResult.facts/elapsed_s/status`,
-`CostEstimate.tus/cache_hit_rate`, `ScanResult.confidence/estimate`). Add a thin
-test helper (`tests/_scan_fixtures.py`) that runs `service.run_scan(ScanRequest)`
-against a case dir and returns the counters named in `expected_scan`, plus a
-`service.estimate_scan` path for the `--estimate` selection-vs-parse split
-(ADR-035 D7). No engine change — this is a harness/accessor.
+Bucket 3 asserts on the **scan plan**. The counters it needs (`selected_tus`,
+`parsed_tus`, `skipped_tus`, `matched_symbols`, `unmatched_exports`) are produced
+*inside* the engine but **not currently surfaced on `ScanResult`**:
+`_layers_from_coverage` (`service.py`) copies only
+`method/layer/status/detail/skipped_reason` onto each `LayerResult`, leaving
+`facts`/`elapsed_s` at their defaults and dropping the source-surface
+boundary counters entirely (the integrity counters ADR-035 D4 requires). So the
+assertion surface is split into two honest paths:
+
+- **No-engine-change path (most cases).** Assert directly against the existing
+  lower-level objects that already expose the data:
+  `buildsource.poi.build_points_of_interest(...)` returns the typed
+  `PointsOfInterest` work-list (pure — the floor/targeting cases assert on it
+  directly); the per-check `crosscheck` coverage rows
+  (`run_crosschecks(...).coverage`, `status`/`detail`) carry present/skipped and
+  counts; the `source_link` boundary report carries
+  matched/unmatched-export counts. These need **no** new plumbing.
+- **One small, explicitly-scoped engine touch (integrity case only).** To assert
+  the D4 integrity counters *on `ScanResult`* (so the rendered report — not just
+  an internal object — shows "zero matched symbols"), extend
+  `_layers_from_coverage` to carry `facts` and a `counters` dict from the
+  coverage rows. This is a **reporting/plumbing** change (no detector or policy
+  change), tracked as the single engine task in this plan, gated behind its own
+  commit. Until it lands, `integrity_unlinked_source_evidence` asserts against
+  the `source_link`/coverage objects (path 1).
+
+Add a thin test helper (`tests/_scan_fixtures.py`) that runs the scan and returns
+whichever surface the case uses, plus a `service.estimate_scan` path for the
+`--estimate` selection-vs-parse split (ADR-035 D7).
 
 ### 3.4 Docs generation
 
@@ -219,13 +243,24 @@ fixture for the catalog rendering.
 | `case148_xcheck_header_build_mismatch` | `header_build_context_mismatch` (API_BREAK) | binary-only blind; header parsed without `-DBIG_BUFFERS` reports the *wrong* layout; only L2 macros ↔ L3 flags expose the divergence | `compile_commands.json` (`-DBIG_BUFFERS=1`) + macro-conditional header |
 | `case149_xcheck_odr_variant` | `odr_type_variant` (API_BREAK) | two TUs materialize one public type with different layouts; only L4 per-TU layout ↔ layout | 2-TU source set or `abicheck_inputs/` w/ divergent per-TU records |
 | `case150_xcheck_export_public_pair` | `exported_not_public` + `public_not_exported` | bidirectional L0 exports ↔ L2 decls: one symbol exported w/ no decl, one decl w/ visibility promise but `static` definition | `.so` + `include/` |
-| `case151_xcheck_confidence_matrix` | (reuses `exported_not_public`) | same finding, 3 corroborating providers vs 1 → different `Confidence` tag (§6.8) | two packs: full-provider vs binary-only |
+| `case151_xcheck_provider_matrix` | (reuses `exported_not_public`) | same finding, 3 corroborating providers vs 1 → longer provider list / stronger corroboration (§6.8) | two packs: full-provider vs binary-only |
 
 `case148` is the flagship — the clearest demonstration that combining L2 + L3
-exposes a divergence neither shows alone. `case151` is the one that demonstrates
-"better results from the *combination*" as an **output property**: it asserts
-`ScanResult.confidence["exported_not_public"]` lists three providers in the rich
-fixture and one in the thin fixture, and that the rendered confidence tag differs.
+exposes a divergence neither shows alone. `case151` demonstrates "better results
+from the *combination*" as an **output property**, but with a precise scope: the
+current engine records the **provider list** per check
+(`ScanResult.confidence["exported_not_public"]`, copied from
+`crosscheck.providers`) and **always** stamps each `exported_not_public` finding
+`Confidence.HIGH` regardless of provider count (`crosscheck.py`). So:
+
+- **What case151 asserts today (no engine change):** the rich fixture lists three
+  providers (`binary_exports` + `public_header_ast` + `build_config`) and the thin
+  (binary-only) fixture lists one — i.e. the §6.8 provider-agreement *matrix* is
+  populated and differs. This is the real, available corroboration signal.
+- **Out of scope for this corpus:** deriving the per-finding `Confidence` *tag*
+  from provider count (so 1-provider corroboration renders a weaker tag than 3).
+  That is a `crosscheck`/reporter enhancement, **not** an example case; tracked
+  separately, not a Phase 2 acceptance blocker.
 
 **Example test assertion (case148, synthetic, fast lane):**
 
@@ -248,16 +283,19 @@ negative — proving no false positive on the healthy build).
 ## 6. Phase 3 — evidence-directed focusing (G20.3)
 
 Test-only scenario suites — the *interesting artifact is the scan plan*, so these
-assert on `ScanResult`/POI counters, not the verdict. Two new files:
-`tests/test_poi_scenarios.py` and `tests/test_source_evidence_integrity.py`.
+assert on the POI work-list and coverage objects, not the verdict. Per §3.3, the
+POI and `source_link`/crosscheck coverage objects already expose what these need;
+only the integrity case's *`ScanResult`-rendered* counters wait on the one scoped
+plumbing task. Two new files: `tests/test_poi_scenarios.py` and
+`tests/test_source_evidence_integrity.py`.
 
-| Scenario | Asserts | ADR-035 |
+| Scenario | Asserts (existing object) | ADR-035 |
 |---|---|---|
-| `poi_export_delta_targets_replay` | changed export + unchanged header → POI resolves symbol → source decl → `expected_scan.selected_tus == 1`; unrelated body in `skipped_tus` | D7 |
-| `poi_macro_conditional_layout` | macro capture runs only for TUs materializing the type; others skipped | D7 |
-| `poi_template_instantiation_seed` | demangled exported template symbol seeds which instantiations replay (`selected_tus` matches the instantiation set) | D7 |
-| `poi_changed_path_floor` | a deliberately mis-weighted `risk_rules` profile; assert the changed TU is **still** in `build_points_of_interest(...)` output (floor: risk adds, never drops) | D7 floor |
-| `integrity_unlinked_source_evidence` | oneDAL shape: many exports, TUs parsed, **zero matched symbols** → `LayerResult.status == "partial"`/degraded with boundary counters; **not** counted as clean L4 coverage; exit code unaffected | D4 integrity |
+| `poi_export_delta_targets_replay` | changed export + unchanged header → `build_points_of_interest(...)` resolves symbol → source decl → POI set holds that one TU, not the unrelated body | D7 |
+| `poi_macro_conditional_layout` | POI selects only the TUs materializing the type; others absent from the work-list | D7 |
+| `poi_template_instantiation_seed` | demangled exported template symbol seeds which instantiations the POI set targets | D7 |
+| `poi_changed_path_floor` | a deliberately mis-weighted `risk_rules` profile; the changed TU is **still** in `build_points_of_interest(...)` output (floor: risk adds, never drops) | D7 floor |
+| `integrity_unlinked_source_evidence` | oneDAL shape: many exports, TUs parsed, **zero matched symbols** → asserted against the `source_link` boundary report / crosscheck coverage rows (and, once the §3.3 plumbing lands, `LayerResult.status`/counters on `ScanResult`); **not** counted as clean L4 coverage; exit code unaffected | D4 integrity |
 
 `poi_changed_path_floor` and `integrity_unlinked_source_evidence` are the two
 highest-value guards: the first proves focusing **cannot hide a real change**, the
@@ -325,9 +363,13 @@ engine entry and the ADR-035 decision it demonstrates (D2/D4/D7/D8).
 
 ## 10. Relationship to existing work
 
-- **G19 / ADR-035** — consumes the engine G19 shipped; no engine or policy
-  change. `buildsource/crosscheck.py`, `poi.py`, `risk.py`, `service.run_scan`
-  are used as-is.
+- **G19 / ADR-035** — consumes the engine G19 shipped; **no detector or policy
+  change**. `buildsource/crosscheck.py`, `poi.py`, `risk.py`, `service.run_scan`
+  are used as-is for every case except one scoped reporting/plumbing task
+  (§3.3): extending `_layers_from_coverage` to carry the D4 integrity counters
+  onto `ScanResult` so the *rendered* report (not just an internal object) shows
+  them. Tracked as the single engine touch in this plan; all other cases assert
+  against existing objects.
 - **`tests/test_crosscheck.py`** — the `_snap(**kw)` synthetic-snapshot + `_coverage`/`_findings_of`
   helpers Phase 2/3 reuse directly.
 - **`tests/test_pattern_audit_scenarios.py`** — the model for the test-only

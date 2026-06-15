@@ -748,9 +748,11 @@ use_cases:
       crosschecking two — `header_build_context_mismatch` (L2 macros vs L3 flags),
       `odr_type_variant` (L4 layout vs layout), and the bidirectional
       `exported_not_public`/`public_not_exported` pair (L0 exports vs L2 decls) —
-      plus a provider-agreement/confidence-matrix case (§6.8) asserting the
-      confidence tag differs for 3-provider vs 1-provider corroboration. Each
-      positive ships a clean negative counterpart to hold the FP-rate gate at 0/0.
+      plus a provider-agreement-matrix case (§6.8) asserting the recorded
+      provider list differs for 3-provider vs 1-provider corroboration (deriving a
+      confidence tag from provider count is a separate reporting enhancement, not
+      part of this corpus). Each positive ships a clean negative counterpart to
+      hold the FP-rate gate at 0/0.
       See plan Phase 2.
 
   - id: UC-WORKFLOW-focusing-example-corpus
