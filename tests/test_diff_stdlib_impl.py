@@ -22,8 +22,10 @@ from abicheck.checker_policy import RISK_KINDS, ChangeKind, Verdict
 from abicheck.model import (
     AbiSnapshot,
     Function,
+    Param,
     RecordType,
     TypeField,
+    Variable,
     Visibility,
     stdlib_namespaces_excluded,
 )
@@ -658,3 +660,133 @@ class TestBuildModeFallback:
         )
         kinds = {c.kind for c in compare(old, new).changes}
         assert ChangeKind.STDLIB_IMPLEMENTATION_CHANGED in kinds
+
+
+class TestPublicByValueClosure:
+    """The BREAKING escalation hinges on whether a std::-embedding record is
+    reachable from the public surface *by value*. The single-field case is
+    covered above; these exercise the reachability closure across base classes,
+    typedef aliases, and public variables, plus its robustness to shared types
+    and reference cycles — real ABI-reachability semantics, not the easy path.
+    """
+
+    @staticmethod
+    def _embedding(name: str = "Inner", size_bits: int = 192) -> RecordType:
+        """A record that embeds a std:: container by value (layout-dependent)."""
+        return RecordType(
+            name=name,
+            kind="class",
+            size_bits=size_bits,
+            fields=[TypeField(name="data", type="std::vector<int>", offset_bits=0)],
+        )
+
+    @staticmethod
+    def _pair(**snapshot_kwargs: object) -> tuple[AbiSnapshot, AbiSnapshot]:
+        """An (libstdc++, libc++) pair with identical surface but differing impl."""
+
+        def mk(version: str, fam: StdlibFamily) -> AbiSnapshot:
+            return AbiSnapshot(
+                library="libwidget.so.1",
+                version=version,
+                build_mode=BuildMode(stdlib=fam),
+                **snapshot_kwargs,  # type: ignore[arg-type]
+            )
+
+        return mk("1", StdlibFamily.LIBSTDCXX), mk("2", StdlibFamily.LIBCXX)
+
+    def _finding(self, old: AbiSnapshot, new: AbiSnapshot):
+        result = compare(old, new)
+        finding = next(
+            c
+            for c in result.changes
+            if c.kind == ChangeKind.STDLIB_IMPLEMENTATION_CHANGED
+        )
+        return result, finding
+
+    def test_embedding_reachable_via_base_class_escalates(self) -> None:
+        # A namespaced public type returned by a public function; the embedding
+        # is reached only through Widget's base-class list, not its own fields.
+        inner = self._embedding("Inner")
+        widget = RecordType(
+            name="app::Widget", kind="class", size_bits=64, bases=["Inner"]
+        )
+        fn = Function(
+            name="make", mangled="_Z4makev",
+            return_type="app::Widget", visibility=Visibility.PUBLIC,
+        )
+        old, new = self._pair(types=[widget, inner], functions=[fn])
+        result, finding = self._finding(old, new)
+        assert finding.effective_verdict is Verdict.BREAKING
+        assert result.verdict is Verdict.BREAKING
+
+    def test_embedding_reachable_via_typedef_escalates(self) -> None:
+        # The public parameter names a typedef; the closure must follow the
+        # typedef target to find the embedding behind the alias.
+        inner = self._embedding("Buffer")
+        fn = Function(
+            name="take", mangled="_Z4takev", return_type="void",
+            params=[Param(name="b", type="BufferAlias")],
+            visibility=Visibility.PUBLIC,
+        )
+        old, new = self._pair(
+            types=[inner], functions=[fn], typedefs={"BufferAlias": "Buffer"}
+        )
+        _, finding = self._finding(old, new)
+        assert finding.effective_verdict is Verdict.BREAKING
+
+    def test_embedding_reachable_via_public_variable_escalates(self) -> None:
+        # A public global variable is also a public root that seeds the closure.
+        inner = self._embedding("Buffer")
+        var = Variable(
+            name="g_buf", mangled="g_buf",
+            type="Buffer", visibility=Visibility.PUBLIC,
+        )
+        old, new = self._pair(types=[inner], variables=[var])
+        _, finding = self._finding(old, new)
+        assert finding.effective_verdict is Verdict.BREAKING
+
+    def test_embedding_seeded_only_by_hidden_function_does_not_escalate(self) -> None:
+        # A public variable keeps the surface resolvable but does NOT reach the
+        # embedding; the only path to Buffer is a hidden (non-public) function,
+        # which must not seed the by-value closure. So no escalation.
+        inner = self._embedding("Buffer")
+        public_var = Variable(
+            name="g_flag", mangled="g_flag",
+            type="int", visibility=Visibility.PUBLIC,
+        )
+        hidden_fn = Function(
+            name="hidden", mangled="_Z6hiddenv",
+            return_type="Buffer", visibility=Visibility.HIDDEN,
+        )
+        old, new = self._pair(
+            types=[inner], functions=[hidden_fn], variables=[public_var]
+        )
+        result, finding = self._finding(old, new)
+        assert finding.effective_verdict is None
+        assert result.verdict is Verdict.COMPATIBLE_WITH_RISK
+
+    def test_closure_is_robust_to_shared_types_and_cycles(self) -> None:
+        # Widget reaches the embedding via BOTH a base and a by-value field
+        # (shared target → must be visited once), references an unknown type
+        # (not a record), holds a const self-pointer (a reference cycle, but
+        # pointer-indirect so layout-neutral), and the public function has an
+        # unspelled parameter type. The closure must terminate and still flag
+        # the by-value-reachable embedding.
+        inner = self._embedding("Inner")
+        widget = RecordType(
+            name="Widget", kind="class", size_bits=64,
+            bases=["Inner"],
+            fields=[
+                TypeField(name="dup", type="Inner", offset_bits=0),
+                TypeField(name="color", type="Color", offset_bits=64),
+                TypeField(name="self", type="Widget * const", offset_bits=128),
+            ],
+        )
+        fn = Function(
+            name="make", mangled="_Z4makev", return_type="Widget",
+            params=[Param(name="anon", type="")],
+            visibility=Visibility.PUBLIC,
+        )
+        old, new = self._pair(types=[widget, inner], functions=[fn])
+        _, finding = self._finding(old, new)
+        assert finding.effective_verdict is Verdict.BREAKING
