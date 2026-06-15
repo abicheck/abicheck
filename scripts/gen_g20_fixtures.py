@@ -29,16 +29,28 @@ import sys
 from collections.abc import Iterable
 from pathlib import Path
 
-from abicheck.buildsource.build_evidence import BuildEvidence, BuildOption
-from abicheck.buildsource.pack import BuildSourcePack
-from abicheck.buildsource.source_abi import SourceAbiSurface
-from abicheck.buildsource.source_graph import SourceGraphSummary
-from abicheck.elf_metadata import ElfMetadata, ElfSymbol
-from abicheck.model import AbiSnapshot, Function, Param, RecordType, ScopeOrigin
-from abicheck.serialization import snapshot_to_dict
-
 ROOT = Path(__file__).resolve().parent.parent
 EXAMPLES = ROOT / "examples"
+
+# Run-as-script support: when invoked as `python scripts/gen_g20_fixtures.py`,
+# sys.path[0] is scripts/, not the repo root, so the abicheck import below fails
+# on a fresh checkout that has not `pip install -e`'d the package. Prepend ROOT.
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from abicheck.buildsource.build_evidence import BuildEvidence, BuildOption  # noqa: E402
+from abicheck.buildsource.pack import BuildSourcePack  # noqa: E402
+from abicheck.buildsource.source_abi import SourceAbiSurface  # noqa: E402
+from abicheck.buildsource.source_graph import SourceGraphSummary  # noqa: E402
+from abicheck.elf_metadata import ElfMetadata, ElfSymbol  # noqa: E402
+from abicheck.model import (  # noqa: E402
+    AbiSnapshot,
+    Function,
+    Param,
+    RecordType,
+    ScopeOrigin,
+)
+from abicheck.serialization import snapshot_to_dict  # noqa: E402
 
 
 def _snap(**kw) -> AbiSnapshot:

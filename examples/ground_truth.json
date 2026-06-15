@@ -9,7 +9,7 @@
     "test_evidence_tiers": "tests/test_evidence_tiers.py \u2014 keeps min_evidence in sync with scripts/evidence_tiers.py",
     "test_manual": "tests/test_abi_examples.py \u2014 hardcoded expectations for cases 01-18 (must stay in sync)",
     "test_crosscheck_catalog": "tests/test_g20_catalog.py \u2014 loads each G20 case's committed snapshot fixture and asserts expected_crosscheck_kinds / expected_providers via run_crosschecks (compiler-free, fast lane)",
-    "crosscheck_engine": "abicheck/buildsource/crosscheck.py \u2014 run_crosschecks() produces the eight ADR-035 D4/D8 cross-source / audit ChangeKinds the G20 corpus demonstrates",
+    "crosscheck_engine": "abicheck/buildsource/crosscheck.py \u2014 run_crosschecks() produces the eight ADR-035 D4/D8 cross-source / audit ChangeKinds; the G20 corpus demonstrates seven of them (public_to_internal_dependency is not yet in a catalog case)",
     "g20_fixture_writer": "scripts/gen_g20_fixtures.py \u2014 single source of truth for the committed snapshot fixtures (snapshot.abi.json) of cases 143-151",
     "examples_readme": "examples/README.md \u2014 case index table (must stay in sync)"
   },
