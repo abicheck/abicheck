@@ -388,6 +388,25 @@ class TestResolveInputELF:
         result = _resolve_input(elf_file, [], [], "1.0", "rust")
         assert result is fake_snap
 
+    def test_linker_script_following_disabled(self, tmp_path, monkeypatch):
+        """MCP must not follow GNU ld linker scripts.
+
+        _check_file_size only guards the caller-supplied path, so following an
+        INPUT(huge.so) directive would parse an unchecked target and bypass
+        MCP_MAX_FILE_SIZE. _resolve_input pins follow_linker_scripts=False.
+        """
+        import abicheck.service as svc
+
+        captured: dict = {}
+
+        def fake_resolve(path, headers, includes, version, lang, **kwargs):
+            captured.update(kwargs)
+            return _empty_snapshot()
+
+        monkeypatch.setattr(svc, "resolve_input", fake_resolve)
+        _resolve_input(tmp_path / "libfoo.so", [], [], "1.0", "c++")
+        assert captured.get("follow_linker_scripts") is False
+
 
 # ---------------------------------------------------------------------------
 # _render_output — stat, sarif, html, markdown, unknown (lines 376-405)

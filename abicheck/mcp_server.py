@@ -303,15 +303,25 @@ def _resolve_input(
     """Auto-detect input type and return an AbiSnapshot.
 
     Thin wrapper over :func:`abicheck.service.resolve_input` — the single source
-    of truth for format detection, GNU ld linker-script following, raw BTF/CTF
-    blobs, and native (ELF/PE/Mach-O) dumping. The MCP surface is framework-free,
-    so the service's ``SnapshotError`` / ``ValidationError`` (both
-    ``AbicheckError`` subclasses) propagate unchanged for the tool handlers to
-    convert into structured error payloads.
+    of truth for format detection, raw BTF/CTF blobs, and native (ELF/PE/Mach-O)
+    dumping. The MCP surface is framework-free, so the service's
+    ``SnapshotError`` / ``ValidationError`` (both ``AbicheckError`` subclasses)
+    propagate unchanged for the tool handlers to convert into structured error
+    payloads.
+
+    ``follow_linker_scripts=False``: the MCP tools enforce ``MCP_MAX_FILE_SIZE``
+    via :func:`_check_file_size` on the *caller-supplied* path before resolving.
+    Following a GNU ld linker script would parse an ``INPUT()``/``GROUP()``
+    target that never went through that guard, so a tiny script pointing at a
+    huge library could defeat the resource limit. Disabling the follow keeps the
+    size check authoritative (and matches the MCP server's pre-unification
+    behaviour, which never followed linker scripts).
     """
     from . import service
 
-    return service.resolve_input(path, headers, includes, version, lang)
+    return service.resolve_input(
+        path, headers, includes, version, lang, follow_linker_scripts=False
+    )
 
 
 def _snapshot_summary(snap: AbiSnapshot) -> dict[str, Any]:
