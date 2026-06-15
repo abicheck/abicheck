@@ -25,7 +25,7 @@ from abicheck.buildsource.crosscheck import (
 )
 from abicheck.buildsource.pack import BuildSourcePack
 from abicheck.buildsource.source_abi import SourceAbiSurface, SourceEntity
-from abicheck.buildsource.source_graph import SourceGraphSummary
+from abicheck.buildsource.source_graph import GraphNode, SourceGraphSummary
 from abicheck.checker_policy import ChangeKind, Confidence
 from abicheck.elf_metadata import ElfMetadata, ElfSymbol
 from abicheck.model import AbiSnapshot, Function, RecordType, ScopeOrigin
@@ -184,7 +184,26 @@ def _leak_snap(*, with_graph: bool) -> AbiSnapshot:
         ),
     ]
     if with_graph:
-        snap.build_source = BuildSourcePack(root="", source_graph=SourceGraphSummary())
+        # Seed real decl/type graph facts so the L5 (source_index) provider is
+        # backed by an actual index of the public→private relationship, not the
+        # mere presence of an empty graph object (Codex review).
+        graph = SourceGraphSummary(
+            nodes=[
+                GraphNode(
+                    id="decl://use",
+                    kind="source_decl",
+                    label="use",
+                    attrs={"visibility": "public_header"},
+                ),
+                GraphNode(
+                    id="type://detail::Impl",
+                    kind="record_type",
+                    label="detail::Impl",
+                    attrs={"visibility": "private_header"},
+                ),
+            ]
+        )
+        snap.build_source = BuildSourcePack(root="", source_graph=graph)
     return snap
 
 
