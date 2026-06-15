@@ -441,6 +441,29 @@ class _DwarfSnapshotBuilder:
             return
         self._seen_func_mangles.add(mangled)
 
+        self.functions.append(
+            self._build_function(die, CU, scope, name, mangled, qualified_name, is_deleted)
+        )
+
+    def _build_function(
+        self,
+        die: Any,
+        CU: Any,
+        scope: str,
+        name: str,
+        mangled: str,
+        qualified_name: str,
+        is_deleted: bool,
+    ) -> Function:
+        """Construct a :class:`Function` from a (already surface-admitted)
+        ``DW_TAG_subprogram`` DIE.
+
+        Pure DWARF→model mapping (N-C): admission/dedup live in
+        ``_process_subprogram``; this only reads DIE attributes and builds the
+        model object, so the DWARF-to-``Function`` translation is testable
+        without the surface-filtering path. It still records referenced type
+        names on the builder so the second extraction pass can reach them.
+        """
         # Return type
         ret_type = "void"
         ret_ptr_depth = 0
@@ -483,24 +506,22 @@ class _DwarfSnapshotBuilder:
         if "DW_AT_vtable_elem_location" in die.attributes:
             vtable_index = _attr_int(die, "DW_AT_vtable_elem_location")
 
-        self.functions.append(
-            Function(
-                name=qualified_name if scope else name,
-                mangled=mangled,
-                return_type=ret_type,
-                params=params,
-                visibility=Visibility.PUBLIC,
-                is_virtual=is_virtual,
-                is_extern_c=is_extern_c,
-                vtable_index=vtable_index,
-                is_static=is_static,
-                is_pure_virtual=is_pure_virtual,
-                access=access,
-                return_pointer_depth=ret_ptr_depth,
-                is_deleted=is_deleted,
-                deleted_from_dwarf=is_deleted,
-                is_explicit=is_explicit,
-            )
+        return Function(
+            name=qualified_name if scope else name,
+            mangled=mangled,
+            return_type=ret_type,
+            params=params,
+            visibility=Visibility.PUBLIC,
+            is_virtual=is_virtual,
+            is_extern_c=is_extern_c,
+            vtable_index=vtable_index,
+            is_static=is_static,
+            is_pure_virtual=is_pure_virtual,
+            access=access,
+            return_pointer_depth=ret_ptr_depth,
+            is_deleted=is_deleted,
+            deleted_from_dwarf=is_deleted,
+            is_explicit=is_explicit,
         )
 
     def _is_abi_relevant_export(self, name: str) -> bool:

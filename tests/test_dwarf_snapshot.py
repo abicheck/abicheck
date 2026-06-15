@@ -1557,3 +1557,79 @@ class TestDwarfSnapshotErrorHandling:
         )
         assert snap is not None
         assert len(snap.functions) == 0
+
+
+def test_build_function_is_isolated_from_elf_and_filter():
+    """N-C: _build_function maps a DW_TAG_subprogram DIE → Function as a pure
+    parse step — testable without the ELF I/O / surface-filter path that
+    _DwarfSnapshotBuilder.__init__ performs.
+    """
+    from types import SimpleNamespace
+
+    from abicheck.dwarf_snapshot import _DwarfSnapshotBuilder
+    from abicheck.model import AccessLevel, Function
+
+    # Bypass __init__ (which opens the ELF) — _build_function only needs the
+    # referenced-type-name sink.
+    builder = _DwarfSnapshotBuilder.__new__(_DwarfSnapshotBuilder)
+    builder._referenced_type_names = set()
+
+    # Minimal fake DIE: a void, no-parameter, external C function. attr_* read
+    # die.attributes[name].value, so absent attributes take their defaults.
+    die = SimpleNamespace(attributes={}, iter_children=lambda: iter(()))
+
+    fn = builder._build_function(
+        die, CU=None, scope="", name="do_thing", mangled="do_thing",
+        qualified_name="do_thing", is_deleted=False,
+    )
+
+    assert isinstance(fn, Function)
+    assert fn.name == "do_thing"
+    assert fn.mangled == "do_thing"
+    assert fn.return_type == "void"
+    assert fn.params == []
+    assert fn.is_extern_c is True           # mangled does not start with _Z
+    assert fn.is_static is True             # DW_AT_external absent
+    assert fn.is_virtual is False
+    assert fn.is_pure_virtual is False
+    assert fn.access == AccessLevel.PUBLIC
+    assert fn.vtable_index is None
+    assert fn.is_deleted is False
+    # The parse step records the (void) return type for reachability.
+    assert "void" in builder._referenced_type_names
+
+
+def test_build_function_reads_virtual_and_access_from_die():
+    """Virtual/access/vtable fields come straight off the DIE — covered without
+    any ELF or filtering."""
+    from types import SimpleNamespace
+
+    from abicheck.dwarf_snapshot import _DwarfSnapshotBuilder
+    from abicheck.model import AccessLevel
+
+    builder = _DwarfSnapshotBuilder.__new__(_DwarfSnapshotBuilder)
+    builder._referenced_type_names = set()
+
+    def _av(value):
+        return SimpleNamespace(value=value)
+
+    die = SimpleNamespace(
+        attributes={
+            "DW_AT_virtuality": _av(2),            # pure virtual
+            "DW_AT_accessibility": _av(3),         # private
+            "DW_AT_vtable_elem_location": _av(4),
+            "DW_AT_external": _av(1),
+        },
+        iter_children=lambda: iter(()),
+    )
+    fn = builder._build_function(
+        die, CU=None, scope="Cls", name="m", mangled="_ZN3Cls1mEv",
+        qualified_name="Cls::m", is_deleted=False,
+    )
+    assert fn.name == "Cls::m"
+    assert fn.is_virtual is True
+    assert fn.is_pure_virtual is True
+    assert fn.access == AccessLevel.PRIVATE
+    assert fn.vtable_index == 4
+    assert fn.is_static is False
+    assert fn.is_extern_c is False
