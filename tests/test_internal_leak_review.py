@@ -343,3 +343,39 @@ class TestPointerMediatedLayoutLeakSuppressed:
             "must still be flagged"
         )
         assert "pointer / template" in leaks[0].description
+
+    def _pimpl_snap(self, *, impl_field_type: str, impl_size: int) -> AbiSnapshot:
+        return AbiSnapshot(
+            library="lib.so",
+            version="1.0",
+            functions=[Function(
+                name="make", mangled="make", return_type="Public*",
+                params=[], visibility=Visibility.PUBLIC,
+            )],
+            types=[
+                RecordType(name="Public", kind="class", fields=[
+                    TypeField(name="impl_", type=impl_field_type),
+                ]),
+                RecordType(name="ns::detail::Impl", kind="struct", size_bits=impl_size),
+            ],
+        )
+
+    def test_pointer_to_value_embed_still_fires(self) -> None:
+        # Codex review: old reaches Impl through a pointer, new embeds it BY VALUE
+        # (pimpl -> by-value) and Impl's layout changes. _merge_leak_paths dedups
+        # the identical `field:impl_` chain, so the suppression must evaluate each
+        # path against its OWN snapshot — the new by-value layout now propagates
+        # to Public, so the leak must NOT be suppressed.
+        old = self._pimpl_snap(impl_field_type="ns::detail::Impl*", impl_size=64)
+        new = self._pimpl_snap(impl_field_type="ns::detail::Impl", impl_size=128)
+        changes = [Change(
+            kind=ChangeKind.TYPE_SIZE_CHANGED,
+            symbol="ns::detail::Impl",
+            description="size 64 -> 128",
+        )]
+        leaks = detect_internal_leaks(changes, old, new)
+        assert len(leaks) == 1, (
+            "an internal type newly embedded by value carries its layout into the "
+            f"public holder — the leak must still fire (got: {leaks})"
+        )
+        assert "embedded-by-value" in leaks[0].description

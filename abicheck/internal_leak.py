@@ -711,14 +711,20 @@ def detect_internal_leaks(
 
     out: list[Change] = []
     for tname, triggers in internal_changes.items():
+        old_pl = old_paths.get(tname, [])
+        new_pl = new_paths.get(tname, [])
         paths = _merge_leak_paths(tname, old_paths, new_paths)
         if not paths:
             # Internal type changed but not reachable from public API in
             # either snapshot — this is the "truly private" case; skip.
             continue
-        # Pick the snapshot whose path list to use for the value-embedding
-        # heuristic. Prefer old (where the public API was already shipped).
-        sample_snap = old if old_paths.get(tname) else new
+        # Evaluate every path against the snapshot it was discovered in: the
+        # *same* ``field:<name>`` chain can be a pointer in old but an embedded
+        # value in new (a pimpl that switched to by-value), and ``_merge_leak_
+        # paths`` dedups the identical chain — so checking only the preferred
+        # sample snapshot would mis-read the indirection (Codex review). A side
+        # with no paths contributes nothing.
+        side_paths = [(p, old) for p in old_pl] + [(p, new) for p in new_pl]
         identity_or_vtable = any(
             c.kind in _IDENTITY_VTABLE_KINDS for c in triggers
         )
@@ -727,17 +733,22 @@ def detect_internal_leaks(
         # not consumer-visible — the public holder embeds only the pointer, not
         # the changed layout (oneTBB ``thread_request_serializer`` behind a
         # ``unique_ptr``). Skip the leak so surface scoping demotes it as
-        # private-internal churn. Identity/vtable changes still propagate through
-        # a pointer (vtable dispatch / RTTI / base-subobject), so they keep
-        # firing; and ``_path_has_indirection`` only suppresses when *every* path
-        # has positive pointer evidence, so by-value embedding/inheritance and
-        # ambiguous return-type paths are never silently dropped.
-        all_indirect = all(_path_has_indirection(p, sample_snap) for p in paths)
+        # private-internal churn. Suppress **only** when every path on *both*
+        # snapshots has positive pointer evidence: identity/vtable changes
+        # propagate through a pointer (vtable dispatch / RTTI / base-subobject),
+        # and any value/inheritance-embedded path — in either old or new — keeps
+        # the finding (a just-embedded internal type now carries its layout into
+        # the public type).
+        value_prop = any(_path_is_value_propagating(p, s) for p, s in side_paths)
+        all_indirect = bool(side_paths) and all(
+            _path_has_indirection(p, s) for p, s in side_paths
+        )
         if all_indirect and not identity_or_vtable:
             continue
-        value_prop = any(_path_is_value_propagating(p, sample_snap) for p in paths)
         out.append(
-            _build_leak_change(tname, triggers, paths, sample_snap, value_prop)
+            _build_leak_change(
+                tname, triggers, paths, old if old_pl else new, value_prop
+            )
         )
 
     return out
