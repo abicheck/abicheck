@@ -187,11 +187,12 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     "header_build_context_mismatch": "L3",
     # ── L4: ADR-035 D4 cross-source checks that read the source-replay surface /
     # source graph carried in a BuildSourcePack (no artifact layer sees them) ──
-    # odr_type_variant reads the L4 surface's recorded per-TU ODR conflicts;
-    # public_to_internal_dependency reads the L5 source graph's decl-dependency
-    # edges (which ride in the same BuildSourcePack the L4 replay produces).
+    # odr_type_variant reads the L4 surface's recorded per-TU ODR conflicts.
     "odr_type_variant": "L4",
-    "public_to_internal_dependency": "L4",
+    # ── L5: needs the L5 source graph's decl-dependency edges (the check skips
+    # cleanly when no call-graph pass populated the graph), so its minimum
+    # evidence is the graph tier, not the L4 replay surface that carries it. ──
+    "public_to_internal_dependency": "L5",
     # ── ADR-035 D8 single-release hygiene audit ──
     # unversioned_exported_symbol is pure ELF (export table vs .gnu.version_d);
     # rtti_for_internal_type needs header provenance to know a type is internal.

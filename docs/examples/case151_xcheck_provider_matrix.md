@@ -35,8 +35,8 @@ That provider list is the available corroboration signal ScanResult records.
 ## Reproduce
 
 ```bash
-abicheck scan --audit libdemo.so -H include/                 # thin: 1 provider
-abicheck scan --audit libdemo.so -H include/ --sources .     # rich: + source_index
+abicheck scan --binary libdemo.so -H include/ --audit                 # thin: 1 provider
+abicheck scan --binary libdemo.so -H include/ --audit --sources .     # rich: + source_index
 ```
 
 ## Fix

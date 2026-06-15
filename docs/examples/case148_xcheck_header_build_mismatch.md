@@ -37,7 +37,7 @@ be actively misleading.
 ## Reproduce
 
 ```bash
-abicheck scan --audit libdemo.so -H include/ -p build/   # build/ holds compile_commands.json
+abicheck scan --binary libdemo.so -H include/ --build-info build/ --audit   # build/ holds compile_commands.json
 ```
 
 ## Fix

@@ -34,7 +34,7 @@ neither in isolation can tell an accidental export from an intentional one.
 ## Reproduce
 
 ```bash
-abicheck scan --audit libdemo.so -H include/
+abicheck scan --binary libdemo.so -H include/ --audit
 ```
 
 The committed `snapshot.abi.json` carries the same L0 + L2 provenance a live

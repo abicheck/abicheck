@@ -147,7 +147,7 @@ One row per `ChangeKind` (254 total). Columns fuse the verdict partition (`check
 | `public_reachability_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `public_reachability_changed` |
 | `public_surface_grew` | quality | `COMPATIBLE` | `warning` | unspecified | `public_surface_grew` |
 | `public_surface_shrank` | quality | `COMPATIBLE` | `warning` | unspecified | `public_surface_shrank` |
-| `public_to_internal_dependency` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L4 | `public_to_internal_dependency` |
+| `public_to_internal_dependency` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L5 | `public_to_internal_dependency` |
 | `public_typedef_target_changed` | api_break | `API_BREAK` | `warning` | unspecified | `public_typedef_target_changed` |
 | `relro_weakened` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `relro_weakened` |
 | `removed_const_overload` | api_break | `API_BREAK` | `warning` | unspecified | `removed_const_overload` |

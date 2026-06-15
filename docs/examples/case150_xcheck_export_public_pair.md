@@ -31,7 +31,7 @@ more than the API documents.
 ## Reproduce
 
 ```bash
-abicheck scan --audit libdemo.so -H include/
+abicheck scan --binary libdemo.so -H include/ --audit
 ```
 
 ## Fix

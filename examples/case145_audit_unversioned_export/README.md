@@ -26,7 +26,7 @@ Pure L0 — no DWARF, no headers, no baseline.
 ## Reproduce
 
 ```bash
-abicheck scan --audit libdemo.so
+abicheck scan --binary libdemo.so --audit
 ```
 
 ## Fix

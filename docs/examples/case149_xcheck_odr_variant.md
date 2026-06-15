@@ -36,7 +36,7 @@ The cross-check reads the L4 source-replay surface's recorded ODR conflicts; the
 ## Reproduce
 
 ```bash
-abicheck scan --audit libdemo.so --sources .   # replays each TU, links the surface
+abicheck scan --binary libdemo.so --sources . --audit   # replays each TU, links the surface
 ```
 
 ## Fix

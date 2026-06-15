@@ -30,7 +30,7 @@ public ABI surface — a latent break the day the private header changes.
 ## Reproduce
 
 ```bash
-abicheck scan --audit libdemo.so -H include/
+abicheck scan --binary libdemo.so -H include/ --audit
 ```
 
 ## Fix

@@ -1135,7 +1135,7 @@
       "category": "risk",
       "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
-      "min_evidence": "L4",
+      "min_evidence": "L5",
       "doc_slug": "public_to_internal_dependency"
     },
     {

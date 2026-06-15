@@ -34,8 +34,8 @@ S5 pass would add — the endpoint of the ladder.
 ## Reproduce the ladder
 
 ```bash
-abicheck scan --audit libdemo.so -H include/ --depth s3   # pattern only
-abicheck scan --audit libdemo.so -H include/ --sources .  # S5 replay + graph
+abicheck scan --binary libdemo.so -H include/ --audit --source-method s3   # pattern only
+abicheck scan --binary libdemo.so -H include/ --audit --sources . --source-method s5  # S5 replay + graph
 ```
 
 ## Fix
