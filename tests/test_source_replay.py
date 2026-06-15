@@ -233,6 +233,60 @@ def test_headers_only_set_cover_ignores_non_owning_includer() -> None:
     assert {u.id for u in units} == {"cu://lib"}
 
 
+def test_headers_only_reverse_dep_does_not_promote_normal_library_consumer() -> None:
+    build = BuildEvidence(
+        targets=[
+            Target(id="lib", public_headers=["include/foo.h"]),
+            Target(id="app", dependencies=["lib"]),
+        ],
+        compile_units=[
+            _cu("cu://lib", "lib.cpp", "lib"),
+            _cu("cu://app", "app.cpp", "app"),
+        ],
+    )
+    include_map = {
+        "cu://app": ["include/foo.h"],
+        "cu://lib": ["include/foo.h"],
+    }
+    units = select_compile_units(build, scope="headers-only", include_map=include_map)
+    assert {u.id for u in units} == {"cu://lib"}
+
+
+def test_headers_only_allows_direct_header_target_reverse_dep() -> None:
+    # Bazel commonly puts hdrs in a header-only helper target and has the real
+    # compile target depend on it. That direct reverse dep is the owning compile
+    # context; unrelated downstream users still must not cover the header.
+    build = BuildEvidence(
+        targets=[
+            Target(id="headers", public_headers=["pkg/foo.h"]),
+            Target(id="kernel", dependencies=["headers"]),
+            Target(id="app", dependencies=["kernel"]),
+        ],
+        compile_units=[
+            _cu("cu://kernel", "kernel.cpp", "kernel"),
+            _cu("cu://app", "app.cpp", "app"),
+        ],
+    )
+    include_map = {
+        "cu://kernel": ["pkg/foo.h"],
+        "cu://app": ["pkg/foo.h"],
+    }
+    units = select_compile_units(build, scope="headers-only", include_map=include_map)
+    assert {u.id for u in units} == {"cu://kernel"}
+
+
+def test_headers_only_heuristic_uses_header_target_reverse_dep() -> None:
+    build = BuildEvidence(
+        targets=[
+            Target(id="headers", public_headers=["pkg/foo.h"]),
+            Target(id="kernel", dependencies=["headers"]),
+        ],
+        compile_units=[_cu("cu://kernel", "kernel.cpp", "kernel")],
+    )
+    units = select_compile_units(build, scope="headers-only")
+    assert {u.id for u in units} == {"cu://kernel"}
+
+
 def test_headers_only_set_cover_needs_two_units() -> None:
     # No single TU covers both headers → cover needs two (one per header).
     include_map = {

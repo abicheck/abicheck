@@ -169,6 +169,7 @@ class CompileUnit:
     undefines: list[str] = field(default_factory=list)
     include_paths: list[str] = field(default_factory=list)
     system_include_paths: list[str] = field(default_factory=list)
+    input_files: list[str] = field(default_factory=list)
     sysroot: str | None = None
     target_triple: str = ""
     abi_relevant_flags: list[str] = field(default_factory=list)
@@ -189,6 +190,7 @@ class CompileUnit:
             "undefines": list(self.undefines),
             "include_paths": list(self.include_paths),
             "system_include_paths": list(self.system_include_paths),
+            "input_files": list(self.input_files),
             "sysroot": self.sysroot,
             "target_triple": self.target_triple,
             "abi_relevant_flags": list(self.abi_relevant_flags),
@@ -211,6 +213,7 @@ class CompileUnit:
             undefines=list(d.get("undefines", [])),
             include_paths=list(d.get("include_paths", [])),
             system_include_paths=list(d.get("system_include_paths", [])),
+            input_files=list(d.get("input_files", [])),
             sysroot=d.get("sysroot"),
             target_triple=str(d.get("target_triple", "")),
             abi_relevant_flags=list(d.get("abi_relevant_flags", [])),

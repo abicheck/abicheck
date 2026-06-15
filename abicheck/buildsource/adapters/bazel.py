@@ -91,6 +91,7 @@ class BazelAdapter:
         cquery: str | Path | None = None,
         aquery: str | Path | None = None,
         allow_query: bool = True,
+        record_inputs: bool = False,
         redaction: RedactionPolicy | None = None,
     ) -> None:
         self.workspace = Path(workspace).resolve() if workspace is not None else None
@@ -98,6 +99,7 @@ class BazelAdapter:
         self._cquery = cquery
         self._aquery = aquery
         self.allow_query = allow_query
+        self.record_inputs = record_inputs
         self.redaction = redaction or DEFAULT_REDACTION
 
     def collect(self) -> BuildEvidence:
@@ -204,8 +206,8 @@ class BazelAdapter:
         if not name:
             return None
         attrs = _attr_map(rule.get("attribute", []))
-        srcs = [self.redaction.path(s) for s in attrs.get("srcs", [])]
-        hdrs = [self.redaction.path(h) for h in attrs.get("hdrs", [])]
+        srcs = [self.redaction.path(_label_to_workspace_path(s)) for s in attrs.get("srcs", [])]
+        hdrs = [self.redaction.path(_label_to_workspace_path(h)) for h in attrs.get("hdrs", [])]
         # ``deps`` are Bazel labels used as graph keys: they must stay in the
         # same (un-redacted) form as the ``target://<label>`` target ids so the
         # dependency edges resolve. Labels are not host paths, so there is
@@ -273,6 +275,15 @@ class BazelAdapter:
             undefines=sorted(ctx.undefines),
             include_paths=[self.redaction.path(str(p)) for p in ctx.include_paths],
             system_include_paths=[self.redaction.path(str(p)) for p in ctx.system_includes],
+            input_files=(
+                [
+                    self.redaction.path(p)
+                    for p in graph.input_paths(action)
+                    if _is_compile_input(p)
+                ]
+                if self.record_inputs
+                else []
+            ),
             sysroot=self.redaction.path(str(ctx.sysroot)) if ctx.sysroot else None,
             target_triple=ctx.target_triple or "",
             abi_relevant_flags=[self.redaction.arg(f) for f in extract_abi_relevant_flags(argv)],
@@ -439,6 +450,18 @@ def _is_link_input(path: str) -> bool:
     return ".so." in low  # versioned shared object, e.g. libfoo.so.1.2
 
 
+def _is_compile_input(path: str) -> bool:
+    low = path.lower()
+    if low.endswith((
+        ".c", ".cc", ".cpp", ".cxx", ".c++", ".cu",
+        ".h", ".hh", ".hpp", ".hxx", ".h++", ".cuh",
+        ".inc", ".inl", ".ipp", ".tcc",
+    )):
+        return True
+    name = low.rsplit("/", 1)[-1]
+    return bool(name) and "." not in name
+
+
 def _link_kind(output: str) -> str:
     low = output.lower()
     if low.endswith((".so", ".dylib", ".dll")) or ".so." in low:
@@ -465,6 +488,27 @@ def _target_kind_for_rule(
     ):
         return TargetKind.SHARED_LIBRARY
     return base
+
+
+def _label_to_workspace_path(label: str) -> str:
+    """Best-effort conversion from a Bazel file label to a workspace path."""
+    if not label.startswith(("@", "//")):
+        return label
+    repo = ""
+    rest = label
+    if label.startswith("@"):
+        repo, _, suffix = label.partition("//")
+        if not suffix:
+            return label
+        repo = repo.lstrip("@")
+        rest = f"//{suffix}"
+    package, colon, name = rest[2:].partition(":")
+    if not colon:
+        name = package.rsplit("/", 1)[-1]
+    path = f"{package}/{name}" if package else name
+    if repo:
+        return f"external/{repo}/{path}"
+    return path
 
 
 def _is_truthy(values: list[str] | None) -> bool:

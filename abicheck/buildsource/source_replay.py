@@ -324,7 +324,7 @@ def _select_headers_only(
     by_target: dict[str, list[CompileUnit]] = {}
     for cu in build.compile_units:
         by_target.setdefault(cu.target_id, []).append(cu)
-    targets_with_headers = {t.id for t in build.targets if t.public_headers}
+    targets_with_headers = _public_header_compile_owner_ids(build)
     picked_heur: list[CompileUnit] = []
     for tid in sorted(targets_with_headers):
         group = sorted(by_target.get(tid, []), key=lambda c: c.id)
@@ -334,6 +334,21 @@ def _select_headers_only(
     # there is nothing to scope by, so fall back to a full parse rather than
     # silently producing an empty surface.
     return picked_heur or list(build.compile_units)
+
+
+def _public_header_compile_owner_ids(build: BuildEvidence) -> set[str]:
+    compile_target_ids = {cu.target_id for cu in build.compile_units if cu.target_id}
+    reverse_deps: dict[str, set[str]] = {}
+    for target in build.targets:
+        for dep in target.dependencies:
+            reverse_deps.setdefault(dep, set()).add(target.id)
+    owners: set[str] = set()
+    for target in build.targets:
+        if target.public_headers:
+            owners.add(target.id)
+            if target.id not in compile_target_ids:
+                owners.update(reverse_deps.get(target.id, set()))
+    return owners
 
 
 def _headers_only_set_cover(
@@ -357,9 +372,23 @@ def _headers_only_set_cover(
     # the surface) — so a TU may only "cover" a public header its own target
     # declares (Codex review).
     header_owners: dict[str, set[str]] = {}
+    compile_target_ids = {cu.target_id for cu in build.compile_units if cu.target_id}
+    reverse_deps: dict[str, set[str]] = {}
+    for target in build.targets:
+        for dep in target.dependencies:
+            reverse_deps.setdefault(dep, set()).add(target.id)
     for target in build.targets:
         for ph in target.public_headers:
-            header_owners.setdefault(ph, set()).add(target.id)
+            owners = header_owners.setdefault(ph, set())
+            owners.add(target.id)
+            # Bazel often models public headers as a header-only helper target
+            # (for example `:__kernel_headers__`) that compile targets depend on.
+            # Those direct reverse deps are the owning compile contexts for the
+            # header surface; accepting arbitrary downstream TUs would still be
+            # too broad.
+            if target.id not in compile_target_ids:
+                owners.update(reverse_deps.get(target.id, set()))
+    public_suffixes = {ph: _suffixes(_norm(ph)) for ph in public}
     # cu_id -> set of public headers that TU includes (build-root-stable match) and
     # whose owning target it belongs to.
     coverage: dict[str, set[str]] = {}
@@ -367,11 +396,13 @@ def _headers_only_set_cover(
         cu = by_id.get(cu_id)
         if cu is None:
             continue
-        incset = frozenset(incs)
+        inc_norms = {_norm(inc) for inc in incs if inc}
+        inc_suffixes = {suffix for inc in inc_norms for suffix in _suffixes(inc)}
         covered = {
             ph
             for ph in public
-            if _included(ph, incset) and cu.target_id in header_owners.get(ph, set())
+            if _included(ph, inc_norms, inc_suffixes, public_suffixes[ph])
+            and cu.target_id in header_owners.get(ph, set())
         }
         if covered:
             coverage[cu_id] = covered
@@ -401,14 +432,25 @@ def _headers_only_set_cover(
     return [by_id[c] for c in chosen]
 
 
-def _included(public_header: str, includes: frozenset[str]) -> bool:
+def _suffixes(path: str) -> set[str]:
+    parts = [p for p in path.split("/") if p]
+    return {"/".join(parts[i:]) for i in range(len(parts))}
+
+
+def _included(
+    public_header: str,
+    include_norms: set[str],
+    include_suffixes: set[str],
+    public_suffixes: set[str],
+) -> bool:
     """Whether one of ``includes`` is the same file as ``public_header``.
 
     Reuses the build-root-stable path-suffix match so an absolute included path
     (``/work/include/foo.h``) lines up with a repo-relative public header
     (``include/foo.h``).
     """
-    return _path_matches(public_header, includes)
+    public_norm = _norm(public_header)
+    return public_norm in include_suffixes or bool(public_suffixes & include_norms)
 
 
 def _select_target(build: BuildEvidence, target_id: str) -> list[CompileUnit]:

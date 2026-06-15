@@ -60,6 +60,8 @@ AQUERY = json.dumps({
         {"id": "1", "pathFragmentId": "10"},   # foo/foo.cc
         {"id": "2", "pathFragmentId": "11"},   # foo/foo.o
         {"id": "3", "pathFragmentId": "12"},   # foo/libfoo.so
+        {"id": "4", "pathFragmentId": "13"},   # foo/foo.h
+        {"id": "5", "pathFragmentId": "14"},   # foo/Core (extensionless header)
     ],
     "actions": [
         {
@@ -68,7 +70,7 @@ AQUERY = json.dumps({
             "arguments": ["/usr/bin/gcc", "-std=c++17", "-D_GLIBCXX_USE_CXX11_ABI=0",
                           "-c", "foo/foo.cc", "-o", "foo/foo.o"],
             "primaryOutputId": "2",
-            "inputDepSetIds": ["200"],
+            "inputDepSetIds": ["203"],
         },
         {
             "targetId": "100",
@@ -81,12 +83,16 @@ AQUERY = json.dumps({
     "targets": [{"id": "100", "label": "//foo:foo"}],
     "depSetOfFiles": [
         {"id": "200", "directArtifactIds": ["1"]},
+        {"id": "202", "directArtifactIds": ["4", "5"]},
+        {"id": "203", "transitiveDepSetIds": ["200", "202"]},
         {"id": "201", "directArtifactIds": ["2"]},
     ],
     "pathFragments": [
         {"id": "12", "label": "libfoo.so", "parentId": "20"},
         {"id": "11", "label": "foo.o", "parentId": "20"},
         {"id": "10", "label": "foo.cc", "parentId": "20"},
+        {"id": "13", "label": "foo.h", "parentId": "20"},
+        {"id": "14", "label": "Core", "parentId": "20"},
         {"id": "20", "label": "foo"},
     ],
 })
@@ -99,8 +105,8 @@ def test_bazel_cquery_builds_target_graph():
     foo = targets["target:////foo:foo"]
     assert foo.kind is TargetKind.STATIC_LIBRARY
     assert foo.name == "foo"
-    assert foo.source_files == ["//foo:foo.cc"]
-    assert foo.public_headers == ["//foo:foo.h"]
+    assert foo.source_files == ["foo/foo.cc"]
+    assert foo.public_headers == ["foo/foo.h"]
     assert foo.dependencies == ["target:////bar:bar"]
     assert foo.visibility == "public"
     assert foo.outputs == ["//foo:libfoo.a"]
@@ -197,7 +203,7 @@ def test_bazel_cquery_single_config_keeps_plain_id():
 
 
 def test_bazel_aquery_builds_compile_and_link_units():
-    ev = BazelAdapter(aquery=AQUERY).collect()
+    ev = BazelAdapter(aquery=AQUERY, record_inputs=True).collect()
     assert len(ev.compile_units) == 1
     cu = ev.compile_units[0]
     assert cu.source == "foo/foo.cc"
@@ -205,6 +211,7 @@ def test_bazel_aquery_builds_compile_and_link_units():
     assert cu.language == "CXX"
     assert cu.standard == "c++17"
     assert cu.target_id == "target:////foo:foo"
+    assert set(cu.input_files) == {"foo/foo.cc", "foo/foo.h", "foo/Core"}
 
     assert len(ev.link_units) == 1
     lu = ev.link_units[0]
@@ -217,6 +224,11 @@ def test_bazel_aquery_builds_compile_and_link_units():
     opts = {(o.key, o.value) for o in ev.build_options}
     assert ("std:CXX", "c++17") in opts
     assert ("define:_GLIBCXX_USE_CXX11_ABI", "0") in opts
+
+
+def test_bazel_aquery_omits_compile_inputs_by_default():
+    ev = BazelAdapter(aquery=AQUERY).collect()
+    assert ev.compile_units[0].input_files == []
 
 
 def test_bazel_combined_cquery_and_aquery():
