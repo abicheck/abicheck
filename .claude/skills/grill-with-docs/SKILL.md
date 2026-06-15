@@ -27,11 +27,14 @@ Most repos have a single context:
 /
 ├── CONTEXT.md
 ├── docs/
-│   └── adr/
-│       ├── 0001-event-sourced-orders.md
-│       └── 0002-postgres-for-write-model.md
+│   └── development/
+│       └── adr/
+│           ├── 001-technology-stack.md
+│           └── 002-multi-binary-release-compare.md
 └── src/
 ```
+
+(In this repo, ADRs live under `docs/development/adr/` with 3-digit numbering — see `docs/CLAUDE.md`. The `docs/adr/` path in the upstream skill is the generic default.)
 
 If a `CONTEXT-MAP.md` exists at the root, the repo has multiple contexts. The map points to where each one lives:
 
@@ -39,7 +42,7 @@ If a `CONTEXT-MAP.md` exists at the root, the repo has multiple contexts. The ma
 /
 ├── CONTEXT-MAP.md
 ├── docs/
-│   └── adr/                          ← system-wide decisions
+│   └── development/adr/              ← system-wide decisions
 ├── src/
 │   ├── ordering/
 │   │   ├── CONTEXT.md
@@ -49,7 +52,7 @@ If a `CONTEXT-MAP.md` exists at the root, the repo has multiple contexts. The ma
 │       └── docs/adr/
 ```
 
-Create files lazily — only when you have something to write. If no `CONTEXT.md` exists, create one when the first term is resolved. If no `docs/adr/` exists, create it when the first ADR is needed.
+Create files lazily — only when you have something to write. If no `CONTEXT.md` exists, create one when the first term is resolved. New ADRs go in the repo's existing `docs/development/adr/` directory (see [ADR-FORMAT.md](./ADR-FORMAT.md)); only create an ADR directory from scratch in a repo that has none.
 
 ## During the session
 

@@ -1,8 +1,8 @@
 # ADR Format
 
-ADRs live in `docs/adr/` and use sequential numbering: `0001-slug.md`, `0002-slug.md`, etc.
+ADRs in this repo live in `docs/development/adr/` (as documented in `docs/CLAUDE.md`) and use sequential 3-digit numbering: `001-slug.md`, `002-slug.md`, etc. Match the numbering width of the existing files in that directory.
 
-Create the `docs/adr/` directory lazily — only when the first ADR is needed.
+The `docs/development/adr/` directory already exists — extend the existing numbered ADR set rather than starting a new one. (If you are using this skill in a different repo where no ADR directory exists, create one lazily — only when the first ADR is needed.)
 
 ## Template
 
@@ -24,7 +24,7 @@ Only include these when they add genuine value. Most ADRs won't need them.
 
 ## Numbering
 
-Scan `docs/adr/` for the highest existing number and increment by one.
+Scan `docs/development/adr/` for the highest existing number and increment by one.
 
 ## When to offer an ADR
 
