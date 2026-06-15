@@ -4,8 +4,11 @@ Evidence-based validation of abicheck against real upstream C/C++ shared
 libraries (not synthetic fixtures), used to drive planning and improvement.
 
 - `uxl-scan-levels-timing-2026-06.md` — **UXL `scan` level sweep:** the full
-  `abicheck scan` stack run against oneTBB (C++) and UMF (C) across every
-  source-scan level (`s0…s6`, `--mode` presets), with per-level **timing** and a
+  `abicheck scan` stack run against oneTBB (C++) and UMF (C) across the
+  source-scan levels `s0, s1, s3–s6` (`s2` is rejected by `cli_scan.py` as
+  unimplemented). The `--mode` presets `pr`/`pr-deep`/`baseline`/`audit` were run
+  on oneTBB; on UMF only `audit` was run (the mode presets resolve to the same
+  s5/s6 levels already swept there). Includes per-level **timing** and a
   **usability** punch-list. Headline: one cost cliff at the L4 AST boundary
   whose height is a C++ phenomenon (~7× on oneTBB, ~1.3× on UMF), seed-gated
   PR scoping (222 s → 11.5 s with a one-file diff seed), and castxml-only L2
