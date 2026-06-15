@@ -285,3 +285,62 @@ pairs on real-world libraries), write a full ADR and integrate into the
 post-processing pipeline to suppress redundant `FUNC_REMOVED` + `FUNC_ADDED`
 pairs when a `FUNC_LIKELY_RENAMED` exists for the same symbol pair.
 | 6 | Validation: DWARF vs castxml snapshot equivalence on test suite | 2-3 days |
+
+---
+
+## Extension: clang as an alternative L2 frontend (planned)
+
+**Date:** 2026-06-15
+**Status:** Planned — surfaced by the UXL field run
+(`validation/uxl-scan-levels-timing-2026-06.md`, P1)
+
+### Context
+
+L2 (Header AST) has a single producer: **castxml** (`_castxml_dump` →
+`dumper_castxml.py`). Two field-observed problems:
+
+1. **castxml-only blocks clang-only hosts.** `dump --headers` / `scan -H`
+   hard-fail with `castxml not found` on the many dev/CI images that ship clang
+   but not castxml. With no L2 there is no header-aware public-surface scoping,
+   and **all four ADR-035 D4 cross-source checks skip** (no public-header
+   provenance) — a whole feature class silently off.
+2. **castxml's bundled clang lags the system toolchain** and aborts on
+   current-standard stdlib headers (e.g. the C++23 `bf16` literal in recent
+   libstdc++ — see the `case80` / `case89` `known_gap`s), before any detector
+   runs.
+
+ADR-001 originally rejected LLVM/clang tooling (Option C) as too heavy
+(~500 MB). That rationale is now **stale**: clang is *already* a dependency —
+the L4 source-ABI replay extractor uses `clang -ast-dump=json`
+(ADR-030 D3, `buildsource/source_extractors/`), behind the ADR-032 extractor
+interface.
+
+### Direction
+
+Add a **clang L2 backend** that produces the same `AbiSnapshot` fields as
+castxml (`functions`, `types`, `enums`, `typedefs`, constants) from
+`clang -ast-dump=json` (or libclang) over the public headers, selected by a
+backend knob (auto: prefer the available/most-capable frontend, mirroring the
+L4 `--source-abi-extractor auto` choice). This **revisits ADR-001 Option C**
+for L2 only, scoped to a header parse — not a full LLVM rewrite.
+
+Snapshot interchangeability (§7) is the constraint: a clang-derived L2 snapshot
+must be schema-equivalent to a castxml-derived one, so the two are a **parity
+oracle** for each other (same pattern as the DWARF↔castxml and
+libabigail/ABICC parity gates). Using both also maximises host coverage:
+clang where castxml is absent or chokes; castxml where the clang JSON-AST
+schema (which drifts across clang releases) is unsupported.
+
+### Scope boundaries (not in scope)
+
+- Replacing castxml — it stays the default and the schema reference.
+- A new `AbiSnapshot` field or detector — this is a new *producer* of existing
+  fields only.
+
+### Next steps
+
+Own PR/ADR. First slice: a `clang -ast-dump=json` → `AbiSnapshot.types`
+parser (sibling to `dumper_castxml.py`) behind a backend selector, plus an
+integration test that runs `scan -H` / `dump --headers` with **clang only on
+PATH** and asserts the D4 cross-source checks run instead of skipping. Gate on
+a clang↔castxml snapshot-equivalence check over the example suite.
