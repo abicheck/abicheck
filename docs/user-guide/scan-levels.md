@@ -64,12 +64,22 @@ abicheck scan \
 ### Single-build audit — no baseline
 
 `--audit` runs the intra-version cross-source hygiene checks against **one**
-build — no previous version required. Use it to catch accidental exports,
-private-header leaks, unversioned symbols, and `header_build_context_mismatch`
-on a single artifact:
+build — no previous version required. With just the binary and headers it catches
+accidental exports, private-header leaks, and unversioned symbols:
 
 ```bash
 abicheck scan --binary libfoo.so --headers include/ --audit
+```
+
+Some audit checks need more evidence than the artifact tiers provide:
+`header_build_context_mismatch` compares the headers' parse context against the
+real build flags, so it only fires when you also pass an L3 build input
+(`--build-info`/`--compile-db` or `--sources`) — without one it is reported as a
+skipped coverage row, not a pass:
+
+```bash
+abicheck scan --binary libfoo.so --headers include/ \
+  --build-info build/compile_commands.json --audit
 ```
 
 This is `(s5, source)` run intra-version; it reports the eight ADR-035
@@ -113,8 +123,9 @@ JSON), so it cannot be fed back as a `--baseline`; produce the baseline with
 so the later PR compare carries them:
 
 ```bash
-# Produce the reusable baseline snapshot once per release:
-abicheck dump build/libfoo.so --headers include/ \
+# Produce the reusable baseline snapshot once per release
+# (dump uses -H/--header — the plural --headers alias is scan-only):
+abicheck dump build/libfoo.so -H include/ \
   --sources . --version 1.0 -o artifacts/libfoo-1.0.abi.json
 
 # PR scans then compare against it:
