@@ -882,6 +882,13 @@ def _check_case_preconditions(
     if entry.get("skip", False):
         return CaseResult(name, "SKIP", expected_raw, None, entry.get("reason", "skip=true"))
 
+    # G20 single-release audit / cross-source cases (ADR-035) have no v1/v2
+    # compilable pair by design — they ship a committed snapshot.abi.json and are
+    # validated compiler-free by tests/test_g20_catalog.py via run_crosschecks.
+    if entry.get("mode") == "audit" or entry.get("expected_crosscheck_kinds"):
+        return CaseResult(name, "SKIP", expected_raw, None,
+                          "G20 audit/cross-source case — validated by tests/test_g20_catalog.py")
+
     # Bundle cases (ADR-023) are multi-library and use a different layout
     # (per-side dirs under examples/<case>/{old,new}/<libname>.cpp).
     # The v1/v2-pair compile path in this script can't build them; they
