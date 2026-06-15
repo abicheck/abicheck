@@ -50,6 +50,7 @@ from typing import TYPE_CHECKING
 
 from .checker_policy import ChangeKind
 from .checker_types import Change
+from .diff_helpers import make_change
 
 # Re-exports — the generic detectors were extracted to dedicated modules
 # in PR-D, but are re-exported here so callers that import them from this
@@ -210,8 +211,8 @@ def detect_sycl_overload_set_removal(
     if len(affected_unq) >= min_overloads:
         affected_unq.sort()
         findings.append(
-            Change(
-                kind=ChangeKind.SYCL_OVERLOAD_SET_REMOVED,
+            make_change(
+                ChangeKind.SYCL_OVERLOAD_SET_REMOVED,
                 symbol="<sycl_overload_family>",
                 description=(
                     f"SYCL overload family withdrawn: {len(affected_mangled)} "
@@ -337,8 +338,8 @@ def _emit_isa_dropped_finding(
     suppressed.update(affected_mangled)
     _suppress_demangled_names(overlapping, old_index, suppressed)
     stems_sorted = sorted(affected_stems)
-    return Change(
-        kind=ChangeKind.CPU_DISPATCH_ISA_DROPPED,
+    return make_change(
+        ChangeKind.CPU_DISPATCH_ISA_DROPPED,
         symbol=f"<isa:{token}>",
         description=(
             f"CPU dispatch ISA '{token}' tier removed: "
@@ -417,8 +418,8 @@ def _find_tag_rename_for_removed(
         added_with_token = _symbols_embedding_leaf(only_added, new_leaf)
         if not added_with_token:
             continue
-        return Change(
-            kind=ChangeKind.TAG_TYPE_RENAMED,
+        return make_change(
+            ChangeKind.TAG_TYPE_RENAMED,
             symbol=removed.name,
             description=(
                 f"Empty tag struct '{removed.name}' renamed to "
@@ -638,8 +639,8 @@ def detect_default_template_arg_changed(
                 continue
             seen_pairs.add(key)
             findings.append(
-                Change(
-                    kind=ChangeKind.DEFAULT_TEMPLATE_ARG_CHANGED,
+                make_change(
+                    ChangeKind.DEFAULT_TEMPLATE_ARG_CHANGED,
                     symbol=fn.mangled,
                     description=(
                         f"Template instantiation '{fn.name}' substitutes to "
@@ -748,8 +749,8 @@ def _emit_inline_body_findings(
             if key in seen:
                 continue
             seen.add(key)
-            findings.append(Change(
-                kind=ChangeKind.INLINE_BODY_REFERENCES_RENAMED_MEMBER,
+            findings.append(make_change(
+                ChangeKind.INLINE_BODY_REFERENCES_RENAMED_MEMBER,
                 symbol=holder,
                 description=(
                     f"Public class '{holder}' has inline accessors "
@@ -938,8 +939,8 @@ def detect_bundle_soname_skew(
         f"metadata; mixed loads can corrupt internal cross-library state."
     )
     return [
-        Change(
-            kind=ChangeKind.BUNDLE_SONAME_SKEW,
+        make_change(
+            ChangeKind.BUNDLE_SONAME_SKEW,
             symbol="<bundle>",
             description=desc,
             old_value=str(sorted(deltas[k][0].library for k in stayed + bumped)),

@@ -57,6 +57,7 @@ from .checker_policy import ChangeKind, Confidence
 from .checker_types import Change
 from .demangle import demangle
 from .detector_registry import registry
+from .diff_helpers import make_change
 from .model import AbiSnapshot, stdlib_namespaces_excluded
 
 # Runtime/standard-library RTTI we never want to flag — these belong to
@@ -208,8 +209,8 @@ def _diff_elf_layout(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         o_slots = _vtable_slots(o_size, pointer_size)
         n_slots = _vtable_slots(n_size, pointer_size)
         changes.append(
-            Change(
-                kind=ChangeKind.VTABLE_SLOT_COUNT_CHANGED,
+            make_change(
+                ChangeKind.VTABLE_SLOT_COUNT_CHANGED,
                 symbol=sym,
                 description=(
                     f"Vtable for '{cls}' changed size: {o_size} → {n_size} bytes "
@@ -238,8 +239,8 @@ def _diff_elf_layout(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         o_shape = _inheritance_shape(o_size, pointer_size)
         n_shape = _inheritance_shape(n_size, pointer_size)
         changes.append(
-            Change(
-                kind=ChangeKind.RTTI_INHERITANCE_CHANGED,
+            make_change(
+                ChangeKind.RTTI_INHERITANCE_CHANGED,
                 symbol=sym,
                 description=(
                     f"RTTI typeinfo for '{cls}' changed size: {o_size} → {n_size} bytes "

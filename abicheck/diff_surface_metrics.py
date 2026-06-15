@@ -26,6 +26,7 @@ from __future__ import annotations
 
 from .checker_policy import ChangeKind
 from .checker_types import Change
+from .diff_helpers import make_change
 from .model import AbiSnapshot
 from .surface_graph import SurfaceMetrics, compute_surface_metrics
 
@@ -52,8 +53,8 @@ def diff_surface_metrics(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     new_count = _public_decl_count(nm)
     if new_count > old_count:
         changes.append(
-            Change(
-                kind=ChangeKind.PUBLIC_SURFACE_GREW,
+            make_change(
+                ChangeKind.PUBLIC_SURFACE_GREW,
                 symbol="<surface>",
                 description=(
                     f"public surface grew: {old_count} → {new_count} "
@@ -65,8 +66,8 @@ def diff_surface_metrics(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         )
     elif new_count < old_count:
         changes.append(
-            Change(
-                kind=ChangeKind.PUBLIC_SURFACE_SHRANK,
+            make_change(
+                ChangeKind.PUBLIC_SURFACE_SHRANK,
                 symbol="<surface>",
                 description=(
                     f"public surface shrank: {old_count} → {new_count} "
@@ -79,8 +80,8 @@ def diff_surface_metrics(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
 
     if nm.undocumented_export_ratio - om.undocumented_export_ratio > _RATIO_EPSILON:
         changes.append(
-            Change(
-                kind=ChangeKind.UNDOCUMENTED_EXPORT_RATIO_INCREASED,
+            make_change(
+                ChangeKind.UNDOCUMENTED_EXPORT_RATIO_INCREASED,
                 symbol="<surface>",
                 description=(
                     "undocumented-export ratio rose: "

@@ -120,10 +120,12 @@ def test_all_templates_use_only_known_vocabulary() -> None:
     assert not offenders, f"templates use unknown placeholders: {offenders}"
 
 
-# Migrated kinds and a (kwargs -> expected description) sample that must match
-# the exact pre-C6 f-string wording, so golden snapshots and any downstream
-# description parsing are unaffected.
+# A representative set of migrated kinds with the exact pre-C6 f-string wording,
+# so golden snapshots and any downstream description parsing stay byte-identical.
+# (The full 5400-test detector suite locks the exact wording for *every* migrated
+# site through the real detectors; these pin a readable cross-section in one place.)
 _FAITHFULNESS_CASES = [
+    # diff_symbols
     (ChangeKind.FUNC_RETURN_CHANGED, {"name": "foo"}, "Return type changed: foo"),
     (ChangeKind.FUNC_PARAMS_CHANGED, {"name": "foo"}, "Parameters changed: foo"),
     (ChangeKind.FUNC_ADDED, {"new": "foo"}, "New public function: foo"),
@@ -145,6 +147,49 @@ _FAITHFULNESS_CASES = [
     (ChangeKind.VAR_TYPE_CHANGED, {"name": "g"}, "Variable type changed: g"),
     (ChangeKind.VAR_REMOVED, {"name": "g"}, "Public variable removed: g"),
     (ChangeKind.VAR_ADDED, {"name": "g"}, "New public variable: g"),
+    # diff_types — type/field/enum/union/typedef/qualifier family
+    (ChangeKind.TYPE_ADDED, {"name": "Widget"}, "New type: Widget"),
+    (
+        ChangeKind.TYPE_SIZE_CHANGED,
+        {"name": "Widget", "old": "64", "new": "128"},
+        "Size changed: Widget (64 → 128 bits)",
+    ),
+    (
+        ChangeKind.TYPE_FIELD_REMOVED,
+        {"name": "Widget", "detail": "x"},
+        "Field removed: Widget::x",
+    ),
+    (
+        ChangeKind.TYPE_FIELD_OFFSET_CHANGED,
+        {"name": "Widget", "detail": "x", "old": "0", "new": "32"},
+        "Field offset changed: Widget::x (0 → 32 bits)",
+    ),
+    (
+        ChangeKind.ENUM_MEMBER_REMOVED,
+        {"name": "Color", "detail": "Red"},
+        "Enum member removed: Color::Red",
+    ),
+    (
+        ChangeKind.ENUM_MEMBER_RENAMED,
+        {"name": "Color", "old": "Red", "new": "Crimson", "detail": "1"},
+        "Enum member renamed: Color::Red → Crimson (value=1)",
+    ),
+    (
+        ChangeKind.FIELD_RENAMED,
+        {"name": "Widget", "old": "x", "new": "y"},
+        "Field renamed: Widget::x → y",
+    ),
+    (ChangeKind.TYPEDEF_REMOVED, {"name": "size_type"}, "Typedef removed: size_type"),
+    (
+        ChangeKind.FUNC_STATIC_CHANGED,
+        {"name": "Widget::make"},
+        "Static qualifier changed: Widget::make",
+    ),
+    (
+        ChangeKind.USED_RESERVED_FIELD,
+        {"name": "Widget", "old": "reserved0", "new": "flags"},
+        "Reserved field put into use: Widget::reserved0 → flags",
+    ),
 ]
 
 
@@ -156,8 +201,25 @@ def test_template_renders_legacy_wording(
     assert change.description == expected
 
 
-def test_faithfulness_cases_cover_every_templated_kind() -> None:
-    # Keeps the table honest: if a new template is added it must get a
-    # faithfulness sample here too.
+def test_faithfulness_samples_are_templated_kinds() -> None:
+    # Every hand-pinned sample must name a kind that actually owns a template.
     covered = {kind.value for kind, _, _ in _FAITHFULNESS_CASES}
-    assert covered == set(REGISTRY.templated_kinds())
+    assert covered <= set(REGISTRY.templated_kinds())
+
+
+def test_every_templated_kind_renders_from_sentinels() -> None:
+    # Exhaustive guard over ALL templated kinds: each must render via make_change
+    # from sentinel values for exactly the placeholders it declares — catches a
+    # stray placeholder, a duplicate brace, or a KeyError the moment a template
+    # is added, without hand-maintaining an exact-wording sample for each.
+    sentinels = {"symbol": "_Zsym", "name": "N", "old": "O", "new": "W", "detail": "D"}
+    for kind in ChangeKind:
+        template = REGISTRY.description_template_for(kind.value)
+        if template is None:
+            continue
+        used = _template_fields(template)
+        kwargs = {k: sentinels[k] for k in used if k != "symbol"}
+        change = make_change(kind, symbol="_Zsym", **kwargs)
+        # Sentinels for the placeholders it used must all appear in the output.
+        for k in used:
+            assert sentinels[k] in change.description, (kind.value, template)

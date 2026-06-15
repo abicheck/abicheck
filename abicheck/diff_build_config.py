@@ -40,6 +40,7 @@ from typing import TYPE_CHECKING
 
 from .checker_policy import ChangeKind
 from .checker_types import Change
+from .diff_helpers import make_change
 
 if TYPE_CHECKING:
     from .probe_harness import MatrixSnapshot
@@ -99,8 +100,8 @@ def _env_dependence_change(
     absent = sorted(c for c, p in presence.items() if not p)
     if not present or not absent:
         return None
-    return Change(
-        kind=ChangeKind.API_DEPENDS_ON_CONSUMER_ENV,
+    return make_change(
+        ChangeKind.API_DEPENDS_ON_CONSUMER_ENV,
         symbol=name,
         description=(
             f"{kind_label} '{name}' is present in configurations "
@@ -165,8 +166,8 @@ def detect_cxx_standard_floor_raised(
         return []
     if new_floor <= old_floor:
         return []
-    return [Change(
-        kind=ChangeKind.CXX_STANDARD_FLOOR_RAISED,
+    return [make_change(
+        ChangeKind.CXX_STANDARD_FLOOR_RAISED,
         symbol="__cplusplus",
         description=(
             f"C++ standard floor raised from C++{old_floor} to "
@@ -212,8 +213,8 @@ def detect_behavioural_default_changed(
                 f"Source compiles and links unchanged; runtime "
                 f"behaviour silently differs."
             )
-        changes.append(Change(
-            kind=ChangeKind.BEHAVIOURAL_DEFAULT_CHANGED,
+        changes.append(make_change(
+            ChangeKind.BEHAVIOURAL_DEFAULT_CHANGED,
             symbol=k,
             description=desc,
             old_value=str(ov) if ov is not None else None,

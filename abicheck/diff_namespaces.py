@@ -45,6 +45,7 @@ from typing import TYPE_CHECKING
 
 from .checker_policy import ChangeKind
 from .checker_types import Change
+from .diff_helpers import make_change
 
 if TYPE_CHECKING:
     from .model import AbiSnapshot
@@ -257,8 +258,8 @@ def _emit_experimental_change(
     old_q = old_exp[0]
     if event == "graduated":
         new_q = new_stable[0]
-        return Change(
-            kind=ChangeKind.EXPERIMENTAL_GRADUATED,
+        return make_change(
+            ChangeKind.EXPERIMENTAL_GRADUATED,
             symbol=new_q,
             description=(
                 f"Experimental {kind_label} '{old_q}' graduated to stable "
@@ -267,8 +268,8 @@ def _emit_experimental_change(
             old_value=old_q,
             new_value=new_q,
         )
-    return Change(
-        kind=ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT,
+    return make_change(
+        ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT,
         symbol=old_q,
         description=(
             f"Experimental {kind_label} '{old_q}' was removed and no "
@@ -422,8 +423,8 @@ def _batch_demangle_public(snap: AbiSnapshot) -> dict[str, str]:
 
 def _build_std_reexport_change(declared: str, underlying: str) -> Change:
     """Build a single ``STD_REEXPORT_REMOVED`` finding."""
-    return Change(
-        kind=ChangeKind.STD_REEXPORT_REMOVED,
+    return make_change(
+        ChangeKind.STD_REEXPORT_REMOVED,
         symbol=declared,
         description=(
             f"Public re-export '{declared}' of standard-library entity "
@@ -584,8 +585,8 @@ def _emit_version_bumps(
             continue
         old_q = old_list[0][0]
         new_q = new_list[0][0]
-        changes.append(Change(
-            kind=ChangeKind.INLINE_NAMESPACE_VERSION_BUMPED,
+        changes.append(make_change(
+            ChangeKind.INLINE_NAMESPACE_VERSION_BUMPED,
             symbol=new_q,
             description=(
                 f"Inline namespace version bumped: '{old_q}' → '{new_q}' "

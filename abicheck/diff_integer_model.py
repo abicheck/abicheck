@@ -27,6 +27,7 @@ from __future__ import annotations
 from .checker_policy import ChangeKind
 from .checker_types import Change
 from .detector_registry import registry
+from .diff_helpers import make_change
 from .model import AbiSnapshot, Function, Visibility
 
 # Canonical integer-width buckets. A change that moves a spelling from one
@@ -179,8 +180,8 @@ def _diff_integer_model(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     direction = _integer_model_direction(up, down)
     detail = _integer_model_detail(flips, total, typedef_flips)
 
-    return [Change(
-        kind=ChangeKind.INTEGER_MODEL_CHANGED,
+    return [make_change(
+        ChangeKind.INTEGER_MODEL_CHANGED,
         symbol="__integer_model",
         description=(
             f"Integer model changed ({direction}): {detail}. "

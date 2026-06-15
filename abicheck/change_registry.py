@@ -192,45 +192,60 @@ REGISTRY = ChangeKindRegistry([
 
     # ── Type changes ───────────────────────────────────────────────────────
     _E("type_size_changed", _B,
-       impact="Old code allocates or copies the type with the old size; heap/stack corruption, out-of-bounds access."),
+       impact="Old code allocates or copies the type with the old size; heap/stack corruption, out-of-bounds access.",
+       description_template="Size changed: {name} ({old} → {new} bits)"),
     _E("type_alignment_changed", _B,
-       impact="Misaligned access can cause bus errors on strict architectures or silent data corruption with SIMD."),
+       impact="Misaligned access can cause bus errors on strict architectures or silent data corruption with SIMD.",
+       description_template="Alignment changed: {name} ({old} → {new} bits)"),
     _E("type_field_removed", _B,
-       impact="Old code accesses a field that no longer exists at the expected offset; reads garbage or writes out of bounds."),
+       impact="Old code accesses a field that no longer exists at the expected offset; reads garbage or writes out of bounds.",
+       description_template="Field removed: {name}::{detail}"),
     _E("type_field_added", _B,
-       impact="New field shifts subsequent fields; old code reads wrong offsets for all fields after insertion point."),
+       impact="New field shifts subsequent fields; old code reads wrong offsets for all fields after insertion point.",
+       description_template="Field added: {name}::{detail}"),
     _E("type_field_offset_changed", _B,
-       impact="Old code reads/writes fields at stale offsets; silent data corruption."),
+       impact="Old code reads/writes fields at stale offsets; silent data corruption.",
+       description_template="Field offset changed: {name}::{detail} ({old} → {new} bits)"),
     _E("type_field_type_changed", _B,
-       impact="Field has different size or representation; old code misinterprets the data."),
+       impact="Field has different size or representation; old code misinterprets the data.",
+       description_template="Field type changed: {name}::{detail}"),
     _E("type_base_changed", _B,
        impact="Base class layout change shifts derived member offsets and vtable pointers; this-pointer arithmetic breaks."),
     _E("type_vtable_changed", _B,
        impact="Vtable slot reordering; virtual dispatch calls wrong method."),
     _E("type_added", _C, is_addition=True,
-       impact="New type available; existing binaries are unaffected."),
+       impact="New type available; existing binaries are unaffected.",
+       description_template="New type: {name}"),
     _E("type_removed", _B,
        impact="Old code references a type that no longer exists; compilation or link failure."),
     _E("type_field_added_compatible", _C, is_addition=True,
-       impact="Field appended without changing existing offsets; old code works but won't initialize the new field."),
+       impact="Field appended without changing existing offsets; old code works but won't initialize the new field.",
+       description_template="Field added: {name}::{detail}"),
 
     # ── Enum changes ───────────────────────────────────────────────────────
     _E("enum_member_removed", _B,
-       impact="Old code uses a constant that no longer exists; compile error for source, stale value for binaries."),
+       impact="Old code uses a constant that no longer exists; compile error for source, stale value for binaries.",
+       description_template="Enum member removed: {name}::{detail}"),
     _E("enum_member_added", _C, is_addition=True,
-       impact="New enumerator may shift subsequent values in non-fixed enums; switch defaults may miss the new case."),
+       impact="New enumerator may shift subsequent values in non-fixed enums; switch defaults may miss the new case.",
+       description_template="Enum member added: {name}::{detail}"),
     _E("enum_member_value_changed", _B,
-       impact="Old binaries use stale numeric values; logic comparisons and switch statements silently break."),
+       impact="Old binaries use stale numeric values; logic comparisons and switch statements silently break.",
+       description_template="Enum member value changed: {name}::{detail}"),
     _E("enum_last_member_value_changed", _R,
-       impact="Sentinel/MAX value changed; old code using it for array sizes allocates wrong amount."),
+       impact="Sentinel/MAX value changed; old code using it for array sizes allocates wrong amount.",
+       description_template="Enum member value changed: {name}::{detail}"),
     _E("typedef_removed", _B,
-       impact="Old code using the typedef name won't compile; binary impact depends on usage."),
+       impact="Old code using the typedef name won't compile; binary impact depends on usage.",
+       description_template="Typedef removed: {name}"),
 
     # ── Method qualifier changes ───────────────────────────────────────────
     _E("func_static_changed", _B,
-       impact="Static/non-static transition changes calling convention (implicit this pointer); ABI mismatch."),
+       impact="Static/non-static transition changes calling convention (implicit this pointer); ABI mismatch.",
+       description_template="Static qualifier changed: {name}"),
     _E("func_cv_changed", _B,
-       impact="const/volatile on 'this' changes the mangled name; old binaries link to the wrong symbol."),
+       impact="const/volatile on 'this' changes the mangled name; old binaries link to the wrong symbol.",
+       description_template="CV qualifier changed: {name}"),
     _E("func_visibility_changed", _B,
        impact="Symbol hidden from dynamic linking; old binaries can't find it at load time."),
     _E("func_visibility_protected_changed", _C,
@@ -241,25 +256,32 @@ REGISTRY = ChangeKindRegistry([
 
     # ── Virtual changes ────────────────────────────────────────────────────
     _E("func_pure_virtual_added", _B,
-       impact="Old subclasses don't implement the pure virtual; instantiation causes linker error or UB."),
+       impact="Old subclasses don't implement the pure virtual; instantiation causes linker error or UB.",
+       description_template="Function became pure virtual: {name}"),
     _E("func_virtual_became_pure", _B,
-       impact="Concrete virtual became pure; old binaries calling it get unresolved dispatch."),
+       impact="Concrete virtual became pure; old binaries calling it get unresolved dispatch.",
+       description_template="Function became pure virtual: {name}"),
 
     # ── Union field changes ────────────────────────────────────────────────
     _E("union_field_added", _C, is_addition=True,
-       impact="Union size may grow; old code allocating with old sizeof gets truncated data."),
+       impact="Union size may grow; old code allocating with old sizeof gets truncated data.",
+       description_template="Union field added: {name}::{detail}"),
     _E("union_field_removed", _B,
-       impact="Old code accessing removed alternative reads uninitialized memory."),
+       impact="Old code accessing removed alternative reads uninitialized memory.",
+       description_template="Union field removed: {name}::{detail}"),
     _E("union_field_type_changed", _B,
-       impact="Old code interprets the union member with wrong type layout."),
+       impact="Old code interprets the union member with wrong type layout.",
+       description_template="Union field type changed: {name}::{detail}"),
 
     # ── Typedef changes ────────────────────────────────────────────────────
     _E("typedef_base_changed", _B,
-       impact="Underlying type changed; old code using the typedef operates on wrong representation."),
+       impact="Underlying type changed; old code using the typedef operates on wrong representation.",
+       description_template="Typedef base type changed: {name}"),
 
     # ── Bitfield changes ───────────────────────────────────────────────────
     _E("field_bitfield_changed", _B,
-       impact="Bit-field width or offset changed; old code reads/writes wrong bits."),
+       impact="Bit-field width or offset changed; old code reads/writes wrong bits.",
+       description_template="Bitfield layout changed: {name}::{detail}"),
 
     # ── ELF-only (Sprint 2) ───────────────────────────────────────────────
     _E("soname_changed", _R,
@@ -420,30 +442,40 @@ REGISTRY = ChangeKindRegistry([
     _E("var_lost_const", _B,
        impact="Variable no longer const; ODR violations possible if old code inlined the value."),
     _E("type_became_opaque", _B,
-       impact="Type became forward-declaration only; old code using sizeof or accessing fields fails."),
-    _E("base_class_position_changed", _B),
+       impact="Type became forward-declaration only; old code using sizeof or accessing fields fails.",
+       description_template="Type became opaque (forward-declaration only): {name} — stack allocation no longer possible"),
+    _E("base_class_position_changed", _B,
+       description_template="Base class order reordered: {name} — this-pointer adjustments changed"),
     _E("base_class_virtual_changed", _B),
 
     # ── Sprint 7 — Source-level breaks ─────────────────────────────────────
     _E("enum_member_renamed", _A,
        impact="Enumerator name changed but value is the same; source code using old name won't compile.",
-       policy_overrides={"sdk_vendor": _C}),
+       policy_overrides={"sdk_vendor": _C},
+       description_template="Enum member renamed: {name}::{old} → {new} (value={detail})"),
     _E("param_default_value_changed", _C),
     _E("param_default_value_removed", _A,
        policy_overrides={"sdk_vendor": _C}),
     _E("field_renamed", _A,
        impact="Field name changed but offset is the same; source code using old name won't compile.",
-       policy_overrides={"sdk_vendor": _C}),
+       policy_overrides={"sdk_vendor": _C},
+       description_template="Field renamed: {name}::{old} → {new}"),
     _E("param_renamed", _A,
        policy_overrides={"sdk_vendor": _C}),
 
     # ── Field qualifier changes ────────────────────────────────────────────
-    _E("field_became_const", _C),
-    _E("field_lost_const", _C),
-    _E("field_became_volatile", _C),
-    _E("field_lost_volatile", _C),
-    _E("field_became_mutable", _C),
-    _E("field_lost_mutable", _C),
+    _E("field_became_const", _C,
+       description_template="Field became const: {name}::{detail}"),
+    _E("field_lost_const", _C,
+       description_template="Field lost const: {name}::{detail}"),
+    _E("field_became_volatile", _C,
+       description_template="Field became volatile: {name}::{detail}"),
+    _E("field_lost_volatile", _C,
+       description_template="Field lost volatile: {name}::{detail}"),
+    _E("field_became_mutable", _C,
+       description_template="Field became mutable: {name}::{detail}"),
+    _E("field_lost_mutable", _C,
+       description_template="Field lost mutable: {name}::{detail}"),
 
     # ── Pointer level changes ──────────────────────────────────────────────
     _E("param_pointer_level_changed", _B),
@@ -462,13 +494,17 @@ REGISTRY = ChangeKindRegistry([
 
     # ── ABICC full parity — remaining gaps ─────────────────────────────────
     _E("var_value_changed", _C),
-    _E("type_kind_changed", _B),
+    _E("type_kind_changed", _B,
+       description_template="Aggregate kind changed: {name} ({old} → {new})"),
     _E("source_level_kind_changed", _A,
-       policy_overrides={"sdk_vendor": _C}),
-    _E("used_reserved_field", _C),
+       policy_overrides={"sdk_vendor": _C},
+       description_template="Aggregate kind changed: {name} ({old} → {new})"),
+    _E("used_reserved_field", _C,
+       description_template="Reserved field put into use: {name}::{old} → {new}"),
     _E("removed_const_overload", _A,
        impact="Const overload removed; source code calling const version breaks.",
-       policy_overrides={"sdk_vendor": _C}),
+       policy_overrides={"sdk_vendor": _C},
+       description_template="Const method overload removed: {name} (non-const version still exists)"),
     _E("param_restrict_changed", _C),
     _E("param_became_va_list", _C),
     _E("param_lost_va_list", _C),
@@ -787,7 +823,8 @@ REGISTRY = ChangeKindRegistry([
               "binaries keep running, but recompilation against the new header "
               "fails — a source/API break. Invisible to binary analysis: "
               "`final` is not recorded in DWARF or the object file, so this is "
-              "detected only in header (castxml) mode."),
+              "detected only in header (castxml) mode.",
+       description_template="Class gained `final` specifier: {name} — consumers that derive from it no longer compile"),
     _E("type_lost_final", _R,
        impact="A class/struct lost the `final` specifier. Deriving from it is "
               "now allowed and previously-valid source still compiles, so this "
@@ -797,7 +834,8 @@ REGISTRY = ChangeKindRegistry([
               "subclass that overrides, those old binaries keep dispatching "
               "statically to the wrong target. KDE's C++ binary-compatibility "
               "policy lists removing `final` as a change to avoid; surfaced as a "
-              "deployment risk for review rather than a hard break."),
+              "deployment risk for review rather than a hard break.",
+       description_template="Class lost `final` specifier: {name}"),
 
     # ── Namespace-shape patterns (PR follow-up to #238) ─────────────────
     # Generic detectors for template / header-only libraries (the patterns

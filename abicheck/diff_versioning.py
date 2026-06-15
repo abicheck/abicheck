@@ -22,6 +22,7 @@ from __future__ import annotations
 
 from .checker_policy import API_BREAK_KINDS, BREAKING_KINDS, ChangeKind, Verdict
 from .checker_types import Change
+from .diff_helpers import make_change
 from .elf_metadata import ElfMetadata
 
 # Tokens that mark an ELF symbol-version node as implementation-internal rather
@@ -180,8 +181,8 @@ def detect_version_node_changes(
         sample = ", ".join(sym_names[:5])
         suffix = f" (+{len(sym_names) - 5} more)" if len(sym_names) > 5 else ""
         changes.append(
-            Change(
-                kind=ChangeKind.SYMBOL_VERSION_NODE_REMOVED,
+            make_change(
+                ChangeKind.SYMBOL_VERSION_NODE_REMOVED,
                 symbol=node,
                 description=(
                     f"Version node {node} was entirely removed from the version script. "
@@ -201,8 +202,8 @@ def detect_version_node_changes(
         new_node = new_sym_to_node[sym_name]
         if old_node != new_node:
             changes.append(
-                Change(
-                    kind=ChangeKind.SYMBOL_MOVED_VERSION_NODE,
+                make_change(
+                    ChangeKind.SYMBOL_MOVED_VERSION_NODE,
                     symbol=sym_name,
                     description=(
                         f"Symbol {sym_name} moved from version node {old_node} to "
@@ -260,8 +261,8 @@ def detect_version_script_missing(
     if not old_had_version_script and old_elf.symbols:
         return []
     return [
-        Change(
-            kind=ChangeKind.VERSION_SCRIPT_MISSING,
+        make_change(
+            ChangeKind.VERSION_SCRIPT_MISSING,
             symbol="<version-script>",
             description=(
                 f"Library exports {len(new_elf.symbols)} symbol(s) without "
@@ -325,8 +326,8 @@ def check_soname_bump_policy(
         else:
             detail = f"SONAME was dropped (was {old_elf.soname!r})"
         result.append(
-            Change(
-                kind=ChangeKind.SONAME_BUMP_RECOMMENDED,
+            make_change(
+                ChangeKind.SONAME_BUMP_RECOMMENDED,
                 symbol="DT_SONAME",
                 description=(
                     f"{breaking_count} binary-incompatible change(s) detected but "
@@ -341,8 +342,8 @@ def check_soname_bump_policy(
 
     if not has_breaking and soname_bumped:
         result.append(
-            Change(
-                kind=ChangeKind.SONAME_BUMP_UNNECESSARY,
+            make_change(
+                ChangeKind.SONAME_BUMP_UNNECESSARY,
                 symbol="DT_SONAME",
                 description=(
                     f"SONAME changed from {old_elf.soname!r} to {new_elf.soname!r} "

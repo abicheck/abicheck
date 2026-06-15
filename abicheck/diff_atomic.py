@@ -27,6 +27,7 @@ import re
 from .checker_policy import ChangeKind
 from .checker_types import Change
 from .detector_registry import registry
+from .diff_helpers import make_change
 from .diff_type_spellings import iter_type_slot_changes
 from .model import AbiSnapshot
 
@@ -48,8 +49,8 @@ def _diff_atomic(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         if old_a == new_a:
             continue
         direction = "qualifier added" if new_a else "qualifier removed"
-        changes.append(Change(
-            kind=ChangeKind.ATOMIC_QUALIFIER_CHANGED,
+        changes.append(make_change(
+            ChangeKind.ATOMIC_QUALIFIER_CHANGED,
             symbol=ch.symbol,
             description=(
                 f"_Atomic {direction} on {ch.slot} of '{ch.symbol}': "

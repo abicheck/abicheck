@@ -34,6 +34,7 @@ from __future__ import annotations
 from .checker_policy import ChangeKind
 from .checker_types import Change
 from .detector_registry import registry
+from .diff_helpers import make_change
 from .model import AbiSnapshot
 from .sycl_metadata import SyclMetadata
 
@@ -46,8 +47,8 @@ def _diff_implementation(old: SyclMetadata, new: SyclMetadata) -> list[Change]:
         and new.implementation
         and old.implementation != new.implementation
     ):
-        changes.append(Change(
-            kind=ChangeKind.SYCL_IMPLEMENTATION_CHANGED,
+        changes.append(make_change(
+            ChangeKind.SYCL_IMPLEMENTATION_CHANGED,
             symbol="sycl::implementation",
             description=(
                 f"SYCL implementation changed from {old.implementation} to "
@@ -63,8 +64,8 @@ def _diff_pi_version(old: SyclMetadata, new: SyclMetadata) -> list[Change]:
     """Detect PI interface version changes at the runtime level."""
     changes: list[Change] = []
     if old.pi_version and new.pi_version and old.pi_version != new.pi_version:
-        changes.append(Change(
-            kind=ChangeKind.SYCL_PI_VERSION_CHANGED,
+        changes.append(make_change(
+            ChangeKind.SYCL_PI_VERSION_CHANGED,
             symbol="sycl::pi",
             description=(
                 f"PI interface version changed from {old.pi_version} to "
@@ -90,8 +91,8 @@ def _diff_plugins(old: SyclMetadata, new: SyclMetadata) -> list[Change]:
     for key in sorted(old_keys - new_keys):
         iface, name = key
         old_plugin = old.plugin_map[key]
-        changes.append(Change(
-            kind=ChangeKind.SYCL_PLUGIN_REMOVED,
+        changes.append(make_change(
+            ChangeKind.SYCL_PLUGIN_REMOVED,
             symbol=f"sycl::{iface}::{name}",
             description=(
                 f"Backend plugin '{old_plugin.library}' ({name}) removed; "
@@ -105,8 +106,8 @@ def _diff_plugins(old: SyclMetadata, new: SyclMetadata) -> list[Change]:
     for key in sorted(new_keys - old_keys):
         iface, name = key
         new_plugin = new.plugin_map[key]
-        changes.append(Change(
-            kind=ChangeKind.SYCL_PLUGIN_ADDED,
+        changes.append(make_change(
+            ChangeKind.SYCL_PLUGIN_ADDED,
             symbol=f"sycl::{iface}::{name}",
             description=(
                 f"Backend plugin '{new_plugin.library}' ({name}) added; "
@@ -137,8 +138,8 @@ def _diff_plugin_entrypoints(
         iface = new_plugin.interface_type.upper()  # "PI" or "UR"
 
         for ep in sorted(old_eps - new_eps):
-            changes.append(Change(
-                kind=ChangeKind.SYCL_PI_ENTRYPOINT_REMOVED,
+            changes.append(make_change(
+                ChangeKind.SYCL_PI_ENTRYPOINT_REMOVED,
                 symbol=f"sycl::{new_plugin.interface_type}::{name}::{ep}",
                 description=(
                     f"{iface} entry point '{ep}' removed from plugin "
@@ -150,8 +151,8 @@ def _diff_plugin_entrypoints(
             ))
 
         for ep in sorted(new_eps - old_eps):
-            changes.append(Change(
-                kind=ChangeKind.SYCL_PI_ENTRYPOINT_ADDED,
+            changes.append(make_change(
+                ChangeKind.SYCL_PI_ENTRYPOINT_ADDED,
                 symbol=f"sycl::{new_plugin.interface_type}::{name}::{ep}",
                 description=(
                     f"{iface} entry point '{ep}' added to plugin "
@@ -175,8 +176,8 @@ def _diff_plugin_search_paths(
     """Detect plugin search path changes."""
     changes: list[Change] = []
     if old.plugin_search_paths != new.plugin_search_paths:
-        changes.append(Change(
-            kind=ChangeKind.SYCL_PLUGIN_SEARCH_PATH_CHANGED,
+        changes.append(make_change(
+            ChangeKind.SYCL_PLUGIN_SEARCH_PATH_CHANGED,
             symbol="sycl::pi::search_paths",
             description=(
                 "SYCL plugin search paths changed; plugins may not be found "
@@ -198,8 +199,8 @@ def _diff_runtime_version(
         and new.runtime_version
         and old.runtime_version != new.runtime_version
     ):
-        changes.append(Change(
-            kind=ChangeKind.SYCL_RUNTIME_VERSION_CHANGED,
+        changes.append(make_change(
+            ChangeKind.SYCL_RUNTIME_VERSION_CHANGED,
             symbol="sycl::runtime",
             description=(
                 f"SYCL runtime version changed from {old.runtime_version} "
@@ -224,8 +225,8 @@ def _diff_backend_driver_reqs(
         old_drv = old_map[key].min_driver_version
         new_drv = new_map[key].min_driver_version
         if old_drv and new_drv and old_drv != new_drv:
-            changes.append(Change(
-                kind=ChangeKind.SYCL_BACKEND_DRIVER_REQ_CHANGED,
+            changes.append(make_change(
+                ChangeKind.SYCL_BACKEND_DRIVER_REQ_CHANGED,
                 symbol=f"sycl::pi::{name}::driver",
                 description=(
                     f"Minimum driver requirement for {name} backend changed "

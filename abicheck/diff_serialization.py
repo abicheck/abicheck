@@ -35,6 +35,7 @@ from typing import TYPE_CHECKING
 
 from .checker_policy import ChangeKind
 from .checker_types import Change
+from .diff_helpers import make_change
 
 if TYPE_CHECKING:
     from .model import AbiSnapshot
@@ -130,8 +131,8 @@ def detect_serialization_tag_changes(
                 f"{new_val}; persisted data using the old tag id is no "
                 f"longer recognised."
             )
-        findings.append(Change(
-            kind=ChangeKind.SERIALIZATION_TAG_CHANGED,
+        findings.append(make_change(
+            ChangeKind.SERIALIZATION_TAG_CHANGED,
             symbol=name,
             description=desc,
             old_value=old_val,

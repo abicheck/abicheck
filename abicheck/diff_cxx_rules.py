@@ -25,6 +25,7 @@ from collections.abc import Iterable
 
 from .checker_policy import ChangeKind
 from .checker_types import Change
+from .diff_helpers import make_change
 from .model import Function, RecordType
 
 _ASCII_DIGITS = "0123456789"
@@ -425,8 +426,8 @@ def virtual_method_addition(
     bases = _transitive_bases(t_new, new_types) | _transitive_bases(t_old, old_types)
     if any(sig in old_virtual_sigs.get(b, ()) for b in bases):
         return None
-    return Change(
-        kind=ChangeKind.VIRTUAL_METHOD_ADDED,
+    return make_change(
+        ChangeKind.VIRTUAL_METHOD_ADDED,
         symbol=f_new.mangled,
         description=(
             f"New virtual method added to existing class {owner}: {f_new.name} "

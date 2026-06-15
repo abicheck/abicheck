@@ -26,6 +26,7 @@ import re
 from .checker_policy import ChangeKind
 from .checker_types import Change
 from .detector_registry import registry
+from .diff_helpers import make_change
 from .diff_type_spellings import iter_type_slot_changes
 from .model import AbiSnapshot
 
@@ -60,8 +61,8 @@ def _diff_bit_int(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
             detail = f"type was _BitInt({old_w})"
         else:
             detail = f"_BitInt width changed {old_w} → {new_w}"
-        changes.append(Change(
-            kind=ChangeKind.BIT_INT_WIDTH_CHANGED,
+        changes.append(make_change(
+            ChangeKind.BIT_INT_WIDTH_CHANGED,
             symbol=ch.symbol,
             description=(
                 f"_BitInt change on {ch.slot} of '{ch.symbol}': {detail} "

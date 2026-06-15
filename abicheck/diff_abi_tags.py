@@ -32,6 +32,7 @@ import re
 from .checker_policy import ChangeKind
 from .checker_types import Change
 from .detector_registry import registry
+from .diff_helpers import make_change
 from .model import AbiSnapshot, Function, Visibility
 
 # Itanium ABI tag component: 'B' followed by a <source-name> = <length><chars>.
@@ -131,8 +132,8 @@ def _diff_abi_tags(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
             parts.append("gained " + ", ".join(f"[abi:{t}]" for t in gained))
         if lost:
             parts.append("lost " + ", ".join(f"[abi:{t}]" for t in lost))
-        changes.append(Change(
-            kind=ChangeKind.ABI_TAG_CHANGED,
+        changes.append(make_change(
+            ChangeKind.ABI_TAG_CHANGED,
             symbol=old_map[r].name,
             description=(
                 f"ABI-tag set changed for '{old_map[r].name}': "

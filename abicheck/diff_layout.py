@@ -52,6 +52,7 @@ from typing import TYPE_CHECKING
 from .checker_policy import ChangeKind
 from .checker_types import Change
 from .detector_registry import registry
+from .diff_helpers import make_change
 
 if TYPE_CHECKING:
     from .model import AbiSnapshot, RecordType
@@ -101,8 +102,8 @@ def _check_base_offsets(name: str, old_rec: RecordType, new_rec: RecordType) -> 
         old_off = old_rec.base_offsets.get(base)
         if old_off is not None and old_off != new_off:
             changes.append(
-                Change(
-                    kind=ChangeKind.BASE_CLASS_OFFSET_CHANGED,
+                make_change(
+                    ChangeKind.BASE_CLASS_OFFSET_CHANGED,
                     symbol=name,
                     description=(
                         f"Base class '{base}' moved within '{name}' "
@@ -136,8 +137,8 @@ def _check_vptr_introduced(name: str, old_rec: RecordType, new_rec: RecordType) 
         and new_rec.vptr_offset_bits is not None
     ):
         return [
-            Change(
-                kind=ChangeKind.VPTR_INTRODUCED,
+            make_change(
+                ChangeKind.VPTR_INTRODUCED,
                 symbol=name,
                 description=(
                     f"'{name}' gained a vtable pointer (became polymorphic). "
@@ -156,8 +157,8 @@ def _check_trivially_copyable_lost(name: str, old_rec: RecordType, new_rec: Reco
     """Emit TRIVIALLY_COPYABLE_LOST when the trait is removed."""
     if old_rec.is_trivially_copyable is True and new_rec.is_trivially_copyable is False:
         return [
-            Change(
-                kind=ChangeKind.TRIVIALLY_COPYABLE_LOST,
+            make_change(
+                ChangeKind.TRIVIALLY_COPYABLE_LOST,
                 symbol=name,
                 description=(
                     f"'{name}' is no longer trivially copyable. It is now passed "
@@ -176,8 +177,8 @@ def _check_standard_layout_lost(name: str, old_rec: RecordType, new_rec: RecordT
     """Emit STANDARD_LAYOUT_LOST when the trait is removed."""
     if old_rec.is_standard_layout is True and new_rec.is_standard_layout is False:
         return [
-            Change(
-                kind=ChangeKind.STANDARD_LAYOUT_LOST,
+            make_change(
+                ChangeKind.STANDARD_LAYOUT_LOST,
                 symbol=name,
                 description=(
                     f"'{name}' is no longer standard-layout. `offsetof` and C "
@@ -203,8 +204,8 @@ def _check_tail_padding_reuse(name: str, old_rec: RecordType, new_rec: RecordTyp
         and old_rec.size_bits == new_rec.size_bits
     ):
         return [
-            Change(
-                kind=ChangeKind.TAIL_PADDING_REUSE_CHANGED,
+            make_change(
+                ChangeKind.TAIL_PADDING_REUSE_CHANGED,
                 symbol=name,
                 description=(
                     f"'{name}' data size changed "
@@ -233,8 +234,8 @@ def _check_layout_unverifiable(name: str, old_rec: RecordType, new_rec: RecordTy
     descriptor_in_play = _has_layout_descriptor(old_rec) or _has_layout_descriptor(new_rec)
     if descriptor_in_play and old_has != new_has:
         return [
-            Change(
-                kind=ChangeKind.LAYOUT_UNVERIFIABLE,
+            make_change(
+                ChangeKind.LAYOUT_UNVERIFIABLE,
                 symbol=name,
                 description=(
                     f"'{name}' layout could not be verified: one side carries a "
