@@ -614,12 +614,20 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
         # ADR-035 D10 typed scan engine cluster: `service.run_scan` drives the
         # shared orchestration core in `cli_scan` (function-local import); `cli_scan`
         # reuses `service`/`cli_buildsource` collectors; `cli`/`cli_surface` register
-        # and reuse those. The engine entry lives in `service` (the one contract the
-        # CLI + MCP share) while the orchestration body stays in `cli_scan`. All
-        # cross-imports are function-local (not an init cycle). One SCC, so this
-        # cluster covers its many representative simple cycles by subset match.
+        # and reuse those, and `cli` resolves inputs via `cli_resolve` → `service`.
+        # The engine entry lives in `service` (the one contract the CLI + MCP share)
+        # while the orchestration body stays in `cli_scan`. All cross-imports are
+        # function-local (not an init cycle). One SCC, so this cluster covers its
+        # many representative simple cycles by subset match.
         frozenset(
-            {"cli", "cli_surface", "cli_buildsource", "cli_scan", "service"}
+            {
+                "cli",
+                "cli_resolve",
+                "cli_surface",
+                "cli_buildsource",
+                "cli_scan",
+                "service",
+            }
         ),
         # TYPE_CHECKING-only typing cycle (no runtime import): AbiSnapshot
         # annotates an embedded BuildSourcePack; pack annotates SourceGraphSummary;

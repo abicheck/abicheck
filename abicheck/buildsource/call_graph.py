@@ -39,7 +39,7 @@ import json
 import shutil
 import subprocess  # noqa: S404 - call-graph extraction shells out to clang (never shell=True)
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -198,6 +198,12 @@ def parse_clang_ast_calls(ast: dict[str, Any]) -> list[CallEdge]:
     function (e.g. a global initializer) and unresolved callees are dropped.
     """
     edges: list[CallEdge] = []
+    # identity → file of its *definition* (a FunctionDecl with a body). Lets a leaf
+    # helper that only ever appears as a callee still resolve its source file: in
+    # clang JSON the call's ``referencedDecl`` usually carries no ``loc.file`` (the
+    # location sits on the sibling FunctionDecl), so ``callee_file`` is filled from
+    # this map after the walk, not from the reference node (Codex review).
+    decl_files: dict[str, str] = {}
 
     def _file_of(node: dict[str, Any]) -> str:
         """The source file a node names, if any. clang emits ``file`` only when it
@@ -212,6 +218,12 @@ def parse_clang_ast_calls(ast: dict[str, Any]) -> list[CallEdge]:
                 return str(beg["file"])
         return ""
 
+    def _has_body(node: dict[str, Any]) -> bool:
+        return any(
+            isinstance(ch, dict) and ch.get("kind") == "CompoundStmt"
+            for ch in node.get("inner", []) or []
+        )
+
     def visit(node: Any, caller: str, caller_file: str, cur_file: str) -> None:
         if not isinstance(node, dict):
             return
@@ -224,25 +236,31 @@ def parse_clang_ast_calls(ast: dict[str, Any]) -> list[CallEdge]:
             if ident != caller:
                 # Entering a new enclosing function: its body lives in cur_file.
                 caller, caller_file = ident, cur_file
+            # Record the definition file so a callee-only leaf helper resolves it.
+            if ident and _has_body(node):
+                decl_files[ident] = cur_file
         if kind in _CALL_EXPR_KINDS and caller:
             ref = _find_referenced_decl(node)
             callee, call_kind, resolution = _classify_call(node, ref)
             if callee and callee != caller:
-                # The callee's *declaration* file (from its referencedDecl loc)
-                # lets a leaf project helper — one seen only as a callee, never a
-                # caller — still earn project provenance (Codex review). Best
-                # effort: clang often omits a file on a reference node, in which
-                # case it stays "" and only caller-side provenance applies.
-                callee_file = _file_of(ref) if isinstance(ref, dict) else ""
                 edges.append(
-                    CallEdge(
-                        caller, callee, call_kind, resolution, caller_file, callee_file
-                    )
+                    CallEdge(caller, callee, call_kind, resolution, caller_file)
                 )
         for child in node.get("inner", []) or []:
             visit(child, caller, caller_file, cur_file)
 
     visit(ast, "", "", "")
+
+    # Fill callee_file from the definition-file map (the callee's own FunctionDecl).
+    if decl_files:
+        edges = [
+            (
+                replace(e, callee_file=decl_files[e.callee])
+                if e.callee in decl_files
+                else e
+            )
+            for e in edges
+        ]
 
     seen: set[tuple[str, str, str]] = set()
     out: list[CallEdge] = []

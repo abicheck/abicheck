@@ -690,10 +690,41 @@ def test_augment_marks_leaf_callee_from_callee_file() -> None:
     g = SourceGraphSummary()
     edges = [
         CallEdge(
-            "_Zpub", "_Zleaf", caller_file="/work/src/api.cc",
+            "_Zpub",
+            "_Zleaf",
+            caller_file="/work/src/api.cc",
             callee_file="/work/src/util.cc",
         ),
     ]
     augment_graph_with_calls(g, edges, frozenset({"src/api.cc", "src/util.cc"}))
     by_id = {n.id: n for n in g.nodes}
     assert by_id["decl://_Zleaf"].attrs.get("defined_in_project") is True
+
+
+def test_parse_fills_callee_file_from_sibling_functiondecl() -> None:
+    # A leaf helper defined in the TU is referenced by a caller; the call's
+    # referencedDecl carries no loc.file, so callee_file is resolved from the
+    # helper's own FunctionDecl definition (Codex review).
+    ast_tree = {
+        "kind": "TranslationUnitDecl",
+        "inner": [
+            _func_in("helper", "_Zhelper", [], "/work/src/util.cc"),
+            _func_in(
+                "api",
+                "_Zapi",
+                [
+                    _direct_call(
+                        {
+                            "kind": "FunctionDecl",
+                            "name": "helper",
+                            "mangledName": "_Zhelper",
+                        }
+                    )
+                ],
+                "/work/src/api.cc",
+            ),
+        ],
+    }
+    edges = parse_clang_ast_calls(ast_tree)
+    edge = next(e for e in edges if e.callee == "_Zhelper")
+    assert edge.callee_file == "/work/src/util.cc"
