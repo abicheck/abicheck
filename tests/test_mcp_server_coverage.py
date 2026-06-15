@@ -300,7 +300,7 @@ class TestResolveInputText:
             return real_open(path, *a, **kw)
 
         monkeypatch.setattr(builtins, "open", failing_open)
-        with pytest.raises(AbicheckError, match="Cannot read input file"):
+        with pytest.raises(AbicheckError, match="Cannot detect format"):
             _resolve_input(bad_file, [], [], "1.0", "c++")
 
     def test_perl_dump_detected(self, tmp_path, monkeypatch):
@@ -331,7 +331,7 @@ class TestResolveInputText:
         )
         fake_snap = _empty_snapshot()
         monkeypatch.setattr(
-            "abicheck.mcp_server.load_snapshot",
+            "abicheck.service.load_snapshot",
             lambda p: fake_snap,
         )
         result = _resolve_input(snap_file, [], [], "1.0", "c++")
@@ -346,7 +346,7 @@ class TestResolveInputText:
             "abicheck.mcp_server._detect_binary_format",
             lambda p: None,
         )
-        with pytest.raises(AbicheckError, match="Cannot detect input format"):
+        with pytest.raises(AbicheckError, match="Cannot detect format"):
             _resolve_input(unknown_file, [], [], "1.0", "c++")
 
 
@@ -372,17 +372,21 @@ class TestResolveInputELF:
         result = _resolve_input(elf_file, [], [], "1.0", "c++")
         assert result is fake_snap
 
-    def test_elf_unsupported_lang_raises(self, tmp_path, monkeypatch):
-        """Lines 259-262: unsupported language raises ValueError."""
+    def test_elf_unusual_lang_forwarded(self, tmp_path, monkeypatch):
+        """lang is no longer rejected at the MCP resolve layer.
+
+        _resolve_input now delegates to ``service.resolve_input`` (the single
+        source of truth), which forwards lang to the dumper (mapping any non-'c'
+        value to the c++ profile) rather than raising. The dump call is mocked
+        so we assert the value is threaded through instead of rejected.
+        """
         elf_file = tmp_path / "lib.so"
         elf_file.write_bytes(b"\x7fELF" + b"\x00" * 100)
 
-        monkeypatch.setattr(
-            "abicheck.mcp_server._detect_binary_format",
-            lambda p: "elf",
-        )
-        with pytest.raises(ValueError, match="Unsupported lang"):
-            _resolve_input(elf_file, [], [], "1.0", "rust")
+        fake_snap = _empty_snapshot()
+        monkeypatch.setattr("abicheck.dumper.dump", lambda **kw: fake_snap)
+        result = _resolve_input(elf_file, [], [], "1.0", "rust")
+        assert result is fake_snap
 
 
 # ---------------------------------------------------------------------------

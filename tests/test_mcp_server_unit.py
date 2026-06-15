@@ -1141,14 +1141,14 @@ class TestResolveInput:
     def test_unknown_format_raises(self, tmp_path: Path):
         f = tmp_path / "unknown.xyz"
         f.write_text("not any recognized format at all", encoding="utf-8")
-        with pytest.raises(AbicheckError, match="Cannot detect input format"):
+        with pytest.raises(AbicheckError, match="Cannot detect format"):
             _resolve_input(f, [], [], "1.0", "c++")
 
     def test_unreadable_file_raises(self, tmp_path: Path):
         f = tmp_path / "unreadable.bin"
         f.write_bytes(b"\x00\x01\x02\x03")
         # The file is readable, but not recognized as any format
-        with pytest.raises(AbicheckError, match="Cannot detect input format"):
+        with pytest.raises(AbicheckError, match="Cannot detect format"):
             _resolve_input(f, [], [], "1.0", "c++")
 
     def test_static_archive_raises_with_guidance(self, tmp_path: Path):
