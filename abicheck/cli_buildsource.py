@@ -211,6 +211,9 @@ def collect_cmd(
     effective_compile_db = compile_db or compile_db_p
     extractors: list[ExtractorRecord] = []
     merged = BuildEvidence()
+    record_bazel_inputs = include_graph or (
+        source_abi and _source_abi_scope_needs_include_map(source_abi_scope, list(changed_paths))
+    )
 
     _run_adapters(
         merged, extractors,
@@ -225,6 +228,7 @@ def collect_cmd(
         binary=binary,
         read_compiler_record=read_compiler_record,
         build_system=build_system,
+        record_bazel_inputs=record_bazel_inputs,
         verbose=verbose,
     )
 
@@ -430,6 +434,7 @@ def _run_adapters(
     binary: Path | None,
     read_compiler_record: bool,
     build_system: str,
+    record_bazel_inputs: bool,
     verbose: bool,
 ) -> None:
     """Run the requested build-evidence adapters and fold them into *merged*."""
@@ -483,7 +488,12 @@ def _run_adapters(
         ))
 
     if bazel_cquery is not None or bazel_aquery is not None:
-        ev = BazelAdapter(workspace=build_dir, cquery=bazel_cquery, aquery=bazel_aquery).collect()
+        ev = BazelAdapter(
+            workspace=build_dir,
+            cquery=bazel_cquery,
+            aquery=bazel_aquery,
+            record_inputs=record_bazel_inputs,
+        ).collect()
         merged.merge(ev)
         inputs = [DEFAULT_REDACTION.path(str(p)) for p in (bazel_cquery, bazel_aquery) if p is not None]
         extractors.append(ExtractorRecord(
@@ -725,8 +735,14 @@ def _include_map_for_replay(
     is unavailable or yields nothing, so :func:`run_source_replay` falls back to
     the target-ownership heuristics — collection never blocks on it.
     """
-    from .buildsource.include_graph import ClangIncludeExtractor
+    from .buildsource.include_graph import (
+        ClangIncludeExtractor,
+        include_map_from_recorded_inputs,
+    )
 
+    recorded = include_map_from_recorded_inputs(merged)
+    if recorded:
+        return recorded
     extractor = ClangIncludeExtractor(
         clang_bin=clang_bin if clang_bin != "clang" else "clang++"
     )
@@ -736,6 +752,28 @@ def _include_map_for_replay(
     for diag in extractor.diagnostics:
         merged.diagnostics.append(f"source_abi_include_graph: {diag}")
     return includes or None
+
+
+_SOURCE_ABI_DIRECT_SOURCE_EXTS = (".c", ".cc", ".cpp", ".cxx", ".c++", ".cu", ".m", ".mm")
+
+
+def _source_abi_scope_needs_include_map(scope: str, changed_paths: list[str]) -> bool:
+    """Whether L4 replay scoping needs depfile include extraction.
+
+    Header-aware scopes benefit from the include graph, but a changed path that
+    is only a source file is selected directly by ``CompileUnit.source`` in
+    ``select_compile_units``. Building depfiles for every TU in that case is pure
+    overhead on large projects.
+    """
+    if scope == "headers-only":
+        return True
+    if scope != "changed":
+        return False
+    return not all(
+        path.lower().replace("\\", "/").endswith(_SOURCE_ABI_DIRECT_SOURCE_EXTS)
+        for path in changed_paths
+    )
+
 
 def _collect_include_graph(
     graph: SourceGraphSummary,
@@ -752,22 +790,27 @@ def _collect_include_graph(
     from .buildsource.include_graph import (
         ClangIncludeExtractor,
         augment_graph_with_includes,
+        include_map_from_recorded_inputs,
     )
 
-    extractor = ClangIncludeExtractor(clang_bin=clang_bin if clang_bin != "clang" else "clang++")
-    if not extractor.available():
-        extractors.append(ExtractorRecord(
-            name="include_graph:clang", status="failed",
-            detail=f"{extractor.clang_bin} not found in PATH; graph collected without include edges",
-        ))
-        return
-    includes = extractor.extract_from_build(merged)
+    includes = include_map_from_recorded_inputs(merged)
+    extractor_name = "include_graph:recorded_inputs"
+    if not includes:
+        extractor = ClangIncludeExtractor(clang_bin=clang_bin if clang_bin != "clang" else "clang++")
+        extractor_name = "include_graph:clang"
+        if not extractor.available():
+            extractors.append(ExtractorRecord(
+                name=extractor_name, status="failed",
+                detail=f"{extractor.clang_bin} not found in PATH; graph collected without include edges",
+            ))
+            return
+        includes = extractor.extract_from_build(merged)
+        for diag in extractor.diagnostics:
+            merged.diagnostics.append(f"include_graph: {diag}")
     added = augment_graph_with_includes(graph, includes)
     graph.finalize()
-    for diag in extractor.diagnostics:
-        merged.diagnostics.append(f"include_graph: {diag}")
     extractors.append(ExtractorRecord(
-        name="include_graph:clang",
+        name=extractor_name,
         status="ok" if added else "partial",
         detail=f"{added} include edges from {len(includes)} compile units",
     ))
@@ -1003,7 +1046,7 @@ def _collect_source_abi(
     # so this never blocks collection. `target`/`full` ignore the include map.
     include_map = (
         _include_map_for_replay(merged, clang_bin)
-        if scope in ("headers-only", "changed")
+        if _source_abi_scope_needs_include_map(scope, changed_paths)
         else None
     )
     cache = SourceAbiCache(cache_dir) if cache_dir else None

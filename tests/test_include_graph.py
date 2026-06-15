@@ -22,6 +22,7 @@ from abicheck.buildsource.include_graph import (
     ClangIncludeExtractor,
     augment_graph_with_includes,
     depfile_args_from_argv,
+    include_map_from_recorded_inputs,
     parse_depfile,
 )
 from abicheck.buildsource.source_graph import GraphNode, SourceGraphSummary
@@ -76,6 +77,24 @@ def test_depfile_args_preserves_safe_include_context_flags() -> None:
         "-include-pch", "pch.pch", "-iquote", "quoted",
         "-idirafter", "after", "-I", "include",
     ]
+
+
+def test_depfile_args_strips_warning_only_flags() -> None:
+    # Bazel/GCC actions can record warning flags that make clang depfile replay
+    # fail (`-Werror` + GCC-only diagnostics options), but they do not affect the
+    # include closure. Keep the preprocessor context and source.
+    assert depfile_args_from_argv([
+        "g++", "-c", "foo.cpp", "-Werror", "-Wformat-security",
+        "-fdiagnostics-color=always", "-fno-canonical-system-headers",
+        "-DABI=1", "-Iinclude",
+    ]) == ["foo.cpp", "-DABI=1", "-Iinclude"]
+
+
+def test_depfile_args_preserves_preprocessor_escape_hatch() -> None:
+    assert depfile_args_from_argv([
+        "g++", "-c", "foo.cpp", "-Wp,-Igenerated", "-Wp,-DPLATFORM=1",
+        "-Werror", "-Iinclude",
+    ]) == ["foo.cpp", "-Wp,-Igenerated", "-Wp,-DPLATFORM=1", "-Iinclude"]
 
 
 def test_depfile_args_strips_clang_plugin_loading_options() -> None:
@@ -134,6 +153,19 @@ def test_augment_dedupes_and_skips_blank() -> None:
     added = augment_graph_with_includes(g, {"cu://foo": ["a.h"]})
     assert added == 0
     assert not any(n.label == "" for n in g.nodes)
+
+
+def test_include_map_from_recorded_inputs() -> None:
+    build = BuildEvidence(compile_units=[
+        CompileUnit(
+            id="cu://foo", source="foo.cpp",
+            input_files=["foo.cpp", "include/foo.h"],
+        ),
+        CompileUnit(id="cu://bar", source="bar.cpp"),
+    ])
+    assert include_map_from_recorded_inputs(build) == {
+        "cu://foo": ["foo.cpp", "include/foo.h"],
+    }
 
 
 def test_extractor_missing_clang_returns_empty() -> None:

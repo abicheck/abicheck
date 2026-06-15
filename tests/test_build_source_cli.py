@@ -632,12 +632,25 @@ def test_compare_without_evidence_is_unchanged(tmp_path):
 # -- L4 source ABI replay (ADR-030 phases 5-7 + CLI wiring) ------------------
 
 
-def test_collect_evidence_source_abi_graceful_without_tool(tmp_path):
+def test_collect_evidence_source_abi_graceful_without_tool(tmp_path, monkeypatch):
     """Source ABI replay degrades gracefully when the tool is missing.
 
     The user message must be explicit that clang is required and that source-only
     checks are disabled (never abort the collection).
     """
+    from abicheck.buildsource.source_extractors.resolver import SourceExtractorChoice
+
+    monkeypatch.setattr(
+        "abicheck.buildsource.source_extractors.select_source_backend",
+        lambda extractor, *, clang_bin: (
+            SourceExtractorChoice(
+                selected=None,
+                skipped=[("clang", "not on PATH"), ("castxml", "not on PATH")],
+                reason="no backend available",
+            ),
+            None,
+        ),
+    )
     cdb = _write_cdb(tmp_path, "c++17")
     out = tmp_path / "ev"
     result = CliRunner().invoke(main, [
@@ -845,6 +858,89 @@ def test_collect_evidence_source_abi_uses_include_graph(tmp_path, monkeypatch):
     pack = BuildSourcePack.load(out)
     assert pack.source_abi is not None
     assert pack.source_abi.coverage.get("include_graph_used") is True
+
+
+def test_collect_evidence_source_abi_changed_source_skips_include_graph(
+    tmp_path, monkeypatch
+):
+    """A changed source is selected directly; depfile fan-out is wasted work."""
+    import abicheck.buildsource.source_extractors as se
+    import abicheck.cli_buildsource as ce
+
+    monkeypatch.setattr(se, "ClangSourceExtractor", _fake_clang_extractor())
+
+    def _boom(merged, clang_bin):
+        raise AssertionError("include graph should not run for source-only changes")
+
+    monkeypatch.setattr(ce, "_include_map_for_replay", _boom)
+    cdb = _write_cdb(tmp_path, "c++17")
+    out = tmp_path / "ev"
+    result = CliRunner().invoke(main, [
+        "collect", "--compile-db", str(cdb),
+        "--source-abi", "--source-abi-scope", "changed",
+        "--changed-path", "src/foo.cpp",
+        "-o", str(out),
+    ])
+    assert result.exit_code == 0, result.output
+    pack = BuildSourcePack.load(out)
+    assert pack.source_abi is not None
+    assert pack.source_abi.coverage.get("include_graph_used") is False
+
+
+def test_collect_evidence_source_abi_changed_header_uses_include_graph(
+    tmp_path, monkeypatch
+):
+    """Header changes still need the depfile map for precise affected-TU replay."""
+    import abicheck.buildsource.source_extractors as se
+    import abicheck.cli_buildsource as ce
+
+    monkeypatch.setattr(se, "ClangSourceExtractor", _fake_clang_extractor())
+    monkeypatch.setattr(
+        ce,
+        "_include_map_for_replay",
+        lambda merged, clang_bin: {"cu://src/foo.cpp#cfg": ["include/foo.h"]},
+    )
+    cdb = _write_cdb(tmp_path, "c++17")
+    out = tmp_path / "ev"
+    result = CliRunner().invoke(main, [
+        "collect", "--compile-db", str(cdb),
+        "--source-abi", "--source-abi-scope", "changed",
+        "--changed-path", "include/foo.h",
+        "-o", str(out),
+    ])
+    assert result.exit_code == 0, result.output
+    pack = BuildSourcePack.load(out)
+    assert pack.source_abi is not None
+    assert pack.source_abi.coverage.get("include_graph_used") is True
+
+
+def test_collect_evidence_source_abi_changed_non_source_paths_use_include_graph(
+    tmp_path, monkeypatch
+):
+    """Unknown/header-like changed paths need depfiles to find affected TUs."""
+    import abicheck.buildsource.source_extractors as se
+    import abicheck.cli_buildsource as ce
+
+    monkeypatch.setattr(se, "ClangSourceExtractor", _fake_clang_extractor())
+    cdb = _write_cdb(tmp_path, "c++17")
+    for changed_path in ("include/foo.cuh", "include/public"):
+        out = tmp_path / f"ev-{changed_path.rsplit('/', 1)[-1]}"
+        monkeypatch.setattr(
+            ce,
+            "_include_map_for_replay",
+            lambda merged, clang_bin, p=changed_path: {merged.compile_units[0].id: [p]},
+        )
+        result = CliRunner().invoke(main, [
+            "collect", "--compile-db", str(cdb),
+            "--source-abi", "--source-abi-scope", "changed",
+            "--changed-path", changed_path,
+            "-o", str(out),
+        ])
+        assert result.exit_code == 0, result.output
+        pack = BuildSourcePack.load(out)
+        assert pack.source_abi is not None
+        assert pack.source_abi.coverage.get("include_graph_used") is True
+        assert pack.source_abi.coverage.get("compile_units_selected") == 1
 
 
 def test_collect_evidence_source_abi_castxml_unavailable(tmp_path):

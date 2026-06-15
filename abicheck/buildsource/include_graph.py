@@ -45,7 +45,14 @@ if TYPE_CHECKING:
 #: recorded compile command as ``clang -MM``: the compile action, the object
 #: output, and any existing dependency-generation options.
 _DEPFILE_DROP_WITH_VALUE = frozenset({"-o", "--output", "-MF", "-MT", "-MQ", "-MJ"})
-_DEPFILE_DROP_FLAG = frozenset({"-c", "-MD", "-MMD", "-MM", "-M", "-MG", "-MP", "-pipe"})
+_DEPFILE_DROP_FLAG = frozenset({
+    "-c", "-MD", "-MMD", "-MM", "-M", "-MG", "-MP", "-pipe",
+    "-fno-strict-overflow",
+})
+_DEPFILE_DROP_PREFIXES = (
+    "-fdiagnostics-color",
+    "-fno-canonical-system-headers",
+)
 # Clang driver/cc1 escape hatches that can load arbitrary native code (for
 # example ``-Xclang -load -Xclang ./evil.so`` or ``-cc1 -load ./evil.so``).
 # Compile databases may come from untrusted PR artifacts, so the depfile replay
@@ -124,6 +131,13 @@ def depfile_args_from_argv(argv: list[str]) -> list[str]:
         if any(tok.startswith(f) and tok != f for f in ("-o", "-MF", "-MT", "-MQ")):
             continue
         if tok in _DEPFILE_DROP_FLAG:
+            continue
+        # Warning/diagnostic flags do not affect the include closure, but they
+        # can turn harmless clang depfile replay warnings into hard failures when
+        # the original Bazel/GCC action recorded `-Werror`.
+        if tok.startswith(_DEPFILE_DROP_PREFIXES) or (
+            tok.startswith("-W") and not tok.startswith("-Wp,")
+        ):
             continue
         out.append(tok)
     return out
@@ -209,6 +223,21 @@ def augment_graph_with_includes(
     return added
 
 
+def include_map_from_recorded_inputs(build: BuildEvidence) -> dict[str, list[str]]:
+    """Build a per-CU include map from recorded compile action inputs.
+
+    Bazel aquery already carries the action input depsets, including headers,
+    and those paths are available without a live execroot. Prefer this when
+    adapters recorded it; fall back to compiler depfile replay for build systems
+    that only expose argv.
+    """
+    out: dict[str, list[str]] = {}
+    for cu in build.compile_units:
+        if cu.input_files:
+            out[cu.id] = list(cu.input_files)
+    return out
+
+
 @dataclass
 class ClangIncludeExtractor:
     """Run ``clang -M`` to recover a TU's included files (integration only).
@@ -219,6 +248,7 @@ class ClangIncludeExtractor:
 
     clang_bin: str = "clang++"
     diagnostics: list[str] = field(default_factory=list)
+    diagnostics_limit: int = 20
 
     def available(self) -> bool:
         return shutil.which(self.clang_bin) is not None
@@ -236,6 +266,7 @@ class ClangIncludeExtractor:
         from .source_extractors._argv import unredact_home
 
         out: dict[str, list[str]] = {}
+        failures = 0
         for cu in build.compile_units:
             if not cu.source:
                 continue
@@ -265,4 +296,17 @@ class ClangIncludeExtractor:
                 continue
             if proc.stdout.strip():
                 out[cu.id] = parse_depfile(proc.stdout)
+            elif proc.returncode != 0:
+                failures += 1
+                if len(self.diagnostics) < self.diagnostics_limit:
+                    detail = (proc.stderr or "").strip().splitlines()
+                    msg = next(
+                        (line for line in detail if "error:" in line or "fatal error:" in line),
+                        detail[0] if detail else f"exit {proc.returncode}",
+                    )
+                    self.diagnostics.append(f"clang -M failed for {cu.id}: {msg}")
+        if failures > self.diagnostics_limit:
+            self.diagnostics.append(
+                f"clang -M failed for {failures - self.diagnostics_limit} more compile units"
+            )
         return out
