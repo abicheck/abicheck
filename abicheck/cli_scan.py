@@ -750,8 +750,13 @@ def scan_cmd(
     # --- build the candidate snapshot (L0-L2 + inline L3-L5 at the level) ------
     # An explicit --compile-db (a file) wins over --build-info (dir/pack) as the
     # L3 source; both feed embed_build_source's build_info input. The POI path set
-    # (floor + pattern-flagged files) is the replay scope seed, so a focused scan
-    # narrows to the entities the cheap evidence flagged.
+    # focuses the replay — but ONLY when a real diff seed was supplied
+    # (``seeded``). Without --since/--changed-path the scan is broad by contract
+    # (the report says so), so passing pattern-trigger POIs as the changed set
+    # would wrongly narrow PR-mode replay to a single pattern-flagged TU and skip
+    # source-only checks elsewhere (Codex review). When seeded, the POI set (floor
+    # + pattern/risk additions) is the focusing work-list.
+    replay_seed = tuple(poi.changed_paths()) if seeded else ()
     new_snap = _build_new_snapshot(
         binary,
         list(headers),
@@ -760,7 +765,7 @@ def scan_cmd(
         collect_mode,
         lang,
         allow_build_query,
-        changed_paths=tuple(poi.changed_paths()),
+        changed_paths=replay_seed,
         build_info=effective_build_info,
         build_config=build_config,
     )
@@ -768,13 +773,16 @@ def scan_cmd(
     # --- conditional tier: S2 preprocessor pre-scan (D2) ----------------------
     # Runs only when L3 build evidence + a preprocessor (`clang -E`) are present;
     # otherwise the coverage row honestly reports it skipped (never clean). Emits
-    # advisory macro-divergence + private/generated-header-leak facts.
+    # advisory macro-divergence + private/generated-header-leak facts. Headers are
+    # expanded to the individual public header *files* (``-H include/`` accepts a
+    # directory) so the per-header leak pass preprocesses each header, not the
+    # directory as one bogus TU (Codex review).
     pp_build = (
         new_snap.build_source.build_evidence
         if new_snap.build_source is not None
         else None
     )
-    preproc = run_preprocessor_scan(pp_build, [str(h) for h in headers])
+    preproc = run_preprocessor_scan(pp_build, _expand_public_headers(list(headers)))
 
     # --- always-on tier: intra-version cross-source checks (D4) ---------------
     cc = run_crosschecks(new_snap, CrosscheckConfig(enabled=frozenset(enabled_checks)))
@@ -864,6 +872,22 @@ def scan_cmd(
 
     if exit_code != 0:
         sys.exit(exit_code)
+
+
+def _expand_public_headers(headers: list[Path]) -> list[str]:
+    """Expand ``-H`` inputs (files or directories) to individual header files.
+
+    ``-H/--headers`` accepts a directory (the snapshot build expands it the same
+    way); the S2 leak pass needs the individual header *files* so clang
+    preprocesses each one, not a directory as a single bogus TU. Falls back to the
+    raw paths if expansion fails (e.g. an empty dir) so the pass still runs.
+    """
+    from .service import expand_header_inputs
+
+    try:
+        return [str(p) for p in expand_header_inputs(headers)]
+    except Exception:  # noqa: BLE001 - expansion is best-effort for the advisory tier
+        return [str(h) for h in headers]
 
 
 def _emit_estimate(

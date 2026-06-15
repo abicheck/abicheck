@@ -241,6 +241,71 @@ def test_cli_estimate_json(runner: CliRunner, snap_path: Path) -> None:
     assert "total_est_seconds" in payload
 
 
+def test_replay_seed_empty_without_diff_seed(
+    monkeypatch, runner: CliRunner, snap_path: Path, header: Path
+) -> None:
+    # No --since/--changed-path → broad scope. Pattern-trigger POIs must NOT
+    # narrow the replay seed (would skip source-only checks in other TUs) — the
+    # seed stays empty so collect_inline_pack keeps the broad fallback (Codex).
+    import abicheck.cli_scan as cs
+
+    captured: dict[str, object] = {}
+    original = cs._build_new_snapshot
+
+    def _spy(*args, **kwargs):
+        captured["changed_paths"] = kwargs.get("changed_paths")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(cs, "_build_new_snapshot", _spy)
+    res = runner.invoke(
+        main,
+        [
+            "scan",
+            "--binary",
+            str(snap_path),
+            "-H",
+            str(header),
+            "--source-method",
+            "s5",
+        ],
+    )
+    assert res.exit_code == 0
+    assert captured["changed_paths"] == ()
+
+
+def test_replay_seed_used_when_changed_path_given(
+    monkeypatch, runner: CliRunner, snap_path: Path, header: Path
+) -> None:
+    # An explicit --changed-path is a real diff seed → the POI floor feeds the
+    # replay scope.
+    import abicheck.cli_scan as cs
+
+    captured: dict[str, object] = {}
+    original = cs._build_new_snapshot
+
+    def _spy(*args, **kwargs):
+        captured["changed_paths"] = kwargs.get("changed_paths")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(cs, "_build_new_snapshot", _spy)
+    res = runner.invoke(
+        main,
+        [
+            "scan",
+            "--binary",
+            str(snap_path),
+            "-H",
+            str(header),
+            "--source-method",
+            "s5",
+            "--changed-path",
+            "src/a.cpp",
+        ],
+    )
+    assert res.exit_code == 0
+    assert "src/a.cpp" in (captured["changed_paths"] or ())
+
+
 def test_cli_audit_emits_hygiene_catalog(
     runner: CliRunner, snap_path: Path, header: Path
 ) -> None:

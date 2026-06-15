@@ -212,3 +212,18 @@ def test_run_passes_compile_unit_directory_as_cwd(monkeypatch) -> None:
     # The source token is stripped from the reused include context.
     assert "src/a.cpp" not in captured["context"]
     assert "-Iinclude" in captured["context"]
+
+
+def test_expand_public_headers_expands_directories(tmp_path) -> None:
+    # cli_scan must hand the S2 leak pass the individual header *files*, not a
+    # directory (which clang would preprocess as one bogus TU) (Codex review).
+    from pathlib import Path
+
+    from abicheck.cli_scan import _expand_public_headers
+
+    inc = tmp_path / "include"
+    inc.mkdir()
+    (inc / "a.h").write_text("// a\n", encoding="utf-8")
+    (inc / "b.hpp").write_text("// b\n", encoding="utf-8")
+    expanded = _expand_public_headers([Path(inc)])
+    assert {Path(p).name for p in expanded} == {"a.h", "b.hpp"}
