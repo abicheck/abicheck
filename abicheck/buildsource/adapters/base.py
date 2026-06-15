@@ -193,6 +193,39 @@ SOURCE_OPERAND_FLAGS: frozenset[str] = frozenset({
 })
 
 
+def sources_from_argv(argv: list[str]) -> list[str]:
+    """Return **every** argv token that names a compiled translation unit, in order.
+
+    A single compiler invocation may build several TUs (``gcc -c a.c b.c``), so a
+    caller that wants all of them (e.g. the ``abicheck-cc`` wrapper) must not stop
+    at the first. Same dialect-aware operand recognition as
+    :func:`source_from_argv`, which is now the first element of this list.
+    """
+    msvc = _is_msvc_command(argv)
+    out: list[str] = []
+    i = 0
+    while i < len(argv):
+        arg = argv[i]
+        if arg in SOURCE_OPERAND_FLAGS:
+            i += 2  # skip the flag and the operand it consumes
+            continue
+        # MSVC/clang-cl name the TU explicitly with /Tp<file> (C++) / /Tc<file>
+        # (C), or the space-separated `/Tp <file>` form.
+        if arg in ("/Tp", "/Tc"):
+            if i + 1 < len(argv) and detect_language(argv[i + 1]):
+                out.append(argv[i + 1])
+            i += 2
+            continue
+        if arg[:3] in ("/Tp", "/Tc") and detect_language(arg[3:]):
+            out.append(arg[3:])
+            i += 1
+            continue
+        if _is_source_token(arg, msvc):
+            out.append(arg)
+        i += 1
+    return out
+
+
 def source_from_argv(argv: list[str]) -> str:
     """Return the first argv token that names the compiled translation unit.
 
@@ -206,27 +239,12 @@ def source_from_argv(argv: list[str]) -> str:
     as options — including combined value-taking forms like ``/FIsrc/config.hpp``
     — while still allowing POSIX absolute paths such as ``/work/src/foo.cc``.
     A GNU command treats ``/abs/path.cc`` as a Unix absolute source path.
+
+    Convenience wrapper over :func:`sources_from_argv` for the common single-TU
+    callers; returns ``""`` when no source operand is present.
     """
-    msvc = _is_msvc_command(argv)
-    i = 0
-    while i < len(argv):
-        arg = argv[i]
-        if arg in SOURCE_OPERAND_FLAGS:
-            i += 2  # skip the flag and the operand it consumes
-            continue
-        # MSVC/clang-cl name the TU explicitly with /Tp<file> (C++) / /Tc<file>
-        # (C), or the space-separated `/Tp <file>` form. Return the bare path.
-        if arg in ("/Tp", "/Tc"):
-            if i + 1 < len(argv) and detect_language(argv[i + 1]):
-                return argv[i + 1]
-            i += 2
-            continue
-        if arg[:3] in ("/Tp", "/Tc") and detect_language(arg[3:]):
-            return arg[3:]
-        if _is_source_token(arg, msvc):
-            return arg
-        i += 1
-    return ""
+    sources = sources_from_argv(argv)
+    return sources[0] if sources else ""
 
 
 #: Driver basenames that mark a command as MSVC-dialect (``/`` introduces an

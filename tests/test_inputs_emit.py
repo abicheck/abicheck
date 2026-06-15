@@ -256,6 +256,30 @@ def test_emit_appends_extracted_tu(tmp_path: Path, monkeypatch) -> None:
     assert ingested.manifest.created_by == "abicheck-cc"
 
 
+def test_emit_captures_all_sources_in_multi_source_compile(tmp_path: Path, monkeypatch) -> None:
+    # `gcc -c a.cpp b.cpp` builds both objects; both must contribute facts.
+    def _extract(cu, *, public_header_roots, target_id=""):
+        stem = Path(cu.source).stem
+        return _tu(stem, mangled=f"_Z3{stem}v", source=cu.source)
+
+    class _FakeBackend:
+        extract = staticmethod(_extract)
+
+    monkeypatch.setattr(
+        "abicheck.buildsource.source_extractors.resolver.select_source_backend",
+        lambda extractor, **kw: (None, _FakeBackend()),
+    )
+    pack = tmp_path / "abicheck_inputs"
+    emit_facts_for_command(
+        ["g++", "-std=c++17", "-c", "a.cpp", "b.cpp"], tmp_path,
+        inputs_dir=pack, library="libfoo.so",
+    )
+    ingested = ingest_inputs_pack(pack)
+    assert ingested.tu_count == 2
+    names = {e.qualified_name for e in ingested.pack.source_abi.reachable_declarations}
+    assert {"a", "b"} <= names
+
+
 def test_emit_none_when_no_backend(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(
         "abicheck.buildsource.source_extractors.resolver.select_source_backend",

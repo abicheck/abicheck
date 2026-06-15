@@ -58,7 +58,7 @@ from .buildsource.adapters.base import (
     detect_language,
     effective_language,
     extract_abi_relevant_flags,
-    source_from_argv,
+    sources_from_argv,
 )
 from .buildsource.build_evidence import CompileUnit
 from .buildsource.inputs_emit import (
@@ -81,41 +81,52 @@ def _is_preprocess_only(command: Sequence[str]) -> bool:
     return any(arg in _PREPROCESS_ONLY_FLAGS for arg in command)
 
 
-def compile_unit_from_command(command: Sequence[str], directory: str | Path) -> CompileUnit | None:
-    """Build a :class:`CompileUnit` from a full compiler command, or ``None``.
+def compile_units_from_command(command: Sequence[str], directory: str | Path) -> list[CompileUnit]:
+    """Build a :class:`CompileUnit` for **every** source operand in *command*.
 
-    *command* is ``[driver, args…]`` exactly as invoked. Returns ``None`` when no
-    source translation unit is present (e.g. a link-only step) or the invocation
-    is preprocess-/dependency-only (``-E``/``-M``…), so those runs are pure
-    pass-through and never add a non-shipped TU to the pack.
+    A single invocation may compile several TUs (``gcc -c a.c b.c``); each gets
+    its own unit (shared flags, per-source id/language) so none is silently
+    dropped from the pack. Returns ``[]`` for a link-only step or a
+    preprocess-/dependency-only invocation (``-E``/``-M``…).
     """
     command = list(command)
-    if len(command) < 2:
-        return None
-    if _is_preprocess_only(command):
-        return None
-    source = source_from_argv(command)
-    if not source or not detect_language(source):
-        return None
-    # Lazy import keeps the lightweight wrapper's import graph thin.
+    if len(command) < 2 or _is_preprocess_only(command):
+        return []
+    sources = [s for s in sources_from_argv(command) if detect_language(s)]
+    if not sources:
+        return []
+    # Lazy import keeps the lightweight wrapper's import graph thin. Flags are
+    # shared across the command's TUs, so derive them once.
     from .build_context import _extract_flags
 
     ctx = _extract_flags(command, Path(directory))
-    return CompileUnit(
-        id=compile_unit_id(source, command),
-        source=source,
-        directory=str(directory),
-        argv=list(command),
-        language=effective_language(command, source),
-        standard=ctx.language_standard or "",
-        defines={k: (v or "") for k, v in ctx.defines.items()},
-        undefines=sorted(ctx.undefines),
-        include_paths=[str(p) for p in ctx.include_paths],
-        system_include_paths=[str(p) for p in ctx.system_includes],
-        sysroot=str(ctx.sysroot) if ctx.sysroot else None,
-        target_triple=ctx.target_triple or "",
-        abi_relevant_flags=list(extract_abi_relevant_flags(command)),
-    )
+    abi_flags = list(extract_abi_relevant_flags(command))
+    units: list[CompileUnit] = []
+    for source in sources:
+        units.append(
+            CompileUnit(
+                id=compile_unit_id(source, command),
+                source=source,
+                directory=str(directory),
+                argv=list(command),
+                language=effective_language(command, source),
+                standard=ctx.language_standard or "",
+                defines={k: (v or "") for k, v in ctx.defines.items()},
+                undefines=sorted(ctx.undefines),
+                include_paths=[str(p) for p in ctx.include_paths],
+                system_include_paths=[str(p) for p in ctx.system_includes],
+                sysroot=str(ctx.sysroot) if ctx.sysroot else None,
+                target_triple=ctx.target_triple or "",
+                abi_relevant_flags=list(abi_flags),
+            )
+        )
+    return units
+
+
+def compile_unit_from_command(command: Sequence[str], directory: str | Path) -> CompileUnit | None:
+    """The first TU of *command* (convenience over :func:`compile_units_from_command`)."""
+    units = compile_units_from_command(command, directory)
+    return units[0] if units else None
 
 
 def emit_facts_for_command(
@@ -130,12 +141,15 @@ def emit_facts_for_command(
 ) -> SourceAbiTu | None:
     """Extract the TU's source ABI and append it to the pack; return the dump.
 
-    Returns ``None`` when there is no source TU or no usable source-ABI backend
-    (the caller treats either as a no-op). Raising backends propagate to the
-    caller, which logs and continues — extraction must never fail the build.
+    Extracts **every** source TU in the command (``gcc -c a.c b.c`` → both), so
+    a multi-source compile contributes all its objects' facts. Returns the first
+    extracted dump (or ``None`` when there is no source TU or no usable backend);
+    the return value is informational — the caller only cares that the pack grew.
+    Raising backends propagate to the caller, which logs and continues —
+    extraction must never fail the build.
     """
-    cu = compile_unit_from_command(command, directory)
-    if cu is None:
+    units = compile_units_from_command(command, directory)
+    if not units:
         return None
     from .buildsource.source_extractors.resolver import select_source_backend
 
@@ -143,10 +157,14 @@ def emit_facts_for_command(
     if impl is None:
         return None
     target_id = f"target://{library}" if library else ""
-    tu = impl.extract(cu, public_header_roots=list(public_header_roots), target_id=target_id)
     init_inputs_pack(inputs_dir, library=library, version=version, created_by="abicheck-cc")
-    append_source_facts(inputs_dir, [tu], filename=facts_filename(cu.source))
-    return tu
+    first: SourceAbiTu | None = None
+    for cu in units:
+        tu = impl.extract(cu, public_header_roots=list(public_header_roots), target_id=target_id)
+        append_source_facts(inputs_dir, [tu], filename=facts_filename(cu.source))
+        if first is None:
+            first = tu
+    return first
 
 
 def _split_paths(value: str) -> list[str]:

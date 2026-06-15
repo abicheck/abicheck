@@ -58,3 +58,14 @@ def test_source_from_argv_gnu_absolute_path_kept_behind_cd_prefix():
     # source_from_argv tolerates a `cd dir && cc …` argv: the GNU absolute path
     # is still recovered and the `&&` does not flip the command to MSVC dialect.
     assert source_from_argv(["cd", "sub", "&&", "gcc", "-c", "/work/src/x.c"]) == "/work/src/x.c"
+
+
+def test_sources_from_argv_returns_every_tu():
+    from abicheck.buildsource.adapters.base import sources_from_argv
+
+    # A multi-source compile yields all TU operands, in order; forced-include
+    # operands and the output are not mistaken for sources.
+    assert sources_from_argv(["g++", "-std=c++17", "-c", "a.cpp", "b.cpp"]) == ["a.cpp", "b.cpp"]
+    assert sources_from_argv(["gcc", "-include", "cfg.h", "-c", "a.c", "b.c"]) == ["a.c", "b.c"]
+    # source_from_argv stays the first element.
+    assert source_from_argv(["g++", "-c", "a.cpp", "b.cpp"]) == "a.cpp"
