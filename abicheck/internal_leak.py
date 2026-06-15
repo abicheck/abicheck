@@ -319,12 +319,22 @@ def _seed_queue_from_functions(
     from .diff_symbols import _public_functions
 
     for func in _public_functions(snap).values():
-        seed_types = [func.return_type] + [p.type for p in func.params]
-        for t in seed_types:
+        # (type-spelling, reached-through-pointer?) for the return + each param.
+        # A type reached only through a pointer/reference in a public signature
+        # (the opaque-handle pattern ``void use(ns::detail::Impl*)``) does not
+        # embed its layout — record the indirection so a layout-only change is
+        # demoted, mirroring the pointer-field case (Codex review). The seed path
+        # otherwise drops the ``*`` (``_candidate_type_names`` strips decorators).
+        seeds = [(func.return_type, (func.return_pointer_depth or 0) > 0)]
+        seeds += [(p.type, (p.pointer_depth or 0) > 0) for p in func.params]
+        for t, via_ptr in seeds:
             if not t:
                 continue
+            base = [f"fn:{func.name}"]
+            if via_ptr or _field_is_indirect(t):
+                base.append("indirect:signature")
             for cand in _candidate_type_names(t):
-                queue.append((cand, [f"fn:{func.name}"]))
+                queue.append((cand, list(base)))
 
 
 def _seed_queue_from_variables(
@@ -336,8 +346,11 @@ def _seed_queue_from_variables(
 
     for var in _public_variables(snap).values():
         if var.type:
+            base = [f"var:{var.name}"]
+            if _field_is_indirect(var.type):
+                base.append("indirect:signature")
             for cand in _candidate_type_names(var.type):
-                queue.append((cand, [f"var:{var.name}"]))
+                queue.append((cand, list(base)))
 
 
 def _seed_queue_from_public_types(
@@ -512,8 +525,12 @@ def compute_leak_paths(
 
 
 def _format_path(path: list[str]) -> str:
-    """Render a leak path as a single arrow-delimited string."""
-    return " → ".join(path)
+    """Render a leak path as a single arrow-delimited string.
+
+    Synthetic ``indirect:`` markers (seed-time pointer evidence) are internal and
+    not shown.
+    """
+    return " → ".join(s for s in path if not s.startswith("indirect:"))
 
 
 def _field_is_indirect(fld_type: str) -> bool:
@@ -623,6 +640,10 @@ def _path_has_indirection(path: list[str], snap: AbiSnapshot) -> bool:
     """
     type_map, _ = _build_type_map(snap)
     for i, step in enumerate(path):
+        if step.startswith("indirect:"):
+            # Synthetic marker recorded at seed time for a public signature that
+            # reaches the type only through a pointer/reference (opaque handle).
+            return True
         if step.startswith("field:"):
             if i == 0:
                 continue

@@ -36,7 +36,14 @@ from abicheck.internal_leak import (
     compute_leak_paths,
     detect_internal_leaks,
 )
-from abicheck.model import AbiSnapshot, Function, RecordType, TypeField, Visibility
+from abicheck.model import (
+    AbiSnapshot,
+    Function,
+    Param,
+    RecordType,
+    TypeField,
+    Visibility,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -495,3 +502,44 @@ class TestPointerMediatedLayoutLeakSuppressed:
             f"not be read as indirection (got: {leaks})"
         )
         assert "embedded-by-value" in leaks[0].description
+
+    def test_opaque_handle_pointer_param_is_suppressed(self) -> None:
+        # Codex review: an internal type reached only through a pointer PARAM in a
+        # public signature (`void use(ns::detail::Impl*)`) does not embed its
+        # layout — a layout-only change must be demoted, not leaked.
+        def _snap(size: int) -> AbiSnapshot:
+            return AbiSnapshot(
+                library="lib.so", version="1.0",
+                functions=[Function(
+                    name="use", mangled="use", return_type="void",
+                    params=[Param(name="h", type="ns::detail::Impl*", pointer_depth=1)],
+                    visibility=Visibility.PUBLIC,
+                )],
+                types=[RecordType(name="ns::detail::Impl", kind="struct", size_bits=size)],
+            )
+        leaks = detect_internal_leaks(
+            [Change(kind=ChangeKind.TYPE_SIZE_CHANGED,
+                    symbol="ns::detail::Impl", description="size")],
+            _snap(32), _snap(64),
+        )
+        assert leaks == [], (
+            f"opaque-handle pointer param must not leak a layout change (got: {leaks})"
+        )
+
+    def test_by_value_return_signature_still_fires(self) -> None:
+        # A by-value return embeds the type in the calling convention — must leak.
+        def _snap(size: int) -> AbiSnapshot:
+            return AbiSnapshot(
+                library="lib.so", version="1.0",
+                functions=[Function(
+                    name="get", mangled="get", return_type="ns::detail::Impl",
+                    return_pointer_depth=0, params=[], visibility=Visibility.PUBLIC,
+                )],
+                types=[RecordType(name="ns::detail::Impl", kind="struct", size_bits=size)],
+            )
+        leaks = detect_internal_leaks(
+            [Change(kind=ChangeKind.TYPE_SIZE_CHANGED,
+                    symbol="ns::detail::Impl", description="size")],
+            _snap(32), _snap(64),
+        )
+        assert len(leaks) == 1, f"a by-value return must leak (got: {leaks})"

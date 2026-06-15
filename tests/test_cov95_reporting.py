@@ -400,7 +400,7 @@ class TestPostProcessingHelpers:
 class TestDetectInternalLeaksStep:
     def _leak_snaps(self) -> tuple[AbiSnapshot, AbiSnapshot]:
         old = _snap(
-            functions=[_public_fn("get", "ns::detail::Impl*", [])],
+            functions=[_public_fn("get", "ns::detail::Impl", [])],  # by value → genuine leak
             types=[
                 _record(
                     "ns::detail::Impl",
@@ -411,7 +411,7 @@ class TestDetectInternalLeaksStep:
             ],
         )
         new = _snap(
-            functions=[_public_fn("get", "ns::detail::Impl*", [])],
+            functions=[_public_fn("get", "ns::detail::Impl", [])],  # by value → genuine leak
             types=[
                 _record(
                     "ns::detail::Impl",
