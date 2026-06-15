@@ -233,12 +233,14 @@ def _iter_source_fact_files(
     returned sorted for deterministic ingest order.
     """
     sink = diagnostics if diagnostics is not None else []
+    explicit = bool(manifest.source_facts)
     entries = manifest.source_facts or [SOURCE_FACTS_DIR]
     files: list[Path] = []
     for entry in entries:
         target = _safe_pack_path(root, entry, sink)
         if target is None:
             continue
+        before = len(files)
         if target.is_dir():
             # ``.jsonl`` is the canonical form; a ``.json`` array file is also
             # accepted so a producer that cannot stream lines still ingests.
@@ -246,6 +248,11 @@ def _iter_source_fact_files(
             files.extend(target.glob("*.json"))
         elif target.is_file():
             files.append(target)
+        # An *explicitly named* entry that resolves to nothing (typo, empty or
+        # missing dir) must not vanish quietly and leave an L3-only baseline
+        # claiming L4 facts (Codex review). The default auto-scan may be empty.
+        if explicit and len(files) == before:
+            sink.append(f"source_facts entry resolved to no readable fact files: {entry}")
     # Re-validate each discovered file on its *resolved* path: a file inside an
     # in-pack directory can itself be a symlink pointing outside the pack, which
     # the per-entry guard above does not catch (Codex review). Drop any escapee
@@ -341,6 +348,12 @@ def _load_build_evidence(root: Path, manifest: InputsManifest, diagnostics: list
     rel = manifest.compile_db or DEFAULT_COMPILE_DB_REL
     compile_db = _safe_pack_path(root, rel, diagnostics)  # refuse absolute/escaping
     if compile_db is None or not compile_db.is_file():
+        # An *explicitly named* compile DB that is absent must be reported — a typo
+        # or stale pack would otherwise silently drop all L3 (Codex review). The
+        # default auto-detect path is allowed to disappear quietly (None refused →
+        # already diagnosed by _safe_pack_path).
+        if manifest.compile_db and compile_db is not None:
+            diagnostics.append(f"compile_db {rel}: file not found")
         return None
     try:
         return CompileDbAdapter(compile_db).collect()

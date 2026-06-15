@@ -345,6 +345,41 @@ def test_ingest_skips_schema_invalid_tu_record(tmp_path: Path) -> None:
     assert any("schema-invalid TU" in d for d in ingested.diagnostics)
 
 
+def test_ingest_diagnoses_explicit_missing_source_facts(tmp_path: Path) -> None:
+    # An explicitly named source_facts entry that resolves to nothing must be
+    # reported (not a silent L3-only baseline) and downgrade the record.
+    pack = _write_inputs_pack(
+        tmp_path,
+        [_tu("foo", mangled="_Z3foov")],
+        compile_db=_compile_db(tmp_path),
+        manifest_extra={"source_facts": ["typo_missing.jsonl"]},
+    )
+    ingested = ingest_inputs_pack(pack)
+    assert ingested.tu_count == 0
+    assert any("resolved to no readable fact files" in d for d in ingested.diagnostics)
+    rec = next(e for e in ingested.pack.manifest.extractors if e.name == "abicheck_inputs")
+    assert rec.status == "partial"
+
+
+def test_ingest_diagnoses_explicit_missing_compile_db(tmp_path: Path) -> None:
+    pack = _write_inputs_pack(
+        tmp_path,
+        [_tu("foo", mangled="_Z3foov")],
+        manifest_extra={"compile_db": "build/nope.json"},  # named but absent
+    )
+    ingested = ingest_inputs_pack(pack)
+    assert ingested.pack.build_evidence is None
+    assert any("file not found" in d for d in ingested.diagnostics)
+
+
+def test_ingest_default_missing_compile_db_is_quiet(tmp_path: Path) -> None:
+    # No compile_db in manifest, none on disk → no diagnostic (auto-detect miss).
+    pack = _write_inputs_pack(tmp_path, [_tu("foo", mangled="_Z3foov")])
+    ingested = ingest_inputs_pack(pack)
+    assert ingested.pack.build_evidence is None
+    assert not any("file not found" in d for d in ingested.diagnostics)
+
+
 def test_ingest_refuses_absolute_compile_db(tmp_path: Path) -> None:
     outside = tmp_path / "evil_cc.json"
     outside.write_text(json.dumps(_compile_db(tmp_path)))
