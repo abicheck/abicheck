@@ -547,7 +547,7 @@ C1  name classification            ✅ done (PR #395)
 C2  report view-model              ✅ inc 1–2 done (model+ADR-036; maps unified; integrity tests)
 C7  CLI → service                  ◐ exit-code unified + integrity tests (body-extraction follow-up)
 C3  binary-format registry         (parallelisable; needs integration lane)
-C10 split model.py                 ◐ stage-1 done (name predicates moved)
+C10 split model.py                 ◐ stage-2 done (name predicates + type-name canonicalization moved)
 C8  ABICC compat adapter           (parity-sensitive)
 C5  synthetic detectors → registry ⛔ deferred (entangled; net-negative)
 C6  Change factory                 ◐ inc 1 done (factory + 167 templates; all ~200 diff_* sites route via make_change)
@@ -572,5 +572,5 @@ parity is contractual and benefits from a stabilised shared layer underneath it.
 | C7 | CLI → service (exit-code unify + cross-flow integrity tests done; command-body extraction follow-up) | Partial | #395 |
 | C8 | ABICC compat adapter | Proposed | — |
 | C9 | Relocate confidence computation | Done | #395 |
-| C10 | Split `model.py` (stage-1: name predicates) | Stage-1 done | #395 |
+| C10 | Split `model.py` (stage-1: name predicates; stage-2: type-name canonicalization + cv-qualifier helpers moved to `name_classification`, re-exported) | Stage-2 done | #395 / #407 |
 | N-A | HTML page seam (`html_template`) — shared document chrome + footer for the three native renderers, byte-identical golden-locked | Done | — |
