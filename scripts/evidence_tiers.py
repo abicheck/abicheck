@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Evidence-tier model for the abicheck example catalog.
 
-abicheck reasons over *five sources of information* about a library, layered
+abicheck reasons over *six sources of information* about a library, layered
 from the least to the most that a release engineer can hand it. Each source is
-labelled with the same ``L0``–``L4`` evidence-layer codes used across the
+labelled with the same ``L0``–``L5`` evidence-layer codes used across the
 docs (see ``docs/concepts/evidence-and-detectability.md`` and
 ``docs/concepts/evidence-pack.md``):
 
