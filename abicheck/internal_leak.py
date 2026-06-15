@@ -197,7 +197,8 @@ def _candidate_type_names_indirect(typename: str) -> list[tuple[str, bool]]:
     # Base candidate: indirect iff the whole spelling is a top-level pointer/ref
     # (collapse template args so a pointer buried in an argument doesn't count).
     top = _strip_template_args(typename)
-    out.append((base, "*" in top or "&" in top))
+    top_ptr = "*" in top or "&" in top
+    out.append((base, top_ptr))
     smart = any(
         m in _strip_decorators(top)
         for m in ("unique_ptr", "uniq_ptr", "shared_ptr", "weak_ptr")
@@ -215,7 +216,9 @@ def _candidate_type_names_indirect(typename: str) -> list[tuple[str, bool]]:
             if depth == 0 and start >= 0:
                 for p in _split_top_level_commas(typename[start:i]):
                     p_top = _strip_template_args(p)
-                    arg_ptr = smart or "*" in p_top or "&" in p_top
+                    # A top-level pointer/ref on the enclosing template
+                    # (``pair<Impl, int>*``) puts every argument behind it.
+                    arg_ptr = top_ptr or smart or "*" in p_top or "&" in p_top
                     sub = _strip_decorators(p)
                     if sub:
                         out.append((sub, arg_ptr))

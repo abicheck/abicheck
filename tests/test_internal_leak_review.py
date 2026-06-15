@@ -539,6 +539,34 @@ class TestPointerMediatedLayoutLeakSuppressed:
         )
         assert "embedded-by-value" in leaks[0].description
 
+    def test_top_level_pointer_to_template_suppresses_args(self) -> None:
+        # Codex review: a top-level pointer on the enclosing template
+        # (`std::pair<ns::detail::Impl, int>*`) puts the by-value `Impl` behind a
+        # pointer too — a layout change to Impl must be demoted.
+        def _snap(size: int) -> AbiSnapshot:
+            return AbiSnapshot(
+                library="lib.so", version="1.0",
+                functions=[Function(
+                    name="make", mangled="make", return_type="Public*",
+                    params=[], visibility=Visibility.PUBLIC,
+                )],
+                types=[
+                    RecordType(name="Public", kind="class", fields=[
+                        TypeField(name="p", type="std::pair<ns::detail::Impl, int>*"),
+                    ]),
+                    RecordType(name="ns::detail::Impl", kind="struct", size_bits=size),
+                ],
+            )
+        leaks = detect_internal_leaks(
+            [Change(kind=ChangeKind.TYPE_SIZE_CHANGED,
+                    symbol="ns::detail::Impl", description="size")],
+            _snap(32), _snap(64),
+        )
+        assert leaks == [], (
+            "a by-value template arg behind a top-level pointer must be demoted "
+            f"(got: {leaks})"
+        )
+
     def test_opaque_handle_pointer_param_is_suppressed(self) -> None:
         # Codex review: an internal type reached only through a pointer PARAM in a
         # public signature (`void use(ns::detail::Impl*)`) does not embed its
