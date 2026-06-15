@@ -566,22 +566,27 @@ use_cases:
     evidence:
       modules:
         - abicheck/buildsource/pattern_scan.py
+        - abicheck/buildsource/risk.py
+        - abicheck/buildsource/scan_levels.py
+        - abicheck/cli_scan.py
       tests:
         - tests/test_pattern_scan.py
+        - tests/test_risk.py
+        - tests/test_scan_levels.py
+        - tests/test_cli_scan.py
     next_steps: >
       ADR-035 D2/D3. DONE: the compiler-free lexical pattern pre-scan
-      (`buildsource/pattern_scan.py`) — a stdlib-regex scan over changed+public
-      files for the D2 ABI-risk construct list, emitting advisory facts +
-      per-kind escalation triggers, with no compile DB and no compiler. REMAINS:
-      the preprocessor macro/include capture (S2), conditional on a compile DB +
-      `clang -E` (reported skipped otherwise); and the deterministic `scan`
-      orchestrator — a fixed `--mode` preset or an explicit
-      `--source-method`/`--depth`. A numeric risk score changes depth ONLY under
-      `--source-method auto` (opt-in) and for POI focusing; `--budget` is a
-      failure guard on the chosen level (errors on overflow, never shrinks scope).
-      A single `scan` orchestrator reports per-tier coverage so partial results
-      are first-class. Reuses the existing collect-mode/replay-scope and
-      evidence-policy machinery; emits RISK/API_BREAK only (authority rule).
+      (`buildsource/pattern_scan.py`); and the deterministic `scan` orchestrator
+      (`cli_scan.py`) — classify → always-on tier (pattern S3 + crosscheck D4) →
+      the pinned level (`--mode` preset or explicit `--source-method`/`--depth`,
+      resolved by `buildsource/scan_levels.py`) → one coverage-annotated report,
+      with `--baseline` comparison and a `--budget` failure guard (exit 5 on
+      overflow, never shrinks scope). The numeric risk score (`buildsource/risk.py`,
+      tunable `risk_rules`) changes depth ONLY under `--source-method auto`
+      (opt-in). Reuses the existing collect-mode/replay-scope machinery; emits
+      RISK/API_BREAK only (authority rule). REMAINS: the preprocessor macro/include
+      capture (S2), conditional on a compile DB + `clang -E`; and the D7 POI
+      work-list that focuses the expensive scan (Phase 3b).
 
   - id: UC-CHANGE-crosscheck-hygiene
     axis: change_class
@@ -649,12 +654,20 @@ use_cases:
   - id: UC-REPORTING-scan-coverage-estimate
     axis: reporting
     name: Scan coverage/confidence report + per-project cost estimate
-    status: planned
+    status: partial
     gap: G19
     plan: docs/development/plans/g19-pr-source-intelligence.md
+    evidence:
+      modules:
+        - abicheck/cli_scan.py
+      tests:
+        - tests/test_cli_scan.py
     next_steps: >
-      ADR-035 D9/D10. A typed ScanResult carrying per-tier LayerCoverage, the
-      provider-agreement/confidence matrix, and estimate-vs-actual cost — rendered
-      by reporter/PR-comment/SARIF/MCP. `scan --estimate` (service.estimate_scan)
-      probes the project (TU count, header fan-out, cache state) and prints the
-      projected per-level cost so a maintainer/CI picks a depth on measured cost.
+      ADR-035 D9/D10. DONE: `scan` emits one report (text/JSON) carrying the
+      per-tier coverage table (intrinsic L0-L2 + pattern-scan S3 + L3/L4/L5 pack
+      coverage + per-crosscheck rows), the resolved level, and the risk score, so
+      a partial scan is legible (never a bare "source scan failed"). REMAINS: the
+      typed `ScanResult`/`CostEstimate` API + provider-agreement/confidence matrix
+      rendered by reporter/PR-comment/SARIF/MCP; and `scan --estimate`
+      (`service.estimate_scan`) probing the project (TU count, header fan-out,
+      cache state) for projected per-level cost (Phase 3b).
