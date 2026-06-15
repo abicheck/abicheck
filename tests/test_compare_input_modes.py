@@ -356,7 +356,7 @@ class TestCompareSoSo:
                 return old_snap
             return new_snap
 
-        monkeypatch.setattr("abicheck.cli.dump", mock_dump)
+        monkeypatch.setattr("abicheck.cli_resolve.dump", mock_dump)
 
         runner = CliRunner()
         result = runner.invoke(main, [
@@ -381,7 +381,7 @@ class TestCompareSoSo:
             recorded_headers.append(list(headers))
             return _make_snapshot(version)
 
-        monkeypatch.setattr("abicheck.cli.dump", mock_dump)
+        monkeypatch.setattr("abicheck.cli_resolve.dump", mock_dump)
 
         runner = CliRunner()
         result = runner.invoke(main, [
@@ -404,7 +404,7 @@ class TestCompareSoSo:
                       lang="c++", **kw):
             return _make_snapshot(version)
 
-        monkeypatch.setattr("abicheck.cli.dump", mock_dump)
+        monkeypatch.setattr("abicheck.cli_resolve.dump", mock_dump)
         runner = CliRunner()
         result = runner.invoke(main, ["compare", str(old_elf), str(new_elf)])
         assert result.exit_code == 0, result.output
@@ -425,7 +425,7 @@ class TestCompareSoSo:
             recorded_versions.append(version)
             return _make_snapshot(version)
 
-        monkeypatch.setattr("abicheck.cli.dump", mock_dump)
+        monkeypatch.setattr("abicheck.cli_resolve.dump", mock_dump)
 
         runner = CliRunner()
         result = runner.invoke(main, [
@@ -451,7 +451,7 @@ class TestCompareSoSo:
             recorded_includes.append(list(extra_includes or []))
             return _make_snapshot(version)
 
-        monkeypatch.setattr("abicheck.cli.dump", mock_dump)
+        monkeypatch.setattr("abicheck.cli_resolve.dump", mock_dump)
 
         runner = CliRunner()
         result = runner.invoke(main, [
@@ -479,7 +479,7 @@ class TestCompareMixed:
                       lang="c++", **kw):
             return _make_snapshot(version)
 
-        monkeypatch.setattr("abicheck.cli.dump", mock_dump)
+        monkeypatch.setattr("abicheck.cli_resolve.dump", mock_dump)
 
         runner = CliRunner()
         result = runner.invoke(main, [
@@ -499,7 +499,7 @@ class TestCompareMixed:
                       lang="c++", **kw):
             return _make_snapshot(version)
 
-        monkeypatch.setattr("abicheck.cli.dump", mock_dump)
+        monkeypatch.setattr("abicheck.cli_resolve.dump", mock_dump)
 
         runner = CliRunner()
         result = runner.invoke(main, [
@@ -519,7 +519,7 @@ class TestCompareMixed:
                       lang="c++", **kw):
             return new_snap
 
-        monkeypatch.setattr("abicheck.cli.dump", mock_dump)
+        monkeypatch.setattr("abicheck.cli_resolve.dump", mock_dump)
 
         runner = CliRunner()
         result = runner.invoke(main, [
@@ -541,7 +541,7 @@ class TestCompareMixed:
             recorded_headers.append(list(headers))
             return _make_snapshot(version)
 
-        monkeypatch.setattr("abicheck.cli.dump", mock_dump)
+        monkeypatch.setattr("abicheck.cli_resolve.dump", mock_dump)
 
         runner = CliRunner()
         result = runner.invoke(main, [
@@ -568,7 +568,7 @@ class TestCompareSoOutputFormats:
                       lang="c++", **kw):
             return _make_snapshot(version)
 
-        monkeypatch.setattr("abicheck.cli.dump", mock_dump)
+        monkeypatch.setattr("abicheck.cli_resolve.dump", mock_dump)
 
         args = ["compare", str(old_elf), str(new_elf), "-H", str(hdr),
                 "--format", fmt]
@@ -646,7 +646,7 @@ class TestElfNoHeaderFallback:
                       lang="c++", **kw):
             return _make_snapshot(version)
 
-        monkeypatch.setattr("abicheck.cli.dump", mock_dump)
+        monkeypatch.setattr("abicheck.cli_resolve.dump", mock_dump)
         runner = CliRunner()
         result = runner.invoke(main, ["compare", str(old_elf), str(new_elf)])
         assert result.exit_code == 0, result.output
@@ -674,7 +674,7 @@ class TestHeaderDirectoryInput:
             captured.append(list(headers))
             return _make_snapshot(version)
 
-        monkeypatch.setattr("abicheck.cli.dump", mock_dump)
+        monkeypatch.setattr("abicheck.cli_resolve.dump", mock_dump)
 
         runner = CliRunner()
         result = runner.invoke(main, [
@@ -706,7 +706,7 @@ class TestHeaderDirectoryInput:
             captured.append(list(headers))
             return _make_snapshot(version)
 
-        monkeypatch.setattr("abicheck.cli.dump", mock_dump)
+        monkeypatch.setattr("abicheck.cli_resolve.dump", mock_dump)
         runner = CliRunner()
         result = runner.invoke(main, [
             "compare", str(old_elf), str(new_elf),
@@ -736,7 +736,7 @@ class TestHeaderDirectoryInput:
             captured.append(list(headers))
             return _make_snapshot(version)
 
-        monkeypatch.setattr("abicheck.cli.dump", mock_dump)
+        monkeypatch.setattr("abicheck.cli_resolve.dump", mock_dump)
         runner = CliRunner()
         result = runner.invoke(main, [
             "compare", str(old_elf), str(new_elf),

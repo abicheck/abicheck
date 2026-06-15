@@ -110,6 +110,7 @@ disable_error_code = ["attr-defined"]
 # we also relax ``no-any-return`` / ``misc`` there.
 module = [
     "abicheck.cli",
+    "abicheck.cli_resolve",
     "abicheck.cli_appcompat",
     "abicheck.cli_compare_release",
     "abicheck.cli_debian_symbols",
