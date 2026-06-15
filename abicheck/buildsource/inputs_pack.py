@@ -87,6 +87,28 @@ def _opt_str(raw: Any, default: str = "") -> str:
     return default if raw is None else str(raw)
 
 
+def _safe_pack_path(root: Path, entry: str, diagnostics: list[str]) -> Path | None:
+    """Resolve a manifest-relative path, refusing absolute or escaping entries.
+
+    Protocol paths are documented as **pack-relative** (ADR-035 D5). An absolute
+    path, a ``..`` that climbs out of the pack, or a symlink that resolves
+    outside it could read arbitrary runner files into the L4/L5 baseline, so it
+    is refused with a diagnostic rather than followed (Codex review). The check
+    is on the *resolved* path, so symlink escapes are caught too. Returns the
+    joined (unresolved, for a stable user-facing path) path when safe, else
+    ``None``.
+    """
+    if Path(entry).is_absolute():
+        diagnostics.append(f"refused absolute path outside pack: {entry}")
+        return None
+    root_resolved = root.resolve()
+    candidate = (root / entry).resolve()
+    if candidate != root_resolved and not candidate.is_relative_to(root_resolved):
+        diagnostics.append(f"refused path escaping pack root: {entry}")
+        return None
+    return root / entry
+
+
 @dataclass
 class InputsManifest:
     """Declarative manifest for an ``abicheck_inputs/`` pack (Flow 2).
@@ -199,18 +221,24 @@ def load_inputs_manifest(root: Path | str) -> InputsManifest:
     return InputsManifest.from_dict(data)
 
 
-def _iter_source_fact_files(root: Path, manifest: InputsManifest) -> list[Path]:
+def _iter_source_fact_files(
+    root: Path, manifest: InputsManifest, diagnostics: list[str] | None = None
+) -> list[Path]:
     """Resolve the normalized source-fact files to read.
 
     Honours an explicit ``source_facts`` list in the manifest (each entry a file
     or a directory of ``*.jsonl``); otherwise scans the default
-    ``source_facts/`` sub-directory. Files are returned sorted for deterministic
-    ingest order.
+    ``source_facts/`` sub-directory. Entries are constrained to the pack root
+    (absolute/escaping paths are refused, see :func:`_safe_pack_path`). Files are
+    returned sorted for deterministic ingest order.
     """
+    sink = diagnostics if diagnostics is not None else []
     entries = manifest.source_facts or [SOURCE_FACTS_DIR]
     files: list[Path] = []
     for entry in entries:
-        target = root / entry
+        target = _safe_pack_path(root, entry, sink)
+        if target is None:
+            continue
         if target.is_dir():
             # ``.jsonl`` is the canonical form; a ``.json`` array file is also
             # accepted so a producer that cannot stream lines still ingests.
@@ -275,7 +303,7 @@ def read_source_facts(
     manifest = manifest or load_inputs_manifest(root)
     sink = diagnostics if diagnostics is not None else []
     tus: list[SourceAbiTu] = []
-    for path in _iter_source_fact_files(root, manifest):
+    for path in _iter_source_fact_files(root, manifest, sink):
         tus.extend(_parse_tu_records(path.read_text(encoding="utf-8"), path.name, sink))
     return tus
 
@@ -283,8 +311,8 @@ def read_source_facts(
 def _load_build_evidence(root: Path, manifest: InputsManifest, diagnostics: list[str]) -> BuildEvidence | None:
     """Parse the pack's compile DB into L3 build evidence, if present."""
     rel = manifest.compile_db or DEFAULT_COMPILE_DB_REL
-    compile_db = root / rel
-    if not compile_db.is_file():
+    compile_db = _safe_pack_path(root, rel, diagnostics)  # refuse absolute/escaping
+    if compile_db is None or not compile_db.is_file():
         return None
     try:
         return CompileDbAdapter(compile_db).collect()
@@ -319,10 +347,17 @@ def ingest_inputs_pack(
 
     surface = None
     if tus:
+        # Preserve the TU target id when the pack describes a single target, so
+        # the linked surface's `target_id` is set and the L5 graph emits the
+        # BINARY_EXPORTS_SYMBOL target edges `localize_symbol()` needs (Codex
+        # review). Ambiguous (multi-target) packs leave it empty.
+        tu_targets = {tu.target_id for tu in tus if tu.target_id}
+        target_id = next(iter(tu_targets)) if len(tu_targets) == 1 else ""
         surface = link_source_abi(
             tus,
             exported_symbols=exports,
             library=manifest.library,
+            target_id=target_id,
         )
 
     build_evidence = _load_build_evidence(root, manifest, diagnostics)

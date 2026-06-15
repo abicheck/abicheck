@@ -232,6 +232,14 @@ def test_ingest_without_compile_db_skips_l3(tmp_path: Path) -> None:
     assert statuses[DataLayer.L3_BUILD.value] == CoverageStatus.NOT_COLLECTED
 
 
+def test_ingest_preserves_single_target_id(tmp_path: Path) -> None:
+    # The TUs carry target://libfoo; the linked surface must keep it so the L5
+    # graph emits BINARY_EXPORTS_SYMBOL target edges (localize_symbol needs them).
+    pack = _write_inputs_pack(tmp_path, [_tu("foo", mangled="_Z3foov")])
+    ingested = ingest_inputs_pack(pack)
+    assert ingested.pack.source_abi.target_id == "target://libfoo"
+
+
 def test_ingest_records_provenance_extractor(tmp_path: Path) -> None:
     pack = _write_inputs_pack(tmp_path, [_tu("foo", mangled="_Z3foov")])
     ingested = ingest_inputs_pack(pack)
@@ -285,6 +293,36 @@ def test_ingest_surfaces_malformed_record_diagnostics(tmp_path: Path) -> None:
     rec = next(e for e in ingested.pack.manifest.extractors if e.name == "abicheck_inputs")
     assert rec.status == "partial"
     assert rec.diagnostics
+
+
+def test_ingest_refuses_escaping_source_facts_path(tmp_path: Path) -> None:
+    # A stale/third-party manifest pointing outside the pack must not read the
+    # runner's filesystem into the baseline — the entry is refused.
+    secret = tmp_path / "secret.jsonl"
+    secret.write_text(json.dumps(_tu("evil", mangled="_Z4evilv").to_dict()) + "\n")
+    pack = _write_inputs_pack(
+        tmp_path,
+        [_tu("foo", mangled="_Z3foov")],
+        manifest_extra={"source_facts": ["../secret.jsonl", "source_facts"]},
+    )
+    ingested = ingest_inputs_pack(pack)
+    names = {e.qualified_name for e in ingested.pack.source_abi.reachable_declarations}
+    assert "evil" not in names  # the escaping path was refused
+    assert "foo" in names  # the in-pack entry still ingested
+    assert any("escaping pack root" in d for d in ingested.diagnostics)
+
+
+def test_ingest_refuses_absolute_compile_db(tmp_path: Path) -> None:
+    outside = tmp_path / "evil_cc.json"
+    outside.write_text(json.dumps(_compile_db(tmp_path)))
+    pack = _write_inputs_pack(
+        tmp_path,
+        [_tu("foo", mangled="_Z3foov")],
+        manifest_extra={"compile_db": str(outside)},  # absolute path
+    )
+    ingested = ingest_inputs_pack(pack)
+    assert ingested.pack.build_evidence is None
+    assert any("absolute path outside pack" in d for d in ingested.diagnostics)
 
 
 def test_multiple_jsonl_records_ingest(tmp_path: Path) -> None:
