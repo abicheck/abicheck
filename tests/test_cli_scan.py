@@ -536,6 +536,19 @@ def test_malformed_risk_rules_yaml_is_click_error(
     assert "cannot read --risk-rules" in res.output
 
 
+def test_header_short_alias_works(runner, tmp_path, new_snap_compatible):
+    # The --help example uses `-H`; the alias must actually parse (Codex review).
+    header = tmp_path / "inc" / "w.h"
+    header.parent.mkdir()
+    header.write_text("#pragma pack(1)\nstruct W { int a; };\n", encoding="utf-8")
+    res = runner.invoke(
+        main,
+        ["scan", "--binary", str(new_snap_compatible), "-H", str(header), "--audit"],
+    )
+    assert res.exit_code == 0, res.output
+    assert "Pattern pre-scan facts" in res.output
+
+
 def test_out_of_tree_compile_db_is_accepted(runner, tmp_path, new_snap_compatible):
     # An explicit --compile-db (out-of-tree, no --sources) must be threaded into
     # evidence collection, not ignored (Codex review). Empty DB → no compiler

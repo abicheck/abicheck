@@ -427,11 +427,13 @@ def _audit_exit_code(
     help="Library/artifact (or .abi.json snapshot) to scan.",
 )
 @click.option(
+    "-H",
+    "--header",
     "--headers",
     "headers",
     multiple=True,
     type=click.Path(exists=True, path_type=Path),
-    help="Public header file or directory (repeatable).",
+    help="Public header file or directory (repeatable). Alias: -H/--header.",
 )
 @click.option(
     "-I",
