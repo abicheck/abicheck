@@ -170,3 +170,45 @@ def test_run_skips_when_clang_absent(monkeypatch) -> None:
     result = run_preprocessor_scan(build, ["include/foo.h"], clang_bin="clang++")
     assert result.ran is False
     assert "not found" in result.skipped_reason
+
+
+def test_run_passes_compile_unit_directory_as_cwd(monkeypatch) -> None:
+    # Relative -I flags from a CMake/Ninja compile DB only resolve when the
+    # depfile pass runs from the CU's directory — that dir must reach the live
+    # header-include capture as cwd (Codex review).
+    from abicheck.buildsource import build_evidence as be
+    from abicheck.buildsource import preprocessor_scan as ps
+
+    build = be.BuildEvidence(
+        compile_units=[
+            be.CompileUnit(
+                id="cu://a",
+                source="src/a.cpp",
+                language="CXX",
+                directory="/work/build",
+                argv=["clang++", "-c", "src/a.cpp", "-Iinclude"],
+            )
+        ]
+    )
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(ps.ClangPreprocessorExtractor, "available", lambda self: True)
+    monkeypatch.setattr(
+        ps.ClangPreprocessorExtractor, "capture_macros", lambda self, b: {}
+    )
+
+    def _fake_includes(self, headers, context, language="c++", cwd=None):
+        captured["cwd"] = cwd
+        captured["context"] = context
+        return {headers[0]: ["include/detail/impl.h"]}
+
+    monkeypatch.setattr(
+        ps.ClangPreprocessorExtractor, "capture_header_includes", _fake_includes
+    )
+
+    result = ps.run_preprocessor_scan(build, ["include/foo.h"])
+    assert result.ran is True
+    assert captured["cwd"] == "/work/build"
+    # The source token is stripped from the reused include context.
+    assert "src/a.cpp" not in captured["context"]
+    assert "-Iinclude" in captured["context"]

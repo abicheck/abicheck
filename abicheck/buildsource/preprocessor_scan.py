@@ -426,6 +426,7 @@ class ClangPreprocessorExtractor:
         public_headers: list[str],
         context_argv: list[str],
         language: str = "c++",
+        cwd: str | None = None,
     ) -> dict[str, list[str]]:
         """Return ``{public_header: [resolved include, ...]}`` via ``clang -M``.
 
@@ -433,10 +434,18 @@ class ClangPreprocessorExtractor:
         context (``context_argv`` — the ``-I``/``-isystem``/``-D``/``-std`` flags
         from a representative compile command) so the resolved transitive include
         set is what a consumer of that header actually pulls in.
+
+        *cwd* is the representative compile unit's directory: compile DBs commonly
+        store **relative** ``-I`` flags (CMake/Ninja), so the depfile pass must run
+        from that directory to resolve them — running from the process cwd would
+        fail to find project includes and report no leaks even with valid L3
+        evidence (Codex review). The macro-capture path honours ``cu.directory``
+        the same way per unit.
         """
         from .include_graph import _lang_flag, parse_depfile
         from .source_extractors._argv import unredact_home
 
+        run_cwd = unredact_home(cwd) if cwd else None
         out: dict[str, list[str]] = {}
         for hdr in public_headers:
             if not hdr:
@@ -448,7 +457,7 @@ class ClangPreprocessorExtractor:
                 *(unredact_home(a) for a in context_argv),
                 hdr,
             ]
-            text = self._run(cmd, None, hdr)
+            text = self._run(cmd, run_cwd, hdr)
             if text and text.strip():
                 out[hdr] = parse_depfile(text)
         return out
@@ -504,9 +513,15 @@ def run_preprocessor_scan(
 
     headers = [h for h in (public_headers or []) if h]
     if headers:
-        context = _context_flags(_depfile_context(build.compile_units[0]))
-        language = build.compile_units[0].language or "c++"
-        header_includes = extractor.capture_header_includes(headers, context, language)
+        representative = build.compile_units[0]
+        context = _context_flags(_depfile_context(representative))
+        language = representative.language or "c++"
+        # Run from the representative CU's directory so relative -I flags from a
+        # CMake/Ninja compile DB resolve (Codex review) — same dir the per-unit
+        # macro capture uses.
+        header_includes = extractor.capture_header_includes(
+            headers, context, language, cwd=representative.directory or None
+        )
         result.headers_scanned = len(header_includes)
         result.leaks = find_private_header_leaks(header_includes, frozenset(headers))
 
