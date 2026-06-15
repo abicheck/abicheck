@@ -699,6 +699,7 @@ def test_augment_marks_leaf_callee_from_callee_file() -> None:
     augment_graph_with_calls(g, edges, frozenset({"src/api.cc", "src/util.cc"}))
     by_id = {n.id: n for n in g.nodes}
     assert by_id["decl://_Zleaf"].attrs.get("defined_in_project") is True
+    assert by_id["decl://_Zleaf"].attrs.get("def_file") == "/work/src/util.cc"
 
 
 def test_parse_fills_callee_file_from_sibling_functiondecl() -> None:

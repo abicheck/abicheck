@@ -312,15 +312,19 @@ def augment_graph_with_calls(
     """
     from .source_graph import _decl_node_id
 
-    defined_in_project: set[str] = set()
+    # identity → the project source file its body is defined in. Both marks the
+    # decl ``defined_in_project`` AND preserves the path so the cross-check's
+    # changed-file HIGH-confidence elevation works for call-graph-only internals
+    # (not just SOURCE_DECLARES-backed ones) — Codex review.
+    project_def_file: dict[str, str] = {}
     if project_files:
         for e in edges:
-            if _file_in_project(e.caller_file, project_files):
-                defined_in_project.add(e.caller)
+            if e.caller_file and _file_in_project(e.caller_file, project_files):
+                project_def_file.setdefault(e.caller, e.caller_file)
             # A leaf helper appears only as a callee; mark it too when its
             # declaration file is a project source (Codex review).
-            if _file_in_project(e.callee_file, project_files):
-                defined_in_project.add(e.callee)
+            if e.callee_file and _file_in_project(e.callee_file, project_files):
+                project_def_file.setdefault(e.callee, e.callee_file)
 
     added = 0
     for e in edges:
@@ -329,7 +333,9 @@ def augment_graph_with_calls(
         for node_id, ident in ((src, e.caller), (dst, e.callee)):
             if not graph.has_node(node_id):
                 attrs = (
-                    {"defined_in_project": True} if ident in defined_in_project else {}
+                    {"defined_in_project": True, "def_file": project_def_file[ident]}
+                    if ident in project_def_file
+                    else {}
                 )
                 graph.add_node(
                     GraphNode(

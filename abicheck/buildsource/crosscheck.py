@@ -810,7 +810,14 @@ def _check_public_to_internal_dependency(
         if key in seen:
             continue
         seen.add(key)
+        # Declaring file from SOURCE_DECLARES (L4), else the call-graph node's
+        # source-location ``def_file`` — so changed-file elevation also works for
+        # a call-graph-only internal helper (Codex review).
         changed_file = decl_to_file.get(e.dst, "")
+        if not changed_file:
+            dst_node = node_by_id.get(e.dst)
+            if dst_node is not None:
+                changed_file = str(dst_node.attrs.get("def_file", ""))
         is_changed = _path_matches(changed_file, cfg.changed_paths)
         note = (
             f" — {internal!r} is declared in changed file {changed_file!r}, so the "

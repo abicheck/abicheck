@@ -1085,6 +1085,8 @@ def abi_scan(
         cdb_path = (
             _safe_read_path(compile_db, label="compile_db") if compile_db else None
         )
+        if cdb_path is not None:
+            _check_file_size(cdb_path, label="compile_db")
         base_path = _safe_read_path(baseline, label="baseline") if baseline else None
         if base_path is not None:
             _check_file_size(base_path, label="baseline")

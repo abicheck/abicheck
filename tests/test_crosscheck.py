@@ -1393,3 +1393,27 @@ def test_crosscheck_kinds_are_risk_or_api_break_never_breaking():
     assert ChangeKind.ODR_TYPE_VARIANT in _api_break_kinds()
     assert ChangeKind.PUBLIC_TO_INTERNAL_DEPENDENCY not in _api_break_kinds()
     assert Verdict.BREAKING is not None  # sanity: import wired
+
+
+def test_public_to_internal_dependency_elevates_via_callgraph_def_file():
+    # A call-graph-only internal helper (no SOURCE_DECLARES) carries its source
+    # path in def_file; a changed-path match must elevate to HIGH with a location
+    # (Codex review).
+    g = _graph(
+        [
+            _decl("decl://pub", "pubFn", "public_header"),
+            GraphNode(
+                id="decl://impl", kind="source_decl", label="implHelper",
+                attrs={"defined_in_project": True, "def_file": "/work/src/impl.cc"},
+            ),
+        ],
+        [GraphEdge(src="decl://pub", dst="decl://impl", kind="DECL_CALLS_DECL")],
+    )
+    snap = _snap(build_source=BuildSourcePack(root="", source_graph=g))
+    res = run_crosschecks(
+        snap, CrosscheckConfig(changed_paths=frozenset({"src/impl.cc"}))
+    )
+    hits = _findings_of(res, ChangeKind.PUBLIC_TO_INTERNAL_DEPENDENCY)
+    assert len(hits) == 1
+    assert hits[0].confidence == Confidence.HIGH
+    assert hits[0].source_location == "/work/src/impl.cc"
