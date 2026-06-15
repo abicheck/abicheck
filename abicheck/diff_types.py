@@ -23,6 +23,7 @@ from .checker_policy import ChangeKind
 from .checker_types import Change
 from .detector_registry import registry
 from .diff_cxx_rules import itanium_qualified_name
+from .diff_helpers import make_change
 from .diff_symbols import (
     _PUBLIC_VIS,
     _public_functions,
@@ -161,8 +162,8 @@ def _diff_types(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         if t_new is None:
             if suppress_removed:
                 continue
-            changes.append(Change(
-                kind=ChangeKind.TYPE_REMOVED,
+            changes.append(make_change(
+                ChangeKind.TYPE_REMOVED,
                 symbol=name,
                 description=f"Type removed: {name}",
             ))
@@ -171,10 +172,10 @@ def _diff_types(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
 
     for name in new_map:
         if name not in old_map:
-            changes.append(Change(
-                kind=ChangeKind.TYPE_ADDED,
+            changes.append(make_change(
+                ChangeKind.TYPE_ADDED,
                 symbol=name,
-                description=f"New type: {name}",
+                name=name,
             ))
 
     return changes
@@ -246,13 +247,10 @@ def _diff_overload_additions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]
             continue  # original declaration gone → a replacement/rename, not an addition
         if not (new_mangleds - {original.mangled}):
             continue  # nothing genuinely new
-        changes.append(Change(
-            kind=ChangeKind.OVERLOAD_ADDED,
+        changes.append(make_change(
+            ChangeKind.OVERLOAD_ADDED,
             symbol=original.mangled,
-            description=(
-                f"Overload added to previously non-overloaded function: {key} "
-                f"— `&{key}` becomes ambiguous and overload resolution may change"
-            ),
+            name=key,
             old_value="1 overload",
             new_value=f"{len(news)} overloads",
         ))
@@ -264,10 +262,10 @@ def _diff_type_pair(name: str, t_old: RecordType, t_new: RecordType) -> list[Cha
 
     # TYPE_BECAME_OPAQUE: was complete, now forward-decl only
     if not t_old.is_opaque and t_new.is_opaque:
-        changes.append(Change(
-            kind=ChangeKind.TYPE_BECAME_OPAQUE,
+        changes.append(make_change(
+            ChangeKind.TYPE_BECAME_OPAQUE,
             symbol=name,
-            description=f"Type became opaque (forward-declaration only): {name} — stack allocation no longer possible",
+            name=name,
             old_value="complete",
             new_value="opaque",
         ))
@@ -298,18 +296,18 @@ def _append_type_finality_changes(
     if t_old.is_final == t_new.is_final:
         return
     if t_new.is_final:
-        changes.append(Change(
-            kind=ChangeKind.TYPE_BECAME_FINAL,
+        changes.append(make_change(
+            ChangeKind.TYPE_BECAME_FINAL,
             symbol=name,
-            description=f"Class gained `final` specifier: {name} — consumers that derive from it no longer compile",
+            name=name,
             old_value="non-final",
             new_value="final",
         ))
     else:
-        changes.append(Change(
-            kind=ChangeKind.TYPE_LOST_FINAL,
+        changes.append(make_change(
+            ChangeKind.TYPE_LOST_FINAL,
             symbol=name,
-            description=f"Class lost `final` specifier: {name}",
+            name=name,
             old_value="final",
             new_value="non-final",
         ))
@@ -319,12 +317,12 @@ def _append_type_size_and_alignment_changes(
     changes: list[Change], name: str, t_old: RecordType, t_new: RecordType,
 ) -> None:
     if t_old.size_bits is not None and t_new.size_bits is not None and t_old.size_bits != t_new.size_bits:
-        changes.append(Change(
-            kind=ChangeKind.TYPE_SIZE_CHANGED,
+        changes.append(make_change(
+            ChangeKind.TYPE_SIZE_CHANGED,
             symbol=name,
-            description=f"Size changed: {name} ({t_old.size_bits} → {t_new.size_bits} bits)",
-            old_value=str(t_old.size_bits),
-            new_value=str(t_new.size_bits),
+            name=name,
+            old=str(t_old.size_bits),
+            new=str(t_new.size_bits),
         ))
 
     if (
@@ -332,12 +330,12 @@ def _append_type_size_and_alignment_changes(
         and t_new.alignment_bits is not None
         and t_old.alignment_bits != t_new.alignment_bits
     ):
-        changes.append(Change(
-            kind=ChangeKind.TYPE_ALIGNMENT_CHANGED,
+        changes.append(make_change(
+            ChangeKind.TYPE_ALIGNMENT_CHANGED,
             symbol=name,
-            description=f"Alignment changed: {name} ({t_old.alignment_bits} → {t_new.alignment_bits} bits)",
-            old_value=str(t_old.alignment_bits),
-            new_value=str(t_new.alignment_bits),
+            name=name,
+            old=str(t_old.alignment_bits),
+            new=str(t_new.alignment_bits),
         ))
 
 
@@ -379,12 +377,12 @@ def _try_match_reserved_field(
     if candidate is not None and not _RESERVED_FIELD_RE.match(candidate.name):
         # Reserved field -> real field at same offset/type -> COMPATIBLE
         reserved_matched_added.add(candidate.name)
-        return Change(
-            kind=ChangeKind.USED_RESERVED_FIELD,
+        return make_change(
+            ChangeKind.USED_RESERVED_FIELD,
             symbol=name,
-            description=f"Reserved field put into use: {name}::{fname} → {candidate.name}",
-            old_value=fname,
-            new_value=candidate.name,
+            name=name,
+            old=fname,
+            new=candidate.name,
         )
     return None
 
@@ -432,10 +430,10 @@ def _diff_type_fields(name: str, t_old: RecordType, t_new: RecordType) -> list[C
             if matched is not None:
                 changes.append(matched)
                 continue
-            changes.append(Change(
-                kind=ChangeKind.TYPE_FIELD_REMOVED,
+            changes.append(make_change(
+                ChangeKind.TYPE_FIELD_REMOVED,
                 symbol=name,
-                description=f"Field removed: {name}::{fname}",
+                name=name, detail=fname,
             ))
             continue
         # Skip trailing FAM type changes — handled by _diff_flexible_array_member
@@ -448,10 +446,10 @@ def _diff_type_fields(name: str, t_old: RecordType, t_new: RecordType) -> list[C
             # Skip trailing FAM additions — handled by _diff_flexible_array_member
             if fname == new_trailing_fam:
                 continue
-            changes.append(Change(
-                kind=_new_field_change_kind(t_new),
+            changes.append(make_change(
+                _new_field_change_kind(t_new),
                 symbol=name,
-                description=f"Field added: {name}::{fname}",
+                name=name, detail=fname,
             ))
 
     # FLEXIBLE_ARRAY_MEMBER_CHANGED: detect changes to trailing flexible array members.
@@ -473,26 +471,26 @@ def _diff_type_field_pair(name: str, fname: str, f_old: TypeField, f_new: TypeFi
         canonicalize_type_name(f_old.type) != canonicalize_type_name(f_new.type)
         and not cv_qualifiers_only_differ(f_old.type, f_new.type)
     ):
-        changes.append(Change(
-            kind=ChangeKind.TYPE_FIELD_TYPE_CHANGED,
+        changes.append(make_change(
+            ChangeKind.TYPE_FIELD_TYPE_CHANGED,
             symbol=name,
-            description=f"Field type changed: {name}::{fname}",
+            name=name, detail=fname,
             old_value=f_old.type,
             new_value=f_new.type,
         ))
     if f_old.offset_bits is not None and f_new.offset_bits is not None and f_old.offset_bits != f_new.offset_bits:
-        changes.append(Change(
-            kind=ChangeKind.TYPE_FIELD_OFFSET_CHANGED,
+        changes.append(make_change(
+            ChangeKind.TYPE_FIELD_OFFSET_CHANGED,
             symbol=name,
-            description=f"Field offset changed: {name}::{fname} ({f_old.offset_bits} → {f_new.offset_bits} bits)",
-            old_value=str(f_old.offset_bits),
-            new_value=str(f_new.offset_bits),
+            name=name, detail=fname,
+            old=str(f_old.offset_bits),
+            new=str(f_new.offset_bits),
         ))
     if f_old.is_bitfield != f_new.is_bitfield or f_old.bitfield_bits != f_new.bitfield_bits:
-        changes.append(Change(
-            kind=ChangeKind.FIELD_BITFIELD_CHANGED,
+        changes.append(make_change(
+            ChangeKind.FIELD_BITFIELD_CHANGED,
             symbol=name,
-            description=f"Bitfield layout changed: {name}::{fname}",
+            name=name, detail=fname,
             old_value=f"bits={f_old.bitfield_bits}",
             new_value=f"bits={f_new.bitfield_bits}",
         ))
@@ -525,8 +523,8 @@ def _diff_flexible_array_member(
 
     if old_fam is not None and new_fam is None:
         # FAM removed — already caught by TYPE_FIELD_REMOVED, but emit specific kind
-        changes.append(Change(
-            kind=ChangeKind.FLEXIBLE_ARRAY_MEMBER_CHANGED,
+        changes.append(make_change(
+            ChangeKind.FLEXIBLE_ARRAY_MEMBER_CHANGED,
             symbol=name,
             description=f"Flexible array member removed: {name}::{old_fam.name}",
             old_value=old_fam.type,
@@ -534,8 +532,8 @@ def _diff_flexible_array_member(
         ))
     elif old_fam is None and new_fam is not None:
         # FAM added
-        changes.append(Change(
-            kind=ChangeKind.FLEXIBLE_ARRAY_MEMBER_CHANGED,
+        changes.append(make_change(
+            ChangeKind.FLEXIBLE_ARRAY_MEMBER_CHANGED,
             symbol=name,
             description=f"Flexible array member added: {name}::{new_fam.name}",
             old_value="(none)",
@@ -549,8 +547,8 @@ def _diff_flexible_array_member(
             old_base = canonicalize_type_name(old_elem.group(1))
             new_base = canonicalize_type_name(new_elem.group(1))
             if old_base != new_base:
-                changes.append(Change(
-                    kind=ChangeKind.FLEXIBLE_ARRAY_MEMBER_CHANGED,
+                changes.append(make_change(
+                    ChangeKind.FLEXIBLE_ARRAY_MEMBER_CHANGED,
                     symbol=name,
                     description=(
                         f"Flexible array member element type changed: "
@@ -582,17 +580,17 @@ def _diff_type_bases(name: str, t_old: RecordType, t_new: RecordType) -> list[Ch
     old_bases_set = set(t_old.bases)
     new_bases_set = set(t_new.bases)
     if old_bases_set == new_bases_set and t_old.bases != t_new.bases:
-        changes.append(Change(
-            kind=ChangeKind.BASE_CLASS_POSITION_CHANGED,
+        changes.append(make_change(
+            ChangeKind.BASE_CLASS_POSITION_CHANGED,
             symbol=name,
-            description=f"Base class order reordered: {name} — this-pointer adjustments changed",
+            name=name,
             old_value=str(t_old.bases),
             new_value=str(t_new.bases),
         ))
     elif old_bases_set != new_bases_set:
         # General base class set change (add/remove base) → TYPE_BASE_CHANGED
-        changes.append(Change(
-            kind=ChangeKind.TYPE_BASE_CHANGED,
+        changes.append(make_change(
+            ChangeKind.TYPE_BASE_CHANGED,
             symbol=name,
             description=f"Base classes changed: {name}",
             old_value=str(t_old.bases),
@@ -611,10 +609,11 @@ def _diff_type_bases(name: str, t_old: RecordType, t_new: RecordType) -> list[Ch
             desc_parts.append(f"became virtual: {sorted(became_virtual)}")
         if lost_virtual:
             desc_parts.append(f"lost virtual: {sorted(lost_virtual)}")
-        changes.append(Change(
-            kind=ChangeKind.BASE_CLASS_VIRTUAL_CHANGED,
+        changes.append(make_change(
+            ChangeKind.BASE_CLASS_VIRTUAL_CHANGED,
             symbol=name,
-            description=f"Base class virtual inheritance changed: {name} — {'; '.join(desc_parts)}",
+            name=name,
+            detail="; ".join(desc_parts),
             old_value=str(sorted(t_old.virtual_bases)),
             new_value=str(sorted(t_new.virtual_bases)),
         ))
@@ -623,8 +622,8 @@ def _diff_type_bases(name: str, t_old: RecordType, t_new: RecordType) -> list[Ch
         # e.g. class D : virtual A  →  class D : virtual A, virtual B
         # → TYPE_BASE_CHANGED (hierarchy changed, not just virtuality toggled)
         if not changes:  # don't duplicate if TYPE_BASE_CHANGED already emitted above
-            changes.append(Change(
-                kind=ChangeKind.TYPE_BASE_CHANGED,
+            changes.append(make_change(
+                ChangeKind.TYPE_BASE_CHANGED,
                 symbol=name,
                 description=f"Virtual base classes changed: {name}",
                 old_value=str(t_old.virtual_bases),
@@ -642,8 +641,8 @@ def _diff_type_vtable(name: str, t_old: RecordType, t_new: RecordType) -> list[C
         if Counter(t_old.vtable) == Counter(t_new.vtable)
         else f"vtable changed: {name}"
     )
-    return [Change(
-        kind=ChangeKind.TYPE_VTABLE_CHANGED,
+    return [make_change(
+        ChangeKind.TYPE_VTABLE_CHANGED,
         symbol=name,
         description=description,
         old_value=", ".join(t_old.vtable),
@@ -671,8 +670,8 @@ def _diff_enums(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     for name, e_old in old_map.items():
         if name not in new_map:
             if not suppress_removed:
-                changes.append(Change(
-                    kind=ChangeKind.TYPE_REMOVED,
+                changes.append(make_change(
+                    ChangeKind.TYPE_REMOVED,
                     symbol=name,
                     description=f"Enum removed: {name}",
                 ))
@@ -707,10 +706,10 @@ def _diff_enums(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                 if mval in new_val_to_newname:
                     continue
                 # Value truly removed
-                changes.append(Change(
-                    kind=ChangeKind.ENUM_MEMBER_REMOVED,
+                changes.append(make_change(
+                    ChangeKind.ENUM_MEMBER_REMOVED,
                     symbol=f"{name}::{mname}",
-                    description=f"Enum member removed: {name}::{mname}",
+                    name=name, detail=mname,
                     old_value=str(mval),
                 ))
             elif new_members[mname] != mval:
@@ -719,10 +718,10 @@ def _diff_enums(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                     if _is_sentinel_member(mname)
                     else ChangeKind.ENUM_MEMBER_VALUE_CHANGED
                 )
-                changes.append(Change(
-                    kind=kind,
+                changes.append(make_change(
+                    kind,
                     symbol=f"{name}::{mname}",
-                    description=f"Enum member value changed: {name}::{mname}",
+                    name=name, detail=mname,
                     old_value=str(mval),
                     new_value=str(new_members[mname]),
                 ))
@@ -747,10 +746,10 @@ def _diff_enums(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
             if mname not in old_members:
                 if str(mval) in removed_old_values:
                     continue  # same value as a removed old member — rename candidate
-                changes.append(Change(
-                    kind=ChangeKind.ENUM_MEMBER_ADDED,
+                changes.append(make_change(
+                    ChangeKind.ENUM_MEMBER_ADDED,
                     symbol=f"{name}::{mname}",
-                    description=f"Enum member added: {name}::{mname}",
+                    name=name, detail=mname,
                     new_value=str(mval),
                 ))
 
@@ -790,10 +789,10 @@ def _diff_method_qualifiers(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         f_new = new_by_mangled[mangled]
 
         if f_old.is_static != f_new.is_static:
-            changes.append(Change(
-                kind=ChangeKind.FUNC_STATIC_CHANGED,
+            changes.append(make_change(
+                ChangeKind.FUNC_STATIC_CHANGED,
                 symbol=mangled,
-                description=f"Static qualifier changed: {f_old.name}",
+                name=f_old.name,
                 old_value=str(f_old.is_static),
                 new_value=str(f_new.is_static),
             ))
@@ -804,10 +803,10 @@ def _diff_method_qualifiers(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                 if f_old.is_virtual
                 else ChangeKind.FUNC_PURE_VIRTUAL_ADDED
             )
-            changes.append(Change(
-                kind=kind,
+            changes.append(make_change(
+                kind,
                 symbol=mangled,
-                description=f"Function became pure virtual: {f_old.name}",
+                name=f_old.name,
             ))
 
     # --- cv/static detection: match removed functions against added functions by sig ---
@@ -828,18 +827,18 @@ def _diff_method_qualifiers(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         f_new = added_by_sig[key]
         # Same (name, params) — only qualifiers changed; report instead of REMOVED+ADDED
         if f_old.is_static != f_new.is_static:
-            changes.append(Change(
-                kind=ChangeKind.FUNC_STATIC_CHANGED,
+            changes.append(make_change(
+                ChangeKind.FUNC_STATIC_CHANGED,
                 symbol=f_old.mangled,
-                description=f"Static qualifier changed: {f_old.name}",
+                name=f_old.name,
                 old_value=str(f_old.is_static),
                 new_value=str(f_new.is_static),
             ))
         if f_old.is_const != f_new.is_const or f_old.is_volatile != f_new.is_volatile:
-            changes.append(Change(
-                kind=ChangeKind.FUNC_CV_CHANGED,
+            changes.append(make_change(
+                ChangeKind.FUNC_CV_CHANGED,
                 symbol=f_old.mangled,
-                description=f"CV qualifier changed: {f_old.name}",
+                name=f_old.name,
                 old_value=f"const={f_old.is_const} volatile={f_old.is_volatile}",
                 new_value=f"const={f_new.is_const} volatile={f_new.is_volatile}",
             ))
@@ -848,10 +847,10 @@ def _diff_method_qualifiers(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         old_rq = f_old.ref_qualifier or ""
         new_rq = f_new.ref_qualifier or ""
         if old_rq != new_rq:
-            changes.append(Change(
-                kind=ChangeKind.FUNC_REF_QUAL_CHANGED,
+            changes.append(make_change(
+                ChangeKind.FUNC_REF_QUAL_CHANGED,
                 symbol=f_old.mangled,
-                description=f"Ref-qualifier changed: {f_old.name} ({old_rq!r} → {new_rq!r})",
+                name=f_old.name, old=repr(old_rq), new=repr(new_rq),
                 old_value=old_rq or "(none)",
                 new_value=new_rq or "(none)",
             ))
@@ -875,30 +874,30 @@ def _diff_unions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
 
         for fname, f_old in old_fields.items():
             if fname not in new_fields:
-                changes.append(Change(
-                    kind=ChangeKind.UNION_FIELD_REMOVED,
+                changes.append(make_change(
+                    ChangeKind.UNION_FIELD_REMOVED,
                     symbol=name,
-                    description=f"Union field removed: {name}::{fname}",
+                    name=name, detail=fname,
                     old_value=f_old.type,
                 ))
             elif (
                 canonicalize_type_name(f_old.type) != canonicalize_type_name(new_fields[fname].type)
                 and not cv_qualifiers_only_differ(f_old.type, new_fields[fname].type)
             ):
-                changes.append(Change(
-                    kind=ChangeKind.UNION_FIELD_TYPE_CHANGED,
+                changes.append(make_change(
+                    ChangeKind.UNION_FIELD_TYPE_CHANGED,
                     symbol=name,
-                    description=f"Union field type changed: {name}::{fname}",
+                    name=name, detail=fname,
                     old_value=f_old.type,
                     new_value=new_fields[fname].type,
                 ))
 
         for fname, f_new in new_fields.items():
             if fname not in old_fields:
-                changes.append(Change(
-                    kind=ChangeKind.UNION_FIELD_ADDED,
+                changes.append(make_change(
+                    ChangeKind.UNION_FIELD_ADDED,
                     symbol=name,
-                    description=f"Union field added: {name}::{fname}",
+                    name=name, detail=fname,
                     new_value=f_new.type,
                 ))
 
@@ -966,28 +965,25 @@ def _diff_typedefs(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
             # genuine TYPEDEF_REMOVED breaks for names that merely match the
             # version-stamp pattern.
             if _is_version_stamped_typedef(alias) and _has_version_family_successor(alias, new.typedefs):
-                changes.append(Change(
-                    kind=ChangeKind.TYPEDEF_VERSION_SENTINEL,
+                changes.append(make_change(
+                    ChangeKind.TYPEDEF_VERSION_SENTINEL,
                     symbol=alias,
-                    description=(
-                        f"Version-stamped typedef removed (compile-time sentinel, "
-                        f"not an ABI break): {alias}"
-                    ),
+                    name=alias,
                     old_value=old_type,
                 ))
                 continue
             # Typedef removed — breaking for consumers that used the alias
-            changes.append(Change(
-                kind=ChangeKind.TYPEDEF_REMOVED,
+            changes.append(make_change(
+                ChangeKind.TYPEDEF_REMOVED,
                 symbol=alias,
-                description=f"Typedef removed: {alias}",
+                name=alias,
                 old_value=old_type,
             ))
         elif new_type != old_type:
-            changes.append(Change(
-                kind=ChangeKind.TYPEDEF_BASE_CHANGED,
+            changes.append(make_change(
+                ChangeKind.TYPEDEF_BASE_CHANGED,
                 symbol=alias,
-                description=f"Typedef base type changed: {alias}",
+                name=alias,
                 old_value=old_type,
                 new_value=new_type,
             ))
@@ -1034,12 +1030,12 @@ def _diff_enum_renames(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
             if old_mval in new_by_val:
                 new_mname = new_by_val[old_mval]
                 if new_mname not in old_by_name:
-                    changes.append(Change(
-                        kind=ChangeKind.ENUM_MEMBER_RENAMED,
+                    changes.append(make_change(
+                        ChangeKind.ENUM_MEMBER_RENAMED,
                         symbol=name,
-                        description=f"Enum member renamed: {name}::{old_mname} → {new_mname} (value={old_mval})",
-                        old_value=old_mname,
-                        new_value=new_mname,
+                        name=name, detail=str(old_mval),
+                        old=old_mname,
+                        new=new_mname,
                     ))
 
     return changes
@@ -1052,52 +1048,52 @@ def _check_field_qualifier_pair(
     changes: list[Change] = []
 
     if not f_old.is_const and f_new.is_const:
-        changes.append(Change(
-            kind=ChangeKind.FIELD_BECAME_CONST,
+        changes.append(make_change(
+            ChangeKind.FIELD_BECAME_CONST,
             symbol=name,
-            description=f"Field became const: {name}::{fname}",
+            name=name, detail=fname,
             old_value="non-const",
             new_value="const",
         ))
     elif f_old.is_const and not f_new.is_const:
-        changes.append(Change(
-            kind=ChangeKind.FIELD_LOST_CONST,
+        changes.append(make_change(
+            ChangeKind.FIELD_LOST_CONST,
             symbol=name,
-            description=f"Field lost const: {name}::{fname}",
+            name=name, detail=fname,
             old_value="const",
             new_value="non-const",
         ))
 
     if not f_old.is_volatile and f_new.is_volatile:
-        changes.append(Change(
-            kind=ChangeKind.FIELD_BECAME_VOLATILE,
+        changes.append(make_change(
+            ChangeKind.FIELD_BECAME_VOLATILE,
             symbol=name,
-            description=f"Field became volatile: {name}::{fname}",
+            name=name, detail=fname,
             old_value="non-volatile",
             new_value="volatile",
         ))
     elif f_old.is_volatile and not f_new.is_volatile:
-        changes.append(Change(
-            kind=ChangeKind.FIELD_LOST_VOLATILE,
+        changes.append(make_change(
+            ChangeKind.FIELD_LOST_VOLATILE,
             symbol=name,
-            description=f"Field lost volatile: {name}::{fname}",
+            name=name, detail=fname,
             old_value="volatile",
             new_value="non-volatile",
         ))
 
     if not f_old.is_mutable and f_new.is_mutable:
-        changes.append(Change(
-            kind=ChangeKind.FIELD_BECAME_MUTABLE,
+        changes.append(make_change(
+            ChangeKind.FIELD_BECAME_MUTABLE,
             symbol=name,
-            description=f"Field became mutable: {name}::{fname}",
+            name=name, detail=fname,
             old_value="non-mutable",
             new_value="mutable",
         ))
     elif f_old.is_mutable and not f_new.is_mutable:
-        changes.append(Change(
-            kind=ChangeKind.FIELD_LOST_MUTABLE,
+        changes.append(make_change(
+            ChangeKind.FIELD_LOST_MUTABLE,
             symbol=name,
-            description=f"Field lost mutable: {name}::{fname}",
+            name=name, detail=fname,
             old_value="mutable",
             new_value="non-mutable",
         ))
@@ -1159,12 +1155,12 @@ def _diff_field_renames(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
             sig = (f_old.offset_bits, f_old.type)
             f_new = added_by_sig.get(sig)
             if f_new is not None:
-                changes.append(Change(
-                    kind=ChangeKind.FIELD_RENAMED,
+                changes.append(make_change(
+                    ChangeKind.FIELD_RENAMED,
                     symbol=name,
-                    description=f"Field renamed: {name}::{f_old.name} → {f_new.name}",
-                    old_value=f_old.name,
-                    new_value=f_new.name,
+                    name=name,
+                    old=f_old.name,
+                    new=f_new.name,
                 ))
 
     return changes
@@ -1193,10 +1189,10 @@ def _diff_var_values(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
             and v_new.value is not None
             and v_old.value != v_new.value
         ):
-            changes.append(Change(
-                kind=ChangeKind.VAR_VALUE_CHANGED,
+            changes.append(make_change(
+                ChangeKind.VAR_VALUE_CHANGED,
                 symbol=mangled,
-                description=f"Global data value changed: {v_old.name} ({v_old.value!r} → {v_new.value!r})",
+                name=v_old.name, old=repr(v_old.value), new=repr(v_new.value),
                 old_value=v_old.value,
                 new_value=v_new.value,
             ))
@@ -1220,12 +1216,12 @@ def _diff_type_kind_changes(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
             # struct↔class transitions are source-level only (identical ABI).
             union_involved = t_old.kind == "union" or t_new.kind == "union"
             ck = ChangeKind.TYPE_KIND_CHANGED if union_involved else ChangeKind.SOURCE_LEVEL_KIND_CHANGED
-            changes.append(Change(
-                kind=ck,
+            changes.append(make_change(
+                ck,
                 symbol=name,
-                description=f"Aggregate kind changed: {name} ({t_old.kind} → {t_new.kind})",
-                old_value=t_old.kind,
-                new_value=t_new.kind,
+                name=name,
+                old=t_old.kind,
+                new=t_new.kind,
             ))
     return changes
 
@@ -1276,12 +1272,12 @@ def _diff_reserved_fields(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                         break
             if candidate is not None:
                 matched.add(candidate.name)
-                changes.append(Change(
-                    kind=ChangeKind.USED_RESERVED_FIELD,
+                changes.append(make_change(
+                    ChangeKind.USED_RESERVED_FIELD,
                     symbol=name,
-                    description=f"Reserved field put into use: {name}::{f_old.name} → {candidate.name}",
-                    old_value=f_old.name,
-                    new_value=candidate.name,
+                    name=name,
+                    old=f_old.name,
+                    new=candidate.name,
                 ))
     return changes
 
@@ -1325,10 +1321,10 @@ def _diff_const_overloads(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         if not new_const and new_nonconst:
             # Const overload removed, non-const kept
             f_removed = old_const[0]
-            changes.append(Change(
-                kind=ChangeKind.REMOVED_CONST_OVERLOAD,
+            changes.append(make_change(
+                ChangeKind.REMOVED_CONST_OVERLOAD,
                 symbol=f_removed.mangled,
-                description=f"Const method overload removed: {f_removed.name} (non-const version still exists)",
+                name=f_removed.name,
                 old_value="const overload present",
                 new_value="const overload removed",
             ))

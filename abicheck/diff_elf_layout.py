@@ -57,6 +57,7 @@ from .checker_policy import ChangeKind, Confidence
 from .checker_types import Change
 from .demangle import demangle
 from .detector_registry import registry
+from .diff_helpers import make_change
 from .model import AbiSnapshot, stdlib_namespaces_excluded
 
 # Runtime/standard-library RTTI we never want to flag — these belong to
@@ -208,18 +209,13 @@ def _diff_elf_layout(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         o_slots = _vtable_slots(o_size, pointer_size)
         n_slots = _vtable_slots(n_size, pointer_size)
         changes.append(
-            Change(
-                kind=ChangeKind.VTABLE_SLOT_COUNT_CHANGED,
+            make_change(
+                ChangeKind.VTABLE_SLOT_COUNT_CHANGED,
                 symbol=sym,
-                description=(
-                    f"Vtable for '{cls}' changed size: {o_size} → {n_size} bytes "
-                    f"(~{o_slots} → ~{n_slots} virtual slots). A virtual method was "
-                    f"added, removed, or reordered; existing binaries dispatch through "
-                    f"fixed vtable offsets and will call the wrong slot. Detected from "
-                    f"the ELF symbol size without debug info."
-                ),
-                old_value=str(o_size),
-                new_value=str(n_size),
+                name=cls,
+                detail=f"~{o_slots} → ~{n_slots} virtual slots",
+                old=str(o_size),
+                new=str(n_size),
                 # Derived from symbol size alone (no DWARF/headers): the slot
                 # count is inferred, not authoritative, so label it MEDIUM.
                 confidence=Confidence.MEDIUM,
@@ -238,17 +234,13 @@ def _diff_elf_layout(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         o_shape = _inheritance_shape(o_size, pointer_size)
         n_shape = _inheritance_shape(n_size, pointer_size)
         changes.append(
-            Change(
-                kind=ChangeKind.RTTI_INHERITANCE_CHANGED,
+            make_change(
+                ChangeKind.RTTI_INHERITANCE_CHANGED,
                 symbol=sym,
-                description=(
-                    f"RTTI typeinfo for '{cls}' changed size: {o_size} → {n_size} bytes "
-                    f"({o_shape} → {n_shape}). The base-class shape changed, which shifts "
-                    f"this-pointer adjustments, member offsets, and the vtable. Detected "
-                    f"from the ELF symbol size without debug info."
-                ),
-                old_value=str(o_size),
-                new_value=str(n_size),
+                name=cls,
+                detail=f"{o_shape} → {n_shape}",
+                old=str(o_size),
+                new=str(n_size),
                 # Inheritance shape inferred from _ZTI symbol size alone.
                 confidence=Confidence.MEDIUM,
             )

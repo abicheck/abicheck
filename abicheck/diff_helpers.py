@@ -37,12 +37,69 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable, Mapping
 from typing import Any, TypeVar, cast
 
+from .change_registry import REGISTRY
 from .checker_policy import ChangeKind
 from .checker_types import Change
 
 K = TypeVar("K")
 V = TypeVar("V")
 W = TypeVar("W")
+
+# Fixed placeholder vocabulary a ``ChangeKind.description_template`` may use
+# (C6). ``make_change`` formats the template from exactly these structured
+# fields, so the wording for a kind is owned by the registry rather than
+# reinvented at each call site:
+#   {symbol} — the mangled / exported symbol (or type) name (the Change.symbol)
+#   {name}   — the human-facing declared name (demangled, e.g. ``f_old.name``)
+#   {old}    — old value (also populates Change.old_value unless overridden)
+#   {new}    — new value (also populates Change.new_value unless overridden)
+#   {detail} — any extra computed snippet the template wants to interpolate
+TEMPLATE_VOCAB = frozenset({"symbol", "name", "old", "new", "detail"})
+
+
+def make_change(
+    kind: ChangeKind,
+    *,
+    symbol: str,
+    name: str | None = None,
+    old: str | None = None,
+    new: str | None = None,
+    detail: str | None = None,
+    description: str | None = None,
+    **change_kwargs: Any,
+) -> Change:
+    """Build a :class:`Change`, formatting its description from the registry.
+
+    The C6 *change factory*: a thin wrapper over the :class:`Change` dataclass
+    that keeps a kind's description wording next to its verdict/impact in
+    ``change_registry`` instead of hand-rolled at the call site.
+
+    * When ``description`` is given it is used verbatim — the *bespoke* path,
+      first-class for findings whose text embeds computed offsets, demangled
+      signatures, vtable slot indices, counts, … that no fixed template fits.
+    * Otherwise the kind's ``description_template`` is looked up and formatted
+      from the ``{symbol} {name} {old} {new} {detail}`` vocabulary. A kind with
+      neither a template nor an explicit ``description`` is a programming error
+      and raises :class:`ValueError`.
+
+    ``old`` / ``new`` also populate ``Change.old_value`` / ``Change.new_value``
+    unless those keys are passed explicitly in ``change_kwargs``. Any remaining
+    ``change_kwargs`` (``caused_by_type``, ``confidence``, ``affected_symbols``,
+    …) are forwarded to :class:`Change` unchanged.
+    """
+    if description is None:
+        template = REGISTRY.description_template_for(kind.value)
+        if template is None:
+            raise ValueError(
+                f"make_change({kind.value!r}) requires an explicit description= "
+                "(no description_template registered for this kind)"
+            )
+        description = template.format(
+            symbol=symbol, name=name, old=old, new=new, detail=detail
+        )
+    change_kwargs.setdefault("old_value", old)
+    change_kwargs.setdefault("new_value", new)
+    return Change(kind=kind, symbol=symbol, description=description, **change_kwargs)
 
 # Sentinel distinguishing "key absent" from "key present with value None".
 # Typed as Any so it can stand in for a ``W`` in the get() default without

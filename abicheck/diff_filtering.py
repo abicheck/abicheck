@@ -21,6 +21,7 @@ from collections import deque
 
 from .checker_policy import ChangeKind
 from .checker_types import SYMBOL_VERSION_ALIAS_NOT_RETAINED_MARKER, Change
+from .diff_helpers import make_change
 from .diff_symbols import _PUBLIC_VIS, _public_functions
 from .model import AbiSnapshot, Function
 
@@ -1483,8 +1484,8 @@ def _downgrade_opaque_struct_changes(
         if c.kind in _OPAQUE_DOWNGRADEABLE and c.symbol in truly_opaque:
             # Downgrade: replace with TYPE_FIELD_ADDED_COMPATIBLE
             result.append(
-                Change(
-                    kind=ChangeKind.TYPE_FIELD_ADDED_COMPATIBLE,
+                make_change(
+                    ChangeKind.TYPE_FIELD_ADDED_COMPATIBLE,
                     symbol=c.symbol,
                     description=f"(opaque struct) {c.description}",
                     old_value=c.old_value,

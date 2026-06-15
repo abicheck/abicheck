@@ -22,6 +22,7 @@ from __future__ import annotations
 
 from .checker_policy import API_BREAK_KINDS, BREAKING_KINDS, ChangeKind, Verdict
 from .checker_types import Change
+from .diff_helpers import make_change
 from .elf_metadata import ElfMetadata
 
 # Tokens that mark an ELF symbol-version node as implementation-internal rather
@@ -180,14 +181,11 @@ def detect_version_node_changes(
         sample = ", ".join(sym_names[:5])
         suffix = f" (+{len(sym_names) - 5} more)" if len(sym_names) > 5 else ""
         changes.append(
-            Change(
-                kind=ChangeKind.SYMBOL_VERSION_NODE_REMOVED,
+            make_change(
+                ChangeKind.SYMBOL_VERSION_NODE_REMOVED,
                 symbol=node,
-                description=(
-                    f"Version node {node} was entirely removed from the version script. "
-                    f"Symbols previously under this node: {sample}{suffix}. "
-                    f"Applications linked against {node} will get unresolved symbol errors."
-                ),
+                name=node,
+                detail=f"{sample}{suffix}",
                 old_value=node,
             )
         )
@@ -201,17 +199,12 @@ def detect_version_node_changes(
         new_node = new_sym_to_node[sym_name]
         if old_node != new_node:
             changes.append(
-                Change(
-                    kind=ChangeKind.SYMBOL_MOVED_VERSION_NODE,
+                make_change(
+                    ChangeKind.SYMBOL_MOVED_VERSION_NODE,
                     symbol=sym_name,
-                    description=(
-                        f"Symbol {sym_name} moved from version node {old_node} to "
-                        f"{new_node}. Applications linked against {old_node} will not "
-                        f"find this symbol at the expected version. This is typically "
-                        f"intentional during a major release."
-                    ),
-                    old_value=old_node,
-                    new_value=new_node,
+                    name=sym_name,
+                    old=old_node,
+                    new=new_node,
                 )
             )
 
@@ -260,16 +253,10 @@ def detect_version_script_missing(
     if not old_had_version_script and old_elf.symbols:
         return []
     return [
-        Change(
-            kind=ChangeKind.VERSION_SCRIPT_MISSING,
+        make_change(
+            ChangeKind.VERSION_SCRIPT_MISSING,
             symbol="<version-script>",
-            description=(
-                f"Library exports {len(new_elf.symbols)} symbol(s) without "
-                f"a version script. This is a common oversight that prevents "
-                f"fine-grained symbol versioning and makes future ABI evolution "
-                f"harder to manage. Consider adding a version script "
-                f"(--version-script=libfoo.map)."
-            ),
+            detail=str(len(new_elf.symbols)),
         )
     ]
 
@@ -325,15 +312,12 @@ def check_soname_bump_policy(
         else:
             detail = f"SONAME was dropped (was {old_elf.soname!r})"
         result.append(
-            Change(
-                kind=ChangeKind.SONAME_BUMP_RECOMMENDED,
+            make_change(
+                ChangeKind.SONAME_BUMP_RECOMMENDED,
                 symbol="DT_SONAME",
-                description=(
-                    f"{breaking_count} binary-incompatible change(s) detected but "
-                    f"{detail}. Consumers linked against "
-                    f"{old_elf.soname!r} will encounter runtime failures. "
-                    f"Recommended: bump SONAME to signal the ABI break."
-                ),
+                name=str(breaking_count),
+                detail=detail,
+                old=repr(old_elf.soname),
                 old_value=old_elf.soname,
                 new_value=new_elf.soname,
             )
@@ -341,15 +325,11 @@ def check_soname_bump_policy(
 
     if not has_breaking and soname_bumped:
         result.append(
-            Change(
-                kind=ChangeKind.SONAME_BUMP_UNNECESSARY,
+            make_change(
+                ChangeKind.SONAME_BUMP_UNNECESSARY,
                 symbol="DT_SONAME",
-                description=(
-                    f"SONAME changed from {old_elf.soname!r} to {new_elf.soname!r} "
-                    f"but no binary-incompatible changes were detected. This forces "
-                    f"all consumers to relink unnecessarily. Consider whether the "
-                    f"bump was intentional."
-                ),
+                old=repr(old_elf.soname),
+                new=repr(new_elf.soname),
                 old_value=old_elf.soname,
                 new_value=new_elf.soname,
             )

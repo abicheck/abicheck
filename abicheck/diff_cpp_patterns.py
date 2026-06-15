@@ -50,6 +50,7 @@ from typing import TYPE_CHECKING
 
 from .checker_policy import ChangeKind
 from .checker_types import Change
+from .diff_helpers import make_change
 
 # Re-exports — the generic detectors were extracted to dedicated modules
 # in PR-D, but are re-exported here so callers that import them from this
@@ -210,19 +211,14 @@ def detect_sycl_overload_set_removal(
     if len(affected_unq) >= min_overloads:
         affected_unq.sort()
         findings.append(
-            Change(
-                kind=ChangeKind.SYCL_OVERLOAD_SET_REMOVED,
+            make_change(
+                ChangeKind.SYCL_OVERLOAD_SET_REMOVED,
                 symbol="<sycl_overload_family>",
-                description=(
-                    f"SYCL overload family withdrawn: {len(affected_mangled)} "
-                    f"overloads taking ``sycl::queue&`` were removed across "
-                    f"{len(affected_unq)} entry points "
+                detail=(
+                    f"{len(affected_mangled)} overloads taking ``sycl::queue&`` "
+                    f"were removed across {len(affected_unq)} entry points "
                     f"({', '.join(affected_unq[:10])}"
-                    f"{'…' if len(affected_unq) > 10 else ''}). "
-                    f"This is the deployment-level event 'DPC++ build "
-                    f"disabled' rather than independent API removals — "
-                    f"consumers built against the SYCL surface need a "
-                    f"DPC++-enabled rebuild."
+                    f"{'…' if len(affected_unq) > 10 else ''})"
                 ),
                 affected_symbols=affected_mangled,
             )
@@ -337,18 +333,15 @@ def _emit_isa_dropped_finding(
     suppressed.update(affected_mangled)
     _suppress_demangled_names(overlapping, old_index, suppressed)
     stems_sorted = sorted(affected_stems)
-    return Change(
-        kind=ChangeKind.CPU_DISPATCH_ISA_DROPPED,
+    return make_change(
+        ChangeKind.CPU_DISPATCH_ISA_DROPPED,
         symbol=f"<isa:{token}>",
-        description=(
-            f"CPU dispatch ISA '{token}' tier removed: "
+        name=token,
+        detail=(
             f"{len(affected_mangled)} specialisations across "
             f"{len(affected_stems)} algorithms "
             f"({', '.join(stems_sorted[:8])}"
-            f"{'…' if len(stems_sorted) > 8 else ''}). "
-            f"Runtime dispatcher continues to work; consumers that "
-            f"pinned directly to '{token}' symbols get unresolved "
-            f"references at load time."
+            f"{'…' if len(stems_sorted) > 8 else ''})"
         ),
         affected_symbols=affected_mangled,
     )
@@ -417,21 +410,17 @@ def _find_tag_rename_for_removed(
         added_with_token = _symbols_embedding_leaf(only_added, new_leaf)
         if not added_with_token:
             continue
-        return Change(
-            kind=ChangeKind.TAG_TYPE_RENAMED,
+        return make_change(
+            ChangeKind.TAG_TYPE_RENAMED,
             symbol=removed.name,
-            description=(
-                f"Empty tag struct '{removed.name}' renamed to "
-                f"'{added.name}'. The type has no fields or vtable, so "
-                f"layout-based detectors see no change, but "
+            old=removed.name,
+            new=added.name,
+            detail=(
                 f"{len(removed_with_token)} explicit instantiation "
                 f"symbol(s) referencing the old name were re-mangled "
                 f"(now {len(added_with_token)} symbol(s) reference the "
-                f"new name). Consumers built against the old header "
-                f"fail to resolve the instantiation at load time."
+                f"new name)"
             ),
-            old_value=removed.name,
-            new_value=added.name,
             affected_symbols=removed_with_token,
         )
     return None
@@ -638,18 +627,11 @@ def detect_default_template_arg_changed(
                 continue
             seen_pairs.add(key)
             findings.append(
-                Change(
-                    kind=ChangeKind.DEFAULT_TEMPLATE_ARG_CHANGED,
+                make_change(
+                    ChangeKind.DEFAULT_TEMPLATE_ARG_CHANGED,
                     symbol=fn.mangled,
-                    description=(
-                        f"Template instantiation '{fn.name}' substitutes to "
-                        f"different arguments than its surviving sibling "
-                        f"'{cand.name}'. This is consistent with a change to a "
-                        f"default template argument in the declaring header: "
-                        f"consumer source compiles unchanged, but the "
-                        f"substituted mangled symbol differs. Consumers built "
-                        f"against the old default get unresolved symbols."
-                    ),
+                    name=fn.name,
+                    detail=cand.name,
                     old_value=old_args,
                     new_value=new_args,
                 )
@@ -748,21 +730,13 @@ def _emit_inline_body_findings(
             if key in seen:
                 continue
             seen.add(key)
-            findings.append(Change(
-                kind=ChangeKind.INLINE_BODY_REFERENCES_RENAMED_MEMBER,
+            findings.append(make_change(
+                ChangeKind.INLINE_BODY_REFERENCES_RENAMED_MEMBER,
                 symbol=holder,
-                description=(
-                    f"Public class '{holder}' has inline accessors "
-                    f"({len(inline_funcs)} found) reaching into "
-                    f"'{internal_type}' by name. Field '{old_field}' was "
-                    f"renamed to '{new_field}' in the new internal layout. "
-                    f"Consumers compiled against the old header have the "
-                    f"old member name baked into their inline accessor "
-                    f"bodies; running against the new library reads the "
-                    f"wrong offset or fails to resolve the member."
-                ),
-                old_value=old_field,
-                new_value=new_field,
+                name=holder,
+                detail=f"({len(inline_funcs)} found) reaching into '{internal_type}'",
+                old=old_field,
+                new=new_field,
             ))
     return findings
 
@@ -938,8 +912,8 @@ def detect_bundle_soname_skew(
         f"metadata; mixed loads can corrupt internal cross-library state."
     )
     return [
-        Change(
-            kind=ChangeKind.BUNDLE_SONAME_SKEW,
+        make_change(
+            ChangeKind.BUNDLE_SONAME_SKEW,
             symbol="<bundle>",
             description=desc,
             old_value=str(sorted(deltas[k][0].library for k in stayed + bumped)),

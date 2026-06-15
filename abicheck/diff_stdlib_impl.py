@@ -54,6 +54,7 @@ from .build_mode import StdlibFamily, build_mode_from_signals
 from .checker_policy import ChangeKind, Verdict
 from .checker_types import Change
 from .detector_registry import registry
+from .diff_helpers import make_change
 
 if TYPE_CHECKING:
     from .build_mode import BuildMode
@@ -410,8 +411,8 @@ def _diff_stdlib_implementation(old: AbiSnapshot, new: AbiSnapshot) -> list[Chan
                 "matching runtime to be safe."
             )
         changes.append(
-            Change(
-                kind=ChangeKind.STDLIB_IMPLEMENTATION_CHANGED,
+            make_change(
+                ChangeKind.STDLIB_IMPLEMENTATION_CHANGED,
                 symbol=_STDLIB_IMPL_MARKER,
                 description=desc,
                 old_value=old_bm.stdlib.value,
@@ -425,18 +426,11 @@ def _diff_stdlib_implementation(old: AbiSnapshot, new: AbiSnapshot) -> list[Chan
     new_v = new_bm.libcpp_abi_version
     if old_v is not None and new_v is not None and old_v != new_v:
         changes.append(
-            Change(
-                kind=ChangeKind.LIBCPP_ABI_VERSION_CHANGED,
+            make_change(
+                ChangeKind.LIBCPP_ABI_VERSION_CHANGED,
                 symbol=_STDLIB_IMPL_MARKER,
-                description=(
-                    f"libc++ ABI version changed ({old_v} → {new_v}). libc++ selects "
-                    "incompatible internal layouts for std:: types via an inline "
-                    f"namespace (std::__{old_v} vs std::__{new_v}); types embedding "
-                    "them by value are laid out differently. Rebuild consumers against "
-                    "the matching libc++ ABI version."
-                ),
-                old_value=str(old_v),
-                new_value=str(new_v),
+                old=str(old_v),
+                new=str(new_v),
             )
         )
 

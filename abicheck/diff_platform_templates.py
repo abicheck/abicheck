@@ -23,6 +23,7 @@ from __future__ import annotations
 from .checker_policy import ChangeKind
 from .checker_types import Change
 from .detector_registry import registry
+from .diff_helpers import make_change
 from .diff_symbols import _public_functions
 from .model import AbiSnapshot
 
@@ -145,15 +146,12 @@ def _diff_template_inner_types(old: AbiSnapshot, new: AbiSnapshot) -> list[Chang
             and old_ret_args != new_ret_args
             and _template_outer(f_old.return_type) == _template_outer(f_new.return_type)
         ):
-            changes.append(Change(
-                kind=ChangeKind.TEMPLATE_RETURN_TYPE_CHANGED,
+            changes.append(make_change(
+                ChangeKind.TEMPLATE_RETURN_TYPE_CHANGED,
                 symbol=mangled,
-                description=(
-                    f"Template return type inner argument changed: {f_old.name} "
-                    f"({f_old.return_type} → {f_new.return_type})"
-                ),
-                old_value=f_old.return_type,
-                new_value=f_new.return_type,
+                name=f_old.name,
+                old=f_old.return_type,
+                new=f_new.return_type,
             ))
 
         # --- Param template inner change ---
@@ -167,15 +165,13 @@ def _diff_template_inner_types(old: AbiSnapshot, new: AbiSnapshot) -> list[Chang
                 and _template_outer(p_old.type) == _template_outer(p_new.type)
             ):
                 param_label = p_old.name or str(i)
-                changes.append(Change(
-                    kind=ChangeKind.TEMPLATE_PARAM_TYPE_CHANGED,
+                changes.append(make_change(
+                    ChangeKind.TEMPLATE_PARAM_TYPE_CHANGED,
                     symbol=mangled,
-                    description=(
-                        f"Template parameter inner type changed: {f_old.name} "
-                        f"param {param_label} ({p_old.type} → {p_new.type})"
-                    ),
-                    old_value=p_old.type,
-                    new_value=p_new.type,
+                    name=f_old.name,
+                    detail=param_label,
+                    old=p_old.type,
+                    new=p_new.type,
                 ))
 
     return changes

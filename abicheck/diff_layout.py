@@ -52,6 +52,7 @@ from typing import TYPE_CHECKING
 from .checker_policy import ChangeKind
 from .checker_types import Change
 from .detector_registry import registry
+from .diff_helpers import make_change
 
 if TYPE_CHECKING:
     from .model import AbiSnapshot, RecordType
@@ -101,18 +102,13 @@ def _check_base_offsets(name: str, old_rec: RecordType, new_rec: RecordType) -> 
         old_off = old_rec.base_offsets.get(base)
         if old_off is not None and old_off != new_off:
             changes.append(
-                Change(
-                    kind=ChangeKind.BASE_CLASS_OFFSET_CHANGED,
+                make_change(
+                    ChangeKind.BASE_CLASS_OFFSET_CHANGED,
                     symbol=name,
-                    description=(
-                        f"Base class '{base}' moved within '{name}' "
-                        f"({old_off} → {new_off} bits). The `this`-pointer "
-                        "adjustment for that base and the offset of every field "
-                        "after it shift; existing binaries read the wrong "
-                        "addresses."
-                    ),
-                    old_value=str(old_off),
-                    new_value=str(new_off),
+                    name=name,
+                    detail=base,
+                    old=str(old_off),
+                    new=str(new_off),
                 )
             )
     return changes
@@ -136,15 +132,10 @@ def _check_vptr_introduced(name: str, old_rec: RecordType, new_rec: RecordType) 
         and new_rec.vptr_offset_bits is not None
     ):
         return [
-            Change(
-                kind=ChangeKind.VPTR_INTRODUCED,
+            make_change(
+                ChangeKind.VPTR_INTRODUCED,
                 symbol=name,
-                description=(
-                    f"'{name}' gained a vtable pointer (became polymorphic). "
-                    "sizeof grows and every data member's offset shifts by a "
-                    "pointer width; binaries that embed or derive from the type "
-                    "are laid out incompatibly."
-                ),
+                name=name,
                 old_value="non-polymorphic",
                 new_value=f"vptr@{new_rec.vptr_offset_bits}",
             )
@@ -156,15 +147,10 @@ def _check_trivially_copyable_lost(name: str, old_rec: RecordType, new_rec: Reco
     """Emit TRIVIALLY_COPYABLE_LOST when the trait is removed."""
     if old_rec.is_trivially_copyable is True and new_rec.is_trivially_copyable is False:
         return [
-            Change(
-                kind=ChangeKind.TRIVIALLY_COPYABLE_LOST,
+            make_change(
+                ChangeKind.TRIVIALLY_COPYABLE_LOST,
                 symbol=name,
-                description=(
-                    f"'{name}' is no longer trivially copyable. It is now passed "
-                    "and returned by value differently (via a hidden reference / "
-                    "not in registers), so the calling convention of any function "
-                    "taking or returning it by value changes."
-                ),
+                name=name,
                 old_value="trivially_copyable",
                 new_value="non_trivially_copyable",
             )
@@ -176,15 +162,10 @@ def _check_standard_layout_lost(name: str, old_rec: RecordType, new_rec: RecordT
     """Emit STANDARD_LAYOUT_LOST when the trait is removed."""
     if old_rec.is_standard_layout is True and new_rec.is_standard_layout is False:
         return [
-            Change(
-                kind=ChangeKind.STANDARD_LAYOUT_LOST,
+            make_change(
+                ChangeKind.STANDARD_LAYOUT_LOST,
                 symbol=name,
-                description=(
-                    f"'{name}' is no longer standard-layout. `offsetof` and C "
-                    "interoperability are no longer guaranteed and tail-padding "
-                    "reuse rules change; review code relying on the C-compatible "
-                    "layout."
-                ),
+                name=name,
                 old_value="standard_layout",
                 new_value="non_standard_layout",
             )
@@ -203,18 +184,13 @@ def _check_tail_padding_reuse(name: str, old_rec: RecordType, new_rec: RecordTyp
         and old_rec.size_bits == new_rec.size_bits
     ):
         return [
-            Change(
-                kind=ChangeKind.TAIL_PADDING_REUSE_CHANGED,
+            make_change(
+                ChangeKind.TAIL_PADDING_REUSE_CHANGED,
                 symbol=name,
-                description=(
-                    f"'{name}' data size changed "
-                    f"({old_rec.data_size_bits} → {new_rec.data_size_bits} bits) "
-                    f"while sizeof stayed {new_rec.size_bits} bits. A derived class "
-                    "may reuse this type's tail padding, so a derived layout can "
-                    "shift even though sizeof is unchanged."
-                ),
-                old_value=str(old_rec.data_size_bits),
-                new_value=str(new_rec.data_size_bits),
+                name=name,
+                old=str(old_rec.data_size_bits),
+                new=str(new_rec.data_size_bits),
+                detail=str(new_rec.size_bits),
             )
         ]
     return []
@@ -233,16 +209,10 @@ def _check_layout_unverifiable(name: str, old_rec: RecordType, new_rec: RecordTy
     descriptor_in_play = _has_layout_descriptor(old_rec) or _has_layout_descriptor(new_rec)
     if descriptor_in_play and old_has != new_has:
         return [
-            Change(
-                kind=ChangeKind.LAYOUT_UNVERIFIABLE,
+            make_change(
+                ChangeKind.LAYOUT_UNVERIFIABLE,
                 symbol=name,
-                description=(
-                    f"'{name}' layout could not be verified: one side carries a "
-                    "layout descriptor but the other has no layout evidence (no "
-                    "size/offsets). A real layout change cannot be ruled out — "
-                    "rebuild with debug info (or supply headers) to confirm. "
-                    "Informational and non-escalating."
-                ),
+                name=name,
             )
         ]
     return []

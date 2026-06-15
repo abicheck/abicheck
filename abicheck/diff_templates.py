@@ -49,6 +49,7 @@ from typing import TYPE_CHECKING
 
 from .checker_policy import ChangeKind
 from .checker_types import Change
+from .diff_helpers import make_change
 
 if TYPE_CHECKING:
     from .model import AbiSnapshot, Function
@@ -178,15 +179,11 @@ def _leak_change(
     """Build an INTERNAL_TEMPLATE_LEAKS_VIA_PUBLIC_API finding for *stem*."""
     removed_names = sorted({n for n, _ in old_sigs - new_sigs})[:3]
     added_names = sorted({n for n, _ in new_sigs - old_sigs})[:3]
-    return Change(
-        kind=ChangeKind.INTERNAL_TEMPLATE_LEAKS_VIA_PUBLIC_API,
+    return make_change(
+        ChangeKind.INTERNAL_TEMPLATE_LEAKS_VIA_PUBLIC_API,
         symbol=stem,
-        description=(
-            f"Internal-namespace function template '{stem}' has "
-            f"changed instantiations: removed={removed_names}, "
-            f"added={added_names}. These mangled names participate "
-            f"in consumer symbol tables; every consumer must rebuild."
-        ),
+        name=stem,
+        detail=f"removed={removed_names}, added={added_names}",
         old_value=str(sorted({n for n, _ in old_sigs})[:3]),
         new_value=str(sorted({n for n, _ in new_sigs})[:3]),
     )
@@ -285,32 +282,24 @@ def detect_cpo_kind_changed(
 
     # function → variable
     for name in sorted((old_funcs - old_vars) & (new_vars - new_funcs)):
-        changes.append(Change(
-            kind=ChangeKind.CPO_KIND_CHANGED,
+        changes.append(make_change(
+            ChangeKind.CPO_KIND_CHANGED,
             symbol=name,
-            description=(
-                f"Public name '{name}' was a function in old and is a "
-                f"variable (function-object / CPO) in new. Call syntax "
-                f"preserved; decltype, extern templates, and trait "
-                f"specializations break."
-            ),
-            old_value="function",
+            name=name,
+            old="function",
+            new="variable (function-object / CPO)",
             new_value="variable",
         ))
 
     # variable → function
     for name in sorted((old_vars - old_funcs) & (new_funcs - new_vars)):
-        changes.append(Change(
-            kind=ChangeKind.CPO_KIND_CHANGED,
+        changes.append(make_change(
+            ChangeKind.CPO_KIND_CHANGED,
             symbol=name,
-            description=(
-                f"Public name '{name}' was a variable (function-object "
-                f"/ CPO) in old and is a function in new. Call syntax "
-                f"preserved; decltype, extern templates, and trait "
-                f"specializations break."
-            ),
+            name=name,
+            old="variable (function-object / CPO)",
+            new="function",
             old_value="variable",
-            new_value="function",
         ))
 
     return changes
@@ -393,16 +382,11 @@ def detect_overload_set_rerouted(
         # are not under-counted.
         if len(old_by_stem[stem]) < 2 and len(new_by_stem[stem]) < 2:
             continue
-        changes.append(Change(
-            kind=ChangeKind.OVERLOAD_SET_REROUTED,
+        changes.append(make_change(
+            ChangeKind.OVERLOAD_SET_REROUTED,
             symbol=stem,
-            description=(
-                f"Overload set for '{stem}' changed: "
-                f"{len(removed)} overload(s) removed and {len(added)} "
-                f"added in the same revision. Call sites that previously "
-                f"resolved to a removed overload may silently re-route to "
-                f"a different overload."
-            ),
+            name=stem,
+            detail=f"{len(removed)} overload(s) removed and {len(added)} added in the same revision",
             old_value=str(sorted(_fmt_key(k) for k in old_sigs)),
             new_value=str(sorted(_fmt_key(k) for k in new_sigs)),
         ))
@@ -494,15 +478,12 @@ def detect_mandatory_template_param_added(
         new_min = min(new_ar[stem])
         if new_min <= old_min:
             continue
-        changes.append(Change(
-            kind=ChangeKind.MANDATORY_TEMPLATE_PARAM_ADDED,
+        changes.append(make_change(
+            ChangeKind.MANDATORY_TEMPLATE_PARAM_ADDED,
             symbol=stem,
-            description=(
-                f"Template '{stem}' minimum effective argument count grew "
-                f"from {old_min} to {new_min}. Consumers that wrote "
-                f"'{stem}<...{old_min} args...>' without supplying the new "
-                f"parameter no longer compile."
-            ),
+            name=stem,
+            old=str(old_min),
+            new=str(new_min),
             old_value=f"min_arity={old_min}",
             new_value=f"min_arity={new_min}",
         ))
@@ -587,8 +568,8 @@ def detect_unspecified_return_now_named(
                 f"wrote out the type no longer compiles; only `auto` "
                 f"captures it now."
             )
-        changes.append(Change(
-            kind=ChangeKind.UNSPECIFIED_RETURN_NOW_NAMED,
+        changes.append(make_change(
+            ChangeKind.UNSPECIFIED_RETURN_NOW_NAMED,
             symbol=qname,
             description=desc,
             old_value=old_rt,
@@ -632,17 +613,11 @@ def detect_missing_instantiations(
         stem = _strip_template_args(fn.name)
         if stem not in surviving_stems:
             continue
-        findings.append(Change(
-            kind=ChangeKind.INSTANTIATION_MISSING_FROM_BINARY,
+        findings.append(make_change(
+            ChangeKind.INSTANTIATION_MISSING_FROM_BINARY,
             symbol=fn.mangled,
-            description=(
-                f"Template instantiation '{fn.name}' was exported by the "
-                f"old library but is missing from the new binary. Other "
-                f"instantiations of '{stem}' still exist, so the public "
-                f"header very likely still advertises this one. Consumers "
-                f"built against the old header link cleanly but fail at "
-                f"load time with an undefined-symbol error."
-            ),
+            name=fn.name,
+            detail=stem,
             old_value=fn.mangled,
             new_value=None,
         ))

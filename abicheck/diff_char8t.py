@@ -27,6 +27,7 @@ import re
 from .checker_policy import ChangeKind
 from .checker_types import Change
 from .detector_registry import registry
+from .diff_helpers import make_change
 from .diff_type_spellings import iter_type_slot_changes
 from .model import AbiSnapshot
 
@@ -49,15 +50,12 @@ def _diff_char8t(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         if old_c8 == new_c8:
             continue
         direction = "char-family → char8_t" if new_c8 else "char8_t → char-family"
-        changes.append(Change(
-            kind=ChangeKind.CHAR8T_MIGRATION,
+        changes.append(make_change(
+            ChangeKind.CHAR8T_MIGRATION,
             symbol=ch.symbol,
-            description=(
-                f"char8_t migration ({direction}) on {ch.slot} of '{ch.symbol}': "
-                f"{ch.old_type} → {ch.new_type}. char8_t is a distinct C++20 type "
-                f"that changes overload identity and name mangling."
-            ),
-            old_value=ch.old_type,
-            new_value=ch.new_type,
+            name=f"{ch.slot} of '{ch.symbol}'",
+            detail=direction,
+            old=ch.old_type,
+            new=ch.new_type,
         ))
     return changes

@@ -36,7 +36,7 @@ from .diff_cxx_rules import (
     owner_class_of,
     virtual_method_addition,
 )
-from .diff_helpers import bool_transition, diff_by_key
+from .diff_helpers import bool_transition, diff_by_key, make_change
 from .elf_metadata import SymbolType
 from .elf_symbol_filter import (
     FUNCTION_SYMBOL_TYPES,
@@ -213,10 +213,10 @@ def _check_removed_function(
         and f_hidden.visibility == Visibility.HIDDEN
         and not (elf_only_mode and f_old.visibility == Visibility.ELF_ONLY)
     ):
-        return Change(
-            kind=ChangeKind.FUNC_VISIBILITY_CHANGED,
+        return make_change(
+            ChangeKind.FUNC_VISIBILITY_CHANGED,
             symbol=mangled,
-            description=f"Function visibility changed to hidden: {f_old.name}",
+            name=f_old.name,
             old_value=f_old.visibility.value,
             new_value=f_hidden.visibility.value,
         )
@@ -225,8 +225,8 @@ def _check_removed_function(
         if (elf_only_mode and f_old.visibility == Visibility.ELF_ONLY)
         else ChangeKind.FUNC_REMOVED
     )
-    return Change(
-        kind=removed_kind,
+    return make_change(
+        removed_kind,
         symbol=mangled,
         description=f"{f_old.visibility.value.capitalize()} function removed: {f_old.name}",
         old_value=f_old.name,
@@ -387,12 +387,12 @@ def _check_return_type_change(
     # break: same width, signedness, and calling convention.
     if _abi_equivalent_scalar(f_old.return_type, f_new.return_type, is_llp64):
         return []
-    return [Change(
-        kind=ChangeKind.FUNC_RETURN_CHANGED,
+    return [make_change(
+        ChangeKind.FUNC_RETURN_CHANGED,
         symbol=mangled,
-        description=f"Return type changed: {f_old.name}",
-        old_value=f_old.return_type,
-        new_value=f_new.return_type,
+        name=f_old.name,
+        old=f_old.return_type,
+        new=f_new.return_type,
     )]
 
 
@@ -439,12 +439,12 @@ def _check_params_change(
         )
     if not changed:
         return []
-    return [Change(
-        kind=ChangeKind.FUNC_PARAMS_CHANGED,
+    return [make_change(
+        ChangeKind.FUNC_PARAMS_CHANGED,
         symbol=mangled,
-        description=f"Parameters changed: {f_old.name}",
-        old_value=_format_params(f_old.params),
-        new_value=_format_params(f_new.params),
+        name=f_old.name,
+        old=_format_params(f_old.params),
+        new=_format_params(f_new.params),
     )]
 
 
@@ -454,10 +454,10 @@ def _check_ref_qualifier_change(mangled: str, f_old: Function, f_new: Function) 
     new_rq = f_new.ref_qualifier or ""
     if old_rq == new_rq:
         return []
-    return [Change(
-        kind=ChangeKind.FUNC_REF_QUAL_CHANGED,
+    return [make_change(
+        ChangeKind.FUNC_REF_QUAL_CHANGED,
         symbol=mangled,
-        description=f"Ref-qualifier changed: {f_old.name} ({old_rq!r} → {new_rq!r})",
+        name=f_old.name, old=repr(old_rq), new=repr(new_rq),
         old_value=old_rq or "(none)",
         new_value=new_rq or "(none)",
     )]
@@ -469,12 +469,12 @@ def _check_linkage_change(mangled: str, f_old: Function, f_new: Function) -> lis
         return []
     old_linkage = 'extern "C"' if f_old.is_extern_c else "C++"
     new_linkage = 'extern "C"' if f_new.is_extern_c else "C++"
-    return [Change(
-        kind=ChangeKind.FUNC_LANGUAGE_LINKAGE_CHANGED,
+    return [make_change(
+        ChangeKind.FUNC_LANGUAGE_LINKAGE_CHANGED,
         symbol=mangled,
-        description=f"Language linkage changed: {f_old.name} ({old_linkage} → {new_linkage})",
-        old_value=old_linkage,
-        new_value=new_linkage,
+        name=f_old.name,
+        old=old_linkage,
+        new=new_linkage,
     )]
 
 
@@ -571,8 +571,8 @@ def _check_inline_transitions(
                 new_elf is not None
                 and any(s.name == mangled for s in new_elf.symbols)
             )
-            changes.append(Change(
-                kind=ChangeKind.FUNC_BECAME_INLINE,
+            changes.append(make_change(
+                ChangeKind.FUNC_BECAME_INLINE,
                 symbol=mangled,
                 description=(
                     f"Function became inline, symbol still exported: {f_old.name}"
@@ -583,12 +583,12 @@ def _check_inline_transitions(
                 new_value="inline",
             ))
         elif f_old.is_inline and not f_new.is_inline:
-            changes.append(Change(
-                kind=ChangeKind.FUNC_LOST_INLINE,
+            changes.append(make_change(
+                ChangeKind.FUNC_LOST_INLINE,
                 symbol=mangled,
-                description=f"Function lost inline attribute (now has external linkage): {f_old.name}",
-                old_value="inline",
-                new_value="non-inline",
+                name=f_old.name,
+                old="inline",
+                new="non-inline",
             ))
     return changes
 
@@ -701,10 +701,10 @@ def _detect_newly_deleted_functions(
                 if f_new.deleted_from_dwarf
                 else ChangeKind.FUNC_DELETED
             )
-            changes.append(Change(
-                kind=kind,
+            changes.append(make_change(
+                kind,
                 symbol=mangled,
-                description=f"Function explicitly deleted (= delete): {f_new.name}",
+                name=f_new.name,
                 old_value="callable",
                 new_value="deleted",
             ))
@@ -761,11 +761,10 @@ def _diff_functions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         if mangled not in old_map and f_new.name not in matched_by_name:
             virtual_break = virtual_method_addition(
                 f_new, old_owner_classes, old_types, new_types, old_virtual_sigs)
-            changes.append(virtual_break if virtual_break is not None else Change(
-                kind=ChangeKind.FUNC_ADDED,
+            changes.append(virtual_break if virtual_break is not None else make_change(
+                ChangeKind.FUNC_ADDED,
                 symbol=mangled,
-                description=f"New public function: {f_new.name}",
-                new_value=f_new.name,
+                new=f_new.name,
             ))
 
     old_all = old.function_map
@@ -802,22 +801,20 @@ def _diff_inline_hidden_friends(
             continue
         if mangled in new_all:
             continue
-        changes.append(Change(
-            kind=ChangeKind.HIDDEN_FRIEND_REMOVED,
+        changes.append(make_change(
+            ChangeKind.HIDDEN_FRIEND_REMOVED,
             symbol=mangled,
-            description=f"Hidden friend declaration removed: {f_old.name}",
-            old_value=f_old.name,
+            old=f_old.name,
         ))
     for mangled, f_new in new_all.items():
         if not f_new.is_hidden_friend:
             continue
         if mangled in old_all:
             continue
-        changes.append(Change(
-            kind=ChangeKind.HIDDEN_FRIEND_ADDED,
+        changes.append(make_change(
+            ChangeKind.HIDDEN_FRIEND_ADDED,
             symbol=mangled,
-            description=f"Hidden friend declaration added: {f_new.name}",
-            new_value=f_new.name,
+            new=f_new.name,
         ))
     return changes
 
@@ -828,11 +825,11 @@ def _check_variable(mangled: str, v_old: Variable, v_new: Variable) -> list[Chan
     if _type_unknown(v_old.type) or _type_unknown(v_new.type):
         return []
     if canonicalize_type_name(v_old.type) != canonicalize_type_name(v_new.type):
-        return [Change(
-            kind=ChangeKind.VAR_TYPE_CHANGED,
+        return [make_change(
+            ChangeKind.VAR_TYPE_CHANGED,
             symbol=mangled,
-            description=f"Variable type changed: {v_old.name}",
-            old_value=v_old.type, new_value=v_new.type,
+            name=v_old.name,
+            old=v_old.type, new=v_new.type,
         )]
     # const-qualification transitions only matter when the type is unchanged.
     return bool_transition(
@@ -845,18 +842,18 @@ def _check_variable(mangled: str, v_old: Variable, v_new: Variable) -> list[Chan
 
 
 def _var_removed(mangled: str, v_old: Variable) -> list[Change]:
-    return [Change(
-        kind=ChangeKind.VAR_REMOVED,
+    return [make_change(
+        ChangeKind.VAR_REMOVED,
         symbol=mangled,
-        description=f"Public variable removed: {v_old.name}",
+        name=v_old.name,
     )]
 
 
 def _var_added(mangled: str, v_new: Variable) -> list[Change]:
-    return [Change(
-        kind=ChangeKind.VAR_ADDED,
+    return [make_change(
+        ChangeKind.VAR_ADDED,
         symbol=mangled,
-        description=f"New public variable: {v_new.name}",
+        name=v_new.name,
     )]
 
 
@@ -911,18 +908,18 @@ def _diff_param_defaults(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         # Compare parameter defaults pairwise
         for i, (p_old, p_new) in enumerate(zip(f_old.params, f_new.params)):
             if p_old.default is not None and p_new.default is None:
-                changes.append(Change(
-                    kind=ChangeKind.PARAM_DEFAULT_VALUE_REMOVED,
+                changes.append(make_change(
+                    ChangeKind.PARAM_DEFAULT_VALUE_REMOVED,
                     symbol=mangled,
-                    description=f"Parameter default removed: {f_old.name} param {p_old.name or i}",
+                    name=f_old.name, detail=str(p_old.name or i),
                     old_value=p_old.default,
                     new_value=None,
                 ))
             elif p_old.default is not None and p_new.default is not None and p_old.default != p_new.default:
-                changes.append(Change(
-                    kind=ChangeKind.PARAM_DEFAULT_VALUE_CHANGED,
+                changes.append(make_change(
+                    ChangeKind.PARAM_DEFAULT_VALUE_CHANGED,
                     symbol=mangled,
-                    description=f"Parameter default changed: {f_old.name} param {p_old.name or i}",
+                    name=f_old.name, detail=str(p_old.name or i),
                     old_value=p_old.default,
                     new_value=p_new.default,
                 ))
@@ -951,12 +948,12 @@ def _diff_param_renames(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
             continue
         for i, (p_old, p_new) in enumerate(zip(f_old.params, f_new.params)):
             if p_old.type == p_new.type and p_old.name and p_new.name and p_old.name != p_new.name:
-                changes.append(Change(
-                    kind=ChangeKind.PARAM_RENAMED,
+                changes.append(make_change(
+                    ChangeKind.PARAM_RENAMED,
                     symbol=mangled,
-                    description=f"Parameter renamed: {f_old.name} param {i}: {p_old.name} → {p_new.name}",
-                    old_value=p_old.name,
-                    new_value=p_new.name,
+                    name=f_old.name, detail=str(i),
+                    old=p_old.name,
+                    new=p_new.name,
                 ))
 
     return changes
@@ -985,12 +982,12 @@ def _diff_pointer_levels(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         if return_known and f_old.return_pointer_depth != f_new.return_pointer_depth and (
             f_old.return_pointer_depth > 0 or f_new.return_pointer_depth > 0
         ):
-            changes.append(Change(
-                kind=ChangeKind.RETURN_POINTER_LEVEL_CHANGED,
+            changes.append(make_change(
+                ChangeKind.RETURN_POINTER_LEVEL_CHANGED,
                 symbol=mangled,
-                description=f"Return pointer level changed: {f_old.name} (depth {f_old.return_pointer_depth} → {f_new.return_pointer_depth})",
-                old_value=str(f_old.return_pointer_depth),
-                new_value=str(f_new.return_pointer_depth),
+                name=f_old.name,
+                old=str(f_old.return_pointer_depth),
+                new=str(f_new.return_pointer_depth),
             ))
 
         if params_unconfirmed:
@@ -1005,12 +1002,12 @@ def _diff_pointer_levels(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
             if p_old.pointer_depth != p_new.pointer_depth and (
                 p_old.pointer_depth > 0 or p_new.pointer_depth > 0
             ):
-                changes.append(Change(
-                    kind=ChangeKind.PARAM_POINTER_LEVEL_CHANGED,
+                changes.append(make_change(
+                    ChangeKind.PARAM_POINTER_LEVEL_CHANGED,
                     symbol=mangled,
-                    description=f"Parameter pointer level changed: {f_old.name} param {p_old.name or i} (depth {p_old.pointer_depth} → {p_new.pointer_depth})",
-                    old_value=str(p_old.pointer_depth),
-                    new_value=str(p_new.pointer_depth),
+                    name=f_old.name, detail=str(p_old.name or i),
+                    old=str(p_old.pointer_depth),
+                    new=str(p_new.pointer_depth),
                 ))
 
     return changes
@@ -1038,12 +1035,12 @@ def _check_method_access_changes(
         if f_new is None:
             continue
         if f_old.access != f_new.access and _is_access_narrowing(f_old.access, f_new.access):
-            changes.append(Change(
-                kind=ChangeKind.METHOD_ACCESS_CHANGED,
+            changes.append(make_change(
+                ChangeKind.METHOD_ACCESS_CHANGED,
                 symbol=mangled,
-                description=f"Method access level narrowed: {f_old.name} ({f_old.access.value} → {f_new.access.value})",
-                old_value=f_old.access.value,
-                new_value=f_new.access.value,
+                name=f_old.name,
+                old=f_old.access.value,
+                new=f_new.access.value,
             ))
     return changes
 
@@ -1065,12 +1062,12 @@ def _check_field_access_changes(
             if f_new_f is None:
                 continue
             if f_old_f.access != f_new_f.access and _is_access_narrowing(f_old_f.access, f_new_f.access):
-                changes.append(Change(
-                    kind=ChangeKind.FIELD_ACCESS_CHANGED,
+                changes.append(make_change(
+                    ChangeKind.FIELD_ACCESS_CHANGED,
                     symbol=name,
-                    description=f"Field access level narrowed: {name}::{fname} ({f_old_f.access.value} → {f_new_f.access.value})",
-                    old_value=f_old_f.access.value,
-                    new_value=f_new_f.access.value,
+                    name=name, detail=fname,
+                    old=f_old_f.access.value,
+                    new=f_new_f.access.value,
                 ))
     return changes
 
@@ -1105,15 +1102,15 @@ def _check_anon_field_at_offset(
     """Compare a single anonymous field (by offset) to what the new type has."""
     f_new = new_by_offset.get(offset)
     if f_new is None:
-        return Change(
-            kind=ChangeKind.ANON_FIELD_CHANGED,
+        return make_change(
+            ChangeKind.ANON_FIELD_CHANGED,
             symbol=name,
             description=f"Anonymous field removed at offset {offset} in {name}",
             old_value=f_old.type,
         )
     if f_old.type != f_new.type:
-        return Change(
-            kind=ChangeKind.ANON_FIELD_CHANGED,
+        return make_change(
+            ChangeKind.ANON_FIELD_CHANGED,
             symbol=name,
             description=f"Anonymous field type changed at offset {offset} in {name}",
             old_value=f_old.type,
@@ -1204,13 +1201,11 @@ def _emit_batch_rename(rename_pairs: list[tuple[str, str]]) -> list[Change]:
     pair_desc = ", ".join(f"{o} → {n}" for o, n in rename_pairs[:5])
     if len(rename_pairs) > 5:
         pair_desc += f", ... ({len(rename_pairs)} total)"
-    return [Change(
-        kind=ChangeKind.SYMBOL_RENAMED_BATCH,
+    return [make_change(
+        ChangeKind.SYMBOL_RENAMED_BATCH,
         symbol=f"batch_rename:{prefix}*",
-        description=(
-            f"Batch symbol rename detected (namespace refactoring): "
-            f"prefix '{prefix}' added to {len(rename_pairs)} symbols ({pair_desc})"
-        ),
+        name=prefix,
+        detail=f"{len(rename_pairs)} symbols ({pair_desc})",
         old_value=", ".join(o for o, _ in rename_pairs),
         new_value=", ".join(n for _, n in rename_pairs),
     )]
@@ -1255,10 +1250,10 @@ def _diff_param_restrict(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         for i, (p_old, p_new) in enumerate(zip(f_old.params, f_new.params)):
             if p_old.is_restrict != p_new.is_restrict:
                 direction = "added" if p_new.is_restrict else "removed"
-                changes.append(Change(
-                    kind=ChangeKind.PARAM_RESTRICT_CHANGED,
+                changes.append(make_change(
+                    ChangeKind.PARAM_RESTRICT_CHANGED,
                     symbol=mangled,
-                    description=f"Parameter restrict qualifier {direction}: {f_old.name} param {p_old.name or i}",
+                    name=f_old.name, detail=direction, old=str(p_old.name or i),
                     old_value=f"restrict={p_old.is_restrict}",
                     new_value=f"restrict={p_new.is_restrict}",
                 ))
@@ -1278,18 +1273,18 @@ def _diff_param_va_list(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
             continue
         for i, (p_old, p_new) in enumerate(zip(f_old.params, f_new.params)):
             if not p_old.is_va_list and p_new.is_va_list:
-                changes.append(Change(
-                    kind=ChangeKind.PARAM_BECAME_VA_LIST,
+                changes.append(make_change(
+                    ChangeKind.PARAM_BECAME_VA_LIST,
                     symbol=mangled,
-                    description=f"Parameter became va_list: {f_old.name} param {p_old.name or i}",
+                    name=f_old.name, detail=str(p_old.name or i),
                     old_value=p_old.type,
                     new_value="va_list",
                 ))
             elif p_old.is_va_list and not p_new.is_va_list:
-                changes.append(Change(
-                    kind=ChangeKind.PARAM_LOST_VA_LIST,
+                changes.append(make_change(
+                    ChangeKind.PARAM_LOST_VA_LIST,
                     symbol=mangled,
-                    description=f"Parameter was va_list, now fixed: {f_old.name} param {p_old.name or i}",
+                    name=f_old.name, detail=str(p_old.name or i),
                     old_value="va_list",
                     new_value=p_new.type,
                 ))
@@ -1317,27 +1312,27 @@ def _diff_constants(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     for name, old_val in old_consts.items():
         new_val = new_consts.get(name)
         if new_val is None:
-            changes.append(Change(
-                kind=ChangeKind.CONSTANT_REMOVED,
+            changes.append(make_change(
+                ChangeKind.CONSTANT_REMOVED,
                 symbol=name,
-                description=f"Preprocessor constant removed: {name}",
+                name=name,
                 old_value=old_val,
             ))
         elif new_val != old_val:
-            changes.append(Change(
-                kind=ChangeKind.CONSTANT_CHANGED,
+            changes.append(make_change(
+                ChangeKind.CONSTANT_CHANGED,
                 symbol=name,
-                description=f"Preprocessor constant value changed: {name} ({old_val!r} → {new_val!r})",
+                name=name, old=repr(old_val), new=repr(new_val),
                 old_value=old_val,
                 new_value=new_val,
             ))
 
     for name, new_val in new_consts.items():
         if name not in old_consts:
-            changes.append(Change(
-                kind=ChangeKind.CONSTANT_ADDED,
+            changes.append(make_change(
+                ChangeKind.CONSTANT_ADDED,
                 symbol=name,
-                description=f"New preprocessor constant: {name}",
+                name=name,
                 new_value=new_val,
             ))
     return changes
@@ -1356,20 +1351,20 @@ def _diff_var_access(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
             continue
         if v_old.access != v_new.access:
             if _is_access_narrowing(v_old.access, v_new.access):
-                changes.append(Change(
-                    kind=ChangeKind.VAR_ACCESS_CHANGED,
+                changes.append(make_change(
+                    ChangeKind.VAR_ACCESS_CHANGED,
                     symbol=mangled,
-                    description=f"Variable access level narrowed: {v_old.name} ({v_old.access.value} → {v_new.access.value})",
-                    old_value=v_old.access.value,
-                    new_value=v_new.access.value,
+                    name=v_old.name,
+                    old=v_old.access.value,
+                    new=v_new.access.value,
                 ))
             else:
-                changes.append(Change(
-                    kind=ChangeKind.VAR_ACCESS_WIDENED,
+                changes.append(make_change(
+                    ChangeKind.VAR_ACCESS_WIDENED,
                     symbol=mangled,
-                    description=f"Variable access level widened: {v_old.name} ({v_old.access.value} → {v_new.access.value})",
-                    old_value=v_old.access.value,
-                    new_value=v_new.access.value,
+                    name=v_old.name,
+                    old=v_old.access.value,
+                    new=v_new.access.value,
                 ))
     return changes
 
@@ -1972,15 +1967,13 @@ def _diff_fingerprint_renames(old: AbiSnapshot, new: AbiSnapshot) -> list[Change
     candidates = match_renamed_functions(old_fps, new_fps, name_filter=_plausible_rename)
     for c in candidates:
         conf_pct = int(c.confidence * 100)
-        changes.append(Change(
-            kind=ChangeKind.FUNC_LIKELY_RENAMED,
+        changes.append(make_change(
+            ChangeKind.FUNC_LIKELY_RENAMED,
             symbol=c.old_name,
-            description=(
-                f"Function likely renamed: {c.old_name} → {c.new_name} "
-                f"(size={c.old_fingerprint.size}B, confidence={conf_pct}%)"
-            ),
-            old_value=c.old_name,
-            new_value=c.new_name,
+            name=str(conf_pct),
+            detail=str(c.old_fingerprint.size),
+            old=c.old_name,
+            new=c.new_name,
         ))
 
     if candidates:
