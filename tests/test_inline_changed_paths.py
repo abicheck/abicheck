@@ -100,3 +100,142 @@ def test_changed_scope_in_collect_pack_narrows_with_paths(monkeypatch, tmp_path)
     # An explicit changed set narrows the inline replay to the affected TUs.
     assert captured["scope"] == "changed"
     assert captured["changed_paths"] == ("src/foo.cpp",)
+
+
+# --------------------------------------------------------------------------- #
+# call-graph wiring into the inline L5 graph (ADR-035 D4 reviewer request)
+# --------------------------------------------------------------------------- #
+
+
+def test_inline_graph_folds_call_edges_for_l4_l5_mode(monkeypatch):
+    # When L4 + L5 are both collected (a semantic source mode), the inline graph
+    # build folds a call graph so the decl-dependency cross-checks are reachable
+    # from `scan`. The clang extractor is stubbed (no compiler needed).
+    from abicheck.buildsource import call_graph
+    from abicheck.buildsource.call_graph import CallEdge
+
+    class _FakeCallExtractor:
+        def __init__(self, *a, **k):
+            self.clang_bin = "clang++"
+            self.diagnostics: list[str] = []
+
+        def available(self) -> bool:
+            return True
+
+        def extract_from_build(self, build) -> list[CallEdge]:
+            return [CallEdge("caller", "callee", "direct", "exact")]
+
+    monkeypatch.setattr(call_graph, "ClangCallGraphExtractor", _FakeCallExtractor)
+    merged = _build_with_one_unit()
+    graph = inline._build_inline_graph(
+        merged, surface=None, with_call_graph=True, clang_bin="clang", extractors=[]
+    )
+    assert graph is not None
+    assert any(e.kind == "DECL_CALLS_DECL" for e in graph.edges)
+
+
+def test_inline_graph_no_call_edges_when_clang_absent(monkeypatch):
+    # Best-effort: a missing clang++ records a failed extractor row and leaves the
+    # graph without call edges — never raises.
+    from abicheck.buildsource import call_graph
+
+    class _Unavailable:
+        def __init__(self, *a, **k):
+            self.clang_bin = "clang++"
+            self.diagnostics: list[str] = []
+
+        def available(self) -> bool:
+            return False
+
+    monkeypatch.setattr(call_graph, "ClangCallGraphExtractor", _Unavailable)
+    merged = _build_with_one_unit()
+    rows: list = []
+    graph = inline._build_inline_graph(
+        merged, surface=None, with_call_graph=True, clang_bin="clang", extractors=rows
+    )
+    assert graph is not None
+    assert not any(e.kind == "DECL_CALLS_DECL" for e in graph.edges)
+    assert any(r.name == "call_graph:clang" and r.status == "failed" for r in rows)
+
+
+def test_inline_call_graph_scoped_to_changed_tus(monkeypatch):
+    # A PR/--since scan scopes the call-graph pass to the changed compile units —
+    # parsing every TU of a large compile DB would defeat the targeted PR cost
+    # model (ADR-035 D7 / Codex review).
+    from abicheck.buildsource import call_graph
+    from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
+    from abicheck.buildsource.call_graph import CallEdge
+
+    seen_sources: list[str] = []
+
+    class _FakeCallExtractor:
+        def __init__(self, *a, **k):
+            self.clang_bin = "clang++"
+            self.diagnostics: list[str] = []
+
+        def available(self) -> bool:
+            return True
+
+        def extract_from_build(self, build) -> list[CallEdge]:
+            seen_sources.extend(cu.source for cu in build.compile_units)
+            return []
+
+    monkeypatch.setattr(call_graph, "ClangCallGraphExtractor", _FakeCallExtractor)
+    merged = BuildEvidence(
+        compile_units=[
+            CompileUnit(id="cu://src/a.cpp", source="src/a.cpp"),
+            CompileUnit(id="cu://src/b.cpp", source="src/b.cpp"),
+        ]
+    )
+    inline._build_inline_graph(
+        merged,
+        surface=None,
+        with_call_graph=True,
+        clang_bin="clang",
+        extractors=[],
+        changed_paths=("src/a.cpp",),
+    )
+    # Only the changed TU was parsed for call edges.
+    assert seen_sources == ["src/a.cpp"]
+
+
+def test_inline_call_graph_header_change_fans_out_to_all_tus(monkeypatch):
+    # A changed *header* has no compile unit of its own; the call-graph pass must
+    # fan out to all TUs (like the L4 selector) rather than match cu.source and
+    # drop everything — else public_to_internal_dependency is skipped exactly for
+    # header-only API changes (Codex review).
+    from abicheck.buildsource import call_graph
+    from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit
+    from abicheck.buildsource.call_graph import CallEdge
+
+    seen_sources: list[str] = []
+
+    class _FakeCallExtractor:
+        def __init__(self, *a, **k):
+            self.clang_bin = "clang++"
+            self.diagnostics: list[str] = []
+
+        def available(self) -> bool:
+            return True
+
+        def extract_from_build(self, build) -> list[CallEdge]:
+            seen_sources.extend(cu.source for cu in build.compile_units)
+            return []
+
+    monkeypatch.setattr(call_graph, "ClangCallGraphExtractor", _FakeCallExtractor)
+    merged = BuildEvidence(
+        compile_units=[
+            CompileUnit(id="cu://src/a.cpp", source="src/a.cpp"),
+            CompileUnit(id="cu://src/b.cpp", source="src/b.cpp"),
+        ]
+    )
+    inline._build_inline_graph(
+        merged,
+        surface=None,
+        with_call_graph=True,
+        clang_bin="clang",
+        extractors=[],
+        changed_paths=("include/foo.h",),
+    )
+    # Header change → all TUs parsed for call edges.
+    assert sorted(seen_sources) == ["src/a.cpp", "src/b.cpp"]

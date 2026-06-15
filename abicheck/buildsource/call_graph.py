@@ -32,13 +32,14 @@ This module is split so the hard part stays testable:
 - :func:`augment_graph_with_calls` folds the resulting edges into a
   :class:`~abicheck.buildsource.source_graph.SourceGraphSummary`.
 """
+
 from __future__ import annotations
 
 import json
 import shutil
 import subprocess  # noqa: S404 - call-graph extraction shells out to clang (never shell=True)
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -63,14 +64,21 @@ RESOLUTION_OVERAPPROX = "overapprox"
 RESOLUTION_UNKNOWN = "unknown"
 
 #: clang AST node kinds that introduce a callable scope (the "caller").
-_FUNCTION_DECL_KINDS = frozenset({
-    "FunctionDecl", "CXXMethodDecl", "CXXConstructorDecl",
-    "CXXDestructorDecl", "CXXConversionDecl",
-})
+_FUNCTION_DECL_KINDS = frozenset(
+    {
+        "FunctionDecl",
+        "CXXMethodDecl",
+        "CXXConstructorDecl",
+        "CXXDestructorDecl",
+        "CXXConversionDecl",
+    }
+)
 #: clang AST node kinds that represent a call site.
 _CALL_EXPR_KINDS = frozenset({"CallExpr", "CXXMemberCallExpr", "CXXOperatorCallExpr"})
 #: referenced-decl kinds that mean "called through a pointer/variable".
-_POINTER_DECL_KINDS = frozenset({"VarDecl", "ParmVarDecl", "FieldDecl", "NonTypeTemplateParmDecl"})
+_POINTER_DECL_KINDS = frozenset(
+    {"VarDecl", "ParmVarDecl", "FieldDecl", "NonTypeTemplateParmDecl"}
+)
 
 #: ABI/API-affecting flags safe to replay into clang for AST parsing.  This is
 #: intentionally narrower than the original compile command: flags such as
@@ -79,11 +87,24 @@ _POINTER_DECL_KINDS = frozenset({"VarDecl", "ParmVarDecl", "FieldDecl", "NonType
 #: parse-only command from normalized build evidence instead of appending raw
 #: compile database argv.
 _SAFE_REPLAY_FLAG_PREFIXES: tuple[str, ...] = (
-    "-fvisibility", "-fvisibility-inlines-hidden",
-    "-fpack-struct", "/Zp", "-fshort-enums", "-fshort-wchar",
-    "-fabi-version", "-fno-rtti", "-frtti", "-fno-exceptions", "-fexceptions",
-    "-flto", "-fno-lto", "-fwhole-program-vtables",
-    "-mabi=", "-m32", "-m64", "/arch:",
+    "-fvisibility",
+    "-fvisibility-inlines-hidden",
+    "-fpack-struct",
+    "/Zp",
+    "-fshort-enums",
+    "-fshort-wchar",
+    "-fabi-version",
+    "-fno-rtti",
+    "-frtti",
+    "-fno-exceptions",
+    "-fexceptions",
+    "-flto",
+    "-fno-lto",
+    "-fwhole-program-vtables",
+    "-mabi=",
+    "-m32",
+    "-m64",
+    "/arch:",
 )
 
 _LANGUAGE_TO_CLANG_X: dict[str, str] = {
@@ -99,10 +120,19 @@ _LANGUAGE_TO_CLANG_X: dict[str, str] = {
 class CallEdge:
     """One static call edge, with its approximation labels (ADR-031 D4)."""
 
-    caller: str                     # callee/caller identity: mangled name else qualified name
+    caller: str  # callee/caller identity: mangled name else qualified name
     callee: str
     call_kind: str = CALL_KIND_DIRECT
     resolution: str = RESOLUTION_EXACT
+    #: Source file the *caller* is defined in (clang AST loc, sticky-tracked). Used
+    #: to mark a decl ``defined_in_project`` from source-location provenance — a
+    #: function whose body lives in a project compile-unit source, not a
+    #: third-party/system header (ADR-035 D4 / Codex review).
+    caller_file: str = ""
+    #: Source file the *callee*'s declaration sits in (from its referencedDecl
+    #: loc, when clang emits one). Lets a leaf project helper seen only as a
+    #: callee still earn ``defined_in_project`` (Codex review).
+    callee_file: str = ""
 
     def confidence(self) -> str:
         """Map the resolution onto a graph confidence label (ADR-031 D9)."""
@@ -138,7 +168,9 @@ def _find_referenced_decl(node: dict[str, Any]) -> dict[str, Any] | None:
     return None
 
 
-def _classify_call(call_node: dict[str, Any], ref: dict[str, Any] | None) -> tuple[str, str, str]:
+def _classify_call(
+    call_node: dict[str, Any], ref: dict[str, Any] | None
+) -> tuple[str, str, str]:
     """Return ``(callee_identity, call_kind, resolution)`` for one call site."""
     if ref is None:
         return "", CALL_KIND_UNKNOWN, RESOLUTION_UNKNOWN
@@ -166,21 +198,69 @@ def parse_clang_ast_calls(ast: dict[str, Any]) -> list[CallEdge]:
     function (e.g. a global initializer) and unresolved callees are dropped.
     """
     edges: list[CallEdge] = []
+    # identity → file of its *definition* (a FunctionDecl with a body). Lets a leaf
+    # helper that only ever appears as a callee still resolve its source file: in
+    # clang JSON the call's ``referencedDecl`` usually carries no ``loc.file`` (the
+    # location sits on the sibling FunctionDecl), so ``callee_file`` is filled from
+    # this map after the walk, not from the reference node (Codex review).
+    decl_files: dict[str, str] = {}
 
-    def visit(node: Any, caller: str) -> None:
+    def _file_of(node: dict[str, Any]) -> str:
+        """The source file a node names, if any. clang emits ``file`` only when it
+        *changes* (sticky), so the caller tracks the last-seen value."""
+        loc = node.get("loc")
+        if isinstance(loc, dict) and loc.get("file"):
+            return str(loc["file"])
+        rng = node.get("range")
+        if isinstance(rng, dict):
+            beg = rng.get("begin")
+            if isinstance(beg, dict) and beg.get("file"):
+                return str(beg["file"])
+        return ""
+
+    def _has_body(node: dict[str, Any]) -> bool:
+        return any(
+            isinstance(ch, dict) and ch.get("kind") == "CompoundStmt"
+            for ch in node.get("inner", []) or []
+        )
+
+    def visit(node: Any, caller: str, caller_file: str, cur_file: str) -> None:
         if not isinstance(node, dict):
             return
+        f = _file_of(node)
+        if f:
+            cur_file = f
         kind = str(node.get("kind", ""))
         if kind in _FUNCTION_DECL_KINDS:
-            caller = _identity(node) or caller
+            ident = _identity(node) or caller
+            if ident != caller:
+                # Entering a new enclosing function: its body lives in cur_file.
+                caller, caller_file = ident, cur_file
+            # Record the definition file so a callee-only leaf helper resolves it.
+            if ident and _has_body(node):
+                decl_files[ident] = cur_file
         if kind in _CALL_EXPR_KINDS and caller:
-            callee, call_kind, resolution = _classify_call(node, _find_referenced_decl(node))
+            ref = _find_referenced_decl(node)
+            callee, call_kind, resolution = _classify_call(node, ref)
             if callee and callee != caller:
-                edges.append(CallEdge(caller, callee, call_kind, resolution))
+                edges.append(
+                    CallEdge(caller, callee, call_kind, resolution, caller_file)
+                )
         for child in node.get("inner", []) or []:
-            visit(child, caller)
+            visit(child, caller, caller_file, cur_file)
 
-    visit(ast, "")
+    visit(ast, "", "", "")
+
+    # Fill callee_file from the definition-file map (the callee's own FunctionDecl).
+    if decl_files:
+        edges = [
+            (
+                replace(e, callee_file=decl_files[e.callee])
+                if e.callee in decl_files
+                else e
+            )
+            for e in edges
+        ]
 
     seen: set[tuple[str, str, str]] = set()
     out: list[CallEdge] = []
@@ -192,7 +272,47 @@ def parse_clang_ast_calls(ast: dict[str, Any]) -> list[CallEdge]:
     return out
 
 
-def augment_graph_with_calls(graph: SourceGraphSummary, edges: list[CallEdge]) -> int:
+def _file_in_project(caller_file: str, project_files: frozenset[str]) -> bool:
+    """Whether *caller_file* is one of the project's own compile-unit sources.
+
+    Build-evidence sources are often repo-relative (``src/foo.cc``) while the
+    clang AST emits an absolute path (``/work/src/foo.cc``); match on a path
+    suffix either way (mirrors ``source_replay._path_matches``). A function whose
+    body is in one of these files is project-defined; one in a third-party/system
+    header (Boost/Abseil/libstdc++) is not.
+    """
+    if not caller_file:
+        return False
+    c = caller_file.replace("\\", "/").lstrip("./")
+    for pf in project_files:
+        n = pf.replace("\\", "/").lstrip("./")
+        if c == n or c.endswith("/" + n) or n.endswith("/" + c):
+            return True
+    return False
+
+
+def project_source_files(build: BuildEvidence) -> frozenset[str]:
+    """Project-internal source files for ``defined_in_project`` provenance.
+
+    Compile-unit sources **plus the targets' private headers** — a function whose
+    body is in a project ``.cc`` *or* a project private header is internal
+    implementation. Public headers are deliberately excluded: an inline function
+    in a public header is consumer-visible public surface, so marking it
+    ``defined_in_project`` (→ internal) would false-positive
+    ``public_to_internal_dependency``. Third-party/system headers (Boost, libc++)
+    are never in either list, so they stay external (Codex review).
+    """
+    files: set[str] = {cu.source for cu in build.compile_units if cu.source}
+    for tgt in build.targets:
+        files.update(h for h in tgt.private_headers if h)
+    return frozenset(files)
+
+
+def augment_graph_with_calls(
+    graph: SourceGraphSummary,
+    edges: list[CallEdge],
+    project_files: frozenset[str] | None = None,
+) -> int:
     """Fold call edges into *graph* as ``DECL_CALLS_DECL`` edges (ADR-031 D4).
 
     Caller/callee identities are mapped onto ``source_decl`` nodes keyed by
@@ -200,8 +320,28 @@ def augment_graph_with_calls(graph: SourceGraphSummary, edges: list[CallEdge]) -
     edge whose endpoint matches an already-folded declaration links to it rather
     than creating a duplicate. Each edge carries its ``call_kind`` / ``resolution``
     labels and a derived confidence. Returns the number of edges added.
+
+    When *project_files* (the project's compile-unit sources) is supplied, a decl
+    whose body is defined in one of them is marked ``defined_in_project`` on its
+    node — sound source-location provenance the cross-checks use to tell a
+    project implementation helper (flag) from a third-party/system call target
+    (don't), even when neither carries L4 visibility (ADR-035 D4 / Codex review).
     """
     from .source_graph import _decl_node_id
+
+    # identity → the project source file its body is defined in. Both marks the
+    # decl ``defined_in_project`` AND preserves the path so the cross-check's
+    # changed-file HIGH-confidence elevation works for call-graph-only internals
+    # (not just SOURCE_DECLARES-backed ones) — Codex review.
+    project_def_file: dict[str, str] = {}
+    if project_files:
+        for e in edges:
+            if e.caller_file and _file_in_project(e.caller_file, project_files):
+                project_def_file.setdefault(e.caller, e.caller_file)
+            # A leaf helper appears only as a callee; mark it too when its
+            # declaration file is a project source (Codex review).
+            if e.callee_file and _file_in_project(e.callee_file, project_files):
+                project_def_file.setdefault(e.callee, e.callee_file)
 
     added = 0
     for e in edges:
@@ -209,16 +349,32 @@ def augment_graph_with_calls(graph: SourceGraphSummary, edges: list[CallEdge]) -
         dst = _decl_node_id(e.callee)
         for node_id, ident in ((src, e.caller), (dst, e.callee)):
             if not graph.has_node(node_id):
-                graph.add_node(GraphNode(
-                    id=node_id, kind="source_decl", label=ident,
-                    provenance="call_graph", confidence=e.confidence(),
-                ))
+                attrs = (
+                    {"defined_in_project": True, "def_file": project_def_file[ident]}
+                    if ident in project_def_file
+                    else {}
+                )
+                graph.add_node(
+                    GraphNode(
+                        id=node_id,
+                        kind="source_decl",
+                        label=ident,
+                        provenance="call_graph",
+                        confidence=e.confidence(),
+                        attrs=attrs,
+                    )
+                )
         before = len(graph.edges)
-        graph.add_edge(GraphEdge(
-            src=src, dst=dst, kind="DECL_CALLS_DECL",
-            provenance="call_graph", confidence=e.confidence(),
-            attrs={"call_kind": e.call_kind, "resolution": e.resolution},
-        ))
+        graph.add_edge(
+            GraphEdge(
+                src=src,
+                dst=dst,
+                kind="DECL_CALLS_DECL",
+                provenance="call_graph",
+                confidence=e.confidence(),
+                attrs={"call_kind": e.call_kind, "resolution": e.resolution},
+            )
+        )
         added += len(graph.edges) - before
     return added
 
@@ -331,11 +487,17 @@ class ClangCallGraphExtractor:
     def available(self) -> bool:
         return shutil.which(self.clang_bin) is not None
 
-    def extract_from_args(self, argv: list[str], cwd: str | None = None) -> list[CallEdge]:
+    def extract_from_args(
+        self, argv: list[str], cwd: str | None = None
+    ) -> list[CallEdge]:
         """Run clang AST extraction for one TU after allowlisting argv flags."""
-        return self._extract_from_safe_args(_safe_clang_args_from_argv(argv, cwd), cwd=cwd)
+        return self._extract_from_safe_args(
+            _safe_clang_args_from_argv(argv, cwd), cwd=cwd
+        )
 
-    def _extract_from_safe_args(self, argv: list[str], cwd: str | None = None) -> list[CallEdge]:
+    def _extract_from_safe_args(
+        self, argv: list[str], cwd: str | None = None
+    ) -> list[CallEdge]:
         """Run ``clang -Xclang -ast-dump=json -fsyntax-only`` with pre-sanitized args."""
         if not self.available():
             self.diagnostics.append(f"{self.clang_bin} not found in PATH")
@@ -343,13 +505,20 @@ class ClangCallGraphExtractor:
         cmd = [self.clang_bin, "-Xclang", "-ast-dump=json", "-fsyntax-only", *argv]
         try:
             proc = subprocess.run(  # noqa: S603 - fixed argv, never shell=True
-                cmd, cwd=cwd, capture_output=True, text=True, timeout=120, check=False,
+                cmd,
+                cwd=cwd,
+                capture_output=True,
+                text=True,
+                timeout=120,
+                check=False,
             )
         except (OSError, subprocess.SubprocessError) as exc:
             self.diagnostics.append(f"clang invocation failed: {exc}")
             return []
         if not proc.stdout.strip():
-            self.diagnostics.append(f"clang produced no AST (stderr: {proc.stderr[:200]})")
+            self.diagnostics.append(
+                f"clang produced no AST (stderr: {proc.stderr[:200]})"
+            )
             return []
         try:
             # Both json.loads and the recursive AST walk can hit Python's

@@ -1221,7 +1221,9 @@ def _count_compile_db_tus(compile_db: Path) -> int:
             continue
         f = str(e["file"])
         directory = str(e.get("directory") or "")
-        resolved = _osp.normpath(_osp.join(directory, f)) if directory else _osp.normpath(f)
+        resolved = (
+            _osp.normpath(_osp.join(directory, f)) if directory else _osp.normpath(f)
+        )
         files.add(resolved)
     return len(files)
 
@@ -1447,7 +1449,8 @@ def estimate_scan(req: ScanRequest) -> list[CostEstimate]:
                 f"{collect_mode} replay scope ({replay_tus} of {total_tus} TU(s))",
             )
         )
-    if collect_mode in ("graph-build", "graph-full"):
+    # L5 structural fold runs for every graph-building mode (cheap).
+    if collect_mode in ("graph-build", "graph-full", "source-changed"):
         estimates.append(
             CostEstimate(
                 resolved.value,
@@ -1458,7 +1461,247 @@ def estimate_scan(req: ScanRequest) -> list[CostEstimate]:
                 "source graph fold/edges",
             )
         )
+    # When both L4 and L5 are collected the inline path also runs a Clang
+    # call-graph pass (``inline._fold_call_graph``) over the replay scope — price
+    # it so `scan --estimate` does not understate a source-changed/graph-full PR
+    # scan (Codex review). Scope mirrors the L4 replay (changed-scoped vs full).
+    if collect_mode in ("source-changed", "graph-full"):
+        estimates.append(
+            CostEstimate(
+                resolved.value,
+                "L5_source_graph",
+                replay_tus,
+                _COST_PER_TU_REPLAY * replay_tus,
+                0.0,
+                f"call-graph clang pass ({replay_tus} of {total_tus} TU(s))",
+            )
+        )
     return estimates
+
+
+@dataclass(frozen=True)
+class ScanResult:
+    """Typed result of an executed scan (ADR-035 D10) — the one object the CLI,
+    the MCP server, and library callers consume.
+
+    ``diff`` is the full report payload (``None``-free); ``findings`` are the raw
+    cross-source :class:`Change` objects; ``layers`` is the per-layer coverage;
+    ``confidence`` is the §6.8 provider-agreement matrix; ``estimate`` is the
+    projected per-layer cost for comparison against the actual run.
+    """
+
+    verdict: str
+    exit_code: int
+    findings: list[Any] = field(default_factory=list)
+    layers: list[LayerResult] = field(default_factory=list)
+    confidence: dict[str, list[str]] = field(default_factory=dict)
+    estimate: list[CostEstimate] = field(default_factory=list)
+    report: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "verdict": self.verdict,
+            "exit_code": self.exit_code,
+            "findings": len(self.findings),
+            "layers": [layer.to_dict() for layer in self.layers],
+            "confidence": {k: list(v) for k, v in self.confidence.items()},
+            "estimate": [e.to_dict() for e in self.estimate],
+            "report": dict(self.report),
+        }
+
+
+def _layers_from_coverage(coverage: list[dict[str, Any]]) -> list[LayerResult]:
+    """Map the engine's coverage rows onto typed :class:`LayerResult`s."""
+    out: list[LayerResult] = []
+    for row in coverage:
+        out.append(
+            LayerResult(
+                method=row.get("method"),
+                layer=str(row.get("layer", "")),
+                status=str(row.get("status", "")),
+                detail=str(row.get("detail", "")),
+                skipped_reason=row.get("skipped_reason"),
+            )
+        )
+    return out
+
+
+def run_scan(req: ScanRequest) -> ScanResult:
+    """Execute a scan and return a typed :class:`ScanResult` (ADR-035 D10).
+
+    The single engine entry point behind the ``scan`` CLI and the MCP scan tool:
+    it resolves the deterministic level from *req* (the same way
+    :func:`estimate_scan` does), drives the shared orchestration core
+    (``cli_scan.run_scan_core`` — classify → always-on tier → pinned level →
+    optional baseline compare), and folds the projected ``estimate_scan`` cost in
+    so a caller can compare projected vs. actual. ``--budget`` overflow surfaces as
+    ``exit_code`` 5 (the failure-guard contract; never shrinks scope).
+    """
+    (
+        RiskRules,
+        score_changed_paths,
+        EvidenceDepth,
+        ScanMode,
+        SourceMethod,
+        level_to_collect_mode,
+        resolve_level,
+    ) = _scan_imports()
+    from .buildsource.crosscheck import ALL_CHECKS
+    from .cli_scan import _BudgetOverflow, run_scan_core
+
+    if len(req.binaries) != 1:
+        raise ValueError("run_scan accepts exactly one binary")
+    binary = req.binaries[0]
+
+    changed = [p for p in req.changed_paths if p]
+    seeded = req.seeded or bool(changed)
+    risk_rules = RiskRules.default()
+    risk = score_changed_paths(changed, risk_rules)
+
+    scan_mode = ScanMode(req.mode)
+    sm = SourceMethod(req.source_method) if req.source_method else None
+    dp = EvidenceDepth(req.depth) if req.depth else None
+    is_auto = sm is SourceMethod.AUTO
+    auto_method = risk.recommended_method if (is_auto and seeded) else None
+    resolved, eff_depth = resolve_level(
+        mode=scan_mode, source_method=sm, depth=dp, auto_method=auto_method
+    )
+    collect_mode = level_to_collect_mode(resolved, eff_depth)
+    effective_build_info = req.compile_db or req.build_info
+    budget_s = req.budget.total_timeout
+    budget_str = f"{budget_s:g}s" if budget_s is not None else None
+
+    import time as _time
+
+    try:
+        core = run_scan_core(
+            start=_time.monotonic(),
+            binary=binary,
+            headers=list(req.headers),
+            includes=list(req.includes),
+            sources=req.sources,
+            effective_build_info=effective_build_info,
+            build_config=None,
+            baseline=Path(req.baseline) if req.baseline is not None else None,
+            lang=req.lang,
+            allow_build_query=False,
+            scan_mode=scan_mode,
+            resolved=resolved,
+            eff_depth_enum=eff_depth,
+            collect_mode=collect_mode,
+            changed=changed,
+            changed_src="run_scan",
+            seeded=seeded,
+            risk=risk,
+            is_auto=is_auto,
+            enabled_checks=frozenset(ALL_CHECKS),
+            severities={},
+            budget=budget_str,
+            budget_s=budget_s,
+        )
+    except _BudgetOverflow:
+        # The failure-guard contract: overflow is exit 5, never a shrunk scope.
+        return ScanResult(verdict="BUDGET_OVERFLOW", exit_code=5)
+
+    outcome = core.outcome
+    return ScanResult(
+        verdict=outcome.verdict,
+        exit_code=outcome.exit_code,
+        findings=core.findings,
+        layers=_layers_from_coverage(outcome.coverage),
+        confidence={
+            k: list(v) for k, v in outcome.crosscheck.get("providers", {}).items()
+        },
+        estimate=estimate_scan(req),
+        report=outcome.to_dict(),
+    )
+
+
+def run_audit(req: ScanRequest) -> ScanResult:
+    """Single-release hygiene audit — :func:`run_scan` with the AUDIT mode (no
+    baseline, ADR-035 D8). A thin convenience wrapper so callers can name intent."""
+    from dataclasses import replace
+
+    return run_scan(replace(req, mode="audit", baseline=None))
+
+
+def _scan_subprocess_worker(req: ScanRequest, q: Any) -> None:
+    """Child-process entry: run the scan and ship back the JSON-able result dict.
+
+    Detaches into its own process group (POSIX) so the parent can kill the whole
+    subtree — including any clang/castxml grandchildren — on timeout. Conveys a
+    sanitized ``(status, payload)`` pair; never lets an exception escape silently.
+    """
+    import os
+
+    try:
+        os.setsid()  # new process group; killpg(parent) reaches clang subprocs
+    except (OSError, AttributeError):
+        pass  # non-POSIX or already a leader — parent falls back to terminate()
+    try:
+        q.put(("ok", run_scan(req).to_dict()))
+    except BaseException as exc:  # noqa: BLE001 — convey, don't crash the worker
+        q.put(("err", f"{type(exc).__name__}: {exc}"))
+
+
+def _kill_process_tree(proc: Any) -> None:
+    """Terminate *proc* and its process group (best-effort, never raises)."""
+    import os
+    import signal
+
+    if not proc.is_alive():
+        return
+    try:
+        pgid = os.getpgid(proc.pid)
+        # Only kill the *group* when the child actually detached into its own
+        # (``os.setsid`` ran). If it timed out before that, its pgid still equals
+        # the parent's group — killpg would then terminate the MCP server itself,
+        # so fall back to killing just the worker process (Codex review).
+        own_pgid = os.getpgrp()
+        if pgid != own_pgid:
+            os.killpg(pgid, signal.SIGTERM)
+            proc.join(3)
+            if proc.is_alive():
+                os.killpg(pgid, signal.SIGKILL)
+        else:
+            proc.terminate()
+    except (ProcessLookupError, PermissionError, AttributeError, OSError):
+        try:
+            proc.terminate()
+        except (OSError, AttributeError):
+            pass
+    proc.join(5)
+
+
+def run_scan_subprocess(req: ScanRequest, timeout: float) -> dict[str, Any]:
+    """Run :func:`run_scan` in a killable child process; return ``ScanResult.to_dict()``.
+
+    The MCP server uses this so a deep/hung scan that exceeds the tool timeout is
+    *terminated* (process + clang subtree) rather than orphaned to keep burning
+    CPU after the timeout response is sent (ADR-035 / Codex review). Raises
+    :class:`TimeoutError` on overflow and :class:`RuntimeError` on a worker-side
+    failure (already sanitized to ``Type: message``).
+    """
+    import multiprocessing as mp
+    import queue as _queue
+
+    ctx = mp.get_context("spawn")  # no inherited locks/fds; portable
+    q: Any = ctx.Queue()
+    proc = ctx.Process(target=_scan_subprocess_worker, args=(req, q), daemon=True)
+    proc.start()
+    try:
+        try:
+            status, payload = q.get(timeout=timeout)
+        except _queue.Empty:
+            raise TimeoutError(f"scan exceeded {timeout:.0f}s") from None
+    finally:
+        if proc.is_alive():
+            _kill_process_tree(proc)
+        else:
+            proc.join(1)
+    if status == "err":
+        raise RuntimeError(payload)
+    return payload  # type: ignore[no-any-return]
 
 
 def _render_deps_section_md(old: AbiSnapshot, new: AbiSnapshot | None) -> str:

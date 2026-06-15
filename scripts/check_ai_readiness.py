@@ -611,6 +611,24 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
         # are the by-design sibling-registration / helper-reuse pattern, not a
         # true initialization cycle (the reuse import is function-local).
         frozenset({"cli", "cli_scan", "cli_buildsource"}),
+        # ADR-035 D10 typed scan engine cluster: `service.run_scan` drives the
+        # shared orchestration core in `cli_scan` (function-local import); `cli_scan`
+        # reuses `service`/`cli_buildsource` collectors; `cli`/`cli_surface` register
+        # and reuse those, and `cli` resolves inputs via `cli_resolve` → `service`.
+        # The engine entry lives in `service` (the one contract the CLI + MCP share)
+        # while the orchestration body stays in `cli_scan`. All cross-imports are
+        # function-local (not an init cycle). One SCC, so this cluster covers its
+        # many representative simple cycles by subset match.
+        frozenset(
+            {
+                "cli",
+                "cli_resolve",
+                "cli_surface",
+                "cli_buildsource",
+                "cli_scan",
+                "service",
+            }
+        ),
         # TYPE_CHECKING-only typing cycle (no runtime import): AbiSnapshot
         # annotates an embedded BuildSourcePack; pack annotates SourceGraphSummary;
         # source_graph annotates Change from checker_types; checker_types annotates
@@ -646,7 +664,13 @@ def check_import_cycles(f: Findings) -> None:
     cycles = _find_cycles(graph)
     for cyc in cycles:
         short = frozenset(m.removeprefix("abicheck.") for m in cyc[:-1])
-        if short in IMPORT_CYCLE_ALLOWLIST:
+        # Subset match: a detected cycle is allowed when its node-set is contained
+        # in a declared by-design cluster. One SCC (the CLI registration / scan
+        # engine cluster) yields many representative simple cycles whose exact
+        # node-sets vary by traversal order, so matching a single cluster set is
+        # robust — while a cycle that reaches any module *outside* the declared
+        # clusters is not a subset of any and is still flagged.
+        if any(short <= allowed for allowed in IMPORT_CYCLE_ALLOWLIST):
             continue
         f.err(
             "import-cycles",

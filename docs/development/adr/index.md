@@ -38,6 +38,6 @@
 | [032](032-evidence-extractor-plugin-interface.md) | Evidence Extractor Plugin Interface and Security Model | Accepted — implemented |
 | [033](033-ci-rollout-performance-and-validation.md) | CI Rollout, Performance, Caching, and Validation Strategy | Accepted — implemented |
 | [034](034-managed-runtime-and-non-c-abi-frontends.md) | Managed-Runtime and Non-C ABI Frontends | Proposed |
-| [035](035-pr-tier-source-intelligence-and-crosscheck.md) | PR-Tier Source Intelligence and Cross-Source Validation | Proposed — partially implemented (G19) |
+| [035](035-pr-tier-source-intelligence-and-crosscheck.md) | PR-Tier Source Intelligence and Cross-Source Validation | Accepted — implemented (G19, D1–D10) |
 | [036](036-report-view-model.md) | Report view-model and canonical report severity | Accepted |
 | [Gap Analysis](adr-gap-analysis.md) | Decisions Needing Formal ADRs | Reference |

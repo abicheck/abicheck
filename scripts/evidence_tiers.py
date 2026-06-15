@@ -183,6 +183,18 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     # ADR-035 D4 cross-source check that compares L2 header context against the
     # L3 build flags — only visible once the build evidence is present.
     "header_build_context_mismatch": "L3",
+    # ── L4: ADR-035 D4 cross-source checks that read the source-replay surface /
+    # source graph carried in a BuildSourcePack (no artifact layer sees them) ──
+    # odr_type_variant reads the L4 surface's recorded per-TU ODR conflicts;
+    # public_to_internal_dependency reads the L5 source graph's decl-dependency
+    # edges (which ride in the same BuildSourcePack the L4 replay produces).
+    "odr_type_variant": "L4",
+    "public_to_internal_dependency": "L4",
+    # ── ADR-035 D8 single-release hygiene audit ──
+    # unversioned_exported_symbol is pure ELF (export table vs .gnu.version_d);
+    # rtti_for_internal_type needs header provenance to know a type is internal.
+    "unversioned_exported_symbol": "L0",
+    "rtti_for_internal_type": "L2",
 }
 
 # Cases with no ``expected_kinds`` (NO_CHANGE baselines, scoped-internal cases,

@@ -76,9 +76,20 @@ authority rule (L0–L2 stay authoritative for `BREAKING`).
   procedure, with per-check coverage rows and the §6.8 provider-agreement matrix.
   Every check skips (never false-positives) when its evidence is absent and is
   never BREAKING (authority rule). Tests: `tests/test_crosscheck.py`.
-- **TODO** — `odr_type_variant` and `public_to_internal_dependency` checks;
-  wiring into the Phase-3 `scan`/`audit` orchestrator + `crosschecks:` severity
-  config; FP-rate-gate corpus cases before any check is promoted to gate.
+- **DONE** — `odr_type_variant` (API_BREAK, reads the L4 surface's recorded ODR
+  conflicts) and `public_to_internal_dependency` (RISK, reads the L5 graph's
+  decl-dependency edges; skips with a soft advisory when an S4/S5 pass did not
+  run; elevates a finding whose internal target is in the changed-path set) added
+  per the four-step procedure, wired into the `scan`/`audit` orchestrator (they
+  run via `ALL_CHECKS`, accept `--crosscheck KEY=LEVEL`, and `odr_type_variant`
+  gates audit exit 2 via `API_BREAK_KINDS`). `scan` threads the resolved
+  changed-path set into `CrosscheckConfig.changed_paths`. Tests:
+  `tests/test_crosscheck.py`.
+- **DONE** — FP-rate-gate corpus for the cross-checks: `CROSSCHECK_CORPUS` in
+  `scripts/check_fp_rate.py` carries both polarities (fire on a real hygiene
+  issue / stay silent on a clean snapshot) for all six D4 checks, baselines 0/0,
+  mirrored in `tests/test_fp_rate_gate.py`. This is the promotion gate a check
+  must pass before it may be raised to `--crosscheck KEY=error`.
 
 ### Phase 3 — Deterministic `scan` orchestrator (G19.3)
 - **DONE** — New `abicheck/cli_scan.py` (sibling-module registration per
@@ -120,9 +131,15 @@ authority rule (L0–L2 stay authoritative for `BREAKING`).
   from the compile DB / source tree, header fan-out) that scans nothing. MCP
   `abi_estimate` / `abi_audit` tools wrap the same engine. Tests:
   `tests/test_scan_estimate.py`.
-- **TODO** — the uniform per-level provider protocol
-  (`capabilities`/`estimate`/`run(ctx, poi)`) and the full `ScanResult`/`run_scan`
-  refactor that moves the `cli_scan` orchestration body into `service.py`.
+- **DONE** — typed `ScanResult` + `run_scan(req)`/`run_audit(req)` in `service.py`
+  (the one engine entry the CLI + MCP `abi_scan` share); the `cli_scan`
+  orchestration body is factored into a pure `run_scan_core` (no click/argv,
+  raises `_BudgetOverflow` instead of `sys.exit`) that `service.run_scan` drives,
+  so the CLI is a thin argv→render→exit shell. The uniform per-level provider
+  protocol — `LayerProvider` (`capabilities`/`estimate`/`run(ctx, poi)`) +
+  `ScanContext`/`LayerFacts`/`ProviderCapabilities`/`ProviderCostEstimate` — lands
+  in `buildsource/providers.py` as the typed contract (existing collectors are the
+  implementations). Tests: `tests/test_scan_estimate.py`, `tests/test_providers.py`.
 
 ### Phase 3c — Single-release audit (G19.6)
 - **DONE** — `scan --audit` runs D2 + D4 intra-version (no baseline) and renders
@@ -131,9 +148,13 @@ authority rule (L0–L2 stay authoritative for `BREAKING`).
   `_audit_exit_code` mapping (RISK advisory; API_BREAK → exit 2; promoted checks
   gate). MCP `abi_audit` exposes the same catalog. Tests:
   `tests/test_scan_estimate.py`.
-- **TODO** — `surface-report` reuse + the deeper one-time audit checks (ODR
-  variants, visibility/versioning hygiene, RTTI-for-internal-types) once their
-  ChangeKinds land (Phase 2 tail).
+- **DONE** — `surface-report --audit` reuses the single-binary surface tooling as
+  the no-baseline hygiene lint (runs `run_crosschecks` over the one snapshot and
+  lists the findings, text + JSON). Deeper audit ChangeKinds landed:
+  `odr_type_variant` (L4 ODR), `unversioned_exported_symbol` (export with no
+  version under a `.gnu.version_d` scheme), `rtti_for_internal_type` (`_ZTI`/`_ZTV`
+  for a private-header type), each with FP-rate-gate corpus coverage. Tests:
+  `tests/test_crosscheck.py`, `tests/test_surface_graph.py`.
 
 ### Phase 4 — Build-integrated extraction (G19.4)
 - **DONE** — `abicheck/buildsource/inputs_pack.py` defines the Flow-2

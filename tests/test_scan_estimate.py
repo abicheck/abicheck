@@ -82,9 +82,17 @@ def header(tmp_path: Path) -> Path:
 def test_estimate_pr_mode_layers(snap_path: Path) -> None:
     req = ScanRequest(binaries=[snap_path], mode="pr")
     layers = {e.layer for e in estimate_scan(req)}
-    # pr = source-changed → intrinsic L0-L2 + L3 build + L4 replay, no L5 graph.
-    assert {"L0_binary", "L1_debug", "L2_header", "L3_build", "L4_source_abi"} <= layers
-    assert "L5_source_graph" not in layers
+    # pr = source-changed → intrinsic L0-L2 + L3 build + L4 replay + the L5 graph
+    # fold and call-graph clang pass (both run for source-changed, so the estimate
+    # must price them — Codex review).
+    assert {
+        "L0_binary",
+        "L1_debug",
+        "L2_header",
+        "L3_build",
+        "L4_source_abi",
+        "L5_source_graph",
+    } <= layers
 
 
 def test_estimate_baseline_mode_includes_graph(snap_path: Path) -> None:
@@ -454,3 +462,49 @@ def test_cli_audit_json_carries_poi(
     payload = json.loads(res.output)
     assert "poi" in payload
     assert payload["poi"]["version"] == 1
+
+
+# --------------------------------------------------------------------------- #
+# run_scan / run_audit typed engine (ADR-035 D10 / Phase 3b tail)
+# --------------------------------------------------------------------------- #
+
+
+def test_run_audit_returns_typed_result_with_findings(snap_path: Path) -> None:
+    from abicheck.service import ScanResult, run_audit
+
+    res = run_audit(ScanRequest(binaries=[snap_path]))
+    assert isinstance(res, ScanResult)
+    assert res.exit_code == 0  # RISK-only hygiene findings stay advisory
+    # _Z6secretv is exported but no public header declares it.
+    kinds = {f.kind.value for f in res.findings}
+    assert "exported_not_public" in kinds
+    assert res.layers  # per-layer coverage rows present
+    assert res.estimate  # projected cost folded in
+    d = res.to_dict()
+    assert d["verdict"] == res.verdict
+    assert d["findings"] == len(res.findings)
+
+
+def test_run_scan_no_baseline_matches_audit_findings(snap_path: Path) -> None:
+    from abicheck.service import run_scan
+
+    # mode=audit with no baseline is the single-release path.
+    res = run_scan(ScanRequest(binaries=[snap_path], mode="audit"))
+    assert res.verdict in ("COMPATIBLE", "API_BREAK")
+    assert any(f.kind.value == "exported_not_public" for f in res.findings)
+
+
+def test_run_scan_rejects_multiple_binaries(snap_path: Path) -> None:
+    from abicheck.service import run_scan
+
+    with pytest.raises(ValueError):
+        run_scan(ScanRequest(binaries=[snap_path, snap_path]))
+
+
+def test_run_scan_confidence_matrix_present(snap_path: Path) -> None:
+    from abicheck.service import run_audit
+
+    res = run_audit(ScanRequest(binaries=[snap_path]))
+    # The provider-agreement matrix is populated for run checks.
+    assert isinstance(res.confidence, dict)
+    assert "exported_not_public" in res.confidence

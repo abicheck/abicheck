@@ -1,6 +1,6 @@
 {
   "description": "Formal detector specification matrix (generated).",
-  "count": 250,
+  "count": 254,
   "detectors": [
     {
       "kind": "abi_relevant_build_flag_changed",
@@ -947,6 +947,14 @@
       "doc_slug": "odr_source_conflict"
     },
     {
+      "kind": "odr_type_variant",
+      "category": "api_break",
+      "default_verdict": "API_BREAK",
+      "severity": "warning",
+      "min_evidence": "L4",
+      "doc_slug": "odr_type_variant"
+    },
+    {
       "kind": "opaque_invariant_broken",
       "category": "breaking",
       "default_verdict": "BREAKING",
@@ -1123,6 +1131,14 @@
       "doc_slug": "public_surface_shrank"
     },
     {
+      "kind": "public_to_internal_dependency",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "L4",
+      "doc_slug": "public_to_internal_dependency"
+    },
+    {
       "kind": "public_typedef_target_changed",
       "category": "api_break",
       "default_verdict": "API_BREAK",
@@ -1161,6 +1177,14 @@
       "severity": "warning",
       "min_evidence": "unspecified",
       "doc_slug": "rpath_changed"
+    },
+    {
+      "kind": "rtti_for_internal_type",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "L2",
+      "doc_slug": "rtti_for_internal_type"
     },
     {
       "kind": "rtti_inheritance_changed",
@@ -1849,6 +1873,14 @@
       "severity": "warning",
       "min_evidence": "unspecified",
       "doc_slug": "unspecified_return_now_named"
+    },
+    {
+      "kind": "unversioned_exported_symbol",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "L0",
+      "doc_slug": "unversioned_exported_symbol"
     },
     {
       "kind": "used_reserved_field",

@@ -52,36 +52,64 @@ def _ref(kind: str, name: str, mangled: str = "", *, virtual: bool = False) -> d
 
 
 def _direct_call(callee: dict) -> dict:
-    return {"kind": "CallExpr", "inner": [
-        {"kind": "ImplicitCastExpr", "inner": [
-            {"kind": "DeclRefExpr", "referencedDecl": callee}]}]}
+    return {
+        "kind": "CallExpr",
+        "inner": [
+            {
+                "kind": "ImplicitCastExpr",
+                "inner": [{"kind": "DeclRefExpr", "referencedDecl": callee}],
+            }
+        ],
+    }
 
 
 def _member_call(member: dict) -> dict:
-    return {"kind": "CXXMemberCallExpr", "inner": [
-        {"kind": "MemberExpr", "referencedMemberDecl": member}]}
+    return {
+        "kind": "CXXMemberCallExpr",
+        "inner": [{"kind": "MemberExpr", "referencedMemberDecl": member}],
+    }
 
 
 def _func(name: str, mangled: str, body: list[dict]) -> dict:
-    return {"kind": "FunctionDecl", "name": name, "mangledName": mangled,
-            "inner": [{"kind": "CompoundStmt", "inner": body}]}
+    return {
+        "kind": "FunctionDecl",
+        "name": name,
+        "mangledName": mangled,
+        "inner": [{"kind": "CompoundStmt", "inner": body}],
+    }
 
 
 # ── parser ──────────────────────────────────────────────────────────────────
 
 
 def test_parse_direct_call() -> None:
-    ast = {"kind": "TranslationUnitDecl", "inner": [
-        _func("caller", "_Zcaller", [_direct_call(_ref("FunctionDecl", "callee", "_Zcallee"))]),
-    ]}
+    ast = {
+        "kind": "TranslationUnitDecl",
+        "inner": [
+            _func(
+                "caller",
+                "_Zcaller",
+                [_direct_call(_ref("FunctionDecl", "callee", "_Zcallee"))],
+            ),
+        ],
+    }
     edges = parse_clang_ast_calls(ast)
-    assert edges == [CallEdge("_Zcaller", "_Zcallee", CALL_KIND_DIRECT, RESOLUTION_EXACT)]
+    assert edges == [
+        CallEdge("_Zcaller", "_Zcallee", CALL_KIND_DIRECT, RESOLUTION_EXACT)
+    ]
 
 
 def test_parse_virtual_call_is_overapprox() -> None:
-    ast = {"kind": "TranslationUnitDecl", "inner": [
-        _func("c", "_Zc", [_member_call(_ref("CXXMethodDecl", "v", "_Zv", virtual=True))]),
-    ]}
+    ast = {
+        "kind": "TranslationUnitDecl",
+        "inner": [
+            _func(
+                "c",
+                "_Zc",
+                [_member_call(_ref("CXXMethodDecl", "v", "_Zv", virtual=True))],
+            ),
+        ],
+    }
     e = parse_clang_ast_calls(ast)[0]
     assert e.call_kind == CALL_KIND_VIRTUAL
     assert e.resolution == RESOLUTION_OVERAPPROX
@@ -89,9 +117,12 @@ def test_parse_virtual_call_is_overapprox() -> None:
 
 
 def test_parse_function_pointer_call_is_unknown() -> None:
-    ast = {"kind": "TranslationUnitDecl", "inner": [
-        _func("c", "_Zc", [_direct_call(_ref("ParmVarDecl", "fp"))]),
-    ]}
+    ast = {
+        "kind": "TranslationUnitDecl",
+        "inner": [
+            _func("c", "_Zc", [_direct_call(_ref("ParmVarDecl", "fp"))]),
+        ],
+    }
     e = parse_clang_ast_calls(ast)[0]
     assert e.call_kind == CALL_KIND_FUNCTION_POINTER
     assert e.resolution == RESOLUTION_UNKNOWN
@@ -100,37 +131,60 @@ def test_parse_function_pointer_call_is_unknown() -> None:
 
 def test_parse_unresolved_callee_dropped() -> None:
     # A CallExpr with no referenced decl (e.g. through a complex expression).
-    ast = {"kind": "TranslationUnitDecl", "inner": [
-        _func("c", "_Zc", [{"kind": "CallExpr", "inner": [{"kind": "ParenExpr"}]}]),
-    ]}
+    ast = {
+        "kind": "TranslationUnitDecl",
+        "inner": [
+            _func("c", "_Zc", [{"kind": "CallExpr", "inner": [{"kind": "ParenExpr"}]}]),
+        ],
+    }
     assert parse_clang_ast_calls(ast) == []
 
 
 def test_parse_tolerates_non_dict_inner_nodes() -> None:
     # A malformed AST with non-dict entries in `inner` must not crash.
-    ast = {"kind": "TranslationUnitDecl", "inner": [
-        None, "stray",
-        {"kind": "FunctionDecl", "name": "c", "mangledName": "_Zc", "inner": [
-            None, _direct_call(_ref("FunctionDecl", "callee", "_Zcallee"))]},
-    ]}
+    ast = {
+        "kind": "TranslationUnitDecl",
+        "inner": [
+            None,
+            "stray",
+            {
+                "kind": "FunctionDecl",
+                "name": "c",
+                "mangledName": "_Zc",
+                "inner": [
+                    None,
+                    _direct_call(_ref("FunctionDecl", "callee", "_Zcallee")),
+                ],
+            },
+        ],
+    }
     assert parse_clang_ast_calls(ast) == [CallEdge("_Zc", "_Zcallee")]
 
 
 def test_parse_finds_ref_in_later_sibling() -> None:
     # First child subtree has no referenced decl; the callee is in a later one.
-    call = {"kind": "CallExpr", "inner": [
-        {"kind": "ParenExpr", "inner": [{"kind": "IntegerLiteral"}]},
-        {"kind": "DeclRefExpr", "referencedDecl": _ref("FunctionDecl", "callee", "_Zcallee")},
-    ]}
+    call = {
+        "kind": "CallExpr",
+        "inner": [
+            {"kind": "ParenExpr", "inner": [{"kind": "IntegerLiteral"}]},
+            {
+                "kind": "DeclRefExpr",
+                "referencedDecl": _ref("FunctionDecl", "callee", "_Zcallee"),
+            },
+        ],
+    }
     ast = {"kind": "TranslationUnitDecl", "inner": [_func("c", "_Zc", [call])]}
     assert parse_clang_ast_calls(ast) == [CallEdge("_Zc", "_Zcallee")]
 
 
 def test_parse_call_outside_function_ignored() -> None:
     # A call not nested in any function decl has no caller → dropped.
-    ast = {"kind": "TranslationUnitDecl", "inner": [
-        _direct_call(_ref("FunctionDecl", "callee", "_Zcallee")),
-    ]}
+    ast = {
+        "kind": "TranslationUnitDecl",
+        "inner": [
+            _direct_call(_ref("FunctionDecl", "callee", "_Zcallee")),
+        ],
+    }
     assert parse_clang_ast_calls(ast) == []
 
 
@@ -141,33 +195,56 @@ def test_parse_dedupes_repeated_edges() -> None:
 
 
 def test_parse_uses_name_when_no_mangled() -> None:
-    ast = {"kind": "TranslationUnitDecl", "inner": [
-        {"kind": "FunctionDecl", "name": "caller", "inner": [
-            {"kind": "CompoundStmt", "inner": [_direct_call(_ref("FunctionDecl", "callee"))]}]},
-    ]}
+    ast = {
+        "kind": "TranslationUnitDecl",
+        "inner": [
+            {
+                "kind": "FunctionDecl",
+                "name": "caller",
+                "inner": [
+                    {
+                        "kind": "CompoundStmt",
+                        "inner": [_direct_call(_ref("FunctionDecl", "callee"))],
+                    }
+                ],
+            },
+        ],
+    }
     e = parse_clang_ast_calls(ast)[0]
     assert e.caller == "caller" and e.callee == "callee"
 
 
 def test_parse_self_recursive_call_skipped() -> None:
-    ast = {"kind": "TranslationUnitDecl", "inner": [
-        _func("rec", "_Zrec", [_direct_call(_ref("FunctionDecl", "rec", "_Zrec"))]),
-    ]}
+    ast = {
+        "kind": "TranslationUnitDecl",
+        "inner": [
+            _func("rec", "_Zrec", [_direct_call(_ref("FunctionDecl", "rec", "_Zrec"))]),
+        ],
+    }
     assert parse_clang_ast_calls(ast) == []
 
 
 def test_parse_referenced_decl_without_name_dropped() -> None:
     # A referenced decl with no name/mangled yields an empty callee → dropped.
-    ast = {"kind": "TranslationUnitDecl", "inner": [
-        _func("c", "_Zc", [_direct_call({"kind": "FunctionDecl"})]),
-    ]}
+    ast = {
+        "kind": "TranslationUnitDecl",
+        "inner": [
+            _func("c", "_Zc", [_direct_call({"kind": "FunctionDecl"})]),
+        ],
+    }
     assert parse_clang_ast_calls(ast) == []
 
 
 def test_call_edge_confidence_labels() -> None:
     assert CallEdge("a", "b", CALL_KIND_DIRECT, RESOLUTION_EXACT).confidence() == "high"
-    assert CallEdge("a", "b", CALL_KIND_VIRTUAL, RESOLUTION_OVERAPPROX).confidence() == "reduced"
-    assert CallEdge("a", "b", CALL_KIND_FUNCTION_POINTER, RESOLUTION_UNKNOWN).confidence() == "unknown"
+    assert (
+        CallEdge("a", "b", CALL_KIND_VIRTUAL, RESOLUTION_OVERAPPROX).confidence()
+        == "reduced"
+    )
+    assert (
+        CallEdge("a", "b", CALL_KIND_FUNCTION_POINTER, RESOLUTION_UNKNOWN).confidence()
+        == "unknown"
+    )
 
 
 # ── graph augmentation ──────────────────────────────────────────────────────
@@ -175,9 +252,12 @@ def test_call_edge_confidence_labels() -> None:
 
 def test_augment_adds_decl_calls_decl_edges_with_labels() -> None:
     g = SourceGraphSummary()
-    added = augment_graph_with_calls(g, [
-        CallEdge("_Za", "_Zb", CALL_KIND_VIRTUAL, RESOLUTION_OVERAPPROX),
-    ])
+    added = augment_graph_with_calls(
+        g,
+        [
+            CallEdge("_Za", "_Zb", CALL_KIND_VIRTUAL, RESOLUTION_OVERAPPROX),
+        ],
+    )
     assert added == 1
     edge = next(e for e in g.edges if e.kind == "DECL_CALLS_DECL")
     assert edge.attrs == {"call_kind": "virtual", "resolution": "overapprox"}
@@ -187,7 +267,11 @@ def test_augment_adds_decl_calls_decl_edges_with_labels() -> None:
 
 def test_augment_merges_with_existing_decl_node() -> None:
     g = SourceGraphSummary()
-    g.add_node(GraphNode(id="decl://_Zb", kind="source_decl", label="b", provenance="source_abi"))
+    g.add_node(
+        GraphNode(
+            id="decl://_Zb", kind="source_decl", label="b", provenance="source_abi"
+        )
+    )
     augment_graph_with_calls(g, [CallEdge("_Za", "_Zb")])
     # The callee reuses the existing decl node rather than duplicating it.
     assert sum(1 for n in g.nodes if n.id == "decl://_Zb") == 1
@@ -203,13 +287,26 @@ def test_augment_dedupes_edges() -> None:
 # ── call-reachability finding (D6, quality) ─────────────────────────────────
 
 
-def _graph_with_calls(entry_symbol: str, calls: list[tuple[str, str]]) -> SourceGraphSummary:
+def _graph_with_calls(
+    entry_symbol: str, calls: list[tuple[str, str]]
+) -> SourceGraphSummary:
     g = SourceGraphSummary()
     # entry decl backs an exported symbol → it is a public entry point.
     g.add_node(GraphNode(id="decl://entry", kind="source_decl", label="entry"))
-    g.add_node(GraphNode(id=f"binary_symbol://{entry_symbol}", kind="binary_symbol", label=entry_symbol))
-    g.add_edge(GraphEdge(src="decl://entry", dst=f"binary_symbol://{entry_symbol}",
-                         kind="SOURCE_DECL_MAPS_TO_SYMBOL"))
+    g.add_node(
+        GraphNode(
+            id=f"binary_symbol://{entry_symbol}",
+            kind="binary_symbol",
+            label=entry_symbol,
+        )
+    )
+    g.add_edge(
+        GraphEdge(
+            src="decl://entry",
+            dst=f"binary_symbol://{entry_symbol}",
+            kind="SOURCE_DECL_MAPS_TO_SYMBOL",
+        )
+    )
     augment_graph_with_calls(g, [CallEdge(c, d) for c, d in calls])
     return g.finalize()
 
@@ -218,7 +315,11 @@ def test_call_reachability_change_emits_quality_finding() -> None:
     old = _graph_with_calls("_Zentry", [("entry", "_Zimpl1")])
     new = _graph_with_calls("_Zentry", [("entry", "_Zimpl1"), ("_Zimpl1", "_Zimpl2")])
     findings = diff_source_graph_findings(old, new)
-    cg = [c for c in findings if c.kind == ChangeKind.CALL_GRAPH_PUBLIC_ENTRY_REACHABILITY_CHANGED]
+    cg = [
+        c
+        for c in findings
+        if c.kind == ChangeKind.CALL_GRAPH_PUBLIC_ENTRY_REACHABILITY_CHANGED
+    ]
     assert len(cg) == 1
     assert cg[0].source_location == "[L5_SOURCE_GRAPH]"
     assert ChangeKind.CALL_GRAPH_PUBLIC_ENTRY_REACHABILITY_CHANGED in COMPATIBLE_KINDS
@@ -241,7 +342,12 @@ def test_extractor_missing_clang_returns_empty() -> None:
     ext = ClangCallGraphExtractor(clang_bin="definitely-not-a-real-clang-xyz")
     assert ext.available() is False
     assert ext.extract_from_args(["foo.cpp"]) == []
-    assert ext.extract_from_build(BuildEvidence(compile_units=[CompileUnit(id="cu://x", source="x.cpp")])) == []
+    assert (
+        ext.extract_from_build(
+            BuildEvidence(compile_units=[CompileUnit(id="cu://x", source="x.cpp")])
+        )
+        == []
+    )
     assert ext.diagnostics  # a reason was recorded
 
 
@@ -251,10 +357,14 @@ class _FakeProc:
         self.stderr = stderr
 
 
-def _patch_clang(monkeypatch, *, available: bool = True, proc=None, raises=None) -> None:
+def _patch_clang(
+    monkeypatch, *, available: bool = True, proc=None, raises=None
+) -> None:
     import abicheck.buildsource.call_graph as cg
 
-    monkeypatch.setattr(cg.shutil, "which", lambda _b: "/usr/bin/clang++" if available else None)
+    monkeypatch.setattr(
+        cg.shutil, "which", lambda _b: "/usr/bin/clang++" if available else None
+    )
 
     def fake_run(*_a, **_k):
         if raises is not None:
@@ -266,15 +376,23 @@ def _patch_clang(monkeypatch, *, available: bool = True, proc=None, raises=None)
 
 def test_extract_from_args_parses_mocked_clang(monkeypatch) -> None:
     import json as _json
-    ast = {"kind": "TranslationUnitDecl", "inner": [
-        _func("c", "_Zc", [_direct_call(_ref("FunctionDecl", "callee", "_Zcallee"))]),
-    ]}
+
+    ast = {
+        "kind": "TranslationUnitDecl",
+        "inner": [
+            _func(
+                "c", "_Zc", [_direct_call(_ref("FunctionDecl", "callee", "_Zcallee"))]
+            ),
+        ],
+    }
     _patch_clang(monkeypatch, proc=_FakeProc(_json.dumps(ast)))
     edges = ClangCallGraphExtractor().extract_from_args(["x.cpp"])
     assert edges == [CallEdge("_Zc", "_Zcallee", CALL_KIND_DIRECT, RESOLUTION_EXACT)]
 
 
-def test_extract_from_args_reconstructs_safe_parse_command(monkeypatch, tmp_path) -> None:
+def test_extract_from_args_reconstructs_safe_parse_command(
+    monkeypatch, tmp_path
+) -> None:
     import json as _json
 
     import abicheck.buildsource.call_graph as cg
@@ -291,15 +409,23 @@ def test_extract_from_args_reconstructs_safe_parse_command(monkeypatch, tmp_path
     src = tmp_path / "victim.cpp"
     src.write_text("int main() { return 0; }", encoding="utf-8")
 
-    ClangCallGraphExtractor().extract_from_args([
-        "/usr/bin/g++",
-        "-Xclang", "-load", "-Xclang", "./evil.so",
-        "-fplugin=./evil.so",
-        "-I", "include",
-        "-D", "FEATURE=1",
-        "-std=c++20",
-        str(src),
-    ], cwd=str(tmp_path))
+    ClangCallGraphExtractor().extract_from_args(
+        [
+            "/usr/bin/g++",
+            "-Xclang",
+            "-load",
+            "-Xclang",
+            "./evil.so",
+            "-fplugin=./evil.so",
+            "-I",
+            "include",
+            "-D",
+            "FEATURE=1",
+            "-std=c++20",
+            str(src),
+        ],
+        cwd=str(tmp_path),
+    )
 
     cmd = captured["cmd"]
     assert "-fplugin=./evil.so" not in cmd
@@ -325,16 +451,20 @@ def test_extract_from_build_ignores_compile_unit_raw_argv(monkeypatch) -> None:
         return _FakeProc(_json.dumps(ast))
 
     monkeypatch.setattr(cg.subprocess, "run", fake_run)
-    build = BuildEvidence(compile_units=[CompileUnit(
-        id="cu://x",
-        source="victim.cpp",
-        argv=["/usr/bin/g++", "-fplugin=./evil.so", "victim.cpp"],
-        language="CXX",
-        standard="c++17",
-        defines={"FEATURE": "1"},
-        include_paths=["include"],
-        abi_relevant_flags=["-fvisibility=hidden"],
-    )])
+    build = BuildEvidence(
+        compile_units=[
+            CompileUnit(
+                id="cu://x",
+                source="victim.cpp",
+                argv=["/usr/bin/g++", "-fplugin=./evil.so", "victim.cpp"],
+                language="CXX",
+                standard="c++17",
+                defines={"FEATURE": "1"},
+                include_paths=["include"],
+                abi_relevant_flags=["-fvisibility=hidden"],
+            )
+        ]
+    )
 
     ClangCallGraphExtractor().extract_from_build(build)
 
@@ -371,15 +501,23 @@ def test_extract_from_args_subprocess_error(monkeypatch) -> None:
 
 def test_extract_from_build_dedupes_across_units(monkeypatch) -> None:
     import json as _json
-    ast = {"kind": "TranslationUnitDecl", "inner": [
-        _func("c", "_Zc", [_direct_call(_ref("FunctionDecl", "callee", "_Zcallee"))]),
-    ]}
+
+    ast = {
+        "kind": "TranslationUnitDecl",
+        "inner": [
+            _func(
+                "c", "_Zc", [_direct_call(_ref("FunctionDecl", "callee", "_Zcallee"))]
+            ),
+        ],
+    }
     _patch_clang(monkeypatch, proc=_FakeProc(_json.dumps(ast)))
-    build = BuildEvidence(compile_units=[
-        CompileUnit(id="cu://a", source="a.cpp", argv=["a.cpp"]),
-        CompileUnit(id="cu://b", source="b.cpp", argv=["b.cpp"]),
-        CompileUnit(id="cu://nosrc", source=""),  # skipped (no source)
-    ])
+    build = BuildEvidence(
+        compile_units=[
+            CompileUnit(id="cu://a", source="a.cpp", argv=["a.cpp"]),
+            CompileUnit(id="cu://b", source="b.cpp", argv=["b.cpp"]),
+            CompileUnit(id="cu://nosrc", source=""),  # skipped (no source)
+        ]
+    )
     edges = ClangCallGraphExtractor().extract_from_build(build)
     assert edges == [CallEdge("_Zc", "_Zcallee", CALL_KIND_DIRECT, RESOLUTION_EXACT)]
 
@@ -390,8 +528,13 @@ def test_extract_from_build_dedupes_across_units(monkeypatch) -> None:
 class _FakeExtractor:
     """Stand-in for ClangCallGraphExtractor with a controllable result."""
 
-    def __init__(self, *, available: bool, edges: list[CallEdge] | None = None,
-                 clang_bin: str = "clang++") -> None:
+    def __init__(
+        self,
+        *,
+        available: bool,
+        edges: list[CallEdge] | None = None,
+        clang_bin: str = "clang++",
+    ) -> None:
         self.clang_bin = clang_bin
         self._available = available
         self._edges = edges or []
@@ -415,7 +558,9 @@ def test_collect_call_graph_folds_edges_and_refinalizes(monkeypatch) -> None:
     from abicheck.buildsource.source_graph import build_source_graph
     from abicheck.cli_buildsource import _collect_call_graph
 
-    _patch_extractor(monkeypatch, _FakeExtractor(available=True, edges=[CallEdge("_Za", "_Zb")]))
+    _patch_extractor(
+        monkeypatch, _FakeExtractor(available=True, edges=[CallEdge("_Za", "_Zb")])
+    )
     graph = build_source_graph(BuildEvidence())
     records: list[ExtractorRecord] = []
     _collect_call_graph(graph, BuildEvidence(), records, clang_bin="clang")
@@ -450,17 +595,158 @@ def test_collect_evidence_call_graph_flag_end_to_end(monkeypatch, tmp_path) -> N
     src = tmp_path / "foo.cpp"
     src.write_text("int foo(){return 1;}\n")
     cdb = tmp_path / "compile_commands.json"
-    cdb.write_text(_json.dumps([{
-        "directory": str(tmp_path), "file": str(src),
-        "command": f"c++ -c {src} -o foo.o",
-    }]))
-    _patch_extractor(monkeypatch, _FakeExtractor(available=True, edges=[CallEdge("_Za", "_Zb")]))
+    cdb.write_text(
+        _json.dumps(
+            [
+                {
+                    "directory": str(tmp_path),
+                    "file": str(src),
+                    "command": f"c++ -c {src} -o foo.o",
+                }
+            ]
+        )
+    )
+    _patch_extractor(
+        monkeypatch, _FakeExtractor(available=True, edges=[CallEdge("_Za", "_Zb")])
+    )
 
     out = tmp_path / "out.evidence"
-    res = CliRunner().invoke(main, [
-        "collect", "--compile-db", str(cdb), "--call-graph", "-o", str(out),
-    ])
+    res = CliRunner().invoke(
+        main,
+        [
+            "collect",
+            "--compile-db",
+            str(cdb),
+            "--call-graph",
+            "-o",
+            str(out),
+        ],
+    )
     assert res.exit_code == 0, res.output
     pack = BuildSourcePack.load(out)
     assert pack.source_graph is not None
     assert any(e.kind == "DECL_CALLS_DECL" for e in pack.source_graph.edges)
+
+
+# ── source-location provenance (defined_in_project) ───────────────────────────
+
+
+def _func_in(name: str, mangled: str, body: list[dict], file: str) -> dict:
+    # A FunctionDecl carrying a source file on its loc (clang sticky-file form).
+    return {
+        "kind": "FunctionDecl",
+        "name": name,
+        "mangledName": mangled,
+        "loc": {"file": file, "line": 1},
+        "inner": [{"kind": "CompoundStmt", "inner": body}],
+    }
+
+
+def test_parse_captures_caller_file() -> None:
+    ast = {
+        "kind": "TranslationUnitDecl",
+        "inner": [
+            _func_in(
+                "caller",
+                "_Zcaller",
+                [_direct_call(_ref("FunctionDecl", "callee", "_Zcallee"))],
+                "/work/src/impl.cc",
+            )
+        ],
+    }
+    edge = parse_clang_ast_calls(ast)[0]
+    assert edge.caller_file == "/work/src/impl.cc"
+
+
+def test_augment_marks_defined_in_project_from_source_file() -> None:
+    # A caller whose body is in a project compile-unit source is defined_in_project;
+    # a callee that is never a project-file caller (extern / third-party) is not.
+    g = SourceGraphSummary()
+    edges = [
+        CallEdge("_Zhelper", "_Zmalloc", caller_file="/work/src/impl.cc"),
+    ]
+    augment_graph_with_calls(g, edges, frozenset({"src/impl.cc"}))
+    by_id = {n.id: n for n in g.nodes}
+    assert by_id["decl://_Zhelper"].attrs.get("defined_in_project") is True
+    # malloc is only ever a callee (no project-file body) → not marked.
+    assert not by_id["decl://_Zmalloc"].attrs.get("defined_in_project")
+
+
+def test_augment_thirdparty_header_caller_not_project() -> None:
+    # An inline third-party header function whose body makes a call appears as a
+    # caller, but its file is a header outside the project sources → not marked.
+    g = SourceGraphSummary()
+    edges = [
+        CallEdge("_Zboost", "_Zinner", caller_file="/usr/include/boost/x.hpp"),
+    ]
+    augment_graph_with_calls(g, edges, frozenset({"src/impl.cc"}))
+    by_id = {n.id: n for n in g.nodes}
+    assert not by_id["decl://_Zboost"].attrs.get("defined_in_project")
+
+
+def test_augment_marks_leaf_callee_from_callee_file() -> None:
+    # A leaf helper appears only as a callee (no outgoing calls); its declaration
+    # file (callee_file) earns it project provenance (Codex review).
+    g = SourceGraphSummary()
+    edges = [
+        CallEdge(
+            "_Zpub",
+            "_Zleaf",
+            caller_file="/work/src/api.cc",
+            callee_file="/work/src/util.cc",
+        ),
+    ]
+    augment_graph_with_calls(g, edges, frozenset({"src/api.cc", "src/util.cc"}))
+    by_id = {n.id: n for n in g.nodes}
+    assert by_id["decl://_Zleaf"].attrs.get("defined_in_project") is True
+    assert by_id["decl://_Zleaf"].attrs.get("def_file") == "/work/src/util.cc"
+
+
+def test_parse_fills_callee_file_from_sibling_functiondecl() -> None:
+    # A leaf helper defined in the TU is referenced by a caller; the call's
+    # referencedDecl carries no loc.file, so callee_file is resolved from the
+    # helper's own FunctionDecl definition (Codex review).
+    ast_tree = {
+        "kind": "TranslationUnitDecl",
+        "inner": [
+            _func_in("helper", "_Zhelper", [], "/work/src/util.cc"),
+            _func_in(
+                "api",
+                "_Zapi",
+                [
+                    _direct_call(
+                        {
+                            "kind": "FunctionDecl",
+                            "name": "helper",
+                            "mangledName": "_Zhelper",
+                        }
+                    )
+                ],
+                "/work/src/api.cc",
+            ),
+        ],
+    }
+    edges = parse_clang_ast_calls(ast_tree)
+    edge = next(e for e in edges if e.callee == "_Zhelper")
+    assert edge.callee_file == "/work/src/util.cc"
+
+
+def test_project_source_files_includes_private_headers_not_public() -> None:
+    from abicheck.buildsource.build_evidence import BuildEvidence, CompileUnit, Target
+    from abicheck.buildsource.call_graph import project_source_files
+
+    build = BuildEvidence(
+        compile_units=[CompileUnit(id="cu://a", source="src/a.cc")],
+        targets=[
+            Target(
+                id="t",
+                name="t",
+                public_headers=["include/api.h"],
+                private_headers=["src/detail.h"],
+            )
+        ],
+    )
+    pf = project_source_files(build)
+    assert "src/a.cc" in pf
+    assert "src/detail.h" in pf  # private header → internal provenance
+    assert "include/api.h" not in pf  # public header excluded (public surface)

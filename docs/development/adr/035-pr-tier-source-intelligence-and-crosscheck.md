@@ -1,11 +1,20 @@
 # ADR-035: PR-Tier Source Intelligence and Cross-Source Validation
 
 **Date:** 2026-06-14
-**Status:** Proposed — partially implemented (D1–D5 shipped; tracked as G19 in
-`docs/development/usecase-registry.yaml`). D5 (build-emitted source-facts
-protocol) is `complete`; D1/D3 (deterministic level + risk-scored `auto`),
-D2 (compiler-free pattern pre-scan), D4 (cross-source validation engine), and
-D9/D10 (scan coverage report) are `partial`. D6–D8 remain planned.
+**Status:** Accepted — implemented (D1–D10 shipped; tracked as G19 in
+`docs/development/usecase-registry.yaml` and the phased plan
+[plans/g19-pr-source-intelligence.md](../plans/g19-pr-source-intelligence.md)).
+All ten decisions landed: D1/D3 (two axes + deterministic level / opt-in
+risk-scored `auto`), D2 (compiler-free pattern + S2 preprocessor pre-scan),
+D4 (cross-source validation engine — six checks, FP-rate-gate corpus),
+D5 (build-emitted `abicheck_inputs/` facts protocol + `abicheck-cc` wrapper),
+D6 (additive `.abicheck.yml` source/risk/crosscheck config), D7 (POI focusing),
+D8 (single-release audit via `scan --audit` / `surface-report --audit`),
+D9 (asymmetric per-mode defaults), and D10 (typed `ScanRequest`/`ScanResult`
+engine `service.run_scan`, the `LayerProvider` protocol, `scan --estimate`, and
+the `abi_scan`/`abi_audit`/`abi_estimate` MCP tools). The cross-source checks
+ship advisory (RISK/API_BREAK, never BREAKING — authority rule) and gate only
+once promoted per-check via `--crosscheck KEY=error`.
 **Decision maker:** Nikolay Petrov
 
 ---

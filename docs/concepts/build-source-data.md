@@ -568,8 +568,9 @@ ABI break.
 The checks above all compare *two versions*. abicheck also runs an
 **intra-version** cross-source validation pass (ADR-035 D4) that diffs **one**
 merged snapshot's evidence sources against *each other* — binary exports vs.
-header declarations vs. build flags vs. header provenance — to surface "bad ABI
-hygiene" that is visible from a single build, no baseline required:
+header declarations vs. build flags vs. header provenance vs. per-TU source
+layouts vs. the source graph — to surface "bad ABI hygiene" that is visible from
+a single build, no baseline required:
 
 | ChangeKind | verdict | meaning |
 |---|---|---|
@@ -577,6 +578,10 @@ hygiene" that is visible from a single build, no baseline required:
 | `public_not_exported` | risk | A public header declares an entity with an export obligation (a non-inline, non-template, default-visibility function/extern variable) that the binary does not export — consumers get an undefined-symbol link error |
 | `header_build_context_mismatch` | api_break | The build records ABI-relevant flags/macros but the headers were parsed context-free, so the declared API surface may not match the shipped translation units — re-dump headers with the build's `compile_commands.json` |
 | `private_header_leak` | risk | A public API exposes a type declared only in a private (non-installed) header, so consumers pull in an unshipped declaration — make the header self-contained or install the leaked header |
+| `odr_type_variant` | api_break | One type has divergent per-translation-unit definitions (the L4 source-replay surface recorded an ODR conflict), so mixing them at link time is undefined behavior — reconcile the definitions (usually a macro/flag that changes the type per TU) |
+| `public_to_internal_dependency` | risk | A public/exported declaration reaches an internal (private-header / source-file) entity through the L5 source graph, so a change to that hidden entity is an undeclared behavioral risk — elevated when the internal entity is among the revision's changed files |
+| `unversioned_exported_symbol` | risk | The library defines a symbol-versioning scheme (version script / `.gnu.version_d`) yet exports a symbol with no version node, so it can't be evolved compatibly later — add it to the version script or hide it (single-release hygiene, ADR-035 D8) |
+| `rtti_for_internal_type` | risk | The binary exports RTTI (`_ZTI`/`_ZTV`/`_ZTS`) for a polymorphic type declared only in a private header, leaking its run-time type info onto the ABI surface — hide the type or stop exporting its typeinfo (single-release hygiene, ADR-035 D8) |
 
 Each finding records which evidence sources (`binary_exports`,
 `public_header_ast`, `build_config`, `source_index`) corroborate it, driving its

@@ -21,14 +21,22 @@ of "bad ABI hygiene" findings that only become visible when the binary export
 table, the public-header AST, the build flags, and the include/provenance graph
 are checked for *mutual consistency*:
 
-==============================  =====================================  ==========
-Check                           Inputs                                  Tier
-==============================  =====================================  ==========
-``exported_not_public``         binary exports ↔ L2 header decls         RISK
-``public_not_exported``         L2 header decls ↔ binary exports         RISK
-``header_build_context_mismatch`` L2 header context ↔ L3 build flags     API_BREAK
-``private_header_leak``         public API ↔ private-header provenance   RISK
-==============================  =====================================  ==========
+================================  =====================================  ==========
+Check                             Inputs                                  Tier
+================================  =====================================  ==========
+``exported_not_public``           binary exports ↔ L2 header decls         RISK
+``public_not_exported``           L2 header decls ↔ binary exports         RISK
+``header_build_context_mismatch`` L2 header context ↔ L3 build flags       API_BREAK
+``private_header_leak``           public API ↔ private-header provenance   RISK
+``odr_type_variant``              L4 per-TU layouts of one type            API_BREAK
+``public_to_internal_dependency`` L5 reachability ↔ changed files          RISK
+``unversioned_exported_symbol``   binary exports ↔ ELF version table       RISK
+``rtti_for_internal_type``        typeinfo exports ↔ header provenance     RISK
+================================  =====================================  ==========
+
+The last two are the ADR-035 D8 single-release hygiene audit: intra-version "bad
+ABI hygiene" surfaced from one build (no baseline), exposed through ``scan
+--audit`` / ``surface-report --audit``.
 
 Per ADR-035 D1/D4 the findings are **never** ``BREAKING`` on their own (an
 artifact diff still proves a shipped break); they default to ``RISK`` or
@@ -73,6 +81,10 @@ CHECK_EXPORTED_NOT_PUBLIC = "exported_not_public"
 CHECK_PUBLIC_NOT_EXPORTED = "public_not_exported"
 CHECK_HEADER_BUILD_CONTEXT_MISMATCH = "header_build_context_mismatch"
 CHECK_PRIVATE_HEADER_LEAK = "private_header_leak"
+CHECK_ODR_TYPE_VARIANT = "odr_type_variant"
+CHECK_PUBLIC_TO_INTERNAL_DEPENDENCY = "public_to_internal_dependency"
+CHECK_UNVERSIONED_EXPORTED_SYMBOL = "unversioned_exported_symbol"
+CHECK_RTTI_FOR_INTERNAL_TYPE = "rtti_for_internal_type"
 
 #: Every check the engine knows, in cheapest-first order (ADR-035 D4 table).
 ALL_CHECKS: tuple[str, ...] = (
@@ -80,6 +92,10 @@ ALL_CHECKS: tuple[str, ...] = (
     CHECK_PUBLIC_NOT_EXPORTED,
     CHECK_HEADER_BUILD_CONTEXT_MISMATCH,
     CHECK_PRIVATE_HEADER_LEAK,
+    CHECK_ODR_TYPE_VARIANT,
+    CHECK_PUBLIC_TO_INTERNAL_DEPENDENCY,
+    CHECK_UNVERSIONED_EXPORTED_SYMBOL,
+    CHECK_RTTI_FOR_INTERNAL_TYPE,
 )
 
 #: The §6.8 provider-agreement vocabulary (ADR-035 D4) — which evidence source
@@ -98,11 +114,15 @@ class CrosscheckConfig:
     ``enabled`` defaults to every check; the orchestrator (Phase 3 ``scan``)
     narrows it from the ``crosschecks:`` config block. ``max_per_check`` caps a
     single check's findings so a pathological library cannot flood the report;
-    0 disables the cap.
+    0 disables the cap. ``changed_paths`` is the optional PR/revision changed-file
+    set: ``public_to_internal_dependency`` elevates a finding whose internal
+    target was changed (ADR-035 D4 "L5 reachability ↔ PR changed files"). It only
+    refines the message/confidence — the base finding fires regardless.
     """
 
     enabled: frozenset[str] = frozenset(ALL_CHECKS)
     max_per_check: int = 200
+    changed_paths: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True)
@@ -163,6 +183,10 @@ def run_crosschecks(
         CHECK_PUBLIC_NOT_EXPORTED: _check_public_not_exported,
         CHECK_HEADER_BUILD_CONTEXT_MISMATCH: _check_header_build_context_mismatch,
         CHECK_PRIVATE_HEADER_LEAK: _check_private_header_leak,
+        CHECK_ODR_TYPE_VARIANT: _check_odr_type_variant,
+        CHECK_PUBLIC_TO_INTERNAL_DEPENDENCY: _check_public_to_internal_dependency,
+        CHECK_UNVERSIONED_EXPORTED_SYMBOL: _check_unversioned_exported_symbol,
+        CHECK_RTTI_FOR_INTERNAL_TYPE: _check_rtti_for_internal_type,
     }
     for name in ALL_CHECKS:
         if name not in cfg.enabled:
@@ -471,6 +495,549 @@ def _check_private_header_leak(
     detail = (
         f"public API ↔ private-header provenance: {len(findings)} public "
         f"declaration(s) exposing one of {n_private} private type(s)"
+    )
+    return _CheckOutput(findings, "present", detail, providers)
+
+
+# ---------------------------------------------------------------------------
+# odr_type_variant — one type has divergent per-TU layouts (L4 ODR conflict).
+# ---------------------------------------------------------------------------
+
+
+def _surface_has_l4_facts(surface: Any) -> bool:
+    """Whether a linked L4 source surface carries any real replay evidence.
+
+    An ``inline`` collector attaches an empty :class:`SourceAbiSurface` when L4
+    replay ran but parsed zero TUs (missing clang/castxml), so the presence of a
+    surface object is not proof of evidence — check for actual content.
+    """
+    if surface.odr_conflicts:
+        return True
+    if any(
+        (
+            surface.reachable_declarations,
+            surface.reachable_types,
+            surface.reachable_macros,
+            surface.reachable_templates,
+            surface.reachable_inline_bodies,
+        )
+    ):
+        return True
+    mappings = surface.mappings or {}
+    if any(
+        mappings.get(k)
+        for k in ("source_decl_to_binary_symbol", "source_type_to_debug_type")
+    ):
+        return True
+    # Only *parsed-TU* coverage counts. ``exported_symbols``/``matched_symbols``
+    # are recorded from the binary export table even when replay parsed zero TUs,
+    # so counting them would re-mask an all-failed/zero-TU L4 run as a clean ODR
+    # audit (Codex review). Require a real parsed-compile-unit count.
+    coverage = surface.coverage or {}
+    return any(
+        coverage.get(k) for k in ("parsed_tus", "compile_units_parsed", "parsed")
+    )
+
+
+def _check_odr_type_variant(
+    snapshot: AbiSnapshot, cfg: CrosscheckConfig
+) -> _CheckOutput:
+    """A type with divergent per-TU definitions in the L4 source surface, API_BREAK.
+
+    The L4 linker (``source_link.link_source_abi``) already records, per merged
+    library surface, every ``(qualified_name, header)`` whose ``type_hash``
+    diverged between the translation units that defined it — an ODR conflict.
+    This check turns each recorded conflict into a finding: mixing those
+    definitions at link time is undefined behavior (a consumer compiled against
+    one layout reads a struct laid out the other way), and it is almost always a
+    macro/flag that changes the type per TU.
+
+    Needs the L4 source-ABI surface; skips cleanly (never false-positives) on a
+    snapshot that carries no source-replay evidence.
+    """
+    providers = [PROVIDER_SOURCE_INDEX]
+    surface = (
+        snapshot.build_source.source_abi if snapshot.build_source is not None else None
+    )
+    if surface is None:
+        return _CheckOutput(
+            [],
+            "skipped",
+            "no L4 source-ABI surface on the snapshot (run --source-method s5)",
+            providers,
+        )
+    # An empty surface is attached when L4 replay ran but parsed zero TUs (e.g.
+    # clang/castxml unavailable). Reading that as a clean ODR audit would mask the
+    # missing evidence, so skip with an honest reason instead of "present"
+    # (ADR-035 D4 coverage honesty — Codex review).
+    if not _surface_has_l4_facts(surface):
+        return _CheckOutput(
+            [],
+            "skipped",
+            "L4 source surface present but empty (no TUs parsed — clang/castxml "
+            "unavailable?); ODR audit not run",
+            providers,
+        )
+
+    findings: list[Change] = []
+    for conflict in surface.odr_conflicts:
+        name = str(conflict.get("qualified_name", "")) or "<anonymous>"
+        header = str(conflict.get("header", ""))
+        where = f" in {header!r}" if header else ""
+        findings.append(
+            _change(
+                ChangeKind.ODR_TYPE_VARIANT,
+                name,
+                f"Type {name!r} has divergent per-translation-unit definitions"
+                f"{where}: the source-replay surface recorded different layouts for "
+                "the same type. Linking code that mixes them is undefined behavior — "
+                "a consumer compiled against one layout silently reads the other. "
+                "Reconcile the definitions (usually a macro/flag that changes the "
+                "type per TU).",
+                new_value=name,
+                confidence=Confidence.MEDIUM,
+                caused_by_type=name,
+                source_location=header or None,
+            )
+        )
+    findings.sort(key=lambda c: (c.symbol, c.source_location or ""))
+    detail = (
+        f"L4 per-TU type layouts: {len(findings)} type(s) with divergent "
+        "cross-TU definitions (ODR conflict)"
+    )
+    return _CheckOutput(findings, "present", detail, providers)
+
+
+# ---------------------------------------------------------------------------
+# public_to_internal_dependency — public API reaches an internal entity (L5).
+# ---------------------------------------------------------------------------
+
+#: L5 edge kinds that express a decl→decl/type dependency. They are produced
+#: only by an S4/S5 semantic pass (``call_graph``/AST augmentation), so a
+#: structural-only graph carries none of them — the check then skips with a soft
+#: advisory rather than reading clean (ADR-035 D4 coverage honesty).
+_DEPENDENCY_EDGE_KINDS = frozenset(
+    {"DECL_CALLS_DECL", "DECL_REFERENCES_DECL", "DECL_HAS_TYPE"}
+)
+
+#: Graph node kinds that carry a declaration/type visibility we can classify.
+_DECL_NODE_KINDS = frozenset({"source_decl", "record_type", "enum_type", "typedef"})
+
+#: Node visibilities that put an entity *on* the public source surface. Mirrors
+#: ``source_link._is_public`` (which the L5 graph's ``visibility`` attr is derived
+#: from): ``generated`` means a generated header **under the public roots** — a
+#: public, consumer-visible entity — so it is NOT an internal dependency (Codex
+#: review).
+_PUBLIC_VISIBILITIES = frozenset({"public_header", "generated"})
+
+#: Node visibilities that make an entity *internal* (not public surface): a
+#: project-private header or an implementation ("source") file. System headers
+#: are third-party (excluded), and ``generated`` is public (above).
+_INTERNAL_VISIBILITIES = frozenset({"private_header", "source"})
+
+#: Visibilities that carry no provenance. The built-in call-graph extractor
+#: (``augment_graph_with_calls``) creates callee ``source_decl`` nodes with **no**
+#: ``visibility`` attr. Such a node is internal *only when the project also
+#: declares it* via a ``SOURCE_DECLARES`` edge — caller-presence alone is unsound
+#: (an inline third-party header function whose body calls something also appears
+#: as a caller), so a bare call-graph node with no project provenance is treated
+#: as a third-party/system call target and not flagged (Codex review).
+_UNANNOTATED_VISIBILITIES = frozenset({"", "unknown"})
+
+#: Mangled-name prefixes / substrings that mark a standard-library or
+#: compiler-internal decl. The call graph resolves callees into ``std::`` /
+#: ``__gnu_cxx`` / cxxabi helpers, which carry no visibility too; without this an
+#: unannotated stdlib callee would be mis-read as a project-internal dependency
+#: and a public API calling ``std::`` would light up (Codex review). Mirrors the
+#: stdlib/compiler filtering the dumper already applies to exported symbols.
+_SYSTEM_NAME_PREFIXES = (
+    "_ZSt",
+    "_ZNSt",
+    "_ZNKSt",
+    "_ZNSa",
+    "_ZN9__gnu_cxx",
+    "_ZNK9__gnu_cxx",
+    "_ZN6__cxxabiv",
+    "_Znw",
+    "_Zna",
+    "_Zdl",
+    "_Zda",
+    "__",
+)
+_SYSTEM_NAME_SUBSTRINGS = ("std::", "__gnu_cxx::", "__cxxabiv")
+
+
+def _looks_system(name: str) -> bool:
+    """Whether *name* is a standard-library / compiler-internal decl spelling."""
+    if name.startswith(_SYSTEM_NAME_PREFIXES):
+        return True
+    return any(sub in name for sub in _SYSTEM_NAME_SUBSTRINGS)
+
+
+def _norm_path(path: str) -> str:
+    """Normalize a path for cross-source comparison: forward slashes, no ``./``."""
+    p = path.replace("\\", "/")
+    while p.startswith("./"):
+        p = p[2:]
+    return p
+
+
+def _path_matches(candidate: str, changed: frozenset[str]) -> bool:
+    """Whether *candidate* refers to one of the *changed* paths.
+
+    Graph node labels are often absolute build/clang paths (``/work/src/foo.cc``)
+    while ``scan`` passes ``git diff --name-only`` repo-relative paths
+    (``src/foo.cc``); match when either is a path-component suffix of the other,
+    so the two spellings line up without a basename-only false hit (mirrors
+    ``source_replay._path_matches`` — kept local to avoid importing that heavy,
+    castxml-dependent module into this pure engine; Codex review).
+    """
+    if not candidate:
+        return False
+    c = _norm_path(candidate)
+    for ch in changed:
+        n = _norm_path(ch)
+        if c == n or c.endswith("/" + n) or n.endswith("/" + c):
+            return True
+    return False
+
+
+def _check_public_to_internal_dependency(
+    snapshot: AbiSnapshot, cfg: CrosscheckConfig
+) -> _CheckOutput:
+    """A public/exported decl that reaches an internal entity via the L5 graph, RISK.
+
+    Reads the source graph's decl-dependency edges (``DECL_CALLS_DECL`` /
+    ``DECL_REFERENCES_DECL`` / ``DECL_HAS_TYPE``): when a *public* declaration
+    (public-header visibility, or one mapped to an exported binary symbol) points
+    at an *internal* declaration/type (private-header or source-file visibility;
+    ``generated`` is a public generated header and excluded), the public surface
+    depends on something consumers cannot see —
+    a behavioral risk, elevated when the internal entity is among the revision's
+    changed files (``cfg.changed_paths``).
+
+    The dependency edges only exist after an S4/S5 semantic pass. With a
+    structural-only graph (or no graph at all) the check skips with a soft
+    advisory naming what to enable — it is never counted clean.
+    """
+    providers = [PROVIDER_SOURCE_INDEX]
+    graph = (
+        snapshot.build_source.source_graph
+        if snapshot.build_source is not None
+        else None
+    )
+    if graph is None:
+        return _CheckOutput(
+            [],
+            "skipped",
+            "no L5 source graph on the snapshot (run --source-method s5/--depth graph)",
+            providers,
+        )
+    if not any(e.kind in _DEPENDENCY_EDGE_KINDS for e in graph.edges):
+        return _CheckOutput(
+            [],
+            "skipped",
+            "L5 source graph has no decl-dependency edges — run a semantic source "
+            "mode with clang++ available (`--source-method s5` / `--mode pr-deep`) "
+            "or fold a call graph (`collect --call-graph`, Kythe/CodeQL); the "
+            "structural-only `--depth graph` (s4) mode emits no call edges",
+            providers,
+        )
+
+    node_by_id = {n.id: n for n in graph.nodes}
+    # A decl is definitively public when it maps to an exported binary symbol.
+    exported_decls = {
+        e.src for e in graph.edges if e.kind == "SOURCE_DECL_MAPS_TO_SYMBOL"
+    }
+    # Reverse the SOURCE_DECLARES edge (header → decl/type) to learn each
+    # entity's declaring file, so changed-path elevation can fire.
+    decl_to_file: dict[str, str] = {}
+    for e in graph.edges:
+        if e.kind != "SOURCE_DECLARES":
+            continue
+        header = node_by_id.get(e.src)
+        if header is not None and header.label:
+            decl_to_file.setdefault(e.dst, header.label)
+
+    def _visibility(node_id: str) -> str:
+        node = node_by_id.get(node_id)
+        if node is None or node.kind not in _DECL_NODE_KINDS:
+            return ""
+        return str(node.attrs.get("visibility", ""))
+
+    def _is_public(node_id: str) -> bool:
+        if node_id in exported_decls:
+            return True
+        return _visibility(node_id) in _PUBLIC_VISIBILITIES
+
+    def _is_internal(node_id: str) -> bool:
+        node = node_by_id.get(node_id)
+        if node is None or node.kind not in _DECL_NODE_KINDS:
+            return False
+        if node_id in exported_decls:
+            return False
+        vis = str(node.attrs.get("visibility", ""))
+        if vis in _INTERNAL_VISIBILITIES:
+            return True
+        # An unannotated (call-graph-only) decl is internal only with explicit
+        # *project provenance*: either a SOURCE_DECLARES edge from one of the
+        # project's own files (``decl_to_file``), or the call-graph extractor's
+        # ``defined_in_project`` marker (the decl's body lives in a project
+        # compile-unit source — sound source-location provenance, not mere
+        # caller-presence). This catches a public→impl-helper dependency the
+        # built-in call graph produced without L4 SOURCE_DECLARES evidence, while
+        # a third-party header-inline or extern/system call target (no project
+        # source-file body) still has neither marker and is not flagged (Codex
+        # review).
+        if vis in _UNANNOTATED_VISIBILITIES:
+            has_provenance = node_id in decl_to_file or bool(
+                node.attrs.get("defined_in_project")
+            )
+            if not has_provenance:
+                return False
+            return not _looks_system(node.label or "")
+        return False
+
+    def _label(node_id: str) -> str:
+        node = node_by_id.get(node_id)
+        return node.label if node and node.label else node_id
+
+    findings: list[Change] = []
+    seen: set[tuple[str, str]] = set()
+    for e in graph.edges:
+        if e.kind not in _DEPENDENCY_EDGE_KINDS:
+            continue
+        if not _is_public(e.src) or not _is_internal(e.dst):
+            continue
+        pub, internal = _label(e.src), _label(e.dst)
+        key = (pub, internal)
+        if key in seen:
+            continue
+        seen.add(key)
+        # Declaring file from SOURCE_DECLARES (L4), else the call-graph node's
+        # source-location ``def_file`` — so changed-file elevation also works for
+        # a call-graph-only internal helper (Codex review).
+        changed_file = decl_to_file.get(e.dst, "")
+        if not changed_file:
+            dst_node = node_by_id.get(e.dst)
+            if dst_node is not None:
+                changed_file = str(dst_node.attrs.get("def_file", ""))
+        is_changed = _path_matches(changed_file, cfg.changed_paths)
+        note = (
+            f" — {internal!r} is declared in changed file {changed_file!r}, so the "
+            "API's behavior may have shifted this revision"
+            if is_changed
+            else ""
+        )
+        findings.append(
+            _change(
+                ChangeKind.PUBLIC_TO_INTERNAL_DEPENDENCY,
+                pub,
+                f"Public API {pub!r} depends on internal entity {internal!r} "
+                "(declared in a private header / source file, not the public "
+                f"surface){note}. Consumers cannot see it, so a change to it is an "
+                "undeclared behavioral risk. Make the dependency public or sever it.",
+                new_value=internal,
+                confidence=Confidence.HIGH if is_changed else Confidence.MEDIUM,
+                # Only stamp source_location when the internal entity was actually
+                # changed this revision — otherwise the finding is about the public
+                # API (``symbol``), and pointing the location at the unchanged
+                # private file would mislead SARIF/suppression matching (review).
+                source_location=changed_file if is_changed else None,
+            )
+        )
+    findings.sort(key=lambda c: (c.symbol, c.new_value or ""))
+    detail = (
+        f"L5 reachability: {len(findings)} public declaration(s) depending on an "
+        "internal entity"
+    )
+    if cfg.changed_paths:
+        detail += f" ({len(cfg.changed_paths)} changed path(s) considered)"
+    return _CheckOutput(findings, "present", detail, providers)
+
+
+# ---------------------------------------------------------------------------
+# unversioned_exported_symbol — export with no version though a scheme exists.
+# ---------------------------------------------------------------------------
+
+
+def _check_unversioned_exported_symbol(
+    snapshot: AbiSnapshot, cfg: CrosscheckConfig
+) -> _CheckOutput:
+    """Exported symbols with no version node though the library is versioned, RISK.
+
+    When the ELF carries a symbol-versioning scheme (``.gnu.version_d`` defines at
+    least one real version node — ``snapshot.elf.versions_defined``, which already
+    excludes the ``VER_FLG_BASE`` soname entry), an exported symbol that carries no
+    version is a hygiene smell: it cannot be evolved compatibly later, since
+    consumers bind the bare name with no version guarantee. ELF-only — PE/Mach-O
+    have no GNU symbol versioning — so it skips cleanly on every other format and
+    on an unversioned ELF.
+    """
+    providers = [PROVIDER_BINARY_EXPORTS]
+    elf = snapshot.elf
+    if elf is None:
+        return _CheckOutput(
+            [],
+            "skipped",
+            "symbol versioning is ELF-only; no ELF symbol table",
+            providers,
+        )
+    if not elf.versions_defined:
+        return _CheckOutput(
+            [], "present", "library defines no symbol-versioning scheme", providers
+        )
+
+    from ..elf_symbol_filter import is_abi_relevant_elf_symbol
+
+    findings: list[Change] = []
+    for sym in elf.symbols:
+        if not sym.name or not sym.is_default or sym.version:
+            continue
+        if sym.visibility not in ("default", "protected"):
+            continue
+        # Reuse the shared ELF ABI-relevance filter so linker/runtime artifacts
+        # (`_edata`/`_end`/`_init`, GCC internals, weak transitive stdlib, private
+        # `__` C symbols) don't produce noisy hygiene failures (Codex review), and
+        # skip C++ structor artifacts the same way the public-export check does.
+        if not is_abi_relevant_elf_symbol(sym.name):
+            continue
+        if _is_cxx_implementation_symbol(sym.name):
+            continue
+        findings.append(
+            _change(
+                ChangeKind.UNVERSIONED_EXPORTED_SYMBOL,
+                sym.name,
+                f"Symbol {sym.name!r} is exported with no version node even though the "
+                f"library defines a versioning scheme ({len(elf.versions_defined)} "
+                "version(s)). Add it to the version script so it can be evolved "
+                "compatibly — or hide it if it is not public API.",
+                new_value=sym.name,
+                confidence=Confidence.MEDIUM,
+            )
+        )
+    findings.sort(key=lambda c: c.symbol)
+    detail = (
+        f"binary exports ↔ version table: {len(findings)} exported symbol(s) with no "
+        f"version under a {len(elf.versions_defined)}-node scheme"
+    )
+    return _CheckOutput(findings, "present", detail, providers)
+
+
+# ---------------------------------------------------------------------------
+# rtti_for_internal_type — typeinfo/vtable exported for a private-header type.
+# ---------------------------------------------------------------------------
+
+#: Itanium RTTI symbol prefixes: typeinfo (``_ZTI``), vtable (``_ZTV``), VTT
+#: (``_ZTT``), typeinfo-name (``_ZTS``). Each is followed by the encoded type.
+_RTTI_PREFIXES = ("_ZTI", "_ZTV", "_ZTT", "_ZTS")
+
+
+def _typeinfo_type_tokens(symbol: str) -> tuple[str, ...]:
+    """Matchable type tokens an Itanium RTTI symbol names, most-specific first.
+
+    Pure (no demangler subprocess): strips the RTTI prefix and an optional nested
+    ``N…E`` wrapper, then parses the length-prefixed ``<len><name>`` segments.
+    Returns the **fully-qualified** spelling first, then the bare leaf, so a
+    private ``detail::Internal`` is matched on its qualified name even when a
+    public ``api::Internal`` shares the leaf token (``_private_type_names``
+    suppresses the bare alias in that collision — Codex review):
+    ``_ZTI6Widget`` → ``("Widget",)``; ``_ZTIN6detail8InternalE`` →
+    ``("detail::Internal", "Internal")``. Empty for forms it cannot parse.
+    """
+    rest = ""
+    for p in _RTTI_PREFIXES:
+        if symbol.startswith(p):
+            rest = symbol[len(p) :]
+            break
+    else:
+        return ()
+    if rest.startswith("N"):
+        rest = rest[1:]
+    segments: list[str] = []
+    i = 0
+    while i < len(rest) and rest[i].isdigit():
+        j = i
+        while j < len(rest) and rest[j].isdigit():
+            j += 1
+        n = int(rest[i:j])
+        if j + n > len(rest):
+            break
+        segments.append(rest[j : j + n])
+        i = j + n
+    if not segments:
+        return ()
+    qualified = "::".join(segments)
+    leaf = segments[-1]
+    return (qualified,) if qualified == leaf else (qualified, leaf)
+
+
+def _check_rtti_for_internal_type(
+    snapshot: AbiSnapshot, cfg: CrosscheckConfig
+) -> _CheckOutput:
+    """Exported RTTI (typeinfo/vtable) for a private-header type, RISK.
+
+    A polymorphic type declared only in a private / non-installed header should
+    not leak its run-time type information onto the ABI surface: consumers cannot
+    name the type, yet its ``_ZTI``/``_ZTV`` is exported, bloating the export set
+    and risking cross-module RTTI/``dynamic_cast`` coupling to an internal class.
+    Reuses :func:`_private_type_names` (private/non-public-generated origin,
+    public-collision-safe) so it only fires for a genuinely internal type, and
+    needs provenance + an export table — skips cleanly otherwise.
+    """
+    providers = [PROVIDER_BINARY_EXPORTS, PROVIDER_PUBLIC_HEADER_AST]
+    if not _origin_resolvable(snapshot):
+        return _CheckOutput([], "skipped", _NO_PROVENANCE, providers)
+    exported = _exported_symbol_names(snapshot)
+    if exported is None:
+        return _CheckOutput(
+            [], "skipped", "no binary export table on the snapshot", providers
+        )
+    private_types = _private_type_names(snapshot)
+    if not private_types:
+        return _CheckOutput(
+            [], "present", "no private-header types declared in the snapshot", providers
+        )
+
+    findings: list[Change] = []
+    seen: set[tuple[str, str]] = set()
+    for sym in sorted(exported):
+        if not sym.startswith(_RTTI_PREFIXES):
+            continue
+        # Try the fully-qualified spelling first, then the bare leaf, so a private
+        # ``detail::Internal`` matches even when a public ``api::Internal`` shares
+        # the leaf (Codex review).
+        canonical = next(
+            (
+                c
+                for tok in _typeinfo_type_tokens(sym)
+                if (c := private_types.get(tok)) is not None
+            ),
+            None,
+        )
+        if canonical is None:
+            continue
+        key = (sym, canonical)
+        if key in seen:
+            continue
+        seen.add(key)
+        findings.append(
+            _change(
+                ChangeKind.RTTI_FOR_INTERNAL_TYPE,
+                sym,
+                f"Symbol {sym!r} exports run-time type information for type "
+                f"{canonical!r}, which is declared only in a private (non-installed) "
+                "header. Its typeinfo leaks onto the ABI surface though consumers "
+                "cannot name the type — hide the type or stop exporting its RTTI.",
+                new_value=canonical,
+                confidence=Confidence.MEDIUM,
+                caused_by_type=canonical,
+            )
+        )
+    n_private = len(set(private_types.values()))
+    detail = (
+        f"typeinfo exports ↔ private-header provenance: {len(findings)} RTTI symbol(s) "
+        f"for one of {n_private} private type(s)"
     )
     return _CheckOutput(findings, "present", detail, providers)
 
@@ -822,24 +1389,51 @@ def _private_type_names(snapshot: AbiSnapshot) -> dict[str, str]:
     ]
 
     public_tokens: set[str] = set()
+
+    def _add_public(name: str) -> None:
+        if not name:
+            return
+        public_tokens.add(name)
+        if "::" in name:
+            public_tokens.add(name.rsplit("::", 1)[1])
+        # Template instantiations: also reserve the base spelling (``ns::Box`` and
+        # ``Box`` for ``ns::Box<int>``) so a private ``detail::Box<…>`` cannot
+        # register a bare alias that collides with a public template's base
+        # (Codex review — template RTTI matching).
+        if "<" in name:
+            _add_public(name.split("<", 1)[0])
+
     for name, origin in type_decls:
-        if origin in _PUBLIC_TYPE_ORIGINS and name:
-            public_tokens.add(name)
-            if "::" in name:
-                public_tokens.add(name.rsplit("::", 1)[1])
+        if origin in _PUBLIC_TYPE_ORIGINS:
+            _add_public(name)
 
     names: dict[str, str] = {}
 
     def _register(name: str) -> None:
+        # A type that *also* has a public-header declaration (PIMPL forward-decl)
+        # is on the public surface — register nothing (Codex review).
         if name in public_tokens:
             return
-        names[name] = name
+        canonical = name
+
+        def _alias(token: str) -> None:
+            if token and token not in public_tokens:
+                names.setdefault(token, canonical)
+
+        names[name] = canonical
         if "::" in name:
-            segment = name.rsplit("::", 1)[1]
-            # Skip a trailing-segment alias that collides with a public type's
-            # name/segment — the public type owns that bare spelling.
-            if segment not in public_tokens:
-                names.setdefault(segment, name)
+            _alias(name.rsplit("::", 1)[1])
+        # Template instantiation (``detail::Box<int>``): also match its base
+        # spelling, because an Itanium RTTI symbol (``_ZTIN6detail3BoxIiEE``) and
+        # a signature token reduce to ``detail::Box``/``Box`` without the template
+        # arguments — so the base must resolve back to the instantiation to catch
+        # exported RTTI / leaked references to internal template types (Codex
+        # review). Public-collision-guarded via ``public_tokens`` above.
+        if "<" in name:
+            base = name.split("<", 1)[0]
+            _alias(base)
+            if "::" in base:
+                _alias(base.rsplit("::", 1)[1])
 
     for name, origin in type_decls:
         if origin in _PRIVATE_TYPE_ORIGINS and name:
