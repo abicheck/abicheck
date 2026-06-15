@@ -37,7 +37,6 @@ from .cli import (
     _build_match_map,
     _collect_metadata,
     _collect_release_inputs,
-    _load_suppression_and_policy,
     _normalize_binary_input,
     _resolve_input,
     _safe_write_output,
@@ -46,7 +45,7 @@ from .cli import (
     _write_release_step_summary,
     main,
 )
-from .cli_params import POLICY_FILE_PARAM
+from .cli_params import POLICY_FILE_PARAM, _load_suppression_and_policy
 from .model import AbiSnapshot
 from .reporter import to_json
 

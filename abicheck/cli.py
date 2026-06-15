@@ -37,7 +37,7 @@ from .cli_options import (
     build_source_compare_options,
     build_source_dump_options,
 )
-from .cli_params import POLICY_FILE_PARAM
+from .cli_params import POLICY_FILE_PARAM, _load_suppression_and_policy
 from .compat.abicc_dump_import import import_abicc_perl_dump, looks_like_perl_dump
 from .compat.cli import compat_group
 from .dumper import dump
@@ -47,9 +47,7 @@ from .serialization import load_snapshot, snapshot_to_json
 if TYPE_CHECKING:
     from .checker_types import Change, DiffResult
     from .debug_resolver import DebugArtifact
-    from .policy_file import PolicyFile
     from .severity import SeverityConfig
-    from .suppression import SuppressionList
 
 from . import __version__ as _abicheck_version
 from .model import AbiSnapshot
@@ -987,69 +985,6 @@ def _warn_ignored_flags(
             f"Warning: {', '.join(ignored_flags)} ignored when both inputs are snapshots.",
             err=True,
         )
-
-
-def _load_suppression_and_policy(
-    suppress: Path | None, policy: str, policy_file_path: Path | None,
-    *,
-    strict_suppressions: bool = False,
-    require_justification: bool = False,
-) -> tuple[SuppressionList | None, PolicyFile | None]:
-    """Load suppression list and policy file from CLI arguments."""
-    from .policy_file import PolicyFile
-    from .suppression import SuppressionList
-
-    suppression: SuppressionList | None = None
-    if suppress is not None:
-        try:
-            suppression = SuppressionList.load(
-                suppress, require_justification=require_justification,
-            )
-        except OSError as e:
-            raise click.BadParameter(str(e), param_hint="--suppress") from e
-        except ValueError as e:
-            msg = str(e)
-            if "no 'reason' field" in msg:
-                raise click.ClickException(msg) from e
-            raise click.BadParameter(msg, param_hint="--suppress") from e
-        if strict_suppressions:
-            expired = suppression.check_expired_strict()
-            if expired:
-                parts = [
-                    f"ERROR: {len(expired)} expired suppression rule(s) "
-                    f"found in {suppress}:"
-                ]
-                for idx, rule in expired:
-                    target = (
-                        rule.symbol_pattern and f'symbol_pattern="{rule.symbol_pattern}"'
-                        or rule.symbol and f'symbol="{rule.symbol}"'
-                        or rule.type_pattern and f'type_pattern="{rule.type_pattern}"'
-                        or rule.source_location and f'source_location="{rule.source_location}"'
-                        or "?"
-                    )
-                    parts.append(
-                        f"  Rule {idx + 1}: {target} expired on {rule.expires}"
-                    )
-                parts.append(
-                    "Remove or renew expired rules before proceeding."
-                )
-                raise click.ClickException("\n".join(parts))
-
-    pf: PolicyFile | None = None
-    if policy_file_path is not None:
-        try:
-            pf = PolicyFile.load(policy_file_path)
-        except ImportError as e:
-            raise click.ClickException(str(e)) from e
-        except (ValueError, OSError) as e:
-            raise click.BadParameter(str(e), param_hint="--policy-file") from e
-        if policy != "strict_abi":
-            click.echo(
-                f"Warning: --policy={policy!r} is ignored when --policy-file is given. "
-                "Set base_policy in the YAML file to override the base policy.",
-                err=True,
-            )
-    return suppression, pf
 
 
 def _collect_force_public_symbols(

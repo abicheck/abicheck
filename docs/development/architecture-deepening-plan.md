@@ -545,7 +545,7 @@ C4  detector auto-discovery        ✅ done (PR #395)
 C9  relocate confidence            ✅ done (PR #395)
 C1  name classification            ✅ done (PR #395)
 C2  report view-model              ✅ inc 1–2 done (model+ADR-036; maps unified; integrity tests)
-C7  CLI → service                  ◐ exit-code unified + integrity tests (body-extraction follow-up)
+C7  CLI → service                  ◐ exit-code unified + shared loader moved to cli_params leaf (body-extraction follow-up)
 C3  binary-format registry         (parallelisable; needs integration lane)
 C10 split model.py                 ◐ stage-2 done (name predicates + type-name canonicalization moved)
 C8  ABICC compat adapter           (parity-sensitive)
@@ -569,7 +569,7 @@ parity is contractual and benefits from a stabilised shared layer underneath it.
 | C4 | Detector auto-discovery | Done | #395 |
 | C5 | Synthetic detectors → registry | Deferred (not a clean win) | — |
 | C6 | `Change` factory | Increment 1 done (factory + `description_template` registry field; all ~200 `diff_*` constructor sites route via `make_change`; 167 regular kinds templated; bespoke long tail remains) | — |
-| C7 | CLI → service (exit-code unify + cross-flow integrity tests done; command-body extraction follow-up) | Partial | #395 |
+| C7 | CLI → service (exit-code unify + cross-flow integrity tests done; shared `_load_suppression_and_policy` relocated to `cli_params` leaf, importers repointed, `cli.py` 1993→1928; command-body extraction follow-up) | Partial | #395 / #407 |
 | C8 | ABICC compat adapter | Proposed | — |
 | C9 | Relocate confidence computation | Done | #395 |
 | C10 | Split `model.py` (stage-1: name predicates; stage-2: type-name canonicalization + cv-qualifier helpers moved to `name_classification`, re-exported) | Stage-2 done | #395 / #407 |
