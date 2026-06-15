@@ -27,6 +27,27 @@ with `compile_commands.json`.
 - **Verdict is depth-invariant** — identical at every level on both libs; the
   L0/L1 binary diff sets the gate, L3–L5 only localize.
 
+## oneDAL release binaries (symbols-only scale + FP check)
+
+Two real `libonedal_core.so` releases (pip `daal` wheels; **stripped**, so
+L0/L1 symbols-only — no DWARF/L2/L4, internal-leak/P2 not exercised). Raw:
+`data/uxl_onedal_release_2026-06.json`.
+
+| Pair | SONAME | Verdict | Time | Findings |
+|---|---|---|---:|---|
+| 2024.7.0 → 2025.0.0 (major) | `.so.2 → .so.3` | **BREAKING** | 63.6 s | 39,523 — 20,524 breaking (17.5k `func_removed_elf_only`, 3.0k `var_removed`, 2.0k `symbol_binding_strengthened`), 18,969 compatible additions, 30 risk |
+| 2025.0.0 → 2025.0.1 (minor) | `.so.3` (same) | **COMPATIBLE** | 50.0 s | **1** — a compatible `visibility_leak`; **zero false breaks** |
+
+- **Scales cleanly:** ~50–64 s on a **125–149 MB** library with **10–25k**
+  exported functions; linear, no blow-up (validates the `performance.md`
+  detector fixes on the headline oneDAL target).
+- **Correct verdicts:** the major `.so.2→.so.3` bump is BREAKING; the
+  same-SONAME minor bump is COMPATIBLE with **no false positives** — the
+  symbols-only "compare two releases" path remains abicheck's strongest mode.
+- Because releases ship stripped, the C++ `detail::`-namespace internal-leak
+  path (the P2 fix) is **not** reached here; exercising it on oneDAL needs a
+  debug/header build (ties to P1).
+
 ## Problems to address
 
 | # | Type | Sev | Status | Problem | Action |
