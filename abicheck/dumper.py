@@ -42,11 +42,7 @@ from defusedxml import ElementTree as DefusedET
 
 from .dumper_castxml import (
     _CastxmlParser as _CastxmlParser,
-)
-from .dumper_castxml import (
     _parse_vtable_index as _parse_vtable_index,
-)
-from .dumper_castxml import (
     _vt_sort_key as _vt_sort_key,
 )
 from .elf_symbol_filter import is_abi_relevant_elf_symbol

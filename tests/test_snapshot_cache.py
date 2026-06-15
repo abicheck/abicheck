@@ -234,3 +234,5 @@ class TestStoreErrorPaths:
         binary.write_bytes(b"ELF content")
         snap = _sample_snap()
         store(snap, binary, [], [], "1.0", "c++")  # should not raise
+        # mkdir failed, so nothing should have been written to the cache dir.
+        assert not cache_dir.exists()

@@ -196,8 +196,7 @@ def test_capture_header_includes_makes_header_absolute(monkeypatch) -> None:
 
 
 def test_run_skips_when_clang_absent(monkeypatch) -> None:
-    from abicheck.buildsource import build_evidence as be
-    from abicheck.buildsource import preprocessor_scan as ps
+    from abicheck.buildsource import build_evidence as be, preprocessor_scan as ps
 
     build = be.BuildEvidence(
         compile_units=[be.CompileUnit(id="cu://a", source="a.cpp", language="CXX")]
@@ -212,8 +211,7 @@ def test_run_skips_when_clang_absent(monkeypatch) -> None:
 def test_coverage_downgraded_when_all_clang_runs_fail(monkeypatch) -> None:
     # clang present but every invocation fails → nothing inspected; the coverage
     # row must NOT read as a clean PRESENT scan (Codex review).
-    from abicheck.buildsource import build_evidence as be
-    from abicheck.buildsource import preprocessor_scan as ps
+    from abicheck.buildsource import build_evidence as be, preprocessor_scan as ps
 
     build = be.BuildEvidence(
         compile_units=[
@@ -238,8 +236,7 @@ def test_coverage_downgraded_when_all_clang_runs_fail(monkeypatch) -> None:
 
 
 def test_coverage_partial_when_some_clang_runs_fail(monkeypatch) -> None:
-    from abicheck.buildsource import build_evidence as be
-    from abicheck.buildsource import preprocessor_scan as ps
+    from abicheck.buildsource import build_evidence as be, preprocessor_scan as ps
 
     build = be.BuildEvidence(
         compile_units=[
@@ -269,8 +266,7 @@ def test_run_passes_compile_unit_directory_as_cwd(monkeypatch) -> None:
     # Relative -I flags from a CMake/Ninja compile DB only resolve when the
     # depfile pass runs from the CU's directory — that dir must reach the live
     # header-include capture as cwd (Codex review).
-    from abicheck.buildsource import build_evidence as be
-    from abicheck.buildsource import preprocessor_scan as ps
+    from abicheck.buildsource import build_evidence as be, preprocessor_scan as ps
 
     build = be.BuildEvidence(
         compile_units=[

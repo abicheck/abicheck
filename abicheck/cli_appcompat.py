@@ -280,8 +280,12 @@ def appcompat_cmd(
     """
     _setup_verbosity(verbose)
 
-    from .appcompat import _get_lib_soname, check_appcompat, parse_app_requirements
-    from .appcompat import check_against as _check_against
+    from .appcompat import (
+        _get_lib_soname,
+        check_against as _check_against,
+        check_appcompat,
+        parse_app_requirements,
+    )
     from .appcompat_html import appcompat_to_html
     from .reporter import appcompat_to_json, appcompat_to_markdown
 

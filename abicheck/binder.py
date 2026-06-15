@@ -25,8 +25,7 @@ from collections import deque
 from dataclasses import dataclass
 from enum import Enum
 
-from .elf_metadata import ElfMetadata
-from .elf_metadata import SymbolBinding as ElfSymbolBinding
+from .elf_metadata import ElfMetadata, SymbolBinding as ElfSymbolBinding
 from .resolver import DependencyGraph
 
 log = logging.getLogger(__name__)

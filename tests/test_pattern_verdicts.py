@@ -507,8 +507,7 @@ def test_private_inheritance_does_not_suppress_new_public_factory_risk() -> None
     # PRIVATE_HEADER record (not a public risk). New adds the first public factory
     # returning Base*. The new *public* risk must be emitted — the private-
     # inheritance evidence must not pre-seed old_aps and suppress it.
-    from abicheck.model import RecordType as _RT
-    from abicheck.model import ScopeOrigin
+    from abicheck.model import RecordType as _RT, ScopeOrigin
 
     base = _RT(name="Base", kind="class", vtable=["_ZN4Base3fooEv"])
 

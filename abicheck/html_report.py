@@ -43,8 +43,6 @@ from .checker_policy import HasKind
 # imported it from here keeps working.
 from .html_template import (
     _CSS as _CSS,
-)
-from .html_template import (
     _VERDICT_STYLE,
     render_document,
     render_footer,

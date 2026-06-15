@@ -19,8 +19,11 @@ pytestmark = pytest.mark.slow
 pytest.importorskip("hypothesis")
 import json  # noqa: E402
 
-from hypothesis import given, settings  # noqa: E402
-from hypothesis import strategies as st  # noqa: E402
+from hypothesis import (  # noqa: E402
+    given,
+    settings,
+    strategies as st,  # noqa: E402
+)
 
 # ---------------------------------------------------------------------------
 # 1. AbiSnapshot JSON serialization round-trip
@@ -169,8 +172,8 @@ def test_suppression_pattern_fuzz(pattern: str) -> None:
             symbol="test_symbol",
             description="test",
         )
-        # Should not crash
-        s.matches(dummy_change)
+        # Should not crash, and must return a definite boolean verdict.
+        assert isinstance(s.matches(dummy_change), bool)
     except (ValueError, re.error):
         pass  # Expected for invalid regex patterns
 

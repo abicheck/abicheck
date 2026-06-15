@@ -1034,8 +1034,8 @@ from abicheck.elf_metadata import (
     ElfImport,
     ElfMetadata,
     ElfSymbol,
+    SymbolBinding as ElfSymbolBinding,
 )
-from abicheck.elf_metadata import SymbolBinding as ElfSymbolBinding
 from abicheck.resolver import DependencyGraph, ResolvedDSO
 
 

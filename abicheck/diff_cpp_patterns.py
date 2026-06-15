@@ -66,10 +66,8 @@ from .diff_serialization import (  # noqa: F401
 )
 from .diff_templates import (  # noqa: F401
     _looks_like_template_instantiation,
-    detect_missing_instantiations,
-)
-from .diff_templates import (
     _strip_template_args as _callable_stem,
+    detect_missing_instantiations,
 )
 
 if TYPE_CHECKING:

@@ -13,6 +13,7 @@
 # limitations under the License.
 
 "Platform-specific ABI diff detectors (ELF, PE, Mach-O, DWARF)."
+
 from __future__ import annotations
 
 import re
@@ -22,21 +23,42 @@ from .checker_policy import ChangeKind
 from .checker_types import SYMBOL_VERSION_ALIAS_NOT_RETAINED_MARKER, Change
 from .detector_registry import registry
 from .diff_helpers import make_change
+from .diff_platform_elf_dynamic import (
+    _INTERNAL_NAME_PATTERNS as _INTERNAL_NAME_PATTERNS,
+    _RELRO_RANK as _RELRO_RANK,
+    _diff_elf_dynamic_section as _diff_elf_dynamic_section,
+    _diff_leaked_dependency_symbols as _diff_leaked_dependency_symbols,
+    _diff_needed_libraries as _diff_needed_libraries,
+    _diff_security_hardening as _diff_security_hardening,
+    _diff_visibility_leak as _diff_visibility_leak,
+    _looks_internal as _looks_internal,
+)
+from .diff_platform_elf_symbols import (
+    _ELF_VIS_PROTECTED_PAIR,
+    _UNPARSEABLE_VERSION as _UNPARSEABLE_VERSION,
+    _check_binding_change as _check_binding_change,
+    _check_elf_visibility_change as _check_elf_visibility_change,
+    _check_func_visibility_protected as _check_func_visibility_protected,
+    _check_ifunc_type_change as _check_ifunc_type_change,
+    _check_symbol_size_change as _check_symbol_size_change,
+    _diff_elf_symbol_metadata as _diff_elf_symbol_metadata,
+    _diff_elf_symbol_pair as _diff_elf_symbol_pair,
+    _diff_elf_symbol_versioning as _diff_elf_symbol_versioning,
+    _is_const_unbounded_string_object as _is_const_unbounded_string_object,
+    _is_internal_data_symbol as _is_internal_data_symbol,
+    _is_unattached_private_version_node as _is_unattached_private_version_node,
+    _parse_abi_version_tag as _parse_abi_version_tag,
+    _resolve_size_change_kind as _resolve_size_change_kind,
+)
 from .diff_platform_templates import (
     _diff_template_inner_types as _diff_template_inner_types,
-)
-from .diff_platform_templates import (
     _extract_template_args as _extract_template_args,
-)
-from .diff_platform_templates import (
     _split_top_level_args as _split_top_level_args,
-)
-from .diff_platform_templates import (
     _template_outer as _template_outer,
 )
 from .diff_symbols import _public_functions, _should_filter_transitive_runtime_symbols
 from .diff_types import _RESERVED_FIELD_RE
-from .elf_metadata import SymbolBinding, SymbolType
+from .elf_metadata import SymbolType
 from .elf_symbol_filter import is_abi_relevant_elf_symbol
 from .model import (
     AbiSnapshot,
@@ -46,9 +68,6 @@ from .model import (
     stdlib_namespaces_excluded,
 )
 from .name_classification import RTTI_DATA_PREFIXES
-
-# Module-level constant: ELF visibility values that form the default<->protected pair (case51).
-_ELF_VIS_PROTECTED_PAIR: frozenset[str] = frozenset({"default", "protected"})
 
 
 def _pe_export_id(e: Any) -> str:
@@ -63,23 +82,6 @@ def _pe_export_id(e: Any) -> str:
 # Data symbol types subject to copy relocations (OBJECT/COMMON).
 _COPY_RELOC_TYPES = (SymbolType.OBJECT, SymbolType.COMMON)
 
-
-def _is_const_unbounded_string_object(snap: AbiSnapshot, sym_name: str) -> bool:
-    """Return True for header-visible const char string objects without a bound."""
-    if not snap.from_headers or snap.from_headers_inferred:
-        return False
-    var = snap.variable_map.get(sym_name)
-    if var is None:
-        var = next(
-            (candidate for candidate in snap.variables if candidate.name == sym_name),
-            None,
-        )
-    if var is None:
-        return False
-    if not var.is_const:
-        return False
-    typ = re.sub(r"\s+", " ", var.type.replace("const char", "char const")).strip()
-    return typ in {"char const[]", "char const []", "const char[]", "const char []"}
 
 @registry.detector("elf")
 def _diff_elf(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
@@ -138,20 +140,24 @@ def _diff_pe(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     for eid in sorted(old_ids - new_ids):
         if eid in old_fn_names:
             continue
-        changes.append(make_change(
-            removed_kind,
-            symbol=eid,
-            description=f"export removed from DLL: {eid}",
-        ))
+        changes.append(
+            make_change(
+                removed_kind,
+                symbol=eid,
+                description=f"export removed from DLL: {eid}",
+            )
+        )
 
     for eid in sorted(new_ids - old_ids):
         if eid in new_fn_names:
             continue
-        changes.append(make_change(
-            ChangeKind.FUNC_ADDED,
-            symbol=eid,
-            description=f"new export in DLL: {eid}",
-        ))
+        changes.append(
+            make_change(
+                ChangeKind.FUNC_ADDED,
+                symbol=eid,
+                description=f"new export in DLL: {eid}",
+            )
+        )
 
     # Ordinal / forwarder stability for exports retained across versions.
     # These are metadata-only signals (the export id — name when present, else
@@ -181,45 +187,56 @@ def _diff_pe(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         # Forwarder repoint: the export resolves to a different DLL!Symbol target.
         # Applies to both named and ordinal-only exports.
         if oe.forwarder != ne.forwarder and (oe.forwarder or ne.forwarder):
-            changes.append(make_change(
-                ChangeKind.PE_FORWARDER_CHANGED,
-                symbol=label,
-                name=label,
-                old=oe.forwarder or "(direct export)",
-                new=ne.forwarder or "(direct export)",
-            ))
+            changes.append(
+                make_change(
+                    ChangeKind.PE_FORWARDER_CHANGED,
+                    symbol=label,
+                    name=label,
+                    old=oe.forwarder or "(direct export)",
+                    new=ne.forwarder or "(direct export)",
+                )
+            )
 
     # Architecture drift — a DLL that changes machine type is a different binary
     # contract entirely (e.g. AMD64 → ARM64).
     if o.machine and n.machine and o.machine != n.machine:
-        changes.append(make_change(
-            ChangeKind.PE_MACHINE_CHANGED,
-            symbol="PE_HEADER",
-            old=o.machine,
-            new=n.machine,
-        ))
+        changes.append(
+            make_change(
+                ChangeKind.PE_MACHINE_CHANGED,
+                symbol="PE_HEADER",
+                old=o.machine,
+                new=n.machine,
+            )
+        )
 
     # Detect changed import dependencies
     old_deps = set(o.imports.keys())
     new_deps = set(n.imports.keys())
     for dep in sorted(old_deps - new_deps):
-        changes.append(make_change(
-            ChangeKind.NEEDED_REMOVED,
-            symbol=dep,
-            description=f"import dependency removed: {dep}",
-        ))
+        changes.append(
+            make_change(
+                ChangeKind.NEEDED_REMOVED,
+                symbol=dep,
+                description=f"import dependency removed: {dep}",
+            )
+        )
     for dep in sorted(new_deps - old_deps):
-        changes.append(make_change(
-            ChangeKind.NEEDED_ADDED,
-            symbol=dep,
-            description=f"new import dependency: {dep}",
-        ))
+        changes.append(
+            make_change(
+                ChangeKind.NEEDED_ADDED,
+                symbol=dep,
+                description=f"new import dependency: {dep}",
+            )
+        )
 
     return changes
 
 
 def _diff_macho_exports(
-    old: AbiSnapshot, new: AbiSnapshot, o: Any, n: Any,
+    old: AbiSnapshot,
+    new: AbiSnapshot,
+    o: Any,
+    n: Any,
 ) -> list[Change]:
     """Compute export-level delta between old and new Mach-O metadata."""
     changes: list[Change] = []
@@ -236,20 +253,24 @@ def _diff_macho_exports(
     for name in sorted(old_names - new_names):
         if name in old_fn_names:
             continue
-        changes.append(make_change(
-            removed_kind,
-            symbol=name,
-            description=f"export removed from dylib: {name}",
-        ))
+        changes.append(
+            make_change(
+                removed_kind,
+                symbol=name,
+                description=f"export removed from dylib: {name}",
+            )
+        )
 
     for name in sorted(new_names - old_names):
         if name in new_fn_names:
             continue
-        changes.append(make_change(
-            ChangeKind.FUNC_ADDED,
-            symbol=name,
-            description=f"new export in dylib: {name}",
-        ))
+        changes.append(
+            make_change(
+                ChangeKind.FUNC_ADDED,
+                symbol=name,
+                description=f"new export in dylib: {name}",
+            )
+        )
     return changes
 
 
@@ -276,13 +297,15 @@ def _diff_macho(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
 
     # Install name change (equivalent of SONAME change)
     if o.install_name != n.install_name and (o.install_name or n.install_name):
-        changes.append(make_change(
-            ChangeKind.SONAME_CHANGED,
-            symbol="LC_ID_DYLIB",
-            old_value=o.install_name,
-            new_value=n.install_name,
-            description=f"install name changed: {o.install_name} → {n.install_name}",
-        ))
+        changes.append(
+            make_change(
+                ChangeKind.SONAME_CHANGED,
+                symbol="LC_ID_DYLIB",
+                old_value=o.install_name,
+                new_value=n.install_name,
+                description=f"install name changed: {o.install_name} → {n.install_name}",
+            )
+        )
 
     # Architecture drift — only breaking when an architecture slice that used to
     # ship is GONE. Adding slices (single-arch → universal) keeps old clients
@@ -292,658 +315,80 @@ def _diff_macho(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     # *old* snapshot serialized before ``cpu_types`` existed records only its
     # selected slice, so dropping a non-selected slice of a then-universal
     # binary can go unseen. Re-dumping the old binary restores full detection.
-    old_arches = set(getattr(o, "cpu_types", None) or ()) or ({o.cpu_type} if o.cpu_type else set())
-    new_arches = set(getattr(n, "cpu_types", None) or ()) or ({n.cpu_type} if n.cpu_type else set())
+    old_arches = set(getattr(o, "cpu_types", None) or ()) or (
+        {o.cpu_type} if o.cpu_type else set()
+    )
+    new_arches = set(getattr(n, "cpu_types", None) or ()) or (
+        {n.cpu_type} if n.cpu_type else set()
+    )
     removed_arches = old_arches - new_arches
     if old_arches and new_arches and removed_arches:
-        changes.append(make_change(
-            ChangeKind.MACHO_CPU_TYPE_CHANGED,
-            symbol="MACHO_HEADER",
-            detail=", ".join(sorted(removed_arches)),
-            old=", ".join(sorted(old_arches)),
-            new=", ".join(sorted(new_arches)),
-        ))
+        changes.append(
+            make_change(
+                ChangeKind.MACHO_CPU_TYPE_CHANGED,
+                symbol="MACHO_HEADER",
+                detail=", ".join(sorted(removed_arches)),
+                old=", ".join(sorted(old_arches)),
+                new=", ".join(sorted(new_arches)),
+            )
+        )
 
     # Compatibility version change (LC_ID_DYLIB compat_version — binary contract)
     if o.compat_version != n.compat_version and (o.compat_version or n.compat_version):
-        changes.append(make_change(
-            ChangeKind.COMPAT_VERSION_CHANGED,
-            symbol="compat_version",
-            old=o.compat_version,
-            new=n.compat_version,
-        ))
+        changes.append(
+            make_change(
+                ChangeKind.COMPAT_VERSION_CHANGED,
+                symbol="compat_version",
+                old=o.compat_version,
+                new=n.compat_version,
+            )
+        )
 
     # Detect dependency changes
     old_deps = set(o.dependent_libs)
     new_deps = set(n.dependent_libs)
     for dep in sorted(old_deps - new_deps):
-        changes.append(make_change(
-            ChangeKind.NEEDED_REMOVED,
-            symbol=dep,
-            description=f"dependency removed: {dep}",
-        ))
+        changes.append(
+            make_change(
+                ChangeKind.NEEDED_REMOVED,
+                symbol=dep,
+                description=f"dependency removed: {dep}",
+            )
+        )
     for dep in sorted(new_deps - old_deps):
-        changes.append(make_change(
-            ChangeKind.NEEDED_ADDED,
-            symbol=dep,
-            description=f"new dependency: {dep}",
-        ))
+        changes.append(
+            make_change(
+                ChangeKind.NEEDED_ADDED,
+                symbol=dep,
+                description=f"new dependency: {dep}",
+            )
+        )
 
     # Detect re-exported dylib changes (LC_REEXPORT_DYLIB)
     old_reexports = set(o.reexported_libs)
     new_reexports = set(n.reexported_libs)
     for lib in sorted(old_reexports - new_reexports):
-        changes.append(make_change(
-            ChangeKind.NEEDED_REMOVED,
-            symbol=lib,
-            description=f"re-exported dylib removed: {lib}",
-        ))
-    for lib in sorted(new_reexports - old_reexports):
-        changes.append(make_change(
-            ChangeKind.NEEDED_ADDED,
-            symbol=lib,
-            description=f"new re-exported dylib: {lib}",
-        ))
-
-    return changes
-
-
-
-
-_INTERNAL_NAME_PATTERNS = (
-    "internal",
-    "helper",
-    "_impl",
-    "detail",
-    "private",
-    "__",
-    "_priv",
-    "_int_",
-    "_do_",
-    "_handle_",
-)
-
-
-def _looks_internal(name: str) -> bool:
-    """Heuristic: True if symbol name looks like internal implementation detail."""
-    lower = name.lower()
-    return any(pat in lower for pat in _INTERNAL_NAME_PATTERNS)
-
-
-def _is_internal_data_symbol(name: str) -> bool:
-    """True if an exported *data* symbol name looks reserved/internal.
-
-    A leading underscore on a file/global-scope identifier is reserved for the
-    implementation (C standard) and is the convention real libraries use for
-    private exported data (``_XkeyTable``, ``_pcre2_ucd_records_8``,
-    ``_UCD_accessors``, ``_rl_*``). Such symbols are not part of the intended
-    public ABI, but exported data still participates in the dynamic ABI, so the
-    kind remains breaking by default. Linker artifacts (``_init``/``_edata``/…)
-    are filtered earlier.
-
-    Mangled C++ (``_Z…`` / ``__Z…``) symbols are excluded: their leading
-    underscore is part of the Itanium mangling, not a reserved-identifier
-    marker — they denote real (public) C++ objects whose size change IS a break.
-    """
-    if name.startswith(("_Z", "__Z")):
-        return False
-    return name.startswith("_")
-
-
-def _diff_visibility_leak(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
-    """Detect old-library visibility leaks (ELF-only internal symbols exported)."""
-    del new  # detector is intentionally old-library-only
-    if not getattr(old, "elf_only_mode", False):
-        return []
-
-    filter_transitive_runtime_symbols = _should_filter_transitive_runtime_symbols(old)
-    leaked = [
-        f for f in old.functions
-        if (
-            f.visibility == Visibility.ELF_ONLY
-            and is_abi_relevant_elf_symbol(
-                f.name,
-                filter_transitive_runtime_symbols=filter_transitive_runtime_symbols,
+        changes.append(
+            make_change(
+                ChangeKind.NEEDED_REMOVED,
+                symbol=lib,
+                description=f"re-exported dylib removed: {lib}",
             )
-            and _looks_internal(f.name)
         )
-    ]
-    if not leaked:
-        return []
+    for lib in sorted(new_reexports - old_reexports):
+        changes.append(
+            make_change(
+                ChangeKind.NEEDED_ADDED,
+                symbol=lib,
+                description=f"new re-exported dylib: {lib}",
+            )
+        )
 
-    names = ", ".join(f.name for f in leaked[:5])
-    suffix = f" (+{len(leaked) - 5} more)" if len(leaked) > 5 else ""
-    return [make_change(
-        ChangeKind.VISIBILITY_LEAK,
-        symbol="<visibility>",
-        name=f"{names}{suffix}",
-        detail=str(len(leaked)),
-        old_value=str(len(leaked)),
-    )]
-
-
-def _diff_leaked_dependency_symbols(old_elf: Any, new_elf: Any) -> list[Change]:
-    """Detect symbols that were added or removed and appear to originate from a dependency.
-
-    When a symbol exported by this library was detected as likely originating from
-    a dependency (libstdc++, libgcc, libc, …), any *addition* or *removal* of that
-    symbol gets annotated as ``SYMBOL_LEAKED_FROM_DEPENDENCY_CHANGED``.
-
-    Symbols that exist in both old and new with the same origin are intentionally
-    **not** re-emitted here — ``_diff_elf_symbol_metadata`` already covers changes
-    to the symbol's type/binding/size and emits its own Change records.  Emitting a
-    second Change for the same symbol from both detectors would produce contradictory
-    messages (one BREAKING, one RISK) for the same event.
-
-    This is a real ABI fact — the library is leaking dependency symbols into its
-    public ABI surface — but the verdict is ``COMPATIBLE_WITH_RISK`` rather than
-    ``BREAKING``, because direct consumers of this library typically resolve those
-    symbols through the dependency directly and are not affected by the leak.
-
-    The risk is that on other systems with a different version of the dependency
-    the leaked symbols may differ, causing failures.
-
-    Consider applying ``-fvisibility=hidden`` to prevent this.
-    """
-    changes: list[Change] = []
-    old_syms = old_elf.symbol_map
-    new_syms = new_elf.symbol_map
-
-    # Symbols that were *removed* (present in old, absent in new)
-    for sym_name, s_old in old_syms.items():
-        if sym_name in new_syms:
-            # Symbol still exists — skip to avoid double-annotation with
-            # _diff_elf_symbol_metadata which handles changed symbols.
-            continue
-        origin = s_old.origin_lib
-        if origin is None:
-            continue
-        changes.append(make_change(
-            ChangeKind.SYMBOL_LEAKED_FROM_DEPENDENCY_CHANGED,
-            symbol=sym_name,
-            description=(
-                f"Symbol '{sym_name}' was removed but appears to originate from "
-                f"'{origin}' (a dependency of this library). This is a real ABI "
-                f"change — the library is leaking dependency symbols into its public "
-                f"ABI surface. Consider applying -fvisibility=hidden."
-            ),
-            old_value=origin,
-            new_value=None,
-        ))
-
-    # Symbols that were *added* (absent in old, present in new with origin_lib)
-    for sym_name, s_new in new_syms.items():
-        if sym_name in old_syms:
-            continue  # Already present in old — not a pure addition
-        if s_new.origin_lib is None:
-            continue
-        changes.append(make_change(
-            ChangeKind.SYMBOL_LEAKED_FROM_DEPENDENCY_CHANGED,
-            symbol=sym_name,
-            description=(
-                f"Symbol '{sym_name}' was added but appears to originate from "
-                f"'{s_new.origin_lib}' (a dependency of this library). This is a real "
-                f"ABI change — the library is leaking dependency symbols into its public "
-                f"ABI surface. Consider applying -fvisibility=hidden."
-            ),
-            old_value=None,
-            new_value=s_new.origin_lib,
-        ))
-
-    return changes
-
-
-def _diff_elf_dynamic_section(old_elf: Any, new_elf: Any) -> list[Change]:
-    changes: list[Change] = []
-    # Emit SONAME_CHANGED only when old library HAD a SONAME (non-empty) and it
-    # changed or was removed. Adding a SONAME (empty/None → value) is a compatible
-    # improvement and must not be flagged as breaking.
-    if old_elf.soname and old_elf.soname != new_elf.soname:
-        changes.append(make_change(
-            ChangeKind.SONAME_CHANGED,
-            symbol="DT_SONAME",
-            description=f"SONAME changed: {old_elf.soname!r} → {new_elf.soname!r}",
-            old_value=old_elf.soname,
-            new_value=new_elf.soname,
-        ))
-    elif not old_elf.soname and new_elf.soname:
-        changes.append(make_change(
-            ChangeKind.SONAME_MISSING,
-            symbol="DT_SONAME",
-            new=repr(new_elf.soname),
-            old_value="",
-            new_value=new_elf.soname,
-        ))
-    changes.extend(_diff_needed_libraries(old_elf.needed, new_elf.needed))
-    if old_elf.rpath != new_elf.rpath:
-        changes.append(make_change(
-            ChangeKind.RPATH_CHANGED,
-            symbol="DT_RPATH",
-            old=repr(old_elf.rpath),
-            new=repr(new_elf.rpath),
-            old_value=old_elf.rpath,
-            new_value=new_elf.rpath,
-        ))
-    if old_elf.runpath != new_elf.runpath:
-        changes.append(make_change(
-            ChangeKind.RUNPATH_CHANGED,
-            symbol="DT_RUNPATH",
-            old=repr(old_elf.runpath),
-            new=repr(new_elf.runpath),
-            old_value=old_elf.runpath,
-            new_value=new_elf.runpath,
-        ))
-
-    # PT_GNU_STACK executable stack detection (security bad practice).
-    # Report ONLY the regression direction (stack becomes executable); making
-    # the stack non-executable is a hardening improvement, not a finding — and
-    # emitting it would let the shipped `security` policy fail an improvement.
-    old_exec = getattr(old_elf, "has_executable_stack", False)
-    new_exec = getattr(new_elf, "has_executable_stack", False)
-    if new_exec and not old_exec:
-        changes.append(make_change(
-            ChangeKind.EXECUTABLE_STACK,
-            symbol="PT_GNU_STACK",
-            old_value="RW",
-            new_value="RWE",
-        ))
-    elif old_exec and not new_exec:
-        # Improvement direction — a distinct kind so the `security` policy can
-        # gate the regression (executable_stack) without failing this fix.
-        changes.append(make_change(
-            ChangeKind.EXECUTABLE_STACK_REMOVED,
-            symbol="PT_GNU_STACK",
-            old_value="RWE",
-            new_value="RW",
-        ))
-
-    changes.extend(_diff_security_hardening(old_elf, new_elf))
-
-    return changes
-
-
-#: RELRO levels ordered weakest → strongest, for regression detection.
-_RELRO_RANK: dict[str, int] = {"none": 0, "partial": 1, "full": 2}
-
-
-def _diff_security_hardening(old_elf: Any, new_elf: Any) -> list[Change]:
-    """Detect checksec-style hardening regressions between two ELF snapshots.
-
-    Only *weakening* transitions are reported (a release that improves
-    hardening is not a finding). All kinds are RISK by default; the shipped
-    ``security`` policy gates them to break.
-    """
-    changes: list[Change] = []
-
-    old_relro = getattr(old_elf, "relro", "none")
-    new_relro = getattr(new_elf, "relro", "none")
-    if _RELRO_RANK.get(new_relro, 0) < _RELRO_RANK.get(old_relro, 0):
-        changes.append(make_change(
-            ChangeKind.RELRO_WEAKENED,
-            symbol="GNU_RELRO",
-            old=old_relro,
-            new=new_relro,
-        ))
-
-    if getattr(old_elf, "is_pie", False) and not getattr(new_elf, "is_pie", False):
-        changes.append(make_change(
-            ChangeKind.PIE_DISABLED,
-            symbol="DF_1_PIE",
-            old_value="PIE",
-            new_value="no-PIE",
-        ))
-
-    if getattr(old_elf, "has_stack_canary", False) and not getattr(new_elf, "has_stack_canary", False):
-        changes.append(make_change(
-            ChangeKind.STACK_CANARY_REMOVED,
-            symbol="__stack_chk_fail",
-            old_value="canary",
-            new_value="none",
-        ))
-
-    if getattr(old_elf, "has_fortify_source", False) and not getattr(new_elf, "has_fortify_source", False):
-        changes.append(make_change(
-            ChangeKind.FORTIFY_SOURCE_WEAKENED,
-            symbol="_FORTIFY_SOURCE",
-            old_value="fortified",
-            new_value="none",
-        ))
-
-    if not getattr(old_elf, "has_writable_executable_segment", False) and getattr(new_elf, "has_writable_executable_segment", False):
-        changes.append(make_change(
-            ChangeKind.WRITABLE_EXECUTABLE_SEGMENT,
-            symbol="PT_LOAD",
-            old_value="W^X",
-            new_value="W+X",
-        ))
-
-    return changes
-
-
-def _diff_needed_libraries(old_needed: list[str], new_needed: list[str]) -> list[Change]:
-    changes: list[Change] = []
-    old_set = set(old_needed)
-    new_set = set(new_needed)
-    for lib in sorted(new_set - old_set):
-        changes.append(make_change(
-            ChangeKind.NEEDED_ADDED,
-            symbol="DT_NEEDED",
-            description=f"New dependency added: {lib}",
-            new_value=lib,
-        ))
-    for lib in sorted(old_set - new_set):
-        changes.append(make_change(
-            ChangeKind.NEEDED_REMOVED,
-            symbol="DT_NEEDED",
-            description=f"Dependency removed: {lib}",
-            old_value=lib,
-        ))
-    return changes
-
-
-_UNPARSEABLE_VERSION: tuple[int, ...] = (2**31,)
-"""Sentinel returned by :func:`_parse_abi_version_tag` for non-numeric tags
-like ``GLIBC_PRIVATE``.  Sorts *above* any real version so that a new
-non-numeric requirement is always treated as potentially BREAKING — never
-silently COMPAT."""
-
-
-def _parse_abi_version_tag(ver: str) -> tuple[int, ...]:
-    """Parse a versioned symbol tag like ``GLIBC_2.34`` or ``GLIBCXX_3.4.19``
-    into a comparable integer tuple.
-
-    Only the numeric suffix after the last ``_`` is used:
-    ``GLIBC_2.34`` → ``(2, 34)``, ``GLIBCXX_3.4.19`` → ``(3, 4, 19)``.
-
-    Returns :data:`_UNPARSEABLE_VERSION` for non-numeric tags such as
-    ``GLIBC_PRIVATE`` — a very large sentinel that always compares as newer
-    than any real version, so such tags are conservatively treated as BREAKING.
-    """
-    parts = ver.rsplit("_", 1)
-    numeric = parts[-1] if len(parts) > 1 else ver
-    result = tuple(int(x) for x in numeric.split(".") if x.isdigit())
-    return result if result else _UNPARSEABLE_VERSION
-
-
-def _diff_elf_symbol_versioning(old_elf: Any, new_elf: Any) -> list[Change]:
-    changes: list[Change] = []
-    old_def = set(old_elf.versions_defined)
-    new_def = set(new_elf.versions_defined)
-    for ver in sorted(old_def - new_def):
-        if _is_unattached_private_version_node(old_elf, ver):
-            continue
-        changes.append(make_change(
-            ChangeKind.SYMBOL_VERSION_DEFINED_REMOVED,
-            symbol=ver,
-            old=ver,
-        ))
-    for ver in sorted(new_def - old_def):
-        changes.append(make_change(
-            ChangeKind.SYMBOL_VERSION_DEFINED_ADDED,
-            symbol=ver,
-            new=ver,
-        ))
-
-    all_req_libs = set(old_elf.versions_required) | set(new_elf.versions_required)
-    for lib in sorted(all_req_libs):
-        old_vers = set(old_elf.versions_required.get(lib, []))
-        new_vers = set(new_elf.versions_required.get(lib, []))
-        # The old maximum requirement for this lib — anything added that
-        # is *older* than this maximum is not a new constraint on the caller.
-        # If the lib is entirely new (not in old at all), its version
-        # requirements are already captured by needed_added → COMPATIBLE.
-        lib_is_new = lib not in old_elf.versions_required and lib not in getattr(old_elf, "needed", [])
-
-        # Compute old max PER VERSION-TAG PREFIX (e.g. "GLIBC", "GLIBCXX", "CXXABI")
-        # to avoid cross-namespace bleed: GLIBCXX_3.4.32 must not suppress a
-        # genuinely newer CXXABI_1.3.14 requirement.
-        def _old_max_for_prefix(prefix: str, _old_vers: set[str] = old_vers) -> tuple[int, ...]:  # pylint: disable=dangerous-default-value
-            matching = [_parse_abi_version_tag(v) for v in _old_vers
-                        if v.startswith(prefix + "_")]
-            return max(matching, default=(0,))
-
-        for ver in sorted(new_vers - old_vers):
-            ver_tuple = _parse_abi_version_tag(ver)
-            prefix = ver.rsplit("_", 1)[0] if "_" in ver else ver
-            old_max = _old_max_for_prefix(prefix)
-            if lib_is_new or ver_tuple <= old_max:
-                # Either the whole lib is new (covered by needed_added), or the
-                # added requirement is not newer than the old max — COMPATIBLE.
-                changes.append(make_change(
-                    ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED_COMPAT,
-                    symbol=ver,
-                    name=ver,
-                    detail=lib,
-                    new_value=f"{lib}:{ver}",
-                ))
-            else:
-                # Genuinely newer requirement — callers on older runtimes will fail.
-                changes.append(make_change(
-                    ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED,
-                    symbol=ver,
-                    name=ver,
-                    detail=lib,
-                    new_value=f"{lib}:{ver}",
-                ))
-        for ver in sorted(old_vers - new_vers):
-            changes.append(make_change(
-                ChangeKind.SYMBOL_VERSION_REQUIRED_REMOVED,
-                symbol=ver,
-                name=ver,
-                detail=lib,
-                old_value=f"{lib}:{ver}",
-            ))
-    return changes
-
-
-def _is_unattached_private_version_node(elf: Any, version: str) -> bool:
-    """Return True for private version-script marker nodes with no exports.
-
-    Thin wrapper around the canonical helper in :mod:`diff_versioning` so the
-    version-def removal path and the version-script-missing path agree on what
-    counts as an unattached private marker.
-    """
-    from .diff_versioning import _is_unattached_private_version_node as _impl
-
-    return _impl(elf, version)
-
-
-def _diff_elf_symbol_metadata(
-    old: AbiSnapshot | Any,
-    new: AbiSnapshot | Any,
-    old_elf: Any | None = None,
-    new_elf: Any | None = None,
-) -> list[Change]:
-    if old_elf is None and new_elf is None:
-        old_elf = old
-        new_elf = new
-        old = AbiSnapshot(library="", version="")
-        new = AbiSnapshot(library="", version="")
-    assert old_elf is not None
-    assert new_elf is not None
-    changes: list[Change] = []
-    old_syms = old_elf.symbol_map
-    new_syms = new_elf.symbol_map
-
-    for sym_name, s_old in old_syms.items():
-        s_new = new_syms.get(sym_name)
-        if s_new is None:
-            continue
-        changes.extend(_diff_elf_symbol_pair(old, new, sym_name, s_old, s_new))
-
-    for sym_name, s_new in new_syms.items():
-        if s_new.sym_type != SymbolType.COMMON:
-            continue
-        old_common = old_syms.get(sym_name)
-        if old_common is None or old_common.sym_type != SymbolType.COMMON:
-            changes.append(make_change(
-                ChangeKind.COMMON_SYMBOL_RISK,
-                symbol=sym_name,
-                name=sym_name,
-            ))
-    return changes
-
-
-def _check_ifunc_type_change(sym_name: str, s_old: Any, s_new: Any) -> list[Change]:
-    """Detect IFUNC introduction, removal, or generic symbol-type change."""
-    if s_old.sym_type != SymbolType.IFUNC and s_new.sym_type == SymbolType.IFUNC:
-        return [make_change(
-            ChangeKind.IFUNC_INTRODUCED,
-            symbol=sym_name,
-            name=sym_name,
-            old_value=s_old.sym_type.value,
-            new_value="ifunc",
-        )]
-    if s_old.sym_type == SymbolType.IFUNC and s_new.sym_type != SymbolType.IFUNC:
-        return [make_change(
-            ChangeKind.IFUNC_REMOVED,
-            symbol=sym_name,
-            name=sym_name,
-            old_value="ifunc",
-            new_value=s_new.sym_type.value,
-        )]
-    if s_old.sym_type != s_new.sym_type:
-        return [make_change(
-            ChangeKind.SYMBOL_TYPE_CHANGED,
-            symbol=sym_name,
-            name=sym_name,
-            old=s_old.sym_type.value,
-            new=s_new.sym_type.value,
-        )]
-    return []
-
-
-def _check_binding_change(sym_name: str, s_old: Any, s_new: Any) -> list[Change]:
-    """Detect symbol binding changes (GLOBAL↔WEAK and other binding transitions)."""
-    if s_old.binding == s_new.binding:
-        return []
-    is_weakening = s_old.binding == SymbolBinding.GLOBAL and s_new.binding == SymbolBinding.WEAK
-    kind = ChangeKind.SYMBOL_BINDING_CHANGED if is_weakening else ChangeKind.SYMBOL_BINDING_STRENGTHENED
-    return [make_change(
-        kind,
-        symbol=sym_name,
-        name=sym_name,
-        old=s_old.binding.value,
-        new=s_new.binding.value,
-    )]
-
-
-def _check_elf_visibility_change(sym_name: str, s_old: Any, s_new: Any) -> list[Change]:
-    """Detect ELF st_other visibility transitions among exported visibilities.
-
-    HIDDEN/INTERNAL transitions are already caught by FUNC_VISIBILITY_CHANGED or
-    FUNC_REMOVED (symbol disappears from exported set). Only emit for transitions
-    among exported visibilities (DEFAULT↔PROTECTED).
-    """
-    if s_old.visibility == s_new.visibility:
-        return []
-    old_vis = s_old.visibility
-    new_vis = s_new.visibility
-    if old_vis in ("hidden", "internal") or new_vis in ("hidden", "internal"):
-        return []
-    return [make_change(
-        ChangeKind.SYMBOL_ELF_VISIBILITY_CHANGED,
-        symbol=sym_name,
-        name=sym_name,
-        old=old_vis,
-        new=new_vis,
-    )]
-
-
-def _resolve_size_change_kind(
-    old: AbiSnapshot,
-    new: AbiSnapshot,
-    sym_name: str,
-    s_old: Any,
-    s_new: Any,
-) -> ChangeKind | None:
-    """Resolve the ChangeKind for a data-symbol size change, or None to suppress.
-
-    Const string-like objects without a fixed header bound use
-    SYMBOL_SIZE_CHANGED_CONST_OBJECT when growing; shrinking is suppressed because
-    old consumers already sized from the smaller DSO.  Internal-looking symbols use
-    SYMBOL_SIZE_CHANGED_INTERNAL.  All others use SYMBOL_SIZE_CHANGED.
-    """
-    if _is_const_unbounded_string_object(old, sym_name) and _is_const_unbounded_string_object(new, sym_name):
-        return None if s_new.size <= s_old.size else ChangeKind.SYMBOL_SIZE_CHANGED_CONST_OBJECT
-    return ChangeKind.SYMBOL_SIZE_CHANGED_INTERNAL if _is_internal_data_symbol(sym_name) else ChangeKind.SYMBOL_SIZE_CHANGED
-
-
-def _check_symbol_size_change(
-    old: AbiSnapshot,
-    new: AbiSnapshot,
-    sym_name: str,
-    s_old: Any,
-    s_new: Any,
-) -> list[Change]:
-    """Detect exported data-symbol size changes (OBJECT/COMMON/TLS).
-
-    Vtable (_ZTV) and typeinfo (_ZTI) object size changes are owned by
-    diff_elf_layout.py, which decodes them into vtable-slot-count /
-    inheritance-shape findings; typeinfo-name (_ZTS) size only tracks the
-    mangled spelling and is not ABI-meaningful. Skip those here so the
-    generic SYMBOL_SIZE_CHANGED does not double-emit. VTT (_ZTT) is NOT
-    skipped: it is part of the construction ABI for virtual-base classes
-    and has no dedicated detector, so it keeps generic size-change coverage.
-    """
-    if not (
-        s_old.size > 0
-        and s_new.size > 0
-        and s_old.size != s_new.size
-        and s_new.sym_type in (SymbolType.OBJECT, SymbolType.COMMON, SymbolType.TLS)
-        and not sym_name.startswith(("_ZTV", "_ZTI", "_ZTS"))
-    ):
-        return []
-    size_kind = _resolve_size_change_kind(old, new, sym_name, s_old, s_new)
-    if size_kind is None:
-        return []
-    return [make_change(
-        size_kind,
-        symbol=sym_name,
-        name=sym_name,
-        old=str(s_old.size),
-        new=str(s_new.size),
-    )]
-
-
-def _check_func_visibility_protected(sym_name: str, s_old: Any, s_new: Any) -> list[Change]:
-    """Detect DEFAULT↔PROTECTED visibility changes for function symbols (case51).
-
-    Data symbols with default→protected break copy relocations (real ABI break).
-    Only for functions is this safely compatible (interposition semantics change only).
-    """
-    old_vis = getattr(s_old, "visibility", "default") or "default"
-    new_vis = getattr(s_new, "visibility", "default") or "default"
-    if old_vis == new_vis or {old_vis, new_vis} != _ELF_VIS_PROTECTED_PAIR:
-        return []
-    if getattr(s_old, "sym_type", None) != SymbolType.FUNC:
-        return []
-    return [make_change(
-        ChangeKind.FUNC_VISIBILITY_PROTECTED_CHANGED,
-        symbol=sym_name,
-        name=sym_name,
-        old=old_vis,
-        new=new_vis,
-    )]
-
-
-def _diff_elf_symbol_pair(
-    old: AbiSnapshot,
-    new: AbiSnapshot,
-    sym_name: str,
-    s_old: Any,
-    s_new: Any,
-) -> list[Change]:
-    changes: list[Change] = []
-    changes.extend(_check_ifunc_type_change(sym_name, s_old, s_new))
-    changes.extend(_check_binding_change(sym_name, s_old, s_new))
-    changes.extend(_check_elf_visibility_change(sym_name, s_old, s_new))
-    changes.extend(_check_symbol_size_change(old, new, sym_name, s_old, s_new))
-    changes.extend(_check_func_visibility_protected(sym_name, s_old, s_new))
     return changes
 
 
 # ── Gap analysis: new ELF-level detectors ─────────────────────────────────────
+
 
 @registry.detector("tls_checks")
 def _diff_tls_symbols(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
@@ -964,13 +409,15 @@ def _diff_tls_symbols(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         if s_new is None or s_new.sym_type != SymbolType.TLS:
             continue
         if s_old.size > 0 and s_new.size > 0 and s_old.size != s_new.size:
-            changes.append(make_change(
-                ChangeKind.TLS_VAR_SIZE_CHANGED,
-                symbol=sym_name,
-                name=sym_name,
-                old=str(s_old.size),
-                new=str(s_new.size),
-            ))
+            changes.append(
+                make_change(
+                    ChangeKind.TLS_VAR_SIZE_CHANGED,
+                    symbol=sym_name,
+                    name=sym_name,
+                    old=str(s_old.size),
+                    new=str(s_new.size),
+                )
+            )
 
     return changes
 
@@ -1002,15 +449,20 @@ def _diff_protected_visibility(old: AbiSnapshot, new: AbiSnapshot) -> list[Chang
         # relocations are a concern.  Function symbols are already covered by
         # func_visibility_protected_changed; TLS/IFUNC/other types don't use
         # copy relocations, so DEFAULT↔PROTECTED is benign for them.
-        if s_old.sym_type not in _COPY_RELOC_TYPES or s_new.sym_type not in _COPY_RELOC_TYPES:
+        if (
+            s_old.sym_type not in _COPY_RELOC_TYPES
+            or s_new.sym_type not in _COPY_RELOC_TYPES
+        ):
             continue
-        changes.append(make_change(
-            ChangeKind.PROTECTED_VISIBILITY_CHANGED,
-            symbol=sym_name,
-            name=sym_name,
-            old=old_vis,
-            new=new_vis,
-        ))
+        changes.append(
+            make_change(
+                ChangeKind.PROTECTED_VISIBILITY_CHANGED,
+                symbol=sym_name,
+                name=sym_name,
+                old=old_vis,
+                new=new_vis,
+            )
+        )
 
     return changes
 
@@ -1049,19 +501,18 @@ def _diff_symbol_version_aliases(old: AbiSnapshot, new: AbiSnapshot) -> list[Cha
             continue
         # Default version changed — check if old version is retained as alias
         retained = old_ver in new_all_vers.get(sym_name, set())
-        desc = (
-            f"Default symbol version changed: {sym_name} "
-            f"(@@{old_ver} → @@{new_ver})"
-        )
+        desc = f"Default symbol version changed: {sym_name} (@@{old_ver} → @@{new_ver})"
         if not retained:
             desc += f" — {SYMBOL_VERSION_ALIAS_NOT_RETAINED_MARKER}"
-        changes.append(make_change(
-            ChangeKind.SYMBOL_VERSION_ALIAS_CHANGED,
-            symbol=sym_name,
-            description=desc,
-            old_value=old_ver,
-            new_value=new_ver,
-        ))
+        changes.append(
+            make_change(
+                ChangeKind.SYMBOL_VERSION_ALIAS_CHANGED,
+                symbol=sym_name,
+                description=desc,
+                old_value=old_ver,
+                new_value=new_ver,
+            )
+        )
 
     return changes
 
@@ -1076,8 +527,16 @@ def _diff_glibcxx_dual_abi(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     single diagnostic instead of hundreds of individual add/remove reports.
     """
     changes: list[Change] = []
-    old_map = {f.mangled: f for f in old.functions if f.visibility in (Visibility.PUBLIC, Visibility.ELF_ONLY)}
-    new_map = {f.mangled: f for f in new.functions if f.visibility in (Visibility.PUBLIC, Visibility.ELF_ONLY)}
+    old_map = {
+        f.mangled: f
+        for f in old.functions
+        if f.visibility in (Visibility.PUBLIC, Visibility.ELF_ONLY)
+    }
+    new_map = {
+        f.mangled: f
+        for f in new.functions
+        if f.visibility in (Visibility.PUBLIC, Visibility.ELF_ONLY)
+    }
 
     removed = set(old_map.keys()) - set(new_map.keys())
     added = set(new_map.keys()) - set(old_map.keys())
@@ -1087,7 +546,9 @@ def _diff_glibcxx_dual_abi(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
 
     # Detect dual ABI markers in removed/added symbols
     _CXX11_ABI_MARKERS = ("__cxx11", "cxx11")
-    removed_with_marker = sum(1 for s in removed if any(m in s for m in _CXX11_ABI_MARKERS))
+    removed_with_marker = sum(
+        1 for s in removed if any(m in s for m in _CXX11_ABI_MARKERS)
+    )
     added_with_marker = sum(1 for s in added if any(m in s for m in _CXX11_ABI_MARKERS))
 
     # Pattern 1: Old has __cxx11 symbols, new doesn't (ABI=1 → ABI=0)
@@ -1101,14 +562,16 @@ def _diff_glibcxx_dual_abi(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
             if removed_with_marker > added_with_marker
             else "legacy ABI → CXX11 ABI"
         )
-        changes.append(make_change(
-            ChangeKind.GLIBCXX_DUAL_ABI_FLIP_DETECTED,
-            symbol="__glibcxx_dual_abi",
-            name=f"{marker_churn} of {total_churn}",
-            detail=direction,
-            old_value=f"{removed_with_marker} removed with marker",
-            new_value=f"{added_with_marker} added with marker",
-        ))
+        changes.append(
+            make_change(
+                ChangeKind.GLIBCXX_DUAL_ABI_FLIP_DETECTED,
+                symbol="__glibcxx_dual_abi",
+                name=f"{marker_churn} of {total_churn}",
+                detail=direction,
+                old_value=f"{removed_with_marker} removed with marker",
+                new_value=f"{added_with_marker} added with marker",
+            )
+        )
 
     return changes
 
@@ -1123,8 +586,16 @@ def _diff_inline_namespace(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     import re
 
     changes: list[Change] = []
-    old_map = {f.mangled: f for f in old.functions if f.visibility in (Visibility.PUBLIC, Visibility.ELF_ONLY)}
-    new_map = {f.mangled: f for f in new.functions if f.visibility in (Visibility.PUBLIC, Visibility.ELF_ONLY)}
+    old_map = {
+        f.mangled: f
+        for f in old.functions
+        if f.visibility in (Visibility.PUBLIC, Visibility.ELF_ONLY)
+    }
+    new_map = {
+        f.mangled: f
+        for f in new.functions
+        if f.visibility in (Visibility.PUBLIC, Visibility.ELF_ONLY)
+    }
 
     removed = set(old_map.keys()) - set(new_map.keys())
     added = set(new_map.keys()) - set(old_map.keys())
@@ -1135,7 +606,7 @@ def _diff_inline_namespace(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     # Build lookup by demangled name with versioned namespace stripped.
     # Matches Itanium-style ::v1::, ::__v2:: AND libc++-style ::__1::, ::__2::
     # Anchored to :: on both sides to avoid matching inside identifiers.
-    _INLINE_NS_RE = re.compile(r'::(?:__)?(?:v)?\d+::')
+    _INLINE_NS_RE = re.compile(r"::(?:__)?(?:v)?\d+::")
 
     from .demangle import demangle_batch
 
@@ -1175,13 +646,15 @@ def _diff_inline_namespace(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
 
     # Only emit if we find a pattern of namespace-version moves (2+ symbols)
     if matched_count >= 2:
-        changes.append(make_change(
-            ChangeKind.INLINE_NAMESPACE_MOVED,
-            symbol="__inline_namespace_move",
-            detail=str(matched_count),
-            old_value=f"{matched_count} symbols in old namespace",
-            new_value=f"{matched_count} symbols in new namespace",
-        ))
+        changes.append(
+            make_change(
+                ChangeKind.INLINE_NAMESPACE_MOVED,
+                symbol="__inline_namespace_move",
+                detail=str(matched_count),
+                old_value=f"{matched_count} symbols in old namespace",
+                new_value=f"{matched_count} symbols in new namespace",
+            )
+        )
 
     return changes
 
@@ -1203,10 +676,15 @@ def _diff_vtable_identity(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     # Find vtable/typeinfo symbols by mangling convention (_ZTV, _ZTI, _ZTS)
     _RTTI_PREFIXES = RTTI_DATA_PREFIXES
 
-    old_filter_transitive_runtime_symbols = _should_filter_transitive_runtime_symbols(old)
-    new_filter_transitive_runtime_symbols = _should_filter_transitive_runtime_symbols(new)
+    old_filter_transitive_runtime_symbols = _should_filter_transitive_runtime_symbols(
+        old
+    )
+    new_filter_transitive_runtime_symbols = _should_filter_transitive_runtime_symbols(
+        new
+    )
     old_rtti = {
-        s.name for s in o.symbols
+        s.name
+        for s in o.symbols
         if any(s.name.startswith(p) for p in _RTTI_PREFIXES)
         and is_abi_relevant_elf_symbol(
             s.name,
@@ -1214,7 +692,8 @@ def _diff_vtable_identity(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         )
     }
     new_rtti = {
-        s.name for s in n.symbols
+        s.name
+        for s in n.symbols
         if any(s.name.startswith(p) for p in _RTTI_PREFIXES)
         and is_abi_relevant_elf_symbol(
             s.name,
@@ -1234,7 +713,7 @@ def _diff_vtable_identity(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     def _rtti_key(sym: str) -> tuple[str, str]:
         for p in _RTTI_PREFIXES:
             if sym.startswith(p):
-                return (p, sym[len(p):])
+                return (p, sym[len(p) :])
         return ("", sym)
 
     removed_keys = {_rtti_key(s) for s in removed_rtti}
@@ -1242,25 +721,31 @@ def _diff_vtable_identity(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
 
     # Same (prefix, type_hash) in both removed and added → identity changed
     # (e.g. _ZTVFoo@@V1 removed, _ZTVFoo@@V2 added — same prefix + type)
-    identity_changed = removed_keys & added_keys if (removed_rtti and added_rtti) else set()
+    identity_changed = (
+        removed_keys & added_keys if (removed_rtti and added_rtti) else set()
+    )
     if identity_changed:
         for rkey in sorted(identity_changed):
             prefix, type_hash = rkey
             old_sym = prefix + type_hash
             new_sym = prefix + type_hash  # same name, but different properties
             # Reconstruct from actual removed/added sets for accuracy
-            actual_old = next((s for s in removed_rtti if _rtti_key(s) == rkey), old_sym)
+            actual_old = next(
+                (s for s in removed_rtti if _rtti_key(s) == rkey), old_sym
+            )
             actual_new = next((s for s in added_rtti if _rtti_key(s) == rkey), new_sym)
-            changes.append(make_change(
-                ChangeKind.VTABLE_SYMBOL_IDENTITY_CHANGED,
-                symbol=actual_old,
-                description=(
-                    f"RTTI/vtable symbol identity changed: {actual_old} → {actual_new}; "
-                    f"may break cross-DSO RTTI and exception handling"
-                ),
-                old_value=actual_old,
-                new_value=actual_new,
-            ))
+            changes.append(
+                make_change(
+                    ChangeKind.VTABLE_SYMBOL_IDENTITY_CHANGED,
+                    symbol=actual_old,
+                    description=(
+                        f"RTTI/vtable symbol identity changed: {actual_old} → {actual_new}; "
+                        f"may break cross-DSO RTTI and exception handling"
+                    ),
+                    old_value=actual_old,
+                    new_value=actual_new,
+                )
+            )
 
     # Also check existing RTTI symbols for visibility or version changes
     if common_rtti:
@@ -1272,7 +757,9 @@ def _diff_vtable_identity(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
             old_vis = s_old.visibility or "default"
             new_vis = s_new.visibility or "default"
             vis_changed = old_vis != new_vis
-            ver_changed = (s_old.version != s_new.version) or (s_old.is_default != s_new.is_default)
+            ver_changed = (s_old.version != s_new.version) or (
+                s_old.is_default != s_new.is_default
+            )
             if vis_changed or ver_changed:
                 detail_parts = []
                 if vis_changed:
@@ -1282,16 +769,22 @@ def _diff_vtable_identity(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                     new_v = s_new.version or "(none)"
                     detail_parts.append(f"version {old_v} → {new_v}")
                 detail = ", ".join(detail_parts)
-                changes.append(make_change(
-                    ChangeKind.VTABLE_SYMBOL_IDENTITY_CHANGED,
-                    symbol=sym_name,
-                    description=(
-                        f"RTTI/vtable symbol changed: {sym_name} "
-                        f"({detail}); may break cross-DSO RTTI"
-                    ),
-                    old_value=old_vis if vis_changed else (s_old.version or "(none)"),
-                    new_value=new_vis if vis_changed else (s_new.version or "(none)"),
-                ))
+                changes.append(
+                    make_change(
+                        ChangeKind.VTABLE_SYMBOL_IDENTITY_CHANGED,
+                        symbol=sym_name,
+                        description=(
+                            f"RTTI/vtable symbol changed: {sym_name} "
+                            f"({detail}); may break cross-DSO RTTI"
+                        ),
+                        old_value=old_vis
+                        if vis_changed
+                        else (s_old.version or "(none)"),
+                        new_value=new_vis
+                        if vis_changed
+                        else (s_new.version or "(none)"),
+                    )
+                )
 
     return changes
 
@@ -1321,19 +814,22 @@ def _diff_abi_surface(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     # Thresholds: >2x growth or <0.5x shrinkage with at least 50 symbol delta
     if abs(delta) >= 50 and (ratio > 2.0 or ratio < 0.5):
         direction = "grew" if delta > 0 else "shrank"
-        changes.append(make_change(
-            ChangeKind.ABI_SURFACE_EXPLOSION,
-            symbol="__abi_surface",
-            name=f"{ratio:.1f}x",
-            detail=direction,
-            old=str(old_count),
-            new=str(new_count),
-        ))
+        changes.append(
+            make_change(
+                ChangeKind.ABI_SURFACE_EXPLOSION,
+                symbol="__abi_surface",
+                name=f"{ratio:.1f}x",
+                detail=direction,
+                old=str(old_count),
+                new=str(new_count),
+            )
+        )
 
     return changes
 
 
 # ── Sprint 3: DWARF-aware layout diff ────────────────────────────────────────
+
 
 @registry.detector("dwarf")
 def _diff_dwarf(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
@@ -1368,10 +864,12 @@ def _diff_dwarf(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
             "DWARF layout comparison skipped: new binary has no debug info. "
             "Recompile with -g to enable struct/enum ABI checks."
         )
-        return [make_change(
-            ChangeKind.DWARF_INFO_MISSING,
-            symbol="<dwarf>",
-        )]
+        return [
+            make_change(
+                ChangeKind.DWARF_INFO_MISSING,
+                symbol="<dwarf>",
+            )
+        ]
 
     def _allow_name(name: str, allowed: set[str]) -> bool:
         # Match by full name or by unqualified name (last component after ::)
@@ -1388,17 +886,17 @@ def _diff_dwarf(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     allowed_structs: set[str] = (
         {t.name for t in old.types} | {t.name for t in new.types}
     ) - both_opaque
-    allowed_enums: set[str] = {
-        e.name for e in old.enums
-    } | {
-        e.name for e in new.enums
-    }
+    allowed_enums: set[str] = {e.name for e in old.enums} | {e.name for e in new.enums}
 
     # If the header model is absent (no castxml data), fall back to comparing
     # all DWARF types — this preserves compatibility when running DWARF-only.
     if allowed_structs:
-        o_structs = {k: v for k, v in o.structs.items() if _allow_name(k, allowed_structs)}
-        n_structs = {k: v for k, v in n.structs.items() if _allow_name(k, allowed_structs)}
+        o_structs = {
+            k: v for k, v in o.structs.items() if _allow_name(k, allowed_structs)
+        }
+        n_structs = {
+            k: v for k, v in n.structs.items() if _allow_name(k, allowed_structs)
+        }
     else:
         o_structs = o.structs
         n_structs = n.structs
@@ -1423,13 +921,33 @@ def _diff_dwarf(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     # surface), but anonymous/lambda and compiler-internal types are still
     # dropped — those are never stable ABI even for the runtime itself.
     excl = stdlib_namespaces_excluded(old, new)
-    o_structs = {k: v for k, v in o_structs.items() if not is_non_abi_surface_type(k, exclude_stdlib_namespaces=excl)}
-    n_structs = {k: v for k, v in n_structs.items() if not is_non_abi_surface_type(k, exclude_stdlib_namespaces=excl)}
-    o_enums = {k: v for k, v in o_enums.items() if not is_non_abi_surface_type(k, exclude_stdlib_namespaces=excl)}
-    n_enums = {k: v for k, v in n_enums.items() if not is_non_abi_surface_type(k, exclude_stdlib_namespaces=excl)}
+    o_structs = {
+        k: v
+        for k, v in o_structs.items()
+        if not is_non_abi_surface_type(k, exclude_stdlib_namespaces=excl)
+    }
+    n_structs = {
+        k: v
+        for k, v in n_structs.items()
+        if not is_non_abi_surface_type(k, exclude_stdlib_namespaces=excl)
+    }
+    o_enums = {
+        k: v
+        for k, v in o_enums.items()
+        if not is_non_abi_surface_type(k, exclude_stdlib_namespaces=excl)
+    }
+    n_enums = {
+        k: v
+        for k, v in n_enums.items()
+        if not is_non_abi_surface_type(k, exclude_stdlib_namespaces=excl)
+    }
 
-    filtered_old = DwarfMetadata(structs=o_structs, enums=o_enums, has_dwarf=o.has_dwarf)
-    filtered_new = DwarfMetadata(structs=n_structs, enums=n_enums, has_dwarf=n.has_dwarf)
+    filtered_old = DwarfMetadata(
+        structs=o_structs, enums=o_enums, has_dwarf=o.has_dwarf
+    )
+    filtered_new = DwarfMetadata(
+        structs=n_structs, enums=n_enums, has_dwarf=n.has_dwarf
+    )
 
     changes: list[Change] = []
     changes.extend(_diff_struct_layouts(filtered_old, filtered_new))
@@ -1466,6 +984,7 @@ def _normalize_type_name(name: str) -> str:
     The original type names are still preserved in Change.old_value/new_value.
     """
     import re as _re
+
     s = name.strip()
     # Remove trailing pointer/reference decorators and CV-qualifiers
     s = _re.sub(r"[\s*&]+$", "", s).strip()
@@ -1477,7 +996,7 @@ def _normalize_type_name(name: str) -> str:
     lead = _re.match(r"^(struct|class|union)\s+", s)
     lead_kind = lead.group(1) if lead else None
     if lead:
-        s = s[lead.end():].strip()
+        s = s[lead.end() :].strip()
     # Anonymous/unnamed member types have no stable *name* across DWARF / castxml
     # / PDB extraction — the same anonymous union can be spelled "<unnamed-tag>"
     # by one reader and "Parent::<unnamed-type-u>" by another (observed on the
@@ -1510,23 +1029,27 @@ def _diff_struct_layouts(o: object, n: object) -> list[Change]:
 
         # 1. Total size
         if old_s.byte_size != new_s.byte_size:
-            changes.append(make_change(
-                ChangeKind.STRUCT_SIZE_CHANGED,
-                symbol=name,
-                name=name,
-                old=str(old_s.byte_size),
-                new=str(new_s.byte_size),
-            ))
+            changes.append(
+                make_change(
+                    ChangeKind.STRUCT_SIZE_CHANGED,
+                    symbol=name,
+                    name=name,
+                    old=str(old_s.byte_size),
+                    new=str(new_s.byte_size),
+                )
+            )
 
         # 2. Alignment (only when explicitly present in DWARF 5)
         if old_s.alignment and new_s.alignment and old_s.alignment != new_s.alignment:
-            changes.append(make_change(
-                ChangeKind.STRUCT_ALIGNMENT_CHANGED,
-                symbol=name,
-                name=name,
-                old=str(old_s.alignment),
-                new=str(new_s.alignment),
-            ))
+            changes.append(
+                make_change(
+                    ChangeKind.STRUCT_ALIGNMENT_CHANGED,
+                    symbol=name,
+                    name=name,
+                    old=str(old_s.alignment),
+                    new=str(new_s.alignment),
+                )
+            )
 
         # Build field maps
         old_fields = {f.name: f for f in old_s.fields}
@@ -1547,23 +1070,31 @@ def _diff_struct_layouts(o: object, n: object) -> list[Change]:
             if _RESERVED_FIELD_RE.match(fname):
                 old_f = old_fields[fname]
                 candidate = added_by_offset.get(old_f.byte_offset)
-                if candidate is not None and not _RESERVED_FIELD_RE.match(candidate.name) and old_f.type_name == candidate.type_name:
-                    changes.append(make_change(
-                        ChangeKind.USED_RESERVED_FIELD,
-                        symbol=name,
-                        name=name,
-                        old=fname,
-                        new=candidate.name,
-                    ))
+                if (
+                    candidate is not None
+                    and not _RESERVED_FIELD_RE.match(candidate.name)
+                    and old_f.type_name == candidate.type_name
+                ):
+                    changes.append(
+                        make_change(
+                            ChangeKind.USED_RESERVED_FIELD,
+                            symbol=name,
+                            name=name,
+                            old=fname,
+                            new=candidate.name,
+                        )
+                    )
                     reserved_matched.add(candidate.name)
                     continue
-            changes.append(make_change(
-                ChangeKind.STRUCT_FIELD_REMOVED,
-                symbol=f"{name}::{fname}",
-                name=name,
-                detail=fname,
-                old_value=f"{old_fields[fname].type_name}",
-            ))
+            changes.append(
+                make_change(
+                    ChangeKind.STRUCT_FIELD_REMOVED,
+                    symbol=f"{name}::{fname}",
+                    name=name,
+                    detail=fname,
+                    old_value=f"{old_fields[fname].type_name}",
+                )
+            )
 
         # 4. Existing fields: offset and type changes
         for fname, old_f in old_fields.items():
@@ -1572,14 +1103,16 @@ def _diff_struct_layouts(o: object, n: object) -> list[Change]:
             new_f = new_fields[fname]
 
             if old_f.byte_offset != new_f.byte_offset:
-                changes.append(make_change(
-                    ChangeKind.STRUCT_FIELD_OFFSET_CHANGED,
-                    symbol=f"{name}::{fname}",
-                    name=name,
-                    detail=fname,
-                    old=str(old_f.byte_offset),
-                    new=str(new_f.byte_offset),
-                ))
+                changes.append(
+                    make_change(
+                        ChangeKind.STRUCT_FIELD_OFFSET_CHANGED,
+                        symbol=f"{name}::{fname}",
+                        name=name,
+                        detail=fname,
+                        old=str(old_f.byte_offset),
+                        new=str(new_f.byte_offset),
+                    )
+                )
 
             # Field type drift:
             # - catches same-size type substitutions (int→float, Foo*→Bar*)
@@ -1590,26 +1123,29 @@ def _diff_struct_layouts(o: object, n: object) -> list[Change]:
             # it is not a binary layout break (ISSUE-30/35/65: libuv
             # ``uv_cpu_info_s::model`` const-pointer churn). A genuine size
             # change is still reported via ``type_size_changed`` below.
-            type_name_changed = (
-                _normalize_type_name(old_f.type_name) != _normalize_type_name(new_f.type_name)
-                and not cv_qualifiers_only_differ(old_f.type_name, new_f.type_name)
-            )
+            type_name_changed = _normalize_type_name(
+                old_f.type_name
+            ) != _normalize_type_name(
+                new_f.type_name
+            ) and not cv_qualifiers_only_differ(old_f.type_name, new_f.type_name)
             type_size_changed = (
                 old_f.byte_size > 0
                 and new_f.byte_size > 0
                 and old_f.byte_size != new_f.byte_size
             )
             if type_name_changed or type_size_changed:
-                changes.append(make_change(
-                    ChangeKind.STRUCT_FIELD_TYPE_CHANGED,
-                    symbol=f"{name}::{fname}",
-                    name=name,
-                    detail=fname,
-                    old=f"{old_f.type_name}({old_f.byte_size}B)",
-                    new=f"{new_f.type_name}({new_f.byte_size}B)",
-                    old_value=old_f.type_name,
-                    new_value=new_f.type_name,
-                ))
+                changes.append(
+                    make_change(
+                        ChangeKind.STRUCT_FIELD_TYPE_CHANGED,
+                        symbol=f"{name}::{fname}",
+                        name=name,
+                        detail=fname,
+                        old=f"{old_f.type_name}({old_f.byte_size}B)",
+                        new=f"{new_f.type_name}({new_f.byte_size}B)",
+                        old_value=old_f.type_name,
+                        new_value=new_f.type_name,
+                    )
+                )
 
     return changes
 
@@ -1629,13 +1165,15 @@ def _diff_enum_layouts(o: object, n: object) -> list[Change]:
 
         # 1. Underlying size change (e.g. int8_t → int32_t)
         if old_e.underlying_byte_size != new_e.underlying_byte_size:
-            changes.append(make_change(
-                ChangeKind.ENUM_UNDERLYING_SIZE_CHANGED,
-                symbol=name,
-                name=name,
-                old=str(old_e.underlying_byte_size),
-                new=str(new_e.underlying_byte_size),
-            ))
+            changes.append(
+                make_change(
+                    ChangeKind.ENUM_UNDERLYING_SIZE_CHANGED,
+                    symbol=name,
+                    name=name,
+                    old=str(old_e.underlying_byte_size),
+                    new=str(new_e.underlying_byte_size),
+                )
+            )
 
         # 2. Removed members — skip rename-only removals here.
         # A dedicated rename detector emits ENUM_MEMBER_RENAMED. Here we only
@@ -1649,7 +1187,11 @@ def _diff_enum_layouts(o: object, n: object) -> list[Change]:
         _claimed_new: set[str] = set()
         for _rname in sorted(_removed_names):
             _rval = old_e.members[_rname]
-            _candidates = [_n for _n in _added_names if new_e.members[_n] == _rval and _n not in _claimed_new]
+            _candidates = [
+                _n
+                for _n in _added_names
+                if new_e.members[_n] == _rval and _n not in _claimed_new
+            ]
             if len(_candidates) == 1:
                 _renamed_old.add(_rname)
                 _claimed_new.add(_candidates[0])
@@ -1657,13 +1199,15 @@ def _diff_enum_layouts(o: object, n: object) -> list[Change]:
             if mname in _renamed_old:
                 continue
             old_val = old_e.members[mname]
-            changes.append(make_change(
-                ChangeKind.ENUM_MEMBER_REMOVED,
-                symbol=f"{name}::{mname}",
-                name=name,
-                detail=mname,
-                old_value=str(old_val),
-            ))
+            changes.append(
+                make_change(
+                    ChangeKind.ENUM_MEMBER_REMOVED,
+                    symbol=f"{name}::{mname}",
+                    name=name,
+                    detail=mname,
+                    old_value=str(old_val),
+                )
+            )
 
         # 3. Changed values
         # Sentinel detection: name-pattern based (*_last, *_max, *_count).
@@ -1681,21 +1225,24 @@ def _diff_enum_layouts(o: object, n: object) -> list[Change]:
                     if _is_sentinel_member(mname)
                     else ChangeKind.ENUM_MEMBER_VALUE_CHANGED
                 )
-                changes.append(make_change(
-                    kind,
-                    symbol=f"{name}::{mname}",
-                    description=(
-                        f"Enum member value changed: {name}::{mname} "
-                        f"({old_val} → {new_e.members[mname]})"
-                    ),
-                    old_value=str(old_val),
-                    new_value=str(new_e.members[mname]),
-                ))
+                changes.append(
+                    make_change(
+                        kind,
+                        symbol=f"{name}::{mname}",
+                        description=(
+                            f"Enum member value changed: {name}::{mname} "
+                            f"({old_val} → {new_e.members[mname]})"
+                        ),
+                        old_value=str(old_val),
+                        new_value=str(new_e.members[mname]),
+                    )
+                )
 
     return changes
 
 
 # ── PR #89: ELF fallback for = delete (issue #100) ───────────────────────────
+
 
 @registry.detector("elf_deleted_fallback")
 def _diff_elf_deleted_fallback(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
@@ -1764,13 +1311,15 @@ def _diff_elf_deleted_fallback(old: AbiSnapshot, new: AbiSnapshot) -> list[Chang
             continue
 
         # Symbol disappeared from ELF without explicit annotation — likely deleted
-        changes.append(make_change(
-            ChangeKind.FUNC_DELETED_ELF_FALLBACK,
-            symbol=mangled,
-            name=f_old.name,
-            old_value="exported",
-            new_value="absent_from_dynsym",
-        ))
+        changes.append(
+            make_change(
+                ChangeKind.FUNC_DELETED_ELF_FALLBACK,
+                symbol=mangled,
+                name=f_old.name,
+                old_value="exported",
+                new_value="absent_from_dynsym",
+            )
+        )
 
     return changes
 

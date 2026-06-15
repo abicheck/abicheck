@@ -52,8 +52,7 @@ from _detector_mutations import (
     build_snapshot,
     context_identifiers,
 )
-from hypothesis import HealthCheck, assume, given, settings
-from hypothesis import strategies as st
+from hypothesis import HealthCheck, assume, given, settings, strategies as st
 
 from abicheck.checker import compare
 from abicheck.checker_policy import (

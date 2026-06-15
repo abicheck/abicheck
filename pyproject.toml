@@ -159,6 +159,7 @@ module = [
     "abicheck.environment_matrix",
     "abicheck.probe_harness",
     "abicheck.bundle",
+    "abicheck.bundle_manifest",
     "abicheck.buildsource.extractor_manifest",
     "abicheck.buildsource.inline",
 ]

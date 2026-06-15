@@ -60,12 +60,15 @@ from typing import Any
 from elftools.common.exceptions import ELFError
 from elftools.elf.elffile import ELFFile
 
-from .dwarf_utils import BASE_PRUNE_TAGS, has_real_dwarf_info
-from .dwarf_utils import attr_bool as _attr_bool  # noqa: F401
-from .dwarf_utils import attr_int as _attr_int
-from .dwarf_utils import attr_str as _attr_str
-from .dwarf_utils import decode_member_location as _decode_member_location
-from .dwarf_utils import resolve_die_ref as _resolve_ref
+from .dwarf_utils import (
+    BASE_PRUNE_TAGS,
+    attr_bool as _attr_bool,  # noqa: F401
+    attr_int as _attr_int,
+    attr_str as _attr_str,
+    decode_member_location as _decode_member_location,
+    has_real_dwarf_info,
+    resolve_die_ref as _resolve_ref,
+)
 
 log = logging.getLogger(__name__)
 

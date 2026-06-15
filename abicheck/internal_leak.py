@@ -262,8 +262,7 @@ def _build_type_map(snap: AbiSnapshot) -> tuple[dict[str, RecordType], bool]:
     dwarf = getattr(snap, "dwarf", None)
     if dwarf is None or not getattr(dwarf, "structs", None):
         return out, False
-    from .model import RecordType as _RecordType
-    from .model import TypeField as _TypeField
+    from .model import RecordType as _RecordType, TypeField as _TypeField
 
     for name, layout in dwarf.structs.items():
         fields = [

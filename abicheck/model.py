@@ -27,23 +27,11 @@ from typing import TYPE_CHECKING
 # keeps type-checking cleanly for the ~9 detector modules that use it.
 from .name_classification import (
     COMPILER_INTERNAL_TYPES as COMPILER_INTERNAL_TYPES,
-)
-from .name_classification import (
     canonicalize_type_name as canonicalize_type_name,
-)
-from .name_classification import (
     cv_qualifiers_only_differ as cv_qualifiers_only_differ,
-)
-from .name_classification import (
     is_abi_surface_type_name as is_abi_surface_type_name,
-)
-from .name_classification import (
     is_compiler_internal_type as is_compiler_internal_type,
-)
-from .name_classification import (
     is_cxx_runtime_library as is_cxx_runtime_library,
-)
-from .name_classification import (
     is_non_abi_surface_type as is_non_abi_surface_type,
 )
 

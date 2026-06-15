@@ -611,14 +611,21 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
         # are the by-design sibling-registration / helper-reuse pattern, not a
         # true initialization cycle (the reuse import is function-local).
         frozenset({"cli", "cli_scan", "cli_buildsource"}),
-        # ADR-035 D10 typed scan engine cluster: `service.run_scan` drives the
-        # shared orchestration core in `cli_scan` (function-local import); `cli_scan`
-        # reuses `service`/`cli_buildsource` collectors; `cli`/`cli_surface` register
-        # and reuse those, and `cli` resolves inputs via `cli_resolve` → `service`.
-        # The engine entry lives in `service` (the one contract the CLI + MCP share)
-        # while the orchestration body stays in `cli_scan`. All cross-imports are
-        # function-local (not an init cycle). One SCC, so this cluster covers its
-        # many representative simple cycles by subset match.
+        # ADR-035 D10 typed scan engine cluster: the typed engine
+        # (`ScanRequest`/`run_scan`/`estimate_scan`) lives in the leaf module
+        # `service_scan`, which `service` re-exports for the public Python API.
+        # `service_scan.run_scan` drives the shared orchestration core in `cli_scan`
+        # (function-local import) and `estimate_scan` reuses `service.expand_header_inputs`
+        # (function-local); `cli_scan` reuses `service`/`cli_buildsource` collectors;
+        # `cli`/`cli_surface` register and reuse those, and `cli` resolves inputs via
+        # `cli_resolve` → `service`. `service_scan` imports nothing from `service` at
+        # module-load time (it is a leaf), so the SCC closes only through function-local
+        # imports (not an init cycle). One SCC, so this cluster covers its many
+        # representative simple cycles by subset match. `cli_helpers_compare` and
+        # `cli_buildsource_helpers` are extracted leaf helper modules for `cli` /
+        # `cli_buildsource` (size-split per CLAUDE.md); they reuse `cli_resolve` /
+        # `service` collectors and are re-exported back by their parent, so they join
+        # the same by-design cluster (the package imports cleanly — no init deadlock).
         frozenset(
             {
                 "cli",
@@ -627,6 +634,9 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
                 "cli_buildsource",
                 "cli_scan",
                 "service",
+                "service_scan",
+                "cli_helpers_compare",
+                "cli_buildsource_helpers",
             }
         ),
         # TYPE_CHECKING-only typing cycle (no runtime import): AbiSnapshot

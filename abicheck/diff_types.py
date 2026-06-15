@@ -43,9 +43,9 @@ from .model import (
     TypeField,
     canonicalize_type_name,
     cv_qualifiers_only_differ,
+    is_non_abi_surface_type as _is_non_abi_surface_type,
+    stdlib_namespaces_excluded as _exclude_stdlib_namespaces,
 )
-from .model import is_non_abi_surface_type as _is_non_abi_surface_type
-from .model import stdlib_namespaces_excluded as _exclude_stdlib_namespaces
 
 
 def _exported_elf_symbol_names(snap: AbiSnapshot, *, symbol_types: Collection[str]) -> set[str]:
