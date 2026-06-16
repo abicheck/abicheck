@@ -54,8 +54,7 @@ def _prepare_side(
     includes: tuple[Path, ...],
     sources: Path | None,
     build_info: Path | None,
-    depth: str | None,
-    max_depth: bool,
+    collect_mode: str,
     version: str,
     lang: str,
     header_backend: str,
@@ -91,8 +90,7 @@ def _prepare_side(
         header_backend=header_backend,
         sources=sources,
         build_info=build_info,
-        depth=depth,
-        max_depth=max_depth,
+        collect_mode=collect_mode,
         output=out,
     )
     return out
@@ -253,13 +251,13 @@ def deep_compare_cmd(
 
         old_ready = _prepare_side(
             ctx, input_path=old_input, headers=old_h, includes=old_inc, sources=old_src,
-            build_info=old_build_info, depth=depth, max_depth=max_depth,
+            build_info=old_build_info, collect_mode=compare_collect_mode,
             version=old_version, lang=lang, header_backend=header_backend,
             out_dir=out_dir, label="old",
         )
         new_ready = _prepare_side(
             ctx, input_path=new_input, headers=new_h, includes=new_inc, sources=new_src,
-            build_info=new_build_info, depth=depth, max_depth=max_depth,
+            build_info=new_build_info, collect_mode=compare_collect_mode,
             version=new_version, lang=lang, header_backend=header_backend,
             out_dir=out_dir, label="new",
         )

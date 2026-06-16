@@ -91,6 +91,36 @@ def test_deep_compare_propagates_break_exit_code(tmp_path: Path) -> None:
     assert res.exit_code == 4, (res.exit_code, res.output)
 
 
+def test_deep_compare_threads_resolved_collect_mode(tmp_path: Path, monkeypatch) -> None:
+    # Regression (Codex): the per-side dump must receive the SAME resolved
+    # collect mode compare reports — bare --sources is off (not dump_cmd's
+    # source-target default); --depth full is graph-full.
+    old = _snap(tmp_path, "old.json", with_foo=True)
+    new = _snap(tmp_path, "new.json", with_foo=True)
+    srcs = tmp_path / "src"
+    srcs.mkdir()
+
+    seen: list[str] = []
+
+    def _spy(ctx, **kw):  # noqa: ANN001, ANN003
+        seen.append(kw["collect_mode"])
+        return kw["input_path"]  # pass the snapshot through to compare
+
+    monkeypatch.setattr(cli_max, "_prepare_side", _spy)
+
+    seen.clear()
+    res = CliRunner().invoke(main, ["deep-compare", str(old), str(new), "--sources", str(srcs)])
+    assert res.exit_code == 0, res.output
+    assert seen == ["off", "off"]
+
+    seen.clear()
+    res = CliRunner().invoke(
+        main, ["deep-compare", str(old), str(new), "--sources", str(srcs), "--depth", "full"]
+    )
+    assert res.exit_code == 0, res.output
+    assert seen == ["graph-full", "graph-full"]
+
+
 class _FakeCtx:
     """Records ctx.invoke calls and materializes the requested output file."""
 
@@ -119,7 +149,7 @@ def test_prepare_side_dumps_native_binary(tmp_path: Path, monkeypatch) -> None:
     inc.mkdir()
     out = cli_max._prepare_side(
         ctx, input_path=binary, headers=(), includes=(inc,), sources=srcs,
-        build_info=None, depth="full", max_depth=False, version="2", lang="c++",
+        build_info=None, collect_mode="graph-full", version="2", lang="c++",
         header_backend="auto", out_dir=tmp_path, label="old",
     )
     assert out == tmp_path / "old.abi.json"
@@ -130,7 +160,10 @@ def test_prepare_side_dumps_native_binary(tmp_path: Path, monkeypatch) -> None:
     assert call["so_path"] == binary
     assert call["sources"] == srcs
     assert call["includes"] == (inc,)  # include dirs threaded into the dump
-    assert call["depth"] == "full"
+    # The resolved collect mode is threaded so the dump embeds exactly the depth
+    # compare reports — never dump_cmd's own source-target default (Codex review).
+    assert call["collect_mode"] == "graph-full"
+    assert "depth" not in call
     assert call["output"] == out
 
 
@@ -145,7 +178,7 @@ def test_prepare_side_snapshot_without_evidence_is_silent(tmp_path: Path, monkey
     monkeypatch.setattr(cli_max.click, "echo", lambda *a, **k: captured.append(str(a)))
     out = cli_max._prepare_side(
         ctx, input_path=snap, headers=(), includes=(), sources=None, build_info=None,
-        depth=None, max_depth=False, version="1", lang="c++",
+        collect_mode="off", version="1", lang="c++",
         header_backend="auto", out_dir=tmp_path, label="new",
     )
     assert out == snap
