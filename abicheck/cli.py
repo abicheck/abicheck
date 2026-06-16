@@ -170,15 +170,37 @@ def _stamp_provenance(
             pass  # git not available or not a repo — leave as None
 
 
+def _layer_payload_empty(pack: BuildSourcePack, key: str) -> bool:
+    """True when *key*'s embedded payload carries no facts.
+
+    A coverage row can read ``PARTIAL``/``PRESENT`` while the payload is empty —
+    e.g. ``_run_inline_source_abi`` returns an empty ``SourceAbiSurface()`` when
+    clang is unavailable after L3 was found. The status alone then hides the
+    miss, so we inspect the actual payload (Codex review, PR #422).
+    """
+    if key == "L3":
+        be = pack.build_evidence
+        return be is None or (not be.targets and not be.compile_units)
+    if key == "L4":
+        sa = pack.source_abi
+        return sa is None or not any(sa.reachable_buckets().values())
+    if key == "L5":
+        sg = pack.source_graph
+        return sg is None or not sg.nodes
+    return False
+
+
 def _missing_requested_evidence_layers(
     pack: BuildSourcePack | None, collect_mode: str
 ) -> list[str]:
-    """Layers the *collect_mode* asked for but that came back not-collected.
+    """Layers the *collect_mode* asked for but that came back empty.
 
     Maps the ADR-033 evidence mode to its expected L3/L4/L5 layers and checks the
-    embedded pack's coverage; a ``NOT_COLLECTED`` (or absent) row for a requested
-    layer is reported by its display name. Returns [] when nothing was requested
-    or everything was at least partially collected.
+    embedded pack. A layer is reported missing when its coverage row is
+    ``NOT_COLLECTED`` (or absent) **or** when its embedded payload carries no
+    facts despite a ``PARTIAL``/``PRESENT`` status — the latter catches a
+    requested extractor that ran but produced nothing (e.g. clang unavailable).
+    Returns [] when nothing was requested or every requested layer has facts.
     """
     if pack is None:
         return []
@@ -197,7 +219,11 @@ def _missing_requested_evidence_layers(
         if layer is None:
             continue
         cov = pack.manifest.coverage_for(layer)
-        if cov is None or cov.status == CoverageStatus.NOT_COLLECTED:
+        if (
+            cov is None
+            or cov.status == CoverageStatus.NOT_COLLECTED
+            or _layer_payload_empty(pack, key)
+        ):
             missing.append(layer.value)
     return missing
 

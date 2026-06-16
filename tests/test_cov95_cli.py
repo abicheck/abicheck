@@ -283,16 +283,27 @@ class TestSmallHelpers:
         assert "--header" in opt.opts and "--headers" in opt.opts
 
     def test_missing_requested_evidence_layers(self) -> None:
-        # G21.7: a requested layer that came back NOT_COLLECTED is reported.
+        # G21.7: a requested layer that came back NOT_COLLECTED — or PARTIAL with
+        # an empty payload (Codex review) — is reported.
         from types import SimpleNamespace
 
         from abicheck.buildsource.model import CoverageStatus, DataLayer
         from abicheck.cli import _missing_requested_evidence_layers
 
-        def _pack(statuses):
+        # Non-empty payload stand-ins, one per layer key.
+        _full_be = SimpleNamespace(targets=["t"], compile_units=["cu"])
+        _full_sa = SimpleNamespace(reachable_buckets=lambda: {"declarations": ["d"]})
+        _full_sg = SimpleNamespace(nodes=["n"])
+        _empty_sa = SimpleNamespace(reachable_buckets=lambda: {"declarations": []})
+
+        def _pack(statuses, *, build_evidence=_full_be, source_abi=_full_sa,
+                  source_graph=_full_sg):
             cov = {dl: SimpleNamespace(status=st) for dl, st in statuses.items()}
             return SimpleNamespace(
-                manifest=SimpleNamespace(coverage_for=lambda layer: cov.get(layer))
+                manifest=SimpleNamespace(coverage_for=lambda layer: cov.get(layer)),
+                build_evidence=build_evidence,
+                source_abi=source_abi,
+                source_graph=source_graph,
             )
 
         pack = _pack({
@@ -305,6 +316,26 @@ class TestSmallHelpers:
         ]
         assert _missing_requested_evidence_layers(None, "source-target") == []
         assert _missing_requested_evidence_layers(pack, "off") == []  # nothing requested
+
+        # Empty-but-PARTIAL L4 (clang unavailable after L3 found) is still missing.
+        empty_partial = _pack(
+            {
+                DataLayer.L3_BUILD: CoverageStatus.PRESENT,
+                DataLayer.L4_SOURCE_ABI: CoverageStatus.PARTIAL,
+                DataLayer.L5_SOURCE_GRAPH: CoverageStatus.PRESENT,
+            },
+            source_abi=_empty_sa,
+        )
+        assert _missing_requested_evidence_layers(empty_partial, "source-target") == [
+            DataLayer.L4_SOURCE_ABI.value
+        ]
+        # All layers present and non-empty → nothing reported.
+        full = _pack({
+            DataLayer.L3_BUILD: CoverageStatus.PRESENT,
+            DataLayer.L4_SOURCE_ABI: CoverageStatus.PARTIAL,
+            DataLayer.L5_SOURCE_GRAPH: CoverageStatus.PRESENT,
+        })
+        assert _missing_requested_evidence_layers(full, "source-target") == []
 
     def test_dump_gcc_option_ignored_warning_for_non_elf(self, tmp_path) -> None:
         # G21.5/Codex: --gcc-option(s) aren't applied on the native PE/Mach-O
