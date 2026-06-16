@@ -305,6 +305,8 @@ def test_sc_scan_sarif(tmp_path: Path) -> None:
     doc = json.loads(res.output)
     assert doc.get("version") == "2.1.0"
     assert doc.get("runs"), "SARIF must contain runs"
+    driver = doc["runs"][0]["tool"]["driver"]
+    assert driver["informationUri"] == "https://github.com/abicheck/abicheck"
 
 
 def test_sc_release_recommendation(tmp_path: Path) -> None:
