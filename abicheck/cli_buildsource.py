@@ -604,6 +604,24 @@ def _collect_source_abi(
             roots=roots,
         )
 
+    # A no-op replay scope selects zero translation units by design ("off", or
+    # "changed" with no --changed-path), so it needs neither L3 build evidence
+    # nor a source-ABI frontend. Resolve it *before* probing for clang/castxml
+    # so a minimal image (no frontend) does not false-fail --collection-mode
+    # strict on a scope that would never use one. (ADR-030 D7; Codex review.)
+    if scope == "off" or (scope == "changed" and not changed_paths):
+        extractors.append(
+            ExtractorRecord(
+                name=f"source_abi:{extractor}",
+                status="partial",
+                detail=f"scope {scope!r} selects no translation units; nothing to replay",
+            )
+        )
+        return (
+            SourceAbiSurface(library=library, target_id=target_id),
+            f"no-op: scope {scope!r} selects no translation units",
+        )
+
     from .buildsource.source_extractors import select_source_backend
 
     # Evaluate the available front-ends and pick a path (ADR-030 D3): "auto"
@@ -635,26 +653,12 @@ def _collect_source_abi(
         merged.diagnostics.append(f"source_abi: {choice.gap_note()}")
 
     if not merged.compile_units:
-        # A no-op replay scope selects zero TUs by design ("off", or "changed"
-        # with no --changed-path), so absent L3 build evidence is not a missing
-        # prerequisite — it would not be used. Only the scopes that actually
-        # consume compile units treat empty L3 as a "skipped" layer, so that
-        # --collection-mode strict fails loud on an explicitly-requested layer
-        # that produced nothing without false-failing the no-op scopes. (ADR-030
-        # D7.) Permissive mode is unaffected and still exits 0 either way.
-        noop_scope = scope == "off" or (scope == "changed" and not changed_paths)
-        if noop_scope:
-            extractors.append(
-                ExtractorRecord(
-                    name=f"source_abi:{extractor}",
-                    status="partial",
-                    detail=f"scope {scope!r} selects no translation units; nothing to replay",
-                )
-            )
-            return (
-                SourceAbiSurface(library=library, target_id=target_id),
-                f"no-op: scope {scope!r} selects no translation units",
-            )
+        # The user explicitly asked for a unit-consuming L4 scope but there is
+        # no L3 build context to replay, so nothing is produced. Record this as
+        # "skipped" (not "partial") so --collection-mode strict fails loud
+        # instead of silently passing on an empty requested layer; permissive
+        # mode is unaffected and still exits 0. (No-op scopes already returned
+        # above, before backend resolution.)
         extractors.append(
             ExtractorRecord(
                 name=f"source_abi:{extractor}",
