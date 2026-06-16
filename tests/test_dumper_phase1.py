@@ -67,7 +67,9 @@ def test_dump_with_headers_uses_castxml_parser_results(tmp_path, monkeypatch):
     monkeypatch.setattr("abicheck.dwarf_metadata.parse_dwarf_metadata", lambda _p: None)
     monkeypatch.setattr("abicheck.dwarf_advanced.parse_advanced_dwarf", lambda _p: None)
 
-    snap = dump(so_path=so_path, headers=[header], extra_includes=[tmp_path], version="2.0")
+    # Pin the castxml backend: this test exercises the castxml parser path
+    # specifically (auto would pick clang on a clang-only host).
+    snap = dump(so_path=so_path, headers=[header], extra_includes=[tmp_path], version="2.0", header_backend="castxml")
 
     assert snap.version == "2.0"
     assert len(snap.functions) == 1
@@ -88,4 +90,4 @@ def test_dump_with_headers_propagates_castxml_error(tmp_path, monkeypatch):
     monkeypatch.setattr("abicheck.dwarf_advanced.parse_advanced_dwarf", lambda _p: None)
 
     with pytest.raises(RuntimeError, match="castxml failed"):
-        dump(so_path=so_path, headers=[header], version="1.0")
+        dump(so_path=so_path, headers=[header], version="1.0", header_backend="castxml")

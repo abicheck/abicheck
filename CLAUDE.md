@@ -56,6 +56,11 @@ Core pipeline (in order of data flow):
    - `btf_metadata.py`, `ctf_metadata.py` — Linux kernel debug formats
    - `sycl_metadata.py` — SYCL plugin interface
 2. **Snapshot** — `dumper.py` creates `AbiSnapshot` (model in `model.py`)
+   - `dumper_castxml.py` — castxml XML → model parser (default L2 header backend)
+   - `dumper_clang.py` — `clang -ast-dump=json` → model parser (alternative L2
+     backend for clang-only hosts; `--header-backend clang` /
+     `ABICHECK_HEADER_BACKEND=clang`). Both parsers expose the same `parse_*`
+     surface behind `dumper._header_ast_parser`.
    - `dwarf_snapshot.py` — DWARF-specific snapshot logic
    - `snapshot_cache.py` — caching layer
 3. **Diffing** — compare two snapshots

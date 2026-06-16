@@ -282,7 +282,13 @@ def main() -> None:
               help="Library version string to embed in snapshot.")
 @click.option("--lang", default="c++", show_default=True,
               type=click.Choice(["c++", "c"], case_sensitive=False),
-              help="Language mode for castxml.")
+              help="Language mode for the header backend.")
+@click.option("--header-backend", "header_backend", default="auto", show_default=True,
+              type=click.Choice(["auto", "castxml", "clang"], case_sensitive=False),
+              help="L2 header-AST frontend: castxml (default schema reference) or "
+                   "clang (-ast-dump=json; for hosts where castxml is absent or its "
+                   "bundled frontend chokes). auto = castxml if present, else clang. "
+                   "Env: ABICHECK_HEADER_BACKEND.")
 @click.option("-o", "--output", "output", type=click.Path(path_type=Path), default=None,
               help="Output JSON file. Defaults to stdout.")
 # ── Cross-compilation flags ───────────────────────────────────────────────────
@@ -359,7 +365,7 @@ def main() -> None:
 @build_source_dump_options  # --build-info / --sources (embed inline)
 def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Path, ...],
              public_headers: tuple[Path, ...], public_header_dirs: tuple[Path, ...],
-             version: str, lang: str, output: Path | None,
+             version: str, lang: str, header_backend: str, output: Path | None,
              gcc_path: str | None, gcc_prefix: str | None, gcc_options: str | None,
              sysroot: Path | None, nostdinc: bool, pdb_path: Path | None,
              follow_deps: bool, search_paths: tuple[Path, ...], ld_library_path: str,
@@ -423,6 +429,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
             follow_deps, git_tag, build_id, no_git, output, public_headers,
             public_header_dirs, build_info, sources, build_config,
             allow_build_query, collect_mode, build_query, build_compile_db,
+            header_backend=header_backend,
         )
         return
 
@@ -454,6 +461,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         effective_debug_format=effective_debug_format,
         public_headers=public_headers,
         public_header_dirs=public_header_dirs,
+        header_backend=header_backend,
         effective_compile_db=effective_compile_db,
         follow_deps=follow_deps,
         search_paths=search_paths,
@@ -498,6 +506,7 @@ def _handle_non_elf_dump(
     collect_mode: str = "source-target",
     build_query: str | None = None,
     build_compile_db: str | None = None,
+    header_backend: str = "auto",
 ) -> None:
     """Handle PE/Mach-O native dump path and output writing."""
     if follow_deps:
@@ -508,6 +517,7 @@ def _handle_non_elf_dump(
             pdb_path=pdb_path,
             public_headers=list(public_headers),
             public_header_dirs=list(public_header_dirs),
+            header_backend=header_backend,
         )
     except click.ClickException:
         raise
@@ -818,7 +828,12 @@ def _finalize_compare_result(
               help="Extra include directory for castxml (applied to both sides).")
 @click.option("--lang", default="c++", show_default=True,
               type=click.Choice(["c++", "c"], case_sensitive=False),
-              help="Language mode for castxml.")
+              help="Language mode for the header backend.")
+@click.option("--header-backend", "header_backend", default="auto", show_default=True,
+              type=click.Choice(["auto", "castxml", "clang"], case_sensitive=False),
+              help="L2 header-AST frontend for native-binary inputs: castxml "
+                   "(default) or clang (-ast-dump=json; for clang-only hosts). "
+                   "auto = castxml if present, else clang. Env: ABICHECK_HEADER_BACKEND.")
 @click.option("--old-header", "old_headers_only", multiple=True,
               type=click.Path(path_type=Path),
               help="Public header for old side only (overrides -H for old). "
@@ -998,6 +1013,7 @@ def _finalize_compare_result(
 def compare_cmd(
     old_input: Path, new_input: Path,
     headers: tuple[Path, ...], includes: tuple[Path, ...], lang: str,
+    header_backend: str,
     old_headers_only: tuple[Path, ...], new_headers_only: tuple[Path, ...],
     old_includes_only: tuple[Path, ...], new_includes_only: tuple[Path, ...],
     old_version: str, new_version: str,
@@ -1162,6 +1178,7 @@ def compare_cmd(
         pdb_path, old_pdb_path, new_pdb_path,
         dwarf_only, effective_debug_format,
         follow_deps, search_paths, ld_library_path,
+        header_backend=header_backend,
     )
 
     suppression, pf = _load_suppression_and_policy(

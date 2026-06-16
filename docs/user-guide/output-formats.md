@@ -125,7 +125,7 @@ itself (ADR-024 §D5.3), distinct from the overall verdict confidence:
 
 - `confidence`: `"high"` (a clean header-scoped run) or `"reduced"`.
 - `notes`: structured codes explaining any reduction —
-  `mangling-fallback` / `castxml-unavailable` (header scoping was requested on a
+  `mangling-fallback` / `header-backend-unavailable` (header scoping was requested on a
   PE/Mach-O binary but fell back to the export table; recorded on the snapshot
   as `scope_fallback`), or `no-provenance` (the surface resolved without any
   declaration provenance).

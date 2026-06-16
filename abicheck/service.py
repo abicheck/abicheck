@@ -152,6 +152,7 @@ def resolve_input(
     public_headers: list[Path] | None = None,
     public_header_dirs: list[Path] | None = None,
     follow_linker_scripts: bool = True,
+    header_backend: str = "auto",
     notify: Callable[[str], None] | None = None,
 ) -> AbiSnapshot:
     """Auto-detect input type and return an ABI snapshot.
@@ -204,6 +205,7 @@ def resolve_input(
             debug_format=debug_format,
             public_headers=public_headers,
             public_header_dirs=public_header_dirs,
+            header_backend=header_backend,
             notify=notify,
         )
 
@@ -224,6 +226,7 @@ def resolve_input(
             debug_format=debug_format,
             public_headers=public_headers,
             public_header_dirs=public_header_dirs,
+            header_backend=header_backend,
             notify=notify,
         )
 
@@ -288,6 +291,7 @@ def resolve_input(
                     public_headers=public_headers,
                     public_header_dirs=public_header_dirs,
                     follow_linker_scripts=follow_linker_scripts,
+                    header_backend=header_backend,
                     notify=notify,
                 )
             raise ValidationError(
@@ -334,6 +338,7 @@ def run_dump(
     debug_format: str | None = None,
     public_headers: list[Path] | None = None,
     public_header_dirs: list[Path] | None = None,
+    header_backend: str = "auto",
     notify: Callable[[str], None] | None = None,
 ) -> AbiSnapshot:
     """Extract an ABI snapshot from a native binary (ELF, PE, or Mach-O).
@@ -362,6 +367,7 @@ def run_dump(
             debug_roots=debug_roots,
             enable_debuginfod=enable_debuginfod,
             debug_format=debug_format,
+            header_backend=header_backend,
             notify=notify,
         )
         _try_attach_sycl_metadata(snap, path)
@@ -374,6 +380,7 @@ def run_dump(
             includes=_includes,
             lang=lang,
             pdb_path=pdb_path,
+            header_backend=header_backend,
         )
         return _apply_native_provenance(snap, public_headers, public_header_dirs)
     if binary_fmt == "macho":
@@ -382,6 +389,7 @@ def run_dump(
             version,
             headers=_headers,
             includes=_includes,
+            header_backend=header_backend,
             lang=lang,
         )
         return _apply_native_provenance(snap, public_headers, public_header_dirs)
@@ -448,6 +456,7 @@ def _dump_elf(
     debug_roots: list[Path] | None = None,
     enable_debuginfod: bool = False,
     debug_format: str | None = None,
+    header_backend: str = "auto",
     notify: Callable[[str], None] | None = None,
 ) -> AbiSnapshot:
     """Dump an ELF binary to an ABI snapshot."""
@@ -480,6 +489,7 @@ def _dump_elf(
             lang=lang if lang == "c" else None,
             dwarf_only=dwarf_only,
             debug_format=debug_format,
+            header_backend=header_backend,
         )
     except (AbicheckError, RuntimeError, OSError, ValueError) as exc:
         raise SnapshotError(f"Failed to dump '{path}': {exc}") from exc
@@ -506,16 +516,18 @@ def _try_header_scoped_dump(
     includes: list[Path],
     version: str,
     lang: str,
+    header_backend: str = "auto",
 ) -> tuple[AbiSnapshot | None, str | None]:
-    """Attempt a castxml header-scoped dump for a PE/Mach-O binary.
+    """Attempt a header-scoped dump for a PE/Mach-O binary.
 
-    Returns ``(snapshot, None)`` when castxml is available *and* at least one
-    declared symbol matched the export table.  Returns ``(None, reason)`` (after
-    emitting a ``UserWarning``) when scoping is unavailable or had no effect, so
-    the caller can fall back to export-table mode and record the structured
-    confidence signal (ADR-024 §D5.3).  ``reason`` is one of
-    ``"castxml-unavailable"`` / ``"mangling-fallback"``.  This mirrors the
-    public-API scoping that ``abidw --headers-dir`` / abi-dumper apply for ELF.
+    Returns ``(snapshot, None)`` when the selected header backend is available
+    *and* at least one declared symbol matched the export table.  Returns
+    ``(None, reason)`` (after emitting a ``UserWarning``) when scoping is
+    unavailable or had no effect, so the caller can fall back to export-table
+    mode and record the structured confidence signal (ADR-024 §D5.3).
+    ``reason`` is one of ``"header-backend-unavailable"`` /
+    ``"mangling-fallback"``.  This mirrors the public-API scoping that
+    ``abidw --headers-dir`` / abi-dumper apply for ELF.
     """
     from .dumper import _dump_macho as _dumper_macho, _dump_pe as _dumper_pe
 
@@ -531,13 +543,15 @@ def _try_header_scoped_dump(
     try:
         if fmt == "pe":
             snap = _dumper_pe(
-                path, resolved_headers, includes, version, compiler, lang=lang_arg
+                path, resolved_headers, includes, version, compiler,
+                lang=lang_arg, header_backend=header_backend,
             )
         else:
             snap = _dumper_macho(
-                path, resolved_headers, includes, version, compiler, lang=lang_arg
+                path, resolved_headers, includes, version, compiler,
+                lang=lang_arg, header_backend=header_backend,
             )
-    except Exception as exc:  # noqa: BLE001 — castxml missing / parse failure → fall back
+    except Exception as exc:  # noqa: BLE001 — header backend/parse failure → fall back
         warnings.warn(
             f"Header-based ABI scoping unavailable for '{path.name}' "
             f"({fmt.upper()}): {exc}. Falling back to export-table mode — "
@@ -545,7 +559,7 @@ def _try_header_scoped_dump(
             UserWarning,
             stacklevel=2,
         )
-        return None, "castxml-unavailable"
+        return None, "header-backend-unavailable"
 
     if not _has_matched_public_surface(snap):
         warnings.warn(
@@ -592,6 +606,7 @@ def _dump_pe(
     includes: list[Path] | None = None,
     lang: str = "c++",
     pdb_path: Path | None = None,
+    header_backend: str = "auto",
 ) -> AbiSnapshot:
     """Dump a PE binary (Windows DLL) to an ABI snapshot.
 
@@ -631,6 +646,7 @@ def _dump_pe(
             includes or [],
             version,
             lang,
+            header_backend=header_backend,
         )
         if scoped is not None:
             # Preserve any PDB debug info alongside the header-scoped surface.
@@ -684,6 +700,7 @@ def _dump_macho(
     headers: list[Path] | None = None,
     includes: list[Path] | None = None,
     lang: str = "c++",
+    header_backend: str = "auto",
 ) -> AbiSnapshot:
     """Dump a Mach-O binary (macOS dylib) to an ABI snapshot.
 
@@ -716,6 +733,7 @@ def _dump_macho(
             includes or [],
             version,
             lang,
+            header_backend=header_backend,
         )
         if scoped is not None:
             return scoped
