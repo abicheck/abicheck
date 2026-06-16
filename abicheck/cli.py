@@ -84,6 +84,7 @@ from .errors import AbicheckError
 from .serialization import snapshot_to_json
 
 if TYPE_CHECKING:
+    from .buildsource.pack import BuildSourcePack
     from .checker_types import Change, DiffResult
     from .debug_resolver import DebugArtifact
     from .severity import SeverityConfig
@@ -169,6 +170,38 @@ def _stamp_provenance(
             pass  # git not available or not a repo — leave as None
 
 
+def _missing_requested_evidence_layers(
+    pack: BuildSourcePack | None, collect_mode: str
+) -> list[str]:
+    """Layers the *collect_mode* asked for but that came back not-collected.
+
+    Maps the ADR-033 evidence mode to its expected L3/L4/L5 layers and checks the
+    embedded pack's coverage; a ``NOT_COLLECTED`` (or absent) row for a requested
+    layer is reported by its display name. Returns [] when nothing was requested
+    or everything was at least partially collected.
+    """
+    if pack is None:
+        return []
+    from .buildsource.model import CoverageStatus, DataLayer
+    from .buildsource.source_replay import collection_for_ci_mode
+
+    _layer_for = {
+        "L3": DataLayer.L3_BUILD,
+        "L4": DataLayer.L4_SOURCE_ABI,
+        "L5": DataLayer.L5_SOURCE_GRAPH,
+    }
+    _, layers = collection_for_ci_mode(collect_mode)
+    missing: list[str] = []
+    for key in layers:
+        layer = _layer_for.get(key)
+        if layer is None:
+            continue
+        cov = pack.manifest.coverage_for(layer)
+        if cov is None or cov.status == CoverageStatus.NOT_COLLECTED:
+            missing.append(layer.value)
+    return missing
+
+
 def _write_snapshot_output(
     snap: AbiSnapshot,
     output: Path | None,
@@ -199,6 +232,19 @@ def _write_snapshot_output(
             collect_mode=collect_mode,
             build_query=build_query, build_compile_db=build_compile_db,
         )
+        # G21.7: fail loud — if a requested evidence layer came back empty, say so
+        # prominently instead of leaving it buried in the coverage rows. Permissive
+        # by design (a warning, not an error): --collection-mode strict on
+        # `collect` remains the hard-fail path (ADR-028 D3).
+        missing = _missing_requested_evidence_layers(snap.build_source, collect_mode)
+        if missing:
+            click.echo(
+                f"Warning: requested evidence layer(s) not collected: "
+                f"{', '.join(missing)}. The snapshot embeds no facts for them — "
+                "supply --build-info/--compile-db or install clang/castxml, and "
+                "see the coverage rows for details.",
+                err=True,
+            )
     result = snapshot_to_json(snap)
     if output:
         _safe_write_output(output, result)

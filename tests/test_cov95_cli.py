@@ -275,6 +275,37 @@ class TestSmallHelpers:
         dump_help = runner.invoke(main, ["dump", "--help"]).output
         assert "Toolchain" in dump_help and "Provenance" in dump_help
 
+    def test_collect_header_alias(self) -> None:
+        # M5: collect gains a --header alias for cross-command vocab consistency
+        # (dump/compare use --header); --headers stays working.
+        opt = next(p for p in main.commands["collect"].params
+                   if getattr(p, "name", "") == "headers")
+        assert "--header" in opt.opts and "--headers" in opt.opts
+
+    def test_missing_requested_evidence_layers(self) -> None:
+        # G21.7: a requested layer that came back NOT_COLLECTED is reported.
+        from types import SimpleNamespace
+
+        from abicheck.buildsource.model import CoverageStatus, DataLayer
+        from abicheck.cli import _missing_requested_evidence_layers
+
+        def _pack(statuses):
+            cov = {dl: SimpleNamespace(status=st) for dl, st in statuses.items()}
+            return SimpleNamespace(
+                manifest=SimpleNamespace(coverage_for=lambda layer: cov.get(layer))
+            )
+
+        pack = _pack({
+            DataLayer.L3_BUILD: CoverageStatus.PRESENT,
+            DataLayer.L4_SOURCE_ABI: CoverageStatus.NOT_COLLECTED,
+            DataLayer.L5_SOURCE_GRAPH: CoverageStatus.PRESENT,
+        })
+        assert _missing_requested_evidence_layers(pack, "source-target") == [
+            DataLayer.L4_SOURCE_ABI.value
+        ]
+        assert _missing_requested_evidence_layers(None, "source-target") == []
+        assert _missing_requested_evidence_layers(pack, "off") == []  # nothing requested
+
     def test_dump_gcc_option_ignored_warning_for_non_elf(self, tmp_path) -> None:
         # G21.5/Codex: --gcc-option(s) aren't applied on the native PE/Mach-O
         # dump path, so the CLI warns rather than dropping them silently.

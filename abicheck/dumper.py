@@ -631,11 +631,16 @@ def _build_castxml_command(
     # whitespace survives intact and identically on POSIX and Windows.
     cmd += list(gcc_option_tokens)
 
+    explicit_std = _has_explicit_std(gcc_options, gcc_option_tokens)
     # Workaround: castxml with --castxml-cc-gnu gcc auto-injects -std=gnu++17
-    # which is rejected when parsing a .h file in C mode.
+    # which is rejected when parsing a .h file in C mode. Force C mode, but only
+    # impose gnu11 when the user did not request a C standard via --gcc-option(s)
+    # — otherwise their -std=gnu17/c99 would be overridden by a later flag.
     if not force_cpp and cc_id == "gnu":
-        cmd += ["-x", "c", "-std=gnu11"]
-    elif force_cpp20 and not _has_explicit_std(gcc_options, gcc_option_tokens):
+        cmd += ["-x", "c"]
+        if not explicit_std:
+            cmd += ["-std=gnu11"]
+    elif force_cpp20 and not explicit_std:
         # Headers contain C++20-only syntax (concept / requires-expression).
         # Castxml's default standard is whatever the host compiler picks
         # (usually C++17 on modern gcc / MSVC), which rejects concepts.

@@ -336,3 +336,20 @@ def test_clang_header_command_carries_gcc_option_tokens(tmp_path):
     i = cmd.index("-include")
     assert cmd[i + 1] == "some header.h"        # spaced value stays one arg
     assert "-std=gnu++23" in cmd and "-std=gnu++20" not in cmd
+
+
+def test_castxml_c_mode_user_std_token_not_overridden():
+    """C-mode castxml must not append -std=gnu11 after a user -std token, so a
+    C dialect chosen via --gcc-option actually takes effect (Codex review)."""
+    from pathlib import Path
+
+    from abicheck.dumper import _build_castxml_command
+
+    cmd = _build_castxml_command(
+        "gcc", "gnu", [], Path("o.xml"), Path("a.h"),
+        gcc_option_tokens=("-std=gnu17",),
+        force_cpp=False,
+    )
+    assert "-std=gnu17" in cmd
+    assert "-std=gnu11" not in cmd
+    assert "-x" in cmd and "c" in cmd  # C language mode still forced
