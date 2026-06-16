@@ -353,3 +353,72 @@ def test_castxml_c_mode_user_std_token_not_overridden():
     assert "-std=gnu17" in cmd
     assert "-std=gnu11" not in cmd
     assert "-x" in cmd and "c" in cmd  # C language mode still forced
+
+
+def _ast_parser_kwargs(tmp_path):
+    """Common keyword args for _header_ast_parser in the G16 fallback tests."""
+    return dict(
+        compiler="c++", gcc_path=None, gcc_prefix=None, gcc_options=None,
+        gcc_option_tokens=(), sysroot=None, nostdinc=False, lang=None,
+        exported_dynamic=set(), exported_static=set(),
+        public_header_paths=[], public_dir_paths=[],
+    )
+
+
+def test_header_ast_parser_falls_back_to_clang_on_toolchain_failure(tmp_path, monkeypatch):
+    """G16: an auto-selected castxml that fails with a toolchain-version error
+    (bundled Clang too old) falls back to the clang backend instead of aborting."""
+    from abicheck import dumper
+    from abicheck.dumper import _ClangAstParser, _header_ast_parser
+    from abicheck.errors import SnapshotError
+
+    def _boom(*a, **k):
+        raise SnapshotError("castxml failed: error: unknown type name '_Float128'")
+
+    sentinel = object()
+    monkeypatch.setattr(dumper, "_resolve_header_backend", lambda b: "castxml")
+    monkeypatch.setattr(dumper, "_castxml_dump", _boom)
+    monkeypatch.setattr(dumper, "_clang_available", lambda *a, **k: True)
+    monkeypatch.setattr(dumper, "_clang_header_dump", lambda *a, **k: sentinel)
+    monkeypatch.delenv("ABICHECK_HEADER_BACKEND", raising=False)
+
+    parser = _header_ast_parser([Path("a.h")], [], backend="auto", **_ast_parser_kwargs(tmp_path))
+    assert isinstance(parser, _ClangAstParser)
+
+
+def test_header_ast_parser_no_fallback_when_castxml_explicit(tmp_path, monkeypatch):
+    """An explicit --header-backend castxml is honored verbatim — the toolchain
+    error surfaces unchanged rather than silently switching to clang."""
+    from abicheck import dumper
+    from abicheck.dumper import _header_ast_parser
+    from abicheck.errors import SnapshotError
+
+    def _boom(*a, **k):
+        raise SnapshotError("castxml failed: error: unknown type name '_Float128'")
+
+    monkeypatch.setattr(dumper, "_resolve_header_backend", lambda b: "castxml")
+    monkeypatch.setattr(dumper, "_castxml_dump", _boom)
+    monkeypatch.setattr(dumper, "_clang_available", lambda *a, **k: True)
+    monkeypatch.delenv("ABICHECK_HEADER_BACKEND", raising=False)
+
+    with pytest.raises(SnapshotError):
+        _header_ast_parser([Path("a.h")], [], backend="castxml", **_ast_parser_kwargs(tmp_path))
+
+
+def test_header_ast_parser_no_fallback_on_non_toolchain_failure(tmp_path, monkeypatch):
+    """A castxml failure that is NOT a toolchain-version signature (e.g. a bad
+    header) re-raises — fallback is reserved for the recoverable case."""
+    from abicheck import dumper
+    from abicheck.dumper import _header_ast_parser
+    from abicheck.errors import SnapshotError
+
+    def _boom(*a, **k):
+        raise SnapshotError("castxml failed: fatal error: 'missing.h' file not found")
+
+    monkeypatch.setattr(dumper, "_resolve_header_backend", lambda b: "castxml")
+    monkeypatch.setattr(dumper, "_castxml_dump", _boom)
+    monkeypatch.setattr(dumper, "_clang_available", lambda *a, **k: True)
+    monkeypatch.delenv("ABICHECK_HEADER_BACKEND", raising=False)
+
+    with pytest.raises(SnapshotError):
+        _header_ast_parser([Path("a.h")], [], backend="auto", **_ast_parser_kwargs(tmp_path))

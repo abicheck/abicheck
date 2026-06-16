@@ -19,7 +19,10 @@ The header AST (L2) is produced by one of two interchangeable frontends behind
 ``dumper_castxml._CastxmlParser``) or **clang** (``clang -ast-dump=json``, parsed
 by ``dumper_clang._ClangAstParser``) for hosts where castxml is absent. Select
 with ``header_backend=`` (``auto``/``castxml``/``clang``) or the
-``ABICHECK_HEADER_BACKEND`` env var. See ADR-003.
+``ABICHECK_HEADER_BACKEND`` env var. When the backend is auto-selected, a castxml
+*toolchain-version* failure (bundled Clang too old for the host libstdc++/GCC)
+falls back to the clang backend automatically (G16); an explicit selection is
+honored verbatim. See ADR-003.
 """
 from __future__ import annotations
 
@@ -316,7 +319,8 @@ def _header_ast_parser(
     uniformly — the only difference is which frontend produced the AST.
     """
     resolved = _resolve_header_backend(backend)
-    if resolved == "clang":
+
+    def _run_clang() -> _ClangAstParser:
         ast_root = _clang_header_dump(
             headers, extra_includes, compiler=compiler,
             gcc_path=gcc_path, gcc_prefix=gcc_prefix, gcc_options=gcc_options,
@@ -328,12 +332,39 @@ def _header_ast_parser(
             public_header_paths=public_header_paths,
             public_dir_paths=public_dir_paths,
         )
-    xml_root = _castxml_dump(
-        headers, extra_includes, compiler=compiler,
-        gcc_path=gcc_path, gcc_prefix=gcc_prefix, gcc_options=gcc_options,
-        gcc_option_tokens=gcc_option_tokens,
-        sysroot=sysroot, nostdinc=nostdinc, lang=lang,
-    )
+
+    if resolved == "clang":
+        return _run_clang()
+
+    # G16: when the backend was selected automatically (no explicit --header-backend
+    # and no ABICHECK_HEADER_BACKEND pin), a castxml *toolchain-version* failure
+    # (bundled Clang too old for the host libstdc++/GCC) is recoverable — the clang
+    # backend parses against the host toolchain directly. Fall back to it rather
+    # than aborting. An explicit castxml request is honored verbatim (the error
+    # surfaces unchanged).
+    choice = (backend or "auto").lower()
+    env_pin = os.environ.get("ABICHECK_HEADER_BACKEND", "").strip().lower()
+    auto_selected = choice == "auto" and env_pin not in ("castxml", "clang")
+    try:
+        xml_root = _castxml_dump(
+            headers, extra_includes, compiler=compiler,
+            gcc_path=gcc_path, gcc_prefix=gcc_prefix, gcc_options=gcc_options,
+            gcc_option_tokens=gcc_option_tokens,
+            sysroot=sysroot, nostdinc=nostdinc, lang=lang,
+        )
+    except SnapshotError as exc:
+        if (
+            auto_selected
+            and _clang_available()
+            and _is_toolchain_version_failure(str(exc))
+        ):
+            log.warning(
+                "castxml failed with a toolchain-version error; falling back to "
+                "the clang header backend (set --header-backend castxml to force "
+                "castxml and see the original error)."
+            )
+            return _run_clang()
+        raise
     return _CastxmlParser(
         xml_root, exported_dynamic, exported_static,
         public_header_paths=public_header_paths,

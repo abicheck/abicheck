@@ -380,8 +380,9 @@ def main() -> None:
               type=click.Choice(["auto", "castxml", "clang"], case_sensitive=False),
               help="L2 header-AST frontend: castxml (default schema reference) or "
                    "clang (-ast-dump=json; for hosts where castxml is absent or its "
-                   "bundled frontend chokes). auto = castxml if present, else clang. "
-                   "Env: ABICHECK_HEADER_BACKEND.")
+                   "bundled frontend chokes). auto = castxml if present, else clang, "
+                   "and auto-falls back to clang when castxml hits a toolchain-version "
+                   "error. Env: ABICHECK_HEADER_BACKEND.")
 @click.option("-o", "--output", "output", type=click.Path(path_type=Path), default=None,
               help="Output JSON file. Defaults to stdout.")
 # ── Cross-compilation flags ───────────────────────────────────────────────────
@@ -951,7 +952,9 @@ def _finalize_compare_result(
               type=click.Choice(["auto", "castxml", "clang"], case_sensitive=False),
               help="L2 header-AST frontend for native-binary inputs: castxml "
                    "(default) or clang (-ast-dump=json; for clang-only hosts). "
-                   "auto = castxml if present, else clang. Env: ABICHECK_HEADER_BACKEND.")
+                   "auto = castxml if present, else clang, and auto-falls back to "
+                   "clang on a castxml toolchain-version error. "
+                   "Env: ABICHECK_HEADER_BACKEND.")
 @click.option("--old-header", "old_headers_only", multiple=True,
               type=click.Path(path_type=Path),
               help="Public header for old side only (overrides -H for old). "

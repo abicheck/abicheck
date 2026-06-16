@@ -193,7 +193,10 @@ M overall. G21.1/G21.2 are the headline win and ride on existing machinery
   evidence contract (ADR-028 D3) and needs its own decision; G21.7 only adds a
   default-visible *warning* plus the existing opt-in strict failure.
 - **L2 clang-direct fallback** (route header AST through the clang backend on a
-  castxml toolchain-version failure) — separate PR, see G16.
+  castxml toolchain-version failure) — **shipped (G16)**: `_header_ast_parser`
+  auto-falls back to the clang backend when an *auto-selected* castxml hits a
+  toolchain-version signature; an explicit `--header-backend castxml` is honored
+  verbatim (the error surfaces unchanged).
 - Conda/`dal-devel` fetching stays in the eval harness, not the tool.
 
 **G21.9** — the one-shot `deep-compare` orchestrator — **shipped in PR #422**
