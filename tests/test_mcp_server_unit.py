@@ -53,6 +53,7 @@ from abicheck.mcp_server import (  # noqa: E402
     abi_dump,
     abi_explain_change,
     abi_list_changes,
+    abi_scan,
     main,
 )
 from abicheck.model import (  # noqa: E402
@@ -184,26 +185,32 @@ class TestSafeWritePath:
         __import__("platform").system() == "Windows",
         reason="POSIX-only sensitive paths",
     )
-    @pytest.mark.parametrize("path", [
-        "/etc/foo.json",
-        "/bin/foo.json",
-        "/sbin/foo.json",
-        "/usr/bin/foo.json",
-        "/usr/sbin/foo.json",
-        "/boot/foo.json",
-        "/sys/foo.json",
-        "/proc/foo.json",
-        "/dev/foo.json",
-    ])
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "/etc/foo.json",
+            "/bin/foo.json",
+            "/sbin/foo.json",
+            "/usr/bin/foo.json",
+            "/usr/sbin/foo.json",
+            "/boot/foo.json",
+            "/sys/foo.json",
+            "/proc/foo.json",
+            "/dev/foo.json",
+        ],
+    )
     def test_posix_sensitive_path_blocked(self, path):
         with pytest.raises(ValueError, match="sensitive system path"):
             _safe_write_path(path)
 
-    @pytest.mark.parametrize("dotdir,filename", [
-        (".ssh", "keys.json"),
-        (".aws", "config.json"),
-        (".gnupg", "ring.json"),
-    ])
+    @pytest.mark.parametrize(
+        "dotdir,filename",
+        [
+            (".ssh", "keys.json"),
+            (".aws", "config.json"),
+            (".gnupg", "ring.json"),
+        ],
+    )
     def test_credential_dir_blocked(self, dotdir, filename):
         home = Path.home()
         with pytest.raises(ValueError, match="credential directory"):
@@ -568,9 +575,9 @@ class TestImpactCategory:
             ChangeKind.PARAM_DEFAULT_VALUE_REMOVED,
         ]:
             if kind in API_BREAK_KINDS:
-                assert (
-                    _impact_category(kind) == "api_break"
-                ), f"{kind} should be api_break"
+                assert _impact_category(kind) == "api_break", (
+                    f"{kind} should be api_break"
+                )
 
     def test_risk_kinds(self):
         assert _impact_category(ChangeKind.SYMBOL_VERSION_REQUIRED_ADDED) == "risk"
@@ -587,9 +594,13 @@ class TestImpactCategory:
 
     def test_sdk_vendor_downgrades_some_api_breaks(self):
         # enum_member_renamed is api_break under strict_abi, compatible under sdk_vendor
-        assert _impact_category(ChangeKind.ENUM_MEMBER_RENAMED, "strict_abi") == "api_break"
         assert (
-            _impact_category(ChangeKind.ENUM_MEMBER_RENAMED, "sdk_vendor") == "compatible"
+            _impact_category(ChangeKind.ENUM_MEMBER_RENAMED, "strict_abi")
+            == "api_break"
+        )
+        assert (
+            _impact_category(ChangeKind.ENUM_MEMBER_RENAMED, "sdk_vendor")
+            == "compatible"
         )
 
     def test_plugin_abi_policy(self):
@@ -916,12 +927,8 @@ class TestAbiCompare:
         assert data["summary"]["compatible"] > 0
 
     def test_api_break_exit_code(self, tmp_path: Path):
-        old_enum = EnumType(
-            name="Color", members=[EnumMember(name="RED", value=0)]
-        )
-        new_enum = EnumType(
-            name="Color", members=[EnumMember(name="ROUGE", value=0)]
-        )
+        old_enum = EnumType(name="Color", members=[EnumMember(name="RED", value=0)])
+        new_enum = EnumType(name="Color", members=[EnumMember(name="ROUGE", value=0)])
         old = _make_snapshot("1.0", enums=[old_enum])
         new = _make_snapshot("2.0", enums=[new_enum])
         old_p, new_p = self._make_pair(tmp_path, old, new)
@@ -975,7 +982,9 @@ class TestAbiCompare:
         raw = abi_compare(str(old_p), str(new_p), output_format="html")
         data = json.loads(raw)
         assert data["status"] == "ok"
-        assert "<html" in data["report"].lower() or "<!doctype" in data["report"].lower()
+        assert (
+            "<html" in data["report"].lower() or "<!doctype" in data["report"].lower()
+        )
 
     def test_stat_parameter(self, tmp_path: Path):
         snap = _make_snapshot("1.0")
@@ -1007,12 +1016,8 @@ class TestAbiCompare:
             assert data["status"] == "ok", f"policy={policy} failed"
 
     def test_impact_respects_policy(self, tmp_path: Path):
-        old_enum = EnumType(
-            name="Color", members=[EnumMember(name="RED", value=0)]
-        )
-        new_enum = EnumType(
-            name="Color", members=[EnumMember(name="ROUGE", value=0)]
-        )
+        old_enum = EnumType(name="Color", members=[EnumMember(name="RED", value=0)])
+        new_enum = EnumType(name="Color", members=[EnumMember(name="ROUGE", value=0)])
         old = _make_snapshot("1.0", enums=[old_enum])
         new = _make_snapshot("2.0", enums=[new_enum])
         old_p, new_p = self._make_pair(tmp_path, old, new)
@@ -1020,14 +1025,18 @@ class TestAbiCompare:
         # strict_abi: enum_member_renamed is api_break
         raw = abi_compare(str(old_p), str(new_p), policy="strict_abi")
         data = json.loads(raw)
-        rename_changes = [c for c in data["changes"] if c["kind"] == "enum_member_renamed"]
+        rename_changes = [
+            c for c in data["changes"] if c["kind"] == "enum_member_renamed"
+        ]
         assert rename_changes
         assert rename_changes[0]["impact"] == "api_break"
 
         # sdk_vendor: downgraded to compatible
         raw = abi_compare(str(old_p), str(new_p), policy="sdk_vendor")
         data = json.loads(raw)
-        rename_changes = [c for c in data["changes"] if c["kind"] == "enum_member_renamed"]
+        rename_changes = [
+            c for c in data["changes"] if c["kind"] == "enum_member_renamed"
+        ]
         assert rename_changes
         assert rename_changes[0]["impact"] == "compatible"
 
@@ -1171,7 +1180,9 @@ class TestMain:
         from abicheck import mcp_server
 
         calls = []
-        monkeypatch.setattr(mcp_server.mcp, "run", lambda transport: calls.append(transport))
+        monkeypatch.setattr(
+            mcp_server.mcp, "run", lambda transport: calls.append(transport)
+        )
         monkeypatch.setattr("sys.argv", ["abicheck-mcp"])
         main()
         assert calls == ["stdio"]
@@ -1294,3 +1305,58 @@ class TestSafeWritePathTraversalEdgeCases:
     def test_double_slash_etc(self):
         with pytest.raises(ValueError, match="sensitive system path"):
             _safe_write_path("//etc/foo.json")
+
+
+# ---------------------------------------------------------------------------
+# abi_scan: --public-header-dir provenance wiring (A1)
+# ---------------------------------------------------------------------------
+
+
+class TestAbiScanPublicHeaderDir:
+    def _snap_file(self, tmp_path: Path) -> Path:
+        p = tmp_path / "lib.abi.json"
+        p.write_text(snapshot_to_json(_make_snapshot("1.0")), encoding="utf-8")
+        return p
+
+    def test_nonexistent_public_header_dir_is_error(self, tmp_path: Path):
+        # A public-header boundary must be a real directory (matches the CLI's
+        # exists=True, file_okay=False) — else provenance would mis-classify.
+        snap = self._snap_file(tmp_path)
+        raw = abi_scan(
+            str(snap),
+            mode="audit",
+            public_header_dirs=[str(tmp_path / "missing")],
+        )
+        data = json.loads(raw)
+        assert data["status"] == "error"
+        assert "public_header_dir must be an existing directory" in data["error"]
+
+    def test_file_as_public_header_dir_is_error(self, tmp_path: Path):
+        snap = self._snap_file(tmp_path)
+        not_a_dir = tmp_path / "all.hpp"
+        not_a_dir.write_text("// umbrella\n", encoding="utf-8")
+        raw = abi_scan(str(snap), mode="audit", public_header_dirs=[str(not_a_dir)])
+        data = json.loads(raw)
+        assert data["status"] == "error"
+        assert "must be an existing directory" in data["error"]
+
+    def test_public_header_dir_forwarded_to_request(self, tmp_path: Path, monkeypatch):
+        # A valid directory is resolved and threaded onto ScanRequest so the typed
+        # engine classifies provenance (unlocking the leakage/RTTI cross-checks).
+        from abicheck import service
+
+        snap = self._snap_file(tmp_path)
+        pub = tmp_path / "pub"
+        pub.mkdir()
+
+        captured: dict[str, object] = {}
+
+        def _fake_subprocess(req, timeout):
+            captured["public_header_dirs"] = list(req.public_header_dirs)
+            return {"verdict": "COMPATIBLE", "exit_code": 0}
+
+        monkeypatch.setattr(service, "run_scan_subprocess", _fake_subprocess)
+        raw = abi_scan(str(snap), mode="audit", public_header_dirs=[str(pub)])
+        data = json.loads(raw)
+        assert data["status"] == "ok"
+        assert captured["public_header_dirs"] == [pub.resolve()]

@@ -378,6 +378,8 @@ def _build_new_snapshot(
     changed_paths: tuple[str, ...] = (),
     build_info: Path | None = None,
     build_config: Path | None = None,
+    public_headers: list[Path] | None = None,
+    public_header_dirs: list[Path] | None = None,
 ) -> Any:
     """Dump the candidate's L0-L2 surface and embed L3-L5 inline at *collect_mode*.
 
@@ -396,7 +398,15 @@ def _build_new_snapshot(
     from .service import resolve_input
 
     try:
-        snap = resolve_input(binary, headers, includes, version="", lang=lang)
+        snap = resolve_input(
+            binary,
+            headers,
+            includes,
+            version="",
+            lang=lang,
+            public_headers=public_headers,
+            public_header_dirs=public_header_dirs,
+        )
     except AbicheckError as exc:
         raise click.ClickException(f"Failed to load --binary {binary}: {exc}") from exc
     # Collect evidence when there is something to collect from — a source tree OR
@@ -479,6 +489,17 @@ def _audit_exit_code(
     multiple=True,
     type=click.Path(exists=True, file_okay=False, path_type=Path),
     help="Additional include directory for header parsing (repeatable).",
+)
+@click.option(
+    "--public-header-dir",
+    "public_header_dirs",
+    multiple=True,
+    type=click.Path(exists=True, file_okay=False, path_type=Path),
+    help="Directory whose headers are public for provenance classification "
+    "(repeatable). Establishes the public/internal boundary so the leakage / "
+    "RTTI / exported-vs-public cross-checks run instead of skipping. A directory "
+    "passed via -H also counts; a lone -H umbrella *file* cannot establish a "
+    "boundary, so origins stay UNKNOWN unless a directory is given.",
 )
 @click.option(
     "--sources",
@@ -602,6 +623,7 @@ def scan_cmd(
     binaries: tuple[Path, ...],
     headers: tuple[Path, ...],
     includes: tuple[Path, ...],
+    public_header_dirs: tuple[Path, ...],
     sources: Path | None,
     build_info: Path | None,
     compile_db: Path | None,
@@ -734,12 +756,17 @@ def scan_cmd(
     # The classify→tier→level→compare body lives in ``run_scan_core`` so the CLI,
     # ``service.run_scan``, and the MCP tool drive one engine. The CLI only parses
     # argv, renders, and maps the budget-overflow signal onto an exit code.
+    prov_headers, prov_dirs = _public_provenance_set(
+        list(headers), list(public_header_dirs)
+    )
     try:
         core = run_scan_core(
             start=start,
             binary=binary,
             headers=list(headers),
             includes=list(includes),
+            public_headers=prov_headers,
+            public_header_dirs=prov_dirs,
             sources=sources,
             effective_build_info=effective_build_info,
             build_config=build_config,
@@ -809,6 +836,8 @@ def run_scan_core(
     binary: Path,
     headers: list[Path],
     includes: list[Path],
+    public_headers: list[Path],
+    public_header_dirs: list[Path],
     sources: Path | None,
     effective_build_info: Path | None,
     build_config: Path | None,
@@ -878,6 +907,8 @@ def run_scan_core(
         changed_paths=replay_seed,
         build_info=effective_build_info,
         build_config=build_config,
+        public_headers=list(public_headers),
+        public_header_dirs=list(public_header_dirs),
     )
 
     # --- conditional tier: S2 preprocessor pre-scan (D2) ----------------------
@@ -918,6 +949,8 @@ def run_scan_core(
             collect_mode,
             list(headers),
             list(includes),
+            list(public_headers),
+            list(public_header_dirs),
         )
         # A cross-check the maintainer promoted to `error` (D6) gates the exit
         # even when the baseline diff itself is clean.
@@ -979,6 +1012,34 @@ def run_scan_core(
     return ScanCoreResult(
         outcome=outcome, findings=list(cc.findings), snapshot=new_snap
     )
+
+
+def _public_provenance_set(
+    headers: list[Path], public_header_dirs: list[Path]
+) -> tuple[list[Path], list[Path]]:
+    """Build the ``(public_headers, public_header_dirs)`` provenance set for scan.
+
+    A directory boundary is what lets ``apply_provenance`` classify origins as
+    PUBLIC/INTERNAL (and so unlocks the leakage / RTTI / exported-vs-public
+    cross-checks, ADR-024). Directories come from ``--public-header-dir`` and from
+    any ``-H`` argument that is itself a directory; ``-H`` *file* arguments ride
+    along as explicit public headers.
+
+    A lone ``-H`` umbrella *file* with no directory does **not** activate
+    provenance: a single header cannot establish a public directory boundary
+    (the abicheck A1 finding), so we return empty sets and every origin stays
+    ``UNKNOWN`` — preserving the prior default-scan behaviour.
+    """
+    dirs = list(public_header_dirs)
+    files: list[Path] = []
+    for h in headers:
+        if h.is_dir():
+            dirs.append(h)
+        else:
+            files.append(h)
+    if not dirs:
+        return [], []
+    return files, dirs
 
 
 def _expand_public_headers(headers: list[Path]) -> list[str]:
@@ -1096,6 +1157,8 @@ def _run_baseline_compare(
     collect_mode: str,
     headers: list[Path],
     includes: list[Path],
+    public_headers: list[Path],
+    public_header_dirs: list[Path],
 ) -> tuple[str, int, dict[str, Any]]:
     """Compare *new_snap* against *baseline*, folding cross-source findings in.
 
@@ -1122,7 +1185,15 @@ def _run_baseline_compare(
     from .service import resolve_input
 
     try:
-        old_snap = resolve_input(baseline, headers, includes, version="", lang=lang)
+        old_snap = resolve_input(
+            baseline,
+            headers,
+            includes,
+            version="",
+            lang=lang,
+            public_headers=public_headers,
+            public_header_dirs=public_header_dirs,
+        )
     except AbicheckError as exc:
         raise click.ClickException(
             f"Failed to load --baseline {baseline}: {exc}"

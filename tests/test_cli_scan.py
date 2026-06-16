@@ -714,3 +714,114 @@ def test_malformed_baseline_input_is_click_error(runner, tmp_path, new_snap_comp
     assert res.exit_code != 0
     assert res.exception is None or isinstance(res.exception, SystemExit)
     assert "Failed to load --baseline" in res.output
+
+
+# ── A1: --public-header-dir threads provenance into the scan ──────────────────
+
+
+def test_public_provenance_set_lone_header_file_no_boundary(tmp_path):
+    # A lone -H umbrella *file* with no directory cannot establish a public
+    # boundary, so provenance stays off (origins remain UNKNOWN) — preserving the
+    # prior default-scan behaviour (abicheck A1).
+    from abicheck.cli_scan import _public_provenance_set
+
+    umbrella = tmp_path / "all.hpp"
+    umbrella.write_text("// umbrella\n", encoding="utf-8")
+    files, dirs = _public_provenance_set([umbrella], [])
+    assert files == []
+    assert dirs == []
+
+
+def test_public_provenance_set_dir_activates(tmp_path):
+    # --public-header-dir establishes the boundary; a -H *file* rides along as an
+    # explicit public header once a directory is present.
+    from abicheck.cli_scan import _public_provenance_set
+
+    inc = tmp_path / "include"
+    inc.mkdir()
+    umbrella = tmp_path / "all.hpp"
+    umbrella.write_text("// umbrella\n", encoding="utf-8")
+    files, dirs = _public_provenance_set([umbrella], [inc])
+    assert files == [umbrella]
+    assert dirs == [inc]
+
+
+def test_public_provenance_set_header_dir_counts_as_boundary(tmp_path):
+    # A directory passed via -H is itself a boundary, even without
+    # --public-header-dir.
+    from abicheck.cli_scan import _public_provenance_set
+
+    hdr_dir = tmp_path / "pub"
+    hdr_dir.mkdir()
+    files, dirs = _public_provenance_set([hdr_dir], [])
+    assert files == []
+    assert dirs == [hdr_dir]
+
+
+def test_scan_public_header_dir_forwarded_to_snapshot(
+    monkeypatch, runner, new_snap_compatible, tmp_path
+):
+    # The CLI flag must reach the snapshot builder as public_header_dirs so
+    # apply_provenance can classify origins (unlocking the leakage/RTTI/exported-
+    # vs-public cross-checks).
+    import abicheck.cli_scan as cs
+
+    pub = tmp_path / "pub"
+    pub.mkdir()
+    captured: dict[str, object] = {}
+    original = cs._build_new_snapshot
+
+    def _spy(*args, **kwargs):
+        captured["public_header_dirs"] = kwargs.get("public_header_dirs")
+        captured["public_headers"] = kwargs.get("public_headers")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(cs, "_build_new_snapshot", _spy)
+    res = runner.invoke(
+        main,
+        [
+            "scan",
+            "--binary",
+            str(new_snap_compatible),
+            "--public-header-dir",
+            str(pub),
+            "--audit",
+        ],
+    )
+    assert res.exit_code == 0, res.output
+    assert captured["public_header_dirs"] == [pub]
+    assert captured["public_headers"] == []
+
+
+def test_scan_lone_header_file_does_not_activate_provenance(
+    monkeypatch, runner, new_snap_compatible, tmp_path
+):
+    # A lone -H file (no dir) must NOT activate provenance — empty sets reach the
+    # snapshot builder so behaviour is unchanged.
+    import abicheck.cli_scan as cs
+
+    umbrella = tmp_path / "all.hpp"
+    umbrella.write_text("// umbrella\n", encoding="utf-8")
+    captured: dict[str, object] = {}
+    original = cs._build_new_snapshot
+
+    def _spy(*args, **kwargs):
+        captured["public_header_dirs"] = kwargs.get("public_header_dirs")
+        captured["public_headers"] = kwargs.get("public_headers")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(cs, "_build_new_snapshot", _spy)
+    res = runner.invoke(
+        main,
+        [
+            "scan",
+            "--binary",
+            str(new_snap_compatible),
+            "-H",
+            str(umbrella),
+            "--audit",
+        ],
+    )
+    assert res.exit_code == 0, res.output
+    assert captured["public_header_dirs"] == []
+    assert captured["public_headers"] == []

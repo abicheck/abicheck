@@ -1036,6 +1036,7 @@ def abi_scan(
     binary_path: str,
     headers: list[str] | None = None,
     include_dirs: list[str] | None = None,
+    public_header_dirs: list[str] | None = None,
     sources: str | None = None,
     compile_db: str | None = None,
     baseline: str | None = None,
@@ -1059,6 +1060,10 @@ def abi_scan(
         binary_path: Library/artifact (or JSON snapshot) to scan.
         headers: Public header files (provenance + pattern pre-scan).
         include_dirs: Extra include directories for the parser.
+        public_header_dirs: Directories whose headers are public; establishes the
+            public/internal boundary so the leakage / RTTI / exported-vs-public
+            cross-checks run instead of skipping. A directory passed via ``headers``
+            also counts; a lone umbrella header file cannot establish a boundary.
         sources: Source tree (compile DB auto-discovered within it).
         compile_db: Explicit compile_commands.json (else discovered in sources).
         baseline: Previous build's dump/library to compare against (omit for a
@@ -1081,6 +1086,21 @@ def abi_scan(
         inc_paths = [
             _safe_read_path(d, label="include_dir") for d in (include_dirs or [])
         ]
+        phd_paths: list[Path] = []
+        for d in public_header_dirs or []:
+            p = _safe_read_path(d, label="public_header_dir")
+            # Match the CLI option (exists=True, file_okay=False): a public-header
+            # boundary must be a real directory, else apply_provenance would tag
+            # every declaration INTERNAL against a path that matches nothing,
+            # producing misleading origin classification (CodeRabbit).
+            if not p.is_dir():
+                return json.dumps(
+                    {
+                        "status": "error",
+                        "error": f"public_header_dir must be an existing directory: {d}",
+                    }
+                )
+            phd_paths.append(p)
         src_path = _safe_read_path(sources, label="sources") if sources else None
         cdb_path = (
             _safe_read_path(compile_db, label="compile_db") if compile_db else None
@@ -1095,6 +1115,7 @@ def abi_scan(
             binaries=[bin_path],
             headers=hdr_paths,
             includes=inc_paths,
+            public_header_dirs=phd_paths,
             sources=src_path,
             compile_db=cdb_path,
             baseline=base_path,
