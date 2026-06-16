@@ -59,7 +59,7 @@ abicheck compare task_state.v1.btf task_state.v2.btf
 ```
 
 The committed example
-[`examples/case121_kernel_btf_struct_field_added`](https://github.com/napetrov/abicheck/tree/main/examples/case121_kernel_btf_struct_field_added)
+[`examples/case121_kernel_btf_struct_field_added`](https://github.com/abicheck/abicheck/tree/main/examples/case121_kernel_btf_struct_field_added)
 is exactly this: two BTF blobs where `task_state` grows from 2 to 3 fields,
 reported as `struct_size_changed` / `BREAKING`.
 

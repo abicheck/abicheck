@@ -10,8 +10,8 @@ the abicheck commands they run, and the outcome they expect. It is an
 **internal validation asset** — it drives end-to-end tests — not a user-facing
 encyclopedia. It lives next to its runner under `tests/`:
 
-- **Catalog (grouped, globbed):** [`tests/scenarios/*.yaml`](https://github.com/napetrov/abicheck/tree/main/tests/scenarios)
-- **Format & index:** [`tests/scenarios/README.md`](https://github.com/napetrov/abicheck/blob/main/tests/scenarios/README.md)
+- **Catalog (grouped, globbed):** [`tests/scenarios/*.yaml`](https://github.com/abicheck/abicheck/tree/main/tests/scenarios)
+- **Format & index:** [`tests/scenarios/README.md`](https://github.com/abicheck/abicheck/blob/main/tests/scenarios/README.md)
 - **End-to-end driver:** `tests/test_scenarios.py`
 
 | Entity | Purpose | Audience |
@@ -33,7 +33,7 @@ SARIF output. The catalog is structurally validated and every scenario's
 ## Capturing missed usage scenarios
 
 When a real-world usage gap surfaces — for example
-[issue #235](https://github.com/napetrov/abicheck/issues/235), where private
+[issue #235](https://github.com/abicheck/abicheck/issues/235), where private
 ABI breaks were reported even when public headers were supplied — it is added
 to the catalog (`SC-PUBLIC-SURFACE-SCOPE`) and validated end-to-end so it
 becomes a permanent regression guard. This is the mechanism that ensures

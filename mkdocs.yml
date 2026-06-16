@@ -1,8 +1,8 @@
 site_name: abicheck
 site_description: ABI compatibility checker for C/C++ shared libraries
-site_url: https://napetrov.github.io/abicheck
-repo_url: https://github.com/napetrov/abicheck
-repo_name: napetrov/abicheck
+site_url: https://abicheck.github.io/abicheck
+repo_url: https://github.com/abicheck/abicheck
+repo_name: abicheck/abicheck
 edit_uri: edit/main/docs/
 
 theme:
@@ -223,4 +223,4 @@ markdown_extensions:
 extra:
   social:
     - icon: fontawesome/brands/github
-      link: https://github.com/napetrov/abicheck
+      link: https://github.com/abicheck/abicheck

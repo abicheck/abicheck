@@ -485,7 +485,7 @@ follow-up (unifying the stdlib-/runtime-RTTI skip sets) a natural home.
 `stack_html.py` reached into `html_report.py` for styling
 (`from .html_report import _CSS, _VERDICT_STYLE, _changes_table`) but each
 re-emitted the same `<!DOCTYPE html> … </html>` skeleton and the same
-`<footer>…napetrov/abicheck…</footer>` by hand. A stylesheet, layout or
+`<footer>…abicheck/abicheck…</footer>` by hand. A stylesheet, layout or
 accessibility fix had to be made in up to three places, and the shared `_CSS`
 constant lived inside a 950-line renderer rather than at a seam. This is
 distinct from **C2**: C2 unifies *what data/severity* each renderer sees

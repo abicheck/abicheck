@@ -51,7 +51,7 @@ abicheck compare libfoo.so.1 libfoo.so.2 --policy-file security
 ```
 
 `--policy-file security` resolves to the packaged
-[`abicheck/policies/security.yaml`](https://github.com/napetrov/abicheck/blob/main/abicheck/policies/security.yaml).
+[`abicheck/policies/security.yaml`](https://github.com/abicheck/abicheck/blob/main/abicheck/policies/security.yaml).
 It uses `base_policy: strict_abi` and gates `relro_weakened`, `pie_disabled`,
 `stack_canary_removed`, `fortify_source_weakened`, `writable_executable_segment`
 and `executable_stack` to `break`, and `rpath_changed` / `runpath_changed` to

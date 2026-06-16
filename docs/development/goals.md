@@ -60,7 +60,7 @@ Make the tool convenient for AI agents and automation pipelines:
 - `--format json/markdown` output modes
 - Snapshot files for offline/async workflows (`abicheck dump` → `.abi.json`)
 
-**Done:** JSON output, snapshot format, exit codes (0/2/4), SARIF 2.1.0 output; MCP server for AI agent integration; GitHub Action (`napetrov/abicheck@v0.3.0`) for CI; report filtering (`--show-only`, `--stat`, `--show-impact`, `--report-mode leaf`) for CI gate pipelines.
+**Done:** JSON output, snapshot format, exit codes (0/2/4), SARIF 2.1.0 output; MCP server for AI agent integration; GitHub Action (`abicheck/abicheck@v0.3.0`) for CI; report filtering (`--show-only`, `--stat`, `--show-impact`, `--report-mode leaf`) for CI gate pipelines.
 
 ---
 
@@ -89,7 +89,7 @@ Distribute via conda-forge — `conda install -c conda-forge abicheck`.
 
 ### GitHub Pages documentation site
 
-Public documentation at <https://napetrov.github.io/abicheck/>:
+Public documentation at <https://abicheck.github.io/abicheck/>:
 
 - Getting started / installation
 - CLI reference

@@ -19,7 +19,7 @@ class TestMainModule:
             capture_output=True, text=True, timeout=10,
         )
         assert result.returncode == 0
-        assert "napetrov/abicheck" in result.stdout
+        assert "abicheck/abicheck" in result.stdout
 
     def test_version_output_format(self):
         """Version output should include project qualifier."""
@@ -27,5 +27,5 @@ class TestMainModule:
             [sys.executable, "-m", "abicheck", "--version"],
             capture_output=True, text=True, timeout=10,
         )
-        # Format: "abicheck X.Y.Z (napetrov/abicheck)"
-        assert "(napetrov/abicheck)" in result.stdout
+        # Format: "abicheck X.Y.Z (abicheck/abicheck)"
+        assert "(abicheck/abicheck)" in result.stdout

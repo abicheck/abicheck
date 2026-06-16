@@ -160,7 +160,7 @@ reporting stages (see [Coverage beyond `compare()`](#coverage-beyond-compare)).
 
 ## CI integration
 
-[`.github/workflows/performance.yml`](https://github.com/napetrov/abicheck/blob/main/.github/workflows/performance.yml)
+[`.github/workflows/performance.yml`](https://github.com/abicheck/abicheck/blob/main/.github/workflows/performance.yml)
 runs the scaling benchmark and the `slow` performance tests. Now that every
 `compare()` scenario is linear, the lane is **gating**:
 
@@ -185,7 +185,7 @@ runs the scaling benchmark and the `slow` performance tests. Now that every
 - Publishes the scaling table to the job summary and uploads the JSON.
 
 `slow` regression guards also live in
-[`tests/test_performance.py`](https://github.com/napetrov/abicheck/blob/main/tests/test_performance.py)
+[`tests/test_performance.py`](https://github.com/abicheck/abicheck/blob/main/tests/test_performance.py)
 — `TestTypeChurnScaling` (compare back to genuine O(n²)),
 `TestSuppressionAuditScaling` (audit stays linear in findings), and the
 HTML/SARIF cases in `TestReporterScaling`. They run in the existing slow lane
@@ -250,7 +250,7 @@ python scripts/benchmark_scaling.py --baseline base.json --regress-tolerance 0.5
 
 Only scenarios present on **both** sides are compared (a scenario new in the PR
 has no baseline and is skipped), and baseline times below a 50 ms noise floor are
-ignored. The [`regression`](https://github.com/napetrov/abicheck/blob/main/.github/workflows/performance.yml)
+ignored. The [`regression`](https://github.com/abicheck/abicheck/blob/main/.github/workflows/performance.yml)
 workflow job automates this on PRs: it installs the base branch and the PR head
 into separate venvs on the same runner, runs both, and prints the regressions to
 the job summary. It now **gates** (a >50 % slowdown fails the job) — loosen
@@ -305,7 +305,7 @@ want source-body semantics or PR localization for humans.**
 
 The scaling harness above is pure-Python and times the *compare* pipeline. The
 **dump-side L4 source ABI replay** (clang per-TU AST extraction) is a separate
-cost, timed by [`eval/scaling.py`](https://github.com/napetrov/abicheck/blob/main/eval/scaling.py)
+cost, timed by [`eval/scaling.py`](https://github.com/abicheck/abicheck/blob/main/eval/scaling.py)
 on real source trees (it needs clang + a built tree, so it is manual, not in CI).
 
 Knobs and the reasoning behind them (`abicheck/buildsource/source_replay.py`):

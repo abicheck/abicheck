@@ -67,7 +67,7 @@ detection dimension: the **minimum evidence** that makes the family visible
 (`L0` binary · `L1` +debug info · `L2` +headers · `L3` +build data · `L4`
 +sources), and whether a symbol-level or debug-info-level checker can see it at
 all. Per-case minimums are machine-readable in
-[`examples/ground_truth.json`](https://github.com/napetrov/abicheck/blob/main/examples/ground_truth.json)
+[`examples/ground_truth.json`](https://github.com/abicheck/abicheck/blob/main/examples/ground_truth.json)
 (`min_evidence` field) and measured in
 [Benchmarking by evidence tier](../../reference/tool-comparison.md#benchmarking-by-evidence-tier).
 

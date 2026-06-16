@@ -1,7 +1,7 @@
 # abicheck real-world validation report
 
 **Date:** 2026-06-01
-**abicheck version:** 0.2.0 (`napetrov/abicheck` @ `main` / commit `2d43b4b`)
+**abicheck version:** 0.2.0 (`abicheck/abicheck` @ `main` / commit `2d43b4b`)
 **Author:** automated validation run (Claude Code session)
 **Purpose:** Validate the latest `main` against real-world C/C++ shared libraries,
 quantify false positives / usability gaps, and produce an evidence base for the

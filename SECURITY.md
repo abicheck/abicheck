@@ -12,7 +12,7 @@
 
 Please **do not** open a public GitHub issue for security vulnerabilities.
 
-Report vulnerabilities via [GitHub Private Vulnerability Reporting](https://github.com/napetrov/abicheck/security/advisories/new)
+Report vulnerabilities via [GitHub Private Vulnerability Reporting](https://github.com/abicheck/abicheck/security/advisories/new)
 or by emailing the maintainer directly.
 
 Include:
