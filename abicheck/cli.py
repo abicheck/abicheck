@@ -21,17 +21,17 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import click
+
+# rich-click renders the (large) option lists in named panels for progressive
+# disclosure (G21.8 / collapse M1). We keep the plain ``click`` API (so the
+# module type-checks against click's stubs) and only base the root group on
+# ``RichGroup`` — that alone makes ``cls=_AbicheckGroup`` render the rich panels
+# (and RichGroup.command produces RichCommand subcommands). Fall back to plain
+# click.Group if rich-click is somehow unavailable so the CLI never hard-fails.
 try:
-    # rich-click renders the (large) option lists in named panels for
-    # progressive disclosure (G21.8 / collapse M1). It is a drop-in for click;
-    # fall back to plain click if it is somehow unavailable so the CLI never
-    # hard-fails on a missing optional render dependency. Note: rich-click does
-    # not patch click.Group on import — the root group must subclass RichGroup
-    # (below) for the rich panels to render, since we pass an explicit cls=.
-    import rich_click as click
     from rich_click import RichGroup as _RootGroupBase
 except ImportError:  # pragma: no cover - rich-click is a declared dependency
-    import click  # type: ignore[no-redef]
     _RootGroupBase = click.Group  # type: ignore[assignment,misc]
 
 from .checker import DiffResult, LibraryMetadata, compare

@@ -148,7 +148,12 @@ def configure_rich_help() -> None:
         import rich_click
     except ImportError:  # pragma: no cover - rich-click is a declared dependency
         return
-    rich_click.rich_click.OPTION_GROUPS.update(OPTION_GROUPS)
-    # Show the legacy --btf/--ctf/--dwarf aliases only when explicitly asked;
-    # keep the panels tight. (They are already hidden=True at definition.)
-    rich_click.rich_click.STYLE_OPTIONS_PANEL_BORDER = "dim"
+    # rich-click types the values as its OptionGroupDict TypedDict; our plain
+    # dict literal is structurally compatible but mypy can't prove it.
+    rich_click.rich_click.OPTION_GROUPS.update(OPTION_GROUPS)  # type: ignore[arg-type]
+    # Render help monochrome (no ANSI). CI runners set FORCE_COLOR/CI, which
+    # would make rich emit colour escapes even into a pipe — env-dependent output
+    # that breaks help-substring tests on some platforms but not others. The
+    # grouping panels (the actual M1 win) are unaffected; only colour is dropped,
+    # so help text is deterministic everywhere.
+    rich_click.rich_click.COLOR_SYSTEM = None
