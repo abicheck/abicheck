@@ -337,6 +337,25 @@ class TestSmallHelpers:
         })
         assert _missing_requested_evidence_layers(full, "source-target") == []
 
+        # Empty L3 build_evidence and empty L5 graph are each flagged too,
+        # exercising both per-layer emptiness branches.
+        empty_l3 = _pack(
+            {DataLayer.L3_BUILD: CoverageStatus.PRESENT},
+            build_evidence=SimpleNamespace(targets=[], compile_units=[]),
+        )
+        assert DataLayer.L3_BUILD.value in _missing_requested_evidence_layers(empty_l3, "build")
+        empty_l5 = _pack(
+            {
+                DataLayer.L3_BUILD: CoverageStatus.PRESENT,
+                DataLayer.L4_SOURCE_ABI: CoverageStatus.PRESENT,
+                DataLayer.L5_SOURCE_GRAPH: CoverageStatus.PRESENT,
+            },
+            source_graph=SimpleNamespace(nodes=[]),
+        )
+        assert DataLayer.L5_SOURCE_GRAPH.value in _missing_requested_evidence_layers(
+            empty_l5, "source-target"
+        )
+
     def test_dump_gcc_option_ignored_warning_for_non_elf(self, tmp_path) -> None:
         # G21.5/Codex: --gcc-option(s) aren't applied on the native PE/Mach-O
         # dump path, so the CLI warns rather than dropping them silently.

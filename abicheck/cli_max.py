@@ -51,6 +51,7 @@ def _prepare_side(
     *,
     input_path: Path,
     headers: tuple[Path, ...],
+    includes: tuple[Path, ...],
     sources: Path | None,
     build_info: Path | None,
     depth: str | None,
@@ -84,6 +85,7 @@ def _prepare_side(
         dump_cmd,
         so_path=norm_path,
         headers=headers,
+        includes=includes,
         version=version,
         lang=lang,
         header_backend=header_backend,
@@ -119,6 +121,13 @@ def _prepare_side(
               help="Public header for OLD side only (overrides -H for old).")
 @click.option("--new-header", "new_headers_only", multiple=True, type=click.Path(exists=True, path_type=Path),
               help="Public header for NEW side only (overrides -H for new).")
+@click.option("-I", "--include", "includes", multiple=True, type=click.Path(path_type=Path),
+              help="Extra include directory for the header backend, applied to both sides "
+                   "(repeat for multiple). Needed when public headers pull in project includes.")
+@click.option("--old-include", "old_includes_only", multiple=True, type=click.Path(path_type=Path),
+              help="Include dir for OLD side only (overrides -I for old).")
+@click.option("--new-include", "new_includes_only", multiple=True, type=click.Path(path_type=Path),
+              help="Include dir for NEW side only (overrides -I for new).")
 # ── Depth dial (shared vocabulary with `dump`/`scan`) ────────────────────────
 @click.option("--depth", "depth", type=click.Choice(["headers", "build", "graph", "source", "full"]),
               default=None,
@@ -173,6 +182,8 @@ def deep_compare_cmd(
     old_build_info: Path | None, new_build_info: Path | None,
     headers: tuple[Path, ...],
     old_headers_only: tuple[Path, ...], new_headers_only: tuple[Path, ...],
+    includes: tuple[Path, ...],
+    old_includes_only: tuple[Path, ...], new_includes_only: tuple[Path, ...],
     depth: str | None, max_depth: bool,
     old_version: str, new_version: str,
     lang: str, header_backend: str,
@@ -206,23 +217,30 @@ def deep_compare_cmd(
     old_src = old_sources if old_sources is not None else both_sources
     new_src = new_sources if new_sources is not None else both_sources
 
+    # The depth the embedded snapshots carry; forwarded to compare so its
+    # coverage table reflects the evidence actually requested.
+    compare_collect_mode = resolve_dump_depth(depth, max_depth, "off", False)
+
+    # Only a depth that actually collects L3-L5 needs explicit evidence. At
+    # --depth headers (and the bare default) the depth resolves to "off" — that
+    # is the advertised L2-only / plain-compare mode, so it stays usable without
+    # any --sources/--build-info (Codex review).
     if (
-        old_src is None and new_src is None
+        compare_collect_mode != "off"
+        and old_src is None and new_src is None
         and old_build_info is None and new_build_info is None
     ):
         raise click.UsageError(
-            "deep-compare needs explicit evidence: pass --sources (or per-side "
-            "--old-sources/--new-sources) and/or --old/new-build-info. With no "
-            "source/build inputs there is nothing deeper to collect — use plain "
-            "`abicheck compare` instead."
+            f"deep-compare --depth {depth} collects L3-L5 evidence but no sources "
+            "were given: pass --sources (or per-side --old-sources/--new-sources) "
+            "and/or --old/new-build-info. For an L2-only run use --depth headers "
+            "or plain `abicheck compare`."
         )
 
     old_h = old_headers_only or headers
     new_h = new_headers_only or headers
-
-    # The depth the embedded snapshots carry; forwarded to compare so its
-    # coverage table reflects the evidence actually requested.
-    compare_collect_mode = resolve_dump_depth(depth, max_depth, "off", False)
+    old_inc = old_includes_only or includes
+    new_inc = new_includes_only or includes
 
     import contextlib
 
@@ -234,13 +252,13 @@ def deep_compare_cmd(
             out_dir = Path(stack.enter_context(tempfile.TemporaryDirectory(prefix="abicheck-deep-")))
 
         old_ready = _prepare_side(
-            ctx, input_path=old_input, headers=old_h, sources=old_src,
+            ctx, input_path=old_input, headers=old_h, includes=old_inc, sources=old_src,
             build_info=old_build_info, depth=depth, max_depth=max_depth,
             version=old_version, lang=lang, header_backend=header_backend,
             out_dir=out_dir, label="old",
         )
         new_ready = _prepare_side(
-            ctx, input_path=new_input, headers=new_h, sources=new_src,
+            ctx, input_path=new_input, headers=new_h, includes=new_inc, sources=new_src,
             build_info=new_build_info, depth=depth, max_depth=max_depth,
             version=new_version, lang=lang, header_backend=header_backend,
             out_dir=out_dir, label="new",

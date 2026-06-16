@@ -27,6 +27,7 @@ from pathlib import Path
 
 from click.testing import CliRunner
 
+import abicheck.cli_max as cli_max
 from abicheck.cli import main
 from abicheck.model import AbiSnapshot, Function
 from abicheck.serialization import save_snapshot
@@ -43,15 +44,23 @@ def _snap(tmp_path: Path, name: str, *, with_foo: bool) -> Path:
     return out
 
 
-def test_deep_compare_requires_evidence(tmp_path: Path) -> None:
-    # P09: with no source/build inputs there is nothing deeper to collect, so the
-    # command refuses and points at plain `compare` rather than silently doing it.
+def test_deep_compare_deep_depth_requires_evidence(tmp_path: Path) -> None:
+    # A depth that collects L3-L5 with no source/build inputs is refused and
+    # points at --depth headers / plain `compare` rather than a silent no-op.
     old = _snap(tmp_path, "old.json", with_foo=True)
     new = _snap(tmp_path, "new.json", with_foo=True)
-    res = CliRunner().invoke(main, ["deep-compare", str(old), str(new)])
+    res = CliRunner().invoke(main, ["deep-compare", str(old), str(new), "--depth", "full"])
     assert res.exit_code != 0
-    assert "needs explicit evidence" in res.output
-    assert "compare" in res.output
+    assert "collects L3-L5 evidence but no sources" in res.output
+
+
+def test_deep_compare_headers_depth_no_evidence_ok(tmp_path: Path) -> None:
+    # --depth headers resolves to off (L2-only / plain compare), so it stays
+    # usable without any --sources/--build-info (Codex review).
+    old = _snap(tmp_path, "old.json", with_foo=True)
+    new = _snap(tmp_path, "new.json", with_foo=True)
+    res = CliRunner().invoke(main, ["deep-compare", str(old), str(new), "--depth", "headers"])
+    assert res.exit_code == 0, res.output
 
 
 def test_deep_compare_snapshot_passthrough_compatible(tmp_path: Path) -> None:
@@ -80,6 +89,68 @@ def test_deep_compare_propagates_break_exit_code(tmp_path: Path) -> None:
         main, ["deep-compare", str(old), str(new), "--sources", str(srcs)]
     )
     assert res.exit_code == 4, (res.exit_code, res.output)
+
+
+class _FakeCtx:
+    """Records ctx.invoke calls and materializes the requested output file."""
+
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
+    def invoke(self, cmd, **kwargs) -> None:  # noqa: ANN001
+        self.calls.append({"cmd": cmd, **kwargs})
+        out = kwargs.get("output")
+        if out is not None:
+            Path(out).write_text("{}", encoding="utf-8")
+
+
+def test_prepare_side_dumps_native_binary(tmp_path: Path, monkeypatch) -> None:
+    # The native-binary branch dumps to a temp snapshot via ctx.invoke(dump_cmd)
+    # with the source tree + depth threaded through — exercised here without a
+    # real compiler by faking the format probe and the invoke.
+    binary = tmp_path / "libfoo.so"
+    binary.write_bytes(b"\x7fELF")
+    monkeypatch.setattr(cli_max, "_normalize_binary_input", lambda p: (p, "elf"))
+    ctx = _FakeCtx()
+    srcs = tmp_path / "src"
+    srcs.mkdir()
+
+    inc = tmp_path / "inc"
+    inc.mkdir()
+    out = cli_max._prepare_side(
+        ctx, input_path=binary, headers=(), includes=(inc,), sources=srcs,
+        build_info=None, depth="full", max_depth=False, version="2", lang="c++",
+        header_backend="auto", out_dir=tmp_path, label="old",
+    )
+    assert out == tmp_path / "old.abi.json"
+    assert out.exists()
+    assert len(ctx.calls) == 1
+    call = ctx.calls[0]
+    assert call["cmd"] is cli_max.dump_cmd
+    assert call["so_path"] == binary
+    assert call["sources"] == srcs
+    assert call["includes"] == (inc,)  # include dirs threaded into the dump
+    assert call["depth"] == "full"
+    assert call["output"] == out
+
+
+def test_prepare_side_snapshot_without_evidence_is_silent(tmp_path: Path, monkeypatch) -> None:
+    # A snapshot side with no per-side evidence passes through with no warning
+    # (the warning only fires when --*-sources/--*-build-info were given).
+    snap = _snap(tmp_path, "s.json", with_foo=True)
+    monkeypatch.setattr(cli_max, "_normalize_binary_input", lambda p: (p, None))
+    ctx = _FakeCtx()
+
+    captured: list[str] = []
+    monkeypatch.setattr(cli_max.click, "echo", lambda *a, **k: captured.append(str(a)))
+    out = cli_max._prepare_side(
+        ctx, input_path=snap, headers=(), includes=(), sources=None, build_info=None,
+        depth=None, max_depth=False, version="1", lang="c++",
+        header_backend="auto", out_dir=tmp_path, label="new",
+    )
+    assert out == snap
+    assert ctx.calls == []
+    assert captured == []  # no ignored-evidence warning
 
 
 def test_deep_compare_keep_snapshots_dir_for_passthrough(tmp_path: Path) -> None:
