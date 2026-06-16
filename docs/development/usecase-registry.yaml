@@ -326,9 +326,12 @@ use_cases:
   - id: UC-WF-oneshot-deep
     axis: workflow
     name: One-shot deep compare (auto-collect L3–L5) + CLI usability
-    status: planned
+    status: partial
     gap: G21
     plan: docs/development/plans/g21-oneshot-deep-compare.md
+    evidence:
+      modules: [abicheck/cli_help.py, abicheck/cli_dump_helpers.py]
+      tests: [tests/test_cov95_cli.py]
     next_steps: >
       A --depth headers|build|graph|source|full dial (--max = --depth full)
       reusing the scan_levels vocabulary/mapping — shipped on dump in PR #422;
