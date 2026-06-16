@@ -19,7 +19,10 @@ The header AST (L2) is produced by one of two interchangeable frontends behind
 ``dumper_castxml._CastxmlParser``) or **clang** (``clang -ast-dump=json``, parsed
 by ``dumper_clang._ClangAstParser``) for hosts where castxml is absent. Select
 with ``header_backend=`` (``auto``/``castxml``/``clang``) or the
-``ABICHECK_HEADER_BACKEND`` env var. See ADR-003.
+``ABICHECK_HEADER_BACKEND`` env var. When the backend is auto-selected, a castxml
+*toolchain-version* failure (bundled Clang too old for the host libstdc++/GCC)
+falls back to the clang backend automatically (G16); an explicit selection is
+honored verbatim. See ADR-003.
 """
 from __future__ import annotations
 
@@ -113,6 +116,21 @@ def _resolve_header_backend(backend: str | None) -> str:
     return "castxml"
 
 
+def _has_explicit_std(
+    gcc_options: str | None, gcc_option_tokens: tuple[str, ...] = ()
+) -> bool:
+    """True if the user supplied an explicit C/C++ standard.
+
+    Checks both ``--gcc-options`` (whitespace-split string) and any repeatable
+    ``--gcc-option`` token (e.g. ``-std=gnu++23`` / ``/std:c++latest``), so the
+    automatic C++20 bump never appends a standard *after* — and thus override —
+    a dialect the user requested through either flag.
+    """
+    if gcc_options and ("-std=" in gcc_options or "/std:" in gcc_options):
+        return True
+    return any(("-std=" in t or "/std:" in t) for t in gcc_option_tokens)
+
+
 def _build_clang_header_command(
     cc_bin: str, cc_id: str,
     extra_includes: list[Path], agg_path: Path,
@@ -120,6 +138,7 @@ def _build_clang_header_command(
     sysroot: Path | None = None,
     nostdinc: bool = False,
     gcc_options: str | None = None,
+    gcc_option_tokens: tuple[str, ...] = (),
     force_cpp: bool = False,
     force_cpp20: bool = False,
 ) -> list[str]:
@@ -141,7 +160,9 @@ def _build_clang_header_command(
         cmd += ["-nostdinc"]
     if gcc_options:
         cmd += shlex.split(gcc_options, posix=os.name != "nt")
-    explicit_std = bool(gcc_options and ("-std=" in gcc_options or "/std:" in gcc_options))
+    # Repeatable --gcc-option: one literal argument each (no shlex split).
+    cmd += list(gcc_option_tokens)
+    explicit_std = _has_explicit_std(gcc_options, gcc_option_tokens)
     if not force_cpp:
         if not explicit_std:
             cmd += ["-x", "c", "-std=gnu11"]
@@ -165,6 +186,7 @@ def _clang_header_dump(
     gcc_path: str | None = None,
     gcc_prefix: str | None = None,
     gcc_options: str | None = None,
+    gcc_option_tokens: tuple[str, ...] = (),
     sysroot: Path | None = None,
     nostdinc: bool = False,
     lang: str | None = None,
@@ -204,6 +226,7 @@ def _clang_header_dump(
     key = _cache_key(
         headers, extra_includes, clang_bin,
         gcc_path=gcc_path, gcc_prefix=gcc_prefix, gcc_options=gcc_options,
+        gcc_option_tokens=gcc_option_tokens,
         sysroot=sysroot, nostdinc=nostdinc, lang=lang, backend="clang",
     )
     cached = _cache_path(key, backend="clang")
@@ -228,6 +251,7 @@ def _clang_header_dump(
     cmd = _build_clang_header_command(
         clang_bin, cc_id, extra_includes, agg_path,
         sysroot=sysroot, nostdinc=nostdinc, gcc_options=gcc_options,
+        gcc_option_tokens=gcc_option_tokens,
         force_cpp=force_cpp, force_cpp20=force_cpp20,
     )
     try:
@@ -278,6 +302,7 @@ def _header_ast_parser(
     gcc_path: str | None,
     gcc_prefix: str | None,
     gcc_options: str | None,
+    gcc_option_tokens: tuple[str, ...] = (),
     sysroot: Path | None,
     nostdinc: bool,
     lang: str | None,
@@ -294,10 +319,12 @@ def _header_ast_parser(
     uniformly — the only difference is which frontend produced the AST.
     """
     resolved = _resolve_header_backend(backend)
-    if resolved == "clang":
+
+    def _run_clang() -> _ClangAstParser:
         ast_root = _clang_header_dump(
             headers, extra_includes, compiler=compiler,
             gcc_path=gcc_path, gcc_prefix=gcc_prefix, gcc_options=gcc_options,
+            gcc_option_tokens=gcc_option_tokens,
             sysroot=sysroot, nostdinc=nostdinc, lang=lang,
         )
         return _ClangAstParser(
@@ -305,11 +332,39 @@ def _header_ast_parser(
             public_header_paths=public_header_paths,
             public_dir_paths=public_dir_paths,
         )
-    xml_root = _castxml_dump(
-        headers, extra_includes, compiler=compiler,
-        gcc_path=gcc_path, gcc_prefix=gcc_prefix, gcc_options=gcc_options,
-        sysroot=sysroot, nostdinc=nostdinc, lang=lang,
-    )
+
+    if resolved == "clang":
+        return _run_clang()
+
+    # G16: when the backend was selected automatically (no explicit --header-backend
+    # and no ABICHECK_HEADER_BACKEND pin), a castxml *toolchain-version* failure
+    # (bundled Clang too old for the host libstdc++/GCC) is recoverable — the clang
+    # backend parses against the host toolchain directly. Fall back to it rather
+    # than aborting. An explicit castxml request is honored verbatim (the error
+    # surfaces unchanged).
+    choice = (backend or "auto").lower()
+    env_pin = os.environ.get("ABICHECK_HEADER_BACKEND", "").strip().lower()
+    auto_selected = choice == "auto" and env_pin not in ("castxml", "clang")
+    try:
+        xml_root = _castxml_dump(
+            headers, extra_includes, compiler=compiler,
+            gcc_path=gcc_path, gcc_prefix=gcc_prefix, gcc_options=gcc_options,
+            gcc_option_tokens=gcc_option_tokens,
+            sysroot=sysroot, nostdinc=nostdinc, lang=lang,
+        )
+    except SnapshotError as exc:
+        if (
+            auto_selected
+            and _clang_available()
+            and _is_toolchain_version_failure(str(exc))
+        ):
+            log.warning(
+                "castxml failed with a toolchain-version error; falling back to "
+                "the clang header backend (set --header-backend castxml to force "
+                "castxml and see the original error)."
+            )
+            return _run_clang()
+        raise
     return _CastxmlParser(
         xml_root, exported_dynamic, exported_static,
         public_header_paths=public_header_paths,
@@ -385,6 +440,7 @@ def _cache_key(
     gcc_path: str | None = None,
     gcc_prefix: str | None = None,
     gcc_options: str | None = None,
+    gcc_option_tokens: tuple[str, ...] = (),
     sysroot: Path | None = None,
     nostdinc: bool = False,
     lang: str | None = None,
@@ -417,6 +473,7 @@ def _cache_key(
     h.update(f"gcc_path={gcc_path or ''}".encode())
     h.update(f"gcc_prefix={gcc_prefix or ''}".encode())
     h.update(f"gcc_options={gcc_options or ''}".encode())
+    h.update(f"gcc_option_tokens={chr(0).join(gcc_option_tokens)}".encode())
     h.update(f"sysroot={sysroot or ''}".encode())
     h.update(f"nostdinc={nostdinc}".encode())
     h.update(f"lang={lang or ''}".encode())
@@ -584,6 +641,7 @@ def _build_castxml_command(
     sysroot: Path | None = None,
     nostdinc: bool = False,
     gcc_options: str | None = None,
+    gcc_option_tokens: tuple[str, ...] = (),
     force_cpp: bool = False,
     force_cpp20: bool = False,
 ) -> list[str]:
@@ -599,15 +657,21 @@ def _build_castxml_command(
         cmd += ["-nostdinc"]
     if gcc_options:
         cmd += shlex.split(gcc_options, posix=os.name != "nt")
+    # Repeatable --gcc-option: each value is one literal compiler argument,
+    # appended verbatim (no shlex split) so a flag whose value contains
+    # whitespace survives intact and identically on POSIX and Windows.
+    cmd += list(gcc_option_tokens)
 
+    explicit_std = _has_explicit_std(gcc_options, gcc_option_tokens)
     # Workaround: castxml with --castxml-cc-gnu gcc auto-injects -std=gnu++17
-    # which is rejected when parsing a .h file in C mode.
+    # which is rejected when parsing a .h file in C mode. Force C mode, but only
+    # impose gnu11 when the user did not request a C standard via --gcc-option(s)
+    # — otherwise their -std=gnu17/c99 would be overridden by a later flag.
     if not force_cpp and cc_id == "gnu":
-        cmd += ["-x", "c", "-std=gnu11"]
-    elif force_cpp20 and not (
-        gcc_options
-        and ("-std=" in gcc_options or "/std:" in gcc_options)
-    ):
+        cmd += ["-x", "c"]
+        if not explicit_std:
+            cmd += ["-std=gnu11"]
+    elif force_cpp20 and not explicit_std:
         # Headers contain C++20-only syntax (concept / requires-expression).
         # Castxml's default standard is whatever the host compiler picks
         # (usually C++17 on modern gcc / MSVC), which rejects concepts.
@@ -803,6 +867,7 @@ def _castxml_dump(
     gcc_path: str | None = None,
     gcc_prefix: str | None = None,
     gcc_options: str | None = None,
+    gcc_option_tokens: tuple[str, ...] = (),
     sysroot: Path | None = None,
     nostdinc: bool = False,
     lang: str | None = None,
@@ -829,6 +894,7 @@ def _castxml_dump(
     key = _cache_key(
         headers, extra_includes, compiler,
         gcc_path=gcc_path, gcc_prefix=gcc_prefix, gcc_options=gcc_options,
+        gcc_option_tokens=gcc_option_tokens,
         sysroot=sysroot, nostdinc=nostdinc, lang=lang,
     )
     cached = _cache_path(key)
@@ -857,6 +923,7 @@ def _castxml_dump(
             root = _run_castxml_attempt(
                 cc_bin, cc_id, headers, extra_includes, out_xml,
                 sysroot=sysroot, nostdinc=nostdinc, gcc_options=gcc_options,
+                gcc_option_tokens=gcc_option_tokens,
                 force_cpp=force_cpp,
             )
         except SnapshotError as primary:
@@ -885,6 +952,7 @@ def _castxml_dump(
                 root = _run_castxml_attempt(
                     cc_bin, cc_id, headers, extra_includes, out_xml,
                     sysroot=sysroot, nostdinc=nostdinc, gcc_options=gcc_options,
+                    gcc_option_tokens=gcc_option_tokens,
                     force_cpp=True,
                 )
             except SnapshotError:
@@ -907,6 +975,7 @@ def _run_castxml_attempt(
     sysroot: Path | None,
     nostdinc: bool,
     gcc_options: str | None,
+    gcc_option_tokens: tuple[str, ...] = (),
     force_cpp: bool,
 ) -> Element:
     """Run one castxml invocation in a fixed language mode and parse its output.
@@ -932,6 +1001,7 @@ def _run_castxml_attempt(
     cmd = _build_castxml_command(
         cc_bin, cc_id, extra_includes, out_xml, agg_path,
         sysroot=sysroot, nostdinc=nostdinc, gcc_options=gcc_options,
+        gcc_option_tokens=gcc_option_tokens,
         force_cpp=force_cpp,
         force_cpp20=force_cpp20,
     )
@@ -1011,6 +1081,7 @@ def dump(
     gcc_path: str | None = None,
     gcc_prefix: str | None = None,
     gcc_options: str | None = None,
+    gcc_option_tokens: tuple[str, ...] = (),
     sysroot: Path | None = None,
     nostdinc: bool = False,
     lang: str | None = None,
@@ -1082,6 +1153,7 @@ def dump(
     snapshot = handler.builder(
         so_path, headers, extra_includes or [], version, compiler,
         gcc_path=gcc_path, gcc_prefix=gcc_prefix, gcc_options=gcc_options,
+        gcc_option_tokens=gcc_option_tokens,
         sysroot=sysroot, nostdinc=nostdinc, lang=lang,
         public_headers=public_headers, public_header_dirs=public_header_dirs,
         header_backend=header_backend,
@@ -1426,6 +1498,7 @@ def _dump_elf(
     gcc_path: str | None = None,
     gcc_prefix: str | None = None,
     gcc_options: str | None = None,
+    gcc_option_tokens: tuple[str, ...] = (),
     sysroot: Path | None = None,
     nostdinc: bool = False,
     lang: str | None = None,
@@ -1470,6 +1543,7 @@ def _dump_elf(
     parser = _header_ast_parser(
         headers, extra_includes, backend=header_backend, compiler=compiler,
         gcc_path=gcc_path, gcc_prefix=gcc_prefix, gcc_options=gcc_options,
+        gcc_option_tokens=gcc_option_tokens,
         sysroot=sysroot, nostdinc=nostdinc, lang=lang,
         exported_dynamic=exported_dynamic, exported_static=exported_static,
         public_header_paths=[str(h) for h in headers] + [str(h) for h in (public_headers or [])],
@@ -1509,6 +1583,7 @@ def _dump_macho(
     gcc_path: str | None = None,
     gcc_prefix: str | None = None,
     gcc_options: str | None = None,
+    gcc_option_tokens: tuple[str, ...] = (),
     sysroot: Path | None = None,
     nostdinc: bool = False,
     lang: str | None = None,
@@ -1601,6 +1676,7 @@ def _dump_macho(
     parser = _header_ast_parser(
         headers, extra_includes, backend=header_backend, compiler=compiler,
         gcc_path=gcc_path, gcc_prefix=gcc_prefix, gcc_options=gcc_options,
+        gcc_option_tokens=gcc_option_tokens,
         sysroot=sysroot, nostdinc=nostdinc, lang=lang,
         exported_dynamic=exported_no_underscore, exported_static=exported_no_underscore,
         public_header_paths=[str(h) for h in headers] + [str(h) for h in (public_headers or [])],
@@ -1636,6 +1712,7 @@ def _dump_pe(
     gcc_path: str | None = None,
     gcc_prefix: str | None = None,
     gcc_options: str | None = None,
+    gcc_option_tokens: tuple[str, ...] = (),
     sysroot: Path | None = None,
     nostdinc: bool = False,
     lang: str | None = None,
@@ -1683,6 +1760,7 @@ def _dump_pe(
     parser = _header_ast_parser(
         headers, extra_includes, backend=header_backend, compiler=compiler,
         gcc_path=gcc_path, gcc_prefix=gcc_prefix, gcc_options=gcc_options,
+        gcc_option_tokens=gcc_option_tokens,
         sysroot=sysroot, nostdinc=nostdinc, lang=lang,
         exported_dynamic=exported_dynamic, exported_static=exported_static,
         public_header_paths=[str(h) for h in headers] + [str(h) for h in (public_headers or [])],

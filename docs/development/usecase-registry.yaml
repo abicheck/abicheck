@@ -323,6 +323,29 @@ use_cases:
       tests: [tests/test_bundle.py, tests/test_cpp_pattern_detectors.py]
       examples: [examples/case84_bundle_soname_skew]
 
+  - id: UC-WF-oneshot-deep
+    axis: workflow
+    name: One-shot deep compare (auto-collect L3–L5) + CLI usability
+    status: partial
+    gap: G21
+    plan: docs/development/plans/g21-oneshot-deep-compare.md
+    evidence:
+      modules: [abicheck/cli_max.py, abicheck/cli_help.py, abicheck/cli_dump_helpers.py]
+      tests: [tests/test_cli_deep_compare.py, tests/test_cov95_cli.py]
+    next_steps: >
+      Shipped in PR #422: the --depth headers|build|graph|source|full dial
+      (--max = --depth full) on dump reusing the scan_levels vocabulary/mapping;
+      the one-shot `deep-compare` orchestrator (cli_max.py) that dumps both sides
+      with --sources at --depth then compares, collapsing the six-stage
+      dump→collect→merge→compare sequence the oneDAL eval required into one
+      command; option collapsing (rich-click groups M1, presets M2, vocab
+      unification M5); a cross-platform --gcc-option; and a fail-loud signal on
+      an empty requested layer (including empty-PARTIAL). The strict-mode honesty
+      half (empty requested L4 => skipped) also shipped. Remaining (deferred as
+      explicit opt-in per the P09 "warn, don't guess" design): header/source
+      auto-discovery (G21.2) and compile_commands.json auto-synthesis (G21.6) —
+      both guess inputs, so they must stay opt-in flags, not defaults.
+
   - id: UC-WF-wheel-vendored
     axis: workflow
     name: manylinux/auditwheel vendored-library pairing (hashed sonames)

@@ -153,6 +153,7 @@ nav:
       - "G18: Bazel build-evidence": development/plans/g18-bazel-build-evidence.md
       - "G19: PR-tier source intelligence": development/plans/g19-pr-source-intelligence.md
       - "G20: Source-scan example catalog": development/plans/g20-source-scan-example-catalog.md
+      - "G21: One-shot deep compare & CLI usability": development/plans/g21-oneshot-deep-compare.md
     - ADR:
       - Overview: development/adr/index.md
       - "001: Technology Stack": development/adr/001-technology-stack.md

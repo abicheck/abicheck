@@ -234,6 +234,156 @@ class TestSmallHelpers:
     def test_merge_gcc_options_both(self) -> None:
         assert _merge_gcc_options(["-DA"], "-O2") == "-DA -O2"
 
+    def test_resolve_dump_depth_maps_each_depth(self) -> None:
+        from abicheck.cli_dump_helpers import resolve_dump_depth
+
+        cases = {
+            "headers": "off",
+            "build": "build",
+            "graph": "graph-build",
+            "source": "source-changed",
+            "full": "graph-full",
+        }
+        for depth, expected in cases.items():
+            assert resolve_dump_depth(depth, False, "source-target", False) == expected
+
+    def test_resolve_dump_depth_max_is_full(self) -> None:
+        from abicheck.cli_dump_helpers import resolve_dump_depth
+
+        assert resolve_dump_depth(None, True, "source-target", False) == "graph-full"
+
+    def test_resolve_dump_depth_no_preset_keeps_collect_mode(self) -> None:
+        from abicheck.cli_dump_helpers import resolve_dump_depth
+
+        assert resolve_dump_depth(None, False, "build", True) == "build"
+
+    def test_resolve_dump_depth_conflicts_raise(self) -> None:
+        from abicheck.cli_dump_helpers import resolve_dump_depth
+
+        with pytest.raises(click.UsageError):
+            resolve_dump_depth("source", False, "build", True)  # depth + explicit mode
+        with pytest.raises(click.UsageError):
+            resolve_dump_depth("build", True, "source-target", False)  # --max + --depth build
+
+    def test_help_option_groups_render(self) -> None:
+        # G21.8/M1: rich-click renders option-group panels so the big commands'
+        # --help leads with named sections instead of a flat list.
+        runner = CliRunner()
+        compare_help = runner.invoke(main, ["compare", "--help"]).output
+        assert "Per-side overrides" in compare_help
+        assert "Build/source evidence" in compare_help
+        dump_help = runner.invoke(main, ["dump", "--help"]).output
+        assert "Toolchain" in dump_help and "Provenance" in dump_help
+
+    def test_collect_header_alias(self) -> None:
+        # M5: collect gains a --header alias for cross-command vocab consistency
+        # (dump/compare use --header); --headers stays working.
+        opt = next(p for p in main.commands["collect"].params
+                   if getattr(p, "name", "") == "headers")
+        assert "--header" in opt.opts and "--headers" in opt.opts
+
+    def test_missing_requested_evidence_layers(self) -> None:
+        # G21.7: a requested layer that came back NOT_COLLECTED — or PARTIAL with
+        # an empty payload (Codex review) — is reported.
+        from types import SimpleNamespace
+
+        from abicheck.buildsource.model import CoverageStatus, DataLayer
+        from abicheck.cli import _missing_requested_evidence_layers
+
+        # Non-empty payload stand-ins, one per layer key.
+        _full_be = SimpleNamespace(targets=["t"], compile_units=["cu"])
+        _full_sa = SimpleNamespace(reachable_buckets=lambda: {"declarations": ["d"]})
+        _full_sg = SimpleNamespace(nodes=["n"])
+        _empty_sa = SimpleNamespace(reachable_buckets=lambda: {"declarations": []})
+
+        def _pack(statuses, *, build_evidence=_full_be, source_abi=_full_sa,
+                  source_graph=_full_sg):
+            cov = {dl: SimpleNamespace(status=st) for dl, st in statuses.items()}
+            return SimpleNamespace(
+                manifest=SimpleNamespace(coverage_for=lambda layer: cov.get(layer)),
+                build_evidence=build_evidence,
+                source_abi=source_abi,
+                source_graph=source_graph,
+            )
+
+        pack = _pack({
+            DataLayer.L3_BUILD: CoverageStatus.PRESENT,
+            DataLayer.L4_SOURCE_ABI: CoverageStatus.NOT_COLLECTED,
+            DataLayer.L5_SOURCE_GRAPH: CoverageStatus.PRESENT,
+        })
+        assert _missing_requested_evidence_layers(pack, "source-target") == [
+            DataLayer.L4_SOURCE_ABI.value
+        ]
+        assert _missing_requested_evidence_layers(None, "source-target") == []
+        assert _missing_requested_evidence_layers(pack, "off") == []  # nothing requested
+
+        # Empty-but-PARTIAL L4 (clang unavailable after L3 found) is still missing.
+        empty_partial = _pack(
+            {
+                DataLayer.L3_BUILD: CoverageStatus.PRESENT,
+                DataLayer.L4_SOURCE_ABI: CoverageStatus.PARTIAL,
+                DataLayer.L5_SOURCE_GRAPH: CoverageStatus.PRESENT,
+            },
+            source_abi=_empty_sa,
+        )
+        assert _missing_requested_evidence_layers(empty_partial, "source-target") == [
+            DataLayer.L4_SOURCE_ABI.value
+        ]
+        # All layers present and non-empty → nothing reported.
+        full = _pack({
+            DataLayer.L3_BUILD: CoverageStatus.PRESENT,
+            DataLayer.L4_SOURCE_ABI: CoverageStatus.PARTIAL,
+            DataLayer.L5_SOURCE_GRAPH: CoverageStatus.PRESENT,
+        })
+        assert _missing_requested_evidence_layers(full, "source-target") == []
+
+        # Empty L3 build_evidence and empty L5 graph are each flagged too,
+        # exercising both per-layer emptiness branches.
+        empty_l3 = _pack(
+            {DataLayer.L3_BUILD: CoverageStatus.PRESENT},
+            build_evidence=SimpleNamespace(targets=[], compile_units=[]),
+        )
+        assert DataLayer.L3_BUILD.value in _missing_requested_evidence_layers(empty_l3, "build")
+        empty_l5 = _pack(
+            {
+                DataLayer.L3_BUILD: CoverageStatus.PRESENT,
+                DataLayer.L4_SOURCE_ABI: CoverageStatus.PRESENT,
+                DataLayer.L5_SOURCE_GRAPH: CoverageStatus.PRESENT,
+            },
+            source_graph=SimpleNamespace(nodes=[]),
+        )
+        assert DataLayer.L5_SOURCE_GRAPH.value in _missing_requested_evidence_layers(
+            empty_l5, "source-target"
+        )
+
+    def test_dump_gcc_option_ignored_warning_for_non_elf(self, tmp_path) -> None:
+        # G21.5/Codex: --gcc-option(s) aren't applied on the native PE/Mach-O
+        # dump path, so the CLI warns rather than dropping them silently.
+        import struct
+        dylib = tmp_path / "fake.dylib"
+        dylib.write_bytes(struct.pack("<I", 0xfeedfacf) + b"\x00" * 64)
+        result = CliRunner().invoke(main, ["dump", str(dylib), "--gcc-option=-DX"])
+        assert "will be ignored" in result.output
+
+    def test_dump_gcc_option_help(self) -> None:
+        # G21.5: the repeatable --gcc-option is documented on dump.
+        out = CliRunner().invoke(main, ["dump", "--help"]).output
+        norm = out.replace("│", "").replace("\n", "").replace(" ", "")
+        assert "--gcc-option" in norm
+
+    def test_dump_depth_help_and_mutual_exclusion(self) -> None:
+        runner = CliRunner()
+        help_out = runner.invoke(main, ["dump", "--help"])
+        assert help_out.exit_code == 0
+        assert "--depth" in help_out.output and "--max" in help_out.output
+        # --depth and --collect-mode are mutually exclusive (resolved before any
+        # binary access, so a source-only invocation surfaces the error).
+        clash = runner.invoke(
+            main, ["dump", "--depth", "source", "--collect-mode", "build"]
+        )
+        assert clash.exit_code != 0
+        assert "mutually exclusive" in clash.output
+
     def test_resolve_per_side_options_overrides(self, tmp_path: Path) -> None:
         h = (tmp_path / "h.h",)
         oh = (tmp_path / "old.h",)

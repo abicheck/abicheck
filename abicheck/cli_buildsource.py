@@ -96,10 +96,12 @@ if TYPE_CHECKING:
 @click.option(
     "-H",
     "--headers",
+    "--header",
     "headers",
     multiple=True,
     type=click.Path(path_type=Path),
-    help="Public header file or directory (recorded as provenance; repeat).",
+    help="Public header file or directory (recorded as provenance; repeat). "
+    "`--header` is an alias for cross-command consistency with dump/compare.",
 )
 @click.option(
     "--build-dir",
@@ -591,6 +593,26 @@ def _collect_source_abi(
 
     exported = _exported_symbols_from_binary(binary)
     library = str(binary) if binary else ""
+
+    # A no-op replay scope selects zero translation units by design ("off", or
+    # "changed" with no --changed-path), so it needs neither L3 build evidence,
+    # an Android dump, nor a source-ABI frontend. Resolve it first — before the
+    # Android branch and the clang/castxml probe — so a no-op scope never
+    # false-fails --collection-mode strict on a missing dump/frontend it would
+    # not use. (ADR-030 D7; Codex review.)
+    if scope == "off" or (scope == "changed" and not changed_paths):
+        extractors.append(
+            ExtractorRecord(
+                name=f"source_abi:{extractor}",
+                status="partial",
+                detail=f"scope {scope!r} selects no translation units; nothing to replay",
+            )
+        )
+        return (
+            SourceAbiSurface(library=library, target_id=target_id),
+            f"no-op: scope {scope!r} selects no translation units",
+        )
+
     # Header roots: explicit --headers win; else pull from the build targets.
     roots = [str(h) for h in headers] or public_header_roots_for(merged, target_id)
 
@@ -635,10 +657,16 @@ def _collect_source_abi(
         merged.diagnostics.append(f"source_abi: {choice.gap_note()}")
 
     if not merged.compile_units:
+        # The user explicitly asked for a unit-consuming L4 scope but there is
+        # no L3 build context to replay, so nothing is produced. Record this as
+        # "skipped" (not "partial") so --collection-mode strict fails loud
+        # instead of silently passing on an empty requested layer; permissive
+        # mode is unaffected and still exits 0. (No-op scopes already returned
+        # above, before backend resolution.)
         extractors.append(
             ExtractorRecord(
                 name=f"source_abi:{extractor}",
-                status="partial",
+                status="skipped",
                 detail="no compile units in build evidence; collect L3 first (e.g. --compile-db)",
             )
         )

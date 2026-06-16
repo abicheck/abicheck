@@ -22,6 +22,7 @@ scope**.
 | **G16** | [Header-scope toolchain robustness](g16-header-scope-toolchain-robustness.md) | `UC-TC-header-scope-robustness` | M |
 | **G17** | [Real-world validation corpus](g17-real-world-corpus.md) | `UC-WORKFLOW-real-world-corpus` | M |
 | **G18** | [Bazel build-evidence](g18-bazel-build-evidence.md) | `UC-TC-bazel-build-evidence` | M |
+| **G21** | [One-shot deep compare & CLI usability](g21-oneshot-deep-compare.md) | `UC-WF-oneshot-deep` | M |
 
 Initiative plans (cross-cutting, not tied to a single registry gap):
 

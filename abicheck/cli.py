@@ -23,6 +23,17 @@ from typing import TYPE_CHECKING, Any
 
 import click
 
+# rich-click renders the (large) option lists in named panels for progressive
+# disclosure (G21.8 / collapse M1). We keep the plain ``click`` API (so the
+# module type-checks against click's stubs) and only base the root group on
+# ``RichGroup`` — that alone makes ``cls=_AbicheckGroup`` render the rich panels
+# (and RichGroup.command produces RichCommand subcommands). Fall back to plain
+# click.Group if rich-click is somehow unavailable so the CLI never hard-fails.
+try:
+    from rich_click import RichGroup as _RootGroupBase
+except ImportError:  # pragma: no cover - rich-click is a declared dependency
+    _RootGroupBase = click.Group  # type: ignore[assignment,misc]
+
 from .checker import DiffResult, LibraryMetadata, compare
 from .cli_audit import echo_filtered_surface, echo_pattern_modulations
 from .cli_datasources import print_data_sources as _print_data_sources
@@ -30,7 +41,9 @@ from .cli_dump_helpers import (
     perform_elf_dump,
     resolve_dump_compile_db,
     resolve_dump_debug_format,
+    resolve_dump_depth,
 )
+from .cli_help import configure_rich_help
 from .cli_helpers_compare import (  # noqa: F401  — re-exported to keep cli import sites stable
     _build_match_map as _build_match_map,
     _canonical_library_key as _canonical_library_key,
@@ -71,6 +84,7 @@ from .errors import AbicheckError
 from .serialization import snapshot_to_json
 
 if TYPE_CHECKING:
+    from .buildsource.pack import BuildSourcePack
     from .checker_types import Change, DiffResult
     from .debug_resolver import DebugArtifact
     from .severity import SeverityConfig
@@ -156,6 +170,64 @@ def _stamp_provenance(
             pass  # git not available or not a repo — leave as None
 
 
+def _layer_payload_empty(pack: BuildSourcePack, key: str) -> bool:
+    """True when *key*'s embedded payload carries no facts.
+
+    A coverage row can read ``PARTIAL``/``PRESENT`` while the payload is empty —
+    e.g. ``_run_inline_source_abi`` returns an empty ``SourceAbiSurface()`` when
+    clang is unavailable after L3 was found. The status alone then hides the
+    miss, so we inspect the actual payload (Codex review, PR #422).
+    """
+    if key == "L3":
+        be = pack.build_evidence
+        return be is None or (not be.targets and not be.compile_units)
+    if key == "L4":
+        sa = pack.source_abi
+        return sa is None or not any(sa.reachable_buckets().values())
+    if key == "L5":
+        sg = pack.source_graph
+        return sg is None or not sg.nodes
+    return False
+
+
+def _missing_requested_evidence_layers(
+    pack: BuildSourcePack | None, collect_mode: str
+) -> list[str]:
+    """Layers the *collect_mode* asked for but that came back empty.
+
+    Maps the ADR-033 evidence mode to its expected L3/L4/L5 layers and checks the
+    embedded pack. A layer is reported missing when its coverage row is
+    ``NOT_COLLECTED`` (or absent) **or** when its embedded payload carries no
+    facts despite a ``PARTIAL``/``PRESENT`` status — the latter catches a
+    requested extractor that ran but produced nothing (e.g. clang unavailable).
+    Returns [] when nothing was requested or every requested layer has facts.
+    """
+    if pack is None:
+        return []
+    from .buildsource.model import CoverageStatus, DataLayer
+    from .buildsource.source_replay import collection_for_ci_mode
+
+    _layer_for = {
+        "L3": DataLayer.L3_BUILD,
+        "L4": DataLayer.L4_SOURCE_ABI,
+        "L5": DataLayer.L5_SOURCE_GRAPH,
+    }
+    _, layers = collection_for_ci_mode(collect_mode)
+    missing: list[str] = []
+    for key in layers:
+        layer = _layer_for.get(key)
+        if layer is None:
+            continue
+        cov = pack.manifest.coverage_for(layer)
+        if (
+            cov is None
+            or cov.status == CoverageStatus.NOT_COLLECTED
+            or _layer_payload_empty(pack, key)
+        ):
+            missing.append(layer.value)
+    return missing
+
+
 def _write_snapshot_output(
     snap: AbiSnapshot,
     output: Path | None,
@@ -186,6 +258,19 @@ def _write_snapshot_output(
             collect_mode=collect_mode,
             build_query=build_query, build_compile_db=build_compile_db,
         )
+        # G21.7: fail loud — if a requested evidence layer came back empty, say so
+        # prominently instead of leaving it buried in the coverage rows. Permissive
+        # by design (a warning, not an error): --collection-mode strict on
+        # `collect` remains the hard-fail path (ADR-028 D3).
+        missing = _missing_requested_evidence_layers(snap.build_source, collect_mode)
+        if missing:
+            click.echo(
+                f"Warning: requested evidence layer(s) not collected: "
+                f"{', '.join(missing)}. The snapshot embeds no facts for them — "
+                "supply --build-info/--compile-db or install clang/castxml, and "
+                "see the coverage rows for details.",
+                err=True,
+            )
     result = snapshot_to_json(snap)
     if output:
         _safe_write_output(output, result)
@@ -223,7 +308,7 @@ def _collect_metadata(path: Path) -> LibraryMetadata | None:
 _EXIT_USAGE_ERROR = 64
 
 
-class _AbicheckGroup(click.Group):
+class _AbicheckGroup(_RootGroupBase):
     """Root group that maps Click *usage* errors to a dedicated exit code.
 
     Click exits 2 for ``UsageError`` / ``BadParameter`` (bad arguments, unknown
@@ -237,10 +322,15 @@ class _AbicheckGroup(click.Group):
     """
 
     def main(self, *args: Any, standalone_mode: bool = True, **kwargs: Any) -> Any:  # type: ignore[override]
+        # Call plain click's main (not rich-click's RichGroup.main, our direct
+        # super), because rich-click's main renders and exits on a ClickException
+        # itself — which would bypass the usage-error→64 remap below. Help still
+        # renders richly: that goes through RichCommand.format_help, invoked by
+        # click's main during --help handling regardless of which main runs.
         if not standalone_mode:
-            return super().main(*args, standalone_mode=False, **kwargs)  # type: ignore[call-overload]
+            return click.Group.main(self, *args, standalone_mode=False, **kwargs)  # type: ignore[call-overload]
         try:
-            super().main(*args, standalone_mode=False, **kwargs)  # type: ignore[call-overload]
+            click.Group.main(self, *args, standalone_mode=False, **kwargs)  # type: ignore[call-overload]
         except click.exceptions.Abort:
             click.echo("Aborted!", err=True)
             sys.exit(1)
@@ -250,6 +340,9 @@ class _AbicheckGroup(click.Group):
             sys.exit(_EXIT_USAGE_ERROR if exc.exit_code == 2 else exc.exit_code)
         else:
             sys.exit(0)
+
+
+configure_rich_help()  # register --help option-group panels (G21.8 / M1)
 
 
 @click.group(cls=_AbicheckGroup)
@@ -287,8 +380,9 @@ def main() -> None:
               type=click.Choice(["auto", "castxml", "clang"], case_sensitive=False),
               help="L2 header-AST frontend: castxml (default schema reference) or "
                    "clang (-ast-dump=json; for hosts where castxml is absent or its "
-                   "bundled frontend chokes). auto = castxml if present, else clang. "
-                   "Env: ABICHECK_HEADER_BACKEND.")
+                   "bundled frontend chokes). auto = castxml if present, else clang, "
+                   "and auto-falls back to clang when castxml hits a toolchain-version "
+                   "error. Env: ABICHECK_HEADER_BACKEND.")
 @click.option("-o", "--output", "output", type=click.Path(path_type=Path), default=None,
               help="Output JSON file. Defaults to stdout.")
 # ── Cross-compilation flags ───────────────────────────────────────────────────
@@ -297,7 +391,14 @@ def main() -> None:
 @click.option("--gcc-prefix", default=None,
               help="Cross-toolchain prefix (e.g. aarch64-linux-gnu-).")
 @click.option("--gcc-options", default=None,
-              help="Extra compiler flags passed through to castxml.")
+              help="Extra compiler flags passed through to castxml (split on "
+                   "whitespace). For a flag whose value contains spaces, use the "
+                   "repeatable --gcc-option instead.")
+@click.option("--gcc-option", "gcc_option_tokens", multiple=True,
+              help="A single extra compiler flag passed through to castxml "
+                   "verbatim (repeatable; not whitespace-split). Use two flags for "
+                   "a flag + spaced value, e.g. --gcc-option=-include "
+                   "--gcc-option='some header.h'.")
 @click.option("--sysroot", type=click.Path(path_type=Path), default=None,
               help="Alternative system root directory.")
 @click.option("--nostdinc", is_flag=True, default=False,
@@ -367,6 +468,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
              public_headers: tuple[Path, ...], public_header_dirs: tuple[Path, ...],
              version: str, lang: str, header_backend: str, output: Path | None,
              gcc_path: str | None, gcc_prefix: str | None, gcc_options: str | None,
+             gcc_option_tokens: tuple[str, ...],
              sysroot: Path | None, nostdinc: bool, pdb_path: Path | None,
              follow_deps: bool, search_paths: tuple[Path, ...], ld_library_path: str,
              dwarf_only: bool, show_data_sources: bool,
@@ -381,7 +483,8 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
              build_info: Path | None = None, sources: Path | None = None,
              build_config: Path | None = None, allow_build_query: bool = False,
              build_query: str | None = None, build_compile_db: str | None = None,
-             collect_mode: str = "source-target") -> None:
+             collect_mode: str = "source-target",
+             depth: str | None = None, max_depth: bool = False) -> None:
     """Dump ABI snapshot of a shared library to JSON.
 
     \b
@@ -390,6 +493,15 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
       abicheck dump --sources ./libfoo-src/ -o libfoo.src.json  # source-only (no binary)
     """
     _setup_verbosity(verbose)
+
+    # Resolve the --depth/--max preset into the underlying --collect-mode before
+    # any dump path runs, so every branch (source-only / PE-Mach-O / ELF) embeds
+    # the same evidence depth (G21.1).
+    collect_mode = resolve_dump_depth(
+        depth, max_depth, collect_mode,
+        click.get_current_context().get_parameter_source("collect_mode")
+        == click.core.ParameterSource.COMMANDLINE,
+    )
 
     # Source-only dump (no binary) for the parallel-baseline / merge flow.
     if so_path is None:
@@ -424,6 +536,12 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
             f"--{effective_debug_format} is only supported for ELF binaries, not {binary_fmt.upper()}."
         )
     if binary_fmt in ("pe", "macho"):
+        if gcc_option_tokens or gcc_options:
+            click.echo(
+                "Warning: --gcc-option/--gcc-options are not applied on the "
+                f"native {binary_fmt.upper()} dump path and will be ignored.",
+                err=True,
+            )
         _handle_non_elf_dump(
             so_path, binary_fmt, headers, includes, version, lang, pdb_path,
             follow_deps, git_tag, build_id, no_git, output, public_headers,
@@ -455,6 +573,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         gcc_path=gcc_path,
         gcc_prefix=gcc_prefix,
         effective_gcc_options=effective_gcc_options,
+        gcc_option_tokens=gcc_option_tokens,
         sysroot=sysroot,
         nostdinc=nostdinc,
         dwarf_only=dwarf_only,
@@ -833,7 +952,9 @@ def _finalize_compare_result(
               type=click.Choice(["auto", "castxml", "clang"], case_sensitive=False),
               help="L2 header-AST frontend for native-binary inputs: castxml "
                    "(default) or clang (-ast-dump=json; for clang-only hosts). "
-                   "auto = castxml if present, else clang. Env: ABICHECK_HEADER_BACKEND.")
+                   "auto = castxml if present, else clang, and auto-falls back to "
+                   "clang on a castxml toolchain-version error. "
+                   "Env: ABICHECK_HEADER_BACKEND.")
 @click.option("--old-header", "old_headers_only", multiple=True,
               type=click.Path(path_type=Path),
               help="Public header for old side only (overrides -H for old). "
@@ -1309,6 +1430,7 @@ from . import (  # noqa: E402  — must run after `main` and helpers are defined
     cli_buildsource,  # noqa: F401  — registers collect
     cli_compare_release,  # noqa: F401  — registers compare-release
     cli_debian_symbols,  # noqa: F401  — registers debian-symbols
+    cli_max,  # noqa: F401  — registers deep-compare
     cli_plugin,  # noqa: F401  — registers plugin-check
     cli_pr_comment,  # noqa: F401  — registers pr-comment
     cli_probe,  # noqa: F401  — registers probe (run, compare)

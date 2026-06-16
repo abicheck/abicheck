@@ -90,7 +90,20 @@ def build_source_dump_options(func: F) -> F:
         "replay), 'graph-build' adds the L5 structural graph (build options + "
         "target/source/header nodes) from L3 alone — no L4 parse, feasible on "
         "monorepos, 'source-*'/'graph-*' collect L3+L4+L5 at the matching replay "
-        "scope, 'off' embeds nothing.",
+        "scope, 'off' embeds nothing. Prefer the friendlier --depth preset.",
+    )(func)
+    func = click.option(
+        "--depth", "depth",
+        type=click.Choice(["headers", "build", "graph", "source", "full"]),
+        default=None,
+        help="Evidence-depth preset over --collect-mode (same vocabulary as "
+        "`scan --depth`): headers=L2 only, build=L3 build context, graph=L5 "
+        "graph from L3, source=L3-L5 (changed scope), full=L3-L5 (full). "
+        "Mutually exclusive with --collect-mode.",
+    )(func)
+    func = click.option(
+        "--max", "max_depth", is_flag=True, default=False,
+        help="Shorthand for --depth full (collect the deepest evidence available).",
     )(func)
     func = click.option(
         "--allow-build-query", "allow_build_query", is_flag=True, default=False,

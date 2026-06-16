@@ -987,6 +987,54 @@ def test_collect_evidence_source_abi_without_compile_units(tmp_path):
     assert "no L3 build context" in result.output
 
 
+def test_collect_evidence_source_abi_without_compile_units_strict_fails(tmp_path):
+    """Strict mode fails loud when an explicitly-requested L4 layer is empty.
+
+    Permissive mode (above) still exits 0; under --collection-mode strict the
+    empty source-ABI layer is a "skipped" extractor and must fail the command
+    rather than silently passing on an empty requested layer.
+    """
+    out = tmp_path / "ev"
+    result = CliRunner().invoke(main, [
+        "collect", "--source-abi", "--source-abi-extractor", "clang",
+        "--collection-mode", "strict", "-o", str(out),
+    ])
+    assert result.exit_code != 0, result.output
+    assert "strict collection mode" in result.output
+
+
+def test_collect_evidence_source_abi_noop_scope_strict_passes(tmp_path):
+    """A no-op replay scope must not false-fail strict mode on absent L3.
+
+    `--source-abi-scope off` selects zero translation units by design, so a
+    missing compile DB is not a missing prerequisite — strict mode must still
+    exit 0 (the skipped-on-empty rule applies only to scopes that consume units).
+    """
+    out = tmp_path / "ev"
+    result = CliRunner().invoke(main, [
+        "collect", "--source-abi", "--source-abi-extractor", "clang",
+        "--source-abi-scope", "off", "--collection-mode", "strict",
+        "-o", str(out),
+    ])
+    assert result.exit_code == 0, result.output
+
+
+def test_collect_evidence_source_abi_noop_scope_android_no_dump(tmp_path):
+    """A no-op scope short-circuits before the Android branch and its dump check.
+
+    `--source-abi-extractor android --source-abi-scope off` must not raise the
+    missing-`--android-dump` usage error, since the off scope selects zero TUs
+    and needs neither a dump nor a frontend; strict mode still exits 0.
+    """
+    out = tmp_path / "ev"
+    result = CliRunner().invoke(main, [
+        "collect", "--source-abi", "--source-abi-extractor", "android",
+        "--source-abi-scope", "off", "--collection-mode", "strict",
+        "-o", str(out),
+    ])
+    assert result.exit_code == 0, result.output
+
+
 def test_exported_symbols_from_binary_edge_cases(tmp_path):
     from pathlib import Path
 

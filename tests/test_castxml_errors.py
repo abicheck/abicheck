@@ -269,3 +269,182 @@ class TestCastxmlNotFound:
             header.write_text("// empty", encoding="utf-8")
             with pytest.raises(RuntimeError, match="castxml not found"):
                 _castxml_dump([header], [])
+
+
+def test_build_castxml_command_gcc_option_tokens_verbatim(tmp_path):
+    """G21.5: repeatable --gcc-option tokens reach castxml as literal argv
+    elements (no shlex split), so a flag value with whitespace survives intact
+    and identically across platforms — the cross-platform-correct design that
+    the string-quoting approach could not provide on Windows."""
+    from pathlib import Path
+
+    from abicheck.dumper import _build_castxml_command
+
+    cmd = _build_castxml_command(
+        "gcc", "gnu", [], Path("out.xml"), Path("agg.hpp"),
+        gcc_options="-O2 -DA",
+        gcc_option_tokens=("-include", "some header.h"),
+        force_cpp=True,
+    )
+    # --gcc-options still whitespace-splits into separate flags.
+    assert "-O2" in cmd and "-DA" in cmd
+    # Each --gcc-option is one literal argv element; the spaced value is NOT split.
+    i = cmd.index("-include")
+    assert cmd[i + 1] == "some header.h"
+    assert "some" not in cmd and "header.h" not in cmd
+
+
+def test_has_explicit_std_checks_both_flag_forms():
+    """Codex review: an explicit -std supplied via the repeatable --gcc-option
+    must be honoured, not just one in the whitespace --gcc-options string."""
+    from abicheck.dumper import _has_explicit_std
+
+    assert _has_explicit_std("-O2 -std=gnu++23", ()) is True
+    assert _has_explicit_std(None, ("-std=gnu++23",)) is True
+    assert _has_explicit_std(None, ("/std:c++latest",)) is True
+    assert _has_explicit_std("-O2", ("-Wall",)) is False
+    assert _has_explicit_std(None, ()) is False
+
+
+def test_castxml_command_user_std_token_not_overridden(tmp_path):
+    """A -std passed via --gcc-option suppresses the automatic C++20 bump, so the
+    user's dialect is the last (winning) standard flag (Codex review)."""
+    from pathlib import Path
+
+    from abicheck.dumper import _build_castxml_command
+
+    cmd = _build_castxml_command(
+        "g++", "gnu", [], Path("o.xml"), Path("a.hpp"),
+        gcc_option_tokens=("-std=gnu++23",),
+        force_cpp=True, force_cpp20=True,
+    )
+    assert "-std=gnu++23" in cmd
+    assert "-std=gnu++20" not in cmd  # abicheck did not append its own after
+
+
+def test_clang_header_command_carries_gcc_option_tokens(tmp_path):
+    """The clang L2 backend honours --gcc-option too (verbatim argv + std guard)."""
+    from pathlib import Path
+
+    from abicheck.dumper import _build_clang_header_command
+
+    cmd = _build_clang_header_command(
+        "clang++", "gnu", [], Path("a.hpp"),
+        gcc_option_tokens=("-include", "some header.h", "-std=gnu++23"),
+        force_cpp=True, force_cpp20=True,
+    )
+    i = cmd.index("-include")
+    assert cmd[i + 1] == "some header.h"        # spaced value stays one arg
+    assert "-std=gnu++23" in cmd and "-std=gnu++20" not in cmd
+
+
+def test_castxml_c_mode_user_std_token_not_overridden():
+    """C-mode castxml must not append -std=gnu11 after a user -std token, so a
+    C dialect chosen via --gcc-option actually takes effect (Codex review)."""
+    from pathlib import Path
+
+    from abicheck.dumper import _build_castxml_command
+
+    cmd = _build_castxml_command(
+        "gcc", "gnu", [], Path("o.xml"), Path("a.h"),
+        gcc_option_tokens=("-std=gnu17",),
+        force_cpp=False,
+    )
+    assert "-std=gnu17" in cmd
+    assert "-std=gnu11" not in cmd
+    assert "-x" in cmd and "c" in cmd  # C language mode still forced
+
+
+def _ast_parser_kwargs(tmp_path):
+    """Common keyword args for _header_ast_parser in the G16 fallback tests."""
+    return dict(
+        compiler="c++", gcc_path=None, gcc_prefix=None, gcc_options=None,
+        gcc_option_tokens=(), sysroot=None, nostdinc=False, lang=None,
+        exported_dynamic=set(), exported_static=set(),
+        public_header_paths=[], public_dir_paths=[],
+    )
+
+
+def test_header_ast_parser_falls_back_to_clang_on_toolchain_failure(tmp_path, monkeypatch):
+    """G16: an auto-selected castxml that fails with a toolchain-version error
+    (bundled Clang too old) falls back to the clang backend instead of aborting."""
+    from abicheck import dumper
+    from abicheck.dumper import _ClangAstParser, _header_ast_parser
+    from abicheck.errors import SnapshotError
+
+    def _boom(*a, **k):
+        raise SnapshotError("castxml failed: error: unknown type name '_Float128'")
+
+    sentinel = object()
+    monkeypatch.setattr(dumper, "_resolve_header_backend", lambda b: "castxml")
+    monkeypatch.setattr(dumper, "_castxml_dump", _boom)
+    monkeypatch.setattr(dumper, "_clang_available", lambda *a, **k: True)
+    monkeypatch.setattr(dumper, "_clang_header_dump", lambda *a, **k: sentinel)
+    monkeypatch.delenv("ABICHECK_HEADER_BACKEND", raising=False)
+
+    parser = _header_ast_parser([Path("a.h")], [], backend="auto", **_ast_parser_kwargs(tmp_path))
+    assert isinstance(parser, _ClangAstParser)
+
+
+def test_header_ast_parser_no_fallback_when_castxml_explicit(tmp_path, monkeypatch):
+    """An explicit --header-backend castxml is honored verbatim — the toolchain
+    error surfaces unchanged rather than silently switching to clang."""
+    from abicheck import dumper
+    from abicheck.dumper import _header_ast_parser
+    from abicheck.errors import SnapshotError
+
+    def _boom(*a, **k):
+        raise SnapshotError("castxml failed: error: unknown type name '_Float128'")
+
+    monkeypatch.setattr(dumper, "_resolve_header_backend", lambda b: "castxml")
+    monkeypatch.setattr(dumper, "_castxml_dump", _boom)
+    monkeypatch.setattr(dumper, "_clang_available", lambda *a, **k: True)
+    monkeypatch.delenv("ABICHECK_HEADER_BACKEND", raising=False)
+
+    with pytest.raises(SnapshotError):
+        _header_ast_parser([Path("a.h")], [], backend="castxml", **_ast_parser_kwargs(tmp_path))
+
+
+def test_header_ast_parser_no_fallback_on_non_toolchain_failure(tmp_path, monkeypatch):
+    """A castxml failure that is NOT a toolchain-version signature (e.g. a bad
+    header) re-raises — fallback is reserved for the recoverable case."""
+    from abicheck import dumper
+    from abicheck.dumper import _header_ast_parser
+    from abicheck.errors import SnapshotError
+
+    def _boom(*a, **k):
+        raise SnapshotError("castxml failed: fatal error: 'missing.h' file not found")
+
+    monkeypatch.setattr(dumper, "_resolve_header_backend", lambda b: "castxml")
+    monkeypatch.setattr(dumper, "_castxml_dump", _boom)
+    monkeypatch.setattr(dumper, "_clang_available", lambda *a, **k: True)
+    monkeypatch.delenv("ABICHECK_HEADER_BACKEND", raising=False)
+
+    with pytest.raises(SnapshotError):
+        _header_ast_parser([Path("a.h")], [], backend="auto", **_ast_parser_kwargs(tmp_path))
+
+
+def test_header_ast_parser_clang_backend_returns_clang_parser(tmp_path, monkeypatch):
+    """When the resolved backend is clang, the clang parser is returned directly."""
+    from abicheck import dumper
+    from abicheck.dumper import _ClangAstParser, _header_ast_parser
+
+    monkeypatch.setattr(dumper, "_resolve_header_backend", lambda b: "clang")
+    monkeypatch.setattr(dumper, "_clang_header_dump", lambda *a, **k: {})
+
+    parser = _header_ast_parser([Path("a.h")], [], backend="clang", **_ast_parser_kwargs(tmp_path))
+    assert isinstance(parser, _ClangAstParser)
+
+
+def test_header_ast_parser_castxml_success_returns_castxml_parser(tmp_path, monkeypatch):
+    """A successful castxml dump returns the castxml parser (no fallback)."""
+    from xml.etree.ElementTree import Element
+
+    from abicheck import dumper
+    from abicheck.dumper import _CastxmlParser, _header_ast_parser
+
+    monkeypatch.setattr(dumper, "_resolve_header_backend", lambda b: "castxml")
+    monkeypatch.setattr(dumper, "_castxml_dump", lambda *a, **k: Element("GCC_XML"))
+
+    parser = _header_ast_parser([Path("a.h")], [], backend="auto", **_ast_parser_kwargs(tmp_path))
+    assert isinstance(parser, _CastxmlParser)
