@@ -80,7 +80,7 @@ graph — **six evidence layers in all**, layered from the least input to the mo
 ```mermaid
 flowchart LR
     L0["L0 · binary<br/>(stripped .so)"] --> L1["L1 · + debug<br/>(DWARF/PDB)"]
-    L1 --> L2["L2 · + headers<br/>(castxml AST)"]
+    L1 --> L2["L2 · + headers<br/>(castxml / clang AST)"]
     L2 --> L3["L3 · + build data<br/>(compile DB)"]
     L3 --> L4["L4 · + sources<br/>(build/source pack)"]
     L3 -.derived.-> L5["L5 · source/build graph<br/>(reachability)"]

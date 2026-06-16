@@ -166,7 +166,7 @@ the five **independent, additive** sources of [§0](#0-the-five-sources-of-infor
 |-------|--------|-------------------------|
 | **L0** | Binary metadata | ELF symbols, SONAME, versioning, visibility, dependencies (and PE/COFF + Mach-O equivalents) |
 | **L1** | Debug info (DWARF/PDB) | Layout, offsets, enum values, calling convention, vtable slots, type cross-checks |
-| **L2** | Header AST (castxml or clang) | Function signatures, classes, structs, vtables, enums, typedefs, templates, `noexcept`, access, public/internal scoping |
+| **L2** | Header AST (castxml or clang) | Function signatures, classes, structs, enums, typedefs, templates, `noexcept`, access, public/internal scoping (castxml also resolves vtables/layout; the clang backend is syntactic — pair it with L1/DWARF for layout) |
 | **L3** | Build context | ABI-relevant flags, toolchain/sysroot, target graph, export-policy changes |
 | **L4** | Source ABI replay | Macro/`constexpr` values, default-argument values, inline/template bodies, uninstantiated templates |
 | **L5** | Source/build graph *(derived)* | Include/type/call reachability — localizes and explains findings, prioritizes cross-symbol impact (folded from L3, plus any L4 surface) |
