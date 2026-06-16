@@ -23,6 +23,7 @@ scope**.
 | **G17** | [Real-world validation corpus](g17-real-world-corpus.md) | `UC-WORKFLOW-real-world-corpus` | M |
 | **G18** | [Bazel build-evidence](g18-bazel-build-evidence.md) | `UC-TC-bazel-build-evidence` | M |
 | **G21** | [One-shot deep compare & CLI usability](g21-oneshot-deep-compare.md) | `UC-WF-oneshot-deep` | M |
+| **G22** | [CLI consolidation & interface-contract enforcement](g22-cli-consolidation.md) | `UC-WF-cli-contract` | L |
 
 Initiative plans (cross-cutting, not tied to a single registry gap):
 
