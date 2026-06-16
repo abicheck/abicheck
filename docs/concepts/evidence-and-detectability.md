@@ -27,8 +27,15 @@ different inputs.
 A release engineer can hand a compatibility checker up to **five different
 sources of information** about a library, ordered from the least to the most.
 Each one *adds* facts the previous cannot see; none of them is complete on its
-own. abicheck names them with the layer codes `L0`–`L4` used throughout the
-docs. You can see which **artifact** layers (`L0`–`L2`) a given input exposes
+own. abicheck names them with the layer codes `L0`–`L4`. A **sixth** layer,
+`L5`, is not something you hand over — it is a source/build *graph* abicheck
+**derives** from L3 (and any L4 surface) to localize and explain findings. So
+the full model is **six evidence layers, `L0`–`L5`** (matching
+[Build Info & Sources](build-source-data.md)), of which the **five `L0`–`L4`
+are inputs you provide** and `L5` is derived. This section covers the five you
+provide; the derived `L5` layer is detailed below and in
+[Build Info & Sources](build-source-data.md). You can see which **artifact**
+layers (`L0`–`L2`) a given input exposes
 with `abicheck dump --show-data-sources`; the build/source layers (`L3`/`L4`)
 are not reported there — they surface in the pack-aware `compare`
 `layer_coverage` table once you supply a build/source pack:
@@ -37,7 +44,7 @@ are not reported there — they surface in the pack-aware `compare`
 |---|--------------------|:-----:|----------------|------------------------|
 | 1 | **Just the binary** | **L0** | a stripped `.so`/`.dll`/`.dylib` | Exported symbols, SONAME/install-name, symbol versions, visibility, binding, `DT_NEEDED`/`LC_LOAD_DYLIB` dependencies |
 | 2 | **+ Debug symbols** | **L1** | a `-g` build (DWARF/PDB) or sidecar debug file | Type **layout**: struct/class sizes, field offsets, enum *values*, vtable slots, calling convention, packing/alignment |
-| 3 | **+ Public headers** | **L2** | `-H include/` (parsed by castxml) | Source-level **API**: signatures, overloads, access (`public`/`private`), `final`/`explicit`/`noexcept`, templates, declared default args, public/internal **scoping** |
+| 3 | **+ Public headers** | **L2** | `-H include/` (parsed by castxml or clang — `--header-backend`) | Source-level **API**: signatures, overloads, access (`public`/`private`), `final`/`explicit`/`noexcept`, templates, declared default args, public/internal **scoping** |
 | 4 | **+ Build system data & options** | **L3** | `-p build/` (compile DB, CMake/Ninja/Bazel/Make) | The **flags the library was actually built with**: `-std`, `_GLIBCXX_USE_CXX11_ABI`, `-fvisibility`, `-fabi-version`, toolchain/sysroot, target graph, export maps |
 | 5 | **+ Sources** | **L4** | a build/source pack (per-TU source ABI replay, ADR-030) | Facts that never reach the binary: macro constants, `constexpr` values, default-argument *values*, inline/template **bodies**, uninstantiated templates |
 
@@ -48,9 +55,18 @@ raise.** A struct-field insertion is invisible at L0 but obvious at L1
 *looks* like a break at L1 is correctly dismissed once L2 headers reveal the
 struct is non-public ([case118](../examples/case118_internal_struct_field_added_scoped.md)).
 
-> An optional sixth source — the **L5 source/build graph** (include/type/call
-> reachability, ADR-031) — extends L4 to *localize and explain* findings; it is
-> covered with the other pack layers in [Build & Source Packs](build-source-data.md).
+> **The derived sixth layer, `L5`.** Beyond the five sources above, abicheck
+> *derives* an `L5` source/build graph (include/type/call reachability, ADR-031)
+> from L3 (and any L4 surface) to **localize and explain** findings and
+> prioritize cross-symbol impact. It is covered with the other build/source
+> layers in [Build Info & Sources](build-source-data.md).
+>
+> **Layers (`L`) vs. scan levels (`S`).** The `L0`–`L5` codes name *evidence
+> layers* — *what* abicheck sees and how much that evidence is trusted. The
+> `abicheck scan` command has a **separate** `s0`–`s6` axis naming the *method*
+> used to gather the L3–L5 evidence — a different meaning of the word "level".
+> [Scan Levels (S vs L)](scan-and-evidence-levels.md) explains both axes and how
+> they map onto each other.
 
 ### How they combine
 
@@ -143,15 +159,17 @@ what can a checker conclude — and what is it structurally blind to?*
 
 abicheck is strongest because it does **not** rely on a single row. It overlays
 the five **independent, additive** sources of [§0](#0-the-five-sources-of-information)
+— plus the derived `L5` graph — for **six evidence layers in all**
 (see [Architecture](architecture.md#evidence-layers-the-five-sources) and ADR-003 / ADR-028):
 
 | Layer | Source | Evidence it contributes |
 |-------|--------|-------------------------|
 | **L0** | Binary metadata | ELF symbols, SONAME, versioning, visibility, dependencies (and PE/COFF + Mach-O equivalents) |
 | **L1** | Debug info (DWARF/PDB) | Layout, offsets, enum values, calling convention, vtable slots, type cross-checks |
-| **L2** | Header AST (CastXML) | Function signatures, classes, structs, vtables, enums, typedefs, templates, `noexcept`, access, public/internal scoping |
+| **L2** | Header AST (castxml or clang) | Function signatures, classes, structs, enums, typedefs, templates, `noexcept`, access, public/internal scoping (castxml also resolves vtables/layout; the clang backend is syntactic — pair it with L1/DWARF for layout) |
 | **L3** | Build context | ABI-relevant flags, toolchain/sysroot, target graph, export-policy changes |
 | **L4** | Source ABI replay | Macro/`constexpr` values, default-argument values, inline/template bodies, uninstantiated templates |
+| **L5** | Source/build graph *(derived)* | Include/type/call reachability — localizes and explains findings, prioritizes cross-symbol impact (folded from L3, plus any L4 surface) |
 
 The best input you can give it is therefore:
 

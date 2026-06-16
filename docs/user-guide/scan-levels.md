@@ -4,6 +4,13 @@
 the changed paths, runs the always-on compiler-free pattern pre-scan, then runs a
 **pinned evidence level** and (with `--baseline`) compares against it.
 
+!!! tip "First time here? Read the model, then the flags."
+    The `s0…s6`, `L0…L5`, `--mode`, and `--depth` knobs name **two different
+    axes** (`S` = the method, `L` = the evidence) plus presets over them. If they
+    look like they overlap, read [Scan Levels (S vs L)](../concepts/scan-and-evidence-levels.md)
+    for the mental model first — this page is the practical flag reference and the
+    [worked examples](#worked-examples) below.
+
 Two orthogonal knobs select how deep it goes (`abicheck/buildsource/scan_levels.py`):
 
 - **`--source-method s0…s6`** — the precise S-axis (the *how*). Deterministic.
@@ -27,6 +34,162 @@ Two orthogonal knobs select how deep it goes (`abicheck/buildsource/scan_levels.
 `--mode` presets: `pr` = `(s5, source)`, `pr-deep` = `(s5, graph)` (full L5
 reachability), `baseline` = `(s6, full)`, `audit` = `(s5, source)` intra-version
 (single-build hygiene, no baseline).
+
+## Worked examples
+
+Each example shows the command, what level it pins, and what to read in the
+output. Every `scan` ends with a coverage block — always read it before trusting
+the verdict (see [Reading the coverage block](#reading-the-coverage-block)).
+
+### PR gate (the default) — diff-seeded `s5`
+
+The common CI case: gate a PR by comparing the just-built library against the
+baseline from `main`, scoping the expensive L4 replay to the files the PR
+touched. The `--since` seed is what makes `pr` cheaper than a full `baseline`
+scan — without it, `s5` replays every TU.
+
+```bash
+abicheck scan \
+  --binary build/libfoo.so --headers include/ \
+  --sources . --since origin/main \
+  --baseline artifacts/libfoo-main.abi.json
+```
+
+- **Level:** `--mode pr` (the default) = `(s5, source)`.
+- **Exit code:** `0` compatible, `2` source/API break, `4` ABI break (from the
+  baseline compare), `5` `--budget` overflow.
+- Add `--mode pr-deep` to also fold the full L5 reachability graph when you want
+  cross-symbol impact in the report.
+
+### Single-build audit — no baseline
+
+`--audit` runs the intra-version cross-source hygiene checks against **one**
+build — no previous version required. With just the binary and headers it catches
+accidental exports, private-header leaks, and unversioned symbols:
+
+```bash
+abicheck scan --binary libfoo.so --headers include/ --audit
+```
+
+Worked example cases for each audit finding:
+[case143](../examples/case143_audit_accidental_export.md) (`exported_not_public`),
+[case144](../examples/case144_audit_private_header_leak.md) (`private_header_leak`),
+[case145](../examples/case145_audit_unversioned_export.md) (`unversioned_exported_symbol`),
+[case146](../examples/case146_audit_rtti_for_internal.md) (`rtti_for_internal_type`).
+[case150](../examples/case150_xcheck_export_public_pair.md) shows the
+bidirectional `exported_not_public` ↔ `public_not_exported` pair, and
+[case151](../examples/case151_xcheck_provider_matrix.md) shows confidence growing
+with the number of corroborating sources (the provider-agreement matrix).
+
+Some audit checks need more evidence than the artifact tiers provide:
+`header_build_context_mismatch` compares the headers' parse context against the
+real build flags, so it only fires when you also pass an L3 build input
+(`--build-info`/`--compile-db` or `--sources`) — without one it is reported as a
+skipped coverage row, not a pass:
+
+```bash
+abicheck scan --binary libfoo.so --headers include/ \
+  --build-info build/compile_commands.json --audit
+```
+
+This is `(s5, source)` run intra-version; it reports the eight ADR-035
+cross-source / single-release findings rather than a two-version diff. The
+flagship cross-source cases —
+[case148](../examples/case148_xcheck_header_build_mismatch.md)
+(`header_build_context_mismatch`, L2 macros ↔ L3 flags) and
+[case149](../examples/case149_xcheck_odr_variant.md) (`odr_type_variant`, L4
+layout ↔ layout) — are findings that are invisible or ambiguous to any single
+source and resolve only by crosschecking two.
+
+### Cheap gate — no compiler, no sources
+
+When you only have the two binaries (or want a fast pre-check), pin a cheap
+level. `--depth build` (`s1`) adds build-flag/toolchain drift, but only when you
+also give it a build input to read — a compile DB or build dir via
+`--build-info`/`--compile-db` (or a `--sources` tree); without one, L3 is
+reported `not_collected` and no drift is checked. `--depth headers` (`s0`) stays
+on the always-on pattern scan and the artifact tiers only:
+
+```bash
+# build-flag drift only, flat ~0.3–0.5s regardless of project size
+# (the compile DB is what supplies L3 — without it the scan is artifact-only)
+abicheck scan --binary new/libfoo.so --baseline old/libfoo.abi.json \
+  --build-info build/compile_commands.json --depth build
+
+# artifact + always-on lexical scan only (no L3/L4/L5; no build input needed)
+abicheck scan --binary new/libfoo.so --baseline old/libfoo.abi.json --depth headers
+```
+
+### Estimate before you spend — `--estimate`
+
+L4 cost scales with C++ template depth, so on a heavy library project the per-TU
+replay cost first. `--estimate` is a dry run: it prints the projected per-layer
+cost for *this* project and scans nothing.
+
+```bash
+abicheck scan --binary libfoo.so --sources . --mode pr --estimate
+```
+
+### Release baseline — full `s6`
+
+The reusable `--baseline` that PR scans compare against is a **`dump`-produced
+snapshot**, not a scan report. `scan -o` writes the rendered scan report (text or
+JSON), so it cannot be fed back as a `--baseline`; produce the baseline with
+`abicheck dump` instead. Pass `--sources` to embed the full-depth L3/L4/L5 facts
+so the later PR compare carries them:
+
+```bash
+# Produce the reusable baseline snapshot once per release
+# (dump uses -H/--header — the plural --headers alias is scan-only):
+abicheck dump build/libfoo.so -H include/ \
+  --sources . --version 1.0 -o artifacts/libfoo-1.0.abi.json
+
+# PR scans then compare against it:
+abicheck scan --binary build/libfoo.so --headers include/ \
+  --sources . --since origin/main --baseline artifacts/libfoo-1.0.abi.json
+```
+
+To get a full-depth scan *report* of a release (replays every TU, folds the full
+graph) for human review — as opposed to the reusable baseline above — run
+`scan --mode baseline` and send its report to `-o`:
+
+```bash
+abicheck scan --binary build/libfoo.so --headers include/ \
+  --sources . --mode baseline -o artifacts/libfoo-1.0-scan.json
+```
+
+### Let risk pick the depth — `--source-method auto` (local/dev only)
+
+`auto` reads the risk of the changed paths and picks an S-method (capped at
+`s5`). It is opt-in and **never** fires for a pinned CI level — keep CI on a
+fixed `--mode`/`--source-method` for reproducibility.
+
+```bash
+abicheck scan --binary new.so -H include/ --source-method auto --since origin/main
+```
+
+### Reading the coverage block
+
+`S` is a *method* and `L` is *evidence*, so a scan can request a deep level and
+only reach a shallow one (clang missing, no sources, a parse error). `scan` never
+reports that as "failed" — it states the depth it **actually reached** and, for
+each disabled check, the input or tool to add:
+
+```text
+Checks enabled for this scan (and why others are not):
+  [on]  Symbol presence & linkage … — from the binary's dynamic symbol table
+  [on]  Build-flag & toolchain drift … — from build-system data
+  [off] Macros, default args, inline/template/constexpr bodies — no sources/clang:
+        source-only API changes are not detected
+```
+
+An `[off]` line is the precise input to add (here: install clang and pass
+`--sources`). See
+[Build Info & Sources § Evidence coverage](../concepts/build-source-data.md#evidence-coverage)
+for the full coverage and capability report.
+[case147](../examples/case147_scan_depth_ladder.md) is the legibility anchor:
+the *same* input scanned at S3 (pattern only), then deeper, with the coverage
+block showing exactly what each depth proved and what it could not.
 
 ## Cost guide (rules of thumb)
 
