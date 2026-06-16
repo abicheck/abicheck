@@ -254,8 +254,8 @@ def deep_compare_cmd(
         and _native_without_evidence(new_input, new_src, new_build_info)
     ):
         raise click.UsageError(
-            f"deep-compare --depth {depth} collects L3-L5 evidence but neither "
-            "native input has sources: pass --sources (or per-side "
+            f"deep-compare --depth {depth or 'full'} collects L3-L5 evidence but "
+            "neither native input has sources: pass --sources (or per-side "
             "--old-sources/--new-sources) and/or --old/new-build-info. For an "
             "L2-only run use --depth headers or plain `abicheck compare`."
         )
