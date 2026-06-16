@@ -292,3 +292,47 @@ def test_build_castxml_command_gcc_option_tokens_verbatim(tmp_path):
     i = cmd.index("-include")
     assert cmd[i + 1] == "some header.h"
     assert "some" not in cmd and "header.h" not in cmd
+
+
+def test_has_explicit_std_checks_both_flag_forms():
+    """Codex review: an explicit -std supplied via the repeatable --gcc-option
+    must be honoured, not just one in the whitespace --gcc-options string."""
+    from abicheck.dumper import _has_explicit_std
+
+    assert _has_explicit_std("-O2 -std=gnu++23", ()) is True
+    assert _has_explicit_std(None, ("-std=gnu++23",)) is True
+    assert _has_explicit_std(None, ("/std:c++latest",)) is True
+    assert _has_explicit_std("-O2", ("-Wall",)) is False
+    assert _has_explicit_std(None, ()) is False
+
+
+def test_castxml_command_user_std_token_not_overridden(tmp_path):
+    """A -std passed via --gcc-option suppresses the automatic C++20 bump, so the
+    user's dialect is the last (winning) standard flag (Codex review)."""
+    from pathlib import Path
+
+    from abicheck.dumper import _build_castxml_command
+
+    cmd = _build_castxml_command(
+        "g++", "gnu", [], Path("o.xml"), Path("a.hpp"),
+        gcc_option_tokens=("-std=gnu++23",),
+        force_cpp=True, force_cpp20=True,
+    )
+    assert "-std=gnu++23" in cmd
+    assert "-std=gnu++20" not in cmd  # abicheck did not append its own after
+
+
+def test_clang_header_command_carries_gcc_option_tokens(tmp_path):
+    """The clang L2 backend honours --gcc-option too (verbatim argv + std guard)."""
+    from pathlib import Path
+
+    from abicheck.dumper import _build_clang_header_command
+
+    cmd = _build_clang_header_command(
+        "clang++", "gnu", [], Path("a.hpp"),
+        gcc_option_tokens=("-include", "some header.h", "-std=gnu++23"),
+        force_cpp=True, force_cpp20=True,
+    )
+    i = cmd.index("-include")
+    assert cmd[i + 1] == "some header.h"        # spaced value stays one arg
+    assert "-std=gnu++23" in cmd and "-std=gnu++20" not in cmd
