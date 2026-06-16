@@ -234,18 +234,20 @@ class TestSmallHelpers:
     def test_merge_gcc_options_both(self) -> None:
         assert _merge_gcc_options(["-DA"], "-O2") == "-DA -O2"
 
-    def test_resolve_dump_depth_maps_each_depth(self) -> None:
+    @pytest.mark.parametrize(
+        ("depth", "expected"),
+        [
+            ("headers", "off"),
+            ("build", "build"),
+            ("graph", "graph-build"),
+            ("source", "source-changed"),
+            ("full", "graph-full"),
+        ],
+    )
+    def test_resolve_dump_depth_maps_each_depth(self, depth: str, expected: str) -> None:
         from abicheck.cli_dump_helpers import resolve_dump_depth
 
-        cases = {
-            "headers": "off",
-            "build": "build",
-            "graph": "graph-build",
-            "source": "source-changed",
-            "full": "graph-full",
-        }
-        for depth, expected in cases.items():
-            assert resolve_dump_depth(depth, False, "source-target", False) == expected
+        assert resolve_dump_depth(depth, False, "source-target", False) == expected
 
     def test_resolve_dump_depth_max_is_full(self) -> None:
         from abicheck.cli_dump_helpers import resolve_dump_depth
@@ -355,6 +357,22 @@ class TestSmallHelpers:
         assert DataLayer.L5_SOURCE_GRAPH.value in _missing_requested_evidence_layers(
             empty_l5, "source-target"
         )
+
+    def test_dump_explicit_deep_depth_without_sources_warns(self, tmp_path) -> None:
+        # Codex: an explicit --max/--depth (deep collect mode) with no
+        # --sources/--build-info would silently write an L0-L2 snapshot; warn.
+        so = tmp_path / "fake.so"
+        so.write_bytes(b"\x7fELF")
+        result = CliRunner().invoke(main, ["dump", str(so), "--max"])
+        assert "carry only L0-L2 data" in result.output
+
+    def test_dump_default_depth_no_warning(self, tmp_path) -> None:
+        # The bare default (no --depth/--collect-mode) must NOT warn — embedding
+        # is a no-op there by design, so a plain dump stays quiet about evidence.
+        so = tmp_path / "fake.so"
+        so.write_bytes(b"\x7fELF")
+        result = CliRunner().invoke(main, ["dump", str(so)])
+        assert "carry only L0-L2 data" not in result.output
 
     def test_dump_gcc_option_ignored_warning_for_non_elf(self, tmp_path) -> None:
         # G21.5/Codex: --gcc-option(s) aren't applied on the native PE/Mach-O

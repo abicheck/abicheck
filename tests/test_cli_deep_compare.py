@@ -44,14 +44,27 @@ def _snap(tmp_path: Path, name: str, *, with_foo: bool) -> Path:
     return out
 
 
-def test_deep_compare_deep_depth_requires_evidence(tmp_path: Path) -> None:
-    # A depth that collects L3-L5 with no source/build inputs is refused and
-    # points at --depth headers / plain `compare` rather than a silent no-op.
+def test_deep_compare_deep_depth_requires_evidence(tmp_path: Path, monkeypatch) -> None:
+    # Two native binaries at a deep depth with no sources can't collect anything,
+    # so the run is refused and points at --depth headers / plain `compare`.
+    old = tmp_path / "old.so"
+    new = tmp_path / "new.so"
+    old.write_bytes(b"\x7fELF")
+    new.write_bytes(b"\x7fELF")
+    monkeypatch.setattr(cli_max, "_normalize_binary_input", lambda p: (p, "elf"))
+    res = CliRunner().invoke(main, ["deep-compare", str(old), str(new), "--depth", "full"])
+    assert res.exit_code != 0
+    assert "collects L3-L5 evidence but neither native input has sources" in res.output
+
+
+def test_deep_compare_deep_depth_allows_snapshot_inputs(tmp_path: Path) -> None:
+    # Snapshot/JSON inputs are exempt from the no-evidence guard — they may embed
+    # an L3-L5 pack that compare consumes (like `compare --collect-mode graph-full`),
+    # so cached deep snapshots stay usable with deep-compare (Codex review).
     old = _snap(tmp_path, "old.json", with_foo=True)
     new = _snap(tmp_path, "new.json", with_foo=True)
     res = CliRunner().invoke(main, ["deep-compare", str(old), str(new), "--depth", "full"])
-    assert res.exit_code != 0
-    assert "collects L3-L5 evidence but no sources" in res.output
+    assert res.exit_code == 0, res.output  # not rejected; passes through to compare
 
 
 def test_deep_compare_headers_depth_no_evidence_ok(tmp_path: Path) -> None:
