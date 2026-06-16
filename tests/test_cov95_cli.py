@@ -275,6 +275,12 @@ class TestSmallHelpers:
         dump_help = runner.invoke(main, ["dump", "--help"]).output
         assert "Toolchain" in dump_help and "Provenance" in dump_help
 
+    def test_dump_gcc_option_help(self) -> None:
+        # G21.5: the repeatable --gcc-option is documented on dump.
+        out = CliRunner().invoke(main, ["dump", "--help"]).output
+        norm = out.replace("│", "").replace("\n", "").replace(" ", "")
+        assert "--gcc-option" in norm
+
     def test_dump_depth_help_and_mutual_exclusion(self) -> None:
         runner = CliRunner()
         help_out = runner.invoke(main, ["dump", "--help"])

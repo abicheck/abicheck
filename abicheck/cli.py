@@ -318,7 +318,14 @@ def main() -> None:
 @click.option("--gcc-prefix", default=None,
               help="Cross-toolchain prefix (e.g. aarch64-linux-gnu-).")
 @click.option("--gcc-options", default=None,
-              help="Extra compiler flags passed through to castxml.")
+              help="Extra compiler flags passed through to castxml (split on "
+                   "whitespace). For a flag whose value contains spaces, use the "
+                   "repeatable --gcc-option instead.")
+@click.option("--gcc-option", "gcc_option_tokens", multiple=True,
+              help="A single extra compiler flag passed through to castxml "
+                   "verbatim (repeatable; not whitespace-split). Use two flags for "
+                   "a flag + spaced value, e.g. --gcc-option=-include "
+                   "--gcc-option='some header.h'.")
 @click.option("--sysroot", type=click.Path(path_type=Path), default=None,
               help="Alternative system root directory.")
 @click.option("--nostdinc", is_flag=True, default=False,
@@ -388,6 +395,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
              public_headers: tuple[Path, ...], public_header_dirs: tuple[Path, ...],
              version: str, lang: str, header_backend: str, output: Path | None,
              gcc_path: str | None, gcc_prefix: str | None, gcc_options: str | None,
+             gcc_option_tokens: tuple[str, ...],
              sysroot: Path | None, nostdinc: bool, pdb_path: Path | None,
              follow_deps: bool, search_paths: tuple[Path, ...], ld_library_path: str,
              dwarf_only: bool, show_data_sources: bool,
@@ -455,6 +463,12 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
             f"--{effective_debug_format} is only supported for ELF binaries, not {binary_fmt.upper()}."
         )
     if binary_fmt in ("pe", "macho"):
+        if gcc_option_tokens or gcc_options:
+            click.echo(
+                "Warning: --gcc-option/--gcc-options are not applied on the "
+                f"native {binary_fmt.upper()} dump path and will be ignored.",
+                err=True,
+            )
         _handle_non_elf_dump(
             so_path, binary_fmt, headers, includes, version, lang, pdb_path,
             follow_deps, git_tag, build_id, no_git, output, public_headers,
@@ -486,6 +500,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         gcc_path=gcc_path,
         gcc_prefix=gcc_prefix,
         effective_gcc_options=effective_gcc_options,
+        gcc_option_tokens=gcc_option_tokens,
         sysroot=sysroot,
         nostdinc=nostdinc,
         dwarf_only=dwarf_only,

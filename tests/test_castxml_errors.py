@@ -269,3 +269,26 @@ class TestCastxmlNotFound:
             header.write_text("// empty", encoding="utf-8")
             with pytest.raises(RuntimeError, match="castxml not found"):
                 _castxml_dump([header], [])
+
+
+def test_build_castxml_command_gcc_option_tokens_verbatim(tmp_path):
+    """G21.5: repeatable --gcc-option tokens reach castxml as literal argv
+    elements (no shlex split), so a flag value with whitespace survives intact
+    and identically across platforms — the cross-platform-correct design that
+    the string-quoting approach could not provide on Windows."""
+    from pathlib import Path
+
+    from abicheck.dumper import _build_castxml_command
+
+    cmd = _build_castxml_command(
+        "gcc", "gnu", [], Path("out.xml"), Path("agg.hpp"),
+        gcc_options="-O2 -DA",
+        gcc_option_tokens=("-include", "some header.h"),
+        force_cpp=True,
+    )
+    # --gcc-options still whitespace-splits into separate flags.
+    assert "-O2" in cmd and "-DA" in cmd
+    # Each --gcc-option is one literal argv element; the spaced value is NOT split.
+    i = cmd.index("-include")
+    assert cmd[i + 1] == "some header.h"
+    assert "some" not in cmd and "header.h" not in cmd
