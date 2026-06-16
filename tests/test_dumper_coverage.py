@@ -615,7 +615,7 @@ class TestFromHeadersProvenance:
         with patch.object(_pe, "parse_pe_metadata", return_value=meta), \
              patch.object(dumper, "_castxml_dump", return_value=object()), \
              patch.object(dumper, "_CastxmlParser", return_value=self._mock_parser()):
-            snap = dumper._dump_pe(dll, [tmp_path / "h.h"], [], "1.0", "c++")
+            snap = dumper._dump_pe(dll, [tmp_path / "h.h"], [], "1.0", "c++", header_backend="castxml")
         assert snap.from_headers is True
 
     def test_pe_without_headers_is_not_header_parsed(self, tmp_path: Path) -> None:
@@ -643,7 +643,7 @@ class TestFromHeadersProvenance:
         with patch.object(_macho, "parse_macho_metadata", return_value=meta), \
              patch.object(dumper, "_castxml_dump", return_value=object()), \
              patch.object(dumper, "_CastxmlParser", return_value=self._mock_parser()):
-            snap = dumper._dump_macho(dylib, [tmp_path / "h.h"], [], "1.0", "c++")
+            snap = dumper._dump_macho(dylib, [tmp_path / "h.h"], [], "1.0", "c++", header_backend="castxml")
         assert snap.from_headers is True
 
     def test_macho_without_headers_is_not_header_parsed(self, tmp_path: Path) -> None:
@@ -678,7 +678,7 @@ class TestFromHeadersProvenance:
              patch.object(dumper, "_castxml_dump", return_value=object()), \
              patch.object(dumper, "_CastxmlParser", return_value=self._mock_parser()), \
              patch.object(dumper, "_populate_elf_visibility", lambda snap: None):
-            snap = dumper._dump_elf(so, [tmp_path / "h.h"], [], "1.0", "c++")
+            snap = dumper._dump_elf(so, [tmp_path / "h.h"], [], "1.0", "c++", header_backend="castxml")
         assert snap.from_headers is True
 
     def test_elf_dwarf_only_is_not_header_parsed(self, tmp_path: Path) -> None:

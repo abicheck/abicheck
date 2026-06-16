@@ -308,7 +308,10 @@ class _ClangAstParser:
             self._functions.append(entry)
         elif kind == "VarDecl" and name:
             self._variables.append(entry)
-        elif kind in ("CXXRecordDecl", "RecordDecl") and name:
+        elif kind in ("CXXRecordDecl", "RecordDecl"):
+            # Anonymous records (name="") are kept too: a ``typedef struct {…}
+            # Foo;`` emits an unnamed RecordDecl that carries the fields, recovered
+            # under the typedef name in parse_types (Codex/CodeRabbit review).
             self._records.append(entry)
         elif kind == "EnumDecl" and name:
             self._enums.append(entry)
@@ -523,23 +526,44 @@ class _ClangAstParser:
         )
 
     def parse_types(self) -> list[RecordType]:
+        # Map each anonymous record's clang id → the typedef name that aliases it
+        # (``typedef struct {…} Foo;``), so the unnamed record is emitted as
+        # ``Foo`` with its fields intact rather than dropped (mirrors castxml's
+        # ``typedef_name_for`` alias handling).
+        anon_names = self._anon_typedef_names()
         types: list[RecordType] = []
         for entry in self._records:
             node = entry.node
             if _is_builtin_file(entry.file):
                 continue
             name = str(node.get("name", ""))
-            if not name or name.startswith("__"):
+            if not name:
+                name = anon_names.get(str(node.get("id", "")), "")
+                if not name:
+                    continue  # a truly anonymous record (e.g. an inline union member)
+            if name.startswith("__"):
                 continue
             # Only definitions carry meaningful members; a forward declaration
             # (no body) would emit an empty record and create a false ODR/empty
             # signal, so skip it (matches the castxml `incomplete`/no-members guard).
             if not _is_record_definition(node):
                 continue
-            types.append(self._build_record(entry))
+            types.append(self._build_record(entry, override_name=name))
         return types
 
-    def _build_record(self, entry: _Decl) -> RecordType:
+    def _anon_typedef_names(self) -> dict[str, str]:
+        """``{anonymous-record-id: typedef-name}`` from the collected typedefs."""
+        out: dict[str, str] = {}
+        for entry in self._typedefs:
+            tname = str(entry.node.get("name", ""))
+            if not tname:
+                continue
+            rid = _owned_tag_id(entry.node)
+            if rid:
+                out.setdefault(rid, tname)
+        return out
+
+    def _build_record(self, entry: _Decl, override_name: str = "") -> RecordType:
         node = entry.node
         kind = "union" if node.get("tagUsed") == "union" else (
             "struct" if node.get("tagUsed") == "struct" else "class"
@@ -547,7 +571,7 @@ class _ClangAstParser:
         fields = self._parse_fields(node)
         bases, virtual_bases, base_access = _parse_bases(node)
         return RecordType(
-            name=str(node.get("name", "")),
+            name=override_name or str(node.get("name", "")),
             kind=kind,
             # clang's JSON AST does not compute layout — size/align/offsets are
             # left None so the layout detectors skip an unknown-vs-unknown
@@ -881,6 +905,29 @@ def _canonical_expr(node: Any) -> Any:
     if isinstance(inner, list):
         out["inner"] = [_canonical_expr(c) for c in inner]
     return out
+
+
+def _owned_tag_id(typedef_node: dict[str, Any]) -> str:
+    """The clang id of an anonymous tag a typedef *owns*, or ``""``.
+
+    For ``typedef struct {…} Foo;`` clang nests an ``ElaboratedType`` under the
+    ``TypedefDecl`` whose ``ownedTagDecl`` points at the unnamed ``RecordDecl``
+    that holds the fields. Returns that record's ``id`` so parse_types can emit
+    the otherwise-anonymous record under the typedef name.
+    """
+    def _scan(node: Any) -> str:
+        if not isinstance(node, dict):
+            return ""
+        owned = node.get("ownedTagDecl")
+        if isinstance(owned, dict) and isinstance(owned.get("id"), str):
+            return str(owned["id"])
+        for child in node.get("inner", []) or []:
+            found = _scan(child)
+            if found:
+                return found
+        return ""
+
+    return _scan(typedef_node)
 
 
 def _typedef_underlying(node: dict[str, Any]) -> str:

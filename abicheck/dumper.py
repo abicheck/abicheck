@@ -178,7 +178,20 @@ def _clang_header_dump(
     the castxml path. Raises :class:`SnapshotError` when clang is missing, times
     out, or emits no usable AST.
     """
-    clang_bin = gcc_path or (f"{gcc_prefix}clang++" if gcc_prefix else None)
+    # Resolve the clang executable. ``--gcc-path`` is, by its name, a GCC/G++
+    # binary that castxml emulates — running *that* with clang-only
+    # ``-Xclang -ast-dump=json`` flags would fail, so only honor it here when it
+    # actually points at a clang (e.g. a user passing an explicit clang path).
+    # A cross ``--gcc-prefix`` maps to the prefixed clang driver.
+    clang_bin: str | None = None
+    if gcc_path and "clang" in Path(gcc_path).name.lower():
+        clang_bin = gcc_path
+    elif gcc_prefix:
+        clang_bin = (
+            f"{gcc_prefix}clang++"
+            if compiler in ("c++", "g++", "clang++")
+            else f"{gcc_prefix}clang"
+        )
     if not clang_bin:
         clang_bin = "clang++" if compiler in ("c++", "g++", "clang++") else "clang"
     if not _clang_available(clang_bin):
@@ -225,6 +238,19 @@ def _clang_header_dump(
                 "clang timed out after 120 seconds parsing the header(s). The header "
                 "may contain syntax that causes the frontend to hang."
             ) from exc
+        # A nonzero exit means clang hit a hard parse error. Unlike L4 source
+        # replay (which tolerates partial coverage), the L2 header AST must be
+        # complete to be authoritative — a truncated declaration set would
+        # manifest as false removals/additions. So fail like the castxml path
+        # rather than caching a partial tree (Codex review). ``-ferror-limit=0``
+        # only suppresses the error *cap*; genuine errors still set the exit code.
+        if result.returncode != 0:
+            raise SnapshotError(
+                f"clang failed to parse the header(s) (exit {result.returncode}). The "
+                "header may be malformed or need build flags it was not given (try "
+                f"--gcc-options / -p, or --header-backend castxml):\n"
+                f"{result.stderr[:1000].strip()}"
+            )
         if not result.stdout.strip():
             raise SnapshotError(
                 f"clang produced no AST for the header(s) (exit {result.returncode}): "

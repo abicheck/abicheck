@@ -941,9 +941,11 @@ def test_clang_header_dump_no_output_raises(
     header.write_text("int foo(void);\n")
     monkeypatch.setattr(dumper, "_clang_available", lambda *a, **k: True)
     monkeypatch.setattr(dumper, "_cache_path", lambda *a, **k: tmp_path / "c.json")
+    # Exit 0 but empty stdout → the "no AST" path (a nonzero exit is the
+    # earlier branch, covered by test_clang_header_dump_nonzero_exit_raises).
     monkeypatch.setattr(
         dumper.subprocess, "run",
-        lambda *a, **k: _fake_proc(stdout="", stderr="boom", returncode=1),
+        lambda *a, **k: _fake_proc(stdout="", stderr="boom", returncode=0),
     )
     with pytest.raises(SnapshotError, match="no AST"):
         _clang_header_dump([header], [])
@@ -1237,3 +1239,135 @@ def test_folded_bitfield_width_on_constantexpr_wrapper() -> None:
     )
     (s,) = _ClangAstParser(root, set(), set()).parse_types()
     assert s.fields[0].bitfield_bits == 4
+
+
+# ── anonymous typedef records + remaining backend branches ───────────────────
+
+
+def test_anonymous_typedef_struct_emitted_with_fields() -> None:
+    # typedef struct { int x; } Foo; — clang emits an unnamed RecordDecl that
+    # the typedef's ownedTagDecl links to; the record must surface as "Foo".
+    rid = "0xRECORD"
+    root = _tu(
+        {
+            "kind": "RecordDecl",
+            "name": "",
+            "id": rid,
+            "tagUsed": "struct",
+            "loc": {"file": "include/foo.h", "line": 1},
+            "completeDefinition": True,
+            "inner": [{"kind": "FieldDecl", "name": "x", "type": {"qualType": "int"}}],
+        },
+        {
+            "kind": "TypedefDecl",
+            "name": "Foo",
+            "loc": {"file": "include/foo.h", "line": 1},
+            "type": {"qualType": "struct Foo"},
+            "inner": [
+                {
+                    "kind": "ElaboratedType",
+                    "ownedTagDecl": {"id": rid, "kind": "RecordDecl", "name": ""},
+                }
+            ],
+        },
+    )
+    types = {t.name: t for t in _ClangAstParser(root, set(), set()).parse_types()}
+    assert "Foo" in types
+    assert [(f.name, f.type) for f in types["Foo"].fields] == [("x", "int")]
+
+
+def test_truly_anonymous_record_without_typedef_dropped() -> None:
+    root = _tu(
+        {
+            "kind": "RecordDecl",
+            "name": "",
+            "id": "0xANON",
+            "tagUsed": "struct",
+            "loc": {"file": "include/foo.h", "line": 1},
+            "completeDefinition": True,
+            "inner": [{"kind": "FieldDecl", "name": "x", "type": {"qualType": "int"}}],
+        }
+    )
+    assert _ClangAstParser(root, set(), set()).parse_types() == []
+
+
+def test_clang_header_dump_nonzero_exit_raises(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # A hard parse error (nonzero exit) must fail, even if clang emitted some
+    # JSON — the L2 header AST must be complete to be authoritative.
+    header = tmp_path / "foo.h"
+    header.write_text("int foo(void);\n")
+    monkeypatch.setattr(dumper, "_clang_available", lambda *a, **k: True)
+    monkeypatch.setattr(dumper, "_cache_path", lambda *a, **k: tmp_path / "c.json")
+
+    class _P:
+        stdout = '{"kind": "TranslationUnitDecl", "inner": []}'
+        stderr = "error: use of undeclared identifier"
+        returncode = 1
+
+    monkeypatch.setattr(dumper.subprocess, "run", lambda *a, **k: _P())
+    with pytest.raises(SnapshotError, match="failed to parse"):
+        _clang_header_dump([header], [])
+
+
+def test_clang_header_dump_gcc_path_not_used_as_clang(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # A --gcc-path pointing at g++ must NOT become the clang executable.
+    header = tmp_path / "foo.h"
+    header.write_text("int foo(void);\n")
+    seen = {}
+
+    def _avail(b="clang"):
+        seen["bin"] = b
+        return False  # force the missing-tool error so we can inspect the bin
+
+    monkeypatch.setattr(dumper, "_clang_available", _avail)
+    with pytest.raises(SnapshotError):
+        _clang_header_dump([header], [], gcc_path="/usr/bin/g++")
+    # Fell back to a clang driver, NOT the supplied g++ binary.
+    assert seen["bin"] != "/usr/bin/g++"
+    assert "clang" in seen["bin"]
+
+
+def test_clang_header_dump_explicit_clang_path_honored(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    header = tmp_path / "foo.h"
+    header.write_text("int foo(void);\n")
+    seen = {}
+
+    def _avail(b="clang"):
+        seen["bin"] = b
+        return False
+
+    monkeypatch.setattr(dumper, "_clang_available", _avail)
+    with pytest.raises(SnapshotError):
+        _clang_header_dump([header], [], gcc_path="/opt/llvm/bin/clang-18")
+    assert seen["bin"] == "/opt/llvm/bin/clang-18"
+
+
+def test_clang_header_dump_gcc_prefix_maps_to_prefixed_clang(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    header = tmp_path / "foo.h"
+    header.write_text("int foo(void);\n")
+    seen = {}
+
+    def _avail(b="clang"):
+        seen["bin"] = b
+        return False
+
+    monkeypatch.setattr(dumper, "_clang_available", _avail)
+    with pytest.raises(SnapshotError):
+        _clang_header_dump(
+            [header], [], gcc_prefix="aarch64-linux-gnu-", compiler="c++"
+        )
+    assert seen["bin"] == "aarch64-linux-gnu-clang++"
+
+
+def test_owned_tag_id_absent_returns_empty() -> None:
+    from abicheck.dumper_clang import _owned_tag_id
+
+    assert _owned_tag_id({"kind": "TypedefDecl", "name": "t"}) == ""
