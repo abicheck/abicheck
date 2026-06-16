@@ -167,6 +167,26 @@ def test_prepare_side_dumps_native_binary(tmp_path: Path, monkeypatch) -> None:
     assert call["output"] == out
 
 
+def test_prepare_side_native_deep_without_sources_warns(tmp_path: Path, monkeypatch) -> None:
+    # A native side at deep depth with no sources of its own embeds no L3-L5, so
+    # the compare would silently miss source/graph findings — warn per side
+    # rather than guess inputs (Codex review).
+    binary = tmp_path / "libfoo.so"
+    binary.write_bytes(b"\x7fELF")
+    monkeypatch.setattr(cli_max, "_normalize_binary_input", lambda p: (p, "elf"))
+    ctx = _FakeCtx()
+
+    captured: list[str] = []
+    monkeypatch.setattr(cli_max.click, "echo", lambda *a, **k: captured.append(str(a[0])))
+    cli_max._prepare_side(
+        ctx, input_path=binary, headers=(), includes=(), sources=None, build_info=None,
+        collect_mode="graph-full", version="2", lang="c++",
+        header_backend="auto", out_dir=tmp_path, label="new",
+    )
+    assert len(ctx.calls) == 1  # still dumped (best-effort)
+    assert any("embeds no" in m and "--new-sources" in m for m in captured)
+
+
 def test_prepare_side_snapshot_without_evidence_is_silent(tmp_path: Path, monkeypatch) -> None:
     # A snapshot side with no per-side evidence passes through with no warning
     # (the warning only fires when --*-sources/--*-build-info were given).

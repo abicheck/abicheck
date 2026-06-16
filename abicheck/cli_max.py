@@ -79,6 +79,21 @@ def _prepare_side(
             )
         return input_path
 
+    # A native side at a deep (non-off) depth with no sources/build-info of its
+    # own embeds only L0-L2 — and diff_embedded_build_source runs L4/L5 diffs
+    # only when BOTH sides carry the surface, so the deep findings silently
+    # vanish. Warn per side rather than guess inputs (P09) so the asymmetry is
+    # visible (Codex review).
+    if collect_mode != "off" and sources is None and build_info is None:
+        click.echo(
+            f"Warning: {label} side {input_path} is a native binary but no "
+            f"--{label}-sources/--{label}-build-info was given, so it embeds no "
+            f"L3-L5 evidence at this --depth. Source/graph findings need both sides; "
+            f"this comparison is asymmetric. Pass evidence for the {label} side or "
+            "use --depth headers.",
+            err=True,
+        )
+
     out = out_dir / f"{label}.abi.json"
     ctx.invoke(
         dump_cmd,
