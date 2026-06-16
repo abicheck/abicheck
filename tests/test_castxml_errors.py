@@ -422,3 +422,29 @@ def test_header_ast_parser_no_fallback_on_non_toolchain_failure(tmp_path, monkey
 
     with pytest.raises(SnapshotError):
         _header_ast_parser([Path("a.h")], [], backend="auto", **_ast_parser_kwargs(tmp_path))
+
+
+def test_header_ast_parser_clang_backend_returns_clang_parser(tmp_path, monkeypatch):
+    """When the resolved backend is clang, the clang parser is returned directly."""
+    from abicheck import dumper
+    from abicheck.dumper import _ClangAstParser, _header_ast_parser
+
+    monkeypatch.setattr(dumper, "_resolve_header_backend", lambda b: "clang")
+    monkeypatch.setattr(dumper, "_clang_header_dump", lambda *a, **k: {})
+
+    parser = _header_ast_parser([Path("a.h")], [], backend="clang", **_ast_parser_kwargs(tmp_path))
+    assert isinstance(parser, _ClangAstParser)
+
+
+def test_header_ast_parser_castxml_success_returns_castxml_parser(tmp_path, monkeypatch):
+    """A successful castxml dump returns the castxml parser (no fallback)."""
+    from xml.etree.ElementTree import Element
+
+    from abicheck import dumper
+    from abicheck.dumper import _CastxmlParser, _header_ast_parser
+
+    monkeypatch.setattr(dumper, "_resolve_header_backend", lambda b: "castxml")
+    monkeypatch.setattr(dumper, "_castxml_dump", lambda *a, **k: Element("GCC_XML"))
+
+    parser = _header_ast_parser([Path("a.h")], [], backend="auto", **_ast_parser_kwargs(tmp_path))
+    assert isinstance(parser, _CastxmlParser)
