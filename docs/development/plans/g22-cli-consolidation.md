@@ -54,13 +54,17 @@ Tier 2 but keeps its own flags).
 ### Phase 1 — Typed requests + single chokepoint (ADR-037 D1, D2)
 - Add `api_types.py`: `InputSpec`, `CompareRequest` (+ `validate()`),
   `OutputSpec`. Reuse `SeverityConfig`, `PolicySpec`, `SuppressionSpec`,
-  `AnalysisDepth`.
+  `AnalysisDepth`. Struct-valued fields use `field(default_factory=...)`, not a
+  bare call — a frozen dataclass still shares a single import-time default
+  otherwise.
 - Refactor `service.run_compare` to take `CompareRequest`; keep a thin
   back-compat shim for the old kwargs during the phase.
 - Route `cli_compare_release._run_compare_pair` and `cli_appcompat` through
   `service.run_compare` (kills the `scope_public` default drift).
 - **Gate:** add `cli-contract` D10.1 (no Tier-skip) to
-  `scripts/check_ai_readiness.py` + `tests/test_cli_contract.py`.
+  `scripts/check_ai_readiness.py` + `tests/test_cli_contract.py`. Gate on
+  Tier-1 *call sites*, not imports — `diff_*`/`checker_types` type imports for
+  annotations/rendering stay legal.
 
 ### Phase 2 — Decorator-ize shared families (D3)
 - Define the 7 decorators in `cli_options.py` (ADR-037 D3 table).
@@ -73,13 +77,18 @@ Tier 2 but keeps its own flags).
 ### Phase 3 — Depth vocabulary + L5-internal (D5, D6)
 - `--depth {symbols,headers,build,source,full}` + `--max` via `@evidence_options`.
 - `--collect-mode`/`--mode`/standalone `--source-method` → deprecated aliases
-  (record in `DEPRECATED_FLAGS`).
+  (record in `DEPRECATED_FLAGS`). **Include the G21 `--depth graph` value** —
+  it maps to `--depth source` (graph now built internally, D6) and must not
+  disappear silently the release after it shipped.
 - Make the L5 graph an internal consequence of `--depth source`; remove
   `graph-*` rungs; add `source.graph: summary|full` config knob.
 
 ### Phase 4 — Command consolidation (D7)
 - `compare` input-type dispatch: file / snapshot / directory / package / (app →
   hint to `appcompat`). Move `-j`, `--dso-only`, bundle opts under set-inputs.
+  Dispatch must disambiguate `ET_DYN` PIE executables from `.so` (ELF type
+  alone is insufficient) — require explicit operand kind when ambiguous rather
+  than guessing.
 - `compare-release` and `deep-compare` → thin deprecated aliases.
 - Keep `appcompat`/`plugin-check` as distinct verbs (different question).
 

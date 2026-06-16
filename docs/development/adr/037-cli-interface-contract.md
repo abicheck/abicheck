@@ -91,13 +91,17 @@ class CompareRequest:
     lang: str = "c++"
     frontend: str = "auto"            # D8
     depth: AnalysisDepth = AnalysisDepth.AUTO   # D5
-    policy: PolicySpec = PolicySpec.default()
+    policy: PolicySpec = field(default_factory=PolicySpec.default)
     suppression: SuppressionSpec | None = None
     scope_public: bool = True
-    severity: SeverityConfig = SeverityConfig.default()
+    severity: SeverityConfig = field(default_factory=SeverityConfig.default)
     pattern_verdicts: bool = False
     # new feature == new field with a default. never a signature break.
 ```
+
+Note the `field(default_factory=...)` for the struct-valued fields: a frozen
+dataclass still evaluates a bare `PolicySpec.default()` once at import (a shared
+mutable default). Use a factory, not a call.
 
 `compare-release` builds one `CompareRequest` per library pair and calls the
 same verb. MCP builds it from JSON. The CLI builds it from flags+config. One
@@ -185,6 +189,14 @@ is `AnalysisDepth`; the flag is `--depth`:
 `scan`'s presets (`PR/release/beta`) remain as named bundles that *set*
 `--depth` + config, not as a separate vocabulary.
 
+**Migration note — the G21 `--depth graph` value.** G21 already shipped
+`--depth {headers,build,graph,source,full}`. This ADR drops `graph` as a rung
+(D6) and adds `symbols` at the bottom, so the canonical ladder becomes
+`{symbols,headers,build,source,full}`. The just-shipped `--depth graph` value
+is therefore itself a **deprecated alias** (→ `--depth source`, which now builds
+the graph internally) and goes in `DEPRECATED_FLAGS` alongside `--collect-mode`
+et al. — it must not vanish silently in the same release it appeared.
+
 **Why not "evidence":** it leaks the internal L-layer model into the UI and
 forces users to learn "graph-summary vs source-target." Depth is a single
 monotone ladder a user already understands ("look at symbols / headers / the
@@ -215,6 +227,12 @@ on a different *quantity* or *depth* of operand. Fold them in:
   concerns become flags that are only meaningful for set inputs (`-j/--jobs`,
   `--dso-only`, bundle options) — documented as such. `compare-release` becomes
   a thin deprecated alias.
+  - *Dispatch edge:* file-vs-app detection is heuristic — a PIE executable is
+    `ET_DYN`, indistinguishable from a `.so` by ELF type alone. Dispatch must
+    not silently treat a binary as the wrong operand kind; when the kind is
+    ambiguous (`ET_DYN` without a `DT_SONAME`, or with `DT_FLAGS_1` `PIE`),
+    require the user to disambiguate rather than guess. Tracked as a Phase-4
+    edge, not a clean switch.
 - **`deep-compare` → `compare --max`.** Once `--depth` auto-detects from inputs
   and `--max` exists on `compare`, the orchestrator is redundant. Alias, then
   remove.
@@ -273,8 +291,12 @@ Front-ends validate the assembled request *before* any heavy work:
 Add a `cli-contract` check to `scripts/check_ai_readiness.py` (ERROR severity)
 plus a unit test, asserting:
 
-1. **No Tier-skip:** no `cli*.py` module imports `checker.compare` /
-   `diff_*` directly (front-ends must go through `service`). AST/import scan.
+1. **No Tier-skip:** no `cli*.py` module *calls* the Tier-1 entry points
+   (`checker.compare`, the `diff_*` orchestration functions) directly —
+   front-ends must go through `service`. AST scan on call sites, not bare
+   imports: importing a `diff_*` / `checker_types` **type** for annotations or
+   result handling is allowed (and unavoidable for rendering), so the gate keys
+   on the call expression, not the `import` statement.
 2. **Shared-decorator coverage:** every command in the verdict-emitting set
    carries the required decorators from `cli_options.py` (introspect the
    command's params against each decorator's param set); a command missing one
@@ -306,13 +328,17 @@ When a feature needs new surface, walk this tree:
 
 ### D12. One exit-code scheme, declared not inferred
 
-The legacy/severity/compat schemes are kept for back-compat but the active one
-is **explicit**, never inferred from flag presence:
+The legacy/severity schemes are kept for back-compat but the active one is
+**explicit**, never inferred from flag presence:
 
-- `--exit-code-scheme {auto,legacy,severity,compat}` (default `auto` =
-  current behaviour, documented). Passing `--severity-*` no longer *silently*
-  switches meaning — it is recorded as a deliberate scheme selection and
-  surfaced in `--help` and the run header.
+- `--exit-code-scheme {auto,legacy,severity}` (default `auto` = current
+  behaviour, documented). Passing `--severity-*` no longer *silently* switches
+  meaning — it is recorded as a deliberate scheme selection and surfaced in
+  `--help` and the run header.
+- The ABICC `compat` command keeps its own distinct exit-code taxonomy (see
+  `compat/cli.py`); it is **not** offered as a scheme value on native `compare`
+  — mixing the two vocabularies on one command is precisely the inference
+  ambiguity this decision removes.
 
 ---
 
