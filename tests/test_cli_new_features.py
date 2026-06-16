@@ -151,6 +151,75 @@ class TestCompareLang:
         assert "Invalid value" in result.output or "invalid choice" in result.output.lower()
 
 
+# ── per-side --old-header-backend / --new-header-backend on compare ───────
+
+class TestPerSideHeaderBackend:
+    def _two_elf(self, tmp_path):
+        old_so = tmp_path / "old.so"
+        new_so = tmp_path / "new.so"
+        old_so.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        new_so.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        header = tmp_path / "foo.h"
+        header.write_text("int foo();\n", encoding="utf-8")
+        return old_so, new_so, header
+
+    def test_per_side_backend_routed_independently(self, tmp_path, monkeypatch):
+        """--old-header-backend castxml + --new-header-backend clang reach each side."""
+        old_so, new_so, header = self._two_elf(tmp_path)
+        calls = []
+
+        def fake_dump(**kwargs):
+            calls.append(kwargs)
+            return AbiSnapshot(library="libfoo.so", version="1.0")
+
+        monkeypatch.setattr("abicheck.dumper.dump", fake_dump)
+        result = CliRunner().invoke(main, [
+            "compare", str(old_so), str(new_so), "-H", str(header),
+            "--old-header-backend", "castxml", "--new-header-backend", "clang",
+        ])
+        assert result.exit_code == 0
+        assert len(calls) == 2
+        # _resolve_compare_snapshots dumps old first, then new.
+        assert calls[0].get("header_backend") == "castxml"
+        assert calls[1].get("header_backend") == "clang"
+
+    def test_per_side_inherits_global_default(self, tmp_path, monkeypatch):
+        """Without per-side flags, both sides inherit --header-backend."""
+        old_so, new_so, header = self._two_elf(tmp_path)
+        calls = []
+
+        def fake_dump(**kwargs):
+            calls.append(kwargs)
+            return AbiSnapshot(library="libfoo.so", version="1.0")
+
+        monkeypatch.setattr("abicheck.dumper.dump", fake_dump)
+        result = CliRunner().invoke(main, [
+            "compare", str(old_so), str(new_so), "-H", str(header),
+            "--header-backend", "clang",
+        ])
+        assert result.exit_code == 0
+        assert len(calls) == 2
+        assert all(c.get("header_backend") == "clang" for c in calls)
+
+    def test_one_side_override_other_inherits(self, tmp_path, monkeypatch):
+        """A single per-side flag overrides only that side; the other inherits."""
+        old_so, new_so, header = self._two_elf(tmp_path)
+        calls = []
+
+        def fake_dump(**kwargs):
+            calls.append(kwargs)
+            return AbiSnapshot(library="libfoo.so", version="1.0")
+
+        monkeypatch.setattr("abicheck.dumper.dump", fake_dump)
+        result = CliRunner().invoke(main, [
+            "compare", str(old_so), str(new_so), "-H", str(header),
+            "--header-backend", "castxml", "--new-header-backend", "clang",
+        ])
+        assert result.exit_code == 0
+        assert calls[0].get("header_backend") == "castxml"
+        assert calls[1].get("header_backend") == "clang"
+
+
 # ── --lang on dump ───────────────────────────────────────────────────────
 
 class TestDumpLang:

@@ -388,8 +388,19 @@ def _resolve_compare_snapshots(
     search_paths: tuple[Path, ...],
     ld_library_path: str,
     header_backend: str = "auto",
+    old_header_backend: str | None = None,
+    new_header_backend: str | None = None,
 ) -> tuple[AbiSnapshot, AbiSnapshot]:
-    """Load both ABI snapshots and (optionally) populate ELF dependency info."""
+    """Load both ABI snapshots and (optionally) populate ELF dependency info.
+
+    ``header_backend`` is the both-sides default; ``old_header_backend`` /
+    ``new_header_backend`` override it for one side only (``None`` = inherit).
+    A per-side override lets a release whose new headers need the host
+    toolchain parse on ``clang`` while the old release keeps the ``castxml``
+    schema reference — the backend mirror of ``--old-header``/``--new-header``.
+    """
+    old_backend = old_header_backend or header_backend
+    new_backend = new_header_backend or header_backend
     old = _resolve_input(
         old_input,
         old_h,
@@ -400,7 +411,7 @@ def _resolve_compare_snapshots(
         pdb_path=old_pdb_path if old_pdb_path else pdb_path,
         dwarf_only=dwarf_only,
         debug_format=debug_format,
-        header_backend=header_backend,
+        header_backend=old_backend,
     )
     new = _resolve_input(
         new_input,
@@ -412,7 +423,7 @@ def _resolve_compare_snapshots(
         pdb_path=new_pdb_path if new_pdb_path else pdb_path,
         dwarf_only=dwarf_only,
         debug_format=debug_format,
-        header_backend=header_backend,
+        header_backend=new_backend,
     )
     if follow_deps:
         if old_fmt == "elf":

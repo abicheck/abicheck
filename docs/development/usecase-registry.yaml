@@ -527,9 +527,15 @@ use_cases:
       shim was prototyped and REJECTED: glibc's own `typedef float _Float32;`
       fallback would be rewritten into `typedef float float;` (PR review). The
       durable cure is a castxml built against a newer Clang, or the libclang
-      extractor (G4). REMAINING: an integration-marked end-to-end check that
-      `compare --headers` over a `<math.h>`-including header succeeds on a real CI
-      host, and a dedicated `HeaderToolchainError` type.
+      extractor (G4). ALSO DONE: per-side L2 backend selection
+      (`--old-header-backend`/`--new-header-backend` on `compare`/`deep-compare`,
+      each inheriting `--header-backend`) so a release whose new headers need the
+      host toolchain parses on clang while the old release keeps the castxml schema
+      reference — the backend mirror of `--old-header`/`--new-header`
+      (tests/test_cli_new_features.py::TestPerSideHeaderBackend). REMAINING: an
+      integration-marked end-to-end check that `compare --headers` over a
+      `<math.h>`-including header succeeds on a real CI host, and a dedicated
+      `HeaderToolchainError` type.
 
   - id: UC-TC-cxx-standard-floor
     axis: toolchain

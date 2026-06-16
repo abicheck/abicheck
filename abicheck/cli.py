@@ -978,6 +978,15 @@ def _finalize_compare_result(
                    "auto = castxml if present, else clang, and auto-falls back to "
                    "clang on a castxml toolchain-version error. "
                    "Env: ABICHECK_HEADER_BACKEND.")
+@click.option("--old-header-backend", "old_header_backend", default=None,
+              type=click.Choice(["auto", "castxml", "clang"], case_sensitive=False),
+              help="L2 header-AST frontend for the old side only (overrides "
+                   "--header-backend for old). Use when the old release parses on "
+                   "castxml but the new one needs clang (or vice versa).")
+@click.option("--new-header-backend", "new_header_backend", default=None,
+              type=click.Choice(["auto", "castxml", "clang"], case_sensitive=False),
+              help="L2 header-AST frontend for the new side only (overrides "
+                   "--header-backend for new).")
 @click.option("--old-header", "old_headers_only", multiple=True,
               type=click.Path(path_type=Path),
               help="Public header for old side only (overrides -H for old). "
@@ -1158,6 +1167,7 @@ def compare_cmd(
     old_input: Path, new_input: Path,
     headers: tuple[Path, ...], includes: tuple[Path, ...], lang: str,
     header_backend: str,
+    old_header_backend: str | None, new_header_backend: str | None,
     old_headers_only: tuple[Path, ...], new_headers_only: tuple[Path, ...],
     old_includes_only: tuple[Path, ...], new_includes_only: tuple[Path, ...],
     old_version: str, new_version: str,
@@ -1323,6 +1333,8 @@ def compare_cmd(
         dwarf_only, effective_debug_format,
         follow_deps, search_paths, ld_library_path,
         header_backend=header_backend,
+        old_header_backend=old_header_backend,
+        new_header_backend=new_header_backend,
     )
 
     suppression, pf = _load_suppression_and_policy(
