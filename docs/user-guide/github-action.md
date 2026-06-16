@@ -130,7 +130,7 @@ scan degrades gracefully and L0–L2 stay authoritative.
 
 | Input | Default | Description |
 |-------|---------|-------------|
-| `format` | `markdown` | Output format: `markdown`, `json`, `sarif`, `html`. `sarif`/`html` only supported in compare mode; other modes fall back to `markdown` |
+| `format` | `markdown` (`text` for scan) | Output format: `markdown`, `json`, `sarif`, `html`. `sarif`/`html` are compare-only; `compare-release`/`appcompat`/`deps`/`stack-check` fall back to `markdown`; `scan` supports only `text`/`json` and falls back to `text`. |
 | `output-file` | — | Path to write report (auto-set for SARIF) |
 | `policy` | `strict_abi` | Built-in policy: `strict_abi`, `sdk_vendor`, `plugin_abi` |
 | `policy-file` | — | Custom YAML policy file |
