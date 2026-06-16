@@ -24,7 +24,6 @@ directly with pre-built JSON ``AbiSnapshot`` files / mocks instead.
 from __future__ import annotations
 
 import json
-import shlex
 from pathlib import Path
 
 import click
@@ -39,7 +38,6 @@ from abicheck.cli import (
     _collect_release_inputs,
     _exit_with_severity_or_verdict,
     _expand_header_inputs,
-    _fold_gcc_option_tokens,
     _load_probe_matrix_changes,
     _load_suppression_and_policy,
     _maybe_emit_annotations,
@@ -235,20 +233,6 @@ class TestSmallHelpers:
 
     def test_merge_gcc_options_both(self) -> None:
         assert _merge_gcc_options(["-DA"], "-O2") == "-DA -O2"
-
-    def test_fold_gcc_option_tokens_none(self) -> None:
-        assert _fold_gcc_option_tokens("-O2", ()) == "-O2"
-        assert _fold_gcc_option_tokens(None, ()) is None
-
-    def test_fold_gcc_option_tokens_only(self) -> None:
-        # A whitespace-bearing token survives shlex.split as a single argument,
-        # which the bare --gcc-options string cannot guarantee.
-        folded = _fold_gcc_option_tokens(None, ("-include some header.h",))
-        assert shlex.split(folded) == ["-include some header.h"]
-
-    def test_fold_gcc_option_tokens_appends_to_options(self) -> None:
-        folded = _fold_gcc_option_tokens("-O2 -DA", ("-DFOO=a b", "-Wall"))
-        assert shlex.split(folded) == ["-O2", "-DA", "-DFOO=a b", "-Wall"]
 
     def test_resolve_per_side_options_overrides(self, tmp_path: Path) -> None:
         h = (tmp_path / "h.h",)
