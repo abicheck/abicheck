@@ -365,9 +365,11 @@ class AbiSnapshot:
     # output; this field makes the same fact machine-readable so the surface
     # ledger can disclose reduced confidence. None = scoping succeeded or was
     # never requested. Recognised values:
-    #   "castxml-unavailable" — castxml missing / header parse failed
-    #   "mangling-fallback"   — headers parsed but no declared symbol matched the
-    #                            export table (typically MSVC C++ name mangling)
+    #   "header-backend-unavailable" — selected header backend missing / header
+    #                                  parse failed
+    #   "mangling-fallback"          — headers parsed but no declared symbol
+    #                                  matched the export table (typically MSVC
+    #                                  C++ name mangling)
     scope_fallback: str | None = None
 
     # Full-stack dependency info (populated by --follow-deps)

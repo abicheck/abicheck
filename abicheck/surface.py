@@ -433,7 +433,7 @@ def compute_public_surface(snap: AbiSnapshot) -> PublicSurface:
 # flag that the resolved surface (and therefore every demotion decision made
 # against it) is less trustworthy than a clean header-scoped run.
 SCOPE_NOTE_MANGLING_FALLBACK = "mangling-fallback"  # MSVC C++ name-mangling gap
-SCOPE_NOTE_CASTXML_UNAVAILABLE = "castxml-unavailable"  # castxml missing / parse failed
+SCOPE_NOTE_HEADER_BACKEND_UNAVAILABLE = "header-backend-unavailable"
 SCOPE_NOTE_NO_PROVENANCE = "no-provenance"  # surface resolved without provenance
 
 
@@ -450,7 +450,7 @@ def surface_scope_confidence(
     Returns ``(confidence, notes)`` where *confidence* is ``"high"`` or
     ``"reduced"`` and *notes* is a deduplicated, order-stable list of structured
     note codes. ``"high"`` with no notes is the clean case. The dumper records
-    the per-snapshot ``scope_fallback`` signal (castxml/mangling); a resolvable
+    the per-snapshot ``scope_fallback`` signal (backend/mangling); a resolvable
     surface that nonetheless lacks provenance adds ``no-provenance``.
 
     ``surf_old`` / ``surf_new`` may be passed when the caller has already run

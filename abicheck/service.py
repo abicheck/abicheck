@@ -518,15 +518,16 @@ def _try_header_scoped_dump(
     lang: str,
     header_backend: str = "auto",
 ) -> tuple[AbiSnapshot | None, str | None]:
-    """Attempt a castxml header-scoped dump for a PE/Mach-O binary.
+    """Attempt a header-scoped dump for a PE/Mach-O binary.
 
-    Returns ``(snapshot, None)`` when castxml is available *and* at least one
-    declared symbol matched the export table.  Returns ``(None, reason)`` (after
-    emitting a ``UserWarning``) when scoping is unavailable or had no effect, so
-    the caller can fall back to export-table mode and record the structured
-    confidence signal (ADR-024 §D5.3).  ``reason`` is one of
-    ``"castxml-unavailable"`` / ``"mangling-fallback"``.  This mirrors the
-    public-API scoping that ``abidw --headers-dir`` / abi-dumper apply for ELF.
+    Returns ``(snapshot, None)`` when the selected header backend is available
+    *and* at least one declared symbol matched the export table.  Returns
+    ``(None, reason)`` (after emitting a ``UserWarning``) when scoping is
+    unavailable or had no effect, so the caller can fall back to export-table
+    mode and record the structured confidence signal (ADR-024 §D5.3).
+    ``reason`` is one of ``"header-backend-unavailable"`` /
+    ``"mangling-fallback"``.  This mirrors the public-API scoping that
+    ``abidw --headers-dir`` / abi-dumper apply for ELF.
     """
     from .dumper import _dump_macho as _dumper_macho, _dump_pe as _dumper_pe
 
@@ -550,7 +551,7 @@ def _try_header_scoped_dump(
                 path, resolved_headers, includes, version, compiler,
                 lang=lang_arg, header_backend=header_backend,
             )
-    except Exception as exc:  # noqa: BLE001 — castxml missing / parse failure → fall back
+    except Exception as exc:  # noqa: BLE001 — header backend/parse failure → fall back
         warnings.warn(
             f"Header-based ABI scoping unavailable for '{path.name}' "
             f"({fmt.upper()}): {exc}. Falling back to export-table mode — "
@@ -558,7 +559,7 @@ def _try_header_scoped_dump(
             UserWarning,
             stacklevel=2,
         )
-        return None, "castxml-unavailable"
+        return None, "header-backend-unavailable"
 
     if not _has_matched_public_surface(snap):
         warnings.warn(

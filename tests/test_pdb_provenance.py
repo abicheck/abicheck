@@ -235,7 +235,7 @@ class TestHeaderScopeFallback:
     service._try_header_scoped_dump when PE/Mach-O header scoping cannot apply.
     """
 
-    def test_castxml_unavailable_fallback(self, tmp_path, monkeypatch):
+    def test_header_backend_unavailable_fallback(self, tmp_path, monkeypatch):
         import warnings as _w
 
         import abicheck.dumper as dumper
@@ -254,7 +254,7 @@ class TestHeaderScopeFallback:
                 "pe", tmp_path / "lib.dll", [hdr], [], "1", "c++"
             )
         assert snap is None
-        assert reason == "castxml-unavailable"
+        assert reason == "header-backend-unavailable"
 
     def test_mangling_fallback(self, tmp_path, monkeypatch):
         import warnings as _w

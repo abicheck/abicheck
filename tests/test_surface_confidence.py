@@ -62,12 +62,16 @@ class TestScopeFallbackConfidence:
         assert conf == "reduced"
         assert notes == ["mangling-fallback"]
 
-    def test_castxml_unavailable_recorded(self):
-        old = AbiSnapshot(library="l.dll", version="1", scope_fallback="castxml-unavailable")
+    def test_header_backend_unavailable_recorded(self):
+        old = AbiSnapshot(
+            library="l.dll",
+            version="1",
+            scope_fallback="header-backend-unavailable",
+        )
         new = AbiSnapshot(library="l.dll", version="2")
         conf, notes = surface_scope_confidence(old, new, scope_enabled=False)
         assert conf == "reduced"
-        assert notes == ["castxml-unavailable"]
+        assert notes == ["header-backend-unavailable"]
 
     def test_clean_run_is_high_confidence(self):
         old = AbiSnapshot(library="l", version="1", functions=[_fn("api", origin=ScopeOrigin.PUBLIC_HEADER)])

@@ -134,7 +134,7 @@ hard `--headers-dir` drop: we keep auditability.
    provenance existed for the snapshot but not for the demoted type. The
    scope-level confidence signal (`surface_scope.confidence` /
    `surfaceScope.confidence`, with structured `notes`) discloses
-   `mangling-fallback` / `castxml-unavailable` (recorded by the dumper as the
+   `mangling-fallback` / `header-backend-unavailable` (recorded by the dumper as the
    snapshot's `scope_fallback`) and `no-provenance` — see §D5.3.
    `suppressed-by-user` lives in the separate suppression ledger.
 2. **Leak guard always wins.** If a `PRIVATE_HEADER`-origin type is reachable from a
@@ -144,7 +144,7 @@ hard `--headers-dir` drop: we keep auditability.
    reduced-confidence (export-only, mangling fallback, missing provenance). The PE/Mach-O
    `UserWarning` fallbacks from PR #259 become structured confidence signals.
    *Shipped:* the dumper records a machine-readable `scope_fallback`
-   (`"castxml-unavailable"` / `"mangling-fallback"`) on the snapshot alongside
+   (`"header-backend-unavailable"` / `"mangling-fallback"`) on the snapshot alongside
    the human `UserWarning`; the comparison surfaces a `surface_scope.confidence`
    of `"high"` / `"reduced"` plus structured `notes` in the JSON/SARIF ledger.
 4. **No silent suppression of breaks.** When a *user* control (suppression/allowlist) would
