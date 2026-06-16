@@ -172,11 +172,18 @@ M overall. G21.1/G21.2 are the headline win and ride on existing machinery
 
 ## Out of scope
 
-`--gcc-option` (G21.5), `compile_commands.json` auto-synthesis (G21.6),
-inline-path fail-loud (G21.7), and the triad/vocab collapse (M4/M5) were
-previously parked here but are now **in scope** — see *Goal & acceptance* and
-*Option collapsing* above. What remains out of scope:
+`--gcc-option` (G21.5) and inline-path fail-loud (G21.7) and the vocab alias
+(M5) shipped. What remains out of scope:
 
+- **G21.6 `compile_commands.json` auto-synthesis** and **G21.2 header/source
+  auto-discovery** — both *guess the inputs*, which collides with the deliberate
+  **P09** design (`buildsource/inline.py` `embed_build_source` intentionally
+  **warns** — "no `compile_commands.json`; run `bear -- make` or pass
+  `--build-info`" — rather than fabricating a flag-less DB or grabbing sibling
+  headers, which would silently produce a wrong/low-confidence ABI surface). If
+  pursued, they must be **explicit opt-in** flags (e.g. `--synthesize-compile-db`,
+  `--auto-headers`) so the P09 default is preserved — a deliberate decision, not
+  a default behaviour change. Deferred.
 - **Changing the *permissive default* exit code** so an empty layer fails
   without `--collection-mode strict`. That is a policy change to the best-effort
   evidence contract (ADR-028 D3) and needs its own decision; G21.7 only adds a
@@ -184,6 +191,11 @@ previously parked here but are now **in scope** — see *Goal & acceptance* and
 - **L2 clang-direct fallback** (route header AST through the clang backend on a
   castxml toolchain-version failure) — separate PR, see G16.
 - Conda/`dal-devel` fetching stays in the eval harness, not the tool.
+
+The one substantial item still open is **G21.9** — the one-shot `compare`
+orchestrator (dump both sides with `--sources` at `--depth`, then compare). It
+is P09-compatible (the user supplies sources explicitly) and is the headline
+deep-compare feature; sized for its own focused PR.
 
 ## Background
 
