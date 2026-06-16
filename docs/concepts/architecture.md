@@ -144,8 +144,12 @@ Reads native binary metadata using format-specific parsers:
 Parses C/C++ headers through a selectable backend — `--header-backend
 auto|castxml|clang` (or `ABICHECK_HEADER_BACKEND`); `auto` prefers castxml and
 falls back to clang `-ast-dump=json` on clang-only hosts (ADR-003). The rest of
-this section describes the castxml backend; the clang backend exposes the
-identical snapshot surface. Either extracts:
+this section describes the castxml backend. The clang backend exposes the same
+declaration surface (signatures, classes/bases, enums, typedefs, access,
+`noexcept`, templates) but is a **syntactic** AST: it does **not** compute record
+layout, so `size_bits`/`offset_bits`/vtable slots stay unset and the layout
+detectors skip an unknown-vs-unknown comparison — **DWARF (L1) remains the layout
+authority** on a clang-only host. With that caveat, either backend extracts:
 
 - Function signatures (parameters, return types)
 - Class/struct definitions and layout
