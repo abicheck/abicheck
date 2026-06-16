@@ -141,6 +141,7 @@ class ScanRequest:
     binaries: list[Path] = field(default_factory=list)
     headers: list[Path] = field(default_factory=list)
     includes: list[Path] = field(default_factory=list)
+    public_header_dirs: list[Path] = field(default_factory=list)
     sources: Path | None = None
     compile_db: Path | None = None
     build_info: Path | None = None
@@ -560,11 +561,14 @@ def run_scan(req: ScanRequest) -> ScanResult:
         resolve_level,
     ) = _scan_imports()
     from .buildsource.crosscheck import ALL_CHECKS
-    from .cli_scan import _BudgetOverflow, run_scan_core
+    from .cli_scan import _BudgetOverflow, _public_provenance_set, run_scan_core
 
     if len(req.binaries) != 1:
         raise ValueError("run_scan accepts exactly one binary")
     binary = req.binaries[0]
+    prov_headers, prov_dirs = _public_provenance_set(
+        list(req.headers), list(req.public_header_dirs)
+    )
 
     changed = [p for p in req.changed_paths if p]
     seeded = req.seeded or bool(changed)
@@ -592,6 +596,8 @@ def run_scan(req: ScanRequest) -> ScanResult:
             binary=binary,
             headers=list(req.headers),
             includes=list(req.includes),
+            public_headers=prov_headers,
+            public_header_dirs=prov_dirs,
             sources=req.sources,
             effective_build_info=effective_build_info,
             build_config=None,
