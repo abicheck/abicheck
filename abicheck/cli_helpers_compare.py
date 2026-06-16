@@ -27,6 +27,7 @@ re-exported from ``abicheck.cli`` to keep existing import sites (sibling
 from __future__ import annotations
 
 import re
+import shlex
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -110,6 +111,23 @@ def _merge_gcc_options(
         return gcc_options
     merged = " ".join(build_context_flags)
     return f"{merged} {gcc_options}" if gcc_options else merged
+
+
+def _fold_gcc_option_tokens(
+    gcc_options: str | None, tokens: tuple[str, ...]
+) -> str | None:
+    """Fold repeatable ``--gcc-option`` tokens into the ``--gcc-options`` string.
+
+    Each ``--gcc-option`` value is one literal compiler argument that must reach
+    castxml intact, including arguments that contain whitespace (e.g. a macro
+    value or a path with a space). ``--gcc-options`` is later split with
+    ``shlex.split``, so each token is ``shlex.quote``-escaped here to round-trip
+    back to a single argument rather than shattering on whitespace.
+    """
+    if not tokens:
+        return gcc_options
+    quoted = " ".join(shlex.quote(t) for t in tokens)
+    return f"{gcc_options} {quoted}" if gcc_options else quoted
 
 
 def _resolve_per_side_options(

@@ -37,6 +37,7 @@ from .cli_helpers_compare import (  # noqa: F401  — re-exported to keep cli im
     _collect_additions as _collect_additions,
     _collect_force_public_symbols as _collect_force_public_symbols,
     _collect_release_inputs as _collect_release_inputs,
+    _fold_gcc_option_tokens as _fold_gcc_option_tokens,
     _merge_gcc_options as _merge_gcc_options,
     _merge_redundant_changes as _merge_redundant_changes,
     _provenance_timestamp as _provenance_timestamp,
@@ -297,7 +298,13 @@ def main() -> None:
 @click.option("--gcc-prefix", default=None,
               help="Cross-toolchain prefix (e.g. aarch64-linux-gnu-).")
 @click.option("--gcc-options", default=None,
-              help="Extra compiler flags passed through to castxml.")
+              help="Extra compiler flags passed through to castxml (split on "
+                   "whitespace). For a single flag that itself contains spaces, "
+                   "use --gcc-option instead.")
+@click.option("--gcc-option", "gcc_option_tokens", multiple=True,
+              help="A single extra compiler flag passed through to castxml "
+                   "verbatim (repeatable; not whitespace-split, so a value such "
+                   "as '-include some header.h' stays one argument).")
 @click.option("--sysroot", type=click.Path(path_type=Path), default=None,
               help="Alternative system root directory.")
 @click.option("--nostdinc", is_flag=True, default=False,
@@ -367,6 +374,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
              public_headers: tuple[Path, ...], public_header_dirs: tuple[Path, ...],
              version: str, lang: str, header_backend: str, output: Path | None,
              gcc_path: str | None, gcc_prefix: str | None, gcc_options: str | None,
+             gcc_option_tokens: tuple[str, ...],
              sysroot: Path | None, nostdinc: bool, pdb_path: Path | None,
              follow_deps: bool, search_paths: tuple[Path, ...], ld_library_path: str,
              dwarf_only: bool, show_data_sources: bool,
@@ -436,6 +444,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
     build_context_flags = _resolve_build_context_flags(
         effective_compile_db, headers, compile_db_filter,
     )
+    gcc_options = _fold_gcc_option_tokens(gcc_options, gcc_option_tokens)
     effective_gcc_options = _merge_gcc_options(build_context_flags, gcc_options)
 
     # Debug artifact resolution (ADR-021a): resolve before dump

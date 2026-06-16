@@ -635,10 +635,15 @@ def _collect_source_abi(
         merged.diagnostics.append(f"source_abi: {choice.gap_note()}")
 
     if not merged.compile_units:
+        # The user explicitly asked for L4 (--source-abi) but there is no L3
+        # build context to replay, so nothing is produced. Record this as
+        # "skipped" (not "partial") so --collection-mode strict fails loudly
+        # instead of silently passing on an empty requested layer; permissive
+        # mode is unaffected and still exits 0.
         extractors.append(
             ExtractorRecord(
                 name=f"source_abi:{extractor}",
-                status="partial",
+                status="skipped",
                 detail="no compile units in build evidence; collect L3 first (e.g. --compile-db)",
             )
         )

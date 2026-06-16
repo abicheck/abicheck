@@ -987,6 +987,22 @@ def test_collect_evidence_source_abi_without_compile_units(tmp_path):
     assert "no L3 build context" in result.output
 
 
+def test_collect_evidence_source_abi_without_compile_units_strict_fails(tmp_path):
+    """Strict mode fails loud when an explicitly-requested L4 layer is empty.
+
+    Permissive mode (above) still exits 0; under --collection-mode strict the
+    empty source-ABI layer is a "skipped" extractor and must fail the command
+    rather than silently passing on an empty requested layer.
+    """
+    out = tmp_path / "ev"
+    result = CliRunner().invoke(main, [
+        "collect", "--source-abi", "--source-abi-extractor", "clang",
+        "--collection-mode", "strict", "-o", str(out),
+    ])
+    assert result.exit_code != 0, result.output
+    assert "strict collection mode" in result.output
+
+
 def test_exported_symbols_from_binary_edge_cases(tmp_path):
     from pathlib import Path
 
