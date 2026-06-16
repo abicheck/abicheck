@@ -97,6 +97,20 @@ def test_depfile_args_preserves_preprocessor_escape_hatch() -> None:
     ]) == ["foo.cpp", "-Wp,-Igenerated", "-Wp,-DPLATFORM=1", "-Iinclude"]
 
 
+def test_depfile_args_strips_output_side_effect_options() -> None:
+    # Compile DB argv is untrusted: do not forward clang options that can write
+    # files during the S2 preprocessor/include replay (for example time traces).
+    assert depfile_args_from_argv([
+        "clang++", "-c", "foo.cpp", "-I", "include",
+        "-ftime-trace=/tmp/victim.json",
+        "-ftime-trace", "/tmp/victim2.json",
+        "-serialize-diagnostic-file=/tmp/diag",
+        "-fmodules-cache-path", "/tmp/cache",
+        "-save-temps", "--save-temps=obj",
+        "-MJ/tmp/compile.json",
+    ]) == ["foo.cpp", "-I", "include"]
+
+
 def test_depfile_args_strips_clang_plugin_loading_options() -> None:
     # compile_commands.json is untrusted input for source-ABI replay.  The
     # depfile pass must not forward Clang escape hatches that load plugins or
