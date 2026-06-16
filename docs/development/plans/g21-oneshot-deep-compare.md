@@ -70,9 +70,13 @@ This is an architecture-level UX problem, not a missing flag.
   (Reinstated.)
 - **G21.8 — Option collapsing (M1–M6).** Reduce the 394-option surface — see
   the dedicated section below.
-- **G21.9 — One-shot deep `compare`.** The orchestrator that dumps both sides
-  with `--sources` at the chosen `--depth` (inline L3–L5 embed) then compares,
-  with auto-discovery (G21.2) — the headline "deep compare in one command".
+- **G21.9 — One-shot deep `compare`.** *Shipped (PR #422)* as the
+  `deep-compare` command (`abicheck/cli_max.py`): it dumps both sides with
+  `--sources` at the chosen `--depth` (inline L3–L5 embed) then delegates to
+  `compare`, propagating its verdict exit code unchanged — the headline "deep
+  compare in one command". P09-honest: sources are explicit (no auto-discovery);
+  a snapshot/JSON input passes through with a warning; `--depth headers`
+  degrades to a plain `compare`.
 
 Acceptance = each behaviour-observable criterion has a scenario in
 `tests/scenarios/` (validating `UC-WF-oneshot-deep`) plus a unit test;
@@ -192,10 +196,11 @@ M overall. G21.1/G21.2 are the headline win and ride on existing machinery
   castxml toolchain-version failure) — separate PR, see G16.
 - Conda/`dal-devel` fetching stays in the eval harness, not the tool.
 
-The one substantial item still open is **G21.9** — the one-shot `compare`
-orchestrator (dump both sides with `--sources` at `--depth`, then compare). It
-is P09-compatible (the user supplies sources explicitly) and is the headline
-deep-compare feature; sized for its own focused PR.
+**G21.9** — the one-shot `deep-compare` orchestrator — **shipped in PR #422**
+(`abicheck/cli_max.py`, tests in `tests/test_cli_deep_compare.py`). It is
+P09-compatible (the user supplies sources explicitly) and is the headline
+deep-compare feature. What remains genuinely out of scope is only the
+input-guessing pieces (G21.2/G21.6 above), which must stay explicit opt-in.
 
 ## Background
 

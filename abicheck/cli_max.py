@@ -1,0 +1,271 @@
+# Copyright 2026 Nikolay Petrov
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""``deep-compare`` — the one-shot deep-evidence compare orchestrator (G21.9).
+
+The data pipeline is ``dump -> compare`` (L0->L5). To reach high-confidence
+L3-L5 evidence today, a user has to ``dump`` each side with ``--sources`` at a
+chosen depth (embedding the build/source/graph facts inline) and then
+``compare`` the two embedded snapshots. ``deep-compare`` collapses that into one
+command: it dumps each native-binary side with its source tree at the requested
+``--depth`` and hands the two embedded snapshots to ``compare``.
+
+It is deliberately **P09-compatible**: the user supplies the source trees
+explicitly (``--old-sources``/``--new-sources``/``--sources``). Nothing is
+auto-discovered or guessed — at ``--depth headers`` it degrades to a plain
+``compare``. A snapshot/JSON input is passed straight through (it cannot be
+re-dumped); evidence flags for such a side are ignored with a warning.
+"""
+from __future__ import annotations
+
+import tempfile
+from pathlib import Path
+
+import click
+
+# Import _normalize_binary_input from .cli (the registration parent) rather than
+# .cli_resolve so cli_max adds no new import edge beyond the by-design
+# cli<->cli_max sibling cycle (cli re-exports it in __all__). POLICY_FILE_PARAM
+# comes from the leaf cli_params (no cycle back to cli).
+from .cli import _normalize_binary_input, compare_cmd, dump_cmd, main
+from .cli_dump_helpers import resolve_dump_depth
+from .cli_params import POLICY_FILE_PARAM
+
+_DIR = click.Path(exists=True, file_okay=False, path_type=Path)
+
+
+def _prepare_side(
+    ctx: click.Context,
+    *,
+    input_path: Path,
+    headers: tuple[Path, ...],
+    sources: Path | None,
+    build_info: Path | None,
+    depth: str | None,
+    max_depth: bool,
+    version: str,
+    lang: str,
+    header_backend: str,
+    out_dir: Path,
+    label: str,
+) -> Path:
+    """Dump one native-binary side to an embedded snapshot; pass snapshots through.
+
+    Returns the path ``compare`` should read for this side. A native binary is
+    dumped with its source tree at the requested depth (so L3-L5 ride inline in
+    the snapshot); a JSON/Perl snapshot input can't be re-dumped, so it is
+    returned unchanged and any evidence flags are reported as ignored.
+    """
+    norm_path, fmt = _normalize_binary_input(input_path)
+    if fmt is None:
+        if sources is not None or build_info is not None:
+            click.echo(
+                f"Warning: {label} input {input_path} is a snapshot, not a native "
+                "binary; its --*-sources/--*-build-info are ignored (re-dump the "
+                "binary to embed deeper evidence).",
+                err=True,
+            )
+        return input_path
+
+    out = out_dir / f"{label}.abi.json"
+    ctx.invoke(
+        dump_cmd,
+        so_path=norm_path,
+        headers=headers,
+        version=version,
+        lang=lang,
+        header_backend=header_backend,
+        sources=sources,
+        build_info=build_info,
+        depth=depth,
+        max_depth=max_depth,
+        output=out,
+    )
+    return out
+
+
+@main.command("deep-compare")
+@click.argument("old_input", type=click.Path(exists=True, path_type=Path))
+@click.argument("new_input", type=click.Path(exists=True, path_type=Path))
+# ── Evidence inputs (explicit; P09) ──────────────────────────────────────────
+@click.option("--old-sources", "old_sources", type=_DIR, default=None,
+              help="Source tree for the OLD side (checkout, not a pack). Its L3-L5 "
+                   "facts are collected inline at --depth and embedded in the dump.")
+@click.option("--new-sources", "new_sources", type=_DIR, default=None,
+              help="Source tree for the NEW side.")
+@click.option("--sources", "both_sources", type=_DIR, default=None,
+              help="Source tree applied to both sides (per-side --old/new-sources override it).")
+@click.option("--old-build-info", "old_build_info", type=click.Path(exists=True, path_type=Path),
+              default=None, help="Optional L3 build input (build dir / compile_commands.json / "
+                   "pack) for the OLD side; auto-found inside --old-sources when omitted.")
+@click.option("--new-build-info", "new_build_info", type=click.Path(exists=True, path_type=Path),
+              default=None, help="Optional L3 build input for the NEW side.")
+# ── Headers (used at dump time) ──────────────────────────────────────────────
+@click.option("-H", "--header", "headers", multiple=True, type=click.Path(exists=True, path_type=Path),
+              help="Public header file or directory applied to both sides (repeat for multiple).")
+@click.option("--old-header", "old_headers_only", multiple=True, type=click.Path(exists=True, path_type=Path),
+              help="Public header for OLD side only (overrides -H for old).")
+@click.option("--new-header", "new_headers_only", multiple=True, type=click.Path(exists=True, path_type=Path),
+              help="Public header for NEW side only (overrides -H for new).")
+# ── Depth dial (shared vocabulary with `dump`/`scan`) ────────────────────────
+@click.option("--depth", "depth", type=click.Choice(["headers", "build", "graph", "source", "full"]),
+              default=None,
+              help="Evidence depth for both sides (same vocabulary as `dump --depth`): "
+                   "headers=L2 only (== plain compare), build=L3, graph=L5-from-L3, "
+                   "source=L3-L5 (changed scope), full=L3-L5 (full).")
+@click.option("--max", "max_depth", is_flag=True, default=False,
+              help="Shorthand for --depth full (the deepest evidence available).")
+# ── Per-side labels ──────────────────────────────────────────────────────────
+@click.option("--old-version", "old_version", default="old", show_default=True,
+              help="Version label for the OLD side.")
+@click.option("--new-version", "new_version", default="new", show_default=True,
+              help="Version label for the NEW side.")
+@click.option("--lang", default="c++", show_default=True,
+              type=click.Choice(["c++", "c"], case_sensitive=False),
+              help="Language mode for the header backend (both sides).")
+@click.option("--header-backend", "header_backend", default="auto", show_default=True,
+              type=click.Choice(["auto", "castxml", "clang"], case_sensitive=False),
+              help="L2 header-AST frontend (both sides). Env: ABICHECK_HEADER_BACKEND.")
+# ── Compare pass-through ─────────────────────────────────────────────────────
+@click.option("--format", "fmt",
+              type=click.Choice(["json", "markdown", "sarif", "html", "junit", "review"]),
+              default="markdown", show_default=True, help="Output format.")
+@click.option("-o", "--output", type=click.Path(path_type=Path), default=None,
+              help="Write the report here instead of stdout.")
+@click.option("--policy", "policy",
+              type=click.Choice(["strict_abi", "sdk_vendor", "plugin_abi"], case_sensitive=True),
+              default="strict_abi", show_default=True, help="Built-in policy profile.")
+@click.option("--policy-file", "policy_file_path", type=POLICY_FILE_PARAM, default=None,
+              help="YAML policy file or built-in name; overrides --policy.")
+@click.option("--severity-preset", "severity_preset",
+              type=click.Choice(["default", "strict", "info-only"], case_sensitive=True),
+              default=None, help="Severity preset controlling exit codes and labels.")
+@click.option("--suppress", type=click.Path(exists=True, path_type=Path), default=None,
+              help="Suppression file (YAML) to filter known/intentional changes.")
+@click.option("--recommend", is_flag=True, default=False,
+              help="Append a release recommendation (semver bump + SONAME action).")
+@click.option("--scope-public-headers/--no-scope-public-headers", "scope_public_headers",
+              default=True, show_default=True,
+              help="Restrict findings to the public-header ABI surface (ADR-024).")
+# ── Orchestration knobs ──────────────────────────────────────────────────────
+@click.option("--keep-snapshots", "keep_snapshots", type=click.Path(file_okay=False, path_type=Path),
+              default=None,
+              help="Write the intermediate per-side dumps here (for caching/debugging) "
+                   "instead of a throwaway temp dir.")
+@click.option("-v", "--verbose", is_flag=True, default=False, help="Enable verbose/debug output.")
+@click.pass_context
+def deep_compare_cmd(
+    ctx: click.Context,
+    old_input: Path, new_input: Path,
+    old_sources: Path | None, new_sources: Path | None, both_sources: Path | None,
+    old_build_info: Path | None, new_build_info: Path | None,
+    headers: tuple[Path, ...],
+    old_headers_only: tuple[Path, ...], new_headers_only: tuple[Path, ...],
+    depth: str | None, max_depth: bool,
+    old_version: str, new_version: str,
+    lang: str, header_backend: str,
+    fmt: str, output: Path | None,
+    policy: str, policy_file_path: Path | None,
+    severity_preset: str | None,
+    suppress: Path | None, recommend: bool, scope_public_headers: bool,
+    keep_snapshots: Path | None, verbose: bool,
+) -> None:
+    """Deep-compare two libraries in one command: dump both sides with their
+    source trees at --depth, then compare the embedded snapshots.
+
+    This is the one-shot front door to high-confidence L3-L5 evidence. Supply a
+    source checkout per side; abicheck collects the build/source/graph facts
+    inline (no guessing — explicit sources only) and folds them into the verdict.
+
+    \b
+    Examples:
+    \b
+      # Deepest evidence, one command (sources per side)
+      abicheck deep-compare libfoo.so.1 libfoo.so.2 \\
+        --old-sources ./foo-1.x --new-sources ./foo-2.x \\
+        -H include/foo.h --max --recommend
+    \b
+      # Same source tree for both, L3 build context only
+      abicheck deep-compare old/libfoo.so new/libfoo.so \\
+        --sources ./foo-src --depth build
+    \b
+    Exit codes match `compare` (the verdict comes from it unchanged).
+    """
+    old_src = old_sources if old_sources is not None else both_sources
+    new_src = new_sources if new_sources is not None else both_sources
+
+    if (
+        old_src is None and new_src is None
+        and old_build_info is None and new_build_info is None
+    ):
+        raise click.UsageError(
+            "deep-compare needs explicit evidence: pass --sources (or per-side "
+            "--old-sources/--new-sources) and/or --old/new-build-info. With no "
+            "source/build inputs there is nothing deeper to collect — use plain "
+            "`abicheck compare` instead."
+        )
+
+    old_h = old_headers_only or headers
+    new_h = new_headers_only or headers
+
+    # The depth the embedded snapshots carry; forwarded to compare so its
+    # coverage table reflects the evidence actually requested.
+    compare_collect_mode = resolve_dump_depth(depth, max_depth, "off", False)
+
+    import contextlib
+
+    with contextlib.ExitStack() as stack:
+        if keep_snapshots is not None:
+            keep_snapshots.mkdir(parents=True, exist_ok=True)
+            out_dir = keep_snapshots
+        else:
+            out_dir = Path(stack.enter_context(tempfile.TemporaryDirectory(prefix="abicheck-deep-")))
+
+        old_ready = _prepare_side(
+            ctx, input_path=old_input, headers=old_h, sources=old_src,
+            build_info=old_build_info, depth=depth, max_depth=max_depth,
+            version=old_version, lang=lang, header_backend=header_backend,
+            out_dir=out_dir, label="old",
+        )
+        new_ready = _prepare_side(
+            ctx, input_path=new_input, headers=new_h, sources=new_src,
+            build_info=new_build_info, depth=depth, max_depth=max_depth,
+            version=new_version, lang=lang, header_backend=header_backend,
+            out_dir=out_dir, label="new",
+        )
+
+        # The source facts already ride inline in the dumped snapshots, so compare
+        # reads them from the embedded payload — do NOT forward --*-sources (those
+        # are pack directories in `compare`, not source trees). Forward the depth
+        # via collect_mode only so the coverage rows are honest.
+        ctx.invoke(
+            compare_cmd,
+            old_input=old_ready,
+            new_input=new_ready,
+            old_version=old_version,
+            new_version=new_version,
+            lang=lang,
+            header_backend=header_backend,
+            fmt=fmt,
+            output=output,
+            policy=policy,
+            policy_file_path=policy_file_path,
+            severity_preset=severity_preset,
+            suppress=suppress,
+            recommend=recommend,
+            scope_public_headers=scope_public_headers,
+            collect_mode=compare_collect_mode,
+            verbose=verbose,
+        )
