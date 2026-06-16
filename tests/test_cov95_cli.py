@@ -356,6 +356,22 @@ class TestSmallHelpers:
             empty_l5, "source-target"
         )
 
+    def test_dump_explicit_deep_depth_without_sources_warns(self, tmp_path) -> None:
+        # Codex: an explicit --max/--depth (deep collect mode) with no
+        # --sources/--build-info would silently write an L0-L2 snapshot; warn.
+        so = tmp_path / "fake.so"
+        so.write_bytes(b"\x7fELF")
+        result = CliRunner().invoke(main, ["dump", str(so), "--max"])
+        assert "carry only L0-L2 data" in result.output
+
+    def test_dump_default_depth_no_warning(self, tmp_path) -> None:
+        # The bare default (no --depth/--collect-mode) must NOT warn — embedding
+        # is a no-op there by design, so a plain dump stays quiet about evidence.
+        so = tmp_path / "fake.so"
+        so.write_bytes(b"\x7fELF")
+        result = CliRunner().invoke(main, ["dump", str(so)])
+        assert "carry only L0-L2 data" not in result.output
+
     def test_dump_gcc_option_ignored_warning_for_non_elf(self, tmp_path) -> None:
         # G21.5/Codex: --gcc-option(s) aren't applied on the native PE/Mach-O
         # dump path, so the CLI warns rather than dropping them silently.

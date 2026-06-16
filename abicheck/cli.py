@@ -497,11 +497,34 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
     # Resolve the --depth/--max preset into the underlying --collect-mode before
     # any dump path runs, so every branch (source-only / PE-Mach-O / ELF) embeds
     # the same evidence depth (G21.1).
-    collect_mode = resolve_dump_depth(
-        depth, max_depth, collect_mode,
+    collect_mode_explicit = (
         click.get_current_context().get_parameter_source("collect_mode")
-        == click.core.ParameterSource.COMMANDLINE,
+        == click.core.ParameterSource.COMMANDLINE
     )
+    collect_mode = resolve_dump_depth(
+        depth, max_depth, collect_mode, collect_mode_explicit,
+    )
+
+    # An *explicitly* requested deep evidence depth (--depth/--max or an explicit
+    # --collect-mode) collects nothing without a source tree / build context:
+    # _write_snapshot_output only embeds when --sources/--build-info is given.
+    # Warn loudly rather than silently writing an L0-L2 snapshot for an
+    # explicitly-requested deep depth (Codex review). The bare default
+    # (collect_mode "source-target" with no flag) stays silent — embedding is a
+    # no-op there by design. G21.7-style fail-loud (a warning, not an error).
+    depth_requested = depth is not None or max_depth
+    if (
+        (depth_requested or collect_mode_explicit)
+        and collect_mode != "off"
+        and sources is None and build_info is None
+    ):
+        click.echo(
+            f"Warning: evidence depth '{collect_mode}' was requested but no "
+            "--sources/--build-info was given; the snapshot will carry only "
+            "L0-L2 data (no build/source/graph facts). Pass --sources or "
+            "--build-info, or use --depth headers for an L2-only dump.",
+            err=True,
+        )
 
     # Source-only dump (no binary) for the parallel-baseline / merge flow.
     if so_path is None:

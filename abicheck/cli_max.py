@@ -234,20 +234,30 @@ def deep_compare_cmd(
     # coverage table reflects the evidence actually requested.
     compare_collect_mode = resolve_dump_depth(depth, max_depth, "off", False)
 
-    # Only a depth that actually collects L3-L5 needs explicit evidence. At
-    # --depth headers (and the bare default) the depth resolves to "off" — that
-    # is the advertised L2-only / plain-compare mode, so it stays usable without
-    # any --sources/--build-info (Codex review).
+    # A depth that collects L3-L5 needs *some* evidence to collect from. A side
+    # only fails this when it is a native binary that must be dumped yet has no
+    # --sources/--build-info of its own — a snapshot/JSON input is exempt because
+    # it may already embed an L3-L5 pack that compare consumes (like plain
+    # `compare --collect-mode graph-full`). Error only when *neither* side can
+    # contribute, so cached deep snapshots still work (Codex review). The
+    # asymmetric one-native-side-missing case is handled per side in
+    # _prepare_side (a warning, not a hard error).
+    def _native_without_evidence(inp: Path, src: Path | None, bi: Path | None) -> bool:
+        if src is not None or bi is not None:
+            return False
+        _, fmt = _normalize_binary_input(inp)
+        return fmt is not None  # native binary that would dump with no sources
+
     if (
         compare_collect_mode != "off"
-        and old_src is None and new_src is None
-        and old_build_info is None and new_build_info is None
+        and _native_without_evidence(old_input, old_src, old_build_info)
+        and _native_without_evidence(new_input, new_src, new_build_info)
     ):
         raise click.UsageError(
-            f"deep-compare --depth {depth} collects L3-L5 evidence but no sources "
-            "were given: pass --sources (or per-side --old-sources/--new-sources) "
-            "and/or --old/new-build-info. For an L2-only run use --depth headers "
-            "or plain `abicheck compare`."
+            f"deep-compare --depth {depth} collects L3-L5 evidence but neither "
+            "native input has sources: pass --sources (or per-side "
+            "--old-sources/--new-sources) and/or --old/new-build-info. For an "
+            "L2-only run use --depth headers or plain `abicheck compare`."
         )
 
     old_h = old_headers_only or headers
