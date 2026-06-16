@@ -100,6 +100,7 @@ if [[ "$MODE" == "dump" ]]; then
   add_flag "-I" "${INPUT_NEW_INCLUDE:-}"
   add_single_flag "--version" "${INPUT_NEW_VERSION:-}"
   add_single_flag "--lang" "${INPUT_LANG:-}"
+  add_single_flag "--header-backend" "${INPUT_HEADER_BACKEND:-}"
   add_single_flag "--gcc-path" "${INPUT_GCC_PATH:-}"
   add_single_flag "--gcc-prefix" "${INPUT_GCC_PREFIX:-}"
   add_single_flag "--gcc-options" "${INPUT_GCC_OPTIONS:-}"
@@ -147,6 +148,7 @@ elif [[ "$MODE" == "compare" ]]; then
   add_single_flag "--old-version" "${INPUT_OLD_VERSION:-}"
   add_single_flag "--new-version" "${INPUT_NEW_VERSION:-}"
   add_single_flag "--lang" "${INPUT_LANG:-}"
+  add_single_flag "--header-backend" "${INPUT_HEADER_BACKEND:-}"
 
   # Format — for SARIF, always write to a file so upload-sarif can find it
   FORMAT="${INPUT_FORMAT:-markdown}"

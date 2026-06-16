@@ -73,7 +73,8 @@ automatically, then runs ABI comparison and reports results.
 
 | Input | Default | Description |
 |-------|---------|-------------|
-| `lang` | `c++` | Language mode: `c++` or `c` |
+| `lang` | `c++` | Language mode for the header backend: `c++` or `c` |
+| `header-backend` | `castxml` (`auto`) | L2 header-AST frontend (compare/dump modes): `auto`, `castxml`, or `clang` (`clang -ast-dump=json`, for clang-only hosts). `auto` falls back to clang on a castxml toolchain error. Same as `ABICHECK_HEADER_BACKEND`. |
 | `gcc-path` | — | Path to cross-compiler binary (dump mode only) |
 | `gcc-prefix` | — | Cross-toolchain prefix, e.g. `aarch64-linux-gnu-` (dump mode only) |
 | `gcc-options` | — | Extra flags for castxml (dump mode only) |
