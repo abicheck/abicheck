@@ -51,9 +51,10 @@ This is an architecture-level UX problem, not a missing flag.
   remediation hint ("no headers/DWARF — pass `-H` or install the `-devel`
   package"), not just the bare condition.
 
-Acceptance = each criterion has a scenario in `tests/scenarios/` (validating
-`UC-WF-oneshot-deep`) and a unit test, and the registry entry flips to
-`complete` with real `evidence`.
+Acceptance = each behaviour-observable criterion (G21.1, G21.2, G21.4) has a
+scenario in `tests/scenarios/` (validating `UC-WF-oneshot-deep`) plus a unit
+test; G21.3 (help grouping) is behaviour-preserving and carries a unit test
+only. The registry entry then flips to `complete` with real `evidence`.
 
 ## Design
 

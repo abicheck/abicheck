@@ -1003,6 +1003,22 @@ def test_collect_evidence_source_abi_without_compile_units_strict_fails(tmp_path
     assert "strict collection mode" in result.output
 
 
+def test_collect_evidence_source_abi_noop_scope_strict_passes(tmp_path):
+    """A no-op replay scope must not false-fail strict mode on absent L3.
+
+    `--source-abi-scope off` selects zero translation units by design, so a
+    missing compile DB is not a missing prerequisite — strict mode must still
+    exit 0 (the skipped-on-empty rule applies only to scopes that consume units).
+    """
+    out = tmp_path / "ev"
+    result = CliRunner().invoke(main, [
+        "collect", "--source-abi", "--source-abi-extractor", "clang",
+        "--source-abi-scope", "off", "--collection-mode", "strict",
+        "-o", str(out),
+    ])
+    assert result.exit_code == 0, result.output
+
+
 def test_exported_symbols_from_binary_edge_cases(tmp_path):
     from pathlib import Path
 

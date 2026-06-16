@@ -635,11 +635,26 @@ def _collect_source_abi(
         merged.diagnostics.append(f"source_abi: {choice.gap_note()}")
 
     if not merged.compile_units:
-        # The user explicitly asked for L4 (--source-abi) but there is no L3
-        # build context to replay, so nothing is produced. Record this as
-        # "skipped" (not "partial") so --collection-mode strict fails loudly
-        # instead of silently passing on an empty requested layer; permissive
-        # mode is unaffected and still exits 0.
+        # A no-op replay scope selects zero TUs by design ("off", or "changed"
+        # with no --changed-path), so absent L3 build evidence is not a missing
+        # prerequisite — it would not be used. Only the scopes that actually
+        # consume compile units treat empty L3 as a "skipped" layer, so that
+        # --collection-mode strict fails loud on an explicitly-requested layer
+        # that produced nothing without false-failing the no-op scopes. (ADR-030
+        # D7.) Permissive mode is unaffected and still exits 0 either way.
+        noop_scope = scope == "off" or (scope == "changed" and not changed_paths)
+        if noop_scope:
+            extractors.append(
+                ExtractorRecord(
+                    name=f"source_abi:{extractor}",
+                    status="partial",
+                    detail=f"scope {scope!r} selects no translation units; nothing to replay",
+                )
+            )
+            return (
+                SourceAbiSurface(library=library, target_id=target_id),
+                f"no-op: scope {scope!r} selects no translation units",
+            )
         extractors.append(
             ExtractorRecord(
                 name=f"source_abi:{extractor}",
