@@ -11,7 +11,13 @@ inputs:
     description: >
       Operation mode: "compare" (default) compares two ABI surfaces;
       "compare-release" compares all libraries in two directories or packages;
-      "dump" generates a JSON baseline snapshot from a single library;
+      "dump" generates a JSON baseline snapshot from a single library (now also
+      embeds optional L3/L4/L5 build-source evidence via source/build inputs);
+      "scan" runs the deterministic source-intelligence orchestrator (classify →
+      always-on pattern/cross-source tier → pinned evidence level, optionally
+      compared against a baseline) — the entry point for source scans;
+      "merge" combines independently-produced dumps and/or a Flow-2
+      "abicheck_inputs/" pack into one self-contained baseline snapshot;
       "appcompat" checks whether an application binary is affected by a library update;
       "deps" resolves transitive dependencies and symbol bindings (Linux ELF);
       "stack-check" compares a binary's full dependency stack across two
@@ -123,9 +129,17 @@ inputs:
 
   # ── Language & compiler ─────────────────────────────────────────────────────
   lang:
-    description: 'Language mode for castxml: "c++" or "c".'
+    description: 'Language mode for the header backend: "c++" or "c".'
     required: false
     default: 'c++'
+  header-backend:
+    description: >
+      L2 header-AST frontend for native-binary inputs: "auto" (castxml if
+      present, else clang, with auto-fallback to clang on a castxml
+      toolchain-version error), "castxml" (default), or "clang"
+      (clang -ast-dump=json; for clang-only hosts). Applies to compare and
+      dump modes. Equivalent to the ABICHECK_HEADER_BACKEND env var.
+    required: false
   gcc-path:
     description: 'Path to GCC/G++ cross-compiler binary (dump mode only).'
     required: false
@@ -169,14 +183,126 @@ inputs:
       and follow-deps modes.
     required: false
 
-  # ── Baseline auto-fetch (compare mode) ──────────────────────────────────────
+  # ── Source-scan & build-source evidence (scan / dump / merge modes) ──────────
+  sources:
+    description: >
+      Source checkout / tree for source-intelligence analysis. The compile
+      database is auto-discovered within it. Drives L4 source-ABI replay and
+      L5 source-graph collection. Used by scan and dump modes.
+    required: false
+  build-info:
+    description: >
+      Out-of-tree L3 build context: a build directory, a compile_commands.json,
+      or a previously-collected evidence pack. Use when the build tree lives
+      outside --sources. Used by scan and dump modes.
+    required: false
+  compile-db:
+    description: >
+      Explicit path to a compile_commands.json (scan mode). For dump mode this
+      is folded into build-info. Use when the compile DB is not under sources.
+    required: false
+  build-config:
+    description: >
+      Path to a trusted .abicheck.yml. Enables build.query (compile-DB
+      generation) together with allow-build-query. Used by scan and dump modes.
+    required: false
+  allow-build-query:
+    description: >
+      Permit a trusted build.query subprocess (from build-config) to emit a
+      compile database. Off by default — only existing build outputs are read.
+      Used by scan and dump modes.
+    required: false
+    default: 'false'
+  collect-mode:
+    description: >
+      How much build-source evidence dump collects from sources/build-info:
+      off, build (L3 only), graph-build, source-changed, source-target
+      (default in CLI), graph-summary, graph-full. dump mode only;
+      scan derives this from scan-mode / source-method / depth.
+    required: false
+  scan-mode:
+    description: >
+      scan mode only. Fixed (L,S) preset selecting how deep the scan runs:
+      'pr' (default), 'pr-deep', 'baseline', or 'audit'. Maps to scan --mode.
+    required: false
+    default: 'pr'
+  source-method:
+    description: >
+      scan mode only. Precise S-axis level to reach (deterministic):
+      s0, s1, s2, s3, s4, s5, s6, or 'auto' (risk-driven, opt-in).
+      Maps to scan --source-method.
+    required: false
+  depth:
+    description: >
+      scan mode only. Coarse L-axis selector: headers, build, source, full,
+      or graph. source-method wins if both are set. Maps to scan --depth.
+    required: false
+  since:
+    description: >
+      scan mode only. Focus the scan on files changed vs a git ref
+      (e.g. origin/main). Maps to scan --since.
+    required: false
+  changed-path:
+    description: >
+      scan mode only. Changed path(s) to focus the scan on (space-separated;
+      alternative to since). Maps to repeated scan --changed-path.
+    required: false
+  budget:
+    description: >
+      scan mode only. Time guard (e.g. 15m, 900s, 1h). The step FAILS on
+      overflow (exit 5) — a budget never silently shrinks scope.
+      Maps to scan --budget.
+    required: false
+  audit:
+    description: >
+      scan mode only. Single-build hygiene lint with no baseline
+      (intra-version cross-source checks). Maps to scan --audit.
+    required: false
+    default: 'false'
+  estimate:
+    description: >
+      scan mode only. Dry-run: print the projected per-layer cost for this
+      project and scan nothing (always exits 0). Maps to scan --estimate.
+    required: false
+    default: 'false'
+  crosscheck:
+    description: >
+      scan mode only. Per-check severity overrides KEY=LEVEL
+      (off|info|warning|error), space-separated. Maps to repeated
+      scan --crosscheck. Promote a check to =error to gate CI on it.
+    required: false
+  risk-rules:
+    description: >
+      scan mode only. Path to a YAML file overriding the risk_rules profile.
+      Maps to scan --risk-rules.
+    required: false
+
+  # ── Baseline combination (merge mode) ────────────────────────────────────────
+  merge-inputs:
+    description: >
+      merge mode only. Space-separated list of inputs to combine: one or more
+      .abi.json dumps and/or a Flow-2 "abicheck_inputs/" pack directory the
+      product build emitted. The binary-bearing dump becomes the base; every
+      input's build_source facts are folded in per layer. Output goes to
+      output-file (default merged-baseline.json).
+    required: false
+  on-conflict:
+    description: >
+      merge mode only. What to do when two inputs supply the SAME layer
+      (L3/L4/L5) with differing facts: 'warn' (default, first-wins + diagnostic)
+      or 'error' (exit non-zero). Maps to merge --on-conflict.
+    required: false
+    default: 'warn'
+
+  # ── Baseline auto-fetch (compare / scan modes) ───────────────────────────────
   abi-baseline:
     description: >
-      Automatically fetch an ABI baseline snapshot as old-library for compare mode.
+      Automatically fetch an ABI baseline snapshot for compare mode (used as
+      old-library) or scan mode (used as the scan baseline).
       Values: "latest-release" fetches *.abicheck.json from the latest GitHub Release;
       a tag name (e.g. "v2.0.0") fetches from that release; a file path uses the
       file directly. Requires GITHUB_TOKEN with contents:read permission.
-      Overrides old-library when set.
+      Overrides old-library (compare) / baseline (scan) when set.
     required: false
 
   # ── Output & policy ─────────────────────────────────────────────────────────
@@ -305,6 +431,8 @@ outputs:
       REMOVED_LIBRARY (when fail-on-removed-library is set), or ERROR.
       For appcompat: COMPATIBLE, API_BREAK, BREAKING, or ERROR.
       For dump: COMPATIBLE or ERROR.
+      For scan: COMPATIBLE, API_BREAK, BREAKING, BUDGET_OVERFLOW, or ERROR.
+      For merge: COMPATIBLE (combined baseline written) or ERROR.
       For stack-check: PASS, WARN, FAIL, or ERROR.
       For deps: PASS, FAIL, or ERROR.
     value: ${{ steps.run-abicheck.outputs.verdict }}
@@ -314,8 +442,9 @@ outputs:
       2 (API break), 4 (ABI break). compare-release: 0 (compatible),
       2 (API break), 4 (ABI break), 8 (library removed).
       appcompat: 0 (compatible), 2 (API break), 4 (ABI break).
-      stack-check: 0 (pass), 1 (warn), 4 (fail).
-      deps: 0 (ok), 1 (missing). Click CLI errors are mapped to
+      scan: 0 (compatible/advisory), 2 (API break), 4 (ABI break),
+      5 (budget overflow). merge: 0 (ok). stack-check: 0 (pass), 1 (warn),
+      4 (fail). deps: 0 (ok), 1 (missing). Click CLI errors are mapped to
       VERDICT=ERROR.
     value: ${{ steps.run-abicheck.outputs.exit-code }}
   report-path:
@@ -365,6 +494,7 @@ runs:
         INPUT_OLD_VERSION: ${{ inputs.old-version }}
         INPUT_NEW_VERSION: ${{ inputs.new-version }}
         INPUT_LANG: ${{ inputs.lang }}
+        INPUT_HEADER_BACKEND: ${{ inputs.header-backend }}
         INPUT_GCC_PATH: ${{ inputs.gcc-path }}
         INPUT_GCC_PREFIX: ${{ inputs.gcc-prefix }}
         INPUT_GCC_OPTIONS: ${{ inputs.gcc-options }}
@@ -401,6 +531,24 @@ runs:
         INPUT_PR_COMMENT_MODE: ${{ inputs.pr-comment-mode }}
         INPUT_PR_COMMENT_ON: ${{ inputs.pr-comment-on }}
         INPUT_PR_COMMENT_DETAIL: ${{ inputs.pr-comment-detail }}
+        INPUT_SOURCES: ${{ inputs.sources }}
+        INPUT_BUILD_INFO: ${{ inputs.build-info }}
+        INPUT_COMPILE_DB: ${{ inputs.compile-db }}
+        INPUT_BUILD_CONFIG: ${{ inputs.build-config }}
+        INPUT_ALLOW_BUILD_QUERY: ${{ inputs.allow-build-query }}
+        INPUT_COLLECT_MODE: ${{ inputs.collect-mode }}
+        INPUT_SCAN_MODE: ${{ inputs.scan-mode }}
+        INPUT_SOURCE_METHOD: ${{ inputs.source-method }}
+        INPUT_DEPTH: ${{ inputs.depth }}
+        INPUT_SINCE: ${{ inputs.since }}
+        INPUT_CHANGED_PATH: ${{ inputs.changed-path }}
+        INPUT_BUDGET: ${{ inputs.budget }}
+        INPUT_AUDIT: ${{ inputs.audit }}
+        INPUT_ESTIMATE: ${{ inputs.estimate }}
+        INPUT_CROSSCHECK: ${{ inputs.crosscheck }}
+        INPUT_RISK_RULES: ${{ inputs.risk-rules }}
+        INPUT_MERGE_INPUTS: ${{ inputs.merge-inputs }}
+        INPUT_ON_CONFLICT: ${{ inputs.on-conflict }}
         GH_TOKEN: ${{ inputs.github-token }}
       run: bash "${{ github.action_path }}/action/run.sh"
 

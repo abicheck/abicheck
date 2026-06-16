@@ -1,5 +1,8 @@
 name: Test GitHub Action
 
+permissions:
+  contents: read
+
 on:
   pull_request:
     paths:
@@ -369,3 +372,123 @@ jobs:
           fi
           echo "Correctly passed with additions at default severity (info)"
 
+  # ── Scan mode: source-intelligence orchestrator (snapshot inputs) ──────────
+  test-scan-baseline-breaking:
+    name: 'Scan: baseline comparison detects breaking change'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+      - name: Run abicheck scan against a baseline
+        id: abi
+        uses: ./
+        with:
+          mode: scan
+          new-library: tests/fixtures/action/action_test_v2.json
+          baseline: tests/fixtures/action/action_test_v1.json
+          install-deps: false
+          fail-on-breaking: false  # don't fail the test job
+
+      - name: Verify verdict is BREAKING (exit 4)
+        shell: bash
+        run: |
+          echo "Verdict: ${{ steps.abi.outputs.verdict }}"
+          echo "Exit code: ${{ steps.abi.outputs.exit-code }}"
+          if [[ "${{ steps.abi.outputs.verdict }}" != "BREAKING" ]]; then
+            echo "::error::Expected verdict BREAKING, got ${{ steps.abi.outputs.verdict }}"
+            exit 1
+          fi
+          if [[ "${{ steps.abi.outputs.exit-code }}" != "4" ]]; then
+            echo "::error::Expected exit code 4, got ${{ steps.abi.outputs.exit-code }}"
+            exit 1
+          fi
+
+  test-scan-audit:
+    name: 'Scan: single-release audit (no baseline)'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+      - name: Run abicheck scan in audit mode
+        id: abi
+        uses: ./
+        with:
+          mode: scan
+          new-library: tests/fixtures/action/action_test_v2.json
+          audit: 'true'
+          install-deps: false
+
+      - name: Verify audit succeeds and is COMPATIBLE
+        shell: bash
+        run: |
+          echo "Verdict: ${{ steps.abi.outputs.verdict }}"
+          if [[ "${{ steps.abi.outcome }}" != "success" ]]; then
+            echo "::error::Expected the audit step to succeed"
+            exit 1
+          fi
+          if [[ "${{ steps.abi.outputs.verdict }}" != "COMPATIBLE" ]]; then
+            echo "::error::Expected verdict COMPATIBLE, got ${{ steps.abi.outputs.verdict }}"
+            exit 1
+          fi
+
+  test-scan-estimate:
+    name: 'Scan: --estimate dry run'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+      - name: Run abicheck scan --estimate
+        id: abi
+        uses: ./
+        with:
+          mode: scan
+          new-library: tests/fixtures/action/action_test_v2.json
+          estimate: 'true'
+          install-deps: false
+
+      - name: Verify estimate exits 0
+        shell: bash
+        run: |
+          echo "Verdict: ${{ steps.abi.outputs.verdict }}"
+          if [[ "${{ steps.abi.outputs.exit-code }}" != "0" ]]; then
+            echo "::error::Expected estimate to exit 0, got ${{ steps.abi.outputs.exit-code }}"
+            exit 1
+          fi
+
+  # ── Merge mode: combine dumps into one self-contained baseline ─────────────
+  test-merge-dumps:
+    name: 'Merge: combine two dumps into a baseline'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+      - name: Run abicheck merge
+        id: abi
+        uses: ./
+        with:
+          mode: merge
+          merge-inputs: 'tests/fixtures/action/action_test_v1.json tests/fixtures/action/action_test_v2.json'
+          output-file: merged-baseline.json
+          install-deps: false
+
+      - name: Verify the merged baseline was written
+        shell: bash
+        run: |
+          echo "Verdict: ${{ steps.abi.outputs.verdict }}"
+          echo "Report path: ${{ steps.abi.outputs.report-path }}"
+          if [[ "${{ steps.abi.outputs.verdict }}" != "COMPATIBLE" ]]; then
+            echo "::error::Expected verdict COMPATIBLE, got ${{ steps.abi.outputs.verdict }}"
+            exit 1
+          fi
+          if [[ ! -s merged-baseline.json ]]; then
+            echo "::error::Expected merged-baseline.json to be written"
+            exit 1
+          fi

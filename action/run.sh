@@ -39,43 +39,60 @@ MODE="${INPUT_MODE:-compare}"
 # Baseline auto-fetch: resolve INPUT_ABI_BASELINE → INPUT_OLD_LIBRARY
 # ---------------------------------------------------------------------------
 ABI_BASELINE="${INPUT_ABI_BASELINE:-}"
-if [[ -n "$ABI_BASELINE" && "$MODE" == "compare" ]]; then
+if [[ -n "$ABI_BASELINE" && ( "$MODE" == "compare" || "$MODE" == "scan" ) ]]; then
   BASELINE_DIR=$(mktemp -d)
   # Clean up temp dir on exit (combined with STDERR_FILE cleanup later)
   _BASELINE_CLEANUP="$BASELINE_DIR"
-  if [[ "$ABI_BASELINE" == "latest-release" ]]; then
-    echo "::group::Fetch ABI baseline from latest release"
-    if ! gh release download --pattern '*.abicheck.json' -D "$BASELINE_DIR"; then
-      echo "::error::No ABI baseline found in latest release. Run 'abicheck dump --output-name auto' in your release workflow and upload the *.abicheck.json file as a release asset."
-      exit 1
-    fi
-    echo "::endgroup::"
-  elif [[ -f "$ABI_BASELINE" ]]; then
-    # Direct file path — use as-is
-    cp "$ABI_BASELINE" "$BASELINE_DIR/"
+  if [[ -f "$ABI_BASELINE" ]]; then
+    # Direct file path — use it as-is (any name, e.g. abi-baseline.json), no
+    # download and no *.abicheck.json pattern match (which would reject a
+    # normal .json name; the input doc promises a path is used directly).
+    BASELINE_FILE="$ABI_BASELINE"
   else
-    # Treat as a tag name
-    echo "::group::Fetch ABI baseline from release $ABI_BASELINE"
-    if ! gh release download "$ABI_BASELINE" --pattern '*.abicheck.json' -D "$BASELINE_DIR"; then
-      echo "::error::No ABI baseline found in release '$ABI_BASELINE'. Ensure the release has a *.abicheck.json asset."
+    if [[ "$ABI_BASELINE" == "latest-release" ]]; then
+      echo "::group::Fetch ABI baseline from latest release"
+      if ! gh release download --pattern '*.abicheck.json' -D "$BASELINE_DIR"; then
+        echo "::error::No ABI baseline found in latest release. Run 'abicheck dump --output-name auto' in your release workflow and upload the *.abicheck.json file as a release asset."
+        exit 1
+      fi
+      echo "::endgroup::"
+    else
+      # Treat as a tag name
+      echo "::group::Fetch ABI baseline from release $ABI_BASELINE"
+      if ! gh release download "$ABI_BASELINE" --pattern '*.abicheck.json' -D "$BASELINE_DIR"; then
+        echo "::error::No ABI baseline found in release '$ABI_BASELINE'. Ensure the release has a *.abicheck.json asset."
+        exit 1
+      fi
+      echo "::endgroup::"
+    fi
+    # Pick the first .abicheck.json found in the download dir.
+    BASELINE_FILE=$(find "$BASELINE_DIR" -name '*.abicheck.json' | head -1)
+    if [[ -z "$BASELINE_FILE" ]]; then
+      echo "::error::No *.abicheck.json file found after download."
       exit 1
     fi
-    echo "::endgroup::"
-  fi
-  # Pick the first .abicheck.json found
-  BASELINE_FILE=$(find "$BASELINE_DIR" -name '*.abicheck.json' | head -1)
-  if [[ -z "$BASELINE_FILE" ]]; then
-    echo "::error::No *.abicheck.json file found after download."
-    exit 1
   fi
   echo "Using ABI baseline: $BASELINE_FILE"
-  INPUT_OLD_LIBRARY="$BASELINE_FILE"
+  # compare consumes the baseline as old-library; scan consumes it as --baseline.
+  if [[ "$MODE" == "scan" ]]; then
+    INPUT_BASELINE="$BASELINE_FILE"
+  else
+    INPUT_OLD_LIBRARY="$BASELINE_FILE"
+  fi
 fi
 
 if [[ "$MODE" == "dump" ]]; then
   # ── Dump mode ───────────────────────────────────────────────────────────
   CMD+=(dump)
-  CMD+=("${INPUT_NEW_LIBRARY:?new-library is required}")
+  # The library is an optional positional: a source-only dump
+  # (`abicheck dump --sources ./src -o out.json`) needs no binary. Require
+  # either a binary OR a source/build-evidence input.
+  if [[ -n "${INPUT_NEW_LIBRARY:-}" ]]; then
+    CMD+=("${INPUT_NEW_LIBRARY}")
+  elif [[ -z "${INPUT_SOURCES:-}${INPUT_BUILD_INFO:-}${INPUT_COMPILE_DB:-}" ]]; then
+    echo "::error::dump mode requires new-library, or one of sources/build-info/compile-db for a source-only dump."
+    exit 1
+  fi
 
   add_flag "-H" "${INPUT_HEADER:-}"
   add_flag "-H" "${INPUT_NEW_HEADER:-}"
@@ -83,6 +100,7 @@ if [[ "$MODE" == "dump" ]]; then
   add_flag "-I" "${INPUT_NEW_INCLUDE:-}"
   add_single_flag "--version" "${INPUT_NEW_VERSION:-}"
   add_single_flag "--lang" "${INPUT_LANG:-}"
+  add_single_flag "--header-backend" "${INPUT_HEADER_BACKEND:-}"
   add_single_flag "--gcc-path" "${INPUT_GCC_PATH:-}"
   add_single_flag "--gcc-prefix" "${INPUT_GCC_PREFIX:-}"
   add_single_flag "--gcc-options" "${INPUT_GCC_OPTIONS:-}"
@@ -96,6 +114,19 @@ if [[ "$MODE" == "dump" ]]; then
     CMD+=(--follow-deps)
     add_flag "--search-path" "${INPUT_SEARCH_PATH:-}"
     add_single_flag "--ld-library-path" "${INPUT_LD_LIBRARY_PATH:-}"
+  fi
+
+  # Build-source evidence (L3/L4/L5) embedded inline in the snapshot. A snapshot
+  # dumped with --sources/--build-info carries its build/source findings into any
+  # later `compare` (including one run from this Action). `compile-db` has no
+  # dedicated dump flag — fold it into --build-info, which accepts a
+  # compile_commands.json. (See action input `build-info`.)
+  add_single_flag "--sources" "${INPUT_SOURCES:-}"
+  add_single_flag "--build-info" "${INPUT_BUILD_INFO:-${INPUT_COMPILE_DB:-}}"
+  add_single_flag "--build-config" "${INPUT_BUILD_CONFIG:-}"
+  add_single_flag "--collect-mode" "${INPUT_COLLECT_MODE:-}"
+  if [[ "${INPUT_ALLOW_BUILD_QUERY:-false}" == "true" ]]; then
+    CMD+=(--allow-build-query)
   fi
 
   # Output file — required for dump in action context (otherwise stdout)
@@ -117,6 +148,7 @@ elif [[ "$MODE" == "compare" ]]; then
   add_single_flag "--old-version" "${INPUT_OLD_VERSION:-}"
   add_single_flag "--new-version" "${INPUT_NEW_VERSION:-}"
   add_single_flag "--lang" "${INPUT_LANG:-}"
+  add_single_flag "--header-backend" "${INPUT_HEADER_BACKEND:-}"
 
   # Format — for SARIF, always write to a file so upload-sarif can find it
   FORMAT="${INPUT_FORMAT:-markdown}"
@@ -295,8 +327,75 @@ elif [[ "$MODE" == "stack-check" ]]; then
     CMD+=(-o "$OUTPUT_FILE")
   fi
 
+elif [[ "$MODE" == "scan" ]]; then
+  # ── Scan mode (source-intelligence orchestrator) ─────────────────────────
+  # One front-end over dump/compare: always-on pattern + cross-source tier,
+  # then the pinned evidence level, optionally compared against --baseline.
+  CMD+=(scan)
+  CMD+=(--binary "${INPUT_NEW_LIBRARY:?new-library (the scanned binary or .abi.json) is required for scan mode}")
+
+  add_flag "-H" "${INPUT_HEADER:-}"
+  add_flag "-H" "${INPUT_NEW_HEADER:-}"
+  add_flag "-I" "${INPUT_INCLUDE:-}"
+  add_flag "-I" "${INPUT_NEW_INCLUDE:-}"
+
+  # Build-source evidence inputs (L3/L4/L5)
+  add_single_flag "--sources" "${INPUT_SOURCES:-}"
+  add_single_flag "--build-info" "${INPUT_BUILD_INFO:-}"
+  add_single_flag "--compile-db" "${INPUT_COMPILE_DB:-}"
+  add_single_flag "--build-config" "${INPUT_BUILD_CONFIG:-}"
+  add_single_flag "--baseline" "${INPUT_BASELINE:-}"
+  add_single_flag "--lang" "${INPUT_LANG:-}"
+
+  # Level selection (scan-mode preset, or precise S-/L-axis)
+  add_single_flag "--mode" "${INPUT_SCAN_MODE:-}"
+  add_single_flag "--source-method" "${INPUT_SOURCE_METHOD:-}"
+  add_single_flag "--depth" "${INPUT_DEPTH:-}"
+
+  # Focusing + guards + policy
+  add_single_flag "--since" "${INPUT_SINCE:-}"
+  add_flag "--changed-path" "${INPUT_CHANGED_PATH:-}"
+  add_single_flag "--budget" "${INPUT_BUDGET:-}"
+  add_single_flag "--risk-rules" "${INPUT_RISK_RULES:-}"
+  add_flag "--crosscheck" "${INPUT_CROSSCHECK:-}"
+
+  if [[ "${INPUT_AUDIT:-false}" == "true" ]]; then
+    CMD+=(--audit)
+  fi
+  if [[ "${INPUT_ESTIMATE:-false}" == "true" ]]; then
+    CMD+=(--estimate)
+  fi
+  if [[ "${INPUT_ALLOW_BUILD_QUERY:-false}" == "true" ]]; then
+    CMD+=(--allow-build-query)
+  fi
+
+  # Format — scan only supports text and json.
+  FORMAT="${INPUT_FORMAT:-text}"
+  if [[ "$FORMAT" != "text" && "$FORMAT" != "json" ]]; then
+    echo "::warning::scan mode only supports 'text' and 'json' formats. Falling back to 'text'."
+    FORMAT="text"
+  fi
+  CMD+=(--format "$FORMAT")
+
+  OUTPUT_FILE="${INPUT_OUTPUT_FILE:-}"
+  if [[ -n "$OUTPUT_FILE" ]]; then
+    CMD+=(-o "$OUTPUT_FILE")
+  fi
+
+elif [[ "$MODE" == "merge" ]]; then
+  # ── Merge mode (combine dumps + a Flow-2 abicheck_inputs/ pack) ───────────
+  CMD+=(merge)
+  OUTPUT_FILE="${INPUT_OUTPUT_FILE:-merged-baseline.json}"
+  CMD+=(-o "$OUTPUT_FILE")
+  add_single_flag "--on-conflict" "${INPUT_ON_CONFLICT:-}"
+  # Positional inputs come last (Click: `merge [OPTIONS] INPUTS...`).
+  MERGE_INPUTS="${INPUT_MERGE_INPUTS:?merge-inputs is required for merge mode}"
+  for item in $MERGE_INPUTS; do
+    CMD+=("$item")
+  done
+
 else
-  echo "::error::Unknown mode '$MODE'. Use 'compare', 'compare-release', 'dump', 'appcompat', 'deps', or 'stack-check'."
+  echo "::error::Unknown mode '$MODE'. Use 'compare', 'compare-release', 'dump', 'scan', 'merge', 'appcompat', 'deps', or 'stack-check'."
   exit 1
 fi
 
@@ -444,6 +543,38 @@ elif [[ "$MODE" == "compare-release" ]]; then
     esac
   fi
 
+elif [[ "$MODE" == "scan" ]]; then
+  # scan exit codes: 0=compatible/advisory, 2=API break, 4=ABI break,
+  # 5=budget overflow. Click usage errors also use exit 2 — distinguish via stderr.
+  if [[ $ABICHECK_EXIT -eq 2 ]] && echo "$STDERR_CONTENT" | grep -qE '(^Usage:|^Error:|^Try )'; then
+    VERDICT="ERROR"
+    echo "::error::abicheck scan failed due to a CLI argument or configuration error (exit code 2)."
+    echo "::error::Check the command and inputs above. This is NOT an API break — the scan did not run."
+  else
+    case $ABICHECK_EXIT in
+      0) VERDICT="COMPATIBLE" ;;
+      2) VERDICT="API_BREAK" ;;
+      4) VERDICT="BREAKING" ;;
+      5) VERDICT="BUDGET_OVERFLOW" ;;
+      *)
+        VERDICT="ERROR"
+        if _is_cli_error; then
+          echo "::error::abicheck scan failed due to a CLI error (exit code $ABICHECK_EXIT)."
+        fi
+        ;;
+    esac
+  fi
+
+elif [[ "$MODE" == "merge" ]]; then
+  # merge exit codes: 0=combined baseline written; non-zero=error
+  # (e.g. --on-conflict error on differing layers, or a malformed input).
+  if [[ $ABICHECK_EXIT -eq 0 ]]; then
+    VERDICT="COMPATIBLE"
+  else
+    VERDICT="ERROR"
+    echo "::error::abicheck merge failed (exit code $ABICHECK_EXIT)."
+  fi
+
 else
   # compare exit codes: 0=compatible, 1=severity error, 2=API_BREAK, 4=BREAKING
   # Click also uses exit code 2 for usage/argument errors — detect via stderr.
@@ -489,10 +620,12 @@ echo "abicheck verdict: $VERDICT (exit code $ABICHECK_EXIT)"
 # ---------------------------------------------------------------------------
 # Job Summary
 # ---------------------------------------------------------------------------
-if [[ "${INPUT_ADD_JOB_SUMMARY:-true}" == "true" && "$MODE" != "dump" ]]; then
+if [[ "${INPUT_ADD_JOB_SUMMARY:-true}" == "true" && "$MODE" != "dump" && "$MODE" != "merge" ]]; then
   {
     if [[ "$MODE" == "appcompat" ]]; then
       echo "## abicheck Application Compatibility Report"
+    elif [[ "$MODE" == "scan" ]]; then
+      echo "## abicheck Source-Intelligence Scan Report"
     else
       echo "## abicheck ABI Compatibility Report"
     fi
@@ -525,6 +658,9 @@ if [[ "${INPUT_ADD_JOB_SUMMARY:-true}" == "true" && "$MODE" != "dump" ]]; then
         ;;
       REMOVED_LIBRARY)
         echo "> **Verdict: REMOVED_LIBRARY** — A library present in the old package is missing from the new package."
+        ;;
+      BUDGET_OVERFLOW)
+        echo "> **Verdict: BUDGET_OVERFLOW** ⏱️ — Scan exceeded the configured \`budget\`. Pin a shallower level (source-method/depth) or raise the budget; a budget never silently shrinks scope."
         ;;
       PASS)
         echo "> **Verdict: PASS** — Binary loads and no harmful ABI changes detected."
@@ -560,6 +696,21 @@ if [[ "${INPUT_ADD_JOB_SUMMARY:-true}" == "true" && "$MODE" != "dump" ]]; then
       echo "| Binary | \`${INPUT_NEW_LIBRARY:-}\` |"
       echo "| Baseline | \`${INPUT_BASELINE:-}\` |"
       echo "| Candidate | \`${INPUT_CANDIDATE:-}\` |"
+    elif [[ "$MODE" == "scan" ]]; then
+      echo "| Binary | \`${INPUT_NEW_LIBRARY:-}\` |"
+      if [[ -n "${INPUT_BASELINE:-}" ]]; then
+        echo "| Baseline | \`${INPUT_BASELINE}\` |"
+      fi
+      if [[ -n "${INPUT_SOURCES:-}" ]]; then
+        echo "| Sources | \`${INPUT_SOURCES}\` |"
+      fi
+      echo "| Scan mode | ${INPUT_SCAN_MODE:-pr} |"
+      if [[ -n "${INPUT_SOURCE_METHOD:-}" ]]; then
+        echo "| Source method | ${INPUT_SOURCE_METHOD} |"
+      fi
+      if [[ -n "${INPUT_DEPTH:-}" ]]; then
+        echo "| Depth | ${INPUT_DEPTH} |"
+      fi
     elif [[ "$MODE" == "deps" ]]; then
       echo "| Binary | \`${INPUT_NEW_LIBRARY:-}\` |"
     fi
@@ -820,9 +971,33 @@ elif [[ "$MODE" == "stack-check" || "$MODE" == "deps" ]]; then
     FINAL_EXIT=1
   fi
 
-elif [[ "$MODE" == "dump" ]]; then
-  # dump: non-zero is always an error (already mapped to ERROR above)
+elif [[ "$MODE" == "dump" || "$MODE" == "merge" ]]; then
+  # dump/merge: producers — non-zero is always an error (already mapped above)
   :
+
+elif [[ "$MODE" == "scan" ]]; then
+  # scan: BREAKING/API_BREAK follow the fail-on flags; a budget overflow always
+  # fails the step (the budget is a guard that must not be silently swallowed).
+  if [[ "$VERDICT" == "BREAKING" && "${INPUT_FAIL_ON_BREAKING:-true}" == "true" ]]; then
+    echo "::error::ABI break detected by scan. Set fail-on-breaking: false to continue despite breaks."
+    FINAL_EXIT=1
+  fi
+
+  # API_BREAK (scan exit 2) covers baseline/source API breaks AND a cross-check
+  # the user promoted with --crosscheck KEY=error (the scan CLI maps both to
+  # exit 2). They share one tier, so fail-on-api-break gates them uniformly — we
+  # cannot tell from the exit code alone whether a promoted check fired, so
+  # keying off the crosscheck flag would wrongly fail an unrelated API break
+  # when fail-on-api-break is false (Codex review).
+  if [[ "$VERDICT" == "API_BREAK" && "${INPUT_FAIL_ON_API_BREAK:-false}" == "true" ]]; then
+    echo "::error::API/source break detected by scan (includes promoted --crosscheck=error gates). Set fail-on-api-break: false to ignore."
+    FINAL_EXIT=1
+  fi
+
+  if [[ "$VERDICT" == "BUDGET_OVERFLOW" ]]; then
+    echo "::error::Scan exceeded its budget. Pin a shallower level or raise the budget."
+    FINAL_EXIT=1
+  fi
 
 elif [[ "$MODE" == "appcompat" ]]; then
   # appcompat: same failure flags as compare (fail-on-breaking, fail-on-api-break)
