@@ -591,24 +591,13 @@ def _collect_source_abi(
 
     exported = _exported_symbols_from_binary(binary)
     library = str(binary) if binary else ""
-    # Header roots: explicit --headers win; else pull from the build targets.
-    roots = [str(h) for h in headers] or public_header_roots_for(merged, target_id)
-
-    if extractor == "android":
-        return _collect_source_abi_android(
-            android_dump,
-            extractors,
-            target_id=target_id,
-            exported=exported,
-            library=library,
-            roots=roots,
-        )
 
     # A no-op replay scope selects zero translation units by design ("off", or
-    # "changed" with no --changed-path), so it needs neither L3 build evidence
-    # nor a source-ABI frontend. Resolve it *before* probing for clang/castxml
-    # so a minimal image (no frontend) does not false-fail --collection-mode
-    # strict on a scope that would never use one. (ADR-030 D7; Codex review.)
+    # "changed" with no --changed-path), so it needs neither L3 build evidence,
+    # an Android dump, nor a source-ABI frontend. Resolve it first — before the
+    # Android branch and the clang/castxml probe — so a no-op scope never
+    # false-fails --collection-mode strict on a missing dump/frontend it would
+    # not use. (ADR-030 D7; Codex review.)
     if scope == "off" or (scope == "changed" and not changed_paths):
         extractors.append(
             ExtractorRecord(
@@ -620,6 +609,19 @@ def _collect_source_abi(
         return (
             SourceAbiSurface(library=library, target_id=target_id),
             f"no-op: scope {scope!r} selects no translation units",
+        )
+
+    # Header roots: explicit --headers win; else pull from the build targets.
+    roots = [str(h) for h in headers] or public_header_roots_for(merged, target_id)
+
+    if extractor == "android":
+        return _collect_source_abi_android(
+            android_dump,
+            extractors,
+            target_id=target_id,
+            exported=exported,
+            library=library,
+            roots=roots,
         )
 
     from .buildsource.source_extractors import select_source_backend

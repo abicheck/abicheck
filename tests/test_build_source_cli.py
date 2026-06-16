@@ -1019,6 +1019,22 @@ def test_collect_evidence_source_abi_noop_scope_strict_passes(tmp_path):
     assert result.exit_code == 0, result.output
 
 
+def test_collect_evidence_source_abi_noop_scope_android_no_dump(tmp_path):
+    """A no-op scope short-circuits before the Android branch and its dump check.
+
+    `--source-abi-extractor android --source-abi-scope off` must not raise the
+    missing-`--android-dump` usage error, since the off scope selects zero TUs
+    and needs neither a dump nor a frontend; strict mode still exits 0.
+    """
+    out = tmp_path / "ev"
+    result = CliRunner().invoke(main, [
+        "collect", "--source-abi", "--source-abi-extractor", "android",
+        "--source-abi-scope", "off", "--collection-mode", "strict",
+        "-o", str(out),
+    ])
+    assert result.exit_code == 0, result.output
+
+
 def test_exported_symbols_from_binary_edge_cases(tmp_path):
     from pathlib import Path
 
