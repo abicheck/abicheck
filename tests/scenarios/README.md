@@ -66,6 +66,6 @@ a `note:`.
 ## Capturing missed usage scenarios
 
 When a real-world usage gap surfaces (for example
-[issue #235](https://github.com/napetrov/abicheck/issues/235) — private ABI
+[issue #235](https://github.com/abicheck/abicheck/issues/235) — private ABI
 breaks reported despite public headers), add it here so it becomes a permanent
 end-to-end regression guard.

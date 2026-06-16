@@ -10,7 +10,7 @@ It supports ELF (Linux), PE/COFF (Windows), and Mach-O (macOS) binaries, and it'
 > the Security tab:
 >
 > ```yaml
-> - uses: napetrov/abicheck@v0.3.0
+> - uses: abicheck/abicheck@v0.3.0
 >   with:
 >     old-library: abi-baseline.json
 >     new-library: build/libfoo.so
@@ -88,6 +88,6 @@ The docs are two complementary tracks, each ordered from introductory to expert:
 
 ## Status
 
-[![CI](https://github.com/napetrov/abicheck/actions/workflows/ci.yml/badge.svg)](https://github.com/napetrov/abicheck/actions/workflows/ci.yml)
+[![CI](https://github.com/abicheck/abicheck/actions/workflows/ci.yml/badge.svg)](https://github.com/abicheck/abicheck/actions/workflows/ci.yml)
 [![PyPI version](https://img.shields.io/pypi/v/abicheck.svg)](https://pypi.org/project/abicheck/)
 [![conda-forge](https://img.shields.io/conda/vn/conda-forge/abicheck.svg)](https://anaconda.org/conda-forge/abicheck)

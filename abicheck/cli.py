@@ -349,7 +349,7 @@ configure_rich_help()  # register --help option-group panels (G21.8 / M1)
 @click.version_option(
     version=_abicheck_version,
     prog_name="abicheck",
-    message="%(prog)s %(version)s (napetrov/abicheck)",
+    message="%(prog)s %(version)s (abicheck/abicheck)",
 )
 def main() -> None:
     """abicheck — ABI compatibility checker for C/C++ shared libraries."""

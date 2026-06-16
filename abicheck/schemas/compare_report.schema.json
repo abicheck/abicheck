@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://napetrov.github.io/abicheck/schemas/compare_report.schema.json",
+  "$id": "https://abicheck.github.io/abicheck/schemas/compare_report.schema.json",
   "title": "abicheck compare report",
   "description": "Schema for the JSON document produced by `abicheck compare --format json` (full report mode). See docs/user-guide/output-formats.md for stability guarantees. The schema is versioned via report_schema_version; additive changes (new optional keys, new enum members) bump the MINOR component, breaking changes bump the MAJOR component.",
   "type": "object",

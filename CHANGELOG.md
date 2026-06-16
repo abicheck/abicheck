@@ -291,7 +291,7 @@ No changes yet.
   exactly one of BREAKING/COMPATIBLE/API_BREAK/RISK sets, enforced at import time.
 
 #### Additional Improvements
-- **GitHub Action** (`napetrov/abicheck@v1`) for CI integration with per-mode verdict mapping,
+- **GitHub Action** (`abicheck/abicheck@v1`) for CI integration with per-mode verdict mapping,
   format validation, and severity-preset support.
 - **MCP server** for AI agent integration.
 - **`--strict-elf-only`** flag: injects PolicyFile override upgrading `FUNC_REMOVED_ELF_ONLY`
@@ -498,7 +498,7 @@ additional capabilities.
 
 ---
 
-[0.1.0]: https://github.com/napetrov/abicheck/releases/tag/v0.1.0
-[0.2.0]: https://github.com/napetrov/abicheck/releases/tag/v0.2.0
-[0.3.0]: https://github.com/napetrov/abicheck/releases/tag/v0.3.0
-[Unreleased]: https://github.com/napetrov/abicheck/compare/v0.3.0...HEAD
+[0.1.0]: https://github.com/abicheck/abicheck/releases/tag/v0.1.0
+[0.2.0]: https://github.com/abicheck/abicheck/releases/tag/v0.2.0
+[0.3.0]: https://github.com/abicheck/abicheck/releases/tag/v0.3.0
+[Unreleased]: https://github.com/abicheck/abicheck/compare/v0.3.0...HEAD

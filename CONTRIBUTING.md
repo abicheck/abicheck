@@ -18,7 +18,7 @@ Thank you for your interest in contributing!
 conda create -n abicheck-dev python=3.10 castxml -c conda-forge
 conda activate abicheck-dev
 
-git clone https://github.com/napetrov/abicheck.git
+git clone https://github.com/abicheck/abicheck.git
 cd abicheck
 pip install -e ".[dev]"
 ```
@@ -29,7 +29,7 @@ pip install -e ".[dev]"
 # Install castxml separately (Ubuntu/Debian)
 sudo apt install castxml g++
 
-git clone https://github.com/napetrov/abicheck.git
+git clone https://github.com/abicheck/abicheck.git
 cd abicheck
 pip install -e ".[dev]"
 ```
@@ -131,4 +131,4 @@ test: add coverage for PolicyFile.compute_verdict
 
 ## Questions
 
-Open an [issue](https://github.com/napetrov/abicheck/issues) or discussion.
+Open an [issue](https://github.com/abicheck/abicheck/issues) or discussion.

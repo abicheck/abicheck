@@ -51,7 +51,7 @@ Concretely: the core `compare` workflow is now exercised end-to-end on native
 PE and Mach-O binaries (built by the platform's own toolchain) in the
 `cross-platform-e2e` CI lane (gap **G1** closed). What remains a deliberate
 Linux-anchored subset is the **example catalog**: every entry in
-[`examples/ground_truth.json`](https://github.com/napetrov/abicheck/blob/main/examples/ground_truth.json)
+[`examples/ground_truth.json`](https://github.com/abicheck/abicheck/blob/main/examples/ground_truth.json)
 is validated on Linux, and a `platforms` tag of `macos`/`windows` expresses
 *intended* portability rather than a per-case CI result — some cases carry an
 explicit `known_gap` describing where the non-Linux path diverges. This

@@ -49,7 +49,7 @@ VALID_DIR = SCRIPTS_DIR.parent  # validation/
 
 ANACONDA_API = "https://api.anaconda.org/package/conda-forge/{pkg}"
 CONDA_CHANNEL = "https://conda.anaconda.org/conda-forge/"
-USER_AGENT = "abicheck-validation/1.0 (+https://github.com/napetrov/abicheck)"
+USER_AGENT = "abicheck-validation/1.0 (+https://github.com/abicheck/abicheck)"
 
 # Reuse the verdict normalisation/ranking from the scoring module.
 sys.path.insert(0, str(SCRIPTS_DIR))

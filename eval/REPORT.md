@@ -2,7 +2,7 @@
 # abicheck field-evaluation report (binary tier)
 
 - generated: `2026-06-13T19:03:53+00:00`
-- abicheck: `abicheck 0.3.0 (napetrov/abicheck)`
+- abicheck: `abicheck 0.3.0 (abicheck/abicheck)`
 - host: `Linux-6.18.5-x86_64-with-glibc2.39`, Python 3.11.15
 - libraries: **22** | verdict matches expected: **22/22**
 - verdict distribution: BREAKING×9, COMPATIBLE×6, COMPATIBLE_WITH_RISK×7

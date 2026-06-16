@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://napetrov.github.io/abicheck/schemas/build_source_pack.schema.json",
+  "$id": "https://abicheck.github.io/abicheck/schemas/build_source_pack.schema.json",
   "title": "abicheck BuildSourcePack manifest",
   "description": "Schema for the manifest.json at the root of an BuildSourcePack directory produced by `abicheck collect` (ADR-028). The pack is content-addressed and versioned independently of the ABI snapshot schema via build_source_pack_version. The snapshot stores only a lightweight reference (see the build_source_pack property of an AbiSnapshot).",
   "type": "object",

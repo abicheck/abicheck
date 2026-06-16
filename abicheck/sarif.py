@@ -70,7 +70,7 @@ def _rule_for(kind: ChangeKind) -> dict[str, Any]:
     rule_id = kind.value
     severity = policy_for(kind).severity
     doc_slug = policy_for(kind).doc_slug
-    help_uri = f"https://github.com/napetrov/abicheck/blob/main/docs/abi_breaking_cases_catalog.md#{doc_slug}"
+    help_uri = f"https://github.com/abicheck/abicheck/blob/main/docs/abi_breaking_cases_catalog.md#{doc_slug}"
     impact = impact_for(kind)
     full_desc = impact if impact else f"ABI change detected: {rule_id.replace('_', ' ')}"
     return {
@@ -184,7 +184,7 @@ def to_sarif(
                     "driver": {
                         "name": "abicheck",
                         "version": tool_version,
-                        "informationUri": "https://github.com/napetrov/abicheck",
+                        "informationUri": "https://github.com/abicheck/abicheck",
                         "rules": list(rules_seen.values()),
                     }
                 },

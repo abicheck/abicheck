@@ -147,4 +147,4 @@ Exits non-zero on any 🔴 BREAKING or 🟠 API_BREAK finding. Add `--suppress s
 | 🟢 | COMPATIBLE (addition) | New API surface, fully backward-compatible |
 | ✅ | NO_CHANGE | Identical ABI |
 
-Full verdict semantics: [Verdicts](verdicts.md) | All example cases: [Scenario Catalog](https://github.com/napetrov/abicheck/tree/main/examples)
+Full verdict semantics: [Verdicts](verdicts.md) | All example cases: [Scenario Catalog](https://github.com/abicheck/abicheck/tree/main/examples)

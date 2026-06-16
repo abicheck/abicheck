@@ -2,7 +2,7 @@
 # abicheck field-evaluation — L4 parallel-scaling (C1)
 
 - generated: `2026-06-14T02:30:52+00:00`
-- abicheck: `abicheck 0.3.0 (napetrov/abicheck)`
+- abicheck: `abicheck 0.3.0 (abicheck/abicheck)`
 - host: `Linux-6.18.5-x86_64-with-glibc2.39`, 4 CPUs, Python 3.11.15
 - reps per point: **1** (median reported)
 

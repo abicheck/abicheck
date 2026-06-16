@@ -12,7 +12,7 @@ or neither.
 > [Plugin Systems](../user-guide/plugin-systems.md),
 > [Build & Source Packs](../concepts/build-source-data.md)). The authoritative,
 > always-complete list is the `ChangeKind` enum in
-> [`abicheck/checker_policy.py`](https://github.com/napetrov/abicheck/blob/main/abicheck/checker_policy.py),
+> [`abicheck/checker_policy.py`](https://github.com/abicheck/abicheck/blob/main/abicheck/checker_policy.py),
 > and CI enforces that every kind is classified, produced by a detector, and
 > mentioned in the docs.
 

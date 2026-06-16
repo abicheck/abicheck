@@ -84,7 +84,7 @@ No extra manual dependency installation is required when using the conda-forge p
 ### Install from source
 
 ```bash
-git clone https://github.com/napetrov/abicheck.git
+git clone https://github.com/abicheck/abicheck.git
 cd abicheck
 pip install -e .
 ```
@@ -342,7 +342,7 @@ and abicheck for you, runs the comparison, sets the step exit code, and can
 upload SARIF — all in a few lines of YAML:
 
 ```yaml
-- uses: napetrov/abicheck@v0.3.0
+- uses: abicheck/abicheck@v0.3.0
   with:
     old-library: abi-baseline.json   # committed or downloaded baseline
     new-library: build/libfoo.so

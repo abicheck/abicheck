@@ -39,7 +39,7 @@ wrappers in Debian `devscripts`, or `abicheck` in Fedora's `libabigail-tools`).
 Confirm you're running this project:
 
 ```bash
-abicheck --version   # should print: abicheck X.Y.Z (napetrov/abicheck)
+abicheck --version   # should print: abicheck X.Y.Z (abicheck/abicheck)
 ```
 
 If a different tool shadows it, invoke via the module form: `python -m abicheck`.

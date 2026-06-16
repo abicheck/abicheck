@@ -1,7 +1,7 @@
 # Real-World ABICC-Oracle Parity Scan — 2026-06
 
 **Date:** 2026-06-11
-**abicheck version:** 0.3.0 (`napetrov/abicheck`)
+**abicheck version:** 0.3.0 (`abicheck/abicheck`)
 **Oracle:** [abi-laboratory.pro/tracker](https://abi-laboratory.pro/index.php?view=tracker)
 (run by Andrey Ponomarenko, author of `abi-compliance-checker` — the tool abicheck
 replaces). Each consecutive release pair carries an ABICC-computed

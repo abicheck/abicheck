@@ -21,7 +21,7 @@ matrices across two versions. It surfaces three change kinds:
 
 A probe spec is a YAML file with `configurations`, `probes`, and an
 optional `defaults` map. See
-[`examples/probes/onedpl.yaml`](https://github.com/napetrov/abicheck/blob/main/examples/probes/onedpl.yaml)
+[`examples/probes/onedpl.yaml`](https://github.com/abicheck/abicheck/blob/main/examples/probes/onedpl.yaml)
 for a complete oneDPL manifest:
 
 ```yaml

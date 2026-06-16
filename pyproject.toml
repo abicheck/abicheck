@@ -45,10 +45,10 @@ abicheck-mcp = "abicheck.mcp_server:main"
 abicheck-cc = "abicheck.cc_wrapper:main"
 
 [project.urls]
-Repository = "https://github.com/napetrov/abicheck"
-Documentation = "https://napetrov.github.io/abicheck/"
-"Bug Tracker" = "https://github.com/napetrov/abicheck/issues"
-Changelog = "https://github.com/napetrov/abicheck/blob/main/CHANGELOG.md"
+Repository = "https://github.com/abicheck/abicheck"
+Documentation = "https://abicheck.github.io/abicheck/"
+"Bug Tracker" = "https://github.com/abicheck/abicheck/issues"
+Changelog = "https://github.com/abicheck/abicheck/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 mcp = [

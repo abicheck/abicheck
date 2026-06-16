@@ -8,7 +8,7 @@
 
 ## Context
 
-[Issue #235](https://github.com/napetrov/abicheck/issues/235) reports that abicheck
+[Issue #235](https://github.com/abicheck/abicheck/issues/235) reports that abicheck
 does not filter the ABI surface to the symbols declared in the public headers a user
 supplies via `-H/--header` (and `--old-header`/`--new-header`). Both reference tools do
 this: libabigail filters via `abidw --headers-dir`, and abi-compliance-checker derives
@@ -20,7 +20,7 @@ There are **two distinct defects** behind the single issue:
 
 | Layer | Defect | Status |
 |-------|--------|--------|
-| **L1 — header plumbing** | On PE/Mach-O the CLI dropped `--header`/`--include` entirely (`service._dump_pe`/`cli._dump_macho` never received them), so headers were a silent no-op; directory inputs were not expanded. | **Fixed in [PR #259](https://github.com/napetrov/abicheck/pull/259)** |
+| **L1 — header plumbing** | On PE/Mach-O the CLI dropped `--header`/`--include` entirely (`service._dump_pe`/`cli._dump_macho` never received them), so headers were a silent no-op; directory inputs were not expanded. | **Fixed in [PR #259](https://github.com/abicheck/abicheck/pull/259)** |
 | **L2 — surface resolution** | Even where headers *are* honored (ELF), the surface is decided by *export-table membership only*, not by what is declared in the provided public headers. castxml parses the public headers **plus everything they transitively `#include`** (private/internal headers, system headers) with no source-location filtering. Any such declaration that is also exported is treated as public and compared. | **Open — this ADR** |
 
 ### Why the current model is insufficient
