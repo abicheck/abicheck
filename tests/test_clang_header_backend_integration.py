@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -38,13 +39,23 @@ import pytest
 from abicheck.dumper import dump
 from abicheck.model import Visibility
 
-# NB: deliberately *not* marked ``integration``. That marker's Linux gate
-# requires castxml (see tests/conftest.py ``_integration_skip_reason``), but the
-# whole point of the clang L2 backend is the **castxml-absent** host — gating on
-# castxml would skip exactly the case we must cover. Instead each test self-skips
+# Scoped to **Linux/ELF** — the clang L2 backend's target (P1: clang-only Linux
+# CI images). The cross-platform binary-build conventions diverge in ways
+# unrelated to the backend logic: on macOS clang/g++ emit Mach-O dylibs, and on
+# Windows clang defaults to the **MSVC** ABI (``?add@lib@@…``) while MinGW g++
+# exports **Itanium** names, so a clang-built AST and a g++-built binary use
+# different mangling schemes and never match. The pure-parser unit suite
+# (``test_dumper_clang.py``) covers the backend logic on every platform.
+#
+# NB: deliberately *not* marked ``integration`` — that marker's Linux gate
+# requires castxml (tests/conftest.py ``_integration_skip_reason``), but the
+# whole point here is the **castxml-absent** host. Each test instead self-skips
 # on its own real tool requirement (clang + g++; the parity test additionally
-# needs castxml), so it runs wherever the needed tools exist and skips cleanly
-# otherwise.
+# needs castxml).
+pytestmark = pytest.mark.skipif(
+    not sys.platform.startswith("linux"),
+    reason="clang L2 backend integration test is ELF/Linux-scoped (see module docstring)",
+)
 
 _HEADER = """
 #pragma once

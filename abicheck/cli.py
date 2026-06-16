@@ -429,6 +429,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
             follow_deps, git_tag, build_id, no_git, output, public_headers,
             public_header_dirs, build_info, sources, build_config,
             allow_build_query, collect_mode, build_query, build_compile_db,
+            header_backend=header_backend,
         )
         return
 
@@ -505,6 +506,7 @@ def _handle_non_elf_dump(
     collect_mode: str = "source-target",
     build_query: str | None = None,
     build_compile_db: str | None = None,
+    header_backend: str = "auto",
 ) -> None:
     """Handle PE/Mach-O native dump path and output writing."""
     if follow_deps:
@@ -515,6 +517,7 @@ def _handle_non_elf_dump(
             pdb_path=pdb_path,
             public_headers=list(public_headers),
             public_header_dirs=list(public_header_dirs),
+            header_backend=header_backend,
         )
     except click.ClickException:
         raise

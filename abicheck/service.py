@@ -380,6 +380,7 @@ def run_dump(
             includes=_includes,
             lang=lang,
             pdb_path=pdb_path,
+            header_backend=header_backend,
         )
         return _apply_native_provenance(snap, public_headers, public_header_dirs)
     if binary_fmt == "macho":
@@ -388,6 +389,7 @@ def run_dump(
             version,
             headers=_headers,
             includes=_includes,
+            header_backend=header_backend,
             lang=lang,
         )
         return _apply_native_provenance(snap, public_headers, public_header_dirs)
@@ -514,6 +516,7 @@ def _try_header_scoped_dump(
     includes: list[Path],
     version: str,
     lang: str,
+    header_backend: str = "auto",
 ) -> tuple[AbiSnapshot | None, str | None]:
     """Attempt a castxml header-scoped dump for a PE/Mach-O binary.
 
@@ -539,11 +542,13 @@ def _try_header_scoped_dump(
     try:
         if fmt == "pe":
             snap = _dumper_pe(
-                path, resolved_headers, includes, version, compiler, lang=lang_arg
+                path, resolved_headers, includes, version, compiler,
+                lang=lang_arg, header_backend=header_backend,
             )
         else:
             snap = _dumper_macho(
-                path, resolved_headers, includes, version, compiler, lang=lang_arg
+                path, resolved_headers, includes, version, compiler,
+                lang=lang_arg, header_backend=header_backend,
             )
     except Exception as exc:  # noqa: BLE001 — castxml missing / parse failure → fall back
         warnings.warn(
@@ -600,6 +605,7 @@ def _dump_pe(
     includes: list[Path] | None = None,
     lang: str = "c++",
     pdb_path: Path | None = None,
+    header_backend: str = "auto",
 ) -> AbiSnapshot:
     """Dump a PE binary (Windows DLL) to an ABI snapshot.
 
@@ -639,6 +645,7 @@ def _dump_pe(
             includes or [],
             version,
             lang,
+            header_backend=header_backend,
         )
         if scoped is not None:
             # Preserve any PDB debug info alongside the header-scoped surface.
@@ -692,6 +699,7 @@ def _dump_macho(
     headers: list[Path] | None = None,
     includes: list[Path] | None = None,
     lang: str = "c++",
+    header_backend: str = "auto",
 ) -> AbiSnapshot:
     """Dump a Mach-O binary (macOS dylib) to an ABI snapshot.
 
@@ -724,6 +732,7 @@ def _dump_macho(
             includes or [],
             version,
             lang,
+            header_backend=header_backend,
         )
         if scoped is not None:
             return scoped

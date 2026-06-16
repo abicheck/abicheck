@@ -152,6 +152,25 @@ def _return_type(qualtype: str) -> str:
     return qualtype.strip()
 
 
+def _is_noexcept_qualifier(quals: str) -> bool:
+    """Whether a function's trailing qualifiers denote a *non-throwing* spec.
+
+    A bare ``noexcept`` (and ``noexcept(true)`` / ``noexcept(1)``) is
+    non-throwing; ``noexcept(false)`` / ``noexcept(0)`` is *throwing* and must
+    not be treated as ``noexcept`` — since C++17 the exception specification is
+    part of the function type, so conflating the two would hide a real ABI break
+    (CodeRabbit review). A dependent ``noexcept(expr)`` keeps its conservative
+    "non-throwing" reading (the spelling is all the header AST exposes).
+    """
+    m = re.search(r"\bnoexcept(?:\s*\(([^)]*)\))?", quals)
+    if m is None:
+        return False
+    expr = m.group(1)
+    if expr is None:
+        return True
+    return expr.strip() not in ("false", "0")
+
+
 def _function_qualifiers(qualtype: str) -> str:
     """The trailing cv/ref/exception qualifiers after a function's parameter list.
 
@@ -242,7 +261,15 @@ class _ClangAstParser:
         name = node.get("name") or ""
 
         if not node.get("isImplicit"):
-            self._categorize(node, kind, name, scope, file, access)
+            self._categorize(node, kind, name, scope, file, access, extern_c)
+
+        # A function/method body is not an ABI declaration surface: its
+        # parameters and defaults are read straight off the function node in
+        # parse_functions(), so descending into the CompoundStmt would only risk
+        # categorizing block-scope locals (a plain `int x;` with no storageClass)
+        # as ABI variables/constants. Stop here (Codex/CodeRabbit review).
+        if kind in _FUNCTION_NODE_KINDS:
+            return file
 
         # A record body's children inherit the tag's default access until an
         # AccessSpecDecl switches it; namespaces/linkage-specs impose none.
@@ -274,8 +301,9 @@ class _ClangAstParser:
         scope: tuple[str, ...],
         file: str,
         access: str,
+        extern_c: bool,
     ) -> None:
-        entry = _Decl(node=node, scope=scope, file=file, access=access)
+        entry = _Decl(node=node, scope=scope, file=file, access=access, extern_c=extern_c)
         if kind in _FUNCTION_NODE_KINDS and name:
             self._functions.append(entry)
         elif kind == "VarDecl" and name:
@@ -294,16 +322,35 @@ class _ClangAstParser:
 
         Identical policy to the castxml parser so a clang- and a castxml-derived
         snapshot classify the same declaration the same way.
+
+        Mach-O quirk: clang's ``mangledName`` carries the platform global-symbol
+        prefix (``__ZN3lib3addEii`` on macOS), but ``_dump_macho`` strips the
+        single leading underscore off the export set to match castxml's
+        prefix-free names. So each mangled candidate is matched both as-is (ELF)
+        **and** with one leading underscore removed (Mach-O), trying the as-is
+        form first so an ELF Itanium ``_Z…`` name never spuriously matches the
+        stripped variant.
         """
-        if mangled and mangled in self._exported_dynamic:
-            return Visibility.PUBLIC
+        for cand in self._symbol_candidates(mangled):
+            if cand in self._exported_dynamic:
+                return Visibility.PUBLIC
         if name and name in self._exported_dynamic:
             return Visibility.PUBLIC
-        if mangled and mangled in self._exported_static:
-            return Visibility.ELF_ONLY
+        for cand in self._symbol_candidates(mangled):
+            if cand in self._exported_static:
+                return Visibility.ELF_ONLY
         if name and name in self._exported_static:
             return Visibility.ELF_ONLY
         return Visibility.HIDDEN
+
+    @staticmethod
+    def _symbol_candidates(mangled: str) -> tuple[str, ...]:
+        """The mangled name plus, on a leading underscore, its de-prefixed form."""
+        if not mangled:
+            return ()
+        if mangled.startswith("_"):
+            return (mangled, mangled[1:])
+        return (mangled,)
 
     @staticmethod
     def _access_level(access: str) -> AccessLevel:
@@ -315,10 +362,20 @@ class _ClangAstParser:
 
     @staticmethod
     def _source_location(entry: _Decl) -> str | None:
+        """``file:line`` for a decl, or the bare file when clang omits the line.
+
+        clang makes ``loc.line`` sticky just like ``loc.file`` — a declaration
+        nested on the same source line as its parent (e.g. a ``static constexpr``
+        member of a one-line ``struct``) often carries the inherited file but no
+        ``line``. Dropping the whole location there would strip provenance and
+        make ``_decl_is_public`` discard an otherwise-public constant/type, so
+        the file is kept (``header_from_location`` tolerates a path with no
+        ``:line`` suffix). Returns ``None`` only when there is no file at all.
+        """
+        if not entry.file:
+            return None
         line = _node_line(entry.node)
-        if entry.file and line:
-            return f"{entry.file}:{line}"
-        return None
+        return f"{entry.file}:{line}" if line else entry.file
 
     def _qualified(self, entry: _Decl) -> str:
         name = entry.node.get("name", "")
@@ -369,8 +426,11 @@ class _ClangAstParser:
                     params=params,
                     visibility=self._visibility(str(node.get("mangledName", "")), name),
                     is_virtual=bool(node.get("virtual")),
-                    is_noexcept="noexcept" in quals,
-                    is_extern_c=mangled == name,
+                    is_noexcept=_is_noexcept_qualifier(quals),
+                    # An ``extern "C"`` linkage spec is authoritative; fall back
+                    # to the mangled==name heuristic for a plain C-mode parse
+                    # (no LinkageSpecDecl, but C-linkage names equal their symbol).
+                    is_extern_c=entry.extern_c or mangled == name,
                     vtable_index=None,
                     source_location=self._source_location(entry),
                     is_static=node.get("storageClass") == "static",
@@ -590,15 +650,23 @@ class _Decl:
     ``__slots__`` keeps the per-decl overhead low on large headers.
     """
 
-    __slots__ = ("node", "scope", "file", "access")
+    __slots__ = ("node", "scope", "file", "access", "extern_c")
 
     def __init__(
-        self, node: dict[str, Any], scope: tuple[str, ...], file: str, access: str
+        self,
+        node: dict[str, Any],
+        scope: tuple[str, ...],
+        file: str,
+        access: str,
+        extern_c: bool = False,
     ) -> None:
         self.node = node
         self.scope = scope
         self.file = file
         self.access = access
+        # True when the decl sits inside an ``extern "C"`` linkage spec — an
+        # authoritative C-linkage signal that beats the mangled==name heuristic.
+        self.extern_c = extern_c
 
 
 def _qualtype(node: dict[str, Any]) -> str:
@@ -630,9 +698,12 @@ def _node_line(node: dict[str, Any]) -> int:
         line = loc.get("line")
         if isinstance(line, int):
             return line
-        exp = loc.get("expansionLoc")
-        if isinstance(exp, dict) and isinstance(exp.get("line"), int):
-            return int(exp["line"])
+        # Mirror _node_file's macro/expansion fallback so a decl whose file comes
+        # from expansionLoc/spellingLoc gets its line from the same place.
+        for sub in ("expansionLoc", "spellingLoc"):
+            s = loc.get(sub)
+            if isinstance(s, dict) and isinstance(s.get("line"), int):
+                return int(s["line"])
     return 0
 
 
@@ -671,18 +742,35 @@ def _param_has_default(param: dict[str, Any]) -> bool:
     )
 
 
+def _evaluated_int_value(node: dict[str, Any]) -> int | None:
+    """The integer value of an expression node, ``None`` when not constant-int.
+
+    clang records a fully-evaluated constant on the ``ConstantExpr`` *wrapper*
+    itself (``value``), so a folded expression like ``1 << 3`` or ``-1`` carries
+    its value there while its children (a ``BinaryOperator``/``UnaryOperator``)
+    do not. Read the wrapper's value first, then fall back to the unwrapped leaf
+    literal — otherwise such bitfield widths / enum values would be lost (Codex/
+    CodeRabbit review).
+    """
+    for candidate in (node, _unwrap_expr(node)):
+        if not isinstance(candidate, dict):
+            continue
+        val = candidate.get("value")
+        if val is not None:
+            try:
+                return int(str(val), 0)
+            except ValueError:
+                continue
+    return None
+
+
 def _bitfield_width(field: dict[str, Any]) -> tuple[int | None, bool]:
-    """``(width, is_bitfield)`` for a ``FieldDecl`` (width from its inner literal)."""
+    """``(width, is_bitfield)`` for a ``FieldDecl`` (width from its inner expr)."""
     if not field.get("isBitfield"):
         return None, False
     for child in field.get("inner", []) or []:
         if isinstance(child, dict):
-            core = _unwrap_expr(child)
-            if core.get("kind") in _LITERAL_NODE_KINDS and "value" in core:
-                try:
-                    return int(str(core["value"])), True
-                except ValueError:
-                    return None, True
+            return _evaluated_int_value(child), True
     return None, True
 
 
@@ -724,13 +812,9 @@ def _enum_constant_value(node: dict[str, Any]) -> int | None:
     for child in node.get("inner", []) or []:
         if not isinstance(child, dict):
             continue
-        core = _unwrap_expr(child)
-        val = core.get("value")
-        if val is not None:
-            try:
-                return int(str(val), 0)
-            except ValueError:
-                return None
+        value = _evaluated_int_value(child)
+        if value is not None:
+            return value
     return None
 
 

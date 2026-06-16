@@ -63,7 +63,7 @@ See [Architecture](../concepts/architecture.md) for the full per-layer breakdown
 | Requirement | Mandatory? | Notes |
 |-------------|-----------|-------|
 | Two inputs (`.so`/`.dll`/`.dylib`, JSON snapshot, package, or directory) | ✅ | Core input; mix freely |
-| `castxml` **or** `clang` + a compiler | ⚠️ for header AST | Needed only when you pass `-H`/`--*-header`. The default backend is **castxml** (GCC, Clang, or MSVC — castxml emulates whichever you point it at); pass `--header-backend clang` (or set `ABICHECK_HEADER_BACKEND=clang`) to use `clang -ast-dump=json` instead, e.g. on a clang-only host where castxml is absent. `--header-backend auto` (default) prefers castxml, then clang. The clang backend produces signatures/qualifiers/enums/typedefs/public constants but not computed record layout (DWARF covers layout). |
+| `castxml` **or** `clang` + a compiler | ⚠️ for header AST | Needed only when you pass `-H`/`--*-header`. The default selector is **`--header-backend auto`**: it prefers **castxml** when present (GCC, Clang, or MSVC — castxml emulates whichever you point it at) and automatically falls back to **clang** (`clang -ast-dump=json`) on a clang-only host where castxml is absent — so you normally need not choose. Pin a backend with `--header-backend castxml`/`clang` (or `ABICHECK_HEADER_BACKEND=…`) to override. The clang backend produces signatures/qualifiers/enums/typedefs/public constants but not computed record layout (DWARF covers layout). |
 | Debug info (`-g`) | ❌ optional | DWARF/PDB enrich layout, calling-convention, and packing checks |
 | Headers | strongly recommended | Without them abicheck runs **symbols-only mode** and warns; type/signature breaks may be missed |
 

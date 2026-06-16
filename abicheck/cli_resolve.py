@@ -200,6 +200,7 @@ def _dump_native_binary(
     debug_format: str | None = None,
     public_headers: list[Path] | None = None,
     public_header_dirs: list[Path] | None = None,
+    header_backend: str = "auto",
 ) -> AbiSnapshot:
     """Dump an ABI snapshot from a native binary (ELF, PE, or Mach-O).
 
@@ -230,6 +231,7 @@ def _dump_native_binary(
             debug_format=debug_format,
             public_headers=public_headers,
             public_header_dirs=public_header_dirs,
+            header_backend=header_backend,
             notify=_click_notify,
         )
     except ValidationError as exc:
