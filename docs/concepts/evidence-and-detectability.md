@@ -44,7 +44,7 @@ are not reported there — they surface in the pack-aware `compare`
 |---|--------------------|:-----:|----------------|------------------------|
 | 1 | **Just the binary** | **L0** | a stripped `.so`/`.dll`/`.dylib` | Exported symbols, SONAME/install-name, symbol versions, visibility, binding, `DT_NEEDED`/`LC_LOAD_DYLIB` dependencies |
 | 2 | **+ Debug symbols** | **L1** | a `-g` build (DWARF/PDB) or sidecar debug file | Type **layout**: struct/class sizes, field offsets, enum *values*, vtable slots, calling convention, packing/alignment |
-| 3 | **+ Public headers** | **L2** | `-H include/` (parsed by castxml) | Source-level **API**: signatures, overloads, access (`public`/`private`), `final`/`explicit`/`noexcept`, templates, declared default args, public/internal **scoping** |
+| 3 | **+ Public headers** | **L2** | `-H include/` (parsed by castxml or clang — `--header-backend`) | Source-level **API**: signatures, overloads, access (`public`/`private`), `final`/`explicit`/`noexcept`, templates, declared default args, public/internal **scoping** |
 | 4 | **+ Build system data & options** | **L3** | `-p build/` (compile DB, CMake/Ninja/Bazel/Make) | The **flags the library was actually built with**: `-std`, `_GLIBCXX_USE_CXX11_ABI`, `-fvisibility`, `-fabi-version`, toolchain/sysroot, target graph, export maps |
 | 5 | **+ Sources** | **L4** | a build/source pack (per-TU source ABI replay, ADR-030) | Facts that never reach the binary: macro constants, `constexpr` values, default-argument *values*, inline/template **bodies**, uninstantiated templates |
 
@@ -166,7 +166,7 @@ the five **independent, additive** sources of [§0](#0-the-five-sources-of-infor
 |-------|--------|-------------------------|
 | **L0** | Binary metadata | ELF symbols, SONAME, versioning, visibility, dependencies (and PE/COFF + Mach-O equivalents) |
 | **L1** | Debug info (DWARF/PDB) | Layout, offsets, enum values, calling convention, vtable slots, type cross-checks |
-| **L2** | Header AST (CastXML) | Function signatures, classes, structs, vtables, enums, typedefs, templates, `noexcept`, access, public/internal scoping |
+| **L2** | Header AST (castxml or clang) | Function signatures, classes, structs, vtables, enums, typedefs, templates, `noexcept`, access, public/internal scoping |
 | **L3** | Build context | ABI-relevant flags, toolchain/sysroot, target graph, export-policy changes |
 | **L4** | Source ABI replay | Macro/`constexpr` values, default-argument values, inline/template bodies, uninstantiated templates |
 | **L5** | Source/build graph *(derived)* | Include/type/call reachability — localizes and explains findings, prioritizes cross-symbol impact (folded from L3, plus any L4 surface) |

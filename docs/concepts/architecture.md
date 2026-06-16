@@ -72,7 +72,7 @@ graph — **six evidence layers in all**, layered from the least input to the mo
 |:-----:|--------|----------------|-----------|---------|
 | **L0** | Just the **binary** | ELF/PE/Mach-O parsers (`elf_metadata.py`, `pe_metadata.py`, `macho_metadata.py`) | Authoritative | Exported symbols, SONAME/install-name, versions, visibility, binding, dependencies |
 | **L1** | **Debug symbols** | DWARF/PDB/BTF/CTF (`dwarf_*`, `pdb_*`, `btf_metadata.py`, `ctf_metadata.py`) | Authoritative when matched to the binary | Type **layout**: sizes, field offsets, enum values, vtable slots, calling convention, packing |
-| **L2** | **Public headers** | castxml AST (`dumper_castxml.py`) | Authoritative for header-visible API | Source **API**: signatures, overloads, access, `final`/`explicit`/`noexcept`, templates, public/internal scoping |
+| **L2** | **Public headers** | castxml or clang AST (`dumper_castxml.py` / `dumper_clang.py`, `--header-backend`) | Authoritative for header-visible API | Source **API**: signatures, overloads, access, `final`/`explicit`/`noexcept`, templates, public/internal scoping |
 | **L3** | **Build system data & options** | compile DB / CMake / Ninja / Bazel / Make (`build_context.py`, build/source pack ADR-029) | Context / confidence | ABI-relevant flags (`-std`, `_GLIBCXX_USE_CXX11_ABI`, `-fvisibility`, `-fabi-version`), toolchain, target graph, export policy |
 | **L4** | **Sources** | per-TU source ABI replay (build/source pack ADR-030) | Source-/API-risk evidence, never sole shipped-ABI authority | Macro/`constexpr` values, default-argument values, inline/template bodies, uninstantiated templates |
 | **L5** | **Source/build graph** *(derived)* | folded from L3 (+ any L4 surface) into a graph summary (build/source pack ADR-031) | Explanation / localization / impact, never shipped-ABI authority | Include/type/call reachability: which public surface a change reaches; prioritizes cross-symbol impact |
@@ -141,7 +141,11 @@ Reads native binary metadata using format-specific parsers:
 
 ### Layer L2: Header AST (castxml / Clang) — all platforms
 
-Parses C/C++ headers through castxml to extract:
+Parses C/C++ headers through a selectable backend — `--header-backend
+auto|castxml|clang` (or `ABICHECK_HEADER_BACKEND`); `auto` prefers castxml and
+falls back to clang `-ast-dump=json` on clang-only hosts (ADR-003). The rest of
+this section describes the castxml backend; the clang backend exposes the
+identical snapshot surface. Either extracts:
 
 - Function signatures (parameters, return types)
 - Class/struct definitions and layout
