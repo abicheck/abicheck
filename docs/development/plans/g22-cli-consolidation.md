@@ -115,8 +115,10 @@ Tier 2 but keeps its own flags).
 - Phase 5 is the biggest UX shift (flags → config) — do it after the structure
   is sound so settings move to a stable home.
 
-## Done = 
+## Definition of done (when implementation lands)
 
-Registry `UC-WF-cli-contract` flips to `complete` with evidence pointing at
+This is a docs-only PR; G22 stays `planned` and ADR-037 stays `Proposed` until
+the work below merges. The gap is considered closed only once registry
+`UC-WF-cli-contract` can flip to `complete` with evidence pointing at
 `api_types.py`, the `cli-contract` gate, `tests/test_cli_contract.py`, and the
-alias/round-trip tests. ADR-037 status → Accepted — implemented.
+alias/round-trip tests — at which point ADR-037 moves to Accepted — implemented.

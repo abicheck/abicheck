@@ -51,7 +51,7 @@ down the contract that keeps it from re-rotting.
 
 ### D1. Three named tiers; the service layer is the only API
 
-```
+```text
 TIER 1  CORE       checker.compare(old_snap, new_snap, *, request) -> DiffResult
                    pure: snapshots in, result out. no Click, no I/O, no format.
 
@@ -166,7 +166,7 @@ The user-facing concept is **how deep we analyse**, not "which evidence layer."
 "Evidence/L0–L5" stays *internal* implementation vocabulary. The request field
 is `AnalysisDepth`; the flag is `--depth`:
 
-```
+```text
 --depth {symbols, headers, build, source, full}    # coarse, user-facing
 --max                                               # sugar for --depth full
 # (auto): depth inferred from inputs — pass --sources ⇒ depth ≥ source
