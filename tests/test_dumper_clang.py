@@ -114,9 +114,10 @@ def test_parse_functions_signature_and_qualifiers() -> None:
     assert fn.is_noexcept is True
     assert fn.visibility == Visibility.PUBLIC
     assert [p.name for p in fn.params] == ["x", "y"]
-    # The second parameter carries a default-argument expression.
+    # The second parameter carries a default-argument expression; its evaluated
+    # value is preserved so a changed default fires PARAM_DEFAULT_VALUE_CHANGED.
     assert fn.params[0].default is None
-    assert fn.params[1].default == "default"
+    assert fn.params[1].default == "1"
 
 
 def test_parse_functions_method_const_and_access() -> None:
@@ -1289,6 +1290,138 @@ def test_truly_anonymous_record_without_typedef_dropped() -> None:
         }
     )
     assert _ClangAstParser(root, set(), set()).parse_types() == []
+
+
+def test_anonymous_union_members_flattened() -> None:
+    # struct S { union { int i; float f; }; int tag; }; — clang nests the
+    # anonymous union as an unnamed RecordDecl plus an implicit unnamed
+    # FieldDecl, and marks the injected members with IndirectFieldDecl. The
+    # union's members must surface directly on S (matching castxml).
+    root = _tu(
+        {
+            "kind": "RecordDecl",
+            "name": "S",
+            "tagUsed": "struct",
+            "loc": {"file": "include/foo.h", "line": 1},
+            "completeDefinition": True,
+            "inner": [
+                {
+                    "kind": "RecordDecl",
+                    "name": "",
+                    "tagUsed": "union",
+                    "inner": [
+                        {"kind": "FieldDecl", "name": "i", "type": {"qualType": "int"}},
+                        {"kind": "FieldDecl", "name": "f", "type": {"qualType": "float"}},
+                    ],
+                },
+                {"kind": "FieldDecl", "name": "", "type": {"qualType": "union S::(anonymous)"}},
+                {"kind": "IndirectFieldDecl", "name": "i"},
+                {"kind": "IndirectFieldDecl", "name": "f"},
+                {"kind": "FieldDecl", "name": "tag", "type": {"qualType": "int"}},
+            ],
+        }
+    )
+    (s,) = _ClangAstParser(root, set(), set()).parse_types()
+    assert [(f.name, f.type) for f in s.fields] == [("i", "int"), ("f", "float"), ("tag", "int")]
+
+
+def test_typedef_anonymous_record_inside_struct_not_flattened() -> None:
+    # struct S { typedef struct { int z; } T; int a; }; — the unnamed RecordDecl
+    # is owned by a nested typedef, NOT an anonymous aggregate member (no
+    # IndirectFieldDecl), so its `z` must not leak into S's fields.
+    root = _tu(
+        {
+            "kind": "RecordDecl",
+            "name": "S",
+            "tagUsed": "struct",
+            "loc": {"file": "include/foo.h", "line": 1},
+            "completeDefinition": True,
+            "inner": [
+                {
+                    "kind": "RecordDecl",
+                    "name": "",
+                    "tagUsed": "struct",
+                    "inner": [{"kind": "FieldDecl", "name": "z", "type": {"qualType": "int"}}],
+                },
+                {"kind": "TypedefDecl", "name": "T", "type": {"qualType": "struct T"}},
+                {"kind": "FieldDecl", "name": "a", "type": {"qualType": "int"}},
+            ],
+        }
+    )
+    (s,) = _ClangAstParser(root, set(), set()).parse_types()
+    assert [f.name for f in s.fields] == ["a"]
+
+
+def test_hidden_friend_function_marked() -> None:
+    # struct Pt { friend bool operator==(Pt, Pt) { ... } }; — an inline friend
+    # is ADL-only; the FriendDecl-wrapped FunctionDecl must be flagged
+    # is_hidden_friend so add/remove of the operator is still diffed.
+    root = _tu(
+        {
+            "kind": "CXXRecordDecl",
+            "name": "Pt",
+            "tagUsed": "struct",
+            "loc": {"file": "include/foo.h", "line": 1},
+            "completeDefinition": True,
+            "inner": [
+                {
+                    "kind": "FriendDecl",
+                    "inner": [
+                        {
+                            "kind": "FunctionDecl",
+                            "name": "operator==",
+                            "loc": {"file": "include/foo.h", "line": 2},
+                            "mangledName": "_ZeqRK2PtS1_",
+                            "type": {"qualType": "bool (Pt, Pt)"},
+                            "inner": [
+                                {"kind": "ParmVarDecl", "name": "a", "type": {"qualType": "Pt"}},
+                                {"kind": "ParmVarDecl", "name": "b", "type": {"qualType": "Pt"}},
+                            ],
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+    (fn,) = _ClangAstParser(root, set(), set()).parse_functions()
+    assert fn.name == "operator=="
+    assert fn.is_hidden_friend is True
+
+
+def test_default_argument_non_literal_fingerprint_and_marker_fallback() -> None:
+    # A non-literal default keeps a stable structural fingerprint (so two
+    # different defaults compare unequal); a default flagged present but with no
+    # usable expression child still records its presence via the bare marker.
+    root = _tu(
+        {
+            "kind": "FunctionDecl",
+            "name": "f",
+            "loc": {"file": "include/foo.h", "line": 1},
+            "mangledName": "_Z1fii",
+            "type": {"qualType": "void (int, int)"},
+            "inner": [
+                {
+                    "kind": "ParmVarDecl",
+                    "name": "x",
+                    "type": {"qualType": "int"},
+                    "init": "c",
+                    "inner": [{"kind": "DeclRefExpr", "name": "kDefault"}],
+                },
+                {
+                    "kind": "ParmVarDecl",
+                    "name": "y",
+                    "type": {"qualType": "int"},
+                    "init": "c",
+                    # presence flagged but no usable expression child
+                    "inner": [{"kind": "FullComment"}],
+                },
+            ],
+        }
+    )
+    (fn,) = _ClangAstParser(root, set(), set()).parse_functions()
+    assert fn.params[0].default is not None
+    assert fn.params[0].default.startswith("expr:")
+    assert fn.params[1].default == "default"
 
 
 def test_clang_header_dump_nonzero_exit_raises(

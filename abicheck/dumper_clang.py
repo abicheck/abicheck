@@ -234,7 +234,7 @@ class _ClangAstParser:
         self._records: list[_Decl] = []
         self._enums: list[_Decl] = []
         self._typedefs: list[_Decl] = []
-        self._walk(root, scope=(), current_file="", access="public", extern_c=False)
+        self._walk(root, scope=(), current_file="", access="public", extern_c=False, in_friend=False)
 
     # ── traversal ────────────────────────────────────────────────────────────
 
@@ -246,6 +246,7 @@ class _ClangAstParser:
         current_file: str,
         access: str,
         extern_c: bool,
+        in_friend: bool,
     ) -> str:
         """Pre-order walk that categorizes public decls, threading the sticky file.
 
@@ -261,7 +262,7 @@ class _ClangAstParser:
         name = node.get("name") or ""
 
         if not node.get("isImplicit"):
-            self._categorize(node, kind, name, scope, file, access, extern_c)
+            self._categorize(node, kind, name, scope, file, access, extern_c, in_friend)
 
         # A function/method body is not an ABI declaration surface: its
         # parameters and defaults are read straight off the function node in
@@ -278,6 +279,11 @@ class _ClangAstParser:
         )
         child_scope = (*scope, name) if kind in _SCOPE_NODE_KINDS and name else scope
         running = _default_record_access(node) if kind in ("CXXRecordDecl", "RecordDecl") else "public"
+        # A ``friend`` declaration injects its function into the enclosing
+        # namespace but reachable only via ADL ("hidden friend"); mark the
+        # subtree so parse_functions can flag it (matches castxml's
+        # ``befriending`` link). Friends never define a new scope.
+        child_in_friend = in_friend or kind == "FriendDecl"
         for child in node.get("inner", []) or []:
             if not isinstance(child, dict):
                 continue
@@ -290,6 +296,7 @@ class _ClangAstParser:
                 current_file=file,
                 access=child.get("access", running),
                 extern_c=child_extern_c,
+                in_friend=child_in_friend,
             )
         return file
 
@@ -302,8 +309,11 @@ class _ClangAstParser:
         file: str,
         access: str,
         extern_c: bool,
+        in_friend: bool,
     ) -> None:
-        entry = _Decl(node=node, scope=scope, file=file, access=access, extern_c=extern_c)
+        entry = _Decl(
+            node=node, scope=scope, file=file, access=access, extern_c=extern_c, in_friend=in_friend
+        )
         if kind in _FUNCTION_NODE_KINDS and name:
             self._functions.append(entry)
         elif kind == "VarDecl" and name:
@@ -404,7 +414,10 @@ class _ClangAstParser:
                     name=str(p.get("name", "")),
                     type=_qualtype(p),
                     pointer_depth=_pointer_depth(_qualtype(p)),
-                    default="default" if _param_has_default(p) else None,
+                    # Preserve the actual default-argument value (so a changed
+                    # default fires PARAM_DEFAULT_VALUE_CHANGED); fall back to a
+                    # bare presence marker when the value can't be evaluated.
+                    default=(_initializer_value(p) or "default") if _param_has_default(p) else None,
                 )
                 for p in node.get("inner", []) or []
                 if isinstance(p, dict) and p.get("kind") == "ParmVarDecl"
@@ -446,6 +459,7 @@ class _ClangAstParser:
                     return_pointer_depth=_pointer_depth(ret_type),
                     ref_qualifier=ref_qualifier,
                     is_explicit=is_explicit,
+                    is_hidden_friend=entry.in_friend,
                 )
             )
         return funcs
@@ -589,35 +603,58 @@ class _ClangAstParser:
         )
 
     def _parse_fields(self, node: dict[str, Any]) -> list[TypeField]:
+        # Members injected from an anonymous struct/union are referenced by
+        # ``IndirectFieldDecl`` siblings; collect their names so the anonymous
+        # record's FieldDecls can be flattened up into this record (and so a
+        # typedef'd anonymous record, which has no IndirectFieldDecl, is not).
+        injected = _anonymous_member_names(node)
+        return self._collect_fields(node, _default_record_access(node), injected)
+
+    def _collect_fields(
+        self, node: dict[str, Any], running: str, injected: set[str], *, nested: bool = False
+    ) -> list[TypeField]:
         fields: list[TypeField] = []
-        running = _default_record_access(node)
         for child in node.get("inner", []) or []:
             if not isinstance(child, dict):
                 continue
-            if child.get("kind") == "AccessSpecDecl":
+            kind = child.get("kind")
+            if kind == "AccessSpecDecl":
                 running = child.get("access", running)
                 continue
-            if child.get("kind") != "FieldDecl":
+            if kind in ("RecordDecl", "CXXRecordDecl") and not child.get("name"):
+                # Anonymous struct/union member: its public members live directly
+                # in the enclosing record's namespace, so flatten them here. Keep
+                # only the injected names to avoid pulling in a typedef'd
+                # anonymous record's fields.
+                fields.extend(self._collect_fields(child, running, injected, nested=True))
+                continue
+            if kind != "FieldDecl":
                 continue
             fname = str(child.get("name", ""))
             if not fname:
                 continue
-            ftype = _qualtype(child)
-            bits, is_bitfield = _bitfield_width(child)
-            fields.append(
-                TypeField(
-                    name=fname,
-                    type=ftype,
-                    offset_bits=None,
-                    is_bitfield=is_bitfield,
-                    bitfield_bits=bits,
-                    is_const=bool(re.search(r"\bconst\b", ftype)),
-                    is_volatile=bool(re.search(r"\bvolatile\b", ftype)),
-                    is_mutable=bool(child.get("mutable")),
-                    access=self._access_level(child.get("access", running)),
-                )
-            )
+            if nested and fname not in injected:
+                # A nested unnamed record contributes only the members that an
+                # IndirectFieldDecl injected (anonymous aggregate); a typedef'd
+                # anonymous record injects nothing, so its fields are dropped.
+                continue
+            fields.append(self._make_field(child, child.get("access", running)))
         return fields
+
+    def _make_field(self, child: dict[str, Any], access: str) -> TypeField:
+        ftype = _qualtype(child)
+        bits, is_bitfield = _bitfield_width(child)
+        return TypeField(
+            name=str(child.get("name", "")),
+            type=ftype,
+            offset_bits=None,
+            is_bitfield=is_bitfield,
+            bitfield_bits=bits,
+            is_const=bool(re.search(r"\bconst\b", ftype)),
+            is_volatile=bool(re.search(r"\bvolatile\b", ftype)),
+            is_mutable=bool(child.get("mutable")),
+            access=self._access_level(access),
+        )
 
     def parse_enums(self) -> list[EnumType]:
         enums: list[EnumType] = []
@@ -674,7 +711,7 @@ class _Decl:
     ``__slots__`` keeps the per-decl overhead low on large headers.
     """
 
-    __slots__ = ("node", "scope", "file", "access", "extern_c")
+    __slots__ = ("node", "scope", "file", "access", "extern_c", "in_friend")
 
     def __init__(
         self,
@@ -683,6 +720,7 @@ class _Decl:
         file: str,
         access: str,
         extern_c: bool = False,
+        in_friend: bool = False,
     ) -> None:
         self.node = node
         self.scope = scope
@@ -691,6 +729,10 @@ class _Decl:
         # True when the decl sits inside an ``extern "C"`` linkage spec — an
         # authoritative C-linkage signal that beats the mangled==name heuristic.
         self.extern_c = extern_c
+        # True when the decl is reached through a ``friend`` declaration: the
+        # function is ADL-only ("hidden friend") and the diff treats it apart
+        # from the ordinary public surface.
+        self.in_friend = in_friend
 
 
 def _qualtype(node: dict[str, Any]) -> str:
@@ -796,6 +838,22 @@ def _bitfield_width(field: dict[str, Any]) -> tuple[int | None, bool]:
         if isinstance(child, dict):
             return _evaluated_int_value(child), True
     return None, True
+
+
+def _anonymous_member_names(node: dict[str, Any]) -> set[str]:
+    """Names injected into *node* from anonymous struct/union members.
+
+    clang emits an ``IndirectFieldDecl`` for every member that an anonymous
+    aggregate injects into its enclosing record; their names mark exactly which
+    of the anonymous record's fields belong to this record's surface.
+    """
+    names: set[str] = set()
+    for child in node.get("inner", []) or []:
+        if isinstance(child, dict) and child.get("kind") == "IndirectFieldDecl":
+            name = child.get("name")
+            if name:
+                names.add(str(name))
+    return names
 
 
 def _parse_bases(node: dict[str, Any]) -> tuple[list[str], list[str], dict[str, str]]:
