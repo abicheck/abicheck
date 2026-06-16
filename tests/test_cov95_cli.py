@@ -275,6 +275,15 @@ class TestSmallHelpers:
         dump_help = runner.invoke(main, ["dump", "--help"]).output
         assert "Toolchain" in dump_help and "Provenance" in dump_help
 
+    def test_dump_gcc_option_ignored_warning_for_non_elf(self, tmp_path) -> None:
+        # G21.5/Codex: --gcc-option(s) aren't applied on the native PE/Mach-O
+        # dump path, so the CLI warns rather than dropping them silently.
+        import struct
+        dylib = tmp_path / "fake.dylib"
+        dylib.write_bytes(struct.pack("<I", 0xfeedfacf) + b"\x00" * 64)
+        result = CliRunner().invoke(main, ["dump", str(dylib), "--gcc-option=-DX"])
+        assert "will be ignored" in result.output
+
     def test_dump_gcc_option_help(self) -> None:
         # G21.5: the repeatable --gcc-option is documented on dump.
         out = CliRunner().invoke(main, ["dump", "--help"]).output
