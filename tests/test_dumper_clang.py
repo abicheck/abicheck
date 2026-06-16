@@ -1371,3 +1371,106 @@ def test_owned_tag_id_absent_returns_empty() -> None:
     from abicheck.dumper_clang import _owned_tag_id
 
     assert _owned_tag_id({"kind": "TypedefDecl", "name": "t"}) == ""
+
+
+# ── pure-helper branch coverage ──────────────────────────────────────────────
+
+
+def test_return_type_and_qualifiers_with_template_brackets() -> None:
+    from abicheck.dumper_clang import _function_qualifiers, _return_type
+
+    # Generic return type with <> brackets, then a templated param list + const.
+    assert _return_type("std::map<int, char> (int)") == "std::map<int, char>"
+    quals = _function_qualifiers("void (std::vector<int>) const &&")
+    assert "const" in quals and "&&" in quals
+
+
+def test_pointer_depth_closing_brackets_underflow() -> None:
+    # Stray closing brackets must clamp at zero, not go negative.
+    assert _pointer_depth("]>)*") == 1
+
+
+def test_visibility_matches_by_plain_name() -> None:
+    from abicheck.dumper_clang import _ClangAstParser
+    from abicheck.model import Visibility
+
+    p = _ClangAstParser({"kind": "TranslationUnitDecl", "inner": []}, {"foo"}, {"bar"})
+    # No mangled name, matched by plain name in the dynamic/static tables.
+    assert p._visibility("", "foo") == Visibility.PUBLIC
+    assert p._visibility("", "bar") == Visibility.ELF_ONLY
+    assert p._visibility("", "nope") == Visibility.HIDDEN
+
+
+def test_symbol_candidates_and_source_location_edges() -> None:
+    from abicheck.dumper_clang import _ClangAstParser, _Decl
+
+    assert _ClangAstParser._symbol_candidates("") == ()
+    assert _ClangAstParser._symbol_candidates("foo") == ("foo",)
+    # No file at all → no source location.
+    entry = _Decl(node={"kind": "FunctionDecl"}, scope=(), file="", access="public")
+    assert _ClangAstParser._source_location(entry) is None
+
+
+def test_node_helpers_on_non_dict_and_missing_loc() -> None:
+    from abicheck.dumper_clang import _node_file, _node_line
+
+    assert _node_file({}, "prev.h") == "prev.h"  # no loc → keep current
+    assert _node_line({}) == 0
+    assert _node_line({"loc": {}}) == 0
+
+
+def test_canonical_expr_and_typedef_underlying_edges() -> None:
+    from abicheck.dumper_clang import _canonical_expr, _typedef_underlying
+
+    # A non-dict node is returned verbatim; a dict keeps type.qualType.
+    assert _canonical_expr("leaf") == "leaf"
+    out = _canonical_expr({"kind": "X", "type": {"qualType": "int"}, "inner": ["y"]})
+    assert out == {"kind": "X", "type": "int", "inner": ["y"]}
+    # Typedef with a non-dict type → empty underlying.
+    assert _typedef_underlying({"type": None}) == ""
+
+
+def test_owned_tag_id_nested_and_non_dict() -> None:
+    from abicheck.dumper_clang import _owned_tag_id
+
+    node = {"inner": ["x", {"inner": [{"ownedTagDecl": {"id": "0xABC"}}]}]}
+    assert _owned_tag_id(node) == "0xABC"
+    assert _owned_tag_id({"inner": [123]}) == ""
+
+
+def test_clang_header_dump_timeout_raises(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import subprocess as _sp
+
+    header = tmp_path / "foo.h"
+    header.write_text("int foo(void);\n")
+    monkeypatch.setattr(dumper, "_clang_available", lambda *a, **k: True)
+    monkeypatch.setattr(dumper, "_cache_path", lambda *a, **k: tmp_path / "c.json")
+
+    def _boom(*a, **k):
+        raise _sp.TimeoutExpired(cmd="clang", timeout=120)
+
+    monkeypatch.setattr(dumper.subprocess, "run", _boom)
+    with pytest.raises(SnapshotError, match="timed out"):
+        _clang_header_dump([header], [])
+
+
+def test_clang_header_dump_corrupt_cache_is_discarded(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    header = tmp_path / "foo.h"
+    header.write_text("int foo(void);\n")
+    cache = tmp_path / "c.json"
+    cache.write_text("{ this is not valid json")  # corrupt prior cache entry
+    ast = '{"kind": "TranslationUnitDecl", "inner": []}'
+
+    monkeypatch.setattr(dumper, "_clang_available", lambda *a, **k: True)
+    monkeypatch.setattr(dumper, "_cache_path", lambda *a, **k: cache)
+    monkeypatch.setattr(
+        dumper.subprocess, "run",
+        lambda *a, **k: _fake_proc(stdout=ast, returncode=0),
+    )
+    # The corrupt cache is unlinked and the fresh clang run repopulates it.
+    root = _clang_header_dump([header], [])
+    assert root == {"kind": "TranslationUnitDecl", "inner": []}
