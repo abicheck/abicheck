@@ -30,6 +30,7 @@ from .cli_dump_helpers import (
     perform_elf_dump,
     resolve_dump_compile_db,
     resolve_dump_debug_format,
+    resolve_dump_depth,
 )
 from .cli_helpers_compare import (  # noqa: F401  — re-exported to keep cli import sites stable
     _build_match_map as _build_match_map,
@@ -381,7 +382,8 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
              build_info: Path | None = None, sources: Path | None = None,
              build_config: Path | None = None, allow_build_query: bool = False,
              build_query: str | None = None, build_compile_db: str | None = None,
-             collect_mode: str = "source-target") -> None:
+             collect_mode: str = "source-target",
+             depth: str | None = None, max_depth: bool = False) -> None:
     """Dump ABI snapshot of a shared library to JSON.
 
     \b
@@ -390,6 +392,15 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
       abicheck dump --sources ./libfoo-src/ -o libfoo.src.json  # source-only (no binary)
     """
     _setup_verbosity(verbose)
+
+    # Resolve the --depth/--max preset into the underlying --collect-mode before
+    # any dump path runs, so every branch (source-only / PE-Mach-O / ELF) embeds
+    # the same evidence depth (G21.1).
+    collect_mode = resolve_dump_depth(
+        depth, max_depth, collect_mode,
+        click.get_current_context().get_parameter_source("collect_mode")
+        == click.core.ParameterSource.COMMANDLINE,
+    )
 
     # Source-only dump (no binary) for the parallel-baseline / merge flow.
     if so_path is None:

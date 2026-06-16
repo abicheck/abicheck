@@ -234,6 +234,50 @@ class TestSmallHelpers:
     def test_merge_gcc_options_both(self) -> None:
         assert _merge_gcc_options(["-DA"], "-O2") == "-DA -O2"
 
+    def test_resolve_dump_depth_maps_each_depth(self) -> None:
+        from abicheck.cli_dump_helpers import resolve_dump_depth
+
+        cases = {
+            "headers": "off",
+            "build": "build",
+            "graph": "graph-build",
+            "source": "source-changed",
+            "full": "graph-full",
+        }
+        for depth, expected in cases.items():
+            assert resolve_dump_depth(depth, False, "source-target", False) == expected
+
+    def test_resolve_dump_depth_max_is_full(self) -> None:
+        from abicheck.cli_dump_helpers import resolve_dump_depth
+
+        assert resolve_dump_depth(None, True, "source-target", False) == "graph-full"
+
+    def test_resolve_dump_depth_no_preset_keeps_collect_mode(self) -> None:
+        from abicheck.cli_dump_helpers import resolve_dump_depth
+
+        assert resolve_dump_depth(None, False, "build", True) == "build"
+
+    def test_resolve_dump_depth_conflicts_raise(self) -> None:
+        from abicheck.cli_dump_helpers import resolve_dump_depth
+
+        with pytest.raises(click.UsageError):
+            resolve_dump_depth("source", False, "build", True)  # depth + explicit mode
+        with pytest.raises(click.UsageError):
+            resolve_dump_depth("build", True, "source-target", False)  # --max + --depth build
+
+    def test_dump_depth_help_and_mutual_exclusion(self) -> None:
+        runner = CliRunner()
+        help_out = runner.invoke(main, ["dump", "--help"])
+        assert help_out.exit_code == 0
+        assert "--depth" in help_out.output and "--max" in help_out.output
+        # --depth and --collect-mode are mutually exclusive (resolved before any
+        # binary access, so a source-only invocation surfaces the error).
+        clash = runner.invoke(
+            main, ["dump", "--depth", "source", "--collect-mode", "build"]
+        )
+        assert clash.exit_code != 0
+        assert "mutually exclusive" in clash.output
+
     def test_resolve_per_side_options_overrides(self, tmp_path: Path) -> None:
         h = (tmp_path / "h.h",)
         oh = (tmp_path / "old.h",)

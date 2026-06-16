@@ -84,6 +84,49 @@ def resolve_dump_debug_format(
     return debug_format
 
 
+def resolve_dump_depth(
+    depth: str | None,
+    max_depth: bool,
+    collect_mode: str,
+    collect_mode_explicit: bool,
+) -> str:
+    """Resolve the ``--depth``/``--max`` preset into a ``--collect-mode`` value.
+
+    ``--depth`` is the friendly evidence-depth dial (same vocabulary as
+    ``scan --depth``: headers/build/graph/source/full); it expands to the
+    underlying ADR-033 collect mode via the shared ``scan_levels`` mapping so the
+    two commands stay consistent. ``--max`` is shorthand for ``--depth full``.
+
+    ``--depth`` and an explicit ``--collect-mode`` are mutually exclusive (the
+    preset *is* the collect mode); raises :class:`click.UsageError` if both are
+    given, or if ``--max`` is combined with a different ``--depth``. When no
+    depth preset is supplied, ``collect_mode`` is returned unchanged.
+    """
+    from .buildsource.scan_levels import (
+        EvidenceDepth,
+        depth_to_method,
+        method_to_collect_mode,
+    )
+
+    if max_depth:
+        if depth is not None and depth != EvidenceDepth.FULL.value:
+            raise click.UsageError(
+                "--max is shorthand for --depth full; do not combine it with a "
+                "different --depth."
+            )
+        depth = EvidenceDepth.FULL.value
+    if depth is None:
+        return collect_mode
+    if collect_mode_explicit:
+        raise click.UsageError(
+            "--depth and --collect-mode are mutually exclusive: --depth is the "
+            "friendly preset over --collect-mode."
+        )
+    method = depth_to_method(EvidenceDepth(depth))
+    # headers depth reaches no source method (L2 is intrinsic) — collect nothing.
+    return "off" if method is None else method_to_collect_mode(method)
+
+
 def resolve_dump_compile_db(
     compile_db_path: Path | None,
     compile_db_path_alt: Path | None,
