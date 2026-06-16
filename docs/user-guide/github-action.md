@@ -116,7 +116,7 @@ scan degrades gracefully and L0–L2 stay authoritative.
 | `budget` | scan | Time guard (e.g. `15m`). The step **fails** on overflow (`verdict: BUDGET_OVERFLOW`) — a budget never silently shrinks scope. |
 | `audit` | scan | Single-build hygiene lint, no baseline (intra-version cross-source checks). |
 | `estimate` | scan | Dry-run: print projected per-layer cost and scan nothing (always exits 0). |
-| `crosscheck` | scan | Per-check severity overrides `KEY=LEVEL` (`off`/`info`/`warning`/`error`), space-separated. Promote a check to `=error` to gate CI on it. |
+| `crosscheck` | scan | Per-check severity overrides `KEY=LEVEL` (`off`/`info`/`warning`/`error`), space-separated. Promoting a check to `=error` makes a finding for it exit `2` (the API_BREAK tier); pair with `fail-on-api-break: true` to gate the step. |
 | `risk-rules` | scan | Path to a YAML file overriding the `risk_rules` profile. |
 | `merge-inputs` | merge | Space-separated `.abi.json` dumps and/or a Flow-2 `abicheck_inputs/` pack directory to combine. |
 | `on-conflict` | merge | `warn` (default, first-wins + diagnostic) or `error` (exit non-zero) when two inputs supply the same layer with differing facts. |
@@ -362,8 +362,9 @@ for a large repo:
 
 ### Gate CI on a specific cross-source check
 
-Cross-source findings are advisory by default. Promote one to `error` to make a
-finding fail the step (exit 2):
+Cross-source findings are advisory by default. Promoting one to `error` makes a
+finding for it exit `2` (the API_BREAK tier); add `fail-on-api-break: true` so
+that exit turns the step red:
 
 ```yaml
       - uses: napetrov/abicheck@v0.3.0
@@ -374,7 +375,12 @@ finding fail the step (exit 2):
           sources: .
           baseline: abi-baseline.json
           crosscheck: 'private_header_leak=error odr_type_variant=error'
+          fail-on-api-break: true   # gate on the exit-2 (API_BREAK) tier
 ```
+
+`fail-on-api-break` gates the whole API_BREAK tier (baseline/source breaks and
+promoted cross-checks alike); the Action can't tell from the exit code which one
+fired, so leave it `false` if you only want binary ABI breaks (exit 4) to gate.
 
 ## Passing sources into a baseline (build/source evidence)
 

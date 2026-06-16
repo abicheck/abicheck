@@ -983,13 +983,14 @@ elif [[ "$MODE" == "scan" ]]; then
     FINAL_EXIT=1
   fi
 
-  # API_BREAK gates when fail-on-api-break is set, OR when the user explicitly
-  # promoted a cross-check to =error (an opt-in CI gate the scan CLI maps to
-  # exit 2). The promotion alone must fail the step, as the docs promise, even
-  # with the default fail-on-api-break: false.
-  if [[ "$VERDICT" == "API_BREAK" ]] \
-     && { [[ "${INPUT_FAIL_ON_API_BREAK:-false}" == "true" ]] || [[ "${INPUT_CROSSCHECK:-}" == *"=error"* ]]; }; then
-    echo "::error::API/source break detected by scan (or a promoted --crosscheck=error gate). Set fail-on-api-break: false and drop any crosscheck=error to ignore."
+  # API_BREAK (scan exit 2) covers baseline/source API breaks AND a cross-check
+  # the user promoted with --crosscheck KEY=error (the scan CLI maps both to
+  # exit 2). They share one tier, so fail-on-api-break gates them uniformly — we
+  # cannot tell from the exit code alone whether a promoted check fired, so
+  # keying off the crosscheck flag would wrongly fail an unrelated API break
+  # when fail-on-api-break is false (Codex review).
+  if [[ "$VERDICT" == "API_BREAK" && "${INPUT_FAIL_ON_API_BREAK:-false}" == "true" ]]; then
+    echo "::error::API/source break detected by scan (includes promoted --crosscheck=error gates). Set fail-on-api-break: false to ignore."
     FINAL_EXIT=1
   fi
 
