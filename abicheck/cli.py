@@ -21,7 +21,18 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-import click
+try:
+    # rich-click renders the (large) option lists in named panels for
+    # progressive disclosure (G21.8 / collapse M1). It is a drop-in for click;
+    # fall back to plain click if it is somehow unavailable so the CLI never
+    # hard-fails on a missing optional render dependency. Note: rich-click does
+    # not patch click.Group on import — the root group must subclass RichGroup
+    # (below) for the rich panels to render, since we pass an explicit cls=.
+    import rich_click as click
+    from rich_click import RichGroup as _RootGroupBase
+except ImportError:  # pragma: no cover - rich-click is a declared dependency
+    import click  # type: ignore[no-redef]
+    _RootGroupBase = click.Group  # type: ignore[assignment,misc]
 
 from .checker import DiffResult, LibraryMetadata, compare
 from .cli_audit import echo_filtered_surface, echo_pattern_modulations
@@ -32,6 +43,7 @@ from .cli_dump_helpers import (
     resolve_dump_debug_format,
     resolve_dump_depth,
 )
+from .cli_help import configure_rich_help
 from .cli_helpers_compare import (  # noqa: F401  — re-exported to keep cli import sites stable
     _build_match_map as _build_match_map,
     _canonical_library_key as _canonical_library_key,
@@ -224,7 +236,7 @@ def _collect_metadata(path: Path) -> LibraryMetadata | None:
 _EXIT_USAGE_ERROR = 64
 
 
-class _AbicheckGroup(click.Group):
+class _AbicheckGroup(_RootGroupBase):
     """Root group that maps Click *usage* errors to a dedicated exit code.
 
     Click exits 2 for ``UsageError`` / ``BadParameter`` (bad arguments, unknown
@@ -238,10 +250,15 @@ class _AbicheckGroup(click.Group):
     """
 
     def main(self, *args: Any, standalone_mode: bool = True, **kwargs: Any) -> Any:  # type: ignore[override]
+        # Call plain click's main (not rich-click's RichGroup.main, our direct
+        # super), because rich-click's main renders and exits on a ClickException
+        # itself — which would bypass the usage-error→64 remap below. Help still
+        # renders richly: that goes through RichCommand.format_help, invoked by
+        # click's main during --help handling regardless of which main runs.
         if not standalone_mode:
-            return super().main(*args, standalone_mode=False, **kwargs)  # type: ignore[call-overload]
+            return click.Group.main(self, *args, standalone_mode=False, **kwargs)  # type: ignore[call-overload]
         try:
-            super().main(*args, standalone_mode=False, **kwargs)  # type: ignore[call-overload]
+            click.Group.main(self, *args, standalone_mode=False, **kwargs)  # type: ignore[call-overload]
         except click.exceptions.Abort:
             click.echo("Aborted!", err=True)
             sys.exit(1)
@@ -251,6 +268,9 @@ class _AbicheckGroup(click.Group):
             sys.exit(_EXIT_USAGE_ERROR if exc.exit_code == 2 else exc.exit_code)
         else:
             sys.exit(0)
+
+
+configure_rich_help()  # register --help option-group panels (G21.8 / M1)
 
 
 @click.group(cls=_AbicheckGroup)

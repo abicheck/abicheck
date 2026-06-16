@@ -265,6 +265,16 @@ class TestSmallHelpers:
         with pytest.raises(click.UsageError):
             resolve_dump_depth("build", True, "source-target", False)  # --max + --depth build
 
+    def test_help_option_groups_render(self) -> None:
+        # G21.8/M1: rich-click renders option-group panels so the big commands'
+        # --help leads with named sections instead of a flat list.
+        runner = CliRunner()
+        compare_help = runner.invoke(main, ["compare", "--help"]).output
+        assert "Per-side overrides" in compare_help
+        assert "Build/source evidence" in compare_help
+        dump_help = runner.invoke(main, ["dump", "--help"]).output
+        assert "Toolchain" in dump_help and "Provenance" in dump_help
+
     def test_dump_depth_help_and_mutual_exclusion(self) -> None:
         runner = CliRunner()
         help_out = runner.invoke(main, ["dump", "--help"])

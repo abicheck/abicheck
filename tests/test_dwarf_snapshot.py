@@ -606,8 +606,11 @@ class TestCLIDwarfFlags:
             [sys.executable, "-c", "from abicheck.cli import main; main()", "dump", "--help"],
             capture_output=True, text=True, timeout=10,
         )
-        assert "Preview only" in result.stdout
-        assert "No snapshot is written" in result.stdout
+        # rich-click wraps option help across panel lines; strip box-drawing and
+        # collapse whitespace so word-wrapped phrases match.
+        norm = " ".join(result.stdout.replace("│", "").split())
+        assert "Preview only" in norm
+        assert "No snapshot is written" in norm
 
     def test_compare_help_shows_dwarf_only(self) -> None:
         """compare --help should mention --dwarf-only."""

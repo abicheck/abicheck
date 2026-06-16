@@ -30,6 +30,7 @@ classifiers = [
 ]
 dependencies = [
     "click>=8.0",
+    "rich-click>=1.7",    # progressive-disclosure --help option grouping (G21.8/M1)
     "pyyaml>=6.0",
     "defusedxml>=0.7.1",
     "pyelftools>=0.29",   # ELF/DWARF parsing

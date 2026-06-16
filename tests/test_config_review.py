@@ -223,7 +223,12 @@ class TestReportModeImpact:
 class TestCompareReleaseDefaults:
     def test_scope_toggle_present(self):
         out = CliRunner().invoke(main, ["compare-release", "--help"]).output
-        assert "--scope-public-headers / --no-scope-public-headers" in out
+        # The flag is documented (rich-click wraps the long toggle across panel
+        # lines, so assert the stable primary name) and is a boolean toggle.
+        assert "--scope-public-headers" in out
+        opt = next(p for p in main.commands["compare-release"].params
+                   if getattr(p, "name", "") == "scope_public_headers")
+        assert "--no-scope-public-headers" in opt.secondary_opts
 
     def test_jobs_default_zero(self):
         out = CliRunner().invoke(main, ["compare-release", "--help"]).output
@@ -288,7 +293,12 @@ class TestCompareReleaseSeverityExit:
 class TestAppcompatWarnings:
     def test_scope_toggle_present(self):
         out = CliRunner().invoke(main, ["appcompat", "--help"]).output
-        assert "--scope-public-headers / --no-scope-public-headers" in out
+        # The flag is documented (rich-click wraps the long toggle across panel
+        # lines, so assert the stable primary name) and is a boolean toggle.
+        assert "--scope-public-headers" in out
+        opt = next(p for p in main.commands["appcompat"].params
+                   if getattr(p, "name", "") == "scope_public_headers")
+        assert "--no-scope-public-headers" in opt.secondary_opts
 
     def test_severity_options_present(self):
         out = CliRunner().invoke(main, ["appcompat", "--help"]).output

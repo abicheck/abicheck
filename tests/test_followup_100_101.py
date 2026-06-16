@@ -428,10 +428,16 @@ class TestCliPolicy:
 
         from abicheck.cli import main
         result = CliRunner().invoke(main, ["compare", "--help"])
-        assert "sdk_vendor" in result.output
-        assert "plugin_abi" in result.output
-        assert "strict_abi" in result.output
-        assert "--policy-file" in result.output
+        assert result.exit_code == 0
+        # rich-click wraps the choices metavar across two columns, so scraping
+        # the rendered tokens is unreliable; assert the actual Choice instead.
+        policy = next(p for p in main.commands["compare"].params
+                      if getattr(p, "name", "") == "policy")
+        choices = set(policy.type.choices)  # type: ignore[attr-defined]
+        assert {"sdk_vendor", "plugin_abi", "strict_abi"} <= choices
+        # --policy-file is documented (stable single-token flag name).
+        norm = result.output.replace("│", "").replace("\n", "").replace(" ", "")
+        assert "--policy-file" in norm
 
 
 class TestDiffResultPolicyAwareProperties:
