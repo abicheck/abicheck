@@ -273,3 +273,31 @@ class TestWriteSnapshotOutput:
         _write_snapshot_output(snap, out)
         assert out.exists()
         assert "lib.so" in out.read_text(encoding="utf-8")
+
+    def test_warns_on_empty_requested_layer(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """G21.7: a requested layer that comes back empty triggers a loud warning."""
+        import abicheck.cli as cli_mod
+        import abicheck.cli_buildsource as cbs_mod
+
+        snap = AbiSnapshot(library="lib.so", version="1.0")
+
+        # Fake embed (imported locally from cli_buildsource): pretend a source
+        # tree was processed but produced no facts, so the missing-layer helper
+        # reports the requested L4/L5.
+        def _fake_embed(s, build_info, sources, **kwargs):
+            pass  # leave build_source None; the patched helper drives the warning
+
+        monkeypatch.setattr(cbs_mod, "embed_build_source", _fake_embed)
+        monkeypatch.setattr(
+            cli_mod, "_missing_requested_evidence_layers",
+            lambda pack, mode: ["L4", "L5"],
+        )
+        srcs = tmp_path / "src"
+        srcs.mkdir()
+        _write_snapshot_output(snap, None, sources=srcs, collect_mode="source-target")
+        err = capsys.readouterr().err
+        assert "requested evidence layer(s) not collected" in err
+        assert "L4" in err and "L5" in err
