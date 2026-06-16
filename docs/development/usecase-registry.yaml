@@ -330,15 +330,16 @@ use_cases:
     gap: G21
     plan: docs/development/plans/g21-oneshot-deep-compare.md
     next_steps: >
-      Add a depth dial to compare (--depth quick|standard|deep|max; --max
-      shorthand) that expands to the existing --collect-mode plus header/source
-      auto-discovery, so the common deep path is one command instead of the
+      A --depth headers|build|graph|source|full dial (--max = --depth full)
+      reusing the scan_levels vocabulary/mapping — shipped on dump in PR #422;
+      compare gains it via a one-shot orchestrator that dumps both sides with
+      --sources then compares, so the deep path is one command instead of the
       six-stage dump→collect→merge→compare sequence the oneDAL eval required.
-      Pairs with sibling-path header/source discovery (compile-DB discovery
-      already exists), progressive-disclosure --help grouping via rich-click,
-      and actionable coverage warnings. Rides on existing collection machinery —
-      no new analysis engine. The strict-mode honesty half (empty requested L4
-      => skipped, not partial) already shipped in PR #422.
+      Plus header/source auto-discovery, option collapsing (rich-click groups
+      M1, presets M2, vocab unification M5), actionable coverage warnings, a
+      cross-platform --gcc-option, compile_commands.json auto-synthesis, and a
+      fail-loud signal on an empty requested layer. The strict-mode honesty half
+      (empty requested L4 => skipped) already shipped in PR #422.
 
   - id: UC-WF-wheel-vendored
     axis: workflow
