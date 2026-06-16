@@ -219,6 +219,30 @@ class TestPerSideHeaderBackend:
         assert calls[0].get("header_backend") == "castxml"
         assert calls[1].get("header_backend") == "clang"
 
+    def test_resolve_compare_snapshots_routes_backend_per_side(self, monkeypatch):
+        """Direct unit: _resolve_compare_snapshots derives per-side backend and
+        forwards it to each side's _resolve_input (None inherits the shared one)."""
+        from abicheck import cli_resolve
+
+        seen: list[str] = []
+
+        def fake_resolve_input(_input, _h, _inc, _ver, _lang, **kwargs):
+            seen.append(kwargs["header_backend"])
+            return AbiSnapshot(library="libfoo.so", version=_ver)
+
+        monkeypatch.setattr(cli_resolve, "_resolve_input", fake_resolve_input)
+        old, new = cli_resolve._resolve_compare_snapshots(
+            Path("old.json"), Path("new.json"), None, None,
+            [], [], [], [], "1.0", "2.0", "c++",
+            None, None, None, False, None,
+            False, (), "",
+            header_backend="castxml",
+            old_header_backend=None,        # inherits castxml
+            new_header_backend="clang",     # overrides
+        )
+        assert seen == ["castxml", "clang"]
+        assert old.version == "1.0" and new.version == "2.0"
+
 
 # ── --lang on dump ───────────────────────────────────────────────────────
 
