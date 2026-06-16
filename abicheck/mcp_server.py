@@ -1086,10 +1086,21 @@ def abi_scan(
         inc_paths = [
             _safe_read_path(d, label="include_dir") for d in (include_dirs or [])
         ]
-        phd_paths = [
-            _safe_read_path(d, label="public_header_dir")
-            for d in (public_header_dirs or [])
-        ]
+        phd_paths: list[Path] = []
+        for d in public_header_dirs or []:
+            p = _safe_read_path(d, label="public_header_dir")
+            # Match the CLI option (exists=True, file_okay=False): a public-header
+            # boundary must be a real directory, else apply_provenance would tag
+            # every declaration INTERNAL against a path that matches nothing,
+            # producing misleading origin classification (CodeRabbit).
+            if not p.is_dir():
+                return json.dumps(
+                    {
+                        "status": "error",
+                        "error": f"public_header_dir must be an existing directory: {d}",
+                    }
+                )
+            phd_paths.append(p)
         src_path = _safe_read_path(sources, label="sources") if sources else None
         cdb_path = (
             _safe_read_path(compile_db, label="compile_db") if compile_db else None
