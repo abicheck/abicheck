@@ -214,6 +214,28 @@ inline/template bodies as part of the contract, and
 [Part 6](abi-series/06-transitive-breaks.md) treats exposed dependency types as
 transitive ABI.
 
+### App-swap (ASW): the consumer-scoped runtime check
+
+The most realistic *consumer-level* test is **application software swap (ASW)** —
+build an app against the old library, drop in the new one, and run it. abicheck
+exposes this as [`appcompat`](../user-guide/appcompat.md): it parses the app's
+required symbols, compares old/new in full mode, and **filters** findings to the
+changes that affect *that* app. ASW is powerful and narrow at the same time:
+
+- It **proves** real loader/linker behavior and tested execution paths — "this
+  app does not import the removed symbol", "this app needs symbol version X the
+  new lib lacks".
+- It **cannot** speak for the whole contract: untested public API, *future*
+  consumers, silent layout corruption a test never exercises, and source-only
+  (recompile) breaks all stay invisible.
+
+So ASW is **consumer-scoped** compatibility; library `compare`/`scan` is
+**contract-scoped**. Use both — `compare`/`scan` protect the library contract,
+ASW protects a specific deployment. ASW is one of several *methods*, each seeing
+different evidence; the full comparison of methods (libabigail, ABICC, app-swap,
+bundle scan) is in
+[Evidence & Detectability](evidence-and-detectability.md#2-methods-compared-by-the-evidence-they-use).
+
 ---
 
 ### Feed abicheck `.so` + debug info + headers for the best result
@@ -272,6 +294,45 @@ signature changes; C symbols do not. ² A few source-only changes (e.g. enum/fie
 *renames*) are visible in DWARF too; most (default args, `explicit`, `const`
 values) leave no binary trace and require headers. The authoritative per-change
 table is in [Limitations](limitations.md#source-only-changes-invisible-to-binaryobject-analysis).
+
+### Going deeper than artifacts: the source scan
+
+Artifact comparison (L0–L2) proves what the *shipped binary* did. To recover the
+source-only facts it cannot see — `#define` macros, `constexpr` values,
+default-argument values, inline/template **bodies**, uninstantiated templates —
+abicheck can read the build's compile database (**L3**) and replay the sources
+(**L4**), and fold a source/build reachability graph (**L5**). The one-shot
+driver is `abicheck scan`. It exposes two orthogonal "level" axes — the `L0`–`L5`
+*evidence layers* (what it sees + authority) and the `s0`–`s6` *source-analysis
+methods* (how it gathers L3–L5) — fully explained in
+[Scan Levels (S vs L)](scan-and-evidence-levels.md). The governing **authority
+rule**: source/build evidence (L3/L4/L5) explains, localizes, scopes, or raises
+its own source-/API-level findings, but **never deletes an artifact-proven
+break**.
+
+`scan --mode` picks a fixed depth: `pr` (the cheap per-PR gate, diff-seeded L4),
+`pr-deep` (PR + the full L5 graph), `baseline` (a full-depth release snapshot),
+and `audit` — an **intra-version single-build hygiene lint that needs no previous
+version**. Audit surfaces "bad ABI hygiene" visible from one build: accidental
+exports, private-header leaks, unversioned symbols, exported RTTI for internal
+types, and cross-source mismatches. Worked example cases:
+
+| Family | Example case | What it shows |
+|--------|--------------|---------------|
+| Accidental export (`exported_not_public`) | [case143](../examples/case143_audit_accidental_export.md) | symbol exported but in no public header |
+| Private-header leak (`private_header_leak`) | [case144](../examples/case144_audit_private_header_leak.md) | public API pulls an unshipped header |
+| Unversioned export (`unversioned_exported_symbol`) | [case145](../examples/case145_audit_unversioned_export.md) | export with no version node though a scheme exists |
+| Exported RTTI for internal type (`rtti_for_internal_type`) | [case146](../examples/case146_audit_rtti_for_internal.md) | `_ZTI`/`_ZTV` leaked for a private-header type |
+| Header/build mismatch (`header_build_context_mismatch`) | [case148](../examples/case148_xcheck_header_build_mismatch.md) | L2 macros ↔ L3 flags disagree |
+| ODR type variant (`odr_type_variant`) | [case149](../examples/case149_xcheck_odr_variant.md) | one type, two per-TU layouts (L4 ↔ L4) |
+| Bidirectional export ↔ decl (`exported_not_public`/`public_not_exported`) | [case150](../examples/case150_xcheck_export_public_pair.md) | L0 exports ↔ L2 decls, both directions |
+| Provider corroboration | [case151](../examples/case151_xcheck_provider_matrix.md) | confidence grows with how many sources agree |
+| Depth ladder | [case147](../examples/case147_scan_depth_ladder.md) | same input answered at S3 vs deeper, honest coverage |
+
+The throughline of the cross-source cases: a finding invisible or ambiguous to
+**any single source** resolves only by crosschecking two — and `case147` shows
+the scan stating the depth it *actually reached*, never a bare "scan failed".
+Practical recipes are in the [Source-Scan Levels guide](../user-guide/scan-levels.md).
 
 ## Detection coverage and roadmap
 
