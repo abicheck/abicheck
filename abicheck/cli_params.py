@@ -61,6 +61,49 @@ class PolicyFileParam(click.ParamType):
 POLICY_FILE_PARAM = PolicyFileParam()
 
 
+class DepthParam(click.ParamType):
+    """Click type for the unified ``--depth`` dial (ADR-037 D5/D6).
+
+    Accepts the user-facing ladder ``{symbols,headers,build,source,full}`` and
+    resolves deprecated spellings (currently the G21 ``graph`` rung → ``source``)
+    to their replacement, printing a one-line stderr deprecation note. The L5
+    graph is built internally at ``--depth source`` (D6), so ``graph`` is no
+    longer a user-facing rung — but it keeps working for one release.
+    """
+
+    name = "depth"
+
+    def convert(self, value: Any, param: Any, ctx: Any) -> str:
+        from .buildsource.scan_levels import DEPRECATED_DEPTHS, USER_DEPTHS
+
+        v = str(value).lower()
+        user_values = [d.value for d in USER_DEPTHS]
+        if v in user_values:
+            return v
+        if v in DEPRECATED_DEPTHS:
+            replacement = DEPRECATED_DEPTHS[v].value
+            click.echo(
+                f"warning: --depth {v} is deprecated (ADR-037 D6); use "
+                f"--depth {replacement}. The L5 graph is built automatically at "
+                "--depth source.",
+                err=True,
+            )
+            return replacement
+        choices = ", ".join(user_values)
+        raise click.BadParameter(
+            f"{value!r} is not one of {choices}.", ctx=ctx, param=param
+        )
+
+    def get_metavar(self, param: Any, ctx: Any = None) -> str:
+        from .buildsource.scan_levels import USER_DEPTHS
+
+        return "[" + "|".join(d.value for d in USER_DEPTHS) + "]"
+
+
+#: Shared instance for every ``--depth`` option.
+DEPTH_PARAM = DepthParam()
+
+
 def _load_suppression_and_policy(
     suppress: Path | None, policy: str, policy_file_path: Path | None,
     *,

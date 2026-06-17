@@ -154,6 +154,22 @@ debug-resolution is uniform — all *via the shared decorator*, not copies.
 
 ### Phase 3 — Depth vocabulary + L5-internal (D5, D6)
 
+**Status: landed.** One user-facing dial `--depth {symbols,headers,build,source,full}`
+now spans `compare`/`deep-compare`/`dump`/`scan` via a shared `DepthParam`
+(`cli_params.py`): it adds `symbols` (L0/L1, suppresses the L2 AST), drops `graph`
+as a user rung, and resolves the deprecated `--depth graph` → `source` with a
+stderr note. `compare` gained `--depth`/`--max` (folded into the collect mode the
+same way `dump`/`deep-compare` do). `--collect-mode` is now a hidden deprecated
+alias that warns when used. The L5 graph stays internal — built automatically at
+`--depth source` — and `EvidenceDepth.GRAPH` survives only for scan's `pr-deep`
+preset (determinism). A new `.abicheck.yml` `sources.graph: summary|full` knob
+(default `summary`, `BuildConfig.graph_detail`) caps/deepens the graph replay
+scope (`effective_graph_scope`). The deprecated spellings are catalogued in
+`cli_options.DEPRECATED_FLAGS` (the window-enforcing resolver lands in Phase 7).
+Covered by `tests/test_depth_vocabulary.py` (alias resolution, monotone ladder,
+graph-at-source, symbols-only, config knob). `--source-method`/`--mode` on `scan`
+are unchanged — their move to config is Phase 5 (D4), not D5.
+
 **Work.** `--depth {symbols,headers,build,source,full}` + `--max` on
 `@evidence_options` (incl. per-side `--old/new-sources`, `--old/new-build-info`).
 Map deprecated `--collect-mode`/`--mode`/standalone `--source-method` **and the

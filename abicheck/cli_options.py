@@ -28,7 +28,7 @@ from typing import TypeVar
 
 import click
 
-from .cli_params import POLICY_FILE_PARAM
+from .cli_params import DEPTH_PARAM, POLICY_FILE_PARAM
 
 F = TypeVar("F", bound=Callable[..., object])
 
@@ -331,22 +331,18 @@ def build_source_dump_options(func: F) -> F:
     func = click.option(
         "--collect-mode", "collect_mode",
         type=click.Choice(["off", "build", "graph-build", "source-changed", "source-target", "graph-summary", "graph-full"]),
-        default="source-target", show_default=True,
-        help="ADR-033 D2 CI evidence mode selecting which layers to collect from "
-        "--sources/--build-info: 'build' captures L3 build context only (no source "
-        "replay), 'graph-build' adds the L5 structural graph (build options + "
-        "target/source/header nodes) from L3 alone — no L4 parse, feasible on "
-        "monorepos, 'source-*'/'graph-*' collect L3+L4+L5 at the matching replay "
-        "scope, 'off' embeds nothing. Prefer the friendlier --depth preset.",
+        default="source-target", show_default=False, hidden=True,
+        help="DEPRECATED (ADR-037 D5): internal ADR-033 D2 evidence mode. Prefer "
+        "the unified --depth dial; kept as a hidden alias for one release.",
     )(func)
     func = click.option(
         "--depth", "depth",
-        type=click.Choice(["headers", "build", "graph", "source", "full"]),
+        type=DEPTH_PARAM,
         default=None,
-        help="Evidence-depth preset over --collect-mode (same vocabulary as "
-        "`scan --depth`): headers=L2 only, build=L3 build context, graph=L5 "
-        "graph from L3, source=L3-L5 (changed scope), full=L3-L5 (full). "
-        "Mutually exclusive with --collect-mode.",
+        help="Unified evidence-depth dial (ADR-037 D5; same vocabulary as "
+        "`compare`/`scan --depth`): symbols=L0/L1 only, headers=+L2 AST (default), "
+        "build=+L3 build context, source=+L4 replay & the L5 graph, full=deepest. "
+        "--max == --depth full.",
     )(func)
     func = click.option(
         "--max", "max_depth", is_flag=True, default=False,
@@ -419,10 +415,20 @@ def build_source_compare_options(func: F) -> F:
     func = click.option(
         "--collect-mode", "collect_mode",
         type=click.Choice(["off", "build", "graph-build", "source-changed", "source-target", "graph-summary", "graph-full"]),
-        default="off", show_default=True,
-        help="Inline collection mode (ADR-033 D2). 'off' uses embedded facts and "
-        "any explicitly-provided pack directories. Other modes are recognized "
-        "and reported in the coverage table but not yet collected inline.",
+        default="off", show_default=False, hidden=True,
+        help="DEPRECATED (ADR-037 D5): internal ADR-033 D2 evidence mode. Prefer "
+        "the unified --depth dial; kept as a hidden alias for one release.",
+    )(func)
+    func = click.option(
+        "--max", "max_depth", is_flag=True, default=False,
+        help="Shorthand for --depth full (collect the deepest evidence available).",
+    )(func)
+    func = click.option(
+        "--depth", "depth", type=DEPTH_PARAM, default=None,
+        help="Unified evidence-depth dial (ADR-037 D5): symbols=L0/L1 only, "
+        "headers=+L2 AST (default), build=+L3, source=+L4 replay & the L5 graph, "
+        "full=deepest. --max == --depth full. Deeper-than-headers needs "
+        "--old/new-sources or --old/new-build-info.",
     )(func)
     func = click.option(
         "--new-sources", "new_sources", type=pack_dir, default=None,
@@ -502,6 +508,27 @@ INTENTIONAL_SUBSET: dict[tuple[str, str], str] = {
 
 #: Flag names knowingly carrying two defaults across decorators, deferred to a
 #: later phase rather than hidden. ``--collect-mode`` differs between the dump
-#: embed default (source-target) and the compare read default (off); G22 Phase 3
-#: collapses both into the unified ``--depth`` dial, which resolves it.
+#: embed default (source-target) and the compare read default (off); it is now a
+#: hidden deprecated alias behind the unified ``--depth`` dial (G22 Phase 3) and
+#: its two-default-ness rides out the deprecation window in ``DEPRECATED_FLAGS``.
 DEFERRED_MULTI_DEFAULT: frozenset[str] = frozenset({"--collect-mode"})
+
+
+# ── ADR-037 D5 / §Backward-compat: deprecated-flag registry (G22 Phase 3) ─────
+#
+# Single source of truth for renamed/removed CLI surface. Each entry records the
+# replacement and a one-line note; the deprecation *resolver* + window-enforcing
+# test land in Phase 7 (kept advisory until 1.0). Today the live deprecations
+# already warn at their option sites (``--collect-mode`` in the command bodies,
+# ``--depth graph`` in ``cli_params.DepthParam``); this table documents them in
+# one place so nothing is removed silently.
+DEPRECATED_FLAGS: dict[str, tuple[str, str]] = {
+    "--collect-mode": (
+        "--depth",
+        "internal ADR-033 evidence mode; use the unified --depth dial (ADR-037 D5).",
+    ),
+    "--depth=graph": (
+        "--depth=source",
+        "the L5 graph is built internally at --depth source (ADR-037 D6).",
+    ),
+}

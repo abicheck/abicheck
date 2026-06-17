@@ -96,6 +96,11 @@ class BuildConfig:
     compile_db: str = ""
     public_headers: list[str] = field(default_factory=list)
     exclude: list[str] = field(default_factory=list)
+    #: L5 source-graph detail cap (ADR-037 D6): ``summary`` (default — changed
+    #: scope, the cheap CI graph) or ``full`` (full replay scope). The user no
+    #: longer selects a ``graph-*`` mode on the CLI; ``--depth source`` builds the
+    #: graph at this configured detail.
+    graph_detail: str = "summary"
 
     @classmethod
     def from_dict(cls, data: dict[str, object]) -> BuildConfig:
@@ -116,12 +121,18 @@ class BuildConfig:
                 return [v]
             return []
 
+        graph_detail = _str(sources, "graph", "summary") or "summary"
+        if graph_detail not in ("summary", "full"):
+            raise ValueError(
+                f"sources.graph must be 'summary' or 'full', got {graph_detail!r}"
+            )
         return cls(
             system=_str(build, "system", "auto") or "auto",
             query=_str(build, "query"),
             compile_db=_str(build, "compile_db"),
             public_headers=_strs(sources, "public_headers"),
             exclude=_strs(sources, "exclude"),
+            graph_detail=graph_detail,
         )
 
 
@@ -154,6 +165,18 @@ def discover_build_config(source_tree: Path | None) -> Path | None:
 def is_pack_dir(path: Path | None) -> bool:
     """True when *path* is a pack directory produced by ``abicheck collect``."""
     return path is not None and path.is_dir() and (path / "manifest.json").is_file()
+
+
+def effective_graph_scope(graph_detail: str, scope: str) -> str:
+    """Apply the ADR-037 D6 ``sources.graph`` detail cap to a replay scope.
+
+    ``full`` deepens a ``changed`` scope to ``target`` (full replay); ``summary``
+    (the default) leaves the requested scope untouched. The override only ever
+    *widens* — it never silently drops evidence.
+    """
+    if graph_detail == "full" and scope == "changed":
+        return "target"
+    return scope
 
 
 def collect_inline_pack(
@@ -194,6 +217,7 @@ def collect_inline_pack(
     L4 source replay and L5 graph entirely. ``L5`` requires ``L4``.
     """
     cfg = build_config or BuildConfig()
+    scope = effective_graph_scope(cfg.graph_detail, scope)
     merged = BuildEvidence()
     extractors: list[ExtractorRecord] = []
 

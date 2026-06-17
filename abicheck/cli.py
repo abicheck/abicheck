@@ -507,9 +507,17 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         click.get_current_context().get_parameter_source("collect_mode")
         == click.core.ParameterSource.COMMANDLINE
     )
+    if collect_mode_explicit:
+        click.echo(
+            "warning: --collect-mode is deprecated (ADR-037 D5); use --depth.",
+            err=True,
+        )
     collect_mode = resolve_dump_depth(
         depth, max_depth, collect_mode, collect_mode_explicit,
     )
+    # --depth symbols suppresses the L2 header AST (symbols-only dump, ADR-037 D5).
+    if depth == "symbols":
+        headers = ()
 
     # An *explicitly* requested deep evidence depth (--depth/--max or an explicit
     # --collect-mode) collects nothing without a source tree / build context:
@@ -1130,6 +1138,7 @@ def compare_cmd(
     old_build_info: Path | None = None, new_build_info: Path | None = None,
     old_sources: Path | None = None, new_sources: Path | None = None,
     collect_mode: str = "off",
+    depth: str | None = None, max_depth: bool = False,
     probe_matrix_old: Path | None = None,
     probe_matrix_new: Path | None = None,
 ) -> None:
@@ -1188,6 +1197,23 @@ def compare_cmd(
 
     if annotate_additions and not annotate:
         raise click.UsageError("--annotate-additions requires --annotate")
+
+    # Fold the unified --depth/--max dial into the underlying collect mode
+    # (ADR-037 D5), the same way `dump`/`deep-compare` do. The hidden
+    # --collect-mode alias still works but warns; --depth symbols suppresses the
+    # L2 header AST (symbols-only).
+    collect_mode_explicit = (
+        click.get_current_context().get_parameter_source("collect_mode")
+        == click.core.ParameterSource.COMMANDLINE
+    )
+    if collect_mode_explicit:
+        click.echo(
+            "warning: --collect-mode is deprecated (ADR-037 D5); use --depth.",
+            err=True,
+        )
+    collect_mode = resolve_dump_depth(depth, max_depth, collect_mode, collect_mode_explicit)
+    if depth == "symbols":
+        headers, old_headers_only, new_headers_only = (), (), ()
 
     # Reconcile the --debug-format selector with the legacy --btf/--ctf/--dwarf
     # flags. The selector supersedes the legacy flags whenever it is given:

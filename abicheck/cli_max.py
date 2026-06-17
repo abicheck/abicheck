@@ -47,6 +47,7 @@ from .cli_options import (
     scope_options,
     two_sided_input_options,
 )
+from .cli_params import DEPTH_PARAM
 
 _DIR = click.Path(exists=True, file_okay=False, path_type=Path)
 
@@ -136,12 +137,11 @@ def _prepare_side(
 # Two-sided header/include/version family (the per-side version labels also come
 # from this decorator; --lang and the --header-backend trio stay inline below).
 @two_sided_input_options
-# ── Depth dial (shared vocabulary with `dump`/`scan`) ────────────────────────
-@click.option("--depth", "depth", type=click.Choice(["headers", "build", "graph", "source", "full"]),
-              default=None,
-              help="Evidence depth for both sides (same vocabulary as `dump --depth`): "
-                   "headers=L2 only (== plain compare), build=L3, graph=L5-from-L3, "
-                   "source=L3-L5 (changed scope), full=L3-L5 (full).")
+# ── Depth dial (unified vocabulary with `compare`/`dump`/`scan`, ADR-037 D5) ──
+@click.option("--depth", "depth", type=DEPTH_PARAM, default=None,
+              help="Evidence depth for both sides (unified dial): symbols=L0/L1, "
+                   "headers=+L2 AST (== plain compare), build=+L3, source=+L4 "
+                   "replay & the L5 graph, full=deepest.")
 @click.option("--max", "max_depth", is_flag=True, default=False,
               help="Shorthand for --depth full (the deepest evidence available).")
 # ── Header backend + language (per-side labels come from the shared family) ────
@@ -224,6 +224,9 @@ def deep_compare_cmd(
     # The depth the embedded snapshots carry; forwarded to compare so its
     # coverage table reflects the evidence actually requested.
     compare_collect_mode = resolve_dump_depth(depth, max_depth, "off", False)
+    # --depth symbols suppresses the L2 header AST on both sides (ADR-037 D5).
+    if depth == "symbols":
+        headers, old_headers_only, new_headers_only = (), (), ()
 
     # A depth that collects L3-L5 needs *some* evidence to collect from. A side
     # only fails this when it is a native binary that must be dumped yet has no
