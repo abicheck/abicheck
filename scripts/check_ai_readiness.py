@@ -1347,6 +1347,97 @@ def _check_one_default_per_flag(f: Findings) -> None:
             )
 
 
+# ── ADR-037 D10.3: MCP ⇄ CLI name-map completeness ───────────────────────────
+#
+# The single ``MCP_CLI_NAME_MAP`` table (``cli_options.py``) reconciles the MCP
+# tool's JSON parameter names with the ``compare`` CLI flags so the two
+# front-ends can't silently diverge. This gate keys on the *MCP* side: every
+# ``abi_compare`` parameter must appear in the map (a CLI-flag-side completeness
+# check that needs the live Click command runs in ``tests/test_cli_contract.py``).
+
+#: ``abi_compare`` params that are framework plumbing, not part of the shared
+#: request surface, so they need no CLI-flag row.
+_MCP_NAME_MAP_EXEMPT_PARAMS: frozenset[str] = frozenset()
+
+
+def _dict_literal_keys(tree: ast.Module, name: str) -> set[str] | None:
+    """Return the string keys of a module-level ``name = {...}`` dict literal.
+
+    ``None`` when no such assignment (or annotated assignment) with a dict
+    literal value is found, so the caller can flag a missing table rather than
+    silently passing. Iterates ``tree.body`` (not ``ast.walk``) so a same-named
+    symbol nested in a function/class can never shadow the module-level table.
+    """
+    for node in tree.body:
+        target_names: list[str] = []
+        value: ast.expr | None = None
+        if isinstance(node, ast.Assign):
+            target_names = [t.id for t in node.targets if isinstance(t, ast.Name)]
+            value = node.value
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            target_names = [node.target.id]
+            value = node.value
+        if name in target_names and isinstance(value, ast.Dict):
+            return {
+                k.value
+                for k in value.keys
+                if isinstance(k, ast.Constant) and isinstance(k.value, str)
+            }
+    return None
+
+
+def _function_param_names(tree: ast.Module, func_name: str) -> list[str] | None:
+    """Return the positional/keyword parameter names of a module-level
+    ``def func_name(...)``.
+
+    Iterates ``tree.body`` (not ``ast.walk``) so the lookup is scoped to
+    module-level definitions and a nested function of the same name cannot match.
+    """
+    for node in tree.body:
+        if isinstance(node, ast.FunctionDef) and node.name == func_name:
+            a = node.args
+            return [p.arg for p in (*a.posonlyargs, *a.args, *a.kwonlyargs)]
+    return None
+
+
+def _check_mcp_cli_name_map(f: Findings) -> None:
+    """ADR-037 D10.3: every ``abi_compare`` MCP param is in ``MCP_CLI_NAME_MAP``."""
+    co_path = PKG / "cli_options.py"
+    mcp_path = PKG / "mcp_server.py"
+    if not co_path.is_file() or not mcp_path.is_file():
+        return
+    try:
+        co_tree = ast.parse(_read(co_path), filename=_rel(co_path))
+        mcp_tree = ast.parse(_read(mcp_path), filename=_rel(mcp_path))
+    except SyntaxError:
+        return
+    keys = _dict_literal_keys(co_tree, "MCP_CLI_NAME_MAP")
+    if keys is None:
+        f.err(
+            "cli-contract",
+            f"{_rel(co_path)}: MCP_CLI_NAME_MAP table not found (ADR-037 D10.3); "
+            "it is the single source of truth reconciling MCP params ⇄ CLI flags.",
+        )
+        return
+    params = _function_param_names(mcp_tree, "abi_compare")
+    if params is None:
+        f.err(
+            "cli-contract",
+            f"{_rel(mcp_path)}: MCP tool `abi_compare` not found; its param ⇄ flag "
+            "name-map coverage (ADR-037 D10.3) could not be verified.",
+        )
+        return
+    for p in params:
+        if p in _MCP_NAME_MAP_EXEMPT_PARAMS or p in keys:
+            continue
+        f.err(
+            "cli-contract",
+            f"{_rel(mcp_path)}: MCP param `abi_compare.{p}` is absent from "
+            "`MCP_CLI_NAME_MAP` (ADR-037 D10.3) — add a row mapping it to its "
+            "`compare` flag (or `None` if it has no CLI equivalent).",
+        )
+
+
 def check_cli_contract(f: Findings) -> None:
     """ERROR if a front-end module calls a Tier-1 core entry point
     (``checker.compare``) directly instead of routing through the Tier-2 service.
@@ -1387,6 +1478,8 @@ def check_cli_contract(f: Findings) -> None:
     # D10.2 shared-decorator coverage + D10.4 one-default-per-flag (ADR-037 D3).
     _check_decorator_coverage(f)
     _check_one_default_per_flag(f)
+    # D10.3 MCP ⇄ CLI name-map completeness (ADR-037 D8/D9 cross-front-end parity).
+    _check_mcp_cli_name_map(f)
 
 
 # ---------------------------------------------------------------------------

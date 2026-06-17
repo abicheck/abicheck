@@ -41,6 +41,16 @@ from .errors import ValidationError
 #: Languages the C/C++ frontends accept (mirrors the CLI ``--lang`` choices).
 SUPPORTED_LANGS = frozenset({"c", "c++"})
 
+#: AST frontends the ``--ast-frontend`` flag accepts (ADR-037 D8). ``auto`` /
+#: ``castxml`` / ``clang`` drive header-AST parsing *and* L4 source-ABI replay;
+#: ``android`` is a source-ABI-only value (it reuses a pre-captured header-abi
+#: dump and has no header-AST path), so selecting it without source inputs is a
+#: validation error (D9).
+SUPPORTED_FRONTENDS = frozenset({"auto", "castxml", "clang", "android"})
+
+#: The subset of :data:`SUPPORTED_FRONTENDS` valid for header-AST parsing.
+HEADER_AST_FRONTENDS = frozenset({"auto", "castxml", "clang"})
+
 
 def _path_tuple(paths: Iterable[Path | str] | None) -> tuple[Path, ...]:
     """Normalise an optional iterable of path-likes into a tuple of ``Path``.
@@ -119,6 +129,8 @@ class CompareRequest:
     old: InputSpec
     new: InputSpec
     lang: str = "c++"
+    frontend: str = "auto"
+    has_sources: bool = False
     policy: str = "strict_abi"
     policy_file_path: Path | None = None
     suppress: Path | None = None
@@ -131,15 +143,34 @@ class CompareRequest:
         """Return a list of human-readable validation problems (empty == valid).
 
         Lives here (Tier 2) so the CLI and MCP front-ends surface *identical*
-        error text for the same bad request (ADR-037 D9 / goal AC 8). Phase 6
-        extends this with mutual-exclusion and depth-feasibility rules.
+        error text for the same bad request (ADR-037 D9 / goal AC 8): value
+        validation (language / AST frontend enums) and the cross-flag
+        feasibility rules (an ``android`` frontend has no header-AST path, so it
+        needs source inputs).
         """
         errors: list[str] = []
         if self.lang.lower() not in SUPPORTED_LANGS:
             allowed = ", ".join(sorted(SUPPORTED_LANGS))
             errors.append(f"unsupported language {self.lang!r}: choose from {allowed}")
+        frontend = self.frontend.lower()
+        if frontend not in SUPPORTED_FRONTENDS:
+            allowed = ", ".join(sorted(SUPPORTED_FRONTENDS))
+            errors.append(
+                f"unsupported AST frontend {self.frontend!r}: choose from {allowed}"
+            )
+        elif frontend == "android" and not self.has_sources:
+            # D8/D9: 'android' reuses a pre-captured header-abi dump; it has no
+            # header-AST path, so a header-only run can't use it.
+            errors.append(
+                "the 'android' AST frontend is source-ABI only (it has no "
+                "header-AST path); supply source inputs (--sources) to use it"
+            )
         if not self.policy:
             errors.append("policy profile name must not be empty")
+        # D9 pre-flight: a --policy-file path that doesn't exist is a hard error
+        # here (Tier 2), so CLI and MCP surface the same message before any work.
+        if self.policy_file_path is not None and not Path(self.policy_file_path).exists():
+            errors.append(f"policy file not found: {self.policy_file_path}")
         return errors
 
     def validate(self) -> CompareRequest:
@@ -158,6 +189,8 @@ class CompareRequest:
 
 
 __all__ = [
+    "HEADER_AST_FRONTENDS",
+    "SUPPORTED_FRONTENDS",
     "SUPPORTED_LANGS",
     "CompareRequest",
     "InputSpec",

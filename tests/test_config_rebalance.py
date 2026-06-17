@@ -313,3 +313,60 @@ class TestExitSchemeExplicit:
             main, ["compare", str(old_f), str(new_f), "--config", str(cfg)]
         )
         assert res.exit_code == 2
+
+
+# ── G22 Phase 7: config forward-compat (version + unknown-key warning) ────────
+
+
+class TestConfigForwardCompat:
+    """ADR-037 §Backward compatibility: `.abicheck.yml` carries `version:`, and an
+    unknown key **warns** (never errors) so an older abicheck still loads a config
+    written for a newer schema."""
+
+    def test_version_round_trips(self) -> None:
+        cfg = BuildConfig.from_dict({"version": 1})
+        assert cfg.version == 1
+        assert cfg.to_dict()["version"] == 1
+        # Round-trip is stable and emits no unknown-key warning.
+        assert BuildConfig.from_dict(cfg.to_dict()).version == 1
+
+    def test_unknown_top_key_warns_but_loads(self) -> None:
+        with pytest.warns(UserWarning, match="future_feature"):
+            cfg = BuildConfig.from_dict(
+                {"version": 2, "future_feature": {"enabled": True}}
+            )
+        # Load still succeeds: known keys parse, the unknown one is ignored.
+        assert cfg.version == 2
+
+    def test_unknown_block_key_warns_but_loads(self) -> None:
+        with pytest.warns(UserWarning, match=r"sources\.'?nonsense'?"):
+            cfg = BuildConfig.from_dict(
+                {"sources": {"public_headers": ["api.h"], "nonsense": 1}}
+            )
+        # The recognized sibling key still parsed.
+        assert cfg.public_headers == ["api.h"]
+
+    def test_known_config_does_not_warn(self, recwarn: pytest.WarningsRecorder) -> None:
+        BuildConfig.from_dict(
+            {
+                "version": 1,
+                "build": {"system": "cmake"},
+                "sources": {"public_headers": ["a.h"], "graph": "full"},
+                "severity": {"preset": "strict"},
+                "scope": {"public": True},
+                "suppression": {"strict": True},
+                "source": {"method": "s4"},
+                "exit_code_scheme": "severity",
+                # Keys parsed by sibling modules must not trip the warning.
+                "risk_rules": {},
+                "crosschecks": {},
+            }
+        )
+        assert [w for w in recwarn.list if issubclass(w.category, UserWarning)] == []
+
+    def test_load_build_config_unknown_key_warns(self, tmp_path: Path) -> None:
+        cfg_path = tmp_path / ".abicheck.yml"
+        cfg_path.write_text("version: 3\nbrand_new_block:\n  x: 1\n")
+        with pytest.warns(UserWarning, match="brand_new_block"):
+            cfg = load_build_config(cfg_path)
+        assert cfg.version == 3

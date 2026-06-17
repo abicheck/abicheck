@@ -277,6 +277,36 @@ fields).
 
 ### Phase 6 — `--ast-frontend`, MCP name-map, validation, docs (D8, D9, D10.3)
 
+**Status: partially landed.** `--header-backend` → **`--ast-frontend`** (D8) on
+`compare`/`deep-compare`/`dump`, with `--old/new-ast-frontend` per-side and the
+`--header-backend` spellings kept as working aliases on the same Click params;
+the env knob is now `ABICHECK_AST_FRONTEND` (legacy `ABICHECK_HEADER_BACKEND`
+honored as a fallback in `dumper._resolve_header_backend`). Each command body
+prints a one-line stderr deprecation note when a legacy spelling is used
+(`cli_options.note_deprecated_ast_frontend`, advisory until 1.0); the renamed
+flags are catalogued in `DEPRECATED_FLAGS`. The single **`MCP_CLI_NAME_MAP`**
+(D10.3) reconciles every `abi_compare` MCP param with its `compare` flag and is
+enforced by a new `cli-contract` sub-check (`_check_mcp_cli_name_map`) plus the
+live `tests/test_cli_contract.py::test_mcp_cli_name_map_complete`. `CompareRequest`
+gained a `frontend` field and `validate()` now rejects an out-of-enum
+`--ast-frontend` (with the allowed set) and an `android` frontend without source
+inputs (D9), threaded through `service.run_compare`. Covered by
+`tests/test_api_types.py` (frontend enum + android-needs-sources) and the new
+`tests/test_cli_contract.py` D8/D10.3 cases.
+
+**L4-frontend unification (now landed).** `--ast-frontend` flows through the
+dump inline-collection chain (`dump`/`deep-compare` → `_write_snapshot_output`
+→ `embed_build_source` → `collect_inline_pack(extractor=…)`), so one frontend
+choice drives both the L2 header AST and the L4 source-ABI replay (`auto`/
+`castxml`/`clang`). The `android` value stays on `collect`'s explicit
+`--source-abi-extractor` — it has no header-AST path, so it is not exposed on
+the header-AST commands (the `CompareRequest.validate()` android-needs-sources
+rule guards the API path). `CompareRequest.validate()` also pre-flights a
+missing `--policy-file` path (D9). The only non-blocking follow-up is cosmetic
+doc regen (a standalone `cli-flags.md` page); per the docs convention we prefer
+`--help` over a hand-rolled flag table, and the `.abicheck.yml` blocks are
+documented in `concepts/build-source-data.md`.
+
 **Work.** Rename `--header-backend` → `--ast-frontend` (+ `ABICHECK_AST_FRONTEND`
 env, + old aliases); wire it to the L4 extractor selection too. Introduce the
 single `MCP_CLI_NAME_MAP` and align `mcp_server.py` params to it (D10.3 check).
@@ -296,6 +326,22 @@ regen is mechanical (mkdocs `--strict` is the guard).
 front-ends; docs build `--strict`.
 
 ### Phase 7 — Backward-compat scaffolding (future-enabled)
+
+**Status: landed.** `cli_options` now exposes the single deprecation-window
+resolver over the `DEPRECATED_FLAGS` registry: `resolve_deprecated_flag(spelling)`
+→ `(replacement, reason)`, `deprecated_flags_in_argv(argv)` (scans for every
+deprecated spelling — both flag-level renames and value-level deprecations like
+`--depth=graph`, matched as `--depth graph` too), and `note_deprecated_flags(argv)`
+(the combined one-line note the 1.0 switch-on will route all front-ends through;
+the live per-flag sites stay until then). `.abicheck.yml` is forward-compatible:
+`BuildConfig` carries `version:` and `from_dict` **warns** (never errors) on any
+unknown top-level or in-block key (`_KNOWN_TOP_KEYS`/`_KNOWN_BLOCK_KEYS`; sibling
+`risk_rules`/`crosschecks` are recognized so they don't trip it). The
+deprecation-window test stays **advisory** (a pytest table-test, not an
+AI-readiness ERROR gate) until 1.0 per ADR-037 §Backward compatibility. Covered
+by `tests/test_cli_contract.py` (`test_every_deprecated_flag_resolves`,
+`test_deprecated_flags_in_argv`, `test_note_deprecated_flags_combines`) and
+`tests/test_config_rebalance.py::TestConfigForwardCompat`.
 
 **Work.** Build the `DEPRECATED_FLAGS` resolver + stderr deprecation notes;
 test that every alias in the table still resolves. Add `version:` to
@@ -337,13 +383,16 @@ The "~62 → ~20 flags" and "no divergence" claims are testable, not aspirationa
 
 ## Definition of done (when implementation lands)
 
-Phases 1–5 have landed (typed `CompareRequest` + single `service` chokepoint;
-the shared option-family decorators; the unified `--depth` vocabulary; `compare`
-input-type dispatch folding `compare-release`/`deep-compare`; and the
-`.abicheck.yml` config rebalance with explicit `--exit-code-scheme`), along with
-the `cli-contract` gate and its test mirror. G22 stays **in progress** and
-ADR-037 stays `Proposed` until the remaining phases (6–7) merge.
-The gap is considered closed only once registry `UC-WF-cli-contract` can flip to
-`complete` with evidence pointing at `api_types.py`, the `cli-contract` gate,
-`tests/test_cli_contract.py`, and the alias/round-trip tests — at which point
-ADR-037 moves to Accepted — implemented.
+**All seven phases have landed.** Typed `CompareRequest` + single `service`
+chokepoint; the shared option-family decorators; the unified `--depth`
+vocabulary; `compare` input-type dispatch folding `compare-release`/
+`deep-compare`; the `.abicheck.yml` config rebalance with explicit
+`--exit-code-scheme`; `--header-backend` → `--ast-frontend` (one frontend across
+L2 header AST and L4 source-ABI replay) + `MCP_CLI_NAME_MAP` +
+`CompareRequest.validate()`; and the deprecation-window resolver + config
+forward-compat — all enforced by the `cli-contract` gate (D10.1–D10.4) and its
+test mirror. Registry `UC-WF-cli-contract` is now **complete** (evidence:
+`api_types.py`, the `cli-contract` gate, `tests/test_cli_contract.py`, and the
+alias/round-trip/forward-compat tests) and **ADR-037 is Accepted — implemented**.
+The sole residual is the `--ast-frontend android` value, which remains on
+`collect`'s `--source-abi-extractor` because it has no header-AST path.

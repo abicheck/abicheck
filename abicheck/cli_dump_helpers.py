@@ -66,6 +66,7 @@ class _WriteSnapshotOutput(Protocol):
         collect_mode: str,
         build_query: str | None = ...,
         build_compile_db: str | None = ...,
+        extractor: str = ...,
     ) -> None: ...
 
 
@@ -225,4 +226,5 @@ def perform_elf_dump(
     write_snapshot_output(
         snap, output, build_info, sources, build_config, allow_build_query,
         collect_mode, build_query=build_query, build_compile_db=build_compile_db,
+        extractor=header_backend,
     )

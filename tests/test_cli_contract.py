@@ -348,15 +348,285 @@ def test_gate_tables_mirror_cli_options() -> None:
     assert gate._DEFERRED_MULTI_DEFAULT_FLAGS == co.DEFERRED_MULTI_DEFAULT
 
 
+# ── D10.3: MCP ⇄ CLI name-map completeness (ADR-037 / G22 Phase 6) ───────────
+
+
+def _has_mcp() -> bool:
+    import importlib.util
+
+    return importlib.util.find_spec("mcp") is not None
+
+
+@pytest.mark.skipif(not _has_mcp(), reason="MCP dependencies not installed")
+def test_mcp_cli_name_map_complete() -> None:
+    """Every ``abi_compare`` MCP param has a row in ``MCP_CLI_NAME_MAP``.
+
+    Live introspection of the actual tool signature (stronger than the gate's
+    AST scan): a new MCP param that forgets its name-map row is caught here, so
+    the MCP and CLI front-ends cannot silently diverge (ADR-037 D10.3).
+    """
+    import inspect
+
+    import scripts.check_ai_readiness as gate
+    from abicheck import cli_options as co, mcp_server
+
+    sig = inspect.signature(mcp_server.abi_compare)
+    params = set(sig.parameters)
+    # Mirror the gate's exemption set (framework-plumbing params) so an
+    # intentionally-exempt param does not fail here while the gate allows it.
+    missing = params - set(co.MCP_CLI_NAME_MAP) - set(gate._MCP_NAME_MAP_EXEMPT_PARAMS)
+    assert not missing, (
+        f"abi_compare params absent from MCP_CLI_NAME_MAP: {sorted(missing)} — "
+        "add a row mapping each to its compare flag (or None)."
+    )
+
+
+def test_mcp_cli_name_map_values_are_real_compare_flags() -> None:
+    """Each non-``None`` map value names a real ``compare`` flag (or positional).
+
+    Keeps the CLI side of the map honest: a typo'd or removed flag is caught
+    (ADR-037 D10.3). Positional-operand rows are spelled with parentheses and
+    are exempt from the flag-set check.
+    """
+    from abicheck import cli_options as co
+
+    compare_flags = _command_flags(_registered_commands()["compare"])
+    for mcp_param, cli_name in co.MCP_CLI_NAME_MAP.items():
+        if cli_name is None or "(" in cli_name:
+            continue  # no-flag row or a positional operand
+        assert cli_name in compare_flags, (
+            f"MCP_CLI_NAME_MAP[{mcp_param!r}] = {cli_name!r} is not a real "
+            "`compare` flag"
+        )
+
+
+def test_gate_flags_unmapped_mcp_param(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """D10.3 is not a no-op: an ``abi_compare`` param missing from the map fails."""
+    import scripts.check_ai_readiness as gate
+
+    pkg = tmp_path / "abicheck"
+    pkg.mkdir()
+    (pkg / "cli_options.py").write_text(
+        "MCP_CLI_NAME_MAP = {'old_input': '--old'}\n"
+    )
+    (pkg / "mcp_server.py").write_text(
+        "def abi_compare(old_input, new_input, mystery_param='x'):\n    return ''\n"
+    )
+    monkeypatch.setattr(gate, "PKG", pkg)
+    monkeypatch.setattr(gate, "ROOT", tmp_path)
+
+    findings = gate.Findings()
+    gate._check_mcp_cli_name_map(findings)
+    msgs = [m for c, m in findings.errors if c == "cli-contract"]
+    # new_input and mystery_param are both absent from the planted map.
+    assert any("new_input" in m for m in msgs)
+    assert any("mystery_param" in m for m in msgs)
+
+
+# ── D8: --header-backend → --ast-frontend rename + alias (ADR-037 Phase 6) ────
+
+
+@pytest.mark.parametrize("cmd_name", ["compare", "dump", "deep-compare"])
+@pytest.mark.parametrize("flag", ["--ast-frontend", "--header-backend"])
+def test_ast_frontend_and_legacy_alias_both_resolve(cmd_name: str, flag: str) -> None:
+    """``--ast-frontend`` and its legacy ``--header-backend`` alias both bind the
+    same Click param on every command that carries it (ADR-037 D8)."""
+    commands = _registered_commands()
+    cmd = commands[cmd_name]
+    by_dest = {p.name: p for p in cmd.params}  # type: ignore[attr-defined]
+    param = by_dest["header_backend"]
+    assert "--ast-frontend" in param.opts
+    assert "--header-backend" in param.opts
+    assert flag in param.opts
+
+
+@pytest.mark.parametrize("cmd_name", ["compare", "deep-compare"])
+def test_per_side_ast_frontend_aliases_resolve(cmd_name: str) -> None:
+    """Per-side ``--old/new-ast-frontend`` carry their legacy aliases too."""
+    cmd = _registered_commands()[cmd_name]
+    by_dest = {p.name: p for p in cmd.params}  # type: ignore[attr-defined]
+    for dest, new, old in (
+        ("old_header_backend", "--old-ast-frontend", "--old-header-backend"),
+        ("new_header_backend", "--new-ast-frontend", "--new-header-backend"),
+    ):
+        assert new in by_dest[dest].opts
+        assert old in by_dest[dest].opts
+
+
+def test_note_deprecated_ast_frontend_detects_legacy_spellings() -> None:
+    """The deprecation-note helper fires only on a legacy spelling (ADR-037 D8)."""
+    from abicheck.cli_options import note_deprecated_ast_frontend
+
+    assert note_deprecated_ast_frontend(["abicheck", "compare", "a", "b"]) is None
+    assert (
+        note_deprecated_ast_frontend(["abicheck", "compare", "--ast-frontend", "clang"])
+        is None
+    )
+    note = note_deprecated_ast_frontend(
+        ["abicheck", "compare", "--header-backend", "castxml"]
+    )
+    assert note is not None and "--header-backend" in note and "--ast-frontend" in note
+    # Also matches the ``--flag=value`` spelling and the per-side variants.
+    assert note_deprecated_ast_frontend(["x", "--old-header-backend=clang"]) is not None
+
+
+@pytest.mark.parametrize("cmd_name", ["compare", "deep-compare"])
+def test_legacy_flag_invocation_echoes_note(
+    cmd_name: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Invoking a command with the legacy ``--header-backend`` spelling prints the
+    D8 deprecation note to stderr (the alias still resolves)."""
+    from click.testing import CliRunner
+
+    # cli_max registers deep-compare; importing it also pulls in `main`.
+    _registered_commands()
+    from abicheck.cli import main
+
+    old_p = _make_snap_file(tmp_path, "libdn", "1.0", [_func("a")])
+    new_p = _make_snap_file(tmp_path, "libdn", "2.0", [_func("a")])
+    argv = [cmd_name, str(old_p), str(new_p), "--header-backend", "castxml"]
+    # The note keys on sys.argv (it detects the literal legacy spelling), so the
+    # CliRunner args must also be reflected there.
+    monkeypatch.setattr(sys, "argv", ["abicheck", *argv])
+    res = CliRunner().invoke(main, argv)
+    assert "deprecated (ADR-037 D8)" in res.output, res.output
+
+
+def test_deep_compare_emits_note_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`deep-compare` fans out to compare/dump via ctx.invoke; the D8 note must
+    still be printed exactly once per invocation (emit-once via ctx.meta)."""
+    from click.testing import CliRunner
+
+    _registered_commands()
+    from abicheck.cli import main
+
+    old_p = _make_snap_file(tmp_path, "libonce", "1.0", [_func("a")])
+    new_p = _make_snap_file(tmp_path, "libonce", "2.0", [_func("a")])
+    argv = ["deep-compare", str(old_p), str(new_p), "--header-backend", "castxml"]
+    monkeypatch.setattr(sys, "argv", ["abicheck", *argv])
+    res = CliRunner().invoke(main, argv)
+    assert res.output.count("deprecated (ADR-037 D8)") == 1, res.output
+
+
+def test_dump_legacy_flag_echoes_note(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`dump` echoes the D8 note too (the note fires before format detection)."""
+    from click.testing import CliRunner
+
+    from abicheck.cli import main
+
+    snap = _make_snap_file(tmp_path, "libd", "1.0", [_func("a")])
+    argv = ["dump", str(snap), "--header-backend", "castxml"]
+    monkeypatch.setattr(sys, "argv", ["abicheck", *argv])
+    res = CliRunner().invoke(main, argv)
+    assert "deprecated (ADR-037 D8)" in res.output, res.output
+
+
+# ── D8: --ast-frontend unifies L2 header AST + L4 source-ABI extractor ────────
+
+
+def test_ast_frontend_threads_to_l4_extractor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`--ast-frontend` selects the L4 source-ABI replay extractor too, not just
+    the L2 header AST — one frontend choice across both stages (ADR-037 D8)."""
+    import abicheck.buildsource.inline as inline
+    import abicheck.cli_buildsource as cb
+    from abicheck.model import AbiSnapshot
+
+    captured: dict[str, object] = {}
+
+    def _fake_collect(**kwargs: object) -> None:
+        captured.update(kwargs)
+        return None
+
+    # embed_build_source imports collect_inline_pack from the inline module at
+    # call time, so patch it at the source.
+    monkeypatch.setattr(inline, "collect_inline_pack", _fake_collect)
+    src = tmp_path / "src"
+    src.mkdir()
+    snap = AbiSnapshot(library="l", version="1")
+    cb.embed_build_source(snap, None, src, collect_mode="source-target", extractor="clang")
+    assert captured.get("extractor") == "clang"
+
+
+# ── G22 Phase 7: DEPRECATED_FLAGS resolver (ADR-037 §Backward-compat) ─────────
+
+
+def test_every_deprecated_flag_resolves() -> None:
+    """Table-driven: every ``DEPRECATED_FLAGS`` entry resolves to a non-empty
+    replacement + reason via the single resolver (advisory window scaffolding)."""
+    from abicheck import cli_options as co
+
+    assert co.DEPRECATED_FLAGS, "registry must not be empty"
+    for spelling, (replacement, reason) in co.DEPRECATED_FLAGS.items():
+        resolved = co.resolve_deprecated_flag(spelling)
+        assert resolved == (replacement, reason)
+        assert replacement and replacement != spelling, spelling
+        assert reason.strip(), spelling
+        # The replacement must itself be a *live* spelling, never another
+        # deprecated one (no alias-to-alias chains).
+        assert spelling not in {replacement}
+        assert replacement not in co.DEPRECATED_FLAGS, (
+            f"{spelling} resolves to deprecated {replacement}"
+        )
+
+
+def test_resolve_unknown_flag_is_none() -> None:
+    from abicheck.cli_options import resolve_deprecated_flag
+
+    assert resolve_deprecated_flag("--ast-frontend") is None
+    assert resolve_deprecated_flag("--not-a-flag") is None
+
+
+@pytest.mark.parametrize(
+    "argv, expected",
+    [
+        (["x", "--header-backend", "clang"], ["--header-backend"]),
+        (["x", "--old-header-backend=castxml"], ["--old-header-backend"]),
+        (["x", "--collect-mode", "graph-full"], ["--collect-mode"]),
+        # value-level deprecation: --depth=graph (both spaced + = forms).
+        (["x", "--depth", "graph"], ["--depth=graph"]),
+        (["x", "--depth=graph"], ["--depth=graph"]),
+        # a live --depth value is NOT flagged.
+        (["x", "--depth", "source"], []),
+        (["x", "compare", "a", "b"], []),
+    ],
+)
+def test_deprecated_flags_in_argv(argv: list[str], expected: list[str]) -> None:
+    """The argv scanner finds each deprecated spelling (flag- and value-level)."""
+    from abicheck.cli_options import deprecated_flags_in_argv
+
+    found = [s for s, _, _ in deprecated_flags_in_argv(argv)]
+    assert found == expected
+
+
+def test_note_deprecated_flags_combines() -> None:
+    """The generic note covers multiple deprecated spellings in one line."""
+    from abicheck.cli_options import note_deprecated_flags
+
+    assert note_deprecated_flags(["x", "compare", "a", "b"]) is None
+    note = note_deprecated_flags(["x", "--collect-mode", "build", "--depth=graph"])
+    assert note is not None
+    assert "--collect-mode" in note and "--depth=graph" in note
+    assert "--depth" in note and "ADR-037" in note
+
+
 # ── Resolved option-set snapshot (catches an accidental flag drop in review) ──
 
 # Frozen sets of every option spelling each verdict-emitting command exposes.
 # A diff here in review means a flag was added or dropped — update deliberately.
 _OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
     "compare": (
-        "--annotate", "--annotate-additions", "--btf", "--collapse-versioned-symbols",
+        "--annotate", "--annotate-additions", "--ast-frontend", "--btf",
+        "--collapse-versioned-symbols",
         "--collect-mode", "--ctf", "--debug-format", "--debug-root", "--debug-root1",
-        "--config",
+        "--config", "--new-ast-frontend", "--old-ast-frontend",
         "--debug-root2", "--debuginfod", "--debuginfod-url", "--demangle", "--depth",
         "--dso-only", "--dwarf",
         "--dwarf-only", "--exit-code-scheme", "--explain-patterns", "--follow-deps",
@@ -400,6 +670,7 @@ _OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         "--verbose", "-H", "-I", "-o", "-v",
     ),
     "deep-compare": (
+        "--ast-frontend", "--new-ast-frontend", "--old-ast-frontend",
         "--depth", "--format", "--header", "--header-backend", "--include",
         "--keep-snapshots", "--lang", "--max", "--new-build-info", "--new-header",
         "--new-header-backend", "--new-include", "--new-sources", "--new-version",
