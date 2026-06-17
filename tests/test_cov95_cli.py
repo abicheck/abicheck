@@ -511,15 +511,15 @@ class TestCollectReleaseInputs:
 
 class TestExitSchemeHelpers:
     def test_announce_suppressed_for_json(self, capsys) -> None:
-        _announce_exit_scheme(False, None, fmt="json", stat=False)
+        _announce_exit_scheme("legacy", fmt="json", stat=False)
         assert capsys.readouterr().err == ""
 
     def test_announce_legacy_scheme(self, capsys) -> None:
-        _announce_exit_scheme(False, None, fmt="markdown", stat=False)
+        _announce_exit_scheme("legacy", fmt="markdown", stat=False)
         assert "legacy verdict" in capsys.readouterr().err
 
     def test_announce_severity_scheme(self, capsys) -> None:
-        _announce_exit_scheme(True, None, fmt="markdown", stat=False)
+        _announce_exit_scheme("severity", fmt="markdown", stat=False)
         assert "severity-aware" in capsys.readouterr().err
 
     def test_exit_verdict_breaking(self) -> None:
@@ -527,7 +527,7 @@ class TestExitSchemeHelpers:
             old_version="1", new_version="2", library="x", verdict=Verdict.BREAKING
         )
         with pytest.raises(SystemExit) as exc:
-            _exit_with_severity_or_verdict(result, None, False)
+            _exit_with_severity_or_verdict(result, None, "legacy")
         assert exc.value.code == 4
 
     def test_exit_verdict_api_break(self) -> None:
@@ -535,7 +535,7 @@ class TestExitSchemeHelpers:
             old_version="1", new_version="2", library="x", verdict=Verdict.API_BREAK
         )
         with pytest.raises(SystemExit) as exc:
-            _exit_with_severity_or_verdict(result, None, False)
+            _exit_with_severity_or_verdict(result, None, "legacy")
         assert exc.value.code == 2
 
     def test_exit_verdict_compatible_no_exit(self) -> None:
@@ -543,7 +543,7 @@ class TestExitSchemeHelpers:
             old_version="1", new_version="2", library="x", verdict=Verdict.COMPATIBLE
         )
         # Compatible verdict returns normally (no SystemExit).
-        assert _exit_with_severity_or_verdict(result, None, False) is None
+        assert _exit_with_severity_or_verdict(result, None, "legacy") is None
 
 
 # ── _maybe_emit_annotations (cli.py:1329-1340) ────────────────────────────────

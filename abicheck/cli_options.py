@@ -130,34 +130,40 @@ def policy_options(func: F) -> F:
 def severity_options(func: F) -> F:
     """The severity preset + the four per-category overrides.
 
-    ADR-037 D4 will demote the per-category flags into ``.abicheck.yml`` (Phase
-    5), leaving only ``--severity-preset`` on the CLI; until then they are a
-    genuine shared family across ``compare`` / ``compare-release`` / ``appcompat``
-    and live here once instead of being copy-pasted three times.
+    ADR-037 D4 demotes the per-category flags into ``.abicheck.yml``'s
+    ``severity:`` block (G22 Phase 5): they stay on the CLI as **hidden**
+    overrides (a CLI value still beats config for a one-off run), but the visible
+    surface keeps only ``--severity-preset``. The whole family remains a genuine
+    shared decorator across ``compare`` / ``compare-release`` / ``appcompat`` so
+    the contract gate (D10.2) still sees it composed once, not copy-pasted.
     """
     func = click.option(
         "--severity-addition", "severity_addition",
         type=click.Choice(["error", "warning", "info"], case_sensitive=True),
-        default=None,
-        help="Severity for new public API additions (overrides preset).",
+        default=None, hidden=True,
+        help="Override severity for new public API additions (config: "
+             "severity.addition). Beats the preset and config for this run.",
     )(func)
     func = click.option(
         "--severity-quality-issues", "severity_quality_issues",
         type=click.Choice(["error", "warning", "info"], case_sensitive=True),
-        default=None,
-        help="Severity for problematic behaviors like std symbol leaks (overrides preset).",
+        default=None, hidden=True,
+        help="Override severity for quality issues like std symbol leaks (config: "
+             "severity.quality_issues).",
     )(func)
     func = click.option(
         "--severity-potential-breaking", "severity_potential_breaking",
         type=click.Choice(["error", "warning", "info"], case_sensitive=True),
-        default=None,
-        help="Severity for potential incompatibilities needing review (overrides preset).",
+        default=None, hidden=True,
+        help="Override severity for potential incompatibilities needing review "
+             "(config: severity.potential_breaking).",
     )(func)
     func = click.option(
         "--severity-abi-breaking", "severity_abi_breaking",
         type=click.Choice(["error", "warning", "info"], case_sensitive=True),
-        default=None,
-        help="Severity for clear ABI/API incompatibilities (overrides preset).",
+        default=None, hidden=True,
+        help="Override severity for clear ABI/API incompatibilities (config: "
+             "severity.abi_breaking).",
     )(func)
     func = click.option(
         "--severity-preset", "severity_preset",
@@ -218,6 +224,33 @@ def output_options(
         return func
 
     return deco
+
+
+def set_input_options(func: F) -> F:
+    """Set-input fan-out knobs: ``-j/--jobs`` / ``--dso-only`` / ``--output-dir``.
+
+    ADR-037 D7 folds ``compare-release`` into ``compare`` via input-type
+    dispatch: when ``compare``'s operands are directories or packages it fans out
+    to a per-library comparison, and these three flags tune that fan-out (parallel
+    jobs, executable filtering, per-library report directory). On single-file
+    inputs they are a no-op and ``compare`` warns. Declared once here so the
+    dispatch and the deprecated ``compare-release`` alias share one surface.
+    Applied bottom-up, so listed in reverse of displayed order.
+    """
+    func = click.option(
+        "--output-dir", "output_dir", type=click.Path(path_type=Path), default=None,
+        help="Directory to write per-library reports (directory/package inputs only).",
+    )(func)
+    func = click.option(
+        "--dso-only", "dso_only", is_flag=True, default=False,
+        help="Only compare shared objects, skip executables (directory/package inputs only).",
+    )(func)
+    func = click.option(
+        "-j", "--jobs", "jobs", type=int, default=0, show_default=True,
+        help="Parallel library comparisons for directory/package inputs "
+             "(0 = auto-detect CPU count, the default).",
+    )(func)
+    return func
 
 
 def debug_resolution_options(func: F) -> F:
@@ -513,6 +546,25 @@ INTENTIONAL_SUBSET: dict[tuple[str, str], str] = {
         "(ADR-037 D4) and not surfaced on this command."
     ),
 }
+
+#: ADR-037 D10.5 — soft per-command flag-count budget for ``compare`` (a WARN
+#: nudge, enforced by ``tests/test_config_rebalance.py::test_flag_budget``).
+#: Counts only the *visible* options: the families demoted to ``.abicheck.yml``
+#: in Phase 5 (per-category severity, scope FP-tuning, suppression hygiene) are
+#: hidden and config-bound (D4), so they don't count against the budget. The
+#: ADR's end-state target is ~20; this interim ceiling keeps new visible flags
+#: from creeping back in while the deprecation window runs.
+COMPARE_FLAG_BUDGET = 60
+
+
+def count_visible_options(cmd: object) -> int:
+    """Count a Click command's user-visible (non-hidden) options (ADR-037 D10.5)."""
+    n = 0
+    for p in getattr(cmd, "params", []):
+        if getattr(p, "param_type_name", None) == "option" and not getattr(p, "hidden", False):
+            n += 1
+    return n
+
 
 #: Flag names knowingly carrying two defaults across decorators, deferred to a
 #: later phase rather than hidden. ``--collect-mode`` differs between the dump

@@ -236,8 +236,13 @@ class TestCompareReleaseDefaults:
 
     def test_severity_options_present(self):
         out = CliRunner().invoke(main, ["compare-release", "--help"]).output
+        # ADR-037 D4: only the coarse --severity-preset stays visible; the
+        # per-category overrides are demoted to config (hidden, still functional).
         assert "--severity-preset" in out
-        assert "--severity-abi-breaking" in out
+        assert "--severity-abi-breaking" not in out
+        opt = next(p for p in main.commands["compare-release"].params
+                   if getattr(p, "name", "") == "severity_abi_breaking")
+        assert opt.hidden
 
 
 # ── §5 compare-release severity-aware exit aggregation ──────────────────────

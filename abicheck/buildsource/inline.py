@@ -79,16 +79,33 @@ _QUERY_TIMEOUT_S = 300
 _BUILD_QUERY_DIAG_STATUSES = ("failed", "skipped", "partial")
 
 
+#: Valid per-category severity levels (ADR-037 D4 ``severity:`` block).
+_SEVERITY_LEVELS = ("error", "warning", "info")
+#: Valid severity presets (mirror of ``severity.SEVERITY_PRESETS`` spelling).
+_SEVERITY_PRESETS = ("default", "strict", "info-only")
+#: Valid exit-code schemes (ADR-037 D12 ``exit_code_scheme:``).
+_EXIT_CODE_SCHEMES = ("auto", "legacy", "severity")
+
+
 @dataclass
 class BuildConfig:
-    """Parsed ``.abicheck.yml`` ``build:`` + ``sources:`` block (amendment D4).
+    """Parsed ``.abicheck.yml`` project config (ADR-028 amendment D4 + ADR-037 D4).
 
-    All fields are optional; an absent file yields the all-defaults config and
-    inline collection falls back to auto-detection. ``system`` is advisory (it
-    selects the compile-DB adapter hint); ``query`` is the *query/extraction*
-    command run only when the config is explicitly supplied and
-    ``--allow-build-query`` is set; ``compile_db`` is where that query (or the
-    build) lands its ``compile_commands.json``.
+    All fields are optional; an absent file yields the all-defaults config. The
+    ``build:`` / ``sources:`` blocks drive inline build/source collection
+    (``system`` is advisory; ``query`` runs only with an explicit config +
+    ``--allow-build-query``; ``compile_db`` is where it lands).
+
+    ADR-037 D4 adds the project-contract blocks consumed by ``compare`` — the
+    settings that are stable, reviewed-in-a-PR properties rather than per-run
+    invocation flags: ``severity:`` (per-category levels + preset), ``scope:``
+    (public-surface FP tuning), ``suppression:`` (hygiene policy), ``source:``
+    (precise S-axis), plus the top-level ``exit_code_scheme:`` and ``version:``.
+    CLI flags override these; see :func:`abicheck.cli_helpers_compare.resolve_compare_config`
+    for the precedence resolver (CLI > config > built-in default).
+
+    A field left at its ``None`` / ``""`` / empty default means "unset — inherit
+    the next level down", which is what makes the precedence merge unambiguous.
     """
 
     system: str = "auto"
@@ -102,16 +119,55 @@ class BuildConfig:
     #: graph at this configured detail.
     graph_detail: str = "summary"
 
+    # ── ADR-037 D4: project-contract blocks (consumed by `compare`) ───────────
+    #: ``severity:`` — preset + per-category overrides. ``None`` = unset.
+    severity_preset: str | None = None
+    severity_abi_breaking: str | None = None
+    severity_potential_breaking: str | None = None
+    severity_quality_issues: str | None = None
+    severity_addition: str | None = None
+    #: ``scope:`` — public-surface FP tuning. ``scope_public``/``collapse_*``
+    #: are ``None`` when unset so the CLI flag can override either way.
+    scope_public: bool | None = None
+    collapse_versioned_symbols: bool | None = None
+    public_symbols: list[str] = field(default_factory=list)
+    #: ``suppression:`` — hygiene policy (a project rule, not a per-run flag).
+    suppression_strict: bool | None = None
+    suppression_require_justification: bool | None = None
+    #: ``source:`` — precise S-axis for power users (``s0``..``s6``/``auto``).
+    source_method: str | None = None
+    #: ``exit_code_scheme:`` — ADR-037 D12; CI keys on it, so it lives in config.
+    exit_code_scheme: str = "auto"
+    #: ``version:`` — config schema version (forward-compat; Phase 7 wires the
+    #: unknown-key warning). ``0`` = unset.
+    version: int = 0
+
     @classmethod
     def from_dict(cls, data: dict[str, object]) -> BuildConfig:
         build = data.get("build") if isinstance(data, dict) else None
         build = build if isinstance(build, dict) else {}
         sources = data.get("sources") if isinstance(data, dict) else None
         sources = sources if isinstance(sources, dict) else {}
+        severity = data.get("severity") if isinstance(data, dict) else None
+        severity = severity if isinstance(severity, dict) else {}
+        scope = data.get("scope") if isinstance(data, dict) else None
+        scope = scope if isinstance(scope, dict) else {}
+        suppression = data.get("suppression") if isinstance(data, dict) else None
+        suppression = suppression if isinstance(suppression, dict) else {}
+        source = data.get("source") if isinstance(data, dict) else None
+        source = source if isinstance(source, dict) else {}
 
         def _str(d: dict[str, object], key: str, default: str = "") -> str:
             v = d.get(key)
             return v if isinstance(v, str) else default
+
+        def _opt_str(d: dict[str, object], key: str) -> str | None:
+            v = d.get(key)
+            return v if isinstance(v, str) else None
+
+        def _opt_bool(d: dict[str, object], key: str) -> bool | None:
+            v = d.get(key)
+            return v if isinstance(v, bool) else None
 
         def _strs(d: dict[str, object], key: str) -> list[str]:
             v = d.get(key)
@@ -121,11 +177,35 @@ class BuildConfig:
                 return [v]
             return []
 
+        def _level(key: str) -> str | None:
+            raw = _opt_str(severity, key)
+            if raw is not None and raw not in _SEVERITY_LEVELS:
+                raise ValueError(
+                    f"severity.{key} must be one of {_SEVERITY_LEVELS}, got {raw!r}"
+                )
+            return raw
+
         graph_detail = _str(sources, "graph", "summary") or "summary"
         if graph_detail not in ("summary", "full"):
             raise ValueError(
                 f"sources.graph must be 'summary' or 'full', got {graph_detail!r}"
             )
+
+        preset = _opt_str(severity, "preset")
+        if preset is not None and preset not in _SEVERITY_PRESETS:
+            raise ValueError(
+                f"severity.preset must be one of {_SEVERITY_PRESETS}, got {preset!r}"
+            )
+
+        scheme = _str(data if isinstance(data, dict) else {}, "exit_code_scheme", "auto") or "auto"
+        if scheme not in _EXIT_CODE_SCHEMES:
+            raise ValueError(
+                f"exit_code_scheme must be one of {_EXIT_CODE_SCHEMES}, got {scheme!r}"
+            )
+
+        version_raw = data.get("version") if isinstance(data, dict) else None
+        version = version_raw if isinstance(version_raw, int) and not isinstance(version_raw, bool) else 0
+
         return cls(
             system=_str(build, "system", "auto") or "auto",
             query=_str(build, "query"),
@@ -133,7 +213,85 @@ class BuildConfig:
             public_headers=_strs(sources, "public_headers"),
             exclude=_strs(sources, "exclude"),
             graph_detail=graph_detail,
+            severity_preset=preset,
+            severity_abi_breaking=_level("abi_breaking"),
+            severity_potential_breaking=_level("potential_breaking"),
+            severity_quality_issues=_level("quality_issues"),
+            severity_addition=_level("addition"),
+            scope_public=_opt_bool(scope, "public"),
+            collapse_versioned_symbols=_opt_bool(scope, "collapse_versioned_symbols"),
+            public_symbols=_strs(scope, "public_symbols"),
+            suppression_strict=_opt_bool(suppression, "strict"),
+            suppression_require_justification=_opt_bool(suppression, "require_justification"),
+            source_method=_opt_str(source, "method"),
+            exit_code_scheme=scheme,
+            version=version,
         )
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize back to a ``.abicheck.yml`` mapping (round-trips via from_dict).
+
+        Only non-default blocks/keys are emitted so a dumped config stays minimal
+        and a reload reproduces the same :class:`BuildConfig` (ADR-037 D4
+        round-trip contract, ``test_config_roundtrip``).
+        """
+        out: dict[str, Any] = {}
+        build: dict[str, Any] = {}
+        if self.system and self.system != "auto":
+            build["system"] = self.system
+        if self.query:
+            build["query"] = self.query
+        if self.compile_db:
+            build["compile_db"] = self.compile_db
+        if build:
+            out["build"] = build
+
+        sources: dict[str, Any] = {}
+        if self.public_headers:
+            sources["public_headers"] = list(self.public_headers)
+        if self.exclude:
+            sources["exclude"] = list(self.exclude)
+        if self.graph_detail and self.graph_detail != "summary":
+            sources["graph"] = self.graph_detail
+        if sources:
+            out["sources"] = sources
+
+        severity: dict[str, Any] = {}
+        if self.severity_preset is not None:
+            severity["preset"] = self.severity_preset
+        for key in ("abi_breaking", "potential_breaking", "quality_issues", "addition"):
+            val = getattr(self, f"severity_{key}")
+            if val is not None:
+                severity[key] = val
+        if severity:
+            out["severity"] = severity
+
+        scope: dict[str, Any] = {}
+        if self.scope_public is not None:
+            scope["public"] = self.scope_public
+        if self.collapse_versioned_symbols is not None:
+            scope["collapse_versioned_symbols"] = self.collapse_versioned_symbols
+        if self.public_symbols:
+            scope["public_symbols"] = list(self.public_symbols)
+        if scope:
+            out["scope"] = scope
+
+        suppression: dict[str, Any] = {}
+        if self.suppression_strict is not None:
+            suppression["strict"] = self.suppression_strict
+        if self.suppression_require_justification is not None:
+            suppression["require_justification"] = self.suppression_require_justification
+        if suppression:
+            out["suppression"] = suppression
+
+        if self.source_method is not None:
+            out["source"] = {"method": self.source_method}
+
+        if self.exit_code_scheme and self.exit_code_scheme != "auto":
+            out["exit_code_scheme"] = self.exit_code_scheme
+        if self.version:
+            out["version"] = self.version
+        return out
 
 
 def load_build_config(path: Path) -> BuildConfig:

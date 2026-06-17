@@ -191,6 +191,23 @@ aliases; `graph` no longer appears as a user-facing depth.
 
 ### Phase 4 — Command consolidation (D7)
 
+**Status: landed.** `compare` now classifies each operand
+(`classify_compare_operand` in `cli_resolve.py`) as file / directory / package /
+app — snapshots ride the `file` path — and dispatches: a directory or package operand fans out to the
+per-library release comparison (`cli._dispatch_release_compare` → the existing
+`compare-release` engine through the single Tier-2 `service.run_compare`
+chokepoint, so a library gets the identical verdict from `compare` and
+`compare-release`); an application/PIE operand (`_looks_like_application`, a
+positive ET_EXEC / PIE-with-PT_INTERP-and-non-`.so`-name test — never a guess) is
+rejected with a hint at `appcompat`. The set-input fan-out flags (`-j/--jobs`,
+`--dso-only`, `--output-dir`) ride a shared `set_input_options` decorator and
+no-op-with-warning on single files. `compare-release` and `deep-compare` keep
+working as thin deprecated aliases that emit a stderr note (suppressed for
+machine formats and when `compare-release` runs as the fan-out backend). Covered
+by `tests/test_compare_dispatch.py` (classifier, file/dir dispatch, app
+rejection, `compare <dir> <dir>` == `compare-release <dir> <dir>` JSON parity,
+`--output-dir` fan-out, alias smoke).
+
 **Work.** `compare` input-type dispatch: file / snapshot / directory / package /
 (app → actionable hint to `appcompat`). Disambiguate `ET_DYN` PIE executables
 from `.so` (ELF type alone is insufficient — fall back to `DT_SONAME` presence
@@ -213,6 +230,26 @@ aliases already point at the same code, so reverting is cosmetic).
 byte-for-byte on the summary; ambiguous-binary inputs error with guidance.
 
 ### Phase 5 — CLI↔config rebalance (D4)
+
+**Status: landed.** `BuildConfig` (`buildsource/inline.py`) gained the
+project-contract blocks `severity:` (preset + per-category), `scope:`
+(`public`/`collapse_versioned_symbols`/`public_symbols`), `suppression:`
+(`strict`/`require_justification`), `source:` (`method`, the precise S-axis),
+plus the top-level `exit_code_scheme:` and `version:` — all validated, with a
+`to_dict()` that round-trips through `from_dict`. `compare` auto-discovers the
+nearest `.abicheck.yml` (`discover_project_config`, overridable with `--config`)
+and merges CLI flags over it through one pure resolver
+(`resolve_compare_config` → `ResolvedCompareConfig`) with precedence **CLI >
+config > built-in default**. The demoted families (per-category severity, scope
+FP-tuning, suppression hygiene) stay on the CLI as **hidden** overrides — still
+functional for a one-off run, off the visible surface. The exit-code scheme is
+now explicit (`--exit-code-scheme {auto,legacy,severity}`, D12): `auto` resolves
+to severity when a severity setting is in effect (CLI *or* config) else legacy,
+so passing `--severity-*` no longer silently flips an explicitly-pinned scheme.
+The D10.5 budget is a `COMPARE_FLAG_BUDGET` constant + `count_visible_options`
+(WARN nudge). Covered by `tests/test_config_rebalance.py` (per-key precedence,
+dataclass/YAML round-trip, flag budget + hidden/visible split, explicit
+exit-scheme, config-driven exit scheme and severity).
 
 **Work.** Extend `.abicheck.yml` — the loader is `buildsource/inline.py`
 (`load_build_config`/`BuildConfig`; `risk_rules`/`crosschecks` already live in
@@ -300,9 +337,12 @@ The "~62 → ~20 flags" and "no divergence" claims are testable, not aspirationa
 
 ## Definition of done (when implementation lands)
 
-Phase 1 has landed (`api_types.py`, the single `service` chokepoint, the
-`cli-contract` gate, and `tests/test_cli_contract.py`); G22 stays **in
-progress** and ADR-037 stays `Proposed` until the remaining phases (2–7) merge.
+Phases 1–5 have landed (typed `CompareRequest` + single `service` chokepoint;
+the shared option-family decorators; the unified `--depth` vocabulary; `compare`
+input-type dispatch folding `compare-release`/`deep-compare`; and the
+`.abicheck.yml` config rebalance with explicit `--exit-code-scheme`), along with
+the `cli-contract` gate and its test mirror. G22 stays **in progress** and
+ADR-037 stays `Proposed` until the remaining phases (6–7) merge.
 The gap is considered closed only once registry `UC-WF-cli-contract` can flip to
 `complete` with evidence pointing at `api_types.py`, the `cli-contract` gate,
 `tests/test_cli_contract.py`, and the alias/round-trip tests — at which point
