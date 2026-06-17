@@ -645,6 +645,32 @@ def note_deprecated_ast_frontend(argv: Sequence[str] | None = None) -> str | Non
     )
 
 
+#: ``ctx.meta`` key marking the AST-frontend deprecation note as already emitted
+#: for this invocation. ``Context.invoke`` shares one ``meta`` dict across the
+#: whole context tree, so a nested call (``deep-compare`` → ``compare``/``dump``)
+#: sees the flag set by its parent and stays quiet.
+_AST_NOTE_META_KEY = "abicheck._ast_frontend_note_emitted"
+
+
+def echo_ast_frontend_deprecation() -> None:
+    """Emit the legacy-``--header-backend`` deprecation note **once per invocation**.
+
+    ``deep-compare`` fans out to ``compare``/``dump`` via ``ctx.invoke``; each of
+    those bodies would otherwise re-scan ``sys.argv`` and re-print the note for a
+    single user invocation. Guarding on a shared ``ctx.meta`` flag collapses that
+    to one note (ADR-037 D8). Falls back to a plain emit when there is no active
+    Click context (e.g. a direct unit-test call).
+    """
+    ctx = click.get_current_context(silent=True)
+    if ctx is not None and ctx.meta.get(_AST_NOTE_META_KEY):
+        return
+    note = note_deprecated_ast_frontend()
+    if note is not None:
+        click.echo(note, err=True)
+    if ctx is not None:
+        ctx.meta[_AST_NOTE_META_KEY] = True
+
+
 #: ADR-037 D10.3 — the single MCP-param ⇄ CLI-flag name map. The ``abi_compare``
 #: MCP tool and the native ``compare`` command answer the same question through
 #: the same Tier-2 chokepoint, but their surface vocabularies differ (JSON snake

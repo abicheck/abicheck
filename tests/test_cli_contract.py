@@ -367,11 +367,14 @@ def test_mcp_cli_name_map_complete() -> None:
     """
     import inspect
 
+    import scripts.check_ai_readiness as gate
     from abicheck import cli_options as co, mcp_server
 
     sig = inspect.signature(mcp_server.abi_compare)
     params = set(sig.parameters)
-    missing = params - set(co.MCP_CLI_NAME_MAP)
+    # Mirror the gate's exemption set (framework-plumbing params) so an
+    # intentionally-exempt param does not fail here while the gate allows it.
+    missing = params - set(co.MCP_CLI_NAME_MAP) - set(gate._MCP_NAME_MAP_EXEMPT_PARAMS)
     assert not missing, (
         f"abi_compare params absent from MCP_CLI_NAME_MAP: {sorted(missing)} — "
         "add a row mapping each to its compare flag (or None)."
@@ -489,6 +492,24 @@ def test_legacy_flag_invocation_echoes_note(
     monkeypatch.setattr(sys, "argv", ["abicheck", *argv])
     res = CliRunner().invoke(main, argv)
     assert "deprecated (ADR-037 D8)" in res.output, res.output
+
+
+def test_deep_compare_emits_note_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`deep-compare` fans out to compare/dump via ctx.invoke; the D8 note must
+    still be printed exactly once per invocation (emit-once via ctx.meta)."""
+    from click.testing import CliRunner
+
+    _registered_commands()
+    from abicheck.cli import main
+
+    old_p = _make_snap_file(tmp_path, "libonce", "1.0", [_func("a")])
+    new_p = _make_snap_file(tmp_path, "libonce", "2.0", [_func("a")])
+    argv = ["deep-compare", str(old_p), str(new_p), "--header-backend", "castxml"]
+    monkeypatch.setattr(sys, "argv", ["abicheck", *argv])
+    res = CliRunner().invoke(main, argv)
+    assert res.output.count("deprecated (ADR-037 D8)") == 1, res.output
 
 
 def test_dump_legacy_flag_echoes_note(

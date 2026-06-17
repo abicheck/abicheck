@@ -64,7 +64,7 @@ from .cli_options import (
     build_source_compare_options,
     build_source_dump_options,
     debug_resolution_options,
-    note_deprecated_ast_frontend,
+    echo_ast_frontend_deprecation,
     output_options,
     policy_options,
     scope_options,
@@ -509,9 +509,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
     _setup_verbosity(verbose)
 
     # ADR-037 D8: legacy --header-backend → --ast-frontend deprecation note.
-    _ast_note = note_deprecated_ast_frontend()
-    if _ast_note:
-        click.echo(_ast_note, err=True)
+    echo_ast_frontend_deprecation()
 
     # Resolve the --depth/--max preset into the underlying --collect-mode before
     # any dump path runs, so every branch (source-only / PE-Mach-O / ELF) embeds
@@ -1317,9 +1315,7 @@ def compare_cmd(
 
     # ADR-037 D8: the legacy --header-backend spellings still resolve but print a
     # one-line deprecation note while the alias window runs (advisory until 1.0).
-    _ast_note = note_deprecated_ast_frontend()
-    if _ast_note:
-        click.echo(_ast_note, err=True)
+    echo_ast_frontend_deprecation()
 
     # ADR-037 D4: load the project config and merge CLI flags over it
     # (precedence CLI > config > built-in default) *before* dispatch, so both the

@@ -42,7 +42,7 @@ import click
 from .cli import _normalize_binary_input, compare_cmd, dump_cmd, main
 from .cli_dump_helpers import resolve_dump_depth
 from .cli_options import (
-    note_deprecated_ast_frontend,
+    echo_ast_frontend_deprecation,
     output_options,
     policy_options,
     scope_options,
@@ -236,9 +236,9 @@ def deep_compare_cmd(
         )
 
     # ADR-037 D8: legacy --header-backend → --ast-frontend deprecation note.
-    _ast_note = note_deprecated_ast_frontend()
-    if _ast_note:
-        click.echo(_ast_note, err=True)
+    # Emit-once: deep-compare fans out to compare/dump via ctx.invoke (which
+    # shares ctx.meta), so the note is printed a single time per invocation.
+    echo_ast_frontend_deprecation()
 
     old_src = old_sources if old_sources is not None else both_sources
     new_src = new_sources if new_sources is not None else both_sources

@@ -1365,9 +1365,10 @@ def _dict_literal_keys(tree: ast.Module, name: str) -> set[str] | None:
 
     ``None`` when no such assignment (or annotated assignment) with a dict
     literal value is found, so the caller can flag a missing table rather than
-    silently passing.
+    silently passing. Iterates ``tree.body`` (not ``ast.walk``) so a same-named
+    symbol nested in a function/class can never shadow the module-level table.
     """
-    for node in ast.walk(tree):
+    for node in tree.body:
         target_names: list[str] = []
         value: ast.expr | None = None
         if isinstance(node, ast.Assign):
@@ -1386,8 +1387,13 @@ def _dict_literal_keys(tree: ast.Module, name: str) -> set[str] | None:
 
 
 def _function_param_names(tree: ast.Module, func_name: str) -> list[str] | None:
-    """Return the positional/keyword parameter names of ``def func_name(...)``."""
-    for node in ast.walk(tree):
+    """Return the positional/keyword parameter names of a module-level
+    ``def func_name(...)``.
+
+    Iterates ``tree.body`` (not ``ast.walk``) so the lookup is scoped to
+    module-level definitions and a nested function of the same name cannot match.
+    """
+    for node in tree.body:
         if isinstance(node, ast.FunctionDef) and node.name == func_name:
             a = node.args
             return [p.arg for p in (*a.posonlyargs, *a.args, *a.kwonlyargs)]
