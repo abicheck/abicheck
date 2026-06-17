@@ -66,7 +66,7 @@ What each module gains/loses. "T2" = Tier 2 (service), "FE" = front-end.
 | `abicheck/cli_scan.py` (FE) | `--mode`/`--source-method` → aliases of `--depth` | 3 |
 | `abicheck/mcp_server.py` (FE) | params aligned to `MCP_CLI_NAME_MAP`; build `CompareRequest` | 6 |
 | `abicheck/dumper.py` / dump cmd | `--header-backend` → `--ast-frontend`; `@evidence_options` | 6,3 |
-| `abicheck/policy_file.py` | new `.abicheck.yml` blocks: `severity`, `scope`, `suppression`, `source`, `exit_code_scheme`, `version` | 5,7 |
+| `abicheck/buildsource/inline.py` (`load_build_config`/`BuildConfig`) | new `.abicheck.yml` blocks: `severity`, `scope`, `suppression`, `source`, `exit_code_scheme`, `version` — wired into `policy_file.py`/`severity.py`/`suppression.py` loaders | 5,7 |
 | `scripts/check_ai_readiness.py` | `cli-contract` check (D10.1–5) | 1,2,5 |
 | `tests/test_cli_contract.py` *(new)* | the gate's unit-test mirror + option-count snapshot | 1,2,5 |
 
@@ -165,10 +165,13 @@ byte-for-byte on the summary; ambiguous-binary inputs error with guidance.
 
 ### Phase 5 — CLI↔config rebalance (D4)
 
-**Work.** Extend `.abicheck.yml` (in `policy_file.py`): `severity:`
-(per-category), `scope:` (FP-tuning, public-surface list), `suppression:`
-(strict/justification policy), `source:` (precise S-axis, graph detail),
-`exit_code_scheme:`. Demote the corresponding flags to config; CLI keeps coarse
+**Work.** Extend `.abicheck.yml` — the loader is `buildsource/inline.py`
+(`load_build_config`/`BuildConfig`; `risk_rules`/`crosschecks` already live in
+`risk.py`/`crosscheck.py`). Add `severity:` (per-category), `scope:` (FP-tuning,
+public-surface list), `suppression:` (strict/justification policy), `source:`
+(precise S-axis, graph detail), `exit_code_scheme:`, and wire each into the
+existing `policy_file.py`/`severity.py`/`suppression.py` loaders. Demote the
+corresponding flags to config; CLI keeps coarse
 overrides (`--severity-preset`, `--show-filtered`, `--depth`,
 `--exit-code-scheme`). Precedence: **CLI > config > built-in default** — one
 resolver, tested. Add `--exit-code-scheme` (D12) and the D10.5 flag-count budget

@@ -426,7 +426,9 @@ same Tier-2 service, so no option drift.
 `MCP_CLI_NAME_MAP` (D10.3) translates JSON keys to the same `CompareRequest`;
 `request.validate()` (D9) runs before any work, so a bad `depth` yields the
 *same* error text a CLI user sees. One classifier, one validation, two
-front-ends.
+front-ends. (Keys shown are the post-name-map target spelling; the live tool
+today uses `old_input`/`new_input`/`old_headers` — the map is exactly what
+reconciles them.)
 
 ### S6 — snapshot now, compare later (offline / cross-machine)
 ```text
