@@ -908,7 +908,12 @@ def run_scan_core(
     # "no auto-warn"). Carried on the result (text + JSON) so it never pollutes a
     # structured-format stdout.
     advisories: list[str] = []
-    if not seeded and collect_mode == "source-changed":
+    # Only when L4 replay can actually run (a --sources tree is present —
+    # `_run_inline_source_abi` returns early without one, and `--build-info`
+    # alone yields L3 but no replay) does the headers-only fallback apply; firing
+    # the advisory otherwise would report a replay that never happened
+    # (CodeRabbit review).
+    if not seeded and collect_mode == "source-changed" and sources is not None:
         advisories.append(
             "no --since/--changed-path seed; the source replay covers the "
             "public-API surface (headers-only) instead of a focused diff. Pass "

@@ -1314,6 +1314,26 @@ def test_l4_coverage_row_reports_tu_and_cache_counts():
     assert "1 extractor failures" in detail
 
 
+def test_l4_coverage_detail_partial_and_empty():
+    # The detail helper degrades gracefully: an empty coverage dict yields an
+    # empty string (no spurious segments), and absent optional counts are simply
+    # omitted (ADR-035 P5 — branch coverage of _l4_coverage_detail).
+    from abicheck.buildsource.inline import _l4_coverage_detail
+    from abicheck.buildsource.source_abi import SourceAbiSurface
+
+    assert _l4_coverage_detail(SourceAbiSurface(coverage={})) == ""
+    only_scope = SourceAbiSurface(
+        coverage={
+            "replay_scope": "changed",
+            "compile_units_selected": 2,
+            "compile_units_parsed": 2,
+        }
+    )
+    detail = _l4_coverage_detail(only_scope)
+    assert detail == "scope=changed, 2/2 TUs parsed"
+    assert "symbols matched" not in detail and "cache" not in detail
+
+
 def test_build_query_failure_is_recorded(tmp_path, monkeypatch):
     """A failing build.query command degrades to a failed extractor, no abort."""
     from abicheck.buildsource.inline import BuildConfig, collect_inline_pack

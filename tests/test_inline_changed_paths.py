@@ -58,6 +58,37 @@ def _capture_scope(monkeypatch) -> dict[str, object]:
     return captured
 
 
+def test_cache_stats_threaded_into_surface_coverage(monkeypatch, tmp_path: Path):
+    # ADR-035 P5: an L4 run with a cache dir records its hit/miss tally into the
+    # surface coverage so the live L4 coverage row can report it (not only
+    # `scan --estimate`). No compiler needed — the replay is stubbed.
+    def _fake_replay(build, extractor, *, scope="target", changed_paths=(), **kw):
+        # Exercise the cache so hit_rate is non-None (one recorded miss), which
+        # also drives the cache-hit-rate diagnostic branch.
+        cache = kw.get("cache")
+        if cache is not None:
+            cache.get("nonexistent-key")  # → one miss
+        return SourceAbiSurface(), []
+
+    monkeypatch.setattr(
+        inline, "_make_source_extractor", lambda *a, **k: (_FakeExtractor(), "fake")
+    )
+    monkeypatch.setattr(source_replay, "run_source_replay", _fake_replay)
+    surface = inline._run_inline_source_abi(
+        tmp_path,
+        _build_with_one_unit(),
+        [],
+        extractor="clang",
+        scope="changed",
+        clang_bin="clang",
+        changed_paths=("src/foo.cpp",),
+        source_abi_cache_dir=tmp_path / "l4cache",
+    )
+    assert surface is not None
+    assert surface.coverage["cache_hits"] == 0
+    assert surface.coverage["cache_misses"] == 1
+
+
 def test_changed_paths_keep_changed_scope(monkeypatch, tmp_path: Path):
     captured = _capture_scope(monkeypatch)
     inline._run_inline_source_abi(
