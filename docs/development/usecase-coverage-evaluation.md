@@ -5,7 +5,7 @@
 ABI-API change use cases, identify where coverage is deep vs. thin, and record
 the concrete code / test / example follow-ups.
 
-This is a companion to [`adr/adr-gap-analysis.md`](adr/adr-gap-analysis.md)
+This is a companion to [`archive/adr-gap-analysis.md`](archive/adr-gap-analysis.md)
 (which tracks *undocumented decisions*); this document tracks *uncovered
 scenarios*.
 

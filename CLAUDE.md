@@ -199,26 +199,22 @@ the global 95% floor** to make another platform pass.
 
 ## Files that are large — edit carefully
 
-- `cli.py` (2,000 lines — at the hard cap) — main CLI, Click commands; sub-command modules below register on it
-- `diff_symbols.py` (~2,000 lines — at the hard cap) — function/variable/parameter diffing
-- `cli_buildsource.py` (~1,840 lines) — `collect`/`merge`/graph commands (build-source evidence)
-- `diff_platform.py` (~1,810 lines) — all platform-specific detection
-- `reporter.py` (~1,770 lines) — JSON/Markdown/text output
-- `cli_compare_release.py` (~1,660 lines) — `compare-release` command and helpers (split from `cli.py`)
-- `compat/cli.py` (~1,580 lines) — ABICC compat CLI
-- `bundle.py` (~1,520 lines) — bundle-aware multi-binary analysis
-- `diff_filtering.py` (~1,520 lines) — deduplication and redundancy removal
-- `dumper.py` (~1,360 lines) — binary metadata extraction
-- `dumper_castxml.py` (~990 lines) — castxml XML parser (split from `dumper.py`)
-- `cli_appcompat.py` (~390 lines) — `appcompat` command and helpers (split from `cli.py`)
-- `cli_baseline.py` (~290 lines) — `baseline` command group (split from `cli.py`)
-- `cli_stack.py` (~190 lines) — `deps` and `stack-check` commands (split from `cli.py`)
-- `diff_platform_templates.py` (~180 lines) — template inner-type detectors (split from `diff_platform.py`)
-- `compat/_errors.py` (~150 lines) — ABICC compat error classification helpers (split from `compat/cli.py`)
-- `cli_debian_symbols.py` (~130 lines) — `debian-symbols` command group (split from `cli.py`)
-- `cli_suggest.py` (~80 lines) — `suggest-suppressions` command (split from `cli.py`)
+**Don't trust hard-coded line counts — they drift.** The AI-readiness gate is the
+source of truth: it WARNs on any file >1500 lines and ERRORs >2000 (hard cap, no
+allowlist). To see today's large files, run:
 
-The 2000-line hard cap is enforced for every source file (no allowlist). Files above 1500 lines emit a WARN as a refactor signal. When editing, read the specific section you need rather than the whole file.
+```bash
+python scripts/check_ai_readiness.py 2>&1 | grep "exceeds soft limit"
+```
+
+As of this writing the WARN set (>1500 lines) is `cli.py`, `dumper.py`, and
+`buildsource/crosscheck.py` — the main CLI, binary-metadata extraction, and the
+cross-check engine. Treat that command output (not this sentence) as current.
+
+When editing any large file, read the specific section you need rather than the
+whole file. Several big commands have already been split into sibling
+`cli_<name>.py` / `diff_*` modules (see the module map above); prefer extending a
+split-out module over growing the parent toward the cap.
 
 ### Adding a new top-level command
 

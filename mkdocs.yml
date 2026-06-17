@@ -127,8 +127,6 @@ nav:
       - Use-Case Coverage Evaluation: development/usecase-coverage-evaluation.md
       - User Scenarios & Flows: development/user-scenarios.md
       - Architecture Deepening Plan: development/architecture-deepening-plan.md
-      - Data-Source Process Remediation Plan: development/data-source-process-remediation-plan.md
-      - Data-Source Remeasurement Status: development/data-source-remeasurement-status-2026-06-11.md
     - Parity & Reports:
       - ABICC Parity Status: development/abicc-parity-status.md
       - ABICC Test Coverage Comparison: development/abicc-test-coverage-comparison.md
@@ -155,6 +153,7 @@ nav:
       - "G19: PR-tier source intelligence": development/plans/g19-pr-source-intelligence.md
       - "G20: Source-scan example catalog": development/plans/g20-source-scan-example-catalog.md
       - "G21: One-shot deep compare & CLI usability": development/plans/g21-oneshot-deep-compare.md
+      - "G22: CLI consolidation": development/plans/g22-cli-consolidation.md
     - ADR:
       - Overview: development/adr/index.md
       - "001: Technology Stack": development/adr/001-technology-stack.md
@@ -195,7 +194,11 @@ nav:
       - "034: Managed-Runtime & Non-C Frontends": development/adr/034-managed-runtime-and-non-c-abi-frontends.md
       - "035: PR-Tier Source Intelligence & Cross-Check": development/adr/035-pr-tier-source-intelligence-and-crosscheck.md
       - "036: Report View-Model & Canonical Severity": development/adr/036-report-view-model.md
-      - Gap Analysis: development/adr/adr-gap-analysis.md
+      - "037: CLI Interface Contract": development/adr/037-cli-interface-contract.md
+    - Archive (historical):
+      - "ADR Gap Analysis": development/archive/adr-gap-analysis.md
+      - "Data-Source Process Remediation Plan": development/archive/data-source-process-remediation-plan.md
+      - "Data-Source Remeasurement Status": development/archive/data-source-remeasurement-status-2026-06-11.md
 
 # Agent instructions are repo-internal context, not published documentation.
 exclude_docs: |
