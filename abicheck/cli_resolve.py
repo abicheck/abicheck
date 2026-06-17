@@ -392,8 +392,16 @@ def _looks_like_application(path: Path) -> bool:
         with open(path, "rb") as f:
             if f.read(4) != _ELF_MAGIC:
                 return False
-            ei_class = f.read(1)[0]
-            ei_data = f.read(1)[0]
+            ei_class_raw = f.read(1)
+            ei_data_raw = f.read(1)
+            if len(ei_class_raw) != 1 or len(ei_data_raw) != 1:
+                return False
+            ei_class = ei_class_raw[0]
+            ei_data = ei_data_raw[0]
+            # Unknown class/endianness ⇒ inconclusive: return False rather than
+            # fall through to big-endian parsing and risk misreading e_type.
+            if ei_class not in (1, 2) or ei_data not in (1, 2):
+                return False
             f.seek(16)
             byte_order = "<" if ei_data == 1 else ">"
             e_type = struct.unpack(f"{byte_order}H", f.read(2))[0]

@@ -192,8 +192,8 @@ aliases; `graph` no longer appears as a user-facing depth.
 ### Phase 4 — Command consolidation (D7)
 
 **Status: landed.** `compare` now classifies each operand
-(`classify_compare_operand` in `cli_resolve.py`) as file / snapshot / directory /
-package / app and dispatches: a directory or package operand fans out to the
+(`classify_compare_operand` in `cli_resolve.py`) as file / directory / package /
+app — snapshots ride the `file` path — and dispatches: a directory or package operand fans out to the
 per-library release comparison (`cli._dispatch_release_compare` → the existing
 `compare-release` engine through the single Tier-2 `service.run_compare`
 chokepoint, so a library gets the identical verdict from `compare` and
@@ -337,9 +337,12 @@ The "~62 → ~20 flags" and "no divergence" claims are testable, not aspirationa
 
 ## Definition of done (when implementation lands)
 
-Phase 1 has landed (`api_types.py`, the single `service` chokepoint, the
-`cli-contract` gate, and `tests/test_cli_contract.py`); G22 stays **in
-progress** and ADR-037 stays `Proposed` until the remaining phases (2–7) merge.
+Phases 1–5 have landed (typed `CompareRequest` + single `service` chokepoint;
+the shared option-family decorators; the unified `--depth` vocabulary; `compare`
+input-type dispatch folding `compare-release`/`deep-compare`; and the
+`.abicheck.yml` config rebalance with explicit `--exit-code-scheme`), along with
+the `cli-contract` gate and its test mirror. G22 stays **in progress** and
+ADR-037 stays `Proposed` until the remaining phases (6–7) merge.
 The gap is considered closed only once registry `UC-WF-cli-contract` can flip to
 `complete` with evidence pointing at `api_types.py`, the `cli-contract` gate,
 `tests/test_cli_contract.py`, and the alias/round-trip tests — at which point

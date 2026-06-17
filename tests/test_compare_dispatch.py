@@ -136,15 +136,14 @@ class TestCompareDispatch:
     def test_dir_input_dispatches_even_when_only_one_side_is_a_set(
         self, tmp_path: Path
     ) -> None:
-        # A directory on one side is enough to route through the set-input
-        # (release) path; the engine matches libraries by stem across sides.
+        # A directory on *one* side is enough to route through the set-input
+        # (release) path; the other side is a single snapshot file. The engine
+        # matches libraries by stem across sides.
         old_dir = tmp_path / "old"
         old_dir.mkdir()
         _write_snap(old_dir / "libfoo.json", _snap())
-        new_dir = tmp_path / "new"
-        new_dir.mkdir()
-        _write_snap(new_dir / "libfoo.json", _snap())
-        code, out, _ = _invoke("compare", str(old_dir), str(new_dir))
+        new_file = _write_snap(tmp_path / "libfoo.json", _snap())
+        code, out, _ = _invoke("compare", str(old_dir), str(new_file))
         assert code == 0
         assert "NO_CHANGE" in out
 
@@ -166,6 +165,17 @@ class TestCompareDispatch:
         # The flag is ignored (single-file path), with a warning on stderr.
         assert result.exit_code == 4
         assert "only apply to directory/package" in (result.stderr or "")
+
+    def test_explicit_jobs_zero_still_warns_on_single_file(self, tmp_path: Path) -> None:
+        # `--jobs 0` is the default value, but passing it explicitly is still a
+        # set-input flag the single-file path can't use, so it must warn.
+        old, new = _breaking_pair()
+        old_f = _write_snap(tmp_path / "old.json", old)
+        new_f = _write_snap(tmp_path / "new.json", new)
+        result = CliRunner().invoke(
+            main, ["compare", str(old_f), str(new_f), "--jobs", "0"]
+        )
+        assert "-j/--jobs" in (result.stderr or "")
 
 
 # ── parity: compare <dir> <dir> == compare-release <dir> <dir> (summary) ────────

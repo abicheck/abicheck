@@ -1001,11 +1001,11 @@ def _reject_application_operand(
 
 
 def _warn_unused_set_flags(
-    *, jobs: int, dso_only: bool, output_dir: Path | None
+    *, jobs_explicit: bool, dso_only: bool, output_dir: Path | None
 ) -> None:
     """Warn that the set-input fan-out flags do not apply to single-file inputs."""
     used = []
-    if jobs:
+    if jobs_explicit:
         used.append("-j/--jobs")
     if dso_only:
         used.append("--dso-only")
@@ -1303,10 +1303,53 @@ def compare_cmd(
     """
     _setup_verbosity(verbose)
 
+    # ADR-037 D4: load the project config and merge CLI flags over it
+    # (precedence CLI > config > built-in default) *before* dispatch, so both the
+    # single-file and the directory/package fan-out paths share one resolution.
+    # Auto-discovered from the current directory upward, overridable with --config.
+    from .buildsource.inline import load_build_config
+    from .cli_helpers_compare import discover_project_config, resolve_compare_config
+
+    cfg_path = config if config is not None else discover_project_config()
+    try:
+        project_cfg = load_build_config(cfg_path) if cfg_path is not None else None
+    except ValueError as exc:
+        raise click.UsageError(str(exc)) from exc
+
+    def _cli_flag(name: str, value: bool) -> bool | None:
+        # Return the value only when it actually came from the command line, so a
+        # flag default (e.g. --scope-public-headers's True) doesn't mask config.
+        src = click.get_current_context().get_parameter_source(name)
+        return value if src == click.core.ParameterSource.COMMANDLINE else None
+
+    resolved_cfg = resolve_compare_config(
+        project_cfg,
+        cli_severity_preset=severity_preset,
+        cli_severity_abi_breaking=severity_abi_breaking,
+        cli_severity_potential_breaking=severity_potential_breaking,
+        cli_severity_quality_issues=severity_quality_issues,
+        cli_severity_addition=severity_addition,
+        cli_scope_public=_cli_flag("scope_public_headers", scope_public_headers),
+        cli_collapse_versioned_symbols=_cli_flag(
+            "collapse_versioned_symbols", collapse_versioned_symbols
+        ),
+        cli_public_symbols=public_symbols,
+        cli_strict_suppressions=_cli_flag("strict_suppressions", strict_suppressions),
+        cli_require_justification=_cli_flag("require_justification", require_justification),
+        cli_exit_code_scheme=exit_code_scheme,
+    )
+    sev_config = resolved_cfg.severity
+    scope_public_headers = resolved_cfg.scope_public
+    collapse_versioned_symbols = resolved_cfg.collapse_versioned_symbols
+    strict_suppressions = resolved_cfg.strict_suppressions
+    require_justification = resolved_cfg.require_justification
+
     # ADR-037 D7: input-type dispatch. A directory or package operand fans out to
     # a per-library comparison (absorbing `compare-release`); an application/PIE
     # operand is not a library `compare` can pair (hint at `appcompat`). A single
-    # .so / snapshot / dump falls through to the normal one-pair path below.
+    # .so / snapshot / dump falls through to the normal one-pair path below. The
+    # resolved config (scope/suppression/severity) is forwarded so a set-input
+    # compare classifies the same way a single-pair one would (ADR-037 D4).
     old_kind = classify_compare_operand(old_input)
     new_kind = classify_compare_operand(new_input)
     if old_kind == "app" or new_kind == "app":
@@ -1325,18 +1368,23 @@ def compare_cmd(
             policy=policy, policy_file_path=policy_file_path,
             dso_only=dso_only, jobs=jobs,
             scope_public_headers=scope_public_headers,
-            severity_preset=severity_preset,
-            severity_abi_breaking=severity_abi_breaking,
-            severity_potential_breaking=severity_potential_breaking,
-            severity_quality_issues=severity_quality_issues,
-            severity_addition=severity_addition,
+            severity_preset=resolved_cfg.merged_severity_preset,
+            severity_abi_breaking=resolved_cfg.merged_severity_abi_breaking,
+            severity_potential_breaking=resolved_cfg.merged_severity_potential_breaking,
+            severity_quality_issues=resolved_cfg.merged_severity_quality_issues,
+            severity_addition=resolved_cfg.merged_severity_addition,
             probe_matrix_old=probe_matrix_old, probe_matrix_new=probe_matrix_new,
             annotate=annotate, annotate_additions=annotate_additions,
             verbose=verbose,
         )
         return
     # Single-file/snapshot inputs: the set-only fan-out flags do not apply.
-    _warn_unused_set_flags(jobs=jobs, dso_only=dso_only, output_dir=output_dir)
+    jobs_explicit = (
+        ctx.get_parameter_source("jobs") == click.core.ParameterSource.COMMANDLINE
+    )
+    _warn_unused_set_flags(
+        jobs_explicit=jobs_explicit, dso_only=dso_only, output_dir=output_dir
+    )
 
     if annotate_additions and not annotate:
         raise click.UsageError("--annotate-additions requires --annotate")
@@ -1379,46 +1427,6 @@ def compare_cmd(
     if report_mode == "impact":
         report_mode = "full"
         show_impact = True
-
-    # ADR-037 D4: load the project config and merge CLI flags over it
-    # (precedence CLI > config > built-in default). Auto-discovered from the
-    # current directory upward, overridable with --config.
-    from .buildsource.inline import load_build_config
-    from .cli_helpers_compare import discover_project_config, resolve_compare_config
-
-    cfg_path = config if config is not None else discover_project_config()
-    try:
-        project_cfg = load_build_config(cfg_path) if cfg_path is not None else None
-    except ValueError as exc:
-        raise click.UsageError(str(exc)) from exc
-
-    def _cli_flag(name: str, value: bool) -> bool | None:
-        # Return the value only when it actually came from the command line, so a
-        # flag default (e.g. --scope-public-headers's True) doesn't mask config.
-        src = click.get_current_context().get_parameter_source(name)
-        return value if src == click.core.ParameterSource.COMMANDLINE else None
-
-    resolved_cfg = resolve_compare_config(
-        project_cfg,
-        cli_severity_preset=severity_preset,
-        cli_severity_abi_breaking=severity_abi_breaking,
-        cli_severity_potential_breaking=severity_potential_breaking,
-        cli_severity_quality_issues=severity_quality_issues,
-        cli_severity_addition=severity_addition,
-        cli_scope_public=_cli_flag("scope_public_headers", scope_public_headers),
-        cli_collapse_versioned_symbols=_cli_flag(
-            "collapse_versioned_symbols", collapse_versioned_symbols
-        ),
-        cli_public_symbols=public_symbols,
-        cli_strict_suppressions=_cli_flag("strict_suppressions", strict_suppressions),
-        cli_require_justification=_cli_flag("require_justification", require_justification),
-        cli_exit_code_scheme=exit_code_scheme,
-    )
-    sev_config = resolved_cfg.severity
-    scope_public_headers = resolved_cfg.scope_public
-    collapse_versioned_symbols = resolved_cfg.collapse_versioned_symbols
-    strict_suppressions = resolved_cfg.strict_suppressions
-    require_justification = resolved_cfg.require_justification
 
     # ADR-037 D4: the precise S-axis lives in config (source.method). It sets the
     # collection depth only when the user gave no explicit --depth/--max/

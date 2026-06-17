@@ -259,6 +259,40 @@ class TestExitSchemeExplicit:
         # config pins legacy → severity flag does not flip it → API_BREAK == 2.
         assert res.exit_code == 2
 
+    def test_config_applies_on_directory_dispatch(self, tmp_path: Path) -> None:
+        # ADR-037 D4: a directory (set-input) compare honours .abicheck.yml too —
+        # config severity flows through to the per-library fan-out. A config that
+        # downgrades abi_breaking to a warning turns a BREAKING removal into a
+        # non-error exit under the severity scheme.
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        old = AbiSnapshot(library="libfoo.so", version="1.0", from_headers=True, functions=[
+            Function(name="foo", mangled="_Z3foov", return_type="int", visibility=Visibility.PUBLIC),
+            Function(name="bar", mangled="_Z3barv", return_type="void", visibility=Visibility.PUBLIC),
+        ])
+        new = AbiSnapshot(library="libfoo.so", version="2.0", from_headers=True, functions=[
+            Function(name="foo", mangled="_Z3foov", return_type="int", visibility=Visibility.PUBLIC),
+        ])
+        _write_snap(old_dir / "libfoo.json", old)
+        _write_snap(new_dir / "libfoo.json", new)
+        cfg = tmp_path / ".abicheck.yml"
+        cfg.write_text(
+            yaml.safe_dump({"severity": {"abi_breaking": "warning"}}), encoding="utf-8"
+        )
+        # Without config the removal is BREAKING → exit 4.
+        baseline = CliRunner().invoke(
+            main, ["compare", str(old_dir), str(new_dir), "--format", "json"]
+        )
+        assert baseline.exit_code == 4
+        # With config downgrading abi_breaking, the fan-out no longer errors.
+        res = CliRunner().invoke(
+            main,
+            ["compare", str(old_dir), str(new_dir), "--config", str(cfg), "--format", "json"],
+        )
+        assert res.exit_code == 0
+
     def test_config_severity_drives_exit(self, tmp_path: Path) -> None:
         old, new = _api_break_pair()
         old_f = _write_snap(tmp_path / "old.json", old)

@@ -312,6 +312,14 @@ class ResolvedCompareConfig:
     #: has already been decided from ``severity_active``).
     exit_code_scheme: str
     source_method: str | None
+    #: The CLI-or-config severity values (``None`` when neither set), kept raw so
+    #: the directory/package fan-out can forward them to ``compare-release``
+    #: without forcing severity-aware mode when nothing is configured.
+    merged_severity_preset: str | None = None
+    merged_severity_abi_breaking: str | None = None
+    merged_severity_potential_breaking: str | None = None
+    merged_severity_quality_issues: str | None = None
+    merged_severity_addition: str | None = None
 
 
 def resolve_compare_config(
@@ -421,6 +429,11 @@ def resolve_compare_config(
         require_justification=require_just,
         exit_code_scheme=scheme,
         source_method=source_method,
+        merged_severity_preset=eff_preset,
+        merged_severity_abi_breaking=eff_abi,
+        merged_severity_potential_breaking=eff_pot,
+        merged_severity_quality_issues=eff_qual,
+        merged_severity_addition=eff_add,
     )
 
 
