@@ -923,3 +923,84 @@ def test_scan_lone_header_file_does_not_activate_provenance(
     assert res.exit_code == 0, res.output
     assert captured["public_header_dirs"] == []
     assert captured["public_headers"] == []
+
+
+def test_export_delta_resolves_tu_into_replay_seed(monkeypatch, runner, tmp_path):
+    # ADR-035 D7 (the focusing half): a baseline that carries an L5 graph mapping
+    # `_Z3barv` → src/bar.cpp, and a candidate that *removes* that export, must
+    # point the replay at src/bar.cpp — even though git only changed an unrelated
+    # file. Proves the cheap L0 export delta steers the expensive scan's scope.
+    import abicheck.cli_scan as cs
+    from abicheck.buildsource.pack import BuildSourcePack
+    from abicheck.buildsource.source_graph import (
+        GraphEdge,
+        GraphNode,
+        SourceGraphSummary,
+    )
+
+    graph = SourceGraphSummary(
+        nodes=[
+            GraphNode(
+                id="binary_symbol://_Z3barv", kind="binary_symbol", label="_Z3barv"
+            ),
+            GraphNode(id="decl://bar", kind="source_decl", label="bar"),
+            GraphNode(id="header://src/bar.cpp", kind="header", label="src/bar.cpp"),
+        ],
+        edges=[
+            GraphEdge(
+                src="decl://bar",
+                dst="binary_symbol://_Z3barv",
+                kind="SOURCE_DECL_MAPS_TO_SYMBOL",
+            ),
+            GraphEdge(
+                src="header://src/bar.cpp", dst="decl://bar", kind="SOURCE_DECLARES"
+            ),
+        ],
+    )
+    base = AbiSnapshot(
+        library="libfoo.so",
+        version="1.0",
+        from_headers=True,
+        functions=[_func("foo", "_Z3foov"), _func("bar", "_Z3barv")],
+        elf=_elf("_Z3foov", "_Z3barv"),
+    )
+    base.build_source = BuildSourcePack(root="", source_graph=graph)
+    base_path = _write_snapshot(tmp_path / "old.abi.json", base)
+    # Candidate removed `bar` → `_Z3barv` is a removed export (the L0 delta).
+    cand = AbiSnapshot(
+        library="libfoo.so",
+        version="2.0",
+        from_headers=True,
+        functions=[_func("foo", "_Z3foov")],
+        elf=_elf("_Z3foov"),
+    )
+    cand_path = _write_snapshot(tmp_path / "new.abi.json", cand)
+
+    captured: dict[str, object] = {}
+    original = cs._build_new_snapshot
+
+    def _spy(*args, **kwargs):
+        captured["changed_paths"] = kwargs.get("changed_paths")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(cs, "_build_new_snapshot", _spy)
+    res = runner.invoke(
+        main,
+        [
+            "scan",
+            "--binary",
+            str(cand_path),
+            "--baseline",
+            str(base_path),
+            "--source-method",
+            "s5",
+            "--changed-path",
+            "src/unrelated.cpp",
+        ],
+    )
+    assert res.exit_code in (0, 4), res.output  # removed export → BREAKING is fine
+    seed = captured["changed_paths"]
+    assert seed is not None
+    # The git-changed file (floor) AND the export-delta-resolved TU are both in.
+    assert "src/unrelated.cpp" in seed
+    assert "src/bar.cpp" in seed

@@ -58,7 +58,7 @@ import click
 
 from .buildsource.crosscheck import ALL_CHECKS, CrosscheckConfig, run_crosschecks
 from .buildsource.pattern_scan import scan_files
-from .buildsource.poi import build_points_of_interest
+from .buildsource.poi import build_points_of_interest, resolve_symbol_tus
 from .buildsource.preprocessor_scan import run_preprocessor_scan
 from .buildsource.risk import RiskRules, RiskScore, score_changed_paths
 from .buildsource.scan_levels import (
@@ -429,6 +429,28 @@ def _build_new_snapshot(
             changed_paths=changed_paths,
         )
     return snap
+
+
+def _load_exports_for_poi(path: Path | None, lang: str) -> Any | None:
+    """Best-effort cheap load for the D7 export-delta POI walk (ADR-035 D7).
+
+    Loads *path* **header-free** — so no castxml/L2 and no L3-L5 collection, just
+    the L0 export tables (and, for a JSON baseline, its embedded L5 graph). The
+    export-delta walk in ``build_points_of_interest`` needs both sides' export
+    tables *before* the expensive collection runs; this is how it gets the
+    candidate's. Returns ``None`` on any failure (a registry-ref baseline, a load
+    error, …) so POI focusing simply degrades to changed-paths/triggers/risk —
+    it must never break the scan. This is an L0/L1-only read (well below the L4
+    cost cliff); the one expensive collection still runs once, below.
+    """
+    if path is None:
+        return None
+    from .service import resolve_input
+
+    try:
+        return resolve_input(path, [], [], version="", lang=lang)
+    except Exception:  # noqa: BLE001 - best-effort focusing input, never fatal
+        return None
 
 
 def _crosscheck_severity_exit(findings: list[Any], severities: dict[str, str]) -> int:
@@ -883,12 +905,22 @@ def run_scan_core(
     pattern = scan_files(pattern_roots, changed if seeded else None)
 
     # --- D7 points-of-interest: cheap facts steer the expensive scan ----------
-    # Floor = the directly-changed paths (always included); the pattern triggers
-    # and risk score only *add* candidates, never drop a changed TU (ADR-035 D7).
+    # Floor = the directly-changed paths (always included); the pattern triggers,
+    # risk score, and the L0↔L2 export deltas only *add* candidates, never drop a
+    # changed TU (ADR-035 D7). The export-delta walk needs both sides' export
+    # tables up front, so read a cheap, header-free L0 view of the candidate and
+    # baseline here (no castxml/L3-L5); the one expensive collection still runs
+    # once, below, with the resulting focus seed.
+    poi_candidate = _load_exports_for_poi(binary, lang)
+    poi_baseline = (
+        _load_exports_for_poi(baseline, lang) if baseline is not None else None
+    )
     poi = build_points_of_interest(
         changed_paths=changed,
         risk=risk,
         pattern_triggers=pattern.escalation_triggers,
+        baseline=poi_baseline,
+        candidate=poi_candidate,
     )
 
     # --- build the candidate snapshot (L0-L2 + inline L3-L5 at the level) ------
@@ -898,9 +930,15 @@ def run_scan_core(
     # (``seeded``). Without --since/--changed-path the scan is broad by contract
     # (the report says so), so passing pattern-trigger POIs as the changed set
     # would wrongly narrow PR-mode replay to a single pattern-flagged TU and skip
-    # source-only checks elsewhere (Codex review). When seeded, the POI set (floor
-    # + pattern/risk additions) is the focusing work-list.
-    replay_seed = tuple(poi.changed_paths()) if seeded else ()
+    # source-only checks elsewhere (Codex review). When seeded, the focusing
+    # work-list is the changed-path floor *plus* the TUs resolved from changed
+    # exports via the baseline's L5 graph (resolve_symbol_tus) — so a changed
+    # export with an unchanged header still points the replay at the one TU that
+    # emits it (ADR-035 D7, the focusing half).
+    symbol_tus = resolve_symbol_tus(poi, poi_baseline) if seeded else ()
+    replay_seed = (
+        tuple(dict.fromkeys((*poi.changed_paths(), *symbol_tus))) if seeded else ()
+    )
     # ADR-035 P3: an unseeded s5/pr run cannot narrow 'source-changed' to a diff,
     # so the L4 replay falls back to the public-API 'headers-only' surface
     # (inline.collect_inline_pack). Record an advisory naming the cost + the knob
@@ -953,11 +991,15 @@ def run_scan_core(
     # ``public_to_internal_dependency`` can elevate a finding whose internal
     # target was touched this revision (ADR-035 D4 "L5 reachability ↔ PR
     # changed files").
+    # The changed-path set handed to the engine also carries the TUs the D7
+    # export-delta walk resolved (symbol_tus), so ``public_to_internal_dependency``
+    # elevates a finding whose internal target sits in a TU this revision touched
+    # *via a changed export* — not only the literally git-changed files.
     cc = run_crosschecks(
         new_snap,
         CrosscheckConfig(
             enabled=frozenset(enabled_checks),
-            changed_paths=frozenset(changed),
+            changed_paths=frozenset(changed) | set(symbol_tus),
         ),
     )
 
