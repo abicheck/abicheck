@@ -367,6 +367,72 @@ def _is_supported_compare_input(path: Path) -> bool:
     return is_supported_compare_input(path)
 
 
+def _looks_like_application(path: Path) -> bool:
+    """Positively identify an ELF *application* (executable), not a library.
+
+    Returns True only when we are confident the file is an executable:
+    ``ET_EXEC``, or a PIE (``ET_DYN`` with a ``PT_INTERP`` segment and a
+    non-``.so`` filename). Anything inconclusive (unreadable, malformed program
+    headers, a versioned ``.so`` name) returns False so the operand stays on the
+    normal single-artifact path — we never *guess* a binary is an app (ADR-037
+    D7: when the kind is genuinely ambiguous, the caller asks the user rather
+    than mis-dispatching).
+    """
+    import struct
+
+    from .package import (
+        _ELF_MAGIC,
+        _ET_DYN,
+        _has_interp_segment,
+        _has_shared_object_name,
+    )
+
+    _ET_EXEC = 2
+    try:
+        with open(path, "rb") as f:
+            if f.read(4) != _ELF_MAGIC:
+                return False
+            ei_class = f.read(1)[0]
+            ei_data = f.read(1)[0]
+            f.seek(16)
+            byte_order = "<" if ei_data == 1 else ">"
+            e_type = struct.unpack(f"{byte_order}H", f.read(2))[0]
+            if e_type == _ET_EXEC:
+                return True
+            if e_type == _ET_DYN:
+                # PIE executable: ET_DYN + an interpreter + not a .so-style name.
+                has_interp = _has_interp_segment(f, ei_class, byte_order)
+                return has_interp is True and not _has_shared_object_name(path)
+            return False
+    except (OSError, struct.error, IndexError):
+        return False
+
+
+def classify_compare_operand(path: Path) -> str:
+    """Classify a ``compare`` operand for ADR-037 D7 input-type dispatch.
+
+    Returns one of:
+
+    * ``"package"``   — a recognised archive/package (RPM/Deb/tar/conda/wheel);
+      a *set* input that fans out to per-library comparison.
+    * ``"directory"`` — a plain directory of libraries; also a set input.
+    * ``"app"``       — an ELF application/executable (or ambiguous PIE) that
+      ``compare`` cannot pair as a library (hint the user at ``appcompat``).
+    * ``"file"``      — a single ``.so`` / JSON snapshot / Perl dump: the default
+      single-pair path, unchanged.
+    """
+    from .package import is_package
+
+    if path.is_dir():
+        return "directory"
+    if is_package(path):
+        return "package"
+    norm, fmt = _normalize_binary_input(path)
+    if fmt == "elf" and _looks_like_application(norm):
+        return "app"
+    return "file"
+
+
 def _resolve_compare_snapshots(
     old_input: Path,
     new_input: Path,

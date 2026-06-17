@@ -220,6 +220,33 @@ def output_options(
     return deco
 
 
+def set_input_options(func: F) -> F:
+    """Set-input fan-out knobs: ``-j/--jobs`` / ``--dso-only`` / ``--output-dir``.
+
+    ADR-037 D7 folds ``compare-release`` into ``compare`` via input-type
+    dispatch: when ``compare``'s operands are directories or packages it fans out
+    to a per-library comparison, and these three flags tune that fan-out (parallel
+    jobs, executable filtering, per-library report directory). On single-file
+    inputs they are a no-op and ``compare`` warns. Declared once here so the
+    dispatch and the deprecated ``compare-release`` alias share one surface.
+    Applied bottom-up, so listed in reverse of displayed order.
+    """
+    func = click.option(
+        "--output-dir", "output_dir", type=click.Path(path_type=Path), default=None,
+        help="Directory to write per-library reports (directory/package inputs only).",
+    )(func)
+    func = click.option(
+        "--dso-only", "dso_only", is_flag=True, default=False,
+        help="Only compare shared objects, skip executables (directory/package inputs only).",
+    )(func)
+    func = click.option(
+        "-j", "--jobs", "jobs", type=int, default=0, show_default=True,
+        help="Parallel library comparisons for directory/package inputs "
+             "(0 = auto-detect CPU count, the default).",
+    )(func)
+    return func
+
+
 def debug_resolution_options(func: F) -> F:
     """Separate-debug-file resolution (ADR-021a): roots + debuginfod + format.
 

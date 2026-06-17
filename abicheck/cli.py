@@ -67,6 +67,7 @@ from .cli_options import (
     output_options,
     policy_options,
     scope_options,
+    set_input_options,
     severity_options,
     two_sided_input_options,
 )
@@ -77,6 +78,7 @@ from .cli_resolve import (
     _dump_native_binary,
     _expand_header_inputs,
     _is_supported_compare_input,
+    _looks_like_application,
     _maybe_follow_linker_script,
     _normalize_binary_input,
     _populate_dependency_info,
@@ -84,6 +86,7 @@ from .cli_resolve import (
     _resolve_input,
     _resolve_linker_script,
     _sniff_text_format,
+    classify_compare_operand,
 )
 from .compat.cli import compat_group
 from .errors import AbicheckError
@@ -110,6 +113,7 @@ __all__ = [
     "_dump_native_binary",
     "_expand_header_inputs",
     "_is_supported_compare_input",
+    "_looks_like_application",
     "_maybe_follow_linker_script",
     "_normalize_binary_input",
     "_populate_dependency_info",
@@ -117,6 +121,7 @@ __all__ = [
     "_resolve_input",
     "_resolve_linker_script",
     "_sniff_text_format",
+    "classify_compare_operand",
 ]
 
 _logger = logging.getLogger("abicheck")
@@ -968,9 +973,82 @@ def _finalize_compare_result(
     )
 
 
+# ── ADR-037 D7: input-type dispatch for `compare` ────────────────────────────
+# `compare` accepts a single .so / snapshot, a directory, or a package. Set
+# inputs (directory/package) fan out to a per-library comparison (the former
+# `compare-release`); an application/PIE operand is rejected with a hint at
+# `appcompat`. The set-only fan-out flags are a no-op-with-warning on single
+# inputs.
+
+_RELEASE_FORMATS = frozenset({"json", "markdown", "junit"})
+
+
+def _reject_application_operand(
+    old_input: Path, new_input: Path, old_kind: str, new_kind: str
+) -> None:
+    """Error when a `compare` operand is an application/executable, not a library."""
+    which = old_input if old_kind == "app" else new_input
+    raise click.UsageError(
+        f"'{which}' looks like an application/executable, not a shared library, "
+        "so `compare` cannot pair it as a library ABI. To check whether an "
+        "application is still satisfied by a library, use "
+        "`abicheck appcompat <app> <old-lib> <new-lib>`. If this file really is a "
+        "shared library with an unusual ET_DYN/PIE layout, dump it first with "
+        "`abicheck dump` and compare the resulting snapshots."
+    )
+
+
+def _warn_unused_set_flags(
+    *, jobs: int, dso_only: bool, output_dir: Path | None
+) -> None:
+    """Warn that the set-input fan-out flags do not apply to single-file inputs."""
+    used = []
+    if jobs:
+        used.append("-j/--jobs")
+    if dso_only:
+        used.append("--dso-only")
+    if output_dir is not None:
+        used.append("--output-dir")
+    if used:
+        click.echo(
+            "Warning: " + ", ".join(used) + " only apply to directory/package "
+            "(set) inputs; ignoring them for this single-file comparison.",
+            err=True,
+        )
+
+
+def _dispatch_release_compare(ctx: click.Context, **kwargs: Any) -> None:
+    """Fan a directory/package `compare` out to the per-library release engine.
+
+    Routes through the same `compare-release` implementation (which already
+    fans out per library through the single Tier-2 `service.run_compare`
+    chokepoint and writes the two-level summary/per-library output), so a
+    library compared here gets the identical verdict it would from a single-pair
+    `compare` (ADR-037 D1/D7). The deprecation note that command prints for its
+    own users is silenced while it runs as `compare`'s backend.
+    """
+    fmt = kwargs.get("fmt", "markdown")
+    if fmt not in _RELEASE_FORMATS:
+        raise click.UsageError(
+            f"--format {fmt} is not available when comparing directories or "
+            f"packages; choose one of: {', '.join(sorted(_RELEASE_FORMATS))}."
+        )
+    from . import cli_compare_release as _crmod
+    from .cli_compare_release import compare_release_cmd
+
+    _crmod._SILENCE_DEPRECATION = True
+    try:
+        ctx.invoke(compare_release_cmd, **kwargs)
+    finally:
+        _crmod._SILENCE_DEPRECATION = False
+
+
 @main.command("compare")
 @click.argument("old_input", type=click.Path(exists=True, path_type=Path))
 @click.argument("new_input", type=click.Path(exists=True, path_type=Path))
+# Set-input fan-out (ADR-037 D7): -j/--jobs, --dso-only, --output-dir only bite
+# when the operands are directories/packages; a no-op-with-warning otherwise.
+@set_input_options
 # ── Dump options (used when input is an ELF binary) ──────────────────────────
 # Two-sided header/include/version family (ADR-037 D3); --lang and the L2
 # --header-backend trio stay inline (not part of the shared family).
@@ -1098,8 +1176,11 @@ def _finalize_compare_result(
 @adr027_compare_options  # ADR-027: --pattern-verdicts/--explain-patterns/--surface-metrics
 @click.option("-v", "--verbose", is_flag=True, default=False,
               help="Enable verbose/debug output.")
+@click.pass_context
 def compare_cmd(
+    ctx: click.Context,
     old_input: Path, new_input: Path,
+    jobs: int, dso_only: bool, output_dir: Path | None,
     headers: tuple[Path, ...], includes: tuple[Path, ...], lang: str,
     header_backend: str,
     old_header_backend: str | None, new_header_backend: str | None,
@@ -1194,6 +1275,41 @@ def compare_cmd(
       abicheck compare old.json new.json --suppress suppressions.yaml
     """
     _setup_verbosity(verbose)
+
+    # ADR-037 D7: input-type dispatch. A directory or package operand fans out to
+    # a per-library comparison (absorbing `compare-release`); an application/PIE
+    # operand is not a library `compare` can pair (hint at `appcompat`). A single
+    # .so / snapshot / dump falls through to the normal one-pair path below.
+    old_kind = classify_compare_operand(old_input)
+    new_kind = classify_compare_operand(new_input)
+    if old_kind == "app" or new_kind == "app":
+        _reject_application_operand(old_input, new_input, old_kind, new_kind)
+    if {old_kind, new_kind} & {"directory", "package"}:
+        _dispatch_release_compare(
+            ctx,
+            old_dir=old_input, new_dir=new_input,
+            headers=headers, includes=includes,
+            old_headers_only=old_headers_only, new_headers_only=new_headers_only,
+            old_includes_only=old_includes_only, new_includes_only=new_includes_only,
+            old_version=old_version, new_version=new_version, lang=lang,
+            fmt=fmt, output=output, output_dir=output_dir,
+            suppress=suppress, strict_suppressions=strict_suppressions,
+            require_justification=require_justification,
+            policy=policy, policy_file_path=policy_file_path,
+            dso_only=dso_only, jobs=jobs,
+            scope_public_headers=scope_public_headers,
+            severity_preset=severity_preset,
+            severity_abi_breaking=severity_abi_breaking,
+            severity_potential_breaking=severity_potential_breaking,
+            severity_quality_issues=severity_quality_issues,
+            severity_addition=severity_addition,
+            probe_matrix_old=probe_matrix_old, probe_matrix_new=probe_matrix_new,
+            annotate=annotate, annotate_additions=annotate_additions,
+            verbose=verbose,
+        )
+        return
+    # Single-file/snapshot inputs: the set-only fan-out flags do not apply.
+    _warn_unused_set_flags(jobs=jobs, dso_only=dso_only, output_dir=output_dir)
 
     if annotate_additions and not annotate:
         raise click.UsageError("--annotate-additions requires --annotate")

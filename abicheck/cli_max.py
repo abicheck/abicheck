@@ -218,6 +218,16 @@ def deep_compare_cmd(
     \b
     Exit codes match `compare` (the verdict comes from it unchanged).
     """
+    # Suppressed for machine formats whose consumers may capture stderr with
+    # stdout (mirrors `compare-release`'s deprecation-note discipline).
+    if fmt not in {"json", "sarif", "junit"}:
+        click.echo(
+            "Note: 'deep-compare' is deprecated (ADR-037 D7); use "
+            "'abicheck compare <old> <new> --max --old-sources ... --new-sources ...' "
+            "for one-shot deep-evidence comparison.",
+            err=True,
+        )
+
     old_src = old_sources if old_sources is not None else both_sources
     new_src = new_sources if new_sources is not None else both_sources
 

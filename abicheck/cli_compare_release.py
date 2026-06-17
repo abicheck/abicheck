@@ -85,6 +85,12 @@ if TYPE_CHECKING:
 # compare-release helpers
 # ---------------------------------------------------------------------------
 
+#: Set True by `compare`'s directory/package dispatch (ADR-037 D7) so the
+#: deprecation note below is not printed when `compare-release` runs as the
+#: fan-out backend for `abicheck compare <dir> <dir>`. Toggled around the
+#: `ctx.invoke` in `cli._dispatch_release_compare`.
+_SILENCE_DEPRECATION = False
+
 
 def _run_compare_pair(
     old_input: Path,
@@ -1014,6 +1020,17 @@ def compare_release_cmd(
     )
 
     _setup_verbosity(verbose)
+
+    # Suppressed when running as `compare`'s fan-out backend, and for machine
+    # formats whose consumers may capture stderr alongside stdout (mirrors the
+    # `_announce_exit_scheme` banner discipline).
+    if not _SILENCE_DEPRECATION and fmt not in {"json", "junit"}:
+        click.echo(
+            "Note: 'compare-release' is deprecated (ADR-037 D7); "
+            "'abicheck compare <old> <new>' now accepts directories and packages "
+            "and fans out to the same per-library comparison.",
+            err=True,
+        )
 
     if annotate_additions and not annotate:
         raise click.UsageError("--annotate-additions requires --annotate")
