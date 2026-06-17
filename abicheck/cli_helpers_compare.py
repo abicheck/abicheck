@@ -27,12 +27,14 @@ re-exported from ``abicheck.cli`` to keep existing import sites (sibling
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import click
 
 if TYPE_CHECKING:
+    from .buildsource.inline import BuildConfig
     from .checker_types import DiffResult
     from .severity import SeverityConfig
 
@@ -283,6 +285,159 @@ def _resolve_severity(
         addition=addition,
     )
     return config, explicitly_set
+
+
+# ── ADR-037 D4: CLI ↔ config precedence resolver ─────────────────────────────
+
+
+@dataclass(frozen=True)
+class ResolvedCompareConfig:
+    """The settings ``compare`` runs with, after merging CLI flags over config.
+
+    Precedence per key is **CLI > config > built-in default** (ADR-037 D4). A
+    CLI value of ``None`` means "the user did not pass the flag", so the config
+    value (or the default) wins; an explicit CLI value always wins.
+    """
+
+    severity: SeverityConfig
+    #: True when severity was set anywhere (CLI flag or config) — drives the
+    #: ``auto`` exit-code scheme.
+    severity_active: bool
+    scope_public: bool
+    collapse_versioned_symbols: bool
+    public_symbols: tuple[str, ...]
+    strict_suppressions: bool
+    require_justification: bool
+    #: Resolved to a concrete scheme: ``"legacy"`` or ``"severity"`` (``auto``
+    #: has already been decided from ``severity_active``).
+    exit_code_scheme: str
+    source_method: str | None
+
+
+def resolve_compare_config(
+    cfg: BuildConfig | None,
+    *,
+    cli_severity_preset: str | None,
+    cli_severity_abi_breaking: str | None,
+    cli_severity_potential_breaking: str | None,
+    cli_severity_quality_issues: str | None,
+    cli_severity_addition: str | None,
+    cli_scope_public: bool | None,
+    cli_collapse_versioned_symbols: bool | None,
+    cli_public_symbols: tuple[str, ...] = (),
+    cli_strict_suppressions: bool | None = None,
+    cli_require_justification: bool | None = None,
+    cli_exit_code_scheme: str | None = None,
+) -> ResolvedCompareConfig:
+    """Merge CLI flags over ``.abicheck.yml`` config with built-in defaults.
+
+    Pure (no Click/IO) so the precedence contract is unit-testable per key
+    (``test_config_precedence``). Each ``cli_*`` argument is ``None`` when the
+    user did not pass the corresponding flag.
+    """
+    from .severity import resolve_severity_config
+
+    def _pick(cli: object, conf: object, default: object) -> object:
+        if cli is not None:
+            return cli
+        if conf is not None:
+            return conf
+        return default
+
+    # Severity: merge preset + per-category from CLI → config → preset/default.
+    c_preset = cfg.severity_preset if cfg else None
+    c_abi = cfg.severity_abi_breaking if cfg else None
+    c_pot = cfg.severity_potential_breaking if cfg else None
+    c_qual = cfg.severity_quality_issues if cfg else None
+    c_add = cfg.severity_addition if cfg else None
+
+    eff_preset = cli_severity_preset if cli_severity_preset is not None else c_preset
+    eff_abi = cli_severity_abi_breaking if cli_severity_abi_breaking is not None else c_abi
+    eff_pot = (
+        cli_severity_potential_breaking
+        if cli_severity_potential_breaking is not None
+        else c_pot
+    )
+    eff_qual = (
+        cli_severity_quality_issues if cli_severity_quality_issues is not None else c_qual
+    )
+    eff_add = cli_severity_addition if cli_severity_addition is not None else c_add
+
+    severity_active = any(
+        v is not None for v in (eff_preset, eff_abi, eff_pot, eff_qual, eff_add)
+    )
+    severity = resolve_severity_config(
+        preset=eff_preset,
+        abi_breaking=eff_abi,
+        potential_breaking=eff_pot,
+        quality_issues=eff_qual,
+        addition=eff_add,
+    )
+
+    scope_public = bool(
+        _pick(cli_scope_public, cfg.scope_public if cfg else None, True)
+    )
+    collapse = bool(
+        _pick(
+            cli_collapse_versioned_symbols,
+            cfg.collapse_versioned_symbols if cfg else None,
+            False,
+        )
+    )
+    # Public-symbol overlay is additive: config list + any CLI additions.
+    merged_public: list[str] = list(cfg.public_symbols) if cfg else []
+    for s in cli_public_symbols:
+        if s not in merged_public:
+            merged_public.append(s)
+
+    strict = bool(
+        _pick(cli_strict_suppressions, cfg.suppression_strict if cfg else None, False)
+    )
+    require_just = bool(
+        _pick(
+            cli_require_justification,
+            cfg.suppression_require_justification if cfg else None,
+            False,
+        )
+    )
+
+    raw_scheme = str(
+        _pick(cli_exit_code_scheme, cfg.exit_code_scheme if cfg else None, "auto")
+    )
+    if raw_scheme == "auto":
+        scheme = "severity" if severity_active else "legacy"
+    else:
+        scheme = raw_scheme
+
+    source_method = cfg.source_method if cfg else None
+
+    return ResolvedCompareConfig(
+        severity=severity,
+        severity_active=severity_active,
+        scope_public=scope_public,
+        collapse_versioned_symbols=collapse,
+        public_symbols=tuple(merged_public),
+        strict_suppressions=strict,
+        require_justification=require_just,
+        exit_code_scheme=scheme,
+        source_method=source_method,
+    )
+
+
+def discover_project_config(start: Path | None = None) -> Path | None:
+    """Find a project ``.abicheck.yml`` for ``compare`` (ADR-037 D4).
+
+    Looks in *start* (default: current working directory) and then walks up to
+    the filesystem root, returning the first ``.abicheck.yml`` found. ``compare``
+    runs from a project checkout, so the nearest enclosing config is the
+    project's reviewed contract.
+    """
+    base = (start or Path.cwd()).resolve()
+    for d in (base, *base.parents):
+        candidate = d / ".abicheck.yml"
+        if candidate.is_file():
+            return candidate
+    return None
 
 
 def _merge_redundant_changes(result: DiffResult) -> None:

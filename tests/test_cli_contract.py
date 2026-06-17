@@ -356,9 +356,11 @@ _OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
     "compare": (
         "--annotate", "--annotate-additions", "--btf", "--collapse-versioned-symbols",
         "--collect-mode", "--ctf", "--debug-format", "--debug-root", "--debug-root1",
+        "--config",
         "--debug-root2", "--debuginfod", "--debuginfod-url", "--demangle", "--depth",
         "--dso-only", "--dwarf",
-        "--dwarf-only", "--explain-patterns", "--follow-deps", "--format", "--header",
+        "--dwarf-only", "--exit-code-scheme", "--explain-patterns", "--follow-deps",
+        "--format", "--header",
         "--header-backend", "--include", "--jobs", "--lang", "--ld-library-path", "--max",
         "--new-build-info",
         "--new-header", "--new-header-backend", "--new-include", "--new-pdb-path",

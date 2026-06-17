@@ -852,38 +852,40 @@ def _write_or_echo(output: Path | None, text: str) -> None:
 
 
 def _announce_exit_scheme(
-    severity_explicitly_set: bool, sev_config: SeverityConfig | None,
+    scheme: str,
     *, fmt: str = "markdown", stat: bool = False,
 ) -> None:
     """Announce (on stderr) which exit-code scheme the compare command uses.
 
-    Kept on stderr so it never pollutes the report on stdout. Emitted only by
-    the ``compare`` command (not compare-release / appcompat), and only for the
-    human-readable formats — machine formats (json/sarif/junit) and the
-    one-line ``--stat`` summary are consumed by tooling that treats the whole
-    captured stream as data, so the banner is suppressed there.
+    The scheme is now explicit (ADR-037 D12 / D4: ``--exit-code-scheme`` or the
+    config's ``exit_code_scheme``, with ``auto`` already resolved to ``legacy`` or
+    ``severity`` by the time we get here). Kept on stderr so it never pollutes the
+    report on stdout, and only for the human-readable formats — machine formats
+    (json/sarif/junit) and the one-line ``--stat`` summary are consumed by tooling
+    that treats the whole captured stream as data, so the banner is suppressed.
     """
     if stat or fmt not in {"markdown", "html", "review"}:
         return
-    if severity_explicitly_set:
+    if scheme == "severity":
         click.echo(
-            "Exit-code scheme: severity-aware (per-category --severity-* settings).",
+            "Exit-code scheme: severity-aware (per-category severity settings).",
             err=True,
         )
     else:
         click.echo(
             "Exit-code scheme: legacy verdict (0=compatible, 2=API break, 4=ABI break). "
-            "Pass --severity-preset/--severity-* for the severity-aware scheme.",
+            "Pass --exit-code-scheme severity (or a --severity-* setting) for the "
+            "severity-aware scheme.",
             err=True,
         )
 
 
 def _exit_with_severity_or_verdict(
-    result: DiffResult, sev_config: SeverityConfig | None, severity_explicitly_set: bool,
+    result: DiffResult, sev_config: SeverityConfig | None, scheme: str,
 ) -> None:
-    """Exit with appropriate code based on severity config or legacy verdict."""
+    """Exit with the appropriate code for the resolved exit-code scheme."""
     from .severity import compute_exit_code, legacy_exit_code
-    if severity_explicitly_set:
+    if scheme == "severity":
         assert sev_config is not None
         eff_sets = result._effective_kind_sets()
         exit_code = compute_exit_code(
@@ -1086,10 +1088,13 @@ def _dispatch_release_compare(ctx: click.Context, **kwargs: Any) -> None:
                    "demangled regardless of this flag.")
 # Policy + suppression family (ADR-037 D3); strict/justification stay inline.
 @policy_options
-@click.option("--strict-suppressions", is_flag=True, default=False,
-              help="Fail with exit code 1 if any suppression rule has expired.")
-@click.option("--require-justification", is_flag=True, default=False,
-              help="Require every suppression rule to have a non-empty 'reason' field.")
+@click.option("--strict-suppressions", is_flag=True, default=False, hidden=True,
+              help="Fail with exit code 1 if any suppression rule has expired "
+                   "(config: suppression.strict). Demoted to config (ADR-037 D4).")
+@click.option("--require-justification", is_flag=True, default=False, hidden=True,
+              help="Require every suppression rule to have a non-empty 'reason' "
+                   "field (config: suppression.require_justification). Demoted to "
+                   "config (ADR-037 D4).")
 @click.option("--pdb-path", "pdb_path", type=click.Path(path_type=Path), default=None,
               help="Explicit PDB file path for Windows PE debug info (applied to both sides). "
                    "Overrides automatic PDB discovery.")
@@ -1099,6 +1104,22 @@ def _dispatch_release_compare(ctx: click.Context, **kwargs: Any) -> None:
               help="PDB file path for new side only (overrides --pdb-path for new).")
 # Severity preset + per-category overrides (ADR-037 D3 / D4).
 @severity_options
+# ── Project config & exit-code scheme (ADR-037 D4 / D12) ──────────────────────
+@click.option("--config", "config", type=click.Path(exists=True, dir_okay=False, path_type=Path),
+              default=None,
+              help="Path to the project .abicheck.yml (ADR-037 D4). Default: the "
+                   "nearest .abicheck.yml found from the current directory upward. "
+                   "Supplies stable project settings (severity map, scope/FP "
+                   "tuning, suppression policy, exit-code scheme); CLI flags "
+                   "override it.")
+@click.option("--exit-code-scheme", "exit_code_scheme",
+              type=click.Choice(["auto", "legacy", "severity"], case_sensitive=True),
+              default=None,
+              help="Exit-code scheme (ADR-037 D12): 'legacy' (0/2/4 verdict), "
+                   "'severity' (per-category error levels), or 'auto' (severity "
+                   "when a severity setting is in effect, else legacy). Declared "
+                   "explicitly here so passing --severity-* no longer silently "
+                   "changes the scheme. Default: config's exit_code_scheme, else auto.")
 @click.option("--follow-deps", is_flag=True, default=False,
               help="Resolve transitive dependencies for both old and new, compute symbol "
                    "bindings, and include a dependency-change section in the report. ELF only.")
@@ -1112,23 +1133,27 @@ def _dispatch_release_compare(ctx: click.Context, **kwargs: Any) -> None:
                    "derived from root type changes.")
 @scope_options  # --scope-public-headers/--no- (ADR-037 D3); --show-filtered stays inline
 @click.option("--collapse-versioned-symbols", "collapse_versioned_symbols", is_flag=True, default=False,
+              hidden=True,
               help="Opt-in (G15): when a versioned-symbol scheme is detected (most removed "
                    "symbols reappear differing only by a version token, e.g. ICU u_*_NN), "
                    "reclassify those version-rename pairs as compatible so the verdict "
                    "reflects the real delta, not the rename churn. A real SONAME bump and "
-                   "non-versioned removals still drive the verdict.")
+                   "non-versioned removals still drive the verdict. Demoted to config "
+                   "(scope.collapse_versioned_symbols, ADR-037 D4).")
 @click.option("--show-filtered", "show_filtered", is_flag=True, default=False,
               help="List findings excluded by --scope-public-headers (audit trail).")
-@click.option("--public-symbol", "public_symbols", multiple=True,
+@click.option("--public-symbol", "public_symbols", multiple=True, hidden=True,
               help="Widening overlay (ADR-024 §D6): force a symbol (mangled or demangled "
                    "name) into the public surface even when header provenance can't see it "
                    "(asm stubs, .def exports, extern \"C\" shims, MSVC-mangling gaps). "
-                   "Repeatable. Only meaningful with --scope-public-headers.")
+                   "Repeatable. Only meaningful with --scope-public-headers. Demoted to "
+                   "config (scope.public_symbols, ADR-037 D4).")
 @click.option("--public-symbols-list", "public_symbols_list",
               type=click.Path(exists=True, dir_okay=False, path_type=Path), default=None,
+              hidden=True,
               help="File of symbols to force public (one per line; '#' comments and blank "
                    "lines ignored), à la abi-compliance-checker -symbols-list. "
-                   "Merged with --public-symbol.")
+                   "Merged with --public-symbol and scope.public_symbols (ADR-037 D4).")
 @click.option("--probe-matrix-old", "probe_matrix_old", type=click.Path(exists=True, path_type=Path),
               default=None,
               help="Old build-configuration matrix snapshot (from 'abicheck probe run'). "
@@ -1197,6 +1222,8 @@ def compare_cmd(
     severity_potential_breaking: str | None,
     severity_quality_issues: str | None,
     severity_addition: str | None,
+    config: Path | None,
+    exit_code_scheme: str | None,
     follow_deps: bool, search_paths: tuple[Path, ...], ld_library_path: str,
     show_redundant: bool, show_only: str | None, stat: bool,
     scope_public_headers: bool, collapse_versioned_symbols: bool, show_filtered: bool,
@@ -1353,10 +1380,63 @@ def compare_cmd(
         report_mode = "full"
         show_impact = True
 
-    sev_config, severity_explicitly_set = _resolve_severity(
-        severity_preset, severity_abi_breaking,
-        severity_potential_breaking, severity_quality_issues, severity_addition,
+    # ADR-037 D4: load the project config and merge CLI flags over it
+    # (precedence CLI > config > built-in default). Auto-discovered from the
+    # current directory upward, overridable with --config.
+    from .buildsource.inline import load_build_config
+    from .cli_helpers_compare import discover_project_config, resolve_compare_config
+
+    cfg_path = config if config is not None else discover_project_config()
+    try:
+        project_cfg = load_build_config(cfg_path) if cfg_path is not None else None
+    except ValueError as exc:
+        raise click.UsageError(str(exc)) from exc
+
+    def _cli_flag(name: str, value: bool) -> bool | None:
+        # Return the value only when it actually came from the command line, so a
+        # flag default (e.g. --scope-public-headers's True) doesn't mask config.
+        src = click.get_current_context().get_parameter_source(name)
+        return value if src == click.core.ParameterSource.COMMANDLINE else None
+
+    resolved_cfg = resolve_compare_config(
+        project_cfg,
+        cli_severity_preset=severity_preset,
+        cli_severity_abi_breaking=severity_abi_breaking,
+        cli_severity_potential_breaking=severity_potential_breaking,
+        cli_severity_quality_issues=severity_quality_issues,
+        cli_severity_addition=severity_addition,
+        cli_scope_public=_cli_flag("scope_public_headers", scope_public_headers),
+        cli_collapse_versioned_symbols=_cli_flag(
+            "collapse_versioned_symbols", collapse_versioned_symbols
+        ),
+        cli_public_symbols=public_symbols,
+        cli_strict_suppressions=_cli_flag("strict_suppressions", strict_suppressions),
+        cli_require_justification=_cli_flag("require_justification", require_justification),
+        cli_exit_code_scheme=exit_code_scheme,
     )
+    sev_config = resolved_cfg.severity
+    scope_public_headers = resolved_cfg.scope_public
+    collapse_versioned_symbols = resolved_cfg.collapse_versioned_symbols
+    strict_suppressions = resolved_cfg.strict_suppressions
+    require_justification = resolved_cfg.require_justification
+
+    # ADR-037 D4: the precise S-axis lives in config (source.method). It sets the
+    # collection depth only when the user gave no explicit --depth/--max/
+    # --collect-mode signal (CLI > config).
+    if (
+        resolved_cfg.source_method
+        and not collect_mode_explicit
+        and depth is None
+        and not max_depth
+    ):
+        from .buildsource.scan_levels import SourceMethod, method_to_collect_mode
+        try:
+            collect_mode = method_to_collect_mode(SourceMethod(resolved_cfg.source_method))
+        except ValueError:
+            raise click.UsageError(
+                f"source.method in .abicheck.yml is invalid: "
+                f"{resolved_cfg.source_method!r} (expected s0..s6 or auto)."
+            ) from None
 
     old_h, new_h, old_inc, new_inc = _resolve_per_side_options(
         headers, includes, old_headers_only, new_headers_only,
@@ -1412,7 +1492,9 @@ def compare_cmd(
         require_justification=require_justification,
     )
 
-    force_public = _collect_force_public_symbols(public_symbols, public_symbols_list)
+    force_public = _collect_force_public_symbols(
+        resolved_cfg.public_symbols, public_symbols_list
+    )
     if force_public and not scope_public_headers:
         click.echo(
             "Warning: --public-symbol/--public-symbols-list only take effect with "
@@ -1464,15 +1546,15 @@ def compare_cmd(
         follow_deps=follow_deps,
         show_only=show_only, report_mode=report_mode,
         show_impact=show_impact, stat=stat,
-        severity_config=sev_config if severity_explicitly_set else None,
+        severity_config=sev_config if resolved_cfg.exit_code_scheme == "severity" else None,
         show_recommendation=recommend,
         demangle=demangle,
     )
 
     _write_or_echo(output, text)
 
-    _announce_exit_scheme(severity_explicitly_set, sev_config, fmt=fmt, stat=stat)
-    _exit_with_severity_or_verdict(result, sev_config, severity_explicitly_set)
+    _announce_exit_scheme(resolved_cfg.exit_code_scheme, fmt=fmt, stat=stat)
+    _exit_with_severity_or_verdict(result, sev_config, resolved_cfg.exit_code_scheme)
 
 
 @main.command("recommend-collect-mode")
