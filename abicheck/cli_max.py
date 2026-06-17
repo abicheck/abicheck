@@ -37,11 +37,16 @@ import click
 
 # Import _normalize_binary_input from .cli (the registration parent) rather than
 # .cli_resolve so cli_max adds no new import edge beyond the by-design
-# cli<->cli_max sibling cycle (cli re-exports it in __all__). POLICY_FILE_PARAM
-# comes from the leaf cli_params (no cycle back to cli).
+# cli<->cli_max sibling cycle (cli re-exports it in __all__). The shared option
+# families come from the leaf cli_options (no cycle back to cli).
 from .cli import _normalize_binary_input, compare_cmd, dump_cmd, main
 from .cli_dump_helpers import resolve_dump_depth
-from .cli_params import POLICY_FILE_PARAM
+from .cli_options import (
+    output_options,
+    policy_options,
+    scope_options,
+    two_sided_input_options,
+)
 
 _DIR = click.Path(exists=True, file_okay=False, path_type=Path)
 
@@ -127,20 +132,10 @@ def _prepare_side(
                    "pack) for the OLD side; auto-found inside --old-sources when omitted.")
 @click.option("--new-build-info", "new_build_info", type=click.Path(exists=True, path_type=Path),
               default=None, help="Optional L3 build input for the NEW side.")
-# ── Headers (used at dump time) ──────────────────────────────────────────────
-@click.option("-H", "--header", "headers", multiple=True, type=click.Path(exists=True, path_type=Path),
-              help="Public header file or directory applied to both sides (repeat for multiple).")
-@click.option("--old-header", "old_headers_only", multiple=True, type=click.Path(exists=True, path_type=Path),
-              help="Public header for OLD side only (overrides -H for old).")
-@click.option("--new-header", "new_headers_only", multiple=True, type=click.Path(exists=True, path_type=Path),
-              help="Public header for NEW side only (overrides -H for new).")
-@click.option("-I", "--include", "includes", multiple=True, type=click.Path(path_type=Path),
-              help="Extra include directory for the header backend, applied to both sides "
-                   "(repeat for multiple). Needed when public headers pull in project includes.")
-@click.option("--old-include", "old_includes_only", multiple=True, type=click.Path(path_type=Path),
-              help="Include dir for OLD side only (overrides -I for old).")
-@click.option("--new-include", "new_includes_only", multiple=True, type=click.Path(path_type=Path),
-              help="Include dir for NEW side only (overrides -I for new).")
+# ── Headers / includes / version labels (shared family, ADR-037 D3) ───────────
+# Two-sided header/include/version family (the per-side version labels also come
+# from this decorator; --lang and the --header-backend trio stay inline below).
+@two_sided_input_options
 # ── Depth dial (shared vocabulary with `dump`/`scan`) ────────────────────────
 @click.option("--depth", "depth", type=click.Choice(["headers", "build", "graph", "source", "full"]),
               default=None,
@@ -149,11 +144,7 @@ def _prepare_side(
                    "source=L3-L5 (changed scope), full=L3-L5 (full).")
 @click.option("--max", "max_depth", is_flag=True, default=False,
               help="Shorthand for --depth full (the deepest evidence available).")
-# ── Per-side labels ──────────────────────────────────────────────────────────
-@click.option("--old-version", "old_version", default="old", show_default=True,
-              help="Version label for the OLD side.")
-@click.option("--new-version", "new_version", default="new", show_default=True,
-              help="Version label for the NEW side.")
+# ── Header backend + language (per-side labels come from the shared family) ────
 @click.option("--lang", default="c++", show_default=True,
               type=click.Choice(["c++", "c"], case_sensitive=False),
               help="Language mode for the header backend (both sides).")
@@ -166,27 +157,20 @@ def _prepare_side(
 @click.option("--new-header-backend", "new_header_backend", default=None,
               type=click.Choice(["auto", "castxml", "clang"], case_sensitive=False),
               help="L2 header-AST frontend for the new side only (overrides --header-backend).")
-# ── Compare pass-through ─────────────────────────────────────────────────────
-@click.option("--format", "fmt",
-              type=click.Choice(["json", "markdown", "sarif", "html", "junit", "review"]),
-              default="markdown", show_default=True, help="Output format.")
-@click.option("-o", "--output", type=click.Path(path_type=Path), default=None,
-              help="Write the report here instead of stdout.")
-@click.option("--policy", "policy",
-              type=click.Choice(["strict_abi", "sdk_vendor", "plugin_abi"], case_sensitive=True),
-              default="strict_abi", show_default=True, help="Built-in policy profile.")
-@click.option("--policy-file", "policy_file_path", type=POLICY_FILE_PARAM, default=None,
-              help="YAML policy file or built-in name; overrides --policy.")
+# ── Compare pass-through (shared families, ADR-037 D3) ────────────────────────
+@output_options(
+    ["json", "markdown", "sarif", "html", "junit", "review"],
+    output_help="Write the report here instead of stdout.",
+)
+@policy_options  # --policy / --policy-file / --suppress
+# Only the coarse --severity-preset is surfaced here (ADR-037 D4: the
+# per-category overrides are config-bound); see INTENTIONAL_SUBSET in cli_options.
 @click.option("--severity-preset", "severity_preset",
               type=click.Choice(["default", "strict", "info-only"], case_sensitive=True),
               default=None, help="Severity preset controlling exit codes and labels.")
-@click.option("--suppress", type=click.Path(exists=True, path_type=Path), default=None,
-              help="Suppression file (YAML) to filter known/intentional changes.")
 @click.option("--recommend", is_flag=True, default=False,
               help="Append a release recommendation (semver bump + SONAME action).")
-@click.option("--scope-public-headers/--no-scope-public-headers", "scope_public_headers",
-              default=True, show_default=True,
-              help="Restrict findings to the public-header ABI surface (ADR-024).")
+@scope_options  # --scope-public-headers/--no- (ADR-037 D3)
 # ── Orchestration knobs ──────────────────────────────────────────────────────
 @click.option("--keep-snapshots", "keep_snapshots", type=click.Path(file_okay=False, path_type=Path),
               default=None,

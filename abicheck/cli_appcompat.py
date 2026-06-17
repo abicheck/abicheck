@@ -35,7 +35,14 @@ from .cli import (
     _setup_verbosity,
     main,
 )
-from .cli_params import POLICY_FILE_PARAM, _load_suppression_and_policy
+from .cli_options import (
+    output_options,
+    policy_options,
+    scope_options,
+    severity_options,
+    two_sided_input_options,
+)
+from .cli_params import _load_suppression_and_policy
 
 if TYPE_CHECKING:
     from .appcompat import AppRequirements
@@ -145,75 +152,23 @@ def _handle_list_required_symbols(
               type=click.Path(exists=True, path_type=Path), default=None,
               help="Weak mode: check if a library provides everything the app needs "
                    "(no old library required).")
-# ── Dump options ──────────────────────────────────────────────────────────────
-@click.option("-H", "--header", "headers", multiple=True,
-              type=click.Path(path_type=Path),
-              help="Public header file or directory for library ABI extraction "
-                   "(applied to both sides).")
-@click.option("-I", "--include", "includes", multiple=True,
-              type=click.Path(path_type=Path),
-              help="Extra include directory for castxml (applied to both sides).")
+# ── Dump options (shared families, ADR-037 D3) ────────────────────────────────
+# Two-sided header/include/version family; --lang stays inline.
+@two_sided_input_options
 @click.option("--lang", default="c++", show_default=True,
               type=click.Choice(["c++", "c"], case_sensitive=False),
               help="Language mode for castxml.")
-@click.option("--old-header", "old_headers_only", multiple=True,
-              type=click.Path(path_type=Path),
-              help="Public header for old library only (overrides -H for old).")
-@click.option("--new-header", "new_headers_only", multiple=True,
-              type=click.Path(path_type=Path),
-              help="Public header for new library only (overrides -H for new).")
-@click.option("--old-include", "old_includes_only", multiple=True,
-              type=click.Path(path_type=Path),
-              help="Include dir for old library only (overrides -I for old).")
-@click.option("--new-include", "new_includes_only", multiple=True,
-              type=click.Path(path_type=Path),
-              help="Include dir for new library only (overrides -I for new).")
-@click.option("--old-version", "old_version", default="old", show_default=True)
-@click.option("--new-version", "new_version", default="new", show_default=True)
 # ── Output options ────────────────────────────────────────────────────────────
-@click.option("--format", "fmt", type=click.Choice(["json", "markdown", "html"]),
-              default="markdown", show_default=True)
-@click.option("-o", "--output", type=click.Path(path_type=Path), default=None)
+@output_options(["json", "markdown", "html"])
 @click.option("--show-irrelevant", is_flag=True, default=False,
               help="Include library changes that don't affect the application.")
 @click.option("--list-required-symbols", "list_symbols", is_flag=True, default=False,
               help="List symbols the application requires and exit.")
 # ── Suppression + policy ─────────────────────────────────────────────────────
-@click.option("--suppress", type=click.Path(exists=True, path_type=Path), default=None,
-              help="Suppression file (YAML).")
-@click.option("--policy", "policy",
-              type=click.Choice(["strict_abi", "sdk_vendor", "plugin_abi"], case_sensitive=True),
-              default="strict_abi", show_default=True)
-@click.option("--policy-file", "policy_file_path",
-              type=POLICY_FILE_PARAM, default=None)
-@click.option("--scope-public-headers/--no-scope-public-headers", "scope_public_headers",
-              default=True, show_default=True,
-              help="Restrict findings to the public-header ABI surface (ADR-024). "
-                   "On by default; matches `compare`. Use --no-scope-public-headers "
-                   "to report every finding.")
-# ── Severity (mirrors `compare`) ──────────────────────────────────────────────
-@click.option("--severity-preset", "severity_preset",
-              type=click.Choice(["default", "strict", "info-only"], case_sensitive=True),
-              default=None,
-              help="Severity preset: 'default', 'strict', or 'info-only'. "
-                   "When set (or any --severity-* option), exit codes follow the "
-                   "severity-aware scheme instead of the verdict-based one.")
-@click.option("--severity-abi-breaking", "severity_abi_breaking",
-              type=click.Choice(["error", "warning", "info"], case_sensitive=True),
-              default=None,
-              help="Severity for clear ABI/API incompatibilities (overrides preset).")
-@click.option("--severity-potential-breaking", "severity_potential_breaking",
-              type=click.Choice(["error", "warning", "info"], case_sensitive=True),
-              default=None,
-              help="Severity for potential incompatibilities needing review (overrides preset).")
-@click.option("--severity-quality-issues", "severity_quality_issues",
-              type=click.Choice(["error", "warning", "info"], case_sensitive=True),
-              default=None,
-              help="Severity for problematic behaviors (overrides preset).")
-@click.option("--severity-addition", "severity_addition",
-              type=click.Choice(["error", "warning", "info"], case_sensitive=True),
-              default=None,
-              help="Severity for new public API additions (overrides preset).")
+@policy_options
+@scope_options  # --scope-public-headers/--no- (ADR-037 D3)
+# ── Severity (shared family; mirrors `compare`) ───────────────────────────────
+@severity_options
 @click.option("-v", "--verbose", is_flag=True, default=False)
 def appcompat_cmd(
     app_path: Path,

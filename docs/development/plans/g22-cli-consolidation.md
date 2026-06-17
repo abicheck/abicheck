@@ -110,7 +110,31 @@ change observable from the CLI.
 
 ### Phase 2 — Decorator-ize shared families (D3)
 
-**Work.** Define the 7 decorators in `cli_options.py` (ADR-037 D3 table).
+**Status: landed.** `cli_options.py` now defines six shared families as
+decorators — `two_sided_input_options`, `policy_options`, `severity_options`,
+`scope_options`, `debug_resolution_options`, and the `output_options` factory
+(per-command `--format` choices vary legitimately) — plus the contract tables
+(`FAMILY_FLAGS`, `FAMILY_DECORATOR`, `REQUIRED_FAMILIES`,
+`VERDICT_EMITTING_COMMANDS`, `INTENTIONAL_SUBSET`, `DEFERRED_MULTI_DEFAULT`).
+`compare`, `compare-release`, `appcompat`, and `deep-compare` are recomposed onto
+them with their inline duplicates deleted (behaviour-preserving; help text is now
+uniform, and the divergences are closed — `deep-compare`'s `-H` no longer needs
+the file to exist at parse, matching its siblings). `deep-compare` keeps only the
+coarse `--severity-preset` and is the sole `INTENTIONAL_SUBSET` entry. The
+`cli-contract` gate gained D10.2 (decorator coverage) and D10.4
+(one-default-per-flag), mirrored in `tests/test_cli_contract.py` along with the
+per-command option-set snapshot and the gate↔`cli_options` table-mirror test.
+
+The seventh decorator, **`@evidence_options` (`--depth`/`--collect-mode`/
+`--sources`/`--build-info`), is deferred to Phase 3** where the depth vocabulary
+is unified: the existing `build_source_compare_options`/`build_source_dump_options`
+helpers stay as-is for now, and their `--collect-mode` double-default (the very
+case D10.4 exists to catch) is parked on the `DEFERRED_MULTI_DEFAULT` allowlist
+with a pointer to Phase 3 rather than hidden. `dump`/`scan` are not in the
+verdict-emitting set, so their recompose rides along with the depth work in
+Phase 3.
+
+**Original plan.** Define the 7 decorators in `cli_options.py` (ADR-037 D3 table).
 Recompose `compare`, `compare-release`, `appcompat`, `deep-compare`, `dump`,
 `scan` onto them, deleting inline duplicates. Seed `INTENTIONAL_SUBSET` with any
 deliberate omission (each with a reason string). Add D10.2 (decorator coverage)
