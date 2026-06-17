@@ -41,7 +41,7 @@ from scripts.check_ai_readiness import Findings, check_cli_contract  # noqa: E40
 # ── D10.1: no front-end skips the Tier-2 service ─────────────────────────────
 
 
-def test_no_tier_skip():
+def test_no_tier_skip() -> None:
     """No ``abicheck/cli*.py`` module calls Tier-1 ``checker.compare`` directly.
 
     Front-ends must route through ``service.run_compare`` /
@@ -59,7 +59,7 @@ def test_no_tier_skip():
 # a different way; the gate must flag exactly one violation naming that file.
 # (filename, source) — covers: direct import, aliased lazy `compare` import,
 # aliased `checker` *module* call, and the non-`cli*.py` `appcompat.py` scope.
-_GATE_VIOLATION_CASES = [
+_GATE_VIOLATION_CASES: list[pytest.ParameterSet] = [
     pytest.param(
         "cli_bad.py",
         "from .checker import compare\ndef go(a, b):\n    return compare(a, b)\n",
@@ -86,7 +86,12 @@ _GATE_VIOLATION_CASES = [
 
 
 @pytest.mark.parametrize("filename, source", _GATE_VIOLATION_CASES)
-def test_gate_flags_violation(tmp_path, monkeypatch, filename, source):
+def test_gate_flags_violation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    filename: str,
+    source: str,
+) -> None:
     """The gate is not a no-op: each way of reaching Tier-1 is caught once."""
     import scripts.check_ai_readiness as gate
 
@@ -103,7 +108,9 @@ def test_gate_flags_violation(tmp_path, monkeypatch, filename, source):
     assert filename in errors[0]
 
 
-def test_service_compare_call_is_not_flagged(tmp_path, monkeypatch):
+def test_service_compare_call_is_not_flagged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Routing through ``service.compare_snapshots`` must NOT be flagged."""
     import scripts.check_ai_readiness as gate
 
@@ -125,7 +132,9 @@ def test_service_compare_call_is_not_flagged(tmp_path, monkeypatch):
 # ── Chokepoint parity: one classifier, no scope_public drift ─────────────────
 
 
-def _make_snap_file(tmp_path: Path, name: str, version: str, funcs) -> Path:
+def _make_snap_file(
+    tmp_path: Path, name: str, version: str, funcs: list[Function]
+) -> Path:
     snap = AbiSnapshot(library=name, version=version, functions=funcs)
     p = tmp_path / f"{name}_{version}.json"
     save_snapshot(snap, p)
@@ -142,7 +151,7 @@ def _func(name: str) -> Function:
     )
 
 
-def test_compare_release_matches_service_run_compare(tmp_path):
+def test_compare_release_matches_service_run_compare(tmp_path: Path) -> None:
     """``compare-release``'s per-pair runner classifies identically to
     ``service.run_compare`` — they share the one chokepoint (ADR-037 D1)."""
     from abicheck import service
@@ -182,7 +191,7 @@ def test_compare_release_matches_service_run_compare(tmp_path):
     )
 
 
-def test_run_compare_request_equivalent_to_kwargs_shim(tmp_path):
+def test_run_compare_request_equivalent_to_kwargs_shim(tmp_path: Path) -> None:
     """The kwargs ``run_compare`` shim and a hand-built ``CompareRequest`` agree."""
     from abicheck.api_types import CompareRequest, InputSpec
     from abicheck.service import run_compare, run_compare_request
