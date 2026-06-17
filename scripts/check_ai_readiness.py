@@ -39,6 +39,8 @@ TESTS = ROOT / "tests"
 DOCS = ROOT / "docs"
 EXAMPLES = ROOT / "examples"
 SCRIPTS = ROOT / "scripts"
+EVAL = ROOT / "eval"
+VALIDATION = ROOT / "validation"
 
 # ---------------------------------------------------------------------------
 # Tunables
@@ -62,6 +64,8 @@ REQUIRED_CLAUDE_MD_DIRS: tuple[Path, ...] = (
     DOCS,
     EXAMPLES,
     SCRIPTS,
+    EVAL,
+    VALIDATION,
 )
 
 # Minimum test-file ratio (test files / source files).
@@ -471,7 +475,8 @@ def check_doc_count_sync(f: Findings) -> None:
     # enum size. The anchors above pin specific headline sentences; this catches
     # the long tail of casual mentions that historically drifted (190, 183,
     # 180+, 150+, 100+...). ADRs are dated decision records and keep the counts
-    # that were true when they were written, so they are exempt.
+    # that were true when they were written, so they are exempt; the archive of
+    # retired/historical docs is exempt for the same reason.
     # `?...`? tolerates markdown code spans: "183 `ChangeKind` values",
     # "234 `ChangeKind`s".
     generic = re.compile(
@@ -479,6 +484,8 @@ def check_doc_count_sync(f: Findings) -> None:
         r"(?:-kind\b|\s+(?:ABI/API\s+)?(?:[Cc]hange\s+(?:kinds?|types?)|`?ChangeKinds?`?s?|detection\s+rules))"
     )
     adr_dir = DOCS / "development" / "adr"
+    archive_dir = DOCS / "development" / "archive"
+    exempt_dirs = (adr_dir, archive_dir)
     sweep_files = [
         ROOT / "README.md",
         ROOT / "CLAUDE.md",
@@ -487,7 +494,8 @@ def check_doc_count_sync(f: Findings) -> None:
     sweep_files += [
         p
         for p in sorted(DOCS.rglob("*"))
-        if p.suffix in {".md", ".yaml", ".yml"} and not p.is_relative_to(adr_dir)
+        if p.suffix in {".md", ".yaml", ".yml"}
+        and not any(p.is_relative_to(d) for d in exempt_dirs)
     ]
     for path in sweep_files:
         if not path.is_file():
