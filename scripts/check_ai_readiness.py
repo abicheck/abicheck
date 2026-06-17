@@ -1263,11 +1263,13 @@ def _check_decorator_coverage(f: Findings) -> None:
             tree = ast.parse(_read(path), filename=rel)
         except SyntaxError:
             continue
+        found = False
         for fn in ast.walk(tree):
             if not isinstance(fn, ast.FunctionDef):
                 continue
             if _command_name_of(fn) != cmd_name:
                 continue
+            found = True
             applied = {
                 name
                 for dec in fn.decorator_list
@@ -1284,6 +1286,15 @@ def _check_decorator_coverage(f: Findings) -> None:
                     f"`@{required}` (ADR-037 D3/D10.2). Compose it from "
                     "`cli_options.py` or add an `INTENTIONAL_SUBSET` entry with a reason.",
                 )
+        # A mapped command whose module exists but no longer declares it is a
+        # D10.2 false-negative (coverage silently un-verifiable) — flag it.
+        if not found:
+            f.err(
+                "cli-contract",
+                f"{rel}: expected verdict-emitting command `{cmd_name}` was not "
+                "found; its shared-decorator coverage (ADR-037 D10.2) could not be "
+                "verified. Update `VERDICT_EMITTING_COMMANDS` if it moved or was renamed.",
+            )
 
 
 def _option_flag_and_default(call: ast.Call) -> tuple[str | None, str | None]:

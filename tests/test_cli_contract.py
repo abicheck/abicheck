@@ -218,6 +218,26 @@ def test_gate_flags_missing_decorator(
     assert missing == {"severity_options", "scope_options", "output_options"}, msgs
 
 
+def test_gate_flags_missing_command(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A mapped command whose module exists but no longer declares it is flagged
+    (D10.2 must not silently pass when coverage can't be verified)."""
+    import scripts.check_ai_readiness as gate
+
+    pkg = tmp_path / "abicheck"
+    pkg.mkdir()
+    # cli.py exists but the `compare` command has been removed from it.
+    (pkg / "cli.py").write_text("def helper():\n    return 1\n")
+    monkeypatch.setattr(gate, "PKG", pkg)
+    monkeypatch.setattr(gate, "ROOT", tmp_path)
+
+    findings = gate.Findings()
+    gate.check_cli_contract(findings)
+    msgs = [m for c, m in findings.errors if c == "cli-contract"]
+    assert any("`compare` was not found" in m for m in msgs), msgs
+
+
 def test_intentional_subset_decorator_is_not_flagged(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
