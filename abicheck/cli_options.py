@@ -716,6 +716,15 @@ def note_deprecated_flags(argv: Sequence[str] | None = None) -> str | None:
 
     The generic counterpart of :func:`note_deprecated_ast_frontend` over the whole
     ``DEPRECATED_FLAGS`` registry — the form the 1.0 switch-on will adopt.
+
+    Unlike the single-family ``note_deprecated_ast_frontend`` (whose flags share
+    one replacement, so a bare "use --ast-frontend instead" is unambiguous), this
+    spans the *whole* registry where a replacement-only message would be
+    ambiguous — e.g. ``--collect-mode`` → ``--depth`` and the value-level
+    ``--depth=graph`` → ``--depth=source`` in the same run. The explicit
+    ``spelling → replacement`` arrow pairs each deprecated token with its own
+    target, which is why this form keeps the arrow rather than matching the
+    sibling's simpler phrasing.
     """
     found = deprecated_flags_in_argv(argv)
     if not found:
