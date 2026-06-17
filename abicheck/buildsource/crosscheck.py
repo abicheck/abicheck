@@ -133,11 +133,9 @@ class _CheckOutput:
     status: str  # "present" | "skipped"
     detail: str
     providers: list[str]
-    #: Optional source-surface boundary integrity counters (ADR-035 D4): e.g.
-    #: ``exported_symbols`` / ``matched_symbols`` / ``unmatched_symbols`` for an
-    #: L4 check, so a degraded link (zero matched) is named on the rendered
-    #: coverage row, never folded in as clean. ``facts`` is the parsed-evidence
-    #: count anchoring the row.
+    #: Optional ADR-035 D4 source-surface boundary integrity numbers (e.g.
+    #: exported/matched/unmatched symbols) carried onto the coverage row so a
+    #: degraded link is named, never folded in as clean. ``facts`` anchors the row.
     facts: int = 0
     counters: dict[str, int] = field(default_factory=dict)
 
@@ -620,11 +618,10 @@ def _check_odr_type_variant(
         f"L4 per-TU type layouts: {len(findings)} type(s) with divergent "
         "cross-TU definitions (ODR conflict)"
     )
-    # Surface the source-link boundary integrity counters (ADR-035 D4) onto the
-    # coverage row so the *rendered* ScanResult — not just an internal object —
-    # names a degraded link: an L4 surface can carry parsed decls yet match zero
-    # of the binary's exports (the oneDAL field-failure shape). A clean ODR pass
-    # over such a surface must still show matched_symbols == 0.
+    # Carry the source-link boundary integrity counters (ADR-035 D4) onto the
+    # coverage row so the rendered ScanResult names a degraded link: an L4 surface
+    # can carry parsed decls yet match zero exports (the oneDAL shape) — a clean
+    # ODR pass over it must still show matched_symbols == 0.
     cov = surface.coverage or {}
     unmatched = surface.unmatched or {}
     counters = {
@@ -633,7 +630,7 @@ def _check_odr_type_variant(
         "unmatched_symbols": len(unmatched.get("symbols_without_decl", []) or []),
     }
     facts = int(cov.get("reachable_declarations", 0) or 0) or len(
-        surface.reachable_declarations
+        surface.reachable_declarations or []
     )
     return _CheckOutput(findings, "present", detail, providers, facts, counters)
 
@@ -1507,9 +1504,8 @@ def _coverage_row(
 ) -> dict[str, Any]:
     """One serialized coverage row for a check (ADR-035 D4 coverage honesty).
 
-    ``facts``/``counters`` are optional source-surface boundary integrity
-    numbers (D4): they are added only when non-empty so existing rows (and any
-    serialized snapshots of them) are byte-for-byte unchanged.
+    ``facts``/``counters`` are optional D4 boundary-integrity numbers, added only
+    when non-empty so existing rows stay byte-for-byte unchanged.
     """
     row: dict[str, Any] = {
         "layer": f"crosscheck:{check}",
