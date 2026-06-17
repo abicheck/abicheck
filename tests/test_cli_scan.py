@@ -95,6 +95,32 @@ def new_snap_compatible(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
+def source_tree_with_compile_db(tmp_path: Path) -> Path:
+    """A minimal source tree with a compile_commands.json for L3/L4 scan tests.
+
+    The compile DB makes L3 resolve cleanly (no stderr "no compile_commands.json"
+    note that would otherwise prepend to JSON stdout), so an `s5` scan reaches the
+    L4 replay path. Returns the source dir.
+    """
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "foo.cpp").write_text("int foo() { return 0; }\n", encoding="utf-8")
+    (src / "compile_commands.json").write_text(
+        json.dumps(
+            [
+                {
+                    "directory": str(src),
+                    "file": "foo.cpp",
+                    "arguments": ["c++", "-c", "foo.cpp"],
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+    return src
+
+
+@pytest.fixture
 def new_snap_breaking(tmp_path: Path) -> Path:
     # `bar` removed → a removed exported symbol is a hard ABI break.
     snap = AbiSnapshot(
@@ -609,30 +635,12 @@ def test_auto_without_diff_seed_falls_back_to_preset(runner, new_snap_compatible
 
 
 def test_unseeded_s5_with_sources_emits_headers_only_advisory(
-    runner, tmp_path, new_snap_compatible
+    runner, source_tree_with_compile_db, new_snap_compatible
 ):
     # ADR-035 P3: an unseeded s5 scan *with a source tree* falls back to a
     # headers-only replay; the result must carry an advisory naming
     # --since/--changed-path (text + JSON), not silently pay broad-replay cost.
     # The advisory rides the structured result so it never pollutes JSON stdout.
-    src = tmp_path / "src"
-    src.mkdir()
-    (src / "foo.cpp").write_text("int foo() { return 0; }\n", encoding="utf-8")
-    # A compile DB makes L3 resolve cleanly (no stderr "no compile_commands.json"
-    # note that would otherwise prepend to JSON stdout); L4 replay then runs (and
-    # falls back to headers-only when unseeded, firing the advisory).
-    (src / "compile_commands.json").write_text(
-        json.dumps(
-            [
-                {
-                    "directory": str(src),
-                    "file": "foo.cpp",
-                    "arguments": ["c++", "-c", "foo.cpp"],
-                }
-            ]
-        ),
-        encoding="utf-8",
-    )
     res = runner.invoke(
         main,
         [
@@ -640,7 +648,7 @@ def test_unseeded_s5_with_sources_emits_headers_only_advisory(
             "--binary",
             str(new_snap_compatible),
             "--sources",
-            str(src),
+            str(source_tree_with_compile_db),
             "--source-method",
             "s5",
             "--format",
@@ -654,25 +662,10 @@ def test_unseeded_s5_with_sources_emits_headers_only_advisory(
 
 
 def test_unseeded_s5_advisory_rendered_in_text_output(
-    runner, tmp_path, new_snap_compatible
+    runner, source_tree_with_compile_db, new_snap_compatible
 ):
     # The advisory must also render as a `note:` line in the default text report
     # (not only JSON) so an interactive user sees it.
-    src = tmp_path / "src"
-    src.mkdir()
-    (src / "foo.cpp").write_text("int foo() { return 0; }\n", encoding="utf-8")
-    (src / "compile_commands.json").write_text(
-        json.dumps(
-            [
-                {
-                    "directory": str(src),
-                    "file": "foo.cpp",
-                    "arguments": ["c++", "-c", "foo.cpp"],
-                }
-            ]
-        ),
-        encoding="utf-8",
-    )
     res = runner.invoke(
         main,
         [
@@ -680,7 +673,7 @@ def test_unseeded_s5_advisory_rendered_in_text_output(
             "--binary",
             str(new_snap_compatible),
             "--sources",
-            str(src),
+            str(source_tree_with_compile_db),
             "--source-method",
             "s5",
             "--audit",
@@ -712,28 +705,11 @@ def test_unseeded_s5_without_sources_has_no_advisory(runner, new_snap_compatible
 
 
 def test_seeded_s5_with_sources_has_no_headers_only_advisory(
-    runner, tmp_path, new_snap_compatible
+    runner, source_tree_with_compile_db, new_snap_compatible
 ):
-    # With a --changed-path seed the replay is focused, so the P3 advisory must
-    # NOT fire even with a source tree present.
-    src = tmp_path / "src"
-    src.mkdir()
-    (src / "foo.cpp").write_text("int foo() { return 0; }\n", encoding="utf-8")
-    # A compile DB makes L3 resolve cleanly (no stderr "no compile_commands.json"
-    # note that would otherwise prepend to JSON stdout); L4 replay then runs (and
-    # falls back to headers-only when unseeded, firing the advisory).
-    (src / "compile_commands.json").write_text(
-        json.dumps(
-            [
-                {
-                    "directory": str(src),
-                    "file": "foo.cpp",
-                    "arguments": ["c++", "-c", "foo.cpp"],
-                }
-            ]
-        ),
-        encoding="utf-8",
-    )
+    # Because this test is seeded (--changed-path), the L4 replay runs in focused
+    # mode rather than falling back to headers-only, so the P3 advisory must NOT
+    # fire even with a source tree present.
     res = runner.invoke(
         main,
         [
@@ -741,7 +717,7 @@ def test_seeded_s5_with_sources_has_no_headers_only_advisory(
             "--binary",
             str(new_snap_compatible),
             "--sources",
-            str(src),
+            str(source_tree_with_compile_db),
             "--source-method",
             "s5",
             "--changed-path",
