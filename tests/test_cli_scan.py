@@ -653,6 +653,43 @@ def test_unseeded_s5_with_sources_emits_headers_only_advisory(
     assert any("--since" in a for a in payload["advisories"])
 
 
+def test_unseeded_s5_advisory_rendered_in_text_output(
+    runner, tmp_path, new_snap_compatible
+):
+    # The advisory must also render as a `note:` line in the default text report
+    # (not only JSON) so an interactive user sees it.
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "foo.cpp").write_text("int foo() { return 0; }\n", encoding="utf-8")
+    (src / "compile_commands.json").write_text(
+        json.dumps(
+            [
+                {
+                    "directory": str(src),
+                    "file": "foo.cpp",
+                    "arguments": ["c++", "-c", "foo.cpp"],
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+    res = runner.invoke(
+        main,
+        [
+            "scan",
+            "--binary",
+            str(new_snap_compatible),
+            "--sources",
+            str(src),
+            "--source-method",
+            "s5",
+            "--audit",
+        ],
+    )
+    assert res.exit_code == 0, res.output
+    assert "note: no --since/--changed-path seed" in res.output
+
+
 def test_unseeded_s5_without_sources_has_no_advisory(runner, new_snap_compatible):
     # No --sources tree → L4 replay never runs, so the headers-only advisory must
     # NOT fire (it would report a replay that never happened — CodeRabbit review).
