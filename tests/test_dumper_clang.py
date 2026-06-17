@@ -466,12 +466,28 @@ def test_resolve_header_backend_rejects_unknown() -> None:
 
 
 def test_resolve_header_backend_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("ABICHECK_AST_FRONTEND", raising=False)
     monkeypatch.setenv("ABICHECK_HEADER_BACKEND", "clang")
     assert _resolve_header_backend("auto") == "clang"
     assert _resolve_header_backend(None) == "clang"
     # An explicit request always wins over the env default.
     monkeypatch.setenv("ABICHECK_HEADER_BACKEND", "clang")
     assert _resolve_header_backend("castxml") == "castxml"
+
+
+def test_resolve_header_backend_ast_frontend_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """ABICHECK_AST_FRONTEND is the canonical env knob and wins over the legacy
+    ABICHECK_HEADER_BACKEND alias (ADR-037 D8)."""
+    monkeypatch.setenv("ABICHECK_AST_FRONTEND", "clang")
+    assert _resolve_header_backend("auto") == "clang"
+    assert _resolve_header_backend(None) == "clang"
+    # The canonical knob takes precedence when both env vars disagree.
+    monkeypatch.setenv("ABICHECK_HEADER_BACKEND", "castxml")
+    assert _resolve_header_backend("auto") == "clang"
+    # An out-of-enum ABICHECK_AST_FRONTEND value is ignored; the legacy alias
+    # then supplies the default.
+    monkeypatch.setenv("ABICHECK_AST_FRONTEND", "bogus")
+    assert _resolve_header_backend("auto") == "castxml"
 
 
 def test_resolve_header_backend_auto_prefers_castxml(

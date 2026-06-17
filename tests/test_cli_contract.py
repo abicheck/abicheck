@@ -469,6 +469,43 @@ def test_note_deprecated_ast_frontend_detects_legacy_spellings() -> None:
     assert note_deprecated_ast_frontend(["x", "--old-header-backend=clang"]) is not None
 
 
+@pytest.mark.parametrize("cmd_name", ["compare", "deep-compare"])
+def test_legacy_flag_invocation_echoes_note(
+    cmd_name: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Invoking a command with the legacy ``--header-backend`` spelling prints the
+    D8 deprecation note to stderr (the alias still resolves)."""
+    from click.testing import CliRunner
+
+    # cli_max registers deep-compare; importing it also pulls in `main`.
+    _registered_commands()
+    from abicheck.cli import main
+
+    old_p = _make_snap_file(tmp_path, "libdn", "1.0", [_func("a")])
+    new_p = _make_snap_file(tmp_path, "libdn", "2.0", [_func("a")])
+    argv = [cmd_name, str(old_p), str(new_p), "--header-backend", "castxml"]
+    # The note keys on sys.argv (it detects the literal legacy spelling), so the
+    # CliRunner args must also be reflected there.
+    monkeypatch.setattr(sys, "argv", ["abicheck", *argv])
+    res = CliRunner().invoke(main, argv)
+    assert "deprecated (ADR-037 D8)" in res.output, res.output
+
+
+def test_dump_legacy_flag_echoes_note(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`dump` echoes the D8 note too (the note fires before format detection)."""
+    from click.testing import CliRunner
+
+    from abicheck.cli import main
+
+    snap = _make_snap_file(tmp_path, "libd", "1.0", [_func("a")])
+    argv = ["dump", str(snap), "--header-backend", "castxml"]
+    monkeypatch.setattr(sys, "argv", ["abicheck", *argv])
+    res = CliRunner().invoke(main, argv)
+    assert "deprecated (ADR-037 D8)" in res.output, res.output
+
+
 # ── Resolved option-set snapshot (catches an accidental flag drop in review) ──
 
 # Frozen sets of every option spelling each verdict-emitting command exposes.
