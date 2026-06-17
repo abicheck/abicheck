@@ -49,6 +49,23 @@ down the contract that keeps it from re-rotting.
 
 ## Decision
 
+At a glance — the twelve decisions:
+
+| # | Decision | One-line |
+|---|----------|----------|
+| D1 | Three named tiers | core / service / front-end; service is the only API |
+| D2 | Options are data | frozen `*Request` dataclasses, not growing kwargs |
+| D3 | One decorator per family | shared CLI options defined once in `cli_options.py` |
+| D4 | CLI vs config balance | per-run → CLI; stable project contract → `.abicheck.yml` |
+| D5 | One `--depth` dial | drop the "evidence/L-layer" vocabulary from the UI |
+| D6 | L5 graph is internal | derived from `--depth source`, never its own mode |
+| D7 | Command consolidation | fold `compare-release`/`deep-compare` into `compare` |
+| D8 | `--ast-frontend` | rename `--header-backend`; spans header AST + L4 replay |
+| D9 | Fail-fast validation | in Tier 2, so CLI and MCP error identically |
+| D10 | CI gates the contract | `cli-contract` check makes the above non-optional |
+| D11 | Extension procedure | the decision tree for adding any new surface |
+| D12 | One exit-code scheme | explicit, never inferred from flag presence |
+
 ### D1. Three named tiers; the service layer is the only API
 
 ```text
@@ -122,7 +139,7 @@ contract violation (CI-checked, D10).
 | `@scope_options` | `--scope-public-headers/--no-`, `--show-filtered` |
 | `@debug_resolution_options` | `--debug-root{,1,2}`, `--debuginfod[-url]`, `--debug-format`, `--dwarf-only` |
 | `@output_options` | `--format`, `-o/--output` |
-| `@evidence_options` | `--depth`, `--max`, `--sources`, `--build-info` (D5) |
+| `@evidence_options` | `--depth`, `--max`, `--sources` + per-side `--old/new-sources`, `--build-info` + per-side `--old/new-build-info` (D5) |
 
 A command that legitimately wants a *subset* opts out **explicitly with a code
 comment stating why** — the absence becomes a deliberate, reviewable decision
@@ -163,6 +180,14 @@ Concrete moves into config (CLI keeps a coarse override only):
 Result: a configured project runs `abicheck compare old new` and everything
 else comes from `.abicheck.yml`. The CLI surface for `compare` drops from ~62
 to ~20 flags.
+
+*Accepted tradeoff:* a one-off, single-category severity override (e.g. "treat
+quality as error just this once") is no longer a CLI flag — the user picks a
+whole `--severity-preset` or edits the config. This is deliberate: per-category
+tuning is a reviewed project decision, and the rare one-off is served by the
+three presets. If real demand appears, a single escape hatch
+(`--severity KEY=LEVEL`, repeatable) can be added later under D11 without
+reopening this decision.
 
 ### D5. One analysis-depth dial — and drop the "evidence" vocabulary
 
@@ -225,8 +250,11 @@ on a different *quantity* or *depth* of operand. Fold them in:
 - **`compare-release` → `compare`.** `compare` accepts directories/packages
   (RPM/deb/tar) as inputs and auto-expands to per-library pairs. Multi-library
   concerns become flags that are only meaningful for set inputs (`-j/--jobs`,
-  `--dso-only`, bundle options) — documented as such. `compare-release` becomes
-  a thin deprecated alias.
+  `--dso-only`, `--output-dir` for per-library reports, bundle options) —
+  documented as such, and a no-op-with-warning when the inputs are single
+  files. `compare-release` becomes a thin deprecated alias. The set case keeps
+  its two-level output (a summary on stdout/`-o`, per-library reports under
+  `--output-dir`) — folding the command must not lose the fan-out.
   - *Dispatch edge:* file-vs-app detection is heuristic — a PIE executable is
     `ET_DYN`, indistinguishable from a `.so` by ELF type alone. Dispatch must
     not silently treat a binary as the wrong operand kind; when the kind is
@@ -335,10 +363,92 @@ The legacy/severity schemes are kept for back-compat but the active one is
   behaviour, documented). Passing `--severity-*` no longer *silently* switches
   meaning — it is recorded as a deliberate scheme selection and surfaced in
   `--help` and the run header.
+- The chosen scheme is a *project-stable* decision (CI scripts key on it), so it
+  is also settable in `.abicheck.yml` (`exit_code_scheme:`) per D4, with the CLI
+  flag as the per-run override. This keeps a project's CI contract in the
+  reviewed config rather than scattered across workflow YAML.
 - The ABICC `compat` command keeps its own distinct exit-code taxonomy (see
   `compat/cli.py`); it is **not** offered as a scheme value on native `compare`
   — mixing the two vocabularies on one command is precisely the inference
   ambiguity this decision removes.
+
+---
+
+## Worked scenarios (design validation)
+
+Walking real invocations through the contract — both to show the intended UX and
+to prove the tiers/decorators actually compose. Each scenario names the tier
+path and what each layer does. Frictions found while writing these were folded
+back into D4/D5/D7/D12 above.
+
+### S1 — PR gate, configured project (the 90% case)
+```text
+abicheck compare libfoo.so.1 libfoo.so.2
+```
+`.abicheck.yml` supplies policy, severity map, suppressions, scope, and
+`exit_code_scheme`. CLI builds a `CompareRequest` (D2) from two `InputSpec`s +
+config; Tier 2 `run_compare` classifies; exit code per the configured scheme
+(D12). **Twenty-flag command, two-token invocation.** This is the payoff.
+
+### S2 — release / package comparison (absorbs `compare-release`)
+```text
+abicheck compare ./old/ ./new/ -j8 --dso-only --output-dir reports/
+```
+Input-type dispatch (D7) sees directories, expands to per-library pairs, runs
+`run_compare` per pair in parallel, writes a summary to stdout and per-library
+reports under `--output-dir`. Same classifier as S1 → a library compared here
+and in S1 gets an identical verdict (D1). `compare-release ...` still works as a
+deprecated alias.
+
+### S3 — deep one-shot with source evidence (absorbs `deep-compare`)
+```text
+abicheck compare libfoo.so.1 libfoo.so.2 --old-sources ./v1 --new-sources ./v2 --max
+```
+`--max` ⇒ `depth=full` (D5); per-side `--old/new-sources` ride the
+`@evidence_options` decorator (D3). Tier 2 collects L3/L4 and builds the L5
+graph internally (D6) — no `graph-*` mode to learn. `deep-compare ...` is a
+deprecated alias.
+
+### S4 — application compatibility (stays its own verb)
+```text
+abicheck appcompat ./myapp libfoo.so.1 libfoo.so.2
+abicheck appcompat ./myapp --check-against libfoo.so.2     # weak mode
+```
+Different *question* (consumer-side), so a distinct command per the D7 bar — but
+it shares `@policy_options`/`@severity_options`/`@scope_options` and calls the
+same Tier-2 service, so no option drift.
+
+### S5 — AI agent over MCP
+```json
+{"tool": "abi_compare",
+ "args": {"old": "a.so", "new": "b.so", "depth": "source", "policy": "strict_abi"}}
+```
+`MCP_CLI_NAME_MAP` (D10.3) translates JSON keys to the same `CompareRequest`;
+`request.validate()` (D9) runs before any work, so a bad `depth` yields the
+*same* error text a CLI user sees. One classifier, one validation, two
+front-ends.
+
+### S6 — snapshot now, compare later (offline / cross-machine)
+```text
+abicheck dump libfoo.so.2 --max --sources ./v2 -o v2.abi.json     # build host
+abicheck compare v1.abi.json v2.abi.json                          # CI host
+```
+`dump` shares `@evidence_options`, so `--depth`/`--max`/`--sources` mean exactly
+what they mean on `compare`. `resolve_input` (Tier 2) accepts the JSON snapshot
+transparently — the second invocation needs no source/build access.
+
+### S7 — cross-compiled lib with split debug + clang frontend
+```text
+abicheck compare arm/old.so arm/new.so --debug-root ./dbg --debuginfod --ast-frontend clang
+```
+`@debug_resolution_options` (D3) is now present on `compare` (it was
+`compare`-only before, but the *decorator* makes it uniformly available). One
+`--ast-frontend` (D8) drives both header AST and any L4 replay.
+
+**What the walk-through surfaced** (now fixed above): per-side `--old/new-sources`
+must live on `@evidence_options` (S3); set-input runs need `--output-dir`
+fan-out (S2); `exit_code_scheme` belongs in config too (S1). All three were
+gaps in the first draft — the imagination game earned its keep.
 
 ---
 
