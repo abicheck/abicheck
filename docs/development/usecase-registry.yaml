@@ -346,6 +346,26 @@ use_cases:
       auto-discovery (G21.2) and compile_commands.json auto-synthesis (G21.6) —
       both guess inputs, so they must stay opt-in flags, not defaults.
 
+  - id: UC-WF-cli-contract
+    axis: workflow
+    name: CLI interface contract, config balance, and extension policy
+    status: planned
+    gap: G22
+    plan: docs/development/plans/g22-cli-consolidation.md
+    next_steps: >
+      ADR-037. Formalises the CLI/API as three tiers (core/service/front-end)
+      with the service layer as the only chokepoint, typed CompareRequest
+      dataclasses (mirroring ADR-035 ScanRequest), one decorator per shared
+      option family, a single --depth vocabulary (dropping the "evidence"
+      naming and the user-facing L5 graph rung), folding compare-release and
+      deep-compare into compare, renaming --header-backend to --ast-frontend,
+      a CLI/config rebalance into .abicheck.yml, an explicit exit-code scheme,
+      and a cli-contract CI gate. Backward-compat mechanism designed but left
+      advisory until 1.0 (pre-1.0, breaking invocations is acceptable now).
+      Phased in plans/g22-cli-consolidation.md (P1 chokepoint + typed request,
+      P2 decorators, P3 depth vocab, P4 command fold, P5 config rebalance,
+      P6 ast-frontend/MCP-name-map/validation, P7 deprecation scaffolding).
+
   - id: UC-WF-wheel-vendored
     axis: workflow
     name: manylinux/auditwheel vendored-library pairing (hashed sonames)
