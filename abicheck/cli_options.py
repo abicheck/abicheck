@@ -471,6 +471,14 @@ FAMILY_FLAGS: dict[str, frozenset[str]] = {
     }),
     "scope": frozenset({"--scope-public-headers"}),
     "output": frozenset({"--format", "--output"}),
+    # Documented for completeness; deliberately *not* in REQUIRED_FAMILIES (it
+    # resolves local ELF debug artifacts, which the package/snapshot-oriented
+    # commands do not take).
+    "debug_resolution": frozenset({
+        "--dwarf-only", "--debug-root", "--debug-root1", "--debug-root2",
+        "--debuginfod", "--debuginfod-url", "--debug-format",
+        "--btf", "--ctf", "--dwarf",
+    }),
 }
 
 #: Family name → the decorator callable that supplies it (used by the gate's

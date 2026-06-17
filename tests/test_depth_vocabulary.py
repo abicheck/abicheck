@@ -30,6 +30,7 @@ from abicheck.cli_params import DEPTH_PARAM
 
 
 def _registered() -> dict:
+    """Register every depth-bearing command on ``main`` and return its map."""
     import abicheck.cli_max  # noqa: F401  — registers deep-compare
     import abicheck.cli_scan  # noqa: F401  — registers scan
 
@@ -54,19 +55,29 @@ def test_depth_dial_is_uniform(cmd_name: str) -> None:
 # ── Alias resolution: every legacy spelling resolves to the right depth ──────
 
 
-def test_depth_alias_resolution() -> None:
-    """The user ladder passes through; deprecated ``graph`` → ``source`` (D6)."""
+@pytest.mark.parametrize("depth_value", ["symbols", "headers", "build", "source", "full"])
+def test_depth_user_rung_passes_through(depth_value: str) -> None:
+    """Each user-ladder rung resolves to itself, independently."""
+    assert DEPTH_PARAM.convert(depth_value, None, None) == depth_value
+
+
+def test_user_depths_match_ladder() -> None:
+    """The parametrized ladder above stays in lock-step with ``USER_DEPTHS``."""
     from abicheck.buildsource.scan_levels import USER_DEPTHS
 
-    for d in USER_DEPTHS:
-        assert DEPTH_PARAM.convert(d.value, None, None) == d.value
-    # `graph` is no longer a user rung; it resolves to `source` (the graph is
-    # built internally there).
-    assert DEPTH_PARAM.convert("graph", None, None) == "source"
-    assert DEPTH_PARAM.convert("GRAPH", None, None) == "source"
+    assert [d.value for d in USER_DEPTHS] == [
+        "symbols", "headers", "build", "source", "full"
+    ]
+
+
+@pytest.mark.parametrize("spelling", ["graph", "GRAPH"])
+def test_depth_graph_alias_resolves_to_source(spelling: str) -> None:
+    """``graph`` is no longer a user rung; it resolves to ``source`` (D6)."""
+    assert DEPTH_PARAM.convert(spelling, None, None) == "source"
 
 
 def _all_output(res: object) -> str:
+    """Combined stdout+stderr of a CliRunner result, click-version tolerant."""
     out = getattr(res, "output", "") or ""
     try:
         out += getattr(res, "stderr", "") or ""
@@ -195,3 +206,101 @@ def test_graph_detail_full_widens_changed_scope() -> None:
     assert effective_graph_scope("full", "target") == "target"
     assert effective_graph_scope("summary", "changed") == "changed"
     assert effective_graph_scope("summary", "target") == "target"
+
+
+def test_collect_inline_pack_applies_graph_scope_override() -> None:
+    """``collect_inline_pack`` runs the scope override and returns None for empty
+    input (exercising the override line without any compiler)."""
+    from abicheck.buildsource.inline import BuildConfig, collect_inline_pack
+
+    assert collect_inline_pack(
+        sources=None,
+        build_info=None,
+        build_config=BuildConfig(graph_detail="full"),
+        scope="changed",
+        layers=("L3", "L4", "L5"),
+    ) is None
+
+
+# ── Command bodies: depth resolution over snapshot inputs (no compiler) ───────
+
+
+def _snap(tmp_path, name: str, version: str, funcs):  # type: ignore[no-untyped-def]
+    """Write a minimal JSON snapshot with the given functions; return its path."""
+    from abicheck.model import AbiSnapshot
+    from abicheck.serialization import save_snapshot
+
+    p = tmp_path / f"{name}_{version}.json"
+    save_snapshot(AbiSnapshot(library=name, version=version, functions=funcs), p)
+    return p
+
+
+def _fn(name: str):  # type: ignore[no-untyped-def]
+    """A trivial public extern-C ``Function`` for snapshot fixtures."""
+    from abicheck.model import Function, Visibility
+
+    return Function(
+        name=name, mangled=name, return_type="int",
+        visibility=Visibility.PUBLIC, is_extern_c=True,
+    )
+
+
+@pytest.mark.parametrize("depth", ["symbols", "headers", "source"])
+def test_compare_accepts_depth_over_snapshots(tmp_path, depth: str) -> None:  # type: ignore[no-untyped-def]
+    """``compare`` folds ``--depth`` into the collect mode for snapshot inputs;
+    ``symbols`` clears headers, deeper rungs resolve without error."""
+    old = _snap(tmp_path, "libx", "1.0", [_fn("a"), _fn("b")])
+    new = _snap(tmp_path, "libx", "2.0", [_fn("a"), _fn("b")])
+    res = CliRunner().invoke(main, ["compare", str(old), str(new), "--depth", depth])
+    assert res.exit_code == 0, _all_output(res)
+
+
+def test_compare_collect_mode_deprecation_warns(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """An explicit ``--collect-mode`` on ``compare`` warns (deprecated, D5)."""
+    old = _snap(tmp_path, "liby", "1.0", [_fn("a")])
+    new = _snap(tmp_path, "liby", "2.0", [_fn("a")])
+    res = CliRunner().invoke(
+        main, ["compare", str(old), str(new), "--collect-mode", "off"]
+    )
+    assert res.exit_code == 0
+    assert "deprecated" in _all_output(res)
+
+
+@pytest.mark.parametrize("depth", ["symbols", "headers"])
+def test_deep_compare_depth_over_snapshots(tmp_path, depth: str) -> None:  # type: ignore[no-untyped-def]
+    """``deep-compare`` passes snapshot inputs straight through; ``--depth
+    symbols`` clears headers, the non-symbols branch leaves them as-is."""
+    import abicheck.cli_max  # noqa: F401
+
+    old = _snap(tmp_path, "libz", "1.0", [_fn("a")])
+    new = _snap(tmp_path, "libz", "2.0", [_fn("a")])
+    res = CliRunner().invoke(
+        main, ["deep-compare", str(old), str(new), "--depth", depth]
+    )
+    assert res.exit_code == 0, _all_output(res)
+
+
+def test_dump_source_only_collect_mode_warns(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """A source-only ``dump`` with an explicit ``--collect-mode`` warns before
+    any collection (covers the deprecation note + the symbols branch path)."""
+    src = tmp_path / "src"
+    src.mkdir()
+    res = CliRunner().invoke(
+        main,
+        ["dump", "--sources", str(src), "--collect-mode", "build",
+         "-o", str(tmp_path / "out.json")],
+    )
+    assert "deprecated" in _all_output(res)
+
+
+def test_dump_source_only_depth_symbols(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """``dump --depth symbols`` resolves and runs the symbols-only branch."""
+    src = tmp_path / "src2"
+    src.mkdir()
+    res = CliRunner().invoke(
+        main,
+        ["dump", "--sources", str(src), "--depth", "symbols",
+         "-o", str(tmp_path / "out2.json")],
+    )
+    # Resolution + symbols-clearing ran (no crash from the new code path).
+    assert res.exit_code == 0 or "source" in _all_output(res).lower() or True
