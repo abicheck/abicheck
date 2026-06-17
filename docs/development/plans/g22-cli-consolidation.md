@@ -323,6 +323,22 @@ front-ends; docs build `--strict`.
 
 ### Phase 7 — Backward-compat scaffolding (future-enabled)
 
+**Status: landed.** `cli_options` now exposes the single deprecation-window
+resolver over the `DEPRECATED_FLAGS` registry: `resolve_deprecated_flag(spelling)`
+→ `(replacement, reason)`, `deprecated_flags_in_argv(argv)` (scans for every
+deprecated spelling — both flag-level renames and value-level deprecations like
+`--depth=graph`, matched as `--depth graph` too), and `note_deprecated_flags(argv)`
+(the combined one-line note the 1.0 switch-on will route all front-ends through;
+the live per-flag sites stay until then). `.abicheck.yml` is forward-compatible:
+`BuildConfig` carries `version:` and `from_dict` **warns** (never errors) on any
+unknown top-level or in-block key (`_KNOWN_TOP_KEYS`/`_KNOWN_BLOCK_KEYS`; sibling
+`risk_rules`/`crosschecks` are recognized so they don't trip it). The
+deprecation-window test stays **advisory** (a pytest table-test, not an
+AI-readiness ERROR gate) until 1.0 per ADR-037 §Backward compatibility. Covered
+by `tests/test_cli_contract.py` (`test_every_deprecated_flag_resolves`,
+`test_deprecated_flags_in_argv`, `test_note_deprecated_flags_combines`) and
+`tests/test_config_rebalance.py::TestConfigForwardCompat`.
+
 **Work.** Build the `DEPRECATED_FLAGS` resolver + stderr deprecation notes;
 test that every alias in the table still resolves. Add `version:` to
 `.abicheck.yml` (unknown keys warn, not error). Keep the deprecation-window test

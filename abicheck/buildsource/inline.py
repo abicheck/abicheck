@@ -43,9 +43,10 @@ import datetime as _dt
 import os
 import shlex
 import subprocess
+import warnings
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from .build_evidence import BuildEvidence
 from .model import (
@@ -142,8 +143,57 @@ class BuildConfig:
     #: unknown-key warning). ``0`` = unset.
     version: int = 0
 
+    #: ADR-037 §Backward-compat (G22 Phase 7): recognized ``.abicheck.yml`` keys.
+    #: ``version:`` makes the config forward-compatible — an *unknown* key (a
+    #: newer schema read by an older abicheck) **warns**, never errors, so a
+    #: project can adopt a future key without breaking older installs. Keys parsed
+    #: by sibling modules (``risk_rules`` → ``risk.py``, ``crosschecks`` →
+    #: ``crosscheck.py``) are listed so they don't trip the warning.
+    _KNOWN_TOP_KEYS: ClassVar[frozenset[str]] = frozenset({
+        "build", "sources", "severity", "scope", "suppression", "source",
+        "exit_code_scheme", "version", "risk_rules", "crosschecks",
+    })
+    _KNOWN_BLOCK_KEYS: ClassVar[dict[str, frozenset[str]]] = {
+        "build": frozenset({"system", "query", "compile_db"}),
+        "sources": frozenset({"public_headers", "exclude", "graph"}),
+        "severity": frozenset({
+            "preset", "abi_breaking", "potential_breaking",
+            "quality_issues", "addition",
+        }),
+        "scope": frozenset({"public", "collapse_versioned_symbols", "public_symbols"}),
+        "suppression": frozenset({"strict", "require_justification"}),
+        "source": frozenset({"method", "graph"}),
+    }
+
+    @classmethod
+    def _warn_unknown_keys(cls, data: dict[str, object]) -> None:
+        """Warn (never error) on unrecognized keys — config forward-compat (D-§BC)."""
+        for key in data:
+            if key not in cls._KNOWN_TOP_KEYS:
+                warnings.warn(
+                    f"unknown .abicheck.yml key {key!r} ignored (forward-compat; "
+                    "ADR-037 §Backward compatibility). Check the spelling, or bump "
+                    "'version:' once the schema for this key ships.",
+                    UserWarning,
+                    stacklevel=3,
+                )
+                continue
+            block = data.get(key)
+            known = cls._KNOWN_BLOCK_KEYS.get(key)
+            if known is not None and isinstance(block, dict):
+                for sub in block:
+                    if sub not in known:
+                        warnings.warn(
+                            f"unknown .abicheck.yml key {key}.{sub!r} ignored "
+                            "(forward-compat; ADR-037 §Backward compatibility).",
+                            UserWarning,
+                            stacklevel=3,
+                        )
+
     @classmethod
     def from_dict(cls, data: dict[str, object]) -> BuildConfig:
+        if isinstance(data, dict):
+            cls._warn_unknown_keys(data)
         build = data.get("build") if isinstance(data, dict) else None
         build = build if isinstance(build, dict) else {}
         sources = data.get("sources") if isinstance(data, dict) else None

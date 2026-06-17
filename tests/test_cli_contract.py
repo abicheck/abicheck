@@ -527,6 +527,68 @@ def test_dump_legacy_flag_echoes_note(
     assert "deprecated (ADR-037 D8)" in res.output, res.output
 
 
+# ── G22 Phase 7: DEPRECATED_FLAGS resolver (ADR-037 §Backward-compat) ─────────
+
+
+def test_every_deprecated_flag_resolves() -> None:
+    """Table-driven: every ``DEPRECATED_FLAGS`` entry resolves to a non-empty
+    replacement + reason via the single resolver (advisory window scaffolding)."""
+    from abicheck import cli_options as co
+
+    assert co.DEPRECATED_FLAGS, "registry must not be empty"
+    for spelling, (replacement, reason) in co.DEPRECATED_FLAGS.items():
+        resolved = co.resolve_deprecated_flag(spelling)
+        assert resolved == (replacement, reason)
+        assert replacement and replacement != spelling, spelling
+        assert reason.strip(), spelling
+        # The replacement must itself be a *live* spelling, never another
+        # deprecated one (no alias-to-alias chains).
+        assert spelling not in {replacement}
+        assert replacement not in co.DEPRECATED_FLAGS, (
+            f"{spelling} resolves to deprecated {replacement}"
+        )
+
+
+def test_resolve_unknown_flag_is_none() -> None:
+    from abicheck.cli_options import resolve_deprecated_flag
+
+    assert resolve_deprecated_flag("--ast-frontend") is None
+    assert resolve_deprecated_flag("--not-a-flag") is None
+
+
+@pytest.mark.parametrize(
+    "argv, expected",
+    [
+        (["x", "--header-backend", "clang"], ["--header-backend"]),
+        (["x", "--old-header-backend=castxml"], ["--old-header-backend"]),
+        (["x", "--collect-mode", "graph-full"], ["--collect-mode"]),
+        # value-level deprecation: --depth=graph (both spaced + = forms).
+        (["x", "--depth", "graph"], ["--depth=graph"]),
+        (["x", "--depth=graph"], ["--depth=graph"]),
+        # a live --depth value is NOT flagged.
+        (["x", "--depth", "source"], []),
+        (["x", "compare", "a", "b"], []),
+    ],
+)
+def test_deprecated_flags_in_argv(argv: list[str], expected: list[str]) -> None:
+    """The argv scanner finds each deprecated spelling (flag- and value-level)."""
+    from abicheck.cli_options import deprecated_flags_in_argv
+
+    found = [s for s, _, _ in deprecated_flags_in_argv(argv)]
+    assert found == expected
+
+
+def test_note_deprecated_flags_combines() -> None:
+    """The generic note covers multiple deprecated spellings in one line."""
+    from abicheck.cli_options import note_deprecated_flags
+
+    assert note_deprecated_flags(["x", "compare", "a", "b"]) is None
+    note = note_deprecated_flags(["x", "--collect-mode", "build", "--depth=graph"])
+    assert note is not None
+    assert "--collect-mode" in note and "--depth=graph" in note
+    assert "--depth" in note and "ADR-037" in note
+
+
 # ── Resolved option-set snapshot (catches an accidental flag drop in review) ──
 
 # Frozen sets of every option spelling each verdict-emitting command exposes.

@@ -645,6 +645,89 @@ def note_deprecated_ast_frontend(argv: Sequence[str] | None = None) -> str | Non
     )
 
 
+# ── ADR-037 §Backward-compat: the deprecation-window resolver (G22 Phase 7) ───
+#
+# Scaffolding for the 1.0 deprecation window. ``DEPRECATED_FLAGS`` is the single
+# registry of renamed/removed surface (name → (replacement, reason)); this
+# resolver is the one place that turns a *used* spelling into its replacement +
+# note. It stays **advisory** until 1.0 (no removal/hard-fail) per ADR-037; at
+# 1.0 the switch-on is flipping the window test from advisory to ERROR. Two key
+# shapes are supported: a bare ``--flag`` (flag-level rename) and a
+# ``--flag=value`` token (a deprecated *value* of a live flag, e.g.
+# ``--depth=graph`` → ``--depth=source``).
+
+
+def _argv_has_flag(argv: Sequence[str], flag: str) -> bool:
+    """True if ``flag`` appears in *argv* as ``--flag`` or ``--flag=...``."""
+    return any(tok == flag or tok.startswith(f"{flag}=") for tok in argv)
+
+
+def _argv_has_flag_value(argv: Sequence[str], flag: str, value: str) -> bool:
+    """True if *argv* sets ``flag`` to ``value`` (``--flag value`` or ``--flag=value``)."""
+    tokens = list(argv)
+    for i, tok in enumerate(tokens):
+        if tok == f"{flag}={value}":
+            return True
+        if tok == flag and i + 1 < len(tokens) and tokens[i + 1] == value:
+            return True
+    return False
+
+
+def resolve_deprecated_flag(spelling: str) -> tuple[str, str] | None:
+    """Resolve a deprecated flag/value *spelling* to ``(replacement, reason)``.
+
+    ``spelling`` is a ``DEPRECATED_FLAGS`` key — a bare ``--flag`` or a
+    ``--flag=value`` token. Returns ``None`` when the spelling is not deprecated.
+    The single lookup point so a front-end never hard-codes a replacement.
+    """
+    return DEPRECATED_FLAGS.get(spelling)
+
+
+def deprecated_flags_in_argv(
+    argv: Sequence[str] | None = None,
+) -> list[tuple[str, str, str]]:
+    """Scan *argv* for every deprecated spelling present (ADR-037 §Backward-compat).
+
+    Returns ``(spelling_used, replacement, reason)`` per match, in registry order.
+    Handles both flag-level renames (bare ``--flag`` key) and value-level
+    deprecations (``--flag=value`` key, matched as ``--flag value`` too). Used by
+    :func:`note_deprecated_flags` and the advisory window test; the live per-flag
+    stderr notes (``--collect-mode``, ``--ast-frontend``) keep their existing
+    sites until the 1.0 switch-on routes them all through here.
+    """
+    import sys
+
+    tokens = list(sys.argv if argv is None else argv)
+    found: list[tuple[str, str, str]] = []
+    for spelling, (replacement, reason) in DEPRECATED_FLAGS.items():
+        flag, sep, value = spelling.partition("=")
+        hit = (
+            _argv_has_flag_value(tokens, flag, value)
+            if sep
+            else _argv_has_flag(tokens, flag)
+        )
+        if hit:
+            found.append((spelling, replacement, reason))
+    return found
+
+
+def note_deprecated_flags(argv: Sequence[str] | None = None) -> str | None:
+    """One-line stderr note covering *all* deprecated spellings in *argv*, or None.
+
+    The generic counterpart of :func:`note_deprecated_ast_frontend` over the whole
+    ``DEPRECATED_FLAGS`` registry — the form the 1.0 switch-on will adopt.
+    """
+    found = deprecated_flags_in_argv(argv)
+    if not found:
+        return None
+    parts = [f"{spelling} → {replacement}" for spelling, replacement, _ in found]
+    verb = "is" if len(found) == 1 else "are"
+    return (
+        f"warning: {', '.join(s for s, _, _ in found)} {verb} deprecated "
+        f"(ADR-037); use {', '.join(parts)}."
+    )
+
+
 #: ``ctx.meta`` key marking the AST-frontend deprecation note as already emitted
 #: for this invocation. ``Context.invoke`` shares one ``meta`` dict across the
 #: whole context tree, so a nested call (``deep-compare`` → ``compare``/``dump``)
