@@ -16,8 +16,9 @@
 
 Verifies that an explicit changed-path set threaded by the `scan` orchestrator
 keeps the inline L4 replay at `changed` scope (narrow, POI-focused) instead of
-falling back to the full `target` replay — and that an empty set still falls back
-(the inline-dump default). No compiler needed: the extractor and the replay
+falling back to a broad replay — and that an empty set still falls back to the
+non-empty `headers-only` public-API surface (ADR-035 P3: never the full-target,
+== s6, cost). No compiler needed: the extractor and the replay
 driver are stubbed so only the scope-selection decision is exercised.
 """
 
@@ -83,8 +84,10 @@ def test_changed_scope_in_collect_pack_falls_back_without_paths(monkeypatch, tmp
         layers=("L3", "L4"),
         changed_paths=(),
     )
-    # No changed set → fall back to the non-empty target replay (inline default).
-    assert captured["scope"] == "target"
+    # No changed set → fall back to the non-empty public-API surface
+    # (headers-only), NOT a whole-target replay: an unseeded s5/pr run must not
+    # silently pay full-target (== s6) replay cost (ADR-035 P3 cliff).
+    assert captured["scope"] == "headers-only"
 
 
 def test_changed_scope_in_collect_pack_narrows_with_paths(monkeypatch, tmp_path):

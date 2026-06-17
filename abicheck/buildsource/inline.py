@@ -456,12 +456,20 @@ def collect_inline_pack(
     surface = None
     if "L4" in layers:
         # A 'changed' scope with no PR diff would select zero TUs and embed an
-        # empty L4 surface (Codex review), so fall back to 'target' — the
-        # non-empty choice that still enables the source-only checks. But when the
-        # caller *did* thread an explicit changed-path set (PR replay, ADR-035 D7
-        # POI focusing), honour 'changed' so the scan narrows to the affected TUs
-        # instead of replaying the whole target.
-        replay_scope = "target" if (scope == "changed" and not changed_paths) else scope
+        # empty L4 surface (Codex review), so fall back to a non-empty scope that
+        # still enables the source-only checks. But when the caller *did* thread an
+        # explicit changed-path set (PR replay, ADR-035 D7 POI focusing), honour
+        # 'changed' so the scan narrows to the affected TUs.
+        #
+        # The unseeded fallback is 'headers-only' (the public-API-covering TU
+        # subset), NOT 'target' (the whole target): an unseeded s5/pr run otherwise
+        # silently pays full-target (== s6) replay cost — the ADR-035 P3 cliff
+        # (validation/uxl-scan-levels-timing-2026-06.md). 'headers-only' keeps a
+        # non-empty public surface for the cross-checks at a fraction of the cost;
+        # the caller (cli_scan) emits the advisory naming --since to focus further.
+        replay_scope = (
+            "headers-only" if (scope == "changed" and not changed_paths) else scope
+        )
         # L4 per-TU cache dir: explicit arg wins, else the ABICHECK_L4_CACHE_DIR
         # env (the CI-friendly knob — point it at a restored cache directory).
         l4_cache_dir = source_abi_cache_dir
@@ -953,6 +961,12 @@ def _run_inline_source_abi(
                 f"source_abi: L4 cache hit rate {rate:.0%} "
                 f"({cache.hits}/{cache.hits + cache.misses})"
             )
+        # Thread the cache stats into the surface so the live L4 coverage row can
+        # report them too (ADR-035 P5) — not only `scan --estimate` (which probes
+        # the cache up front). `build_inline_coverage` reads these keys.
+        if surface is not None:
+            surface.coverage["cache_hits"] = cache.hits
+            surface.coverage["cache_misses"] = cache.misses
     for diag in diagnostics:
         merged.diagnostics.append(f"source_abi: {diag}")
     parsed = int(surface.coverage.get("compile_units_parsed", 0) or 0)
@@ -1128,6 +1142,38 @@ def _fold_call_graph(
 # ── coverage rows ─────────────────────────────────────────────────────────────
 
 
+def _l4_coverage_detail(surface: SourceAbiSurface) -> str:
+    """A human L4 coverage detail from the surface's recorded counts (ADR-035 P5).
+
+    The live row was previously blank — only ``scan --estimate`` reported TU
+    counts. Mirror that here: replay scope, parsed/selected TUs, matched/exported
+    symbols, and (when an L4 cache ran) its hit/miss tally.
+    """
+    cov = surface.coverage
+    scope = cov.get("replay_scope")
+    parts: list[str] = []
+    if scope:
+        parts.append(f"scope={scope}")
+    selected = cov.get("compile_units_selected")
+    parsed = cov.get("compile_units_parsed")
+    if selected is not None or parsed is not None:
+        parts.append(f"{int(parsed or 0)}/{int(selected or 0)} TUs parsed")
+    matched = cov.get("matched_symbols")
+    exported = cov.get("exported_symbols")
+    if matched is not None or exported is not None:
+        parts.append(f"{int(matched or 0)}/{int(exported or 0)} symbols matched")
+    if "cache_hits" in cov or "cache_misses" in cov:
+        hits = int(cov.get("cache_hits", 0) or 0)
+        misses = int(cov.get("cache_misses", 0) or 0)
+        total = hits + misses
+        if total:
+            parts.append(f"cache {hits}/{total} hit ({hits / total:.0%})")
+    failures = int(cov.get("extractor_failures", 0) or 0)
+    if failures:
+        parts.append(f"{failures} extractor failures")
+    return ", ".join(parts)
+
+
 def build_inline_coverage(
     merged: BuildEvidence,
     has_build: bool,
@@ -1188,6 +1234,7 @@ def build_inline_coverage(
             confidence=LayerConfidence.HIGH
             if any_entities
             else LayerConfidence.REDUCED,
+            detail=_l4_coverage_detail(surface),
         )
     else:
         l4 = LayerCoverage(

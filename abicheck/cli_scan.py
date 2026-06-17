@@ -197,6 +197,7 @@ class ScanOutcome:
     crosscheck: dict[str, Any] = field(default_factory=dict)
     crosscheck_severities: dict[str, str] = field(default_factory=dict)
     poi: dict[str, Any] = field(default_factory=dict)
+    advisories: list[str] = field(default_factory=list)
     audit: bool = False
     diff_summary: dict[str, Any] | None = None
     verdict: str = "COMPATIBLE"
@@ -224,6 +225,7 @@ class ScanOutcome:
             "crosscheck": self.crosscheck,
             "crosscheck_severities": dict(self.crosscheck_severities),
             "poi": self.poi,
+            "advisories": list(self.advisories),
             "diff": self.diff_summary,
             "verdict": self.verdict,
             "exit_code": self.exit_code,
@@ -301,6 +303,8 @@ def _render_text(out: ScanOutcome) -> str:
     lines.append(
         f"  changed paths: {out.changed_path_count} ({out.changed_path_source})"
     )
+    for note in out.advisories:
+        lines.append(f"  note: {note}")
 
     poi_counts = out.poi.get("counts_by_reason") or {}
     if poi_counts:
@@ -897,6 +901,19 @@ def run_scan_core(
     # source-only checks elsewhere (Codex review). When seeded, the POI set (floor
     # + pattern/risk additions) is the focusing work-list.
     replay_seed = tuple(poi.changed_paths()) if seeded else ()
+    # ADR-035 P3: an unseeded s5/pr run cannot narrow 'source-changed' to a diff,
+    # so the L4 replay falls back to the public-API 'headers-only' surface
+    # (inline.collect_inline_pack). Record an advisory naming the cost + the knob
+    # that focuses it, rather than silently paying a broad replay (validation P3
+    # "no auto-warn"). Carried on the result (text + JSON) so it never pollutes a
+    # structured-format stdout.
+    advisories: list[str] = []
+    if not seeded and collect_mode == "source-changed":
+        advisories.append(
+            "no --since/--changed-path seed; the source replay covers the "
+            "public-API surface (headers-only) instead of a focused diff. Pass "
+            "--since <ref> or --changed-path to scope it to the change."
+        )
     new_snap = _build_new_snapshot(
         binary,
         list(headers),
@@ -1003,6 +1020,7 @@ def run_scan_core(
         crosscheck=cc.to_dict(),
         crosscheck_severities=severities,
         poi=poi.to_dict(),
+        advisories=advisories,
         audit=scan_mode is ScanMode.AUDIT,
         diff_summary=diff_summary,
         verdict=verdict,

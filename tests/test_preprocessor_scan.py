@@ -316,3 +316,52 @@ def test_expand_public_headers_expands_directories(tmp_path) -> None:
     (inc / "b.hpp").write_text("// b\n", encoding="utf-8")
     expanded = _expand_public_headers([Path(inc)])
     assert {Path(p).name for p in expanded} == {"a.h", "b.hpp"}
+
+
+def test_capture_macros_argv_is_output_flag_sanitized(monkeypatch) -> None:
+    # The `clang -E -dM` macro pass must route the recorded compile argv through
+    # the #426-hardened depfile sanitizer, so output-producing instrumentation
+    # from an untrusted PR artifact (-save-temps / -ftime-trace / -o) never
+    # reaches the replay. Guards against the macro pass drifting off the shared
+    # sanitizer and re-opening the field "clang -E failed every invocation" shape.
+    import abicheck.buildsource.build_evidence as be
+    import abicheck.buildsource.preprocessor_scan as ps
+
+    build = be.BuildEvidence(
+        compile_units=[
+            be.CompileUnit(
+                id="cu://a",
+                source="src/a.cpp",
+                language="CXX",
+                directory="/work/build",
+                argv=[
+                    "clang++",
+                    "-c",
+                    "src/a.cpp",
+                    "-Iinclude",
+                    "-DUSE_X=1",
+                    "-o",
+                    "a.o",
+                    "-save-temps",
+                    "-ftime-trace=/tmp/victim.json",
+                ],
+            )
+        ]
+    )
+    seen: dict[str, list[str]] = {}
+
+    def _fake_run(self, cmd, cwd, unit):
+        seen["cmd"] = list(cmd)
+        return "#define NDEBUG 1\n"
+
+    monkeypatch.setattr(ps.ClangPreprocessorExtractor, "_run", _fake_run)
+    out = ps.ClangPreprocessorExtractor().capture_macros(build)
+
+    cmd = seen["cmd"]
+    assert cmd[:3] == ["clang++", "-E", "-dM"]
+    # ABI-relevant context is preserved; output/instrumentation flags are stripped.
+    assert "-Iinclude" in cmd and "-DUSE_X=1" in cmd and "src/a.cpp" in cmd
+    assert "-o" not in cmd and "a.o" not in cmd
+    assert "-save-temps" not in cmd
+    assert not any(a.startswith("-ftime-trace") for a in cmd)
+    assert out["cu://a"] == {"NDEBUG": "1"}

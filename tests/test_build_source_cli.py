@@ -1280,6 +1280,40 @@ def test_build_inline_coverage_rows():
     assert by["L5_source_graph"].status.value == "not_collected"
 
 
+def test_l4_coverage_row_reports_tu_and_cache_counts():
+    # ADR-035 P5: the live L4 coverage row must carry the TU/symbol/cache counts,
+    # not print a bare "partial" with an empty detail.
+    from abicheck.buildsource.build_evidence import BuildEvidence
+    from abicheck.buildsource.inline import build_inline_coverage
+    from abicheck.buildsource.source_abi import SourceAbiSurface, SourceEntity
+
+    surface = SourceAbiSurface(
+        reachable_types=[SourceEntity(id="t1", kind="record", qualified_name="W")],
+        coverage={
+            "replay_scope": "headers-only",
+            "compile_units_selected": 4,
+            "compile_units_parsed": 3,
+            "matched_symbols": 7,
+            "exported_symbols": 10,
+            "cache_hits": 2,
+            "cache_misses": 1,
+            "extractor_failures": 1,
+        },
+    )
+    rows = {
+        r.layer: r
+        for r in build_inline_coverage(
+            BuildEvidence(), has_build=False, surface=surface, graph=None
+        )
+    }
+    detail = rows["L4_source_abi"].detail
+    assert "scope=headers-only" in detail
+    assert "3/4 TUs parsed" in detail
+    assert "7/10 symbols matched" in detail
+    assert "cache 2/3 hit" in detail
+    assert "1 extractor failures" in detail
+
+
 def test_build_query_failure_is_recorded(tmp_path, monkeypatch):
     """A failing build.query command degrades to a failed extractor, no abort."""
     from abicheck.buildsource.inline import BuildConfig, collect_inline_pack
@@ -1608,9 +1642,10 @@ def test_mixed_build_pack_and_raw_sources_hash_distinguishes_trees(tmp_path):
     assert a.content_hash() == same.content_hash()
 
 
-def test_inline_source_changed_falls_back_to_target_scope(tmp_path, monkeypatch):
-    """ADR-033 (Codex): inline dump has no PR diff, so a 'changed' scope must fall
-    back to 'target' for replay — otherwise L4 selects zero TUs and is empty."""
+def test_inline_source_changed_falls_back_to_headers_only_scope(tmp_path, monkeypatch):
+    """ADR-035 P3: inline dump has no PR diff, so a 'changed' scope falls back to
+    'headers-only' (the public-API surface) — non-empty, but NOT the full-target
+    (== s6) replay that silently paid the cost cliff before."""
     import abicheck.buildsource.inline as inline
     captured = {}
 
@@ -1628,7 +1663,7 @@ def test_inline_source_changed_falls_back_to_target_scope(tmp_path, monkeypatch)
         "arguments": ["c++", "-c", "f.cpp"]}]))
     inline.collect_inline_pack(sources=tree, build_info=None, scope="changed",
                                layers=("L3", "L4", "L5"))
-    assert captured["scope"] == "target"
+    assert captured["scope"] == "headers-only"
 
 
 def test_exported_symbols_from_snapshot_extracts_mangled_names():

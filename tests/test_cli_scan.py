@@ -608,6 +608,52 @@ def test_auto_without_diff_seed_falls_back_to_preset(runner, new_snap_compatible
     assert payload["level"]["collect_mode"] == "source-changed"
 
 
+def test_unseeded_s5_emits_headers_only_advisory(runner, new_snap_compatible):
+    # ADR-035 P3: an unseeded s5/pr scan falls back to a headers-only replay; the
+    # result must carry an advisory naming --since/--changed-path (text + JSON),
+    # not silently pay broad-replay cost. The advisory rides the structured result
+    # so it never pollutes JSON stdout.
+    res = runner.invoke(
+        main,
+        [
+            "scan",
+            "--binary",
+            str(new_snap_compatible),
+            "--source-method",
+            "s5",
+            "--format",
+            "json",
+            "--audit",
+        ],
+    )
+    assert res.exit_code == 0, res.output
+    payload = json.loads(res.output)
+    assert any("--since" in a for a in payload["advisories"])
+
+
+def test_seeded_s5_has_no_headers_only_advisory(runner, new_snap_compatible):
+    # With a --changed-path seed the replay is focused, so the P3 advisory must
+    # NOT fire.
+    res = runner.invoke(
+        main,
+        [
+            "scan",
+            "--binary",
+            str(new_snap_compatible),
+            "--source-method",
+            "s5",
+            "--changed-path",
+            "src/foo.cpp",
+            "--format",
+            "json",
+            "--audit",
+        ],
+    )
+    assert res.exit_code == 0, res.output
+    payload = json.loads(res.output)
+    assert not any("--since" in a for a in payload["advisories"])
+
+
 def test_header_short_alias_works(runner, tmp_path, new_snap_compatible):
     # The --help example uses `-H`; the alias must actually parse (Codex review).
     header = tmp_path / "inc" / "w.h"
