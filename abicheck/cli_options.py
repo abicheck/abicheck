@@ -518,17 +518,16 @@ FAMILY_FLAGS: dict[str, frozenset[str]] = {
     }),
     "scope": frozenset({"--scope-public-headers"}),
     "output": frozenset({"--format", "--output"}),
-    # Two-sided evidence family (ADR-037 D3 ``@evidence_options``). Documented for
-    # completeness; deliberately *not* in REQUIRED_FAMILIES — only commands that
-    # take source depth (``compare``) compose it (``--collect-mode`` is a hidden
-    # deprecated alias and is omitted here).
+    # Two-sided evidence family (ADR-037 D3 ``@evidence_options``): registered
+    # but *not* required — only commands that take source depth (``compare``)
+    # compose it; the hidden deprecated ``--collect-mode`` alias is omitted here.
     "evidence": frozenset({
         "--depth", "--max", "--old-sources", "--new-sources",
         "--old-build-info", "--new-build-info",
     }),
-    # Documented for completeness; deliberately *not* in REQUIRED_FAMILIES (it
-    # resolves local ELF debug artifacts, which the package/snapshot-oriented
-    # commands do not take).
+    # Local-ELF debug-resolution family: registered but *not* required either — it
+    # resolves local ELF debug artifacts the package/snapshot-oriented commands
+    # do not take.
     "debug_resolution": frozenset({
         "--dwarf-only", "--debug-root", "--debug-root1", "--debug-root2",
         "--debuginfod", "--debuginfod-url", "--debug-format",
