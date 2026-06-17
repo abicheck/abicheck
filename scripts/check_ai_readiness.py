@@ -1149,23 +1149,61 @@ def _checker_compare_bindings(tree: ast.Module) -> set[str]:
     return names
 
 
+def _checker_module_bindings(tree: ast.Module) -> set[str]:
+    """Return local names bound to the ``checker`` *module* itself.
+
+    Catches ``from . import checker [as X]`` / ``from abicheck import checker
+    [as X]`` and ``import abicheck.checker as X``, so an aliased
+    ``core.compare(...)`` call is recognised, not just the literal
+    ``checker.compare(...)``.
+    """
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            # ``from . import checker`` (module is None) or ``from abicheck import checker``.
+            if node.module is None or node.module.split(".")[-1] == "abicheck":
+                for alias in node.names:
+                    if alias.name == "checker":
+                        names.add(alias.asname or alias.name)
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name.split(".")[-1] == "checker":
+                    # ``import abicheck.checker`` binds ``abicheck``; only an
+                    # explicit ``as X`` gives a usable ``X.compare`` call name.
+                    if alias.asname:
+                        names.add(alias.asname)
+    return names
+
+
+def _iter_cli_contract_sources() -> Iterable[Path]:
+    """The front-end modules the contract covers: every ``cli*.py`` plus the
+    consumer-side ``appcompat.py`` (it is a verdict-emitting front-end too)."""
+    yield from PKG.glob("cli*.py")
+    appcompat = PKG / "appcompat.py"
+    if appcompat.is_file():
+        yield appcompat
+
+
 def check_cli_contract(f: Findings) -> None:
-    """ERROR if a front-end ``cli*.py`` module calls a Tier-1 core entry point
+    """ERROR if a front-end module calls a Tier-1 core entry point
     (``checker.compare``) directly instead of routing through the Tier-2 service.
 
-    ADR-037 D1/D10.1: front-ends are thin adapters; one classification path is
-    what keeps ``compare`` / ``compare-release`` / ``appcompat`` / MCP from
-    drifting apart (the ``scope_public`` default divergence the ADR documents).
-    Importing a ``checker`` *type* for annotations or result-rendering stays
-    legal — the gate keys on the *call expression*, not the import statement.
+    Covers every ``abicheck/cli*.py`` and ``abicheck/appcompat.py``. ADR-037
+    D1/D10.1: front-ends are thin adapters; one classification path is what keeps
+    ``compare`` / ``compare-release`` / ``appcompat`` / MCP from drifting apart
+    (the ``scope_public`` default divergence the ADR documents). Importing a
+    ``checker`` *type* for annotations or result-rendering stays legal — the gate
+    keys on the *call expression*, not the import statement. Both a direct
+    ``compare`` import and an aliased ``checker``-module call are detected.
     """
-    for path in sorted(PKG.glob("cli*.py")):
+    for path in sorted(_iter_cli_contract_sources()):
         rel = _rel(path)
         try:
             tree = ast.parse(_read(path), filename=rel)
         except SyntaxError:
             continue
         bound = _checker_compare_bindings(tree)
+        checker_modules = _checker_module_bindings(tree)
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
                 continue
@@ -1174,7 +1212,7 @@ def check_cli_contract(f: Findings) -> None:
                 isinstance(func, ast.Attribute)
                 and func.attr in _TIER1_CORE_FUNCS
                 and isinstance(func.value, ast.Name)
-                and func.value.id == "checker"
+                and func.value.id in checker_modules
             )
             if is_tier1 and f"{rel}:{node.lineno}" not in CLI_CONTRACT_ALLOWLIST:
                 f.err(

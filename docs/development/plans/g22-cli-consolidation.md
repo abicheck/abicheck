@@ -260,8 +260,10 @@ The "~62 → ~20 flags" and "no divergence" claims are testable, not aspirationa
 
 ## Definition of done (when implementation lands)
 
-This is a docs-only PR; G22 stays `planned` and ADR-037 stays `Proposed` until
-the work below merges. The gap is considered closed only once registry
-`UC-WF-cli-contract` can flip to `complete` with evidence pointing at
-`api_types.py`, the `cli-contract` gate, `tests/test_cli_contract.py`, and the
-alias/round-trip tests — at which point ADR-037 moves to Accepted — implemented.
+Phase 1 has landed (`api_types.py`, the single `service` chokepoint, the
+`cli-contract` gate, and `tests/test_cli_contract.py`); G22 stays **in
+progress** and ADR-037 stays `Proposed` until the remaining phases (2–7) merge.
+The gap is considered closed only once registry `UC-WF-cli-contract` can flip to
+`complete` with evidence pointing at `api_types.py`, the `cli-contract` gate,
+`tests/test_cli_contract.py`, and the alias/round-trip tests — at which point
+ADR-037 moves to Accepted — implemented.

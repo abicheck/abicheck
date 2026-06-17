@@ -91,6 +91,42 @@ def test_gate_allows_aliased_import_call(tmp_path, monkeypatch):
     assert any(c == "cli-contract" for c, _ in findings.errors)
 
 
+def test_gate_flags_module_alias_call(tmp_path, monkeypatch):
+    """An aliased ``checker`` module call (``core.compare(...)``) is caught."""
+    import scripts.check_ai_readiness as gate
+
+    pkg = tmp_path / "abicheck"
+    pkg.mkdir()
+    (pkg / "cli_modalias.py").write_text(
+        "from . import checker as core\ndef go(a, b):\n    return core.compare(a, b)\n"
+    )
+    monkeypatch.setattr(gate, "PKG", pkg)
+    monkeypatch.setattr(gate, "ROOT", tmp_path)
+
+    findings = gate.Findings()
+    gate.check_cli_contract(findings)
+    assert any(c == "cli-contract" for c, _ in findings.errors)
+
+
+def test_gate_covers_appcompat(tmp_path, monkeypatch):
+    """``appcompat.py`` is in scope even though it is not a ``cli*.py`` file."""
+    import scripts.check_ai_readiness as gate
+
+    pkg = tmp_path / "abicheck"
+    pkg.mkdir()
+    (pkg / "appcompat.py").write_text(
+        "from .checker import compare\ndef check(a, b):\n    return compare(a, b)\n"
+    )
+    monkeypatch.setattr(gate, "PKG", pkg)
+    monkeypatch.setattr(gate, "ROOT", tmp_path)
+
+    findings = gate.Findings()
+    gate.check_cli_contract(findings)
+    errors = [m for c, m in findings.errors if c == "cli-contract"]
+    assert len(errors) == 1
+    assert "appcompat.py" in errors[0]
+
+
 def test_service_compare_call_is_not_flagged(tmp_path, monkeypatch):
     """Routing through ``service.compare_snapshots`` must NOT be flagged."""
     import scripts.check_ai_readiness as gate

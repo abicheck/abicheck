@@ -33,6 +33,15 @@ class TestInputSpec:
         assert spec.headers == (Path("a.h"), Path("b.h"))
         assert spec.includes == (Path("inc"),)
 
+    def test_of_single_string_is_one_path_not_per_character(self):
+        # A bare string must be one path, not a tuple of per-character paths.
+        spec = InputSpec.of("lib.so", headers="include/api.h")
+        assert spec.headers == (Path("include/api.h"),)
+
+    def test_of_single_path_is_one_path(self):
+        spec = InputSpec.of("lib.so", includes=Path("inc"))
+        assert spec.includes == (Path("inc"),)
+
     def test_of_defaults_are_empty_tuples(self):
         spec = InputSpec.of("lib.so")
         assert spec.headers == ()

@@ -94,7 +94,7 @@ def _run_compare_pair(
     policy_file_path: Path | None,
     old_pdb_path: Path | None,
     new_pdb_path: Path | None,
-    scope_to_public_surface: bool = False,
+    scope_to_public_surface: bool = True,
     pattern_verdicts: bool = False,
 ) -> tuple[DiffResult, AbiSnapshot, AbiSnapshot]:
     """Run compare for one old/new pair and return result + resolved snapshots.
@@ -188,7 +188,7 @@ def _compare_one_library(
     policy: str,
     policy_file_path: Path | None,
     output_dir: Path | None,
-    scope_to_public_surface: bool = False,
+    scope_to_public_surface: bool = True,
 ) -> dict[str, object]:
     """Compare one library pair — suitable for parallel dispatch.
 
@@ -335,7 +335,7 @@ def _compare_release_libraries(
     annotate: bool = False,
     annotate_additions: bool = False,
     jobs: int = 1,
-    scope_to_public_surface: bool = False,
+    scope_to_public_surface: bool = True,
 ) -> tuple[list[dict[str, object]], str, list[tuple[DiffResult, AbiSnapshot]]]:
     """Compare each matched library pair and collect results.
 
@@ -519,7 +519,7 @@ def _collect_release_extras(
     annotate_additions: bool,
     collect_diff_results: bool,
     annotate: bool,
-    scope_to_public_surface: bool = False,
+    scope_to_public_surface: bool = True,
 ) -> tuple[list[tuple[DiffResult, AbiSnapshot]], list[tuple[int, str]]]:
     """Collect optional re-run artifacts for JUnit and annotations."""
     diff_pairs: list[tuple[DiffResult, AbiSnapshot]] = []

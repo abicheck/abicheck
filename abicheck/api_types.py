@@ -43,9 +43,16 @@ SUPPORTED_LANGS = frozenset({"c", "c++"})
 
 
 def _path_tuple(paths: Iterable[Path | str] | None) -> tuple[Path, ...]:
-    """Normalise an optional iterable of path-likes into a tuple of ``Path``."""
-    if not paths:
+    """Normalise an optional iterable of path-likes into a tuple of ``Path``.
+
+    A bare ``str``/``Path`` is treated as a *single* path, not an iterable of
+    characters/parts — so ``headers="include/api.h"`` yields one path, not one
+    per character.
+    """
+    if paths is None:
         return ()
+    if isinstance(paths, (str, Path)):
+        return (Path(paths),)
     return tuple(Path(p) for p in paths)
 
 

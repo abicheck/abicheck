@@ -875,6 +875,10 @@ def run_compare_request(
         SnapshotError: If either input cannot be loaded.
     """
     request.validate()
+    # ``validate()`` accepts the language case-insensitively, but the ELF dump
+    # path does case-sensitive ``lang == "c"`` checks — normalise so an accepted
+    # ``"C"`` is not silently treated as C++.
+    lang = request.lang.lower()
 
     old_fmt = detect_binary_format(request.old.path)
     new_fmt = detect_binary_format(request.new.path)
@@ -884,7 +888,7 @@ def run_compare_request(
         list(request.old.headers),
         list(request.old.includes),
         request.old.version,
-        request.lang,
+        lang,
         is_elf=True if old_fmt == "elf" else None,
         pdb_path=request.old.pdb,
         debug_roots=list(request.old.debug_roots) or None,
@@ -895,7 +899,7 @@ def run_compare_request(
         list(request.new.headers),
         list(request.new.includes),
         request.new.version,
-        request.lang,
+        lang,
         is_elf=True if new_fmt == "elf" else None,
         pdb_path=request.new.pdb,
         debug_roots=list(request.new.debug_roots) or None,
