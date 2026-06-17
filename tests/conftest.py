@@ -1,4 +1,5 @@
 """conftest.py — pytest configuration for abicheck tests."""
+import json
 import os
 import shutil
 import subprocess
@@ -6,6 +7,33 @@ import sys
 from pathlib import Path
 
 import pytest
+
+
+@pytest.fixture
+def source_tree_with_compile_db(tmp_path: Path) -> Path:
+    """A minimal source tree with a compile_commands.json for L3/L4 scan tests.
+
+    The compile DB makes L3 resolve cleanly (no stderr "no compile_commands.json"
+    note that would otherwise prepend to JSON stdout), so an `s5` scan reaches the
+    L4 replay path. Returns the source dir. Shared so multiple suites can drive a
+    `scan --sources` run without re-deriving the tree (ADR-035 P3 tests).
+    """
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "foo.cpp").write_text("int foo() { return 0; }\n", encoding="utf-8")
+    (src / "compile_commands.json").write_text(
+        json.dumps(
+            [
+                {
+                    "directory": str(src),
+                    "file": "foo.cpp",
+                    "arguments": ["c++", "-c", "foo.cpp"],
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+    return src
 
 try:
     import filelock  # explicit dev dependency; used for xdist cmake locking

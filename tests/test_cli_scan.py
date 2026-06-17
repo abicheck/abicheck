@@ -95,32 +95,6 @@ def new_snap_compatible(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
-def source_tree_with_compile_db(tmp_path: Path) -> Path:
-    """A minimal source tree with a compile_commands.json for L3/L4 scan tests.
-
-    The compile DB makes L3 resolve cleanly (no stderr "no compile_commands.json"
-    note that would otherwise prepend to JSON stdout), so an `s5` scan reaches the
-    L4 replay path. Returns the source dir.
-    """
-    src = tmp_path / "src"
-    src.mkdir()
-    (src / "foo.cpp").write_text("int foo() { return 0; }\n", encoding="utf-8")
-    (src / "compile_commands.json").write_text(
-        json.dumps(
-            [
-                {
-                    "directory": str(src),
-                    "file": "foo.cpp",
-                    "arguments": ["c++", "-c", "foo.cpp"],
-                }
-            ]
-        ),
-        encoding="utf-8",
-    )
-    return src
-
-
-@pytest.fixture
 def new_snap_breaking(tmp_path: Path) -> Path:
     # `bar` removed → a removed exported symbol is a hard ABI break.
     snap = AbiSnapshot(
