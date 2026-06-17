@@ -203,13 +203,14 @@ def output_options(
     sarif/junit, ``compare-release`` cannot emit html/review) — but the option
     *structure*, the ``-o/--output`` flag, and the contract live here once.
     """
+    # ``help=None`` renders no help line in Click, so a single call covers both
+    # the with-help and without-help cases without a ``**dict[str, object]``
+    # unpack (which mypy can't reconcile with ``click.option``'s overloads).
     def deco(func: F) -> F:
-        out_kwargs: dict[str, object] = {
-            "type": click.Path(path_type=Path), "default": None,
-        }
-        if output_help is not None:
-            out_kwargs["help"] = output_help
-        func = click.option("-o", "--output", "output", **out_kwargs)(func)
+        func = click.option(
+            "-o", "--output", "output",
+            type=click.Path(path_type=Path), default=None, help=output_help,
+        )(func)
         func = click.option(
             "--format", "fmt", type=click.Choice(list(formats)),
             default=default, show_default=True, help=format_help,
