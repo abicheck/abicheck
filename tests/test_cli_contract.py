@@ -27,6 +27,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
+
 # Import the gate from scripts/ — the AI-readiness module is pure stdlib.
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
@@ -53,70 +55,44 @@ def test_no_tier_skip():
     )
 
 
-def test_gate_flags_a_planted_violation(tmp_path, monkeypatch):
-    """The gate is not a no-op: a planted direct ``compare`` call is caught."""
-    import scripts.check_ai_readiness as gate
-
-    pkg = tmp_path / "abicheck"
-    pkg.mkdir()
-    (pkg / "cli_bad.py").write_text(
-        "from .checker import compare\ndef go(a, b):\n    return compare(a, b)\n"
-    )
-    monkeypatch.setattr(gate, "PKG", pkg)
-    monkeypatch.setattr(gate, "ROOT", tmp_path)
-
-    findings = gate.Findings()
-    gate.check_cli_contract(findings)
-    errors = [m for c, m in findings.errors if c == "cli-contract"]
-    assert len(errors) == 1
-    assert "cli_bad.py" in errors[0]
-
-
-def test_gate_allows_aliased_import_call(tmp_path, monkeypatch):
-    """An aliased lazy import (``compare as _compare``) is still caught."""
-    import scripts.check_ai_readiness as gate
-
-    pkg = tmp_path / "abicheck"
-    pkg.mkdir()
-    (pkg / "cli_alias.py").write_text(
+# Each case plants one front-end module that reaches Tier-1 `checker.compare`
+# a different way; the gate must flag exactly one violation naming that file.
+# (filename, source) — covers: direct import, aliased lazy `compare` import,
+# aliased `checker` *module* call, and the non-`cli*.py` `appcompat.py` scope.
+_GATE_VIOLATION_CASES = [
+    pytest.param(
+        "cli_bad.py",
+        "from .checker import compare\ndef go(a, b):\n    return compare(a, b)\n",
+        id="direct-import",
+    ),
+    pytest.param(
+        "cli_alias.py",
         "def go(a, b):\n"
         "    from .checker import compare as _compare\n"
-        "    return _compare(a, b)\n"
-    )
-    monkeypatch.setattr(gate, "PKG", pkg)
-    monkeypatch.setattr(gate, "ROOT", tmp_path)
+        "    return _compare(a, b)\n",
+        id="aliased-lazy-import",
+    ),
+    pytest.param(
+        "cli_modalias.py",
+        "from . import checker as core\ndef go(a, b):\n    return core.compare(a, b)\n",
+        id="aliased-module-call",
+    ),
+    pytest.param(
+        "appcompat.py",
+        "from .checker import compare\ndef check(a, b):\n    return compare(a, b)\n",
+        id="appcompat-in-scope",
+    ),
+]
 
-    findings = gate.Findings()
-    gate.check_cli_contract(findings)
-    assert any(c == "cli-contract" for c, _ in findings.errors)
 
-
-def test_gate_flags_module_alias_call(tmp_path, monkeypatch):
-    """An aliased ``checker`` module call (``core.compare(...)``) is caught."""
+@pytest.mark.parametrize("filename, source", _GATE_VIOLATION_CASES)
+def test_gate_flags_violation(tmp_path, monkeypatch, filename, source):
+    """The gate is not a no-op: each way of reaching Tier-1 is caught once."""
     import scripts.check_ai_readiness as gate
 
     pkg = tmp_path / "abicheck"
     pkg.mkdir()
-    (pkg / "cli_modalias.py").write_text(
-        "from . import checker as core\ndef go(a, b):\n    return core.compare(a, b)\n"
-    )
-    monkeypatch.setattr(gate, "PKG", pkg)
-    monkeypatch.setattr(gate, "ROOT", tmp_path)
-
-    findings = gate.Findings()
-    gate.check_cli_contract(findings)
-    assert any(c == "cli-contract" for c, _ in findings.errors)
-
-
-def test_gate_covers_appcompat(tmp_path, monkeypatch):
-    """``appcompat.py`` is in scope even though it is not a ``cli*.py`` file."""
-    import scripts.check_ai_readiness as gate
-
-    pkg = tmp_path / "abicheck"
-    pkg.mkdir()
-    (pkg / "appcompat.py").write_text(
-        "from .checker import compare\ndef check(a, b):\n    return compare(a, b)\n"
-    )
+    (pkg / filename).write_text(source)
     monkeypatch.setattr(gate, "PKG", pkg)
     monkeypatch.setattr(gate, "ROOT", tmp_path)
 
@@ -124,7 +100,7 @@ def test_gate_covers_appcompat(tmp_path, monkeypatch):
     gate.check_cli_contract(findings)
     errors = [m for c, m in findings.errors if c == "cli-contract"]
     assert len(errors) == 1
-    assert "appcompat.py" in errors[0]
+    assert filename in errors[0]
 
 
 def test_service_compare_call_is_not_flagged(tmp_path, monkeypatch):
