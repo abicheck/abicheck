@@ -207,3 +207,34 @@ def test_run_compare_request_equivalent_to_kwargs_shim(tmp_path: Path) -> None:
     assert sorted(c.kind for c in shim_result.breaking) == sorted(
         c.kind for c in req_result.breaking
     )
+
+
+def test_run_compare_request_normalizes_lang(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An accepted upper-case ``lang`` is lowered before snapshot resolution.
+
+    ``validate()`` accepts ``"C"`` case-insensitively, but the ELF dump path
+    does case-sensitive ``lang == "c"`` checks — ``run_compare_request`` must
+    normalise so ``"C"`` is not silently treated as C++.
+    """
+    from abicheck import service
+    from abicheck.api_types import CompareRequest, InputSpec
+
+    old_p = _make_snap_file(tmp_path, "liblang", "1.0", [_func("a")])
+    new_p = _make_snap_file(tmp_path, "liblang", "2.0", [_func("a")])
+
+    seen_langs: list[str] = []
+
+    def _spy_resolve_input(path, headers, includes, version, lang, **kwargs):  # type: ignore[no-untyped-def]
+        seen_langs.append(lang)
+        return AbiSnapshot(library="liblang", version=version)
+
+    monkeypatch.setattr(service, "resolve_input", _spy_resolve_input)
+
+    req = CompareRequest(
+        old=InputSpec.of(old_p), new=InputSpec.of(new_p), lang="C"
+    )
+    service.run_compare_request(req)
+
+    assert seen_langs == ["c", "c"]
