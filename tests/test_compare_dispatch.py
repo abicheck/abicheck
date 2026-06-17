@@ -29,7 +29,7 @@ from pathlib import Path
 from click.testing import CliRunner
 
 from abicheck.cli import main
-from abicheck.cli_resolve import classify_compare_operand
+from abicheck.cli_resolve import _looks_like_application, classify_compare_operand
 from abicheck.model import AbiSnapshot, Function, Visibility
 from abicheck.serialization import snapshot_to_json
 
@@ -79,6 +79,57 @@ def _make_pie_executable(path: Path) -> Path:
     struct.pack_into("<I", ph, 0, 3)  # p_type = PT_INTERP
     path.write_bytes(bytes(hdr) + bytes(ph))
     return path
+
+
+def _elf_header(e_type: int, *, ei_class: int = 2, ei_data: int = 1) -> bytes:
+    """Craft a minimal 64-byte ELF header with a given e_type/class/endianness."""
+    hdr = bytearray(64)
+    hdr[0:4] = b"\x7fELF"
+    hdr[4] = ei_class
+    hdr[5] = ei_data
+    hdr[6] = 1
+    order = "<" if ei_data == 1 else ">"
+    struct.pack_into(f"{order}H", hdr, 16, e_type)
+    return bytes(hdr)
+
+
+class TestLooksLikeApplication:
+    """Direct coverage of the ELF-header guard branches (ADR-037 D7)."""
+
+    def test_et_exec_is_application(self, tmp_path: Path) -> None:
+        p = tmp_path / "exe"
+        p.write_bytes(_elf_header(2))  # ET_EXEC
+        assert _looks_like_application(p) is True
+
+    def test_et_dyn_without_interp_is_not_application(self, tmp_path: Path) -> None:
+        p = tmp_path / "lib.so"
+        p.write_bytes(_elf_header(3))  # ET_DYN, no program headers → no PT_INTERP
+        assert _looks_like_application(p) is False
+
+    def test_et_rel_is_not_application(self, tmp_path: Path) -> None:
+        p = tmp_path / "obj.o"
+        p.write_bytes(_elf_header(1))  # ET_REL
+        assert _looks_like_application(p) is False
+
+    def test_unknown_endianness_is_inconclusive(self, tmp_path: Path) -> None:
+        p = tmp_path / "weird"
+        p.write_bytes(_elf_header(2, ei_data=7))  # bogus EI_DATA
+        assert _looks_like_application(p) is False
+
+    def test_unknown_class_is_inconclusive(self, tmp_path: Path) -> None:
+        p = tmp_path / "weird2"
+        p.write_bytes(_elf_header(2, ei_class=9))  # bogus EI_CLASS
+        assert _looks_like_application(p) is False
+
+    def test_truncated_header_is_inconclusive(self, tmp_path: Path) -> None:
+        p = tmp_path / "trunc"
+        p.write_bytes(b"\x7fELF\x02")  # magic + class byte only, no data byte
+        assert _looks_like_application(p) is False
+
+    def test_non_elf_is_not_application(self, tmp_path: Path) -> None:
+        p = tmp_path / "text"
+        p.write_bytes(b"not an elf at all")
+        assert _looks_like_application(p) is False
 
 
 def _invoke(*args: str) -> tuple[int, str, str]:
@@ -146,6 +197,21 @@ class TestCompareDispatch:
         code, out, _ = _invoke("compare", str(old_dir), str(new_file))
         assert code == 0
         assert "NO_CHANGE" in out
+
+    def test_exit_code_scheme_rejected_on_set_inputs(self, tmp_path: Path) -> None:
+        # --exit-code-scheme can't be honoured by the release fan-out, so it is
+        # rejected rather than silently ignored (ADR-037 D12).
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        _write_snap(old_dir / "libfoo.json", _snap())
+        _write_snap(new_dir / "libfoo.json", _snap())
+        code, out, err = _invoke(
+            "compare", str(old_dir), str(new_dir), "--exit-code-scheme", "legacy"
+        )
+        assert code != 0
+        assert "--exit-code-scheme is not supported" in (out + err)
 
     def test_app_operand_rejected_with_hint(self, tmp_path: Path) -> None:
         app = _make_pie_executable(tmp_path / "myapp")

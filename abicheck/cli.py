@@ -1355,6 +1355,18 @@ def compare_cmd(
     if old_kind == "app" or new_kind == "app":
         _reject_application_operand(old_input, new_input, old_kind, new_kind)
     if {old_kind, new_kind} & {"directory", "package"}:
+        # The per-library fan-out (`compare-release` backend) uses its own
+        # exit-code logic (legacy verdict, or severity-aware when severity is
+        # configured); it does not consume an explicit --exit-code-scheme. Reject
+        # it loudly rather than silently ignore it (ADR-037 D12).
+        if exit_code_scheme is not None:
+            raise click.UsageError(
+                "--exit-code-scheme is not supported for directory/package "
+                "(release) comparisons: the per-library fan-out uses the legacy "
+                "verdict scheme, or severity-aware when severity is configured in "
+                ".abicheck.yml. Compare libraries individually for explicit "
+                "scheme control."
+            )
         _dispatch_release_compare(
             ctx,
             old_dir=old_input, new_dir=new_input,

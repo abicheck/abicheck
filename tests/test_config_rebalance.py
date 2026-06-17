@@ -281,9 +281,14 @@ class TestExitSchemeExplicit:
         cfg.write_text(
             yaml.safe_dump({"severity": {"abi_breaking": "warning"}}), encoding="utf-8"
         )
-        # Without config the removal is BREAKING → exit 4.
+        # Without config the removal is BREAKING → exit 4. Pin an empty config so
+        # the baseline doesn't pick up an ambient .abicheck.yml from the CWD.
+        empty_cfg = tmp_path / "empty.yml"
+        empty_cfg.write_text(yaml.safe_dump({}), encoding="utf-8")
         baseline = CliRunner().invoke(
-            main, ["compare", str(old_dir), str(new_dir), "--format", "json"]
+            main,
+            ["compare", str(old_dir), str(new_dir), "--config", str(empty_cfg),
+             "--format", "json"],
         )
         assert baseline.exit_code == 4
         # With config downgrading abi_breaking, the fan-out no longer errors.
