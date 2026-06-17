@@ -8,6 +8,11 @@ from pathlib import Path
 
 import pytest
 
+try:
+    import filelock  # explicit dev dependency; used for xdist cmake locking
+except ImportError:
+    filelock = None  # type: ignore[assignment]
+
 
 @pytest.fixture
 def source_tree_with_compile_db(tmp_path: Path) -> Path:
@@ -34,11 +39,6 @@ def source_tree_with_compile_db(tmp_path: Path) -> Path:
         encoding="utf-8",
     )
     return src
-
-try:
-    import filelock  # explicit dev dependency; used for xdist cmake locking
-except ImportError:
-    filelock = None  # type: ignore[assignment]
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
