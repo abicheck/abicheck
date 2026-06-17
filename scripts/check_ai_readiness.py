@@ -632,23 +632,38 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
         # front-ends now route through the Tier-2 service instead of calling
         # `checker.compare` directly. `cli_compare_release` and `appcompat` reach
         # `service` via *function-local* imports (`service.run_compare` /
-        # `service.compare_snapshots`), and `cli` registers them (and `cli_plugin`)
-        # at its module-load tail — so they close the same SCC through lazy edges,
-        # never an init cycle.
+        # `service.compare_snapshots`); `cli` registers every sibling command at its
+        # module-load tail; and each sibling imports `main`/helpers back from `cli`.
+        # That collapses the whole CLI-registration + service-routing graph into ONE
+        # strongly-connected component. The members below are the *exact* SCC (it
+        # closes only through function-local imports — the package imports cleanly,
+        # no init deadlock), so listing the full set makes the subset match robust to
+        # the DFS traversal order, which otherwise surfaces a different representative
+        # simple cycle on each platform (e.g. via `cli_appcompat` vs `cli_plugin`).
+        # A genuinely new bad cycle would pull in a module *outside* this SCC and so
+        # would not be a subset — still flagged.
         frozenset(
             {
-                "cli",
-                "cli_resolve",
-                "cli_surface",
-                "cli_buildsource",
-                "cli_scan",
-                "cli_compare_release",
-                "cli_plugin",
                 "appcompat",
+                "cli",
+                "cli_appcompat",
+                "cli_baseline",
+                "cli_buildsource",
+                "cli_buildsource_helpers",
+                "cli_compare_release",
+                "cli_debian_symbols",
+                "cli_helpers_compare",
+                "cli_max",
+                "cli_plugin",
+                "cli_pr_comment",
+                "cli_probe",
+                "cli_resolve",
+                "cli_scan",
+                "cli_stack",
+                "cli_suggest",
+                "cli_surface",
                 "service",
                 "service_scan",
-                "cli_helpers_compare",
-                "cli_buildsource_helpers",
             }
         ),
         # TYPE_CHECKING-only typing cycle (no runtime import): AbiSnapshot
