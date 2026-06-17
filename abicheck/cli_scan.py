@@ -70,6 +70,7 @@ from .buildsource.scan_levels import (
 )
 from .checker_policy import API_BREAK_KINDS, BREAKING_KINDS
 from .cli import _safe_write_output, _setup_verbosity, main
+from .cli_params import DEPTH_PARAM
 
 #: Exit code for a ``--budget`` overflow (ADR-035 D3: a budget always fails,
 #: never silently shrinks scope). Distinct from the verdict codes (0/2/4) and the
@@ -552,9 +553,9 @@ def _audit_exit_code(
 @click.option(
     "--depth",
     "depth",
-    type=click.Choice([d.value for d in EvidenceDepth]),
+    type=DEPTH_PARAM,
     default=None,
-    help="Coarse L-axis selector (lossy; --source-method wins if both).",
+    help="Coarse L-axis selector (unified dial; --source-method wins if both).",
 )
 @click.option(
     "--since",

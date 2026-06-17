@@ -129,6 +129,293 @@ def test_service_compare_call_is_not_flagged(
     assert not any(c == "cli-contract" for c, _ in findings.errors)
 
 
+# ── D10.2: shared-decorator coverage (ADR-037 D3 / G22 Phase 2) ──────────────
+
+
+def _registered_commands() -> dict:
+    """Force every verdict-emitting command module to register on ``main``."""
+    import abicheck.cli_appcompat  # noqa: F401  — registers `appcompat`
+    import abicheck.cli_compare_release  # noqa: F401  — registers `compare-release`
+    import abicheck.cli_max  # noqa: F401  — registers `deep-compare`
+    from abicheck.cli import main
+
+    return main.commands
+
+
+def _command_flags(cmd: object) -> set[str]:
+    flags: set[str] = set()
+    for p in cmd.params:  # type: ignore[attr-defined]
+        if getattr(p, "param_type_name", None) != "option":
+            continue
+        flags.update(p.opts)
+        flags.update(p.secondary_opts)
+    return flags
+
+
+def test_decorator_coverage() -> None:
+    """Every verdict-emitting command carries each required shared option family
+    (in full), or is on the ``INTENTIONAL_SUBSET`` allowlist (ADR-037 D10.2).
+
+    This introspects the *live Click params* — stronger than the gate's AST
+    decorator scan, so a family applied but secretly stripped would still fail.
+    """
+    from abicheck import cli_options as co
+
+    commands = _registered_commands()
+    for cmd_name in co.VERDICT_EMITTING_COMMANDS:
+        flags = _command_flags(commands[cmd_name])
+        for family in co.REQUIRED_FAMILIES:
+            if (cmd_name, family) in co.INTENTIONAL_SUBSET:
+                continue
+            missing = co.FAMILY_FLAGS[family] - flags
+            assert not missing, (
+                f"{cmd_name} is missing {family} flags {sorted(missing)} — "
+                "compose the shared decorator or add an INTENTIONAL_SUBSET entry"
+            )
+
+
+def test_intentional_subset_entries_are_real_gaps() -> None:
+    """An allowlisted (command, family) must be a *genuine* omission — otherwise
+    the allowlist rots into a rubber stamp for families that are actually present."""
+    from abicheck import cli_options as co
+
+    commands = _registered_commands()
+    for (cmd_name, family), reason in co.INTENTIONAL_SUBSET.items():
+        assert reason.strip(), f"{cmd_name}/{family} needs a non-empty reason"
+        flags = _command_flags(commands[cmd_name])
+        assert co.FAMILY_FLAGS[family] - flags, (
+            f"{cmd_name} actually carries the whole {family} family — drop the "
+            "INTENTIONAL_SUBSET entry"
+        )
+
+
+def test_gate_flags_missing_decorator(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """D10.2 is not a no-op: a verdict command lacking a required family is caught."""
+    import scripts.check_ai_readiness as gate
+
+    pkg = tmp_path / "abicheck"
+    pkg.mkdir()
+    # A `compare` command that composes only some of the required families.
+    (pkg / "cli.py").write_text(
+        "import click\n"
+        '@main.command("compare")\n'
+        "@two_sided_input_options\n"
+        "@policy_options\n"
+        "def compare_cmd():\n"
+        "    pass\n"
+    )
+    monkeypatch.setattr(gate, "PKG", pkg)
+    monkeypatch.setattr(gate, "ROOT", tmp_path)
+
+    findings = gate.Findings()
+    gate.check_cli_contract(findings)
+    msgs = [m for c, m in findings.errors if c == "cli-contract"]
+    # severity/scope/output are missing → three coverage errors naming `compare`.
+    missing = {fam for fam in ("severity_options", "scope_options", "output_options")
+               if any(fam in m and "compare" in m for m in msgs)}
+    assert missing == {"severity_options", "scope_options", "output_options"}, msgs
+
+
+def test_gate_flags_missing_command(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A mapped command whose module exists but no longer declares it is flagged
+    (D10.2 must not silently pass when coverage can't be verified)."""
+    import scripts.check_ai_readiness as gate
+
+    pkg = tmp_path / "abicheck"
+    pkg.mkdir()
+    # cli.py exists but the `compare` command has been removed from it.
+    (pkg / "cli.py").write_text("def helper():\n    return 1\n")
+    monkeypatch.setattr(gate, "PKG", pkg)
+    monkeypatch.setattr(gate, "ROOT", tmp_path)
+
+    findings = gate.Findings()
+    gate.check_cli_contract(findings)
+    msgs = [m for c, m in findings.errors if c == "cli-contract"]
+    assert any("`compare` was not found" in m for m in msgs), msgs
+
+
+def test_intentional_subset_decorator_is_not_flagged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`deep-compare` omitting `@severity_options` is allowlisted, not an error."""
+    import scripts.check_ai_readiness as gate
+
+    pkg = tmp_path / "abicheck"
+    pkg.mkdir()
+    (pkg / "cli_max.py").write_text(
+        "import click\n"
+        '@main.command("deep-compare")\n'
+        "@two_sided_input_options\n"
+        "@policy_options\n"
+        "@scope_options\n"
+        "@output_options(['json'])\n"
+        "def deep_compare_cmd():\n"
+        "    pass\n"
+    )
+    monkeypatch.setattr(gate, "PKG", pkg)
+    monkeypatch.setattr(gate, "ROOT", tmp_path)
+
+    findings = gate.Findings()
+    gate.check_cli_contract(findings)
+    msgs = [m for c, m in findings.errors if c == "cli-contract"]
+    assert not any("deep-compare" in m and "severity_options" in m for m in msgs), msgs
+
+
+# ── D10.4: one default per flag (ADR-037 D3 / G22 Phase 2) ───────────────────
+
+
+def test_one_default_per_flag() -> None:
+    """The real ``cli_options.py`` has no un-deferred conflicting flag default."""
+    import scripts.check_ai_readiness as gate
+
+    findings = gate.Findings()
+    gate._check_one_default_per_flag(findings)
+    assert [m for c, m in findings.errors if c == "cli-contract"] == []
+
+
+def test_gate_flags_conflicting_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """D10.4 catches the same ``--flag`` declared with two different defaults."""
+    import scripts.check_ai_readiness as gate
+
+    pkg = tmp_path / "abicheck"
+    pkg.mkdir()
+    (pkg / "cli_options.py").write_text(
+        "import click\n"
+        "def a(func):\n"
+        '    return click.option("--mode", default="off")(func)\n'
+        "def b(func):\n"
+        '    return click.option("--mode", default="on")(func)\n'
+    )
+    monkeypatch.setattr(gate, "PKG", pkg)
+    monkeypatch.setattr(gate, "ROOT", tmp_path)
+
+    findings = gate.Findings()
+    gate._check_one_default_per_flag(findings)
+    msgs = [m for c, m in findings.errors if c == "cli-contract"]
+    assert len(msgs) == 1 and "--mode" in msgs[0], msgs
+
+
+def test_deferred_multi_default_is_not_flagged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A flag on the ``DEFERRED_MULTI_DEFAULT`` allowlist is skipped (Phase 3)."""
+    import scripts.check_ai_readiness as gate
+
+    pkg = tmp_path / "abicheck"
+    pkg.mkdir()
+    (pkg / "cli_options.py").write_text(
+        "import click\n"
+        "def a(func):\n"
+        '    return click.option("--collect-mode", default="off")(func)\n'
+        "def b(func):\n"
+        '    return click.option("--collect-mode", default="source-target")(func)\n'
+    )
+    monkeypatch.setattr(gate, "PKG", pkg)
+    monkeypatch.setattr(gate, "ROOT", tmp_path)
+
+    findings = gate.Findings()
+    gate._check_one_default_per_flag(findings)
+    assert [m for c, m in findings.errors if c == "cli-contract"] == []
+
+
+# ── Gate tables mirror the cli_options source of truth ───────────────────────
+
+
+def test_gate_tables_mirror_cli_options() -> None:
+    """The pure-stdlib gate duplicates ``cli_options`` contract tables (it cannot
+    import the package). Assert the two never drift (ADR-037 D10)."""
+    import scripts.check_ai_readiness as gate
+    from abicheck import cli_options as co
+
+    # command ↔ module map (inverted between the two).
+    assert gate._VERDICT_CMD_MODULES == {
+        mod: cmd for cmd, mod in co.VERDICT_EMITTING_COMMANDS.items()
+    }
+    # required decorators = the decorator for each required family.
+    assert gate._REQUIRED_FAMILY_DECORATORS == frozenset(
+        co.FAMILY_DECORATOR[f] for f in co.REQUIRED_FAMILIES
+    )
+    # allowlist, mapped from (cmd, family) to (cmd, decorator).
+    assert gate._INTENTIONAL_SUBSET_DECORATORS == frozenset(
+        (cmd, co.FAMILY_DECORATOR[fam]) for (cmd, fam) in co.INTENTIONAL_SUBSET
+    )
+    assert gate._DEFERRED_MULTI_DEFAULT_FLAGS == co.DEFERRED_MULTI_DEFAULT
+
+
+# ── Resolved option-set snapshot (catches an accidental flag drop in review) ──
+
+# Frozen sets of every option spelling each verdict-emitting command exposes.
+# A diff here in review means a flag was added or dropped — update deliberately.
+_OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
+    "compare": (
+        "--annotate", "--annotate-additions", "--btf", "--collapse-versioned-symbols",
+        "--collect-mode", "--ctf", "--debug-format", "--debug-root", "--debug-root1",
+        "--debug-root2", "--debuginfod", "--debuginfod-url", "--demangle", "--depth",
+        "--dwarf",
+        "--dwarf-only", "--explain-patterns", "--follow-deps", "--format", "--header",
+        "--header-backend", "--include", "--lang", "--ld-library-path", "--max",
+        "--new-build-info",
+        "--new-header", "--new-header-backend", "--new-include", "--new-pdb-path",
+        "--new-sources", "--new-version", "--no-demangle", "--no-pattern-verdicts",
+        "--no-scope-public-headers", "--old-build-info", "--old-header",
+        "--old-header-backend", "--old-include", "--old-pdb-path", "--old-sources",
+        "--old-version", "--output", "--pattern-verdicts", "--pdb-path", "--policy",
+        "--policy-file", "--probe-matrix-new", "--probe-matrix-old", "--public-symbol",
+        "--public-symbols-list", "--recommend", "--report-mode", "--require-justification",
+        "--scope-public-headers", "--search-path", "--severity-abi-breaking",
+        "--severity-addition", "--severity-potential-breaking", "--severity-preset",
+        "--severity-quality-issues", "--show-filtered", "--show-impact", "--show-only",
+        "--show-redundant", "--stat", "--strict-suppressions", "--suppress",
+        "--surface-metrics", "--verbose", "-H", "-I", "-o", "-v",
+    ),
+    "compare-release": (
+        "--annotate", "--annotate-additions", "--bundle-cohort", "--bundle-system-providers",
+        "--debug-info1", "--debug-info2", "--devel-pkg1", "--devel-pkg2", "--dso-only",
+        "--fail-on-removed-library", "--format", "--header", "--include",
+        "--include-private-dso", "--jobs", "--keep-extracted", "--lang", "--manifest",
+        "--new-header", "--new-include", "--new-version", "--no-bundle-analysis",
+        "--no-fail-on-removed-library", "--no-scope-public-headers", "--old-header",
+        "--old-include", "--old-version", "--output", "--output-dir", "--policy",
+        "--policy-file", "--probe-matrix-new", "--probe-matrix-old", "--require-justification",
+        "--scope-public-headers", "--severity-abi-breaking", "--severity-addition",
+        "--severity-potential-breaking", "--severity-preset", "--severity-quality-issues",
+        "--strict-suppressions", "--suppress", "--verbose", "-H", "-I", "-j", "-o", "-v",
+    ),
+    "appcompat": (
+        "--check-against", "--format", "--header", "--include", "--lang",
+        "--list-required-symbols", "--new-header", "--new-include", "--new-version",
+        "--no-scope-public-headers", "--old-header", "--old-include", "--old-version",
+        "--output", "--policy", "--policy-file", "--scope-public-headers",
+        "--severity-abi-breaking", "--severity-addition", "--severity-potential-breaking",
+        "--severity-preset", "--severity-quality-issues", "--show-irrelevant", "--suppress",
+        "--verbose", "-H", "-I", "-o", "-v",
+    ),
+    "deep-compare": (
+        "--depth", "--format", "--header", "--header-backend", "--include",
+        "--keep-snapshots", "--lang", "--max", "--new-build-info", "--new-header",
+        "--new-header-backend", "--new-include", "--new-sources", "--new-version",
+        "--no-scope-public-headers", "--old-build-info", "--old-header",
+        "--old-header-backend", "--old-include", "--old-sources", "--old-version",
+        "--output", "--policy", "--policy-file", "--recommend", "--scope-public-headers",
+        "--severity-preset", "--sources", "--suppress", "--verbose", "-H", "-I", "-o", "-v",
+    ),
+}
+
+
+@pytest.mark.parametrize("cmd_name", sorted(_OPTION_SET_SNAPSHOT))
+def test_option_set_snapshot(cmd_name: str) -> None:
+    """Each command's full option surface matches the frozen snapshot."""
+    commands = _registered_commands()
+    flags = _command_flags(commands[cmd_name])
+    assert sorted(flags) == sorted(_OPTION_SET_SNAPSHOT[cmd_name])
+
+
 # ── Chokepoint parity: one classifier, no scope_public drift ─────────────────
 
 

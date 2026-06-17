@@ -67,7 +67,14 @@ from .cli_compare_release_helpers import (  # noqa: F401
     _resolve_release_severity_config,
     _run_bundle_analysis,
 )
-from .cli_params import POLICY_FILE_PARAM, _load_suppression_and_policy
+from .cli_options import (
+    output_options,
+    policy_options,
+    scope_options,
+    severity_options,
+    two_sided_input_options,
+)
+from .cli_params import _load_suppression_and_policy
 from .model import AbiSnapshot
 from .reporter import to_json
 
@@ -756,83 +763,17 @@ def _strip_diff_results_and_adjust_verdict(
 @main.command("compare-release")
 @click.argument("old_dir", type=click.Path(exists=True, path_type=Path))
 @click.argument("new_dir", type=click.Path(exists=True, path_type=Path))
-@click.option(
-    "-H",
-    "--header",
-    "headers",
-    multiple=True,
-    type=click.Path(path_type=Path),
-    help="Public header file or directory applied to both sides.",
-)
-@click.option(
-    "-I",
-    "--include",
-    "includes",
-    multiple=True,
-    type=click.Path(path_type=Path),
-    help="Extra include directory for castxml.",
-)
-@click.option(
-    "--old-include",
-    "old_includes_only",
-    multiple=True,
-    type=click.Path(path_type=Path),
-    help="Include directory for old side only (overrides -I for old).",
-)
-@click.option(
-    "--new-include",
-    "new_includes_only",
-    multiple=True,
-    type=click.Path(path_type=Path),
-    help="Include directory for new side only (overrides -I for new).",
-)
-@click.option(
-    "--old-header",
-    "old_headers_only",
-    multiple=True,
-    type=click.Path(path_type=Path),
-    help="Header for old side only (overrides -H for old).",
-)
-@click.option(
-    "--new-header",
-    "new_headers_only",
-    multiple=True,
-    type=click.Path(path_type=Path),
-    help="Header for new side only (overrides -H for new).",
-)
-@click.option(
-    "--old-version",
-    "old_version",
-    default="old",
-    show_default=True,
-    help="Version label for old side.",
-)
-@click.option(
-    "--new-version",
-    "new_version",
-    default="new",
-    show_default=True,
-    help="Version label for new side.",
-)
+# Two-sided header/include/version family (ADR-037 D3); --lang stays inline.
+@two_sided_input_options
 @click.option(
     "--lang",
     default="c++",
     show_default=True,
     type=click.Choice(["c++", "c"], case_sensitive=False),
 )
-@click.option(
-    "--format",
-    "fmt",
-    type=click.Choice(["json", "markdown", "junit"]),
-    default="markdown",
-    show_default=True,
-)
-@click.option(
-    "-o",
-    "--output",
-    type=click.Path(path_type=Path),
-    default=None,
-    help="Output file for summary report (default: stdout).",
+@output_options(
+    ["json", "markdown", "junit"],
+    output_help="Output file for summary report (default: stdout).",
 )
 @click.option(
     "--output-dir",
@@ -841,12 +782,8 @@ def _strip_diff_results_and_adjust_verdict(
     default=None,
     help="Directory to write per-library reports.",
 )
-@click.option(
-    "--suppress",
-    type=click.Path(exists=True, path_type=Path),
-    default=None,
-    help="Suppression file (YAML).",
-)
+# Policy + suppression family (ADR-037 D3); strict/justification stay inline.
+@policy_options
 @click.option(
     "--strict-suppressions",
     is_flag=True,
@@ -859,14 +796,6 @@ def _strip_diff_results_and_adjust_verdict(
     default=False,
     help="Require every suppression rule to have a non-empty 'reason' field.",
 )
-@click.option(
-    "--policy",
-    "policy",
-    type=click.Choice(["strict_abi", "sdk_vendor", "plugin_abi"], case_sensitive=True),
-    default="strict_abi",
-    show_default=True,
-)
-@click.option("--policy-file", "policy_file_path", type=POLICY_FILE_PARAM, default=None)
 @click.option(
     "--fail-on-removed-library/--no-fail-on-removed-library",
     "fail_on_removed",
@@ -974,15 +903,7 @@ def _strip_diff_results_and_adjust_verdict(
     "across DSO boundaries, type drift across siblings, provider "
     "migration, and manifest mismatches.",
 )
-@click.option(
-    "--scope-public-headers/--no-scope-public-headers",
-    "scope_public_headers",
-    default=True,
-    show_default=True,
-    help="Restrict findings to the public-header ABI surface (ADR-024). "
-    "On by default (matches `compare`); use --no-scope-public-headers "
-    "to report every finding.",
-)
+@scope_options  # --scope-public-headers/--no- (ADR-037 D3)
 @click.option(
     "--probe-matrix-old",
     "probe_matrix_old",
@@ -1001,44 +922,8 @@ def _strip_diff_results_and_adjust_verdict(
     default=None,
     help="New build-configuration matrix snapshot (pairs with --probe-matrix-old).",
 )
-# ── Severity (mirrors `compare`) ──────────────────────────────────────────────
-@click.option(
-    "--severity-preset",
-    "severity_preset",
-    type=click.Choice(["default", "strict", "info-only"], case_sensitive=True),
-    default=None,
-    help="Severity preset: 'default', 'strict', or 'info-only'. "
-    "When set (or any --severity-* option), exit codes follow the "
-    "severity-aware scheme aggregated across all libraries.",
-)
-@click.option(
-    "--severity-abi-breaking",
-    "severity_abi_breaking",
-    type=click.Choice(["error", "warning", "info"], case_sensitive=True),
-    default=None,
-    help="Severity for clear ABI/API incompatibilities (overrides preset).",
-)
-@click.option(
-    "--severity-potential-breaking",
-    "severity_potential_breaking",
-    type=click.Choice(["error", "warning", "info"], case_sensitive=True),
-    default=None,
-    help="Severity for potential incompatibilities needing review (overrides preset).",
-)
-@click.option(
-    "--severity-quality-issues",
-    "severity_quality_issues",
-    type=click.Choice(["error", "warning", "info"], case_sensitive=True),
-    default=None,
-    help="Severity for problematic behaviors (overrides preset).",
-)
-@click.option(
-    "--severity-addition",
-    "severity_addition",
-    type=click.Choice(["error", "warning", "info"], case_sensitive=True),
-    default=None,
-    help="Severity for new public API additions (overrides preset).",
-)
+# ── Severity (shared family, ADR-037 D3; mirrors `compare`) ───────────────────
+@severity_options
 def compare_release_cmd(
     old_dir: Path,
     new_dir: Path,

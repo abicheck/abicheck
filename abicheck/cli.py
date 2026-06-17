@@ -63,8 +63,14 @@ from .cli_options import (
     adr027_compare_options,
     build_source_compare_options,
     build_source_dump_options,
+    debug_resolution_options,
+    output_options,
+    policy_options,
+    scope_options,
+    severity_options,
+    two_sided_input_options,
 )
-from .cli_params import POLICY_FILE_PARAM, _load_suppression_and_policy
+from .cli_params import _load_suppression_and_policy
 from .cli_resolve import (
     _apply_native_provenance,
     _detect_binary_format,
@@ -501,9 +507,17 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         click.get_current_context().get_parameter_source("collect_mode")
         == click.core.ParameterSource.COMMANDLINE
     )
+    if collect_mode_explicit:
+        click.echo(
+            "warning: --collect-mode is deprecated (ADR-037 D5); use --depth.",
+            err=True,
+        )
     collect_mode = resolve_dump_depth(
         depth, max_depth, collect_mode, collect_mode_explicit,
     )
+    # --depth symbols suppresses the L2 header AST (symbols-only dump, ADR-037 D5).
+    if depth == "symbols":
+        headers = ()
 
     # An *explicitly* requested deep evidence depth (--depth/--max or an explicit
     # --collect-mode) collects nothing without a source tree / build context:
@@ -958,16 +972,9 @@ def _finalize_compare_result(
 @click.argument("old_input", type=click.Path(exists=True, path_type=Path))
 @click.argument("new_input", type=click.Path(exists=True, path_type=Path))
 # ── Dump options (used when input is an ELF binary) ──────────────────────────
-@click.option("-H", "--header", "headers", multiple=True,
-              type=click.Path(path_type=Path),
-              help="Public header file or directory applied to both sides (repeat for multiple). "
-                   "Recommended for full ABI analysis; without headers, native binaries fall back to symbols-only mode. "
-                   "Scopes the ABI surface to declarations in these headers for ELF; on PE/Mach-O scoping is "
-                   "best-effort and falls back to the export table when castxml is unavailable or names don't match "
-                   "(e.g. MSVC C++ mangling). Validated for native binaries; ignored for snapshots.")
-@click.option("-I", "--include", "includes", multiple=True,
-              type=click.Path(path_type=Path),
-              help="Extra include directory for castxml (applied to both sides).")
+# Two-sided header/include/version family (ADR-037 D3); --lang and the L2
+# --header-backend trio stay inline (not part of the shared family).
+@two_sided_input_options
 @click.option("--lang", default="c++", show_default=True,
               type=click.Choice(["c++", "c"], case_sensitive=False),
               help="Language mode for the header backend.")
@@ -987,49 +994,24 @@ def _finalize_compare_result(
               type=click.Choice(["auto", "castxml", "clang"], case_sensitive=False),
               help="L2 header-AST frontend for the new side only (overrides "
                    "--header-backend for new).")
-@click.option("--old-header", "old_headers_only", multiple=True,
-              type=click.Path(path_type=Path),
-              help="Public header for old side only (overrides -H for old). "
-                   "Validated for native binaries; ignored for snapshots.")
-@click.option("--new-header", "new_headers_only", multiple=True,
-              type=click.Path(path_type=Path),
-              help="Public header for new side only (overrides -H for new). "
-                   "Validated for native binaries; ignored for snapshots.")
-@click.option("--old-include", "old_includes_only", multiple=True,
-              type=click.Path(path_type=Path),
-              help="Include dir for old side only (overrides -I for old).")
-@click.option("--new-include", "new_includes_only", multiple=True,
-              type=click.Path(path_type=Path),
-              help="Include dir for new side only (overrides -I for new).")
-@click.option("--old-version", "old_version", default="old", show_default=True,
-              help="Version label for old side (used when input is a .so file).")
-@click.option("--new-version", "new_version", default="new", show_default=True,
-              help="Version label for new side (used when input is a .so file).")
 # ── Compare options (unchanged) ──────────────────────────────────────────────
-@click.option("--format", "fmt", type=click.Choice(["json", "markdown", "sarif", "html", "junit", "review"]),
-              default="markdown", show_default=True,
-              help="Output format. 'review' emits a compact GitHub-facing digest "
-                   "(verdict + counts + release recommendation + manual-review banner) "
-                   "suitable for a job summary or PR comment.")
+@output_options(
+    ["json", "markdown", "sarif", "html", "junit", "review"],
+    format_help="Output format. 'review' emits a compact GitHub-facing digest "
+                "(verdict + counts + release recommendation + manual-review banner) "
+                "suitable for a job summary or PR comment.",
+)
 @click.option("--demangle/--no-demangle", default=None,
               help="Demangle C++ symbol names in markdown/review output (default "
                    "ON; use --no-demangle to turn off). json/sarif always keep raw "
                    "mangled names, and HTML is rendered structurally and is never "
                    "demangled regardless of this flag.")
-@click.option("-o", "--output", type=click.Path(path_type=Path), default=None)
-@click.option("--suppress", type=click.Path(exists=True, path_type=Path), default=None,
-              help="Suppression file (YAML) to filter known/intentional changes.")
+# Policy + suppression family (ADR-037 D3); strict/justification stay inline.
+@policy_options
 @click.option("--strict-suppressions", is_flag=True, default=False,
               help="Fail with exit code 1 if any suppression rule has expired.")
 @click.option("--require-justification", is_flag=True, default=False,
               help="Require every suppression rule to have a non-empty 'reason' field.")
-@click.option("--policy", "policy",
-              type=click.Choice(["strict_abi", "sdk_vendor", "plugin_abi"], case_sensitive=True),
-              default="strict_abi", show_default=True,
-              help="Built-in policy profile for verdict classification. Ignored when --policy-file is given.")
-@click.option("--policy-file", "policy_file_path",
-              type=POLICY_FILE_PARAM, default=None,
-              help="YAML policy file with per-kind verdict overrides, or a built-in name (e.g. 'security'). Overrides --policy.")
 @click.option("--pdb-path", "pdb_path", type=click.Path(path_type=Path), default=None,
               help="Explicit PDB file path for Windows PE debug info (applied to both sides). "
                    "Overrides automatic PDB discovery.")
@@ -1037,31 +1019,8 @@ def _finalize_compare_result(
               help="PDB file path for old side only (overrides --pdb-path for old).")
 @click.option("--new-pdb-path", "new_pdb_path", type=click.Path(path_type=Path), default=None,
               help="PDB file path for new side only (overrides --pdb-path for new).")
-@click.option("--dwarf-only", is_flag=True, default=False,
-              help="Force DWARF-only mode for both sides: use DWARF debug info "
-                   "as primary data source even when headers are available.")
-@click.option("--severity-preset", "severity_preset",
-              type=click.Choice(["default", "strict", "info-only"], case_sensitive=True),
-              default=None,
-              help="Severity preset: 'default', 'strict', or 'info-only'. "
-                   "Controls exit codes and report labels. Per-category "
-                   "--severity-* options override the chosen preset.")
-@click.option("--severity-abi-breaking", "severity_abi_breaking",
-              type=click.Choice(["error", "warning", "info"], case_sensitive=True),
-              default=None,
-              help="Severity for clear ABI/API incompatibilities (overrides preset).")
-@click.option("--severity-potential-breaking", "severity_potential_breaking",
-              type=click.Choice(["error", "warning", "info"], case_sensitive=True),
-              default=None,
-              help="Severity for potential incompatibilities needing review (overrides preset).")
-@click.option("--severity-quality-issues", "severity_quality_issues",
-              type=click.Choice(["error", "warning", "info"], case_sensitive=True),
-              default=None,
-              help="Severity for problematic behaviors like std symbol leaks (overrides preset).")
-@click.option("--severity-addition", "severity_addition",
-              type=click.Choice(["error", "warning", "info"], case_sensitive=True),
-              default=None,
-              help="Severity for new public API additions (overrides preset).")
+# Severity preset + per-category overrides (ADR-037 D3 / D4).
+@severity_options
 @click.option("--follow-deps", is_flag=True, default=False,
               help="Resolve transitive dependencies for both old and new, compute symbol "
                    "bindings, and include a dependency-change section in the report. ELF only.")
@@ -1073,13 +1032,7 @@ def _finalize_compare_result(
 @click.option("--show-redundant", is_flag=True, default=False,
               help="Disable redundancy filtering and show all changes including those "
                    "derived from root type changes.")
-@click.option("--scope-public-headers/--no-scope-public-headers", "scope_public_headers",
-              default=True, show_default=True,
-              help="Restrict findings to the public-header ABI surface (ADR-024): "
-                   "changes to symbols/types not reachable from public-header-declared "
-                   "exported API are recorded as filtered, not reported. Internal-type "
-                   "leaks are never hidden. On by default; use --no-scope-public-headers "
-                   "to report every finding regardless of surface.")
+@scope_options  # --scope-public-headers/--no- (ADR-037 D3); --show-filtered stays inline
 @click.option("--collapse-versioned-symbols", "collapse_versioned_symbols", is_flag=True, default=False,
               help="Opt-in (G15): when a versioned-symbol scheme is detected (most removed "
                    "symbols reappear differing only by a version token, e.g. ICU u_*_NN), "
@@ -1130,16 +1083,6 @@ def _finalize_compare_result(
 @click.option("--recommend", is_flag=True, default=False,
               help="Append a release recommendation (semver bump + SONAME action) to the "
                    "report. Always present in --format json under 'release_recommendation'.")
-@click.option("--debug-format", "debug_format_opt",
-              type=click.Choice(["auto", "dwarf", "btf", "ctf"], case_sensitive=False), default=None,
-              help="Force the ELF debug format for both sides (auto=pick best available). "
-                   "Supersedes the individual --btf/--ctf/--dwarf flags.")
-@click.option("--btf", "debug_format", flag_value="btf", default=None, hidden=True,
-              help="Force BTF debug format for both sides (ELF only).")
-@click.option("--ctf", "debug_format", flag_value="ctf", hidden=True,
-              help="Force CTF debug format for both sides (ELF only).")
-@click.option("--dwarf", "debug_format", flag_value="dwarf", hidden=True,
-              help="Force DWARF debug format for both sides (ELF only).")
 @click.option("--annotate", is_flag=True, default=False,
               help="Emit GitHub Actions workflow command annotations to stderr. "
                    "Annotations appear as inline comments on PR diffs. "
@@ -1147,18 +1090,10 @@ def _finalize_compare_result(
 @click.option("--annotate-additions", is_flag=True, default=False,
               help="Include additions/compatible changes as ::notice annotations "
                    "(requires --annotate).")
-# ── Debug artifact resolution (ADR-021a) ──────────────────────────────────────
-@click.option("--debug-root", "debug_roots", multiple=True, type=click.Path(path_type=Path),
-              help="Directory containing separate debug files (build-id trees, "
-                   "path-mirror, dSYM bundles). Applied to both sides. Can be repeated.")
-@click.option("--debug-root1", "debug_roots_old", multiple=True, type=click.Path(path_type=Path),
-              help="Debug root for old side only (overrides --debug-root for old).")
-@click.option("--debug-root2", "debug_roots_new", multiple=True, type=click.Path(path_type=Path),
-              help="Debug root for new side only (overrides --debug-root for new).")
-@click.option("--debuginfod", is_flag=True, default=False,
-              help="Enable debuginfod network resolution for debug info (opt-in).")
-@click.option("--debuginfod-url", "debuginfod_url", default=None,
-              help="debuginfod server URL (overrides DEBUGINFOD_URLS env var).")
+# ── Debug artifact resolution (ADR-021a + ADR-037 D3) ─────────────────────────
+# --dwarf-only, --debug-root{,1,2}, --debuginfod[-url], --debug-format (+hidden
+# --btf/--ctf/--dwarf): the shared local-ELF debug-resolution family.
+@debug_resolution_options
 @build_source_compare_options  # --old/new-build-info, --old/new-sources, --collect-mode
 @adr027_compare_options  # ADR-027: --pattern-verdicts/--explain-patterns/--surface-metrics
 @click.option("-v", "--verbose", is_flag=True, default=False,
@@ -1203,6 +1138,7 @@ def compare_cmd(
     old_build_info: Path | None = None, new_build_info: Path | None = None,
     old_sources: Path | None = None, new_sources: Path | None = None,
     collect_mode: str = "off",
+    depth: str | None = None, max_depth: bool = False,
     probe_matrix_old: Path | None = None,
     probe_matrix_new: Path | None = None,
 ) -> None:
@@ -1261,6 +1197,23 @@ def compare_cmd(
 
     if annotate_additions and not annotate:
         raise click.UsageError("--annotate-additions requires --annotate")
+
+    # Fold the unified --depth/--max dial into the underlying collect mode
+    # (ADR-037 D5), the same way `dump`/`deep-compare` do. The hidden
+    # --collect-mode alias still works but warns; --depth symbols suppresses the
+    # L2 header AST (symbols-only).
+    collect_mode_explicit = (
+        click.get_current_context().get_parameter_source("collect_mode")
+        == click.core.ParameterSource.COMMANDLINE
+    )
+    if collect_mode_explicit:
+        click.echo(
+            "warning: --collect-mode is deprecated (ADR-037 D5); use --depth.",
+            err=True,
+        )
+    collect_mode = resolve_dump_depth(depth, max_depth, collect_mode, collect_mode_explicit)
+    if depth == "symbols":
+        headers, old_headers_only, new_headers_only = (), (), ()
 
     # Reconcile the --debug-format selector with the legacy --btf/--ctf/--dwarf
     # flags. The selector supersedes the legacy flags whenever it is given:

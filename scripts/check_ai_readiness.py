@@ -1184,6 +1184,169 @@ def _iter_cli_contract_sources() -> Iterable[Path]:
         yield appcompat
 
 
+# ── ADR-037 D10.2 / D10.4: shared-decorator coverage + one-default-per-flag ───
+#
+# These mirror the contract tables in ``abicheck/cli_options.py``. The gate is
+# the first CI step and must stay pure-stdlib (no ``import abicheck``), so the
+# small mapping is duplicated here and ``tests/test_cli_contract.py`` asserts it
+# stays in lock-step with ``cli_options`` (the source of truth).
+
+#: verdict-emitting command module basename → the command's registered name.
+_VERDICT_CMD_MODULES: dict[str, str] = {
+    "cli.py": "compare",
+    "cli_compare_release.py": "compare-release",
+    "cli_appcompat.py": "appcompat",
+    "cli_max.py": "deep-compare",
+}
+
+#: decorator callables every verdict-emitting command must compose (ADR-037 D3).
+_REQUIRED_FAMILY_DECORATORS: frozenset[str] = frozenset(
+    {
+        "two_sided_input_options",
+        "policy_options",
+        "severity_options",
+        "scope_options",
+        "output_options",
+    }
+)
+
+#: (command, decorator) pairs allowed to be absent — a deliberate, reviewed
+#: subset (mirrors ``cli_options.INTENTIONAL_SUBSET``).
+_INTENTIONAL_SUBSET_DECORATORS: frozenset[tuple[str, str]] = frozenset(
+    {
+        ("deep-compare", "severity_options"),
+    }
+)
+
+#: flag names knowingly carrying two defaults across decorators, deferred to a
+#: later phase (mirrors ``cli_options.DEFERRED_MULTI_DEFAULT``).
+_DEFERRED_MULTI_DEFAULT_FLAGS: frozenset[str] = frozenset({"--collect-mode"})
+
+
+def _decorator_callable_name(node: ast.expr) -> str | None:
+    """The bare callable name of a decorator (``@foo`` or ``@foo(...)``).
+
+    Returns ``None`` for attribute-style decorators (``@click.option(...)`` /
+    ``@main.command(...)``) which are not shared-family decorators.
+    """
+    if isinstance(node, ast.Call):
+        node = node.func
+    if isinstance(node, ast.Name):
+        return node.id
+    return None
+
+
+def _command_name_of(fn: ast.FunctionDef) -> str | None:
+    """If *fn* is a ``@main.command("name")`` handler, return that name."""
+    for dec in fn.decorator_list:
+        if (
+            isinstance(dec, ast.Call)
+            and isinstance(dec.func, ast.Attribute)
+            and dec.func.attr == "command"
+            and dec.args
+            and isinstance(dec.args[0], ast.Constant)
+            and isinstance(dec.args[0].value, str)
+        ):
+            return dec.args[0].value
+    return None
+
+
+def _check_decorator_coverage(f: Findings) -> None:
+    """ADR-037 D10.2: every verdict-emitting command composes the required shared
+    option-family decorators (or is on the intentional-subset allowlist)."""
+    for module, cmd_name in _VERDICT_CMD_MODULES.items():
+        path = PKG / module
+        if not path.is_file():
+            continue
+        rel = _rel(path)
+        try:
+            tree = ast.parse(_read(path), filename=rel)
+        except SyntaxError:
+            continue
+        found = False
+        for fn in ast.walk(tree):
+            if not isinstance(fn, ast.FunctionDef):
+                continue
+            if _command_name_of(fn) != cmd_name:
+                continue
+            found = True
+            applied = {
+                name
+                for dec in fn.decorator_list
+                if (name := _decorator_callable_name(dec)) is not None
+            }
+            for required in sorted(_REQUIRED_FAMILY_DECORATORS):
+                if required in applied:
+                    continue
+                if (cmd_name, required) in _INTENTIONAL_SUBSET_DECORATORS:
+                    continue
+                f.err(
+                    "cli-contract",
+                    f"{rel}: command `{cmd_name}` is missing shared option family "
+                    f"`@{required}` (ADR-037 D3/D10.2). Compose it from "
+                    "`cli_options.py` or add an `INTENTIONAL_SUBSET` entry with a reason.",
+                )
+        # A mapped command whose module exists but no longer declares it is a
+        # D10.2 false-negative (coverage silently un-verifiable) — flag it.
+        if not found:
+            f.err(
+                "cli-contract",
+                f"{rel}: expected verdict-emitting command `{cmd_name}` was not "
+                "found; its shared-decorator coverage (ADR-037 D10.2) could not be "
+                "verified. Update `VERDICT_EMITTING_COMMANDS` if it moved or was renamed.",
+            )
+
+
+def _option_flag_and_default(call: ast.Call) -> tuple[str | None, str | None]:
+    """For a ``click.option(...)`` call, return its canonical ``--flag`` name and
+    the source text of its ``default=`` (or ``None`` if absent)."""
+    flag: str | None = None
+    for arg in call.args:
+        if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+            token = arg.value.split("/")[0]  # `--x/--no-x` → `--x`
+            if token.startswith("--"):
+                flag = token
+                break
+            if flag is None and token.startswith("-"):
+                flag = token  # short-only fallback; a long form usually follows
+    default_src: str | None = None
+    for kw in call.keywords:
+        if kw.arg == "default":
+            default_src = ast.unparse(kw.value)
+    return flag, default_src
+
+
+def _check_one_default_per_flag(f: Findings) -> None:
+    """ADR-037 D10.4: a flag declared in more than one shared decorator must not
+    carry two different defaults (the ``--collect-mode`` double-default trap)."""
+    path = PKG / "cli_options.py"
+    if not path.is_file():
+        return
+    rel = _rel(path)
+    try:
+        tree = ast.parse(_read(path), filename=rel)
+    except SyntaxError:
+        return
+    defaults: dict[str, set[str]] = defaultdict(set)
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "option"
+        ):
+            flag, default_src = _option_flag_and_default(node)
+            if flag is not None and default_src is not None:
+                defaults[flag].add(default_src)
+    for flag, seen in sorted(defaults.items()):
+        if len(seen) > 1 and flag not in _DEFERRED_MULTI_DEFAULT_FLAGS:
+            f.err(
+                "cli-contract",
+                f"{rel}: flag `{flag}` is declared with conflicting defaults "
+                f"{sorted(seen)} across shared decorators (ADR-037 D10.4). "
+                "Give it one default, or add it to `DEFERRED_MULTI_DEFAULT`.",
+            )
+
+
 def check_cli_contract(f: Findings) -> None:
     """ERROR if a front-end module calls a Tier-1 core entry point
     (``checker.compare``) directly instead of routing through the Tier-2 service.
@@ -1221,6 +1384,9 @@ def check_cli_contract(f: Findings) -> None:
                     "directly; route through `service.run_compare` / "
                     "`service.compare_snapshots` (ADR-037 D1/D10.1)",
                 )
+    # D10.2 shared-decorator coverage + D10.4 one-default-per-flag (ADR-037 D3).
+    _check_decorator_coverage(f)
+    _check_one_default_per_flag(f)
 
 
 # ---------------------------------------------------------------------------
