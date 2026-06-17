@@ -64,6 +64,7 @@ from .cli_options import (
     build_source_compare_options,
     build_source_dump_options,
     debug_resolution_options,
+    note_deprecated_ast_frontend,
     output_options,
     policy_options,
     scope_options,
@@ -387,13 +388,15 @@ def main() -> None:
 @click.option("--lang", default="c++", show_default=True,
               type=click.Choice(["c++", "c"], case_sensitive=False),
               help="Language mode for the header backend.")
-@click.option("--header-backend", "header_backend", default="auto", show_default=True,
+@click.option("--ast-frontend", "--header-backend", "header_backend",
+              default="auto", show_default=True,
               type=click.Choice(["auto", "castxml", "clang"], case_sensitive=False),
-              help="L2 header-AST frontend: castxml (default schema reference) or "
-                   "clang (-ast-dump=json; for hosts where castxml is absent or its "
-                   "bundled frontend chokes). auto = castxml if present, else clang, "
-                   "and auto-falls back to clang when castxml hits a toolchain-version "
-                   "error. Env: ABICHECK_HEADER_BACKEND.")
+              help="C/C++ AST frontend (ADR-037 D8): castxml (default schema "
+                   "reference) or clang (-ast-dump=json; for hosts where castxml is "
+                   "absent or its bundled frontend chokes). auto = castxml if "
+                   "present, else clang, and auto-falls back to clang when castxml "
+                   "hits a toolchain-version error. Env: ABICHECK_AST_FRONTEND. "
+                   "(--header-backend is a deprecated alias.)")
 @click.option("-o", "--output", "output", type=click.Path(path_type=Path), default=None,
               help="Output JSON file. Defaults to stdout.")
 # ── Cross-compilation flags ───────────────────────────────────────────────────
@@ -504,6 +507,11 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
       abicheck dump --sources ./libfoo-src/ -o libfoo.src.json  # source-only (no binary)
     """
     _setup_verbosity(verbose)
+
+    # ADR-037 D8: legacy --header-backend → --ast-frontend deprecation note.
+    _ast_note = note_deprecated_ast_frontend()
+    if _ast_note:
+        click.echo(_ast_note, err=True)
 
     # Resolve the --depth/--max preset into the underlying --collect-mode before
     # any dump path runs, so every branch (source-only / PE-Mach-O / ELF) embeds
@@ -1052,28 +1060,32 @@ def _dispatch_release_compare(ctx: click.Context, **kwargs: Any) -> None:
 # when the operands are directories/packages; a no-op-with-warning otherwise.
 @set_input_options
 # ── Dump options (used when input is an ELF binary) ──────────────────────────
-# Two-sided header/include/version family (ADR-037 D3); --lang and the L2
-# --header-backend trio stay inline (not part of the shared family).
+# Two-sided header/include/version family (ADR-037 D3); --lang and the
+# --ast-frontend trio stay inline (not part of the shared family).
 @two_sided_input_options
 @click.option("--lang", default="c++", show_default=True,
               type=click.Choice(["c++", "c"], case_sensitive=False),
               help="Language mode for the header backend.")
-@click.option("--header-backend", "header_backend", default="auto", show_default=True,
+@click.option("--ast-frontend", "--header-backend", "header_backend",
+              default="auto", show_default=True,
               type=click.Choice(["auto", "castxml", "clang"], case_sensitive=False),
-              help="L2 header-AST frontend for native-binary inputs: castxml "
-                   "(default) or clang (-ast-dump=json; for clang-only hosts). "
-                   "auto = castxml if present, else clang, and auto-falls back to "
-                   "clang on a castxml toolchain-version error. "
-                   "Env: ABICHECK_HEADER_BACKEND.")
-@click.option("--old-header-backend", "old_header_backend", default=None,
+              help="C/C++ AST frontend for native-binary inputs (ADR-037 D8): "
+                   "castxml (default) or clang (-ast-dump=json; for clang-only "
+                   "hosts). auto = castxml if present, else clang, and auto-falls "
+                   "back to clang on a castxml toolchain-version error. "
+                   "Env: ABICHECK_AST_FRONTEND. (--header-backend is a deprecated alias.)")
+@click.option("--old-ast-frontend", "--old-header-backend", "old_header_backend",
+              default=None,
               type=click.Choice(["auto", "castxml", "clang"], case_sensitive=False),
-              help="L2 header-AST frontend for the old side only (overrides "
-                   "--header-backend for old). Use when the old release parses on "
-                   "castxml but the new one needs clang (or vice versa).")
-@click.option("--new-header-backend", "new_header_backend", default=None,
+              help="C/C++ AST frontend for the old side only (overrides "
+                   "--ast-frontend for old). Use when the old release parses on "
+                   "castxml but the new one needs clang (or vice versa). "
+                   "(--old-header-backend is a deprecated alias.)")
+@click.option("--new-ast-frontend", "--new-header-backend", "new_header_backend",
+              default=None,
               type=click.Choice(["auto", "castxml", "clang"], case_sensitive=False),
-              help="L2 header-AST frontend for the new side only (overrides "
-                   "--header-backend for new).")
+              help="C/C++ AST frontend for the new side only (overrides "
+                   "--ast-frontend for new). (--new-header-backend is a deprecated alias.)")
 # ── Compare options (unchanged) ──────────────────────────────────────────────
 @output_options(
     ["json", "markdown", "sarif", "html", "junit", "review"],
@@ -1302,6 +1314,12 @@ def compare_cmd(
       abicheck compare old.json new.json --suppress suppressions.yaml
     """
     _setup_verbosity(verbose)
+
+    # ADR-037 D8: the legacy --header-backend spellings still resolve but print a
+    # one-line deprecation note while the alias window runs (advisory until 1.0).
+    _ast_note = note_deprecated_ast_frontend()
+    if _ast_note:
+        click.echo(_ast_note, err=True)
 
     # ADR-037 D4: load the project config and merge CLI flags over it
     # (precedence CLI > config > built-in default) *before* dispatch, so both the

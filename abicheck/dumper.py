@@ -18,8 +18,9 @@ The header AST (L2) is produced by one of two interchangeable frontends behind
 ``_header_ast_parser``: **castxml** (the default / schema reference, parsed by
 ``dumper_castxml._CastxmlParser``) or **clang** (``clang -ast-dump=json``, parsed
 by ``dumper_clang._ClangAstParser``) for hosts where castxml is absent. Select
-with ``header_backend=`` (``auto``/``castxml``/``clang``) or the
-``ABICHECK_HEADER_BACKEND`` env var. When the backend is auto-selected, a castxml
+with ``header_backend=`` (``auto``/``castxml``/``clang``; CLI ``--ast-frontend``)
+or the ``ABICHECK_AST_FRONTEND`` env var (legacy ``ABICHECK_HEADER_BACKEND`` is a
+deprecated alias). When the backend is auto-selected, a castxml
 *toolchain-version* failure (bundled Clang too old for the host libstdc++/GCC)
 falls back to the clang backend automatically (G16); an explicit selection is
 honored verbatim. See ADR-003.
@@ -89,24 +90,30 @@ HEADER_BACKENDS = ("auto", "castxml", "clang")
 
 
 def _resolve_header_backend(backend: str | None) -> str:
-    """Resolve an L2 header-AST backend request to a concrete ``castxml``/``clang``.
+    """Resolve an L2 header-AST frontend request to a concrete ``castxml``/``clang``.
 
     Precedence: an explicit ``castxml``/``clang`` is honored verbatim (and the
     caller gets a clear error later if that tool is missing). ``auto``/``None``
-    consults the ``ABICHECK_HEADER_BACKEND`` env var first — so a clang-only CI
-    image can flip the global default without touching every call site — then
-    prefers castxml (the schema reference), falling back to clang when only clang
-    is on PATH. When neither tool is present it returns ``castxml`` so the
-    existing "install castxml" error message is surfaced unchanged.
+    consults the ``ABICHECK_AST_FRONTEND`` env var first (with the legacy
+    ``ABICHECK_HEADER_BACKEND`` honored as a deprecated alias, ADR-037 D8) — so a
+    clang-only CI image can flip the global default without touching every call
+    site — then prefers castxml (the schema reference), falling back to clang
+    when only clang is on PATH. When neither tool is present it returns
+    ``castxml`` so the existing "install castxml" error message is surfaced
+    unchanged.
     """
     choice = (backend or "auto").lower()
     if choice in ("castxml", "clang"):
         return choice
     if choice != "auto":
         raise ValidationError(
-            f"Unknown header backend {backend!r}; expected one of {HEADER_BACKENDS}."
+            f"Unknown AST frontend {backend!r}; expected one of {HEADER_BACKENDS}."
         )
-    env = os.environ.get("ABICHECK_HEADER_BACKEND", "").strip().lower()
+    # ADR-037 D8: ``ABICHECK_AST_FRONTEND`` is the canonical env knob; the older
+    # ``ABICHECK_HEADER_BACKEND`` stays a back-compat alias for one release.
+    env = os.environ.get("ABICHECK_AST_FRONTEND", "").strip().lower()
+    if env not in ("castxml", "clang"):
+        env = os.environ.get("ABICHECK_HEADER_BACKEND", "").strip().lower()
     if env in ("castxml", "clang"):
         return env
     if _castxml_available():
@@ -220,7 +227,7 @@ def _clang_header_dump(
         raise SnapshotError(
             f"{clang_bin} not found in PATH. The clang header backend needs clang/clang++ "
             "installed (apt install clang, brew install llvm, or conda install -c conda-forge "
-            "clang). Or use the castxml backend (--header-backend castxml)."
+            "clang). Or use the castxml frontend (--ast-frontend castxml)."
         )
 
     key = _cache_key(
@@ -336,14 +343,16 @@ def _header_ast_parser(
     if resolved == "clang":
         return _run_clang()
 
-    # G16: when the backend was selected automatically (no explicit --header-backend
-    # and no ABICHECK_HEADER_BACKEND pin), a castxml *toolchain-version* failure
-    # (bundled Clang too old for the host libstdc++/GCC) is recoverable — the clang
-    # backend parses against the host toolchain directly. Fall back to it rather
-    # than aborting. An explicit castxml request is honored verbatim (the error
-    # surfaces unchanged).
+    # G16: when the frontend was selected automatically (no explicit --ast-frontend
+    # and no ABICHECK_AST_FRONTEND/ABICHECK_HEADER_BACKEND pin), a castxml
+    # *toolchain-version* failure (bundled Clang too old for the host libstdc++/GCC)
+    # is recoverable — the clang backend parses against the host toolchain directly.
+    # Fall back to it rather than aborting. An explicit castxml request is honored
+    # verbatim (the error surfaces unchanged).
     choice = (backend or "auto").lower()
-    env_pin = os.environ.get("ABICHECK_HEADER_BACKEND", "").strip().lower()
+    env_pin = os.environ.get("ABICHECK_AST_FRONTEND", "").strip().lower()
+    if env_pin not in ("castxml", "clang"):
+        env_pin = os.environ.get("ABICHECK_HEADER_BACKEND", "").strip().lower()
     auto_selected = choice == "auto" and env_pin not in ("castxml", "clang")
     try:
         xml_root = _castxml_dump(
@@ -360,7 +369,7 @@ def _header_ast_parser(
         ):
             log.warning(
                 "castxml failed with a toolchain-version error; falling back to "
-                "the clang header backend (set --header-backend castxml to force "
+                "the clang header backend (set --ast-frontend castxml to force "
                 "castxml and see the original error)."
             )
             return _run_clang()

@@ -70,6 +70,8 @@ class TestCompareRequestDefaults:
     def test_other_defaults(self):
         req = CompareRequest(old=InputSpec.of("a"), new=InputSpec.of("b"))
         assert req.lang == "c++"
+        assert req.frontend == "auto"
+        assert req.has_sources is False
         assert req.policy == "strict_abi"
         assert req.policy_file_path is None
         assert req.suppress is None
@@ -119,6 +121,46 @@ class TestCompareRequestValidate:
             old=InputSpec.of("a"), new=InputSpec.of("b"), lang="go", policy=""
         )
         assert len(req.validation_errors()) == 2
+
+    # ── D8/D9: --ast-frontend value + feasibility validation ─────────────────
+
+    @pytest.mark.parametrize("frontend", ["auto", "castxml", "clang", "AUTO", "Clang"])
+    def test_supported_frontends_accepted(self, frontend):
+        req = CompareRequest(
+            old=InputSpec.of("a"), new=InputSpec.of("b"), frontend=frontend
+        )
+        assert req.validation_errors() == []
+
+    def test_unsupported_frontend_rejected(self):
+        req = CompareRequest(
+            old=InputSpec.of("a"), new=InputSpec.of("b"), frontend="gccxml"
+        )
+        errors = req.validation_errors()
+        assert len(errors) == 1
+        assert "gccxml" in errors[0]
+        # Allowed set is surfaced so the user can self-correct.
+        assert "castxml" in errors[0] and "clang" in errors[0]
+        with pytest.raises(ValidationError, match="gccxml"):
+            req.validate()
+
+    def test_android_frontend_without_sources_rejected(self):
+        # 'android' is source-ABI only (no header-AST path) — a header-only run
+        # can't use it (ADR-037 D8/D9).
+        req = CompareRequest(
+            old=InputSpec.of("a"), new=InputSpec.of("b"), frontend="android"
+        )
+        errors = req.validation_errors()
+        assert len(errors) == 1
+        assert "android" in errors[0] and "--sources" in errors[0]
+
+    def test_android_frontend_with_sources_accepted(self):
+        req = CompareRequest(
+            old=InputSpec.of("a"),
+            new=InputSpec.of("b"),
+            frontend="android",
+            has_sources=True,
+        )
+        assert req.validation_errors() == []
 
 
 class TestCompareRequestReplace:

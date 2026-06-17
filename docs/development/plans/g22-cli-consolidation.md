@@ -277,6 +277,32 @@ fields).
 
 ### Phase 6 — `--ast-frontend`, MCP name-map, validation, docs (D8, D9, D10.3)
 
+**Status: partially landed.** `--header-backend` → **`--ast-frontend`** (D8) on
+`compare`/`deep-compare`/`dump`, with `--old/new-ast-frontend` per-side and the
+`--header-backend` spellings kept as working aliases on the same Click params;
+the env knob is now `ABICHECK_AST_FRONTEND` (legacy `ABICHECK_HEADER_BACKEND`
+honored as a fallback in `dumper._resolve_header_backend`). Each command body
+prints a one-line stderr deprecation note when a legacy spelling is used
+(`cli_options.note_deprecated_ast_frontend`, advisory until 1.0); the renamed
+flags are catalogued in `DEPRECATED_FLAGS`. The single **`MCP_CLI_NAME_MAP`**
+(D10.3) reconciles every `abi_compare` MCP param with its `compare` flag and is
+enforced by a new `cli-contract` sub-check (`_check_mcp_cli_name_map`) plus the
+live `tests/test_cli_contract.py::test_mcp_cli_name_map_complete`. `CompareRequest`
+gained a `frontend` field and `validate()` now rejects an out-of-enum
+`--ast-frontend` (with the allowed set) and an `android` frontend without source
+inputs (D9), threaded through `service.run_compare`. Covered by
+`tests/test_api_types.py` (frontend enum + android-needs-sources) and the new
+`tests/test_cli_contract.py` D8/D10.3 cases.
+
+**Deferred within Phase 6:** unifying the L4 source-ABI extractor selection
+under the same `--ast-frontend` dial (the ADR's "spans header AST + L4 replay"
+note) — the inline-collection chain (`prepare_embedded_build_source` →
+`diff_embedded_build_source` → `collect_inline_pack`) still hard-defaults its
+extractor, and `collect`'s explicit `--source-abi-extractor` is unchanged. The
+full mutual-exclusion / depth-feasibility matrix in `validate()` and the
+mechanical doc regen (`cli-flags.md`, the `.abicheck.yml` schema page) also
+remain. These are the open items before Phase 6 can be marked landed.
+
 **Work.** Rename `--header-backend` → `--ast-frontend` (+ `ABICHECK_AST_FRONTEND`
 env, + old aliases); wire it to the L4 extractor selection too. Introduce the
 single `MCP_CLI_NAME_MAP` and align `mcp_server.py` params to it (D10.3 check).

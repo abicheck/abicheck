@@ -348,15 +348,137 @@ def test_gate_tables_mirror_cli_options() -> None:
     assert gate._DEFERRED_MULTI_DEFAULT_FLAGS == co.DEFERRED_MULTI_DEFAULT
 
 
+# ── D10.3: MCP ⇄ CLI name-map completeness (ADR-037 / G22 Phase 6) ───────────
+
+
+def _has_mcp() -> bool:
+    import importlib.util
+
+    return importlib.util.find_spec("mcp") is not None
+
+
+@pytest.mark.skipif(not _has_mcp(), reason="MCP dependencies not installed")
+def test_mcp_cli_name_map_complete() -> None:
+    """Every ``abi_compare`` MCP param has a row in ``MCP_CLI_NAME_MAP``.
+
+    Live introspection of the actual tool signature (stronger than the gate's
+    AST scan): a new MCP param that forgets its name-map row is caught here, so
+    the MCP and CLI front-ends cannot silently diverge (ADR-037 D10.3).
+    """
+    import inspect
+
+    from abicheck import cli_options as co, mcp_server
+
+    sig = inspect.signature(mcp_server.abi_compare)
+    params = set(sig.parameters)
+    missing = params - set(co.MCP_CLI_NAME_MAP)
+    assert not missing, (
+        f"abi_compare params absent from MCP_CLI_NAME_MAP: {sorted(missing)} — "
+        "add a row mapping each to its compare flag (or None)."
+    )
+
+
+def test_mcp_cli_name_map_values_are_real_compare_flags() -> None:
+    """Each non-``None`` map value names a real ``compare`` flag (or positional).
+
+    Keeps the CLI side of the map honest: a typo'd or removed flag is caught
+    (ADR-037 D10.3). Positional-operand rows are spelled with parentheses and
+    are exempt from the flag-set check.
+    """
+    from abicheck import cli_options as co
+
+    compare_flags = _command_flags(_registered_commands()["compare"])
+    for mcp_param, cli_name in co.MCP_CLI_NAME_MAP.items():
+        if cli_name is None or "(" in cli_name:
+            continue  # no-flag row or a positional operand
+        assert cli_name in compare_flags, (
+            f"MCP_CLI_NAME_MAP[{mcp_param!r}] = {cli_name!r} is not a real "
+            "`compare` flag"
+        )
+
+
+def test_gate_flags_unmapped_mcp_param(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """D10.3 is not a no-op: an ``abi_compare`` param missing from the map fails."""
+    import scripts.check_ai_readiness as gate
+
+    pkg = tmp_path / "abicheck"
+    pkg.mkdir()
+    (pkg / "cli_options.py").write_text(
+        "MCP_CLI_NAME_MAP = {'old_input': '--old'}\n"
+    )
+    (pkg / "mcp_server.py").write_text(
+        "def abi_compare(old_input, new_input, mystery_param='x'):\n    return ''\n"
+    )
+    monkeypatch.setattr(gate, "PKG", pkg)
+    monkeypatch.setattr(gate, "ROOT", tmp_path)
+
+    findings = gate.Findings()
+    gate._check_mcp_cli_name_map(findings)
+    msgs = [m for c, m in findings.errors if c == "cli-contract"]
+    # new_input and mystery_param are both absent from the planted map.
+    assert any("new_input" in m for m in msgs)
+    assert any("mystery_param" in m for m in msgs)
+
+
+# ── D8: --header-backend → --ast-frontend rename + alias (ADR-037 Phase 6) ────
+
+
+@pytest.mark.parametrize("cmd_name", ["compare", "dump", "deep-compare"])
+@pytest.mark.parametrize("flag", ["--ast-frontend", "--header-backend"])
+def test_ast_frontend_and_legacy_alias_both_resolve(cmd_name: str, flag: str) -> None:
+    """``--ast-frontend`` and its legacy ``--header-backend`` alias both bind the
+    same Click param on every command that carries it (ADR-037 D8)."""
+    commands = _registered_commands()
+    cmd = commands[cmd_name]
+    by_dest = {p.name: p for p in cmd.params}  # type: ignore[attr-defined]
+    param = by_dest["header_backend"]
+    assert "--ast-frontend" in param.opts
+    assert "--header-backend" in param.opts
+    assert flag in param.opts
+
+
+@pytest.mark.parametrize("cmd_name", ["compare", "deep-compare"])
+def test_per_side_ast_frontend_aliases_resolve(cmd_name: str) -> None:
+    """Per-side ``--old/new-ast-frontend`` carry their legacy aliases too."""
+    cmd = _registered_commands()[cmd_name]
+    by_dest = {p.name: p for p in cmd.params}  # type: ignore[attr-defined]
+    for dest, new, old in (
+        ("old_header_backend", "--old-ast-frontend", "--old-header-backend"),
+        ("new_header_backend", "--new-ast-frontend", "--new-header-backend"),
+    ):
+        assert new in by_dest[dest].opts
+        assert old in by_dest[dest].opts
+
+
+def test_note_deprecated_ast_frontend_detects_legacy_spellings() -> None:
+    """The deprecation-note helper fires only on a legacy spelling (ADR-037 D8)."""
+    from abicheck.cli_options import note_deprecated_ast_frontend
+
+    assert note_deprecated_ast_frontend(["abicheck", "compare", "a", "b"]) is None
+    assert (
+        note_deprecated_ast_frontend(["abicheck", "compare", "--ast-frontend", "clang"])
+        is None
+    )
+    note = note_deprecated_ast_frontend(
+        ["abicheck", "compare", "--header-backend", "castxml"]
+    )
+    assert note is not None and "--header-backend" in note and "--ast-frontend" in note
+    # Also matches the ``--flag=value`` spelling and the per-side variants.
+    assert note_deprecated_ast_frontend(["x", "--old-header-backend=clang"]) is not None
+
+
 # ── Resolved option-set snapshot (catches an accidental flag drop in review) ──
 
 # Frozen sets of every option spelling each verdict-emitting command exposes.
 # A diff here in review means a flag was added or dropped — update deliberately.
 _OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
     "compare": (
-        "--annotate", "--annotate-additions", "--btf", "--collapse-versioned-symbols",
+        "--annotate", "--annotate-additions", "--ast-frontend", "--btf",
+        "--collapse-versioned-symbols",
         "--collect-mode", "--ctf", "--debug-format", "--debug-root", "--debug-root1",
-        "--config",
+        "--config", "--new-ast-frontend", "--old-ast-frontend",
         "--debug-root2", "--debuginfod", "--debuginfod-url", "--demangle", "--depth",
         "--dso-only", "--dwarf",
         "--dwarf-only", "--exit-code-scheme", "--explain-patterns", "--follow-deps",
@@ -400,6 +522,7 @@ _OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         "--verbose", "-H", "-I", "-o", "-v",
     ),
     "deep-compare": (
+        "--ast-frontend", "--new-ast-frontend", "--old-ast-frontend",
         "--depth", "--format", "--header", "--header-backend", "--include",
         "--keep-snapshots", "--lang", "--max", "--new-build-info", "--new-header",
         "--new-header-backend", "--new-include", "--new-sources", "--new-version",

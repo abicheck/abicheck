@@ -42,6 +42,7 @@ import click
 from .cli import _normalize_binary_input, compare_cmd, dump_cmd, main
 from .cli_dump_helpers import resolve_dump_depth
 from .cli_options import (
+    note_deprecated_ast_frontend,
     output_options,
     policy_options,
     scope_options,
@@ -135,7 +136,7 @@ def _prepare_side(
               default=None, help="Optional L3 build input for the NEW side.")
 # ── Headers / includes / version labels (shared family, ADR-037 D3) ───────────
 # Two-sided header/include/version family (the per-side version labels also come
-# from this decorator; --lang and the --header-backend trio stay inline below).
+# from this decorator; --lang and the --ast-frontend trio stay inline below).
 @two_sided_input_options
 # ── Depth dial (unified vocabulary with `compare`/`dump`/`scan`, ADR-037 D5) ──
 @click.option("--depth", "depth", type=DEPTH_PARAM, default=None,
@@ -148,15 +149,21 @@ def _prepare_side(
 @click.option("--lang", default="c++", show_default=True,
               type=click.Choice(["c++", "c"], case_sensitive=False),
               help="Language mode for the header backend (both sides).")
-@click.option("--header-backend", "header_backend", default="auto", show_default=True,
+@click.option("--ast-frontend", "--header-backend", "header_backend",
+              default="auto", show_default=True,
               type=click.Choice(["auto", "castxml", "clang"], case_sensitive=False),
-              help="L2 header-AST frontend (both sides). Env: ABICHECK_HEADER_BACKEND.")
-@click.option("--old-header-backend", "old_header_backend", default=None,
+              help="C/C++ AST frontend, both sides (ADR-037 D8). Env: "
+                   "ABICHECK_AST_FRONTEND. (--header-backend is a deprecated alias.)")
+@click.option("--old-ast-frontend", "--old-header-backend", "old_header_backend",
+              default=None,
               type=click.Choice(["auto", "castxml", "clang"], case_sensitive=False),
-              help="L2 header-AST frontend for the old side only (overrides --header-backend).")
-@click.option("--new-header-backend", "new_header_backend", default=None,
+              help="C/C++ AST frontend for the old side only (overrides --ast-frontend). "
+                   "(--old-header-backend is a deprecated alias.)")
+@click.option("--new-ast-frontend", "--new-header-backend", "new_header_backend",
+              default=None,
               type=click.Choice(["auto", "castxml", "clang"], case_sensitive=False),
-              help="L2 header-AST frontend for the new side only (overrides --header-backend).")
+              help="C/C++ AST frontend for the new side only (overrides --ast-frontend). "
+                   "(--new-header-backend is a deprecated alias.)")
 # ── Compare pass-through (shared families, ADR-037 D3) ────────────────────────
 @output_options(
     ["json", "markdown", "sarif", "html", "junit", "review"],
@@ -227,6 +234,11 @@ def deep_compare_cmd(
             "for one-shot deep-evidence comparison.",
             err=True,
         )
+
+    # ADR-037 D8: legacy --header-backend → --ast-frontend deprecation note.
+    _ast_note = note_deprecated_ast_frontend()
+    if _ast_note:
+        click.echo(_ast_note, err=True)
 
     old_src = old_sources if old_sources is not None else both_sources
     new_src = new_sources if new_sources is not None else both_sources

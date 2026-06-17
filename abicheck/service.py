@@ -879,6 +879,14 @@ def run_compare_request(
     # path does case-sensitive ``lang == "c"`` checks — normalise so an accepted
     # ``"C"`` is not silently treated as C++.
     lang = request.lang.lower()
+    # The artifact resolve path uses the header-AST frontend; an ``android``
+    # selection (source-ABI only, gated to has_sources by validate) has no
+    # header-AST path, so fall back to ``auto`` for the binary dump.
+    from .api_types import HEADER_AST_FRONTENDS
+
+    header_backend = (
+        request.frontend if request.frontend.lower() in HEADER_AST_FRONTENDS else "auto"
+    )
 
     old_fmt = detect_binary_format(request.old.path)
     new_fmt = detect_binary_format(request.new.path)
@@ -893,6 +901,7 @@ def run_compare_request(
         pdb_path=request.old.pdb,
         debug_roots=list(request.old.debug_roots) or None,
         enable_debuginfod=request.enable_debuginfod,
+        header_backend=header_backend,
     )
     new = resolve_input(
         request.new.path,
@@ -904,6 +913,7 @@ def run_compare_request(
         pdb_path=request.new.pdb,
         debug_roots=list(request.new.debug_roots) or None,
         enable_debuginfod=request.enable_debuginfod,
+        header_backend=header_backend,
     )
 
     suppression, pf = load_suppression_and_policy(
@@ -936,6 +946,7 @@ def run_compare(
     old_version: str = "",
     new_version: str = "",
     lang: str = "c++",
+    frontend: str = "auto",
     suppress: Path | None = None,
     policy: str = "strict_abi",
     policy_file_path: Path | None = None,
@@ -980,6 +991,7 @@ def run_compare(
             debug_roots=tuple(new_debug_roots or ()),
         ),
         lang=lang,
+        frontend=frontend,
         policy=policy,
         policy_file_path=policy_file_path,
         suppress=suppress,
