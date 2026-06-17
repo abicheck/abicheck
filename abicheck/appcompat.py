@@ -29,7 +29,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from .checker import Change, DiffResult, compare
+from .checker import Change, DiffResult
 from .checker_policy import ChangeKind, Verdict, compute_verdict
 from .model import AbiSnapshot, Visibility
 
@@ -744,7 +744,10 @@ def check_appcompat(
         lang="c" if lang == "c" else None,
     )
 
-    diff = compare(old_snap, new_snap, suppression=suppression, policy=policy, policy_file=policy_file, scope_to_public_surface=scope_to_public_surface)
+    # Route through the Tier-2 service (lazy import avoids a
+    # service→cli→appcompat import cycle); ADR-037 D1.
+    from .service import compare_snapshots
+    diff = compare_snapshots(old_snap, new_snap, suppression=suppression, policy=policy, policy_file=policy_file, scope_to_public_surface=scope_to_public_surface)
 
     # 3. Check symbol availability in new library
     new_exports = _get_new_lib_exports(new_lib_path)
@@ -905,7 +908,10 @@ def check_plugin_host_contract(
     """
     required = set(required_entrypoints)
 
-    diff = compare(
+    # Route through the Tier-2 service (lazy import avoids a
+    # service→cli→appcompat import cycle); ADR-037 D1.
+    from .service import compare_snapshots
+    diff = compare_snapshots(
         old_plugin, new_plugin,
         suppression=suppression, policy=policy, policy_file=policy_file,
     )

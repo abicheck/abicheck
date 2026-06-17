@@ -152,6 +152,7 @@ CI runs `mypy abicheck/` as a required gate. The baseline is currently **0 error
 | `changekind-detector` | WARN | Every `ChangeKind` is produced somewhere (not orphaned) |
 | `changekind-docs` | WARN | Every `ChangeKind` is mentioned in `docs/` |
 | `doc-count-sync` | ERROR on drift, WARN if anchor moved | Headline counts in docs (ChangeKind count, example-catalog size) match their source of truth (`len(ChangeKind)`, `ground_truth.json`) |
+| `cli-contract` | ERROR | No front-end `cli*.py` module calls Tier-1 `checker.compare` directly — it must route through the Tier-2 service (`service.run_compare`/`compare_snapshots`); ADR-037 D10.1 |
 | `import-cycles` | ERROR | No import cycles within `abicheck/` |
 | `mypy-baseline` | ERROR if drifted up | mypy error count ≤ documented baseline |
 | `examples-ground-truth` | ERROR | Every `examples/case*/` has a `README.md` and an entry in `ground_truth.json` |

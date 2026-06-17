@@ -30,6 +30,7 @@ import warnings
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from .api_types import CompareRequest, InputSpec
 from .checker import compare
 from .checker_types import DiffResult, LibraryMetadata
 from .errors import AbicheckError, SnapshotError, ValidationError
@@ -40,6 +41,7 @@ from .serialization import load_snapshot
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from .checker_types import Change
     from .dwarf_advanced import AdvancedDwarfMetadata
     from .dwarf_metadata import DwarfMetadata
     from .policy_file import PolicyFile
@@ -817,6 +819,113 @@ def load_suppression_and_policy(
     return suppression, pf
 
 
+def compare_snapshots(
+    old: AbiSnapshot,
+    new: AbiSnapshot,
+    suppression: SuppressionList | None = None,
+    *,
+    policy: str = "strict_abi",
+    policy_file: PolicyFile | None = None,
+    scope_to_public_surface: bool = True,
+    force_public_symbols: set[str] | None = None,
+    extra_changes: list[Change] | None = None,
+    pattern_verdicts: bool = False,
+    surface_metrics: bool = False,
+    collapse_versioned_symbols: bool = False,
+) -> DiffResult:
+    """Classify two already-resolved snapshots — the Tier-2 snapshot verb.
+
+    Thin wrapper over the Tier-1 core (:func:`abicheck.checker.compare`) so that
+    *front-ends never call the core directly* (ADR-037 D1/D10.1). Front-ends
+    that have already resolved their own snapshots (the native ``compare``
+    command with embedded build-source evidence, ``scan``, ``appcompat``) route
+    through here instead of importing ``checker.compare``; the kwargs mirror the
+    core verb exactly so no capability is lost.
+    """
+    return compare(
+        old,
+        new,
+        suppression=suppression,
+        policy=policy,
+        policy_file=policy_file,
+        scope_to_public_surface=scope_to_public_surface,
+        force_public_symbols=force_public_symbols,
+        extra_changes=extra_changes,
+        pattern_verdicts=pattern_verdicts,
+        surface_metrics=surface_metrics,
+        collapse_versioned_symbols=collapse_versioned_symbols,
+    )
+
+
+def run_compare_request(
+    request: CompareRequest,
+) -> tuple[DiffResult, AbiSnapshot, AbiSnapshot]:
+    """Compare two ABI inputs described by a :class:`CompareRequest`.
+
+    The single classification chokepoint (ADR-037 D1/D2): every front-end builds
+    a ``CompareRequest`` and calls this, so defaults cannot diverge between
+    invocation paths. The legacy keyword-argument :func:`run_compare` is a thin
+    shim that builds the request and delegates here.
+
+    Returns:
+        A tuple of (DiffResult, old_snapshot, new_snapshot).
+
+    Raises:
+        ValidationError: If the request fails :meth:`CompareRequest.validate`.
+        SnapshotError: If either input cannot be loaded.
+    """
+    request.validate()
+    # ``validate()`` accepts the language case-insensitively, but the ELF dump
+    # path does case-sensitive ``lang == "c"`` checks — normalise so an accepted
+    # ``"C"`` is not silently treated as C++.
+    lang = request.lang.lower()
+
+    old_fmt = detect_binary_format(request.old.path)
+    new_fmt = detect_binary_format(request.new.path)
+
+    old = resolve_input(
+        request.old.path,
+        list(request.old.headers),
+        list(request.old.includes),
+        request.old.version,
+        lang,
+        is_elf=True if old_fmt == "elf" else None,
+        pdb_path=request.old.pdb,
+        debug_roots=list(request.old.debug_roots) or None,
+        enable_debuginfod=request.enable_debuginfod,
+    )
+    new = resolve_input(
+        request.new.path,
+        list(request.new.headers),
+        list(request.new.includes),
+        request.new.version,
+        lang,
+        is_elf=True if new_fmt == "elf" else None,
+        pdb_path=request.new.pdb,
+        debug_roots=list(request.new.debug_roots) or None,
+        enable_debuginfod=request.enable_debuginfod,
+    )
+
+    suppression, pf = load_suppression_and_policy(
+        request.suppress, request.policy, request.policy_file_path
+    )
+    result = compare_snapshots(
+        old,
+        new,
+        suppression=suppression,
+        policy=request.policy,
+        policy_file=pf,
+        scope_to_public_surface=request.scope_public,
+        force_public_symbols=(
+            set(request.force_public_symbols) if request.force_public_symbols else None
+        ),
+        pattern_verdicts=request.pattern_verdicts,
+    )
+    result.old_metadata = collect_metadata(request.old.path)
+    result.new_metadata = collect_metadata(request.new.path)
+    return result, old, new
+
+
 def run_compare(
     old_input: Path,
     new_input: Path,
@@ -837,14 +946,14 @@ def run_compare(
     enable_debuginfod: bool = False,
     scope_to_public_surface: bool = True,
     force_public_symbols: set[str] | None = None,
+    pattern_verdicts: bool = False,
 ) -> tuple[DiffResult, AbiSnapshot, AbiSnapshot]:
     """Compare two ABI inputs and return the classified diff result.
 
-    This is the main entry point for programmatic comparison. It handles:
-    - Input format detection and snapshot loading
-    - Suppression and policy file loading
-    - Running the comparison
-    - Collecting library metadata
+    Keyword-argument shim over :func:`run_compare_request`: it assembles a
+    :class:`CompareRequest` from loose arguments and delegates, so existing
+    callers keep working while the typed request is the real chokepoint
+    (ADR-037 D2). New callers should build a ``CompareRequest`` directly.
 
     Returns:
         A tuple of (DiffResult, old_snapshot, new_snapshot).
@@ -853,50 +962,35 @@ def run_compare(
         SnapshotError: If either input cannot be loaded.
         ValidationError: If inputs have unrecognised formats.
     """
-    _old_headers = old_headers or []
-    _new_headers = new_headers or []
-    _old_includes = old_includes or []
-    _new_includes = new_includes or []
-
-    old_fmt = detect_binary_format(old_input)
-    new_fmt = detect_binary_format(new_input)
-
-    old = resolve_input(
-        old_input,
-        _old_headers,
-        _old_includes,
-        old_version,
-        lang,
-        is_elf=True if old_fmt == "elf" else None,
-        pdb_path=old_pdb_path,
-        debug_roots=old_debug_roots,
-        enable_debuginfod=enable_debuginfod,
-    )
-    new = resolve_input(
-        new_input,
-        _new_headers,
-        _new_includes,
-        new_version,
-        lang,
-        is_elf=True if new_fmt == "elf" else None,
-        pdb_path=new_pdb_path,
-        debug_roots=new_debug_roots,
-        enable_debuginfod=enable_debuginfod,
-    )
-
-    suppression, pf = load_suppression_and_policy(suppress, policy, policy_file_path)
-    result = compare(
-        old,
-        new,
-        suppression=suppression,
+    request = CompareRequest(
+        old=InputSpec(
+            path=old_input,
+            headers=tuple(old_headers or ()),
+            includes=tuple(old_includes or ()),
+            version=old_version,
+            pdb=old_pdb_path,
+            debug_roots=tuple(old_debug_roots or ()),
+        ),
+        new=InputSpec(
+            path=new_input,
+            headers=tuple(new_headers or ()),
+            includes=tuple(new_includes or ()),
+            version=new_version,
+            pdb=new_pdb_path,
+            debug_roots=tuple(new_debug_roots or ()),
+        ),
+        lang=lang,
         policy=policy,
-        policy_file=pf,
-        scope_to_public_surface=scope_to_public_surface,
-        force_public_symbols=force_public_symbols,
+        policy_file_path=policy_file_path,
+        suppress=suppress,
+        scope_public=scope_to_public_surface,
+        force_public_symbols=(
+            frozenset(force_public_symbols) if force_public_symbols else None
+        ),
+        pattern_verdicts=pattern_verdicts,
+        enable_debuginfod=enable_debuginfod,
     )
-    result.old_metadata = collect_metadata(old_input)
-    result.new_metadata = collect_metadata(new_input)
-    return result, old, new
+    return run_compare_request(request)
 
 
 # ── Output rendering ────────────────────────────────────────────────────────
@@ -1076,11 +1170,14 @@ from .service_scan import (  # noqa: E402,F401
 # ``from abicheck.service import ...``.
 __all__ = [
     "Budget",
+    "CompareRequest",
     "CostEstimate",
+    "InputSpec",
     "LayerResult",
     "ScanRequest",
     "ScanResult",
     "collect_metadata",
+    "compare_snapshots",
     "detect_binary_format",
     "estimate_scan",
     "expand_header_inputs",
@@ -1089,6 +1186,7 @@ __all__ = [
     "resolve_input",
     "run_audit",
     "run_compare",
+    "run_compare_request",
     "run_dump",
     "run_scan",
     "run_scan_subprocess",
