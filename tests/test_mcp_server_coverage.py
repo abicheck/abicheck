@@ -573,7 +573,7 @@ class TestAbiCompareTool:
         )
         fake_result = _minimal_diff()
         monkeypatch.setattr(
-            "abicheck.mcp_server.compare",
+            "abicheck.mcp_server.compare_snapshots",
             lambda old, new, **kw: fake_result,
         )
         monkeypatch.setattr(
@@ -605,7 +605,7 @@ class TestAbiCompareTool:
         )
         fake_result = _minimal_diff()
         monkeypatch.setattr(
-            "abicheck.mcp_server.compare",
+            "abicheck.mcp_server.compare_snapshots",
             lambda old, new, **kw: fake_result,
         )
         monkeypatch.setattr(
@@ -629,7 +629,7 @@ class TestAbiCompareTool:
         )
         fake_result = _minimal_diff()
         monkeypatch.setattr(
-            "abicheck.mcp_server.compare",
+            "abicheck.mcp_server.compare_snapshots",
             lambda old, new, **kw: fake_result,
         )
         monkeypatch.setattr(
@@ -652,7 +652,7 @@ class TestAbiCompareTool:
         )
         fake_result = _minimal_diff()
         monkeypatch.setattr(
-            "abicheck.mcp_server.compare",
+            "abicheck.mcp_server.compare_snapshots",
             lambda old, new, **kw: fake_result,
         )
         monkeypatch.setattr(
@@ -676,7 +676,7 @@ class TestAbiCompareTool:
         )
         fake_result = _minimal_diff()
         monkeypatch.setattr(
-            "abicheck.mcp_server.compare",
+            "abicheck.mcp_server.compare_snapshots",
             lambda old, new, **kw: fake_result,
         )
         monkeypatch.setattr(
@@ -700,7 +700,7 @@ class TestAbiCompareTool:
         )
         fake_result = _minimal_diff()
         monkeypatch.setattr(
-            "abicheck.mcp_server.compare",
+            "abicheck.mcp_server.compare_snapshots",
             lambda old, new, **kw: fake_result,
         )
         monkeypatch.setattr(
