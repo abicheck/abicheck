@@ -79,6 +79,26 @@ _DEPFILE_UNSAFE_PREFIXES = (
     "--config=",
 )
 
+# Clang options that can create or overwrite files even during preprocessing.
+# Build evidence can be supplied by untrusted PR artifacts, so replay must not
+# forward output-producing instrumentation/cache/diagnostic controls.
+_DEPFILE_OUTPUT_WITH_VALUE = frozenset({
+    "-ftime-trace",
+    "-serialize-diagnostic-file",
+    "-fmodules-cache-path",
+})
+_DEPFILE_OUTPUT_FLAG = frozenset({
+    "-save-temps",
+    "--save-temps",
+})
+_DEPFILE_OUTPUT_PREFIXES = (
+    "-ftime-trace=",
+    "-serialize-diagnostic-file=",
+    "-fmodules-cache-path=",
+    "-save-temps=",
+    "--save-temps=",
+)
+
 
 def depfile_args_from_argv(argv: list[str]) -> list[str]:
     """Strip a recorded compile argv down to the args usable after ``clang -MM``.
@@ -113,7 +133,11 @@ def depfile_args_from_argv(argv: list[str]) -> list[str]:
         if skip_next:
             skip_next = False
             continue
-        if tok in _DEPFILE_DROP_WITH_VALUE or tok in _DEPFILE_UNSAFE_WITH_VALUE:
+        if (
+            tok in _DEPFILE_DROP_WITH_VALUE
+            or tok in _DEPFILE_UNSAFE_WITH_VALUE
+            or tok in _DEPFILE_OUTPUT_WITH_VALUE
+        ):
             skip_next = True
             continue
         if tok == "--config":
@@ -121,14 +145,22 @@ def depfile_args_from_argv(argv: list[str]) -> list[str]:
             continue
         if tok.startswith("@"):
             continue
-        if tok in _DEPFILE_UNSAFE_FLAG or tok.startswith(_DEPFILE_UNSAFE_PREFIXES):
+        if (
+            tok in _DEPFILE_UNSAFE_FLAG
+            or tok in _DEPFILE_OUTPUT_FLAG
+            or tok.startswith(_DEPFILE_UNSAFE_PREFIXES)
+            or tok.startswith(_DEPFILE_OUTPUT_PREFIXES)
+        ):
             continue
         # `-oFOO` / `-MFfoo.d` glued forms and the GCC long `--output=foo.o`
         # spelling (clang -M with --output=… writes the depfile to that file and
         # leaves stdout empty, losing the include entry — Codex review).
         if tok.startswith("--output="):
             continue
-        if any(tok.startswith(f) and tok != f for f in ("-o", "-MF", "-MT", "-MQ")):
+        if any(
+            tok.startswith(f) and tok != f
+            for f in ("-o", "-MF", "-MT", "-MQ", "-MJ")
+        ):
             continue
         if tok in _DEPFILE_DROP_FLAG:
             continue
