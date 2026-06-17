@@ -590,6 +590,35 @@ class TestPointerMediatedLayoutLeakSuppressed:
             f"opaque-handle pointer param must not leak a layout change (got: {leaks})"
         )
 
+    def test_smart_pointer_like_by_value_template_arg_still_fires(self) -> None:
+        # Aardvark: do not classify arbitrary user-defined templates as pointer
+        # wrappers just because their names contain smart-pointer substrings.
+        # This wrapper embeds Impl by value, so Impl's layout is public ABI.
+        def _snap(size: int) -> AbiSnapshot:
+            return AbiSnapshot(
+                library="lib.so", version="1.0",
+                functions=[Function(
+                    name="make", mangled="make", return_type="Public*",
+                    params=[], visibility=Visibility.PUBLIC,
+                )],
+                types=[
+                    RecordType(name="Public", kind="class", fields=[
+                        TypeField(name="member", type="acme::unique_ptr_value<ns::detail::Impl>"),
+                    ]),
+                    RecordType(name="ns::detail::Impl", kind="struct", size_bits=size),
+                ],
+            )
+        leaks = detect_internal_leaks(
+            [Change(kind=ChangeKind.TYPE_SIZE_CHANGED,
+                    symbol="ns::detail::Impl", description="size")],
+            _snap(32), _snap(64),
+        )
+        assert len(leaks) == 1, (
+            "a by-value template with a smart-pointer-like name must still leak "
+            f"(got: {leaks})"
+        )
+        assert "embedded-by-value" in leaks[0].description
+
     def test_pimpl_alias_template_field_is_suppressed(self) -> None:
         # oneDAL pimpl<T> alias = a smart-pointer; a layout change to the pointee
         # must be demoted even though `pimpl` is not std::*_ptr.
