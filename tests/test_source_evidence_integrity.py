@@ -28,6 +28,7 @@ from abicheck.buildsource.source_abi import (
 from abicheck.buildsource.source_link import link_source_abi
 from abicheck.checker_policy import ChangeKind
 from abicheck.model import AbiSnapshot
+from abicheck.service_scan import _layers_from_coverage
 
 
 def _public_fn(name: str, mangled: str) -> SourceEntity:
@@ -99,3 +100,71 @@ def test_empty_l4_surface_is_skipped_not_credited_as_clean():
     assert row["status"] == "skipped"
     assert "empty" in row["detail"]
     assert [c for c in res.findings if c.kind == ChangeKind.ODR_TYPE_VARIANT] == []
+
+
+def _degraded_surface_snapshot() -> AbiSnapshot:
+    """oneDAL shape as a snapshot: a TU parses one public decl, but none of the
+    three binary exports resolve to a source declaration (matched_symbols == 0)."""
+    tu = SourceAbiTu(
+        tu_id="cu://src/foo.cpp",
+        source="src/foo.cpp",
+        public_header_roots=["include/api.h"],
+        functions=[_public_fn("foo", "_Z3foov")],
+    )
+    surface = link_source_abi(
+        [tu], exported_symbols=["_Z3barv", "_Z3bazv", "_Z3quxv"], library="libfoo.so"
+    )
+    return AbiSnapshot(
+        library="libfoo.so",
+        version="1.0",
+        from_headers=True,
+        build_source=BuildSourcePack(root="", source_abi=surface),
+    )
+
+
+def test_integrity_counters_surface_on_rendered_scan_layers():
+    # The §3.3 plumbing: the L4 boundary integrity counters must reach the
+    # rendered ScanResult layer (via _layers_from_coverage), not just the internal
+    # source_link object — so a degraded link is named even when ODR runs clean.
+    snap = _degraded_surface_snapshot()
+    res = run_crosschecks(snap)
+    layers = _layers_from_coverage(res.coverage)
+    odr = next(
+        layer
+        for layer in layers
+        if layer.layer == f"crosscheck:{CHECK_ODR_TYPE_VARIANT}"
+    )
+    # ODR itself ran clean (no conflicts) ...
+    assert odr.status == "present"
+    assert [c for c in res.findings if c.kind == ChangeKind.ODR_TYPE_VARIANT] == []
+    # ... yet the rendered layer names the degraded boundary: zero exports matched
+    # a source decl, all three unmatched.
+    assert odr.counters["exported_symbols"] == 3
+    assert odr.counters["matched_symbols"] == 0
+    assert odr.counters["unmatched_symbols"] == 3
+    assert odr.facts == 1  # one parsed declaration anchored the row
+    # The counters round-trip through the serialized report payload.
+    assert odr.to_dict()["counters"]["matched_symbols"] == 0
+
+
+def test_healthy_link_records_matched_counters_not_zero():
+    # The clean counterpart (FP-rate sanity): a fully-linked surface reports a
+    # non-zero matched count on the same rendered layer — no false "degraded".
+    tu = SourceAbiTu(
+        tu_id="cu://src/foo.cpp",
+        source="src/foo.cpp",
+        public_header_roots=["include/api.h"],
+        functions=[_public_fn("foo", "_Z3foov")],
+    )
+    surface = link_source_abi([tu], exported_symbols=["_Z3foov"], library="libfoo.so")
+    snap = AbiSnapshot(
+        library="libfoo.so", version="1.0", from_headers=True,
+        build_source=BuildSourcePack(root="", source_abi=surface),
+    )
+    odr = next(
+        layer
+        for layer in _layers_from_coverage(run_crosschecks(snap).coverage)
+        if layer.layer == f"crosscheck:{CHECK_ODR_TYPE_VARIANT}"
+    )
+    assert odr.counters["matched_symbols"] == 1
+    assert odr.counters["unmatched_symbols"] == 0

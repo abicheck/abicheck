@@ -91,6 +91,31 @@ def test_provider_matrix_thin_has_fewer_providers() -> None:
     assert "source_index" in rich and "source_index" not in thin
 
 
+def test_depth_ladder_deepens_corroboration_same_input() -> None:
+    """case147: the depth-ladder legibility anchor, asserted compiler-free.
+
+    The same input answered at two depths: a shallow pass with only the L2
+    public-header provenance flags ``private_header_leak`` from ``public_header_ast``
+    alone; the deep pass (the committed snapshot's L5 source graph attached) flags
+    the *same* finding but gains the ``source_index`` corroboration — exactly the
+    honest-coverage promise the README's ladder describes (what each depth adds),
+    without a live castxml replay. The live S3->S5 timing run stays ``integration``.
+    """
+    import dataclasses
+
+    snap = load_case_snapshot("case147_scan_depth_ladder")
+    deep = crosscheck_surface(snap)
+    shallow = crosscheck_surface(dataclasses.replace(snap, build_source=None))
+
+    leak = "private_header_leak"
+    # Both depths reach the finding — the leak is not invented by the deep pass.
+    assert leak in deep.kinds and leak in shallow.kinds
+    # ... but only the deep pass carries the source-graph corroboration.
+    assert "source_index" in deep.providers[leak]
+    assert "source_index" not in shallow.providers[leak]
+    assert set(shallow.providers[leak]) < set(deep.providers[leak])
+
+
 def test_fixtures_match_generator() -> None:
     """The committed snapshot fixtures must equal what the writer produces."""
     import importlib.util

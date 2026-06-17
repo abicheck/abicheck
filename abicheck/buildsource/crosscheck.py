@@ -133,6 +133,13 @@ class _CheckOutput:
     status: str  # "present" | "skipped"
     detail: str
     providers: list[str]
+    #: Optional source-surface boundary integrity counters (ADR-035 D4): e.g.
+    #: ``exported_symbols`` / ``matched_symbols`` / ``unmatched_symbols`` for an
+    #: L4 check, so a degraded link (zero matched) is named on the rendered
+    #: coverage row, never folded in as clean. ``facts`` is the parsed-evidence
+    #: count anchoring the row.
+    facts: int = 0
+    counters: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass
@@ -206,7 +213,9 @@ def run_crosschecks(
         if len(capped) < len(out.findings):
             status = "partial"
             detail += f" (capped at {cfg.max_per_check} of {len(out.findings)})"
-        result.coverage.append(_coverage_row(name, status, detail))
+        result.coverage.append(
+            _coverage_row(name, status, detail, facts=out.facts, counters=out.counters)
+        )
         if out.status == "present":
             result.providers[name] = out.providers
     return result
@@ -611,7 +620,22 @@ def _check_odr_type_variant(
         f"L4 per-TU type layouts: {len(findings)} type(s) with divergent "
         "cross-TU definitions (ODR conflict)"
     )
-    return _CheckOutput(findings, "present", detail, providers)
+    # Surface the source-link boundary integrity counters (ADR-035 D4) onto the
+    # coverage row so the *rendered* ScanResult — not just an internal object —
+    # names a degraded link: an L4 surface can carry parsed decls yet match zero
+    # of the binary's exports (the oneDAL field-failure shape). A clean ODR pass
+    # over such a surface must still show matched_symbols == 0.
+    cov = surface.coverage or {}
+    unmatched = surface.unmatched or {}
+    counters = {
+        "exported_symbols": int(cov.get("exported_symbols", 0) or 0),
+        "matched_symbols": int(cov.get("matched_symbols", 0) or 0),
+        "unmatched_symbols": len(unmatched.get("symbols_without_decl", []) or []),
+    }
+    facts = int(cov.get("reachable_declarations", 0) or 0) or len(
+        surface.reachable_declarations
+    )
+    return _CheckOutput(findings, "present", detail, providers, facts, counters)
 
 
 # ---------------------------------------------------------------------------
@@ -1473,10 +1497,27 @@ def _change(
     )
 
 
-def _coverage_row(check: str, status: str, detail: str) -> dict[str, Any]:
-    """One serialized coverage row for a check (ADR-035 D4 coverage honesty)."""
-    return {
+def _coverage_row(
+    check: str,
+    status: str,
+    detail: str,
+    *,
+    facts: int = 0,
+    counters: dict[str, int] | None = None,
+) -> dict[str, Any]:
+    """One serialized coverage row for a check (ADR-035 D4 coverage honesty).
+
+    ``facts``/``counters`` are optional source-surface boundary integrity
+    numbers (D4): they are added only when non-empty so existing rows (and any
+    serialized snapshots of them) are byte-for-byte unchanged.
+    """
+    row: dict[str, Any] = {
         "layer": f"crosscheck:{check}",
         "status": status,
         "detail": detail,
     }
+    if facts:
+        row["facts"] = facts
+    if counters:
+        row["counters"] = dict(counters)
+    return row
