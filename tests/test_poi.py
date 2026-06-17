@@ -258,6 +258,52 @@ def test_resolve_symbol_tus_unknown_symbol_resolves_nothing() -> None:
     assert resolve_symbol_tus(_sym_poi("_Z3barv"), _graph_baseline(graph)) == ()
 
 
+def test_resolve_symbol_tus_symbol_node_without_decl_mapping() -> None:
+    # The export's binary_symbol node exists, but nothing maps a decl to it (no
+    # SOURCE_DECL_MAPS_TO_SYMBOL edge) → no TU to focus, clean empty tuple.
+    graph = SourceGraphSummary(
+        nodes=[
+            GraphNode(
+                id="binary_symbol://_Z3barv", kind="binary_symbol", label="_Z3barv"
+            ),
+        ],
+        edges=[],
+    )
+    assert resolve_symbol_tus(_sym_poi("_Z3barv"), _graph_baseline(graph)) == ()
+
+
+def test_resolve_symbol_tus_ignores_dangling_declares_edge() -> None:
+    # A SOURCE_DECLARES edge whose file node is absent (dangling src) is skipped,
+    # not crashed; the def_file fallback still resolves the TU.
+    graph = SourceGraphSummary(
+        nodes=[
+            GraphNode(
+                id="binary_symbol://_Z3barv", kind="binary_symbol", label="_Z3barv"
+            ),
+            GraphNode(
+                id="decl://bar",
+                kind="source_decl",
+                label="bar",
+                attrs={"def_file": "src/bar.cpp"},
+            ),
+        ],
+        edges=[
+            GraphEdge(
+                src="decl://bar",
+                dst="binary_symbol://_Z3barv",
+                kind="SOURCE_DECL_MAPS_TO_SYMBOL",
+            ),
+            # Points at a header node that does not exist → fn is None, skipped.
+            GraphEdge(
+                src="header://gone.cpp", dst="decl://bar", kind="SOURCE_DECLARES"
+            ),
+        ],
+    )
+    assert resolve_symbol_tus(_sym_poi("_Z3barv"), _graph_baseline(graph)) == (
+        "src/bar.cpp",
+    )
+
+
 def test_resolve_symbol_tus_degrades_without_graph_or_baseline() -> None:
     # No baseline, no graph, no symbols → always a clean empty tuple (never raises),
     # so a shallow baseline simply contributes no extra focus (ADR-035 D7).

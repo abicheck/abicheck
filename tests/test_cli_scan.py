@@ -925,6 +925,17 @@ def test_scan_lone_header_file_does_not_activate_provenance(
     assert captured["public_headers"] == []
 
 
+def test_load_exports_for_poi_degrades_to_none(tmp_path):
+    # Best-effort: a missing/garbage path (or None) must never raise — the POI
+    # export-delta walk simply has no candidate/baseline view and degrades to
+    # changed-paths/triggers/risk focusing.
+    import abicheck.cli_scan as cs
+
+    assert cs._load_exports_for_poi(None, "auto") is None
+    bogus = tmp_path / "nope.abi.json"
+    assert cs._load_exports_for_poi(bogus, "auto") is None
+
+
 def test_export_delta_resolves_tu_into_replay_seed(monkeypatch, runner, tmp_path):
     # ADR-035 D7 (the focusing half): a baseline that carries an L5 graph mapping
     # `_Z3barv` → src/bar.cpp, and a candidate that *removes* that export, must
