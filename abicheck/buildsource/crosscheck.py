@@ -133,6 +133,11 @@ class _CheckOutput:
     status: str  # "present" | "skipped"
     detail: str
     providers: list[str]
+    #: Optional ADR-035 D4 source-surface boundary integrity numbers (e.g.
+    #: exported/matched/unmatched symbols) carried onto the coverage row so a
+    #: degraded link is named, never folded in as clean. ``facts`` anchors the row.
+    facts: int = 0
+    counters: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass
@@ -206,7 +211,9 @@ def run_crosschecks(
         if len(capped) < len(out.findings):
             status = "partial"
             detail += f" (capped at {cfg.max_per_check} of {len(out.findings)})"
-        result.coverage.append(_coverage_row(name, status, detail))
+        result.coverage.append(
+            _coverage_row(name, status, detail, facts=out.facts, counters=out.counters)
+        )
         if out.status == "present":
             result.providers[name] = out.providers
     return result
@@ -545,6 +552,27 @@ def _surface_has_l4_facts(surface: Any) -> bool:
     )
 
 
+def _surface_boundary_counters(surface: Any) -> tuple[int, dict[str, int]]:
+    """The L4 source-link boundary integrity numbers (ADR-035 D4) for a surface.
+
+    Returns ``(facts, counters)`` where ``counters`` names exported vs matched vs
+    unmatched symbols, so a degraded link (parsed decls — or even zero TUs — yet
+    zero matched exports, the oneDAL shape) is named on the coverage row rather
+    than read as clean. Emitted on the present *and* the empty-surface skip path.
+    """
+    cov = surface.coverage or {}
+    unmatched = surface.unmatched or {}
+    counters = {
+        "exported_symbols": int(cov.get("exported_symbols", 0) or 0),
+        "matched_symbols": int(cov.get("matched_symbols", 0) or 0),
+        "unmatched_symbols": len(unmatched.get("symbols_without_decl", []) or []),
+    }
+    facts = int(cov.get("reachable_declarations", 0) or 0) or len(
+        surface.reachable_declarations or []
+    )
+    return facts, counters
+
+
 def _check_odr_type_variant(
     snapshot: AbiSnapshot, cfg: CrosscheckConfig
 ) -> _CheckOutput:
@@ -577,12 +605,17 @@ def _check_odr_type_variant(
     # missing evidence, so skip with an honest reason instead of "present"
     # (ADR-035 D4 coverage honesty — Codex review).
     if not _surface_has_l4_facts(surface):
+        # Still surface the boundary counters: a zero-TU L4 run with exports on
+        # record is a degraded link, named on the skipped row, never read clean.
+        facts, counters = _surface_boundary_counters(surface)
         return _CheckOutput(
             [],
             "skipped",
             "L4 source surface present but empty (no TUs parsed — clang/castxml "
             "unavailable?); ODR audit not run",
             providers,
+            facts,
+            counters,
         )
 
     findings: list[Change] = []
@@ -611,7 +644,12 @@ def _check_odr_type_variant(
         f"L4 per-TU type layouts: {len(findings)} type(s) with divergent "
         "cross-TU definitions (ODR conflict)"
     )
-    return _CheckOutput(findings, "present", detail, providers)
+    # Carry the boundary integrity counters (ADR-035 D4) onto the coverage row so
+    # the rendered ScanResult names a degraded link: an L4 surface can carry parsed
+    # decls yet match zero exports (the oneDAL shape) — a clean ODR pass over it
+    # must still show matched_symbols == 0.
+    facts, counters = _surface_boundary_counters(surface)
+    return _CheckOutput(findings, "present", detail, providers, facts, counters)
 
 
 # ---------------------------------------------------------------------------
@@ -1473,10 +1511,26 @@ def _change(
     )
 
 
-def _coverage_row(check: str, status: str, detail: str) -> dict[str, Any]:
-    """One serialized coverage row for a check (ADR-035 D4 coverage honesty)."""
-    return {
+def _coverage_row(
+    check: str,
+    status: str,
+    detail: str,
+    *,
+    facts: int = 0,
+    counters: dict[str, int] | None = None,
+) -> dict[str, Any]:
+    """One serialized coverage row for a check (ADR-035 D4 coverage honesty).
+
+    ``facts``/``counters`` are optional D4 boundary-integrity numbers, added only
+    when non-empty so existing rows stay byte-for-byte unchanged.
+    """
+    row: dict[str, Any] = {
         "layer": f"crosscheck:{check}",
         "status": status,
         "detail": detail,
     }
+    if facts:
+        row["facts"] = facts
+    if counters:
+        row["counters"] = dict(counters)
+    return row

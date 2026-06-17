@@ -188,6 +188,10 @@ class LayerResult:
     elapsed_s: float = 0.0
     skipped_reason: str | None = None
     detail: str = ""
+    #: Source-surface boundary integrity counters (ADR-035 D4), carried from the
+    #: engine's coverage row so the rendered report can show a degraded link
+    #: (e.g. ``matched_symbols == 0``) rather than only an internal object.
+    counters: dict[str, int] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -198,6 +202,7 @@ class LayerResult:
             "elapsed_s": round(self.elapsed_s, 3),
             "skipped_reason": self.skipped_reason,
             "detail": self.detail,
+            "counters": dict(self.counters),
         }
 
 
@@ -528,13 +533,27 @@ def _layers_from_coverage(coverage: list[dict[str, Any]]) -> list[LayerResult]:
     """Map the engine's coverage rows onto typed :class:`LayerResult`s."""
     out: list[LayerResult] = []
     for row in coverage:
+        # Defensive int coercion: a hand-edited / forward-compat row could carry a
+        # non-numeric counter or facts value; skip it rather than abort the render.
+        counters: dict[str, int] = {}
+        for k, v in (row.get("counters") or {}).items():
+            try:
+                counters[str(k)] = int(v)
+            except (TypeError, ValueError):
+                continue
+        try:
+            facts = int(row.get("facts", 0) or 0)
+        except (TypeError, ValueError):
+            facts = 0
         out.append(
             LayerResult(
                 method=row.get("method"),
                 layer=str(row.get("layer", "")),
                 status=str(row.get("status", "")),
+                facts=facts,
                 detail=str(row.get("detail", "")),
                 skipped_reason=row.get("skipped_reason"),
+                counters=counters,
             )
         )
     return out

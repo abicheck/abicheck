@@ -160,6 +160,12 @@ def _prepare_side(
 @click.option("--header-backend", "header_backend", default="auto", show_default=True,
               type=click.Choice(["auto", "castxml", "clang"], case_sensitive=False),
               help="L2 header-AST frontend (both sides). Env: ABICHECK_HEADER_BACKEND.")
+@click.option("--old-header-backend", "old_header_backend", default=None,
+              type=click.Choice(["auto", "castxml", "clang"], case_sensitive=False),
+              help="L2 header-AST frontend for the old side only (overrides --header-backend).")
+@click.option("--new-header-backend", "new_header_backend", default=None,
+              type=click.Choice(["auto", "castxml", "clang"], case_sensitive=False),
+              help="L2 header-AST frontend for the new side only (overrides --header-backend).")
 # ── Compare pass-through ─────────────────────────────────────────────────────
 @click.option("--format", "fmt",
               type=click.Choice(["json", "markdown", "sarif", "html", "junit", "review"]),
@@ -200,6 +206,7 @@ def deep_compare_cmd(
     depth: str | None, max_depth: bool,
     old_version: str, new_version: str,
     lang: str, header_backend: str,
+    old_header_backend: str | None, new_header_backend: str | None,
     fmt: str, output: Path | None,
     policy: str, policy_file_path: Path | None,
     severity_preset: str | None,
@@ -277,13 +284,15 @@ def deep_compare_cmd(
         old_ready = _prepare_side(
             ctx, input_path=old_input, headers=old_h, includes=old_inc, sources=old_src,
             build_info=old_build_info, collect_mode=compare_collect_mode,
-            version=old_version, lang=lang, header_backend=header_backend,
+            version=old_version, lang=lang,
+            header_backend=old_header_backend or header_backend,
             out_dir=out_dir, label="old",
         )
         new_ready = _prepare_side(
             ctx, input_path=new_input, headers=new_h, includes=new_inc, sources=new_src,
             build_info=new_build_info, collect_mode=compare_collect_mode,
-            version=new_version, lang=lang, header_backend=header_backend,
+            version=new_version, lang=lang,
+            header_backend=new_header_backend or header_backend,
             out_dir=out_dir, label="new",
         )
 

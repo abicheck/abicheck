@@ -547,9 +547,15 @@ use_cases:
       shim was prototyped and REJECTED: glibc's own `typedef float _Float32;`
       fallback would be rewritten into `typedef float float;` (PR review). The
       durable cure is a castxml built against a newer Clang, or the libclang
-      extractor (G4). REMAINING: an integration-marked end-to-end check that
-      `compare --headers` over a `<math.h>`-including header succeeds on a real CI
-      host, and a dedicated `HeaderToolchainError` type.
+      extractor (G4). ALSO DONE: per-side L2 backend selection
+      (`--old-header-backend`/`--new-header-backend` on `compare`/`deep-compare`,
+      each inheriting `--header-backend`) so a release whose new headers need the
+      host toolchain parses on clang while the old release keeps the castxml schema
+      reference — the backend mirror of `--old-header`/`--new-header`
+      (tests/test_cli_new_features.py::TestPerSideHeaderBackend). REMAINING: an
+      integration-marked end-to-end check that `compare --headers` over a
+      `<math.h>`-including header succeeds on a real CI host, and a dedicated
+      `HeaderToolchainError` type.
 
   - id: UC-TC-cxx-standard-floor
     axis: toolchain
@@ -786,8 +792,14 @@ use_cases:
       `private_header_leak`, `unversioned_exported_symbol`,
       `rtti_for_internal_type`, and the depth-ladder case. Each ships a committed
       `snapshot.abi.json` validated compiler-free by `tests/test_g20_catalog.py`.
+      The depth-ladder legibility property (case147) is now asserted compiler-free
+      as provider escalation — the same input flags `private_header_leak` from
+      `public_header_ast` alone at shallow depth and gains the `source_index`
+      corroboration with the L5 graph attached
+      (`test_g20_catalog.py::test_depth_ladder_deepens_corroboration_same_input`).
       REMAINING: a live S3->S5 depth-ladder run under the `integration` (castxml)
-      lane to show the real per-depth cost, and Flow-2 `abicheck_inputs/` pack
+      lane to show the real per-depth *timing* (the compiler-free test proves the
+      coverage escalation, not the cost), and Flow-2 `abicheck_inputs/` pack
       fixtures alongside the committed snapshots. See plan Phase 1.
 
   - id: UC-CHANGE-crosscheck-example-corpus
@@ -833,6 +845,11 @@ use_cases:
       changed-path floor (a mis-weighted `risk_rules` cannot drop a changed TU),
       and the D4 unlinked-source-evidence integrity guard (the oneDAL shape: many
       exports, TUs parsed, zero matched symbols reported as degraded, never clean).
-      REMAINING: the optional `_layers_from_coverage` plumbing to surface the D4
-      integrity counters on the rendered `ScanResult` (the suites currently assert
-      against the `source_link`/coverage objects). See plan Phase 3.
+      ALSO DONE: the §3.3 `_layers_from_coverage` plumbing — the L4 source-link
+      boundary integrity counters (`exported_symbols`/`matched_symbols`/
+      `unmatched_symbols` + `facts`) now ride the crosscheck coverage row
+      (`crosscheck._coverage_row`/`_CheckOutput`) onto the rendered
+      `ScanResult` layer (`service_scan.LayerResult.counters`), so a degraded
+      link is named on the report even when ODR runs clean
+      (`test_source_evidence_integrity.py::test_integrity_counters_surface_on_rendered_scan_layers`).
+      REMAINING: nothing in this entry. See plan Phase 3.
