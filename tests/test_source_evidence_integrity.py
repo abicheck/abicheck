@@ -168,3 +168,46 @@ def test_healthy_link_records_matched_counters_not_zero():
     )
     assert odr.counters["matched_symbols"] == 1
     assert odr.counters["unmatched_symbols"] == 0
+
+
+def test_empty_l4_skip_row_still_names_the_degraded_boundary():
+    # A zero-TU L4 run with exports on record is the worst degraded shape: the ODR
+    # check *skips* (no parsed facts to audit), but the skipped row must still name
+    # the boundary (exported>0, matched==0), never read as silently clean.
+    surface = SourceAbiSurface(
+        library="libfoo.so",
+        coverage={"exported_symbols": 3, "matched_symbols": 0},
+        unmatched={"symbols_without_decl": ["_Z3barv", "_Z3bazv", "_Z3quxv"]},
+    )
+    snap = AbiSnapshot(
+        library="libfoo.so", version="1.0", from_headers=True,
+        build_source=BuildSourcePack(root="", source_abi=surface),
+    )
+    res = run_crosschecks(snap)
+    odr = next(
+        layer
+        for layer in _layers_from_coverage(res.coverage)
+        if layer.layer == f"crosscheck:{CHECK_ODR_TYPE_VARIANT}"
+    )
+    assert odr.status == "skipped"  # no parsed TUs to audit ...
+    assert odr.counters["exported_symbols"] == 3  # ... but the link is named
+    assert odr.counters["matched_symbols"] == 0
+    assert odr.counters["unmatched_symbols"] == 3
+
+
+def test_layers_from_coverage_tolerates_non_numeric_counters():
+    # A hand-edited / forward-compat coverage row with a non-numeric counter or
+    # facts value must not abort the render — the bad value is dropped.
+    rows = [
+        {
+            "layer": "crosscheck:odr_type_variant",
+            "status": "present",
+            "detail": "",
+            "facts": "not-a-number",
+            "counters": {"matched_symbols": "oops", "exported_symbols": 2},
+        }
+    ]
+    layers = _layers_from_coverage(rows)
+    assert len(layers) == 1
+    assert layers[0].facts == 0  # bad facts coerced to 0
+    assert layers[0].counters == {"exported_symbols": 2}  # bad entry dropped, good kept
