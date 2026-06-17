@@ -175,6 +175,17 @@ def test_make_does_not_expand_large_response_file(tmp_path):
     assert "@large.rsp" in cu.argv
 
 
+def test_make_does_not_expand_response_file_directory(tmp_path):
+    src = tmp_path / "foo.cc"
+    rsp_dir = tmp_path / "not-a-file.rsp"
+    src.write_text("int f() { return 0; }\n")
+    rsp_dir.mkdir()
+
+    cu = MakeAdapter(build_dir=tmp_path, dry_run="g++ @not-a-file.rsp -c foo.cc -o foo.o").collect().compile_units[0]
+
+    assert "@not-a-file.rsp" in cu.argv
+
+
 def test_make_msvc_combined_forced_include_not_source():
     # `/FIsrc/config.hpp` is a combined MSVC forced-include with an embedded
     # path; despite the `.hpp` it must not be read as the TU — foo.cc wins.

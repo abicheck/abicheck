@@ -40,6 +40,7 @@ from __future__ import annotations
 import os
 import re
 import shlex
+import stat as stat_module
 from pathlib import Path
 
 from ...build_context import _extract_flags
@@ -250,10 +251,10 @@ def _read_response_file(path: Path, directory: Path, root: Path | None) -> str |
     if resolved is None or not _is_relative_to(resolved, root):
         return None
     try:
-        stat = resolved.stat()
+        st = resolved.stat()
     except OSError:
         return None
-    if not resolved.is_file() or stat.st_size > _MAX_RESPONSE_FILE_BYTES:
+    if not stat_module.S_ISREG(st.st_mode) or st.st_size > _MAX_RESPONSE_FILE_BYTES:
         return None
     try:
         data = resolved.read_bytes()
