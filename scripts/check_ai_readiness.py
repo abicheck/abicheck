@@ -1176,12 +1176,15 @@ def _checker_module_bindings(tree: ast.Module) -> set[str]:
 
 
 def _iter_cli_contract_sources() -> Iterable[Path]:
-    """The front-end modules the contract covers: every ``cli*.py`` plus the
-    consumer-side ``appcompat.py`` (it is a verdict-emitting front-end too)."""
+    """The front-end modules the contract covers: every ``cli*.py``, the
+    consumer-side ``appcompat.py`` (a verdict-emitting front-end too), and the
+    MCP server ``mcp_server.py`` — ADR-037 D1 names MCP a Tier-3 front-end, so it
+    must route through the Tier-2 service just like the CLI commands."""
     yield from PKG.glob("cli*.py")
-    appcompat = PKG / "appcompat.py"
-    if appcompat.is_file():
-        yield appcompat
+    for extra in ("appcompat.py", "mcp_server.py"):
+        path = PKG / extra
+        if path.is_file():
+            yield path
 
 
 # ── ADR-037 D10.2 / D10.4: shared-decorator coverage + one-default-per-flag ───
@@ -1442,7 +1445,8 @@ def check_cli_contract(f: Findings) -> None:
     """ERROR if a front-end module calls a Tier-1 core entry point
     (``checker.compare``) directly instead of routing through the Tier-2 service.
 
-    Covers every ``abicheck/cli*.py`` and ``abicheck/appcompat.py``. ADR-037
+    Covers every ``abicheck/cli*.py``, ``abicheck/appcompat.py``, and
+    ``abicheck/mcp_server.py``. ADR-037
     D1/D10.1: front-ends are thin adapters; one classification path is what keeps
     ``compare`` / ``compare-release`` / ``appcompat`` / MCP from drifting apart
     (the ``scope_public`` default divergence the ADR documents). Importing a

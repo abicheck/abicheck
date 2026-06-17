@@ -61,10 +61,10 @@ from .cli_helpers_compare import (  # noqa: F401  — re-exported to keep cli im
 )
 from .cli_options import (
     adr027_compare_options,
-    build_source_compare_options,
     build_source_dump_options,
     debug_resolution_options,
     echo_ast_frontend_deprecation,
+    evidence_options,
     output_options,
     policy_options,
     scope_options,
@@ -1212,7 +1212,7 @@ def _dispatch_release_compare(ctx: click.Context, **kwargs: Any) -> None:
 # --dwarf-only, --debug-root{,1,2}, --debuginfod[-url], --debug-format (+hidden
 # --btf/--ctf/--dwarf): the shared local-ELF debug-resolution family.
 @debug_resolution_options
-@build_source_compare_options  # --old/new-build-info, --old/new-sources, --collect-mode
+@evidence_options  # --depth/--max, --old/new-build-info, --old/new-sources, --collect-mode
 @adr027_compare_options  # ADR-027: --pattern-verdicts/--explain-patterns/--surface-metrics
 @click.option("-v", "--verbose", is_flag=True, default=False,
               help="Enable verbose/debug output.")

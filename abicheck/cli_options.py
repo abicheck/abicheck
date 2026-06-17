@@ -430,8 +430,17 @@ def build_source_dump_options(func: F) -> F:
     return func
 
 
-def build_source_compare_options(func: F) -> F:
-    """Add the build-info / sources compare options.
+def evidence_options(func: F) -> F:
+    """The shared two-sided evidence family (ADR-037 D3's ``@evidence_options``).
+
+    The single source of truth for the depth/source/build-info surface a
+    *two-sided* verdict command exposes: ``--depth`` / ``--max`` plus the per-side
+    ``--old/new-sources`` and ``--old/new-build-info`` packs. ``dump`` is
+    single-sided (one artifact, plus the build-query knobs) so it composes the
+    sibling :func:`build_source_dump_options` instead — they are deliberately not
+    one decorator because their surfaces differ (per-side vs build-query), which
+    is why ``evidence`` is a registered-but-not-required family (only commands
+    that take source depth compose it).
 
     By default ``compare old.json new.json`` reads build-info + source facts
     **embedded** in each snapshot (single-artifact UX). The optional
@@ -482,6 +491,11 @@ def build_source_compare_options(func: F) -> F:
     return func
 
 
+#: Back-compat alias for the pre-ADR-037-D3 name. ``evidence_options`` is the
+#: canonical spelling (the D3 table); this keeps existing imports working.
+build_source_compare_options = evidence_options
+
+
 # ── ADR-037 D10: contract metadata (single source of truth for the gate) ──────
 #
 # The ``cli-contract`` AI-readiness gate (D10.2 decorator coverage, D10.4
@@ -504,6 +518,14 @@ FAMILY_FLAGS: dict[str, frozenset[str]] = {
     }),
     "scope": frozenset({"--scope-public-headers"}),
     "output": frozenset({"--format", "--output"}),
+    # Two-sided evidence family (ADR-037 D3 ``@evidence_options``). Documented for
+    # completeness; deliberately *not* in REQUIRED_FAMILIES — only commands that
+    # take source depth (``compare``) compose it (``--collect-mode`` is a hidden
+    # deprecated alias and is omitted here).
+    "evidence": frozenset({
+        "--depth", "--max", "--old-sources", "--new-sources",
+        "--old-build-info", "--new-build-info",
+    }),
     # Documented for completeness; deliberately *not* in REQUIRED_FAMILIES (it
     # resolves local ELF debug artifacts, which the package/snapshot-oriented
     # commands do not take).
@@ -522,12 +544,17 @@ FAMILY_DECORATOR: dict[str, str] = {
     "severity": "severity_options",
     "scope": "scope_options",
     "output": "output_options",
+    "evidence": "evidence_options",
 }
 
 #: Families every verdict-emitting command must compose (unless allowlisted).
 #: ``debug_resolution`` is deliberately *not* required — it resolves local ELF
 #: debug artifacts that the package/snapshot-oriented commands do not take.
-REQUIRED_FAMILIES: frozenset[str] = frozenset(FAMILY_DECORATOR)
+#: ``evidence`` is likewise registered-but-not-required — only commands that take
+#: source depth (``compare``) compose ``@evidence_options`` (ADR-037 D3).
+REQUIRED_FAMILIES: frozenset[str] = frozenset({
+    "two_sided_input", "policy", "severity", "scope", "output",
+})
 
 #: command name → module basename, for the gate to locate each command's source.
 VERDICT_EMITTING_COMMANDS: dict[str, str] = {

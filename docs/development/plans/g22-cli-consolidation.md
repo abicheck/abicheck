@@ -81,10 +81,12 @@ Each phase = one PR. Sub-structure: **Work** · **Tests** · **Risk & rollback**
 (`validate()`)/`OutputSpec`; `service.run_compare` is a kwargs shim over
 `run_compare_request(CompareRequest)`, and the new Tier-2 `service.compare_snapshots`
 wraps `checker.compare` so every front-end (`compare`, `compare-release`,
-`scan`, `appcompat`) routes through Tier 2 — no `cli*.py` calls `checker.compare`
-directly. Enforced by the `cli-contract` AI-readiness check (D10.1) and mirrored
-in `tests/test_cli_contract.py`; `tests/test_api_types.py` covers the request
-struct. The remaining phases (2–7) are still open.
+`scan`, `appcompat`, and the MCP server `abi_compare`) routes through Tier 2 — no
+front-end calls `checker.compare` directly. Enforced by the `cli-contract`
+AI-readiness check (D10.1), which now scans `mcp_server.py` alongside every
+`cli*.py` and `appcompat.py`, and mirrored in `tests/test_cli_contract.py`;
+`tests/test_api_types.py` covers the request struct. The remaining phases (2–7)
+are still open.
 
 **Work.** Add `api_types.py` (`InputSpec`, `CompareRequest`+`validate()`,
 `OutputSpec`); struct fields via `field(default_factory=...)` (a frozen
@@ -125,14 +127,15 @@ coarse `--severity-preset` and is the sole `INTENTIONAL_SUBSET` entry. The
 (one-default-per-flag), mirrored in `tests/test_cli_contract.py` along with the
 per-command option-set snapshot and the gate↔`cli_options` table-mirror test.
 
-The seventh decorator, **`@evidence_options` (`--depth`/`--collect-mode`/
-`--sources`/`--build-info`), is deferred to Phase 3** where the depth vocabulary
-is unified: the existing `build_source_compare_options`/`build_source_dump_options`
-helpers stay as-is for now, and their `--collect-mode` double-default (the very
-case D10.4 exists to catch) is parked on the `DEFERRED_MULTI_DEFAULT` allowlist
-with a pointer to Phase 3 rather than hidden. `dump`/`scan` are not in the
-verdict-emitting set, so their recompose rides along with the depth work in
-Phase 3.
+The seventh decorator, **`@evidence_options` (`--depth`/`--max`/per-side
+`--old/new-sources`/`--old/new-build-info`, plus the hidden `--collect-mode`
+alias), now exists as the canonical two-sided evidence family** (the pre-rename
+`build_source_compare_options` is kept as a back-compat alias). It is registered
+in the contract tables as a *non-required* family (`FAMILY_FLAGS["evidence"]` /
+`FAMILY_DECORATOR["evidence"]`) because only commands that take source depth
+(`compare`) compose it. `dump` stays single-sided on the sibling
+`build_source_dump_options` (it adds the build-query knobs and has no per-side
+packs), so the two are deliberately not merged into one decorator.
 
 **Original plan.** Define the 7 decorators in `cli_options.py` (ADR-037 D3 table).
 Recompose `compare`, `compare-release`, `appcompat`, `deep-compare`, `dump`,
