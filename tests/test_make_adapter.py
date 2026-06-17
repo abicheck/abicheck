@@ -33,6 +33,10 @@ make: Leaving directory '/home/user/proj'
 """
 
 
+def _has_response_arg(argv: list[str], path: Path) -> bool:
+    return any(arg.startswith("@") and Path(arg[1:]).expanduser() == path for arg in argv)
+
+
 def test_make_dry_run_extracts_compile_units():
     ev = MakeAdapter(dry_run=DRY_RUN).collect()
     assert ev.generators[0].kind == "make"
@@ -127,7 +131,7 @@ def test_make_does_not_expand_response_file_without_trusted_build_dir(tmp_path):
 
     cu = MakeAdapter(dry_run=f"g++ @{rsp} -c {src} -o foo.o").collect().compile_units[0]
 
-    assert f"@{rsp}" in cu.argv
+    assert _has_response_arg(cu.argv, rsp)
     assert "LEAKED_TOKEN" not in cu.argv
 
 
@@ -141,7 +145,7 @@ def test_make_does_not_expand_response_file_outside_build_dir(tmp_path):
 
     cu = MakeAdapter(build_dir=build, dry_run=f"g++ @{outside} -c foo.cc -o foo.o").collect().compile_units[0]
 
-    assert f"@{outside}" in cu.argv
+    assert _has_response_arg(cu.argv, outside)
     assert "LEAKED_TOKEN" not in cu.argv
 
 
