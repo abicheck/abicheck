@@ -302,5 +302,7 @@ def test_dump_source_only_depth_symbols(tmp_path) -> None:  # type: ignore[no-un
         ["dump", "--sources", str(src), "--depth", "symbols",
          "-o", str(tmp_path / "out2.json")],
     )
-    # Resolution + symbols-clearing ran (no crash from the new code path).
-    assert res.exit_code == 0 or "source" in _all_output(res).lower() or True
+    # Resolution + symbols-clearing ran; a source-only symbols dump writes an
+    # L0-L2 snapshot and exits clean.
+    assert res.exit_code == 0, _all_output(res)
+    assert (tmp_path / "out2.json").is_file()
