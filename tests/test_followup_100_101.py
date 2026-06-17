@@ -355,7 +355,7 @@ class TestCliPolicy:
             assert kwargs["policy"] == "plugin_abi"
             return DiffResult(old_version="1.0", new_version="2.0", library="lib.so", changes=[], verdict=Verdict.NO_CHANGE)
 
-        with patch("abicheck.cli.compare", side_effect=_fake_compare):
+        with patch("abicheck.service.compare_snapshots", side_effect=_fake_compare):
             result = CliRunner().invoke(main, ["compare", str(old_p), str(new_p), "--policy", "plugin_abi"])
 
         assert result.exit_code == 0, result.output
@@ -383,7 +383,7 @@ class TestCliPolicy:
             assert kwargs["policy_file"] is not None
             return DiffResult(old_version="1.0", new_version="2.0", library="lib.so", changes=[], verdict=Verdict.NO_CHANGE)
 
-        with patch("abicheck.cli.compare", side_effect=_fake_compare):
+        with patch("abicheck.service.compare_snapshots", side_effect=_fake_compare):
             result = CliRunner().invoke(
                 main,
                 ["compare", str(old_p), str(new_p), "--policy-file", str(policy_p)],
@@ -409,7 +409,7 @@ class TestCliPolicy:
             captured["policy_file"] = kwargs.get("policy_file")
             return DiffResult(old_version="1.0", new_version="2.0", library="lib.so", changes=[], verdict=Verdict.NO_CHANGE)
 
-        with patch("abicheck.cli.compare", side_effect=_fake_compare):
+        with patch("abicheck.service.compare_snapshots", side_effect=_fake_compare):
             result = CliRunner().invoke(
                 main,
                 ["compare", str(old_p), str(new_p),

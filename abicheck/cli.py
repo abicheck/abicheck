@@ -34,7 +34,7 @@ try:
 except ImportError:  # pragma: no cover - rich-click is a declared dependency
     _RootGroupBase = click.Group  # type: ignore[assignment,misc]
 
-from .checker import DiffResult, LibraryMetadata, compare
+from .checker import DiffResult, LibraryMetadata
 from .cli_audit import echo_filtered_surface, echo_pattern_modulations
 from .cli_datasources import print_data_sources as _print_data_sources
 from .cli_dump_helpers import (
@@ -1353,7 +1353,8 @@ def compare_cmd(
     )
 
     apply_patterns = pattern_verdicts or explain_patterns  # --explain implies on
-    result = compare(
+    from .service import compare_snapshots
+    result = compare_snapshots(
         old, new, suppression=suppression, policy=policy, policy_file=pf,
         scope_to_public_surface=scope_public_headers,
         force_public_symbols=force_public,

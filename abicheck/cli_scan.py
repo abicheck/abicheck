@@ -1179,10 +1179,9 @@ def _run_baseline_compare(
     folded into the verdict too (``checker.compare`` itself does not read
     ``build_source``).
     """
-    from .checker import compare
     from .cli_buildsource import prepare_embedded_build_source
     from .errors import AbicheckError
-    from .service import resolve_input
+    from .service import compare_snapshots, resolve_input
 
     try:
         old_snap = resolve_input(
@@ -1216,7 +1215,7 @@ def _run_baseline_compare(
         None,
         None,
     )
-    diff = compare(
+    diff = compare_snapshots(
         old_snap,
         new_snap,
         extra_changes=merged_extra,

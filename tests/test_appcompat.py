@@ -1255,7 +1255,7 @@ class TestCheckAppcompat:
             patch("abicheck.appcompat._get_lib_soname", return_value=soname),
             patch("abicheck.appcompat.parse_app_requirements", return_value=app_reqs),
             patch("abicheck.dumper.dump", return_value=MagicMock()),
-            patch("abicheck.appcompat.compare", return_value=diff),
+            patch("abicheck.service.compare_snapshots", return_value=diff),
             patch("abicheck.appcompat._get_new_lib_exports", return_value=new_exports),
             patch("abicheck.appcompat._detect_app_format", return_value=None),
         ]
@@ -1430,7 +1430,7 @@ class TestCheckAppcompat:
             patch("abicheck.appcompat._get_lib_soname", return_value="libfoo.so"),
             patch("abicheck.appcompat.parse_app_requirements", return_value=app_reqs),
             patch("abicheck.dumper.dump", return_value=MagicMock()),
-            patch("abicheck.appcompat.compare", return_value=diff),
+            patch("abicheck.service.compare_snapshots", return_value=diff),
             patch("abicheck.appcompat._get_new_lib_exports", return_value=new_exports),
             patch("abicheck.appcompat._detect_app_format", return_value="elf"),
             patch("abicheck.elf_metadata.parse_elf_metadata", return_value=elf_meta),
@@ -1454,7 +1454,7 @@ class TestCheckAppcompat:
             patch("abicheck.appcompat._get_lib_soname", return_value="libfoo.so"),
             patch("abicheck.appcompat.parse_app_requirements", return_value=app_reqs),
             patch("abicheck.dumper.dump", return_value=MagicMock()) as mock_dump,
-            patch("abicheck.appcompat.compare", return_value=diff),
+            patch("abicheck.service.compare_snapshots", return_value=diff),
             patch("abicheck.appcompat._get_new_lib_exports", return_value=new_exports),
             patch("abicheck.appcompat._detect_app_format", return_value=None),
         ):
@@ -1481,7 +1481,7 @@ class TestCheckAppcompat:
             patch("abicheck.appcompat._detect_app_format", return_value="elf"),
             patch("abicheck.appcompat._get_old_lib_exports_for_scoping", return_value={"inflate"}),
             patch("abicheck.dumper.dump", return_value=MagicMock()),
-            patch("abicheck.appcompat.compare", return_value=diff),
+            patch("abicheck.service.compare_snapshots", return_value=diff),
             patch("abicheck.appcompat._get_new_lib_exports", return_value={"inflate"}),
             patch("abicheck.elf_metadata.parse_elf_metadata", return_value=SimpleNamespace(versions_defined=[])),
         ):
@@ -1506,7 +1506,7 @@ class TestCheckAppcompat:
             patch("abicheck.appcompat._detect_app_format", return_value="elf"),
             patch("abicheck.appcompat._get_old_lib_exports_for_scoping", return_value={"inflate"}),
             patch("abicheck.dumper.dump", return_value=MagicMock()),
-            patch("abicheck.appcompat.compare", return_value=diff),
+            patch("abicheck.service.compare_snapshots", return_value=diff),
             patch("abicheck.appcompat._get_new_lib_exports", return_value={"inflate"}),
             patch("abicheck.elf_metadata.parse_elf_metadata", return_value=SimpleNamespace(versions_defined=[])),
         ):

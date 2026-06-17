@@ -77,6 +77,15 @@ Each phase = one PR. Sub-structure: **Work** · **Tests** · **Risk & rollback**
 
 ### Phase 1 — Typed requests + single chokepoint (D1, D2)
 
+**Status: landed.** `abicheck/api_types.py` ships `InputSpec`/`CompareRequest`
+(`validate()`)/`OutputSpec`; `service.run_compare` is a kwargs shim over
+`run_compare_request(CompareRequest)`, and the new Tier-2 `service.compare_snapshots`
+wraps `checker.compare` so every front-end (`compare`, `compare-release`,
+`scan`, `appcompat`) routes through Tier 2 — no `cli*.py` calls `checker.compare`
+directly. Enforced by the `cli-contract` AI-readiness check (D10.1) and mirrored
+in `tests/test_cli_contract.py`; `tests/test_api_types.py` covers the request
+struct. The remaining phases (2–7) are still open.
+
 **Work.** Add `api_types.py` (`InputSpec`, `CompareRequest`+`validate()`,
 `OutputSpec`); struct fields via `field(default_factory=...)` (a frozen
 dataclass still shares one import-time default otherwise). Refactor

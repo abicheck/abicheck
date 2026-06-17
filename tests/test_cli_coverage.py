@@ -257,7 +257,7 @@ class TestCompareApiBreakExitCode:
         snap = AbiSnapshot(library="lib.so", version="1.0")
         monkeypatch.setattr("abicheck.service.load_snapshot", lambda _: snap)
         monkeypatch.setattr(
-            "abicheck.cli.compare",
+            "abicheck.service.compare_snapshots",
             lambda *_a, **_kw: DiffResult(
                 old_version="1", new_version="2", library="lib.so",
                 verdict=Verdict.API_BREAK,

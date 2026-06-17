@@ -32,13 +32,11 @@ from typing import TYPE_CHECKING
 import click
 
 from .bundle import BundleDiffResult
-from .checker import DiffResult, compare
+from .checker import DiffResult
 from .cli import (
     _build_match_map,
-    _collect_metadata,
     _collect_release_inputs,
     _normalize_binary_input,
-    _resolve_input,
     _safe_write_output,
     _setup_verbosity,
     _write_or_echo,
@@ -99,44 +97,39 @@ def _run_compare_pair(
     scope_to_public_surface: bool = False,
     pattern_verdicts: bool = False,
 ) -> tuple[DiffResult, AbiSnapshot, AbiSnapshot]:
-    """Run compare for one old/new pair and return result + resolved snapshots."""
+    """Run compare for one old/new pair and return result + resolved snapshots.
+
+    Routes through the single Tier-2 chokepoint (:func:`service.run_compare`,
+    ADR-037 D1) rather than calling ``checker.compare`` directly — this is what
+    keeps ``compare-release`` and ``compare`` on one classification path so a
+    library gets the same verdict from either command (no ``scope_public``
+    default drift).
+    """
+    from . import service
+
     # Follow GNU ld linker scripts up front so metadata/dependency analysis use
     # the resolved DSO, not the text script.
-    old_input, old_fmt = _normalize_binary_input(old_input)
-    new_input, new_fmt = _normalize_binary_input(new_input)
+    old_input, _ = _normalize_binary_input(old_input)
+    new_input, _ = _normalize_binary_input(new_input)
 
-    old = _resolve_input(
+    return service.run_compare(
         old_input,
-        old_headers,
-        old_includes,
-        old_version,
-        lang,
-        is_elf=True if old_fmt == "elf" else None,
-        pdb_path=old_pdb_path,
-    )
-    new = _resolve_input(
         new_input,
-        new_headers,
-        new_includes,
-        new_version,
-        lang,
-        is_elf=True if new_fmt == "elf" else None,
-        pdb_path=new_pdb_path,
-    )
-
-    suppression, pf = _load_suppression_and_policy(suppress, policy, policy_file_path)
-    result = compare(
-        old,
-        new,
-        suppression=suppression,
+        old_headers=old_headers,
+        new_headers=new_headers,
+        old_includes=old_includes,
+        new_includes=new_includes,
+        old_version=old_version,
+        new_version=new_version,
+        lang=lang,
+        suppress=suppress,
         policy=policy,
-        policy_file=pf,
+        policy_file_path=policy_file_path,
+        old_pdb_path=old_pdb_path,
+        new_pdb_path=new_pdb_path,
         scope_to_public_surface=scope_to_public_surface,
         pattern_verdicts=pattern_verdicts,
     )
-    result.old_metadata = _collect_metadata(old_input)
-    result.new_metadata = _collect_metadata(new_input)
-    return result, old, new
 
 
 _CompareReleaseCommonArgs = tuple[
@@ -628,14 +621,14 @@ def _collect_matrix_result(
     if not matrix_changes:
         return None, worst_verdict
 
-    from .checker import compare as _compare
     from .model import AbiSnapshot
+    from .service import compare_snapshots
 
     suppression, pf = _load_suppression_and_policy(suppress, policy, policy_file_path)
     # Empty snapshots contribute no per-binary changes; the matrix findings
     # ride in as extra_changes and inherit the full post-processing pipeline.
     name = "<build-config matrix>"
-    result = _compare(
+    result = compare_snapshots(
         AbiSnapshot(library=name, version=old_version or "old"),
         AbiSnapshot(library=name, version=new_version or "new"),
         suppression=suppression,

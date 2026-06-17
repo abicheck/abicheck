@@ -627,6 +627,14 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
         # `cli_buildsource` (size-split per CLAUDE.md); they reuse `cli_resolve` /
         # `service` collectors and are re-exported back by their parent, so they join
         # the same by-design cluster (the package imports cleanly — no init deadlock).
+        #
+        # ADR-037 D1 (G22 Phase 1) widens this cluster: the verdict-emitting
+        # front-ends now route through the Tier-2 service instead of calling
+        # `checker.compare` directly. `cli_compare_release` and `appcompat` reach
+        # `service` via *function-local* imports (`service.run_compare` /
+        # `service.compare_snapshots`), and `cli` registers them (and `cli_plugin`)
+        # at its module-load tail — so they close the same SCC through lazy edges,
+        # never an init cycle.
         frozenset(
             {
                 "cli",
@@ -634,6 +642,9 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
                 "cli_surface",
                 "cli_buildsource",
                 "cli_scan",
+                "cli_compare_release",
+                "cli_plugin",
+                "appcompat",
                 "service",
                 "service_scan",
                 "cli_helpers_compare",
@@ -1090,6 +1101,76 @@ def check_banned_imports(f: Findings) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Check: CLI interface contract (ADR-037 D10.1)
+# ---------------------------------------------------------------------------
+
+# Tier-1 core entry points a front-end must never call directly — it must route
+# through the Tier-2 service layer (``service.run_compare`` /
+# ``service.compare_snapshots``). ADR-037 D1/D10.1.
+_TIER1_CORE_FUNCS: frozenset[str] = frozenset({"compare"})
+
+# ``"<rel-path>:<lineno>"`` call sites deliberately exempted, each needing a
+# reason in review. Empty by design — a new exemption is a reviewed decision,
+# not an accident (mirrors the INTENTIONAL_SUBSET philosophy of D10.2).
+CLI_CONTRACT_ALLOWLIST: frozenset[str] = frozenset()
+
+
+def _checker_compare_bindings(tree: ast.Module) -> set[str]:
+    """Return the local names bound to ``checker.compare`` via import in *tree*.
+
+    Handles ``from .checker import compare`` and ``... import compare as X`` at
+    module or function scope, so a lazily-imported alias is caught too.
+    """
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.ImportFrom)
+            and node.module is not None
+            and node.module.split(".")[-1] == "checker"
+        ):
+            for alias in node.names:
+                if alias.name in _TIER1_CORE_FUNCS:
+                    names.add(alias.asname or alias.name)
+    return names
+
+
+def check_cli_contract(f: Findings) -> None:
+    """ERROR if a front-end ``cli*.py`` module calls a Tier-1 core entry point
+    (``checker.compare``) directly instead of routing through the Tier-2 service.
+
+    ADR-037 D1/D10.1: front-ends are thin adapters; one classification path is
+    what keeps ``compare`` / ``compare-release`` / ``appcompat`` / MCP from
+    drifting apart (the ``scope_public`` default divergence the ADR documents).
+    Importing a ``checker`` *type* for annotations or result-rendering stays
+    legal — the gate keys on the *call expression*, not the import statement.
+    """
+    for path in sorted(PKG.glob("cli*.py")):
+        rel = _rel(path)
+        try:
+            tree = ast.parse(_read(path), filename=rel)
+        except SyntaxError:
+            continue
+        bound = _checker_compare_bindings(tree)
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            is_tier1 = (isinstance(func, ast.Name) and func.id in bound) or (
+                isinstance(func, ast.Attribute)
+                and func.attr in _TIER1_CORE_FUNCS
+                and isinstance(func.value, ast.Name)
+                and func.value.id == "checker"
+            )
+            if is_tier1 and f"{rel}:{node.lineno}" not in CLI_CONTRACT_ALLOWLIST:
+                f.err(
+                    "cli-contract",
+                    f"{rel}:{node.lineno}: front-end calls Tier-1 `checker.compare` "
+                    "directly; route through `service.run_compare` / "
+                    "`service.compare_snapshots` (ADR-037 D1/D10.1)",
+                )
+
+
+# ---------------------------------------------------------------------------
 # Check: test assertion density (coverage-honesty guard)
 # ---------------------------------------------------------------------------
 
@@ -1246,6 +1327,7 @@ CHECKS: dict[str, Callable[[Findings], None]] = {
     "examples-readme-sync": check_examples_readme_sync,
     "mkdocs-nav-coverage": check_mkdocs_nav_coverage,
     "banned-imports": check_banned_imports,
+    "cli-contract": check_cli_contract,
     "license-header": check_license_header,
     "test-assertion-density": check_test_assertion_density,
 }
