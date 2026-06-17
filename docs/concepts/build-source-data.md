@@ -288,6 +288,41 @@ sources:
 - **`run_build` / `wrap_build` (denied):** abicheck never performs a full
   project build or compiler-wrapper interception.
 
+### Project-contract blocks (ADR-037 D4)
+
+`.abicheck.yml` is also the home for the project's stable comparison contract —
+the settings that are version-controlled and reviewed in a PR rather than typed
+per run. `compare` auto-discovers the nearest config and merges CLI flags over
+it (precedence **CLI > config > built-in default**). Unknown keys **warn, never
+error** (forward-compat), and a top-level `version:` records the schema version.
+
+```yaml
+version: 1
+severity:                  # per-category overrides (CLI keeps only --severity-preset)
+  preset: strict           # default | strict | info-only
+  abi_breaking: error      # error | warning | info
+  potential_breaking: warning
+  quality_issues: info
+  addition: info
+scope:                     # public-surface / FP tuning (stable project properties)
+  public: true
+  collapse_versioned_symbols: false
+  public_symbols: ["foo_*", "bar_init"]
+suppression:               # suppression hygiene (a project rule, inherited by CI)
+  strict: true
+  require_justification: true
+source:
+  method: s4               # precise S-axis for power users (CLI exposes coarse --depth)
+  graph: summary           # summary | full — L5 graph replay scope
+exit_code_scheme: auto     # auto | legacy | severity (ADR-037 D12)
+```
+
+The matching CLI flags (e.g. `--severity-abi-breaking`, `--strict-suppressions`,
+`--collapse-versioned-symbols`) stay as **hidden** per-run overrides — functional
+but off the visible surface. The L2/L4 frontend is one knob, `--ast-frontend`
+(`auto`/`castxml`/`clang`; env `ABICHECK_AST_FRONTEND`), shared across header-AST
+parsing and source-ABI replay (ADR-037 D8).
+
 ### Advanced: `collect` and out-of-band packs
 
 The `collect` command (which writes an on-disk pack directory) remains for

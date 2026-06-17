@@ -810,6 +810,7 @@ def embed_build_source(
     build_query: str | None = None,
     build_compile_db: str | None = None,
     changed_paths: tuple[str, ...] = (),
+    extractor: str = "auto",
 ) -> None:
     """Embed build-info / source facts inline in *snap* (single-artifact UX).
 
@@ -896,6 +897,7 @@ def embed_build_source(
             build_config_trusted_for_query=cfg_trusted_for_query,
             base_build=bi_pack.build_evidence if bi_pack else None,
             clang_bin=clang_bin,
+            extractor=extractor,
             scope=scope,
             layers=layers,
             exported_symbols=exported,
@@ -951,6 +953,7 @@ def dump_source_only(
     collect_mode: str = "source-target",
     build_query: str | None = None,
     build_compile_db: str | None = None,
+    extractor: str = "auto",
 ) -> None:
     """Write a binary-less snapshot carrying only the embedded build/source facts.
 
@@ -983,6 +986,7 @@ def dump_source_only(
         collect_mode,
         build_query=build_query,
         build_compile_db=build_compile_db,
+        extractor=extractor,
     )
 
 

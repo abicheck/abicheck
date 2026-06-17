@@ -349,9 +349,13 @@ use_cases:
   - id: UC-WF-cli-contract
     axis: workflow
     name: CLI interface contract, config balance, and extension policy
-    status: planned
+    status: complete
     gap: G22
     plan: docs/development/plans/g22-cli-consolidation.md
+    evidence:
+      modules: [abicheck/api_types.py, abicheck/service.py, abicheck/cli_options.py, abicheck/buildsource/inline.py]
+      tests: [tests/test_cli_contract.py, tests/test_api_types.py, tests/test_config_rebalance.py]
+      docs: [docs/development/adr/037-cli-interface-contract.md, docs/development/plans/g22-cli-consolidation.md]
     next_steps: >
       ADR-037. Formalises the CLI/API as three tiers (core/service/front-end)
       with the service layer as the only chokepoint, typed CompareRequest

@@ -167,6 +167,10 @@ class CompareRequest:
             )
         if not self.policy:
             errors.append("policy profile name must not be empty")
+        # D9 pre-flight: a --policy-file path that doesn't exist is a hard error
+        # here (Tier 2), so CLI and MCP surface the same message before any work.
+        if self.policy_file_path is not None and not Path(self.policy_file_path).exists():
+            errors.append(f"policy file not found: {self.policy_file_path}")
         return errors
 
     def validate(self) -> CompareRequest:

@@ -250,6 +250,7 @@ def _write_snapshot_output(
     collect_mode: str = "source-target",
     build_query: str | None = None,
     build_compile_db: str | None = None,
+    extractor: str = "auto",
 ) -> None:
     """Serialize snapshot and write to file or stdout.
 
@@ -260,7 +261,9 @@ def _write_snapshot_output(
     ADR-033 D2 CI evidence mode) selects which layers and replay scope to collect:
     ``build`` captures L3 build context only, ``off`` collects nothing.
     *build_query* / *build_compile_db* are the CLI equivalents of the
-    ``.abicheck.yml`` ``build.query`` / ``build.compile_db`` keys.
+    ``.abicheck.yml`` ``build.query`` / ``build.compile_db`` keys. *extractor* is
+    the L4 source-ABI frontend — the same ``--ast-frontend`` knob that drives the
+    L2 header AST (ADR-037 D8): one frontend choice across both pipeline stages.
     """
     if build_info is not None or sources is not None:
         from .cli_buildsource import embed_build_source
@@ -269,6 +272,7 @@ def _write_snapshot_output(
             build_config=build_config, allow_build_query=allow_build_query,
             collect_mode=collect_mode,
             build_query=build_query, build_compile_db=build_compile_db,
+            extractor=extractor,
         )
         # G21.7: fail loud — if a requested evidence layer came back empty, say so
         # prominently instead of leaving it buried in the coverage rows. Permissive
@@ -559,7 +563,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
                 "produce binary data-source diagnostics."
             )
         from .cli_buildsource import dump_source_only
-        dump_source_only(sources, build_info, version, output, build_config, allow_build_query, git_tag, build_id, no_git, collect_mode, build_query=build_query, build_compile_db=build_compile_db)
+        dump_source_only(sources, build_info, version, output, build_config, allow_build_query, git_tag, build_id, no_git, collect_mode, build_query=build_query, build_compile_db=build_compile_db, extractor=header_backend)
         return
 
     effective_debug_format = resolve_dump_debug_format(debug_format_opt, debug_format)
@@ -694,6 +698,7 @@ def _handle_non_elf_dump(
     _write_snapshot_output(
         snap, output, build_info, sources, build_config, allow_build_query,
         collect_mode, build_query=build_query, build_compile_db=build_compile_db,
+        extractor=header_backend,
     )
 
 

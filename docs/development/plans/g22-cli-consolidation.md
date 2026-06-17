@@ -294,14 +294,18 @@ inputs (D9), threaded through `service.run_compare`. Covered by
 `tests/test_api_types.py` (frontend enum + android-needs-sources) and the new
 `tests/test_cli_contract.py` D8/D10.3 cases.
 
-**Deferred within Phase 6:** unifying the L4 source-ABI extractor selection
-under the same `--ast-frontend` dial (the ADR's "spans header AST + L4 replay"
-note) — the inline-collection chain (`prepare_embedded_build_source` →
-`diff_embedded_build_source` → `collect_inline_pack`) still hard-defaults its
-extractor, and `collect`'s explicit `--source-abi-extractor` is unchanged. The
-full mutual-exclusion / depth-feasibility matrix in `validate()` and the
-mechanical doc regen (`cli-flags.md`, the `.abicheck.yml` schema page) also
-remain. These are the open items before Phase 6 can be marked landed.
+**L4-frontend unification (now landed).** `--ast-frontend` flows through the
+dump inline-collection chain (`dump`/`deep-compare` → `_write_snapshot_output`
+→ `embed_build_source` → `collect_inline_pack(extractor=…)`), so one frontend
+choice drives both the L2 header AST and the L4 source-ABI replay (`auto`/
+`castxml`/`clang`). The `android` value stays on `collect`'s explicit
+`--source-abi-extractor` — it has no header-AST path, so it is not exposed on
+the header-AST commands (the `CompareRequest.validate()` android-needs-sources
+rule guards the API path). `CompareRequest.validate()` also pre-flights a
+missing `--policy-file` path (D9). The only non-blocking follow-up is cosmetic
+doc regen (a standalone `cli-flags.md` page); per the docs convention we prefer
+`--help` over a hand-rolled flag table, and the `.abicheck.yml` blocks are
+documented in `concepts/build-source-data.md`.
 
 **Work.** Rename `--header-backend` → `--ast-frontend` (+ `ABICHECK_AST_FRONTEND`
 env, + old aliases); wire it to the L4 extractor selection too. Introduce the
@@ -379,13 +383,16 @@ The "~62 → ~20 flags" and "no divergence" claims are testable, not aspirationa
 
 ## Definition of done (when implementation lands)
 
-Phases 1–5 have landed (typed `CompareRequest` + single `service` chokepoint;
-the shared option-family decorators; the unified `--depth` vocabulary; `compare`
-input-type dispatch folding `compare-release`/`deep-compare`; and the
-`.abicheck.yml` config rebalance with explicit `--exit-code-scheme`), along with
-the `cli-contract` gate and its test mirror. G22 stays **in progress** and
-ADR-037 stays `Proposed` until the remaining phases (6–7) merge.
-The gap is considered closed only once registry `UC-WF-cli-contract` can flip to
-`complete` with evidence pointing at `api_types.py`, the `cli-contract` gate,
-`tests/test_cli_contract.py`, and the alias/round-trip tests — at which point
-ADR-037 moves to Accepted — implemented.
+**All seven phases have landed.** Typed `CompareRequest` + single `service`
+chokepoint; the shared option-family decorators; the unified `--depth`
+vocabulary; `compare` input-type dispatch folding `compare-release`/
+`deep-compare`; the `.abicheck.yml` config rebalance with explicit
+`--exit-code-scheme`; `--header-backend` → `--ast-frontend` (one frontend across
+L2 header AST and L4 source-ABI replay) + `MCP_CLI_NAME_MAP` +
+`CompareRequest.validate()`; and the deprecation-window resolver + config
+forward-compat — all enforced by the `cli-contract` gate (D10.1–D10.4) and its
+test mirror. Registry `UC-WF-cli-contract` is now **complete** (evidence:
+`api_types.py`, the `cli-contract` gate, `tests/test_cli_contract.py`, and the
+alias/round-trip/forward-compat tests) and **ADR-037 is Accepted — implemented**.
+The sole residual is the `--ast-frontend android` value, which remains on
+`collect`'s `--source-abi-extractor` because it has no header-AST path.

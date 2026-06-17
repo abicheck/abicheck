@@ -162,6 +162,24 @@ class TestCompareRequestValidate:
         )
         assert req.validation_errors() == []
 
+    def test_missing_policy_file_rejected(self, tmp_path):
+        # D9 pre-flight: a --policy-file path that doesn't exist errors identically
+        # from CLI and MCP (one Tier-2 rule).
+        missing = tmp_path / "nope.yml"
+        req = CompareRequest(
+            old=InputSpec.of("a"), new=InputSpec.of("b"), policy_file_path=missing
+        )
+        errors = req.validation_errors()
+        assert any("policy file not found" in e for e in errors)
+
+    def test_existing_policy_file_accepted(self, tmp_path):
+        present = tmp_path / "policy.yml"
+        present.write_text("base_policy: strict_abi\n")
+        req = CompareRequest(
+            old=InputSpec.of("a"), new=InputSpec.of("b"), policy_file_path=present
+        )
+        assert req.validation_errors() == []
+
 
 class TestCompareRequestReplace:
     def test_replace_round_trips_fields(self):

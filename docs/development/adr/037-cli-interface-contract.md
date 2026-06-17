@@ -1,9 +1,14 @@
 # ADR-037: CLI Interface Contract, Configuration Balance, and Extension Policy
 
 **Date:** 2026-06-16
-**Status:** Proposed — tracked as G22 in
-`docs/development/usecase-registry.yaml`; phased work in
-[plans/g22-cli-consolidation.md](../plans/g22-cli-consolidation.md).
+**Status:** Accepted — implemented. Tracked as G22 in
+`docs/development/usecase-registry.yaml` (entry `UC-WF-cli-contract`, now
+`complete`); phased work in
+[plans/g22-cli-consolidation.md](../plans/g22-cli-consolidation.md). All seven
+phases landed (D1–D12), enforced by the `cli-contract` AI-readiness gate and
+`tests/test_cli_contract.py`. The single residual is the `--ast-frontend android`
+value, which stays exposed on `collect`'s `--source-abi-extractor` rather than
+the header-AST commands (it has no header-AST path).
 **Decision maker:** (pending)
 
 ---

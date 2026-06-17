@@ -527,6 +527,34 @@ def test_dump_legacy_flag_echoes_note(
     assert "deprecated (ADR-037 D8)" in res.output, res.output
 
 
+# ── D8: --ast-frontend unifies L2 header AST + L4 source-ABI extractor ────────
+
+
+def test_ast_frontend_threads_to_l4_extractor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`--ast-frontend` selects the L4 source-ABI replay extractor too, not just
+    the L2 header AST — one frontend choice across both stages (ADR-037 D8)."""
+    import abicheck.buildsource.inline as inline
+    import abicheck.cli_buildsource as cb
+    from abicheck.model import AbiSnapshot
+
+    captured: dict[str, object] = {}
+
+    def _fake_collect(**kwargs: object) -> None:
+        captured.update(kwargs)
+        return None
+
+    # embed_build_source imports collect_inline_pack from the inline module at
+    # call time, so patch it at the source.
+    monkeypatch.setattr(inline, "collect_inline_pack", _fake_collect)
+    src = tmp_path / "src"
+    src.mkdir()
+    snap = AbiSnapshot(library="l", version="1")
+    cb.embed_build_source(snap, None, src, collect_mode="source-target", extractor="clang")
+    assert captured.get("extractor") == "clang"
+
+
 # ── G22 Phase 7: DEPRECATED_FLAGS resolver (ADR-037 §Backward-compat) ─────────
 
 
