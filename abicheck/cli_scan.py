@@ -70,6 +70,7 @@ from .buildsource.scan_levels import (
 )
 from .checker_policy import API_BREAK_KINDS, BREAKING_KINDS
 from .cli import _safe_write_output, _setup_verbosity, main
+from .cli_options import compile_context_options, echo_ast_frontend_deprecation
 from .cli_params import DEPTH_PARAM
 
 #: Exit code for a ``--budget`` overflow (ADR-035 D3: a budget always fails,
@@ -403,6 +404,7 @@ def _build_new_snapshot(
     build_config: Path | None = None,
     public_headers: list[Path] | None = None,
     public_header_dirs: list[Path] | None = None,
+    compile_context: Any = None,
 ) -> Any:
     """Dump the candidate's L0-L2 surface and embed L3-L5 inline at *collect_mode*.
 
@@ -429,6 +431,7 @@ def _build_new_snapshot(
             lang=lang,
             public_headers=public_headers,
             public_header_dirs=public_header_dirs,
+            compile=compile_context,
         )
     except AbicheckError as exc:
         raise click.ClickException(f"Failed to load --binary {binary}: {exc}") from exc
@@ -665,6 +668,7 @@ def _audit_exit_code(
 )
 @click.option("-o", "--output", type=click.Path(path_type=Path), default=None)
 @click.option("-v", "--verbose", is_flag=True, default=False)
+@compile_context_options  # dump↔scan L2 compile-context parity (ADR-037 D3)
 def scan_cmd(
     binaries: tuple[Path, ...],
     headers: tuple[Path, ...],
@@ -690,6 +694,13 @@ def scan_cmd(
     fmt: str,
     output: Path | None,
     verbose: bool,
+    header_backend: str = "auto",
+    gcc_path: str | None = None,
+    gcc_prefix: str | None = None,
+    gcc_options: str | None = None,
+    gcc_option_tokens: tuple[str, ...] = (),
+    sysroot: Path | None = None,
+    nostdinc: bool = False,
 ) -> None:
     """Deterministic source-intelligence scan (classify → always-on tier → level).
 
@@ -715,6 +726,24 @@ def scan_cmd(
     """
     _setup_verbosity(verbose)
     start = time.monotonic()
+
+    # ADR-037 D8: legacy --header-backend → --ast-frontend deprecation note.
+    echo_ast_frontend_deprecation()
+
+    # L2 header compile context (dump↔scan parity, ADR-037 D3): bundle the
+    # cross-toolchain + frontend flags so the candidate/baseline header parse runs
+    # with the same build context `dump` would use.
+    from .service_scan import CompileContext
+
+    compile_context = CompileContext(
+        gcc_path=gcc_path,
+        gcc_prefix=gcc_prefix,
+        gcc_options=gcc_options,
+        gcc_option_tokens=tuple(gcc_option_tokens),
+        sysroot=sysroot,
+        nostdinc=nostdinc,
+        frontend=header_backend,
+    )
 
     if len(binaries) != 1:
         raise click.UsageError(
@@ -842,6 +871,7 @@ def scan_cmd(
                 source_method is not None and source_method != SourceMethod.AUTO.value
             )
             or (source_method is None and depth is not None),
+            compile_context=None if compile_context.is_default else compile_context,
         )
     except _BudgetOverflow as bo:
         click.echo(bo.message, err=True)
@@ -914,6 +944,7 @@ def run_scan_core(
     budget: str | None,
     budget_s: float | None,
     level_explicit: bool = False,
+    compile_context: Any = None,
 ) -> ScanCoreResult:
     """The shared scan orchestration (classify → always-on tier → level → compare).
 
@@ -1038,6 +1069,7 @@ def run_scan_core(
         build_config=build_config,
         public_headers=list(public_headers),
         public_header_dirs=list(public_header_dirs),
+        compile_context=compile_context,
     )
 
     # --- honest level-vs-evidence advisory ------------------------------------
@@ -1103,6 +1135,7 @@ def run_scan_core(
             list(includes),
             list(public_headers),
             list(public_header_dirs),
+            compile_context=compile_context,
         )
         # A cross-check the maintainer promoted to `error` (D6) gates the exit
         # even when the baseline diff itself is clean.
@@ -1312,6 +1345,7 @@ def _run_baseline_compare(
     includes: list[Path],
     public_headers: list[Path],
     public_header_dirs: list[Path],
+    compile_context: Any = None,
 ) -> tuple[str, int, dict[str, Any]]:
     """Compare *new_snap* against *baseline*, folding cross-source findings in.
 
@@ -1345,6 +1379,7 @@ def _run_baseline_compare(
             lang=lang,
             public_headers=public_headers,
             public_header_dirs=public_header_dirs,
+            compile=compile_context,
         )
     except AbicheckError as exc:
         raise click.ClickException(

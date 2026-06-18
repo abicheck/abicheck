@@ -235,6 +235,77 @@ def scope_options(func: F) -> F:
     return func
 
 
+def compile_context_options(func: F) -> F:
+    """L2 header-AST compile context — the cross-toolchain + frontend family.
+
+    The single source of truth for the flags that tell the header frontend how to
+    parse the public headers: ``--ast-frontend`` (which frontend), the cross
+    compiler (``--gcc-path``/``--gcc-prefix``), pass-through compiler flags
+    (``--gcc-options``/``--gcc-option``), an alternate ``--sysroot``, and
+    ``--nostdinc``. Shared verbatim by ``dump`` **and** ``scan`` so the two never
+    drift (ADR-037 D3 parity; ADR-035 amendment — ``scan`` must be able to reach a
+    real L2). Decorators apply bottom-up, so the options are listed in reverse of
+    their displayed order. Dest names match the ``dumper.dump`` /
+    :class:`~abicheck.service_scan.CompileContext` kwargs exactly.
+    """
+    func = click.option(
+        "--nostdinc",
+        "nostdinc",
+        is_flag=True,
+        default=False,
+        help="Do not search the standard system include paths (suppresses the "
+        "castxml↔clang system-include auto-detection too).",
+    )(func)
+    func = click.option(
+        "--sysroot",
+        "sysroot",
+        type=click.Path(path_type=Path),
+        default=None,
+        help="Alternative system root directory for header resolution.",
+    )(func)
+    func = click.option(
+        "--gcc-option",
+        "gcc_option_tokens",
+        multiple=True,
+        help="A single extra compiler flag passed to the header frontend verbatim "
+        "(repeatable; not whitespace-split). Use two for a flag + spaced value, "
+        "e.g. --gcc-option=-include --gcc-option='some header.h'.",
+    )(func)
+    func = click.option(
+        "--gcc-options",
+        "gcc_options",
+        default=None,
+        help="Extra compiler flags passed through to the header frontend (split on "
+        "whitespace). For a flag whose value contains spaces use --gcc-option.",
+    )(func)
+    func = click.option(
+        "--gcc-prefix",
+        "gcc_prefix",
+        default=None,
+        help="Cross-toolchain prefix (e.g. aarch64-linux-gnu-).",
+    )(func)
+    func = click.option(
+        "--gcc-path",
+        "gcc_path",
+        default=None,
+        help="Path to a GCC/G++ (or clang) cross-compiler binary.",
+    )(func)
+    func = click.option(
+        "--ast-frontend",
+        "--header-backend",
+        "header_backend",
+        default="auto",
+        show_default=True,
+        type=click.Choice(["auto", "castxml", "clang"], case_sensitive=False),
+        help="C/C++ AST frontend (ADR-037 D8): castxml (default schema reference) "
+        "or clang (-ast-dump=json; for hosts where castxml is absent or its "
+        "bundled frontend chokes). auto = castxml if present, else clang, with an "
+        "automatic clang fallback on a castxml toolchain-version error. Env: "
+        "ABICHECK_AST_FRONTEND. (--header-backend is a deprecated alias.)",
+    )(func)
+    return func
+
+
 def output_options(
     formats: Sequence[str],
     *,

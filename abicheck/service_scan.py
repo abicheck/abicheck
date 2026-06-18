@@ -135,6 +135,34 @@ class Budget:
 
 
 @dataclass(frozen=True)
+class CompileContext:
+    """L2 header-AST compile context — shared by ``dump`` and ``scan``.
+
+    The cross-toolchain + frontend knobs the header frontend needs to parse the
+    public headers: the cross-compiler (``--gcc-path``/``--gcc-prefix``), extra
+    compiler flags (``--gcc-options``/``--gcc-option``), an alternate
+    ``--sysroot``, ``--nostdinc``, and which ``--ast-frontend`` to drive. ADR-037
+    D3 (parity: ``dump`` and ``scan`` carry the *same* family via one decorator)
+    and the ADR-035 amendment (``scan`` must be able to reach a real L2 — the
+    cross-source checks depend on header provenance). All fields defaulted, so a
+    bare ``CompileContext()`` is additive over every request and dump path.
+    """
+
+    gcc_path: str | None = None
+    gcc_prefix: str | None = None
+    gcc_options: str | None = None
+    gcc_option_tokens: tuple[str, ...] = ()
+    sysroot: Path | None = None
+    nostdinc: bool = False
+    frontend: str = "auto"  # --ast-frontend (auto/castxml/clang)
+
+    @property
+    def is_default(self) -> bool:
+        """True when nothing was customised (lets call sites skip threading)."""
+        return self == CompileContext()
+
+
+@dataclass(frozen=True)
 class ScanRequest:
     """Typed input to the scan engine (ADR-035 D10). All additive over dump/compare."""
 
@@ -153,6 +181,8 @@ class ScanRequest:
     seeded: bool = False  # a real diff seed was produced (even if changed_paths is [])
     budget: Budget = field(default_factory=Budget)
     lang: str = "c++"
+    # L2 header compile context (dump↔scan flag parity, ADR-037 D3).
+    compile: CompileContext = field(default_factory=CompileContext)
 
 
 @dataclass(frozen=True)
@@ -638,6 +668,7 @@ def run_scan(req: ScanRequest) -> ScanResult:
             severities={},
             budget=budget_str,
             budget_s=budget_s,
+            compile_context=None if req.compile.is_default else req.compile,
         )
     except _BudgetOverflow:
         # The failure-guard contract: overflow is exit 5, never a shrunk scope.

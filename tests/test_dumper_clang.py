@@ -1686,7 +1686,9 @@ def test_auto_system_includes_enabled_default_and_toggle(
 def test_resolve_probe_compiler_prefers_gnu_gcc_path(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(dumper.shutil, "which", lambda c: c)
+    from abicheck import dumper_sysinc
+
+    monkeypatch.setattr(dumper_sysinc.shutil, "which", lambda c: c)
     # An explicit GNU --gcc-path is used verbatim…
     assert _resolve_probe_compiler("c++", "/opt/gcc-13/bin/g++", None) == (
         "/opt/gcc-13/bin/g++"
@@ -1704,18 +1706,24 @@ def test_resolve_probe_compiler_prefers_gnu_gcc_path(
 def test_resolve_probe_compiler_none_when_no_compiler(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(dumper.shutil, "which", lambda c: None)
+    from abicheck import dumper_sysinc
+
+    monkeypatch.setattr(dumper_sysinc.shutil, "which", lambda c: None)
     assert _resolve_probe_compiler("c++", None, None) is None
 
 
 def test_resolve_clang_system_includes_gating(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from abicheck import dumper_sysinc
+
     monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "1")
     monkeypatch.setattr(
-        dumper, "_probe_gnu_system_includes", lambda *a, **k: ["/usr/include/c++/13"]
+        dumper_sysinc,
+        "_probe_gnu_system_includes",
+        lambda *a, **k: ["/usr/include/c++/13"],
     )
-    monkeypatch.setattr(dumper, "_resolve_probe_compiler", lambda *a, **k: "g++")
+    monkeypatch.setattr(dumper_sysinc, "_resolve_probe_compiler", lambda *a, **k: "g++")
 
     base = dict(gcc_path=None, gcc_prefix=None, force_cpp=True)
     # Default: probed dirs returned.
@@ -1738,8 +1746,10 @@ def test_resolve_clang_system_includes_gating(
 def test_resolve_clang_system_includes_no_compiler(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from abicheck import dumper_sysinc
+
     monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "1")
-    monkeypatch.setattr(dumper, "_resolve_probe_compiler", lambda *a, **k: None)
+    monkeypatch.setattr(dumper_sysinc, "_resolve_probe_compiler", lambda *a, **k: None)
     assert _resolve_clang_system_includes(
         "c++", gcc_path=None, gcc_prefix=None, sysroot=None,
         nostdinc=False, force_cpp=True,

@@ -59,6 +59,13 @@ from .dumper_castxml import (
     _vt_sort_key as _vt_sort_key,
 )
 from .dumper_clang import _ClangAstParser as _ClangAstParser
+from .dumper_sysinc import (
+    _auto_system_includes_enabled as _auto_system_includes_enabled,
+    _parse_gnu_include_search_dirs as _parse_gnu_include_search_dirs,
+    _probe_gnu_system_includes as _probe_gnu_system_includes,
+    _resolve_clang_system_includes as _resolve_clang_system_includes,
+    _resolve_probe_compiler as _resolve_probe_compiler,
+)
 from .elf_symbol_filter import is_abi_relevant_elf_symbol
 from .errors import SnapshotError, ValidationError
 from .model import (
@@ -136,128 +143,6 @@ def _has_explicit_std(
     if gcc_options and ("-std=" in gcc_options or "/std:" in gcc_options):
         return True
     return any(("-std=" in t or "/std:" in t) for t in gcc_option_tokens)
-
-
-#: Env knob to disable the castxml↔clang system-include auto-detection (below).
-#: On by default; set to a falsey value to suppress the host-compiler probe (e.g.
-#: for a hermetic build that supplies its own ``-isystem``/``--sysroot``).
-_AUTO_SYSINC_ENV = "ABICHECK_AUTO_SYSTEM_INCLUDES"
-
-
-def _auto_system_includes_enabled() -> bool:
-    """True unless the user disabled the system-include probe via the env knob."""
-    return os.environ.get(_AUTO_SYSINC_ENV, "1").strip().lower() not in (
-        "0",
-        "false",
-        "no",
-        "off",
-    )
-
-
-def _parse_gnu_include_search_dirs(stderr: str) -> list[str]:
-    """Parse a GCC/Clang ``-E -v`` stderr into its system include search dirs.
-
-    The driver prints the resolved search path between the
-    ``#include <...> search starts here:`` and ``End of search list.`` markers,
-    one directory per indented line (Clang/GCC both use this format; Darwin may
-    append `` (framework directory)``). Pure/string-only so it is unit-testable
-    without a compiler installed. Returns the directories in search order.
-    """
-    dirs: list[str] = []
-    in_block = False
-    for line in stderr.splitlines():
-        stripped = line.strip()
-        if "search starts here:" in stripped:
-            in_block = True
-            continue
-        if stripped.startswith("End of search list."):
-            break
-        if in_block and stripped:
-            # GCC/Clang on Darwin tag framework dirs with a trailing note.
-            dirs.append(stripped.split(" (", 1)[0].strip())
-    return dirs
-
-
-def _probe_gnu_system_includes(cc_bin: str, *, cpp: bool) -> list[str]:
-    """Probe *cc_bin* for the system include dirs it would search (best-effort).
-
-    The clang counterpart of what castxml gets for free: ``castxml
-    --castxml-cc-gnu g++`` runs the real compiler to discover its built-in
-    include paths (so the host libstdc++ ``<cstddef>`` etc. are found), then
-    parses with those injected. Running ``clang -ast-dump=json`` *directly* does
-    not — clang uses its own GCC-toolchain auto-detection, which misses the host
-    C++ stdlib in minimal containers / non-standard prefixes / Conda-clang
-    setups. This re-creates the castxml behaviour for the clang backend by asking
-    the GNU driver where its headers live and feeding them back as ``-isystem``.
-
-    Best-effort: any probe failure (no compiler, timeout) yields ``[]`` so the
-    dump still runs on clang's own detection. Only existing directories are
-    returned, in the compiler's own search order.
-    """
-    lang = "c++" if cpp else "c"
-    try:
-        proc = subprocess.run(
-            [cc_bin, "-E", "-x", lang, "-v", "-"],
-            input="",
-            capture_output=True,
-            text=True,
-            timeout=15,
-            check=False,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return []
-    return [
-        d for d in _parse_gnu_include_search_dirs(proc.stderr or "") if Path(d).is_dir()
-    ]
-
-
-def _resolve_probe_compiler(
-    compiler: str, gcc_path: str | None, gcc_prefix: str | None
-) -> str | None:
-    """Pick a GNU ``gcc``/``g++`` driver to probe for system includes, or None.
-
-    Prefers an explicit GNU ``--gcc-path`` (a clang there is useless for
-    discovering the host libstdc++, so it is skipped), then the cross
-    ``--gcc-prefix`` driver, then ``g++``/``gcc`` on PATH. Returns the first that
-    resolves, or ``None`` when no GNU compiler is available (then clang falls
-    back to its own detection).
-    """
-    cpp = compiler in ("c++", "g++", "clang++")
-    primary = "g++" if cpp else "gcc"
-    candidates: list[str] = []
-    if gcc_path and "clang" not in Path(gcc_path).name.lower():
-        candidates.append(gcc_path)
-    if gcc_prefix:
-        candidates.append(f"{gcc_prefix}{primary}")
-    candidates += [primary, "gcc" if cpp else "g++"]
-    for cand in candidates:
-        if shutil.which(cand):
-            return cand
-    return None
-
-
-def _resolve_clang_system_includes(
-    compiler: str,
-    *,
-    gcc_path: str | None,
-    gcc_prefix: str | None,
-    sysroot: Path | None,
-    nostdinc: bool,
-    force_cpp: bool,
-) -> tuple[str, ...]:
-    """Resolve the ``-isystem`` dirs to inject for a clang header dump.
-
-    Empty when auto-detection is disabled, ``-nostdinc`` was requested, an
-    explicit ``--sysroot`` already redirects the search, or no GNU compiler is
-    available to probe. Otherwise the host GNU driver's system include dirs
-    (castxml↔clang parity, see :func:`_probe_gnu_system_includes`).
-    """
-    if nostdinc or sysroot is not None or not _auto_system_includes_enabled():
-        return ()
-    probe_cc = _resolve_probe_compiler(compiler, gcc_path, gcc_prefix)
-    if probe_cc is None:
-        return ()
-    return tuple(_probe_gnu_system_includes(probe_cc, cpp=force_cpp))
 
 
 def _build_clang_header_command(

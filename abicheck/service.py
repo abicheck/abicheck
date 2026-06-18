@@ -155,6 +155,7 @@ def resolve_input(
     public_header_dirs: list[Path] | None = None,
     follow_linker_scripts: bool = True,
     header_backend: str = "auto",
+    compile: CompileContext | None = None,
     notify: Callable[[str], None] | None = None,
 ) -> AbiSnapshot:
     """Auto-detect input type and return an ABI snapshot.
@@ -208,6 +209,7 @@ def resolve_input(
             public_headers=public_headers,
             public_header_dirs=public_header_dirs,
             header_backend=header_backend,
+            compile=compile,
             notify=notify,
         )
 
@@ -229,6 +231,7 @@ def resolve_input(
             public_headers=public_headers,
             public_header_dirs=public_header_dirs,
             header_backend=header_backend,
+            compile=compile,
             notify=notify,
         )
 
@@ -294,6 +297,7 @@ def resolve_input(
                     public_header_dirs=public_header_dirs,
                     follow_linker_scripts=follow_linker_scripts,
                     header_backend=header_backend,
+                    compile=compile,
                     notify=notify,
                 )
             raise ValidationError(
@@ -341,6 +345,7 @@ def run_dump(
     public_headers: list[Path] | None = None,
     public_header_dirs: list[Path] | None = None,
     header_backend: str = "auto",
+    compile: CompileContext | None = None,
     notify: Callable[[str], None] | None = None,
 ) -> AbiSnapshot:
     """Extract an ABI snapshot from a native binary (ELF, PE, or Mach-O).
@@ -357,6 +362,13 @@ def run_dump(
     """
     _headers = headers or []
     _includes = includes or []
+    # An explicit --ast-frontend on the compile context wins over the bare
+    # header_backend arg (the latter is the compare-path default carrier).
+    eff_backend = (
+        compile.frontend
+        if (compile is not None and compile.frontend != "auto")
+        else header_backend
+    )
 
     if binary_fmt == "elf":
         snap = _dump_elf(
@@ -369,7 +381,8 @@ def run_dump(
             debug_roots=debug_roots,
             enable_debuginfod=enable_debuginfod,
             debug_format=debug_format,
-            header_backend=header_backend,
+            header_backend=eff_backend,
+            compile=compile,
             notify=notify,
         )
         _try_attach_sycl_metadata(snap, path)
@@ -382,7 +395,7 @@ def run_dump(
             includes=_includes,
             lang=lang,
             pdb_path=pdb_path,
-            header_backend=header_backend,
+            header_backend=eff_backend,
         )
         return _apply_native_provenance(snap, public_headers, public_header_dirs)
     if binary_fmt == "macho":
@@ -391,7 +404,7 @@ def run_dump(
             version,
             headers=_headers,
             includes=_includes,
-            header_backend=header_backend,
+            header_backend=eff_backend,
             lang=lang,
         )
         return _apply_native_provenance(snap, public_headers, public_header_dirs)
@@ -459,11 +472,13 @@ def _dump_elf(
     enable_debuginfod: bool = False,
     debug_format: str | None = None,
     header_backend: str = "auto",
+    compile: CompileContext | None = None,
     notify: Callable[[str], None] | None = None,
 ) -> AbiSnapshot:
     """Dump an ELF binary to an ABI snapshot."""
     from .dumper import dump
 
+    cc = compile if compile is not None else CompileContext()
     resolved_headers = expand_header_inputs(headers) if headers else []
     if not resolved_headers and not dwarf_only:
         _emit(
@@ -488,6 +503,12 @@ def _dump_elf(
             extra_includes=includes,
             version=version,
             compiler=compiler,
+            gcc_path=cc.gcc_path,
+            gcc_prefix=cc.gcc_prefix,
+            gcc_options=cc.gcc_options,
+            gcc_option_tokens=cc.gcc_option_tokens,
+            sysroot=cc.sysroot,
+            nostdinc=cc.nostdinc,
             lang=lang if lang == "c" else None,
             dwarf_only=dwarf_only,
             debug_format=debug_format,
@@ -1156,6 +1177,7 @@ def _render_json_output(
 from .service_scan import (  # noqa: E402,F401
     _HEADER_EXTS,
     Budget,
+    CompileContext,
     CostEstimate,
     LayerResult,
     ScanRequest,
@@ -1183,6 +1205,7 @@ from .service_scan import (  # noqa: E402,F401
 __all__ = [
     "Budget",
     "CompareRequest",
+    "CompileContext",
     "CostEstimate",
     "InputSpec",
     "LayerResult",
