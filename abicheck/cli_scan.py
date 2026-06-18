@@ -833,13 +833,16 @@ def scan_cmd(
             severities=severities,
             budget=budget,
             budget_s=budget_s,
-            # A concrete explicit --source-method/--depth (not the default mode
-            # preset, and not --source-method auto) is what consents to
-            # level-implies-query auto-running build.query.
+            # A concrete explicit level is what consents to level-implies-query
+            # auto-running build.query: a non-auto --source-method, or --depth ONLY
+            # when no --source-method is given (resolve_level gives --source-method
+            # precedence and ignores --depth otherwise, so `auto`+`--depth` resolves
+            # via auto/the preset, not the depth — it must not count as consent;
+            # Codex review).
             level_explicit=(
-                (source_method is not None and source_method != SourceMethod.AUTO.value)
-                or depth is not None
-            ),
+                source_method is not None and source_method != SourceMethod.AUTO.value
+            )
+            or (source_method is None and depth is not None),
         )
     except _BudgetOverflow as bo:
         click.echo(bo.message, err=True)

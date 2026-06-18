@@ -997,6 +997,68 @@ def test_level_implies_query_silent_when_config_defines_no_query(
     assert "auto-enabled the query" not in res.output
 
 
+def test_level_implies_query_auto_plus_depth_does_not_consent(
+    runner, tmp_path, source_tree_with_compile_db, new_snap_compatible
+):
+    # Codex review: `--source-method auto` takes precedence and makes resolve_level
+    # IGNORE --depth, so `auto` + `--depth` resolves via auto/the preset, not the
+    # depth. That must NOT count as explicit consent to run build.query. (build-info
+    # carries a real DB so the query string is never actually executed.)
+    cfg = tmp_path / ".abicheck.yml"
+    cfg.write_text(
+        "build:\n  query: cmake -S . -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON\n",
+        encoding="utf-8",
+    )
+    res = runner.invoke(
+        main,
+        [
+            "scan",
+            "--binary",
+            str(new_snap_compatible),
+            "--build-info",
+            str(source_tree_with_compile_db),
+            "--config",
+            str(cfg),
+            "--source-method",
+            "auto",
+            "--depth",
+            "source",
+            "--audit",
+        ],
+    )
+    assert res.exit_code == 0, res.output
+    assert "auto-enabled the query" not in res.output
+
+
+def test_level_implies_query_depth_only_consents(
+    runner, tmp_path, source_tree_with_compile_db, new_snap_compatible
+):
+    # The flip side: an explicit --depth with NO --source-method is a concrete
+    # pinned level (resolve_level uses it), so it DOES consent to the trusted query.
+    cfg = tmp_path / ".abicheck.yml"
+    cfg.write_text(
+        "build:\n  query: cmake -S . -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON\n",
+        encoding="utf-8",
+    )
+    res = runner.invoke(
+        main,
+        [
+            "scan",
+            "--binary",
+            str(new_snap_compatible),
+            "--build-info",
+            str(source_tree_with_compile_db),
+            "--config",
+            str(cfg),
+            "--depth",
+            "source",
+            "--audit",
+        ],
+    )
+    assert res.exit_code == 0, res.output
+    assert "auto-enabled the query" in res.output
+
+
 def test_header_short_alias_works(runner, tmp_path, new_snap_compatible):
     # The --help example uses `-H`; the alias must actually parse (Codex review).
     header = tmp_path / "inc" / "w.h"
