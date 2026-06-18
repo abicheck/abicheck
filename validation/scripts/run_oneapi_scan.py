@@ -219,7 +219,11 @@ def run() -> list[dict]:
                 text=True,
                 timeout=900,
             )
-        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+        except (
+            subprocess.CalledProcessError,
+            subprocess.TimeoutExpired,
+            OSError,
+        ) as exc:
             row["status"] = "DUMP_FAILED"
             row["detail"] = (getattr(exc, "stderr", None) or str(exc))[-300:]
             results.append(row)
@@ -247,9 +251,9 @@ def run() -> list[dict]:
                 text=True,
                 timeout=900,
             )
-        except subprocess.TimeoutExpired as exc:
+        except (subprocess.TimeoutExpired, OSError) as exc:
             row["status"] = "SCAN_FAILED"
-            row["detail"] = f"timeout: {exc}"[-300:]
+            row["detail"] = str(exc)[-300:]
             results.append(row)
             continue
         row["wall_s"] = round(time.monotonic() - start, 2)
