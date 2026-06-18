@@ -130,38 +130,23 @@ def _resolve_header_backend(backend: str | None) -> str:
     return "castxml"
 
 
-#: The C++ standard library headers (C++23). A *valid C* translation unit never
-#: ``#include``s any of these, so when a C-mode parse fails to find one the TU is
-#: actually C++ — the signal that drives the clang C→C++ retry. Restricted to this
-#: exact whitelist (not "any extensionless header") so a C header that misses an
-#: extensionless *project* include (e.g. ``<config>``) is reported as the genuine
-#: missing C dependency rather than being silently re-parsed under ``__cplusplus``
-#: (Codex review).
+#: The C++ ``<cXXX>`` C-compatibility headers (``<cstddef>``, ``<cstdint>``, …).
+#: A missing one of these under a C-mode parse unambiguously means the TU is C++
+#: — the signal that drives the clang C→C++ retry. Deliberately restricted to the
+#: ``<cXXX>`` spellings rather than the *full* C++ library set: a C project never
+#: bare-includes ``<cstddef>``, whereas plain names like ``<string>``/``<version>``
+#: collide with plausible C project headers (oneTBB itself ships a ``version.h``),
+#: so matching those could re-parse a broken C build as C++ — silently caching a
+#: wrong AST instead of reporting the genuine missing dependency (Codex review).
+#: In practice the first miss for a C++ TU parsed in C mode is always a ``<cXXX>``
+#: header (libstdc++ pulls them in early); the rare "pure-C++ header missing
+#: first" case is handled by passing ``--lang c++`` explicitly.
 _CPP_STDLIB_HEADERS = frozenset(
     {
-        # C++ library headers
-        "algorithm", "any", "array", "atomic", "barrier", "bit", "bitset",
-        "charconv", "chrono", "codecvt", "compare", "complex", "concepts",
-        "condition_variable", "coroutine", "deque", "exception", "execution",
-        "expected", "filesystem", "flat_map", "flat_set", "format",
-        "forward_list", "fstream", "functional", "future", "generator",
-        "initializer_list", "iomanip", "ios", "iosfwd", "iostream", "istream",
-        "iterator", "latch", "limits", "list", "locale", "map", "mdspan",
-        "memory", "memory_resource", "mutex", "new", "numbers", "numeric",
-        "optional", "ostream", "print", "queue", "random", "ranges", "ratio",
-        "regex", "scoped_allocator", "semaphore", "set", "shared_mutex",
-        "source_location", "span", "spanstream", "sstream", "stack",
-        "stacktrace", "stdexcept", "stdfloat", "stop_token", "streambuf",
-        "string", "string_view", "strstream", "syncstream", "system_error",
-        "thread", "tuple", "type_traits", "typeindex", "typeinfo",
-        "unordered_map", "unordered_set", "utility", "valarray", "variant",
-        "vector", "version",
-        # C compatibility headers (<cXXX>) — the ones that surface first in
-        # practice because they pull in libstdc++/libc machinery.
         "cassert", "cctype", "cerrno", "cfenv", "cfloat", "cinttypes",
         "ciso646", "climits", "clocale", "cmath", "csetjmp", "csignal",
-        "cstdarg", "cstddef", "cstdint", "cstdio", "cstdlib", "cstring",
-        "ctime", "cuchar", "cwchar", "cwctype",
+        "cstdalign", "cstdarg", "cstdbool", "cstddef", "cstdint", "cstdio",
+        "cstdlib", "cstring", "ctgmath", "ctime", "cuchar", "cwchar", "cwctype",
     }
 )
 
@@ -171,16 +156,16 @@ _MISSING_HEADER_RE = re.compile(r"'([^'/]+)' file not found")
 
 
 def _is_missing_cpp_stdlib_header_error(stderr: str) -> bool:
-    """True if a clang parse failed because a C++ *standard* header was not found.
+    """True if a clang parse failed because a C++ ``<cXXX>`` header was not found.
 
     Pure/string-only so it is unit-testable without a compiler. Matches clang's
     ``fatal error: '<name>' file not found`` and confirms ``<name>`` is one of the
-    known C++ standard library headers (:data:`_CPP_STDLIB_HEADERS`). A C header
-    always carries a ``.h`` suffix and the C standard library is never named this
-    way, so such a miss means the TU is C++ and a C-mode parse picked the wrong
-    language — driving the C→C++ retry. An extensionless *project* include that is
-    not a stdlib header is deliberately *not* matched, so a real missing C
-    dependency is reported instead of masked by a ``__cplusplus`` re-parse.
+    C++ ``<cXXX>`` C-compatibility headers (:data:`_CPP_STDLIB_HEADERS`). A C TU
+    never includes one, so such a miss means the TU is C++ and a C-mode parse
+    picked the wrong language — driving the C→C++ retry. Plain-name C++ headers
+    (``<string>``/``<version>``/…) are deliberately *not* matched because they
+    collide with plausible C project header names; matching them could silently
+    re-parse a broken C build as C++ instead of reporting the missing dependency.
     """
     return any(
         m.group(1) in _CPP_STDLIB_HEADERS for m in _MISSING_HEADER_RE.finditer(stderr)

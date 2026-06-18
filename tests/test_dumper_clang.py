@@ -993,13 +993,20 @@ def test_clang_header_dump_bad_json_raises(
 @pytest.mark.parametrize(
     "stderr,expected",
     [
+        # The <cXXX> C-compatibility wrappers are the unambiguous trigger.
         ("fatal error: 'cstddef' file not found", True),
-        ("fatal error: 'vector' file not found", True),
-        ("error: 'string' file not found", True),
         ("fatal error: 'cstdint' file not found", True),
+        ("error: 'cstdlib' file not found", True),
+        ("fatal error: 'cstring' file not found", True),
         # A C header miss carries a .h suffix → not a C++ stdlib signal.
         ("fatal error: 'stdio.h' file not found", False),
         ("fatal error: 'oneapi/tbb.h' file not found", False),
+        # Plain-name C++ headers are deliberately NOT matched — they collide with
+        # plausible C project header names (oneTBB ships a version.h), so matching
+        # them could mask a real missing C dependency by re-parsing as C++.
+        ("fatal error: 'string' file not found", False),
+        ("fatal error: 'version' file not found", False),
+        ("fatal error: 'vector' file not found", False),
         # An extensionless *project* include that is not a stdlib header must NOT
         # trigger the retry (a C header's real missing dependency, not C++).
         ("fatal error: 'config' file not found", False),
