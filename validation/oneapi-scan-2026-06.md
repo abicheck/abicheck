@@ -3,9 +3,13 @@
 Real `abicheck` **0.4.0** run (post-PR #440, fresh `main` `e31f357`) against four
 Intel oneAPI / UXL libraries on a **clang-only host (no castxml)**. This records
 the binary-evidence tier (`--source-method s0` → L0/L1) end-to-end across seven
-version pairs, plus the feasibility limits hit on the deeper L2–L5 tiers.
+version pairs. The **[L2 finalization](#l2-finalization-post-pr-444--scope-divergences-resolved)**
+section below (added after PR #444 unblocked the clang L2 backend on GNU hosts)
+re-runs the divergent pairs under public-header scope and resolves the
+scope-divergence questions raised in the binary-tier analysis.
 
-Raw per-pair data: `data/oneapi_scan_2026-06.json`. Reproduce with
+Raw per-pair data: `data/oneapi_scan_2026-06.json` (binary tier) and
+`data/oneapi_scan_l2_2026-06.json` (L2). Reproduce with
 `validation/scripts/run_oneapi_scan.py`.
 
 ## Environment
@@ -78,7 +82,8 @@ public-header oracle, and the divergences are all explained by it:
 binary-strict scope divergences (oneDNN/oneDAL minor) that a public-header scope
 would demote. **Zero clear false positives** — every breaking verdict corresponds
 to symbols genuinely removed from the binary; the question is only public-ness,
-which needs the L2 header tier to settle.
+**settled in the [L2 finalization](#l2-finalization-post-pr-444--scope-divergences-resolved)
+below** (oneDAL → NO_CHANGE; oneDNN → one real public change).
 
 ## Timing
 
@@ -86,30 +91,52 @@ which needs the L2 header tier to settle.
   oneDNN (~mid) 3–4 s; **oneCCL 15 s; oneDAL 52–61 s** (125–149 MB, ~10–25 k
   symbols). All s0; no L4 cliff is paid at this tier.
 
-## Limitations hit (deeper tiers)
+## L2 finalization (post-PR #444) — scope divergences resolved
 
-- **L2 (clang header AST) needs the full TU flag set.** Scanning `oneapi/tbb.h`
-  via the clang L2 backend failed in a cascade — each fix surfaced the next:
-  (1) nested `oneapi/...` includes → needs `-I <include-root>`; (2) `<cstddef>`
-  not found → **clang doesn't auto-detect the GCC libstdc++ toolchain** here
-  (headers at `/usr/include/c++/13`); (3) a `-std=c++NN` is then required. The bare
-  `scan -H` path supplies none of these, confirming the documented "L2 needs the
-  TU's compile context" limit on a clang-only host. **Consequence:** the
-  public/internal boundary (which would demote the oneDNN/oneDAL scope divergences
-  to COMPATIBLE) could not be established here.
-- **L3–L5 (s1/s2/s4/s5/s6) need a compile DB.** Not exercised in this run; conda
-  ships no `compile_commands.json`, so these require a configure step or
-  `build.query` (oneDAL would use the Bazel `aquery` adapter).
+The L2 cascade documented above was an **abicheck-side gap, not an environment
+limit**: PR #444 (`main` @ `2625ed8`) fixed two defects in the clang L2 backend's
+host-toolchain probe — it injected GCC's own compiler-resource dir (breaking on
+`__builtin_ia32_*`), and it parsed pure-`#include` umbrella headers in C mode
+(so `<cstddef>` was missing). With #444 merged, the clang L2 backend parses these
+headers directly (the `-I` include root is still supplied; libstdc++ detection and
+the C→C++ retry are now automatic). Re-running the two divergent minor pairs (and
+oneTBB as a control) under **public-header scope** confirms the predicted demotions.
+Raw data: `data/oneapi_scan_l2_2026-06.json`.
+
+| Lib | Pair | Binary tier (s0) | **L2 (public header)** | What L2 revealed |
+|-----|------|------------------|------------------------|------------------|
+| oneTBB | 2021.12→2021.13 | COMPATIBLE_WITH_RISK | **COMPATIBLE_WITH_RISK** | Consistent (control); confirms the L2 pipeline. |
+| oneDNN | 3.11→3.12 | BREAKING (6) | **BREAKING (1 real)** | 5 findings **demote to risk** — they are *libstdc++* leakage (`std::_Sp_counted_deleter` RTTI/vtable, `std::__do_uninit_copy`, `std::_Hashtable`), not oneDNN API. The 1 remaining breaking change is concrete and **public**: `dnnl::memory::format_tag::format_tag_last` shifted (3.12 added format tags → the enum sentinel changed value). |
+| oneDAL | 2025.0→2025.1 | BREAKING (164) | **NO_CHANGE** | Full demotion. The public DAAL API (`daal.h` → **25,595 functions, 1,189 types, 448 enums**) is byte-identical; the 212 removed exports are confirmed **bundled MKL/BLAS** internals (`DGETRF`/`SGETRF`/…) outside oneDAL's public surface. |
+
+**Takeaway:** L2 does exactly what the binary-tier analysis predicted. oneDAL's
+minor-bump BREAKING was pure packaging noise → **NO_CHANGE** under public scope.
+oneDNN's BREAKING was *mostly* noise (leaked stdlib instantiations demoted to
+risk) but L2 also **surfaced one genuine public-API change** the binary tier had
+buried among opaque `func_removed_elf_only` rows — the `format_tag_last` enum
+sentinel. This is the core value of the header tier: it separates dependency/stdlib
+leakage from real public-surface changes. Both `tbb.h` and `daal.h` are pure
+`#include` umbrella headers and exercised #444's C→C++ self-heal retry; `dnnl.hpp`
+carries inline `namespace`/`enum` and was detected as C++ directly.
+
+## Limitations still open (L3–L5)
+
+- **L3–L5 (s1/s2/s4/s5/s6) need a compile DB.** Not exercised; conda ships no
+  `compile_commands.json`, so these require a configure step or a trusted
+  `build.query` (oneDAL would use the Bazel `aquery` adapter). L2 settles the
+  public/internal boundary for these libraries, so L3–L5 would add build-graph
+  provenance rather than change the verdicts above.
 
 ## Conclusions
 
-- The PR #440 scanner runs cleanly on real oneAPI binaries; the Intel-channel
-  harness fetches oneCCL correctly.
+- The scanner runs cleanly on real oneAPI binaries; the Intel-channel harness
+  fetches oneCCL correctly.
 - Binary-strict `s0` gives the **right verdict on SONAME bumps** and **correctly
   demotes oneTBB's internal-symbol churn** (no FP). The oneDNN/oneDAL minor-bump
-  BREAKINGs are **real exported-symbol removals scoped outside each library's
-  public API** — the documented scope-divergence case, resolvable only with the
-  L2 header tier (blocked here by the clang-toolchain setup, not by abicheck).
-- Next step to close the loop: establish L2 by passing the resolved clang flags
-  (`-I` include roots + libstdc++ paths + `-std`), then re-run the two divergent
-  pairs under public-header scoping to confirm they demote to COMPATIBLE.
+  BREAKINGs were **real exported-symbol removals scoped outside each library's
+  public API** — the documented scope-divergence case.
+- **L2 (post-#444) closes the loop:** oneDAL 2025.0→2025.1 demotes to **NO_CHANGE**
+  and oneDNN 3.11→3.12 reduces to **one real public change** (`format_tag_last`),
+  confirming zero false positives in the binary tier and demonstrating that the
+  header tier both *demotes* dependency/stdlib leakage and *surfaces* genuine
+  public-API changes the binary tier cannot name.
