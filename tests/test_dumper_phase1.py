@@ -10,7 +10,9 @@ from abicheck.elf_metadata import ElfMetadata
 from abicheck.model import Function, Visibility
 
 
-def test_dump_without_headers_warns_and_returns_exported_symbols(tmp_path, monkeypatch):
+def test_dump_without_headers_logs_info_and_returns_exported_symbols(
+    tmp_path, monkeypatch, caplog
+):
     so_path = tmp_path / "libfoo.so"
     so_path.write_bytes(b"\x7fELF")
 
@@ -19,11 +21,15 @@ def test_dump_without_headers_warns_and_returns_exported_symbols(tmp_path, monke
     monkeypatch.setattr("abicheck.dwarf_metadata.parse_dwarf_metadata", lambda _p: None)
     monkeypatch.setattr("abicheck.dwarf_advanced.parse_advanced_dwarf", lambda _p: None)
 
+    # ADR-035 P6: the header-less advisory is now an info log (no stderr spam on
+    # every run), not a UserWarning. It must not warn, and must log the notice.
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
-        snap = dump(so_path=so_path, headers=[], version="1.0")
+        with caplog.at_level("INFO", logger="abicheck.dumper"):
+            snap = dump(so_path=so_path, headers=[], version="1.0")
 
-    assert any("No headers provided" in str(w.message) for w in caught)
+    assert not any("No headers provided" in str(w.message) for w in caught)
+    assert any("No headers provided" in rec.message for rec in caplog.records)
     assert [f.name for f in snap.functions] == ["a_sym", "z_sym"]
     assert all(f.visibility == Visibility.ELF_ONLY for f in snap.functions)
 

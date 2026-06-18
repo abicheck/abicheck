@@ -608,6 +608,104 @@ def test_auto_without_diff_seed_falls_back_to_preset(runner, new_snap_compatible
     assert payload["level"]["collect_mode"] == "source-changed"
 
 
+def test_unseeded_s5_with_sources_emits_headers_only_advisory(
+    runner, source_tree_with_compile_db, new_snap_compatible
+):
+    # ADR-035 P3: an unseeded s5 scan *with a source tree* falls back to a
+    # headers-only replay; the result must carry an advisory naming
+    # --since/--changed-path (text + JSON), not silently pay broad-replay cost.
+    # The advisory rides the structured result so it never pollutes JSON stdout.
+    res = runner.invoke(
+        main,
+        [
+            "scan",
+            "--binary",
+            str(new_snap_compatible),
+            "--sources",
+            str(source_tree_with_compile_db),
+            "--source-method",
+            "s5",
+            "--format",
+            "json",
+            "--audit",
+        ],
+    )
+    assert res.exit_code == 0, res.output
+    payload = json.loads(res.output)
+    assert any("--since" in a for a in payload["advisories"])
+
+
+def test_unseeded_s5_advisory_rendered_in_text_output(
+    runner, source_tree_with_compile_db, new_snap_compatible
+):
+    # The advisory must also render as a `note:` line in the default text report
+    # (not only JSON) so an interactive user sees it.
+    res = runner.invoke(
+        main,
+        [
+            "scan",
+            "--binary",
+            str(new_snap_compatible),
+            "--sources",
+            str(source_tree_with_compile_db),
+            "--source-method",
+            "s5",
+            "--audit",
+        ],
+    )
+    assert res.exit_code == 0, res.output
+    assert "note: no --since/--changed-path seed" in res.output
+
+
+def test_unseeded_s5_without_sources_has_no_advisory(runner, new_snap_compatible):
+    # No --sources tree → L4 replay never runs, so the headers-only advisory must
+    # NOT fire (it would report a replay that never happened — CodeRabbit review).
+    res = runner.invoke(
+        main,
+        [
+            "scan",
+            "--binary",
+            str(new_snap_compatible),
+            "--source-method",
+            "s5",
+            "--format",
+            "json",
+            "--audit",
+        ],
+    )
+    assert res.exit_code == 0, res.output
+    payload = json.loads(res.output)
+    assert not any("--since" in a for a in payload["advisories"])
+
+
+def test_seeded_s5_with_sources_has_no_headers_only_advisory(
+    runner, source_tree_with_compile_db, new_snap_compatible
+):
+    # Because this test is seeded (--changed-path), the L4 replay runs in focused
+    # mode rather than falling back to headers-only, so the P3 advisory must NOT
+    # fire even with a source tree present.
+    res = runner.invoke(
+        main,
+        [
+            "scan",
+            "--binary",
+            str(new_snap_compatible),
+            "--sources",
+            str(source_tree_with_compile_db),
+            "--source-method",
+            "s5",
+            "--changed-path",
+            "src/foo.cpp",
+            "--format",
+            "json",
+            "--audit",
+        ],
+    )
+    assert res.exit_code == 0, res.output
+    payload = json.loads(res.output)
+    assert not any("--since" in a for a in payload["advisories"])
+
+
 def test_header_short_alias_works(runner, tmp_path, new_snap_compatible):
     # The --help example uses `-H`; the alias must actually parse (Codex review).
     header = tmp_path / "inc" / "w.h"
@@ -825,3 +923,95 @@ def test_scan_lone_header_file_does_not_activate_provenance(
     assert res.exit_code == 0, res.output
     assert captured["public_header_dirs"] == []
     assert captured["public_headers"] == []
+
+
+def test_load_exports_for_poi_degrades_to_none(tmp_path):
+    # Best-effort: a missing/garbage path (or None) must never raise — the POI
+    # export-delta walk simply has no candidate/baseline view and degrades to
+    # changed-paths/triggers/risk focusing.
+    import abicheck.cli_scan as cs
+
+    assert cs._load_exports_for_poi(None, "auto") is None
+    bogus = tmp_path / "nope.abi.json"
+    assert cs._load_exports_for_poi(bogus, "auto") is None
+
+
+def test_export_delta_resolves_tu_into_replay_seed(monkeypatch, runner, tmp_path):
+    # ADR-035 D7 (the focusing half): a baseline that carries an L5 graph mapping
+    # `_Z3barv` → src/bar.cpp, and a candidate that *removes* that export, must
+    # point the replay at src/bar.cpp — even though git only changed an unrelated
+    # file. Proves the cheap L0 export delta steers the expensive scan's scope.
+    import abicheck.cli_scan as cs
+    from abicheck.buildsource.pack import BuildSourcePack
+    from abicheck.buildsource.source_graph import (
+        GraphEdge,
+        GraphNode,
+        SourceGraphSummary,
+    )
+
+    graph = SourceGraphSummary(
+        nodes=[
+            GraphNode(
+                id="binary_symbol://_Z3barv", kind="binary_symbol", label="_Z3barv"
+            ),
+            GraphNode(id="decl://bar", kind="source_decl", label="bar"),
+            GraphNode(id="header://src/bar.cpp", kind="header", label="src/bar.cpp"),
+        ],
+        edges=[
+            GraphEdge(
+                src="decl://bar",
+                dst="binary_symbol://_Z3barv",
+                kind="SOURCE_DECL_MAPS_TO_SYMBOL",
+            ),
+            GraphEdge(
+                src="header://src/bar.cpp", dst="decl://bar", kind="SOURCE_DECLARES"
+            ),
+        ],
+    )
+    base = AbiSnapshot(
+        library="libfoo.so",
+        version="1.0",
+        from_headers=True,
+        functions=[_func("foo", "_Z3foov"), _func("bar", "_Z3barv")],
+        elf=_elf("_Z3foov", "_Z3barv"),
+    )
+    base.build_source = BuildSourcePack(root="", source_graph=graph)
+    base_path = _write_snapshot(tmp_path / "old.abi.json", base)
+    # Candidate removed `bar` → `_Z3barv` is a removed export (the L0 delta).
+    cand = AbiSnapshot(
+        library="libfoo.so",
+        version="2.0",
+        from_headers=True,
+        functions=[_func("foo", "_Z3foov")],
+        elf=_elf("_Z3foov"),
+    )
+    cand_path = _write_snapshot(tmp_path / "new.abi.json", cand)
+
+    captured: dict[str, object] = {}
+    original = cs._build_new_snapshot
+
+    def _spy(*args, **kwargs):
+        captured["changed_paths"] = kwargs.get("changed_paths")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(cs, "_build_new_snapshot", _spy)
+    res = runner.invoke(
+        main,
+        [
+            "scan",
+            "--binary",
+            str(cand_path),
+            "--baseline",
+            str(base_path),
+            "--source-method",
+            "s5",
+            "--changed-path",
+            "src/unrelated.cpp",
+        ],
+    )
+    assert res.exit_code in (0, 4), res.output  # removed export → BREAKING is fine
+    seed = captured["changed_paths"]
+    assert seed is not None
+    # The git-changed file (floor) AND the export-delta-resolved TU are both in.
+    assert "src/unrelated.cpp" in seed
+    assert "src/bar.cpp" in seed

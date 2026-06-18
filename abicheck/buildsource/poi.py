@@ -347,3 +347,71 @@ def _looks_template_instantiation(symbol: str) -> bool:
     if symbol.startswith("_Z") and "I" in symbol and "E" in symbol:
         return True
     return "?$" in symbol
+
+
+# ---------------------------------------------------------------------------
+# symbol → translation-unit resolution (ADR-035 D7, the focusing half)
+# ---------------------------------------------------------------------------
+
+
+def resolve_symbol_tus(
+    poi: PointsOfInterest, baseline: AbiSnapshot | None
+) -> tuple[str, ...]:
+    """Resolve the export-delta SYMBOL POIs to the source files that emit them.
+
+    This is the consumer that turns ``poi.symbols()`` (the cheap L0↔L2 export
+    delta, computed by :func:`build_points_of_interest`) into a **replay scope
+    seed** — the missing half of ADR-035 D7's reverse explain-finding walk
+    (export → decl → declaring file). It reads the **baseline's** cached L5
+    source graph (the full-depth baseline of ADR-035 D9 carries it), so a changed
+    export points the *new* scan at exactly the TU(s) that declare it instead of
+    replaying the whole target.
+
+    Pure and best-effort: returns ``()`` whenever the baseline carries no L5
+    graph (the common shallow-baseline case) or no symbol resolves — never an
+    error, so it only ever *adds* focus, never drops a changed TU (the floor in
+    :class:`PointsOfInterest` already holds those).
+    """
+    symbols = set(poi.symbols())
+    if not symbols or baseline is None:
+        return ()
+    pack = getattr(baseline, "build_source", None)
+    graph = getattr(pack, "source_graph", None) if pack is not None else None
+    if graph is None or not getattr(graph, "nodes", None):
+        return ()
+
+    # 1) binary_symbol nodes whose exported name is a POI symbol.
+    sym_node_ids = {
+        n.id
+        for n in graph.nodes
+        if getattr(n, "kind", "") == "binary_symbol" and n.label in symbols
+    }
+    if not sym_node_ids:
+        return ()
+
+    # 2) the source decls that map to those symbols (decl → symbol edge).
+    decl_ids = {
+        e.src
+        for e in graph.edges
+        if e.kind == "SOURCE_DECL_MAPS_TO_SYMBOL" and e.dst in sym_node_ids
+    }
+    if not decl_ids:
+        return ()
+
+    # 3) the file each decl is declared/defined in: a SOURCE_DECLARES edge from a
+    # file node, or the decl node's own ``def_file``/source-location attr.
+    node_by_id = {n.id: n for n in graph.nodes}
+    files: dict[str, None] = {}
+    for e in graph.edges:
+        if e.kind == "SOURCE_DECLARES" and e.dst in decl_ids:
+            fn = node_by_id.get(e.src)
+            if fn is not None and fn.label:
+                files.setdefault(fn.label, None)
+    for did in decl_ids:
+        dn = node_by_id.get(did)
+        attrs = getattr(dn, "attrs", None) or {} if dn is not None else {}
+        loc = attrs.get("def_file") or attrs.get("source_location")
+        if loc:
+            files.setdefault(_path_of_location(str(loc)), None)
+    files.pop("", None)
+    return tuple(files)

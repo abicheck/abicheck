@@ -713,10 +713,14 @@ use_cases:
       escalation triggers + L0/L1/L2 export deltas + risk score (reverse of the
       explain-finding localization walk); the floor is unconditional (risk/deltas
       only add, never drop a changed TU). `scan` runs the pattern pre-scan first
-      and feeds `poi.changed_paths()` into the source-replay scope. REMAINS:
-      handing the symbol POIs (not just paths) into `crosscheck` as a work-list,
-      and the automatic baseline-delta POI inside the `scan --baseline` path
-      (the builder already supports it; CLI wiring loads the baseline later).
+      and feeds `poi.changed_paths()` into the source-replay scope. The
+      `scan --baseline` path now reads a cheap, header-free L0 view of both sides
+      (`_load_exports_for_poi`) so the export-delta walk runs live, and
+      `resolve_symbol_tus` turns the resulting symbol POIs into declaring TUs
+      (via the baseline's cached L5 graph) that join the replay seed *and* the
+      `crosscheck` changed-path work-list. REMAINS: symbol→TU resolution only
+      fires when the baseline carries an L5 graph (the full-depth ADR-035 D9
+      baseline); a shallow baseline still focuses on changed paths only.
 
   - id: UC-TC-build-emitted-facts
     axis: toolchain

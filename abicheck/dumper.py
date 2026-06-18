@@ -1404,11 +1404,14 @@ def _try_dwarf_snapshot(
     # If DWARF produced functions (or was explicitly forced), use it.
     if snap.functions or snap.variables or dwarf_only:
         if not headers and not dwarf_only:
-            warnings.warn(
+            # Advisory, not a problem: header-less dump is a legitimate mode (a
+            # stripped/binary-only library). Demoted from UserWarning to an
+            # info log so it does not spam stderr on every run; visible under
+            # `-v` (ADR-035 P6). The genuine "headers passed but unusable"
+            # cases below stay UserWarnings.
+            log.info(
                 "No headers provided — using DWARF debug info as primary data source. "
-                "#define constants and default parameter values will be unavailable.",
-                UserWarning,
-                stacklevel=3,
+                "#define constants and default parameter values will be unavailable."
             )
         _populate_elf_visibility(snap)
         return snap, []
@@ -1441,20 +1444,19 @@ def _build_symbol_only_snapshot(
     # builder produced types but no functions, we still preserve
     # those types (see *dwarf_only_types*), so the warning is
     # narrowed to reflect what's actually missing.
+    # Advisory (ADR-035 P6): a header-less dump is a legitimate mode, so this is
+    # an info log (suppressed by default, shown under `-v`), not a stderr-spamming
+    # UserWarning on every run.
     if dwarf_only_types:
-        warnings.warn(
+        log.info(
             "No headers provided — using ELF-exported symbols for "
             "functions/variables; DWARF-derived type information "
-            "preserved.",
-            UserWarning,
-            stacklevel=3,
+            "preserved."
         )
     else:
-        warnings.warn(
+        log.info(
             "No headers provided and no DWARF debug info — only ELF-exported "
-            "symbols will be captured; type information will be missing.",
-            UserWarning,
-            stacklevel=3,
+            "symbols will be captured; type information will be missing."
         )
     snapshot = AbiSnapshot(
         library=so_path.name,
@@ -1621,11 +1623,10 @@ def _dump_macho(
     profile_hint = _lang_to_profile(lang)
 
     if not headers:
-        warnings.warn(
+        # Advisory only (ADR-035 P6): info log, not a per-run UserWarning.
+        log.info(
             "No headers provided — only Mach-O exported symbols will be captured; "
-            "type information will be missing.",
-            UserWarning,
-            stacklevel=2,
+            "type information will be missing."
         )
         # Normalize Mach-O leading underscore: _foo → foo, __Z... → _Z...
         def _normalize_macho_sym(s: str) -> str:
@@ -1742,11 +1743,10 @@ def _dump_pe(
     profile_hint = _lang_to_profile(lang)
 
     if not headers:
-        warnings.warn(
+        # Advisory only (ADR-035 P6): info log, not a per-run UserWarning.
+        log.info(
             "No headers provided — only PE exported symbols will be captured; "
-            "type information will be missing.",
-            UserWarning,
-            stacklevel=2,
+            "type information will be missing."
         )
         return AbiSnapshot(
             library=dll_path.name,
