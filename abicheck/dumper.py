@@ -130,24 +130,61 @@ def _resolve_header_backend(backend: str | None) -> str:
     return "castxml"
 
 
-#: ``'<name>' file not found`` where *name* is extensionless — a C TU never
-#: ``#include``s an extensionless header (the C stdlib is all ``*.h``), so a
-#: missing extensionless include (``<cstddef>``, ``<vector>``, ``<string>`` …)
-#: under a C-mode parse means the header is actually C++. Used to drive the clang
-#: C→C++ retry below.
-_MISSING_CPP_STDLIB_HEADER_RE = re.compile(rb"'[a-z_][a-z0-9_]*' file not found")
+#: The C++ standard library headers (C++23). A *valid C* translation unit never
+#: ``#include``s any of these, so when a C-mode parse fails to find one the TU is
+#: actually C++ — the signal that drives the clang C→C++ retry. Restricted to this
+#: exact whitelist (not "any extensionless header") so a C header that misses an
+#: extensionless *project* include (e.g. ``<config>``) is reported as the genuine
+#: missing C dependency rather than being silently re-parsed under ``__cplusplus``
+#: (Codex review).
+_CPP_STDLIB_HEADERS = frozenset(
+    {
+        # C++ library headers
+        "algorithm", "any", "array", "atomic", "barrier", "bit", "bitset",
+        "charconv", "chrono", "codecvt", "compare", "complex", "concepts",
+        "condition_variable", "coroutine", "deque", "exception", "execution",
+        "expected", "filesystem", "flat_map", "flat_set", "format",
+        "forward_list", "fstream", "functional", "future", "generator",
+        "initializer_list", "iomanip", "ios", "iosfwd", "iostream", "istream",
+        "iterator", "latch", "limits", "list", "locale", "map", "mdspan",
+        "memory", "memory_resource", "mutex", "new", "numbers", "numeric",
+        "optional", "ostream", "print", "queue", "random", "ranges", "ratio",
+        "regex", "scoped_allocator", "semaphore", "set", "shared_mutex",
+        "source_location", "span", "spanstream", "sstream", "stack",
+        "stacktrace", "stdexcept", "stdfloat", "stop_token", "streambuf",
+        "string", "string_view", "strstream", "syncstream", "system_error",
+        "thread", "tuple", "type_traits", "typeindex", "typeinfo",
+        "unordered_map", "unordered_set", "utility", "valarray", "variant",
+        "vector", "version",
+        # C compatibility headers (<cXXX>) — the ones that surface first in
+        # practice because they pull in libstdc++/libc machinery.
+        "cassert", "cctype", "cerrno", "cfenv", "cfloat", "cinttypes",
+        "ciso646", "climits", "clocale", "cmath", "csetjmp", "csignal",
+        "cstdarg", "cstddef", "cstdint", "cstdio", "cstdlib", "cstring",
+        "ctime", "cuchar", "cwchar", "cwctype",
+    }
+)
+
+#: ``'<name>' file not found`` — captures the quoted include that clang could not
+#: resolve, checked against :data:`_CPP_STDLIB_HEADERS`.
+_MISSING_HEADER_RE = re.compile(r"'([^'/]+)' file not found")
 
 
 def _is_missing_cpp_stdlib_header_error(stderr: str) -> bool:
-    """True if a clang parse failed because a C++ standard header was not found.
+    """True if a clang parse failed because a C++ *standard* header was not found.
 
     Pure/string-only so it is unit-testable without a compiler. Matches clang's
-    ``fatal error: '<name>' file not found`` for an *extensionless* header name;
-    a C header always carries a ``.h`` suffix, so an extensionless miss is the
-    C++ standard library (``<cstddef>``/``<vector>``/…), i.e. the TU is C++ and a
-    C-mode parse picked the wrong language.
+    ``fatal error: '<name>' file not found`` and confirms ``<name>`` is one of the
+    known C++ standard library headers (:data:`_CPP_STDLIB_HEADERS`). A C header
+    always carries a ``.h`` suffix and the C standard library is never named this
+    way, so such a miss means the TU is C++ and a C-mode parse picked the wrong
+    language — driving the C→C++ retry. An extensionless *project* include that is
+    not a stdlib header is deliberately *not* matched, so a real missing C
+    dependency is reported instead of masked by a ``__cplusplus`` re-parse.
     """
-    return bool(_MISSING_CPP_STDLIB_HEADER_RE.search(stderr.encode("utf-8", "replace")))
+    return any(
+        m.group(1) in _CPP_STDLIB_HEADERS for m in _MISSING_HEADER_RE.finditer(stderr)
+    )
 
 
 def _has_explicit_std(
@@ -287,15 +324,26 @@ def _clang_header_dump(
     # dirs and inject them as ``-isystem`` so clang resolves libstdc++/libc the
     # way castxml does via ``--castxml-cc-gnu``. Folded into the cache key so a
     # toolchain change invalidates a stale dump.
-    system_includes = _resolve_clang_system_includes(
-        compiler,
-        gcc_path=gcc_path,
-        gcc_prefix=gcc_prefix,
-        sysroot=sysroot,
-        nostdinc=nostdinc,
-        force_cpp=force_cpp,
-        gcc_options=gcc_options,
-        gcc_option_tokens=gcc_option_tokens,
+    def _resolve_sysinc(*, force_cpp: bool) -> tuple[str, ...]:
+        return _resolve_clang_system_includes(
+            compiler,
+            gcc_path=gcc_path,
+            gcc_prefix=gcc_prefix,
+            sysroot=sysroot,
+            nostdinc=nostdinc,
+            force_cpp=force_cpp,
+            gcc_options=gcc_options,
+            gcc_option_tokens=gcc_option_tokens,
+        )
+
+    system_includes = _resolve_sysinc(force_cpp=force_cpp)
+    # Pre-resolve the C++ system include set so it (a) folds into the cache key —
+    # the C→C++ retry below parses with these, and the C-mode probe omits the
+    # versioned libstdc++ dirs, so without this a libstdc++/GCC upgrade would not
+    # change the key and abicheck would reuse a stale C++ AST (Codex review); and
+    # (b) is reused by the retry without a second probe.
+    cpp_system_includes = (
+        system_includes if force_cpp else _resolve_sysinc(force_cpp=True)
     )
 
     key = _cache_key(
@@ -303,7 +351,12 @@ def _clang_header_dump(
         gcc_path=gcc_path, gcc_prefix=gcc_prefix, gcc_options=gcc_options,
         gcc_option_tokens=gcc_option_tokens,
         sysroot=sysroot, nostdinc=nostdinc, lang=lang, backend="clang",
-        system_includes=system_includes,
+        # Both include sets feed the key: whichever the retry settles on, a
+        # toolchain change to either invalidates the cached AST. Equal when
+        # already in C++ mode — pass once so existing C++ cache keys are stable.
+        system_includes=system_includes
+        if force_cpp
+        else (*system_includes, *cpp_system_includes),
     )
     cached = _cache_path(key, backend="clang")
     if cached.exists():
@@ -339,26 +392,16 @@ def _clang_header_dump(
         # C→C++ self-heal: a pure-``#include`` umbrella header (e.g. oneTBB's
         # ``oneapi/tbb.h``) carries no inline C++ syntax, so ``_detect_cpp_headers``
         # picks C mode — then ``#include <cstddef>`` fails because the C-mode probe
-        # never injected the libstdc++ ``-isystem`` dirs. A missing *extensionless*
-        # header is an unambiguous "this is C++" signal (a C TU only includes
-        # ``*.h``), so re-resolve the system includes for C++ and retry once in C++
-        # mode. Mirrors the castxml C→C++ retry; skipped when already in C++ mode or
-        # the failure is anything other than a missing C++ stdlib header.
+        # never injected the libstdc++ ``-isystem`` dirs. A missing C++ *standard*
+        # header is an unambiguous "this is C++" signal (a C TU never includes one),
+        # so retry once in C++ mode with the pre-resolved C++ system includes.
+        # Mirrors the castxml C→C++ retry; skipped when already in C++ mode or the
+        # failure is anything other than a missing C++ stdlib header.
         if (
             result.returncode != 0
             and not force_cpp
             and _is_missing_cpp_stdlib_header_error(result.stderr or "")
         ):
-            cpp_system_includes = _resolve_clang_system_includes(
-                compiler,
-                gcc_path=gcc_path,
-                gcc_prefix=gcc_prefix,
-                sysroot=sysroot,
-                nostdinc=nostdinc,
-                force_cpp=True,
-                gcc_options=gcc_options,
-                gcc_option_tokens=gcc_option_tokens,
-            )
             log.warning(
                 "clang failed to find a C++ standard header parsing the header(s) in "
                 "C mode; the header is C++ (a pure-#include umbrella header has no "

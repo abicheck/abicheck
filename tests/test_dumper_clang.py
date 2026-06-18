@@ -996,9 +996,14 @@ def test_clang_header_dump_bad_json_raises(
         ("fatal error: 'cstddef' file not found", True),
         ("fatal error: 'vector' file not found", True),
         ("error: 'string' file not found", True),
+        ("fatal error: 'cstdint' file not found", True),
         # A C header miss carries a .h suffix → not a C++ stdlib signal.
         ("fatal error: 'stdio.h' file not found", False),
         ("fatal error: 'oneapi/tbb.h' file not found", False),
+        # An extensionless *project* include that is not a stdlib header must NOT
+        # trigger the retry (a C header's real missing dependency, not C++).
+        ("fatal error: 'config' file not found", False),
+        ("fatal error: 'myheader' file not found", False),
         # Unrelated parse errors must not trigger the retry.
         ("error: use of undeclared identifier 'foo'", False),
         ("", False),
