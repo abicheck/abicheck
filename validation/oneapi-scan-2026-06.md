@@ -136,9 +136,13 @@ with `abicheck compare` directly. Fetch the **pinned** conda-forge artifacts
 
 | Lib | Runtime pkg (both sides) | Header pkg | `<HEADER>` (from extract root) | `<INCLUDE_ROOT>` |
 |-----|--------------------------|-----------|--------------------------------|------------------|
-| oneTBB | `tbb-2021.12.0-h84d6215_4`, `tbb-2021.13.0-hb700be7_6` | `tbb-devel-*_4` / `*_6` | `include/oneapi/tbb.h` | `include` |
+| oneTBB | `tbb-2021.12.0-h84d6215_4`, `tbb-2021.13.0-hb700be7_6` | `tbb-devel-2021.12.0-h94b29a5_4` / `tbb-devel-2021.13.0-hab88423_6` | `include/oneapi/tbb.h` | `include` |
 | oneDNN | `onednn-3.11-tbb_h2a4fcdb_0`, `onednn-3.12-tbb_h2a4fcdb_0` | (headers bundled in runtime pkg) | `include/oneapi/dnnl/dnnl.hpp` | `include` |
 | oneDAL | `dal-2025.0.0-h9289deb_961`, `dal-2025.1.0-h9289deb_124` | `dal-include-2025.0.0-hf2ce2f3_961` / `*-2025.1.0-hf2ce2f3_124` | `include/daal.h` | `include/dal` |
+
+All package basenames above are conda-forge **`linux-64`** **`.conda`** artifacts:
+fetch each as `https://conda.anaconda.org/conda-forge/linux-64/<basename>.conda`
+(exact build string + hash pinned for determinism).
 
 `<HEADER>` and `<INCLUDE_ROOT>` are both **extract-root-relative**, so the command
 substitutes them directly (note oneDAL's `daal.h` sits one level *above* its `-I`
