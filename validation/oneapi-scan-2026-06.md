@@ -17,26 +17,36 @@ Raw per-pair data: `data/oneapi_scan_2026-06.json`. Reproduce with
 
 ## Results (s0, binary L0/L1)
 
-| Lib | Pair | SONAME | Expected¹ | abicheck | Breaking findings | Wall |
+| Lib | Pair | SONAME | Expected¹ | abicheck | Breaking findings² | Wall |
 |-----|------|--------|-----------|----------|-------------------|------|
 | oneTBB | 2021.12.0→2021.13.0 | `libtbb.so.12` (stable) | COMPATIBLE | **COMPATIBLE_WITH_RISK** | 0 | 0.5 s |
 | oneTBB | 2021.13.0→2023.0.0 | `libtbb.so.12` (stable) | ~compatible | **COMPATIBLE_WITH_RISK** | **0** | 0.5 s |
 | oneDNN | 3.11→3.12 | `libdnnl.so.3` (stable) | COMPATIBLE | **BREAKING** | 6 | 4.2 s |
-| oneDNN | 2.7.2→3.0 | `.so.2`→`.so.3` (bump) | BREAKING | **BREAKING** | — | 2.7 s |
+| oneDNN | 2.7.2→3.0 | `.so.2`→`.so.3` (bump) | BREAKING | **BREAKING** | 92 | 2.7 s |
 | oneDAL | 2025.0.0→2025.1.0 | `libonedal_core.so.3` (stable) | COMPATIBLE | **BREAKING** | 164 | 52 s |
-| oneDAL | 2024.7.0→2025.0.0 | `.so.2`→`.so.3` (bump) | BREAKING | **BREAKING** | — | 61 s |
+| oneDAL | 2024.7.0→2025.0.0 | `.so.2`→`.so.3` (bump) | BREAKING | **BREAKING** | 20524 | 61 s |
 | oneCCL | 2021.12.0→2021.13.0 | `libccl.so.1` (stable) | COMPATIBLE | **COMPATIBLE_WITH_RISK** | 0 | 15 s |
 
 ¹ "Expected" = SONAME/SemVer convention from a *public-header* viewpoint (no
 independent ABICC oracle tracks these four). Treat this as a **case study**, not a
 statistical accuracy figure — n is tiny and the labels are convention-derived.
 
+² "Breaking findings" = abicheck's **breaking-classified** count (the scan's
+`diff.breaking`, recorded per pair in `data/oneapi_scan_2026-06.json`). This is
+*not* the same as a raw count of removed exported symbols — abicheck groups and
+classifies, so e.g. oneDAL 2025.0→2025.1 yields **164** breaking findings against
+**212** raw removed exported `FUNC`/`OBJECT` symbols seen via `readelf` (§ below).
+
 ## Accuracy analysis
 
-**No usable DWARF on any binary** (`has_dwarf` = false on all seven — the conda/
-Intel `.so` carry `.symtab`/`.dynsym` only), and the **L2 header tier was not
-reached** (see limitations), so *every* verdict here is **binary-strict**: it
-treats every exported symbol as ABI. That lens is correct but stricter than a
+**No usable DWARF on any binary** — `has_dwarf` (a rigorous `.debug_info` +
+`DW_TAG_subprogram` check) is **false on both sides of all seven pairs**
+(`dwarf_old` *and* `dwarf_new` in the dataset). Note abicheck's own `L1_debug`
+coverage row still reads `present`: a `.debug_*` section exists, but it carries no
+usable type DIEs — so the libraries are effectively **symbols-only** for type
+purposes. Combined with the **L2 header tier not being reached** (see
+limitations), *every* verdict here is **binary-strict**: it treats every exported
+symbol as ABI. That lens is correct but stricter than a
 public-header oracle, and the divergences are all explained by it:
 
 - **SONAME-bump pairs → BREAKING, correct (true positives).** oneDNN `.so.2→.so.3`
@@ -52,11 +62,13 @@ public-header oracle, and the divergences are all explained by it:
   `std::call_once` guard symbols. None are public `dnnl_*` C API or public `dnnl::`
   C++ classes. A header-scoped view would call this COMPATIBLE; binary-strict
   correctly reports real removals of exported-but-internal symbols.
-- **oneDAL 2025.0→2025.1 → BREAKING is also a scope divergence.** Of 212 removed
-  exported symbols, the bulk are **bundled BLAS/LAPACK routines** (`DGETRF`,
-  `SGETRF`, `DGETRS`, …) — 0 of the first 300 are in `daal::`. This is a
-  *packaging* change in what `libonedal_core` re-exports (MKL/LAPACK bundling),
-  not a change to oneDAL's own public API. Real binary-ABI change; not a oneDAL
+- **oneDAL 2025.0→2025.1 → BREAKING is also a scope divergence.** abicheck reports
+  **164 breaking findings**; independently, `readelf` shows **212 raw removed
+  exported symbols** (the two are different metrics — see footnote ²). The bulk of
+  the removed symbols are **bundled BLAS/LAPACK routines** (`DGETRF`, `SGETRF`,
+  `DGETRS`, …) — 0 of the first 300 are in `daal::`. This is a *packaging* change
+  in what `libonedal_core` re-exports (MKL/LAPACK bundling), not a change to
+  oneDAL's own public API. Real binary-ABI change; not a oneDAL
   API break.
 
 **Bucketed:** 3 correct non-breaking, 2 correct breaking (SONAME bumps), 2

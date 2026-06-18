@@ -28,12 +28,16 @@ import json
 import pathlib
 import subprocess
 import sys
+import tempfile
 import time
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import conda_harness as ch  # noqa: E402
 
-WORK = pathlib.Path("/tmp/oneapi_run")
+# A fresh per-run temp dir (portable; no /tmp hardcode or concurrent-run
+# collision). Downloaded artifacts and per-pair scan JSONs are scratch; only the
+# aggregated results land in data/.
+WORK = pathlib.Path(tempfile.mkdtemp(prefix="oneapi_run_"))
 
 # (lib, pkg, channel, old, new, so_glob, expectation, note)
 PAIRS = [
@@ -174,14 +178,23 @@ def run() -> list[dict]:
             continue
         row["soname_old"] = pathlib.Path(old_so).name
         row["soname_new"] = pathlib.Path(new_so).name
+        row["dwarf_old"] = ch.has_dwarf(old_so)
         row["dwarf_new"] = ch.has_dwarf(new_so)
         base = WORK / f"{lib}_{ov}.abi.json"
-        subprocess.run(
-            ["abicheck", "dump", old_so, "-o", str(base)],
-            check=True,
-            capture_output=True,
-        )
+        try:
+            subprocess.run(
+                ["abicheck", "dump", old_so, "-o", str(base)],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        except subprocess.CalledProcessError as exc:
+            row["status"] = "DUMP_FAILED"
+            row["detail"] = (exc.stderr or "")[-300:]
+            results.append(row)
+            continue
         out = WORK / f"{lib}_{ov}_{nv}_s0.json"
+        out.unlink(missing_ok=True)  # never parse a stale report from a prior run
         start = time.monotonic()
         proc = subprocess.run(
             [
@@ -203,9 +216,18 @@ def run() -> list[dict]:
         )
         row["wall_s"] = round(time.monotonic() - start, 2)
         row["exit"] = proc.returncode
+        # A BREAKING scan exits non-zero (2/4) but still writes JSON; gate on a
+        # freshly-written report, not the exit code, so a real failure (no file)
+        # is recorded as such instead of silently parsing stale data.
+        if not out.exists():
+            row["status"] = "SCAN_FAILED"
+            row["detail"] = proc.stderr[-300:]
+            results.append(row)
+            continue
         scan = json.loads(out.read_text())
         cov = {r["layer"]: r["status"] for r in scan.get("coverage", [])}
         row["verdict"] = scan.get("verdict")
+        row["L0"] = cov.get("L0_binary")
         row["L1"] = cov.get("L1_debug")
         row["diff"] = scan.get("diff") or {}
         row["status"] = "OK"

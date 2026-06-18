@@ -13,12 +13,17 @@
   "soname_new": "libtbb.so.12.13",
   "dwarf_old": false,
   "dwarf_new": false,
-  "wall_s": 0.47,
+  "wall_s": 0.45,
   "exit": 0,
   "verdict": "COMPATIBLE_WITH_RISK",
   "L0": "present",
   "L1": "present",
-  "diff": {},
+  "diff": {
+   "breaking": 0,
+   "api_break": 0,
+   "risk": 1,
+   "compatible": 2
+  },
   "status": "OK"
  },
  {
@@ -27,20 +32,25 @@
   "channel": "conda-forge",
   "old": "2021.13.0",
   "new": "2023.0.0",
-  "expectation": "BREAKING?",
-  "note": "internal symbol removals (scope test)",
+  "expectation": "COMPATIBLE",
+  "note": "wide gap, internal symbol removals (scope test)",
   "old_file": "tbb-2021.13.0-hb700be7_6.conda",
   "new_file": "tbb-2023.0.0-hab88423_2.conda",
   "soname_old": "libtbb.so.12.13",
   "soname_new": "libtbb.so.12.18",
   "dwarf_old": false,
   "dwarf_new": false,
-  "wall_s": 0.45,
+  "wall_s": 0.46,
   "exit": 0,
   "verdict": "COMPATIBLE_WITH_RISK",
   "L0": "present",
   "L1": "present",
-  "diff": {},
+  "diff": {
+   "breaking": 0,
+   "api_break": 0,
+   "risk": 1,
+   "compatible": 9
+  },
   "status": "OK"
  },
  {
@@ -57,12 +67,17 @@
   "soname_new": "libdnnl.so.3.12",
   "dwarf_old": false,
   "dwarf_new": false,
-  "wall_s": 4.17,
+  "wall_s": 4.09,
   "exit": 4,
   "verdict": "BREAKING",
   "L0": "present",
   "L1": "present",
-  "diff": {},
+  "diff": {
+   "breaking": 6,
+   "api_break": 0,
+   "risk": 5,
+   "compatible": 5
+  },
   "status": "OK"
  },
  {
@@ -72,19 +87,24 @@
   "old": "2.7.2",
   "new": "3.0",
   "expectation": "BREAKING",
-  "note": "SONAME .so.2->.so.3",
+  "note": "SONAME .so.2 -> .so.3",
   "old_file": "onednn-2.7.2-tbb_hb007830_0.conda",
   "new_file": "onednn-3.0-tbb_h7022a57_0.conda",
   "soname_old": "libdnnl.so.2.7",
   "soname_new": "libdnnl.so.3.0",
   "dwarf_old": false,
   "dwarf_new": false,
-  "wall_s": 2.74,
+  "wall_s": 2.78,
   "exit": 4,
   "verdict": "BREAKING",
   "L0": "present",
   "L1": "present",
-  "diff": {},
+  "diff": {
+   "breaking": 92,
+   "api_break": 0,
+   "risk": 10,
+   "compatible": 61
+  },
   "status": "OK"
  },
  {
@@ -101,12 +121,17 @@
   "soname_new": "libonedal_core.so.3",
   "dwarf_old": false,
   "dwarf_new": false,
-  "wall_s": 52.12,
+  "wall_s": 51.32,
   "exit": 4,
   "verdict": "BREAKING",
   "L0": "present",
   "L1": "present",
-  "diff": {},
+  "diff": {
+   "breaking": 164,
+   "api_break": 0,
+   "risk": 0,
+   "compatible": 98
+  },
   "status": "OK"
  },
  {
@@ -116,19 +141,24 @@
   "old": "2024.7.0",
   "new": "2025.0.0",
   "expectation": "BREAKING",
-  "note": "SONAME .so.2->.so.3",
+  "note": "SONAME .so.2 -> .so.3",
   "old_file": "dal-2024.7.0-h58b1d36_15.conda",
   "new_file": "dal-2025.0.0-h9289deb_961.conda",
   "soname_old": "libonedal_core.so.2",
   "soname_new": "libonedal_core.so.3",
   "dwarf_old": false,
   "dwarf_new": false,
-  "wall_s": 60.55,
+  "wall_s": 58.49,
   "exit": 4,
   "verdict": "BREAKING",
   "L0": "present",
   "L1": "present",
-  "diff": {},
+  "diff": {
+   "breaking": 20524,
+   "api_break": 0,
+   "risk": 17,
+   "compatible": 18969
+  },
   "status": "OK"
  },
  {
@@ -145,12 +175,17 @@
   "soname_new": "libccl.so.1.0",
   "dwarf_old": false,
   "dwarf_new": false,
-  "wall_s": 14.89,
+  "wall_s": 15.04,
   "exit": 0,
   "verdict": "COMPATIBLE_WITH_RISK",
   "L0": "present",
   "L1": "present",
-  "diff": {},
+  "diff": {
+   "breaking": 0,
+   "api_break": 0,
+   "risk": 12740,
+   "compatible": 8515
+  },
   "status": "OK"
  }
 ]
