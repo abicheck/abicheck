@@ -442,7 +442,9 @@ def estimate_scan(req: ScanRequest) -> list[CostEstimate]:
             n_headers,
             _COST_PER_HEADER_PARSE * n_headers,
             0.0,
-            "public-header AST (needs castxml)" if n_headers else "no headers supplied",
+            "public-header AST (needs castxml or clang)"
+            if n_headers
+            else "no headers supplied",
         ),
     ]
 

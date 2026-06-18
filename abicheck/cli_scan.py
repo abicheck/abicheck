@@ -262,7 +262,7 @@ def _intrinsic_coverage(snap: Any) -> list[dict[str, Any]]:
             "status": "present" if snap.from_headers else "skipped",
             "detail": f"{len(snap.types)} type(s) from public headers"
             if snap.from_headers
-            else "no public-header AST (pass --headers; needs castxml)",
+            else "no public-header AST (pass --headers; needs castxml or clang)",
         }
     )
     return rows
@@ -282,6 +282,24 @@ def _pack_coverage(snap: Any) -> list[dict[str, Any]]:
             for layer in ("L3_build", "L4_source_abi", "L5_source_graph")
         ]
     return [c.to_dict() for c in pack.manifest.coverage]
+
+
+def _l3_collected(snap: Any) -> bool:
+    """True when the snapshot carries a non-empty L3 build-evidence layer.
+
+    Used to decide whether a deep ``--source-method`` actually reached L3: a
+    ``not_collected`` (or absent pack) L3 means the requested L3/L4/L5 layers were
+    skipped for want of a compile database, which warrants a pointed advisory.
+    ``partial`` counts as collected — it ran and produced something.
+    """
+    pack = getattr(snap, "build_source", None)
+    if pack is None:
+        return False
+    for cov in pack.manifest.coverage:
+        row = cov.to_dict() if hasattr(cov, "to_dict") else cov
+        if row.get("layer") == "L3_build":
+            return row.get("status") != "not_collected"
+    return False
 
 
 def _render_text(out: ScanOutcome) -> str:
@@ -975,6 +993,25 @@ def run_scan_core(
         public_headers=list(public_headers),
         public_header_dirs=list(public_header_dirs),
     )
+
+    # --- honest level-vs-evidence advisory ------------------------------------
+    # A deep --source-method (s1/s2/s4/s5/s6 → collect_mode != "off") needs an L3
+    # compile database; without one the L3/L4/L5 layers are *skipped*, not failed.
+    # When the user actually supplied a source input (a --sources tree or
+    # --build-info) yet L3 still came back empty — typically a pristine checkout
+    # with no compile_commands.json — the coverage rows say `not_collected`, but
+    # the user shouldn't have to infer *why*: name the requested level and the
+    # exact remedy (mirrors the unseeded-replay advisory). Gated on a source input
+    # so a plain binary-only scan at the default deep mode isn't nagged.
+    gave_source_input = sources is not None or effective_build_info is not None
+    if gave_source_input and collect_mode != "off" and not _l3_collected(new_snap):
+        advisories.append(
+            f"requested source-method {resolved.value} (depth {eff_depth_enum.value}) "
+            "needs an L3 compile database, but none was found — L3/L4/L5 were "
+            "skipped. Provide one with --build-info/--compile-db (a "
+            "compile_commands.json or build dir), or a trusted --build-config plus "
+            "--allow-build-query to generate it."
+        )
 
     # --- conditional tier: S2 preprocessor pre-scan (D2) ----------------------
     # Runs only when L3 build evidence + a preprocessor (`clang -E`) are present;

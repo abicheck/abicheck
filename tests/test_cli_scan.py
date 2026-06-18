@@ -706,6 +706,95 @@ def test_seeded_s5_with_sources_has_no_headers_only_advisory(
     assert not any("--since" in a for a in payload["advisories"])
 
 
+def test_deep_method_without_compile_db_emits_l3_advisory(
+    runner, tmp_path, new_snap_compatible
+):
+    # A deep --source-method over a pristine source tree with no
+    # compile_commands.json collects no L3, so L3/L4/L5 are skipped. The user who
+    # asked for a deep level must get a pointed advisory naming the level and the
+    # remedy — not just silent `not_collected` coverage rows (UX gap fix).
+    bare = tmp_path / "bare_src"
+    bare.mkdir()
+    (bare / "foo.cpp").write_text("int foo() { return 0; }\n", encoding="utf-8")
+    res = runner.invoke(
+        main,
+        [
+            "scan",
+            "--binary",
+            str(new_snap_compatible),
+            "--sources",
+            str(bare),
+            "--source-method",
+            "s5",
+            "--audit",
+        ],
+    )
+    assert res.exit_code == 0, res.output
+    assert "needs an L3 compile database" in res.output
+
+
+def test_compile_db_present_suppresses_l3_advisory(
+    runner, source_tree_with_compile_db, new_snap_compatible
+):
+    # With a real compile_commands.json L3 collects cleanly, so the missing-L3
+    # advisory must NOT fire. Seeded (--changed-path) so the unrelated headers-only
+    # advisory also stays silent.
+    res = runner.invoke(
+        main,
+        [
+            "scan",
+            "--binary",
+            str(new_snap_compatible),
+            "--sources",
+            str(source_tree_with_compile_db),
+            "--source-method",
+            "s5",
+            "--changed-path",
+            "foo.cpp",
+            "--audit",
+        ],
+    )
+    assert res.exit_code == 0, res.output
+    assert "needs an L3 compile database" not in res.output
+
+
+def test_binary_only_deep_method_has_no_l3_advisory(runner, new_snap_compatible):
+    # A deep --source-method with NO source input (no --sources/--build-info) is the
+    # obvious binary-only case; the advisory is gated on a source input so a plain
+    # binary scan at a deep level isn't nagged.
+    res = runner.invoke(
+        main,
+        [
+            "scan",
+            "--binary",
+            str(new_snap_compatible),
+            "--source-method",
+            "s1",
+            "--audit",
+        ],
+    )
+    assert res.exit_code == 0, res.output
+    assert "needs an L3 compile database" not in res.output
+
+
+def test_l2_coverage_hint_mentions_clang_backend():
+    # The L2 skip hint must mention clang, not only castxml — the clang L2 backend
+    # now covers header parsing (ADR-003 extension), so "needs castxml" was stale.
+    from abicheck.cli_scan import _intrinsic_coverage
+
+    snap = AbiSnapshot(
+        library="libfoo.so",
+        version="1.0",
+        from_headers=False,
+        functions=[_func("foo", "_Z3foov")],
+        elf=_elf("_Z3foov"),
+    )
+    rows = _intrinsic_coverage(snap)
+    l2 = next(r for r in rows if r["layer"] == "L2_header")
+    assert l2["status"] == "skipped"
+    assert "clang" in l2["detail"]
+
+
 def test_header_short_alias_works(runner, tmp_path, new_snap_compatible):
     # The --help example uses `-H`; the alias must actually parse (Codex review).
     header = tmp_path / "inc" / "w.h"
