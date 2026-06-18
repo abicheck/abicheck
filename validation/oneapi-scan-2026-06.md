@@ -8,9 +8,11 @@ section below (added after PR #444 unblocked the clang L2 backend on GNU hosts)
 re-runs the divergent pairs under public-header scope and resolves the
 scope-divergence questions raised in the binary-tier analysis.
 
-Raw per-pair data: `data/oneapi_scan_2026-06.json` (binary tier) and
-`data/oneapi_scan_l2_2026-06.json` (L2). Reproduce with
-`validation/scripts/run_oneapi_scan.py`.
+Raw per-pair data: `data/oneapi_scan_2026-06.json` (binary tier — reproduce with
+`validation/scripts/run_oneapi_scan.py`) and `data/oneapi_scan_l2_2026-06.json`
+(L2 — reproduce with the pinned `abicheck compare` commands in
+[Reproduce (L2)](#reproduce-l2) below; the binary-tier driver does **not** emit
+the L2 dataset).
 
 ## Environment
 
@@ -125,6 +127,29 @@ sentinel. This is the core value of the header tier: it separates dependency/std
 leakage from real public-surface changes. Both `tbb.h` and `daal.h` are pure
 `#include` umbrella headers and exercised #444's C→C++ self-heal retry; `dnnl.hpp`
 carries inline `namespace`/`enum` and was detected as C++ directly.
+
+### Reproduce (L2)
+
+The binary-tier driver does not cover L2; reproduce `oneapi_scan_l2_2026-06.json`
+with `abicheck compare` directly. Fetch the **pinned** conda-forge artifacts
+(runtime `.so` + the header package), extract, then run per pair:
+
+| Lib | Runtime pkg (both sides) | Header pkg | Header / `-I` root |
+|-----|--------------------------|-----------|---------------------|
+| oneTBB | `tbb-2021.12.0-h84d6215_4`, `tbb-2021.13.0-hb700be7_6` | `tbb-devel-*_4` / `*_6` | `oneapi/tbb.h` / `include` |
+| oneDNN | `onednn-3.11-tbb_h2a4fcdb_0`, `onednn-3.12-tbb_h2a4fcdb_0` | (headers bundled in runtime pkg) | `oneapi/dnnl/dnnl.hpp` / `include` |
+| oneDAL | `dal-2025.0.0-h9289deb_961`, `dal-2025.1.0-h9289deb_124` | `dal-include-2025.0.0-hf2ce2f3_961` / `*-2025.1.0-hf2ce2f3_124` | `daal.h` / `include/dal` |
+
+```bash
+abicheck compare <old>/lib/<libNAME.so.X.Y> <new>/lib/<libNAME.so.X.Z> \
+  --old-header <old>/<HEADER> --new-header <new>/<HEADER> \
+  --old-include <old>/<INCLUDE_ROOT> --new-include <new>/<INCLUDE_ROOT> \
+  --ast-frontend clang --format json
+```
+
+Needs clang on PATH (no castxml required). `tbb.h` and `daal.h` trigger #444's
+C→C++ retry automatically. Exact per-pair paths and the resulting kind
+breakdowns are recorded in `data/oneapi_scan_l2_2026-06.json` (`_about` field).
 
 ## Limitations still open (L3–L5)
 
