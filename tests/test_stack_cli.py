@@ -38,6 +38,20 @@ def _require_linux_elf(path: Path) -> Path:
     return path
 
 
+def _pick_elf() -> Path:
+    """Return the first available system ELF binary, or skip.
+
+    Shared by the function-scoped ``real_binary`` fixture and the class-scoped
+    ``deps_json`` fixture (the latter can't consume the former across scopes).
+    """
+    if sys.platform != "linux":
+        pytest.skip("Full-stack dependency tests require Linux")
+    for p in (Path("/usr/bin/python3"), Path("/usr/bin/ls"), Path("/bin/ls")):
+        if p.exists():
+            return _require_linux_elf(p)
+    pytest.skip("No suitable ELF binary found")
+
+
 @pytest.fixture
 def runner():
     return CliRunner()
@@ -45,13 +59,7 @@ def runner():
 
 @pytest.fixture
 def real_binary():
-    if sys.platform != "linux":
-        pytest.skip("Full-stack dependency tests require Linux")
-    candidates = [Path("/usr/bin/python3"), Path("/usr/bin/ls"), Path("/bin/ls")]
-    for p in candidates:
-        if p.exists():
-            return _require_linux_elf(p)
-    pytest.skip("No suitable ELF binary found")
+    return _pick_elf()
 
 
 class TestDepsCommand:
@@ -63,16 +71,8 @@ class TestDepsCommand:
     @pytest.fixture(scope="class")
     def deps_json():
         # Class-scoped, so it can't take the function-scoped `real_binary`
-        # fixture — resolve the binary inline (same logic as `real_binary`).
-        if sys.platform != "linux":
-            pytest.skip("Full-stack dependency tests require Linux")
-        binary = None
-        for p in (Path("/usr/bin/python3"), Path("/usr/bin/ls"), Path("/bin/ls")):
-            if p.exists():
-                binary = _require_linux_elf(p)
-                break
-        if binary is None:
-            pytest.skip("No suitable ELF binary found")
+        # fixture — resolve the binary via the shared helper instead.
+        binary = _pick_elf()
         result = CliRunner().invoke(main, ["deps", str(binary), "--format", "json"])
         assert result.exit_code == 0
         return json.loads(result.output)

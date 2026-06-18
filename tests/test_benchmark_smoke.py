@@ -24,6 +24,12 @@ def _load_benchmark():
     attributes or uses context-managed ``patch.object`` (auto-reverted), so a
     single shared load is correct. Re-executing the module on every test was a
     pure-overhead hotspot (~0.3s × 19 ≈ 6s); load it once and cache it.
+
+    Caveat for future tests: the module object is now shared, so a test that
+    mutates a module-level global *without* reverting it (a bare assignment
+    rather than ``patch.object``) would leak that state into later tests. Keep
+    mutations context-managed; if a test genuinely needs a pristine module,
+    reset ``_BENCHMARK_MOD = None`` to force a fresh load.
     """
     global _BENCHMARK_MOD
     if _BENCHMARK_MOD is not None:

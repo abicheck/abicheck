@@ -82,7 +82,15 @@ def main(argv: list[str] | None = None) -> int:
         print(f"No durations file at {path}; nothing to report.", file=sys.stderr)
         return 0
 
-    rows = json.loads(path.read_text(encoding="utf-8"))
+    # Reporting-only contract: a truncated or malformed file must degrade
+    # gracefully (like the missing-file path) rather than traceback. CI already
+    # makes the step continue-on-error, but this keeps local runs honest too.
+    try:
+        rows = json.loads(path.read_text(encoding="utf-8"))
+    except (ValueError, OSError) as exc:
+        print(f"Could not read durations from {path}: {exc}; nothing to report.", file=sys.stderr)
+        return 0
+
     report = render(aggregate(rows), args.top)
 
     summary = os.environ.get("GITHUB_STEP_SUMMARY")
