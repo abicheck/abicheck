@@ -41,10 +41,13 @@ classifies, so e.g. oneDAL 2025.0→2025.1 yields **164** breaking findings agai
 
 **No usable DWARF on any binary** — `has_dwarf` (a rigorous `.debug_info` +
 `DW_TAG_subprogram` check) is **false on both sides of all seven pairs**
-(`dwarf_old` *and* `dwarf_new` in the dataset). Note abicheck's own `L1_debug`
-coverage row still reads `present`: a `.debug_*` section exists, but it carries no
-usable type DIEs — so the libraries are effectively **symbols-only** for type
-purposes. Combined with the **L2 header tier not being reached** (see
+(`dwarf_old` *and* `dwarf_new` in the dataset). The `dwarf_*` probe is the
+authoritative signal here — **not** abicheck's own `L1_debug` coverage row, which
+reads `present`. That row is a coverage artifact, not proof of a debug section:
+`cli_scan` marks L1 `present` whenever `snap.dwarf is not None`, and `dumper`
+attaches an *empty* `DwarfMetadata` even in the symbol-only fallback. So the
+libraries are effectively **symbols-only** for type purposes. Combined with the
+**L2 header tier not being reached** (see
 limitations), *every* verdict here is **binary-strict**: it treats every exported
 symbol as ABI. That lens is correct but stricter than a
 public-header oracle, and the divergences are all explained by it:
