@@ -617,6 +617,17 @@ def test_note_deprecated_flags_combines() -> None:
     assert "--depth" in note and "ADR-037" in note
 
 
+@pytest.mark.parametrize("name", ["dump", "scan"])
+def test_project_config_flag_is_config_not_build_config(name: str) -> None:
+    """`--build-config` was renamed to `--config` (ADR-037 D4) to match `compare`
+    and reflect that it loads the whole project .abicheck.yml. No back-compat
+    window is kept, so the old spelling must be gone on dump/scan."""
+    commands = _registered_commands()
+    flags = _command_flags(commands[name])
+    assert "--config" in flags, name
+    assert "--build-config" not in flags, name  # old spelling fully removed
+
+
 # ── Resolved option-set snapshot (catches an accidental flag drop in review) ──
 
 # Frozen sets of every option spelling each verdict-emitting command exposes.

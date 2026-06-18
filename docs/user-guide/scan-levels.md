@@ -35,6 +35,67 @@ Two orthogonal knobs select how deep it goes (`abicheck/buildsource/scan_levels.
 reachability), `baseline` = `(s6, full)`, `audit` = `(s5, source)` intra-version
 (single-build hygiene, no baseline).
 
+## What input each use case needs — and how to get it
+
+Every level needs a specific **input**; without it the matching coverage row is
+`not_collected` (the scan never silently pretends it ran). Pick the row that
+matches your goal, then supply the input named in column 3.
+
+| Goal (use case) | Level | Input you must provide | How to obtain it | If the input is missing |
+|---|---|---|---|---|
+| Binary-only ABI gate (removed/changed exports; no-DWARF vtable/RTTI size) | `s0` / `--depth symbols` | two `.so` (or `.abi.json`) | release artifacts / conda / `.deb` | always available (L0/L1) |
+| Header-aware API surface + internal-vs-public scoping + cross-source checks | L2 (intrinsic, with `-H`) | a public-header **directory** + a C/C++ frontend | `-H include/ --public-header-dir include/`; `castxml` **or** `clang` on `PATH` | a lone `-H file.h` does not establish a boundary → provenance/cross-checks stay dormant |
+| Build-flag / toolchain / visibility drift | `s1` / `--depth build` | an L3 compile database | `cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=ON` (configure-only), `meson setup`, `bazel aquery --output=jsonproto`, or `bear -- make`; pass via `--build-info`/`--compile-db` | L3 `not_collected`; the scan advises the exact remedy |
+| Macro-value / include divergence; private/generated-header leaks | `s2` | L3 compile DB + `clang -E` | same as `s1` (the `-E` pass needs the TU's full flag set) | preprocessor tier skipped (coverage row, not a pass) |
+| Source→symbol reachability graph (which exports reach a changed internal decl) | `s4` / `--depth graph` | L3 compile DB | same as `s1` | L5 `not_collected` (no L4 replay either) |
+| Semantic source-ABI replay of changed TUs (macro/default-arg/inline/template/constexpr **body** changes) | `s5` / `--depth source` / `--mode pr` | L3 compile DB + source checkout + `clang` + generated headers present | configure for the DB; **codegen/partial build** for generated headers; seed with `--since`/`--changed-path` | without a seed, `s5` falls back to a headers-only public-API replay and emits an advisory (not a full per-TU replay); missing generated headers → L4 `partial` |
+| Full-library source replay | `s6` / `--depth full` / `--mode baseline` | as `s5`, whole library | amortized baseline build | expensive — the one cost cliff is at L4 |
+| Single-build hygiene lint (accidental exports, leaks, unversioned/RTTI) | `--audit` (no baseline) | binary + public-header **dir** (+ optional L3/L4) | as above | `header_build_context_mismatch` needs L3; `odr_type_variant` needs L4 |
+
+### Obtaining a compile database without a full build
+
+The L3+ levels need a `compile_commands.json`; a pristine checkout has none.
+Generate one — none of these compiles the library, they only configure / query
+the build graph:
+
+```bash
+# CMake (oneTBB, oneDNN, oneCCL, …): configure-only
+cmake -S . -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+abicheck scan --binary new/libfoo.so -H include/ --build-info build --source-method s5 …
+
+# Bazel (oneDAL, …): query the action graph (no build)
+bazel aquery 'mnemonic("CppCompile", //...)' --output=jsonproto > aq.json
+abicheck scan --binary new/libonedal_core.so -H include/ --build-info aq.json --source-method s1 …
+```
+
+!!! note "Generated headers"
+    L4 replay re-parses each TU with `clang`. If a TU `#include`s a header that
+    is *generated* during the build (e.g. `version.h`, `*.pb.h`, TableGen
+    `*.inc`), a configure-only tree won't have it and that TU's replay is
+    reported `partial` — run the project's codegen step first.
+
+### Letting `abicheck` drive the build query
+
+If your project ships a trusted `.abicheck.yml` with a `build.query`, you can let
+`abicheck` run it instead of pre-generating the DB. Pass it with `--config`
+(the project contract). Pinning a deep
+level (`--source-method s5`, etc.) with such a trusted `--config` **auto-enables**
+the query — you no longer also need `--allow-build-query` for a level you
+explicitly asked for (the report notes when this happens). An *auto-discovered*
+`.abicheck.yml` under `--sources` is never trusted to execute commands; only an
+explicit `--config` is.
+
+```yaml
+# .abicheck.yml
+build:
+  query: cmake -S . -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+```
+
+```bash
+abicheck scan --binary new/libfoo.so -H include/ --sources . \
+  --config .abicheck.yml --source-method s5 --baseline old/libfoo.abi.json
+```
+
 ## Worked examples
 
 Each example shows the command, what level it pins, and what to read in the

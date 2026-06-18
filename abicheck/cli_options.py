@@ -56,48 +56,68 @@ def two_sided_input_options(func: F) -> F:
     inline — the latter renamed from ``--header-backend`` in G22 Phase 6, D8.)
     """
     func = click.option(
-        "--new-version", "new_version", default="new", show_default=True,
+        "--new-version",
+        "new_version",
+        default="new",
+        show_default=True,
         help="Version label for new side (used when input is a .so file).",
     )(func)
     func = click.option(
-        "--old-version", "old_version", default="old", show_default=True,
+        "--old-version",
+        "old_version",
+        default="old",
+        show_default=True,
         help="Version label for old side (used when input is a .so file).",
     )(func)
     func = click.option(
-        "--new-include", "new_includes_only", multiple=True,
+        "--new-include",
+        "new_includes_only",
+        multiple=True,
         type=click.Path(path_type=Path),
         help="Include dir for new side only (overrides -I for new).",
     )(func)
     func = click.option(
-        "--old-include", "old_includes_only", multiple=True,
+        "--old-include",
+        "old_includes_only",
+        multiple=True,
         type=click.Path(path_type=Path),
         help="Include dir for old side only (overrides -I for old).",
     )(func)
     func = click.option(
-        "--new-header", "new_headers_only", multiple=True,
+        "--new-header",
+        "new_headers_only",
+        multiple=True,
         type=click.Path(path_type=Path),
         help="Public header for new side only (overrides -H for new). "
-             "Validated for native binaries; ignored for snapshots.",
+        "Validated for native binaries; ignored for snapshots.",
     )(func)
     func = click.option(
-        "--old-header", "old_headers_only", multiple=True,
+        "--old-header",
+        "old_headers_only",
+        multiple=True,
         type=click.Path(path_type=Path),
         help="Public header for old side only (overrides -H for old). "
-             "Validated for native binaries; ignored for snapshots.",
+        "Validated for native binaries; ignored for snapshots.",
     )(func)
     func = click.option(
-        "-I", "--include", "includes", multiple=True,
+        "-I",
+        "--include",
+        "includes",
+        multiple=True,
         type=click.Path(path_type=Path),
         help="Extra include directory for castxml (applied to both sides).",
     )(func)
     func = click.option(
-        "-H", "--header", "headers", multiple=True,
+        "-H",
+        "--header",
+        "headers",
+        multiple=True,
         type=click.Path(path_type=Path),
         help="Public header file or directory applied to both sides (repeat for multiple). "
-             "Recommended for full ABI analysis; without headers, native binaries fall back to symbols-only mode. "
-             "Scopes the ABI surface to declarations in these headers for ELF; on PE/Mach-O scoping is "
-             "best-effort and falls back to the export table when castxml is unavailable or names don't match "
-             "(e.g. MSVC C++ mangling). Validated for native binaries; ignored for snapshots.",
+        "Recommended for full ABI analysis; without headers, native binaries fall back to symbols-only mode. "
+        "Scopes the ABI surface to declarations in these headers for ELF; on PE/Mach-O scoping is "
+        "best-effort and falls back to the export table when castxml is unavailable or names don't match "
+        "(e.g. MSVC C++ mangling). Validated for native binaries; ignored for snapshots.",
     )(func)
     return func
 
@@ -109,20 +129,29 @@ def policy_options(func: F) -> F:
     *path* directly, folding ``--policy-file`` in, is a later-phase D4 change.)
     """
     func = click.option(
-        "--suppress", type=click.Path(exists=True, path_type=Path), default=None,
+        "--suppress",
+        type=click.Path(exists=True, path_type=Path),
+        default=None,
         help="Suppression file (YAML) to filter known/intentional changes.",
     )(func)
     func = click.option(
-        "--policy-file", "policy_file_path", type=POLICY_FILE_PARAM, default=None,
+        "--policy-file",
+        "policy_file_path",
+        type=POLICY_FILE_PARAM,
+        default=None,
         help="YAML policy file with per-kind verdict overrides, or a built-in name "
-             "(e.g. 'security'). Overrides --policy.",
+        "(e.g. 'security'). Overrides --policy.",
     )(func)
     func = click.option(
-        "--policy", "policy",
-        type=click.Choice(["strict_abi", "sdk_vendor", "plugin_abi"], case_sensitive=True),
-        default="strict_abi", show_default=True,
+        "--policy",
+        "policy",
+        type=click.Choice(
+            ["strict_abi", "sdk_vendor", "plugin_abi"], case_sensitive=True
+        ),
+        default="strict_abi",
+        show_default=True,
         help="Built-in policy profile for verdict classification. Ignored when "
-             "--policy-file is given.",
+        "--policy-file is given.",
     )(func)
     return func
 
@@ -138,40 +167,49 @@ def severity_options(func: F) -> F:
     the contract gate (D10.2) still sees it composed once, not copy-pasted.
     """
     func = click.option(
-        "--severity-addition", "severity_addition",
+        "--severity-addition",
+        "severity_addition",
         type=click.Choice(["error", "warning", "info"], case_sensitive=True),
-        default=None, hidden=True,
+        default=None,
+        hidden=True,
         help="Override severity for new public API additions (config: "
-             "severity.addition). Beats the preset and config for this run.",
+        "severity.addition). Beats the preset and config for this run.",
     )(func)
     func = click.option(
-        "--severity-quality-issues", "severity_quality_issues",
+        "--severity-quality-issues",
+        "severity_quality_issues",
         type=click.Choice(["error", "warning", "info"], case_sensitive=True),
-        default=None, hidden=True,
+        default=None,
+        hidden=True,
         help="Override severity for quality issues like std symbol leaks (config: "
-             "severity.quality_issues).",
+        "severity.quality_issues).",
     )(func)
     func = click.option(
-        "--severity-potential-breaking", "severity_potential_breaking",
+        "--severity-potential-breaking",
+        "severity_potential_breaking",
         type=click.Choice(["error", "warning", "info"], case_sensitive=True),
-        default=None, hidden=True,
+        default=None,
+        hidden=True,
         help="Override severity for potential incompatibilities needing review "
-             "(config: severity.potential_breaking).",
+        "(config: severity.potential_breaking).",
     )(func)
     func = click.option(
-        "--severity-abi-breaking", "severity_abi_breaking",
+        "--severity-abi-breaking",
+        "severity_abi_breaking",
         type=click.Choice(["error", "warning", "info"], case_sensitive=True),
-        default=None, hidden=True,
+        default=None,
+        hidden=True,
         help="Override severity for clear ABI/API incompatibilities (config: "
-             "severity.abi_breaking).",
+        "severity.abi_breaking).",
     )(func)
     func = click.option(
-        "--severity-preset", "severity_preset",
+        "--severity-preset",
+        "severity_preset",
         type=click.Choice(["default", "strict", "info-only"], case_sensitive=True),
         default=None,
         help="Severity preset: 'default', 'strict', or 'info-only'. "
-             "Controls exit codes and report labels. Per-category "
-             "--severity-* options override the chosen preset.",
+        "Controls exit codes and report labels. Per-category "
+        "--severity-* options override the chosen preset.",
     )(func)
     return func
 
@@ -184,13 +222,15 @@ def scope_options(func: F) -> F:
     have no filtered-findings report to dump.
     """
     func = click.option(
-        "--scope-public-headers/--no-scope-public-headers", "scope_public_headers",
-        default=True, show_default=True,
+        "--scope-public-headers/--no-scope-public-headers",
+        "scope_public_headers",
+        default=True,
+        show_default=True,
         help="Restrict findings to the public-header ABI surface (ADR-024): "
-             "changes to symbols/types not reachable from public-header-declared "
-             "exported API are recorded as filtered, not reported. Internal-type "
-             "leaks are never hidden. On by default; use --no-scope-public-headers "
-             "to report every finding regardless of surface.",
+        "changes to symbols/types not reachable from public-header-declared "
+        "exported API are recorded as filtered, not reported. Internal-type "
+        "leaks are never hidden. On by default; use --no-scope-public-headers "
+        "to report every finding regardless of surface.",
     )(func)
     return func
 
@@ -209,17 +249,26 @@ def output_options(
     sarif/junit, ``compare-release`` cannot emit html/review) — but the option
     *structure*, the ``-o/--output`` flag, and the contract live here once.
     """
+
     # ``help=None`` renders no help line in Click, so a single call covers both
     # the with-help and without-help cases without a ``**dict[str, object]``
     # unpack (which mypy can't reconcile with ``click.option``'s overloads).
     def deco(func: F) -> F:
         func = click.option(
-            "-o", "--output", "output",
-            type=click.Path(path_type=Path), default=None, help=output_help,
+            "-o",
+            "--output",
+            "output",
+            type=click.Path(path_type=Path),
+            default=None,
+            help=output_help,
         )(func)
         func = click.option(
-            "--format", "fmt", type=click.Choice(list(formats)),
-            default=default, show_default=True, help=format_help,
+            "--format",
+            "fmt",
+            type=click.Choice(list(formats)),
+            default=default,
+            show_default=True,
+            help=format_help,
         )(func)
         return func
 
@@ -238,17 +287,28 @@ def set_input_options(func: F) -> F:
     Applied bottom-up, so listed in reverse of displayed order.
     """
     func = click.option(
-        "--output-dir", "output_dir", type=click.Path(path_type=Path), default=None,
+        "--output-dir",
+        "output_dir",
+        type=click.Path(path_type=Path),
+        default=None,
         help="Directory to write per-library reports (directory/package inputs only).",
     )(func)
     func = click.option(
-        "--dso-only", "dso_only", is_flag=True, default=False,
+        "--dso-only",
+        "dso_only",
+        is_flag=True,
+        default=False,
         help="Only compare shared objects, skip executables (directory/package inputs only).",
     )(func)
     func = click.option(
-        "-j", "--jobs", "jobs", type=int, default=0, show_default=True,
+        "-j",
+        "--jobs",
+        "jobs",
+        type=int,
+        default=0,
+        show_default=True,
         help="Parallel library comparisons for directory/package inputs "
-             "(0 = auto-detect CPU count, the default).",
+        "(0 = auto-detect CPU count, the default).",
     )(func)
     return func
 
@@ -263,49 +323,75 @@ def debug_resolution_options(func: F) -> F:
     compose, not a copy to drift (ADR-037 D3).
     """
     func = click.option(
-        "--dwarf", "debug_format", flag_value="dwarf", hidden=True,
+        "--dwarf",
+        "debug_format",
+        flag_value="dwarf",
+        hidden=True,
         help="Force DWARF debug format for both sides (ELF only).",
     )(func)
     func = click.option(
-        "--ctf", "debug_format", flag_value="ctf", hidden=True,
+        "--ctf",
+        "debug_format",
+        flag_value="ctf",
+        hidden=True,
         help="Force CTF debug format for both sides (ELF only).",
     )(func)
     func = click.option(
-        "--btf", "debug_format", flag_value="btf", default=None, hidden=True,
+        "--btf",
+        "debug_format",
+        flag_value="btf",
+        default=None,
+        hidden=True,
         help="Force BTF debug format for both sides (ELF only).",
     )(func)
     func = click.option(
-        "--debug-format", "debug_format_opt",
+        "--debug-format",
+        "debug_format_opt",
         type=click.Choice(["auto", "dwarf", "btf", "ctf"], case_sensitive=False),
         default=None,
         help="Force the ELF debug format for both sides (auto=pick best available). "
-             "Supersedes the individual --btf/--ctf/--dwarf flags.",
+        "Supersedes the individual --btf/--ctf/--dwarf flags.",
     )(func)
     func = click.option(
-        "--debuginfod-url", "debuginfod_url", default=None,
+        "--debuginfod-url",
+        "debuginfod_url",
+        default=None,
         help="debuginfod server URL (overrides DEBUGINFOD_URLS env var).",
     )(func)
     func = click.option(
-        "--debuginfod", is_flag=True, default=False,
+        "--debuginfod",
+        is_flag=True,
+        default=False,
         help="Enable debuginfod network resolution for debug info (opt-in).",
     )(func)
     func = click.option(
-        "--debug-root2", "debug_roots_new", multiple=True, type=click.Path(path_type=Path),
+        "--debug-root2",
+        "debug_roots_new",
+        multiple=True,
+        type=click.Path(path_type=Path),
         help="Debug root for new side only (overrides --debug-root for new).",
     )(func)
     func = click.option(
-        "--debug-root1", "debug_roots_old", multiple=True, type=click.Path(path_type=Path),
+        "--debug-root1",
+        "debug_roots_old",
+        multiple=True,
+        type=click.Path(path_type=Path),
         help="Debug root for old side only (overrides --debug-root for old).",
     )(func)
     func = click.option(
-        "--debug-root", "debug_roots", multiple=True, type=click.Path(path_type=Path),
+        "--debug-root",
+        "debug_roots",
+        multiple=True,
+        type=click.Path(path_type=Path),
         help="Directory containing separate debug files (build-id trees, "
-             "path-mirror, dSYM bundles). Applied to both sides. Can be repeated.",
+        "path-mirror, dSYM bundles). Applied to both sides. Can be repeated.",
     )(func)
     func = click.option(
-        "--dwarf-only", is_flag=True, default=False,
+        "--dwarf-only",
+        is_flag=True,
+        default=False,
         help="Force DWARF-only mode for both sides: use DWARF debug info "
-             "as primary data source even when headers are available.",
+        "as primary data source even when headers are available.",
     )(func)
     return func
 
@@ -362,14 +448,28 @@ def build_source_dump_options(func: F) -> F:
     from pathlib import Path
 
     func = click.option(
-        "--collect-mode", "collect_mode",
-        type=click.Choice(["off", "build", "graph-build", "source-changed", "source-target", "graph-summary", "graph-full"]),
-        default="source-target", show_default=False, hidden=True,
+        "--collect-mode",
+        "collect_mode",
+        type=click.Choice(
+            [
+                "off",
+                "build",
+                "graph-build",
+                "source-changed",
+                "source-target",
+                "graph-summary",
+                "graph-full",
+            ]
+        ),
+        default="source-target",
+        show_default=False,
+        hidden=True,
         help="DEPRECATED (ADR-037 D5): internal ADR-033 D2 evidence mode. Prefer "
         "the unified --depth dial; kept as a hidden alias for one release.",
     )(func)
     func = click.option(
-        "--depth", "depth",
+        "--depth",
+        "depth",
         type=DEPTH_PARAM,
         default=None,
         help="Unified evidence-depth dial (ADR-037 D5; same vocabulary as "
@@ -378,41 +478,56 @@ def build_source_dump_options(func: F) -> F:
         "--max == --depth full.",
     )(func)
     func = click.option(
-        "--max", "max_depth", is_flag=True, default=False,
+        "--max",
+        "max_depth",
+        is_flag=True,
+        default=False,
         help="Shorthand for --depth full (collect the deepest evidence available).",
     )(func)
     func = click.option(
-        "--allow-build-query", "allow_build_query", is_flag=True, default=False,
+        "--allow-build-query",
+        "allow_build_query",
+        is_flag=True,
+        default=False,
         help="Permit running `build.query` from an explicit trusted "
-        "--build-config to emit a compile DB / exports (ADR-032 D5 "
+        "--config to emit a compile DB / exports (ADR-032 D5 "
         "query_build_system). Off by default, and ignored for auto-discovered "
         "source-tree configs: only existing build outputs are inspected — "
         "a full project build is never run.",
     )(func)
     func = click.option(
-        "--build-config", "build_config",
+        "--config",
+        "build_config",
         type=click.Path(exists=True, dir_okay=False, path_type=Path),
         default=None,
-        help="Path to a trusted `.abicheck.yml` build config (build system, "
-        "query command, compile-DB location). Defaults to `.abicheck.yml` "
-        "at the --sources tree root for non-executing settings; build.query "
-        "runs only from an explicit --build-config.",
+        help="Path to the project `.abicheck.yml` (ADR-037 D4): build system, "
+        "query command, compile-DB location, plus the stable severity/scope/"
+        "suppression/source settings. Defaults to `.abicheck.yml` at the "
+        "--sources tree root for non-executing settings; build.query runs only "
+        "from an explicit --config.",
     )(func)
     func = click.option(
-        "--build-compile-db", "build_compile_db", default=None, metavar="GLOB",
+        "--build-compile-db",
+        "build_compile_db",
+        default=None,
+        metavar="GLOB",
         help="Where a build/query lands its compile_commands.json, relative to "
         "--sources (e.g. 'build/compile_commands.json'). CLI equivalent of "
         "`.abicheck.yml` build.compile_db; overrides it when both are given.",
     )(func)
     func = click.option(
-        "--build-query", "build_query", default=None, metavar="CMD",
+        "--build-query",
+        "build_query",
+        default=None,
+        metavar="CMD",
         help="Build-system query command that emits a compile DB without a full "
         "build (e.g. 'cmake -S . -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON'). "
         "CLI equivalent of `.abicheck.yml` build.query — no config file needed. "
         "Only runs with --allow-build-query.",
     )(func)
     func = click.option(
-        "--sources", "sources",
+        "--sources",
+        "sources",
         type=click.Path(exists=True, path_type=Path),
         default=None,
         help="Source checkout to run L4 source ABI replay + the L5 graph over "
@@ -420,7 +535,8 @@ def build_source_dump_options(func: F) -> F:
         "as that pack instead.)",
     )(func)
     func = click.option(
-        "--build-info", "build_info",
+        "--build-info",
+        "build_info",
         type=click.Path(exists=True, path_type=Path),
         default=None,
         help="Optional L3 build context: a build dir, a compile_commands.json, "
@@ -455,37 +571,68 @@ def evidence_options(func: F) -> F:
 
     pack_dir = click.Path(exists=True, file_okay=False, path_type=Path)
     func = click.option(
-        "--collect-mode", "collect_mode",
-        type=click.Choice(["off", "build", "graph-build", "source-changed", "source-target", "graph-summary", "graph-full"]),
-        default="off", show_default=False, hidden=True,
+        "--collect-mode",
+        "collect_mode",
+        type=click.Choice(
+            [
+                "off",
+                "build",
+                "graph-build",
+                "source-changed",
+                "source-target",
+                "graph-summary",
+                "graph-full",
+            ]
+        ),
+        default="off",
+        show_default=False,
+        hidden=True,
         help="DEPRECATED (ADR-037 D5): internal ADR-033 D2 evidence mode. Prefer "
         "the unified --depth dial; kept as a hidden alias for one release.",
     )(func)
     func = click.option(
-        "--max", "max_depth", is_flag=True, default=False,
+        "--max",
+        "max_depth",
+        is_flag=True,
+        default=False,
         help="Shorthand for --depth full (collect the deepest evidence available).",
     )(func)
     func = click.option(
-        "--depth", "depth", type=DEPTH_PARAM, default=None,
+        "--depth",
+        "depth",
+        type=DEPTH_PARAM,
+        default=None,
         help="Unified evidence-depth dial (ADR-037 D5): symbols=L0/L1 only, "
         "headers=+L2 AST (default), build=+L3, source=+L4 replay & the L5 graph, "
         "full=deepest. --max == --depth full. Deeper-than-headers needs "
         "--old/new-sources or --old/new-build-info.",
     )(func)
     func = click.option(
-        "--new-sources", "new_sources", type=pack_dir, default=None,
+        "--new-sources",
+        "new_sources",
+        type=pack_dir,
+        default=None,
         help="Out-of-band L4/L5 source pack for the new side (overrides embedded).",
     )(func)
     func = click.option(
-        "--old-sources", "old_sources", type=pack_dir, default=None,
+        "--old-sources",
+        "old_sources",
+        type=pack_dir,
+        default=None,
         help="Out-of-band L4/L5 source pack for the old side (overrides embedded).",
     )(func)
     func = click.option(
-        "--new-build-info", "new_build_info", type=pack_dir, default=None,
+        "--new-build-info",
+        "new_build_info",
+        type=pack_dir,
+        default=None,
         help="Out-of-band L3 build-info pack for the new side (overrides embedded).",
     )(func)
     func = click.option(
-        "--old-build-info", "old_build_info", type=pack_dir, default=None,
+        "--old-build-info",
+        "old_build_info",
+        type=pack_dir,
+        default=None,
         help="Out-of-band L3 build-info pack for the old side (overrides embedded).",
     )(func)
     return func
@@ -506,33 +653,60 @@ build_source_compare_options = evidence_options
 #: checks a verdict-emitting command carries the *whole* family (composed via the
 #: matching decorator) or is allowlisted in ``INTENTIONAL_SUBSET``.
 FAMILY_FLAGS: dict[str, frozenset[str]] = {
-    "two_sided_input": frozenset({
-        "--header", "--include", "--old-header", "--new-header",
-        "--old-include", "--new-include", "--old-version", "--new-version",
-    }),
+    "two_sided_input": frozenset(
+        {
+            "--header",
+            "--include",
+            "--old-header",
+            "--new-header",
+            "--old-include",
+            "--new-include",
+            "--old-version",
+            "--new-version",
+        }
+    ),
     "policy": frozenset({"--policy", "--policy-file", "--suppress"}),
-    "severity": frozenset({
-        "--severity-preset", "--severity-abi-breaking",
-        "--severity-potential-breaking", "--severity-quality-issues",
-        "--severity-addition",
-    }),
+    "severity": frozenset(
+        {
+            "--severity-preset",
+            "--severity-abi-breaking",
+            "--severity-potential-breaking",
+            "--severity-quality-issues",
+            "--severity-addition",
+        }
+    ),
     "scope": frozenset({"--scope-public-headers"}),
     "output": frozenset({"--format", "--output"}),
     # Two-sided evidence family (ADR-037 D3 ``@evidence_options``): registered
     # but *not* required — only commands that take source depth (``compare``)
     # compose it; the hidden deprecated ``--collect-mode`` alias is omitted here.
-    "evidence": frozenset({
-        "--depth", "--max", "--old-sources", "--new-sources",
-        "--old-build-info", "--new-build-info",
-    }),
+    "evidence": frozenset(
+        {
+            "--depth",
+            "--max",
+            "--old-sources",
+            "--new-sources",
+            "--old-build-info",
+            "--new-build-info",
+        }
+    ),
     # Local-ELF debug-resolution family: registered but *not* required either — it
     # resolves local ELF debug artifacts the package/snapshot-oriented commands
     # do not take.
-    "debug_resolution": frozenset({
-        "--dwarf-only", "--debug-root", "--debug-root1", "--debug-root2",
-        "--debuginfod", "--debuginfod-url", "--debug-format",
-        "--btf", "--ctf", "--dwarf",
-    }),
+    "debug_resolution": frozenset(
+        {
+            "--dwarf-only",
+            "--debug-root",
+            "--debug-root1",
+            "--debug-root2",
+            "--debuginfod",
+            "--debuginfod-url",
+            "--debug-format",
+            "--btf",
+            "--ctf",
+            "--dwarf",
+        }
+    ),
 }
 
 #: Family name → the decorator callable that supplies it (used by the gate's
@@ -551,9 +725,15 @@ FAMILY_DECORATOR: dict[str, str] = {
 #: debug artifacts that the package/snapshot-oriented commands do not take.
 #: ``evidence`` is likewise registered-but-not-required — only commands that take
 #: source depth (``compare``) compose ``@evidence_options`` (ADR-037 D3).
-REQUIRED_FAMILIES: frozenset[str] = frozenset({
-    "two_sided_input", "policy", "severity", "scope", "output",
-})
+REQUIRED_FAMILIES: frozenset[str] = frozenset(
+    {
+        "two_sided_input",
+        "policy",
+        "severity",
+        "scope",
+        "output",
+    }
+)
 
 #: command name → module basename, for the gate to locate each command's source.
 VERDICT_EMITTING_COMMANDS: dict[str, str] = {
@@ -587,7 +767,9 @@ def count_visible_options(cmd: object) -> int:
     """Count a Click command's user-visible (non-hidden) options (ADR-037 D10.5)."""
     n = 0
     for p in getattr(cmd, "params", []):
-        if getattr(p, "param_type_name", None) == "option" and not getattr(p, "hidden", False):
+        if getattr(p, "param_type_name", None) == "option" and not getattr(
+            p, "hidden", False
+        ):
             n += 1
     return n
 

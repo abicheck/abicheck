@@ -80,6 +80,69 @@ def test_conda_download_url_joins_channel_and_basename() -> None:
     assert mod.conda_download_url("/linux-64/x.conda").count("conda-forge//") == 0
 
 
+def test_conda_download_url_prefers_record_download_url_for_other_channels() -> None:
+    # Intel-channel packages 301-redirect on the conda CDN path, so the API
+    # file record's (protocol-relative) download_url must be used instead.
+    mod = _load_module()
+    bn = "linux-64/oneccl-devel-2021.13.0-intel_299.tar.bz2"
+    api = {
+        "files": [
+            {"basename": bn, "download_url": f"//api.anaconda.org/download/intel/{bn}"}
+        ]
+    }
+    assert (
+        mod.conda_download_url(bn, api)
+        == f"https://api.anaconda.org/download/intel/{bn}"
+    )
+    # No record for the basename → fall back to the CDN form for the channel.
+    assert mod.conda_download_url(bn, {"files": []}, channel="intel") == (
+        f"https://conda.anaconda.org/intel/{bn}"
+    )
+
+
+def test_evaluate_pair_preserves_manifest_channel_for_url_fallback(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    mod = _load_module()
+    urls: list[str] = []
+
+    monkeypatch.setattr(
+        mod,
+        "resolve_pair",
+        lambda pair, api, subdir: (
+            "linux-64/old-1.0-0.tar.bz2",
+            "linux-64/new-2.0-0.tar.bz2",
+        ),
+    )
+
+    def fake_fetch(url: str, out: Path) -> None:
+        urls.append(url)
+        out.write_bytes(b"pkg")
+
+    monkeypatch.setattr(mod, "fetch_file", fake_fetch)
+    monkeypatch.setattr(mod, "extract_sos", lambda pkg, into: {"libx": str(pkg)})
+    monkeypatch.setattr(mod, "run_abicheck", lambda old, new, ov, nv: {"verdict": "COMPATIBLE"})
+
+    verdict = mod.evaluate_pair(
+        {
+            "pair": "x",
+            "old_ver": "1.0",
+            "new_ver": "2.0",
+            "channel": "intel",
+        },
+        {"files": []},
+        "linux-64",
+        tmp_path,
+        1,
+    )
+
+    assert verdict == "COMPATIBLE"
+    assert urls == [
+        "https://conda.anaconda.org/intel/linux-64/old-1.0-0.tar.bz2",
+        "https://conda.anaconda.org/intel/linux-64/new-2.0-0.tar.bz2",
+    ]
+
+
 def test_select_conda_basename_picks_newest_build_in_subdir() -> None:
     mod = _load_module()
     # highest build number (-4) wins among the three linux-64 builds of 2.9.4

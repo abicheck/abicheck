@@ -122,7 +122,7 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
             "options": [
                 "--depth", "--max", "--collect-mode", "--build-info", "--sources",
                 "--build-dir", "--compile-db-filter",
-                "--build-query", "--build-compile-db", "--build-config",
+                "--build-query", "--build-compile-db", "--config",
                 "--allow-build-query",
             ],
         },

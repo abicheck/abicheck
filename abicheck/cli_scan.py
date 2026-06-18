@@ -262,7 +262,7 @@ def _intrinsic_coverage(snap: Any) -> list[dict[str, Any]]:
             "status": "present" if snap.from_headers else "skipped",
             "detail": f"{len(snap.types)} type(s) from public headers"
             if snap.from_headers
-            else "no public-header AST (pass --headers; needs castxml)",
+            else "no public-header AST (pass --headers; needs castxml or clang)",
         }
     )
     return rows
@@ -282,6 +282,24 @@ def _pack_coverage(snap: Any) -> list[dict[str, Any]]:
             for layer in ("L3_build", "L4_source_abi", "L5_source_graph")
         ]
     return [c.to_dict() for c in pack.manifest.coverage]
+
+
+def _l3_collected(snap: Any) -> bool:
+    """True when the snapshot carries a non-empty L3 build-evidence layer.
+
+    Used to decide whether a deep ``--source-method`` actually reached L3: a
+    ``not_collected`` (or absent pack) L3 means the requested L3/L4/L5 layers were
+    skipped for want of a compile database, which warrants a pointed advisory.
+    ``partial`` counts as collected — it ran and produced something.
+    """
+    pack = getattr(snap, "build_source", None)
+    if pack is None:
+        return False
+    for cov in pack.manifest.coverage:
+        row = cov.to_dict() if hasattr(cov, "to_dict") else cov
+        if row.get("layer") == "L3_build":
+            return row.get("status") != "not_collected"
+    return False
 
 
 def _render_text(out: ScanOutcome) -> str:
@@ -549,11 +567,12 @@ def _audit_exit_code(
     help="Explicit compile_commands.json (use when not under --sources).",
 )
 @click.option(
-    "--build-config",
+    "--config",
     "build_config",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
     default=None,
-    help="Trusted .abicheck.yml (enables build.query with --allow-build-query).",
+    help="Trusted project .abicheck.yml (enables build.query with "
+    "--allow-build-query).",
 )
 @click.option(
     "--baseline",
@@ -813,6 +832,16 @@ def scan_cmd(
             severities=severities,
             budget=budget,
             budget_s=budget_s,
+            # A concrete explicit level is what consents to level-implies-query
+            # auto-running build.query: a non-auto --source-method, or --depth ONLY
+            # when no --source-method is given (resolve_level gives --source-method
+            # precedence and ignores --depth otherwise, so `auto`+`--depth` resolves
+            # via auto/the preset, not the depth — it must not count as consent;
+            # Codex review).
+            level_explicit=(
+                source_method is not None and source_method != SourceMethod.AUTO.value
+            )
+            or (source_method is None and depth is not None),
         )
     except _BudgetOverflow as bo:
         click.echo(bo.message, err=True)
@@ -884,6 +913,7 @@ def run_scan_core(
     severities: dict[str, str],
     budget: str | None,
     budget_s: float | None,
+    level_explicit: bool = False,
 ) -> ScanCoreResult:
     """The shared scan orchestration (classify → always-on tier → level → compare).
 
@@ -961,6 +991,40 @@ def run_scan_core(
             "public-API surface (headers-only) instead of a focused diff. Pass "
             "--since <ref> or --changed-path to scope it to the change."
         )
+    # level-implies-query (ADR-037 D4): an explicit, *trusted* --config that
+    # defines a build.query, together with an *explicitly pinned* deep level
+    # (--source-method/--depth, level_explicit), is itself consent to run that
+    # query — making the user pass --allow-build-query as well for a level they
+    # explicitly asked for is needless friction. Trusted = an explicit --config
+    # path (build_config is not None here; an auto-discovered source-tree config
+    # is resolved later in embed_build_source and never reaches this gate), so
+    # this never runs an attacker-controlled command. Crucially it does NOT fire
+    # for the default mode preset (a plain `scan`/`--audit` with `--sources` whose
+    # collect_mode is already non-off) — only an explicit deep level counts, so a
+    # --config passed purely for project settings never silently runs a subprocess
+    # (Codex review). No-op when the config defines no query.
+    effective_allow_query = allow_build_query
+    if (
+        not allow_build_query
+        and build_config is not None
+        and collect_mode != "off"
+        and level_explicit
+    ):
+        from .buildsource.inline import load_build_config
+
+        try:
+            _cfg = load_build_config(build_config)
+        except Exception:  # malformed config surfaces later in the real load
+            _cfg = None
+        if _cfg is not None and _cfg.query:
+            effective_allow_query = True
+            advisories.append(
+                f"level {resolved.value} with a trusted --config defining "
+                "build.query: auto-enabled the query to collect L3+ evidence "
+                "(equivalent to --allow-build-query). Pass --allow-build-query "
+                "explicitly to silence this note."
+            )
+
     new_snap = _build_new_snapshot(
         binary,
         list(headers),
@@ -968,13 +1032,32 @@ def run_scan_core(
         sources,
         collect_mode,
         lang,
-        allow_build_query,
+        effective_allow_query,
         changed_paths=replay_seed,
         build_info=effective_build_info,
         build_config=build_config,
         public_headers=list(public_headers),
         public_header_dirs=list(public_header_dirs),
     )
+
+    # --- honest level-vs-evidence advisory ------------------------------------
+    # A deep --source-method (s1/s2/s4/s5/s6 → collect_mode != "off") needs an L3
+    # compile database; without one the L3/L4/L5 layers are *skipped*, not failed.
+    # When the user actually supplied a source input (a --sources tree or
+    # --build-info) yet L3 still came back empty — typically a pristine checkout
+    # with no compile_commands.json — the coverage rows say `not_collected`, but
+    # the user shouldn't have to infer *why*: name the requested level and the
+    # exact remedy (mirrors the unseeded-replay advisory). Gated on a source input
+    # so a plain binary-only scan at the default deep mode isn't nagged.
+    gave_source_input = sources is not None or effective_build_info is not None
+    if gave_source_input and collect_mode != "off" and not _l3_collected(new_snap):
+        advisories.append(
+            f"requested source-method {resolved.value} (depth {eff_depth_enum.value}) "
+            "needs an L3 compile database, but none was found — L3/L4/L5 were "
+            "skipped. Provide one with --build-info/--compile-db (a "
+            "compile_commands.json or build dir), or a trusted --config plus "
+            "--allow-build-query to generate it."
+        )
 
     # --- conditional tier: S2 preprocessor pre-scan (D2) ----------------------
     # Runs only when L3 build evidence + a preprocessor (`clang -E`) are present;

@@ -861,7 +861,7 @@ def embed_build_source(
     inline_pack: BuildSourcePack | None = None
     if raw_build_info is not None or raw_sources is not None:
         cfg_path = build_config or discover_build_config(raw_sources)
-        # Only an explicit --build-config is operator-supplied/trusted for
+        # Only an explicit --config is operator-supplied/trusted for
         # subprocess execution. Auto-discovered source-tree configs may be
         # attacker-controlled; their non-executable settings are still honored.
         cfg_trusted_for_query = build_config is not None
