@@ -401,6 +401,7 @@ def _merge_compile_config(
     sources: Path | None = None,
     *,
     frontend_explicit: bool = False,
+    nostdinc_explicit: bool = False,
 ) -> tuple[CompileContext, tuple[Path, ...]]:
     """Fold a ``.abicheck.yml`` ``compile:`` block into the CLI compile context.
 
@@ -464,13 +465,18 @@ def _merge_compile_config(
         if cli_ctx.sysroot is not None
         else (Path(bc.compile_sysroot) if bc.compile_sysroot else None)
     )
+    # CLI > config: an explicit --nostdinc/--no-nostdinc wins in *either*
+    # direction; an unset flag inherits the config value (Codex review).
+    nostdinc = (
+        cli_ctx.nostdinc if nostdinc_explicit else bool(bc.compile_nostdinc)
+    )
     merged = CompileContext(
         gcc_path=cli_ctx.gcc_path,
         gcc_prefix=cli_ctx.gcc_prefix,
         gcc_options=gcc_options,
         gcc_option_tokens=cli_ctx.gcc_option_tokens,
         sysroot=sysroot,
-        nostdinc=cli_ctx.nostdinc or bool(bc.compile_nostdinc),
+        nostdinc=nostdinc,
         frontend=frontend,
     )
     includes = tuple(cli_includes) + tuple(
@@ -838,16 +844,19 @@ def scan_cmd(
     # explicitly-typed --ast-frontend (even "auto") wins over a pinned config
     # frontend, so detect whether the user actually passed it (Codex review).
     ctx = click.get_current_context()
-    frontend_explicit = (
-        ctx.get_parameter_source("header_backend")
-        == click.core.ParameterSource.COMMANDLINE
-    )
+
+    def _explicit(param: str) -> bool:
+        return (
+            ctx.get_parameter_source(param) == click.core.ParameterSource.COMMANDLINE
+        )
+
     compile_context, includes = _merge_compile_config(
         compile_context,
         tuple(includes),
         build_config,
         sources=sources,
-        frontend_explicit=frontend_explicit,
+        frontend_explicit=_explicit("header_backend"),
+        nostdinc_explicit=_explicit("nostdinc"),
     )
 
     if len(binaries) != 1:

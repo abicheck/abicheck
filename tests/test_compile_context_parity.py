@@ -364,3 +364,26 @@ def test_try_header_scoped_dump_threads_compile_to_dumper(
     assert captured["gcc_prefix"] == "x-"
     assert captured["sysroot"] == tmp_path
     assert captured["nostdinc"] is True
+
+
+def test_merge_compile_config_nostdinc_precedence(tmp_path: Path) -> None:
+    # config compile.nostdinc: true is inherited by default, but an explicit
+    # --no-nostdinc (nostdinc_explicit, value False) overrides it (Codex review).
+    cfg = tmp_path / ".abicheck.yml"
+    cfg.write_text("compile:\n  nostdinc: true\n", encoding="utf-8")
+    from abicheck.cli_scan import _merge_compile_config
+
+    # Default (not explicit) inherits config True.
+    inherit, _ = _merge_compile_config(CompileContext(), (), cfg)
+    assert inherit.nostdinc is True
+    # Explicit --no-nostdinc (cli False, explicit) overrides config True.
+    override, _ = _merge_compile_config(
+        CompileContext(nostdinc=False), (), cfg, nostdinc_explicit=True
+    )
+    assert override.nostdinc is False
+    # Explicit --nostdinc with no config also holds.
+    cfg.write_text("compile:\n  std: c++20\n", encoding="utf-8")
+    on, _ = _merge_compile_config(
+        CompileContext(nostdinc=True), (), cfg, nostdinc_explicit=True
+    )
+    assert on.nostdinc is True

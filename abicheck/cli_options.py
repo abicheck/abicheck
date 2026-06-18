@@ -249,12 +249,13 @@ def compile_context_options(func: F) -> F:
     :class:`~abicheck.service_scan.CompileContext` kwargs exactly.
     """
     func = click.option(
-        "--nostdinc",
+        "--nostdinc/--no-nostdinc",
         "nostdinc",
-        is_flag=True,
         default=False,
         help="Do not search the standard system include paths (suppresses the "
-        "castxml/clang system-include auto-detection too).",
+        "castxml/clang system-include auto-detection too). Paired form so an "
+        "explicit --no-nostdinc on `scan` can override a config `compile.nostdinc: "
+        "true` for a one-off run (CLI > config).",
     )(func)
     func = click.option(
         "--sysroot",
