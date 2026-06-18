@@ -173,7 +173,15 @@ def run() -> list[dict]:
     results: list[dict] = []
     for spec in PAIRS:
         pkg, chan = spec["pkg"], spec["channel"]
-        api = apis.setdefault((pkg, chan), ch.query_conda(pkg, channel=chan))
+        # setdefault would evaluate query_conda() eagerly even on a cache hit
+        # (Python evaluates arguments before the call), so a repeated package's
+        # second pair would re-hit the Anaconda API — and a transient/rate-limited
+        # failure there would abort the whole run despite the metadata already
+        # being cached. Gate the network call behind an explicit membership check.
+        key = (pkg, chan)
+        if key not in apis:
+            apis[key] = ch.query_conda(pkg, channel=chan)
+        api = apis[key]
         row = {
             k: spec[k]
             for k in (
