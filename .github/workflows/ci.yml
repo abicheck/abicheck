@@ -124,11 +124,14 @@ jobs:
         # Renders the captured durations into the GitHub run summary. Reporting
         # only — a hard per-test wall-time gate would be flaky given CI-runner
         # variance; the uploaded artifact is the durable record for trends.
+        # continue-on-error keeps it truly non-blocking: a hiccup rendering the
+        # report must never fail an otherwise-green test job.
         if: always() && matrix.python-version == '3.13' && matrix.os == 'ubuntu-latest'
+        continue-on-error: true
         run: python scripts/summarize_test_durations.py test-durations.json --top 25
       - name: Upload test-durations artifact
         if: always() && matrix.python-version == '3.13' && matrix.os == 'ubuntu-latest'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         with:
           name: test-durations
           path: test-durations.json
