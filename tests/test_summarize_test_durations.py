@@ -82,3 +82,14 @@ def test_main_missing_file_is_noop(tmp_path, capsys):
     mod = _load()
     rc = mod.main([str(tmp_path / "nope.json")])
     assert rc == 0  # absence is tolerated (e.g. the test step was skipped)
+
+
+def test_main_malformed_file_returns_error(tmp_path, capsys):
+    mod = _load()
+    bad = tmp_path / "bad.json"
+    bad.write_text("{ not valid json")
+    rc = mod.main([str(bad)])
+    # A present-but-corrupt export is an operational failure, not a benign no-op:
+    # non-zero exit, with the reason on stderr (no traceback).
+    assert rc == 1
+    assert "Could not read durations" in capsys.readouterr().err
