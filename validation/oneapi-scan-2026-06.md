@@ -63,12 +63,17 @@ public-header oracle, and the divergences are all explained by it:
   `nm`), abicheck's default scoping **correctly demotes** them — no false positive.
   This is the headline good result. ✓
 - **oneCCL minor → COMPATIBLE_WITH_RISK, correct.** ✓
-- **oneDNN 3.11→3.12 → BREAKING is a *scope divergence*, not a clear FP.** The 6
-  breaking findings are all `func_removed_elf_only`: one experimental free function
-  (`sdpa_primitive_desc_create`) + five **internal** `dnnl::impl::graph::*`
-  `std::call_once` guard symbols. None are public `dnnl_*` C API or public `dnnl::`
-  C++ classes. A header-scoped view would call this COMPATIBLE; binary-strict
-  correctly reports real removals of exported-but-internal symbols.
+- **oneDNN 3.11→3.12 → BREAKING is correct, mostly internal noise + one real
+  public change.** The 6 breaking findings are all `func_removed_elf_only`: one
+  experimental free function (`sdpa_primitive_desc_create`) + five **internal**
+  `dnnl::impl::graph::*` `std::call_once` guard symbols — none public `dnnl_*` C
+  API or public `dnnl::` C++ classes, so the *removed exports* are internal. But
+  the header-scoped rerun does **not** fully demote this row: the
+  [L2 finalization](#l2-finalization-post-pr-444--scope-divergences-resolved)
+  below also **surfaces one genuine public-API change** the binary tier could not
+  name — the `dnnl::memory::format_tag::format_tag_last` enum sentinel shifted
+  (3.12 added format tags). So binary-strict BREAKING is the right verdict, and
+  L2 refines *why* (one real public change, not pure scope divergence).
 - **oneDAL 2025.0→2025.1 → BREAKING is also a scope divergence.** abicheck reports
   **164 breaking findings**; independently, `readelf` shows **212 raw removed
   exported symbols** (the two are different metrics — see footnote ²). The bulk of
@@ -79,11 +84,13 @@ public-header oracle, and the divergences are all explained by it:
   API break.
 
 **Bucketed:** 3 correct non-breaking, 2 correct breaking (SONAME bumps), 2
-binary-strict scope divergences (oneDNN/oneDAL minor) that a public-header scope
-would demote. **Zero clear false positives** — every breaking verdict corresponds
-to symbols genuinely removed from the binary; the question is only public-ness,
+binary-strict minor pairs (oneDNN/oneDAL) whose public-ness the binary tier
+cannot settle on its own. **Zero clear false positives** — every breaking verdict
+corresponds to symbols genuinely removed from the binary. The public-ness is
 **settled in the [L2 finalization](#l2-finalization-post-pr-444--scope-divergences-resolved)
-below** (oneDAL → NO_CHANGE; oneDNN → one real public change).
+below**: oneDAL fully demotes to **NO_CHANGE** (a true scope divergence), while
+oneDNN does **not** — L2 confirms the removed exports are internal *and* finds
+one genuine public change (`format_tag_last`), so it stays **BREAKING**.
 
 ## Timing
 
