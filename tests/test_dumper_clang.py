@@ -990,6 +990,87 @@ def test_clang_header_dump_bad_json_raises(
         _clang_header_dump([header], [])
 
 
+@pytest.mark.parametrize(
+    "stderr,expected",
+    [
+        # The <cXXX> C-compatibility wrappers are the unambiguous trigger.
+        ("fatal error: 'cstddef' file not found", True),
+        ("fatal error: 'cstdint' file not found", True),
+        ("error: 'cstdlib' file not found", True),
+        ("fatal error: 'cstring' file not found", True),
+        # A C header miss carries a .h suffix → not a C++ stdlib signal.
+        ("fatal error: 'stdio.h' file not found", False),
+        ("fatal error: 'oneapi/tbb.h' file not found", False),
+        # Plain-name C++ headers are deliberately NOT matched — they collide with
+        # plausible C project header names (oneTBB ships a version.h), so matching
+        # them could mask a real missing C dependency by re-parsing as C++.
+        ("fatal error: 'string' file not found", False),
+        ("fatal error: 'version' file not found", False),
+        ("fatal error: 'vector' file not found", False),
+        # An extensionless *project* include that is not a stdlib header must NOT
+        # trigger the retry (a C header's real missing dependency, not C++).
+        ("fatal error: 'config' file not found", False),
+        ("fatal error: 'myheader' file not found", False),
+        # Unrelated parse errors must not trigger the retry.
+        ("error: use of undeclared identifier 'foo'", False),
+        ("", False),
+    ],
+)
+def test_is_missing_cpp_stdlib_header_error(stderr: str, expected: bool) -> None:
+    assert dumper._is_missing_cpp_stdlib_header_error(stderr) is expected
+
+
+def test_clang_header_dump_retries_cpp_on_missing_cpp_stdlib_header(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # A pure-#include umbrella header has no inline C++ syntax, so it is parsed in
+    # C mode first; the missing-<cstddef> failure must trigger one C++-mode retry
+    # (with -x c++ in the rebuilt command) rather than hard-failing.
+    header = tmp_path / "umbrella.h"
+    header.write_text('#include "detail/impl.h"\n')
+    monkeypatch.setattr(dumper, "_clang_available", lambda *a, **k: True)
+    monkeypatch.setattr(dumper, "_cache_path", lambda *a, **k: tmp_path / "c.json")
+    monkeypatch.setattr(dumper, "_detect_cpp_headers", lambda *a, **k: False)
+    monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "0")
+    ast_json = '{"kind": "TranslationUnitDecl", "inner": []}'
+    cmds: list[list[str]] = []
+
+    def _run(cmd, **kwargs):
+        cmds.append(list(cmd))
+        if len(cmds) == 1:
+            return _fake_proc(stderr="fatal error: 'cstddef' file not found", returncode=1)
+        return _fake_proc(stdout=ast_json, returncode=0)
+
+    monkeypatch.setattr(dumper.subprocess, "run", _run)
+    root = _clang_header_dump([header], [])
+    assert root == {"kind": "TranslationUnitDecl", "inner": []}
+    assert len(cmds) == 2  # one C attempt + one C++ retry
+    assert "c" in cmds[0] and cmds[0][cmds[0].index("-x") + 1] == "c"
+    assert cmds[1][cmds[1].index("-x") + 1] == "c++"
+
+
+def test_clang_header_dump_no_retry_on_other_error(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # A non-"missing C++ stdlib header" failure must NOT retry — it surfaces as-is.
+    header = tmp_path / "foo.h"
+    header.write_text("int foo(void);\n")
+    monkeypatch.setattr(dumper, "_clang_available", lambda *a, **k: True)
+    monkeypatch.setattr(dumper, "_cache_path", lambda *a, **k: tmp_path / "c.json")
+    monkeypatch.setattr(dumper, "_detect_cpp_headers", lambda *a, **k: False)
+    monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "0")
+    calls = {"n": 0}
+
+    def _run(cmd, **kwargs):
+        calls["n"] += 1
+        return _fake_proc(stderr="error: undeclared identifier 'x'", returncode=1)
+
+    monkeypatch.setattr(dumper.subprocess, "run", _run)
+    with pytest.raises(SnapshotError, match="failed to parse"):
+        _clang_header_dump([header], [])
+    assert calls["n"] == 1  # no retry
+
+
 def test_resolve_header_backend_neither_tool_defaults_castxml(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

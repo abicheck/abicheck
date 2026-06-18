@@ -291,6 +291,64 @@ def test_probe_gnu_system_includes_handles_oserror(monkeypatch) -> None:
     assert dumper_sysinc._probe_gnu_system_includes("g++", cpp=True) == []
 
 
+@pytest.mark.parametrize(
+    "path,expected",
+    [
+        # GCC's own compiler resource / builtins dir (GCC_INCLUDE_DIR + fixed).
+        ("/usr/lib/gcc/x86_64-linux-gnu/13/include", True),
+        ("/usr/lib/gcc/x86_64-linux-gnu/13/include-fixed", True),
+        ("/usr/lib64/gcc/x86_64-redhat-linux/12/include", True),
+        ("/usr/lib32/gcc/x86_64-linux-gnu/13/include", True),
+        ("/usr/libx32/gcc/x86_64-linux-gnu/13/include", True),
+        ("/opt/cross/lib/gcc-cross/aarch64-linux-gnu/12/include", True),
+        # libstdc++ and libc dirs must be KEPT (not GCC resource dirs).
+        ("/usr/include/c++/13", False),
+        ("/usr/include/x86_64-linux-gnu/c++/13", False),
+        ("/usr/include", False),
+        ("/usr/local/include", False),
+        ("/usr/include/x86_64-linux-gnu", False),
+        # A 'gcc' segment not preceded by an exact multilib dir is not the
+        # resource dir: a bare 'gcc' dir, or a 'lib'-prefixed but non-multilib
+        # dir like 'libfoo', must not be misclassified (matcher tightened from
+        # startswith('lib') to an exact multilib-name set).
+        ("/home/gcc/include", False),
+        ("/opt/libfoo/gcc/x86_64-linux-gnu/13/include", False),
+    ],
+)
+def test_is_gnu_compiler_resource_dir(path: str, expected: bool) -> None:
+    from abicheck import dumper_sysinc
+
+    assert dumper_sysinc._is_gnu_compiler_resource_dir(path) is expected
+
+
+def test_probe_gnu_system_includes_drops_gcc_resource_dir(
+    monkeypatch, tmp_path: Path
+) -> None:
+    # The GCC compiler resource dir (lib/gcc/.../include) must not cross over to
+    # the clang backend: clang has its own intrinsics headers, and GCC's
+    # immintrin.h/ia32intrin.h reference GCC-only __builtin_ia32_* that clang
+    # cannot parse. It is dropped even though it exists on disk.
+    from abicheck import dumper_sysinc
+
+    libstdcxx = tmp_path / "include" / "c++" / "13"
+    libc = tmp_path / "include"
+    gcc_res = tmp_path / "lib" / "gcc" / "x86_64-linux-gnu" / "13" / "include"
+    for d in (libstdcxx, libc, gcc_res):
+        d.mkdir(parents=True, exist_ok=True)
+
+    class _P:
+        stderr = "ignored"
+
+    monkeypatch.setattr(dumper_sysinc.subprocess, "run", lambda *a, **k: _P())
+    monkeypatch.setattr(
+        dumper_sysinc,
+        "_parse_gnu_include_search_dirs",
+        lambda s: [str(libstdcxx), str(gcc_res), str(libc)],
+    )
+    out = dumper_sysinc._probe_gnu_system_includes("g++", cpp=True)
+    assert out == [str(libstdcxx), str(libc)]  # gcc resource dir filtered out
+
+
 def test_buildconfig_compile_frontend_case_insensitive() -> None:
     from abicheck.buildsource.inline import BuildConfig
 
