@@ -129,12 +129,23 @@ def _resolve_probe_compiler(
     return None
 
 
-#: Pass-through flags that signal a hermetic/cross parse — if the caller already
-#: supplied any of these via ``--gcc-options``/``--gcc-option``, the host-compiler
-#: probe must stay out of the way (matching what the structured ``nostdinc`` /
-#: ``sysroot`` fields do). Substring match covers ``-nostdinc`` / ``-nostdinc++``
-#: and ``--sysroot`` / ``--sysroot=…`` / ``-isysroot``.
-_PROBE_SUPPRESSING_FLAGS = ("-nostdinc", "--sysroot", "-isysroot")
+#: Pass-through flags that signal a hermetic/cross/selected-toolchain parse — if
+#: the caller already supplied any of these via ``--gcc-options``/``--gcc-option``,
+#: the host-compiler probe must stay out of the way (matching what the structured
+#: ``nostdinc`` / ``sysroot`` fields do). Substring match covers ``-nostdinc`` /
+#: ``-nostdinc++``, ``--sysroot`` / ``--sysroot=…`` / ``-isysroot``, the GCC
+#: toolchain selectors (``--gcc-toolchain=…`` / ``--gcc-install-dir=…``), and a
+#: cross ``--target=…`` / ``-target …`` — in all of those, probing the host
+#: ``g++`` would inject the wrong libstdc++/libc dirs.
+_PROBE_SUPPRESSING_FLAGS = (
+    "-nostdinc",
+    "--sysroot",
+    "-isysroot",
+    "--gcc-toolchain",
+    "--gcc-install-dir",
+    "--target",
+    "-target",
+)
 
 
 def _pass_through_suppresses_probe(
@@ -165,10 +176,11 @@ def _resolve_clang_system_includes(
 
     Empty when auto-detection is disabled, ``-nostdinc`` was requested, an
     explicit ``--sysroot`` already redirects the search, the caller passed an
-    equivalent hermetic/cross flag through ``--gcc-options``/``--gcc-option``
-    (``-nostdinc``/``-nostdinc++``/``--sysroot``/``-isysroot``), or no GNU
-    compiler is available to probe. Otherwise the host GNU driver's system
-    include dirs (castxml↔clang parity, see :func:`_probe_gnu_system_includes`).
+    equivalent hermetic/cross/selected-toolchain flag through ``--gcc-options``/
+    ``--gcc-option`` (``-nostdinc``/``-nostdinc++``/``--sysroot``/``-isysroot``/
+    ``--gcc-toolchain``/``--gcc-install-dir``/``--target``), or no GNU compiler is
+    available to probe. Otherwise the host GNU driver's system include dirs
+    (castxml↔clang parity, see :func:`_probe_gnu_system_includes`).
     """
     if (
         nostdinc

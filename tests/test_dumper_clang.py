@@ -1805,9 +1805,15 @@ def test_build_clang_command_probed_isystem_after_user_flags(tmp_path: Path) -> 
         ("-nostdinc++", ()),
         ("--sysroot=/sdk", ()),
         ("-isysroot /sdk", ()),
+        ("--gcc-toolchain=/opt/gcc", ()),
+        ("--gcc-install-dir=/opt/gcc/lib", ()),
+        ("--target=aarch64-linux-gnu", ()),
         (None, ("-nostdinc",)),
         (None, ("--sysroot=/sdk",)),
         (None, ("-nostdinc++",)),
+        (None, ("--gcc-toolchain=/opt/gcc",)),
+        (None, ("--target=aarch64-linux-gnu",)),
+        (None, ("-target", "aarch64-linux-gnu")),
     ],
 )
 def test_resolve_clang_system_includes_respects_passthrough(
