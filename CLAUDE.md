@@ -190,12 +190,16 @@ Four mechanisms guard test quality so coverage can't be "filled" without verifyi
 ## Line-coverage floor
 
 The fast lane enforces a **95%** line+branch coverage floor (`--cov-fail-under=95`),
-but **only on the Linux unit-test lane** in `.github/workflows/ci.yml` — that's where
-the full unit suite runs. macOS/Windows skip the Linux-only ELF/DWARF parsing tests,
-which structurally lowers their coverage (~93% on macOS), so those lanes run the same
-tests without the fail-under gate (macOS still emits a coverage report). If the macOS
-lane ever fails on coverage, the fix is to keep the gate Linux-scoped — **do not lower
-the global 95% floor** to make another platform pass.
+but **only on the canonical Linux/Python-3.13 unit-test lane** in
+`.github/workflows/ci.yml` — that's where the full unit suite runs under coverage.
+The other Linux Pythons (3.12/3.14) run the same suite *without* coverage (they would
+only re-check the identical floor, and coverage instrumentation adds ~60% wall time).
+macOS/Windows skip the Linux-only ELF/DWARF parsing tests, which structurally lowers
+their coverage (~93% on macOS), so those lanes run the same tests without the
+fail-under gate (macOS still emits a coverage report). Coverage uses the
+`sys.monitoring` backend (`COVERAGE_CORE=sysmon`, Python 3.12+) to keep the
+instrumentation cheap. If the macOS lane ever fails on coverage, the fix is to keep the
+gate Linux-scoped — **do not lower the global 95% floor** to make another platform pass.
 
 ## Files that are large — edit carefully
 
