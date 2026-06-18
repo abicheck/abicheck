@@ -395,6 +395,7 @@ def _merge_compile_config(
     cli_ctx: Any,
     cli_includes: tuple[Path, ...],
     build_config: Path | None,
+    sources: Path | None = None,
 ) -> tuple[Any, tuple[Path, ...]]:
     """Fold a ``.abicheck.yml`` ``compile:`` block into the CLI compile context.
 
@@ -404,23 +405,31 @@ def _merge_compile_config(
     ``--gcc-options``; ``include_dirs`` (resolved against the config's directory)
     are appended *after* the CLI ``-I`` so explicit roots keep search precedence.
     Returns the merged ``(CompileContext, includes)``.
+
+    The config is the explicit ``--config`` when given, else the ``.abicheck.yml``
+    auto-discovered at the ``--sources`` tree root — so a source-tree scan honors
+    the project's ``compile:`` block for L2 the same way ``embed_build_source``
+    honors its other non-executable settings for L3-L5 (Codex review). Only the
+    non-executable ``compile:`` block is read here; ``build.query`` still requires
+    an explicit trusted ``--config`` + ``--allow-build-query`` (ADR-032 D5).
     """
+    from .buildsource.inline import discover_build_config, load_build_config
     from .service_scan import CompileContext
 
-    if build_config is None:
+    cfg = build_config if build_config is not None else discover_build_config(sources)
+    if cfg is None:
         return cli_ctx, cli_includes
-    from .buildsource.inline import load_build_config
 
     try:
-        bc = load_build_config(build_config)
+        bc = load_build_config(cfg)
     except ValueError:
-        # Best-effort, like the level-implies-query probe: a malformed --config is
+        # Best-effort, like the level-implies-query probe: a malformed config is
         # swallowed here so a no-source scan still runs; the real downstream load
         # (embed_build_source, when --sources is given) surfaces it as a clean
         # ClickException (tests: malformed_build_config_yaml_is_click_error /
         # level_implies_query_malformed_config_does_not_crash).
         return cli_ctx, cli_includes
-    base = build_config.parent
+    base = cfg.parent
 
     frontend = (
         cli_ctx.frontend
@@ -809,9 +818,10 @@ def scan_cmd(
         nostdinc=nostdinc,
         frontend=header_backend,
     )
-    # Fold the project's `.abicheck.yml` compile: block in (CLI > config).
+    # Fold the project's `.abicheck.yml` compile: block in (CLI > config; the
+    # config is --config or the one auto-discovered at the --sources root).
     compile_context, includes = _merge_compile_config(
-        compile_context, tuple(includes), build_config
+        compile_context, tuple(includes), build_config, sources=sources
     )
 
     if len(binaries) != 1:

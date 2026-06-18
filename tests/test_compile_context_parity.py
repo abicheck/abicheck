@@ -226,3 +226,66 @@ def test_merge_compile_config_noop_without_path() -> None:
     merged, includes = _merge_compile_config(cli, (Path("a"),), None)
     assert merged is cli
     assert includes == (Path("a"),)
+
+
+def test_merge_compile_config_autodiscovers_from_sources(tmp_path: Path) -> None:
+    # No explicit --config, but a .abicheck.yml at the --sources root carries a
+    # compile: block → honored for L2 (Codex review parity with embed_build_source).
+    src = tmp_path / "tree"
+    src.mkdir()
+    (src / ".abicheck.yml").write_text(
+        "compile:\n  std: c++20\n  include_dirs: [include]\n", encoding="utf-8"
+    )
+    from abicheck.cli_scan import _merge_compile_config
+
+    merged, includes = _merge_compile_config(
+        CompileContext(), (), None, sources=src
+    )
+    assert merged.gcc_options == "-std=c++20"
+    assert includes == (src / "include",)
+
+
+def test_merge_compile_config_explicit_config_beats_autodiscovery(
+    tmp_path: Path,
+) -> None:
+    src = tmp_path / "tree"
+    src.mkdir()
+    (src / ".abicheck.yml").write_text("compile:\n  std: c++11\n", encoding="utf-8")
+    explicit = tmp_path / "explicit.yml"
+    explicit.write_text("compile:\n  std: c++23\n", encoding="utf-8")
+    from abicheck.cli_scan import _merge_compile_config
+
+    merged, _ = _merge_compile_config(CompileContext(), (), explicit, sources=src)
+    assert merged.gcc_options == "-std=c++23"  # explicit --config wins
+
+
+def test_probe_gnu_system_includes_mocked(monkeypatch, tmp_path: Path) -> None:
+    # Cover the subprocess probe body without a real compiler: only *existing*
+    # dirs survive the filter, in search order.
+    from abicheck import dumper_sysinc
+
+    real = tmp_path / "inc"
+    real.mkdir()
+    missing = tmp_path / "gone"  # never created
+
+    class _P:
+        stderr = "ignored"
+
+    monkeypatch.setattr(dumper_sysinc.subprocess, "run", lambda *a, **k: _P())
+    monkeypatch.setattr(
+        dumper_sysinc,
+        "_parse_gnu_include_search_dirs",
+        lambda s: [str(missing), str(real)],
+    )
+    out = dumper_sysinc._probe_gnu_system_includes("g++", cpp=True)
+    assert out == [str(real)]
+
+
+def test_probe_gnu_system_includes_handles_oserror(monkeypatch) -> None:
+    from abicheck import dumper_sysinc
+
+    def _boom(*a, **k):
+        raise OSError("no compiler")
+
+    monkeypatch.setattr(dumper_sysinc.subprocess, "run", _boom)
+    assert dumper_sysinc._probe_gnu_system_includes("g++", cpp=True) == []

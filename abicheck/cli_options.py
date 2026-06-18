@@ -254,7 +254,7 @@ def compile_context_options(func: F) -> F:
         is_flag=True,
         default=False,
         help="Do not search the standard system include paths (suppresses the "
-        "castxml↔clang system-include auto-detection too).",
+        "castxml/clang system-include auto-detection too).",
     )(func)
     func = click.option(
         "--sysroot",
