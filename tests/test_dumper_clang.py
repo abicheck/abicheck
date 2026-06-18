@@ -1671,14 +1671,19 @@ def test_parse_gnu_include_search_dirs_empty_when_no_block() -> None:
     assert _parse_gnu_include_search_dirs("clang: error: no input files\n") == []
 
 
-def test_auto_system_includes_enabled_default_and_toggle(
+@pytest.mark.parametrize("off", ["0", "false", "no", "off", "OFF"])
+def test_auto_system_includes_enabled_off_values(
+    monkeypatch: pytest.MonkeyPatch, off: str
+) -> None:
+    monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", off)
+    assert _auto_system_includes_enabled() is False
+
+
+def test_auto_system_includes_enabled_default_and_on(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv("ABICHECK_AUTO_SYSTEM_INCLUDES", raising=False)
     assert _auto_system_includes_enabled() is True
-    for off in ("0", "false", "no", "off", "OFF"):
-        monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", off)
-        assert _auto_system_includes_enabled() is False
     monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "1")
     assert _auto_system_includes_enabled() is True
 

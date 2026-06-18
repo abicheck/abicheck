@@ -289,3 +289,78 @@ def test_probe_gnu_system_includes_handles_oserror(monkeypatch) -> None:
 
     monkeypatch.setattr(dumper_sysinc.subprocess, "run", _boom)
     assert dumper_sysinc._probe_gnu_system_includes("g++", cpp=True) == []
+
+
+def test_buildconfig_compile_frontend_case_insensitive() -> None:
+    from abicheck.buildsource.inline import BuildConfig
+
+    bc = BuildConfig.from_dict({"compile": {"frontend": "Clang"}})
+    assert bc.compile_frontend == "clang"
+
+
+def test_merge_compile_config_explicit_auto_beats_config(tmp_path: Path) -> None:
+    # CLI > config: an explicitly-typed --ast-frontend auto bypasses a pinned
+    # config frontend (Codex review).
+    cfg = tmp_path / ".abicheck.yml"
+    cfg.write_text("compile:\n  frontend: clang\n", encoding="utf-8")
+    from abicheck.cli_scan import _merge_compile_config
+
+    # Default 'auto' (not explicit) inherits config 'clang'.
+    inherit, _ = _merge_compile_config(CompileContext(), (), cfg)
+    assert inherit.frontend == "clang"
+    # Explicit 'auto' wins.
+    explicit, _ = _merge_compile_config(
+        CompileContext(frontend="auto"), (), cfg, frontend_explicit=True
+    )
+    assert explicit.frontend == "auto"
+
+
+def test_merge_compile_config_warns_on_malformed(tmp_path, capsys) -> None:
+    from abicheck.cli_scan import _merge_compile_config
+
+    bad = tmp_path / ".abicheck.yml"
+    bad.write_text("compile: [unterminated\n", encoding="utf-8")
+    cli = CompileContext(gcc_options="-DX")
+    merged, includes = _merge_compile_config(cli, (), bad)
+    assert merged is cli  # CLI-only fallback
+    assert "could not parse" in capsys.readouterr().err
+
+
+def test_try_header_scoped_dump_threads_compile_to_dumper(
+    monkeypatch, tmp_path: Path
+) -> None:
+    # PE/Mach-O native header scoping forwards the compile context to the dumper
+    # (Codex review: gcc_options/sysroot must reach PE/Mach-O header parsing).
+    import abicheck.dumper as dumper_mod
+    from abicheck import service
+
+    header = tmp_path / "h.h"
+    header.write_text("int foo(void);\n")
+    captured: dict[str, object] = {}
+
+    def _fake_dumper_pe(*args, **kwargs):
+        captured.update(kwargs)
+        # A snapshot with a PUBLIC-visibility symbol so scoping counts as matched
+        # (only `.visibility` is read by _has_matched_public_surface).
+        import types as _types
+
+        from abicheck.model import Visibility
+
+        return _types.SimpleNamespace(
+            functions=[_types.SimpleNamespace(visibility=Visibility.PUBLIC)],
+            variables=[],
+        )
+
+    monkeypatch.setattr(dumper_mod, "_dump_pe", _fake_dumper_pe)
+    cc = CompileContext(
+        gcc_options="-std=c++20 -DPE", gcc_prefix="x-", sysroot=tmp_path,
+        nostdinc=True,
+    )
+    snap, reason = service._try_header_scoped_dump(
+        "pe", tmp_path / "x.dll", [header], [], "1.0", "c++", compile=cc
+    )
+    assert reason is None  # matched
+    assert captured["gcc_options"] == "-std=c++20 -DPE"
+    assert captured["gcc_prefix"] == "x-"
+    assert captured["sysroot"] == tmp_path
+    assert captured["nostdinc"] is True

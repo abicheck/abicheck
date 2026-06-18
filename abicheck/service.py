@@ -396,6 +396,7 @@ def run_dump(
             lang=lang,
             pdb_path=pdb_path,
             header_backend=eff_backend,
+            compile=compile,
         )
         return _apply_native_provenance(snap, public_headers, public_header_dirs)
     if binary_fmt == "macho":
@@ -406,6 +407,7 @@ def run_dump(
             includes=_includes,
             header_backend=eff_backend,
             lang=lang,
+            compile=compile,
         )
         return _apply_native_provenance(snap, public_headers, public_header_dirs)
     raise ValidationError(f"Unsupported binary format: {binary_fmt}")
@@ -540,6 +542,7 @@ def _try_header_scoped_dump(
     version: str,
     lang: str,
     header_backend: str = "auto",
+    compile: CompileContext | None = None,
 ) -> tuple[AbiSnapshot | None, str | None]:
     """Attempt a header-scoped dump for a PE/Mach-O binary.
 
@@ -563,15 +566,22 @@ def _try_header_scoped_dump(
 
     compiler = "cc" if lang.lower() == "c" else "c++"
     lang_arg = lang if lang.lower() == "c" else None
+    cc = compile if compile is not None else CompileContext()
     try:
         if fmt == "pe":
             snap = _dumper_pe(
                 path, resolved_headers, includes, version, compiler,
+                gcc_path=cc.gcc_path, gcc_prefix=cc.gcc_prefix,
+                gcc_options=cc.gcc_options, gcc_option_tokens=cc.gcc_option_tokens,
+                sysroot=cc.sysroot, nostdinc=cc.nostdinc,
                 lang=lang_arg, header_backend=header_backend,
             )
         else:
             snap = _dumper_macho(
                 path, resolved_headers, includes, version, compiler,
+                gcc_path=cc.gcc_path, gcc_prefix=cc.gcc_prefix,
+                gcc_options=cc.gcc_options, gcc_option_tokens=cc.gcc_option_tokens,
+                sysroot=cc.sysroot, nostdinc=cc.nostdinc,
                 lang=lang_arg, header_backend=header_backend,
             )
     except Exception as exc:  # noqa: BLE001 — header backend/parse failure → fall back
@@ -630,6 +640,7 @@ def _dump_pe(
     lang: str = "c++",
     pdb_path: Path | None = None,
     header_backend: str = "auto",
+    compile: CompileContext | None = None,
 ) -> AbiSnapshot:
     """Dump a PE binary (Windows DLL) to an ABI snapshot.
 
@@ -670,6 +681,7 @@ def _dump_pe(
             version,
             lang,
             header_backend=header_backend,
+            compile=compile,
         )
         if scoped is not None:
             # Preserve any PDB debug info alongside the header-scoped surface.
@@ -724,6 +736,7 @@ def _dump_macho(
     includes: list[Path] | None = None,
     lang: str = "c++",
     header_backend: str = "auto",
+    compile: CompileContext | None = None,
 ) -> AbiSnapshot:
     """Dump a Mach-O binary (macOS dylib) to an ABI snapshot.
 
@@ -757,6 +770,7 @@ def _dump_macho(
             version,
             lang,
             header_backend=header_backend,
+            compile=compile,
         )
         if scoped is not None:
             return scoped

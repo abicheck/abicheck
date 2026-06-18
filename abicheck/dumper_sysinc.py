@@ -59,14 +59,17 @@ def _parse_gnu_include_search_dirs(stderr: str) -> list[str]:
     The driver prints the resolved search path between the
     ``#include <...> search starts here:`` and ``End of search list.`` markers,
     one directory per indented line (Clang/GCC both use this format; Darwin may
-    append `` (framework directory)``). Pure/string-only so it is unit-testable
-    without a compiler installed. Returns the directories in search order.
+    append `` (framework directory)``). Only the angle-bracket (``<...>``) system
+    block is captured — the preceding quote-include (``"..."``) block lists
+    ``-iquote`` dirs, which are not system paths and must not become ``-isystem``.
+    Pure/string-only so it is unit-testable without a compiler installed. Returns
+    the directories in search order.
     """
     dirs: list[str] = []
     in_block = False
     for line in stderr.splitlines():
         stripped = line.strip()
-        if "search starts here:" in stripped:
+        if "<...> search starts here:" in stripped:
             in_block = True
             continue
         if stripped.startswith("End of search list."):

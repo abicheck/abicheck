@@ -302,6 +302,10 @@ class BuildConfig:
         )
 
         compile_frontend = _opt_str(compile_blk, "frontend")
+        if compile_frontend is not None:
+            # The CLI accepts the frontend case-insensitively (Click Choice
+            # case_sensitive=False); normalize the config value to match.
+            compile_frontend = compile_frontend.lower()
         if compile_frontend is not None and compile_frontend not in (
             "auto",
             "castxml",

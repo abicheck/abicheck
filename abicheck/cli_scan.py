@@ -52,7 +52,7 @@ import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import click
 
@@ -72,6 +72,9 @@ from .checker_policy import API_BREAK_KINDS, BREAKING_KINDS
 from .cli import _safe_write_output, _setup_verbosity, main
 from .cli_options import compile_context_options, echo_ast_frontend_deprecation
 from .cli_params import DEPTH_PARAM
+
+if TYPE_CHECKING:
+    from .service_scan import CompileContext
 
 #: Exit code for a ``--budget`` overflow (ADR-035 D3: a budget always fails,
 #: never silently shrinks scope). Distinct from the verdict codes (0/2/4) and the
@@ -392,11 +395,13 @@ def _render_text(out: ScanOutcome) -> str:
 
 
 def _merge_compile_config(
-    cli_ctx: Any,
+    cli_ctx: CompileContext,
     cli_includes: tuple[Path, ...],
     build_config: Path | None,
     sources: Path | None = None,
-) -> tuple[Any, tuple[Path, ...]]:
+    *,
+    frontend_explicit: bool = False,
+) -> tuple[CompileContext, tuple[Path, ...]]:
     """Fold a ``.abicheck.yml`` ``compile:`` block into the CLI compile context.
 
     Precedence is CLI > config (ADR-035 D6.1 / ADR-037 D4): a per-field CLI value
@@ -422,20 +427,30 @@ def _merge_compile_config(
 
     try:
         bc = load_build_config(cfg)
-    except ValueError:
+    except ValueError as exc:
         # Best-effort, like the level-implies-query probe: a malformed config is
         # swallowed here so a no-source scan still runs; the real downstream load
         # (embed_build_source, when --sources is given) surfaces it as a clean
         # ClickException (tests: malformed_build_config_yaml_is_click_error /
-        # level_implies_query_malformed_config_does_not_crash).
+        # level_implies_query_malformed_config_does_not_crash). Still warn so a
+        # broken config is not silently ignored (CodeRabbit review).
+        click.echo(
+            f"warning: could not parse {cfg}; using CLI compile context only "
+            f"({exc}).",
+            err=True,
+        )
         return cli_ctx, cli_includes
     base = cfg.parent
 
+    # CLI > config: an explicit --ast-frontend wins even when it is "auto" (the
+    # documented escape hatch to bypass a pinned config frontend); only a *default*
+    # "auto" inherits the config's frontend (Codex review).
     frontend = (
         cli_ctx.frontend
-        if cli_ctx.frontend != "auto"
+        if (frontend_explicit or cli_ctx.frontend != "auto")
         else (bc.compile_frontend or "auto")
     )
+    gcc_options: str | None
     if cli_ctx.gcc_options is not None:
         gcc_options = cli_ctx.gcc_options
     else:
@@ -478,7 +493,7 @@ def _build_new_snapshot(
     build_config: Path | None = None,
     public_headers: list[Path] | None = None,
     public_header_dirs: list[Path] | None = None,
-    compile_context: Any = None,
+    compile_context: CompileContext | None = None,
 ) -> Any:
     """Dump the candidate's L0-L2 surface and embed L3-L5 inline at *collect_mode*.
 
@@ -819,9 +834,20 @@ def scan_cmd(
         frontend=header_backend,
     )
     # Fold the project's `.abicheck.yml` compile: block in (CLI > config; the
-    # config is --config or the one auto-discovered at the --sources root).
+    # config is --config or the one auto-discovered at the --sources root). An
+    # explicitly-typed --ast-frontend (even "auto") wins over a pinned config
+    # frontend, so detect whether the user actually passed it (Codex review).
+    ctx = click.get_current_context()
+    frontend_explicit = (
+        ctx.get_parameter_source("header_backend")
+        == click.core.ParameterSource.COMMANDLINE
+    )
     compile_context, includes = _merge_compile_config(
-        compile_context, tuple(includes), build_config, sources=sources
+        compile_context,
+        tuple(includes),
+        build_config,
+        sources=sources,
+        frontend_explicit=frontend_explicit,
     )
 
     if len(binaries) != 1:
@@ -1023,7 +1049,7 @@ def run_scan_core(
     budget: str | None,
     budget_s: float | None,
     level_explicit: bool = False,
-    compile_context: Any = None,
+    compile_context: CompileContext | None = None,
 ) -> ScanCoreResult:
     """The shared scan orchestration (classify → always-on tier → level → compare).
 
@@ -1424,7 +1450,7 @@ def _run_baseline_compare(
     includes: list[Path],
     public_headers: list[Path],
     public_header_dirs: list[Path],
-    compile_context: Any = None,
+    compile_context: CompileContext | None = None,
 ) -> tuple[str, int, dict[str, Any]]:
     """Compare *new_snap* against *baseline*, folding cross-source findings in.
 
