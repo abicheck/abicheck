@@ -910,10 +910,14 @@ def run_scan_core(
     # changed TU (ADR-035 D7). The export-delta walk needs both sides' export
     # tables up front, so read a cheap, header-free L0 view of the candidate and
     # baseline here (no castxml/L3-L5); the one expensive collection still runs
-    # once, below, with the resulting focus seed.
-    poi_candidate = _load_exports_for_poi(binary, lang)
+    # once, below, with the resulting focus seed. The candidate view is only
+    # loaded when there is a baseline to diff it against — the delta walk consumes
+    # the two together, so loading it baseline-less would be a wasted L0/L1 parse.
     poi_baseline = (
         _load_exports_for_poi(baseline, lang) if baseline is not None else None
+    )
+    poi_candidate = (
+        _load_exports_for_poi(binary, lang) if poi_baseline is not None else None
     )
     poi = build_points_of_interest(
         changed_paths=changed,
