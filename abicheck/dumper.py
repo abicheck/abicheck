@@ -130,6 +130,26 @@ def _resolve_header_backend(backend: str | None) -> str:
     return "castxml"
 
 
+#: ``'<name>' file not found`` where *name* is extensionless — a C TU never
+#: ``#include``s an extensionless header (the C stdlib is all ``*.h``), so a
+#: missing extensionless include (``<cstddef>``, ``<vector>``, ``<string>`` …)
+#: under a C-mode parse means the header is actually C++. Used to drive the clang
+#: C→C++ retry below.
+_MISSING_CPP_STDLIB_HEADER_RE = re.compile(rb"'[a-z_][a-z0-9_]*' file not found")
+
+
+def _is_missing_cpp_stdlib_header_error(stderr: str) -> bool:
+    """True if a clang parse failed because a C++ standard header was not found.
+
+    Pure/string-only so it is unit-testable without a compiler. Matches clang's
+    ``fatal error: '<name>' file not found`` for an *extensionless* header name;
+    a C header always carries a ``.h`` suffix, so an extensionless miss is the
+    C++ standard library (``<cstddef>``/``<vector>``/…), i.e. the TU is C++ and a
+    C-mode parse picked the wrong language.
+    """
+    return bool(_MISSING_CPP_STDLIB_HEADER_RE.search(stderr.encode("utf-8", "replace")))
+
+
 def _has_explicit_std(
     gcc_options: str | None, gcc_option_tokens: tuple[str, ...] = ()
 ) -> bool:
@@ -194,8 +214,14 @@ def _build_clang_header_command(
     if not force_cpp:
         if not explicit_std:
             cmd += ["-x", "c", "-std=gnu11"]
-    elif force_cpp20 and not explicit_std:
-        cmd += ["-x", "c++", "-std=gnu++20"]
+    elif not explicit_std:
+        # Select the C++ language explicitly (``-x c++``) rather than relying on
+        # the aggregate file's extension: the C→C++ retry reuses a ``.h`` aggregate
+        # that clang would otherwise parse as C. Only bump the standard to gnu++20
+        # when C++20 syntax was detected; otherwise leave clang's default dialect.
+        cmd += ["-x", "c++"]
+        if force_cpp20:
+            cmd += ["-std=gnu++20"]
     cmd += [
         "-fsyntax-only",
         "-ferror-limit=0",
@@ -292,21 +318,54 @@ def _clang_header_dump(
             agg.write(f'#include "{h.resolve()}"\n')
         agg_path = Path(agg.name)
 
-    cmd = _build_clang_header_command(
-        clang_bin, cc_id, extra_includes, agg_path,
-        sysroot=sysroot, nostdinc=nostdinc, gcc_options=gcc_options,
-        gcc_option_tokens=gcc_option_tokens,
-        force_cpp=force_cpp, force_cpp20=force_cpp20,
-        system_includes=system_includes,
-    )
-    try:
+    def _run_clang(fcpp: bool, fcpp20: bool, sysinc: tuple[str, ...]) -> subprocess.CompletedProcess[str]:
+        cmd = _build_clang_header_command(
+            clang_bin, cc_id, extra_includes, agg_path,
+            sysroot=sysroot, nostdinc=nostdinc, gcc_options=gcc_options,
+            gcc_option_tokens=gcc_option_tokens,
+            force_cpp=fcpp, force_cpp20=fcpp20,
+            system_includes=sysinc,
+        )
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=120, check=False)
+            return subprocess.run(cmd, capture_output=True, text=True, timeout=120, check=False)
         except subprocess.TimeoutExpired as exc:
             raise SnapshotError(
                 "clang timed out after 120 seconds parsing the header(s). The header "
                 "may contain syntax that causes the frontend to hang."
             ) from exc
+
+    try:
+        result = _run_clang(force_cpp, force_cpp20, system_includes)
+        # C→C++ self-heal: a pure-``#include`` umbrella header (e.g. oneTBB's
+        # ``oneapi/tbb.h``) carries no inline C++ syntax, so ``_detect_cpp_headers``
+        # picks C mode — then ``#include <cstddef>`` fails because the C-mode probe
+        # never injected the libstdc++ ``-isystem`` dirs. A missing *extensionless*
+        # header is an unambiguous "this is C++" signal (a C TU only includes
+        # ``*.h``), so re-resolve the system includes for C++ and retry once in C++
+        # mode. Mirrors the castxml C→C++ retry; skipped when already in C++ mode or
+        # the failure is anything other than a missing C++ stdlib header.
+        if (
+            result.returncode != 0
+            and not force_cpp
+            and _is_missing_cpp_stdlib_header_error(result.stderr or "")
+        ):
+            cpp_system_includes = _resolve_clang_system_includes(
+                compiler,
+                gcc_path=gcc_path,
+                gcc_prefix=gcc_prefix,
+                sysroot=sysroot,
+                nostdinc=nostdinc,
+                force_cpp=True,
+                gcc_options=gcc_options,
+                gcc_option_tokens=gcc_option_tokens,
+            )
+            log.warning(
+                "clang failed to find a C++ standard header parsing the header(s) in "
+                "C mode; the header is C++ (a pure-#include umbrella header has no "
+                "inline C++ syntax to auto-detect). Retrying in C++ mode. Pass "
+                "--lang c++ to select this directly and silence this warning."
+            )
+            result = _run_clang(True, _detect_cpp20_headers(headers), cpp_system_includes)
         # A nonzero exit means clang hit a hard parse error. Unlike L4 source
         # replay (which tolerates partial coverage), the L2 header AST must be
         # complete to be authoritative — a truncated declaration set would
