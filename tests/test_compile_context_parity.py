@@ -298,6 +298,8 @@ def test_probe_gnu_system_includes_handles_oserror(monkeypatch) -> None:
         ("/usr/lib/gcc/x86_64-linux-gnu/13/include", True),
         ("/usr/lib/gcc/x86_64-linux-gnu/13/include-fixed", True),
         ("/usr/lib64/gcc/x86_64-redhat-linux/12/include", True),
+        ("/usr/lib32/gcc/x86_64-linux-gnu/13/include", True),
+        ("/usr/libx32/gcc/x86_64-linux-gnu/13/include", True),
         ("/opt/cross/lib/gcc-cross/aarch64-linux-gnu/12/include", True),
         # libstdc++ and libc dirs must be KEPT (not GCC resource dirs).
         ("/usr/include/c++/13", False),
@@ -305,8 +307,12 @@ def test_probe_gnu_system_includes_handles_oserror(monkeypatch) -> None:
         ("/usr/include", False),
         ("/usr/local/include", False),
         ("/usr/include/x86_64-linux-gnu", False),
-        # A 'gcc' segment not preceded by lib* is not the resource dir.
+        # A 'gcc' segment not preceded by an exact multilib dir is not the
+        # resource dir: a bare 'gcc' dir, or a 'lib'-prefixed but non-multilib
+        # dir like 'libfoo', must not be misclassified (matcher tightened from
+        # startswith('lib') to an exact multilib-name set).
         ("/home/gcc/include", False),
+        ("/opt/libfoo/gcc/x86_64-linux-gnu/13/include", False),
     ],
 )
 def test_is_gnu_compiler_resource_dir(path: str, expected: bool) -> None:

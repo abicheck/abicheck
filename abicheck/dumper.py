@@ -327,7 +327,10 @@ def _clang_header_dump(
     # the C→C++ retry below parses with these, and the C-mode probe omits the
     # versioned libstdc++ dirs, so without this a libstdc++/GCC upgrade would not
     # change the key and abicheck would reuse a stale C++ AST (Codex review); and
-    # (b) is reused by the retry without a second probe.
+    # (b) is reused by the retry without a second probe. This means a C-mode dump
+    # pays one extra ``g++ -E -v`` probe even when it never retries — accepted as
+    # the cost of a retry-stable cache key (a lazy resolve would reopen the
+    # staleness window). The probe is fast and the clang backend is opt-in.
     cpp_system_includes = (
         system_includes if force_cpp else _resolve_sysinc(force_cpp=True)
     )

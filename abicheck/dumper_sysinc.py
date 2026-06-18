@@ -91,17 +91,24 @@ def _parse_gnu_include_search_dirs(stderr: str) -> list[str]:
 #: dirs should cross over to the clang backend.
 _GNU_COMPILER_RESOURCE_SEGMENTS = ("gcc", "gcc-cross")
 
+#: The multilib library dir names that precede ``gcc``/``gcc-cross`` in a GCC
+#: resource path (``/usr/lib/gcc/…``, ``/usr/lib64/gcc/…``, ``/usr/libx32/…``).
+#: Matched exactly rather than by ``startswith("lib")`` so an unrelated dir such
+#: as ``…/libfoo/gcc/…`` is not misclassified as a GCC resource dir.
+_GNU_MULTILIB_DIRS = frozenset({"lib", "lib32", "lib64", "libx32"})
+
 
 def _is_gnu_compiler_resource_dir(path: str) -> bool:
     """True if *path* is a GCC compiler-internal include dir (not libstdc++/libc).
 
-    Matches the ``.../lib*/gcc[-cross]/<triple>/<ver>/include[-fixed]`` layout by
-    looking for a ``lib*`` segment immediately followed by ``gcc``/``gcc-cross``.
-    Pure/string-only so it is unit-testable without a real toolchain.
+    Matches the ``.../lib{,32,64,x32}/gcc[-cross]/<triple>/<ver>/include[-fixed]``
+    layout by looking for a multilib library segment (:data:`_GNU_MULTILIB_DIRS`)
+    immediately followed by ``gcc``/``gcc-cross``. Pure/string-only so it is
+    unit-testable without a real toolchain.
     """
     parts = Path(path).parts
     for prev, cur in zip(parts, parts[1:]):
-        if cur in _GNU_COMPILER_RESOURCE_SEGMENTS and prev.startswith("lib"):
+        if cur in _GNU_COMPILER_RESOURCE_SEGMENTS and prev in _GNU_MULTILIB_DIRS:
             return True
     return False
 
