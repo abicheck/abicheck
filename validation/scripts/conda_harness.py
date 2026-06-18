@@ -454,8 +454,9 @@ def evaluate_pair(
         # Preserve the real extension so extract_sos can dispatch on it.
         op = tmp / f"old_{idx}_{Path(ob).name}"
         npath = tmp / f"new_{idx}_{Path(nb).name}"
-        fetch_file(conda_download_url(ob, api), op)
-        fetch_file(conda_download_url(nb, api), npath)
+        channel = pair.get("channel", DEFAULT_CHANNEL)
+        fetch_file(conda_download_url(ob, api, channel=channel), op)
+        fetch_file(conda_download_url(nb, api, channel=channel), npath)
         old_sos = extract_sos(op, tmp / f"old_{idx}")
         new_sos = extract_sos(npath, tmp / f"new_{idx}")
     except (

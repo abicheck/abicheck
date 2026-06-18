@@ -100,6 +100,49 @@ def test_conda_download_url_prefers_record_download_url_for_other_channels() -> 
     )
 
 
+def test_evaluate_pair_preserves_manifest_channel_for_url_fallback(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    mod = _load_module()
+    urls: list[str] = []
+
+    monkeypatch.setattr(
+        mod,
+        "resolve_pair",
+        lambda pair, api, subdir: (
+            "linux-64/old-1.0-0.tar.bz2",
+            "linux-64/new-2.0-0.tar.bz2",
+        ),
+    )
+
+    def fake_fetch(url: str, out: Path) -> None:
+        urls.append(url)
+        out.write_bytes(b"pkg")
+
+    monkeypatch.setattr(mod, "fetch_file", fake_fetch)
+    monkeypatch.setattr(mod, "extract_sos", lambda pkg, into: {"libx": str(pkg)})
+    monkeypatch.setattr(mod, "run_abicheck", lambda old, new, ov, nv: {"verdict": "COMPATIBLE"})
+
+    verdict = mod.evaluate_pair(
+        {
+            "pair": "x",
+            "old_ver": "1.0",
+            "new_ver": "2.0",
+            "channel": "intel",
+        },
+        {"files": []},
+        "linux-64",
+        tmp_path,
+        1,
+    )
+
+    assert verdict == "COMPATIBLE"
+    assert urls == [
+        "https://conda.anaconda.org/intel/linux-64/old-1.0-0.tar.bz2",
+        "https://conda.anaconda.org/intel/linux-64/new-2.0-0.tar.bz2",
+    ]
+
+
 def test_select_conda_basename_picks_newest_build_in_subdir() -> None:
     mod = _load_module()
     # highest build number (-4) wins among the three linux-64 builds of 2.9.4

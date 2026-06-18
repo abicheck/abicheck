@@ -917,6 +917,35 @@ def test_level_implies_query_silent_for_default_mode(
     assert "auto-enabled the query" not in res.output
 
 
+def test_level_implies_query_silent_for_source_method_auto(
+    runner, tmp_path, source_tree_with_compile_db, new_snap_compatible
+):
+    # ``--source-method auto`` still lets the resolver choose a default deep
+    # level. It is not concrete consent to run build.query.
+    cfg = tmp_path / ".abicheck.yml"
+    cfg.write_text(
+        "build:\n  query: cmake -S . -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON\n",
+        encoding="utf-8",
+    )
+    res = runner.invoke(
+        main,
+        [
+            "scan",
+            "--binary",
+            str(new_snap_compatible),
+            "--build-info",
+            str(source_tree_with_compile_db),
+            "--config",
+            str(cfg),
+            "--source-method",
+            "auto",
+            "--audit",
+        ],
+    )
+    assert res.exit_code == 0, res.output
+    assert "auto-enabled the query" not in res.output
+
+
 def test_header_short_alias_works(runner, tmp_path, new_snap_compatible):
     # The --help example uses `-H`; the alias must actually parse (Codex review).
     header = tmp_path / "inc" / "w.h"

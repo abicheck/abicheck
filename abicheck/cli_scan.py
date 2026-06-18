@@ -833,9 +833,13 @@ def scan_cmd(
             severities=severities,
             budget=budget,
             budget_s=budget_s,
-            # An explicit --source-method/--depth (not the default mode preset) is
-            # what consents to level-implies-query auto-running build.query.
-            level_explicit=source_method is not None or depth is not None,
+            # A concrete explicit --source-method/--depth (not the default mode
+            # preset, and not --source-method auto) is what consents to
+            # level-implies-query auto-running build.query.
+            level_explicit=(
+                (source_method is not None and source_method != SourceMethod.AUTO.value)
+                or depth is not None
+            ),
         )
     except _BudgetOverflow as bo:
         click.echo(bo.message, err=True)
