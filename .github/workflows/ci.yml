@@ -98,6 +98,10 @@ jobs:
         # --durations=25 surfaces the slowest tests in the CI log every run so
         # timing regressions stay visible (test-time hygiene).
         if: runner.os == 'Linux' && matrix.python-version == '3.13'
+        env:
+          # Capture per-test durations (tests/conftest.py hook) for the
+          # test-time report + artifact below.
+          ABICHECK_DURATIONS_JSON: test-durations.json
         run: |
           pytest tests/ -v --tb=short -m "not integration and not libabigail and not abicc and not slow" -n auto --dist worksteal --durations=25 --cov=abicheck --cov-report=term-missing --cov-report=xml --cov-fail-under=95
       - name: Run tests (Linux non-canonical Python — no coverage)
@@ -116,6 +120,19 @@ jobs:
         if: matrix.python-version == '3.13' && matrix.os == 'ubuntu-latest'
         run: |
           pytest tests/ -v --tb=short -m "slow" --cov=abicheck --cov-report=xml:coverage-slow.xml --cov-append
+      - name: Test-time report (slowest tests → run summary)
+        # Renders the captured durations into the GitHub run summary. Reporting
+        # only — a hard per-test wall-time gate would be flaky given CI-runner
+        # variance; the uploaded artifact is the durable record for trends.
+        if: always() && matrix.python-version == '3.13' && matrix.os == 'ubuntu-latest'
+        run: python scripts/summarize_test_durations.py test-durations.json --top 25
+      - name: Upload test-durations artifact
+        if: always() && matrix.python-version == '3.13' && matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-durations
+          path: test-durations.json
+          if-no-files-found: ignore
       - name: Upload coverage to Codecov
         if: matrix.python-version == '3.13' && matrix.os == 'ubuntu-latest'
         uses: codecov/codecov-action@v7

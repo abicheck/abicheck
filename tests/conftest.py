@@ -145,12 +145,24 @@ def update_goldens(request: pytest.FixtureRequest) -> bool:
 
 _EXECUTED_TESTS = 0
 
+# Optional per-phase duration capture for test-time tracking. When
+# ``ABICHECK_DURATIONS_JSON`` is set, every (nodeid, phase, duration) tuple is
+# collected and written out at session end (see pytest_sessionfinish). Under
+# xdist the controller receives every worker's forwarded reports, so it alone
+# holds the complete picture — workers don't write. Zero cost when the env var
+# is unset.
+_PHASE_DURATIONS: list[dict[str, object]] = []
+
 
 def pytest_runtest_logreport(report: pytest.TestReport) -> None:
-    """Count tests that actually executed (ran their call phase)."""
+    """Count tests that actually executed, and (optionally) record durations."""
     global _EXECUTED_TESTS
     if report.when == "call" and report.outcome in ("passed", "failed"):
         _EXECUTED_TESTS += 1
+    if os.environ.get("ABICHECK_DURATIONS_JSON"):
+        _PHASE_DURATIONS.append(
+            {"nodeid": report.nodeid, "when": report.when, "duration": float(report.duration)}
+        )
 
 
 def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
@@ -159,7 +171,20 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
     Skipped on xdist workers (the controller aggregates every worker's reports
     and is the one that owns the final exit status).
     """
-    if hasattr(session.config, "workerinput"):
+    is_worker = hasattr(session.config, "workerinput")
+
+    # Test-time tracking: write the captured per-phase durations once, from the
+    # controller (it has aggregated every worker's reports under xdist). The CI
+    # job renders the slowest entries into the run summary and uploads the file
+    # as an artifact for trend tracking.
+    durations_path = os.environ.get("ABICHECK_DURATIONS_JSON")
+    if durations_path and not is_worker:
+        try:
+            Path(durations_path).write_text(json.dumps(_PHASE_DURATIONS), encoding="utf-8")
+        except OSError:
+            pass
+
+    if is_worker:
         return  # this is an xdist worker; let the controller decide
     raw = os.environ.get("ABICHECK_MIN_EXECUTED")
     if not raw:
