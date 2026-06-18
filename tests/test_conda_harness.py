@@ -80,6 +80,26 @@ def test_conda_download_url_joins_channel_and_basename() -> None:
     assert mod.conda_download_url("/linux-64/x.conda").count("conda-forge//") == 0
 
 
+def test_conda_download_url_prefers_record_download_url_for_other_channels() -> None:
+    # Intel-channel packages 301-redirect on the conda CDN path, so the API
+    # file record's (protocol-relative) download_url must be used instead.
+    mod = _load_module()
+    bn = "linux-64/oneccl-devel-2021.13.0-intel_299.tar.bz2"
+    api = {
+        "files": [
+            {"basename": bn, "download_url": f"//api.anaconda.org/download/intel/{bn}"}
+        ]
+    }
+    assert (
+        mod.conda_download_url(bn, api)
+        == f"https://api.anaconda.org/download/intel/{bn}"
+    )
+    # No record for the basename → fall back to the CDN form for the channel.
+    assert mod.conda_download_url(bn, {"files": []}, channel="intel") == (
+        f"https://conda.anaconda.org/intel/{bn}"
+    )
+
+
 def test_select_conda_basename_picks_newest_build_in_subdir() -> None:
     mod = _load_module()
     # highest build number (-4) wins among the three linux-64 builds of 2.9.4

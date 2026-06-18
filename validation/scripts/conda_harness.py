@@ -47,8 +47,9 @@ from pathlib import Path
 SCRIPTS_DIR = Path(__file__).resolve().parent
 VALID_DIR = SCRIPTS_DIR.parent  # validation/
 
-ANACONDA_API = "https://api.anaconda.org/package/conda-forge/{pkg}"
-CONDA_CHANNEL = "https://conda.anaconda.org/conda-forge/"
+DEFAULT_CHANNEL = "conda-forge"
+ANACONDA_API = "https://api.anaconda.org/package/{channel}/{pkg}"
+CONDA_CHANNEL = "https://conda.anaconda.org/conda-forge/"  # back-compat default
 USER_AGENT = "abicheck-validation/1.0 (+https://github.com/abicheck/abicheck)"
 
 # Reuse the verdict normalisation/ranking from the scoring module.
@@ -95,14 +96,32 @@ _SCOPE_SENSITIVE_BREAKING_KINDS = frozenset(
 )
 
 
-def conda_download_url(basename: str) -> str:
-    """Build a conda-forge download URL from an anaconda.org ``basename``.
+def conda_download_url(
+    basename: str, api_json: dict | None = None, channel: str = DEFAULT_CHANNEL
+) -> str:
+    """Resolve a downloadable URL for an anaconda.org ``basename``.
 
-    The API ``basename`` already carries the subdir (e.g.
-    ``linux-64/libxml2-2.9.4-4.tar.bz2``), so it appends directly to the
-    channel root.
+    When ``api_json`` is supplied, prefer the matching file record's
+    ``download_url`` — it is channel-correct and works for **any** channel,
+    including ``intel`` (whose ``conda.anaconda.org`` CDN path 301-redirects to
+    an HTML page rather than serving the artifact). The field is
+    protocol-relative (``//api.anaconda.org/download/...``); normalize it to an
+    ``https`` URL. Falls back to the conda CDN form for the given ``channel``
+    when no record is available (the conda-forge fast path; back-compatible with
+    the single-argument call).
     """
-    return CONDA_CHANNEL + basename.lstrip("/")
+    if api_json is not None:
+        for f in api_json.get("files", []):
+            if f.get("basename") == basename:
+                du = f.get("download_url")
+                if du:
+                    if du.startswith("//"):
+                        return "https:" + du
+                    if du.startswith("/"):
+                        return "https://api.anaconda.org" + du
+                    return du
+                break
+    return f"https://conda.anaconda.org/{channel}/" + basename.lstrip("/")
 
 
 def build_number(basename: str) -> int:
@@ -138,10 +157,17 @@ def logical_name(path: str) -> str:
     return re.sub(r"-(?:\d+\.)+\d+$", "", stem)
 
 
-def query_conda(pkg: str, timeout: float = 30.0) -> dict:
-    """Fetch the anaconda.org file listing for a conda-forge package."""
+def query_conda(
+    pkg: str, channel: str = DEFAULT_CHANNEL, timeout: float = 30.0
+) -> dict:
+    """Fetch the anaconda.org file listing for ``pkg`` on ``channel``.
+
+    ``channel`` defaults to ``conda-forge``; pass e.g. ``intel`` for packages
+    (such as ``oneccl-devel``) that are only published on the Intel channel.
+    """
     req = urllib.request.Request(
-        ANACONDA_API.format(pkg=pkg), headers={"User-Agent": USER_AGENT}
+        ANACONDA_API.format(channel=channel, pkg=pkg),
+        headers={"User-Agent": USER_AGENT},
     )
     with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 (fixed api host)  # nosec B310
         return json.loads(resp.read())
@@ -428,8 +454,8 @@ def evaluate_pair(
         # Preserve the real extension so extract_sos can dispatch on it.
         op = tmp / f"old_{idx}_{Path(ob).name}"
         npath = tmp / f"new_{idx}_{Path(nb).name}"
-        fetch_file(conda_download_url(ob), op)
-        fetch_file(conda_download_url(nb), npath)
+        fetch_file(conda_download_url(ob, api), op)
+        fetch_file(conda_download_url(nb, api), npath)
         old_sos = extract_sos(op, tmp / f"old_{idx}")
         new_sos = extract_sos(npath, tmp / f"new_{idx}")
     except (
