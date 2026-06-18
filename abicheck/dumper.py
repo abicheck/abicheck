@@ -310,6 +310,7 @@ def _clang_header_dump(
     # way castxml does via ``--castxml-cc-gnu``. Folded into the cache key so a
     # toolchain change invalidates a stale dump.
     def _resolve_sysinc(*, force_cpp: bool) -> tuple[str, ...]:
+        """Probe the host GNU driver's ``-isystem`` dirs for the given language."""
         return _resolve_clang_system_includes(
             compiler,
             gcc_path=gcc_path,
@@ -357,6 +358,7 @@ def _clang_header_dump(
         agg_path = Path(agg.name)
 
     def _run_clang(fcpp: bool, fcpp20: bool, sysinc: tuple[str, ...]) -> subprocess.CompletedProcess[str]:
+        """Build and run the clang AST-dump command for the given language mode."""
         cmd = _build_clang_header_command(
             clang_bin, cc_id, extra_includes, agg_path,
             sysroot=sysroot, nostdinc=nostdinc, gcc_options=gcc_options,
