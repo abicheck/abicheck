@@ -946,6 +946,57 @@ def test_level_implies_query_silent_for_source_method_auto(
     assert "auto-enabled the query" not in res.output
 
 
+def test_level_implies_query_malformed_config_does_not_crash(
+    runner, tmp_path, new_snap_compatible
+):
+    # A trusted but malformed --config at an explicit deep level must not crash the
+    # level-implies-query probe: load_build_config raises, the probe swallows it
+    # (the real load surfaces the error downstream), and with no source input there
+    # is no downstream load, so the scan still completes without auto-enabling.
+    cfg = tmp_path / ".abicheck.yml"
+    cfg.write_text("build: [unterminated\n", encoding="utf-8")  # invalid YAML
+    res = runner.invoke(
+        main,
+        [
+            "scan",
+            "--binary",
+            str(new_snap_compatible),
+            "--config",
+            str(cfg),
+            "--source-method",
+            "s5",
+            "--audit",
+        ],
+    )
+    assert res.exit_code == 0, res.output
+    assert "auto-enabled the query" not in res.output
+
+
+def test_level_implies_query_silent_when_config_defines_no_query(
+    runner, tmp_path, new_snap_compatible
+):
+    # An explicit deep level + a trusted --config that defines NO build.query must
+    # not auto-enable anything (the false branch): the config is loaded fine but
+    # there is no query to consent to.
+    cfg = tmp_path / ".abicheck.yml"
+    cfg.write_text("severity:\n  preset: strict\n", encoding="utf-8")  # no build.query
+    res = runner.invoke(
+        main,
+        [
+            "scan",
+            "--binary",
+            str(new_snap_compatible),
+            "--config",
+            str(cfg),
+            "--source-method",
+            "s5",
+            "--audit",
+        ],
+    )
+    assert res.exit_code == 0, res.output
+    assert "auto-enabled the query" not in res.output
+
+
 def test_header_short_alias_works(runner, tmp_path, new_snap_compatible):
     # The --help example uses `-H`; the alias must actually parse (Codex review).
     header = tmp_path / "inc" / "w.h"
