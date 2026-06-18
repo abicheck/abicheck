@@ -58,11 +58,36 @@ don't exactly match what was compiled, results will be unreliable.
 
 **Mitigation:**
 - Always use the exact same headers that were used to build the `.so`
-- Pass compile-time defines to castxml: `abicheck dump libfoo.so -H foo.h --castxml-arg=-DFEATURE_X`
+- Pass the build's include roots, dialect, and defines to the header frontend:
+  `abicheck dump libfoo.so -H foo.h -I include/ --gcc-options "-std=c++20 -DFEATURE_X"`
+  (the same flags work on `abicheck scan`; persist them in a `.abicheck.yml`
+  `compile:` block so every run is reproducible — see
+  [Compile context for header parsing](../user-guide/scan-levels.md#compile-context-for-header-parsing-l2))
 - For `abicheck compat`, use `-s` (strict mode) to promote `COMPATIBLE`/`API_BREAK` to BREAKING:
   `abicheck compat check -lib foo -old OLD.xml -new NEW.xml -s`
   (use `--strict-mode api` to promote only `API_BREAK`; `-s` is not available on `abicheck compare`)
 - Cross-check with `abicheck compat check` (ABICC mode) for independent validation
+
+### System-include auto-detection (and what it does *not* fix)
+
+The `clang` frontend now auto-detects the host C++ standard library the way
+`castxml` always has (it probes `g++ -E -v` and injects the system include dirs),
+so a bare `scan -H include/` finds `<cstddef>` without extra flags. This is
+**system headers only** — it cannot guess your project's own `-I` roots, `-D`
+feature macros, or the exact `-std`. Disable it with `--nostdinc`, an explicit
+`--sysroot`, or `ABICHECK_AUTO_SYSTEM_INCLUDES=0`.
+
+!!! danger "Scope divergence: missing L2 context can turn internal cleanups into false BREAKING"
+    The header AST (L2) is what tells `abicheck` which symbols are **public**. If
+    the headers cannot be parsed — because the compile context above is missing —
+    the scan has only the binary, so it treats the export table as the surface and
+    flags the removal of *internal* symbols (e.g. macro-guarded `detail::`/`impl::`
+    helpers, or statically-bundled third-party routines) as BREAKING. These are
+    **missing-context artifacts, not real breaks**: supply the include roots /
+    dialect / defines (so L2 parses) and they demote to COMPATIBLE. Always read
+    the scan's coverage block — if L2 is `not_collected`, treat any BREAKING on an
+    `impl`/`detail`/`internal` symbol with suspicion and fix the header context
+    first.
 
 ---
 

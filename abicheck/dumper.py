@@ -59,6 +59,13 @@ from .dumper_castxml import (
     _vt_sort_key as _vt_sort_key,
 )
 from .dumper_clang import _ClangAstParser as _ClangAstParser
+from .dumper_sysinc import (
+    _auto_system_includes_enabled as _auto_system_includes_enabled,
+    _parse_gnu_include_search_dirs as _parse_gnu_include_search_dirs,
+    _probe_gnu_system_includes as _probe_gnu_system_includes,
+    _resolve_clang_system_includes as _resolve_clang_system_includes,
+    _resolve_probe_compiler as _resolve_probe_compiler,
+)
 from .elf_symbol_filter import is_abi_relevant_elf_symbol
 from .errors import SnapshotError, ValidationError
 from .model import (
@@ -148,6 +155,7 @@ def _build_clang_header_command(
     gcc_option_tokens: tuple[str, ...] = (),
     force_cpp: bool = False,
     force_cpp20: bool = False,
+    system_includes: tuple[str, ...] = (),
 ) -> list[str]:
     """Build the ``clang -ast-dump=json`` command for the aggregate header.
 
@@ -157,6 +165,14 @@ def _build_clang_header_command(
     just a different frontend over the identical inputs. ``-fsyntax-only`` (no
     codegen) with ``-ferror-limit=0`` keeps parsing past recoverable errors so a
     single bad decl does not blank the whole dump.
+
+    ``system_includes`` are host-compiler-probed system dirs (see
+    :func:`_probe_gnu_system_includes`) injected as ``-isystem`` so clang finds
+    the same libstdc++/libc headers castxml gets via ``--castxml-cc-gnu`` — the
+    castxml↔clang capability-parity fix. They are emitted **last** (after the
+    user's ``-I`` *and* the pass-through ``--gcc-options``/``--gcc-option``) so
+    auto-detection stays a genuine fallback: a user-supplied ``-isystem`` for a
+    cross/hermetic SDK is searched first and wins. Skipped under ``-nostdinc``.
     """
     cmd = [cc_bin]
     for inc in extra_includes:
@@ -169,6 +185,11 @@ def _build_clang_header_command(
         cmd += shlex.split(gcc_options, posix=os.name != "nt")
     # Repeatable --gcc-option: one literal argument each (no shlex split).
     cmd += list(gcc_option_tokens)
+    # Auto-probed host system dirs go *after* the user's pass-through flags, so a
+    # user-supplied -isystem (cross/hermetic SDK) keeps higher search priority
+    # (Codex review). Auto-detection is a fallback, never an override.
+    for sysinc in system_includes:
+        cmd += ["-isystem", sysinc]
     explicit_std = _has_explicit_std(gcc_options, gcc_option_tokens)
     if not force_cpp:
         if not explicit_std:
@@ -230,11 +251,33 @@ def _clang_header_dump(
             "clang). Or use the castxml frontend (--ast-frontend castxml)."
         )
 
+    force_cpp = bool(lang and lang.upper() in ("C++", "CPP"))
+    if not lang:
+        force_cpp = _detect_cpp_headers(headers)
+    force_cpp20 = force_cpp and _detect_cpp20_headers(headers)
+    cc_id = "msvc" if Path(clang_bin).name.lower() in ("cl", "cl.exe") else "gnu"
+
+    # castxml↔clang parity: probe the host GNU compiler for its system include
+    # dirs and inject them as ``-isystem`` so clang resolves libstdc++/libc the
+    # way castxml does via ``--castxml-cc-gnu``. Folded into the cache key so a
+    # toolchain change invalidates a stale dump.
+    system_includes = _resolve_clang_system_includes(
+        compiler,
+        gcc_path=gcc_path,
+        gcc_prefix=gcc_prefix,
+        sysroot=sysroot,
+        nostdinc=nostdinc,
+        force_cpp=force_cpp,
+        gcc_options=gcc_options,
+        gcc_option_tokens=gcc_option_tokens,
+    )
+
     key = _cache_key(
         headers, extra_includes, clang_bin,
         gcc_path=gcc_path, gcc_prefix=gcc_prefix, gcc_options=gcc_options,
         gcc_option_tokens=gcc_option_tokens,
         sysroot=sysroot, nostdinc=nostdinc, lang=lang, backend="clang",
+        system_includes=system_includes,
     )
     cached = _cache_path(key, backend="clang")
     if cached.exists():
@@ -242,12 +285,6 @@ def _clang_header_dump(
             return cast("dict[str, Any]", json.loads(cached.read_text(encoding="utf-8")))
         except (ValueError, OSError):
             cached.unlink(missing_ok=True)
-
-    force_cpp = bool(lang and lang.upper() in ("C++", "CPP"))
-    if not lang:
-        force_cpp = _detect_cpp_headers(headers)
-    force_cpp20 = force_cpp and _detect_cpp20_headers(headers)
-    cc_id = "msvc" if Path(clang_bin).name.lower() in ("cl", "cl.exe") else "gnu"
 
     agg_ext = ".hpp" if force_cpp else ".h"
     with tempfile.NamedTemporaryFile(suffix=agg_ext, mode="w", delete=False) as agg:
@@ -260,6 +297,7 @@ def _clang_header_dump(
         sysroot=sysroot, nostdinc=nostdinc, gcc_options=gcc_options,
         gcc_option_tokens=gcc_option_tokens,
         force_cpp=force_cpp, force_cpp20=force_cpp20,
+        system_includes=system_includes,
     )
     try:
         try:
@@ -454,6 +492,7 @@ def _cache_key(
     nostdinc: bool = False,
     lang: str | None = None,
     backend: str = "castxml",
+    system_includes: tuple[str, ...] = (),
 ) -> str:
     h = hashlib.sha256()
     # The header-AST backend is part of the key: a castxml-XML cache entry and a
@@ -486,6 +525,9 @@ def _cache_key(
     h.update(f"sysroot={sysroot or ''}".encode())
     h.update(f"nostdinc={nostdinc}".encode())
     h.update(f"lang={lang or ''}".encode())
+    # Auto-probed system include dirs (castxml↔clang parity): a host-toolchain
+    # change must invalidate a cached clang dump (the resolved libstdc++ moved).
+    h.update(f"system_includes={chr(0).join(system_includes)}".encode())
     return h.hexdigest()
 
 

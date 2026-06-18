@@ -98,10 +98,20 @@ def test_no_hard_file_size_violations(car):
 def test_main_returns_zero_on_clean_tree(car, capsys):
     """End-to-end: running the script against the live tree should exit 0.
 
-    We skip the slow mypy check here; it's exercised in CI where mypy is
-    available.
+    We skip the slowest whole-tree scans here to avoid re-running them:
+    - ``mypy-baseline`` needs mypy (exercised in the dedicated CI lane);
+    - ``import-cycles`` and ``banned-imports`` each re-walk every module's AST
+      and are already asserted individually by ``test_no_import_cycles`` and
+      ``test_no_banned_imports``. Running them again inside this end-to-end
+      check just doubled the cost (it was the dominant unit-lane offender at
+      ~14.6s under coverage) without adding coverage — ``scripts/`` isn't
+      measured, and the full gate already runs standalone in the
+      ``ai-readiness`` CI job. The remaining checks still verify that
+      ``main()`` wires up the run and exits 0.
     """
-    rc = car.main(["--skip", "mypy-baseline"])
+    rc = car.main(
+        ["--skip", "mypy-baseline", "--skip", "import-cycles", "--skip", "banned-imports"]
+    )
     assert rc == 0, capsys.readouterr().out
 
 

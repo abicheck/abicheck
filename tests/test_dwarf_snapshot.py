@@ -580,45 +580,51 @@ class TestDumperFallbackChain:
 
 # ── CLI tests ───────────────────────────────────────────────────────────────
 
+@pytest.fixture(scope="module")
+def _cli_help():
+    """Cache `<command> --help` stdout across the help-text tests.
+
+    Each help assertion previously spawned its own Python subprocess (~0.34s of
+    interpreter startup + cli import); three of them ran the identical
+    `dump --help`. Run each help command once per module and share the output.
+    """
+    cache: dict[str, str] = {}
+
+    def _get(command: str) -> str:
+        if command not in cache:
+            result = subprocess.run(
+                [sys.executable, "-c", "from abicheck.cli import main; main()", command, "--help"],
+                capture_output=True, text=True, timeout=10,
+            )
+            cache[command] = result.stdout
+        return cache[command]
+
+    return _get
+
+
 class TestCLIDwarfFlags:
     """Test CLI --dwarf-only and --show-data-sources flags exist and are accepted."""
 
-    def test_dump_help_shows_dwarf_only(self) -> None:
+    def test_dump_help_shows_dwarf_only(self, _cli_help) -> None:
         """dump --help should mention --dwarf-only."""
-        result = subprocess.run(
-            [sys.executable, "-c", "from abicheck.cli import main; main()", "dump", "--help"],
-            capture_output=True, text=True, timeout=10,
-        )
-        assert "--dwarf-only" in result.stdout
+        assert "--dwarf-only" in _cli_help("dump")
 
-    def test_dump_help_shows_data_sources(self) -> None:
+    def test_dump_help_shows_data_sources(self, _cli_help) -> None:
         """dump --help should mention --show-data-sources."""
-        result = subprocess.run(
-            [sys.executable, "-c", "from abicheck.cli import main; main()", "dump", "--help"],
-            capture_output=True, text=True, timeout=10,
-        )
-        assert "--show-data-sources" in result.stdout
+        assert "--show-data-sources" in _cli_help("dump")
 
-    def test_dump_help_flags_data_sources_preview_only(self) -> None:
+    def test_dump_help_flags_data_sources_preview_only(self, _cli_help) -> None:
         """--show-data-sources help must make the preview-only contract clear
         (B1): it writes no snapshot and embeds no L3/L4/L5 facts."""
-        result = subprocess.run(
-            [sys.executable, "-c", "from abicheck.cli import main; main()", "dump", "--help"],
-            capture_output=True, text=True, timeout=10,
-        )
         # rich-click wraps option help across panel lines; strip box-drawing and
         # collapse whitespace so word-wrapped phrases match.
-        norm = " ".join(result.stdout.replace("│", "").split())
+        norm = " ".join(_cli_help("dump").replace("│", "").split())
         assert "Preview only" in norm
         assert "No snapshot is written" in norm
 
-    def test_compare_help_shows_dwarf_only(self) -> None:
+    def test_compare_help_shows_dwarf_only(self, _cli_help) -> None:
         """compare --help should mention --dwarf-only."""
-        result = subprocess.run(
-            [sys.executable, "-c", "from abicheck.cli import main; main()", "compare", "--help"],
-            capture_output=True, text=True, timeout=10,
-        )
-        assert "--dwarf-only" in result.stdout
+        assert "--dwarf-only" in _cli_help("compare")
 
     @pytest.mark.skipif(not _HAS_GCC, reason="GCC not available")
     def test_show_data_sources_output(self, tmp_path: Path) -> None:

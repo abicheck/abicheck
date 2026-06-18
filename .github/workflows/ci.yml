@@ -59,6 +59,12 @@ jobs:
     permissions:
       contents: read
       id-token: write
+    env:
+      # Use the sys.monitoring coverage backend (Python 3.12+): far lower
+      # instrumentation overhead than the default C-trace core, with the same
+      # line+branch data. Every matrix Python here is 3.12+, so it's always
+      # available. Harmless on steps that don't collect coverage.
+      COVERAGE_CORE: sysmon
     strategy:
       fail-fast: false
       matrix:
@@ -83,26 +89,53 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev,mcp]"
-      - name: Run tests with coverage (Linux — enforces 95% floor)
-        # Linux is the canonical lane: the full unit suite runs here, so the
-        # 95% minimum-coverage floor is enforced on it. macOS/Windows skip the
-        # Linux-only ELF/DWARF parsing tests, structurally lowering coverage,
-        # so they run the same suite without the fail-under gate.
-        if: runner.os == 'Linux'
+      - name: Run tests with coverage (Linux 3.13 — canonical lane, enforces 95% floor)
+        # Coverage + the 95% floor + the codecov upload run on ONE canonical
+        # Linux/Python lane (3.13). The other Linux Pythons (3.12/3.14) run the
+        # same suite *without* coverage instrumentation — they'd only re-check
+        # the identical floor, and coverage adds ~60% wall time. macOS/Windows
+        # skip the Linux-only ELF/DWARF tests, so they don't enforce the floor.
+        # --durations=25 surfaces the slowest tests in the CI log every run so
+        # timing regressions stay visible (test-time hygiene).
+        if: runner.os == 'Linux' && matrix.python-version == '3.13'
+        env:
+          # Capture per-test durations (tests/conftest.py hook) for the
+          # test-time report + artifact below.
+          ABICHECK_DURATIONS_JSON: test-durations.json
         run: |
-          pytest tests/ -v --tb=short -m "not integration and not libabigail and not abicc and not slow" -n auto --dist worksteal --cov=abicheck --cov-report=term-missing --cov-report=xml --cov-fail-under=95
+          pytest tests/ -v --tb=short -m "not integration and not libabigail and not abicc and not slow" -n auto --dist worksteal --durations=25 --cov=abicheck --cov-report=term-missing --cov-report=xml --cov-fail-under=95
+      - name: Run tests (Linux non-canonical Python — no coverage)
+        if: runner.os == 'Linux' && matrix.python-version != '3.13'
+        run: |
+          pytest tests/ -v --tb=short -m "not integration and not libabigail and not abicc and not slow" -n auto --dist worksteal --durations=25
       - name: Run tests with coverage (macOS — report only, platform tests skip)
         if: runner.os == 'macOS'
         run: |
-          pytest tests/ -v --tb=short -m "not integration and not libabigail and not abicc and not slow" -n auto --dist worksteal --cov=abicheck --cov-report=term-missing --cov-report=xml
+          pytest tests/ -v --tb=short -m "not integration and not libabigail and not abicc and not slow" -n auto --dist worksteal --durations=25 --cov=abicheck --cov-report=term-missing --cov-report=xml
       - name: Run tests (Windows — parallel, no coverage)
         if: runner.os == 'Windows'
         run: |
-          pytest tests/ -v --tb=short -m "not integration and not libabigail and not abicc and not slow" -n auto --dist worksteal
+          pytest tests/ -v --tb=short -m "not integration and not libabigail and not abicc and not slow" -n auto --dist worksteal --durations=25
       - name: Run slow tests (hypothesis / property-based)
         if: matrix.python-version == '3.13' && matrix.os == 'ubuntu-latest'
         run: |
           pytest tests/ -v --tb=short -m "slow" --cov=abicheck --cov-report=xml:coverage-slow.xml --cov-append
+      - name: Test-time report (slowest tests → run summary)
+        # Renders the captured durations into the GitHub run summary. Reporting
+        # only — a hard per-test wall-time gate would be flaky given CI-runner
+        # variance; the uploaded artifact is the durable record for trends.
+        # continue-on-error keeps it truly non-blocking: a hiccup rendering the
+        # report must never fail an otherwise-green test job.
+        if: always() && matrix.python-version == '3.13' && matrix.os == 'ubuntu-latest'
+        continue-on-error: true
+        run: python scripts/summarize_test_durations.py test-durations.json --top 25
+      - name: Upload test-durations artifact
+        if: always() && matrix.python-version == '3.13' && matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: test-durations
+          path: test-durations.json
+          if-no-files-found: ignore
       - name: Upload coverage to Codecov
         if: matrix.python-version == '3.13' && matrix.os == 'ubuntu-latest'
         uses: codecov/codecov-action@v7
