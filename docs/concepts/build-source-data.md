@@ -265,7 +265,7 @@ default, trusted query opt-in, full build never**):
 
 ```yaml
 # .abicheck.yml at the source-tree root for non-executing settings
-# (pass a trusted --build-config <path> before build.query can run)
+# (pass a trusted --config <path> before build.query can run)
 build:
   system: bazel            # bazel | cmake | make | meson | auto (default: auto-detect)
   # A command that EMITS flags/exports without performing a full project build —
@@ -284,7 +284,7 @@ sources:
   it with no shell (parsed via `shlex`) in the source-tree directory. A
   `.abicheck.yml` auto-discovered from `--sources` is still used for
   non-executing settings such as `build.compile_db`, but its `build.query` is
-  ignored; pass a trusted config path with `--build-config` to enable queries.
+  ignored; pass a trusted config path with `--config` to enable queries.
 - **`run_build` / `wrap_build` (denied):** abicheck never performs a full
   project build or compiler-wrapper interception.
 

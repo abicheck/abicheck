@@ -78,7 +78,7 @@ abicheck scan --binary new/libonedal_core.so -H include/ --build-info aq.json --
 
 If your project ships a trusted `.abicheck.yml` with a `build.query`, you can let
 `abicheck` run it instead of pre-generating the DB. Pass it with `--config`
-(the project contract; `--build-config` is the deprecated alias). Pinning a deep
+(the project contract). Pinning a deep
 level (`--source-method s5`, etc.) with such a trusted `--config` **auto-enables**
 the query — you no longer also need `--allow-build-query` for a level you
 explicitly asked for (the report notes when this happens). An *auto-discovered*

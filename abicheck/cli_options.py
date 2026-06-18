@@ -490,14 +490,13 @@ def build_source_dump_options(func: F) -> F:
         is_flag=True,
         default=False,
         help="Permit running `build.query` from an explicit trusted "
-        "--build-config to emit a compile DB / exports (ADR-032 D5 "
+        "--config to emit a compile DB / exports (ADR-032 D5 "
         "query_build_system). Off by default, and ignored for auto-discovered "
         "source-tree configs: only existing build outputs are inspected — "
         "a full project build is never run.",
     )(func)
     func = click.option(
         "--config",
-        "--build-config",
         "build_config",
         type=click.Path(exists=True, dir_okay=False, path_type=Path),
         default=None,
@@ -505,7 +504,7 @@ def build_source_dump_options(func: F) -> F:
         "query command, compile-DB location, plus the stable severity/scope/"
         "suppression/source settings. Defaults to `.abicheck.yml` at the "
         "--sources tree root for non-executing settings; build.query runs only "
-        "from an explicit --config. (`--build-config` is the deprecated alias.)",
+        "from an explicit --config.",
     )(func)
     func = click.option(
         "--build-compile-db",
@@ -799,12 +798,6 @@ DEPRECATED_FLAGS: dict[str, tuple[str, str]] = {
     "--depth=graph": (
         "--depth=source",
         "the L5 graph is built internally at --depth source (ADR-037 D6).",
-    ),
-    "--build-config": (
-        "--config",
-        "the flag loads the whole project .abicheck.yml (severity/scope/"
-        "suppression/source), not just build settings; renamed to --config to "
-        "match `compare` (ADR-037 D4).",
     ),
     "--header-backend": (
         "--ast-frontend",

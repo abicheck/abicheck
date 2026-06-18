@@ -618,14 +618,14 @@ def test_note_deprecated_flags_combines() -> None:
 
 
 @pytest.mark.parametrize("name", ["dump", "scan"])
-def test_config_alias_on_dump_and_scan(name: str) -> None:
+def test_project_config_flag_is_config_not_build_config(name: str) -> None:
     """`--build-config` was renamed to `--config` (ADR-037 D4) to match `compare`
-    and reflect that it loads the whole project .abicheck.yml. Both spellings must
-    resolve on dump/scan so the deprecation window keeps working."""
+    and reflect that it loads the whole project .abicheck.yml. No back-compat
+    window is kept, so the old spelling must be gone on dump/scan."""
     commands = _registered_commands()
     flags = _command_flags(commands[name])
     assert "--config" in flags, name
-    assert "--build-config" in flags, name  # deprecated alias still present
+    assert "--build-config" not in flags, name  # old spelling fully removed
 
 
 # ── Resolved option-set snapshot (catches an accidental flag drop in review) ──

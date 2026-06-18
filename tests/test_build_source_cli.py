@@ -1126,7 +1126,7 @@ def test_build_query_skipped_without_allow_flag(tmp_path):
 
 
 def test_auto_discovered_build_query_is_not_executed(tmp_path):
-    """Source-tree .abicheck.yml may be untrusted, so queries need --build-config."""
+    """Source-tree .abicheck.yml may be untrusted, so queries need --config."""
     from abicheck.cli_buildsource import embed_build_source
 
     tree = tmp_path / "src"

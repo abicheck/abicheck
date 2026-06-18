@@ -568,12 +568,11 @@ def _audit_exit_code(
 )
 @click.option(
     "--config",
-    "--build-config",
     "build_config",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
     default=None,
     help="Trusted project .abicheck.yml (enables build.query with "
-    "--allow-build-query). (`--build-config` is the deprecated alias.)",
+    "--allow-build-query).",
 )
 @click.option(
     "--baseline",

@@ -1097,7 +1097,7 @@ def test_out_of_tree_compile_db_is_accepted(runner, tmp_path, new_snap_compatibl
 def test_malformed_build_config_yaml_is_click_error(
     runner, tmp_path, new_snap_compatible
 ):
-    # Invalid --build-config YAML must surface as a clean CLI error, not a
+    # Invalid --config YAML must surface as a clean CLI error, not a
     # traceback through embed_build_source/load_build_config (Codex review).
     src = tmp_path / "src"
     src.mkdir()
@@ -1111,7 +1111,7 @@ def test_malformed_build_config_yaml_is_click_error(
             str(new_snap_compatible),
             "--sources",
             str(src),
-            "--build-config",
+            "--config",
             str(bad),
         ],
     )

@@ -586,7 +586,7 @@ def _resolve_compile_db(
                     status="skipped",
                     detail=(
                         "build.query ignored from auto-discovered .abicheck.yml; "
-                        "pass a trusted config with --build-config to permit queries"
+                        "pass a trusted config with --config to permit queries"
                     ),
                 )
             )
