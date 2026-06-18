@@ -138,6 +138,128 @@ def _has_explicit_std(
     return any(("-std=" in t or "/std:" in t) for t in gcc_option_tokens)
 
 
+#: Env knob to disable the castxml↔clang system-include auto-detection (below).
+#: On by default; set to a falsey value to suppress the host-compiler probe (e.g.
+#: for a hermetic build that supplies its own ``-isystem``/``--sysroot``).
+_AUTO_SYSINC_ENV = "ABICHECK_AUTO_SYSTEM_INCLUDES"
+
+
+def _auto_system_includes_enabled() -> bool:
+    """True unless the user disabled the system-include probe via the env knob."""
+    return os.environ.get(_AUTO_SYSINC_ENV, "1").strip().lower() not in (
+        "0",
+        "false",
+        "no",
+        "off",
+    )
+
+
+def _parse_gnu_include_search_dirs(stderr: str) -> list[str]:
+    """Parse a GCC/Clang ``-E -v`` stderr into its system include search dirs.
+
+    The driver prints the resolved search path between the
+    ``#include <...> search starts here:`` and ``End of search list.`` markers,
+    one directory per indented line (Clang/GCC both use this format; Darwin may
+    append `` (framework directory)``). Pure/string-only so it is unit-testable
+    without a compiler installed. Returns the directories in search order.
+    """
+    dirs: list[str] = []
+    in_block = False
+    for line in stderr.splitlines():
+        stripped = line.strip()
+        if "search starts here:" in stripped:
+            in_block = True
+            continue
+        if stripped.startswith("End of search list."):
+            break
+        if in_block and stripped:
+            # GCC/Clang on Darwin tag framework dirs with a trailing note.
+            dirs.append(stripped.split(" (", 1)[0].strip())
+    return dirs
+
+
+def _probe_gnu_system_includes(cc_bin: str, *, cpp: bool) -> list[str]:
+    """Probe *cc_bin* for the system include dirs it would search (best-effort).
+
+    The clang counterpart of what castxml gets for free: ``castxml
+    --castxml-cc-gnu g++`` runs the real compiler to discover its built-in
+    include paths (so the host libstdc++ ``<cstddef>`` etc. are found), then
+    parses with those injected. Running ``clang -ast-dump=json`` *directly* does
+    not — clang uses its own GCC-toolchain auto-detection, which misses the host
+    C++ stdlib in minimal containers / non-standard prefixes / Conda-clang
+    setups. This re-creates the castxml behaviour for the clang backend by asking
+    the GNU driver where its headers live and feeding them back as ``-isystem``.
+
+    Best-effort: any probe failure (no compiler, timeout) yields ``[]`` so the
+    dump still runs on clang's own detection. Only existing directories are
+    returned, in the compiler's own search order.
+    """
+    lang = "c++" if cpp else "c"
+    try:
+        proc = subprocess.run(
+            [cc_bin, "-E", "-x", lang, "-v", "-"],
+            input="",
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return []
+    return [
+        d for d in _parse_gnu_include_search_dirs(proc.stderr or "") if Path(d).is_dir()
+    ]
+
+
+def _resolve_probe_compiler(
+    compiler: str, gcc_path: str | None, gcc_prefix: str | None
+) -> str | None:
+    """Pick a GNU ``gcc``/``g++`` driver to probe for system includes, or None.
+
+    Prefers an explicit GNU ``--gcc-path`` (a clang there is useless for
+    discovering the host libstdc++, so it is skipped), then the cross
+    ``--gcc-prefix`` driver, then ``g++``/``gcc`` on PATH. Returns the first that
+    resolves, or ``None`` when no GNU compiler is available (then clang falls
+    back to its own detection).
+    """
+    cpp = compiler in ("c++", "g++", "clang++")
+    primary = "g++" if cpp else "gcc"
+    candidates: list[str] = []
+    if gcc_path and "clang" not in Path(gcc_path).name.lower():
+        candidates.append(gcc_path)
+    if gcc_prefix:
+        candidates.append(f"{gcc_prefix}{primary}")
+    candidates += [primary, "gcc" if cpp else "g++"]
+    for cand in candidates:
+        if shutil.which(cand):
+            return cand
+    return None
+
+
+def _resolve_clang_system_includes(
+    compiler: str,
+    *,
+    gcc_path: str | None,
+    gcc_prefix: str | None,
+    sysroot: Path | None,
+    nostdinc: bool,
+    force_cpp: bool,
+) -> tuple[str, ...]:
+    """Resolve the ``-isystem`` dirs to inject for a clang header dump.
+
+    Empty when auto-detection is disabled, ``-nostdinc`` was requested, an
+    explicit ``--sysroot`` already redirects the search, or no GNU compiler is
+    available to probe. Otherwise the host GNU driver's system include dirs
+    (castxml↔clang parity, see :func:`_probe_gnu_system_includes`).
+    """
+    if nostdinc or sysroot is not None or not _auto_system_includes_enabled():
+        return ()
+    probe_cc = _resolve_probe_compiler(compiler, gcc_path, gcc_prefix)
+    if probe_cc is None:
+        return ()
+    return tuple(_probe_gnu_system_includes(probe_cc, cpp=force_cpp))
+
+
 def _build_clang_header_command(
     cc_bin: str, cc_id: str,
     extra_includes: list[Path], agg_path: Path,
@@ -148,6 +270,7 @@ def _build_clang_header_command(
     gcc_option_tokens: tuple[str, ...] = (),
     force_cpp: bool = False,
     force_cpp20: bool = False,
+    system_includes: tuple[str, ...] = (),
 ) -> list[str]:
     """Build the ``clang -ast-dump=json`` command for the aggregate header.
 
@@ -157,10 +280,18 @@ def _build_clang_header_command(
     just a different frontend over the identical inputs. ``-fsyntax-only`` (no
     codegen) with ``-ferror-limit=0`` keeps parsing past recoverable errors so a
     single bad decl does not blank the whole dump.
+
+    ``system_includes`` are host-compiler-probed system dirs (see
+    :func:`_probe_gnu_system_includes`) injected as ``-isystem`` so clang finds
+    the same libstdc++/libc headers castxml gets via ``--castxml-cc-gnu`` — the
+    castxml↔clang capability-parity fix. They follow the user's ``-I`` (so an
+    explicit include still wins) and are skipped under ``-nostdinc``.
     """
     cmd = [cc_bin]
     for inc in extra_includes:
         cmd += ["-I", str(inc)]
+    for sysinc in system_includes:
+        cmd += ["-isystem", sysinc]
     if sysroot:
         cmd += [f"--sysroot={sysroot.as_posix()}"]
     if nostdinc:
@@ -230,11 +361,31 @@ def _clang_header_dump(
             "clang). Or use the castxml frontend (--ast-frontend castxml)."
         )
 
+    force_cpp = bool(lang and lang.upper() in ("C++", "CPP"))
+    if not lang:
+        force_cpp = _detect_cpp_headers(headers)
+    force_cpp20 = force_cpp and _detect_cpp20_headers(headers)
+    cc_id = "msvc" if Path(clang_bin).name.lower() in ("cl", "cl.exe") else "gnu"
+
+    # castxml↔clang parity: probe the host GNU compiler for its system include
+    # dirs and inject them as ``-isystem`` so clang resolves libstdc++/libc the
+    # way castxml does via ``--castxml-cc-gnu``. Folded into the cache key so a
+    # toolchain change invalidates a stale dump.
+    system_includes = _resolve_clang_system_includes(
+        compiler,
+        gcc_path=gcc_path,
+        gcc_prefix=gcc_prefix,
+        sysroot=sysroot,
+        nostdinc=nostdinc,
+        force_cpp=force_cpp,
+    )
+
     key = _cache_key(
         headers, extra_includes, clang_bin,
         gcc_path=gcc_path, gcc_prefix=gcc_prefix, gcc_options=gcc_options,
         gcc_option_tokens=gcc_option_tokens,
         sysroot=sysroot, nostdinc=nostdinc, lang=lang, backend="clang",
+        system_includes=system_includes,
     )
     cached = _cache_path(key, backend="clang")
     if cached.exists():
@@ -242,12 +393,6 @@ def _clang_header_dump(
             return cast("dict[str, Any]", json.loads(cached.read_text(encoding="utf-8")))
         except (ValueError, OSError):
             cached.unlink(missing_ok=True)
-
-    force_cpp = bool(lang and lang.upper() in ("C++", "CPP"))
-    if not lang:
-        force_cpp = _detect_cpp_headers(headers)
-    force_cpp20 = force_cpp and _detect_cpp20_headers(headers)
-    cc_id = "msvc" if Path(clang_bin).name.lower() in ("cl", "cl.exe") else "gnu"
 
     agg_ext = ".hpp" if force_cpp else ".h"
     with tempfile.NamedTemporaryFile(suffix=agg_ext, mode="w", delete=False) as agg:
@@ -260,6 +405,7 @@ def _clang_header_dump(
         sysroot=sysroot, nostdinc=nostdinc, gcc_options=gcc_options,
         gcc_option_tokens=gcc_option_tokens,
         force_cpp=force_cpp, force_cpp20=force_cpp20,
+        system_includes=system_includes,
     )
     try:
         try:
@@ -454,6 +600,7 @@ def _cache_key(
     nostdinc: bool = False,
     lang: str | None = None,
     backend: str = "castxml",
+    system_includes: tuple[str, ...] = (),
 ) -> str:
     h = hashlib.sha256()
     # The header-AST backend is part of the key: a castxml-XML cache entry and a
@@ -486,6 +633,9 @@ def _cache_key(
     h.update(f"sysroot={sysroot or ''}".encode())
     h.update(f"nostdinc={nostdinc}".encode())
     h.update(f"lang={lang or ''}".encode())
+    # Auto-probed system include dirs (castxml↔clang parity): a host-toolchain
+    # change must invalidate a cached clang dump (the resolved libstdc++ moved).
+    h.update(f"system_includes={chr(0).join(system_includes)}".encode())
     return h.hexdigest()
 
 

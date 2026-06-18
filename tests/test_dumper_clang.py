@@ -29,10 +29,14 @@ import pytest
 
 from abicheck import dumper
 from abicheck.dumper import (
+    _auto_system_includes_enabled,
     _build_clang_header_command,
     _clang_header_dump,
     _header_ast_parser,
+    _parse_gnu_include_search_dirs,
+    _resolve_clang_system_includes,
     _resolve_header_backend,
+    _resolve_probe_compiler,
 )
 from abicheck.dumper_clang import (
     _ClangAstParser,
@@ -934,6 +938,9 @@ def test_clang_header_dump_success_and_cache(
 
     monkeypatch.setattr(dumper, "_clang_available", lambda *a, **k: True)
     monkeypatch.setattr(dumper, "_cache_path", lambda *a, **k: cache)
+    # Isolate the single clang AST-dump call: disable the castxml↔clang
+    # system-include probe (itself a separate, best-effort subprocess).
+    monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "0")
     calls = {"n": 0}
 
     def _run(cmd, **kwargs):
@@ -1623,3 +1630,134 @@ def test_clang_header_dump_corrupt_cache_is_discarded(
     # The corrupt cache is unlinked and the fresh clang run repopulates it.
     root = _clang_header_dump([header], [])
     assert root == {"kind": "TranslationUnitDecl", "inner": []}
+
+
+# ── castxml↔clang system-include auto-detection (parity fix) ─────────────────
+
+_GCC_VERBOSE_STDERR = """\
+ignoring nonexistent directory "/usr/local/include/x86_64-linux-gnu"
+#include "..." search starts here:
+#include <...> search starts here:
+ /usr/include/c++/13
+ /usr/include/x86_64-linux-gnu/c++/13
+ /usr/lib/gcc/x86_64-linux-gnu/13/include
+ /usr/include
+End of search list.
+"""
+
+
+def test_parse_gnu_include_search_dirs() -> None:
+    dirs = _parse_gnu_include_search_dirs(_GCC_VERBOSE_STDERR)
+    # Only the lines inside the <...> block, in order; the leading "ignoring"
+    # line and the quote-include marker are excluded.
+    assert dirs == [
+        "/usr/include/c++/13",
+        "/usr/include/x86_64-linux-gnu/c++/13",
+        "/usr/lib/gcc/x86_64-linux-gnu/13/include",
+        "/usr/include",
+    ]
+
+
+def test_parse_gnu_include_search_dirs_strips_framework_note() -> None:
+    stderr = (
+        "#include <...> search starts here:\n"
+        " /System/Library/Frameworks (framework directory)\n"
+        "End of search list.\n"
+    )
+    assert _parse_gnu_include_search_dirs(stderr) == ["/System/Library/Frameworks"]
+
+
+def test_parse_gnu_include_search_dirs_empty_when_no_block() -> None:
+    assert _parse_gnu_include_search_dirs("clang: error: no input files\n") == []
+
+
+def test_auto_system_includes_enabled_default_and_toggle(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("ABICHECK_AUTO_SYSTEM_INCLUDES", raising=False)
+    assert _auto_system_includes_enabled() is True
+    for off in ("0", "false", "no", "off", "OFF"):
+        monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", off)
+        assert _auto_system_includes_enabled() is False
+    monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "1")
+    assert _auto_system_includes_enabled() is True
+
+
+def test_resolve_probe_compiler_prefers_gnu_gcc_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(dumper.shutil, "which", lambda c: c)
+    # An explicit GNU --gcc-path is used verbatim…
+    assert _resolve_probe_compiler("c++", "/opt/gcc-13/bin/g++", None) == (
+        "/opt/gcc-13/bin/g++"
+    )
+    # …but a clang there is skipped (useless for libstdc++ discovery) → g++.
+    assert _resolve_probe_compiler("c++", "/usr/bin/clang++", None) == "g++"
+    # Cross prefix maps to the prefixed GNU driver.
+    assert _resolve_probe_compiler("c++", None, "aarch64-linux-gnu-") == (
+        "aarch64-linux-gnu-g++"
+    )
+    # C mode probes gcc.
+    assert _resolve_probe_compiler("cc", None, None) == "gcc"
+
+
+def test_resolve_probe_compiler_none_when_no_compiler(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(dumper.shutil, "which", lambda c: None)
+    assert _resolve_probe_compiler("c++", None, None) is None
+
+
+def test_resolve_clang_system_includes_gating(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "1")
+    monkeypatch.setattr(
+        dumper, "_probe_gnu_system_includes", lambda *a, **k: ["/usr/include/c++/13"]
+    )
+    monkeypatch.setattr(dumper, "_resolve_probe_compiler", lambda *a, **k: "g++")
+
+    base = dict(gcc_path=None, gcc_prefix=None, force_cpp=True)
+    # Default: probed dirs returned.
+    assert _resolve_clang_system_includes(
+        "c++", sysroot=None, nostdinc=False, **base
+    ) == ("/usr/include/c++/13",)
+    # nostdinc, explicit sysroot, or the env toggle each suppress the probe.
+    assert _resolve_clang_system_includes(
+        "c++", sysroot=None, nostdinc=True, **base
+    ) == ()
+    assert _resolve_clang_system_includes(
+        "c++", sysroot=Path("/sysroot"), nostdinc=False, **base
+    ) == ()
+    monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "0")
+    assert _resolve_clang_system_includes(
+        "c++", sysroot=None, nostdinc=False, **base
+    ) == ()
+
+
+def test_resolve_clang_system_includes_no_compiler(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "1")
+    monkeypatch.setattr(dumper, "_resolve_probe_compiler", lambda *a, **k: None)
+    assert _resolve_clang_system_includes(
+        "c++", gcc_path=None, gcc_prefix=None, sysroot=None,
+        nostdinc=False, force_cpp=True,
+    ) == ()
+
+
+def test_build_clang_command_injects_isystem(tmp_path: Path) -> None:
+    agg = tmp_path / "agg.hpp"
+    agg.write_text("")
+    cmd = _build_clang_header_command(
+        "clang++", "gnu", [tmp_path / "inc"], agg,
+        force_cpp=True,
+        system_includes=("/usr/include/c++/13", "/usr/include"),
+    )
+    # User -I precedes the probed -isystem dirs, which appear as pairs.
+    assert "-I" in cmd
+    i = cmd.index("-isystem")
+    assert cmd[i + 1] == "/usr/include/c++/13"
+    assert cmd[cmd.index("/usr/include") - 1] == "-isystem"
+    # The user's -I still comes before the first -isystem (explicit wins).
+    assert cmd.index("-I") < i
