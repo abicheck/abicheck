@@ -147,3 +147,82 @@ def test_dump_elf_default_compile_context_is_inert(
     assert captured["gcc_options"] is None
     assert captured["nostdinc"] is False
     assert captured["gcc_option_tokens"] == ()
+
+
+# ── .abicheck.yml compile: block (ADR-035 D6.1 / ADR-037 D4) ─────────────────
+
+
+def test_buildconfig_parses_compile_block() -> None:
+    from abicheck.buildsource.inline import BuildConfig
+
+    bc = BuildConfig.from_dict(
+        {
+            "compile": {
+                "frontend": "clang",
+                "std": "c++20",
+                "include_dirs": ["include", "third_party/inc"],
+                "defines": ["FOO=1", "BAR"],
+                "sysroot": "/opt/sysroot",
+                "nostdinc": True,
+            }
+        }
+    )
+    assert bc.compile_frontend == "clang"
+    assert bc.compile_std == "c++20"
+    assert bc.compile_include_dirs == ["include", "third_party/inc"]
+    assert bc.compile_defines == ["FOO=1", "BAR"]
+    assert bc.compile_sysroot == "/opt/sysroot"
+    assert bc.compile_nostdinc is True
+    # Round-trips through to_dict.
+    assert BuildConfig.from_dict(bc.to_dict()).to_dict() == bc.to_dict()
+
+
+def test_buildconfig_rejects_bad_compile_frontend() -> None:
+    import pytest as _pytest
+
+    from abicheck.buildsource.inline import BuildConfig
+
+    with _pytest.raises(ValueError, match="compile.frontend"):
+        BuildConfig.from_dict({"compile": {"frontend": "gcc"}})
+
+
+def test_merge_compile_config_cli_wins_over_config(tmp_path: Path) -> None:
+    from abicheck.cli_scan import _merge_compile_config
+
+    cfg = tmp_path / ".abicheck.yml"
+    cfg.write_text(
+        "compile:\n"
+        "  frontend: castxml\n"
+        "  std: c++17\n"
+        "  defines: [CFG=1]\n"
+        "  include_dirs: [include]\n"
+        "  sysroot: /cfg/sysroot\n"
+    )
+    cli = CompileContext(frontend="clang", gcc_options="-std=c++20 -DCLI=1")
+    merged, includes = _merge_compile_config(cli, (), cfg)
+    # CLI frontend + gcc_options win; config std/defines are NOT synthesized.
+    assert merged.frontend == "clang"
+    assert merged.gcc_options == "-std=c++20 -DCLI=1"
+    # Config sysroot fills the unset CLI field; include_dirs resolve under cfg dir.
+    assert merged.sysroot == Path("/cfg/sysroot")
+    assert includes == (tmp_path / "include",)
+
+
+def test_merge_compile_config_uses_config_when_cli_unset(tmp_path: Path) -> None:
+    from abicheck.cli_scan import _merge_compile_config
+
+    cfg = tmp_path / ".abicheck.yml"
+    cfg.write_text("compile:\n  std: c++20\n  defines: [A, B=2]\n  frontend: clang\n")
+    merged, _ = _merge_compile_config(CompileContext(), (), cfg)
+    assert merged.frontend == "clang"
+    # std + defines synthesized into gcc_options when the user gave none.
+    assert merged.gcc_options == "-std=c++20 -DA -DB=2"
+
+
+def test_merge_compile_config_noop_without_path() -> None:
+    from abicheck.cli_scan import _merge_compile_config
+
+    cli = CompileContext(gcc_options="-DX")
+    merged, includes = _merge_compile_config(cli, (Path("a"),), None)
+    assert merged is cli
+    assert includes == (Path("a"),)

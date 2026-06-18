@@ -296,6 +296,42 @@ API key — not a new `levels` spelling), `risk_rules`, and `crosschecks:
 they imply new cost; they map onto the existing collect-mode / evidence-policy
 machinery rather than replacing it.
 
+**D6.1 — Amendment (2026-06): `compile:` block + L2 must be reachable from `scan`.**
+The cross-source checks (D4) and public-surface scoping depend on a real **L2
+header AST** — that is what tells the scan which symbols are *public*. A field run
+of oneTBB / oneDNN / oneDAL showed L2 silently failing under `scan`: the header
+parse needed the translation unit's compile context (include roots, the host
+libstdc++ paths, a `-std`) and `scan` had **no flag, config, or compile-DB path**
+to supply it, so the scan fell back to a binary-strict scope and (correctly, by
+its own rules) reported internal removals — oneDNN's `dnnl::impl::*`, oneDAL's
+bundled `DGETRF`/`SGETRF` — as BREAKING. With L2 those demote to COMPATIBLE.
+
+Two fixes, both additive: (a) `scan` gains the same L2 compile-context flags as
+`dump` via one shared decorator (CLI parity — specified in **ADR-037 D8.1**); and
+(b) the stable, version-controlled half of that context lives in a new
+`.abicheck.yml` **`compile:`** block (per the D4 CLI-vs-config rule — include
+roots, `std`, defines, frontend, sysroot are stable project properties, while the
+per-invocation/cross-compile flags stay CLI overrides):
+
+```yaml
+compile:
+  frontend: auto          # auto | castxml | clang  (== --ast-frontend)
+  std: c++20              # parse standard (-std=)
+  include_dirs: [include, third_party/include]
+  defines: [DNNL_ENABLE_FOO=1]
+  sysroot: /opt/sysroot
+  nostdinc: false
+```
+
+Precedence: explicit CLI flag > `.abicheck.yml` `compile:` > compile-DB-derived
+flags > auto-detected system includes. Auto-detection (clang gaining castxml's
+system-include discovery) is the default floor so a bare `scan -H` finds the C++
+stdlib; it cannot guess the project's own include roots / macros / dialect, which
+is why the config block and CLI overrides remain. **Threading the per-TU `-I`/
+`-std`/`-D` from an existing `--compile-db` into the L2 frontend** (today the
+compile DB feeds only L3–L5) is the precise next step and is tracked as a
+follow-up — it needs header→TU flag mapping and so is scoped separately.
+
 ### D7. Evidence-directed focusing: cheap facts steer the expensive scan
 
 Cross-source links are used in **two directions**, not one. D4 reads them to

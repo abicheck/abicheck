@@ -96,6 +96,78 @@ abicheck scan --binary new/libfoo.so -H include/ --sources . \
   --config .abicheck.yml --source-method s5 --baseline old/libfoo.abi.json
 ```
 
+## Compile context for header parsing (L2)
+
+The L2 header AST is what establishes the **public/internal boundary** — which
+declarations are API, so the cross-source checks and public-surface scoping can
+tell an *internal* symbol removal (compatible) from a public one (breaking). To
+build it, the frontend must parse your public headers the way your compiler does:
+it needs the include roots they `#include`, the C++ standard they assume, and any
+`-D` feature macros that gate declarations. When that context is missing the
+header parse fails, the scan falls back to a binary-strict scope, and internal
+removals get reported as BREAKING.
+
+`scan` now takes the **same** compile-context flags as `dump` (they share one
+definition, so they never drift):
+
+| Flag | Purpose |
+|---|---|
+| `--ast-frontend {auto,castxml,clang}` | which frontend parses the headers (env `ABICHECK_AST_FRONTEND`) |
+| `-I/--include DIR` | an include root your headers need (repeatable) |
+| `--gcc-options "…"` | extra compiler flags (whitespace-split), e.g. `--gcc-options "-std=c++20 -DFOO=1"` |
+| `--gcc-option TOK` | one flag verbatim (repeatable; for a flag + spaced value) |
+| `--gcc-path` / `--gcc-prefix` | a cross-compiler / cross-toolchain prefix |
+| `--sysroot DIR` | an alternate system root |
+| `--nostdinc` | do not search system includes (and disable the auto-probe below) |
+
+### Where each setting belongs (CLI vs config)
+
+Four layers resolve the context, **highest precedence first**:
+
+1. **Explicit CLI flag** — a per-run override (`--gcc-options`, `--sysroot`, …).
+2. **`.abicheck.yml` `compile:` block** — your project's stable contract,
+   reviewed in PRs (see below). Put include roots, `std`, and `defines` here so
+   every scan/CI run is reproducible without re-typing them.
+3. **Compile-DB-derived flags** — *planned*: per-TU `-I`/`-std`/`-D` taken from a
+   `--compile-db`. Today the compile DB feeds L3–L5 only.
+4. **Auto-detected system includes** — the default floor (below).
+
+```yaml
+# .abicheck.yml
+compile:
+  frontend: auto          # auto | castxml | clang
+  std: c++20
+  include_dirs: [include, third_party/include]
+  defines: [DNNL_ENABLE_FOO=1]
+  # sysroot: /opt/sysroot
+  # nostdinc: false
+```
+
+### Auto-detection of system includes (on by default)
+
+`castxml` finds the host C++ standard library for free, because it runs your real
+compiler to discover its built-in include paths. The `clang` frontend did not —
+so on a minimal container, a non-standard prefix, or a Conda-clang setup it could
+not find `<cstddef>` and the parse failed. The clang backend now **probes the
+host GNU compiler** (`g++ -E -v`) for its system include dirs and injects them, so
+a bare `scan -H include/` finds libstdc++ without extra flags. Disable it with
+`--nostdinc`, an explicit `--sysroot`, or `ABICHECK_AUTO_SYSTEM_INCLUDES=0`.
+
+!!! warning "Auto-detection is partial — know its limits"
+    - It recovers **system** headers (libstdc++/libc), **not your project's own**
+      include roots or `-D` feature macros. oneTBB-style headers still need
+      `-I`/the `compile:` block for the `oneapi/` root.
+    - A **wrong `-std`** changes the ABI surface (concepts, `char8_t`,
+      `noexcept`-in-type, inline-namespace versioning) — parse at the standard the
+      library was *built* with or L2 shows phantom add/remove churn.
+    - **Wrong/missing `-D` defines** change which declarations are visible —
+      macro-gated internals (e.g. `dnnl::impl::*`) or the libstdc++ dual ABI
+      (`_GLIBCXX_USE_CXX11_ABI`) — and produce exactly the "scope divergence"
+      false BREAKINGs this feature exists to remove.
+    - Auto-detection reads the **host** toolchain → it is wrong for
+      cross-compiles (use `--gcc-prefix`/`--sysroot` or the config block) and
+      makes results host-dependent (pin context in config for reproducible CI).
+
 ## Worked examples
 
 Each example shows the command, what level it pins, and what to read in the

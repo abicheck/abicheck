@@ -391,6 +391,71 @@ def _render_text(out: ScanOutcome) -> str:
     return "\n".join(lines)
 
 
+def _merge_compile_config(
+    cli_ctx: Any,
+    cli_includes: tuple[Path, ...],
+    build_config: Path | None,
+) -> tuple[Any, tuple[Path, ...]]:
+    """Fold a ``.abicheck.yml`` ``compile:`` block into the CLI compile context.
+
+    Precedence is CLI > config (ADR-035 D6.1 / ADR-037 D4): a per-field CLI value
+    overrides config, an unset CLI field inherits it. The config's ``std`` +
+    ``defines`` synthesize ``-std=…``/``-D…`` flags only when the user did not pass
+    ``--gcc-options``; ``include_dirs`` (resolved against the config's directory)
+    are appended *after* the CLI ``-I`` so explicit roots keep search precedence.
+    Returns the merged ``(CompileContext, includes)``.
+    """
+    from .service_scan import CompileContext
+
+    if build_config is None:
+        return cli_ctx, cli_includes
+    from .buildsource.inline import load_build_config
+
+    try:
+        bc = load_build_config(build_config)
+    except ValueError:
+        # Best-effort, like the level-implies-query probe: a malformed --config is
+        # swallowed here so a no-source scan still runs; the real downstream load
+        # (embed_build_source, when --sources is given) surfaces it as a clean
+        # ClickException (tests: malformed_build_config_yaml_is_click_error /
+        # level_implies_query_malformed_config_does_not_crash).
+        return cli_ctx, cli_includes
+    base = build_config.parent
+
+    frontend = (
+        cli_ctx.frontend
+        if cli_ctx.frontend != "auto"
+        else (bc.compile_frontend or "auto")
+    )
+    if cli_ctx.gcc_options is not None:
+        gcc_options = cli_ctx.gcc_options
+    else:
+        parts: list[str] = []
+        if bc.compile_std:
+            parts.append(f"-std={bc.compile_std}")
+        parts += [f"-D{d}" for d in bc.compile_defines]
+        gcc_options = " ".join(parts) or None
+    sysroot = (
+        cli_ctx.sysroot
+        if cli_ctx.sysroot is not None
+        else (Path(bc.compile_sysroot) if bc.compile_sysroot else None)
+    )
+    merged = CompileContext(
+        gcc_path=cli_ctx.gcc_path,
+        gcc_prefix=cli_ctx.gcc_prefix,
+        gcc_options=gcc_options,
+        gcc_option_tokens=cli_ctx.gcc_option_tokens,
+        sysroot=sysroot,
+        nostdinc=cli_ctx.nostdinc or bool(bc.compile_nostdinc),
+        frontend=frontend,
+    )
+    includes = tuple(cli_includes) + tuple(
+        (base / p) if not Path(p).is_absolute() else Path(p)
+        for p in bc.compile_include_dirs
+    )
+    return merged, includes
+
+
 def _build_new_snapshot(
     binary: Path,
     headers: list[Path],
@@ -743,6 +808,10 @@ def scan_cmd(
         sysroot=sysroot,
         nostdinc=nostdinc,
         frontend=header_backend,
+    )
+    # Fold the project's `.abicheck.yml` compile: block in (CLI > config).
+    compile_context, includes = _merge_compile_config(
+        compile_context, tuple(includes), build_config
     )
 
     if len(binaries) != 1:

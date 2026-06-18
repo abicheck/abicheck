@@ -57,6 +57,51 @@ abicheck implements, and why runtime testing (approach 2) still belongs in your
 release pipeline *next to* static checking: it is the only approach that observes
 behaviour.
 
+### 1a. The hidden prerequisite of header/AST diffing: the compile context
+
+Approach 5 (L2 header/AST) has a subtlety the table glosses: a header is not a
+self-contained fact, it is *source code*. To turn it into an AST the frontend
+must parse it **the way your compiler does** — with the include roots it
+`#include`s, the C++ standard it assumes (`-std`), and the `-D` feature macros
+that gate which declarations even exist. Get that context wrong and L2 does not
+fail loudly; it produces a *different, plausible* AST. Two consequences matter
+for compatibility:
+
+- **L2 is what decides "public."** The public/internal boundary — and therefore
+  whether a removed symbol is a compatible internal cleanup or a breaking API
+  removal — comes from the header AST. If L2 cannot be built, the scan only has
+  the binary, so it must treat the export table as the surface and (correctly, by
+  that narrower rule) flags *internal* removals as BREAKING. This "scope
+  divergence" is a missing-context artifact, not a real break: with L2 those
+  demote to COMPATIBLE. A field run of oneTBB / oneDNN / oneDAL hit exactly this —
+  `dnnl::impl::*` and bundled `DGETRF`/`SGETRF` removals reported as breaking
+  purely because the headers could not be parsed.
+- **The wrong context manufactures phantom diffs.** Parse at `-std=c++17` a
+  library built at `-std=c++20` and concepts, `char8_t`, `noexcept`-in-type, and
+  inline-namespace versions shift — L2 shows add/remove churn that no consumer
+  would ever observe. Likewise a mismatched `-D` (a feature macro, or
+  libstdc++'s `_GLIBCXX_USE_CXX11_ABI` dual-ABI switch) changes which
+  declarations are visible at all.
+
+This is why the **source of the compile context matters as much as the frontend
+choice**, and why the two frontends are only interchangeable when fed the same
+context:
+
+| Scan source | What it supplies to L2 | What it cannot supply alone |
+|---|---|---|
+| **castxml** (`--ast-frontend castxml`) | runs your real `g++`/MSVC, so system includes + predefined macros + the compiler's default dialect come for free | your project's own `-I` roots, `-D`, and the exact `-std` (still pass these) |
+| **clang** (`--ast-frontend clang`) | the alternative for clang-only hosts; now auto-probes the host GNU compiler for system includes so libstdc++ resolves like castxml | same as above — auto-detection is system-headers only |
+| **`-I` / `--gcc-options` (CLI)** | per-run include roots, `-std`, `-D` | reproducibility — a human/CI must retype them each run |
+| **`.abicheck.yml` `compile:` block** | the project's stable, reviewed include roots / `std` / `defines` | per-invocation cross-compile specifics (those stay CLI) |
+| **compile database** (`compile_commands.json`) | the authoritative per-TU `-I`/`-std`/`-D` the library was actually built with | *(threading it into L2 is a planned step; today it feeds L3–L5)* |
+
+The practical takeaway for [`abicheck scan`](../../user-guide/scan-levels.md#compile-context-for-header-parsing-l2):
+auto-detection makes the common case (find the C++ stdlib) work with no flags,
+but the **project-specific** context — include roots, dialect, feature macros —
+must come from a compile DB, the config `compile:` block, or explicit flags, or
+L2 (and the public/internal scoping that depends on it) is only as good as the
+context it was handed.
+
 ---
 
 ## 2. What it takes to find each break family
