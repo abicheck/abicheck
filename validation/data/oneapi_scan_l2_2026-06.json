@@ -6,25 +6,36 @@
   "pairs": [
     {
       "lib": "oneTBB",
-      "old": "2021.12.0", "new": "2021.13.0",
-      "header": "oneapi/tbb.h", "include_root": "include",
+      "old": "2021.12.0",
+      "new": "2021.13.0",
+      "header": "include/oneapi/tbb.h",
+      "include_root": "include",
       "cpp_retry_fired": true,
       "binary_tier_verdict": "COMPATIBLE_WITH_RISK",
       "l2_verdict": "COMPATIBLE_WITH_RISK",
       "l2_changes": 2,
-      "l2_kinds": {"symbol_version_required_added": 1, "symbol_version_required_added_compat": 1},
+      "l2_kinds": {
+        "symbol_version_required_added": 1,
+        "symbol_version_required_added_compat": 1
+      },
       "interpretation": "Consistent across tiers; confirms the L2 pipeline end-to-end. tbb.h is a pure-#include umbrella header -> exercised the #444 C->C++ retry."
     },
     {
       "lib": "oneDNN",
-      "old": "3.11", "new": "3.12",
-      "header": "oneapi/dnnl/dnnl.hpp", "include_root": "include",
+      "old": "3.11",
+      "new": "3.12",
+      "header": "include/oneapi/dnnl/dnnl.hpp",
+      "include_root": "include",
       "cpp_retry_fired": false,
       "binary_tier_verdict": "BREAKING",
       "binary_tier_breaking_findings": 6,
       "l2_verdict": "BREAKING",
       "l2_changes": 7,
-      "l2_kinds": {"symbol_leaked_from_dependency_changed": 5, "serialization_tag_changed": 1, "soname_bump_recommended": 1},
+      "l2_kinds": {
+        "symbol_leaked_from_dependency_changed": 5,
+        "serialization_tag_changed": 1,
+        "soname_bump_recommended": 1
+      },
       "l2_demoted_to_risk": [
         "std::__do_uninit_copy (_ZSt16__do_uninit_copy...)",
         "std::__cxx11 _Hashtable (_ZNSt10_Hashtable...)",
@@ -35,16 +46,23 @@
     },
     {
       "lib": "oneDAL",
-      "old": "2025.0.0", "new": "2025.1.0",
+      "old": "2025.0.0",
+      "new": "2025.1.0",
       "binary": "libonedal_core.so.3",
-      "header": "daal.h", "include_root": "include/dal",
+      "header": "include/daal.h",
+      "include_root": "include/dal",
       "cpp_retry_fired": true,
       "binary_tier_verdict": "BREAKING",
       "binary_tier_breaking_findings": 164,
       "binary_tier_raw_removed_exports": 212,
       "l2_verdict": "NO_CHANGE",
       "l2_changes": 0,
-      "l2_public_surface": {"functions": 25595, "types": 1189, "enums": 448, "typedefs": 599},
+      "l2_public_surface": {
+        "functions": 25595,
+        "types": 1189,
+        "enums": 448,
+        "typedefs": 599
+      },
       "interpretation": "Textbook scope-divergence demotion: binary-strict BREAKING (212 removed bundled BLAS/LAPACK exports: DGETRF/SGETRF/...) -> L2 public-header scope NO_CHANGE. The full public DAAL API (25,595 functions) is byte-identical between 2025.0 and 2025.1, confirming the removed symbols are bundled-MKL internals outside oneDAL's public surface. daal.h is a pure-#include umbrella -> exercised the #444 C->C++ retry."
     }
   ]

@@ -134,11 +134,15 @@ The binary-tier driver does not cover L2; reproduce `oneapi_scan_l2_2026-06.json
 with `abicheck compare` directly. Fetch the **pinned** conda-forge artifacts
 (runtime `.so` + the header package), extract, then run per pair:
 
-| Lib | Runtime pkg (both sides) | Header pkg | Header / `-I` root |
-|-----|--------------------------|-----------|---------------------|
-| oneTBB | `tbb-2021.12.0-h84d6215_4`, `tbb-2021.13.0-hb700be7_6` | `tbb-devel-*_4` / `*_6` | `oneapi/tbb.h` / `include` |
-| oneDNN | `onednn-3.11-tbb_h2a4fcdb_0`, `onednn-3.12-tbb_h2a4fcdb_0` | (headers bundled in runtime pkg) | `oneapi/dnnl/dnnl.hpp` / `include` |
-| oneDAL | `dal-2025.0.0-h9289deb_961`, `dal-2025.1.0-h9289deb_124` | `dal-include-2025.0.0-hf2ce2f3_961` / `*-2025.1.0-hf2ce2f3_124` | `daal.h` / `include/dal` |
+| Lib | Runtime pkg (both sides) | Header pkg | `<HEADER>` (from extract root) | `<INCLUDE_ROOT>` |
+|-----|--------------------------|-----------|--------------------------------|------------------|
+| oneTBB | `tbb-2021.12.0-h84d6215_4`, `tbb-2021.13.0-hb700be7_6` | `tbb-devel-*_4` / `*_6` | `include/oneapi/tbb.h` | `include` |
+| oneDNN | `onednn-3.11-tbb_h2a4fcdb_0`, `onednn-3.12-tbb_h2a4fcdb_0` | (headers bundled in runtime pkg) | `include/oneapi/dnnl/dnnl.hpp` | `include` |
+| oneDAL | `dal-2025.0.0-h9289deb_961`, `dal-2025.1.0-h9289deb_124` | `dal-include-2025.0.0-hf2ce2f3_961` / `*-2025.1.0-hf2ce2f3_124` | `include/daal.h` | `include/dal` |
+
+`<HEADER>` and `<INCLUDE_ROOT>` are both **extract-root-relative**, so the command
+substitutes them directly (note oneDAL's `daal.h` sits one level *above* its `-I`
+root — `include/daal.h` with `-I include/dal` — and is reproduced verbatim):
 
 ```bash
 abicheck compare <old>/lib/<libNAME.so.X.Y> <new>/lib/<libNAME.so.X.Z> \

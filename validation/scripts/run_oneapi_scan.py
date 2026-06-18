@@ -233,7 +233,12 @@ def run() -> list[dict]:
             OSError,
         ) as exc:
             row["status"] = "DUMP_FAILED"
-            row["detail"] = (getattr(exc, "stderr", None) or str(exc))[-300:]
+            # TimeoutExpired.stderr stays bytes even with text=True; coerce so the
+            # row stays JSON-serializable.
+            detail = getattr(exc, "stderr", None)
+            if isinstance(detail, bytes):
+                detail = detail.decode("utf-8", "replace")
+            row["detail"] = (detail or str(exc))[-300:]
             results.append(row)
             continue
         out = WORK / f"{spec['lib']}_{spec['old']}_{spec['new']}_s0.json"
