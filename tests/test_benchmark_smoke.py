@@ -14,10 +14,21 @@ from unittest.mock import patch
 SCRIPTS_DIR = Path(__file__).parent.parent / "scripts"
 
 
+_BENCHMARK_MOD = None
+
+
 def _load_benchmark():
-    """Dynamically import scripts/benchmark_comparison.py."""
+    """Dynamically import scripts/benchmark_comparison.py (memoized).
+
+    The script is import-only for these smoke tests — every test reads module
+    attributes or uses context-managed ``patch.object`` (auto-reverted), so a
+    single shared load is correct. Re-executing the module on every test was a
+    pure-overhead hotspot (~0.3s × 19 ≈ 6s); load it once and cache it.
+    """
+    global _BENCHMARK_MOD
+    if _BENCHMARK_MOD is not None:
+        return _BENCHMARK_MOD
     mod_name = "benchmark_comparison"
-    # Unload any cached version to ensure a fresh import
     sys.modules.pop(mod_name, None)
     spec = importlib.util.spec_from_file_location(
         mod_name,
@@ -27,6 +38,7 @@ def _load_benchmark():
     # Must register in sys.modules BEFORE exec so @dataclass can resolve the module
     sys.modules[mod_name] = mod
     spec.loader.exec_module(mod)
+    _BENCHMARK_MOD = mod
     return mod
 
 

@@ -88,17 +88,19 @@ jobs:
         # 95% minimum-coverage floor is enforced on it. macOS/Windows skip the
         # Linux-only ELF/DWARF parsing tests, structurally lowering coverage,
         # so they run the same suite without the fail-under gate.
+        # --durations=25 surfaces the slowest tests in the CI log on every run
+        # so timing regressions stay visible (test-time hygiene).
         if: runner.os == 'Linux'
         run: |
-          pytest tests/ -v --tb=short -m "not integration and not libabigail and not abicc and not slow" -n auto --dist worksteal --cov=abicheck --cov-report=term-missing --cov-report=xml --cov-fail-under=95
+          pytest tests/ -v --tb=short -m "not integration and not libabigail and not abicc and not slow" -n auto --dist worksteal --durations=25 --cov=abicheck --cov-report=term-missing --cov-report=xml --cov-fail-under=95
       - name: Run tests with coverage (macOS — report only, platform tests skip)
         if: runner.os == 'macOS'
         run: |
-          pytest tests/ -v --tb=short -m "not integration and not libabigail and not abicc and not slow" -n auto --dist worksteal --cov=abicheck --cov-report=term-missing --cov-report=xml
+          pytest tests/ -v --tb=short -m "not integration and not libabigail and not abicc and not slow" -n auto --dist worksteal --durations=25 --cov=abicheck --cov-report=term-missing --cov-report=xml
       - name: Run tests (Windows — parallel, no coverage)
         if: runner.os == 'Windows'
         run: |
-          pytest tests/ -v --tb=short -m "not integration and not libabigail and not abicc and not slow" -n auto --dist worksteal
+          pytest tests/ -v --tb=short -m "not integration and not libabigail and not abicc and not slow" -n auto --dist worksteal --durations=25
       - name: Run slow tests (hypothesis / property-based)
         if: matrix.python-version == '3.13' && matrix.os == 'ubuntu-latest'
         run: |

@@ -48,38 +48,37 @@ def _require_linux_elf(path: Path) -> Path:
 
 
 class TestCheckSingleEnv:
-    @pytest.fixture
-    def real_binary(self):
+    # ``check_single_env`` follows the binary's whole dependency chain (~0.6s on
+    # real libc), and every test below only asserts a different attribute of the
+    # same result. Compute it once per class instead of re-running the analysis
+    # 7× (~4s → ~0.6s). The result is read-only, so sharing it is safe.
+    @staticmethod
+    @pytest.fixture(scope="class")
+    def result():
         if sys.platform != "linux":
             pytest.skip("Full-stack dependency tests require Linux")
         candidates = [Path("/usr/bin/python3"), Path("/usr/bin/ls"), Path("/bin/ls")]
         for p in candidates:
             if p.exists():
-                return _require_linux_elf(p)
+                return check_single_env(_require_linux_elf(p))
         pytest.skip("No suitable ELF binary found")
 
-    def test_loadability_pass(self, real_binary):
-        result = check_single_env(real_binary)
+    def test_loadability_pass(self, result):
         assert result.loadability == StackVerdict.PASS
 
-    def test_abi_risk_pass(self, real_binary):
-        result = check_single_env(real_binary)
+    def test_abi_risk_pass(self, result):
         assert result.abi_risk == StackVerdict.PASS
 
-    def test_risk_score_low(self, real_binary):
-        result = check_single_env(real_binary)
+    def test_risk_score_low(self, result):
         assert result.risk_score == "low"
 
-    def test_no_missing_symbols(self, real_binary):
-        result = check_single_env(real_binary)
+    def test_no_missing_symbols(self, result):
         assert len(result.missing_symbols) == 0
 
-    def test_graph_populated(self, real_binary):
-        result = check_single_env(real_binary)
+    def test_graph_populated(self, result):
         assert result.baseline_graph.node_count >= 2  # At least root + libc
 
-    def test_bindings_populated(self, real_binary):
-        result = check_single_env(real_binary)
+    def test_bindings_populated(self, result):
         assert len(result.bindings_baseline) > 0
 
     def test_nonexistent_binary(self, tmp_path):

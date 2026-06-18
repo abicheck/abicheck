@@ -55,6 +55,28 @@ def real_binary():
 
 
 class TestDepsCommand:
+    # The `deps --format json` invocation follows the binary's whole dependency
+    # chain (~0.6s). Three tests below asserted on the *same* JSON output, so
+    # run it once per class and share the parsed payload instead of paying the
+    # resolution cost 3× (~1.8s → ~0.6s).
+    @staticmethod
+    @pytest.fixture(scope="class")
+    def deps_json():
+        # Class-scoped, so it can't take the function-scoped `real_binary`
+        # fixture — resolve the binary inline (same logic as `real_binary`).
+        if sys.platform != "linux":
+            pytest.skip("Full-stack dependency tests require Linux")
+        binary = None
+        for p in (Path("/usr/bin/python3"), Path("/usr/bin/ls"), Path("/bin/ls")):
+            if p.exists():
+                binary = _require_linux_elf(p)
+                break
+        if binary is None:
+            pytest.skip("No suitable ELF binary found")
+        result = CliRunner().invoke(main, ["deps", str(binary), "--format", "json"])
+        assert result.exit_code == 0
+        return json.loads(result.output)
+
     def test_deps_markdown(self, runner, real_binary):
         result = runner.invoke(main, ["deps", str(real_binary)])
         assert result.exit_code == 0
@@ -62,13 +84,10 @@ class TestDepsCommand:
         assert "Dependency Tree" in result.output
         assert "Symbol Binding Summary" in result.output
 
-    def test_deps_json(self, runner, real_binary):
-        result = runner.invoke(main, ["deps", str(real_binary), "--format", "json"])
-        assert result.exit_code == 0
-        data = json.loads(result.output)
-        assert "root_binary" in data
-        assert "verdict" in data
-        assert data["verdict"]["loadability"] == "pass"
+    def test_deps_json(self, deps_json):
+        assert "root_binary" in deps_json
+        assert "verdict" in deps_json
+        assert deps_json["verdict"]["loadability"] == "pass"
 
     def test_deps_output_file(self, runner, real_binary, tmp_path):
         outfile = tmp_path / "deps.json"
@@ -84,20 +103,14 @@ class TestDepsCommand:
         result = runner.invoke(main, ["deps", str(tmp_path / "nonexistent")])
         assert result.exit_code != 0  # Click raises error for non-existent path
 
-    def test_deps_contains_libc(self, runner, real_binary):
-        result = runner.invoke(main, ["deps", str(real_binary), "--format", "json"])
-        assert result.exit_code == 0
-        data = json.loads(result.output)
-        sonames = [n["soname"] for n in data["baseline_graph"]["nodes"]]
+    def test_deps_contains_libc(self, deps_json):
+        sonames = [n["soname"] for n in deps_json["baseline_graph"]["nodes"]]
         assert "libc.so.6" in sonames
 
-    def test_deps_binding_summary(self, runner, real_binary):
-        result = runner.invoke(main, ["deps", str(real_binary), "--format", "json"])
-        assert result.exit_code == 0
-        data = json.loads(result.output)
-        assert "bindings_summary" in data
-        assert "resolved_ok" in data["bindings_summary"]
-        assert data["bindings_summary"]["resolved_ok"] > 0
+    def test_deps_binding_summary(self, deps_json):
+        assert "bindings_summary" in deps_json
+        assert "resolved_ok" in deps_json["bindings_summary"]
+        assert deps_json["bindings_summary"]["resolved_ok"] > 0
 
 
 class TestStackCheckCommand:

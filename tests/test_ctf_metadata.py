@@ -532,10 +532,13 @@ class TestDecompression:
             str_off=0,
             str_len=0,
         )
-        # Build a zlib-compressed blob of zeros that decompresses to ~300 MiB.
-        # Zeros compress extremely well, so the compressed payload is tiny.
-        big_data = b"\x00" * (300 * 1024 * 1024)
-        compressed = zlib.compress(big_data)
+        # Build a zlib-compressed blob of zeros that decompresses to just over
+        # the 256 MiB guard. The decompressor caps output at the limit and only
+        # needs to see unconsumed_tail, so 257 MiB is enough — no need to
+        # allocate/compress 300 MiB. level=1 keeps the (CPU-bound) compression
+        # of zeros fast; default level 6 here was a multi-second hotspot.
+        big_data = b"\x00" * (257 * 1024 * 1024)
+        compressed = zlib.compress(big_data, 1)
         preamble = struct.pack("<HBB", CTF_MAGIC, CTF_VERSION_3, CTF_F_COMPRESS)
         data = preamble + compressed
         with pytest.raises(ValueError, match="exceeds 256 MiB limit"):
