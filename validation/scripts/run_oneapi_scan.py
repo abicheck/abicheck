@@ -14,18 +14,25 @@
 # limitations under the License.
 """Binary-tier oneAPI scan driver (validation/oneapi-scan-2026-06.md).
 
-Fetches each planned ``(lib, pair)`` from conda-forge / the Intel channel, dumps
-the old side and runs ``abicheck scan --source-method s0``, recording verdict /
-coverage / DWARF presence / SONAME / wall time to
+For each planned ``(lib, pair)`` it downloads the **pinned** conda-forge / Intel
+artifacts, dumps the old side and runs ``abicheck scan --source-method s0``,
+recording verdict / coverage / DWARF presence / SONAME / wall time to
 ``data/oneapi_scan_2026-06.json``. Network + ``abicheck`` on PATH required; this
 is a slow real-world lane, not a unit test.
+
+Reproducibility: each pair pins the exact ``old_file``/``new_file`` build
+basename (like ``data/manifest.json``), so a rebuild publishing a higher build
+number for the same version cannot silently change which artifacts are scanned.
 """
 
 from __future__ import annotations
 
+import atexit
 import glob
 import json
 import pathlib
+import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -35,102 +42,99 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import conda_harness as ch  # noqa: E402
 
 # A fresh per-run temp dir (portable; no /tmp hardcode or concurrent-run
-# collision). Downloaded artifacts and per-pair scan JSONs are scratch; only the
-# aggregated results land in data/.
+# collision), cleaned up at exit. Downloaded artifacts and per-pair scan JSONs
+# are scratch; only the aggregated results land in data/.
 WORK = pathlib.Path(tempfile.mkdtemp(prefix="oneapi_run_"))
+atexit.register(shutil.rmtree, WORK, ignore_errors=True)
+SUBDIR = "linux-64"
 
-# (lib, pkg, channel, old, new, so_glob, expectation, note)
+# Pinned exact build basenames per pair (reproducibility — see module docstring).
 PAIRS = [
-    (
-        "oneTBB",
-        "tbb",
-        "conda-forge",
-        "2021.12.0",
-        "2021.13.0",
-        "libtbb.so.12*",
-        "COMPATIBLE",
-        "minor, same SONAME",
-    ),
-    (
-        "oneTBB",
-        "tbb",
-        "conda-forge",
-        "2021.13.0",
-        "2023.0.0",
-        "libtbb.so.12*",
-        "COMPATIBLE",
-        "wide gap, internal symbol removals (scope test)",
-    ),
-    (
-        "oneDNN",
-        "onednn",
-        "conda-forge",
-        "3.11",
-        "3.12",
-        "libdnnl.so*",
-        "COMPATIBLE",
-        "minor, libdnnl.so.3",
-    ),
-    (
-        "oneDNN",
-        "onednn",
-        "conda-forge",
-        "2.7.2",
-        "3.0",
-        "libdnnl.so*",
-        "BREAKING",
-        "SONAME .so.2 -> .so.3",
-    ),
-    (
-        "oneDAL",
-        "dal",
-        "conda-forge",
-        "2025.0.0",
-        "2025.1.0",
-        "libonedal_core.so*",
-        "COMPATIBLE",
-        "minor, same SONAME",
-    ),
-    (
-        "oneDAL",
-        "dal",
-        "conda-forge",
-        "2024.7.0",
-        "2025.0.0",
-        "libonedal_core.so*",
-        "BREAKING",
-        "SONAME .so.2 -> .so.3",
-    ),
-    (
-        "oneCCL",
-        "oneccl-devel",
-        "intel",
-        "2021.12.0",
-        "2021.13.0",
-        "libccl.so*",
-        "COMPATIBLE",
-        "minor, libccl.so.1",
-    ),
+    {
+        "lib": "oneTBB",
+        "pkg": "tbb",
+        "channel": "conda-forge",
+        "old": "2021.12.0",
+        "new": "2021.13.0",
+        "so_glob": "libtbb.so.12*",
+        "expectation": "COMPATIBLE",
+        "note": "minor, same SONAME",
+        "old_file": "tbb-2021.12.0-h84d6215_4.conda",
+        "new_file": "tbb-2021.13.0-hb700be7_6.conda",
+    },
+    {
+        "lib": "oneTBB",
+        "pkg": "tbb",
+        "channel": "conda-forge",
+        "old": "2021.13.0",
+        "new": "2023.0.0",
+        "so_glob": "libtbb.so.12*",
+        "expectation": "COMPATIBLE",
+        "note": "wide gap, internal removals (scope test)",
+        "old_file": "tbb-2021.13.0-hb700be7_6.conda",
+        "new_file": "tbb-2023.0.0-hab88423_2.conda",
+    },
+    {
+        "lib": "oneDNN",
+        "pkg": "onednn",
+        "channel": "conda-forge",
+        "old": "3.11",
+        "new": "3.12",
+        "so_glob": "libdnnl.so*",
+        "expectation": "COMPATIBLE",
+        "note": "minor, libdnnl.so.3 (tbb variant)",
+        "old_file": "onednn-3.11-tbb_h2a4fcdb_0.conda",
+        "new_file": "onednn-3.12-tbb_h2a4fcdb_0.conda",
+    },
+    {
+        "lib": "oneDNN",
+        "pkg": "onednn",
+        "channel": "conda-forge",
+        "old": "2.7.2",
+        "new": "3.0",
+        "so_glob": "libdnnl.so*",
+        "expectation": "BREAKING",
+        "note": "SONAME .so.2 -> .so.3 (tbb variant)",
+        "old_file": "onednn-2.7.2-tbb_hb007830_0.conda",
+        "new_file": "onednn-3.0-tbb_h7022a57_0.conda",
+    },
+    {
+        "lib": "oneDAL",
+        "pkg": "dal",
+        "channel": "conda-forge",
+        "old": "2025.0.0",
+        "new": "2025.1.0",
+        "so_glob": "libonedal_core.so*",
+        "expectation": "COMPATIBLE",
+        "note": "minor, same SONAME",
+        "old_file": "dal-2025.0.0-h9289deb_961.conda",
+        "new_file": "dal-2025.1.0-h9289deb_124.conda",
+    },
+    {
+        "lib": "oneDAL",
+        "pkg": "dal",
+        "channel": "conda-forge",
+        "old": "2024.7.0",
+        "new": "2025.0.0",
+        "so_glob": "libonedal_core.so*",
+        "expectation": "BREAKING",
+        "note": "SONAME .so.2 -> .so.3",
+        "old_file": "dal-2024.7.0-h58b1d36_15.conda",
+        "new_file": "dal-2025.0.0-h9289deb_961.conda",
+    },
+    {
+        "lib": "oneCCL",
+        "pkg": "oneccl-devel",
+        "channel": "intel",
+        "old": "2021.12.0",
+        "new": "2021.13.0",
+        "so_glob": "libccl.so*",
+        "expectation": "COMPATIBLE",
+        "note": "minor, libccl.so.1",
+        "old_file": "oneccl-devel-2021.12.0-intel_309.tar.bz2",
+        "new_file": "oneccl-devel-2021.13.0-intel_299.tar.bz2",
+    },
 ]
-
-
-def variant_ok(pkg: str, basename: str) -> bool:
-    """Hold oneDNN's threading variant constant (compare like-for-like)."""
-    return pkg != "onednn" or "tbb_" in basename
-
-
-def pick(api: dict, version: str, pkg: str) -> str | None:
-    """Newest linux-64 build basename for *version* (variant-filtered)."""
-    cands = [
-        f["basename"]
-        for f in api.get("files", [])
-        if f.get("version") == version
-        and f.get("attrs", {}).get("subdir") == "linux-64"
-        and variant_ok(pkg, f["basename"])
-    ]
-    if not cands:
-        return None
-    return max(cands, key=lambda b: (ch.build_number(b), b))
 
 
 def real_so(extract_dir: pathlib.Path, so_glob: str) -> str | None:
@@ -144,43 +148,63 @@ def real_so(extract_dir: pathlib.Path, so_glob: str) -> str | None:
     return matches[0] if matches else None
 
 
+def dt_soname(so_path: str) -> str:
+    """The ELF ``DT_SONAME`` (e.g. ``libtbb.so.12``), or the filename if absent.
+
+    The on-disk file is versioned more deeply than its SONAME
+    (``libtbb.so.12.13``), so the SONAME — not the path — is what distinguishes a
+    stable-SONAME minor from a real SONAME bump.
+    """
+    out = subprocess.run(
+        ["readelf", "-d", so_path], capture_output=True, text=True
+    ).stdout
+    m = re.search(r"\(SONAME\).*\[(.*?)\]", out)
+    return m.group(1) if m else pathlib.Path(so_path).name
+
+
 def run() -> list[dict]:
-    WORK.mkdir(exist_ok=True)
     apis: dict[tuple[str, str], dict] = {}
     results: list[dict] = []
-    for lib, pkg, chan, ov, nv, so_glob, exp, note in PAIRS:
+    for spec in PAIRS:
+        pkg, chan = spec["pkg"], spec["channel"]
         api = apis.setdefault((pkg, chan), ch.query_conda(pkg, channel=chan))
         row = {
-            "lib": lib,
-            "pkg": pkg,
-            "channel": chan,
-            "old": ov,
-            "new": nv,
-            "expectation": exp,
-            "note": note,
+            k: spec[k]
+            for k in (
+                "lib",
+                "pkg",
+                "channel",
+                "old",
+                "new",
+                "expectation",
+                "note",
+                "old_file",
+                "new_file",
+            )
         }
-        ob, nb = pick(api, ov, pkg), pick(api, nv, pkg)
-        if not ob or not nb:
-            row["status"] = "UNAVAILABLE"
-            results.append(row)
-            continue
-        row["old_file"] = pathlib.Path(ob).name
-        row["new_file"] = pathlib.Path(nb).name
-        old_dir, new_dir = WORK / f"{lib}_{ov}", WORK / f"{lib}_{nv}"
+        ob = f"{SUBDIR}/{spec['old_file']}"
+        nb = f"{SUBDIR}/{spec['new_file']}"
+        old_dir = WORK / f"{spec['lib']}_{spec['old']}"
+        new_dir = WORK / f"{spec['lib']}_{spec['new']}"
         for bn, dd in [(ob, old_dir), (nb, new_dir)]:
             local = WORK / pathlib.Path(bn).name
             ch.fetch_file(ch.conda_download_url(bn, api, channel=chan), local)
             ch.extract_sos(local, dd)
-        old_so, new_so = real_so(old_dir, so_glob), real_so(new_dir, so_glob)
+        old_so = real_so(old_dir, spec["so_glob"])
+        new_so = real_so(new_dir, spec["so_glob"])
         if not old_so or not new_so:
             row["status"] = "NO_SO"
             results.append(row)
             continue
-        row["soname_old"] = pathlib.Path(old_so).name
-        row["soname_new"] = pathlib.Path(new_so).name
+        # SONAME from ELF (DT_SONAME) distinguishes stable-SONAME minors from
+        # bumps; sofile_* keeps the deeper on-disk filename for provenance.
+        row["soname_old"] = dt_soname(old_so)
+        row["soname_new"] = dt_soname(new_so)
+        row["sofile_old"] = pathlib.Path(old_so).name
+        row["sofile_new"] = pathlib.Path(new_so).name
         row["dwarf_old"] = ch.has_dwarf(old_so)
         row["dwarf_new"] = ch.has_dwarf(new_so)
-        base = WORK / f"{lib}_{ov}.abi.json"
+        base = WORK / f"{spec['lib']}_{spec['old']}.abi.json"
         try:
             subprocess.run(
                 ["abicheck", "dump", old_so, "-o", str(base)],
@@ -193,7 +217,7 @@ def run() -> list[dict]:
             row["detail"] = (exc.stderr or "")[-300:]
             results.append(row)
             continue
-        out = WORK / f"{lib}_{ov}_{nv}_s0.json"
+        out = WORK / f"{spec['lib']}_{spec['old']}_{spec['new']}_s0.json"
         out.unlink(missing_ok=True)  # never parse a stale report from a prior run
         start = time.monotonic()
         proc = subprocess.run(
@@ -217,14 +241,19 @@ def run() -> list[dict]:
         row["wall_s"] = round(time.monotonic() - start, 2)
         row["exit"] = proc.returncode
         # A BREAKING scan exits non-zero (2/4) but still writes JSON; gate on a
-        # freshly-written report, not the exit code, so a real failure (no file)
-        # is recorded as such instead of silently parsing stale data.
+        # freshly-written report, not the exit code.
         if not out.exists():
             row["status"] = "SCAN_FAILED"
             row["detail"] = proc.stderr[-300:]
             results.append(row)
             continue
-        scan = json.loads(out.read_text())
+        try:
+            scan = json.loads(out.read_text())
+        except (OSError, json.JSONDecodeError) as exc:
+            row["status"] = "SCAN_FAILED"
+            row["detail"] = (proc.stderr or str(exc))[-300:]
+            results.append(row)
+            continue
         cov = {r["layer"]: r["status"] for r in scan.get("coverage", [])}
         row["verdict"] = scan.get("verdict")
         row["L0"] = cov.get("L0_binary")
@@ -246,6 +275,7 @@ if __name__ == "__main__":
     for r in rows:
         print(
             f"{r['status']:11} {r['lib']:7} {r['old']}->{r['new']} "
-            f"verdict={r.get('verdict')} wall={r.get('wall_s')}s"
+            f"verdict={r.get('verdict')} soname={r.get('soname_old')}->"
+            f"{r.get('soname_new')} wall={r.get('wall_s')}s"
         )
     print("wrote", dest)
