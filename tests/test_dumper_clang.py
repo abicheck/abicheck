@@ -1776,3 +1776,23 @@ def test_build_clang_command_injects_isystem(tmp_path: Path) -> None:
     assert cmd[cmd.index("/usr/include") - 1] == "-isystem"
     # The user's -I still comes before the first -isystem (explicit wins).
     assert cmd.index("-I") < i
+
+
+def test_build_clang_command_probed_isystem_after_user_flags(tmp_path: Path) -> None:
+    # Auto-probed -isystem must follow the user's pass-through flags so a
+    # user-supplied SDK -isystem keeps higher search priority (Codex review).
+    agg = tmp_path / "agg.hpp"
+    agg.write_text("")
+    cmd = _build_clang_header_command(
+        "clang++", "gnu", [], agg,
+        force_cpp=True,
+        gcc_options="-isystem /sdk/include",
+        gcc_option_tokens=("-isystem", "/sdk2"),
+        system_includes=("/usr/include/c++/13",),
+    )
+    user_sdk = cmd.index("/sdk/include")
+    user_sdk2 = cmd.index("/sdk2")
+    probed = cmd.index("/usr/include/c++/13")
+    # Both user-supplied system dirs are searched before the probed fallback.
+    assert user_sdk < probed
+    assert user_sdk2 < probed

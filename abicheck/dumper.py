@@ -169,14 +169,14 @@ def _build_clang_header_command(
     ``system_includes`` are host-compiler-probed system dirs (see
     :func:`_probe_gnu_system_includes`) injected as ``-isystem`` so clang finds
     the same libstdc++/libc headers castxml gets via ``--castxml-cc-gnu`` — the
-    castxml↔clang capability-parity fix. They follow the user's ``-I`` (so an
-    explicit include still wins) and are skipped under ``-nostdinc``.
+    castxml↔clang capability-parity fix. They are emitted **last** (after the
+    user's ``-I`` *and* the pass-through ``--gcc-options``/``--gcc-option``) so
+    auto-detection stays a genuine fallback: a user-supplied ``-isystem`` for a
+    cross/hermetic SDK is searched first and wins. Skipped under ``-nostdinc``.
     """
     cmd = [cc_bin]
     for inc in extra_includes:
         cmd += ["-I", str(inc)]
-    for sysinc in system_includes:
-        cmd += ["-isystem", sysinc]
     if sysroot:
         cmd += [f"--sysroot={sysroot.as_posix()}"]
     if nostdinc:
@@ -185,6 +185,11 @@ def _build_clang_header_command(
         cmd += shlex.split(gcc_options, posix=os.name != "nt")
     # Repeatable --gcc-option: one literal argument each (no shlex split).
     cmd += list(gcc_option_tokens)
+    # Auto-probed host system dirs go *after* the user's pass-through flags, so a
+    # user-supplied -isystem (cross/hermetic SDK) keeps higher search priority
+    # (Codex review). Auto-detection is a fallback, never an override.
+    for sysinc in system_includes:
+        cmd += ["-isystem", sysinc]
     explicit_std = _has_explicit_std(gcc_options, gcc_option_tokens)
     if not force_cpp:
         if not explicit_std:
