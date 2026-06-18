@@ -1796,3 +1796,54 @@ def test_build_clang_command_probed_isystem_after_user_flags(tmp_path: Path) -> 
     # Both user-supplied system dirs are searched before the probed fallback.
     assert user_sdk < probed
     assert user_sdk2 < probed
+
+
+@pytest.mark.parametrize(
+    "gcc_options,gcc_option_tokens",
+    [
+        ("-nostdinc", ()),
+        ("-nostdinc++", ()),
+        ("--sysroot=/sdk", ()),
+        ("-isysroot /sdk", ()),
+        (None, ("-nostdinc",)),
+        (None, ("--sysroot=/sdk",)),
+        (None, ("-nostdinc++",)),
+    ],
+)
+def test_resolve_clang_system_includes_respects_passthrough(
+    monkeypatch: pytest.MonkeyPatch, gcc_options, gcc_option_tokens
+) -> None:
+    # Hermetic/cross flags supplied via --gcc-options/--gcc-option must suppress
+    # the host probe too, not just the structured nostdinc/sysroot (Codex review).
+    from abicheck import dumper_sysinc
+
+    monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "1")
+    monkeypatch.setattr(
+        dumper_sysinc, "_resolve_probe_compiler", lambda *a, **k: "g++"
+    )
+    monkeypatch.setattr(
+        dumper_sysinc, "_probe_gnu_system_includes", lambda *a, **k: ["/usr/x"]
+    )
+    assert _resolve_clang_system_includes(
+        "c++", gcc_path=None, gcc_prefix=None, sysroot=None, nostdinc=False,
+        force_cpp=True, gcc_options=gcc_options, gcc_option_tokens=gcc_option_tokens,
+    ) == ()
+
+
+def test_resolve_clang_system_includes_probes_without_passthrough(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A benign --gcc-options that doesn't isolate the parse still probes.
+    from abicheck import dumper_sysinc
+
+    monkeypatch.setenv("ABICHECK_AUTO_SYSTEM_INCLUDES", "1")
+    monkeypatch.setattr(
+        dumper_sysinc, "_resolve_probe_compiler", lambda *a, **k: "g++"
+    )
+    monkeypatch.setattr(
+        dumper_sysinc, "_probe_gnu_system_includes", lambda *a, **k: ["/usr/x"]
+    )
+    assert _resolve_clang_system_includes(
+        "c++", gcc_path=None, gcc_prefix=None, sysroot=None, nostdinc=False,
+        force_cpp=True, gcc_options="-DFOO=1", gcc_option_tokens=("-O2",),
+    ) == ("/usr/x",)

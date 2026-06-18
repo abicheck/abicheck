@@ -268,6 +268,8 @@ def _clang_header_dump(
         sysroot=sysroot,
         nostdinc=nostdinc,
         force_cpp=force_cpp,
+        gcc_options=gcc_options,
+        gcc_option_tokens=gcc_option_tokens,
     )
 
     key = _cache_key(

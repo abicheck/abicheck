@@ -129,6 +129,27 @@ def _resolve_probe_compiler(
     return None
 
 
+#: Pass-through flags that signal a hermetic/cross parse — if the caller already
+#: supplied any of these via ``--gcc-options``/``--gcc-option``, the host-compiler
+#: probe must stay out of the way (matching what the structured ``nostdinc`` /
+#: ``sysroot`` fields do). Substring match covers ``-nostdinc`` / ``-nostdinc++``
+#: and ``--sysroot`` / ``--sysroot=…`` / ``-isysroot``.
+_PROBE_SUPPRESSING_FLAGS = ("-nostdinc", "--sysroot", "-isysroot")
+
+
+def _pass_through_suppresses_probe(
+    gcc_options: str | None, gcc_option_tokens: tuple[str, ...]
+) -> bool:
+    """True if pass-through flags already isolate the parse (skip the probe)."""
+    if gcc_options and any(f in gcc_options for f in _PROBE_SUPPRESSING_FLAGS):
+        return True
+    return any(
+        tok.startswith(f)
+        for tok in gcc_option_tokens
+        for f in _PROBE_SUPPRESSING_FLAGS
+    )
+
+
 def _resolve_clang_system_includes(
     compiler: str,
     *,
@@ -137,15 +158,24 @@ def _resolve_clang_system_includes(
     sysroot: Path | None,
     nostdinc: bool,
     force_cpp: bool,
+    gcc_options: str | None = None,
+    gcc_option_tokens: tuple[str, ...] = (),
 ) -> tuple[str, ...]:
     """Resolve the ``-isystem`` dirs to inject for a clang header dump.
 
     Empty when auto-detection is disabled, ``-nostdinc`` was requested, an
-    explicit ``--sysroot`` already redirects the search, or no GNU compiler is
-    available to probe. Otherwise the host GNU driver's system include dirs
-    (castxml↔clang parity, see :func:`_probe_gnu_system_includes`).
+    explicit ``--sysroot`` already redirects the search, the caller passed an
+    equivalent hermetic/cross flag through ``--gcc-options``/``--gcc-option``
+    (``-nostdinc``/``-nostdinc++``/``--sysroot``/``-isysroot``), or no GNU
+    compiler is available to probe. Otherwise the host GNU driver's system
+    include dirs (castxml↔clang parity, see :func:`_probe_gnu_system_includes`).
     """
-    if nostdinc or sysroot is not None or not _auto_system_includes_enabled():
+    if (
+        nostdinc
+        or sysroot is not None
+        or not _auto_system_includes_enabled()
+        or _pass_through_suppresses_probe(gcc_options, gcc_option_tokens)
+    ):
         return ()
     probe_cc = _resolve_probe_compiler(compiler, gcc_path, gcc_prefix)
     if probe_cc is None:
