@@ -795,6 +795,98 @@ def test_l2_coverage_hint_mentions_clang_backend():
     assert "clang" in l2["detail"]
 
 
+@pytest.mark.parametrize(
+    "pack, expected",
+    [
+        (None, False),  # no embedded pack at all
+        ([{"layer": "L3_build", "status": "present"}], True),  # plain-dict row
+        ([{"layer": "L3_build", "status": "partial"}], True),  # partial still counts
+        ([{"layer": "L3_build", "status": "not_collected"}], False),  # ran, empty
+        ([{"layer": "L2_header", "status": "present"}], False),  # no L3 row at all
+    ],
+)
+def test_l3_collected_branches(pack, expected):
+    # Direct coverage of every _l3_collected branch: absent pack, L3 present/partial
+    # (collected), L3 not_collected, and a pack with no L3 row. Rows expose both the
+    # dataclass (.to_dict) and plain-dict shapes; cover the dataclass path too.
+    from abicheck.cli_scan import _l3_collected
+
+    class _Cov:
+        def __init__(self, d):
+            self._d = d
+
+        def to_dict(self):
+            return self._d
+
+    class _Pack:
+        def __init__(self, rows):
+            self.manifest = type("M", (), {"coverage": rows})()
+
+    class _Snap:
+        def __init__(self, p):
+            self.build_source = p
+
+    rows = None if pack is None else [_Cov(d) for d in pack]
+    assert _l3_collected(_Snap(_Pack(rows) if rows is not None else None)) is expected
+    # Same rows as plain dicts (no .to_dict) — exercises the dict branch.
+    if pack is not None:
+        assert _l3_collected(_Snap(_Pack(list(pack)))) is expected
+
+
+def test_level_implies_query_auto_enables_with_trusted_config(
+    runner, tmp_path, source_tree_with_compile_db, new_snap_compatible
+):
+    # ADR-037 D4: an explicit (trusted) --config defining build.query + a pinned
+    # deep level is consent to run the query — auto-enable it (advisory), no
+    # separate --allow-build-query needed. --build-info carries a real compile DB
+    # so the query string is never actually executed (build_info resolves first),
+    # keeping the test hermetic while still exercising the auto-enable path.
+    cfg = tmp_path / ".abicheck.yml"
+    cfg.write_text(
+        "build:\n  query: cmake -S . -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON\n",
+        encoding="utf-8",
+    )
+    res = runner.invoke(
+        main,
+        [
+            "scan",
+            "--binary",
+            str(new_snap_compatible),
+            "--build-info",
+            str(source_tree_with_compile_db),
+            "--config",
+            str(cfg),
+            "--source-method",
+            "s5",
+            "--audit",
+        ],
+    )
+    assert res.exit_code == 0, res.output
+    assert "auto-enabled the query" in res.output
+
+
+def test_level_implies_query_silent_without_trusted_config(
+    runner, source_tree_with_compile_db, new_snap_compatible
+):
+    # No explicit --config → nothing is trusted for query execution, so the
+    # auto-enable advisory must NOT fire even at a deep level.
+    res = runner.invoke(
+        main,
+        [
+            "scan",
+            "--binary",
+            str(new_snap_compatible),
+            "--build-info",
+            str(source_tree_with_compile_db),
+            "--source-method",
+            "s5",
+            "--audit",
+        ],
+    )
+    assert res.exit_code == 0, res.output
+    assert "auto-enabled the query" not in res.output
+
+
 def test_header_short_alias_works(runner, tmp_path, new_snap_compatible):
     # The --help example uses `-H`; the alias must actually parse (Codex review).
     header = tmp_path / "inc" / "w.h"

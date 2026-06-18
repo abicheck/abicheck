@@ -617,6 +617,17 @@ def test_note_deprecated_flags_combines() -> None:
     assert "--depth" in note and "ADR-037" in note
 
 
+def test_config_alias_on_dump_and_scan() -> None:
+    """`--build-config` was renamed to `--config` (ADR-037 D4) to match `compare`
+    and reflect that it loads the whole project .abicheck.yml. Both spellings must
+    resolve on dump/scan so the deprecation window keeps working."""
+    commands = _registered_commands()
+    for name in ("dump", "scan"):
+        flags = _command_flags(commands[name])
+        assert "--config" in flags, name
+        assert "--build-config" in flags, name  # deprecated alias still present
+
+
 # ── Resolved option-set snapshot (catches an accidental flag drop in review) ──
 
 # Frozen sets of every option spelling each verdict-emitting command exposes.

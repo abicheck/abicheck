@@ -567,11 +567,13 @@ def _audit_exit_code(
     help="Explicit compile_commands.json (use when not under --sources).",
 )
 @click.option(
+    "--config",
     "--build-config",
     "build_config",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
     default=None,
-    help="Trusted .abicheck.yml (enables build.query with --allow-build-query).",
+    help="Trusted project .abicheck.yml (enables build.query with "
+    "--allow-build-query). (`--build-config` is the deprecated alias.)",
 )
 @click.option(
     "--baseline",
@@ -979,6 +981,31 @@ def run_scan_core(
             "public-API surface (headers-only) instead of a focused diff. Pass "
             "--since <ref> or --changed-path to scope it to the change."
         )
+    # level-implies-query (ADR-037 D4): an explicit, *trusted* --config that
+    # defines a build.query, together with a pinned level that needs L3+
+    # (collect_mode != "off"), is itself consent to run that query — making the
+    # user pass --allow-build-query as well for a level they explicitly asked for
+    # is needless friction. Trusted = an explicit --config path (build_config is
+    # not None here; an auto-discovered source-tree config is resolved later in
+    # embed_build_source and never reaches this gate), so this never runs an
+    # attacker-controlled command. No-op when the config defines no query.
+    effective_allow_query = allow_build_query
+    if not allow_build_query and build_config is not None and collect_mode != "off":
+        from .buildsource.inline import load_build_config
+
+        try:
+            _cfg = load_build_config(build_config)
+        except Exception:  # malformed config surfaces later in the real load
+            _cfg = None
+        if _cfg is not None and _cfg.query:
+            effective_allow_query = True
+            advisories.append(
+                f"level {resolved.value} with a trusted --config defining "
+                "build.query: auto-enabled the query to collect L3+ evidence "
+                "(equivalent to --allow-build-query). Pass --allow-build-query "
+                "explicitly to silence this note."
+            )
+
     new_snap = _build_new_snapshot(
         binary,
         list(headers),
@@ -986,7 +1013,7 @@ def run_scan_core(
         sources,
         collect_mode,
         lang,
-        allow_build_query,
+        effective_allow_query,
         changed_paths=replay_seed,
         build_info=effective_build_info,
         build_config=build_config,
