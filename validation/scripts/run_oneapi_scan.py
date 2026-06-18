@@ -155,9 +155,15 @@ def dt_soname(so_path: str) -> str:
     (``libtbb.so.12.13``), so the SONAME — not the path — is what distinguishes a
     stable-SONAME minor from a real SONAME bump.
     """
-    out = subprocess.run(
-        ["readelf", "-d", so_path], capture_output=True, text=True
-    ).stdout
+    try:
+        out = subprocess.run(
+            ["readelf", "-d", so_path],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        return pathlib.Path(so_path).name
     m = re.search(r"\(SONAME\).*\[(.*?)\]", out)
     return m.group(1) if m else pathlib.Path(so_path).name
 
@@ -211,33 +217,41 @@ def run() -> list[dict]:
                 check=True,
                 capture_output=True,
                 text=True,
+                timeout=900,
             )
-        except subprocess.CalledProcessError as exc:
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
             row["status"] = "DUMP_FAILED"
-            row["detail"] = (exc.stderr or "")[-300:]
+            row["detail"] = (getattr(exc, "stderr", None) or str(exc))[-300:]
             results.append(row)
             continue
         out = WORK / f"{spec['lib']}_{spec['old']}_{spec['new']}_s0.json"
         out.unlink(missing_ok=True)  # never parse a stale report from a prior run
         start = time.monotonic()
-        proc = subprocess.run(
-            [
-                "abicheck",
-                "scan",
-                "--binary",
-                new_so,
-                "--baseline",
-                str(base),
-                "--source-method",
-                "s0",
-                "--format",
-                "json",
-                "-o",
-                str(out),
-            ],
-            capture_output=True,
-            text=True,
-        )
+        try:
+            proc = subprocess.run(
+                [
+                    "abicheck",
+                    "scan",
+                    "--binary",
+                    new_so,
+                    "--baseline",
+                    str(base),
+                    "--source-method",
+                    "s0",
+                    "--format",
+                    "json",
+                    "-o",
+                    str(out),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=900,
+            )
+        except subprocess.TimeoutExpired as exc:
+            row["status"] = "SCAN_FAILED"
+            row["detail"] = f"timeout: {exc}"[-300:]
+            results.append(row)
+            continue
         row["wall_s"] = round(time.monotonic() - start, 2)
         row["exit"] = proc.returncode
         # A BREAKING scan exits non-zero (2/4) but still writes JSON; gate on a
