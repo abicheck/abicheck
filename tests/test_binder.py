@@ -295,25 +295,24 @@ class TestLoadOrder:
 
 
 class TestRealBinary:
-    @pytest.fixture
-    def real_binary(self):
+    # Resolving + binding a real binary's full dependency graph is ~0.6s; both
+    # tests need the same bindings, so compute them once per class instead of
+    # twice.
+    @staticmethod
+    @pytest.fixture(scope="class")
+    def bindings():
+        from abicheck.resolver import resolve_dependencies
         candidates = [Path("/usr/bin/python3"), Path("/usr/bin/ls"), Path("/bin/ls")]
         for p in candidates:
             if p.exists():
-                return p
+                return compute_bindings(resolve_dependencies(p))
         pytest.skip("No suitable ELF binary found")
 
-    def test_no_missing_required_symbols(self, real_binary):
-        from abicheck.resolver import resolve_dependencies
-        graph = resolve_dependencies(real_binary)
-        bindings = compute_bindings(graph)
+    def test_no_missing_required_symbols(self, bindings):
         missing = [b for b in bindings if b.status == BindingStatus.MISSING]
         assert len(missing) == 0, f"Missing symbols: {[b.symbol for b in missing[:5]]}"
 
-    def test_all_bindings_have_status(self, real_binary):
-        from abicheck.resolver import resolve_dependencies
-        graph = resolve_dependencies(real_binary)
-        bindings = compute_bindings(graph)
+    def test_all_bindings_have_status(self, bindings):
         for b in bindings:
             assert isinstance(b.status, BindingStatus)
             assert b.consumer
