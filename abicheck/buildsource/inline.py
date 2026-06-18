@@ -137,6 +137,16 @@ class BuildConfig:
     suppression_require_justification: bool | None = None
     #: ``source:`` — precise S-axis for power users (``s0``..``s6``/``auto``).
     source_method: str | None = None
+    #: ``compile:`` — the stable half of the L2 header compile context (ADR-035
+    #: D6.1 / ADR-037 D4). The project's reviewed include roots / dialect / feature
+    #: macros / frontend; per-invocation cross-compile flags stay CLI overrides
+    #: (CLI > config). ``None``/empty = unset, so the CLI flag wins unambiguously.
+    compile_frontend: str | None = None
+    compile_std: str | None = None
+    compile_include_dirs: list[str] = field(default_factory=list)
+    compile_defines: list[str] = field(default_factory=list)
+    compile_sysroot: str | None = None
+    compile_nostdinc: bool | None = None
     #: ``exit_code_scheme:`` — ADR-037 D12; CI keys on it, so it lives in config.
     exit_code_scheme: str = "auto"
     #: ``version:`` — config schema version (forward-compat; Phase 7 wires the
@@ -149,20 +159,46 @@ class BuildConfig:
     #: project can adopt a future key without breaking older installs. Keys parsed
     #: by sibling modules (``risk_rules`` → ``risk.py``, ``crosschecks`` →
     #: ``crosscheck.py``) are listed so they don't trip the warning.
-    _KNOWN_TOP_KEYS: ClassVar[frozenset[str]] = frozenset({
-        "build", "sources", "severity", "scope", "suppression", "source",
-        "exit_code_scheme", "version", "risk_rules", "crosschecks",
-    })
+    _KNOWN_TOP_KEYS: ClassVar[frozenset[str]] = frozenset(
+        {
+            "build",
+            "sources",
+            "severity",
+            "scope",
+            "suppression",
+            "source",
+            "compile",
+            "exit_code_scheme",
+            "version",
+            "risk_rules",
+            "crosschecks",
+        }
+    )
     _KNOWN_BLOCK_KEYS: ClassVar[dict[str, frozenset[str]]] = {
         "build": frozenset({"system", "query", "compile_db"}),
         "sources": frozenset({"public_headers", "exclude", "graph"}),
-        "severity": frozenset({
-            "preset", "abi_breaking", "potential_breaking",
-            "quality_issues", "addition",
-        }),
+        "severity": frozenset(
+            {
+                "preset",
+                "abi_breaking",
+                "potential_breaking",
+                "quality_issues",
+                "addition",
+            }
+        ),
         "scope": frozenset({"public", "collapse_versioned_symbols", "public_symbols"}),
         "suppression": frozenset({"strict", "require_justification"}),
         "source": frozenset({"method", "graph"}),
+        "compile": frozenset(
+            {
+                "frontend",
+                "std",
+                "include_dirs",
+                "defines",
+                "sysroot",
+                "nostdinc",
+            }
+        ),
     }
 
     @classmethod
@@ -206,6 +242,8 @@ class BuildConfig:
         suppression = suppression if isinstance(suppression, dict) else {}
         source = data.get("source") if isinstance(data, dict) else None
         source = source if isinstance(source, dict) else {}
+        compile_blk = data.get("compile") if isinstance(data, dict) else None
+        compile_blk = compile_blk if isinstance(compile_blk, dict) else {}
 
         def _str(d: dict[str, object], key: str, default: str = "") -> str:
             v = d.get(key)
@@ -247,14 +285,36 @@ class BuildConfig:
                 f"severity.preset must be one of {_SEVERITY_PRESETS}, got {preset!r}"
             )
 
-        scheme = _str(data if isinstance(data, dict) else {}, "exit_code_scheme", "auto") or "auto"
+        scheme = (
+            _str(data if isinstance(data, dict) else {}, "exit_code_scheme", "auto")
+            or "auto"
+        )
         if scheme not in _EXIT_CODE_SCHEMES:
             raise ValueError(
                 f"exit_code_scheme must be one of {_EXIT_CODE_SCHEMES}, got {scheme!r}"
             )
 
         version_raw = data.get("version") if isinstance(data, dict) else None
-        version = version_raw if isinstance(version_raw, int) and not isinstance(version_raw, bool) else 0
+        version = (
+            version_raw
+            if isinstance(version_raw, int) and not isinstance(version_raw, bool)
+            else 0
+        )
+
+        compile_frontend = _opt_str(compile_blk, "frontend")
+        if compile_frontend is not None:
+            # The CLI accepts the frontend case-insensitively (Click Choice
+            # case_sensitive=False); normalize the config value to match.
+            compile_frontend = compile_frontend.lower()
+        if compile_frontend is not None and compile_frontend not in (
+            "auto",
+            "castxml",
+            "clang",
+        ):
+            raise ValueError(
+                "compile.frontend must be one of ('auto', 'castxml', 'clang'), "
+                f"got {compile_frontend!r}"
+            )
 
         return cls(
             system=_str(build, "system", "auto") or "auto",
@@ -272,8 +332,16 @@ class BuildConfig:
             collapse_versioned_symbols=_opt_bool(scope, "collapse_versioned_symbols"),
             public_symbols=_strs(scope, "public_symbols"),
             suppression_strict=_opt_bool(suppression, "strict"),
-            suppression_require_justification=_opt_bool(suppression, "require_justification"),
+            suppression_require_justification=_opt_bool(
+                suppression, "require_justification"
+            ),
             source_method=_opt_str(source, "method"),
+            compile_frontend=compile_frontend,
+            compile_std=_opt_str(compile_blk, "std"),
+            compile_include_dirs=_strs(compile_blk, "include_dirs"),
+            compile_defines=_strs(compile_blk, "defines"),
+            compile_sysroot=_opt_str(compile_blk, "sysroot"),
+            compile_nostdinc=_opt_bool(compile_blk, "nostdinc"),
             exit_code_scheme=scheme,
             version=version,
         )
@@ -330,12 +398,30 @@ class BuildConfig:
         if self.suppression_strict is not None:
             suppression["strict"] = self.suppression_strict
         if self.suppression_require_justification is not None:
-            suppression["require_justification"] = self.suppression_require_justification
+            suppression["require_justification"] = (
+                self.suppression_require_justification
+            )
         if suppression:
             out["suppression"] = suppression
 
         if self.source_method is not None:
             out["source"] = {"method": self.source_method}
+
+        compile_blk: dict[str, Any] = {}
+        if self.compile_frontend is not None:
+            compile_blk["frontend"] = self.compile_frontend
+        if self.compile_std is not None:
+            compile_blk["std"] = self.compile_std
+        if self.compile_include_dirs:
+            compile_blk["include_dirs"] = list(self.compile_include_dirs)
+        if self.compile_defines:
+            compile_blk["defines"] = list(self.compile_defines)
+        if self.compile_sysroot is not None:
+            compile_blk["sysroot"] = self.compile_sysroot
+        if self.compile_nostdinc is not None:
+            compile_blk["nostdinc"] = self.compile_nostdinc
+        if compile_blk:
+            out["compile"] = compile_blk
 
         if self.exit_code_scheme and self.exit_code_scheme != "auto":
             out["exit_code_scheme"] = self.exit_code_scheme

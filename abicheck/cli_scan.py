@@ -52,7 +52,7 @@ import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import click
 
@@ -70,7 +70,11 @@ from .buildsource.scan_levels import (
 )
 from .checker_policy import API_BREAK_KINDS, BREAKING_KINDS
 from .cli import _safe_write_output, _setup_verbosity, main
+from .cli_options import compile_context_options, echo_ast_frontend_deprecation
 from .cli_params import DEPTH_PARAM
+
+if TYPE_CHECKING:
+    from .service_scan import CompileContext
 
 #: Exit code for a ``--budget`` overflow (ADR-035 D3: a budget always fails,
 #: never silently shrinks scope). Distinct from the verdict codes (0/2/4) and the
@@ -390,6 +394,98 @@ def _render_text(out: ScanOutcome) -> str:
     return "\n".join(lines)
 
 
+def _merge_compile_config(
+    cli_ctx: CompileContext,
+    cli_includes: tuple[Path, ...],
+    build_config: Path | None,
+    sources: Path | None = None,
+    *,
+    frontend_explicit: bool = False,
+    nostdinc_explicit: bool = False,
+) -> tuple[CompileContext, tuple[Path, ...]]:
+    """Fold a ``.abicheck.yml`` ``compile:`` block into the CLI compile context.
+
+    Precedence is CLI > config (ADR-035 D6.1 / ADR-037 D4): a per-field CLI value
+    overrides config, an unset CLI field inherits it. The config's ``std`` +
+    ``defines`` synthesize ``-std=…``/``-D…`` flags only when the user did not pass
+    ``--gcc-options``; ``include_dirs`` (resolved against the config's directory)
+    are appended *after* the CLI ``-I`` so explicit roots keep search precedence.
+    Returns the merged ``(CompileContext, includes)``.
+
+    The config is the explicit ``--config`` when given, else the ``.abicheck.yml``
+    auto-discovered at the ``--sources`` tree root — so a source-tree scan honors
+    the project's ``compile:`` block for L2 the same way ``embed_build_source``
+    honors its other non-executable settings for L3-L5 (Codex review). Only the
+    non-executable ``compile:`` block is read here; ``build.query`` still requires
+    an explicit trusted ``--config`` + ``--allow-build-query`` (ADR-032 D5).
+    """
+    from .buildsource.inline import discover_build_config, load_build_config
+    from .service_scan import CompileContext
+
+    cfg = build_config if build_config is not None else discover_build_config(sources)
+    if cfg is None:
+        return cli_ctx, cli_includes
+
+    try:
+        bc = load_build_config(cfg)
+    except ValueError as exc:
+        # Best-effort, like the level-implies-query probe: a malformed config is
+        # swallowed here so a no-source scan still runs; the real downstream load
+        # (embed_build_source, when --sources is given) surfaces it as a clean
+        # ClickException (tests: malformed_build_config_yaml_is_click_error /
+        # level_implies_query_malformed_config_does_not_crash). Still warn so a
+        # broken config is not silently ignored (CodeRabbit review).
+        click.echo(
+            f"warning: could not parse {cfg}; using CLI compile context only "
+            f"({exc}).",
+            err=True,
+        )
+        return cli_ctx, cli_includes
+    base = cfg.parent
+
+    # CLI > config: an explicit --ast-frontend wins even when it is "auto" (the
+    # documented escape hatch to bypass a pinned config frontend); only a *default*
+    # "auto" inherits the config's frontend (Codex review).
+    frontend = (
+        cli_ctx.frontend
+        if (frontend_explicit or cli_ctx.frontend != "auto")
+        else (bc.compile_frontend or "auto")
+    )
+    gcc_options: str | None
+    if cli_ctx.gcc_options is not None:
+        gcc_options = cli_ctx.gcc_options
+    else:
+        parts: list[str] = []
+        if bc.compile_std:
+            parts.append(f"-std={bc.compile_std}")
+        parts += [f"-D{d}" for d in bc.compile_defines]
+        gcc_options = " ".join(parts) or None
+    sysroot = (
+        cli_ctx.sysroot
+        if cli_ctx.sysroot is not None
+        else (Path(bc.compile_sysroot) if bc.compile_sysroot else None)
+    )
+    # CLI > config: an explicit --nostdinc/--no-nostdinc wins in *either*
+    # direction; an unset flag inherits the config value (Codex review).
+    nostdinc = (
+        cli_ctx.nostdinc if nostdinc_explicit else bool(bc.compile_nostdinc)
+    )
+    merged = CompileContext(
+        gcc_path=cli_ctx.gcc_path,
+        gcc_prefix=cli_ctx.gcc_prefix,
+        gcc_options=gcc_options,
+        gcc_option_tokens=cli_ctx.gcc_option_tokens,
+        sysroot=sysroot,
+        nostdinc=nostdinc,
+        frontend=frontend,
+    )
+    includes = tuple(cli_includes) + tuple(
+        (base / p) if not Path(p).is_absolute() else Path(p)
+        for p in bc.compile_include_dirs
+    )
+    return merged, includes
+
+
 def _build_new_snapshot(
     binary: Path,
     headers: list[Path],
@@ -403,6 +499,7 @@ def _build_new_snapshot(
     build_config: Path | None = None,
     public_headers: list[Path] | None = None,
     public_header_dirs: list[Path] | None = None,
+    compile_context: CompileContext | None = None,
 ) -> Any:
     """Dump the candidate's L0-L2 surface and embed L3-L5 inline at *collect_mode*.
 
@@ -429,6 +526,7 @@ def _build_new_snapshot(
             lang=lang,
             public_headers=public_headers,
             public_header_dirs=public_header_dirs,
+            compile=compile_context,
         )
     except AbicheckError as exc:
         raise click.ClickException(f"Failed to load --binary {binary}: {exc}") from exc
@@ -665,6 +763,7 @@ def _audit_exit_code(
 )
 @click.option("-o", "--output", type=click.Path(path_type=Path), default=None)
 @click.option("-v", "--verbose", is_flag=True, default=False)
+@compile_context_options  # dump↔scan L2 compile-context parity (ADR-037 D3)
 def scan_cmd(
     binaries: tuple[Path, ...],
     headers: tuple[Path, ...],
@@ -690,6 +789,13 @@ def scan_cmd(
     fmt: str,
     output: Path | None,
     verbose: bool,
+    header_backend: str = "auto",
+    gcc_path: str | None = None,
+    gcc_prefix: str | None = None,
+    gcc_options: str | None = None,
+    gcc_option_tokens: tuple[str, ...] = (),
+    sysroot: Path | None = None,
+    nostdinc: bool = False,
 ) -> None:
     """Deterministic source-intelligence scan (classify → always-on tier → level).
 
@@ -715,6 +821,43 @@ def scan_cmd(
     """
     _setup_verbosity(verbose)
     start = time.monotonic()
+
+    # ADR-037 D8: legacy --header-backend → --ast-frontend deprecation note.
+    echo_ast_frontend_deprecation()
+
+    # L2 header compile context (dump↔scan parity, ADR-037 D3): bundle the
+    # cross-toolchain + frontend flags so the candidate/baseline header parse runs
+    # with the same build context `dump` would use.
+    from .service_scan import CompileContext
+
+    compile_context = CompileContext(
+        gcc_path=gcc_path,
+        gcc_prefix=gcc_prefix,
+        gcc_options=gcc_options,
+        gcc_option_tokens=tuple(gcc_option_tokens),
+        sysroot=sysroot,
+        nostdinc=nostdinc,
+        frontend=header_backend,
+    )
+    # Fold the project's `.abicheck.yml` compile: block in (CLI > config; the
+    # config is --config or the one auto-discovered at the --sources root). An
+    # explicitly-typed --ast-frontend (even "auto") wins over a pinned config
+    # frontend, so detect whether the user actually passed it (Codex review).
+    ctx = click.get_current_context()
+
+    def _explicit(param: str) -> bool:
+        return (
+            ctx.get_parameter_source(param) == click.core.ParameterSource.COMMANDLINE
+        )
+
+    compile_context, includes = _merge_compile_config(
+        compile_context,
+        tuple(includes),
+        build_config,
+        sources=sources,
+        frontend_explicit=_explicit("header_backend"),
+        nostdinc_explicit=_explicit("nostdinc"),
+    )
 
     if len(binaries) != 1:
         raise click.UsageError(
@@ -842,6 +985,7 @@ def scan_cmd(
                 source_method is not None and source_method != SourceMethod.AUTO.value
             )
             or (source_method is None and depth is not None),
+            compile_context=None if compile_context.is_default else compile_context,
         )
     except _BudgetOverflow as bo:
         click.echo(bo.message, err=True)
@@ -914,6 +1058,7 @@ def run_scan_core(
     budget: str | None,
     budget_s: float | None,
     level_explicit: bool = False,
+    compile_context: CompileContext | None = None,
 ) -> ScanCoreResult:
     """The shared scan orchestration (classify → always-on tier → level → compare).
 
@@ -1038,6 +1183,7 @@ def run_scan_core(
         build_config=build_config,
         public_headers=list(public_headers),
         public_header_dirs=list(public_header_dirs),
+        compile_context=compile_context,
     )
 
     # --- honest level-vs-evidence advisory ------------------------------------
@@ -1103,6 +1249,7 @@ def run_scan_core(
             list(includes),
             list(public_headers),
             list(public_header_dirs),
+            compile_context=compile_context,
         )
         # A cross-check the maintainer promoted to `error` (D6) gates the exit
         # even when the baseline diff itself is clean.
@@ -1312,6 +1459,7 @@ def _run_baseline_compare(
     includes: list[Path],
     public_headers: list[Path],
     public_header_dirs: list[Path],
+    compile_context: CompileContext | None = None,
 ) -> tuple[str, int, dict[str, Any]]:
     """Compare *new_snap* against *baseline*, folding cross-source findings in.
 
@@ -1345,6 +1493,7 @@ def _run_baseline_compare(
             lang=lang,
             public_headers=public_headers,
             public_header_dirs=public_header_dirs,
+            compile=compile_context,
         )
     except AbicheckError as exc:
         raise click.ClickException(

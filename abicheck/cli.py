@@ -62,6 +62,7 @@ from .cli_helpers_compare import (  # noqa: F401  — re-exported to keep cli im
 from .cli_options import (
     adr027_compare_options,
     build_source_dump_options,
+    compile_context_options,
     debug_resolution_options,
     echo_ast_frontend_deprecation,
     evidence_options,
@@ -392,35 +393,12 @@ def main() -> None:
 @click.option("--lang", default="c++", show_default=True,
               type=click.Choice(["c++", "c"], case_sensitive=False),
               help="Language mode for the header backend.")
-@click.option("--ast-frontend", "--header-backend", "header_backend",
-              default="auto", show_default=True,
-              type=click.Choice(["auto", "castxml", "clang"], case_sensitive=False),
-              help="C/C++ AST frontend (ADR-037 D8): castxml (default schema "
-                   "reference) or clang (-ast-dump=json; for hosts where castxml is "
-                   "absent or its bundled frontend chokes). auto = castxml if "
-                   "present, else clang, and auto-falls back to clang when castxml "
-                   "hits a toolchain-version error. Env: ABICHECK_AST_FRONTEND. "
-                   "(--header-backend is a deprecated alias.)")
 @click.option("-o", "--output", "output", type=click.Path(path_type=Path), default=None,
               help="Output JSON file. Defaults to stdout.")
-# ── Cross-compilation flags ───────────────────────────────────────────────────
-@click.option("--gcc-path", default=None,
-              help="Path to GCC/G++ cross-compiler binary.")
-@click.option("--gcc-prefix", default=None,
-              help="Cross-toolchain prefix (e.g. aarch64-linux-gnu-).")
-@click.option("--gcc-options", default=None,
-              help="Extra compiler flags passed through to castxml (split on "
-                   "whitespace). For a flag whose value contains spaces, use the "
-                   "repeatable --gcc-option instead.")
-@click.option("--gcc-option", "gcc_option_tokens", multiple=True,
-              help="A single extra compiler flag passed through to castxml "
-                   "verbatim (repeatable; not whitespace-split). Use two flags for "
-                   "a flag + spaced value, e.g. --gcc-option=-include "
-                   "--gcc-option='some header.h'.")
-@click.option("--sysroot", type=click.Path(path_type=Path), default=None,
-              help="Alternative system root directory.")
-@click.option("--nostdinc", is_flag=True, default=False,
-              help="Do not search standard system include paths.")
+# ── L2 compile context (shared with `scan` — ADR-037 D3 parity) ──────────────
+# --ast-frontend / --gcc-path / --gcc-prefix / --gcc-options / --gcc-option /
+# --sysroot / --nostdinc are defined once in cli_options.compile_context_options
+# so `dump` and `scan` never drift; applied as a decorator below.
 @click.option("--pdb-path", "pdb_path", type=click.Path(path_type=Path), default=None,
               help="Explicit path to PDB file for Windows PE debug info. "
                    "Overrides automatic PDB discovery from the PE debug directory.")
@@ -482,6 +460,7 @@ def main() -> None:
 @click.option("--no-git", "no_git", is_flag=True, default=False,
               help="Do not auto-detect git commit SHA.")
 @build_source_dump_options  # --build-info / --sources (embed inline)
+@compile_context_options  # --ast-frontend + cross-toolchain (shared with `scan`)
 def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Path, ...],
              public_headers: tuple[Path, ...], public_header_dirs: tuple[Path, ...],
              version: str, lang: str, header_backend: str, output: Path | None,
