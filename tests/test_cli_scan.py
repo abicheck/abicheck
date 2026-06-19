@@ -1497,8 +1497,40 @@ def test_estimate_uses_resolved_level_not_raw_flags(
         ],
     )
     assert res.exit_code == 0, res.output
-    assert captured["source_method"] == "s5"
-    assert captured["depth"] == "source"
+    assert captured["resolved_method"].value == "s5"
+    assert captured["eff_depth"].value == "source"
+
+
+def test_source_method_overrides_depth_binary_keeps_headers(
+    monkeypatch, runner, new_snap_compatible, tmp_path
+):
+    # --source-method wins over --depth (resolve precedence), so
+    # `--source-method s5 --depth binary` resolves to a SOURCE scan that still needs
+    # the L2 header AST. Header suppression must key on the *resolved* effective
+    # depth, not the raw --depth, else the winning level loses its headers (Codex).
+    import abicheck.cli_scan as cs
+
+    header = tmp_path / "foo.h"
+    header.write_text("int foo(void);\n", encoding="utf-8")
+    captured: dict[str, object] = {}
+    original = cs.run_scan_core
+
+    def _spy(*args, **kwargs):
+        captured["headers"] = kwargs.get("headers")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(cs, "run_scan_core", _spy)
+    # s5 with no compile DB → pinned-depth contract error (exit 1), but run_scan_core
+    # is still entered and must have received the (un-suppressed) headers.
+    runner.invoke(
+        main,
+        [
+            "scan", "--binary", str(new_snap_compatible),
+            "-H", str(header), "--source-method", "s5", "--depth", "binary",
+        ],
+    )
+    assert captured["headers"]  # headers kept — resolved depth is source, not binary
+    assert [str(p) for p in captured["headers"]] == [str(header)]
 
 
 def test_pinned_depth_with_embedded_l3_snapshot_no_contract_error(runner, tmp_path):

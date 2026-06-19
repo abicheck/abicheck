@@ -861,11 +861,6 @@ def scan_cmd(
     # preprocessor pass when a compile DB + `clang -E` are available (else the
     # coverage row reports it skipped — ADR-035 D2 coverage honesty).
     dp = EvidenceDepth(depth) if depth else None
-    # --depth binary is symbols-only (L0/L1): suppress the L2 header AST even when
-    # -H is passed, so the collected evidence matches the reported depth — parity
-    # with dump/compare/deep-compare's binary handling (Codex review).
-    if dp is EvidenceDepth.BINARY:
-        headers = ()
     # The unset dial means 'auto' (ADR-037 D5): opt into the risk-driven S-method
     # so a seeded PR scan escalates by risk and an unseeded one falls back to the
     # preset. Only when *nothing* was pinned (no --depth, no --source-method, no
@@ -888,6 +883,15 @@ def scan_cmd(
     # so a deeper preset (pr-deep = graph) is distinct from pr, and an explicit
     # --source-method reports its own depth, not the mode preset (Codex review).
     collect_mode = level_to_collect_mode(resolved, eff_depth_enum)
+    # --depth binary is symbols-only (L0/L1): suppress the L2 header AST even when
+    # -H is passed, so the collected evidence matches the reported depth — parity
+    # with dump/compare/deep-compare's binary handling. Keyed on the *resolved*
+    # effective depth, not the raw --depth: --source-method wins over --depth, so
+    # `--source-method s5 --depth binary -H ...` resolves to a source scan that
+    # still needs the header AST/provenance — only an effective binary depth drops
+    # headers (Codex review).
+    if eff_depth_enum is EvidenceDepth.BINARY:
+        headers = ()
     effective_build_info = compile_db or build_info
 
     # --- --estimate: dry-run cost probe, scan nothing (ADR-035 D10) -----------
@@ -901,10 +905,11 @@ def scan_cmd(
             mode=scan_mode.value,
             # Thread the *resolved* concrete level (not the raw flags) so the
             # estimate matches what the real scan would run — e.g. the auto
-            # default resolving a seeded empty diff to s0/off, not the pr preset
-            # (Codex review).
-            source_method=resolved.value,
-            depth=eff_depth_enum.value,
+            # default resolving a seeded empty diff to s0/off, not the pr preset,
+            # and pr-deep keeping its (s5, graph) depth rather than collapsing to
+            # source under the source-method>depth precedence (Codex review).
+            resolved_method=resolved,
+            eff_depth=eff_depth_enum,
             changed=changed,
             seeded=seeded,
             budget_s=budget_s,
@@ -1403,8 +1408,8 @@ def _emit_estimate(
     sources: Path | None,
     build_info: Path | None,
     mode: str,
-    source_method: str | None,
-    depth: str | None,
+    resolved_method: SourceMethod,
+    eff_depth: EvidenceDepth,
     changed: list[str],
     seeded: bool,
     budget_s: float | None,
@@ -1428,14 +1433,18 @@ def _emit_estimate(
         sources=sources,
         build_info=build_info,
         mode=mode,
-        source_method=source_method,
-        depth=depth,
+        source_method=resolved_method.value,
+        depth=eff_depth.value,
         changed_paths=list(changed),
         seeded=seeded,
         budget=Budget(total_timeout=budget_s),
         lang=lang,
     )
-    estimates = estimate_scan(req)
+    # Pass the *already-resolved* level so the estimate mirrors the real scan
+    # exactly — re-resolving from the round-tripped flags would re-apply the
+    # source-method > depth precedence and lose a mode preset's deeper depth
+    # (pr-deep = (s5, graph)); Codex review.
+    estimates = estimate_scan(req, resolved_level=(resolved_method, eff_depth))
     total = sum(e.est_seconds for e in estimates)
 
     if fmt == "json":

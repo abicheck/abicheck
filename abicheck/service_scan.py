@@ -30,9 +30,12 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .errors import ValidationError
+
+if TYPE_CHECKING:
+    from .buildsource.scan_levels import EvidenceDepth, SourceMethod
 
 _logger = logging.getLogger(__name__)
 
@@ -371,7 +374,11 @@ def _count_pack_tus(path: Path) -> int | None:
     return len(be.compile_units) if be is not None else 0
 
 
-def estimate_scan(req: ScanRequest) -> list[CostEstimate]:
+def estimate_scan(
+    req: ScanRequest,
+    *,
+    resolved_level: tuple[SourceMethod, EvidenceDepth] | None = None,
+) -> list[CostEstimate]:
     """Dry-run: projected per-layer cost of *req* for this project (ADR-035 D10).
 
     Probes the project (TU count from the compile DB or source tree, public-header
@@ -393,21 +400,30 @@ def estimate_scan(req: ScanRequest) -> list[CostEstimate]:
     ) = _scan_imports()
 
     mode = ScanMode(req.mode)
-    sm = SourceMethod(req.source_method) if req.source_method else None
-    dp = parse_user_depth(req.depth)  # honors the symbols→binary alias (Codex)
-    auto_method = None
-    # AUTO resolves from the risk score whenever a real diff seed was produced —
-    # including a *seeded but empty* diff (a no-op PR), which scores 0 → s0/off,
-    # mirroring what the real scan does. Treating a seeded empty diff as unseeded
-    # would fall back to the mode preset and over-estimate a no-op PR (Codex
-    # review). A non-empty changed set is itself proof of a seed.
-    if sm is SourceMethod.AUTO and (req.seeded or req.changed_paths):
-        auto_method = score_changed_paths(
-            list(req.changed_paths), RiskRules.default()
-        ).recommended_method
-    resolved, eff_depth = resolve_level(
-        mode=mode, source_method=sm, depth=dp, auto_method=auto_method
-    )
+    if resolved_level is not None:
+        # The caller (the CLI scan path) already resolved the concrete (method,
+        # depth) level — including the auto/risk choice. Honor it verbatim so the
+        # estimate matches the real scan: re-resolving from req.source_method/depth
+        # here would re-apply the source-method > depth precedence and collapse a
+        # mode preset that pins a *deeper* depth than its method implies
+        # (``pr-deep`` = (s5, graph) → graph-full), under-pricing it (Codex review).
+        resolved, eff_depth = resolved_level
+    else:
+        sm = SourceMethod(req.source_method) if req.source_method else None
+        dp = parse_user_depth(req.depth)  # honors the symbols→binary alias (Codex)
+        auto_method = None
+        # AUTO resolves from the risk score whenever a real diff seed was produced —
+        # including a *seeded but empty* diff (a no-op PR), which scores 0 → s0/off,
+        # mirroring what the real scan does. Treating a seeded empty diff as unseeded
+        # would fall back to the mode preset and over-estimate a no-op PR (Codex
+        # review). A non-empty changed set is itself proof of a seed.
+        if sm is SourceMethod.AUTO and (req.seeded or req.changed_paths):
+            auto_method = score_changed_paths(
+                list(req.changed_paths), RiskRules.default()
+            ).recommended_method
+        resolved, eff_depth = resolve_level(
+            mode=mode, source_method=sm, depth=dp, auto_method=auto_method
+        )
     collect_mode = level_to_collect_mode(resolved, eff_depth)
 
     # A --build-info that is an `abicheck collect` pack dir is loaded by the real
@@ -628,14 +644,6 @@ def run_scan(req: ScanRequest) -> ScanResult:
     binary = req.binaries[0]
     sm = SourceMethod(req.source_method) if req.source_method else None
     dp = parse_user_depth(req.depth)  # honors the symbols→binary alias (Codex)
-    # --depth binary is symbols-only (L0/L1): suppress the L2 header AST (and its
-    # provenance) even when the caller passes headers, so the collected evidence
-    # matches the reported depth — parity with the CLI's `scan --depth binary`
-    # handling (Codex review).
-    eff_headers = [] if dp is EvidenceDepth.BINARY else list(req.headers)
-    prov_headers, prov_dirs = _public_provenance_set(
-        eff_headers, list(req.public_header_dirs)
-    )
 
     changed = [p for p in req.changed_paths if p]
     seeded = req.seeded or bool(changed)
@@ -657,6 +665,16 @@ def run_scan(req: ScanRequest) -> ScanResult:
         mode=scan_mode, source_method=sm, depth=dp, auto_method=auto_method
     )
     collect_mode = level_to_collect_mode(resolved, eff_depth)
+    # --depth binary is symbols-only (L0/L1): suppress the L2 header AST (and its
+    # provenance) even when the caller passes headers, so the collected evidence
+    # matches the reported depth — parity with the CLI's `scan --depth binary`.
+    # Keyed on the *resolved* effective depth, not the raw depth: --source-method
+    # wins over --depth, so a source-method scan that also passes `depth="binary"`
+    # still needs the header AST (Codex review).
+    eff_headers = [] if eff_depth is EvidenceDepth.BINARY else list(req.headers)
+    prov_headers, prov_dirs = _public_provenance_set(
+        eff_headers, list(req.public_header_dirs)
+    )
     effective_build_info = req.compile_db or req.build_info
     budget_s = req.budget.total_timeout
     budget_str = f"{budget_s:g}s" if budget_s is not None else None

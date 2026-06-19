@@ -338,6 +338,40 @@ def test_cli_estimate_json(runner: CliRunner, snap_path: Path) -> None:
     assert "total_est_seconds" in payload
 
 
+def test_estimate_pr_deep_preserves_graph_full_depth(
+    runner: CliRunner, snap_path: Path
+) -> None:
+    # pr-deep pins (s5, graph) = graph-full; the CLI estimate must not collapse it
+    # to source-changed by re-resolving the round-tripped flags under the
+    # source-method > depth precedence (Codex review).
+    res = runner.invoke(
+        main, ["scan", "--estimate", "--mode", "pr-deep", "--binary", str(snap_path)]
+    )
+    assert res.exit_code == 0, res.output
+    assert "graph-full" in res.output
+    assert "source-changed replay scope" not in res.output
+
+
+def test_estimate_scan_honors_resolved_level(snap_path: Path) -> None:
+    # estimate_scan honors a caller-supplied resolved (method, depth) verbatim: the
+    # (s5, graph) pr-deep pair stays graph-full, whereas re-resolving the same req
+    # applies precedence and collapses to source-changed (Codex review).
+    from abicheck.buildsource.scan_levels import EvidenceDepth, SourceMethod
+    from abicheck.service_scan import estimate_scan
+
+    req = ScanRequest(
+        binaries=[snap_path], mode="pr-deep", source_method="s5", depth="graph"
+    )
+    reresolved = " ".join(e.note for e in estimate_scan(req))
+    pinned = " ".join(
+        e.note
+        for e in estimate_scan(req, resolved_level=(SourceMethod.S5, EvidenceDepth.GRAPH))
+    )
+    assert "source-changed" in reresolved  # the round-trip hazard this guards
+    assert "graph-full" in pinned
+    assert "source-changed" not in pinned
+
+
 def _minimal_compile_db(tmp_path: Path) -> Path:
     """A minimal compile_commands.json (L3 build metadata; pure parsing).
 
@@ -579,6 +613,37 @@ def test_run_scan_binary_depth_suppresses_headers(
     assert res.verdict != "EVIDENCE_CONTRACT_ERROR"
     # Headers were dropped before reaching the core — no L2 header parse.
     assert captured["headers"] == []
+
+
+def test_run_scan_source_method_overrides_binary_keeps_headers(
+    monkeypatch, snap_path: Path, header: Path
+) -> None:
+    # Service parity with the CLI (Codex review): --source-method wins over --depth,
+    # so source_method="s5" + depth="binary" resolves to a SOURCE scan that keeps
+    # the header AST — suppression keys on the *resolved* depth, not the raw one.
+    import abicheck.cli_scan as cs
+    from abicheck.service import run_scan
+
+    captured: dict[str, object] = {}
+    original = cs.run_scan_core
+
+    def _spy(*args, **kwargs):
+        captured["headers"] = kwargs.get("headers")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(cs, "run_scan_core", _spy)
+    # s5 with no compile DB → pinned-depth contract error, but run_scan_core still
+    # receives the (un-suppressed) headers.
+    run_scan(
+        ScanRequest(
+            binaries=[snap_path],
+            source_method="s5",
+            depth="binary",
+            headers=[header],
+            mode="audit",
+        )
+    )
+    assert captured["headers"] == [header]
 
 
 def test_service_accepts_symbols_depth_alias(snap_path: Path) -> None:
