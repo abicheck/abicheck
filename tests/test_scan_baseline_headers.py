@@ -83,6 +83,7 @@ def _patched(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
         captured["headers"] = list(headers)
         captured["includes"] = list(includes)
         captured["public_headers"] = list(kw.get("public_headers") or [])
+        captured["public_header_dirs"] = list(kw.get("public_header_dirs") or [])
         return _FakeSnap()
 
     monkeypatch.setattr(service, "resolve_input", fake_resolve_input)
@@ -122,15 +123,36 @@ def test_native_baseline_without_baseline_header_warns_and_reuses_candidate(
 
 
 def test_baseline_header_overrides_old_side_and_silences_warning(
-    _patched: dict[str, object], capsys: pytest.CaptureFixture[str]
+    _patched: dict[str, object],
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
 ) -> None:
-    _run(baseline_headers=[Path("old/include")], baseline_includes=[Path("old/include")])
+    # Real dirs so the `is_dir()` provenance filter is meaningfully exercised:
+    # this is precisely what distinguishes the fix from the old buggy
+    # `[...] or public_header_dirs`, which would have leaked the NEW dir.
+    old_inc = tmp_path / "old" / "include"
+    new_inc = tmp_path / "new" / "include"
+    old_inc.mkdir(parents=True)
+    new_inc.mkdir(parents=True)
+    _run(
+        headers=[new_inc],
+        includes=[new_inc],
+        public_headers=[new_inc],
+        public_header_dirs=[new_inc],
+        baseline_headers=[old_inc],
+        baseline_includes=[old_inc],
+    )
     err = capsys.readouterr().err
     assert "--baseline-header" not in err
     # Old side parsed with ITS OWN headers, not the new ones.
-    assert _patched["headers"] == [Path("old/include")]
-    assert _patched["includes"] == [Path("old/include")]
-    assert _patched["public_headers"] == [Path("old/include")]
+    assert _patched["headers"] == [old_inc]
+    assert _patched["includes"] == [old_inc]
+    assert _patched["public_headers"] == [old_inc]
+    # The old-side public boundary is derived ONLY from --baseline-header dirs;
+    # the candidate's new/include must NOT leak in (Codex review). A relative
+    # dir like `include/` would otherwise re-mark old private headers PUBLIC.
+    assert _patched["public_header_dirs"] == [old_inc]
+    assert new_inc not in _patched["public_header_dirs"]
 
 
 def test_snapshot_baseline_does_not_warn(

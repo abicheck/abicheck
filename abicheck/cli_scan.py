@@ -436,8 +436,7 @@ def _merge_compile_config(
         # level_implies_query_malformed_config_does_not_crash). Still warn so a
         # broken config is not silently ignored (CodeRabbit review).
         click.echo(
-            f"warning: could not parse {cfg}; using CLI compile context only "
-            f"({exc}).",
+            f"warning: could not parse {cfg}; using CLI compile context only ({exc}).",
             err=True,
         )
         return cli_ctx, cli_includes
@@ -467,9 +466,7 @@ def _merge_compile_config(
     )
     # CLI > config: an explicit --nostdinc/--no-nostdinc wins in *either*
     # direction; an unset flag inherits the config value (Codex review).
-    nostdinc = (
-        cli_ctx.nostdinc if nostdinc_explicit else bool(bc.compile_nostdinc)
-    )
+    nostdinc = cli_ctx.nostdinc if nostdinc_explicit else bool(bc.compile_nostdinc)
     merged = CompileContext(
         gcc_path=cli_ctx.gcc_path,
         gcc_prefix=cli_ctx.gcc_prefix,
@@ -868,9 +865,7 @@ def scan_cmd(
     ctx = click.get_current_context()
 
     def _explicit(param: str) -> bool:
-        return (
-            ctx.get_parameter_source(param) == click.core.ParameterSource.COMMANDLINE
-        )
+        return ctx.get_parameter_source(param) == click.core.ParameterSource.COMMANDLINE
 
     compile_context, includes = _merge_compile_config(
         compile_context,
@@ -1536,7 +1531,12 @@ def _run_baseline_compare(
         bl_headers = list(baseline_headers)
         bl_includes = list(baseline_includes) if baseline_includes else includes
         bl_public_headers = bl_headers
-        bl_public_dirs = [p for p in bl_headers if p.is_dir()] or public_header_dirs
+        # The old-side public boundary comes ONLY from --baseline-header: dirs in
+        # it are public-header dirs, files opt in just themselves. Do NOT fall back
+        # to the new side's public dirs — a relative dir like `include/` would
+        # (segment-based provenance) re-mark old private headers as PUBLIC and skew
+        # the public-surface scoping (Codex review).
+        bl_public_dirs = [p for p in bl_headers if p.is_dir()]
     else:
         bl_headers, bl_includes = headers, includes
         bl_public_headers, bl_public_dirs = public_headers, public_header_dirs
