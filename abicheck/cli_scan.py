@@ -884,7 +884,7 @@ def scan_cmd(
     collect_mode = level_to_collect_mode(resolved, eff_depth_enum)
     # --depth binary is symbols-only (L0/L1): suppress the L2 header AST even when
     # -H is passed, so the collected evidence matches the reported depth — parity
-    # with dump/compare/deep-compare's binary handling. Keyed on the *resolved*
+    # with dump/compare's binary handling. Keyed on the *resolved*
     # effective depth, not the raw --depth: --source-method wins over --depth, so
     # `--source-method s5 --depth binary -H ...` resolves to a source scan that
     # still needs the header AST/provenance — only an effective binary depth drops

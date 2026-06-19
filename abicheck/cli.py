@@ -1498,7 +1498,7 @@ def compare_cmd(
         raise click.UsageError("--annotate-additions requires --annotate")
 
     # Fold the unified --depth/--max dial into the underlying collect mode
-    # (ADR-037 D5), the same way `dump`/`deep-compare` do. The hidden
+    # (ADR-037 D5), the same way `dump` does. The hidden
     # --collect-mode alias still works but warns; --depth binary suppresses the
     # L2 header AST (symbols-only).
     collect_mode_explicit = (
@@ -1766,7 +1766,6 @@ from . import (  # noqa: E402  — must run after `main` and helpers are defined
     cli_buildsource,  # noqa: F401  — registers collect
     cli_compare_release,  # noqa: F401  — registers compare-release
     cli_debian_symbols,  # noqa: F401  — registers debian-symbols
-    cli_max,  # noqa: F401  — registers deep-compare
     cli_plugin,  # noqa: F401  — registers plugin-check
     cli_pr_comment,  # noqa: F401  — registers pr-comment
     cli_probe,  # noqa: F401  — registers probe (run, compare)

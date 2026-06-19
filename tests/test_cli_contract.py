@@ -136,7 +136,6 @@ def _registered_commands() -> dict:
     """Force every verdict-emitting command module to register on ``main``."""
     import abicheck.cli_appcompat  # noqa: F401  — registers `appcompat`
     import abicheck.cli_compare_release  # noqa: F401  — registers `compare-release`
-    import abicheck.cli_max  # noqa: F401  — registers `deep-compare`
     from abicheck.cli import main
 
     return main.commands
@@ -241,28 +240,34 @@ def test_gate_flags_missing_command(
 def test_intentional_subset_decorator_is_not_flagged(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """`deep-compare` omitting `@severity_options` is allowlisted, not an error."""
+    """A command listed in the intentional-subset allowlist may omit a required
+    family without being flagged. The real allowlist is empty today, so this
+    drives the mechanism with a synthetic command + allowlist entry."""
     import scripts.check_ai_readiness as gate
 
     pkg = tmp_path / "abicheck"
     pkg.mkdir()
-    (pkg / "cli_max.py").write_text(
+    (pkg / "cli_synth.py").write_text(
         "import click\n"
-        '@main.command("deep-compare")\n'
+        '@main.command("synth")\n'
         "@two_sided_input_options\n"
         "@policy_options\n"
         "@scope_options\n"
         "@output_options(['json'])\n"
-        "def deep_compare_cmd():\n"
+        "def synth_cmd():\n"
         "    pass\n"
     )
     monkeypatch.setattr(gate, "PKG", pkg)
     monkeypatch.setattr(gate, "ROOT", tmp_path)
+    monkeypatch.setattr(gate, "_VERDICT_CMD_MODULES", {"cli_synth.py": "synth"})
+    monkeypatch.setattr(
+        gate, "_INTENTIONAL_SUBSET_DECORATORS", frozenset({("synth", "severity_options")})
+    )
 
     findings = gate.Findings()
     gate.check_cli_contract(findings)
     msgs = [m for c, m in findings.errors if c == "cli-contract"]
-    assert not any("deep-compare" in m and "severity_options" in m for m in msgs), msgs
+    assert not any("synth" in m and "severity_options" in m for m in msgs), msgs
 
 
 # ── D10.4: one default per flag (ADR-037 D3 / G22 Phase 2) ───────────────────
@@ -428,7 +433,7 @@ def test_gate_flags_unmapped_mcp_param(
 # ── D8: --header-backend → --ast-frontend rename + alias (ADR-037 Phase 6) ────
 
 
-@pytest.mark.parametrize("cmd_name", ["compare", "dump", "deep-compare"])
+@pytest.mark.parametrize("cmd_name", ["compare", "dump"])
 @pytest.mark.parametrize("flag", ["--ast-frontend", "--header-backend"])
 def test_ast_frontend_and_legacy_alias_both_resolve(cmd_name: str, flag: str) -> None:
     """``--ast-frontend`` and its legacy ``--header-backend`` alias both bind the
@@ -442,7 +447,7 @@ def test_ast_frontend_and_legacy_alias_both_resolve(cmd_name: str, flag: str) ->
     assert flag in param.opts
 
 
-@pytest.mark.parametrize("cmd_name", ["compare", "deep-compare"])
+@pytest.mark.parametrize("cmd_name", ["compare"])
 def test_per_side_ast_frontend_aliases_resolve(cmd_name: str) -> None:
     """Per-side ``--old/new-ast-frontend`` carry their legacy aliases too."""
     cmd = _registered_commands()[cmd_name]
@@ -472,7 +477,7 @@ def test_note_deprecated_ast_frontend_detects_legacy_spellings() -> None:
     assert note_deprecated_ast_frontend(["x", "--old-header-backend=clang"]) is not None
 
 
-@pytest.mark.parametrize("cmd_name", ["compare", "deep-compare"])
+@pytest.mark.parametrize("cmd_name", ["compare"])
 def test_legacy_flag_invocation_echoes_note(
     cmd_name: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -480,7 +485,6 @@ def test_legacy_flag_invocation_echoes_note(
     D8 deprecation note to stderr (the alias still resolves)."""
     from click.testing import CliRunner
 
-    # cli_max registers deep-compare; importing it also pulls in `main`.
     _registered_commands()
     from abicheck.cli import main
 
@@ -492,24 +496,6 @@ def test_legacy_flag_invocation_echoes_note(
     monkeypatch.setattr(sys, "argv", ["abicheck", *argv])
     res = CliRunner().invoke(main, argv)
     assert "deprecated (ADR-037 D8)" in res.output, res.output
-
-
-def test_deep_compare_emits_note_once(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """`deep-compare` fans out to compare/dump via ctx.invoke; the D8 note must
-    still be printed exactly once per invocation (emit-once via ctx.meta)."""
-    from click.testing import CliRunner
-
-    _registered_commands()
-    from abicheck.cli import main
-
-    old_p = _make_snap_file(tmp_path, "libonce", "1.0", [_func("a")])
-    new_p = _make_snap_file(tmp_path, "libonce", "2.0", [_func("a")])
-    argv = ["deep-compare", str(old_p), str(new_p), "--header-backend", "castxml"]
-    monkeypatch.setattr(sys, "argv", ["abicheck", *argv])
-    res = CliRunner().invoke(main, argv)
-    assert res.output.count("deprecated (ADR-037 D8)") == 1, res.output
 
 
 def test_dump_legacy_flag_echoes_note(
@@ -680,16 +666,6 @@ _OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         "--severity-abi-breaking", "--severity-addition", "--severity-potential-breaking",
         "--severity-preset", "--severity-quality-issues", "--show-irrelevant", "--suppress",
         "--verbose", "-H", "-I", "-o", "-v",
-    ),
-    "deep-compare": (
-        "--ast-frontend", "--new-ast-frontend", "--old-ast-frontend",
-        "--depth", "--format", "--header", "--header-backend", "--include",
-        "--keep-snapshots", "--lang", "--max", "--new-build-info", "--new-header",
-        "--new-header-backend", "--new-include", "--new-sources", "--new-version",
-        "--no-scope-public-headers", "--old-build-info", "--old-header",
-        "--old-header-backend", "--old-include", "--old-sources", "--old-version",
-        "--output", "--policy", "--policy-file", "--recommend", "--scope-public-headers",
-        "--severity-preset", "--sources", "--suppress", "--verbose", "-H", "-I", "-o", "-v",
     ),
 }
 

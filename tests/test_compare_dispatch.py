@@ -300,10 +300,3 @@ class TestDeprecatedAliases:
         assert result.exit_code == 0
         assert "deprecated" in (result.stderr or "")
 
-    def test_deep_compare_still_works_and_warns(self, tmp_path: Path) -> None:
-        old, new = _breaking_pair()
-        old_f = _write_snap(tmp_path / "old.json", old)
-        new_f = _write_snap(tmp_path / "new.json", new)
-        result = CliRunner().invoke(main, ["deep-compare", str(old_f), str(new_f)])
-        assert result.exit_code == 4
-        assert "deprecated" in (result.stderr or "")

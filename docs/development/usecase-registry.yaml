@@ -330,9 +330,13 @@ use_cases:
     gap: G21
     plan: docs/development/plans/g21-oneshot-deep-compare.md
     evidence:
-      modules: [abicheck/cli_max.py, abicheck/cli_help.py, abicheck/cli_dump_helpers.py]
-      tests: [tests/test_cli_deep_compare.py, tests/test_cov95_cli.py]
+      modules: [abicheck/cli.py, abicheck/cli_help.py, abicheck/cli_dump_helpers.py]
+      tests: [tests/test_depth_vocabulary.py, tests/test_cov95_cli.py]
     next_steps: >
+      Superseded: the standalone `deep-compare` orchestrator was removed and
+      folded into `compare`, which takes binaries directly with the same
+      `--depth`/`--max`/`--old-sources`/`--new-sources` dial. The text below is
+      retained as historical context for G21.
       Shipped in PR #422: the --depth headers|build|graph|source|full dial
       (--max = --depth full) on dump reusing the scan_levels vocabulary/mapping;
       the one-shot `deep-compare` orchestrator (cli_max.py) that dumps both sides

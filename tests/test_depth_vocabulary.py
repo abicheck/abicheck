@@ -15,7 +15,7 @@
 
 """Unified ``--depth`` dial + L5-internal graph (ADR-037 D5/D6 / G22 Phase 3).
 
-One depth vocabulary across ``compare``/``deep-compare``/``dump``/``scan``; the
+One depth vocabulary across ``compare``/``dump``/``scan``; the
 G21 ``graph`` rung and ``--collect-mode`` are deprecated aliases; the L5 graph is
 an internal consequence of ``--depth source``, never a user rung.
 """
@@ -31,7 +31,6 @@ from abicheck.cli_params import DEPTH_PARAM
 
 def _registered() -> dict:
     """Register every depth-bearing command on ``main`` and return its map."""
-    import abicheck.cli_max  # noqa: F401  — registers deep-compare
     import abicheck.cli_scan  # noqa: F401  — registers scan
 
     return main.commands
@@ -39,7 +38,7 @@ def _registered() -> dict:
 
 # ── One dial: every depth-bearing command shows the same user-facing ladder ──
 
-_DEPTH_COMMANDS = ("compare", "deep-compare", "dump", "scan")
+_DEPTH_COMMANDS = ("compare", "dump", "scan")
 
 
 @pytest.mark.parametrize("cmd_name", _DEPTH_COMMANDS)
@@ -281,15 +280,13 @@ def test_compare_collect_mode_deprecation_warns(tmp_path) -> None:  # type: igno
 
 
 @pytest.mark.parametrize("depth", ["binary", "headers"])
-def test_deep_compare_depth_over_snapshots(tmp_path, depth: str) -> None:  # type: ignore[no-untyped-def]
-    """``deep-compare`` passes snapshot inputs straight through; ``--depth
+def test_compare_depth_over_snapshots(tmp_path, depth: str) -> None:  # type: ignore[no-untyped-def]
+    """``compare`` passes snapshot inputs straight through; ``--depth
     binary`` clears headers, the non-binary branch leaves them as-is."""
-    import abicheck.cli_max  # noqa: F401
-
     old = _snap(tmp_path, "libz", "1.0", [_fn("a")])
     new = _snap(tmp_path, "libz", "2.0", [_fn("a")])
     res = CliRunner().invoke(
-        main, ["deep-compare", str(old), str(new), "--depth", depth]
+        main, ["compare", str(old), str(new), "--depth", depth]
     )
     assert res.exit_code == 0, _all_output(res)
 

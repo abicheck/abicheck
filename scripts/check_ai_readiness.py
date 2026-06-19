@@ -604,7 +604,6 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
         frozenset({"cli", "cli_compare_release"}),
         frozenset({"cli", "cli_baseline"}),
         frozenset({"cli", "cli_debian_symbols"}),
-        frozenset({"cli", "cli_max"}),
         frozenset({"cli", "cli_buildsource"}),
         frozenset({"cli", "cli_appcompat"}),
         frozenset({"cli", "cli_plugin"}),
@@ -669,7 +668,6 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
                 "cli_compare_release",
                 "cli_debian_symbols",
                 "cli_helpers_compare",
-                "cli_max",
                 "cli_options",
                 "cli_plugin",
                 "cli_pr_comment",
@@ -1216,7 +1214,6 @@ _VERDICT_CMD_MODULES: dict[str, str] = {
     "cli.py": "compare",
     "cli_compare_release.py": "compare-release",
     "cli_appcompat.py": "appcompat",
-    "cli_max.py": "deep-compare",
 }
 
 #: decorator callables every verdict-emitting command must compose (ADR-037 D3).
@@ -1232,11 +1229,7 @@ _REQUIRED_FAMILY_DECORATORS: frozenset[str] = frozenset(
 
 #: (command, decorator) pairs allowed to be absent — a deliberate, reviewed
 #: subset (mirrors ``cli_options.INTENTIONAL_SUBSET``).
-_INTENTIONAL_SUBSET_DECORATORS: frozenset[tuple[str, str]] = frozenset(
-    {
-        ("deep-compare", "severity_options"),
-    }
-)
+_INTENTIONAL_SUBSET_DECORATORS: frozenset[tuple[str, str]] = frozenset()
 
 #: flag names knowingly carrying two defaults across decorators, deferred to a
 #: later phase (mirrors ``cli_options.DEFERRED_MULTI_DEFAULT``).

@@ -54,7 +54,7 @@ def two_sided_input_options(func: F) -> F:
     """Headers / includes / version labels, shared (`-H/-I` + per-side + version).
 
     Identical across ``compare`` / ``compare-release`` / ``appcompat`` /
-    ``deep-compare``: a both-sides input plus an old-only / new-only override and
+    ``compare-release`` / ``appcompat``: a both-sides input plus an old-only / new-only override and
     a per-side version label. (``--lang`` and the ``--ast-frontend`` family stay
     inline — the latter renamed from ``--header-backend`` in G22 Phase 6, D8.)
     """
@@ -588,7 +588,7 @@ def debug_resolution_options(func: F) -> F:
 
     Currently a ``compare``-only family — it resolves *local* ELF debug
     artifacts, which the package-oriented (``compare-release``) and
-    snapshot-oriented (``deep-compare``/``appcompat``) commands do not take. It
+    snapshot-oriented (``appcompat``) commands do not take. It
     lives here so the moment a second command needs it there is one definition to
     compose, not a copy to drift (ADR-037 D3).
     """
@@ -1010,18 +1010,12 @@ VERDICT_EMITTING_COMMANDS: dict[str, str] = {
     "compare": "cli.py",
     "compare-release": "cli_compare_release.py",
     "appcompat": "cli_appcompat.py",
-    "deep-compare": "cli_max.py",
 }
 
 #: (command, family) → reason. A deliberate, reviewed omission of a shared
 #: family from a verdict-emitting command (ADR-037 D3: opt out *explicitly*).
-INTENTIONAL_SUBSET: dict[tuple[str, str], str] = {
-    ("deep-compare", "severity"): (
-        "deep-compare is a one-shot convenience wrapper that exposes only the "
-        "coarse --severity-preset; the per-category overrides are config-bound "
-        "(ADR-037 D4) and not surfaced on this command."
-    ),
-}
+#: Empty today — every verdict-emitting command carries the full required set.
+INTENTIONAL_SUBSET: dict[tuple[str, str], str] = {}
 
 #: ADR-037 D10.5 — soft per-command flag-count budget for ``compare`` (a WARN
 #: nudge, enforced by ``tests/test_config_rebalance.py::test_flag_budget``).
