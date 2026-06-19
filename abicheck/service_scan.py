@@ -374,6 +374,35 @@ def _count_pack_tus(path: Path) -> int | None:
     return len(be.compile_units) if be is not None else 0
 
 
+def _count_bazel_build_info_tus(path: Path) -> int | None:
+    """Compile-unit count of a Bazel ``aquery``/``cquery`` ``--build-info``, else ``None``.
+
+    The real scan routes a Bazel jsonproto ``--build-info`` through
+    ``inline._maybe_collect_bazel_build_info`` → ``BazelAdapter`` (pre-captured,
+    ``allow_query=False``) and replays its compile actions; the estimate mirrors
+    that so a Bazel project does not report 0 L3/L4/L5 TUs and undersize the budget
+    (Codex review). Non-executing (parses the captured JSON only); best-effort —
+    any failure → ``None`` so the caller falls back to compile-DB / source counting.
+    """
+    if not path.is_file():
+        return None
+    try:
+        from .buildsource.inline import sniff_build_info_format
+
+        fmt = sniff_build_info_format(path)
+        if fmt not in ("bazel_aquery", "bazel_cquery"):
+            return None
+        from .buildsource.adapters.bazel import BazelAdapter
+
+        if fmt == "bazel_aquery":
+            adapter = BazelAdapter(aquery=path, allow_query=False)
+        else:
+            adapter = BazelAdapter(cquery=path, allow_query=False)
+        return len(adapter.collect().compile_units)
+    except Exception:  # noqa: BLE001 - estimate is advisory; never raise
+        return None
+
+
 def estimate_scan(
     req: ScanRequest,
     *,
@@ -429,10 +458,20 @@ def estimate_scan(
     # A --build-info that is an `abicheck collect` pack dir is loaded by the real
     # scan and supplies its own L3 compile units, so the estimate must count them
     # too — else a pack-only input reports 0 TUs and undersizes the budget (Codex
-    # review). A raw compile DB / source tree is counted otherwise.
+    # review). A Bazel aquery/cquery jsonproto is routed through the Bazel adapter
+    # by the real scan, so count its compile actions the same way. A raw compile DB
+    # / source tree is counted otherwise.
+    bazel_tus = (
+        _count_bazel_build_info_tus(req.build_info)
+        if req.build_info is not None
+        else None
+    )
     pack_tus = _count_pack_tus(req.build_info) if req.build_info is not None else None
     compile_db = _discover_compile_db(req.sources, req.compile_db or req.build_info)
-    if pack_tus is not None:
+    if bazel_tus is not None:
+        total_tus = bazel_tus
+        tu_note = "Bazel aquery/cquery (build_evidence)"
+    elif pack_tus is not None:
         total_tus = pack_tus
         tu_note = "abicheck collect pack (build_evidence)"
     elif compile_db is not None:

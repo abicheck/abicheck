@@ -352,6 +352,48 @@ def test_estimate_pr_deep_preserves_graph_full_depth(
     assert "source-changed replay scope" not in res.output
 
 
+def test_estimate_counts_bazel_build_info_tus(snap_path: Path, tmp_path: Path) -> None:
+    # A Bazel aquery --build-info is replayed via BazelAdapter by the real scan, so
+    # the estimate must count its compile actions instead of routing the JSON object
+    # through the compile-DB counter and reporting 0 TUs (Codex review).
+    from abicheck.service_scan import estimate_scan
+
+    aquery = tmp_path / "aq.json"
+    aquery.write_text(
+        json.dumps(
+            {
+                "artifacts": [
+                    {"id": "1", "pathFragmentId": "10"},
+                    {"id": "2", "pathFragmentId": "11"},
+                ],
+                "actions": [
+                    {
+                        "targetId": "100",
+                        "mnemonic": "CppCompile",
+                        "arguments": ["/usr/bin/gcc", "-std=c++17", "-c", "foo/foo.cc"],
+                        "primaryOutputId": "2",
+                    }
+                ],
+                "targets": [{"id": "100", "label": "//foo:foo"}],
+                "pathFragments": [
+                    {"id": "10", "label": "foo.cc", "parentId": "20"},
+                    {"id": "11", "label": "foo.o", "parentId": "20"},
+                    {"id": "20", "label": "foo"},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    est = estimate_scan(
+        ScanRequest(
+            binaries=[snap_path], build_info=aquery, depth="source", mode="audit"
+        )
+    )
+    l3 = next(e for e in est if e.layer == "L3_build")
+    assert l3.tus >= 1  # the CppCompile action counted, not 0
+    assert any("Bazel" in e.note for e in est)
+
+
 def test_estimate_binary_depth_suppresses_header_cost(
     snap_path: Path, header: Path
 ) -> None:
