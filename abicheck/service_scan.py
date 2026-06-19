@@ -455,19 +455,20 @@ def estimate_scan(
         )
     collect_mode = level_to_collect_mode(resolved, eff_depth)
 
-    # A --build-info that is an `abicheck collect` pack dir is loaded by the real
-    # scan and supplies its own L3 compile units, so the estimate must count them
-    # too — else a pack-only input reports 0 TUs and undersizes the budget (Codex
-    # review). A Bazel aquery/cquery jsonproto is routed through the Bazel adapter
-    # by the real scan, so count its compile actions the same way. A raw compile DB
-    # / source tree is counted otherwise.
+    # Count TUs from the *same* effective build-info the real scan uses
+    # (`req.compile_db or req.build_info`) so an explicit --compile-db wins over a
+    # Bazel --build-info here too — else the estimate could price a different action
+    # graph than the scan executes (Codex review). A pack dir supplies its own L3
+    # compile units; a Bazel aquery/cquery jsonproto is routed through the Bazel
+    # adapter; a raw compile DB / source tree is counted otherwise.
+    eff_build_info = req.compile_db or req.build_info
     bazel_tus = (
-        _count_bazel_build_info_tus(req.build_info)
-        if req.build_info is not None
+        _count_bazel_build_info_tus(eff_build_info)
+        if eff_build_info is not None
         else None
     )
-    pack_tus = _count_pack_tus(req.build_info) if req.build_info is not None else None
-    compile_db = _discover_compile_db(req.sources, req.compile_db or req.build_info)
+    pack_tus = _count_pack_tus(eff_build_info) if eff_build_info is not None else None
+    compile_db = _discover_compile_db(req.sources, eff_build_info)
     if bazel_tus is not None:
         total_tus = bazel_tus
         tu_note = "Bazel aquery/cquery (build_evidence)"

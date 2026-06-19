@@ -427,6 +427,60 @@ def test_estimate_counts_bazel_build_info_tus(snap_path: Path, tmp_path: Path) -
     assert any("Bazel" in e.note for e in est)
 
 
+def test_estimate_compile_db_overrides_bazel_build_info(
+    snap_path: Path, tmp_path: Path
+) -> None:
+    # When both --compile-db and a Bazel --build-info are given, the real scan uses
+    # `req.compile_db or req.build_info` (compile DB wins); the estimate must mirror
+    # that and count the compile DB's TUs, not the Bazel action graph (Codex review).
+    from abicheck.service_scan import estimate_scan
+
+    cdb = tmp_path / "compile_commands.json"
+    cdb.write_text(
+        json.dumps(
+            [
+                {"file": "a.c", "command": "cc -c a.c", "directory": str(tmp_path)},
+                {"file": "b.c", "command": "cc -c b.c", "directory": str(tmp_path)},
+            ]
+        ),
+        encoding="utf-8",
+    )
+    aq = tmp_path / "aq.json"  # a Bazel aquery with a single CppCompile (1 TU)
+    aq.write_text(
+        json.dumps(
+            {
+                "artifacts": [{"id": "2", "pathFragmentId": "11"}],
+                "actions": [
+                    {
+                        "targetId": "100",
+                        "mnemonic": "CppCompile",
+                        "arguments": ["/usr/bin/gcc", "-c", "foo/foo.cc"],
+                        "primaryOutputId": "2",
+                    }
+                ],
+                "targets": [{"id": "100", "label": "//foo:foo"}],
+                "pathFragments": [
+                    {"id": "11", "label": "foo.o", "parentId": "20"},
+                    {"id": "20", "label": "foo"},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    est = estimate_scan(
+        ScanRequest(
+            binaries=[snap_path],
+            compile_db=cdb,
+            build_info=aq,
+            depth="source",
+            mode="audit",
+        )
+    )
+    l3 = next(e for e in est if e.layer == "L3_build")
+    assert l3.tus == 2  # the 2-TU compile DB, not the 1-action Bazel graph
+    assert not any("Bazel" in e.note for e in est)
+
+
 def test_estimate_binary_depth_suppresses_header_cost(
     snap_path: Path, header: Path
 ) -> None:
