@@ -134,10 +134,10 @@ compile:
 
 `compare` reads the block from `--config` or the nearest `.abicheck.yml` found from
 the current directory upward; `dump`/`scan` from `--config` or the one auto-discovered
-at the `--sources` tree root. `dump` applies it on its ELF/L2 header path (a
-PE/Mach-O dump scopes against the export table and doesn't consume the
-cross-toolchain flags). A malformed **explicit** `--config` fails loudly rather
-than silently dropping the settings; an auto-discovered one warns and falls back.
+at the `--sources` tree root. It is applied on every header-scoping path — ELF and
+the PE/Mach-O header parse alike. A malformed **explicit** `--config` fails loudly
+rather than silently dropping the settings; an auto-discovered one warns and falls
+back.
 
 #### Build-context capture (`compile_commands.json`) — evidence layer L3
 

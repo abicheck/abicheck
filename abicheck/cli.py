@@ -99,6 +99,7 @@ if TYPE_CHECKING:
     from .buildsource.pack import BuildSourcePack
     from .checker_types import Change, DiffResult
     from .debug_resolver import DebugArtifact
+    from .service_scan import CompileContext
     from .severity import SeverityConfig
 
 from . import __version__ as _abicheck_version
@@ -567,27 +568,14 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         raise click.BadParameter(
             f"--{effective_debug_format} is only supported for ELF binaries, not {binary_fmt.upper()}."
         )
-    if binary_fmt in ("pe", "macho"):
-        if gcc_option_tokens or gcc_options:
-            click.echo(
-                "Warning: --gcc-option/--gcc-options are not applied on the "
-                f"native {binary_fmt.upper()} dump path and will be ignored.",
-                err=True,
-            )
-        _handle_non_elf_dump(
-            so_path, binary_fmt, headers, includes, version, lang, pdb_path,
-            follow_deps, git_tag, build_id, no_git, output, public_headers,
-            public_header_dirs, build_info, sources, build_config,
-            allow_build_query, collect_mode, build_query, build_compile_db,
-            header_backend=header_backend,
-        )
-        return
 
     # Fold the project's .abicheck.yml compile: block into the L2 compile context
     # (compare↔dump↔scan parity, ADR-037 D3): the same shared resolver scan uses,
     # so a dump honors `compile.std`/`defines`/`sysroot`/`frontend`/`include_dirs`
     # for its header AST the way scan does. CLI > config; an explicit --config or
-    # the .abicheck.yml auto-discovered at the --sources root.
+    # the .abicheck.yml auto-discovered at the --sources root. Resolved *before*
+    # the format dispatch so the PE/Mach-O header-scoping path gets the same
+    # context as ELF (Codex review) — `_try_header_scoped_dump` consumes it.
     _cc, includes = resolve_compile_context(
         click.get_current_context(),
         gcc_path=gcc_path, gcc_prefix=gcc_prefix, gcc_options=gcc_options,
@@ -598,6 +586,17 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
     gcc_path, gcc_prefix, gcc_options = _cc.gcc_path, _cc.gcc_prefix, _cc.gcc_options
     gcc_option_tokens, sysroot, nostdinc = _cc.gcc_option_tokens, _cc.sysroot, _cc.nostdinc
     header_backend = _cc.frontend
+
+    if binary_fmt in ("pe", "macho"):
+        _handle_non_elf_dump(
+            so_path, binary_fmt, headers, includes, version, lang, pdb_path,
+            follow_deps, git_tag, build_id, no_git, output, public_headers,
+            public_header_dirs, build_info, sources, build_config,
+            allow_build_query, collect_mode, build_query, build_compile_db,
+            header_backend=header_backend,
+            compile_context=_cc,
+        )
+        return
 
     build_context_flags = _resolve_build_context_flags(
         effective_compile_db, headers, compile_db_filter,
@@ -674,6 +673,7 @@ def _handle_non_elf_dump(
     build_query: str | None = None,
     build_compile_db: str | None = None,
     header_backend: str = "auto",
+    compile_context: CompileContext | None = None,
 ) -> None:
     """Handle PE/Mach-O native dump path and output writing."""
     if follow_deps:
@@ -685,6 +685,7 @@ def _handle_non_elf_dump(
             public_headers=list(public_headers),
             public_header_dirs=list(public_header_dirs),
             header_backend=header_backend,
+            compile=compile_context,
         )
     except click.ClickException:
         raise

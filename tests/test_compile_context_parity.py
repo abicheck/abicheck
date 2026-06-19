@@ -721,3 +721,60 @@ def test_compare_config_include_dirs_survive_per_side_include(
     assert cfg_inc in old_inc
     # New side: no override → config dir still present.
     assert cfg_inc in new_inc
+
+
+def test_dump_pe_threads_compile_context(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A PE/Mach-O dump now folds the compile: block into header scoping too — the
+    context is resolved before the format dispatch and threaded into the non-ELF
+    path (Codex review). Previously --gcc-options were warned-and-ignored there."""
+    import abicheck.cli as cli_mod
+
+    pe = tmp_path / "foo.dll"
+    pe.write_bytes(b"MZ" + b"\x00" * 128)
+    header = tmp_path / "foo.h"
+    header.write_text("int foo(void);\n", encoding="utf-8")
+    cfg = tmp_path / ".abicheck.yml"
+    cfg.write_text("compile:\n  std: c++20\n  frontend: clang\n", encoding="utf-8")
+
+    captured: dict[str, object] = {}
+
+    def _fake_non_elf(*args: object, **kwargs: object) -> None:
+        captured.update(kwargs)
+
+    monkeypatch.setattr(cli_mod, "_handle_non_elf_dump", _fake_non_elf)
+    result = CliRunner().invoke(
+        main, ["dump", str(pe), "-H", str(header), "--config", str(cfg)]
+    )
+    assert result.exit_code == 0, result.output
+    # The merged compile context reaches the PE path (frontend folded from config)...
+    cc = captured["compile_context"]
+    assert cc is not None
+    assert getattr(cc, "frontend") == "clang"
+    assert getattr(cc, "gcc_options") == "-std=c++20"
+    assert captured["header_backend"] == "clang"
+    # ...and the old "gcc-options ignored on the native path" warning is gone.
+    assert "will be ignored" not in result.output
+
+
+def test_dump_pe_explicit_gcc_options_no_longer_warns(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import abicheck.cli as cli_mod
+
+    pe = tmp_path / "foo.dll"
+    pe.write_bytes(b"MZ" + b"\x00" * 128)
+    header = tmp_path / "foo.h"
+    header.write_text("int foo(void);\n", encoding="utf-8")
+
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(
+        cli_mod, "_handle_non_elf_dump", lambda *a, **k: captured.update(k)
+    )
+    result = CliRunner().invoke(
+        main, ["dump", str(pe), "-H", str(header), "--gcc-options", "-DPE=1"]
+    )
+    assert result.exit_code == 0, result.output
+    assert "will be ignored" not in result.output
+    assert getattr(captured["compile_context"], "gcc_options") == "-DPE=1"

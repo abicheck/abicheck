@@ -202,6 +202,7 @@ def _dump_native_binary(
     public_headers: list[Path] | None = None,
     public_header_dirs: list[Path] | None = None,
     header_backend: str = "auto",
+    compile: CompileContext | None = None,
 ) -> AbiSnapshot:
     """Dump an ABI snapshot from a native binary (ELF, PE, or Mach-O).
 
@@ -215,6 +216,8 @@ def _dump_native_binary(
 
     ``public_headers`` / ``public_header_dirs`` classify declaration provenance
     (ADR-024 Phase 1) on PE/Mach-O snapshots; a no-op for ELF and when empty.
+    ``compile`` carries the L2 cross-toolchain context (ADR-037 D3); ``run_dump``
+    threads it into the PE/Mach-O header-scoping path (``_try_header_scoped_dump``).
     """
     from . import service
     from .errors import SnapshotError, ValidationError
@@ -233,6 +236,7 @@ def _dump_native_binary(
             public_headers=public_headers,
             public_header_dirs=public_header_dirs,
             header_backend=header_backend,
+            compile=compile,
             notify=_click_notify,
         )
     except ValidationError as exc:

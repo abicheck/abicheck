@@ -374,14 +374,24 @@ class TestSmallHelpers:
         result = CliRunner().invoke(main, ["dump", str(so)])
         assert "carry only L0-L2 data" not in result.output
 
-    def test_dump_gcc_option_ignored_warning_for_non_elf(self, tmp_path) -> None:
-        # G21.5/Codex: --gcc-option(s) aren't applied on the native PE/Mach-O
-        # dump path, so the CLI warns rather than dropping them silently.
+    def test_dump_gcc_option_threaded_to_non_elf(self, tmp_path, monkeypatch) -> None:
+        # ADR-037 D3 (Codex): --gcc-option(s) are now threaded into the native
+        # PE/Mach-O header-scoping path (resolved before format dispatch), so the
+        # old "will be ignored" warning is gone and the context reaches the dump.
         import struct
+
+        import abicheck.cli as cli_mod
+
         dylib = tmp_path / "fake.dylib"
-        dylib.write_bytes(struct.pack("<I", 0xfeedfacf) + b"\x00" * 64)
+        dylib.write_bytes(struct.pack("<I", 0xFEEDFACF) + b"\x00" * 64)
+        captured: dict[str, object] = {}
+        monkeypatch.setattr(
+            cli_mod, "_handle_non_elf_dump", lambda *a, **k: captured.update(k)
+        )
         result = CliRunner().invoke(main, ["dump", str(dylib), "--gcc-option=-DX"])
-        assert "will be ignored" in result.output
+        assert result.exit_code == 0, result.output
+        assert "will be ignored" not in result.output
+        assert getattr(captured["compile_context"], "gcc_option_tokens") == ("-DX",)
 
     def test_dump_gcc_option_help(self) -> None:
         # G21.5: the repeatable --gcc-option is documented on dump.
