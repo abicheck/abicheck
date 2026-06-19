@@ -544,12 +544,12 @@ def _source_tree(tmp_path):
 
 
 def test_dump_collect_mode_build_collects_l3_only(tmp_path):
-    """ADR-033 D2/Phase-1: `dump --collect-mode build` captures L3 build context
+    """ADR-033 D2/Phase-1: `dump --depth build` captures L3 build context
     only — no L4 source replay or L5 graph."""
     tree = _source_tree(tmp_path)
     out = tmp_path / "s.json"
     result = CliRunner().invoke(main, [
-        "dump", "--sources", str(tree), "--collect-mode", "build", "-o", str(out),
+        "dump", "--sources", str(tree), "--depth", "build", "-o", str(out),
     ])
     assert result.exit_code == 0, result.output
     bs = load_snapshot(out).build_source
@@ -563,7 +563,7 @@ def test_dump_collect_mode_build_collects_l3_only(tmp_path):
 
 
 def test_dump_collect_mode_build_filters_pre_captured_pack(tmp_path):
-    """ADR-033 D2 (Codex review): `--collect-mode build` must strip L4/L5 from a
+    """ADR-033 D2 (Codex review): `--depth build` must strip L4/L5 from a
     pre-captured pack too, so an L3-only run can't smuggle in source evidence."""
     runner = CliRunner()
     cdb = _write_cdb(tmp_path, "c++17")
@@ -573,7 +573,7 @@ def test_dump_collect_mode_build_filters_pre_captured_pack(tmp_path):
     assert BuildSourcePack.load(ev).source_graph is not None  # full pack
     out = tmp_path / "s.json"
     result = runner.invoke(main, [
-        "dump", "--build-info", str(ev), "--collect-mode", "build", "-o", str(out),
+        "dump", "--build-info", str(ev), "--depth", "build", "-o", str(out),
     ])
     assert result.exit_code == 0, result.output
     bs = load_snapshot(out).build_source
@@ -607,11 +607,11 @@ def test_recommend_collect_mode_cli():
 
 
 def test_dump_collect_mode_off_embeds_nothing(tmp_path):
-    """`--collect-mode off` collects no evidence even with a source tree."""
+    """`--depth headers` collects no source evidence even with a source tree."""
     tree = _source_tree(tmp_path)
     out = tmp_path / "s.json"
     result = CliRunner().invoke(main, [
-        "dump", "--sources", str(tree), "--collect-mode", "off", "-o", str(out),
+        "dump", "--sources", str(tree), "--depth", "headers", "-o", str(out),
     ])
     assert result.exit_code == 0, result.output
     assert load_snapshot(out).build_source is None
@@ -621,10 +621,10 @@ def test_compare_collect_mode_without_packs_is_noted(tmp_path):
     old_snap = _make_snap(tmp_path, "old.json", "1.0")
     new_snap = _make_snap(tmp_path, "new.json", "2.0")
     result = CliRunner().invoke(main, [
-        "compare", str(old_snap), str(new_snap), "--collect-mode", "build",
+        "compare", str(old_snap), str(new_snap), "--depth", "build",
     ])
     assert result.exit_code in (0, 2, 4), result.output
-    assert "collect-mode build" in result.stderr
+    assert "'build'" in result.stderr
 
 
 def test_compare_without_evidence_is_unchanged(tmp_path):

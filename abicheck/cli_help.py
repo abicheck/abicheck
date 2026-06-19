@@ -71,7 +71,7 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
             "name": "Build/source evidence (L3–L5)",
             "options": [
                 "--old-build-info", "--new-build-info", "--old-sources",
-                "--new-sources", "--collect-mode",
+                "--new-sources", "--depth", "--max",
             ],
         },
         {
@@ -169,7 +169,7 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
         {
             "name": "Build/source evidence (L3–L5)",
             "options": [
-                "--depth", "--max", "--collect-mode", "--build-info", "--sources",
+                "--depth", "--max", "--build-info", "--sources",
                 "--build-dir", "--compile-db-filter",
                 "--build-query", "--build-compile-db", "--config",
                 "--allow-build-query",

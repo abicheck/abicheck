@@ -106,11 +106,10 @@ scan degrades gracefully and L0–L2 stay authoritative.
 | `compile-db` | scan (dump folds into `build-info`) | Explicit `compile_commands.json` path. |
 | `build-config` | scan, dump | Trusted `.abicheck.yml`; enables `build.query` together with `allow-build-query`. |
 | `allow-build-query` | scan, dump | Permit a trusted `build.query` subprocess to emit a compile DB (default `false`; only existing build outputs are read otherwise). |
-| `collect-mode` | dump | How much evidence dump collects: `off`, `build`, `graph-build`, `source-changed`, `source-target`, `graph-summary`, `graph-full`. (scan derives this from the level inputs below.) |
+| `depth` | scan, dump | Evidence-depth dial: `binary`, `headers`, `build`, `source`, or `full`. Maps to `--depth`. (scan can also derive this from the level inputs below.) |
 | `baseline` | scan | Previous build's dump/library to compare against (or use `abi-baseline` to auto-fetch one). |
 | `scan-mode` | scan | Fixed `(L,S)` preset: `pr` (default), `pr-deep`, `baseline`, `audit`. |
 | `source-method` | scan | Precise S-axis: `s0`…`s6`, or `auto` (risk-driven, opt-in). |
-| `depth` | scan | Coarse L-axis: `headers`, `build`, `source`, `full`, `graph`. `source-method` wins if both set. |
 | `since` | scan | Focus the scan on files changed vs a git ref (e.g. `origin/main`). |
 | `changed-path` | scan | Changed path(s) to focus on (space-separated; alternative to `since`). |
 | `budget` | scan | Time guard (e.g. `15m`). The step **fails** on overflow (`verdict: BUDGET_OVERFLOW`) — a budget never silently shrinks scope. |
@@ -401,7 +400,7 @@ such snapshots) carries the L3/L4/L5 findings — no out-of-band directories:
           new-library: build/libfoo.so
           header: include/
           sources: .
-          collect-mode: source-target   # full L3+L4+L5 for a baseline
+          depth: source                 # full L3+L4+L5 for a baseline
           output-file: abi-baseline.json
 ```
 

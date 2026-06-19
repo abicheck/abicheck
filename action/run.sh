@@ -123,8 +123,8 @@ if [[ "$MODE" == "dump" ]]; then
   # compile_commands.json. (See action input `build-info`.)
   add_single_flag "--sources" "${INPUT_SOURCES:-}"
   add_single_flag "--build-info" "${INPUT_BUILD_INFO:-${INPUT_COMPILE_DB:-}}"
-  add_single_flag "--build-config" "${INPUT_BUILD_CONFIG:-}"
-  add_single_flag "--collect-mode" "${INPUT_COLLECT_MODE:-}"
+  add_single_flag "--config" "${INPUT_BUILD_CONFIG:-}"
+  add_single_flag "--depth" "${INPUT_DEPTH:-}"
   if [[ "${INPUT_ALLOW_BUILD_QUERY:-false}" == "true" ]]; then
     CMD+=(--allow-build-query)
   fi

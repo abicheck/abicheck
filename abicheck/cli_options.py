@@ -822,26 +822,6 @@ def build_source_dump_options(func: F) -> F:
     from pathlib import Path
 
     func = click.option(
-        "--collect-mode",
-        "collect_mode",
-        type=click.Choice(
-            [
-                "off",
-                "build",
-                "graph-build",
-                "source-changed",
-                "source-target",
-                "graph-summary",
-                "graph-full",
-            ]
-        ),
-        default="source-target",
-        show_default=False,
-        hidden=True,
-        help="DEPRECATED (ADR-037 D5): internal ADR-033 D2 evidence mode. Prefer "
-        "the unified --depth dial; kept as a hidden alias for one release.",
-    )(func)
-    func = click.option(
         "--depth",
         "depth",
         type=DEPTH_PARAM,
@@ -936,34 +916,19 @@ def evidence_options(func: F) -> F:
     **embedded** in each snapshot (single-artifact UX). The optional
     ``--old-build-info`` / ``--new-build-info`` and ``--old-sources`` /
     ``--new-sources`` point at out-of-band pack directories to supply or
-    override those facts per side; ``--collect-mode`` selects the inline
-    collection mode (ADR-033 D2). All folded into the verdict as ordinary
+    override those facts per side; ``--depth`` selects how deep the inline
+    collection runs (ADR-037 D5). All folded into the verdict as ordinary
     findings, never overriding artifact-backed ABI verdicts (ADR-028 D3).
     Applied bottom-up, so listed in reverse of displayed order.
     """
     from pathlib import Path
 
     pack_dir = click.Path(exists=True, file_okay=False, path_type=Path)
-    func = click.option(
-        "--collect-mode",
-        "collect_mode",
-        type=click.Choice(
-            [
-                "off",
-                "build",
-                "graph-build",
-                "source-changed",
-                "source-target",
-                "graph-summary",
-                "graph-full",
-            ]
-        ),
-        default="off",
-        show_default=False,
-        hidden=True,
-        help="DEPRECATED (ADR-037 D5): internal ADR-033 D2 evidence mode. Prefer "
-        "the unified --depth dial; kept as a hidden alias for one release.",
-    )(func)
+    # --build-info also accepts a file (a raw compile_commands.json), not just a
+    # build dir / pack dir — the per-side replacement for the removed
+    # deep-compare, whose build-info option took dirs *or* a compile DB file
+    # (Codex review). The later pack/raw validation still distinguishes them.
+    build_info_path = click.Path(exists=True, path_type=Path)
     func = click.option(
         "--max",
         "max_depth",
@@ -1002,16 +967,18 @@ def evidence_options(func: F) -> F:
     func = click.option(
         "--new-build-info",
         "new_build_info",
-        type=pack_dir,
+        type=build_info_path,
         default=None,
-        help="Out-of-band L3 build-info pack for the new side (overrides embedded).",
+        help="Out-of-band L3 build-info for the new side: a build dir, a "
+        "compile_commands.json, or a pack (overrides embedded).",
     )(func)
     func = click.option(
         "--old-build-info",
         "old_build_info",
-        type=pack_dir,
+        type=build_info_path,
         default=None,
-        help="Out-of-band L3 build-info pack for the old side (overrides embedded).",
+        help="Out-of-band L3 build-info for the old side: a build dir, a "
+        "compile_commands.json, or a pack (overrides embedded).",
     )(func)
     return func
 
@@ -1057,7 +1024,7 @@ FAMILY_FLAGS: dict[str, frozenset[str]] = {
     "output": frozenset({"--format", "--output"}),
     # Two-sided evidence family (ADR-037 D3 ``@evidence_options``): registered
     # but *not* required — only commands that take source depth (``compare``)
-    # compose it; the hidden deprecated ``--collect-mode`` alias is omitted here.
+    # compose it.
     "evidence": frozenset(
         {
             "--depth",
@@ -1152,122 +1119,6 @@ def count_visible_options(cmd: object) -> int:
         ):
             n += 1
     return n
-
-
-#: Flag names knowingly carrying two defaults across decorators, deferred to a
-#: later phase rather than hidden. ``--collect-mode`` differs between the dump
-#: embed default (source-target) and the compare read default (off); it is now a
-#: hidden deprecated alias behind the unified ``--depth`` dial (G22 Phase 3) and
-#: its two-default-ness rides out the deprecation window in ``DEPRECATED_FLAGS``.
-DEFERRED_MULTI_DEFAULT: frozenset[str] = frozenset({"--collect-mode"})
-
-
-# ── ADR-037 D5 / §Backward-compat: deprecated-flag registry (G22 Phase 3) ─────
-#
-# Single source of truth for renamed/removed CLI surface. Each entry records the
-# replacement and a one-line note; the deprecation *resolver* + window-enforcing
-# test land in Phase 7 (kept advisory until 1.0). Today the live deprecations
-# already warn at their option sites (``--collect-mode`` in the command bodies,
-# ``--depth graph`` in ``cli_params.DepthParam``); this table documents them in
-# one place so nothing is removed silently.
-DEPRECATED_FLAGS: dict[str, tuple[str, str]] = {
-    "--collect-mode": (
-        "--depth",
-        "internal ADR-033 evidence mode; use the unified --depth dial (ADR-037 D5).",
-    ),
-    "--depth=graph": (
-        "--depth=source",
-        "the L5 graph is built internally at --depth source (ADR-037 D6).",
-    ),
-}
-
-
-# ── ADR-037 §Backward-compat: the deprecation-window resolver (G22 Phase 7) ───
-#
-# Scaffolding for the 1.0 deprecation window. ``DEPRECATED_FLAGS`` is the single
-# registry of renamed/removed surface (name → (replacement, reason)); this
-# resolver is the one place that turns a *used* spelling into its replacement +
-# note. It stays **advisory** until 1.0 (no removal/hard-fail) per ADR-037; at
-# 1.0 the switch-on is flipping the window test from advisory to ERROR. Two key
-# shapes are supported: a bare ``--flag`` (flag-level rename) and a
-# ``--flag=value`` token (a deprecated *value* of a live flag, e.g.
-# ``--depth=graph`` → ``--depth=source``).
-
-
-def _argv_has_flag(argv: Sequence[str], flag: str) -> bool:
-    """True if ``flag`` appears in *argv* as ``--flag`` or ``--flag=...``."""
-    return any(tok == flag or tok.startswith(f"{flag}=") for tok in argv)
-
-
-def _argv_has_flag_value(argv: Sequence[str], flag: str, value: str) -> bool:
-    """True if *argv* sets ``flag`` to ``value`` (``--flag value`` or ``--flag=value``)."""
-    tokens = list(argv)
-    for i, tok in enumerate(tokens):
-        if tok == f"{flag}={value}":
-            return True
-        if tok == flag and i + 1 < len(tokens) and tokens[i + 1] == value:
-            return True
-    return False
-
-
-def resolve_deprecated_flag(spelling: str) -> tuple[str, str] | None:
-    """Resolve a deprecated flag/value *spelling* to ``(replacement, reason)``.
-
-    ``spelling`` is a ``DEPRECATED_FLAGS`` key — a bare ``--flag`` or a
-    ``--flag=value`` token. Returns ``None`` when the spelling is not deprecated.
-    The single lookup point so a front-end never hard-codes a replacement.
-    """
-    return DEPRECATED_FLAGS.get(spelling)
-
-
-def deprecated_flags_in_argv(
-    argv: Sequence[str] | None = None,
-) -> list[tuple[str, str, str]]:
-    """Scan *argv* for every deprecated spelling present (ADR-037 §Backward-compat).
-
-    Returns ``(spelling_used, replacement, reason)`` per match, in registry order.
-    Handles both flag-level renames (bare ``--flag`` key) and value-level
-    deprecations (``--flag=value`` key, matched as ``--flag value`` too). Used by
-    :func:`note_deprecated_flags` and the advisory window test; the live per-flag
-    stderr notes (``--collect-mode``, ``--ast-frontend``) keep their existing
-    sites until the 1.0 switch-on routes them all through here.
-    """
-    import sys
-
-    tokens = list(sys.argv if argv is None else argv)
-    found: list[tuple[str, str, str]] = []
-    for spelling, (replacement, reason) in DEPRECATED_FLAGS.items():
-        flag, sep, value = spelling.partition("=")
-        hit = (
-            _argv_has_flag_value(tokens, flag, value)
-            if sep
-            else _argv_has_flag(tokens, flag)
-        )
-        if hit:
-            found.append((spelling, replacement, reason))
-    return found
-
-
-def note_deprecated_flags(argv: Sequence[str] | None = None) -> str | None:
-    """One-line stderr note covering *all* deprecated spellings in *argv*, or None.
-
-    Spans the whole ``DEPRECATED_FLAGS`` registry — the form the 1.0 switch-on
-    will adopt. A replacement-only message would be ambiguous across the registry
-    — e.g. ``--collect-mode`` → ``--depth`` and the value-level
-    ``--depth=graph`` → ``--depth=source`` in the same run — so the explicit
-    ``spelling → replacement`` arrow pairs each deprecated token with its own
-    target, which is why this form keeps the arrow rather than matching the
-    sibling's simpler phrasing.
-    """
-    found = deprecated_flags_in_argv(argv)
-    if not found:
-        return None
-    parts = [f"{spelling} → {replacement}" for spelling, replacement, _ in found]
-    verb = "is" if len(found) == 1 else "are"
-    return (
-        f"warning: {', '.join(s for s, _, _ in found)} {verb} deprecated "
-        f"(ADR-037); use {', '.join(parts)}."
-    )
 
 
 #: ADR-037 D10.3 — the single MCP-param ⇄ CLI-flag name map. The ``abi_compare``

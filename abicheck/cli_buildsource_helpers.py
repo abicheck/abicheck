@@ -132,10 +132,11 @@ def diff_embedded_build_source(
     if old_pack is None and new_pack is None:
         if collect_mode != "off":
             click.echo(
-                f"Note: --collect-mode {collect_mode} requested but no build-info/"
-                "source facts were embedded or supplied; inline collection for "
-                "this mode is not yet available. Use `abicheck collect` then embed "
-                "with `dump --build-info/--sources` (or pass --old/new pack dirs).",
+                f"Note: --depth collected evidence mode '{collect_mode}' was "
+                "requested but no build-info/source facts were embedded or "
+                "supplied; inline collection for this mode is not yet available. "
+                "Use `abicheck collect` then embed with `dump --build-info/"
+                "--sources` (or pass --old/new pack dirs).",
                 err=True,
             )
         # require_evidence still fires with no packs at all: every required layer

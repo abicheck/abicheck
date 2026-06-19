@@ -481,7 +481,6 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
              build_info: Path | None = None, sources: Path | None = None,
              build_config: Path | None = None, allow_build_query: bool = False,
              build_query: str | None = None, build_compile_db: str | None = None,
-             collect_mode: str = "source-target",
              depth: str | None = None, max_depth: bool = False,
              _resolved_compile_context: CompileContext | None = None) -> None:
     """Dump ABI snapshot of a shared library to JSON.
@@ -493,21 +492,10 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
     """
     _setup_verbosity(verbose)
 
-    # Resolve the --depth/--max preset into the underlying --collect-mode before
-    # any dump path runs, so every branch (source-only / PE-Mach-O / ELF) embeds
-    # the same evidence depth (G21.1).
-    collect_mode_explicit = (
-        click.get_current_context().get_parameter_source("collect_mode")
-        == click.core.ParameterSource.COMMANDLINE
-    )
-    if collect_mode_explicit:
-        click.echo(
-            "warning: --collect-mode is deprecated (ADR-037 D5); use --depth.",
-            err=True,
-        )
-    collect_mode = resolve_dump_depth(
-        depth, max_depth, collect_mode, collect_mode_explicit,
-    )
+    # Resolve the --depth/--max preset into the internal collect mode before any
+    # dump path runs, so every branch (source-only / PE-Mach-O / ELF) embeds the
+    # same evidence depth (G21.1). With no preset, dump embeds at "source-target".
+    collect_mode = resolve_dump_depth(depth, max_depth, "source-target")
     # --depth binary suppresses the L2 header AST (symbols-only dump, ADR-037 D5;
     # the `symbols` alias is normalized to `binary` by DEPTH_PARAM). A compile DB
     # only feeds the header parse, so discard it with the headers — otherwise
@@ -519,16 +507,16 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         compile_db_path = None
         compile_db_path_alt = None
 
-    # An *explicitly* requested deep evidence depth (--depth/--max or an explicit
-    # --collect-mode) collects nothing without a source tree / build context:
-    # _write_snapshot_output only embeds when --sources/--build-info is given.
-    # Warn loudly rather than silently writing an L0-L2 snapshot for an
-    # explicitly-requested deep depth (Codex review). The bare default
-    # (collect_mode "source-target" with no flag) stays silent — embedding is a
-    # no-op there by design. G21.7-style fail-loud (a warning, not an error).
+    # An *explicitly* requested deep evidence depth (--depth/--max) collects
+    # nothing without a source tree / build context: _write_snapshot_output only
+    # embeds when --sources/--build-info is given. Warn loudly rather than
+    # silently writing an L0-L2 snapshot for an explicitly-requested deep depth
+    # (Codex review). The bare default (collect_mode "source-target" with no
+    # flag) stays silent — embedding is a no-op there by design. G21.7-style
+    # fail-loud (a warning, not an error).
     depth_requested = depth is not None or max_depth
     if (
-        (depth_requested or collect_mode_explicit)
+        depth_requested
         and collect_mode != "off"
         and sources is None and build_info is None
     ):
@@ -1223,8 +1211,8 @@ def _embed_inline_source_side(
         )
         return input_path, None, kept_build_info
     # The --depth dial governs how deep to collect. When it resolves to "off"
-    # (--depth binary/headers, or an explicit --collect-mode off) there is no
-    # source collection to do, so the tree can't contribute at this depth —
+    # (--depth binary/headers) there is no source collection to do, so the tree
+    # can't contribute at this depth —
     # ignore it with a note rather than silently deepening the run (matches the
     # old deep-compare, which never auto-bumped the depth).
     if collect_mode == "off":
@@ -1432,7 +1420,7 @@ def _embed_inline_source_side(
 # --dwarf-only, --debug-root{,1,2}, --debuginfod[-url], --debug-format (+hidden
 # --btf/--ctf/--dwarf): the shared local-ELF debug-resolution family.
 @debug_resolution_options
-@evidence_options  # --depth/--max, --old/new-build-info, --old/new-sources, --collect-mode
+@evidence_options  # --depth/--max, --old/new-build-info, --old/new-sources
 @adr027_compare_options  # ADR-027: --pattern-verdicts/--explain-patterns/--surface-metrics
 @click.option("-v", "--verbose", is_flag=True, default=False,
               help="Enable verbose/debug output.")
@@ -1488,7 +1476,6 @@ def compare_cmd(
     verbose: bool,
     old_build_info: Path | None = None, new_build_info: Path | None = None,
     old_sources: Path | None = None, new_sources: Path | None = None,
-    collect_mode: str = "off",
     depth: str | None = None, max_depth: bool = False,
     probe_matrix_old: Path | None = None,
     probe_matrix_new: Path | None = None,
@@ -1652,20 +1639,10 @@ def compare_cmd(
     if annotate_additions and not annotate:
         raise click.UsageError("--annotate-additions requires --annotate")
 
-    # Fold the unified --depth/--max dial into the underlying collect mode
-    # (ADR-037 D5), the same way `dump` does. The hidden
-    # --collect-mode alias still works but warns; --depth binary suppresses the
-    # L2 header AST (symbols-only).
-    collect_mode_explicit = (
-        click.get_current_context().get_parameter_source("collect_mode")
-        == click.core.ParameterSource.COMMANDLINE
-    )
-    if collect_mode_explicit:
-        click.echo(
-            "warning: --collect-mode is deprecated (ADR-037 D5); use --depth.",
-            err=True,
-        )
-    collect_mode = resolve_dump_depth(depth, max_depth, collect_mode, collect_mode_explicit)
+    # Fold the unified --depth/--max dial into the internal collect mode
+    # (ADR-037 D5), the same way `dump` does. With no preset, compare reads at
+    # "off"; --depth binary suppresses the L2 header AST (symbols-only).
+    collect_mode = resolve_dump_depth(depth, max_depth, "off")
     if depth == "binary":
         headers, old_headers_only, new_headers_only = (), (), ()
 
@@ -1692,11 +1669,10 @@ def compare_cmd(
         show_impact = True
 
     # ADR-037 D4: the precise S-axis lives in config (source.method). It sets the
-    # collection depth only when the user gave no explicit --depth/--max/
-    # --collect-mode signal (CLI > config).
+    # collection depth only when the user gave no explicit --depth/--max signal
+    # (CLI > config).
     if (
         resolved_cfg.source_method
-        and not collect_mode_explicit
         and depth is None
         and not max_depth
     ):
@@ -1926,10 +1902,12 @@ def compare_cmd(
 @main.command("recommend-collect-mode")
 @click.argument("paths", nargs=-1)
 def recommend_collect_mode_cmd(paths: tuple[str, ...]) -> None:
-    """Recommend a `--collect-mode` from a PR's changed paths (ADR-033 D3).
+    """Recommend an evidence collection scope from a PR's changed paths (ADR-033 D3).
 
-    Prints `build` for build-system-only changes, `source-changed` when sources
-    or headers changed, else `off`. The artifact compare stays authoritative —
+    Prints the internal collection mode a CI job should use: `build` for
+    build-system-only changes, `source-changed` when sources or headers changed,
+    else `off`. Use it to pick the `--depth` rung (build → `--depth build`,
+    source-changed → `--depth source`). The artifact compare stays authoritative —
     this only scopes which optional evidence a CI job should collect.
     """
     from .buildsource.source_replay import recommend_collect_mode

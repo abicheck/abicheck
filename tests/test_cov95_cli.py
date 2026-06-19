@@ -247,25 +247,25 @@ class TestSmallHelpers:
     def test_resolve_dump_depth_maps_each_depth(self, depth: str, expected: str) -> None:
         from abicheck.cli_dump_helpers import resolve_dump_depth
 
-        assert resolve_dump_depth(depth, False, "source-target", False) == expected
+        assert resolve_dump_depth(depth, False, "source-target") == expected
 
     def test_resolve_dump_depth_max_is_full(self) -> None:
         from abicheck.cli_dump_helpers import resolve_dump_depth
 
-        assert resolve_dump_depth(None, True, "source-target", False) == "graph-full"
+        assert resolve_dump_depth(None, True, "source-target") == "graph-full"
 
-    def test_resolve_dump_depth_no_preset_keeps_collect_mode(self) -> None:
+    def test_resolve_dump_depth_no_preset_returns_default_mode(self) -> None:
         from abicheck.cli_dump_helpers import resolve_dump_depth
 
-        assert resolve_dump_depth(None, False, "build", True) == "build"
+        # No --depth/--max preset → the command's default collect mode is returned.
+        assert resolve_dump_depth(None, False, "build") == "build"
+        assert resolve_dump_depth(None, False, "off") == "off"
 
     def test_resolve_dump_depth_conflicts_raise(self) -> None:
         from abicheck.cli_dump_helpers import resolve_dump_depth
 
         with pytest.raises(click.UsageError):
-            resolve_dump_depth("source", False, "build", True)  # depth + explicit mode
-        with pytest.raises(click.UsageError):
-            resolve_dump_depth("build", True, "source-target", False)  # --max + --depth build
+            resolve_dump_depth("build", True, "source-target")  # --max + --depth build
 
     def test_help_option_groups_render(self) -> None:
         # G21.8/M1: rich-click renders option-group panels so the big commands'
@@ -367,8 +367,8 @@ class TestSmallHelpers:
         assert "carry only L0-L2 data" in result.output
 
     def test_dump_default_depth_no_warning(self, tmp_path) -> None:
-        # The bare default (no --depth/--collect-mode) must NOT warn — embedding
-        # is a no-op there by design, so a plain dump stays quiet about evidence.
+        # The bare default (no --depth) must NOT warn — embedding is a no-op
+        # there by design, so a plain dump stays quiet about evidence.
         so = tmp_path / "fake.so"
         so.write_bytes(b"\x7fELF")
         result = CliRunner().invoke(main, ["dump", str(so)])
@@ -399,18 +399,19 @@ class TestSmallHelpers:
         norm = out.replace("│", "").replace("\n", "").replace(" ", "")
         assert "--gcc-option" in norm
 
-    def test_dump_depth_help_and_mutual_exclusion(self) -> None:
+    def test_dump_depth_help_and_max_mutual_exclusion(self) -> None:
         runner = CliRunner()
         help_out = runner.invoke(main, ["dump", "--help"])
         assert help_out.exit_code == 0
         assert "--depth" in help_out.output and "--max" in help_out.output
-        # --depth and --collect-mode are mutually exclusive (resolved before any
-        # binary access, so a source-only invocation surfaces the error).
+        # --max is shorthand for --depth full; combining it with a *different*
+        # --depth is a usage error (resolved before any binary access, so a
+        # source-only invocation surfaces the error).
         clash = runner.invoke(
-            main, ["dump", "--depth", "source", "--collect-mode", "build"]
+            main, ["dump", "--depth", "source", "--max"]
         )
         assert clash.exit_code != 0
-        assert "mutually exclusive" in clash.output
+        assert "shorthand for --depth full" in clash.output
 
     def test_resolve_per_side_options_overrides(self, tmp_path: Path) -> None:
         h = (tmp_path / "h.h",)

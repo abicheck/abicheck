@@ -305,10 +305,11 @@ def test_gate_flags_conflicting_default(
     assert len(msgs) == 1 and "--mode" in msgs[0], msgs
 
 
-def test_deferred_multi_default_is_not_flagged(
+def test_conflicting_defaults_always_flagged(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A flag on the ``DEFERRED_MULTI_DEFAULT`` allowlist is skipped (Phase 3)."""
+    """With the deprecation-era allowlist gone, any flag declared with two
+    different defaults across shared decorators is flagged (ADR-037 D10.4)."""
     import scripts.check_ai_readiness as gate
 
     pkg = tmp_path / "abicheck"
@@ -325,7 +326,8 @@ def test_deferred_multi_default_is_not_flagged(
 
     findings = gate.Findings()
     gate._check_one_default_per_flag(findings)
-    assert [m for c, m in findings.errors if c == "cli-contract"] == []
+    msgs = [m for c, m in findings.errors if c == "cli-contract"]
+    assert len(msgs) == 1 and "--collect-mode" in msgs[0], msgs
 
 
 # ── Gate tables mirror the cli_options source of truth ───────────────────────
@@ -349,7 +351,6 @@ def test_gate_tables_mirror_cli_options() -> None:
     assert gate._INTENTIONAL_SUBSET_DECORATORS == frozenset(
         (cmd, co.FAMILY_DECORATOR[fam]) for (cmd, fam) in co.INTENTIONAL_SUBSET
     )
-    assert gate._DEFERRED_MULTI_DEFAULT_FLAGS == co.DEFERRED_MULTI_DEFAULT
 
 
 # ── D10.3: MCP ⇄ CLI name-map completeness (ADR-037 / G22 Phase 6) ───────────
@@ -500,66 +501,6 @@ def test_ast_frontend_threads_to_l4_extractor(
     assert captured.get("extractor") == "clang"
 
 
-# ── G22 Phase 7: DEPRECATED_FLAGS resolver (ADR-037 §Backward-compat) ─────────
-
-
-def test_every_deprecated_flag_resolves() -> None:
-    """Table-driven: every ``DEPRECATED_FLAGS`` entry resolves to a non-empty
-    replacement + reason via the single resolver (advisory window scaffolding)."""
-    from abicheck import cli_options as co
-
-    assert co.DEPRECATED_FLAGS, "registry must not be empty"
-    for spelling, (replacement, reason) in co.DEPRECATED_FLAGS.items():
-        resolved = co.resolve_deprecated_flag(spelling)
-        assert resolved == (replacement, reason)
-        assert replacement and replacement != spelling, spelling
-        assert reason.strip(), spelling
-        # The replacement must itself be a *live* spelling, never another
-        # deprecated one (no alias-to-alias chains).
-        assert spelling not in {replacement}
-        assert replacement not in co.DEPRECATED_FLAGS, (
-            f"{spelling} resolves to deprecated {replacement}"
-        )
-
-
-def test_resolve_unknown_flag_is_none() -> None:
-    from abicheck.cli_options import resolve_deprecated_flag
-
-    assert resolve_deprecated_flag("--ast-frontend") is None
-    assert resolve_deprecated_flag("--not-a-flag") is None
-
-
-@pytest.mark.parametrize(
-    "argv, expected",
-    [
-        (["x", "--collect-mode", "graph-full"], ["--collect-mode"]),
-        # value-level deprecation: --depth=graph (both spaced + = forms).
-        (["x", "--depth", "graph"], ["--depth=graph"]),
-        (["x", "--depth=graph"], ["--depth=graph"]),
-        # a live --depth value is NOT flagged.
-        (["x", "--depth", "source"], []),
-        (["x", "compare", "a", "b"], []),
-    ],
-)
-def test_deprecated_flags_in_argv(argv: list[str], expected: list[str]) -> None:
-    """The argv scanner finds each deprecated spelling (flag- and value-level)."""
-    from abicheck.cli_options import deprecated_flags_in_argv
-
-    found = [s for s, _, _ in deprecated_flags_in_argv(argv)]
-    assert found == expected
-
-
-def test_note_deprecated_flags_combines() -> None:
-    """The generic note covers multiple deprecated spellings in one line."""
-    from abicheck.cli_options import note_deprecated_flags
-
-    assert note_deprecated_flags(["x", "compare", "a", "b"]) is None
-    note = note_deprecated_flags(["x", "--collect-mode", "build", "--depth=graph"])
-    assert note is not None
-    assert "--collect-mode" in note and "--depth=graph" in note
-    assert "--depth" in note and "ADR-037" in note
-
-
 @pytest.mark.parametrize("name", ["dump", "scan"])
 def test_project_config_flag_is_config_not_build_config(name: str) -> None:
     """`--build-config` was renamed to `--config` (ADR-037 D4) to match `compare`
@@ -578,7 +519,7 @@ def test_project_config_flag_is_config_not_build_config(name: str) -> None:
 _OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
     "compare": (
         "--annotate", "--annotate-additions", "--ast-frontend", "--btf", "--bundle-cohort", "--bundle-system-providers",
-        "--collapse-versioned-symbols", "--collect-mode", "--config", "--ctf", "--debug-format", "--debug-info1",
+        "--collapse-versioned-symbols", "--config", "--ctf", "--debug-format", "--debug-info1",
         "--debug-info2", "--debug-root", "--debug-root1", "--debug-root2", "--debuginfod", "--debuginfod-url",
         "--demangle", "--depth", "--devel-pkg1", "--devel-pkg2", "--dso-only", "--dwarf",
         "--dwarf-only", "--exit-code-scheme", "--explain-patterns", "--fail-on-removed-library", "--follow-deps", "--format",

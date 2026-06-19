@@ -64,11 +64,11 @@ POLICY_FILE_PARAM = PolicyFileParam()
 class DepthParam(click.ParamType):
     """Click type for the unified ``--depth`` dial (ADR-037 D5/D6).
 
-    Accepts the user-facing ladder ``{symbols,headers,build,source,full}`` and
-    resolves deprecated spellings (currently the G21 ``graph`` rung → ``source``)
-    to their replacement, printing a one-line stderr deprecation note. The L5
-    graph is built internally at ``--depth source`` (D6), so ``graph`` is no
-    longer a user-facing rung — but it keeps working for one release.
+    Accepts the user-facing ladder ``{binary,headers,build,source,full}`` and
+    resolves the remaining deprecated spelling (``symbols`` → ``binary``) to its
+    replacement, printing a one-line stderr deprecation note. The L5 graph is
+    built internally at ``--depth source`` (D6), so ``graph`` is not a user-facing
+    rung (it was removed outright as part of the pre-1.0 CLI clean-up).
     """
 
     name = "depth"
@@ -82,8 +82,7 @@ class DepthParam(click.ParamType):
             return v
         if v in DEPRECATED_DEPTHS:
             replacement = DEPRECATED_DEPTHS[v].value
-            # Generic note covering every deprecated rung (graph→source, the L5
-            # graph is built internally at --depth source; symbols→binary, the
+            # Note covering the remaining deprecated rung (symbols→binary, the
             # evidence-named rung — G22 Phase 6).
             click.echo(
                 f"warning: --depth {v} is deprecated (ADR-037 D5/D6); use "

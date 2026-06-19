@@ -16,8 +16,9 @@
 """Unified ``--depth`` dial + L5-internal graph (ADR-037 D5/D6 / G22 Phase 3).
 
 One depth vocabulary across ``compare``/``dump``/``scan``; the
-G21 ``graph`` rung and ``--collect-mode`` are deprecated aliases; the L5 graph is
-an internal consequence of ``--depth source``, never a user rung.
+G21 ``graph`` rung and the ``--collect-mode`` flag were removed outright (pre-1.0
+clean-up); the L5 graph is an internal consequence of ``--depth source``, never a
+user rung.
 """
 
 from __future__ import annotations
@@ -83,9 +84,13 @@ def test_depth_symbols_alias_warns_on_stderr() -> None:
 
 
 @pytest.mark.parametrize("spelling", ["graph", "GRAPH"])
-def test_depth_graph_alias_resolves_to_source(spelling: str) -> None:
-    """``graph`` is no longer a user rung; it resolves to ``source`` (D6)."""
-    assert DEPTH_PARAM.convert(spelling, None, None) == "source"
+def test_depth_graph_is_rejected(spelling: str) -> None:
+    """``graph`` was removed outright (the L5 graph is internal to ``--depth
+    source``); it is no longer accepted as a user rung or a deprecated alias."""
+    import click
+
+    with pytest.raises(click.BadParameter):
+        DEPTH_PARAM.convert(spelling, None, None)
 
 
 def _all_output(res: object) -> str:
@@ -98,13 +103,12 @@ def _all_output(res: object) -> str:
     return out
 
 
-def test_depth_graph_warns_on_stderr() -> None:
-    """The deprecated ``--depth graph`` resolves but prints a one-line note."""
-    # A bad operand makes the command fail fast *after* param conversion, so the
-    # deprecation note (emitted during conversion) is captured regardless.
+def test_depth_graph_rejected_on_cli() -> None:
+    """The removed ``--depth graph`` is now a hard usage error on the CLI."""
     res = CliRunner().invoke(main, ["dump", "--depth", "graph", "/no/such/bin"])
+    assert res.exit_code != 0
     text = _all_output(res)
-    assert "deprecated" in text and "--depth source" in text
+    assert "graph" in text  # the rejected value is named in the error
 
 
 def test_unknown_depth_rejected() -> None:
@@ -186,9 +190,9 @@ def test_resolve_dump_depth_binary_collects_nothing() -> None:
     from abicheck.cli_dump_helpers import resolve_dump_depth
 
     # DEPTH_PARAM normalizes the `symbols` alias to `binary` before this runs.
-    assert resolve_dump_depth("binary", False, "off", False) == "off"
-    assert resolve_dump_depth("headers", False, "off", False) == "off"
-    assert resolve_dump_depth("source", False, "off", False) != "off"
+    assert resolve_dump_depth("binary", False, "off") == "off"
+    assert resolve_dump_depth("headers", False, "off") == "off"
+    assert resolve_dump_depth("source", False, "off") != "off"
 
 
 # ── config: sources.graph: summary|full (ADR-037 D6) ─────────────────────────
@@ -268,15 +272,15 @@ def test_compare_accepts_depth_over_snapshots(tmp_path, depth: str) -> None:  # 
     assert res.exit_code == 0, _all_output(res)
 
 
-def test_compare_collect_mode_deprecation_warns(tmp_path) -> None:  # type: ignore[no-untyped-def]
-    """An explicit ``--collect-mode`` on ``compare`` warns (deprecated, D5)."""
+def test_compare_collect_mode_flag_removed(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """The removed ``--collect-mode`` flag is now a hard usage error on compare."""
     old = _snap(tmp_path, "liby", "1.0", [_fn("a")])
     new = _snap(tmp_path, "liby", "2.0", [_fn("a")])
     res = CliRunner().invoke(
         main, ["compare", str(old), str(new), "--collect-mode", "off"]
     )
-    assert res.exit_code == 0
-    assert "deprecated" in _all_output(res)
+    assert res.exit_code != 0
+    assert "No such option" in _all_output(res)
 
 
 @pytest.mark.parametrize("depth", ["binary", "headers"])
@@ -291,17 +295,17 @@ def test_compare_depth_over_snapshots(tmp_path, depth: str) -> None:  # type: ig
     assert res.exit_code == 0, _all_output(res)
 
 
-def test_dump_source_only_collect_mode_warns(tmp_path) -> None:  # type: ignore[no-untyped-def]
-    """A source-only ``dump`` with an explicit ``--collect-mode`` warns before
-    any collection (covers the deprecation note + the symbols branch path)."""
+def test_dump_source_only_depth_build(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """A source-only ``dump --depth build`` resolves the L3 collect mode and runs
+    the source-only branch without error."""
     src = tmp_path / "src"
     src.mkdir()
     res = CliRunner().invoke(
         main,
-        ["dump", "--sources", str(src), "--collect-mode", "build",
+        ["dump", "--sources", str(src), "--depth", "build",
          "-o", str(tmp_path / "out.json")],
     )
-    assert "deprecated" in _all_output(res)
+    assert res.exit_code == 0, _all_output(res)
 
 
 def test_dump_source_only_depth_binary(tmp_path) -> None:  # type: ignore[no-untyped-def]

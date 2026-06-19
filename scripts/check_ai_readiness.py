@@ -1230,10 +1230,6 @@ _REQUIRED_FAMILY_DECORATORS: frozenset[str] = frozenset(
 #: subset (mirrors ``cli_options.INTENTIONAL_SUBSET``).
 _INTENTIONAL_SUBSET_DECORATORS: frozenset[tuple[str, str]] = frozenset()
 
-#: flag names knowingly carrying two defaults across decorators, deferred to a
-#: later phase (mirrors ``cli_options.DEFERRED_MULTI_DEFAULT``).
-_DEFERRED_MULTI_DEFAULT_FLAGS: frozenset[str] = frozenset({"--collect-mode"})
-
 
 def _decorator_callable_name(node: ast.expr) -> str | None:
     """The bare callable name of a decorator (``@foo`` or ``@foo(...)``).
@@ -1330,7 +1326,7 @@ def _option_flag_and_default(call: ast.Call) -> tuple[str | None, str | None]:
 
 def _check_one_default_per_flag(f: Findings) -> None:
     """ADR-037 D10.4: a flag declared in more than one shared decorator must not
-    carry two different defaults (the ``--collect-mode`` double-default trap)."""
+    carry two different defaults (the historical ``--collect-mode`` trap)."""
     path = PKG / "cli_options.py"
     if not path.is_file():
         return
@@ -1350,12 +1346,12 @@ def _check_one_default_per_flag(f: Findings) -> None:
             if flag is not None and default_src is not None:
                 defaults[flag].add(default_src)
     for flag, seen in sorted(defaults.items()):
-        if len(seen) > 1 and flag not in _DEFERRED_MULTI_DEFAULT_FLAGS:
+        if len(seen) > 1:
             f.err(
                 "cli-contract",
                 f"{rel}: flag `{flag}` is declared with conflicting defaults "
                 f"{sorted(seen)} across shared decorators (ADR-037 D10.4). "
-                "Give it one default, or add it to `DEFERRED_MULTI_DEFAULT`.",
+                "Give it one default.",
             )
 
 
