@@ -588,3 +588,44 @@ def test_dump_reads_compile_block_from_config(
     )
     assert result.exit_code == 0, result.output
     assert "-std=c++17" in str(captured["effective_gcc_options"])
+
+
+def test_compare_rejects_compile_context_for_set_inputs(tmp_path: Path) -> None:
+    """Directory/package operands + a compile-context flag must fail loudly, not
+    silently drop it: the per-library fan-out doesn't thread the L2 context
+    (Codex review)."""
+    old_dir = tmp_path / "old"
+    new_dir = tmp_path / "new"
+    old_dir.mkdir()
+    new_dir.mkdir()
+    result = CliRunner().invoke(
+        main,
+        ["compare", str(old_dir), str(new_dir), "--gcc-options", "-DX=1"],
+    )
+    assert result.exit_code != 0
+    assert "--gcc-options" in result.output
+    assert "directory/package" in result.output
+
+
+def test_compare_set_inputs_without_compile_flags_not_rejected(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The guard fires only on explicitly-passed compile-context flags — a plain
+    directory compare still dispatches (no false rejection from the 'auto'
+    --ast-frontend default)."""
+    import abicheck.cli as cli_mod
+
+    old_dir = tmp_path / "old"
+    new_dir = tmp_path / "new"
+    old_dir.mkdir()
+    new_dir.mkdir()
+
+    dispatched: dict[str, object] = {}
+
+    def _fake_dispatch(ctx: object, **kwargs: object) -> None:
+        dispatched.update(kwargs)
+
+    monkeypatch.setattr(cli_mod, "_dispatch_release_compare", _fake_dispatch)
+    result = CliRunner().invoke(main, ["compare", str(old_dir), str(new_dir)])
+    assert result.exit_code == 0, result.output
+    assert dispatched  # the fan-out was reached, not rejected

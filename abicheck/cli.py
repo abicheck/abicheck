@@ -1026,6 +1026,47 @@ def _warn_unused_set_flags(
         )
 
 
+#: Compile-context flag dest → spelling, for the set-input rejection guard. The
+#: per-library release fan-out does not yet thread the L2 compile-context family
+#: (ADR-037 D3) down to each pair's header dump, so an explicitly-passed flag must
+#: be rejected loudly rather than silently dropped (Codex review).
+_COMPILE_CONTEXT_SET_INPUT_FLAGS: dict[str, str] = {
+    "gcc_path": "--gcc-path",
+    "gcc_prefix": "--gcc-prefix",
+    "gcc_options": "--gcc-options",
+    "gcc_option_tokens": "--gcc-option",
+    "sysroot": "--sysroot",
+    "nostdinc": "--nostdinc",
+    "header_backend": "--ast-frontend",
+    "old_header_backend": "--old-ast-frontend",
+    "new_header_backend": "--new-ast-frontend",
+}
+
+
+def _reject_compile_context_for_set_inputs(ctx: click.Context) -> None:
+    """Reject explicitly-passed compile-context flags for directory/package compares.
+
+    The per-library fan-out (`compare-release` backend) runs each pair through
+    `service.run_compare` without a `CompileContext`, so the L2 cross-toolchain /
+    frontend flags would be silently ignored for every library. Reject them loudly
+    here (mirrors the `--exit-code-scheme` guard) so the gap is never silent;
+    compare libraries individually to use them.
+    """
+    used = [
+        flag
+        for dest, flag in _COMPILE_CONTEXT_SET_INPUT_FLAGS.items()
+        if ctx.get_parameter_source(dest) == click.core.ParameterSource.COMMANDLINE
+    ]
+    if used:
+        raise click.UsageError(
+            ", ".join(sorted(used)) + " "
+            + ("is" if len(used) == 1 else "are")
+            + " not supported for directory/package (release) comparisons: the "
+            "per-library fan-out does not thread the L2 compile context to each "
+            "pair's header dump. Compare the libraries individually to use them."
+        )
+
+
 def _dispatch_release_compare(ctx: click.Context, **kwargs: Any) -> None:
     """Fan a directory/package `compare` out to the per-library release engine.
 
@@ -1379,6 +1420,7 @@ def compare_cmd(
                 ".abicheck.yml. Compare libraries individually for explicit "
                 "scheme control."
             )
+        _reject_compile_context_for_set_inputs(ctx)
         _dispatch_release_compare(
             ctx,
             old_dir=old_input, new_dir=new_input,
