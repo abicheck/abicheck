@@ -1043,14 +1043,42 @@ _COMPILE_CONTEXT_SET_INPUT_FLAGS: dict[str, str] = {
 }
 
 
-def _reject_compile_context_for_set_inputs(ctx: click.Context) -> None:
-    """Reject explicitly-passed compile-context flags for directory/package compares.
+def _config_has_compile_block(project_cfg: Any) -> bool:
+    """True if a loaded ``.abicheck.yml`` carries any ``compile:`` setting.
+
+    Used to flag that a project's L2 compile context would be dropped by the
+    per-library release fan-out (which the single-pair path honors).
+    """
+    if project_cfg is None:
+        return False
+    return bool(
+        getattr(project_cfg, "compile_frontend", None)
+        or getattr(project_cfg, "compile_std", None)
+        or getattr(project_cfg, "compile_defines", None)
+        or getattr(project_cfg, "compile_include_dirs", None)
+        or getattr(project_cfg, "compile_sysroot", None)
+        or getattr(project_cfg, "compile_nostdinc", False)
+    )
+
+
+def _reject_compile_context_for_set_inputs(ctx: click.Context, project_cfg: Any) -> None:
+    """Guard the L2 compile context for directory/package compares.
 
     The per-library fan-out (`compare-release` backend) runs each pair through
     `service.run_compare` without a `CompileContext`, so the L2 cross-toolchain /
-    frontend flags would be silently ignored for every library. Reject them loudly
-    here (mirrors the `--exit-code-scheme` guard) so the gap is never silent;
-    compare libraries individually to use them.
+    frontend context is not applied per library — unlike the single-pair path that
+    now honors it. Two cases, never silent (Codex review):
+
+    * An **explicitly-passed** compile-context flag is rejected loudly (a
+      `UsageError`, mirroring the `--exit-code-scheme` guard): the user asked for
+      it, so erroring beats ignoring it.
+    * An **ambient** project ``.abicheck.yml`` ``compile:`` block only *warns*:
+      a plain ``compare dir1 dir2`` in a configured project shouldn't hard-fail,
+      but the user must know those settings apply to single-library compares and
+      not to this fan-out (so per-library snapshots may differ).
+
+    Either way, compare libraries individually (or pre-dump snapshots) to apply
+    the context.
     """
     used = [
         flag
@@ -1064,6 +1092,15 @@ def _reject_compile_context_for_set_inputs(ctx: click.Context) -> None:
             + " not supported for directory/package (release) comparisons: the "
             "per-library fan-out does not thread the L2 compile context to each "
             "pair's header dump. Compare the libraries individually to use them."
+        )
+    if _config_has_compile_block(project_cfg):
+        click.echo(
+            "Warning: the .abicheck.yml compile: block is not applied to "
+            "directory/package (release) comparisons — the per-library fan-out "
+            "does not thread the L2 compile context. It affects single-library "
+            "compares only; compare libraries individually for consistent "
+            "per-library snapshots.",
+            err=True,
         )
 
 
@@ -1420,7 +1457,7 @@ def compare_cmd(
                 ".abicheck.yml. Compare libraries individually for explicit "
                 "scheme control."
             )
-        _reject_compile_context_for_set_inputs(ctx)
+        _reject_compile_context_for_set_inputs(ctx, project_cfg)
         _dispatch_release_compare(
             ctx,
             old_dir=old_input, new_dir=new_input,
@@ -1521,12 +1558,18 @@ def compare_cmd(
     # .abicheck.yml auto-discovered from cwd).
     import dataclasses
 
-    compile_context, includes = resolve_compile_context(
+    compile_context, merged_includes = resolve_compile_context(
         ctx,
         gcc_path=gcc_path, gcc_prefix=gcc_prefix, gcc_options=gcc_options,
         gcc_option_tokens=gcc_option_tokens, sysroot=sysroot, nostdinc=nostdinc,
         header_backend=header_backend, includes=includes, build_config=cfg_path,
     )
+    # The dirs the config appended past the CLI -I roots. These are documented as
+    # applying to *both* sides, so they must survive a per-side --old/new-include
+    # override (which replaces the both-sides -I for that side). Keep them separate
+    # and re-append after per-side resolution rather than folding into the shared
+    # tuple, else the overridden side would lose them (Codex review).
+    config_includes = tuple(merged_includes[len(includes):])
     # The merged frontend flows to both sides through the explicit header_backend
     # (so --old/new-ast-frontend can still override per side); neutralize the
     # frontend on the threaded context so run_dump's `compile.frontend` does NOT
@@ -1539,6 +1582,9 @@ def compare_cmd(
         headers, includes, old_headers_only, new_headers_only,
         old_includes_only, new_includes_only,
     )
+    if config_includes:
+        old_inc = list(old_inc) + list(config_includes)
+        new_inc = list(new_inc) + list(config_includes)
 
     # Follow GNU ld linker scripts up front so the resolved DSO (not the text
     # script) drives format detection, metadata, and dependency analysis.

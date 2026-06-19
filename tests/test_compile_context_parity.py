@@ -651,3 +651,73 @@ def test_compare_set_inputs_without_compile_flags_not_rejected(
     result = CliRunner().invoke(main, ["compare", str(old_dir), str(new_dir)])
     assert result.exit_code == 0, result.output
     assert dispatched  # the fan-out was reached, not rejected
+
+
+def test_compare_set_inputs_warns_on_config_compile_block(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A directory/package compare in a project with a .abicheck.yml compile:
+    block must WARN (not silently drop, not hard-fail) — the fan-out doesn't
+    thread the L2 context (Codex review)."""
+    import abicheck.cli as cli_mod
+
+    old_dir = tmp_path / "old"
+    new_dir = tmp_path / "new"
+    old_dir.mkdir()
+    new_dir.mkdir()
+    cfg = tmp_path / ".abicheck.yml"
+    cfg.write_text("compile:\n  std: c++20\n", encoding="utf-8")
+
+    dispatched: dict[str, object] = {}
+    monkeypatch.setattr(
+        cli_mod,
+        "_dispatch_release_compare",
+        lambda ctx, **kw: dispatched.update(kw),
+    )
+    result = CliRunner().invoke(
+        main, ["compare", str(old_dir), str(new_dir), "--config", str(cfg)]
+    )
+    assert result.exit_code == 0, result.output
+    assert dispatched  # warned, still dispatched (not rejected)
+    assert "compile: block is not applied" in result.output
+
+
+def test_compare_config_include_dirs_survive_per_side_include(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """config compile.include_dirs apply to BOTH sides even when --old-include
+    overrides the both-sides -I for one side (Codex review)."""
+    import abicheck.dumper as dumper_mod
+    from abicheck.model import AbiSnapshot
+
+    old_so, new_so, header = _two_elf(tmp_path)
+    cfg_inc = tmp_path / "cfg_inc"
+    cfg_inc.mkdir()
+    old_only = tmp_path / "old_inc"
+    old_only.mkdir()
+    cfg = tmp_path / ".abicheck.yml"
+    cfg.write_text("compile:\n  include_dirs: [cfg_inc]\n", encoding="utf-8")
+
+    calls: list[dict[str, object]] = []
+
+    def _fake_dump(**kwargs: object) -> object:
+        calls.append(kwargs)
+        return AbiSnapshot(library="libfoo.so", version="1.0")
+
+    monkeypatch.setattr(dumper_mod, "dump", _fake_dump)
+    result = CliRunner().invoke(
+        main,
+        [
+            "compare", str(old_so), str(new_so), "-H", str(header),
+            "--config", str(cfg), "--old-include", str(old_only),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert len(calls) == 2
+    old_inc = list(calls[0]["extra_includes"])  # type: ignore[arg-type]
+    new_inc = list(calls[1]["extra_includes"])  # type: ignore[arg-type]
+    # Old side: its per-side override AND the config dir (config not dropped).
+    assert old_only in old_inc
+    assert cfg_inc in old_inc
+    # New side: no override → config dir still present.
+    assert cfg_inc in new_inc
