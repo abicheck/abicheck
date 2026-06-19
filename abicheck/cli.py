@@ -1781,7 +1781,11 @@ def compare_cmd(
             header_backend=old_header_backend or header_backend,
             compile_context=compile_context,
             frontend_explicit=_frontend_explicit or old_header_backend is not None,
-            nostdinc_explicit=_nostdinc_explicit,
+            # A nostdinc already resolved True (from --config) must survive the
+            # tree-config merge even when the tree omits it (Codex review); False
+            # is the default and indistinguishable from "unset", so only True needs
+            # preserving.
+            nostdinc_explicit=_nostdinc_explicit or compile_context.nostdinc,
             build_info=old_build_info,
             follow_deps=follow_deps, search_paths=search_paths,
             ld_library_path=ld_library_path,
@@ -1795,7 +1799,7 @@ def compare_cmd(
             header_backend=new_header_backend or header_backend,
             compile_context=compile_context,
             frontend_explicit=_frontend_explicit or new_header_backend is not None,
-            nostdinc_explicit=_nostdinc_explicit,
+            nostdinc_explicit=_nostdinc_explicit or compile_context.nostdinc,
             build_info=new_build_info,
             follow_deps=follow_deps, search_paths=search_paths,
             ld_library_path=ld_library_path,

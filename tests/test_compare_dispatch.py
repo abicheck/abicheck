@@ -181,6 +181,20 @@ def test_embed_inline_source_merges_tree_config_but_cli_wins(tmp_path: Path) -> 
             collect_mode="source-target", out_dir=tmp_path, label="old",
         )
         assert captured["_resolved_compile_context"].frontend == "auto"
+
+        # A nostdinc already resolved True (e.g. from compare --config) survives
+        # the tree merge even though this tree's config omits it (Codex review).
+        captured.clear()
+        climod._embed_inline_source_side(
+            _Ctx(), input_path=tmp_path / "lib.so", sources=tree,
+            headers=(), includes=(), version="1.0", lang="c++",
+            header_backend="auto", compile_context=CompileContext(nostdinc=True),
+            frontend_explicit=False, nostdinc_explicit=True, build_info=None,
+            follow_deps=False, search_paths=(), ld_library_path="",
+            dwarf_only=False, debug_format=None, pdb_path=None,
+            collect_mode="source-target", out_dir=tmp_path, label="old",
+        )
+        assert captured["_resolved_compile_context"].nostdinc is True
     finally:
         climod._normalize_binary_input = orig  # type: ignore[assignment]
 
