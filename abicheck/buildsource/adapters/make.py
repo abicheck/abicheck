@@ -40,6 +40,7 @@ from __future__ import annotations
 import os
 import re
 import shlex
+import stat as stat_module
 from pathlib import Path
 
 from ...build_context import _extract_flags
@@ -143,7 +144,7 @@ class MakeAdapter:
         source = source_from_argv(argv)
         if not source:
             return None
-        argv, _expanded_rsp = _expand_response_files(argv, directory)
+        argv, _expanded_rsp = _expand_response_files(argv, directory, self.build_dir)
         ctx = _extract_flags(argv, directory)
         output = _output_from_argv(argv)
         red_argv = self.redaction.argv(argv)
@@ -214,20 +215,24 @@ def _truncate_shell_pipeline(argv: list[str]) -> list[str]:
     return argv
 
 
-def _expand_response_files(argv: list[str], directory: Path) -> tuple[list[str], bool]:
-    """Inline readable compiler response-file tokens (``@file``)."""
+_MAX_RESPONSE_FILE_BYTES = 1024 * 1024
+
+
+def _expand_response_files(
+    argv: list[str],
+    directory: Path,
+    response_root: Path | None,
+) -> tuple[list[str], bool]:
+    """Inline bounded compiler response files from the trusted build tree."""
     expanded: list[str] = []
     changed = False
+    root = _safe_resolve(response_root) if response_root is not None else None
     for arg in argv:
         if not arg.startswith("@") or len(arg) == 1:
             expanded.append(arg)
             continue
-        path = Path(arg[1:])
-        if not path.is_absolute():
-            path = directory / path
-        try:
-            text = path.read_text(encoding="utf-8", errors="replace")
-        except OSError:
+        text = _read_response_file(Path(arg[1:]), directory, root)
+        if text is None:
             expanded.append(arg)
             continue
         try:
@@ -236,6 +241,45 @@ def _expand_response_files(argv: list[str], directory: Path) -> tuple[list[str],
         except ValueError:
             expanded.append(arg)
     return expanded, changed
+
+
+def _read_response_file(path: Path, directory: Path, root: Path | None) -> str | None:
+    if root is None:
+        return None
+    candidate = path if path.is_absolute() else directory / path
+    resolved = _safe_resolve(candidate)
+    if resolved is None or not _is_relative_to(resolved, root):
+        return None
+    try:
+        st = resolved.stat()
+    except OSError:
+        return None
+    if not stat_module.S_ISREG(st.st_mode) or st.st_size > _MAX_RESPONSE_FILE_BYTES:
+        return None
+    try:
+        data = resolved.read_bytes()
+    except OSError:
+        return None
+    if len(data) > _MAX_RESPONSE_FILE_BYTES:
+        return None
+    return data.decode("utf-8", errors="replace")
+
+
+def _safe_resolve(path: Path | None) -> Path | None:
+    if path is None:
+        return None
+    try:
+        return path.resolve()
+    except OSError:
+        return None
+
+
+def _is_relative_to(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+    except ValueError:
+        return False
+    return True
 
 
 def _output_from_argv(argv: list[str]) -> str:

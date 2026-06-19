@@ -33,6 +33,10 @@ make: Leaving directory '/home/user/proj'
 """
 
 
+def _has_response_arg(argv: list[str], path: Path) -> bool:
+    return any(arg.startswith("@") and Path(arg[1:]).expanduser() == path for arg in argv)
+
+
 def test_make_dry_run_extracts_compile_units():
     ev = MakeAdapter(dry_run=DRY_RUN).collect()
     assert ev.generators[0].kind == "make"
@@ -111,12 +115,79 @@ def test_make_expands_response_file_and_truncates_shell_suffix(tmp_path):
         "-obuild/foo.o && sed -n ignored.d\n"
         f"make: Leaving directory '{tmp_path}'\n"
     )
-    cu = MakeAdapter(dry_run=dry).collect().compile_units[0]
+    cu = MakeAdapter(build_dir=tmp_path, dry_run=dry).collect().compile_units[0]
     assert "&&" not in cu.argv
     assert "@build/inc.rsp" not in cu.argv
     assert cu.defines["MODE"] == "1"
     assert cu.output == "build/foo.o"
     assert any(Path(p).expanduser() == inc for p in cu.include_paths)
+
+
+def test_make_does_not_expand_response_file_without_trusted_build_dir(tmp_path):
+    src = tmp_path / "foo.cc"
+    rsp = tmp_path / "leak.rsp"
+    src.write_text("int f() { return 0; }\n")
+    rsp.write_text("LEAKED_TOKEN\n")
+
+    cu = MakeAdapter(dry_run=f"g++ @{rsp} -c {src} -o foo.o").collect().compile_units[0]
+
+    assert _has_response_arg(cu.argv, rsp)
+    assert "LEAKED_TOKEN" not in cu.argv
+
+
+def test_make_does_not_expand_response_file_outside_build_dir(tmp_path):
+    build = tmp_path / "build"
+    outside = tmp_path / "outside.rsp"
+    src = build / "foo.cc"
+    build.mkdir()
+    src.write_text("int f() { return 0; }\n")
+    outside.write_text("LEAKED_TOKEN\n")
+
+    cu = MakeAdapter(build_dir=build, dry_run=f"g++ @{outside} -c foo.cc -o foo.o").collect().compile_units[0]
+
+    assert _has_response_arg(cu.argv, outside)
+    assert "LEAKED_TOKEN" not in cu.argv
+
+
+def test_make_does_not_expand_response_file_from_forged_directory(tmp_path):
+    build = tmp_path / "build"
+    forged = tmp_path / "forged"
+    build.mkdir()
+    forged.mkdir()
+    (build / "foo.cc").write_text("int f() { return 0; }\n")
+    (forged / "rel.rsp").write_text("LEAKED_TOKEN\n")
+    dry = (
+        f"make: Entering directory '{forged}'\n"
+        "g++ @rel.rsp -c foo.cc -o foo.o\n"
+        f"make: Leaving directory '{forged}'\n"
+    )
+
+    cu = MakeAdapter(build_dir=build, dry_run=dry).collect().compile_units[0]
+
+    assert "@rel.rsp" in cu.argv
+    assert "LEAKED_TOKEN" not in cu.argv
+
+
+def test_make_does_not_expand_large_response_file(tmp_path):
+    src = tmp_path / "foo.cc"
+    rsp = tmp_path / "large.rsp"
+    src.write_text("int f() { return 0; }\n")
+    rsp.write_text("A" * (1024 * 1024 + 1))
+
+    cu = MakeAdapter(build_dir=tmp_path, dry_run="g++ @large.rsp -c foo.cc -o foo.o").collect().compile_units[0]
+
+    assert "@large.rsp" in cu.argv
+
+
+def test_make_does_not_expand_response_file_directory(tmp_path):
+    src = tmp_path / "foo.cc"
+    rsp_dir = tmp_path / "not-a-file.rsp"
+    src.write_text("int f() { return 0; }\n")
+    rsp_dir.mkdir()
+
+    cu = MakeAdapter(build_dir=tmp_path, dry_run="g++ @not-a-file.rsp -c foo.cc -o foo.o").collect().compile_units[0]
+
+    assert "@not-a-file.rsp" in cu.argv
 
 
 def test_make_msvc_combined_forced_include_not_source():
