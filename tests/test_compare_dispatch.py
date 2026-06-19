@@ -58,8 +58,25 @@ def test_source_is_pack_detects_manifest(tmp_path: Path) -> None:
 
     pack = tmp_path / "pack"
     pack.mkdir()
-    (pack / "manifest.json").write_text("{}")
+    (pack / "manifest.json").write_text('{"build_source_pack_version": 1}')
     assert _source_is_pack(pack)
+
+    # A Flow-2 inputs pack is also a pack.
+    inputs = tmp_path / "inputs"
+    inputs.mkdir()
+    (inputs / "manifest.json").write_text('{"kind": "abicheck_inputs"}')
+    assert _source_is_pack(inputs)
+
+    # A raw checkout with a stray/sparse manifest.json is NOT a pack — it must
+    # still be collected from (Codex review).
+    stray = tmp_path / "stray"
+    stray.mkdir()
+    (stray / "manifest.json").write_text('{"name": "my-project"}')
+    assert not _source_is_pack(stray)
+    bad = tmp_path / "bad"
+    bad.mkdir()
+    (bad / "manifest.json").write_text("not json{")
+    assert not _source_is_pack(bad)
 
 
 def test_embed_inline_source_forwards_toolchain_and_collects(tmp_path: Path) -> None:

@@ -1138,10 +1138,32 @@ def _dispatch_release_compare(ctx: click.Context, **kwargs: Any) -> None:
 
 
 def _source_is_pack(path: Path) -> bool:
-    """True if *path* is a ``collect``-produced evidence pack (has a manifest.json)
-    rather than a raw source checkout — lets ``compare``'s --old/new-sources accept
-    either form."""
-    return (path / "manifest.json").is_file()
+    """True if *path* is a real ``collect``-produced evidence pack rather than a
+    raw source checkout — lets ``compare``'s --old/new-sources accept either.
+
+    Validates the manifest *content*, not just its presence: a raw checkout that
+    happens to contain a top-level ``manifest.json`` (which ``BuildSourcePack.load``
+    would otherwise accept with sparse defaults) must still be collected from, so
+    we require the BuildSourcePack marker (``build_source_pack_version`` / legacy
+    ``evidence_pack_version``) or the Flow-2 ``kind: abicheck_inputs`` discriminator.
+    """
+    manifest = path / "manifest.json"
+    if not manifest.is_file():
+        return False
+    import json
+
+    try:
+        with manifest.open(encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        return False  # unreadable / non-JSON → treat as a raw tree, collect from it
+    if not isinstance(data, dict):
+        return False
+    return (
+        "build_source_pack_version" in data
+        or "evidence_pack_version" in data
+        or data.get("kind") == "abicheck_inputs"
+    )
 
 
 def _embed_inline_source_side(
