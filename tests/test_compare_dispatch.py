@@ -232,6 +232,41 @@ def test_embed_inline_source_ignored_when_depth_collects_nothing(tmp_path: Path)
     assert called["n"] == 0  # no dump performed
 
 
+def test_embed_inline_source_drops_raw_build_info_when_tree_ignored(tmp_path: Path) -> None:
+    """When the source tree can't be collected (here: collect_mode 'off'), a raw
+    --build-info dir is dropped too — otherwise prepare_embedded_build_source would
+    try to load it as a pack and abort with 'Invalid evidence pack' (Codex review).
+    A build-info that *is* a validated pack survives so it can still be applied."""
+    import abicheck.cli as climod
+    from abicheck.service_scan import CompileContext
+
+    tree = tmp_path / "src"
+    tree.mkdir()
+    raw_build = tmp_path / "build"  # raw build dir, NOT a pack
+    raw_build.mkdir()
+
+    class _Ctx:
+        def invoke(self, _cmd, **kwargs):  # type: ignore[no-untyped-def]
+            pass
+
+    orig = climod._normalize_binary_input
+    climod._normalize_binary_input = lambda p: (Path(p), "elf")  # type: ignore[assignment]
+    try:
+        _, kept, kept_bi = climod._embed_inline_source_side(
+            _Ctx(), input_path=tmp_path / "lib.so", sources=tree,
+            headers=(), includes=(), version="1.0", lang="c++",
+            header_backend="auto", compile_context=CompileContext(),
+            frontend_explicit=False, nostdinc_explicit=False, build_info=raw_build,
+            follow_deps=False, search_paths=(),
+            ld_library_path="", dwarf_only=False, debug_format=None,
+            pdb_path=None, collect_mode="off", out_dir=tmp_path, label="old",
+        )
+    finally:
+        climod._normalize_binary_input = orig  # type: ignore[assignment]
+
+    assert kept is None and kept_bi is None  # raw build dir dropped, not kept
+
+
 def test_compare_source_tree_on_snapshot_input_is_ignored(tmp_path: Path) -> None:
     """A raw --old-sources tree on a snapshot input can't be embedded (you can't
     re-dump a snapshot), so compare warns and still produces a verdict."""

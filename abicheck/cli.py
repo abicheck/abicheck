@@ -1203,6 +1203,16 @@ def _embed_inline_source_side(
     """
     if sources is None or _source_is_pack(sources):
         return input_path, sources, build_info
+    # When the source tree can't be collected here (snapshot input, or a --depth
+    # that gathers no source evidence), the side falls through to
+    # prepare_embedded_build_source. That path treats any leftover --build-info as
+    # an out-of-band *pack* (_resolve_side_pack → _load_pack_or_raise), so a raw
+    # build dir / compile_commands.json would abort with "Invalid evidence pack".
+    # Keep --build-info only when it is itself a validated pack; otherwise drop it
+    # alongside the ignored tree (Codex review).
+    kept_build_info = (
+        build_info if (build_info is not None and _source_is_pack(build_info)) else None
+    )
     norm, fmt = _normalize_binary_input(input_path)
     if fmt is None:
         click.echo(
@@ -1211,7 +1221,7 @@ def _embed_inline_source_side(
             "binary from its tree to embed deeper evidence).",
             err=True,
         )
-        return input_path, None, build_info
+        return input_path, None, kept_build_info
     # The --depth dial governs how deep to collect. When it resolves to "off"
     # (--depth binary/headers, or an explicit --collect-mode off) there is no
     # source collection to do, so the tree can't contribute at this depth —
@@ -1224,7 +1234,7 @@ def _embed_inline_source_side(
             "--depth source/full (or --max) to collect from it.",
             err=True,
         )
-        return input_path, None, build_info
+        return input_path, None, kept_build_info
     out = out_dir / f"{label}.abi.json"
     # Merge the side's source-root .abicheck.yml `compile:` block into compare's
     # resolved context — exactly what `dump --sources` / the old deep-compare did —
