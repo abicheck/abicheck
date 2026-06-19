@@ -946,13 +946,15 @@ def test_level_implies_query_silent_for_source_method_auto(
     assert "auto-enabled the query" not in res.output
 
 
-def test_level_implies_query_malformed_config_does_not_crash(
+def test_explicit_malformed_config_fails_loud(
     runner, tmp_path, new_snap_compatible
 ):
-    # A trusted but malformed --config at an explicit deep level must not crash the
-    # level-implies-query probe: load_build_config raises, the probe swallows it
-    # (the real load surfaces the error downstream), and with no source input there
-    # is no downstream load, so the scan still completes without auto-enabling.
+    # An *explicit* --config that won't parse fails loudly via the shared compile
+    # resolver (ADR-037 D3 fail-loud, Codex review) — even with no --sources, where
+    # nothing reloads it downstream. A clean CLI error (no traceback), not exit 0
+    # with the compile: settings silently dropped. Supersedes the old
+    # "does not crash → exit 0" behavior, which let a malformed explicit config
+    # through.
     cfg = tmp_path / ".abicheck.yml"
     cfg.write_text("build: [unterminated\n", encoding="utf-8")  # invalid YAML
     res = runner.invoke(
@@ -968,8 +970,9 @@ def test_level_implies_query_malformed_config_does_not_crash(
             "--audit",
         ],
     )
-    assert res.exit_code == 0, res.output
-    assert "auto-enabled the query" not in res.output
+    assert res.exit_code != 0
+    assert res.exception is None or isinstance(res.exception, SystemExit)
+    assert "cannot parse build config" in res.output
 
 
 def test_level_implies_query_silent_when_config_defines_no_query(

@@ -13,13 +13,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""dump↔scan L2 compile-context flag parity + threading (ADR-037 D3 / ADR-035).
+"""compare↔dump↔scan L2 compile-context parity + threading (ADR-037 D3 / ADR-035).
 
 The cross-toolchain + frontend family is defined once in
-``cli_options.compile_context_options`` and shared by ``dump`` and ``scan``; this
-guards that they never drift, and that ``scan`` actually threads the context down
-to the header dump (so a ``scan`` of oneTBB-style headers gets the same build
-context ``dump`` would use).
+``cli_options.compile_context_options`` and shared by ``compare`` / ``dump`` /
+``scan``; the project ``compile:`` block is folded in by the one shared resolver
+(``cli_options.merge_compile_config`` / ``resolve_compile_context``). This guards
+that the three commands never drift, that ``scan`` threads the context down to the
+header dump, and that ``compare`` now threads its both-sides context to *both*
+sides while the per-side ``--old/new-ast-frontend`` override still wins.
 """
 
 from __future__ import annotations
@@ -27,8 +29,9 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from click.testing import CliRunner
 
-from abicheck.cli import dump_cmd
+from abicheck.cli import compare_cmd, dump_cmd, main
 from abicheck.cli_scan import scan_cmd
 from abicheck.service_scan import CompileContext, ScanRequest
 
@@ -58,12 +61,19 @@ def test_scan_exposes_full_compile_context_family() -> None:
     assert _COMPILE_CONTEXT_DESTS <= _param_dests(scan_cmd)
 
 
-def test_dump_and_scan_compile_context_does_not_drift() -> None:
-    # Both commands expose the *same* compile-context flags — the whole point of
-    # sharing one decorator. (A future inline addition to one would break this.)
+def test_compare_exposes_full_compile_context_family() -> None:
+    # ADR-037 D3: compare gained the shared L2 family (it previously had only
+    # --ast-frontend inline and no --gcc-*/--sysroot/--nostdinc at all).
+    assert _COMPILE_CONTEXT_DESTS <= _param_dests(compare_cmd)
+
+
+def test_compare_dump_scan_compile_context_does_not_drift() -> None:
+    # All three commands expose the *same* compile-context flags — the whole point
+    # of sharing one decorator. (A future inline addition to one would break this.)
+    compare_ctx = _param_dests(compare_cmd) & _COMPILE_CONTEXT_DESTS
     dump_ctx = _param_dests(dump_cmd) & _COMPILE_CONTEXT_DESTS
     scan_ctx = _param_dests(scan_cmd) & _COMPILE_CONTEXT_DESTS
-    assert dump_ctx == scan_ctx == _COMPILE_CONTEXT_DESTS
+    assert compare_ctx == dump_ctx == scan_ctx == _COMPILE_CONTEXT_DESTS
 
 
 def test_compile_context_default_is_empty() -> None:
@@ -238,9 +248,7 @@ def test_merge_compile_config_autodiscovers_from_sources(tmp_path: Path) -> None
     )
     from abicheck.cli_scan import _merge_compile_config
 
-    merged, includes = _merge_compile_config(
-        CompileContext(), (), None, sources=src
-    )
+    merged, includes = _merge_compile_config(CompileContext(), (), None, sources=src)
     assert merged.gcc_options == "-std=c++20"
     assert includes == (src / "include",)
 
@@ -373,15 +381,37 @@ def test_merge_compile_config_explicit_auto_beats_config(tmp_path: Path) -> None
     assert explicit.frontend == "auto"
 
 
-def test_merge_compile_config_warns_on_malformed(tmp_path, capsys) -> None:
+def test_merge_compile_config_explicit_malformed_fails_loud(tmp_path) -> None:
+    # An *explicit* --config (build_config not None) that won't parse must fail
+    # loudly, not silently drop the compile: settings (Codex review).
+    import click
+
     from abicheck.cli_scan import _merge_compile_config
 
     bad = tmp_path / ".abicheck.yml"
     bad.write_text("compile: [unterminated\n", encoding="utf-8")
+    with pytest.raises(click.ClickException, match="cannot parse build config"):
+        _merge_compile_config(CompileContext(gcc_options="-DX"), (), bad)
+
+
+def test_merge_compile_config_autodiscovered_malformed_warns(tmp_path, capsys) -> None:
+    # An *auto-discovered* config (build_config None, found via --sources) stays
+    # best-effort: warn + CLI-only fallback rather than fail the run.
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / ".abicheck.yml").write_text("compile: [unterminated\n", encoding="utf-8")
     cli = CompileContext(gcc_options="-DX")
-    merged, includes = _merge_compile_config(cli, (), bad)
+    merged, _ = _merge_compile_config_autodiscover(cli, src)
     assert merged is cli  # CLI-only fallback
-    assert "could not parse" in capsys.readouterr().err
+    assert "could not parse auto-discovered" in capsys.readouterr().err
+
+
+def _merge_compile_config_autodiscover(
+    cli: CompileContext, src: Path
+) -> tuple[CompileContext, tuple[Path, ...]]:
+    from abicheck.cli_scan import _merge_compile_config
+
+    return _merge_compile_config(cli, (), None, sources=src)
 
 
 def test_try_header_scoped_dump_threads_compile_to_dumper(
@@ -411,7 +441,9 @@ def test_try_header_scoped_dump_threads_compile_to_dumper(
 
     monkeypatch.setattr(dumper_mod, "_dump_pe", _fake_dumper_pe)
     cc = CompileContext(
-        gcc_options="-std=c++20 -DPE", gcc_prefix="x-", sysroot=tmp_path,
+        gcc_options="-std=c++20 -DPE",
+        gcc_prefix="x-",
+        sysroot=tmp_path,
         nostdinc=True,
     )
     snap, reason = service._try_header_scoped_dump(
@@ -445,3 +477,247 @@ def test_merge_compile_config_nostdinc_precedence(tmp_path: Path) -> None:
         CompileContext(nostdinc=True), (), cfg, nostdinc_explicit=True
     )
     assert on.nostdinc is True
+
+
+# ── compare end-to-end threading (ADR-037 D3) ────────────────────────────────
+
+
+def _two_elf(tmp_path: Path) -> tuple[Path, Path, Path]:
+    old_so = tmp_path / "old.so"
+    new_so = tmp_path / "new.so"
+    old_so.write_bytes(b"\x7fELF" + b"\x00" * 100)
+    new_so.write_bytes(b"\x7fELF" + b"\x00" * 100)
+    header = tmp_path / "foo.h"
+    header.write_text("int foo(void);\n", encoding="utf-8")
+    return old_so, new_so, header
+
+
+def _compare_capturing_dump(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, extra_args: list[str]
+) -> list[dict[str, object]]:
+    """Invoke ``compare`` on two fake ELFs with ``dumper.dump`` captured per side."""
+    import abicheck.dumper as dumper_mod
+    from abicheck.model import AbiSnapshot
+
+    old_so, new_so, header = _two_elf(tmp_path)
+    calls: list[dict[str, object]] = []
+
+    def _fake_dump(**kwargs: object) -> object:
+        calls.append(kwargs)
+        return AbiSnapshot(library="libfoo.so", version="1.0")
+
+    monkeypatch.setattr(dumper_mod, "dump", _fake_dump)
+    result = CliRunner().invoke(
+        main,
+        ["compare", str(old_so), str(new_so), "-H", str(header), *extra_args],
+    )
+    assert result.exit_code == 0, result.output
+    assert len(calls) == 2
+    return calls
+
+
+def test_compare_threads_compile_context_to_both_sides(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """--gcc-* / --sysroot / --nostdinc reach *both* sides' dumper.dump (ADR-037 D3)."""
+    sysroot = tmp_path / "sr"
+    sysroot.mkdir()
+    calls = _compare_capturing_dump(
+        monkeypatch,
+        tmp_path,
+        [
+            "--gcc-path",
+            "/opt/g++",
+            "--gcc-prefix",
+            "aarch64-linux-gnu-",
+            "--gcc-options",
+            "-DFOO=1",
+            "--sysroot",
+            str(sysroot),
+            "--nostdinc",
+        ],
+    )
+    for c in calls:  # both old and new
+        assert c["gcc_path"] == "/opt/g++"
+        assert c["gcc_prefix"] == "aarch64-linux-gnu-"
+        assert c["gcc_options"] == "-DFOO=1"
+        assert c["sysroot"] == sysroot
+        assert c["nostdinc"] is True
+
+
+def test_compare_gcc_context_applies_with_per_side_frontend(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The both-sides gcc context applies to both sides even when the frontend
+    differs per side — the neutralized compile.frontend must not clobber the
+    per-side header_backend (regression guard for the run_dump eff_backend rule)."""
+    calls = _compare_capturing_dump(
+        monkeypatch,
+        tmp_path,
+        [
+            "--gcc-options",
+            "-DBAR=2",
+            "--header-backend",
+            "castxml",
+            "--new-header-backend",
+            "clang",
+        ],
+    )
+    # gcc context on both sides...
+    assert all(c["gcc_options"] == "-DBAR=2" for c in calls)
+    # ...while the per-side frontend override still wins.
+    assert calls[0]["header_backend"] == "castxml"
+    assert calls[1]["header_backend"] == "clang"
+
+
+def test_compare_reads_compile_block_from_config(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """compare folds the project .abicheck.yml compile: block into its L2 context
+    (CLI > config) — std/defines synthesize gcc_options for both sides."""
+    cfg = tmp_path / ".abicheck.yml"
+    cfg.write_text("compile:\n  std: c++20\n  defines: [FOO=1]\n", encoding="utf-8")
+    calls = _compare_capturing_dump(monkeypatch, tmp_path, ["--config", str(cfg)])
+    for c in calls:
+        assert c["gcc_options"] == "-std=c++20 -DFOO=1"
+
+
+def test_dump_reads_compile_block_from_config(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """dump's ELF path folds the compile: block in via the same shared resolver.
+
+    Patches ``perform_elf_dump`` (so the fake-ELF bytes are never parsed for real)
+    and asserts the synthesized ``-std`` reaches its ``effective_gcc_options``.
+    """
+    import abicheck.cli as cli_mod
+
+    so = tmp_path / "libfoo.so"
+    so.write_bytes(b"\x7fELF" + b"\x00" * 100)
+    header = tmp_path / "foo.h"
+    header.write_text("int foo(void);\n", encoding="utf-8")
+    cfg = tmp_path / ".abicheck.yml"
+    cfg.write_text("compile:\n  std: c++17\n", encoding="utf-8")
+
+    captured: dict[str, object] = {}
+
+    def _fake_perform_elf_dump(**kwargs: object) -> None:
+        captured.update(kwargs)
+
+    monkeypatch.setattr(cli_mod, "perform_elf_dump", _fake_perform_elf_dump)
+    result = CliRunner().invoke(
+        main, ["dump", str(so), "-H", str(header), "--config", str(cfg)]
+    )
+    assert result.exit_code == 0, result.output
+    assert "-std=c++17" in str(captured["effective_gcc_options"])
+
+
+def test_compare_rejects_compile_context_for_set_inputs(tmp_path: Path) -> None:
+    """Directory/package operands + a compile-context flag must fail loudly, not
+    silently drop it: the per-library fan-out doesn't thread the L2 context
+    (Codex review)."""
+    old_dir = tmp_path / "old"
+    new_dir = tmp_path / "new"
+    old_dir.mkdir()
+    new_dir.mkdir()
+    result = CliRunner().invoke(
+        main,
+        ["compare", str(old_dir), str(new_dir), "--gcc-options", "-DX=1"],
+    )
+    assert result.exit_code != 0
+    assert "--gcc-options" in result.output
+    assert "directory/package" in result.output
+
+
+def test_compare_set_inputs_without_compile_flags_not_rejected(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The guard fires only on explicitly-passed compile-context flags — a plain
+    directory compare still dispatches (no false rejection from the 'auto'
+    --ast-frontend default)."""
+    import abicheck.cli as cli_mod
+
+    old_dir = tmp_path / "old"
+    new_dir = tmp_path / "new"
+    old_dir.mkdir()
+    new_dir.mkdir()
+
+    dispatched: dict[str, object] = {}
+
+    def _fake_dispatch(ctx: object, **kwargs: object) -> None:
+        dispatched.update(kwargs)
+
+    monkeypatch.setattr(cli_mod, "_dispatch_release_compare", _fake_dispatch)
+    result = CliRunner().invoke(main, ["compare", str(old_dir), str(new_dir)])
+    assert result.exit_code == 0, result.output
+    assert dispatched  # the fan-out was reached, not rejected
+
+
+def test_compare_set_inputs_warns_on_config_compile_block(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A directory/package compare in a project with a .abicheck.yml compile:
+    block must WARN (not silently drop, not hard-fail) — the fan-out doesn't
+    thread the L2 context (Codex review)."""
+    import abicheck.cli as cli_mod
+
+    old_dir = tmp_path / "old"
+    new_dir = tmp_path / "new"
+    old_dir.mkdir()
+    new_dir.mkdir()
+    cfg = tmp_path / ".abicheck.yml"
+    cfg.write_text("compile:\n  std: c++20\n", encoding="utf-8")
+
+    dispatched: dict[str, object] = {}
+    monkeypatch.setattr(
+        cli_mod,
+        "_dispatch_release_compare",
+        lambda ctx, **kw: dispatched.update(kw),
+    )
+    result = CliRunner().invoke(
+        main, ["compare", str(old_dir), str(new_dir), "--config", str(cfg)]
+    )
+    assert result.exit_code == 0, result.output
+    assert dispatched  # warned, still dispatched (not rejected)
+    assert "compile: block is not applied" in result.output
+
+
+def test_compare_config_include_dirs_survive_per_side_include(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """config compile.include_dirs apply to BOTH sides even when --old-include
+    overrides the both-sides -I for one side (Codex review)."""
+    import abicheck.dumper as dumper_mod
+    from abicheck.model import AbiSnapshot
+
+    old_so, new_so, header = _two_elf(tmp_path)
+    cfg_inc = tmp_path / "cfg_inc"
+    cfg_inc.mkdir()
+    old_only = tmp_path / "old_inc"
+    old_only.mkdir()
+    cfg = tmp_path / ".abicheck.yml"
+    cfg.write_text("compile:\n  include_dirs: [cfg_inc]\n", encoding="utf-8")
+
+    calls: list[dict[str, object]] = []
+
+    def _fake_dump(**kwargs: object) -> object:
+        calls.append(kwargs)
+        return AbiSnapshot(library="libfoo.so", version="1.0")
+
+    monkeypatch.setattr(dumper_mod, "dump", _fake_dump)
+    result = CliRunner().invoke(
+        main,
+        [
+            "compare", str(old_so), str(new_so), "-H", str(header),
+            "--config", str(cfg), "--old-include", str(old_only),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert len(calls) == 2
+    old_inc = list(calls[0]["extra_includes"])  # type: ignore[arg-type]
+    new_inc = list(calls[1]["extra_includes"])  # type: ignore[arg-type]
+    # Old side: its per-side override AND the config dir (config not dropped).
+    assert old_only in old_inc
+    assert cfg_inc in old_inc
+    # New side: no override → config dir still present.
+    assert cfg_inc in new_inc

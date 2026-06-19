@@ -68,6 +68,7 @@ from .cli_options import (
     evidence_options,
     output_options,
     policy_options,
+    resolve_compile_context,
     scope_options,
     set_input_options,
     severity_options,
@@ -582,6 +583,22 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         )
         return
 
+    # Fold the project's .abicheck.yml compile: block into the L2 compile context
+    # (compare↔dump↔scan parity, ADR-037 D3): the same shared resolver scan uses,
+    # so a dump honors `compile.std`/`defines`/`sysroot`/`frontend`/`include_dirs`
+    # for its header AST the way scan does. CLI > config; an explicit --config or
+    # the .abicheck.yml auto-discovered at the --sources root.
+    _cc, includes = resolve_compile_context(
+        click.get_current_context(),
+        gcc_path=gcc_path, gcc_prefix=gcc_prefix, gcc_options=gcc_options,
+        gcc_option_tokens=gcc_option_tokens, sysroot=sysroot, nostdinc=nostdinc,
+        header_backend=header_backend, includes=includes,
+        build_config=build_config, sources=sources,
+    )
+    gcc_path, gcc_prefix, gcc_options = _cc.gcc_path, _cc.gcc_prefix, _cc.gcc_options
+    gcc_option_tokens, sysroot, nostdinc = _cc.gcc_option_tokens, _cc.sysroot, _cc.nostdinc
+    header_backend = _cc.frontend
+
     build_context_flags = _resolve_build_context_flags(
         effective_compile_db, headers, compile_db_filter,
     )
@@ -1009,6 +1026,84 @@ def _warn_unused_set_flags(
         )
 
 
+#: Compile-context flag dest → spelling, for the set-input rejection guard. The
+#: per-library release fan-out does not yet thread the L2 compile-context family
+#: (ADR-037 D3) down to each pair's header dump, so an explicitly-passed flag must
+#: be rejected loudly rather than silently dropped (Codex review).
+_COMPILE_CONTEXT_SET_INPUT_FLAGS: dict[str, str] = {
+    "gcc_path": "--gcc-path",
+    "gcc_prefix": "--gcc-prefix",
+    "gcc_options": "--gcc-options",
+    "gcc_option_tokens": "--gcc-option",
+    "sysroot": "--sysroot",
+    "nostdinc": "--nostdinc",
+    "header_backend": "--ast-frontend",
+    "old_header_backend": "--old-ast-frontend",
+    "new_header_backend": "--new-ast-frontend",
+}
+
+
+def _config_has_compile_block(project_cfg: Any) -> bool:
+    """True if a loaded ``.abicheck.yml`` carries any ``compile:`` setting.
+
+    Used to flag that a project's L2 compile context would be dropped by the
+    per-library release fan-out (which the single-pair path honors).
+    """
+    if project_cfg is None:
+        return False
+    return bool(
+        getattr(project_cfg, "compile_frontend", None)
+        or getattr(project_cfg, "compile_std", None)
+        or getattr(project_cfg, "compile_defines", None)
+        or getattr(project_cfg, "compile_include_dirs", None)
+        or getattr(project_cfg, "compile_sysroot", None)
+        or getattr(project_cfg, "compile_nostdinc", False)
+    )
+
+
+def _reject_compile_context_for_set_inputs(ctx: click.Context, project_cfg: Any) -> None:
+    """Guard the L2 compile context for directory/package compares.
+
+    The per-library fan-out (`compare-release` backend) runs each pair through
+    `service.run_compare` without a `CompileContext`, so the L2 cross-toolchain /
+    frontend context is not applied per library — unlike the single-pair path that
+    now honors it. Two cases, never silent (Codex review):
+
+    * An **explicitly-passed** compile-context flag is rejected loudly (a
+      `UsageError`, mirroring the `--exit-code-scheme` guard): the user asked for
+      it, so erroring beats ignoring it.
+    * An **ambient** project ``.abicheck.yml`` ``compile:`` block only *warns*:
+      a plain ``compare dir1 dir2`` in a configured project shouldn't hard-fail,
+      but the user must know those settings apply to single-library compares and
+      not to this fan-out (so per-library snapshots may differ).
+
+    Either way, compare libraries individually (or pre-dump snapshots) to apply
+    the context.
+    """
+    used = [
+        flag
+        for dest, flag in _COMPILE_CONTEXT_SET_INPUT_FLAGS.items()
+        if ctx.get_parameter_source(dest) == click.core.ParameterSource.COMMANDLINE
+    ]
+    if used:
+        raise click.UsageError(
+            ", ".join(sorted(used)) + " "
+            + ("is" if len(used) == 1 else "are")
+            + " not supported for directory/package (release) comparisons: the "
+            "per-library fan-out does not thread the L2 compile context to each "
+            "pair's header dump. Compare the libraries individually to use them."
+        )
+    if _config_has_compile_block(project_cfg):
+        click.echo(
+            "Warning: the .abicheck.yml compile: block is not applied to "
+            "directory/package (release) comparisons — the per-library fan-out "
+            "does not thread the L2 compile context. It affects single-library "
+            "compares only; compare libraries individually for consistent "
+            "per-library snapshots.",
+            err=True,
+        )
+
+
 def _dispatch_release_compare(ctx: click.Context, **kwargs: Any) -> None:
     """Fan a directory/package `compare` out to the per-library release engine.
 
@@ -1042,20 +1137,15 @@ def _dispatch_release_compare(ctx: click.Context, **kwargs: Any) -> None:
 # when the operands are directories/packages; a no-op-with-warning otherwise.
 @set_input_options
 # ── Dump options (used when input is an ELF binary) ──────────────────────────
-# Two-sided header/include/version family (ADR-037 D3); --lang and the
-# --ast-frontend trio stay inline (not part of the shared family).
+# Two-sided header/include/version family (ADR-037 D3). The L2 compile-context
+# family (--ast-frontend + cross-toolchain --gcc-*/--sysroot/--nostdinc) comes from
+# the shared @compile_context_options decorator so compare/dump/scan never drift
+# (ADR-037 D3); --lang and the per-side --old/new-ast-frontend overrides stay inline.
 @two_sided_input_options
+@compile_context_options  # --ast-frontend + cross-toolchain (shared with dump/scan)
 @click.option("--lang", default="c++", show_default=True,
               type=click.Choice(["c++", "c"], case_sensitive=False),
               help="Language mode for the header backend.")
-@click.option("--ast-frontend", "--header-backend", "header_backend",
-              default="auto", show_default=True,
-              type=click.Choice(["auto", "castxml", "clang"], case_sensitive=False),
-              help="C/C++ AST frontend for native-binary inputs (ADR-037 D8): "
-                   "castxml (default) or clang (-ast-dump=json; for clang-only "
-                   "hosts). auto = castxml if present, else clang, and auto-falls "
-                   "back to clang on a castxml toolchain-version error. "
-                   "Env: ABICHECK_AST_FRONTEND. (--header-backend is a deprecated alias.)")
 @click.option("--old-ast-frontend", "--old-header-backend", "old_header_backend",
               default=None,
               type=click.Choice(["auto", "castxml", "clang"], case_sensitive=False),
@@ -1202,6 +1292,8 @@ def compare_cmd(
     jobs: int, dso_only: bool, output_dir: Path | None,
     headers: tuple[Path, ...], includes: tuple[Path, ...], lang: str,
     header_backend: str,
+    gcc_path: str | None, gcc_prefix: str | None, gcc_options: str | None,
+    gcc_option_tokens: tuple[str, ...], sysroot: Path | None, nostdinc: bool,
     old_header_backend: str | None, new_header_backend: str | None,
     old_headers_only: tuple[Path, ...], new_headers_only: tuple[Path, ...],
     old_includes_only: tuple[Path, ...], new_includes_only: tuple[Path, ...],
@@ -1365,6 +1457,7 @@ def compare_cmd(
                 ".abicheck.yml. Compare libraries individually for explicit "
                 "scheme control."
             )
+        _reject_compile_context_for_set_inputs(ctx, project_cfg)
         _dispatch_release_compare(
             ctx,
             old_dir=old_input, new_dir=new_input,
@@ -1456,10 +1549,42 @@ def compare_cmd(
                 f"{resolved_cfg.source_method!r} (expected s0..s6 or auto)."
             ) from None
 
+    # L2 header compile context (compare↔dump↔scan parity, ADR-037 D3): the one
+    # shared resolver folds the project's .abicheck.yml compile: block into the CLI
+    # cross-toolchain/frontend flags (CLI > config) and appends config include_dirs
+    # after the -I roots. It applies to both sides; the per-side --old/new-ast-frontend
+    # overrides still win for the frontend (threaded separately below). cfg_path is
+    # the same config compare resolves everything else from (explicit --config or the
+    # .abicheck.yml auto-discovered from cwd).
+    import dataclasses
+
+    compile_context, merged_includes = resolve_compile_context(
+        ctx,
+        gcc_path=gcc_path, gcc_prefix=gcc_prefix, gcc_options=gcc_options,
+        gcc_option_tokens=gcc_option_tokens, sysroot=sysroot, nostdinc=nostdinc,
+        header_backend=header_backend, includes=includes, build_config=cfg_path,
+    )
+    # The dirs the config appended past the CLI -I roots. These are documented as
+    # applying to *both* sides, so they must survive a per-side --old/new-include
+    # override (which replaces the both-sides -I for that side). Keep them separate
+    # and re-append after per-side resolution rather than folding into the shared
+    # tuple, else the overridden side would lose them (Codex review).
+    config_includes = tuple(merged_includes[len(includes):])
+    # The merged frontend flows to both sides through the explicit header_backend
+    # (so --old/new-ast-frontend can still override per side); neutralize the
+    # frontend on the threaded context so run_dump's `compile.frontend` does NOT
+    # outrank that per-side header_backend (it only carries the --gcc-*/--sysroot/
+    # --nostdinc knobs for both sides).
+    header_backend = compile_context.frontend
+    side_compile_context = dataclasses.replace(compile_context, frontend="auto")
+
     old_h, new_h, old_inc, new_inc = _resolve_per_side_options(
         headers, includes, old_headers_only, new_headers_only,
         old_includes_only, new_includes_only,
     )
+    if config_includes:
+        old_inc = list(old_inc) + list(config_includes)
+        new_inc = list(new_inc) + list(config_includes)
 
     # Follow GNU ld linker scripts up front so the resolved DSO (not the text
     # script) drives format detection, metadata, and dependency analysis.
@@ -1502,6 +1627,7 @@ def compare_cmd(
         header_backend=header_backend,
         old_header_backend=old_header_backend,
         new_header_backend=new_header_backend,
+        compile_context=side_compile_context,
     )
 
     suppression, pf = _load_suppression_and_policy(

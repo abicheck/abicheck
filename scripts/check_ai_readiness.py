@@ -650,6 +650,14 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
         # simple cycle on each platform (e.g. via `cli_appcompat` vs `cli_plugin`).
         # A genuinely new bad cycle would pull in a module *outside* this SCC and so
         # would not be a subset — still flagged.
+        #
+        # ADR-037 D3 adds `cli_options`: the shared `@compile_context_options`
+        # decorator's one resolver (`merge_compile_config`/`resolve_compile_context`,
+        # shared by compare/dump/scan) reaches `CompileContext` in `service_scan` via
+        # a *function-local* `from .service_scan import CompileContext`; `service_scan`
+        # reaches `cli_scan` function-locally and `cli_scan` imports `cli_options` at
+        # module load. `cli_options` itself imports only `cli_params` at module load
+        # (it is a leaf), so this too closes only through function-local imports.
         frozenset(
             {
                 "appcompat",
@@ -662,6 +670,7 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
                 "cli_debian_symbols",
                 "cli_helpers_compare",
                 "cli_max",
+                "cli_options",
                 "cli_plugin",
                 "cli_pr_comment",
                 "cli_probe",

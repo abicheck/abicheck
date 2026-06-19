@@ -24,11 +24,14 @@ from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import TypeVar
+from typing import TYPE_CHECKING, TypeVar
 
 import click
 
 from .cli_params import DEPTH_PARAM, POLICY_FILE_PARAM
+
+if TYPE_CHECKING:
+    from .service_scan import CompileContext
 
 F = TypeVar("F", bound=Callable[..., object])
 
@@ -305,6 +308,159 @@ def compile_context_options(func: F) -> F:
         "ABICHECK_AST_FRONTEND. (--header-backend is a deprecated alias.)",
     )(func)
     return func
+
+
+def merge_compile_config(
+    cli_ctx: CompileContext,
+    cli_includes: tuple[Path, ...],
+    build_config: Path | None,
+    sources: Path | None = None,
+    *,
+    frontend_explicit: bool = False,
+    nostdinc_explicit: bool = False,
+) -> tuple[CompileContext, tuple[Path, ...]]:
+    """Fold a ``.abicheck.yml`` ``compile:`` block into the CLI compile context.
+
+    The single resolver shared by ``compare`` / ``dump`` / ``scan`` (ADR-037 D3):
+    precedence is CLI > config (ADR-035 D6.1 / ADR-037 D4) — a per-field CLI value
+    overrides config, an unset CLI field inherits it. The config's ``std`` +
+    ``defines`` synthesize ``-std=…``/``-D…`` flags only when the user did not pass
+    ``--gcc-options``; ``include_dirs`` (resolved against the config's directory)
+    are appended *after* the CLI ``-I`` so explicit roots keep search precedence.
+    Returns the merged ``(CompileContext, includes)``.
+
+    The config is the explicit ``--config`` when given, else the ``.abicheck.yml``
+    auto-discovered at the ``--sources`` tree root — so a source-tree scan honors
+    the project's ``compile:`` block for L2 the same way ``embed_build_source``
+    honors its other non-executable settings for L3-L5 (Codex review). Only the
+    non-executable ``compile:`` block is read here; ``build.query`` still requires
+    an explicit trusted ``--config`` + ``--allow-build-query`` (ADR-032 D5).
+
+    A parse error is fail-loud for an **explicit** ``--config`` (``ClickException``)
+    — otherwise an L2-only dump/scan with no ``--sources`` would silently drop the
+    intended ``compile:`` settings and still exit 0 — but best-effort (warn +
+    CLI-only fallback) for an **auto-discovered** config the user didn't bind to.
+    """
+    from .buildsource.inline import discover_build_config, load_build_config
+    from .service_scan import CompileContext
+
+    explicit_config = build_config is not None
+    cfg = build_config if explicit_config else discover_build_config(sources)
+    if cfg is None:
+        return cli_ctx, cli_includes
+
+    try:
+        bc = load_build_config(cfg)
+    except ValueError as exc:
+        if explicit_config:
+            # An *explicit* --config the user pointed at must fail loudly: for an
+            # L2-only dump/scan (no --sources/--build-info) nothing reloads it
+            # downstream, so a warn-and-fallback would silently drop the intended
+            # compile.std/defines/sysroot/frontend and still exit 0 (Codex review).
+            raise click.ClickException(f"cannot parse build config {cfg}: {exc}") from exc
+        # An *auto-discovered* config stays best-effort: a malformed file found by
+        # walking up from cwd / the --sources root shouldn't fail a run the user
+        # didn't ask to bind to it. Warn so it isn't silently ignored; the real
+        # downstream load (embed_build_source, when --sources is given) still
+        # surfaces it as a clean ClickException.
+        click.echo(
+            f"warning: could not parse auto-discovered {cfg}; using CLI compile "
+            f"context only ({exc}).",
+            err=True,
+        )
+        return cli_ctx, cli_includes
+    base = cfg.parent
+
+    # CLI > config: an explicit --ast-frontend wins even when it is "auto" (the
+    # documented escape hatch to bypass a pinned config frontend); only a *default*
+    # "auto" inherits the config's frontend (Codex review).
+    frontend = (
+        cli_ctx.frontend
+        if (frontend_explicit or cli_ctx.frontend != "auto")
+        else (bc.compile_frontend or "auto")
+    )
+    gcc_options: str | None
+    if cli_ctx.gcc_options is not None:
+        gcc_options = cli_ctx.gcc_options
+    else:
+        parts: list[str] = []
+        if bc.compile_std:
+            parts.append(f"-std={bc.compile_std}")
+        parts += [f"-D{d}" for d in bc.compile_defines]
+        gcc_options = " ".join(parts) or None
+    sysroot = (
+        cli_ctx.sysroot
+        if cli_ctx.sysroot is not None
+        else (Path(bc.compile_sysroot) if bc.compile_sysroot else None)
+    )
+    # CLI > config: an explicit --nostdinc/--no-nostdinc wins in *either*
+    # direction; an unset flag inherits the config value (Codex review).
+    nostdinc = cli_ctx.nostdinc if nostdinc_explicit else bool(bc.compile_nostdinc)
+    merged = CompileContext(
+        gcc_path=cli_ctx.gcc_path,
+        gcc_prefix=cli_ctx.gcc_prefix,
+        gcc_options=gcc_options,
+        gcc_option_tokens=cli_ctx.gcc_option_tokens,
+        sysroot=sysroot,
+        nostdinc=nostdinc,
+        frontend=frontend,
+    )
+    includes = tuple(cli_includes) + tuple(
+        (base / p) if not Path(p).is_absolute() else Path(p)
+        for p in bc.compile_include_dirs
+    )
+    return merged, includes
+
+
+def resolve_compile_context(
+    ctx: click.Context,
+    *,
+    gcc_path: str | None,
+    gcc_prefix: str | None,
+    gcc_options: str | None,
+    gcc_option_tokens: tuple[str, ...],
+    sysroot: Path | None,
+    nostdinc: bool,
+    header_backend: str,
+    includes: tuple[Path, ...],
+    build_config: Path | None,
+    sources: Path | None = None,
+) -> tuple[CompileContext, tuple[Path, ...]]:
+    """Build the CLI :class:`CompileContext` and fold the config ``compile:`` block in.
+
+    The single entry point the ``@compile_context_options`` family resolves to
+    (ADR-037 D3): construct a :class:`~abicheck.service_scan.CompileContext` from
+    the decorator's flags, then delegate to :func:`merge_compile_config` with the
+    ``--ast-frontend`` / ``--nostdinc`` explicitness read from the Click parameter
+    source (so an explicitly-typed value — even a default-looking ``auto`` — beats
+    a pinned config one). ``compare`` / ``dump`` / ``scan`` all call this so their
+    L2 compile context cannot drift.
+    """
+    from .service_scan import CompileContext
+
+    cli_ctx = CompileContext(
+        gcc_path=gcc_path,
+        gcc_prefix=gcc_prefix,
+        gcc_options=gcc_options,
+        gcc_option_tokens=tuple(gcc_option_tokens),
+        sysroot=sysroot,
+        nostdinc=nostdinc,
+        frontend=header_backend,
+    )
+
+    def _explicit(param: str) -> bool:
+        return bool(
+            ctx.get_parameter_source(param) == click.core.ParameterSource.COMMANDLINE
+        )
+
+    return merge_compile_config(
+        cli_ctx,
+        tuple(includes),
+        build_config,
+        sources=sources,
+        frontend_explicit=_explicit("header_backend"),
+        nostdinc_explicit=_explicit("nostdinc"),
+    )
 
 
 def output_options(
@@ -831,8 +987,12 @@ INTENTIONAL_SUBSET: dict[tuple[str, str], str] = {
 #: in Phase 5 (per-category severity, scope FP-tuning, suppression hygiene) are
 #: hidden and config-bound (D4), so they don't count against the budget. The
 #: ADR's end-state target is ~20; this interim ceiling keeps new visible flags
-#: from creeping back in while the deprecation window runs.
-COMPARE_FLAG_BUDGET = 60
+#: from creeping back in while the deprecation window runs. Raised from 60→66 when
+#: the shared ``@compile_context_options`` L2 family (--ast-frontend was already
+#: visible; +6 for --gcc-path/--gcc-prefix/--gcc-options/--gcc-option/--sysroot/
+#: --nostdinc) was unified onto ``compare`` for dump/scan parity (ADR-037 D3): the
+#: family is genuine L2 surface ``compare`` previously lacked, not config-demotable.
+COMPARE_FLAG_BUDGET = 66
 
 
 def count_visible_options(cmd: object) -> int:
