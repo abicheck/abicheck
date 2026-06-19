@@ -441,7 +441,7 @@ others.
 
 ```bash
 abicheck compare old.json new.json --format junit -o results.xml
-abicheck compare-release release-1.0/ release-2.0/ --format junit -o abi-tests.xml
+abicheck compare release-1.0/ release-2.0/ --format junit -o abi-tests.xml
 ```
 
 ### How it works

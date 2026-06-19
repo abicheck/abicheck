@@ -18,7 +18,7 @@ you're unsure, start with `abicheck compare` — it's the default workflow.
 |---------------|---------|-----|
 | **Did my library break?** — does upgrading it break existing consumers? | `abicheck compare` | [§2 below](#2-first-check-using-repo-examples) |
 | **Does my application still work** with the new library version? | `abicheck appcompat` | [§5 below](#5-application-compatibility-check) |
-| **Did my whole package / release break?** | `abicheck compare-release` | [Multi-Binary Releases](user-guide/multi-binary.md) |
+| **Did my whole package / release break?** | `abicheck compare` | [Multi-Binary Releases](user-guide/multi-binary.md) |
 | Will this binary load and resolve correctly in this sysroot — and does its dependency tree have unresolved symbols? | `abicheck deps tree` (`--sysroot /rootfs` for a specific root) | [CLI Usage](user-guide/cli-usage.md) |
 | Did anything in the dependency stack change between two sysroots / images? | `abicheck deps compare --baseline … --candidate …` | [CLI Usage](user-guide/cli-usage.md) |
 | I'm migrating from `abi-compliance-checker` and want the same flags. | `abicheck compat` | [Migrating from ABICC](user-guide/from-abicc.md) |
