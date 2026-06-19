@@ -1154,6 +1154,8 @@ def _embed_inline_source_side(
     version: str,
     lang: str,
     header_backend: str,
+    compile_context: object,
+    build_config: Path | None,
     collect_mode: str,
     out_dir: Path,
     label: str,
@@ -1168,6 +1170,13 @@ def _embed_inline_source_side(
     left untouched for the embedded-build-source pass; a tree we embed here is
     consumed (its sources arg becomes ``None``). A snapshot input cannot be
     re-dumped, so a tree on it is reported ignored.
+
+    *compile_context* is compare's already-resolved
+    :class:`~abicheck.service_scan.CompileContext` (the cross-toolchain
+    ``--gcc-*``/``--sysroot``/``--nostdinc`` knobs) and *build_config* the
+    ``--config`` path; both are forwarded so the inline dump parses this side's
+    headers with the same toolchain a plain ``compare``/``dump`` would, instead
+    of the default context.
     """
     if sources is None or _source_is_pack(sources):
         return input_path, sources
@@ -1180,10 +1189,21 @@ def _embed_inline_source_side(
             err=True,
         )
         return input_path, None
-    # A raw tree is an explicit request to collect from source; make sure the
-    # depth actually collects it even when no --depth/--max was given.
-    effective = collect_mode if collect_mode != "off" else "source-target"
+    # The --depth dial governs how deep to collect. When it resolves to "off"
+    # (--depth binary/headers, or an explicit --collect-mode off) there is no
+    # source collection to do, so the tree can't contribute at this depth —
+    # ignore it with a note rather than silently deepening the run (matches the
+    # old deep-compare, which never auto-bumped the depth).
+    if collect_mode == "off":
+        click.echo(
+            f"Warning: --{label}-sources was given but the selected --depth "
+            "collects no source evidence; ignoring the source tree. Use "
+            "--depth source/full (or --max) to collect from it.",
+            err=True,
+        )
+        return input_path, None
     out = out_dir / f"{label}.abi.json"
+    cc = compile_context
     ctx.invoke(
         dump_cmd,
         so_path=norm,
@@ -1192,8 +1212,15 @@ def _embed_inline_source_side(
         version=version,
         lang=lang,
         header_backend=header_backend,
+        gcc_path=cc.gcc_path,  # type: ignore[attr-defined]
+        gcc_prefix=cc.gcc_prefix,  # type: ignore[attr-defined]
+        gcc_options=cc.gcc_options,  # type: ignore[attr-defined]
+        gcc_option_tokens=cc.gcc_option_tokens,  # type: ignore[attr-defined]
+        sysroot=cc.sysroot,  # type: ignore[attr-defined]
+        nostdinc=cc.nostdinc,  # type: ignore[attr-defined]
+        build_config=build_config,
         sources=sources,
-        collect_mode=effective,
+        collect_mode=collect_mode,
         output=out,
     )
     return out, None
@@ -1658,23 +1685,28 @@ def compare_cmd(
     # dump that side at --depth so its L3-L5 facts ride embedded in the snapshot,
     # the way the standalone deep-compare command used to. Pre-built packs fall
     # through unchanged to prepare_embedded_build_source below.
-    _src_tmp: str | None = None
     if (old_sources and not _source_is_pack(old_sources)) or (
         new_sources and not _source_is_pack(new_sources)
     ):
+        import shutil
         import tempfile
 
         _src_tmp = tempfile.mkdtemp(prefix="abicheck-compare-src-")
+        # Cleanup on context teardown so the temp dir never leaks, even if an
+        # inline dump or _resolve_compare_snapshots raises before we return.
+        ctx.call_on_close(lambda: shutil.rmtree(_src_tmp, ignore_errors=True))
         old_input, old_sources = _embed_inline_source_side(
             ctx, input_path=old_input, sources=old_sources,
             headers=old_h, includes=old_inc, version=old_version, lang=lang,
             header_backend=old_header_backend or header_backend,
+            compile_context=compile_context, build_config=cfg_path,
             collect_mode=collect_mode, out_dir=Path(_src_tmp), label="old",
         )
         new_input, new_sources = _embed_inline_source_side(
             ctx, input_path=new_input, sources=new_sources,
             headers=new_h, includes=new_inc, version=new_version, lang=lang,
             header_backend=new_header_backend or header_backend,
+            compile_context=compile_context, build_config=cfg_path,
             collect_mode=collect_mode, out_dir=Path(_src_tmp), label="new",
         )
 
@@ -1721,11 +1753,6 @@ def compare_cmd(
         new_header_backend=new_header_backend,
         compile_context=side_compile_context,
     )
-    # The embedded snapshots are now loaded into `old`/`new`; drop the temp dir.
-    if _src_tmp is not None:
-        import shutil
-
-        shutil.rmtree(_src_tmp, ignore_errors=True)
 
     suppression, pf = _load_suppression_and_policy(
         suppress, policy, policy_file_path,
@@ -1862,7 +1889,7 @@ from . import (  # noqa: E402  — must run after `main` and helpers are defined
     cli_pr_comment,  # noqa: F401  — registers pr-comment
     cli_probe,  # noqa: F401  — registers probe (run, compare)
     cli_scan,  # noqa: F401  — registers scan
-    cli_stack,  # noqa: F401  — registers deps, stack-check
+    cli_stack,  # noqa: F401  — registers deps (tree, compare)
     cli_suggest,  # noqa: F401  — registers suggest-suppressions
     cli_surface,  # noqa: F401  — registers surface-report
 )

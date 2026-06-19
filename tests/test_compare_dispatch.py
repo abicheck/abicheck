@@ -62,6 +62,73 @@ def test_source_is_pack_detects_manifest(tmp_path: Path) -> None:
     assert _source_is_pack(pack)
 
 
+def test_embed_inline_source_forwards_toolchain_and_collects(tmp_path: Path) -> None:
+    """A raw source tree on a native side dumps inline at the requested depth and
+    forwards the resolved compile/toolchain context (gcc/sysroot/nostdinc)."""
+    import abicheck.cli as climod
+    from abicheck.service_scan import CompileContext
+
+    tree = tmp_path / "src"
+    tree.mkdir()  # raw checkout (no manifest.json)
+    captured: dict = {}
+
+    class _Ctx:
+        def invoke(self, _cmd, **kwargs):  # type: ignore[no-untyped-def]
+            captured.update(kwargs)
+
+    # Pretend the input is a native ELF binary so the embed path is taken.
+    orig = climod._normalize_binary_input
+    climod._normalize_binary_input = lambda p: (Path(p), "elf")  # type: ignore[assignment]
+    try:
+        cc = CompileContext(
+            gcc_path="/x/g++", gcc_prefix="aarch64-", gcc_options="-O2",
+            gcc_option_tokens=("-DFOO",), sysroot=Path("/sysroot"), nostdinc=True,
+        )
+        out, kept = climod._embed_inline_source_side(
+            _Ctx(), input_path=tmp_path / "lib.so", sources=tree,
+            headers=(), includes=(), version="1.0", lang="c++",
+            header_backend="auto", compile_context=cc, build_config=None,
+            collect_mode="source-target", out_dir=tmp_path, label="old",
+        )
+    finally:
+        climod._normalize_binary_input = orig  # type: ignore[assignment]
+
+    assert kept is None and out == tmp_path / "old.abi.json"
+    assert captured["sources"] == tree and captured["collect_mode"] == "source-target"
+    assert captured["gcc_path"] == "/x/g++" and captured["sysroot"] == Path("/sysroot")
+    assert captured["nostdinc"] is True and captured["gcc_option_tokens"] == ("-DFOO",)
+
+
+def test_embed_inline_source_ignored_when_depth_collects_nothing(tmp_path: Path) -> None:
+    """At a depth that collects no source (collect_mode 'off') a raw tree is
+    ignored rather than silently deepening the run."""
+    import abicheck.cli as climod
+    from abicheck.service_scan import CompileContext
+
+    tree = tmp_path / "src"
+    tree.mkdir()
+    called = {"n": 0}
+
+    class _Ctx:
+        def invoke(self, _cmd, **kwargs):  # type: ignore[no-untyped-def]
+            called["n"] += 1
+
+    orig = climod._normalize_binary_input
+    climod._normalize_binary_input = lambda p: (Path(p), "elf")  # type: ignore[assignment]
+    try:
+        out, kept = climod._embed_inline_source_side(
+            _Ctx(), input_path=tmp_path / "lib.so", sources=tree,
+            headers=(), includes=(), version="1.0", lang="c++",
+            header_backend="auto", compile_context=CompileContext(),
+            build_config=None, collect_mode="off", out_dir=tmp_path, label="old",
+        )
+    finally:
+        climod._normalize_binary_input = orig  # type: ignore[assignment]
+
+    assert kept is None and out == tmp_path / "lib.so"  # input unchanged
+    assert called["n"] == 0  # no dump performed
+
+
 def test_compare_source_tree_on_snapshot_input_is_ignored(tmp_path: Path) -> None:
     """A raw --old-sources tree on a snapshot input can't be embedded (you can't
     re-dump a snapshot), so compare warns and still produces a verdict."""
