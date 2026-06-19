@@ -338,8 +338,26 @@ def test_cli_estimate_json(runner: CliRunner, snap_path: Path) -> None:
     assert "total_est_seconds" in payload
 
 
+def _minimal_compile_db(tmp_path: Path) -> Path:
+    """A minimal compile_commands.json (L3 build metadata; pure parsing).
+
+    Supplies source evidence so a pinned deep --source-method does not trip
+    auto-strict (ADR-037 D5: a pinned depth with no source input errors).
+    """
+    src = tmp_path / "u.c"
+    src.write_text("int u(void){return 0;}\n", encoding="utf-8")
+    cdb = tmp_path / "compile_commands.json"
+    cdb.write_text(
+        json.dumps(
+            [{"directory": str(tmp_path), "file": str(src), "command": "cc -c u.c"}]
+        ),
+        encoding="utf-8",
+    )
+    return cdb
+
+
 def test_replay_seed_empty_without_diff_seed(
-    monkeypatch, runner: CliRunner, snap_path: Path, header: Path
+    monkeypatch, runner: CliRunner, snap_path: Path, header: Path, tmp_path: Path
 ) -> None:
     # No --since/--changed-path → broad scope. Pattern-trigger POIs must NOT
     # narrow the replay seed (would skip source-only checks in other TUs) — the
@@ -364,14 +382,16 @@ def test_replay_seed_empty_without_diff_seed(
             str(header),
             "--source-method",
             "s5",
+            "--build-info",
+            str(_minimal_compile_db(tmp_path)),
         ],
     )
-    assert res.exit_code == 0
+    assert res.exit_code == 0, res.output
     assert captured["changed_paths"] == ()
 
 
 def test_replay_seed_used_when_changed_path_given(
-    monkeypatch, runner: CliRunner, snap_path: Path, header: Path
+    monkeypatch, runner: CliRunner, snap_path: Path, header: Path, tmp_path: Path
 ) -> None:
     # An explicit --changed-path is a real diff seed → the POI floor feeds the
     # replay scope.
@@ -395,11 +415,13 @@ def test_replay_seed_used_when_changed_path_given(
             str(header),
             "--source-method",
             "s5",
+            "--build-info",
+            str(_minimal_compile_db(tmp_path)),
             "--changed-path",
             "src/a.cpp",
         ],
     )
-    assert res.exit_code == 0
+    assert res.exit_code == 0, res.output
     assert "src/a.cpp" in (captured["changed_paths"] or ())
 
 

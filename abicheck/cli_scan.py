@@ -621,22 +621,31 @@ def _audit_exit_code(
     "mode",
     type=click.Choice([m.value for m in ScanMode]),
     default=ScanMode.PR.value,
-    show_default=True,
-    help="Fixed (L,S) preset selecting how deep the scan runs.",
+    show_default=False,
+    hidden=True,
+    help="DEPRECATED (ADR-037 D5 G22 Phase 6): fixed (L,S) preset. Use --depth; "
+    "kept as a warned alias for one release. (--audit is the standalone "
+    "no-baseline lint switch.)",
 )
 @click.option(
     "--source-method",
     "source_method",
     type=click.Choice([m.value for m in SourceMethod]),
     default=None,
-    help="Precise S-axis level to reach; deterministic. 'auto' = risk-driven (opt-in).",
+    hidden=True,
+    help="DEPRECATED (ADR-037 D5 G22 Phase 6): precise S-axis technique. Use "
+    "--depth; kept as a warned alias for one release.",
 )
 @click.option(
     "--depth",
     "depth",
     type=DEPTH_PARAM,
     default=None,
-    help="Coarse L-axis selector (unified dial; --source-method wins if both).",
+    help="Evidence depth to collect — the single dial, named by what you get: "
+    "binary (L0/L1 symbols only), headers (+L2 AST), build (+L3 build context), "
+    "source (+L4 replay & the L5 graph), full (deepest). Omit for 'auto' "
+    "(risk-driven when a --since/--changed-path seed is present, else a sensible "
+    "default). --audit is orthogonal (no-baseline lint).",
 )
 @click.option(
     "--since",
@@ -820,6 +829,30 @@ def scan_cmd(
     risk_rules = _load_risk_rules(risk_rules_path)
     risk = score_changed_paths(changed, risk_rules)
 
+    # ADR-037 D5 G22 Phase 6: --depth is the single visible dial; --mode and
+    # --source-method are hidden, deprecated warned aliases for one release.
+    _ctx = click.get_current_context()
+    _mode_explicit = (
+        _ctx.get_parameter_source("mode") == click.core.ParameterSource.COMMANDLINE
+    )
+    _sm_explicit = (
+        _ctx.get_parameter_source("source_method")
+        == click.core.ParameterSource.COMMANDLINE
+    )
+    if _mode_explicit or _sm_explicit:
+        _dep = [
+            f
+            for f, e in (("--mode", _mode_explicit), ("--source-method", _sm_explicit))
+            if e
+        ]
+        click.echo(
+            f"warning: {', '.join(_dep)} {'is' if len(_dep) == 1 else 'are'} "
+            "deprecated (ADR-037 D5); use --depth "
+            "(binary|headers|build|source|full), or omit it for auto. --audit is "
+            "the no-baseline lint switch.",
+            err=True,
+        )
+
     scan_mode = ScanMode.AUDIT if audit else ScanMode(mode)
     sm = SourceMethod(source_method) if source_method else None
     # S2 (preprocessor macro/include capture) is collected by the conditional S2
@@ -828,6 +861,12 @@ def scan_cmd(
     # preprocessor pass when a compile DB + `clang -E` are available (else the
     # coverage row reports it skipped — ADR-035 D2 coverage honesty).
     dp = EvidenceDepth(depth) if depth else None
+    # The unset dial means 'auto' (ADR-037 D5): opt into the risk-driven S-method
+    # so a seeded PR scan escalates by risk and an unseeded one falls back to the
+    # preset. Only when *nothing* was pinned (no --depth, no --source-method, no
+    # explicit --mode) — a pinned rung stays deterministic.
+    if sm is None and dp is None and not _mode_explicit:
+        sm = SourceMethod.AUTO
     is_auto = sm is SourceMethod.AUTO
     # auto uses the risk score ONLY when a valid diff seed was produced. A seeded
     # empty diff (no-op PR) correctly yields s0 (skip the scan); a missing/failed
@@ -917,6 +956,11 @@ def scan_cmd(
     except _BudgetOverflow as bo:
         click.echo(bo.message, err=True)
         sys.exit(_EXIT_BUDGET_OVERFLOW)
+    except _EvidenceContractError as ce:
+        # A pinned depth that can't collect its evidence is a usage contract
+        # violation → a clean CLI error (exit 1), distinct from the verdict codes
+        # (2/4) and the budget code (5).
+        raise click.ClickException(ce.message) from ce
 
     outcome = core.outcome
     text = (
@@ -939,6 +983,22 @@ class _BudgetOverflow(Exception):
 
     A scan-engine signal (not a click concern): the budget is a *failure guard*
     that never shrinks scope, so the core raises and the CLI maps it onto exit 5.
+    """
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+        self.message = message
+
+
+class _EvidenceContractError(Exception):
+    """Raised by ``run_scan_core`` when a *pinned* depth can't collect its evidence.
+
+    ADR-037 D5 (#2 auto-strict): an explicitly-pinned ``--depth``/``--source-method``
+    is a contract — if the requested source/build evidence is unavailable the scan
+    fails loudly rather than silently degrading to a shallower one. Like
+    :class:`_BudgetOverflow`, it is an engine signal the CLI maps onto an error
+    exit (a clean ``ClickException``, exit 1) and ``service.run_scan`` maps onto a
+    failed :class:`ScanResult`. The implicit ``auto`` default never raises it.
     """
 
     def __init__(self, message: str) -> None:
@@ -1115,21 +1175,34 @@ def run_scan_core(
         compile_context=compile_context,
     )
 
-    # --- honest level-vs-evidence advisory ------------------------------------
-    # A deep --source-method (s1/s2/s4/s5/s6 → collect_mode != "off") needs an L3
-    # compile database; without one the L3/L4/L5 layers are *skipped*, not failed.
-    # When the user actually supplied a source input (a --sources tree or
-    # --build-info) yet L3 still came back empty — typically a pristine checkout
-    # with no compile_commands.json — the coverage rows say `not_collected`, but
-    # the user shouldn't have to infer *why*: name the requested level and the
-    # exact remedy (mirrors the unseeded-replay advisory). Gated on a source input
-    # so a plain binary-only scan at the default deep mode isn't nagged.
+    # --- level-vs-evidence: fail-loud on missing input, advise otherwise ------
+    # A deep depth (build/source/full → collect_mode != "off") needs an L3 compile
+    # database; without one the L3/L4/L5 layers cannot be collected.
+    #
+    # ADR-037 D5 (#2 auto-strict): a depth the user *explicitly pinned* is a
+    # contract. If it was pinned with **no source input at all** (no --sources /
+    # --build-info to analyze), there is nothing to collect from — that is the
+    # "missing input" case, and we ERROR with the remedy rather than silently
+    # produce a shallow binary-only scan. When a source input *was* supplied but
+    # L3 still came back empty (e.g. a pristine tree with no compile_commands.json)
+    # the user clearly tried — that stays a pointed *advisory* naming the remedy,
+    # not a hard error. The implicit 'auto' default never errors here.
     gave_source_input = sources is not None or effective_build_info is not None
-    if gave_source_input and collect_mode != "off" and not _l3_collected(new_snap):
+    needs_source = collect_mode != "off"
+    if needs_source and level_explicit and not gave_source_input:
+        raise _EvidenceContractError(
+            f"pinned depth '{eff_depth_enum.value}' (source-method {resolved.value}) "
+            "needs source evidence, but no --sources/--build-info was given — there "
+            "is nothing to collect L3/L4/L5 from. Pass --sources <tree> or "
+            "--build-info <dir|compile_commands.json> (or a trusted --config plus "
+            "--allow-build-query), or drop the pin / use the default 'auto' for a "
+            "best-effort binary scan. (Pinned depths are a contract.)"
+        )
+    if needs_source and gave_source_input and not _l3_collected(new_snap):
         advisories.append(
-            f"requested source-method {resolved.value} (depth {eff_depth_enum.value}) "
-            "needs an L3 compile database, but none was found — L3/L4/L5 were "
-            "skipped. Provide one with --build-info/--compile-db (a "
+            f"requested depth '{eff_depth_enum.value}' (source-method "
+            f"{resolved.value}) needs an L3 compile database, but none was found — "
+            "L3/L4/L5 were skipped. Provide one with --build-info/--compile-db (a "
             "compile_commands.json or build dir), or a trusted --config plus "
             "--allow-build-query to generate it."
         )

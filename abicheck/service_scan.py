@@ -612,7 +612,12 @@ def run_scan(req: ScanRequest) -> ScanResult:
         resolve_level,
     ) = _scan_imports()
     from .buildsource.crosscheck import ALL_CHECKS
-    from .cli_scan import _BudgetOverflow, _public_provenance_set, run_scan_core
+    from .cli_scan import (
+        _BudgetOverflow,
+        _EvidenceContractError,
+        _public_provenance_set,
+        run_scan_core,
+    )
 
     if len(req.binaries) != 1:
         raise ValueError("run_scan accepts exactly one binary")
@@ -673,6 +678,12 @@ def run_scan(req: ScanRequest) -> ScanResult:
     except _BudgetOverflow:
         # The failure-guard contract: overflow is exit 5, never a shrunk scope.
         return ScanResult(verdict="BUDGET_OVERFLOW", exit_code=5)
+    except _EvidenceContractError:
+        # A pinned depth that can't collect its evidence (auto-strict, ADR-037 D5).
+        # The programmatic API stays best-effort (run_scan_core is called without
+        # level_explicit), so this is defensive; map it to a failed result rather
+        # than degrade silently.
+        return ScanResult(verdict="EVIDENCE_CONTRACT_ERROR", exit_code=1)
 
     outcome = core.outcome
     return ScanResult(

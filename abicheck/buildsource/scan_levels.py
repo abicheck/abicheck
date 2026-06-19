@@ -68,7 +68,7 @@ class SourceMethod(str, Enum):
 class EvidenceDepth(str, Enum):
     """The coarse L-axis ``--depth`` selector (maps lossily to a representative S)."""
 
-    SYMBOLS = "symbols"  # L0/L1 exported symbols + binary metadata only (no L2 AST)
+    BINARY = "binary"  # L0/L1 exported symbols + binary metadata only (no L2 AST)
     HEADERS = "headers"  # L2 only
     BUILD = "build"  # L3 (S1)
     SOURCE = "source"  # L4 scoped + L5 edges (S5)
@@ -80,7 +80,7 @@ class EvidenceDepth(str, Enum):
 #: ``GRAPH`` is excluded: the L5 graph is an *internal* consequence of
 #: ``--depth source`` (D6), never its own user rung.
 USER_DEPTHS: tuple[EvidenceDepth, ...] = (
-    EvidenceDepth.SYMBOLS,
+    EvidenceDepth.BINARY,
     EvidenceDepth.HEADERS,
     EvidenceDepth.BUILD,
     EvidenceDepth.SOURCE,
@@ -88,9 +88,12 @@ USER_DEPTHS: tuple[EvidenceDepth, ...] = (
 )
 
 #: Deprecated ``--depth`` spellings → their replacement (ADR-037 D5/D6). The G21
-#: ``graph`` rung folds into ``source`` (which now builds the graph internally).
+#: ``graph`` rung folds into ``source`` (which now builds the graph internally);
+#: ``symbols`` was renamed to the evidence-named ``binary`` rung (ADR-037 D5 G22
+#: Phase 6) and keeps working as an alias for one release.
 DEPRECATED_DEPTHS: dict[str, EvidenceDepth] = {
     "graph": EvidenceDepth.SOURCE,
+    "symbols": EvidenceDepth.BINARY,
 }
 
 
@@ -109,7 +112,7 @@ _MODE_PRESET: dict[ScanMode, tuple[SourceMethod, EvidenceDepth]] = {
 #: reaches no S-method (L2 is intrinsic header AST). ``BUILD`` is S1 — S2
 #: (preprocessor) is *not* reachable via ``--depth`` and needs ``--source-method``.
 _DEPTH_TO_METHOD: dict[EvidenceDepth, SourceMethod | None] = {
-    EvidenceDepth.SYMBOLS: None,  # L0/L1 only — no source method, no L2 AST
+    EvidenceDepth.BINARY: None,  # L0/L1 only — no source method, no L2 AST
     EvidenceDepth.HEADERS: None,
     EvidenceDepth.BUILD: SourceMethod.S1,
     EvidenceDepth.GRAPH: SourceMethod.S4,
