@@ -1144,8 +1144,12 @@ def _source_is_pack(path: Path) -> bool:
     Validates the manifest *content*, not just its presence: a raw checkout that
     happens to contain a top-level ``manifest.json`` (which ``BuildSourcePack.load``
     would otherwise accept with sparse defaults) must still be collected from, so
-    we require the BuildSourcePack marker (``build_source_pack_version`` / legacy
-    ``evidence_pack_version``) or the Flow-2 ``kind: abicheck_inputs`` discriminator.
+    we require the ``BuildSourcePack`` marker (``build_source_pack_version`` /
+    legacy ``evidence_pack_version``). A Flow-2 ``kind: abicheck_inputs`` pack is
+    deliberately **not** treated as a pack here: the compare evidence path loads
+    only ``BuildSourcePack`` (via ``_resolve_side_pack``), not inputs packs, so
+    classifying one as a pack would route it to the wrong loader and silently drop
+    its facts — feed those through ``merge`` instead.
     """
     manifest = path / "manifest.json"
     if not manifest.is_file():
@@ -1159,11 +1163,7 @@ def _source_is_pack(path: Path) -> bool:
         return False  # unreadable / non-JSON → treat as a raw tree, collect from it
     if not isinstance(data, dict):
         return False
-    return (
-        "build_source_pack_version" in data
-        or "evidence_pack_version" in data
-        or data.get("kind") == "abicheck_inputs"
-    )
+    return "build_source_pack_version" in data or "evidence_pack_version" in data
 
 
 def _embed_inline_source_side(

@@ -61,11 +61,13 @@ def test_source_is_pack_detects_manifest(tmp_path: Path) -> None:
     (pack / "manifest.json").write_text('{"build_source_pack_version": 1}')
     assert _source_is_pack(pack)
 
-    # A Flow-2 inputs pack is also a pack.
+    # A Flow-2 inputs pack is NOT treated as a compare-sources pack: the evidence
+    # path only loads BuildSourcePack, so routing it here would mis-load it. Feed
+    # inputs packs through `merge` instead (Codex review).
     inputs = tmp_path / "inputs"
     inputs.mkdir()
     (inputs / "manifest.json").write_text('{"kind": "abicheck_inputs"}')
-    assert _source_is_pack(inputs)
+    assert not _source_is_pack(inputs)
 
     # A raw checkout with a stray/sparse manifest.json is NOT a pack — it must
     # still be collected from (Codex review).
