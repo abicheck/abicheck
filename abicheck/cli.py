@@ -512,9 +512,15 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
         depth, max_depth, collect_mode, collect_mode_explicit,
     )
     # --depth binary suppresses the L2 header AST (symbols-only dump, ADR-037 D5;
-    # the `symbols` alias is normalized to `binary` by DEPTH_PARAM).
+    # the `symbols` alias is normalized to `binary` by DEPTH_PARAM). A compile DB
+    # only feeds the header parse, so discard it with the headers — otherwise
+    # resolve_dump_compile_db would reject the now-headerless invocation even though
+    # the user did supply headers, blocking the switch to the fast binary rung
+    # (Codex review).
     if depth == "binary":
         headers = ()
+        compile_db_path = None
+        compile_db_path_alt = None
 
     # An *explicitly* requested deep evidence depth (--depth/--max or an explicit
     # --collect-mode) collects nothing without a source tree / build context:

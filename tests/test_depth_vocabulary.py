@@ -320,3 +320,26 @@ def test_dump_source_only_depth_binary(tmp_path) -> None:  # type: ignore[no-unt
     # L0-L2 snapshot and exits clean.
     assert res.exit_code == 0, _all_output(res)
     assert (tmp_path / "out2.json").is_file()
+
+
+def test_dump_depth_binary_ignores_compile_db(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """``dump --depth binary`` discards a -H + --compile-db invocation's L2 inputs:
+    it must NOT abort on the compile-DB header requirement just because binary depth
+    cleared the headers (Codex review)."""
+    hdr = tmp_path / "foo.h"
+    hdr.write_text("int foo(void);\n", encoding="utf-8")
+    cdb = tmp_path / "compile_commands.json"
+    cdb.write_text("[]", encoding="utf-8")
+    res = CliRunner().invoke(
+        main,
+        [
+            "dump", "/no/such/bin.so", "-H", str(hdr), "--compile-db", str(cdb),
+            "--depth", "binary", "-o", str(tmp_path / "o.json"),
+        ],
+    )
+    # The compile-DB-requires-headers UsageError must not fire (it would block the
+    # switch to the fast binary rung). Any later failure is the missing binary, not
+    # this validation.
+    out = _all_output(res)
+    assert "Compilation database" not in out
+    assert "requires -H" not in out
