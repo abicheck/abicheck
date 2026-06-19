@@ -626,8 +626,15 @@ def run_scan(req: ScanRequest) -> ScanResult:
     if len(req.binaries) != 1:
         raise ValueError("run_scan accepts exactly one binary")
     binary = req.binaries[0]
+    sm = SourceMethod(req.source_method) if req.source_method else None
+    dp = parse_user_depth(req.depth)  # honors the symbols→binary alias (Codex)
+    # --depth binary is symbols-only (L0/L1): suppress the L2 header AST (and its
+    # provenance) even when the caller passes headers, so the collected evidence
+    # matches the reported depth — parity with the CLI's `scan --depth binary`
+    # handling (Codex review).
+    eff_headers = [] if dp is EvidenceDepth.BINARY else list(req.headers)
     prov_headers, prov_dirs = _public_provenance_set(
-        list(req.headers), list(req.public_header_dirs)
+        eff_headers, list(req.public_header_dirs)
     )
 
     changed = [p for p in req.changed_paths if p]
@@ -636,8 +643,6 @@ def run_scan(req: ScanRequest) -> ScanResult:
     risk = score_changed_paths(changed, risk_rules)
 
     scan_mode = ScanMode(req.mode)
-    sm = SourceMethod(req.source_method) if req.source_method else None
-    dp = parse_user_depth(req.depth)  # honors the symbols→binary alias (Codex)
     # The pinned-depth contract (ADR-037 D5 auto-strict) applies to the programmatic
     # API too: an explicit depth *always* pins (even with source_method=auto, which
     # only picks the method), or a non-auto source_method does. So run_scan_core
@@ -662,7 +667,7 @@ def run_scan(req: ScanRequest) -> ScanResult:
         core = run_scan_core(
             start=_time.monotonic(),
             binary=binary,
-            headers=list(req.headers),
+            headers=eff_headers,
             includes=list(req.includes),
             public_headers=prov_headers,
             public_header_dirs=prov_dirs,

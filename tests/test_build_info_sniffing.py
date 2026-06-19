@@ -162,6 +162,30 @@ def test_sniff_object_wrapped_compile_db(tmp_path: Path) -> None:
     assert sniff_build_info_format(p) == "compile_db"
 
 
+def test_sniff_unreadable_or_missing_path_is_unknown(tmp_path: Path) -> None:
+    # A path that can't be opened (here: does not exist) → "unknown", never a crash
+    # (the OSError guard around the bounded-head read).
+    assert sniff_build_info_format(tmp_path / "nope.json") == "unknown"
+
+
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        ('"just a json string"', "unknown"),  # neither array nor object head
+        ("garbage not json", "unknown"),  # not JSON at all
+        ('{"actions": [{"mnemonic":', "bazel_aquery"),  # truncated → prefix fallback
+        ('{"results": [{"target":', "bazel_cquery"),  # truncated → prefix fallback
+        ('{"foo": [1, 2, 3', "unknown"),  # truncated, no discriminating key
+    ],
+)
+def test_sniff_non_object_and_truncated_objects(
+    tmp_path: Path, text, expected
+) -> None:
+    # Heads that aren't a parseable object exercise the non-`{` branch and the
+    # truncated-JSON prefix fallback (json.load fails → scan the bounded head).
+    assert sniff_build_info_format(_w(tmp_path, "x.json", text)) == expected
+
+
 def test_maybe_collect_bazel_handles_none_and_nonfile(tmp_path: Path) -> None:
     from abicheck.buildsource.inline import _maybe_collect_bazel_build_info
 

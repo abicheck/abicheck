@@ -551,6 +551,36 @@ def test_run_scan_auto_default_without_evidence_is_best_effort(snap_path: Path) 
     assert res.verdict != "EVIDENCE_CONTRACT_ERROR"
 
 
+def test_run_scan_binary_depth_suppresses_headers(
+    monkeypatch, snap_path: Path, header: Path
+) -> None:
+    # Codex P2: a programmatic ScanRequest(depth="binary", headers=[...]) must not
+    # parse the L2 header AST — the service mirrors the CLI's `--depth binary`
+    # header suppression so the collected evidence matches the reported depth.
+    import abicheck.cli_scan as cs
+    from abicheck.service import run_scan
+
+    captured: dict[str, object] = {}
+    original = cs.run_scan_core
+
+    def _spy(*args, **kwargs):
+        captured["headers"] = kwargs.get("headers")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(cs, "run_scan_core", _spy)
+    res = run_scan(
+        ScanRequest(
+            binaries=[snap_path],
+            depth="binary",
+            headers=[header],
+            mode="audit",
+        )
+    )
+    assert res.verdict != "EVIDENCE_CONTRACT_ERROR"
+    # Headers were dropped before reaching the core — no L2 header parse.
+    assert captured["headers"] == []
+
+
 def test_service_accepts_symbols_depth_alias(snap_path: Path) -> None:
     # The deprecated `symbols` depth spelling must not crash the programmatic API
     # (it's only normalized by the CLI DEPTH_PARAM otherwise) — Codex review.
