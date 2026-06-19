@@ -48,6 +48,37 @@ the changed paths, runs the always-on compiler-free pattern pre-scan, then runs 
 | `s5` | targeted semantic AST (changed TUs) | + **L4** source-ABI replay + L5 edges |
 | `s6` | full AST (all TUs) | + L4 over the whole library |
 
+### What each method does, in plain terms
+
+- **`s0` — binary diff (the always-available floor).** Compares the two
+  binaries' exported symbols, SONAME, and dependencies (plus DWARF types if the
+  build ships them), and runs a compiler-free pattern pre-scan. Needs only the
+  two artifacts — no source, no build. It is worth naming because the **default
+  is not binary-only**: `--mode pr` is `s5`, so `s0` (or `--depth binary`) is how
+  you deliberately **opt out** of source analysis — a fast gate, or when no
+  sources/compile DB are available — and pin that choice reproducibly.
+- **`s1` — build context.** Reads a compile database to see the flags each
+  translation unit was built with, so it can flag `-fvisibility`/`-D`/standard or
+  toolchain **drift** between the two builds. Needs a compile DB.
+- **`s2` — preprocessor.** Runs `clang -E` to capture macro *values* and the
+  include graph — catches macro-value changes, include divergence, and
+  private/generated-header leaks. Needs a compile DB.
+- **`s3` — lexical pattern scan.** A pure text/regex pass over the sources (no
+  compiler) — the same always-on pattern facts `s0` already runs, pinned as a
+  level. The cheapest source-aware option.
+- **`s4` — reference graph.** Builds a source→symbol reachability graph — *which
+  public exports reach a changed internal declaration*. Needs a compile DB; no
+  semantic replay (no L4).
+- **`s5` — semantic replay of changed TUs (the `pr` default).** Re-parses the
+  *changed* translation units with `clang` and replays their ABI — the only level
+  that sees inline / template / macro / default-argument / `constexpr` **body**
+  changes. Needs a compile DB, the source checkout (`--sources`), and a diff seed
+  (`--since`/`--changed-path`); without a seed it falls back to a headers-only
+  replay.
+- **`s6` — full semantic replay.** Like `s5` but over the **whole** library, not
+  just the changed TUs — the most thorough and the most expensive (the one real
+  cost cliff). Used by `--mode baseline`.
+
 `--mode` presets: `pr` = `(s5, source)`, `pr-deep` = `(s5, graph)` (full L5
 reachability), `baseline` = `(s6, full)`, `audit` = `(s5, source)` intra-version
 (single-build hygiene, no baseline).
@@ -76,11 +107,12 @@ Generate one — none of these compiles the library, they only configure / query
 the build graph:
 
 ```bash
-# CMake (oneTBB, oneDNN, oneCCL, …): configure-only
+# CMake: configure-only (s5/s6 also need --sources . and a diff seed --since)
 cmake -S . -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 abicheck scan --binary new/libfoo.so -H include/ --build-info build --depth source …
 
-# Bazel (oneDAL, …): query the action graph (no build)
+# Bazel: query the action graph (no build); --build-info sniffs the aquery
+# jsonproto and routes it straight to the Bazel adapter (ADR-037 D5 — no pack step)
 bazel aquery 'mnemonic("CppCompile", //...)' --output=jsonproto > aq.json
 abicheck scan --binary new/libonedal_core.so -H include/ --build-info aq.json --depth build …
 ```
@@ -162,7 +194,7 @@ compile:
   frontend: auto          # auto | castxml | clang
   std: c++20
   include_dirs: [include, third_party/include]
-  defines: [DNNL_ENABLE_FOO=1]
+  defines: [FOO_ENABLE_FEATURE=1]
   # sysroot: /opt/sysroot
   # nostdinc: false
 ```
@@ -179,13 +211,13 @@ a bare `scan -H include/` finds libstdc++ without extra flags. Disable it with
 
 !!! warning "Auto-detection is partial — know its limits"
     - It recovers **system** headers (libstdc++/libc), **not your project's own**
-      include roots or `-D` feature macros. oneTBB-style headers still need
-      `-I`/the `compile:` block for the `oneapi/` root.
+      include roots or `-D` feature macros. Umbrella headers still need
+      `-I`/the `compile:` block for their own include root.
     - A **wrong `-std`** changes the ABI surface (concepts, `char8_t`,
       `noexcept`-in-type, inline-namespace versioning) — parse at the standard the
       library was *built* with or L2 shows phantom add/remove churn.
     - **Wrong/missing `-D` defines** change which declarations are visible —
-      macro-gated internals (e.g. `dnnl::impl::*`) or the libstdc++ dual ABI
+      macro-gated internals (e.g. `mylib::detail::*`) or the libstdc++ dual ABI
       (`_GLIBCXX_USE_CXX11_ABI`) — and produce exactly the "scope divergence"
       false BREAKINGs this feature exists to remove.
     - Auto-detection reads the **host** toolchain → it is wrong for

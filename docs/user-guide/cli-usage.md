@@ -51,6 +51,22 @@ abicheck compare libfoo.so.1 libfoo.so.2 \
   --old-header v1/foo.h --new-header v2/foo.h --format junit -o results.xml
 ```
 
+#### Public headers vs. include roots
+
+`-H/--header` and `-I/--include` look similar but answer different questions:
+
+| Flag | Question | Role |
+|------|----------|------|
+| `-H` / `--header` (`--old-header`/`--new-header`) | **What** to analyse | The **public headers** — the files a consumer `#include`s. These *are* the API surface abicheck parses to decide what's public and to read types. Pass a directory to establish a public/internal boundary. |
+| `-I` / `--include` (`--old-include`/`--new-include`) | **How** to parse it | The **include roots** — directories added to the parser's search path so the public headers' *own* `#include "…"`/`<…>` lines resolve. They are **not** analysed; they only make the parse succeed. |
+
+Often a single `include/` is both the public header dir and the include root. But
+they diverge when a public header pulls in a dependency from elsewhere — e.g.
+`include/foo/api.h` doing `#include <bar/baz.h>` needs `third_party/` added as an
+include root (`-I third_party`) even though `bar/baz.h` itself is not part of
+`foo`'s public API. If the parser can't find an included file, add its directory
+as an include root.
+
 `compare` auto-detects each input: `.so` files are dumped on-the-fly, `.json`
 snapshots and ABICC Perl dumps (Data::Dumper `.dump` files) are loaded directly.
 You can mix them freely (see below).
