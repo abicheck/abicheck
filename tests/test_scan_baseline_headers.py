@@ -47,7 +47,23 @@ from abicheck.cli_scan import scan_cmd
     ],
 )
 def test_baseline_is_native_library(name: str, expected: bool) -> None:
+    # Non-existent paths can't be magic-sniffed → the name heuristic decides.
     assert cli_scan._baseline_is_native_library(Path("dir") / name) is expected
+
+
+def test_baseline_is_native_library_sniffs_extensionless_elf(tmp_path: Path) -> None:
+    # An extensionless ELF (or .pyd/.node/Mach-O framework binary) has no .so in
+    # its name, so the suffix heuristic alone would miss it; magic-byte detection
+    # must still flag it native so the wrong-headers warning fires (Codex review).
+    elf = tmp_path / "libfoo"  # no .so / .dll / .dylib in the name
+    elf.write_bytes(b"\x7fELF\x02\x01\x01\x00" + b"\x00" * 56)
+    assert cli_scan._baseline_is_native_library(elf) is True
+
+
+def test_baseline_is_native_library_real_json_is_not_native(tmp_path: Path) -> None:
+    snap = tmp_path / "baseline.json"
+    snap.write_text('{"format": "abicheck-snapshot"}', encoding="utf-8")
+    assert cli_scan._baseline_is_native_library(snap) is False
 
 
 def test_scan_exposes_baseline_header_options() -> None:

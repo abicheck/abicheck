@@ -1473,15 +1473,27 @@ def _load_risk_rules(path: Path | None) -> RiskRules:
 
 
 def _baseline_is_native_library(path: Path) -> bool:
-    """True if *path* is a native shared library, not a JSON / ABICC-dump snapshot.
+    """True if *path* is a native binary, not a JSON / ABICC-dump snapshot.
 
     A snapshot baseline already has its headers baked in, so the candidate-`-H`
-    reuse is harmless there; only a native library is re-parsed (and thus at risk
-    of being read through the wrong headers). Pure/name-based so it is unit-testable.
+    reuse is harmless there; only a native binary is re-parsed (and thus at risk
+    of being read through the wrong headers).
+
+    Detection is content-first to match `resolve_input`'s own native dispatch:
+    magic-byte sniffing (`detect_binary_format`) catches the cases a suffix scan
+    misses — an extensionless ELF (`build/foo`), a Mach-O framework binary, a
+    `.pyd`/`.node` shared object (Codex review). The filename heuristic is only a
+    fallback for paths that cannot be sniffed (e.g. a not-yet-existing file in a
+    unit test), and the snapshot suffixes short-circuit first so a real `.json`
+    on disk is never mis-sniffed.
     """
     name = path.name.lower()
     if name.endswith((".json", ".dump", ".tar.gz", ".tgz", ".xml")):
         return False
+    from .binary_utils import detect_binary_format
+
+    if detect_binary_format(path) is not None:
+        return True
     return ".so" in name or name.endswith((".dll", ".dylib"))
 
 
