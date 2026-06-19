@@ -132,13 +132,13 @@ inputs:
     description: 'Language mode for the header backend: "c++" or "c".'
     required: false
     default: 'c++'
-  header-backend:
+  ast-frontend:
     description: >
       L2 header-AST frontend for native-binary inputs: "auto" (castxml if
       present, else clang, with auto-fallback to clang on a castxml
       toolchain-version error), "castxml" (default), or "clang"
       (clang -ast-dump=json; for clang-only hosts). Applies to compare and
-      dump modes. Equivalent to the ABICHECK_HEADER_BACKEND env var.
+      dump modes. Equivalent to the ABICHECK_AST_FRONTEND env var.
     required: false
   gcc-path:
     description: 'Path to GCC/G++ cross-compiler binary (dump mode only).'
@@ -494,7 +494,7 @@ runs:
         INPUT_OLD_VERSION: ${{ inputs.old-version }}
         INPUT_NEW_VERSION: ${{ inputs.new-version }}
         INPUT_LANG: ${{ inputs.lang }}
-        INPUT_HEADER_BACKEND: ${{ inputs.header-backend }}
+        INPUT_AST_FRONTEND: ${{ inputs.ast-frontend }}
         INPUT_GCC_PATH: ${{ inputs.gcc-path }}
         INPUT_GCC_PREFIX: ${{ inputs.gcc-prefix }}
         INPUT_GCC_OPTIONS: ${{ inputs.gcc-options }}

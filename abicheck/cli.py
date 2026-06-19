@@ -64,7 +64,6 @@ from .cli_options import (
     build_source_dump_options,
     compile_context_options,
     debug_resolution_options,
-    echo_ast_frontend_deprecation,
     evidence_options,
     lang_option,
     output_options,
@@ -493,9 +492,6 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
       abicheck dump --sources ./libfoo-src/ -o libfoo.src.json  # source-only (no binary)
     """
     _setup_verbosity(verbose)
-
-    # ADR-037 D8: legacy --header-backend → --ast-frontend deprecation note.
-    echo_ast_frontend_deprecation()
 
     # Resolve the --depth/--max preset into the underlying --collect-mode before
     # any dump path runs, so every branch (source-only / PE-Mach-O / ELF) embeds
@@ -1292,18 +1288,17 @@ def _embed_inline_source_side(
 @two_sided_input_options
 @compile_context_options  # --ast-frontend + cross-toolchain (shared with dump/scan)
 @lang_option
-@click.option("--old-ast-frontend", "--old-header-backend", "old_header_backend",
+@click.option("--old-ast-frontend", "old_header_backend",
               default=None,
               type=click.Choice(["auto", "castxml", "clang"], case_sensitive=False),
               help="C/C++ AST frontend for the old side only (overrides "
                    "--ast-frontend for old). Use when the old release parses on "
-                   "castxml but the new one needs clang (or vice versa). "
-                   "(--old-header-backend is a deprecated alias.)")
-@click.option("--new-ast-frontend", "--new-header-backend", "new_header_backend",
+                   "castxml but the new one needs clang (or vice versa).")
+@click.option("--new-ast-frontend", "new_header_backend",
               default=None,
               type=click.Choice(["auto", "castxml", "clang"], case_sensitive=False),
               help="C/C++ AST frontend for the new side only (overrides "
-                   "--ast-frontend for new). (--new-header-backend is a deprecated alias.)")
+                   "--ast-frontend for new).")
 # ── Compare options (unchanged) ──────────────────────────────────────────────
 @output_options(
     ["json", "markdown", "sarif", "html", "junit", "review"],
@@ -1540,10 +1535,6 @@ def compare_cmd(
       abicheck compare old.json new.json --suppress suppressions.yaml
     """
     _setup_verbosity(verbose)
-
-    # ADR-037 D8: the legacy --header-backend spellings still resolve but print a
-    # one-line deprecation note while the alias window runs (advisory until 1.0).
-    echo_ast_frontend_deprecation()
 
     # ADR-037 D4: load the project config and merge CLI flags over it
     # (precedence CLI > config > built-in default) *before* dispatch, so both the

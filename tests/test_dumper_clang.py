@@ -470,34 +470,29 @@ def test_resolve_header_backend_rejects_unknown() -> None:
 
 
 def test_resolve_header_backend_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("ABICHECK_AST_FRONTEND", raising=False)
-    monkeypatch.setenv("ABICHECK_HEADER_BACKEND", "clang")
+    monkeypatch.setenv("ABICHECK_AST_FRONTEND", "clang")
     assert _resolve_header_backend("auto") == "clang"
     assert _resolve_header_backend(None) == "clang"
     # An explicit request always wins over the env default.
-    monkeypatch.setenv("ABICHECK_HEADER_BACKEND", "clang")
     assert _resolve_header_backend("castxml") == "castxml"
 
 
 def test_resolve_header_backend_ast_frontend_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    """ABICHECK_AST_FRONTEND is the canonical env knob and wins over the legacy
-    ABICHECK_HEADER_BACKEND alias (ADR-037 D8)."""
+    """ABICHECK_AST_FRONTEND is the canonical env knob."""
     monkeypatch.setenv("ABICHECK_AST_FRONTEND", "clang")
     assert _resolve_header_backend("auto") == "clang"
     assert _resolve_header_backend(None) == "clang"
-    # The canonical knob takes precedence when both env vars disagree.
-    monkeypatch.setenv("ABICHECK_HEADER_BACKEND", "castxml")
-    assert _resolve_header_backend("auto") == "clang"
-    # An out-of-enum ABICHECK_AST_FRONTEND value is ignored; the legacy alias
+    # An out-of-enum ABICHECK_AST_FRONTEND value is ignored; auto-detection
     # then supplies the default.
     monkeypatch.setenv("ABICHECK_AST_FRONTEND", "bogus")
+    monkeypatch.setattr("abicheck.dumper._castxml_available", lambda: True)
     assert _resolve_header_backend("auto") == "castxml"
 
 
 def test_resolve_header_backend_auto_prefers_castxml(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.delenv("ABICHECK_HEADER_BACKEND", raising=False)
+    monkeypatch.delenv("ABICHECK_AST_FRONTEND", raising=False)
     monkeypatch.setattr("abicheck.dumper._castxml_available", lambda: True)
     monkeypatch.setattr("abicheck.dumper._clang_available", lambda *a, **k: True)
     assert _resolve_header_backend("auto") == "castxml"
@@ -1074,7 +1069,7 @@ def test_clang_header_dump_no_retry_on_other_error(
 def test_resolve_header_backend_neither_tool_defaults_castxml(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.delenv("ABICHECK_HEADER_BACKEND", raising=False)
+    monkeypatch.delenv("ABICHECK_AST_FRONTEND", raising=False)
     monkeypatch.setattr(dumper, "_castxml_available", lambda: False)
     monkeypatch.setattr(dumper, "_clang_available", lambda *a, **k: False)
     # Falls back to castxml so the existing "install castxml" error surfaces.

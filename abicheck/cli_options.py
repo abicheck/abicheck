@@ -56,7 +56,7 @@ def two_sided_input_options(func: F) -> F:
     Identical across ``compare`` / ``compare-release`` / ``appcompat`` /
     ``compare-release`` / ``appcompat``: a both-sides input plus an old-only / new-only override and
     a per-side version label. (``--lang`` and the ``--ast-frontend`` family stay
-    inline — the latter renamed from ``--header-backend`` in G22 Phase 6, D8.)
+    inline.)
     """
     func = click.option(
         "--new-version",
@@ -338,7 +338,6 @@ def compile_context_options(func: F) -> F:
     )(func)
     func = click.option(
         "--ast-frontend",
-        "--header-backend",
         "header_backend",
         default="auto",
         show_default=True,
@@ -347,7 +346,7 @@ def compile_context_options(func: F) -> F:
         "or clang (-ast-dump=json; for hosts where castxml is absent or its "
         "bundled frontend chokes). auto = castxml if present, else clang, with an "
         "automatic clang fallback on a castxml toolchain-version error. Env: "
-        "ABICHECK_AST_FRONTEND. (--header-backend is a deprecated alias.)",
+        "ABICHECK_AST_FRONTEND.",
     )(func)
     return func
 
@@ -1180,58 +1179,7 @@ DEPRECATED_FLAGS: dict[str, tuple[str, str]] = {
         "--depth=source",
         "the L5 graph is built internally at --depth source (ADR-037 D6).",
     ),
-    "--header-backend": (
-        "--ast-frontend",
-        "the C/C++ frontend governs both header AST and source-ABI replay; "
-        "renamed to --ast-frontend (ADR-037 D8).",
-    ),
-    "--old-header-backend": (
-        "--old-ast-frontend",
-        "per-side rename of --header-backend → --ast-frontend (ADR-037 D8).",
-    ),
-    "--new-header-backend": (
-        "--new-ast-frontend",
-        "per-side rename of --header-backend → --ast-frontend (ADR-037 D8).",
-    ),
 }
-
-
-# ── ADR-037 D8 / §Backward-compat: deprecated AST-frontend spellings ──────────
-#: The renamed-to-``--ast-frontend`` spellings, as bare ``--flag`` tokens. The
-#: front-end commands scan ``sys.argv`` for these (see
-#: :func:`note_deprecated_ast_frontend`) to print a one-line stderr note while the
-#: alias still resolves. Enforcement (removal) is Phase 7, advisory until 1.0.
-_DEPRECATED_AST_FRONTEND_SPELLINGS: frozenset[str] = frozenset(
-    {"--header-backend", "--old-header-backend", "--new-header-backend"}
-)
-
-
-def note_deprecated_ast_frontend(argv: Sequence[str] | None = None) -> str | None:
-    """Return a deprecation note if a legacy ``--header-backend`` spelling was used.
-
-    ADR-037 D8 renamed ``--header-backend`` (and the per-side variants) to
-    ``--ast-frontend``; the old names stay working aliases for one release. A
-    command body calls this with ``sys.argv`` and echoes the returned note to
-    stderr, so a user migrating sees the new spelling. Returns ``None`` when no
-    deprecated spelling is present. Kept here (beside ``DEPRECATED_FLAGS``) so the
-    detection and the registry never drift.
-    """
-    import sys
-
-    tokens = list(sys.argv if argv is None else argv)
-    used = sorted(
-        flag
-        for flag in _DEPRECATED_AST_FRONTEND_SPELLINGS
-        if any(tok == flag or tok.startswith(f"{flag}=") for tok in tokens)
-    )
-    if not used:
-        return None
-    replacements = ", ".join(DEPRECATED_FLAGS[flag][0] for flag in used)
-    verb = "is" if len(used) == 1 else "are"
-    return (
-        f"warning: {', '.join(used)} {verb} deprecated (ADR-037 D8); "
-        f"use {replacements} instead."
-    )
 
 
 # ── ADR-037 §Backward-compat: the deprecation-window resolver (G22 Phase 7) ───
@@ -1303,14 +1251,10 @@ def deprecated_flags_in_argv(
 def note_deprecated_flags(argv: Sequence[str] | None = None) -> str | None:
     """One-line stderr note covering *all* deprecated spellings in *argv*, or None.
 
-    The generic counterpart of :func:`note_deprecated_ast_frontend` over the whole
-    ``DEPRECATED_FLAGS`` registry — the form the 1.0 switch-on will adopt.
-
-    Unlike the single-family ``note_deprecated_ast_frontend`` (whose flags share
-    one replacement, so a bare "use --ast-frontend instead" is unambiguous), this
-    spans the *whole* registry where a replacement-only message would be
-    ambiguous — e.g. ``--collect-mode`` → ``--depth`` and the value-level
-    ``--depth=graph`` → ``--depth=source`` in the same run. The explicit
+    Spans the whole ``DEPRECATED_FLAGS`` registry — the form the 1.0 switch-on
+    will adopt. A replacement-only message would be ambiguous across the registry
+    — e.g. ``--collect-mode`` → ``--depth`` and the value-level
+    ``--depth=graph`` → ``--depth=source`` in the same run — so the explicit
     ``spelling → replacement`` arrow pairs each deprecated token with its own
     target, which is why this form keeps the arrow rather than matching the
     sibling's simpler phrasing.
@@ -1324,32 +1268,6 @@ def note_deprecated_flags(argv: Sequence[str] | None = None) -> str | None:
         f"warning: {', '.join(s for s, _, _ in found)} {verb} deprecated "
         f"(ADR-037); use {', '.join(parts)}."
     )
-
-
-#: ``ctx.meta`` key marking the AST-frontend deprecation note as already emitted
-#: for this invocation. ``Context.invoke`` shares one ``meta`` dict across the
-#: whole context tree, so a nested call (``deep-compare`` → ``compare``/``dump``)
-#: sees the flag set by its parent and stays quiet.
-_AST_NOTE_META_KEY = "abicheck._ast_frontend_note_emitted"
-
-
-def echo_ast_frontend_deprecation() -> None:
-    """Emit the legacy-``--header-backend`` deprecation note **once per invocation**.
-
-    ``deep-compare`` fans out to ``compare``/``dump`` via ``ctx.invoke``; each of
-    those bodies would otherwise re-scan ``sys.argv`` and re-print the note for a
-    single user invocation. Guarding on a shared ``ctx.meta`` flag collapses that
-    to one note (ADR-037 D8). Falls back to a plain emit when there is no active
-    Click context (e.g. a direct unit-test call).
-    """
-    ctx = click.get_current_context(silent=True)
-    if ctx is not None and ctx.meta.get(_AST_NOTE_META_KEY):
-        return
-    note = note_deprecated_ast_frontend()
-    if note is not None:
-        click.echo(note, err=True)
-    if ctx is not None:
-        ctx.meta[_AST_NOTE_META_KEY] = True
 
 
 #: ADR-037 D10.3 — the single MCP-param ⇄ CLI-flag name map. The ``abi_compare``

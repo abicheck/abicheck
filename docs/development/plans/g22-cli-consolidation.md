@@ -280,14 +280,12 @@ fields).
 
 ### Phase 6 — `--ast-frontend`, MCP name-map, validation, docs (D8, D9, D10.3)
 
-**Status: partially landed.** `--header-backend` → **`--ast-frontend`** (D8) on
-`compare`/`deep-compare`/`dump`, with `--old/new-ast-frontend` per-side and the
-`--header-backend` spellings kept as working aliases on the same Click params;
-the env knob is now `ABICHECK_AST_FRONTEND` (legacy `ABICHECK_HEADER_BACKEND`
-honored as a fallback in `dumper._resolve_header_backend`). Each command body
-prints a one-line stderr deprecation note when a legacy spelling is used
-(`cli_options.note_deprecated_ast_frontend`, advisory until 1.0); the renamed
-flags are catalogued in `DEPRECATED_FLAGS`. The single **`MCP_CLI_NAME_MAP`**
+**Status: landed.** `--header-backend` → **`--ast-frontend`** (D8) on
+`compare`/`dump`, with `--old/new-ast-frontend` per-side; the env knob is now
+`ABICHECK_AST_FRONTEND`. The legacy `--header-backend` flag spellings and the
+`ABICHECK_HEADER_BACKEND` env alias were removed outright (clean removal — the
+project is pre-1.0 and not under compatibility versioning). The single
+**`MCP_CLI_NAME_MAP`**
 (D10.3) reconciles every `abi_compare` MCP param with its `compare` flag and is
 enforced by a new `cli-contract` sub-check (`_check_mcp_cli_name_map`) plus the
 live `tests/test_cli_contract.py::test_mcp_cli_name_map_complete`. `CompareRequest`

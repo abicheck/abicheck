@@ -557,9 +557,9 @@ def test_compare_gcc_context_applies_with_per_side_frontend(
         [
             "--gcc-options",
             "-DBAR=2",
-            "--header-backend",
+            "--ast-frontend",
             "castxml",
-            "--new-header-backend",
+            "--new-ast-frontend",
             "clang",
         ],
     )

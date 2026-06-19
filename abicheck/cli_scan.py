@@ -72,7 +72,6 @@ from .checker_policy import API_BREAK_KINDS, BREAKING_KINDS
 from .cli import _safe_write_output, _setup_verbosity, main
 from .cli_options import (
     compile_context_options,
-    echo_ast_frontend_deprecation,
     lang_option,
     merge_compile_config,
     resolve_compile_context,
@@ -769,9 +768,6 @@ def scan_cmd(
     """
     _setup_verbosity(verbose)
     start = time.monotonic()
-
-    # ADR-037 D8: legacy --header-backend → --ast-frontend deprecation note.
-    echo_ast_frontend_deprecation()
 
     # L2 header compile context (compare↔dump↔scan parity, ADR-037 D3): the one
     # shared resolver bundles the cross-toolchain + frontend flags and folds the

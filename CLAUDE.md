@@ -58,8 +58,8 @@ Core pipeline (in order of data flow):
 2. **Snapshot** — `dumper.py` creates `AbiSnapshot` (model in `model.py`)
    - `dumper_castxml.py` — castxml XML → model parser (default L2 header backend)
    - `dumper_clang.py` — `clang -ast-dump=json` → model parser (alternative L2
-     backend for clang-only hosts; `--header-backend clang` /
-     `ABICHECK_HEADER_BACKEND=clang`). Both parsers expose the same `parse_*`
+     backend for clang-only hosts; `--ast-frontend clang` /
+     `ABICHECK_AST_FRONTEND=clang`). Both parsers expose the same `parse_*`
      surface behind `dumper._header_ast_parser`.
    - `dwarf_snapshot.py` — DWARF-specific snapshot logic
    - `snapshot_cache.py` — caching layer

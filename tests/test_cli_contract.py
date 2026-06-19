@@ -429,87 +429,47 @@ def test_gate_flags_unmapped_mcp_param(
     assert any("mystery_param" in m for m in msgs)
 
 
-# ── D8: --header-backend → --ast-frontend rename + alias (ADR-037 Phase 6) ────
+# ── D8: --ast-frontend (legacy --header-backend aliases removed) ─────────────
 
 
 @pytest.mark.parametrize("cmd_name", ["compare", "dump"])
-@pytest.mark.parametrize("flag", ["--ast-frontend", "--header-backend"])
-def test_ast_frontend_and_legacy_alias_both_resolve(cmd_name: str, flag: str) -> None:
-    """``--ast-frontend`` and its legacy ``--header-backend`` alias both bind the
-    same Click param on every command that carries it (ADR-037 D8)."""
-    commands = _registered_commands()
-    cmd = commands[cmd_name]
+def test_ast_frontend_is_the_only_frontend_spelling(cmd_name: str) -> None:
+    """``--ast-frontend`` is the frontend flag; the removed ``--header-backend``
+    alias is gone (clean removal, ADR-037 D7/D8)."""
+    cmd = _registered_commands()[cmd_name]
     by_dest = {p.name: p for p in cmd.params}  # type: ignore[attr-defined]
     param = by_dest["header_backend"]
     assert "--ast-frontend" in param.opts
-    assert "--header-backend" in param.opts
-    assert flag in param.opts
+    assert "--header-backend" not in param.opts
 
 
-@pytest.mark.parametrize("cmd_name", ["compare"])
-def test_per_side_ast_frontend_aliases_resolve(cmd_name: str) -> None:
-    """Per-side ``--old/new-ast-frontend`` carry their legacy aliases too."""
-    cmd = _registered_commands()[cmd_name]
+def test_per_side_ast_frontend_has_no_legacy_alias() -> None:
+    """Per-side ``--old/new-ast-frontend`` carry no legacy ``--*-header-backend``."""
+    cmd = _registered_commands()["compare"]
     by_dest = {p.name: p for p in cmd.params}  # type: ignore[attr-defined]
     for dest, new, old in (
         ("old_header_backend", "--old-ast-frontend", "--old-header-backend"),
         ("new_header_backend", "--new-ast-frontend", "--new-header-backend"),
     ):
         assert new in by_dest[dest].opts
-        assert old in by_dest[dest].opts
+        assert old not in by_dest[dest].opts
 
 
-def test_note_deprecated_ast_frontend_detects_legacy_spellings() -> None:
-    """The deprecation-note helper fires only on a legacy spelling (ADR-037 D8)."""
-    from abicheck.cli_options import note_deprecated_ast_frontend
-
-    assert note_deprecated_ast_frontend(["abicheck", "compare", "a", "b"]) is None
-    assert (
-        note_deprecated_ast_frontend(["abicheck", "compare", "--ast-frontend", "clang"])
-        is None
-    )
-    note = note_deprecated_ast_frontend(
-        ["abicheck", "compare", "--header-backend", "castxml"]
-    )
-    assert note is not None and "--header-backend" in note and "--ast-frontend" in note
-    # Also matches the ``--flag=value`` spelling and the per-side variants.
-    assert note_deprecated_ast_frontend(["x", "--old-header-backend=clang"]) is not None
-
-
-@pytest.mark.parametrize("cmd_name", ["compare"])
-def test_legacy_flag_invocation_echoes_note(
-    cmd_name: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_legacy_header_backend_flag_is_rejected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Invoking a command with the legacy ``--header-backend`` spelling prints the
-    D8 deprecation note to stderr (the alias still resolves)."""
+    """The removed ``--header-backend`` spelling is now a hard usage error."""
     from click.testing import CliRunner
 
-    _registered_commands()
     from abicheck.cli import main
 
     old_p = _make_snap_file(tmp_path, "libdn", "1.0", [_func("a")])
     new_p = _make_snap_file(tmp_path, "libdn", "2.0", [_func("a")])
-    argv = [cmd_name, str(old_p), str(new_p), "--header-backend", "castxml"]
-    # The note keys on sys.argv (it detects the literal legacy spelling), so the
-    # CliRunner args must also be reflected there.
-    monkeypatch.setattr(sys, "argv", ["abicheck", *argv])
-    res = CliRunner().invoke(main, argv)
-    assert "deprecated (ADR-037 D8)" in res.output, res.output
-
-
-def test_dump_legacy_flag_echoes_note(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """`dump` echoes the D8 note too (the note fires before format detection)."""
-    from click.testing import CliRunner
-
-    from abicheck.cli import main
-
-    snap = _make_snap_file(tmp_path, "libd", "1.0", [_func("a")])
-    argv = ["dump", str(snap), "--header-backend", "castxml"]
-    monkeypatch.setattr(sys, "argv", ["abicheck", *argv])
-    res = CliRunner().invoke(main, argv)
-    assert "deprecated (ADR-037 D8)" in res.output, res.output
+    res = CliRunner().invoke(
+        main, ["compare", str(old_p), str(new_p), "--header-backend", "castxml"]
+    )
+    assert res.exit_code != 0
+    assert "no such option" in res.output.lower() or "No such option" in res.output
 
 
 # ── D8: --ast-frontend unifies L2 header AST + L4 source-ABI extractor ────────
@@ -572,8 +532,6 @@ def test_resolve_unknown_flag_is_none() -> None:
 @pytest.mark.parametrize(
     "argv, expected",
     [
-        (["x", "--header-backend", "clang"], ["--header-backend"]),
-        (["x", "--old-header-backend=castxml"], ["--old-header-backend"]),
         (["x", "--collect-mode", "graph-full"], ["--collect-mode"]),
         # value-level deprecation: --depth=graph (both spaced + = forms).
         (["x", "--depth", "graph"], ["--depth=graph"]),
@@ -624,18 +582,18 @@ _OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         "--debug-info2", "--debug-root", "--debug-root1", "--debug-root2", "--debuginfod", "--debuginfod-url",
         "--demangle", "--depth", "--devel-pkg1", "--devel-pkg2", "--dso-only", "--dwarf",
         "--dwarf-only", "--exit-code-scheme", "--explain-patterns", "--fail-on-removed-library", "--follow-deps", "--format",
-        "--gcc-option", "--gcc-options", "--gcc-path", "--gcc-prefix", "--header", "--header-backend",
-        "--include", "--include-private-dso", "--jobs", "--keep-extracted", "--lang", "--ld-library-path",
-        "--manifest", "--max", "--new-ast-frontend", "--new-build-info", "--new-header", "--new-header-backend",
-        "--new-include", "--new-pdb-path", "--new-sources", "--new-version", "--no-bundle-analysis", "--no-demangle",
-        "--no-fail-on-removed-library", "--no-nostdinc", "--no-pattern-verdicts", "--no-scope-public-headers", "--nostdinc", "--old-ast-frontend",
-        "--old-build-info", "--old-header", "--old-header-backend", "--old-include", "--old-pdb-path", "--old-sources",
-        "--old-version", "--output", "--output-dir", "--pattern-verdicts", "--pdb-path", "--policy",
-        "--policy-file", "--probe-matrix-new", "--probe-matrix-old", "--public-symbol", "--public-symbols-list", "--recommend",
-        "--report-mode", "--require-justification", "--scope-public-headers", "--search-path", "--severity-abi-breaking", "--severity-addition",
-        "--severity-potential-breaking", "--severity-preset", "--severity-quality-issues", "--show-filtered", "--show-impact", "--show-only",
-        "--show-redundant", "--stat", "--strict-suppressions", "--suppress", "--surface-metrics", "--sysroot",
-        "--verbose", "-H", "-I", "-j", "-o", "-v",
+        "--gcc-option", "--gcc-options", "--gcc-path", "--gcc-prefix", "--header", "--include",
+        "--include-private-dso", "--jobs", "--keep-extracted", "--lang", "--ld-library-path", "--manifest",
+        "--max", "--new-ast-frontend", "--new-build-info", "--new-header", "--new-include", "--new-pdb-path",
+        "--new-sources", "--new-version", "--no-bundle-analysis", "--no-demangle", "--no-fail-on-removed-library", "--no-nostdinc",
+        "--no-pattern-verdicts", "--no-scope-public-headers", "--nostdinc", "--old-ast-frontend", "--old-build-info", "--old-header",
+        "--old-include", "--old-pdb-path", "--old-sources", "--old-version", "--output", "--output-dir",
+        "--pattern-verdicts", "--pdb-path", "--policy", "--policy-file", "--probe-matrix-new", "--probe-matrix-old",
+        "--public-symbol", "--public-symbols-list", "--recommend", "--report-mode", "--require-justification", "--scope-public-headers",
+        "--search-path", "--severity-abi-breaking", "--severity-addition", "--severity-potential-breaking", "--severity-preset", "--severity-quality-issues",
+        "--show-filtered", "--show-impact", "--show-only", "--show-redundant", "--stat", "--strict-suppressions",
+        "--suppress", "--surface-metrics", "--sysroot", "--verbose", "-H", "-I",
+        "-j", "-o", "-v",
     ),
     "appcompat": (
         "--check-against", "--format", "--header", "--include", "--lang",

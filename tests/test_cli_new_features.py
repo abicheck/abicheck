@@ -151,7 +151,7 @@ class TestCompareLang:
         assert "Invalid value" in result.output or "invalid choice" in result.output.lower()
 
 
-# ── per-side --old-header-backend / --new-header-backend on compare ───────
+# ── per-side --old-ast-frontend / --new-ast-frontend on compare ───────
 
 class TestPerSideHeaderBackend:
     def _two_elf(self, tmp_path):
@@ -164,7 +164,7 @@ class TestPerSideHeaderBackend:
         return old_so, new_so, header
 
     def test_per_side_backend_routed_independently(self, tmp_path, monkeypatch):
-        """--old-header-backend castxml + --new-header-backend clang reach each side."""
+        """--old-ast-frontend castxml + --new-ast-frontend clang reach each side."""
         old_so, new_so, header = self._two_elf(tmp_path)
         calls = []
 
@@ -175,7 +175,7 @@ class TestPerSideHeaderBackend:
         monkeypatch.setattr("abicheck.dumper.dump", fake_dump)
         result = CliRunner().invoke(main, [
             "compare", str(old_so), str(new_so), "-H", str(header),
-            "--old-header-backend", "castxml", "--new-header-backend", "clang",
+            "--old-ast-frontend", "castxml", "--new-ast-frontend", "clang",
         ])
         assert result.exit_code == 0
         assert len(calls) == 2
@@ -184,7 +184,7 @@ class TestPerSideHeaderBackend:
         assert calls[1].get("header_backend") == "clang"
 
     def test_per_side_inherits_global_default(self, tmp_path, monkeypatch):
-        """Without per-side flags, both sides inherit --header-backend."""
+        """Without per-side flags, both sides inherit --ast-frontend."""
         old_so, new_so, header = self._two_elf(tmp_path)
         calls = []
 
@@ -195,7 +195,7 @@ class TestPerSideHeaderBackend:
         monkeypatch.setattr("abicheck.dumper.dump", fake_dump)
         result = CliRunner().invoke(main, [
             "compare", str(old_so), str(new_so), "-H", str(header),
-            "--header-backend", "clang",
+            "--ast-frontend", "clang",
         ])
         assert result.exit_code == 0
         assert len(calls) == 2
@@ -213,7 +213,7 @@ class TestPerSideHeaderBackend:
         monkeypatch.setattr("abicheck.dumper.dump", fake_dump)
         result = CliRunner().invoke(main, [
             "compare", str(old_so), str(new_so), "-H", str(header),
-            "--header-backend", "castxml", "--new-header-backend", "clang",
+            "--ast-frontend", "castxml", "--new-ast-frontend", "clang",
         ])
         assert result.exit_code == 0
         assert calls[0].get("header_backend") == "castxml"
