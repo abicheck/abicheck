@@ -1159,6 +1159,9 @@ def _embed_inline_source_side(
     follow_deps: bool,
     search_paths: tuple[Path, ...],
     ld_library_path: str,
+    dwarf_only: bool,
+    debug_format: str | None,
+    pdb_path: Path | None,
     collect_mode: str,
     out_dir: Path,
     label: str,
@@ -1228,6 +1231,9 @@ def _embed_inline_source_side(
         follow_deps=follow_deps,
         search_paths=search_paths,
         ld_library_path=ld_library_path,
+        dwarf_only=dwarf_only,
+        debug_format_opt=debug_format,
+        pdb_path=pdb_path,
         sources=sources,
         collect_mode=collect_mode,
         output=out,
@@ -1711,6 +1717,8 @@ def compare_cmd(
             compile_context=compile_context, build_config=cfg_path,
             follow_deps=follow_deps, search_paths=search_paths,
             ld_library_path=ld_library_path,
+            dwarf_only=dwarf_only, debug_format=effective_debug_format,
+            pdb_path=old_pdb_path or pdb_path,
             collect_mode=collect_mode, out_dir=Path(_src_tmp), label="old",
         )
         new_input, new_sources = _embed_inline_source_side(
@@ -1720,6 +1728,8 @@ def compare_cmd(
             compile_context=compile_context, build_config=cfg_path,
             follow_deps=follow_deps, search_paths=search_paths,
             ld_library_path=ld_library_path,
+            dwarf_only=dwarf_only, debug_format=effective_debug_format,
+            pdb_path=new_pdb_path or pdb_path,
             collect_mode=collect_mode, out_dir=Path(_src_tmp), label="new",
         )
 

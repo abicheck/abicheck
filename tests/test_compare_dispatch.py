@@ -89,7 +89,8 @@ def test_embed_inline_source_forwards_toolchain_and_collects(tmp_path: Path) -> 
             headers=(), includes=(), version="1.0", lang="c++",
             header_backend="auto", compile_context=cc, build_config=None,
             follow_deps=True, search_paths=(Path("/libs"),),
-            ld_library_path="/x:/y",
+            ld_library_path="/x:/y", dwarf_only=True, debug_format="dwarf",
+            pdb_path=Path("/p.pdb"),
             collect_mode="source-target", out_dir=tmp_path, label="old",
         )
     finally:
@@ -102,6 +103,9 @@ def test_embed_inline_source_forwards_toolchain_and_collects(tmp_path: Path) -> 
     # dependency-analysis knobs ride into the inline dump too (Codex review)
     assert captured["follow_deps"] is True and captured["search_paths"] == (Path("/libs"),)
     assert captured["ld_library_path"] == "/x:/y"
+    # native dump selectors (dwarf-only/debug-format/pdb) too (Codex review)
+    assert captured["dwarf_only"] is True and captured["debug_format_opt"] == "dwarf"
+    assert captured["pdb_path"] == Path("/p.pdb")
 
 
 def test_embed_inline_source_ignored_when_depth_collects_nothing(tmp_path: Path) -> None:
@@ -126,7 +130,8 @@ def test_embed_inline_source_ignored_when_depth_collects_nothing(tmp_path: Path)
             headers=(), includes=(), version="1.0", lang="c++",
             header_backend="auto", compile_context=CompileContext(),
             build_config=None, follow_deps=False, search_paths=(),
-            ld_library_path="", collect_mode="off", out_dir=tmp_path, label="old",
+            ld_library_path="", dwarf_only=False, debug_format=None,
+            pdb_path=None, collect_mode="off", out_dir=tmp_path, label="old",
         )
     finally:
         climod._normalize_binary_input = orig  # type: ignore[assignment]
