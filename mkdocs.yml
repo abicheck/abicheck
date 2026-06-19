@@ -38,6 +38,7 @@ nav:
       - Getting Started: getting-started.md
       - Choose Your Workflow: user-guide/choose-your-workflow.md
       - Local Compare: user-guide/local-compare.md
+      - 'Worked Example: Real Library': user-guide/real-world-example.md
     - Everyday Use:
       - CLI Usage: user-guide/cli-usage.md
       - Source-Scan Levels: user-guide/scan-levels.md
