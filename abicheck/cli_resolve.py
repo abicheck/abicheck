@@ -41,6 +41,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from .model import AbiSnapshot
+    from .service_scan import CompileContext
 
 
 def _click_notify(message: str) -> None:
@@ -252,6 +253,7 @@ def _resolve_input(
     dwarf_only: bool = False,
     debug_format: str | None = None,
     header_backend: str = "auto",
+    compile: CompileContext | None = None,
 ) -> AbiSnapshot:
     """Auto-detect input type and return an AbiSnapshot.
 
@@ -290,6 +292,7 @@ def _resolve_input(
             dwarf_only=dwarf_only,
             debug_format=debug_format,
             header_backend=header_backend,
+            compile=compile,
             notify=_click_notify,
         )
     except ValidationError as exc:
@@ -464,6 +467,7 @@ def _resolve_compare_snapshots(
     header_backend: str = "auto",
     old_header_backend: str | None = None,
     new_header_backend: str | None = None,
+    compile_context: CompileContext | None = None,
 ) -> tuple[AbiSnapshot, AbiSnapshot]:
     """Load both ABI snapshots and (optionally) populate ELF dependency info.
 
@@ -472,6 +476,12 @@ def _resolve_compare_snapshots(
     A per-side override lets a release whose new headers need the host
     toolchain parse on ``clang`` while the old release keeps the ``castxml``
     schema reference — the backend mirror of ``--old-header``/``--new-header``.
+
+    ``compile_context`` carries the both-sides L2 cross-toolchain knobs
+    (``--gcc-*``/``--sysroot``/``--nostdinc``, ADR-037 D3) merged with the project
+    ``compile:`` block; it applies to both sides. Its ``frontend`` field is unused
+    here — the frontend is driven by the explicit ``header_backend`` so the per-side
+    override above still wins.
     """
     old_backend = old_header_backend or header_backend
     new_backend = new_header_backend or header_backend
@@ -486,6 +496,7 @@ def _resolve_compare_snapshots(
         dwarf_only=dwarf_only,
         debug_format=debug_format,
         header_backend=old_backend,
+        compile=compile_context,
     )
     new = _resolve_input(
         new_input,
@@ -498,6 +509,7 @@ def _resolve_compare_snapshots(
         dwarf_only=dwarf_only,
         debug_format=debug_format,
         header_backend=new_backend,
+        compile=compile_context,
     )
     if follow_deps:
         if old_fmt == "elf":

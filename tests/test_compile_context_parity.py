@@ -13,13 +13,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""dump↔scan L2 compile-context flag parity + threading (ADR-037 D3 / ADR-035).
+"""compare↔dump↔scan L2 compile-context parity + threading (ADR-037 D3 / ADR-035).
 
 The cross-toolchain + frontend family is defined once in
-``cli_options.compile_context_options`` and shared by ``dump`` and ``scan``; this
-guards that they never drift, and that ``scan`` actually threads the context down
-to the header dump (so a ``scan`` of oneTBB-style headers gets the same build
-context ``dump`` would use).
+``cli_options.compile_context_options`` and shared by ``compare`` / ``dump`` /
+``scan``; the project ``compile:`` block is folded in by the one shared resolver
+(``cli_options.merge_compile_config`` / ``resolve_compile_context``). This guards
+that the three commands never drift, that ``scan`` threads the context down to the
+header dump, and that ``compare`` now threads its both-sides context to *both*
+sides while the per-side ``--old/new-ast-frontend`` override still wins.
 """
 
 from __future__ import annotations
@@ -27,8 +29,9 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from click.testing import CliRunner
 
-from abicheck.cli import dump_cmd
+from abicheck.cli import compare_cmd, dump_cmd, main
 from abicheck.cli_scan import scan_cmd
 from abicheck.service_scan import CompileContext, ScanRequest
 
@@ -58,12 +61,19 @@ def test_scan_exposes_full_compile_context_family() -> None:
     assert _COMPILE_CONTEXT_DESTS <= _param_dests(scan_cmd)
 
 
-def test_dump_and_scan_compile_context_does_not_drift() -> None:
-    # Both commands expose the *same* compile-context flags — the whole point of
-    # sharing one decorator. (A future inline addition to one would break this.)
+def test_compare_exposes_full_compile_context_family() -> None:
+    # ADR-037 D3: compare gained the shared L2 family (it previously had only
+    # --ast-frontend inline and no --gcc-*/--sysroot/--nostdinc at all).
+    assert _COMPILE_CONTEXT_DESTS <= _param_dests(compare_cmd)
+
+
+def test_compare_dump_scan_compile_context_does_not_drift() -> None:
+    # All three commands expose the *same* compile-context flags — the whole point
+    # of sharing one decorator. (A future inline addition to one would break this.)
+    compare_ctx = _param_dests(compare_cmd) & _COMPILE_CONTEXT_DESTS
     dump_ctx = _param_dests(dump_cmd) & _COMPILE_CONTEXT_DESTS
     scan_ctx = _param_dests(scan_cmd) & _COMPILE_CONTEXT_DESTS
-    assert dump_ctx == scan_ctx == _COMPILE_CONTEXT_DESTS
+    assert compare_ctx == dump_ctx == scan_ctx == _COMPILE_CONTEXT_DESTS
 
 
 def test_compile_context_default_is_empty() -> None:
@@ -238,9 +248,7 @@ def test_merge_compile_config_autodiscovers_from_sources(tmp_path: Path) -> None
     )
     from abicheck.cli_scan import _merge_compile_config
 
-    merged, includes = _merge_compile_config(
-        CompileContext(), (), None, sources=src
-    )
+    merged, includes = _merge_compile_config(CompileContext(), (), None, sources=src)
     assert merged.gcc_options == "-std=c++20"
     assert includes == (src / "include",)
 
@@ -411,7 +419,9 @@ def test_try_header_scoped_dump_threads_compile_to_dumper(
 
     monkeypatch.setattr(dumper_mod, "_dump_pe", _fake_dumper_pe)
     cc = CompileContext(
-        gcc_options="-std=c++20 -DPE", gcc_prefix="x-", sysroot=tmp_path,
+        gcc_options="-std=c++20 -DPE",
+        gcc_prefix="x-",
+        sysroot=tmp_path,
         nostdinc=True,
     )
     snap, reason = service._try_header_scoped_dump(
@@ -445,3 +455,136 @@ def test_merge_compile_config_nostdinc_precedence(tmp_path: Path) -> None:
         CompileContext(nostdinc=True), (), cfg, nostdinc_explicit=True
     )
     assert on.nostdinc is True
+
+
+# ── compare end-to-end threading (ADR-037 D3) ────────────────────────────────
+
+
+def _two_elf(tmp_path: Path) -> tuple[Path, Path, Path]:
+    old_so = tmp_path / "old.so"
+    new_so = tmp_path / "new.so"
+    old_so.write_bytes(b"\x7fELF" + b"\x00" * 100)
+    new_so.write_bytes(b"\x7fELF" + b"\x00" * 100)
+    header = tmp_path / "foo.h"
+    header.write_text("int foo(void);\n", encoding="utf-8")
+    return old_so, new_so, header
+
+
+def _compare_capturing_dump(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, extra_args: list[str]
+) -> list[dict[str, object]]:
+    """Invoke ``compare`` on two fake ELFs with ``dumper.dump`` captured per side."""
+    import abicheck.dumper as dumper_mod
+    from abicheck.model import AbiSnapshot
+
+    old_so, new_so, header = _two_elf(tmp_path)
+    calls: list[dict[str, object]] = []
+
+    def _fake_dump(**kwargs: object) -> object:
+        calls.append(kwargs)
+        return AbiSnapshot(library="libfoo.so", version="1.0")
+
+    monkeypatch.setattr(dumper_mod, "dump", _fake_dump)
+    result = CliRunner().invoke(
+        main,
+        ["compare", str(old_so), str(new_so), "-H", str(header), *extra_args],
+    )
+    assert result.exit_code == 0, result.output
+    assert len(calls) == 2
+    return calls
+
+
+def test_compare_threads_compile_context_to_both_sides(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """--gcc-* / --sysroot / --nostdinc reach *both* sides' dumper.dump (ADR-037 D3)."""
+    sysroot = tmp_path / "sr"
+    sysroot.mkdir()
+    calls = _compare_capturing_dump(
+        monkeypatch,
+        tmp_path,
+        [
+            "--gcc-path",
+            "/opt/g++",
+            "--gcc-prefix",
+            "aarch64-linux-gnu-",
+            "--gcc-options",
+            "-DFOO=1",
+            "--sysroot",
+            str(sysroot),
+            "--nostdinc",
+        ],
+    )
+    for c in calls:  # both old and new
+        assert c["gcc_path"] == "/opt/g++"
+        assert c["gcc_prefix"] == "aarch64-linux-gnu-"
+        assert c["gcc_options"] == "-DFOO=1"
+        assert c["sysroot"] == sysroot
+        assert c["nostdinc"] is True
+
+
+def test_compare_gcc_context_applies_with_per_side_frontend(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The both-sides gcc context applies to both sides even when the frontend
+    differs per side — the neutralized compile.frontend must not clobber the
+    per-side header_backend (regression guard for the run_dump eff_backend rule)."""
+    calls = _compare_capturing_dump(
+        monkeypatch,
+        tmp_path,
+        [
+            "--gcc-options",
+            "-DBAR=2",
+            "--header-backend",
+            "castxml",
+            "--new-header-backend",
+            "clang",
+        ],
+    )
+    # gcc context on both sides...
+    assert all(c["gcc_options"] == "-DBAR=2" for c in calls)
+    # ...while the per-side frontend override still wins.
+    assert calls[0]["header_backend"] == "castxml"
+    assert calls[1]["header_backend"] == "clang"
+
+
+def test_compare_reads_compile_block_from_config(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """compare folds the project .abicheck.yml compile: block into its L2 context
+    (CLI > config) — std/defines synthesize gcc_options for both sides."""
+    cfg = tmp_path / ".abicheck.yml"
+    cfg.write_text("compile:\n  std: c++20\n  defines: [FOO=1]\n", encoding="utf-8")
+    calls = _compare_capturing_dump(monkeypatch, tmp_path, ["--config", str(cfg)])
+    for c in calls:
+        assert c["gcc_options"] == "-std=c++20 -DFOO=1"
+
+
+def test_dump_reads_compile_block_from_config(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """dump's ELF path folds the compile: block in via the same shared resolver.
+
+    Patches ``perform_elf_dump`` (so the fake-ELF bytes are never parsed for real)
+    and asserts the synthesized ``-std`` reaches its ``effective_gcc_options``.
+    """
+    import abicheck.cli as cli_mod
+
+    so = tmp_path / "libfoo.so"
+    so.write_bytes(b"\x7fELF" + b"\x00" * 100)
+    header = tmp_path / "foo.h"
+    header.write_text("int foo(void);\n", encoding="utf-8")
+    cfg = tmp_path / ".abicheck.yml"
+    cfg.write_text("compile:\n  std: c++17\n", encoding="utf-8")
+
+    captured: dict[str, object] = {}
+
+    def _fake_perform_elf_dump(**kwargs: object) -> None:
+        captured.update(kwargs)
+
+    monkeypatch.setattr(cli_mod, "perform_elf_dump", _fake_perform_elf_dump)
+    result = CliRunner().invoke(
+        main, ["dump", str(so), "-H", str(header), "--config", str(cfg)]
+    )
+    assert result.exit_code == 0, result.output
+    assert "-std=c++17" in str(captured["effective_gcc_options"])
