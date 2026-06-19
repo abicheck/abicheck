@@ -458,8 +458,38 @@ def discover_build_config(source_tree: Path | None) -> Path | None:
 
 
 def is_pack_dir(path: Path | None) -> bool:
-    """True when *path* is a pack directory produced by ``abicheck collect``."""
-    return path is not None and path.is_dir() and (path / "manifest.json").is_file()
+    """True when *path* is a real ``BuildSourcePack`` directory (``abicheck collect``).
+
+    Validates the manifest *content*, not just its presence: a raw source checkout
+    or build dir that merely contains a top-level ``manifest.json`` must not be
+    mistaken for a pack — ``BuildSourcePack.load`` would otherwise accept it with
+    sparse defaults and silently drop the real L3-L5 evidence the caller meant to
+    collect. Requires the BuildSourcePack version marker
+    (``build_source_pack_version`` / legacy ``evidence_pack_version``).
+    """
+    if path is None or not path.is_dir():
+        return False
+    manifest = path / "manifest.json"
+    if not manifest.is_file():
+        return False
+    import json
+
+    try:
+        with manifest.open(encoding="utf-8") as fh:
+            data = json.load(fh)
+    except OSError:
+        return False
+    except ValueError:
+        # Present but unparseable: keep treating it as a (corrupt) pack so the
+        # downstream load raises a loud error rather than silently collecting —
+        # a corrupt `collect` output must never be ignored.
+        return True
+    # Valid JSON *without* the BuildSourcePack marker is a non-pack file (e.g. a
+    # stray project manifest.json in a raw checkout) — collect from the tree, do
+    # not mis-load it as an empty pack.
+    return isinstance(data, dict) and (
+        "build_source_pack_version" in data or "evidence_pack_version" in data
+    )
 
 
 def effective_graph_scope(graph_detail: str, scope: str) -> str:

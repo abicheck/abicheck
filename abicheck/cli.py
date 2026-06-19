@@ -1161,19 +1161,11 @@ def _source_is_pack(path: Path) -> bool:
     classifying one as a pack would route it to the wrong loader and silently drop
     its facts — feed those through ``merge`` instead.
     """
-    manifest = path / "manifest.json"
-    if not manifest.is_file():
-        return False
-    import json
+    # Single source of truth: the dump/collect side validates the same way via
+    # inline.is_pack_dir (content, not filename), so the two never disagree.
+    from .buildsource.inline import is_pack_dir
 
-    try:
-        with manifest.open(encoding="utf-8") as fh:
-            data = json.load(fh)
-    except (OSError, ValueError):
-        return False  # unreadable / non-JSON → treat as a raw tree, collect from it
-    if not isinstance(data, dict):
-        return False
-    return "build_source_pack_version" in data or "evidence_pack_version" in data
+    return is_pack_dir(path)
 
 
 def _embed_inline_source_side(
@@ -1189,6 +1181,7 @@ def _embed_inline_source_side(
     compile_context: object,
     frontend_explicit: bool,
     nostdinc_explicit: bool,
+    build_info: Path | None,
     follow_deps: bool,
     search_paths: tuple[Path, ...],
     ld_library_path: str,
@@ -1286,6 +1279,7 @@ def _embed_inline_source_side(
         debug_format_opt=debug_format,
         pdb_path=pdb_path,
         sources=sources,
+        build_info=build_info,
         collect_mode=collect_mode,
         output=out,
     )
@@ -1782,6 +1776,7 @@ def compare_cmd(
             compile_context=compile_context,
             frontend_explicit=_frontend_explicit or old_header_backend is not None,
             nostdinc_explicit=_nostdinc_explicit,
+            build_info=old_build_info,
             follow_deps=follow_deps, search_paths=search_paths,
             ld_library_path=ld_library_path,
             dwarf_only=dwarf_only, debug_format=effective_debug_format,
@@ -1795,6 +1790,7 @@ def compare_cmd(
             compile_context=compile_context,
             frontend_explicit=_frontend_explicit or new_header_backend is not None,
             nostdinc_explicit=_nostdinc_explicit,
+            build_info=new_build_info,
             follow_deps=follow_deps, search_paths=search_paths,
             ld_library_path=ld_library_path,
             dwarf_only=dwarf_only, debug_format=effective_debug_format,

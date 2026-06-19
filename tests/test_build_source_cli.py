@@ -1248,8 +1248,20 @@ def test_is_pack_dir_and_compile_db_resolution(tmp_path):
     plain = tmp_path / "plain"
     plain.mkdir()
     assert is_pack_dir(plain) is False
+    # A valid manifest.json WITHOUT the BuildSourcePack marker is a stray file,
+    # not a pack — collect from the tree instead of mis-loading an empty pack.
     (plain / "manifest.json").write_text("{}", encoding="utf-8")
+    assert is_pack_dir(plain) is False
+    # The version marker makes it a real pack.
+    (plain / "manifest.json").write_text(
+        '{"build_source_pack_version": 1}', encoding="utf-8"
+    )
     assert is_pack_dir(plain) is True
+    # A present-but-corrupt manifest stays a (corrupt) pack so the load errors loudly.
+    corrupt = tmp_path / "corrupt"
+    corrupt.mkdir()
+    (corrupt / "manifest.json").write_text("{ not json", encoding="utf-8")
+    assert is_pack_dir(corrupt) is True
 
     # _compile_db_at: a build dir with build/compile_commands.json is found.
     bd = tmp_path / "bd"
