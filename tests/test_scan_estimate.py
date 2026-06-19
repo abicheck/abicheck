@@ -352,6 +352,39 @@ def test_estimate_pr_deep_preserves_graph_full_depth(
     assert "source-changed replay scope" not in res.output
 
 
+def test_count_bazel_build_info_tus_branches(monkeypatch, tmp_path: Path) -> None:
+    # Cover the helper's branches directly: non-file, non-Bazel (compile DB array),
+    # the cquery route, and the best-effort guard that swallows any adapter/sniff
+    # failure into None so the estimate never raises (Codex review).
+    from abicheck.service_scan import _count_bazel_build_info_tus
+
+    assert _count_bazel_build_info_tus(tmp_path / "nope.json") is None
+
+    cdb = tmp_path / "compile_commands.json"
+    cdb.write_text(
+        json.dumps(
+            [{"file": "a.c", "command": "cc -c a.c", "directory": str(tmp_path)}]
+        ),
+        encoding="utf-8",
+    )
+    assert _count_bazel_build_info_tus(cdb) is None  # not Bazel → compile-DB path
+
+    cq = tmp_path / "cq.json"
+    cq.write_text(
+        json.dumps({"results": [{"target": {"rule": {"name": "//foo:foo"}}}]}),
+        encoding="utf-8",
+    )
+    assert _count_bazel_build_info_tus(cq) == 0  # cquery route, no compile actions
+
+    def _boom(_p):
+        raise RuntimeError("adapter blew up")
+
+    monkeypatch.setattr(
+        "abicheck.buildsource.inline.sniff_build_info_format", _boom
+    )
+    assert _count_bazel_build_info_tus(cq) is None  # guard swallows the failure
+
+
 def test_estimate_counts_bazel_build_info_tus(snap_path: Path, tmp_path: Path) -> None:
     # A Bazel aquery --build-info is replayed via BazelAdapter by the real scan, so
     # the estimate must count its compile actions instead of routing the JSON object
