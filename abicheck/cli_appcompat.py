@@ -36,6 +36,7 @@ from .cli import (
     main,
 )
 from .cli_options import (
+    lang_option,
     output_options,
     policy_options,
     scope_options,
@@ -155,9 +156,7 @@ def _handle_list_required_symbols(
 # ── Dump options (shared families, ADR-037 D3) ────────────────────────────────
 # Two-sided header/include/version family; --lang stays inline.
 @two_sided_input_options
-@click.option("--lang", default="c++", show_default=True,
-              type=click.Choice(["c++", "c"], case_sensitive=False),
-              help="Language mode for castxml.")
+@lang_option(help="Language mode for castxml.")
 # ── Output options ────────────────────────────────────────────────────────────
 @output_options(["json", "markdown", "html"])
 @click.option("--show-irrelevant", is_flag=True, default=False,

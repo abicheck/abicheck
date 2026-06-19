@@ -66,6 +66,7 @@ from .cli_options import (
     debug_resolution_options,
     echo_ast_frontend_deprecation,
     evidence_options,
+    lang_option,
     output_options,
     policy_options,
     resolve_compile_context,
@@ -392,9 +393,7 @@ def main() -> None:
                    "classification (repeat for multiple).")
 @click.option("--version", "version", default="unknown", show_default=True,
               help="Library version string to embed in snapshot.")
-@click.option("--lang", default="c++", show_default=True,
-              type=click.Choice(["c++", "c"], case_sensitive=False),
-              help="Language mode for the header backend.")
+@lang_option
 @click.option("-o", "--output", "output", type=click.Path(path_type=Path), default=None,
               help="Output JSON file. Defaults to stdout.")
 # ── L2 compile context (shared with `scan` — ADR-037 D3 parity) ──────────────
@@ -1151,9 +1150,7 @@ def _dispatch_release_compare(ctx: click.Context, **kwargs: Any) -> None:
 # (ADR-037 D3); --lang and the per-side --old/new-ast-frontend overrides stay inline.
 @two_sided_input_options
 @compile_context_options  # --ast-frontend + cross-toolchain (shared with dump/scan)
-@click.option("--lang", default="c++", show_default=True,
-              type=click.Choice(["c++", "c"], case_sensitive=False),
-              help="Language mode for the header backend.")
+@lang_option
 @click.option("--old-ast-frontend", "--old-header-backend", "old_header_backend",
               default=None,
               type=click.Choice(["auto", "castxml", "clang"], case_sensitive=False),

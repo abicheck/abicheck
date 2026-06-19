@@ -43,6 +43,7 @@ from .cli import _normalize_binary_input, compare_cmd, dump_cmd, main
 from .cli_dump_helpers import resolve_dump_depth
 from .cli_options import (
     echo_ast_frontend_deprecation,
+    lang_option,
     output_options,
     policy_options,
     scope_options,
@@ -146,9 +147,7 @@ def _prepare_side(
 @click.option("--max", "max_depth", is_flag=True, default=False,
               help="Shorthand for --depth full (the deepest evidence available).")
 # ── Header backend + language (per-side labels come from the shared family) ────
-@click.option("--lang", default="c++", show_default=True,
-              type=click.Choice(["c++", "c"], case_sensitive=False),
-              help="Language mode for the header backend (both sides).")
+@lang_option(help="Language mode for the header backend (both sides).")
 @click.option("--ast-frontend", "--header-backend", "header_backend",
               default="auto", show_default=True,
               type=click.Choice(["auto", "castxml", "clang"], case_sensitive=False),

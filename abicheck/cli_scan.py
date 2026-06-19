@@ -73,6 +73,7 @@ from .cli import _safe_write_output, _setup_verbosity, main
 from .cli_options import (
     compile_context_options,
     echo_ast_frontend_deprecation,
+    lang_option,
     merge_compile_config,
     resolve_compile_context,
 )
@@ -692,9 +693,7 @@ def _audit_exit_code(
     default=None,
     help="Override the risk_rules profile (YAML).",
 )
-@click.option(
-    "--lang", type=click.Choice(["c", "c++"]), default="c++", show_default=True
-)
+@lang_option
 @click.option(
     "--allow-build-query",
     is_flag=True,

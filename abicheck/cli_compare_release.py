@@ -68,6 +68,7 @@ from .cli_compare_release_helpers import (  # noqa: F401
     _run_bundle_analysis,
 )
 from .cli_options import (
+    lang_option,
     output_options,
     policy_options,
     scope_options,
@@ -771,12 +772,7 @@ def _strip_diff_results_and_adjust_verdict(
 @click.argument("new_dir", type=click.Path(exists=True, path_type=Path))
 # Two-sided header/include/version family (ADR-037 D3); --lang stays inline.
 @two_sided_input_options
-@click.option(
-    "--lang",
-    default="c++",
-    show_default=True,
-    type=click.Choice(["c++", "c"], case_sensitive=False),
-)
+@lang_option
 @output_options(
     ["json", "markdown", "junit"],
     output_help="Output file for summary report (default: stdout).",

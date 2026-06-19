@@ -238,6 +238,44 @@ def scope_options(func: F) -> F:
     return func
 
 
+#: Canonical ``--lang`` choice set + default. Declared once so the choice
+#: *order* (shown in ``--help`` and error text) and case-insensitivity cannot
+#: drift between commands — historically ``scan`` listed ``["c", "c++"]`` and
+#: omitted ``case_sensitive=False`` while every other command used
+#: ``["c++", "c"]`` with it (ADR-037 D3 parity).
+LANG_CHOICES: tuple[str, ...] = ("c++", "c")
+LANG_DEFAULT: str = "c++"
+
+
+def lang_option(
+    func: F | None = None,
+    *,
+    help: str = "Language mode for the header backend.",
+) -> F | Callable[[F], F]:
+    """The shared ``--lang`` option (factory; usable bare or with ``help=``).
+
+    A factory rather than a bare decorator only so each command can keep its own
+    one-line ``help`` (``compare``/``dump`` say "header backend", ``appcompat``
+    said "castxml", ``plugin-check`` notes it only applies when dumping binaries),
+    while the *choice set*, *order*, *default*, and case-insensitivity live here
+    once and therefore cannot drift (ADR-037 D3). Usable directly
+    (``@lang_option``) or called (``@lang_option(help="…")``).
+    """
+
+    def deco(f: F) -> F:
+        f = click.option(
+            "--lang",
+            "lang",
+            default=LANG_DEFAULT,
+            show_default=True,
+            type=click.Choice(list(LANG_CHOICES), case_sensitive=False),
+            help=help,
+        )(f)
+        return f
+
+    return deco if func is None else deco(func)
+
+
 def compile_context_options(func: F) -> F:
     """L2 header-AST compile context — the cross-toolchain + frontend family.
 
