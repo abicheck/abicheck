@@ -1155,7 +1155,6 @@ def _embed_inline_source_side(
     lang: str,
     header_backend: str,
     compile_context: object,
-    build_config: Path | None,
     follow_deps: bool,
     search_paths: tuple[Path, ...],
     ld_library_path: str,
@@ -1179,10 +1178,15 @@ def _embed_inline_source_side(
 
     *compile_context* is compare's already-resolved
     :class:`~abicheck.service_scan.CompileContext` (the cross-toolchain
-    ``--gcc-*``/``--sysroot``/``--nostdinc`` knobs) and *build_config* the
-    ``--config`` path; both are forwarded so the inline dump parses this side's
-    headers with the same toolchain a plain ``compare``/``dump`` would, instead
-    of the default context. ``follow_deps``/``search_paths``/``ld_library_path``
+    ``--gcc-*``/``--sysroot``/``--nostdinc`` knobs, with ``--config`` already
+    folded in and CLI-over-config explicitness honored). Its *resolved* values
+    are forwarded so the inline dump parses this side's headers with the same
+    toolchain a plain ``compare``/``dump`` would. We deliberately do **not**
+    forward ``--config`` to the dump: that would re-run ``resolve_compile_context``
+    and re-merge the config on top of the already-resolved values, and because
+    ``ctx.invoke`` kwargs are not COMMANDLINE param-sources the explicit
+    overrides (e.g. ``--no-nostdinc`` over a config ``nostdinc: true``) would be
+    lost. ``follow_deps``/``search_paths``/``ld_library_path``
     are forwarded too so the embedded snapshot carries the same dependency graph
     a native ``compare --follow-deps`` would — without them the dependency
     analysis would be silently lost once the side is replaced by a snapshot.
@@ -1227,7 +1231,6 @@ def _embed_inline_source_side(
         gcc_option_tokens=cc.gcc_option_tokens,  # type: ignore[attr-defined]
         sysroot=cc.sysroot,  # type: ignore[attr-defined]
         nostdinc=cc.nostdinc,  # type: ignore[attr-defined]
-        build_config=build_config,
         follow_deps=follow_deps,
         search_paths=search_paths,
         ld_library_path=ld_library_path,
@@ -1714,7 +1717,7 @@ def compare_cmd(
             ctx, input_path=old_input, sources=old_sources,
             headers=old_h, includes=old_inc, version=old_version, lang=lang,
             header_backend=old_header_backend or header_backend,
-            compile_context=compile_context, build_config=cfg_path,
+            compile_context=compile_context,
             follow_deps=follow_deps, search_paths=search_paths,
             ld_library_path=ld_library_path,
             dwarf_only=dwarf_only, debug_format=effective_debug_format,
@@ -1725,7 +1728,7 @@ def compare_cmd(
             ctx, input_path=new_input, sources=new_sources,
             headers=new_h, includes=new_inc, version=new_version, lang=lang,
             header_backend=new_header_backend or header_backend,
-            compile_context=compile_context, build_config=cfg_path,
+            compile_context=compile_context,
             follow_deps=follow_deps, search_paths=search_paths,
             ld_library_path=ld_library_path,
             dwarf_only=dwarf_only, debug_format=effective_debug_format,
