@@ -679,6 +679,26 @@ def _audit_exit_code(
     help="Previous build's dump/library to compare against.",
 )
 @click.option(
+    "--baseline-header",
+    "--baseline-headers",
+    "baseline_header",
+    multiple=True,
+    type=click.Path(exists=True, path_type=Path),
+    help="Public header(s)/dir for the --baseline side when it is a native "
+    "library whose headers differ from the new build's -H. Without this, a "
+    "native baseline is parsed with the new -H (correct only when the headers "
+    "did not change). Ignored for a JSON-snapshot baseline (headers already "
+    "baked in).",
+)
+@click.option(
+    "--baseline-include",
+    "baseline_include",
+    multiple=True,
+    type=click.Path(exists=True, file_okay=False, path_type=Path),
+    help="Include root(s) for parsing --baseline-header (the old side's -I). "
+    "Defaults to the new build's -I when unset.",
+)
+@click.option(
     "--mode",
     "mode",
     type=click.Choice([m.value for m in ScanMode]),
@@ -774,6 +794,8 @@ def scan_cmd(
     compile_db: Path | None,
     build_config: Path | None,
     baseline: Path | None,
+    baseline_header: tuple[Path, ...],
+    baseline_include: tuple[Path, ...],
     mode: str,
     source_method: str | None,
     depth: str | None,
@@ -960,6 +982,8 @@ def scan_cmd(
             effective_build_info=effective_build_info,
             build_config=build_config,
             baseline=baseline,
+            baseline_headers=list(baseline_header),
+            baseline_includes=list(baseline_include),
             lang=lang,
             allow_build_query=allow_build_query,
             scan_mode=scan_mode,
@@ -1044,6 +1068,8 @@ def run_scan_core(
     baseline: Path | None,
     lang: str,
     allow_build_query: bool,
+    baseline_headers: list[Path] | None = None,
+    baseline_includes: list[Path] | None = None,
     scan_mode: ScanMode,
     resolved: SourceMethod,
     eff_depth_enum: EvidenceDepth,
@@ -1250,6 +1276,8 @@ def run_scan_core(
             list(public_headers),
             list(public_header_dirs),
             compile_context=compile_context,
+            baseline_headers=baseline_headers,
+            baseline_includes=baseline_includes,
         )
         # A cross-check the maintainer promoted to `error` (D6) gates the exit
         # even when the baseline diff itself is clean.
@@ -1449,6 +1477,19 @@ def _load_risk_rules(path: Path | None) -> RiskRules:
     return RiskRules.from_dict(block if isinstance(block, dict) else raw)
 
 
+def _baseline_is_native_library(path: Path) -> bool:
+    """True if *path* is a native shared library, not a JSON / ABICC-dump snapshot.
+
+    A snapshot baseline already has its headers baked in, so the candidate-`-H`
+    reuse is harmless there; only a native library is re-parsed (and thus at risk
+    of being read through the wrong headers). Pure/name-based so it is unit-testable.
+    """
+    name = path.name.lower()
+    if name.endswith((".json", ".dump", ".tar.gz", ".tgz", ".xml")):
+        return False
+    return ".so" in name or name.endswith((".dll", ".dylib"))
+
+
 def _run_baseline_compare(
     baseline: Path,
     new_snap: Any,
@@ -1460,6 +1501,8 @@ def _run_baseline_compare(
     public_headers: list[Path],
     public_header_dirs: list[Path],
     compile_context: CompileContext | None = None,
+    baseline_headers: list[Path] | None = None,
+    baseline_includes: list[Path] | None = None,
 ) -> tuple[str, int, dict[str, Any]]:
     """Compare *new_snap* against *baseline*, folding cross-source findings in.
 
@@ -1484,15 +1527,37 @@ def _run_baseline_compare(
     from .errors import AbicheckError
     from .service import compare_snapshots, resolve_input
 
+    # Each side is parsed with its *own* headers. `scan` has a single -H (built for
+    # the candidate); for a native --baseline library whose public headers differ,
+    # --baseline-header/-include select the old side's headers. Without them we
+    # reuse the candidate -H/-I — correct only when the headers did not change — so
+    # warn rather than silently read the old side through the new headers (Codex).
+    if baseline_headers:
+        bl_headers = list(baseline_headers)
+        bl_includes = list(baseline_includes) if baseline_includes else includes
+        bl_public_headers = bl_headers
+        bl_public_dirs = [p for p in bl_headers if p.is_dir()] or public_header_dirs
+    else:
+        bl_headers, bl_includes = headers, includes
+        bl_public_headers, bl_public_dirs = public_headers, public_header_dirs
+        if headers and _baseline_is_native_library(baseline):
+            click.echo(
+                f"warning: --baseline {baseline.name} is a native library parsed "
+                f"with the new build's headers (-H); if its public headers differ "
+                f"from the new version, pass --baseline-header (else the old side is "
+                f"read through the new headers and the diff may be wrong/noisy).",
+                err=True,
+            )
+
     try:
         old_snap = resolve_input(
             baseline,
-            headers,
-            includes,
+            bl_headers,
+            bl_includes,
             version="",
             lang=lang,
-            public_headers=public_headers,
-            public_header_dirs=public_header_dirs,
+            public_headers=bl_public_headers,
+            public_header_dirs=bl_public_dirs,
             compile=compile_context,
         )
     except AbicheckError as exc:
