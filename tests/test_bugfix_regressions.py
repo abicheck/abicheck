@@ -308,7 +308,7 @@ class TestBug7ElfValidation:
         fake = tmp_path / "fake.json"
         fake.write_text('{"library": "lib.so"}')
         runner = CliRunner()
-        result = runner.invoke(main, ["deps", str(fake)])
+        result = runner.invoke(main, ["deps", "tree", str(fake)])
         assert result.exit_code != 0
         assert "ELF" in result.output or "ELF" in (result.exception and str(result.exception) or "")
 
@@ -320,7 +320,7 @@ class TestBug7ElfValidation:
         fake = tmp_path / "notes.txt"
         fake.write_text("not a binary")
         runner = CliRunner()
-        result = runner.invoke(main, ["deps", str(fake)])
+        result = runner.invoke(main, ["deps", "tree", str(fake)])
         assert result.exit_code != 0
 
 

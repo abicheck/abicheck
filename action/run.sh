@@ -284,7 +284,7 @@ elif [[ "$MODE" == "compare-release" ]]; then
 
 elif [[ "$MODE" == "deps" ]]; then
   # ── Deps mode (Linux ELF) ───────────────────────────────────────────────
-  CMD+=(deps)
+  CMD+=(deps tree)
   CMD+=("${INPUT_NEW_LIBRARY:?new-library is required for deps mode}")
 
   add_single_flag "--sysroot" "${INPUT_SYSROOT:-}"
@@ -305,8 +305,8 @@ elif [[ "$MODE" == "deps" ]]; then
   fi
 
 elif [[ "$MODE" == "stack-check" ]]; then
-  # ── Stack-check mode (Linux ELF) ────────────────────────────────────────
-  CMD+=(stack-check)
+  # ── Stack-check mode (Linux ELF) → `deps compare` ───────────────────────
+  CMD+=(deps compare)
   CMD+=("${INPUT_NEW_LIBRARY:?new-library (binary path) is required for stack-check mode}")
   CMD+=(--baseline "${INPUT_BASELINE:?baseline is required for stack-check mode}")
   CMD+=(--candidate "${INPUT_CANDIDATE:?candidate is required for stack-check mode}")

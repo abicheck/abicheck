@@ -113,7 +113,7 @@ def test_stack_check_cli_reports_fail(tmp_path: Path) -> None:
     baseline, candidate = _build_sysroots(tmp_path)
     result = CliRunner().invoke(
         main,
-        ["stack-check", str(ROOT_REL),
+        ["deps", "compare", str(ROOT_REL),
          "--baseline", str(baseline), "--candidate", str(candidate)],
     )
     # FAIL → exit code 4 (see cli_stack.py).

@@ -269,7 +269,7 @@ break.
 
 | Module | Responsibility |
 |--------|---------------|
-| `cli.py` | CLI entrypoint — `dump`, `compare`, `compat check`, `compat dump`, `deps`, `stack-check`, `baseline`, `appcompat` commands |
+| `cli.py` | CLI entrypoint — `dump`, `compare`, `compat check`, `compat dump`, `deps` (tree/compare), `baseline`, `appcompat` commands |
 | `service.py` | Service layer — shared orchestration for CLI and MCP server (`resolve_input`, `run_dump`, `run_compare`, `render_output`) |
 | `mcp_server.py` | MCP (Model Context Protocol) server for AI agent integration |
 | `build_context.py` | `compile_commands.json` parsing and per-TU flag extraction |
