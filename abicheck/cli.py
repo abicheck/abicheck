@@ -1191,17 +1191,20 @@ def _embed_inline_source_side(
     collect_mode: str,
     out_dir: Path,
     label: str,
-) -> tuple[Path, Path | None]:
+) -> tuple[Path, Path | None, Path | None]:
     """Resolve one side's ``--sources`` into the input ``compare`` should read.
 
     A raw source *tree* (no manifest.json) on a native-binary side is dumped
     inline at *collect_mode* so the L3-L5 build/source/graph facts ride embedded
     in the snapshot — the one-shot deep-compare workflow, folded into ``compare``
     (the path the removed ``deep-compare`` command pointed migrators at). Returns
-    ``(input_to_read, pack_sources_to_keep)``: a pre-built ``collect`` pack is
-    left untouched for the embedded-build-source pass; a tree we embed here is
-    consumed (its sources arg becomes ``None``). A snapshot input cannot be
-    re-dumped, so a tree on it is reported ignored.
+    ``(input_to_read, sources_to_keep, build_info_to_keep)``: a pre-built
+    ``collect`` pack is left untouched for the embedded-build-source pass; a tree
+    we embed here is consumed (sources *and* the matching ``--build-info``, which
+    was forwarded into the inline dump, both become ``None`` so the later
+    ``prepare_embedded_build_source`` does not re-process them — it would reject a
+    raw build dir as an invalid pack). A snapshot input cannot be re-dumped, so a
+    tree on it is reported ignored.
 
     *compile_context* is compare's already-resolved
     :class:`~abicheck.service_scan.CompileContext` (the cross-toolchain
@@ -1219,7 +1222,7 @@ def _embed_inline_source_side(
     analysis would be silently lost once the side is replaced by a snapshot.
     """
     if sources is None or _source_is_pack(sources):
-        return input_path, sources
+        return input_path, sources, build_info
     norm, fmt = _normalize_binary_input(input_path)
     if fmt is None:
         click.echo(
@@ -1228,7 +1231,7 @@ def _embed_inline_source_side(
             "binary from its tree to embed deeper evidence).",
             err=True,
         )
-        return input_path, None
+        return input_path, None, build_info
     # The --depth dial governs how deep to collect. When it resolves to "off"
     # (--depth binary/headers, or an explicit --collect-mode off) there is no
     # source collection to do, so the tree can't contribute at this depth —
@@ -1241,7 +1244,7 @@ def _embed_inline_source_side(
             "--depth source/full (or --max) to collect from it.",
             err=True,
         )
-        return input_path, None
+        return input_path, None, build_info
     out = out_dir / f"{label}.abi.json"
     # Merge the side's source-root .abicheck.yml `compile:` block into compare's
     # resolved context — exactly what `dump --sources` / the old deep-compare did —
@@ -1283,7 +1286,10 @@ def _embed_inline_source_side(
         collect_mode=collect_mode,
         output=out,
     )
-    return out, None
+    # Sources and build-info are now embedded in the snapshot; drop both so the
+    # later prepare_embedded_build_source does not re-process them (it would reject
+    # a raw build dir as an invalid pack) — Codex review.
+    return out, None, None
 
 
 @main.command("compare")
@@ -1769,7 +1775,7 @@ def compare_cmd(
         # Cleanup on context teardown so the temp dir never leaks, even if an
         # inline dump or _resolve_compare_snapshots raises before we return.
         ctx.call_on_close(lambda: shutil.rmtree(_src_tmp, ignore_errors=True))
-        old_input, old_sources = _embed_inline_source_side(
+        old_input, old_sources, old_build_info = _embed_inline_source_side(
             ctx, input_path=old_input, sources=old_sources,
             headers=old_h, includes=old_inc, version=old_version, lang=lang,
             header_backend=old_header_backend or header_backend,
@@ -1783,7 +1789,7 @@ def compare_cmd(
             pdb_path=old_pdb_path or pdb_path,
             collect_mode=collect_mode, out_dir=Path(_src_tmp), label="old",
         )
-        new_input, new_sources = _embed_inline_source_side(
+        new_input, new_sources, new_build_info = _embed_inline_source_side(
             ctx, input_path=new_input, sources=new_sources,
             headers=new_h, includes=new_inc, version=new_version, lang=lang,
             header_backend=new_header_backend or header_backend,

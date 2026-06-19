@@ -105,7 +105,7 @@ def test_embed_inline_source_forwards_toolchain_and_collects(tmp_path: Path) -> 
             gcc_path="/x/g++", gcc_prefix="aarch64-", gcc_options="-O2",
             gcc_option_tokens=("-DFOO",), sysroot=Path("/sysroot"), nostdinc=True,
         )
-        out, kept = climod._embed_inline_source_side(
+        out, kept, kept_bi = climod._embed_inline_source_side(
             _Ctx(), input_path=tmp_path / "lib.so", sources=tree,
             headers=(), includes=(), version="1.0", lang="c++",
             header_backend="auto", compile_context=cc,
@@ -118,7 +118,7 @@ def test_embed_inline_source_forwards_toolchain_and_collects(tmp_path: Path) -> 
     finally:
         climod._normalize_binary_input = orig  # type: ignore[assignment]
 
-    assert kept is None and out == tmp_path / "old.abi.json"
+    assert kept is None and kept_bi is None and out == tmp_path / "old.abi.json"
     assert captured["sources"] == tree and captured["collect_mode"] == "source-target"
     # The resolved compile context is frozen and handed to dump verbatim (so dump
     # does not re-resolve / re-discover the tree's config) — Codex review.
@@ -202,7 +202,7 @@ def test_embed_inline_source_ignored_when_depth_collects_nothing(tmp_path: Path)
     orig = climod._normalize_binary_input
     climod._normalize_binary_input = lambda p: (Path(p), "elf")  # type: ignore[assignment]
     try:
-        out, kept = climod._embed_inline_source_side(
+        out, kept, kept_bi = climod._embed_inline_source_side(
             _Ctx(), input_path=tmp_path / "lib.so", sources=tree,
             headers=(), includes=(), version="1.0", lang="c++",
             header_backend="auto", compile_context=CompileContext(),
@@ -214,7 +214,7 @@ def test_embed_inline_source_ignored_when_depth_collects_nothing(tmp_path: Path)
     finally:
         climod._normalize_binary_input = orig  # type: ignore[assignment]
 
-    assert kept is None and out == tmp_path / "lib.so"  # input unchanged
+    assert kept is None and kept_bi is None and out == tmp_path / "lib.so"
     assert called["n"] == 0  # no dump performed
 
 
