@@ -84,9 +84,11 @@ abicheck compare libv1.so libv2.so -H foo.h --lang c
 #### Cross-compilation
 
 When analysing libraries built for a different architecture, pass cross-compilation
-flags to `dump`:
+flags. The same **compile-context family** is shared verbatim by `dump`, `compare`,
+and `scan` (one decorator, so the three never drift), so it works the same on each:
 
 ```bash
+# dump (single artifact)
 abicheck dump libfoo.so -H include/foo.h \
   --gcc-prefix aarch64-linux-gnu- \
   --sysroot /opt/sysroots/aarch64 \
@@ -97,14 +99,45 @@ abicheck dump libfoo.so -H include/foo.h \
 abicheck dump libfoo.so -H include/foo.h \
   --gcc-path /usr/bin/aarch64-linux-gnu-g++ \
   -o snap.json
+
+# compare (two artifacts) — the family applies to BOTH sides
+abicheck compare libv1.so libv2.so -H include/foo.h \
+  --gcc-prefix aarch64-linux-gnu- --sysroot /opt/sysroots/aarch64
 ```
 
-Available cross-compilation flags:
+Available compile-context flags (on `dump`, `compare`, and `scan`):
 - `--gcc-path` — path to the cross-compiler binary
 - `--gcc-prefix` — toolchain prefix (e.g. `aarch64-linux-gnu-`)
-- `--gcc-options` — extra compiler flags passed to castxml
+- `--gcc-options` — extra compiler flags passed to the header frontend
 - `--sysroot` — alternative system root directory
-- `--nostdinc` — do not search standard system include paths
+- `--nostdinc` / `--no-nostdinc` — do not search standard system include paths
+- `--ast-frontend {auto,castxml,clang}` — which C/C++ AST frontend parses the headers
+
+On `compare` these apply to **both** old and new sides; the per-side
+`--old-ast-frontend` / `--new-ast-frontend` overrides still win for the frontend
+when one release parses on a different toolchain than the other.
+
+Rather than repeating these flags on every invocation, set them once in the
+project's `.abicheck.yml` `compile:` block — `dump`, `compare`, and `scan` all fold
+it into their L2 header parse (CLI flags override config):
+
+```yaml
+# .abicheck.yml
+compile:
+  frontend: castxml          # auto | castxml | clang
+  std: c++20                 # synthesizes -std=c++20
+  defines: [FOO=1, NDEBUG]   # synthesizes -DFOO=1 -DNDEBUG
+  include_dirs: [include, third_party/inc]   # appended after -I roots
+  sysroot: /opt/sysroots/aarch64
+  nostdinc: false
+```
+
+`compare` reads the block from `--config` or the nearest `.abicheck.yml` found from
+the current directory upward; `dump`/`scan` from `--config` or the one auto-discovered
+at the `--sources` tree root. It is applied on every header-scoping path — ELF and
+the PE/Mach-O header parse alike. A malformed **explicit** `--config` fails loudly
+rather than silently dropping the settings; an auto-discovered one warns and falls
+back.
 
 #### Build-context capture (`compile_commands.json`) — evidence layer L3
 

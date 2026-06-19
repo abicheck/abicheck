@@ -70,11 +70,21 @@ from .buildsource.scan_levels import (
 )
 from .checker_policy import API_BREAK_KINDS, BREAKING_KINDS
 from .cli import _safe_write_output, _setup_verbosity, main
-from .cli_options import compile_context_options, echo_ast_frontend_deprecation
+from .cli_options import (
+    compile_context_options,
+    echo_ast_frontend_deprecation,
+    merge_compile_config,
+    resolve_compile_context,
+)
 from .cli_params import DEPTH_PARAM
 
 if TYPE_CHECKING:
     from .service_scan import CompileContext
+
+#: Back-compat alias — the resolver moved to ``cli_options`` (ADR-037 D3: one
+#: resolver shared by compare/dump/scan). Kept importable from here for existing
+#: callers and ``tests/test_compile_context_parity.py``.
+_merge_compile_config = merge_compile_config
 
 #: Exit code for a ``--budget`` overflow (ADR-035 D3: a budget always fails,
 #: never silently shrinks scope). Distinct from the verdict codes (0/2/4) and the
@@ -394,98 +404,6 @@ def _render_text(out: ScanOutcome) -> str:
     return "\n".join(lines)
 
 
-def _merge_compile_config(
-    cli_ctx: CompileContext,
-    cli_includes: tuple[Path, ...],
-    build_config: Path | None,
-    sources: Path | None = None,
-    *,
-    frontend_explicit: bool = False,
-    nostdinc_explicit: bool = False,
-) -> tuple[CompileContext, tuple[Path, ...]]:
-    """Fold a ``.abicheck.yml`` ``compile:`` block into the CLI compile context.
-
-    Precedence is CLI > config (ADR-035 D6.1 / ADR-037 D4): a per-field CLI value
-    overrides config, an unset CLI field inherits it. The config's ``std`` +
-    ``defines`` synthesize ``-std=…``/``-D…`` flags only when the user did not pass
-    ``--gcc-options``; ``include_dirs`` (resolved against the config's directory)
-    are appended *after* the CLI ``-I`` so explicit roots keep search precedence.
-    Returns the merged ``(CompileContext, includes)``.
-
-    The config is the explicit ``--config`` when given, else the ``.abicheck.yml``
-    auto-discovered at the ``--sources`` tree root — so a source-tree scan honors
-    the project's ``compile:`` block for L2 the same way ``embed_build_source``
-    honors its other non-executable settings for L3-L5 (Codex review). Only the
-    non-executable ``compile:`` block is read here; ``build.query`` still requires
-    an explicit trusted ``--config`` + ``--allow-build-query`` (ADR-032 D5).
-    """
-    from .buildsource.inline import discover_build_config, load_build_config
-    from .service_scan import CompileContext
-
-    cfg = build_config if build_config is not None else discover_build_config(sources)
-    if cfg is None:
-        return cli_ctx, cli_includes
-
-    try:
-        bc = load_build_config(cfg)
-    except ValueError as exc:
-        # Best-effort, like the level-implies-query probe: a malformed config is
-        # swallowed here so a no-source scan still runs; the real downstream load
-        # (embed_build_source, when --sources is given) surfaces it as a clean
-        # ClickException (tests: malformed_build_config_yaml_is_click_error /
-        # level_implies_query_malformed_config_does_not_crash). Still warn so a
-        # broken config is not silently ignored (CodeRabbit review).
-        click.echo(
-            f"warning: could not parse {cfg}; using CLI compile context only "
-            f"({exc}).",
-            err=True,
-        )
-        return cli_ctx, cli_includes
-    base = cfg.parent
-
-    # CLI > config: an explicit --ast-frontend wins even when it is "auto" (the
-    # documented escape hatch to bypass a pinned config frontend); only a *default*
-    # "auto" inherits the config's frontend (Codex review).
-    frontend = (
-        cli_ctx.frontend
-        if (frontend_explicit or cli_ctx.frontend != "auto")
-        else (bc.compile_frontend or "auto")
-    )
-    gcc_options: str | None
-    if cli_ctx.gcc_options is not None:
-        gcc_options = cli_ctx.gcc_options
-    else:
-        parts: list[str] = []
-        if bc.compile_std:
-            parts.append(f"-std={bc.compile_std}")
-        parts += [f"-D{d}" for d in bc.compile_defines]
-        gcc_options = " ".join(parts) or None
-    sysroot = (
-        cli_ctx.sysroot
-        if cli_ctx.sysroot is not None
-        else (Path(bc.compile_sysroot) if bc.compile_sysroot else None)
-    )
-    # CLI > config: an explicit --nostdinc/--no-nostdinc wins in *either*
-    # direction; an unset flag inherits the config value (Codex review).
-    nostdinc = (
-        cli_ctx.nostdinc if nostdinc_explicit else bool(bc.compile_nostdinc)
-    )
-    merged = CompileContext(
-        gcc_path=cli_ctx.gcc_path,
-        gcc_prefix=cli_ctx.gcc_prefix,
-        gcc_options=gcc_options,
-        gcc_option_tokens=cli_ctx.gcc_option_tokens,
-        sysroot=sysroot,
-        nostdinc=nostdinc,
-        frontend=frontend,
-    )
-    includes = tuple(cli_includes) + tuple(
-        (base / p) if not Path(p).is_absolute() else Path(p)
-        for p in bc.compile_include_dirs
-    )
-    return merged, includes
-
-
 def _build_new_snapshot(
     binary: Path,
     headers: list[Path],
@@ -679,6 +597,26 @@ def _audit_exit_code(
     help="Previous build's dump/library to compare against.",
 )
 @click.option(
+    "--baseline-header",
+    "--baseline-headers",
+    "baseline_header",
+    multiple=True,
+    type=click.Path(exists=True, path_type=Path),
+    help="Public header(s)/dir for the --baseline side when it is a native "
+    "library whose headers differ from the new build's -H. Without this, a "
+    "native baseline is parsed with the new -H (correct only when the headers "
+    "did not change). Ignored for a JSON-snapshot baseline (headers already "
+    "baked in).",
+)
+@click.option(
+    "--baseline-include",
+    "baseline_include",
+    multiple=True,
+    type=click.Path(exists=True, file_okay=False, path_type=Path),
+    help="Include root(s) for parsing --baseline-header (the old side's -I). "
+    "Defaults to the new build's -I when unset.",
+)
+@click.option(
     "--mode",
     "mode",
     type=click.Choice([m.value for m in ScanMode]),
@@ -774,6 +712,8 @@ def scan_cmd(
     compile_db: Path | None,
     build_config: Path | None,
     baseline: Path | None,
+    baseline_header: tuple[Path, ...],
+    baseline_include: tuple[Path, ...],
     mode: str,
     source_method: str | None,
     depth: str | None,
@@ -825,39 +765,24 @@ def scan_cmd(
     # ADR-037 D8: legacy --header-backend → --ast-frontend deprecation note.
     echo_ast_frontend_deprecation()
 
-    # L2 header compile context (dump↔scan parity, ADR-037 D3): bundle the
-    # cross-toolchain + frontend flags so the candidate/baseline header parse runs
-    # with the same build context `dump` would use.
-    from .service_scan import CompileContext
-
-    compile_context = CompileContext(
+    # L2 header compile context (compare↔dump↔scan parity, ADR-037 D3): the one
+    # shared resolver bundles the cross-toolchain + frontend flags and folds the
+    # project's `.abicheck.yml` compile: block in (CLI > config; the config is
+    # --config or the one auto-discovered at the --sources root).
+    compile_context, includes_tuple = resolve_compile_context(
+        click.get_current_context(),
         gcc_path=gcc_path,
         gcc_prefix=gcc_prefix,
         gcc_options=gcc_options,
         gcc_option_tokens=tuple(gcc_option_tokens),
         sysroot=sysroot,
         nostdinc=nostdinc,
-        frontend=header_backend,
-    )
-    # Fold the project's `.abicheck.yml` compile: block in (CLI > config; the
-    # config is --config or the one auto-discovered at the --sources root). An
-    # explicitly-typed --ast-frontend (even "auto") wins over a pinned config
-    # frontend, so detect whether the user actually passed it (Codex review).
-    ctx = click.get_current_context()
-
-    def _explicit(param: str) -> bool:
-        return (
-            ctx.get_parameter_source(param) == click.core.ParameterSource.COMMANDLINE
-        )
-
-    compile_context, includes = _merge_compile_config(
-        compile_context,
-        tuple(includes),
-        build_config,
+        header_backend=header_backend,
+        includes=tuple(includes),
+        build_config=build_config,
         sources=sources,
-        frontend_explicit=_explicit("header_backend"),
-        nostdinc_explicit=_explicit("nostdinc"),
     )
+    includes = includes_tuple
 
     if len(binaries) != 1:
         raise click.UsageError(
@@ -960,6 +885,8 @@ def scan_cmd(
             effective_build_info=effective_build_info,
             build_config=build_config,
             baseline=baseline,
+            baseline_headers=list(baseline_header),
+            baseline_includes=list(baseline_include),
             lang=lang,
             allow_build_query=allow_build_query,
             scan_mode=scan_mode,
@@ -1044,6 +971,8 @@ def run_scan_core(
     baseline: Path | None,
     lang: str,
     allow_build_query: bool,
+    baseline_headers: list[Path] | None = None,
+    baseline_includes: list[Path] | None = None,
     scan_mode: ScanMode,
     resolved: SourceMethod,
     eff_depth_enum: EvidenceDepth,
@@ -1250,6 +1179,8 @@ def run_scan_core(
             list(public_headers),
             list(public_header_dirs),
             compile_context=compile_context,
+            baseline_headers=baseline_headers,
+            baseline_includes=baseline_includes,
         )
         # A cross-check the maintainer promoted to `error` (D6) gates the exit
         # even when the baseline diff itself is clean.
@@ -1449,6 +1380,31 @@ def _load_risk_rules(path: Path | None) -> RiskRules:
     return RiskRules.from_dict(block if isinstance(block, dict) else raw)
 
 
+def _baseline_is_native_library(path: Path) -> bool:
+    """True if *path* is a native binary, not a JSON / ABICC-dump snapshot.
+
+    A snapshot baseline already has its headers baked in, so the candidate-`-H`
+    reuse is harmless there; only a native binary is re-parsed (and thus at risk
+    of being read through the wrong headers).
+
+    Detection is content-first to match `resolve_input`'s own native dispatch:
+    magic-byte sniffing (`detect_binary_format`) catches the cases a suffix scan
+    misses — an extensionless ELF (`build/foo`), a Mach-O framework binary, a
+    `.pyd`/`.node` shared object (Codex review). The filename heuristic is only a
+    fallback for paths that cannot be sniffed (e.g. a not-yet-existing file in a
+    unit test), and the snapshot suffixes short-circuit first so a real `.json`
+    on disk is never mis-sniffed.
+    """
+    name = path.name.lower()
+    if name.endswith((".json", ".dump", ".tar.gz", ".tgz", ".xml")):
+        return False
+    from .binary_utils import detect_binary_format
+
+    if detect_binary_format(path) is not None:
+        return True
+    return ".so" in name or name.endswith((".dll", ".dylib"))
+
+
 def _run_baseline_compare(
     baseline: Path,
     new_snap: Any,
@@ -1460,6 +1416,8 @@ def _run_baseline_compare(
     public_headers: list[Path],
     public_header_dirs: list[Path],
     compile_context: CompileContext | None = None,
+    baseline_headers: list[Path] | None = None,
+    baseline_includes: list[Path] | None = None,
 ) -> tuple[str, int, dict[str, Any]]:
     """Compare *new_snap* against *baseline*, folding cross-source findings in.
 
@@ -1484,15 +1442,42 @@ def _run_baseline_compare(
     from .errors import AbicheckError
     from .service import compare_snapshots, resolve_input
 
+    # Each side is parsed with its *own* headers. `scan` has a single -H (built for
+    # the candidate); for a native --baseline library whose public headers differ,
+    # --baseline-header/-include select the old side's headers. Without them we
+    # reuse the candidate -H/-I — correct only when the headers did not change — so
+    # warn rather than silently read the old side through the new headers (Codex).
+    if baseline_headers:
+        bl_headers = list(baseline_headers)
+        bl_includes = list(baseline_includes) if baseline_includes else includes
+        bl_public_headers = bl_headers
+        # The old-side public boundary comes ONLY from --baseline-header: dirs in
+        # it are public-header dirs, files opt in just themselves. Do NOT fall back
+        # to the new side's public dirs — a relative dir like `include/` would
+        # (segment-based provenance) re-mark old private headers as PUBLIC and skew
+        # the public-surface scoping (Codex review).
+        bl_public_dirs = [p for p in bl_headers if p.is_dir()]
+    else:
+        bl_headers, bl_includes = headers, includes
+        bl_public_headers, bl_public_dirs = public_headers, public_header_dirs
+        if headers and _baseline_is_native_library(baseline):
+            click.echo(
+                f"warning: --baseline {baseline.name} is a native library parsed "
+                f"with the new build's headers (-H); if its public headers differ "
+                f"from the new version, pass --baseline-header (else the old side is "
+                f"read through the new headers and the diff may be wrong/noisy).",
+                err=True,
+            )
+
     try:
         old_snap = resolve_input(
             baseline,
-            headers,
-            includes,
+            bl_headers,
+            bl_includes,
             version="",
             lang=lang,
-            public_headers=public_headers,
-            public_header_dirs=public_header_dirs,
+            public_headers=bl_public_headers,
+            public_header_dirs=bl_public_dirs,
             compile=compile_context,
         )
     except AbicheckError as exc:
