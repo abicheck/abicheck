@@ -140,7 +140,7 @@ def _prepare_side(
 @two_sided_input_options
 # ── Depth dial (unified vocabulary with `compare`/`dump`/`scan`, ADR-037 D5) ──
 @click.option("--depth", "depth", type=DEPTH_PARAM, default=None,
-              help="Evidence depth for both sides (unified dial): symbols=L0/L1, "
+              help="Evidence depth for both sides (unified dial): binary=L0/L1, "
                    "headers=+L2 AST (== plain compare), build=+L3, source=+L4 "
                    "replay & the L5 graph, full=deepest.")
 @click.option("--max", "max_depth", is_flag=True, default=False,
@@ -246,8 +246,9 @@ def deep_compare_cmd(
     # The depth the embedded snapshots carry; forwarded to compare so its
     # coverage table reflects the evidence actually requested.
     compare_collect_mode = resolve_dump_depth(depth, max_depth, "off", False)
-    # --depth symbols suppresses the L2 header AST on both sides (ADR-037 D5).
-    if depth == "symbols":
+    # --depth binary suppresses the L2 header AST on both sides (ADR-037 D5; the
+    # `symbols` alias is normalized to `binary` by DEPTH_PARAM).
+    if depth == "binary":
         headers, old_headers_only, new_headers_only = (), (), ()
 
     # A depth that collects L3-L5 needs *some* evidence to collect from. A side

@@ -861,6 +861,11 @@ def scan_cmd(
     # preprocessor pass when a compile DB + `clang -E` are available (else the
     # coverage row reports it skipped — ADR-035 D2 coverage honesty).
     dp = EvidenceDepth(depth) if depth else None
+    # --depth binary is symbols-only (L0/L1): suppress the L2 header AST even when
+    # -H is passed, so the collected evidence matches the reported depth — parity
+    # with dump/compare/deep-compare's binary handling (Codex review).
+    if dp is EvidenceDepth.BINARY:
+        headers = ()
     # The unset dial means 'auto' (ADR-037 D5): opt into the risk-driven S-method
     # so a seeded PR scan escalates by risk and an unseeded one falls back to the
     # preset. Only when *nothing* was pinned (no --depth, no --source-method, no
@@ -894,8 +899,12 @@ def scan_cmd(
             sources=sources,
             build_info=effective_build_info,
             mode=scan_mode.value,
-            source_method=source_method,
-            depth=depth,
+            # Thread the *resolved* concrete level (not the raw flags) so the
+            # estimate matches what the real scan would run — e.g. the auto
+            # default resolving a seeded empty diff to s0/off, not the pr preset
+            # (Codex review).
+            source_method=resolved.value,
+            depth=eff_depth_enum.value,
             changed=changed,
             seeded=seeded,
             budget_s=budget_s,

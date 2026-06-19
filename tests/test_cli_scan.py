@@ -1464,3 +1464,53 @@ def test_export_delta_resolves_tu_into_replay_seed(monkeypatch, runner, tmp_path
     # The git-changed file (floor) AND the export-delta-resolved TU are both in.
     assert "src/unrelated.cpp" in seed
     assert "src/bar.cpp" in seed
+
+
+def test_depth_binary_clears_headers_in_scan(monkeypatch, runner, new_snap_compatible, tmp_path):
+    # --depth binary is L0/L1-only: -H must be suppressed so the collected
+    # evidence matches the reported depth (Codex review). Spy run_scan_core to
+    # confirm headers are cleared even when -H is passed.
+    import abicheck.cli_scan as cs
+
+    header = tmp_path / "foo.h"
+    header.write_text("int foo(void);\n", encoding="utf-8")
+    captured: dict[str, object] = {}
+    original = cs.run_scan_core
+
+    def _spy(*args, **kwargs):
+        captured["headers"] = kwargs.get("headers")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(cs, "run_scan_core", _spy)
+    res = runner.invoke(
+        main,
+        [
+            "scan", "--binary", str(new_snap_compatible),
+            "-H", str(header), "--depth", "binary", "--audit",
+        ],
+    )
+    assert res.exit_code == 0, res.output
+    assert captured["headers"] == []  # -H suppressed for the binary rung
+
+
+def test_estimate_uses_resolved_level_not_raw_flags(
+    monkeypatch, runner, new_snap_compatible
+):
+    # The --estimate path must reflect the *resolved* level, not the raw flags —
+    # e.g. --depth source resolves to s5, so the estimate sees s5 (Codex review).
+    import abicheck.cli_scan as cs
+
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(
+        cs, "_emit_estimate", lambda **kw: captured.update(kw)
+    )
+    res = runner.invoke(
+        main,
+        [
+            "scan", "--binary", str(new_snap_compatible),
+            "--depth", "source", "--estimate", "--audit",
+        ],
+    )
+    assert res.exit_code == 0, res.output
+    assert captured["source_method"] == "s5"
+    assert captured["depth"] == "source"
