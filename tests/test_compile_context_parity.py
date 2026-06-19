@@ -381,15 +381,37 @@ def test_merge_compile_config_explicit_auto_beats_config(tmp_path: Path) -> None
     assert explicit.frontend == "auto"
 
 
-def test_merge_compile_config_warns_on_malformed(tmp_path, capsys) -> None:
+def test_merge_compile_config_explicit_malformed_fails_loud(tmp_path) -> None:
+    # An *explicit* --config (build_config not None) that won't parse must fail
+    # loudly, not silently drop the compile: settings (Codex review).
+    import click
+
     from abicheck.cli_scan import _merge_compile_config
 
     bad = tmp_path / ".abicheck.yml"
     bad.write_text("compile: [unterminated\n", encoding="utf-8")
+    with pytest.raises(click.ClickException, match="cannot parse build config"):
+        _merge_compile_config(CompileContext(gcc_options="-DX"), (), bad)
+
+
+def test_merge_compile_config_autodiscovered_malformed_warns(tmp_path, capsys) -> None:
+    # An *auto-discovered* config (build_config None, found via --sources) stays
+    # best-effort: warn + CLI-only fallback rather than fail the run.
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / ".abicheck.yml").write_text("compile: [unterminated\n", encoding="utf-8")
     cli = CompileContext(gcc_options="-DX")
-    merged, includes = _merge_compile_config(cli, (), bad)
+    merged, _ = _merge_compile_config_autodiscover(cli, src)
     assert merged is cli  # CLI-only fallback
-    assert "could not parse" in capsys.readouterr().err
+    assert "could not parse auto-discovered" in capsys.readouterr().err
+
+
+def _merge_compile_config_autodiscover(
+    cli: CompileContext, src: Path
+) -> tuple[CompileContext, tuple[Path, ...]]:
+    from abicheck.cli_scan import _merge_compile_config
+
+    return _merge_compile_config(cli, (), None, sources=src)
 
 
 def test_try_header_scoped_dump_threads_compile_to_dumper(

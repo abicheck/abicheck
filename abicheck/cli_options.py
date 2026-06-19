@@ -335,23 +335,37 @@ def merge_compile_config(
     honors its other non-executable settings for L3-L5 (Codex review). Only the
     non-executable ``compile:`` block is read here; ``build.query`` still requires
     an explicit trusted ``--config`` + ``--allow-build-query`` (ADR-032 D5).
+
+    A parse error is fail-loud for an **explicit** ``--config`` (``ClickException``)
+    — otherwise an L2-only dump/scan with no ``--sources`` would silently drop the
+    intended ``compile:`` settings and still exit 0 — but best-effort (warn +
+    CLI-only fallback) for an **auto-discovered** config the user didn't bind to.
     """
     from .buildsource.inline import discover_build_config, load_build_config
     from .service_scan import CompileContext
 
-    cfg = build_config if build_config is not None else discover_build_config(sources)
+    explicit_config = build_config is not None
+    cfg = build_config if explicit_config else discover_build_config(sources)
     if cfg is None:
         return cli_ctx, cli_includes
 
     try:
         bc = load_build_config(cfg)
     except ValueError as exc:
-        # Best-effort, like the level-implies-query probe: a malformed config is
-        # swallowed here so a no-source run still works; the real downstream load
-        # (embed_build_source, when --sources is given) surfaces it as a clean
-        # ClickException. Still warn so a broken config is not silently ignored.
+        if explicit_config:
+            # An *explicit* --config the user pointed at must fail loudly: for an
+            # L2-only dump/scan (no --sources/--build-info) nothing reloads it
+            # downstream, so a warn-and-fallback would silently drop the intended
+            # compile.std/defines/sysroot/frontend and still exit 0 (Codex review).
+            raise click.ClickException(f"cannot parse build config {cfg}: {exc}") from exc
+        # An *auto-discovered* config stays best-effort: a malformed file found by
+        # walking up from cwd / the --sources root shouldn't fail a run the user
+        # didn't ask to bind to it. Warn so it isn't silently ignored; the real
+        # downstream load (embed_build_source, when --sources is given) still
+        # surfaces it as a clean ClickException.
         click.echo(
-            f"warning: could not parse {cfg}; using CLI compile context only ({exc}).",
+            f"warning: could not parse auto-discovered {cfg}; using CLI compile "
+            f"context only ({exc}).",
             err=True,
         )
         return cli_ctx, cli_includes
