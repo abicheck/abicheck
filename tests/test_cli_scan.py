@@ -1528,3 +1528,27 @@ def test_pinned_depth_with_embedded_l3_snapshot_no_contract_error(runner, tmp_pa
     # The embedded L3 satisfies the contract → no EVIDENCE_CONTRACT error (exit 1).
     assert res.exit_code != 1, res.output
     assert "nothing to collect" not in res.output
+
+
+def test_mode_audit_alias_binary_only_no_contract_error(runner, new_snap_compatible):
+    # The deprecated `--mode audit` alias must stay a best-effort binary-only lint
+    # (like `--audit`) — a preset is NOT a pinned-depth contract (Codex review).
+    res = runner.invoke(
+        main, ["scan", "--binary", str(new_snap_compatible), "--mode", "audit"]
+    )
+    assert res.exit_code != 1, res.output
+    assert "nothing to collect" not in res.output
+
+
+def test_depth_pin_with_auto_method_still_a_contract(runner, new_snap_compatible):
+    # An explicit --depth pins the contract even alongside --source-method auto
+    # (auto only picks the method; the user still demanded source depth) — CodeRabbit.
+    res = runner.invoke(
+        main,
+        [
+            "scan", "--binary", str(new_snap_compatible),
+            "--depth", "source", "--source-method", "auto", "--audit",
+        ],
+    )
+    assert res.exit_code != 0
+    assert "pinned depth 'source'" in res.output

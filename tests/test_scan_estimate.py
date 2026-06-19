@@ -549,3 +549,17 @@ def test_run_scan_auto_default_without_evidence_is_best_effort(snap_path: Path) 
 
     res = run_scan(ScanRequest(binaries=[snap_path], mode="audit"))
     assert res.verdict != "EVIDENCE_CONTRACT_ERROR"
+
+
+def test_service_accepts_symbols_depth_alias(snap_path: Path) -> None:
+    # The deprecated `symbols` depth spelling must not crash the programmatic API
+    # (it's only normalized by the CLI DEPTH_PARAM otherwise) — Codex review.
+    from abicheck.service import run_scan
+    from abicheck.service_scan import estimate_scan
+
+    # estimate_scan + run_scan both construct EvidenceDepth from req.depth.
+    est = estimate_scan(ScanRequest(binaries=[snap_path], depth="symbols"))
+    assert est  # non-empty cost estimate, no ValueError
+    res = run_scan(ScanRequest(binaries=[snap_path], depth="symbols", mode="audit"))
+    # `symbols`→`binary` is L0/L1 only (collect_mode off) → no contract error.
+    assert res.verdict != "EVIDENCE_CONTRACT_ERROR"

@@ -155,6 +155,23 @@ _METHOD_TO_DEPTH: dict[SourceMethod, EvidenceDepth] = {
 }
 
 
+def parse_user_depth(value: str | None) -> EvidenceDepth | None:
+    """Resolve a ``--depth`` / ``ScanRequest.depth`` string to an EvidenceDepth.
+
+    Honors the deprecated aliases (``symbols``→``binary``, ``graph``→``source``)
+    so non-CLI callers (``service.run_scan`` / ``estimate_scan`` / MCP) accept the
+    one-release compatibility spellings too — the Click ``DEPTH_PARAM`` normalizes
+    them on the CLI path, but programmatic callers construct the enum directly
+    (Codex review). ``None``/empty → ``None``.
+    """
+    if not value:
+        return None
+    v = str(value).lower()
+    if v in DEPRECATED_DEPTHS:
+        return DEPRECATED_DEPTHS[v]
+    return EvidenceDepth(v)
+
+
 def mode_preset(mode: ScanMode) -> tuple[SourceMethod, EvidenceDepth]:
     """The fixed (source_method, depth) preset for *mode* (deterministic)."""
     return _MODE_PRESET[mode]

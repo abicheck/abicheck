@@ -918,9 +918,19 @@ def scan_cmd(
     # The classify→tier→level→compare body lives in ``run_scan_core`` so the CLI,
     # ``service.run_scan``, and the MCP tool drive one engine. The CLI only parses
     # argv, renders, and maps the budget-overflow signal onto an exit code.
-    _level_explicit = (
-        source_method is not None and source_method != SourceMethod.AUTO.value
-    ) or (source_method is None and depth is not None)
+    # Two distinct notions of "explicit", deliberately not the same boolean:
+    #  • _level_explicit — consent to auto-run build.query (level-implies-query):
+    #    a non-auto --source-method, or --depth ONLY when no --source-method is
+    #    given (--source-method auto wins in resolution and must NOT grant query
+    #    consent). Conservative.
+    #  • _pinned_explicit — the auto-strict evidence contract: an explicit --depth
+    #    *always* pins (regardless of --source-method auto, which only picks the
+    #    method, not whether the user demanded source depth), or a non-auto
+    #    --source-method (CodeRabbit review). --mode is a deprecated preset, never
+    #    a pin.
+    _sm_pin = source_method is not None and source_method != SourceMethod.AUTO.value
+    _level_explicit = _sm_pin or (source_method is None and depth is not None)
+    _pinned_explicit = (depth is not None) or _sm_pin
     prov_headers, prov_dirs = _public_provenance_set(
         list(headers), list(public_header_dirs)
     )
@@ -960,12 +970,14 @@ def scan_cmd(
             # via auto/the preset, not the depth — it must not count as consent;
             # Codex review). An explicit --mode is deliberately NOT consent here.
             level_explicit=_level_explicit,
-            # The pinned-depth contract (auto-strict) uses a *wider* notion of
-            # "the user pinned a level": the query-consent set PLUS an explicit
-            # (deprecated) --mode, so `--mode baseline` with no evidence fails loud
-            # the same as `--depth full` would, instead of silently degrading
-            # (CodeRabbit review). Kept separate from query-consent above.
-            pinned_explicit=_level_explicit or _mode_explicit,
+            # The pinned-depth contract (auto-strict) gates on the *deliberate* new
+            # surface only — an explicit --depth (even alongside --source-method
+            # auto) or a non-auto --source-method. An explicit --mode is NOT a pin:
+            # it is a deprecated *preset* alias (pr/pr-deep/baseline/audit, all deep
+            # by collect-mode) that the GitHub Action passes by default (`--mode pr`)
+            # and that `--mode audit` uses for a binary-only lint — treating it as a
+            # pin would break those best-effort paths (Codex review).
+            pinned_explicit=_pinned_explicit,
             compile_context=None if compile_context.is_default else compile_context,
         )
     except _BudgetOverflow as bo:

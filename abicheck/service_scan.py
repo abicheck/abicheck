@@ -111,6 +111,7 @@ def _scan_imports() -> tuple[Any, ...]:
         ScanMode,
         SourceMethod,
         level_to_collect_mode,
+        parse_user_depth,
         resolve_level,
     )
 
@@ -122,6 +123,7 @@ def _scan_imports() -> tuple[Any, ...]:
         SourceMethod,
         level_to_collect_mode,
         resolve_level,
+        parse_user_depth,
     )
 
 
@@ -387,11 +389,12 @@ def estimate_scan(req: ScanRequest) -> list[CostEstimate]:
         SourceMethod,
         level_to_collect_mode,
         resolve_level,
+        parse_user_depth,
     ) = _scan_imports()
 
     mode = ScanMode(req.mode)
     sm = SourceMethod(req.source_method) if req.source_method else None
-    dp = EvidenceDepth(req.depth) if req.depth else None
+    dp = parse_user_depth(req.depth)  # honors the symbols→binary alias (Codex)
     auto_method = None
     # AUTO resolves from the risk score whenever a real diff seed was produced —
     # including a *seeded but empty* diff (a no-op PR), which scores 0 → s0/off,
@@ -610,6 +613,7 @@ def run_scan(req: ScanRequest) -> ScanResult:
         SourceMethod,
         level_to_collect_mode,
         resolve_level,
+        parse_user_depth,
     ) = _scan_imports()
     from .buildsource.crosscheck import ALL_CHECKS
     from .cli_scan import (
@@ -633,14 +637,14 @@ def run_scan(req: ScanRequest) -> ScanResult:
 
     scan_mode = ScanMode(req.mode)
     sm = SourceMethod(req.source_method) if req.source_method else None
-    dp = EvidenceDepth(req.depth) if req.depth else None
+    dp = parse_user_depth(req.depth)  # honors the symbols→binary alias (Codex)
     # The pinned-depth contract (ADR-037 D5 auto-strict) applies to the programmatic
-    # API too: an explicitly-pinned deep level (a non-auto source_method, or a depth
-    # with no source_method) is a contract, so run_scan_core fails loud if it can't
-    # collect the evidence — same as the CLI. AUTO / preset-only requests stay
-    # best-effort.
-    pinned_explicit = (sm is not None and sm is not SourceMethod.AUTO) or (
-        sm is None and dp is not None
+    # API too: an explicit depth *always* pins (even with source_method=auto, which
+    # only picks the method), or a non-auto source_method does. So run_scan_core
+    # fails loud if it can't collect the evidence — same as the CLI. AUTO / preset-
+    # only requests stay best-effort (CodeRabbit review).
+    pinned_explicit = (dp is not None) or (
+        sm is not None and sm is not SourceMethod.AUTO
     )
     is_auto = sm is SourceMethod.AUTO
     auto_method = risk.recommended_method if (is_auto and seeded) else None
