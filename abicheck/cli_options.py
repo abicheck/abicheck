@@ -24,7 +24,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, TypeVar
+from typing import TYPE_CHECKING, TypeVar, overload
 
 import click
 
@@ -247,6 +247,10 @@ LANG_CHOICES: tuple[str, ...] = ("c++", "c")
 LANG_DEFAULT: str = "c++"
 
 
+@overload
+def lang_option(func: F) -> F: ...
+@overload
+def lang_option(*, help: str = ...) -> Callable[[F], F]: ...
 def lang_option(
     func: F | None = None,
     *,
