@@ -634,6 +634,14 @@ def run_scan(req: ScanRequest) -> ScanResult:
     scan_mode = ScanMode(req.mode)
     sm = SourceMethod(req.source_method) if req.source_method else None
     dp = EvidenceDepth(req.depth) if req.depth else None
+    # The pinned-depth contract (ADR-037 D5 auto-strict) applies to the programmatic
+    # API too: an explicitly-pinned deep level (a non-auto source_method, or a depth
+    # with no source_method) is a contract, so run_scan_core fails loud if it can't
+    # collect the evidence — same as the CLI. AUTO / preset-only requests stay
+    # best-effort.
+    pinned_explicit = (sm is not None and sm is not SourceMethod.AUTO) or (
+        sm is None and dp is not None
+    )
     is_auto = sm is SourceMethod.AUTO
     auto_method = risk.recommended_method if (is_auto and seeded) else None
     resolved, eff_depth = resolve_level(
@@ -673,16 +681,16 @@ def run_scan(req: ScanRequest) -> ScanResult:
             severities={},
             budget=budget_str,
             budget_s=budget_s,
+            pinned_explicit=pinned_explicit,
             compile_context=None if req.compile.is_default else req.compile,
         )
     except _BudgetOverflow:
         # The failure-guard contract: overflow is exit 5, never a shrunk scope.
         return ScanResult(verdict="BUDGET_OVERFLOW", exit_code=5)
     except _EvidenceContractError:
-        # A pinned depth that can't collect its evidence (auto-strict, ADR-037 D5).
-        # The programmatic API stays best-effort (run_scan_core is called without
-        # level_explicit), so this is defensive; map it to a failed result rather
-        # than degrade silently.
+        # A pinned depth that can't collect its evidence (auto-strict, ADR-037 D5):
+        # the programmatic API honors the same contract as the CLI (pinned_explicit
+        # above), so map the signal to a failed result rather than degrade silently.
         return ScanResult(verdict="EVIDENCE_CONTRACT_ERROR", exit_code=1)
 
     outcome = core.outcome

@@ -143,3 +143,29 @@ def test_collect_inline_pack_routes_bazel_build_info(tmp_path: Path) -> None:
     assert not any(
         "no compile_commands.json" in d for d in pack.build_evidence.diagnostics
     )
+
+
+def test_sniff_large_aquery_preamble_still_detected(tmp_path: Path) -> None:
+    """A Bazel aquery whose `actions` key sits past the bounded sniff window (huge
+    `artifacts`/`pathFragments` preamble) must still classify as bazel_aquery —
+    the object is fully parsed, not prefix-scanned (Codex review)."""
+    big_artifacts = [{"id": str(i), "pathFragmentId": str(i)} for i in range(20000)]
+    payload = {"artifacts": big_artifacts, "actions": [{"mnemonic": "CppCompile"}]}
+    p = _w(tmp_path, "big_aquery.json", json.dumps(payload))
+    assert p.stat().st_size > 70000  # exceeds the 64 KiB sniff head
+    assert sniff_build_info_format(p) == "bazel_aquery"
+
+
+def test_sniff_object_wrapped_compile_db(tmp_path: Path) -> None:
+    # An object that carries compile-DB keys (not actions/results) → compile_db.
+    p = _w(tmp_path, "wrapped.json", json.dumps({"file": "a.c", "command": "cc"}))
+    assert sniff_build_info_format(p) == "compile_db"
+
+
+def test_maybe_collect_bazel_handles_none_and_nonfile(tmp_path: Path) -> None:
+    from abicheck.buildsource.inline import _maybe_collect_bazel_build_info
+
+    merged = BuildEvidence()
+    assert _maybe_collect_bazel_build_info(None, merged, []) is False
+    # A directory is not a file → not routed here (pack/build_dir handled upstream).
+    assert _maybe_collect_bazel_build_info(tmp_path, merged, []) is False

@@ -78,26 +78,6 @@ def _payload(res) -> dict:  # type: ignore[no-untyped-def]
 
 
 @pytest.fixture
-def compile_db(tmp_path):  # type: ignore[no-untyped-def]
-    """A minimal compile_commands.json supplying L3 build metadata (no compiler).
-
-    Lets a pinned deep level collect L3 so auto-strict (ADR-037 D5: a pinned depth
-    with no source input is an error) does not fire in tests whose intent is level
-    reporting / seed resolution, not collection.
-    """
-    src = tmp_path / "u.c"
-    src.write_text("int u(void){return 0;}\n", encoding="utf-8")
-    cdb = tmp_path / "compile_commands.json"
-    cdb.write_text(
-        json.dumps(
-            [{"directory": str(tmp_path), "file": str(src), "command": "cc -c u.c"}]
-        ),
-        encoding="utf-8",
-    )
-    return cdb
-
-
-@pytest.fixture
 def baseline_snap(tmp_path: Path) -> Path:
     snap = AbiSnapshot(
         library="libfoo.so",
@@ -267,8 +247,11 @@ def test_source_method_pin_overrides_mode_in_report(
     assert "depth=build" in res.output
 
 
-def test_pr_deep_is_distinct_from_pr(runner, new_snap_compatible):
+def test_pr_deep_is_distinct_from_pr(runner, new_snap_compatible, compile_db):
     # No --audit here: --audit would force the AUDIT preset and mask --mode.
+    # --mode pr-deep is an explicit deep pin → the contract needs source evidence
+    # (ADR-037 D5 auto-strict applies to the deprecated --mode alias too), so
+    # supply a minimal compile DB.
     res = runner.invoke(
         main,
         [
@@ -277,6 +260,8 @@ def test_pr_deep_is_distinct_from_pr(runner, new_snap_compatible):
             str(new_snap_compatible),
             "--mode",
             "pr-deep",
+            "--build-info",
+            str(compile_db),
             "--format",
             "json",
         ],
@@ -1514,3 +1499,32 @@ def test_estimate_uses_resolved_level_not_raw_flags(
     assert res.exit_code == 0, res.output
     assert captured["source_method"] == "s5"
     assert captured["depth"] == "source"
+
+
+def test_pinned_depth_with_embedded_l3_snapshot_no_contract_error(runner, tmp_path):
+    # Codex review: a cached .abi.json that already carries embedded L3 evidence
+    # must satisfy the pinned-depth contract via _l3_collected — not be rejected
+    # because no raw --sources/--build-info was passed on the CLI.
+    from abicheck.buildsource.model import CoverageStatus, LayerCoverage
+    from abicheck.buildsource.pack import BuildSourcePack
+
+    snap = AbiSnapshot(
+        library="libfoo.so",
+        version="2.0",
+        from_headers=True,
+        functions=[_func("foo", "_Z3foov")],
+        elf=_elf("_Z3foov"),
+    )
+    pack = BuildSourcePack(root="")
+    pack.manifest.coverage.append(
+        LayerCoverage(layer="L3_build", status=CoverageStatus.PRESENT)
+    )
+    snap.build_source = pack
+    p = _write_snapshot(tmp_path / "embedded.abi.json", snap)
+
+    res = runner.invoke(
+        main, ["scan", "--binary", str(p), "--depth", "source", "--audit"]
+    )
+    # The embedded L3 satisfies the contract → no EVIDENCE_CONTRACT error (exit 1).
+    assert res.exit_code != 1, res.output
+    assert "nothing to collect" not in res.output

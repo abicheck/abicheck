@@ -530,3 +530,22 @@ def test_run_scan_confidence_matrix_present(snap_path: Path) -> None:
     # The provider-agreement matrix is populated for run checks.
     assert isinstance(res.confidence, dict)
     assert "exported_not_public" in res.confidence
+
+
+def test_run_scan_pinned_depth_without_evidence_is_contract_error(snap_path: Path) -> None:
+    # ADR-037 D5 auto-strict applies to the programmatic API too: a pinned deep
+    # depth with no source input maps to a failed ScanResult (not a silent shallow
+    # scan), mirroring the CLI (CodeRabbit/Codex review).
+    from abicheck.service import run_scan
+
+    res = run_scan(ScanRequest(binaries=[snap_path], depth="source"))
+    assert res.exit_code == 1
+    assert res.verdict == "EVIDENCE_CONTRACT_ERROR"
+
+
+def test_run_scan_auto_default_without_evidence_is_best_effort(snap_path: Path) -> None:
+    # The unpinned default never trips the contract — best-effort binary scan.
+    from abicheck.service import run_scan
+
+    res = run_scan(ScanRequest(binaries=[snap_path], mode="audit"))
+    assert res.verdict != "EVIDENCE_CONTRACT_ERROR"

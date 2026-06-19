@@ -278,3 +278,23 @@ def shared_cmake_build_dir(tmp_path_factory: pytest.TempPathFactory) -> Path | N
         return None
 
     return build_dir
+
+
+@pytest.fixture
+def compile_db(tmp_path: Path) -> Path:
+    """A minimal ``compile_commands.json`` supplying L3 build metadata (no compiler).
+
+    Shared across scan tests: lets a pinned deep level collect L3 so auto-strict
+    (ADR-037 D5 — a pinned depth with no source input is an error) does not fire in
+    tests whose intent is level reporting / seed resolution, not collection.
+    """
+    src = tmp_path / "u.c"
+    src.write_text("int u(void){return 0;}\n", encoding="utf-8")
+    cdb = tmp_path / "compile_commands.json"
+    cdb.write_text(
+        json.dumps(
+            [{"directory": str(tmp_path), "file": str(src), "command": "cc -c u.c"}]
+        ),
+        encoding="utf-8",
+    )
+    return cdb

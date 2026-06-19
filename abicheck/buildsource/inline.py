@@ -40,6 +40,7 @@ the artifact tiers (L0/L1/L2) stay authoritative.
 from __future__ import annotations
 
 import datetime as _dt
+import json
 import os
 import shlex
 import subprocess
@@ -733,7 +734,9 @@ def sniff_build_info_format(path: Path) -> str:
     ``"bazel_cquery"`` (Bazel ``--output=jsonproto`` — a JSON *object* keyed by
     ``actions`` / ``results``), or ``"unknown"``. Lets a Bazel query result and a
     pack "just work" when passed to ``--build-info`` instead of being mis-parsed
-    as a compile DB. Sniffs only a bounded head; never executes anything.
+    as a compile DB. The top-level shape is read from a bounded head (``[`` = a
+    compile-DB array); a ``{`` object is fully parsed so a large aquery preamble
+    can't hide the discriminating key (Codex review). Never executes anything.
     """
     if path.is_dir():
         return "pack" if is_pack_dir(path) else "build_dir"
@@ -747,14 +750,28 @@ def sniff_build_info_format(path: Path) -> str:
         return "unknown"
     if text[0] == "[":
         return "compile_db"  # compile_commands.json is a top-level JSON array
-    if text[0] == "{":
-        # Bazel jsonproto: aquery is keyed by "actions", cquery by "results".
+    if text[0] != "{":
+        return "unknown"
+    # A JSON object: a Bazel jsonproto (aquery→"actions", cquery→"results") or an
+    # object-wrapped compile DB. The discriminating key can sit far past the sniff
+    # window in a large aquery dump (long artifacts/pathFragments preamble), so
+    # parse the whole object to classify by key, not a bounded prefix (Codex).
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        # Truncated / not-quite-JSON: fall back to the bounded-prefix heuristic.
         if '"actions"' in text:
             return "bazel_aquery"
         if '"results"' in text:
             return "bazel_cquery"
-        # Some tooling wraps a compile DB in an object; treat the DB shape as one.
-        if '"file"' in text or '"command"' in text or '"arguments"' in text:
+        return "unknown"
+    if isinstance(data, dict):
+        if "actions" in data:
+            return "bazel_aquery"
+        if "results" in data:
+            return "bazel_cquery"
+        if any(k in data for k in ("file", "command", "arguments")):
             return "compile_db"
     return "unknown"
 

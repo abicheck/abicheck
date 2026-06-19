@@ -918,6 +918,9 @@ def scan_cmd(
     # The classify→tier→level→compare body lives in ``run_scan_core`` so the CLI,
     # ``service.run_scan``, and the MCP tool drive one engine. The CLI only parses
     # argv, renders, and maps the budget-overflow signal onto an exit code.
+    _level_explicit = (
+        source_method is not None and source_method != SourceMethod.AUTO.value
+    ) or (source_method is None and depth is not None)
     prov_headers, prov_dirs = _public_provenance_set(
         list(headers), list(public_header_dirs)
     )
@@ -955,11 +958,14 @@ def scan_cmd(
             # when no --source-method is given (resolve_level gives --source-method
             # precedence and ignores --depth otherwise, so `auto`+`--depth` resolves
             # via auto/the preset, not the depth — it must not count as consent;
-            # Codex review).
-            level_explicit=(
-                source_method is not None and source_method != SourceMethod.AUTO.value
-            )
-            or (source_method is None and depth is not None),
+            # Codex review). An explicit --mode is deliberately NOT consent here.
+            level_explicit=_level_explicit,
+            # The pinned-depth contract (auto-strict) uses a *wider* notion of
+            # "the user pinned a level": the query-consent set PLUS an explicit
+            # (deprecated) --mode, so `--mode baseline` with no evidence fails loud
+            # the same as `--depth full` would, instead of silently degrading
+            # (CodeRabbit review). Kept separate from query-consent above.
+            pinned_explicit=_level_explicit or _mode_explicit,
             compile_context=None if compile_context.is_default else compile_context,
         )
     except _BudgetOverflow as bo:
@@ -1056,6 +1062,7 @@ def run_scan_core(
     budget: str | None,
     budget_s: float | None,
     level_explicit: bool = False,
+    pinned_explicit: bool = False,
     compile_context: CompileContext | None = None,
 ) -> ScanCoreResult:
     """The shared scan orchestration (classify → always-on tier → level → compare).
@@ -1189,16 +1196,21 @@ def run_scan_core(
     # database; without one the L3/L4/L5 layers cannot be collected.
     #
     # ADR-037 D5 (#2 auto-strict): a depth the user *explicitly pinned* is a
-    # contract. If it was pinned with **no source input at all** (no --sources /
-    # --build-info to analyze), there is nothing to collect from — that is the
-    # "missing input" case, and we ERROR with the remedy rather than silently
-    # produce a shallow binary-only scan. When a source input *was* supplied but
-    # L3 still came back empty (e.g. a pristine tree with no compile_commands.json)
-    # the user clearly tried — that stays a pointed *advisory* naming the remedy,
-    # not a hard error. The implicit 'auto' default never errors here.
+    # contract. If it was pinned with **no source evidence at all** — no
+    # --sources / --build-info, and the trusted --config build.query flow didn't
+    # produce L3 either — there is nothing to collect from, so we ERROR with the
+    # remedy rather than silently produce a shallow binary-only scan. When a
+    # source input *was* supplied (or L3 was actually collected via the config
+    # query) but L3 still came back empty, that stays a pointed *advisory* naming
+    # the remedy, not a hard error. The implicit 'auto' default never errors here.
     gave_source_input = sources is not None or effective_build_info is not None
     needs_source = collect_mode != "off"
-    if needs_source and level_explicit and not gave_source_input:
+    if (
+        needs_source
+        and pinned_explicit
+        and not gave_source_input
+        and not _l3_collected(new_snap)
+    ):
         raise _EvidenceContractError(
             f"pinned depth '{eff_depth_enum.value}' (source-method {resolved.value}) "
             "needs source evidence, but no --sources/--build-info was given — there "
