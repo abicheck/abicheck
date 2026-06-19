@@ -94,6 +94,46 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
             ],
         },
     ],
+    "* collect": [
+        {
+            "name": "Inputs",
+            "options": [
+                "--binary", "--header", "--source-root", "--build-dir",
+                "--compile-db", "-p",
+            ],
+        },
+        {
+            "name": "Build-system adapters",
+            "options": [
+                "--cmake", "--ninja", "--ninja-compdb", "--bazel-cquery",
+                "--bazel-aquery", "--make-dry-run", "--build-system",
+                "--read-compiler-record",
+            ],
+        },
+        {
+            "name": "Source-ABI (L4)",
+            "options": [
+                "--source-abi", "--source-abi-extractor", "--source-abi-scope",
+                "--source-abi-target", "--source-abi-cache", "--clang-bin",
+                "--android-dump",
+            ],
+        },
+        {
+            "name": "Source graph (L5)",
+            "options": [
+                "--source-graph", "--call-graph", "--include-graph",
+                "--kythe-entries", "--codeql-results",
+            ],
+        },
+        {
+            "name": "Extractors & collection",
+            "options": [
+                "--extractor-manifest", "--collection-mode", "--allow-build-query",
+                "--changed-path",
+            ],
+        },
+        {"name": "Output", "options": ["--output", "--verbose"]},
+    ],
     "* dump": [
         {
             "name": "Inputs",
