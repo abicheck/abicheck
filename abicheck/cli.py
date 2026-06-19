@@ -482,7 +482,8 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
              build_config: Path | None = None, allow_build_query: bool = False,
              build_query: str | None = None, build_compile_db: str | None = None,
              depth: str | None = None, max_depth: bool = False,
-             _resolved_compile_context: CompileContext | None = None) -> None:
+             _resolved_compile_context: CompileContext | None = None,
+             _resolved_collect_mode: str | None = None) -> None:
     """Dump ABI snapshot of a shared library to JSON.
 
     \b
@@ -495,7 +496,14 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
     # Resolve the --depth/--max preset into the internal collect mode before any
     # dump path runs, so every branch (source-only / PE-Mach-O / ELF) embeds the
     # same evidence depth (G21.1). With no preset, dump embeds at "source-target".
-    collect_mode = resolve_dump_depth(depth, max_depth, "source-target")
+    # ``compare``'s inline source-tree embed already resolved the mode (possibly
+    # from a config source.method, where --depth is None) and hands it over via
+    # the private _resolved_collect_mode hook so we don't re-derive a different
+    # default here (Codex review).
+    if _resolved_collect_mode is not None:
+        collect_mode = _resolved_collect_mode
+    else:
+        collect_mode = resolve_dump_depth(depth, max_depth, "source-target")
     # --depth binary suppresses the L2 header AST (symbols-only dump, ADR-037 D5;
     # the `symbols` alias is normalized to `binary` by DEPTH_PARAM). A compile DB
     # only feeds the header parse, so discard it with the headers — otherwise
@@ -1261,7 +1269,7 @@ def _embed_inline_source_side(
         pdb_path=pdb_path,
         sources=sources,
         build_info=build_info,
-        collect_mode=collect_mode,
+        _resolved_collect_mode=collect_mode,
         output=out,
     )
     # Sources and build-info are now embedded in the snapshot; drop both so the

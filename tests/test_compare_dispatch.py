@@ -119,7 +119,13 @@ def test_embed_inline_source_forwards_toolchain_and_collects(tmp_path: Path) -> 
         climod._normalize_binary_input = orig  # type: ignore[assignment]
 
     assert kept is None and kept_bi is None and out == tmp_path / "old.abi.json"
-    assert captured["sources"] == tree and captured["collect_mode"] == "source-target"
+    # Every kwarg forwarded to dump must be a real dump_cmd parameter — guards
+    # against threading a removed/renamed option through ctx.invoke (which would
+    # only blow up at runtime with a real Context, not this fake one). Codex review.
+    import inspect
+    dump_params = set(inspect.signature(climod.dump_cmd.callback).parameters)
+    assert set(captured) <= dump_params, set(captured) - dump_params
+    assert captured["sources"] == tree and captured["_resolved_collect_mode"] == "source-target"
     # The resolved compile context is frozen and handed to dump verbatim (so dump
     # does not re-resolve / re-discover the tree's config) — Codex review.
     frozen = captured["_resolved_compile_context"]

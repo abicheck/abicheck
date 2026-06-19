@@ -291,16 +291,16 @@ rather than producing a compare verdict:
 abicheck surface-report libfoo.so -H include/ --idioms --anti-patterns
 
 # Diff two L5 source-graph summaries (from `collect --source-graph`)
-abicheck compare-graph old-pack/ new-pack/
+abicheck graph compare old-pack/ new-pack/
 
 # Localize a compare finding through the L5 source graph (which TU/include chain)
-abicheck explain-finding --report report.json --finding-id <id> --sources new-pack/
+abicheck graph explain --report report.json --finding-id <id> --sources new-pack/
 ```
 
 See [API Surface Intelligence](../concepts/api-surface-intelligence.md) for what
 the surface metrics and idiom recognizers mean, and
 [Build & Source Packs](../concepts/build-source-data.md) for producing the packs
-that `compare-graph` / `explain-finding` consume.
+that `graph compare` / `graph explain` consume.
 
 ### Report filtering and display options
 

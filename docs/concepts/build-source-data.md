@@ -53,12 +53,12 @@ binary symbol / debug type (`SOURCE_DECL_MAPS_TO_SYMBOL`,
 `SOURCE_TYPE_MAPS_TO_DEBUG_TYPE`, `BINARY_EXPORTS_SYMBOL`) — giving the full
 `target → public header → declaration → exported symbol` reachability closure.
 Every node and edge carries provenance and a confidence label. Collect it with
-`--source-graph summary` and compare two summaries with `compare-graph` (below).
+`--source-graph summary` and compare two summaries with `graph compare` (below).
 Deeper layers extend the same graph: approximate Clang call edges
 (`--call-graph`), compile-unit include edges (`--include-graph`), and
 pre-captured Kythe/CodeQL backends (`--kythe-entries`/`--codeql-results`). All
-six graph-derived findings flow through `compare-graph` and the verdict
-pipeline, and `explain-finding` localizes a single finding through the graph.
+six graph-derived findings flow through `graph compare` and the verdict
+pipeline, and `graph explain` localizes a single finding through the graph.
 
 > **Source ABI replay (L4) requires clang** (or castxml for the declaration
 > subset, or a pre-captured Android dump). It is the one tier gated on a C++
@@ -372,9 +372,9 @@ absent):
 Localize a single finding through the graph:
 
 ```bash
-abicheck explain-finding --sources libfoo.evidence/ --symbol _ZN3foo3barEv
+abicheck graph explain --sources libfoo.evidence/ --symbol _ZN3foo3barEv
 # or resolve the symbol from a JSON report:
-abicheck explain-finding --sources libfoo.evidence/ --report report.json --finding-id 0
+abicheck graph explain --sources libfoo.evidence/ --report report.json --finding-id 0
 ```
 
 It reports what produced and reaches the symbol — exporting target, source
@@ -385,8 +385,8 @@ Compare two graph summaries directly — pass either the pack directories or the
 `graph/source_graph_summary.json` files:
 
 ```bash
-abicheck compare-graph old.evidence/ new.evidence/            # structural delta
-abicheck compare-graph old.evidence/ new.evidence/ --format json
+abicheck graph compare old.evidence/ new.evidence/            # structural delta
+abicheck graph compare old.evidence/ new.evidence/ --format json
 ```
 
 The diff is **structural** (which nodes/edges entered or left the graph). Per
@@ -578,7 +578,7 @@ policy profiles decide whether a source-only finding blocks a release.
 ## Source graph findings (L5)
 
 When both packs carry an L5 source graph summary, comparing them (via `compare`
-with `--old/--new-build-info`, or directly with `compare-graph`) produces
+with `--old/--new-build-info`, or directly with `graph compare`) produces
 graph-derived **risk** findings (ADR-031 D6):
 
 | ChangeKind | verdict | meaning |

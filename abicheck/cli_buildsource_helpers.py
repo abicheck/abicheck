@@ -557,7 +557,7 @@ def _echo_capabilities(
             click.echo(f"  [off] {label} — {why_off}", err=True)
 
 
-# ── compare-graph: structural graph-to-graph diff (ADR-031 D6, D8) ────────────
+# ── graph compare: structural graph-to-graph diff (ADR-031 D6, D8) ────────────
 
 
 def _load_source_graph(path: Path) -> SourceGraphSummary:

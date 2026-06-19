@@ -1069,7 +1069,17 @@ def merge_cmd(
     _merge_print_summary(base_path, contributors, len(snaps), combined, output)
 
 
-@main.command("compare-graph")
+@main.group("graph")
+def graph_group() -> None:
+    """L5 source-graph tools (ADR-031): structural diff and finding localization.
+
+    These commands *explain and prioritize* impact through the source→symbol
+    graph; per ADR-028 D3 they never, on their own, decide or suppress an
+    artifact-proven ABI break.
+    """
+
+
+@graph_group.command("compare")
 @click.argument("old", type=click.Path(path_type=Path))
 @click.argument("new", type=click.Path(path_type=Path))
 @click.option(
@@ -1142,7 +1152,7 @@ def compare_graph_cmd(old: Path, new: Path, fmt: str) -> None:
             click.echo(f"  [{c.kind.value}] {c.symbol}: {c.description}")
 
 
-@main.command("explain-finding")
+@graph_group.command("explain")
 @click.option(
     "--sources",
     "sources",
