@@ -47,6 +47,37 @@ def _write_snap(path: Path, snap: AbiSnapshot) -> Path:
     return path
 
 
+def test_source_is_pack_detects_manifest(tmp_path: Path) -> None:
+    """A `collect` pack (manifest.json present) is distinguished from a raw tree."""
+    from abicheck.cli import _source_is_pack
+
+    tree = tmp_path / "checkout"
+    tree.mkdir()
+    (tree / "main.c").write_text("int main(void){return 0;}\n")
+    assert not _source_is_pack(tree)
+
+    pack = tmp_path / "pack"
+    pack.mkdir()
+    (pack / "manifest.json").write_text("{}")
+    assert _source_is_pack(pack)
+
+
+def test_compare_source_tree_on_snapshot_input_is_ignored(tmp_path: Path) -> None:
+    """A raw --old-sources tree on a snapshot input can't be embedded (you can't
+    re-dump a snapshot), so compare warns and still produces a verdict."""
+    old, new = _breaking_pair()
+    old_f = _write_snap(tmp_path / "old.json", old)
+    new_f = _write_snap(tmp_path / "new.json", new)
+    tree = tmp_path / "src"
+    tree.mkdir()  # no manifest.json → looks like a raw source checkout
+    result = CliRunner().invoke(
+        main, ["compare", str(old_f), str(new_f), "--old-sources", str(tree)]
+    )
+    out = (result.output or "") + (result.stderr or "")
+    assert "ignored" in out, out
+    assert result.exit_code in (0, 2, 4), out
+
+
 def _breaking_pair(lib: str = "libfoo.so") -> tuple[AbiSnapshot, AbiSnapshot]:
     old = _snap("1.0", [
         Function(name="foo", mangled="_Z3foov", return_type="int", visibility=Visibility.PUBLIC),

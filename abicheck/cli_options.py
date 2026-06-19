@@ -882,14 +882,18 @@ def evidence_options(func: F) -> F:
         "new_sources",
         type=pack_dir,
         default=None,
-        help="Out-of-band L4/L5 source pack for the new side (overrides embedded).",
+        help="New-side L4/L5 source: a raw source checkout (collected inline at "
+        "--depth, embedding build/source/graph facts) or a pre-built `collect` "
+        "pack. Overrides embedded.",
     )(func)
     func = click.option(
         "--old-sources",
         "old_sources",
         type=pack_dir,
         default=None,
-        help="Out-of-band L4/L5 source pack for the old side (overrides embedded).",
+        help="Old-side L4/L5 source: a raw source checkout (collected inline at "
+        "--depth, embedding build/source/graph facts) or a pre-built `collect` "
+        "pack. Overrides embedded.",
     )(func)
     func = click.option(
         "--new-build-info",

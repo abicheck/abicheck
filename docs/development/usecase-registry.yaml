@@ -334,9 +334,11 @@ use_cases:
       tests: [tests/test_depth_vocabulary.py, tests/test_cov95_cli.py]
     next_steps: >
       Superseded: the standalone `deep-compare` orchestrator was removed and
-      folded into `compare`, which takes binaries directly with the same
-      `--depth`/`--max`/`--old-sources`/`--new-sources` dial. The text below is
-      retained as historical context for G21.
+      folded into `compare`. `compare old.so new.so --old-sources ./src1
+      --new-sources ./src2 --max` collects L3-L5 inline from each raw source
+      tree (a pre-built `collect` pack is accepted too) and embeds it in the
+      per-side snapshot before comparing — the one-shot deep route, now on
+      `compare`. The text below is retained as historical context for G21.
       Shipped in PR #422: the --depth headers|build|graph|source|full dial
       (--max = --depth full) on dump reusing the scan_levels vocabulary/mapping;
       the one-shot `deep-compare` orchestrator (cli_max.py) that dumps both sides

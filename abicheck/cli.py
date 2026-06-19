@@ -1137,6 +1137,68 @@ def _dispatch_release_compare(ctx: click.Context, **kwargs: Any) -> None:
         _crmod._SILENCE_DEPRECATION = False
 
 
+def _source_is_pack(path: Path) -> bool:
+    """True if *path* is a ``collect``-produced evidence pack (has a manifest.json)
+    rather than a raw source checkout — lets ``compare``'s --old/new-sources accept
+    either form."""
+    return (path / "manifest.json").is_file()
+
+
+def _embed_inline_source_side(
+    ctx: click.Context,
+    *,
+    input_path: Path,
+    sources: Path | None,
+    headers: tuple[Path, ...] | list[Path],
+    includes: tuple[Path, ...] | list[Path],
+    version: str,
+    lang: str,
+    header_backend: str,
+    collect_mode: str,
+    out_dir: Path,
+    label: str,
+) -> tuple[Path, Path | None]:
+    """Resolve one side's ``--sources`` into the input ``compare`` should read.
+
+    A raw source *tree* (no manifest.json) on a native-binary side is dumped
+    inline at *collect_mode* so the L3-L5 build/source/graph facts ride embedded
+    in the snapshot — the one-shot deep-compare workflow, folded into ``compare``
+    (the path the removed ``deep-compare`` command pointed migrators at). Returns
+    ``(input_to_read, pack_sources_to_keep)``: a pre-built ``collect`` pack is
+    left untouched for the embedded-build-source pass; a tree we embed here is
+    consumed (its sources arg becomes ``None``). A snapshot input cannot be
+    re-dumped, so a tree on it is reported ignored.
+    """
+    if sources is None or _source_is_pack(sources):
+        return input_path, sources
+    norm, fmt = _normalize_binary_input(input_path)
+    if fmt is None:
+        click.echo(
+            f"Warning: {label} input {input_path} is a snapshot, not a native "
+            f"binary; the --{label}-sources source tree is ignored (dump the "
+            "binary from its tree to embed deeper evidence).",
+            err=True,
+        )
+        return input_path, None
+    # A raw tree is an explicit request to collect from source; make sure the
+    # depth actually collects it even when no --depth/--max was given.
+    effective = collect_mode if collect_mode != "off" else "source-target"
+    out = out_dir / f"{label}.abi.json"
+    ctx.invoke(
+        dump_cmd,
+        so_path=norm,
+        headers=tuple(headers),
+        includes=tuple(includes),
+        version=version,
+        lang=lang,
+        header_backend=header_backend,
+        sources=sources,
+        collect_mode=effective,
+        output=out,
+    )
+    return out, None
+
+
 @main.command("compare")
 @click.argument("old_input", type=click.Path(exists=True, path_type=Path))
 @click.argument("new_input", type=click.Path(exists=True, path_type=Path))
@@ -1591,6 +1653,31 @@ def compare_cmd(
         old_inc = list(old_inc) + list(config_includes)
         new_inc = list(new_inc) + list(config_includes)
 
+    # Inline source-tree collection (deep-compare folded into compare): when a
+    # side's --old/new-sources points at a raw checkout (not a `collect` pack),
+    # dump that side at --depth so its L3-L5 facts ride embedded in the snapshot,
+    # the way the standalone deep-compare command used to. Pre-built packs fall
+    # through unchanged to prepare_embedded_build_source below.
+    _src_tmp: str | None = None
+    if (old_sources and not _source_is_pack(old_sources)) or (
+        new_sources and not _source_is_pack(new_sources)
+    ):
+        import tempfile
+
+        _src_tmp = tempfile.mkdtemp(prefix="abicheck-compare-src-")
+        old_input, old_sources = _embed_inline_source_side(
+            ctx, input_path=old_input, sources=old_sources,
+            headers=old_h, includes=old_inc, version=old_version, lang=lang,
+            header_backend=old_header_backend or header_backend,
+            collect_mode=collect_mode, out_dir=Path(_src_tmp), label="old",
+        )
+        new_input, new_sources = _embed_inline_source_side(
+            ctx, input_path=new_input, sources=new_sources,
+            headers=new_h, includes=new_inc, version=new_version, lang=lang,
+            header_backend=new_header_backend or header_backend,
+            collect_mode=collect_mode, out_dir=Path(_src_tmp), label="new",
+        )
+
     # Follow GNU ld linker scripts up front so the resolved DSO (not the text
     # script) drives format detection, metadata, and dependency analysis.
     old_input, old_fmt = _normalize_binary_input(old_input)
@@ -1634,6 +1721,11 @@ def compare_cmd(
         new_header_backend=new_header_backend,
         compile_context=side_compile_context,
     )
+    # The embedded snapshots are now loaded into `old`/`new`; drop the temp dir.
+    if _src_tmp is not None:
+        import shutil
+
+        shutil.rmtree(_src_tmp, ignore_errors=True)
 
     suppression, pf = _load_suppression_and_policy(
         suppress, policy, policy_file_path,
