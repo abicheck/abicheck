@@ -338,8 +338,213 @@ def test_cli_estimate_json(runner: CliRunner, snap_path: Path) -> None:
     assert "total_est_seconds" in payload
 
 
+def test_estimate_pr_deep_preserves_graph_full_depth(
+    runner: CliRunner, snap_path: Path
+) -> None:
+    # pr-deep pins (s5, graph) = graph-full; the CLI estimate must not collapse it
+    # to source-changed by re-resolving the round-tripped flags under the
+    # source-method > depth precedence (Codex review).
+    res = runner.invoke(
+        main, ["scan", "--estimate", "--mode", "pr-deep", "--binary", str(snap_path)]
+    )
+    assert res.exit_code == 0, res.output
+    assert "graph-full" in res.output
+    assert "source-changed replay scope" not in res.output
+
+
+def test_count_bazel_build_info_tus_branches(monkeypatch, tmp_path: Path) -> None:
+    # Cover the helper's branches directly: non-file, non-Bazel (compile DB array),
+    # the cquery route, and the best-effort guard that swallows any adapter/sniff
+    # failure into None so the estimate never raises (Codex review).
+    from abicheck.service_scan import _count_bazel_build_info_tus
+
+    assert _count_bazel_build_info_tus(tmp_path / "nope.json") is None
+
+    cdb = tmp_path / "compile_commands.json"
+    cdb.write_text(
+        json.dumps(
+            [{"file": "a.c", "command": "cc -c a.c", "directory": str(tmp_path)}]
+        ),
+        encoding="utf-8",
+    )
+    assert _count_bazel_build_info_tus(cdb) is None  # not Bazel → compile-DB path
+
+    cq = tmp_path / "cq.json"
+    cq.write_text(
+        json.dumps({"results": [{"target": {"rule": {"name": "//foo:foo"}}}]}),
+        encoding="utf-8",
+    )
+    assert _count_bazel_build_info_tus(cq) == 0  # cquery route, no compile actions
+
+    def _boom(_p):
+        raise RuntimeError("adapter blew up")
+
+    monkeypatch.setattr(
+        "abicheck.buildsource.inline.sniff_build_info_format", _boom
+    )
+    assert _count_bazel_build_info_tus(cq) is None  # guard swallows the failure
+
+
+def test_estimate_counts_bazel_build_info_tus(snap_path: Path, tmp_path: Path) -> None:
+    # A Bazel aquery --build-info is replayed via BazelAdapter by the real scan, so
+    # the estimate must count its compile actions instead of routing the JSON object
+    # through the compile-DB counter and reporting 0 TUs (Codex review).
+    from abicheck.service_scan import estimate_scan
+
+    aquery = tmp_path / "aq.json"
+    aquery.write_text(
+        json.dumps(
+            {
+                "artifacts": [
+                    {"id": "1", "pathFragmentId": "10"},
+                    {"id": "2", "pathFragmentId": "11"},
+                ],
+                "actions": [
+                    {
+                        "targetId": "100",
+                        "mnemonic": "CppCompile",
+                        "arguments": ["/usr/bin/gcc", "-std=c++17", "-c", "foo/foo.cc"],
+                        "primaryOutputId": "2",
+                    }
+                ],
+                "targets": [{"id": "100", "label": "//foo:foo"}],
+                "pathFragments": [
+                    {"id": "10", "label": "foo.cc", "parentId": "20"},
+                    {"id": "11", "label": "foo.o", "parentId": "20"},
+                    {"id": "20", "label": "foo"},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    est = estimate_scan(
+        ScanRequest(
+            binaries=[snap_path], build_info=aquery, depth="source", mode="audit"
+        )
+    )
+    l3 = next(e for e in est if e.layer == "L3_build")
+    assert l3.tus >= 1  # the CppCompile action counted, not 0
+    assert any("Bazel" in e.note for e in est)
+
+
+def test_estimate_compile_db_overrides_bazel_build_info(
+    snap_path: Path, tmp_path: Path
+) -> None:
+    # When both --compile-db and a Bazel --build-info are given, the real scan uses
+    # `req.compile_db or req.build_info` (compile DB wins); the estimate must mirror
+    # that and count the compile DB's TUs, not the Bazel action graph (Codex review).
+    from abicheck.service_scan import estimate_scan
+
+    cdb = tmp_path / "compile_commands.json"
+    cdb.write_text(
+        json.dumps(
+            [
+                {"file": "a.c", "command": "cc -c a.c", "directory": str(tmp_path)},
+                {"file": "b.c", "command": "cc -c b.c", "directory": str(tmp_path)},
+            ]
+        ),
+        encoding="utf-8",
+    )
+    aq = tmp_path / "aq.json"  # a Bazel aquery with a single CppCompile (1 TU)
+    aq.write_text(
+        json.dumps(
+            {
+                "artifacts": [{"id": "2", "pathFragmentId": "11"}],
+                "actions": [
+                    {
+                        "targetId": "100",
+                        "mnemonic": "CppCompile",
+                        "arguments": ["/usr/bin/gcc", "-c", "foo/foo.cc"],
+                        "primaryOutputId": "2",
+                    }
+                ],
+                "targets": [{"id": "100", "label": "//foo:foo"}],
+                "pathFragments": [
+                    {"id": "11", "label": "foo.o", "parentId": "20"},
+                    {"id": "20", "label": "foo"},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    est = estimate_scan(
+        ScanRequest(
+            binaries=[snap_path],
+            compile_db=cdb,
+            build_info=aq,
+            depth="source",
+            mode="audit",
+        )
+    )
+    l3 = next(e for e in est if e.layer == "L3_build")
+    assert l3.tus == 2  # the 2-TU compile DB, not the 1-action Bazel graph
+    assert not any("Bazel" in e.note for e in est)
+
+
+def test_estimate_binary_depth_suppresses_header_cost(
+    snap_path: Path, header: Path
+) -> None:
+    # The estimate must mirror the real scan: --depth binary suppresses the L2
+    # header AST, so the embedded ScanResult.estimate (and any direct caller) must
+    # not price an L2_header layer for suppressed headers (Codex review).
+    from abicheck.service_scan import estimate_scan
+
+    binary = estimate_scan(
+        ScanRequest(binaries=[snap_path], depth="binary", headers=[header], mode="audit")
+    )
+    l2 = next(e for e in binary if e.layer == "L2_header")
+    assert l2.tus == 0
+    assert l2.est_seconds == 0.0
+    # Control: a --depth headers scan with the same header DOES price the L2 layer.
+    headers_depth = estimate_scan(
+        ScanRequest(
+            binaries=[snap_path], depth="headers", headers=[header], mode="audit"
+        )
+    )
+    l2b = next(e for e in headers_depth if e.layer == "L2_header")
+    assert l2b.tus >= 1
+
+
+def test_estimate_scan_honors_resolved_level(snap_path: Path) -> None:
+    # estimate_scan honors a caller-supplied resolved (method, depth) verbatim: the
+    # (s5, graph) pr-deep pair stays graph-full, whereas re-resolving the same req
+    # applies precedence and collapses to source-changed (Codex review).
+    from abicheck.buildsource.scan_levels import EvidenceDepth, SourceMethod
+    from abicheck.service_scan import estimate_scan
+
+    req = ScanRequest(
+        binaries=[snap_path], mode="pr-deep", source_method="s5", depth="graph"
+    )
+    reresolved = " ".join(e.note for e in estimate_scan(req))
+    pinned = " ".join(
+        e.note
+        for e in estimate_scan(req, resolved_level=(SourceMethod.S5, EvidenceDepth.GRAPH))
+    )
+    assert "source-changed" in reresolved  # the round-trip hazard this guards
+    assert "graph-full" in pinned
+    assert "source-changed" not in pinned
+
+
+def _minimal_compile_db(tmp_path: Path) -> Path:
+    """A minimal compile_commands.json (L3 build metadata; pure parsing).
+
+    Supplies source evidence so a pinned deep --source-method does not trip
+    auto-strict (ADR-037 D5: a pinned depth with no source input errors).
+    """
+    src = tmp_path / "u.c"
+    src.write_text("int u(void){return 0;}\n", encoding="utf-8")
+    cdb = tmp_path / "compile_commands.json"
+    cdb.write_text(
+        json.dumps(
+            [{"directory": str(tmp_path), "file": str(src), "command": "cc -c u.c"}]
+        ),
+        encoding="utf-8",
+    )
+    return cdb
+
+
 def test_replay_seed_empty_without_diff_seed(
-    monkeypatch, runner: CliRunner, snap_path: Path, header: Path
+    monkeypatch, runner: CliRunner, snap_path: Path, header: Path, tmp_path: Path
 ) -> None:
     # No --since/--changed-path → broad scope. Pattern-trigger POIs must NOT
     # narrow the replay seed (would skip source-only checks in other TUs) — the
@@ -364,14 +569,16 @@ def test_replay_seed_empty_without_diff_seed(
             str(header),
             "--source-method",
             "s5",
+            "--build-info",
+            str(_minimal_compile_db(tmp_path)),
         ],
     )
-    assert res.exit_code == 0
+    assert res.exit_code == 0, res.output
     assert captured["changed_paths"] == ()
 
 
 def test_replay_seed_used_when_changed_path_given(
-    monkeypatch, runner: CliRunner, snap_path: Path, header: Path
+    monkeypatch, runner: CliRunner, snap_path: Path, header: Path, tmp_path: Path
 ) -> None:
     # An explicit --changed-path is a real diff seed → the POI floor feeds the
     # replay scope.
@@ -395,11 +602,13 @@ def test_replay_seed_used_when_changed_path_given(
             str(header),
             "--source-method",
             "s5",
+            "--build-info",
+            str(_minimal_compile_db(tmp_path)),
             "--changed-path",
             "src/a.cpp",
         ],
     )
-    assert res.exit_code == 0
+    assert res.exit_code == 0, res.output
     assert "src/a.cpp" in (captured["changed_paths"] or ())
 
 
@@ -508,3 +717,97 @@ def test_run_scan_confidence_matrix_present(snap_path: Path) -> None:
     # The provider-agreement matrix is populated for run checks.
     assert isinstance(res.confidence, dict)
     assert "exported_not_public" in res.confidence
+
+
+def test_run_scan_pinned_depth_without_evidence_is_contract_error(snap_path: Path) -> None:
+    # ADR-037 D5 auto-strict applies to the programmatic API too: a pinned deep
+    # depth with no source input maps to a failed ScanResult (not a silent shallow
+    # scan), mirroring the CLI (CodeRabbit/Codex review).
+    from abicheck.service import run_scan
+
+    res = run_scan(ScanRequest(binaries=[snap_path], depth="source"))
+    assert res.exit_code == 1
+    assert res.verdict == "EVIDENCE_CONTRACT_ERROR"
+
+
+def test_run_scan_auto_default_without_evidence_is_best_effort(snap_path: Path) -> None:
+    # The unpinned default never trips the contract — best-effort binary scan.
+    from abicheck.service import run_scan
+
+    res = run_scan(ScanRequest(binaries=[snap_path], mode="audit"))
+    assert res.verdict != "EVIDENCE_CONTRACT_ERROR"
+
+
+def test_run_scan_binary_depth_suppresses_headers(
+    monkeypatch, snap_path: Path, header: Path
+) -> None:
+    # Codex P2: a programmatic ScanRequest(depth="binary", headers=[...]) must not
+    # parse the L2 header AST — the service mirrors the CLI's `--depth binary`
+    # header suppression so the collected evidence matches the reported depth.
+    import abicheck.cli_scan as cs
+    from abicheck.service import run_scan
+
+    captured: dict[str, object] = {}
+    original = cs.run_scan_core
+
+    def _spy(*args, **kwargs):
+        captured["headers"] = kwargs.get("headers")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(cs, "run_scan_core", _spy)
+    res = run_scan(
+        ScanRequest(
+            binaries=[snap_path],
+            depth="binary",
+            headers=[header],
+            mode="audit",
+        )
+    )
+    assert res.verdict != "EVIDENCE_CONTRACT_ERROR"
+    # Headers were dropped before reaching the core — no L2 header parse.
+    assert captured["headers"] == []
+
+
+def test_run_scan_source_method_overrides_binary_keeps_headers(
+    monkeypatch, snap_path: Path, header: Path
+) -> None:
+    # Service parity with the CLI (Codex review): --source-method wins over --depth,
+    # so source_method="s5" + depth="binary" resolves to a SOURCE scan that keeps
+    # the header AST — suppression keys on the *resolved* depth, not the raw one.
+    import abicheck.cli_scan as cs
+    from abicheck.service import run_scan
+
+    captured: dict[str, object] = {}
+    original = cs.run_scan_core
+
+    def _spy(*args, **kwargs):
+        captured["headers"] = kwargs.get("headers")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(cs, "run_scan_core", _spy)
+    # s5 with no compile DB → pinned-depth contract error, but run_scan_core still
+    # receives the (un-suppressed) headers.
+    run_scan(
+        ScanRequest(
+            binaries=[snap_path],
+            source_method="s5",
+            depth="binary",
+            headers=[header],
+            mode="audit",
+        )
+    )
+    assert captured["headers"] == [header]
+
+
+def test_service_accepts_symbols_depth_alias(snap_path: Path) -> None:
+    # The deprecated `symbols` depth spelling must not crash the programmatic API
+    # (it's only normalized by the CLI DEPTH_PARAM otherwise) — Codex review.
+    from abicheck.service import run_scan
+    from abicheck.service_scan import estimate_scan
+
+    # estimate_scan + run_scan both construct EvidenceDepth from req.depth.
+    est = estimate_scan(ScanRequest(binaries=[snap_path], depth="symbols"))
+    assert est  # non-empty cost estimate, no ValueError
+    res = run_scan(ScanRequest(binaries=[snap_path], depth="symbols", mode="audit"))
+    # `symbols`→`binary` is L0/L1 only (collect_mode off) → no contract error.
+    assert res.verdict != "EVIDENCE_CONTRACT_ERROR"

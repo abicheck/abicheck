@@ -511,9 +511,16 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
     collect_mode = resolve_dump_depth(
         depth, max_depth, collect_mode, collect_mode_explicit,
     )
-    # --depth symbols suppresses the L2 header AST (symbols-only dump, ADR-037 D5).
-    if depth == "symbols":
+    # --depth binary suppresses the L2 header AST (symbols-only dump, ADR-037 D5;
+    # the `symbols` alias is normalized to `binary` by DEPTH_PARAM). A compile DB
+    # only feeds the header parse, so discard it with the headers — otherwise
+    # resolve_dump_compile_db would reject the now-headerless invocation even though
+    # the user did supply headers, blocking the switch to the fast binary rung
+    # (Codex review).
+    if depth == "binary":
         headers = ()
+        compile_db_path = None
+        compile_db_path_alt = None
 
     # An *explicitly* requested deep evidence depth (--depth/--max or an explicit
     # --collect-mode) collects nothing without a source tree / build context:
@@ -1495,7 +1502,7 @@ def compare_cmd(
 
     # Fold the unified --depth/--max dial into the underlying collect mode
     # (ADR-037 D5), the same way `dump`/`deep-compare` do. The hidden
-    # --collect-mode alias still works but warns; --depth symbols suppresses the
+    # --collect-mode alias still works but warns; --depth binary suppresses the
     # L2 header AST (symbols-only).
     collect_mode_explicit = (
         click.get_current_context().get_parameter_source("collect_mode")
@@ -1507,7 +1514,7 @@ def compare_cmd(
             err=True,
         )
     collect_mode = resolve_dump_depth(depth, max_depth, collect_mode, collect_mode_explicit)
-    if depth == "symbols":
+    if depth == "binary":
         headers, old_headers_only, new_headers_only = (), (), ()
 
     # Reconcile the --debug-format selector with the legacy --btf/--ctf/--dwarf

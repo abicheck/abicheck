@@ -40,6 +40,7 @@ the artifact tiers (L0/L1/L2) stay authoritative.
 from __future__ import annotations
 
 import datetime as _dt
+import json
 import os
 import shlex
 import subprocess
@@ -520,6 +521,10 @@ def collect_inline_pack(
 
     if merged.compile_units:
         compile_db = None  # already seeded from a build-info pack
+    elif _maybe_collect_bazel_build_info(build_info, merged, extractors):
+        # A pre-captured Bazel aquery/cquery jsonproto produces BuildEvidence
+        # directly (no compile_commands.json to load) — ADR-037 D5 #5 sniffing.
+        compile_db = None
     else:
         compile_db = _resolve_compile_db(
             build_info,
@@ -712,6 +717,103 @@ def _compile_db_at(path: Path) -> Path | None:
             if candidate.is_file():
                 return candidate
     return None
+
+
+#: How many bytes to sniff from the head of a ``--build-info`` file when
+#: classifying its format (ADR-037 D5 #5). Enough to see the top-level JSON
+#: shape + the first discriminating key without reading a huge aquery dump.
+_BUILD_INFO_SNIFF_BYTES = 65536
+
+
+def sniff_build_info_format(path: Path) -> str:
+    """Classify a ``--build-info`` path by content (ADR-037 D5 #5).
+
+    Returns one of ``"pack"`` (a ``collect`` pack dir), ``"build_dir"`` (a
+    directory to search for ``compile_commands.json``), ``"compile_db"`` (a
+    Clang/CMake ``compile_commands.json`` — a JSON *array*), ``"bazel_aquery"`` /
+    ``"bazel_cquery"`` (Bazel ``--output=jsonproto`` — a JSON *object* keyed by
+    ``actions`` / ``results``), or ``"unknown"``. Lets a Bazel query result and a
+    pack "just work" when passed to ``--build-info`` instead of being mis-parsed
+    as a compile DB. The top-level shape is read from a bounded head (``[`` = a
+    compile-DB array); a ``{`` object is fully parsed so a large aquery preamble
+    can't hide the discriminating key (Codex review). Never executes anything.
+    """
+    if path.is_dir():
+        return "pack" if is_pack_dir(path) else "build_dir"
+    try:
+        with open(path, "rb") as f:
+            head = f.read(_BUILD_INFO_SNIFF_BYTES)
+    except OSError:
+        return "unknown"
+    text = head.decode("utf-8", "replace").lstrip()
+    if not text:
+        return "unknown"
+    if text[0] == "[":
+        return "compile_db"  # compile_commands.json is a top-level JSON array
+    if text[0] != "{":
+        return "unknown"
+    # A JSON object: a Bazel jsonproto (aquery→"actions", cquery→"results") or an
+    # object-wrapped compile DB. The discriminating key can sit far past the sniff
+    # window in a large aquery dump (long artifacts/pathFragments preamble), so
+    # parse the whole object to classify by key, not a bounded prefix (Codex).
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        # Truncated / not-quite-JSON: fall back to the bounded-prefix heuristic.
+        if '"actions"' in text:
+            return "bazel_aquery"
+        if '"results"' in text:
+            return "bazel_cquery"
+        return "unknown"
+    if isinstance(data, dict):
+        if "actions" in data:
+            return "bazel_aquery"
+        if "results" in data:
+            return "bazel_cquery"
+        if any(k in data for k in ("file", "command", "arguments")):
+            return "compile_db"
+    return "unknown"
+
+
+def _maybe_collect_bazel_build_info(
+    build_info: Path | None,
+    merged: BuildEvidence,
+    extractors: list[ExtractorRecord],
+) -> bool:
+    """Route a pre-captured Bazel aquery/cquery ``--build-info`` to the adapter.
+
+    Returns ``True`` (and merges the normalized :class:`BuildEvidence` into
+    *merged*) when *build_info* is a Bazel jsonproto file, else ``False`` so the
+    caller falls back to compile-DB resolution. Pre-captured only — the adapter is
+    constructed with ``allow_query=False`` so no ``bazel`` subprocess ever runs.
+    """
+    if build_info is None or not build_info.is_file():
+        return False
+    fmt = sniff_build_info_format(build_info)
+    if fmt not in ("bazel_aquery", "bazel_cquery"):
+        return False
+    from .adapters.bazel import BazelAdapter
+
+    if fmt == "bazel_aquery":
+        kind = "aquery"
+        adapter = BazelAdapter(aquery=build_info, allow_query=False)
+    else:
+        kind = "cquery"
+        adapter = BazelAdapter(cquery=build_info, allow_query=False)
+    ev = adapter.collect()
+    merged.merge(ev)
+    extractors.append(
+        ExtractorRecord(
+            name="bazel",
+            status="present" if ev.compile_units else "partial",
+            detail=(
+                f"pre-captured {kind} jsonproto from --build-info, "
+                f"{len(ev.compile_units)} compile unit(s)"
+            ),
+        )
+    )
+    return True
 
 
 def _autodiscover_compile_db(source_tree: Path | None) -> Path | None:

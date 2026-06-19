@@ -11,13 +11,30 @@ the changed paths, runs the always-on compiler-free pattern pre-scan, then runs 
     for the mental model first — this page is the practical flag reference and the
     [worked examples](#worked-examples) below.
 
-Two orthogonal knobs select how deep it goes (`abicheck/buildsource/scan_levels.py`):
+**One dial selects how deep it goes — `--depth`, named by the evidence you get:**
 
-- **`--source-method s0…s6`** — the precise S-axis (the *how*). Deterministic.
-- **`--depth headers|build|source|full|graph`** — a coarse, lossy L-axis. The
-  `--source-method` wins if both are given.
-- **`--mode pr|pr-deep|baseline|audit`** — a fixed `(S, L)` preset (the default
-  is `pr`). A pinned mode produces the same scan for the same inputs.
+- **`--depth binary|headers|build|source|full`** — the single knob (ADR-037 D5).
+  `binary` = L0/L1 exported symbols + binary metadata; `headers` = +L2 header AST;
+  `build` = +L3 build context; `source` = +L4 replay & the L5 graph; `full` =
+  deepest (whole-library replay). **Omit it for `auto`** — the default: risk-driven
+  when a `--since`/`--changed-path` seed is present, else a sensible preset.
+- **`--audit`** is orthogonal: a single-build, no-baseline hygiene lint (it does
+  not need a previous version).
+
+!!! warning "A pinned depth is a contract (fail-loud)"
+    Pinning a deep depth (`--depth build|source|full`) with **no source input**
+    (`--sources`/`--build-info`) is an error, not a silent shallow scan: there is
+    nothing to collect L3/L4/L5 from. Pass the evidence, or use the default `auto`
+    for a best-effort binary scan. (The `auto` default never errors this way.)
+
+??? note "Expert axes (`--source-method`, `--mode`) — deprecated aliases"
+    The precise **S-axis** (`--source-method s0…s6`, the technique) and the
+    **`--mode pr|pr-deep|baseline|audit`** presets still work but are now hidden,
+    **deprecated** aliases (they warn and map onto `--depth`) for one release.
+    Prefer `--depth`. The `s0…s6` / `L0…L5` model is still the spine — see
+    [Scan Levels (S vs L)](../concepts/scan-and-evidence-levels.md) for the mental
+    model; `--depth` is its friendly façade. (`--depth symbols` was renamed to
+    `--depth binary`; `symbols` keeps working as a warned alias.)
 
 ## What each level reaches
 
@@ -43,7 +60,7 @@ matches your goal, then supply the input named in column 3.
 
 | Goal (use case) | Level | Input you must provide | How to obtain it | If the input is missing |
 |---|---|---|---|---|
-| Binary-only ABI gate (removed/changed exports; no-DWARF vtable/RTTI size) | `s0` / `--depth symbols` | two `.so` (or `.abi.json`) | release artifacts / conda / `.deb` | always available (L0/L1) |
+| Binary-only ABI gate (removed/changed exports; no-DWARF vtable/RTTI size) | `--depth binary` (`s0`) | two `.so` (or `.abi.json`) | release artifacts / conda / `.deb` | always available (L0/L1) |
 | Header-aware API surface + internal-vs-public scoping + cross-source checks | L2 (intrinsic, with `-H`) | a public-header **directory** + a C/C++ frontend | `-H include/ --public-header-dir include/`; `castxml` **or** `clang` on `PATH` | a lone `-H file.h` does not establish a boundary → provenance/cross-checks stay dormant |
 | Build-flag / toolchain / visibility drift | `s1` / `--depth build` | an L3 compile database | `cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=ON` (configure-only), `meson setup`, `bazel aquery --output=jsonproto`, or `bear -- make`; pass via `--build-info`/`--compile-db` | L3 `not_collected`; the scan advises the exact remedy |
 | Macro-value / include divergence; private/generated-header leaks | `s2` | L3 compile DB + `clang -E` | same as `s1` (the `-E` pass needs the TU's full flag set) | preprocessor tier skipped (coverage row, not a pass) |
@@ -61,12 +78,19 @@ the build graph:
 ```bash
 # CMake (oneTBB, oneDNN, oneCCL, …): configure-only
 cmake -S . -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
-abicheck scan --binary new/libfoo.so -H include/ --build-info build --source-method s5 …
+abicheck scan --binary new/libfoo.so -H include/ --build-info build --depth source …
 
 # Bazel (oneDAL, …): query the action graph (no build)
 bazel aquery 'mnemonic("CppCompile", //...)' --output=jsonproto > aq.json
-abicheck scan --binary new/libonedal_core.so -H include/ --build-info aq.json --source-method s1 …
+abicheck scan --binary new/libonedal_core.so -H include/ --build-info aq.json --depth build …
 ```
+
+!!! tip "`--build-info` auto-detects the format (ADR-037 D5)"
+    `--build-info` sniffs its argument by content, so each kind "just works":
+    a `compile_commands.json` (CMake/Meson/`bear`), a Bazel
+    `--output=jsonproto` **aquery** or **cquery** dump, a build **directory**
+    (searched for `compile_commands.json`), or a `collect` **pack**. A Bazel
+    query result is routed to the Bazel adapter — not mis-read as a compile DB.
 
 !!! note "Generated headers"
     L4 replay re-parses each TU with `clang`. If a TU `#include`s a header that

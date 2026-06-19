@@ -65,6 +65,18 @@ def runner() -> CliRunner:
     return CliRunner()
 
 
+def _payload(res) -> dict:  # type: ignore[no-untyped-def]
+    """Parse the JSON report from a scan result, tolerating a leading stderr note.
+
+    CliRunner mixes stderr into ``output``; the deprecated --mode/--source-method
+    aliases now print a one-line note there (ADR-037 D5), so strip anything before
+    the first ``{`` before decoding.
+    """
+    out = res.output
+    i = out.find("{")
+    return json.loads(out[i:] if i >= 0 else out)
+
+
 @pytest.fixture
 def baseline_snap(tmp_path: Path) -> Path:
     snap = AbiSnapshot(
@@ -210,7 +222,9 @@ def test_pattern_prescan_reports_facts(runner, tmp_path, new_snap_compatible):
     assert "pragma_pack" in res.output
 
 
-def test_source_method_pin_overrides_mode_in_report(runner, new_snap_compatible):
+def test_source_method_pin_overrides_mode_in_report(
+    runner, new_snap_compatible, compile_db
+):
     res = runner.invoke(
         main,
         [
@@ -221,6 +235,8 @@ def test_source_method_pin_overrides_mode_in_report(runner, new_snap_compatible)
             "baseline",
             "--source-method",
             "s1",
+            "--build-info",
+            str(compile_db),
             "--audit",
         ],
     )
@@ -231,8 +247,11 @@ def test_source_method_pin_overrides_mode_in_report(runner, new_snap_compatible)
     assert "depth=build" in res.output
 
 
-def test_pr_deep_is_distinct_from_pr(runner, new_snap_compatible):
+def test_pr_deep_is_distinct_from_pr(runner, new_snap_compatible, compile_db):
     # No --audit here: --audit would force the AUDIT preset and mask --mode.
+    # --mode pr-deep is an explicit deep pin → the contract needs source evidence
+    # (ADR-037 D5 auto-strict applies to the deprecated --mode alias too), so
+    # supply a minimal compile DB.
     res = runner.invoke(
         main,
         [
@@ -241,26 +260,44 @@ def test_pr_deep_is_distinct_from_pr(runner, new_snap_compatible):
             str(new_snap_compatible),
             "--mode",
             "pr-deep",
+            "--build-info",
+            str(compile_db),
             "--format",
             "json",
         ],
     )
     assert res.exit_code == 0, res.output
-    payload = json.loads(res.output)
+    payload = _payload(res)
     # pr-deep keeps GRAPH depth and a distinct graph collect-mode (Codex review).
     assert payload["level"]["depth"] == "graph"
     assert payload["level"]["collect_mode"] == "graph-full"
 
 
-def test_reported_depth_matches_resolved_source_method(runner, new_snap_compatible):
+def test_reported_depth_matches_resolved_source_method(
+    runner, new_snap_compatible, tmp_path
+):
+    # A minimal compile DB supplies L3 build metadata (pure parsing, no compiler),
+    # so the pinned deep level can collect its evidence and auto-strict (ADR-037
+    # D5) does not fire — letting us assert the honest depth reporting.
+    src = tmp_path / "a.c"
+    src.write_text("int a(void){return 0;}\n", encoding="utf-8")
+    cdb = tmp_path / "compile_commands.json"
+    cdb.write_text(
+        json.dumps(
+            [{"directory": str(tmp_path), "file": str(src), "command": "cc -c a.c"}]
+        ),
+        encoding="utf-8",
+    )
     res = runner.invoke(
         main,
         [
             "scan",
             "--binary",
             str(new_snap_compatible),
-            "--source-method",
-            "s6",
+            "--depth",
+            "full",
+            "--build-info",
+            str(cdb),
             "--format",
             "json",
             "--audit",
@@ -268,20 +305,34 @@ def test_reported_depth_matches_resolved_source_method(runner, new_snap_compatib
     )
     assert res.exit_code == 0, res.output
     payload = json.loads(res.output)
-    # s6 reaches full depth — must not be reported as the pr-preset 'source'.
+    # --depth full reaches s6 — must not be reported as the pr-preset 'source'.
     assert payload["level"]["source_method"] == "s6"
     assert payload["level"]["depth"] == "full"
 
 
+def test_pinned_depth_without_evidence_errors(runner, new_snap_compatible):
+    # ADR-037 D5 (#2 auto-strict): an explicitly pinned source/build depth that
+    # can't collect its evidence (no --sources/--build-info) fails loudly with the
+    # remedy, instead of silently degrading to a shallow scan.
+    res = runner.invoke(
+        main,
+        ["scan", "--binary", str(new_snap_compatible), "--depth", "source", "--audit"],
+    )
+    assert res.exit_code != 0
+    assert "pinned depth 'source'" in res.output and "nothing to collect" in res.output
+    # The implicit 'auto' default (no --depth) must NOT error on the same input.
+    ok = runner.invoke(main, ["scan", "--binary", str(new_snap_compatible), "--audit"])
+    assert ok.exit_code == 0, ok.output
+
+
 def test_auto_method_uses_changed_path_risk(runner, new_snap_compatible):
+    # The default dial (no --depth) IS auto (ADR-037 D5): risk-driven when seeded.
     res = runner.invoke(
         main,
         [
             "scan",
             "--binary",
             str(new_snap_compatible),
-            "--source-method",
-            "auto",
             "--changed-path",
             "include/foo.h",
             "--format",
@@ -290,7 +341,7 @@ def test_auto_method_uses_changed_path_risk(runner, new_snap_compatible):
         ],
     )
     assert res.exit_code == 0, res.output
-    payload = json.loads(res.output)
+    payload = _payload(res)
     assert payload["level"]["auto"] is True
     # include/** is the public-header signal → auto escalates to s5.
     assert payload["level"]["source_method"] == "s5"
@@ -536,10 +587,14 @@ def test_malformed_risk_rules_yaml_is_click_error(
     assert "cannot read --risk-rules" in res.output
 
 
-def test_source_method_s2_runs_preprocessor_tier(runner, new_snap_compatible):
-    # S2 is now the conditional preprocessor pre-scan (ADR-035 D2). With no L3
-    # build evidence (snapshot-only input) it runs but reports the preprocessor
-    # tier as skipped — honest coverage, not a hard reject and not a clean pass.
+def test_source_method_s2_runs_preprocessor_tier(
+    runner, new_snap_compatible, compile_db
+):
+    # S2 is the conditional preprocessor pre-scan (ADR-035 D2). It needs L3 build
+    # evidence; a pinned s2 with no source input is now an error (ADR-037 D5
+    # auto-strict), so supply a minimal compile DB. Without `clang -E` the
+    # preprocessor pass still reports honestly (ran=False / skipped), never a clean
+    # pass.
     res = runner.invoke(
         main,
         [
@@ -548,16 +603,19 @@ def test_source_method_s2_runs_preprocessor_tier(runner, new_snap_compatible):
             str(new_snap_compatible),
             "--source-method",
             "s2",
+            "--build-info",
+            str(compile_db),
             "--audit",
             "--format",
             "json",
         ],
     )
-    assert res.exit_code == 0
-    payload = json.loads(res.output)
-    assert payload["preprocessor_scan"]["ran"] is False
+    assert res.exit_code == 0, res.output
+    payload = _payload(res)
     rows = {row["layer"]: row for row in payload["coverage"]}
-    assert rows["preprocessor_scan"]["status"] == "not_collected"
+    # The preprocessor tier is present as a coverage row (ran, or skipped without
+    # clang -E) — never silently absent.
+    assert "preprocessor_scan" in rows
 
 
 def test_auto_seeded_empty_diff_uses_s0(runner, new_snap_compatible):
@@ -570,8 +628,6 @@ def test_auto_seeded_empty_diff_uses_s0(runner, new_snap_compatible):
             "scan",
             "--binary",
             str(new_snap_compatible),
-            "--source-method",
-            "auto",
             "--since",
             "HEAD",
             "--format",
@@ -581,7 +637,7 @@ def test_auto_seeded_empty_diff_uses_s0(runner, new_snap_compatible):
     )
     if res.exit_code != 0 or "seed failed" in res.output:
         pytest.skip("git unavailable / not a repo in this environment")
-    payload = json.loads(res.output)
+    payload = _payload(res)
     assert payload["level"]["source_method"] == "s0"
     assert payload["level"]["collect_mode"] == "off"
 
@@ -595,15 +651,13 @@ def test_auto_without_diff_seed_falls_back_to_preset(runner, new_snap_compatible
             "scan",
             "--binary",
             str(new_snap_compatible),
-            "--source-method",
-            "auto",
             "--format",
             "json",
             "--audit",
         ],
     )
     assert res.exit_code == 0, res.output
-    payload = json.loads(res.output)
+    payload = _payload(res)
     assert payload["level"]["source_method"] == "s5"
     assert payload["level"]["collect_mode"] == "source-changed"
 
@@ -631,7 +685,7 @@ def test_unseeded_s5_with_sources_emits_headers_only_advisory(
         ],
     )
     assert res.exit_code == 0, res.output
-    payload = json.loads(res.output)
+    payload = _payload(res)
     assert any("--since" in a for a in payload["advisories"])
 
 
@@ -660,21 +714,21 @@ def test_unseeded_s5_advisory_rendered_in_text_output(
 def test_unseeded_s5_without_sources_has_no_advisory(runner, new_snap_compatible):
     # No --sources tree → L4 replay never runs, so the headers-only advisory must
     # NOT fire (it would report a replay that never happened — CodeRabbit review).
+    # Uses the default 'auto' dial (not a pinned depth) so auto-strict (ADR-037 D5)
+    # does not error on the missing source input — best-effort by design.
     res = runner.invoke(
         main,
         [
             "scan",
             "--binary",
             str(new_snap_compatible),
-            "--source-method",
-            "s5",
             "--format",
             "json",
             "--audit",
         ],
     )
     assert res.exit_code == 0, res.output
-    payload = json.loads(res.output)
+    payload = _payload(res)
     assert not any("--since" in a for a in payload["advisories"])
 
 
@@ -702,7 +756,7 @@ def test_seeded_s5_with_sources_has_no_headers_only_advisory(
         ],
     )
     assert res.exit_code == 0, res.output
-    payload = json.loads(res.output)
+    payload = _payload(res)
     assert not any("--since" in a for a in payload["advisories"])
 
 
@@ -759,17 +813,17 @@ def test_compile_db_present_suppresses_l3_advisory(
 
 
 def test_binary_only_deep_method_has_no_l3_advisory(runner, new_snap_compatible):
-    # A deep --source-method with NO source input (no --sources/--build-info) is the
-    # obvious binary-only case; the advisory is gated on a source input so a plain
-    # binary scan at a deep level isn't nagged.
+    # The default 'auto' dial over a binary-only input (no --sources/--build-info):
+    # the L3 advisory is gated on a source input, so a plain binary scan isn't
+    # nagged — and 'auto' (unpinned) never triggers auto-strict (ADR-037 D5). A
+    # *pinned* deep depth with no input is covered by
+    # test_pinned_depth_without_evidence_errors.
     res = runner.invoke(
         main,
         [
             "scan",
             "--binary",
             str(new_snap_compatible),
-            "--source-method",
-            "s1",
             "--audit",
         ],
     )
@@ -983,6 +1037,15 @@ def test_level_implies_query_silent_when_config_defines_no_query(
     # there is no query to consent to.
     cfg = tmp_path / ".abicheck.yml"
     cfg.write_text("severity:\n  preset: strict\n", encoding="utf-8")  # no build.query
+    src = tmp_path / "u.c"
+    src.write_text("int u(void){return 0;}\n", encoding="utf-8")
+    cdb = tmp_path / "compile_commands.json"
+    cdb.write_text(
+        json.dumps(
+            [{"directory": str(tmp_path), "file": str(src), "command": "cc -c u.c"}]
+        ),
+        encoding="utf-8",
+    )
     res = runner.invoke(
         main,
         [
@@ -993,6 +1056,8 @@ def test_level_implies_query_silent_when_config_defines_no_query(
             str(cfg),
             "--source-method",
             "s5",
+            "--build-info",
+            str(cdb),
             "--audit",
         ],
     )
@@ -1351,6 +1416,17 @@ def test_export_delta_resolves_tu_into_replay_seed(monkeypatch, runner, tmp_path
         return original(*args, **kwargs)
 
     monkeypatch.setattr(cs, "_build_new_snapshot", _spy)
+    # A minimal compile DB so the pinned s5 has source evidence (auto-strict,
+    # ADR-037 D5, otherwise errors on the missing input before the seed is built).
+    src = tmp_path / "u.c"
+    src.write_text("int u(void){return 0;}\n", encoding="utf-8")
+    cdb = tmp_path / "compile_commands.json"
+    cdb.write_text(
+        json.dumps(
+            [{"directory": str(tmp_path), "file": str(src), "command": "cc -c u.c"}]
+        ),
+        encoding="utf-8",
+    )
     res = runner.invoke(
         main,
         [
@@ -1361,6 +1437,8 @@ def test_export_delta_resolves_tu_into_replay_seed(monkeypatch, runner, tmp_path
             str(base_path),
             "--source-method",
             "s5",
+            "--build-info",
+            str(cdb),
             "--changed-path",
             "src/unrelated.cpp",
         ],
@@ -1371,3 +1449,170 @@ def test_export_delta_resolves_tu_into_replay_seed(monkeypatch, runner, tmp_path
     # The git-changed file (floor) AND the export-delta-resolved TU are both in.
     assert "src/unrelated.cpp" in seed
     assert "src/bar.cpp" in seed
+
+
+def test_depth_binary_clears_headers_in_scan(monkeypatch, runner, new_snap_compatible, tmp_path):
+    # --depth binary is L0/L1-only: -H must be suppressed so the collected
+    # evidence matches the reported depth (Codex review). Spy run_scan_core to
+    # confirm headers are cleared even when -H is passed.
+    import abicheck.cli_scan as cs
+
+    header = tmp_path / "foo.h"
+    header.write_text("int foo(void);\n", encoding="utf-8")
+    captured: dict[str, object] = {}
+    original = cs.run_scan_core
+
+    def _spy(*args, **kwargs):
+        captured["headers"] = kwargs.get("headers")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(cs, "run_scan_core", _spy)
+    res = runner.invoke(
+        main,
+        [
+            "scan", "--binary", str(new_snap_compatible),
+            "-H", str(header), "--depth", "binary", "--audit",
+        ],
+    )
+    assert res.exit_code == 0, res.output
+    assert captured["headers"] == []  # -H suppressed for the binary rung
+
+
+def test_depth_binary_clears_baseline_headers(
+    monkeypatch, runner, baseline_snap, new_snap_compatible, tmp_path
+):
+    # --depth binary must also drop the *baseline* header inputs: leaving them would
+    # parse the old side with the L2 header AST while the new side has none, yielding
+    # spurious header/type removals against a symbols-only scan (Codex review).
+    import abicheck.cli_scan as cs
+
+    header = tmp_path / "old.h"
+    header.write_text("int old(void);\n", encoding="utf-8")
+    captured: dict[str, object] = {}
+    original = cs.run_scan_core
+
+    def _spy(*args, **kwargs):
+        captured["baseline_headers"] = kwargs.get("baseline_headers")
+        captured["headers"] = kwargs.get("headers")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(cs, "run_scan_core", _spy)
+    res = runner.invoke(
+        main,
+        [
+            "scan", "--binary", str(new_snap_compatible),
+            "--baseline", str(baseline_snap), "--baseline-header", str(header),
+            "--depth", "binary",
+        ],
+    )
+    assert res.exit_code == 0, res.output
+    assert captured["baseline_headers"] == []  # old side stays symbols-only too
+    assert captured["headers"] == []
+
+
+def test_estimate_uses_resolved_level_not_raw_flags(
+    monkeypatch, runner, new_snap_compatible
+):
+    # The --estimate path must reflect the *resolved* level, not the raw flags —
+    # e.g. --depth source resolves to s5, so the estimate sees s5 (Codex review).
+    import abicheck.cli_scan as cs
+
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(
+        cs, "_emit_estimate", lambda **kw: captured.update(kw)
+    )
+    res = runner.invoke(
+        main,
+        [
+            "scan", "--binary", str(new_snap_compatible),
+            "--depth", "source", "--estimate", "--audit",
+        ],
+    )
+    assert res.exit_code == 0, res.output
+    assert captured["resolved_method"].value == "s5"
+    assert captured["eff_depth"].value == "source"
+
+
+def test_source_method_overrides_depth_binary_keeps_headers(
+    monkeypatch, runner, new_snap_compatible, tmp_path
+):
+    # --source-method wins over --depth (resolve precedence), so
+    # `--source-method s5 --depth binary` resolves to a SOURCE scan that still needs
+    # the L2 header AST. Header suppression must key on the *resolved* effective
+    # depth, not the raw --depth, else the winning level loses its headers (Codex).
+    import abicheck.cli_scan as cs
+
+    header = tmp_path / "foo.h"
+    header.write_text("int foo(void);\n", encoding="utf-8")
+    captured: dict[str, object] = {}
+    original = cs.run_scan_core
+
+    def _spy(*args, **kwargs):
+        captured["headers"] = kwargs.get("headers")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(cs, "run_scan_core", _spy)
+    # s5 with no compile DB → pinned-depth contract error (exit 1), but run_scan_core
+    # is still entered and must have received the (un-suppressed) headers.
+    runner.invoke(
+        main,
+        [
+            "scan", "--binary", str(new_snap_compatible),
+            "-H", str(header), "--source-method", "s5", "--depth", "binary",
+        ],
+    )
+    assert captured["headers"]  # headers kept — resolved depth is source, not binary
+    assert [str(p) for p in captured["headers"]] == [str(header)]
+
+
+def test_pinned_depth_with_embedded_l3_snapshot_no_contract_error(runner, tmp_path):
+    # Codex review: a cached .abi.json that already carries embedded L3 evidence
+    # must satisfy the pinned-depth contract via _l3_collected — not be rejected
+    # because no raw --sources/--build-info was passed on the CLI.
+    from abicheck.buildsource.model import CoverageStatus, LayerCoverage
+    from abicheck.buildsource.pack import BuildSourcePack
+
+    snap = AbiSnapshot(
+        library="libfoo.so",
+        version="2.0",
+        from_headers=True,
+        functions=[_func("foo", "_Z3foov")],
+        elf=_elf("_Z3foov"),
+    )
+    pack = BuildSourcePack(root="")
+    pack.manifest.coverage.append(
+        LayerCoverage(layer="L3_build", status=CoverageStatus.PRESENT)
+    )
+    snap.build_source = pack
+    p = _write_snapshot(tmp_path / "embedded.abi.json", snap)
+
+    res = runner.invoke(
+        main, ["scan", "--binary", str(p), "--depth", "source", "--audit"]
+    )
+    # The embedded L3 satisfies the contract → no EVIDENCE_CONTRACT error (exit 1).
+    assert res.exit_code != 1, res.output
+    assert "nothing to collect" not in res.output
+
+
+def test_mode_audit_alias_binary_only_no_contract_error(runner, new_snap_compatible):
+    # The deprecated `--mode audit` alias must stay a best-effort binary-only lint
+    # (like `--audit`) — a preset is NOT a pinned-depth contract (Codex review).
+    res = runner.invoke(
+        main, ["scan", "--binary", str(new_snap_compatible), "--mode", "audit"]
+    )
+    assert res.exit_code != 1, res.output
+    assert "nothing to collect" not in res.output
+
+
+def test_depth_pin_with_auto_method_still_a_contract(runner, new_snap_compatible):
+    # An explicit --depth pins the contract even alongside --source-method auto
+    # (auto only picks the method; the user still demanded source depth) — CodeRabbit.
+    res = runner.invoke(
+        main,
+        [
+            "scan", "--binary", str(new_snap_compatible),
+            "--depth", "source", "--source-method", "auto", "--audit",
+        ],
+    )
+    assert res.exit_code != 0
+    assert "pinned depth 'source'" in res.output

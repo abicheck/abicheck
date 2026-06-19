@@ -82,10 +82,12 @@ class DepthParam(click.ParamType):
             return v
         if v in DEPRECATED_DEPTHS:
             replacement = DEPRECATED_DEPTHS[v].value
+            # Generic note covering every deprecated rung (graph→source, the L5
+            # graph is built internally at --depth source; symbols→binary, the
+            # evidence-named rung — G22 Phase 6).
             click.echo(
-                f"warning: --depth {v} is deprecated (ADR-037 D6); use "
-                f"--depth {replacement}. The L5 graph is built automatically at "
-                "--depth source.",
+                f"warning: --depth {v} is deprecated (ADR-037 D5/D6); use "
+                f"--depth {replacement}.",
                 err=True,
             )
             return replacement
