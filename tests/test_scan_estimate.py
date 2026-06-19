@@ -352,6 +352,30 @@ def test_estimate_pr_deep_preserves_graph_full_depth(
     assert "source-changed replay scope" not in res.output
 
 
+def test_estimate_binary_depth_suppresses_header_cost(
+    snap_path: Path, header: Path
+) -> None:
+    # The estimate must mirror the real scan: --depth binary suppresses the L2
+    # header AST, so the embedded ScanResult.estimate (and any direct caller) must
+    # not price an L2_header layer for suppressed headers (Codex review).
+    from abicheck.service_scan import estimate_scan
+
+    binary = estimate_scan(
+        ScanRequest(binaries=[snap_path], depth="binary", headers=[header], mode="audit")
+    )
+    l2 = next(e for e in binary if e.layer == "L2_header")
+    assert l2.tus == 0
+    assert l2.est_seconds == 0.0
+    # Control: a --depth headers scan with the same header DOES price the L2 layer.
+    headers_depth = estimate_scan(
+        ScanRequest(
+            binaries=[snap_path], depth="headers", headers=[header], mode="audit"
+        )
+    )
+    l2b = next(e for e in headers_depth if e.layer == "L2_header")
+    assert l2b.tus >= 1
+
+
 def test_estimate_scan_honors_resolved_level(snap_path: Path) -> None:
     # estimate_scan honors a caller-supplied resolved (method, depth) verbatim: the
     # (s5, graph) pr-deep pair stays graph-full, whereas re-resolving the same req

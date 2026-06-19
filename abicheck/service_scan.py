@@ -445,7 +445,12 @@ def estimate_scan(
         total_tus = 0
         tu_note = "no source tree / compile DB"
 
-    n_headers = len(expand_header_inputs(list(req.headers))) if req.headers else 0
+    # --depth binary is symbols-only: the real scan suppresses the L2 header AST, so
+    # the estimate must not price an L2_header layer for headers that won't be parsed
+    # — else a programmatic caller's `ScanResult.estimate` plans a different cost than
+    # what executes (Codex review). Keyed on the resolved effective depth.
+    eff_req_headers = [] if eff_depth is EvidenceDepth.BINARY else list(req.headers)
+    n_headers = len(expand_header_inputs(eff_req_headers)) if eff_req_headers else 0
     # The L4 replay scope: a changed-only collection touches at most the changed
     # *source* TUs (POI-focused, D7); a full/target scope touches every TU. The
     # budget's max_tus is a documented cap (never shrinks scope silently — it

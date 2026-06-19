@@ -892,6 +892,11 @@ def scan_cmd(
     # headers (Codex review).
     if eff_depth_enum is EvidenceDepth.BINARY:
         headers = ()
+        # Also drop the *baseline* header inputs: leaving them would make
+        # _run_baseline_compare parse the old side with the L2 header AST while the
+        # new side has none, yielding spurious header/type removals against a
+        # symbols-only scan (Codex review). Include dirs are harmless (no AST).
+        baseline_header = ()
     effective_build_info = compile_db or build_info
 
     # --- --estimate: dry-run cost probe, scan nothing (ADR-035 D10) -----------

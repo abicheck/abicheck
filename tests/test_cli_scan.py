@@ -1478,6 +1478,38 @@ def test_depth_binary_clears_headers_in_scan(monkeypatch, runner, new_snap_compa
     assert captured["headers"] == []  # -H suppressed for the binary rung
 
 
+def test_depth_binary_clears_baseline_headers(
+    monkeypatch, runner, baseline_snap, new_snap_compatible, tmp_path
+):
+    # --depth binary must also drop the *baseline* header inputs: leaving them would
+    # parse the old side with the L2 header AST while the new side has none, yielding
+    # spurious header/type removals against a symbols-only scan (Codex review).
+    import abicheck.cli_scan as cs
+
+    header = tmp_path / "old.h"
+    header.write_text("int old(void);\n", encoding="utf-8")
+    captured: dict[str, object] = {}
+    original = cs.run_scan_core
+
+    def _spy(*args, **kwargs):
+        captured["baseline_headers"] = kwargs.get("baseline_headers")
+        captured["headers"] = kwargs.get("headers")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(cs, "run_scan_core", _spy)
+    res = runner.invoke(
+        main,
+        [
+            "scan", "--binary", str(new_snap_compatible),
+            "--baseline", str(baseline_snap), "--baseline-header", str(header),
+            "--depth", "binary",
+        ],
+    )
+    assert res.exit_code == 0, res.output
+    assert captured["baseline_headers"] == []  # old side stays symbols-only too
+    assert captured["headers"] == []
+
+
 def test_estimate_uses_resolved_level_not_raw_flags(
     monkeypatch, runner, new_snap_compatible
 ):
