@@ -1156,6 +1156,9 @@ def _embed_inline_source_side(
     header_backend: str,
     compile_context: object,
     build_config: Path | None,
+    follow_deps: bool,
+    search_paths: tuple[Path, ...],
+    ld_library_path: str,
     collect_mode: str,
     out_dir: Path,
     label: str,
@@ -1176,7 +1179,10 @@ def _embed_inline_source_side(
     ``--gcc-*``/``--sysroot``/``--nostdinc`` knobs) and *build_config* the
     ``--config`` path; both are forwarded so the inline dump parses this side's
     headers with the same toolchain a plain ``compare``/``dump`` would, instead
-    of the default context.
+    of the default context. ``follow_deps``/``search_paths``/``ld_library_path``
+    are forwarded too so the embedded snapshot carries the same dependency graph
+    a native ``compare --follow-deps`` would — without them the dependency
+    analysis would be silently lost once the side is replaced by a snapshot.
     """
     if sources is None or _source_is_pack(sources):
         return input_path, sources
@@ -1219,6 +1225,9 @@ def _embed_inline_source_side(
         sysroot=cc.sysroot,  # type: ignore[attr-defined]
         nostdinc=cc.nostdinc,  # type: ignore[attr-defined]
         build_config=build_config,
+        follow_deps=follow_deps,
+        search_paths=search_paths,
+        ld_library_path=ld_library_path,
         sources=sources,
         collect_mode=collect_mode,
         output=out,
@@ -1700,6 +1709,8 @@ def compare_cmd(
             headers=old_h, includes=old_inc, version=old_version, lang=lang,
             header_backend=old_header_backend or header_backend,
             compile_context=compile_context, build_config=cfg_path,
+            follow_deps=follow_deps, search_paths=search_paths,
+            ld_library_path=ld_library_path,
             collect_mode=collect_mode, out_dir=Path(_src_tmp), label="old",
         )
         new_input, new_sources = _embed_inline_source_side(
@@ -1707,6 +1718,8 @@ def compare_cmd(
             headers=new_h, includes=new_inc, version=new_version, lang=lang,
             header_backend=new_header_backend or header_backend,
             compile_context=compile_context, build_config=cfg_path,
+            follow_deps=follow_deps, search_paths=search_paths,
+            ld_library_path=ld_library_path,
             collect_mode=collect_mode, out_dir=Path(_src_tmp), label="new",
         )
 

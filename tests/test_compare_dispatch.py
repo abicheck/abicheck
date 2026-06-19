@@ -88,6 +88,8 @@ def test_embed_inline_source_forwards_toolchain_and_collects(tmp_path: Path) -> 
             _Ctx(), input_path=tmp_path / "lib.so", sources=tree,
             headers=(), includes=(), version="1.0", lang="c++",
             header_backend="auto", compile_context=cc, build_config=None,
+            follow_deps=True, search_paths=(Path("/libs"),),
+            ld_library_path="/x:/y",
             collect_mode="source-target", out_dir=tmp_path, label="old",
         )
     finally:
@@ -97,6 +99,9 @@ def test_embed_inline_source_forwards_toolchain_and_collects(tmp_path: Path) -> 
     assert captured["sources"] == tree and captured["collect_mode"] == "source-target"
     assert captured["gcc_path"] == "/x/g++" and captured["sysroot"] == Path("/sysroot")
     assert captured["nostdinc"] is True and captured["gcc_option_tokens"] == ("-DFOO",)
+    # dependency-analysis knobs ride into the inline dump too (Codex review)
+    assert captured["follow_deps"] is True and captured["search_paths"] == (Path("/libs"),)
+    assert captured["ld_library_path"] == "/x:/y"
 
 
 def test_embed_inline_source_ignored_when_depth_collects_nothing(tmp_path: Path) -> None:
@@ -120,7 +125,8 @@ def test_embed_inline_source_ignored_when_depth_collects_nothing(tmp_path: Path)
             _Ctx(), input_path=tmp_path / "lib.so", sources=tree,
             headers=(), includes=(), version="1.0", lang="c++",
             header_backend="auto", compile_context=CompileContext(),
-            build_config=None, collect_mode="off", out_dir=tmp_path, label="old",
+            build_config=None, follow_deps=False, search_paths=(),
+            ld_library_path="", collect_mode="off", out_dir=tmp_path, label="old",
         )
     finally:
         climod._normalize_binary_input = orig  # type: ignore[assignment]
