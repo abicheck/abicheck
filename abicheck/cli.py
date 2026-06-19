@@ -482,7 +482,8 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
              build_config: Path | None = None, allow_build_query: bool = False,
              build_query: str | None = None, build_compile_db: str | None = None,
              collect_mode: str = "source-target",
-             depth: str | None = None, max_depth: bool = False) -> None:
+             depth: str | None = None, max_depth: bool = False,
+             _resolved_compile_context: CompileContext | None = None) -> None:
     """Dump ABI snapshot of a shared library to JSON.
 
     \b
@@ -582,13 +583,22 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
     # the .abicheck.yml auto-discovered at the --sources root. Resolved *before*
     # the format dispatch so the PE/Mach-O header-scoping path gets the same
     # context as ELF (Codex review) — `_try_header_scoped_dump` consumes it.
-    _cc, includes = resolve_compile_context(
-        click.get_current_context(),
-        gcc_path=gcc_path, gcc_prefix=gcc_prefix, gcc_options=gcc_options,
-        gcc_option_tokens=gcc_option_tokens, sysroot=sysroot, nostdinc=nostdinc,
-        header_backend=header_backend, includes=includes,
-        build_config=build_config, sources=sources,
-    )
+    if _resolved_compile_context is not None:
+        # Caller (compare's inline source-tree embed) already resolved the compile
+        # context with CLI-over-config explicitness honored; use it verbatim and do
+        # NOT re-discover/re-merge the tree's .abicheck.yml here — re-running the
+        # resolver under ctx.invoke would lose that explicitness (the kwargs are not
+        # COMMANDLINE param-sources), clobbering e.g. --no-nostdinc / --ast-frontend
+        # auto on the source-tree path only (Codex review).
+        _cc = _resolved_compile_context
+    else:
+        _cc, includes = resolve_compile_context(
+            click.get_current_context(),
+            gcc_path=gcc_path, gcc_prefix=gcc_prefix, gcc_options=gcc_options,
+            gcc_option_tokens=gcc_option_tokens, sysroot=sysroot, nostdinc=nostdinc,
+            header_backend=header_backend, includes=includes,
+            build_config=build_config, sources=sources,
+        )
     gcc_path, gcc_prefix, gcc_options = _cc.gcc_path, _cc.gcc_prefix, _cc.gcc_options
     gcc_option_tokens, sysroot, nostdinc = _cc.gcc_option_tokens, _cc.sysroot, _cc.nostdinc
     header_backend = _cc.frontend
@@ -1238,7 +1248,14 @@ def _embed_inline_source_side(
         )
         return input_path, None
     out = out_dir / f"{label}.abi.json"
-    cc = compile_context
+    # Freeze compare's resolved compile context for this side (its --gcc-*/
+    # --sysroot/--nostdinc plus the per-side --ast-frontend) and hand it to dump
+    # verbatim via the private _resolved_compile_context hook so dump does NOT
+    # re-resolve / re-discover the tree's .abicheck.yml — that re-merge would lose
+    # CLI-over-config explicitness on this path only (Codex review).
+    import dataclasses
+
+    frozen_cc = dataclasses.replace(compile_context, frontend=header_backend)  # type: ignore[type-var]
     ctx.invoke(
         dump_cmd,
         so_path=norm,
@@ -1246,13 +1263,7 @@ def _embed_inline_source_side(
         includes=tuple(includes),
         version=version,
         lang=lang,
-        header_backend=header_backend,
-        gcc_path=cc.gcc_path,  # type: ignore[attr-defined]
-        gcc_prefix=cc.gcc_prefix,  # type: ignore[attr-defined]
-        gcc_options=cc.gcc_options,  # type: ignore[attr-defined]
-        gcc_option_tokens=cc.gcc_option_tokens,  # type: ignore[attr-defined]
-        sysroot=cc.sysroot,  # type: ignore[attr-defined]
-        nostdinc=cc.nostdinc,  # type: ignore[attr-defined]
+        _resolved_compile_context=frozen_cc,
         follow_deps=follow_deps,
         search_paths=search_paths,
         ld_library_path=ld_library_path,

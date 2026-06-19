@@ -117,8 +117,12 @@ def test_embed_inline_source_forwards_toolchain_and_collects(tmp_path: Path) -> 
 
     assert kept is None and out == tmp_path / "old.abi.json"
     assert captured["sources"] == tree and captured["collect_mode"] == "source-target"
-    assert captured["gcc_path"] == "/x/g++" and captured["sysroot"] == Path("/sysroot")
-    assert captured["nostdinc"] is True and captured["gcc_option_tokens"] == ("-DFOO",)
+    # The resolved compile context is frozen and handed to dump verbatim (so dump
+    # does not re-resolve / re-discover the tree's config) — Codex review.
+    frozen = captured["_resolved_compile_context"]
+    assert frozen.gcc_path == "/x/g++" and frozen.sysroot == Path("/sysroot")
+    assert frozen.nostdinc is True and frozen.gcc_option_tokens == ("-DFOO",)
+    assert frozen.frontend == "auto"
     # dependency-analysis knobs ride into the inline dump too (Codex review)
     assert captured["follow_deps"] is True and captured["search_paths"] == (Path("/libs"),)
     assert captured["ld_library_path"] == "/x:/y"
