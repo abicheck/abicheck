@@ -107,6 +107,7 @@ def test_embed_inline_source_forwards_toolchain_and_collects(tmp_path: Path) -> 
             _Ctx(), input_path=tmp_path / "lib.so", sources=tree,
             headers=(), includes=(), version="1.0", lang="c++",
             header_backend="auto", compile_context=cc,
+            frontend_explicit=False, nostdinc_explicit=False,
             follow_deps=True, search_paths=(Path("/libs"),),
             ld_library_path="/x:/y", dwarf_only=True, debug_format="dwarf",
             pdb_path=Path("/p.pdb"),
@@ -131,6 +132,57 @@ def test_embed_inline_source_forwards_toolchain_and_collects(tmp_path: Path) -> 
     assert captured["pdb_path"] == Path("/p.pdb")
 
 
+def test_embed_inline_source_merges_tree_config_but_cli_wins(tmp_path: Path) -> None:
+    """The side's source-root .abicheck.yml compile: block is merged into the
+    frozen context (so dump --sources behavior is preserved), but an explicit CLI
+    override still wins over the config frontend (both Codex findings)."""
+    import abicheck.cli as climod
+    from abicheck.service_scan import CompileContext
+
+    tree = tmp_path / "src"
+    tree.mkdir()
+    (tree / ".abicheck.yml").write_text(
+        "version: 3\ncompile:\n  frontend: clang\n  sysroot: /from/cfg\n"
+    )
+    captured: dict = {}
+
+    class _Ctx:
+        def invoke(self, _cmd, **kwargs):  # type: ignore[no-untyped-def]
+            captured.update(kwargs)
+
+    orig = climod._normalize_binary_input
+    climod._normalize_binary_input = lambda p: (Path(p), "elf")  # type: ignore[assignment]
+    try:
+        # frontend left at default "auto", NOT explicit → config's clang wins; the
+        # tree's sysroot is picked up too.
+        climod._embed_inline_source_side(
+            _Ctx(), input_path=tmp_path / "lib.so", sources=tree,
+            headers=(), includes=(), version="1.0", lang="c++",
+            header_backend="auto", compile_context=CompileContext(),
+            frontend_explicit=False, nostdinc_explicit=False,
+            follow_deps=False, search_paths=(), ld_library_path="",
+            dwarf_only=False, debug_format=None, pdb_path=None,
+            collect_mode="source-target", out_dir=tmp_path, label="old",
+        )
+        merged = captured["_resolved_compile_context"]
+        assert merged.frontend == "clang" and merged.sysroot == Path("/from/cfg")
+
+        # Now mark --ast-frontend auto explicit → CLI "auto" must beat config clang.
+        captured.clear()
+        climod._embed_inline_source_side(
+            _Ctx(), input_path=tmp_path / "lib.so", sources=tree,
+            headers=(), includes=(), version="1.0", lang="c++",
+            header_backend="auto", compile_context=CompileContext(),
+            frontend_explicit=True, nostdinc_explicit=False,
+            follow_deps=False, search_paths=(), ld_library_path="",
+            dwarf_only=False, debug_format=None, pdb_path=None,
+            collect_mode="source-target", out_dir=tmp_path, label="old",
+        )
+        assert captured["_resolved_compile_context"].frontend == "auto"
+    finally:
+        climod._normalize_binary_input = orig  # type: ignore[assignment]
+
+
 def test_embed_inline_source_ignored_when_depth_collects_nothing(tmp_path: Path) -> None:
     """At a depth that collects no source (collect_mode 'off') a raw tree is
     ignored rather than silently deepening the run."""
@@ -152,6 +204,7 @@ def test_embed_inline_source_ignored_when_depth_collects_nothing(tmp_path: Path)
             _Ctx(), input_path=tmp_path / "lib.so", sources=tree,
             headers=(), includes=(), version="1.0", lang="c++",
             header_backend="auto", compile_context=CompileContext(),
+            frontend_explicit=False, nostdinc_explicit=False,
             follow_deps=False, search_paths=(),
             ld_library_path="", dwarf_only=False, debug_format=None,
             pdb_path=None, collect_mode="off", out_dir=tmp_path, label="old",

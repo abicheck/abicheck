@@ -1187,6 +1187,8 @@ def _embed_inline_source_side(
     lang: str,
     header_backend: str,
     compile_context: object,
+    frontend_explicit: bool,
+    nostdinc_explicit: bool,
     follow_deps: bool,
     search_paths: tuple[Path, ...],
     ld_library_path: str,
@@ -1248,19 +1250,32 @@ def _embed_inline_source_side(
         )
         return input_path, None
     out = out_dir / f"{label}.abi.json"
-    # Freeze compare's resolved compile context for this side (its --gcc-*/
-    # --sysroot/--nostdinc plus the per-side --ast-frontend) and hand it to dump
-    # verbatim via the private _resolved_compile_context hook so dump does NOT
-    # re-resolve / re-discover the tree's .abicheck.yml — that re-merge would lose
-    # CLI-over-config explicitness on this path only (Codex review).
+    # Merge the side's source-root .abicheck.yml `compile:` block into compare's
+    # resolved context — exactly what `dump --sources` / the old deep-compare did —
+    # but compute the CLI-over-config explicitness HERE (compare's real ctx, where
+    # --ast-frontend/--nostdinc are genuine COMMANDLINE params) and freeze the
+    # result, handing it to dump via the private _resolved_compile_context hook so
+    # dump does not re-resolve under ctx.invoke (which would lose that explicitness).
+    # This honors the tree's include_dirs/sysroot/frontend while keeping explicit
+    # CLI overrides winning (Codex review).
     import dataclasses
 
-    frozen_cc = dataclasses.replace(compile_context, frontend=header_backend)  # type: ignore[type-var]
+    from .cli_options import merge_compile_config
+
+    side_cli = dataclasses.replace(compile_context, frontend=header_backend)  # type: ignore[type-var]
+    frozen_cc, merged_includes = merge_compile_config(
+        side_cli,  # type: ignore[arg-type]
+        tuple(includes),
+        None,
+        sources=sources,
+        frontend_explicit=frontend_explicit,
+        nostdinc_explicit=nostdinc_explicit,
+    )
     ctx.invoke(
         dump_cmd,
         so_path=norm,
         headers=tuple(headers),
-        includes=tuple(includes),
+        includes=merged_includes,
         version=version,
         lang=lang,
         _resolved_compile_context=frozen_cc,
@@ -1742,6 +1757,20 @@ def compare_cmd(
         import shutil
         import tempfile
 
+        # CLI-over-config explicitness read from compare's *real* ctx (where
+        # --ast-frontend/--nostdinc are genuine COMMANDLINE params); the inline
+        # dump runs under ctx.invoke where that signal is lost, so we compute it
+        # here and thread it through (Codex review). A per-side --old/new-ast-frontend
+        # is itself an explicit frontend for that side.
+        _nostdinc_explicit = (
+            ctx.get_parameter_source("nostdinc")
+            == click.core.ParameterSource.COMMANDLINE
+        )
+        _frontend_explicit = (
+            ctx.get_parameter_source("header_backend")
+            == click.core.ParameterSource.COMMANDLINE
+        )
+
         _src_tmp = tempfile.mkdtemp(prefix="abicheck-compare-src-")
         # Cleanup on context teardown so the temp dir never leaks, even if an
         # inline dump or _resolve_compare_snapshots raises before we return.
@@ -1751,6 +1780,8 @@ def compare_cmd(
             headers=old_h, includes=old_inc, version=old_version, lang=lang,
             header_backend=old_header_backend or header_backend,
             compile_context=compile_context,
+            frontend_explicit=_frontend_explicit or old_header_backend is not None,
+            nostdinc_explicit=_nostdinc_explicit,
             follow_deps=follow_deps, search_paths=search_paths,
             ld_library_path=ld_library_path,
             dwarf_only=dwarf_only, debug_format=effective_debug_format,
@@ -1762,6 +1793,8 @@ def compare_cmd(
             headers=new_h, includes=new_inc, version=new_version, lang=lang,
             header_backend=new_header_backend or header_backend,
             compile_context=compile_context,
+            frontend_explicit=_frontend_explicit or new_header_backend is not None,
+            nostdinc_explicit=_nostdinc_explicit,
             follow_deps=follow_deps, search_paths=search_paths,
             ld_library_path=ld_library_path,
             dwarf_only=dwarf_only, debug_format=effective_debug_format,
