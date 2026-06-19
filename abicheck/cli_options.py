@@ -583,6 +583,111 @@ def set_input_options(func: F) -> F:
     return func
 
 
+def release_options(func: F) -> F:
+    """Directory/package (release) comparison knobs, folded onto ``compare``.
+
+    The release-only options the removed ``compare-release`` command exposed:
+    package extraction (``--debug-info*``/``--devel-pkg*``), DSO selection
+    (``--include-private-dso``/``--keep-extracted``), the removed-library gate, and
+    the ADR-023 bundle/manifest analysis. They bite only when ``compare``'s
+    operands are directories or packages (the per-library fan-out); on single-file
+    inputs they are inert. Declared once here so ``compare`` and the internal
+    release engine share one surface (ADR-037 D7). Applied bottom-up, so listed in
+    reverse of displayed order.
+    """
+    func = click.option(
+        "--no-bundle-analysis",
+        "no_bundle_analysis",
+        is_flag=True,
+        default=False,
+        help="Skip bundle-level cross-library analysis (debug/parity escape hatch). "
+        "Bundle findings catch intra-bundle symbol removals, signature drift "
+        "across DSO boundaries, type drift across siblings, provider migration, "
+        "and manifest mismatches. (directory/package inputs only)",
+    )(func)
+    func = click.option(
+        "--bundle-cohort",
+        "bundle_cohorts",
+        multiple=True,
+        metavar="PREFIX",
+        help="Declare a co-versioned library cohort by name prefix (e.g. "
+        "'libfoo_'). Repeatable. Enables the BUNDLE_SONAME_SKEW check. "
+        "(directory/package inputs only)",
+    )(func)
+    func = click.option(
+        "--bundle-system-providers",
+        "bundle_system_providers",
+        default="",
+        help="Comma-separated extra sonames to treat as system-provided "
+        "(extends the built-in libc/libstdc++/libgcc/libtbb allow-list). "
+        "(directory/package inputs only)",
+    )(func)
+    func = click.option(
+        "--manifest",
+        "manifest_path",
+        type=click.Path(exists=True, path_type=Path),
+        default=None,
+        help="ABI instantiation manifest (YAML/JSON) listing symbols the release "
+        "publicly promises (ADR-023). (directory/package inputs only)",
+    )(func)
+    func = click.option(
+        "--keep-extracted",
+        "keep_extracted",
+        is_flag=True,
+        default=False,
+        help="Keep extracted temporary files for debugging. "
+        "(directory/package inputs only)",
+    )(func)
+    func = click.option(
+        "--include-private-dso",
+        "include_private_dso",
+        is_flag=True,
+        default=False,
+        help="Include private (non-public) shared objects from non-standard "
+        "paths. (directory/package inputs only)",
+    )(func)
+    func = click.option(
+        "--devel-pkg2",
+        "devel_pkg2",
+        type=click.Path(exists=True, path_type=Path),
+        default=None,
+        help="Development package with headers for the new side. "
+        "(directory/package inputs only)",
+    )(func)
+    func = click.option(
+        "--devel-pkg1",
+        "devel_pkg1",
+        type=click.Path(exists=True, path_type=Path),
+        default=None,
+        help="Development package with headers for the old side. "
+        "(directory/package inputs only)",
+    )(func)
+    func = click.option(
+        "--debug-info2",
+        "debug_info2",
+        type=click.Path(exists=True, path_type=Path),
+        default=None,
+        help="Debug info package for the new side (RPM/Deb/tar). "
+        "(directory/package inputs only)",
+    )(func)
+    func = click.option(
+        "--debug-info1",
+        "debug_info1",
+        type=click.Path(exists=True, path_type=Path),
+        default=None,
+        help="Debug info package for the old side (RPM/Deb/tar). "
+        "(directory/package inputs only)",
+    )(func)
+    func = click.option(
+        "--fail-on-removed-library/--no-fail-on-removed-library",
+        "fail_on_removed",
+        default=False,
+        help="Exit 8 when a library present in old_dir is absent in new_dir. "
+        "(directory/package inputs only)",
+    )(func)
+    return func
+
+
 def debug_resolution_options(func: F) -> F:
     """Separate-debug-file resolution (ADR-021a): roots + debuginfod + format.
 
@@ -1012,7 +1117,6 @@ REQUIRED_FAMILIES: frozenset[str] = frozenset(
 #: command name → module basename, for the gate to locate each command's source.
 VERDICT_EMITTING_COMMANDS: dict[str, str] = {
     "compare": "cli.py",
-    "compare-release": "cli_compare_release.py",
     "appcompat": "cli_appcompat.py",
 }
 
@@ -1032,7 +1136,12 @@ INTENTIONAL_SUBSET: dict[tuple[str, str], str] = {}
 #: visible; +6 for --gcc-path/--gcc-prefix/--gcc-options/--gcc-option/--sysroot/
 #: --nostdinc) was unified onto ``compare`` for dump/scan parity (ADR-037 D3): the
 #: family is genuine L2 surface ``compare`` previously lacked, not config-demotable.
-COMPARE_FLAG_BUDGET = 66
+#: Raised 66→77 when the standalone ``compare-release`` command was removed and its
+#: 11 release-only knobs (``@release_options``: package extraction, DSO selection,
+#: removed-library gate, ADR-023 bundle/manifest analysis) folded onto ``compare``'s
+#: directory/package path (ADR-037 D7) — genuine release surface, inert on single
+#: files, grouped in its own ``--help`` panel.
+COMPARE_FLAG_BUDGET = 77
 
 
 def count_visible_options(cmd: object) -> int:

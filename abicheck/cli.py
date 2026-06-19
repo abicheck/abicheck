@@ -69,6 +69,7 @@ from .cli_options import (
     lang_option,
     output_options,
     policy_options,
+    release_options,
     resolve_compile_context,
     scope_options,
     set_input_options,
@@ -1124,12 +1125,12 @@ def _reject_compile_context_for_set_inputs(ctx: click.Context, project_cfg: Any)
 def _dispatch_release_compare(ctx: click.Context, **kwargs: Any) -> None:
     """Fan a directory/package `compare` out to the per-library release engine.
 
-    Routes through the same `compare-release` implementation (which already
-    fans out per library through the single Tier-2 `service.run_compare`
-    chokepoint and writes the two-level summary/per-library output), so a
-    library compared here gets the identical verdict it would from a single-pair
-    `compare` (ADR-037 D1/D7). The deprecation note that command prints for its
-    own users is silenced while it runs as `compare`'s backend.
+    Routes through the same release engine (the unregistered `compare_release_cmd`,
+    which fans out per library through the single Tier-2 `service.run_compare`
+    chokepoint and writes the two-level summary/per-library output), so a library
+    compared here gets the identical verdict it would from a single-pair `compare`
+    (ADR-037 D1/D7). The standalone `compare-release` command was removed; this is
+    now its only entry point.
     """
     fmt = kwargs.get("fmt", "markdown")
     if fmt not in _RELEASE_FORMATS:
@@ -1137,14 +1138,9 @@ def _dispatch_release_compare(ctx: click.Context, **kwargs: Any) -> None:
             f"--format {fmt} is not available when comparing directories or "
             f"packages; choose one of: {', '.join(sorted(_RELEASE_FORMATS))}."
         )
-    from . import cli_compare_release as _crmod
     from .cli_compare_release import compare_release_cmd
 
-    _crmod._SILENCE_DEPRECATION = True
-    try:
-        ctx.invoke(compare_release_cmd, **kwargs)
-    finally:
-        _crmod._SILENCE_DEPRECATION = False
+    ctx.invoke(compare_release_cmd, **kwargs)
 
 
 def _source_is_pack(path: Path) -> bool:
@@ -1195,31 +1191,19 @@ def _embed_inline_source_side(
     """Resolve one side's ``--sources`` into the input ``compare`` should read.
 
     A raw source *tree* (no manifest.json) on a native-binary side is dumped
-    inline at *collect_mode* so the L3-L5 build/source/graph facts ride embedded
-    in the snapshot — the one-shot deep-compare workflow, folded into ``compare``
-    (the path the removed ``deep-compare`` command pointed migrators at). Returns
+    inline at *collect_mode* (the deep-compare workflow, folded into ``compare``)
+    so the L3-L5 facts ride embedded in the snapshot. Returns
     ``(input_to_read, sources_to_keep, build_info_to_keep)``: a pre-built
-    ``collect`` pack is left untouched for the embedded-build-source pass; a tree
-    we embed here is consumed (sources *and* the matching ``--build-info``, which
-    was forwarded into the inline dump, both become ``None`` so the later
-    ``prepare_embedded_build_source`` does not re-process them — it would reject a
-    raw build dir as an invalid pack). A snapshot input cannot be re-dumped, so a
-    tree on it is reported ignored.
+    ``collect`` pack passes through untouched; an embedded tree consumes both its
+    sources and ``--build-info`` (-> ``None``, so the later
+    ``prepare_embedded_build_source`` won't re-process them); a snapshot input
+    can't be re-dumped, so a tree on it is reported ignored.
 
     *compile_context* is compare's already-resolved
-    :class:`~abicheck.service_scan.CompileContext` (the cross-toolchain
-    ``--gcc-*``/``--sysroot``/``--nostdinc`` knobs, with ``--config`` already
-    folded in and CLI-over-config explicitness honored). Its *resolved* values
-    are forwarded so the inline dump parses this side's headers with the same
-    toolchain a plain ``compare``/``dump`` would. We deliberately do **not**
-    forward ``--config`` to the dump: that would re-run ``resolve_compile_context``
-    and re-merge the config on top of the already-resolved values, and because
-    ``ctx.invoke`` kwargs are not COMMANDLINE param-sources the explicit
-    overrides (e.g. ``--no-nostdinc`` over a config ``nostdinc: true``) would be
-    lost. ``follow_deps``/``search_paths``/``ld_library_path``
-    are forwarded too so the embedded snapshot carries the same dependency graph
-    a native ``compare --follow-deps`` would — without them the dependency
-    analysis would be silently lost once the side is replaced by a snapshot.
+    :class:`~abicheck.service_scan.CompileContext` (the merged per-side context).
+    The caller passes the *resolved* values plus the toolchain/dependency/native
+    knobs (``follow_deps``/``--gcc-*``/``--dwarf-only``/…) so the inline dump
+    parses this side exactly as a native ``compare``/``dump`` would.
     """
     if sources is None or _source_is_pack(sources):
         return input_path, sources, build_info
@@ -1298,6 +1282,8 @@ def _embed_inline_source_side(
 # Set-input fan-out (ADR-037 D7): -j/--jobs, --dso-only, --output-dir only bite
 # when the operands are directories/packages; a no-op-with-warning otherwise.
 @set_input_options
+# ── Release (directory/package) comparison knobs (ADR-037 D7) ────────────────
+@release_options
 # ── Dump options (used when input is an ELF binary) ──────────────────────────
 # Two-sided header/include/version family (ADR-037 D3). The L2 compile-context
 # family (--ast-frontend + cross-toolchain --gcc-*/--sysroot/--nostdinc) comes from
@@ -1450,6 +1436,12 @@ def compare_cmd(
     ctx: click.Context,
     old_input: Path, new_input: Path,
     jobs: int, dso_only: bool, output_dir: Path | None,
+    fail_on_removed: bool,
+    debug_info1: Path | None, debug_info2: Path | None,
+    devel_pkg1: Path | None, devel_pkg2: Path | None,
+    include_private_dso: bool, keep_extracted: bool,
+    manifest_path: Path | None, bundle_system_providers: str,
+    bundle_cohorts: tuple[str, ...], no_bundle_analysis: bool,
     headers: tuple[Path, ...], includes: tuple[Path, ...], lang: str,
     header_backend: str,
     gcc_path: str | None, gcc_prefix: str | None, gcc_options: str | None,
@@ -1630,6 +1622,13 @@ def compare_cmd(
             require_justification=require_justification,
             policy=policy, policy_file_path=policy_file_path,
             dso_only=dso_only, jobs=jobs,
+            fail_on_removed=fail_on_removed,
+            debug_info1=debug_info1, debug_info2=debug_info2,
+            devel_pkg1=devel_pkg1, devel_pkg2=devel_pkg2,
+            include_private_dso=include_private_dso, keep_extracted=keep_extracted,
+            manifest_path=manifest_path,
+            bundle_system_providers=bundle_system_providers,
+            bundle_cohorts=bundle_cohorts, no_bundle_analysis=no_bundle_analysis,
             scope_public_headers=scope_public_headers,
             severity_preset=resolved_cfg.merged_severity_preset,
             severity_abi_breaking=resolved_cfg.merged_severity_abi_breaking,
@@ -1981,7 +1980,6 @@ from . import (  # noqa: E402  — must run after `main` and helpers are defined
     cli_appcompat,  # noqa: F401  — registers appcompat
     cli_baseline,  # noqa: F401  — registers baseline
     cli_buildsource,  # noqa: F401  — registers collect
-    cli_compare_release,  # noqa: F401  — registers compare-release
     cli_debian_symbols,  # noqa: F401  — registers debian-symbols
     cli_plugin,  # noqa: F401  — registers plugin-check
     cli_pr_comment,  # noqa: F401  — registers pr-comment

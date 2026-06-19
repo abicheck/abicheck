@@ -135,7 +135,6 @@ def test_service_compare_call_is_not_flagged(
 def _registered_commands() -> dict:
     """Force every verdict-emitting command module to register on ``main``."""
     import abicheck.cli_appcompat  # noqa: F401  — registers `appcompat`
-    import abicheck.cli_compare_release  # noqa: F401  — registers `compare-release`
     from abicheck.cli import main
 
     return main.commands
@@ -620,43 +619,23 @@ def test_project_config_flag_is_config_not_build_config(name: str) -> None:
 # A diff here in review means a flag was added or dropped — update deliberately.
 _OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
     "compare": (
-        "--annotate", "--annotate-additions", "--ast-frontend", "--btf",
-        "--collapse-versioned-symbols",
-        "--collect-mode", "--ctf", "--debug-format", "--debug-root", "--debug-root1",
-        "--config", "--new-ast-frontend", "--old-ast-frontend",
-        "--debug-root2", "--debuginfod", "--debuginfod-url", "--demangle", "--depth",
-        "--dso-only", "--dwarf",
-        "--dwarf-only", "--exit-code-scheme", "--explain-patterns", "--follow-deps",
-        "--format", "--gcc-option", "--gcc-options", "--gcc-path", "--gcc-prefix",
-        "--header",
-        "--header-backend", "--include", "--jobs", "--lang", "--ld-library-path", "--max",
-        "--new-build-info", "--no-nostdinc", "--nostdinc", "--sysroot",
-        "--new-header", "--new-header-backend", "--new-include", "--new-pdb-path",
-        "--new-sources", "--new-version", "--no-demangle", "--no-pattern-verdicts",
-        "--no-scope-public-headers", "--old-build-info", "--old-header",
-        "--old-header-backend", "--old-include", "--old-pdb-path", "--old-sources",
-        "--old-version", "--output", "--output-dir", "--pattern-verdicts", "--pdb-path",
-        "--policy",
-        "--policy-file", "--probe-matrix-new", "--probe-matrix-old", "--public-symbol",
-        "--public-symbols-list", "--recommend", "--report-mode", "--require-justification",
-        "--scope-public-headers", "--search-path", "--severity-abi-breaking",
-        "--severity-addition", "--severity-potential-breaking", "--severity-preset",
-        "--severity-quality-issues", "--show-filtered", "--show-impact", "--show-only",
-        "--show-redundant", "--stat", "--strict-suppressions", "--suppress",
-        "--surface-metrics", "--verbose", "-H", "-I", "-j", "-o", "-v",
-    ),
-    "compare-release": (
-        "--annotate", "--annotate-additions", "--bundle-cohort", "--bundle-system-providers",
-        "--debug-info1", "--debug-info2", "--devel-pkg1", "--devel-pkg2", "--dso-only",
-        "--fail-on-removed-library", "--format", "--header", "--include",
-        "--include-private-dso", "--jobs", "--keep-extracted", "--lang", "--manifest",
-        "--new-header", "--new-include", "--new-version", "--no-bundle-analysis",
-        "--no-fail-on-removed-library", "--no-scope-public-headers", "--old-header",
-        "--old-include", "--old-version", "--output", "--output-dir", "--policy",
-        "--policy-file", "--probe-matrix-new", "--probe-matrix-old", "--require-justification",
-        "--scope-public-headers", "--severity-abi-breaking", "--severity-addition",
-        "--severity-potential-breaking", "--severity-preset", "--severity-quality-issues",
-        "--strict-suppressions", "--suppress", "--verbose", "-H", "-I", "-j", "-o", "-v",
+        "--annotate", "--annotate-additions", "--ast-frontend", "--btf", "--bundle-cohort", "--bundle-system-providers",
+        "--collapse-versioned-symbols", "--collect-mode", "--config", "--ctf", "--debug-format", "--debug-info1",
+        "--debug-info2", "--debug-root", "--debug-root1", "--debug-root2", "--debuginfod", "--debuginfod-url",
+        "--demangle", "--depth", "--devel-pkg1", "--devel-pkg2", "--dso-only", "--dwarf",
+        "--dwarf-only", "--exit-code-scheme", "--explain-patterns", "--fail-on-removed-library", "--follow-deps", "--format",
+        "--gcc-option", "--gcc-options", "--gcc-path", "--gcc-prefix", "--header", "--header-backend",
+        "--include", "--include-private-dso", "--jobs", "--keep-extracted", "--lang", "--ld-library-path",
+        "--manifest", "--max", "--new-ast-frontend", "--new-build-info", "--new-header", "--new-header-backend",
+        "--new-include", "--new-pdb-path", "--new-sources", "--new-version", "--no-bundle-analysis", "--no-demangle",
+        "--no-fail-on-removed-library", "--no-nostdinc", "--no-pattern-verdicts", "--no-scope-public-headers", "--nostdinc", "--old-ast-frontend",
+        "--old-build-info", "--old-header", "--old-header-backend", "--old-include", "--old-pdb-path", "--old-sources",
+        "--old-version", "--output", "--output-dir", "--pattern-verdicts", "--pdb-path", "--policy",
+        "--policy-file", "--probe-matrix-new", "--probe-matrix-old", "--public-symbol", "--public-symbols-list", "--recommend",
+        "--report-mode", "--require-justification", "--scope-public-headers", "--search-path", "--severity-abi-breaking", "--severity-addition",
+        "--severity-potential-breaking", "--severity-preset", "--severity-quality-issues", "--show-filtered", "--show-impact", "--show-only",
+        "--show-redundant", "--stat", "--strict-suppressions", "--suppress", "--surface-metrics", "--sysroot",
+        "--verbose", "-H", "-I", "-j", "-o", "-v",
     ),
     "appcompat": (
         "--check-against", "--format", "--header", "--include", "--lang",

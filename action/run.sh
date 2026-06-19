@@ -232,8 +232,11 @@ elif [[ "$MODE" == "appcompat" ]]; then
   fi
 
 elif [[ "$MODE" == "compare-release" ]]; then
-  # ── Compare-release mode (package-level comparison) ──────────────────────
-  CMD+=(compare-release)
+  # ── Compare-release mode (package-level comparison) → `compare` dirs/pkgs ──
+  # The standalone compare-release command was removed (ADR-037 D7); `compare`
+  # accepts directories/packages and fans out to the same per-library engine.
+  # The Action mode name is kept for back-compat.
+  CMD+=(compare)
   CMD+=("${INPUT_OLD_LIBRARY:?old-library is required for compare-release mode}")
   CMD+=("${INPUT_NEW_LIBRARY:?new-library is required}")
 

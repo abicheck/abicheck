@@ -460,7 +460,7 @@ class TestReleaseFanoutParity:
         _write_snap(new_dir / "libbar.json", _snap())
 
         rel = CliRunner().invoke(
-            main, ["compare-release", str(old_dir), str(new_dir), "--format", "json"]
+            main, ["compare", str(old_dir), str(new_dir), "--format", "json"]
         )
         cmp = CliRunner().invoke(
             main, ["compare", str(old_dir), str(new_dir), "--format", "json"]
@@ -487,17 +487,18 @@ class TestReleaseFanoutParity:
         assert list(out_dir.glob("*.json"))
 
 
-# ── alias smoke ────────────────────────────────────────────────────────────────
+# ── directory comparison (no deprecation: compare-release was removed) ───────
 
-class TestDeprecatedAliases:
-    def test_compare_release_still_works_and_warns(self, tmp_path: Path) -> None:
+class TestDirectoryComparison:
+    def test_compare_directories_runs_release_fanout(self, tmp_path: Path) -> None:
         old_dir = tmp_path / "old"
         new_dir = tmp_path / "new"
         old_dir.mkdir()
         new_dir.mkdir()
         _write_snap(old_dir / "libfoo.json", _snap())
         _write_snap(new_dir / "libfoo.json", _snap())
-        result = CliRunner().invoke(main, ["compare-release", str(old_dir), str(new_dir)])
+        result = CliRunner().invoke(main, ["compare", str(old_dir), str(new_dir)])
         assert result.exit_code == 0
-        assert "deprecated" in (result.stderr or "")
+        # The standalone compare-release command was removed; no deprecation note.
+        assert "deprecated" not in (result.stderr or "")
 

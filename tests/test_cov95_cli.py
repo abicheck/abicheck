@@ -961,7 +961,7 @@ class TestFoldReleaseGlobalSeverity:
 
 class TestCompareReleaseCommand:
     def test_help(self) -> None:
-        result = _invoke("compare-release", "--help")
+        result = _invoke("compare", "--help")
         assert result.exit_code == 0
 
     def test_annotate_additions_requires_annotate(self, tmp_path: Path) -> None:
@@ -972,7 +972,7 @@ class TestCompareReleaseCommand:
         _write_snap(old_dir / "libfoo.json", _snap())
         _write_snap(new_dir / "libfoo.json", _snap())
         result = _invoke(
-            "compare-release",
+            "compare",
             str(old_dir),
             str(new_dir),
             "--annotate-additions",
@@ -988,7 +988,7 @@ class TestCompareReleaseCommand:
         _write_snap(old_dir / "libfoo.json", _snap())
         _write_snap(new_dir / "libfoo.json", _snap())
         result = _invoke(
-            "compare-release",
+            "compare",
             str(old_dir),
             str(new_dir),
             "--format",
@@ -1006,7 +1006,7 @@ class TestCompareReleaseCommand:
         _write_snap(old_dir / "libfoo.json", old)
         _write_snap(new_dir / "libfoo.json", new)
         result = _invoke(
-            "compare-release",
+            "compare",
             str(old_dir),
             str(new_dir),
             "--severity-preset",
@@ -1023,7 +1023,7 @@ class TestCompareReleaseCommand:
         _write_snap(old_dir / "libfoo.json", old)
         _write_snap(new_dir / "libfoo.json", new)
         result = _invoke(
-            "compare-release",
+            "compare",
             str(old_dir),
             str(new_dir),
             "--severity-preset",
@@ -1039,7 +1039,7 @@ class TestCompareReleaseCommand:
         _write_snap(old_dir / "libfoo.json", _snap())
         _write_snap(new_dir / "libfoo.json", _snap())
         result = _invoke(
-            "compare-release",
+            "compare",
             str(old_dir),
             str(new_dir),
             "--format",
@@ -1057,7 +1057,7 @@ class TestCompareReleaseCommand:
         _write_snap(new_dir / "libfoo.json", _snap())
         out = tmp_path / "release.json"
         result = _invoke(
-            "compare-release",
+            "compare",
             str(old_dir),
             str(new_dir),
             "--format",
@@ -1077,7 +1077,7 @@ class TestCompareReleaseCommand:
         _write_snap(old_dir / "libgone.json", _snap(library="libgone.so"))
         _write_snap(new_dir / "libfoo.json", _snap())
         result = _invoke(
-            "compare-release",
+            "compare",
             str(old_dir),
             str(new_dir),
             "--format",
@@ -1693,7 +1693,7 @@ class TestCompareReleaseExtraFlows:
         _write_snap(new_dir / "libfoo.json", new)
         out_dir = tmp_path / "reports"
         result = _invoke(
-            "compare-release",
+            "compare",
             str(old_dir),
             str(new_dir),
             "--output-dir",
@@ -1713,7 +1713,7 @@ class TestCompareReleaseExtraFlows:
         _write_snap(old_dir / "libfoo.json", _snap(library="libfoo.so"))
         _write_snap(new_dir / "libfoo.json", _snap(library="libfoo.so"))
         result = _invoke(
-            "compare-release",
+            "compare",
             str(old_dir),
             str(new_dir),
             "--format",
@@ -1735,7 +1735,7 @@ class TestCompareReleaseExtraFlows:
             "  - symbol: foo\n    reason: legacy\n    expires: 2000-01-01\n",
         )
         result = _invoke(
-            "compare-release",
+            "compare",
             str(old_dir),
             str(new_dir),
             "--suppress",
@@ -1759,7 +1759,7 @@ class TestCompareReleaseExtraFlows:
 
         monkeypatch.setattr(cr_mod, "_run_compare_pair", boom)
         result = _invoke(
-            "compare-release",
+            "compare",
             str(old_dir),
             str(new_dir),
             "--format",

@@ -1212,7 +1212,6 @@ def _iter_cli_contract_sources() -> Iterable[Path]:
 #: verdict-emitting command module basename → the command's registered name.
 _VERDICT_CMD_MODULES: dict[str, str] = {
     "cli.py": "compare",
-    "cli_compare_release.py": "compare-release",
     "cli_appcompat.py": "appcompat",
 }
 
