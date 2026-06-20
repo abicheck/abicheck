@@ -26,6 +26,7 @@ import json
 import struct
 from pathlib import Path
 
+import pytest
 from click.testing import CliRunner
 
 from abicheck.cli import main
@@ -554,6 +555,38 @@ class TestCompareDispatch:
         )
         assert code != 0
         assert "--exit-code-scheme is not supported" in (out + err)
+
+    @pytest.mark.parametrize(
+        "flag, value, is_path",
+        [
+            ("--max", None, False),
+            ("--depth", "source", False),
+            ("--old-sources", "src", True),
+            ("--new-build-info", "build", True),
+        ],
+    )
+    def test_evidence_flags_rejected_on_set_inputs(
+        self, tmp_path: Path, flag: str, value: str | None, is_path: bool
+    ) -> None:
+        # Inline build/source evidence flags can't be threaded through the
+        # release fan-out, so they are rejected rather than silently dropped
+        # (Codex review).
+        old_dir = tmp_path / "old"
+        new_dir = tmp_path / "new"
+        old_dir.mkdir()
+        new_dir.mkdir()
+        _write_snap(old_dir / "libfoo.json", _snap())
+        _write_snap(new_dir / "libfoo.json", _snap())
+        if value is None:
+            extra = [flag]
+        elif is_path:
+            (tmp_path / value).mkdir(exist_ok=True)  # --sources/--build-info need a real path
+            extra = [flag, str(tmp_path / value)]
+        else:
+            extra = [flag, value]  # --depth takes a literal choice value
+        code, out, err = _invoke("compare", str(old_dir), str(new_dir), *extra)
+        assert code != 0
+        assert "not supported for directory/package" in (out + err)
 
     def test_app_operand_rejected_with_hint(self, tmp_path: Path) -> None:
         app = _make_pie_executable(tmp_path / "myapp")

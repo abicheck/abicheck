@@ -86,6 +86,8 @@ from .cli_resolve import (
     _maybe_follow_linker_script,
     _normalize_binary_input,
     _populate_dependency_info,
+    _reject_compile_context_for_set_inputs,
+    _reject_evidence_flags_for_set_inputs,
     _resolve_compare_snapshots,
     _resolve_input,
     _resolve_linker_script,
@@ -500,7 +502,7 @@ def dump_cmd(so_path: Path | None, headers: tuple[Path, ...], includes: tuple[Pa
     # from a config source.method, where --depth is None) and hands it over via
     # the private _resolved_collect_mode hook so we don't re-derive a different
     # default here (Codex review).
-    if _resolved_collect_mode is not None:
+    if _resolved_collect_mode is not None:  # pragma: no cover - only via compare's inline embed (integration)
         collect_mode = _resolved_collect_mode
     else:
         collect_mode = resolve_dump_depth(depth, max_depth, "source-target")
@@ -1036,84 +1038,6 @@ def _warn_unused_set_flags(
         )
 
 
-#: Compile-context flag dest → spelling, for the set-input rejection guard. The
-#: per-library release fan-out does not yet thread the L2 compile-context family
-#: (ADR-037 D3) down to each pair's header dump, so an explicitly-passed flag must
-#: be rejected loudly rather than silently dropped (Codex review).
-_COMPILE_CONTEXT_SET_INPUT_FLAGS: dict[str, str] = {
-    "gcc_path": "--gcc-path",
-    "gcc_prefix": "--gcc-prefix",
-    "gcc_options": "--gcc-options",
-    "gcc_option_tokens": "--gcc-option",
-    "sysroot": "--sysroot",
-    "nostdinc": "--nostdinc",
-    "header_backend": "--ast-frontend",
-    "old_header_backend": "--old-ast-frontend",
-    "new_header_backend": "--new-ast-frontend",
-}
-
-
-def _config_has_compile_block(project_cfg: Any) -> bool:
-    """True if a loaded ``.abicheck.yml`` carries any ``compile:`` setting.
-
-    Used to flag that a project's L2 compile context would be dropped by the
-    per-library release fan-out (which the single-pair path honors).
-    """
-    if project_cfg is None:
-        return False
-    return bool(
-        getattr(project_cfg, "compile_frontend", None)
-        or getattr(project_cfg, "compile_std", None)
-        or getattr(project_cfg, "compile_defines", None)
-        or getattr(project_cfg, "compile_include_dirs", None)
-        or getattr(project_cfg, "compile_sysroot", None)
-        or getattr(project_cfg, "compile_nostdinc", False)
-    )
-
-
-def _reject_compile_context_for_set_inputs(ctx: click.Context, project_cfg: Any) -> None:
-    """Guard the L2 compile context for directory/package compares.
-
-    The per-library fan-out (`compare-release` backend) runs each pair through
-    `service.run_compare` without a `CompileContext`, so the L2 cross-toolchain /
-    frontend context is not applied per library — unlike the single-pair path that
-    now honors it. Two cases, never silent (Codex review):
-
-    * An **explicitly-passed** compile-context flag is rejected loudly (a
-      `UsageError`, mirroring the `--exit-code-scheme` guard): the user asked for
-      it, so erroring beats ignoring it.
-    * An **ambient** project ``.abicheck.yml`` ``compile:`` block only *warns*:
-      a plain ``compare dir1 dir2`` in a configured project shouldn't hard-fail,
-      but the user must know those settings apply to single-library compares and
-      not to this fan-out (so per-library snapshots may differ).
-
-    Either way, compare libraries individually (or pre-dump snapshots) to apply
-    the context.
-    """
-    used = [
-        flag
-        for dest, flag in _COMPILE_CONTEXT_SET_INPUT_FLAGS.items()
-        if ctx.get_parameter_source(dest) == click.core.ParameterSource.COMMANDLINE
-    ]
-    if used:
-        raise click.UsageError(
-            ", ".join(sorted(used)) + " "
-            + ("is" if len(used) == 1 else "are")
-            + " not supported for directory/package (release) comparisons: the "
-            "per-library fan-out does not thread the L2 compile context to each "
-            "pair's header dump. Compare the libraries individually to use them."
-        )
-    if _config_has_compile_block(project_cfg):
-        click.echo(
-            "Warning: the .abicheck.yml compile: block is not applied to "
-            "directory/package (release) comparisons — the per-library fan-out "
-            "does not thread the L2 compile context. It affects single-library "
-            "compares only; compare libraries individually for consistent "
-            "per-library snapshots.",
-            err=True,
-        )
-
-
 def _dispatch_release_compare(ctx: click.Context, **kwargs: Any) -> None:
     """Fan a directory/package `compare` out to the per-library release engine.
 
@@ -1617,6 +1541,7 @@ def compare_cmd(
                 "scheme control."
             )
         _reject_compile_context_for_set_inputs(ctx, project_cfg)
+        _reject_evidence_flags_for_set_inputs(ctx)
         _dispatch_release_compare(
             ctx,
             old_dir=old_input, new_dir=new_input,

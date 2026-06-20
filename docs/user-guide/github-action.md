@@ -324,7 +324,7 @@ with `source-method` (S-axis) or the coarser `depth` (L-axis):
 | Cheap build-flag drift only (L3) | `depth: build` |
 | Source semantics on changed TUs | `source-method: s4` + `since:` |
 | Full source-ABI replay | `source-method: s5` |
-| Source graph / localization (L5) | `depth: graph` or `scan-mode: pr-deep` |
+| Source graph / localization (L5) | `source-method: s4` or `scan-mode: pr-deep` |
 | Risk-driven (dev/local, opt-in) | `source-method: auto` + `since:` |
 
 ### Single-release audit (no baseline)
