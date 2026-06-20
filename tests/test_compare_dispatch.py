@@ -273,6 +273,43 @@ def test_embed_inline_source_drops_raw_build_info_when_tree_ignored(tmp_path: Pa
     assert kept is None and kept_bi is None  # raw build dir dropped, not kept
 
 
+def test_embed_inline_collects_raw_build_info_without_sources(tmp_path: Path) -> None:
+    """A raw --build-info on a native side with no --sources still triggers the
+    inline dump (so L3 is collected/embedded) rather than falling through to the
+    pack loader and aborting with 'Invalid evidence pack' (Codex review)."""
+    import abicheck.cli as climod
+    from abicheck.service_scan import CompileContext
+
+    raw_build = tmp_path / "build"  # raw build dir, NOT a pack
+    raw_build.mkdir()
+    captured: dict = {}
+
+    class _Ctx:
+        def invoke(self, _cmd, **kwargs):  # type: ignore[no-untyped-def]
+            captured.update(kwargs)
+
+    orig = climod._normalize_binary_input
+    climod._normalize_binary_input = lambda p: (Path(p), "elf")  # type: ignore[assignment]
+    try:
+        out, kept, kept_bi = climod._embed_inline_source_side(
+            _Ctx(), input_path=tmp_path / "lib.so", sources=None,
+            headers=(), includes=(), version="1.0", lang="c++",
+            header_backend="auto", compile_context=CompileContext(),
+            frontend_explicit=False, nostdinc_explicit=False, build_info=raw_build,
+            follow_deps=False, search_paths=(),
+            ld_library_path="", dwarf_only=False, debug_format=None,
+            pdb_path=None, collect_mode="build", out_dir=tmp_path, label="old",
+        )
+    finally:
+        climod._normalize_binary_input = orig  # type: ignore[assignment]
+
+    # The dump was invoked with the raw build-info forwarded; both consumed → None.
+    assert out == tmp_path / "old.abi.json"
+    assert kept is None and kept_bi is None
+    assert captured["build_info"] == raw_build and captured["sources"] is None
+    assert captured["_resolved_collect_mode"] == "build"
+
+
 def test_compare_source_tree_on_snapshot_input_is_ignored(tmp_path: Path) -> None:
     """A raw --old-sources tree on a snapshot input can't be embedded (you can't
     re-dump a snapshot), so compare warns and still produces a verdict."""

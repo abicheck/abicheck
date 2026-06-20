@@ -1197,40 +1197,51 @@ def _embed_inline_source_side(
     knobs (``follow_deps``/``--gcc-*``/``--dwarf-only``/…) so the inline dump
     parses this side exactly as a native ``compare``/``dump`` would.
     """
-    if sources is None or _source_is_pack(sources):
+    sources_raw = sources is not None and not _source_is_pack(sources)
+    build_info_raw = build_info is not None and not _source_is_pack(build_info)
+    if not sources_raw and not build_info_raw:
+        # Nothing raw to collect inline; any pack-shaped sources/build-info fall
+        # through to prepare_embedded_build_source unchanged.
         return input_path, sources, build_info
-    # When the source tree can't be collected here (snapshot input, or a --depth
-    # that gathers no source evidence), the side falls through to
-    # prepare_embedded_build_source. That path treats any leftover --build-info as
-    # an out-of-band *pack* (_resolve_side_pack → _load_pack_or_raise), so a raw
-    # build dir / compile_commands.json would abort with "Invalid evidence pack".
-    # Keep --build-info only when it is itself a validated pack; otherwise drop it
-    # alongside the ignored tree (Codex review).
-    kept_build_info = (
-        build_info if (build_info is not None and _source_is_pack(build_info)) else None
-    )
+    # A *raw* --build-info (build dir / compile_commands.json) is collected by the
+    # inline dump below — it must never reach prepare_embedded_build_source, which
+    # treats a leftover --build-info as an out-of-band *pack* (_resolve_side_pack →
+    # _load_pack_or_raise) and aborts with "Invalid evidence pack". A pack-shaped
+    # one passes through for that out-of-band path. Likewise raw sources are
+    # consumed here; pack sources pass through (Codex review).
+    kept_build_info = None if build_info_raw else build_info
+    kept_sources = None if sources_raw else sources
     norm, fmt = _normalize_binary_input(input_path)
     if fmt is None:
+        ignored = []
+        if sources_raw:
+            ignored.append(f"--{label}-sources source tree")
+        if build_info_raw:
+            ignored.append(f"raw --{label}-build-info")
         click.echo(
             f"Warning: {label} input {input_path} is a snapshot, not a native "
-            f"binary; the --{label}-sources source tree is ignored (dump the "
-            "binary from its tree to embed deeper evidence).",
+            f"binary; the {' and '.join(ignored)} is ignored (dump the binary "
+            "from its tree to embed deeper evidence).",
             err=True,
         )
-        return input_path, None, kept_build_info
+        return input_path, kept_sources, kept_build_info
     # The --depth dial governs how deep to collect. When it resolves to "off"
-    # (--depth binary/headers) there is no source collection to do, so the tree
-    # can't contribute at this depth —
-    # ignore it with a note rather than silently deepening the run (matches the
-    # old deep-compare, which never auto-bumped the depth).
+    # (--depth binary/headers) there is no source collection to do, so a raw tree
+    # / build-info can't contribute at this depth — ignore it with a note rather
+    # than silently deepening the run (matches the old deep-compare, which never
+    # auto-bumped the depth).
     if collect_mode == "off":
         click.echo(
-            f"Warning: --{label}-sources was given but the selected --depth "
-            "collects no source evidence; ignoring the source tree. Use "
-            "--depth source/full (or --max) to collect from it.",
+            f"Warning: --{label}-sources/--{label}-build-info was given but the "
+            "selected --depth collects no evidence; ignoring it. Use --depth "
+            "build/source/full (or --max) to collect from it.",
             err=True,
         )
-        return input_path, None, kept_build_info
+        return input_path, kept_sources, kept_build_info
+    # Only the raw inputs are consumed by the inline dump; pack-shaped sources /
+    # build-info ride through to the out-of-band path.
+    dump_sources = sources if sources_raw else None
+    dump_build_info = build_info if build_info_raw else None
     out = out_dir / f"{label}.abi.json"
     # Merge the side's source-root .abicheck.yml `compile:` block into compare's
     # resolved context — exactly what `dump --sources` / the old deep-compare did —
@@ -1249,7 +1260,7 @@ def _embed_inline_source_side(
         side_cli,  # type: ignore[arg-type]
         tuple(includes),
         None,
-        sources=sources,
+        sources=dump_sources,
         frontend_explicit=frontend_explicit,
         nostdinc_explicit=nostdinc_explicit,
     )
@@ -1267,15 +1278,15 @@ def _embed_inline_source_side(
         dwarf_only=dwarf_only,
         debug_format_opt=debug_format,
         pdb_path=pdb_path,
-        sources=sources,
-        build_info=build_info,
+        sources=dump_sources,
+        build_info=dump_build_info,
         _resolved_collect_mode=collect_mode,
         output=out,
     )
-    # Sources and build-info are now embedded in the snapshot; drop both so the
-    # later prepare_embedded_build_source does not re-process them (it would reject
-    # a raw build dir as an invalid pack) — Codex review.
-    return out, None, None
+    # The raw sources/build-info are now embedded in the snapshot; pack-shaped
+    # inputs (kept_*) ride through to the later prepare_embedded_build_source so
+    # it does not re-process the consumed raws as bogus packs — Codex review.
+    return out, kept_sources, kept_build_info
 
 
 @main.command("compare")
@@ -1731,12 +1742,19 @@ def compare_cmd(
         new_inc = list(new_inc) + list(config_includes)
 
     # Inline source-tree collection (deep-compare folded into compare): when a
-    # side's --old/new-sources points at a raw checkout (not a `collect` pack),
-    # dump that side at --depth so its L3-L5 facts ride embedded in the snapshot,
-    # the way the standalone deep-compare command used to. Pre-built packs fall
-    # through unchanged to prepare_embedded_build_source below.
-    if (old_sources and not _source_is_pack(old_sources)) or (
-        new_sources and not _source_is_pack(new_sources)
+    # side's --old/new-sources points at a raw checkout, or --old/new-build-info
+    # at a raw build dir / compile_commands.json (not a `collect` pack), dump that
+    # side at --depth so its L3-L5 facts ride embedded in the snapshot, the way
+    # the standalone deep-compare command used to. Pre-built packs fall through
+    # unchanged to prepare_embedded_build_source below.
+    def _raw_evidence(p: Path | None) -> bool:
+        return p is not None and not _source_is_pack(p)
+
+    if (
+        _raw_evidence(old_sources)
+        or _raw_evidence(new_sources)
+        or _raw_evidence(old_build_info)
+        or _raw_evidence(new_build_info)
     ):
         import shutil
         import tempfile
