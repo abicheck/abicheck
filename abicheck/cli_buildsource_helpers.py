@@ -877,8 +877,9 @@ def parse_from_specs(specs: tuple[str, ...]) -> dict[str, object]:
     Returns a dict with ``cmake``/``ninja`` bools and ``ninja_compdb``/
     ``bazel_cquery``/``bazel_aquery``/``make_dry_run`` paths (None when unset).
     Raises :class:`click.UsageError` on an unknown adapter, a live adapter given
-    a ``=path``, or a pre-captured adapter given no path. Pure (no I/O) so it is
-    unit-tested directly.
+    a ``=path``, a pre-captured adapter given no path, or the same adapter passed
+    twice (so a repeated ``--from`` never silently last-wins). Pure (no I/O) so it
+    is unit-tested directly.
     """
     out: dict[str, object] = {
         "cmake": False,
@@ -889,9 +890,15 @@ def parse_from_specs(specs: tuple[str, ...]) -> dict[str, object]:
         "make_dry_run": None,
     }
     valid = sorted(_FROM_LIVE_ADAPTERS | set(_FROM_PATH_ADAPTERS))
+    seen: set[str] = set()
     for spec in specs:
         name, sep, value = spec.partition("=")
         name = name.strip()
+        if name in seen:
+            raise click.UsageError(
+                f"--from {name} was given more than once; pass each adapter "
+                "at most once."
+            )
         if name in _FROM_LIVE_ADAPTERS:
             if sep:
                 raise click.UsageError(
@@ -910,6 +917,7 @@ def parse_from_specs(specs: tuple[str, ...]) -> dict[str, object]:
             raise click.UsageError(
                 f"--from: unknown adapter {name!r}; expected one of {valid}."
             )
+        seen.add(name)
     return out
 
 

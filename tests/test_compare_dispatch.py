@@ -84,7 +84,9 @@ def test_source_is_pack_detects_manifest(tmp_path: Path) -> None:
     assert _source_is_pack(bad)
 
 
-def test_embed_inline_source_forwards_toolchain_and_collects(tmp_path: Path) -> None:
+def test_embed_inline_source_forwards_toolchain_and_collects(
+    tmp_path: Path, monkeypatch
+) -> None:
     """A raw source tree on a native side dumps inline at the requested depth and
     forwards the resolved compile/toolchain context (gcc/sysroot/nostdinc)."""
     import abicheck.cli as climod
@@ -99,25 +101,21 @@ def test_embed_inline_source_forwards_toolchain_and_collects(tmp_path: Path) -> 
             captured.update(kwargs)
 
     # Pretend the input is a native ELF binary so the embed path is taken.
-    orig = climod._normalize_binary_input
-    climod._normalize_binary_input = lambda p: (Path(p), "elf")  # type: ignore[assignment]
-    try:
-        cc = CompileContext(
-            gcc_path="/x/g++", gcc_prefix="aarch64-", gcc_options="-O2",
-            gcc_option_tokens=("-DFOO",), sysroot=Path("/sysroot"), nostdinc=True,
-        )
-        out, kept, kept_bi = climod._embed_inline_source_side(
-            _Ctx(), input_path=tmp_path / "lib.so", sources=tree,
-            headers=(), includes=(), version="1.0", lang="c++",
-            header_backend="auto", compile_context=cc,
-            frontend_explicit=False, nostdinc_explicit=False, build_info=None,
-            follow_deps=True, search_paths=(Path("/libs"),),
-            ld_library_path="/x:/y", dwarf_only=True, debug_format="dwarf",
-            pdb_path=Path("/p.pdb"),
-            collect_mode="source-target", out_dir=tmp_path, label="old",
-        )
-    finally:
-        climod._normalize_binary_input = orig  # type: ignore[assignment]
+    monkeypatch.setattr(climod, "_normalize_binary_input", lambda p: (Path(p), "elf"))
+    cc = CompileContext(
+        gcc_path="/x/g++", gcc_prefix="aarch64-", gcc_options="-O2",
+        gcc_option_tokens=("-DFOO",), sysroot=Path("/sysroot"), nostdinc=True,
+    )
+    out, kept, kept_bi = climod._embed_inline_source_side(
+        _Ctx(), input_path=tmp_path / "lib.so", sources=tree,
+        headers=(), includes=(), version="1.0", lang="c++",
+        header_backend="auto", compile_context=cc,
+        frontend_explicit=False, nostdinc_explicit=False, build_info=None,
+        follow_deps=True, search_paths=(Path("/libs"),),
+        ld_library_path="/x:/y", dwarf_only=True, debug_format="dwarf",
+        pdb_path=Path("/p.pdb"),
+        collect_mode="source-target", out_dir=tmp_path, label="old",
+    )
 
     assert kept is None and kept_bi is None and out == tmp_path / "old.abi.json"
     # Every kwarg forwarded to dump must be a real dump_cmd parameter — guards
@@ -141,7 +139,9 @@ def test_embed_inline_source_forwards_toolchain_and_collects(tmp_path: Path) -> 
     assert captured["pdb_path"] == Path("/p.pdb")
 
 
-def test_embed_inline_source_merges_tree_config_but_cli_wins(tmp_path: Path) -> None:
+def test_embed_inline_source_merges_tree_config_but_cli_wins(
+    tmp_path: Path, monkeypatch
+) -> None:
     """The side's source-root .abicheck.yml compile: block is merged into the
     frozen context (so dump --sources behavior is preserved), but an explicit CLI
     override still wins over the config frontend (both Codex findings)."""
@@ -159,54 +159,52 @@ def test_embed_inline_source_merges_tree_config_but_cli_wins(tmp_path: Path) -> 
         def invoke(self, _cmd, **kwargs):  # type: ignore[no-untyped-def]
             captured.update(kwargs)
 
-    orig = climod._normalize_binary_input
-    climod._normalize_binary_input = lambda p: (Path(p), "elf")  # type: ignore[assignment]
-    try:
-        # frontend left at default "auto", NOT explicit → config's clang wins; the
-        # tree's sysroot is picked up too.
-        climod._embed_inline_source_side(
-            _Ctx(), input_path=tmp_path / "lib.so", sources=tree,
-            headers=(), includes=(), version="1.0", lang="c++",
-            header_backend="auto", compile_context=CompileContext(),
-            frontend_explicit=False, nostdinc_explicit=False, build_info=None,
-            follow_deps=False, search_paths=(), ld_library_path="",
-            dwarf_only=False, debug_format=None, pdb_path=None,
-            collect_mode="source-target", out_dir=tmp_path, label="old",
-        )
-        merged = captured["_resolved_compile_context"]
-        assert merged.frontend == "clang" and merged.sysroot == Path("/from/cfg")
+    monkeypatch.setattr(climod, "_normalize_binary_input", lambda p: (Path(p), "elf"))
+    # frontend left at default "auto", NOT explicit → config's clang wins; the
+    # tree's sysroot is picked up too.
+    climod._embed_inline_source_side(
+        _Ctx(), input_path=tmp_path / "lib.so", sources=tree,
+        headers=(), includes=(), version="1.0", lang="c++",
+        header_backend="auto", compile_context=CompileContext(),
+        frontend_explicit=False, nostdinc_explicit=False, build_info=None,
+        follow_deps=False, search_paths=(), ld_library_path="",
+        dwarf_only=False, debug_format=None, pdb_path=None,
+        collect_mode="source-target", out_dir=tmp_path, label="old",
+    )
+    merged = captured["_resolved_compile_context"]
+    assert merged.frontend == "clang" and merged.sysroot == Path("/from/cfg")
 
-        # Now mark --ast-frontend auto explicit → CLI "auto" must beat config clang.
-        captured.clear()
-        climod._embed_inline_source_side(
-            _Ctx(), input_path=tmp_path / "lib.so", sources=tree,
-            headers=(), includes=(), version="1.0", lang="c++",
-            header_backend="auto", compile_context=CompileContext(),
-            frontend_explicit=True, nostdinc_explicit=False, build_info=None,
-            follow_deps=False, search_paths=(), ld_library_path="",
-            dwarf_only=False, debug_format=None, pdb_path=None,
-            collect_mode="source-target", out_dir=tmp_path, label="old",
-        )
-        assert captured["_resolved_compile_context"].frontend == "auto"
+    # Now mark --ast-frontend auto explicit → CLI "auto" must beat config clang.
+    captured.clear()
+    climod._embed_inline_source_side(
+        _Ctx(), input_path=tmp_path / "lib.so", sources=tree,
+        headers=(), includes=(), version="1.0", lang="c++",
+        header_backend="auto", compile_context=CompileContext(),
+        frontend_explicit=True, nostdinc_explicit=False, build_info=None,
+        follow_deps=False, search_paths=(), ld_library_path="",
+        dwarf_only=False, debug_format=None, pdb_path=None,
+        collect_mode="source-target", out_dir=tmp_path, label="old",
+    )
+    assert captured["_resolved_compile_context"].frontend == "auto"
 
-        # A nostdinc already resolved True (e.g. from compare --config) survives
-        # the tree merge even though this tree's config omits it (Codex review).
-        captured.clear()
-        climod._embed_inline_source_side(
-            _Ctx(), input_path=tmp_path / "lib.so", sources=tree,
-            headers=(), includes=(), version="1.0", lang="c++",
-            header_backend="auto", compile_context=CompileContext(nostdinc=True),
-            frontend_explicit=False, nostdinc_explicit=True, build_info=None,
-            follow_deps=False, search_paths=(), ld_library_path="",
-            dwarf_only=False, debug_format=None, pdb_path=None,
-            collect_mode="source-target", out_dir=tmp_path, label="old",
-        )
-        assert captured["_resolved_compile_context"].nostdinc is True
-    finally:
-        climod._normalize_binary_input = orig  # type: ignore[assignment]
+    # A nostdinc already resolved True (e.g. from compare --config) survives
+    # the tree merge even though this tree's config omits it (Codex review).
+    captured.clear()
+    climod._embed_inline_source_side(
+        _Ctx(), input_path=tmp_path / "lib.so", sources=tree,
+        headers=(), includes=(), version="1.0", lang="c++",
+        header_backend="auto", compile_context=CompileContext(nostdinc=True),
+        frontend_explicit=False, nostdinc_explicit=True, build_info=None,
+        follow_deps=False, search_paths=(), ld_library_path="",
+        dwarf_only=False, debug_format=None, pdb_path=None,
+        collect_mode="source-target", out_dir=tmp_path, label="old",
+    )
+    assert captured["_resolved_compile_context"].nostdinc is True
 
 
-def test_embed_inline_source_ignored_when_depth_collects_nothing(tmp_path: Path) -> None:
+def test_embed_inline_source_ignored_when_depth_collects_nothing(
+    tmp_path: Path, monkeypatch
+) -> None:
     """At a depth that collects no source (collect_mode 'off') a raw tree is
     ignored rather than silently deepening the run."""
     import abicheck.cli as climod
@@ -220,26 +218,24 @@ def test_embed_inline_source_ignored_when_depth_collects_nothing(tmp_path: Path)
         def invoke(self, _cmd, **kwargs):  # type: ignore[no-untyped-def]
             called["n"] += 1
 
-    orig = climod._normalize_binary_input
-    climod._normalize_binary_input = lambda p: (Path(p), "elf")  # type: ignore[assignment]
-    try:
-        out, kept, kept_bi = climod._embed_inline_source_side(
-            _Ctx(), input_path=tmp_path / "lib.so", sources=tree,
-            headers=(), includes=(), version="1.0", lang="c++",
-            header_backend="auto", compile_context=CompileContext(),
-            frontend_explicit=False, nostdinc_explicit=False, build_info=None,
-            follow_deps=False, search_paths=(),
-            ld_library_path="", dwarf_only=False, debug_format=None,
-            pdb_path=None, collect_mode="off", out_dir=tmp_path, label="old",
-        )
-    finally:
-        climod._normalize_binary_input = orig  # type: ignore[assignment]
+    monkeypatch.setattr(climod, "_normalize_binary_input", lambda p: (Path(p), "elf"))
+    out, kept, kept_bi = climod._embed_inline_source_side(
+        _Ctx(), input_path=tmp_path / "lib.so", sources=tree,
+        headers=(), includes=(), version="1.0", lang="c++",
+        header_backend="auto", compile_context=CompileContext(),
+        frontend_explicit=False, nostdinc_explicit=False, build_info=None,
+        follow_deps=False, search_paths=(),
+        ld_library_path="", dwarf_only=False, debug_format=None,
+        pdb_path=None, collect_mode="off", out_dir=tmp_path, label="old",
+    )
 
     assert kept is None and kept_bi is None and out == tmp_path / "lib.so"
     assert called["n"] == 0  # no dump performed
 
 
-def test_embed_inline_source_drops_raw_build_info_when_tree_ignored(tmp_path: Path) -> None:
+def test_embed_inline_source_drops_raw_build_info_when_tree_ignored(
+    tmp_path: Path, monkeypatch
+) -> None:
     """When the source tree can't be collected (here: collect_mode 'off'), a raw
     --build-info dir is dropped too — otherwise prepare_embedded_build_source would
     try to load it as a pack and abort with 'Invalid evidence pack' (Codex review).
@@ -256,25 +252,23 @@ def test_embed_inline_source_drops_raw_build_info_when_tree_ignored(tmp_path: Pa
         def invoke(self, _cmd, **kwargs):  # type: ignore[no-untyped-def]
             pass
 
-    orig = climod._normalize_binary_input
-    climod._normalize_binary_input = lambda p: (Path(p), "elf")  # type: ignore[assignment]
-    try:
-        _, kept, kept_bi = climod._embed_inline_source_side(
-            _Ctx(), input_path=tmp_path / "lib.so", sources=tree,
-            headers=(), includes=(), version="1.0", lang="c++",
-            header_backend="auto", compile_context=CompileContext(),
-            frontend_explicit=False, nostdinc_explicit=False, build_info=raw_build,
-            follow_deps=False, search_paths=(),
-            ld_library_path="", dwarf_only=False, debug_format=None,
-            pdb_path=None, collect_mode="off", out_dir=tmp_path, label="old",
-        )
-    finally:
-        climod._normalize_binary_input = orig  # type: ignore[assignment]
+    monkeypatch.setattr(climod, "_normalize_binary_input", lambda p: (Path(p), "elf"))
+    _, kept, kept_bi = climod._embed_inline_source_side(
+        _Ctx(), input_path=tmp_path / "lib.so", sources=tree,
+        headers=(), includes=(), version="1.0", lang="c++",
+        header_backend="auto", compile_context=CompileContext(),
+        frontend_explicit=False, nostdinc_explicit=False, build_info=raw_build,
+        follow_deps=False, search_paths=(),
+        ld_library_path="", dwarf_only=False, debug_format=None,
+        pdb_path=None, collect_mode="off", out_dir=tmp_path, label="old",
+    )
 
     assert kept is None and kept_bi is None  # raw build dir dropped, not kept
 
 
-def test_embed_inline_collects_raw_build_info_without_sources(tmp_path: Path) -> None:
+def test_embed_inline_collects_raw_build_info_without_sources(
+    tmp_path: Path, monkeypatch
+) -> None:
     """A raw --build-info on a native side with no --sources still triggers the
     inline dump (so L3 is collected/embedded) rather than falling through to the
     pack loader and aborting with 'Invalid evidence pack' (Codex review)."""
@@ -289,20 +283,16 @@ def test_embed_inline_collects_raw_build_info_without_sources(tmp_path: Path) ->
         def invoke(self, _cmd, **kwargs):  # type: ignore[no-untyped-def]
             captured.update(kwargs)
 
-    orig = climod._normalize_binary_input
-    climod._normalize_binary_input = lambda p: (Path(p), "elf")  # type: ignore[assignment]
-    try:
-        out, kept, kept_bi = climod._embed_inline_source_side(
-            _Ctx(), input_path=tmp_path / "lib.so", sources=None,
-            headers=(), includes=(), version="1.0", lang="c++",
-            header_backend="auto", compile_context=CompileContext(),
-            frontend_explicit=False, nostdinc_explicit=False, build_info=raw_build,
-            follow_deps=False, search_paths=(),
-            ld_library_path="", dwarf_only=False, debug_format=None,
-            pdb_path=None, collect_mode="build", out_dir=tmp_path, label="old",
-        )
-    finally:
-        climod._normalize_binary_input = orig  # type: ignore[assignment]
+    monkeypatch.setattr(climod, "_normalize_binary_input", lambda p: (Path(p), "elf"))
+    out, kept, kept_bi = climod._embed_inline_source_side(
+        _Ctx(), input_path=tmp_path / "lib.so", sources=None,
+        headers=(), includes=(), version="1.0", lang="c++",
+        header_backend="auto", compile_context=CompileContext(),
+        frontend_explicit=False, nostdinc_explicit=False, build_info=raw_build,
+        follow_deps=False, search_paths=(),
+        ld_library_path="", dwarf_only=False, debug_format=None,
+        pdb_path=None, collect_mode="build", out_dir=tmp_path, label="old",
+    )
 
     # The dump was invoked with the raw build-info forwarded; both consumed → None.
     assert out == tmp_path / "old.abi.json"
@@ -311,7 +301,9 @@ def test_embed_inline_collects_raw_build_info_without_sources(tmp_path: Path) ->
     assert captured["_resolved_collect_mode"] == "build"
 
 
-def test_embed_inline_raw_build_info_on_snapshot_is_ignored(tmp_path: Path) -> None:
+def test_embed_inline_raw_build_info_on_snapshot_is_ignored(
+    tmp_path: Path, monkeypatch
+) -> None:
     """A raw --build-info on a snapshot input (can't re-dump) is warned about and
     cleared, so it never reaches the pack loader (Codex review)."""
     import abicheck.cli as climod
@@ -324,25 +316,23 @@ def test_embed_inline_raw_build_info_on_snapshot_is_ignored(tmp_path: Path) -> N
         def invoke(self, _cmd, **kwargs):  # type: ignore[no-untyped-def]
             raise AssertionError("dump must not run on a snapshot input")
 
-    orig = climod._normalize_binary_input
-    climod._normalize_binary_input = lambda p: (Path(p), None)  # type: ignore[assignment]
-    try:
-        out, kept, kept_bi = climod._embed_inline_source_side(
-            _Ctx(), input_path=tmp_path / "old.json", sources=None,
-            headers=(), includes=(), version="1.0", lang="c++",
-            header_backend="auto", compile_context=CompileContext(),
-            frontend_explicit=False, nostdinc_explicit=False, build_info=raw_build,
-            follow_deps=False, search_paths=(), ld_library_path="",
-            dwarf_only=False, debug_format=None, pdb_path=None,
-            collect_mode="build", out_dir=tmp_path, label="old",
-        )
-    finally:
-        climod._normalize_binary_input = orig  # type: ignore[assignment]
+    monkeypatch.setattr(climod, "_normalize_binary_input", lambda p: (Path(p), None))
+    out, kept, kept_bi = climod._embed_inline_source_side(
+        _Ctx(), input_path=tmp_path / "old.json", sources=None,
+        headers=(), includes=(), version="1.0", lang="c++",
+        header_backend="auto", compile_context=CompileContext(),
+        frontend_explicit=False, nostdinc_explicit=False, build_info=raw_build,
+        follow_deps=False, search_paths=(), ld_library_path="",
+        dwarf_only=False, debug_format=None, pdb_path=None,
+        collect_mode="build", out_dir=tmp_path, label="old",
+    )
 
     assert kept is None and kept_bi is None  # raw build-info dropped, not kept
 
 
-def test_embed_inline_raw_build_info_dropped_at_off_depth(tmp_path: Path) -> None:
+def test_embed_inline_raw_build_info_dropped_at_off_depth(
+    tmp_path: Path, monkeypatch
+) -> None:
     """A raw --build-info with a no-collect depth (collect_mode 'off') is dropped
     rather than reaching the pack loader."""
     import abicheck.cli as climod
@@ -356,20 +346,16 @@ def test_embed_inline_raw_build_info_dropped_at_off_depth(tmp_path: Path) -> Non
         def invoke(self, _cmd, **kwargs):  # type: ignore[no-untyped-def]
             called["n"] += 1
 
-    orig = climod._normalize_binary_input
-    climod._normalize_binary_input = lambda p: (Path(p), "elf")  # type: ignore[assignment]
-    try:
-        _, kept, kept_bi = climod._embed_inline_source_side(
-            _Ctx(), input_path=tmp_path / "lib.so", sources=None,
-            headers=(), includes=(), version="1.0", lang="c++",
-            header_backend="auto", compile_context=CompileContext(),
-            frontend_explicit=False, nostdinc_explicit=False, build_info=raw_build,
-            follow_deps=False, search_paths=(), ld_library_path="",
-            dwarf_only=False, debug_format=None, pdb_path=None,
-            collect_mode="off", out_dir=tmp_path, label="old",
-        )
-    finally:
-        climod._normalize_binary_input = orig  # type: ignore[assignment]
+    monkeypatch.setattr(climod, "_normalize_binary_input", lambda p: (Path(p), "elf"))
+    _, kept, kept_bi = climod._embed_inline_source_side(
+        _Ctx(), input_path=tmp_path / "lib.so", sources=None,
+        headers=(), includes=(), version="1.0", lang="c++",
+        header_backend="auto", compile_context=CompileContext(),
+        frontend_explicit=False, nostdinc_explicit=False, build_info=raw_build,
+        follow_deps=False, search_paths=(), ld_library_path="",
+        dwarf_only=False, debug_format=None, pdb_path=None,
+        collect_mode="off", out_dir=tmp_path, label="old",
+    )
 
     assert kept is None and kept_bi is None and called["n"] == 0
 

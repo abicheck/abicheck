@@ -141,6 +141,17 @@ def test_parse_from_specs_rejects_bad_specs(spec, needle):
     assert needle in str(exc.value)
 
 
+def test_parse_from_specs_rejects_duplicate_adapter():
+    """A repeated `--from` adapter is rejected, not silently last-wins."""
+    import click as _click
+
+    from abicheck.cli_buildsource_helpers import parse_from_specs
+
+    with pytest.raises(_click.UsageError) as exc:
+        parse_from_specs(("bazel-aquery=a.json", "bazel-aquery=b.json"))
+    assert "more than once" in str(exc.value)
+
+
 def test_collect_from_bogus_adapter_is_usage_error(tmp_path):
     """The bad-spec error surfaces through the live `collect` command too."""
     result = CliRunner().invoke(
