@@ -95,13 +95,14 @@ if TYPE_CHECKING:
 )
 @click.option(
     "-H",
-    "--headers",
     "--header",
+    "--headers",
     "headers",
     multiple=True,
     type=click.Path(path_type=Path),
     help="Public header file or directory (recorded as provenance; repeat). "
-    "`--header` is an alias for cross-command consistency with dump/compare.",
+    "`--header` is the canonical spelling (shared with dump/compare); "
+    "`--headers` is accepted as a back-compat alias.",
 )
 @click.option(
     "--build-dir",

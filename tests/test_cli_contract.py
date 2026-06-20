@@ -593,6 +593,37 @@ def test_no_option_has_empty_help() -> None:
     assert blank == [], f"options with empty --help: {blank}"
 
 
+def test_shared_concept_canonical_spelling() -> None:
+    """A shared concept shows one canonical long flag across every command.
+
+    The CLI carries the same idea on many commands (public headers, the output
+    path). They had drifted in which spelling renders *first* in ``--help``
+    (`collect` led with ``--headers``; `probe run` used ``--out``). The aliases
+    still resolve, but the displayed primary must be uniform so the surface
+    reads as one tool. ABICC-dialect commands use their own single-dash dests
+    and are naturally excluded (they never bind ``headers``/``output``/``out``).
+    """
+    import click
+
+    header_offenders: list[str] = []
+    output_offenders: list[str] = []
+    for path, cmd in _all_leaf_commands():
+        for p in cmd.params:  # type: ignore[attr-defined]
+            if not isinstance(p, click.Option):
+                continue
+            longs = [o for o in p.opts if o.startswith("--")]
+            if p.name == "headers" and longs and longs[0] != "--header":
+                header_offenders.append(f"{path}: {longs}")
+            if p.name in {"output", "out"} and "--output" not in p.opts:
+                output_offenders.append(f"{path}: {list(p.opts)}")
+    assert header_offenders == [], (
+        f"header option must lead with --header: {header_offenders}"
+    )
+    assert output_offenders == [], (
+        f"output-path option must offer --output: {output_offenders}"
+    )
+
+
 # ── Chokepoint parity: one classifier, no scope_public drift ─────────────────
 
 
