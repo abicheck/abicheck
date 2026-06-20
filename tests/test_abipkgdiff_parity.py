@@ -94,7 +94,7 @@ def _run_abicheck_compare_release(old_pkg: Path, new_pkg: Path) -> str:
     from abicheck.cli import main
 
     runner = CliRunner()
-    result = runner.invoke(main, ["compare-release", str(old_pkg), str(new_pkg)])
+    result = runner.invoke(main, ["compare", str(old_pkg), str(new_pkg)])
     code = result.exit_code
     if code == 4:
         return "BREAKING"

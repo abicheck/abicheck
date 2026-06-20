@@ -74,7 +74,7 @@ automatically, then runs ABI comparison and reports results.
 | Input | Default | Description |
 |-------|---------|-------------|
 | `lang` | `c++` | Language mode for the header backend: `c++` or `c` |
-| `header-backend` | `castxml` (`auto`) | L2 header-AST frontend (compare/dump modes): `auto`, `castxml`, or `clang` (`clang -ast-dump=json`, for clang-only hosts). `auto` falls back to clang on a castxml toolchain error. Same as `ABICHECK_HEADER_BACKEND`. |
+| `ast-frontend` | `castxml` (`auto`) | L2 header-AST frontend (compare/dump modes): `auto`, `castxml`, or `clang` (`clang -ast-dump=json`, for clang-only hosts). `auto` falls back to clang on a castxml toolchain error. Same as `ABICHECK_AST_FRONTEND`. |
 | `gcc-path` | — | Path to cross-compiler binary (dump mode only) |
 | `gcc-prefix` | — | Cross-toolchain prefix, e.g. `aarch64-linux-gnu-` (dump mode only) |
 | `gcc-options` | — | Extra flags for castxml (dump mode only) |
@@ -106,11 +106,10 @@ scan degrades gracefully and L0–L2 stay authoritative.
 | `compile-db` | scan (dump folds into `build-info`) | Explicit `compile_commands.json` path. |
 | `build-config` | scan, dump | Trusted `.abicheck.yml`; enables `build.query` together with `allow-build-query`. |
 | `allow-build-query` | scan, dump | Permit a trusted `build.query` subprocess to emit a compile DB (default `false`; only existing build outputs are read otherwise). |
-| `collect-mode` | dump | How much evidence dump collects: `off`, `build`, `graph-build`, `source-changed`, `source-target`, `graph-summary`, `graph-full`. (scan derives this from the level inputs below.) |
+| `depth` | scan, dump | Evidence-depth dial: `binary`, `headers`, `build`, `source`, or `full`. Maps to `--depth`. (scan can also derive this from the level inputs below.) |
 | `baseline` | scan | Previous build's dump/library to compare against (or use `abi-baseline` to auto-fetch one). |
 | `scan-mode` | scan | Fixed `(L,S)` preset: `pr` (default), `pr-deep`, `baseline`, `audit`. |
 | `source-method` | scan | Precise S-axis: `s0`…`s6`, or `auto` (risk-driven, opt-in). |
-| `depth` | scan | Coarse L-axis: `headers`, `build`, `source`, `full`, `graph`. `source-method` wins if both set. |
 | `since` | scan | Focus the scan on files changed vs a git ref (e.g. `origin/main`). |
 | `changed-path` | scan | Changed path(s) to focus on (space-separated; alternative to `since`). |
 | `budget` | scan | Time guard (e.g. `15m`). The step **fails** on overflow (`verdict: BUDGET_OVERFLOW`) — a budget never silently shrinks scope. |
@@ -325,7 +324,7 @@ with `source-method` (S-axis) or the coarser `depth` (L-axis):
 | Cheap build-flag drift only (L3) | `depth: build` |
 | Source semantics on changed TUs | `source-method: s4` + `since:` |
 | Full source-ABI replay | `source-method: s5` |
-| Source graph / localization (L5) | `depth: graph` or `scan-mode: pr-deep` |
+| Source graph / localization (L5) | `source-method: s4` or `scan-mode: pr-deep` |
 | Risk-driven (dev/local, opt-in) | `source-method: auto` + `since:` |
 
 ### Single-release audit (no baseline)
@@ -401,7 +400,7 @@ such snapshots) carries the L3/L4/L5 findings — no out-of-band directories:
           new-library: build/libfoo.so
           header: include/
           sources: .
-          collect-mode: source-target   # full L3+L4+L5 for a baseline
+          depth: source                 # full L3+L4+L5 for a baseline
           output-file: abi-baseline.json
 ```
 

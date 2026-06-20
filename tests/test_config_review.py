@@ -222,27 +222,26 @@ class TestReportModeImpact:
 
 class TestCompareReleaseDefaults:
     def test_scope_toggle_present(self):
-        out = CliRunner().invoke(main, ["compare-release", "--help"]).output
+        out = CliRunner().invoke(main, ["compare", "--help"]).output
         # The flag is documented (rich-click wraps the long toggle across panel
         # lines, so assert the stable primary name) and is a boolean toggle.
         assert "--scope-public-headers" in out
-        opt = next(p for p in main.commands["compare-release"].params
+        opt = next(p for p in main.commands["compare"].params
                    if getattr(p, "name", "") == "scope_public_headers")
         assert "--no-scope-public-headers" in opt.secondary_opts
 
     def test_jobs_default_zero(self):
-        out = CliRunner().invoke(main, ["compare-release", "--help"]).output
+        out = CliRunner().invoke(main, ["compare", "--help"]).output
         assert "auto-detect" in out
 
     def test_severity_options_present(self):
-        out = CliRunner().invoke(main, ["compare-release", "--help"]).output
-        # ADR-037 D4: only the coarse --severity-preset stays visible; the
-        # per-category overrides are demoted to config (hidden, still functional).
+        out = CliRunner().invoke(main, ["compare", "--help"]).output
+        # `compare` now drives directory/package (release) comparisons too. It
+        # surfaces the full severity family (the coarse --severity-preset plus the
+        # per-category overrides) — unlike the removed `compare-release` command,
+        # which hid the per-category knobs.
         assert "--severity-preset" in out
-        assert "--severity-abi-breaking" not in out
-        opt = next(p for p in main.commands["compare-release"].params
-                   if getattr(p, "name", "") == "severity_abi_breaking")
-        assert opt.hidden
+        assert "--severity-abi-breaking" in out
 
 
 # ── §5 compare-release severity-aware exit aggregation ──────────────────────
@@ -268,7 +267,7 @@ class TestCompareReleaseSeverityExit:
         old_dir, new_dir = self._make_release(tmp_path)
         result = CliRunner().invoke(
             main,
-            ["compare-release", str(old_dir), str(new_dir),
+            ["compare", str(old_dir), str(new_dir),
              "--severity-preset", "info-only"],
         )
         # info-only downgrades everything below error -> exit 0 despite the break.
@@ -278,7 +277,7 @@ class TestCompareReleaseSeverityExit:
         old_dir, new_dir = self._make_release(tmp_path)
         result = CliRunner().invoke(
             main,
-            ["compare-release", str(old_dir), str(new_dir),
+            ["compare", str(old_dir), str(new_dir),
              "--severity-preset", "default"],
         )
         assert result.exit_code == 4
@@ -286,7 +285,7 @@ class TestCompareReleaseSeverityExit:
     def test_no_severity_keeps_legacy_exit(self, tmp_path):
         old_dir, new_dir = self._make_release(tmp_path)
         result = CliRunner().invoke(
-            main, ["compare-release", str(old_dir), str(new_dir)],
+            main, ["compare", str(old_dir), str(new_dir)],
         )
         # Removed C++ symbol == BREAKING == legacy exit 4.
         assert result.exit_code == 4

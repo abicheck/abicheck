@@ -132,13 +132,13 @@ inputs:
     description: 'Language mode for the header backend: "c++" or "c".'
     required: false
     default: 'c++'
-  header-backend:
+  ast-frontend:
     description: >
       L2 header-AST frontend for native-binary inputs: "auto" (castxml if
       present, else clang, with auto-fallback to clang on a castxml
       toolchain-version error), "castxml" (default), or "clang"
       (clang -ast-dump=json; for clang-only hosts). Applies to compare and
-      dump modes. Equivalent to the ABICHECK_HEADER_BACKEND env var.
+      dump modes. Equivalent to the ABICHECK_AST_FRONTEND env var.
     required: false
   gcc-path:
     description: 'Path to GCC/G++ cross-compiler binary (dump mode only).'
@@ -213,13 +213,6 @@ inputs:
       Used by scan and dump modes.
     required: false
     default: 'false'
-  collect-mode:
-    description: >
-      How much build-source evidence dump collects from sources/build-info:
-      off, build (L3 only), graph-build, source-changed, source-target
-      (default in CLI), graph-summary, graph-full. dump mode only;
-      scan derives this from scan-mode / source-method / depth.
-    required: false
   scan-mode:
     description: >
       scan mode only. Fixed (L,S) preset selecting how deep the scan runs:
@@ -234,8 +227,9 @@ inputs:
     required: false
   depth:
     description: >
-      scan mode only. Coarse L-axis selector: headers, build, source, full,
-      or graph. source-method wins if both are set. Maps to scan --depth.
+      Coarse evidence-depth selector (scan and dump modes): binary, headers,
+      build, source, or full. In scan mode, source-method wins if both are set.
+      Maps to --depth.
     required: false
   since:
     description: >
@@ -494,7 +488,7 @@ runs:
         INPUT_OLD_VERSION: ${{ inputs.old-version }}
         INPUT_NEW_VERSION: ${{ inputs.new-version }}
         INPUT_LANG: ${{ inputs.lang }}
-        INPUT_HEADER_BACKEND: ${{ inputs.header-backend }}
+        INPUT_AST_FRONTEND: ${{ inputs.ast-frontend }}
         INPUT_GCC_PATH: ${{ inputs.gcc-path }}
         INPUT_GCC_PREFIX: ${{ inputs.gcc-prefix }}
         INPUT_GCC_OPTIONS: ${{ inputs.gcc-options }}
@@ -536,7 +530,6 @@ runs:
         INPUT_COMPILE_DB: ${{ inputs.compile-db }}
         INPUT_BUILD_CONFIG: ${{ inputs.build-config }}
         INPUT_ALLOW_BUILD_QUERY: ${{ inputs.allow-build-query }}
-        INPUT_COLLECT_MODE: ${{ inputs.collect-mode }}
         INPUT_SCAN_MODE: ${{ inputs.scan-mode }}
         INPUT_SOURCE_METHOD: ${{ inputs.source-method }}
         INPUT_DEPTH: ${{ inputs.depth }}

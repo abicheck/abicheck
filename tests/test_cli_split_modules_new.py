@@ -292,13 +292,13 @@ class TestCliStackBasics:
         assert "dependency tree" in result.output.lower()
 
     def test_stack_check_help(self) -> None:
-        result = CliRunner().invoke(main, ["stack-check", "--help"])
+        result = CliRunner().invoke(main, ["deps", "compare", "--help"])
         assert result.exit_code == 0
         assert "stack" in result.output.lower()
 
     def test_stack_check_same_baseline_candidate_rejected(self, tmp_path: Path) -> None:
         result = CliRunner().invoke(main, [
-            "stack-check", "usr/bin/myapp",
+            "deps", "compare", "usr/bin/myapp",
             "--baseline", str(tmp_path),
             "--candidate", str(tmp_path),
         ])
@@ -308,7 +308,7 @@ class TestCliStackBasics:
     def test_deps_rejects_non_elf(self, tmp_path: Path) -> None:
         f = tmp_path / "fake.txt"
         f.write_text("hello", encoding="utf-8")
-        result = CliRunner().invoke(main, ["deps", str(f)])
+        result = CliRunner().invoke(main, ["deps", "tree", str(f)])
         assert result.exit_code != 0
         assert "requires an ELF binary" in result.output
 
@@ -320,7 +320,7 @@ class TestCliStackBasics:
         (baseline / "fake").write_text("hello", encoding="utf-8")
         (candidate / "fake").write_text("hello", encoding="utf-8")
         result = CliRunner().invoke(main, [
-            "stack-check", "fake",
+            "deps", "compare", "fake",
             "--baseline", str(baseline),
             "--candidate", str(candidate),
         ])

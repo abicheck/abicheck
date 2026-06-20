@@ -53,12 +53,12 @@ binary symbol / debug type (`SOURCE_DECL_MAPS_TO_SYMBOL`,
 `SOURCE_TYPE_MAPS_TO_DEBUG_TYPE`, `BINARY_EXPORTS_SYMBOL`) — giving the full
 `target → public header → declaration → exported symbol` reachability closure.
 Every node and edge carries provenance and a confidence label. Collect it with
-`--source-graph summary` and compare two summaries with `compare-graph` (below).
+`--source-graph summary` and compare two summaries with `graph compare` (below).
 Deeper layers extend the same graph: approximate Clang call edges
 (`--call-graph`), compile-unit include edges (`--include-graph`), and
 pre-captured Kythe/CodeQL backends (`--kythe-entries`/`--codeql-results`). All
-six graph-derived findings flow through `compare-graph` and the verdict
-pipeline, and `explain-finding` localizes a single finding through the graph.
+six graph-derived findings flow through `graph compare` and the verdict
+pipeline, and `graph explain` localizes a single finding through the graph.
 
 > **Source ABI replay (L4) requires clang** (or castxml for the declaration
 > subset, or a pre-captured Android dump). It is the one tier gated on a C++
@@ -228,33 +228,30 @@ that cost is measurable and you control the toolchain image. GCC
 contract is identical, so `abicheck merge` ingests them the same way. The portable
 default remains `compile_commands.json` replay (`dump --sources`).
 
-### Choosing how much to collect — `dump --collect-mode`
+### Choosing how much to collect — `dump --depth`
 
-`dump --collect-mode` (the ADR-033 D2 CI evidence mode) selects *which* layers
-are collected from `--sources` / `--build-info`, trading cost for depth:
+`dump --depth` (the unified evidence-depth dial, ADR-037 D5) selects *which*
+layers are collected from `--sources` / `--build-info`, trading cost for depth:
 
 ```bash
-abicheck dump --sources ./src/ --collect-mode build         -o s.json  # L3 only
-abicheck dump --sources ./src/ --collect-mode source-target -o s.json  # L3+L4+L5 (default)
-abicheck dump --sources ./src/ --collect-mode off           -o s.json  # embed nothing
+abicheck dump --sources ./src/ --depth build    -o s.json  # L3 only
+abicheck dump --sources ./src/ --depth source   -o s.json  # L3+L4+L5
+abicheck dump --sources ./src/ --depth headers  -o s.json  # embed nothing (L2 only)
+abicheck dump --sources ./src/ --max            -o s.json  # deepest (== --depth full)
 ```
 
-| Mode | Layers collected | Replay scope |
-|------|------------------|--------------|
-| `off` | none | — |
-| `build` | L3 build context only | — |
-| `graph-build` | L3 + L5 graph (no source replay) | — |
-| `source-changed` | L3 + L4 + L5 | changed TUs |
-| `source-target` *(default)* | L3 + L4 + L5 | target |
-| `graph-summary` | L3 + L4 + L5 | changed |
-| `graph-full` | L3 + L4 + L5 | full |
+| `--depth` | Layers collected | Replay scope |
+|-----------|------------------|--------------|
+| `binary` / `headers` | none (L0/L1, or +L2 AST) | — |
+| `build` | + L3 build context | — |
+| `source` | + L4 + L5 | target |
+| `full` (`--max`) | + L4 + L5 | full |
 
 `build` is the cheap PR default (build-flag/toolchain drift, no source parse);
-`graph-build` additionally folds the **L5 structural graph** (target → source →
-header → build-option nodes) from those L3 facts *without* the L4 source replay,
-so the graph + build options are available even on large monorepos where a full
-L4 parse would take hours; the `source-*` / `graph-*` modes add the L4 source
-replay and L5 graph at the matching replay scope.
+the `source`/`full` rungs add the L4 source replay and the **L5 structural
+graph** (target → source → header → build-option nodes) at the matching replay
+scope. (The graph is an internal consequence of the `source` rung, never its own
+user-facing depth.)
 
 ### Build-tool query configuration (`.abicheck.yml`)
 
@@ -375,9 +372,9 @@ absent):
 Localize a single finding through the graph:
 
 ```bash
-abicheck explain-finding --sources libfoo.evidence/ --symbol _ZN3foo3barEv
+abicheck graph explain --sources libfoo.evidence/ --symbol _ZN3foo3barEv
 # or resolve the symbol from a JSON report:
-abicheck explain-finding --sources libfoo.evidence/ --report report.json --finding-id 0
+abicheck graph explain --sources libfoo.evidence/ --report report.json --finding-id 0
 ```
 
 It reports what produced and reaches the symbol — exporting target, source
@@ -388,8 +385,8 @@ Compare two graph summaries directly — pass either the pack directories or the
 `graph/source_graph_summary.json` files:
 
 ```bash
-abicheck compare-graph old.evidence/ new.evidence/            # structural delta
-abicheck compare-graph old.evidence/ new.evidence/ --format json
+abicheck graph compare old.evidence/ new.evidence/            # structural delta
+abicheck graph compare old.evidence/ new.evidence/ --format json
 ```
 
 The diff is **structural** (which nodes/edges entered or left the graph). Per
@@ -400,17 +397,22 @@ decides or suppresses an artifact-proven ABI break.
 
 - `--compile-db PATH` / `-p DIR` — a `compile_commands.json` (the universal,
   low-friction input).
-- `--build-dir DIR --cmake` — the CMake File API *reply* directory (target
+
+Build-system adapters are selected with a single repeatable
+`--from ADAPTER[=PATH]`. Live adapters read `--build-dir` and take no path;
+pre-captured adapters require a path:
+
+- `--build-dir DIR --from cmake` — the CMake File API *reply* directory (target
   graph, public/private header file sets, toolchains).
-- `--build-dir DIR --ninja` / `--ninja-compdb FILE` — Ninja `-t compdb`/`graph`
-  output (live query or pre-captured for hermetic CI).
-- `--bazel-cquery FILE` / `--bazel-aquery FILE` — pre-captured
+- `--build-dir DIR --from ninja` / `--from ninja-compdb=FILE` — Ninja
+  `-t compdb`/`graph` output (live query or pre-captured for hermetic CI).
+- `--from bazel-cquery=FILE` / `--from bazel-aquery=FILE` — pre-captured
   `bazel cquery --output=jsonproto` (configured target graph) and
   `bazel aquery --output=jsonproto` (compile/link action graph). Use the
   textual `jsonproto` form: a binary `--output=proto` blob is reported with a
   diagnostic rather than decoded (binary-proto ingestion is a documented
   follow-up).
-- `--make-dry-run FILE` — a pre-captured `make -n`/`make --trace` transcript.
+- `--from make=FILE` — a pre-captured `make -n`/`make --trace` transcript.
   Make has no authoritative target graph, so the recovered compile units are
   **reduced confidence**; prefer a generated `compile_commands.json` when one
   is available.
@@ -437,7 +439,7 @@ cmake --build build-old
 #    Add --source-abi for L4 (needs clang); drop it for L3-only.
 abicheck collect \
     --compile-db build-old/compile_commands.json \
-    --build-dir build-old --cmake \
+    --build-dir build-old --from cmake \
     --source-abi \
     --output libfoo-1.0.evidence/
 
@@ -581,7 +583,7 @@ policy profiles decide whether a source-only finding blocks a release.
 ## Source graph findings (L5)
 
 When both packs carry an L5 source graph summary, comparing them (via `compare`
-with `--old/--new-build-info`, or directly with `compare-graph`) produces
+with `--old/--new-build-info`, or directly with `graph compare`) produces
 graph-derived **risk** findings (ADR-031 D6):
 
 | ChangeKind | verdict | meaning |
@@ -760,8 +762,8 @@ abicheck dump libfoo.so --sources ./src \
 - **L3 (build data)** — effectively free (~0.3–0.5 s), independent of project size.
 - **L4+L5 (source replay)** — the expensive tier; cost ≈ *TUs × per-TU parse*.
   It does **not** scale to monorepos as a full pass. Control it with:
-  - `--collect-mode source-changed` — replay only the TUs a PR touches (the CI default);
-  - `--collect-mode graph-build` — L3 + the L5 structural graph (build options +
+  - `--depth source` with a `--since`/`--changed-path` seed — replay only the TUs a PR touches;
+  - `--depth build` — L3 + the L5 structural graph (build options +
     target/source/header nodes) with **no** L4 parse — feasible on LLVM in seconds;
   - the content-addressed per-TU cache (`abicheck collect --build-cache-dir`) — unchanged TUs are skipped on re-runs.
 - **`compare`** — cost is driven less by raw symbol count than by the **fuzzy
@@ -771,11 +773,11 @@ abicheck dump libfoo.so --sources ./src \
 
 ### Recommended defaults
 
-- **PR gate:** dump the two binaries (L0/L1) + `--collect-mode build` for cheap
-  build-flag drift. Add `source-changed` only if you need source-level API checks.
+- **PR gate:** dump the two binaries (L0/L1) + `--depth build` for cheap
+  build-flag drift. Add `--depth source` only if you need source-level API checks.
 - **Release:** the full `--sources` pass on the changed library, with `-H` for
   public-surface scoping.
-- **Monorepo / huge project:** stay on the artifact tiers + `graph-build`; never
+- **Monorepo / huge project:** stay on the artifact tiers + `--depth build`; never
   run a full L4 pass over thousands of TUs.
 
 ## Schema & storage

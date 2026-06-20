@@ -38,6 +38,7 @@ from .cli import (
     _setup_verbosity,
     main,
 )
+from .cli_options import lang_option
 from .cli_params import POLICY_FILE_PARAM, _load_suppression_and_policy
 
 
@@ -116,9 +117,7 @@ def _render_plugin_result_json(result: object) -> str:
               type=click.Path(exists=True, path_type=Path), default=None,
               help="Manifest file listing required entrypoints, one per line "
                    "(# comments allowed).")
-@click.option("--lang", default="c++", show_default=True,
-              type=click.Choice(["c++", "c"], case_sensitive=False),
-              help="Language mode (used only when dumping plugin binaries).")
+@lang_option(help="Language mode (used only when dumping plugin binaries).")
 @click.option("--format", "fmt", type=click.Choice(["markdown", "json"]),
               default="markdown", show_default=True)
 @click.option("-o", "--output", type=click.Path(path_type=Path), default=None)

@@ -88,20 +88,18 @@ def resolve_dump_debug_format(
 def resolve_dump_depth(
     depth: str | None,
     max_depth: bool,
-    collect_mode: str,
-    collect_mode_explicit: bool,
+    default_mode: str,
 ) -> str:
-    """Resolve the ``--depth``/``--max`` preset into a ``--collect-mode`` value.
+    """Resolve the ``--depth``/``--max`` preset into the internal collect-mode value.
 
     ``--depth`` is the friendly evidence-depth dial (same vocabulary as
-    ``scan --depth``: headers/build/graph/source/full); it expands to the
+    ``scan --depth``: binary/headers/build/source/full); it expands to the
     underlying ADR-033 collect mode via the shared ``scan_levels`` mapping so the
-    two commands stay consistent. ``--max`` is shorthand for ``--depth full``.
+    commands stay consistent. ``--max`` is shorthand for ``--depth full``.
 
-    ``--depth`` and an explicit ``--collect-mode`` are mutually exclusive (the
-    preset *is* the collect mode); raises :class:`click.UsageError` if both are
-    given, or if ``--max`` is combined with a different ``--depth``. When no
-    depth preset is supplied, ``collect_mode`` is returned unchanged.
+    Raises :class:`click.UsageError` if ``--max`` is combined with a different
+    ``--depth``. When no depth preset is supplied, the command's *default_mode* is
+    returned (``dump`` embeds at ``source-target``; ``compare`` reads at ``off``).
     """
     from .buildsource.scan_levels import (
         EvidenceDepth,
@@ -117,12 +115,7 @@ def resolve_dump_depth(
             )
         depth = EvidenceDepth.FULL.value
     if depth is None:
-        return collect_mode
-    if collect_mode_explicit:
-        raise click.UsageError(
-            "--depth and --collect-mode are mutually exclusive: --depth is the "
-            "friendly preset over --collect-mode."
-        )
+        return default_mode
     method = depth_to_method(EvidenceDepth(depth))
     # headers depth reaches no source method (L2 is intrinsic) — collect nothing.
     return "off" if method is None else method_to_collect_mode(method)

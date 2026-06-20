@@ -87,12 +87,11 @@ USER_DEPTHS: tuple[EvidenceDepth, ...] = (
     EvidenceDepth.FULL,
 )
 
-#: Deprecated ``--depth`` spellings → their replacement (ADR-037 D5/D6). The G21
-#: ``graph`` rung folds into ``source`` (which now builds the graph internally);
+#: Deprecated ``--depth`` spellings → their replacement (ADR-037 D5/D6).
 #: ``symbols`` was renamed to the evidence-named ``binary`` rung (ADR-037 D5 G22
-#: Phase 6) and keeps working as an alias for one release.
+#: Phase 6) and keeps working as an alias. (The G21 ``graph`` rung was removed
+#: outright — the L5 graph is an internal consequence of ``--depth source``.)
 DEPRECATED_DEPTHS: dict[str, EvidenceDepth] = {
-    "graph": EvidenceDepth.SOURCE,
     "symbols": EvidenceDepth.BINARY,
 }
 
@@ -158,9 +157,9 @@ _METHOD_TO_DEPTH: dict[SourceMethod, EvidenceDepth] = {
 def parse_user_depth(value: str | None) -> EvidenceDepth | None:
     """Resolve a ``--depth`` / ``ScanRequest.depth`` string to an EvidenceDepth.
 
-    Honors the deprecated aliases (``symbols``→``binary``, ``graph``→``source``)
+    Honors the deprecated alias (``symbols``→``binary``)
     so non-CLI callers (``service.run_scan`` / ``estimate_scan`` / MCP) accept the
-    one-release compatibility spellings too — the Click ``DEPTH_PARAM`` normalizes
+    compatibility spelling too — the Click ``DEPTH_PARAM`` normalizes
     them on the CLI path, but programmatic callers construct the enum directly
     (Codex review). ``None``/empty → ``None``.
     """

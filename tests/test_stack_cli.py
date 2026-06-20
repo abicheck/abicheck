@@ -73,12 +73,12 @@ class TestDepsCommand:
         # Class-scoped, so it can't take the function-scoped `real_binary`
         # fixture — resolve the binary via the shared helper instead.
         binary = _pick_elf()
-        result = CliRunner().invoke(main, ["deps", str(binary), "--format", "json"])
+        result = CliRunner().invoke(main, ["deps", "tree", str(binary), "--format", "json"])
         assert result.exit_code == 0
         return json.loads(result.output)
 
     def test_deps_markdown(self, runner, real_binary):
-        result = runner.invoke(main, ["deps", str(real_binary)])
+        result = runner.invoke(main, ["deps", "tree", str(real_binary)])
         assert result.exit_code == 0
         assert "Stack Report" in result.output
         assert "Dependency Tree" in result.output
@@ -92,7 +92,7 @@ class TestDepsCommand:
     def test_deps_output_file(self, runner, real_binary, tmp_path):
         outfile = tmp_path / "deps.json"
         result = runner.invoke(main, [
-            "deps", str(real_binary), "--format", "json", "-o", str(outfile),
+            "deps", "tree", str(real_binary), "--format", "json", "-o", str(outfile),
         ])
         assert result.exit_code == 0
         assert outfile.exists()
@@ -100,7 +100,7 @@ class TestDepsCommand:
         assert "root_binary" in data
 
     def test_deps_nonexistent_binary(self, runner, tmp_path):
-        result = runner.invoke(main, ["deps", str(tmp_path / "nonexistent")])
+        result = runner.invoke(main, ["deps", "tree", str(tmp_path / "nonexistent")])
         assert result.exit_code != 0  # Click raises error for non-existent path
 
     def test_deps_contains_libc(self, deps_json):
@@ -115,7 +115,7 @@ class TestDepsCommand:
 
 class TestStackCheckCommand:
     def test_stack_check_help(self, runner):
-        result = runner.invoke(main, ["stack-check", "--help"])
+        result = runner.invoke(main, ["deps", "compare", "--help"])
         assert result.exit_code == 0
         assert "baseline" in result.output.lower()
         assert "candidate" in result.output.lower()

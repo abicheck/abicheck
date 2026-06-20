@@ -346,8 +346,8 @@ the identical `parse_functions`/`parse_variables`/`parse_types`/`parse_enums`/
 
 - `dumper.dump(..., header_backend=...)` and `service.run_dump`/`resolve_input`
   thread a `header_backend` of `auto` | `castxml` | `clang`;
-- the CLI exposes `--header-backend` on `dump` and `compare`;
-- the `ABICHECK_HEADER_BACKEND` env var sets the global default (so a
+- the CLI exposes `--ast-frontend` on `dump` and `compare`;
+- the `ABICHECK_AST_FRONTEND` env var sets the global default (so a
   clang-only CI image flips the default with no flag), consulted by
   `dumper._resolve_header_backend`;
 - `auto` prefers castxml (the schema reference), then falls back to clang when

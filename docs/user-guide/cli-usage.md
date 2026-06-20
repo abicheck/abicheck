@@ -206,7 +206,7 @@ Packs](../concepts/build-source-data.md) for the full model.
 # 1. Collect a pack from an existing build tree (no rebuild).
 abicheck collect \
     --compile-db build/compile_commands.json \
-    --build-dir build --cmake --source-abi \
+    --build-dir build --from cmake --source-abi \
     --output libfoo.bs/
 
 # 2. Embed the build + source facts inline in the snapshot. The resulting
@@ -234,7 +234,7 @@ abicheck compare old.abi.json new.abi.json
 | `--sources <dir>` | `dump` | Embed a pack's L4/L5 source facts (source ABI replay + graph) inline in the snapshot |
 | `--old-build-info <dir>` / `--new-build-info <dir>` | `compare` | Out-of-band L3 build-info pack per side (overrides embedded) |
 | `--old-sources <dir>` / `--new-sources <dir>` | `compare` | Out-of-band L4/L5 source pack per side (overrides embedded) |
-| `--collect-mode <mode>` | `compare` | Inline collection mode. Only `off` (the default) is functional in this release: it uses embedded facts and any explicitly-provided pack directories. Other modes are accepted and reported in the coverage table, but inline collection for them is not implemented yet — run `abicheck collect` separately instead. |
+| `--depth <rung>` | `compare`, `dump` | Evidence-depth dial (`binary`/`headers`/`build`/`source`/`full`; `--max` == `--depth full`). On `compare`, depths past `headers` collect from an `--old/new-sources` tree (or read embedded facts); without a source tree the requested mode is reported in the coverage table only — run `abicheck collect` separately instead. |
 
 To additionally capture **L4 source ABI replay** (macro/`constexpr` values,
 default-argument values, uninstantiated templates), add `--source-abi` to
@@ -307,16 +307,16 @@ rather than producing a compare verdict:
 abicheck surface-report libfoo.so -H include/ --idioms --anti-patterns
 
 # Diff two L5 source-graph summaries (from `collect --source-graph`)
-abicheck compare-graph old-pack/ new-pack/
+abicheck graph compare old-pack/ new-pack/
 
 # Localize a compare finding through the L5 source graph (which TU/include chain)
-abicheck explain-finding --report report.json --finding-id <id> --sources new-pack/
+abicheck graph explain --report report.json --finding-id <id> --sources new-pack/
 ```
 
 See [API Surface Intelligence](../concepts/api-surface-intelligence.md) for what
 the surface metrics and idiom recognizers mean, and
 [Build & Source Packs](../concepts/build-source-data.md) for producing the packs
-that `compare-graph` / `explain-finding` consume.
+that `graph compare` / `graph explain` consume.
 
 ### Report filtering and display options
 
@@ -541,11 +541,11 @@ stack-level ABI compatibility verdict.
 
 ```bash
 # Show dependency tree + symbol binding status
-abicheck deps /usr/bin/python3
-abicheck deps /usr/bin/python3 --format json
+abicheck deps tree /usr/bin/python3
+abicheck deps tree /usr/bin/python3 --format json
 
 # Compare a binary's full stack across two sysroots
-abicheck stack-check usr/bin/myapp \
+abicheck deps compare usr/bin/myapp \
     --baseline /rootfs/v1 --candidate /rootfs/v2
 
 # Include dependency info in dump/compare
@@ -553,12 +553,12 @@ abicheck dump libfoo.so -H foo.h --follow-deps -o snap.json
 abicheck compare old.so new.so -H foo.h --follow-deps
 ```
 
-The `deps` command resolves the transitive dependency closure and displays:
+The `deps tree` command resolves the transitive dependency closure and displays:
 - Dependency tree with resolution reasons (rpath, runpath, default, etc.)
 - Unresolved libraries
 - Symbol binding summary (resolved, missing, version mismatches)
 
-The `stack-check` command compares two environments and reports:
+The `deps compare` command compares two environments and reports:
 - Loadability verdict (will the binary load?)
 - ABI risk verdict (are there breaking changes in dependencies?)
 - Per-library ABI diffs intersected with actual symbol usage
@@ -679,8 +679,8 @@ The parser handles the full Debian symbols tag syntax:
 CLI
   dump                         — dump ABI snapshot to JSON
   compare                      — compare two ABI surfaces
-  deps                         — show dependency tree + binding status (Linux ELF)
-  stack-check                  — full-stack comparison across environments (Linux ELF)
+  deps tree                    — show dependency tree + binding status (Linux ELF)
+  deps compare                 — full-stack comparison across environments (Linux ELF)
   debian-symbols generate      — generate Debian symbols file from shared library
   debian-symbols validate      — validate symbols file against binary
   debian-symbols diff          — diff two Debian symbols files

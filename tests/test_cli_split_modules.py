@@ -469,7 +469,7 @@ class TestCompareReleaseErrorPaths:
         new_dir.mkdir()
         runner = CliRunner()
         result = runner.invoke(main, [
-            "compare-release", str(old_dir), str(new_dir),
+            "compare", str(old_dir), str(new_dir),
             "--annotate-additions",
         ])
         assert result.exit_code != 0
@@ -483,7 +483,7 @@ class TestCompareReleaseErrorPaths:
         new_dir.mkdir()
         runner = CliRunner()
         result = runner.invoke(main, [
-            "compare-release", str(old_dir), str(new_dir),
+            "compare", str(old_dir), str(new_dir),
             "--no-bundle-analysis",
         ])
         assert result.exit_code != 0
@@ -886,7 +886,7 @@ class TestCompareReleaseErrorPaths:
         with patch("abicheck.package.is_package", return_value=True), \
              patch("abicheck.package.detect_extractor", return_value=None):
             result = runner.invoke(main, [
-                "compare-release", str(old_pkg), str(new_pkg),
+                "compare", str(old_pkg), str(new_pkg),
             ])
         assert result.exit_code != 0
         assert "Unrecognized package format" in result.output

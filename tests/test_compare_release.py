@@ -132,7 +132,7 @@ class TestFileVsFile:
         snap = _snap()
         old_f = _write_snap(tmp_path / "libfoo.json", snap)
         new_f = _write_snap(tmp_path / "libfoo_new.json", snap)
-        code, out = _invoke("compare-release", str(old_f), str(new_f))
+        code, out = _invoke("compare", str(old_f), str(new_f))
         assert code == 0
         assert "NO_CHANGE" in out
 
@@ -140,7 +140,7 @@ class TestFileVsFile:
         old, new = _breaking_pair()
         old_f = _write_snap(tmp_path / "libfoo.json", old)
         new_f = _write_snap(tmp_path / "libfoo_new.json", new)
-        code, out = _invoke("compare-release", str(old_f), str(new_f))
+        code, out = _invoke("compare", str(old_f), str(new_f))
         assert code == 4
         assert "BREAKING" in out
 
@@ -148,18 +148,22 @@ class TestFileVsFile:
         old, new = _api_break_pair()
         old_f = _write_snap(tmp_path / "libfoo.json", old)
         new_f = _write_snap(tmp_path / "libfoo_new.json", new)
-        code, out = _invoke("compare-release", str(old_f), str(new_f))
+        code, out = _invoke("compare", str(old_f), str(new_f))
         assert code == 2
 
     def test_json_output(self, tmp_path: Path) -> None:
         snap = _snap()
         old_f = _write_snap(tmp_path / "libfoo.json", snap)
         new_f = _write_snap(tmp_path / "libfoo2.json", snap)
-        code, out = _invoke("compare-release", str(old_f), str(new_f), "--format", "json")
+        code, out = _invoke("compare", str(old_f), str(new_f), "--format", "json")
         assert code == 0
         data = json.loads(out)
+        # Two *file* operands are a single-pair compare (no release fan-out), so
+        # the JSON is the single-pair report — not the release `libraries` summary
+        # the removed compare-release produced for file inputs. Directory operands
+        # still produce that summary (covered by the dir-vs-dir tests below).
         assert data["verdict"] == "NO_CHANGE"
-        assert len(data["libraries"]) == 1
+        assert "libraries" not in data
 
 
 # ── dir vs dir ───────────────────────────────────────────────────────────────
@@ -173,7 +177,7 @@ class TestDirVsDir:
         snap = _snap()
         _write_snap(old_dir / "libfoo.json", snap)
         _write_snap(new_dir / "libfoo.json", snap)
-        code, out = _invoke("compare-release", str(old_dir), str(new_dir))
+        code, out = _invoke("compare", str(old_dir), str(new_dir))
         assert code == 0
         assert "NO_CHANGE" in out
 
@@ -186,7 +190,7 @@ class TestDirVsDir:
             snap = _snap()
             _write_snap(old_dir / name, snap)
             _write_snap(new_dir / name, snap)
-        code, out = _invoke("compare-release", str(old_dir), str(new_dir))
+        code, out = _invoke("compare", str(old_dir), str(new_dir))
         assert code == 0
         assert "NO_CHANGE" in out
 
@@ -200,7 +204,7 @@ class TestDirVsDir:
         _write_snap(new_dir / "libfoo.json", new_foo)
         _write_snap(old_dir / "libbar.json", _snap())
         _write_snap(new_dir / "libbar.json", _snap())
-        code, out = _invoke("compare-release", str(old_dir), str(new_dir))
+        code, out = _invoke("compare", str(old_dir), str(new_dir))
         assert code == 4
         assert "BREAKING" in out
 
@@ -214,7 +218,7 @@ class TestDirVsDir:
         _write_snap(new_dir / "libfoo.json", new_foo)
         _write_snap(old_dir / "libbar.json", _snap())
         _write_snap(new_dir / "libbar.json", _snap())
-        code, out = _invoke("compare-release", str(old_dir), str(new_dir))
+        code, out = _invoke("compare", str(old_dir), str(new_dir))
         assert code == 2
 
     def test_json_output_multi(self, tmp_path: Path) -> None:
@@ -226,7 +230,7 @@ class TestDirVsDir:
             snap = _snap()
             _write_snap(old_dir / name, snap)
             _write_snap(new_dir / name, snap)
-        code, out = _invoke("compare-release", str(old_dir), str(new_dir), "--format", "json")
+        code, out = _invoke("compare", str(old_dir), str(new_dir), "--format", "json")
         assert code == 0
         data = json.loads(out)
         assert data["verdict"] == "NO_CHANGE"
@@ -244,7 +248,7 @@ class TestDirVsDir:
         _write_snap(new_dir / "libfoo.json", new_foo)
         _write_snap(old_dir / "libbar.json", old_bar)
         _write_snap(new_dir / "libbar.json", new_bar)
-        code, out = _invoke("compare-release", str(old_dir), str(new_dir))
+        code, out = _invoke("compare", str(old_dir), str(new_dir))
         assert code == 4
         assert "BREAKING" in out
 
@@ -256,7 +260,7 @@ class TestDirVsDir:
         new_dir.mkdir()
         _write_snap(old_dir / "libfoo.json", _snap())
         _write_snap(new_dir / "libbar.json", _snap())
-        code, out = _invoke("compare-release", str(old_dir), str(new_dir))
+        code, out = _invoke("compare", str(old_dir), str(new_dir))
         assert code == 0
         assert "no matching" in out.lower() or "warning" in out.lower()
 
@@ -273,7 +277,7 @@ class TestUnmatched:
         _write_snap(old_dir / "libfoo.json", _snap())
         _write_snap(old_dir / "libbar.json", _snap())
         _write_snap(new_dir / "libfoo.json", _snap())
-        code, out = _invoke("compare-release", str(old_dir), str(new_dir))
+        code, out = _invoke("compare", str(old_dir), str(new_dir))
         assert code == 0
 
     def test_removed_library_with_flag(self, tmp_path: Path) -> None:
@@ -286,7 +290,7 @@ class TestUnmatched:
         _write_snap(old_dir / "libbar.json", _snap())
         _write_snap(new_dir / "libfoo.json", _snap())
         code, _ = _invoke(
-            "compare-release", str(old_dir), str(new_dir),
+            "compare", str(old_dir), str(new_dir),
             "--fail-on-removed-library",
         )
         assert code == 8
@@ -302,7 +306,7 @@ class TestUnmatched:
         _write_snap(new_dir / "libfoo.json", new_foo)
         _write_snap(old_dir / "libremoved.json", _snap())  # removed
         code, _ = _invoke(
-            "compare-release", str(old_dir), str(new_dir),
+            "compare", str(old_dir), str(new_dir),
             "--fail-on-removed-library",
         )
         assert code == 4
@@ -316,7 +320,7 @@ class TestUnmatched:
         _write_snap(old_dir / "libfoo.json", _snap())
         _write_snap(new_dir / "libfoo.json", _snap())
         _write_snap(new_dir / "libbar.json", _snap())
-        code, out = _invoke("compare-release", str(old_dir), str(new_dir))
+        code, out = _invoke("compare", str(old_dir), str(new_dir))
         assert code == 0
 
     def test_unmatched_reported_in_json(self, tmp_path: Path) -> None:
@@ -328,7 +332,7 @@ class TestUnmatched:
         _write_snap(old_dir / "libremoved.json", _snap())
         _write_snap(new_dir / "libfoo.json", _snap())
         _write_snap(new_dir / "libadded.json", _snap())
-        code, out = _invoke("compare-release", str(old_dir), str(new_dir), "--format", "json")
+        code, out = _invoke("compare", str(old_dir), str(new_dir), "--format", "json")
         assert code == 0
         data = json.loads(out)
         assert isinstance(data["unmatched_old"], list)
@@ -349,7 +353,7 @@ class TestOutputDir:
         _write_snap(old_dir / "libfoo.json", _snap())
         _write_snap(new_dir / "libfoo.json", _snap())
         code, _ = _invoke(
-            "compare-release", str(old_dir), str(new_dir),
+            "compare", str(old_dir), str(new_dir),
             "--output-dir", str(out_dir),
         )
         assert code == 0
@@ -364,7 +368,7 @@ class TestOutputDir:
         out_dir = tmp_path / "reports"
         _write_snap(old_dir / "libfoo.json", _snap())
         _write_snap(new_dir / "libfoo.json", _snap())
-        code, _ = _invoke("compare-release", str(old_dir), str(new_dir), "--output-dir", str(out_dir))
+        code, _ = _invoke("compare", str(old_dir), str(new_dir), "--output-dir", str(out_dir))
         assert code == 0
         summary = json.loads((out_dir / "summary.json").read_text())
         assert summary["verdict"] == "NO_CHANGE"
@@ -390,7 +394,7 @@ class TestCompareReleaseScopeAndChangedLibraries:
         _write_snap(new_dir / "libfoo.json", new_foo)
         _write_snap(old_dir / "libbar.json", _snap(library="libbar.so"))
         _write_snap(new_dir / "libbar.json", _snap(library="libbar.so"))
-        code, out = _invoke("compare-release", str(old_dir), str(new_dir), "--format", "json")
+        code, out = _invoke("compare", str(old_dir), str(new_dir), "--format", "json")
         assert code == 4
         data = json.loads(out)
         assert data["changed_libraries"] == ["libfoo.json"]
@@ -413,7 +417,7 @@ class TestCompareReleaseScopeAndChangedLibraries:
                           types=[_rec("Config", 32), _rec("InternalCache", 128)])
         _write_snap(old_dir / "libfoo.json", old)
         _write_snap(new_dir / "libfoo.json", new)
-        code, out = _invoke("compare-release", str(old_dir), str(new_dir),
+        code, out = _invoke("compare", str(old_dir), str(new_dir),
                             "--scope-public-headers", "--format", "json")
         data = json.loads(out)
         assert data["scope"]["public_headers_applied"] is True
@@ -434,7 +438,7 @@ class TestCompareReleaseScopeAndChangedLibraries:
                           types=[_rec("InternalCache", 128)])
         _write_snap(old_dir / "libfoo.json", old)
         _write_snap(new_dir / "libfoo.json", new)
-        code, out = _invoke("compare-release", str(old_dir), str(new_dir),
+        code, out = _invoke("compare", str(old_dir), str(new_dir),
                             "--scope-public-headers", "--format", "json")
         data = json.loads(out)
         assert data["scope"]["manual_review_required"] is True
@@ -454,7 +458,7 @@ class TestMixedInputs:
         snap = _snap()
         _write_snap(old_dir / "libfoo.so.1.2.json", snap)
         _write_snap(new_dir / "libfoo.so.1.3.json", snap)
-        code, out = _invoke("compare-release", str(old_dir), str(new_dir), "--format", "json")
+        code, out = _invoke("compare", str(old_dir), str(new_dir), "--format", "json")
         assert code == 0
         data = json.loads(out)
         assert len(data["libraries"]) == 1
@@ -471,7 +475,7 @@ class TestMixedInputs:
         _write_snap(old_dir / "libfoo.so.1.9.json", snap)
         _write_snap(old_dir / "libfoo.so.1.10.json", snap)
         _write_snap(new_dir / "libfoo.so.2.0.json", snap)
-        code, out = _invoke("compare-release", str(old_dir), str(new_dir), "--format", "json")
+        code, out = _invoke("compare", str(old_dir), str(new_dir), "--format", "json")
         assert code == 0
         data = json.loads(out)
         # Only 1 comparison, and warnings should mention 1.10 as selected
@@ -511,7 +515,7 @@ class TestFilterOutNonABIFiles:
         (old_dir / "html.tpl").write_text("{% extends 'base.tpl' %}\n{% block content %}\n...\n{% endblock %}")
         (new_dir / "html.tpl").write_text("{% extends 'base.tpl' %}\n{% block content %}\n...\n{% endblock %}")
 
-        code, out = _invoke("compare-release", str(old_dir), str(new_dir), "--format", "json")
+        code, out = _invoke("compare", str(old_dir), str(new_dir), "--format", "json")
         assert code == 0, f"Should pass (only one real library). Output: {out}"
         data = json.loads(out)
         # Only the real ABI snapshot is compared
@@ -541,7 +545,7 @@ class TestFilterOutNonABIFiles:
         (old_dir / "something.dll.txt").write_text("Not a DLL")
         (new_dir / "something.dll.txt").write_text("Not a DLL")
 
-        code, out = _invoke("compare-release", str(old_dir), str(new_dir), "--format", "json")
+        code, out = _invoke("compare", str(old_dir), str(new_dir), "--format", "json")
         assert code == 0, f"Should pass (only one real library). Output: {out}"
         data = json.loads(out)
         # Only the real ABI snapshot is compared
@@ -562,7 +566,7 @@ class TestFilterOutNonABIFiles:
         _write_snap(old_dir / "libfoo.json", snap1)
         _write_snap(new_dir / "libfoo.json", snap2)
 
-        code, out = _invoke("compare-release", str(old_dir), str(new_dir), "--format", "json")
+        code, out = _invoke("compare", str(old_dir), str(new_dir), "--format", "json")
         assert code == 0, f"Should compare the two snapshots. Output: {out}"
         data = json.loads(out)
         assert len(data["libraries"]) == 1

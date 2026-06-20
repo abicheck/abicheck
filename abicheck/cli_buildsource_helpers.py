@@ -132,10 +132,11 @@ def diff_embedded_build_source(
     if old_pack is None and new_pack is None:
         if collect_mode != "off":
             click.echo(
-                f"Note: --collect-mode {collect_mode} requested but no build-info/"
-                "source facts were embedded or supplied; inline collection for "
-                "this mode is not yet available. Use `abicheck collect` then embed "
-                "with `dump --build-info/--sources` (or pass --old/new pack dirs).",
+                f"Note: --depth collected evidence mode '{collect_mode}' was "
+                "requested but no build-info/source facts were embedded or "
+                "supplied; inline collection for this mode is not yet available. "
+                "Use `abicheck collect` then embed with `dump --build-info/"
+                "--sources` (or pass --old/new pack dirs).",
                 err=True,
             )
         # require_evidence still fires with no packs at all: every required layer
@@ -556,7 +557,7 @@ def _echo_capabilities(
             click.echo(f"  [off] {label} — {why_off}", err=True)
 
 
-# ── compare-graph: structural graph-to-graph diff (ADR-031 D6, D8) ────────────
+# ── graph compare: structural graph-to-graph diff (ADR-031 D6, D8) ────────────
 
 
 def _load_source_graph(path: Path) -> SourceGraphSummary:
@@ -853,6 +854,71 @@ def _echo_collection_summary(
         click.echo(f"  L5 source graph: {graph_detail or 'empty (no build evidence)'}")
     for diag in merged.diagnostics:
         click.echo(f"  note: {diag}", err=True)
+
+
+#: ``collect --from`` adapter specs (ADR-037 CLI consolidation). The six former
+#: per-adapter flags (``--cmake``/``--ninja`` live toggles + ``--ninja-compdb``/
+#: ``--bazel-cquery``/``--bazel-aquery``/``--make-dry-run`` pre-captured paths)
+#: collapse onto one repeatable ``--from adapter[=path]``. Live adapters take no
+#: ``=path`` (they read ``--build-dir``); pre-captured ones require one.
+_FROM_LIVE_ADAPTERS: frozenset[str] = frozenset({"cmake", "ninja"})
+#: pre-captured adapter name → the ``_run_adapters`` kwarg it feeds.
+_FROM_PATH_ADAPTERS: dict[str, str] = {
+    "ninja-compdb": "ninja_compdb",
+    "bazel-cquery": "bazel_cquery",
+    "bazel-aquery": "bazel_aquery",
+    "make": "make_dry_run",
+}
+
+
+def parse_from_specs(specs: tuple[str, ...]) -> dict[str, object]:
+    """Parse ``collect --from adapter[=path]`` specs into ``_run_adapters`` kwargs.
+
+    Returns a dict with ``cmake``/``ninja`` bools and ``ninja_compdb``/
+    ``bazel_cquery``/``bazel_aquery``/``make_dry_run`` paths (None when unset).
+    Raises :class:`click.UsageError` on an unknown adapter, a live adapter given
+    a ``=path``, a pre-captured adapter given no path, or the same adapter passed
+    twice (so a repeated ``--from`` never silently last-wins). Pure (no I/O) so it
+    is unit-tested directly.
+    """
+    out: dict[str, object] = {
+        "cmake": False,
+        "ninja": False,
+        "ninja_compdb": None,
+        "bazel_cquery": None,
+        "bazel_aquery": None,
+        "make_dry_run": None,
+    }
+    valid = sorted(_FROM_LIVE_ADAPTERS | set(_FROM_PATH_ADAPTERS))
+    seen: set[str] = set()
+    for spec in specs:
+        name, sep, value = spec.partition("=")
+        name = name.strip()
+        if name in seen:
+            raise click.UsageError(
+                f"--from {name} was given more than once; pass each adapter "
+                "at most once."
+            )
+        if name in _FROM_LIVE_ADAPTERS:
+            if sep:
+                raise click.UsageError(
+                    f"--from {name} is a live adapter and takes no '=path' "
+                    "(it reads --build-dir)."
+                )
+            out[name] = True
+        elif name in _FROM_PATH_ADAPTERS:
+            if not value:
+                raise click.UsageError(
+                    f"--from {name} requires a pre-captured path "
+                    f"(e.g. --from {name}=path)."
+                )
+            out[_FROM_PATH_ADAPTERS[name]] = Path(value)
+        else:
+            raise click.UsageError(
+                f"--from: unknown adapter {name!r}; expected one of {valid}."
+            )
+        seen.add(name)
+    return out
 
 
 def _run_adapters(

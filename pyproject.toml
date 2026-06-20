@@ -115,7 +115,6 @@ module = [
     "abicheck.cli_appcompat",
     "abicheck.cli_compare_release",
     "abicheck.cli_debian_symbols",
-    "abicheck.cli_max",
     "abicheck.cli_baseline",
     "abicheck.cli_buildsource",
     "abicheck.cli_plugin",

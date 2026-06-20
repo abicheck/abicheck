@@ -71,7 +71,7 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
             "name": "Build/source evidence (L3–L5)",
             "options": [
                 "--old-build-info", "--new-build-info", "--old-sources",
-                "--new-sources", "--collect-mode",
+                "--new-sources", "--depth", "--max",
             ],
         },
         {
@@ -93,6 +93,54 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
                 "--explain-patterns", "--surface-metrics",
             ],
         },
+        {
+            "name": "Release (directory/package inputs)",
+            "options": [
+                "--jobs", "--dso-only", "--output-dir", "--fail-on-removed-library",
+                "--debug-info1", "--debug-info2", "--devel-pkg1", "--devel-pkg2",
+                "--include-private-dso", "--keep-extracted", "--manifest",
+                "--bundle-system-providers", "--bundle-cohort", "--no-bundle-analysis",
+            ],
+        },
+    ],
+    "* collect": [
+        {
+            "name": "Inputs",
+            "options": [
+                "--binary", "--header", "--source-root", "--build-dir",
+                "--compile-db", "-p",
+            ],
+        },
+        {
+            "name": "Build-system adapters",
+            "options": [
+                "--from", "--build-system",
+                "--read-compiler-record",
+            ],
+        },
+        {
+            "name": "Source-ABI (L4)",
+            "options": [
+                "--source-abi", "--source-abi-extractor", "--source-abi-scope",
+                "--source-abi-target", "--source-abi-cache", "--clang-bin",
+                "--android-dump",
+            ],
+        },
+        {
+            "name": "Source graph (L5)",
+            "options": [
+                "--source-graph", "--call-graph", "--include-graph",
+                "--kythe-entries", "--codeql-results",
+            ],
+        },
+        {
+            "name": "Extractors & collection",
+            "options": [
+                "--extractor-manifest", "--collection-mode", "--allow-build-query",
+                "--changed-path",
+            ],
+        },
+        {"name": "Output", "options": ["--output", "--verbose"]},
     ],
     "* dump": [
         {
@@ -120,7 +168,7 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
         {
             "name": "Build/source evidence (L3–L5)",
             "options": [
-                "--depth", "--max", "--collect-mode", "--build-info", "--sources",
+                "--depth", "--max", "--build-info", "--sources",
                 "--build-dir", "--compile-db-filter",
                 "--build-query", "--build-compile-db", "--config",
                 "--allow-build-query",

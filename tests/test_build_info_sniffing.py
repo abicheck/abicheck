@@ -90,7 +90,11 @@ def test_sniff_pack_vs_build_dir(tmp_path: Path) -> None:
     assert sniff_build_info_format(build_dir) == "build_dir"
     pack = tmp_path / "pack"
     pack.mkdir()
-    (pack / "manifest.json").write_text("{}", encoding="utf-8")
+    # A real pack carries the BuildSourcePack version marker; a bare {} manifest
+    # is a stray file and sniffs as a build_dir, not a pack.
+    (pack / "manifest.json").write_text(
+        '{"build_source_pack_version": 1}', encoding="utf-8"
+    )
     assert sniff_build_info_format(pack) == "pack"
 
 

@@ -72,7 +72,7 @@ from .checker_policy import API_BREAK_KINDS, BREAKING_KINDS
 from .cli import _safe_write_output, _setup_verbosity, main
 from .cli_options import (
     compile_context_options,
-    echo_ast_frontend_deprecation,
+    lang_option,
     merge_compile_config,
     resolve_compile_context,
 )
@@ -692,9 +692,7 @@ def _audit_exit_code(
     default=None,
     help="Override the risk_rules profile (YAML).",
 )
-@click.option(
-    "--lang", type=click.Choice(["c", "c++"]), default="c++", show_default=True
-)
+@lang_option
 @click.option(
     "--allow-build-query",
     is_flag=True,
@@ -770,9 +768,6 @@ def scan_cmd(
     """
     _setup_verbosity(verbose)
     start = time.monotonic()
-
-    # ADR-037 D8: legacy --header-backend → --ast-frontend deprecation note.
-    echo_ast_frontend_deprecation()
 
     # L2 header compile context (compare↔dump↔scan parity, ADR-037 D3): the one
     # shared resolver bundles the cross-toolchain + frontend flags and folds the
@@ -885,7 +880,7 @@ def scan_cmd(
     collect_mode = level_to_collect_mode(resolved, eff_depth_enum)
     # --depth binary is symbols-only (L0/L1): suppress the L2 header AST even when
     # -H is passed, so the collected evidence matches the reported depth — parity
-    # with dump/compare/deep-compare's binary handling. Keyed on the *resolved*
+    # with dump/compare's binary handling. Keyed on the *resolved*
     # effective depth, not the raw --depth: --source-method wins over --depth, so
     # `--source-method s5 --depth binary -H ...` resolves to a source scan that
     # still needs the header AST/provenance — only an effective binary depth drops

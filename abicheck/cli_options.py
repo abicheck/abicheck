@@ -24,7 +24,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, TypeVar
+from typing import TYPE_CHECKING, TypeVar, overload
 
 import click
 
@@ -54,9 +54,9 @@ def two_sided_input_options(func: F) -> F:
     """Headers / includes / version labels, shared (`-H/-I` + per-side + version).
 
     Identical across ``compare`` / ``compare-release`` / ``appcompat`` /
-    ``deep-compare``: a both-sides input plus an old-only / new-only override and
+    ``compare-release`` / ``appcompat``: a both-sides input plus an old-only / new-only override and
     a per-side version label. (``--lang`` and the ``--ast-frontend`` family stay
-    inline — the latter renamed from ``--header-backend`` in G22 Phase 6, D8.)
+    inline.)
     """
     func = click.option(
         "--new-version",
@@ -238,6 +238,48 @@ def scope_options(func: F) -> F:
     return func
 
 
+#: Canonical ``--lang`` choice set + default. Declared once so the choice
+#: *order* (shown in ``--help`` and error text) and case-insensitivity cannot
+#: drift between commands — historically ``scan`` listed ``["c", "c++"]`` and
+#: omitted ``case_sensitive=False`` while every other command used
+#: ``["c++", "c"]`` with it (ADR-037 D3 parity).
+LANG_CHOICES: tuple[str, ...] = ("c++", "c")
+LANG_DEFAULT: str = "c++"
+
+
+@overload
+def lang_option(func: F) -> F: ...
+@overload
+def lang_option(*, help: str = ...) -> Callable[[F], F]: ...
+def lang_option(
+    func: F | None = None,
+    *,
+    help: str = "Language mode for the header backend.",
+) -> F | Callable[[F], F]:
+    """The shared ``--lang`` option (factory; usable bare or with ``help=``).
+
+    A factory rather than a bare decorator only so each command can keep its own
+    one-line ``help`` (``compare``/``dump`` say "header backend", ``appcompat``
+    said "castxml", ``plugin-check`` notes it only applies when dumping binaries),
+    while the *choice set*, *order*, *default*, and case-insensitivity live here
+    once and therefore cannot drift (ADR-037 D3). Usable directly
+    (``@lang_option``) or called (``@lang_option(help="…")``).
+    """
+
+    def deco(f: F) -> F:
+        f = click.option(
+            "--lang",
+            "lang",
+            default=LANG_DEFAULT,
+            show_default=True,
+            type=click.Choice(list(LANG_CHOICES), case_sensitive=False),
+            help=help,
+        )(f)
+        return f
+
+    return deco if func is None else deco(func)
+
+
 def compile_context_options(func: F) -> F:
     """L2 header-AST compile context — the cross-toolchain + frontend family.
 
@@ -296,7 +338,6 @@ def compile_context_options(func: F) -> F:
     )(func)
     func = click.option(
         "--ast-frontend",
-        "--header-backend",
         "header_backend",
         default="auto",
         show_default=True,
@@ -305,7 +346,7 @@ def compile_context_options(func: F) -> F:
         "or clang (-ast-dump=json; for hosts where castxml is absent or its "
         "bundled frontend chokes). auto = castxml if present, else clang, with an "
         "automatic clang fallback on a castxml toolchain-version error. Env: "
-        "ABICHECK_AST_FRONTEND. (--header-backend is a deprecated alias.)",
+        "ABICHECK_AST_FRONTEND.",
     )(func)
     return func
 
@@ -541,12 +582,117 @@ def set_input_options(func: F) -> F:
     return func
 
 
+def release_options(func: F) -> F:
+    """Directory/package (release) comparison knobs, folded onto ``compare``.
+
+    The release-only options the removed ``compare-release`` command exposed:
+    package extraction (``--debug-info*``/``--devel-pkg*``), DSO selection
+    (``--include-private-dso``/``--keep-extracted``), the removed-library gate, and
+    the ADR-023 bundle/manifest analysis. They bite only when ``compare``'s
+    operands are directories or packages (the per-library fan-out); on single-file
+    inputs they are inert. Declared once here so ``compare`` and the internal
+    release engine share one surface (ADR-037 D7). Applied bottom-up, so listed in
+    reverse of displayed order.
+    """
+    func = click.option(
+        "--no-bundle-analysis",
+        "no_bundle_analysis",
+        is_flag=True,
+        default=False,
+        help="Skip bundle-level cross-library analysis (debug/parity escape hatch). "
+        "Bundle findings catch intra-bundle symbol removals, signature drift "
+        "across DSO boundaries, type drift across siblings, provider migration, "
+        "and manifest mismatches. (directory/package inputs only)",
+    )(func)
+    func = click.option(
+        "--bundle-cohort",
+        "bundle_cohorts",
+        multiple=True,
+        metavar="PREFIX",
+        help="Declare a co-versioned library cohort by name prefix (e.g. "
+        "'libfoo_'). Repeatable. Enables the BUNDLE_SONAME_SKEW check. "
+        "(directory/package inputs only)",
+    )(func)
+    func = click.option(
+        "--bundle-system-providers",
+        "bundle_system_providers",
+        default="",
+        help="Comma-separated extra sonames to treat as system-provided "
+        "(extends the built-in libc/libstdc++/libgcc/libtbb allow-list). "
+        "(directory/package inputs only)",
+    )(func)
+    func = click.option(
+        "--manifest",
+        "manifest_path",
+        type=click.Path(exists=True, path_type=Path),
+        default=None,
+        help="ABI instantiation manifest (YAML/JSON) listing symbols the release "
+        "publicly promises (ADR-023). (directory/package inputs only)",
+    )(func)
+    func = click.option(
+        "--keep-extracted",
+        "keep_extracted",
+        is_flag=True,
+        default=False,
+        help="Keep extracted temporary files for debugging. "
+        "(directory/package inputs only)",
+    )(func)
+    func = click.option(
+        "--include-private-dso",
+        "include_private_dso",
+        is_flag=True,
+        default=False,
+        help="Include private (non-public) shared objects from non-standard "
+        "paths. (directory/package inputs only)",
+    )(func)
+    func = click.option(
+        "--devel-pkg2",
+        "devel_pkg2",
+        type=click.Path(exists=True, path_type=Path),
+        default=None,
+        help="Development package with headers for the new side. "
+        "(directory/package inputs only)",
+    )(func)
+    func = click.option(
+        "--devel-pkg1",
+        "devel_pkg1",
+        type=click.Path(exists=True, path_type=Path),
+        default=None,
+        help="Development package with headers for the old side. "
+        "(directory/package inputs only)",
+    )(func)
+    func = click.option(
+        "--debug-info2",
+        "debug_info2",
+        type=click.Path(exists=True, path_type=Path),
+        default=None,
+        help="Debug info package for the new side (RPM/Deb/tar). "
+        "(directory/package inputs only)",
+    )(func)
+    func = click.option(
+        "--debug-info1",
+        "debug_info1",
+        type=click.Path(exists=True, path_type=Path),
+        default=None,
+        help="Debug info package for the old side (RPM/Deb/tar). "
+        "(directory/package inputs only)",
+    )(func)
+    func = click.option(
+        "--fail-on-removed-library/--no-fail-on-removed-library",
+        "fail_on_removed",
+        default=False,
+        help="Exit 8 when a library present in old_dir is absent in new_dir. "
+        "(directory/package inputs only)",
+    )(func)
+    return func
+
+
 def debug_resolution_options(func: F) -> F:
     """Separate-debug-file resolution (ADR-021a): roots + debuginfod + format.
 
     Currently a ``compare``-only family — it resolves *local* ELF debug
     artifacts, which the package-oriented (``compare-release``) and
-    snapshot-oriented (``deep-compare``/``appcompat``) commands do not take. It
+    snapshot-oriented (``appcompat``) commands do not take. It
     lives here so the moment a second command needs it there is one definition to
     compose, not a copy to drift (ADR-037 D3).
     """
@@ -676,26 +822,6 @@ def build_source_dump_options(func: F) -> F:
     from pathlib import Path
 
     func = click.option(
-        "--collect-mode",
-        "collect_mode",
-        type=click.Choice(
-            [
-                "off",
-                "build",
-                "graph-build",
-                "source-changed",
-                "source-target",
-                "graph-summary",
-                "graph-full",
-            ]
-        ),
-        default="source-target",
-        show_default=False,
-        hidden=True,
-        help="DEPRECATED (ADR-037 D5): internal ADR-033 D2 evidence mode. Prefer "
-        "the unified --depth dial; kept as a hidden alias for one release.",
-    )(func)
-    func = click.option(
         "--depth",
         "depth",
         type=DEPTH_PARAM,
@@ -790,34 +916,19 @@ def evidence_options(func: F) -> F:
     **embedded** in each snapshot (single-artifact UX). The optional
     ``--old-build-info`` / ``--new-build-info`` and ``--old-sources`` /
     ``--new-sources`` point at out-of-band pack directories to supply or
-    override those facts per side; ``--collect-mode`` selects the inline
-    collection mode (ADR-033 D2). All folded into the verdict as ordinary
+    override those facts per side; ``--depth`` selects how deep the inline
+    collection runs (ADR-037 D5). All folded into the verdict as ordinary
     findings, never overriding artifact-backed ABI verdicts (ADR-028 D3).
     Applied bottom-up, so listed in reverse of displayed order.
     """
     from pathlib import Path
 
     pack_dir = click.Path(exists=True, file_okay=False, path_type=Path)
-    func = click.option(
-        "--collect-mode",
-        "collect_mode",
-        type=click.Choice(
-            [
-                "off",
-                "build",
-                "graph-build",
-                "source-changed",
-                "source-target",
-                "graph-summary",
-                "graph-full",
-            ]
-        ),
-        default="off",
-        show_default=False,
-        hidden=True,
-        help="DEPRECATED (ADR-037 D5): internal ADR-033 D2 evidence mode. Prefer "
-        "the unified --depth dial; kept as a hidden alias for one release.",
-    )(func)
+    # --build-info also accepts a file (a raw compile_commands.json), not just a
+    # build dir / pack dir — the per-side replacement for the removed
+    # deep-compare, whose build-info option took dirs *or* a compile DB file
+    # (Codex review). The later pack/raw validation still distinguishes them.
+    build_info_path = click.Path(exists=True, path_type=Path)
     func = click.option(
         "--max",
         "max_depth",
@@ -840,28 +951,34 @@ def evidence_options(func: F) -> F:
         "new_sources",
         type=pack_dir,
         default=None,
-        help="Out-of-band L4/L5 source pack for the new side (overrides embedded).",
+        help="New-side L4/L5 source: a raw source checkout (collected inline at "
+        "--depth, embedding build/source/graph facts) or a pre-built `collect` "
+        "pack. Overrides embedded.",
     )(func)
     func = click.option(
         "--old-sources",
         "old_sources",
         type=pack_dir,
         default=None,
-        help="Out-of-band L4/L5 source pack for the old side (overrides embedded).",
+        help="Old-side L4/L5 source: a raw source checkout (collected inline at "
+        "--depth, embedding build/source/graph facts) or a pre-built `collect` "
+        "pack. Overrides embedded.",
     )(func)
     func = click.option(
         "--new-build-info",
         "new_build_info",
-        type=pack_dir,
+        type=build_info_path,
         default=None,
-        help="Out-of-band L3 build-info pack for the new side (overrides embedded).",
+        help="Out-of-band L3 build-info for the new side: a build dir, a "
+        "compile_commands.json, or a pack (overrides embedded).",
     )(func)
     func = click.option(
         "--old-build-info",
         "old_build_info",
-        type=pack_dir,
+        type=build_info_path,
         default=None,
-        help="Out-of-band L3 build-info pack for the old side (overrides embedded).",
+        help="Out-of-band L3 build-info for the old side: a build dir, a "
+        "compile_commands.json, or a pack (overrides embedded).",
     )(func)
     return func
 
@@ -907,7 +1024,7 @@ FAMILY_FLAGS: dict[str, frozenset[str]] = {
     "output": frozenset({"--format", "--output"}),
     # Two-sided evidence family (ADR-037 D3 ``@evidence_options``): registered
     # but *not* required — only commands that take source depth (``compare``)
-    # compose it; the hidden deprecated ``--collect-mode`` alias is omitted here.
+    # compose it.
     "evidence": frozenset(
         {
             "--depth",
@@ -966,20 +1083,13 @@ REQUIRED_FAMILIES: frozenset[str] = frozenset(
 #: command name → module basename, for the gate to locate each command's source.
 VERDICT_EMITTING_COMMANDS: dict[str, str] = {
     "compare": "cli.py",
-    "compare-release": "cli_compare_release.py",
     "appcompat": "cli_appcompat.py",
-    "deep-compare": "cli_max.py",
 }
 
 #: (command, family) → reason. A deliberate, reviewed omission of a shared
 #: family from a verdict-emitting command (ADR-037 D3: opt out *explicitly*).
-INTENTIONAL_SUBSET: dict[tuple[str, str], str] = {
-    ("deep-compare", "severity"): (
-        "deep-compare is a one-shot convenience wrapper that exposes only the "
-        "coarse --severity-preset; the per-category overrides are config-bound "
-        "(ADR-037 D4) and not surfaced on this command."
-    ),
-}
+#: Empty today — every verdict-emitting command carries the full required set.
+INTENTIONAL_SUBSET: dict[tuple[str, str], str] = {}
 
 #: ADR-037 D10.5 — soft per-command flag-count budget for ``compare`` (a WARN
 #: nudge, enforced by ``tests/test_config_rebalance.py::test_flag_budget``).
@@ -992,7 +1102,12 @@ INTENTIONAL_SUBSET: dict[tuple[str, str], str] = {
 #: visible; +6 for --gcc-path/--gcc-prefix/--gcc-options/--gcc-option/--sysroot/
 #: --nostdinc) was unified onto ``compare`` for dump/scan parity (ADR-037 D3): the
 #: family is genuine L2 surface ``compare`` previously lacked, not config-demotable.
-COMPARE_FLAG_BUDGET = 66
+#: Raised 66→77 when the standalone ``compare-release`` command was removed and its
+#: 11 release-only knobs (``@release_options``: package extraction, DSO selection,
+#: removed-library gate, ADR-023 bundle/manifest analysis) folded onto ``compare``'s
+#: directory/package path (ADR-037 D7) — genuine release surface, inert on single
+#: files, grouped in its own ``--help`` panel.
+COMPARE_FLAG_BUDGET = 77
 
 
 def count_visible_options(cmd: object) -> int:
@@ -1004,203 +1119,6 @@ def count_visible_options(cmd: object) -> int:
         ):
             n += 1
     return n
-
-
-#: Flag names knowingly carrying two defaults across decorators, deferred to a
-#: later phase rather than hidden. ``--collect-mode`` differs between the dump
-#: embed default (source-target) and the compare read default (off); it is now a
-#: hidden deprecated alias behind the unified ``--depth`` dial (G22 Phase 3) and
-#: its two-default-ness rides out the deprecation window in ``DEPRECATED_FLAGS``.
-DEFERRED_MULTI_DEFAULT: frozenset[str] = frozenset({"--collect-mode"})
-
-
-# ── ADR-037 D5 / §Backward-compat: deprecated-flag registry (G22 Phase 3) ─────
-#
-# Single source of truth for renamed/removed CLI surface. Each entry records the
-# replacement and a one-line note; the deprecation *resolver* + window-enforcing
-# test land in Phase 7 (kept advisory until 1.0). Today the live deprecations
-# already warn at their option sites (``--collect-mode`` in the command bodies,
-# ``--depth graph`` in ``cli_params.DepthParam``); this table documents them in
-# one place so nothing is removed silently.
-DEPRECATED_FLAGS: dict[str, tuple[str, str]] = {
-    "--collect-mode": (
-        "--depth",
-        "internal ADR-033 evidence mode; use the unified --depth dial (ADR-037 D5).",
-    ),
-    "--depth=graph": (
-        "--depth=source",
-        "the L5 graph is built internally at --depth source (ADR-037 D6).",
-    ),
-    "--header-backend": (
-        "--ast-frontend",
-        "the C/C++ frontend governs both header AST and source-ABI replay; "
-        "renamed to --ast-frontend (ADR-037 D8).",
-    ),
-    "--old-header-backend": (
-        "--old-ast-frontend",
-        "per-side rename of --header-backend → --ast-frontend (ADR-037 D8).",
-    ),
-    "--new-header-backend": (
-        "--new-ast-frontend",
-        "per-side rename of --header-backend → --ast-frontend (ADR-037 D8).",
-    ),
-}
-
-
-# ── ADR-037 D8 / §Backward-compat: deprecated AST-frontend spellings ──────────
-#: The renamed-to-``--ast-frontend`` spellings, as bare ``--flag`` tokens. The
-#: front-end commands scan ``sys.argv`` for these (see
-#: :func:`note_deprecated_ast_frontend`) to print a one-line stderr note while the
-#: alias still resolves. Enforcement (removal) is Phase 7, advisory until 1.0.
-_DEPRECATED_AST_FRONTEND_SPELLINGS: frozenset[str] = frozenset(
-    {"--header-backend", "--old-header-backend", "--new-header-backend"}
-)
-
-
-def note_deprecated_ast_frontend(argv: Sequence[str] | None = None) -> str | None:
-    """Return a deprecation note if a legacy ``--header-backend`` spelling was used.
-
-    ADR-037 D8 renamed ``--header-backend`` (and the per-side variants) to
-    ``--ast-frontend``; the old names stay working aliases for one release. A
-    command body calls this with ``sys.argv`` and echoes the returned note to
-    stderr, so a user migrating sees the new spelling. Returns ``None`` when no
-    deprecated spelling is present. Kept here (beside ``DEPRECATED_FLAGS``) so the
-    detection and the registry never drift.
-    """
-    import sys
-
-    tokens = list(sys.argv if argv is None else argv)
-    used = sorted(
-        flag
-        for flag in _DEPRECATED_AST_FRONTEND_SPELLINGS
-        if any(tok == flag or tok.startswith(f"{flag}=") for tok in tokens)
-    )
-    if not used:
-        return None
-    replacements = ", ".join(DEPRECATED_FLAGS[flag][0] for flag in used)
-    verb = "is" if len(used) == 1 else "are"
-    return (
-        f"warning: {', '.join(used)} {verb} deprecated (ADR-037 D8); "
-        f"use {replacements} instead."
-    )
-
-
-# ── ADR-037 §Backward-compat: the deprecation-window resolver (G22 Phase 7) ───
-#
-# Scaffolding for the 1.0 deprecation window. ``DEPRECATED_FLAGS`` is the single
-# registry of renamed/removed surface (name → (replacement, reason)); this
-# resolver is the one place that turns a *used* spelling into its replacement +
-# note. It stays **advisory** until 1.0 (no removal/hard-fail) per ADR-037; at
-# 1.0 the switch-on is flipping the window test from advisory to ERROR. Two key
-# shapes are supported: a bare ``--flag`` (flag-level rename) and a
-# ``--flag=value`` token (a deprecated *value* of a live flag, e.g.
-# ``--depth=graph`` → ``--depth=source``).
-
-
-def _argv_has_flag(argv: Sequence[str], flag: str) -> bool:
-    """True if ``flag`` appears in *argv* as ``--flag`` or ``--flag=...``."""
-    return any(tok == flag or tok.startswith(f"{flag}=") for tok in argv)
-
-
-def _argv_has_flag_value(argv: Sequence[str], flag: str, value: str) -> bool:
-    """True if *argv* sets ``flag`` to ``value`` (``--flag value`` or ``--flag=value``)."""
-    tokens = list(argv)
-    for i, tok in enumerate(tokens):
-        if tok == f"{flag}={value}":
-            return True
-        if tok == flag and i + 1 < len(tokens) and tokens[i + 1] == value:
-            return True
-    return False
-
-
-def resolve_deprecated_flag(spelling: str) -> tuple[str, str] | None:
-    """Resolve a deprecated flag/value *spelling* to ``(replacement, reason)``.
-
-    ``spelling`` is a ``DEPRECATED_FLAGS`` key — a bare ``--flag`` or a
-    ``--flag=value`` token. Returns ``None`` when the spelling is not deprecated.
-    The single lookup point so a front-end never hard-codes a replacement.
-    """
-    return DEPRECATED_FLAGS.get(spelling)
-
-
-def deprecated_flags_in_argv(
-    argv: Sequence[str] | None = None,
-) -> list[tuple[str, str, str]]:
-    """Scan *argv* for every deprecated spelling present (ADR-037 §Backward-compat).
-
-    Returns ``(spelling_used, replacement, reason)`` per match, in registry order.
-    Handles both flag-level renames (bare ``--flag`` key) and value-level
-    deprecations (``--flag=value`` key, matched as ``--flag value`` too). Used by
-    :func:`note_deprecated_flags` and the advisory window test; the live per-flag
-    stderr notes (``--collect-mode``, ``--ast-frontend``) keep their existing
-    sites until the 1.0 switch-on routes them all through here.
-    """
-    import sys
-
-    tokens = list(sys.argv if argv is None else argv)
-    found: list[tuple[str, str, str]] = []
-    for spelling, (replacement, reason) in DEPRECATED_FLAGS.items():
-        flag, sep, value = spelling.partition("=")
-        hit = (
-            _argv_has_flag_value(tokens, flag, value)
-            if sep
-            else _argv_has_flag(tokens, flag)
-        )
-        if hit:
-            found.append((spelling, replacement, reason))
-    return found
-
-
-def note_deprecated_flags(argv: Sequence[str] | None = None) -> str | None:
-    """One-line stderr note covering *all* deprecated spellings in *argv*, or None.
-
-    The generic counterpart of :func:`note_deprecated_ast_frontend` over the whole
-    ``DEPRECATED_FLAGS`` registry — the form the 1.0 switch-on will adopt.
-
-    Unlike the single-family ``note_deprecated_ast_frontend`` (whose flags share
-    one replacement, so a bare "use --ast-frontend instead" is unambiguous), this
-    spans the *whole* registry where a replacement-only message would be
-    ambiguous — e.g. ``--collect-mode`` → ``--depth`` and the value-level
-    ``--depth=graph`` → ``--depth=source`` in the same run. The explicit
-    ``spelling → replacement`` arrow pairs each deprecated token with its own
-    target, which is why this form keeps the arrow rather than matching the
-    sibling's simpler phrasing.
-    """
-    found = deprecated_flags_in_argv(argv)
-    if not found:
-        return None
-    parts = [f"{spelling} → {replacement}" for spelling, replacement, _ in found]
-    verb = "is" if len(found) == 1 else "are"
-    return (
-        f"warning: {', '.join(s for s, _, _ in found)} {verb} deprecated "
-        f"(ADR-037); use {', '.join(parts)}."
-    )
-
-
-#: ``ctx.meta`` key marking the AST-frontend deprecation note as already emitted
-#: for this invocation. ``Context.invoke`` shares one ``meta`` dict across the
-#: whole context tree, so a nested call (``deep-compare`` → ``compare``/``dump``)
-#: sees the flag set by its parent and stays quiet.
-_AST_NOTE_META_KEY = "abicheck._ast_frontend_note_emitted"
-
-
-def echo_ast_frontend_deprecation() -> None:
-    """Emit the legacy-``--header-backend`` deprecation note **once per invocation**.
-
-    ``deep-compare`` fans out to ``compare``/``dump`` via ``ctx.invoke``; each of
-    those bodies would otherwise re-scan ``sys.argv`` and re-print the note for a
-    single user invocation. Guarding on a shared ``ctx.meta`` flag collapses that
-    to one note (ADR-037 D8). Falls back to a plain emit when there is no active
-    Click context (e.g. a direct unit-test call).
-    """
-    ctx = click.get_current_context(silent=True)
-    if ctx is not None and ctx.meta.get(_AST_NOTE_META_KEY):
-        return
-    note = note_deprecated_ast_frontend()
-    if note is not None:
-        click.echo(note, err=True)
-    if ctx is not None:
-        ctx.meta[_AST_NOTE_META_KEY] = True
 
 
 #: ADR-037 D10.3 — the single MCP-param ⇄ CLI-flag name map. The ``abi_compare``

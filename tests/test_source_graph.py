@@ -384,12 +384,12 @@ def test_compare_graph_cli_surfaces_findings(tmp_path) -> None:
     op.write_text(json.dumps(old.to_dict()))
     np.write_text(json.dumps(new.to_dict()))
 
-    res = CliRunner().invoke(main, ["compare-graph", str(op), str(np)])
+    res = CliRunner().invoke(main, ["graph", "compare", str(op), str(np)])
     assert res.exit_code == 0, res.output
     assert "Graph-derived risk findings" in res.output
     assert "source_to_binary_mapping_changed" in res.output
 
-    res_json = CliRunner().invoke(main, ["compare-graph", str(op), str(np), "--format", "json"])
+    res_json = CliRunner().invoke(main, ["graph", "compare", str(op), str(np), "--format", "json"])
     payload = json.loads(res_json.output)
     assert payload["findings"][0]["kind"] == "source_to_binary_mapping_changed"
 
@@ -490,14 +490,14 @@ def test_explain_finding_cli(tmp_path) -> None:
     graph_json.write_text(json.dumps(g.to_dict()))
 
     res = CliRunner().invoke(main, [
-        "explain-finding", "--sources", str(graph_json), "--symbol", "_ZN3foo3barEv",
+        "graph", "explain", "--sources", str(graph_json), "--symbol", "_ZN3foo3barEv",
     ])
     assert res.exit_code == 0, res.output
     assert "target://libfoo" in res.output
     assert "foo::bar" in res.output
 
     res_json = CliRunner().invoke(main, [
-        "explain-finding", "--sources", str(graph_json),
+        "graph", "explain", "--sources", str(graph_json),
         "--symbol", "_ZN3foo3barEv", "--format", "json",
     ])
     payload = json.loads(res_json.output)
@@ -516,7 +516,7 @@ def test_explain_finding_resolves_symbol_from_report(tmp_path) -> None:
     report.write_text(json.dumps({"changes": [{"symbol": "_ZN3foo3barEv"}]}))
 
     res = CliRunner().invoke(main, [
-        "explain-finding", "--sources", str(graph_json),
+        "graph", "explain", "--sources", str(graph_json),
         "--report", str(report), "--finding-id", "0", "--format", "json",
     ])
     assert res.exit_code == 0, res.output
@@ -527,7 +527,7 @@ def test_explain_finding_requires_a_symbol(tmp_path) -> None:
     g = build_source_graph(BuildEvidence())
     graph_json = tmp_path / "g.json"
     graph_json.write_text(json.dumps(g.to_dict()))
-    res = CliRunner().invoke(main, ["explain-finding", "--sources", str(graph_json)])
+    res = CliRunner().invoke(main, ["graph", "explain", "--sources", str(graph_json)])
     assert res.exit_code != 0
     assert "No symbol to explain" in res.output
 
@@ -710,12 +710,12 @@ def test_compare_graph_cli_reports_diff(tmp_path) -> None:
     old_path.write_text(json.dumps(old.to_dict()))
     new_path.write_text(json.dumps(new.to_dict()))
 
-    res = CliRunner().invoke(main, ["compare-graph", str(old_path), str(new_path)])
+    res = CliRunner().invoke(main, ["graph", "compare", str(old_path), str(new_path)])
     assert res.exit_code == 0, res.output
     assert "structural diff" in res.output
 
     res_json = CliRunner().invoke(
-        main, ["compare-graph", str(old_path), str(new_path), "--format", "json"]
+        main, ["graph", "compare", str(old_path), str(new_path), "--format", "json"]
     )
     assert res_json.exit_code == 0
     counts = json.loads(res_json.output)["counts"]
@@ -726,13 +726,13 @@ def test_compare_graph_identical(tmp_path) -> None:
     g = build_source_graph(_sample_build())
     p = tmp_path / "g.json"
     p.write_text(json.dumps(g.to_dict()))
-    res = CliRunner().invoke(main, ["compare-graph", str(p), str(p)])
+    res = CliRunner().invoke(main, ["graph", "compare", str(p), str(p)])
     assert res.exit_code == 0
     assert "structurally identical" in res.output
 
 
 def test_compare_graph_missing_graph_errors(tmp_path) -> None:
-    res = CliRunner().invoke(main, ["compare-graph", str(tmp_path / "nope.json"), str(tmp_path / "nope.json")])
+    res = CliRunner().invoke(main, ["graph", "compare", str(tmp_path / "nope.json"), str(tmp_path / "nope.json")])
     assert res.exit_code != 0
 
 
@@ -767,7 +767,7 @@ def test_compare_graph_accepts_pack_directories_and_shows_removals(tmp_path) -> 
     # removed-edge rendering branches of the text output.
     big = _collect_pack(tmp_path, "big", two_units=True)
     small = _collect_pack(tmp_path, "small", two_units=False)
-    res = CliRunner().invoke(main, ["compare-graph", big, small])
+    res = CliRunner().invoke(main, ["graph", "compare", big, small])
     assert res.exit_code == 0, res.output
     assert "- node" in res.output or "- edge" in res.output
 
@@ -785,7 +785,7 @@ def test_compare_graph_pack_without_graph_errors(tmp_path) -> None:
     assert CliRunner().invoke(main, [
         "collect", "--compile-db", str(cdb), "-o", str(out),
     ]).exit_code == 0
-    res = CliRunner().invoke(main, ["compare-graph", str(out), str(out)])
+    res = CliRunner().invoke(main, ["graph", "compare", str(out), str(out)])
     assert res.exit_code != 0
     assert "no L5 source graph" in res.output
 
@@ -793,7 +793,7 @@ def test_compare_graph_pack_without_graph_errors(tmp_path) -> None:
 def test_compare_graph_malformed_json_errors(tmp_path) -> None:
     bad = tmp_path / "bad.json"
     bad.write_text("{not valid json")
-    res = CliRunner().invoke(main, ["compare-graph", str(bad), str(bad)])
+    res = CliRunner().invoke(main, ["graph", "compare", str(bad), str(bad)])
     assert res.exit_code != 0
     assert "Cannot read source graph" in res.output
 
@@ -801,7 +801,7 @@ def test_compare_graph_malformed_json_errors(tmp_path) -> None:
 def test_compare_graph_non_object_json_errors(tmp_path) -> None:
     arr = tmp_path / "arr.json"
     arr.write_text("[1, 2, 3]")
-    res = CliRunner().invoke(main, ["compare-graph", str(arr), str(arr)])
+    res = CliRunner().invoke(main, ["graph", "compare", str(arr), str(arr)])
     assert res.exit_code != 0
     assert "must contain a JSON object" in res.output
 
@@ -811,7 +811,7 @@ def test_compare_graph_rejects_non_graph_json_object(tmp_path) -> None:
     # actionable error, not be read as an empty graph (CodeRabbit review).
     manifest = tmp_path / "manifest.json"
     manifest.write_text(json.dumps({"build_source_pack_version": 1, "coverage": []}))
-    res = CliRunner().invoke(main, ["compare-graph", str(manifest), str(manifest)])
+    res = CliRunner().invoke(main, ["graph", "compare", str(manifest), str(manifest)])
     assert res.exit_code != 0
     assert "not a source graph summary" in res.output
 

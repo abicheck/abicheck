@@ -656,7 +656,7 @@ class TestCompareReleaseTarPackages:
 
         runner = CliRunner()
         result = runner.invoke(main, [
-            "compare-release", str(old_tar), str(new_tar),
+            "compare", str(old_tar), str(new_tar),
             "--format", "json",
         ])
         # Should succeed — NO_CHANGE since snapshots are identical
@@ -681,7 +681,7 @@ class TestCompareReleaseTarPackages:
 
         runner = CliRunner()
         result = runner.invoke(main, [
-            "compare-release", str(tar), str(tar),
+            "compare", str(tar), str(tar),
             "--format", "json", "--keep-extracted",
         ])
         assert result.exit_code == 0, f"Exit {result.exit_code}: {result.output}"
@@ -714,7 +714,7 @@ class TestCompareReleaseDirectoryPassthrough:
 
         runner = CliRunner()
         result = runner.invoke(main, [
-            "compare-release", str(old_dir), str(new_dir),
+            "compare", str(old_dir), str(new_dir),
             "--format", "json",
         ])
         assert result.exit_code == 0, f"Exit {result.exit_code}: {result.output}"
@@ -864,7 +864,7 @@ class TestCompareReleaseWheelPackages:
 
         runner = CliRunner()
         result = runner.invoke(main, [
-            "compare-release", str(old_whl), str(new_whl),
+            "compare", str(old_whl), str(new_whl),
             "--format", "json",
         ])
         assert result.exit_code == 0, f"Exit {result.exit_code}: {result.output}"
@@ -1439,7 +1439,7 @@ class TestCompareReleaseDsoOnly:
 
         runner = CliRunner()
         result = runner.invoke(main, [
-            "compare-release", str(old_dir), str(new_dir),
+            "compare", str(old_dir), str(new_dir),
             "--format", "json", "--dso-only",
         ])
         # With --dso-only, JSON snapshots are not ELF DSOs, so no pairs found
@@ -1471,7 +1471,7 @@ class TestKeepExtractedActuallyKeeps:
 
         runner = CliRunner()
         result = runner.invoke(main, [
-            "compare-release", str(archive), str(archive),
+            "compare", str(archive), str(archive),
             "--format", "json", "--keep-extracted",
         ])
         assert result.exit_code == 0, f"Exit {result.exit_code}: {result.output}"

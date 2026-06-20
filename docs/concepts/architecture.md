@@ -142,8 +142,7 @@ Reads native binary metadata using format-specific parsers:
 ### Layer L2: Header AST (castxml / Clang) — all platforms
 
 Parses C/C++ headers through a selectable frontend — `--ast-frontend
-auto|castxml|clang` (or `ABICHECK_AST_FRONTEND`; the old `--header-backend` /
-`ABICHECK_HEADER_BACKEND` spellings remain as deprecated aliases, ADR-037 D8);
+auto|castxml|clang` (or `ABICHECK_AST_FRONTEND`);
 `auto` prefers castxml and
 falls back to clang `-ast-dump=json` on clang-only hosts (ADR-003). The rest of
 this section describes the castxml backend. The clang backend exposes the same
@@ -269,7 +268,7 @@ break.
 
 | Module | Responsibility |
 |--------|---------------|
-| `cli.py` | CLI entrypoint — `dump`, `compare`, `compat check`, `compat dump`, `deps`, `stack-check`, `baseline`, `appcompat` commands |
+| `cli.py` | CLI entrypoint — `dump`, `compare`, `compat check`, `compat dump`, `deps` (tree/compare), `baseline`, `appcompat` commands |
 | `service.py` | Service layer — shared orchestration for CLI and MCP server (`resolve_input`, `run_dump`, `run_compare`, `render_output`) |
 | `mcp_server.py` | MCP (Model Context Protocol) server for AI agent integration |
 | `build_context.py` | `compile_commands.json` parsing and per-TU flag extraction |

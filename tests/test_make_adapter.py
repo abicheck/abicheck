@@ -248,7 +248,7 @@ def test_collect_evidence_make_dry_run_cli(tmp_path):
     dr = tmp_path / "dry.txt"
     dr.write_text(DRY_RUN)
     out = tmp_path / "e"
-    result = CliRunner().invoke(main, ["collect", "--make-dry-run", str(dr), "-o", str(out)])
+    result = CliRunner().invoke(main, ["collect", "--from", f"make={dr}", "-o", str(out)])
     assert result.exit_code == 0, result.output
     pack = BuildSourcePack.load(out)
     assert pack.build_evidence is not None

@@ -36,7 +36,7 @@ becomes the worst of `bundle_verdict` and the per-library worst.
 The bundle layer is **enabled by default**:
 
 ```bash
-abicheck compare-release release-1.0/ release-2.0/ -H include/
+abicheck compare release-1.0/ release-2.0/ -H include/
 ```
 
 If the bundle is broken, you'll see a new section in the markdown
@@ -240,7 +240,7 @@ When to use it:
 Example:
 
 ```bash
-abicheck compare-release old/ new/ \
+abicheck compare old/ new/ \
     --bundle-system-providers libvpl.so.2,libcuda.so.1
 ```
 

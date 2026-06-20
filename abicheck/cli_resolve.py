@@ -31,7 +31,7 @@ caller is a CLI entry point — the parallel, framework-free contract lives in
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import click
 
@@ -525,3 +525,122 @@ def _resolve_compare_snapshots(
                 new, new_input, list(search_paths), None, ld_library_path
             )
     return old, new
+
+
+# ── Set-input (directory/package) compare guards (ADR-037 D3/D12) ─────────────
+#
+# The per-library release fan-out forwards only release-comparison kwargs; it
+# does not thread the single-pair L2 compile context or inline build/source
+# evidence per pair. So the corresponding flags would be silently dropped on a
+# directory/package compare — reject them loudly instead (Codex review). Kept
+# here (not in cli.py) so cli.py stays under the file-size hard cap.
+
+#: Compile-context flag dest → spelling, for the set-input rejection guard.
+_COMPILE_CONTEXT_SET_INPUT_FLAGS: dict[str, str] = {
+    "gcc_path": "--gcc-path",
+    "gcc_prefix": "--gcc-prefix",
+    "gcc_options": "--gcc-options",
+    "gcc_option_tokens": "--gcc-option",
+    "sysroot": "--sysroot",
+    "nostdinc": "--nostdinc",
+    "header_backend": "--ast-frontend",
+    "old_header_backend": "--old-ast-frontend",
+    "new_header_backend": "--new-ast-frontend",
+}
+
+#: Build/source evidence flags (param dest → flag). ``max_depth``/``depth`` are
+#: the evidence-depth dial; the four per-side --sources/--build-info are the
+#: inline evidence inputs.
+_EVIDENCE_SET_INPUT_FLAGS: dict[str, str] = {
+    "max_depth": "--max",
+    "depth": "--depth",
+    "old_sources": "--old-sources",
+    "new_sources": "--new-sources",
+    "old_build_info": "--old-build-info",
+    "new_build_info": "--new-build-info",
+}
+
+
+def _reject_evidence_flags_for_set_inputs(ctx: click.Context) -> None:
+    """Reject inline build/source evidence flags for directory/package compares.
+
+    The release fan-out forwards only release-comparison kwargs, so ``--max``/
+    ``--depth`` and the per-side ``--old/new-sources`` / ``--old/new-build-info``
+    would be accepted and silently dropped (no L3-L5 collected). Fail loudly so
+    the user knows to compare libraries individually to collect deep evidence
+    (Codex review)."""
+    used = [
+        flag
+        for dest, flag in _EVIDENCE_SET_INPUT_FLAGS.items()
+        if ctx.get_parameter_source(dest) == click.core.ParameterSource.COMMANDLINE
+    ]
+    if used:
+        raise click.UsageError(
+            ", ".join(sorted(used)) + " "
+            + ("is" if len(used) == 1 else "are")
+            + " not supported for directory/package (release) comparisons: the "
+            "per-library fan-out does not collect inline build/source evidence. "
+            "Compare the libraries individually (or pre-dump snapshots with "
+            "`dump --sources/--build-info`) to collect L3-L5 evidence."
+        )
+
+
+def _config_has_compile_block(project_cfg: Any) -> bool:
+    """True if a loaded ``.abicheck.yml`` carries any ``compile:`` setting.
+
+    Used to flag that a project's L2 compile context would be dropped by the
+    per-library release fan-out (which the single-pair path honors).
+    """
+    if project_cfg is None:
+        return False
+    return bool(
+        getattr(project_cfg, "compile_frontend", None)
+        or getattr(project_cfg, "compile_std", None)
+        or getattr(project_cfg, "compile_defines", None)
+        or getattr(project_cfg, "compile_include_dirs", None)
+        or getattr(project_cfg, "compile_sysroot", None)
+        or getattr(project_cfg, "compile_nostdinc", False)
+    )
+
+
+def _reject_compile_context_for_set_inputs(ctx: click.Context, project_cfg: Any) -> None:
+    """Guard the L2 compile context for directory/package compares.
+
+    The per-library fan-out (release backend) runs each pair through
+    `service.run_compare` without a `CompileContext`, so the L2 cross-toolchain /
+    frontend context is not applied per library — unlike the single-pair path that
+    now honors it. Two cases, never silent (Codex review):
+
+    * An **explicitly-passed** compile-context flag is rejected loudly (a
+      `UsageError`, mirroring the `--exit-code-scheme` guard): the user asked for
+      it, so erroring beats ignoring it.
+    * An **ambient** project ``.abicheck.yml`` ``compile:`` block only *warns*:
+      a plain ``compare dir1 dir2`` in a configured project shouldn't hard-fail,
+      but the user must know those settings apply to single-library compares and
+      not to this fan-out (so per-library snapshots may differ).
+
+    Either way, compare libraries individually (or pre-dump snapshots) to apply
+    the context.
+    """
+    used = [
+        flag
+        for dest, flag in _COMPILE_CONTEXT_SET_INPUT_FLAGS.items()
+        if ctx.get_parameter_source(dest) == click.core.ParameterSource.COMMANDLINE
+    ]
+    if used:
+        raise click.UsageError(
+            ", ".join(sorted(used)) + " "
+            + ("is" if len(used) == 1 else "are")
+            + " not supported for directory/package (release) comparisons: the "
+            "per-library fan-out does not thread the L2 compile context to each "
+            "pair's header dump. Compare the libraries individually to use them."
+        )
+    if _config_has_compile_block(project_cfg):
+        click.echo(
+            "Warning: the .abicheck.yml compile: block is not applied to "
+            "directory/package (release) comparisons — the per-library fan-out "
+            "does not thread the L2 compile context. It affects single-library "
+            "compares only; compare libraries individually for consistent "
+            "per-library snapshots.",
+            err=True,
+        )

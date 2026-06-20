@@ -20,6 +20,7 @@ import json
 import sys
 from types import SimpleNamespace
 
+import pytest
 from click.testing import CliRunner
 
 from abicheck.buildsource.pack import BuildSourcePack
@@ -93,10 +94,71 @@ def test_collect_evidence_requires_output(tmp_path):
 
 def test_collect_evidence_cmake_requires_build_dir(tmp_path):
     result = CliRunner().invoke(
-        main, ["collect", "--cmake", "-o", str(tmp_path / "e")],
+        main, ["collect", "--from", "cmake", "-o", str(tmp_path / "e")],
     )
     assert result.exit_code != 0
     assert "build-dir" in result.output
+
+
+def test_parse_from_specs_maps_adapters(tmp_path):
+    """The unified `--from adapter[=path]` parses into the per-adapter kwargs."""
+    from abicheck.cli_buildsource_helpers import parse_from_specs
+
+    got = parse_from_specs((
+        "cmake", "ninja",
+        f"ninja-compdb={tmp_path / 'c.json'}",
+        f"bazel-cquery={tmp_path / 'cq.json'}",
+        f"bazel-aquery={tmp_path / 'aq.json'}",
+        f"make={tmp_path / 'dry.txt'}",
+    ))
+    assert got["cmake"] is True and got["ninja"] is True
+    assert got["ninja_compdb"] == tmp_path / "c.json"
+    assert got["bazel_cquery"] == tmp_path / "cq.json"
+    assert got["bazel_aquery"] == tmp_path / "aq.json"
+    assert got["make_dry_run"] == tmp_path / "dry.txt"
+    # Empty specs → all defaults (no adapter requested).
+    empty = parse_from_specs(())
+    assert empty["cmake"] is False and empty["ninja_compdb"] is None
+
+
+@pytest.mark.parametrize(
+    "spec, needle",
+    [
+        ("cmake=foo", "takes no '=path'"),       # live adapter rejects a path
+        ("ninja=foo", "takes no '=path'"),
+        ("make", "requires a pre-captured path"),  # pre-captured needs a path
+        ("bazel-cquery", "requires a pre-captured path"),
+        ("bogus", "unknown adapter"),
+    ],
+)
+def test_parse_from_specs_rejects_bad_specs(spec, needle):
+    import click as _click
+
+    from abicheck.cli_buildsource_helpers import parse_from_specs
+
+    with pytest.raises(_click.UsageError) as exc:
+        parse_from_specs((spec,))
+    assert needle in str(exc.value)
+
+
+def test_parse_from_specs_rejects_duplicate_adapter():
+    """A repeated `--from` adapter is rejected, not silently last-wins."""
+    import click as _click
+
+    from abicheck.cli_buildsource_helpers import parse_from_specs
+
+    with pytest.raises(_click.UsageError) as exc:
+        parse_from_specs(("bazel-aquery=a.json", "bazel-aquery=b.json"))
+    assert "more than once" in str(exc.value)
+
+
+def test_collect_from_bogus_adapter_is_usage_error(tmp_path):
+    """The bad-spec error surfaces through the live `collect` command too."""
+    result = CliRunner().invoke(
+        main, ["collect", "--from", "nope", "-o", str(tmp_path / "e")],
+    )
+    assert result.exit_code != 0
+    assert "unknown adapter" in result.output
 
 
 def test_dump_attach_evidence_ref(tmp_path):
@@ -544,12 +606,12 @@ def _source_tree(tmp_path):
 
 
 def test_dump_collect_mode_build_collects_l3_only(tmp_path):
-    """ADR-033 D2/Phase-1: `dump --collect-mode build` captures L3 build context
+    """ADR-033 D2/Phase-1: `dump --depth build` captures L3 build context
     only — no L4 source replay or L5 graph."""
     tree = _source_tree(tmp_path)
     out = tmp_path / "s.json"
     result = CliRunner().invoke(main, [
-        "dump", "--sources", str(tree), "--collect-mode", "build", "-o", str(out),
+        "dump", "--sources", str(tree), "--depth", "build", "-o", str(out),
     ])
     assert result.exit_code == 0, result.output
     bs = load_snapshot(out).build_source
@@ -563,7 +625,7 @@ def test_dump_collect_mode_build_collects_l3_only(tmp_path):
 
 
 def test_dump_collect_mode_build_filters_pre_captured_pack(tmp_path):
-    """ADR-033 D2 (Codex review): `--collect-mode build` must strip L4/L5 from a
+    """ADR-033 D2 (Codex review): `--depth build` must strip L4/L5 from a
     pre-captured pack too, so an L3-only run can't smuggle in source evidence."""
     runner = CliRunner()
     cdb = _write_cdb(tmp_path, "c++17")
@@ -573,7 +635,7 @@ def test_dump_collect_mode_build_filters_pre_captured_pack(tmp_path):
     assert BuildSourcePack.load(ev).source_graph is not None  # full pack
     out = tmp_path / "s.json"
     result = runner.invoke(main, [
-        "dump", "--build-info", str(ev), "--collect-mode", "build", "-o", str(out),
+        "dump", "--build-info", str(ev), "--depth", "build", "-o", str(out),
     ])
     assert result.exit_code == 0, result.output
     bs = load_snapshot(out).build_source
@@ -607,11 +669,11 @@ def test_recommend_collect_mode_cli():
 
 
 def test_dump_collect_mode_off_embeds_nothing(tmp_path):
-    """`--collect-mode off` collects no evidence even with a source tree."""
+    """`--depth headers` collects no source evidence even with a source tree."""
     tree = _source_tree(tmp_path)
     out = tmp_path / "s.json"
     result = CliRunner().invoke(main, [
-        "dump", "--sources", str(tree), "--collect-mode", "off", "-o", str(out),
+        "dump", "--sources", str(tree), "--depth", "headers", "-o", str(out),
     ])
     assert result.exit_code == 0, result.output
     assert load_snapshot(out).build_source is None
@@ -621,10 +683,10 @@ def test_compare_collect_mode_without_packs_is_noted(tmp_path):
     old_snap = _make_snap(tmp_path, "old.json", "1.0")
     new_snap = _make_snap(tmp_path, "new.json", "2.0")
     result = CliRunner().invoke(main, [
-        "compare", str(old_snap), str(new_snap), "--collect-mode", "build",
+        "compare", str(old_snap), str(new_snap), "--depth", "build",
     ])
     assert result.exit_code in (0, 2, 4), result.output
-    assert "collect-mode build" in result.stderr
+    assert "'build'" in result.stderr
 
 
 def test_compare_without_evidence_is_unchanged(tmp_path):
@@ -1248,8 +1310,20 @@ def test_is_pack_dir_and_compile_db_resolution(tmp_path):
     plain = tmp_path / "plain"
     plain.mkdir()
     assert is_pack_dir(plain) is False
+    # A valid manifest.json WITHOUT the BuildSourcePack marker is a stray file,
+    # not a pack — collect from the tree instead of mis-loading an empty pack.
     (plain / "manifest.json").write_text("{}", encoding="utf-8")
+    assert is_pack_dir(plain) is False
+    # The version marker makes it a real pack.
+    (plain / "manifest.json").write_text(
+        '{"build_source_pack_version": 1}', encoding="utf-8"
+    )
     assert is_pack_dir(plain) is True
+    # A present-but-corrupt manifest stays a (corrupt) pack so the load errors loudly.
+    corrupt = tmp_path / "corrupt"
+    corrupt.mkdir()
+    (corrupt / "manifest.json").write_text("{ not json", encoding="utf-8")
+    assert is_pack_dir(corrupt) is True
 
     # _compile_db_at: a build dir with build/compile_commands.json is found.
     bd = tmp_path / "bd"

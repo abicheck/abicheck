@@ -64,7 +64,7 @@ jobs:
           runtime_deb="$(ls zlib1g_*.deb | head -1)"
           devel_deb="$(ls zlib1g-dev_*.deb | head -1)"
           cd ../..
-          abicheck compare-release \
+          abicheck compare \
             "inputs/debs/${runtime_deb}" \
             "inputs/debs/${runtime_deb}" \
             --devel-pkg1 "inputs/debs/${devel_deb}" \

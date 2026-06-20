@@ -330,9 +330,15 @@ use_cases:
     gap: G21
     plan: docs/development/plans/g21-oneshot-deep-compare.md
     evidence:
-      modules: [abicheck/cli_max.py, abicheck/cli_help.py, abicheck/cli_dump_helpers.py]
-      tests: [tests/test_cli_deep_compare.py, tests/test_cov95_cli.py]
+      modules: [abicheck/cli.py, abicheck/cli_help.py, abicheck/cli_dump_helpers.py]
+      tests: [tests/test_depth_vocabulary.py, tests/test_cov95_cli.py]
     next_steps: >
+      Superseded: the standalone `deep-compare` orchestrator was removed and
+      folded into `compare`. `compare old.so new.so --old-sources ./src1
+      --new-sources ./src2 --max` collects L3-L5 inline from each raw source
+      tree (a pre-built `collect` pack is accepted too) and embeds it in the
+      per-side snapshot before comparing — the one-shot deep route, now on
+      `compare`. The text below is retained as historical context for G21.
       Shipped in PR #422: the --depth headers|build|graph|source|full dial
       (--max = --depth full) on dump reusing the scan_levels vocabulary/mapping;
       the one-shot `deep-compare` orchestrator (cli_max.py) that dumps both sides
@@ -552,8 +558,8 @@ use_cases:
       fallback would be rewritten into `typedef float float;` (PR review). The
       durable cure is a castxml built against a newer Clang, or the libclang
       extractor (G4). ALSO DONE: per-side L2 backend selection
-      (`--old-header-backend`/`--new-header-backend` on `compare`/`deep-compare`,
-      each inheriting `--header-backend`) so a release whose new headers need the
+      (`--old-ast-frontend`/`--new-ast-frontend` on `compare`,
+      each inheriting `--ast-frontend`) so a release whose new headers need the
       host toolchain parses on clang while the old release keeps the castxml schema
       reference — the backend mirror of `--old-header`/`--new-header`
       (tests/test_cli_new_features.py::TestPerSideHeaderBackend). REMAINING: an

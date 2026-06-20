@@ -19,7 +19,7 @@ Cross-source links are read in **two** directions (ADR-035 D7). The cross-check
 engine (``crosscheck.py``, D4) reads them *after* a scan to emit findings; this
 module reads the *same* cheap, already-computed facts *before* the expensive scan
 to shrink its scope to a **points-of-interest (POI) set**. It is mechanically the
-**reverse** of the ``explain-finding`` localization walk (export → decl → header
+**reverse** of the ``graph explain`` localization walk (export → decl → header
 → build option): instead of explaining a finding after the fact, the POI set is
 computed up front and handed to ``source_replay`` scope selection and the
 cross-check engine as a work-list, so a large project pays L4/L5 cost only on the
@@ -170,7 +170,7 @@ def build_points_of_interest(
       :class:`~abicheck.buildsource.pattern_scan.EscalationTrigger` objects; each
       contributes its sample paths as ``PATTERN_TRIGGER`` POIs.
     - ``baseline`` / ``candidate`` — when both are given, the L0/L1/L2 export
-      deltas are walked (reverse explain-finding): added/removed exports,
+      deltas are walked (reverse `graph explain`): added/removed exports,
       exported symbols with no public declaration, and exported template
       instantiations become ``SYMBOL`` POIs that point the scan at the source
       declarations that emit them.
@@ -215,7 +215,7 @@ def build_points_of_interest(
             f"pattern: {kind_str}",
         )
 
-    # 3) L0/L1/L2 export deltas vs. the baseline (reverse explain-finding walk).
+    # 3) L0/L1/L2 export deltas vs. the baseline (reverse `graph explain` walk).
     if baseline is not None and candidate is not None:
         _add_export_deltas(_add, baseline, candidate)
 
@@ -361,7 +361,7 @@ def resolve_symbol_tus(
 
     This is the consumer that turns ``poi.symbols()`` (the cheap L0↔L2 export
     delta, computed by :func:`build_points_of_interest`) into a **replay scope
-    seed** — the missing half of ADR-035 D7's reverse explain-finding walk
+    seed** — the missing half of ADR-035 D7's reverse `graph explain` walk
     (export → decl → declaring file). It reads the **baseline's** cached L5
     source graph (the full-depth baseline of ADR-035 D9 carries it), so a changed
     export points the *new* scan at exactly the TU(s) that declare it instead of
