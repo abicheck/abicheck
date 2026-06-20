@@ -605,6 +605,25 @@ def test_load_source_graph_invalid_pack_dir(tmp_path) -> None:
         _load_source_graph(tmp_path)
 
 
+def test_graph_helpers_backcompat_reexport_from_cli_buildsource() -> None:
+    """The helpers moved to ``cli_graph`` when the graph group was extracted, but
+    the historical ``from abicheck.cli_buildsource import _load_source_graph``
+    path stays alive via a lazy ``__getattr__`` shim (no import cycle). Pin it so
+    the back-compat surface can't silently regress; an unknown attr still raises.
+    """
+    import pytest
+
+    from abicheck import cli_buildsource, cli_graph
+
+    assert cli_buildsource._load_source_graph is cli_graph._load_source_graph
+    assert (
+        cli_buildsource._resolve_symbol_from_report
+        is cli_graph._resolve_symbol_from_report
+    )
+    with pytest.raises(AttributeError):
+        cli_buildsource._definitely_not_a_real_attr
+
+
 # ── Phase 1: schema round-trip + content addressing ─────────────────────────
 
 
