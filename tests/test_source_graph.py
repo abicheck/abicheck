@@ -533,7 +533,7 @@ def test_explain_finding_requires_a_symbol(tmp_path) -> None:
 
 
 def test_resolve_symbol_from_report_variants(tmp_path) -> None:
-    from abicheck.cli_buildsource import _resolve_symbol_from_report
+    from abicheck.cli_graph import _resolve_symbol_from_report
 
     report = tmp_path / "r.json"
     report.write_text(json.dumps({"changes": [
@@ -553,7 +553,7 @@ def test_resolve_symbol_from_report_unreadable(tmp_path) -> None:
     import click
     import pytest
 
-    from abicheck.cli_buildsource import _resolve_symbol_from_report
+    from abicheck.cli_graph import _resolve_symbol_from_report
 
     with pytest.raises(click.ClickException):
         _resolve_symbol_from_report(tmp_path / "missing.json", "0")

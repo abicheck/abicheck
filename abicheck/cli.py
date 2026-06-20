@@ -1911,6 +1911,7 @@ from . import (  # noqa: E402  — must run after `main` and helpers are defined
     cli_baseline,  # noqa: F401  — registers baseline
     cli_buildsource,  # noqa: F401  — registers collect
     cli_debian_symbols,  # noqa: F401  — registers debian-symbols
+    cli_graph,  # noqa: F401  — registers graph (compare, explain)
     cli_plugin,  # noqa: F401  — registers plugin-check
     cli_pr_comment,  # noqa: F401  — registers pr-comment
     cli_probe,  # noqa: F401  — registers probe (run, compare)

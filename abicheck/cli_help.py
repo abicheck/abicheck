@@ -183,6 +183,17 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
             "options": ["--git-tag", "--build-id", "--no-git"],
         },
     ],
+    # `graph explain` (cli_graph). `graph compare` carries only --format, which
+    # the "* compare" key above already groups under "Output & reporting" (the
+    # fnmatch key matches the sub-command name) — so only `explain` needs an
+    # explicit entry to keep its inputs ahead of the output flag.
+    "* explain": [
+        {
+            "name": "Inputs",
+            "options": ["--sources", "--symbol", "--report", "--finding-id"],
+        },
+        {"name": "Output", "options": ["--format"]},
+    ],
 }
 
 
