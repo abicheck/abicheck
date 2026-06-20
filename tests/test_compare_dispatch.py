@@ -310,6 +310,69 @@ def test_embed_inline_collects_raw_build_info_without_sources(tmp_path: Path) ->
     assert captured["_resolved_collect_mode"] == "build"
 
 
+def test_embed_inline_raw_build_info_on_snapshot_is_ignored(tmp_path: Path) -> None:
+    """A raw --build-info on a snapshot input (can't re-dump) is warned about and
+    cleared, so it never reaches the pack loader (Codex review)."""
+    import abicheck.cli as climod
+    from abicheck.service_scan import CompileContext
+
+    raw_build = tmp_path / "build"
+    raw_build.mkdir()
+
+    class _Ctx:
+        def invoke(self, _cmd, **kwargs):  # type: ignore[no-untyped-def]
+            raise AssertionError("dump must not run on a snapshot input")
+
+    orig = climod._normalize_binary_input
+    climod._normalize_binary_input = lambda p: (Path(p), None)  # type: ignore[assignment]
+    try:
+        out, kept, kept_bi = climod._embed_inline_source_side(
+            _Ctx(), input_path=tmp_path / "old.json", sources=None,
+            headers=(), includes=(), version="1.0", lang="c++",
+            header_backend="auto", compile_context=CompileContext(),
+            frontend_explicit=False, nostdinc_explicit=False, build_info=raw_build,
+            follow_deps=False, search_paths=(), ld_library_path="",
+            dwarf_only=False, debug_format=None, pdb_path=None,
+            collect_mode="build", out_dir=tmp_path, label="old",
+        )
+    finally:
+        climod._normalize_binary_input = orig  # type: ignore[assignment]
+
+    assert kept is None and kept_bi is None  # raw build-info dropped, not kept
+
+
+def test_embed_inline_raw_build_info_dropped_at_off_depth(tmp_path: Path) -> None:
+    """A raw --build-info with a no-collect depth (collect_mode 'off') is dropped
+    rather than reaching the pack loader."""
+    import abicheck.cli as climod
+    from abicheck.service_scan import CompileContext
+
+    raw_build = tmp_path / "build"
+    raw_build.mkdir()
+    called = {"n": 0}
+
+    class _Ctx:
+        def invoke(self, _cmd, **kwargs):  # type: ignore[no-untyped-def]
+            called["n"] += 1
+
+    orig = climod._normalize_binary_input
+    climod._normalize_binary_input = lambda p: (Path(p), "elf")  # type: ignore[assignment]
+    try:
+        _, kept, kept_bi = climod._embed_inline_source_side(
+            _Ctx(), input_path=tmp_path / "lib.so", sources=None,
+            headers=(), includes=(), version="1.0", lang="c++",
+            header_backend="auto", compile_context=CompileContext(),
+            frontend_explicit=False, nostdinc_explicit=False, build_info=raw_build,
+            follow_deps=False, search_paths=(), ld_library_path="",
+            dwarf_only=False, debug_format=None, pdb_path=None,
+            collect_mode="off", out_dir=tmp_path, label="old",
+        )
+    finally:
+        climod._normalize_binary_input = orig  # type: ignore[assignment]
+
+    assert kept is None and kept_bi is None and called["n"] == 0
+
+
 def test_compare_source_tree_on_snapshot_input_is_ignored(tmp_path: Path) -> None:
     """A raw --old-sources tree on a snapshot input can't be embedded (you can't
     re-dump a snapshot), so compare warns and still produces a verdict."""

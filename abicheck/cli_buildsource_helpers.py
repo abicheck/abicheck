@@ -856,6 +856,63 @@ def _echo_collection_summary(
         click.echo(f"  note: {diag}", err=True)
 
 
+#: ``collect --from`` adapter specs (ADR-037 CLI consolidation). The six former
+#: per-adapter flags (``--cmake``/``--ninja`` live toggles + ``--ninja-compdb``/
+#: ``--bazel-cquery``/``--bazel-aquery``/``--make-dry-run`` pre-captured paths)
+#: collapse onto one repeatable ``--from adapter[=path]``. Live adapters take no
+#: ``=path`` (they read ``--build-dir``); pre-captured ones require one.
+_FROM_LIVE_ADAPTERS: frozenset[str] = frozenset({"cmake", "ninja"})
+#: pre-captured adapter name → the ``_run_adapters`` kwarg it feeds.
+_FROM_PATH_ADAPTERS: dict[str, str] = {
+    "ninja-compdb": "ninja_compdb",
+    "bazel-cquery": "bazel_cquery",
+    "bazel-aquery": "bazel_aquery",
+    "make": "make_dry_run",
+}
+
+
+def parse_from_specs(specs: tuple[str, ...]) -> dict[str, object]:
+    """Parse ``collect --from adapter[=path]`` specs into ``_run_adapters`` kwargs.
+
+    Returns a dict with ``cmake``/``ninja`` bools and ``ninja_compdb``/
+    ``bazel_cquery``/``bazel_aquery``/``make_dry_run`` paths (None when unset).
+    Raises :class:`click.UsageError` on an unknown adapter, a live adapter given
+    a ``=path``, or a pre-captured adapter given no path. Pure (no I/O) so it is
+    unit-tested directly.
+    """
+    out: dict[str, object] = {
+        "cmake": False,
+        "ninja": False,
+        "ninja_compdb": None,
+        "bazel_cquery": None,
+        "bazel_aquery": None,
+        "make_dry_run": None,
+    }
+    valid = sorted(_FROM_LIVE_ADAPTERS | set(_FROM_PATH_ADAPTERS))
+    for spec in specs:
+        name, sep, value = spec.partition("=")
+        name = name.strip()
+        if name in _FROM_LIVE_ADAPTERS:
+            if sep:
+                raise click.UsageError(
+                    f"--from {name} is a live adapter and takes no '=path' "
+                    "(it reads --build-dir)."
+                )
+            out[name] = True
+        elif name in _FROM_PATH_ADAPTERS:
+            if not value:
+                raise click.UsageError(
+                    f"--from {name} requires a pre-captured path "
+                    f"(e.g. --from {name}=path)."
+                )
+            out[_FROM_PATH_ADAPTERS[name]] = Path(value)
+        else:
+            raise click.UsageError(
+                f"--from: unknown adapter {name!r}; expected one of {valid}."
+            )
+    return out
+
+
 def _run_adapters(
     merged: BuildEvidence,
     extractors: list[ExtractorRecord],

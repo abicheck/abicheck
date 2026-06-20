@@ -20,6 +20,7 @@ import json
 import sys
 from types import SimpleNamespace
 
+import pytest
 from click.testing import CliRunner
 
 from abicheck.buildsource.pack import BuildSourcePack
@@ -93,10 +94,60 @@ def test_collect_evidence_requires_output(tmp_path):
 
 def test_collect_evidence_cmake_requires_build_dir(tmp_path):
     result = CliRunner().invoke(
-        main, ["collect", "--cmake", "-o", str(tmp_path / "e")],
+        main, ["collect", "--from", "cmake", "-o", str(tmp_path / "e")],
     )
     assert result.exit_code != 0
     assert "build-dir" in result.output
+
+
+def test_parse_from_specs_maps_adapters(tmp_path):
+    """The unified `--from adapter[=path]` parses into the per-adapter kwargs."""
+    from abicheck.cli_buildsource_helpers import parse_from_specs
+
+    got = parse_from_specs((
+        "cmake", "ninja",
+        f"ninja-compdb={tmp_path / 'c.json'}",
+        f"bazel-cquery={tmp_path / 'cq.json'}",
+        f"bazel-aquery={tmp_path / 'aq.json'}",
+        f"make={tmp_path / 'dry.txt'}",
+    ))
+    assert got["cmake"] is True and got["ninja"] is True
+    assert got["ninja_compdb"] == tmp_path / "c.json"
+    assert got["bazel_cquery"] == tmp_path / "cq.json"
+    assert got["bazel_aquery"] == tmp_path / "aq.json"
+    assert got["make_dry_run"] == tmp_path / "dry.txt"
+    # Empty specs → all defaults (no adapter requested).
+    empty = parse_from_specs(())
+    assert empty["cmake"] is False and empty["ninja_compdb"] is None
+
+
+@pytest.mark.parametrize(
+    "spec, needle",
+    [
+        ("cmake=foo", "takes no '=path'"),       # live adapter rejects a path
+        ("ninja=foo", "takes no '=path'"),
+        ("make", "requires a pre-captured path"),  # pre-captured needs a path
+        ("bazel-cquery", "requires a pre-captured path"),
+        ("bogus", "unknown adapter"),
+    ],
+)
+def test_parse_from_specs_rejects_bad_specs(spec, needle):
+    import click as _click
+
+    from abicheck.cli_buildsource_helpers import parse_from_specs
+
+    with pytest.raises(_click.UsageError) as exc:
+        parse_from_specs((spec,))
+    assert needle in str(exc.value)
+
+
+def test_collect_from_bogus_adapter_is_usage_error(tmp_path):
+    """The bad-spec error surfaces through the live `collect` command too."""
+    result = CliRunner().invoke(
+        main, ["collect", "--from", "nope", "-o", str(tmp_path / "e")],
+    )
+    assert result.exit_code != 0
+    assert "unknown adapter" in result.output
 
 
 def test_dump_attach_evidence_ref(tmp_path):

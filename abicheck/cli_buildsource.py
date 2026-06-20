@@ -77,6 +77,7 @@ from .cli_buildsource_helpers import (  # noqa: F401  (re-exported for API stabi
     _run_external_extractors as _run_external_extractors,
     attach_evidence_metrics as attach_evidence_metrics,
     diff_embedded_build_source as diff_embedded_build_source,
+    parse_from_specs as parse_from_specs,
     prepare_embedded_build_source as prepare_embedded_build_source,
 )
 
@@ -125,47 +126,15 @@ if TYPE_CHECKING:
     help="Alias for --compile-db (build dir or file).",
 )
 @click.option(
-    "--cmake",
-    "--cmake-file-api",
-    "cmake",
-    is_flag=True,
-    default=False,
-    help="Collect CMake File API facts from --build-dir (reads the reply directory; no build).",
-)
-@click.option(
-    "--ninja",
-    "ninja",
-    is_flag=True,
-    default=False,
-    help="Collect Ninja compile/graph facts from --build-dir via `ninja -t` queries.",
-)
-@click.option(
-    "--ninja-compdb",
-    "ninja_compdb",
-    type=click.Path(path_type=Path),
-    default=None,
-    help="Pre-captured `ninja -t compdb` output (for hermetic CI / no live ninja).",
-)
-@click.option(
-    "--bazel-cquery",
-    "bazel_cquery",
-    type=click.Path(path_type=Path),
-    default=None,
-    help="Pre-captured `bazel cquery --output=jsonproto` output (configured target graph).",
-)
-@click.option(
-    "--bazel-aquery",
-    "bazel_aquery",
-    type=click.Path(path_type=Path),
-    default=None,
-    help="Pre-captured `bazel aquery --output=jsonproto` output (compile/link action graph).",
-)
-@click.option(
-    "--make-dry-run",
-    "make_dry_run",
-    type=click.Path(path_type=Path),
-    default=None,
-    help="Pre-captured `make -n`/`--trace` transcript (reduced-confidence compile units).",
+    "--from",
+    "from_adapters",
+    multiple=True,
+    metavar="ADAPTER[=PATH]",
+    help="Build-evidence adapter to run (repeatable). Live (read --build-dir, no "
+    "build): `cmake` (CMake File API reply), `ninja` (`ninja -t` queries). "
+    "Pre-captured (require a path): `ninja-compdb=<file>`, `bazel-cquery=<file>`, "
+    "`bazel-aquery=<file>`, `make=<transcript>`. "
+    "E.g. `--from cmake --from bazel-aquery=aquery.json`.",
 )
 @click.option(
     "--read-compiler-record",
@@ -344,12 +313,7 @@ def collect_cmd(
     build_dir: Path | None,
     compile_db: Path | None,
     compile_db_p: Path | None,
-    cmake: bool,
-    ninja: bool,
-    ninja_compdb: Path | None,
-    bazel_cquery: Path | None,
-    bazel_aquery: Path | None,
-    make_dry_run: Path | None,
+    from_adapters: tuple[str, ...],
     read_compiler_record: bool,
     build_system: str,
     source_abi: bool,
@@ -378,7 +342,8 @@ def collect_cmd(
     Examples:
       abicheck collect --compile-db build/compile_commands.json -o libfoo.evidence/
       abicheck collect -p build/ --headers include/ -o libfoo.evidence/
-      abicheck collect --build-dir build --cmake --ninja -o libfoo.evidence/
+      abicheck collect --build-dir build --from cmake --from ninja -o libfoo.evidence/
+      abicheck collect --from bazel-aquery=aquery.json -o libfoo.evidence/
 
     The resulting directory attaches to a snapshot with `abicheck dump --build-info`/`--sources`.
     """
@@ -389,18 +354,21 @@ def collect_cmd(
         source_abi
         and _source_abi_scope_needs_include_map(source_abi_scope, list(changed_paths))
     )
+    # Collapse the unified `--from adapter[=path]` specs into the per-adapter
+    # kwargs the engine still takes (ADR-037 CLI consolidation).
+    adapters = parse_from_specs(from_adapters)
 
     _run_adapters(
         merged,
         extractors,
         compile_db=effective_compile_db,
         build_dir=build_dir,
-        cmake=cmake,
-        ninja=ninja,
-        ninja_compdb=ninja_compdb,
-        bazel_cquery=bazel_cquery,
-        bazel_aquery=bazel_aquery,
-        make_dry_run=make_dry_run,
+        cmake=bool(adapters["cmake"]),
+        ninja=bool(adapters["ninja"]),
+        ninja_compdb=adapters["ninja_compdb"],  # type: ignore[arg-type]
+        bazel_cquery=adapters["bazel_cquery"],  # type: ignore[arg-type]
+        bazel_aquery=adapters["bazel_aquery"],  # type: ignore[arg-type]
+        make_dry_run=adapters["make_dry_run"],  # type: ignore[arg-type]
         binary=binary,
         read_compiler_record=read_compiler_record,
         build_system=build_system,

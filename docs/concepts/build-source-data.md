@@ -397,17 +397,22 @@ decides or suppresses an artifact-proven ABI break.
 
 - `--compile-db PATH` / `-p DIR` — a `compile_commands.json` (the universal,
   low-friction input).
-- `--build-dir DIR --cmake` — the CMake File API *reply* directory (target
+
+Build-system adapters are selected with a single repeatable
+`--from ADAPTER[=PATH]`. Live adapters read `--build-dir` and take no path;
+pre-captured adapters require a path:
+
+- `--build-dir DIR --from cmake` — the CMake File API *reply* directory (target
   graph, public/private header file sets, toolchains).
-- `--build-dir DIR --ninja` / `--ninja-compdb FILE` — Ninja `-t compdb`/`graph`
-  output (live query or pre-captured for hermetic CI).
-- `--bazel-cquery FILE` / `--bazel-aquery FILE` — pre-captured
+- `--build-dir DIR --from ninja` / `--from ninja-compdb=FILE` — Ninja
+  `-t compdb`/`graph` output (live query or pre-captured for hermetic CI).
+- `--from bazel-cquery=FILE` / `--from bazel-aquery=FILE` — pre-captured
   `bazel cquery --output=jsonproto` (configured target graph) and
   `bazel aquery --output=jsonproto` (compile/link action graph). Use the
   textual `jsonproto` form: a binary `--output=proto` blob is reported with a
   diagnostic rather than decoded (binary-proto ingestion is a documented
   follow-up).
-- `--make-dry-run FILE` — a pre-captured `make -n`/`make --trace` transcript.
+- `--from make=FILE` — a pre-captured `make -n`/`make --trace` transcript.
   Make has no authoritative target graph, so the recovered compile units are
   **reduced confidence**; prefer a generated `compile_commands.json` when one
   is available.
@@ -434,7 +439,7 @@ cmake --build build-old
 #    Add --source-abi for L4 (needs clang); drop it for L3-only.
 abicheck collect \
     --compile-db build-old/compile_commands.json \
-    --build-dir build-old --cmake \
+    --build-dir build-old --from cmake \
     --source-abi \
     --output libfoo-1.0.evidence/
 

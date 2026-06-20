@@ -114,8 +114,7 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
         {
             "name": "Build-system adapters",
             "options": [
-                "--cmake", "--ninja", "--ninja-compdb", "--bazel-cquery",
-                "--bazel-aquery", "--make-dry-run", "--build-system",
+                "--from", "--build-system",
                 "--read-compiler-record",
             ],
         },

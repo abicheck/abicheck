@@ -190,7 +190,7 @@ Packs](../concepts/build-source-data.md) for the full model.
 # 1. Collect a pack from an existing build tree (no rebuild).
 abicheck collect \
     --compile-db build/compile_commands.json \
-    --build-dir build --cmake --source-abi \
+    --build-dir build --from cmake --source-abi \
     --output libfoo.bs/
 
 # 2. Embed the build + source facts inline in the snapshot. The resulting

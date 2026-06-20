@@ -605,7 +605,7 @@ def test_collect_evidence_bazel_files(tmp_path):
     out = tmp_path / "e"
     result = CliRunner().invoke(
         main,
-        ["collect", "--bazel-cquery", str(cq), "--bazel-aquery", str(aq), "-o", str(out)],
+        ["collect", "--from", f"bazel-cquery={cq}", "--from", f"bazel-aquery={aq}", "-o", str(out)],
     )
     assert result.exit_code == 0, result.output
     pack = BuildSourcePack.load(out)
@@ -625,7 +625,7 @@ def test_collect_evidence_bazel_files_uses_build_dir_as_workspace(tmp_path):
         [
             "collect",
             "--build-dir", str(workspace),
-            "--bazel-aquery", str(aq),
+            "--from", f"bazel-aquery={aq}",
             "-o", str(out),
         ],
     )
@@ -646,7 +646,7 @@ def test_collect_evidence_bazel_link_only_pack_preserved(tmp_path):
         "pathFragments": [{"id": "10", "label": "libfoo.so"}],
     }))
     out = tmp_path / "e"
-    result = CliRunner().invoke(main, ["collect", "--bazel-aquery", str(aq), "-o", str(out)])
+    result = CliRunner().invoke(main, ["collect", "--from", f"bazel-aquery={aq}", "-o", str(out)])
     assert result.exit_code == 0, result.output
     pack = BuildSourcePack.load(out)
     assert pack.build_evidence is not None
@@ -674,7 +674,7 @@ def test_bazel_real_aquery_export_yields_nonempty_l3():
 
 def test_collect_real_bazel_aquery_pack_has_l3(tmp_path):
     out = tmp_path / "pack"
-    result = CliRunner().invoke(main, ["collect", "--bazel-aquery", str(_REAL_AQUERY), "-o", str(out)])
+    result = CliRunner().invoke(main, ["collect", "--from", f"bazel-aquery={_REAL_AQUERY}", "-o", str(out)])
     assert result.exit_code == 0, result.output
     pack = BuildSourcePack.load(out)
     assert pack.build_evidence is not None
