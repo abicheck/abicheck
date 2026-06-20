@@ -30,6 +30,7 @@ from pathlib import Path
 import click
 
 from .cli import _detect_binary_format, _safe_write_output, _setup_verbosity, main
+from .cli_options import verbose_option
 
 
 @main.group("deps")
@@ -53,9 +54,10 @@ def deps_group() -> None:
 @click.option("--ld-library-path", "ld_library_path", default="",
               help="Simulated LD_LIBRARY_PATH (colon-separated).")
 @click.option("--format", "fmt", type=click.Choice(["json", "markdown", "html"]),
-              default="markdown", show_default=True)
-@click.option("-o", "--output", type=click.Path(path_type=Path), default=None)
-@click.option("-v", "--verbose", is_flag=True, default=False)
+              default="markdown", show_default=True, help="Output format.")
+@click.option("-o", "--output", type=click.Path(path_type=Path), default=None,
+              help="Write output to this path (default: stdout).")
+@verbose_option
 def deps_tree_cmd(
     binary: Path, search_paths: tuple[Path, ...],
     sysroot: Path | None, ld_library_path: str,
@@ -128,9 +130,10 @@ def deps_tree_cmd(
 @click.option("--ld-library-path", "ld_library_path", default="",
               help="Simulated LD_LIBRARY_PATH (colon-separated).")
 @click.option("--format", "fmt", type=click.Choice(["json", "markdown", "html"]),
-              default="markdown", show_default=True)
-@click.option("-o", "--output", type=click.Path(path_type=Path), default=None)
-@click.option("-v", "--verbose", is_flag=True, default=False)
+              default="markdown", show_default=True, help="Output format.")
+@click.option("-o", "--output", type=click.Path(path_type=Path), default=None,
+              help="Write output to this path (default: stdout).")
+@verbose_option
 def deps_compare_cmd(
     binary: Path, baseline: Path, candidate: Path,
     search_paths: tuple[Path, ...], ld_library_path: str,

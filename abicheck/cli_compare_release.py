@@ -73,6 +73,7 @@ from .cli_options import (
     scope_options,
     severity_options,
     two_sided_input_options,
+    verbose_option,
 )
 from .cli_params import _load_suppression_and_policy
 from .model import AbiSnapshot
@@ -856,7 +857,7 @@ def _strip_diff_results_and_adjust_verdict(
     help="Include additions/compatible changes as ::notice annotations "
     "(requires --annotate).",
 )
-@click.option("-v", "--verbose", is_flag=True, default=False)
+@verbose_option
 @click.option(
     "-j",
     "--jobs",

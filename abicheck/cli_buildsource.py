@@ -78,6 +78,7 @@ from .cli_buildsource_helpers import (  # noqa: F401  (re-exported for API stabi
     parse_from_specs as parse_from_specs,
     prepare_embedded_build_source as prepare_embedded_build_source,
 )
+from .cli_options import verbose_option
 
 if TYPE_CHECKING:
     from .buildsource.source_abi import SourceAbiSurface
@@ -304,7 +305,7 @@ if TYPE_CHECKING:
     required=True,
     help="Output build-source pack directory.",
 )
-@click.option("-v", "--verbose", is_flag=True, default=False)
+@verbose_option
 def collect_cmd(
     binary: Path | None,
     headers: tuple[Path, ...],
@@ -981,7 +982,7 @@ def dump_source_only(
     "with DIFFERING facts: `warn` keeps first-wins and records a "
     "diagnostic; `error` exits non-zero (good for baseline generation).",
 )
-@click.option("-v", "--verbose", is_flag=True, default=False)
+@verbose_option
 def merge_cmd(
     inputs: tuple[Path, ...], output: Path, on_conflict: str, verbose: bool
 ) -> None:

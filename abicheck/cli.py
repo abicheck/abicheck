@@ -74,6 +74,7 @@ from .cli_options import (
     set_input_options,
     severity_options,
     two_sided_input_options,
+    verbose_option,
 )
 from .cli_params import _load_suppression_and_policy
 from .cli_resolve import (
@@ -453,8 +454,7 @@ def main() -> None:
                    "Uses DEBUGINFOD_URLS environment variable or --debuginfod-url.")
 @click.option("--debuginfod-url", "debuginfod_url", default=None,
               help="debuginfod server URL (overrides DEBUGINFOD_URLS env var).")
-@click.option("-v", "--verbose", is_flag=True, default=False,
-              help="Enable verbose/debug output.")
+@verbose_option
 # ── Provenance metadata ──────────────────────────────────────────────────────
 @click.option("--git-tag", "git_tag", default=None,
               help="Git tag to embed in the snapshot (e.g. v2.0.0).")
@@ -1365,8 +1365,7 @@ def _embed_inline_source_side(
 @debug_resolution_options
 @evidence_options  # --depth/--max, --old/new-build-info, --old/new-sources
 @adr027_compare_options  # ADR-027: --pattern-verdicts/--explain-patterns/--surface-metrics
-@click.option("-v", "--verbose", is_flag=True, default=False,
-              help="Enable verbose/debug output.")
+@verbose_option
 @click.pass_context
 def compare_cmd(
     ctx: click.Context,

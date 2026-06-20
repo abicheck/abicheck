@@ -509,7 +509,7 @@ def output_options(
     *,
     default: str = "markdown",
     format_help: str = "Output format.",
-    output_help: str | None = None,
+    output_help: str | None = "Write output to this path (default: stdout).",
 ) -> Callable[[F], F]:
     """Factory for the ``--format`` / ``-o/--output`` pair.
 
@@ -542,6 +542,23 @@ def output_options(
         return func
 
     return deco
+
+
+def verbose_option(func: F) -> F:
+    """The universal ``-v/--verbose`` flag, defined once (ADR-037 D3).
+
+    ``output_options`` already owns ``-o/--output``; verbose is the other flag
+    nearly every command carries, and it had drifted to blank/inconsistent help
+    across ~14 inline copies. One decorator keeps the spelling and help uniform.
+    """
+    func = click.option(
+        "-v",
+        "--verbose",
+        is_flag=True,
+        default=False,
+        help="Enable verbose/debug output.",
+    )(func)
+    return func
 
 
 def set_input_options(func: F) -> F:
