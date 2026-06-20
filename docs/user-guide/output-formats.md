@@ -448,7 +448,7 @@ abicheck compare release-1.0/ release-2.0/ --format junit -o abi-tests.xml
 
 ABI changes are mapped to JUnit test cases:
 
-- Each **library** in a `compare-release` becomes a `<testsuite>`
+- Each **library** in a bundle `compare` (directory/package inputs) becomes a `<testsuite>`
 - Each **exported symbol or type** that was checked becomes a `<testcase>`
 - **BREAKING** and **API_BREAK** changes produce `<failure>` elements
 - **COMPATIBLE** changes (additions, no-change) are passing test cases

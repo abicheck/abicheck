@@ -9,7 +9,29 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
-No changes yet.
+### Changed
+
+- **Breaking — command-surface consolidation (ADR-037 / G22).** Completed the
+  ADR-037 cleanup begun in 0.4.0: removed the remaining deprecated command
+  paths and introduced a shared `--lang` factory used identically across
+  commands.
+- **`scan` depth is a single `--depth` dial** (auto default), with auto-strict
+  pins and `--build-info` sniffing, replacing the earlier per-mode flags.
+- **Unified compile-context across `dump` / `compare` / `scan`** — the same
+  `--gcc-*`, `--ast-frontend`, `--sysroot`, `--nostdinc`, and `--lang` flags
+  behave identically on all three, plus native `--baseline` /
+  `--baseline-header` / `--baseline-include` on `scan`.
+
+### Added
+
+- `graph` command group: `graph compare` (structural source-graph diff) and
+  `graph explain` (localize a symbol or finding through the L5 source graph).
+
+### Fixed
+
+- Uniform CLI help: every option carries help text, options are grouped into
+  rich-click panels, and shared flags use one canonical spelling
+  (`-v/--verbose`, `-o/--output`, `-H/--header`) — all contract-tested.
 
 ---
 
@@ -17,6 +39,17 @@ No changes yet.
 
 ### Changed
 
+- **Breaking — CLI interface contract (ADR-037 / G22).** Reshaped the command
+  surface behind a typed Tier-2 service chokepoint and shared option-family
+  decorators. Migration notes:
+  - `--header-backend` is renamed to `--ast-frontend` (per-side
+    `--old-ast-frontend` / `--new-ast-frontend`); the old spelling is rejected.
+  - `compare-release` and `deep-compare` are folded into `compare` via
+    input-type dispatch — pass two directories/packages for the release/bundle
+    flow, or `compare --sources …` for the former deep-compare path. (The
+    GitHub Action still accepts `mode: compare-release` as an alias.)
+  - Per-side L2 header backend on `compare`, and `--public-header-dir` on
+    `scan` to classify public/internal provenance.
 - Version bump to 0.4.0.
 
 ---

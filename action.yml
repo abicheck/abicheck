@@ -129,7 +129,7 @@ inputs:
 
   # ── Language & compiler ─────────────────────────────────────────────────────
   lang:
-    description: 'Language mode for the header backend: "c++" or "c".'
+    description: 'Language mode for header AST parsing: "c++" or "c".'
     required: false
     default: 'c++'
   ast-frontend:
