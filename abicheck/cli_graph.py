@@ -37,7 +37,6 @@ from typing import TYPE_CHECKING
 import click
 
 from .cli import main
-from .cli_buildsource_helpers import _load_pack_or_raise
 
 if TYPE_CHECKING:
     from .buildsource.source_graph import SourceGraphSummary
@@ -215,10 +214,19 @@ def _load_source_graph(path: Path) -> SourceGraphSummary:
     directory (the graph is read from its manifest layout). Raises a Click error
     when neither yields a graph so the failure is actionable.
     """
+    from .buildsource.pack import BuildSourcePack
     from .buildsource.source_graph import SourceGraphSummary
 
     if path.is_dir():
-        pack = _load_pack_or_raise(path)
+        # Load the pack directly (rather than via cli_buildsource_helpers) so this
+        # module stays off the service/scan import cluster — keeping `cli_graph`'s
+        # only cycle the by-design `cli <-> cli_graph` sibling-registration edge.
+        try:
+            pack = BuildSourcePack.load(path)
+        except (FileNotFoundError, ValueError) as exc:
+            raise click.ClickException(
+                f"Invalid evidence pack at {path}: {exc}"
+            ) from exc
         if pack.source_graph is None:
             raise click.ClickException(
                 f"Evidence pack at {path} has no L5 source graph "
@@ -259,6 +267,11 @@ def _resolve_symbol_from_report(report: Path, finding_id: str) -> str:
         data = json.loads(Path(report).read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         raise click.ClickException(f"Cannot read report {report}: {exc}") from exc
+    if not isinstance(data, dict):
+        # A valid-but-non-object report (e.g. a bare JSON list) would make the
+        # `.get(...)` below raise AttributeError past Click's handling; turn it
+        # into an actionable error, mirroring _load_source_graph's dict guard.
+        raise click.ClickException(f"Report {report} must contain a JSON object.")
     changes = data.get("changes") or data.get("findings") or []
     if not isinstance(changes, list):
         return ""

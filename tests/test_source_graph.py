@@ -559,6 +559,52 @@ def test_resolve_symbol_from_report_unreadable(tmp_path) -> None:
         _resolve_symbol_from_report(tmp_path / "missing.json", "0")
 
 
+def test_resolve_symbol_from_report_non_object(tmp_path) -> None:
+    # A valid-but-non-object report (a bare JSON list) must raise a Click error,
+    # not an unhandled AttributeError from `.get(...)`.
+    import click
+    import pytest
+
+    from abicheck.cli_graph import _resolve_symbol_from_report
+
+    report = tmp_path / "list.json"
+    report.write_text(json.dumps([{"symbol": "_Zx"}]))
+    with pytest.raises(click.ClickException, match="must contain a JSON object"):
+        _resolve_symbol_from_report(report, "0")
+
+
+def test_resolve_symbol_from_report_non_list_changes(tmp_path) -> None:
+    from abicheck.cli_graph import _resolve_symbol_from_report
+
+    report = tmp_path / "r.json"
+    report.write_text(json.dumps({"changes": "not-a-list"}))
+    assert _resolve_symbol_from_report(report, "0") == ""
+
+
+def test_explain_finding_text_symbol_absent(tmp_path) -> None:
+    # Text-mode localization of a symbol absent from the graph reports the
+    # "not present" notice rather than failing.
+    g = build_source_graph(BuildEvidence())
+    graph_json = tmp_path / "g.json"
+    graph_json.write_text(json.dumps(g.to_dict()))
+    res = CliRunner().invoke(
+        main, ["graph", "explain", "--sources", str(graph_json), "--symbol", "_Zmissing"]
+    )
+    assert res.exit_code == 0, res.output
+    assert "symbol not present in the source graph" in res.output
+
+
+def test_load_source_graph_invalid_pack_dir(tmp_path) -> None:
+    # A directory that is not a valid evidence pack yields an actionable error.
+    import click
+    import pytest
+
+    from abicheck.cli_graph import _load_source_graph
+
+    with pytest.raises(click.ClickException):
+        _load_source_graph(tmp_path)
+
+
 # ── Phase 1: schema round-trip + content addressing ─────────────────────────
 
 
