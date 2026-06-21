@@ -641,16 +641,6 @@ def test_scan_files_parallel_matches_serial(tmp_path: Path, monkeypatch) -> None
     # Run the parallel branch in-process so it is deterministic and measured.
     monkeypatch.setattr(concurrent.futures, "ProcessPoolExecutor", _InProcessExecutor)
     _make_tree(tmp_path)
-    # A broken symlink with a header suffix is discovered but unreadable → it
-    # exercises the "skipped" branch on both paths (best-effort; Windows without
-    # symlink privilege simply gets 0 skips and the equality still holds).
-    try:
-        import os
-
-        os.symlink(tmp_path / "missing-target", tmp_path / "dangling.hpp")
-        expected_skipped = 1
-    except (OSError, NotImplementedError):
-        expected_skipped = 0
 
     monkeypatch.setenv("ABICHECK_PATTERN_SCAN_JOBS", "1")
     serial = ps.scan_files([tmp_path])
@@ -659,7 +649,48 @@ def test_scan_files_parallel_matches_serial(tmp_path: Path, monkeypatch) -> None
 
     assert _facts_key(serial) == _facts_key(parallel)
     assert serial.files_scanned == parallel.files_scanned == 6
-    assert serial.files_skipped == parallel.files_skipped == expected_skipped
+    assert serial.files_skipped == parallel.files_skipped == 0
+
+
+def test_scan_files_parallel_counts_unreadable_as_skipped(
+    tmp_path: Path, monkeypatch
+) -> None:
+    # The parallel branch must count a worker's unreadable result as skipped,
+    # exactly like the serial path. Use an in-process executor whose map injects
+    # one (.., False) result so the skip branch runs deterministically.
+    import concurrent.futures
+
+    import abicheck.buildsource.pattern_scan as ps
+
+    class _ExecutorWithOneUnreadable(_InProcessExecutor):
+        def map(self, fn, iterable, chunksize: int = 1):
+            results = [fn(x) for x in iterable]
+            results.append(([], False))  # simulate one unreadable file
+            return results
+
+    monkeypatch.setattr(ps, "_PARALLEL_FILE_FLOOR", 2)
+    monkeypatch.setattr(
+        concurrent.futures, "ProcessPoolExecutor", _ExecutorWithOneUnreadable
+    )
+    _make_tree(tmp_path, n=3)
+    monkeypatch.setenv("ABICHECK_PATTERN_SCAN_JOBS", "2")
+    result = ps.scan_files([tmp_path])
+    assert result.files_scanned == 3
+    assert result.files_skipped == 1
+
+
+def test_iter_source_files_skips_fifo(tmp_path: Path) -> None:
+    # A FIFO with a header-like name must not be enqueued — opening it would
+    # block the pre-scan (Codex review). Skip on platforms without os.mkfifo.
+    import os
+
+    if not hasattr(os, "mkfifo"):
+        pytest.skip("no os.mkfifo on this platform")
+    (tmp_path / "real.hpp").write_text("struct S { virtual void f(); };")
+    os.mkfifo(tmp_path / "pipe.hpp")
+    names = {p.name for p in iter_source_files([tmp_path])}
+    assert "real.hpp" in names
+    assert "pipe.hpp" not in names
 
 
 def test_resolve_scan_jobs_daemonic_is_serial(monkeypatch) -> None:

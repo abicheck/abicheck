@@ -759,7 +759,13 @@ def iter_source_files(
                 # merely filtered out after the fact (Codex review).
                 dirnames[:] = [d for d in dirnames if d not in _PRUNED_DIR_SEGMENTS]
                 base = Path(dirpath)
-                candidates.extend((base / fn, False) for fn in filenames)
+                # Only regular files: os.walk lists FIFOs/sockets/devices and
+                # broken symlinks under filenames too, and opening a named pipe
+                # would block the pre-scan forever (Codex review). `is_file()`
+                # follows symlinks and is False for non-regular entries.
+                candidates.extend(
+                    (p, False) for fn in filenames if (p := base / fn).is_file()
+                )
         else:
             continue
         for cand, explicit in candidates:
