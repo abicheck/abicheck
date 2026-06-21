@@ -75,6 +75,7 @@ from .cli_options import (
     lang_option,
     merge_compile_config,
     resolve_compile_context,
+    verbose_option,
 )
 from .cli_params import DEPTH_PARAM
 
@@ -705,9 +706,11 @@ def _audit_exit_code(
     type=click.Choice(["text", "json"]),
     default="text",
     show_default=True,
+    help="Output format.",
 )
-@click.option("-o", "--output", type=click.Path(path_type=Path), default=None)
-@click.option("-v", "--verbose", is_flag=True, default=False)
+@click.option("-o", "--output", type=click.Path(path_type=Path), default=None,
+              help="Write output to this path (default: stdout).")
+@verbose_option
 @compile_context_options  # dump↔scan L2 compile-context parity (ADR-037 D3)
 def scan_cmd(
     binaries: tuple[Path, ...],

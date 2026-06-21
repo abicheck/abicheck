@@ -74,6 +74,7 @@ from .cli_options import (
     set_input_options,
     severity_options,
     two_sided_input_options,
+    verbose_option,
 )
 from .cli_params import _load_suppression_and_policy
 from .cli_resolve import (
@@ -453,8 +454,7 @@ def main() -> None:
                    "Uses DEBUGINFOD_URLS environment variable or --debuginfod-url.")
 @click.option("--debuginfod-url", "debuginfod_url", default=None,
               help="debuginfod server URL (overrides DEBUGINFOD_URLS env var).")
-@click.option("-v", "--verbose", is_flag=True, default=False,
-              help="Enable verbose/debug output.")
+@verbose_option
 # ── Provenance metadata ──────────────────────────────────────────────────────
 @click.option("--git-tag", "git_tag", default=None,
               help="Git tag to embed in the snapshot (e.g. v2.0.0).")
@@ -1365,8 +1365,7 @@ def _embed_inline_source_side(
 @debug_resolution_options
 @evidence_options  # --depth/--max, --old/new-build-info, --old/new-sources
 @adr027_compare_options  # ADR-027: --pattern-verdicts/--explain-patterns/--surface-metrics
-@click.option("-v", "--verbose", is_flag=True, default=False,
-              help="Enable verbose/debug output.")
+@verbose_option
 @click.pass_context
 def compare_cmd(
     ctx: click.Context,
@@ -1911,6 +1910,7 @@ from . import (  # noqa: E402  — must run after `main` and helpers are defined
     cli_baseline,  # noqa: F401  — registers baseline
     cli_buildsource,  # noqa: F401  — registers collect
     cli_debian_symbols,  # noqa: F401  — registers debian-symbols
+    cli_graph,  # noqa: F401  — registers graph (compare, explain)
     cli_plugin,  # noqa: F401  — registers plugin-check
     cli_pr_comment,  # noqa: F401  — registers pr-comment
     cli_probe,  # noqa: F401  — registers probe (run, compare)

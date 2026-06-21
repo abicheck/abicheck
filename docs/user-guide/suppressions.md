@@ -209,8 +209,8 @@ This prevents stale suppressions from accumulating. When a rule expires, the tea
 must explicitly decide: remove it (the change is no longer expected), or renew it
 with an updated expiry and reason.
 
-Both `--strict-suppressions` and `--require-justification` work on `compare` and
-`compare-release`.
+Both `--strict-suppressions` and `--require-justification` work on `compare`
+(single-library and bundle/package inputs).
 
 ### Recommended CI configuration
 

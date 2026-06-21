@@ -24,7 +24,7 @@ It catches removed or renamed symbols, changed function signatures, struct layou
 - **Cross-platform.** Linux (ELF), Windows (PE/COFF), and macOS (Mach-O) binaries, with debug-info cross-checks from DWARF, PDB, BTF, and CTF.
 - **Built for CI.** Deterministic [exit codes](https://abicheck.github.io/abicheck/reference/exit-codes/), SARIF/JSON/Markdown/HTML/JUnit output, snapshot-based [baselines](https://abicheck.github.io/abicheck/user-guide/baseline-management/), [policy profiles](https://abicheck.github.io/abicheck/user-guide/policies/) and [suppressions](https://abicheck.github.io/abicheck/user-guide/suppressions/), and a first-class [GitHub Action](https://abicheck.github.io/abicheck/user-guide/github-action/).
 - **Public-surface scoping.** Filters findings to the library's *public* ABI surface so internal-only changes don't fail your build — fewer false positives than symbol-only tools.
-- **More than one library at a time.** Compare co-versioned multi-library releases as a single bundle ([`compare-release`](https://abicheck.github.io/abicheck/user-guide/multi-binary/)), check whether a specific application still works ([`appcompat`](https://abicheck.github.io/abicheck/user-guide/appcompat/)), or validate a binary's full dependency stack across sysroots ([`stack-check`](https://abicheck.github.io/abicheck/user-guide/cli-usage/)).
+- **More than one library at a time.** Compare co-versioned multi-library releases as a single bundle ([`compare` on directory/package inputs](https://abicheck.github.io/abicheck/user-guide/multi-binary/)), check whether a specific application still works ([`appcompat`](https://abicheck.github.io/abicheck/user-guide/appcompat/)), or validate a binary's full dependency stack across sysroots ([`stack-check`](https://abicheck.github.io/abicheck/user-guide/cli-usage/)).
 - **Drop-in for existing tools.** A [`compat`](https://abicheck.github.io/abicheck/user-guide/from-abicc/) mode mirrors `abi-compliance-checker` flags, and migration guides cover [ABICC](https://abicheck.github.io/abicheck/user-guide/from-abicc/) and [libabigail](https://abicheck.github.io/abicheck/user-guide/from-libabigail/).
 - **Agent- and script-friendly.** Structured JSON, a [Python API](#python-api), and an [MCP server](https://abicheck.github.io/abicheck/user-guide/mcp-integration/) for AI-driven workflows. Pure Python (3.10+), no heavyweight native toolchain required for binary-only mode.
 
@@ -111,7 +111,7 @@ Use these to gate CI pipelines.
 | `1` | `SEVERITY_ERROR` | Severity-driven error (with `--severity-*` flags) |
 | `2` | `API_BREAK` | Source-level break (recompile needed, binary may still work) |
 | `4` | `BREAKING` | Binary ABI break (old binaries will crash or misbehave) |
-| `8` | `REMOVED_LIBRARY` | Library removed in new version (`compare-release` only) |
+| `8` | `REMOVED_LIBRARY` | Library removed in new version (multi-library/bundle compare only) |
 
 `appcompat`, `stack-check`, and `compat` use the same scheme with per-mode additions — see the [full exit code reference](https://abicheck.github.io/abicheck/reference/exit-codes/).
 

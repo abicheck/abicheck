@@ -38,7 +38,7 @@ from .cli import (
     _setup_verbosity,
     main,
 )
-from .cli_options import lang_option
+from .cli_options import lang_option, verbose_option
 from .cli_params import POLICY_FILE_PARAM, _load_suppression_and_policy
 
 
@@ -119,8 +119,9 @@ def _render_plugin_result_json(result: object) -> str:
                    "(# comments allowed).")
 @lang_option(help="Language mode (used only when dumping plugin binaries).")
 @click.option("--format", "fmt", type=click.Choice(["markdown", "json"]),
-              default="markdown", show_default=True)
-@click.option("-o", "--output", type=click.Path(path_type=Path), default=None)
+              default="markdown", show_default=True, help="Output format.")
+@click.option("-o", "--output", type=click.Path(path_type=Path), default=None,
+              help="Write output to this path (default: stdout).")
 @click.option("--suppress", type=click.Path(exists=True, path_type=Path), default=None,
               help="Suppression file (YAML).")
 @click.option("--policy", "policy",
@@ -129,8 +130,9 @@ def _render_plugin_result_json(result: object) -> str:
               help="Verdict policy; plugin_abi is the natural default for "
                    "in-process host/plugin builds.")
 @click.option("--policy-file", "policy_file_path",
-              type=POLICY_FILE_PARAM, default=None)
-@click.option("-v", "--verbose", is_flag=True, default=False)
+              type=POLICY_FILE_PARAM, default=None,
+              help="YAML policy file with per-kind verdict overrides (or a built-in profile name).")
+@verbose_option
 def plugin_check_cmd(
     old_plugin: Path,
     new_plugin: Path,

@@ -556,6 +556,74 @@ def test_option_set_snapshot(cmd_name: str) -> None:
     assert sorted(flags) == sorted(_OPTION_SET_SNAPSHOT[cmd_name])
 
 
+def _all_leaf_commands() -> list[tuple[str, object]]:
+    """Every leaf command in the live tree, as (dotted-path, command)."""
+    import click
+
+    from abicheck.cli import main
+
+    out: list[tuple[str, object]] = []
+
+    def walk(cmd: object, path: list[str]) -> None:
+        if isinstance(cmd, click.Group):
+            for name, sub in cmd.commands.items():
+                walk(sub, path + [name])
+        elif path:
+            out.append((" ".join(path), cmd))
+
+    walk(main, [])
+    return out
+
+
+def test_no_option_has_empty_help() -> None:
+    """Every *visible* option on every command carries help text.
+
+    A blank ``--help`` line is a UX defect (the flag shows with no description).
+    Hidden options are exempt — they are deliberately off the help surface. This
+    guards the cleanup that routed `-v/--verbose` through `@verbose_option` and
+    filled the stray blank `-o`/`--format`/`--policy-file` strings.
+    """
+    import click
+
+    blank: list[str] = []
+    for path, cmd in _all_leaf_commands():
+        for p in cmd.params:  # type: ignore[attr-defined]
+            if isinstance(p, click.Option) and not p.hidden and not p.help:
+                blank.append(f"{path} {p.opts[-1]}")
+    assert blank == [], f"options with empty --help: {blank}"
+
+
+def test_shared_concept_canonical_spelling() -> None:
+    """A shared concept shows one canonical long flag across every command.
+
+    The CLI carries the same idea on many commands (public headers, the output
+    path). They had drifted in which spelling renders *first* in ``--help``
+    (`collect` led with ``--headers``; `probe run` used ``--out``). The aliases
+    still resolve, but the displayed primary must be uniform so the surface
+    reads as one tool. ABICC-dialect commands use their own single-dash dests
+    and are naturally excluded (they never bind ``headers``/``output``/``out``).
+    """
+    import click
+
+    header_offenders: list[str] = []
+    output_offenders: list[str] = []
+    for path, cmd in _all_leaf_commands():
+        for p in cmd.params:  # type: ignore[attr-defined]
+            if not isinstance(p, click.Option):
+                continue
+            longs = [o for o in p.opts if o.startswith("--")]
+            if p.name == "headers" and longs and longs[0] != "--header":
+                header_offenders.append(f"{path}: {longs}")
+            if p.name in {"output", "out"} and "--output" not in p.opts:
+                output_offenders.append(f"{path}: {list(p.opts)}")
+    assert header_offenders == [], (
+        f"header option must lead with --header: {header_offenders}"
+    )
+    assert output_offenders == [], (
+        f"output-path option must offer --output: {output_offenders}"
+    )
+
+
 # ── Chokepoint parity: one classifier, no scope_public drift ─────────────────
 
 

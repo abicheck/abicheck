@@ -42,6 +42,7 @@ from .cli_options import (
     scope_options,
     severity_options,
     two_sided_input_options,
+    verbose_option,
 )
 from .cli_params import _load_suppression_and_policy
 
@@ -168,7 +169,7 @@ def _handle_list_required_symbols(
 @scope_options  # --scope-public-headers/--no- (ADR-037 D3)
 # ── Severity (shared family; mirrors `compare`) ───────────────────────────────
 @severity_options
-@click.option("-v", "--verbose", is_flag=True, default=False)
+@verbose_option
 def appcompat_cmd(
     app_path: Path,
     old_lib: Path | None,

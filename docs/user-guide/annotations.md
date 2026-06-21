@@ -64,7 +64,7 @@ runners), abicheck appends a full Markdown ABI report to the
 
 ## CLI flags
 
-Both `compare` and `compare-release` commands support these flags:
+Both single-library `compare` and bundle `compare` (directory/package inputs) support these flags:
 
 ### `--annotate`
 
@@ -192,8 +192,8 @@ GitHub Actions caps visible annotations at approximately 50 per step.
 abicheck enforces this limit and sorts annotations by severity so the most
 important ones (errors first, then warnings, then notices) are always visible.
 
-For `compare-release`, the 50-annotation budget is shared across all libraries
-in the release. This ensures a single noisy library doesn't consume all
+For a bundle `compare` (directory/package inputs), the 50-annotation budget is
+shared across all libraries in the release. This ensures a single noisy library doesn't consume all
 available annotation slots.
 
 ### Message truncation
@@ -207,8 +207,8 @@ When `$GITHUB_STEP_SUMMARY` is available, abicheck automatically appends a
 full Markdown ABI report to the Job Summary panel. This provides the complete
 report alongside the inline annotations.
 
-- **`compare`**: writes the per-library Markdown report
-- **`compare-release`**: writes the consolidated release summary (one entry,
+- **single-library `compare`**: writes the per-library Markdown report
+- **bundle `compare`** (directory/package inputs): writes the consolidated release summary (one entry,
   not per-library)
 
 ### Special character escaping

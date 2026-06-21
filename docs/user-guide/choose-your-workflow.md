@@ -164,9 +164,10 @@ For large diffs, add `--report-mode leaf --show-impact` to group derived
 changes under their root cause. Full reference:
 [Output Formats](output-formats.md).
 
-> **`compare-release` formats are narrower:** the bundle/package command emits
-> only `markdown`, `json`, and `junit` — **not** `sarif` or `html`. Those two
-> formats apply to single-library `compare`. For a release bundle in GitHub Code
+> **Bundle/package compare formats are narrower:** a release/bundle `compare`
+> (directory/package inputs) emits only `markdown`, `json`, and `junit` —
+> **not** `sarif` or `html`. Those two formats apply to single-library
+> `compare`. For a release bundle in GitHub Code
 > Scanning, run per-library `compare --format sarif` for the libraries you want
 > to surface there.
 
@@ -183,7 +184,7 @@ changes under their root cause. Full reference:
 | Raw shell CI (any system) | Drive the CLI directly; gate on the exit code. See [Local Compare](local-compare.md). |
 | Offline / air-gapped | Pre-dump snapshots, then `abicheck compare old.json new.json` — no castxml or network needed. |
 | Multi-platform project | Matrix over Linux/macOS/Windows, emit JSON per platform, aggregate in a final gate job — see [GitHub Action](github-action.md). |
-| Package / release validation | `compare-release` on RPM/Deb/tar/conda/wheel inputs, with debug/devel packages where available. |
+| Package / release validation | `compare` on RPM/Deb/tar/conda/wheel directory/package inputs, with debug/devel packages where available. |
 
 ---
 

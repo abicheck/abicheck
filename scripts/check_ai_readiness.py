@@ -524,6 +524,14 @@ def _module_name(path: Path) -> str:
 
 
 def _module_imports(path: Path) -> set[str]:
+    # Static-only: this walks `import` / `from … import` AST nodes. A *runtime*
+    # `importlib.import_module("abicheck.X")` call is deliberately invisible
+    # here — that is the escape hatch the `cli_buildsource` back-compat
+    # `__getattr__` shim uses to re-export the graph helpers from `cli_graph`
+    # without registering a `cli_buildsource → cli_graph` edge (which would form
+    # a real cycle). If you switch a shim like that to a static import, expect
+    # this gate to flag the cycle — add the module-set to IMPORT_CYCLE_ALLOWLIST
+    # only if the coupling is genuinely intended.
     src = _read(path)
     try:
         tree = ast.parse(src, filename=str(path))
@@ -605,6 +613,7 @@ IMPORT_CYCLE_ALLOWLIST: frozenset[frozenset[str]] = frozenset(
         frozenset({"cli", "cli_baseline"}),
         frozenset({"cli", "cli_debian_symbols"}),
         frozenset({"cli", "cli_buildsource"}),
+        frozenset({"cli", "cli_graph"}),
         frozenset({"cli", "cli_appcompat"}),
         frozenset({"cli", "cli_plugin"}),
         frozenset({"cli", "cli_pr_comment"}),
