@@ -27,10 +27,13 @@ import pytest
 
 from abicheck.buildsource.model import CoverageStatus, LayerConfidence
 from abicheck.buildsource.pattern_scan import (
+    _EXTENSIONLESS_MAX_BYTES,
     PATTERN_SCAN_VERSION,
     PatternCategory,
     PatternKind,
     PatternScanResult,
+    _is_scannable,
+    _resolve_scan_jobs,
     iter_source_files,
     scan_files,
     scan_text,
@@ -478,6 +481,92 @@ def test_iter_source_files_includes_extensionless_headers(tmp_path: Path) -> Non
     found = {p.name for p in iter_source_files([tmp_path / "include"])}
     assert "Core" in found
     assert "notes.md" not in found
+
+
+# ── P2: the extensionless heuristic must not sweep in data / binary / VCS files ──
+
+
+def test_is_scannable_rejects_oversized_extensionless_file(tmp_path: Path) -> None:
+    # A multi-MB extensionless *data* file (e.g. oneDNN benchdnn option sets) is
+    # not a header — scanning it is pure cost with no ABI signal.
+    big = tmp_path / "option_set_fwks_gpu"
+    big.write_text("x = 1\n" * ((_EXTENSIONLESS_MAX_BYTES // 6) + 100))
+    assert big.stat().st_size > _EXTENSIONLESS_MAX_BYTES
+    assert _is_scannable(big) is False
+
+
+def test_is_scannable_rejects_binary_extensionless_file(tmp_path: Path) -> None:
+    blob = tmp_path / "index"  # e.g. .git/index-shaped binary
+    blob.write_bytes(b"DIRC\x00\x00\x00\x02\x00" + b"\x00" * 64)
+    assert _is_scannable(blob) is False
+
+
+def test_is_scannable_keeps_small_text_extensionless_header(tmp_path: Path) -> None:
+    hdr = tmp_path / "Core"
+    hdr.write_text("struct S { virtual void f(); };")
+    assert _is_scannable(hdr) is True
+
+
+def test_is_scannable_does_not_cap_known_suffix_files(tmp_path: Path) -> None:
+    # A real large header (a 600 KB dnnl.hpp) keeps a known suffix and is scanned
+    # — only the *extensionless* heuristic is byte-capped.
+    big_hpp = tmp_path / "dnnl.hpp"
+    big_hpp.write_text("// header\n" * ((_EXTENSIONLESS_MAX_BYTES // 9) + 100))
+    assert big_hpp.stat().st_size > _EXTENSIONLESS_MAX_BYTES
+    assert _is_scannable(big_hpp) is True
+
+
+@pytest.mark.parametrize("vcs", [".git", ".hg", ".svn"])
+def test_iter_source_files_prunes_vcs_dirs(tmp_path: Path, vcs: str) -> None:
+    (tmp_path / "real.hpp").write_text("struct S { virtual void f(); };")
+    vcsdir = tmp_path / vcs / "objects"
+    vcsdir.mkdir(parents=True)
+    # an extensionless, header-shaped file living under VCS metadata
+    (vcsdir / "HEAD").write_text("struct Leak { virtual void g(); };")
+    (tmp_path / vcs / "index").write_bytes(b"\x00" * 32)
+    names = {p.name for p in iter_source_files([tmp_path])}
+    assert "real.hpp" in names
+    assert "HEAD" not in names
+    assert "index" not in names
+
+
+# ── P2: parallel fan-out is deterministic and falls back to serial ───────────
+
+
+def test_resolve_scan_jobs_serial_below_floor(monkeypatch) -> None:
+    monkeypatch.delenv("ABICHECK_PATTERN_SCAN_JOBS", raising=False)
+    assert _resolve_scan_jobs(10) == 1  # tiny tree stays serial
+
+
+def test_resolve_scan_jobs_env_overrides(monkeypatch) -> None:
+    monkeypatch.setenv("ABICHECK_PATTERN_SCAN_JOBS", "1")
+    assert _resolve_scan_jobs(10_000) == 1  # forced serial even on a big tree
+    monkeypatch.setenv("ABICHECK_PATTERN_SCAN_JOBS", "3")
+    assert _resolve_scan_jobs(10_000) == 3
+    assert _resolve_scan_jobs(10) == 1  # N still serial below the floor
+
+
+def test_scan_files_parallel_matches_serial(tmp_path: Path, monkeypatch) -> None:
+    import abicheck.buildsource.pattern_scan as ps
+
+    # Lower the parallel floor so a handful of files exercises the process pool.
+    monkeypatch.setattr(ps, "_PARALLEL_FILE_FLOOR", 2)
+    for i in range(6):
+        (tmp_path / f"f{i}.hpp").write_text(
+            f"#pragma pack({i})\nstruct S{i} {{ virtual void f(); }};\n"
+        )
+
+    monkeypatch.setenv("ABICHECK_PATTERN_SCAN_JOBS", "1")
+    serial = ps.scan_files([tmp_path])
+    monkeypatch.setenv("ABICHECK_PATTERN_SCAN_JOBS", "2")
+    parallel = ps.scan_files([tmp_path])
+
+    def _key(r: PatternScanResult) -> list:
+        return [(f.kind, f.path, f.line, f.snippet) for f in r.facts]
+
+    assert _key(serial) == _key(parallel)
+    assert serial.files_scanned == parallel.files_scanned == 6
+    assert parallel.files_skipped == 0
 
 
 def test_iter_source_files_extensionless_changed_scope(tmp_path: Path) -> None:

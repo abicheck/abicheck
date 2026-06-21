@@ -37,6 +37,7 @@ is the portable baseline (ADR-035 D2).
 
 from __future__ import annotations
 
+import os
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass, field
@@ -673,16 +674,62 @@ def scan_text(text: str, path: str = "") -> list[PatternFact]:
     return facts
 
 
+#: Directory names whose contents are never part of a library's source surface.
+#: VCS metadata holds packed/loose blobs and indexes (a shallow clone's
+#: ``.git/index`` is a multi-hundred-KB binary file) that the extensionless
+#: heuristic below would otherwise feed to every regex rule. Pruned from the walk.
+_PRUNED_DIR_SEGMENTS: frozenset[str] = frozenset({".git", ".hg", ".svn"})
+
+#: Size ceiling for the **extensionless** heuristic only. A genuine extensionless
+#: C++ header (``include/mylib/Core``) is small; multi-MB extensionless files are
+#: build/test *data* (e.g. oneDNN's ``tests/benchdnn/inputs/...`` option sets,
+#: several MB each) or VCS blobs — never headers. Files with a known C/C++
+#: suffix are *not* capped (a real ``dnnl.hpp`` is legitimately large).
+_EXTENSIONLESS_MAX_BYTES = 256 * 1024
+
+
+def _within_pruned_dir(rel: Path) -> bool:
+    """True if a path (relative to a walk root) lies under a pruned VCS dir."""
+    return any(seg in _PRUNED_DIR_SEGMENTS for seg in rel.parts)
+
+
+def _looks_binary(path: Path) -> bool:
+    """Heuristic: a NUL byte in the first 8 KiB marks a non-text (binary) file.
+
+    Unreadable files are treated as binary so they fall out of the scan set
+    (``scan_files`` would skip them anyway).
+    """
+    try:
+        with open(path, "rb") as fh:
+            return b"\x00" in fh.read(8192)
+    except OSError:
+        return True
+
+
 def _is_scannable(path: Path) -> bool:
     """True if a directory-walked file should be lexically scanned.
 
-    Known C/C++ suffixes plus **extensionless** files: many C++ libraries ship
-    extensionless public headers (``include/mylib/Core``), and the D2 scope is
-    "changed + public headers", not "files with a C/C++ extension". Files with a
-    different, explicit extension (``.md``, ``.txt``, ``.bin``) are skipped.
+    Known C/C++ suffixes are always scannable. **Extensionless** files are
+    accepted too — many C++ libraries ship extensionless public headers
+    (``include/mylib/Core``), and the D2 scope is "changed + public headers", not
+    "files with a C/C++ extension" — but only when they are small *text* files:
+    an oversized or binary extensionless file is build/test data or a VCS blob,
+    not a header, and scanning it is pure cost with no ABI signal (ADR-035 D2;
+    the pre-scan is advisory, so a missed exotic giant header is harmless).
+    Files with a different, explicit extension (``.md``, ``.txt``, ``.bin``) are
+    skipped.
     """
     suffix = path.suffix.lower()
-    return suffix in SOURCE_SUFFIXES or suffix == ""
+    if suffix in SOURCE_SUFFIXES:
+        return True
+    if suffix != "":
+        return False
+    try:
+        if path.stat().st_size > _EXTENSIONLESS_MAX_BYTES:
+            return False
+    except OSError:
+        return False
+    return not _looks_binary(path)
 
 
 def iter_source_files(
@@ -692,8 +739,9 @@ def iter_source_files(
     """Collect C/C++ source/header files under ``roots`` (files or directories).
 
     A ``root`` that is a **file** is honored regardless of suffix — the caller
-    pointed at it directly. A ``root`` that is a **directory** is walked and
-    filtered by :func:`_is_scannable` (known suffixes + extensionless headers).
+    pointed at it directly. A ``root`` that is a **directory** is walked (with
+    VCS metadata dirs pruned, see :data:`_PRUNED_DIR_SEGMENTS`) and filtered by
+    :func:`_is_scannable` (known suffixes + small text extensionless headers).
     When ``changed_paths`` is given, the result is intersected with it (by
     suffix-matching the path tail), implementing the ADR-035 D2 "changed +
     public" scope: callers pass public roots and the PR's changed paths. The
@@ -709,7 +757,11 @@ def iter_source_files(
         if rp.is_file():
             candidates = [(rp, True)]  # explicit file: honor regardless of suffix
         elif rp.is_dir():
-            candidates = [(p, False) for p in rp.rglob("*") if p.is_file()]
+            candidates = [
+                (p, False)
+                for p in rp.rglob("*")
+                if p.is_file() and not _within_pruned_dir(p.relative_to(rp))
+            ]
         else:
             continue
         for cand, explicit in candidates:
@@ -741,6 +793,69 @@ def _path_changed(candidate: Path, changed: set[str]) -> bool:
     return False
 
 
+#: File-count floor below which the parallel path is never used — process-pool
+#: spawn/pickle overhead dwarfs the work on small trees (and keeps the fast unit
+#: tests, which use tiny fixtures, on the deterministic serial path). A
+#: whole-source ``--audit`` over a big library (oneDNN ~3.8k files) is the case
+#: parallelism is for.
+_PARALLEL_FILE_FLOOR = 256
+
+
+def _resolve_scan_jobs(n_files: int) -> int:
+    """Worker count for the pattern scan (``ABICHECK_PATTERN_SCAN_JOBS``).
+
+    ``re`` matching holds the GIL, so a whole-tree pre-scan is CPU-bound and
+    single-threaded — the named cost in ``validation/oneapi-conda-scan-*`` (a
+    67 MB tree ran past 900 s). Spreading files across processes is the fix.
+
+    - unset / ``auto`` → ``min(cpu, 8)`` once the file count clears
+      :data:`_PARALLEL_FILE_FLOOR`, else serial;
+    - ``0`` / ``1`` → force serial (CI/test determinism, constrained sandboxes);
+    - ``N`` → cap at ``N`` (still serial under the floor).
+    """
+    raw = os.environ.get("ABICHECK_PATTERN_SCAN_JOBS", "").strip().lower()
+    if raw in ("0", "1"):
+        return 1
+    if raw and raw != "auto":
+        try:
+            requested = max(1, int(raw))
+        except ValueError:
+            requested = 0
+        if requested:
+            return requested if n_files >= _PARALLEL_FILE_FLOOR else 1
+    if n_files < _PARALLEL_FILE_FLOOR:
+        return 1
+    return min(os.cpu_count() or 1, 8)
+
+
+def _scan_one_file(path_str: str) -> tuple[list[PatternFact], bool]:
+    """Worker: read + scan one file. Returns ``(facts, readable)``.
+
+    Top-level (picklable) so it can run in a :class:`ProcessPoolExecutor` child
+    under ``spawn`` start methods (macOS/Windows). Unreadable files yield
+    ``(.., False)`` so the caller can count them as skipped.
+    """
+    try:
+        text = Path(path_str).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return [], False
+    return scan_text(text, path=path_str), True
+
+
+def _scan_files_serial(files: list[Path]) -> PatternScanResult:
+    facts: list[PatternFact] = []
+    scanned = 0
+    skipped = 0
+    for f in files:
+        rfacts, ok = _scan_one_file(str(f))
+        if not ok:
+            skipped += 1
+            continue
+        facts.extend(rfacts)
+        scanned += 1
+    return PatternScanResult(facts=facts, files_scanned=scanned, files_skipped=skipped)
+
+
 def scan_files(
     roots: Iterable[str | Path],
     changed_paths: Iterable[str] | None = None,
@@ -749,17 +864,36 @@ def scan_files(
 
     Unreadable files are counted as skipped (reported via ``coverage()``), never
     fatal — the pre-scan is best-effort advisory by design (ADR-035 D2/D3).
+
+    Large trees fan out across processes (see :func:`_resolve_scan_jobs`); the
+    result is **identical** to the serial path — files are scanned in the
+    deterministic sorted order from :func:`iter_source_files` and facts are
+    concatenated in that order. Any executor failure falls back to serial so a
+    constrained sandbox never turns a scan into an error.
     """
     files = iter_source_files(roots, changed_paths)
+    jobs = _resolve_scan_jobs(len(files))
+    if jobs <= 1:
+        return _scan_files_serial(files)
+
+    from concurrent.futures import ProcessPoolExecutor
+
     facts: list[PatternFact] = []
     scanned = 0
     skipped = 0
-    for f in files:
-        try:
-            text = f.read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            skipped += 1
-            continue
-        facts.extend(scan_text(text, path=str(f)))
-        scanned += 1
+    chunk = max(1, len(files) // (jobs * 4))
+    try:
+        with ProcessPoolExecutor(max_workers=jobs) as ex:
+            # map preserves input order → deterministic, sorted-by-path facts.
+            for rfacts, ok in ex.map(
+                _scan_one_file, [str(f) for f in files], chunksize=chunk
+            ):
+                if not ok:
+                    skipped += 1
+                    continue
+                facts.extend(rfacts)
+                scanned += 1
+    except (OSError, RuntimeError, ImportError):
+        # BrokenProcessPool, no-fork sandbox, etc. → identical serial result.
+        return _scan_files_serial(files)
     return PatternScanResult(facts=facts, files_scanned=scanned, files_skipped=skipped)
