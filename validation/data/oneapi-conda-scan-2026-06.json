@@ -1,0 +1,106 @@
+{
+  "schema": "oneapi-conda-scan.v1",
+  "date": "2026-06-21",
+  "abicheck_version": "0.4.0",
+  "host": {
+    "os": "Linux 6.18.5 x86_64",
+    "python": "3.11.15",
+    "ast_frontend": "clang (clang-18; castxml absent)",
+    "cpu": 4,
+    "note": "ABICHECK_AST_FRONTEND=clang for every run; castxml not on PATH."
+  },
+  "method": {
+    "binaries": "conda-forge linux-64 .conda packages (extracted with zstandard)",
+    "headers": "matching conda-forge -devel / -include packages",
+    "sources": "github.com/uxlfoundation/<lib> shallow clone at the matching tag",
+    "command": "abicheck scan --binary <lib> -H <umbrella-header> -I <include> --public-header-dir <include> --lang c++ --audit --depth <D> [--sources <tree>]"
+  },
+  "subjects": [
+    {
+      "lib": "oneTBB",
+      "conda_pkg": "tbb 2023.0.0 (hab88423_2) + tbb-devel",
+      "binary": "libtbb.so.12.18",
+      "binary_size": "388K",
+      "tbb_interface_version": 12180,
+      "git_tag": "v2023.0.0",
+      "umbrella_header": "oneapi/tbb.h",
+      "source_files": 688,
+      "source_mb": 7.7,
+      "extensionless_files": 23,
+      "l0_functions": 24603,
+      "l0_variables": 1214,
+      "l2_types": 913
+    },
+    {
+      "lib": "oneDNN",
+      "conda_pkg": "onednn 3.12 (omp_h83de36e_0)",
+      "binary": "libdnnl.so.3.12",
+      "binary_size": "72M",
+      "git_tag": "v3.12",
+      "umbrella_header": "dnnl.hpp",
+      "source_files": 3867,
+      "source_mb": 67.1,
+      "extensionless_files": 827,
+      "l0_functions": 13127,
+      "l0_variables": 290,
+      "l2_types": 518
+    },
+    {
+      "lib": "oneDAL",
+      "conda_pkg": "dal 2026.1.0 (h74c4b1a_14) + dal-include",
+      "binary": "libonedal.so.4",
+      "binary_size": "11M",
+      "git_tag": "2026.1.0",
+      "umbrella_header": "oneapi/dal.hpp",
+      "source_files": 3072,
+      "source_mb": 15.9,
+      "extensionless_files": 192,
+      "l0_functions": 20708,
+      "l0_variables": 1126,
+      "l2_types": 954
+    },
+    {
+      "lib": "oneCCL",
+      "conda_pkg": "oneccl-devel 2022.0.0 (h7a4b287_49302)",
+      "binary": "libccl.a (STATIC ARCHIVE — no .so on conda-forge)",
+      "git_tag": "2022.0.0",
+      "umbrella_header": "oneapi/ccl.hpp",
+      "source_files": 54,
+      "source_mb": 0.5,
+      "scannable": false,
+      "reject_reason": "static/import library archive (.a/.lib) not analysed by abicheck"
+    }
+  ],
+  "runs": [
+    {"lib": "oneTBB", "depth": "headers", "exit": 0, "elapsed_s": 10.0, "verdict": "COMPATIBLE", "layers": "L0,L1,L2,patternS3(1 file)"},
+    {"lib": "oneTBB", "depth": "build",   "exit": 0, "elapsed_s": 30.7, "verdict": "COMPATIBLE", "layers": "L0,L1,L2,patternS3(689 files/983 facts); L3/L4/L5 not_collected (no compile_commands.json)"},
+    {"lib": "oneTBB", "depth": "source",  "exit": 0, "elapsed_s": 30.9, "verdict": "COMPATIBLE", "layers": "same as build; L4/L5 not_collected"},
+    {"lib": "oneTBB", "depth": "full",    "exit": 0, "elapsed_s": 30.5, "verdict": "COMPATIBLE", "layers": "same as build"},
+    {"lib": "oneDNN", "depth": "headers", "exit": 0, "elapsed_s": 11.4, "verdict": "COMPATIBLE", "layers": "L0,L1,L2"},
+    {"lib": "oneDNN", "depth": "build",   "exit": 124, "elapsed_s": 900.0, "verdict": null, "note": "TIMED OUT in always-on lexical pattern pre-scan (single-threaded, whole 67 MB / 3867-file tree)"},
+    {"lib": "oneDNN", "depth": "build", "scoped": true, "changed_path": "include/oneapi/dnnl/dnnl.hpp", "exit": 0, "elapsed_s": 9.2, "verdict": "COMPATIBLE", "note": "pattern scan scoped to 1 file by --changed-path"},
+    {"lib": "oneDAL", "depth": "headers", "exit": 0, "elapsed_s": 11.0, "verdict": "COMPATIBLE", "layers": "L0,L1,L2"},
+    {"lib": "oneDAL", "depth": "build",   "exit": 124, "elapsed_s": 600.0, "verdict": null, "note": "TIMED OUT in pattern pre-scan; 16 MB / 3072-file tree, even slower per-byte than oneDNN"},
+    {"lib": "oneCCL", "depth": "headers", "exit": 1, "elapsed_s": 0.4, "verdict": null, "note": "rejected: static archive libccl.a is not a linkable image"}
+  ],
+  "pattern_scan_breakdown_onednn": {
+    "total_files_seen_by_iter_source_files": 3867,
+    "total_mb": 67.1,
+    "extensionless_files": 827,
+    "biggest_extensionless": [
+      ["src/oneDNN/tests/benchdnn/inputs/conv/option_set_fwks_ext_gpu", 3475375],
+      ["src/oneDNN/tests/benchdnn/inputs/matmul/option_set_fwks_llm_gpu", 1656415],
+      ["src/oneDNN/.git/index", 522827]
+    ],
+    "pathological_regex_files": 0,
+    "diagnosis": "no catastrophic backtracking; cost is pure volume x single-thread. third_party/, tests/ (incl. multi-MB benchdnn data fixtures matched by the extensionless-header heuristic) and .git/ are all walked and regex-scanned."
+  },
+  "provenance_bug": {
+    "symptom": "scan --audit reports 4 crosschecks (exported_not_public, public_not_exported, private_header_leak, rtti_for_internal_type) as 'skipped: no public-header provenance' on EVERY ELF run, even with --public-header-dir given.",
+    "root_cause": "service.resolve_input -> _dump_elf never receives/applies public_headers/public_header_dirs (apply_provenance runs only on the PE/Mach-O path via _apply_native_provenance). scan builds its snapshot through service.resolve_input, so ELF origins stay UNKNOWN. The dump/compare CLI path (cli_resolve._resolve_input) DOES call apply_provenance, so `dump` classifies correctly.",
+    "evidence": {
+      "dump_tbb_origins": {"functions": {"system_header": 21163, "public_header": 3440}, "types": {"system_header": 536, "public_header": 377}},
+      "resolve_input_tbb_origins": {"functions": {"unknown": 24603}, "types": {"unknown": 913}, "origin_resolvable": false}
+    }
+  }
+}
