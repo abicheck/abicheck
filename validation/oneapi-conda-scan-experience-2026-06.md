@@ -109,14 +109,30 @@ about *getting a clean run at all*, and that is where the friction lives.
 
 ## Reproduction
 
+A `.conda` file is just a zip of zstd-compressed tarballs; extract the `pkg-*`
+member to recover the package's `lib/` + `include/` tree. The commands below
+assume you ran them from a single working directory so the relative paths
+resolve (oneTBB shown; the other three follow the same shape with their own
+umbrella header from the table above).
+
 ```bash
-# binaries (no conda needed): download + extract the conda-forge .conda zips
-#   tbb 2023.0.0 / onednn 3.12 / dal 2026.1.0 + dal-include / oneccl-devel 2022.0.0
-# sources: git clone --depth 1 --branch <tag> https://github.com/uxlfoundation/<lib>
-export ABICHECK_AST_FRONTEND=clang   # clang-only host
-abicheck scan --binary libtbb.so.12.18 \
+mkdir -p ~/oneapi-audit && cd ~/oneapi-audit
+
+# 1. binaries (no conda CLI needed): fetch + unpack the conda-forge .conda zips.
+#    Runtime .so lives in `tbb`; headers in `tbb-devel` (oneDAL headers are in a
+#    third pkg, `dal-include`). Pin: tbb 2023.0.0 / onednn 3.12 /
+#    dal 2026.1.0 + dal-include / oneccl-devel 2022.0.0.
+#    Each .conda → unzip → `pkg-*.tar.zst` → zstd -d | tar x  ==> ./lib ./include
+
+# 2. sources at the tag matching the conda version:
+git clone --depth 1 --branch v2023.0.0 https://github.com/uxlfoundation/oneTBB src/oneTBB
+
+export ABICHECK_AST_FRONTEND=clang        # clang-only host (no castxml)
+abicheck scan --binary lib/libtbb.so.12.18 \
   -H include/oneapi/tbb.h -I include --public-header-dir include \
-  --lang c++ --audit --depth headers          # L2, ~10 s
-# deeper depths need a compile_commands.json under --sources; add
-#   --changed-path <file> or --since <ref> to keep the pattern pre-scan bounded.
+  --lang c++ --audit --depth headers      # L2, ~10 s
+
+# deeper depths add --sources src/oneTBB and need a compile_commands.json under
+# it; also add --changed-path <file> or --since <ref> to keep the pattern
+# pre-scan bounded (see P2) — without a seed it scans the whole tree.
 ```
