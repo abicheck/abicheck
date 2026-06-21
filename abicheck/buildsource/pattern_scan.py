@@ -688,11 +688,6 @@ _PRUNED_DIR_SEGMENTS: frozenset[str] = frozenset({".git", ".hg", ".svn"})
 _EXTENSIONLESS_MAX_BYTES = 256 * 1024
 
 
-def _within_pruned_dir(rel: Path) -> bool:
-    """True if a path (relative to a walk root) lies under a pruned VCS dir."""
-    return any(seg in _PRUNED_DIR_SEGMENTS for seg in rel.parts)
-
-
 def _looks_binary(path: Path) -> bool:
     """Heuristic: a NUL byte in the first 8 KiB marks a non-text (binary) file.
 
@@ -757,11 +752,14 @@ def iter_source_files(
         if rp.is_file():
             candidates = [(rp, True)]  # explicit file: honor regardless of suffix
         elif rp.is_dir():
-            candidates = [
-                (p, False)
-                for p in rp.rglob("*")
-                if p.is_file() and not _within_pruned_dir(p.relative_to(rp))
-            ]
+            candidates = []
+            for dirpath, dirnames, filenames in os.walk(rp):
+                # Prune VCS metadata dirs *in place* so os.walk never descends
+                # into them — a large `.git` tree is never stat'd/scanned, not
+                # merely filtered out after the fact (Codex review).
+                dirnames[:] = [d for d in dirnames if d not in _PRUNED_DIR_SEGMENTS]
+                base = Path(dirpath)
+                candidates.extend((base / fn, False) for fn in filenames)
         else:
             continue
         for cand, explicit in candidates:
@@ -843,6 +841,11 @@ def _scan_one_file(path_str: str) -> tuple[list[PatternFact], bool]:
 
 
 def _scan_files_serial(files: list[Path]) -> PatternScanResult:
+    """Scan ``files`` one at a time (the serial path / parallel fallback).
+
+    Unreadable files are counted as skipped rather than raising — the pre-scan
+    is best-effort advisory (ADR-035 D2/D3).
+    """
     facts: list[PatternFact] = []
     scanned = 0
     skipped = 0

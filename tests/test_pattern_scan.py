@@ -507,6 +507,11 @@ def test_is_scannable_keeps_small_text_extensionless_header(tmp_path: Path) -> N
     assert _is_scannable(hdr) is True
 
 
+def test_is_scannable_rejects_unstattable_extensionless(tmp_path: Path) -> None:
+    # An extensionless path that cannot be stat'd (does not exist) is not a header.
+    assert _is_scannable(tmp_path / "ghost") is False
+
+
 def test_is_scannable_does_not_cap_known_suffix_files(tmp_path: Path) -> None:
     # A real large header (a 600 KB dnnl.hpp) keeps a known suffix and is scanned
     # — only the *extensionless* heuristic is byte-capped.
@@ -546,27 +551,137 @@ def test_resolve_scan_jobs_env_overrides(monkeypatch) -> None:
     assert _resolve_scan_jobs(10) == 1  # N still serial below the floor
 
 
-def test_scan_files_parallel_matches_serial(tmp_path: Path, monkeypatch) -> None:
+def test_resolve_scan_jobs_auto_and_invalid(monkeypatch) -> None:
     import abicheck.buildsource.pattern_scan as ps
 
-    # Lower the parallel floor so a handful of files exercises the process pool.
-    monkeypatch.setattr(ps, "_PARALLEL_FILE_FLOOR", 2)
-    for i in range(6):
+    monkeypatch.setattr(ps, "_PARALLEL_FILE_FLOOR", 4)
+    monkeypatch.setattr(ps.os, "cpu_count", lambda: 6)
+    monkeypatch.setenv("ABICHECK_PATTERN_SCAN_JOBS", "auto")
+    assert ps._resolve_scan_jobs(100) == 6  # auto → min(cpu, 8) above the floor
+    monkeypatch.setenv("ABICHECK_PATTERN_SCAN_JOBS", "notanumber")
+    assert ps._resolve_scan_jobs(100) == 6  # invalid → auto
+    monkeypatch.setattr(ps.os, "cpu_count", lambda: 32)
+    monkeypatch.delenv("ABICHECK_PATTERN_SCAN_JOBS", raising=False)
+    assert ps._resolve_scan_jobs(100) == 8  # capped at 8
+
+
+def test_looks_binary(tmp_path: Path) -> None:
+    import abicheck.buildsource.pattern_scan as ps
+
+    text = tmp_path / "t"
+    text.write_text("struct S {};")
+    binary = tmp_path / "b"
+    binary.write_bytes(b"\x7fELF\x00\x01\x02")
+    assert ps._looks_binary(text) is False
+    assert ps._looks_binary(binary) is True
+    assert ps._looks_binary(tmp_path) is True  # unreadable (a dir) → treated binary
+
+
+def test_scan_one_file_readable_and_unreadable(tmp_path: Path) -> None:
+    import abicheck.buildsource.pattern_scan as ps
+
+    f = tmp_path / "h.hpp"
+    f.write_text("#pragma pack(1)\nstruct S {};")
+    facts, ok = ps._scan_one_file(str(f))
+    assert ok is True
+    assert any(x.kind is PatternKind.PRAGMA_PACK for x in facts)
+    # A directory path is unreadable as text → (.., False), counted as skipped.
+    empty, ok2 = ps._scan_one_file(str(tmp_path))
+    assert ok2 is False
+    assert empty == []
+
+
+def test_scan_files_serial_counts_unreadable_as_skipped(tmp_path: Path) -> None:
+    import abicheck.buildsource.pattern_scan as ps
+
+    good = tmp_path / "a.hpp"
+    good.write_text("struct S { virtual void f(); };")
+    result = ps._scan_files_serial([good, tmp_path])  # tmp_path: a dir → skipped
+    assert result.files_scanned == 1
+    assert result.files_skipped == 1
+
+
+class _InProcessExecutor:
+    """A drop-in ``ProcessPoolExecutor`` that runs ``map`` in-process.
+
+    Lets the parallel branch of ``scan_files`` be exercised deterministically
+    (and under coverage, in the measured parent) without spawning workers.
+    """
+
+    def __init__(self, max_workers: int | None = None) -> None:
+        self.max_workers = max_workers
+
+    def __enter__(self) -> _InProcessExecutor:
+        return self
+
+    def __exit__(self, *exc: object) -> bool:
+        return False
+
+    def map(self, fn, iterable, chunksize: int = 1):
+        return [fn(x) for x in iterable]
+
+
+def _make_tree(tmp_path: Path, n: int = 6) -> None:
+    for i in range(n):
         (tmp_path / f"f{i}.hpp").write_text(
             f"#pragma pack({i})\nstruct S{i} {{ virtual void f(); }};\n"
         )
+
+
+def _facts_key(r: PatternScanResult) -> list:
+    return [(f.kind, f.path, f.line, f.snippet) for f in r.facts]
+
+
+def test_scan_files_parallel_matches_serial(tmp_path: Path, monkeypatch) -> None:
+    import concurrent.futures
+
+    import abicheck.buildsource.pattern_scan as ps
+
+    monkeypatch.setattr(ps, "_PARALLEL_FILE_FLOOR", 2)
+    # Run the parallel branch in-process so it is deterministic and measured.
+    monkeypatch.setattr(concurrent.futures, "ProcessPoolExecutor", _InProcessExecutor)
+    _make_tree(tmp_path)
+    # A broken symlink with a header suffix is discovered but unreadable → it
+    # exercises the "skipped" branch on both paths (best-effort; Windows without
+    # symlink privilege simply gets 0 skips and the equality still holds).
+    try:
+        import os
+
+        os.symlink(tmp_path / "missing-target", tmp_path / "dangling.hpp")
+        expected_skipped = 1
+    except (OSError, NotImplementedError):
+        expected_skipped = 0
 
     monkeypatch.setenv("ABICHECK_PATTERN_SCAN_JOBS", "1")
     serial = ps.scan_files([tmp_path])
     monkeypatch.setenv("ABICHECK_PATTERN_SCAN_JOBS", "2")
     parallel = ps.scan_files([tmp_path])
 
-    def _key(r: PatternScanResult) -> list:
-        return [(f.kind, f.path, f.line, f.snippet) for f in r.facts]
-
-    assert _key(serial) == _key(parallel)
+    assert _facts_key(serial) == _facts_key(parallel)
     assert serial.files_scanned == parallel.files_scanned == 6
-    assert parallel.files_skipped == 0
+    assert serial.files_skipped == parallel.files_skipped == expected_skipped
+
+
+def test_scan_files_parallel_falls_back_to_serial(tmp_path: Path, monkeypatch) -> None:
+    import concurrent.futures
+
+    import abicheck.buildsource.pattern_scan as ps
+
+    monkeypatch.setattr(ps, "_PARALLEL_FILE_FLOOR", 2)
+
+    def _broken(*a, **k):  # simulate a no-fork sandbox / BrokenProcessPool
+        raise RuntimeError("no subprocesses here")
+
+    monkeypatch.setattr(concurrent.futures, "ProcessPoolExecutor", _broken)
+    _make_tree(tmp_path)
+
+    monkeypatch.setenv("ABICHECK_PATTERN_SCAN_JOBS", "1")
+    serial = ps.scan_files([tmp_path])
+    monkeypatch.setenv("ABICHECK_PATTERN_SCAN_JOBS", "4")
+    fell_back = ps.scan_files([tmp_path])  # raises → serial fallback
+
+    assert _facts_key(fell_back) == _facts_key(serial)
+    assert fell_back.files_scanned == 6
 
 
 def test_iter_source_files_extensionless_changed_scope(tmp_path: Path) -> None:
