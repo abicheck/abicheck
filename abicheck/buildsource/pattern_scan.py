@@ -806,11 +806,20 @@ def _resolve_scan_jobs(n_files: int) -> int:
     single-threaded — the named cost in ``validation/oneapi-conda-scan-*`` (a
     67 MB tree ran past 900 s). Spreading files across processes is the fix.
 
+    - a **daemonic** process → always serial (it may not spawn children);
     - unset / ``auto`` → ``min(cpu, 8)`` once the file count clears
       :data:`_PARALLEL_FILE_FLOOR`, else serial;
     - ``0`` / ``1`` → force serial (CI/test determinism, constrained sandboxes);
     - ``N`` → cap at ``N`` (still serial under the floor).
     """
+    import multiprocessing
+
+    # A daemonic process may not spawn children — `ProcessPoolExecutor.map`
+    # raises ``AssertionError: daemonic processes are not allowed to have
+    # children`` before yielding. Never go parallel from one, e.g. when a caller
+    # runs the scan inside a multiprocessing worker (Codex review).
+    if multiprocessing.current_process().daemon:
+        return 1
     raw = os.environ.get("ABICHECK_PATTERN_SCAN_JOBS", "").strip().lower()
     if raw in ("0", "1"):
         return 1
@@ -896,7 +905,8 @@ def scan_files(
                     continue
                 facts.extend(rfacts)
                 scanned += 1
-    except (OSError, RuntimeError, ImportError):
-        # BrokenProcessPool, no-fork sandbox, etc. → identical serial result.
+    except (OSError, RuntimeError, ImportError, AssertionError):
+        # BrokenProcessPool, no-fork sandbox, or a daemonic process that slipped
+        # past the _resolve_scan_jobs guard (AssertionError) → serial fallback.
         return _scan_files_serial(files)
     return PatternScanResult(facts=facts, files_scanned=scanned, files_skipped=skipped)

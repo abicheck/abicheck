@@ -662,15 +662,37 @@ def test_scan_files_parallel_matches_serial(tmp_path: Path, monkeypatch) -> None
     assert serial.files_skipped == parallel.files_skipped == expected_skipped
 
 
-def test_scan_files_parallel_falls_back_to_serial(tmp_path: Path, monkeypatch) -> None:
+def test_resolve_scan_jobs_daemonic_is_serial(monkeypatch) -> None:
+    # A daemonic process can't spawn children, so the scan must stay serial even
+    # when a big tree and an explicit job count would otherwise go parallel
+    # (Codex review: ProcessPoolExecutor.map raises AssertionError otherwise).
+    import multiprocessing
+
+    import abicheck.buildsource.pattern_scan as ps
+
+    monkeypatch.setattr(ps, "_PARALLEL_FILE_FLOOR", 2)
+    monkeypatch.setenv("ABICHECK_PATTERN_SCAN_JOBS", "4")
+
+    class _DaemonProc:
+        daemon = True
+
+    monkeypatch.setattr(multiprocessing, "current_process", lambda: _DaemonProc())
+    assert ps._resolve_scan_jobs(10_000) == 1
+
+
+@pytest.mark.parametrize("exc", [RuntimeError, OSError, AssertionError, ImportError])
+def test_scan_files_parallel_falls_back_to_serial(
+    tmp_path: Path, monkeypatch, exc
+) -> None:
     import concurrent.futures
 
     import abicheck.buildsource.pattern_scan as ps
 
     monkeypatch.setattr(ps, "_PARALLEL_FILE_FLOOR", 2)
 
-    def _broken(*a, **k):  # simulate a no-fork sandbox / BrokenProcessPool
-        raise RuntimeError("no subprocesses here")
+    def _broken(*a, **k):
+        # simulate no-fork sandbox / BrokenProcessPool / daemonic-spawn assertion
+        raise exc("no subprocesses here")
 
     monkeypatch.setattr(concurrent.futures, "ProcessPoolExecutor", _broken)
     _make_tree(tmp_path)
