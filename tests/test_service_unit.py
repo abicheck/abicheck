@@ -1,4 +1,5 @@
 """Unit tests for abicheck.service — targeting ≥80% coverage."""
+
 from __future__ import annotations
 
 import json
@@ -146,6 +147,33 @@ class TestResolveInput:
         with patch("abicheck.service.run_dump", return_value=snap):
             result = resolve_input(p)
         assert result is snap
+
+    def test_elf_forwards_provenance_to_dumper(self, tmp_path):
+        # P1 regression: the ELF service path (used by `scan`) must thread
+        # public_headers / public_header_dirs into dumper.dump, which runs
+        # apply_provenance. Without this the ELF origins stay UNKNOWN and the
+        # provenance-gated cross-checks silently skip — even with
+        # --public-header-dir given. The `dump` CLI always forwarded them; this
+        # path did not.
+        so = tmp_path / "lib.so"
+        so.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        hdr = tmp_path / "pub.h"
+        hdr.write_text("int f();")
+        pubdir = tmp_path / "include"
+        pubdir.mkdir()
+        snap = AbiSnapshot(library="t", version="1.0")
+        with patch("abicheck.dumper.dump", return_value=snap) as mock:
+            resolve_input(
+                so,
+                headers=[hdr],
+                includes=[],
+                is_elf=True,
+                public_headers=[hdr],
+                public_header_dirs=[pubdir],
+            )
+        kwargs = mock.call_args.kwargs
+        assert kwargs["public_headers"] == [hdr]
+        assert kwargs["public_header_dirs"] == [pubdir]
 
     def test_json_text_format(self, tmp_path):
         p = tmp_path / "snap.json"
@@ -302,7 +330,10 @@ class TestDumpElf:
             with patch("abicheck.dumper.dump", return_value=snap) as mock_dump:
                 _dump_elf(p, [], [], "1.0", "c")
         call_kwargs = mock_dump.call_args
-        assert call_kwargs.kwargs.get("compiler") == "cc" or call_kwargs[1].get("compiler") == "cc"
+        assert (
+            call_kwargs.kwargs.get("compiler") == "cc"
+            or call_kwargs[1].get("compiler") == "cc"
+        )
 
 
 # ── _dump_pe() ──────────────────────────────────────────────────────────────
@@ -356,7 +387,10 @@ class TestDumpPe:
 
         p = tmp_path / "lib.dll"
         p.write_bytes(b"MZ" + b"\x00" * 100)
-        with patch("abicheck.pe_metadata.parse_pe_metadata", side_effect=ImportError("no pefile")):
+        with patch(
+            "abicheck.pe_metadata.parse_pe_metadata",
+            side_effect=ImportError("no pefile"),
+        ):
             with pytest.raises(SnapshotError, match="no pefile"):
                 _dump_pe(p, "1.0")
 
@@ -365,7 +399,10 @@ class TestDumpPe:
 
         p = tmp_path / "lib.dll"
         p.write_bytes(b"MZ" + b"\x00" * 100)
-        with patch("abicheck.pe_metadata.parse_pe_metadata", side_effect=RuntimeError("corrupt")):
+        with patch(
+            "abicheck.pe_metadata.parse_pe_metadata",
+            side_effect=RuntimeError("corrupt"),
+        ):
             with pytest.raises(SnapshotError, match="Failed to parse PE"):
                 _dump_pe(p, "1.0")
 
@@ -400,7 +437,10 @@ class TestDumpPe:
         mock_adv = MagicMock()
         with patch("abicheck.pe_metadata.parse_pe_metadata", return_value=pe_meta):
             with patch("abicheck.pdb_utils.locate_pdb", return_value=Path("/fake.pdb")):
-                with patch("abicheck.pdb_metadata.parse_pdb_debug_info", return_value=(mock_dwarf, mock_adv)):
+                with patch(
+                    "abicheck.pdb_metadata.parse_pdb_debug_info",
+                    return_value=(mock_dwarf, mock_adv),
+                ):
                     result = _dump_pe(p, "1.0")
         assert result.dwarf is mock_dwarf
         assert result.dwarf_advanced is mock_adv
@@ -417,7 +457,9 @@ class TestDumpPe:
         pe_meta.machine = "AMD64"
         pe_meta.exports = [export]
         with patch("abicheck.pe_metadata.parse_pe_metadata", return_value=pe_meta):
-            with patch("abicheck.pdb_utils.locate_pdb", side_effect=RuntimeError("pdb error")):
+            with patch(
+                "abicheck.pdb_utils.locate_pdb", side_effect=RuntimeError("pdb error")
+            ):
                 result = _dump_pe(p, "1.0")
         assert result.dwarf is None
 
@@ -453,7 +495,9 @@ class TestDumpMacho:
         macho_meta.exports = [export]
         macho_meta.install_name = "libtest.dylib"
         macho_meta.dependent_libs = []
-        with patch("abicheck.macho_metadata.parse_macho_metadata", return_value=macho_meta):
+        with patch(
+            "abicheck.macho_metadata.parse_macho_metadata", return_value=macho_meta
+        ):
             result = _dump_macho(p, "1.0")
         assert result.platform == "macho"
         assert len(result.functions) == 1
@@ -467,7 +511,9 @@ class TestDumpMacho:
         macho_meta.exports = []
         macho_meta.install_name = None
         macho_meta.dependent_libs = []
-        with patch("abicheck.macho_metadata.parse_macho_metadata", return_value=macho_meta):
+        with patch(
+            "abicheck.macho_metadata.parse_macho_metadata", return_value=macho_meta
+        ):
             with pytest.raises(SnapshotError, match="no exports"):
                 _dump_macho(p, "1.0")
 
@@ -476,7 +522,10 @@ class TestDumpMacho:
 
         p = tmp_path / "lib.dylib"
         p.write_bytes(b"\x00" * 100)
-        with patch("abicheck.macho_metadata.parse_macho_metadata", side_effect=RuntimeError("bad macho")):
+        with patch(
+            "abicheck.macho_metadata.parse_macho_metadata",
+            side_effect=RuntimeError("bad macho"),
+        ):
             with pytest.raises(SnapshotError, match="Failed to parse Mach-O"):
                 _dump_macho(p, "1.0")
 
@@ -493,7 +542,9 @@ class TestDumpMacho:
         macho_meta.exports = [exp_named, exp_empty]
         macho_meta.install_name = "libtest.dylib"
         macho_meta.dependent_libs = []
-        with patch("abicheck.macho_metadata.parse_macho_metadata", return_value=macho_meta):
+        with patch(
+            "abicheck.macho_metadata.parse_macho_metadata", return_value=macho_meta
+        ):
             result = _dump_macho(p, "1.0")
         assert len(result.functions) == 1
 
@@ -508,7 +559,9 @@ class TestDumpMacho:
         macho_meta.exports = [export]
         macho_meta.install_name = "libtest.dylib"
         macho_meta.dependent_libs = []
-        with patch("abicheck.macho_metadata.parse_macho_metadata", return_value=macho_meta):
+        with patch(
+            "abicheck.macho_metadata.parse_macho_metadata", return_value=macho_meta
+        ):
             result = _dump_macho(p, "1.0")
         assert result.functions[0].is_extern_c is False
 
@@ -557,7 +610,9 @@ class TestLoadSuppressionAndPolicy:
 
     def test_valid_suppression_file(self, tmp_path):
         f = tmp_path / "suppress.yaml"
-        f.write_text("version: 1\nsuppressions:\n  - symbol: 'foo'\n    change_kind: func_removed\n")
+        f.write_text(
+            "version: 1\nsuppressions:\n  - symbol: 'foo'\n    change_kind: func_removed\n"
+        )
         s, p = load_suppression_and_policy(f)
         assert s is not None
         assert p is None
@@ -568,7 +623,9 @@ class TestLoadSuppressionAndPolicy:
         pf = tmp_path / "policy.yaml"
         pf.write_text("overrides: {}\n")
         with caplog.at_level(logging.WARNING, logger="abicheck.service"):
-            _, p = load_suppression_and_policy(None, policy="permissive", policy_file_path=pf)
+            _, p = load_suppression_and_policy(
+                None, policy="permissive", policy_file_path=pf
+            )
         assert p is not None
         assert "ignored" in caplog.text.lower()
 
@@ -586,13 +643,20 @@ class TestRunCompare:
     def _make_snap_file(self, tmp_path, name, version="1.0"):
         """Create a minimal JSON snapshot file."""
         snap = AbiSnapshot(
-            library=name, version=version,
+            library=name,
+            version=version,
             functions=[
-                Function(name="foo", mangled="foo", return_type="int",
-                         visibility=Visibility.PUBLIC, is_extern_c=True),
+                Function(
+                    name="foo",
+                    mangled="foo",
+                    return_type="int",
+                    visibility=Visibility.PUBLIC,
+                    is_extern_c=True,
+                ),
             ],
         )
         from abicheck.serialization import save_snapshot
+
         p = tmp_path / f"{name}_{version}.json"
         save_snapshot(snap, p)
         return p
@@ -609,7 +673,9 @@ class TestRunCompare:
         old_p = self._make_snap_file(tmp_path, "libtest", "1.0")
         new_p = self._make_snap_file(tmp_path, "libtest", "2.0")
         sf = tmp_path / "suppress.yaml"
-        sf.write_text("version: 1\nsuppressions:\n  - symbol: foo\n    change_kind: func_removed\n")
+        sf.write_text(
+            "version: 1\nsuppressions:\n  - symbol: foo\n    change_kind: func_removed\n"
+        )
         result, _, _ = run_compare(old_p, new_p, suppress=sf)
         assert isinstance(result, DiffResult)
 
@@ -620,9 +686,11 @@ class TestRunCompare:
 class TestRenderOutput:
     @pytest.fixture
     def snap(self):
-        return AbiSnapshot(library="libtest", version="1.0",
-                           functions=[Function(name="foo", mangled="foo",
-                                               return_type="int")])
+        return AbiSnapshot(
+            library="libtest",
+            version="1.0",
+            functions=[Function(name="foo", mangled="foo", return_type="int")],
+        )
 
     @pytest.fixture
     def diff_result(self):
@@ -648,7 +716,11 @@ class TestRenderOutput:
 
     def test_html_format(self, diff_result, snap):
         out = render_output("html", diff_result, snap)
-        assert "<html" in out.lower() or "<!doctype" in out.lower() or "<div" in out.lower()
+        assert (
+            "<html" in out.lower()
+            or "<!doctype" in out.lower()
+            or "<div" in out.lower()
+        )
 
     def test_unsupported_format_raises(self, diff_result, snap):
         with pytest.raises(ValidationError, match="Unsupported output format"):
@@ -667,7 +739,9 @@ class TestRenderOutput:
         snap.dependency_info = DependencyInfo(
             nodes=[{"soname": "libc.so.6", "depth": 0}],
         )
-        diff_result = DiffResult(old_version="1.0", new_version="2.0", library="libtest")
+        diff_result = DiffResult(
+            old_version="1.0", new_version="2.0", library="libtest"
+        )
         out = render_output("json", diff_result, snap, follow_deps=True)
         d = json.loads(out)
         assert "old_dependency_info" in d
@@ -676,13 +750,17 @@ class TestRenderOutput:
         snap.dependency_info = DependencyInfo(
             nodes=[{"soname": "libc.so.6", "depth": 0}],
         )
-        diff_result = DiffResult(old_version="1.0", new_version="2.0", library="libtest")
+        diff_result = DiffResult(
+            old_version="1.0", new_version="2.0", library="libtest"
+        )
         out = render_output("markdown", diff_result, snap, follow_deps=True)
         assert "Dependency" in out
 
     def test_html_with_new_snap(self, snap):
         new_snap = AbiSnapshot(library="libtest", version="2.0")
-        diff_result = DiffResult(old_version="1.0", new_version="2.0", library="libtest")
+        diff_result = DiffResult(
+            old_version="1.0", new_version="2.0", library="libtest"
+        )
         out = render_output("html", diff_result, snap, new=new_snap)
         assert isinstance(out, str)
 
@@ -790,10 +868,14 @@ class TestPeHeaderScoping:
         # Header-scoped dump only sees the symbol declared in the public header.
         scoped = _scoped_snapshot("pe", ("PublicApiFunc", Visibility.PUBLIC))
 
-        with patch("abicheck.pe_metadata.parse_pe_metadata", return_value=pe_meta), \
-             patch("abicheck.pdb_utils.locate_pdb", return_value=None), \
-             patch("abicheck.dumper._dump_pe", return_value=scoped) as mock_dump:
-            result = _dump_pe(p, "1.0", headers=[_mk_header(tmp_path)], includes=[Path("inc")])
+        with (
+            patch("abicheck.pe_metadata.parse_pe_metadata", return_value=pe_meta),
+            patch("abicheck.pdb_utils.locate_pdb", return_value=None),
+            patch("abicheck.dumper._dump_pe", return_value=scoped) as mock_dump,
+        ):
+            result = _dump_pe(
+                p, "1.0", headers=[_mk_header(tmp_path)], includes=[Path("inc")]
+            )
 
         # The header-aware dumper was actually invoked with the (expanded) headers.
         assert mock_dump.called
@@ -822,15 +904,21 @@ class TestPeHeaderScoping:
         new_scoped = _scoped_snapshot("pe", ("PublicApiFunc", Visibility.PUBLIC))
 
         with patch("abicheck.pdb_utils.locate_pdb", return_value=None):
-            with patch("abicheck.pe_metadata.parse_pe_metadata", return_value=old_pe), \
-                 patch("abicheck.dumper._dump_pe", return_value=old_scoped):
+            with (
+                patch("abicheck.pe_metadata.parse_pe_metadata", return_value=old_pe),
+                patch("abicheck.dumper._dump_pe", return_value=old_scoped),
+            ):
                 old_snap = _dump_pe(old_p, "1.0", headers=[_mk_header(tmp_path)])
-            with patch("abicheck.pe_metadata.parse_pe_metadata", return_value=new_pe), \
-                 patch("abicheck.dumper._dump_pe", return_value=new_scoped):
+            with (
+                patch("abicheck.pe_metadata.parse_pe_metadata", return_value=new_pe),
+                patch("abicheck.dumper._dump_pe", return_value=new_scoped),
+            ):
                 new_snap = _dump_pe(new_p, "2.0", headers=[_mk_header(tmp_path)])
 
         result = compare(old_snap, new_snap)
-        removed = [c for c in result.changes if "InternalPrivateFunc" in (c.symbol or "")]
+        removed = [
+            c for c in result.changes if "InternalPrivateFunc" in (c.symbol or "")
+        ]
         assert removed == [], f"private export must not be reported: {removed}"
 
     def test_fallback_when_no_header_match(self, tmp_path):
@@ -843,10 +931,14 @@ class TestPeHeaderScoping:
         # castxml parsed headers but nothing matched the export table.
         scoped = _scoped_snapshot("pe", ("someDecl", Visibility.HIDDEN))
 
-        with patch("abicheck.pe_metadata.parse_pe_metadata", return_value=pe_meta), \
-             patch("abicheck.pdb_utils.locate_pdb", return_value=None), \
-             patch("abicheck.dumper._dump_pe", return_value=scoped):
-            with pytest.warns(UserWarning, match="None of the provided headers matched"):
+        with (
+            patch("abicheck.pe_metadata.parse_pe_metadata", return_value=pe_meta),
+            patch("abicheck.pdb_utils.locate_pdb", return_value=None),
+            patch("abicheck.dumper._dump_pe", return_value=scoped),
+        ):
+            with pytest.warns(
+                UserWarning, match="None of the provided headers matched"
+            ):
                 result = _dump_pe(p, "1.0", headers=[_mk_header(tmp_path)])
 
         # Fell back to the full export table.
@@ -860,10 +952,17 @@ class TestPeHeaderScoping:
         p.write_bytes(b"MZ" + b"\x00" * 100)
         pe_meta = _pe_meta("PublicApiFunc")
 
-        with patch("abicheck.pe_metadata.parse_pe_metadata", return_value=pe_meta), \
-             patch("abicheck.pdb_utils.locate_pdb", return_value=None), \
-             patch("abicheck.dumper._dump_pe", side_effect=RuntimeError("castxml not found")):
-            with pytest.warns(UserWarning, match="Header-based ABI scoping unavailable"):
+        with (
+            patch("abicheck.pe_metadata.parse_pe_metadata", return_value=pe_meta),
+            patch("abicheck.pdb_utils.locate_pdb", return_value=None),
+            patch(
+                "abicheck.dumper._dump_pe",
+                side_effect=RuntimeError("castxml not found"),
+            ),
+        ):
+            with pytest.warns(
+                UserWarning, match="Header-based ABI scoping unavailable"
+            ):
                 result = _dump_pe(p, "1.0", headers=[_mk_header(tmp_path)])
 
         names = [f.name for f in result.functions]
@@ -877,9 +976,11 @@ class TestPeHeaderScoping:
         p.write_bytes(b"MZ" + b"\x00" * 100)
         pe_meta = _pe_meta("PublicApiFunc", "InternalPrivateFunc")
 
-        with patch("abicheck.pe_metadata.parse_pe_metadata", return_value=pe_meta), \
-             patch("abicheck.pdb_utils.locate_pdb", return_value=None), \
-             patch("abicheck.dumper._dump_pe") as mock_dump:
+        with (
+            patch("abicheck.pe_metadata.parse_pe_metadata", return_value=pe_meta),
+            patch("abicheck.pdb_utils.locate_pdb", return_value=None),
+            patch("abicheck.dumper._dump_pe") as mock_dump,
+        ):
             result = _dump_pe(p, "1.0")
 
         assert not mock_dump.called  # castxml path never taken
@@ -897,9 +998,14 @@ class TestPeHeaderScoping:
         dwarf_meta = MagicMock()
         dwarf_adv = MagicMock()
 
-        with patch("abicheck.pe_metadata.parse_pe_metadata", return_value=pe_meta), \
-             patch("abicheck.dumper._dump_pe", return_value=scoped), \
-             patch("abicheck.service._extract_pdb_debug", return_value=(dwarf_meta, dwarf_adv)):
+        with (
+            patch("abicheck.pe_metadata.parse_pe_metadata", return_value=pe_meta),
+            patch("abicheck.dumper._dump_pe", return_value=scoped),
+            patch(
+                "abicheck.service._extract_pdb_debug",
+                return_value=(dwarf_meta, dwarf_adv),
+            ),
+        ):
             result = _dump_pe(p, "1.0", headers=[_mk_header(tmp_path)])
 
         assert result.dwarf is dwarf_meta
@@ -918,9 +1024,11 @@ class TestPeHeaderScoping:
         pe_meta = _pe_meta("PublicApiFunc")
         scoped = _scoped_snapshot("pe", ("PublicApiFunc", Visibility.PUBLIC))
 
-        with patch("abicheck.pe_metadata.parse_pe_metadata", return_value=pe_meta), \
-             patch("abicheck.pdb_utils.locate_pdb", return_value=None), \
-             patch("abicheck.dumper._dump_pe", return_value=scoped) as mock_dump:
+        with (
+            patch("abicheck.pe_metadata.parse_pe_metadata", return_value=pe_meta),
+            patch("abicheck.pdb_utils.locate_pdb", return_value=None),
+            patch("abicheck.dumper._dump_pe", return_value=scoped) as mock_dump,
+        ):
             _dump_pe(p, "1.0", headers=[hdr_dir])
 
         # The dumper received the individual header files, not the directory.
@@ -936,8 +1044,10 @@ class TestPeHeaderScoping:
         p.write_bytes(b"MZ" + b"\x00" * 100)
         pe_meta = _pe_meta("PublicApiFunc")
 
-        with patch("abicheck.pe_metadata.parse_pe_metadata", return_value=pe_meta), \
-             patch("abicheck.pdb_utils.locate_pdb", return_value=None):
+        with (
+            patch("abicheck.pe_metadata.parse_pe_metadata", return_value=pe_meta),
+            patch("abicheck.pdb_utils.locate_pdb", return_value=None),
+        ):
             with pytest.raises(ValidationError, match="not found"):
                 _dump_pe(p, "1.0", headers=[tmp_path / "missing.h"])
 
@@ -956,8 +1066,12 @@ class TestMachoHeaderScoping:
         macho_meta.dependent_libs = []
         scoped = _scoped_snapshot("macho", ("publicFn", Visibility.PUBLIC))
 
-        with patch("abicheck.macho_metadata.parse_macho_metadata", return_value=macho_meta), \
-             patch("abicheck.dumper._dump_macho", return_value=scoped) as mock_dump:
+        with (
+            patch(
+                "abicheck.macho_metadata.parse_macho_metadata", return_value=macho_meta
+            ),
+            patch("abicheck.dumper._dump_macho", return_value=scoped) as mock_dump,
+        ):
             result = _dump_macho(p, "1.0", headers=[_mk_header(tmp_path)])
 
         assert mock_dump.called
@@ -976,9 +1090,15 @@ class TestMachoHeaderScoping:
         macho_meta.dependent_libs = []
         scoped = _scoped_snapshot("macho", ("other", Visibility.HIDDEN))
 
-        with patch("abicheck.macho_metadata.parse_macho_metadata", return_value=macho_meta), \
-             patch("abicheck.dumper._dump_macho", return_value=scoped):
-            with pytest.warns(UserWarning, match="None of the provided headers matched"):
+        with (
+            patch(
+                "abicheck.macho_metadata.parse_macho_metadata", return_value=macho_meta
+            ),
+            patch("abicheck.dumper._dump_macho", return_value=scoped),
+        ):
+            with pytest.warns(
+                UserWarning, match="None of the provided headers matched"
+            ):
                 result = _dump_macho(p, "1.0", headers=[_mk_header(tmp_path)])
 
         assert [f.name for f in result.functions] == ["_publicFn"]

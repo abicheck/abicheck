@@ -350,10 +350,11 @@ def run_dump(
 ) -> AbiSnapshot:
     """Extract an ABI snapshot from a native binary (ELF, PE, or Mach-O).
 
-    ``public_headers`` / ``public_header_dirs`` tag declaration provenance on
-    PE/Mach-O snapshots (ADR-024 Phase 1); they are a no-op for ELF (whose
-    provenance is applied inside :func:`dumper.dump`) and when no header set is
-    supplied. ``debug_format`` forces the ELF debug format. ``notify`` receives
+    ``public_headers`` / ``public_header_dirs`` tag declaration provenance
+    (ADR-024 Phase 1) on all three formats: ELF threads them into
+    :func:`dumper.dump` (which runs ``apply_provenance``), PE/Mach-O apply them
+    via :func:`_apply_native_provenance`. A no-op when no header set is supplied.
+    ``debug_format`` forces the ELF debug format. ``notify`` receives
     user-facing progress notes (see :func:`resolve_input`).
 
     Raises:
@@ -383,6 +384,8 @@ def run_dump(
             debug_format=debug_format,
             header_backend=eff_backend,
             compile=compile,
+            public_headers=public_headers,
+            public_header_dirs=public_header_dirs,
             notify=notify,
         )
         _try_attach_sycl_metadata(snap, path)
@@ -475,9 +478,19 @@ def _dump_elf(
     debug_format: str | None = None,
     header_backend: str = "auto",
     compile: CompileContext | None = None,
+    public_headers: list[Path] | None = None,
+    public_header_dirs: list[Path] | None = None,
     notify: Callable[[str], None] | None = None,
 ) -> AbiSnapshot:
-    """Dump an ELF binary to an ABI snapshot."""
+    """Dump an ELF binary to an ABI snapshot.
+
+    ``public_headers`` / ``public_header_dirs`` classify declaration provenance
+    (ADR-024). They are threaded into :func:`dumper.dump`, which runs
+    ``apply_provenance`` over the parsed surface — the same call the ``dump`` CLI
+    makes (``cli_dump_helpers._run_elf_dump``). Without this thread-through the
+    ELF service path leaves every origin ``UNKNOWN``, silently disabling the
+    provenance-gated cross-checks on the ``scan`` entry point.
+    """
     from .dumper import dump
 
     cc = compile if compile is not None else CompileContext()
@@ -515,6 +528,8 @@ def _dump_elf(
             dwarf_only=dwarf_only,
             debug_format=debug_format,
             header_backend=header_backend,
+            public_headers=public_headers,
+            public_header_dirs=public_header_dirs,
         )
     except (AbicheckError, RuntimeError, OSError, ValueError) as exc:
         raise SnapshotError(f"Failed to dump '{path}': {exc}") from exc
@@ -570,19 +585,35 @@ def _try_header_scoped_dump(
     try:
         if fmt == "pe":
             snap = _dumper_pe(
-                path, resolved_headers, includes, version, compiler,
-                gcc_path=cc.gcc_path, gcc_prefix=cc.gcc_prefix,
-                gcc_options=cc.gcc_options, gcc_option_tokens=cc.gcc_option_tokens,
-                sysroot=cc.sysroot, nostdinc=cc.nostdinc,
-                lang=lang_arg, header_backend=header_backend,
+                path,
+                resolved_headers,
+                includes,
+                version,
+                compiler,
+                gcc_path=cc.gcc_path,
+                gcc_prefix=cc.gcc_prefix,
+                gcc_options=cc.gcc_options,
+                gcc_option_tokens=cc.gcc_option_tokens,
+                sysroot=cc.sysroot,
+                nostdinc=cc.nostdinc,
+                lang=lang_arg,
+                header_backend=header_backend,
             )
         else:
             snap = _dumper_macho(
-                path, resolved_headers, includes, version, compiler,
-                gcc_path=cc.gcc_path, gcc_prefix=cc.gcc_prefix,
-                gcc_options=cc.gcc_options, gcc_option_tokens=cc.gcc_option_tokens,
-                sysroot=cc.sysroot, nostdinc=cc.nostdinc,
-                lang=lang_arg, header_backend=header_backend,
+                path,
+                resolved_headers,
+                includes,
+                version,
+                compiler,
+                gcc_path=cc.gcc_path,
+                gcc_prefix=cc.gcc_prefix,
+                gcc_options=cc.gcc_options,
+                gcc_option_tokens=cc.gcc_option_tokens,
+                sysroot=cc.sysroot,
+                nostdinc=cc.nostdinc,
+                lang=lang_arg,
+                header_backend=header_backend,
             )
     except Exception as exc:  # noqa: BLE001 — header backend/parse failure → fall back
         warnings.warn(
