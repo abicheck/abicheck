@@ -190,9 +190,12 @@ def explain_finding_cmd(
 
     click.echo(f"Explaining symbol: {symbol}")
     if not result["found"]:
+        # Nothing to localize — skip the five "(none in graph)" rows that would
+        # otherwise add only noise after the not-present notice.
         click.echo(
             "  (symbol not present in the source graph — no localization available)"
         )
+        return
     rows = [
         ("exported by target(s)", result["exported_by_targets"]),
         ("source declaration(s)", result["source_declarations"]),
