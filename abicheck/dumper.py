@@ -296,6 +296,12 @@ def _clang_header_dump(
     if not lang:
         force_cpp = _detect_cpp_headers(headers)
     force_cpp20 = force_cpp and _detect_cpp20_headers(headers)
+    # Was C *explicitly* requested (``--lang c``), as opposed to auto-detected?
+    # Both leave ``force_cpp`` False, but the C→C++ self-heal below must treat
+    # them differently: an explicit C request that reparses as C++ overrides what
+    # the user asked for, so it stays a visible warning; the auto-detected probe
+    # self-healing is just noise and is demoted to debug (Codex review).
+    explicit_c_request = bool(lang) and not force_cpp
     cc_id = "msvc" if Path(clang_bin).name.lower() in ("cl", "cl.exe") else "gnu"
 
     # castxml↔clang parity: probe the host GNU compiler for its system include
@@ -385,12 +391,24 @@ def _clang_header_dump(
             and not force_cpp
             and _is_missing_cpp_stdlib_header_error(result.stderr or "")
         ):
-            log.debug(
-                "clang auto-detected C for a pure-#include umbrella header (no "
-                "inline C++ syntax to key on), then self-healed to C++ after a "
-                "missing C++ standard header — an unambiguous C++ signal. The "
-                "result is unaffected; pass --lang c++ to skip the initial C probe."
-            )
+            if explicit_c_request:
+                # The user asked for C, but the header needs the C++ standard
+                # library — self-heal to C++ so the dump still succeeds, but keep
+                # it visible: the result is C++ ABI evidence, not the C the
+                # request implied (Codex review).
+                log.warning(
+                    "clang was asked for C (--lang c) but the header(s) require the "
+                    "C++ standard library; self-healing to C++ mode. The result is "
+                    "C++ ABI evidence — pass --lang c++ to make this explicit, or "
+                    "verify you intended a C library."
+                )
+            else:
+                log.debug(
+                    "clang auto-detected C for a pure-#include umbrella header (no "
+                    "inline C++ syntax to key on), then self-healed to C++ after a "
+                    "missing C++ standard header — an unambiguous C++ signal. The "
+                    "result is unaffected; pass --lang c++ to skip the initial C probe."
+                )
             result = _run_clang(True, _detect_cpp20_headers(headers), cpp_system_includes)
         # A nonzero exit means clang hit a hard parse error. Unlike L4 source
         # replay (which tolerates partial coverage), the L2 header AST must be

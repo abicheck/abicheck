@@ -531,6 +531,73 @@ def test_clang_header_dump_missing_clang_raises(
         _clang_header_dump([header], [])
 
 
+def _stub_clang_self_heal(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make _clang_header_dump fail once on a missing <cstddef> then succeed.
+
+    Mocks the clang availability/system-include probe and subprocess so the
+    C→C++ self-heal branch runs without a real compiler: the first parse exits
+    nonzero with a missing C++ stdlib header, the C++ retry returns a minimal AST.
+    """
+    import subprocess as _sp
+
+    monkeypatch.setattr("abicheck.dumper._clang_available", lambda *a, **k: True)
+    monkeypatch.setattr(
+        "abicheck.dumper._resolve_clang_system_includes", lambda *a, **k: ()
+    )
+    fail = _sp.CompletedProcess(
+        args=[], returncode=1, stdout="",
+        stderr="fatal error: 'cstddef' file not found",
+    )
+    ok = _sp.CompletedProcess(
+        args=[], returncode=0,
+        stdout='{"kind": "TranslationUnitDecl", "inner": []}', stderr="",
+    )
+    calls = {"n": 0}
+
+    def _run(*a: object, **k: object) -> _sp.CompletedProcess[str]:
+        calls["n"] += 1
+        return fail if calls["n"] == 1 else ok
+
+    monkeypatch.setattr("abicheck.dumper.subprocess.run", _run)
+
+
+def test_clang_self_heal_explicit_c_warns(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog
+) -> None:
+    # Explicit --lang c that self-heals to C++ overrides the user's request, so
+    # it stays a visible warning (Codex review).
+    import logging
+
+    _stub_clang_self_heal(monkeypatch)
+    header = tmp_path / "umbrella.h"
+    header.write_text("int foo(void);\n")
+    with caplog.at_level(logging.DEBUG, logger="abicheck.dumper"):
+        root = _clang_header_dump([header], [], lang="c")
+    assert root["kind"] == "TranslationUnitDecl"
+    warns = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert any("asked for C" in r.message for r in warns), [r.message for r in warns]
+
+
+def test_clang_self_heal_auto_detected_is_debug(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog
+) -> None:
+    # Auto-detected C (lang=None, no inline C++ syntax) self-healing to C++ is
+    # just noise → demoted to debug, no warning (the P6 fix this guards).
+    import logging
+
+    _stub_clang_self_heal(monkeypatch)
+    header = tmp_path / "umbrella.h"
+    header.write_text("int foo(void);\n")
+    with caplog.at_level(logging.DEBUG, logger="abicheck.dumper"):
+        root = _clang_header_dump([header], [])  # lang=None → auto-detect
+    assert root["kind"] == "TranslationUnitDecl"
+    assert not any(r.levelno == logging.WARNING for r in caplog.records)
+    assert any(
+        r.levelno == logging.DEBUG and "self-healed to C++" in r.message
+        for r in caplog.records
+    )
+
+
 # ── parse_variables / constants edge branches ────────────────────────────────
 
 
