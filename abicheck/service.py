@@ -34,6 +34,7 @@ from .api_types import CompareRequest, InputSpec
 from .checker import compare
 from .checker_types import DiffResult, LibraryMetadata
 from .errors import AbicheckError, SnapshotError, ValidationError
+from .header_utils import _implicit_header_includes
 from .model import AbiSnapshot, EnumType, Function, RecordType, Visibility
 from .reporter import to_json, to_markdown, to_stat, to_stat_json
 from .serialization import load_snapshot
@@ -510,12 +511,22 @@ def _dump_elf(
     elif includes and not dwarf_only:
         _emit(notify, "Warning: --include paths are ignored without headers.")
 
+    # P3: auto-add the public-header roots to the search path (user -I first).
+    eff_includes = list(includes)
+    if resolved_headers and not dwarf_only:
+        _user = {str(i.resolve()) for i in includes}
+        eff_includes += [
+            d
+            for d in _implicit_header_includes(headers)
+            if str(d.resolve()) not in _user
+        ]
+
     compiler = "cc" if lang == "c" else "c++"
     try:
         return dump(
             so_path=path,
             headers=resolved_headers,
-            extra_includes=includes,
+            extra_includes=eff_includes,
             version=version,
             compiler=compiler,
             gcc_path=cc.gcc_path,

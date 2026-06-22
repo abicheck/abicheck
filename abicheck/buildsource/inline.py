@@ -736,16 +736,18 @@ def _resolve_compile_db(
 
 
 def _compile_db_at(path: Path) -> Path | None:
-    """Resolve a build-info input to a concrete ``compile_commands.json``."""
+    """Resolve a build-info input to a concrete ``compile_commands.json``.
+
+    A directory is searched with the shared P4 strategy (hint dirs + any
+    immediate subdirectory) so ``--build-info <dir>`` honours the same contract
+    as ``--sources`` auto-discovery (Codex review).
+    """
     if path.is_file():
-        return path if path.name == _COMPILE_DB_NAME else path
+        # An explicit --build-info file is honoured as the compile DB whatever
+        # its name (the user pointed straight at it).
+        return path
     if path.is_dir():
-        for hint in _COMPILE_DB_HINTS:
-            candidate = (
-                (path / hint / _COMPILE_DB_NAME) if hint else (path / _COMPILE_DB_NAME)
-            )
-            if candidate.is_file():
-                return candidate
+        return _find_compile_db_in_dir(path)
     return None
 
 
@@ -846,19 +848,34 @@ def _maybe_collect_bazel_build_info(
     return True
 
 
+def _find_compile_db_in_dir(directory: Path) -> Path | None:
+    """Locate a ``compile_commands.json`` under *directory* (the P4 strategy).
+
+    Conventional build-dir hints first (fast, deterministic), then a fallback to
+    *any* immediate subdirectory holding a compile DB — so a non-standard but
+    common out-of-tree dir (``cmake-build-debug-gcc``, ``build-release``, an
+    IDE/preset dir, …) is still found instead of silently yielding no L3
+    evidence. The fallback stays at depth 1 to remain cheap and is deterministic
+    (sorted). Shared by ``--sources`` auto-discovery and ``--build-info <dir>``
+    resolution so both honour the same "any immediate subdirectory" contract.
+    """
+    for hint in _COMPILE_DB_HINTS:
+        candidate = (
+            (directory / hint / _COMPILE_DB_NAME)
+            if hint
+            else (directory / _COMPILE_DB_NAME)
+        )
+        if candidate.is_file():
+            return candidate
+    fallback = sorted(p for p in directory.glob("*/" + _COMPILE_DB_NAME) if p.is_file())
+    return fallback[0] if fallback else None
+
+
 def _autodiscover_compile_db(source_tree: Path | None) -> Path | None:
     """Best-effort search for a ``compile_commands.json`` inside a source tree."""
     if source_tree is None or not source_tree.is_dir():
         return None
-    for hint in _COMPILE_DB_HINTS:
-        candidate = (
-            (source_tree / hint / _COMPILE_DB_NAME)
-            if hint
-            else (source_tree / _COMPILE_DB_NAME)
-        )
-        if candidate.is_file():
-            return candidate
-    return None
+    return _find_compile_db_in_dir(source_tree)
 
 
 def _run_compile_db(

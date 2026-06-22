@@ -185,11 +185,23 @@ def perform_elf_dump(
     """
     compiler = "cc" if lang == "c" else "c++"
     resolved_headers = expand_header_inputs(list(headers)) if headers else []
+    # P3: auto-add the public-header roots to the search path so a -H umbrella
+    # resolves its own relative includes without a separate -I (user -I first).
+    from .header_utils import _implicit_header_includes
+
+    eff_includes = list(includes)
+    if resolved_headers:
+        _user = {str(i.resolve()) for i in includes}
+        eff_includes += [
+            d
+            for d in _implicit_header_includes(list(headers))
+            if str(d.resolve()) not in _user
+        ]
     try:
         snap = dump(
             so_path=so_path,
             headers=resolved_headers,
-            extra_includes=list(includes),
+            extra_includes=eff_includes,
             version=version,
             compiler=compiler,
             gcc_path=gcc_path,

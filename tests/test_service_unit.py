@@ -270,10 +270,80 @@ class TestRunDump:
         assert result is snap
 
 
+# ── _implicit_header_includes() (P3: -H umbrella resolves without -I) ────────
+
+
+class TestImplicitHeaderIncludes:
+    def test_directory_input_is_its_own_root(self, tmp_path):
+        from abicheck.service import _implicit_header_includes
+
+        inc = tmp_path / "include"
+        inc.mkdir()
+        assert _implicit_header_includes([inc]) == [inc]
+
+    def test_file_at_root_adds_parent(self, tmp_path):
+        from abicheck.service import _implicit_header_includes
+
+        inc = tmp_path / "include"
+        inc.mkdir()
+        umb = inc / "dnnl.hpp"
+        umb.write_text("// umbrella")
+        assert _implicit_header_includes([umb]) == [inc]
+
+    def test_nested_umbrella_adds_include_root_ancestor(self, tmp_path):
+        # include/oneapi/tbb.h → both its parent (include/oneapi) and the
+        # conventional include root (include/) must be on the search path so
+        # `#include "oneapi/tbb/..."` resolves.
+        from abicheck.service import _implicit_header_includes
+
+        root = tmp_path / "include"
+        nested = root / "oneapi"
+        nested.mkdir(parents=True)
+        umb = nested / "tbb.h"
+        umb.write_text("// umbrella")
+        dirs = _implicit_header_includes([umb])
+        assert nested in dirs
+        assert root in dirs
+
+    def test_deduplicates(self, tmp_path):
+        from abicheck.service import _implicit_header_includes
+
+        inc = tmp_path / "include"
+        inc.mkdir()
+        (inc / "a.h").write_text("")
+        (inc / "b.h").write_text("")
+        # Two files in the same dir → the root appears once.
+        assert _implicit_header_includes([inc / "a.h", inc / "b.h"]) == [inc]
+
+    def test_skips_nonexistent_parent(self, tmp_path):
+        # A -H file whose parent dir does not exist contributes nothing.
+        from abicheck.service import _implicit_header_includes
+
+        ghost = tmp_path / "absent" / "x.h"
+        assert _implicit_header_includes([ghost]) == []
+
+
 # ── _dump_elf() ─────────────────────────────────────────────────────────────
 
 
 class TestDumpElf:
+    def test_implicit_header_root_passed_to_dumper(self, tmp_path):
+        # P3 regression: a -H umbrella nested under include/ must reach the
+        # frontend with the include root on extra_includes, with no explicit -I.
+        from abicheck.service import _dump_elf
+
+        p = tmp_path / "lib.so"
+        p.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        root = tmp_path / "include"
+        (root / "oneapi").mkdir(parents=True)
+        umb = root / "oneapi" / "tbb.h"
+        umb.write_text("// umbrella")
+        snap = AbiSnapshot(library="t", version="1.0")
+        with patch("abicheck.dumper.dump", return_value=snap) as mock:
+            _dump_elf(p, [umb], [], "1.0", "c++")
+        passed = mock.call_args.kwargs["extra_includes"]
+        assert root in passed  # the include root was auto-added
+
     def test_no_headers_warning(self, tmp_path):
         from abicheck.service import _dump_elf
 

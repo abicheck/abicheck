@@ -288,6 +288,29 @@ class TestDumpLang:
         assert result.exit_code == 0
         assert captured.get("compiler") == "c++"
 
+    def test_implicit_header_include_root_passed(self, tmp_path, monkeypatch):
+        # P3: a -H umbrella nested under include/ reaches the dumper with the
+        # include root on extra_includes — no separate -I needed.
+        so_path = tmp_path / "libfoo.so"
+        so_path.write_bytes(b"\x7fELF")
+        root = tmp_path / "include"
+        (root / "oneapi").mkdir(parents=True)
+        header = root / "oneapi" / "umbrella.h"
+        header.write_text("int foo();\n", encoding="utf-8")
+
+        captured = {}
+
+        def fake_dump(**kwargs):
+            captured.update(kwargs)
+            return AbiSnapshot(library="libfoo.so", version="1.0")
+
+        monkeypatch.setattr("abicheck.cli_dump_helpers.dump", fake_dump)
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["dump", str(so_path), "-H", str(header)])
+        assert result.exit_code == 0, result.output
+        assert root in captured.get("extra_includes", [])
+
 
 # ── Cross-compilation flags on dump ──────────────────────────────────────
 

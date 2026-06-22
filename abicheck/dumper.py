@@ -385,11 +385,11 @@ def _clang_header_dump(
             and not force_cpp
             and _is_missing_cpp_stdlib_header_error(result.stderr or "")
         ):
-            log.warning(
-                "clang failed to find a C++ standard header parsing the header(s) in "
-                "C mode; the header is C++ (a pure-#include umbrella header has no "
-                "inline C++ syntax to auto-detect). Retrying in C++ mode. Pass "
-                "--lang c++ to select this directly and silence this warning."
+            log.debug(
+                "clang auto-detected C for a pure-#include umbrella header (no "
+                "inline C++ syntax to key on), then self-healed to C++ after a "
+                "missing C++ standard header — an unambiguous C++ signal. The "
+                "result is unaffected; pass --lang c++ to skip the initial C probe."
             )
             result = _run_clang(True, _detect_cpp20_headers(headers), cpp_system_includes)
         # A nonzero exit means clang hit a hard parse error. Unlike L4 source
