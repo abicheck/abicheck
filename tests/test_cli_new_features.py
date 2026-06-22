@@ -290,10 +290,10 @@ class TestDumpLang:
 
     def test_implicit_header_include_root_passed(self, tmp_path, monkeypatch):
         # P3: a -H umbrella nested under include/ reaches the dumper with the
-        # include root on the search path — no separate -I needed. The inferred
-        # root is a *fallback*: it rides in as an `-idirafter` token (searched
-        # after both -I and -isystem build-context dirs), not promoted to a
-        # user-level extra_includes entry (Codex review).
+        # include root on the search path — no separate -I needed. With no build
+        # context to defer to, the inferred root rides in as a plain -I
+        # (extra_includes) so it outranks the standard system dirs — an umbrella
+        # that pulls a system-colliding name still finds the package header.
         so_path = tmp_path / "libfoo.so"
         so_path.write_bytes(b"\x7fELF")
         root = tmp_path / "include"
@@ -312,12 +312,9 @@ class TestDumpLang:
         runner = CliRunner()
         result = runner.invoke(main, ["dump", str(so_path), "-H", str(header)])
         assert result.exit_code == 0, result.output
-        tokens = list(captured.get("gcc_option_tokens", ()))
-        assert str(root) in tokens, tokens
-        # -idirafter, not -I: searched below build-context -I *and* -isystem dirs
-        assert tokens[tokens.index(str(root)) - 1] == "-idirafter"
-        # inferred roots are a fallback, never promoted to a user -I
-        assert root not in captured.get("extra_includes", [])
+        # no build context → plain -I via extra_includes, not an -idirafter token
+        assert root in captured.get("extra_includes", [])
+        assert str(root) not in list(captured.get("gcc_option_tokens", ()))
 
     def test_implicit_root_defers_to_build_context(self, tmp_path, monkeypatch):
         # Codex review: a build-context include (here via --gcc-options) must
@@ -356,9 +353,9 @@ class TestDumpLang:
         assert tokens[tokens.index(str(root)) - 1] == "-idirafter"
 
     def test_implicit_root_skips_user_provided_include(self, tmp_path, monkeypatch):
-        # An inferred root already supplied by the user via -I is not duplicated
-        # as an -idirafter fallback: the user's -I (extra_includes) keeps its
-        # higher priority. The *other* inferred ancestor is still added.
+        # An inferred root already supplied by the user via -I is not duplicated.
+        # With no build context, the *other* inferred ancestor is still added as
+        # a plain -I (both land in extra_includes); the user's stays unduplicated.
         so_path = tmp_path / "libfoo.so"
         so_path.write_bytes(b"\x7fELF")
         root = tmp_path / "include"
@@ -381,14 +378,14 @@ class TestDumpLang:
             "dump", str(so_path), "-H", str(header), "-I", str(nested),
         ])
         assert result.exit_code == 0, result.output
-        # the user -I stays a real extra_includes entry (highest priority)
-        assert nested in captured.get("extra_includes", [])
-        tokens = list(captured.get("gcc_option_tokens", ()))
-        # not re-added as a fallback (deduped against the user -I)
-        assert str(nested) not in tokens
-        # the other inferred ancestor (the include root) is still added
-        assert str(root) in tokens
-        assert tokens[tokens.index(str(root)) - 1] == "-idirafter"
+        extra = captured.get("extra_includes", [])
+        # the user -I stays, exactly once (not re-added by the inferred pass)
+        assert nested in extra
+        assert extra.count(nested) == 1
+        # the other inferred ancestor (the include root) is added as -I too
+        assert root in extra
+        # no build context here, so nothing is deferred to gcc_option_tokens
+        assert str(root) not in list(captured.get("gcc_option_tokens", ()))
 
 
 # ── Cross-compilation flags on dump ──────────────────────────────────────

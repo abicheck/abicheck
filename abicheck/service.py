@@ -34,7 +34,7 @@ from .api_types import CompareRequest, InputSpec
 from .checker import compare
 from .checker_types import DiffResult, LibraryMetadata
 from .errors import AbicheckError, SnapshotError, ValidationError
-from .header_utils import _implicit_header_includes
+from .header_utils import resolve_inferred_header_roots
 from .model import AbiSnapshot, EnumType, Function, RecordType, Visibility
 from .reporter import to_json, to_markdown, to_stat, to_stat_json
 from .serialization import load_snapshot
@@ -511,15 +511,23 @@ def _dump_elf(
     elif includes and not dwarf_only:
         _emit(notify, "Warning: --include paths are ignored without headers.")
 
-    # P3: auto-add the public-header roots to the search path (user -I first).
+    # P3: auto-add the public-header roots to the search path. Same bucket
+    # selection as the dump CLI path (resolve_inferred_header_roots): plain -I
+    # when this request carries no compile-context includes, or -idirafter (below
+    # every build-context dir) when the caller's CompileContext supplies its own
+    # includes via gcc_options/tokens (e.g. -isystem build/generated) — so a real
+    # build context keeps search priority (Codex review).
     eff_includes = list(includes)
+    eff_tokens: tuple[str, ...] = cc.gcc_option_tokens
     if resolved_headers and not dwarf_only:
-        _user = {str(i.resolve()) for i in includes}
-        eff_includes += [
-            d
-            for d in _implicit_header_includes(headers)
-            if str(d.resolve()) not in _user
-        ]
+        inc_extra, idirafter = resolve_inferred_header_roots(
+            headers,
+            list(includes),
+            gcc_options=cc.gcc_options,
+            gcc_option_tokens=cc.gcc_option_tokens,
+        )
+        eff_includes += inc_extra
+        eff_tokens = cc.gcc_option_tokens + tuple(idirafter)
 
     compiler = "cc" if lang == "c" else "c++"
     try:
@@ -532,7 +540,7 @@ def _dump_elf(
             gcc_path=cc.gcc_path,
             gcc_prefix=cc.gcc_prefix,
             gcc_options=cc.gcc_options,
-            gcc_option_tokens=cc.gcc_option_tokens,
+            gcc_option_tokens=eff_tokens,
             sysroot=cc.sysroot,
             nostdinc=cc.nostdinc,
             lang=lang if lang == "c" else None,

@@ -275,14 +275,14 @@ class TestRunDump:
 
 class TestImplicitHeaderIncludes:
     def test_directory_input_is_its_own_root(self, tmp_path):
-        from abicheck.service import _implicit_header_includes
+        from abicheck.header_utils import _implicit_header_includes
 
         inc = tmp_path / "include"
         inc.mkdir()
         assert _implicit_header_includes([inc]) == [inc]
 
     def test_file_at_root_adds_parent(self, tmp_path):
-        from abicheck.service import _implicit_header_includes
+        from abicheck.header_utils import _implicit_header_includes
 
         inc = tmp_path / "include"
         inc.mkdir()
@@ -294,7 +294,7 @@ class TestImplicitHeaderIncludes:
         # include/oneapi/tbb.h → both its parent (include/oneapi) and the
         # conventional include root (include/) must be on the search path so
         # `#include "oneapi/tbb/..."` resolves.
-        from abicheck.service import _implicit_header_includes
+        from abicheck.header_utils import _implicit_header_includes
 
         root = tmp_path / "include"
         nested = root / "oneapi"
@@ -309,7 +309,7 @@ class TestImplicitHeaderIncludes:
         # A -H *directory* nested under a conventional root, e.g.
         # `-H include/oneapi`, must add BOTH itself and the include root —
         # headers inside still `#include "oneapi/..."` relative to include/.
-        from abicheck.service import _implicit_header_includes
+        from abicheck.header_utils import _implicit_header_includes
 
         root = tmp_path / "include"
         nested = root / "oneapi"
@@ -319,7 +319,7 @@ class TestImplicitHeaderIncludes:
         assert root in dirs
 
     def test_deduplicates(self, tmp_path):
-        from abicheck.service import _implicit_header_includes
+        from abicheck.header_utils import _implicit_header_includes
 
         inc = tmp_path / "include"
         inc.mkdir()
@@ -330,10 +330,64 @@ class TestImplicitHeaderIncludes:
 
     def test_skips_nonexistent_parent(self, tmp_path):
         # A -H file whose parent dir does not exist contributes nothing.
-        from abicheck.service import _implicit_header_includes
+        from abicheck.header_utils import _implicit_header_includes
 
         ghost = tmp_path / "absent" / "x.h"
         assert _implicit_header_includes([ghost]) == []
+
+
+class TestResolveInferredHeaderRoots:
+    def _umbrella(self, tmp_path):
+        root = tmp_path / "include"
+        (root / "oneapi").mkdir(parents=True)
+        umb = root / "oneapi" / "tbb.h"
+        umb.write_text("// umbrella")
+        return root, umb
+
+    def test_no_build_context_uses_plain_I(self, tmp_path):
+        from abicheck.header_utils import resolve_inferred_header_roots
+
+        root, umb = self._umbrella(tmp_path)
+        inc, toks = resolve_inferred_header_roots([umb], [])
+        assert root in inc and toks == []
+
+    def test_isystem_context_defers_to_idirafter(self, tmp_path):
+        from abicheck.header_utils import resolve_inferred_header_roots
+
+        root, umb = self._umbrella(tmp_path)
+        inc, toks = resolve_inferred_header_roots(
+            [umb], [], gcc_option_tokens=("-isystem", "/gen")
+        )
+        assert inc == []
+        assert "-idirafter" in toks and str(root) in toks
+
+    def test_gcc_options_include_string_detected(self, tmp_path):
+        from abicheck.header_utils import resolve_inferred_header_roots
+
+        root, umb = self._umbrella(tmp_path)
+        inc, toks = resolve_inferred_header_roots(
+            [umb], [], gcc_options="-I /build/include -O2"
+        )
+        assert inc == [] and str(root) in toks
+
+    def test_non_include_options_are_not_build_context(self, tmp_path):
+        # -O2/-DNDEBUG add no include dir, so the inferred root stays a plain -I.
+        from abicheck.header_utils import resolve_inferred_header_roots
+
+        root, umb = self._umbrella(tmp_path)
+        inc, toks = resolve_inferred_header_roots(
+            [umb], [], gcc_options="-O2 -DNDEBUG", gcc_option_tokens=("-Wall",)
+        )
+        assert root in inc and toks == []
+
+    def test_user_include_deduped(self, tmp_path):
+        from abicheck.header_utils import resolve_inferred_header_roots
+
+        root, umb = self._umbrella(tmp_path)
+        nested = root / "oneapi"
+        inc, toks = resolve_inferred_header_roots([umb], [nested])
+        # nested came from the user -I; only the include root is inferred-added.
+        assert nested not in inc and root in inc
 
 
 # ── _dump_elf() ─────────────────────────────────────────────────────────────
@@ -355,7 +409,31 @@ class TestDumpElf:
         with patch("abicheck.dumper.dump", return_value=snap) as mock:
             _dump_elf(p, [umb], [], "1.0", "c++")
         passed = mock.call_args.kwargs["extra_includes"]
-        assert root in passed  # the include root was auto-added
+        assert root in passed  # the include root was auto-added (plain -I)
+
+    def test_implicit_root_defers_to_isystem_build_context(self, tmp_path):
+        # Codex: when the caller's CompileContext supplies includes via -isystem,
+        # the inferred -H root must defer (emit as -idirafter, below the -isystem
+        # build dir), not jump ahead of it as -I. (-I always beats -isystem.)
+        from abicheck.service import _dump_elf
+        from abicheck.service_scan import CompileContext
+
+        p = tmp_path / "lib.so"
+        p.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        root = tmp_path / "include"
+        (root / "oneapi").mkdir(parents=True)
+        umb = root / "oneapi" / "tbb.h"
+        umb.write_text("// umbrella")
+        snap = AbiSnapshot(library="t", version="1.0")
+        cc = CompileContext(gcc_option_tokens=("-isystem", str(tmp_path / "gen")))
+        with patch("abicheck.dumper.dump", return_value=snap) as mock:
+            _dump_elf(p, [umb], [], "1.0", "c++", compile=cc)
+        kwargs = mock.call_args.kwargs
+        assert root not in kwargs["extra_includes"]  # not promoted to -I
+        toks = list(kwargs["gcc_option_tokens"])
+        assert str(root) in toks
+        assert toks[toks.index(str(root)) - 1] == "-idirafter"
+        assert "-isystem" in toks  # build-context token preserved ahead of it
 
     def test_no_headers_warning(self, tmp_path):
         from abicheck.service import _dump_elf

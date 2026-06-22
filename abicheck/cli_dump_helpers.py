@@ -186,36 +186,35 @@ def perform_elf_dump(
     compiler = "cc" if lang == "c" else "c++"
     resolved_headers = expand_header_inputs(list(headers)) if headers else []
     # P3: auto-add the public-header roots so a -H umbrella resolves its own
-    # relative includes without a separate -I. These roots are *inferred*, not
-    # user-chosen, so they must never outrank a real build context — and that
-    # rules out -I: the preprocessor searches *all* -I dirs before *any*
-    # -isystem dir regardless of command-line order, so a build context that
-    # supplies generated/shim headers via -isystem (common for compile DBs)
-    # would still lose to an inferred -I root (Codex review). Emit them as
-    # -idirafter instead: that bucket is searched after both -I and -isystem
-    # (so every build-context include wins) but still before the standard system
-    # dirs, so the pure-L2/headers-only case — where there is no other search
-    # path — still resolves the umbrella's relative includes. (The service/L2
-    # path has no build context and keeps the roots on extra_includes.)
-    from .header_utils import _implicit_header_includes
+    # relative includes without a separate -I. resolve_inferred_header_roots
+    # picks the search bucket: plain -I (high priority, so an umbrella that pulls
+    # a system-colliding name like <endian.h> still finds the package header)
+    # when there is no build context, or -idirafter (below every build-context
+    # dir, so generated/shim headers from -p/--gcc-options keep priority) when
+    # the compile context supplies its own includes — see its docstring.
+    from .header_utils import resolve_inferred_header_roots
 
-    eff_tokens = list(gcc_option_tokens)
-    if resolved_headers:
-        _user = {str(i.resolve()) for i in includes}
-        for d in _implicit_header_includes(list(headers)):
-            if str(d.resolve()) not in _user:
-                eff_tokens += ["-idirafter", str(d)]
+    inc_extra, idirafter = (
+        resolve_inferred_header_roots(
+            list(headers),
+            list(includes),
+            gcc_options=effective_gcc_options,
+            gcc_option_tokens=tuple(gcc_option_tokens),
+        )
+        if resolved_headers
+        else ([], [])
+    )
     try:
         snap = dump(
             so_path=so_path,
             headers=resolved_headers,
-            extra_includes=list(includes),
+            extra_includes=list(includes) + inc_extra,
             version=version,
             compiler=compiler,
             gcc_path=gcc_path,
             gcc_prefix=gcc_prefix,
             gcc_options=effective_gcc_options,
-            gcc_option_tokens=tuple(eff_tokens),
+            gcc_option_tokens=tuple(gcc_option_tokens) + tuple(idirafter),
             sysroot=sysroot,
             nostdinc=nostdinc,
             lang=lang if lang == "c" else None,
