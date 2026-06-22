@@ -389,6 +389,27 @@ class TestResolveInferredHeaderRoots:
         # nested came from the user -I; only the include root is inferred-added.
         assert nested not in inc and root in inc
 
+    def test_no_inferred_roots_returns_empty(self, tmp_path):
+        # A -H file with a nonexistent parent yields no inferred roots → no flags
+        # of either kind (and no spurious -idirafter even with a build context).
+        from abicheck.header_utils import resolve_inferred_header_roots
+
+        ghost = tmp_path / "absent" / "x.h"
+        assert resolve_inferred_header_roots(
+            [ghost], [], gcc_option_tokens=("-isystem", "/x")
+        ) == ([], [])
+
+    def test_malformed_gcc_options_falls_back_to_plain_split(self, tmp_path):
+        # An unbalanced quote makes shlex.split raise; we fall back to str.split
+        # so an -I in a malformed --gcc-options string is still detected.
+        from abicheck.header_utils import resolve_inferred_header_roots
+
+        root, umb = self._umbrella(tmp_path)
+        inc, toks = resolve_inferred_header_roots(
+            [umb], [], gcc_options='-I "/broken'
+        )
+        assert inc == [] and str(root) in toks
+
 
 # ── _dump_elf() ─────────────────────────────────────────────────────────────
 
