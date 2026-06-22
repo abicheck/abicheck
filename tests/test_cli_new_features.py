@@ -355,6 +355,41 @@ class TestDumpLang:
         assert str(root) in tokens
         assert tokens[tokens.index(str(root)) - 1] == "-idirafter"
 
+    def test_implicit_root_skips_user_provided_include(self, tmp_path, monkeypatch):
+        # An inferred root already supplied by the user via -I is not duplicated
+        # as an -idirafter fallback: the user's -I (extra_includes) keeps its
+        # higher priority. The *other* inferred ancestor is still added.
+        so_path = tmp_path / "libfoo.so"
+        so_path.write_bytes(b"\x7fELF")
+        root = tmp_path / "include"
+        nested = root / "oneapi"
+        nested.mkdir(parents=True)
+        header = nested / "umbrella.h"
+        header.write_text("int foo();\n", encoding="utf-8")
+
+        captured = {}
+
+        def fake_dump(**kwargs):
+            captured.update(kwargs)
+            return AbiSnapshot(library="libfoo.so", version="1.0")
+
+        monkeypatch.setattr("abicheck.cli_dump_helpers.dump", fake_dump)
+
+        runner = CliRunner()
+        # User passes the umbrella's parent (include/oneapi) explicitly via -I.
+        result = runner.invoke(main, [
+            "dump", str(so_path), "-H", str(header), "-I", str(nested),
+        ])
+        assert result.exit_code == 0, result.output
+        # the user -I stays a real extra_includes entry (highest priority)
+        assert nested in captured.get("extra_includes", [])
+        tokens = list(captured.get("gcc_option_tokens", ()))
+        # not re-added as a fallback (deduped against the user -I)
+        assert str(nested) not in tokens
+        # the other inferred ancestor (the include root) is still added
+        assert str(root) in tokens
+        assert tokens[tokens.index(str(root)) - 1] == "-idirafter"
+
 
 # ── Cross-compilation flags on dump ──────────────────────────────────────
 
