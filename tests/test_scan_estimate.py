@@ -181,6 +181,29 @@ def test_estimate_resolves_build_info_directory(
     assert l3.tus == 7
 
 
+def test_estimate_finds_compile_db_in_nonhint_subdir(
+    snap_path: Path, tmp_path: Path
+) -> None:
+    # A compile DB in a non-hint immediate subdirectory (cmake-build-debug-gcc/)
+    # is found by the estimate via the same depth-1 fallback the real scan uses,
+    # so --estimate mirrors execution instead of pricing L3 as absent (Codex).
+    tree = tmp_path / "src"
+    sub = tree / "cmake-build-debug-gcc"
+    sub.mkdir(parents=True)
+    (sub / "compile_commands.json").write_text(
+        json.dumps(
+            [
+                {"file": f"f{i}.cpp", "command": "c++", "directory": "."}
+                for i in range(5)
+            ]
+        ),
+        encoding="utf-8",
+    )
+    req = ScanRequest(binaries=[snap_path], sources=tree, mode="baseline")
+    l3 = next(e for e in estimate_scan(req) if e.layer == "L3_build")
+    assert l3.tus == 5
+
+
 def test_estimate_header_change_fans_out_to_all_tus(
     snap_path: Path, tmp_path: Path
 ) -> None:

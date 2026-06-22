@@ -317,14 +317,17 @@ def _count_source_tus(sources: Path) -> int:
 
 
 def _compile_db_in(root: Path) -> Path | None:
-    """The ``compile_commands.json`` inside a build/source *directory*, if any."""
-    for cand in (
-        root / "compile_commands.json",
-        root / "build" / "compile_commands.json",
-    ):
-        if cand.is_file():
-            return cand
-    return None
+    """The ``compile_commands.json`` inside a build/source *directory*, if any.
+
+    Reuses the *execution* path's discovery (``inline._find_compile_db_in_dir``:
+    the conventional build-dir hints **plus** the depth-1 ``*/compile_commands.json``
+    glob fallback) so ``scan --estimate`` mirrors what the real scan collects — a
+    DB in a non-hint immediate subdirectory such as ``cmake-build-debug-gcc/`` is
+    priced, not reported as absent / 0 TUs (Codex review).
+    """
+    from .buildsource.inline import _find_compile_db_in_dir
+
+    return _find_compile_db_in_dir(root)
 
 
 def _discover_compile_db(sources: Path | None, explicit: Path | None) -> Path | None:
