@@ -291,9 +291,9 @@ class TestDumpLang:
     def test_implicit_header_include_root_passed(self, tmp_path, monkeypatch):
         # P3: a -H umbrella nested under include/ reaches the dumper with the
         # include root on the search path — no separate -I needed. The inferred
-        # root is a *fallback*: it rides in as a trailing `-I` token (emitted
-        # after any build-context flags), not promoted to a user-level
-        # extra_includes entry (Codex review).
+        # root is a *fallback*: it rides in as an `-idirafter` token (searched
+        # after both -I and -isystem build-context dirs), not promoted to a
+        # user-level extra_includes entry (Codex review).
         so_path = tmp_path / "libfoo.so"
         so_path.write_bytes(b"\x7fELF")
         root = tmp_path / "include"
@@ -314,15 +314,17 @@ class TestDumpLang:
         assert result.exit_code == 0, result.output
         tokens = list(captured.get("gcc_option_tokens", ()))
         assert str(root) in tokens, tokens
-        assert tokens[tokens.index(str(root)) - 1] == "-I"
+        # -idirafter, not -I: searched below build-context -I *and* -isystem dirs
+        assert tokens[tokens.index(str(root)) - 1] == "-idirafter"
         # inferred roots are a fallback, never promoted to a user -I
         assert root not in captured.get("extra_includes", [])
 
     def test_implicit_root_defers_to_build_context(self, tmp_path, monkeypatch):
         # Codex review: a build-context include (here via --gcc-options) must
         # keep priority over the inferred -H root. The build-context flag rides
-        # in gcc_options; the inferred root rides in gcc_option_tokens, which the
-        # command builders emit *after* gcc_options — so the build context wins.
+        # in gcc_options; the inferred root rides in gcc_option_tokens as an
+        # -idirafter entry — searched after both -I and -isystem build-context
+        # dirs — so the build context always wins.
         so_path = tmp_path / "libfoo.so"
         so_path.write_bytes(b"\x7fELF")
         root = tmp_path / "include"
@@ -346,10 +348,12 @@ class TestDumpLang:
             "--gcc-options", f"-I {buildctx}",
         ])
         assert result.exit_code == 0, result.output
-        # build context stays in gcc_options (emitted first); inferred root is a
-        # trailing token (emitted later) — so build context keeps search priority.
+        # build context stays in gcc_options (emitted first); inferred root is an
+        # -idirafter token — so build context keeps search priority.
         assert f"-I {buildctx}" in (captured.get("gcc_options") or "")
-        assert str(root) in list(captured.get("gcc_option_tokens", ()))
+        tokens = list(captured.get("gcc_option_tokens", ()))
+        assert str(root) in tokens
+        assert tokens[tokens.index(str(root)) - 1] == "-idirafter"
 
 
 # ── Cross-compilation flags on dump ──────────────────────────────────────

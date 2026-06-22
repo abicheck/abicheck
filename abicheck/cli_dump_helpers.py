@@ -187,15 +187,16 @@ def perform_elf_dump(
     resolved_headers = expand_header_inputs(list(headers)) if headers else []
     # P3: auto-add the public-header roots so a -H umbrella resolves its own
     # relative includes without a separate -I. These roots are *inferred*, not
-    # user-chosen, so they must never outrank a real build context. The command
-    # builders emit search paths in priority order: user -I (extra_includes) →
-    # -p/--gcc-options build-context flags (gcc_options) → repeatable --gcc-option
-    # values (gcc_option_tokens) → auto-probed host system dirs. Routing the
-    # inferred roots in as trailing -I tokens therefore makes them a genuine
-    # fallback — a compile DB that deliberately searches generated/shim headers
-    # before the public tree keeps priority (Codex review) — while still
-    # preceding the host system dirs. (The service/L2 path has no build context,
-    # so it keeps them on extra_includes; here the build context can conflict.)
+    # user-chosen, so they must never outrank a real build context — and that
+    # rules out -I: the preprocessor searches *all* -I dirs before *any*
+    # -isystem dir regardless of command-line order, so a build context that
+    # supplies generated/shim headers via -isystem (common for compile DBs)
+    # would still lose to an inferred -I root (Codex review). Emit them as
+    # -idirafter instead: that bucket is searched after both -I and -isystem
+    # (so every build-context include wins) but still before the standard system
+    # dirs, so the pure-L2/headers-only case — where there is no other search
+    # path — still resolves the umbrella's relative includes. (The service/L2
+    # path has no build context and keeps the roots on extra_includes.)
     from .header_utils import _implicit_header_includes
 
     eff_tokens = list(gcc_option_tokens)
@@ -203,7 +204,7 @@ def perform_elf_dump(
         _user = {str(i.resolve()) for i in includes}
         for d in _implicit_header_includes(list(headers)):
             if str(d.resolve()) not in _user:
-                eff_tokens += ["-I", str(d)]
+                eff_tokens += ["-idirafter", str(d)]
     try:
         snap = dump(
             so_path=so_path,
