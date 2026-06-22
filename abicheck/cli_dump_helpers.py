@@ -185,29 +185,36 @@ def perform_elf_dump(
     """
     compiler = "cc" if lang == "c" else "c++"
     resolved_headers = expand_header_inputs(list(headers)) if headers else []
-    # P3: auto-add the public-header roots to the search path so a -H umbrella
-    # resolves its own relative includes without a separate -I (user -I first).
+    # P3: auto-add the public-header roots so a -H umbrella resolves its own
+    # relative includes without a separate -I. These roots are *inferred*, not
+    # user-chosen, so they must never outrank a real build context. The command
+    # builders emit search paths in priority order: user -I (extra_includes) →
+    # -p/--gcc-options build-context flags (gcc_options) → repeatable --gcc-option
+    # values (gcc_option_tokens) → auto-probed host system dirs. Routing the
+    # inferred roots in as trailing -I tokens therefore makes them a genuine
+    # fallback — a compile DB that deliberately searches generated/shim headers
+    # before the public tree keeps priority (Codex review) — while still
+    # preceding the host system dirs. (The service/L2 path has no build context,
+    # so it keeps them on extra_includes; here the build context can conflict.)
     from .header_utils import _implicit_header_includes
 
-    eff_includes = list(includes)
+    eff_tokens = list(gcc_option_tokens)
     if resolved_headers:
         _user = {str(i.resolve()) for i in includes}
-        eff_includes += [
-            d
-            for d in _implicit_header_includes(list(headers))
-            if str(d.resolve()) not in _user
-        ]
+        for d in _implicit_header_includes(list(headers)):
+            if str(d.resolve()) not in _user:
+                eff_tokens += ["-I", str(d)]
     try:
         snap = dump(
             so_path=so_path,
             headers=resolved_headers,
-            extra_includes=eff_includes,
+            extra_includes=list(includes),
             version=version,
             compiler=compiler,
             gcc_path=gcc_path,
             gcc_prefix=gcc_prefix,
             gcc_options=effective_gcc_options,
-            gcc_option_tokens=tuple(gcc_option_tokens),
+            gcc_option_tokens=tuple(eff_tokens),
             sysroot=sysroot,
             nostdinc=nostdinc,
             lang=lang if lang == "c" else None,

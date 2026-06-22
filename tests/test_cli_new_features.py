@@ -290,7 +290,10 @@ class TestDumpLang:
 
     def test_implicit_header_include_root_passed(self, tmp_path, monkeypatch):
         # P3: a -H umbrella nested under include/ reaches the dumper with the
-        # include root on extra_includes — no separate -I needed.
+        # include root on the search path — no separate -I needed. The inferred
+        # root is a *fallback*: it rides in as a trailing `-I` token (emitted
+        # after any build-context flags), not promoted to a user-level
+        # extra_includes entry (Codex review).
         so_path = tmp_path / "libfoo.so"
         so_path.write_bytes(b"\x7fELF")
         root = tmp_path / "include"
@@ -309,7 +312,44 @@ class TestDumpLang:
         runner = CliRunner()
         result = runner.invoke(main, ["dump", str(so_path), "-H", str(header)])
         assert result.exit_code == 0, result.output
-        assert root in captured.get("extra_includes", [])
+        tokens = list(captured.get("gcc_option_tokens", ()))
+        assert str(root) in tokens, tokens
+        assert tokens[tokens.index(str(root)) - 1] == "-I"
+        # inferred roots are a fallback, never promoted to a user -I
+        assert root not in captured.get("extra_includes", [])
+
+    def test_implicit_root_defers_to_build_context(self, tmp_path, monkeypatch):
+        # Codex review: a build-context include (here via --gcc-options) must
+        # keep priority over the inferred -H root. The build-context flag rides
+        # in gcc_options; the inferred root rides in gcc_option_tokens, which the
+        # command builders emit *after* gcc_options — so the build context wins.
+        so_path = tmp_path / "libfoo.so"
+        so_path.write_bytes(b"\x7fELF")
+        root = tmp_path / "include"
+        (root / "oneapi").mkdir(parents=True)
+        header = root / "oneapi" / "umbrella.h"
+        header.write_text("int foo();\n", encoding="utf-8")
+        buildctx = tmp_path / "buildctx"
+        buildctx.mkdir()
+
+        captured = {}
+
+        def fake_dump(**kwargs):
+            captured.update(kwargs)
+            return AbiSnapshot(library="libfoo.so", version="1.0")
+
+        monkeypatch.setattr("abicheck.cli_dump_helpers.dump", fake_dump)
+
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "dump", str(so_path), "-H", str(header),
+            "--gcc-options", f"-I {buildctx}",
+        ])
+        assert result.exit_code == 0, result.output
+        # build context stays in gcc_options (emitted first); inferred root is a
+        # trailing token (emitted later) — so build context keeps search priority.
+        assert f"-I {buildctx}" in (captured.get("gcc_options") or "")
+        assert str(root) in list(captured.get("gcc_option_tokens", ()))
 
 
 # ── Cross-compilation flags on dump ──────────────────────────────────────
