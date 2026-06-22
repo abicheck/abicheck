@@ -305,6 +305,19 @@ class TestImplicitHeaderIncludes:
         assert nested in dirs
         assert root in dirs
 
+    def test_namespace_directory_adds_include_root_ancestor(self, tmp_path):
+        # A -H *directory* nested under a conventional root, e.g.
+        # `-H include/oneapi`, must add BOTH itself and the include root —
+        # headers inside still `#include "oneapi/..."` relative to include/.
+        from abicheck.service import _implicit_header_includes
+
+        root = tmp_path / "include"
+        nested = root / "oneapi"
+        nested.mkdir(parents=True)
+        dirs = _implicit_header_includes([nested])
+        assert nested in dirs
+        assert root in dirs
+
     def test_deduplicates(self, tmp_path):
         from abicheck.service import _implicit_header_includes
 

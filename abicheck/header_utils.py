@@ -57,10 +57,11 @@ def _implicit_header_includes(headers: list[Path]) -> list[Path]:
             dirs.append(d)
 
     for h in headers:
-        if h.is_dir():
-            _add(h)
-            continue
-        _add(h.parent)
+        # A directory is its own root; a file contributes its parent. Either way
+        # also walk up to any conventional include root — a `-H include/oneapi`
+        # (dir) or `-H include/oneapi/tbb.h` (file) still writes includes
+        # relative to `include/`, so that root must be on the path too.
+        _add(h if h.is_dir() else h.parent)
         for ancestor in h.parents:
             if ancestor.name.lower() in _INCLUDE_ROOT_NAMES:
                 _add(ancestor)
