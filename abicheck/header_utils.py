@@ -90,6 +90,19 @@ def _implicit_header_includes(headers: list[Path]) -> list[Path]:
     return dirs
 
 
+def _context_tokens(
+    gcc_options: str | None, gcc_option_tokens: Sequence[str]
+) -> list[str]:
+    """The pass-through compile flags as a flat token list (string + tokens)."""
+    toks: list[str] = list(gcc_option_tokens)
+    if gcc_options:
+        try:
+            toks += shlex.split(gcc_options, posix=os.name != "nt")
+        except ValueError:
+            toks += gcc_options.split()
+    return toks
+
+
 def _has_include_build_context(
     gcc_options: str | None, gcc_option_tokens: Sequence[str]
 ) -> bool:
@@ -105,13 +118,44 @@ def _has_include_build_context(
     need no detection here — an inferred ``-I`` appended after them is already
     lower priority.
     """
-    toks: list[str] = list(gcc_option_tokens)
-    if gcc_options:
-        try:
-            toks += shlex.split(gcc_options, posix=os.name != "nt")
-        except ValueError:
-            toks += gcc_options.split()
+    toks = _context_tokens(gcc_options, gcc_option_tokens)
     return any(t.startswith(p) for t in toks for p in _INCLUDE_FLAG_PREFIXES)
+
+
+def _build_context_include_dirs(
+    gcc_options: str | None, gcc_option_tokens: Sequence[str]
+) -> set[str]:
+    """Resolved include directories the compile context already searches.
+
+    Parses every include-search flag (spaced ``-I dir`` / ``-isystem dir`` and
+    attached ``-Idir`` forms, GNU and MSVC) out of the pass-through flags and
+    returns their resolved absolute paths. Used to skip an inferred ``-H`` root
+    the build context already covers: re-adding such a root as ``-isystem`` would
+    trip GCC's rule that a directory given with *both* ``-I`` and ``-isystem`` has
+    its ``-I`` ignored — demoting the build's own ``-I`` to the system position
+    and changing search order (Codex review). Best-effort: relative dirs resolve
+    against the cwd, the same basis the inferred roots use.
+    """
+    toks = _context_tokens(gcc_options, gcc_option_tokens)
+    dirs: set[str] = set()
+    i = 0
+    while i < len(toks):
+        t = toks[i]
+        prefix = next((p for p in _INCLUDE_FLAG_PREFIXES if t.startswith(p)), None)
+        if prefix is None:
+            i += 1
+            continue
+        if t == prefix:  # spaced form: the directory is the next token
+            if i + 1 < len(toks):
+                dirs.add(str(Path(toks[i + 1]).resolve()))
+            i += 2
+            continue
+        # Attached form ("-Idir" / "/Idir"): t is strictly longer than the prefix
+        # here (the exact-match spaced form was handled above), so the operand is
+        # always non-empty.
+        dirs.add(str(Path(t[len(prefix) :]).resolve()))
+        i += 1
+    return dirs
 
 
 def resolve_inferred_header_roots(
@@ -142,9 +186,13 @@ def resolve_inferred_header_roots(
     Shared by the ``dump`` CLI path (``cli_dump_helpers.perform_elf_dump``) and
     the service/``scan`` path (``service._dump_elf``) so they cannot drift.
     """
-    user = {str(i.resolve()) for i in user_includes}
+    # Skip roots the user's -I *or* the build context already searches: re-adding
+    # one the build supplies as -I would, when emitted as -isystem, void that -I
+    # (GCC ignores -I for a dir also given via -isystem) and reorder the search.
+    skip = {str(i.resolve()) for i in user_includes}
+    skip |= _build_context_include_dirs(gcc_options, gcc_option_tokens)
     inferred = [
-        d for d in _implicit_header_includes(headers) if str(d.resolve()) not in user
+        d for d in _implicit_header_includes(headers) if str(d.resolve()) not in skip
     ]
     if not inferred:
         return [], []

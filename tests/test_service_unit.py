@@ -389,6 +389,45 @@ class TestResolveInferredHeaderRoots:
             assert str(root) in toks, tok
             assert toks[toks.index(str(root)) - 1] == "-isystem", tok
 
+    def test_root_already_in_build_context_is_skipped(self, tmp_path):
+        # A root the build context already supplies as -I must NOT be re-added as
+        # -isystem (GCC would then ignore the build's -I). Here the build provides
+        # the include root; only the *other* inferred ancestor (oneapi) defers.
+        from abicheck.header_utils import resolve_inferred_header_roots
+
+        root, umb = self._umbrella(tmp_path)  # include/, umbrella at include/oneapi
+        nested = root / "oneapi"
+        inc, toks = resolve_inferred_header_roots(
+            [umb], [], gcc_options=f"-I {root}"
+        )
+        assert inc == []
+        # the include root is in the build context → not re-emitted at all
+        assert str(root) not in toks
+        # the nested ancestor is not in the build context → deferred via -isystem
+        assert str(nested) in toks
+        assert toks[toks.index(str(nested)) - 1] == "-isystem"
+
+    def test_build_context_dir_attached_form_deduped(self, tmp_path):
+        # The attached spelling (-I<dir>) is parsed too, so the root is skipped.
+        from abicheck.header_utils import resolve_inferred_header_roots
+
+        root, umb = self._umbrella(tmp_path)
+        inc, toks = resolve_inferred_header_roots(
+            [umb], [], gcc_option_tokens=(f"-I{root}",)
+        )
+        assert str(root) not in toks
+
+    def test_dangling_include_flag_no_operand(self, tmp_path):
+        # A bare -I with no following dir (build context present but supplies no
+        # parsable dir) still defers the inferred roots via -isystem, no crash.
+        from abicheck.header_utils import resolve_inferred_header_roots
+
+        root, umb = self._umbrella(tmp_path)
+        inc, toks = resolve_inferred_header_roots([umb], [], gcc_option_tokens=("-I",))
+        assert inc == []
+        assert str(root) in toks
+        assert toks[toks.index(str(root)) - 1] == "-isystem"
+
     def test_non_include_options_are_not_build_context(self, tmp_path):
         # -O2/-DNDEBUG add no include dir, so the inferred root stays a plain -I.
         from abicheck.header_utils import resolve_inferred_header_roots
