@@ -65,10 +65,10 @@ def test_cmake_command_is_fixed_and_uses_export_flag(tmp_path: Path):
     assert str(tmp_path / ABICHECK_BUILD_DIR) in cmd
 
 
-def test_make_command_is_dry_run_only(tmp_path: Path):
-    cmd = inferred_query_command("make", tmp_path)
-    # Must never actually build: -n (dry run) is mandatory.
-    assert cmd is not None and cmd[0] == "make" and "-n" in cmd
+def test_make_has_no_auto_command(tmp_path: Path):
+    # Make is detected but never auto-run: `make -n` is not reliably
+    # side-effect-free (GNU make runs `+`/`$(MAKE)` recipes even in dry run).
+    assert inferred_query_command("make", tmp_path) is None
 
 
 def test_unknown_system_has_no_command(tmp_path: Path):
@@ -157,18 +157,21 @@ def test_run_subprocess_error_is_failed(tmp_path: Path, monkeypatch):
     assert ext[-1].status == "failed"
 
 
-def test_run_make_ingests_units(tmp_path: Path, monkeypatch):
-    (tmp_path / "Makefile").write_text("all:\n")
-    src = tmp_path / "foo.cpp"
-    src.write_text("int x;\n")
-    transcript = f"g++ -I{tmp_path} -c {src} -o foo.o\n"
-    monkeypatch.setattr(
-        _bq.subprocess, "run", lambda cmd, **kw: _FakeProc(0, stdout=transcript)
-    )
+def test_run_make_is_skipped_with_diagnostic(tmp_path: Path, monkeypatch):
+    # Make is detected but never auto-run for safety; it must not invoke any
+    # subprocess and must record a skip diagnostic pointing to the opt-in path.
+    (tmp_path / "Makefile").write_text("all:\n\t+touch pwned\n")
+
+    def boom(cmd, **kw):  # pragma: no cover - must never be called
+        raise AssertionError("make must not be auto-run")
+
+    monkeypatch.setattr(_bq.subprocess, "run", boom)
     merged, ext = BuildEvidence(), []
-    assert run_inferred_build_query(tmp_path, merged, ext) is None  # merged, not a DB
+    assert run_inferred_build_query(tmp_path, merged, ext) is None
     assert ext[-1].name == "build_query_auto"
-    assert merged.compile_units  # the g++ -c line became a compile unit
+    assert ext[-1].status == "skipped"
+    assert "build-query" in ext[-1].detail and "Make" in ext[-1].detail
+    assert not merged.compile_units
 
 
 def test_bazel_command_includes_param_files(tmp_path: Path):

@@ -49,10 +49,31 @@ log = logging.getLogger(__name__)
 #: by passing ``--lang c++`` explicitly.
 _CPP_STDLIB_HEADERS = frozenset(
     {
-        "cassert", "cctype", "cerrno", "cfenv", "cfloat", "cinttypes",
-        "ciso646", "climits", "clocale", "cmath", "csetjmp", "csignal",
-        "cstdalign", "cstdarg", "cstdbool", "cstddef", "cstdint", "cstdio",
-        "cstdlib", "cstring", "ctgmath", "ctime", "cuchar", "cwchar", "cwctype",
+        "cassert",
+        "cctype",
+        "cerrno",
+        "cfenv",
+        "cfloat",
+        "cinttypes",
+        "ciso646",
+        "climits",
+        "clocale",
+        "cmath",
+        "csetjmp",
+        "csignal",
+        "cstdalign",
+        "cstdarg",
+        "cstdbool",
+        "cstddef",
+        "cstdint",
+        "cstdio",
+        "cstdlib",
+        "cstring",
+        "ctgmath",
+        "ctime",
+        "cuchar",
+        "cwchar",
+        "cwctype",
     }
 )
 
@@ -64,6 +85,23 @@ _MISSING_HEADER_RE = re.compile(r"'([^'/]+)' file not found")
 #: Used to confirm a header failure is a preprocessor ``#error`` (a header not
 #: meant for direct inclusion) rather than a real compile error before excluding.
 _RENDERED_ERROR_DIRECTIVE = re.compile(r"^\s*\d+\s*\|.*#\s*error\b")
+
+#: Phrasing that marks a ``#error`` as a *direct-inclusion guard* — an internal /
+#: preview header that refuses to be ``#include``d on its own. Only these are safe
+#: to exclude. A ``#error`` reporting a missing config macro / unsupported target
+#: on an otherwise-public header (e.g. ``#error "define MYLIB_CONFIG first"``)
+#: does NOT match, so it surfaces as a hard parse failure telling the user to pass
+#: the required build flag rather than silently dropping the header (Codex P2).
+_DIRECT_INCLUDE_GUARD_RE = re.compile(
+    r"do ?n[o']t .*\binclude\b"  # "do not #include" / "don't include"
+    r"|\binclude[sd]?\b.{0,40}\bdirectly\b"  # "include this ... directly"
+    r"|\bdirectly\b.{0,40}\binclude"  # "directly include"
+    r"|\binternal header\b"
+    r"|\bnot (be |meant to be )?included\b"
+    r"|\bto include\b"  # "Set TBB_PREVIEW_X to include <this header>"
+    r"|#include this",
+    re.IGNORECASE,
+)
 
 
 def _is_missing_cpp_stdlib_header_error(stderr: str) -> bool:
@@ -99,12 +137,15 @@ def _headers_failing_in_aggregate(
     is always printed first and persists until the next aggregate-rooted chain).
 
     Pure / string-only so it is unit-testable without a compiler. A header is
-    excluded **only** when its error is a confirmed preprocessor ``#error``: clang
-    renders the offending source line below the diagnostic (``  21 | #error …``),
-    so a real syntax error or a missing-build-flag failure in an otherwise-public
-    header is *not* dropped — that still surfaces as the hard parse failure
-    ``dumper.py`` raises, keeping the L2 surface authoritative (Codex review). An
-    error in the aggregate file itself is likewise left alone.
+    excluded **only** when both hold: (1) the failure is a confirmed preprocessor
+    ``#error`` (clang renders ``  21 | #error …`` below the diagnostic), and (2)
+    the message reads like a *direct-inclusion guard*
+    (:data:`_DIRECT_INCLUDE_GUARD_RE` — "do not include directly" / "internal
+    header" / "Set … to include"). A real syntax error, a missing-build-flag
+    ``#error`` (e.g. ``#error "define MYLIB_CONFIG first"``), or an error in the
+    aggregate file itself is therefore *not* dropped — it surfaces as the hard
+    parse failure ``dumper.py`` raises, keeping the L2 surface authoritative and
+    telling the user to pass the required flag (Codex P2).
     """
     agg = str(agg_path)
     prefix = "In file included from "
@@ -124,15 +165,22 @@ def _headers_failing_in_aggregate(
             if line.startswith(agg + ":"):
                 root = None  # error in the umbrella itself — not header-excludable
                 continue
-            # Confirm a preprocessor #error from the rendered source line clang
-            # prints just below the diagnostic; otherwise leave the header in so a
-            # genuine error is not masked by exclusion.
-            if root is not None and any(
-                _RENDERED_ERROR_DIRECTIVE.match(w) for w in lines[i + 1 : i + 4]
-            ):
-                idx = root - 1
-                if 0 <= idx < n_headers:
-                    offending.add(idx)
+            # Exclude only a *direct-inclusion guard*: (1) confirmed to be a
+            # preprocessor #error via clang's rendered source line, AND (2) whose
+            # message reads like a "don't include this directly" guard. A #error
+            # reporting a missing config macro / unsupported target on a public
+            # header matches (1) but not (2), so it is left in and surfaces as a
+            # hard failure telling the user to pass the build flag (Codex P2).
+            if root is not None:
+                window = lines[i + 1 : i + 4]
+                is_error_directive = any(
+                    _RENDERED_ERROR_DIRECTIVE.match(w) for w in window
+                )
+                guard_text = " ".join([line, *window])
+                if is_error_directive and _DIRECT_INCLUDE_GUARD_RE.search(guard_text):
+                    idx = root - 1
+                    if 0 <= idx < n_headers:
+                        offending.add(idx)
     return offending
 
 
@@ -159,7 +207,9 @@ def retry_excluding_error_headers(
     """
     excluded: list[Path] = []
     attempts = 0
-    while result.returncode != 0 and len(active_headers) > 1 and attempts < max_attempts:
+    while (
+        result.returncode != 0 and len(active_headers) > 1 and attempts < max_attempts
+    ):
         bad = _headers_failing_in_aggregate(
             result.stderr or "", agg_path, len(active_headers)
         )

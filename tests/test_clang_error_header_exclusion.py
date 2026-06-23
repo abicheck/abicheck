@@ -57,11 +57,11 @@ def test_transitive_chain_attributes_to_outermost_aggregate_frame():
 def test_multiple_offending_headers_collected():
     stderr = (
         f"In file included from {AGG}:10:\n"
-        "/x/a.h:21:6: error: Set FOO\n"
-        "   21 |     #error Set FOO\n"
+        "/x/a.h:21:6: error: a.h must not be included directly\n"
+        "   21 |     #error a.h must not be included directly\n"
         f"In file included from {AGG}:30:\n"
-        "/x/b.h:21:2: error: do not include\n"
-        "   21 |     #error do not include\n"
+        "/x/b.h:21:2: error: do not #include this internal header directly\n"
+        "   21 |     #error do not #include this internal header directly\n"
     )
     assert _headers_failing_in_aggregate(stderr, AGG, 40) == {9, 29}
 
@@ -75,6 +75,19 @@ def test_real_compile_error_in_public_header_is_not_excluded():
         "/x/public.h:42:1: error: unknown type name 'frobnicate'\n"
         "   42 | frobnicate int x;\n"
         "      | ^\n"
+    )
+    assert _headers_failing_in_aggregate(stderr, AGG, 40) == set()
+
+
+def test_config_macro_error_in_public_header_is_not_excluded():
+    # Codex P2: a #error that reports a missing config macro / unsupported target
+    # on a public header is NOT a direct-inclusion guard — it must surface (fail)
+    # so the user passes the build flag, not be silently dropped.
+    stderr = (
+        f"In file included from {AGG}:5:\n"
+        '/x/public.h:3:2: error: "define MYLIB_CONFIG before using this library"\n'
+        '    3 | #error "define MYLIB_CONFIG before using this library"\n'
+        "      |  ^\n"
     )
     assert _headers_failing_in_aggregate(stderr, AGG, 40) == set()
 
@@ -121,8 +134,8 @@ def test_retry_excludes_then_succeeds(tmp_path):
         1,
         stderr=(
             f"In file included from {agg}:2:\n"
-            "/x/bad.h:5:1: error: nope\n"
-            "    5 | #error nope\n"
+            "/x/bad.h:5:1: error: do not #include this internal header directly\n"
+            "    5 | #error do not #include this internal header directly\n"
         ),
     )
     calls = {"n": 0}

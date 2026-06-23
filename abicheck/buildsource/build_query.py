@@ -21,18 +21,26 @@ command. That made the common case ("just point me at the sources and figure out
 the build") impossible without manual setup. This module restores the
 zero-config promise: when a ``--sources`` tree is given and no compile DB already
 exists, abicheck **detects the build system and runs a fixed, abicheck-authored
-query command itself** — ``cmake`` configure (emits ``compile_commands.json``),
-``make -n`` (dry-run transcript), or ``bazel aquery`` (action graph).
+*analysis* command itself** — ``cmake`` configure (emits ``compile_commands.json``)
+or ``bazel aquery`` (action graph). Both are designed to *analyse* the build
+without compiling it.
+
+**Make is detected but never auto-run.** Unlike cmake configure / bazel aquery,
+``make -n`` is not reliably side-effect-free: GNU make still executes recipe
+lines prefixed with ``+`` or invoking ``$(MAKE)`` in dry-run mode, so
+auto-running it on an untrusted checkout could execute arbitrary commands
+(Codex P1). Make projects must opt in explicitly via a trusted
+``--build-query "make -n …"`` or a pre-captured transcript.
 
 Security boundary (the ADR-032 D5 intent, refined): the command run here is
 **constructed by abicheck**, never taken from a tree-local ``.abicheck.yml`` —
 so a malicious checkout cannot inject an arbitrary command through auto-discovery
 (an arbitrary ``build.query`` string still requires an explicit, operator-trusted
-``--config``). The residual trust is inherent to building from source at all:
-running a project's own ``cmake``/``make``/``bazel`` executes that project's
-build scripts. If you pointed abicheck at a source tree to analyse it from
-source, you already trust it enough to configure it. Pre-built artifact scanning
-(``compare`` on two ``.so`` files) never reaches this path.
+``--config``). The residual trust is inherent to *analysing* a build at all:
+``cmake`` configure and ``bazel`` loading still evaluate the project's own build
+scripts. If you pointed abicheck at a source tree to analyse it from source, you
+already trust it enough to configure it. Pre-built artifact scanning (``compare``
+on two ``.so`` files) never reaches this path.
 
 Detection + command construction are pure (unit-testable without a toolchain);
 only :func:`run_inferred_build_query` touches the filesystem / subprocess.
@@ -90,20 +98,30 @@ def inferred_query_command(system: str, sources: Path) -> list[str] | None:
     if system == "cmake":
         return [
             "cmake",
-            "-S", str(sources),
-            "-B", str(sources / ABICHECK_BUILD_DIR),
+            "-S",
+            str(sources),
+            "-B",
+            str(sources / ABICHECK_BUILD_DIR),
             "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
         ]
     if system == "make":
-        # Dry run only — never actually compiles. --always-make forces every
-        # recipe to be printed so the transcript is complete on an up-to-date tree.
-        return ["make", "-n", "--always-make"]
+        # No auto-run for Make: `make -n` is NOT reliably side-effect-free — GNU
+        # make still executes recipe lines prefixed with `+` or invoking
+        # `$(MAKE)` even in dry-run mode, so auto-running it on an untrusted
+        # checkout could execute arbitrary commands (Codex P1). Make projects must
+        # opt in explicitly via `--build-query "make -n …"` (operator-trusted) or
+        # a pre-captured transcript. cmake configure / bazel aquery are analysis
+        # commands designed not to build, so they stay auto.
+        return None
     if system == "bazel":
         # Action graph for all C++ compile actions; jsonproto feeds the adapter.
         # --include_param_files expands @...params so source paths and ABI flags
         # that Bazel spills to param files are present (mirrors BazelAdapter).
         return [
-            "bazel", "aquery", "--output=jsonproto", "--include_param_files",
+            "bazel",
+            "aquery",
+            "--output=jsonproto",
+            "--include_param_files",
             "mnemonic(CppCompile, deps(//...))",
         ]
     return None
@@ -134,6 +152,21 @@ def run_inferred_build_query(
     # `src/src`, and would anchor make/bazel relative paths to the process cwd
     # instead of the tree (Codex review). Absolute paths are cwd-independent.
     sources = sources.resolve()
+    if system == "make":
+        # Detected but deliberately not auto-run (see inferred_query_command).
+        extractors.append(
+            ExtractorRecord(
+                name="build_query_auto",
+                status="skipped",
+                detail=(
+                    "detected a Make project, but `make -n` is not reliably "
+                    "side-effect-free so it is not auto-run; pass an explicit "
+                    '--build-query "make -n …" (trusted) or a pre-captured '
+                    "transcript, or provide --compile-db"
+                ),
+            )
+        )
+        return None
     cmd = inferred_query_command(system, sources)
     if cmd is None:
         return None
@@ -184,7 +217,9 @@ def run_inferred_build_query(
                 ),
             )
         )
-        merged.diagnostics.append(f"build_query_auto: {system} exited {proc.returncode}")
+        merged.diagnostics.append(
+            f"build_query_auto: {system} exited {proc.returncode}"
+        )
         return None
     return _ingest_query_output(system, sources, proc.stdout, merged, extractors)
 
@@ -216,24 +251,6 @@ def _ingest_query_output(
                 name="build_query_auto",
                 status="partial",
                 detail="cmake configure ran but produced no compile_commands.json",
-            )
-        )
-        return None
-    if system == "make":
-        from .adapters.make import MakeAdapter
-
-        # build_dir=sources anchors the transcript's relative compile commands
-        # (e.g. `cc -Iinclude -c src/foo.c`) to the tree, not the process cwd.
-        ev = MakeAdapter(dry_run=stdout, build_dir=sources).collect()
-        merged.merge(ev)
-        extractors.append(
-            ExtractorRecord(
-                name="build_query_auto",
-                status="ok" if ev.compile_units else "partial",
-                detail=(
-                    f"auto-ran `make -n`; {len(ev.compile_units)} compile unit(s) "
-                    "(reduced confidence — make dry-run transcript)"
-                ),
             )
         )
         return None

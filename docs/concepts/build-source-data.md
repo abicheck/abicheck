@@ -278,9 +278,12 @@ sources:
   the checkout already has. No config needed.
 - **`query_build_system` (automatic when `--sources` is given):** if no compile
   DB exists, abicheck **detects the build system and runs its own fixed query**
-  (`cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=ON`, `make -n`, `bazel aquery`) to emit
+  (`cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=ON` or `bazel aquery`) to emit
   flags/exports — no `--allow-build-query` flag (that flag is deprecated to a
-  no-op). It also runs an *operator-supplied* `build.query` automatically (an
+  no-op). Make is detected but *not* auto-run (`make -n` is not reliably
+  side-effect-free — GNU make runs `+`/`$(MAKE)` recipes even in dry-run mode), so
+  it needs an explicit `--build-query "make -n …"` or transcript. It also runs an
+  *operator-supplied* `build.query` automatically (an
   explicit `--config` or `--build-query`). All commands run with no shell
   (parsed via `shlex`) in the source-tree directory. A `.abicheck.yml`
   auto-discovered from `--sources` is still used for non-executing settings such
