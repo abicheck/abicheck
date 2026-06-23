@@ -193,7 +193,7 @@ def perform_elf_dump(
     # so generated/shim headers from -p/--gcc-options keep priority, but still
     # above the standard system dirs) when the compile context supplies its own
     # includes — see its docstring.
-    from .header_utils import resolve_inferred_header_roots
+    from .header_utils import deferred_token_dirs, resolve_inferred_header_roots
 
     inc_extra, deferred = (
         resolve_inferred_header_roots(
@@ -205,6 +205,9 @@ def perform_elf_dump(
         if resolved_headers
         else ([], [])
     )
+    # Deferred roots ride in gcc_option_tokens (as -isystem), not extra_includes,
+    # so their contents must be hashed into the AST cache key explicitly (Codex).
+    deferred_dirs = tuple(deferred_token_dirs(deferred))
     try:
         snap = dump(
             so_path=so_path,
@@ -224,6 +227,7 @@ def perform_elf_dump(
             public_headers=list(public_headers),
             public_header_dirs=list(public_header_dirs),
             header_backend=header_backend,
+            extra_hash_dirs=deferred_dirs,
         )
     except (AbicheckError, RuntimeError, OSError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc

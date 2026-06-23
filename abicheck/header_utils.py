@@ -202,3 +202,15 @@ def resolve_inferred_header_roots(
             toks += ["-isystem", str(d)]
         return [], toks
     return inferred, []
+
+
+def deferred_token_dirs(deferred_tokens: Sequence[str]) -> list[Path]:
+    """The directories carried by ``-isystem <dir>`` deferred tokens.
+
+    The deferred inferred roots ride in ``gcc_option_tokens`` (not
+    ``extra_includes``), so the header-AST cache key — which mtime-scans only
+    ``extra_includes`` dirs — would miss edits to their transitively-included
+    headers and reuse a stale AST (Codex review). Callers pass these dirs to the
+    dumper as hash-only inputs. Pairs the flat ``["-isystem", dir, …]`` list.
+    """
+    return [Path(d) for _flag, d in zip(deferred_tokens[::2], deferred_tokens[1::2])]

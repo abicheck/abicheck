@@ -417,6 +417,15 @@ class TestResolveInferredHeaderRoots:
         )
         assert str(root) not in toks
 
+    def test_deferred_token_dirs_extracts_isystem_paths(self):
+        from pathlib import Path
+
+        from abicheck.header_utils import deferred_token_dirs
+
+        toks = ["-isystem", "/a/include", "-isystem", "/b/oneapi"]
+        assert deferred_token_dirs(toks) == [Path("/a/include"), Path("/b/oneapi")]
+        assert deferred_token_dirs([]) == []
+
     def test_dangling_include_flag_no_operand(self, tmp_path):
         # A bare -I with no following dir (build context present but supplies no
         # parsable dir) still defers the inferred roots via -isystem, no crash.

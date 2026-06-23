@@ -34,7 +34,7 @@ from .api_types import CompareRequest, InputSpec
 from .checker import compare
 from .checker_types import DiffResult, LibraryMetadata
 from .errors import AbicheckError, SnapshotError, ValidationError
-from .header_utils import resolve_inferred_header_roots
+from .header_utils import deferred_token_dirs, resolve_inferred_header_roots
 from .model import AbiSnapshot, EnumType, Function, RecordType, Visibility
 from .reporter import to_json, to_markdown, to_stat, to_stat_json
 from .serialization import load_snapshot
@@ -520,6 +520,7 @@ def _dump_elf(
     # without dropping the inferred root below system headers (Codex review).
     eff_includes = list(includes)
     eff_tokens: tuple[str, ...] = cc.gcc_option_tokens
+    deferred_dirs: tuple[Path, ...] = ()
     if resolved_headers and not dwarf_only:
         inc_extra, deferred = resolve_inferred_header_roots(
             headers,
@@ -529,6 +530,9 @@ def _dump_elf(
         )
         eff_includes += inc_extra
         eff_tokens = cc.gcc_option_tokens + tuple(deferred)
+        # Deferred roots ride in gcc_option_tokens (-isystem), not extra_includes,
+        # so hash their contents into the AST cache key explicitly (Codex review).
+        deferred_dirs = tuple(deferred_token_dirs(deferred))
 
     compiler = "cc" if lang == "c" else "c++"
     try:
@@ -550,6 +554,7 @@ def _dump_elf(
             header_backend=header_backend,
             public_headers=public_headers,
             public_header_dirs=public_header_dirs,
+            extra_hash_dirs=deferred_dirs,
         )
     except (AbicheckError, RuntimeError, OSError, ValueError) as exc:
         raise SnapshotError(f"Failed to dump '{path}': {exc}") from exc
