@@ -104,6 +104,18 @@ def test_config_macro_error_in_public_header_is_not_excluded():
     assert _headers_failing_in_aggregate(stderr, AGG, 40) == set()
 
 
+def test_feature_not_included_message_is_not_excluded():
+    # Codex P2: "feature X not included in this build" is a config message, not a
+    # direct-inclusion guard (no "directly"/"internal header"/"do not include"),
+    # so it must surface rather than be dropped from the L2 surface.
+    stderr = (
+        f"In file included from {AGG}:6:\n"
+        '/x/public.h:4:2: error: "OpenMP support not included in this build"\n'
+        '    4 | #error "OpenMP support not included in this build"\n'
+    )
+    assert _headers_failing_in_aggregate(stderr, AGG, 40) == set()
+
+
 def test_error_in_aggregate_itself_is_not_excludable():
     # A genuinely broken umbrella header (error in the aggregate TU, no include
     # chain) must NOT cause a header to be dropped — that would hide a real bug.

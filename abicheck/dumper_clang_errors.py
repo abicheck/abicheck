@@ -88,20 +88,20 @@ _RENDERED_ERROR_DIRECTIVE = re.compile(r"^\s*\d+\s*\|.*#\s*error\b")
 
 #: Phrasing that marks a ``#error`` as a *direct-inclusion guard* — an internal
 #: header that refuses to be ``#include``d on its own. Only these are safe to
-#: exclude. Deliberately narrow: it matches "do not include (directly)" /
-#: "directly include" / "internal header" / "not (meant to be) included" /
-#: "#include this" and nothing else. A ``#error`` reporting a missing config /
-#: feature macro or unsupported target on an otherwise-public header — even when
-#: phrased as "Set FOO to include optional support" or "define MYLIB_CONFIG
-#: first" — does NOT match, so it surfaces as a hard parse failure telling the
-#: user to pass the required build flag rather than silently dropping the header
-#: (Codex P2: a bare "to include" phrase is no longer treated as a guard).
+#: exclude. Deliberately narrow: it matches "do not include" / "...include(d)
+#: ... directly" / "directly include" / "internal header" / "#include this" and
+#: nothing else. A ``#error`` reporting a missing config / feature macro or
+#: unsupported target on an otherwise-public header — even when phrased as "Set
+#: FOO to include optional support", "feature X not included in this build", or
+#: "define MYLIB_CONFIG first" — does NOT match, so it surfaces as a hard parse
+#: failure telling the user to pass the required build flag rather than silently
+#: dropping the header (Codex P2: bare "to include" / "not included" phrases are
+#: not treated as guards — genuine guards say "directly" / "internal header").
 _DIRECT_INCLUDE_GUARD_RE = re.compile(
     r"do ?n[o']t .*\binclude\b"  # "do not #include" / "don't include"
     r"|\binclude[sd]?\b.{0,40}\bdirectly\b"  # "include this ... directly"
     r"|\bdirectly\b.{0,40}\binclude"  # "directly include"
     r"|\binternal header\b"
-    r"|\bnot (be |meant to be )?included\b"
     r"|#include this",
     re.IGNORECASE,
 )
