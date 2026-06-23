@@ -131,7 +131,15 @@ def test_dump_elf_threads_compile_context_to_dumper(
     assert captured["gcc_path"] == "/opt/g++"
     assert captured["gcc_prefix"] == "aarch64-linux-gnu-"
     assert captured["gcc_options"] == "-DFOO=1"
-    assert captured["gcc_option_tokens"] == ("-isystem", "/x")
+    # The CompileContext tokens thread through and lead; because this request has
+    # a -H header *and* an -isystem build context, the inferred header root is
+    # appended after as its own -isystem entry (searched below the build's, which
+    # is emitted first, but still above the standard system dirs).
+    tokens = captured["gcc_option_tokens"]
+    assert tokens[:2] == ("-isystem", "/x")  # build context leads
+    assert str(tmp_path) in tokens
+    assert tokens[tokens.index(str(tmp_path)) - 1] == "-isystem"
+    assert tokens.index("/x") < tokens.index(str(tmp_path))
     assert captured["sysroot"] == tmp_path
     assert captured["nostdinc"] is True
 

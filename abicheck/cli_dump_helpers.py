@@ -185,17 +185,40 @@ def perform_elf_dump(
     """
     compiler = "cc" if lang == "c" else "c++"
     resolved_headers = expand_header_inputs(list(headers)) if headers else []
+    # P3: auto-add the public-header roots so a -H umbrella resolves its own
+    # relative includes without a separate -I. resolve_inferred_header_roots
+    # picks the search bucket: plain -I (high priority, so an umbrella that pulls
+    # a system-colliding name like <endian.h> still finds the package header)
+    # when there is no build context, or -isystem (below the build-context dirs
+    # so generated/shim headers from -p/--gcc-options keep priority, but still
+    # above the standard system dirs) when the compile context supplies its own
+    # includes — see its docstring.
+    from .header_utils import deferred_token_dirs, resolve_inferred_header_roots
+
+    inc_extra, deferred = (
+        resolve_inferred_header_roots(
+            list(headers),
+            list(includes),
+            gcc_options=effective_gcc_options,
+            gcc_option_tokens=tuple(gcc_option_tokens),
+        )
+        if resolved_headers
+        else ([], [])
+    )
+    # Deferred roots ride in gcc_option_tokens (as -isystem), not extra_includes,
+    # so their contents must be hashed into the AST cache key explicitly (Codex).
+    deferred_dirs = tuple(deferred_token_dirs(deferred))
     try:
         snap = dump(
             so_path=so_path,
             headers=resolved_headers,
-            extra_includes=list(includes),
+            extra_includes=list(includes) + inc_extra,
             version=version,
             compiler=compiler,
             gcc_path=gcc_path,
             gcc_prefix=gcc_prefix,
             gcc_options=effective_gcc_options,
-            gcc_option_tokens=tuple(gcc_option_tokens),
+            gcc_option_tokens=tuple(gcc_option_tokens) + tuple(deferred),
             sysroot=sysroot,
             nostdinc=nostdinc,
             lang=lang if lang == "c" else None,
@@ -204,6 +227,7 @@ def perform_elf_dump(
             public_headers=list(public_headers),
             public_header_dirs=list(public_header_dirs),
             header_backend=header_backend,
+            extra_hash_dirs=deferred_dirs,
         )
     except (AbicheckError, RuntimeError, OSError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc

@@ -98,6 +98,69 @@ class TestCacheKey:
         k = _cache_key([Path("/nonexistent/x.h")], [], "c++")
         assert isinstance(k, str) and len(k) == 64
 
+    def test_extra_hash_dirs_fold_in_contents(self, tmp_path):
+        # A deferred inferred root rides in gcc_option_tokens, not extra_includes,
+        # so its contents are hashed only via extra_hash_dirs. Editing a header
+        # under it (umbrella unchanged) must change the key — else a stale AST is
+        # reused (Codex review).
+        import os
+        import time
+
+        umb = tmp_path / "umbrella.h"
+        umb.write_text("int a(void);\n", encoding="utf-8")
+        root = tmp_path / "pkg"
+        root.mkdir()
+        detail = root / "detail.h"
+        detail.write_text("int b(void);\n", encoding="utf-8")
+
+        k1 = _cache_key([umb], [], "c++", extra_hash_dirs=(root,))
+        detail.write_text("int b(int);\n", encoding="utf-8")
+        future = time.time() + 10
+        os.utime(detail, (future, future))
+        k2 = _cache_key([umb], [], "c++", extra_hash_dirs=(root,))
+        assert k1 != k2  # the deferred root's contents are folded into the key
+
+    def test_hash_dirs_cover_all_header_suffixes(self, tmp_path):
+        # Not just .h/.hpp — an edit to any recognised header suffix under a
+        # hashed dir must bust the key (Codex review).
+        import os
+        import time
+
+        umb = tmp_path / "umbrella.h"
+        umb.write_text("int a(void);\n", encoding="utf-8")
+        root = tmp_path / "pkg"
+        root.mkdir()
+        for ext in (".hh", ".hpp", ".hxx", ".h++", ".ipp", ".tpp", ".inc", ".inl", ".tcc"):
+            detail = root / f"detail{ext}"
+            detail.write_text("int b(void);\n", encoding="utf-8")
+            k1 = _cache_key([umb], [], "c++", extra_hash_dirs=(root,))
+            detail.write_text("int b(int);\n", encoding="utf-8")
+            future = time.time() + 10
+            os.utime(detail, (future, future))
+            k2 = _cache_key([umb], [], "c++", extra_hash_dirs=(root,))
+            assert k1 != k2, ext
+            detail.unlink()
+
+    def test_without_hash_dir_transitive_edit_is_missed(self, tmp_path):
+        # The complementary gap the fix closes: with the root *not* hashed, an
+        # edit under it leaves the umbrella-only key unchanged.
+        import os
+        import time
+
+        umb = tmp_path / "umbrella.h"
+        umb.write_text("int a(void);\n", encoding="utf-8")
+        root = tmp_path / "pkg"
+        root.mkdir()
+        detail = root / "detail.h"
+        detail.write_text("int b(void);\n", encoding="utf-8")
+
+        k1 = _cache_key([umb], [], "c++")
+        detail.write_text("int b(int);\n", encoding="utf-8")
+        future = time.time() + 10
+        os.utime(detail, (future, future))
+        k2 = _cache_key([umb], [], "c++")
+        assert k1 == k2  # detail.h not hashed → why extra_hash_dirs is needed
+
 
 # ── _cache_path ─────────────────────────────────────────────────────────
 

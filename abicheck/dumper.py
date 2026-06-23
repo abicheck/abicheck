@@ -67,6 +67,7 @@ from .dumper_sysinc import (
 )
 from .elf_symbol_filter import is_abi_relevant_elf_symbol
 from .errors import SnapshotError, ValidationError
+from .header_utils import iter_cache_header_files
 from .model import (
     AbiSnapshot,
     ElfVisibility,
@@ -259,6 +260,7 @@ def _clang_header_dump(
     sysroot: Path | None = None,
     nostdinc: bool = False,
     lang: str | None = None,
+    extra_hash_dirs: tuple[Path, ...] = (),
 ) -> dict[str, Any]:
     """Run clang over *headers* and return the parsed ``-ast-dump=json`` root.
 
@@ -296,6 +298,12 @@ def _clang_header_dump(
     if not lang:
         force_cpp = _detect_cpp_headers(headers)
     force_cpp20 = force_cpp and _detect_cpp20_headers(headers)
+    # Was C *explicitly* requested (``--lang c``), as opposed to auto-detected?
+    # Both leave ``force_cpp`` False, but the C→C++ self-heal below must treat
+    # them differently: an explicit C request that reparses as C++ overrides what
+    # the user asked for, so it stays a visible warning; the auto-detected probe
+    # self-healing is just noise and is demoted to debug (Codex review).
+    explicit_c_request = bool(lang) and not force_cpp
     cc_id = "msvc" if Path(clang_bin).name.lower() in ("cl", "cl.exe") else "gnu"
 
     # castxml↔clang parity: probe the host GNU compiler for its system include
@@ -339,6 +347,7 @@ def _clang_header_dump(
         system_includes=system_includes
         if force_cpp
         else (*system_includes, *cpp_system_includes),
+        extra_hash_dirs=extra_hash_dirs,
     )
     cached = _cache_path(key, backend="clang")
     if cached.exists():
@@ -385,12 +394,24 @@ def _clang_header_dump(
             and not force_cpp
             and _is_missing_cpp_stdlib_header_error(result.stderr or "")
         ):
-            log.warning(
-                "clang failed to find a C++ standard header parsing the header(s) in "
-                "C mode; the header is C++ (a pure-#include umbrella header has no "
-                "inline C++ syntax to auto-detect). Retrying in C++ mode. Pass "
-                "--lang c++ to select this directly and silence this warning."
-            )
+            if explicit_c_request:
+                # The user asked for C, but the header needs the C++ standard
+                # library — self-heal to C++ so the dump still succeeds, but keep
+                # it visible: the result is C++ ABI evidence, not the C the
+                # request implied (Codex review).
+                log.warning(
+                    "clang was asked for C (--lang c) but the header(s) require the "
+                    "C++ standard library; self-healing to C++ mode. The result is "
+                    "C++ ABI evidence — pass --lang c++ to make this explicit, or "
+                    "verify you intended a C library."
+                )
+            else:
+                log.debug(
+                    "clang auto-detected C for a pure-#include umbrella header (no "
+                    "inline C++ syntax to key on), then self-healed to C++ after a "
+                    "missing C++ standard header — an unambiguous C++ signal. The "
+                    "result is unaffected; pass --lang c++ to skip the initial C probe."
+                )
             result = _run_clang(True, _detect_cpp20_headers(headers), cpp_system_includes)
         # A nonzero exit means clang hit a hard parse error. Unlike L4 source
         # replay (which tolerates partial coverage), the L2 header AST must be
@@ -440,6 +461,7 @@ def _header_ast_parser(
     exported_static: set[str],
     public_header_paths: list[str],
     public_dir_paths: list[str],
+    extra_hash_dirs: tuple[Path, ...] = (),
 ) -> _CastxmlParser | _ClangAstParser:
     """Run the resolved L2 backend and return its parser (castxml or clang).
 
@@ -456,6 +478,7 @@ def _header_ast_parser(
             gcc_path=gcc_path, gcc_prefix=gcc_prefix, gcc_options=gcc_options,
             gcc_option_tokens=gcc_option_tokens,
             sysroot=sysroot, nostdinc=nostdinc, lang=lang,
+            extra_hash_dirs=extra_hash_dirs,
         )
         return _ClangAstParser(
             ast_root, exported_dynamic, exported_static,
@@ -481,6 +504,7 @@ def _header_ast_parser(
             gcc_path=gcc_path, gcc_prefix=gcc_prefix, gcc_options=gcc_options,
             gcc_option_tokens=gcc_option_tokens,
             sysroot=sysroot, nostdinc=nostdinc, lang=lang,
+            extra_hash_dirs=extra_hash_dirs,
         )
     except SnapshotError as exc:
         if (
@@ -576,6 +600,7 @@ def _cache_key(
     lang: str | None = None,
     backend: str = "castxml",
     system_includes: tuple[str, ...] = (),
+    extra_hash_dirs: tuple[Path, ...] = (),
 ) -> str:
     h = hashlib.sha256()
     # The header-AST backend is part of the key: a castxml-XML cache entry and a
@@ -587,12 +612,18 @@ def _cache_key(
             h.update(str(os.path.getmtime(p)).encode())
         except OSError:
             pass
-    # Also hash mtimes of files in extra_include dirs (catches most transitive changes)
-    for inc_dir in sorted(str(x) for x in extra_includes):
+    # Also hash mtimes of files in the include dirs (catches most transitive
+    # changes). extra_hash_dirs are dirs searched via *deferred* -isystem tokens
+    # (the inferred -H roots when a build context is present) rather than -I, so
+    # their contents must be folded in here too — otherwise an edit to a header
+    # transitively included from such a root would reuse a stale AST (Codex).
+    for inc_dir in sorted(str(x) for x in (*extra_includes, *extra_hash_dirs)):
         inc_path = Path(inc_dir)
         h.update(inc_dir.encode())
         if inc_path.is_dir():
-            for f in sorted(inc_path.rglob("*.h")) + sorted(inc_path.rglob("*.hpp")):
+            # Hash every header-like file (incl. .inl/.tcc template bodies, not
+            # just .h/.hpp) so any transitive include edit busts the key (#454).
+            for f in iter_cache_header_files(inc_path):
                 try:
                     h.update(str(f).encode())
                     h.update(str(f.stat().st_mtime).encode())
@@ -1005,6 +1036,7 @@ def _castxml_dump(
     sysroot: Path | None = None,
     nostdinc: bool = False,
     lang: str | None = None,
+    extra_hash_dirs: tuple[Path, ...] = (),
 ) -> Element:
     """Run castxml on headers and return parsed XML root.
 
@@ -1030,6 +1062,7 @@ def _castxml_dump(
         gcc_path=gcc_path, gcc_prefix=gcc_prefix, gcc_options=gcc_options,
         gcc_option_tokens=gcc_option_tokens,
         sysroot=sysroot, nostdinc=nostdinc, lang=lang,
+        extra_hash_dirs=extra_hash_dirs,
     )
     cached = _cache_path(key)
     if cached.exists():
@@ -1224,6 +1257,7 @@ def dump(
     public_headers: list[Path] | None = None,
     public_header_dirs: list[Path] | None = None,
     header_backend: str = "auto",
+    extra_hash_dirs: tuple[Path, ...] = (),
 ) -> AbiSnapshot:
     """Create an AbiSnapshot from a shared library + headers.
 
@@ -1290,7 +1324,7 @@ def dump(
         gcc_option_tokens=gcc_option_tokens,
         sysroot=sysroot, nostdinc=nostdinc, lang=lang,
         public_headers=public_headers, public_header_dirs=public_header_dirs,
-        header_backend=header_backend,
+        header_backend=header_backend, extra_hash_dirs=extra_hash_dirs,
         **extra,
     )
 
@@ -1643,6 +1677,7 @@ def _dump_elf(
     public_headers: list[Path] | None = None,
     public_header_dirs: list[Path] | None = None,
     header_backend: str = "auto",
+    extra_hash_dirs: tuple[Path, ...] = (),
 ) -> AbiSnapshot:
     """ELF-specific dump: pyelftools + debug info (DWARF/BTF/CTF) + header AST."""
     exported_dynamic, exported_static = _pyelftools_exported_symbols(so_path)
@@ -1684,6 +1719,7 @@ def _dump_elf(
         exported_dynamic=exported_dynamic, exported_static=exported_static,
         public_header_paths=[str(h) for h in headers] + [str(h) for h in (public_headers or [])],
         public_dir_paths=[str(d) for d in (public_header_dirs or [])],
+        extra_hash_dirs=extra_hash_dirs,
     )
 
     snapshot = AbiSnapshot(
@@ -1727,6 +1763,7 @@ def _dump_macho(
     public_headers: list[Path] | None = None,
     public_header_dirs: list[Path] | None = None,
     header_backend: str = "auto",
+    extra_hash_dirs: tuple[Path, ...] = (),
 ) -> AbiSnapshot:
     """Mach-O dump: export table from macholib + header-AST analysis."""
     if dwarf_only:
@@ -1816,6 +1853,7 @@ def _dump_macho(
         exported_dynamic=exported_no_underscore, exported_static=exported_no_underscore,
         public_header_paths=[str(h) for h in headers] + [str(h) for h in (public_headers or [])],
         public_dir_paths=[str(d) for d in (public_header_dirs or [])],
+        extra_hash_dirs=extra_hash_dirs,
     )
 
     return AbiSnapshot(
@@ -1854,6 +1892,7 @@ def _dump_pe(
     public_headers: list[Path] | None = None,
     public_header_dirs: list[Path] | None = None,
     header_backend: str = "auto",
+    extra_hash_dirs: tuple[Path, ...] = (),
 ) -> AbiSnapshot:
     """PE dump: export table from pefile + header-AST analysis."""
     from .pe_metadata import parse_pe_metadata
@@ -1899,6 +1938,7 @@ def _dump_pe(
         exported_dynamic=exported_dynamic, exported_static=exported_static,
         public_header_paths=[str(h) for h in headers] + [str(h) for h in (public_headers or [])],
         public_dir_paths=[str(d) for d in (public_header_dirs or [])],
+        extra_hash_dirs=extra_hash_dirs,
     )
 
     return AbiSnapshot(

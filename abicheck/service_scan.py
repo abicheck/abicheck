@@ -33,25 +33,17 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from .errors import ValidationError
+from .header_utils import HEADER_SUFFIXES
 
 if TYPE_CHECKING:
     from .buildsource.scan_levels import EvidenceDepth, SourceMethod
 
 _logger = logging.getLogger(__name__)
 
-# Header file extensions recognised during directory expansion
-_HEADER_EXTS = frozenset(
-    {
-        ".h",
-        ".hh",
-        ".hpp",
-        ".hxx",
-        ".h++",
-        ".ipp",
-        ".tpp",
-        ".inc",
-    }
-)
+# Header file extensions recognised during directory expansion. Shared with the
+# AST-cache include walk (dumper._cache_key) via the leaf header_utils module so
+# expansion and cache-invalidation can never drift (Codex review).
+_HEADER_EXTS = HEADER_SUFFIXES
 
 
 def expand_header_inputs(inputs: list[Path]) -> list[Path]:
@@ -317,14 +309,17 @@ def _count_source_tus(sources: Path) -> int:
 
 
 def _compile_db_in(root: Path) -> Path | None:
-    """The ``compile_commands.json`` inside a build/source *directory*, if any."""
-    for cand in (
-        root / "compile_commands.json",
-        root / "build" / "compile_commands.json",
-    ):
-        if cand.is_file():
-            return cand
-    return None
+    """The ``compile_commands.json`` inside a build/source *directory*, if any.
+
+    Reuses the *execution* path's discovery (``inline._find_compile_db_in_dir``:
+    the conventional build-dir hints **plus** the depth-1 ``*/compile_commands.json``
+    glob fallback) so ``scan --estimate`` mirrors what the real scan collects — a
+    DB in a non-hint immediate subdirectory such as ``cmake-build-debug-gcc/`` is
+    priced, not reported as absent / 0 TUs (Codex review).
+    """
+    from .buildsource.inline import _find_compile_db_in_dir
+
+    return _find_compile_db_in_dir(root)
 
 
 def _discover_compile_db(sources: Path | None, explicit: Path | None) -> Path | None:

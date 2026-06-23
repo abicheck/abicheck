@@ -270,10 +270,283 @@ class TestRunDump:
         assert result is snap
 
 
+# ── _implicit_header_includes() (P3: -H umbrella resolves without -I) ────────
+
+
+class TestImplicitHeaderIncludes:
+    def test_directory_input_is_its_own_root(self, tmp_path):
+        from abicheck.header_utils import _implicit_header_includes
+
+        inc = tmp_path / "include"
+        inc.mkdir()
+        assert _implicit_header_includes([inc]) == [inc]
+
+    def test_file_at_root_adds_parent(self, tmp_path):
+        from abicheck.header_utils import _implicit_header_includes
+
+        inc = tmp_path / "include"
+        inc.mkdir()
+        umb = inc / "dnnl.hpp"
+        umb.write_text("// umbrella")
+        assert _implicit_header_includes([umb]) == [inc]
+
+    def test_nested_umbrella_adds_include_root_ancestor(self, tmp_path):
+        # include/oneapi/tbb.h → both its parent (include/oneapi) and the
+        # conventional include root (include/) must be on the search path so
+        # `#include "oneapi/tbb/..."` resolves.
+        from abicheck.header_utils import _implicit_header_includes
+
+        root = tmp_path / "include"
+        nested = root / "oneapi"
+        nested.mkdir(parents=True)
+        umb = nested / "tbb.h"
+        umb.write_text("// umbrella")
+        dirs = _implicit_header_includes([umb])
+        assert nested in dirs
+        assert root in dirs
+
+    def test_namespace_directory_adds_include_root_ancestor(self, tmp_path):
+        # A -H *directory* nested under a conventional root, e.g.
+        # `-H include/oneapi`, must add BOTH itself and the include root —
+        # headers inside still `#include "oneapi/..."` relative to include/.
+        from abicheck.header_utils import _implicit_header_includes
+
+        root = tmp_path / "include"
+        nested = root / "oneapi"
+        nested.mkdir(parents=True)
+        dirs = _implicit_header_includes([nested])
+        assert nested in dirs
+        assert root in dirs
+
+    def test_deduplicates(self, tmp_path):
+        from abicheck.header_utils import _implicit_header_includes
+
+        inc = tmp_path / "include"
+        inc.mkdir()
+        (inc / "a.h").write_text("")
+        (inc / "b.h").write_text("")
+        # Two files in the same dir → the root appears once.
+        assert _implicit_header_includes([inc / "a.h", inc / "b.h"]) == [inc]
+
+    def test_skips_nonexistent_parent(self, tmp_path):
+        # A -H file whose parent dir does not exist contributes nothing.
+        from abicheck.header_utils import _implicit_header_includes
+
+        ghost = tmp_path / "absent" / "x.h"
+        assert _implicit_header_includes([ghost]) == []
+
+
+class TestResolveInferredHeaderRoots:
+    def _umbrella(self, tmp_path):
+        root = tmp_path / "include"
+        (root / "oneapi").mkdir(parents=True)
+        umb = root / "oneapi" / "tbb.h"
+        umb.write_text("// umbrella")
+        return root, umb
+
+    def test_no_build_context_uses_plain_I(self, tmp_path):
+        from abicheck.header_utils import resolve_inferred_header_roots
+
+        root, umb = self._umbrella(tmp_path)
+        inc, toks = resolve_inferred_header_roots([umb], [])
+        assert root in inc and toks == []
+
+    def test_isystem_context_defers_via_isystem(self, tmp_path):
+        # A build-context -isystem makes the inferred root defer — emitted as
+        # -isystem (below build context, above standard system dirs), not -I.
+        from abicheck.header_utils import resolve_inferred_header_roots
+
+        root, umb = self._umbrella(tmp_path)
+        inc, toks = resolve_inferred_header_roots(
+            [umb], [], gcc_option_tokens=("-isystem", "/gen")
+        )
+        assert inc == []
+        # every inferred root is emitted as -isystem (not -I, not -idirafter)
+        assert str(root) in toks
+        assert toks[toks.index(str(root)) - 1] == "-isystem"
+        assert "-idirafter" not in toks and "-I" not in toks
+
+    def test_gcc_options_include_string_detected(self, tmp_path):
+        from abicheck.header_utils import resolve_inferred_header_roots
+
+        root, umb = self._umbrella(tmp_path)
+        inc, toks = resolve_inferred_header_roots(
+            [umb], [], gcc_options="-I /build/include -O2"
+        )
+        assert inc == [] and str(root) in toks
+
+    def test_msvc_slash_I_context_detected(self, tmp_path):
+        # An MSVC/clang-cl build context (/I, /external:I, /imsvc) must also count
+        # as build context so the inferred root defers instead of shadowing it.
+        from abicheck.header_utils import resolve_inferred_header_roots
+
+        root, umb = self._umbrella(tmp_path)
+        for tok in ("/Ibuild\\generated", "/external:Igen", "/imsvc"):
+            inc, toks = resolve_inferred_header_roots(
+                [umb], [], gcc_option_tokens=(tok,)
+            )
+            assert inc == [], tok  # detected as build context → deferred
+            assert str(root) in toks, tok
+            # MSVC build context → defer in MSVC dialect (/I), not GNU -isystem,
+            # which cl.exe/clang-cl would ignore (Codex review).
+            assert toks[toks.index(str(root)) - 1] == "/I", tok
+            assert "-isystem" not in toks, tok
+
+    def test_deferred_flag_dialect_matches_build_context(self, tmp_path):
+        # The deferred flag matches the build context's lowest include bucket:
+        # above-system GNU (-I/-isystem) → -isystem; MSVC /I → /I; an
+        # -idirafter-only context → -idirafter (so its below-system fallback
+        # keeps priority instead of being shadowed by an -isystem root).
+        from abicheck.header_utils import resolve_inferred_header_roots
+
+        root, umb = self._umbrella(tmp_path)
+        _, gnu = resolve_inferred_header_roots([umb], [], gcc_options="-I /build/gen")
+        assert gnu[gnu.index(str(root)) - 1] == "-isystem"
+        _, msvc = resolve_inferred_header_roots([umb], [], gcc_options="/I build\\gen")
+        assert msvc[msvc.index(str(root)) - 1] == "/I"
+        _, after = resolve_inferred_header_roots(
+            [umb], [], gcc_options="-idirafter /build/gen"
+        )
+        assert after[after.index(str(root)) - 1] == "-idirafter"
+        assert "-isystem" not in after
+
+    def test_root_already_in_build_context_is_skipped(self, tmp_path):
+        # A root the build context already supplies as -I must NOT be re-added as
+        # -isystem (GCC would then ignore the build's -I). Here the build provides
+        # the include root; only the *other* inferred ancestor (oneapi) defers.
+        from abicheck.header_utils import resolve_inferred_header_roots
+
+        root, umb = self._umbrella(tmp_path)  # include/, umbrella at include/oneapi
+        nested = root / "oneapi"
+        inc, toks = resolve_inferred_header_roots(
+            [umb], [], gcc_options=f"-I {root}"
+        )
+        assert inc == []
+        # the include root is in the build context → not re-emitted at all
+        assert str(root) not in toks
+        # the nested ancestor is not in the build context → deferred via -isystem
+        assert str(nested) in toks
+        assert toks[toks.index(str(nested)) - 1] == "-isystem"
+
+    def test_build_context_dir_attached_form_deduped(self, tmp_path):
+        # The attached spelling (-I<dir>) is parsed too, so the root is skipped.
+        from abicheck.header_utils import resolve_inferred_header_roots
+
+        root, umb = self._umbrella(tmp_path)
+        inc, toks = resolve_inferred_header_roots(
+            [umb], [], gcc_option_tokens=(f"-I{root}",)
+        )
+        assert str(root) not in toks
+
+    def test_deferred_token_dirs_extracts_isystem_paths(self):
+        from pathlib import Path
+
+        from abicheck.header_utils import deferred_token_dirs
+
+        toks = ["-isystem", "/a/include", "-isystem", "/b/oneapi"]
+        assert deferred_token_dirs(toks) == [Path("/a/include"), Path("/b/oneapi")]
+        assert deferred_token_dirs([]) == []
+
+    def test_dangling_include_flag_no_operand(self, tmp_path):
+        # A bare -I with no following dir (build context present but supplies no
+        # parsable dir) still defers the inferred roots via -isystem, no crash.
+        from abicheck.header_utils import resolve_inferred_header_roots
+
+        root, umb = self._umbrella(tmp_path)
+        inc, toks = resolve_inferred_header_roots([umb], [], gcc_option_tokens=("-I",))
+        assert inc == []
+        assert str(root) in toks
+        assert toks[toks.index(str(root)) - 1] == "-isystem"
+
+    def test_non_include_options_are_not_build_context(self, tmp_path):
+        # -O2/-DNDEBUG add no include dir, so the inferred root stays a plain -I.
+        from abicheck.header_utils import resolve_inferred_header_roots
+
+        root, umb = self._umbrella(tmp_path)
+        inc, toks = resolve_inferred_header_roots(
+            [umb], [], gcc_options="-O2 -DNDEBUG", gcc_option_tokens=("-Wall",)
+        )
+        assert root in inc and toks == []
+
+    def test_user_include_deduped(self, tmp_path):
+        from abicheck.header_utils import resolve_inferred_header_roots
+
+        root, umb = self._umbrella(tmp_path)
+        nested = root / "oneapi"
+        inc, toks = resolve_inferred_header_roots([umb], [nested])
+        # nested came from the user -I; only the include root is inferred-added.
+        assert nested not in inc and root in inc
+
+    def test_no_inferred_roots_returns_empty(self, tmp_path):
+        # A -H file with a nonexistent parent yields no inferred roots → no flags
+        # of either kind (and no spurious -isystem even with a build context).
+        from abicheck.header_utils import resolve_inferred_header_roots
+
+        ghost = tmp_path / "absent" / "x.h"
+        assert resolve_inferred_header_roots(
+            [ghost], [], gcc_option_tokens=("-isystem", "/x")
+        ) == ([], [])
+
+    def test_malformed_gcc_options_falls_back_to_plain_split(self, tmp_path):
+        # An unbalanced quote makes shlex.split raise; we fall back to str.split
+        # so an -I in a malformed --gcc-options string is still detected.
+        from abicheck.header_utils import resolve_inferred_header_roots
+
+        root, umb = self._umbrella(tmp_path)
+        inc, toks = resolve_inferred_header_roots(
+            [umb], [], gcc_options='-I "/broken'
+        )
+        assert inc == [] and str(root) in toks
+
+
 # ── _dump_elf() ─────────────────────────────────────────────────────────────
 
 
 class TestDumpElf:
+    def test_implicit_header_root_passed_to_dumper(self, tmp_path):
+        # P3 regression: a -H umbrella nested under include/ must reach the
+        # frontend with the include root on extra_includes, with no explicit -I.
+        from abicheck.service import _dump_elf
+
+        p = tmp_path / "lib.so"
+        p.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        root = tmp_path / "include"
+        (root / "oneapi").mkdir(parents=True)
+        umb = root / "oneapi" / "tbb.h"
+        umb.write_text("// umbrella")
+        snap = AbiSnapshot(library="t", version="1.0")
+        with patch("abicheck.dumper.dump", return_value=snap) as mock:
+            _dump_elf(p, [umb], [], "1.0", "c++")
+        passed = mock.call_args.kwargs["extra_includes"]
+        assert root in passed  # the include root was auto-added (plain -I)
+
+    def test_implicit_root_defers_to_isystem_build_context(self, tmp_path):
+        # Codex: when the caller's CompileContext supplies includes via -isystem,
+        # the inferred -H root must defer — emitted as its own -isystem token
+        # *after* the build's (build's is emitted first, so it wins), not jumping
+        # ahead as -I. -isystem also keeps it above the standard system dirs.
+        from abicheck.service import _dump_elf
+        from abicheck.service_scan import CompileContext
+
+        p = tmp_path / "lib.so"
+        p.write_bytes(b"\x7fELF" + b"\x00" * 100)
+        root = tmp_path / "include"
+        (root / "oneapi").mkdir(parents=True)
+        umb = root / "oneapi" / "tbb.h"
+        umb.write_text("// umbrella")
+        gen = str(tmp_path / "gen")
+        snap = AbiSnapshot(library="t", version="1.0")
+        cc = CompileContext(gcc_option_tokens=("-isystem", gen))
+        with patch("abicheck.dumper.dump", return_value=snap) as mock:
+            _dump_elf(p, [umb], [], "1.0", "c++", compile=cc)
+        kwargs = mock.call_args.kwargs
+        assert root not in kwargs["extra_includes"]  # not promoted to -I
+        toks = list(kwargs["gcc_option_tokens"])
+        assert str(root) in toks
+        assert toks[toks.index(str(root)) - 1] == "-isystem"
+        # the build's -isystem dir stays ahead of the inferred root (wins)
+        assert toks.index(gen) < toks.index(str(root))
+
     def test_no_headers_warning(self, tmp_path):
         from abicheck.service import _dump_elf
 
@@ -337,6 +610,75 @@ class TestDumpElf:
 
 
 # ── _dump_pe() ──────────────────────────────────────────────────────────────
+
+
+class TestHeaderScopedInferredRoots:
+    """P3 parity: the PE/Mach-O header-scoped path also adds inferred -H roots."""
+
+    def _umbrella(self, tmp_path):
+        root = tmp_path / "include"
+        (root / "oneapi").mkdir(parents=True)
+        umb = root / "oneapi" / "tbb.h"
+        umb.write_text("int f(void);\n", encoding="utf-8")
+        return root, umb
+
+    def test_pe_no_build_context_adds_root_as_I(self, tmp_path):
+        from abicheck.service import _try_header_scoped_dump
+
+        root, umb = self._umbrella(tmp_path)
+        captured = {}
+
+        def fake_pe(path, headers, extra_includes, version, compiler, **k):
+            captured["extra_includes"] = extra_includes
+            captured.update(k)
+            return AbiSnapshot(library="x", version="1.0")
+
+        with patch("abicheck.dumper._dump_pe", fake_pe):
+            _try_header_scoped_dump("pe", tmp_path / "x.dll", [umb], [], "1.0", "c++")
+        # no build context → inferred include root rides in extra_includes
+        assert root in captured["extra_includes"]
+
+    def test_no_headers_skips_inferred_derivation(self, tmp_path):
+        # With no -H headers the derivation is skipped: the original includes pass
+        # through unchanged and nothing is deferred/hashed.
+        from abicheck.service import _try_header_scoped_dump
+
+        captured = {}
+
+        def fake_pe(path, headers, extra_includes, version, compiler, **k):
+            captured["extra_includes"] = extra_includes
+            captured.update(k)
+            return AbiSnapshot(library="x", version="1.0")
+
+        inc = [tmp_path / "inc"]
+        with patch("abicheck.dumper._dump_pe", fake_pe):
+            _try_header_scoped_dump("pe", tmp_path / "x.dll", [], inc, "1.0", "c++")
+        assert captured["extra_includes"] == inc  # unchanged, no inferred roots
+        assert captured["extra_hash_dirs"] == ()
+
+    def test_macho_build_context_defers_and_hashes(self, tmp_path):
+        from abicheck.service import _try_header_scoped_dump
+        from abicheck.service_scan import CompileContext
+
+        root, umb = self._umbrella(tmp_path)
+        captured = {}
+
+        def fake_macho(path, headers, extra_includes, version, compiler, **k):
+            captured["extra_includes"] = extra_includes
+            captured.update(k)
+            return AbiSnapshot(library="x", version="1.0")
+
+        cc = CompileContext(gcc_option_tokens=("-isystem", str(tmp_path / "gen")))
+        with patch("abicheck.dumper._dump_macho", fake_macho):
+            _try_header_scoped_dump(
+                "macho", tmp_path / "x.dylib", [umb], [], "1.0", "c++", compile=cc
+            )
+        # build context → root defers to -isystem (gcc_option_tokens), not -I,
+        # and its dir is hashed into the cache key (extra_hash_dirs)
+        assert root not in captured["extra_includes"]
+        toks = list(captured["gcc_option_tokens"])
+        assert str(root) in toks and toks[toks.index(str(root)) - 1] == "-isystem"
+        assert root in captured["extra_hash_dirs"]
 
 
 class TestDumpPe:

@@ -885,7 +885,8 @@ def embed_build_source(
             _deeper = "/L4/L5" if ("L4" in layers or "L5" in layers) else ""
             click.echo(
                 f"warning: no compile_commands.json found under {_tree} "
-                "(looked in: ., build, builddir, out, _build, cmake-build-debug); "
+                "(looked in: ., build, builddir, out, _build, cmake-build-debug, "
+                "and any immediate subdirectory); "
                 f"L3{_deeper} not collected. Generate one — CMake: configure with "
                 "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON; Meson: emitted by `meson setup`; "
                 "Autotools/Make: run `bear -- make` — or pass "

@@ -109,3 +109,58 @@ def test_meson_builddir_is_autodiscovered(tmp_path):
 
     assert snap.build_source is not None
     assert snap.build_source.build_evidence.compile_units  # discovered under builddir/
+
+
+# ── P4: compile-DB auto-discovery also finds non-standard subdir build trees ──
+
+
+def test_autodiscover_compile_db_hint_dir(tmp_path):
+    from abicheck.buildsource.inline import _autodiscover_compile_db
+
+    (tmp_path / "build").mkdir()
+    db = tmp_path / "build" / "compile_commands.json"
+    db.write_text("[]")
+    assert _autodiscover_compile_db(tmp_path) == db
+
+
+def test_autodiscover_compile_db_nonstandard_subdir(tmp_path):
+    # A non-hint, IDE/preset-style build dir is still found via the depth-1
+    # fallback rather than yielding no L3 evidence (P4).
+    from abicheck.buildsource.inline import _autodiscover_compile_db
+
+    bd = tmp_path / "cmake-build-debug-gcc"
+    bd.mkdir()
+    db = bd / "compile_commands.json"
+    db.write_text("[]")
+    assert _autodiscover_compile_db(tmp_path) == db
+
+
+def test_autodiscover_compile_db_prefers_hint_over_subdir(tmp_path):
+    from abicheck.buildsource.inline import _autodiscover_compile_db
+
+    (tmp_path / "build").mkdir()
+    hint_db = tmp_path / "build" / "compile_commands.json"
+    hint_db.write_text("[]")
+    other = tmp_path / "zzz-build"
+    other.mkdir()
+    (other / "compile_commands.json").write_text("[]")
+    assert _autodiscover_compile_db(tmp_path) == hint_db
+
+
+def test_autodiscover_compile_db_none_when_absent(tmp_path):
+    from abicheck.buildsource.inline import _autodiscover_compile_db
+
+    (tmp_path / "src.c").write_text("int x;")
+    assert _autodiscover_compile_db(tmp_path) is None
+
+
+def test_compile_db_at_dir_uses_subdir_fallback(tmp_path):
+    # --build-info <dir> now honours the same depth-1 subdir fallback as
+    # --sources auto-discovery (Codex review).
+    from abicheck.buildsource.inline import _compile_db_at
+
+    bd = tmp_path / "cmake-build-debug-gcc"
+    bd.mkdir()
+    db = bd / "compile_commands.json"
+    db.write_text("[]")
+    assert _compile_db_at(tmp_path) == db

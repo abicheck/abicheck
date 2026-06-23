@@ -288,6 +288,105 @@ class TestDumpLang:
         assert result.exit_code == 0
         assert captured.get("compiler") == "c++"
 
+    def test_implicit_header_include_root_passed(self, tmp_path, monkeypatch):
+        # P3: a -H umbrella nested under include/ reaches the dumper with the
+        # include root on the search path — no separate -I needed. With no build
+        # context to defer to, the inferred root rides in as a plain -I
+        # (extra_includes) so it outranks the standard system dirs — an umbrella
+        # that pulls a system-colliding name still finds the package header.
+        so_path = tmp_path / "libfoo.so"
+        so_path.write_bytes(b"\x7fELF")
+        root = tmp_path / "include"
+        (root / "oneapi").mkdir(parents=True)
+        header = root / "oneapi" / "umbrella.h"
+        header.write_text("int foo();\n", encoding="utf-8")
+
+        captured = {}
+
+        def fake_dump(**kwargs):
+            captured.update(kwargs)
+            return AbiSnapshot(library="libfoo.so", version="1.0")
+
+        monkeypatch.setattr("abicheck.cli_dump_helpers.dump", fake_dump)
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["dump", str(so_path), "-H", str(header)])
+        assert result.exit_code == 0, result.output
+        # no build context → plain -I via extra_includes, not a deferred token
+        assert root in captured.get("extra_includes", [])
+        assert str(root) not in list(captured.get("gcc_option_tokens", ()))
+
+    def test_implicit_root_defers_to_build_context(self, tmp_path, monkeypatch):
+        # Codex review: a build-context include (here via --gcc-options) must
+        # keep priority over the inferred -H root. The build-context flag rides
+        # in gcc_options; the inferred root rides in gcc_option_tokens as an
+        # -isystem entry — searched after the build-context -I/-isystem dirs but
+        # above the standard system dirs — so the build context always wins.
+        so_path = tmp_path / "libfoo.so"
+        so_path.write_bytes(b"\x7fELF")
+        root = tmp_path / "include"
+        (root / "oneapi").mkdir(parents=True)
+        header = root / "oneapi" / "umbrella.h"
+        header.write_text("int foo();\n", encoding="utf-8")
+        buildctx = tmp_path / "buildctx"
+        buildctx.mkdir()
+
+        captured = {}
+
+        def fake_dump(**kwargs):
+            captured.update(kwargs)
+            return AbiSnapshot(library="libfoo.so", version="1.0")
+
+        monkeypatch.setattr("abicheck.cli_dump_helpers.dump", fake_dump)
+
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "dump", str(so_path), "-H", str(header),
+            "--gcc-options", f"-I {buildctx}",
+        ])
+        assert result.exit_code == 0, result.output
+        # build context stays in gcc_options (emitted first); inferred root is an
+        # -isystem token — searched below it — so build context keeps priority.
+        assert f"-I {buildctx}" in (captured.get("gcc_options") or "")
+        tokens = list(captured.get("gcc_option_tokens", ()))
+        assert str(root) in tokens
+        assert tokens[tokens.index(str(root)) - 1] == "-isystem"
+
+    def test_implicit_root_skips_user_provided_include(self, tmp_path, monkeypatch):
+        # An inferred root already supplied by the user via -I is not duplicated.
+        # With no build context, the *other* inferred ancestor is still added as
+        # a plain -I (both land in extra_includes); the user's stays unduplicated.
+        so_path = tmp_path / "libfoo.so"
+        so_path.write_bytes(b"\x7fELF")
+        root = tmp_path / "include"
+        nested = root / "oneapi"
+        nested.mkdir(parents=True)
+        header = nested / "umbrella.h"
+        header.write_text("int foo();\n", encoding="utf-8")
+
+        captured = {}
+
+        def fake_dump(**kwargs):
+            captured.update(kwargs)
+            return AbiSnapshot(library="libfoo.so", version="1.0")
+
+        monkeypatch.setattr("abicheck.cli_dump_helpers.dump", fake_dump)
+
+        runner = CliRunner()
+        # User passes the umbrella's parent (include/oneapi) explicitly via -I.
+        result = runner.invoke(main, [
+            "dump", str(so_path), "-H", str(header), "-I", str(nested),
+        ])
+        assert result.exit_code == 0, result.output
+        extra = captured.get("extra_includes", [])
+        # the user -I stays, exactly once (not re-added by the inferred pass)
+        assert nested in extra
+        assert extra.count(nested) == 1
+        # the other inferred ancestor (the include root) is added as -I too
+        assert root in extra
+        # no build context here, so nothing is deferred to gcc_option_tokens
+        assert str(root) not in list(captured.get("gcc_option_tokens", ()))
+
 
 # ── Cross-compilation flags on dump ──────────────────────────────────────
 
