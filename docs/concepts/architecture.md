@@ -150,11 +150,12 @@ declaration surface (signatures, classes/bases, enums, typedefs, access,
 `noexcept`, templates) but is a **syntactic** AST: it does **not** compute record
 layout, so `size_bits`/`offset_bits`/vtable slots stay unset and the layout
 detectors skip an unknown-vs-unknown comparison — **DWARF (L1) remains the layout
-authority** on a clang-only host. With that caveat, either backend extracts:
+authority** on a clang-only host. With that caveat, the header AST extracts:
 
 - Function signatures (parameters, return types)
-- Class/struct definitions and layout
-- Virtual method tables (vtable slot ordering)
+- Class/struct definitions; layout when backed by castxml or DWARF evidence
+- Virtual method tables (vtable slot ordering) when backed by castxml or DWARF
+  evidence
 - Enum values and member names
 - Typedefs and template instantiations
 - `noexcept` specifications

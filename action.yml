@@ -134,11 +134,12 @@ inputs:
     default: 'c++'
   ast-frontend:
     description: >
-      L2 header-AST frontend for native-binary inputs: "auto" (castxml if
-      present, else clang, with auto-fallback to clang on a castxml
-      toolchain-version error), "castxml" (default), or "clang"
-      (clang -ast-dump=json; for clang-only hosts). Applies to compare and
-      dump modes. Equivalent to the ABICHECK_AST_FRONTEND env var.
+      L2 header-AST frontend for native-binary inputs: "auto" (resolves to
+      castxml without conditional clang fallback; a runtime castxml
+      toolchain-version failure still falls back to clang, G16), "castxml"
+      (default), or "clang" (clang -ast-dump=json; explicit opt-in for
+      clang-only hosts). Applies to compare and dump modes. Same as the
+      ABICHECK_AST_FRONTEND env var.
     required: false
   gcc-path:
     description: 'Path to GCC/G++ cross-compiler binary (dump mode only).'

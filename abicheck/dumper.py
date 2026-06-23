@@ -17,12 +17,14 @@
 The header AST (L2) is produced by one of two interchangeable frontends behind
 ``_header_ast_parser``: **castxml** (the default / schema reference, parsed by
 ``dumper_castxml._CastxmlParser``) or **clang** (``clang -ast-dump=json``, parsed
-by ``dumper_clang._ClangAstParser``) for hosts where castxml is absent. Select
+by ``dumper_clang._ClangAstParser``) when explicitly requested. Select
 with ``header_backend=`` (``auto``/``castxml``/``clang``; CLI ``--ast-frontend``)
-or the ``ABICHECK_AST_FRONTEND`` env var. When the backend is auto-selected, a castxml
-*toolchain-version* failure (bundled Clang too old for the host libstdc++/GCC)
-falls back to the clang backend automatically (G16); an explicit selection is
-honored verbatim. See ADR-003.
+or the ``ABICHECK_AST_FRONTEND`` env var. ``auto`` resolves to castxml and never
+silently falls back to clang on castxml-less hosts (clang's JSON AST lacks
+computed record layout, so an implicit fallback could miss layout-only breaks).
+The one exception is a runtime castxml *toolchain-version* failure (bundled
+Clang too old for the host libstdc++/GCC), which falls back to the clang backend
+automatically (G16); an explicit selection is honored verbatim. See ADR-003.
 """
 from __future__ import annotations
 
@@ -92,7 +94,8 @@ def _clang_available(clang_bin: str = "clang") -> bool:
 #: Header-AST backend identifiers (the L2 producers). castxml is the default and
 #: the schema reference; clang is the alternative for hosts where castxml is
 #: absent or its bundled frontend chokes (ADR-003, "clang as an alternative L2
-#: frontend"). ``auto`` prefers castxml, then clang.
+#: frontend"). ``auto`` resolves to castxml unless the environment explicitly
+#: selects clang; the clang backend lacks computed record layout evidence.
 HEADER_BACKENDS = ("auto", "castxml", "clang")
 
 
@@ -101,11 +104,12 @@ def _resolve_header_backend(backend: str | None) -> str:
 
     Precedence: an explicit ``castxml``/``clang`` is honored verbatim (and the
     caller gets a clear error later if that tool is missing). ``auto``/``None``
-    consults the ``ABICHECK_AST_FRONTEND`` env var first — so a clang-only CI
-    image can flip the global default without touching every call site — then
-    prefers castxml (the schema reference), falling back to clang when only
-    clang is on PATH. When neither tool is present it returns ``castxml`` so the
-    existing "install castxml" error message is surfaced unchanged.
+    consults the ``ABICHECK_AST_FRONTEND`` env var first, then resolves to
+    castxml (the schema reference). It deliberately does not auto-fallback to
+    clang: clang JSON AST snapshots do not carry computed record size, alignment,
+    field offsets, or vtable layout, so implicit fallback could silently miss
+    layout-only ABI breaks on castxml-less hosts. Users who accept that evidence
+    tier may still request ``clang`` explicitly (or via the environment).
     """
     choice = (backend or "auto").lower()
     if choice in ("castxml", "clang"):
@@ -117,10 +121,6 @@ def _resolve_header_backend(backend: str | None) -> str:
     env = os.environ.get("ABICHECK_AST_FRONTEND", "").strip().lower()
     if env in ("castxml", "clang"):
         return env
-    if _castxml_available():
-        return "castxml"
-    if _clang_available():
-        return "clang"
     return "castxml"
 
 

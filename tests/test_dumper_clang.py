@@ -482,23 +482,24 @@ def test_resolve_header_backend_ast_frontend_env(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setenv("ABICHECK_AST_FRONTEND", "clang")
     assert _resolve_header_backend("auto") == "clang"
     assert _resolve_header_backend(None) == "clang"
-    # An out-of-enum ABICHECK_AST_FRONTEND value is ignored; auto-detection
-    # then supplies the default.
+    # An out-of-enum ABICHECK_AST_FRONTEND value is ignored; auto then
+    # fails closed to castxml.
     monkeypatch.setenv("ABICHECK_AST_FRONTEND", "bogus")
     monkeypatch.setattr("abicheck.dumper._castxml_available", lambda: True)
     assert _resolve_header_backend("auto") == "castxml"
 
 
-def test_resolve_header_backend_auto_prefers_castxml(
+def test_resolve_header_backend_auto_stays_castxml_without_env(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv("ABICHECK_AST_FRONTEND", raising=False)
     monkeypatch.setattr("abicheck.dumper._castxml_available", lambda: True)
     monkeypatch.setattr("abicheck.dumper._clang_available", lambda *a, **k: True)
     assert _resolve_header_backend("auto") == "castxml"
-    # castxml absent, clang present → clang.
+    # Do not silently fall back to clang: clang AST lacks computed layout
+    # evidence, so auto must fail closed through the castxml path.
     monkeypatch.setattr("abicheck.dumper._castxml_available", lambda: False)
-    assert _resolve_header_backend("auto") == "clang"
+    assert _resolve_header_backend("auto") == "castxml"
 
 
 def test_build_clang_header_command_cpp_and_c(tmp_path: Path) -> None:
