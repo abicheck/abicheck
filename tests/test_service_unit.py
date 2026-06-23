@@ -617,6 +617,24 @@ class TestHeaderScopedInferredRoots:
         # no build context → inferred include root rides in extra_includes
         assert root in captured["extra_includes"]
 
+    def test_no_headers_skips_inferred_derivation(self, tmp_path):
+        # With no -H headers the derivation is skipped: the original includes pass
+        # through unchanged and nothing is deferred/hashed.
+        from abicheck.service import _try_header_scoped_dump
+
+        captured = {}
+
+        def fake_pe(path, headers, extra_includes, version, compiler, **k):
+            captured["extra_includes"] = extra_includes
+            captured.update(k)
+            return AbiSnapshot(library="x", version="1.0")
+
+        inc = [tmp_path / "inc"]
+        with patch("abicheck.dumper._dump_pe", fake_pe):
+            _try_header_scoped_dump("pe", tmp_path / "x.dll", [], inc, "1.0", "c++")
+        assert captured["extra_includes"] == inc  # unchanged, no inferred roots
+        assert captured["extra_hash_dirs"] == ()
+
     def test_macho_build_context_defers_and_hashes(self, tmp_path):
         from abicheck.service import _try_header_scoped_dump
         from abicheck.service_scan import CompileContext
