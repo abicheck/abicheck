@@ -245,6 +245,31 @@ _ABOVE_SYSTEM_GNU_PREFIXES = ("-I", "-iquote", "-isystem", "-cxx-isystem")
 _MSVC_SYSTEM_BUCKETS = ("/imsvc", "/external:I")
 
 
+def _flag_tokens(toks: list[str]) -> list[str]:
+    """*toks* with the operands of spaced include flags dropped.
+
+    A spaced include flag (``-I dir`` / ``/imsvc dir`` / ``/external:I dir`` …,
+    where the token equals the bare prefix) consumes the *next* token as its
+    directory operand. That operand is a path, not a flag, so it must not be
+    matched against flag spellings — otherwise a dir that merely *starts with* a
+    bucket name (``/I /imsvc-sdk``) is misread as an ``/imsvc`` flag (CodeRabbit
+    review). Returns only the genuine flag tokens. Attached forms (``-Idir`` /
+    ``/external:Idir``) carry their own operand and stay; the bare-prefix
+    (spaced) form is the only one whose successor is a separate operand.
+    """
+    out: list[str] = []
+    i = 0
+    n = len(toks)
+    while i < n:
+        t = toks[i]
+        out.append(t)
+        if t in _INCLUDE_FLAG_PREFIXES and i + 1 < n:
+            i += 2  # skip the directory operand of a spaced include flag
+        else:
+            i += 1
+    return out
+
+
 def _msvc_deferred_flag(toks: list[str]) -> str:
     """The MSVC/clang-cl bucket to defer an inferred root below *toks* (#454).
 
@@ -262,8 +287,9 @@ def _msvc_deferred_flag(toks: list[str]) -> str:
     ``/I`` for a plain ``/I``-only context — there is no system bucket to shadow,
     so command-line order (after the build's own ``/I`` dirs) suffices.
     """
+    flags = _flag_tokens(toks)
     for bucket in _MSVC_SYSTEM_BUCKETS:
-        if any(t.startswith(bucket) for t in toks):
+        if any(t.startswith(bucket) for t in flags):
             return bucket
     return "/I"
 
