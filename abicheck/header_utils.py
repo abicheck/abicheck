@@ -237,11 +237,12 @@ def _msvc_style_context(toks: list[str]) -> bool:
 _ABOVE_SYSTEM_GNU_PREFIXES = ("-I", "-iquote", "-isystem", "-cxx-isystem")
 
 #: MSVC/clang-cl *system*-include buckets, searched after the plain ``/I``
-#: directories but still above the standard ``INCLUDE`` dirs. Ordered by
-#: preference for a deferred root: ``/external:I`` first (understood by both
-#: ``cl.exe`` — with ``/experimental:external`` on older toolsets — and
-#: ``clang-cl``), then ``/imsvc`` (``clang-cl`` only).
-_MSVC_SYSTEM_BUCKETS = ("/external:I", "/imsvc")
+#: directories but still above the standard ``INCLUDE`` dirs. Listed
+#: **lowest-search-priority first** — ``clang-cl`` searches ``/imsvc`` dirs (added
+#: "as if in ``%INCLUDE%``") *after* ``/external:I`` dirs, so ``/imsvc`` is the
+#: lower bucket. :func:`_msvc_deferred_flag` returns the first present here so a
+#: deferred root lands in the build's lowest bucket and can never shadow it.
+_MSVC_SYSTEM_BUCKETS = ("/imsvc", "/external:I")
 
 
 def _msvc_deferred_flag(toks: list[str]) -> str:
@@ -249,14 +250,17 @@ def _msvc_deferred_flag(toks: list[str]) -> str:
 
     Mirrors the build context's own *lowest* include bucket so the deferred
     root can never shadow it: if the context uses a system bucket
-    (``/external:I``/``/imsvc``), emit in that *same* bucket — a plain ``/I``
-    root is searched *before* those system dirs and could shadow them. Mirroring
-    the bucket the context actually used is frontend-agnostic: the frontend that
-    will run must already understand that spelling (it consumed the same flag on
-    input), which sidesteps threading the ``cl.exe``-vs-``clang-cl`` identity
-    into this pure helper. Falls back to ``/I`` for a plain ``/I``-only context
-    — there is no system bucket to shadow, so command-line order (after the
-    build's own ``/I`` dirs) suffices.
+    (``/external:I``/``/imsvc``), emit in the *lowest-searched* one present — a
+    plain ``/I`` root is searched *before* those system dirs and could shadow
+    them, and even an ``/external:I`` root is searched before the build's
+    ``/imsvc`` (``%INCLUDE%``-style) dirs (Codex review). Mirroring a bucket the
+    context actually used is frontend-agnostic: the frontend that will run must
+    already understand that spelling (it consumed the same flag on input) — in
+    particular a context that uses ``/imsvc`` is necessarily ``clang-cl``, since
+    ``cl.exe`` rejects ``/imsvc`` — which sidesteps threading the
+    ``cl.exe``-vs-``clang-cl`` identity into this pure helper. Falls back to
+    ``/I`` for a plain ``/I``-only context — there is no system bucket to shadow,
+    so command-line order (after the build's own ``/I`` dirs) suffices.
     """
     for bucket in _MSVC_SYSTEM_BUCKETS:
         if any(t.startswith(bucket) for t in toks):

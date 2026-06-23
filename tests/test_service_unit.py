@@ -416,12 +416,14 @@ class TestResolveInferredHeaderRoots:
             [umb], [], gcc_options="/I build\\gen /imsvc clang_sys"
         )
         assert imsvc[imsvc.index(str(root)) - 1] == "/imsvc"
-        # /external:I is preferred over /imsvc when both appear (broadest
-        # frontend support — cl.exe understands /external:I, not /imsvc).
+        # When both appear, the *lowest-searched* bucket wins: clang-cl searches
+        # /imsvc (%INCLUDE%-style) dirs after /external:I, so deferring into
+        # /imsvc keeps the root below the build's /imsvc dirs too (Codex review).
+        # A context using /imsvc is necessarily clang-cl, so /imsvc is supported.
         _, both = resolve_inferred_header_roots(
             [umb], [], gcc_options="/imsvc a /external:I b"
         )
-        assert both[both.index(str(root)) - 1] == "/external:I"
+        assert both[both.index(str(root)) - 1] == "/imsvc"
 
     def test_deferred_flag_dialect_matches_build_context(self, tmp_path):
         # The deferred flag matches the build context's lowest include bucket:
