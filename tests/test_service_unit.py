@@ -438,6 +438,14 @@ class TestResolveInferredHeaderRoots:
         )
         assert toks[toks.index(str(root)) - 1] == "/I"
 
+        # The mirror case: a *GNU* -I context whose operand dir starts with a
+        # slash spelling must not be misclassified as MSVC (dialect detection
+        # filters operands too) — it stays the GNU -isystem bucket.
+        _, gnu_toks = resolve_inferred_header_roots(
+            [umb], [], gcc_option_tokens=("-I", "/imsvc-sdk")
+        )
+        assert gnu_toks[gnu_toks.index(str(root)) - 1] == "-isystem"
+
     def test_deferred_flag_dialect_matches_build_context(self, tmp_path):
         # The deferred flag matches the build context's lowest include bucket:
         # above-system GNU (-I/-isystem) → -isystem; MSVC /I → /I; an

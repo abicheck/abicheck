@@ -224,10 +224,14 @@ def _msvc_style_context(toks: list[str]) -> bool:
 
     Distinguishes ``/I``/``/external:I``/``/imsvc`` from the GNU forms so the
     deferred inferred root is emitted in the same dialect — a GNU ``-isystem``
-    is silently ignored by ``cl.exe``/``clang-cl`` (Codex review).
+    is silently ignored by ``cl.exe``/``clang-cl`` (Codex review). Operands of
+    spaced include flags are stripped first (:func:`_flag_tokens`) so a GNU
+    context whose directory merely *starts with* a slash spelling
+    (``-I /imsvc-sdk``) is not misread as MSVC and routed to the wrong dialect
+    (CodeRabbit review).
     """
     msvc = ("/I", "/external:I", "/imsvc")
-    return any(t.startswith(p) for t in toks for p in msvc)
+    return any(t.startswith(p) for t in _flag_tokens(toks) for p in msvc)
 
 
 #: GNU/clang include classes searched *before* the standard system dirs. An
