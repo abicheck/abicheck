@@ -100,7 +100,12 @@ def inferred_query_command(system: str, sources: Path) -> list[str] | None:
         return ["make", "-n", "--always-make"]
     if system == "bazel":
         # Action graph for all C++ compile actions; jsonproto feeds the adapter.
-        return ["bazel", "aquery", "--output=jsonproto", "mnemonic(CppCompile, deps(//...))"]
+        # --include_param_files expands @...params so source paths and ABI flags
+        # that Bazel spills to param files are present (mirrors BazelAdapter).
+        return [
+            "bazel", "aquery", "--output=jsonproto", "--include_param_files",
+            "mnemonic(CppCompile, deps(//...))",
+        ]
     return None
 
 

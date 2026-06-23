@@ -80,6 +80,12 @@ _QUERY_TIMEOUT_S = 300
 # DB produced). "ok" means a DB was produced, so it needs no special handling.
 _BUILD_QUERY_DIAG_STATUSES = ("failed", "skipped", "partial")
 
+# Extractor names that carry a build-query no-facts diagnostic: the explicit
+# trusted `build.query` ("build_query") and the zero-config inferred query
+# ("build_query_auto"). Both must be treated alike in the pack-survival gate and
+# the L3 coverage row so an inferred-query-only run keeps its explanation.
+_BUILD_QUERY_DIAG_NAMES = ("build_query", "build_query_auto")
+
 
 #: Valid per-category severity levels (ADR-037 D4 ``severity:`` block).
 _SEVERITY_LEVELS = ("error", "warning", "info")
@@ -639,8 +645,7 @@ def collect_inline_pack(
     # the build_query diagnostic reach `compare`, rather than dropping it as if
     # nothing was attempted (Codex).
     has_query_diag = any(
-        e.name in ("build_query", "build_query_auto")
-        and e.status in _BUILD_QUERY_DIAG_STATUSES
+        e.name in _BUILD_QUERY_DIAG_NAMES and e.status in _BUILD_QUERY_DIAG_STATUSES
         for e in extractors
     )
     if not (has_build or surface is not None or graph is not None or has_query_diag):
@@ -1446,7 +1451,8 @@ def build_inline_coverage(
             (
                 e
                 for e in extractors
-                if e.name == "build_query" and e.status in _BUILD_QUERY_DIAG_STATUSES
+                if e.name in _BUILD_QUERY_DIAG_NAMES
+                and e.status in _BUILD_QUERY_DIAG_STATUSES
             ),
             None,
         )

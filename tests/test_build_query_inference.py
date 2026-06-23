@@ -171,6 +171,27 @@ def test_run_make_ingests_units(tmp_path: Path, monkeypatch):
     assert merged.compile_units  # the g++ -c line became a compile unit
 
 
+def test_bazel_command_includes_param_files(tmp_path: Path):
+    cmd = inferred_query_command("bazel", tmp_path)
+    assert cmd is not None
+    assert "--include_param_files" in cmd  # expands @...params (Codex review)
+
+
+def test_inferred_query_diag_yields_partial_l3_coverage():
+    # A build_query_auto skipped/failed diagnostic must produce a partial L3 row,
+    # not a silent not_collected, so the user learns why source scanning got no L3.
+    from abicheck.buildsource.inline import build_inline_coverage
+    from abicheck.buildsource.model import CoverageStatus, ExtractorRecord
+
+    rec = ExtractorRecord(
+        name="build_query_auto", status="skipped", detail="cmake not installed"
+    )
+    rows = build_inline_coverage(BuildEvidence(), False, None, None, [rec])
+    l3 = next(r for r in rows if r.layer == "L3_build")
+    assert l3.status == CoverageStatus.PARTIAL
+    assert "cmake not installed" in (l3.detail or "")
+
+
 def test_run_bazel_empty_action_graph_is_partial(tmp_path: Path, monkeypatch):
     (tmp_path / "MODULE.bazel").write_text("module(name='x')\n")
     monkeypatch.setattr(
