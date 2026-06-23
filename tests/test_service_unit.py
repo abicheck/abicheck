@@ -351,7 +351,9 @@ class TestResolveInferredHeaderRoots:
         inc, toks = resolve_inferred_header_roots([umb], [])
         assert root in inc and toks == []
 
-    def test_isystem_context_defers_to_idirafter(self, tmp_path):
+    def test_isystem_context_defers_via_isystem(self, tmp_path):
+        # A build-context -isystem makes the inferred root defer — emitted as
+        # -isystem (below build context, above standard system dirs), not -I.
         from abicheck.header_utils import resolve_inferred_header_roots
 
         root, umb = self._umbrella(tmp_path)
@@ -359,7 +361,10 @@ class TestResolveInferredHeaderRoots:
             [umb], [], gcc_option_tokens=("-isystem", "/gen")
         )
         assert inc == []
-        assert "-idirafter" in toks and str(root) in toks
+        # every inferred root is emitted as -isystem (not -I, not -idirafter)
+        assert str(root) in toks
+        assert toks[toks.index(str(root)) - 1] == "-isystem"
+        assert "-idirafter" not in toks and "-I" not in toks
 
     def test_gcc_options_include_string_detected(self, tmp_path):
         from abicheck.header_utils import resolve_inferred_header_roots
@@ -369,6 +374,20 @@ class TestResolveInferredHeaderRoots:
             [umb], [], gcc_options="-I /build/include -O2"
         )
         assert inc == [] and str(root) in toks
+
+    def test_msvc_slash_I_context_detected(self, tmp_path):
+        # An MSVC/clang-cl build context (/I, /external:I, /imsvc) must also count
+        # as build context so the inferred root defers instead of shadowing it.
+        from abicheck.header_utils import resolve_inferred_header_roots
+
+        root, umb = self._umbrella(tmp_path)
+        for tok in ("/Ibuild\\generated", "/external:Igen", "/imsvc"):
+            inc, toks = resolve_inferred_header_roots(
+                [umb], [], gcc_option_tokens=(tok,)
+            )
+            assert inc == [], tok  # detected as build context → deferred
+            assert str(root) in toks, tok
+            assert toks[toks.index(str(root)) - 1] == "-isystem", tok
 
     def test_non_include_options_are_not_build_context(self, tmp_path):
         # -O2/-DNDEBUG add no include dir, so the inferred root stays a plain -I.
@@ -391,7 +410,7 @@ class TestResolveInferredHeaderRoots:
 
     def test_no_inferred_roots_returns_empty(self, tmp_path):
         # A -H file with a nonexistent parent yields no inferred roots → no flags
-        # of either kind (and no spurious -idirafter even with a build context).
+        # of either kind (and no spurious -isystem even with a build context).
         from abicheck.header_utils import resolve_inferred_header_roots
 
         ghost = tmp_path / "absent" / "x.h"
@@ -434,8 +453,9 @@ class TestDumpElf:
 
     def test_implicit_root_defers_to_isystem_build_context(self, tmp_path):
         # Codex: when the caller's CompileContext supplies includes via -isystem,
-        # the inferred -H root must defer (emit as -idirafter, below the -isystem
-        # build dir), not jump ahead of it as -I. (-I always beats -isystem.)
+        # the inferred -H root must defer — emitted as its own -isystem token
+        # *after* the build's (build's is emitted first, so it wins), not jumping
+        # ahead as -I. -isystem also keeps it above the standard system dirs.
         from abicheck.service import _dump_elf
         from abicheck.service_scan import CompileContext
 
@@ -445,16 +465,18 @@ class TestDumpElf:
         (root / "oneapi").mkdir(parents=True)
         umb = root / "oneapi" / "tbb.h"
         umb.write_text("// umbrella")
+        gen = str(tmp_path / "gen")
         snap = AbiSnapshot(library="t", version="1.0")
-        cc = CompileContext(gcc_option_tokens=("-isystem", str(tmp_path / "gen")))
+        cc = CompileContext(gcc_option_tokens=("-isystem", gen))
         with patch("abicheck.dumper.dump", return_value=snap) as mock:
             _dump_elf(p, [umb], [], "1.0", "c++", compile=cc)
         kwargs = mock.call_args.kwargs
         assert root not in kwargs["extra_includes"]  # not promoted to -I
         toks = list(kwargs["gcc_option_tokens"])
         assert str(root) in toks
-        assert toks[toks.index(str(root)) - 1] == "-idirafter"
-        assert "-isystem" in toks  # build-context token preserved ahead of it
+        assert toks[toks.index(str(root)) - 1] == "-isystem"
+        # the build's -isystem dir stays ahead of the inferred root (wins)
+        assert toks.index(gen) < toks.index(str(root))
 
     def test_no_headers_warning(self, tmp_path):
         from abicheck.service import _dump_elf

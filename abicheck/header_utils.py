@@ -36,10 +36,22 @@ _INCLUDE_ROOT_NAMES = frozenset({"include", "inc"})
 
 #: Compiler flags that contribute an include *search directory*. Their presence
 #: in the pass-through compile context means a real build supplied its own
-#: include tree, which an inferred ``-H`` root must defer to. Distinct, case-
-#: sensitive prefixes (``-I`` ≠ ``-isystem``/``-iquote``): ``startswith`` covers
-#: both the spaced (``-I dir``) and attached (``-Idir``) spellings.
-_INCLUDE_FLAG_PREFIXES = ("-I", "-isystem", "-iquote", "-idirafter", "-cxx-isystem")
+#: include tree, which an inferred ``-H`` root must defer to. Both GNU/clang
+#: (``-I``/``-isystem``/…) and MSVC/clang-cl (``/I``/``/external:I``/``/imsvc``)
+#: spellings are recognised so an MSVC build context (``--gcc-path cl.exe`` with
+#: ``/I`` options) is not mistaken for "no build context" (Codex review).
+#: Distinct, case-sensitive prefixes (``-I`` ≠ ``-isystem``/``-iquote``);
+#: ``startswith`` covers both spaced (``-I dir``) and attached (``-Idir``) forms.
+_INCLUDE_FLAG_PREFIXES = (
+    "-I",
+    "-isystem",
+    "-iquote",
+    "-idirafter",
+    "-cxx-isystem",  # GNU / clang
+    "/I",
+    "/external:I",
+    "/imsvc",  # MSVC / clang-cl
+)
 
 
 def _implicit_header_includes(headers: list[Path]) -> list[Path]:
@@ -83,13 +95,15 @@ def _has_include_build_context(
 ) -> bool:
     """True when the compile context supplies its own include search dirs.
 
-    Detects any ``-I``/``-isystem``/``-iquote``/``-idirafter``/``-cxx-isystem``
-    (attached or spaced) in the pass-through ``--gcc-options`` string or the
-    repeatable ``--gcc-option`` tokens. When present, a real build context is in
-    play and an inferred ``-H`` root must defer to it; when absent, the inferred
-    root can take ``-I`` priority. Compile-DB include dirs are folded into the
-    user ``-I`` list upstream, so they need no detection here — an inferred ``-I``
-    appended after them is already lower priority.
+    Detects any include-search flag — GNU/clang
+    ``-I``/``-isystem``/``-iquote``/``-idirafter``/``-cxx-isystem`` or MSVC/clang-cl
+    ``/I``/``/external:I``/``/imsvc`` (attached or spaced) — in the pass-through
+    ``--gcc-options`` string or the repeatable ``--gcc-option`` tokens. When
+    present, a real build context is in play and an inferred ``-H`` root must
+    defer to it; when absent, the inferred root can take ``-I`` priority.
+    Compile-DB include dirs are folded into the user ``-I`` list upstream, so they
+    need no detection here — an inferred ``-I`` appended after them is already
+    lower priority.
     """
     toks: list[str] = list(gcc_option_tokens)
     if gcc_options:
@@ -109,17 +123,21 @@ def resolve_inferred_header_roots(
 ) -> tuple[list[Path], list[str]]:
     """Split the inferred ``-H`` include roots by how they should be searched.
 
-    Returns ``(extra_includes, idirafter_tokens)`` — exactly one is non-empty.
+    Returns ``(extra_includes, deferred_tokens)`` — exactly one is non-empty.
     The inferred roots (de-duplicated against the user's ``-I``) are emitted as:
 
     * plain ``-I`` (returned as extra-include :class:`Path`\\ s) when there is
       **no** build context to defer to — so they outrank the standard system
       dirs and an umbrella that includes a system-colliding name (``<endian.h>``)
       still resolves the package header rather than the system one;
-    * ``-idirafter`` tokens when the compile context supplies its own include
-      dirs (``-I``/``-isystem``/… in ``gcc_options``/tokens) — that bucket is
-      searched below every build-context dir, so a real build context
-      (generated/shim headers) keeps priority (Codex review).
+    * ``-isystem`` tokens when the compile context supplies its own include dirs
+      (``-I``/``-isystem``/``/I``/… in ``gcc_options``/tokens). ``-isystem`` is
+      searched *after* the build context's ``-I`` **and** its earlier ``-isystem``
+      entries (the build's flags are emitted first), so a real build context
+      keeps priority — yet still *before* the standard system dirs, so the
+      system-colliding-basename case (``<endian.h>``) keeps resolving the package
+      header. (``-idirafter`` would drop below the system dirs and reintroduce
+      that collision — Codex review.)
 
     Shared by the ``dump`` CLI path (``cli_dump_helpers.perform_elf_dump``) and
     the service/``scan`` path (``service._dump_elf``) so they cannot drift.
@@ -133,6 +151,6 @@ def resolve_inferred_header_roots(
     if _has_include_build_context(gcc_options, gcc_option_tokens):
         toks: list[str] = []
         for d in inferred:
-            toks += ["-idirafter", str(d)]
+            toks += ["-isystem", str(d)]
         return [], toks
     return inferred, []

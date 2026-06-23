@@ -189,12 +189,13 @@ def perform_elf_dump(
     # relative includes without a separate -I. resolve_inferred_header_roots
     # picks the search bucket: plain -I (high priority, so an umbrella that pulls
     # a system-colliding name like <endian.h> still finds the package header)
-    # when there is no build context, or -idirafter (below every build-context
-    # dir, so generated/shim headers from -p/--gcc-options keep priority) when
-    # the compile context supplies its own includes — see its docstring.
+    # when there is no build context, or -isystem (below the build-context dirs
+    # so generated/shim headers from -p/--gcc-options keep priority, but still
+    # above the standard system dirs) when the compile context supplies its own
+    # includes — see its docstring.
     from .header_utils import resolve_inferred_header_roots
 
-    inc_extra, idirafter = (
+    inc_extra, deferred = (
         resolve_inferred_header_roots(
             list(headers),
             list(includes),
@@ -214,7 +215,7 @@ def perform_elf_dump(
             gcc_path=gcc_path,
             gcc_prefix=gcc_prefix,
             gcc_options=effective_gcc_options,
-            gcc_option_tokens=tuple(gcc_option_tokens) + tuple(idirafter),
+            gcc_option_tokens=tuple(gcc_option_tokens) + tuple(deferred),
             sysroot=sysroot,
             nostdinc=nostdinc,
             lang=lang if lang == "c" else None,

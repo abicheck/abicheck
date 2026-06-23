@@ -513,21 +513,22 @@ def _dump_elf(
 
     # P3: auto-add the public-header roots to the search path. Same bucket
     # selection as the dump CLI path (resolve_inferred_header_roots): plain -I
-    # when this request carries no compile-context includes, or -idirafter (below
-    # every build-context dir) when the caller's CompileContext supplies its own
-    # includes via gcc_options/tokens (e.g. -isystem build/generated) — so a real
-    # build context keeps search priority (Codex review).
+    # when this request carries no compile-context includes, or -isystem (below
+    # the build-context dirs, above the standard system dirs) when the caller's
+    # CompileContext supplies its own includes via gcc_options/tokens (e.g.
+    # -isystem build/generated) — so a real build context keeps search priority
+    # without dropping the inferred root below system headers (Codex review).
     eff_includes = list(includes)
     eff_tokens: tuple[str, ...] = cc.gcc_option_tokens
     if resolved_headers and not dwarf_only:
-        inc_extra, idirafter = resolve_inferred_header_roots(
+        inc_extra, deferred = resolve_inferred_header_roots(
             headers,
             list(includes),
             gcc_options=cc.gcc_options,
             gcc_option_tokens=cc.gcc_option_tokens,
         )
         eff_includes += inc_extra
-        eff_tokens = cc.gcc_option_tokens + tuple(idirafter)
+        eff_tokens = cc.gcc_option_tokens + tuple(deferred)
 
     compiler = "cc" if lang == "c" else "c++"
     try:

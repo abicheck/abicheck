@@ -312,7 +312,7 @@ class TestDumpLang:
         runner = CliRunner()
         result = runner.invoke(main, ["dump", str(so_path), "-H", str(header)])
         assert result.exit_code == 0, result.output
-        # no build context → plain -I via extra_includes, not an -idirafter token
+        # no build context → plain -I via extra_includes, not a deferred token
         assert root in captured.get("extra_includes", [])
         assert str(root) not in list(captured.get("gcc_option_tokens", ()))
 
@@ -320,8 +320,8 @@ class TestDumpLang:
         # Codex review: a build-context include (here via --gcc-options) must
         # keep priority over the inferred -H root. The build-context flag rides
         # in gcc_options; the inferred root rides in gcc_option_tokens as an
-        # -idirafter entry — searched after both -I and -isystem build-context
-        # dirs — so the build context always wins.
+        # -isystem entry — searched after the build-context -I/-isystem dirs but
+        # above the standard system dirs — so the build context always wins.
         so_path = tmp_path / "libfoo.so"
         so_path.write_bytes(b"\x7fELF")
         root = tmp_path / "include"
@@ -346,11 +346,11 @@ class TestDumpLang:
         ])
         assert result.exit_code == 0, result.output
         # build context stays in gcc_options (emitted first); inferred root is an
-        # -idirafter token — so build context keeps search priority.
+        # -isystem token — searched below it — so build context keeps priority.
         assert f"-I {buildctx}" in (captured.get("gcc_options") or "")
         tokens = list(captured.get("gcc_option_tokens", ()))
         assert str(root) in tokens
-        assert tokens[tokens.index(str(root)) - 1] == "-idirafter"
+        assert tokens[tokens.index(str(root)) - 1] == "-isystem"
 
     def test_implicit_root_skips_user_provided_include(self, tmp_path, monkeypatch):
         # An inferred root already supplied by the user via -I is not duplicated.
