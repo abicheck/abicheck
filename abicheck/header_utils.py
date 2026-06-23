@@ -34,6 +34,16 @@ from pathlib import Path
 #: not the file's immediate parent — is what must be on the search path.
 _INCLUDE_ROOT_NAMES = frozenset({"include", "inc"})
 
+#: Recognised C/C++ header file suffixes — the single source of truth for "what
+#: counts as a header" across directory ``-H`` expansion (``service_scan``) and
+#: the AST-cache include-dir mtime walk (``dumper._cache_key``). Lives in this
+#: leaf module so both can share it without an import cycle; keeping the walk in
+#: sync with expansion means an edit to e.g. a ``.hxx``/``.ipp`` transitive
+#: include still busts the cache (Codex review).
+HEADER_SUFFIXES = frozenset(
+    {".h", ".hh", ".hpp", ".hxx", ".h++", ".ipp", ".tpp", ".inc"}
+)
+
 #: Compiler flags that contribute an include *search directory*. Their presence
 #: in the pass-through compile context means a real build supplied its own
 #: include tree, which an inferred ``-H`` root must defer to. Both GNU/clang

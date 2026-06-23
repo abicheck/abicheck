@@ -33,25 +33,17 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from .errors import ValidationError
+from .header_utils import HEADER_SUFFIXES
 
 if TYPE_CHECKING:
     from .buildsource.scan_levels import EvidenceDepth, SourceMethod
 
 _logger = logging.getLogger(__name__)
 
-# Header file extensions recognised during directory expansion
-_HEADER_EXTS = frozenset(
-    {
-        ".h",
-        ".hh",
-        ".hpp",
-        ".hxx",
-        ".h++",
-        ".ipp",
-        ".tpp",
-        ".inc",
-    }
-)
+# Header file extensions recognised during directory expansion. Shared with the
+# AST-cache include walk (dumper._cache_key) via the leaf header_utils module so
+# expansion and cache-invalidation can never drift (Codex review).
+_HEADER_EXTS = HEADER_SUFFIXES
 
 
 def expand_header_inputs(inputs: list[Path]) -> list[Path]:
