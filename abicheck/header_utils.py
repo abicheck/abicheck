@@ -184,14 +184,12 @@ def resolve_inferred_header_roots(
       **no** build context to defer to — so they outrank the standard system
       dirs and an umbrella that includes a system-colliding name (``<endian.h>``)
       still resolves the package header rather than the system one;
-    * ``-isystem`` tokens when the compile context supplies its own include dirs
-      (``-I``/``-isystem``/``/I``/… in ``gcc_options``/tokens). ``-isystem`` is
-      searched *after* the build context's ``-I`` **and** its earlier ``-isystem``
-      entries (the build's flags are emitted first), so a real build context
-      keeps priority — yet still *before* the standard system dirs, so the
-      system-colliding-basename case (``<endian.h>``) keeps resolving the package
-      header. (``-idirafter`` would drop below the system dirs and reintroduce
-      that collision — Codex review.)
+    * a *deferred* token otherwise — emitted **after** the build context's flags
+      and in the bucket that keeps it below every build-context include dir (see
+      :func:`_deferred_include_flag`): ``-isystem`` below an above-system build
+      context (``-I``/``-isystem``/…, still above the standard system dirs so the
+      ``<endian.h>`` case resolves the package header), ``-idirafter`` below an
+      ``-idirafter``-only build context, or ``/I`` for an MSVC/clang-cl one.
 
     Shared by the ``dump`` CLI path (``cli_dump_helpers.perform_elf_dump``) and
     the service/``scan`` path (``service._dump_elf``) so they cannot drift.
@@ -207,16 +205,8 @@ def resolve_inferred_header_roots(
     if not inferred:
         return [], []
     if _has_include_build_context(gcc_options, gcc_option_tokens):
-        # Defer below the build context's include dirs (its flags are emitted
-        # first) but keep above the standard system dirs. Match the build
-        # context's flag *dialect* so the frontend actually honours the deferred
-        # root: GNU/clang -isystem (a system search class below -I), or MSVC/
-        # clang-cl /I (deferred by command-line order — cl.exe/clang-cl ignore a
-        # GNU -isystem, leaving the root unresolved) (Codex review).
-        flag = (
-            "/I" if _msvc_style_context(gcc_options, gcc_option_tokens) else "-isystem"
-        )
         toks: list[str] = []
+        flag = _deferred_include_flag(gcc_options, gcc_option_tokens)
         for d in inferred:
             toks += [flag, str(d)]
         return [], toks
@@ -235,6 +225,39 @@ def _msvc_style_context(
     toks = _context_tokens(gcc_options, gcc_option_tokens)
     msvc = ("/I", "/external:I", "/imsvc")
     return any(t.startswith(p) for t in toks for p in msvc)
+
+
+#: GNU/clang include classes searched *before* the standard system dirs. An
+#: inferred root deferred below these stays above the system dirs (so a
+#: system-colliding basename still resolves the package header). ``-idirafter``
+#: is deliberately absent — it is searched *after* the system dirs.
+_ABOVE_SYSTEM_GNU_PREFIXES = ("-I", "-iquote", "-isystem", "-cxx-isystem")
+
+
+def _deferred_include_flag(
+    gcc_options: str | None, gcc_option_tokens: Sequence[str]
+) -> str:
+    """The flag to defer an inferred ``-H`` root below the build context.
+
+    The root must search *after* every build-context include dir; the bucket
+    that achieves that depends on the build context's own flags:
+
+    * MSVC/clang-cl (``/I``/…) → ``/I`` (deferred by command-line order — a GNU
+      ``-isystem`` is silently ignored by ``cl.exe``/``clang-cl``);
+    * any *above-system* GNU class (``-I``/``-iquote``/``-isystem``/
+      ``-cxx-isystem``) → ``-isystem`` (searched after those, still above the
+      standard system dirs so a system-colliding basename resolves the package
+      header);
+    * otherwise the build context is ``-idirafter``-only (a *below-system*
+      class) → ``-idirafter`` (after the build's own ``-idirafter`` dirs, in the
+      same class, so the build's fallback keeps priority — Codex review).
+    """
+    if _msvc_style_context(gcc_options, gcc_option_tokens):
+        return "/I"
+    toks = _context_tokens(gcc_options, gcc_option_tokens)
+    if any(t.startswith(p) for t in toks for p in _ABOVE_SYSTEM_GNU_PREFIXES):
+        return "-isystem"
+    return "-idirafter"
 
 
 def deferred_token_dirs(deferred_tokens: Sequence[str]) -> list[Path]:

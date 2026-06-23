@@ -393,18 +393,22 @@ class TestResolveInferredHeaderRoots:
             assert "-isystem" not in toks, tok
 
     def test_deferred_flag_dialect_matches_build_context(self, tmp_path):
-        # GNU build context defers with -isystem; MSVC with /I.
+        # The deferred flag matches the build context's lowest include bucket:
+        # above-system GNU (-I/-isystem) → -isystem; MSVC /I → /I; an
+        # -idirafter-only context → -idirafter (so its below-system fallback
+        # keeps priority instead of being shadowed by an -isystem root).
         from abicheck.header_utils import resolve_inferred_header_roots
 
         root, umb = self._umbrella(tmp_path)
-        _, gnu = resolve_inferred_header_roots(
-            [umb], [], gcc_options="-I /build/gen"
-        )
+        _, gnu = resolve_inferred_header_roots([umb], [], gcc_options="-I /build/gen")
         assert gnu[gnu.index(str(root)) - 1] == "-isystem"
-        _, msvc = resolve_inferred_header_roots(
-            [umb], [], gcc_options="/I build\\gen"
-        )
+        _, msvc = resolve_inferred_header_roots([umb], [], gcc_options="/I build\\gen")
         assert msvc[msvc.index(str(root)) - 1] == "/I"
+        _, after = resolve_inferred_header_roots(
+            [umb], [], gcc_options="-idirafter /build/gen"
+        )
+        assert after[after.index(str(root)) - 1] == "-idirafter"
+        assert "-isystem" not in after
 
     def test_root_already_in_build_context_is_skipped(self, tmp_path):
         # A root the build context already supplies as -I must NOT be re-added as
