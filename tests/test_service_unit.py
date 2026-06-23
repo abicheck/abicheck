@@ -387,7 +387,24 @@ class TestResolveInferredHeaderRoots:
             )
             assert inc == [], tok  # detected as build context → deferred
             assert str(root) in toks, tok
-            assert toks[toks.index(str(root)) - 1] == "-isystem", tok
+            # MSVC build context → defer in MSVC dialect (/I), not GNU -isystem,
+            # which cl.exe/clang-cl would ignore (Codex review).
+            assert toks[toks.index(str(root)) - 1] == "/I", tok
+            assert "-isystem" not in toks, tok
+
+    def test_deferred_flag_dialect_matches_build_context(self, tmp_path):
+        # GNU build context defers with -isystem; MSVC with /I.
+        from abicheck.header_utils import resolve_inferred_header_roots
+
+        root, umb = self._umbrella(tmp_path)
+        _, gnu = resolve_inferred_header_roots(
+            [umb], [], gcc_options="-I /build/gen"
+        )
+        assert gnu[gnu.index(str(root)) - 1] == "-isystem"
+        _, msvc = resolve_inferred_header_roots(
+            [umb], [], gcc_options="/I build\\gen"
+        )
+        assert msvc[msvc.index(str(root)) - 1] == "/I"
 
     def test_root_already_in_build_context_is_skipped(self, tmp_path):
         # A root the build context already supplies as -I must NOT be re-added as

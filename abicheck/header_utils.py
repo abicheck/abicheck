@@ -197,20 +197,44 @@ def resolve_inferred_header_roots(
     if not inferred:
         return [], []
     if _has_include_build_context(gcc_options, gcc_option_tokens):
+        # Defer below the build context's include dirs (its flags are emitted
+        # first) but keep above the standard system dirs. Match the build
+        # context's flag *dialect* so the frontend actually honours the deferred
+        # root: GNU/clang -isystem (a system search class below -I), or MSVC/
+        # clang-cl /I (deferred by command-line order — cl.exe/clang-cl ignore a
+        # GNU -isystem, leaving the root unresolved) (Codex review).
+        flag = (
+            "/I" if _msvc_style_context(gcc_options, gcc_option_tokens) else "-isystem"
+        )
         toks: list[str] = []
         for d in inferred:
-            toks += ["-isystem", str(d)]
+            toks += [flag, str(d)]
         return [], toks
     return inferred, []
 
 
+def _msvc_style_context(
+    gcc_options: str | None, gcc_option_tokens: Sequence[str]
+) -> bool:
+    """True when the build context uses MSVC/clang-cl include spellings.
+
+    Distinguishes ``/I``/``/external:I``/``/imsvc`` from the GNU forms so the
+    deferred inferred root is emitted in the same dialect — a GNU ``-isystem``
+    is silently ignored by ``cl.exe``/``clang-cl`` (Codex review).
+    """
+    toks = _context_tokens(gcc_options, gcc_option_tokens)
+    msvc = ("/I", "/external:I", "/imsvc")
+    return any(t.startswith(p) for t in toks for p in msvc)
+
+
 def deferred_token_dirs(deferred_tokens: Sequence[str]) -> list[Path]:
-    """The directories carried by ``-isystem <dir>`` deferred tokens.
+    """The directories carried by the ``<flag> <dir>`` deferred token pairs.
 
     The deferred inferred roots ride in ``gcc_option_tokens`` (not
     ``extra_includes``), so the header-AST cache key — which mtime-scans only
     ``extra_includes`` dirs — would miss edits to their transitively-included
     headers and reuse a stale AST (Codex review). Callers pass these dirs to the
-    dumper as hash-only inputs. Pairs the flat ``["-isystem", dir, …]`` list.
+    dumper as hash-only inputs. Pairs the flat ``[flag, dir, …]`` list (the flag
+    is ``-isystem`` for GNU contexts, ``/I`` for MSVC ones).
     """
     return [Path(d) for _flag, d in zip(deferred_tokens[::2], deferred_tokens[1::2])]
