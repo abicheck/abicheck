@@ -30,14 +30,26 @@ AGG = Path("/tmp/agg12345.hpp")
 
 
 def test_direct_error_header_attributed_to_aggregate_line():
-    # oneTBB shape: a preview header #errors directly from the aggregate.
+    # A direct-inclusion guard that #errors directly from the aggregate line.
+    stderr = (
+        f"In file included from {AGG}:10:\n"
+        "/x/_detail.h:21:6: error: do not #include this internal header directly\n"
+        "   21 |     #error do not #include this internal header directly\n"
+    )
+    assert _headers_failing_in_aggregate(stderr, AGG, 40) == {9}
+
+
+def test_preview_macro_gate_is_not_excluded():
+    # Codex P2: "Set MACRO to include X" is a config / feature-macro gate, not a
+    # direct-inclusion guard — it must surface (so the user defines the macro)
+    # rather than be silently dropped from the L2 surface.
     stderr = (
         f"In file included from {AGG}:10:\n"
         "/x/concurrent_lru_cache.h:21:6: error: Set TBB_PREVIEW_CONCURRENT_LRU_CACHE "
         "to include concurrent_lru_cache.h\n"
-        "   21 |     #error Set ...\n"
+        "   21 |     #error Set TBB_PREVIEW_CONCURRENT_LRU_CACHE to include ...\n"
     )
-    assert _headers_failing_in_aggregate(stderr, AGG, 40) == {9}
+    assert _headers_failing_in_aggregate(stderr, AGG, 40) == set()
 
 
 def test_transitive_chain_attributes_to_outermost_aggregate_frame():

@@ -32,7 +32,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from .buildsource.build_query import ABICHECK_BUILD_DIR
+from .buildsource.build_query import PRUNED_HEADER_DIR_SEGMENTS
 from .errors import ValidationError
 from .header_utils import HEADER_SUFFIXES
 
@@ -46,15 +46,10 @@ _logger = logging.getLogger(__name__)
 # expansion and cache-invalidation can never drift (Codex review).
 _HEADER_EXTS = HEADER_SUFFIXES
 
-# Directory segments never scanned for headers: VCS metadata (mirrors
-# pattern_scan._PRUNED_DIR_SEGMENTS) plus abicheck's own in-tree cmake build dir
-# (ABICHECK_BUILD_DIR). The latter matters because zero-config `--sources` cmake
-# inference writes a configure tree under `sources/.abicheck-build`, whose
-# *generated* headers (config.h / version.h / …) would otherwise be globbed into
-# the L2 public-header surface and inflate the parsed type set (CodeRabbit).
-_PRUNED_DIR_SEGMENTS: frozenset[str] = frozenset(
-    {".git", ".hg", ".svn", ABICHECK_BUILD_DIR}
-)
+# Directory segments never scanned for headers — VCS metadata plus abicheck's own
+# in-tree cmake build dir; see build_query.PRUNED_HEADER_DIR_SEGMENTS (the shared
+# single source of truth, also used by cli_resolve._expand_header_inputs).
+_PRUNED_DIR_SEGMENTS = PRUNED_HEADER_DIR_SEGMENTS
 
 
 def expand_header_inputs(inputs: list[Path]) -> list[Path]:

@@ -35,6 +35,7 @@ from typing import TYPE_CHECKING, Any
 
 import click
 
+from .buildsource.build_query import PRUNED_HEADER_DIR_SEGMENTS
 from .compat.abicc_dump_import import looks_like_perl_dump
 
 if TYPE_CHECKING:
@@ -53,6 +54,7 @@ def _click_notify(message: str) -> None:
     exactly as they did when this logic lived in the CLI.
     """
     click.echo(message, err=True)
+
 
 _HEADER_EXTS = {".h", ".hh", ".hpp", ".hxx", ".ipp", ".tpp", ".inc"}
 
@@ -76,7 +78,11 @@ def _expand_header_inputs(inputs: list[Path]) -> list[Path]:
             found = [
                 f
                 for f in p.rglob("*")
-                if f.is_file() and f.suffix.lower() in _HEADER_EXTS
+                if f.is_file()
+                and f.suffix.lower() in _HEADER_EXTS
+                and not any(
+                    seg in PRUNED_HEADER_DIR_SEGMENTS for seg in f.relative_to(p).parts
+                )
             ]
             if not found:
                 raise click.ClickException(
@@ -576,7 +582,8 @@ def _reject_evidence_flags_for_set_inputs(ctx: click.Context) -> None:
     ]
     if used:
         raise click.UsageError(
-            ", ".join(sorted(used)) + " "
+            ", ".join(sorted(used))
+            + " "
             + ("is" if len(used) == 1 else "are")
             + " not supported for directory/package (release) comparisons: the "
             "per-library fan-out does not collect inline build/source evidence. "
@@ -603,7 +610,9 @@ def _config_has_compile_block(project_cfg: Any) -> bool:
     )
 
 
-def _reject_compile_context_for_set_inputs(ctx: click.Context, project_cfg: Any) -> None:
+def _reject_compile_context_for_set_inputs(
+    ctx: click.Context, project_cfg: Any
+) -> None:
     """Guard the L2 compile context for directory/package compares.
 
     The per-library fan-out (release backend) runs each pair through
@@ -629,7 +638,8 @@ def _reject_compile_context_for_set_inputs(ctx: click.Context, project_cfg: Any)
     ]
     if used:
         raise click.UsageError(
-            ", ".join(sorted(used)) + " "
+            ", ".join(sorted(used))
+            + " "
             + ("is" if len(used) == 1 else "are")
             + " not supported for directory/package (release) comparisons: the "
             "per-library fan-out does not thread the L2 compile context to each "

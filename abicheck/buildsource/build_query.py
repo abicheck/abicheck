@@ -61,6 +61,17 @@ from .redaction import DEFAULT_REDACTION
 #: the tree so a second run reuses it / auto-discovery finds it next time).
 ABICHECK_BUILD_DIR = ".abicheck-build"
 
+#: Directory segments pruned from ``-H`` header-directory globbing: VCS metadata
+#: plus abicheck's own in-tree cmake build dir. Zero-config cmake inference writes
+#: a configure tree under ``sources/.abicheck-build`` whose *generated* headers
+#: (config.h / version.h / …) would otherwise be swept into the L2 public-header
+#: surface and inflate the parsed type set, creating false ABI changes on a later
+#: run (Codex). Single source of truth shared by both header-expansion paths
+#: (``service_scan.expand_header_inputs`` and ``cli_resolve._expand_header_inputs``).
+PRUNED_HEADER_DIR_SEGMENTS: frozenset[str] = frozenset(
+    {".git", ".hg", ".svn", ABICHECK_BUILD_DIR}
+)
+
 #: Wall-clock ceiling for an inferred query. A configure/dry-run/aquery is far
 #: cheaper than a full build, but cmake configure of a large project (oneDNN,
 #: hundreds of TUs) can take a minute, so this is more generous than a flag query.
@@ -168,7 +179,9 @@ def run_inferred_build_query(
         )
         return None
     cmd = inferred_query_command(system, sources)
-    if cmd is None:  # pragma: no cover - defensive: detection only yields cmake/bazel here
+    if (
+        cmd is None
+    ):  # pragma: no cover - defensive: detection only yields cmake/bazel here
         return None
     # Bazelisk is the common launcher when `bazel` itself isn't on PATH; mirror
     # the BazelAdapter's fallback so inferred Bazel queries still run (Codex/CR).

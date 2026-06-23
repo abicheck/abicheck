@@ -86,19 +86,22 @@ _MISSING_HEADER_RE = re.compile(r"'([^'/]+)' file not found")
 #: meant for direct inclusion) rather than a real compile error before excluding.
 _RENDERED_ERROR_DIRECTIVE = re.compile(r"^\s*\d+\s*\|.*#\s*error\b")
 
-#: Phrasing that marks a ``#error`` as a *direct-inclusion guard* — an internal /
-#: preview header that refuses to be ``#include``d on its own. Only these are safe
-#: to exclude. A ``#error`` reporting a missing config macro / unsupported target
-#: on an otherwise-public header (e.g. ``#error "define MYLIB_CONFIG first"``)
-#: does NOT match, so it surfaces as a hard parse failure telling the user to pass
-#: the required build flag rather than silently dropping the header (Codex P2).
+#: Phrasing that marks a ``#error`` as a *direct-inclusion guard* — an internal
+#: header that refuses to be ``#include``d on its own. Only these are safe to
+#: exclude. Deliberately narrow: it matches "do not include (directly)" /
+#: "directly include" / "internal header" / "not (meant to be) included" /
+#: "#include this" and nothing else. A ``#error`` reporting a missing config /
+#: feature macro or unsupported target on an otherwise-public header — even when
+#: phrased as "Set FOO to include optional support" or "define MYLIB_CONFIG
+#: first" — does NOT match, so it surfaces as a hard parse failure telling the
+#: user to pass the required build flag rather than silently dropping the header
+#: (Codex P2: a bare "to include" phrase is no longer treated as a guard).
 _DIRECT_INCLUDE_GUARD_RE = re.compile(
     r"do ?n[o']t .*\binclude\b"  # "do not #include" / "don't include"
     r"|\binclude[sd]?\b.{0,40}\bdirectly\b"  # "include this ... directly"
     r"|\bdirectly\b.{0,40}\binclude"  # "directly include"
     r"|\binternal header\b"
     r"|\bnot (be |meant to be )?included\b"
-    r"|\bto include\b"  # "Set TBB_PREVIEW_X to include <this header>"
     r"|#include this",
     re.IGNORECASE,
 )
@@ -128,8 +131,10 @@ def _headers_failing_in_aggregate(
 
     The L2 aggregate TU emits one ``#include`` per header — header ``i`` on line
     ``i + 1``. A header not meant to be included directly raises a preprocessor
-    ``#error`` (e.g. oneTBB's preview / ``detail`` headers: "Set TBB_PREVIEW_… to
-    include …", "Do not #include this internal header directly"). When the error
+    ``#error`` (e.g. oneTBB's ``detail`` headers: "Do not #include this internal
+    header directly"). A preview/feature-macro gate ("Set TBB_PREVIEW_… to
+    include …") is *not* treated as a guard — it surfaces so the user defines the
+    macro (Codex P2). When the error
     fires inside an *included* file, clang prints the include chain whose outermost
     frame is the aggregate TU — ``In file included from <agg>:<N>:`` — immediately
     before the ``error:`` line. ``<N>`` therefore identifies the offending
