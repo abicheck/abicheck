@@ -67,7 +67,7 @@ from .dumper_sysinc import (
 )
 from .elf_symbol_filter import is_abi_relevant_elf_symbol
 from .errors import SnapshotError, ValidationError
-from .header_utils import HEADER_SUFFIXES
+from .header_utils import iter_cache_header_files
 from .model import (
     AbiSnapshot,
     ElfVisibility,
@@ -621,12 +621,9 @@ def _cache_key(
         inc_path = Path(inc_dir)
         h.update(inc_dir.encode())
         if inc_path.is_dir():
-            # Hash every recognised header suffix (not just .h/.hpp) so an edit to
-            # a .hxx/.ipp/.tpp/… transitive include still busts the key — the same
-            # set directory -H expansion treats as headers (Codex review).
-            for f in sorted(
-                p for p in inc_path.rglob("*") if p.suffix.lower() in HEADER_SUFFIXES
-            ):
+            # Hash every header-like file (incl. .inl/.tcc template bodies, not
+            # just .h/.hpp) so any transitive include edit busts the key (#454).
+            for f in iter_cache_header_files(inc_path):
                 try:
                     h.update(str(f).encode())
                     h.update(str(f.stat().st_mtime).encode())

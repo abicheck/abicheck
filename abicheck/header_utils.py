@@ -34,15 +34,24 @@ from pathlib import Path
 #: not the file's immediate parent — is what must be on the search path.
 _INCLUDE_ROOT_NAMES = frozenset({"include", "inc"})
 
-#: Recognised C/C++ header file suffixes — the single source of truth for "what
-#: counts as a header" across directory ``-H`` expansion (``service_scan``) and
-#: the AST-cache include-dir mtime walk (``dumper._cache_key``). Lives in this
-#: leaf module so both can share it without an import cycle; keeping the walk in
-#: sync with expansion means an edit to e.g. a ``.hxx``/``.ipp`` transitive
-#: include still busts the cache (Codex review).
+#: Recognised C/C++ header file suffixes for directory ``-H`` *expansion*
+#: (``service_scan``). Deliberately conservative — these become standalone
+#: translation units, so it must not sweep in files meant only to be ``#include``d
+#: (``.inl``/``.tcc`` template bodies). Lives in this leaf module so the consumers
+#: can share it without an import cycle.
 HEADER_SUFFIXES = frozenset(
     {".h", ".hh", ".hpp", ".hxx", ".h++", ".ipp", ".tpp", ".inc"}
 )
+
+#: Header-like suffixes whose edits must invalidate the AST cache
+#: (``dumper._cache_key``'s include-dir mtime walk). A **superset** of
+#: :data:`HEADER_SUFFIXES`: cache invalidation has the opposite bias from
+#: expansion — it must be *generous* (any file that can change the parsed AST),
+#: so it also covers the ``.inl``/``.tcc`` template-implementation includes that
+#: headers commonly pull in but that are never standalone TUs. Decoupling the two
+#: lets the walk catch a ``.inl``/``.tcc`` edit without making ``-H <dir>`` try to
+#: parse those files (#454).
+CACHE_HEADER_SUFFIXES = HEADER_SUFFIXES | frozenset({".inl", ".tcc"})
 
 #: Compiler flags that contribute an include *search directory*. Their presence
 #: in the pass-through compile context means a real build supplied its own
@@ -113,40 +122,33 @@ def _context_tokens(
     return toks
 
 
-def _has_include_build_context(
-    gcc_options: str | None, gcc_option_tokens: Sequence[str]
-) -> bool:
-    """True when the compile context supplies its own include search dirs.
+def _has_include_build_context(toks: list[str]) -> bool:
+    """True when the compile-flag *tokens* supply their own include search dirs.
 
     Detects any include-search flag — GNU/clang
     ``-I``/``-isystem``/``-iquote``/``-idirafter``/``-cxx-isystem`` or MSVC/clang-cl
-    ``/I``/``/external:I``/``/imsvc`` (attached or spaced) — in the pass-through
-    ``--gcc-options`` string or the repeatable ``--gcc-option`` tokens. When
-    present, a real build context is in play and an inferred ``-H`` root must
-    defer to it; when absent, the inferred root can take ``-I`` priority.
-    Compile-DB include dirs are folded into the user ``-I`` list upstream, so they
-    need no detection here — an inferred ``-I`` appended after them is already
-    lower priority.
+    ``/I``/``/external:I``/``/imsvc`` (attached or spaced). When present, a real
+    build context is in play and an inferred ``-H`` root must defer to it; when
+    absent, the inferred root can take ``-I`` priority. Compile-DB include dirs
+    are folded into the user ``-I`` list upstream, so they need no detection here
+    — an inferred ``-I`` appended after them is already lower priority. (*toks* is
+    the pre-split flag list from :func:`_context_tokens`.)
     """
-    toks = _context_tokens(gcc_options, gcc_option_tokens)
     return any(t.startswith(p) for t in toks for p in _INCLUDE_FLAG_PREFIXES)
 
 
-def _build_context_include_dirs(
-    gcc_options: str | None, gcc_option_tokens: Sequence[str]
-) -> set[str]:
-    """Resolved include directories the compile context already searches.
+def _build_context_include_dirs(toks: list[str]) -> set[str]:
+    """Resolved include directories the compile-flag *tokens* already search.
 
     Parses every include-search flag (spaced ``-I dir`` / ``-isystem dir`` and
-    attached ``-Idir`` forms, GNU and MSVC) out of the pass-through flags and
-    returns their resolved absolute paths. Used to skip an inferred ``-H`` root
-    the build context already covers: re-adding such a root as ``-isystem`` would
-    trip GCC's rule that a directory given with *both* ``-I`` and ``-isystem`` has
-    its ``-I`` ignored — demoting the build's own ``-I`` to the system position
-    and changing search order (Codex review). Best-effort: relative dirs resolve
-    against the cwd, the same basis the inferred roots use.
+    attached ``-Idir`` forms, GNU and MSVC) out of *toks* and returns their
+    resolved absolute paths. Used to skip an inferred ``-H`` root the build
+    context already covers: re-adding such a root as ``-isystem`` would trip GCC's
+    rule that a directory given with *both* ``-I`` and ``-isystem`` has its ``-I``
+    ignored — demoting the build's own ``-I`` to the system position and changing
+    search order (Codex review). Best-effort: relative dirs resolve against the
+    cwd, the same basis the inferred roots use.
     """
-    toks = _context_tokens(gcc_options, gcc_option_tokens)
     dirs: set[str] = set()
     i = 0
     while i < len(toks):
@@ -194,35 +196,34 @@ def resolve_inferred_header_roots(
     Shared by the ``dump`` CLI path (``cli_dump_helpers.perform_elf_dump``) and
     the service/``scan`` path (``service._dump_elf``) so they cannot drift.
     """
+    # Tokenize the pass-through flags once, then reuse for every check below.
+    ctx = _context_tokens(gcc_options, gcc_option_tokens)
     # Skip roots the user's -I *or* the build context already searches: re-adding
     # one the build supplies as -I would, when emitted as -isystem, void that -I
     # (GCC ignores -I for a dir also given via -isystem) and reorder the search.
     skip = {str(i.resolve()) for i in user_includes}
-    skip |= _build_context_include_dirs(gcc_options, gcc_option_tokens)
+    skip |= _build_context_include_dirs(ctx)
     inferred = [
         d for d in _implicit_header_includes(headers) if str(d.resolve()) not in skip
     ]
     if not inferred:
         return [], []
-    if _has_include_build_context(gcc_options, gcc_option_tokens):
-        toks: list[str] = []
-        flag = _deferred_include_flag(gcc_options, gcc_option_tokens)
+    if _has_include_build_context(ctx):
+        out: list[str] = []
+        flag = _deferred_include_flag(ctx)
         for d in inferred:
-            toks += [flag, str(d)]
-        return [], toks
+            out += [flag, str(d)]
+        return [], out
     return inferred, []
 
 
-def _msvc_style_context(
-    gcc_options: str | None, gcc_option_tokens: Sequence[str]
-) -> bool:
-    """True when the build context uses MSVC/clang-cl include spellings.
+def _msvc_style_context(toks: list[str]) -> bool:
+    """True when the compile-flag *tokens* use MSVC/clang-cl include spellings.
 
     Distinguishes ``/I``/``/external:I``/``/imsvc`` from the GNU forms so the
     deferred inferred root is emitted in the same dialect — a GNU ``-isystem``
     is silently ignored by ``cl.exe``/``clang-cl`` (Codex review).
     """
-    toks = _context_tokens(gcc_options, gcc_option_tokens)
     msvc = ("/I", "/external:I", "/imsvc")
     return any(t.startswith(p) for t in toks for p in msvc)
 
@@ -234,10 +235,8 @@ def _msvc_style_context(
 _ABOVE_SYSTEM_GNU_PREFIXES = ("-I", "-iquote", "-isystem", "-cxx-isystem")
 
 
-def _deferred_include_flag(
-    gcc_options: str | None, gcc_option_tokens: Sequence[str]
-) -> str:
-    """The flag to defer an inferred ``-H`` root below the build context.
+def _deferred_include_flag(toks: list[str]) -> str:
+    """The flag to defer an inferred ``-H`` root below the build-context *toks*.
 
     The root must search *after* every build-context include dir; the bucket
     that achieves that depends on the build context's own flags:
@@ -252,9 +251,8 @@ def _deferred_include_flag(
       class) → ``-idirafter`` (after the build's own ``-idirafter`` dirs, in the
       same class, so the build's fallback keeps priority — Codex review).
     """
-    if _msvc_style_context(gcc_options, gcc_option_tokens):
+    if _msvc_style_context(toks):
         return "/I"
-    toks = _context_tokens(gcc_options, gcc_option_tokens)
     if any(t.startswith(p) for t in toks for p in _ABOVE_SYSTEM_GNU_PREFIXES):
         return "-isystem"
     return "-idirafter"
@@ -271,3 +269,16 @@ def deferred_token_dirs(deferred_tokens: Sequence[str]) -> list[Path]:
     is ``-isystem`` for GNU contexts, ``/I`` for MSVC ones).
     """
     return [Path(d) for _flag, d in zip(deferred_tokens[::2], deferred_tokens[1::2])]
+
+
+def iter_cache_header_files(directory: Path) -> list[Path]:
+    """Header-like files under *directory* whose edits should bust the AST cache.
+
+    Recurses *directory* and returns the files whose suffix is in
+    :data:`CACHE_HEADER_SUFFIXES` (the generous superset — includes ``.inl``/
+    ``.tcc`` template bodies), sorted for a deterministic cache key. Used by
+    ``dumper._cache_key``'s include-dir mtime walk.
+    """
+    return sorted(
+        p for p in directory.rglob("*") if p.suffix.lower() in CACHE_HEADER_SUFFIXES
+    )

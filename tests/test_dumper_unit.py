@@ -130,7 +130,7 @@ class TestCacheKey:
         umb.write_text("int a(void);\n", encoding="utf-8")
         root = tmp_path / "pkg"
         root.mkdir()
-        for ext in (".hh", ".hpp", ".hxx", ".h++", ".ipp", ".tpp", ".inc"):
+        for ext in (".hh", ".hpp", ".hxx", ".h++", ".ipp", ".tpp", ".inc", ".inl", ".tcc"):
             detail = root / f"detail{ext}"
             detail.write_text("int b(void);\n", encoding="utf-8")
             k1 = _cache_key([umb], [], "c++", extra_hash_dirs=(root,))
