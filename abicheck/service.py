@@ -607,38 +607,59 @@ def _try_header_scoped_dump(
     compiler = "cc" if lang.lower() == "c" else "c++"
     lang_arg = lang if lang.lower() == "c" else None
     cc = compile if compile is not None else CompileContext()
+    # P3 parity with the ELF path: auto-add the inferred public-header roots so a
+    # -H umbrella resolves its own relative includes without a separate -I on
+    # PE/Mach-O too (else header parsing fails and we drop to export-table mode,
+    # losing the L2/type surface). Same bucket selection — plain -I with no build
+    # context, deferred -isystem otherwise — and the deferred dirs are hashed
+    # into the AST cache key (Codex review).
+    eff_includes = list(includes)
+    eff_tokens = cc.gcc_option_tokens
+    deferred_dirs: tuple[Path, ...] = ()
+    if resolved_headers:
+        inc_extra, deferred = resolve_inferred_header_roots(
+            headers,
+            list(includes),
+            gcc_options=cc.gcc_options,
+            gcc_option_tokens=cc.gcc_option_tokens,
+        )
+        eff_includes += inc_extra
+        eff_tokens = cc.gcc_option_tokens + tuple(deferred)
+        deferred_dirs = tuple(deferred_token_dirs(deferred))
     try:
         if fmt == "pe":
             snap = _dumper_pe(
                 path,
                 resolved_headers,
-                includes,
+                eff_includes,
                 version,
                 compiler,
                 gcc_path=cc.gcc_path,
                 gcc_prefix=cc.gcc_prefix,
                 gcc_options=cc.gcc_options,
-                gcc_option_tokens=cc.gcc_option_tokens,
+                gcc_option_tokens=eff_tokens,
                 sysroot=cc.sysroot,
                 nostdinc=cc.nostdinc,
                 lang=lang_arg,
                 header_backend=header_backend,
+                extra_hash_dirs=deferred_dirs,
             )
         else:
             snap = _dumper_macho(
                 path,
                 resolved_headers,
-                includes,
+                eff_includes,
                 version,
                 compiler,
                 gcc_path=cc.gcc_path,
                 gcc_prefix=cc.gcc_prefix,
                 gcc_options=cc.gcc_options,
-                gcc_option_tokens=cc.gcc_option_tokens,
+                gcc_option_tokens=eff_tokens,
                 sysroot=cc.sysroot,
                 nostdinc=cc.nostdinc,
                 lang=lang_arg,
                 header_backend=header_backend,
+                extra_hash_dirs=deferred_dirs,
             )
     except Exception as exc:  # noqa: BLE001 — header backend/parse failure → fall back
         warnings.warn(

@@ -591,6 +591,57 @@ class TestDumpElf:
 # ── _dump_pe() ──────────────────────────────────────────────────────────────
 
 
+class TestHeaderScopedInferredRoots:
+    """P3 parity: the PE/Mach-O header-scoped path also adds inferred -H roots."""
+
+    def _umbrella(self, tmp_path):
+        root = tmp_path / "include"
+        (root / "oneapi").mkdir(parents=True)
+        umb = root / "oneapi" / "tbb.h"
+        umb.write_text("int f(void);\n", encoding="utf-8")
+        return root, umb
+
+    def test_pe_no_build_context_adds_root_as_I(self, tmp_path):
+        from abicheck.service import _try_header_scoped_dump
+
+        root, umb = self._umbrella(tmp_path)
+        captured = {}
+
+        def fake_pe(path, headers, extra_includes, version, compiler, **k):
+            captured["extra_includes"] = extra_includes
+            captured.update(k)
+            return AbiSnapshot(library="x", version="1.0")
+
+        with patch("abicheck.dumper._dump_pe", fake_pe):
+            _try_header_scoped_dump("pe", tmp_path / "x.dll", [umb], [], "1.0", "c++")
+        # no build context → inferred include root rides in extra_includes
+        assert root in captured["extra_includes"]
+
+    def test_macho_build_context_defers_and_hashes(self, tmp_path):
+        from abicheck.service import _try_header_scoped_dump
+        from abicheck.service_scan import CompileContext
+
+        root, umb = self._umbrella(tmp_path)
+        captured = {}
+
+        def fake_macho(path, headers, extra_includes, version, compiler, **k):
+            captured["extra_includes"] = extra_includes
+            captured.update(k)
+            return AbiSnapshot(library="x", version="1.0")
+
+        cc = CompileContext(gcc_option_tokens=("-isystem", str(tmp_path / "gen")))
+        with patch("abicheck.dumper._dump_macho", fake_macho):
+            _try_header_scoped_dump(
+                "macho", tmp_path / "x.dylib", [umb], [], "1.0", "c++", compile=cc
+            )
+        # build context → root defers to -isystem (gcc_option_tokens), not -I,
+        # and its dir is hashed into the cache key (extra_hash_dirs)
+        assert root not in captured["extra_includes"]
+        toks = list(captured["gcc_option_tokens"])
+        assert str(root) in toks and toks[toks.index(str(root)) - 1] == "-isystem"
+        assert root in captured["extra_hash_dirs"]
+
+
 class TestDumpPe:
     def test_no_machine_raises(self, tmp_path):
         from abicheck.service import _dump_pe
