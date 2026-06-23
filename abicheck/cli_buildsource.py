@@ -829,10 +829,13 @@ def embed_build_source(
     inline_pack: BuildSourcePack | None = None
     if raw_build_info is not None or raw_sources is not None:
         cfg_path = build_config or discover_build_config(raw_sources)
-        # Only an explicit --config is operator-supplied/trusted for
-        # subprocess execution. Auto-discovered source-tree configs may be
-        # attacker-controlled; their non-executable settings are still honored.
-        cfg_trusted_for_query = build_config is not None
+        # Only operator-supplied input is trusted for subprocess execution: an
+        # explicit --config file or an explicit --build-query command on the CLI.
+        # Auto-discovered source-tree configs may be attacker-controlled; their
+        # non-executable settings are still honored, but their query never runs.
+        # (Inferred build queries — cmake/make/bazel that abicheck constructs
+        # itself — always run regardless; see buildsource.build_query.)
+        cfg_trusted_for_query = build_config is not None or build_query is not None
         try:
             cfg = load_build_config(cfg_path) if cfg_path is not None else None
         except ValueError as exc:
