@@ -174,6 +174,29 @@ def test_run_make_is_skipped_with_diagnostic(tmp_path: Path, monkeypatch):
     assert not merged.compile_units
 
 
+def test_bazelisk_fallback_when_bazel_absent(tmp_path: Path, monkeypatch):
+    # Mirror BazelAdapter: when `bazel` isn't on PATH but `bazelisk` is, the
+    # inferred query swaps the launcher rather than skipping (Codex/CR).
+    (tmp_path / "MODULE.bazel").write_text("module(name='x')\n")
+    ran: dict = {}
+
+    def fake_run(cmd, **kw):
+        ran["cmd"] = cmd
+        return _FakeProc(0, stdout='{"actions": []}')
+
+    monkeypatch.setattr(_bq.subprocess, "run", fake_run)
+    merged, ext = BuildEvidence(), []
+    out = run_inferred_build_query(
+        tmp_path,
+        merged,
+        ext,
+        which=lambda tool: None if tool == "bazel" else "/usr/bin/bazelisk",
+    )
+    assert out is None  # bazel path merges evidence, returns no DB path
+    assert ran["cmd"][0] == "bazelisk"  # launcher swapped from bazel
+    assert ext[-1].name == "build_query_auto"
+
+
 def test_bazel_command_includes_param_files(tmp_path: Path):
     cmd = inferred_query_command("bazel", tmp_path)
     assert cmd is not None

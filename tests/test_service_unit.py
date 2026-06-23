@@ -118,6 +118,20 @@ class TestExpandHeaderInputs:
         assert len(result) == 1
         assert result[0].name == "deep.h"
 
+    def test_prunes_abicheck_build_and_vcs_dirs(self, tmp_path):
+        # Generated headers under abicheck's own cmake build dir (and VCS dirs)
+        # must never inflate the L2 header surface (CodeRabbit).
+        d = tmp_path / "include"
+        d.mkdir()
+        (d / "public.h").write_text("int api(void);\n")
+        for noise_dir in (".abicheck-build", ".git"):
+            sub = d / noise_dir
+            sub.mkdir()
+            (sub / "config.h").write_text("#define GENERATED 1\n")
+        result = expand_header_inputs([d])
+        names = {p.name for p in result}
+        assert names == {"public.h"}  # generated config.h pruned
+
     def test_various_extensions(self, tmp_path):
         d = tmp_path / "hdrs"
         d.mkdir()
@@ -418,9 +432,7 @@ class TestResolveInferredHeaderRoots:
 
         root, umb = self._umbrella(tmp_path)  # include/, umbrella at include/oneapi
         nested = root / "oneapi"
-        inc, toks = resolve_inferred_header_roots(
-            [umb], [], gcc_options=f"-I {root}"
-        )
+        inc, toks = resolve_inferred_header_roots([umb], [], gcc_options=f"-I {root}")
         assert inc == []
         # the include root is in the build context → not re-emitted at all
         assert str(root) not in toks
@@ -493,9 +505,7 @@ class TestResolveInferredHeaderRoots:
         from abicheck.header_utils import resolve_inferred_header_roots
 
         root, umb = self._umbrella(tmp_path)
-        inc, toks = resolve_inferred_header_roots(
-            [umb], [], gcc_options='-I "/broken'
-        )
+        inc, toks = resolve_inferred_header_roots([umb], [], gcc_options='-I "/broken')
         assert inc == [] and str(root) in toks
 
 

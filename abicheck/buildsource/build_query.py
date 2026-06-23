@@ -168,7 +168,7 @@ def run_inferred_build_query(
         )
         return None
     cmd = inferred_query_command(system, sources)
-    if cmd is None:
+    if cmd is None:  # pragma: no cover - defensive: detection only yields cmake/bazel here
         return None
     # Bazelisk is the common launcher when `bazel` itself isn't on PATH; mirror
     # the BazelAdapter's fallback so inferred Bazel queries still run (Codex/CR).
@@ -279,4 +279,4 @@ def _ingest_query_output(
             )
         )
         return None
-    return None
+    return None  # pragma: no cover - defensive: only cmake/bazel reach ingestion

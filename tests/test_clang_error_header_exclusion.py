@@ -101,19 +101,13 @@ def test_error_in_aggregate_itself_is_not_excludable():
 
 def test_warning_chain_is_not_treated_as_failure():
     # An include chain that only produces a warning attributes nothing.
-    stderr = (
-        f"In file included from {AGG}:5:\n"
-        "/x/c.h:9:1: warning: deprecated\n"
-    )
+    stderr = f"In file included from {AGG}:5:\n/x/c.h:9:1: warning: deprecated\n"
     assert _headers_failing_in_aggregate(stderr, AGG, 40) == set()
 
 
 def test_out_of_range_line_ignored():
     # A line number beyond the header count is ignored (defensive).
-    stderr = (
-        f"In file included from {AGG}:99:\n"
-        "/x/d.h:1:1: error: boom\n"
-    )
+    stderr = f"In file included from {AGG}:99:\n/x/d.h:1:1: error: boom\n"
     assert _headers_failing_in_aggregate(stderr, AGG, 40) == set()
 
 
@@ -154,6 +148,47 @@ def test_retry_excludes_then_succeeds(tmp_path):
     assert out.returncode == 0
     assert calls["n"] == 1  # one retry
     assert written and headers[1] not in written[-1]  # bad.h was dropped
+
+
+def test_nondigit_aggregate_frame_is_ignored():
+    # A malformed include frame (non-numeric line) leaves no attributable root,
+    # so a following error attributes nothing (defensive parse robustness).
+    stderr = (
+        f"In file included from {AGG}:notanumber:\n"
+        "/x/e.h:1:1: error: do not include directly\n"
+        "    1 | #error do not include directly\n"
+    )
+    assert _headers_failing_in_aggregate(stderr, AGG, 40) == set()
+
+
+def test_retry_breaks_when_no_header_is_excludable(tmp_path):
+    # Multi-header parse fails on a genuine error (no #error guard), so nothing is
+    # excludable: the driver breaks immediately, never rewrites or re-runs, and the
+    # original failure stands (the hard parse error must surface).
+    agg = tmp_path / "agg.hpp"
+    fail = _Proc(
+        1,
+        stderr=(
+            f"In file included from {agg}:2:\n"
+            "/x/real.h:9:1: error: unknown type name 'frobnicate'\n"
+            "    9 | frobnicate int x;\n"
+        ),
+    )
+    ran = {"n": 0}
+
+    def run_clang():  # pragma: no cover - must not be called
+        ran["n"] += 1
+        return _Proc(0)
+
+    out = retry_excluding_error_headers(
+        result=fail,
+        run_clang=run_clang,
+        write_agg=lambda _h: None,
+        agg_path=agg,
+        active_headers=[tmp_path / "a.h", tmp_path / "real.h", tmp_path / "c.h"],
+    )
+    assert out.returncode == 1  # failure preserved
+    assert ran["n"] == 0  # broke before any retry
 
 
 def test_retry_single_header_not_reduced(tmp_path):
