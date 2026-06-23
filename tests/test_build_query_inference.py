@@ -170,7 +170,11 @@ def test_run_make_is_skipped_with_diagnostic(tmp_path: Path, monkeypatch):
     assert run_inferred_build_query(tmp_path, merged, ext) is None
     assert ext[-1].name == "build_query_auto"
     assert ext[-1].status == "skipped"
-    assert "build-query" in ext[-1].detail and "Make" in ext[-1].detail
+    # Points at the paths that actually yield L3 (compile DB / build-info pack) —
+    # not `--build-query "make -n"`, which the inline query path can't ingest.
+    assert "Make" in ext[-1].detail
+    assert "--compile-db" in ext[-1].detail and "--build-info" in ext[-1].detail
+    assert "--build-query" not in ext[-1].detail
     assert not merged.compile_units
 
 

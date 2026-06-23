@@ -29,8 +29,11 @@ without compiling it.
 ``make -n`` is not reliably side-effect-free: GNU make still executes recipe
 lines prefixed with ``+`` or invoking ``$(MAKE)`` in dry-run mode, so
 auto-running it on an untrusted checkout could execute arbitrary commands
-(Codex P1). Make projects must opt in explicitly via a trusted
-``--build-query "make -n …"`` or a pre-captured transcript.
+(Codex P1). A Make project must instead supply a compile DB (e.g. ``bear --
+make`` → ``--compile-db``) or a pre-collected Make transcript pack via
+``--build-info`` — note the inline ``build.query`` path only ingests an emitted
+``compile_commands.json``, so it cannot turn a bare ``make -n`` transcript into
+L3 evidence.
 
 Security boundary (the ADR-032 D5 intent, refined): the command run here is
 **constructed by abicheck**, never taken from a tree-local ``.abicheck.yml`` —
@@ -171,9 +174,9 @@ def run_inferred_build_query(
                 status="skipped",
                 detail=(
                     "detected a Make project, but `make -n` is not reliably "
-                    "side-effect-free so it is not auto-run; pass an explicit "
-                    '--build-query "make -n …" (trusted) or a pre-captured '
-                    "transcript, or provide --compile-db"
+                    "side-effect-free so it is not auto-run; provide a compile DB "
+                    "(e.g. `bear -- make`, then --compile-db compile_commands.json) "
+                    "or a pre-collected Make transcript pack via --build-info"
                 ),
             )
         )

@@ -282,9 +282,12 @@ sources:
   flags/exports — no `--allow-build-query` flag (that flag is deprecated to a
   no-op). Make is detected but *not* auto-run (`make -n` is not reliably
   side-effect-free — GNU make runs `+`/`$(MAKE)` recipes even in dry-run mode), so
-  it needs an explicit `--build-query "make -n …"` or transcript. It also runs an
+  a Make project must supply a compile DB (e.g. `bear -- make` → `--compile-db`)
+  or a pre-collected transcript pack via `--build-info`. It also runs an
   *operator-supplied* `build.query` automatically (an
-  explicit `--config` or `--build-query`). All commands run with no shell
+  explicit `--config` or `--build-query`) — but note that path ingests only an
+  emitted `compile_commands.json`, so the query must *write* a DB (e.g.
+  `bear -- make`), not just print a `make -n` transcript. All commands run with no shell
   (parsed via `shlex`) in the source-tree directory. A `.abicheck.yml`
   auto-discovered from `--sources` is still used for non-executing settings such
   as `build.compile_db`, but its `build.query` is **never** auto-run (it may be

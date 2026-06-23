@@ -142,8 +142,9 @@ request to collect build evidence.
 
 Make is *detected but not auto-run*: `make -n` is not reliably side-effect-free
 (GNU make still executes `+`/`$(MAKE)` recipe lines in dry-run mode), so a Make
-project needs an explicit, operator-trusted `--build-query "make -n …"` or a
-pre-captured transcript rather than being driven automatically.
+project must instead supply a compile DB (e.g. `bear -- make`, then
+`--compile-db compile_commands.json`) or a pre-collected Make transcript pack via
+`--build-info`, rather than being driven automatically.
 
 Only an abicheck-constructed command runs automatically. An *arbitrary*
 `build.query` command runs only when it is operator-supplied — an explicit
