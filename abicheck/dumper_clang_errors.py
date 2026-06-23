@@ -88,21 +88,20 @@ _RENDERED_ERROR_DIRECTIVE = re.compile(r"^\s*\d+\s*\|.*#\s*error\b")
 
 #: Phrasing that marks a ``#error`` as a *direct-inclusion guard* — an internal
 #: header that refuses to be ``#include``d on its own. Only these are safe to
-#: exclude. Deliberately narrow: it matches "do not include" / "...include(d)
-#: ... directly" / "directly include" / "internal header" / "#include this" and
-#: nothing else. A ``#error`` reporting a missing config / feature macro or
-#: unsupported target on an otherwise-public header — even when phrased as "Set
-#: FOO to include optional support", "feature X not included in this build", or
-#: "define MYLIB_CONFIG first" — does NOT match, so it surfaces as a hard parse
-#: failure telling the user to pass the required build flag rather than silently
-#: dropping the header (Codex P2: bare "to include" / "not included" phrases are
-#: not treated as guards — genuine guards say "directly" / "internal header").
+#: exclude, and the bar is deliberately high: the message must carry an
+#: unambiguous direct-inclusion signal — ``directly`` tied to an ``include`` verb
+#: ("do not #include this header directly", "directly include"), or the literal
+#: phrase ``internal header``. Nothing else qualifies. Every config / feature /
+#: include-order ``#error`` on an otherwise-public header — "Set FOO to include
+#: optional support", "feature X not included in this build", "define
+#: MYLIB_CONFIG first", "Do not include public.h before config.h" — lacks both
+#: signals, so it surfaces as a hard parse failure telling the user to fix the
+#: build rather than the header being silently dropped from the L2 surface
+#: (Codex P2, iterated: only ``directly``/``internal header`` count as guards).
 _DIRECT_INCLUDE_GUARD_RE = re.compile(
-    r"do ?n[o']t .*\binclude\b"  # "do not #include" / "don't include"
-    r"|\binclude[sd]?\b.{0,40}\bdirectly\b"  # "include this ... directly"
-    r"|\bdirectly\b.{0,40}\binclude"  # "directly include"
-    r"|\binternal header\b"
-    r"|#include this",
+    r"\binclude[ds]?\b.{0,40}\bdirectly\b"  # "include(d) this header ... directly"
+    r"|\bdirectly\b.{0,40}\binclude"  # "directly include ..."
+    r"|\binternal header\b",
     re.IGNORECASE,
 )
 

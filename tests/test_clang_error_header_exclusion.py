@@ -104,6 +104,18 @@ def test_config_macro_error_in_public_header_is_not_excluded():
     assert _headers_failing_in_aggregate(stderr, AGG, 40) == set()
 
 
+def test_include_order_config_error_is_not_excluded():
+    # Codex P2: an include-order config #error ("Do not include public.h before
+    # config.h") has no "directly" / "internal header" signal — it is a real
+    # build problem, not a direct-inclusion guard, so it must surface.
+    stderr = (
+        f"In file included from {AGG}:8:\n"
+        '/x/public.h:2:2: error: "Do not include public.h before config.h"\n'
+        '    2 | #error "Do not include public.h before config.h"\n'
+    )
+    assert _headers_failing_in_aggregate(stderr, AGG, 40) == set()
+
+
 def test_feature_not_included_message_is_not_excluded():
     # Codex P2: "feature X not included in this build" is a config message, not a
     # direct-inclusion guard (no "directly"/"internal header"/"do not include"),
