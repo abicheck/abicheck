@@ -132,14 +132,21 @@ abicheck scan --binary new/libonedal_core.so -H include/ --build-info aq.json --
 
 ### Letting `abicheck` drive the build query
 
-If your project ships a trusted `.abicheck.yml` with a `build.query`, you can let
-`abicheck` run it instead of pre-generating the DB. Pass it with `--config`
-(the project contract). Pinning a deep
-level (`--source-method s5`, etc.) with such a trusted `--config` **auto-enables**
-the query — you no longer also need `--allow-build-query` for a level you
-explicitly asked for (the report notes when this happens). An *auto-discovered*
-`.abicheck.yml` under `--sources` is never trusted to execute commands; only an
-explicit `--config` is.
+**You usually don't pre-generate a compile DB at all — just pass `--sources`.**
+When a source-level depth needs build evidence and no compile DB exists,
+`abicheck` **detects the build system (CMake/Make/Bazel) and runs the query
+itself** (`cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=ON`, `make -n`, `bazel aquery`)
+— no flag, no manual build step. The old `--allow-build-query` flag is gone
+(deprecated to a no-op): asking for a source-level scan *is* the request to
+collect build evidence.
+
+Only an abicheck-constructed command runs automatically. An *arbitrary*
+`build.query` command runs only when it is operator-supplied — an explicit
+`--config` (the project `.abicheck.yml` contract) or `--build-query` on the CLI.
+An auto-discovered `.abicheck.yml` sitting inside the `--sources` tree is never
+trusted to execute its `build.query` (it may be attacker-controlled); its
+non-executing settings are still honoured. Pre-generating and passing a
+`--compile-db` yourself remains supported as an advanced option.
 
 ```yaml
 # .abicheck.yml

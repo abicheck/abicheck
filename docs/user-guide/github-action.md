@@ -104,8 +104,9 @@ scan degrades gracefully and L0–L2 stay authoritative.
 | `sources` | scan, dump | Source checkout/tree. The compile DB is auto-discovered within it; drives L4 replay and L5 graph collection. |
 | `build-info` | scan, dump | Out-of-tree L3 context: a build dir, a `compile_commands.json`, or a collected evidence pack. |
 | `compile-db` | scan (dump folds into `build-info`) | Explicit `compile_commands.json` path. |
-| `build-config` | scan, dump | Trusted `.abicheck.yml`; enables `build.query` together with `allow-build-query`. |
-| `allow-build-query` | scan, dump | Permit a trusted `build.query` subprocess to emit a compile DB (default `false`; only existing build outputs are read otherwise). |
+| `build-config` | scan, dump | Trusted `.abicheck.yml`; its `build.query` runs automatically (operator-supplied = trusted). |
+| `sources` | scan, dump | Source tree. With a source-level depth, `abicheck` auto-detects the build system (CMake/Make/Bazel) and runs the query itself to emit a compile DB — no flag, no manual build. |
+| `allow-build-query` | scan, dump | **Deprecated, ignored.** Build queries now run automatically when `sources` is given; kept as a no-op for backward compatibility. |
 | `depth` | scan, dump | Evidence-depth dial: `binary`, `headers`, `build`, `source`, or `full`. Maps to `--depth`. (scan can also derive this from the level inputs below.) |
 | `baseline` | scan | Previous build's dump/library to compare against (or use `abi-baseline` to auto-fetch one). |
 | `scan-mode` | scan | Fixed `(L,S)` preset: `pr` (default), `pr-deep`, `baseline`, `audit`. |

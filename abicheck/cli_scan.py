@@ -698,7 +698,9 @@ def _audit_exit_code(
     "--allow-build-query",
     is_flag=True,
     default=False,
-    help="Permit a trusted build.query subprocess to emit a compile DB.",
+    hidden=True,  # deprecated no-op: build query runs automatically with --sources
+    help="Deprecated and ignored. With --sources, abicheck infers and runs the "
+    "build-system query (cmake/make/bazel) itself; no flag is needed.",
 )
 @click.option(
     "--format",
