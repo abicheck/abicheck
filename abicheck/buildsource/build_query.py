@@ -124,9 +124,18 @@ def run_inferred_build_query(
     system = detect_build_system(sources)
     if not system or sources is None:
         return None
+    # Resolve to an absolute path first: the query runs with cwd=sources, so a
+    # relative `--sources src` would otherwise make `cmake -S src` resolve to
+    # `src/src`, and would anchor make/bazel relative paths to the process cwd
+    # instead of the tree (Codex review). Absolute paths are cwd-independent.
+    sources = sources.resolve()
     cmd = inferred_query_command(system, sources)
     if cmd is None:
         return None
+    # Bazelisk is the common launcher when `bazel` itself isn't on PATH; mirror
+    # the BazelAdapter's fallback so inferred Bazel queries still run (Codex/CR).
+    if cmd[0] == "bazel" and which("bazel") is None and which("bazelisk") is not None:
+        cmd[0] = "bazelisk"
     tool = cmd[0]
     if which(tool) is None:
         extractors.append(
@@ -208,7 +217,9 @@ def _ingest_query_output(
     if system == "make":
         from .adapters.make import MakeAdapter
 
-        ev = MakeAdapter(dry_run=stdout).collect()
+        # build_dir=sources anchors the transcript's relative compile commands
+        # (e.g. `cc -Iinclude -c src/foo.c`) to the tree, not the process cwd.
+        ev = MakeAdapter(dry_run=stdout, build_dir=sources).collect()
         merged.merge(ev)
         extractors.append(
             ExtractorRecord(
@@ -232,7 +243,9 @@ def _ingest_query_output(
             tf.write(stdout)
             aq = Path(tf.name)
         try:
-            ev = BazelAdapter(aquery=aq, allow_query=False).collect()
+            # workspace=sources anchors the aquery's relative source/include
+            # paths to the tree so source matching + L4 replay resolve.
+            ev = BazelAdapter(aquery=aq, workspace=sources, allow_query=False).collect()
         finally:
             aq.unlink(missing_ok=True)
         merged.merge(ev)

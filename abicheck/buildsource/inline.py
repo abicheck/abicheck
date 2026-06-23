@@ -639,7 +639,8 @@ def collect_inline_pack(
     # the build_query diagnostic reach `compare`, rather than dropping it as if
     # nothing was attempted (Codex).
     has_query_diag = any(
-        e.name == "build_query" and e.status in _BUILD_QUERY_DIAG_STATUSES
+        e.name in ("build_query", "build_query_auto")
+        and e.status in _BUILD_QUERY_DIAG_STATUSES
         for e in extractors
     )
     if not (has_build or surface is not None or graph is not None or has_query_diag):

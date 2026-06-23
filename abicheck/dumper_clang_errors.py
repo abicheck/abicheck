@@ -60,6 +60,11 @@ _CPP_STDLIB_HEADERS = frozenset(
 #: resolve, checked against :data:`_CPP_STDLIB_HEADERS`.
 _MISSING_HEADER_RE = re.compile(r"'([^'/]+)' file not found")
 
+#: clang's rendered source line under a diagnostic, e.g. ``  21 |     #error …``.
+#: Used to confirm a header failure is a preprocessor ``#error`` (a header not
+#: meant for direct inclusion) rather than a real compile error before excluding.
+_RENDERED_ERROR_DIRECTIVE = re.compile(r"^\s*\d+\s*\|.*#\s*error\b")
+
 
 def _is_missing_cpp_stdlib_header_error(stderr: str) -> bool:
     """True if a clang parse failed because a C++ ``<cXXX>`` header was not found.
@@ -93,16 +98,20 @@ def _headers_failing_in_aggregate(
     top-level header, even through a deeper transitive chain (the aggregate frame
     is always printed first and persists until the next aggregate-rooted chain).
 
-    Pure / string-only so it is unit-testable without a compiler. Only attributes
-    ``error:`` diagnostics reached *through* the aggregate: an error in the
-    aggregate file itself (a genuinely broken umbrella header) is left alone so a
-    real syntax error is never silently dropped by excluding a header.
+    Pure / string-only so it is unit-testable without a compiler. A header is
+    excluded **only** when its error is a confirmed preprocessor ``#error``: clang
+    renders the offending source line below the diagnostic (``  21 | #error …``),
+    so a real syntax error or a missing-build-flag failure in an otherwise-public
+    header is *not* dropped — that still surfaces as the hard parse failure
+    ``dumper.py`` raises, keeping the L2 surface authoritative (Codex review). An
+    error in the aggregate file itself is likewise left alone.
     """
     agg = str(agg_path)
     prefix = "In file included from "
     offending: set[int] = set()
     root: int | None = None
-    for line in stderr.splitlines():
+    lines = stderr.splitlines()
+    for i, line in enumerate(lines):
         if line.startswith(prefix):
             rest = line[len(prefix) :]
             if rest.startswith(agg + ":"):
@@ -115,7 +124,12 @@ def _headers_failing_in_aggregate(
             if line.startswith(agg + ":"):
                 root = None  # error in the umbrella itself — not header-excludable
                 continue
-            if root is not None:
+            # Confirm a preprocessor #error from the rendered source line clang
+            # prints just below the diagnostic; otherwise leave the header in so a
+            # genuine error is not masked by exclusion.
+            if root is not None and any(
+                _RENDERED_ERROR_DIRECTIVE.match(w) for w in lines[i + 1 : i + 4]
+            ):
                 idx = root - 1
                 if 0 <= idx < n_headers:
                     offending.add(idx)
