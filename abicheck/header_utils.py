@@ -191,7 +191,9 @@ def resolve_inferred_header_roots(
       :func:`_deferred_include_flag`): ``-isystem`` below an above-system build
       context (``-I``/``-isystem``/…, still above the standard system dirs so the
       ``<endian.h>`` case resolves the package header), ``-idirafter`` below an
-      ``-idirafter``-only build context, or ``/I`` for an MSVC/clang-cl one.
+      ``-idirafter``-only build context, or — for an MSVC/clang-cl context — the
+      build's own lowest include bucket (``/external:I`` / ``/imsvc`` / ``/I``)
+      so the root never shadows the build's system dirs (#454).
 
     Shared by the ``dump`` CLI path (``cli_dump_helpers.perform_elf_dump``) and
     the service/``scan`` path (``service._dump_elf``) so they cannot drift.
@@ -222,10 +224,14 @@ def _msvc_style_context(toks: list[str]) -> bool:
 
     Distinguishes ``/I``/``/external:I``/``/imsvc`` from the GNU forms so the
     deferred inferred root is emitted in the same dialect — a GNU ``-isystem``
-    is silently ignored by ``cl.exe``/``clang-cl`` (Codex review).
+    is silently ignored by ``cl.exe``/``clang-cl`` (Codex review). Operands of
+    spaced include flags are stripped first (:func:`_flag_tokens`) so a GNU
+    context whose directory merely *starts with* a slash spelling
+    (``-I /imsvc-sdk``) is not misread as MSVC and routed to the wrong dialect
+    (CodeRabbit review).
     """
     msvc = ("/I", "/external:I", "/imsvc")
-    return any(t.startswith(p) for t in toks for p in msvc)
+    return any(t.startswith(p) for t in _flag_tokens(toks) for p in msvc)
 
 
 #: GNU/clang include classes searched *before* the standard system dirs. An
@@ -234,6 +240,63 @@ def _msvc_style_context(toks: list[str]) -> bool:
 #: is deliberately absent — it is searched *after* the system dirs.
 _ABOVE_SYSTEM_GNU_PREFIXES = ("-I", "-iquote", "-isystem", "-cxx-isystem")
 
+#: MSVC/clang-cl *system*-include buckets, searched after the plain ``/I``
+#: directories but still above the standard ``INCLUDE`` dirs. Listed
+#: **lowest-search-priority first** — ``clang-cl`` searches ``/imsvc`` dirs (added
+#: "as if in ``%INCLUDE%``") *after* ``/external:I`` dirs, so ``/imsvc`` is the
+#: lower bucket. :func:`_msvc_deferred_flag` returns the first present here so a
+#: deferred root lands in the build's lowest bucket and can never shadow it.
+_MSVC_SYSTEM_BUCKETS = ("/imsvc", "/external:I")
+
+
+def _flag_tokens(toks: list[str]) -> list[str]:
+    """*toks* with the operands of spaced include flags dropped.
+
+    A spaced include flag (``-I dir`` / ``/imsvc dir`` / ``/external:I dir`` …,
+    where the token equals the bare prefix) consumes the *next* token as its
+    directory operand. That operand is a path, not a flag, so it must not be
+    matched against flag spellings — otherwise a dir that merely *starts with* a
+    bucket name (``/I /imsvc-sdk``) is misread as an ``/imsvc`` flag (CodeRabbit
+    review). Returns only the genuine flag tokens. Attached forms (``-Idir`` /
+    ``/external:Idir``) carry their own operand and stay; the bare-prefix
+    (spaced) form is the only one whose successor is a separate operand.
+    """
+    out: list[str] = []
+    i = 0
+    n = len(toks)
+    while i < n:
+        t = toks[i]
+        out.append(t)
+        if t in _INCLUDE_FLAG_PREFIXES and i + 1 < n:
+            i += 2  # skip the directory operand of a spaced include flag
+        else:
+            i += 1
+    return out
+
+
+def _msvc_deferred_flag(toks: list[str]) -> str:
+    """The MSVC/clang-cl bucket to defer an inferred root below *toks* (#454).
+
+    Mirrors the build context's own *lowest* include bucket so the deferred
+    root can never shadow it: if the context uses a system bucket
+    (``/external:I``/``/imsvc``), emit in the *lowest-searched* one present — a
+    plain ``/I`` root is searched *before* those system dirs and could shadow
+    them, and even an ``/external:I`` root is searched before the build's
+    ``/imsvc`` (``%INCLUDE%``-style) dirs (Codex review). Mirroring a bucket the
+    context actually used is frontend-agnostic: the frontend that will run must
+    already understand that spelling (it consumed the same flag on input) — in
+    particular a context that uses ``/imsvc`` is necessarily ``clang-cl``, since
+    ``cl.exe`` rejects ``/imsvc`` — which sidesteps threading the
+    ``cl.exe``-vs-``clang-cl`` identity into this pure helper. Falls back to
+    ``/I`` for a plain ``/I``-only context — there is no system bucket to shadow,
+    so command-line order (after the build's own ``/I`` dirs) suffices.
+    """
+    flags = _flag_tokens(toks)
+    for bucket in _MSVC_SYSTEM_BUCKETS:
+        if any(t.startswith(bucket) for t in flags):
+            return bucket
+    return "/I"
+
 
 def _deferred_include_flag(toks: list[str]) -> str:
     """The flag to defer an inferred ``-H`` root below the build-context *toks*.
@@ -241,8 +304,10 @@ def _deferred_include_flag(toks: list[str]) -> str:
     The root must search *after* every build-context include dir; the bucket
     that achieves that depends on the build context's own flags:
 
-    * MSVC/clang-cl (``/I``/…) → ``/I`` (deferred by command-line order — a GNU
-      ``-isystem`` is silently ignored by ``cl.exe``/``clang-cl``);
+    * MSVC/clang-cl (``/I``/``/external:I``/``/imsvc``) → the build's lowest
+      bucket via :func:`_msvc_deferred_flag` (a system-bucket context keeps the
+      root from shadowing ``/external:I``/``/imsvc`` dirs; a GNU ``-isystem`` is
+      silently ignored by ``cl.exe``/``clang-cl`` either way);
     * any *above-system* GNU class (``-I``/``-iquote``/``-isystem``/
       ``-cxx-isystem``) → ``-isystem`` (searched after those, still above the
       standard system dirs so a system-colliding basename resolves the package
@@ -252,7 +317,7 @@ def _deferred_include_flag(toks: list[str]) -> str:
       same class, so the build's fallback keeps priority — Codex review).
     """
     if _msvc_style_context(toks):
-        return "/I"
+        return _msvc_deferred_flag(toks)
     if any(t.startswith(p) for t in toks for p in _ABOVE_SYSTEM_GNU_PREFIXES):
         return "-isystem"
     return "-idirafter"
@@ -266,7 +331,8 @@ def deferred_token_dirs(deferred_tokens: Sequence[str]) -> list[Path]:
     ``extra_includes`` dirs — would miss edits to their transitively-included
     headers and reuse a stale AST (Codex review). Callers pass these dirs to the
     dumper as hash-only inputs. Pairs the flat ``[flag, dir, …]`` list (the flag
-    is ``-isystem`` for GNU contexts, ``/I`` for MSVC ones).
+    is ``-isystem``/``-idirafter`` for GNU contexts, ``/I``/``/external:I``/
+    ``/imsvc`` for MSVC ones — every pair is two tokens regardless).
     """
     return [Path(d) for _flag, d in zip(deferred_tokens[::2], deferred_tokens[1::2])]
 

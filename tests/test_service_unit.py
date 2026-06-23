@@ -375,22 +375,76 @@ class TestResolveInferredHeaderRoots:
         )
         assert inc == [] and str(root) in toks
 
-    def test_msvc_slash_I_context_detected(self, tmp_path):
+    @pytest.mark.parametrize(
+        ("tok", "want"),
+        [
+            ("/Ibuild\\generated", "/I"),
+            ("/external:Igen", "/external:I"),
+            ("/imsvc", "/imsvc"),
+        ],
+    )
+    def test_msvc_slash_I_context_detected(self, tmp_path, tok, want):
         # An MSVC/clang-cl build context (/I, /external:I, /imsvc) must also count
-        # as build context so the inferred root defers instead of shadowing it.
+        # as build context so the inferred root defers instead of shadowing it,
+        # and in the MSVC dialect (never GNU -isystem, which cl.exe/clang-cl
+        # would ignore). The deferred bucket mirrors the context's own lowest
+        # bucket so the root can't shadow /external:I//imsvc system dirs (#454):
+        # a plain /I context stays /I; a system-bucket context echoes it.
         from abicheck.header_utils import resolve_inferred_header_roots
 
         root, umb = self._umbrella(tmp_path)
-        for tok in ("/Ibuild\\generated", "/external:Igen", "/imsvc"):
-            inc, toks = resolve_inferred_header_roots(
-                [umb], [], gcc_option_tokens=(tok,)
-            )
-            assert inc == [], tok  # detected as build context → deferred
-            assert str(root) in toks, tok
-            # MSVC build context → defer in MSVC dialect (/I), not GNU -isystem,
-            # which cl.exe/clang-cl would ignore (Codex review).
-            assert toks[toks.index(str(root)) - 1] == "/I", tok
-            assert "-isystem" not in toks, tok
+        inc, toks = resolve_inferred_header_roots([umb], [], gcc_option_tokens=(tok,))
+        assert inc == []  # detected as build context → deferred
+        assert str(root) in toks
+        assert toks[toks.index(str(root)) - 1] == want
+        assert "-isystem" not in toks
+
+    def test_msvc_system_bucket_root_does_not_shadow(self, tmp_path):
+        # #454 item 3: when the MSVC context uses a system bucket, the deferred
+        # root must echo that bucket (not collapse to /I, which clang-cl lowers
+        # to -I and searches *above* the /external:I//imsvc system dirs). With
+        # both a plain /I and a system bucket present, the system bucket wins so
+        # the root sits below every build-context include dir.
+        from abicheck.header_utils import resolve_inferred_header_roots
+
+        root, umb = self._umbrella(tmp_path)
+        _, ext = resolve_inferred_header_roots(
+            [umb], [], gcc_options="/I build\\gen /external:I third_party"
+        )
+        assert ext[ext.index(str(root)) - 1] == "/external:I"
+        _, imsvc = resolve_inferred_header_roots(
+            [umb], [], gcc_options="/I build\\gen /imsvc clang_sys"
+        )
+        assert imsvc[imsvc.index(str(root)) - 1] == "/imsvc"
+        # When both appear, the *lowest-searched* bucket wins: clang-cl searches
+        # /imsvc (%INCLUDE%-style) dirs after /external:I, so deferring into
+        # /imsvc keeps the root below the build's /imsvc dirs too (Codex review).
+        # A context using /imsvc is necessarily clang-cl, so /imsvc is supported.
+        _, both = resolve_inferred_header_roots(
+            [umb], [], gcc_options="/imsvc a /external:I b"
+        )
+        assert both[both.index(str(root)) - 1] == "/imsvc"
+
+    def test_msvc_bucket_not_fooled_by_include_operand(self, tmp_path):
+        # A spaced /I operand that merely *starts with* a bucket name (a dir
+        # literally called /imsvc-sdk) must NOT be read as an /imsvc flag — the
+        # only real flag here is /I, so the deferred root stays /I (CodeRabbit
+        # review). Picking /imsvc would emit a flag cl.exe rejects.
+        from abicheck.header_utils import resolve_inferred_header_roots
+
+        root, umb = self._umbrella(tmp_path)
+        _, toks = resolve_inferred_header_roots(
+            [umb], [], gcc_option_tokens=("/I", "/imsvc-sdk")
+        )
+        assert toks[toks.index(str(root)) - 1] == "/I"
+
+        # The mirror case: a *GNU* -I context whose operand dir starts with a
+        # slash spelling must not be misclassified as MSVC (dialect detection
+        # filters operands too) — it stays the GNU -isystem bucket.
+        _, gnu_toks = resolve_inferred_header_roots(
+            [umb], [], gcc_option_tokens=("-I", "/imsvc-sdk")
+        )
+        assert gnu_toks[gnu_toks.index(str(root)) - 1] == "-isystem"
 
     def test_deferred_flag_dialect_matches_build_context(self, tmp_path):
         # The deferred flag matches the build context's lowest include bucket:
@@ -418,9 +472,7 @@ class TestResolveInferredHeaderRoots:
 
         root, umb = self._umbrella(tmp_path)  # include/, umbrella at include/oneapi
         nested = root / "oneapi"
-        inc, toks = resolve_inferred_header_roots(
-            [umb], [], gcc_options=f"-I {root}"
-        )
+        inc, toks = resolve_inferred_header_roots([umb], [], gcc_options=f"-I {root}")
         assert inc == []
         # the include root is in the build context → not re-emitted at all
         assert str(root) not in toks
@@ -493,9 +545,7 @@ class TestResolveInferredHeaderRoots:
         from abicheck.header_utils import resolve_inferred_header_roots
 
         root, umb = self._umbrella(tmp_path)
-        inc, toks = resolve_inferred_header_roots(
-            [umb], [], gcc_options='-I "/broken'
-        )
+        inc, toks = resolve_inferred_header_roots([umb], [], gcc_options='-I "/broken')
         assert inc == [] and str(root) in toks
 
 
