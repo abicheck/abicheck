@@ -286,6 +286,24 @@ def test_bazel_command_includes_param_files(tmp_path: Path):
     assert "--include_param_files" in cmd  # expands @...params (Codex review)
 
 
+def test_bazel_command_queries_compile_and_link_mnemonics(tmp_path: Path):
+    # The inferred aquery must cover link/archive actions too, not just compile —
+    # else link_units lack version_script/soname and LINK_EXPORT_POLICY_CHANGED
+    # can't fire on the inferred Bazel path (review). Derived from the adapter's
+    # own mnemonic sets so the query and the ingester cannot drift.
+    from abicheck.buildsource.adapters.bazel import (
+        _COMPILE_MNEMONICS,
+        _LINK_MNEMONICS,
+    )
+
+    cmd = inferred_query_command("bazel", tmp_path)
+    assert cmd is not None
+    expr = cmd[-1]
+    for mnem in _COMPILE_MNEMONICS | _LINK_MNEMONICS:
+        assert mnem in expr, f"{mnem} missing from inferred aquery expression"
+    assert "CppLink" in expr and "CppCompile" in expr  # explicit sanity
+
+
 def test_inferred_query_diag_yields_partial_l3_coverage():
     # A build_query_auto skipped/failed diagnostic must produce a partial L3 row,
     # not a silent not_collected, so the user learns why source scanning got no L3.

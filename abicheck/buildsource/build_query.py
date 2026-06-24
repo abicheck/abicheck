@@ -128,15 +128,23 @@ def inferred_query_command(system: str, sources: Path) -> list[str] | None:
         # commands designed not to build, so they stay auto.
         return None
     if system == "bazel":
-        # Action graph for all C++ compile actions; jsonproto feeds the adapter.
-        # --include_param_files expands @...params so source paths and ABI flags
-        # that Bazel spills to param files are present (mirrors BazelAdapter).
+        # Action graph for the compile AND link/archive actions the BazelAdapter
+        # ingests — link actions carry version_script/soname facts, so a
+        # compile-only query would drop LINK_EXPORT_POLICY_CHANGED on the inferred
+        # path (review). The mnemonic regex is derived from the adapter's own
+        # mnemonic sets so the two cannot drift; anchored alternation so a
+        # mnemonic is matched whole, not as a substring. --include_param_files
+        # expands @...params so source paths and ABI flags Bazel spills to param
+        # files are present (mirrors BazelAdapter).
+        from .adapters.bazel import _COMPILE_MNEMONICS, _LINK_MNEMONICS
+
+        mnemonics = "|".join(sorted(_COMPILE_MNEMONICS | _LINK_MNEMONICS))
         return [
             "bazel",
             "aquery",
             "--output=jsonproto",
             "--include_param_files",
-            "mnemonic(CppCompile, deps(//...))",
+            f"mnemonic('^({mnemonics})$', deps(//...))",
         ]
     return None
 
