@@ -22,6 +22,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import sys
 import tempfile
 from pathlib import Path
 
@@ -220,6 +221,68 @@ def test_inferred_cmake_build_dir_lock_contention_falls_back_to_unique(
     finally:
         fcntl.flock(held, fcntl.LOCK_UN)
         os.close(held)
+
+
+def test_claim_build_dir_posix_flock_roundtrip(tmp_path: Path):
+    # POSIX: the claim takes an flock on `<base>.lock`, returns the deterministic
+    # path, and the release thunk unlocks it so the next sequential claim re-takes
+    # the same path (cache stability preserved).
+    pytest.importorskip("fcntl")
+    base = tmp_path / "abicheck-cmake-cafef00d"
+    bdir, release = _bq._claim_inferred_build_dir(base, timeout=0)
+    assert bdir == base
+    lock = base.with_name(base.name + ".lock")
+    assert lock.exists()
+    release()  # unlock + close; the .lock file is intentionally left behind
+    bdir2, release2 = _bq._claim_inferred_build_dir(base, timeout=0)
+    assert bdir2 == base  # re-claim after release is deterministic
+    release2()
+
+
+def test_claim_build_dir_polls_until_lock_free(tmp_path: Path, monkeypatch):
+    # When the lock is briefly busy, the claim polls (sleeps) and retries rather
+    # than failing or blocking forever, then takes the deterministic path once free.
+    fcntl = pytest.importorskip("fcntl")
+    base = tmp_path / "abicheck-cmake-feedface"
+    calls = {"n": 0}
+    real_flock = fcntl.flock
+
+    def flaky_flock(fd, op):
+        # First non-blocking attempt reports busy; the retry succeeds.
+        if (op & fcntl.LOCK_NB) and calls["n"] == 0:
+            calls["n"] += 1
+            raise OSError("busy")
+        return real_flock(fd, op)
+
+    monkeypatch.setattr(fcntl, "flock", flaky_flock)
+    monkeypatch.setattr(_bq.time, "sleep", lambda _s: None)  # don't actually wait
+    bdir, release = _bq._claim_inferred_build_dir(base, timeout=5)
+    assert bdir == base and calls["n"] == 1  # polled once, then acquired
+    release()
+
+
+def test_claim_build_dir_marker_fallback_when_no_fcntl(tmp_path: Path, monkeypatch):
+    # Without fcntl (e.g. Windows), the claim uses an O_CREAT|O_EXCL marker file:
+    # sequential claims re-take the deterministic path (marker removed on release),
+    # while a concurrent claim (marker still present) falls back to a unique dir.
+    monkeypatch.setitem(sys.modules, "fcntl", None)  # force `import fcntl` to fail
+    base = tmp_path / "abicheck-cmake-deadbeef"
+    marker = base.with_name(base.name + ".lock")
+
+    bdir, release = _bq._claim_inferred_build_dir(base, timeout=0)
+    assert bdir == base and marker.exists()  # first claim owns the marker
+
+    # Second claim while the marker is held → unique sibling dir, no lock.
+    bdir2, release2 = _bq._claim_inferred_build_dir(base, timeout=0)
+    assert bdir2 != base and bdir2.name.startswith(base.name)
+    release2()  # no-op for the fallback
+    bdir2.rmdir()  # mkdtemp left an empty dir
+
+    release()  # removes the marker so a later sequential claim can re-take base
+    assert not marker.exists()
+    bdir3, release3 = _bq._claim_inferred_build_dir(base, timeout=0)
+    assert bdir3 == base  # sequential re-claim is deterministic
+    release3()
 
 
 def test_run_cmake_no_db_is_partial(tmp_path: Path, monkeypatch):

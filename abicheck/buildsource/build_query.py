@@ -92,7 +92,13 @@ INFERRED_QUERY_TIMEOUT_S = 600
 _BUILD_DIR_LOCK_POLL_S = 0.2
 
 
-def _claim_inferred_build_dir(base: Path, timeout: float) -> tuple[Path, int | None]:
+def _noop_release() -> None:
+    """Release thunk for the unique-dir fallback (nothing to unlock)."""
+
+
+def _claim_inferred_build_dir(
+    base: Path, timeout: float
+) -> tuple[Path, Callable[[], None]]:
     """Take exclusive ownership of the deterministic cmake build dir for this run.
 
     *base* is deterministic per resolved source tree, which keeps each compile
@@ -103,64 +109,81 @@ def _claim_inferred_build_dir(base: Path, timeout: float) -> tuple[Path, int | N
     ``compile_commands.json``, and whichever finishes first ``rmtree``\\ s the dir
     out from under the other's clang replay cwd before L4 finishes (Codex P2).
 
-    An advisory ``flock`` serializes them without sacrificing cache stability: the
-    second scan waits for the first to fully finish (configure → L4 → cleanup),
-    then reuses the *same* path — so nothing is shared live and the cache key is
-    still reproducible. ``flock`` is released by the OS if the holder dies, so a
-    crash never leaves a stale lock. If the lock can't be acquired within *timeout*
-    (a peer is mid-replay on a large tree), fall back to a unique sibling dir for
-    this run — correct, at the cost of a one-off cache miss instead of an unbounded
-    wait.
+    Two cross-platform locking strategies serialize them without sacrificing cache
+    stability — the second scan ends up reusing the *same* deterministic path:
 
-    Returns ``(build_dir, lock_fd)``. ``lock_fd`` is ``None`` when no lock is held
-    (the unique-dir fallback, or a platform without ``fcntl``), in which case the
-    caller simply removes the dir.
+    * **POSIX** — an advisory ``flock`` held for the dir's whole lifetime. The
+      second scan waits (up to *timeout*) for the first to fully finish, then takes
+      it. ``flock`` is released by the OS if the holder dies, so a crash never
+      leaves a stale lock. If the wait exceeds *timeout* (a peer mid-replay on a
+      large tree), fall back to a unique sibling dir rather than block forever.
+    * **No ``fcntl`` (e.g. Windows)** — an ``O_CREAT|O_EXCL`` marker file claim:
+      the first scan creates it, removes it on cleanup, so *sequential* scans
+      re-claim the same path (cache stability preserved). A concurrent scan sees
+      the marker and falls back to a unique sibling dir. A crashed scan can leave a
+      stale marker → later scans fall back until temp is cleared — a one-off cache
+      miss, never corruption.
+
+    Returns ``(build_dir, release)``: *release* unlocks/unlinks the claim (a no-op
+    for the unique-dir fallback). The caller removes *build_dir* and then calls
+    *release*.
     """
+    lock_path = base.with_name(base.name + ".lock")
     try:
         import fcntl
     except ImportError:
-        # No advisory file locking (e.g. Windows): never share the deterministic
-        # tree — use a unique dir so concurrent runs can't collide. Sacrifices
-        # cross-run L4 cache reuse on that platform only.
-        return Path(tempfile.mkdtemp(prefix=f"{base.name}-")), None
-    lock_path = base.with_name(base.name + ".lock")
-    fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
-    waited = 0.0
-    while True:
-        try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            return base, fd
-        except OSError:
-            if waited >= timeout:
-                os.close(fd)
-                # Peer still holds it — don't block the scan indefinitely.
-                return Path(tempfile.mkdtemp(prefix=f"{base.name}-")), None
-            time.sleep(_BUILD_DIR_LOCK_POLL_S)
-            waited += _BUILD_DIR_LOCK_POLL_S
+        fcntl = None  # type: ignore[assignment]
 
+    if fcntl is not None:
+        fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+        waited = 0.0
+        while True:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except OSError:
+                if waited >= timeout:
+                    os.close(fd)
+                    # Peer still holds it — don't block the scan indefinitely.
+                    return Path(tempfile.mkdtemp(prefix=f"{base.name}-")), _noop_release
+                time.sleep(_BUILD_DIR_LOCK_POLL_S)
+                waited += _BUILD_DIR_LOCK_POLL_S
+                continue
 
-def _release_inferred_build_dir(build_dir: Path, lock_fd: int | None) -> None:
-    """Remove the inferred cmake build dir and release its lock (if held).
+            def _unlock(_fd: int = fd) -> None:
+                try:
+                    fcntl.flock(_fd, fcntl.LOCK_UN)
+                finally:
+                    try:
+                        os.close(_fd)
+                    except OSError:
+                        pass
 
-    The ``.lock`` marker file is intentionally left behind (it is tiny and reused
-    by the next run); unlinking it would race a concurrent waiter that already has
-    it open. Releasing the ``flock`` and closing the fd is what lets the next scan
-    of this checkout proceed.
-    """
-    shutil.rmtree(build_dir, ignore_errors=True)
-    if lock_fd is None:
-        return
+            # The `.lock` file is left behind (tiny, reused next run); unlinking it
+            # would race a concurrent waiter that already has it open.
+            return base, _unlock
+
+    # No advisory locking: exclusive-create marker claim.
     try:
-        import fcntl
+        fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_RDWR, 0o600)
+    except FileExistsError:
+        return Path(tempfile.mkdtemp(prefix=f"{base.name}-")), _noop_release
 
-        fcntl.flock(lock_fd, fcntl.LOCK_UN)
-    except (OSError, ImportError):
-        pass
-    finally:
+    def _unlink(_fd: int = fd, _marker: Path = lock_path) -> None:
         try:
-            os.close(lock_fd)
-        except OSError:
-            pass
+            os.close(_fd)
+        finally:
+            try:
+                os.unlink(_marker)  # let the next sequential scan re-claim base
+            except OSError:
+                pass
+
+    return base, _unlink
+
+
+def _release_inferred_build_dir(build_dir: Path, release: Callable[[], None]) -> None:
+    """Remove the inferred cmake build dir, then release its claim."""
+    shutil.rmtree(build_dir, ignore_errors=True)
+    release()
 
 
 #: Build-system marker files, checked most-specific first. CMake wins over Make
@@ -303,13 +326,13 @@ def run_inferred_build_query(
     # sharing one mutable tree (Codex P2); under contention it falls back to a
     # unique dir. Removed (and unlocked) after L4 via `cleanup`.
     build_dir: Path | None = None
-    lock_fd: int | None = None
+    release: Callable[[], None] = _noop_release
     if system == "cmake":
         base = (
             Path(tempfile.gettempdir())
             / f"abicheck-cmake-{hashlib.sha256(str(sources).encode()).hexdigest()[:16]}"
         )
-        build_dir, lock_fd = _claim_inferred_build_dir(base, timeout)
+        build_dir, release = _claim_inferred_build_dir(base, timeout)
         build_dir.mkdir(parents=True, exist_ok=True)
     try:
         cmd = inferred_query_command(system, sources, build_dir=build_dir)
@@ -397,10 +420,10 @@ def run_inferred_build_query(
                 # the lock must stay held until then so a concurrent same-tree scan
                 # can't reuse or delete the dir mid-replay.
                 cleanup.append(
-                    functools.partial(_release_inferred_build_dir, build_dir, lock_fd)
+                    functools.partial(_release_inferred_build_dir, build_dir, release)
                 )
             else:
-                _release_inferred_build_dir(build_dir, lock_fd)
+                _release_inferred_build_dir(build_dir, release)
 
 
 def _ingest_query_output(
