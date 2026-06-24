@@ -474,6 +474,27 @@ def test_inferred_query_runs_when_no_trusted_query_configured(
     assert called["infer"] is True
 
 
+def test_autodiscover_skips_stale_abicheck_build_dir(tmp_path: Path):
+    # A stale `.abicheck-build/compile_commands.json` (an older in-tree inferred
+    # CMake artifact) must NOT be returned by auto-discovery — otherwise a fresh
+    # zero-config --sources run replays with stale flags instead of re-querying
+    # the build (Codex P2).
+    from abicheck.buildsource.build_query import ABICHECK_BUILD_DIR
+    from abicheck.buildsource.inline import _autodiscover_compile_db
+
+    stale = tmp_path / ABICHECK_BUILD_DIR
+    stale.mkdir()
+    (stale / "compile_commands.json").write_text("[]")
+    assert _autodiscover_compile_db(tmp_path) is None  # stale dir ignored
+
+    # A real out-of-tree dir is still discovered.
+    real = tmp_path / "build"
+    real.mkdir()
+    (real / "compile_commands.json").write_text("[]")
+    found = _autodiscover_compile_db(tmp_path)
+    assert found is not None and found.parent.name == "build"
+
+
 def test_no_inferred_query_after_build_info_miss(tmp_path: Path, monkeypatch):
     # An explicit --build-info that resolves to no compile DB must not be masked
     # by abicheck's default inferred query under different flags (review).

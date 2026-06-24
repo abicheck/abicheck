@@ -918,7 +918,9 @@ def _maybe_collect_bazel_build_info(
     return True
 
 
-def _find_compile_db_in_dir(directory: Path) -> Path | None:
+def _find_compile_db_in_dir(
+    directory: Path, skip_segments: frozenset[str] = frozenset()
+) -> Path | None:
     """Locate a ``compile_commands.json`` under *directory* (the P4 strategy).
 
     Conventional build-dir hints first (fast, deterministic), then a fallback to
@@ -928,8 +930,15 @@ def _find_compile_db_in_dir(directory: Path) -> Path | None:
     evidence. The fallback stays at depth 1 to remain cheap and is deterministic
     (sorted). Shared by ``--sources`` auto-discovery and ``--build-info <dir>``
     resolution so both honour the same "any immediate subdirectory" contract.
+
+    *skip_segments* names immediate subdirectories to ignore — used by
+    auto-discovery to skip a stale ``.abicheck-build`` left by an older in-tree
+    inferred-CMake run, so it can't short-circuit a fresh out-of-tree query with
+    stale flags (Codex P2).
     """
     for hint in _COMPILE_DB_HINTS:
+        if hint in skip_segments:
+            continue
         candidate = (
             (directory / hint / _COMPILE_DB_NAME)
             if hint
@@ -937,15 +946,28 @@ def _find_compile_db_in_dir(directory: Path) -> Path | None:
         )
         if candidate.is_file():
             return candidate
-    fallback = sorted(p for p in directory.glob("*/" + _COMPILE_DB_NAME) if p.is_file())
+    fallback = sorted(
+        p
+        for p in directory.glob("*/" + _COMPILE_DB_NAME)
+        if p.is_file() and p.parent.name not in skip_segments
+    )
     return fallback[0] if fallback else None
 
 
 def _autodiscover_compile_db(source_tree: Path | None) -> Path | None:
-    """Best-effort search for a ``compile_commands.json`` inside a source tree."""
+    """Best-effort search for a ``compile_commands.json`` inside a source tree.
+
+    Skips a stale ``.abicheck-build/compile_commands.json`` (an older in-tree
+    inferred-CMake artifact) so a zero-config ``--sources`` run refreshes the build
+    query instead of replaying with stale flags/include paths (Codex P2).
+    """
     if source_tree is None or not source_tree.is_dir():
         return None
-    return _find_compile_db_in_dir(source_tree)
+    from .build_query import ABICHECK_BUILD_DIR
+
+    return _find_compile_db_in_dir(
+        source_tree, skip_segments=frozenset({ABICHECK_BUILD_DIR})
+    )
 
 
 def _run_compile_db(
