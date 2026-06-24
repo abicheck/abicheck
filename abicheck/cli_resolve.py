@@ -37,6 +37,7 @@ import click
 
 from .buildsource.build_query import PRUNED_HEADER_DIR_SEGMENTS
 from .compat.abicc_dump_import import looks_like_perl_dump
+from .header_utils import iter_directory_headers
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -56,8 +57,6 @@ def _click_notify(message: str) -> None:
     click.echo(message, err=True)
 
 
-_HEADER_EXTS = {".h", ".hh", ".hpp", ".hxx", ".ipp", ".tpp", ".inc"}
-
 # Number of bytes to read when sniffing file format (covers ELF magic + JSON/Perl head)
 _SNIFF_BYTES = 256
 
@@ -65,7 +64,10 @@ _SNIFF_BYTES = 256
 def _expand_header_inputs(inputs: list[Path]) -> list[Path]:
     """Expand header inputs where each item can be a file or a directory.
 
-    Directories are scanned recursively for known header extensions.
+    Directories are scanned recursively for known header extensions, via the same
+    shared walker the ``scan``/service path uses (``header_utils`` —
+    canonical :data:`~abicheck.header_utils.HEADER_SUFFIXES`, pruned-dir walk) so
+    the two front-ends never disagree on what counts as a header.
     """
     out: list[Path] = []
     for p in inputs:
@@ -75,20 +77,12 @@ def _expand_header_inputs(inputs: list[Path]) -> list[Path]:
             out.append(p)
             continue
         if p.is_dir():
-            found = [
-                f
-                for f in p.rglob("*")
-                if f.is_file()
-                and f.suffix.lower() in _HEADER_EXTS
-                and not any(
-                    seg in PRUNED_HEADER_DIR_SEGMENTS for seg in f.relative_to(p).parts
-                )
-            ]
+            found = iter_directory_headers(p, PRUNED_HEADER_DIR_SEGMENTS)
             if not found:
                 raise click.ClickException(
                     f"Header directory contains no supported header files: {p}"
                 )
-            out.extend(sorted(found))
+            out.extend(found)
             continue
         raise click.ClickException(f"Header path is neither file nor directory: {p}")
 

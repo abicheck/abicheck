@@ -34,7 +34,7 @@ from typing import TYPE_CHECKING, Any
 
 from .buildsource.build_query import PRUNED_HEADER_DIR_SEGMENTS
 from .errors import ValidationError
-from .header_utils import HEADER_SUFFIXES
+from .header_utils import HEADER_SUFFIXES, iter_directory_headers
 
 if TYPE_CHECKING:
     from .buildsource.scan_levels import EvidenceDepth, SourceMethod
@@ -68,20 +68,12 @@ def expand_header_inputs(inputs: list[Path]) -> list[Path]:
             out.append(p)
             continue
         if p.is_dir():
-            found = [
-                f
-                for f in p.rglob("*")
-                if f.is_file()
-                and f.suffix.lower() in _HEADER_EXTS
-                and not any(
-                    seg in _PRUNED_DIR_SEGMENTS for seg in f.relative_to(p).parts
-                )
-            ]
+            found = iter_directory_headers(p, _PRUNED_DIR_SEGMENTS)
             if not found:
                 raise ValidationError(
                     f"Header directory contains no supported header files: {p}"
                 )
-            out.extend(sorted(found))
+            out.extend(found)
             continue
         raise ValidationError(f"Header path is neither file nor directory: {p}")
 

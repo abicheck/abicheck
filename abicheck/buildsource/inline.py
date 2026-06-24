@@ -538,10 +538,15 @@ def collect_inline_pack(
     explicit ``--build-info`` pack directory) so a raw ``--sources`` tree can
     replay L4 against it without re-resolving a compile DB.
 
-    ``build_config_trusted_for_query`` must be true before ``build.query`` can
-    run. CLI auto-discovered ``.abicheck.yml`` files live inside the supplied
-    source tree and may be attacker-controlled, so they are not trusted for
-    subprocess execution even when ``--allow-build-query`` is set.
+    ``build_config_trusted_for_query`` must be true before a tree-local
+    ``build.query`` command can run. CLI auto-discovered ``.abicheck.yml`` files
+    live inside the supplied source tree and may be attacker-controlled, so they
+    are not trusted for subprocess execution. (The abicheck-authored *inferred*
+    cmake/bazel query is separate — it runs whenever ``--sources`` needs L3, since
+    pointing abicheck at a source tree is itself the request to analyse it; see
+    :func:`_resolve_compile_db`.) ``allow_build_query`` is accepted only for
+    backward compatibility and is ignored — ``--allow-build-query`` is a
+    deprecated no-op.
 
     ``layers`` selects which layers to collect (ADR-033 D2 CI modes): the
     ``build`` mode passes ``("L3",)`` to capture build context only, skipping the
@@ -704,9 +709,11 @@ def _resolve_compile_db(
             f"build-info {build_info}: no {_COMPILE_DB_NAME} found"
         )
 
-    # build.query (ADR-032 D5 query_build_system): opt-in command that EMITS a
-    # compile DB / exports without a full build. Off unless --allow-build-query
-    # is set *and* the config came from an explicit operator-supplied path.
+    # build.query (ADR-032 D5 query_build_system): a tree-supplied command that
+    # EMITS a compile DB / exports without a full build. Runs only when the config
+    # came from an explicit operator-supplied path (build_config_trusted_for_query);
+    # an auto-discovered .abicheck.yml is never trusted to execute. No
+    # --allow-build-query flag is involved any more (it is a deprecated no-op).
     if cfg.query:
         if not build_config_trusted_for_query:
             extractors.append(

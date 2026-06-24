@@ -237,7 +237,22 @@ def run_inferred_build_query(
             f"build_query_auto: {system} exited {proc.returncode}"
         )
         return None
-    return _ingest_query_output(system, sources, proc.stdout, merged, extractors)
+    # Ingestion parses tool output (bazel aquery JSON via a temp file, the cmake
+    # compile DB) — keep it inside the never-raises contract so a malformed
+    # aquery payload or a transient I/O error degrades to a diagnostic rather
+    # than aborting a `dump --sources` run (review).
+    try:
+        return _ingest_query_output(system, sources, proc.stdout, merged, extractors)
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        extractors.append(
+            ExtractorRecord(
+                name="build_query_auto",
+                status="failed",
+                detail=f"auto {system} query ran but its output could not be ingested: {exc}",
+            )
+        )
+        merged.diagnostics.append(f"build_query_auto: ingest failed ({exc})")
+        return None
 
 
 def _ingest_query_output(

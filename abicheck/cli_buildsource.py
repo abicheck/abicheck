@@ -881,7 +881,12 @@ def embed_build_source(
         _ev = inline_pack.build_evidence if inline_pack is not None else None
         _has_l3 = _ev is not None and bool(_ev.compile_units)
         _has_query_note = inline_pack is not None and any(
-            e.name == "build_query" for e in inline_pack.manifest.extractors
+            # Both the trusted `build.query` and the zero-config inferred query
+            # ("build_query_auto") record a diagnostic that already explains the
+            # missing L3 — don't also emit the generic "run cmake …" hint, which
+            # would contradict an inferred query abicheck just attempted.
+            e.name in ("build_query", "build_query_auto")
+            for e in inline_pack.manifest.extractors
         )
         if not _has_l3 and bi_pack is None and not _has_query_note:
             _tree = raw_sources if raw_sources is not None else raw_build_info
