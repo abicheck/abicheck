@@ -763,7 +763,13 @@ def _resolve_compile_db(
             return None
 
     if cfg.compile_db and sources is not None:
-        explicit_input_missed = True  # an explicit DB path was configured
+        # Only an *operator-supplied* (--config) build.compile_db counts as an
+        # explicit input whose miss should suppress inference. A build.compile_db
+        # from an auto-discovered (untrusted) .abicheck.yml is not something the
+        # user explicitly chose, so a stale/cleaned path there must still fall
+        # through to the zero-config inferred query (review).
+        if build_config_trusted_for_query:
+            explicit_input_missed = True
         for match in sorted(sources.glob(cfg.compile_db)):
             if match.is_file():
                 return match

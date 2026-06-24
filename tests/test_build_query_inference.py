@@ -343,6 +343,31 @@ def test_no_inferred_query_after_explicit_compile_db_miss(
     assert called["infer"] is False
 
 
+def test_inferred_query_runs_after_untrusted_compile_db_miss(
+    tmp_path: Path, monkeypatch
+):
+    # A build.compile_db from an AUTO-DISCOVERED (untrusted) .abicheck.yml that
+    # matches nothing must NOT suppress the zero-config inferred query — the user
+    # didn't explicitly choose that path (review). Contrast with the trusted-config
+    # miss above, which does suppress inference.
+    from abicheck.buildsource import build_query as _bqmod
+    from abicheck.buildsource.inline import BuildConfig, _resolve_compile_db
+
+    (tmp_path / "CMakeLists.txt").write_text("project(x)\n")
+    called = {"infer": False}
+
+    def _infer(*a, **k):
+        called["infer"] = True
+        return None
+
+    monkeypatch.setattr(_bqmod, "run_inferred_build_query", _infer)
+    cfg = BuildConfig(compile_db="build/compile_commands.json")  # matches nothing
+    merged, ext = BuildEvidence(), []
+    # build_config_trusted_for_query=False → auto-discovered config, not explicit.
+    _resolve_compile_db(None, tmp_path, cfg, False, merged, ext)
+    assert called["infer"] is True
+
+
 def test_run_subprocess_error_is_failed(tmp_path: Path, monkeypatch):
     (tmp_path / "CMakeLists.txt").write_text("project(x)\n")
 
