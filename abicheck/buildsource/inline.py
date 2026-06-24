@@ -518,6 +518,7 @@ def collect_inline_pack(
     build_config: BuildConfig | None = None,
     allow_build_query: bool = False,
     build_config_trusted_for_query: bool = True,
+    compile_db_explicit: bool = False,
     base_build: BuildEvidence | None = None,
     clang_bin: str = "clang",
     extractor: str = "clang",
@@ -581,6 +582,7 @@ def collect_inline_pack(
             merged,
             extractors,
             cleanup=query_build_dirs,
+            compile_db_explicit=compile_db_explicit,
         )
     if compile_db is not None:
         _run_compile_db(compile_db, cfg.system, merged, extractors, build_cache_dir)
@@ -702,6 +704,7 @@ def _resolve_compile_db(
     merged: BuildEvidence,
     extractors: list[ExtractorRecord],
     cleanup: list[Path] | None = None,
+    compile_db_explicit: bool = False,
 ) -> Path | None:
     """Resolve the compile DB to feed L3 (zero-config; ADR-032 amended).
 
@@ -763,26 +766,31 @@ def _resolve_compile_db(
             return None
 
     if cfg.compile_db and sources is not None:
-        # Only an *operator-supplied* (--config) build.compile_db counts as an
-        # explicit input whose miss should suppress inference. A build.compile_db
-        # from an auto-discovered (untrusted) .abicheck.yml is not something the
-        # user explicitly chose, so a stale/cleaned path there must still fall
-        # through to the zero-config inferred query (review).
-        if build_config_trusted_for_query:
+        # Only an *operator-supplied* build.compile_db (a CLI --build-compile-db or
+        # an explicit --config path) counts as an explicit input whose miss should
+        # suppress fallback — tracked by `compile_db_explicit`, which is distinct
+        # from query-execution trust (review): --build-compile-db makes the DB
+        # explicit without trusting a query, and --build-query trusts a query
+        # without making a DB explicit. A build.compile_db from an auto-discovered
+        # .abicheck.yml is not something the user chose, so a stale/cleaned path
+        # there still falls through to the zero-config inferred query.
+        if compile_db_explicit:
             explicit_input_missed = True
         for match in sorted(sources.glob(cfg.compile_db)):
             if match.is_file():
                 return match
 
+    if explicit_input_missed:
+        # An explicit --build-info / --build-compile-db / --config compile-DB input
+        # was given but resolved to nothing. Surface that miss rather than masking
+        # it with a stale auto-discovered DB OR abicheck's default inferred query
+        # under different flags — checked BEFORE auto-discovery so a stray
+        # build/compile_commands.json can't silently stand in (review).
+        return None
+
     discovered = _autodiscover_compile_db(sources)
     if discovered is not None:
         return discovered
-
-    if explicit_input_missed:
-        # An explicit --build-info / build.compile_db was given but resolved to no
-        # compile DB (and none was auto-discovered). Surface that miss rather than
-        # masking it with abicheck's default inferred query under different flags.
-        return None
 
     # Zero-config fallback: no compile DB exists and no explicit L3 input was
     # given, but a --sources tree is present. Detect the build system and run

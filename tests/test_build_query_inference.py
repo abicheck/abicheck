@@ -323,24 +323,34 @@ def test_no_inferred_query_after_build_info_miss(tmp_path: Path, monkeypatch):
 def test_no_inferred_query_after_explicit_compile_db_miss(
     tmp_path: Path, monkeypatch
 ):
-    # An explicit build.compile_db path that matches nothing is likewise not
-    # masked by the inferred query (review).
-    from abicheck.buildsource import build_query as _bqmod
+    # An *explicit* build.compile_db path (compile_db_explicit=True: CLI
+    # --build-compile-db or operator --config) that matches nothing is not masked
+    # by the inferred query — even if a stray DB exists to auto-discover (review).
+    from abicheck.buildsource import build_query as _bqmod, inline as _inline
     from abicheck.buildsource.inline import BuildConfig, _resolve_compile_db
 
     (tmp_path / "CMakeLists.txt").write_text("project(x)\n")
-    called = {"infer": False}
+    (tmp_path / "compile_commands.json").write_text("[]")  # stray auto-discoverable DB
+    called = {"infer": False, "autodiscover": False}
 
     def _infer(*a, **k):
         called["infer"] = True
         return None
 
+    def _autodiscover(*a, **k):
+        called["autodiscover"] = True
+        return tmp_path / "compile_commands.json"
+
     monkeypatch.setattr(_bqmod, "run_inferred_build_query", _infer)
+    monkeypatch.setattr(_inline, "_autodiscover_compile_db", _autodiscover)
     cfg = BuildConfig(compile_db="build/compile_commands.json")  # matches nothing
     merged, ext = BuildEvidence(), []
-    out = _resolve_compile_db(None, tmp_path, cfg, True, merged, ext)
-    assert out is None
-    assert called["infer"] is False
+    out = _resolve_compile_db(
+        None, tmp_path, cfg, True, merged, ext, compile_db_explicit=True
+    )
+    assert out is None  # explicit miss surfaces
+    assert called["infer"] is False  # not masked by inferred query
+    assert called["autodiscover"] is False  # nor by a stray auto-discovered DB
 
 
 def test_inferred_query_runs_after_untrusted_compile_db_miss(

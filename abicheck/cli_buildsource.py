@@ -866,6 +866,11 @@ def embed_build_source(
             build_config=cfg,
             allow_build_query=allow_build_query,
             build_config_trusted_for_query=cfg_trusted_for_query,
+            # A build.compile_db is an *explicit* L3 input (its miss must surface,
+            # not fall through to inference) when it came from the CLI
+            # --build-compile-db or an operator --config — never from an
+            # auto-discovered .abicheck.yml (review).
+            compile_db_explicit=build_compile_db is not None or build_config is not None,
             base_build=bi_pack.build_evidence if bi_pack else None,
             clang_bin=clang_bin,
             extractor=extractor,
