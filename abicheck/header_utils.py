@@ -73,6 +73,34 @@ _INCLUDE_FLAG_PREFIXES = (
 )
 
 
+def iter_directory_headers(
+    directory: Path, pruned_segments: frozenset[str] = frozenset()
+) -> list[Path]:
+    """Recognised header files under *directory*, never descending pruned dirs.
+
+    Shared by both ``-H <dir>`` expanders — the ``scan``/service path
+    (:func:`abicheck.service_scan.expand_header_inputs`) and the ``dump``/``compare``
+    CLI path (``abicheck.cli_resolve._expand_header_inputs``) — so the two
+    front-ends can never disagree on what counts as a header (they previously kept
+    divergent suffix literals; one was missing ``.h++``). Filters by
+    :data:`HEADER_SUFFIXES` (the conservative standalone-TU set).
+
+    *pruned_segments* directory names are dropped from the walk **in place**, so
+    the walk never descends into them (VCS metadata, abicheck's own in-tree cmake
+    build dir) rather than stat-ing every entry only to discard it afterwards.
+    Sorted for a deterministic surface.
+    """
+    found: list[Path] = []
+    for dirpath, dirnames, filenames in os.walk(directory):
+        dirnames[:] = [d for d in dirnames if d not in pruned_segments]
+        base = Path(dirpath)
+        for name in filenames:
+            f = base / name
+            if f.suffix.lower() in HEADER_SUFFIXES and f.is_file():
+                found.append(f)
+    return sorted(found)
+
+
 def _implicit_header_includes(headers: list[Path]) -> list[Path]:
     """Include directories implied by the ``-H`` inputs themselves.
 

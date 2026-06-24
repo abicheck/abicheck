@@ -45,6 +45,7 @@ import os
 import shlex
 import subprocess
 import warnings
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, ClassVar
@@ -79,6 +80,12 @@ _QUERY_TIMEOUT_S = 300
 # skipped (not allowed), failed (errored/unparseable), partial (ran, no compile
 # DB produced). "ok" means a DB was produced, so it needs no special handling.
 _BUILD_QUERY_DIAG_STATUSES = ("failed", "skipped", "partial")
+
+# Extractor names that carry a build-query no-facts diagnostic: the explicit
+# trusted `build.query` ("build_query") and the zero-config inferred query
+# ("build_query_auto"). Both must be treated alike in the pack-survival gate and
+# the L3 coverage row so an inferred-query-only run keeps its explanation.
+_BUILD_QUERY_DIAG_NAMES = ("build_query", "build_query_auto")
 
 
 #: Valid per-category severity levels (ADR-037 D4 ``severity:`` block).
@@ -511,6 +518,7 @@ def collect_inline_pack(
     build_config: BuildConfig | None = None,
     allow_build_query: bool = False,
     build_config_trusted_for_query: bool = True,
+    compile_db_explicit: bool = False,
     base_build: BuildEvidence | None = None,
     clang_bin: str = "clang",
     extractor: str = "clang",
@@ -532,10 +540,15 @@ def collect_inline_pack(
     explicit ``--build-info`` pack directory) so a raw ``--sources`` tree can
     replay L4 against it without re-resolving a compile DB.
 
-    ``build_config_trusted_for_query`` must be true before ``build.query`` can
-    run. CLI auto-discovered ``.abicheck.yml`` files live inside the supplied
-    source tree and may be attacker-controlled, so they are not trusted for
-    subprocess execution even when ``--allow-build-query`` is set.
+    ``build_config_trusted_for_query`` must be true before a tree-local
+    ``build.query`` command can run. CLI auto-discovered ``.abicheck.yml`` files
+    live inside the supplied source tree and may be attacker-controlled, so they
+    are not trusted for subprocess execution. (The abicheck-authored *inferred*
+    cmake/bazel query is separate — it runs whenever ``--sources`` needs L3, since
+    pointing abicheck at a source tree is itself the request to analyse it; see
+    :func:`_resolve_compile_db`.) ``allow_build_query`` is accepted only for
+    backward compatibility and is ignored — ``--allow-build-query`` is a
+    deprecated no-op.
 
     ``layers`` selects which layers to collect (ADR-033 D2 CI modes): the
     ``build`` mode passes ``("L3",)`` to capture build context only, skipping the
@@ -545,6 +558,12 @@ def collect_inline_pack(
     scope = effective_graph_scope(cfg.graph_detail, scope)
     merged = BuildEvidence()
     extractors: list[ExtractorRecord] = []
+    # Cleanup thunks for temp build dirs (out-of-tree inferred cmake) that must
+    # outlive L4 replay — clang runs with each compile unit's `directory` (the cmake
+    # build dir) as cwd, so the dir can't be removed (nor its lock released) until
+    # after replay. Invoked below once L3/L4/L5 are collected into in-memory
+    # evidence. Each thunk removes its dir and releases the dir's exclusive lock.
+    query_build_cleanups: list[Callable[[], None]] = []
 
     if base_build is not None:
         merged.merge(base_build)
@@ -560,10 +579,11 @@ def collect_inline_pack(
             build_info,
             sources,
             cfg,
-            allow_build_query,
             build_config_trusted_for_query,
             merged,
             extractors,
+            cleanup=query_build_cleanups,
+            compile_db_explicit=compile_db_explicit,
         )
     if compile_db is not None:
         _run_compile_db(compile_db, cfg.system, merged, extractors, build_cache_dir)
@@ -628,6 +648,12 @@ def collect_inline_pack(
         else None
     )
 
+    # L3/L4/L5 are now collected into in-memory evidence; the out-of-tree inferred
+    # cmake build dir (kept alive through L4 replay's clang cwd) can be removed and
+    # its exclusive lock released.
+    for _cleanup in query_build_cleanups:
+        _cleanup()
+
     has_build = bool(
         merged.compile_units
         or merged.targets
@@ -640,7 +666,7 @@ def collect_inline_pack(
     # the build_query diagnostic reach `compare`, rather than dropping it as if
     # nothing was attempted (Codex).
     has_query_diag = any(
-        e.name == "build_query" and e.status in _BUILD_QUERY_DIAG_STATUSES
+        e.name in _BUILD_QUERY_DIAG_NAMES and e.status in _BUILD_QUERY_DIAG_STATUSES
         for e in extractors
     )
     if not (has_build or surface is not None or graph is not None or has_query_diag):
@@ -676,18 +702,28 @@ def _resolve_compile_db(
     build_info: Path | None,
     sources: Path | None,
     cfg: BuildConfig,
-    allow_build_query: bool,
     build_config_trusted_for_query: bool,
     merged: BuildEvidence,
     extractors: list[ExtractorRecord],
+    cleanup: list[Callable[[], None]] | None = None,
+    compile_db_explicit: bool = False,
 ) -> Path | None:
-    """Resolve the compile DB to feed L3, honouring the action ceiling (D5).
+    """Resolve the compile DB to feed L3 (zero-config; ADR-032 amended).
 
-    Order: an explicit ``--build-info`` path (file or dir) → a ``build.query``
-    command result (only with ``--allow-build-query`` and trusted config) →
-    ``build.compile_db`` in the source tree → an auto-discovered
-    ``compile_commands.json`` in the tree.
+    Order: an explicit ``--build-info`` path (file or dir) → a trusted
+    ``--config`` ``build.query`` command result → ``build.compile_db`` in the
+    source tree → an auto-discovered ``compile_commands.json`` → the **inferred,
+    abicheck-authored** build-system query (cmake/make/bazel). No
+    ``--allow-build-query`` flag is required: providing ``--sources`` is the
+    request to collect build evidence. The only command never auto-run is an
+    arbitrary ``build.query`` string from an auto-discovered (untrusted)
+    ``.abicheck.yml`` — that still needs an explicit ``--config``.
     """
+    # Track whether the operator gave an EXPLICIT L3 input (--build-info or a
+    # build.compile_db path) that yielded nothing. If so, the default inferred
+    # query must not run: a cleaned/mistyped build-info path should surface, not
+    # be masked by a fresh `cmake`/`bazel` query under different flags (review).
+    explicit_input_missed = False
     if build_info is not None:
         found = _compile_db_at(build_info)
         if found is not None:
@@ -695,10 +731,13 @@ def _resolve_compile_db(
         merged.diagnostics.append(
             f"build-info {build_info}: no {_COMPILE_DB_NAME} found"
         )
+        explicit_input_missed = True
 
-    # build.query (ADR-032 D5 query_build_system): opt-in command that EMITS a
-    # compile DB / exports without a full build. Off unless --allow-build-query
-    # is set *and* the config came from an explicit operator-supplied path.
+    # build.query (ADR-032 D5 query_build_system): a tree-supplied command that
+    # EMITS a compile DB / exports without a full build. Runs only when the config
+    # came from an explicit operator-supplied path (build_config_trusted_for_query);
+    # an auto-discovered .abicheck.yml is never trusted to execute. No
+    # --allow-build-query flag is involved any more (it is a deprecated no-op).
     if cfg.query:
         if not build_config_trusted_for_query:
             extractors.append(
@@ -711,28 +750,59 @@ def _resolve_compile_db(
                     ),
                 )
             )
-        elif allow_build_query:
+            # Untrusted query is never run — fall through to compile_db /
+            # auto-discovery / the abicheck-authored inferred query below.
+        else:
+            # Trusted operator config (--config): run its query automatically. No
+            # --allow-build-query flag is required any more — pointing abicheck at
+            # sources *is* the request to collect build evidence (ADR-032 amended).
             queried = _run_build_query(cfg, sources, merged, extractors)
             if queried is not None:
                 return queried
-        else:
-            extractors.append(
-                ExtractorRecord(
-                    name="build_query",
-                    status="skipped",
-                    detail=(
-                        "build.query configured but --allow-build-query not set; "
-                        "only existing build outputs were inspected (ADR-032 D5)"
-                    ),
-                )
-            )
+            # The operator supplied an explicit query and it failed / produced no
+            # compile DB. Surface that — do NOT mask it by falling back to a
+            # compile_db glob, a stale auto-discovered DB from a prior/default
+            # configure, or abicheck's default inferred query, which would collect
+            # L3 with the wrong flags the custom query existed to avoid (review).
+            # The build_query diagnostic _run_build_query recorded explains the miss.
+            return None
 
     if cfg.compile_db and sources is not None:
+        # Only an *operator-supplied* build.compile_db (a CLI --build-compile-db or
+        # an explicit --config path) counts as an explicit input whose miss should
+        # suppress fallback — tracked by `compile_db_explicit`, which is distinct
+        # from query-execution trust (review): --build-compile-db makes the DB
+        # explicit without trusting a query, and --build-query trusts a query
+        # without making a DB explicit. A build.compile_db from an auto-discovered
+        # .abicheck.yml is not something the user chose, so a stale/cleaned path
+        # there still falls through to the zero-config inferred query.
+        if compile_db_explicit:
+            explicit_input_missed = True
         for match in sorted(sources.glob(cfg.compile_db)):
             if match.is_file():
                 return match
 
-    return _autodiscover_compile_db(sources)
+    if explicit_input_missed:
+        # An explicit --build-info / --build-compile-db / --config compile-DB input
+        # was given but resolved to nothing. Surface that miss rather than masking
+        # it with a stale auto-discovered DB OR abicheck's default inferred query
+        # under different flags — checked BEFORE auto-discovery so a stray
+        # build/compile_commands.json can't silently stand in (review).
+        return None
+
+    discovered = _autodiscover_compile_db(sources)
+    if discovered is not None:
+        return discovered
+
+    # Zero-config fallback: no compile DB exists and no explicit L3 input was
+    # given, but a --sources tree is present. Detect the build system and run
+    # abicheck's OWN fixed query (cmake configure / bazel aquery) to produce L3 —
+    # so "just provide sources" works with no flag and no manual build step. Only
+    # an abicheck-authored command runs here; an arbitrary tree-local
+    # .abicheck.yml `build.query` string is never auto-executed.
+    from .build_query import run_inferred_build_query
+
+    return run_inferred_build_query(sources, merged, extractors, cleanup=cleanup)
 
 
 def _compile_db_at(path: Path) -> Path | None:
@@ -848,7 +918,9 @@ def _maybe_collect_bazel_build_info(
     return True
 
 
-def _find_compile_db_in_dir(directory: Path) -> Path | None:
+def _find_compile_db_in_dir(
+    directory: Path, skip_segments: frozenset[str] = frozenset()
+) -> Path | None:
     """Locate a ``compile_commands.json`` under *directory* (the P4 strategy).
 
     Conventional build-dir hints first (fast, deterministic), then a fallback to
@@ -858,8 +930,15 @@ def _find_compile_db_in_dir(directory: Path) -> Path | None:
     evidence. The fallback stays at depth 1 to remain cheap and is deterministic
     (sorted). Shared by ``--sources`` auto-discovery and ``--build-info <dir>``
     resolution so both honour the same "any immediate subdirectory" contract.
+
+    *skip_segments* names immediate subdirectories to ignore — used by
+    auto-discovery to skip a stale ``.abicheck-build`` left by an older in-tree
+    inferred-CMake run, so it can't short-circuit a fresh out-of-tree query with
+    stale flags (Codex P2).
     """
     for hint in _COMPILE_DB_HINTS:
+        if hint in skip_segments:
+            continue
         candidate = (
             (directory / hint / _COMPILE_DB_NAME)
             if hint
@@ -867,15 +946,28 @@ def _find_compile_db_in_dir(directory: Path) -> Path | None:
         )
         if candidate.is_file():
             return candidate
-    fallback = sorted(p for p in directory.glob("*/" + _COMPILE_DB_NAME) if p.is_file())
+    fallback = sorted(
+        p
+        for p in directory.glob("*/" + _COMPILE_DB_NAME)
+        if p.is_file() and p.parent.name not in skip_segments
+    )
     return fallback[0] if fallback else None
 
 
 def _autodiscover_compile_db(source_tree: Path | None) -> Path | None:
-    """Best-effort search for a ``compile_commands.json`` inside a source tree."""
+    """Best-effort search for a ``compile_commands.json`` inside a source tree.
+
+    Skips a stale ``.abicheck-build/compile_commands.json`` (an older in-tree
+    inferred-CMake artifact) so a zero-config ``--sources`` run refreshes the build
+    query instead of replaying with stale flags/include paths (Codex P2).
+    """
     if source_tree is None or not source_tree.is_dir():
         return None
-    return _find_compile_db_in_dir(source_tree)
+    from .build_query import ABICHECK_BUILD_DIR
+
+    return _find_compile_db_in_dir(
+        source_tree, skip_segments=frozenset({ABICHECK_BUILD_DIR})
+    )
 
 
 def _run_compile_db(
@@ -999,11 +1091,18 @@ def _run_build_query(
     # The query is expected to have written/refreshed the configured compile DB.
     db: Path | None = None
     if cfg.compile_db and sources is not None:
+        # The operator told us exactly where this query writes its DB. Use only
+        # that path: if the query exited 0 but didn't actually produce it, do NOT
+        # fall back to an auto-discovered stale compile_commands.json — that would
+        # collect L3 with the wrong (default) flags the custom query existed to
+        # set, while reporting success (Codex P2). Surface the miss as partial.
         for match in sorted(sources.glob(cfg.compile_db)):
             if match.is_file():
                 db = match
                 break
-    if db is None:
+    else:
+        # No explicit path configured: discover the conventional compile DB the
+        # query is expected to have refreshed.
         db = _autodiscover_compile_db(sources)
     extractors.append(
         ExtractorRecord(
@@ -1439,7 +1538,8 @@ def build_inline_coverage(
             (
                 e
                 for e in extractors
-                if e.name == "build_query" and e.status in _BUILD_QUERY_DIAG_STATUSES
+                if e.name in _BUILD_QUERY_DIAG_NAMES
+                and e.status in _BUILD_QUERY_DIAG_STATUSES
             ),
             None,
         )

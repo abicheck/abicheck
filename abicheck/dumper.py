@@ -60,6 +60,11 @@ from .dumper_castxml import (
     _vt_sort_key as _vt_sort_key,
 )
 from .dumper_clang import _ClangAstParser as _ClangAstParser
+from .dumper_clang_errors import (
+    _is_direct_include_guard_failure,
+    _is_missing_cpp_stdlib_header_error,
+    retry_excluding_error_headers,
+)
 from .dumper_sysinc import (
     _auto_system_includes_enabled as _auto_system_includes_enabled,
     _parse_gnu_include_search_dirs as _parse_gnu_include_search_dirs,
@@ -122,48 +127,6 @@ def _resolve_header_backend(backend: str | None) -> str:
     if env in ("castxml", "clang"):
         return env
     return "castxml"
-
-
-#: The C++ ``<cXXX>`` C-compatibility headers (``<cstddef>``, ``<cstdint>``, …).
-#: A missing one of these under a C-mode parse unambiguously means the TU is C++
-#: — the signal that drives the clang C→C++ retry. Deliberately restricted to the
-#: ``<cXXX>`` spellings rather than the *full* C++ library set: a C project never
-#: bare-includes ``<cstddef>``, whereas plain names like ``<string>``/``<version>``
-#: collide with plausible C project headers (oneTBB itself ships a ``version.h``),
-#: so matching those could re-parse a broken C build as C++ — silently caching a
-#: wrong AST instead of reporting the genuine missing dependency (Codex review).
-#: In practice the first miss for a C++ TU parsed in C mode is always a ``<cXXX>``
-#: header (libstdc++ pulls them in early); the rare "pure-C++ header missing
-#: first" case is handled by passing ``--lang c++`` explicitly.
-_CPP_STDLIB_HEADERS = frozenset(
-    {
-        "cassert", "cctype", "cerrno", "cfenv", "cfloat", "cinttypes",
-        "ciso646", "climits", "clocale", "cmath", "csetjmp", "csignal",
-        "cstdalign", "cstdarg", "cstdbool", "cstddef", "cstdint", "cstdio",
-        "cstdlib", "cstring", "ctgmath", "ctime", "cuchar", "cwchar", "cwctype",
-    }
-)
-
-#: ``'<name>' file not found`` — captures the quoted include that clang could not
-#: resolve, checked against :data:`_CPP_STDLIB_HEADERS`.
-_MISSING_HEADER_RE = re.compile(r"'([^'/]+)' file not found")
-
-
-def _is_missing_cpp_stdlib_header_error(stderr: str) -> bool:
-    """True if a clang parse failed because a C++ ``<cXXX>`` header was not found.
-
-    Pure/string-only so it is unit-testable without a compiler. Matches clang's
-    ``fatal error: '<name>' file not found`` and confirms ``<name>`` is one of the
-    C++ ``<cXXX>`` C-compatibility headers (:data:`_CPP_STDLIB_HEADERS`). A C TU
-    never includes one, so such a miss means the TU is C++ and a C-mode parse
-    picked the wrong language — driving the C→C++ retry. Plain-name C++ headers
-    (``<string>``/``<version>``/…) are deliberately *not* matched because they
-    collide with plausible C project header names; matching them could silently
-    re-parse a broken C build as C++ instead of reporting the missing dependency.
-    """
-    return any(
-        m.group(1) in _CPP_STDLIB_HEADERS for m in _MISSING_HEADER_RE.finditer(stderr)
-    )
 
 
 def _has_explicit_std(
@@ -358,9 +321,15 @@ def _clang_header_dump(
 
     agg_ext = ".hpp" if force_cpp else ".h"
     with tempfile.NamedTemporaryFile(suffix=agg_ext, mode="w", delete=False) as agg:
-        for h in headers:
-            agg.write(f'#include "{h.resolve()}"\n')
         agg_path = Path(agg.name)
+    active_headers = list(headers)
+
+    def _write_agg(hdrs: list[Path]) -> None:
+        agg_path.write_text(
+            "".join(f'#include "{h.resolve()}"\n' for h in hdrs), encoding="utf-8"
+        )
+
+    _write_agg(active_headers)
 
     def _run_clang(fcpp: bool, fcpp20: bool, sysinc: tuple[str, ...]) -> subprocess.CompletedProcess[str]:
         """Build and run the clang AST-dump command for the given language mode."""
@@ -412,7 +381,24 @@ def _clang_header_dump(
                     "missing C++ standard header — an unambiguous C++ signal. The "
                     "result is unaffected; pass --lang c++ to skip the initial C probe."
                 )
-            result = _run_clang(True, _detect_cpp20_headers(headers), cpp_system_includes)
+            cur_fcpp, cur_fcpp20, cur_sysinc = (
+                True, _detect_cpp20_headers(headers), cpp_system_includes,
+            )
+            result = _run_clang(cur_fcpp, cur_fcpp20, cur_sysinc)
+        else:
+            cur_fcpp, cur_fcpp20, cur_sysinc = force_cpp, force_cpp20, system_includes
+        # Graceful #error handling: when ``-H`` expands to a public include dir,
+        # some headers are not meant to be included directly and raise a
+        # preprocessor ``#error`` (preview / internal ``detail`` headers) that
+        # would otherwise abort the whole aggregate compile. Drop the offending
+        # headers and re-parse the rest (see dumper_clang_errors).
+        result = retry_excluding_error_headers(
+            result=result,
+            run_clang=lambda: _run_clang(cur_fcpp, cur_fcpp20, cur_sysinc),
+            write_agg=_write_agg,
+            agg_path=agg_path,
+            active_headers=active_headers,
+        )
         # A nonzero exit means clang hit a hard parse error. Unlike L4 source
         # replay (which tolerates partial coverage), the L2 header AST must be
         # complete to be authoritative — a truncated declaration set would
@@ -490,11 +476,15 @@ def _header_ast_parser(
         return _run_clang()
 
     # G16: when the frontend was selected automatically (no explicit --ast-frontend
-    # and no ABICHECK_AST_FRONTEND pin), a castxml *toolchain-version* failure
-    # (bundled Clang too old for the host libstdc++/GCC) is recoverable — the clang
-    # backend parses against the host toolchain directly. Fall back to it rather than
-    # aborting. An explicit castxml request is honored verbatim (the error surfaces
-    # unchanged).
+    # and no ABICHECK_AST_FRONTEND pin), two castxml failures are recoverable by
+    # falling back to the clang backend rather than aborting: a *toolchain-version*
+    # failure (bundled Clang too old for the host libstdc++/GCC — clang parses
+    # against the host toolchain directly), and a *direct-inclusion #error guard*
+    # (a `-H <include-dir>` swept in a preview/internal header that #errors on
+    # direct inclusion — only the clang path can granularly exclude the offending
+    # headers via retry_excluding_error_headers, so the headline include-dir scan
+    # works on the default frontend, not just --ast-frontend clang). An explicit
+    # castxml request is honored verbatim (the error surfaces unchanged).
     choice = (backend or "auto").lower()
     env_pin = os.environ.get("ABICHECK_AST_FRONTEND", "").strip().lower()
     auto_selected = choice == "auto" and env_pin not in ("castxml", "clang")
@@ -510,12 +500,17 @@ def _header_ast_parser(
         if (
             auto_selected
             and _clang_available()
-            and _is_toolchain_version_failure(str(exc))
+            and (
+                _is_toolchain_version_failure(str(exc))
+                or _is_direct_include_guard_failure(str(exc))
+            )
         ):
             log.warning(
-                "castxml failed with a toolchain-version error; falling back to "
-                "the clang header backend (set --ast-frontend castxml to force "
-                "castxml and see the original error)."
+                "castxml could not parse the header(s) (toolchain mismatch or a "
+                "header that refuses direct inclusion); falling back to the clang "
+                "header backend, which parses against the host toolchain and can "
+                "exclude direct-include #error guard headers. Set --ast-frontend "
+                "castxml to force castxml and see the original error."
             )
             return _run_clang()
         raise

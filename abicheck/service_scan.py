@@ -32,8 +32,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from .buildsource.build_query import PRUNED_HEADER_DIR_SEGMENTS
 from .errors import ValidationError
-from .header_utils import HEADER_SUFFIXES
+from .header_utils import HEADER_SUFFIXES, iter_directory_headers
 
 if TYPE_CHECKING:
     from .buildsource.scan_levels import EvidenceDepth, SourceMethod
@@ -44,6 +45,11 @@ _logger = logging.getLogger(__name__)
 # AST-cache include walk (dumper._cache_key) via the leaf header_utils module so
 # expansion and cache-invalidation can never drift (Codex review).
 _HEADER_EXTS = HEADER_SUFFIXES
+
+# Directory segments never scanned for headers — VCS metadata plus abicheck's own
+# in-tree cmake build dir; see build_query.PRUNED_HEADER_DIR_SEGMENTS (the shared
+# single source of truth, also used by cli_resolve._expand_header_inputs).
+_PRUNED_DIR_SEGMENTS = PRUNED_HEADER_DIR_SEGMENTS
 
 
 def expand_header_inputs(inputs: list[Path]) -> list[Path]:
@@ -62,16 +68,12 @@ def expand_header_inputs(inputs: list[Path]) -> list[Path]:
             out.append(p)
             continue
         if p.is_dir():
-            found = [
-                f
-                for f in p.rglob("*")
-                if f.is_file() and f.suffix.lower() in _HEADER_EXTS
-            ]
+            found = iter_directory_headers(p, _PRUNED_DIR_SEGMENTS)
             if not found:
                 raise ValidationError(
                     f"Header directory contains no supported header files: {p}"
                 )
-            out.extend(sorted(found))
+            out.extend(found)
             continue
         raise ValidationError(f"Header path is neither file nor directory: {p}")
 

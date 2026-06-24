@@ -1169,18 +1169,21 @@ def test_embed_sources_without_tool_is_graceful(tmp_path):
     assert l4 is not None and l4.status.value in ("partial", "present")
 
 
-def test_build_query_skipped_without_allow_flag(tmp_path):
-    """build.query is not executed unless --allow-build-query (ADR-032 D5)."""
+def test_build_query_skipped_when_config_untrusted(tmp_path):
+    """An arbitrary build.query from an untrusted (auto-discovered) config is not
+    executed (ADR-032 amended): the --allow-build-query flag is gone, but the
+    trust gate remains — only an explicit --config / --build-query runs a query."""
     from abicheck.buildsource.inline import BuildConfig, collect_inline_pack
 
     tree = tmp_path / "src"
     tree.mkdir()
     cfg = BuildConfig(query="this-tool-should-never-run --emit", compile_db="cc.json")
     pack = collect_inline_pack(
-        sources=tree, build_info=None, build_config=cfg, allow_build_query=False,
+        sources=tree, build_info=None, build_config=cfg,
+        build_config_trusted_for_query=False,
     )
-    # The query is not executed; no facts are collected. The pack survives only to
-    # carry the skipped-query diagnostic (A3), and the build_query tool never ran.
+    # The untrusted query is not executed; no facts are collected. The pack
+    # survives only to carry the skipped-query diagnostic (A3).
     assert pack is not None
     assert pack.build_evidence is None  # no L3 facts
     assert [e for e in pack.manifest.extractors
@@ -2138,10 +2141,10 @@ def test_a3_failed_query_pack_survives_with_no_facts(tmp_path):
     tree = tmp_path / "src"
     tree.mkdir()  # no compile DB inside → no L3 facts
     cfg = BuildConfig(query="some-build-query --emit")
-    # allow_build_query=False → query skipped, nothing collected.
+    # untrusted config → query skipped, nothing collected.
     pack = collect_inline_pack(
         sources=tree, build_info=None, build_config=cfg,
-        allow_build_query=False, layers=("L3",),
+        build_config_trusted_for_query=False, layers=("L3",),
     )
     assert pack is not None, "pack must survive to carry the A3 diagnostic"
     l3 = pack.manifest.coverage_for("L3_build")

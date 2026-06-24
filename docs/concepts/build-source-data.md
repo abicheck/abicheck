@@ -276,14 +276,27 @@ sources:
 
 - **`inspect` (default, always on):** read existing build outputs / compile DBs
   the checkout already has. No config needed.
-- **`query_build_system` (opt-in, explicit trusted config + `--allow-build-query`):**
-  run the configured `build.query` command to emit flags/exports. abicheck runs
-  it with no shell (parsed via `shlex`) in the source-tree directory. A
-  `.abicheck.yml` auto-discovered from `--sources` is still used for
-  non-executing settings such as `build.compile_db`, but its `build.query` is
-  ignored; pass a trusted config path with `--config` to enable queries.
+- **`query_build_system` (automatic when `--sources` is given):** if no compile
+  DB exists, abicheck **detects the build system and runs its own fixed query**
+  (`cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=ON` or `bazel aquery`) to emit
+  flags/exports — no `--allow-build-query` flag (that flag is deprecated to a
+  no-op). Make is detected but *not* auto-run (`make -n` is not reliably
+  side-effect-free — GNU make runs `+`/`$(MAKE)` recipes even in dry-run mode), so
+  a Make project must supply a compile DB (e.g. `bear -- make` → `--compile-db`)
+  or a pre-collected transcript pack via `--build-info`. It also runs an
+  *operator-supplied* `build.query` automatically (an
+  explicit `--config` or `--build-query`) — but note that path ingests only an
+  emitted `compile_commands.json`, so the query must *write* a DB (e.g.
+  `bear -- make`), not just print a `make -n` transcript. All commands run with no shell
+  (parsed via `shlex`) in the source-tree directory. A `.abicheck.yml`
+  auto-discovered from `--sources` is still used for non-executing settings such
+  as `build.compile_db`, but its `build.query` is **never** auto-run (it may be
+  attacker-controlled) — pass it via an explicit `--config` to trust it. (The
+  separate `collect --extractor-manifest` plugin path keeps its explicit
+  `--allow-build-query` action-ceiling gate; see *Extractor manifests* below.)
 - **`run_build` / `wrap_build` (denied):** abicheck never performs a full
-  project build or compiler-wrapper interception.
+  project build or compiler-wrapper interception. The inferred queries above are
+  configure/dry-run/aquery only — they do not compile the project.
 
 ### Project-contract blocks (ADR-037 D4)
 

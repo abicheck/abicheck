@@ -829,10 +829,13 @@ def embed_build_source(
     inline_pack: BuildSourcePack | None = None
     if raw_build_info is not None or raw_sources is not None:
         cfg_path = build_config or discover_build_config(raw_sources)
-        # Only an explicit --config is operator-supplied/trusted for
-        # subprocess execution. Auto-discovered source-tree configs may be
-        # attacker-controlled; their non-executable settings are still honored.
-        cfg_trusted_for_query = build_config is not None
+        # Only operator-supplied input is trusted for subprocess execution: an
+        # explicit --config file or an explicit --build-query command on the CLI.
+        # Auto-discovered source-tree configs may be attacker-controlled; their
+        # non-executable settings are still honored, but their query never runs.
+        # (Inferred build queries — cmake/make/bazel that abicheck constructs
+        # itself — always run regardless; see buildsource.build_query.)
+        cfg_trusted_for_query = build_config is not None or build_query is not None
         try:
             cfg = load_build_config(cfg_path) if cfg_path is not None else None
         except ValueError as exc:
@@ -863,6 +866,11 @@ def embed_build_source(
             build_config=cfg,
             allow_build_query=allow_build_query,
             build_config_trusted_for_query=cfg_trusted_for_query,
+            # A build.compile_db is an *explicit* L3 input (its miss must surface,
+            # not fall through to inference) when it came from the CLI
+            # --build-compile-db or an operator --config — never from an
+            # auto-discovered .abicheck.yml (review).
+            compile_db_explicit=build_compile_db is not None or build_config is not None,
             base_build=bi_pack.build_evidence if bi_pack else None,
             clang_bin=clang_bin,
             extractor=extractor,
@@ -878,7 +886,12 @@ def embed_build_source(
         _ev = inline_pack.build_evidence if inline_pack is not None else None
         _has_l3 = _ev is not None and bool(_ev.compile_units)
         _has_query_note = inline_pack is not None and any(
-            e.name == "build_query" for e in inline_pack.manifest.extractors
+            # Both the trusted `build.query` and the zero-config inferred query
+            # ("build_query_auto") record a diagnostic that already explains the
+            # missing L3 — don't also emit the generic "run cmake …" hint, which
+            # would contradict an inferred query abicheck just attempted.
+            e.name in ("build_query", "build_query_auto")
+            for e in inline_pack.manifest.extractors
         )
         if not _has_l3 and bi_pack is None and not _has_query_note:
             _tree = raw_sources if raw_sources is not None else raw_build_info

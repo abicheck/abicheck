@@ -118,6 +118,20 @@ class TestExpandHeaderInputs:
         assert len(result) == 1
         assert result[0].name == "deep.h"
 
+    @pytest.mark.parametrize("noise_dir", [".abicheck-build", ".git"])
+    def test_prunes_abicheck_build_and_vcs_dirs(self, tmp_path, noise_dir):
+        # Generated headers under abicheck's own cmake build dir (and VCS dirs)
+        # must never inflate the L2 header surface (CodeRabbit).
+        d = tmp_path / "include"
+        d.mkdir()
+        (d / "public.h").write_text("int api(void);\n")
+        sub = d / noise_dir
+        sub.mkdir()
+        (sub / "config.h").write_text("#define GENERATED 1\n")
+        result = expand_header_inputs([d])
+        names = {p.name for p in result}
+        assert names == {"public.h"}  # generated config.h pruned
+
     def test_various_extensions(self, tmp_path):
         d = tmp_path / "hdrs"
         d.mkdir()

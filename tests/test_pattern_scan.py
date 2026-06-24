@@ -454,6 +454,17 @@ def test_iter_source_files_filters_by_suffix(tmp_path: Path) -> None:
     assert found == {"a.hpp", "b.cpp"}
 
 
+def test_iter_source_files_prunes_abicheck_build_dir(tmp_path: Path) -> None:
+    # Zero-config cmake inference writes sources/.abicheck-build; its generated
+    # headers must not be lexically pre-scanned as project source (review).
+    (tmp_path / "real.hpp").write_text("int x;")
+    bdir = tmp_path / ".abicheck-build"
+    bdir.mkdir()
+    (bdir / "config.hpp").write_text("#define GENERATED 1")
+    found = {p.name for p in iter_source_files([tmp_path])}
+    assert found == {"real.hpp"}  # generated build header pruned
+
+
 @pytest.mark.parametrize("name", ["detail.tpp", "Config.inc"])
 def test_iter_source_files_includes_tpp_and_inc(tmp_path: Path, name: str) -> None:
     # These are header-like extensions the repo already recognizes elsewhere.

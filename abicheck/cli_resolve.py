@@ -35,7 +35,9 @@ from typing import TYPE_CHECKING, Any
 
 import click
 
+from .buildsource.build_query import PRUNED_HEADER_DIR_SEGMENTS
 from .compat.abicc_dump_import import looks_like_perl_dump
+from .header_utils import iter_directory_headers
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -54,7 +56,6 @@ def _click_notify(message: str) -> None:
     """
     click.echo(message, err=True)
 
-_HEADER_EXTS = {".h", ".hh", ".hpp", ".hxx", ".ipp", ".tpp", ".inc"}
 
 # Number of bytes to read when sniffing file format (covers ELF magic + JSON/Perl head)
 _SNIFF_BYTES = 256
@@ -63,7 +64,10 @@ _SNIFF_BYTES = 256
 def _expand_header_inputs(inputs: list[Path]) -> list[Path]:
     """Expand header inputs where each item can be a file or a directory.
 
-    Directories are scanned recursively for known header extensions.
+    Directories are scanned recursively for known header extensions, via the same
+    shared walker the ``scan``/service path uses (``header_utils`` —
+    canonical :data:`~abicheck.header_utils.HEADER_SUFFIXES`, pruned-dir walk) so
+    the two front-ends never disagree on what counts as a header.
     """
     out: list[Path] = []
     for p in inputs:
@@ -73,16 +77,12 @@ def _expand_header_inputs(inputs: list[Path]) -> list[Path]:
             out.append(p)
             continue
         if p.is_dir():
-            found = [
-                f
-                for f in p.rglob("*")
-                if f.is_file() and f.suffix.lower() in _HEADER_EXTS
-            ]
+            found = iter_directory_headers(p, PRUNED_HEADER_DIR_SEGMENTS)
             if not found:
                 raise click.ClickException(
                     f"Header directory contains no supported header files: {p}"
                 )
-            out.extend(sorted(found))
+            out.extend(found)
             continue
         raise click.ClickException(f"Header path is neither file nor directory: {p}")
 
@@ -576,7 +576,8 @@ def _reject_evidence_flags_for_set_inputs(ctx: click.Context) -> None:
     ]
     if used:
         raise click.UsageError(
-            ", ".join(sorted(used)) + " "
+            ", ".join(sorted(used))
+            + " "
             + ("is" if len(used) == 1 else "are")
             + " not supported for directory/package (release) comparisons: the "
             "per-library fan-out does not collect inline build/source evidence. "
@@ -603,7 +604,9 @@ def _config_has_compile_block(project_cfg: Any) -> bool:
     )
 
 
-def _reject_compile_context_for_set_inputs(ctx: click.Context, project_cfg: Any) -> None:
+def _reject_compile_context_for_set_inputs(
+    ctx: click.Context, project_cfg: Any
+) -> None:
     """Guard the L2 compile context for directory/package compares.
 
     The per-library fan-out (release backend) runs each pair through
@@ -629,7 +632,8 @@ def _reject_compile_context_for_set_inputs(ctx: click.Context, project_cfg: Any)
     ]
     if used:
         raise click.UsageError(
-            ", ".join(sorted(used)) + " "
+            ", ".join(sorted(used))
+            + " "
             + ("is" if len(used) == 1 else "are")
             + " not supported for directory/package (release) comparisons: the "
             "per-library fan-out does not thread the L2 compile context to each "

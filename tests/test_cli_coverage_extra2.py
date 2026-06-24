@@ -18,6 +18,7 @@ Covers: _expand_header_inputs, _setup_verbosity, _safe_write_output,
 _stamp_provenance, _sniff_text_format, _detect_binary_format,
 and _write_snapshot_output.
 """
+
 from __future__ import annotations
 
 import logging
@@ -65,6 +66,19 @@ class TestExpandHeaderInputs:
         names = {p.name for p in result}
         assert "a.h" in names
         assert "b.hpp" in names
+
+    @pytest.mark.parametrize("noise_dir", [".abicheck-build", ".git"])
+    def test_prunes_build_and_vcs_dirs(self, tmp_path: Path, noise_dir: str) -> None:
+        """Generated headers under abicheck's cmake build dir (and VCS dirs) are
+        not swept into the -H surface on the dump/compare CLI path (Codex P2)."""
+        inc = tmp_path / "include"
+        inc.mkdir()
+        (inc / "public.h").write_text("int api();", encoding="utf-8")
+        sub = inc / noise_dir
+        sub.mkdir()
+        (sub / "config.h").write_text("#define GENERATED 1", encoding="utf-8")
+        result = _expand_header_inputs([inc])
+        assert {p.name for p in result} == {"public.h"}
 
     def test_directory_empty_raises(self, tmp_path: Path) -> None:
         """A directory with no header files raises ClickException."""
@@ -142,11 +156,14 @@ class TestSafeWriteOutput:
         assert out.exists()
         assert out.read_text(encoding="utf-8") == "data"
 
-    def test_oserror_raises_click(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_oserror_raises_click(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """OSError during write is wrapped in ClickException."""
         out = tmp_path / "result.json"
         monkeypatch.setattr(
-            Path, "write_text",
+            Path,
+            "write_text",
             lambda *_a, **_kw: (_ for _ in ()).throw(OSError("disk full")),
         )
         with pytest.raises(click.ClickException, match="Cannot write"):
@@ -275,7 +292,9 @@ class TestWriteSnapshotOutput:
         assert "lib.so" in out.read_text(encoding="utf-8")
 
     def test_warns_on_empty_requested_layer(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         """G21.7: a requested layer that comes back empty triggers a loud warning."""
@@ -292,7 +311,8 @@ class TestWriteSnapshotOutput:
 
         monkeypatch.setattr(cbs_mod, "embed_build_source", _fake_embed)
         monkeypatch.setattr(
-            cli_mod, "_missing_requested_evidence_layers",
+            cli_mod,
+            "_missing_requested_evidence_layers",
             lambda pack, mode: ["L4", "L5"],
         )
         srcs = tmp_path / "src"

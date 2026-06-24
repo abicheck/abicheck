@@ -45,6 +45,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
+from .build_query import ABICHECK_BUILD_DIR
 from .model import CoverageStatus, LayerConfidence, LayerCoverage
 
 #: Pattern-scan fact-schema version. Independent of every other buildsource
@@ -678,7 +679,13 @@ def scan_text(text: str, path: str = "") -> list[PatternFact]:
 #: VCS metadata holds packed/loose blobs and indexes (a shallow clone's
 #: ``.git/index`` is a multi-hundred-KB binary file) that the extensionless
 #: heuristic below would otherwise feed to every regex rule. Pruned from the walk.
-_PRUNED_DIR_SEGMENTS: frozenset[str] = frozenset({".git", ".hg", ".svn"})
+#: ``ABICHECK_BUILD_DIR`` is included because zero-config cmake inference writes a
+#: configure tree under ``sources/.abicheck-build``; without pruning it the lexical
+#: pre-scan would flag generated build output (config.h / CMakeFiles) as project
+#: source (review).
+_PRUNED_DIR_SEGMENTS: frozenset[str] = frozenset(
+    {".git", ".hg", ".svn", ABICHECK_BUILD_DIR}
+)
 
 #: Size ceiling for the **extensionless** heuristic only. A genuine extensionless
 #: C++ header (``include/mylib/Core``) is small; multi-MB extensionless files are
