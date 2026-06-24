@@ -43,6 +43,7 @@ import datetime as _dt
 import json
 import os
 import shlex
+import shutil
 import subprocess
 import warnings
 from dataclasses import dataclass, field
@@ -556,6 +557,11 @@ def collect_inline_pack(
     scope = effective_graph_scope(cfg.graph_detail, scope)
     merged = BuildEvidence()
     extractors: list[ExtractorRecord] = []
+    # Temp build dirs (out-of-tree inferred cmake) that must outlive L4 replay —
+    # clang runs with each compile unit's `directory` (the cmake build dir) as
+    # cwd, so the dir can't be removed until after replay. Cleaned up below once
+    # L3/L4/L5 are collected into in-memory evidence.
+    query_build_dirs: list[Path] = []
 
     if base_build is not None:
         merged.merge(base_build)
@@ -574,6 +580,7 @@ def collect_inline_pack(
             build_config_trusted_for_query,
             merged,
             extractors,
+            cleanup=query_build_dirs,
         )
     if compile_db is not None:
         _run_compile_db(compile_db, cfg.system, merged, extractors, build_cache_dir)
@@ -638,6 +645,11 @@ def collect_inline_pack(
         else None
     )
 
+    # L3/L4/L5 are now collected into in-memory evidence; the out-of-tree inferred
+    # cmake build dir (kept alive through L4 replay's clang cwd) can be removed.
+    for _bd in query_build_dirs:
+        shutil.rmtree(_bd, ignore_errors=True)
+
     has_build = bool(
         merged.compile_units
         or merged.targets
@@ -689,6 +701,7 @@ def _resolve_compile_db(
     build_config_trusted_for_query: bool,
     merged: BuildEvidence,
     extractors: list[ExtractorRecord],
+    cleanup: list[Path] | None = None,
 ) -> Path | None:
     """Resolve the compile DB to feed L3 (zero-config; ADR-032 amended).
 
@@ -773,7 +786,7 @@ def _resolve_compile_db(
     # .abicheck.yml `build.query` string is never auto-executed.
     from .build_query import run_inferred_build_query
 
-    return run_inferred_build_query(sources, merged, extractors)
+    return run_inferred_build_query(sources, merged, extractors, cleanup=cleanup)
 
 
 def _compile_db_at(path: Path) -> Path | None:

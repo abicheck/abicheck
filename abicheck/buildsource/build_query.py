@@ -167,16 +167,21 @@ def run_inferred_build_query(
     *,
     timeout: float = INFERRED_QUERY_TIMEOUT_S,
     which: Callable[[str], str | None] = shutil.which,
+    cleanup: list[Path] | None = None,
 ) -> Path | None:
     """Detect the build system and run abicheck's own query to produce L3.
 
     Always returns ``None``: the cmake / bazel evidence is ingested and merged
     directly into *merged* (cmake configures into an out-of-tree temp dir whose
-    ``compile_commands.json`` is parsed and then removed), and a diagnostic
-    ``ExtractorRecord`` is appended for every outcome (ok / partial / skipped /
-    failed). Never raises: a missing tool, non-zero exit, timeout, or unparseable
-    output degrades to a diagnostic so the scan continues with whatever evidence
-    is available.
+    ``compile_commands.json`` is parsed), and a diagnostic ``ExtractorRecord`` is
+    appended for every outcome (ok / partial / skipped / failed). Never raises: a
+    missing tool, non-zero exit, timeout, or unparseable output degrades to a
+    diagnostic so the scan continues with whatever evidence is available.
+
+    The cmake temp build dir must outlive L4 replay (clang runs with each compile
+    unit's ``directory`` — the build dir — as cwd), so when *cleanup* is given the
+    dir is appended to it for the caller to remove *after* replay; only when
+    *cleanup* is ``None`` (standalone/unit-test use) is it removed immediately.
     """
     system = detect_build_system(sources)
     if not system or sources is None:
@@ -291,7 +296,11 @@ def run_inferred_build_query(
             return None
     finally:
         if build_dir is not None:
-            shutil.rmtree(build_dir, ignore_errors=True)
+            if cleanup is not None:
+                # Defer removal: L4 replay still needs this dir as clang's cwd.
+                cleanup.append(build_dir)
+            else:
+                shutil.rmtree(build_dir, ignore_errors=True)
 
 
 def _ingest_query_output(

@@ -20,6 +20,7 @@ construction tested here; the live subprocess is exercised behind a stub."""
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 
 from abicheck.buildsource.build_evidence import BuildEvidence
@@ -145,6 +146,37 @@ def test_run_cmake_ingests_out_of_tree_and_merges(tmp_path: Path, monkeypatch):
     assert ext[-1].status == "ok"
     assert not (tmp_path / ".abicheck-build").exists()  # nothing written in-tree
     assert seen_build_dirs and not seen_build_dirs[0].exists()  # temp dir cleaned up
+
+
+def test_run_cmake_defers_build_dir_cleanup_when_requested(
+    tmp_path: Path, monkeypatch
+):
+    # With a cleanup list (the real collect_inline_pack path), the out-of-tree
+    # build dir is NOT removed immediately: L4 replay runs clang with each compile
+    # unit's `directory` (the build dir) as cwd, so it must outlive replay. It is
+    # appended for the caller to remove afterwards (review P1).
+    (tmp_path / "CMakeLists.txt").write_text("project(x)\n")
+
+    def fake_run(cmd, **kw):
+        bdir = Path(cmd[cmd.index("-B") + 1])
+        bdir.mkdir(parents=True, exist_ok=True)
+        src = tmp_path / "a.cpp"
+        (bdir / "compile_commands.json").write_text(
+            json.dumps(
+                [{"directory": str(bdir), "file": str(src), "command": f"c++ -c {src}"}]
+            )
+        )
+        return _FakeProc(0)
+
+    monkeypatch.setattr(_bq.subprocess, "run", fake_run)
+    merged, ext = BuildEvidence(), []
+    cleanup: list[Path] = []
+    out = run_inferred_build_query(tmp_path, merged, ext, cleanup=cleanup)
+    assert out is None
+    assert merged.compile_units
+    assert len(cleanup) == 1 and cleanup[0].exists()  # deferred, alive for L4 cwd
+    shutil.rmtree(cleanup[0], ignore_errors=True)  # caller removes it post-replay
+    assert not cleanup[0].exists()
 
 
 def test_run_cmake_no_db_is_partial(tmp_path: Path, monkeypatch):
