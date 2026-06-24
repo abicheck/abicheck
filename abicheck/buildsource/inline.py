@@ -1069,11 +1069,18 @@ def _run_build_query(
     # The query is expected to have written/refreshed the configured compile DB.
     db: Path | None = None
     if cfg.compile_db and sources is not None:
+        # The operator told us exactly where this query writes its DB. Use only
+        # that path: if the query exited 0 but didn't actually produce it, do NOT
+        # fall back to an auto-discovered stale compile_commands.json — that would
+        # collect L3 with the wrong (default) flags the custom query existed to
+        # set, while reporting success (Codex P2). Surface the miss as partial.
         for match in sorted(sources.glob(cfg.compile_db)):
             if match.is_file():
                 db = match
                 break
-    if db is None:
+    else:
+        # No explicit path configured: discover the conventional compile DB the
+        # query is expected to have refreshed.
         db = _autodiscover_compile_db(sources)
     extractors.append(
         ExtractorRecord(

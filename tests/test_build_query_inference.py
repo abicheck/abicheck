@@ -382,6 +382,41 @@ def test_no_db_fallback_after_trusted_query_fails(tmp_path: Path, monkeypatch):
     assert out is None
 
 
+def test_trusted_query_missing_configured_db_does_not_autodiscover(
+    tmp_path: Path, monkeypatch
+):
+    # A trusted query that exits 0 but does NOT write its *configured*
+    # build.compile_db must surface as partial/None — not silently accept a stale
+    # auto-discovered compile_commands.json carrying the wrong flags (Codex P2).
+    from abicheck.buildsource import inline as _inline
+    from abicheck.buildsource.inline import BuildConfig, _run_build_query
+
+    (tmp_path / "compile_commands.json").write_text("[]")  # stale default DB present
+    cfg = BuildConfig(query="my-configure", compile_db="build/compile_commands.json")
+    # Query exits 0 but writes nothing at the configured path.
+    monkeypatch.setattr(_inline.subprocess, "run", lambda *a, **k: _FakeProc(0))
+    merged, ext = BuildEvidence(), []
+    out = _run_build_query(cfg, tmp_path, merged, ext)
+    assert out is None  # configured DB missing → not masked by autodiscovery
+    assert ext[-1].status == "partial"
+
+
+def test_trusted_query_without_configured_db_autodiscovers(tmp_path: Path, monkeypatch):
+    # Contrast: with no build.compile_db configured, a zero-exit query's
+    # conventional compile_commands.json is still auto-discovered (the no-mask rule
+    # applies only to an explicitly configured path).
+    from abicheck.buildsource import inline as _inline
+    from abicheck.buildsource.inline import BuildConfig, _run_build_query
+
+    (tmp_path / "compile_commands.json").write_text("[]")
+    cfg = BuildConfig(query="my-configure")  # no compile_db configured
+    monkeypatch.setattr(_inline.subprocess, "run", lambda *a, **k: _FakeProc(0))
+    merged, ext = BuildEvidence(), []
+    out = _run_build_query(cfg, tmp_path, merged, ext)
+    assert out is not None and out.name == "compile_commands.json"
+    assert ext[-1].status == "ok"
+
+
 def test_inferred_query_runs_when_no_trusted_query_configured(
     tmp_path: Path, monkeypatch
 ):
