@@ -55,6 +55,7 @@ import functools
 import hashlib
 import os
 import shutil
+import stat as _stat
 import subprocess
 import tempfile
 import time
@@ -90,6 +91,60 @@ INFERRED_QUERY_TIMEOUT_S = 600
 
 #: Poll interval while waiting on the inferred cmake build-dir lock (seconds).
 _BUILD_DIR_LOCK_POLL_S = 0.2
+
+
+def _private_tmp_root() -> Path | None:
+    """A per-user, owner-only (``0700``) temp subdir, created/validated securely.
+
+    The inferred cmake build dir lives at a *deterministic* (predictable) path so
+    its compile-unit ``directory`` / ``-I`` strings stay stable across runs. On a
+    world-shared ``/tmp`` that predictability is a symlink-attack vector: another
+    local user could pre-create ``/tmp/abicheck-cmake-<hash>`` as a symlink to a
+    victim-writable dir, and ``mkdir(..., exist_ok=True)`` would follow it so
+    ``cmake -B`` writes there (Codex P2). Nesting the build dir inside a ``0700``
+    dir owned by the current user closes that: only the owner can create entries
+    inside it, so no other user can plant the deterministic path or its lock file.
+
+    Returns the validated root, or ``None`` if a safe one cannot be established
+    (the caller then refuses to run the inferred query rather than use a
+    predictable shared path). On platforms without POSIX uids/perms (Windows) the
+    system temp dir is already per-user, so it is returned as-is.
+    """
+    tmp = Path(tempfile.gettempdir())
+    try:
+        uid = os.getuid()
+    except AttributeError:
+        # Windows: %LOCALAPPDATA%\Temp is already per-user — the shared-/tmp
+        # symlink attack does not apply.
+        return tmp
+    root = tmp / f"abicheck-{uid}"
+    try:
+        try:
+            os.mkdir(root, 0o700)
+        except FileExistsError:
+            pass
+        st = os.lstat(root)  # lstat: a symlink fails the S_ISDIR check below
+        if (
+            not _stat.S_ISDIR(st.st_mode)  # real directory, not a symlink/file
+            or st.st_uid != uid  # owned by us
+            or (st.st_mode & 0o077)  # no group/other access
+        ):
+            return None
+        return root
+    except OSError:
+        return None
+
+
+def _inferred_cmake_build_base(sources: Path) -> Path | None:
+    """Deterministic, owner-private base path for the inferred cmake build dir.
+
+    ``None`` when no secure per-user temp root can be established (see
+    :func:`_private_tmp_root`). *sources* must already be resolved.
+    """
+    root = _private_tmp_root()
+    if root is None:
+        return None
+    return root / f"cmake-{hashlib.sha256(str(sources).encode()).hexdigest()[:16]}"
 
 
 def _noop_release() -> None:
@@ -144,7 +199,9 @@ def _claim_inferred_build_dir(
                 if waited >= timeout:
                     os.close(fd)
                     # Peer still holds it — don't block the scan indefinitely.
-                    return Path(tempfile.mkdtemp(prefix=f"{base.name}-")), _noop_release
+                    return Path(
+                        tempfile.mkdtemp(prefix=f"{base.name}-", dir=base.parent)
+                    ), _noop_release
                 time.sleep(_BUILD_DIR_LOCK_POLL_S)
                 waited += _BUILD_DIR_LOCK_POLL_S
                 continue
@@ -166,7 +223,9 @@ def _claim_inferred_build_dir(
     try:
         fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_RDWR, 0o600)
     except FileExistsError:
-        return Path(tempfile.mkdtemp(prefix=f"{base.name}-")), _noop_release
+        return Path(
+            tempfile.mkdtemp(prefix=f"{base.name}-", dir=base.parent)
+        ), _noop_release
 
     def _unlink(_fd: int = fd, _marker: Path = lock_path) -> None:
         try:
@@ -321,17 +380,30 @@ def run_inferred_build_query(
     # generated-header `-I` paths, which feed the L4 replay cache key and
     # compile-unit IDs. A random path would churn both every run (perpetual cache
     # misses, non-reproducible compile-unit IDs); a stable per-tree path keeps them
-    # identical run-to-run. `_claim_inferred_build_dir` takes an exclusive lock on
-    # that path so concurrent scans of the same checkout serialize instead of
-    # sharing one mutable tree (Codex P2); under contention it falls back to a
-    # unique dir. Removed (and unlocked) after L4 via `cleanup`.
+    # identical run-to-run. It lives inside a per-user 0700 root
+    # (`_inferred_cmake_build_base`) so the predictable path can't be pre-planted as
+    # a symlink on a shared /tmp (Codex P2). `_claim_inferred_build_dir` takes an
+    # exclusive lock on it so concurrent scans of the same checkout serialize
+    # instead of sharing one mutable tree (Codex P2); under contention it falls back
+    # to a unique dir. Removed (and unlocked) after L4 via `cleanup`.
     build_dir: Path | None = None
     release: Callable[[], None] = _noop_release
     if system == "cmake":
-        base = (
-            Path(tempfile.gettempdir())
-            / f"abicheck-cmake-{hashlib.sha256(str(sources).encode()).hexdigest()[:16]}"
-        )
+        base = _inferred_cmake_build_base(sources)
+        if base is None:
+            # No owner-private temp dir could be established — refuse to configure
+            # into a predictable shared path (symlink-attack safe; Codex P2).
+            extractors.append(
+                ExtractorRecord(
+                    name="build_query_auto",
+                    status="skipped",
+                    detail=(
+                        "could not create a private temp directory for the cmake "
+                        "build; pass --build-info / --compile-db instead"
+                    ),
+                )
+            )
+            return None
         build_dir, release = _claim_inferred_build_dir(base, timeout)
         build_dir.mkdir(parents=True, exist_ok=True)
     try:

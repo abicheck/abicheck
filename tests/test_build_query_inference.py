@@ -19,11 +19,9 @@ construction tested here; the live subprocess is exercised behind a stub."""
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import sys
-import tempfile
 from pathlib import Path
 
 import pytest
@@ -198,10 +196,8 @@ def test_inferred_cmake_build_dir_lock_contention_falls_back_to_unique(
     fcntl = pytest.importorskip("fcntl")
     (tmp_path / "CMakeLists.txt").write_text("project(x)\n")
     resolved = tmp_path.resolve()
-    base = (
-        Path(tempfile.gettempdir())
-        / f"abicheck-cmake-{hashlib.sha256(str(resolved).encode()).hexdigest()[:16]}"
-    )
+    base = _bq._inferred_cmake_build_base(resolved)  # owner-private deterministic path
+    assert base is not None
     lock_path = base.with_name(base.name + ".lock")
     held = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
     fcntl.flock(held, fcntl.LOCK_EX)  # simulate a concurrent scan holding the lock
@@ -283,6 +279,45 @@ def test_claim_build_dir_marker_fallback_when_no_fcntl(tmp_path: Path, monkeypat
     bdir3, release3 = _bq._claim_inferred_build_dir(base, timeout=0)
     assert bdir3 == base  # sequential re-claim is deterministic
     release3()
+
+
+def test_private_tmp_root_is_owner_only_and_under_tmp(tmp_path: Path, monkeypatch):
+    # The inferred cmake build dir lives inside a per-user 0700 root so another
+    # local user can't pre-plant the predictable path (Codex P2 symlink attack).
+    pytest.importorskip("fcntl")  # POSIX uid/perm model
+    monkeypatch.setattr(_bq.tempfile, "gettempdir", lambda: str(tmp_path))
+    root = _bq._private_tmp_root()
+    assert root is not None
+    assert root.parent == tmp_path and root.is_dir()
+    assert (root.stat().st_mode & 0o077) == 0  # no group/other access
+    assert root.stat().st_uid == os.getuid()  # owned by us
+
+
+def test_private_tmp_root_rejects_symlinked_root(tmp_path: Path, monkeypatch):
+    # If the per-user root already exists as a symlink (attacker-planted), reject
+    # it rather than follow it — the caller then refuses the inferred query.
+    pytest.importorskip("fcntl")
+    monkeypatch.setattr(_bq.tempfile, "gettempdir", lambda: str(tmp_path))
+    victim = tmp_path / "victim"
+    victim.mkdir()
+    (tmp_path / f"abicheck-{os.getuid()}").symlink_to(victim, target_is_directory=True)
+    assert _bq._private_tmp_root() is None
+
+
+def test_inferred_cmake_build_base_none_without_private_root(monkeypatch):
+    # No secure root → no base path (the caller turns this into a skip).
+    monkeypatch.setattr(_bq, "_private_tmp_root", lambda: None)
+    assert _bq._inferred_cmake_build_base(Path("/some/sources")) is None
+
+
+def test_inferred_query_skipped_when_no_private_root(tmp_path: Path, monkeypatch):
+    # When no secure private temp root can be established, the cmake query is
+    # skipped with a diagnostic rather than configuring into a predictable path.
+    (tmp_path / "CMakeLists.txt").write_text("project(x)\n")
+    monkeypatch.setattr(_bq, "_inferred_cmake_build_base", lambda _sources: None)
+    merged, ext = BuildEvidence(), []
+    assert run_inferred_build_query(tmp_path, merged, ext) is None
+    assert ext[-1].status == "skipped" and "private temp" in ext[-1].detail
 
 
 def test_run_cmake_no_db_is_partial(tmp_path: Path, monkeypatch):
