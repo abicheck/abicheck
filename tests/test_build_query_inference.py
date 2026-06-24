@@ -19,6 +19,7 @@ construction tested here; the live subprocess is exercised behind a stub."""
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from abicheck.buildsource.build_evidence import BuildEvidence
@@ -109,21 +110,41 @@ class _FakeProc:
         self.stderr = stderr
 
 
-def test_run_cmake_success_returns_compile_db(tmp_path: Path, monkeypatch):
+def test_run_cmake_ingests_out_of_tree_and_merges(tmp_path: Path, monkeypatch):
+    # cmake configures into an OUT-OF-TREE temp dir (never under --sources); the
+    # compile DB is ingested + merged and the temp dir removed. Returns None
+    # (evidence merged), and nothing is written into the source tree.
     (tmp_path / "CMakeLists.txt").write_text("project(x)\n")
+    seen_build_dirs: list[Path] = []
 
     def fake_run(cmd, **kw):
-        # emulate cmake writing the compile DB into the -B dir
         bdir = Path(cmd[cmd.index("-B") + 1])
+        seen_build_dirs.append(bdir)
+        # The -B dir must NOT be under the source tree (out-of-tree contract).
+        assert tmp_path not in bdir.parents and bdir != tmp_path
         bdir.mkdir(parents=True, exist_ok=True)
-        (bdir / "compile_commands.json").write_text("[]")
+        src = tmp_path / "a.cpp"
+        (bdir / "compile_commands.json").write_text(
+            json.dumps(
+                [
+                    {
+                        "directory": str(bdir),
+                        "file": str(src),
+                        "command": f"c++ -I{tmp_path} -c {src}",
+                    }
+                ]
+            )
+        )
         return _FakeProc(0)
 
     monkeypatch.setattr(_bq.subprocess, "run", fake_run)
     merged, ext = BuildEvidence(), []
-    db = run_inferred_build_query(tmp_path, merged, ext)
-    assert db is not None and db.is_file() and db.name == "compile_commands.json"
+    out = run_inferred_build_query(tmp_path, merged, ext)
+    assert out is None  # evidence merged, no path threaded
+    assert merged.compile_units  # the cmake compile DB became L3 evidence
     assert ext[-1].status == "ok"
+    assert not (tmp_path / ".abicheck-build").exists()  # nothing written in-tree
+    assert seen_build_dirs and not seen_build_dirs[0].exists()  # temp dir cleaned up
 
 
 def test_run_cmake_no_db_is_partial(tmp_path: Path, monkeypatch):
@@ -222,6 +243,51 @@ def test_inferred_query_runs_when_no_trusted_query_configured(
     merged, ext = BuildEvidence(), []
     _resolve_compile_db(None, tmp_path, cfg, True, merged, ext)
     assert called["infer"] is True
+
+
+def test_no_inferred_query_after_build_info_miss(tmp_path: Path, monkeypatch):
+    # An explicit --build-info that resolves to no compile DB must not be masked
+    # by abicheck's default inferred query under different flags (review).
+    from abicheck.buildsource import build_query as _bqmod
+    from abicheck.buildsource.inline import BuildConfig, _resolve_compile_db
+
+    (tmp_path / "CMakeLists.txt").write_text("project(x)\n")
+    empty_bi = tmp_path / "bi"
+    empty_bi.mkdir()  # build-info dir with no compile_commands.json
+    called = {"infer": False}
+
+    def _infer(*a, **k):
+        called["infer"] = True
+        return None
+
+    monkeypatch.setattr(_bqmod, "run_inferred_build_query", _infer)
+    merged, ext = BuildEvidence(), []
+    out = _resolve_compile_db(empty_bi, tmp_path, BuildConfig(), True, merged, ext)
+    assert out is None
+    assert called["infer"] is False
+
+
+def test_no_inferred_query_after_explicit_compile_db_miss(
+    tmp_path: Path, monkeypatch
+):
+    # An explicit build.compile_db path that matches nothing is likewise not
+    # masked by the inferred query (review).
+    from abicheck.buildsource import build_query as _bqmod
+    from abicheck.buildsource.inline import BuildConfig, _resolve_compile_db
+
+    (tmp_path / "CMakeLists.txt").write_text("project(x)\n")
+    called = {"infer": False}
+
+    def _infer(*a, **k):
+        called["infer"] = True
+        return None
+
+    monkeypatch.setattr(_bqmod, "run_inferred_build_query", _infer)
+    cfg = BuildConfig(compile_db="build/compile_commands.json")  # matches nothing
+    merged, ext = BuildEvidence(), []
+    out = _resolve_compile_db(None, tmp_path, cfg, True, merged, ext)
+    assert out is None
+    assert called["infer"] is False
 
 
 def test_run_subprocess_error_is_failed(tmp_path: Path, monkeypatch):

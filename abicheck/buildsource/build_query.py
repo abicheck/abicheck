@@ -53,24 +53,28 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import tempfile
 from collections.abc import Callable
 from pathlib import Path
 
 from .build_evidence import BuildEvidence
 from .model import ExtractorRecord
-from .redaction import DEFAULT_REDACTION
 
-#: Out-of-source build dir abicheck creates for a cmake configure (kept inside
-#: the tree so a second run reuses it / auto-discovery finds it next time).
+#: Out-of-source build dir name. abicheck no longer writes a configure tree into
+#: the ``--sources`` checkout (it uses an out-of-tree temp dir, see
+#: :func:`run_inferred_build_query`); this name is retained only so the tree
+#: walkers still prune a stray ``.abicheck-build`` left by an older abicheck
+#: version or a user convention.
 ABICHECK_BUILD_DIR = ".abicheck-build"
 
-#: Directory segments pruned from ``-H`` header-directory globbing: VCS metadata
-#: plus abicheck's own in-tree cmake build dir. Zero-config cmake inference writes
-#: a configure tree under ``sources/.abicheck-build`` whose *generated* headers
-#: (config.h / version.h / …) would otherwise be swept into the L2 public-header
-#: surface and inflate the parsed type set, creating false ABI changes on a later
-#: run (Codex). Single source of truth shared by both header-expansion paths
-#: (``service_scan.expand_header_inputs`` and ``cli_resolve._expand_header_inputs``).
+#: Directory segments pruned from the tree walkers (``-H`` header-directory
+#: globbing and the S2 lexical pre-scan): VCS metadata plus ``ABICHECK_BUILD_DIR``.
+#: Inferred cmake now configures out-of-tree, so abicheck no longer creates an
+#: in-tree build dir — but pruning the name is kept as cheap defence against a
+#: stray ``.abicheck-build`` from an older abicheck version or a user convention,
+#: whose generated headers (config.h / version.h) would otherwise inflate the L2
+#: surface. Single source of truth shared by ``service_scan.expand_header_inputs``,
+#: ``cli_resolve._expand_header_inputs``, and ``pattern_scan``.
 PRUNED_HEADER_DIR_SEGMENTS: frozenset[str] = frozenset(
     {".git", ".hg", ".svn", ABICHECK_BUILD_DIR}
 )
@@ -103,19 +107,26 @@ def detect_build_system(sources: Path | None) -> str:
     return ""
 
 
-def inferred_query_command(system: str, sources: Path) -> list[str] | None:
+def inferred_query_command(
+    system: str, sources: Path, build_dir: Path | None = None
+) -> list[str] | None:
     """The fixed, abicheck-authored query command for *system* (no user input).
 
     Returns ``None`` for an unknown system. The argv is never shell-interpreted
-    and contains no value taken from the source tree beyond its path.
+    and contains no value taken from the source tree beyond its path. *build_dir*
+    is the cmake configure output (``-B``); :func:`run_inferred_build_query`
+    passes an out-of-tree temp dir so nothing is written under *sources*. Falls
+    back to ``sources / ABICHECK_BUILD_DIR`` only when called standalone without
+    one.
     """
     if system == "cmake":
+        out = build_dir if build_dir is not None else sources / ABICHECK_BUILD_DIR
         return [
             "cmake",
             "-S",
             str(sources),
             "-B",
-            str(sources / ABICHECK_BUILD_DIR),
+            str(out),
             "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
         ]
     if system == "make":
@@ -159,12 +170,13 @@ def run_inferred_build_query(
 ) -> Path | None:
     """Detect the build system and run abicheck's own query to produce L3.
 
-    Returns a ``compile_commands.json`` path (the cmake case, fed to the compile
-    DB adapter by the caller) or ``None`` after merging :class:`BuildEvidence`
-    directly into *merged* (the make/bazel adapter cases) — or ``None`` with a
-    diagnostic ``ExtractorRecord`` when detection/execution produces nothing.
-    Never raises: a missing tool, non-zero exit, or timeout degrades to a coverage
-    diagnostic so the scan continues with whatever evidence is available.
+    Always returns ``None``: the cmake / bazel evidence is ingested and merged
+    directly into *merged* (cmake configures into an out-of-tree temp dir whose
+    ``compile_commands.json`` is parsed and then removed), and a diagnostic
+    ``ExtractorRecord`` is appended for every outcome (ok / partial / skipped /
+    failed). Never raises: a missing tool, non-zero exit, timeout, or unparseable
+    output degrades to a diagnostic so the scan continues with whatever evidence
+    is available.
     """
     system = detect_build_system(sources)
     if not system or sources is None:
@@ -189,78 +201,97 @@ def run_inferred_build_query(
             )
         )
         return None
-    cmd = inferred_query_command(system, sources)
-    if (
-        cmd is None
-    ):  # pragma: no cover - defensive: detection only yields cmake/bazel here
-        return None
-    # Bazelisk is the common launcher when `bazel` itself isn't on PATH; mirror
-    # the BazelAdapter's fallback so inferred Bazel queries still run (Codex/CR).
-    if cmd[0] == "bazel" and which("bazel") is None and which("bazelisk") is not None:
-        cmd[0] = "bazelisk"
-    tool = cmd[0]
-    if which(tool) is None:
-        extractors.append(
-            ExtractorRecord(
-                name="build_query_auto",
-                status="skipped",
-                detail=(
-                    f"detected a {system} project but `{tool}` is not installed; "
-                    "install it or pass --build-info / --compile-db"
-                ),
-            )
-        )
-        return None
+    # cmake configures into an OUT-OF-TREE temp dir: never mutate the --sources
+    # checkout (it may be read-only / shared) and keep generated output away from
+    # every tree walker, so no walker needs to prune an in-tree build dir
+    # (maintainer decision). cmake writes absolute source/-I paths into
+    # compile_commands.json, so an out-of-tree build dir resolves fine; the dir is
+    # removed in the finally once its compile DB has been ingested.
+    build_dir = (
+        Path(tempfile.mkdtemp(prefix="abicheck-cmake-")) if system == "cmake" else None
+    )
     try:
-        proc = subprocess.run(  # noqa: S603 - fixed abicheck-authored argv, shell=False
-            cmd,
-            cwd=str(sources),
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            check=False,
-        )
-    except (OSError, subprocess.SubprocessError) as exc:
-        extractors.append(
-            ExtractorRecord(
-                name="build_query_auto",
-                status="failed",
-                detail=f"auto {system} query failed to run ({tool}): {exc}",
+        cmd = inferred_query_command(system, sources, build_dir=build_dir)
+        if (
+            cmd is None
+        ):  # pragma: no cover - defensive: detection only yields cmake/bazel here
+            return None
+        # Bazelisk is the common launcher when `bazel` isn't on PATH; mirror the
+        # BazelAdapter's fallback so inferred Bazel queries still run (Codex/CR).
+        if (
+            cmd[0] == "bazel"
+            and which("bazel") is None
+            and which("bazelisk") is not None
+        ):
+            cmd[0] = "bazelisk"
+        tool = cmd[0]
+        if which(tool) is None:
+            extractors.append(
+                ExtractorRecord(
+                    name="build_query_auto",
+                    status="skipped",
+                    detail=(
+                        f"detected a {system} project but `{tool}` is not installed; "
+                        "install it or pass --build-info / --compile-db"
+                    ),
+                )
             )
-        )
-        merged.diagnostics.append(f"build_query_auto: {exc}")
-        return None
-    if proc.returncode != 0:
-        extractors.append(
-            ExtractorRecord(
-                name="build_query_auto",
-                status="failed",
-                detail=(
-                    f"auto {system} query exited {proc.returncode}: "
-                    f"{(proc.stderr or '').strip()[:200]}"
-                ),
+            return None
+        try:
+            proc = subprocess.run(  # noqa: S603 - fixed abicheck-authored argv, shell=False
+                cmd,
+                cwd=str(sources),
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                check=False,
             )
-        )
-        merged.diagnostics.append(
-            f"build_query_auto: {system} exited {proc.returncode}"
-        )
-        return None
-    # Ingestion parses tool output (bazel aquery JSON via a temp file, the cmake
-    # compile DB) — keep it inside the never-raises contract so a malformed
-    # aquery payload or a transient I/O error degrades to a diagnostic rather
-    # than aborting a `dump --sources` run (review).
-    try:
-        return _ingest_query_output(system, sources, proc.stdout, merged, extractors)
-    except (OSError, ValueError, KeyError, TypeError) as exc:
-        extractors.append(
-            ExtractorRecord(
-                name="build_query_auto",
-                status="failed",
-                detail=f"auto {system} query ran but its output could not be ingested: {exc}",
+        except (OSError, subprocess.SubprocessError) as exc:
+            extractors.append(
+                ExtractorRecord(
+                    name="build_query_auto",
+                    status="failed",
+                    detail=f"auto {system} query failed to run ({tool}): {exc}",
+                )
             )
-        )
-        merged.diagnostics.append(f"build_query_auto: ingest failed ({exc})")
-        return None
+            merged.diagnostics.append(f"build_query_auto: {exc}")
+            return None
+        if proc.returncode != 0:
+            extractors.append(
+                ExtractorRecord(
+                    name="build_query_auto",
+                    status="failed",
+                    detail=(
+                        f"auto {system} query exited {proc.returncode}: "
+                        f"{(proc.stderr or '').strip()[:200]}"
+                    ),
+                )
+            )
+            merged.diagnostics.append(
+                f"build_query_auto: {system} exited {proc.returncode}"
+            )
+            return None
+        # Ingestion parses tool output (the cmake compile DB, bazel aquery JSON) —
+        # keep it inside the never-raises contract so a malformed payload or a
+        # transient I/O error degrades to a diagnostic rather than aborting a
+        # `dump --sources` run (review).
+        try:
+            return _ingest_query_output(
+                system, sources, proc.stdout, merged, extractors, build_dir=build_dir
+            )
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            extractors.append(
+                ExtractorRecord(
+                    name="build_query_auto",
+                    status="failed",
+                    detail=f"auto {system} query ran but its output could not be ingested: {exc}",
+                )
+            )
+            merged.diagnostics.append(f"build_query_auto: ingest failed ({exc})")
+            return None
+    finally:
+        if build_dir is not None:
+            shutil.rmtree(build_dir, ignore_errors=True)
 
 
 def _ingest_query_output(
@@ -269,27 +300,41 @@ def _ingest_query_output(
     stdout: str,
     merged: BuildEvidence,
     extractors: list[ExtractorRecord],
+    build_dir: Path | None = None,
 ) -> Path | None:
-    """Turn a successful query's output into a compile DB path or merged evidence."""
+    """Parse a successful query's output and merge it into *merged* (returns None).
+
+    For cmake the compile DB is read from *build_dir* (the out-of-tree configure
+    dir) and ingested via :class:`CompileDbAdapter`; for bazel the aquery JSON is
+    parsed via :class:`BazelAdapter`. Both merge into *merged* and return ``None``
+    (the caller no longer threads a compile-DB path).
+    """
     if system == "cmake":
-        db = sources / ABICHECK_BUILD_DIR / "compile_commands.json"
-        if db.is_file():
+        db = (build_dir or (sources / ABICHECK_BUILD_DIR)) / "compile_commands.json"
+        if not db.is_file():
             extractors.append(
                 ExtractorRecord(
                     name="build_query_auto",
-                    status="ok",
-                    detail=(
-                        "auto-ran `cmake` configure; compile DB at "
-                        f"{DEFAULT_REDACTION.path(str(db))}"
-                    ),
+                    status="partial",
+                    detail="cmake configure ran but produced no compile_commands.json",
                 )
             )
-            return db
+            return None
+        from .adapters.compile_db import CompileDbAdapter
+
+        # cmake writes absolute source/-I paths, so the out-of-tree build dir is
+        # fine; ingest here (the build dir is removed by the caller's finally).
+        ev = CompileDbAdapter(db, build_system="cmake").collect()
+        merged.merge(ev)
         extractors.append(
             ExtractorRecord(
                 name="build_query_auto",
-                status="partial",
-                detail="cmake configure ran but produced no compile_commands.json",
+                status="ok" if ev.compile_units else "partial",
+                detail=(
+                    f"auto-ran `cmake` configure; {len(ev.compile_units)} compile unit(s)"
+                    if ev.compile_units
+                    else "cmake configure produced an empty compile_commands.json"
+                ),
             )
         )
         return None

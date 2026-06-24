@@ -701,6 +701,11 @@ def _resolve_compile_db(
     arbitrary ``build.query`` string from an auto-discovered (untrusted)
     ``.abicheck.yml`` — that still needs an explicit ``--config``.
     """
+    # Track whether the operator gave an EXPLICIT L3 input (--build-info or a
+    # build.compile_db path) that yielded nothing. If so, the default inferred
+    # query must not run: a cleaned/mistyped build-info path should surface, not
+    # be masked by a fresh `cmake`/`bazel` query under different flags (review).
+    explicit_input_missed = False
     if build_info is not None:
         found = _compile_db_at(build_info)
         if found is not None:
@@ -708,6 +713,7 @@ def _resolve_compile_db(
         merged.diagnostics.append(
             f"build-info {build_info}: no {_COMPILE_DB_NAME} found"
         )
+        explicit_input_missed = True
 
     # build.query (ADR-032 D5 query_build_system): a tree-supplied command that
     # EMITS a compile DB / exports without a full build. Runs only when the config
@@ -744,6 +750,7 @@ def _resolve_compile_db(
             return None
 
     if cfg.compile_db and sources is not None:
+        explicit_input_missed = True  # an explicit DB path was configured
         for match in sorted(sources.glob(cfg.compile_db)):
             if match.is_file():
                 return match
@@ -752,12 +759,18 @@ def _resolve_compile_db(
     if discovered is not None:
         return discovered
 
-    # Zero-config fallback: no compile DB exists and no trusted query was
-    # configured, but a --sources tree is present. Detect the build system and run
-    # abicheck's OWN fixed query (cmake configure / make -n / bazel aquery) to
-    # produce L3 — so "just provide sources" works with no flag and no manual
-    # build step. Only an abicheck-authored command runs here; an arbitrary
-    # tree-local .abicheck.yml `build.query` string is never auto-executed.
+    if explicit_input_missed:
+        # An explicit --build-info / build.compile_db was given but resolved to no
+        # compile DB (and none was auto-discovered). Surface that miss rather than
+        # masking it with abicheck's default inferred query under different flags.
+        return None
+
+    # Zero-config fallback: no compile DB exists and no explicit L3 input was
+    # given, but a --sources tree is present. Detect the build system and run
+    # abicheck's OWN fixed query (cmake configure / bazel aquery) to produce L3 —
+    # so "just provide sources" works with no flag and no manual build step. Only
+    # an abicheck-authored command runs here; an arbitrary tree-local
+    # .abicheck.yml `build.query` string is never auto-executed.
     from .build_query import run_inferred_build_query
 
     return run_inferred_build_query(sources, merged, extractors)
