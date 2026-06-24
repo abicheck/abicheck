@@ -714,6 +714,7 @@ def _resolve_compile_db(
     # came from an explicit operator-supplied path (build_config_trusted_for_query);
     # an auto-discovered .abicheck.yml is never trusted to execute. No
     # --allow-build-query flag is involved any more (it is a deprecated no-op).
+    trusted_query_attempted = False
     if cfg.query:
         if not build_config_trusted_for_query:
             extractors.append(
@@ -733,6 +734,13 @@ def _resolve_compile_db(
             queried = _run_build_query(cfg, sources, merged, extractors)
             if queried is not None:
                 return queried
+            # The operator supplied an explicit query and it failed / produced no
+            # compile DB. Do NOT silently fall through to abicheck's default
+            # inferred query: the project chose a custom configure for a reason,
+            # and masking the failure with default flags would yield wrong L3
+            # (review). The build_query diagnostic _run_build_query recorded
+            # already explains the miss.
+            trusted_query_attempted = True
 
     if cfg.compile_db and sources is not None:
         for match in sorted(sources.glob(cfg.compile_db)):
@@ -742,6 +750,9 @@ def _resolve_compile_db(
     discovered = _autodiscover_compile_db(sources)
     if discovered is not None:
         return discovered
+
+    if trusted_query_attempted:
+        return None
 
     # Zero-config fallback: no compile DB exists and no trusted query was
     # configured, but a --sources tree is present. Detect the build system and run

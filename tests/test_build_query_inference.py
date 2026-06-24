@@ -145,6 +145,69 @@ def test_run_nonzero_exit_is_failed(tmp_path: Path, monkeypatch):
     assert merged.diagnostics
 
 
+def test_ingest_failure_degrades_to_diagnostic(tmp_path: Path, monkeypatch):
+    # "Never raises": if ingesting a *successful* query's output blows up (bad
+    # aquery JSON, temp-dir full), it degrades to a failed diagnostic, not an
+    # exception that aborts the dump (review).
+    (tmp_path / "CMakeLists.txt").write_text("project(x)\n")
+    monkeypatch.setattr(_bq.subprocess, "run", lambda cmd, **kw: _FakeProc(0))
+
+    def boom(*a, **k):
+        raise ValueError("malformed query output")
+
+    monkeypatch.setattr(_bq, "_ingest_query_output", boom)
+    merged, ext = BuildEvidence(), []
+    assert run_inferred_build_query(tmp_path, merged, ext) is None
+    assert ext[-1].status == "failed"
+    assert "could not be ingested" in ext[-1].detail
+    assert merged.diagnostics
+
+
+def test_no_inferred_query_after_trusted_query_fails(tmp_path: Path, monkeypatch):
+    # A trusted --build-query / --config build.query that fails must NOT fall
+    # through to abicheck's default inferred cmake/bazel query — that would mask
+    # the explicit failure with wrong (default) flags (review).
+    from abicheck.buildsource import build_query as _bqmod, inline as _inline
+    from abicheck.buildsource.inline import BuildConfig, _resolve_compile_db
+
+    (tmp_path / "CMakeLists.txt").write_text("project(x)\n")
+    cfg = BuildConfig(query="my-configure --custom-flags")
+    monkeypatch.setattr(_inline, "_run_build_query", lambda *a, **k: None)  # fails
+    called = {"infer": False}
+
+    def _infer(*a, **k):
+        called["infer"] = True
+        return None
+
+    monkeypatch.setattr(_bqmod, "run_inferred_build_query", _infer)
+    merged, ext = BuildEvidence(), []
+    out = _resolve_compile_db(None, tmp_path, cfg, True, merged, ext)
+    assert out is None
+    assert called["infer"] is False  # explicit failure not masked by inferred query
+
+
+def test_inferred_query_runs_when_no_trusted_query_configured(
+    tmp_path: Path, monkeypatch
+):
+    # Contrast: with no build.query configured, the zero-config inferred query
+    # still runs (the fallback is only skipped after a trusted query *attempt*).
+    from abicheck.buildsource import build_query as _bqmod
+    from abicheck.buildsource.inline import BuildConfig, _resolve_compile_db
+
+    (tmp_path / "CMakeLists.txt").write_text("project(x)\n")
+    cfg = BuildConfig()  # no query
+    called = {"infer": False}
+
+    def _infer(*a, **k):
+        called["infer"] = True
+        return None
+
+    monkeypatch.setattr(_bqmod, "run_inferred_build_query", _infer)
+    merged, ext = BuildEvidence(), []
+    _resolve_compile_db(None, tmp_path, cfg, True, merged, ext)
+    assert called["infer"] is True
+
+
 def test_run_subprocess_error_is_failed(tmp_path: Path, monkeypatch):
     (tmp_path / "CMakeLists.txt").write_text("project(x)\n")
 
