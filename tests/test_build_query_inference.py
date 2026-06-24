@@ -187,6 +187,27 @@ def test_run_cmake_no_db_is_partial(tmp_path: Path, monkeypatch):
     assert ext[-1].status == "partial"
 
 
+def test_inferred_cmake_build_dir_is_stable_per_source_tree(
+    tmp_path: Path, monkeypatch
+):
+    # The out-of-tree cmake build dir is deterministic per resolved source tree,
+    # so repeated zero-config scans record identical compile-unit `directory`/`-I`
+    # paths — the L4 replay cache key and compile-unit IDs stay stable run-to-run
+    # rather than churning on a random /tmp path (review P2).
+    (tmp_path / "CMakeLists.txt").write_text("project(x)\n")
+    seen: list[str] = []
+
+    def fake_run(cmd, **kw):
+        seen.append(cmd[cmd.index("-B") + 1])
+        return _FakeProc(0)
+
+    monkeypatch.setattr(_bq.subprocess, "run", fake_run)
+    for _ in range(2):
+        run_inferred_build_query(tmp_path, BuildEvidence(), [])
+    assert seen[0] == seen[1]  # deterministic across runs
+    assert str(tmp_path) not in seen[0]  # out-of-tree
+
+
 def test_run_nonzero_exit_is_failed(tmp_path: Path, monkeypatch):
     (tmp_path / "CMakeLists.txt").write_text("project(x)\n")
     monkeypatch.setattr(

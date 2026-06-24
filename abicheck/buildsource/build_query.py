@@ -51,6 +51,7 @@ only :func:`run_inferred_build_query` touches the filesystem / subprocess.
 
 from __future__ import annotations
 
+import hashlib
 import shutil
 import subprocess
 import tempfile
@@ -206,15 +207,27 @@ def run_inferred_build_query(
             )
         )
         return None
-    # cmake configures into an OUT-OF-TREE temp dir: never mutate the --sources
+    # cmake configures into an OUT-OF-TREE build dir: never mutate the --sources
     # checkout (it may be read-only / shared) and keep generated output away from
     # every tree walker, so no walker needs to prune an in-tree build dir
     # (maintainer decision). cmake writes absolute source/-I paths into
-    # compile_commands.json, so an out-of-tree build dir resolves fine; the dir is
-    # removed in the finally once its compile DB has been ingested.
+    # compile_commands.json, so an out-of-tree build dir resolves fine.
+    #
+    # The path is DETERMINISTIC per resolved source tree (not a random mkdtemp):
+    # cmake records the build dir in each compile unit's `directory` and in
+    # generated-header `-I` paths, which feed the L4 replay cache key and
+    # compile-unit IDs. A random path would churn both every run (perpetual cache
+    # misses, non-reproducible compile-unit IDs); a stable per-tree path keeps them
+    # identical run-to-run. Removed after L4 via `cleanup` (the path string, not
+    # the dir's persistence, is what keeps the cache key stable across runs).
     build_dir = (
-        Path(tempfile.mkdtemp(prefix="abicheck-cmake-")) if system == "cmake" else None
+        Path(tempfile.gettempdir())
+        / f"abicheck-cmake-{hashlib.sha256(str(sources).encode()).hexdigest()[:16]}"
+        if system == "cmake"
+        else None
     )
+    if build_dir is not None:
+        build_dir.mkdir(parents=True, exist_ok=True)
     try:
         cmd = inferred_query_command(system, sources, build_dir=build_dir)
         if (
