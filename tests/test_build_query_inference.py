@@ -19,9 +19,13 @@ construction tested here; the live subprocess is exercised behind a stub."""
 
 from __future__ import annotations
 
+import hashlib
 import json
-import shutil
+import os
+import tempfile
 from pathlib import Path
+
+import pytest
 
 from abicheck.buildsource.build_evidence import BuildEvidence
 from abicheck.buildsource.build_query import (
@@ -148,17 +152,18 @@ def test_run_cmake_ingests_out_of_tree_and_merges(tmp_path: Path, monkeypatch):
     assert seen_build_dirs and not seen_build_dirs[0].exists()  # temp dir cleaned up
 
 
-def test_run_cmake_defers_build_dir_cleanup_when_requested(
-    tmp_path: Path, monkeypatch
-):
+def test_run_cmake_defers_build_dir_cleanup_when_requested(tmp_path: Path, monkeypatch):
     # With a cleanup list (the real collect_inline_pack path), the out-of-tree
     # build dir is NOT removed immediately: L4 replay runs clang with each compile
-    # unit's `directory` (the build dir) as cwd, so it must outlive replay. It is
-    # appended for the caller to remove afterwards (review P1).
+    # unit's `directory` (the build dir) as cwd, so it must outlive replay. A
+    # removal+unlock thunk is appended for the caller to invoke afterwards (P1); the
+    # dir (and its lock) survive until then.
     (tmp_path / "CMakeLists.txt").write_text("project(x)\n")
+    seen_build_dirs: list[Path] = []
 
     def fake_run(cmd, **kw):
         bdir = Path(cmd[cmd.index("-B") + 1])
+        seen_build_dirs.append(bdir)
         bdir.mkdir(parents=True, exist_ok=True)
         src = tmp_path / "a.cpp"
         (bdir / "compile_commands.json").write_text(
@@ -170,13 +175,51 @@ def test_run_cmake_defers_build_dir_cleanup_when_requested(
 
     monkeypatch.setattr(_bq.subprocess, "run", fake_run)
     merged, ext = BuildEvidence(), []
-    cleanup: list[Path] = []
+    cleanup: list = []
     out = run_inferred_build_query(tmp_path, merged, ext, cleanup=cleanup)
     assert out is None
     assert merged.compile_units
-    assert len(cleanup) == 1 and cleanup[0].exists()  # deferred, alive for L4 cwd
-    shutil.rmtree(cleanup[0], ignore_errors=True)  # caller removes it post-replay
-    assert not cleanup[0].exists()
+    bdir = seen_build_dirs[0]
+    # Deferred: the dir is still alive (clang replay needs it as cwd) and a single
+    # cleanup thunk was queued rather than a bare path.
+    assert len(cleanup) == 1 and callable(cleanup[0]) and bdir.exists()
+    cleanup[0]()  # caller invokes it post-replay → removes dir + releases lock
+    assert not bdir.exists()
+
+
+def test_inferred_cmake_build_dir_lock_contention_falls_back_to_unique(
+    tmp_path: Path, monkeypatch
+):
+    # When another live scan of the same checkout already holds the deterministic
+    # build dir's lock, this invocation must NOT share/await it forever: it falls
+    # back to a unique sibling dir so concurrent scans never corrupt one mutable
+    # tree or rmtree it out from under each other's L4 cwd (Codex P2).
+    fcntl = pytest.importorskip("fcntl")
+    (tmp_path / "CMakeLists.txt").write_text("project(x)\n")
+    resolved = tmp_path.resolve()
+    base = (
+        Path(tempfile.gettempdir())
+        / f"abicheck-cmake-{hashlib.sha256(str(resolved).encode()).hexdigest()[:16]}"
+    )
+    lock_path = base.with_name(base.name + ".lock")
+    held = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+    fcntl.flock(held, fcntl.LOCK_EX)  # simulate a concurrent scan holding the lock
+    try:
+        seen: list[Path] = []
+
+        def fake_run(cmd, **kw):
+            seen.append(Path(cmd[cmd.index("-B") + 1]))
+            return _FakeProc(0)
+
+        monkeypatch.setattr(_bq.subprocess, "run", fake_run)
+        # timeout=0 → fall back immediately instead of polling the held lock.
+        run_inferred_build_query(tmp_path, BuildEvidence(), [], timeout=0)
+        assert seen, "the query should still run on a fallback dir"
+        assert seen[0] != base  # not the contended deterministic path
+        assert seen[0].name.startswith(base.name)  # a unique sibling of it
+    finally:
+        fcntl.flock(held, fcntl.LOCK_UN)
+        os.close(held)
 
 
 def test_run_cmake_no_db_is_partial(tmp_path: Path, monkeypatch):
@@ -320,9 +363,7 @@ def test_no_inferred_query_after_build_info_miss(tmp_path: Path, monkeypatch):
     assert called["infer"] is False
 
 
-def test_no_inferred_query_after_explicit_compile_db_miss(
-    tmp_path: Path, monkeypatch
-):
+def test_no_inferred_query_after_explicit_compile_db_miss(tmp_path: Path, monkeypatch):
     # An *explicit* build.compile_db path (compile_db_explicit=True: CLI
     # --build-compile-db or operator --config) that matches nothing is not masked
     # by the inferred query — even if a stray DB exists to auto-discover (review).

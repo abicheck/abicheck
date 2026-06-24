@@ -43,9 +43,9 @@ import datetime as _dt
 import json
 import os
 import shlex
-import shutil
 import subprocess
 import warnings
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, ClassVar
@@ -558,11 +558,12 @@ def collect_inline_pack(
     scope = effective_graph_scope(cfg.graph_detail, scope)
     merged = BuildEvidence()
     extractors: list[ExtractorRecord] = []
-    # Temp build dirs (out-of-tree inferred cmake) that must outlive L4 replay —
-    # clang runs with each compile unit's `directory` (the cmake build dir) as
-    # cwd, so the dir can't be removed until after replay. Cleaned up below once
-    # L3/L4/L5 are collected into in-memory evidence.
-    query_build_dirs: list[Path] = []
+    # Cleanup thunks for temp build dirs (out-of-tree inferred cmake) that must
+    # outlive L4 replay — clang runs with each compile unit's `directory` (the cmake
+    # build dir) as cwd, so the dir can't be removed (nor its lock released) until
+    # after replay. Invoked below once L3/L4/L5 are collected into in-memory
+    # evidence. Each thunk removes its dir and releases the dir's exclusive lock.
+    query_build_cleanups: list[Callable[[], None]] = []
 
     if base_build is not None:
         merged.merge(base_build)
@@ -581,7 +582,7 @@ def collect_inline_pack(
             build_config_trusted_for_query,
             merged,
             extractors,
-            cleanup=query_build_dirs,
+            cleanup=query_build_cleanups,
             compile_db_explicit=compile_db_explicit,
         )
     if compile_db is not None:
@@ -648,9 +649,10 @@ def collect_inline_pack(
     )
 
     # L3/L4/L5 are now collected into in-memory evidence; the out-of-tree inferred
-    # cmake build dir (kept alive through L4 replay's clang cwd) can be removed.
-    for _bd in query_build_dirs:
-        shutil.rmtree(_bd, ignore_errors=True)
+    # cmake build dir (kept alive through L4 replay's clang cwd) can be removed and
+    # its exclusive lock released.
+    for _cleanup in query_build_cleanups:
+        _cleanup()
 
     has_build = bool(
         merged.compile_units
@@ -703,7 +705,7 @@ def _resolve_compile_db(
     build_config_trusted_for_query: bool,
     merged: BuildEvidence,
     extractors: list[ExtractorRecord],
-    cleanup: list[Path] | None = None,
+    cleanup: list[Callable[[], None]] | None = None,
     compile_db_explicit: bool = False,
 ) -> Path | None:
     """Resolve the compile DB to feed L3 (zero-config; ADR-032 amended).
