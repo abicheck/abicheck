@@ -23,10 +23,32 @@ from pathlib import Path
 
 from abicheck.dumper_clang_errors import (
     _headers_failing_in_aggregate,
+    _is_direct_include_guard_failure,
     retry_excluding_error_headers,
 )
 
 AGG = Path("/tmp/agg12345.hpp")
+
+
+def test_guard_failure_detector_matches_castxml_style_error():
+    # castxml wraps clang and surfaces its stderr; a direct-include guard there
+    # routes the auto frontend to clang (which can exclude the header).
+    castxml_err = (
+        "castxml failed (exit 1):\n"
+        "/x/_detail.h:21:6: error: do not #include this internal header directly\n"
+    )
+    assert _is_direct_include_guard_failure(castxml_err) is True
+
+
+def test_guard_failure_detector_ignores_unrelated_and_config_errors():
+    # A toolchain/config error (even one mentioning "directly" without an include
+    # context) must NOT be treated as a direct-inclusion guard.
+    assert not _is_direct_include_guard_failure(
+        "castxml failed (exit 1):\n/x/p.h:3:2: error: define MYLIB_CONFIG first\n"
+    )
+    assert not _is_direct_include_guard_failure("")
+    # "internal header" phrase but no error context → not a guard failure.
+    assert not _is_direct_include_guard_failure("note: this is an internal header")
 
 
 def test_direct_error_header_attributed_to_aggregate_line():

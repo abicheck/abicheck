@@ -59,6 +59,7 @@ from .dumper_castxml import (
 )
 from .dumper_clang import _ClangAstParser as _ClangAstParser
 from .dumper_clang_errors import (
+    _is_direct_include_guard_failure,
     _is_missing_cpp_stdlib_header_error,
     retry_excluding_error_headers,
 )
@@ -475,11 +476,15 @@ def _header_ast_parser(
         return _run_clang()
 
     # G16: when the frontend was selected automatically (no explicit --ast-frontend
-    # and no ABICHECK_AST_FRONTEND pin), a castxml *toolchain-version* failure
-    # (bundled Clang too old for the host libstdc++/GCC) is recoverable — the clang
-    # backend parses against the host toolchain directly. Fall back to it rather than
-    # aborting. An explicit castxml request is honored verbatim (the error surfaces
-    # unchanged).
+    # and no ABICHECK_AST_FRONTEND pin), two castxml failures are recoverable by
+    # falling back to the clang backend rather than aborting: a *toolchain-version*
+    # failure (bundled Clang too old for the host libstdc++/GCC — clang parses
+    # against the host toolchain directly), and a *direct-inclusion #error guard*
+    # (a `-H <include-dir>` swept in a preview/internal header that #errors on
+    # direct inclusion — only the clang path can granularly exclude the offending
+    # headers via retry_excluding_error_headers, so the headline include-dir scan
+    # works on the default frontend, not just --ast-frontend clang). An explicit
+    # castxml request is honored verbatim (the error surfaces unchanged).
     choice = (backend or "auto").lower()
     env_pin = os.environ.get("ABICHECK_AST_FRONTEND", "").strip().lower()
     auto_selected = choice == "auto" and env_pin not in ("castxml", "clang")
@@ -495,12 +500,17 @@ def _header_ast_parser(
         if (
             auto_selected
             and _clang_available()
-            and _is_toolchain_version_failure(str(exc))
+            and (
+                _is_toolchain_version_failure(str(exc))
+                or _is_direct_include_guard_failure(str(exc))
+            )
         ):
             log.warning(
-                "castxml failed with a toolchain-version error; falling back to "
-                "the clang header backend (set --ast-frontend castxml to force "
-                "castxml and see the original error)."
+                "castxml could not parse the header(s) (toolchain mismatch or a "
+                "header that refuses direct inclusion); falling back to the clang "
+                "header backend, which parses against the host toolchain and can "
+                "exclude direct-include #error guard headers. Set --ast-frontend "
+                "castxml to force castxml and see the original error."
             )
             return _run_clang()
         raise

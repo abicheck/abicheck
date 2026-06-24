@@ -186,6 +186,22 @@ def test_no_inferred_query_after_trusted_query_fails(tmp_path: Path, monkeypatch
     assert called["infer"] is False  # explicit failure not masked by inferred query
 
 
+def test_no_db_fallback_after_trusted_query_fails(tmp_path: Path, monkeypatch):
+    # A failed trusted query must not be masked by a stale/auto-discovered DB
+    # already in the tree from a prior/default configure (review): return None so
+    # the failure surfaces, rather than collecting L3 with the wrong flags.
+    from abicheck.buildsource import inline as _inline
+    from abicheck.buildsource.inline import BuildConfig, _resolve_compile_db
+
+    (tmp_path / "CMakeLists.txt").write_text("project(x)\n")
+    (tmp_path / "compile_commands.json").write_text("[]")  # stale DB present
+    cfg = BuildConfig(query="my-configure --custom-flags")
+    monkeypatch.setattr(_inline, "_run_build_query", lambda *a, **k: None)  # fails
+    merged, ext = BuildEvidence(), []
+    out = _resolve_compile_db(None, tmp_path, cfg, True, merged, ext)
+    assert out is None
+
+
 def test_inferred_query_runs_when_no_trusted_query_configured(
     tmp_path: Path, monkeypatch
 ):

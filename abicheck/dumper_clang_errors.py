@@ -123,6 +123,22 @@ def _is_missing_cpp_stdlib_header_error(stderr: str) -> bool:
     )
 
 
+def _is_direct_include_guard_failure(stderr: str) -> bool:
+    """True if a parse failure looks like a header refusing direct inclusion.
+
+    A coarse, frontend-agnostic signal used to route a *castxml* ``auto`` failure
+    to the clang backend — which can granularly exclude the offending headers via
+    :func:`retry_excluding_error_headers`, a thing the castxml path cannot do — so
+    the ``-H <include-dir>`` case works on the default frontend too (review). The
+    failure text must both look like an error and carry a direct-inclusion guard
+    phrase (:data:`_DIRECT_INCLUDE_GUARD_RE`: "…include…directly" / "internal
+    header"). Deliberately conservative: a castxml toolchain/syntax failure that
+    merely happens to contain the word "directly" without "include" near it, or
+    without any error context, does not match. Pure/string-only.
+    """
+    return "error" in stderr.lower() and bool(_DIRECT_INCLUDE_GUARD_RE.search(stderr))
+
+
 def _headers_failing_in_aggregate(
     stderr: str, agg_path: Path, n_headers: int
 ) -> set[int]:
