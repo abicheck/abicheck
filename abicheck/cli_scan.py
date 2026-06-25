@@ -1010,10 +1010,11 @@ def scan_cmd(
         raise click.ClickException(ce.message) from ce
     finally:
         # Remove the inferred cmake build dir(s) now that every build-dir-dependent
-        # phase has run (or the scan aborted). Best-effort: each thunk is internally
-        # guarded, so a removal error never masks the scan's real outcome.
-        for _cleanup in build_dir_cleanups:
-            _cleanup()
+        # phase has run (or the scan aborted). Best-effort (each thunk is suppressed)
+        # so a removal/unlock error never aborts the rest nor masks the real outcome.
+        from .buildsource.build_query import drain_build_dir_cleanups
+
+        drain_build_dir_cleanups(build_dir_cleanups)
 
     outcome = core.outcome
     text = (

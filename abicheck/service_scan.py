@@ -33,7 +33,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from .buildsource.build_query import PRUNED_HEADER_DIR_SEGMENTS
+from .buildsource.build_query import (
+    PRUNED_HEADER_DIR_SEGMENTS,
+    drain_build_dir_cleanups,
+)
 from .errors import ValidationError
 from .header_utils import HEADER_SUFFIXES, iter_directory_headers
 
@@ -769,9 +772,9 @@ def run_scan(req: ScanRequest) -> ScanResult:
         return ScanResult(verdict="EVIDENCE_CONTRACT_ERROR", exit_code=1)
     finally:
         # Remove the inferred cmake build dir(s) once all build-dir-dependent phases
-        # have run (or the scan aborted). Best-effort; thunks are internally guarded.
-        for _cleanup in build_dir_cleanups:
-            _cleanup()
+        # have run (or the scan aborted). Best-effort (each thunk is suppressed) so a
+        # removal/unlock error never aborts the rest nor masks the real outcome.
+        drain_build_dir_cleanups(build_dir_cleanups)
 
     outcome = core.outcome
     return ScanResult(

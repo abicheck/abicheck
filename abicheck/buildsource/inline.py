@@ -659,8 +659,9 @@ def collect_inline_pack(
         if defer_cleanup is not None:
             defer_cleanup.extend(query_build_cleanups)
         else:
-            for _cleanup in query_build_cleanups:
-                _cleanup()
+            from .build_query import drain_build_dir_cleanups
+
+            drain_build_dir_cleanups(query_build_cleanups)
 
     has_build = bool(
         merged.compile_units

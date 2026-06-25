@@ -751,3 +751,20 @@ def test_collect_inline_pack_defers_build_dir_cleanup(tmp_path: Path, monkeypatc
     assert len(defer_on_abort) == 1 and ran["n"] == 2  # deferred, not lost, not run
     defer_on_abort[0]()
     assert ran["n"] == 3  # caller can still drain it
+
+
+def test_drain_build_dir_cleanups_is_best_effort():
+    # A raising cleanup thunk must NOT abort the remaining thunks (which would leak
+    # the other build dirs/locks) and must not propagate out of the drain — the
+    # contract the scan/dump finally blocks rely on (review).
+    from abicheck.buildsource.build_query import drain_build_dir_cleanups
+
+    ran: list[int] = []
+
+    def boom():
+        raise OSError("flock LOCK_UN on a churned fd")
+
+    drain_build_dir_cleanups(
+        [lambda: ran.append(1), boom, lambda: ran.append(3)]
+    )  # must not raise
+    assert ran == [1, 3]  # the thunk after the raising one still ran
