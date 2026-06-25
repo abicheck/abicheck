@@ -160,8 +160,12 @@ jobs:
       - name: Install system deps (Linux)
         if: runner.os == 'Linux'
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y castxml gcc g++ cmake
+          # Don't let a flaky pre-baked third-party apt repo (e.g. the runner's
+          # packages.microsoft.com returning 403/"no longer signed") fail the lane:
+          # tolerate `update` errors — the `install` below still fails loudly if any
+          # of the packages it needs are genuinely unavailable.
+          sudo apt-get update -qq || sudo apt-get update -qq || true
+          sudo apt-get install -y castxml gcc g++ cmake clang
       - name: Install system deps (macOS)
         if: runner.os == 'macOS'
         run: brew install castxml cmake

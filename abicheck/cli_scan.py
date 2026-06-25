@@ -50,6 +50,7 @@ import json
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -419,6 +420,7 @@ def _build_new_snapshot(
     public_headers: list[Path] | None = None,
     public_header_dirs: list[Path] | None = None,
     compile_context: CompileContext | None = None,
+    defer_cleanup: list[Callable[[], None]] | None = None,
 ) -> Any:
     """Dump the candidate's L0-L2 surface and embed L3-L5 inline at *collect_mode*.
 
@@ -462,6 +464,7 @@ def _build_new_snapshot(
             allow_build_query=allow_build_query,
             collect_mode=collect_mode,
             changed_paths=changed_paths,
+            defer_cleanup=defer_cleanup,
         )
     return snap
 
@@ -944,6 +947,12 @@ def scan_cmd(
     prov_headers, prov_dirs = _public_provenance_set(
         list(headers), list(public_header_dirs)
     )
+    # Cleanup thunks for any out-of-tree inferred cmake build dir, owned here so the
+    # dir outlives every scan phase that re-uses a compile unit's `directory` as a
+    # cwd — the S2 preprocessor scan runs `clang -E` there. collect_inline_pack
+    # would otherwise delete it as soon as L4 finished, before that scan ran (and
+    # before any post-snapshot raise). Run in the finally below, on every exit path.
+    build_dir_cleanups: list[Callable[[], None]] = []
     try:
         core = run_scan_core(
             start=start,
@@ -989,6 +998,7 @@ def scan_cmd(
             # pin would break those best-effort paths (Codex review).
             pinned_explicit=_pinned_explicit,
             compile_context=None if compile_context.is_default else compile_context,
+            defer_cleanup=build_dir_cleanups,
         )
     except _BudgetOverflow as bo:
         click.echo(bo.message, err=True)
@@ -998,6 +1008,13 @@ def scan_cmd(
         # violation → a clean CLI error (exit 1), distinct from the verdict codes
         # (2/4) and the budget code (5).
         raise click.ClickException(ce.message) from ce
+    finally:
+        # Remove the inferred cmake build dir(s) now that every build-dir-dependent
+        # phase has run (or the scan aborted). Best-effort (each thunk is suppressed)
+        # so a removal/unlock error never aborts the rest nor masks the real outcome.
+        from .buildsource.build_query import drain_build_dir_cleanups
+
+        drain_build_dir_cleanups(build_dir_cleanups)
 
     outcome = core.outcome
     text = (
@@ -1086,6 +1103,7 @@ def run_scan_core(
     level_explicit: bool = False,
     pinned_explicit: bool = False,
     compile_context: CompileContext | None = None,
+    defer_cleanup: list[Callable[[], None]] | None = None,
 ) -> ScanCoreResult:
     """The shared scan orchestration (classify → always-on tier → level → compare).
 
@@ -1211,6 +1229,7 @@ def run_scan_core(
         public_headers=list(public_headers),
         public_header_dirs=list(public_header_dirs),
         compile_context=compile_context,
+        defer_cleanup=defer_cleanup,
     )
 
     # --- level-vs-evidence: fail-loud on missing input, advise otherwise ------

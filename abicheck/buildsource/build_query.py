@@ -51,6 +51,7 @@ only :func:`run_inferred_build_query` touches the filesystem / subprocess.
 
 from __future__ import annotations
 
+import contextlib
 import functools
 import hashlib
 import os
@@ -59,7 +60,7 @@ import stat as _stat
 import subprocess
 import tempfile
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from pathlib import Path
 
 from .build_evidence import BuildEvidence
@@ -243,6 +244,21 @@ def _release_inferred_build_dir(build_dir: Path, release: Callable[[], None]) ->
     """Remove the inferred cmake build dir, then release its claim."""
     shutil.rmtree(build_dir, ignore_errors=True)
     release()
+
+
+def drain_build_dir_cleanups(cleanups: Iterable[Callable[[], None]]) -> None:
+    """Run every inferred-build-dir cleanup thunk, best-effort.
+
+    Each thunk removes a temp cmake build dir and releases its lock. A thunk *can*
+    still raise (e.g. ``flock(LOCK_UN)`` on a churned fd), so each call is wrapped in
+    ``suppress`` — one failing thunk must not abort the remaining cleanups (which
+    would leak the other dirs/locks) nor, when run from a caller's ``finally``,
+    replace an in-flight exception with a stray ``OSError``. The single drain site
+    shared by ``inline.collect_inline_pack``, ``cli_scan`` and ``service_scan``.
+    """
+    for cleanup in cleanups:
+        with contextlib.suppress(Exception):
+            cleanup()
 
 
 #: Build-system marker files, checked most-specific first. CMake wins over Make

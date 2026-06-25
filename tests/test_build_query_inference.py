@@ -677,3 +677,94 @@ def test_run_bazel_empty_action_graph_is_partial(tmp_path: Path, monkeypatch):
     assert run_inferred_build_query(tmp_path, merged, ext) is None
     assert ext[-1].name == "build_query_auto"
     assert ext[-1].status == "partial"  # no CppCompile actions
+
+
+def test_collect_inline_pack_defers_build_dir_cleanup(tmp_path: Path, monkeypatch):
+    # Fast-lane guard for the cleanup-lifetime contract (the real end-to-end check
+    # lives in tests/test_scan_levels_integration.py): when a caller passes
+    # ``defer_cleanup``, collect_inline_pack must hand the inferred-build-dir cleanup
+    # thunks to that list (for the scan to run after S2) rather than firing them
+    # itself; without it, it cleans up immediately (e.g. ``dump --sources``).
+    from abicheck.buildsource import inline as _inline
+
+    ran = {"n": 0}
+
+    def fake_resolve(
+        build_info,
+        sources,
+        cfg,
+        trusted,
+        merged,
+        extractors,
+        cleanup=None,
+        compile_db_explicit=False,
+    ):
+        if cleanup is not None:
+            cleanup.append(lambda: ran.__setitem__("n", ran["n"] + 1))
+        return None  # no compile DB → minimal downstream work
+
+    monkeypatch.setattr(_inline, "_resolve_compile_db", fake_resolve)
+
+    # Deferred: the thunk lands in the caller's list and is NOT run yet.
+    defer: list = []
+    _inline.collect_inline_pack(
+        sources=tmp_path, build_info=None, layers=("L3",), defer_cleanup=defer
+    )
+    assert len(defer) == 1 and ran["n"] == 0
+    defer[0]()
+    assert ran["n"] == 1  # caller runs it after the scan's later phases
+
+    # Immediate: no defer list → collect_inline_pack runs the cleanup itself.
+    _inline.collect_inline_pack(sources=tmp_path, build_info=None, layers=("L3",))
+    assert ran["n"] == 2
+
+    # Abort path (CodeRabbit): a thunk is registered, then a later collection step
+    # raises. The handoff lives in a finally, so the thunk is still deferred to the
+    # caller (never lost / never leaked) even though collect_inline_pack re-raises.
+    def resolve_returns_db(
+        build_info,
+        sources,
+        cfg,
+        trusted,
+        merged,
+        extractors,
+        cleanup=None,
+        compile_db_explicit=False,
+    ):
+        if cleanup is not None:
+            cleanup.append(lambda: ran.__setitem__("n", ran["n"] + 1))
+        return tmp_path / "compile_commands.json"  # non-None → _run_compile_db runs
+
+    def boom(*a, **k):
+        raise RuntimeError("L3 normalization blew up mid-collection")
+
+    monkeypatch.setattr(_inline, "_resolve_compile_db", resolve_returns_db)
+    monkeypatch.setattr(_inline, "_run_compile_db", boom)
+    defer_on_abort: list = []
+    with pytest.raises(RuntimeError):
+        _inline.collect_inline_pack(
+            sources=tmp_path,
+            build_info=None,
+            layers=("L3",),
+            defer_cleanup=defer_on_abort,
+        )
+    assert len(defer_on_abort) == 1 and ran["n"] == 2  # deferred, not lost, not run
+    defer_on_abort[0]()
+    assert ran["n"] == 3  # caller can still drain it
+
+
+def test_drain_build_dir_cleanups_is_best_effort():
+    # A raising cleanup thunk must NOT abort the remaining thunks (which would leak
+    # the other build dirs/locks) and must not propagate out of the drain — the
+    # contract the scan/dump finally blocks rely on (review).
+    from abicheck.buildsource.build_query import drain_build_dir_cleanups
+
+    ran: list[int] = []
+
+    def boom():
+        raise OSError("flock LOCK_UN on a churned fd")
+
+    drain_build_dir_cleanups(
+        [lambda: ran.append(1), boom, lambda: ran.append(3)]
+    )  # must not raise
+    assert ran == [1, 3]  # the thunk after the raising one still ran
