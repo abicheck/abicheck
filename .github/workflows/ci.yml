@@ -161,7 +161,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y castxml gcc g++ cmake
+          sudo apt-get install -y castxml gcc g++ cmake clang
       - name: Install system deps (macOS)
         if: runner.os == 'macOS'
         run: brew install castxml cmake

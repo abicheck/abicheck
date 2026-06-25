@@ -28,6 +28,7 @@ backward compatibility.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -723,6 +724,10 @@ def run_scan(req: ScanRequest) -> ScanResult:
 
     import time as _time
 
+    # Own the inferred cmake build-dir cleanup so it outlives run_scan_core's S2
+    # preprocessor phase (which runs `clang -E` with a compile unit's `directory`
+    # as cwd); run it in the finally below on every exit path. See cli_scan.run_scan.
+    build_dir_cleanups: list[Callable[[], None]] = []
     try:
         core = run_scan_core(
             start=_time.monotonic(),
@@ -752,6 +757,7 @@ def run_scan(req: ScanRequest) -> ScanResult:
             budget_s=budget_s,
             pinned_explicit=pinned_explicit,
             compile_context=None if req.compile.is_default else req.compile,
+            defer_cleanup=build_dir_cleanups,
         )
     except _BudgetOverflow:
         # The failure-guard contract: overflow is exit 5, never a shrunk scope.
@@ -761,6 +767,11 @@ def run_scan(req: ScanRequest) -> ScanResult:
         # the programmatic API honors the same contract as the CLI (pinned_explicit
         # above), so map the signal to a failed result rather than degrade silently.
         return ScanResult(verdict="EVIDENCE_CONTRACT_ERROR", exit_code=1)
+    finally:
+        # Remove the inferred cmake build dir(s) once all build-dir-dependent phases
+        # have run (or the scan aborted). Best-effort; thunks are internally guarded.
+        for _cleanup in build_dir_cleanups:
+            _cleanup()
 
     outcome = core.outcome
     return ScanResult(

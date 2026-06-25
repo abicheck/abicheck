@@ -677,3 +677,43 @@ def test_run_bazel_empty_action_graph_is_partial(tmp_path: Path, monkeypatch):
     assert run_inferred_build_query(tmp_path, merged, ext) is None
     assert ext[-1].name == "build_query_auto"
     assert ext[-1].status == "partial"  # no CppCompile actions
+
+
+def test_collect_inline_pack_defers_build_dir_cleanup(tmp_path: Path, monkeypatch):
+    # Fast-lane guard for the cleanup-lifetime contract (the real end-to-end check
+    # lives in tests/test_scan_levels_integration.py): when a caller passes
+    # ``defer_cleanup``, collect_inline_pack must hand the inferred-build-dir cleanup
+    # thunks to that list (for the scan to run after S2) rather than firing them
+    # itself; without it, it cleans up immediately (e.g. ``dump --sources``).
+    from abicheck.buildsource import inline as _inline
+
+    ran = {"n": 0}
+
+    def fake_resolve(
+        build_info,
+        sources,
+        cfg,
+        trusted,
+        merged,
+        extractors,
+        cleanup=None,
+        compile_db_explicit=False,
+    ):
+        if cleanup is not None:
+            cleanup.append(lambda: ran.__setitem__("n", ran["n"] + 1))
+        return None  # no compile DB → minimal downstream work
+
+    monkeypatch.setattr(_inline, "_resolve_compile_db", fake_resolve)
+
+    # Deferred: the thunk lands in the caller's list and is NOT run yet.
+    defer: list = []
+    _inline.collect_inline_pack(
+        sources=tmp_path, build_info=None, layers=("L3",), defer_cleanup=defer
+    )
+    assert len(defer) == 1 and ran["n"] == 0
+    defer[0]()
+    assert ran["n"] == 1  # caller runs it after the scan's later phases
+
+    # Immediate: no defer list → collect_inline_pack runs the cleanup itself.
+    _inline.collect_inline_pack(sources=tmp_path, build_info=None, layers=("L3",))
+    assert ran["n"] == 2

@@ -528,6 +528,7 @@ def collect_inline_pack(
     source_abi_cache_dir: Path | None = None,
     exported_symbols: tuple[str, ...] = (),
     changed_paths: tuple[str, ...] = (),
+    defer_cleanup: list[Callable[[], None]] | None = None,
 ) -> BuildSourcePack | None:
     """Collect an in-memory pack from raw source-tree / build-info inputs.
 
@@ -648,11 +649,18 @@ def collect_inline_pack(
         else None
     )
 
-    # L3/L4/L5 are now collected into in-memory evidence; the out-of-tree inferred
-    # cmake build dir (kept alive through L4 replay's clang cwd) can be removed and
-    # its exclusive lock released.
-    for _cleanup in query_build_cleanups:
-        _cleanup()
+    # L3/L4/L5 are now collected into in-memory evidence. The out-of-tree inferred
+    # cmake build dir can normally be removed (and its lock released) here. But a
+    # caller running *later* phases that re-use the compile units' `directory` as a
+    # cwd — the `scan` flow's S2 preprocessor scan runs `clang -E` there *after*
+    # this returns — passes `defer_cleanup` to take ownership and remove the dir
+    # only once the whole scan is done (else `clang -E` hits a deleted cwd). Without
+    # it (e.g. `dump --sources`), remove immediately.
+    if defer_cleanup is not None:
+        defer_cleanup.extend(query_build_cleanups)
+    else:
+        for _cleanup in query_build_cleanups:
+            _cleanup()
 
     has_build = bool(
         merged.compile_units

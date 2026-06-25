@@ -26,6 +26,7 @@ explicit opt-in not implemented here.
 from __future__ import annotations
 
 import datetime as _dt
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -779,6 +780,7 @@ def embed_build_source(
     build_compile_db: str | None = None,
     changed_paths: tuple[str, ...] = (),
     extractor: str = "auto",
+    defer_cleanup: list[Callable[[], None]] | None = None,
 ) -> None:
     """Embed build-info / source facts inline in *snap* (single-artifact UX).
 
@@ -878,6 +880,7 @@ def embed_build_source(
             layers=layers,
             exported_symbols=exported,
             changed_paths=changed_paths,
+            defer_cleanup=defer_cleanup,
         )
         # P09: don't fail *silently* when a source/build tree yields no compile DB.
         # Autotools `configure` (and a bare checkout) emit no compile_commands.json,
