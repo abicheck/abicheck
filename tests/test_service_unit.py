@@ -1576,3 +1576,51 @@ class TestCliNativeBinaryHeaderWiring:
         with patch("abicheck.service._dump_macho", side_effect=SnapshotError("nope")):
             with pytest.raises(click.ClickException, match="nope"):
                 _dump_native_binary(p, "macho", [], [], "1.0", "c++")
+
+
+def test_run_scan_runs_deferred_build_dir_cleanup(monkeypatch):
+    # Fast-lane guard for the scan orchestrator's ownership of the inferred
+    # build-dir cleanup (the real end-to-end check is the integration suite):
+    # service_scan.run_scan must run the deferred cleanup thunks in its finally —
+    # both on success and when run_scan_core raises — so the temp cmake build dir
+    # never outlives the scan. Mirrors the same contract in cli_scan.run_scan.
+    from types import SimpleNamespace
+
+    from abicheck import service_scan as _ss
+
+    ran = {"n": 0}
+
+    def fake_core(**kw):
+        # The orchestrator hands us the cleanup list; register a sentinel thunk the
+        # way collect_inline_pack would for an inferred cmake build dir.
+        kw["defer_cleanup"].append(lambda: ran.__setitem__("n", ran["n"] + 1))
+        outcome = SimpleNamespace(
+            verdict="COMPATIBLE",
+            exit_code=0,
+            coverage=[],
+            crosscheck={},
+            to_dict=lambda: {},
+        )
+        return SimpleNamespace(outcome=outcome, findings=[])
+
+    monkeypatch.setattr(_ss, "estimate_scan", lambda req: [])
+    monkeypatch.setattr("abicheck.cli_scan.run_scan_core", fake_core)
+
+    req = _ss.ScanRequest(binaries=[Path("libfoo.so")], depth="binary")
+    res = _ss.run_scan(req)
+    assert res.verdict == "COMPATIBLE"
+    assert ran["n"] == 1  # the finally ran the deferred cleanup on success
+
+    # And it still runs when the core raises a budget overflow mid-scan.
+    from abicheck.cli_scan import _BudgetOverflow
+
+    ran["n"] = 0
+
+    def raising_core(**kw):
+        kw["defer_cleanup"].append(lambda: ran.__setitem__("n", ran["n"] + 1))
+        raise _BudgetOverflow("over budget")
+
+    monkeypatch.setattr("abicheck.cli_scan.run_scan_core", raising_core)
+    res = _ss.run_scan(req)
+    assert res.exit_code == 5  # budget overflow surfaced
+    assert ran["n"] == 1  # finally still ran the cleanup on the raise path

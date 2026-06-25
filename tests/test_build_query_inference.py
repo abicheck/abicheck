@@ -717,3 +717,37 @@ def test_collect_inline_pack_defers_build_dir_cleanup(tmp_path: Path, monkeypatc
     # Immediate: no defer list → collect_inline_pack runs the cleanup itself.
     _inline.collect_inline_pack(sources=tmp_path, build_info=None, layers=("L3",))
     assert ran["n"] == 2
+
+    # Abort path (CodeRabbit): a thunk is registered, then a later collection step
+    # raises. The handoff lives in a finally, so the thunk is still deferred to the
+    # caller (never lost / never leaked) even though collect_inline_pack re-raises.
+    def resolve_returns_db(
+        build_info,
+        sources,
+        cfg,
+        trusted,
+        merged,
+        extractors,
+        cleanup=None,
+        compile_db_explicit=False,
+    ):
+        if cleanup is not None:
+            cleanup.append(lambda: ran.__setitem__("n", ran["n"] + 1))
+        return tmp_path / "compile_commands.json"  # non-None → _run_compile_db runs
+
+    def boom(*a, **k):
+        raise RuntimeError("L3 normalization blew up mid-collection")
+
+    monkeypatch.setattr(_inline, "_resolve_compile_db", resolve_returns_db)
+    monkeypatch.setattr(_inline, "_run_compile_db", boom)
+    defer_on_abort: list = []
+    with pytest.raises(RuntimeError):
+        _inline.collect_inline_pack(
+            sources=tmp_path,
+            build_info=None,
+            layers=("L3",),
+            defer_cleanup=defer_on_abort,
+        )
+    assert len(defer_on_abort) == 1 and ran["n"] == 2  # deferred, not lost, not run
+    defer_on_abort[0]()
+    assert ran["n"] == 3  # caller can still drain it

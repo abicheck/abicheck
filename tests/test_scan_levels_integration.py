@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import sys
 
 import pytest
 from click.testing import CliRunner
@@ -46,8 +47,17 @@ from abicheck.cli import main
 _REQUIRED_TOOLS = ("clang", "clang++", "cmake", "gcc", "g++")
 _MISSING = [t for t in _REQUIRED_TOOLS if shutil.which(t) is None]
 
+# Linux/ELF only: the coverage matrix asserted here (L2 header AST, symbol↔header
+# scoping) is for an ELF shared object. On macOS `g++ -shared` emits a Mach-O
+# whose C++ mangling/scoping differs (L2 falls back to export-table mode), so the
+# per-level assertions don't hold — the build-dir lifetime mechanism this guards
+# is platform-independent, but the ELF scenario is where it's exercised cleanly.
 pytestmark = [
     pytest.mark.integration,
+    pytest.mark.skipif(
+        sys.platform != "linux",
+        reason="scan-levels coverage matrix is asserted for Linux/ELF",
+    ),
     pytest.mark.skipif(
         bool(_MISSING),
         reason=f"scan-levels use case needs {', '.join(_REQUIRED_TOOLS)}; "
@@ -56,68 +66,9 @@ pytestmark = [
 ]
 
 
-_FOO_H = """\
-#ifndef FOO_H
-#define FOO_H
-namespace foo {
-class Widget {
-public:
-  Widget();
-  int value() const;
-  void set_value(int v);
-private:
-  int v_;
-};
-int add(int a, int b);
-}
-#endif
-"""
-
-_FOO_CPP = """\
-#include "foo.h"
-namespace foo {
-Widget::Widget() : v_(0) {}
-int Widget::value() const { return v_; }
-void Widget::set_value(int v) { v_ = v; }
-int add(int a, int b) { return a + b; }
-}
-"""
-
-_CMAKELISTS = """\
-cmake_minimum_required(VERSION 3.10)
-project(foo CXX)
-add_library(foo SHARED foo.cpp)
-target_include_directories(foo PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
-set_target_properties(foo PROPERTIES VERSION 1.0.0 SOVERSION 1)
-"""
-
-
-@pytest.fixture(scope="module")
-def project(tmp_path_factory: pytest.TempPathFactory):
-    """A real CMake C++ library: source tree + a compiled .so (built once)."""
-    import subprocess
-
-    root = tmp_path_factory.mktemp("scan_levels_proj")
-    (root / "include").mkdir()
-    (root / "include" / "foo.h").write_text(_FOO_H)
-    (root / "foo.cpp").write_text(_FOO_CPP)
-    (root / "CMakeLists.txt").write_text(_CMAKELISTS)
-    so = root / "libfoo.so.1.0.0"
-    subprocess.run(
-        [
-            "g++",
-            "-shared",
-            "-fPIC",
-            f"-I{root / 'include'}",
-            "-o",
-            str(so),
-            str(root / "foo.cpp"),
-        ],
-        check=True,
-        capture_output=True,
-    )
-    (root / "libfoo.so").symlink_to(so.name)
-    return root
+# The real CMake C++ project fixture (`cmake_cxx_project`) lives in conftest.py per
+# the repo's "fixtures live in conftest.py" convention, so other source-scan
+# integration tests can reuse it.
 
 
 def _scan(project, depth: str) -> dict:
@@ -153,8 +104,8 @@ def _coverage(report: dict) -> dict[str, str]:
     return {row["layer"]: row["status"] for row in report.get("coverage", [])}
 
 
-def test_binary_depth_collects_only_l0_l1(project):
-    cov = _coverage(_scan(project, "binary"))
+def test_binary_depth_collects_only_l0_l1(cmake_cxx_project):
+    cov = _coverage(_scan(cmake_cxx_project, "binary"))
     assert cov["L0_binary"] == "present"
     # No source layers collected at binary depth.
     assert cov["L2_header"] == "skipped"
@@ -162,17 +113,17 @@ def test_binary_depth_collects_only_l0_l1(project):
     assert cov["L4_source_abi"] == "not_collected"
 
 
-def test_headers_depth_adds_l2_ast(project):
-    cov = _coverage(_scan(project, "headers"))
+def test_headers_depth_adds_l2_ast(cmake_cxx_project):
+    cov = _coverage(_scan(cmake_cxx_project, "headers"))
     assert cov["L0_binary"] == "present"
     assert cov["L2_header"] == "present"  # clang AST frontend parsed the header
     assert cov["L3_build"] == "not_collected"
 
 
-def test_build_depth_runs_zero_config_cmake_and_preprocessor(project):
+def test_build_depth_runs_zero_config_cmake_and_preprocessor(cmake_cxx_project):
     # --depth build → zero-config cmake inference produces L3 (no compile DB in the
     # tree), and the S2 preprocessor scan must actually RUN over that build context.
-    cov = _coverage(_scan(project, "build"))
+    cov = _coverage(_scan(cmake_cxx_project, "build"))
     assert cov["L2_header"] == "present"
     assert cov["L3_build"] == "present", "zero-config cmake inference should yield L3"
     # Regression guard (the lifetime bug): the inferred cmake build dir must still
@@ -185,8 +136,8 @@ def test_build_depth_runs_zero_config_cmake_and_preprocessor(project):
 
 
 @pytest.mark.parametrize("depth", ["source", "full"])
-def test_source_depths_add_l4_replay_and_l5_graph(project, depth):
-    cov = _coverage(_scan(project, depth))
+def test_source_depths_add_l4_replay_and_l5_graph(cmake_cxx_project, depth):
+    cov = _coverage(_scan(cmake_cxx_project, depth))
     assert cov["L3_build"] == "present"
     assert cov["preprocessor_scan"] == "present"
     # L4 replay runs (parsed, even if symbol matching is partial) and L5 folds.
@@ -194,11 +145,11 @@ def test_source_depths_add_l4_replay_and_l5_graph(project, depth):
     assert cov["L5_source_graph"] == "present"
 
 
-def test_depth_progression_is_monotone(project):
+def test_depth_progression_is_monotone(cmake_cxx_project):
     # Each deeper level collects a superset of the shallower level's source layers:
     # a use-case-level invariant that catches a level silently regressing.
     def present_source_layers(depth: str) -> set[str]:
-        cov = _coverage(_scan(project, depth))
+        cov = _coverage(_scan(cmake_cxx_project, depth))
         return {
             name
             for name in ("L2_header", "L3_build", "L4_source_abi", "L5_source_graph")
@@ -215,7 +166,7 @@ def test_depth_progression_is_monotone(project):
     assert {"L4_source_abi", "L5_source_graph"} <= source
 
 
-def test_no_inferred_build_dir_leak_after_scan(project):
+def test_no_inferred_build_dir_leak_after_scan(cmake_cxx_project):
     # The out-of-tree inferred cmake build dir must be removed once the scan ends
     # (it is owned by the scan orchestrator's finally) — no per-run temp-dir leak.
     import tempfile
@@ -226,7 +177,7 @@ def test_no_inferred_build_dir_leak_after_scan(project):
     except AttributeError:
         pytest.skip("POSIX-only leak check")
     root = Path(tempfile.gettempdir()) / f"abicheck-{uid}"
-    _scan(project, "build")
+    _scan(cmake_cxx_project, "build")
     leaked = list(root.glob("cmake-*/")) if root.is_dir() else []
     # Only ever-present `.lock` marker files may remain; never a build *directory*.
     assert not leaked, f"inferred cmake build dir leaked after scan: {leaked}"

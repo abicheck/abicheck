@@ -566,101 +566,101 @@ def collect_inline_pack(
     # evidence. Each thunk removes its dir and releases the dir's exclusive lock.
     query_build_cleanups: list[Callable[[], None]] = []
 
-    if base_build is not None:
-        merged.merge(base_build)
+    try:
+        if base_build is not None:
+            merged.merge(base_build)
 
-    if merged.compile_units:
-        compile_db = None  # already seeded from a build-info pack
-    elif _maybe_collect_bazel_build_info(build_info, merged, extractors):
-        # A pre-captured Bazel aquery/cquery jsonproto produces BuildEvidence
-        # directly (no compile_commands.json to load) — ADR-037 D5 #5 sniffing.
-        compile_db = None
-    else:
-        compile_db = _resolve_compile_db(
-            build_info,
-            sources,
-            cfg,
-            build_config_trusted_for_query,
-            merged,
-            extractors,
-            cleanup=query_build_cleanups,
-            compile_db_explicit=compile_db_explicit,
-        )
-    if compile_db is not None:
-        _run_compile_db(compile_db, cfg.system, merged, extractors, build_cache_dir)
+        if merged.compile_units:
+            compile_db = None  # already seeded from a build-info pack
+        elif _maybe_collect_bazel_build_info(build_info, merged, extractors):
+            # A pre-captured Bazel aquery/cquery jsonproto produces BuildEvidence
+            # directly (no compile_commands.json to load) — ADR-037 D5 #5 sniffing.
+            compile_db = None
+        else:
+            compile_db = _resolve_compile_db(
+                build_info,
+                sources,
+                cfg,
+                build_config_trusted_for_query,
+                merged,
+                extractors,
+                cleanup=query_build_cleanups,
+                compile_db_explicit=compile_db_explicit,
+            )
+        if compile_db is not None:
+            _run_compile_db(compile_db, cfg.system, merged, extractors, build_cache_dir)
 
-    # A4: with both a --sources tree and L3 compile units, flag when the build
-    # metadata describes a different checkout than the source tree (decoupled
-    # inputs assembled from different trees). Collection-time diagnostic, not a
-    # ChangeKind — collection has no findings list (cf. A2).
-    _check_build_info_source_mismatch(merged, sources, extractors)
+        # A4: with both a --sources tree and L3 compile units, flag when the build
+        # metadata describes a different checkout than the source tree (decoupled
+        # inputs assembled from different trees). Collection-time diagnostic, not a
+        # ChangeKind — collection has no findings list (cf. A2).
+        _check_build_info_source_mismatch(merged, sources, extractors)
 
-    surface = None
-    if "L4" in layers:
-        # A 'changed' scope with no PR diff would select zero TUs and embed an
-        # empty L4 surface (Codex review), so fall back to a non-empty scope that
-        # still enables the source-only checks. But when the caller *did* thread an
-        # explicit changed-path set (PR replay, ADR-035 D7 POI focusing), honour
-        # 'changed' so the scan narrows to the affected TUs.
-        #
-        # The unseeded fallback is 'headers-only' (the public-API-covering TU
-        # subset), NOT 'target' (the whole target): an unseeded s5/pr run otherwise
-        # silently pays full-target (== s6) replay cost — the ADR-035 P3 cliff
-        # (validation/uxl-scan-levels-timing-2026-06.md). 'headers-only' keeps a
-        # non-empty public surface for the cross-checks at a fraction of the cost;
-        # the caller (cli_scan) emits the advisory naming --since to focus further.
-        replay_scope = (
-            "headers-only" if (scope == "changed" and not changed_paths) else scope
+        surface = None
+        if "L4" in layers:
+            # A 'changed' scope with no PR diff would select zero TUs and embed an
+            # empty L4 surface (Codex review), so fall back to a non-empty scope that
+            # still enables the source-only checks. But when the caller *did* thread an
+            # explicit changed-path set (PR replay, ADR-035 D7 POI focusing), honour
+            # 'changed' so the scan narrows to the affected TUs.
+            #
+            # The unseeded fallback is 'headers-only' (the public-API-covering TU
+            # subset), NOT 'target' (the whole target): an unseeded s5/pr run otherwise
+            # silently pays full-target (== s6) replay cost — the ADR-035 P3 cliff
+            # (validation/uxl-scan-levels-timing-2026-06.md). 'headers-only' keeps a
+            # non-empty public surface for the cross-checks at a fraction of the cost;
+            # the caller (cli_scan) emits the advisory naming --since to focus further.
+            replay_scope = (
+                "headers-only" if (scope == "changed" and not changed_paths) else scope
+            )
+            # L4 per-TU cache dir: explicit arg wins, else the ABICHECK_L4_CACHE_DIR
+            # env (the CI-friendly knob — point it at a restored cache directory).
+            l4_cache_dir = source_abi_cache_dir
+            if l4_cache_dir is None:
+                env_dir = os.environ.get("ABICHECK_L4_CACHE_DIR")
+                l4_cache_dir = Path(env_dir) if env_dir else None
+            surface = _run_inline_source_abi(
+                sources,
+                merged,
+                extractors,
+                extractor=extractor,
+                scope=replay_scope,
+                clang_bin=clang_bin,
+                exported_symbols=exported_symbols,
+                source_abi_cache_dir=l4_cache_dir,
+                changed_paths=changed_paths,
+            )
+        # Fold a call graph (DECL_CALLS_DECL edges) into the L5 graph whenever L4 also
+        # ran — i.e. a semantic source mode (source-*/graph-summary/graph-full), not
+        # the structural-only graph-build (L3+L5, no L4). This is what makes the
+        # decl-dependency cross-checks (public_to_internal_dependency, ADR-035 D4)
+        # reachable from `scan --source-method s5`/`--depth graph`; best-effort and
+        # gated on clang++ availability (ADR-035 D4 reviewer wiring request).
+        with_call_graph = "L5" in layers and "L4" in layers
+        graph = (
+            _build_inline_graph(
+                merged,
+                surface,
+                with_call_graph=with_call_graph,
+                clang_bin=clang_bin,
+                extractors=extractors,
+                changed_paths=changed_paths,
+            )
+            if "L5" in layers
+            else None
         )
-        # L4 per-TU cache dir: explicit arg wins, else the ABICHECK_L4_CACHE_DIR
-        # env (the CI-friendly knob — point it at a restored cache directory).
-        l4_cache_dir = source_abi_cache_dir
-        if l4_cache_dir is None:
-            env_dir = os.environ.get("ABICHECK_L4_CACHE_DIR")
-            l4_cache_dir = Path(env_dir) if env_dir else None
-        surface = _run_inline_source_abi(
-            sources,
-            merged,
-            extractors,
-            extractor=extractor,
-            scope=replay_scope,
-            clang_bin=clang_bin,
-            exported_symbols=exported_symbols,
-            source_abi_cache_dir=l4_cache_dir,
-            changed_paths=changed_paths,
-        )
-    # Fold a call graph (DECL_CALLS_DECL edges) into the L5 graph whenever L4 also
-    # ran — i.e. a semantic source mode (source-*/graph-summary/graph-full), not
-    # the structural-only graph-build (L3+L5, no L4). This is what makes the
-    # decl-dependency cross-checks (public_to_internal_dependency, ADR-035 D4)
-    # reachable from `scan --source-method s5`/`--depth graph`; best-effort and
-    # gated on clang++ availability (ADR-035 D4 reviewer wiring request).
-    with_call_graph = "L5" in layers and "L4" in layers
-    graph = (
-        _build_inline_graph(
-            merged,
-            surface,
-            with_call_graph=with_call_graph,
-            clang_bin=clang_bin,
-            extractors=extractors,
-            changed_paths=changed_paths,
-        )
-        if "L5" in layers
-        else None
-    )
 
-    # L3/L4/L5 are now collected into in-memory evidence. The out-of-tree inferred
-    # cmake build dir can normally be removed (and its lock released) here. But a
-    # caller running *later* phases that re-use the compile units' `directory` as a
-    # cwd — the `scan` flow's S2 preprocessor scan runs `clang -E` there *after*
-    # this returns — passes `defer_cleanup` to take ownership and remove the dir
-    # only once the whole scan is done (else `clang -E` hits a deleted cwd). Without
-    # it (e.g. `dump --sources`), remove immediately.
-    if defer_cleanup is not None:
-        defer_cleanup.extend(query_build_cleanups)
-    else:
-        for _cleanup in query_build_cleanups:
-            _cleanup()
+    # Always hand off (or drain) the inferred-build-dir cleanup thunks — even if
+    # _resolve_compile_db / _run_compile_db / L4 replay / L5 fold raised — so the
+    # build dir and its lock never leak. With `defer_cleanup`, the caller's finally
+    # owns them (it runs after the scan's later phases, e.g. S2 `clang -E`); without
+    # it (e.g. `dump --sources`), drain immediately (CodeRabbit).
+    finally:
+        if defer_cleanup is not None:
+            defer_cleanup.extend(query_build_cleanups)
+        else:
+            for _cleanup in query_build_cleanups:
+                _cleanup()
 
     has_build = bool(
         merged.compile_units
