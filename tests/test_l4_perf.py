@@ -143,6 +143,16 @@ def test_cgroup_rel_paths_missing_file(monkeypatch, tmp_path: Path) -> None:
     assert sr._cgroup_rel_paths() == (None, None)
 
 
+def test_cgroup_rel_paths_non_ascii_does_not_raise(monkeypatch, tmp_path: Path) -> None:
+    # A non-ASCII systemd slice / container name must not raise UnicodeDecodeError
+    # mid-iteration and abort the L4 run (best-effort probe). CodeRabbit #458.
+    proc = tmp_path / "cgroup"
+    proc.write_bytes("0::/slice-café/le-π\n".encode())  # non-ASCII bytes
+    monkeypatch.setattr(sr, "_PROC_SELF_CGROUP", str(proc))
+    v2, v1 = sr._cgroup_rel_paths()  # must not raise
+    assert v1 is None and v2 is not None and v2.startswith("/slice-")
+
+
 def test_cgroup_chain_walks_leaf_to_root(tmp_path: Path) -> None:
     chain = sr._cgroup_chain(str(tmp_path), "/a/b")
     assert chain == [tmp_path / "a" / "b", tmp_path / "a", tmp_path]

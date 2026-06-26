@@ -994,7 +994,11 @@ def _cgroup_rel_paths() -> tuple[str | None, str | None]:
     """
     v2 = v1 = None
     try:
-        with open(_PROC_SELF_CGROUP, encoding="ascii") as fh:
+        # ``errors="replace"`` (and the ValueError guard) keeps a non-ASCII
+        # systemd slice / container name in the cgroup path from raising
+        # UnicodeDecodeError mid-iteration and aborting the L4 run — this probe is
+        # best-effort and must degrade to ``None`` (CodeRabbit review on #458).
+        with open(_PROC_SELF_CGROUP, encoding="ascii", errors="replace") as fh:
             for line in fh:
                 parts = line.rstrip("\n").split(":", 2)
                 if len(parts) != 3:
@@ -1004,7 +1008,7 @@ def _cgroup_rel_paths() -> tuple[str | None, str | None]:
                     v2 = path
                 elif "memory" in controllers.split(","):
                     v1 = path
-    except OSError:
+    except (OSError, ValueError):
         pass
     return v2, v1
 
@@ -1094,6 +1098,11 @@ def _l4_available_mem_gib() -> float | None:
 
 
 def _l4_job_mem_budget_gib() -> float:
+    """Per-worker RAM budget (GiB) for the L4 memory cap.
+
+    ``ABICHECK_L4_JOB_MEM_GIB`` overrides the :data:`_L4_JOB_MEM_BUDGET_GIB`
+    default (floored at 0.25 GiB); an unparsable value falls back to the default.
+    """
     try:
         return max(
             0.25,
