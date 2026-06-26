@@ -19,6 +19,8 @@ type from a missing umbrella/std prelude. Pure string-only (no compiler)."""
 
 from __future__ import annotations
 
+import pytest
+
 from abicheck.dumper_clang_errors import diagnose_header_compile_failure
 
 
@@ -107,15 +109,15 @@ def test_all_caps_prose_only_yields_no_macro_hint() -> None:
     assert diagnose_header_compile_failure(stderr) is None
 
 
-def test_leading_underscore_config_macro() -> None:
+@pytest.mark.parametrize("macro", ["_GNU_SOURCE", "__STDC_LIMIT_MACROS"])
+def test_leading_underscore_config_macro(macro: str) -> None:
     # Config macros that start with an underscore (_GNU_SOURCE,
     # __STDC_LIMIT_MACROS) must still be recognized — `\b[A-Z]` would miss them.
-    for macro in ("_GNU_SOURCE", "__STDC_LIMIT_MACROS"):
-        stderr = f"h.h:9:2: error: #error {macro} must be defined first"
-        hint = diagnose_header_compile_failure(stderr)
-        assert hint is not None
-        assert macro in hint
-        assert f"-D{macro}" in hint
+    stderr = f"h.h:9:2: error: #error {macro} must be defined first"
+    hint = diagnose_header_compile_failure(stderr)
+    assert hint is not None
+    assert macro in hint
+    assert f"-D{macro}" in hint
 
 
 def test_macro_takes_precedence_over_missing_header() -> None:
