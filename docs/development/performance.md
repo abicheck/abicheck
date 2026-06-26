@@ -343,6 +343,20 @@ Knobs and the reasoning behind them (`abicheck/buildsource/source_replay.py`):
   with `python eval/scaling.py --jobs 1,2,4 --executor process` vs `thread`. The
   driver falls back to serial if a process pool can't start (sandbox, spawn
   import error), so it never aborts L4.
+- **Concurrent AST memory: clang's output is spilled to a temp file, not captured.**
+  A template-heavy TU's `clang -ast-dump=json` output can be multiple GiB.
+  Capturing it (`capture_output=True`) holds the whole AST *string* in the heap from
+  the moment clang finishes — and because the C `json` parse holds the GIL, the
+  default **thread** pool serializes parsing, so all *N* workers sit holding their
+  giant AST strings (≈ N × text) while queued behind the GIL. Spilling clang's
+  stdout to a temp file keeps those payloads **on disk** until each worker's turn to
+  parse, so the heap holds roughly one payload at a time instead of N. `json.load`
+  still reads the file back to parse, so a *single* TU's parse peak is unchanged
+  (≈ serialized text + tree) — this is a concurrency win, not a per-TU one — and it
+  also drops the `text=True` decode copy (bytes parse) and frees the tree before the
+  macro pass. The per-TU tree itself (~2–5× the AST text) is irreducible without a
+  streaming JSON parser (a dependency the project avoids); for a template-heavy tree
+  on a constrained host, a **seeded/scoped** scan is still the structural win.
 - **`ABICHECK_L4_CACHE_DIR`** — persists the per-TU cache (`SourceAbiCache`,
   content-addressed + per-included-file dependency-hash invalidation) across
   `dump --sources` runs. Previously the inline path passed **no** cache, so every
