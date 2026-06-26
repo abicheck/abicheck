@@ -273,28 +273,6 @@ def test_l4_executor_env(monkeypatch, value: str, expected: bool) -> None:
     assert sr._l4_use_process_pool() is expected
 
 
-# ── process-pool worker recycling (memory release between TUs) ─────────────────
-def test_l4_recycle_workers_false_for_threads(monkeypatch) -> None:
-    from concurrent.futures import ThreadPoolExecutor
-
-    monkeypatch.setattr(sr.sys, "version_info", (3, 11, 0))
-    assert sr._l4_recycle_workers(ThreadPoolExecutor) is False
-
-
-def test_l4_recycle_workers_true_for_process_on_311(monkeypatch) -> None:
-    from concurrent.futures import ProcessPoolExecutor
-
-    monkeypatch.setattr(sr.sys, "version_info", (3, 11, 0))
-    assert sr._l4_recycle_workers(ProcessPoolExecutor) is True
-
-
-def test_l4_recycle_workers_false_pre_311(monkeypatch) -> None:
-    from concurrent.futures import ProcessPoolExecutor
-
-    monkeypatch.setattr(sr.sys, "version_info", (3, 10, 12))
-    assert sr._l4_recycle_workers(ProcessPoolExecutor) is False
-
-
 # ── picklable extract worker (#1: process-pool requirement) ───────────────────
 class _FakeExtractor:
     """Minimal SourceAbiExtractor-shaped stub; picklable (module-level class)."""

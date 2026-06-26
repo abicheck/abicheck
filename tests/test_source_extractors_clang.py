@@ -20,6 +20,7 @@ the fast lane; the end-to-end clang run is marked ``integration``.
 
 from __future__ import annotations
 
+import os
 import textwrap
 from pathlib import Path
 
@@ -1526,6 +1527,25 @@ def test_extract_invalid_json_raises(monkeypatch) -> None:  # type: ignore[no-un
     extractor = _patch_run(monkeypatch, lambda cmd, **kw: _emit_ast(kw, "{not json"))
     with pytest.raises(SourceExtractionError, match="not valid JSON"):
         extractor.extract(_cu(), public_header_roots=["include/foo.h"])
+
+
+def test_run_ast_to_file_unlinks_temp_on_unexpected_error(monkeypatch, tmp_path) -> None:  # type: ignore[no-untyped-def]
+    # An unexpected error mid-run must not leak the AST spill temp file (the
+    # except-BaseException cleanup path).
+    from abicheck.buildsource.source_extractors import clang as clang_mod
+
+    spill = tmp_path / "ast.json"
+    fd = os.open(str(spill), os.O_RDWR | os.O_CREAT)
+    monkeypatch.setattr(clang_mod.tempfile, "mkstemp", lambda **kw: (fd, str(spill)))
+
+    def _boom(cmd, **kw):  # type: ignore[no-untyped-def]
+        raise OSError("disk full")
+
+    monkeypatch.setattr(clang_mod.subprocess, "run", _boom)
+    extractor = ClangSourceExtractor()
+    with pytest.raises(OSError, match="disk full"):
+        extractor._run_ast_to_file(["clang"], "", "x.cpp")
+    assert not spill.exists()  # cleaned up on error
 
 
 def test_build_clang_macro_command_gnu_and_msvc() -> None:

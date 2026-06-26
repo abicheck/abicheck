@@ -1322,10 +1322,11 @@ class ClangSourceExtractor:
             clang_bin=self.clang_bin,
             compiler_binary=self.compiler_binary,
         )
-        # Spill the (potentially multi-GiB) JSON AST to a temp file and parse from
-        # there instead of capturing it into a Python str: capture_output would keep
-        # the whole AST string resident *alongside* the tree json builds from it,
-        # ~doubling the per-TU peak that OOM-killed the template-heavy UXL replays.
+        # Spill the (potentially multi-GiB) JSON AST to a temp file rather than
+        # capturing it into a Python str. json.load still reads it back to parse, so
+        # one TU's parse peak is unchanged — the win is that N concurrent workers
+        # keep their AST payloads on disk (not heap) until each parses, so the
+        # GIL-serialized thread pool stops stacking N giant strings (the UXL OOM).
         ast_path, ast_stderr, ast_rc = self._run_ast_to_file(
             ast_cmd, directory, compile_unit.source
         )
@@ -1402,12 +1403,16 @@ class ClangSourceExtractor:
         """Run clang with its JSON AST streamed to a temp file; return its path.
 
         Returns ``(ast_file_path, stderr_text, returncode)``. The caller owns the
-        file and must delete it. Unlike :meth:`_run`, the (large) stdout never lives
-        in a Python ``str`` — clang writes straight to disk and the caller
-        ``json.load``s it, so the per-TU memory peak is the parsed tree alone rather
-        than tree-plus-source-text (the L4 OOM driver). ``stderr`` stays buffered
-        (it is small). The temp file is removed on timeout/failure here; on success
-        the caller's ``finally`` removes it.
+        file and must delete it. Unlike :meth:`_run` (``capture_output``), clang's
+        large stdout is written **to disk**, not captured into a Python ``str``.
+        ``json.load`` still reads the file back to parse it, so a *single* TU's
+        parse peak is unchanged (~serialized bytes + tree); the wins are across
+        **concurrent** workers: payloads sit on disk — not the heap — until each
+        worker's turn, so the default thread pool (whose C ``json`` parse serializes
+        on the GIL) no longer stacks N giant AST strings in one address space the way
+        captured stdout did. It also drops the ``text=True`` decode copy (bytes
+        parse). ``stderr`` stays buffered (it is small). The temp file is removed on
+        timeout/failure here; on success the caller's ``finally`` removes it.
         """
         cmd = [unredact_home(tok) for tok in cmd]
         fd, name = tempfile.mkstemp(prefix="abicheck-l4-ast-", suffix=".json")
