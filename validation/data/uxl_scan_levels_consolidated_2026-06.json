@@ -1,0 +1,310 @@
+{
+  "schema": "uxl_scan_levels.consolidated.v1",
+  "abicheck_version": "abicheck 0.4.0 (abicheck/abicheck)",
+  "host": {
+    "note": "15.1 GiB RAM, clang-only host (no castxml); ABICHECK_L4_JOBS=8"
+  },
+  "subjects": [
+    {
+      "project": "oneTBB",
+      "lang": "c++",
+      "soname": "libtbb.so.12",
+      "old": "v2021.12.0",
+      "new": "v2021.13.0",
+      "tier": "full",
+      "runs": [
+        {
+          "level": "s0",
+          "exit_code": 0,
+          "elapsed_s": 5.5,
+          "verdict": "COMPATIBLE_WITH_RISK",
+          "layers": {
+            "L3_build": "not_collected",
+            "L4_source_abi": "not_collected",
+            "L5_source_graph": "not_collected",
+            "preprocessor_scan": "not_collected"
+          }
+        },
+        {
+          "level": "s1",
+          "exit_code": 0,
+          "elapsed_s": 28.8,
+          "verdict": "COMPATIBLE_WITH_RISK",
+          "layers": {
+            "L3_build": "present",
+            "L4_source_abi": "not_collected",
+            "L5_source_graph": "not_collected",
+            "preprocessor_scan": "partial"
+          }
+        },
+        {
+          "level": "s3",
+          "exit_code": 0,
+          "elapsed_s": 5.6,
+          "verdict": "COMPATIBLE_WITH_RISK",
+          "layers": {
+            "L3_build": "not_collected",
+            "L4_source_abi": "not_collected",
+            "L5_source_graph": "not_collected",
+            "preprocessor_scan": "not_collected"
+          }
+        },
+        {
+          "level": "s4",
+          "exit_code": 0,
+          "elapsed_s": 28.5,
+          "verdict": "COMPATIBLE_WITH_RISK",
+          "layers": {
+            "L3_build": "present",
+            "L4_source_abi": "not_collected",
+            "L5_source_graph": "present",
+            "preprocessor_scan": "partial"
+          }
+        },
+        {
+          "level": "s5",
+          "exit_code": -9,
+          "elapsed_s": 339.6,
+          "verdict": "?",
+          "layers": {}
+        },
+        {
+          "level": "s6",
+          "exit_code": -9,
+          "elapsed_s": 503.1,
+          "verdict": "?",
+          "layers": {}
+        }
+      ]
+    },
+    {
+      "project": "UMF",
+      "lang": "c",
+      "soname": "libumf.so.0",
+      "old": "v0.10.0",
+      "new": "v0.11.0",
+      "tier": "full",
+      "runs": [
+        {
+          "level": "s0",
+          "exit_code": 4,
+          "elapsed_s": 17.9,
+          "verdict": "BREAKING",
+          "layers": {
+            "L3_build": "not_collected",
+            "L4_source_abi": "not_collected",
+            "L5_source_graph": "not_collected",
+            "preprocessor_scan": "not_collected"
+          }
+        },
+        {
+          "level": "s1",
+          "exit_code": 4,
+          "elapsed_s": 20.5,
+          "verdict": "BREAKING",
+          "layers": {
+            "L3_build": "present",
+            "L4_source_abi": "not_collected",
+            "L5_source_graph": "not_collected",
+            "preprocessor_scan": "present"
+          }
+        },
+        {
+          "level": "s3",
+          "exit_code": 4,
+          "elapsed_s": 18.2,
+          "verdict": "BREAKING",
+          "layers": {
+            "L3_build": "not_collected",
+            "L4_source_abi": "not_collected",
+            "L5_source_graph": "not_collected",
+            "preprocessor_scan": "not_collected"
+          }
+        },
+        {
+          "level": "s4",
+          "exit_code": 4,
+          "elapsed_s": 20.4,
+          "verdict": "BREAKING",
+          "layers": {
+            "L3_build": "present",
+            "L4_source_abi": "not_collected",
+            "L5_source_graph": "present",
+            "preprocessor_scan": "present"
+          }
+        },
+        {
+          "level": "s5",
+          "exit_code": 4,
+          "elapsed_s": 38.7,
+          "verdict": "BREAKING",
+          "layers": {
+            "L3_build": "present",
+            "L4_source_abi": "partial",
+            "L5_source_graph": "present",
+            "preprocessor_scan": "present"
+          }
+        },
+        {
+          "level": "s6",
+          "exit_code": 4,
+          "elapsed_s": 39.1,
+          "verdict": "BREAKING",
+          "layers": {
+            "L3_build": "present",
+            "L4_source_abi": "partial",
+            "L5_source_graph": "present",
+            "preprocessor_scan": "present"
+          }
+        }
+      ]
+    },
+    {
+      "project": "oneDNN",
+      "lang": "c++",
+      "soname": "libdnnl.so.3",
+      "old": "v3.11.3",
+      "new": "v3.12",
+      "tier": "cheap",
+      "runs": [
+        {
+          "level": "s0",
+          "exit_code": 4,
+          "elapsed_s": 38.6,
+          "verdict": "BREAKING",
+          "layers": {
+            "L3_build": "not_collected",
+            "L4_source_abi": "not_collected",
+            "L5_source_graph": "not_collected",
+            "preprocessor_scan": "not_collected"
+          }
+        },
+        {
+          "level": "s1",
+          "exit_code": 4,
+          "elapsed_s": 135.3,
+          "verdict": "BREAKING",
+          "layers": {
+            "L3_build": "present",
+            "L4_source_abi": "not_collected",
+            "L5_source_graph": "not_collected",
+            "preprocessor_scan": "partial"
+          }
+        },
+        {
+          "level": "s3",
+          "exit_code": 4,
+          "elapsed_s": 44.0,
+          "verdict": "BREAKING",
+          "layers": {
+            "L3_build": "not_collected",
+            "L4_source_abi": "not_collected",
+            "L5_source_graph": "not_collected",
+            "preprocessor_scan": "not_collected"
+          }
+        },
+        {
+          "level": "s4",
+          "exit_code": 4,
+          "elapsed_s": 141.7,
+          "verdict": "BREAKING",
+          "layers": {
+            "L3_build": "present",
+            "L4_source_abi": "not_collected",
+            "L5_source_graph": "present",
+            "preprocessor_scan": "partial"
+          }
+        },
+        {
+          "level": "s5/s6",
+          "exit_code": null,
+          "elapsed_s": null,
+          "verdict": "OMITTED (L4 full-target RAM ceiling; see oneTBB s5/s6)",
+          "layers": {}
+        }
+      ]
+    },
+    {
+      "project": "oneDNN-bin",
+      "lang": "c++",
+      "soname": "libdnnl.so.3.11",
+      "old": "v3.11.3",
+      "new": "v3.12",
+      "tier": "binary",
+      "runs": [
+        {
+          "level": "s0",
+          "exit_code": 4,
+          "elapsed_s": 5.3,
+          "verdict": "BREAKING",
+          "layers": {
+            "L3_build": "not_collected",
+            "L4_source_abi": "not_collected",
+            "L5_source_graph": "not_collected",
+            "preprocessor_scan": "not_collected"
+          }
+        }
+      ]
+    },
+    {
+      "project": "oneDAL",
+      "lang": "c++",
+      "soname": "libonedal_core.so.4",
+      "old": "2026.0.0",
+      "new": "2026.1.0",
+      "tier": "binary",
+      "runs": [
+        {
+          "level": "s0",
+          "exit_code": 4,
+          "elapsed_s": 8.8,
+          "verdict": "BREAKING",
+          "layers": {
+            "L3_build": "not_collected",
+            "L4_source_abi": "not_collected",
+            "L5_source_graph": "not_collected",
+            "preprocessor_scan": "not_collected"
+          }
+        }
+      ]
+    }
+  ],
+  "findings": {
+    "oneTBB:libtbb.so.12": {
+      "verdict": "COMPATIBLE_WITH_RISK",
+      "note": "surface-scoped; old DWARF-only FP flood gone"
+    },
+    "UMF:libumf.so.0": {
+      "verdict": "BREAKING",
+      "total": 131,
+      "top": {
+        "symbol_moved_version_node": 104,
+        "func_added": 21,
+        "func_removed_elf_only": 2,
+        "symbol_version_defined_added": 2,
+        "symbol_version_node_removed": 1,
+        "soname_bump_recommended": 1
+      }
+    },
+    "oneDNN:libdnnl.so.3": {
+      "verdict": "BREAKING",
+      "total": 19,
+      "top": {
+        "func_added": 16,
+        "func_removed_elf_only": 1,
+        "visibility_leak": 1,
+        "soname_bump_recommended": 1
+      }
+    },
+    "oneDAL:libonedal.so.4": {
+      "verdict": "BREAKING",
+      "total": 343,
+      "top": {
+        "func_removed_elf_only": 301,
+        "symbol_leaked_from_dependency_changed": 40,
+        "visibility_leak": 1,
+        "soname_bump_recommended": 1
+      }
+    }
+  }
+}
