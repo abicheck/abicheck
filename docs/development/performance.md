@@ -342,7 +342,22 @@ Knobs and the reasoning behind them (`abicheck/buildsource/source_replay.py`):
   per-process spawn). It is opt-in pending a measured win — compare the curves
   with `python eval/scaling.py --jobs 1,2,4 --executor process` vs `thread`. The
   driver falls back to serial if a process pool can't start (sandbox, spawn
-  import error), so it never aborts L4.
+  import error), so it never aborts L4. When the process pool **is** used on
+  Python 3.11+, each worker is recycled after one TU (`max_tasks_per_child=1`) so a
+  worker that parsed a multi-GiB AST returns that memory to the OS instead of
+  carrying its high-water RSS into the next unit.
+- **Per-TU memory: the AST is spilled to a temp file, not buffered in a string.**
+  A template-heavy TU's `clang -ast-dump=json` output can be multiple GiB.
+  Capturing it (`capture_output=True`) would hold the whole AST *string* resident
+  **alongside** the Python object tree `json` builds from it — roughly doubling the
+  per-TU peak (and adding a `text=True` decode copy). The extractor instead streams
+  clang's stdout straight to a temp file and `json.load`s it as bytes, so the peak
+  is the parsed tree alone; the tree is then freed before the macro pass runs.
+  This shrinks the per-TU high-water mark that, multiplied across concurrent
+  workers, drove the UXL OOMs — complementary to the RAM-aware worker cap above.
+  The remaining irreducible cost is the parsed tree itself (~2–5× the AST text);
+  for a template-heavy tree on a constrained host, a **seeded/scoped** scan is
+  still the structural win.
 - **`ABICHECK_L4_CACHE_DIR`** — persists the per-TU cache (`SourceAbiCache`,
   content-addressed + per-included-file dependency-hash invalidation) across
   `dump --sources` runs. Previously the inline path passed **no** cache, so every

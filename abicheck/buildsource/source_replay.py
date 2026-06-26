@@ -44,10 +44,12 @@ import hashlib
 import json
 import logging
 import os
+import sys
 from collections.abc import Iterable, Mapping, Sequence
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from functools import partial
 from pathlib import Path
+from typing import Any
 
 from .build_evidence import BuildEvidence, CompileUnit, Target
 from .source_abi import SOURCE_ABI_VERSION, SourceAbiSurface, SourceAbiTu
@@ -881,8 +883,13 @@ def run_source_replay(
         executor_cls = (
             ProcessPoolExecutor if _l4_use_process_pool() else ThreadPoolExecutor
         )
+        # Recycle process-pool workers per TU so a multi-GiB AST parse doesn't
+        # leave high-water RSS on the worker for the next unit (3.11+).
+        pool_kwargs: dict[str, Any] = {"max_workers": jobs}
+        if _l4_recycle_workers(executor_cls):
+            pool_kwargs["max_tasks_per_child"] = 1
         try:
-            with executor_cls(max_workers=jobs) as pool:
+            with executor_cls(**pool_kwargs) as pool:
                 extracted = list(pool.map(worker, miss_units))
         except Exception as exc:  # noqa: BLE001
             # A process pool can fail to start (spawn import error, sandbox with
@@ -1193,6 +1200,19 @@ def _l4_use_process_pool() -> bool:
     default; an unrecognized value falls back to threads.
     """
     return os.environ.get("ABICHECK_L4_EXECUTOR", "thread").strip().lower() == "process"
+
+
+def _l4_recycle_workers(executor_cls: type) -> bool:
+    """Whether to recycle each L4 pool worker after one TU.
+
+    True only for the opt-in *process* pool on Python 3.11+, where
+    ``max_tasks_per_child=1`` makes a worker that parsed a multi-GiB AST return
+    that memory to the OS instead of carrying its high-water RSS into the next TU
+    — the process pool is chosen for isolation, so bounding per-worker peak is
+    aligned with that intent. Threads share one address space and have no such
+    knob (the RAM-aware ``_l4_jobs`` cap is their guard).
+    """
+    return executor_cls is ProcessPoolExecutor and sys.version_info >= (3, 11)
 
 
 def _extract_one(

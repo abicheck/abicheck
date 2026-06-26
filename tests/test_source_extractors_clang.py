@@ -1434,6 +1434,18 @@ class _Result:
         self.stderr = err
 
 
+def _emit_ast(kw, payload: str, rc: int = 0, err: str = ""):  # type: ignore[no-untyped-def]
+    """Emulate clang writing its JSON AST to the file ``_run_ast_to_file`` passes.
+
+    The AST pass now spills stdout to a temp file (memory fix) instead of capturing
+    it; mocks must write to that file handle and return bytes stderr.
+    """
+    out = kw.get("stdout")
+    assert out is not None and hasattr(out, "write")  # AST pass spills to a file
+    out.write(payload.encode("utf-8"))
+    return _Result(rc, "", err.encode("utf-8"))
+
+
 def _patch_run(monkeypatch, handler) -> ClangSourceExtractor:  # type: ignore[no-untyped-def]
     from abicheck.buildsource.source_extractors import clang as clang_mod
 
@@ -1451,7 +1463,7 @@ def test_extract_runs_macro_pass(monkeypatch) -> None:  # type: ignore[no-untype
     def handler(cmd, **kw):  # type: ignore[no-untyped-def]
         calls.append(cmd)
         if "-ast-dump=json" in cmd:
-            return _Result(0, json.dumps(_ast()))
+            return _emit_ast(kw, json.dumps(_ast()))
         return _Result(0, '# 1 "include/foo.h" 1\n#define FOO_SIZE 16\n')
 
     extractor = _patch_run(monkeypatch, handler)
@@ -1467,7 +1479,7 @@ def test_extract_macro_pass_failure_is_diagnostic(monkeypatch) -> None:  # type:
 
     def handler(cmd, **kw):  # type: ignore[no-untyped-def]
         if "-ast-dump=json" in cmd:
-            return _Result(0, json.dumps(_ast()))
+            return _emit_ast(kw, json.dumps(_ast()))
         return _Result(1, "", "macro boom")
 
     extractor = _patch_run(monkeypatch, handler)
@@ -1481,9 +1493,10 @@ def test_extract_records_recovered_ast_exit(monkeypatch) -> None:  # type: ignor
 
     def handler(cmd, **kw):  # type: ignore[no-untyped-def]
         if "-ast-dump=json" in cmd:
-            return _Result(
-                1,
+            return _emit_ast(
+                kw,
                 json.dumps(_ast()),
+                1,
                 "fatal error: 'llvm/IR/Attributes.inc' file not found",
             )
         return _Result(0, "")
@@ -1510,7 +1523,7 @@ def test_extract_timeout_raises(monkeypatch) -> None:  # type: ignore[no-untyped
 
 
 def test_extract_invalid_json_raises(monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    extractor = _patch_run(monkeypatch, lambda cmd, **kw: _Result(0, "{not json"))
+    extractor = _patch_run(monkeypatch, lambda cmd, **kw: _emit_ast(kw, "{not json"))
     with pytest.raises(SourceExtractionError, match="not valid JSON"):
         extractor.extract(_cu(), public_header_roots=["include/foo.h"])
 
@@ -1557,14 +1570,13 @@ def test_extract_parses_fake_clang_json(tmp_path: Path, monkeypatch) -> None:  #
     monkeypatch.setattr(extractor, "available", lambda: True)
     captured: dict[str, object] = {}
 
-    class _Result:
-        returncode = 0
-        stderr = ""
-        stdout = json.dumps(_ast())
-
     def _fake_run(cmd, **kw):  # type: ignore[no-untyped-def]
         captured["cwd"] = kw.get("cwd")
-        return _Result()
+        out = kw.get("stdout")
+        if out is not None and hasattr(out, "write"):  # AST pass spills to a file
+            out.write(json.dumps(_ast()).encode("utf-8"))
+            return _Result(0, "", "")
+        return _Result(0, "")  # macro pass (capture_output)
 
     monkeypatch.setattr(clang_mod.subprocess, "run", _fake_run)
     cu = _cu(source="src/foo.cpp", directory=str(tmp_path))
@@ -1579,12 +1591,12 @@ def test_extract_raises_on_empty_clang_output(monkeypatch) -> None:  # type: ign
     extractor = ClangSourceExtractor()
     monkeypatch.setattr(extractor, "available", lambda: True)
 
-    class _Result:
-        returncode = 1
-        stderr = "fatal error: 'foo.h' file not found"
-        stdout = ""
+    def _fake_run(cmd, **kw):  # type: ignore[no-untyped-def]
+        # AST pass: write nothing to the spill file -> empty -> "no AST".
+        # stderr is bytes (real subprocess PIPE without text=True).
+        return _Result(1, "", b"fatal error: 'foo.h' file not found")
 
-    monkeypatch.setattr(clang_mod.subprocess, "run", lambda cmd, **kw: _Result())
+    monkeypatch.setattr(clang_mod.subprocess, "run", _fake_run)
     with pytest.raises(SourceExtractionError, match="no AST"):
         extractor.extract(_cu(), public_header_roots=["include/foo.h"])
 
