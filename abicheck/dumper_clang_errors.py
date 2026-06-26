@@ -141,17 +141,22 @@ _ERROR_LINE_RE = re.compile(r"#\s*error\b[^\n]*")
 #: macro itself is pulled out separately and case-sensitively (below) so a
 #: lowercase word like "must" can never be mistaken for the macro.
 _DEFINE_WORD_RE = re.compile(r"\b(?:defined?|set)\b", re.IGNORECASE)
-#: A *negated* requirement — the ``#error`` says the macro must **not** be
-#: defined (``"OPENSSL_API_LEVEL must not be defined by application"``,
-#: ``"You must not define MP_DIGIT_BIT"``). Telling the user to pass
-#: ``-D<macro>`` for the macro that *caused* the failure is exactly backwards,
-#: so a line matching this is not treated as a positive define requirement
-#: (Codex review). The negation must sit *immediately before* the define/set
-#: verb (within a short gap) — a blanket "contains 'not'/'without'" check would
-#: wrongly suppress a positive gate like ``"cannot be used without FOO defined"``
-#: (where "without FOO defined" still *requires* ``FOO``).
+#: A *negated* requirement — the ``#error`` *prohibits* defining the macro
+#: (``"OPENSSL_API_LEVEL must not be defined by application"``, ``"You must not
+#: define MP_DIGIT_BIT"``, ``"do not define FOO"``). Telling the user to pass
+#: ``-D<macro>`` there is exactly backwards (Codex review). The negation is
+#: matched only as a *prohibition modal* ("must/should/do/can not …", a
+#: contraction like "mustn't", or "never") sitting immediately before the
+#: define/set verb. A bare copula state — ``"FOO is not defined"`` (ICU's
+#: ``U_ICU_ENTRY_POINT_RENAME is not defined``) or ``"cannot be used without FOO
+#: defined"`` — is the *opposite*: a positive gate reporting the macro is
+#: currently absent, so it must still produce the ``-D`` hint and is NOT matched.
 _NEGATED_REQUIREMENT_RE = re.compile(
-    r"(?:\b(?:not|never)\b|n't)[^\n]{0,15}?\b(?:defined?|set)\b",
+    r"\b(?:must|shall|should|may|do|does|did|can|could|will|would)\b\s+not\b"
+    r"[^\n]{0,15}?\b(?:defined?|define|set)\b"
+    r"|\b(?:must|do|does|did|ca|could|wo|would|sha|should)n['’]t\b"
+    r"[^\n]{0,15}?\b(?:defined?|define|set)\b"
+    r"|\bnever\b[^\n]{0,15}?\b(?:defined?|define|set)\b",
     re.IGNORECASE,
 )
 #: An uppercase, macro-style identifier — case-sensitive (no IGNORECASE), so it

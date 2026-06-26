@@ -124,14 +124,28 @@ def test_negated_macro_requirement_yields_no_misleading_hint(stderr: str) -> Non
     assert hint is None or "-D" not in hint
 
 
-def test_positive_without_requirement_still_hints() -> None:
-    # "cannot be used without FOO_FEATURE defined" is a *positive* requirement —
-    # the negation guard must not suppress it just because it contains "without"
-    # (Codex review). The macro hint should still fire.
-    stderr = "h.h:2:2: error: #error This header cannot be used without FOO_FEATURE being defined"
+@pytest.mark.parametrize(
+    ("stderr", "macro"),
+    [
+        # "cannot be used without FOO defined" — positive gate (Codex review).
+        (
+            "h.h:2:2: error: #error This header cannot be used without FOO_FEATURE being defined",
+            "FOO_FEATURE",
+        ),
+        # Copula state "is not defined" — positive gate, ICU's pattern (Codex review).
+        (
+            "u.h:5:2: error: #error U_ICU_ENTRY_POINT_RENAME is not defined",
+            "U_ICU_ENTRY_POINT_RENAME",
+        ),
+    ],
+)
+def test_positive_missing_macro_gate_still_hints(stderr: str, macro: str) -> None:
+    # A positive missing-macro gate must still produce the `-D<macro>` hint even
+    # when the wording contains "without" or "not" — only a prohibition modal
+    # ("must not define") suppresses it.
     hint = diagnose_header_compile_failure(stderr)
     assert hint is not None
-    assert "-DFOO_FEATURE" in hint
+    assert f"-D{macro}" in hint
 
 
 @pytest.mark.parametrize("macro", ["_GNU_SOURCE", "__STDC_LIMIT_MACROS"])
