@@ -96,11 +96,24 @@ def test_meminfo_available_parses_memavailable(tmp_path: Path) -> None:
     mi = tmp_path / "meminfo"
     mi.write_text("MemTotal:       16000000 kB\nMemAvailable:    8388608 kB\n")
     # 8388608 kB == 8 GiB exactly.
-    assert sr._meminfo_available_mib_gib(str(mi)) == pytest.approx(8.0)
+    assert sr._meminfo_available_gib(str(mi)) == pytest.approx(8.0)
 
 
 def test_meminfo_available_missing_file_is_none(tmp_path: Path) -> None:
-    assert sr._meminfo_available_mib_gib(str(tmp_path / "nope")) is None
+    assert sr._meminfo_available_gib(str(tmp_path / "nope")) is None
+
+
+def test_meminfo_available_no_memavailable_line_is_none(tmp_path: Path) -> None:
+    mi = tmp_path / "meminfo"
+    mi.write_text(
+        "MemTotal:       16000000 kB\nMemFree:    1000 kB\n"
+    )  # no MemAvailable
+    assert sr._meminfo_available_gib(str(mi)) is None
+
+
+def test_l4_job_mem_budget_invalid_env_falls_back_to_default(monkeypatch) -> None:
+    monkeypatch.setenv("ABICHECK_L4_JOB_MEM_GIB", "not-a-float")
+    assert sr._l4_job_mem_budget_gib() == sr._L4_JOB_MEM_BUDGET_GIB
 
 
 def test_read_int_file_reads_int_else_none(tmp_path: Path) -> None:
@@ -113,48 +126,124 @@ def test_read_int_file_reads_int_else_none(tmp_path: Path) -> None:
     assert sr._read_int_file(str(tmp_path / "absent")) is None
 
 
-def test_cgroup_v2_headroom(monkeypatch, tmp_path: Path) -> None:
-    # v2 limit 6 GiB, 2 GiB used -> 4 GiB headroom.
-    (tmp_path / "max").write_text(str(6 * 1024**3))
-    (tmp_path / "cur").write_text(str(2 * 1024**3))
-    monkeypatch.setattr(sr, "_CGROUP_V2_MAX", str(tmp_path / "max"))
-    monkeypatch.setattr(sr, "_CGROUP_V2_CURRENT", str(tmp_path / "cur"))
+def test_cgroup_rel_paths_parses_v2_and_v1(monkeypatch, tmp_path: Path) -> None:
+    proc = tmp_path / "cgroup"
+    proc.write_text(
+        "0::/pod123/container\n"  # v2 unified line
+        "5:cpu,cpuacct:/pod123\n"  # non-memory v1 controller (ignored)
+        "4:memory:/pod123/mem\n"  # v1 memory line
+        "garbage-line-no-colons\n"  # malformed -> skipped
+    )
+    monkeypatch.setattr(sr, "_PROC_SELF_CGROUP", str(proc))
+    assert sr._cgroup_rel_paths() == ("/pod123/container", "/pod123/mem")
+
+
+def test_cgroup_rel_paths_missing_file(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(sr, "_PROC_SELF_CGROUP", str(tmp_path / "absent"))
+    assert sr._cgroup_rel_paths() == (None, None)
+
+
+def test_cgroup_chain_walks_leaf_to_root(tmp_path: Path) -> None:
+    chain = sr._cgroup_chain(str(tmp_path), "/a/b")
+    assert chain == [tmp_path / "a" / "b", tmp_path / "a", tmp_path]
+    assert sr._cgroup_chain(str(tmp_path), None) == [tmp_path]  # root-only
+    assert sr._cgroup_chain(str(tmp_path), "/") == [tmp_path]
+
+
+def _write_cg(d: Path, max_name: str, cur_name: str, limit: int, used: int) -> None:
+    d.mkdir(parents=True, exist_ok=True)
+    (d / max_name).write_text(str(limit))
+    (d / cur_name).write_text(str(used))
+
+
+def test_cgroup_v2_uses_process_path_not_root(monkeypatch, tmp_path: Path) -> None:
+    # The unified root is unbounded ("max") but the process's nested slice caps it
+    # at 6 GiB w/ 2 used -> 4 GiB. The walk must find the leaf, not stop at root.
+    root = tmp_path / "cg"
+    root.mkdir()
+    (root / "memory.max").write_text("max\n")
+    (root / "memory.current").write_text("0\n")
+    leaf = root / "slice" / "task"
+    _write_cg(leaf, "memory.max", "memory.current", 6 * 1024**3, 2 * 1024**3)
+    proc = tmp_path / "self_cgroup"
+    proc.write_text("0::/slice/task\n")
+    monkeypatch.setattr(sr, "_PROC_SELF_CGROUP", str(proc))
+    monkeypatch.setattr(sr, "_CGROUP_V2_ROOT", str(root))
     assert sr._cgroup_available_mem_gib() == pytest.approx(4.0)
 
 
-def test_cgroup_v2_max_keyword_falls_through_to_v1(monkeypatch, tmp_path: Path) -> None:
-    (tmp_path / "v2max").write_text("max\n")  # unbounded -> ignore v2
-    monkeypatch.setattr(sr, "_CGROUP_V2_MAX", str(tmp_path / "v2max"))
-    (tmp_path / "v1max").write_text(str(3 * 1024**3))
-    (tmp_path / "v1cur").write_text(str(1 * 1024**3))
-    monkeypatch.setattr(sr, "_CGROUP_V1_MAX", str(tmp_path / "v1max"))
-    monkeypatch.setattr(sr, "_CGROUP_V1_CURRENT", str(tmp_path / "v1cur"))
+def test_cgroup_tightest_ancestor_wins(monkeypatch, tmp_path: Path) -> None:
+    # Parent slice (3 GiB free) is tighter than the leaf (5 GiB free): the
+    # effective headroom is the min across the chain.
+    root = tmp_path / "cg"
+    _write_cg(root / "slice", "memory.max", "memory.current", 4 * 1024**3, 1 * 1024**3)
+    _write_cg(
+        root / "slice" / "leaf",
+        "memory.max",
+        "memory.current",
+        6 * 1024**3,
+        1 * 1024**3,
+    )
+    proc = tmp_path / "self_cgroup"
+    proc.write_text("0::/slice/leaf\n")
+    monkeypatch.setattr(sr, "_PROC_SELF_CGROUP", str(proc))
+    monkeypatch.setattr(sr, "_CGROUP_V2_ROOT", str(root))
+    assert sr._cgroup_available_mem_gib() == pytest.approx(3.0)  # parent cap
+
+
+def test_cgroup_v2_unbounded_falls_through_to_v1(monkeypatch, tmp_path: Path) -> None:
+    v2root = tmp_path / "v2"
+    v2root.mkdir()
+    (v2root / "memory.max").write_text("max\n")  # whole v2 chain unbounded
+    v1root = tmp_path / "v1mem"
+    _write_cg(
+        v1root / "pod",
+        "memory.limit_in_bytes",
+        "memory.usage_in_bytes",
+        3 * 1024**3,
+        1 * 1024**3,
+    )
+    proc = tmp_path / "self_cgroup"
+    proc.write_text("0::/\n4:memory:/pod\n")
+    monkeypatch.setattr(sr, "_PROC_SELF_CGROUP", str(proc))
+    monkeypatch.setattr(sr, "_CGROUP_V2_ROOT", str(v2root))
+    monkeypatch.setattr(sr, "_CGROUP_V1_ROOT", str(v1root))
     assert sr._cgroup_available_mem_gib() == pytest.approx(2.0)
 
 
 def test_cgroup_v1_unlimited_sentinel_is_none(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(sr, "_CGROUP_V2_MAX", str(tmp_path / "absent"))
-    (tmp_path / "v1max").write_text(str(sr._CGROUP_V1_UNLIMITED))  # >= sentinel
-    monkeypatch.setattr(sr, "_CGROUP_V1_MAX", str(tmp_path / "v1max"))
+    v2root = tmp_path / "v2"
+    v2root.mkdir()  # no memory.max -> v2 unbounded
+    v1root = tmp_path / "v1mem"
+    (v1root).mkdir()
+    (v1root / "memory.limit_in_bytes").write_text(str(sr._CGROUP_V1_UNLIMITED))
+    proc = tmp_path / "self_cgroup"
+    proc.write_text("0::/\n4:memory:/\n")
+    monkeypatch.setattr(sr, "_PROC_SELF_CGROUP", str(proc))
+    monkeypatch.setattr(sr, "_CGROUP_V2_ROOT", str(v2root))
+    monkeypatch.setattr(sr, "_CGROUP_V1_ROOT", str(v1root))
     assert sr._cgroup_available_mem_gib() is None
 
 
-def test_cgroup_none_when_no_files(monkeypatch, tmp_path: Path) -> None:
-    for attr in ("_CGROUP_V2_MAX", "_CGROUP_V1_MAX"):
-        monkeypatch.setattr(sr, attr, str(tmp_path / f"absent-{attr}"))
+def test_cgroup_none_when_nothing_bounded(monkeypatch, tmp_path: Path) -> None:
+    proc = tmp_path / "self_cgroup"
+    proc.write_text("0::/\n")
+    monkeypatch.setattr(sr, "_PROC_SELF_CGROUP", str(proc))
+    monkeypatch.setattr(sr, "_CGROUP_V2_ROOT", str(tmp_path / "absent-v2"))
+    monkeypatch.setattr(sr, "_CGROUP_V1_ROOT", str(tmp_path / "absent-v1"))
     assert sr._cgroup_available_mem_gib() is None
 
 
 def test_l4_available_mem_takes_min_of_host_and_cgroup(monkeypatch) -> None:
     # The cgroup limit (4 GiB) is smaller than host MemAvailable (64 GiB): a pod
     # on a big host must use the cgroup headroom, not the host RAM.
-    monkeypatch.setattr(sr, "_meminfo_available_mib_gib", lambda path="": 64.0)
+    monkeypatch.setattr(sr, "_meminfo_available_gib", lambda path="": 64.0)
     monkeypatch.setattr(sr, "_cgroup_available_mem_gib", lambda: 4.0)
     assert sr._l4_available_mem_gib() == pytest.approx(4.0)
 
 
 def test_l4_available_mem_none_when_neither_readable(monkeypatch) -> None:
-    monkeypatch.setattr(sr, "_meminfo_available_mib_gib", lambda path="": None)
+    monkeypatch.setattr(sr, "_meminfo_available_gib", lambda path="": None)
     monkeypatch.setattr(sr, "_cgroup_available_mem_gib", lambda: None)
     assert sr._l4_available_mem_gib() is None
 

@@ -954,15 +954,18 @@ _L4_JOB_MEM_BUDGET_GIB = 3.0
 _KIB = 1024.0
 _GIB = 1024.0 * 1024.0 * 1024.0
 
-#: cgroup memory-accounting files. In a container the process is confined to a
-#: cgroup whose limit is usually *below* the host RAM that ``/proc/meminfo``
-#: reports, so the OOM guard must read these too (Codex review on #458): a
-#: 4 GiB-limited pod on a 64 GiB host would otherwise keep the host-sized cap and
-#: still get SIGKILLed. Paths are module constants so tests can repoint them.
-_CGROUP_V2_MAX = "/sys/fs/cgroup/memory.max"
-_CGROUP_V2_CURRENT = "/sys/fs/cgroup/memory.current"
-_CGROUP_V1_MAX = "/sys/fs/cgroup/memory/memory.limit_in_bytes"
-_CGROUP_V1_CURRENT = "/sys/fs/cgroup/memory/memory.usage_in_bytes"
+#: cgroup memory accounting. In a container the process is confined to a cgroup
+#: whose limit is usually *below* the host RAM that ``/proc/meminfo`` reports, so
+#: the OOM guard must read it too (Codex review on #458): a 4 GiB-limited pod on a
+#: 64 GiB host would otherwise keep the host-sized cap and still get SIGKILLed.
+#: The *effective* limit lives at the process's own cgroup path (from
+#: ``/proc/self/cgroup``), not the controller root — under a nested cgroup
+#: (k8s pod / systemd slice / CI runner) the root is often unbounded while a
+#: parent slice imposes the real cap — so we walk leaf→root and take the tightest
+#: bounded limit. Roots are module constants so tests can repoint them.
+_PROC_SELF_CGROUP = "/proc/self/cgroup"
+_CGROUP_V2_ROOT = "/sys/fs/cgroup"  # unified-hierarchy mount
+_CGROUP_V1_ROOT = "/sys/fs/cgroup/memory"  # v1 memory-controller mount
 #: cgroup v1 reports "unlimited" as a near-INT64_MAX sentinel rather than a
 #: keyword; anything at/above this is treated as no limit.
 _CGROUP_V1_UNLIMITED = 1 << 62
@@ -982,25 +985,87 @@ def _read_int_file(path: str) -> int | None:
         return None
 
 
+def _cgroup_rel_paths() -> tuple[str | None, str | None]:
+    """``(v2_rel, v1_memory_rel)`` cgroup paths from ``/proc/self/cgroup``.
+
+    Each is ``None`` when that hierarchy isn't listed (e.g. a pure-v2 host has no
+    v1 memory line). The v2 line is ``0::/rel``; the v1 memory line is
+    ``N:…,memory,…:/rel``.
+    """
+    v2 = v1 = None
+    try:
+        with open(_PROC_SELF_CGROUP, encoding="ascii") as fh:
+            for line in fh:
+                parts = line.rstrip("\n").split(":", 2)
+                if len(parts) != 3:
+                    continue
+                hid, controllers, path = parts
+                if hid == "0":
+                    v2 = path
+                elif "memory" in controllers.split(","):
+                    v1 = path
+    except OSError:
+        pass
+    return v2, v1
+
+
+def _cgroup_chain(root: str, rel: str | None) -> list[Path]:
+    """Cgroup dirs from the leaf (``root``/``rel``) up to ``root``, leaf first."""
+    base = Path(root)
+    chain = [base]
+    cur = base
+    for part in (rel or "").strip("/").split("/"):
+        if part:
+            cur = cur / part
+            chain.append(cur)
+    chain.reverse()
+    return chain
+
+
+def _cgroup_headroom_gib(
+    root: str, rel: str | None, max_name: str, cur_name: str, unlimited: int | None
+) -> float | None:
+    """Tightest memory headroom (GiB) along the leaf→root cgroup chain, or ``None``.
+
+    A bounded ancestor can cap a process more tightly than its own leaf cgroup, so
+    the effective headroom is the *minimum* across the chain. ``None`` when no
+    level is bounded.
+    """
+    best: float | None = None
+    for d in _cgroup_chain(root, rel):
+        limit = _read_int_file(str(d / max_name))
+        if limit is None or (unlimited is not None and limit >= unlimited):
+            continue
+        used = _read_int_file(str(d / cur_name)) or 0
+        headroom = max(0.0, (limit - used) / _GIB)
+        best = headroom if best is None else min(best, headroom)
+    return best
+
+
 def _cgroup_available_mem_gib() -> float | None:
     """Container memory headroom in GiB from cgroup limits, or ``None``.
 
-    Tries cgroup v2 (``memory.max`` − ``memory.current``) then v1
-    (``memory.limit_in_bytes`` − ``memory.usage_in_bytes``); returns ``None``
-    when no bounded limit is configured (the common bare-metal/host case).
+    Resolves the process's own cgroup (``/proc/self/cgroup``) and walks leaf→root
+    for the tightest bounded limit — cgroup v2 (``memory.max`` − ``memory.current``)
+    then v1 (``memory.limit_in_bytes`` − ``memory.usage_in_bytes``). ``None`` when
+    nothing is bounded (the common bare-metal/host case).
     """
-    limit = _read_int_file(_CGROUP_V2_MAX)
-    if limit is not None:
-        used = _read_int_file(_CGROUP_V2_CURRENT) or 0
-        return max(0.0, (limit - used) / _GIB)
-    limit = _read_int_file(_CGROUP_V1_MAX)
-    if limit is not None and limit < _CGROUP_V1_UNLIMITED:
-        used = _read_int_file(_CGROUP_V1_CURRENT) or 0
-        return max(0.0, (limit - used) / _GIB)
-    return None
+    v2_rel, v1_rel = _cgroup_rel_paths()
+    headroom = _cgroup_headroom_gib(
+        _CGROUP_V2_ROOT, v2_rel, "memory.max", "memory.current", None
+    )
+    if headroom is not None:
+        return headroom
+    return _cgroup_headroom_gib(
+        _CGROUP_V1_ROOT,
+        v1_rel,
+        "memory.limit_in_bytes",
+        "memory.usage_in_bytes",
+        _CGROUP_V1_UNLIMITED,
+    )
 
 
-def _meminfo_available_mib_gib(path: str = "/proc/meminfo") -> float | None:
+def _meminfo_available_gib(path: str = "/proc/meminfo") -> float | None:
     """Host ``MemAvailable`` in GiB (Linux ``/proc/meminfo``), or ``None``."""
     try:
         with open(path, encoding="ascii") as fh:
@@ -1022,7 +1087,7 @@ def _l4_available_mem_gib() -> float | None:
     """
     candidates = [
         v
-        for v in (_meminfo_available_mib_gib(), _cgroup_available_mem_gib())
+        for v in (_meminfo_available_gib(), _cgroup_available_mem_gib())
         if v is not None
     ]
     return min(candidates) if candidates else None
