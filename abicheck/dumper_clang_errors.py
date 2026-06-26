@@ -129,15 +129,76 @@ _MISSING_INCLUDE_RE = re.compile(
     r"'([^'\n]+\.[A-Za-z0-9_+]+)' file not found"
     r"|fatal error:\s*([^\n:]+\.[A-Za-z0-9_+]+):\s*No such file or directory"
 )
-#: A config/feature ``#error`` naming an ALL_CAPS macro the caller must define
-#: (e.g. pcre2's ``#error PCRE2_CODE_UNIT_WIDTH must be defined``). The
-#: graceful-exclusion path (:func:`retry_excluding_error_headers`) only drops
-#: *direct-inclusion guards*; a config ``#error`` like this surfaces as a hard
-#: failure, so a hint pointing at ``--gcc-options -D…`` is what unblocks it.
-_REQUIRED_MACRO_RE = re.compile(
-    r"#\s*error\b[^\n]*?\b([A-Z][A-Z0-9_]{3,})\b[^\n]*?\b(?:defined|define|set)\b",
-    re.IGNORECASE,
+#: A config/feature ``#error`` line (e.g. pcre2's ``#error PCRE2_CODE_UNIT_WIDTH
+#: must be defined``). The graceful-exclusion path
+#: (:func:`retry_excluding_error_headers`) only drops *direct-inclusion guards*;
+#: a config ``#error`` like this surfaces as a hard failure, so a hint pointing
+#: at ``--gcc-options -D…`` is what unblocks it. ``#error`` is a literal C
+#: preprocessor directive (always lowercase), so this is *not* IGNORECASE.
+_ERROR_LINE_RE = re.compile(r"#\s*error\b[^\n]*")
+#: A "must be defined / set" requirement phrased in the ``#error`` text. The
+#: prose around it is case-insensitive ("define"/"Define"/"DEFINED"), but the
+#: macro itself is pulled out separately and case-sensitively (below) so a
+#: lowercase word like "must" can never be mistaken for the macro.
+_DEFINE_WORD_RE = re.compile(r"\b(?:defined?|set)\b", re.IGNORECASE)
+#: An uppercase, macro-style identifier — case-sensitive (no IGNORECASE), so it
+#: matches ``PCRE2_CODE_UNIT_WIDTH``/``NDEBUG`` but never lowercase prose.
+_UPPER_MACRO_RE = re.compile(r"\b[A-Z][A-Z0-9_]{3,}\b")
+#: ALL-CAPS English words that turn up in "#error You MUST define FOO" prose but
+#: are never the macro the user must define — skipped when picking the macro.
+_MACRO_PROSE_STOPWORDS = frozenset(
+    {
+        "ERROR",
+        "MUST",
+        "DEFINE",
+        "DEFINED",
+        "SET",
+        "YOU",
+        "THIS",
+        "THE",
+        "BEFORE",
+        "FIRST",
+        "PLEASE",
+        "NOT",
+        "WITH",
+        "FOR",
+        "USE",
+        "USING",
+        "INCLUDE",
+        "INCLUDED",
+        "INCLUDING",
+        "ONLY",
+        "ONE",
+        "AND",
+        "PRIOR",
+    }
 )
+
+
+def _required_macro_from_error(stderr: str) -> str | None:
+    """The macro a config ``#error`` says must be defined, or ``None``.
+
+    Scans only ``#error`` lines that carry a define/set requirement and pulls the
+    uppercase, macro-style identifier *case-sensitively*, so lowercase prose
+    ("you must define …") is never mistaken for the macro (CodeRabbit/Codex
+    review). Prefers a compound ``NAME_WITH_UNDERSCORES`` token and skips common
+    ALL-CAPS prose words, so both ``#error PCRE2_CODE_UNIT_WIDTH must be defined``
+    and ``#error You must define PCRE2_CODE_UNIT_WIDTH`` yield the macro itself.
+    """
+    for m in _ERROR_LINE_RE.finditer(stderr):
+        line = m.group(0)
+        if not _DEFINE_WORD_RE.search(line):
+            continue
+        tokens: list[str] = [
+            t for t in _UPPER_MACRO_RE.findall(line) if t not in _MACRO_PROSE_STOPWORDS
+        ]
+        if not tokens:
+            continue
+        underscored = [t for t in tokens if "_" in t]
+        return underscored[0] if underscored else tokens[0]
+    return None
+
+
 #: A name that resolved to no declaration — the signature of a header parsed
 #: without its umbrella/config prelude (``size_t``, ``hid_t``, ``H5std_string``,
 #: an incomplete forward-declared ``uv__queue``). Captures the offending name.
@@ -167,9 +228,8 @@ def diagnose_header_compile_failure(stderr: str) -> str | None:
     if not stderr:
         return None
 
-    macro = _REQUIRED_MACRO_RE.search(stderr)
-    if macro:
-        name = macro.group(1)
+    name = _required_macro_from_error(stderr)
+    if name:
         return (
             f"\n\nHint: a header requires the macro '{name}' to be defined before "
             f"inclusion. Pass it via --gcc-options (e.g. --gcc-options "

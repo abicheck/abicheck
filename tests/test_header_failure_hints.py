@@ -81,6 +81,26 @@ def test_does_not_name_a_type_cpp() -> None:
     assert "H5std_string" in hint
 
 
+def test_macro_named_after_prose_is_captured_not_the_prose() -> None:
+    # Regression (CodeRabbit/Codex): a macro phrased *after* the prose, e.g.
+    # "You must define FOO_FEATURE", must capture the macro — never a lowercase
+    # word like "must" (which a case-insensitive uppercase class would grab).
+    stderr = "cfg.h:7:2: error: #error You must define FOO_FEATURE before use"
+    hint = diagnose_header_compile_failure(stderr)
+    assert hint is not None
+    assert "FOO_FEATURE" in hint
+    assert "-Dmust" not in hint
+    assert "-DFOO_FEATURE" in hint
+
+
+def test_macro_detection_is_case_sensitive_no_false_hint() -> None:
+    # A generic #error with no ALL-CAPS macro token must not invent a macro hint.
+    stderr = "x.h:1:2: error: #error this header must be configured first"
+    hint = diagnose_header_compile_failure(stderr)
+    # Either no hint, or at least not a bogus macro hint built from prose.
+    assert hint is None or "macro" not in hint
+
+
 def test_macro_takes_precedence_over_missing_header() -> None:
     # When both signatures appear, the required-macro hint (more specific and
     # earlier in the failure) wins so the user gets the unblocking action first.

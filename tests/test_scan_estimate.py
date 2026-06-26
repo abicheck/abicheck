@@ -588,6 +588,19 @@ def test_estimate_l2_two_headers_sum_their_sizes(snap_path: Path, tmp_path: Path
     assert l2.est_seconds > 0.1  # two non-trivial headers cost more than the base anchors
 
 
+def test_estimate_header_seconds_falls_back_when_unstattable(tmp_path: Path) -> None:
+    # A path that can't be stat'd (e.g. a dangling symlink) must not raise
+    # mid-dry-run: the size term is skipped and only the per-header base counts.
+    from abicheck.service_scan import _COST_PER_HEADER_PARSE, _estimate_header_seconds
+
+    missing = tmp_path / "gone.h"  # never created
+    assert _estimate_header_seconds([missing]) == _COST_PER_HEADER_PARSE
+    real = tmp_path / "real.h"
+    real.write_text("void f(void);\n" * 1000, encoding="utf-8")
+    # A real, sizeable header costs strictly more than the bare base anchor.
+    assert _estimate_header_seconds([real]) > _COST_PER_HEADER_PARSE
+
+
 def _minimal_compile_db(tmp_path: Path) -> Path:
     """A minimal compile_commands.json (L3 build metadata; pure parsing).
 
