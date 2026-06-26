@@ -214,20 +214,20 @@
             "L5_source_graph": "present",
             "preprocessor_scan": "partial"
           }
-        },
-        {
-          "level": "s5/s6",
-          "exit_code": null,
-          "elapsed_s": null,
-          "verdict": "OMITTED (L4 full-target RAM ceiling; see oneTBB s5/s6)",
-          "layers": {}
         }
-      ]
+      ],
+      "omitted_levels": {
+        "levels": [
+          "s5",
+          "s6"
+        ],
+        "reason": "L4 full-target source replay omitted \u2014 RAM ceiling on the 15.1 GiB host (cf. oneTBB s5/s6 OOM)"
+      }
     },
     {
       "project": "oneDNN-bin",
       "lang": "c++",
-      "soname": "libdnnl.so.3.11",
+      "soname": "libdnnl.so.3",
       "old": "v3.11.3",
       "new": "v3.12",
       "tier": "binary",
