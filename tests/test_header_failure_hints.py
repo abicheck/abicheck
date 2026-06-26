@@ -124,6 +124,16 @@ def test_negated_macro_requirement_yields_no_misleading_hint(stderr: str) -> Non
     assert hint is None or "-D" not in hint
 
 
+def test_positive_without_requirement_still_hints() -> None:
+    # "cannot be used without FOO_FEATURE defined" is a *positive* requirement —
+    # the negation guard must not suppress it just because it contains "without"
+    # (Codex review). The macro hint should still fire.
+    stderr = "h.h:2:2: error: #error This header cannot be used without FOO_FEATURE being defined"
+    hint = diagnose_header_compile_failure(stderr)
+    assert hint is not None
+    assert "-DFOO_FEATURE" in hint
+
+
 @pytest.mark.parametrize("macro", ["_GNU_SOURCE", "__STDC_LIMIT_MACROS"])
 def test_leading_underscore_config_macro(macro: str) -> None:
     # Config macros that start with an underscore (_GNU_SOURCE,

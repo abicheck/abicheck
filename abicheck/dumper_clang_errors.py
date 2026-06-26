@@ -146,8 +146,14 @@ _DEFINE_WORD_RE = re.compile(r"\b(?:defined?|set)\b", re.IGNORECASE)
 #: ``"You must not define MP_DIGIT_BIT"``). Telling the user to pass
 #: ``-D<macro>`` for the macro that *caused* the failure is exactly backwards,
 #: so a line matching this is not treated as a positive define requirement
-#: (Codex review).
-_NEGATED_REQUIREMENT_RE = re.compile(r"\b(?:not|never|without)\b|n't\b", re.IGNORECASE)
+#: (Codex review). The negation must sit *immediately before* the define/set
+#: verb (within a short gap) — a blanket "contains 'not'/'without'" check would
+#: wrongly suppress a positive gate like ``"cannot be used without FOO defined"``
+#: (where "without FOO defined" still *requires* ``FOO``).
+_NEGATED_REQUIREMENT_RE = re.compile(
+    r"(?:\b(?:not|never)\b|n't)[^\n]{0,15}?\b(?:defined?|set)\b",
+    re.IGNORECASE,
+)
 #: An uppercase, macro-style identifier — case-sensitive (no IGNORECASE), so it
 #: matches ``PCRE2_CODE_UNIT_WIDTH``/``NDEBUG`` but never lowercase prose. The
 #: optional leading ``_*`` admits config macros that start with an underscore
