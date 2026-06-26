@@ -49,6 +49,34 @@ def test_missing_split_include_root_gcc_spelling() -> None:
     assert "--include-dir" in hint or "-I" in hint
 
 
+@pytest.mark.parametrize(
+    "stderr",
+    [
+        # Extensionless C++ include root, clang spelling.
+        "m.cpp:1:10: fatal error: 'Eigen/Core' file not found",
+        # Extensionless, gcc/castxml spelling.
+        "m.cpp:1:10: fatal error: Eigen/Core: No such file or directory",
+    ],
+)
+def test_missing_extensionless_include(stderr: str) -> None:
+    # Bare C++ include roots (Eigen/Core, boost/...) have no extension; the hint
+    # must still fire for them (Codex review).
+    hint = diagnose_header_compile_failure(stderr)
+    assert hint is not None
+    assert "Eigen/Core" in hint
+    assert "split include root" in hint or "dependency" in hint
+
+
+def test_macro_pick_prefers_token_near_define_verb() -> None:
+    # An ALL-CAPS prose acronym before a bare macro must not be mistaken for it:
+    # the token nearest the define verb wins (Codex review).
+    stderr = "h.h:1:2: error: #error API users must define FOO"
+    hint = diagnose_header_compile_failure(stderr)
+    assert hint is not None
+    assert "-DFOO" in hint
+    assert "-DAPI" not in hint
+
+
 def test_required_config_macro() -> None:
     # pcre2 refuses to compile until PCRE2_CODE_UNIT_WIDTH is defined.
     stderr = "pcre2.h:50:4: error: #error PCRE2_CODE_UNIT_WIDTH must be defined"

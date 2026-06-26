@@ -124,10 +124,15 @@ def _is_missing_cpp_stdlib_header_error(stderr: str) -> bool:
 
 
 #: A missing include, either spelling: clang's ``'name' file not found`` or
-#: gcc/castxml's ``fatal error: name: No such file or directory``.
+#: gcc/castxml's ``fatal error: name: No such file or directory``. The name is
+#: *not* required to carry an extension — extensionless C++ include roots
+#: (``Eigen/Core``, ``boost/version.hpp``'s siblings) are exactly the bare
+#: ``-H include/`` failures this hint targets (Codex review). The surrounding
+#: "file not found" / "No such file or directory" phrasing is specific enough
+#: to anchor on without a dot.
 _MISSING_INCLUDE_RE = re.compile(
-    r"'([^'\n]+\.[A-Za-z0-9_+]+)' file not found"
-    r"|fatal error:\s*([^\n:]+\.[A-Za-z0-9_+]+):\s*No such file or directory"
+    r"'([^'\n]+)' file not found"
+    r"|fatal error:\s*(\S+):\s*No such file or directory"
 )
 #: A config/feature ``#error`` line (e.g. pcre2's ``#error PCRE2_CODE_UNIT_WIDTH
 #: must be defined``). The graceful-exclusion path
@@ -206,21 +211,32 @@ def _required_macro_from_error(stderr: str) -> str | None:
     ALL-CAPS prose words, so both ``#error PCRE2_CODE_UNIT_WIDTH must be defined``
     and ``#error You must define PCRE2_CODE_UNIT_WIDTH`` yield the macro itself.
     A *negated* requirement ("must **not** be defined") is skipped — pointing the
-    user at ``-D<macro>`` there would be exactly backwards (Codex review).
+    user at ``-D<macro>`` there would be exactly backwards (Codex review). When no
+    compound token is present, the candidate *nearest the define/set verb* wins,
+    so ``#error API users must define FOO`` yields ``FOO``, not the ``API`` prose
+    acronym (Codex review).
     """
     for m in _ERROR_LINE_RE.finditer(stderr):
         line = m.group(0)
-        if not _DEFINE_WORD_RE.search(line):
+        dm = _DEFINE_WORD_RE.search(line)
+        if not dm:
             continue
         if _NEGATED_REQUIREMENT_RE.search(line):
             continue
-        tokens: list[str] = [
-            t for t in _UPPER_MACRO_RE.findall(line) if t not in _MACRO_PROSE_STOPWORDS
+        cands = [
+            (tm.start(), tm.group(0))
+            for tm in _UPPER_MACRO_RE.finditer(line)
+            if tm.group(0) not in _MACRO_PROSE_STOPWORDS
         ]
-        if not tokens:
+        if not cands:
             continue
-        underscored = [t for t in tokens if "_" in t]
-        return underscored[0] if underscored else tokens[0]
+        underscored = [tok for _, tok in cands if "_" in tok]
+        if underscored:
+            return underscored[0]
+        # No compound NAME_WITH_UNDERSCORES macro: a bare token like FOO. Prefer
+        # the one closest to the define/set verb over a leading prose acronym.
+        verb_pos = dm.start()
+        return min(cands, key=lambda c: abs(c[0] - verb_pos))[1]
     return None
 
 
