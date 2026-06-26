@@ -289,5 +289,9 @@
         "soname_bump_recommended": 1
       }
     }
+  },
+  "notes": {
+    "s2": "The s2 preprocessor source method was not measured; each subject's runs[] lists the exact levels collected.",
+    "timing": "All runs[].elapsed_s were captured with --sources supplied at every level (so even s0 carries source-path setup); oneDNN.binary_only_s0 records the pure binary-only s0 (no --sources)."
   }
 }

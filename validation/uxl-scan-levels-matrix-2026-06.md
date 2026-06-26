@@ -14,10 +14,16 @@ release tarballs (not committed — reproduce from the versions below).
 
 | Product | lang | soname | old → new | tier |
 |---------|------|--------|-----------|------|
-| oneTBB | C++ | `libtbb.so.12` | v2021.12.0 → v2021.13.0 | full `s0`–`s6` |
-| UMF | C | `libumf.so.0` | v0.10.0 → v0.11.0 | full `s0`–`s6` |
-| oneDNN | C++ | `libdnnl.so.3` | v3.11.3 → v3.12 | cheap `s0`–`s4` |
-| oneDAL | C++ | `libonedal_core.so.4` | 2026.0.0 → 2026.1.0 | binary `s0` |
+| oneTBB | C++ | `libtbb.so.12` | v2021.12.0 → v2021.13.0 | `s0,s1,s3,s4,s5,s6` |
+| UMF | C | `libumf.so.0` | v0.10.0 → v0.11.0 | `s0,s1,s3,s4,s5,s6` |
+| oneDNN | C++ | `libdnnl.so.3` | v3.11.3 → v3.12 | `s0,s1,s3,s4` |
+| oneDAL | C++ | `libonedal_core.so.4` | 2026.0.0 → 2026.1.0 | `s0` |
+
+`s2` (the preprocessor source method) was **not** measured in this matrix — the
+levels run are exactly those listed above. All times were captured with
+`--sources` supplied at every level (the harness always passes it), so even the
+`s0` column carries the source-path setup cost; the pure binary-only `s0` (no
+`--sources`) is cheaper — for oneDNN, **5.3 s vs the 38.6 s** shown below.
 
 ## Verdict × level × time
 
