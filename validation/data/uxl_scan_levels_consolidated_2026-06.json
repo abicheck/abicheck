@@ -296,12 +296,12 @@
         "soname_bump_recommended": 1
       }
     },
-    "oneDAL:libonedal.so.4": {
+    "oneDAL:libonedal_core.so.4": {
       "verdict": "BREAKING",
-      "total": 343,
+      "total": 2138,
       "top": {
-        "func_removed_elf_only": 301,
-        "symbol_leaked_from_dependency_changed": 40,
+        "func_removed_elf_only": 2134,
+        "symbol_leaked_from_dependency_changed": 2,
         "visibility_leak": 1,
         "soname_bump_recommended": 1
       }

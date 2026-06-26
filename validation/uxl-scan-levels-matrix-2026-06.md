@@ -51,12 +51,12 @@ From `compare` on the new-vs-old binaries:
 | oneTBB `libtbb.so.12` | COMPATIBLE_WITH_RISK | — | surface-scoped; the old ~90 % DWARF-only false-positive flood stays suppressed |
 | UMF `libumf.so.0` | BREAKING | 131 | 104 `symbol_moved_version_node`, 21 `func_added`, 2 `func_removed_elf_only`, 1 `soname_bump_recommended` |
 | oneDNN `libdnnl.so.3` | BREAKING | 19 | 16 `func_added`, 1 `func_removed_elf_only`, 1 `visibility_leak`, 1 `soname_bump_recommended` |
-| oneDAL `libonedal.so.4` | BREAKING | 343 | **301 `func_removed_elf_only`**, 40 `symbol_leaked_from_dependency_changed`, 1 `visibility_leak`, 1 `soname_bump_recommended` |
+| oneDAL `libonedal_core.so.4` | BREAKING | 2138 | **2134 `func_removed_elf_only`**, 2 `symbol_leaked_from_dependency_changed`, 1 `visibility_leak`, 1 `soname_bump_recommended` |
 
-**Headline:** oneDAL's *minor* release (2026.0.0 → 2026.1.0) **removed 301
-exported functions on a same-major soname** (`libonedal.so.4`). abicheck flags it
-BREAKING and recommends a soname bump — exactly the class of silent break a
-version-string check misses.
+**Headline:** oneDAL's *minor* release (2026.0.0 → 2026.1.0) **removed 2134
+exported functions on a same-major soname** (`libonedal_core.so.4`). abicheck
+flags it BREAKING and recommends a soname bump — exactly the class of silent
+break a version-string check misses.
 
 ## Conclusions
 
