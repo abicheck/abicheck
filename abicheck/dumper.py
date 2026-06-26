@@ -63,6 +63,7 @@ from .dumper_clang import _ClangAstParser as _ClangAstParser
 from .dumper_clang_errors import (
     _is_direct_include_guard_failure,
     _is_missing_cpp_stdlib_header_error,
+    diagnose_header_compile_failure,
     retry_excluding_error_headers,
 )
 from .dumper_sysinc import (
@@ -411,6 +412,7 @@ def _clang_header_dump(
                 "header may be malformed or need build flags it was not given (try "
                 f"--gcc-options / -p, or --ast-frontend castxml):\n"
                 f"{result.stderr[:1000].strip()}"
+                f"{diagnose_header_compile_failure(result.stderr) or ''}"
             )
         if not result.stdout.strip():
             raise SnapshotError(
@@ -970,7 +972,10 @@ def _castxml_failure_hint(
             "(class, namespace, template) but --lang c was specified. "
             "Try removing --lang or using --lang c++."
         )
-    return ""
+    # 4) Generic remediable signatures (missing dependency header, required
+    #    config macro, undeclared type from a missing umbrella) — frontend-
+    #    agnostic, so the castxml path benefits from the same guidance as clang.
+    return diagnose_header_compile_failure(stderr) or ""
 
 
 def _validate_castxml_output(

@@ -123,6 +123,207 @@ def _is_missing_cpp_stdlib_header_error(stderr: str) -> bool:
     )
 
 
+#: A missing include, either spelling: clang's ``'name' file not found`` or
+#: gcc/castxml's ``fatal error: name: No such file or directory``. The name is
+#: *not* required to carry an extension — extensionless C++ include roots
+#: (``Eigen/Core``, ``boost/version.hpp``'s siblings) are exactly the bare
+#: ``-H include/`` failures this hint targets (Codex review). The surrounding
+#: "file not found" / "No such file or directory" phrasing is specific enough
+#: to anchor on without a dot.
+_MISSING_INCLUDE_RE = re.compile(
+    r"'([^'\n]+)' file not found"
+    r"|fatal error:\s*(\S+):\s*No such file or directory"
+)
+#: A config/feature ``#error`` line (e.g. pcre2's ``#error PCRE2_CODE_UNIT_WIDTH
+#: must be defined``). The graceful-exclusion path
+#: (:func:`retry_excluding_error_headers`) only drops *direct-inclusion guards*;
+#: a config ``#error`` like this surfaces as a hard failure, so a hint pointing
+#: at ``--gcc-options -D…`` is what unblocks it. ``#error`` is a literal C
+#: preprocessor directive (always lowercase), so this is *not* IGNORECASE.
+_ERROR_LINE_RE = re.compile(r"#\s*error\b[^\n]*")
+#: A "must be defined / set" requirement phrased in the ``#error`` text. The
+#: prose around it is case-insensitive ("define"/"Define"/"DEFINED"), but the
+#: macro itself is pulled out separately and case-sensitively (below) so a
+#: lowercase word like "must" can never be mistaken for the macro.
+_DEFINE_WORD_RE = re.compile(r"\b(?:defined?|set)\b", re.IGNORECASE)
+#: A *negated* requirement — the ``#error`` *prohibits* defining the macro
+#: (``"OPENSSL_API_LEVEL must not be defined by application"``, ``"You must not
+#: define MP_DIGIT_BIT"``, ``"do not define FOO"``). Telling the user to pass
+#: ``-D<macro>`` there is exactly backwards (Codex review). The negation is
+#: matched only as a *prohibition modal* ("must/should/do/can not …", a
+#: contraction like "mustn't", or "never") sitting immediately before the
+#: define/set verb. A bare copula state — ``"FOO is not defined"`` (ICU's
+#: ``U_ICU_ENTRY_POINT_RENAME is not defined``) or ``"cannot be used without FOO
+#: defined"`` — is the *opposite*: a positive gate reporting the macro is
+#: currently absent, so it must still produce the ``-D`` hint and is NOT matched.
+_NEGATED_REQUIREMENT_RE = re.compile(
+    r"\b(?:must|shall|should|may|do|does|did|can|could|will|would)\b\s+not\b"
+    r"[^\n]{0,15}?\b(?:defined?|define|set)\b"
+    r"|\b(?:must|do|does|did|ca|could|wo|would|sha|should)n['’]t\b"
+    r"[^\n]{0,15}?\b(?:defined?|define|set)\b"
+    r"|\bnever\b[^\n]{0,15}?\b(?:defined?|define|set)\b",
+    re.IGNORECASE,
+)
+#: An *already-defined / conflicting* diagnostic — the macro is present or
+#: clashes, not missing (ncurses' ``MAX_COMMAND is already inconsistently
+#: defined``, Python's ``HAVE_THREAD_LOCAL is already defined``). Suggesting
+#: ``-D<macro>`` is the wrong direction, so these words on the ``#error`` line
+#: suppress the require-macro hint (Codex review). They never appear in a
+#: genuine "you must define X" requirement.
+_ALREADY_DEFINED_RE = re.compile(
+    r"\b(?:already|redefin\w*|inconsistent\w*|conflict\w*)\b", re.IGNORECASE
+)
+#: An uppercase, macro-style identifier — case-sensitive (no IGNORECASE), so it
+#: matches ``PCRE2_CODE_UNIT_WIDTH``/``NDEBUG`` but never lowercase prose. The
+#: optional leading ``_*`` admits config macros that start with an underscore
+#: (``_GNU_SOURCE``, ``__STDC_LIMIT_MACROS``) — a ``\b[A-Z]`` anchor would miss
+#: those because ``_`` is itself a word char (CodeRabbit review).
+_UPPER_MACRO_RE = re.compile(r"(?<![A-Za-z0-9_])_*[A-Z][A-Z0-9_]{2,}(?![A-Za-z0-9_])")
+#: ALL-CAPS English words that turn up in "#error You MUST define FOO" prose but
+#: are never the macro the user must define — skipped when picking the macro.
+_MACRO_PROSE_STOPWORDS = frozenset(
+    {
+        "ERROR",
+        "MUST",
+        "DEFINE",
+        "DEFINED",
+        "SET",
+        "YOU",
+        "THIS",
+        "THE",
+        "BEFORE",
+        "FIRST",
+        "PLEASE",
+        "NOT",
+        "WITH",
+        "FOR",
+        "USE",
+        "USING",
+        "INCLUDE",
+        "INCLUDED",
+        "INCLUDING",
+        "ONLY",
+        "ONE",
+        "AND",
+        "PRIOR",
+    }
+)
+
+
+def _required_macro_from_error(stderr: str) -> str | None:
+    """The macro a config ``#error`` says must be defined, or ``None``.
+
+    Scans only ``#error`` lines that carry a define/set requirement and pulls the
+    uppercase, macro-style identifier *case-sensitively*, so lowercase prose
+    ("you must define …") is never mistaken for the macro (CodeRabbit/Codex
+    review). Prefers a compound ``NAME_WITH_UNDERSCORES`` token and skips common
+    ALL-CAPS prose words, so both ``#error PCRE2_CODE_UNIT_WIDTH must be defined``
+    and ``#error You must define PCRE2_CODE_UNIT_WIDTH`` yield the macro itself.
+    A *negated* requirement ("must **not** be defined") is skipped — pointing the
+    user at ``-D<macro>`` there would be exactly backwards (Codex review). An
+    *already-defined / conflicting* diagnostic ("already defined", "inconsistently
+    defined") is likewise skipped — the macro is present, not missing. When no
+    compound token is present, the candidate *nearest the define/set verb* wins,
+    so ``#error API users must define FOO`` yields ``FOO``, not the ``API`` prose
+    acronym (Codex review).
+    """
+    for m in _ERROR_LINE_RE.finditer(stderr):
+        line = m.group(0)
+        dm = _DEFINE_WORD_RE.search(line)
+        if not dm:
+            continue
+        if _NEGATED_REQUIREMENT_RE.search(line):
+            continue
+        if _ALREADY_DEFINED_RE.search(line):
+            # The macro is already-defined / conflicting, not missing — a -D hint
+            # would point the wrong way (Codex review).
+            continue
+        cands = [
+            (tm.start(), tm.group(0))
+            for tm in _UPPER_MACRO_RE.finditer(line)
+            if tm.group(0) not in _MACRO_PROSE_STOPWORDS
+        ]
+        if not cands:
+            continue
+        underscored = [tok for _, tok in cands if "_" in tok]
+        if underscored:
+            return underscored[0]
+        # No compound NAME_WITH_UNDERSCORES macro: a bare token like FOO. Prefer
+        # the one closest to the define/set verb over a leading prose acronym.
+        verb_pos = dm.start()
+        return min(cands, key=lambda c: abs(c[0] - verb_pos))[1]
+    return None
+
+
+#: A name that resolved to no declaration — the signature of a header parsed
+#: without its umbrella/config prelude (``size_t``, ``hid_t``, ``H5std_string``,
+#: an incomplete forward-declared ``uv__queue``). Captures the offending name.
+_UNDECLARED_NAME_RE = re.compile(
+    r"unknown type name '([^']+)'"
+    r"|use of undeclared identifier '([^']+)'"
+    r"|'([^']+)' (?:was not declared|does not name a type|has not been declared)"
+)
+
+
+def diagnose_header_compile_failure(stderr: str) -> str | None:
+    """Map a remediable header-parse failure to an actionable ``\\n\\nHint: …`` block.
+
+    Frontend-agnostic (clang and castxml both emit clang-style diagnostics), pure
+    and string-only so it is unit-testable without a compiler. Returns ``None``
+    when no known signature matches, so callers can fall back to the raw stderr.
+
+    Covers the three recurring real-world aborts a bare ``-H include/`` hits on a
+    conda/runtime package (field-eval P1) that previously surfaced only as an
+    opaque compiler dump:
+
+    1. a missing dependency / split-include header (``absl/…``, ``gio/gio.h``),
+    2. a required config/feature macro (``PCRE2_CODE_UNIT_WIDTH``),
+    3. an undeclared type from missing umbrella/std context (``size_t``,
+       ``hid_t``, ``H5std_string``).
+    """
+    if not stderr:
+        return None
+
+    name = _required_macro_from_error(stderr)
+    if name:
+        return (
+            f"\n\nHint: a header requires the macro '{name}' to be defined before "
+            f"inclusion. Pass it via --gcc-options (e.g. --gcc-options "
+            f'"-D{name}=...", such as -DPCRE2_CODE_UNIT_WIDTH=8 for pcre2), or point '
+            "-H at the library's umbrella header that defines it rather than an "
+            "individual sub-header."
+        )
+
+    miss = _MISSING_INCLUDE_RE.search(stderr)
+    if miss:
+        name = miss.group(1) or miss.group(2) or ""
+        nested = "/" in name
+        return (
+            f"\n\nHint: the include '{name}' was not found"
+            + (
+                " — it looks like a dependency or a split include root."
+                if nested
+                else "."
+            )
+            + " Add its directory with --include-dir / -I, or install the package "
+            "that ships it (often a separate *-dev/*-devel or dependency package; "
+            "conda runtime packages frequently omit headers)."
+        )
+
+    undecl = _UNDECLARED_NAME_RE.search(stderr)
+    if undecl:
+        name = undecl.group(1) or undecl.group(2) or undecl.group(3) or ""
+        return (
+            f"\n\nHint: '{name}' was used without a declaration — the header was "
+            "likely parsed without its standard prelude or umbrella context. Point "
+            "-H at the library's top-level public/umbrella header (which pulls in "
+            "config and base types) instead of an internal sub-header, or add the "
+            "missing dependency include roots with --include-dir / -I."
+        )
+
+    return None
+
+
 def _is_direct_include_guard_failure(stderr: str) -> bool:
     """True if a parse failure looks like a header refusing direct inclusion.
 

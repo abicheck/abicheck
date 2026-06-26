@@ -548,6 +548,59 @@ def test_estimate_scan_honors_resolved_level(snap_path: Path) -> None:
     assert "source-changed" not in pinned
 
 
+def test_estimate_l2_cost_is_size_aware(snap_path: Path, tmp_path: Path) -> None:
+    # A flat per-header anchor priced a one-line shim and a heavy templated
+    # umbrella identically, so `scan --estimate` understated the cost of a large
+    # public surface (field-eval P1: ICU/HDF5). The L2 estimate must scale with
+    # header size: a big header costs strictly more than a tiny one.
+    from abicheck.service_scan import estimate_scan
+
+    tiny = tmp_path / "tiny.h"
+    tiny.write_text("void f(void);\n", encoding="utf-8")
+    big = tmp_path / "big.h"
+    big.write_text("void g(void);\n" * 20000, encoding="utf-8")  # ~260 KB
+
+    def l2(header: Path) -> float:
+        est = estimate_scan(
+            ScanRequest(binaries=[snap_path], depth="headers", headers=[header], mode="audit")
+        )
+        return next(e.est_seconds for e in est if e.layer == "L2_header")
+
+    tiny_s, big_s = l2(tiny), l2(big)
+    assert big_s > tiny_s
+    # The size term should dominate for a large header (well above the per-header
+    # base anchor), so the ranking is meaningful, not a rounding artefact.
+    assert big_s > 0.5
+
+
+def test_estimate_l2_two_headers_sum_their_sizes(snap_path: Path, tmp_path: Path) -> None:
+    from abicheck.service_scan import estimate_scan
+
+    d = tmp_path / "inc"
+    d.mkdir()
+    (d / "a.h").write_text("void a(void);\n" * 4000, encoding="utf-8")
+    (d / "b.h").write_text("void b(void);\n" * 4000, encoding="utf-8")
+    est = estimate_scan(
+        ScanRequest(binaries=[snap_path], depth="headers", headers=[d], mode="audit")
+    )
+    l2 = next(e for e in est if e.layer == "L2_header")
+    assert l2.tus == 2  # both headers counted
+    assert l2.est_seconds > 0.1  # two non-trivial headers cost more than the base anchors
+
+
+def test_estimate_header_seconds_falls_back_when_unstattable(tmp_path: Path) -> None:
+    # A path that can't be stat'd (e.g. a dangling symlink) must not raise
+    # mid-dry-run: the size term is skipped and only the per-header base counts.
+    from abicheck.service_scan import _COST_PER_HEADER_PARSE, _estimate_header_seconds
+
+    missing = tmp_path / "gone.h"  # never created
+    assert _estimate_header_seconds([missing]) == _COST_PER_HEADER_PARSE
+    real = tmp_path / "real.h"
+    real.write_text("void f(void);\n" * 1000, encoding="utf-8")
+    # A real, sizeable header costs strictly more than the bare base anchor.
+    assert _estimate_header_seconds([real]) > _COST_PER_HEADER_PARSE
+
+
 def _minimal_compile_db(tmp_path: Path) -> Path:
     """A minimal compile_commands.json (L3 build metadata; pure parsing).
 

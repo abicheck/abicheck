@@ -244,10 +244,36 @@ class LayerResult:
 #: ``-fsyntax-only`` pass dominates; pattern/compile-DB scans are <1-5%). The real
 #: per-project number comes from the actual run; the estimate only ranks layers so
 #: a maintainer can pick a depth.
-_COST_PER_HEADER_PARSE = 0.08  # L2 castxml per public header
+_COST_PER_HEADER_PARSE = 0.08  # L2 base: castxml/clang startup + preprocess per header
+#: L2 marginal cost per KB of header text. A flat per-header anchor priced a
+#: one-line shim and a 200 KB templated umbrella (ICU's ``unicode/*.h``,
+#: hdf5's C++ API) identically, so a large public surface was under-ranked and
+#: ``scan --estimate`` understated header-audit cost. Weighting by on-disk size
+#: ranks heavy headers above trivial ones (field-eval P1: ICU/HDF5 header scans
+#: took 80-180 s while the estimate read flat).
+_COST_PER_HEADER_KB = 0.004
 _COST_PER_TU_BUILD = 0.002  # L3 compile-DB entry parse
 _COST_PER_TU_REPLAY = 0.45  # L4 per-TU semantic AST replay
 _COST_PER_TU_GRAPH = 0.02  # L5 per-TU graph fold/edge
+
+
+def _estimate_header_seconds(headers: list[Path]) -> float:
+    """Size-aware L2 cost: a fixed per-header parse/preprocess base plus a
+    marginal per-KB term over each header's on-disk size.
+
+    A large templated header (an ICU/hdf5 umbrella) is ranked above a one-line
+    shim instead of every header costing the same flat anchor. Falls back to the
+    base alone when a path can't be stat'd (a symlink/glob that no longer
+    resolves) so the estimate never raises mid-dry-run.
+    """
+    total = 0.0
+    for h in headers:
+        total += _COST_PER_HEADER_PARSE
+        try:
+            total += _COST_PER_HEADER_KB * (h.stat().st_size / 1024.0)
+        except OSError:
+            continue
+    return total
 
 
 def _count_compile_db_tus(compile_db: Path) -> int:
@@ -491,7 +517,9 @@ def estimate_scan(
     # — else a programmatic caller's `ScanResult.estimate` plans a different cost than
     # what executes (Codex review). Keyed on the resolved effective depth.
     eff_req_headers = [] if eff_depth is EvidenceDepth.BINARY else list(req.headers)
-    n_headers = len(expand_header_inputs(eff_req_headers)) if eff_req_headers else 0
+    expanded_headers = expand_header_inputs(eff_req_headers) if eff_req_headers else []
+    n_headers = len(expanded_headers)
+    l2_seconds = _estimate_header_seconds(expanded_headers)
     # The L4 replay scope: a changed-only collection touches at most the changed
     # *source* TUs (POI-focused, D7); a full/target scope touches every TU. The
     # budget's max_tus is a documented cap (never shrinks scope silently — it
@@ -535,7 +563,7 @@ def estimate_scan(
             None,
             "L2_header",
             n_headers,
-            _COST_PER_HEADER_PARSE * n_headers,
+            l2_seconds,
             0.0,
             "public-header AST (needs castxml or clang)"
             if n_headers
