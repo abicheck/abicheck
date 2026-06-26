@@ -66,9 +66,15 @@ break a version-string check misses.
 
 ## Conclusions
 
-1. **Verdict is depth-invariant.** Every product reaches its final verdict at
-   `s0` (L0/L1 artifact evidence); `s1`–`s6` only add localization/context
-   (L3 build flags, S2 macros, L4 source ABI, L5 graph). The gate is the binary.
+1. **Verdict is depth-invariant across every level that completed.** The artifact
+   verdict set at `s0` (L0/L1) never changed at a deeper level here: UMF held
+   BREAKING through a full `s0`–`s6` (the one deep run that completed), and the
+   cheap tier (`s0`–`s4`) held its verdict on all four products. Deeper levels add
+   localization/context (L3 build flags, S2 macros, L4 source ABI, L5 graph) and
+   *can* surface additional source-level (`API_BREAK`) or risk findings when they
+   complete — but flipped no artifact verdict in this matrix. This is **not** a
+   claim about the levels that didn't run: oneTBB/oneDNN `s5`/`s6` OOM'd or were
+   omitted (§3), so they're evidence neither way.
 2. **One cost cliff, at L4 (`s4`→`s5`), height ∝ C++ template depth.** UMF (C)
    barely moves (~20 s → ~39 s); the template-heavy C++ trees are where L4
    explodes.
