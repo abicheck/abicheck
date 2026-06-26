@@ -311,10 +311,22 @@ on real source trees (it needs clang + a built tree, so it is manual, not in CI)
 Knobs and the reasoning behind them (`abicheck/buildsource/source_replay.py`):
 
 - **`ABICHECK_L4_JOBS`** — worker count for the per-TU extract pool. Auto =
-  `min(TUs, cpu_count, 8)`. An explicit override is now **clamped** to
+  `min(TUs, cpu_count, 8)`. An explicit override is **clamped** to
   `max(8, 2×cpu_count)` (logged when it fires) so a stray `=64` can't
   oversubscribe a host into thrash (`eval/SCALING.md` already saw jobs=8 on 4
   CPUs *regress*). Set `=1` to force serial (determinism).
+- **Memory cap (auto + override).** A single template-heavy C++ TU's
+  `clang -ast-dump=json` output — and its in-Python parse — can reach several
+  GiB, so the worker count is **also capped by available RAM**
+  (`min(…, MemAvailable / ABICHECK_L4_JOB_MEM_GIB)`, default `3.0` GiB/worker,
+  Linux only). On a low-memory host this stops N concurrent giant ASTs from
+  exhausting one process and getting the whole replay **OOM-killed** (the kernel
+  SIGKILLs it → `exit -9`, all L4 work lost — observed on the UXL oneTBB/oneDNN
+  `s5`/`s6` full-target replays on a 15 GiB host). The clamp is logged. For a
+  template-heavy tree on a constrained host, prefer a **seeded/scoped** scan
+  (`--since`/`--changed-path` → a handful of TUs) over a full-target `s5`/`s6`;
+  it sidesteps both the time *and* the memory cliff. `ABICHECK_L4_JOB_MEM_GIB`
+  tunes the per-worker budget (lower = more workers).
 - **`ABICHECK_L4_EXECUTOR`** (`thread` default / `process`) — after clang
   returns, the extractor parses clang's large JSON AST dump and builds
   structural fingerprints: pure-Python, **GIL-bound** work. A thread pool

@@ -942,16 +942,58 @@ def _l4_jobs_ceiling() -> int:
     return max(8, 2 * (os.cpu_count() or 1))
 
 
+#: Rough peak resident memory budget per concurrent L4 worker (GiB). A heavily
+#: templated C++ TU's ``clang -ast-dump=json`` output — and its in-Python parse —
+#: can reach several GiB, so the *default* worker count is sized to available RAM
+#: as well as CPU count: a low-memory host oversubscribing giant ASTs into one
+#: process is how the UXL oneTBB/oneDNN ``s5``/``s6`` replay got OOM-killed (the
+#: kernel SIGKILLs the whole replay → ``exit -9``, all L4 work lost). Tunable via
+#: ``ABICHECK_L4_JOB_MEM_GIB``; the cap is skipped when RAM can't be read.
+_L4_JOB_MEM_BUDGET_GIB = 3.0
+
+
+def _l4_available_mem_gib() -> float | None:
+    """Best-effort available RAM in GiB (Linux ``/proc/meminfo``), else ``None``."""
+    try:
+        with open("/proc/meminfo", encoding="ascii") as fh:
+            for line in fh:
+                if line.startswith("MemAvailable:"):
+                    return int(line.split()[1]) / (1024.0 * 1024.0)  # kB -> GiB
+    except (OSError, ValueError, IndexError):
+        pass
+    return None
+
+
+def _l4_job_mem_budget_gib() -> float:
+    try:
+        return max(0.25, float(os.environ.get("ABICHECK_L4_JOB_MEM_GIB") or _L4_JOB_MEM_BUDGET_GIB))
+    except ValueError:
+        return _L4_JOB_MEM_BUDGET_GIB
+
+
+def _l4_mem_cap() -> int | None:
+    """Max L4 workers that fit in available RAM, or ``None`` when RAM can't be read."""
+    avail = _l4_available_mem_gib()
+    if avail is None:
+        return None
+    return max(1, int(avail / _l4_job_mem_budget_gib()))
+
+
 def _l4_jobs(n_units: int) -> int:
     """Worker count for parallel L4 extraction (P06).
 
     ``ABICHECK_L4_JOBS`` overrides (set ``1`` to force serial — used by tests to
     prove determinism). Otherwise auto: one worker per cache-miss TU, capped at
-    the CPU count and 8 (clang is heavy; more workers mostly add contention). An
-    explicit override is still clamped to ``_l4_jobs_ceiling()`` to avoid
-    oversubscription thrash (a host can't usefully run 64 concurrent clang
-    processes); the clamp is logged so the requested value is not silently lost.
+    the CPU count and 8 (clang is heavy; more workers mostly add contention).
+
+    Both the auto default and an explicit override are additionally capped by
+    *available memory* (``_l4_mem_cap``): a single template-heavy TU's clang JSON
+    AST can be multiple GiB, so N concurrent workers in one process can exhaust a
+    low-memory host and get the whole replay OOM-killed. The memory clamp prevents
+    that (set ``ABICHECK_L4_JOB_MEM_GIB`` to tune, or seed/scope the scan to fewer
+    TUs); like the oversubscription ceiling, a clamp is logged, never silent.
     """
+    mem_cap = _l4_mem_cap()
     env = os.environ.get("ABICHECK_L4_JOBS")
     if env:
         try:
@@ -968,9 +1010,31 @@ def _l4_jobs(n_units: int) -> int:
                 os.cpu_count() or 1,
                 ceiling,
             )
-            return ceiling
+            requested = ceiling
+        if mem_cap is not None and requested > mem_cap:
+            _log.warning(
+                "ABICHECK_L4_JOBS=%d may not fit in available memory (~%.1f GiB at "
+                "~%.1f GiB/worker); clamping to %d to avoid an OOM-killed L4 replay. "
+                "Tune ABICHECK_L4_JOB_MEM_GIB, or seed/scope the scan to fewer TUs.",
+                requested,
+                _l4_available_mem_gib() or 0.0,
+                _l4_job_mem_budget_gib(),
+                mem_cap,
+            )
+            return mem_cap
         return requested
-    return max(1, min(n_units, os.cpu_count() or 1, 8))
+    auto = max(1, min(n_units, os.cpu_count() or 1, 8))
+    if mem_cap is not None and mem_cap < auto:
+        _log.info(
+            "L4 workers reduced %d -> %d to fit available memory (~%.1f GiB at "
+            "~%.1f GiB/worker); set ABICHECK_L4_JOBS / ABICHECK_L4_JOB_MEM_GIB to override.",
+            auto,
+            mem_cap,
+            _l4_available_mem_gib() or 0.0,
+            _l4_job_mem_budget_gib(),
+        )
+        return mem_cap
+    return auto
 
 
 def _l4_use_process_pool() -> bool:

@@ -24,6 +24,7 @@ from abicheck.buildsource.source_extractors.base import SourceExtractionError
 # ── worker-count clamp (#5: oversubscription guard) ───────────────────────────
 def test_l4_jobs_clamps_oversubscription(monkeypatch, caplog) -> None:
     monkeypatch.setenv("ABICHECK_L4_JOBS", "64")
+    monkeypatch.setattr(sr, "_l4_available_mem_gib", lambda: None)  # isolate CPU clamp
     ceiling = sr._l4_jobs_ceiling()
     with caplog.at_level(logging.WARNING):
         jobs = sr._l4_jobs(100)
@@ -45,8 +46,49 @@ def test_l4_jobs_invalid_env_falls_back_serial(monkeypatch) -> None:
 def test_l4_jobs_auto_capped_at_cpu_and_eight(monkeypatch) -> None:
     monkeypatch.delenv("ABICHECK_L4_JOBS", raising=False)
     monkeypatch.setattr(sr.os, "cpu_count", lambda: 4)
+    monkeypatch.setattr(sr, "_l4_available_mem_gib", lambda: None)  # isolate CPU clamp
     assert sr._l4_jobs(1000) == 4  # min(units, cpu, 8)
     assert sr._l4_jobs(2) == 2
+
+
+# ── memory clamp (#3: OOM guard for template-heavy L4) ────────────────────────
+def test_l4_jobs_auto_capped_by_available_memory(monkeypatch) -> None:
+    # On a low-memory host the auto default is reduced below the CPU cap so N
+    # concurrent multi-GiB clang ASTs can't OOM-kill the replay (the UXL s5/s6 OOM).
+    monkeypatch.delenv("ABICHECK_L4_JOBS", raising=False)
+    monkeypatch.delenv("ABICHECK_L4_JOB_MEM_GIB", raising=False)
+    monkeypatch.setattr(sr.os, "cpu_count", lambda: 8)
+    monkeypatch.setattr(sr, "_l4_available_mem_gib", lambda: 6.0)  # 6 GiB / 3.0 = 2
+    assert sr._l4_jobs(1000) == 2  # CPU cap 8 reduced to the memory cap 2
+
+
+def test_l4_jobs_explicit_clamped_by_memory(monkeypatch, caplog) -> None:
+    # An explicit override that won't fit in RAM is clamped (loudly), like the
+    # oversubscription ceiling — correctness (no OOM) over literal obedience.
+    monkeypatch.setenv("ABICHECK_L4_JOBS", "8")
+    monkeypatch.delenv("ABICHECK_L4_JOB_MEM_GIB", raising=False)
+    monkeypatch.setattr(sr, "_l4_available_mem_gib", lambda: 6.0)  # cap = 2
+    with caplog.at_level(logging.WARNING):
+        jobs = sr._l4_jobs(100)
+    assert jobs == 2
+    assert any("OOM" in r.message for r in caplog.records)
+
+
+def test_l4_job_mem_budget_env_tunes_the_cap(monkeypatch) -> None:
+    # A smaller per-worker budget raises the cap (escape hatch for big-RAM/swap hosts).
+    monkeypatch.delenv("ABICHECK_L4_JOBS", raising=False)
+    monkeypatch.setattr(sr.os, "cpu_count", lambda: 8)
+    monkeypatch.setattr(sr, "_l4_available_mem_gib", lambda: 6.0)
+    monkeypatch.setenv("ABICHECK_L4_JOB_MEM_GIB", "1.0")  # 6 / 1.0 = 6
+    assert sr._l4_jobs(1000) == 6
+
+
+def test_l4_jobs_no_meminfo_falls_back_to_cpu_cap(monkeypatch) -> None:
+    # When RAM can't be read (non-Linux / sandbox), the memory clamp is skipped.
+    monkeypatch.delenv("ABICHECK_L4_JOBS", raising=False)
+    monkeypatch.setattr(sr.os, "cpu_count", lambda: 4)
+    monkeypatch.setattr(sr, "_l4_available_mem_gib", lambda: None)
+    assert sr._l4_jobs(1000) == 4
 
 
 # ── executor selector (#1: GIL-bound AST work) ────────────────────────────────
