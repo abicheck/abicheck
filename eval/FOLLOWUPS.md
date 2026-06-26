@@ -201,7 +201,7 @@ The Amdahl wall in C1 (~60–83% serial) is partly an artifact, not inherent:
   `_scan_source_side` shallow-clones the repo at the tag (`_git_clone_tag`),
   configures it (`_cmake_configure` → `compile_commands.json`, honoring
   per-entry `cmake_subdir`/`cmake_args`), runs `dump --sources <tree>
-  --build-info <build> --collect-mode source-target`, and `_source_coverage`
+  --build-info <build> --depth full`, and `_source_coverage`
   counts the embedded `build_source` L3 (compile units/targets/options) / L4
   (declarations/types/macros) / L5 (nodes/edges) facts; the two sides are then
   `compare`d. Gated on git+cmake (skips gracefully with a row per entry when
