@@ -44,7 +44,8 @@ levels run are exactly those listed above. All times were captured with
   there.
 - **UMF** runs L3 + S2 `present` at `s1`/`s4` (operator pre-configure feeds the
   compile DB via `--build-info`, since UMF's CMake network-fetches hwloc/level-zero
-  which the sandbox proxy blocks) and full **L4 + L5** at `s5`/`s6`.
+  which the sandbox proxy blocks) and **L4 (partial) + L5** at `s5`/`s6` — the L4
+  replay completed for most TUs but not all (`L4_source_abi: partial` in the data).
 - **oneDNN** `s4` adds **L5** (`present`); its `s5`/`s6` full-target L4 is omitted
   (see RAM ceiling below).
 
@@ -68,8 +69,9 @@ break a version-string check misses.
 
 1. **Verdict is depth-invariant across every level that completed.** The artifact
    verdict set at `s0` (L0/L1) never changed at a deeper level here: UMF held
-   BREAKING through a full `s0`–`s6` (the one deep run that completed), and the
-   cheap tier (`s0`–`s4`) held its verdict on all four products. Deeper levels add
+   BREAKING through a full `s0`–`s6` (the one deep run that completed, L4 partial),
+   and the cheap tier (`s0`–`s4`) held its verdict on the three products that ran
+   it (oneTBB, UMF, oneDNN — oneDAL was binary-tier `s0` only). Deeper levels add
    localization/context (L3 build flags, S2 macros, L4 source ABI, L5 graph) and
    *can* surface additional source-level (`API_BREAK`) or risk findings when they
    complete — but flipped no artifact verdict in this matrix. This is **not** a
