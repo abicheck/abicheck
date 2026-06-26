@@ -109,6 +109,21 @@ def test_all_caps_prose_only_yields_no_macro_hint() -> None:
     assert diagnose_header_compile_failure(stderr) is None
 
 
+@pytest.mark.parametrize(
+    "stderr",
+    [
+        'ssl.h:1:2: error: #error "OPENSSL_API_LEVEL must not be defined by application"',
+        "n.h:3:2: error: #error You must not define MP_DIGIT_BIT yourself",
+        "c.h:4:2: error: #error do not define FOO_INTERNAL outside the library",
+    ],
+)
+def test_negated_macro_requirement_yields_no_misleading_hint(stderr: str) -> None:
+    # A "#error … must NOT be defined" must not produce a `-D<macro>` hint that
+    # points the user at the very macro that caused the failure (Codex review).
+    hint = diagnose_header_compile_failure(stderr)
+    assert hint is None or "-D" not in hint
+
+
 @pytest.mark.parametrize("macro", ["_GNU_SOURCE", "__STDC_LIMIT_MACROS"])
 def test_leading_underscore_config_macro(macro: str) -> None:
     # Config macros that start with an underscore (_GNU_SOURCE,

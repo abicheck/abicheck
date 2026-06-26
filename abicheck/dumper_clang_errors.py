@@ -141,6 +141,13 @@ _ERROR_LINE_RE = re.compile(r"#\s*error\b[^\n]*")
 #: macro itself is pulled out separately and case-sensitively (below) so a
 #: lowercase word like "must" can never be mistaken for the macro.
 _DEFINE_WORD_RE = re.compile(r"\b(?:defined?|set)\b", re.IGNORECASE)
+#: A *negated* requirement — the ``#error`` says the macro must **not** be
+#: defined (``"OPENSSL_API_LEVEL must not be defined by application"``,
+#: ``"You must not define MP_DIGIT_BIT"``). Telling the user to pass
+#: ``-D<macro>`` for the macro that *caused* the failure is exactly backwards,
+#: so a line matching this is not treated as a positive define requirement
+#: (Codex review).
+_NEGATED_REQUIREMENT_RE = re.compile(r"\b(?:not|never|without)\b|n't\b", re.IGNORECASE)
 #: An uppercase, macro-style identifier — case-sensitive (no IGNORECASE), so it
 #: matches ``PCRE2_CODE_UNIT_WIDTH``/``NDEBUG`` but never lowercase prose. The
 #: optional leading ``_*`` admits config macros that start with an underscore
@@ -187,10 +194,14 @@ def _required_macro_from_error(stderr: str) -> str | None:
     review). Prefers a compound ``NAME_WITH_UNDERSCORES`` token and skips common
     ALL-CAPS prose words, so both ``#error PCRE2_CODE_UNIT_WIDTH must be defined``
     and ``#error You must define PCRE2_CODE_UNIT_WIDTH`` yield the macro itself.
+    A *negated* requirement ("must **not** be defined") is skipped — pointing the
+    user at ``-D<macro>`` there would be exactly backwards (Codex review).
     """
     for m in _ERROR_LINE_RE.finditer(stderr):
         line = m.group(0)
         if not _DEFINE_WORD_RE.search(line):
+            continue
+        if _NEGATED_REQUIREMENT_RE.search(line):
             continue
         tokens: list[str] = [
             t for t in _UPPER_MACRO_RE.findall(line) if t not in _MACRO_PROSE_STOPWORDS
