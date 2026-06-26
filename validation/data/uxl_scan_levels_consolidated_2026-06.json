@@ -222,29 +222,12 @@
           "s6"
         ],
         "reason": "L4 full-target source replay omitted \u2014 RAM ceiling on the 15.1 GiB host (cf. oneTBB s5/s6 OOM)"
+      },
+      "binary_only_s0": {
+        "elapsed_s": 5.3,
+        "verdict": "BREAKING",
+        "note": "pure binary-only s0 (no --sources); the s0 run above carries --sources/--ast-frontend overhead. Findings join to oneDNN:libdnnl.so.3."
       }
-    },
-    {
-      "project": "oneDNN-bin",
-      "lang": "c++",
-      "soname": "libdnnl.so.3",
-      "old": "v3.11.3",
-      "new": "v3.12",
-      "tier": "binary",
-      "runs": [
-        {
-          "level": "s0",
-          "exit_code": 4,
-          "elapsed_s": 5.3,
-          "verdict": "BREAKING",
-          "layers": {
-            "L3_build": "not_collected",
-            "L4_source_abi": "not_collected",
-            "L5_source_graph": "not_collected",
-            "preprocessor_scan": "not_collected"
-          }
-        }
-      ]
     },
     {
       "project": "oneDAL",
