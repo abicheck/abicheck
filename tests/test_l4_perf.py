@@ -91,6 +91,74 @@ def test_l4_jobs_no_meminfo_falls_back_to_cpu_cap(monkeypatch) -> None:
     assert sr._l4_jobs(1000) == 4
 
 
+# ── memory-probe internals (real files; cgroup-aware, #458 Codex review) ──────
+def test_meminfo_available_parses_memavailable(tmp_path: Path) -> None:
+    mi = tmp_path / "meminfo"
+    mi.write_text("MemTotal:       16000000 kB\nMemAvailable:    8388608 kB\n")
+    # 8388608 kB == 8 GiB exactly.
+    assert sr._meminfo_available_mib_gib(str(mi)) == pytest.approx(8.0)
+
+
+def test_meminfo_available_missing_file_is_none(tmp_path: Path) -> None:
+    assert sr._meminfo_available_mib_gib(str(tmp_path / "nope")) is None
+
+
+def test_read_int_file_reads_int_else_none(tmp_path: Path) -> None:
+    good = tmp_path / "n"
+    good.write_text("4294967296\n")
+    assert sr._read_int_file(str(good)) == 4294967296
+    bad = tmp_path / "max"
+    bad.write_text("max\n")  # cgroup v2 unbounded keyword
+    assert sr._read_int_file(str(bad)) is None
+    assert sr._read_int_file(str(tmp_path / "absent")) is None
+
+
+def test_cgroup_v2_headroom(monkeypatch, tmp_path: Path) -> None:
+    # v2 limit 6 GiB, 2 GiB used -> 4 GiB headroom.
+    (tmp_path / "max").write_text(str(6 * 1024**3))
+    (tmp_path / "cur").write_text(str(2 * 1024**3))
+    monkeypatch.setattr(sr, "_CGROUP_V2_MAX", str(tmp_path / "max"))
+    monkeypatch.setattr(sr, "_CGROUP_V2_CURRENT", str(tmp_path / "cur"))
+    assert sr._cgroup_available_mem_gib() == pytest.approx(4.0)
+
+
+def test_cgroup_v2_max_keyword_falls_through_to_v1(monkeypatch, tmp_path: Path) -> None:
+    (tmp_path / "v2max").write_text("max\n")  # unbounded -> ignore v2
+    monkeypatch.setattr(sr, "_CGROUP_V2_MAX", str(tmp_path / "v2max"))
+    (tmp_path / "v1max").write_text(str(3 * 1024**3))
+    (tmp_path / "v1cur").write_text(str(1 * 1024**3))
+    monkeypatch.setattr(sr, "_CGROUP_V1_MAX", str(tmp_path / "v1max"))
+    monkeypatch.setattr(sr, "_CGROUP_V1_CURRENT", str(tmp_path / "v1cur"))
+    assert sr._cgroup_available_mem_gib() == pytest.approx(2.0)
+
+
+def test_cgroup_v1_unlimited_sentinel_is_none(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(sr, "_CGROUP_V2_MAX", str(tmp_path / "absent"))
+    (tmp_path / "v1max").write_text(str(sr._CGROUP_V1_UNLIMITED))  # >= sentinel
+    monkeypatch.setattr(sr, "_CGROUP_V1_MAX", str(tmp_path / "v1max"))
+    assert sr._cgroup_available_mem_gib() is None
+
+
+def test_cgroup_none_when_no_files(monkeypatch, tmp_path: Path) -> None:
+    for attr in ("_CGROUP_V2_MAX", "_CGROUP_V1_MAX"):
+        monkeypatch.setattr(sr, attr, str(tmp_path / f"absent-{attr}"))
+    assert sr._cgroup_available_mem_gib() is None
+
+
+def test_l4_available_mem_takes_min_of_host_and_cgroup(monkeypatch) -> None:
+    # The cgroup limit (4 GiB) is smaller than host MemAvailable (64 GiB): a pod
+    # on a big host must use the cgroup headroom, not the host RAM.
+    monkeypatch.setattr(sr, "_meminfo_available_mib_gib", lambda path="": 64.0)
+    monkeypatch.setattr(sr, "_cgroup_available_mem_gib", lambda: 4.0)
+    assert sr._l4_available_mem_gib() == pytest.approx(4.0)
+
+
+def test_l4_available_mem_none_when_neither_readable(monkeypatch) -> None:
+    monkeypatch.setattr(sr, "_meminfo_available_mib_gib", lambda path="": None)
+    monkeypatch.setattr(sr, "_cgroup_available_mem_gib", lambda: None)
+    assert sr._l4_available_mem_gib() is None
+
+
 # ── executor selector (#1: GIL-bound AST work) ────────────────────────────────
 def test_l4_executor_defaults_to_threads(monkeypatch) -> None:
     monkeypatch.delenv("ABICHECK_L4_EXECUTOR", raising=False)

@@ -951,22 +951,89 @@ def _l4_jobs_ceiling() -> int:
 #: ``ABICHECK_L4_JOB_MEM_GIB``; the cap is skipped when RAM can't be read.
 _L4_JOB_MEM_BUDGET_GIB = 3.0
 
+_KIB = 1024.0
+_GIB = 1024.0 * 1024.0 * 1024.0
 
-def _l4_available_mem_gib() -> float | None:
-    """Best-effort available RAM in GiB (Linux ``/proc/meminfo``), else ``None``."""
+#: cgroup memory-accounting files. In a container the process is confined to a
+#: cgroup whose limit is usually *below* the host RAM that ``/proc/meminfo``
+#: reports, so the OOM guard must read these too (Codex review on #458): a
+#: 4 GiB-limited pod on a 64 GiB host would otherwise keep the host-sized cap and
+#: still get SIGKILLed. Paths are module constants so tests can repoint them.
+_CGROUP_V2_MAX = "/sys/fs/cgroup/memory.max"
+_CGROUP_V2_CURRENT = "/sys/fs/cgroup/memory.current"
+_CGROUP_V1_MAX = "/sys/fs/cgroup/memory/memory.limit_in_bytes"
+_CGROUP_V1_CURRENT = "/sys/fs/cgroup/memory/memory.usage_in_bytes"
+#: cgroup v1 reports "unlimited" as a near-INT64_MAX sentinel rather than a
+#: keyword; anything at/above this is treated as no limit.
+_CGROUP_V1_UNLIMITED = 1 << 62
+
+
+def _read_int_file(path: str) -> int | None:
+    """Read a single integer from ``path`` (cgroup files), or ``None``.
+
+    Returns ``None`` for a missing/unreadable file or a non-integer body such as
+    cgroup v2's literal ``max`` (= unbounded), which the callers treat as
+    "no cgroup limit".
+    """
     try:
-        with open("/proc/meminfo", encoding="ascii") as fh:
+        with open(path, encoding="ascii") as fh:
+            return int(fh.read().strip())
+    except (OSError, ValueError):
+        return None
+
+
+def _cgroup_available_mem_gib() -> float | None:
+    """Container memory headroom in GiB from cgroup limits, or ``None``.
+
+    Tries cgroup v2 (``memory.max`` − ``memory.current``) then v1
+    (``memory.limit_in_bytes`` − ``memory.usage_in_bytes``); returns ``None``
+    when no bounded limit is configured (the common bare-metal/host case).
+    """
+    limit = _read_int_file(_CGROUP_V2_MAX)
+    if limit is not None:
+        used = _read_int_file(_CGROUP_V2_CURRENT) or 0
+        return max(0.0, (limit - used) / _GIB)
+    limit = _read_int_file(_CGROUP_V1_MAX)
+    if limit is not None and limit < _CGROUP_V1_UNLIMITED:
+        used = _read_int_file(_CGROUP_V1_CURRENT) or 0
+        return max(0.0, (limit - used) / _GIB)
+    return None
+
+
+def _meminfo_available_mib_gib(path: str = "/proc/meminfo") -> float | None:
+    """Host ``MemAvailable`` in GiB (Linux ``/proc/meminfo``), or ``None``."""
+    try:
+        with open(path, encoding="ascii") as fh:
             for line in fh:
                 if line.startswith("MemAvailable:"):
-                    return int(line.split()[1]) / (1024.0 * 1024.0)  # kB -> GiB
+                    return int(line.split()[1]) * _KIB / _GIB  # kB -> GiB
     except (OSError, ValueError, IndexError):
         pass
     return None
 
 
+def _l4_available_mem_gib() -> float | None:
+    """Best-effort available RAM in GiB, honouring cgroup limits in containers.
+
+    Returns the *smaller* of host ``MemAvailable`` and the cgroup memory headroom
+    so a process confined to a small cgroup on a large host still sizes its L4
+    worker count to what it is actually allowed to use. ``None`` when neither
+    source is readable (non-Linux / sandbox), which skips the memory clamp.
+    """
+    candidates = [
+        v
+        for v in (_meminfo_available_mib_gib(), _cgroup_available_mem_gib())
+        if v is not None
+    ]
+    return min(candidates) if candidates else None
+
+
 def _l4_job_mem_budget_gib() -> float:
     try:
-        return max(0.25, float(os.environ.get("ABICHECK_L4_JOB_MEM_GIB") or _L4_JOB_MEM_BUDGET_GIB))
+        return max(
+            0.25,
+            float(os.environ.get("ABICHECK_L4_JOB_MEM_GIB") or _L4_JOB_MEM_BUDGET_GIB),
+        )
     except ValueError:
         return _L4_JOB_MEM_BUDGET_GIB
 

@@ -318,8 +318,13 @@ Knobs and the reasoning behind them (`abicheck/buildsource/source_replay.py`):
 - **Memory cap (auto + override).** A single template-heavy C++ TU's
   `clang -ast-dump=json` output — and its in-Python parse — can reach several
   GiB, so the worker count is **also capped by available RAM**
-  (`min(…, MemAvailable / ABICHECK_L4_JOB_MEM_GIB)`, default `3.0` GiB/worker,
-  Linux only). On a low-memory host this stops N concurrent giant ASTs from
+  (`min(…, available / ABICHECK_L4_JOB_MEM_GIB)`, default `3.0` GiB/worker,
+  Linux only). "Available" is the *smaller* of host `MemAvailable`
+  (`/proc/meminfo`) and the **cgroup** memory headroom (v2 `memory.max` −
+  `memory.current`, or v1 `memory.limit_in_bytes` − `memory.usage_in_bytes`), so
+  a container/pod confined to a small cgroup on a large host sizes its workers to
+  what it is actually allowed to use rather than to host RAM. On a low-memory
+  host this stops N concurrent giant ASTs from
   exhausting one process and getting the whole replay **OOM-killed** (the kernel
   SIGKILLs it → `exit -9`, all L4 work lost — observed on the UXL oneTBB/oneDNN
   `s5`/`s6` full-target replays on a 15 GiB host). The clamp is logged. For a
