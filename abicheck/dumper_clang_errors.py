@@ -142,8 +142,11 @@ _ERROR_LINE_RE = re.compile(r"#\s*error\b[^\n]*")
 #: lowercase word like "must" can never be mistaken for the macro.
 _DEFINE_WORD_RE = re.compile(r"\b(?:defined?|set)\b", re.IGNORECASE)
 #: An uppercase, macro-style identifier — case-sensitive (no IGNORECASE), so it
-#: matches ``PCRE2_CODE_UNIT_WIDTH``/``NDEBUG`` but never lowercase prose.
-_UPPER_MACRO_RE = re.compile(r"\b[A-Z][A-Z0-9_]{3,}\b")
+#: matches ``PCRE2_CODE_UNIT_WIDTH``/``NDEBUG`` but never lowercase prose. The
+#: optional leading ``_*`` admits config macros that start with an underscore
+#: (``_GNU_SOURCE``, ``__STDC_LIMIT_MACROS``) — a ``\b[A-Z]`` anchor would miss
+#: those because ``_`` is itself a word char (CodeRabbit review).
+_UPPER_MACRO_RE = re.compile(r"(?<![A-Za-z0-9_])_*[A-Z][A-Z0-9_]{2,}(?![A-Za-z0-9_])")
 #: ALL-CAPS English words that turn up in "#error You MUST define FOO" prose but
 #: are never the macro the user must define — skipped when picking the macro.
 _MACRO_PROSE_STOPWORDS = frozenset(

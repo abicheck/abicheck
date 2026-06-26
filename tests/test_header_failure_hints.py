@@ -94,11 +94,28 @@ def test_macro_named_after_prose_is_captured_not_the_prose() -> None:
 
 
 def test_macro_detection_is_case_sensitive_no_false_hint() -> None:
-    # A generic #error with no ALL-CAPS macro token must not invent a macro hint.
+    # A generic #error with no ALL-CAPS macro token hits no known signature, so
+    # the contract is a clean None — not a bogus macro hint built from prose.
     stderr = "x.h:1:2: error: #error this header must be configured first"
-    hint = diagnose_header_compile_failure(stderr)
-    # Either no hint, or at least not a bogus macro hint built from prose.
-    assert hint is None or "macro" not in hint
+    assert diagnose_header_compile_failure(stderr) is None
+
+
+def test_all_caps_prose_only_yields_no_macro_hint() -> None:
+    # An #error whose only ALL-CAPS tokens are prose stopwords ("You MUST
+    # define") must not fabricate a macro hint from them.
+    stderr = "x.h:1:2: error: #error You MUST define it"
+    assert diagnose_header_compile_failure(stderr) is None
+
+
+def test_leading_underscore_config_macro() -> None:
+    # Config macros that start with an underscore (_GNU_SOURCE,
+    # __STDC_LIMIT_MACROS) must still be recognized — `\b[A-Z]` would miss them.
+    for macro in ("_GNU_SOURCE", "__STDC_LIMIT_MACROS"):
+        stderr = f"h.h:9:2: error: #error {macro} must be defined first"
+        hint = diagnose_header_compile_failure(stderr)
+        assert hint is not None
+        assert macro in hint
+        assert f"-D{macro}" in hint
 
 
 def test_macro_takes_precedence_over_missing_header() -> None:
