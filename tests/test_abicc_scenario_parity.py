@@ -117,6 +117,29 @@ class TestFunctionPointerChanges:
         result = compare(old, new)
         assert result.verdict == Verdict.BREAKING
 
+    def test_std_function_field_signature_changed_after_rename_is_breaking(self) -> None:
+        """pvxs#158: renamed std::function field with changed signature is BREAKING."""
+        old = _snap(types=[RecordType(name="ConnectImpl", kind="class", fields=[
+            TypeField(name="_connected", type="std::atomic<bool>", offset_bits=0),
+            TypeField(name="_onConn", type="std::function<void()>", offset_bits=64),
+            TypeField(name="_onDis", type="std::function<void()>", offset_bits=128),
+        ])])
+        new = _snap(types=[RecordType(name="ConnectImpl", kind="class", fields=[
+            TypeField(name="_connected", type="std::atomic<bool>", offset_bits=0),
+            TypeField(name="_onConn1", type="std::function<void(const Connected&)>", offset_bits=64),
+            TypeField(name="_onDis", type="std::function<void()>", offset_bits=128),
+        ])])
+        result = compare(old, new)
+        changes = [
+            c for c in result.changes
+            if c.kind == ChangeKind.TYPE_FIELD_TYPE_CHANGED and c.symbol == "ConnectImpl"
+        ]
+        assert result.verdict == Verdict.BREAKING
+        assert changes
+        assert "ConnectImpl::_onConn -> _onConn1" in changes[0].description
+        assert changes[0].old_value == "std::function<void()>"
+        assert changes[0].new_value == "std::function<void(const Connected&)>"
+
 
 # ===========================================================================
 # 2. Return type void transitions
