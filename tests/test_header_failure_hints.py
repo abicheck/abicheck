@@ -176,6 +176,21 @@ def test_positive_missing_macro_gate_still_hints(stderr: str, macro: str) -> Non
     assert f"-D{macro}" in hint
 
 
+@pytest.mark.parametrize(
+    "stderr",
+    [
+        "n.h:1:2: error: #error MAX_COMMAND is already inconsistently defined",
+        "p.h:1:2: error: #error HAVE_THREAD_LOCAL is already defined",
+        "x.h:1:2: error: #error FOO_FLAG redefined with a conflicting value",
+    ],
+)
+def test_already_defined_macro_yields_no_misleading_hint(stderr: str) -> None:
+    # An "already/inconsistently/conflicting defined" diagnostic means the macro
+    # is present, not missing — no `-D<macro>` hint should be emitted (Codex).
+    hint = diagnose_header_compile_failure(stderr)
+    assert hint is None or "-D" not in hint
+
+
 @pytest.mark.parametrize("macro", ["_GNU_SOURCE", "__STDC_LIMIT_MACROS"])
 def test_leading_underscore_config_macro(macro: str) -> None:
     # Config macros that start with an underscore (_GNU_SOURCE,

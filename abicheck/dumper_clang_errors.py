@@ -164,6 +164,15 @@ _NEGATED_REQUIREMENT_RE = re.compile(
     r"|\bnever\b[^\n]{0,15}?\b(?:defined?|define|set)\b",
     re.IGNORECASE,
 )
+#: An *already-defined / conflicting* diagnostic — the macro is present or
+#: clashes, not missing (ncurses' ``MAX_COMMAND is already inconsistently
+#: defined``, Python's ``HAVE_THREAD_LOCAL is already defined``). Suggesting
+#: ``-D<macro>`` is the wrong direction, so these words on the ``#error`` line
+#: suppress the require-macro hint (Codex review). They never appear in a
+#: genuine "you must define X" requirement.
+_ALREADY_DEFINED_RE = re.compile(
+    r"\b(?:already|redefin\w*|inconsistent\w*|conflict\w*)\b", re.IGNORECASE
+)
 #: An uppercase, macro-style identifier — case-sensitive (no IGNORECASE), so it
 #: matches ``PCRE2_CODE_UNIT_WIDTH``/``NDEBUG`` but never lowercase prose. The
 #: optional leading ``_*`` admits config macros that start with an underscore
@@ -211,7 +220,9 @@ def _required_macro_from_error(stderr: str) -> str | None:
     ALL-CAPS prose words, so both ``#error PCRE2_CODE_UNIT_WIDTH must be defined``
     and ``#error You must define PCRE2_CODE_UNIT_WIDTH`` yield the macro itself.
     A *negated* requirement ("must **not** be defined") is skipped — pointing the
-    user at ``-D<macro>`` there would be exactly backwards (Codex review). When no
+    user at ``-D<macro>`` there would be exactly backwards (Codex review). An
+    *already-defined / conflicting* diagnostic ("already defined", "inconsistently
+    defined") is likewise skipped — the macro is present, not missing. When no
     compound token is present, the candidate *nearest the define/set verb* wins,
     so ``#error API users must define FOO`` yields ``FOO``, not the ``API`` prose
     acronym (Codex review).
@@ -222,6 +233,10 @@ def _required_macro_from_error(stderr: str) -> str | None:
         if not dm:
             continue
         if _NEGATED_REQUIREMENT_RE.search(line):
+            continue
+        if _ALREADY_DEFINED_RE.search(line):
+            # The macro is already-defined / conflicting, not missing — a -D hint
+            # would point the wrong way (Codex review).
             continue
         cands = [
             (tm.start(), tm.group(0))
