@@ -123,6 +123,91 @@ def _is_missing_cpp_stdlib_header_error(stderr: str) -> bool:
     )
 
 
+#: A missing include, either spelling: clang's ``'name' file not found`` or
+#: gcc/castxml's ``fatal error: name: No such file or directory``.
+_MISSING_INCLUDE_RE = re.compile(
+    r"'([^'\n]+\.[A-Za-z0-9_+]+)' file not found"
+    r"|fatal error:\s*([^\n:]+\.[A-Za-z0-9_+]+):\s*No such file or directory"
+)
+#: A config/feature ``#error`` naming an ALL_CAPS macro the caller must define
+#: (e.g. pcre2's ``#error PCRE2_CODE_UNIT_WIDTH must be defined``). The
+#: graceful-exclusion path (:func:`retry_excluding_error_headers`) only drops
+#: *direct-inclusion guards*; a config ``#error`` like this surfaces as a hard
+#: failure, so a hint pointing at ``--gcc-options -D…`` is what unblocks it.
+_REQUIRED_MACRO_RE = re.compile(
+    r"#\s*error\b[^\n]*?\b([A-Z][A-Z0-9_]{3,})\b[^\n]*?\b(?:defined|define|set)\b",
+    re.IGNORECASE,
+)
+#: A name that resolved to no declaration — the signature of a header parsed
+#: without its umbrella/config prelude (``size_t``, ``hid_t``, ``H5std_string``,
+#: an incomplete forward-declared ``uv__queue``). Captures the offending name.
+_UNDECLARED_NAME_RE = re.compile(
+    r"unknown type name '([^']+)'"
+    r"|use of undeclared identifier '([^']+)'"
+    r"|'([^']+)' (?:was not declared|does not name a type|has not been declared)"
+)
+
+
+def diagnose_header_compile_failure(stderr: str) -> str | None:
+    """Map a remediable header-parse failure to an actionable ``\\n\\nHint: …`` block.
+
+    Frontend-agnostic (clang and castxml both emit clang-style diagnostics), pure
+    and string-only so it is unit-testable without a compiler. Returns ``None``
+    when no known signature matches, so callers can fall back to the raw stderr.
+
+    Covers the three recurring real-world aborts a bare ``-H include/`` hits on a
+    conda/runtime package (field-eval P1) that previously surfaced only as an
+    opaque compiler dump:
+
+    1. a missing dependency / split-include header (``absl/…``, ``gio/gio.h``),
+    2. a required config/feature macro (``PCRE2_CODE_UNIT_WIDTH``),
+    3. an undeclared type from missing umbrella/std context (``size_t``,
+       ``hid_t``, ``H5std_string``).
+    """
+    if not stderr:
+        return None
+
+    macro = _REQUIRED_MACRO_RE.search(stderr)
+    if macro:
+        name = macro.group(1)
+        return (
+            f"\n\nHint: a header requires the macro '{name}' to be defined before "
+            f"inclusion. Pass it via --gcc-options (e.g. --gcc-options "
+            f'"-D{name}=...", such as -DPCRE2_CODE_UNIT_WIDTH=8 for pcre2), or point '
+            "-H at the library's umbrella header that defines it rather than an "
+            "individual sub-header."
+        )
+
+    miss = _MISSING_INCLUDE_RE.search(stderr)
+    if miss:
+        name = miss.group(1) or miss.group(2) or ""
+        nested = "/" in name
+        return (
+            f"\n\nHint: the include '{name}' was not found"
+            + (
+                " — it looks like a dependency or a split include root."
+                if nested
+                else "."
+            )
+            + " Add its directory with --include-dir / -I, or install the package "
+            "that ships it (often a separate *-dev/*-devel or dependency package; "
+            "conda runtime packages frequently omit headers)."
+        )
+
+    undecl = _UNDECLARED_NAME_RE.search(stderr)
+    if undecl:
+        name = undecl.group(1) or undecl.group(2) or undecl.group(3) or ""
+        return (
+            f"\n\nHint: '{name}' was used without a declaration — the header was "
+            "likely parsed without its standard prelude or umbrella context. Point "
+            "-H at the library's top-level public/umbrella header (which pulls in "
+            "config and base types) instead of an internal sub-header, or add the "
+            "missing dependency include roots with --include-dir / -I."
+        )
+
+    return None
+
+
 def _is_direct_include_guard_failure(stderr: str) -> bool:
     """True if a parse failure looks like a header refusing direct inclusion.
 

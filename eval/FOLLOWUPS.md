@@ -350,3 +350,68 @@ The entire eval was **Linux/ELF**. These are untested paths, not known bugs.
 5. **E1 (PE/Mach-O)** — close the platform-coverage hole (the remaining
    highest-value gap).
 6. **E4 LLVM-scale, F1 (new ecosystems)** — depth & breadth as capacity allows.
+
+---
+
+## H. Conda-forge scan 2026-06-24 follow-ups
+
+A broad conda-forge validation run (22 runtime libraries) surfaced one stale
+harness bug and a cluster of header-mode UX gaps. The product-side gaps were
+addressed directly; the harness/packaging items below are network-bound (they
+need live conda fetches + a castxml/clang build) and are scoped here for a
+network-enabled run.
+
+### H1. Source-tier runner used the removed `dump --collect-mode` — **shipped**
+- **Context.** `eval/runner.py --tier source` and `scaling.py` called
+  `dump --collect-mode source-target`, removed when evidence-depth unified
+  behind `--depth`. snappy's source configure also failed on the absent
+  `third_party/benchmark` submodule.
+- **Shipped.** Both call sites now use `dump --sources --build-info … --depth
+  full` (S6 / full-scope replay); snappy's manifest entry passes
+  `-DSNAPPY_BUILD_TESTS=OFF -DSNAPPY_BUILD_BENCHMARKS=OFF`.
+- **Note.** The scan's "`compare-release` missing" finding is **by design** —
+  the standalone command was removed (ADR-037 D7) and folded into
+  `compare <pkg> <pkg>`; the GitHub Action's `compare-release` mode routes
+  there. No change needed.
+
+### H2. Header-scan failures now emit actionable hints (P1) — **shipped (product)**
+- **Context.** A bare `-H include/` against real packages aborted with opaque
+  compiler dumps: pcre2 (`PCRE2_CODE_UNIT_WIDTH` undefined), protobuf
+  (`absl/strings/string_view.h` not found), glib (`gio/gio.h` root missing),
+  libjpeg-turbo/hdf5 (`size_t`/`hid_t`/`H5std_string` undeclared without an
+  umbrella).
+- **Shipped.** `dumper_clang_errors.diagnose_header_compile_failure` maps these
+  three signatures (required macro → `--gcc-options -D…`; missing include →
+  add `-I` / install `-dev`/`-devel`; undeclared type → point `-H` at the
+  umbrella header) and both the castxml and clang failure paths append the
+  hint. Unit-tested in `tests/test_header_failure_hints.py`.
+
+### H3. `scan --estimate` L2 cost is size-aware (P1) — **shipped (product)**
+- **Context.** The dry-run estimate priced every header at a flat anchor, so a
+  trivial shim and a heavy templated umbrella ranked identically; ICU/hdf5
+  header scans took 80–180 s while the estimate read flat.
+- **Shipped.** `service_scan._estimate_header_seconds` adds a per-KB term over
+  each header's on-disk size on top of the per-header base. Tested in
+  `tests/test_scan_estimate.py`.
+
+### H4. Fetch devel/include + dependency header packages — **NEW, network-bound**
+- **Context.** `condafetch.py` fetches only the single runtime package, which
+  for several libs (zlib, xz-liblzma, openblas) ships no `include/` tree; and
+  header scans of split libraries need dependency include roots (protobuf→absl,
+  glib→gio).
+- **Pointers.** `eval/condafetch.py` (add `-dev`/`-devel`/`-static`/`-headers`
+  variant resolution + a way to fetch named dependency packages); a `headers:`
+  block in `manifest.yaml` (umbrella header, required `-D` macros, extra include
+  roots) consumed by a new header tier in `runner.py` (mirror the source tier:
+  non-gating, network-gated, `continue-on-error`).
+- **Acceptance.** Header tier green for the rc=1 libraries using documented,
+  per-entry umbrella + macro config.
+- **Effort·Risk.** M · medium (network + per-package config discovery).
+
+### H5. Add oneDAL / oneTBB / oneDNN entries — **NEW, network-bound**
+- **Context.** Split oneAPI packages exercise the devel-package + umbrella-
+  header path (`oneapi/tbb.h`) end-to-end.
+- **Pointers.** `eval/manifest.yaml` with `source:` blocks (repo + tags +
+  `cmake_args`) and, once H4 lands, a `headers:` block; verify each builds and
+  scans before committing `expect` verdicts (do not commit guessed verdicts).
+- **Effort·Risk.** M per lib · medium.
