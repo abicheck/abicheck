@@ -1510,6 +1510,47 @@ def test_depth_binary_clears_baseline_headers(
     assert captured["headers"] == []
 
 
+def test_depth_binary_clears_source_inputs(
+    monkeypatch, runner, new_snap_compatible, tmp_path
+):
+    # Matrix runners often pass --sources/--compile-db to every depth. Effective
+    # binary depth must stay L0/L1-only and avoid the always-on source pattern
+    # scan / L3 collection cost.
+    import abicheck.cli_scan as cs
+
+    src = tmp_path / "src"
+    src.mkdir()
+    cdb = tmp_path / "compile_commands.json"
+    cdb.write_text("[]", encoding="utf-8")
+    captured: dict[str, object] = {}
+    original = cs.run_scan_core
+
+    def _spy(*args, **kwargs):
+        captured["sources"] = kwargs.get("sources")
+        captured["effective_build_info"] = kwargs.get("effective_build_info")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(cs, "run_scan_core", _spy)
+    res = runner.invoke(
+        main,
+        [
+            "scan",
+            "--binary",
+            str(new_snap_compatible),
+            "--sources",
+            str(src),
+            "--compile-db",
+            str(cdb),
+            "--depth",
+            "binary",
+            "--audit",
+        ],
+    )
+    assert res.exit_code == 0, res.output
+    assert captured["sources"] is None
+    assert captured["effective_build_info"] is None
+
+
 def test_depth_binary_skips_export_delta_poi_loads(
     monkeypatch, runner, baseline_snap, new_snap_compatible
 ):
