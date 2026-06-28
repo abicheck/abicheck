@@ -903,6 +903,13 @@ def scan_cmd(
         # new side has none, yielding spurious header/type removals against a
         # symbols-only scan (Codex review). Include dirs are harmless (no AST).
         baseline_header = ()
+        # Binary depth is L0/L1 only. A caller may pass the same --sources or
+        # --compile-db flags to every depth in a matrix; do not let those flags
+        # trigger the always-on source pattern scan or L3 collection on the binary
+        # rung (Codex / pvxs perf regression).
+        sources = None
+        build_info = None
+        compile_db = None
     effective_build_info = compile_db or build_info
 
     # --- --estimate: dry-run cost probe, scan nothing (ADR-035 D10) -----------
