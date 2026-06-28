@@ -541,6 +541,12 @@ def test_cache_get_ignores_bad_tu_payload(tmp_path: Path) -> None:
     assert cache.get("k") is None
 
 
+def test_cache_put_ignores_unwritable_cache_dir() -> None:
+    cache = SourceAbiCache(Path("/proc/abicheck-l4-cache"))
+
+    cache.put("k", SourceAbiTu(tu_id="cu://x"))
+
+
 def test_cache_key_changes_with_argv_forced_include(tmp_path: Path) -> None:
     # Codex #339 P2: a forced-include change lives only in argv (not the
     # structured fields), so the key must fold in the replayed argv flags or a
