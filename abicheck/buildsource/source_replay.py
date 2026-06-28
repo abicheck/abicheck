@@ -764,13 +764,17 @@ class SourceAbiCache:
             if digest is not None:
                 deps[dep_path] = digest
         entry = {"tu": tu.to_dict(), "deps": deps}
-        self.cache_dir.mkdir(parents=True, exist_ok=True)
         tmp = self._path(key).with_suffix(".json.tmp")
-        tmp.write_text(
-            json.dumps(entry, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-        )
-        # Atomic publish so a concurrent reader never sees a partial file.
-        tmp.replace(self._path(key))
+        try:
+            self.cache_dir.mkdir(parents=True, exist_ok=True)
+            tmp.write_text(
+                json.dumps(entry, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+            )
+            # Atomic publish so a concurrent reader never sees a partial file.
+            tmp.replace(self._path(key))
+        except OSError:
+            # Cache writes are best-effort; replay already produced the facts.
+            tmp.unlink(missing_ok=True)
 
 
 def _dep_digest(path: str, memo: dict[str, str | None] | None = None) -> str | None:

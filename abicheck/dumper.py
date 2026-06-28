@@ -36,7 +36,6 @@ import re
 import shlex
 import shutil
 import subprocess
-import sys
 import tempfile
 import warnings
 from collections.abc import Callable
@@ -54,6 +53,7 @@ if TYPE_CHECKING:
 
 from defusedxml import ElementTree as DefusedET
 
+from .dumper_cache import _cache_path
 from .dumper_castxml import (
     _CastxmlParser as _CastxmlParser,
     _parse_vtable_index as _parse_vtable_index,
@@ -642,22 +642,6 @@ def _cache_key(
     return h.hexdigest()
 
 
-def _cache_path(key: str, backend: str = "castxml") -> Path:
-    # One sub-directory + file extension per backend so the castxml-XML and
-    # clang-JSON caches live side by side without clashing.
-    ext = "json" if backend == "clang" else "xml"
-    if sys.platform == "win32":
-        # Use %LOCALAPPDATA%/abi_check/<backend> on Windows
-        local = os.environ.get("LOCALAPPDATA")
-        if local:
-            cache_dir = Path(local) / "abi_check" / backend
-        else:
-            cache_dir = Path.home() / "AppData" / "Local" / "abi_check" / backend
-    else:
-        cache_dir = Path.home() / ".cache" / "abi_check" / backend
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    return cache_dir / f"{key}.{ext}"
-
 
 # C++ file extensions that unambiguously indicate C++ content.
 _CPP_EXTENSIONS = frozenset({".hpp", ".hxx", ".hh", ".h++", ".tpp"})
@@ -1127,7 +1111,10 @@ def _castxml_dump(
                 # error (and its hint), not the fallback's, so the diagnostic
                 # matches what the user asked for.
                 raise primary from None
-        shutil.copy2(str(out_xml), str(cached))
+        try:
+            shutil.copy2(str(out_xml), str(cached))
+        except OSError as exc:
+            log.warning("Could not write castxml AST cache %s: %s", cached, exc)
         return root
     finally:
         out_xml.unlink(missing_ok=True)

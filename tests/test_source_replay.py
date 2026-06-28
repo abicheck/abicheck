@@ -541,6 +541,22 @@ def test_cache_get_ignores_bad_tu_payload(tmp_path: Path) -> None:
     assert cache.get("k") is None
 
 
+def test_cache_put_ignores_unwritable_cache_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cache = SourceAbiCache(tmp_path / "cache")
+    real_mkdir = Path.mkdir
+
+    def fail_cache_mkdir(self, *args, **kwargs):
+        if self == cache.cache_dir:
+            raise OSError("read-only cache")
+        return real_mkdir(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "mkdir", fail_cache_mkdir)
+    cache.put("k", SourceAbiTu(tu_id="cu://x"))
+    assert cache.get("k") is None
+
+
 def test_cache_key_changes_with_argv_forced_include(tmp_path: Path) -> None:
     # Codex #339 P2: a forced-include change lives only in argv (not the
     # structured fields), so the key must fold in the replayed argv flags or a
