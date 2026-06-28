@@ -58,7 +58,7 @@ conda install -c conda-forge abicheck
 
 `abicheck` also needs `castxml` and a C++ compiler for header AST analysis (the conda-forge package pulls these in automatically). Without them, abicheck still works in binary-only mode. See [Getting Started](https://abicheck.github.io/abicheck/getting-started/) for per-platform setup and cross-compilation.
 
-> **Naming note:** the PyPI package (`abicheck`) is distinct from distro-packaged tools with similar names (`abi-compliance-checker` wrappers in Debian `devscripts`, or `abicheck` in Fedora's `libabigail-tools`). Run `abicheck --version` to confirm — it should print `abicheck X.Y.Z (abicheck/abicheck)`. If there is a conflict, invoke via `python -m abicheck`.
+> **Naming note:** the PyPI/conda-forge package (`abicheck`) is distinct from the older SourceForge `abicheck` that is still packaged by some Linux distributions, and from similarly named ABI tools such as `abi-compliance-checker` wrappers or Fedora's `libabigail-tools`. Run `abicheck --version` to confirm — it should print `abicheck X.Y.Z (abicheck/abicheck)`. If there is a conflict, invoke via `python -m abicheck`.
 
 ---
 
@@ -130,6 +130,8 @@ Use these to gate CI pipelines.
 ```
 
 The action installs Python, castxml, and abicheck automatically. Outputs: `verdict`, `exit-code`, `report-path`. See the [GitHub Action docs](https://abicheck.github.io/abicheck/user-guide/github-action/) for matrix builds, cross-compilation, and gating flags (`fail-on-breaking`, `fail-on-api-break`).
+
+The default compare path only needs normal checkout access. Extra repository permissions are needed only for optional GitHub integrations: `pull-requests: write` for PR comments and `security-events: write` for SARIF upload.
 
 ---
 
