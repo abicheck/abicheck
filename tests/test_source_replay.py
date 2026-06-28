@@ -541,9 +541,18 @@ def test_cache_get_ignores_bad_tu_payload(tmp_path: Path) -> None:
     assert cache.get("k") is None
 
 
-def test_cache_put_ignores_unwritable_cache_dir() -> None:
-    cache = SourceAbiCache(Path("/proc/abicheck-l4-cache"))
+def test_cache_put_ignores_unwritable_cache_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cache = SourceAbiCache(tmp_path / "cache")
+    real_mkdir = Path.mkdir
 
+    def fail_cache_mkdir(self, *args, **kwargs):
+        if self == cache.cache_dir:
+            raise OSError("read-only cache")
+        return real_mkdir(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "mkdir", fail_cache_mkdir)
     cache.put("k", SourceAbiTu(tu_id="cu://x"))
     assert cache.get("k") is None
 

@@ -181,7 +181,17 @@ class TestCachePath:
     def test_posix_readonly_home_falls_back_to_temp_cache(self, tmp_path, monkeypatch):
         monkeypatch.setattr("sys.platform", "linux")
         monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
-        monkeypatch.setattr(Path, "home", lambda: Path("/proc"))
+        blocked_home = tmp_path / "blocked-home"
+        blocked_cache = blocked_home / ".cache" / "abi_check" / "castxml"
+        real_mkdir = Path.mkdir
+
+        def fail_blocked_cache(self, *args, **kwargs):
+            if self == blocked_cache:
+                raise OSError("read-only home")
+            return real_mkdir(self, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "home", lambda: blocked_home)
+        monkeypatch.setattr(Path, "mkdir", fail_blocked_cache)
         monkeypatch.setattr("tempfile.gettempdir", lambda: str(tmp_path))
 
         p = _cache_path("abc123")

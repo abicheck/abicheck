@@ -965,14 +965,21 @@ class TestDebuginfodNetwork:
     def test_fetch_one_url_falls_back_to_temp_cache_on_write_error(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        resolver = DebuginfodResolver(server_urls=["https://x"], cache_dir=Path("/proc/cache"))
+        resolver = DebuginfodResolver(server_urls=["https://x"], cache_dir=tmp_path)
         monkeypatch.setattr("tempfile.gettempdir", lambda: str(tmp_path))
+        primary = tmp_path / "primary" / "out.debug"
+        real_write = resolver._atomic_cache_write
+
+        def fail_primary_cache_write(dest: Path, data: bytes) -> None:
+            if dest == primary:
+                raise OSError("read-only cache")
+            real_write(dest, data)
+
+        monkeypatch.setattr(resolver, "_atomic_cache_write", fail_primary_cache_write)
         with patch.object(
             resolver, "_fetch_data", return_value=b"\x7fELF" + b"\x00" * 20
         ):
-            artifact = resolver._fetch_one_url(
-                "https://x", "abcdef1234567890", Path("/proc/cache/out.debug")
-            )
+            artifact = resolver._fetch_one_url("https://x", "abcdef1234567890", primary)
 
         expected = tmp_path / "abicheck" / "debuginfod" / "ab" / "cdef1234567890.debug"
         assert artifact is not None
