@@ -36,7 +36,6 @@ import re
 import shlex
 import shutil
 import subprocess
-import sys
 import tempfile
 import warnings
 from collections.abc import Callable
@@ -54,12 +53,12 @@ if TYPE_CHECKING:
 
 from defusedxml import ElementTree as DefusedET
 
+from .dumper_cache import _cache_path
 from .dumper_castxml import (
     _CastxmlParser as _CastxmlParser,
     _parse_vtable_index as _parse_vtable_index,
     _vt_sort_key as _vt_sort_key,
 )
-from .dumper_cache import _cache_path
 from .dumper_clang import _ClangAstParser as _ClangAstParser
 from .dumper_clang_errors import (
     _is_direct_include_guard_failure,
