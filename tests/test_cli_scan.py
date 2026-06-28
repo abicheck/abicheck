@@ -1551,6 +1551,57 @@ def test_depth_binary_clears_source_inputs(
     assert captured["effective_build_info"] is None
 
 
+def test_depth_headers_keeps_source_tree_out_of_pattern_scan(
+    monkeypatch, runner, new_snap_compatible, tmp_path
+):
+    # Matrix runners may pass --sources to every depth. The headers rung is
+    # L0/L1/L2-only: it should pattern-scan public headers, not the whole source
+    # tree, and it should use the cheap binary surface instead of a DWARF DIE walk.
+    import abicheck.cli_scan as cs
+
+    include = tmp_path / "include"
+    include.mkdir()
+    header = include / "foo.h"
+    header.write_text("struct Api { virtual ~Api(); };\n", encoding="utf-8")
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "impl.cpp").write_text(
+        "\n".join(f"struct Impl{i} {{ virtual ~Impl{i}(); }};" for i in range(20)),
+        encoding="utf-8",
+    )
+
+    captured: dict[str, object] = {}
+    original = cs._build_new_snapshot
+
+    def _spy(*args, **kwargs):
+        captured["symbols_only"] = kwargs.get("symbols_only")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(cs, "_build_new_snapshot", _spy)
+    res = runner.invoke(
+        main,
+        [
+            "scan",
+            "--binary",
+            str(new_snap_compatible),
+            "-H",
+            str(include),
+            "--sources",
+            str(src),
+            "--depth",
+            "headers",
+            "--audit",
+            "--format",
+            "json",
+        ],
+    )
+    assert res.exit_code == 0, res.output
+    payload = json.loads(res.output)
+    assert captured["symbols_only"] is True
+    assert payload["pattern_scan"]["files_scanned"] == 1
+    assert payload["pattern_scan"]["counts_by_kind"] == {"virtual_method": 1}
+
+
 def test_depth_binary_skips_export_delta_poi_loads(
     monkeypatch, runner, baseline_snap, new_snap_compatible
 ):

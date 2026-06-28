@@ -319,6 +319,20 @@ def _l3_collected(snap: Any) -> bool:
     return False
 
 
+def _uses_fast_binary_surface(depth: EvidenceDepth) -> bool:
+    """True when the scan depth needs only ELF exports plus cheap debug presence.
+
+    The deeper DWARF DIE walk is source/type evidence. ``headers`` gets its type
+    evidence from L2 AST, and ``build`` adds L3 compile context; neither needs the
+    expensive DWARF expansion on the binary side.
+    """
+    return depth in {
+        EvidenceDepth.BINARY,
+        EvidenceDepth.HEADERS,
+        EvidenceDepth.BUILD,
+    }
+
+
 def _render_text(out: ScanOutcome) -> str:
     """Render the human-facing scan report."""
     lines: list[str] = []
@@ -1130,7 +1144,10 @@ def run_scan_core(
     # scope; only a genuinely *unseeded* run (no --since/--changed-path) falls
     # back to the whole-tree scan (Codex review).
     pattern_roots: list[Path] = [*headers]
-    if sources is not None:
+    if sources is not None and eff_depth_enum not in {
+        EvidenceDepth.BINARY,
+        EvidenceDepth.HEADERS,
+    }:
         pattern_roots.append(sources)
     pattern = scan_files(pattern_roots, changed if seeded else None)
 
@@ -1241,7 +1258,7 @@ def run_scan_core(
         public_header_dirs=list(public_header_dirs),
         compile_context=compile_context,
         defer_cleanup=defer_cleanup,
-        symbols_only=eff_depth_enum is EvidenceDepth.BINARY,
+        symbols_only=_uses_fast_binary_surface(eff_depth_enum),
     )
 
     # --- level-vs-evidence: fail-loud on missing input, advise otherwise ------
@@ -1328,7 +1345,7 @@ def run_scan_core(
             compile_context=compile_context,
             baseline_headers=baseline_headers,
             baseline_includes=baseline_includes,
-            symbols_only=eff_depth_enum is EvidenceDepth.BINARY,
+            symbols_only=_uses_fast_binary_surface(eff_depth_enum),
         )
         # A cross-check the maintainer promoted to `error` (D6) gates the exit
         # even when the baseline diff itself is clean.
