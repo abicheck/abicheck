@@ -170,6 +170,24 @@ class TestCachePath:
         assert p.name == "abc123.xml"
         assert "abi_check" in str(p)
 
+    def test_posix_honors_xdg_cache_home(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("sys.platform", "linux")
+        monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "xdg-cache"))
+
+        p = _cache_path("abc123", backend="clang")
+
+        assert p == tmp_path / "xdg-cache" / "abi_check" / "clang" / "abc123.json"
+
+    def test_posix_readonly_home_falls_back_to_temp_cache(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("sys.platform", "linux")
+        monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
+        monkeypatch.setattr(Path, "home", lambda: Path("/proc"))
+        monkeypatch.setattr("tempfile.gettempdir", lambda: str(tmp_path))
+
+        p = _cache_path("abc123")
+
+        assert p == tmp_path / "abi_check" / "castxml" / "abc123.xml"
+
 
 # ── _resolve_debug_metadata ─────────────────────────────────────────────
 

@@ -652,8 +652,21 @@ def _cache_path(key: str, backend: str = "castxml") -> Path:
         else:
             cache_dir = Path.home() / "AppData" / "Local" / "abi_check" / backend
     else:
-        cache_dir = Path.home() / ".cache" / "abi_check" / backend
-    cache_dir.mkdir(parents=True, exist_ok=True)
+        xdg_cache = os.environ.get("XDG_CACHE_HOME")
+        base = Path(xdg_cache) if xdg_cache else Path.home() / ".cache"
+        cache_dir = base / "abi_check" / backend
+    try:
+        cache_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        fallback = Path(tempfile.gettempdir()) / "abi_check" / backend
+        log.warning(
+            "AST cache directory %s is unavailable (%s); using %s",
+            cache_dir,
+            exc,
+            fallback,
+        )
+        fallback.mkdir(parents=True, exist_ok=True)
+        cache_dir = fallback
     return cache_dir / f"{key}.{ext}"
 
 
@@ -1122,7 +1135,10 @@ def _castxml_dump(
                 # error (and its hint), not the fallback's, so the diagnostic
                 # matches what the user asked for.
                 raise primary from None
-        shutil.copy2(str(out_xml), str(cached))
+        try:
+            shutil.copy2(str(out_xml), str(cached))
+        except OSError as exc:
+            log.warning("Could not write castxml AST cache %s: %s", cached, exc)
         return root
     finally:
         out_xml.unlink(missing_ok=True)
