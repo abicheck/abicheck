@@ -135,16 +135,17 @@ abicheck scan --binary new/libonedal_core.so -H include/ --build-info aq.json --
 **You usually don't pre-generate a compile DB at all — just pass `--sources`.**
 When a source-level depth needs build evidence and no compile DB exists,
 `abicheck` **detects the build system and runs the query
-itself** for CMake (`cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=ON`) and Bazel
-(`bazel aquery`) — no flag, no manual build step. The old `--allow-build-query`
+itself** for CMake (`cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=ON`), Bazel
+(`bazel aquery`), and Make (`make -B -n -k`) — no flag, no manual build step.
+The old `--allow-build-query`
 flag is gone (deprecated to a no-op): asking for a source-level scan *is* the
 request to collect build evidence.
 
-Make is *detected but not auto-run*: `make -n` is not reliably side-effect-free
-(GNU make still executes `+`/`$(MAKE)` recipe lines in dry-run mode), so a Make
-project must instead supply a compile DB (e.g. `bear -- make`, then
-`--compile-db compile_commands.json`) or a pre-collected Make transcript pack via
-`--build-info`, rather than being driven automatically.
+Make is queried with a fixed dry-run command (`make -B -n -k`) and the transcript
+is scraped as reduced-confidence L3 evidence. This lets Make/EPICS-style projects
+work without a manual `compile_commands.json`; a real compile DB (for example
+from `bear -- make`, then `--compile-db compile_commands.json`) is still preferred
+when available.
 
 Only an abicheck-constructed command runs automatically. An *arbitrary*
 `build.query` command runs only when it is operator-supplied — an explicit

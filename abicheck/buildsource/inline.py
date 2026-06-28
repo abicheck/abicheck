@@ -805,7 +805,8 @@ def _resolve_compile_db(
 
     # Zero-config fallback: no compile DB exists and no explicit L3 input was
     # given, but a --sources tree is present. Detect the build system and run
-    # abicheck's OWN fixed query (cmake configure / bazel aquery) to produce L3 —
+    # abicheck's OWN fixed query (cmake configure / bazel aquery / make dry-run)
+    # to produce L3 —
     # so "just provide sources" works with no flag and no manual build step. Only
     # an abicheck-authored command runs here; an arbitrary tree-local
     # .abicheck.yml `build.query` string is never auto-executed.

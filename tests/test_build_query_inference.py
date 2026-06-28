@@ -70,10 +70,9 @@ def test_cmake_command_is_fixed_and_uses_export_flag(tmp_path: Path):
     assert str(tmp_path / ABICHECK_BUILD_DIR) in cmd
 
 
-def test_make_has_no_auto_command(tmp_path: Path):
-    # Make is detected but never auto-run: `make -n` is not reliably
-    # side-effect-free (GNU make runs `+`/`$(MAKE)` recipes even in dry run).
-    assert inferred_query_command("make", tmp_path) is None
+def test_make_command_is_fixed_dry_run(tmp_path: Path):
+    cmd = inferred_query_command("make", tmp_path)
+    assert cmd == ["make", "-B", "-n", "-k"]
 
 
 def test_unknown_system_has_no_command(tmp_path: Path):
@@ -585,25 +584,47 @@ def test_run_subprocess_error_is_failed(tmp_path: Path, monkeypatch):
     assert ext[-1].status == "failed"
 
 
-def test_run_make_is_skipped_with_diagnostic(tmp_path: Path, monkeypatch):
-    # Make is detected but never auto-run for safety; it must not invoke any
-    # subprocess and must record a skip diagnostic pointing to the opt-in path.
-    (tmp_path / "Makefile").write_text("all:\n\t+touch pwned\n")
+def test_run_make_ingests_dry_run_transcript(tmp_path: Path, monkeypatch):
+    # Make is auto-queried by default and scraped through the reduced-confidence
+    # MakeAdapter so Make/EPICS-style projects can collect L3 without a manual DB.
+    (tmp_path / "Makefile").write_text(
+        "all:\n\t$(CXX) -std=c++17 -Iinclude -c src/foo.cc -o foo.o\n"
+    )
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src/foo.cc").write_text("int foo;\n")
 
-    def boom(cmd, **kw):  # pragma: no cover - must never be called
-        raise AssertionError("make must not be auto-run")
+    def fake_run(cmd, **kw):
+        assert cmd == ["make", "-B", "-n", "-k"]
+        assert Path(kw["cwd"]) == tmp_path
+        return _FakeProc(
+            0,
+            stdout="c++ -std=c++17 -Iinclude -c src/foo.cc -o foo.o\n",
+        )
 
-    monkeypatch.setattr(_bq.subprocess, "run", boom)
+    monkeypatch.setattr(_bq.subprocess, "run", fake_run)
     merged, ext = BuildEvidence(), []
     assert run_inferred_build_query(tmp_path, merged, ext) is None
     assert ext[-1].name == "build_query_auto"
-    assert ext[-1].status == "skipped"
-    # Points at the paths that actually yield L3 (compile DB / build-info pack) —
-    # not `--build-query "make -n"`, which the inline query path can't ingest.
-    assert "Make" in ext[-1].detail
-    assert "--compile-db" in ext[-1].detail and "--build-info" in ext[-1].detail
-    assert "--build-query" not in ext[-1].detail
-    assert not merged.compile_units
+    assert ext[-1].status == "ok"
+    assert "1 compile unit" in ext[-1].detail
+    assert len(merged.compile_units) == 1
+    assert merged.compile_units[0].source == "src/foo.cc"
+
+
+def test_run_make_keeps_partial_transcript_on_nonzero_exit(tmp_path: Path, monkeypatch):
+    (tmp_path / "Makefile").write_text("all:\n\t$(CC) -c ok.c -o ok.o\n")
+
+    def fake_run(cmd, **kw):
+        return _FakeProc(
+            2, stdout="cc -c ok.c -o ok.o\n", stderr="make: later target failed\n"
+        )
+
+    monkeypatch.setattr(_bq.subprocess, "run", fake_run)
+    merged, ext = BuildEvidence(), []
+    assert run_inferred_build_query(tmp_path, merged, ext) is None
+    assert ext[-1].status == "partial"
+    assert "make exited 2" in ext[-1].detail
+    assert len(merged.compile_units) == 1
 
 
 def test_bazelisk_fallback_when_bazel_absent(tmp_path: Path, monkeypatch):

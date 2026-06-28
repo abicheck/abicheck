@@ -278,12 +278,12 @@ sources:
   the checkout already has. No config needed.
 - **`query_build_system` (automatic when `--sources` is given):** if no compile
   DB exists, abicheck **detects the build system and runs its own fixed query**
-  (`cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=ON` or `bazel aquery`) to emit
-  flags/exports — no `--allow-build-query` flag (that flag is deprecated to a
-  no-op). Make is detected but *not* auto-run (`make -n` is not reliably
-  side-effect-free — GNU make runs `+`/`$(MAKE)` recipes even in dry-run mode), so
-  a Make project must supply a compile DB (e.g. `bear -- make` → `--compile-db`)
-  or a pre-collected transcript pack via `--build-info`. It also runs an
+  (`cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=ON`, `bazel aquery`, or a Make dry-run
+  `make -B -n -k`) to emit flags/exports — no `--allow-build-query` flag (that
+  flag is deprecated to a no-op). Make dry-run evidence is reduced confidence
+  because it is a transcript scrape rather than an authoritative target graph;
+  prefer a real compile DB (`bear -- make` → `--compile-db`) when available. It
+  also runs an
   *operator-supplied* `build.query` automatically (an
   explicit `--config` or `--build-query`) — but note that path ingests only an
   emitted `compile_commands.json`, so the query must *write* a DB (e.g.
@@ -296,7 +296,9 @@ sources:
   `--allow-build-query` action-ceiling gate; see *Extractor manifests* below.)
 - **`run_build` / `wrap_build` (denied):** abicheck never performs a full
   project build or compiler-wrapper interception. The inferred queries above are
-  configure/dry-run/aquery only — they do not compile the project.
+  configure/dry-run/aquery only — they do not compile the project. Make dry-run
+  can still execute recursive/`+` recipes on some Makefiles; this is now part of
+  the default source-query trust boundary.
 
 ### Project-contract blocks (ADR-037 D4)
 
