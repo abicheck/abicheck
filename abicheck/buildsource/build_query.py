@@ -25,25 +25,22 @@ exists, abicheck **detects the build system and runs a fixed, abicheck-authored
 or ``bazel aquery`` (action graph). Both are designed to *analyse* the build
 without compiling it.
 
-**Make is detected but never auto-run.** Unlike cmake configure / bazel aquery,
-``make -n`` is not reliably side-effect-free: GNU make still executes recipe
-lines prefixed with ``+`` or invoking ``$(MAKE)`` in dry-run mode, so
-auto-running it on an untrusted checkout could execute arbitrary commands
-(Codex P1). A Make project must instead supply a compile DB (e.g. ``bear --
-make`` → ``--compile-db``) or a pre-collected Make transcript pack via
-``--build-info`` — note the inline ``build.query`` path only ingests an emitted
-``compile_commands.json``, so it cannot turn a bare ``make -n`` transcript into
-L3 evidence.
+**Make fallback.** Make projects do not normally emit ``compile_commands.json``.
+For zero-config source scans, abicheck now runs a fixed GNU Make dry-run query
+(``make -B -n -k -w``) and scrapes the transcript through the reduced-confidence
+Make adapter. This is less authoritative than a real compile DB and can still
+execute recursive/``+`` recipes on some Makefiles, but it keeps Make/EPICS-style
+projects useful by default.
 
 Security boundary (the ADR-032 D5 intent, refined): the command run here is
 **constructed by abicheck**, never taken from a tree-local ``.abicheck.yml`` —
 so a malicious checkout cannot inject an arbitrary command through auto-discovery
 (an arbitrary ``build.query`` string still requires an explicit, operator-trusted
 ``--config``). The residual trust is inherent to *analysing* a build at all:
-``cmake`` configure and ``bazel`` loading still evaluate the project's own build
-scripts. If you pointed abicheck at a source tree to analyse it from source, you
-already trust it enough to configure it. Pre-built artifact scanning (``compare``
-on two ``.so`` files) never reaches this path.
+``cmake`` configure, ``bazel`` loading, and Make dry-run still evaluate the
+project's own build scripts. If you pointed abicheck at a source tree to analyse
+it from source, you already trust it enough to query it. Pre-built artifact
+scanning (``compare`` on two ``.so`` files) never reaches this path.
 
 Detection + command construction are pure (unit-testable without a toolchain);
 only :func:`run_inferred_build_query` touches the filesystem / subprocess.
@@ -61,6 +58,7 @@ import subprocess
 import tempfile
 import time
 from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 from pathlib import Path
 
 from .build_evidence import BuildEvidence
@@ -285,7 +283,11 @@ def detect_build_system(sources: Path | None) -> str:
 
 
 def inferred_query_command(
-    system: str, sources: Path, build_dir: Path | None = None
+    system: str,
+    sources: Path,
+    build_dir: Path | None = None,
+    *,
+    make_launcher: str = "make",
 ) -> list[str] | None:
     """The fixed, abicheck-authored query command for *system* (no user input).
 
@@ -307,14 +309,11 @@ def inferred_query_command(
             "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
         ]
     if system == "make":
-        # No auto-run for Make: `make -n` is NOT reliably side-effect-free — GNU
-        # make still executes recipe lines prefixed with `+` or invoking
-        # `$(MAKE)` even in dry-run mode, so auto-running it on an untrusted
-        # checkout could execute arbitrary commands (Codex P1). Make projects must
-        # opt in explicitly via `--build-query "make -n …"` (operator-trusted) or
-        # a pre-captured transcript. cmake configure / bazel aquery are analysis
-        # commands designed not to build, so they stay auto.
-        return None
+        # Force recipes to print even when the tree is already built.  Keep going
+        # after dry-run errors so a partial transcript can still yield L3 facts.
+        # `-w` forces GNU Make's recursive directory markers; L4 replay relies on
+        # those to anchor relative EPICS-style `../foo.cpp` source paths.
+        return [make_launcher, "-B", "-n", "-k", "-w"]
     if system == "bazel":
         # Action graph for the compile AND link/archive actions the BazelAdapter
         # ingests — link actions carry version_script/soname facts, so a
@@ -335,6 +334,67 @@ def inferred_query_command(
             f"mnemonic('^({mnemonics})$', deps(//...))",
         ]
     return None
+
+
+@dataclass(frozen=True)
+class _MakeLauncher:
+    """Resolved GNU Make executable plus the user-facing spelling we probed."""
+
+    name: str
+    path: str
+
+
+def _is_gnu_make_launcher(tool: str) -> bool:
+    """Return whether *tool* appears to be GNU Make.
+
+    The transcript scraper expects GNU Make's dry-run semantics and directory
+    messages. BSD/non-GNU make implementations can accept different flags or
+    print different transcript forms, so skip them cleanly.
+    """
+    try:
+        proc = subprocess.run(  # noqa: S603 - fixed tool plus --version, shell=False
+            [tool, "--version"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return proc.returncode == 0 and "GNU Make" in (proc.stdout or "")
+
+
+def _select_gnu_make_launcher(which: Callable[[str], str | None]) -> _MakeLauncher | None:
+    """Pick a GNU Make launcher.
+
+    Prefer the platform's normal ``make`` when it is GNU (Linux/common CI), then
+    fall back to GNU/BSD-package spellings. The returned launcher uses the
+    resolved executable path from ``which`` so the version probe and dry-run run
+    the same binary even if PATH changes between calls. Non-GNU make is skipped
+    because the dry-run flags and directory markers are not portable enough for
+    replay.
+    """
+    for name in ("make", "gmake", "gnumake", "mingw32-make"):
+        path = which(name)
+        if path is not None and _is_gnu_make_launcher(path):
+            return _MakeLauncher(name=name, path=path)
+    return None
+
+
+def _query_tool_available(tool: str, which: Callable[[str], str | None]) -> bool:
+    """Return whether *tool* can be used for an inferred query.
+
+    Relative tool names are checked through ``which``. Absolute paths may come
+    from an earlier ``which`` lookup (GNU Make launcher selection); treating that
+    resolved path as available avoids a second PATH lookup with a different
+    spelling such as ``which('/usr/bin/make')``.
+    """
+    if Path(tool).is_absolute() or tool.startswith(("/", "\\")) or (
+        len(tool) >= 3 and tool[1] == ":" and tool[2] in ("/", "\\")
+    ):
+        return True
+    return which(tool) is not None
 
 
 def run_inferred_build_query(
@@ -370,21 +430,23 @@ def run_inferred_build_query(
     # `src/src`, and would anchor make/bazel relative paths to the process cwd
     # instead of the tree (Codex review). Absolute paths are cwd-independent.
     sources = sources.resolve()
+    make_launcher = "make"
     if system == "make":
-        # Detected but deliberately not auto-run (see inferred_query_command).
-        extractors.append(
-            ExtractorRecord(
-                name="build_query_auto",
-                status="skipped",
-                detail=(
-                    "detected a Make project, but `make -n` is not reliably "
-                    "side-effect-free so it is not auto-run; provide a compile DB "
-                    "(e.g. `bear -- make`, then --compile-db compile_commands.json) "
-                    "or a pre-collected Make transcript pack via --build-info"
-                ),
+        selected = _select_gnu_make_launcher(which)
+        if selected is None:
+            extractors.append(
+                ExtractorRecord(
+                    name="build_query_auto",
+                    status="skipped",
+                    detail=(
+                        "detected a Make project but no GNU Make launcher "
+                        "(`gmake` or GNU `make`) is available; pass "
+                        "--build-info / --compile-db instead"
+                    ),
+                )
             )
-        )
-        return None
+            return None
+        make_launcher = selected.path
     # cmake configures into an OUT-OF-TREE build dir: never mutate the --sources
     # checkout (it may be read-only / shared) and keep generated output away from
     # every tree walker, so no walker needs to prune an in-tree build dir
@@ -423,7 +485,9 @@ def run_inferred_build_query(
         build_dir, release = _claim_inferred_build_dir(base, timeout)
         build_dir.mkdir(parents=True, exist_ok=True)
     try:
-        cmd = inferred_query_command(system, sources, build_dir=build_dir)
+        cmd = inferred_query_command(
+            system, sources, build_dir=build_dir, make_launcher=make_launcher
+        )
         if (
             cmd is None
         ):  # pragma: no cover - defensive: detection only yields cmake/bazel here
@@ -437,7 +501,7 @@ def run_inferred_build_query(
         ):
             cmd[0] = "bazelisk"
         tool = cmd[0]
-        if which(tool) is None:
+        if not _query_tool_available(tool, which):
             extractors.append(
                 ExtractorRecord(
                     name="build_query_auto",
@@ -453,7 +517,8 @@ def run_inferred_build_query(
             proc = subprocess.run(  # noqa: S603 - fixed abicheck-authored argv, shell=False
                 cmd,
                 cwd=str(sources),
-                capture_output=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT if system == "make" else subprocess.PIPE,
                 text=True,
                 timeout=timeout,
                 check=False,
@@ -467,6 +532,32 @@ def run_inferred_build_query(
                 )
             )
             merged.diagnostics.append(f"build_query_auto: {exc}")
+            return None
+        if proc.returncode != 0 and system == "make":
+            try:
+                _ingest_query_output(
+                    system,
+                    sources,
+                    proc.stdout or "",
+                    merged,
+                    extractors,
+                    build_dir=build_dir,
+                    query_returncode=proc.returncode,
+                )
+            except (OSError, ValueError, KeyError, TypeError) as exc:
+                extractors.append(
+                    ExtractorRecord(
+                        name="build_query_auto",
+                        status="failed",
+                        detail=(
+                            "auto make dry-run failed and its transcript could not "
+                            f"be ingested: {exc}"
+                        ),
+                    )
+                )
+                merged.diagnostics.append(
+                    f"build_query_auto: make ingest failed ({exc})"
+                )
             return None
         if proc.returncode != 0:
             extractors.append(
@@ -489,7 +580,12 @@ def run_inferred_build_query(
         # `dump --sources` run (review).
         try:
             return _ingest_query_output(
-                system, sources, proc.stdout, merged, extractors, build_dir=build_dir
+                system,
+                sources,
+                proc.stdout,
+                merged,
+                extractors,
+                build_dir=build_dir,
             )
         except (OSError, ValueError, KeyError, TypeError) as exc:
             extractors.append(
@@ -521,6 +617,7 @@ def _ingest_query_output(
     merged: BuildEvidence,
     extractors: list[ExtractorRecord],
     build_dir: Path | None = None,
+    query_returncode: int = 0,
 ) -> Path | None:
     """Parse a successful query's output and merge it into *merged* (returns None).
 
@@ -580,6 +677,31 @@ def _ingest_query_output(
                 name="build_query_auto",
                 status="ok" if ev.compile_units else "partial",
                 detail=f"auto-ran `bazel aquery`; {len(ev.compile_units)} compile unit(s)",
+            )
+        )
+        return None
+    if system == "make":
+        from .adapters.make import MakeAdapter
+
+        ev = MakeAdapter(build_dir=sources, dry_run=stdout).collect()
+        merged.merge(ev)
+        units = len(ev.compile_units)
+        status = (
+            "ok"
+            if units and query_returncode == 0
+            else ("partial" if units else "failed")
+        )
+        rc_note = "" if query_returncode == 0 else f" (make exited {query_returncode})"
+        extractors.append(
+            ExtractorRecord(
+                name="build_query_auto",
+                status=status,
+                detail=(
+                    f"auto-ran `make -B -n -k -w`; {units} compile unit(s) from "
+                    f"dry-run transcript{rc_note}; reduced confidence"
+                    if units
+                    else f"auto-ran `make -B -n -k -w`{rc_note} but found no compile units"
+                ),
             )
         )
         return None

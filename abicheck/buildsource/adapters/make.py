@@ -192,8 +192,13 @@ def _split_recipe(line: str) -> list[str]:
         return []  # unbalanced quotes / non-command line — skip
 
 
-_ENTER_RE = re.compile(r"^make(?:\[\d+\])?: Entering directory ['`](.+)['`]$")
-_LEAVE_RE = re.compile(r"^make(?:\[\d+\])?: Leaving directory ['`](.+)['`]$")
+_MAKE_PROG_RE = r"(?:[^:\s]*[\\/])?(?:g?make|gnumake|mingw32-make)(?:\.exe)?"
+_ENTER_RE = re.compile(
+    rf"^{_MAKE_PROG_RE}(?:\[\d+\])?: Entering directory ['`](.+)['`]$"
+)
+_LEAVE_RE = re.compile(
+    rf"^{_MAKE_PROG_RE}(?:\[\d+\])?: Leaving directory ['`](.+)['`]$"
+)
 
 
 def _directory_event(line: str) -> tuple[str, Path | None]:
