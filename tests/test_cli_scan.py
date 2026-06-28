@@ -1510,6 +1510,33 @@ def test_depth_binary_clears_baseline_headers(
     assert captured["headers"] == []
 
 
+def test_depth_binary_skips_export_delta_poi_loads(
+    monkeypatch, runner, baseline_snap, new_snap_compatible
+):
+    # The export-delta POI walk only focuses source replay. Effective binary
+    # depth has no replay, so loading candidate+baseline L0 views would duplicate
+    # native binary dumps and make "binary" scans unexpectedly expensive.
+    import abicheck.cli_scan as cs
+
+    def _unexpected(*args, **kwargs):
+        raise AssertionError("binary depth must not load POI export snapshots")
+
+    monkeypatch.setattr(cs, "_load_exports_for_poi", _unexpected)
+    res = runner.invoke(
+        main,
+        [
+            "scan",
+            "--binary",
+            str(new_snap_compatible),
+            "--baseline",
+            str(baseline_snap),
+            "--depth",
+            "binary",
+        ],
+    )
+    assert res.exit_code == 0, res.output
+
+
 def test_estimate_uses_resolved_level_not_raw_flags(
     monkeypatch, runner, new_snap_compatible
 ):
