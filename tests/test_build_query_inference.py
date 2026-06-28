@@ -75,6 +75,11 @@ def test_make_command_is_fixed_dry_run(tmp_path: Path):
     assert cmd == ["make", "-B", "-n", "-k"]
 
 
+def test_make_command_accepts_gnu_launcher(tmp_path: Path):
+    cmd = inferred_query_command("make", tmp_path, make_launcher="gmake")
+    assert cmd == ["gmake", "-B", "-n", "-k"]
+
+
 def test_unknown_system_has_no_command(tmp_path: Path):
     assert inferred_query_command("scons", tmp_path) is None
 
@@ -315,7 +320,15 @@ def test_inferred_query_skipped_when_no_private_root(tmp_path: Path, monkeypatch
     (tmp_path / "CMakeLists.txt").write_text("project(x)\n")
     monkeypatch.setattr(_bq, "_inferred_cmake_build_base", lambda _sources: None)
     merged, ext = BuildEvidence(), []
-    assert run_inferred_build_query(tmp_path, merged, ext) is None
+    assert (
+        run_inferred_build_query(
+            tmp_path,
+            merged,
+            ext,
+            which=lambda tool: f"/usr/bin/{tool}",
+        )
+        is None
+    )
     assert ext[-1].status == "skipped" and "private temp" in ext[-1].detail
 
 
@@ -323,7 +336,15 @@ def test_run_cmake_no_db_is_partial(tmp_path: Path, monkeypatch):
     (tmp_path / "CMakeLists.txt").write_text("project(x)\n")
     monkeypatch.setattr(_bq.subprocess, "run", lambda cmd, **kw: _FakeProc(0))
     merged, ext = BuildEvidence(), []
-    assert run_inferred_build_query(tmp_path, merged, ext) is None
+    assert (
+        run_inferred_build_query(
+            tmp_path,
+            merged,
+            ext,
+            which=lambda tool: f"/usr/bin/{tool}",
+        )
+        is None
+    )
     assert ext[-1].status == "partial"
 
 
@@ -594,8 +615,11 @@ def test_run_make_ingests_dry_run_transcript(tmp_path: Path, monkeypatch):
     (tmp_path / "src/foo.cc").write_text("int foo;\n")
 
     def fake_run(cmd, **kw):
+        if cmd == ["make", "--version"]:
+            return _FakeProc(0, stdout="GNU Make 4.4\n")
         assert cmd == ["make", "-B", "-n", "-k"]
         assert Path(kw["cwd"]) == tmp_path
+        assert kw["stderr"] is _bq.subprocess.STDOUT
         return _FakeProc(
             0,
             stdout="c++ -std=c++17 -Iinclude -c src/foo.cc -o foo.o\n",
@@ -603,7 +627,15 @@ def test_run_make_ingests_dry_run_transcript(tmp_path: Path, monkeypatch):
 
     monkeypatch.setattr(_bq.subprocess, "run", fake_run)
     merged, ext = BuildEvidence(), []
-    assert run_inferred_build_query(tmp_path, merged, ext) is None
+    assert (
+        run_inferred_build_query(
+            tmp_path,
+            merged,
+            ext,
+            which=lambda tool: "/usr/bin/make" if tool == "make" else None,
+        )
+        is None
+    )
     assert ext[-1].name == "build_query_auto"
     assert ext[-1].status == "ok"
     assert "1 compile unit" in ext[-1].detail
@@ -615,8 +647,12 @@ def test_run_make_keeps_partial_transcript_on_nonzero_exit(tmp_path: Path, monke
     (tmp_path / "Makefile").write_text("all:\n\t$(CC) -c ok.c -o ok.o\n")
 
     def fake_run(cmd, **kw):
+        if cmd == ["make", "--version"]:
+            return _FakeProc(0, stdout="GNU Make 4.4\n")
         return _FakeProc(
-            2, stdout="cc -c ok.c -o ok.o\n", stderr="make: later target failed\n"
+            2,
+            stdout="cc -c ok.c -o ok.o\nmake: later target failed\n",
+            stderr=None,
         )
 
     monkeypatch.setattr(_bq.subprocess, "run", fake_run)
@@ -625,6 +661,52 @@ def test_run_make_keeps_partial_transcript_on_nonzero_exit(tmp_path: Path, monke
     assert ext[-1].status == "partial"
     assert "make exited 2" in ext[-1].detail
     assert len(merged.compile_units) == 1
+
+
+def test_run_make_prefers_gmake_when_gnu(tmp_path: Path, monkeypatch):
+    (tmp_path / "Makefile").write_text("all:\n\t$(CC) -c ok.c -o ok.o\n")
+    seen: list[list[str]] = []
+
+    def fake_run(cmd, **kw):
+        seen.append(cmd)
+        if cmd == ["gmake", "--version"]:
+            return _FakeProc(0, stdout="GNU Make 4.4\n")
+        assert cmd == ["gmake", "-B", "-n", "-k"]
+        return _FakeProc(0, stdout="cc -c ok.c -o ok.o\n")
+
+    monkeypatch.setattr(_bq.subprocess, "run", fake_run)
+    merged, ext = BuildEvidence(), []
+    assert (
+        run_inferred_build_query(
+            tmp_path, merged, ext, which=lambda tool: f"/usr/bin/{tool}"
+        )
+        is None
+    )
+    assert seen[0] == ["gmake", "--version"]
+    assert seen[1] == ["gmake", "-B", "-n", "-k"]
+    assert ext[-1].status == "ok"
+
+
+def test_run_make_skips_without_gnu_make(tmp_path: Path, monkeypatch):
+    (tmp_path / "Makefile").write_text("all:\n\t$(CC) -c ok.c -o ok.o\n")
+
+    def fake_run(cmd, **kw):
+        return _FakeProc(0, stdout="BSD make\n")
+
+    monkeypatch.setattr(_bq.subprocess, "run", fake_run)
+    merged, ext = BuildEvidence(), []
+    assert (
+        run_inferred_build_query(
+            tmp_path,
+            merged,
+            ext,
+            which=lambda tool: "/usr/bin/make" if tool == "make" else None,
+        )
+        is None
+    )
+    assert ext[-1].status == "skipped"
+    assert "no GNU Make launcher" in ext[-1].detail
+    assert not merged.compile_units
 
 
 def test_bazelisk_fallback_when_bazel_absent(tmp_path: Path, monkeypatch):

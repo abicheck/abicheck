@@ -282,7 +282,11 @@ def detect_build_system(sources: Path | None) -> str:
 
 
 def inferred_query_command(
-    system: str, sources: Path, build_dir: Path | None = None
+    system: str,
+    sources: Path,
+    build_dir: Path | None = None,
+    *,
+    make_launcher: str = "make",
 ) -> list[str] | None:
     """The fixed, abicheck-authored query command for *system* (no user input).
 
@@ -306,7 +310,7 @@ def inferred_query_command(
     if system == "make":
         # Force recipes to print even when the tree is already built.  Keep going
         # after dry-run errors so a partial transcript can still yield L3 facts.
-        return ["make", "-B", "-n", "-k"]
+        return [make_launcher, "-B", "-n", "-k"]
     if system == "bazel":
         # Action graph for the compile AND link/archive actions the BazelAdapter
         # ingests — link actions carry version_script/soname facts, so a
@@ -326,6 +330,35 @@ def inferred_query_command(
             "--include_param_files",
             f"mnemonic('^({mnemonics})$', deps(//...))",
         ]
+    return None
+
+
+def _is_gnu_make_launcher(tool: str) -> bool:
+    """Return whether *tool* appears to be GNU Make.
+
+    The transcript scraper expects GNU Make's dry-run semantics and directory
+    messages. BSD/non-GNU make implementations can accept different flags or
+    print different transcript forms, so skip them cleanly.
+    """
+    try:
+        proc = subprocess.run(  # noqa: S603 - fixed tool plus --version, shell=False
+            [tool, "--version"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return proc.returncode == 0 and "GNU Make" in (proc.stdout or "")
+
+
+def _select_gnu_make_launcher(which: Callable[[str], str | None]) -> str | None:
+    """Pick a GNU Make launcher, preferring ``gmake`` when present."""
+    for tool in ("gmake", "make"):
+        if which(tool) is not None and _is_gnu_make_launcher(tool):
+            return tool
     return None
 
 
@@ -362,6 +395,23 @@ def run_inferred_build_query(
     # `src/src`, and would anchor make/bazel relative paths to the process cwd
     # instead of the tree (Codex review). Absolute paths are cwd-independent.
     sources = sources.resolve()
+    make_launcher = "make"
+    if system == "make":
+        selected = _select_gnu_make_launcher(which)
+        if selected is None:
+            extractors.append(
+                ExtractorRecord(
+                    name="build_query_auto",
+                    status="skipped",
+                    detail=(
+                        "detected a Make project but no GNU Make launcher "
+                        "(`gmake` or GNU `make`) is available; pass "
+                        "--build-info / --compile-db instead"
+                    ),
+                )
+            )
+            return None
+        make_launcher = selected
     # cmake configures into an OUT-OF-TREE build dir: never mutate the --sources
     # checkout (it may be read-only / shared) and keep generated output away from
     # every tree walker, so no walker needs to prune an in-tree build dir
@@ -400,7 +450,9 @@ def run_inferred_build_query(
         build_dir, release = _claim_inferred_build_dir(base, timeout)
         build_dir.mkdir(parents=True, exist_ok=True)
     try:
-        cmd = inferred_query_command(system, sources, build_dir=build_dir)
+        cmd = inferred_query_command(
+            system, sources, build_dir=build_dir, make_launcher=make_launcher
+        )
         if (
             cmd is None
         ):  # pragma: no cover - defensive: detection only yields cmake/bazel here
@@ -430,7 +482,8 @@ def run_inferred_build_query(
             proc = subprocess.run(  # noqa: S603 - fixed abicheck-authored argv, shell=False
                 cmd,
                 cwd=str(sources),
-                capture_output=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT if system == "make" else subprocess.PIPE,
                 text=True,
                 timeout=timeout,
                 check=False,
@@ -450,7 +503,7 @@ def run_inferred_build_query(
                 _ingest_query_output(
                     system,
                     sources,
-                    "\n".join(s for s in (proc.stdout, proc.stderr) if s),
+                    proc.stdout or "",
                     merged,
                     extractors,
                     build_dir=build_dir,
