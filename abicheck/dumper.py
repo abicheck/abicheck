@@ -1687,21 +1687,9 @@ def _dump_elf(
         _elf_classify_symbols(elf_meta, exported_dynamic, library_name=so_path.name)
     )
     if symbols_only:
-        from elftools.elf.elffile import ELFFile
+        from .dwarf_presence import cheap_dwarf_presence_metadata
 
-        from .dwarf_advanced import AdvancedDwarfMetadata
-        from .dwarf_metadata import DwarfMetadata
-        from .dwarf_utils import has_real_dwarf_info
-
-        try:
-            with open(so_path, "rb") as f:
-                has_dwarf = has_real_dwarf_info(ELFFile(f))  # type: ignore[no-untyped-call]
-        except Exception:  # noqa: BLE001 - debug presence is advisory here
-            has_dwarf = False
-        dwarf_meta, dwarf_adv = (
-            DwarfMetadata(has_dwarf=has_dwarf),
-            AdvancedDwarfMetadata(has_dwarf=has_dwarf),
-        )
+        dwarf_meta, dwarf_adv = cheap_dwarf_presence_metadata(so_path)
     else:
         dwarf_meta, dwarf_adv = _resolve_debug_metadata(so_path, debug_format)
     profile_hint = _lang_to_profile(lang)
