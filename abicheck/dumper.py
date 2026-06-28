@@ -59,6 +59,7 @@ from .dumper_castxml import (
     _parse_vtable_index as _parse_vtable_index,
     _vt_sort_key as _vt_sort_key,
 )
+from .dumper_cache import _cache_path
 from .dumper_clang import _ClangAstParser as _ClangAstParser
 from .dumper_clang_errors import (
     _is_direct_include_guard_failure,
@@ -641,35 +642,6 @@ def _cache_key(
     h.update(f"system_includes={chr(0).join(system_includes)}".encode())
     return h.hexdigest()
 
-
-def _cache_path(key: str, backend: str = "castxml") -> Path:
-    # One sub-directory + file extension per backend so the castxml-XML and
-    # clang-JSON caches live side by side without clashing.
-    ext = "json" if backend == "clang" else "xml"
-    if sys.platform == "win32":
-        # Use %LOCALAPPDATA%/abi_check/<backend> on Windows
-        local = os.environ.get("LOCALAPPDATA")
-        if local:
-            cache_dir = Path(local) / "abi_check" / backend
-        else:
-            cache_dir = Path.home() / "AppData" / "Local" / "abi_check" / backend
-    else:
-        xdg_cache = os.environ.get("XDG_CACHE_HOME")
-        base = Path(xdg_cache) if xdg_cache else Path.home() / ".cache"
-        cache_dir = base / "abi_check" / backend
-    try:
-        cache_dir.mkdir(parents=True, exist_ok=True)
-    except OSError as exc:
-        fallback = Path(tempfile.gettempdir()) / "abi_check" / backend
-        log.warning(
-            "AST cache directory %s is unavailable (%s); using %s",
-            cache_dir,
-            exc,
-            fallback,
-        )
-        fallback.mkdir(parents=True, exist_ok=True)
-        cache_dir = fallback
-    return cache_dir / f"{key}.{ext}"
 
 
 # C++ file extensions that unambiguously indicate C++ content.
