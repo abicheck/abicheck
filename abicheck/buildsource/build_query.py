@@ -390,7 +390,9 @@ def _query_tool_available(tool: str, which: Callable[[str], str | None]) -> bool
     resolved path as available avoids a second PATH lookup with a different
     spelling such as ``which('/usr/bin/make')``.
     """
-    if Path(tool).is_absolute():
+    if Path(tool).is_absolute() or tool.startswith(("/", "\\")) or (
+        len(tool) >= 3 and tool[1] == ":" and tool[2] in ("/", "\\")
+    ):
         return True
     return which(tool) is not None
 

@@ -111,6 +111,16 @@ def test_run_returns_none_for_non_build_tree(tmp_path: Path):
 from abicheck.buildsource import build_query as _bq  # noqa: E402
 
 
+def test_resolved_make_launcher_path_is_available_without_second_which():
+    # CI stubs may hand back a resolved POSIX path while the host Path class is
+    # WindowsPath. Treat the path-like spelling as already selected instead of
+    # asking `which('/usr/bin/make')`, which would incorrectly skip the query.
+    assert _bq._query_tool_available("/usr/bin/make", lambda _tool: None)
+    assert _bq._query_tool_available(
+        r"C:\Program Files\GnuWin32\bin\make.exe", lambda _tool: None
+    )
+
+
 class _FakeProc:
     def __init__(self, returncode=0, stdout="", stderr=""):
         self.returncode = returncode
