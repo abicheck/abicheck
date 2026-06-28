@@ -219,6 +219,32 @@ class TestDumpSymbolFiltering:
 
         assert snap.language_profile == "cpp"
 
+    def test_symbols_only_skips_dwarf_expansion(self, tmp_path, monkeypatch):
+        """scan --depth binary uses this path to keep native binary scans cheap."""
+        from abicheck.elf_metadata import ElfMetadata, ElfSymbol, SymbolType
+
+        so_path = tmp_path / "lib.so"
+        so_path.write_bytes(b"\x7fELF")
+        elf_meta = ElfMetadata(
+            symbols=[ElfSymbol(name="_Z3foov", sym_type=SymbolType.FUNC)]
+        )
+        monkeypatch.setattr(
+            "abicheck.dumper._pyelftools_exported_symbols",
+            lambda _p: ({"_Z3foov"}, {"_Z3foov"}),
+        )
+        monkeypatch.setattr(
+            "abicheck.elf_metadata.parse_elf_metadata", lambda _p: elf_meta
+        )
+
+        def _unexpected(*args, **kwargs):
+            raise AssertionError("symbols_only must not walk DWARF DIEs")
+
+        monkeypatch.setattr("abicheck.dumper._resolve_debug_metadata", _unexpected)
+        snap = dump(so_path=so_path, headers=[], version="1.0", symbols_only=True)
+
+        assert [f.mangled for f in snap.functions] == ["_Z3foov"]
+        assert snap.elf_only_mode is True
+
 
 # ── _CastxmlParser edge cases ─────────────────────────────────────────
 

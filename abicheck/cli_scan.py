@@ -264,7 +264,8 @@ def _intrinsic_coverage(snap: Any) -> list[dict[str, Any]]:
             else "no binary export table (snapshot-only input)",
         }
     )
-    has_debug = snap.dwarf is not None
+    dwarf = getattr(snap, "dwarf", None)
+    has_debug = bool(getattr(dwarf, "has_dwarf", False)) if dwarf is not None else False
     rows.append(
         {
             "layer": "L1_debug",
@@ -421,6 +422,7 @@ def _build_new_snapshot(
     public_header_dirs: list[Path] | None = None,
     compile_context: CompileContext | None = None,
     defer_cleanup: list[Callable[[], None]] | None = None,
+    symbols_only: bool = False,
 ) -> Any:
     """Dump the candidate's L0-L2 surface and embed L3-L5 inline at *collect_mode*.
 
@@ -448,6 +450,7 @@ def _build_new_snapshot(
             public_headers=public_headers,
             public_header_dirs=public_header_dirs,
             compile=compile_context,
+            symbols_only=symbols_only,
         )
     except AbicheckError as exc:
         raise click.ClickException(f"Failed to load --binary {binary}: {exc}") from exc
@@ -1133,9 +1136,10 @@ def run_scan_core(
     # once, below, with the resulting focus seed. The candidate view is only
     # loaded when there is a baseline to diff it against — the delta walk consumes
     # the two together, so loading it baseline-less would be a wasted L0/L1 parse.
-    poi_baseline = (
-        _load_exports_for_poi(baseline, lang) if baseline is not None else None
+    needs_export_delta_poi = (
+        baseline is not None and seeded and collect_mode == "source-changed"
     )
+    poi_baseline = _load_exports_for_poi(baseline, lang) if needs_export_delta_poi else None
     poi_candidate = (
         _load_exports_for_poi(binary, lang) if poi_baseline is not None else None
     )
@@ -1230,6 +1234,7 @@ def run_scan_core(
         public_header_dirs=list(public_header_dirs),
         compile_context=compile_context,
         defer_cleanup=defer_cleanup,
+        symbols_only=eff_depth_enum is EvidenceDepth.BINARY,
     )
 
     # --- level-vs-evidence: fail-loud on missing input, advise otherwise ------
@@ -1316,6 +1321,7 @@ def run_scan_core(
             compile_context=compile_context,
             baseline_headers=baseline_headers,
             baseline_includes=baseline_includes,
+            symbols_only=eff_depth_enum is EvidenceDepth.BINARY,
         )
         # A cross-check the maintainer promoted to `error` (D6) gates the exit
         # even when the baseline diff itself is clean.
@@ -1557,6 +1563,7 @@ def _run_baseline_compare(
     compile_context: CompileContext | None = None,
     baseline_headers: list[Path] | None = None,
     baseline_includes: list[Path] | None = None,
+    symbols_only: bool = False,
 ) -> tuple[str, int, dict[str, Any]]:
     """Compare *new_snap* against *baseline*, folding cross-source findings in.
 
@@ -1618,6 +1625,7 @@ def _run_baseline_compare(
             public_headers=bl_public_headers,
             public_header_dirs=bl_public_dirs,
             compile=compile_context,
+            symbols_only=symbols_only,
         )
     except AbicheckError as exc:
         raise click.ClickException(

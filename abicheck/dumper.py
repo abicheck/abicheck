@@ -1241,6 +1241,7 @@ def dump(
     lang: str | None = None,
     dwarf_only: bool = False,
     debug_format: str | None = None,
+    symbols_only: bool = False,
     public_headers: list[Path] | None = None,
     public_header_dirs: list[Path] | None = None,
     header_backend: str = "auto",
@@ -1269,6 +1270,9 @@ def dump(
         debug_format: Force debug format for ELF inputs: "dwarf", "btf", or "ctf".
             None = auto-detect (DWARF preferred for userspace, BTF for kernel).
             Ignored for Mach-O and PE binaries.
+        symbols_only: For ELF inputs, skip expensive DWARF type expansion and
+            build the ABI surface from exported symbols only while still
+            recording cheap debug-info presence. Used by ``scan --depth binary``.
         public_headers: Explicit public-header files used only to classify
             declaration provenance (ADR-015). When empty, every declaration's
             origin stays UNKNOWN and behaviour is unchanged.
@@ -1305,6 +1309,7 @@ def dump(
         extra["dwarf_only"] = dwarf_only
     if handler.accepts_debug_format:
         extra["debug_format"] = debug_format
+        extra["symbols_only"] = symbols_only
     snapshot = handler.builder(
         so_path, headers, extra_includes or [], version, compiler,
         gcc_path=gcc_path, gcc_prefix=gcc_prefix, gcc_options=gcc_options,
@@ -1599,6 +1604,11 @@ def _build_symbol_only_snapshot(
             "functions/variables; DWARF-derived type information "
             "preserved."
         )
+    elif dwarf_meta.has_dwarf:
+        log.info(
+            "No headers provided — using ELF-exported symbols only; DWARF "
+            "debug info is present but was not expanded into the ABI surface."
+        )
     else:
         log.info(
             "No headers provided and no DWARF debug info — only ELF-exported "
@@ -1661,6 +1671,7 @@ def _dump_elf(
     lang: str | None = None,
     dwarf_only: bool = False,
     debug_format: str | None = None,
+    symbols_only: bool = False,
     public_headers: list[Path] | None = None,
     public_header_dirs: list[Path] | None = None,
     header_backend: str = "auto",
@@ -1675,7 +1686,24 @@ def _dump_elf(
     exported_dynamic, exported_dynamic_funcs, exported_dynamic_objects, exported_dynamic_tls = (
         _elf_classify_symbols(elf_meta, exported_dynamic, library_name=so_path.name)
     )
-    dwarf_meta, dwarf_adv = _resolve_debug_metadata(so_path, debug_format)
+    if symbols_only:
+        from elftools.elf.elffile import ELFFile
+
+        from .dwarf_advanced import AdvancedDwarfMetadata
+        from .dwarf_metadata import DwarfMetadata
+        from .dwarf_utils import has_real_dwarf_info
+
+        try:
+            with open(so_path, "rb") as f:
+                has_dwarf = has_real_dwarf_info(ELFFile(f))  # type: ignore[no-untyped-call]
+        except Exception:  # noqa: BLE001 - debug presence is advisory here
+            has_dwarf = False
+        dwarf_meta, dwarf_adv = (
+            DwarfMetadata(has_dwarf=has_dwarf),
+            AdvancedDwarfMetadata(has_dwarf=has_dwarf),
+        )
+    else:
+        dwarf_meta, dwarf_adv = _resolve_debug_metadata(so_path, debug_format)
     profile_hint = _lang_to_profile(lang)
 
     # ADR-003: Updated fallback chain
@@ -1683,7 +1711,7 @@ def _dump_elf(
     # no headers + DWARF available -> DWARF-only mode with type-aware checks
     # no headers + no DWARF -> symbols-only mode
     dwarf_only_types: list[RecordType] = []
-    if dwarf_only or (not headers and dwarf_meta.has_dwarf):
+    if not symbols_only and (dwarf_only or (not headers and dwarf_meta.has_dwarf)):
         snap, dwarf_only_types = _try_dwarf_snapshot(
             so_path, elf_meta, dwarf_meta, dwarf_adv,
             version, profile_hint, headers, dwarf_only,
