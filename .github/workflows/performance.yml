@@ -49,8 +49,14 @@ on:
       - "abicheck/serialization.py"
       - "abicheck/pe_metadata.py"
       - "abicheck/macho_metadata.py"
+      - "abicheck/cli_scan.py"
+      - "abicheck/dumper.py"
+      - "abicheck/dwarf_presence.py"
+      - "abicheck/service.py"
       - "scripts/benchmark_scaling.py"
       - "tests/test_performance.py"
+      - "tests/test_perf_binary_scan.py"
+      - "tests/test_perf_dump_scaling.py"
       - "tests/test_benchmark_scaling.py"
       - ".github/workflows/performance.yml"
 
@@ -109,7 +115,7 @@ jobs:
 
       - name: Run slow perf tests
         run: |
-          pytest tests/test_performance.py -v --tb=short -m slow
+          pytest tests/test_performance.py tests/test_perf_binary_scan.py -v --tb=short -m slow
 
       - name: Write job summary
         if: always()

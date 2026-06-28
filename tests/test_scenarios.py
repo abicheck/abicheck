@@ -578,6 +578,57 @@ def test_sc_malformed_input(tmp_path: Path) -> None:
     assert "Failed to load" in res.output
 
 
+def test_sc_scan_binary_depth_matrix_args(tmp_path: Path) -> None:
+    from abicheck.elf_metadata import ElfMetadata, ElfSymbol
+
+    old = _lib(
+        "1",
+        [_fn("kept"), _fn("removed")],
+        elf=ElfMetadata(symbols=[ElfSymbol(name="kept"), ElfSymbol(name="removed")]),
+    )
+    new = _lib("2", [_fn("kept")], elf=ElfMetadata(symbols=[ElfSymbol(name="kept")]))
+    old_path = _save(old, tmp_path / "old.json")
+    new_path = _save(new, tmp_path / "new.json")
+    include = tmp_path / "include"
+    include.mkdir()
+    (include / "api.h").write_text("int kept(void);\n", encoding="utf-8")
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "api.cpp").write_text(
+        'extern "C" int kept(void) { return 0; }\n',
+        encoding="utf-8",
+    )
+    cdb = tmp_path / "compile_commands.json"
+    cdb.write_text("[]", encoding="utf-8")
+
+    res = _cli(
+        "scan",
+        "--binary",
+        new_path,
+        "--baseline",
+        old_path,
+        "-H",
+        str(include),
+        "--sources",
+        str(src),
+        "--compile-db",
+        str(cdb),
+        "--depth",
+        "binary",
+        "--format",
+        "json",
+    )
+    assert res.exit_code == 4, res.output
+    doc = json.loads(res.output)
+    assert doc["verdict"] == "BREAKING"
+    rows = {row["layer"]: row for row in doc["coverage"]}
+    assert rows["L0_binary"]["status"] == "present"
+    assert rows["L2_header"]["status"] == "skipped"
+    assert rows["pattern_scan"]["status"] == "not_collected"
+    assert rows["L3_build"]["status"] == "not_collected"
+    assert doc["pattern_scan"]["files_scanned"] == 0
+
+
 def test_sc_c_struct_layout(tmp_path: Path) -> None:
     # Pure-C archetype: a public function takes Point by value; growing Point
     # changes its size, so every caller is ABI-incompatible — no symbol added or
