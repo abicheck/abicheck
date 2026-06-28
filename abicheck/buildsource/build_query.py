@@ -27,7 +27,7 @@ without compiling it.
 
 **Make fallback.** Make projects do not normally emit ``compile_commands.json``.
 For zero-config source scans, abicheck now runs a fixed GNU Make dry-run query
-(``make -B -n -k``) and scrapes the transcript through the reduced-confidence
+(``make -B -n -k -w``) and scrapes the transcript through the reduced-confidence
 Make adapter. This is less authoritative than a real compile DB and can still
 execute recursive/``+`` recipes on some Makefiles, but it keeps Make/EPICS-style
 projects useful by default.
@@ -58,6 +58,7 @@ import subprocess
 import tempfile
 import time
 from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 from pathlib import Path
 
 from .build_evidence import BuildEvidence
@@ -310,7 +311,9 @@ def inferred_query_command(
     if system == "make":
         # Force recipes to print even when the tree is already built.  Keep going
         # after dry-run errors so a partial transcript can still yield L3 facts.
-        return [make_launcher, "-B", "-n", "-k"]
+        # `-w` forces GNU Make's recursive directory markers; L4 replay relies on
+        # those to anchor relative EPICS-style `../foo.cpp` source paths.
+        return [make_launcher, "-B", "-n", "-k", "-w"]
     if system == "bazel":
         # Action graph for the compile AND link/archive actions the BazelAdapter
         # ingests — link actions carry version_script/soname facts, so a
@@ -331,6 +334,14 @@ def inferred_query_command(
             f"mnemonic('^({mnemonics})$', deps(//...))",
         ]
     return None
+
+
+@dataclass(frozen=True)
+class _MakeLauncher:
+    """Resolved GNU Make executable plus the user-facing spelling we probed."""
+
+    name: str
+    path: str
 
 
 def _is_gnu_make_launcher(tool: str) -> bool:
@@ -354,12 +365,34 @@ def _is_gnu_make_launcher(tool: str) -> bool:
     return proc.returncode == 0 and "GNU Make" in (proc.stdout or "")
 
 
-def _select_gnu_make_launcher(which: Callable[[str], str | None]) -> str | None:
-    """Pick a GNU Make launcher, preferring ``gmake`` when present."""
-    for tool in ("gmake", "make"):
-        if which(tool) is not None and _is_gnu_make_launcher(tool):
-            return tool
+def _select_gnu_make_launcher(which: Callable[[str], str | None]) -> _MakeLauncher | None:
+    """Pick a GNU Make launcher.
+
+    Prefer the platform's normal ``make`` when it is GNU (Linux/common CI), then
+    fall back to GNU/BSD-package spellings. The returned launcher uses the
+    resolved executable path from ``which`` so the version probe and dry-run run
+    the same binary even if PATH changes between calls. Non-GNU make is skipped
+    because the dry-run flags and directory markers are not portable enough for
+    replay.
+    """
+    for name in ("make", "gmake", "gnumake", "mingw32-make"):
+        path = which(name)
+        if path is not None and _is_gnu_make_launcher(path):
+            return _MakeLauncher(name=name, path=path)
     return None
+
+
+def _query_tool_available(tool: str, which: Callable[[str], str | None]) -> bool:
+    """Return whether *tool* can be used for an inferred query.
+
+    Relative tool names are checked through ``which``. Absolute paths may come
+    from an earlier ``which`` lookup (GNU Make launcher selection); treating that
+    resolved path as available avoids a second PATH lookup with a different
+    spelling such as ``which('/usr/bin/make')``.
+    """
+    if Path(tool).is_absolute():
+        return True
+    return which(tool) is not None
 
 
 def run_inferred_build_query(
@@ -411,7 +444,7 @@ def run_inferred_build_query(
                 )
             )
             return None
-        make_launcher = selected
+        make_launcher = selected.path
     # cmake configures into an OUT-OF-TREE build dir: never mutate the --sources
     # checkout (it may be read-only / shared) and keep generated output away from
     # every tree walker, so no walker needs to prune an in-tree build dir
@@ -466,7 +499,7 @@ def run_inferred_build_query(
         ):
             cmd[0] = "bazelisk"
         tool = cmd[0]
-        if which(tool) is None:
+        if not _query_tool_available(tool, which):
             extractors.append(
                 ExtractorRecord(
                     name="build_query_auto",
@@ -662,10 +695,10 @@ def _ingest_query_output(
                 name="build_query_auto",
                 status=status,
                 detail=(
-                    f"auto-ran `make -B -n -k`; {units} compile unit(s) from "
+                    f"auto-ran `make -B -n -k -w`; {units} compile unit(s) from "
                     f"dry-run transcript{rc_note}; reduced confidence"
                     if units
-                    else f"auto-ran `make -B -n -k`{rc_note} but found no compile units"
+                    else f"auto-ran `make -B -n -k -w`{rc_note} but found no compile units"
                 ),
             )
         )

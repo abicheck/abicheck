@@ -99,6 +99,57 @@ def test_make_entering_directory_sets_compile_cwd(tmp_path):
     assert (Path(cu.directory).expanduser() / cu.source).is_file()
 
 
+def test_gmake_entering_directory_sets_compile_cwd(tmp_path):
+    obj_dir = tmp_path / "src" / "O.linux-x86_64"
+    obj_dir.mkdir(parents=True)
+    src = tmp_path / "src" / "foo.cc"
+    src.write_text("int f() { return 0; }\n")
+    dry = (
+        f"gmake[1]: Entering directory '{tmp_path / 'src'}'\n"
+        f"gmake[2]: Entering directory '{obj_dir}'\n"
+        "g++ -std=c++17 -I. -c ../foo.cc -o foo.o\n"
+        f"gmake[2]: Leaving directory '{obj_dir}'\n"
+        f"gmake[1]: Leaving directory '{tmp_path / 'src'}'\n"
+    )
+
+    cu = MakeAdapter(build_dir=tmp_path, dry_run=dry).collect().compile_units[0]
+
+    assert Path(cu.directory).expanduser() == obj_dir
+    assert (Path(cu.directory).expanduser() / cu.source).is_file()
+
+
+def test_make_directory_markers_accept_resolved_program_path(tmp_path):
+    src = tmp_path / "src" / "foo.cc"
+    src.parent.mkdir()
+    src.write_text("int f() { return 0; }\n")
+    dry = (
+        f"/usr/local/bin/gnumake[1]: Entering directory `{tmp_path}'\n"
+        "g++ -std=c++17 -c src/foo.cc -o build/foo.o\n"
+        f"/usr/local/bin/gnumake[1]: Leaving directory `{tmp_path}'\n"
+    )
+
+    cu = MakeAdapter(dry_run=dry).collect().compile_units[0]
+
+    assert Path(cu.directory).expanduser() == tmp_path
+    assert (Path(cu.directory).expanduser() / cu.source).is_file()
+
+
+def test_make_directory_markers_accept_mingw_make_exe(tmp_path):
+    src = tmp_path / "src" / "foo.cc"
+    src.parent.mkdir()
+    src.write_text("int f() { return 0; }\n")
+    dry = (
+        f"mingw32-make.exe[1]: Entering directory '{tmp_path}'\n"
+        "g++ -std=c++17 -c src/foo.cc -o build/foo.o\n"
+        f"mingw32-make.exe[1]: Leaving directory '{tmp_path}'\n"
+    )
+
+    cu = MakeAdapter(dry_run=dry).collect().compile_units[0]
+
+    assert Path(cu.directory).expanduser() == tmp_path
+    assert (Path(cu.directory).expanduser() / cu.source).is_file()
+
+
 def test_make_expands_response_file_and_truncates_shell_suffix(tmp_path):
     src = tmp_path / "src" / "foo.cc"
     inc = tmp_path / "include"

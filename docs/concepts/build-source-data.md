@@ -279,7 +279,7 @@ sources:
 - **`query_build_system` (automatic when `--sources` is given):** if no compile
   DB exists, abicheck **detects the build system and runs its own fixed query**
   (`cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=ON`, `bazel aquery`, or a GNU Make
-  dry-run `make -B -n -k`) to emit flags/exports — no `--allow-build-query` flag
+  dry-run `make -B -n -k -w`) to emit flags/exports — no `--allow-build-query` flag
   (that flag is deprecated to a no-op). Make dry-run evidence is reduced confidence
   because it is a transcript scrape rather than an authoritative target graph;
   prefer a real compile DB (`bear -- make` → `--compile-db`) when available. It
