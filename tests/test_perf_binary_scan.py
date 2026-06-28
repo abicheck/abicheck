@@ -108,6 +108,9 @@ def test_binary_depth_matrix_args_stays_artifact_only_and_fast(tmp_path: Path) -
 
 @pytest.mark.skipif(sys.platform != "linux", reason="native ELF fast path is Linux-only")
 def test_headers_depth_matrix_args_stays_l2_only_and_fast(tmp_path: Path) -> None:
+    if shutil.which("clang") is None:
+        pytest.skip("clang required for header-depth scan performance guard")
+
     old_so = tmp_path / "libold.so"
     new_so = tmp_path / "libnew.so"
     _compile_so(
@@ -163,6 +166,8 @@ def test_headers_depth_matrix_args_stays_l2_only_and_fast(tmp_path: Path) -> Non
             str(cdb),
             "--depth",
             "headers",
+            "--ast-frontend",
+            "clang",
             "--lang",
             "c",
             "--format",
@@ -171,12 +176,12 @@ def test_headers_depth_matrix_args_stays_l2_only_and_fast(tmp_path: Path) -> Non
     )
     wall = time.monotonic() - start
 
-    assert res.exit_code == 0, res.output
+    assert res.exit_code == 4, res.output
     json_start = res.output.find("{")
     assert json_start >= 0, res.output
     doc = json.loads(res.output[json_start:])
     rows = {row["layer"]: row for row in doc["coverage"]}
-    assert doc["verdict"] == "COMPATIBLE_WITH_RISK"
+    assert doc["verdict"] == "BREAKING"
     assert rows["L0_binary"]["status"] == "present"
     assert rows["L1_debug"]["status"] == "present"
     assert rows["L2_header"]["status"] == "present"
