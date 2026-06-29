@@ -116,7 +116,7 @@ scenarios:
       verdict: BREAKING
       coverage:
         L0_binary: present
-        L1_debug: skipped
+        L1_debug: not_collected
         L2_header: skipped
         pattern_scan: not_collected
         L3_build: not_collected

@@ -623,6 +623,7 @@ def test_sc_scan_binary_depth_matrix_args(tmp_path: Path) -> None:
     assert doc["verdict"] == "BREAKING"
     rows = {row["layer"]: row for row in doc["coverage"]}
     assert rows["L0_binary"]["status"] == "present"
+    assert rows["L1_debug"]["status"] == "not_collected"
     assert rows["L2_header"]["status"] == "skipped"
     assert rows["pattern_scan"]["status"] == "not_collected"
     assert rows["L3_build"]["status"] == "not_collected"

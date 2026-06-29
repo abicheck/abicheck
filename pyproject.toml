@@ -100,6 +100,7 @@ module = [
     "abicheck.dwarf_metadata",
     "abicheck.dwarf_advanced",
     "abicheck.dwarf_unified",
+    "abicheck.dwarf_presence",
     "abicheck.dumper",
     "abicheck.package",
     "abicheck.pdb_parser",

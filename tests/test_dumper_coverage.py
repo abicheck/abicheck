@@ -27,6 +27,47 @@ from abicheck.elf_metadata import ElfMetadata
 
 # ── _castxml_dump internal branches ────────────────────────────────────
 
+
+def test_cheap_debug_presence_honors_forced_btf(monkeypatch, tmp_path):
+    from abicheck.dwarf_presence import cheap_debug_presence_metadata
+
+    so_path = tmp_path / "vmlinux"
+    so_path.write_bytes(b"\x7fELF")
+    monkeypatch.setattr("abicheck.dwarf_presence._has_btf", lambda _p: True)
+    monkeypatch.setattr("abicheck.dwarf_presence._has_ctf", lambda _p: False)
+    monkeypatch.setattr(
+        "abicheck.dwarf_presence.cheap_dwarf_presence_metadata",
+        lambda _p: pytest.fail("forced BTF must not probe DWARF first"),
+    )
+
+    dwarf_meta, dwarf_adv = cheap_debug_presence_metadata(
+        so_path,
+        debug_format="btf",
+    )
+
+    assert dwarf_meta.has_dwarf is True
+    assert dwarf_adv.has_dwarf is True
+
+
+def test_cheap_debug_presence_auto_prefers_kernel_btf(monkeypatch, tmp_path):
+    from abicheck.dwarf_presence import cheap_debug_presence_metadata
+
+    so_path = tmp_path / "vmlinux"
+    so_path.write_bytes(b"\x7fELF")
+    monkeypatch.setattr("abicheck.dwarf_presence._is_kernel_binary", lambda _p: True)
+    monkeypatch.setattr("abicheck.dwarf_presence._has_btf", lambda _p: True)
+    monkeypatch.setattr("abicheck.dwarf_presence._has_ctf", lambda _p: False)
+    monkeypatch.setattr(
+        "abicheck.dwarf_presence.cheap_dwarf_presence_metadata",
+        lambda _p: pytest.fail("kernel BTF should be selected before DWARF"),
+    )
+
+    dwarf_meta, dwarf_adv = cheap_debug_presence_metadata(so_path)
+
+    assert dwarf_meta.has_dwarf is True
+    assert dwarf_adv.has_dwarf is True
+
+
 class TestCastxmlDumpBranches:
     def _setup(self, monkeypatch, tmp_path):
         """Common setup: castxml available, cache miss."""
@@ -243,6 +284,45 @@ class TestDumpSymbolFiltering:
         snap = dump(so_path=so_path, headers=[], version="1.0", symbols_only=True)
 
         assert [f.mangled for f in snap.functions] == ["_Z3foov"]
+        assert snap.elf_only_mode is True
+
+    def test_symbols_only_skips_header_ast_even_with_headers(self, tmp_path, monkeypatch):
+        """symbols_only is an exported-symbol surface even if callers pass headers."""
+        from abicheck.dwarf_advanced import AdvancedDwarfMetadata
+        from abicheck.dwarf_metadata import DwarfMetadata
+        from abicheck.elf_metadata import ElfMetadata, ElfSymbol, SymbolType
+
+        so_path = tmp_path / "lib.so"
+        so_path.write_bytes(b"\x7fELF")
+        header = tmp_path / "api.h"
+        header.write_text("int foo(void);\n", encoding="utf-8")
+        elf_meta = ElfMetadata(
+            symbols=[ElfSymbol(name="foo", sym_type=SymbolType.FUNC)]
+        )
+        monkeypatch.setattr(
+            "abicheck.dumper._pyelftools_exported_symbols",
+            lambda _p: ({"foo"}, {"foo"}),
+        )
+        monkeypatch.setattr(
+            "abicheck.elf_metadata.parse_elf_metadata", lambda _p: elf_meta
+        )
+        monkeypatch.setattr(
+            "abicheck.dwarf_presence.cheap_debug_presence_metadata",
+            lambda *_a, **_kw: (DwarfMetadata(), AdvancedDwarfMetadata()),
+        )
+
+        def _unexpected(*args, **kwargs):
+            raise AssertionError("symbols_only must not parse headers")
+
+        monkeypatch.setattr("abicheck.dumper._header_ast_parser", _unexpected)
+        snap = dump(
+            so_path=so_path,
+            headers=[header],
+            version="1.0",
+            symbols_only=True,
+        )
+
+        assert [f.mangled for f in snap.functions] == ["foo"]
         assert snap.elf_only_mode is True
 
 

@@ -1575,6 +1575,7 @@ def test_depth_headers_keeps_source_tree_out_of_pattern_scan(
 
     def _spy(*args, **kwargs):
         captured["symbols_only"] = kwargs.get("symbols_only")
+        captured["debug_presence_only"] = kwargs.get("debug_presence_only")
         return original(*args, **kwargs)
 
     monkeypatch.setattr(cs, "_build_new_snapshot", _spy)
@@ -1597,7 +1598,8 @@ def test_depth_headers_keeps_source_tree_out_of_pattern_scan(
     )
     assert res.exit_code == 0, res.output
     payload = json.loads(res.output)
-    assert captured["symbols_only"] is True
+    assert captured["symbols_only"] is False
+    assert captured["debug_presence_only"] is True
     assert payload["pattern_scan"]["files_scanned"] == 1
     assert payload["pattern_scan"]["counts_by_kind"] == {"virtual_method": 1}
 
@@ -1627,6 +1629,22 @@ def test_depth_binary_skips_export_delta_poi_loads(
         ],
     )
     assert res.exit_code == 0, res.output
+
+
+def test_export_delta_poi_load_is_symbols_only(monkeypatch, tmp_path):
+    import abicheck.service as service
+    from abicheck import cli_scan as cs
+
+    captured: dict[str, object] = {}
+
+    def _resolve_input(*args, **kwargs):
+        captured["symbols_only"] = kwargs.get("symbols_only")
+        return object()
+
+    monkeypatch.setattr(service, "resolve_input", _resolve_input)
+
+    assert cs._load_exports_for_poi(tmp_path / "lib.so", "c") is not None
+    assert captured["symbols_only"] is True
 
 
 def test_estimate_uses_resolved_level_not_raw_flags(
