@@ -1241,6 +1241,8 @@ def dump(
     lang: str | None = None,
     dwarf_only: bool = False,
     debug_format: str | None = None,
+    symbols_only: bool = False,
+    debug_presence_only: bool = False,
     public_headers: list[Path] | None = None,
     public_header_dirs: list[Path] | None = None,
     header_backend: str = "auto",
@@ -1269,6 +1271,12 @@ def dump(
         debug_format: Force debug format for ELF inputs: "dwarf", "btf", or "ctf".
             None = auto-detect (DWARF preferred for userspace, BTF for kernel).
             Ignored for Mach-O and PE binaries.
+        symbols_only: For ELF inputs, skip expensive DWARF type expansion and
+            build the ABI surface from exported symbols only while still
+            recording cheap debug-info presence. Used by ``scan --depth binary``.
+        debug_presence_only: For ELF inputs, skip expensive DWARF type expansion
+            while still allowing header parsing. Used by shallow scan depths that
+            collect L2/L3 from headers/build evidence.
         public_headers: Explicit public-header files used only to classify
             declaration provenance (ADR-015). When empty, every declaration's
             origin stays UNKNOWN and behaviour is unchanged.
@@ -1279,14 +1287,12 @@ def dump(
         AbiSnapshot with functions, variables, and types populated.
     """
     fmt = _detect_format(so_path)
-
     handler = _HANDLERS_BY_NAME.get(fmt)
     if handler is None:
         from .binary_utils import detect_archive
         if detect_archive(so_path):
             raise ValidationError(
-                f"'{so_path}' is a static/import library archive (.a/.lib), which "
-                "abicheck does not analyse — it compares single linkable images "
+                f"'{so_path}' is a static/import library archive (.a/.lib); abicheck compares single linkable images "
                 "(shared libraries and objects). Extract the members (e.g. "
                 "`ar x lib.a`) and compare the resulting object files or the shared "
                 "library built from them instead."
@@ -1297,14 +1303,13 @@ def dump(
             f"Ensure the file is a valid shared library."
         )
 
-    # Forward only the optional kwargs each format's builder accepts — preserves
-    # the exact per-format call the if/elif chain made (ELF: dwarf_only +
-    # debug_format; Mach-O: dwarf_only; PE: neither).
     extra: dict[str, Any] = {}
     if handler.accepts_dwarf_only:
         extra["dwarf_only"] = dwarf_only
     if handler.accepts_debug_format:
         extra["debug_format"] = debug_format
+        extra["symbols_only"] = symbols_only
+        extra["debug_presence_only"] = debug_presence_only
     snapshot = handler.builder(
         so_path, headers, extra_includes or [], version, compiler,
         gcc_path=gcc_path, gcc_prefix=gcc_prefix, gcc_options=gcc_options,
@@ -1599,6 +1604,11 @@ def _build_symbol_only_snapshot(
             "functions/variables; DWARF-derived type information "
             "preserved."
         )
+    elif dwarf_meta.has_dwarf:
+        log.info(
+            "No headers provided — using ELF-exported symbols only; DWARF "
+            "debug info is present but was not expanded into the ABI surface."
+        )
     else:
         log.info(
             "No headers provided and no DWARF debug info — only ELF-exported "
@@ -1661,6 +1671,8 @@ def _dump_elf(
     lang: str | None = None,
     dwarf_only: bool = False,
     debug_format: str | None = None,
+    symbols_only: bool = False,
+    debug_presence_only: bool = False,
     public_headers: list[Path] | None = None,
     public_header_dirs: list[Path] | None = None,
     header_backend: str = "auto",
@@ -1668,30 +1680,35 @@ def _dump_elf(
 ) -> AbiSnapshot:
     """ELF-specific dump: pyelftools + debug info (DWARF/BTF/CTF) + header AST."""
     exported_dynamic, exported_static = _pyelftools_exported_symbols(so_path)
-
     from .elf_metadata import parse_elf_metadata
-
     elf_meta = parse_elf_metadata(so_path)
     exported_dynamic, exported_dynamic_funcs, exported_dynamic_objects, exported_dynamic_tls = (
         _elf_classify_symbols(elf_meta, exported_dynamic, library_name=so_path.name)
     )
-    dwarf_meta, dwarf_adv = _resolve_debug_metadata(so_path, debug_format)
+    if symbols_only or debug_presence_only:
+        from .dwarf_presence import cheap_debug_presence_metadata
+        dwarf_meta, dwarf_adv = cheap_debug_presence_metadata(
+            so_path,
+            debug_format=debug_format,
+        )
+    else:
+        dwarf_meta, dwarf_adv = _resolve_debug_metadata(so_path, debug_format)
     profile_hint = _lang_to_profile(lang)
-
     # ADR-003: Updated fallback chain
     # --dwarf-only → force DWARF mode regardless of headers
     # no headers + DWARF available -> DWARF-only mode with type-aware checks
     # no headers + no DWARF -> symbols-only mode
     dwarf_only_types: list[RecordType] = []
-    if dwarf_only or (not headers and dwarf_meta.has_dwarf):
+    if not (symbols_only or debug_presence_only) and (
+        dwarf_only or (not headers and dwarf_meta.has_dwarf)
+    ):
         snap, dwarf_only_types = _try_dwarf_snapshot(
             so_path, elf_meta, dwarf_meta, dwarf_adv,
             version, profile_hint, headers, dwarf_only,
         )
         if snap is not None:
             return snap
-
-    if not headers:
+    if symbols_only or not headers:
         return _build_symbol_only_snapshot(
             so_path, version, elf_meta, dwarf_meta, dwarf_adv,
             exported_dynamic_funcs, exported_dynamic_objects, exported_dynamic_tls,

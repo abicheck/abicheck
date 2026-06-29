@@ -152,6 +152,8 @@ def resolve_input(
     debug_roots: list[Path] | None = None,
     enable_debuginfod: bool = False,
     debug_format: str | None = None,
+    symbols_only: bool = False,
+    debug_presence_only: bool = False,
     public_headers: list[Path] | None = None,
     public_header_dirs: list[Path] | None = None,
     follow_linker_scripts: bool = True,
@@ -207,6 +209,8 @@ def resolve_input(
             debug_roots=debug_roots,
             enable_debuginfod=enable_debuginfod,
             debug_format=debug_format,
+            symbols_only=symbols_only,
+            debug_presence_only=debug_presence_only,
             public_headers=public_headers,
             public_header_dirs=public_header_dirs,
             header_backend=header_backend,
@@ -229,6 +233,8 @@ def resolve_input(
             debug_roots=debug_roots,
             enable_debuginfod=enable_debuginfod,
             debug_format=debug_format,
+            symbols_only=symbols_only,
+            debug_presence_only=debug_presence_only,
             public_headers=public_headers,
             public_header_dirs=public_header_dirs,
             header_backend=header_backend,
@@ -294,6 +300,8 @@ def resolve_input(
                     debug_roots=debug_roots,
                     enable_debuginfod=enable_debuginfod,
                     debug_format=debug_format,
+                    symbols_only=symbols_only,
+                    debug_presence_only=debug_presence_only,
                     public_headers=public_headers,
                     public_header_dirs=public_header_dirs,
                     follow_linker_scripts=follow_linker_scripts,
@@ -343,6 +351,8 @@ def run_dump(
     debug_roots: list[Path] | None = None,
     enable_debuginfod: bool = False,
     debug_format: str | None = None,
+    symbols_only: bool = False,
+    debug_presence_only: bool = False,
     public_headers: list[Path] | None = None,
     public_header_dirs: list[Path] | None = None,
     header_backend: str = "auto",
@@ -383,6 +393,8 @@ def run_dump(
             debug_roots=debug_roots,
             enable_debuginfod=enable_debuginfod,
             debug_format=debug_format,
+            symbols_only=symbols_only,
+            debug_presence_only=debug_presence_only,
             header_backend=eff_backend,
             compile=compile,
             public_headers=public_headers,
@@ -477,6 +489,8 @@ def _dump_elf(
     debug_roots: list[Path] | None = None,
     enable_debuginfod: bool = False,
     debug_format: str | None = None,
+    symbols_only: bool = False,
+    debug_presence_only: bool = False,
     header_backend: str = "auto",
     compile: CompileContext | None = None,
     public_headers: list[Path] | None = None,
@@ -496,7 +510,13 @@ def _dump_elf(
 
     cc = compile if compile is not None else CompileContext()
     resolved_headers = expand_header_inputs(headers) if headers else []
-    if not resolved_headers and not dwarf_only:
+    if not resolved_headers and symbols_only:
+        _emit(
+            notify,
+            f"Warning: '{path}' — no headers provided. "
+            "Using exported symbols only for binary-depth scan.",
+        )
+    elif not resolved_headers and not dwarf_only:
         _emit(
             notify,
             f"Warning: '{path}' — no headers provided. "
@@ -551,6 +571,8 @@ def _dump_elf(
             lang=lang if lang == "c" else None,
             dwarf_only=dwarf_only,
             debug_format=debug_format,
+            symbols_only=symbols_only,
+            debug_presence_only=debug_presence_only,
             header_backend=header_backend,
             public_headers=public_headers,
             public_header_dirs=public_header_dirs,

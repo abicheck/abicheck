@@ -264,7 +264,8 @@ def _intrinsic_coverage(snap: Any) -> list[dict[str, Any]]:
             else "no binary export table (snapshot-only input)",
         }
     )
-    has_debug = snap.dwarf is not None
+    dwarf = getattr(snap, "dwarf", None)
+    has_debug = bool(getattr(dwarf, "has_dwarf", False)) if dwarf is not None else False
     rows.append(
         {
             "layer": "L1_debug",
@@ -316,6 +317,39 @@ def _l3_collected(snap: Any) -> bool:
         if row.get("layer") == "L3_build":
             return row.get("status") != "not_collected"
     return False
+
+
+def _uses_fast_binary_surface(depth: EvidenceDepth) -> bool:
+    """True when the scan depth needs only ELF exports plus cheap debug presence.
+
+    The deeper DWARF DIE walk is source/type evidence. ``headers`` gets its type
+    evidence from L2 AST, and ``build`` adds L3 compile context; neither needs the
+    expensive DWARF expansion on the binary side.
+    """
+    return depth in {
+        EvidenceDepth.BINARY,
+        EvidenceDepth.HEADERS,
+        EvidenceDepth.BUILD,
+    }
+
+
+def _uses_debug_presence_only(depth: EvidenceDepth) -> bool:
+    """True when L2/L3 evidence is collected elsewhere, so DWARF stays cheap."""
+    return depth in {EvidenceDepth.HEADERS, EvidenceDepth.BUILD}
+
+
+def _normalize_depth_inputs(
+    depth: EvidenceDepth,
+    headers: tuple[Path, ...],
+    baseline_header: tuple[Path, ...],
+    sources: Path | None,
+    build_info: Path | None,
+    compile_db: Path | None,
+) -> tuple[tuple[Path, ...], tuple[Path, ...], Path | None, Path | None, Path | None]:
+    """Prune inputs that would collect evidence above the effective scan depth."""
+    if depth is not EvidenceDepth.BINARY:
+        return headers, baseline_header, sources, build_info, compile_db
+    return (), (), None, None, None
 
 
 def _render_text(out: ScanOutcome) -> str:
@@ -421,6 +455,8 @@ def _build_new_snapshot(
     public_header_dirs: list[Path] | None = None,
     compile_context: CompileContext | None = None,
     defer_cleanup: list[Callable[[], None]] | None = None,
+    symbols_only: bool = False,
+    debug_presence_only: bool = False,
 ) -> Any:
     """Dump the candidate's L0-L2 surface and embed L3-L5 inline at *collect_mode*.
 
@@ -448,6 +484,8 @@ def _build_new_snapshot(
             public_headers=public_headers,
             public_header_dirs=public_header_dirs,
             compile=compile_context,
+            symbols_only=symbols_only,
+            debug_presence_only=debug_presence_only,
         )
     except AbicheckError as exc:
         raise click.ClickException(f"Failed to load --binary {binary}: {exc}") from exc
@@ -486,7 +524,7 @@ def _load_exports_for_poi(path: Path | None, lang: str) -> Any | None:
     from .service import resolve_input
 
     try:
-        return resolve_input(path, [], [], version="", lang=lang)
+        return resolve_input(path, [], [], version="", lang=lang, symbols_only=True)
     except Exception:  # noqa: BLE001 - best-effort focusing input, never fatal
         return None
 
@@ -886,20 +924,17 @@ def scan_cmd(
     # so a deeper preset (pr-deep = graph) is distinct from pr, and an explicit
     # --source-method reports its own depth, not the mode preset (Codex review).
     collect_mode = level_to_collect_mode(resolved, eff_depth_enum)
-    # --depth binary is symbols-only (L0/L1): suppress the L2 header AST even when
-    # -H is passed, so the collected evidence matches the reported depth — parity
-    # with dump/compare's binary handling. Keyed on the *resolved*
-    # effective depth, not the raw --depth: --source-method wins over --depth, so
-    # `--source-method s5 --depth binary -H ...` resolves to a source scan that
-    # still needs the header AST/provenance — only an effective binary depth drops
-    # headers (Codex review).
-    if eff_depth_enum is EvidenceDepth.BINARY:
-        headers = ()
-        # Also drop the *baseline* header inputs: leaving them would make
-        # _run_baseline_compare parse the old side with the L2 header AST while the
-        # new side has none, yielding spurious header/type removals against a
-        # symbols-only scan (Codex review). Include dirs are harmless (no AST).
-        baseline_header = ()
+    # Keyed on the *resolved* effective depth, not the raw --depth:
+    # --source-method wins over --depth, so `--source-method s5 --depth binary`
+    # still keeps the inputs needed for a source scan.
+    headers, baseline_header, sources, build_info, compile_db = _normalize_depth_inputs(
+        eff_depth_enum,
+        headers,
+        baseline_header,
+        sources,
+        build_info,
+        compile_db,
+    )
     effective_build_info = compile_db or build_info
 
     # --- --estimate: dry-run cost probe, scan nothing (ADR-035 D10) -----------
@@ -1120,7 +1155,10 @@ def run_scan_core(
     # scope; only a genuinely *unseeded* run (no --since/--changed-path) falls
     # back to the whole-tree scan (Codex review).
     pattern_roots: list[Path] = [*headers]
-    if sources is not None:
+    if sources is not None and eff_depth_enum not in {
+        EvidenceDepth.BINARY,
+        EvidenceDepth.HEADERS,
+    }:
         pattern_roots.append(sources)
     pattern = scan_files(pattern_roots, changed if seeded else None)
 
@@ -1133,9 +1171,12 @@ def run_scan_core(
     # once, below, with the resulting focus seed. The candidate view is only
     # loaded when there is a baseline to diff it against — the delta walk consumes
     # the two together, so loading it baseline-less would be a wasted L0/L1 parse.
-    poi_baseline = (
-        _load_exports_for_poi(baseline, lang) if baseline is not None else None
+    needs_export_delta_poi = (
+        baseline is not None
+        and seeded
+        and collect_mode in {"source-changed", "graph-full"}
     )
+    poi_baseline = _load_exports_for_poi(baseline, lang) if needs_export_delta_poi else None
     poi_candidate = (
         _load_exports_for_poi(binary, lang) if poi_baseline is not None else None
     )
@@ -1230,6 +1271,8 @@ def run_scan_core(
         public_header_dirs=list(public_header_dirs),
         compile_context=compile_context,
         defer_cleanup=defer_cleanup,
+        symbols_only=eff_depth_enum is EvidenceDepth.BINARY,
+        debug_presence_only=_uses_debug_presence_only(eff_depth_enum),
     )
 
     # --- level-vs-evidence: fail-loud on missing input, advise otherwise ------
@@ -1316,6 +1359,8 @@ def run_scan_core(
             compile_context=compile_context,
             baseline_headers=baseline_headers,
             baseline_includes=baseline_includes,
+            symbols_only=eff_depth_enum is EvidenceDepth.BINARY,
+            debug_presence_only=_uses_debug_presence_only(eff_depth_enum),
         )
         # A cross-check the maintainer promoted to `error` (D6) gates the exit
         # even when the baseline diff itself is clean.
@@ -1557,6 +1602,8 @@ def _run_baseline_compare(
     compile_context: CompileContext | None = None,
     baseline_headers: list[Path] | None = None,
     baseline_includes: list[Path] | None = None,
+    symbols_only: bool = False,
+    debug_presence_only: bool = False,
 ) -> tuple[str, int, dict[str, Any]]:
     """Compare *new_snap* against *baseline*, folding cross-source findings in.
 
@@ -1618,6 +1665,8 @@ def _run_baseline_compare(
             public_headers=bl_public_headers,
             public_header_dirs=bl_public_dirs,
             compile=compile_context,
+            symbols_only=symbols_only,
+            debug_presence_only=debug_presence_only,
         )
     except AbicheckError as exc:
         raise click.ClickException(

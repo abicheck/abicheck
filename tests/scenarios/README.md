@@ -24,7 +24,7 @@ file. `tests/test_scenarios.py` merges every `tests/scenarios/*.yaml`:
 | `platform_coverage.yaml` | Linux ELF baseline (automated); native Windows PE/macOS Mach-O, plugin host↔plugin contract (planned) |
 | `archetype_coverage.yaml` | kernel-BTF, SYCL plugin, static library, header-only (planned) |
 
-There are currently **44 scenarios** (28 automated end-to-end + 16 planned).
+There are currently **45 scenarios** (29 automated end-to-end + 16 planned).
 
 Add a new group by dropping in a new `*.yaml`; add a scenario by appending to an
 existing group. Scenario ids must be unique across all files.

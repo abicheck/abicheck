@@ -1510,6 +1510,171 @@ def test_depth_binary_clears_baseline_headers(
     assert captured["headers"] == []
 
 
+def test_depth_binary_clears_source_inputs(
+    monkeypatch, runner, new_snap_compatible, tmp_path
+):
+    # Matrix runners often pass --sources/--compile-db to every depth. Effective
+    # binary depth must stay L0/L1-only and avoid the always-on source pattern
+    # scan / L3 collection cost.
+    import abicheck.cli_scan as cs
+
+    src = tmp_path / "src"
+    src.mkdir()
+    cdb = tmp_path / "compile_commands.json"
+    cdb.write_text("[]", encoding="utf-8")
+    captured: dict[str, object] = {}
+    original = cs.run_scan_core
+
+    def _spy(*args, **kwargs):
+        captured["sources"] = kwargs.get("sources")
+        captured["effective_build_info"] = kwargs.get("effective_build_info")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(cs, "run_scan_core", _spy)
+    res = runner.invoke(
+        main,
+        [
+            "scan",
+            "--binary",
+            str(new_snap_compatible),
+            "--sources",
+            str(src),
+            "--compile-db",
+            str(cdb),
+            "--depth",
+            "binary",
+            "--audit",
+        ],
+    )
+    assert res.exit_code == 0, res.output
+    assert captured["sources"] is None
+    assert captured["effective_build_info"] is None
+
+
+def test_depth_headers_keeps_source_tree_out_of_pattern_scan(
+    monkeypatch, runner, new_snap_compatible, tmp_path
+):
+    # Matrix runners may pass --sources to every depth. The headers rung is
+    # L0/L1/L2-only: it should pattern-scan public headers, not the whole source
+    # tree, and it should use the cheap binary surface instead of a DWARF DIE walk.
+    import abicheck.cli_scan as cs
+
+    include = tmp_path / "include"
+    include.mkdir()
+    header = include / "foo.h"
+    header.write_text("struct Api { virtual ~Api(); };\n", encoding="utf-8")
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "impl.cpp").write_text(
+        "\n".join(f"struct Impl{i} {{ virtual ~Impl{i}(); }};" for i in range(20)),
+        encoding="utf-8",
+    )
+
+    captured: dict[str, object] = {}
+    original = cs._build_new_snapshot
+
+    def _spy(*args, **kwargs):
+        captured["symbols_only"] = kwargs.get("symbols_only")
+        captured["debug_presence_only"] = kwargs.get("debug_presence_only")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(cs, "_build_new_snapshot", _spy)
+    res = runner.invoke(
+        main,
+        [
+            "scan",
+            "--binary",
+            str(new_snap_compatible),
+            "-H",
+            str(include),
+            "--sources",
+            str(src),
+            "--depth",
+            "headers",
+            "--audit",
+            "--format",
+            "json",
+        ],
+    )
+    assert res.exit_code == 0, res.output
+    payload = json.loads(res.output)
+    assert captured["symbols_only"] is False
+    assert captured["debug_presence_only"] is True
+    assert payload["pattern_scan"]["files_scanned"] == 1
+    assert payload["pattern_scan"]["counts_by_kind"] == {"virtual_method": 1}
+
+
+def test_depth_binary_skips_export_delta_poi_loads(
+    monkeypatch, runner, baseline_snap, new_snap_compatible
+):
+    # The export-delta POI walk only focuses source replay. Effective binary
+    # depth has no replay, so loading candidate+baseline L0 views would duplicate
+    # native binary dumps and make "binary" scans unexpectedly expensive.
+    import abicheck.cli_scan as cs
+
+    def _unexpected(*args, **kwargs):
+        raise AssertionError("binary depth must not load POI export snapshots")
+
+    monkeypatch.setattr(cs, "_load_exports_for_poi", _unexpected)
+    res = runner.invoke(
+        main,
+        [
+            "scan",
+            "--binary",
+            str(new_snap_compatible),
+            "--baseline",
+            str(baseline_snap),
+            "--depth",
+            "binary",
+        ],
+    )
+    assert res.exit_code == 0, res.output
+
+
+def test_export_delta_poi_load_is_symbols_only(monkeypatch, tmp_path):
+    import abicheck.service as service
+    from abicheck import cli_scan as cs
+
+    captured: dict[str, object] = {}
+
+    def _resolve_input(*args, **kwargs):
+        captured["symbols_only"] = kwargs.get("symbols_only")
+        return object()
+
+    monkeypatch.setattr(service, "resolve_input", _resolve_input)
+
+    assert cs._load_exports_for_poi(tmp_path / "lib.so", "c") is not None
+    assert captured["symbols_only"] is True
+
+
+def test_normalize_depth_inputs_prunes_only_binary(tmp_path):
+    from abicheck import cli_scan as cs
+    from abicheck.buildsource.scan_levels import EvidenceDepth
+
+    header = tmp_path / "include"
+    baseline_header = tmp_path / "old-include"
+    sources = tmp_path / "src"
+    build_info = tmp_path / "build"
+    compile_db = tmp_path / "compile_commands.json"
+
+    assert cs._normalize_depth_inputs(
+        EvidenceDepth.BINARY,
+        (header,),
+        (baseline_header,),
+        sources,
+        build_info,
+        compile_db,
+    ) == ((), (), None, None, None)
+    assert cs._normalize_depth_inputs(
+        EvidenceDepth.HEADERS,
+        (header,),
+        (baseline_header,),
+        sources,
+        build_info,
+        compile_db,
+    ) == ((header,), (baseline_header,), sources, build_info, compile_db)
+
+
 def test_estimate_uses_resolved_level_not_raw_flags(
     monkeypatch, runner, new_snap_compatible
 ):

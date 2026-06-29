@@ -653,6 +653,8 @@ use_cases:
         - tests/test_risk.py
         - tests/test_scan_levels.py
         - tests/test_cli_scan.py
+        - tests/test_perf_binary_scan.py
+        - tests/test_scenarios.py
     next_steps: >
       ADR-035 D2/D3. DONE: the compiler-free lexical pattern pre-scan
       (`buildsource/pattern_scan.py`); and the deterministic `scan` orchestrator
@@ -668,7 +670,11 @@ use_cases:
       preprocessor pre-scan (`buildsource/preprocessor_scan.py`) — per-TU ABI
       macro-value capture + divergence and public-header private/generated-header
       leak detection, conditional on a compile DB + `clang -E` — is done and wired
-      into `scan` with honest coverage. Phase 1 (D2) complete.
+      into `scan` with honest coverage. Depth semantics are tracked end-to-end:
+      the binary rung stays artifact-only (L0/L1) even when matrix-wide headers,
+      sources, or compile DB flags are present, with a slow native-ELF perf guard
+      and scenario catalog entry preventing source-pattern/L3 work from leaking
+      back into `--depth binary`. Phase 1 (D2) complete.
 
   - id: UC-CHANGE-crosscheck-hygiene
     axis: change_class
