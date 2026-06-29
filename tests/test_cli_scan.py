@@ -1647,6 +1647,34 @@ def test_export_delta_poi_load_is_symbols_only(monkeypatch, tmp_path):
     assert captured["symbols_only"] is True
 
 
+def test_normalize_depth_inputs_prunes_only_binary(tmp_path):
+    from abicheck import cli_scan as cs
+    from abicheck.buildsource.scan_levels import EvidenceDepth
+
+    header = tmp_path / "include"
+    baseline_header = tmp_path / "old-include"
+    sources = tmp_path / "src"
+    build_info = tmp_path / "build"
+    compile_db = tmp_path / "compile_commands.json"
+
+    assert cs._normalize_depth_inputs(
+        EvidenceDepth.BINARY,
+        (header,),
+        (baseline_header,),
+        sources,
+        build_info,
+        compile_db,
+    ) == ((), (), None, None, None)
+    assert cs._normalize_depth_inputs(
+        EvidenceDepth.HEADERS,
+        (header,),
+        (baseline_header,),
+        sources,
+        build_info,
+        compile_db,
+    ) == ((header,), (baseline_header,), sources, build_info, compile_db)
+
+
 def test_estimate_uses_resolved_level_not_raw_flags(
     monkeypatch, runner, new_snap_compatible
 ):

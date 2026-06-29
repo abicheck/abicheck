@@ -49,6 +49,53 @@ def test_cheap_debug_presence_honors_forced_btf(monkeypatch, tmp_path):
     assert dwarf_adv.has_dwarf is True
 
 
+def test_cheap_debug_presence_honors_forced_dwarf(monkeypatch, tmp_path):
+    from abicheck.dwarf_advanced import AdvancedDwarfMetadata
+    from abicheck.dwarf_metadata import DwarfMetadata
+    from abicheck.dwarf_presence import cheap_debug_presence_metadata
+
+    so_path = tmp_path / "lib.so"
+    so_path.write_bytes(b"\x7fELF")
+    monkeypatch.setattr(
+        "abicheck.dwarf_presence.cheap_dwarf_presence_metadata",
+        lambda _p: (DwarfMetadata(has_dwarf=True), AdvancedDwarfMetadata(has_dwarf=True)),
+    )
+
+    dwarf_meta, dwarf_adv = cheap_debug_presence_metadata(
+        so_path,
+        debug_format="dwarf",
+    )
+
+    assert dwarf_meta.has_dwarf is True
+    assert dwarf_adv.has_dwarf is True
+
+
+def test_cheap_debug_presence_honors_forced_ctf(monkeypatch, tmp_path):
+    from abicheck.dwarf_presence import cheap_debug_presence_metadata
+
+    so_path = tmp_path / "lib.so"
+    so_path.write_bytes(b"\x7fELF")
+    monkeypatch.setattr("abicheck.dwarf_presence._has_ctf", lambda _p: True)
+
+    dwarf_meta, dwarf_adv = cheap_debug_presence_metadata(
+        so_path,
+        debug_format="ctf",
+    )
+
+    assert dwarf_meta.has_dwarf is True
+    assert dwarf_adv.has_dwarf is True
+
+
+def test_cheap_debug_presence_rejects_unknown_format(tmp_path):
+    from abicheck.dwarf_presence import cheap_debug_presence_metadata
+
+    so_path = tmp_path / "lib.so"
+    so_path.write_bytes(b"\x7fELF")
+
+    with pytest.raises(ValueError, match="Invalid debug_format"):
+        cheap_debug_presence_metadata(so_path, debug_format="split-dwarf")
+
+
 def test_cheap_debug_presence_auto_prefers_kernel_btf(monkeypatch, tmp_path):
     from abicheck.dwarf_presence import cheap_debug_presence_metadata
 
@@ -66,6 +113,113 @@ def test_cheap_debug_presence_auto_prefers_kernel_btf(monkeypatch, tmp_path):
 
     assert dwarf_meta.has_dwarf is True
     assert dwarf_adv.has_dwarf is True
+
+
+def test_cheap_debug_presence_auto_prefers_dwarf_when_present(monkeypatch, tmp_path):
+    from abicheck.dwarf_advanced import AdvancedDwarfMetadata
+    from abicheck.dwarf_metadata import DwarfMetadata
+    from abicheck.dwarf_presence import cheap_debug_presence_metadata
+
+    so_path = tmp_path / "lib.so"
+    so_path.write_bytes(b"\x7fELF")
+    monkeypatch.setattr("abicheck.dwarf_presence._is_kernel_binary", lambda _p: False)
+    monkeypatch.setattr(
+        "abicheck.dwarf_presence.cheap_dwarf_presence_metadata",
+        lambda _p: (DwarfMetadata(has_dwarf=True), AdvancedDwarfMetadata(has_dwarf=True)),
+    )
+    monkeypatch.setattr("abicheck.dwarf_presence._has_btf", lambda _p: pytest.fail("DWARF wins"))
+
+    dwarf_meta, dwarf_adv = cheap_debug_presence_metadata(so_path)
+
+    assert dwarf_meta.has_dwarf is True
+    assert dwarf_adv.has_dwarf is True
+
+
+def test_cheap_debug_presence_auto_falls_back_to_btf(monkeypatch, tmp_path):
+    from abicheck.dwarf_advanced import AdvancedDwarfMetadata
+    from abicheck.dwarf_metadata import DwarfMetadata
+    from abicheck.dwarf_presence import cheap_debug_presence_metadata
+
+    so_path = tmp_path / "lib.so"
+    so_path.write_bytes(b"\x7fELF")
+    monkeypatch.setattr("abicheck.dwarf_presence._is_kernel_binary", lambda _p: False)
+    monkeypatch.setattr(
+        "abicheck.dwarf_presence.cheap_dwarf_presence_metadata",
+        lambda _p: (DwarfMetadata(has_dwarf=False), AdvancedDwarfMetadata(has_dwarf=False)),
+    )
+    monkeypatch.setattr("abicheck.dwarf_presence._has_btf", lambda _p: True)
+    monkeypatch.setattr("abicheck.dwarf_presence._has_ctf", lambda _p: pytest.fail("BTF wins"))
+
+    dwarf_meta, dwarf_adv = cheap_debug_presence_metadata(so_path)
+
+    assert dwarf_meta.has_dwarf is True
+    assert dwarf_adv.has_dwarf is True
+
+
+def test_cheap_debug_presence_auto_falls_back_to_ctf(monkeypatch, tmp_path):
+    from abicheck.dwarf_advanced import AdvancedDwarfMetadata
+    from abicheck.dwarf_metadata import DwarfMetadata
+    from abicheck.dwarf_presence import cheap_debug_presence_metadata
+
+    so_path = tmp_path / "lib.so"
+    so_path.write_bytes(b"\x7fELF")
+    monkeypatch.setattr("abicheck.dwarf_presence._is_kernel_binary", lambda _p: False)
+    monkeypatch.setattr(
+        "abicheck.dwarf_presence.cheap_dwarf_presence_metadata",
+        lambda _p: (DwarfMetadata(has_dwarf=False), AdvancedDwarfMetadata(has_dwarf=False)),
+    )
+    monkeypatch.setattr("abicheck.dwarf_presence._has_btf", lambda _p: False)
+    monkeypatch.setattr("abicheck.dwarf_presence._has_ctf", lambda _p: True)
+
+    dwarf_meta, dwarf_adv = cheap_debug_presence_metadata(so_path)
+
+    assert dwarf_meta.has_dwarf is True
+    assert dwarf_adv.has_dwarf is True
+
+
+def test_cheap_debug_presence_returns_empty_when_no_debug(monkeypatch, tmp_path):
+    from abicheck.dwarf_advanced import AdvancedDwarfMetadata
+    from abicheck.dwarf_metadata import DwarfMetadata
+    from abicheck.dwarf_presence import cheap_debug_presence_metadata
+
+    so_path = tmp_path / "lib.so"
+    so_path.write_bytes(b"\x7fELF")
+    monkeypatch.setattr("abicheck.dwarf_presence._is_kernel_binary", lambda _p: False)
+    monkeypatch.setattr(
+        "abicheck.dwarf_presence.cheap_dwarf_presence_metadata",
+        lambda _p: (DwarfMetadata(has_dwarf=False), AdvancedDwarfMetadata(has_dwarf=False)),
+    )
+    monkeypatch.setattr("abicheck.dwarf_presence._has_btf", lambda _p: False)
+    monkeypatch.setattr("abicheck.dwarf_presence._has_ctf", lambda _p: False)
+
+    dwarf_meta, dwarf_adv = cheap_debug_presence_metadata(so_path)
+
+    assert dwarf_meta.has_dwarf is False
+    assert dwarf_adv.has_dwarf is False
+
+
+def test_cheap_debug_presence_helpers_treat_probe_errors_as_absent(monkeypatch, tmp_path):
+    import abicheck.btf_metadata as btf_metadata
+    import abicheck.ctf_metadata as ctf_metadata
+    from abicheck import dwarf_presence
+
+    so_path = tmp_path / "not-elf.so"
+    so_path.write_bytes(b"not an elf")
+
+    monkeypatch.setattr(
+        btf_metadata,
+        "has_btf_section",
+        lambda _p: (_ for _ in ()).throw(RuntimeError("btf probe failed")),
+    )
+    monkeypatch.setattr(
+        ctf_metadata,
+        "has_ctf_section",
+        lambda _p: (_ for _ in ()).throw(RuntimeError("ctf probe failed")),
+    )
+
+    assert dwarf_presence._has_btf(so_path) is False
+    assert dwarf_presence._has_ctf(so_path) is False
+    assert dwarf_presence._is_kernel_binary(so_path) is False
 
 
 class TestCastxmlDumpBranches:
