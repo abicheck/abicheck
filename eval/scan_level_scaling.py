@@ -34,9 +34,11 @@ goes super-linear or where a *cheaper-looking* level secretly pays a full-tree
 cost (e.g. seedless ``--depth source`` runs the L5 call-graph pass over the whole
 compile DB even though its L4 replay is scoped to one TU).
 
-Gated on a C++ compiler + ``clang++`` (the L4/L5 source replay backend). With
-neither, only the binary/headers tiers run. Manual (not in CI): a full
-template-heavy sweep is minutes of clang time.
+Gated on a C++ compiler + ``clang++`` (the L4/L5 source replay backend). Without
+a C++ compiler nothing runs (the sweep exits early — it cannot build the corpus);
+without ``clang++`` only, just the compiler-only tiers (``binary``/``build``) run
+and the clang-backed tiers are skipped. Manual (not in CI): a full template-heavy
+sweep is minutes of clang time.
 
 Reproduce::
 
@@ -234,8 +236,28 @@ def _build(root: Path, *, n_tus: int, cxx: str) -> Path:
 
 
 # ── measurement ─────────────────────────────────────────────────────────────
+# We parse the human ``--format text`` report rather than ``--format json``: the
+# verdict is a structured JSON field, but the per-level L4 coverage counts
+# (``N/M TUs parsed`` + elapsed) live only inside the rendered coverage-row detail
+# string — there is no structured JSON field for them — and exposing them as one
+# would mean changing the shipped ``ScanOutcome`` surface for a manual eval
+# harness. The regexes are intentionally loose so a small text-layout change does
+# not break the sweep (a missing match just leaves the field ``None``).
 _L4_RE = re.compile(r"(\d+)/(\d+) TUs parsed.*?([\d.]+)s")
 _VERDICT_RE = re.compile(r"Verdict:\s*(\w+)")
+
+
+def _maxrss_to_mb(maxrss: int) -> float:
+    """``getrusage`` ``ru_maxrss`` → MiB, normalised per platform.
+
+    ``ru_maxrss`` is KiB on Linux but **bytes** on macOS/BSD, so a fixed ``/1024``
+    would be off by ~1024× off-Linux; divide by the right unit so the sweep stays
+    comparable across POSIX hosts.
+    """
+    if sys.platform == "darwin" or "bsd" in sys.platform:
+        return round(maxrss / (1024 * 1024), 1)  # bytes -> MiB
+    return round(maxrss / 1024, 1)  # KiB -> MiB (Linux)
+
 
 #: The user-facing levels, in cost order. ``source`` (seedless s5) and
 #: ``source_seeded`` (s5 + a one-file ``--changed-path``) are split so the
@@ -274,6 +296,7 @@ class Point:
 
 
 def _run_scan(new_root: Path, base_so: Path, level: str, *, jobs: int) -> Point:
+    """Run one ``abicheck scan`` at *level*; time it + capture peak child RSS."""
     seed = "src/tu0.cpp"
     # Invoke the in-tree CLI via ``-m abicheck`` (not the ``abicheck`` console
     # script): the documented entry point is ``python eval/scan_level_scaling.py``
@@ -320,7 +343,7 @@ def _run_scan(new_root: Path, base_so: Path, level: str, *, jobs: int) -> Point:
         n_tus=0,
         depth=0,
         wall_s=round(wall, 2),
-        rss_mb=round(ru.ru_maxrss / 1024, 1),  # KiB -> MiB (Linux)
+        rss_mb=_maxrss_to_mb(ru.ru_maxrss),
         exit=os.waitstatus_to_exitcode(status),
         verdict=verdict.group(1) if verdict else None,
         l4_parsed=int(l4.group(1)) if l4 else None,
@@ -452,6 +475,10 @@ def main() -> int:
         if args.workdir
         else Path(tempfile.mkdtemp(prefix="abicheck-scan-scaling-"))
     )
+    # Surface the (possibly auto-created temp) workdir so repeated manual runs can
+    # find and reclaim the synthetic trees + .so files instead of silently
+    # accumulating them under the system temp dir.
+    print(f"workdir: {workdir}", file=sys.stderr)
 
     points = run_sweep(
         sizes=sizes,

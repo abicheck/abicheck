@@ -487,7 +487,7 @@ def _call_graph_mem_cap() -> int | None:
         from .source_replay import _l4_mem_cap
 
         return _l4_mem_cap()
-    except Exception:  # pragma: no cover - defensive: RAM probe must never break L5
+    except Exception:  # defensive: a RAM-probe failure must never break L5 (tested)
         return None
 
 

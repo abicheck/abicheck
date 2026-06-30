@@ -43,12 +43,15 @@ RAM budget, fewer workers run, so peak RSS drops — at the cost of wall time.
 
 ## Conclusions
 
-The cheap tier (`binary`/`headers`/`build`/`graph`) is **flat in TU count** — it
-is dominated by the binary dump + the L2 header AST + the L3 compile-DB parse,
-none of which grow with the number of `.cpp` files. Confirms the UXL "cheap tier
-is one price" result, now with a scaling exponent rather than a single point.
-`full` (s6) is **linear** in TU count (every TU is replayed). So far, so
-expected.
+The truly cheap tier (`binary`/`headers`/`build`) is **flat in TU count** — it is
+dominated by the binary dump + the L2 header AST + the L3 compile-DB parse, none
+of which grow with the number of `.cpp` files. Confirms the UXL "cheap tier is one
+price" result, now with a scaling exponent rather than a single point. `graph`
+(s4) sits just above them: it is still far cheaper than the L4 tiers (no AST
+replay) but **does** grow mildly with TU count (~0.5 tail exponent, 7.6 s → 14.0 s
+from n=4 to n=16) because the L5 graph fold visits every compile unit — so it is
+not in the same "size-independent" class as binary/headers/build. `full` (s6) is
+**linear** in TU count (every TU is replayed). So far, so expected.
 
 The interesting result is two scalability *gaps* on the `source` (s5) rung,
 both quantified below and both now addressed/filed.
@@ -114,6 +117,14 @@ Measured effect (seedless `source`, n=8, 4 vCPU / 15 GiB host):
 |---|---|---|---|
 | default | 4 (`min(TUs, cpu)`) | 2373 MB | 51.9 s |
 | `ABICHECK_L4_JOB_MEM_GIB=8` (cap → 1) | 1 | **1217 MB (−49 %)** | 60.5 s (+17 %) |
+
+(This `default` row was a separate before/after run from the Raw sweep table
+above, which recorded 3044 MB / 49.9 s for the same n=8 seedless `source` config.
+The ~20 % RSS spread between the two `default` measurements is run-to-run variance:
+peak RSS depends on *which* of the 4 concurrent template-heavy clang ASTs happen
+to overlap at their high-water mark, which shifts between runs. Read both as
+"~2.4–3 GB, bounded by the 4 workers" — the point is the **−49 %** drop to one
+worker, not the absolute baseline.)
 
 Before the fix, `ABICHECK_L4_JOB_MEM_GIB` had **no effect** on this run (it only
 clamped the L4 replay, which was a single TU) — the call-graph pass ran 4 workers
