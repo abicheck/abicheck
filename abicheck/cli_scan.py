@@ -832,16 +832,6 @@ def scan_cmd(
             severities=severities,
             budget=budget,
             budget_s=budget_s,
-            # A concrete explicit level is what consents to level-implies-query
-            # auto-running build.query: a non-auto --source-method, or --depth ONLY
-            # when no --source-method is given (resolve_level gives --source-method
-            # precedence and ignores --depth otherwise, so `auto`+`--depth` resolves
-            # via auto/the preset, not the depth — it must not count as consent;
-            # Codex review).
-            level_explicit=(
-                source_method is not None and source_method != SourceMethod.AUTO.value
-            )
-            or (source_method is None and depth is not None),
         )
     except _BudgetOverflow as bo:
         click.echo(bo.message, err=True)
@@ -913,7 +903,6 @@ def run_scan_core(
     severities: dict[str, str],
     budget: str | None,
     budget_s: float | None,
-    level_explicit: bool = False,
 ) -> ScanCoreResult:
     """The shared scan orchestration (classify → always-on tier → level → compare).
 
@@ -991,39 +980,10 @@ def run_scan_core(
             "public-API surface (headers-only) instead of a focused diff. Pass "
             "--since <ref> or --changed-path to scope it to the change."
         )
-    # level-implies-query (ADR-037 D4): an explicit, *trusted* --config that
-    # defines a build.query, together with an *explicitly pinned* deep level
-    # (--source-method/--depth, level_explicit), is itself consent to run that
-    # query — making the user pass --allow-build-query as well for a level they
-    # explicitly asked for is needless friction. Trusted = an explicit --config
-    # path (build_config is not None here; an auto-discovered source-tree config
-    # is resolved later in embed_build_source and never reaches this gate), so
-    # this never runs an attacker-controlled command. Crucially it does NOT fire
-    # for the default mode preset (a plain `scan`/`--audit` with `--sources` whose
-    # collect_mode is already non-off) — only an explicit deep level counts, so a
-    # --config passed purely for project settings never silently runs a subprocess
-    # (Codex review). No-op when the config defines no query.
-    effective_allow_query = allow_build_query
-    if (
-        not allow_build_query
-        and build_config is not None
-        and collect_mode != "off"
-        and level_explicit
-    ):
-        from .buildsource.inline import load_build_config
-
-        try:
-            _cfg = load_build_config(build_config)
-        except Exception:  # malformed config surfaces later in the real load
-            _cfg = None
-        if _cfg is not None and _cfg.query:
-            effective_allow_query = True
-            advisories.append(
-                f"level {resolved.value} with a trusted --config defining "
-                "build.query: auto-enabled the query to collect L3+ evidence "
-                "(equivalent to --allow-build-query). Pass --allow-build-query "
-                "explicitly to silence this note."
-            )
+    # build.query may execute arbitrary local commands from configuration, so the
+    # scan path must preserve the explicit --allow-build-query action ceiling. An
+    # explicit --config path can make a config eligible for query execution in the
+    # build-source layer, but it is never consent by itself.
 
     new_snap = _build_new_snapshot(
         binary,
@@ -1032,7 +992,7 @@ def run_scan_core(
         sources,
         collect_mode,
         lang,
-        effective_allow_query,
+        allow_build_query,
         changed_paths=replay_seed,
         build_info=effective_build_info,
         build_config=build_config,

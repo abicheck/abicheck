@@ -23,6 +23,7 @@ exit codes, the budget guard, and the coverage report. Default lane.
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -833,180 +834,24 @@ def test_l3_collected_branches(pack, expected):
         assert _l3_collected(_Snap(_Pack(list(pack)))) is expected
 
 
-def test_level_implies_query_auto_enables_with_trusted_config(
-    runner, tmp_path, source_tree_with_compile_db, new_snap_compatible
-):
-    # ADR-037 D4: an explicit (trusted) --config defining build.query + a pinned
-    # deep level is consent to run the query — auto-enable it (advisory), no
-    # separate --allow-build-query needed. --build-info carries a real compile DB
-    # so the query string is never actually executed (build_info resolves first),
-    # keeping the test hermetic while still exercising the auto-enable path.
-    cfg = tmp_path / ".abicheck.yml"
-    cfg.write_text(
-        "build:\n  query: cmake -S . -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON\n",
-        encoding="utf-8",
-    )
-    res = runner.invoke(
-        main,
-        [
-            "scan",
-            "--binary",
-            str(new_snap_compatible),
-            "--build-info",
-            str(source_tree_with_compile_db),
-            "--config",
-            str(cfg),
-            "--source-method",
-            "s5",
-            "--audit",
-        ],
-    )
-    assert res.exit_code == 0, res.output
-    assert "auto-enabled the query" in res.output
-
-
-def test_level_implies_query_silent_without_trusted_config(
-    runner, source_tree_with_compile_db, new_snap_compatible
-):
-    # No explicit --config → nothing is trusted for query execution, so the
-    # auto-enable advisory must NOT fire even at a deep level.
-    res = runner.invoke(
-        main,
-        [
-            "scan",
-            "--binary",
-            str(new_snap_compatible),
-            "--build-info",
-            str(source_tree_with_compile_db),
-            "--source-method",
-            "s5",
-            "--audit",
-        ],
-    )
-    assert res.exit_code == 0, res.output
-    assert "auto-enabled the query" not in res.output
-
-
-def test_level_implies_query_silent_for_default_mode(
-    runner, tmp_path, source_tree_with_compile_db, new_snap_compatible
-):
-    # Codex review: a --config passed only for project settings must NOT trigger
-    # build.query in the *default* flow (here --audit, whose preset is a deep
-    # collect_mode). Auto-enable requires an EXPLICIT --source-method/--depth, not
-    # a default mode preset — otherwise a config-for-settings silently runs a
-    # subprocess, bypassing the --allow-build-query action ceiling.
-    cfg = tmp_path / ".abicheck.yml"
-    cfg.write_text(
-        "build:\n  query: cmake -S . -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON\n",
-        encoding="utf-8",
-    )
-    res = runner.invoke(
-        main,
-        [
-            "scan",
-            "--binary",
-            str(new_snap_compatible),
-            "--build-info",
-            str(source_tree_with_compile_db),
-            "--config",
-            str(cfg),
-            "--audit",  # default mode preset; no explicit --source-method/--depth
-        ],
-    )
-    assert res.exit_code == 0, res.output
-    assert "auto-enabled the query" not in res.output
-
-
-def test_level_implies_query_silent_for_source_method_auto(
-    runner, tmp_path, source_tree_with_compile_db, new_snap_compatible
-):
-    # ``--source-method auto`` still lets the resolver choose a default deep
-    # level. It is not concrete consent to run build.query.
-    cfg = tmp_path / ".abicheck.yml"
-    cfg.write_text(
-        "build:\n  query: cmake -S . -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON\n",
-        encoding="utf-8",
-    )
-    res = runner.invoke(
-        main,
-        [
-            "scan",
-            "--binary",
-            str(new_snap_compatible),
-            "--build-info",
-            str(source_tree_with_compile_db),
-            "--config",
-            str(cfg),
-            "--source-method",
-            "auto",
-            "--audit",
-        ],
-    )
-    assert res.exit_code == 0, res.output
-    assert "auto-enabled the query" not in res.output
-
-
-def test_level_implies_query_malformed_config_does_not_crash(
+def test_scan_config_query_requires_explicit_allow_build_query(
     runner, tmp_path, new_snap_compatible
 ):
-    # A trusted but malformed --config at an explicit deep level must not crash the
-    # level-implies-query probe: load_build_config raises, the probe swallows it
-    # (the real load surfaces the error downstream), and with no source input there
-    # is no downstream load, so the scan still completes without auto-enabling.
-    cfg = tmp_path / ".abicheck.yml"
-    cfg.write_text("build: [unterminated\n", encoding="utf-8")  # invalid YAML
-    res = runner.invoke(
-        main,
-        [
-            "scan",
-            "--binary",
-            str(new_snap_compatible),
-            "--config",
-            str(cfg),
-            "--source-method",
-            "s5",
-            "--audit",
-        ],
+    # build.query is executable configuration. Even when the operator passes an
+    # explicit --config and pins a deep source level, scan must not treat those
+    # options as implicit consent to run the query; only --allow-build-query may
+    # cross that action ceiling.
+    src = tmp_path / "src"
+    src.mkdir()
+    marker = src / "query-ran.txt"
+    payload = src / "payload.py"
+    payload.write_text(
+        "from pathlib import Path\nPath('query-ran.txt').write_text('ran')\n",
+        encoding="utf-8",
     )
-    assert res.exit_code == 0, res.output
-    assert "auto-enabled the query" not in res.output
-
-
-def test_level_implies_query_silent_when_config_defines_no_query(
-    runner, tmp_path, new_snap_compatible
-):
-    # An explicit deep level + a trusted --config that defines NO build.query must
-    # not auto-enable anything (the false branch): the config is loaded fine but
-    # there is no query to consent to.
-    cfg = tmp_path / ".abicheck.yml"
-    cfg.write_text("severity:\n  preset: strict\n", encoding="utf-8")  # no build.query
-    res = runner.invoke(
-        main,
-        [
-            "scan",
-            "--binary",
-            str(new_snap_compatible),
-            "--config",
-            str(cfg),
-            "--source-method",
-            "s5",
-            "--audit",
-        ],
-    )
-    assert res.exit_code == 0, res.output
-    assert "auto-enabled the query" not in res.output
-
-
-def test_level_implies_query_auto_plus_depth_does_not_consent(
-    runner, tmp_path, source_tree_with_compile_db, new_snap_compatible
-):
-    # Codex review: `--source-method auto` takes precedence and makes resolve_level
-    # IGNORE --depth, so `auto` + `--depth` resolves via auto/the preset, not the
-    # depth. That must NOT count as explicit consent to run build.query. (build-info
-    # carries a real DB so the query string is never actually executed.)
     cfg = tmp_path / ".abicheck.yml"
     cfg.write_text(
-        "build:\n  query: cmake -S . -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON\n",
+        "build:\n" f"  query: {json.dumps(f'{sys.executable} {payload.name}')}\n",
         encoding="utf-8",
     )
     res = runner.invoke(
@@ -1015,26 +860,25 @@ def test_level_implies_query_auto_plus_depth_does_not_consent(
             "scan",
             "--binary",
             str(new_snap_compatible),
-            "--build-info",
-            str(source_tree_with_compile_db),
+            "--sources",
+            str(src),
             "--config",
             str(cfg),
             "--source-method",
-            "auto",
-            "--depth",
-            "source",
+            "s5",
             "--audit",
         ],
     )
     assert res.exit_code == 0, res.output
     assert "auto-enabled the query" not in res.output
+    assert "build.query configured but --allow-build-query not set" in res.output
+    assert not marker.exists()
 
 
-def test_level_implies_query_depth_only_consents(
+def test_scan_depth_config_query_requires_explicit_allow_build_query(
     runner, tmp_path, source_tree_with_compile_db, new_snap_compatible
 ):
-    # The flip side: an explicit --depth with NO --source-method is a concrete
-    # pinned level (resolve_level uses it), so it DOES consent to the trusted query.
+    # --depth is also not consent to execute build.query from --config.
     cfg = tmp_path / ".abicheck.yml"
     cfg.write_text(
         "build:\n  query: cmake -S . -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON\n",
@@ -1056,8 +900,7 @@ def test_level_implies_query_depth_only_consents(
         ],
     )
     assert res.exit_code == 0, res.output
-    assert "auto-enabled the query" in res.output
-
+    assert "auto-enabled the query" not in res.output
 
 def test_header_short_alias_works(runner, tmp_path, new_snap_compatible):
     # The --help example uses `-H`; the alias must actually parse (Codex review).

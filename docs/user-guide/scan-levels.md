@@ -78,12 +78,11 @@ abicheck scan --binary new/libonedal_core.so -H include/ --build-info aq.json --
 
 If your project ships a trusted `.abicheck.yml` with a `build.query`, you can let
 `abicheck` run it instead of pre-generating the DB. Pass it with `--config`
-(the project contract). Pinning a deep
-level (`--source-method s5`, etc.) with such a trusted `--config` **auto-enables**
-the query — you no longer also need `--allow-build-query` for a level you
-explicitly asked for (the report notes when this happens). An *auto-discovered*
-`.abicheck.yml` under `--sources` is never trusted to execute commands; only an
-explicit `--config` is.
+(the project contract) and opt in to command execution with `--allow-build-query`.
+Pinning a deep level (`--source-method s5`, etc.) is not enough to run
+`build.query`; the explicit allow flag is always required because the query is
+executable local configuration. An *auto-discovered* `.abicheck.yml` under
+`--sources` is never trusted to execute commands.
 
 ```yaml
 # .abicheck.yml
@@ -93,7 +92,8 @@ build:
 
 ```bash
 abicheck scan --binary new/libfoo.so -H include/ --sources . \
-  --config .abicheck.yml --source-method s5 --baseline old/libfoo.abi.json
+  --config .abicheck.yml --allow-build-query --source-method s5 \
+  --baseline old/libfoo.abi.json
 ```
 
 ## Worked examples
