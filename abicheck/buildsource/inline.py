@@ -44,6 +44,7 @@ import json
 import os
 import shlex
 import subprocess
+import time
 import warnings
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -528,6 +529,7 @@ def collect_inline_pack(
     source_abi_cache_dir: Path | None = None,
     exported_symbols: tuple[str, ...] = (),
     changed_paths: tuple[str, ...] = (),
+    public_header_roots: tuple[str, ...] = (),
     defer_cleanup: list[Callable[[], None]] | None = None,
 ) -> BuildSourcePack | None:
     """Collect an in-memory pack from raw source-tree / build-info inputs.
@@ -629,6 +631,7 @@ def collect_inline_pack(
                 exported_symbols=exported_symbols,
                 source_abi_cache_dir=l4_cache_dir,
                 changed_paths=changed_paths,
+                public_header_roots=public_header_roots,
             )
         # Fold a call graph (DECL_CALLS_DECL edges) into the L5 graph whenever L4 also
         # ran — i.e. a semantic source mode (source-*/graph-summary/graph-full), not
@@ -1239,6 +1242,7 @@ def _run_inline_source_abi(
     exported_symbols: tuple[str, ...] = (),
     source_abi_cache_dir: Path | None = None,
     changed_paths: tuple[str, ...] = (),
+    public_header_roots: tuple[str, ...] = (),
 ) -> SourceAbiSurface | None:
     """Run L4 replay over a source tree; ``None`` when no source tree is given.
 
@@ -1283,12 +1287,20 @@ def _run_inline_source_abi(
         )
         return SourceAbiSurface()
 
-    roots = public_header_roots_for(merged)
+    roots = sorted(set(public_header_roots_for(merged)) | set(public_header_roots))
+    include_map = _include_map_for_replay(
+        merged,
+        scope=scope,
+        roots=tuple(roots),
+        clang_bin=clang_bin,
+        extractors=extractors,
+    )
     # D8 per-TU cache: re-extracting every TU on every `dump --sources` is the
     # cold-start cost (eval E4: zstd 48.6 s cold → 3.4 s warm). Wire the cache
     # when a dir is given (CLI/env), so a persisted dir restored across CI runs
     # makes each run start warm. Absent a dir, behaviour is unchanged (no cache).
     cache = SourceAbiCache(source_abi_cache_dir) if source_abi_cache_dir else None
+    started = time.monotonic()
     surface, diagnostics = run_source_replay(
         merged,
         impl,
@@ -1297,7 +1309,11 @@ def _run_inline_source_abi(
         public_header_roots=roots,
         exported_symbols=exported_symbols,
         cache=cache,
+        include_map=include_map,
     )
+    elapsed = time.monotonic() - started
+    if surface is not None:
+        surface.coverage.setdefault("elapsed_s", round(elapsed, 3))
     if cache is not None:
         rate = cache.hit_rate
         if rate is not None:
@@ -1315,14 +1331,65 @@ def _run_inline_source_abi(
         merged.diagnostics.append(f"source_abi: {diag}")
     parsed = int(surface.coverage.get("compile_units_parsed", 0) or 0)
     selected = int(surface.coverage.get("compile_units_selected", 0) or 0)
+    extra = f", {elapsed:.2f}s"
+    if surface.coverage.get("scope_widened_to_full"):
+        extra += ", widened-to-full"
     extractors.append(
         ExtractorRecord(
             name=f"source_abi:{extractor}",
             status="ok" if parsed else "partial",
-            detail=f"scope={scope}, {parsed}/{selected} TUs parsed, {len(diagnostics)} failures",
+            detail=(
+                f"scope={scope}, {parsed}/{selected} TUs parsed, "
+                f"{len(diagnostics)} failures{extra}"
+            ),
         )
     )
     return surface
+
+
+def _include_map_for_replay(
+    build: BuildEvidence,
+    *,
+    scope: str,
+    roots: tuple[str, ...],
+    clang_bin: str,
+    extractors: list[ExtractorRecord],
+) -> dict[str, list[str]]:
+    """Best-effort include map for narrowing L4 replay.
+
+    ``headers-only`` can shrink from all TUs to the TUs that include public
+    headers, but only when it has an include graph. Prefer recorded action inputs
+    (free, Bazel-style); otherwise run a cheap depfile pass. Failure keeps the old
+    fail-open selector, never drops evidence.
+    """
+    if scope != "headers-only" or not roots or not build.compile_units:
+        return {}
+    from .include_graph import ClangIncludeExtractor, include_map_from_recorded_inputs
+
+    recorded = include_map_from_recorded_inputs(build)
+    if recorded:
+        extractors.append(
+            ExtractorRecord(
+                name="include_graph:recorded_inputs",
+                status="ok",
+                detail=f"{len(recorded)}/{len(build.compile_units)} compile units",
+            )
+        )
+        return recorded
+
+    extractor = ClangIncludeExtractor(
+        clang_bin=clang_bin if clang_bin != "clang" else "clang++"
+    )
+    include_map = extractor.extract_from_build(build)
+    status = "ok" if include_map else "skipped"
+    detail = f"{len(include_map)}/{len(build.compile_units)} compile units"
+    if extractor.diagnostics:
+        status = "partial" if include_map else "failed"
+        detail += "; " + "; ".join(extractor.diagnostics[:3])
+    extractors.append(
+        ExtractorRecord(name="include_graph:clang", status=status, detail=detail)
+    )
+    return include_map
 
 
 def _make_source_extractor(
@@ -1512,6 +1579,14 @@ def _l4_coverage_detail(surface: SourceAbiSurface) -> str:
         total = hits + misses
         if total:
             parts.append(f"cache {hits}/{total} hit ({hits / total:.0%})")
+    if cov.get("scope_widened_to_full"):
+        parts.append("headers-only widened to full")
+    uncovered = int(cov.get("public_headers_uncovered", 0) or 0)
+    if uncovered:
+        parts.append(f"{uncovered} public header(s) not reached by include graph")
+    elapsed = cov.get("elapsed_s")
+    if elapsed is not None:
+        parts.append(f"{float(elapsed):.2f}s")
     failures = int(cov.get("extractor_failures", 0) or 0)
     if failures:
         parts.append(f"{failures} extractor failures")
@@ -1573,13 +1648,20 @@ def build_inline_coverage(
             or surface.reachable_templates
             or surface.reachable_inline_bodies
         )
+        cov = surface.coverage or {}
+        exported = int(cov.get("exported_symbols", 0) or 0)
+        matched = int(cov.get("matched_symbols", 0) or 0)
+        zero_match_degraded = exported > 0 and matched == 0
         l4 = LayerCoverage(
             layer=DataLayer.L4_SOURCE_ABI.value,
-            status=CoverageStatus.PRESENT if any_entities else CoverageStatus.PARTIAL,
+            status=CoverageStatus.PRESENT
+            if any_entities and not zero_match_degraded
+            else CoverageStatus.PARTIAL,
             confidence=LayerConfidence.HIGH
-            if any_entities
+            if any_entities and not zero_match_degraded
             else LayerConfidence.REDUCED,
             detail=_l4_coverage_detail(surface),
+            elapsed_s=float(cov.get("elapsed_s", 0.0) or 0.0),
         )
     else:
         l4 = LayerCoverage(
